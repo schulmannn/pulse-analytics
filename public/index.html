@@ -1,0 +1,958 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pulse Analytics</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:#08090f; --layer1:#0d0f1c; --layer2:#121525; --layer3:#181b2e;
+  --glass:rgba(255,255,255,0.03); --glassbord:rgba(255,255,255,0.07);
+  --border:rgba(255,255,255,0.06);
+  --ig-grd:linear-gradient(135deg,#f58529,#dd2a7b,#8134af);
+  --tg-grd:linear-gradient(135deg,#2aabee,#229ed9,#5b8dee);
+  --text:#f0f2ff; --text2:#8b92b8; --text3:#4a5280;
+  --green:#22d3a0; --yellow:#fbbf24; --red:#f43f5e; --purple:#a78bfa;
+  --sidebar-w:240px; --radius:16px;
+}
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;min-height:100vh;display:flex;overflow-x:hidden;}
+
+/* Ambient */
+.ambient{position:fixed;inset:0;pointer-events:none;z-index:0;overflow:hidden;}
+.orb{position:absolute;border-radius:50%;filter:blur(120px);opacity:0;transition:opacity 1.2s,background 1.2s;}
+.orb1{width:700px;height:700px;top:-200px;left:-100px;}
+.orb2{width:500px;height:500px;bottom:-100px;right:-100px;}
+body.mode-ig .orb1{background:radial-gradient(circle,rgba(245,133,41,.2),transparent 70%);opacity:1;}
+body.mode-ig .orb2{background:radial-gradient(circle,rgba(129,52,175,.16),transparent 70%);opacity:1;}
+body.mode-tg .orb1{background:radial-gradient(circle,rgba(42,171,238,.14),transparent 70%);opacity:1;}
+body.mode-tg .orb2{background:radial-gradient(circle,rgba(91,141,238,.1),transparent 70%);opacity:1;}
+
+/* ── LOGIN SCREEN ── */
+.login-screen{
+  position:fixed;inset:0;z-index:300;
+  background:var(--bg);
+  display:flex;align-items:center;justify-content:center;
+}
+.login-card{
+  background:var(--layer2);border:1px solid var(--glassbord);
+  border-radius:24px;padding:44px 40px;width:420px;max-width:95vw;
+  box-shadow:0 40px 100px rgba(0,0,0,.7);
+  animation:popIn .4s cubic-bezier(.34,1.56,.64,1);
+}
+@keyframes popIn{from{opacity:0;transform:scale(.9) translateY(20px)}to{opacity:1;transform:scale(1) translateY(0)}}
+
+.login-logo{
+  font-family:'Playfair Display',serif;font-size:32px;font-weight:900;
+  background:var(--ig-grd);-webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  margin-bottom:4px;
+}
+.login-sub{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text3);letter-spacing:.1em;margin-bottom:32px;}
+
+.login-platform{display:flex;gap:8px;margin-bottom:24px;}
+.lp-btn{
+  flex:1;padding:11px 8px;border-radius:11px;border:1px solid var(--border);
+  background:transparent;color:var(--text3);font-family:'DM Sans',sans-serif;
+  font-size:12px;font-weight:600;cursor:pointer;transition:all .2s;text-align:center;
+}
+.lp-btn:hover{border-color:rgba(255,255,255,.15);color:var(--text2);}
+.lp-btn.ig-active{background:rgba(221,42,123,.12);border-color:rgba(221,42,123,.4);color:#f58529;}
+.lp-btn.tg-active{background:rgba(42,171,238,.1);border-color:rgba(42,171,238,.4);color:#2aabee;}
+
+.form-label{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px;display:block;}
+.form-input{
+  width:100%;background:var(--layer3);border:1px solid var(--border);
+  border-radius:10px;padding:12px 16px;color:var(--text);
+  font-family:'JetBrains Mono',monospace;font-size:12px;
+  outline:none;transition:border-color .2s,box-shadow .2s;margin-bottom:14px;
+}
+.form-input:focus{border-color:rgba(255,255,255,.2);box-shadow:0 0 0 3px rgba(255,255,255,.04);}
+.form-input::placeholder{color:var(--text3);}
+
+.btn-login{
+  width:100%;padding:14px;border-radius:11px;border:none;
+  background:var(--ig-grd);color:#fff;
+  font-family:'DM Sans',sans-serif;font-size:14px;font-weight:700;
+  cursor:pointer;transition:all .2s;letter-spacing:.02em;
+  box-shadow:0 4px 20px rgba(221,42,123,.3);margin-top:4px;
+}
+.btn-login.tg{background:var(--tg-grd);box-shadow:0 4px 20px rgba(42,171,238,.3);}
+.btn-login:hover{filter:brightness(1.1);transform:translateY(-1px);}
+
+.btn-demo{
+  width:100%;padding:11px;border-radius:10px;border:1px solid var(--border);
+  background:var(--glass);color:var(--text2);
+  font-family:'DM Sans',sans-serif;font-size:13px;font-weight:500;
+  cursor:pointer;transition:all .2s;margin-top:8px;
+}
+.btn-demo:hover{background:rgba(255,255,255,.06);color:var(--text);}
+
+.login-err{
+  background:rgba(244,63,94,.1);border:1px solid rgba(244,63,94,.25);
+  border-radius:9px;padding:10px 14px;
+  font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--red);
+  margin-top:12px;display:none;
+}
+.login-divider{
+  text-align:center;font-family:'JetBrains Mono',monospace;
+  font-size:9px;color:var(--text3);margin:16px 0;letter-spacing:.1em;
+}
+
+/* ── SIDEBAR ── */
+.sidebar{
+  width:var(--sidebar-w);min-height:100vh;
+  background:var(--layer1);border-right:1px solid var(--border);
+  display:flex;flex-direction:column;
+  position:fixed;left:0;top:0;bottom:0;z-index:100;overflow-y:auto;
+}
+.sidebar-logo{padding:20px 20px 14px;border-bottom:1px solid var(--border);}
+.logo-name{
+  font-family:'Playfair Display',serif;font-size:22px;font-weight:900;letter-spacing:-.03em;
+  background:var(--ig-grd);-webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  transition:background .6s;
+}
+body.mode-tg .logo-name{background:var(--tg-grd);-webkit-background-clip:text;-webkit-text-fill-color:transparent;}
+.logo-tagline{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--text3);letter-spacing:.1em;margin-top:2px;}
+
+.platform-switch{padding:14px 16px;border-bottom:1px solid var(--border);}
+.platform-label{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.12em;margin-bottom:9px;}
+.switch-pills{display:flex;gap:6px;}
+.pill{flex:1;padding:9px 6px;border-radius:10px;border:1px solid var(--border);background:transparent;color:var(--text3);font-family:'DM Sans',sans-serif;font-size:12px;font-weight:600;cursor:pointer;transition:all .25s;display:flex;align-items:center;justify-content:center;gap:5px;}
+.pill:hover{border-color:rgba(255,255,255,.15);color:var(--text2);}
+.pill.active-ig{background:var(--ig-grd);border-color:transparent;color:#fff;box-shadow:0 4px 20px rgba(221,42,123,.3);}
+.pill.active-tg{background:var(--tg-grd);border-color:transparent;color:#fff;box-shadow:0 4px 20px rgba(42,171,238,.3);}
+
+.sidebar-account{padding:14px 16px;border-bottom:1px solid var(--border);}
+.acc-card{background:var(--glass);border:1px solid var(--glassbord);border-radius:12px;padding:11px;display:flex;align-items:center;gap:9px;}
+.acc-avatar{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0;background:var(--ig-grd);transition:background .6s;}
+body.mode-tg .acc-avatar{background:var(--tg-grd);}
+.acc-name{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.acc-handle{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text3);margin-top:1px;}
+.acc-dot{width:7px;height:7px;border-radius:50%;background:var(--green);flex-shrink:0;box-shadow:0 0 6px var(--green);}
+
+.nav-section{padding:14px 12px 6px;}
+.nav-section-label{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.12em;padding:0 8px;margin-bottom:5px;}
+.nav-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;color:var(--text3);font-size:13px;font-weight:500;cursor:pointer;transition:all .2s;border:1px solid transparent;margin-bottom:2px;position:relative;}
+.nav-item:hover{color:var(--text2);background:var(--glass);border-color:var(--glassbord);}
+.nav-item.active{color:var(--text);background:var(--layer3);border-color:var(--border);}
+.nav-item.active::before{content:'';position:absolute;left:0;top:50%;transform:translateY(-50%);width:3px;height:16px;border-radius:0 3px 3px 0;background:var(--ig-grd);transition:background .6s;}
+body.mode-tg .nav-item.active::before{background:var(--tg-grd);}
+.nav-icon{font-size:16px;opacity:.5;transition:opacity .2s;flex-shrink:0;}
+.nav-item.active .nav-icon{opacity:1;}
+.nav-badge{margin-left:auto;font-family:'JetBrains Mono',monospace;font-size:9px;padding:2px 7px;border-radius:20px;background:var(--layer3);color:var(--text3);}
+
+.sidebar-bottom{margin-top:auto;padding:14px;border-top:1px solid var(--border);}
+.period-label-sm{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:7px;}
+.period-options{display:flex;gap:4px;}
+.period-opt{flex:1;padding:7px 4px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text3);font-family:'DM Sans',sans-serif;font-size:11px;font-weight:500;cursor:pointer;transition:all .2s;text-align:center;}
+.period-opt:hover{border-color:rgba(255,255,255,.15);color:var(--text2);}
+.period-opt.active{background:var(--layer3);color:var(--text);border-color:rgba(255,255,255,.12);}
+
+.sidebar-user{display:flex;align-items:center;justify-content:space-between;padding:12px 0 0;margin-top:10px;}
+.sidebar-user-name{font-size:12px;color:var(--text2);font-weight:500;}
+.logout-btn{background:transparent;border:1px solid var(--border);border-radius:7px;padding:5px 10px;color:var(--text3);font-family:'DM Sans',sans-serif;font-size:11px;cursor:pointer;transition:all .2s;}
+.logout-btn:hover{border-color:var(--red);color:var(--red);}
+
+/* ── MAIN ── */
+.main{margin-left:var(--sidebar-w);flex:1;min-height:100vh;position:relative;z-index:1;}
+.topbar{height:58px;background:rgba(8,9,15,.85);backdrop-filter:blur(20px);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 26px;justify-content:space-between;position:sticky;top:0;z-index:50;}
+.topbar-left{display:flex;align-items:center;gap:14px;}
+.topbar-title{font-family:'Playfair Display',serif;font-size:18px;font-weight:700;}
+.api-status{display:flex;align-items:center;gap:6px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text3);}
+.status-dot{width:6px;height:6px;border-radius:50%;}
+.status-dot.live{background:var(--green);box-shadow:0 0 8px var(--green);animation:livePulse 2s infinite;}
+.status-dot.demo{background:var(--yellow);}
+.status-dot.err{background:var(--red);}
+@keyframes livePulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(1.3)}}
+
+.topbar-actions{display:flex;gap:8px;align-items:center;}
+.btn-sm{padding:7px 16px;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:12px;font-weight:600;cursor:pointer;transition:all .2s;}
+.btn-sm-primary{background:var(--ig-grd);border:none;color:#fff;box-shadow:0 3px 12px rgba(221,42,123,.2);}
+body.mode-tg .btn-sm-primary{background:var(--tg-grd);box-shadow:0 3px 12px rgba(42,171,238,.2);}
+.btn-sm-primary:hover{filter:brightness(1.1);}
+.btn-sm-ghost{background:var(--glass);border:1px solid var(--border);color:var(--text2);}
+.btn-sm-ghost:hover{border-color:rgba(255,255,255,.15);color:var(--text);}
+
+.content{padding:26px;}
+.page{display:none;}
+.page.active{display:block;animation:fadeIn .3s ease;}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+
+/* ── CARDS & KPI ── */
+.kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(195px,1fr));gap:13px;margin-bottom:20px;}
+.kpi{background:var(--layer2);border:1px solid var(--border);border-radius:var(--radius);padding:20px;position:relative;overflow:hidden;transition:transform .2s,box-shadow .2s;cursor:default;}
+.kpi:hover{transform:translateY(-2px);box-shadow:0 12px 30px rgba(0,0,0,.4);}
+.kpi-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:13px;}
+.kpi-emoji{width:34px;height:34px;background:var(--layer3);border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:16px;}
+.delta{font-family:'JetBrains Mono',monospace;font-size:11px;padding:3px 9px;border-radius:20px;}
+.delta.pos{background:rgba(34,211,160,.12);color:var(--green);}
+.delta.neg{background:rgba(244,63,94,.1);color:var(--red);}
+.delta.neu{background:var(--layer3);color:var(--text3);}
+.kpi-val{font-family:'Playfair Display',serif;font-size:26px;font-weight:700;letter-spacing:-.03em;line-height:1;}
+.kpi-lbl{font-size:10px;color:var(--text3);margin-top:5px;font-weight:500;text-transform:uppercase;letter-spacing:.06em;}
+.kpi-sub{font-size:11px;color:var(--text3);margin-top:7px;}
+
+.card{background:var(--layer2);border:1px solid var(--border);border-radius:var(--radius);padding:22px;position:relative;overflow:hidden;}
+.card::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.06),transparent);}
+.card-head{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px;gap:12px;flex-wrap:wrap;}
+.card-title{font-size:14px;font-weight:600;}
+.card-sub{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text3);margin-top:3px;}
+.chip{font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:500;padding:3px 9px;border-radius:20px;letter-spacing:.06em;white-space:nowrap;text-transform:uppercase;}
+.chip-ig{background:rgba(245,133,41,.1);color:#f58529;border:1px solid rgba(245,133,41,.2);}
+.chip-tg{background:rgba(42,171,238,.1);color:#2aabee;border:1px solid rgba(42,171,238,.2);}
+.chip-green{background:rgba(34,211,160,.1);color:var(--green);border:1px solid rgba(34,211,160,.2);}
+.chip-yellow{background:rgba(251,191,36,.1);color:var(--yellow);border:1px solid rgba(251,191,36,.2);}
+.chip-purple{background:rgba(167,139,250,.1);color:var(--purple);border:1px solid rgba(167,139,250,.2);}
+
+canvas{max-height:220px;}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;}
+.g3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:16px;}
+.g2-1{display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:16px;}
+@media(max-width:900px){.g2,.g3,.g2-1{grid-template-columns:1fr;}}
+.mb{margin-bottom:16px;}
+
+/* Funnel */
+.funnel-list{display:flex;flex-direction:column;gap:8px;}
+.funnel-item{display:flex;align-items:center;gap:12px;}
+.fn-label{font-size:11px;color:var(--text2);width:110px;flex-shrink:0;}
+.fn-track{flex:1;height:28px;background:var(--layer3);border-radius:7px;overflow:hidden;}
+.fn-fill{height:100%;border-radius:7px;display:flex;align-items:center;padding:0 10px;}
+.fn-val{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:500;color:rgba(255,255,255,.85);white-space:nowrap;}
+.fn-pct{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text3);width:42px;text-align:right;flex-shrink:0;}
+
+/* Heatmap */
+.heatmap-scroll{overflow-x:auto;}
+.heatmap{display:grid;grid-template-columns:36px repeat(24,1fr);gap:2px;min-width:560px;}
+.hm-lbl{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--text3);display:flex;align-items:center;}
+.hm-hdr{font-family:'JetBrains Mono',monospace;font-size:8px;color:var(--text3);text-align:center;}
+.hm-cell{height:22px;border-radius:3px;cursor:default;transition:transform .15s;}
+.hm-cell:hover{transform:scale(1.3);z-index:2;position:relative;}
+
+/* Insights */
+.insight-stream{display:flex;flex-direction:column;gap:10px;}
+.insight-item{display:flex;align-items:flex-start;gap:14px;background:var(--glass);border:1px solid var(--glassbord);border-radius:12px;padding:14px;transition:all .2s;}
+.insight-item:hover{background:rgba(255,255,255,.04);}
+.ins-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:5px;}
+.ins-title{font-size:13px;font-weight:600;margin-bottom:3px;}
+.ins-body{font-size:12px;color:var(--text2);line-height:1.6;}
+
+/* Posts table */
+.posts-wrap{overflow-x:auto;}
+.posts-table{width:100%;border-collapse:collapse;}
+.posts-table th{text-align:left;padding:0 11px 12px;font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.1em;border-bottom:1px solid var(--border);}
+.posts-table td{padding:11px;font-size:12px;border-bottom:1px solid rgba(255,255,255,.04);vertical-align:middle;}
+.posts-table tr:last-child td{border-bottom:none;}
+.posts-table tr:hover td{background:var(--glass);}
+
+/* Bench */
+.bench-list{display:flex;flex-direction:column;gap:12px;}
+.bench-item{display:flex;flex-direction:column;gap:5px;}
+.bench-row{display:flex;justify-content:space-between;}
+.bench-name{font-size:12px;font-weight:500;}
+.bench-val{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text3);}
+.bench-track{height:5px;background:var(--layer3);border-radius:5px;overflow:hidden;}
+.bench-fill{height:100%;border-radius:5px;}
+
+/* Rings */
+.rings-row{display:flex;gap:14px;justify-content:space-around;flex-wrap:wrap;padding:8px 0;}
+.ring-item{display:flex;flex-direction:column;align-items:center;gap:6px;}
+.ring-svg{width:72px;height:72px;}
+.ring-label{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--text3);text-align:center;letter-spacing:.05em;text-transform:uppercase;}
+
+/* Tags */
+.tag-cloud{display:flex;flex-wrap:wrap;gap:8px;padding:4px 0;}
+.tag-pill{padding:5px 13px;border-radius:20px;font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--layer3);border:1px solid var(--border);color:var(--text3);cursor:default;transition:all .2s;}
+.tag-pill:hover{border-color:rgba(255,255,255,.15);color:var(--text2);}
+.tag-pill.h1{background:rgba(245,133,41,.1);border-color:rgba(245,133,41,.2);color:#f58529;font-size:13px;}
+.tag-pill.h2{background:rgba(221,42,123,.08);border-color:rgba(221,42,123,.2);color:#dd2a7b;font-size:12px;}
+
+/* Metric grid */
+.metric-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;}
+.metric-item{background:var(--layer3);border:1px solid var(--border);border-radius:12px;padding:16px;display:flex;align-items:center;gap:12px;}
+.metric-icon{width:32px;height:32px;background:var(--glass);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0;}
+.metric-name{font-size:11px;color:var(--text3);font-weight:500;}
+.metric-val{font-size:14px;font-weight:700;margin-top:2px;}
+
+/* Sec header */
+.sec-head{display:flex;align-items:center;gap:12px;margin-bottom:16px;}
+.sec-title{font-family:'Playfair Display',serif;font-size:16px;font-weight:700;white-space:nowrap;}
+.sec-line{flex:1;height:1px;background:var(--border);}
+
+::-webkit-scrollbar{width:4px;height:4px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px;}
+</style>
+</head>
+<body class="mode-ig">
+<div class="ambient"><div class="orb orb1"></div><div class="orb orb2"></div></div>
+
+<!-- ════ LOGIN SCREEN ════ -->
+<div class="login-screen" id="loginScreen">
+  <div class="login-card">
+    <div class="login-logo">Pulse</div>
+    <div class="login-sub">// SOCIAL ANALYTICS PLATFORM</div>
+
+    <div class="login-platform">
+      <button class="lp-btn ig-active" id="lpIg" onclick="setLoginMode('ig',this)">📸 Instagram</button>
+      <button class="lp-btn" id="lpTg" onclick="setLoginMode('tg',this)">✈️ Telegram</button>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Пароль команды</label>
+      <input class="form-input" type="password" id="loginPassword" placeholder="Введи пароль..." onkeydown="if(event.key==='Enter')doLogin()"/>
+    </div>
+
+    <button class="btn-login" id="loginBtn" onclick="doLogin()">Войти →</button>
+
+    <div class="login-divider">— или —</div>
+    <button class="btn-demo" onclick="runDemo()">⚡ Демо-режим (без сервера)</button>
+    <div class="login-err" id="loginErr"></div>
+  </div>
+</div>
+
+<!-- ════ SIDEBAR ════ -->
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <div class="logo-name">Pulse</div>
+    <div class="logo-tagline">// SOCIAL ANALYTICS</div>
+  </div>
+  <div class="platform-switch">
+    <div class="platform-label">Платформа</div>
+    <div class="switch-pills">
+      <button class="pill active-ig" id="pillIg" onclick="switchPlatform('ig')">📸 IG</button>
+      <button class="pill" id="pillTg" onclick="switchPlatform('tg')">✈️ TG</button>
+    </div>
+  </div>
+  <div class="sidebar-account">
+    <div class="acc-card">
+      <div class="acc-avatar" id="sideAvatar">📸</div>
+      <div style="flex:1;overflow:hidden">
+        <div class="acc-name" id="sideName">—</div>
+        <div class="acc-handle" id="sideHandle">—</div>
+      </div>
+      <div class="acc-dot"></div>
+    </div>
+  </div>
+  <div class="nav-section">
+    <div class="nav-section-label">Аналитика</div>
+    <div class="nav-item active" onclick="showPage('overview',this)"><span class="nav-icon">📊</span> Обзор <span class="nav-badge" id="modeBadge">LIVE</span></div>
+    <div class="nav-item" onclick="showPage('content',this)"><span class="nav-icon">🎨</span> Контент</div>
+    <div class="nav-item" onclick="showPage('audience',this)"><span class="nav-icon">👥</span> Аудитория</div>
+    <div class="nav-item" onclick="showPage('engagement',this)"><span class="nav-icon">🔥</span> Вовлечённость</div>
+  </div>
+  <div class="nav-section">
+    <div class="nav-section-label">Расширенные</div>
+    <div class="nav-item" onclick="showPage('growth',this)"><span class="nav-icon">📈</span> Рост & Прогноз</div>
+    <div class="nav-item" onclick="showPage('virality',this)"><span class="nav-icon">🚀</span> Виральность</div>
+    <div class="nav-item" onclick="showPage('insights',this)"><span class="nav-icon">💡</span> Выводы AI</div>
+  </div>
+  <div class="sidebar-bottom">
+    <div class="period-label-sm">Период</div>
+    <div class="period-options">
+      <button class="period-opt" onclick="setPeriod(7,this)">7д</button>
+      <button class="period-opt active" onclick="setPeriod(30,this)">30д</button>
+      <button class="period-opt" onclick="setPeriod(90,this)">90д</button>
+    </div>
+    <div class="sidebar-user">
+      <span class="sidebar-user-name" id="sidebarUserLabel">Демо-режим</span>
+      <button class="logout-btn" onclick="doLogout()">Выйти</button>
+    </div>
+  </div>
+</aside>
+
+<!-- ════ MAIN ════ -->
+<main class="main">
+  <div class="topbar">
+    <div class="topbar-left">
+      <div class="topbar-title" id="pageTitle">Обзор</div>
+      <div class="api-status"><div class="status-dot demo" id="statusDot"></div><span id="statusLabel">Демо</span></div>
+    </div>
+    <div class="topbar-actions">
+      <button class="btn-sm btn-sm-ghost" onclick="refreshData()">↻ Обновить</button>
+      <button class="btn-sm btn-sm-ghost" onclick="clearCache()">🗑 Кэш</button>
+      <button class="btn-sm btn-sm-primary" onclick="switchPlatform(MODE==='ig'?'tg':'ig')">Сменить платформу</button>
+    </div>
+  </div>
+
+  <div class="content">
+    <!-- OVERVIEW -->
+    <div class="page active" id="page-overview">
+      <div class="kpi-row" id="kpiRow"></div>
+      <div class="g2-1">
+        <div class="card"><div class="card-head"><div><div class="card-title">Охват & Просмотры</div><div class="card-sub">// динамика за период</div></div><span class="chip chip-ig" id="chipMain">REACH</span></div><canvas id="mainChart"></canvas></div>
+        <div class="card"><div class="card-head"><div><div class="card-title">Воронка</div><div class="card-sub">// от показов до действий</div></div></div><div class="funnel-list" id="funnelList"></div></div>
+      </div>
+      <div class="g3">
+        <div class="card"><div class="card-head"><div><div class="card-title">Подписчики</div><div class="card-sub">// прирост по дням</div></div></div><canvas id="subsChart"></canvas></div>
+        <div class="card"><div class="card-head"><div><div class="card-title" id="engLabel">Лайки & Сохранения</div><div class="card-sub">// по постам</div></div></div><canvas id="engChart"></canvas></div>
+        <div class="card"><div class="card-head"><div><div class="card-title">Реакции</div><div class="card-sub">// тип вовлечённости</div></div><span class="chip chip-green">REACT</span></div><canvas id="reactChart"></canvas></div>
+      </div>
+      <div class="sec-head"><div class="sec-title">Умные инсайты</div><div class="sec-line"></div><span class="chip chip-purple">AI</span></div>
+      <div class="insight-stream" id="insightStream"></div>
+    </div>
+
+    <!-- CONTENT -->
+    <div class="page" id="page-content">
+      <div class="g2">
+        <div class="card"><div class="card-head"><div><div class="card-title">Тип контента</div></div></div><canvas id="cTypeChart"></canvas></div>
+        <div class="card"><div class="card-head"><div><div class="card-title">Лучшее время публикации</div><div class="card-sub">// охват по часам</div></div><span class="chip chip-yellow">TIMING</span></div><canvas id="hoursChart"></canvas></div>
+      </div>
+      <div class="g2">
+        <div class="card"><div class="card-head"><div><div class="card-title">Лучший день недели</div></div><span class="chip chip-green">DOW</span></div><canvas id="dowChart"></canvas></div>
+        <div class="card"><div class="card-head"><div><div class="card-title" id="erByTypeTitle">ER% по типу контента</div></div></div><canvas id="erTypeChart"></canvas></div>
+      </div>
+      <div class="card mb">
+        <div class="card-head"><div><div class="card-title">Тепловая карта активности</div><div class="card-sub">// день × час</div></div><span class="chip chip-purple">HEATMAP</span></div>
+        <div class="heatmap-scroll"><div class="heatmap" id="heatmapGrid"></div></div>
+      </div>
+      <div class="card mb"><div class="card-head"><div><div class="card-title">Популярные теги</div></div></div><div class="tag-cloud" id="tagCloud"></div></div>
+      <div class="card">
+        <div class="card-head"><div><div class="card-title">Топ публикации</div><div class="card-sub">// по охвату</div></div><span class="chip chip-yellow">TOP 15</span></div>
+        <div class="posts-wrap"><table class="posts-table"><thead><tr><th>#</th><th>Публикация</th><th>Тип</th><th>Дата</th><th id="col1h">❤️ Лайки</th><th>💬 Коммент.</th><th>↗️ Репосты</th><th id="col4h">👁 Охват</th><th id="erColH">ER%</th></tr></thead><tbody id="postsBody"></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- AUDIENCE -->
+    <div class="page" id="page-audience">
+      <div class="g3">
+        <div class="card"><div class="card-head"><div><div class="card-title" id="a1Title">Пол</div></div><span class="chip chip-ig" id="a1Chip">GENDER</span></div><canvas id="aud1Chart"></canvas></div>
+        <div class="card"><div class="card-head"><div><div class="card-title">Возраст</div></div><span class="chip chip-tg">AGE</span></div><canvas id="aud2Chart"></canvas></div>
+        <div class="card"><div class="card-head"><div><div class="card-title">Топ города</div></div><span class="chip chip-green">GEO</span></div><div class="bench-list" id="citiesList"></div></div>
+      </div>
+      <div class="g2">
+        <div class="card"><div class="card-head"><div><div class="card-title">Страны</div></div><span class="chip chip-yellow">COUNTRIES</span></div><canvas id="countriesChart"></canvas></div>
+        <div class="card"><div class="card-head"><div><div class="card-title">Онлайн-активность</div><div class="card-sub">// когда аудитория онлайн</div></div></div><canvas id="onlineChart"></canvas></div>
+      </div>
+      <div class="card mb"><div class="card-head"><div><div class="card-title">Прирост и отток</div><div class="card-sub">// по месяцам</div></div><span class="chip" style="background:rgba(244,63,94,.1);color:var(--red);border:1px solid rgba(244,63,94,.2)">CHURN</span></div><canvas id="churnChart" style="max-height:190px"></canvas></div>
+    </div>
+
+    <!-- ENGAGEMENT -->
+    <div class="page" id="page-engagement">
+      <div class="g2">
+        <div class="card"><div class="card-head"><div><div class="card-title">Оценка аккаунта</div></div><span class="chip chip-purple">SCORE</span></div><div class="rings-row" id="scoreRings"></div></div>
+        <div class="card"><div class="card-head"><div><div class="card-title" id="benchTitle">ER% Benchmark</div><div class="card-sub">// vs нормы отрасли</div></div></div><div class="bench-list" id="benchList"></div></div>
+      </div>
+      <div class="g2">
+        <div class="card"><div class="card-head"><div><div class="card-title">Динамика ER%</div><div class="card-sub">// по неделям</div></div></div><canvas id="erTrendChart"></canvas></div>
+        <div class="card"><div class="card-head"><div><div class="card-title">Scatter: охват vs реакции</div></div></div><canvas id="scatterChart"></canvas></div>
+      </div>
+    </div>
+
+    <!-- GROWTH -->
+    <div class="page" id="page-growth">
+      <div class="g2">
+        <div class="card"><div class="card-head"><div><div class="card-title">Прогноз роста</div><div class="card-sub">// тренд на 30 дней</div></div><span class="chip chip-green">FORECAST</span></div><canvas id="forecastChart"></canvas></div>
+        <div class="card"><div class="card-head"><div><div class="card-title">Скорость роста</div><div class="card-sub">// % в неделю</div></div></div><canvas id="velocityChart"></canvas></div>
+      </div>
+      <div class="g2">
+        <div class="card"><div class="card-head"><div><div class="card-title">Частота постинга vs Охват</div></div></div><canvas id="freqChart"></canvas></div>
+        <div class="card"><div class="card-head"><div><div class="card-title">Источники роста</div></div><span class="chip chip-purple">SOURCE</span></div><canvas id="sourceChart"></canvas></div>
+      </div>
+      <div class="card mb"><div class="card-head"><div><div class="card-title">Ключевые метрики роста</div></div></div><div class="metric-grid" id="growthMetrics"></div></div>
+    </div>
+
+    <!-- VIRALITY -->
+    <div class="page" id="page-virality">
+      <div class="g2">
+        <div class="card"><div class="card-head"><div><div class="card-title">Динамика репостов</div></div><span class="chip chip-yellow">FWDS</span></div><canvas id="fwdChart"></canvas></div>
+        <div class="card"><div class="card-head"><div><div class="card-title">Виральный коэффициент</div><div class="card-sub">// репосты/охват × 100</div></div></div><canvas id="viralChart"></canvas></div>
+      </div>
+      <div class="g2">
+        <div class="card"><div class="card-head"><div><div class="card-title">Сохранения & Репосты по постам</div></div><span class="chip chip-green">SAVE/FWD</span></div><canvas id="savesChart"></canvas></div>
+        <div class="card"><div class="card-head"><div><div class="card-title">CTR по типу ссылок</div></div><span class="chip chip-purple">CTR</span></div><canvas id="ctrChart"></canvas></div>
+      </div>
+    </div>
+
+    <!-- INSIGHTS -->
+    <div class="page" id="page-insights">
+      <div class="sec-head"><div class="sec-title">Автоматические выводы</div><div class="sec-line"></div><span class="chip chip-purple">AI INSIGHTS</span></div>
+      <div id="insightsFull" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:13px;margin-bottom:22px"></div>
+      <div class="sec-head"><div class="sec-title">Рекомендации</div><div class="sec-line"></div></div>
+      <div id="recsFull" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:13px;margin-bottom:22px"></div>
+      <div class="g2">
+        <div class="card"><div class="card-head"><div><div class="card-title">Сравнение периодов</div></div></div><canvas id="compareChart"></canvas></div>
+        <div class="card"><div class="card-head"><div><div class="card-title">Radar — профиль аккаунта</div></div></div><canvas id="radarChart"></canvas></div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+// ══════════════════════════════════════════
+// CONFIG & STATE
+// ══════════════════════════════════════════
+// При деплое на сервер — оставь пустую строку ''
+// При локальной разработке — 'http://localhost:3000'
+const API_BASE = '';
+
+let MODE    = 'ig';
+let PERIOD  = 30;
+let SESSION = null; // токен авторизации
+let IS_DEMO = false;
+let charts  = {};
+
+const PAGE_TITLES = {
+  overview:'Обзор', content:'Контент', audience:'Аудитория',
+  engagement:'Вовлечённость', growth:'Рост & Прогноз',
+  virality:'Виральность', insights:'Выводы AI'
+};
+
+// ══════════════════════════════════════════
+// AUTH
+// ══════════════════════════════════════════
+async function doLogin(){
+  const pw = document.getElementById('loginPassword').value.trim();
+  if(!pw){ showErr('Введи пароль'); return; }
+
+  document.getElementById('loginBtn').textContent = '⏳ Вхожу...';
+  try {
+    const res = await fetch(`${API_BASE}/api/auth/login`, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({password: pw})
+    });
+    const data = await res.json();
+    if(!res.ok) { showErr(data.error || 'Неверный пароль'); return; }
+
+    SESSION = data.token;
+    localStorage.setItem('pulse_session', SESSION);
+    IS_DEMO = false;
+    document.getElementById('sidebarUserLabel').textContent = '🔒 Команда';
+    setStatus('live','LIVE API');
+    hideLogin();
+    await loadRealData();
+  } catch(e) {
+    showErr('Сервер недоступен — попробуй демо-режим');
+  } finally {
+    document.getElementById('loginBtn').textContent = 'Войти →';
+  }
+}
+
+function showErr(msg){
+  const el = document.getElementById('loginErr');
+  el.style.display='block'; el.textContent = '⚠️ ' + msg;
+}
+
+function doLogout(){
+  if(SESSION) fetch(`${API_BASE}/api/auth/logout`,{method:'POST',headers:{'x-session-token':SESSION}}).catch(()=>{});
+  SESSION = null; IS_DEMO = false;
+  localStorage.removeItem('pulse_session');
+  document.getElementById('loginScreen').style.display='flex';
+  document.getElementById('loginPassword').value='';
+  document.getElementById('loginErr').style.display='none';
+}
+
+function setLoginMode(mode, btn){
+  MODE = mode;
+  document.body.className='mode-'+mode;
+  document.querySelectorAll('.lp-btn').forEach(b=>b.className='lp-btn');
+  btn.className='lp-btn '+(mode==='ig'?'ig-active':'tg-active');
+  document.getElementById('loginBtn').className='btn-login'+(mode==='tg'?' tg':'');
+}
+
+function hideLogin(){ document.getElementById('loginScreen').style.display='none'; }
+
+function setStatus(type, label){
+  const dot = document.getElementById('statusDot');
+  dot.className = 'status-dot '+type;
+  document.getElementById('statusLabel').textContent = label;
+}
+
+// ══════════════════════════════════════════
+// API CALLS
+// ══════════════════════════════════════════
+function apiHeaders(){
+  return SESSION ? {'x-session-token': SESSION} : {};
+}
+
+async function apiGet(path){
+  const res = await fetch(`${API_BASE}${path}`, { headers: apiHeaders() });
+  if(res.status === 401){ doLogout(); throw new Error('Сессия истекла'); }
+  const data = await res.json();
+  if(data.error) throw new Error(data.error);
+  return data;
+}
+
+async function loadRealData(){
+  try {
+    if(MODE==='ig'){
+      // ── Instagram ────────────────────────────────────────
+      const [profile, insights, posts] = await Promise.all([
+        apiGet('/api/ig/profile'),
+        apiGet(`/api/ig/insights?days=${PERIOD}`),
+        apiGet('/api/ig/posts?limit=20'),
+      ]);
+      const insightSeries = insights.data || [];
+      const postList      = posts.data || [];
+
+      document.getElementById('sideName').textContent   = profile.name || profile.username;
+      document.getElementById('sideHandle').textContent = '@'+profile.username;
+      document.getElementById('sideAvatar').textContent = '📸';
+      setStatus('live', 'LIVE · Instagram API');
+
+      renderAll({
+        isIg:        true,
+        mem:         profile.followers_count,
+        avgReach:    Math.round(avg(parseValues(insightSeries,'reach')) || 2000),
+        posts:       postList.map(p=>({
+          ...p,
+          text:     p.caption||'',
+          likes:    p.like_count     || 0,
+          comments: p.comments_count || 0,
+          saves:    p.saved          || 0,
+          fwds:     p.shares         || 0,
+          views:    p.reach          || 0,
+        })),
+        labels:      parseDates(insightSeries, 'reach'),
+        viewsSeries: parseValues(insightSeries, 'reach'),
+        subsSeries:  parseValues(insightSeries, 'follower_count'),
+      });
+
+    } else {
+      // ── Telegram — один запрос, получаем всё что доступно ──
+      setStatus('live', 'Загружаем...');
+      const full = await apiGet(`/api/tg/full?limit=${PERIOD}`);
+
+      const ch    = full.channel       || {};
+      const vs    = full.views_summary || {};
+      const posts = full.posts         || [];
+      const hasMtp = full.mtproto_available;
+
+      document.getElementById('sideName').textContent   = ch.title    || '—';
+      document.getElementById('sideHandle').textContent = '@'+(ch.username || '');
+      document.getElementById('sideAvatar').textContent = '✈️';
+
+      // Статус в топбаре
+      setStatus('live', hasMtp ? 'LIVE · MTProto' : 'LIVE · Bot API');
+      if(!hasMtp){
+        showMtprotoHint(full.errors);
+      }
+
+      // Реальные просмотры по дням из MTProto
+      const viewsByDay = vs.views_by_day || {};
+      const sortedDays = Object.keys(viewsByDay).sort((a,b)=>{
+        const [da,ma] = a.split('.').map(Number);
+        const [db,mb] = b.split('.').map(Number);
+        return ma!==mb ? ma-mb : da-db;
+      });
+      const labels      = sortedDays.length ? sortedDays : makeLabels(PERIOD);
+      const viewsSeries = sortedDays.length ? sortedDays.map(d=>viewsByDay[d]) : [];
+
+      // Нормализуем посты из MTProto в единый формат
+      const normPosts = posts.map(p=>({
+        id:        p.id,
+        text:      p.text || '',
+        type:      p.media_type || 'text',
+        date:      p.date ? new Date(p.date).toLocaleDateString('ru-RU') : '—',
+        views:     p.views    || 0,   // ← РЕАЛЬНЫЕ просмотры из MTProto
+        fwds:      p.forwards || 0,   // ← РЕАЛЬНЫЕ репосты
+        reactions: p.reactions|| 0,
+        reactions_detail: p.reactions_detail || [],
+        comments:  p.replies  || 0,
+        likes:     0,
+        saves:     0,
+      }));
+
+      const avgViews = vs.avg_views || (normPosts.length
+        ? Math.round(normPosts.reduce((s,p)=>s+p.views,0)/normPosts.length)
+        : Math.floor(ch.memberCount*0.15));
+
+      renderAll({
+        isIg:        false,
+        mem:         ch.memberCount || 0,
+        avgReach:    avgViews,
+        posts:       normPosts,
+        labels,
+        viewsSeries,
+        subsSeries:  [],
+        // Передаём реальные агрегаты чтобы KPI были точными
+        realTotals: {
+          totalViews:    vs.total_views    || 0,
+          totalForwards: vs.total_forwards || 0,
+          totalReactions:vs.total_reactions|| 0,
+          totalReplies:  vs.total_replies  || 0,
+          avgViewsByType: vs.avg_views_by_type || {},
+        }
+      });
+    }
+  } catch(e){
+    console.warn('API error:', e.message);
+    setStatus('err', 'Ошибка API');
+    runDemo();
+  }
+}
+
+function showMtprotoHint(errors){
+  // Показываем ненавязчивое уведомление если MTProto недоступен
+  const existing = document.getElementById('mtprotoHint');
+  if(existing) return;
+  const hint = document.createElement('div');
+  hint.id = 'mtprotoHint';
+  hint.style.cssText = `
+    background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.2);
+    border-radius:10px;padding:12px 16px;margin-bottom:16px;
+    font-size:12px;color:#fbbf24;display:flex;gap:10px;align-items:flex-start;
+  `;
+  const mtpErr = errors?.mtp || 'сервис не запущен';
+  hint.innerHTML = `
+    <span style="font-size:16px;flex-shrink:0">⚠️</span>
+    <div>
+      <b>MTProto сервис недоступен</b> — просмотры постов показаны приблизительно.<br>
+      <span style="color:rgba(251,191,36,.6);font-size:11px">Причина: ${mtpErr}</span><br>
+      <span style="color:rgba(251,191,36,.6);font-size:11px">Запусти: <code style="background:rgba(0,0,0,.3);padding:1px 5px;border-radius:3px">cd mtproto && pip install -r requirements.txt && python service.py</code></span>
+    </div>
+    <button onclick="this.parentElement.remove()" style="background:transparent;border:none;color:#fbbf24;cursor:pointer;font-size:16px;margin-left:auto;flex-shrink:0">✕</button>
+  `;
+  const content = document.querySelector('.content');
+  if(content) content.prepend(hint);
+}
+
+function parseDates(insightData, name){
+  const m = insightData.find(x=>x.name===name);
+  if(!m) return makeLabels(PERIOD);
+  return (m.values||[]).map(v=>{ const d=new Date(v.end_time); return d.getDate()+'.'+(d.getMonth()+1).toString().padStart(2,'0'); });
+}
+function parseValues(insightData, name){
+  const m = insightData.find(x=>x.name===name);
+  return m ? (m.values||[]).map(v=>v.value) : [];
+}
+
+async function refreshData(){
+  if(IS_DEMO){ renderAll(buildDemoData()); return; }
+  await loadRealData();
+}
+
+async function clearCache(){
+  if(!SESSION){ alert('Только для авторизованных пользователей'); return; }
+  try { await apiGet('/api/cache'); alert('Кэш очищен'); } catch(e){ alert('Ошибка: '+e.message); }
+}
+
+// ══════════════════════════════════════════
+// DEMO MODE
+// ══════════════════════════════════════════
+function runDemo(){
+  IS_DEMO = true;
+  document.getElementById('sidebarUserLabel').textContent = 'Демо-режим';
+  setStatus('demo','DEMO');
+  hideLogin();
+  const d = buildDemoData();
+  document.getElementById('sideName').textContent = MODE==='ig'?'demo_brand':'Tech Insights RU';
+  document.getElementById('sideHandle').textContent = MODE==='ig'?'@demo_brand':'@tech_insights_ru';
+  document.getElementById('sideAvatar').textContent = MODE==='ig'?'📸':'✈️';
+  renderAll(d);
+}
+
+function buildDemoData(){
+  const isIg = MODE==='ig';
+  const mem = isIg?rb(10000,25000):rb(5000,50000);
+  const avgReach = isIg?rb(2000,6000):Math.floor(mem*rb(15,30)/100);
+  const labels = makeLabels(PERIOD);
+  const topics = isIg
+    ?['📸 Новый пост','🔥 Топ контент','✨ Вайб недели','🎯 Маркетинг','💡 Лайфхак','🚀 Запуск']
+    :['🤖 Нейросети 2025','📊 Кейс роста','⚡ Инструменты','🚀 Стартап дня','💡 Инсайт','🔥 Тренд'];
+  const types = isIg?['IMAGE','VIDEO','CAROUSEL_ALBUM']:['text','photo','video','poll'];
+  const posts = Array.from({length:15},(_,i)=>{
+    const views=rb(Math.floor(avgReach*.5),Math.floor(avgReach*1.8));
+    return {id:i+1,text:topics[i%topics.length],type:types[i%types.length],date:new Date(Date.now()-i*1.5*86400000).toLocaleDateString('ru-RU'),views,likes:isIg?Math.floor(views*rb(3,12)/100):0,comments:Math.floor(views*rb(0,3)/100),saves:isIg?Math.floor(views*rb(2,8)/100):0,fwds:Math.floor(views*rb(1,8)/100),reactions:!isIg?Math.floor(views*rb(3,12)/100):0};
+  });
+  return {isIg,mem,avgReach,posts,labels,viewsSeries:labels.map(()=>rb(Math.floor(avgReach*.6),Math.floor(avgReach*1.4))),subsSeries:labels.map(()=>rb(isIg?8:15,isIg?60:120))};
+}
+
+// ══════════════════════════════════════════
+// NAVIGATION
+// ══════════════════════════════════════════
+function showPage(id,btn){
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  document.getElementById('page-'+id).classList.add('active');
+  btn.classList.add('active');
+  document.getElementById('pageTitle').textContent = PAGE_TITLES[id]||id;
+}
+
+function switchPlatform(mode){
+  MODE = mode;
+  document.body.className = 'mode-'+mode;
+  document.getElementById('pillIg').className='pill'+(mode==='ig'?' active-ig':'');
+  document.getElementById('pillTg').className='pill'+(mode==='tg'?' active-tg':'');
+  document.getElementById('sideAvatar').textContent = mode==='ig'?'📸':'✈️';
+  if(IS_DEMO) runDemo(); else loadRealData();
+}
+
+function setPeriod(n,btn){
+  PERIOD=n;
+  document.querySelectorAll('.period-opt').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  if(IS_DEMO) renderAll(buildDemoData()); else loadRealData();
+}
+
+// ══════════════════════════════════════════
+// UTILS
+// ══════════════════════════════════════════
+function dc(id){ if(charts[id]){charts[id].destroy();delete charts[id];} }
+function fmtN(n){ n=parseInt(n)||0; if(n>=1e6)return(n/1e6).toFixed(1)+'M'; if(n>=1e3)return(n/1e3).toFixed(1)+'K'; return n.toString(); }
+function rb(a,b){ return Math.floor(Math.random()*(b-a)+a); }
+function ra(n,a,b){ return Array.from({length:n},()=>rb(a,b)); }
+function avg(arr){ return arr.length?arr.reduce((a,v)=>a+v,0)/arr.length:0; }
+function makeLabels(n){ return Array.from({length:n},(_,i)=>{ const d=new Date(); d.setDate(d.getDate()-n+1+i); return d.getDate()+'.'+(d.getMonth()+1).toString().padStart(2,'0'); }); }
+function acSolid(){ return MODE==='ig'?'#dd2a7b':'#2aabee'; }
+function acColor(a){ return MODE==='ig'?`rgba(221,42,123,${a})`:`rgba(42,171,238,${a})`; }
+function acGrd(){ return MODE==='ig'?['#f58529','#dd2a7b','#8134af']:['#2aabee','#5b8dee','#7c4dff']; }
+
+function co(ex={}){
+  return {responsive:true,maintainAspectRatio:true,plugins:{legend:{labels:{color:'#4a5280',font:{size:10,family:'DM Sans'},boxWidth:10,padding:12}},tooltip:{backgroundColor:'#121525',borderColor:'rgba(255,255,255,.08)',borderWidth:1,titleColor:'#f0f2ff',bodyColor:'#8b92b8',padding:10}},scales:{x:{ticks:{color:'#2e3558',font:{size:9,family:'JetBrains Mono'},maxTicksLimit:8},grid:{color:'rgba(255,255,255,.03)'}},y:{ticks:{color:'#2e3558',font:{size:9,family:'JetBrains Mono'}},grid:{color:'rgba(255,255,255,.03)'}}}, ...ex};
+}
+function coNS(ex={}){ return {responsive:true,maintainAspectRatio:true,plugins:{legend:{labels:{color:'#4a5280',font:{size:10,family:'DM Sans'},boxWidth:10}},tooltip:{backgroundColor:'#121525',borderColor:'rgba(255,255,255,.08)',borderWidth:1,titleColor:'#f0f2ff',bodyColor:'#8b92b8',padding:10}},...ex}; }
+
+// ══════════════════════════════════════════
+// RENDER ALL SECTIONS
+// ══════════════════════════════════════════
+function renderAll(d){ renderOverview(d);renderContent(d);renderAudience(d);renderEngagement(d);renderGrowth(d);renderVirality(d);renderInsights(d); }
+
+function renderOverview({labels,mem,avgReach,posts,isIg,viewsSeries,subsSeries,realTotals}){
+  const vs=viewsSeries&&viewsSeries.length?viewsSeries:labels.map(()=>rb(Math.floor(avgReach*.6),Math.floor(avgReach*1.4)));
+  const ss=subsSeries&&subsSeries.length?subsSeries:labels.map(()=>rb(isIg?8:15,isIg?60:120));
+  // Используем realTotals из MTProto если есть — иначе считаем из постов
+  const rt=realTotals||{};
+  const tL =posts.reduce((a,p)=>a+(p.likes||0),0);
+  const tC =posts.reduce((a,p)=>a+(p.comments||0),0);
+  const tR =rt.totalReactions!=null?rt.totalReactions:posts.reduce((a,p)=>a+(p.reactions||0),0);
+  const tFw=rt.totalForwards !=null?rt.totalForwards :posts.reduce((a,p)=>a+(p.fwds||0),0);
+  const tSv=posts.reduce((a,p)=>a+(p.saves||0),0);
+  const tV =rt.totalViews    !=null?rt.totalViews    :vs.reduce((a,b)=>a+b,0);
+  const tS =ss.reduce((a,b)=>a+b,0);
+  const erN=mem?((isIg?(tL+tC)/(posts.length||1)/mem*100:avgReach/mem*100)):0;
+  document.getElementById('kpiRow').innerHTML=[
+    {e:'👥',v:fmtN(mem),l:'Подписчики',d:'+'+fmtN(tS),pos:true,s:'прирост'},
+    {e:'👁',v:fmtN(tV),l:isIg?'Охват':'Просмотры',d:null,s:'за период'},
+    {e:isIg?'❤️':'↗️',v:fmtN(isIg?tL:tFw),l:isIg?'Лайки':'Репосты',d:null,s:''},
+    {e:'💬',v:fmtN(tC),l:'Комментарии',d:null,s:''},
+    {e:isIg?'🔖':'❤️',v:fmtN(isIg?tSv:tR),l:isIg?'Сохранения':'Реакции',d:null,s:''},
+    {e:'🔥',v:erN.toFixed(2)+'%',l:isIg?'Avg ER%':'Avg ERR%',d:erN>=(isIg?2:15)?'Хорошо':'Норма',pos:erN>=(isIg?2:15),s:isIg?'engagement rate':'views/subs'},
+  ].map(k=>`<div class="kpi"><div class="kpi-top"><div class="kpi-emoji">${k.e}</div>${k.d?`<span class="delta ${k.pos?'pos':'neu'}">${k.d}</span>`:''}</div><div class="kpi-val">${k.v}</div><div class="kpi-lbl">${k.l}</div>${k.s?`<div class="kpi-sub">${k.s}</div>`:''}</div>`).join('');
+  dc('mainChart');charts.mainChart=new Chart(document.getElementById('mainChart'),{type:'line',data:{labels,datasets:[{label:isIg?'Охват':'Просмотры',data:vs,borderColor:acSolid(),backgroundColor:acColor(.07),fill:true,tension:.4,pointRadius:2,borderWidth:2}]},options:co()});
+  document.getElementById('chipMain').textContent=isIg?'REACH':'VIEWS';
+  document.getElementById('chipMain').className='chip '+(isIg?'chip-ig':'chip-tg');
+  const fm=tV||1;
+  const fD=isIg?[{l:'Показы',v:Math.floor(tV*1.4),c:'#8134af'},{l:'Охват',v:tV,c:'#dd2a7b'},{l:'Лайки',v:tL,c:'#f58529'},{l:'Коммент.',v:tC,c:'#22d3a0'},{l:'Сохранения',v:tSv,c:'#fbbf24'}]:[{l:'Показы',v:Math.floor(tV*1.2),c:'#5b8dee'},{l:'Просмотры',v:tV,c:'#2aabee'},{l:'Реакции',v:tR,c:'#22d3a0'},{l:'Репосты',v:tFw,c:'#fbbf24'},{l:'Коммент.',v:tC,c:'#a78bfa'}];
+  document.getElementById('funnelList').innerHTML=fD.map(f=>`<div class="funnel-item"><div class="fn-label">${f.l}</div><div class="fn-track"><div class="fn-fill" style="width:${Math.min(100,f.v/fm*100)}%;background:${f.c}"><span class="fn-val">${fmtN(f.v)}</span></div></div><div class="fn-pct">${(f.v/fm*100).toFixed(1)}%</div></div>`).join('');
+  dc('subsChart');charts.subsChart=new Chart(document.getElementById('subsChart'),{type:'bar',data:{labels,datasets:[{label:'Новые подписчики',data:ss,backgroundColor:acColor(.6),borderRadius:5}]},options:co()});
+  document.getElementById('engLabel').textContent=isIg?'Лайки & Сохранения':'Просмотры / пост';
+  dc('engChart');charts.engChart=new Chart(document.getElementById('engChart'),{type:'bar',data:{labels:posts.map((_,i)=>'#'+(i+1)),datasets:isIg?[{label:'Лайки',data:posts.map(p=>p.likes||0),backgroundColor:acColor(.65),borderRadius:4},{label:'Сохранения',data:posts.map(p=>p.saves||0),backgroundColor:'rgba(251,191,36,.5)',borderRadius:4}]:[{label:'Просмотры',data:posts.map(p=>p.views||avgReach),backgroundColor:acColor(.6),borderRadius:4}]},options:co()});
+  dc('reactChart');const rD=isIg?{l:['Лайки','Коммент.','Сохран.','Репосты'],d:[55,20,15,10],c:['#dd2a7b','#f58529','#8134af','#515bd4']}:{l:['❤️','👍','🔥','🎉','😮'],d:[35,25,20,12,8],c:['#f43f5e','#2aabee','#ff9100','#22d3a0','#a78bfa']};
+  charts.reactChart=new Chart(document.getElementById('reactChart'),{type:'doughnut',data:{labels:rD.l,datasets:[{data:rD.d,backgroundColor:rD.c,borderWidth:0,hoverOffset:6}]},options:coNS({cutout:'60%'})});
+  const erN2=erN;const ins=isIg?[{c:'#22d3a0',t:'Engagement Rate',b:`ER ${erN2.toFixed(2)}% — ${erN2>=3?'выше нормы для аккаунтов 10–50К (2–3%)':'есть потенциал, норма 2–3%'}. Первый час после публикации критичен.`},{c:'#fbbf24',t:'Лучшее время',b:'Пик: 19:00–22:00 и 9:00–11:00. Посты в это время получают +35–50% просмотров.'},{c:acSolid(),t:'Виральность',b:'Сохранения — главный сигнал алгоритму. Текущий уровень: '+fmtN(tSv)+' сохранений за период.'}]:[{c:'#2aabee',t:'ERR% канала',b:`ERR ${erN2.toFixed(1)}% — ${erN2>=20?'отличный показатель! Продолжай.':'попробуй 1–2 поста в день — частота снижает ERR.'}`},{c:'#22d3a0',t:'Виральность',b:'Репосты — главный инструмент роста в Telegram. Делай посты с чёткой ценностью для пересылки.'},{c:'#fbbf24',t:'Тайминг',b:'85% просмотров — первые 24 часа. Публикуй в 19:00–21:00 для максимального охвата.'}];
+  document.getElementById('insightStream').innerHTML=ins.map(i=>`<div class="insight-item"><div class="ins-dot" style="background:${i.c};box-shadow:0 0 8px ${i.c}"></div><div><div class="ins-title">${i.t}</div><div class="ins-body">${i.b}</div></div></div>`).join('');
+}
+
+function renderContent({labels,mem,avgReach,posts,isIg}){
+  const types=isIg?['IMAGE','VIDEO','CAROUSEL_ALBUM']:['text','photo','video','poll'];
+  const tLbl=isIg?['Фото','Видео','Карусель']:['Текст','Фото','Видео','Опрос'];
+  const tCnt=types.map(t=>posts.filter(p=>p.type===t).length||rb(2,7));
+  dc('cTypeChart');charts.cTypeChart=new Chart(document.getElementById('cTypeChart'),{type:'doughnut',data:{labels:tLbl,datasets:[{data:tCnt,backgroundColor:isIg?['#f58529','#dd2a7b','#8134af']:['#2aabee','#5b8dee','#22d3a0','#fbbf24'],borderWidth:0,hoverOffset:6}]},options:coNS({cutout:'58%'})});
+  const hD=Array.from({length:24},(_,i)=>([9,10,11,18,19,20,21,22].includes(i)?rb(60,100):rb(5,35)));
+  dc('hoursChart');charts.hoursChart=new Chart(document.getElementById('hoursChart'),{type:'bar',data:{labels:Array.from({length:24},(_,i)=>i+':00'),datasets:[{label:'Активность',data:hD,backgroundColor:hD.map(v=>v>80?acSolid():v>50?acColor(.5):'rgba(255,255,255,.05)'),borderRadius:4}]},options:{...co(),plugins:{...co().plugins,legend:{display:false}}}});
+  const dW=['Пн','Вт','Ср','Чт','Пт','Сб','Вс'],dD=dW.map(()=>rb(Math.floor(avgReach*.6),Math.floor(avgReach*1.4)));
+  dc('dowChart');charts.dowChart=new Chart(document.getElementById('dowChart'),{type:'bar',data:{labels:dW,datasets:[{label:'Avg охват',data:dD,backgroundColor:dD.map(v=>v===Math.max(...dD)?acSolid():acColor(.3)),borderRadius:7}]},options:co()});
+  document.getElementById('erByTypeTitle').textContent=isIg?'ER% по типу контента':'ERR% по формату';
+  dc('erTypeChart');charts.erTypeChart=new Chart(document.getElementById('erTypeChart'),{type:'bar',data:{labels:tLbl,datasets:[{label:isIg?'Avg ER%':'Avg ERR%',data:ra(tLbl.length,isIg?1:10,isIg?6:30),backgroundColor:isIg?['rgba(245,133,41,.7)','rgba(221,42,123,.7)','rgba(129,52,175,.7)']:['rgba(42,171,238,.7)','rgba(91,141,238,.7)','rgba(34,211,160,.6)','rgba(251,191,36,.6)'],borderRadius:8}]},options:co()});
+  const days=['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];let hmH=`<div class="hm-lbl"></div>`;
+  for(let h=0;h<24;h++)hmH+=`<div class="hm-hdr">${h}</div>`;
+  days.forEach(d=>{hmH+=`<div class="hm-lbl">${d}</div>`;for(let h=0;h<24;h++){const p=([9,10,11,18,19,20,21].includes(h));const v=p?rb(40,100):rb(0,35);hmH+=`<div class="hm-cell" style="background:${acColor((v/100).toFixed(2))}" title="${d} ${h}:00 — ${v}%"></div>`;}});
+  document.getElementById('heatmapGrid').innerHTML=hmH;
+  const tags=isIg?[{t:'#reels',c:'h1'},{t:'#маркетинг',c:'h1'},{t:'#бизнес',c:'h2'},{t:'#контент',c:'h2'},{t:'#smm',c:'h3'},{t:'#продажи',c:'h1'},{t:'#дизайн',c:'h3'},{t:'#тренды',c:'h1'}]:[{t:'#нейросети',c:'h1'},{t:'#стартапы',c:'h1'},{t:'#технологии',c:'h2'},{t:'#кейсы',c:'h1'},{t:'#инструменты',c:'h3'},{t:'#маркетинг',c:'h2'}];
+  document.getElementById('tagCloud').innerHTML=tags.map(t=>`<div class="tag-pill ${t.c}">${t.t}</div>`).join('');
+  const icons={IMAGE:'🖼️',VIDEO:'🎬',CAROUSEL_ALBUM:'🎠',text:'📝',photo:'🖼️',video:'🎬',poll:'📊'};
+  document.getElementById('col1h').textContent=isIg?'❤️ Лайки':'❤️ Реакции';
+  document.getElementById('col4h').textContent=isIg?'👁 Охват':'👁 Просмотры';
+  document.getElementById('erColH').textContent=isIg?'ER%':'ERR%';
+  document.getElementById('postsBody').innerHTML=posts.map((p,i)=>{const erv=mem?((isIg?(p.likes||0)+(p.comments||0):p.views||avgReach)/mem*100).toFixed(2):'—';const ervN=parseFloat(erv)||0;return`<tr><td style="font-family:'JetBrains Mono';font-size:10px;color:var(--text3)">${i+1}</td><td style="max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${(p.text||p.caption||'—').slice(0,40)}</td><td>${icons[p.type]||icons[p.media_type]||'📝'}</td><td style="font-family:'JetBrains Mono';font-size:10px;color:var(--text3)">${p.date||''}</td><td><b>${fmtN(isIg?p.likes||0:p.reactions||0)}</b></td><td>${fmtN(p.comments||0)}</td><td>${fmtN(p.fwds||p.shares||0)}</td><td>${fmtN(p.views||p.reach||avgReach)}</td><td style="font-family:'JetBrains Mono';font-size:11px;font-weight:700;color:${ervN>=(isIg?3:25)?'var(--green)':ervN>=(isIg?1.5:12)?'var(--yellow)':'var(--text3)'}">${erv}%</td></tr>`;}).join('');
+}
+
+function renderAudience({isIg}){
+  document.getElementById('a1Title').textContent=isIg?'Пол аудитории':'Устройства';
+  document.getElementById('a1Chip').textContent=isIg?'GENDER':'DEVICE';
+  document.getElementById('a1Chip').className='chip '+(isIg?'chip-ig':'chip-tg');
+  dc('aud1Chart');charts.aud1Chart=new Chart(document.getElementById('aud1Chart'),{type:'doughnut',data:isIg?{labels:['Женщины','Мужчины','Другое'],datasets:[{data:[62,35,3],backgroundColor:['#dd2a7b','#515bd4','#8134af'],borderWidth:0,hoverOffset:5}]}:{labels:['Android','iOS','Desktop','Web'],datasets:[{data:[48,32,15,5],backgroundColor:['#2aabee','#5b8dee','#22d3a0','#fbbf24'],borderWidth:0,hoverOffset:5}]},options:coNS({cutout:'55%'})});
+  dc('aud2Chart');charts.aud2Chart=new Chart(document.getElementById('aud2Chart'),{type:'bar',data:{labels:['13-17','18-24','25-34','35-44','45-54','55+'],datasets:[{label:'Ж',data:[2,28,35,18,10,7],backgroundColor:isIg?'rgba(221,42,123,.7)':'rgba(42,171,238,.7)',borderRadius:5},{label:'М',data:[1,15,22,11,5,3],backgroundColor:isIg?'rgba(81,91,212,.7)':'rgba(91,141,238,.5)',borderRadius:5}]},options:co()});
+  const cities=[{n:'Москва',p:34},{n:'СПб',p:18},{n:'Новосибирск',p:8},{n:'Екатеринбург',p:6},{n:'Казань',p:5},{n:'Другие',p:29}];
+  document.getElementById('citiesList').innerHTML=cities.map(c=>`<div class="bench-item"><div class="bench-row"><span class="bench-name">${c.n}</span><span class="bench-val">${c.p}%</span></div><div class="bench-track"><div class="bench-fill" style="width:${c.p}%;background:${acSolid()}"></div></div></div>`).join('');
+  dc('countriesChart');charts.countriesChart=new Chart(document.getElementById('countriesChart'),{type:'bar',data:{labels:['Россия','Казахстан','Украина','Беларусь','Германия','Другие'],datasets:[{label:'%',data:[isIg?58:52,10,8,5,4,isIg?15:21],backgroundColor:acColor(.6),borderRadius:6}]},options:co()});
+  const oH=Array.from({length:24},(_,i)=>i>=18&&i<=22?rb(70,100):i>=9&&i<=12?rb(50,80):rb(8,35));
+  dc('onlineChart');charts.onlineChart=new Chart(document.getElementById('onlineChart'),{type:'line',data:{labels:Array.from({length:24},(_,i)=>i+':00'),datasets:[{label:'% онлайн',data:oH,borderColor:acSolid(),backgroundColor:acColor(.07),fill:true,tension:.4,pointRadius:2,borderWidth:2}]},options:co()});
+  dc('churnChart');charts.churnChart=new Chart(document.getElementById('churnChart'),{type:'bar',data:{labels:['Ноя','Дек','Янв','Фев','Мар','Апр'],datasets:[{label:'Подписались',data:[320,410,380,450,520,490],backgroundColor:'rgba(34,211,160,.6)',borderRadius:5,stack:'s'},{label:'Отписались',data:[-95,-110,-85,-120,-100,-90],backgroundColor:'rgba(244,63,94,.45)',borderRadius:5,stack:'s'}]},options:co()});
+}
+
+function renderEngagement({mem,avgReach,posts,isIg}){
+  const erN=mem?((isIg?avg(posts.map(p=>(p.likes||0)+(p.comments||0)))/mem*100:avgReach/mem*100)):0;
+  const cs=rb(65,92),vs=rb(40,78),gs=rb(55,88);
+  function ring(pct,color,label,val){const r=28,cx=35,cy=35,circ=2*Math.PI*r,dash=circ*(Math.min(100,pct)/100);return`<div class="ring-item"><svg class="ring-svg" viewBox="0 0 70 70"><circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="rgba(255,255,255,.05)" stroke-width="7"/><circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${color}" stroke-width="7" stroke-dasharray="${dash} ${circ}" stroke-dashoffset="${circ/4}" stroke-linecap="round"/><text x="${cx}" y="${cy+5}" text-anchor="middle" fill="${color}" font-size="11" font-weight="700" font-family="DM Sans">${val}</text></svg><div class="ring-label">${label}</div></div>`;}
+  document.getElementById('scoreRings').innerHTML=ring(Math.min(100,erN*(isIg?20:3)),acSolid(),'ER SCORE',erN.toFixed(1)+'%')+ring(cs,'#22d3a0','РЕГУЛ.',cs+'/100')+ring(vs,'#fbbf24','ВИРАЛЬ.',vs+'/100')+ring(gs,'#a78bfa','РОСТ',gs+'/100');
+  document.getElementById('benchTitle').textContent=isIg?'ER% Benchmark':'ERR% Benchmark';
+  const bench=isIg?[{n:'Твой ER',v:erN,m:10,c:acSolid()},{n:'Микро (1–10К)',v:3.5,m:10,c:'#a78bfa'},{n:'Средний (10–100К)',v:2.2,m:10,c:'#22d3a0'},{n:'Крупный (100К+)',v:1.1,m:10,c:'#fbbf24'}]:[{n:'Твой ERR',v:erN,m:50,c:acSolid()},{n:'Малый (до 1К)',v:30,m:50,c:'#a78bfa'},{n:'Средний (1–10К)',v:20,m:50,c:'#22d3a0'},{n:'Крупный (10–100К)',v:12,m:50,c:'#fbbf24'},{n:'Мега (100К+)',v:5,m:50,c:'#f43f5e'}];
+  document.getElementById('benchList').innerHTML=bench.map(b=>`<div class="bench-item"><div class="bench-row"><span class="bench-name">${b.n}</span><span class="bench-val">${b.v.toFixed(1)}%</span></div><div class="bench-track"><div class="bench-fill" style="width:${b.v/b.m*100}%;background:${b.c}"></div></div></div>`).join('');
+  dc('erTrendChart');charts.erTrendChart=new Chart(document.getElementById('erTrendChart'),{type:'line',data:{labels:['Нед 1','Нед 2','Нед 3','Нед 4','Нед 5','Нед 6','Нед 7','Нед 8'],datasets:[{label:'ER%',data:Array.from({length:8},()=>+(erN+rb(-10,10)/10).toFixed(2)),borderColor:acSolid(),backgroundColor:acColor(.07),fill:true,tension:.4,pointRadius:4,pointBackgroundColor:acSolid(),borderWidth:2}]},options:co()});
+  dc('scatterChart');charts.scatterChart=new Chart(document.getElementById('scatterChart'),{type:'scatter',data:{datasets:[{label:'Посты',data:posts.map(p=>({x:p.views||avgReach,y:isIg?(p.likes||0)+(p.comments||0):p.reactions||0})),backgroundColor:acColor(.6),pointRadius:7}]},options:co()});
+}
+
+function renderGrowth({labels,mem,avgReach,posts,isIg,subsSeries}){
+  const ss=subsSeries&&subsSeries.length?subsSeries:labels.map(()=>rb(isIg?8:15,isIg?60:120));
+  const base=mem||10000,da=avg(ss)||30;
+  const cum=ss.reduce((acc,v,i)=>{acc.push((acc[i-1]||(base-ss.reduce((a,b)=>a+b,0)))+v);return acc;},[]);
+  const fL=Array.from({length:30},(_,i)=>{const d=new Date();d.setDate(d.getDate()+i+1);return d.getDate()+'.'+(d.getMonth()+1).toString().padStart(2,'0');});
+  const last=cum[cum.length-1]||base,fD=Array.from({length:30},(_,i)=>Math.round(last+da*(i+1)));
+  dc('forecastChart');charts.forecastChart=new Chart(document.getElementById('forecastChart'),{type:'line',data:{labels:[...labels.slice(-15),...fL],datasets:[{label:'История',data:[...cum.slice(-15),...Array(30).fill(null)],borderColor:acSolid(),backgroundColor:acColor(.07),fill:true,tension:.4,pointRadius:2,borderWidth:2},{label:'Прогноз',data:[...Array(15).fill(null),...fD],borderColor:'#fbbf24',backgroundColor:'rgba(251,191,36,.05)',fill:true,tension:.4,pointRadius:2,borderWidth:2,borderDash:[6,3]}]},options:co()});
+  dc('velocityChart');charts.velocityChart=new Chart(document.getElementById('velocityChart'),{type:'line',data:{labels:['Нед 1','Нед 2','Нед 3','Нед 4','Нед 5','Нед 6','Нед 7','Нед 8'],datasets:[{label:'% прироста/нед',data:Array.from({length:8},()=>+(rb(5,25)/10).toFixed(1)),borderColor:'#22d3a0',backgroundColor:'rgba(34,211,160,.07)',fill:true,tension:.4,pointRadius:4,pointBackgroundColor:'#22d3a0',borderWidth:2}]},options:co()});
+  dc('freqChart');charts.freqChart=new Chart(document.getElementById('freqChart'),{type:'line',data:{labels:isIg?['1/нед','2/нед','3/нед','5/нед','7/нед']:['1/день','2/день','3/день','4+/день'],datasets:[{label:'Охват',data:isIg?[3200,5400,7200,8600,7800]:[6200,5800,4900,3700],borderColor:acSolid(),backgroundColor:acColor(.07),fill:true,tension:.4,pointRadius:4,borderWidth:2},{label:'ER%',data:isIg?[4.5,3.8,3.1,2.5,2.0]:[22,18,13,9],borderColor:'#22d3a0',tension:.4,pointRadius:4,borderWidth:2,yAxisID:'y1'}]},options:{...co(),scales:{...co().scales,y1:{type:'linear',display:true,position:'right',ticks:{color:'#2e3558',font:{size:9}},grid:{drawOnChartArea:false}}}}});
+  dc('sourceChart');charts.sourceChart=new Chart(document.getElementById('sourceChart'),{type:'doughnut',data:isIg?{labels:['Хэштеги','Поиск','Профиль','Главная','Репосты'],datasets:[{data:[28,22,20,18,12],backgroundColor:['#f58529','#dd2a7b','#8134af','#515bd4','#22d3a0'],borderWidth:0,hoverOffset:5}]}:{labels:['Репосты','Поиск','Ссылки','Рекоменд.','Реклама'],datasets:[{data:[32,24,20,14,10],backgroundColor:['#2aabee','#5b8dee','#22d3a0','#fbbf24','#a78bfa'],borderWidth:0,hoverOffset:5}]},options:coNS({cutout:'52%'})});
+  document.getElementById('growthMetrics').innerHTML=[{e:'📈',n:'Дневной прирост',v:Math.round(da)+' подп./день'},{e:'📅',n:'Прогноз 30 дней',v:'+'+fmtN(Math.round(da*30))},{e:'🎯',n:'Следующий milestone',v:Math.max(0,Math.round((Math.ceil(mem/10000+1)*10000-mem)/da))+' дней'},{e:'⚡',n:'Лучший день',v:isIg?'Суббота':'Воскресенье'},{e:'🕐',n:'Лучшее время',v:'19:00 – 21:00'},{e:'📊',n:'Оптим. частота',v:isIg?'4–5 постов/нед':'1–2 поста/день'}].map(m=>`<div class="metric-item"><div class="metric-icon">${m.e}</div><div><div class="metric-name">${m.n}</div><div class="metric-val">${m.v}</div></div></div>`).join('');
+}
+
+function renderVirality({labels,avgReach,posts,isIg}){
+  const fs=labels.map(()=>rb(isIg?10:20,isIg?80:180));
+  dc('fwdChart');charts.fwdChart=new Chart(document.getElementById('fwdChart'),{type:'bar',data:{labels,datasets:[{label:'Репосты',data:fs,backgroundColor:'rgba(251,191,36,.6)',borderRadius:5}]},options:co()});
+  dc('viralChart');charts.viralChart=new Chart(document.getElementById('viralChart'),{type:'line',data:{labels,datasets:[{label:'Viral %',data:fs.map(f=>+(f/avgReach*100).toFixed(2)),borderColor:'#fbbf24',backgroundColor:'rgba(251,191,36,.07)',fill:true,tension:.4,pointRadius:2,borderWidth:2}]},options:co()});
+  dc('savesChart');charts.savesChart=new Chart(document.getElementById('savesChart'),{type:'bar',data:{labels:posts.map((_,i)=>'#'+(i+1)),datasets:isIg?[{label:'Сохранения',data:posts.map(p=>p.saves||0),backgroundColor:acColor(.65),borderRadius:4},{label:'Репосты',data:posts.map(p=>p.fwds||0),backgroundColor:'rgba(251,191,36,.5)',borderRadius:4}]:[{label:'Репосты',data:posts.map(p=>p.fwds||0),backgroundColor:'rgba(251,191,36,.6)',borderRadius:4},{label:'Реакции',data:posts.map(p=>p.reactions||0),backgroundColor:acColor(.5),borderRadius:4}]},options:co()});
+  dc('ctrChart');charts.ctrChart=new Chart(document.getElementById('ctrChart'),{type:'bar',data:{labels:isIg?['Ссылка в bio','Stories swipe','Кнопка','Упоминание']:['Текстовая ссылка','Кнопка','Превью','Inline кнопка'],datasets:[{label:'CTR%',data:isIg?[3.2,5.8,4.1,2.1]:ra(4,2,9),backgroundColor:isIg?['rgba(245,133,41,.7)','rgba(221,42,123,.7)','rgba(129,52,175,.7)','rgba(81,91,212,.7)']:['rgba(42,171,238,.7)','rgba(91,141,238,.7)','rgba(34,211,160,.6)','rgba(251,191,36,.6)'],borderRadius:8}]},options:co()});
+}
+
+function renderInsights({mem,avgReach,posts,isIg}){
+  const erN=mem?((isIg?avg(posts.map(p=>(p.likes||0)+(p.comments||0)))/mem*100:avgReach/mem*100)):0;
+  const hasVideo=posts.some(p=>p.type==='video'||p.type==='VIDEO'),hasPoll=posts.some(p=>p.type==='poll');
+  const ins=isIg?[{e:'🔥',t:'Engagement Rate',b:`ER ${erN.toFixed(2)}% — ${erN>=3?'выше нормы для 10–50К (2–3%)!':'норма 2–3%, фокус на призывах к действию.'}`,c:'good'},{e:'🎬',t:'Видеоконтент',b:hasVideo?'Рилсы дают до 3× охвата — увеличь долю до 40–50%.':'Добавь Рилсы — главный инструмент органического охвата.',c:hasVideo?'good':'warn'},{e:'🎠',t:'Карусели',b:'Собирают на 30% больше сохранений. Рекоменд. 2–3/нед.',c:'tip'},{e:'⏰',t:'Тайминг',b:'19:00–22:00 и 9:00–11:00. Охват в первый час +40%.',c:'tip'}]:[{e:'📊',t:'ERR% канала',b:`ERR ${erN.toFixed(1)}% — ${erN>=20?'отлично! Продолжай.':'1–2 поста/день — оптимальная частота для ERR.'}`,c:erN>=20?'good':'warn'},{e:'🎬',t:'Видеоконтент',b:hasVideo?'Видео есть. Автозапуск привлекает внимание.':'Добавь видео — +30–60% просмотров за счёт автозапуска.',c:hasVideo?'good':'warn'},{e:'📊',t:'Опросы',b:hasPoll?'Опросы дают +40% вовлечённости. Продолжай!':'Добавь 1–2 опроса/нед — в 1.5× больше взаимодействий.',c:hasPoll?'good':'warn'},{e:'⏰',t:'Тайминг',b:'19:00–21:00 — пик просмотров определяет итоговый охват.',c:'tip'}];
+  const recs=isIg?[{e:'🚀',t:'Запусти Рилсы',b:'2–3 видео (15–30 сек) в неделю. 85% смотрят без звука — добавляй субтитры.',c:'good'},{e:'💬',t:'Отвечай на комменты',b:'Ответ в первые 60 минут +25% ER. Алгоритм замечает активность.',c:'good'},{e:'📖',t:'Ежедневные сторис',b:'5–10 сторис + опросы и стикеры. Удерживает аудиторию в ленте.',c:'warn'},{e:'🤝',t:'Коллаборации',b:'Совместные посты с похожими аккаунтами без затрат на рекламу.',c:'warn'}]:[{e:'🔔',t:'Включи уведомления',b:'Напомни подписчикам включить уведомления — +20–30% первочасовых просмотров.',c:'good'},{e:'📌',t:'Закреплённый пост',b:'Обнови закреп: навигация, топ-контент, CTA — первое впечатление.',c:'good'},{e:'🤝',t:'Взаимный пиар',b:'3–5 каналов похожей тематики. Дешёвый источник целевых подписчиков.',c:'warn'},{e:'💬',t:'Добавь комментарии',b:'Посты с активными комментами +15–25% просмотров за счёт уведомлений.',c:'warn'}];
+  const bc={good:'chip-green',warn:'chip-yellow',tip:'chip-tg'},bt={good:'ХОРОШО',warn:'УЛУЧШИТЬ',tip:'СОВЕТ'};
+  const card=(i)=>`<div style="background:var(--layer2);border:1px solid var(--border);border-radius:14px;padding:18px;display:flex;gap:14px"><div style="font-size:22px;flex-shrink:0">${i.e}</div><div><div style="font-size:13px;font-weight:600;margin-bottom:4px">${i.t}</div><div style="font-size:12px;color:var(--text2);line-height:1.65">${i.b}</div><span class="chip ${bc[i.c]}" style="margin-top:10px;display:inline-block">${bt[i.c]}</span></div></div>`;
+  document.getElementById('insightsFull').innerHTML=ins.map(card).join('');
+  document.getElementById('recsFull').innerHTML=recs.map(card).join('');
+  dc('compareChart');charts.compareChart=new Chart(document.getElementById('compareChart'),{type:'bar',data:{labels:['Охват','Реакции','Репосты','Коммент.','ER%','Рост'],datasets:[{label:'Этот период',data:[100,100,100,100,100,100],backgroundColor:acColor(.7),borderRadius:5},{label:'Прошлый',data:[rb(70,95),rb(65,95),rb(60,90),rb(70,110),rb(78,100),rb(65,90)],backgroundColor:'rgba(255,255,255,.08)',borderRadius:5}]},options:co()});
+  dc('radarChart');charts.radarChart=new Chart(document.getElementById('radarChart'),{type:'radar',data:{labels:['Охват','Вовлечённость','Регулярность','Виральность','Рост','Качество'],datasets:[{label:'Твой аккаунт',data:[72,65,80,50,68,78],backgroundColor:acColor(.12),borderColor:acSolid(),pointBackgroundColor:acSolid(),borderWidth:2},{label:'Эталон',data:[60,60,60,60,60,60],backgroundColor:'rgba(255,255,255,.03)',borderColor:'rgba(255,255,255,.15)',pointBackgroundColor:'rgba(255,255,255,.3)',borderWidth:1,borderDash:[4,2]}]},options:{responsive:true,maintainAspectRatio:true,plugins:{legend:{labels:{color:'#4a5280',font:{size:10,family:'DM Sans'},boxWidth:10}}},scales:{r:{ticks:{color:'#2e3558',font:{size:9},backdropColor:'transparent'},grid:{color:'rgba(255,255,255,.05)'},pointLabels:{color:'#8b92b8',font:{size:11,family:'DM Sans'}}}}}});
+}
+
+// ══════════════════════════════════════════
+// INIT — проверяем сохранённую сессию
+// ══════════════════════════════════════════
+document.addEventListener('DOMContentLoaded', async ()=>{
+  const saved = localStorage.getItem('pulse_session');
+  if(saved){
+    try{
+      const res = await fetch(`${API_BASE}/api/auth/check`,{headers:{'x-session-token':saved}});
+      if(res.ok){
+        SESSION = saved; IS_DEMO = false;
+        document.getElementById('sidebarUserLabel').textContent='🔒 Команда';
+        setStatus('live','LIVE API');
+        hideLogin();
+        await loadRealData();
+        return;
+      }
+    }catch{}
+    localStorage.removeItem('pulse_session');
+  }
+  // Показываем экран логина
+  document.getElementById('loginScreen').style.display='flex';
+});
+</script>
+</body>
+</html>
