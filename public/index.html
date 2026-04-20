@@ -681,7 +681,10 @@ async function loadRealData(){
   } catch(e){
     console.warn('API error:', e.message);
     setStatus('err', 'Ошибка API');
-    runDemo();
+    showEmptyState(
+      'Не удалось загрузить данные',
+      `Ошибка: ${e.message}<br>Проверь подключение к серверу и настройки API.`
+    );
   }
 }
 
@@ -734,14 +737,16 @@ async function clearCache(){
 // DEMO MODE
 // ══════════════════════════════════════════
 function runDemo(){
+  // Демо только если явно запрошено с логин-экрана — не как фолбэк при ошибке API
   IS_DEMO = true;
   document.getElementById('sidebarUserLabel').textContent = 'Демо-режим';
   setStatus('demo','DEMO');
   hideLogin();
+  const isIg = MODE==='ig';
+  document.getElementById('sideName').textContent    = isIg?'demo_brand':'Tech Insights RU';
+  document.getElementById('sideHandle').textContent  = isIg?'@demo_brand':'@tech_insights_ru';
+  document.getElementById('sideAvatar').textContent  = isIg?'📸':'✈️';
   const d = buildDemoData();
-  document.getElementById('sideName').textContent = MODE==='ig'?'demo_brand':'Tech Insights RU';
-  document.getElementById('sideHandle').textContent = MODE==='ig'?'@demo_brand':'@tech_insights_ru';
-  document.getElementById('sideAvatar').textContent = MODE==='ig'?'📸':'✈️';
   renderAll(d);
 }
 
@@ -758,7 +763,31 @@ function buildDemoData(){
     const views=rb(Math.floor(avgReach*.5),Math.floor(avgReach*1.8));
     return {id:i+1,text:topics[i%topics.length],type:types[i%types.length],date:new Date(Date.now()-i*1.5*86400000).toLocaleDateString('ru-RU'),views,likes:isIg?Math.floor(views*rb(3,12)/100):0,comments:Math.floor(views*rb(0,3)/100),saves:isIg?Math.floor(views*rb(2,8)/100):0,fwds:Math.floor(views*rb(1,8)/100),reactions:!isIg?Math.floor(views*rb(3,12)/100):0};
   });
-  return {isIg,mem,avgReach,posts,labels,viewsSeries:labels.map(()=>rb(Math.floor(avgReach*.6),Math.floor(avgReach*1.4))),subsSeries:labels.map(()=>rb(isIg?8:15,isIg?60:120))};
+  return {isIg,mem,avgReach,posts,labels,
+    viewsSeries:labels.map(()=>rb(Math.floor(avgReach*.6),Math.floor(avgReach*1.4))),
+    subsSeries:labels.map(()=>rb(isIg?8:15,isIg?60:120))};
+}
+
+// Показываем пустое состояние вместо фейковых данных
+function showEmptyState(message, hint=''){
+  document.querySelector('.content').innerHTML = `
+    <div style="
+      display:flex;flex-direction:column;align-items:center;justify-content:center;
+      min-height:60vh;gap:16px;text-align:center;
+    ">
+      <div style="font-size:48px">📡</div>
+      <div style="font-family:'Playfair Display',serif;font-size:22px;font-weight:700">${message}</div>
+      ${hint?`<div style="font-size:13px;color:var(--text2);max-width:420px;line-height:1.7">${hint}</div>`:''}
+      <div style="display:flex;gap:10px;margin-top:8px;flex-wrap:wrap;justify-content:center">
+        <button class="btn-sm btn-sm-primary" onclick="loadRealData()" style="padding:10px 22px">
+          ↻ Попробовать снова
+        </button>
+        <button class="btn-sm btn-sm-ghost" onclick="location.reload()" style="padding:10px 22px">
+          Перезагрузить
+        </button>
+      </div>
+    </div>
+  `;
 }
 
 // ══════════════════════════════════════════
@@ -812,18 +841,23 @@ function coNS(ex={}){ return {responsive:true,maintainAspectRatio:true,plugins:{
 function renderAll(d){ renderOverview(d);renderContent(d);renderAudience(d);renderEngagement(d);renderGrowth(d);renderVirality(d);renderInsights(d); }
 
 function renderOverview({labels,mem,avgReach,posts,isIg,viewsSeries,subsSeries,realTotals}){
-  const vs=viewsSeries&&viewsSeries.length?viewsSeries:labels.map(()=>rb(Math.floor(avgReach*.6),Math.floor(avgReach*1.4)));
-  const ss=subsSeries&&subsSeries.length?subsSeries:labels.map(()=>rb(isIg?8:15,isIg?60:120));
-  // Используем realTotals из MTProto если есть — иначе считаем из постов
-  const rt=realTotals||{};
-  const tL =posts.reduce((a,p)=>a+(p.likes||0),0);
-  const tC =posts.reduce((a,p)=>a+(p.comments||0),0);
-  const tR =rt.totalReactions!=null?rt.totalReactions:posts.reduce((a,p)=>a+(p.reactions||0),0);
-  const tFw=rt.totalForwards !=null?rt.totalForwards :posts.reduce((a,p)=>a+(p.fwds||0),0);
-  const tSv=posts.reduce((a,p)=>a+(p.saves||0),0);
-  const tV =rt.totalViews    !=null?rt.totalViews    :vs.reduce((a,b)=>a+b,0);
-  const tS =ss.reduce((a,b)=>a+b,0);
-  const erN=mem?((isIg?(tL+tC)/(posts.length||1)/mem*100:avgReach/mem*100)):0;
+  // Используем реальные данные — НЕ генерируем случайные если данных нет
+  const hasViews = viewsSeries && viewsSeries.length > 0;
+  const hasSubs  = subsSeries  && subsSeries.length  > 0;
+  const vs = hasViews ? viewsSeries : labels.map(()=>0);
+  const ss = hasSubs  ? subsSeries  : labels.map(()=>0);
+
+  const rt  = realTotals || {};
+  const tL  = posts.reduce((a,p)=>a+(p.likes||0),0);
+  const tC  = posts.reduce((a,p)=>a+(p.comments||0),0);
+  const tR  = rt.totalReactions != null ? rt.totalReactions : posts.reduce((a,p)=>a+(p.reactions||0),0);
+  const tFw = rt.totalForwards  != null ? rt.totalForwards  : posts.reduce((a,p)=>a+(p.fwds||0),0);
+  const tSv = posts.reduce((a,p)=>a+(p.saves||0),0);
+  const tV  = rt.totalViews     != null ? rt.totalViews     : vs.reduce((a,b)=>a+b,0);
+  const tS  = ss.reduce((a,b)=>a+b,0);
+  const erN = mem && avgReach ? (isIg
+    ? (posts.length ? (tL+tC)/posts.length/mem*100 : 0)
+    : avgReach/mem*100) : 0;
   document.getElementById('kpiRow').innerHTML=[
     {e:'👥',v:fmtN(mem),l:'Подписчики',d:'+'+fmtN(tS),pos:true,s:'прирост'},
     {e:'👁',v:fmtN(tV),l:isIg?'Охват':'Просмотры',d:null,s:'за период'},
@@ -850,25 +884,112 @@ function renderOverview({labels,mem,avgReach,posts,isIg,viewsSeries,subsSeries,r
 function renderContent({labels,mem,avgReach,posts,isIg}){
   const types=isIg?['IMAGE','VIDEO','CAROUSEL_ALBUM']:['text','photo','video','poll'];
   const tLbl=isIg?['Фото','Видео','Карусель']:['Текст','Фото','Видео','Опрос'];
-  const tCnt=types.map(t=>posts.filter(p=>p.type===t).length||rb(2,7));
+  // Только реальные данные из постов
+  const tCnt=types.map(t=>posts.filter(p=>p.type===t).length);
+
   dc('cTypeChart');charts.cTypeChart=new Chart(document.getElementById('cTypeChart'),{type:'doughnut',data:{labels:tLbl,datasets:[{data:tCnt,backgroundColor:isIg?['#f58529','#dd2a7b','#8134af']:['#2aabee','#5b8dee','#22d3a0','#fbbf24'],borderWidth:0,hoverOffset:6}]},options:coNS({cutout:'58%'})});
-  const hD=Array.from({length:24},(_,i)=>([9,10,11,18,19,20,21,22].includes(i)?rb(60,100):rb(5,35)));
-  dc('hoursChart');charts.hoursChart=new Chart(document.getElementById('hoursChart'),{type:'bar',data:{labels:Array.from({length:24},(_,i)=>i+':00'),datasets:[{label:'Активность',data:hD,backgroundColor:hD.map(v=>v>80?acSolid():v>50?acColor(.5):'rgba(255,255,255,.05)'),borderRadius:4}]},options:{...co(),plugins:{...co().plugins,legend:{display:false}}}});
-  const dW=['Пн','Вт','Ср','Чт','Пт','Сб','Вс'],dD=dW.map(()=>rb(Math.floor(avgReach*.6),Math.floor(avgReach*1.4)));
-  dc('dowChart');charts.dowChart=new Chart(document.getElementById('dowChart'),{type:'bar',data:{labels:dW,datasets:[{label:'Avg охват',data:dD,backgroundColor:dD.map(v=>v===Math.max(...dD)?acSolid():acColor(.3)),borderRadius:7}]},options:co()});
+
+  // Лучшее время — считаем из реальных постов по часу публикации
+  const hourCounts = Array(24).fill(0);
+  const hourViews  = Array(24).fill(0);
+  posts.forEach(p=>{
+    if(!p.date) return;
+    // date может быть ISO строкой или локальной датой
+    const d = new Date(p.rawDate || p.date);
+    if(!isNaN(d)){
+      const h = d.getHours();
+      hourCounts[h]++;
+      hourViews[h] += p.views || 0;
+    }
+  });
+  // avgViews per hour или 0 если постов не было
+  const hD = hourCounts.map((cnt,h)=> cnt>0 ? Math.round(hourViews[h]/cnt) : 0);
+  dc('hoursChart');charts.hoursChart=new Chart(document.getElementById('hoursChart'),{type:'bar',data:{labels:Array.from({length:24},(_,i)=>i+':00'),datasets:[{label:'Avg просмотров',data:hD,backgroundColor:hD.map(v=>{ const mx=Math.max(...hD); return v===mx&&mx>0?acSolid():v>mx*0.6?acColor(.5):'rgba(255,255,255,.05)'; }),borderRadius:4}]},options:{...co(),plugins:{...co().plugins,legend:{display:false}}}});
+
+  // Лучший день недели — из реальных постов
+  const dowLabels=['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+  const dowViews = Array(7).fill(0);
+  const dowCounts = Array(7).fill(0);
+  posts.forEach(p=>{
+    const d = new Date(p.rawDate || p.date);
+    if(!isNaN(d)){ const dow=(d.getDay()+6)%7; dowCounts[dow]++; dowViews[dow]+=(p.views||0); }
+  });
+  const dD = dowCounts.map((cnt,i)=> cnt>0 ? Math.round(dowViews[i]/cnt) : 0);
+  dc('dowChart');charts.dowChart=new Chart(document.getElementById('dowChart'),{type:'bar',data:{labels:dowLabels,datasets:[{label:'Avg просмотров',data:dD,backgroundColor:dD.map(v=>{ const mx=Math.max(...dD); return v===mx&&mx>0?acSolid():acColor(.3); }),borderRadius:7}]},options:co()});
+
+  // ER по типу — из реальных постов
   document.getElementById('erByTypeTitle').textContent=isIg?'ER% по типу контента':'ERR% по формату';
-  dc('erTypeChart');charts.erTypeChart=new Chart(document.getElementById('erTypeChart'),{type:'bar',data:{labels:tLbl,datasets:[{label:isIg?'Avg ER%':'Avg ERR%',data:ra(tLbl.length,isIg?1:10,isIg?6:30),backgroundColor:isIg?['rgba(245,133,41,.7)','rgba(221,42,123,.7)','rgba(129,52,175,.7)']:['rgba(42,171,238,.7)','rgba(91,141,238,.7)','rgba(34,211,160,.6)','rgba(251,191,36,.6)'],borderRadius:8}]},options:co()});
-  const days=['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];let hmH=`<div class="hm-lbl"></div>`;
-  for(let h=0;h<24;h++)hmH+=`<div class="hm-hdr">${h}</div>`;
-  days.forEach(d=>{hmH+=`<div class="hm-lbl">${d}</div>`;for(let h=0;h<24;h++){const p=([9,10,11,18,19,20,21].includes(h));const v=p?rb(40,100):rb(0,35);hmH+=`<div class="hm-cell" style="background:${acColor((v/100).toFixed(2))}" title="${d} ${h}:00 — ${v}%"></div>`;}});
+  const erByType = types.map(t=>{
+    const tp = posts.filter(p=>p.type===t);
+    if(!tp.length || !mem) return 0;
+    const avgE = tp.reduce((a,p)=>a+(isIg?(p.likes||0)+(p.comments||0):p.views||0),0)/tp.length;
+    return +(avgE/mem*100).toFixed(2);
+  });
+  dc('erTypeChart');charts.erTypeChart=new Chart(document.getElementById('erTypeChart'),{type:'bar',data:{labels:tLbl,datasets:[{label:isIg?'Avg ER%':'Avg ERR%',data:erByType,backgroundColor:isIg?['rgba(245,133,41,.7)','rgba(221,42,123,.7)','rgba(129,52,175,.7)']:['rgba(42,171,238,.7)','rgba(91,141,238,.7)','rgba(34,211,160,.6)','rgba(251,191,36,.6)'],borderRadius:8}]},options:co()});
+
+  // Тепловая карта — из реальных постов
+  const heatData = {};
+  posts.forEach(p=>{
+    const d = new Date(p.rawDate || p.date);
+    if(!isNaN(d)){
+      const dow=(d.getDay()+6)%7;
+      const h=d.getHours();
+      const k=`${dow}_${h}`;
+      if(!heatData[k]) heatData[k]={views:0,count:0};
+      heatData[k].views += p.views||0;
+      heatData[k].count++;
+    }
+  });
+  const maxHeat = Math.max(1, ...Object.values(heatData).map(v=>v.views/v.count));
+  const days=['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+  let hmH=`<div class="hm-lbl"></div>`;
+  for(let h=0;h<24;h++) hmH+=`<div class="hm-hdr">${h}</div>`;
+  days.forEach((day,di)=>{
+    hmH+=`<div class="hm-lbl">${day}</div>`;
+    for(let h=0;h<24;h++){
+      const cell=heatData[`${di}_${h}`];
+      const intensity=cell ? Math.min(1,(cell.views/cell.count)/maxHeat) : 0;
+      hmH+=`<div class="hm-cell" style="background:${acColor(intensity.toFixed(2))}" title="${day} ${h}:00${cell?` — ${fmtN(Math.round(cell.views/cell.count))} просм.`:''}"></div>`;
+    }
+  });
   document.getElementById('heatmapGrid').innerHTML=hmH;
-  const tags=isIg?[{t:'#reels',c:'h1'},{t:'#маркетинг',c:'h1'},{t:'#бизнес',c:'h2'},{t:'#контент',c:'h2'},{t:'#smm',c:'h3'},{t:'#продажи',c:'h1'},{t:'#дизайн',c:'h3'},{t:'#тренды',c:'h1'}]:[{t:'#нейросети',c:'h1'},{t:'#стартапы',c:'h1'},{t:'#технологии',c:'h2'},{t:'#кейсы',c:'h1'},{t:'#инструменты',c:'h3'},{t:'#маркетинг',c:'h2'}];
-  document.getElementById('tagCloud').innerHTML=tags.map(t=>`<div class="tag-pill ${t.c}">${t.t}</div>`).join('');
-  const icons={IMAGE:'🖼️',VIDEO:'🎬',CAROUSEL_ALBUM:'🎠',text:'📝',photo:'🖼️',video:'🎬',poll:'📊'};
+
+  // Хэштеги — парсим из реальных текстов постов
+  const tagFreq={};
+  posts.forEach(p=>{
+    const text = p.text||p.caption||'';
+    (text.match(/#[\wа-яёА-ЯЁ]+/gi)||[]).forEach(tag=>{
+      tagFreq[tag]=(tagFreq[tag]||0)+1;
+    });
+  });
+  const sortedTags=Object.entries(tagFreq).sort((a,b)=>b[1]-a[1]).slice(0,15);
+  const maxFreq=sortedTags[0]?.[1]||1;
+  document.getElementById('tagCloud').innerHTML = sortedTags.length
+    ? sortedTags.map(([t,f])=>`<div class="tag-pill ${f>=maxFreq*.7?'h1':f>=maxFreq*.4?'h2':''}">${t} <span style="opacity:.5;font-size:9px">${f}</span></div>`).join('')
+    : '<div style="color:var(--text3);font-size:12px">Хэштеги не найдены в постах</div>';
+
+  // Таблица постов
+  const icons={IMAGE:'🖼️',VIDEO:'🎬',CAROUSEL_ALBUM:'🎠',text:'📝',photo:'🖼️',video:'🎬',poll:'📊',link:'🔗',document:'📄',voice:'🎙️'};
   document.getElementById('col1h').textContent=isIg?'❤️ Лайки':'❤️ Реакции';
   document.getElementById('col4h').textContent=isIg?'👁 Охват':'👁 Просмотры';
   document.getElementById('erColH').textContent=isIg?'ER%':'ERR%';
-  document.getElementById('postsBody').innerHTML=posts.map((p,i)=>{const erv=mem?((isIg?(p.likes||0)+(p.comments||0):p.views||avgReach)/mem*100).toFixed(2):'—';const ervN=parseFloat(erv)||0;return`<tr><td style="font-family:'JetBrains Mono';font-size:10px;color:var(--text3)">${i+1}</td><td style="max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${(p.text||p.caption||'—').slice(0,40)}</td><td>${icons[p.type]||icons[p.media_type]||'📝'}</td><td style="font-family:'JetBrains Mono';font-size:10px;color:var(--text3)">${p.date||''}</td><td><b>${fmtN(isIg?p.likes||0:p.reactions||0)}</b></td><td>${fmtN(p.comments||0)}</td><td>${fmtN(p.fwds||p.shares||0)}</td><td>${fmtN(p.views||p.reach||avgReach)}</td><td style="font-family:'JetBrains Mono';font-size:11px;font-weight:700;color:${ervN>=(isIg?3:25)?'var(--green)':ervN>=(isIg?1.5:12)?'var(--yellow)':'var(--text3)'}">${erv}%</td></tr>`;}).join('');
+  document.getElementById('postsBody').innerHTML = posts.length
+    ? posts.map((p,i)=>{
+        const erv=mem?((isIg?(p.likes||0)+(p.comments||0):p.views||0)/mem*100).toFixed(2):'—';
+        const ervN=parseFloat(erv)||0;
+        return`<tr>
+          <td style="font-family:'JetBrains Mono';font-size:10px;color:var(--text3)">${i+1}</td>
+          <td style="max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${(p.text||p.caption||'—').slice(0,40)}</td>
+          <td>${icons[p.type]||icons[p.media_type]||'📝'}</td>
+          <td style="font-family:'JetBrains Mono';font-size:10px;color:var(--text3)">${p.date||''}</td>
+          <td><b>${fmtN(isIg?p.likes||0:p.reactions||0)}</b></td>
+          <td>${fmtN(p.comments||0)}</td>
+          <td>${fmtN(p.fwds||p.forwards||p.shares||0)}</td>
+          <td>${fmtN(p.views||p.reach||0)}</td>
+          <td style="font-family:'JetBrains Mono';font-size:11px;font-weight:700;color:${ervN>=(isIg?3:25)?'var(--green)':ervN>=(isIg?1.5:12)?'var(--yellow)':'var(--text3)'}">${erv}%</td>
+        </tr>`;
+      }).join('')
+    : `<tr><td colspan="9" style="text-align:center;padding:32px;color:var(--text3)">Посты не загружены — MTProto сервис недоступен</td></tr>`;
 }
 
 function renderAudience({isIg}){
