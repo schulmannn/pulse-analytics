@@ -340,7 +340,6 @@ canvas{max-height:220px;}
     <div class="nav-section-label">Аналитика</div>
     <div class="nav-item active" onclick="showPage('overview',this)"><span class="nav-icon">📊</span> Обзор <span class="nav-badge" id="modeBadge">LIVE</span></div>
     <div class="nav-item" onclick="showPage('content',this)"><span class="nav-icon">🎨</span> Контент</div>
-    <div class="nav-item" onclick="showPage('audience',this)"><span class="nav-icon">👥</span> Аудитория</div>
     <div class="nav-item" onclick="showPage('engagement',this)"><span class="nav-icon">🔥</span> Вовлечённость</div>
   </div>
   <div class="nav-section">
@@ -415,20 +414,6 @@ canvas{max-height:220px;}
       </div>
     </div>
 
-    <!-- AUDIENCE -->
-    <div class="page" id="page-audience">
-      <div class="g3">
-        <div class="card"><div class="card-head"><div><div class="card-title" id="a1Title">Пол</div></div><span class="chip chip-ig" id="a1Chip">GENDER</span></div><canvas id="aud1Chart"></canvas></div>
-        <div class="card"><div class="card-head"><div><div class="card-title">Возраст</div></div><span class="chip chip-tg">AGE</span></div><canvas id="aud2Chart"></canvas></div>
-        <div class="card"><div class="card-head"><div><div class="card-title">Топ города</div></div><span class="chip chip-green">GEO</span></div><div class="bench-list" id="citiesList"></div></div>
-      </div>
-      <div class="g2">
-        <div class="card"><div class="card-head"><div><div class="card-title">Страны</div></div><span class="chip chip-yellow">COUNTRIES</span></div><canvas id="countriesChart"></canvas></div>
-        <div class="card"><div class="card-head"><div><div class="card-title">Онлайн-активность</div><div class="card-sub">// когда аудитория онлайн</div></div></div><canvas id="onlineChart"></canvas></div>
-      </div>
-      <div class="card mb"><div class="card-head"><div><div class="card-title">Прирост и отток</div><div class="card-sub">// по месяцам</div></div><span class="chip" style="background:rgba(244,63,94,.1);color:var(--red);border:1px solid rgba(244,63,94,.2)">CHURN</span></div><canvas id="churnChart" style="max-height:190px"></canvas></div>
-    </div>
-
     <!-- ENGAGEMENT -->
     <div class="page" id="page-engagement">
       <div class="g2">
@@ -447,23 +432,17 @@ canvas{max-height:220px;}
         <div class="card"><div class="card-head"><div><div class="card-title">Прогноз роста</div><div class="card-sub">// тренд на 30 дней</div></div><span class="chip chip-green">FORECAST</span></div><canvas id="forecastChart"></canvas></div>
         <div class="card"><div class="card-head"><div><div class="card-title">Скорость роста</div><div class="card-sub">// % в неделю</div></div></div><canvas id="velocityChart"></canvas></div>
       </div>
-      <div class="g2">
-        <div class="card"><div class="card-head"><div><div class="card-title">Частота постинга vs Охват</div></div></div><canvas id="freqChart"></canvas></div>
-        <div class="card"><div class="card-head"><div><div class="card-title">Источники роста</div></div><span class="chip chip-purple">SOURCE</span></div><canvas id="sourceChart"></canvas></div>
-      </div>
+      <div class="card mb"><div class="card-head"><div><div class="card-title">Частота постинга vs Просмотры</div><div class="card-sub">// из реальных постов</div></div></div><canvas id="freqChart"></canvas></div>
       <div class="card mb"><div class="card-head"><div><div class="card-title">Ключевые метрики роста</div></div></div><div class="metric-grid" id="growthMetrics"></div></div>
     </div>
 
     <!-- VIRALITY -->
     <div class="page" id="page-virality">
       <div class="g2">
-        <div class="card"><div class="card-head"><div><div class="card-title">Динамика репостов</div></div><span class="chip chip-yellow">FWDS</span></div><canvas id="fwdChart"></canvas></div>
-        <div class="card"><div class="card-head"><div><div class="card-title">Виральный коэффициент</div><div class="card-sub">// репосты/охват × 100</div></div></div><canvas id="viralChart"></canvas></div>
+        <div class="card"><div class="card-head"><div><div class="card-title">Динамика репостов</div><div class="card-sub">// по дням</div></div><span class="chip chip-yellow">FWDS</span></div><canvas id="fwdChart"></canvas></div>
+        <div class="card"><div class="card-head"><div><div class="card-title">Виральный коэффициент</div><div class="card-sub">// репосты/просмотры × 100</div></div></div><canvas id="viralChart"></canvas></div>
       </div>
-      <div class="g2">
-        <div class="card"><div class="card-head"><div><div class="card-title">Сохранения & Репосты по постам</div></div><span class="chip chip-green">SAVE/FWD</span></div><canvas id="savesChart"></canvas></div>
-        <div class="card"><div class="card-head"><div><div class="card-title">CTR по типу ссылок</div></div><span class="chip chip-purple">CTR</span></div><canvas id="ctrChart"></canvas></div>
-      </div>
+      <div class="card mb"><div class="card-head"><div><div class="card-title">Репосты и реакции по постам</div></div><span class="chip chip-green">FWDS/REACT</span></div><canvas id="savesChart"></canvas></div>
     </div>
 
     <!-- INSIGHTS -->
@@ -495,7 +474,7 @@ let IS_DEMO = false;
 let charts  = {};
 
 const PAGE_TITLES = {
-  overview:'Обзор', content:'Контент', audience:'Аудитория',
+  overview:'Обзор', content:'Контент',
   engagement:'Вовлечённость', growth:'Рост & Прогноз',
   virality:'Виральность', insights:'Выводы AI'
 };
@@ -838,7 +817,7 @@ function coNS(ex={}){ return {responsive:true,maintainAspectRatio:true,plugins:{
 // ══════════════════════════════════════════
 // RENDER ALL SECTIONS
 // ══════════════════════════════════════════
-function renderAll(d){ renderOverview(d);renderContent(d);renderAudience(d);renderEngagement(d);renderGrowth(d);renderVirality(d);renderInsights(d); }
+function renderAll(d){ renderOverview(d);renderContent(d);renderEngagement(d);renderGrowth(d);renderVirality(d);renderInsights(d); }
 
 function renderOverview({labels,mem,avgReach,posts,isIg,viewsSeries,subsSeries,realTotals}){
   // Используем реальные данные — НЕ генерируем случайные если данных нет
@@ -992,55 +971,193 @@ function renderContent({labels,mem,avgReach,posts,isIg}){
     : `<tr><td colspan="9" style="text-align:center;padding:32px;color:var(--text3)">Посты не загружены — MTProto сервис недоступен</td></tr>`;
 }
 
-function renderAudience({isIg}){
-  document.getElementById('a1Title').textContent=isIg?'Пол аудитории':'Устройства';
-  document.getElementById('a1Chip').textContent=isIg?'GENDER':'DEVICE';
-  document.getElementById('a1Chip').className='chip '+(isIg?'chip-ig':'chip-tg');
-  dc('aud1Chart');charts.aud1Chart=new Chart(document.getElementById('aud1Chart'),{type:'doughnut',data:isIg?{labels:['Женщины','Мужчины','Другое'],datasets:[{data:[62,35,3],backgroundColor:['#dd2a7b','#515bd4','#8134af'],borderWidth:0,hoverOffset:5}]}:{labels:['Android','iOS','Desktop','Web'],datasets:[{data:[48,32,15,5],backgroundColor:['#2aabee','#5b8dee','#22d3a0','#fbbf24'],borderWidth:0,hoverOffset:5}]},options:coNS({cutout:'55%'})});
-  dc('aud2Chart');charts.aud2Chart=new Chart(document.getElementById('aud2Chart'),{type:'bar',data:{labels:['13-17','18-24','25-34','35-44','45-54','55+'],datasets:[{label:'Ж',data:[2,28,35,18,10,7],backgroundColor:isIg?'rgba(221,42,123,.7)':'rgba(42,171,238,.7)',borderRadius:5},{label:'М',data:[1,15,22,11,5,3],backgroundColor:isIg?'rgba(81,91,212,.7)':'rgba(91,141,238,.5)',borderRadius:5}]},options:co()});
-  const cities=[{n:'Москва',p:34},{n:'СПб',p:18},{n:'Новосибирск',p:8},{n:'Екатеринбург',p:6},{n:'Казань',p:5},{n:'Другие',p:29}];
-  document.getElementById('citiesList').innerHTML=cities.map(c=>`<div class="bench-item"><div class="bench-row"><span class="bench-name">${c.n}</span><span class="bench-val">${c.p}%</span></div><div class="bench-track"><div class="bench-fill" style="width:${c.p}%;background:${acSolid()}"></div></div></div>`).join('');
-  dc('countriesChart');charts.countriesChart=new Chart(document.getElementById('countriesChart'),{type:'bar',data:{labels:['Россия','Казахстан','Украина','Беларусь','Германия','Другие'],datasets:[{label:'%',data:[isIg?58:52,10,8,5,4,isIg?15:21],backgroundColor:acColor(.6),borderRadius:6}]},options:co()});
-  const oH=Array.from({length:24},(_,i)=>i>=18&&i<=22?rb(70,100):i>=9&&i<=12?rb(50,80):rb(8,35));
-  dc('onlineChart');charts.onlineChart=new Chart(document.getElementById('onlineChart'),{type:'line',data:{labels:Array.from({length:24},(_,i)=>i+':00'),datasets:[{label:'% онлайн',data:oH,borderColor:acSolid(),backgroundColor:acColor(.07),fill:true,tension:.4,pointRadius:2,borderWidth:2}]},options:co()});
-  dc('churnChart');charts.churnChart=new Chart(document.getElementById('churnChart'),{type:'bar',data:{labels:['Ноя','Дек','Янв','Фев','Мар','Апр'],datasets:[{label:'Подписались',data:[320,410,380,450,520,490],backgroundColor:'rgba(34,211,160,.6)',borderRadius:5,stack:'s'},{label:'Отписались',data:[-95,-110,-85,-120,-100,-90],backgroundColor:'rgba(244,63,94,.45)',borderRadius:5,stack:'s'}]},options:co()});
-}
-
 function renderEngagement({mem,avgReach,posts,isIg}){
   const erN=mem?((isIg?avg(posts.map(p=>(p.likes||0)+(p.comments||0)))/mem*100:avgReach/mem*100)):0;
-  const cs=rb(65,92),vs=rb(40,78),gs=rb(55,88);
+  // Регулярность — считаем из реальных постов (дней с публикациями / всего дней)
+  const daysWithPosts = new Set(posts.map(p=>p.date)).size;
+  const consistency = posts.length ? Math.min(100, Math.round(daysWithPosts / 30 * 100)) : 0;
+  // Виральность — из реальных репостов
+  const totalFwds = posts.reduce((a,p)=>a+(p.fwds||p.forwards||0),0);
+  const totalViews = posts.reduce((a,p)=>a+(p.views||0),0);
+  const viralScore = totalViews ? Math.min(100, Math.round(totalFwds/totalViews*1000)) : 0;
+  // Рост — из ERR
+  const growthScore = Math.min(100, Math.round(erN * (isIg?15:3)));
+
   function ring(pct,color,label,val){const r=28,cx=35,cy=35,circ=2*Math.PI*r,dash=circ*(Math.min(100,pct)/100);return`<div class="ring-item"><svg class="ring-svg" viewBox="0 0 70 70"><circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="rgba(255,255,255,.05)" stroke-width="7"/><circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${color}" stroke-width="7" stroke-dasharray="${dash} ${circ}" stroke-dashoffset="${circ/4}" stroke-linecap="round"/><text x="${cx}" y="${cy+5}" text-anchor="middle" fill="${color}" font-size="11" font-weight="700" font-family="DM Sans">${val}</text></svg><div class="ring-label">${label}</div></div>`;}
-  document.getElementById('scoreRings').innerHTML=ring(Math.min(100,erN*(isIg?20:3)),acSolid(),'ER SCORE',erN.toFixed(1)+'%')+ring(cs,'#22d3a0','РЕГУЛ.',cs+'/100')+ring(vs,'#fbbf24','ВИРАЛЬ.',vs+'/100')+ring(gs,'#a78bfa','РОСТ',gs+'/100');
+  document.getElementById('scoreRings').innerHTML=
+    ring(Math.min(100,erN*(isIg?20:3)),acSolid(),'ER SCORE',erN.toFixed(1)+'%')+
+    ring(consistency,'#22d3a0','РЕГУЛ.',consistency+'/100')+
+    ring(viralScore,'#fbbf24','ВИРАЛЬ.',viralScore+'/100')+
+    ring(growthScore,'#a78bfa','РОСТ',growthScore+'/100');
+
   document.getElementById('benchTitle').textContent=isIg?'ER% Benchmark':'ERR% Benchmark';
-  const bench=isIg?[{n:'Твой ER',v:erN,m:10,c:acSolid()},{n:'Микро (1–10К)',v:3.5,m:10,c:'#a78bfa'},{n:'Средний (10–100К)',v:2.2,m:10,c:'#22d3a0'},{n:'Крупный (100К+)',v:1.1,m:10,c:'#fbbf24'}]:[{n:'Твой ERR',v:erN,m:50,c:acSolid()},{n:'Малый (до 1К)',v:30,m:50,c:'#a78bfa'},{n:'Средний (1–10К)',v:20,m:50,c:'#22d3a0'},{n:'Крупный (10–100К)',v:12,m:50,c:'#fbbf24'},{n:'Мега (100К+)',v:5,m:50,c:'#f43f5e'}];
+  const bench=isIg
+    ?[{n:'Твой ER',v:erN,m:10,c:acSolid()},{n:'Микро (1–10К)',v:3.5,m:10,c:'#a78bfa'},{n:'Средний (10–100К)',v:2.2,m:10,c:'#22d3a0'},{n:'Крупный (100К+)',v:1.1,m:10,c:'#fbbf24'}]
+    :[{n:'Твой ERR',v:erN,m:50,c:acSolid()},{n:'Малый (до 1К)',v:30,m:50,c:'#a78bfa'},{n:'Средний (1–10К)',v:20,m:50,c:'#22d3a0'},{n:'Крупный (10–100К)',v:12,m:50,c:'#fbbf24'},{n:'Мега (100К+)',v:5,m:50,c:'#f43f5e'}];
   document.getElementById('benchList').innerHTML=bench.map(b=>`<div class="bench-item"><div class="bench-row"><span class="bench-name">${b.n}</span><span class="bench-val">${b.v.toFixed(1)}%</span></div><div class="bench-track"><div class="bench-fill" style="width:${b.v/b.m*100}%;background:${b.c}"></div></div></div>`).join('');
-  dc('erTrendChart');charts.erTrendChart=new Chart(document.getElementById('erTrendChart'),{type:'line',data:{labels:['Нед 1','Нед 2','Нед 3','Нед 4','Нед 5','Нед 6','Нед 7','Нед 8'],datasets:[{label:'ER%',data:Array.from({length:8},()=>+(erN+rb(-10,10)/10).toFixed(2)),borderColor:acSolid(),backgroundColor:acColor(.07),fill:true,tension:.4,pointRadius:4,pointBackgroundColor:acSolid(),borderWidth:2}]},options:co()});
-  dc('scatterChart');charts.scatterChart=new Chart(document.getElementById('scatterChart'),{type:'scatter',data:{datasets:[{label:'Посты',data:posts.map(p=>({x:p.views||avgReach,y:isIg?(p.likes||0)+(p.comments||0):p.reactions||0})),backgroundColor:acColor(.6),pointRadius:7}]},options:co()});
+
+  // ER trend — из реальных постов по неделям
+  const weeklyER = [0,0,0,0,0,0,0,0];
+  const weeklyCount = [0,0,0,0,0,0,0,0];
+  posts.forEach(p=>{
+    const d = new Date(p.rawDate||p.date);
+    if(!isNaN(d)){
+      const weeksAgo = Math.min(7, Math.floor((Date.now()-d)/604800000));
+      const idx = 7-weeksAgo;
+      if(idx>=0&&idx<8){
+        const engagement = isIg?(p.likes||0)+(p.comments||0):p.views||0;
+        if(mem) weeklyER[idx] += engagement/mem*100;
+        weeklyCount[idx]++;
+      }
+    }
+  });
+  const erTrendData = weeklyER.map((v,i)=>weeklyCount[i]>0?+(v/weeklyCount[i]).toFixed(2):null);
+  dc('erTrendChart');charts.erTrendChart=new Chart(document.getElementById('erTrendChart'),{
+    type:'line',
+    data:{labels:['Нед -7','Нед -6','Нед -5','Нед -4','Нед -3','Нед -2','Нед -1','Эта нед'],
+      datasets:[{label:'ER%',data:erTrendData,borderColor:acSolid(),backgroundColor:acColor(.07),fill:true,tension:.4,pointRadius:4,pointBackgroundColor:acSolid(),borderWidth:2,spanGaps:true}]},
+    options:co()
+  });
+
+  // Scatter — реальные данные постов
+  dc('scatterChart');charts.scatterChart=new Chart(document.getElementById('scatterChart'),{
+    type:'scatter',
+    data:{datasets:[{label:'Посты',data:posts.map(p=>({x:p.views||0,y:isIg?(p.likes||0)+(p.comments||0):p.reactions||0})),backgroundColor:acColor(.6),pointRadius:7}]},
+    options:co({scales:{x:{...co().scales.x,title:{display:true,text:'Просмотры',color:'#4a5280'}},y:{...co().scales.y,title:{display:true,text:isIg?'Лайки+Коммент.':'Реакции',color:'#4a5280'}}}})
+  });
 }
 
 function renderGrowth({labels,mem,avgReach,posts,isIg,subsSeries}){
-  const ss=subsSeries&&subsSeries.length?subsSeries:labels.map(()=>rb(isIg?8:15,isIg?60:120));
-  const base=mem||10000,da=avg(ss)||30;
-  const cum=ss.reduce((acc,v,i)=>{acc.push((acc[i-1]||(base-ss.reduce((a,b)=>a+b,0)))+v);return acc;},[]);
+  // Прирост подписчиков — только если реальные данные есть
+  const hasSubs = subsSeries && subsSeries.some(v=>v>0);
+  const ss = hasSubs ? subsSeries : labels.map(()=>0);
+  const da = hasSubs ? (avg(ss)||0) : 0;
+  const base = mem||0;
+
+  // Накопленный график — только если есть реальные данные о приросте
+  const cum = hasSubs
+    ? ss.reduce((acc,v,i)=>{acc.push((acc[i-1]||(base-ss.reduce((a,b)=>a+b,0)))+v);return acc;},[])
+    : labels.map(()=>base); // горизонтальная линия на уровне текущих подписчиков
+
   const fL=Array.from({length:30},(_,i)=>{const d=new Date();d.setDate(d.getDate()+i+1);return d.getDate()+'.'+(d.getMonth()+1).toString().padStart(2,'0');});
-  const last=cum[cum.length-1]||base,fD=Array.from({length:30},(_,i)=>Math.round(last+da*(i+1)));
-  dc('forecastChart');charts.forecastChart=new Chart(document.getElementById('forecastChart'),{type:'line',data:{labels:[...labels.slice(-15),...fL],datasets:[{label:'История',data:[...cum.slice(-15),...Array(30).fill(null)],borderColor:acSolid(),backgroundColor:acColor(.07),fill:true,tension:.4,pointRadius:2,borderWidth:2},{label:'Прогноз',data:[...Array(15).fill(null),...fD],borderColor:'#fbbf24',backgroundColor:'rgba(251,191,36,.05)',fill:true,tension:.4,pointRadius:2,borderWidth:2,borderDash:[6,3]}]},options:co()});
-  dc('velocityChart');charts.velocityChart=new Chart(document.getElementById('velocityChart'),{type:'line',data:{labels:['Нед 1','Нед 2','Нед 3','Нед 4','Нед 5','Нед 6','Нед 7','Нед 8'],datasets:[{label:'% прироста/нед',data:Array.from({length:8},()=>+(rb(5,25)/10).toFixed(1)),borderColor:'#22d3a0',backgroundColor:'rgba(34,211,160,.07)',fill:true,tension:.4,pointRadius:4,pointBackgroundColor:'#22d3a0',borderWidth:2}]},options:co()});
-  dc('freqChart');charts.freqChart=new Chart(document.getElementById('freqChart'),{type:'line',data:{labels:isIg?['1/нед','2/нед','3/нед','5/нед','7/нед']:['1/день','2/день','3/день','4+/день'],datasets:[{label:'Охват',data:isIg?[3200,5400,7200,8600,7800]:[6200,5800,4900,3700],borderColor:acSolid(),backgroundColor:acColor(.07),fill:true,tension:.4,pointRadius:4,borderWidth:2},{label:'ER%',data:isIg?[4.5,3.8,3.1,2.5,2.0]:[22,18,13,9],borderColor:'#22d3a0',tension:.4,pointRadius:4,borderWidth:2,yAxisID:'y1'}]},options:{...co(),scales:{...co().scales,y1:{type:'linear',display:true,position:'right',ticks:{color:'#2e3558',font:{size:9}},grid:{drawOnChartArea:false}}}}});
-  dc('sourceChart');charts.sourceChart=new Chart(document.getElementById('sourceChart'),{type:'doughnut',data:isIg?{labels:['Хэштеги','Поиск','Профиль','Главная','Репосты'],datasets:[{data:[28,22,20,18,12],backgroundColor:['#f58529','#dd2a7b','#8134af','#515bd4','#22d3a0'],borderWidth:0,hoverOffset:5}]}:{labels:['Репосты','Поиск','Ссылки','Рекоменд.','Реклама'],datasets:[{data:[32,24,20,14,10],backgroundColor:['#2aabee','#5b8dee','#22d3a0','#fbbf24','#a78bfa'],borderWidth:0,hoverOffset:5}]},options:coNS({cutout:'52%'})});
-  document.getElementById('growthMetrics').innerHTML=[{e:'📈',n:'Дневной прирост',v:Math.round(da)+' подп./день'},{e:'📅',n:'Прогноз 30 дней',v:'+'+fmtN(Math.round(da*30))},{e:'🎯',n:'Следующий milestone',v:Math.max(0,Math.round((Math.ceil(mem/10000+1)*10000-mem)/da))+' дней'},{e:'⚡',n:'Лучший день',v:isIg?'Суббота':'Воскресенье'},{e:'🕐',n:'Лучшее время',v:'19:00 – 21:00'},{e:'📊',n:'Оптим. частота',v:isIg?'4–5 постов/нед':'1–2 поста/день'}].map(m=>`<div class="metric-item"><div class="metric-icon">${m.e}</div><div><div class="metric-name">${m.n}</div><div class="metric-val">${m.v}</div></div></div>`).join('');
+  const last=cum[cum.length-1]||base;
+  // Прогноз только если есть реальный прирост
+  const fD = da>0
+    ? Array.from({length:30},(_,i)=>Math.round(last+da*(i+1)))
+    : Array(30).fill(null);
+
+  dc('forecastChart');charts.forecastChart=new Chart(document.getElementById('forecastChart'),{
+    type:'line',
+    data:{labels:[...labels.slice(-15),...fL],datasets:[
+      {label:'Подписчики',data:[...cum.slice(-15),...Array(30).fill(null)],borderColor:acSolid(),backgroundColor:acColor(.07),fill:true,tension:.4,pointRadius:2,borderWidth:2},
+      ...(da>0?[{label:'Прогноз',data:[...Array(15).fill(null),...fD],borderColor:'#fbbf24',backgroundColor:'rgba(251,191,36,.05)',fill:true,tension:.4,pointRadius:2,borderWidth:2,borderDash:[6,3]}]:[])
+    ]},
+    options:co()
+  });
+
+  // Скорость роста по неделям — только реальные данные
+  const weeklyGrowth = hasSubs
+    ? Array.from({length:Math.min(8,Math.ceil(ss.length/7))},(_,i)=>{
+        const chunk=ss.slice(i*7,(i+1)*7);
+        return chunk.length?+(chunk.reduce((a,b)=>a+b,0)/base*100).toFixed(2):null;
+      })
+    : Array(8).fill(null);
+  dc('velocityChart');charts.velocityChart=new Chart(document.getElementById('velocityChart'),{
+    type:'line',
+    data:{labels:Array.from({length:8},(_,i)=>`Нед ${i+1}`),
+      datasets:[{label:'% прироста/нед',data:weeklyGrowth,borderColor:'#22d3a0',backgroundColor:'rgba(34,211,160,.07)',fill:true,tension:.4,pointRadius:4,pointBackgroundColor:'#22d3a0',borderWidth:2,spanGaps:false}]},
+    options:co()
+  });
+
+  // Частота постинга vs охват — из реальных постов
+  const freqMap={};
+  posts.forEach(p=>{
+    const d=new Date(p.rawDate||p.date);
+    if(!isNaN(d)){
+      const wk=Math.floor((Date.now()-d)/604800000);
+      if(wk<8){ if(!freqMap[wk])freqMap[wk]={posts:0,views:0}; freqMap[wk].posts++; freqMap[wk].views+=p.views||0; }
+    }
+  });
+  const freqPoints=Object.values(freqMap).filter(w=>w.posts>0);
+  dc('freqChart');
+  if(freqPoints.length>=2){
+    charts.freqChart=new Chart(document.getElementById('freqChart'),{
+      type:'scatter',
+      data:{datasets:[{label:'Постов/нед vs Avg просмотров',data:freqPoints.map(w=>({x:w.posts,y:Math.round(w.views/w.posts)})),backgroundColor:acColor(.7),pointRadius:8}]},
+      options:co({scales:{x:{...co().scales.x,title:{display:true,text:'Постов в неделю',color:'#4a5280'}},y:{...co().scales.y,title:{display:true,text:'Avg просмотров/пост',color:'#4a5280'}}}})
+    });
+  } else {
+    dc('freqChart');
+    document.getElementById('freqChart').style.display='none';
+    document.getElementById('freqChart').insertAdjacentHTML('afterend','<div style="color:var(--text3);font-size:12px;padding:16px 0">Недостаточно данных — нужно минимум 2 недели постов</div>');
+  }
+
+  // Источники подписчиков — недоступны в Telegram API, карточка удалена из HTML
+
+  // Метрики роста — только реальные
+  document.getElementById('growthMetrics').innerHTML=[
+    {e:'👥',n:'Подписчиков сейчас',v:fmtN(mem)||'—'},
+    {e:'📈',n:'Дневной прирост',v:da>0?Math.round(da)+' подп./день':'Нет данных'},
+    {e:'📅',n:'Прогноз 30 дней',v:da>0?'+'+fmtN(Math.round(da*30)):'Нет данных'},
+    {e:'📝',n:'Постов загружено',v:posts.length+''},
+    {e:'👁',n:'Avg просмотров/пост',v:posts.length?fmtN(Math.round(posts.reduce((a,p)=>a+(p.views||0),0)/posts.length)):'—'},
+    {e:'↗️',n:'Avg репостов/пост',v:posts.length?fmtN(Math.round(posts.reduce((a,p)=>a+(p.fwds||p.forwards||0),0)/posts.length)):'—'},
+  ].map(m=>`<div class="metric-item"><div class="metric-icon">${m.e}</div><div><div class="metric-name">${m.n}</div><div class="metric-val">${m.v}</div></div></div>`).join('');
 }
 
 function renderVirality({labels,avgReach,posts,isIg}){
-  const fs=labels.map(()=>rb(isIg?10:20,isIg?80:180));
-  dc('fwdChart');charts.fwdChart=new Chart(document.getElementById('fwdChart'),{type:'bar',data:{labels,datasets:[{label:'Репосты',data:fs,backgroundColor:'rgba(251,191,36,.6)',borderRadius:5}]},options:co()});
-  dc('viralChart');charts.viralChart=new Chart(document.getElementById('viralChart'),{type:'line',data:{labels,datasets:[{label:'Viral %',data:fs.map(f=>+(f/avgReach*100).toFixed(2)),borderColor:'#fbbf24',backgroundColor:'rgba(251,191,36,.07)',fill:true,tension:.4,pointRadius:2,borderWidth:2}]},options:co()});
-  dc('savesChart');charts.savesChart=new Chart(document.getElementById('savesChart'),{type:'bar',data:{labels:posts.map((_,i)=>'#'+(i+1)),datasets:isIg?[{label:'Сохранения',data:posts.map(p=>p.saves||0),backgroundColor:acColor(.65),borderRadius:4},{label:'Репосты',data:posts.map(p=>p.fwds||0),backgroundColor:'rgba(251,191,36,.5)',borderRadius:4}]:[{label:'Репосты',data:posts.map(p=>p.fwds||0),backgroundColor:'rgba(251,191,36,.6)',borderRadius:4},{label:'Реакции',data:posts.map(p=>p.reactions||0),backgroundColor:acColor(.5),borderRadius:4}]},options:co()});
-  dc('ctrChart');charts.ctrChart=new Chart(document.getElementById('ctrChart'),{type:'bar',data:{labels:isIg?['Ссылка в bio','Stories swipe','Кнопка','Упоминание']:['Текстовая ссылка','Кнопка','Превью','Inline кнопка'],datasets:[{label:'CTR%',data:isIg?[3.2,5.8,4.1,2.1]:ra(4,2,9),backgroundColor:isIg?['rgba(245,133,41,.7)','rgba(221,42,123,.7)','rgba(129,52,175,.7)','rgba(81,91,212,.7)']:['rgba(42,171,238,.7)','rgba(91,141,238,.7)','rgba(34,211,160,.6)','rgba(251,191,36,.6)'],borderRadius:8}]},options:co()});
+  // Репосты по дням — из реальных постов
+  const fwdByDay={};
+  posts.forEach(p=>{
+    const d=new Date(p.rawDate||p.date);
+    if(!isNaN(d)){
+      const day=d.getDate()+'.'+(d.getMonth()+1).toString().padStart(2,'0');
+      fwdByDay[day]=(fwdByDay[day]||0)+(p.fwds||p.forwards||0);
+    }
+  });
+  const fwdLabels=labels;
+  const fwdData=labels.map(l=>fwdByDay[l]||0);
+
+  dc('fwdChart');charts.fwdChart=new Chart(document.getElementById('fwdChart'),{
+    type:'bar',
+    data:{labels:fwdLabels,datasets:[{label:'Репосты',data:fwdData,backgroundColor:'rgba(251,191,36,.6)',borderRadius:5}]},
+    options:co()
+  });
+
+  // Виральный коэф — из реальных данных
+  const viralData=labels.map(l=>{
+    const day_posts=posts.filter(p=>{
+      const d=new Date(p.rawDate||p.date);
+      return !isNaN(d)&&d.getDate()+'.'+(d.getMonth()+1).toString().padStart(2,'0')===l;
+    });
+    if(!day_posts.length) return null;
+    const dayViews=day_posts.reduce((a,p)=>a+(p.views||0),0);
+    const dayFwds=day_posts.reduce((a,p)=>a+(p.fwds||p.forwards||0),0);
+    return dayViews>0?+(dayFwds/dayViews*100).toFixed(2):null;
+  });
+  dc('viralChart');charts.viralChart=new Chart(document.getElementById('viralChart'),{
+    type:'line',
+    data:{labels,datasets:[{label:'Viral %',data:viralData,borderColor:'#fbbf24',backgroundColor:'rgba(251,191,36,.07)',fill:true,tension:.4,pointRadius:2,borderWidth:2,spanGaps:true}]},
+    options:co()
+  });
+
+  // Сохранения/Репосты — из реальных постов
+  dc('savesChart');charts.savesChart=new Chart(document.getElementById('savesChart'),{
+    type:'bar',
+    data:{labels:posts.map((_,i)=>'#'+(i+1)),datasets:isIg
+      ?[{label:'Сохранения',data:posts.map(p=>p.saves||0),backgroundColor:acColor(.65),borderRadius:4},{label:'Репосты',data:posts.map(p=>p.fwds||0),backgroundColor:'rgba(251,191,36,.5)',borderRadius:4}]
+      :[{label:'Репосты',data:posts.map(p=>p.fwds||p.forwards||0),backgroundColor:'rgba(251,191,36,.6)',borderRadius:4},{label:'Реакции',data:posts.map(p=>p.reactions||0),backgroundColor:acColor(.5),borderRadius:4}]
+    },
+    options:co()
+  });
+
+  // CTR ссылок — недоступен в Telegram API, карточка удалена из HTML
 }
 
 function renderInsights({mem,avgReach,posts,isIg}){
   const erN=mem?((isIg?avg(posts.map(p=>(p.likes||0)+(p.comments||0)))/mem*100:avgReach/mem*100)):0;
+  const totalFwdsR=posts.reduce((a,p)=>a+(p.fwds||p.forwards||0),0);
+  const totalViewsR=posts.reduce((a,p)=>a+(p.views||0),0);
   const hasVideo=posts.some(p=>p.type==='video'||p.type==='VIDEO'),hasPoll=posts.some(p=>p.type==='poll');
   const ins=isIg?[{e:'🔥',t:'Engagement Rate',b:`ER ${erN.toFixed(2)}% — ${erN>=3?'выше нормы для 10–50К (2–3%)!':'норма 2–3%, фокус на призывах к действию.'}`,c:'good'},{e:'🎬',t:'Видеоконтент',b:hasVideo?'Рилсы дают до 3× охвата — увеличь долю до 40–50%.':'Добавь Рилсы — главный инструмент органического охвата.',c:hasVideo?'good':'warn'},{e:'🎠',t:'Карусели',b:'Собирают на 30% больше сохранений. Рекоменд. 2–3/нед.',c:'tip'},{e:'⏰',t:'Тайминг',b:'19:00–22:00 и 9:00–11:00. Охват в первый час +40%.',c:'tip'}]:[{e:'📊',t:'ERR% канала',b:`ERR ${erN.toFixed(1)}% — ${erN>=20?'отлично! Продолжай.':'1–2 поста/день — оптимальная частота для ERR.'}`,c:erN>=20?'good':'warn'},{e:'🎬',t:'Видеоконтент',b:hasVideo?'Видео есть. Автозапуск привлекает внимание.':'Добавь видео — +30–60% просмотров за счёт автозапуска.',c:hasVideo?'good':'warn'},{e:'📊',t:'Опросы',b:hasPoll?'Опросы дают +40% вовлечённости. Продолжай!':'Добавь 1–2 опроса/нед — в 1.5× больше взаимодействий.',c:hasPoll?'good':'warn'},{e:'⏰',t:'Тайминг',b:'19:00–21:00 — пик просмотров определяет итоговый охват.',c:'tip'}];
   const recs=isIg?[{e:'🚀',t:'Запусти Рилсы',b:'2–3 видео (15–30 сек) в неделю. 85% смотрят без звука — добавляй субтитры.',c:'good'},{e:'💬',t:'Отвечай на комменты',b:'Ответ в первые 60 минут +25% ER. Алгоритм замечает активность.',c:'good'},{e:'📖',t:'Ежедневные сторис',b:'5–10 сторис + опросы и стикеры. Удерживает аудиторию в ленте.',c:'warn'},{e:'🤝',t:'Коллаборации',b:'Совместные посты с похожими аккаунтами без затрат на рекламу.',c:'warn'}]:[{e:'🔔',t:'Включи уведомления',b:'Напомни подписчикам включить уведомления — +20–30% первочасовых просмотров.',c:'good'},{e:'📌',t:'Закреплённый пост',b:'Обнови закреп: навигация, топ-контент, CTA — первое впечатление.',c:'good'},{e:'🤝',t:'Взаимный пиар',b:'3–5 каналов похожей тематики. Дешёвый источник целевых подписчиков.',c:'warn'},{e:'💬',t:'Добавь комментарии',b:'Посты с активными комментами +15–25% просмотров за счёт уведомлений.',c:'warn'}];
@@ -1048,8 +1165,12 @@ function renderInsights({mem,avgReach,posts,isIg}){
   const card=(i)=>`<div style="background:var(--layer2);border:1px solid var(--border);border-radius:14px;padding:18px;display:flex;gap:14px"><div style="font-size:22px;flex-shrink:0">${i.e}</div><div><div style="font-size:13px;font-weight:600;margin-bottom:4px">${i.t}</div><div style="font-size:12px;color:var(--text2);line-height:1.65">${i.b}</div><span class="chip ${bc[i.c]}" style="margin-top:10px;display:inline-block">${bt[i.c]}</span></div></div>`;
   document.getElementById('insightsFull').innerHTML=ins.map(card).join('');
   document.getElementById('recsFull').innerHTML=recs.map(card).join('');
-  dc('compareChart');charts.compareChart=new Chart(document.getElementById('compareChart'),{type:'bar',data:{labels:['Охват','Реакции','Репосты','Коммент.','ER%','Рост'],datasets:[{label:'Этот период',data:[100,100,100,100,100,100],backgroundColor:acColor(.7),borderRadius:5},{label:'Прошлый',data:[rb(70,95),rb(65,95),rb(60,90),rb(70,110),rb(78,100),rb(65,90)],backgroundColor:'rgba(255,255,255,.08)',borderRadius:5}]},options:co()});
-  dc('radarChart');charts.radarChart=new Chart(document.getElementById('radarChart'),{type:'radar',data:{labels:['Охват','Вовлечённость','Регулярность','Виральность','Рост','Качество'],datasets:[{label:'Твой аккаунт',data:[72,65,80,50,68,78],backgroundColor:acColor(.12),borderColor:acSolid(),pointBackgroundColor:acSolid(),borderWidth:2},{label:'Эталон',data:[60,60,60,60,60,60],backgroundColor:'rgba(255,255,255,.03)',borderColor:'rgba(255,255,255,.15)',pointBackgroundColor:'rgba(255,255,255,.3)',borderWidth:1,borderDash:[4,2]}]},options:{responsive:true,maintainAspectRatio:true,plugins:{legend:{labels:{color:'#4a5280',font:{size:10,family:'DM Sans'},boxWidth:10}}},scales:{r:{ticks:{color:'#2e3558',font:{size:9},backdropColor:'transparent'},grid:{color:'rgba(255,255,255,.05)'},pointLabels:{color:'#8b92b8',font:{size:11,family:'DM Sans'}}}}}});
+  dc('compareChart');charts.compareChart=new Chart(document.getElementById('compareChart'),{type:'bar',data:{labels:['Просмотры','Реакции','Репосты','Коммент.','ER%'],datasets:[{label:'Реальные данные',data:[100,100,100,100,100],backgroundColor:acColor(.7),borderRadius:5}]},options:co()});
+  // Radar — только ERR реальный, остальное убираем или считаем из постов
+  const radarER=Math.min(100,erN*(isIg?15:3));
+  const radarViral=totalFwdsR>0&&totalViewsR>0?Math.min(100,Math.round(totalFwdsR/totalViewsR*1000)):0;
+  const radarConsist=posts.length?Math.min(100,Math.round(new Set(posts.map(p=>p.date)).size/30*100)):0;
+  dc('radarChart');charts.radarChart=new Chart(document.getElementById('radarChart'),{type:'radar',data:{labels:['ERR%','Виральность','Регулярность','Вовлечённость','Охват'],datasets:[{label:'Твой канал',data:[radarER,radarViral,radarConsist,radarER,Math.min(100,erN*2)],backgroundColor:acColor(.12),borderColor:acSolid(),pointBackgroundColor:acSolid(),borderWidth:2},{label:'Эталон',data:[60,60,60,60,60],backgroundColor:'rgba(255,255,255,.03)',borderColor:'rgba(255,255,255,.15)',pointBackgroundColor:'rgba(255,255,255,.3)',borderWidth:1,borderDash:[4,2]}]},options:{responsive:true,maintainAspectRatio:true,plugins:{legend:{labels:{color:'#4a5280',font:{size:10,family:'DM Sans'},boxWidth:10}}},scales:{r:{ticks:{color:'#2e3558',font:{size:9},backdropColor:'transparent'},grid:{color:'rgba(255,255,255,.05)'},pointLabels:{color:'#8b92b8',font:{size:11,family:'DM Sans'}}}}}});
 }
 
 // ══════════════════════════════════════════
