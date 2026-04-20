@@ -69,7 +69,7 @@ async def get_client() -> TelegramClient:
     global client
     if client and client.is_connected():
         return client
-    client = TelegramClient(SESSION, API_ID, API_HASH)
+  client = TelegramClient('pulse', API_ID, API_HASH)
     await client.start(phone=PHONE)
     log.info('Telethon client connected')
     return client
