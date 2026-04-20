@@ -31,6 +31,13 @@ from telethon.tl.types import Channel
 from dotenv import load_dotenv
 
 load_dotenv()
+# Восстанавливаем сессию из переменной окружения
+_session_b64 = os.getenv('TG_SESSION_B64', '')
+if _session_b64:
+    import base64
+    with open('pulse.session', 'wb') as _f:
+        _f.write(base64.b64decode(_session_b64 + '=='))
+    log.info('Session restored from TG_SESSION_B64')
 
 # ── Logging ──────────────────────────────────────────────
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
