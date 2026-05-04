@@ -671,6 +671,54 @@
     color: var(--color-slate-blue);
   }
 
+  .breakdown-box {
+    background: var(--color-platinum);
+    border-radius: var(--radius-card);
+    padding: 14px;
+    margin-top: 12px;
+  }
+  .breakdown-title {
+    font-size: var(--text-caption);
+    color: var(--color-slate-blue);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 12px;
+  }
+  .breakdown-row {
+    display: grid;
+    grid-template-columns: 90px 1fr 50px;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+  .breakdown-row:last-child { margin-bottom: 0; }
+  .breakdown-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: var(--text-body);
+    color: var(--color-midnight-ink);
+  }
+  .breakdown-icon { font-size: 14px; line-height: 1; }
+  .breakdown-bar {
+    height: 6px;
+    background: var(--color-powder-blue);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .breakdown-fill {
+    height: 100%;
+    background: var(--color-deep-violet);
+    border-radius: 3px;
+    transition: width .4s ease-out;
+  }
+  .breakdown-val {
+    font-size: var(--text-body);
+    color: var(--color-slate-blue);
+    text-align: right;
+    font-feature-settings: "tnum";
+  }
+
   /* ================================================================
      TOP POSTS GRID
      ================================================================ */
@@ -776,6 +824,24 @@
     border-radius: var(--radius-button);
     font-size: var(--text-caption);
     backdrop-filter: blur(4px);
+  }
+
+  .reactions-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 10px;
+  }
+  .reaction-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 8px;
+    background: var(--color-powder-blue);
+    border-radius: 999px;
+    font-size: var(--text-caption);
+    color: var(--color-slate-blue);
+    line-height: 1.4;
   }
 
   /* ================================================================
@@ -1065,7 +1131,7 @@
 
           <div class="chart-card">
             <div class="chart-head">
-              <span class="chart-title">Активность канала</span>
+              <span class="chart-title" id="tg-chart-title">Активность канала</span>
             </div>
             <svg id="tg-chart" viewBox="0 0 360 100" width="100%" height="100" preserveAspectRatio="none"></svg>
             <div id="tg-chart-labels" style="display: flex; justify-content: space-between; font-size: var(--text-caption); color: var(--color-ghost-gray); padding-top: 6px;"></div>
@@ -1078,6 +1144,8 @@
               <div class="desc" id="tg-insight-desc"></div>
             </div>
           </div>
+
+          <div id="tg-breakdown" class="breakdown-box hidden"></div>
         </div>
       </div>
     </div>
@@ -1642,6 +1710,7 @@ function renderTg() {
   const username = pick(c, ['username','channel_username']) || '';
   const title = pick(c, ['title','name']) || '';
   const members = pick(c, ['memberCount','members_count','member_count','subscribers']) || 0;
+  const onlineMembers = pick(c, ['online','online_count']) || 0;
 
   document.getElementById('tg-username').textContent = username
     ? '@' + username
@@ -1655,70 +1724,176 @@ function renderTg() {
   const vs = state.tg.viewsSummary || null;
   const mtprotoOk = !!state.tg.mtprotoAvailable;
 
-  // Posts-per-week: count posts in last 7 days from tgPosts
-  let postsPerWeek = '—';
+  // Aggregates from views_summary (if MTProto available)
+  const totalViews     = pick(vs, ['total_views']) || 0;
+  const totalForwards  = pick(vs, ['total_forwards']) || 0;
+  const totalReactions = pick(vs, ['total_reactions']) || 0;
+  const totalReplies   = pick(vs, ['total_replies']) || 0;
+  const avgViews       = pick(vs, ['avg_views','average_views']) || 0;
+  const postsAnalyzed  = pick(vs, ['posts_analyzed']) || 0;
+  const viewsByDay     = (vs && vs.views_by_day && typeof vs.views_by_day === 'object') ? vs.views_by_day : null;
+  const avgByType      = (vs && vs.avg_views_by_type && typeof vs.avg_views_by_type === 'object') ? vs.avg_views_by_type : null;
+
+  // Posts-per-week: count posts in last 7 days
+  let postsPerWeek = 0;
   if (tgPosts.length > 0) {
     const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-    const recent = tgPosts.filter(p => {
+    postsPerWeek = tgPosts.filter(p => {
       const ts = p.date ? new Date(p.date).getTime() : 0;
       return ts >= weekAgo;
-    });
-    postsPerWeek = recent.length;
+    }).length;
   }
 
-  // Average views per post from views_summary
-  let avgViews = null;
-  if (vs && typeof vs.avg_views === 'number') avgViews = vs.avg_views;
-  else if (vs && typeof vs.average_views === 'number') avgViews = vs.average_views;
+  // ─── Stats grid ──────────────────────────────────────
+  const statsEl = document.getElementById('tg-stats');
+  if (mtprotoOk) {
+    statsEl.style.gridTemplateColumns = 'repeat(4, 1fr)';
+    statsEl.innerHTML = `
+      <div class="stat-cell">
+        <div class="label">Подписчики</div>
+        <div class="val">${fmt.num(members)}</div>
+        <div class="sub">${onlineMembers ? fmt.num(onlineMembers) + ' онлайн' : 'всего в канале'}</div>
+      </div>
+      <div class="stat-cell">
+        <div class="label">Ср. просмотров</div>
+        <div class="val">${fmt.short(avgViews)}</div>
+        <div class="sub">${postsAnalyzed ? `по ${postsAnalyzed} постам` : '—'}</div>
+      </div>
+      <div class="stat-cell">
+        <div class="label">Реакций</div>
+        <div class="val">${fmt.short(totalReactions)}</div>
+        <div class="sub">${totalForwards ? fmt.short(totalForwards) + ' репостов' : 'всего'}</div>
+      </div>
+      <div class="stat-cell">
+        <div class="label">Комментов</div>
+        <div class="val">${fmt.short(totalReplies)}</div>
+        <div class="sub">${postsPerWeek} постов / нед.</div>
+      </div>
+    `;
+  } else {
+    statsEl.style.gridTemplateColumns = 'repeat(2, 1fr)';
+    statsEl.innerHTML = `
+      <div class="stat-cell">
+        <div class="label">Подписчики</div>
+        <div class="val">${fmt.num(members)}</div>
+        <div class="sub">всего в канале</div>
+      </div>
+      <div class="stat-cell">
+        <div class="label">Постов в&nbsp;неделю</div>
+        <div class="val">${fmt.num(postsPerWeek) || '—'}</div>
+        <div class="sub">за последние 7 дн.</div>
+      </div>
+    `;
+  }
 
-  document.getElementById('tg-stats').innerHTML = `
-    <div class="stat-cell">
-      <div class="label">Подписчики</div>
-      <div class="val">${fmt.num(members)}</div>
-      <div class="sub">всего в канале</div>
-    </div>
-    <div class="stat-cell">
-      <div class="label">${avgViews != null ? 'Ср. просмотров' : 'Постов в&nbsp;неделю'}</div>
-      <div class="val">${avgViews != null ? fmt.short(avgViews) : (typeof postsPerWeek === 'number' ? fmt.num(postsPerWeek) : postsPerWeek)}</div>
-      <div class="sub">${avgViews != null ? 'на пост' : 'за последние 7 дн.'}</div>
-    </div>
-  `;
-
-  // Chart: views per post if MTProto available, otherwise placeholder
+  // ─── Chart ───────────────────────────────────────────
   const chartEl = document.getElementById('tg-chart');
   const labelsEl = document.getElementById('tg-chart-labels');
+  const chartTitleEl = document.getElementById('tg-chart-title');
 
-  if (mtprotoOk && tgPosts.length > 0) {
-    // Use last N posts' views as a bar chart
+  if (mtprotoOk && viewsByDay && Object.keys(viewsByDay).length > 0) {
+    // Sort days chronologically (DD.MM format → year boundary handled simply)
+    const entries = Object.entries(viewsByDay).map(([day, views]) => {
+      const [d, m] = day.split('.').map(Number);
+      const year = new Date().getFullYear();
+      const ts = new Date(year, (m || 1) - 1, d || 1).getTime();
+      return { day, views: Number(views) || 0, ts };
+    }).sort((a, b) => a.ts - b.ts);
+
+    // Show last 14 days max
+    const last = entries.slice(-14);
+    const values = last.map(e => e.views);
+
+    if (chartTitleEl) chartTitleEl.textContent = 'Просмотры по дням';
+    chartEl.innerHTML = barChartSvg(values);
+    labelsEl.innerHTML = last.map((e, i) => {
+      // Show every 2nd label if too dense
+      const showLabel = last.length <= 7 || i % 2 === 0 || i === last.length - 1;
+      return `<span style="${showLabel ? '' : 'visibility:hidden'}">${e.day}</span>`;
+    }).join('');
+  } else if (mtprotoOk && tgPosts.length > 0) {
+    // Fallback: views per post
     const lastPosts = tgPosts.slice(0, 7).reverse();
-    const views = lastPosts.map(p => p.views || p.view_count || 0);
+    const views = lastPosts.map(p => p.views || 0);
+    if (chartTitleEl) chartTitleEl.textContent = 'Просмотры последних постов';
     chartEl.innerHTML = barChartSvg(views);
-    labelsEl.innerHTML = lastPosts.map((p, i) => {
+    labelsEl.innerHTML = lastPosts.map(p => {
       const d = p.date ? new Date(p.date) : null;
-      return `<span>${d ? d.getDate() + '.' + (d.getMonth()+1) : i+1}</span>`;
+      return `<span>${d ? d.getDate() + '.' + (d.getMonth() + 1) : '·'}</span>`;
     }).join('');
   } else {
-    // No MTProto — show informative empty state
+    if (chartTitleEl) chartTitleEl.textContent = 'Активность канала';
     chartEl.innerHTML = `
       <text x="180" y="45" text-anchor="middle" fill="#64748d" font-size="12" font-family="Inter">
         Расширенная аналитика недоступна
       </text>
       <text x="180" y="62" text-anchor="middle" fill="#8492a8" font-size="10" font-family="Inter">
-        Bot API даёт только число подписчиков
+        Подключи MTProto-сервис
       </text>
     `;
     labelsEl.innerHTML = '';
   }
 
-  // Insight box: best post by views (if MTProto)
+  // ─── Media type breakdown ────────────────────────────
+  const breakdownEl = document.getElementById('tg-breakdown');
+  if (mtprotoOk && avgByType && Object.keys(avgByType).length > 0) {
+    const typeIcons = { photo: '🖼', video: '🎬', poll: '📊', document: '📎', text: '📝', audio: '🎵', voice: '🎙', link: '🔗' };
+    const typeNames = { photo: 'Фото', video: 'Видео', poll: 'Опросы', document: 'Файлы', text: 'Текст', audio: 'Аудио', voice: 'Голос', link: 'Ссылки' };
+
+    const items = Object.entries(avgByType)
+      .map(([type, avg]) => ({ type, avg: Number(avg) || 0 }))
+      .filter(x => x.avg > 0)
+      .sort((a, b) => b.avg - a.avg);
+
+    if (items.length > 0) {
+      const max = items[0].avg;
+      breakdownEl.innerHTML = `
+        <div class="breakdown-title">Средние просмотры по типу контента</div>
+        ${items.map(item => {
+          const pct = (item.avg / max) * 100;
+          return `
+            <div class="breakdown-row">
+              <div class="breakdown-label">
+                <span class="breakdown-icon">${typeIcons[item.type] || '·'}</span>
+                <span>${typeNames[item.type] || item.type}</span>
+              </div>
+              <div class="breakdown-bar">
+                <div class="breakdown-fill" style="width: ${pct.toFixed(1)}%"></div>
+              </div>
+              <div class="breakdown-val">${fmt.short(item.avg)}</div>
+            </div>
+          `;
+        }).join('')}
+      `;
+      breakdownEl.classList.remove('hidden');
+    } else {
+      breakdownEl.classList.add('hidden');
+    }
+  } else {
+    breakdownEl.classList.add('hidden');
+  }
+
+  // ─── Insight: top post ──────────────────────────────
   if (mtprotoOk && tgPosts.length > 0) {
     const sortedByViews = [...tgPosts].sort((a, b) => (b.views || 0) - (a.views || 0));
     const top = sortedByViews[0];
     if (top && (top.views || 0) > 0) {
+      // Build reactions string from reactions_detail if available
+      let reactionsStr = '';
+      if (Array.isArray(top.reactions_detail) && top.reactions_detail.length > 0) {
+        reactionsStr = ' · ' + top.reactions_detail.slice(0, 4)
+          .map(r => `${r.emoji} ${r.count}`)
+          .join('  ');
+      }
+      const captionPreview = top.text
+        ? '«' + top.text.slice(0, 60).trim() + (top.text.length > 60 ? '…' : '') + '»'
+        : 'без подписи';
       document.getElementById('tg-insight').classList.remove('hidden');
       document.getElementById('tg-insight-title').textContent = 'Топ-пост по просмотрам';
       document.getElementById('tg-insight-desc').textContent =
-        `${fmt.short(top.views)} просмотров${top.text ? ' · «' + top.text.slice(0, 60).trim() + '…»' : ''}`;
+        `${fmt.short(top.views)} просмотров${reactionsStr} · ${captionPreview}`;
+    } else {
+      document.getElementById('tg-insight').classList.add('hidden');
     }
   } else {
     document.getElementById('tg-insight').classList.add('hidden');
@@ -1777,18 +1952,25 @@ function renderPosts() {
           </div>
           <div class="top-post-body">
             <div class="top-post-caption">${escapeHtml(caption)}</div>
+            ${Array.isArray(p.reactionsDetail) && p.reactionsDetail.length > 0 ? `
+              <div class="reactions-strip">
+                ${p.reactionsDetail.slice(0, 5).map(r =>
+                  `<span class="reaction-pill">${escapeHtml(r.emoji)} ${fmt.short(r.count)}</span>`
+                ).join('')}
+              </div>
+            ` : ''}
             <div class="top-post-meta">
               <div class="top-post-stat">
                 <div class="num">${fmt.short(p.reach)}</div>
-                <div class="lbl">Охват</div>
+                <div class="lbl">${p.source === 'TG' ? 'Просмотры' : 'Охват'}</div>
               </div>
               <div class="top-post-stat">
                 <div class="num">${fmt.short(p.likes)}</div>
-                <div class="lbl">Лайки</div>
+                <div class="lbl">${p.source === 'TG' ? 'Реакции' : 'Лайки'}</div>
               </div>
               <div class="top-post-stat">
-                <div class="num">${er != null ? er.toFixed(1) + '%' : '—'}</div>
-                <div class="lbl">ER</div>
+                <div class="num">${p.source === 'TG' ? fmt.short(p.shares) : (er != null ? er.toFixed(1) + '%' : '—')}</div>
+                <div class="lbl">${p.source === 'TG' ? 'Репосты' : 'ER'}</div>
               </div>
             </div>
           </div>
@@ -1929,10 +2111,12 @@ async function loadAll() {
     mediaType: p.media_type || null,
     reach: p.views || p.view_count || 0,
     impressions: p.views || 0,
-    likes: p.reactions_count || p.likes || 0,
-    comments: p.comments_count || 0,
+    likes: p.reactions || p.reactions_count || 0,
+    comments: p.replies || p.comments_count || 0,
     shares: p.forwards || 0,
     saved: 0,
+    reactionsDetail: Array.isArray(p.reactions_detail) ? p.reactions_detail : [],
+    pinned: !!p.pinned,
     er: null
   }));
   state.posts = [...state.ig.posts, ...tgPostsNormalized];
