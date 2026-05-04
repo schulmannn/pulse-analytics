@@ -457,8 +457,11 @@
      ================================================================ */
   .kpi-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(3, 1fr);
     gap: 12px;
+  }
+  .kpi-grid > .kpi-card.feature {
+    grid-column: span 1;
   }
   .kpi-card {
     background: var(--color-powder-blue);
@@ -669,6 +672,113 @@
   }
 
   /* ================================================================
+     TOP POSTS GRID
+     ================================================================ */
+  .top-posts-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+  .top-post-card {
+    background: var(--color-porcelain);
+    border-radius: var(--radius-card);
+    overflow: hidden;
+    transition: box-shadow .2s, transform .15s;
+    text-decoration: none;
+    color: inherit;
+    display: block;
+    border: 1px solid var(--color-powder-blue);
+  }
+  .top-post-card:hover {
+    box-shadow: var(--shadow-hover);
+    transform: translateY(-1px);
+  }
+  .top-post-thumb {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    background: var(--gradient-dreamy);
+    object-fit: cover;
+    display: block;
+    position: relative;
+  }
+  .top-post-rank {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    background: var(--color-platinum);
+    color: var(--color-deep-violet);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 500;
+    font-size: 13px;
+    box-shadow: var(--shadow-soft);
+  }
+  .top-post-source {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    padding: 3px 8px;
+    background: var(--color-platinum);
+    border-radius: var(--radius-button);
+    font-size: var(--text-caption);
+    color: var(--color-deep-violet);
+    box-shadow: var(--shadow-soft);
+  }
+  .top-post-source.tg-source { color: var(--color-accent-green); }
+  .top-post-body { padding: 14px; }
+  .top-post-caption {
+    font-size: var(--text-body);
+    line-height: 1.4;
+    color: var(--color-midnight-ink);
+    margin-bottom: 10px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .top-post-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-top: 1px solid var(--color-stone-gray);
+    padding-top: 10px;
+  }
+  .top-post-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .top-post-stat .num {
+    font-size: var(--text-subhead);
+    font-weight: 400;
+    letter-spacing: -0.009em;
+    text-align: left;
+    font-feature-settings: "tnum";
+  }
+  .top-post-stat .lbl {
+    font-size: var(--text-caption);
+    color: var(--color-ghost-gray);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .media-type-badge {
+    position: absolute;
+    bottom: 12px;
+    left: 12px;
+    padding: 3px 8px;
+    background: rgba(6, 27, 49, 0.7);
+    color: white;
+    border-radius: var(--radius-button);
+    font-size: var(--text-caption);
+    backdrop-filter: blur(4px);
+  }
+
+  /* ================================================================
      POSTS TABLE
      ================================================================ */
   .posts-table {
@@ -679,8 +789,8 @@
   }
   .posts-row {
     display: grid;
-    grid-template-columns: 64px 1fr 80px 110px 110px 90px;
-    gap: 16px;
+    grid-template-columns: 56px 1fr 70px 90px 90px 80px 60px 70px 70px;
+    gap: 12px;
     padding: 12px 16px;
     align-items: center;
     border-bottom: 1px solid var(--color-powder-blue);
@@ -786,15 +896,27 @@
   /* ================================================================
      RESPONSIVE
      ================================================================ */
+  @media (max-width: 1100px) {
+    .kpi-grid { grid-template-columns: repeat(3, 1fr); }
+    .top-posts-grid { grid-template-columns: repeat(2, 1fr); }
+    .posts-row {
+      grid-template-columns: 56px 1fr 60px 80px 70px 70px;
+      gap: 10px;
+    }
+    .posts-row > .col-impressions,
+    .posts-row > .col-comments,
+    .posts-row > .col-shares { display: none; }
+  }
   @media (max-width: 960px) {
     .app-shell { padding: 16px; }
     .hero-title { font-size: var(--text-h); }
     .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+    .top-posts-grid { grid-template-columns: 1fr; }
     .two-col { grid-template-columns: 1fr; }
     .nav { display: none; }
     .posts-row { grid-template-columns: 48px 1fr 60px 80px; }
     .posts-row > .col-hide { display: none; }
-    .stat-row { grid-template-columns: repeat(2, 1fr); }
+    .stat-row { grid-template-columns: repeat(2, 1fr) !important; }
   }
 </style>
 </head>
@@ -960,6 +1082,19 @@
       </div>
     </div>
 
+    <!-- Top posts -->
+    <div class="section" id="top-posts-section">
+      <div class="section-head">
+        <div>
+          <h2>Топ-посты</h2>
+          <p>3 поста с&nbsp;лучшим охватом за&nbsp;период</p>
+        </div>
+      </div>
+      <div class="top-posts-grid" id="top-posts-grid">
+        <!-- rendered by JS -->
+      </div>
+    </div>
+
     <!-- Posts -->
     <div class="section" id="posts">
       <div class="section-head">
@@ -974,7 +1109,10 @@
           <div>Пост</div>
           <div style="text-align: right;">Источник</div>
           <div style="text-align: right;">Охват</div>
+          <div style="text-align: right;">Показы</div>
           <div style="text-align: right;">Лайки</div>
+          <div style="text-align: right;">💬</div>
+          <div style="text-align: right;">🔖/↗</div>
           <div style="text-align: right;">ER</div>
         </div>
         <div id="posts-list">
@@ -1015,7 +1153,7 @@ const API = {
   async req(path, opts = {}) {
     const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
     const token = this.getToken();
-if (token) headers['X-Session-Token'] = token;
+    if (token) headers['X-Session-Token'] = token;
     const res = await fetch(path, { ...opts, headers });
     if (res.status === 401) {
       this.clearToken();
@@ -1037,7 +1175,7 @@ if (token) headers['X-Session-Token'] = token;
   igInsights(d=7)  { return this.req(`/api/ig/insights?days=${d}`); },
   igPosts(l=20)    { return this.req(`/api/ig/posts?limit=${l}`); },
   tgChannel()      { return this.req('/api/tg/channel'); },
-  tgStats()        { return this.req('/api/tg/stats'); },
+  tgFull()         { return this.req('/api/tg/full?limit=30'); },
   health()         { return this.req('/api/health'); },
   clearCache()     { return this.req('/api/cache', { method: 'DELETE' }); }
 };
@@ -1334,7 +1472,7 @@ function barChartSvg(values) {
 /* ── KPI rendering ───────────────────────────────────────────── */
 function renderKpiSkeletons() {
   const grid = document.getElementById('kpi-grid');
-  grid.innerHTML = Array(4).fill(0).map((_, i) => `
+  grid.innerHTML = Array(6).fill(0).map((_, i) => `
     <div class="kpi-card${i === 0 ? ' feature' : ''}">
       <div class="kpi-label skeleton" style="height: 11px; width: 60%;">&nbsp;</div>
       <div class="skeleton" style="height: 32px; width: 70%; margin-top: 12px;">&nbsp;</div>
@@ -1346,50 +1484,77 @@ function renderKpiSkeletons() {
 function renderKpis() {
   const grid = document.getElementById('kpi-grid');
   const igFollowers = pick(state.ig.profile, ['followers_count','followers','subscribers']) || 0;
-  const tgMembers   = pick(state.tg.channel, ['members_count','member_count','subscribers']) || 0;
+  const tgMembers   = pick(state.tg.channel, ['memberCount','members_count','member_count','subscribers']) || 0;
   const total = igFollowers + tgMembers;
 
-  // Reach from IG insights
-  const igReach = sumMetric(state.ig.insights, ['reach']) || 0;
-  const igImpressions = sumMetric(state.ig.insights, ['impressions','views']) || 0;
+  // Reach / impressions / profile views from IG insights
+  const igReach        = sumMetric(state.ig.insights, ['reach']) || 0;
+  const igImpressions  = sumMetric(state.ig.insights, ['impressions','views']) || 0;
   const igProfileViews = sumMetric(state.ig.insights, ['profile_views']) || 0;
+  const igWebClicks    = sumMetric(state.ig.insights, ['website_clicks']) || 0;
+  const igFollowerNew  = sumMetric(state.ig.insights, ['follower_count']) || 0;
 
   // Engagement from posts
-  let totalLikes = 0, totalComments = 0, postCount = 0;
+  let totalLikes = 0, totalComments = 0, totalShares = 0, totalSaved = 0, postCount = 0;
   state.posts.forEach(p => {
-    totalLikes += Number(p.likes) || 0;
+    totalLikes    += Number(p.likes) || 0;
     totalComments += Number(p.comments) || 0;
-    if (p.reach || p.likes) postCount++;
+    totalShares   += Number(p.shares) || 0;
+    totalSaved    += Number(p.saved) || 0;
+    if (p.reach || p.likes || p.impressions) postCount++;
   });
-  const er = igFollowers > 0 ? ((totalLikes + totalComments) / igFollowers / Math.max(postCount,1)) * 100 : 0;
+  const er = igFollowers > 0
+    ? ((totalLikes + totalComments) / igFollowers / Math.max(postCount, 1)) * 100
+    : 0;
+
+  const reachSeries = extractSeries(state.ig.insights).map(p => p.value).filter(v => v != null);
 
   const cards = [
     {
       feature: true,
       label: 'Подписчики · всего',
       value: fmt.num(total),
-      delta: total > 0 ? '▲ IG ' + fmt.short(igFollowers) + ' · TG ' + fmt.short(tgMembers) : null,
+      delta: total > 0 ? `IG ${fmt.short(igFollowers)} · TG ${fmt.short(tgMembers)}` : null,
       deltaClass: 'muted',
-      spark: extractSeries(state.ig.insights).map(p => p.value).filter(v => v != null)
+      spark: reachSeries
     },
     {
       label: 'Охват',
-      value: fmt.num(igReach),
-      delta: igReach > 0 ? '▲ Instagram, ' + currentPeriod + ' дн.' : null,
-      deltaClass: '',
-      spark: extractSeries(state.ig.insights).map(p => p.value).filter(v => v != null)
+      value: fmt.short(igReach),
+      delta: igReach > 0 ? `Instagram · ${currentPeriod} дн.` : null,
+      deltaClass: 'muted',
+      spark: reachSeries
+    },
+    {
+      label: 'Показы',
+      value: fmt.short(igImpressions),
+      delta: igImpressions > igReach && igReach > 0
+        ? `${(igImpressions / igReach).toFixed(1)}× на охват`
+        : null,
+      deltaClass: 'muted',
+      spark: extractSeries({ data: (state.ig.insights?.data || []).filter(d => /impression/i.test(d.name || '')) })
+        .map(p => p.value).filter(v => v != null)
+    },
+    {
+      label: 'Просмотры профиля',
+      value: fmt.short(igProfileViews),
+      delta: igWebClicks > 0 ? `${fmt.num(igWebClicks)} кликов по сайту` : null,
+      deltaClass: 'muted',
+      spark: []
     },
     {
       label: 'Вовлечённость',
       value: er > 0 ? er.toFixed(2) + '%' : '—',
-      delta: postCount > 0 ? `по ${postCount} постам` : null,
+      delta: postCount > 0 ? `${fmt.num(totalLikes)} ♥ · ${fmt.num(totalComments)} 💬` : null,
       deltaClass: 'muted',
       spark: []
     },
     {
       label: 'Постов за период',
       value: fmt.num(postCount),
-      delta: igImpressions > 0 ? fmt.short(igImpressions) + ' показов' : null,
+      delta: totalSaved + totalShares > 0
+        ? `${fmt.num(totalSaved)} 🔖 · ${fmt.num(totalShares)} ↗`
+        : (postCount > 0 ? `всего ${state.posts.length} в базе` : null),
       deltaClass: 'muted',
       spark: []
     }
@@ -1440,7 +1605,10 @@ function renderIg() {
   const reach = sumMetric(state.ig.insights, ['reach']) || 0;
   const impressions = sumMetric(state.ig.insights, ['impressions','views']) || 0;
   const profileViews = sumMetric(state.ig.insights, ['profile_views']) || 0;
-  document.getElementById('ig-stats').innerHTML = `
+  const websiteClicks = sumMetric(state.ig.insights, ['website_clicks']) || 0;
+  const statsEl = document.getElementById('ig-stats');
+  statsEl.style.gridTemplateColumns = 'repeat(4, 1fr)';
+  statsEl.innerHTML = `
     <div class="stat-cell">
       <div class="label">Охват</div>
       <div class="val">${fmt.short(reach)}</div>
@@ -1456,6 +1624,11 @@ function renderIg() {
       <div class="val">${fmt.short(profileViews)}</div>
       <div class="sub">за ${currentPeriod}&nbsp;дн.</div>
     </div>
+    <div class="stat-cell">
+      <div class="label">Кликов на сайт</div>
+      <div class="val">${fmt.short(websiteClicks)}</div>
+      <div class="sub">за ${currentPeriod}&nbsp;дн.</div>
+    </div>
   `;
 
   // Chart
@@ -1468,79 +1641,179 @@ function renderTg() {
   const c = state.tg.channel;
   const username = pick(c, ['username','channel_username']) || '';
   const title = pick(c, ['title','name']) || '';
-  const members = pick(c, ['members_count','member_count','subscribers']) || 0;
+  const members = pick(c, ['memberCount','members_count','member_count','subscribers']) || 0;
 
-  document.getElementById('tg-username').textContent = username ? '@' + username : (title || 'Не подключено');
+  document.getElementById('tg-username').textContent = username
+    ? '@' + username
+    : (title || 'Не подключено');
   if (username) {
     document.getElementById('tg-open').href = 'https://t.me/' + username;
   }
 
-  // Build stats series — try multiple shapes
-  let memberSeries = [];
-  if (state.tg.stats) {
-    if (Array.isArray(state.tg.stats.members)) memberSeries = state.tg.stats.members.map(x => x.value || x.count || x);
-    else if (Array.isArray(state.tg.stats.timeline)) memberSeries = state.tg.stats.timeline.map(x => x.members || x.value || 0);
-    else if (Array.isArray(state.tg.stats)) memberSeries = state.tg.stats.map(x => x.value || x);
-  }
-  const weeklyChange = memberSeries.length >= 2 ? (memberSeries[memberSeries.length-1] - memberSeries[0]) : null;
+  // Posts from /api/tg/full (MTProto)
+  const tgPosts = state.tg.fullPosts || [];
+  const vs = state.tg.viewsSummary || null;
+  const mtprotoOk = !!state.tg.mtprotoAvailable;
 
-  const postsPerWeek = pick(state.tg.stats, ['posts_per_week','weekly_posts']) || '—';
+  // Posts-per-week: count posts in last 7 days from tgPosts
+  let postsPerWeek = '—';
+  if (tgPosts.length > 0) {
+    const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const recent = tgPosts.filter(p => {
+      const ts = p.date ? new Date(p.date).getTime() : 0;
+      return ts >= weekAgo;
+    });
+    postsPerWeek = recent.length;
+  }
+
+  // Average views per post from views_summary
+  let avgViews = null;
+  if (vs && typeof vs.avg_views === 'number') avgViews = vs.avg_views;
+  else if (vs && typeof vs.average_views === 'number') avgViews = vs.average_views;
 
   document.getElementById('tg-stats').innerHTML = `
     <div class="stat-cell">
       <div class="label">Подписчики</div>
       <div class="val">${fmt.num(members)}</div>
-      <div class="sub" style="${weeklyChange != null && weeklyChange > 0 ? 'color: var(--color-accent-green);' : (weeklyChange != null && weeklyChange < 0 ? 'color: var(--color-vibrant-orange);' : '')}">
-        ${weeklyChange != null ? (weeklyChange >= 0 ? '▲ +' : '▼ ') + fmt.num(Math.abs(weeklyChange)) : 'данные ограничены'}
-      </div>
+      <div class="sub">всего в канале</div>
     </div>
     <div class="stat-cell">
-      <div class="label">Постов в&nbsp;неделю</div>
-      <div class="val">${typeof postsPerWeek === 'number' ? fmt.num(postsPerWeek) : postsPerWeek}</div>
-      <div class="sub">в&nbsp;среднем</div>
+      <div class="label">${avgViews != null ? 'Ср. просмотров' : 'Постов в&nbsp;неделю'}</div>
+      <div class="val">${avgViews != null ? fmt.short(avgViews) : (typeof postsPerWeek === 'number' ? fmt.num(postsPerWeek) : postsPerWeek)}</div>
+      <div class="sub">${avgViews != null ? 'на пост' : 'за последние 7 дн.'}</div>
     </div>
   `;
 
-  // Bar chart — last 7 points or fallback to flat
-  const last7 = memberSeries.slice(-7);
-  document.getElementById('tg-chart').innerHTML = barChartSvg(last7);
-  document.getElementById('tg-chart-labels').innerHTML = last7.length === 7
-    ? ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map(d => `<span>${d}</span>`).join('')
-    : last7.map((_, i) => `<span>${i + 1}</span>`).join('');
+  // Chart: views per post if MTProto available, otherwise placeholder
+  const chartEl = document.getElementById('tg-chart');
+  const labelsEl = document.getElementById('tg-chart-labels');
 
-  // Insight box (best day)
-  if (memberSeries.length >= 2) {
-    const diffs = memberSeries.slice(1).map((v, i) => v - memberSeries[i]);
-    const maxDiff = Math.max(...diffs);
-    if (maxDiff > 0) {
-      const idx = diffs.indexOf(maxDiff);
+  if (mtprotoOk && tgPosts.length > 0) {
+    // Use last N posts' views as a bar chart
+    const lastPosts = tgPosts.slice(0, 7).reverse();
+    const views = lastPosts.map(p => p.views || p.view_count || 0);
+    chartEl.innerHTML = barChartSvg(views);
+    labelsEl.innerHTML = lastPosts.map((p, i) => {
+      const d = p.date ? new Date(p.date) : null;
+      return `<span>${d ? d.getDate() + '.' + (d.getMonth()+1) : i+1}</span>`;
+    }).join('');
+  } else {
+    // No MTProto — show informative empty state
+    chartEl.innerHTML = `
+      <text x="180" y="45" text-anchor="middle" fill="#64748d" font-size="12" font-family="Inter">
+        Расширенная аналитика недоступна
+      </text>
+      <text x="180" y="62" text-anchor="middle" fill="#8492a8" font-size="10" font-family="Inter">
+        Bot API даёт только число подписчиков
+      </text>
+    `;
+    labelsEl.innerHTML = '';
+  }
+
+  // Insight box: best post by views (if MTProto)
+  if (mtprotoOk && tgPosts.length > 0) {
+    const sortedByViews = [...tgPosts].sort((a, b) => (b.views || 0) - (a.views || 0));
+    const top = sortedByViews[0];
+    if (top && (top.views || 0) > 0) {
       document.getElementById('tg-insight').classList.remove('hidden');
-      document.getElementById('tg-insight-title').textContent = 'Лучший день периода';
-      document.getElementById('tg-insight-desc').textContent = `+${fmt.num(maxDiff)} подписчиков (день ${idx + 2} из ${memberSeries.length}).`;
+      document.getElementById('tg-insight-title').textContent = 'Топ-пост по просмотрам';
+      document.getElementById('tg-insight-desc').textContent =
+        `${fmt.short(top.views)} просмотров${top.text ? ' · «' + top.text.slice(0, 60).trim() + '…»' : ''}`;
     }
+  } else {
+    document.getElementById('tg-insight').classList.add('hidden');
   }
 }
 
 /* ── Posts rendering ─────────────────────────────────────────── */
+function mediaTypeLabel(mt) {
+  if (!mt) return '';
+  const t = String(mt).toUpperCase();
+  if (t.includes('VIDEO') || t === 'REELS') return 'REELS';
+  if (t.includes('CAROUSEL')) return 'CAROUSEL';
+  if (t.includes('IMAGE')) return 'IMAGE';
+  return t;
+}
+
 function renderPosts() {
+  const topGrid = document.getElementById('top-posts-grid');
   const list = document.getElementById('posts-list');
+
   if (!state.posts || state.posts.length === 0) {
+    if (topGrid) topGrid.innerHTML = '';
     list.innerHTML = `<div class="empty-state">
       <div class="em-title">Постов пока нет</div>
       <div>Проверь подключение Instagram и&nbsp;Telegram в&nbsp;.env</div>
     </div>`;
+    document.getElementById('top-posts-section')?.classList.add('hidden');
     return;
   }
+
   const sorted = [...state.posts].sort((a, b) => (b.reach || 0) - (a.reach || 0));
-  list.innerHTML = sorted.slice(0, 20).map(p => {
-    const er = p.er != null ? p.er : (p.likes && p.reach ? (p.likes / p.reach * 100) : null);
-    const erTag = er == null ? '<span class="num muted">—</span>'
+
+  // ── Top 3 posts ─────────────────────────────────────
+  const top3 = sorted.slice(0, 3).filter(p => (p.reach || 0) > 0);
+  if (topGrid && top3.length > 0) {
+    document.getElementById('top-posts-section')?.classList.remove('hidden');
+    topGrid.innerHTML = top3.map((p, i) => {
+      const er = p.er != null
+        ? p.er
+        : (p.likes && p.reach ? (p.likes / p.reach * 100) : null);
+      const thumb = p.thumb
+        ? `<img class="top-post-thumb" src="${p.thumb}" alt="" referrerpolicy="no-referrer">`
+        : `<div class="top-post-thumb"></div>`;
+      const sourceClass = p.source === 'TG' ? 'tg-source' : '';
+      const mediaType = p.mediaType ? mediaTypeLabel(p.mediaType) : '';
+      const caption = (p.caption || 'Без подписи').slice(0, 120);
+      const permalink = p.permalink || '#';
+
+      return `
+        <a class="top-post-card" href="${escapeHtml(permalink)}" target="_blank" rel="noopener">
+          <div style="position: relative;">
+            ${thumb}
+            <div class="top-post-rank">#${i + 1}</div>
+            <div class="top-post-source ${sourceClass}">${p.source || '—'}</div>
+            ${mediaType ? `<div class="media-type-badge">${mediaType}</div>` : ''}
+          </div>
+          <div class="top-post-body">
+            <div class="top-post-caption">${escapeHtml(caption)}</div>
+            <div class="top-post-meta">
+              <div class="top-post-stat">
+                <div class="num">${fmt.short(p.reach)}</div>
+                <div class="lbl">Охват</div>
+              </div>
+              <div class="top-post-stat">
+                <div class="num">${fmt.short(p.likes)}</div>
+                <div class="lbl">Лайки</div>
+              </div>
+              <div class="top-post-stat">
+                <div class="num">${er != null ? er.toFixed(1) + '%' : '—'}</div>
+                <div class="lbl">ER</div>
+              </div>
+            </div>
+          </div>
+        </a>
+      `;
+    }).join('');
+  } else if (topGrid) {
+    document.getElementById('top-posts-section')?.classList.add('hidden');
+  }
+
+  // ── Posts table ────────────────────────────────────
+  list.innerHTML = sorted.slice(0, 25).map(p => {
+    const er = p.er != null
+      ? p.er
+      : (p.likes && p.reach ? (p.likes / p.reach * 100) : null);
+    const erTag = er == null
+      ? '<span class="num muted">—</span>'
       : `<span class="tag ${er >= 6 ? 'green' : er >= 3 ? 'violet' : 'orange'}">${er.toFixed(1)}%</span>`;
     const thumb = p.thumb
       ? `<img class="post-thumb" src="${p.thumb}" alt="" referrerpolicy="no-referrer">`
       : `<div class="post-thumb"></div>`;
-    const sourceTag = `<span class="tag violet">${p.source || '—'}</span>`;
+    const sourceTag = `<span class="tag ${p.source === 'TG' ? 'green' : 'violet'}">${p.source || '—'}</span>`;
     const caption = (p.caption || 'Без подписи').slice(0, 80);
+    const sharesOrSaved = (p.saved || 0) + (p.shares || 0);
+
     return `
       <div class="posts-row">
         ${thumb}
@@ -1550,7 +1823,10 @@ function renderPosts() {
         </div>
         <div style="text-align: right;">${sourceTag}</div>
         <div class="num">${fmt.num(p.reach)}</div>
+        <div class="num">${p.impressions ? fmt.num(p.impressions) : '<span class="muted">—</span>'}</div>
         <div class="num">${fmt.num(p.likes)}</div>
+        <div class="num">${p.comments ? fmt.num(p.comments) : '<span class="muted">—</span>'}</div>
+        <div class="num">${sharesOrSaved ? fmt.num(sharesOrSaved) : '<span class="muted">—</span>'}</div>
         <div class="num" style="text-align: right;">${erTag}</div>
       </div>
     `;
@@ -1566,7 +1842,7 @@ function renderHero() {
   document.getElementById('hero-eyebrow').textContent = fmt.todayLabel();
 
   const igFollowers = pick(state.ig.profile, ['followers_count','followers']) || 0;
-  const tgMembers   = pick(state.tg.channel, ['members_count','member_count','subscribers']) || 0;
+  const tgMembers   = pick(state.tg.channel, ['memberCount','members_count','member_count','subscribers']) || 0;
   const reach = sumMetric(state.ig.insights, ['reach']) || 0;
 
   let highlight = '';
@@ -1611,19 +1887,55 @@ async function loadAll() {
         caption: p.caption || '',
         date: p.timestamp || p.created_at,
         thumb: p.thumbnail_url || p.media_url,
-        reach: pick(p.insights, ['reach']) || pick(p, ['reach']) || 0,
+        permalink: p.permalink || null,
+        mediaType: p.media_type,
+        reach: p.reach || 0,
+        impressions: p.impressions || 0,
         likes: p.like_count || p.likes || 0,
         comments: p.comments_count || p.comments || 0,
+        shares: p.shares || 0,
+        saved: p.saved || 0,
         er: null
       }));
     }).catch(e => { console.warn('IG posts:', e.message); state.ig.posts = []; }),
     API.tgChannel().then(d => state.tg.channel = d).catch(e => { console.warn('TG channel:', e.message); state.tg.channel = null; }),
-    API.tgStats().then(d => state.tg.stats = d).catch(e => { console.warn('TG stats:', e.message); state.tg.stats = null; })
+    API.tgFull().then(d => {
+      // /api/tg/full returns: { channel, views_summary, posts, mtproto_available, errors }
+      // Channel info from /api/tg/channel is more focused — keep it as primary source
+      // but extract views/posts/timeline data from /api/tg/full for charts
+      state.tg.stats = d || null;
+      state.tg.fullPosts = (d && Array.isArray(d.posts)) ? d.posts : [];
+      state.tg.viewsSummary = (d && d.views_summary) ? d.views_summary : null;
+      state.tg.mtprotoAvailable = !!(d && d.mtproto_available);
+    }).catch(e => {
+      console.warn('TG full:', e.message);
+      state.tg.stats = null;
+      state.tg.fullPosts = [];
+      state.tg.viewsSummary = null;
+      state.tg.mtprotoAvailable = false;
+    })
   ];
   await Promise.all(tasks);
 
-  // Unified posts list
-  state.posts = [...state.ig.posts];
+  // Unified posts list — merge IG + TG posts
+  const tgUsername = pick(state.tg.channel, ['username','channel_username']) || '';
+  const tgPostsNormalized = (state.tg.fullPosts || []).map(p => ({
+    id: p.id,
+    source: 'TG',
+    caption: p.text || p.caption || '',
+    date: p.date,
+    thumb: p.media_url || null,
+    permalink: tgUsername && p.id ? `https://t.me/${tgUsername}/${p.id}` : null,
+    mediaType: p.media_type || null,
+    reach: p.views || p.view_count || 0,
+    impressions: p.views || 0,
+    likes: p.reactions_count || p.likes || 0,
+    comments: p.comments_count || 0,
+    shares: p.forwards || 0,
+    saved: 0,
+    er: null
+  }));
+  state.posts = [...state.ig.posts, ...tgPostsNormalized];
 
   // Determine status
   const igOk = !!state.ig.profile;
