@@ -1015,7 +1015,7 @@ const API = {
   async req(path, opts = {}) {
     const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
     const token = this.getToken();
-    if (token) headers['Authorization'] = `Bearer ${token}`;
+if (token) headers['X-Session-Token'] = token;
     const res = await fetch(path, { ...opts, headers });
     if (res.status === 401) {
       this.clearToken();
