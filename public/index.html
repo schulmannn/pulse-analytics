@@ -4,1197 +4,1661 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Pulse Analytics</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
 <style>
-:root {
-  --bg:#08090f; --layer1:#0d0f1c; --layer2:#121525; --layer3:#181b2e;
-  --glass:rgba(255,255,255,0.03); --glassbord:rgba(255,255,255,0.07);
-  --border:rgba(255,255,255,0.06);
-  --ig-grd:linear-gradient(135deg,#f58529,#dd2a7b,#8134af);
-  --tg-grd:linear-gradient(135deg,#2aabee,#229ed9,#5b8dee);
-  --text:#f0f2ff; --text2:#8b92b8; --text3:#4a5280;
-  --green:#22d3a0; --yellow:#fbbf24; --red:#f43f5e; --purple:#a78bfa;
-  --sidebar-w:240px; --radius:16px;
-}
-*,*::before,*::after{margin:0;padding:0;box-sizing:border-box;}
-html{scroll-behavior:smooth;}
-body{background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif;min-height:100vh;display:flex;overflow-x:hidden;}
+  /* ================================================================
+     STRIPE / REFERO DESIGN TOKENS
+     ================================================================ */
+  :root {
+    --color-midnight-ink:   #061b31;
+    --color-slate-blue:     #50617a;
+    --color-ghost-gray:     #64748d;
+    --color-stone-gray:     #d8d6df;
+    --color-powder-blue:    #e5edf5;
+    --color-porcelain:      #f8fafd;
+    --color-platinum:       #ffffff;
 
-/* Ambient */
-.ambient{position:fixed;inset:0;pointer-events:none;z-index:0;overflow:hidden;}
-.orb{position:absolute;border-radius:50%;filter:blur(120px);opacity:0;transition:opacity 1.2s,background 1.2s;}
-.orb1{width:700px;height:700px;top:-200px;left:-100px;}
-.orb2{width:500px;height:500px;bottom:-100px;right:-100px;}
-body.mode-ig .orb1{background:radial-gradient(circle,rgba(245,133,41,.2),transparent 70%);opacity:1;}
-body.mode-ig .orb2{background:radial-gradient(circle,rgba(129,52,175,.16),transparent 70%);opacity:1;}
-body.mode-tg .orb1{background:radial-gradient(circle,rgba(42,171,238,.14),transparent 70%);opacity:1;}
-body.mode-tg .orb2{background:radial-gradient(circle,rgba(91,141,238,.1),transparent 70%);opacity:1;}
+    --color-deep-violet:    #533afd;
+    --color-soft-violet:    #8087ff;
+    --color-washed-violet:  #b9b9f9;
+    --color-accent-green:   #81b81a;
+    --color-vibrant-orange: #ff6118;
 
-/* ── LOGIN SCREEN ── */
-.login-screen{
-  position:fixed;inset:0;z-index:300;
-  background:var(--bg);
-  display:flex;align-items:center;justify-content:center;
-}
-.login-card{
-  background:var(--layer2);border:1px solid var(--glassbord);
-  border-radius:24px;padding:44px 40px;width:420px;max-width:95vw;
-  box-shadow:0 40px 100px rgba(0,0,0,.7);
-  animation:popIn .4s cubic-bezier(.34,1.56,.64,1);
-}
-@keyframes popIn{from{opacity:0;transform:scale(.9) translateY(20px)}to{opacity:1;transform:scale(1) translateY(0)}}
+    --gradient-dreamy:   radial-gradient(circle at 30% 20%, rgb(127,125,252), rgb(244,75,204) 33%, rgb(229,237,245) 66%);
+    --gradient-sunburst: linear-gradient(90deg, rgb(114,50,241) 3.13%, rgb(251,118,250) 50%, rgb(255,207,94));
 
-.login-logo{
-  font-family:'Playfair Display',serif;font-size:32px;font-weight:900;
-  background:var(--ig-grd);-webkit-background-clip:text;-webkit-text-fill-color:transparent;
-  margin-bottom:4px;
-}
-.login-sub{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text3);letter-spacing:.1em;margin-bottom:32px;}
+    --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 
-.login-platform{display:flex;gap:8px;margin-bottom:24px;}
-.lp-btn{
-  flex:1;padding:11px 8px;border-radius:11px;border:1px solid var(--border);
-  background:transparent;color:var(--text3);font-family:'DM Sans',sans-serif;
-  font-size:12px;font-weight:600;cursor:pointer;transition:all .2s;text-align:center;
-}
-.lp-btn:hover{border-color:rgba(255,255,255,.15);color:var(--text2);}
-.lp-btn.ig-active{background:rgba(221,42,123,.12);border-color:rgba(221,42,123,.4);color:#f58529;}
-.lp-btn.tg-active{background:rgba(42,171,238,.1);border-color:rgba(42,171,238,.4);color:#2aabee;}
+    --text-caption:   11px;
+    --text-body:      14px;
+    --text-subhead:   18px;
+    --text-h-sm:      22px;
+    --text-h:         32px;
+    --text-h-lg:      44px;
 
-.form-label{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px;display:block;}
-.form-input{
-  width:100%;background:var(--layer3);border:1px solid var(--border);
-  border-radius:10px;padding:12px 16px;color:var(--text);
-  font-family:'JetBrains Mono',monospace;font-size:12px;
-  outline:none;transition:border-color .2s,box-shadow .2s;margin-bottom:14px;
-}
-.form-input:focus{border-color:rgba(255,255,255,.2);box-shadow:0 0 0 3px rgba(255,255,255,.04);}
-.form-input::placeholder{color:var(--text3);}
+    --radius-button: 4px;
+    --radius-card:   6px;
 
-.btn-login{
-  width:100%;padding:14px;border-radius:11px;border:none;
-  background:var(--ig-grd);color:#fff;
-  font-family:'DM Sans',sans-serif;font-size:14px;font-weight:700;
-  cursor:pointer;transition:all .2s;letter-spacing:.02em;
-  box-shadow:0 4px 20px rgba(221,42,123,.3);margin-top:4px;
-}
-.btn-login.tg{background:var(--tg-grd);box-shadow:0 4px 20px rgba(42,171,238,.3);}
-.btn-login:hover{filter:brightness(1.1);transform:translateY(-1px);}
+    --shadow-feature: rgba(0,0,0,0.18) 0px 0px 32px 8px;
+    --shadow-hover:   rgba(50,50,93,0.12) 0px 16px 32px 0px;
+    --shadow-soft:    rgba(23,23,23,0.06) 0px 3px 6px 0px;
+    --shadow-elev:    rgba(23,23,23,0.08) 0px 15px 35px 0px;
 
-.btn-demo{
-  width:100%;padding:11px;border-radius:10px;border:1px solid var(--border);
-  background:var(--glass);color:var(--text2);
-  font-family:'DM Sans',sans-serif;font-size:13px;font-weight:500;
-  cursor:pointer;transition:all .2s;margin-top:8px;
-}
-.btn-demo:hover{background:rgba(255,255,255,.06);color:var(--text);}
+    --gap-section: 64px;
+    --gap-element: 8px;
+    --pad-card:    12px;
+  }
 
-.login-err{
-  background:rgba(244,63,94,.1);border:1px solid rgba(244,63,94,.25);
-  border-radius:9px;padding:10px 14px;
-  font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--red);
-  margin-top:12px;display:none;
-}
-.login-divider{
-  text-align:center;font-family:'JetBrains Mono',monospace;
-  font-size:9px;color:var(--text3);margin:16px 0;letter-spacing:.1em;
-}
+  * { box-sizing: border-box; margin: 0; padding: 0; }
 
-/* ── SIDEBAR ── */
-.sidebar{
-  width:var(--sidebar-w);min-height:100vh;
-  background:var(--layer1);border-right:1px solid var(--border);
-  display:flex;flex-direction:column;
-  position:fixed;left:0;top:0;bottom:0;z-index:100;overflow-y:auto;
-}
-.sidebar-logo{padding:20px 20px 14px;border-bottom:1px solid var(--border);}
-.logo-name{
-  font-family:'Playfair Display',serif;font-size:22px;font-weight:900;letter-spacing:-.03em;
-  background:var(--ig-grd);-webkit-background-clip:text;-webkit-text-fill-color:transparent;
-  transition:background .6s;
-}
-body.mode-tg .logo-name{background:var(--tg-grd);-webkit-background-clip:text;-webkit-text-fill-color:transparent;}
-.logo-tagline{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--text3);letter-spacing:.1em;margin-top:2px;}
+  html, body {
+    background: var(--color-platinum);
+    color: var(--color-midnight-ink);
+    font-family: var(--font-sans);
+    font-size: var(--text-body);
+    font-weight: 400;
+    line-height: 1.4;
+    letter-spacing: 0.003px;
+    font-feature-settings: "ss01" on, "tnum";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
 
-.platform-switch{padding:14px 16px;border-bottom:1px solid var(--border);}
-.platform-label{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.12em;margin-bottom:9px;}
-.switch-pills{display:flex;gap:6px;}
-.pill{flex:1;padding:9px 6px;border-radius:10px;border:1px solid var(--border);background:transparent;color:var(--text3);font-family:'DM Sans',sans-serif;font-size:12px;font-weight:600;cursor:pointer;transition:all .25s;display:flex;align-items:center;justify-content:center;gap:5px;}
-.pill:hover{border-color:rgba(255,255,255,.15);color:var(--text2);}
-.pill.active-ig{background:var(--ig-grd);border-color:transparent;color:#fff;box-shadow:0 4px 20px rgba(221,42,123,.3);}
-.pill.active-tg{background:var(--tg-grd);border-color:transparent;color:#fff;box-shadow:0 4px 20px rgba(42,171,238,.3);}
+  button { font-family: inherit; }
+  a { color: inherit; }
 
-.sidebar-account{padding:14px 16px;border-bottom:1px solid var(--border);}
-.acc-card{background:var(--glass);border:1px solid var(--glassbord);border-radius:12px;padding:11px;display:flex;align-items:center;gap:9px;}
-.acc-avatar{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0;background:var(--ig-grd);transition:background .6s;}
-body.mode-tg .acc-avatar{background:var(--tg-grd);}
-.acc-name{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.acc-handle{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text3);margin-top:1px;}
-.acc-dot{width:7px;height:7px;border-radius:50%;background:var(--green);flex-shrink:0;box-shadow:0 0 6px var(--green);}
+  /* hidden helper */
+  .hidden { display: none !important; }
 
-.nav-section{padding:14px 12px 6px;}
-.nav-section-label{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.12em;padding:0 8px;margin-bottom:5px;}
-.nav-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;color:var(--text3);font-size:13px;font-weight:500;cursor:pointer;transition:all .2s;border:1px solid transparent;margin-bottom:2px;position:relative;}
-.nav-item:hover{color:var(--text2);background:var(--glass);border-color:var(--glassbord);}
-.nav-item.active{color:var(--text);background:var(--layer3);border-color:var(--border);}
-.nav-item.active::before{content:'';position:absolute;left:0;top:50%;transform:translateY(-50%);width:3px;height:16px;border-radius:0 3px 3px 0;background:var(--ig-grd);transition:background .6s;}
-body.mode-tg .nav-item.active::before{background:var(--tg-grd);}
-.nav-icon{font-size:16px;opacity:.5;transition:opacity .2s;flex-shrink:0;}
-.nav-item.active .nav-icon{opacity:1;}
-.nav-badge{margin-left:auto;font-family:'JetBrains Mono',monospace;font-size:9px;padding:2px 7px;border-radius:20px;background:var(--layer3);color:var(--text3);}
+  /* ================================================================
+     LOGIN VIEW
+     ================================================================ */
+  #login-view {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 20px;
+    position: relative;
+    overflow: hidden;
+    background: var(--color-porcelain);
+  }
+  #login-view::before {
+    content: '';
+    position: absolute;
+    top: -200px; right: -200px;
+    width: 720px; height: 720px;
+    background: var(--gradient-dreamy);
+    opacity: 0.18;
+    filter: blur(50px);
+    border-radius: 50%;
+    pointer-events: none;
+  }
+  #login-view::after {
+    content: '';
+    position: absolute;
+    bottom: -240px; left: -240px;
+    width: 600px; height: 600px;
+    background: radial-gradient(circle, rgba(83,58,253,0.6), rgba(255,207,94,0.2) 50%, transparent 70%);
+    opacity: 0.18;
+    filter: blur(60px);
+    border-radius: 50%;
+    pointer-events: none;
+  }
+  .login-card {
+    background: var(--color-platinum);
+    border-radius: var(--radius-card);
+    padding: 40px;
+    width: 100%;
+    max-width: 400px;
+    box-shadow: var(--shadow-elev);
+    position: relative;
+    z-index: 1;
+  }
+  .login-logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 32px;
+  }
+  .login-logo-mark {
+    width: 28px; height: 28px;
+    background: var(--color-deep-violet);
+    border-radius: var(--radius-button);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: 500;
+    font-size: 16px;
+  }
+  .login-logo-text {
+    font-size: 18px;
+    font-weight: 400;
+    letter-spacing: -0.01em;
+  }
+  .login-card h1 {
+    font-size: var(--text-h);
+    font-weight: 300;
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+    margin-bottom: 8px;
+  }
+  .login-card p.sub {
+    color: var(--color-slate-blue);
+    font-size: var(--text-body);
+    margin-bottom: 32px;
+  }
+  .form-label {
+    display: block;
+    font-size: var(--text-caption);
+    color: var(--color-ghost-gray);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 6px;
+  }
+  .form-input {
+    width: 100%;
+    padding: 12px 14px;
+    background: var(--color-platinum);
+    border: 1px solid var(--color-stone-gray);
+    border-radius: var(--radius-button);
+    font-family: inherit;
+    font-size: var(--text-body);
+    color: var(--color-midnight-ink);
+    transition: border-color .15s, box-shadow .15s;
+  }
+  .form-input:focus {
+    outline: none;
+    border-color: var(--color-deep-violet);
+    box-shadow: 0 0 0 3px rgba(83, 58, 253, 0.12);
+  }
+  .login-error {
+    margin-top: 12px;
+    padding: 10px 12px;
+    background: rgba(255, 97, 24, 0.08);
+    border: 1px solid rgba(255, 97, 24, 0.25);
+    border-radius: var(--radius-button);
+    color: var(--color-vibrant-orange);
+    font-size: var(--text-caption);
+  }
+  .login-foot {
+    margin-top: 24px;
+    font-size: var(--text-caption);
+    color: var(--color-ghost-gray);
+    text-align: center;
+  }
 
-.sidebar-bottom{margin-top:auto;padding:14px;border-top:1px solid var(--border);}
-.period-label-sm{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:7px;}
-.period-options{display:flex;gap:4px;}
-.period-opt{flex:1;padding:7px 4px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text3);font-family:'DM Sans',sans-serif;font-size:11px;font-weight:500;cursor:pointer;transition:all .2s;text-align:center;}
-.period-opt:hover{border-color:rgba(255,255,255,.15);color:var(--text2);}
-.period-opt.active{background:var(--layer3);color:var(--text);border-color:rgba(255,255,255,.12);}
+  /* ================================================================
+     BUTTONS
+     ================================================================ */
+  .btn-primary {
+    background: var(--color-deep-violet);
+    color: var(--color-platinum);
+    border: none;
+    border-radius: var(--radius-button);
+    padding: 12px 24px;
+    font-size: var(--text-body);
+    font-weight: 400;
+    cursor: pointer;
+    transition: background .15s, transform .1s;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    justify-content: center;
+  }
+  .btn-primary:hover { background: #4429e8; }
+  .btn-primary:active { transform: translateY(1px); }
+  .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+  .btn-primary.full { width: 100%; }
+  .btn-primary.sm { padding: 8px 14px; font-size: var(--text-body); }
 
-.sidebar-user{display:flex;align-items:center;justify-content:space-between;padding:12px 0 0;margin-top:10px;}
-.sidebar-user-name{font-size:12px;color:var(--text2);font-weight:500;}
-.logout-btn{background:transparent;border:1px solid var(--border);border-radius:7px;padding:5px 10px;color:var(--text3);font-family:'DM Sans',sans-serif;font-size:11px;cursor:pointer;transition:all .2s;}
-.logout-btn:hover{border-color:var(--red);color:var(--red);}
+  .btn-outline {
+    background: transparent;
+    color: var(--color-deep-violet);
+    border: 1px solid var(--color-washed-violet);
+    border-radius: var(--radius-button);
+    padding: 7px 14px;
+    font-size: var(--text-body);
+    cursor: pointer;
+    transition: background .15s;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .btn-outline:hover { background: rgba(83,58,253,0.05); }
 
-/* ── MAIN ── */
-.main{margin-left:var(--sidebar-w);flex:1;min-height:100vh;position:relative;z-index:1;}
-.topbar{height:58px;background:rgba(8,9,15,.85);backdrop-filter:blur(20px);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 26px;justify-content:space-between;position:sticky;top:0;z-index:50;}
-.topbar-left{display:flex;align-items:center;gap:14px;}
-.topbar-title{font-family:'Playfair Display',serif;font-size:18px;font-weight:700;}
-.api-status{display:flex;align-items:center;gap:6px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text3);}
-.status-dot{width:6px;height:6px;border-radius:50%;}
-.status-dot.live{background:var(--green);box-shadow:0 0 8px var(--green);animation:livePulse 2s infinite;}
-.status-dot.demo{background:var(--yellow);}
-.status-dot.err{background:var(--red);}
-@keyframes livePulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(1.3)}}
+  .btn-ghost {
+    background: transparent;
+    color: var(--color-midnight-ink);
+    border: none;
+    padding: 8px 12px;
+    font-size: var(--text-body);
+    cursor: pointer;
+    border-radius: var(--radius-button);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .btn-ghost:hover { background: var(--color-powder-blue); }
 
-.topbar-actions{display:flex;gap:8px;align-items:center;}
-.btn-sm{padding:7px 16px;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:12px;font-weight:600;cursor:pointer;transition:all .2s;}
-.btn-sm-primary{background:var(--ig-grd);border:none;color:#fff;box-shadow:0 3px 12px rgba(221,42,123,.2);}
-body.mode-tg .btn-sm-primary{background:var(--tg-grd);box-shadow:0 3px 12px rgba(42,171,238,.2);}
-.btn-sm-primary:hover{filter:brightness(1.1);}
-.btn-sm-ghost{background:var(--glass);border:1px solid var(--border);color:var(--text2);}
-.btn-sm-ghost:hover{border-color:rgba(255,255,255,.15);color:var(--text);}
+  .icon-btn {
+    width: 32px; height: 32px;
+    border: none;
+    background: transparent;
+    border-radius: var(--radius-button);
+    color: var(--color-slate-blue);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background .15s;
+  }
+  .icon-btn:hover { background: var(--color-powder-blue); color: var(--color-midnight-ink); }
+  .icon-btn.spin svg { animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
 
-.content{padding:26px;}
-.page{display:none;}
-.page.active{display:block;animation:fadeIn .3s ease;}
-@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+  /* ================================================================
+     APP SHELL
+     ================================================================ */
+  .app-shell {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 24px 32px 96px;
+  }
+  .app-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 0;
+    border-bottom: 1px solid var(--color-powder-blue);
+    margin-bottom: 0;
+  }
+  .app-brand {
+    display: flex;
+    align-items: center;
+    gap: 32px;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 16px;
+    font-weight: 400;
+    letter-spacing: -0.01em;
+  }
+  .brand-mark {
+    width: 24px; height: 24px;
+    background: var(--color-deep-violet);
+    border-radius: var(--radius-button);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: 500;
+    font-size: 14px;
+  }
+  .nav { display: flex; gap: 24px; }
+  .nav a {
+    color: var(--color-slate-blue);
+    text-decoration: none;
+    font-size: var(--text-body);
+    padding: 6px 0;
+    position: relative;
+    transition: color .15s;
+    cursor: pointer;
+  }
+  .nav a:hover { color: var(--color-midnight-ink); }
+  .nav a.active { color: var(--color-midnight-ink); }
+  .nav a.active::after {
+    content: '';
+    position: absolute;
+    left: 0; right: 0; bottom: -17px;
+    height: 2px;
+    background: var(--color-deep-violet);
+  }
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    background: var(--color-powder-blue);
+    border-radius: 999px;
+    font-size: var(--text-caption);
+    color: var(--color-slate-blue);
+  }
+  .pill .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--color-accent-green);
+  }
+  .pill.warn .dot { background: var(--color-vibrant-orange); }
+  .pill.warn { color: var(--color-vibrant-orange); background: rgba(255,97,24,0.08); }
+  .avatar {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    background: var(--color-powder-blue);
+    color: var(--color-midnight-ink);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: var(--text-caption);
+    font-weight: 400;
+    cursor: pointer;
+  }
 
-/* ── CARDS & KPI ── */
-.kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(195px,1fr));gap:13px;margin-bottom:20px;}
-.kpi{background:var(--layer2);border:1px solid var(--border);border-radius:var(--radius);padding:20px;position:relative;overflow:hidden;transition:transform .2s,box-shadow .2s;cursor:default;}
-.kpi:hover{transform:translateY(-2px);box-shadow:0 12px 30px rgba(0,0,0,.4);}
-.kpi-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:13px;}
-.kpi-emoji{width:34px;height:34px;background:var(--layer3);border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:16px;}
-.delta{font-family:'JetBrains Mono',monospace;font-size:11px;padding:3px 9px;border-radius:20px;}
-.delta.pos{background:rgba(34,211,160,.12);color:var(--green);}
-.delta.neg{background:rgba(244,63,94,.1);color:var(--red);}
-.delta.neu{background:var(--layer3);color:var(--text3);}
-.kpi-val{font-family:'Playfair Display',serif;font-size:26px;font-weight:700;letter-spacing:-.03em;line-height:1;}
-.kpi-lbl{font-size:10px;color:var(--text3);margin-top:5px;font-weight:500;text-transform:uppercase;letter-spacing:.06em;}
-.kpi-sub{font-size:11px;color:var(--text3);margin-top:7px;}
+  /* ================================================================
+     HERO
+     ================================================================ */
+  .hero {
+    padding: 48px 0 40px;
+    position: relative;
+    overflow: hidden;
+    border-bottom: 1px solid var(--color-powder-blue);
+    margin-bottom: 32px;
+  }
+  .hero::before {
+    content: '';
+    position: absolute;
+    top: -200px; right: -160px;
+    width: 600px; height: 600px;
+    background: var(--gradient-dreamy);
+    opacity: 0.14;
+    filter: blur(50px);
+    pointer-events: none;
+    border-radius: 50%;
+  }
+  .hero-content { position: relative; z-index: 1; max-width: 760px; }
+  .hero-eyebrow {
+    font-size: var(--text-caption);
+    color: var(--color-deep-violet);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    margin-bottom: 12px;
+  }
+  .hero-title {
+    font-size: var(--text-h-lg);
+    font-weight: 300;
+    line-height: 1.1;
+    letter-spacing: -0.025em;
+    margin-bottom: 12px;
+  }
+  .hero-title em {
+    font-style: normal;
+    background: var(--gradient-sunburst);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .hero-sub {
+    font-size: var(--text-subhead);
+    line-height: 1.4;
+    color: var(--color-slate-blue);
+    font-weight: 300;
+    letter-spacing: -0.009em;
+    margin-bottom: 24px;
+  }
+  .hero-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
-.card{background:var(--layer2);border:1px solid var(--border);border-radius:var(--radius);padding:22px;position:relative;overflow:hidden;}
-.card::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.06),transparent);}
-.card-head{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px;gap:12px;flex-wrap:wrap;}
-.card-title{font-size:14px;font-weight:600;}
-.card-sub{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text3);margin-top:3px;}
-.chip{font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:500;padding:3px 9px;border-radius:20px;letter-spacing:.06em;white-space:nowrap;text-transform:uppercase;}
-.chip-ig{background:rgba(245,133,41,.1);color:#f58529;border:1px solid rgba(245,133,41,.2);}
-.chip-tg{background:rgba(42,171,238,.1);color:#2aabee;border:1px solid rgba(42,171,238,.2);}
-.chip-green{background:rgba(34,211,160,.1);color:var(--green);border:1px solid rgba(34,211,160,.2);}
-.chip-yellow{background:rgba(251,191,36,.1);color:var(--yellow);border:1px solid rgba(251,191,36,.2);}
-.chip-purple{background:rgba(167,139,250,.1);color:var(--purple);border:1px solid rgba(167,139,250,.2);}
+  /* ================================================================
+     SECTIONS
+     ================================================================ */
+  .section { margin-bottom: 32px; }
+  .section-head {
+    display: flex;
+    align-items: end;
+    justify-content: space-between;
+    margin-bottom: 16px;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .section-head h2 {
+    font-size: var(--text-h-sm);
+    font-weight: 300;
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+  }
+  .section-head p {
+    color: var(--color-slate-blue);
+    font-size: var(--text-body);
+    margin-top: 4px;
+  }
+  .tabs {
+    display: inline-flex;
+    background: var(--color-powder-blue);
+    padding: 3px;
+    border-radius: var(--radius-button);
+  }
+  .tabs button {
+    background: transparent;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 3px;
+    font-size: var(--text-caption);
+    color: var(--color-slate-blue);
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .tabs button.active {
+    background: var(--color-platinum);
+    color: var(--color-midnight-ink);
+    box-shadow: var(--shadow-soft);
+  }
 
-canvas{max-height:220px;}
-.g2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;}
-.g3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:16px;}
-.g2-1{display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:16px;}
-@media(max-width:900px){.g2,.g3,.g2-1{grid-template-columns:1fr;}}
-.mb{margin-bottom:16px;}
+  /* ================================================================
+     KPI GRID
+     ================================================================ */
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+  }
+  .kpi-card {
+    background: var(--color-powder-blue);
+    border-radius: var(--radius-card);
+    padding: 20px;
+    position: relative;
+    transition: box-shadow .2s;
+  }
+  .kpi-card.feature {
+    background: var(--color-porcelain);
+    box-shadow: var(--shadow-feature);
+  }
+  .kpi-label {
+    font-size: var(--text-caption);
+    color: var(--color-slate-blue);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 12px;
+  }
+  .kpi-value {
+    font-size: var(--text-h);
+    font-weight: 300;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+    font-feature-settings: "tnum";
+  }
+  .kpi-delta {
+    margin-top: 10px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: var(--text-caption);
+    color: var(--color-accent-green);
+  }
+  .kpi-delta.down { color: var(--color-vibrant-orange); }
+  .kpi-delta.muted { color: var(--color-ghost-gray); }
+  .kpi-spark {
+    margin-top: 12px;
+    height: 32px;
+    width: 100%;
+  }
 
-/* Funnel */
-.funnel-list{display:flex;flex-direction:column;gap:8px;}
-.funnel-item{display:flex;align-items:center;gap:12px;}
-.fn-label{font-size:11px;color:var(--text2);width:110px;flex-shrink:0;}
-.fn-track{flex:1;height:28px;background:var(--layer3);border-radius:7px;overflow:hidden;}
-.fn-fill{height:100%;border-radius:7px;display:flex;align-items:center;padding:0 10px;}
-.fn-val{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:500;color:rgba(255,255,255,.85);white-space:nowrap;}
-.fn-pct{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text3);width:42px;text-align:right;flex-shrink:0;}
+  /* ================================================================
+     PANELS
+     ================================================================ */
+  .two-col {
+    display: grid;
+    grid-template-columns: 1.5fr 1fr;
+    gap: 12px;
+  }
+  .panel {
+    background: var(--color-porcelain);
+    border-radius: var(--radius-card);
+    padding: 20px;
+  }
+  .panel.tg-panel { background: var(--color-powder-blue); }
+  .panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+    gap: 12px;
+  }
+  .panel-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .panel-title h3 {
+    font-size: var(--text-subhead);
+    font-weight: 400;
+    letter-spacing: -0.009em;
+  }
+  .panel-title small {
+    color: var(--color-slate-blue);
+    font-size: var(--text-caption);
+    display: block;
+    margin-top: 1px;
+  }
+  .src-mark {
+    width: 28px; height: 28px;
+    border-radius: var(--radius-button);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 14px;
+    font-weight: 500;
+    flex-shrink: 0;
+  }
+  .src-mark.ig { background: linear-gradient(135deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888); }
+  .src-mark.tg { background: linear-gradient(135deg, #2AABEE, #229ED9); }
 
-/* Heatmap */
-.heatmap-scroll{overflow-x:auto;}
-.heatmap{display:grid;grid-template-columns:36px repeat(24,1fr);gap:2px;min-width:560px;}
-.hm-lbl{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--text3);display:flex;align-items:center;}
-.hm-hdr{font-family:'JetBrains Mono',monospace;font-size:8px;color:var(--text3);text-align:center;}
-.hm-cell{height:22px;border-radius:3px;cursor:default;transition:transform .15s;}
-.hm-cell:hover{transform:scale(1.3);z-index:2;position:relative;}
+  .profile-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--color-stone-gray);
+    margin-bottom: 20px;
+  }
+  .profile-pic {
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    background: var(--gradient-dreamy);
+    flex-shrink: 0;
+    object-fit: cover;
+  }
+  .profile-info .username {
+    font-size: var(--text-subhead);
+    font-weight: 400;
+    letter-spacing: -0.009em;
+  }
+  .profile-info .meta {
+    font-size: var(--text-caption);
+    color: var(--color-slate-blue);
+    margin-top: 2px;
+  }
 
-/* Insights */
-.insight-stream{display:flex;flex-direction:column;gap:10px;}
-.insight-item{display:flex;align-items:flex-start;gap:14px;background:var(--glass);border:1px solid var(--glassbord);border-radius:12px;padding:14px;transition:all .2s;}
-.insight-item:hover{background:rgba(255,255,255,.04);}
-.ins-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:5px;}
-.ins-title{font-size:13px;font-weight:600;margin-bottom:3px;}
-.ins-body{font-size:12px;color:var(--text2);line-height:1.6;}
+  .stat-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .stat-cell {
+    background: var(--color-platinum);
+    border-radius: var(--radius-card);
+    padding: 14px;
+  }
+  .stat-cell .label {
+    font-size: var(--text-caption);
+    color: var(--color-slate-blue);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 6px;
+  }
+  .stat-cell .val {
+    font-size: var(--text-h-sm);
+    font-weight: 300;
+    letter-spacing: -0.01em;
+    font-feature-settings: "tnum";
+  }
+  .stat-cell .sub {
+    font-size: var(--text-caption);
+    color: var(--color-ghost-gray);
+    margin-top: 4px;
+  }
 
-/* Posts table */
-.posts-wrap{overflow-x:auto;}
-.posts-table{width:100%;border-collapse:collapse;}
-.posts-table th{text-align:left;padding:0 11px 12px;font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.1em;border-bottom:1px solid var(--border);}
-.posts-table td{padding:11px;font-size:12px;border-bottom:1px solid rgba(255,255,255,.04);vertical-align:middle;}
-.posts-table tr:last-child td{border-bottom:none;}
-.posts-table tr:hover td{background:var(--glass);}
+  .chart-card {
+    background: var(--color-platinum);
+    border-radius: var(--radius-card);
+    padding: 16px;
+  }
+  .chart-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+  .chart-title { font-size: var(--text-body); color: var(--color-slate-blue); }
+  .chart-legend {
+    display: flex;
+    gap: 14px;
+    font-size: var(--text-caption);
+    color: var(--color-ghost-gray);
+  }
+  .chart-legend .leg {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .chart-legend .leg::before {
+    content: '';
+    width: 8px; height: 8px;
+    border-radius: 2px;
+  }
+  .chart-legend .leg.violet::before { background: var(--color-deep-violet); }
+  .chart-legend .leg.soft::before   { background: var(--color-soft-violet); }
 
-/* Bench */
-.bench-list{display:flex;flex-direction:column;gap:12px;}
-.bench-item{display:flex;flex-direction:column;gap:5px;}
-.bench-row{display:flex;justify-content:space-between;}
-.bench-name{font-size:12px;font-weight:500;}
-.bench-val{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text3);}
-.bench-track{height:5px;background:var(--layer3);border-radius:5px;overflow:hidden;}
-.bench-fill{height:100%;border-radius:5px;}
+  .insight-box {
+    background: var(--color-platinum);
+    border-radius: var(--radius-card);
+    padding: 14px;
+    margin-top: 12px;
+    display: flex;
+    align-items: start;
+    gap: 10px;
+  }
+  .insight-icon {
+    width: 24px; height: 24px;
+    border-radius: var(--radius-button);
+    background: rgba(129,184,26,0.12);
+    color: var(--color-accent-green);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: 13px;
+  }
+  .insight-box .title {
+    font-size: var(--text-body);
+    margin-bottom: 2px;
+  }
+  .insight-box .desc {
+    font-size: var(--text-caption);
+    color: var(--color-slate-blue);
+  }
 
-/* Rings */
-.rings-row{display:flex;gap:14px;justify-content:space-around;flex-wrap:wrap;padding:8px 0;}
-.ring-item{display:flex;flex-direction:column;align-items:center;gap:6px;}
-.ring-svg{width:72px;height:72px;}
-.ring-label{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--text3);text-align:center;letter-spacing:.05em;text-transform:uppercase;}
+  /* ================================================================
+     POSTS TABLE
+     ================================================================ */
+  .posts-table {
+    background: var(--color-platinum);
+    border: 1px solid var(--color-powder-blue);
+    border-radius: var(--radius-card);
+    overflow: hidden;
+  }
+  .posts-row {
+    display: grid;
+    grid-template-columns: 64px 1fr 80px 110px 110px 90px;
+    gap: 16px;
+    padding: 12px 16px;
+    align-items: center;
+    border-bottom: 1px solid var(--color-powder-blue);
+    transition: background .15s;
+  }
+  .posts-row:last-child { border-bottom: none; }
+  .posts-row:hover:not(.head) { background: var(--color-porcelain); }
+  .posts-row.head {
+    background: var(--color-porcelain);
+    font-size: var(--text-caption);
+    color: var(--color-slate-blue);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .post-thumb {
+    width: 48px; height: 48px;
+    border-radius: var(--radius-button);
+    background: var(--gradient-dreamy);
+    object-fit: cover;
+    flex-shrink: 0;
+  }
+  .post-caption .title {
+    font-size: var(--text-body);
+    color: var(--color-midnight-ink);
+    margin-bottom: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+  }
+  .post-caption .date {
+    font-size: var(--text-caption);
+    color: var(--color-ghost-gray);
+  }
+  .num {
+    font-feature-settings: "tnum";
+    font-size: var(--text-body);
+    color: var(--color-midnight-ink);
+    text-align: right;
+  }
+  .num.muted { color: var(--color-ghost-gray); }
+  .tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: var(--radius-button);
+    font-size: var(--text-caption);
+    border: 1px solid;
+    white-space: nowrap;
+  }
+  .tag.green { color: var(--color-accent-green); border-color: rgba(129,184,26,0.3); background: rgba(129,184,26,0.06); }
+  .tag.violet { color: var(--color-deep-violet); border-color: var(--color-washed-violet); background: rgba(83,58,253,0.04); }
+  .tag.orange { color: var(--color-vibrant-orange); border-color: rgba(255,97,24,0.3); background: rgba(255,97,24,0.06); }
 
-/* Tags */
-.tag-cloud{display:flex;flex-wrap:wrap;gap:8px;padding:4px 0;}
-.tag-pill{padding:5px 13px;border-radius:20px;font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--layer3);border:1px solid var(--border);color:var(--text3);cursor:default;transition:all .2s;}
-.tag-pill:hover{border-color:rgba(255,255,255,.15);color:var(--text2);}
-.tag-pill.h1{background:rgba(245,133,41,.1);border-color:rgba(245,133,41,.2);color:#f58529;font-size:13px;}
-.tag-pill.h2{background:rgba(221,42,123,.08);border-color:rgba(221,42,123,.2);color:#dd2a7b;font-size:12px;}
+  /* ================================================================
+     LOADING / EMPTY STATES
+     ================================================================ */
+  .skeleton {
+    background: linear-gradient(90deg, var(--color-powder-blue) 0%, var(--color-porcelain) 50%, var(--color-powder-blue) 100%);
+    background-size: 200% 100%;
+    animation: shimmer 1.4s ease-in-out infinite;
+    border-radius: var(--radius-button);
+  }
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
 
-/* Metric grid */
-.metric-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;}
-.metric-item{background:var(--layer3);border:1px solid var(--border);border-radius:12px;padding:16px;display:flex;align-items:center;gap:12px;}
-.metric-icon{width:32px;height:32px;background:var(--glass);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0;}
-.metric-name{font-size:11px;color:var(--text3);font-weight:500;}
-.metric-val{font-size:14px;font-weight:700;margin-top:2px;}
+  .empty-state {
+    padding: 32px;
+    text-align: center;
+    color: var(--color-slate-blue);
+    font-size: var(--text-body);
+  }
+  .empty-state .em-title {
+    font-size: var(--text-subhead);
+    color: var(--color-midnight-ink);
+    font-weight: 400;
+    margin-bottom: 4px;
+  }
 
-/* Sec header */
-.sec-head{display:flex;align-items:center;gap:12px;margin-bottom:16px;}
-.sec-title{font-family:'Playfair Display',serif;font-size:16px;font-weight:700;white-space:nowrap;}
-.sec-line{flex:1;height:1px;background:var(--border);}
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    padding: 12px 16px;
+    background: var(--color-midnight-ink);
+    color: var(--color-platinum);
+    border-radius: var(--radius-card);
+    font-size: var(--text-body);
+    box-shadow: var(--shadow-elev);
+    z-index: 100;
+    transform: translateY(20px);
+    opacity: 0;
+    transition: all .25s;
+    pointer-events: none;
+  }
+  .toast.show {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  .toast.error { background: var(--color-vibrant-orange); }
 
-::-webkit-scrollbar{width:4px;height:4px;}
-::-webkit-scrollbar-track{background:transparent;}
-::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px;}
+  /* ================================================================
+     RESPONSIVE
+     ================================================================ */
+  @media (max-width: 960px) {
+    .app-shell { padding: 16px; }
+    .hero-title { font-size: var(--text-h); }
+    .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+    .two-col { grid-template-columns: 1fr; }
+    .nav { display: none; }
+    .posts-row { grid-template-columns: 48px 1fr 60px 80px; }
+    .posts-row > .col-hide { display: none; }
+    .stat-row { grid-template-columns: repeat(2, 1fr); }
+  }
 </style>
 </head>
-<body class="mode-ig">
-<div class="ambient"><div class="orb orb1"></div><div class="orb orb2"></div></div>
+<body>
 
-<!-- ════ LOGIN SCREEN ════ -->
-<div class="login-screen" id="loginScreen">
+<!-- ============================================================
+     LOGIN VIEW
+     ============================================================ -->
+<div id="login-view">
   <div class="login-card">
-    <div class="login-logo">Pulse</div>
-    <div class="login-sub">// SOCIAL ANALYTICS PLATFORM</div>
-
-    <div class="login-platform">
-      <button class="lp-btn ig-active" id="lpIg" onclick="setLoginMode('ig',this)">📸 Instagram</button>
-      <button class="lp-btn" id="lpTg" onclick="setLoginMode('tg',this)">✈️ Telegram</button>
+    <div class="login-logo">
+      <div class="login-logo-mark">P</div>
+      <div class="login-logo-text">Pulse</div>
     </div>
+    <h1>Вход в&nbsp;аналитику</h1>
+    <p class="sub">Введите командный пароль для доступа к&nbsp;дашборду.</p>
 
-    <div class="form-group">
-      <label class="form-label">Пароль команды</label>
-      <input class="form-input" type="password" id="loginPassword" placeholder="Введи пароль..." onkeydown="if(event.key==='Enter')doLogin()"/>
-    </div>
+    <form id="login-form" autocomplete="off">
+      <label class="form-label" for="password">Пароль</label>
+      <input id="password" type="password" class="form-input" autocomplete="current-password" required>
+      <div id="login-error" class="login-error hidden"></div>
+      <button type="submit" id="login-btn" class="btn-primary full" style="margin-top: 24px;">Войти</button>
+    </form>
 
-    <button class="btn-login" id="loginBtn" onclick="doLogin()">Войти →</button>
-
-    <div class="login-divider">— или —</div>
-    <button class="btn-demo" onclick="runDemo()">⚡ Демо-режим (без сервера)</button>
-    <div class="login-err" id="loginErr"></div>
+    <p class="login-foot">Сессия живёт 8&nbsp;часов · Защищено rate&#8209;limit</p>
   </div>
 </div>
 
-<!-- ════ SIDEBAR ════ -->
-<aside class="sidebar">
-  <div class="sidebar-logo">
-    <div class="logo-name">Pulse</div>
-    <div class="logo-tagline">// SOCIAL ANALYTICS</div>
-  </div>
-  <div class="platform-switch">
-    <div class="platform-label">Платформа</div>
-    <div class="switch-pills">
-      <button class="pill active-ig" id="pillIg" onclick="switchPlatform('ig')">📸 IG</button>
-      <button class="pill" id="pillTg" onclick="switchPlatform('tg')">✈️ TG</button>
-    </div>
-  </div>
-  <div class="sidebar-account">
-    <div class="acc-card">
-      <div class="acc-avatar" id="sideAvatar">📸</div>
-      <div style="flex:1;overflow:hidden">
-        <div class="acc-name" id="sideName">—</div>
-        <div class="acc-handle" id="sideHandle">—</div>
-      </div>
-      <div class="acc-dot"></div>
-    </div>
-  </div>
-  <div class="nav-section">
-    <div class="nav-section-label">Аналитика</div>
-    <div class="nav-item active" onclick="showPage('overview',this)"><span class="nav-icon">📊</span> Обзор <span class="nav-badge" id="modeBadge">LIVE</span></div>
-    <div class="nav-item" onclick="showPage('content',this)"><span class="nav-icon">🎨</span> Контент</div>
-    <div class="nav-item" onclick="showPage('engagement',this)"><span class="nav-icon">🔥</span> Вовлечённость</div>
-  </div>
-  <div class="nav-section">
-    <div class="nav-section-label">Расширенные</div>
-    <div class="nav-item" onclick="showPage('growth',this)"><span class="nav-icon">📈</span> Рост & Прогноз</div>
-    <div class="nav-item" onclick="showPage('virality',this)"><span class="nav-icon">🚀</span> Виральность</div>
-    <div class="nav-item" onclick="showPage('insights',this)"><span class="nav-icon">💡</span> Выводы AI</div>
-  </div>
-  <div class="sidebar-bottom">
-    <div class="period-label-sm">Период</div>
-    <div class="period-options">
-      <button class="period-opt" onclick="setPeriod(7,this)">7д</button>
-      <button class="period-opt active" onclick="setPeriod(30,this)">30д</button>
-      <button class="period-opt" onclick="setPeriod(90,this)">90д</button>
-    </div>
-    <div class="sidebar-user">
-      <span class="sidebar-user-name" id="sidebarUserLabel">Демо-режим</span>
-      <button class="logout-btn" onclick="doLogout()">Выйти</button>
-    </div>
-  </div>
-</aside>
+<!-- ============================================================
+     DASHBOARD VIEW
+     ============================================================ -->
+<div id="dash-view" class="hidden">
+  <div class="app-shell">
 
-<!-- ════ MAIN ════ -->
-<main class="main">
-  <div class="topbar">
-    <div class="topbar-left">
-      <div class="topbar-title" id="pageTitle">Обзор</div>
-      <div class="api-status"><div class="status-dot demo" id="statusDot"></div><span id="statusLabel">Демо</span></div>
-    </div>
-    <div class="topbar-actions">
-      <button class="btn-sm btn-sm-ghost" onclick="refreshData()">↻ Обновить</button>
-      <button class="btn-sm btn-sm-ghost" onclick="clearCache()">🗑 Кэш</button>
-      <button class="btn-sm btn-sm-primary" onclick="switchPlatform(MODE==='ig'?'tg':'ig')">Сменить платформу</button>
-    </div>
-  </div>
-
-  <div class="content">
-    <!-- OVERVIEW -->
-    <div class="page active" id="page-overview">
-      <div class="kpi-row" id="kpiRow"></div>
-      <div class="g2-1">
-        <div class="card"><div class="card-head"><div><div class="card-title">Охват & Просмотры</div><div class="card-sub">// динамика за период</div></div><span class="chip chip-ig" id="chipMain">REACH</span></div><canvas id="mainChart"></canvas></div>
-        <div class="card"><div class="card-head"><div><div class="card-title">Воронка</div><div class="card-sub">// от показов до действий</div></div></div><div class="funnel-list" id="funnelList"></div></div>
+    <!-- Header -->
+    <div class="app-header">
+      <div class="app-brand">
+        <div class="brand">
+          <div class="brand-mark">P</div>
+          <span>Pulse</span>
+        </div>
+        <nav class="nav">
+          <a class="active" data-anchor="overview">Обзор</a>
+          <a data-anchor="instagram">Instagram</a>
+          <a data-anchor="telegram">Telegram</a>
+          <a data-anchor="posts">Посты</a>
+        </nav>
       </div>
-      <div class="g3">
-        <div class="card"><div class="card-head"><div><div class="card-title">Подписчики</div><div class="card-sub">// прирост по дням</div></div></div><canvas id="subsChart"></canvas></div>
-        <div class="card"><div class="card-head"><div><div class="card-title" id="engLabel">Лайки & Сохранения</div><div class="card-sub">// по постам</div></div></div><canvas id="engChart"></canvas></div>
-        <div class="card"><div class="card-head"><div><div class="card-title">Реакции</div><div class="card-sub">// тип вовлечённости</div></div><span class="chip chip-green">REACT</span></div><canvas id="reactChart"></canvas></div>
-      </div>
-      <div class="sec-head"><div class="sec-title">Умные инсайты</div><div class="sec-line"></div><span class="chip chip-purple">AI</span></div>
-      <div class="insight-stream" id="insightStream"></div>
-    </div>
-
-    <!-- CONTENT -->
-    <div class="page" id="page-content">
-      <div class="g2">
-        <div class="card"><div class="card-head"><div><div class="card-title">Тип контента</div></div></div><canvas id="cTypeChart"></canvas></div>
-        <div class="card"><div class="card-head"><div><div class="card-title">Лучшее время публикации</div><div class="card-sub">// охват по часам</div></div><span class="chip chip-yellow">TIMING</span></div><canvas id="hoursChart"></canvas></div>
-      </div>
-      <div class="g2">
-        <div class="card"><div class="card-head"><div><div class="card-title">Лучший день недели</div></div><span class="chip chip-green">DOW</span></div><canvas id="dowChart"></canvas></div>
-        <div class="card"><div class="card-head"><div><div class="card-title" id="erByTypeTitle">ER% по типу контента</div></div></div><canvas id="erTypeChart"></canvas></div>
-      </div>
-      <div class="card mb">
-        <div class="card-head"><div><div class="card-title">Тепловая карта активности</div><div class="card-sub">// день × час</div></div><span class="chip chip-purple">HEATMAP</span></div>
-        <div class="heatmap-scroll"><div class="heatmap" id="heatmapGrid"></div></div>
-      </div>
-      <div class="card mb"><div class="card-head"><div><div class="card-title">Популярные теги</div></div></div><div class="tag-cloud" id="tagCloud"></div></div>
-      <div class="card">
-        <div class="card-head"><div><div class="card-title">Топ публикации</div><div class="card-sub">// по охвату</div></div><span class="chip chip-yellow">TOP 15</span></div>
-        <div class="posts-wrap"><table class="posts-table"><thead><tr><th>#</th><th>Публикация</th><th>Тип</th><th>Дата</th><th id="col1h">❤️ Лайки</th><th>💬 Коммент.</th><th>↗️ Репосты</th><th id="col4h">👁 Охват</th><th id="erColH">ER%</th></tr></thead><tbody id="postsBody"></tbody></table></div>
+      <div class="header-right">
+        <span id="status-pill" class="pill"><span class="dot"></span><span id="status-text">Загрузка…</span></span>
+        <button id="refresh-btn" class="icon-btn" title="Обновить">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>
+        </button>
+        <button id="logout-btn" class="icon-btn" title="Выйти">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        </button>
       </div>
     </div>
 
-    <!-- ENGAGEMENT -->
-    <div class="page" id="page-engagement">
-      <div class="g2">
-        <div class="card"><div class="card-head"><div><div class="card-title">Оценка аккаунта</div></div><span class="chip chip-purple">SCORE</span></div><div class="rings-row" id="scoreRings"></div></div>
-        <div class="card"><div class="card-head"><div><div class="card-title" id="benchTitle">ER% Benchmark</div><div class="card-sub">// vs нормы отрасли</div></div></div><div class="bench-list" id="benchList"></div></div>
-      </div>
-      <div class="g2">
-        <div class="card"><div class="card-head"><div><div class="card-title">Динамика ER%</div><div class="card-sub">// по неделям</div></div></div><canvas id="erTrendChart"></canvas></div>
-        <div class="card"><div class="card-head"><div><div class="card-title">Scatter: охват vs реакции</div></div></div><canvas id="scatterChart"></canvas></div>
+    <!-- Hero -->
+    <div class="hero">
+      <div class="hero-content">
+        <div class="hero-eyebrow" id="hero-eyebrow">Загрузка данных…</div>
+        <h1 class="hero-title" id="hero-title">Привет.</h1>
+        <p class="hero-sub" id="hero-sub">Сводка по&nbsp;Instagram и&nbsp;Telegram.</p>
+        <div class="hero-actions">
+          <button class="btn-primary sm" onclick="window.location.hash='#posts'">Открыть посты</button>
+          <button class="btn-outline" id="export-btn">Экспорт CSV</button>
+          <button class="btn-ghost" id="clear-cache-btn">Сбросить кэш</button>
+        </div>
       </div>
     </div>
 
-    <!-- GROWTH -->
-    <div class="page" id="page-growth">
-      <div class="g2">
-        <div class="card"><div class="card-head"><div><div class="card-title">Прогноз роста</div><div class="card-sub">// тренд на 30 дней</div></div><span class="chip chip-green">FORECAST</span></div><canvas id="forecastChart"></canvas></div>
-        <div class="card"><div class="card-head"><div><div class="card-title">Скорость роста</div><div class="card-sub">// % в неделю</div></div></div><canvas id="velocityChart"></canvas></div>
+    <!-- KPI section -->
+    <div class="section" id="overview">
+      <div class="section-head">
+        <div>
+          <h2>Ключевые метрики</h2>
+          <p>Сравнение с&nbsp;предыдущим периодом</p>
+        </div>
+        <div class="tabs" id="period-tabs">
+          <button data-period="1">24ч</button>
+          <button data-period="7" class="active">7д</button>
+          <button data-period="30">30д</button>
+          <button data-period="90">90д</button>
+        </div>
       </div>
-      <div class="card mb"><div class="card-head"><div><div class="card-title">Частота постинга vs Просмотры</div><div class="card-sub">// из реальных постов</div></div></div><canvas id="freqChart"></canvas></div>
-      <div class="card mb"><div class="card-head"><div><div class="card-title">Ключевые метрики роста</div></div></div><div class="metric-grid" id="growthMetrics"></div></div>
+      <div class="kpi-grid" id="kpi-grid">
+        <!-- KPI cards rendered by JS -->
+      </div>
     </div>
 
-    <!-- VIRALITY -->
-    <div class="page" id="page-virality">
-      <div class="g2">
-        <div class="card"><div class="card-head"><div><div class="card-title">Динамика репостов</div><div class="card-sub">// по дням</div></div><span class="chip chip-yellow">FWDS</span></div><canvas id="fwdChart"></canvas></div>
-        <div class="card"><div class="card-head"><div><div class="card-title">Виральный коэффициент</div><div class="card-sub">// репосты/просмотры × 100</div></div></div><canvas id="viralChart"></canvas></div>
+    <!-- Two-column: IG + TG -->
+    <div class="section">
+      <div class="two-col">
+        <div class="panel" id="instagram">
+          <div class="panel-head">
+            <div class="panel-title">
+              <div class="src-mark ig">Ⓘ</div>
+              <div>
+                <h3>Instagram</h3>
+                <small id="ig-username">загрузка…</small>
+              </div>
+            </div>
+            <a id="ig-open" class="btn-outline" target="_blank" rel="noopener" href="#" style="padding: 6px 12px; font-size: var(--text-caption); text-decoration: none;">Открыть профиль</a>
+          </div>
+
+          <div class="profile-row">
+            <div class="profile-pic skeleton" id="ig-pic" style="width: 56px; height: 56px;"></div>
+            <div class="profile-info">
+              <div class="username" id="ig-display-name">—</div>
+              <div class="meta" id="ig-meta">—</div>
+            </div>
+          </div>
+
+          <div class="stat-row" id="ig-stats">
+            <!-- rendered by JS -->
+          </div>
+
+          <div class="chart-card">
+            <div class="chart-head">
+              <span class="chart-title">Динамика охвата</span>
+              <div class="chart-legend">
+                <span class="leg violet">Текущий период</span>
+              </div>
+            </div>
+            <svg id="ig-chart" viewBox="0 0 600 140" width="100%" height="140" preserveAspectRatio="none"></svg>
+          </div>
+        </div>
+
+        <div class="panel tg-panel" id="telegram">
+          <div class="panel-head">
+            <div class="panel-title">
+              <div class="src-mark tg">✈</div>
+              <div>
+                <h3>Telegram</h3>
+                <small id="tg-username">загрузка…</small>
+              </div>
+            </div>
+            <a id="tg-open" class="btn-outline" target="_blank" rel="noopener" href="#" style="padding: 6px 12px; font-size: var(--text-caption); text-decoration: none;">Открыть канал</a>
+          </div>
+
+          <div class="stat-row" id="tg-stats" style="grid-template-columns: 1fr 1fr;">
+            <!-- rendered by JS -->
+          </div>
+
+          <div class="chart-card">
+            <div class="chart-head">
+              <span class="chart-title">Активность канала</span>
+            </div>
+            <svg id="tg-chart" viewBox="0 0 360 100" width="100%" height="100" preserveAspectRatio="none"></svg>
+            <div id="tg-chart-labels" style="display: flex; justify-content: space-between; font-size: var(--text-caption); color: var(--color-ghost-gray); padding-top: 6px;"></div>
+          </div>
+
+          <div id="tg-insight" class="insight-box hidden">
+            <div class="insight-icon">↑</div>
+            <div>
+              <div class="title" id="tg-insight-title"></div>
+              <div class="desc" id="tg-insight-desc"></div>
+            </div>
+          </div>
+        </div>
       </div>
-      <div class="card mb"><div class="card-head"><div><div class="card-title">Репосты и реакции по постам</div></div><span class="chip chip-green">FWDS/REACT</span></div><canvas id="savesChart"></canvas></div>
     </div>
 
-    <!-- INSIGHTS -->
-    <div class="page" id="page-insights">
-      <div class="sec-head"><div class="sec-title">Автоматические выводы</div><div class="sec-line"></div><span class="chip chip-purple">AI INSIGHTS</span></div>
-      <div id="insightsFull" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:13px;margin-bottom:22px"></div>
-      <div class="sec-head"><div class="sec-title">Рекомендации</div><div class="sec-line"></div></div>
-      <div id="recsFull" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:13px;margin-bottom:22px"></div>
-      <div class="g2">
-        <div class="card"><div class="card-head"><div><div class="card-title">Сравнение периодов</div></div></div><canvas id="compareChart"></canvas></div>
-        <div class="card"><div class="card-head"><div><div class="card-title">Radar — профиль аккаунта</div></div></div><canvas id="radarChart"></canvas></div>
+    <!-- Posts -->
+    <div class="section" id="posts">
+      <div class="section-head">
+        <div>
+          <h2>Последние посты</h2>
+          <p>Сортировка по&nbsp;охвату · Все источники</p>
+        </div>
+      </div>
+      <div class="posts-table" id="posts-table">
+        <div class="posts-row head">
+          <div></div>
+          <div>Пост</div>
+          <div style="text-align: right;">Источник</div>
+          <div style="text-align: right;">Охват</div>
+          <div style="text-align: right;">Лайки</div>
+          <div style="text-align: right;">ER</div>
+        </div>
+        <div id="posts-list">
+          <!-- rendered by JS -->
+        </div>
       </div>
     </div>
+
   </div>
-</main>
+</div>
+
+<div id="toast" class="toast"></div>
 
 <script>
-// ══════════════════════════════════════════
-// CONFIG & STATE
-// ══════════════════════════════════════════
-// При деплое на сервер — оставь пустую строку ''
-// При локальной разработке — 'http://localhost:3000'
-const API_BASE = '';
+/* ================================================================
+   APP — vanilla JS
+   ================================================================ */
 
-let MODE    = 'ig';
-let PERIOD  = 30;
-let SESSION = null; // токен авторизации
-let IS_DEMO = false;
-let charts  = {};
+const STORAGE_KEY = 'pulse_token';
+const STORAGE_EXP = 'pulse_token_exp';
 
-const PAGE_TITLES = {
-  overview:'Обзор', content:'Контент',
-  engagement:'Вовлечённость', growth:'Рост & Прогноз',
-  virality:'Виральность', insights:'Выводы AI'
+/* ── API client ──────────────────────────────────────────────── */
+const API = {
+  getToken() {
+    const t = localStorage.getItem(STORAGE_KEY);
+    const exp = parseInt(localStorage.getItem(STORAGE_EXP) || '0', 10);
+    if (!t || exp < Date.now()) return null;
+    return t;
+  },
+  setToken(token, ttlMs = 8 * 60 * 60 * 1000) {
+    localStorage.setItem(STORAGE_KEY, token);
+    localStorage.setItem(STORAGE_EXP, String(Date.now() + ttlMs));
+  },
+  clearToken() {
+    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(STORAGE_EXP);
+  },
+  async req(path, opts = {}) {
+    const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+    const token = this.getToken();
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const res = await fetch(path, { ...opts, headers });
+    if (res.status === 401) {
+      this.clearToken();
+      showLogin();
+      throw new Error('unauthorized');
+    }
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`;
+      try { const j = await res.json(); if (j && j.error) msg = j.error; } catch(e){}
+      throw new Error(msg);
+    }
+    if (res.status === 204) return null;
+    return res.json();
+  },
+  login(password)  { return this.req('/api/auth/login', { method: 'POST', body: JSON.stringify({ password }) }); },
+  logout()         { return this.req('/api/auth/logout', { method: 'POST' }); },
+  check()          { return this.req('/api/auth/check'); },
+  igProfile()      { return this.req('/api/ig/profile'); },
+  igInsights(d=7)  { return this.req(`/api/ig/insights?days=${d}`); },
+  igPosts(l=20)    { return this.req(`/api/ig/posts?limit=${l}`); },
+  tgChannel()      { return this.req('/api/tg/channel'); },
+  tgStats()        { return this.req('/api/tg/stats'); },
+  health()         { return this.req('/api/health'); },
+  clearCache()     { return this.req('/api/cache', { method: 'DELETE' }); }
 };
 
-// ══════════════════════════════════════════
-// AUTH
-// ══════════════════════════════════════════
-async function doLogin(){
-  const pw = document.getElementById('loginPassword').value.trim();
-  if(!pw){ showErr('Введи пароль'); return; }
-
-  document.getElementById('loginBtn').textContent = '⏳ Вхожу...';
-  try {
-    const res = await fetch(`${API_BASE}/api/auth/login`, {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({password: pw})
-    });
-    const data = await res.json();
-    if(!res.ok) { showErr(data.error || 'Неверный пароль'); return; }
-
-    SESSION = data.token;
-    localStorage.setItem('pulse_session', SESSION);
-    IS_DEMO = false;
-    document.getElementById('sidebarUserLabel').textContent = '🔒 Команда';
-    setStatus('live','LIVE API');
-    hideLogin();
-    await loadRealData();
-  } catch(e) {
-    showErr('Сервер недоступен — попробуй демо-режим');
-  } finally {
-    document.getElementById('loginBtn').textContent = 'Войти →';
+/* ── Helpers ─────────────────────────────────────────────────── */
+const fmt = {
+  num(n) {
+    if (n == null || isNaN(n)) return '—';
+    return Math.round(n).toLocaleString('ru-RU').replace(/,/g, '\u202f');
+  },
+  short(n) {
+    if (n == null || isNaN(n)) return '—';
+    const abs = Math.abs(n);
+    if (abs >= 1e6) return (n / 1e6).toFixed(1).replace('.0','') + 'M';
+    if (abs >= 1e3) return (n / 1e3).toFixed(1).replace('.0','') + 'k';
+    return String(Math.round(n));
+  },
+  pct(p, digits = 2) {
+    if (p == null || isNaN(p)) return '—';
+    return (p >= 0 ? '+' : '') + p.toFixed(digits) + '%';
+  },
+  delta(curr, prev, digits = 1) {
+    if (!prev || !curr) return null;
+    return ((curr - prev) / prev) * 100;
+  },
+  date(iso) {
+    if (!iso) return '';
+    try {
+      const d = new Date(iso);
+      return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }) + ', ' + d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+    } catch(e) { return ''; }
+  },
+  greeting() {
+    const h = new Date().getHours();
+    if (h < 6)  return 'Доброй ночи';
+    if (h < 12) return 'Доброе утро';
+    if (h < 18) return 'Добрый день';
+    return 'Добрый вечер';
+  },
+  todayLabel() {
+    const days = ['Воскресенье','Понедельник','Вторник','Среда','Четверг','Пятница','Суббота'];
+    const months = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
+    const d = new Date();
+    return `${days[d.getDay()]} · ${d.getDate()} ${months[d.getMonth()]}`;
   }
+};
+
+/* Try several keys on an object (server response shapes vary) */
+function pick(obj, keys, fallback = null) {
+  if (!obj) return fallback;
+  for (const k of keys) {
+    if (obj[k] != null) return obj[k];
+  }
+  return fallback;
 }
 
-function showErr(msg){
-  const el = document.getElementById('loginErr');
-  el.style.display='block'; el.textContent = '⚠️ ' + msg;
-}
-
-function doLogout(){
-  if(SESSION) fetch(`${API_BASE}/api/auth/logout`,{method:'POST',headers:{'x-session-token':SESSION}}).catch(()=>{});
-  SESSION = null; IS_DEMO = false;
-  localStorage.removeItem('pulse_session');
-  document.getElementById('loginScreen').style.display='flex';
-  document.getElementById('loginPassword').value='';
-  document.getElementById('loginErr').style.display='none';
-}
-
-function setLoginMode(mode, btn){
-  MODE = mode;
-  document.body.className='mode-'+mode;
-  document.querySelectorAll('.lp-btn').forEach(b=>b.className='lp-btn');
-  btn.className='lp-btn '+(mode==='ig'?'ig-active':'tg-active');
-  document.getElementById('loginBtn').className='btn-login'+(mode==='tg'?' tg':'');
-}
-
-function hideLogin(){ document.getElementById('loginScreen').style.display='none'; }
-
-function setStatus(type, label){
-  const dot = document.getElementById('statusDot');
-  dot.className = 'status-dot '+type;
-  document.getElementById('statusLabel').textContent = label;
-}
-
-// ══════════════════════════════════════════
-// API CALLS
-// ══════════════════════════════════════════
-function apiHeaders(){
-  return SESSION ? {'x-session-token': SESSION} : {};
-}
-
-async function apiGet(path){
-  const res = await fetch(`${API_BASE}${path}`, { headers: apiHeaders() });
-  if(res.status === 401){ doLogout(); throw new Error('Сессия истекла'); }
-  const data = await res.json();
-  if(data.error) throw new Error(data.error);
-  return data;
-}
-
-async function loadRealData(){
-  try {
-    if(MODE==='ig'){
-      // ── Instagram ────────────────────────────────────────
-      const [profile, insights, posts] = await Promise.all([
-        apiGet('/api/ig/profile'),
-        apiGet(`/api/ig/insights?days=${PERIOD}`),
-        apiGet('/api/ig/posts?limit=20'),
-      ]);
-      const insightSeries = insights.data || [];
-      const postList      = posts.data || [];
-
-      document.getElementById('sideName').textContent   = profile.name || profile.username;
-      document.getElementById('sideHandle').textContent = '@'+profile.username;
-      document.getElementById('sideAvatar').textContent = '📸';
-      setStatus('live', 'LIVE · Instagram API');
-
-      renderAll({
-        isIg:        true,
-        mem:         profile.followers_count,
-        avgReach:    Math.round(avg(parseValues(insightSeries,'reach')) || 2000),
-        posts:       postList.map(p=>({
-          ...p,
-          text:     p.caption||'',
-          likes:    p.like_count     || 0,
-          comments: p.comments_count || 0,
-          saves:    p.saved          || 0,
-          fwds:     p.shares         || 0,
-          views:    p.reach          || 0,
-        })),
-        labels:      parseDates(insightSeries, 'reach'),
-        viewsSeries: parseValues(insightSeries, 'reach'),
-        subsSeries:  parseValues(insightSeries, 'follower_count'),
-      });
-
-    } else {
-      // ── Telegram — один запрос, получаем всё что доступно ──
-      setStatus('live', 'Загружаем...');
-      const full = await apiGet(`/api/tg/full?limit=${PERIOD}`);
-
-      const ch    = full.channel       || {};
-      const vs    = full.views_summary || {};
-      const posts = full.posts         || [];
-      const hasMtp = full.mtproto_available;
-
-      document.getElementById('sideName').textContent   = ch.title    || '—';
-      document.getElementById('sideHandle').textContent = '@'+(ch.username || '');
-      document.getElementById('sideAvatar').textContent = '✈️';
-
-      // Статус в топбаре
-      setStatus('live', hasMtp ? 'LIVE · MTProto' : 'LIVE · Bot API');
-      if(!hasMtp){
-        showMtprotoHint(full.errors);
-      }
-
-      // Реальные просмотры по дням из MTProto
-      const viewsByDay = vs.views_by_day || {};
-      const sortedDays = Object.keys(viewsByDay).sort((a,b)=>{
-        const [da,ma] = a.split('.').map(Number);
-        const [db,mb] = b.split('.').map(Number);
-        return ma!==mb ? ma-mb : da-db;
-      });
-      const labels      = sortedDays.length ? sortedDays : makeLabels(PERIOD);
-      const viewsSeries = sortedDays.length ? sortedDays.map(d=>viewsByDay[d]) : [];
-
-      // Нормализуем посты из MTProto в единый формат
-      const normPosts = posts.map(p=>({
-        id:        p.id,
-        text:      p.text || '',
-        type:      p.media_type || 'text',
-        date:      p.date ? new Date(p.date).toLocaleDateString('ru-RU') : '—',
-        views:     p.views    || 0,   // ← РЕАЛЬНЫЕ просмотры из MTProto
-        fwds:      p.forwards || 0,   // ← РЕАЛЬНЫЕ репосты
-        reactions: p.reactions|| 0,
-        reactions_detail: p.reactions_detail || [],
-        comments:  p.replies  || 0,
-        likes:     0,
-        saves:     0,
-      }));
-
-      const avgViews = vs.avg_views || (normPosts.length
-        ? Math.round(normPosts.reduce((s,p)=>s+p.views,0)/normPosts.length)
-        : Math.floor(ch.memberCount*0.15));
-
-      renderAll({
-        isIg:        false,
-        mem:         ch.memberCount || 0,
-        avgReach:    avgViews,
-        posts:       normPosts,
-        labels,
-        viewsSeries,
-        subsSeries:  [],
-        // Передаём реальные агрегаты чтобы KPI были точными
-        realTotals: {
-          totalViews:    vs.total_views    || 0,
-          totalForwards: vs.total_forwards || 0,
-          totalReactions:vs.total_reactions|| 0,
-          totalReplies:  vs.total_replies  || 0,
-          avgViewsByType: vs.avg_views_by_type || {},
-        }
-      });
+/* Best-effort series extractor for IG insights / TG stats */
+function extractSeries(insights) {
+  if (!insights) return [];
+  // Common shapes:
+  // { data: [{name, values: [{value, end_time}]}] }   ← Meta Graph API style
+  // { reach: [...], impressions: [...] }
+  // [{date, reach, ...}]
+  if (Array.isArray(insights)) return insights;
+  if (Array.isArray(insights.data)) {
+    const reach = insights.data.find(d => /reach/i.test(d.name || ''));
+    if (reach && Array.isArray(reach.values)) {
+      return reach.values.map(v => ({ date: v.end_time, value: v.value }));
     }
-  } catch(e){
-    console.warn('API error:', e.message);
-    setStatus('err', 'Ошибка API');
-    showEmptyState(
-      'Не удалось загрузить данные',
-      `Ошибка: ${e.message}<br>Проверь подключение к серверу и настройки API.`
-    );
   }
+  if (Array.isArray(insights.series)) return insights.series;
+  if (Array.isArray(insights.timeline)) return insights.timeline;
+  return [];
 }
 
-function showMtprotoHint(errors){
-  // Показываем ненавязчивое уведомление если MTProto недоступен
-  const existing = document.getElementById('mtprotoHint');
-  if(existing) return;
-  const hint = document.createElement('div');
-  hint.id = 'mtprotoHint';
-  hint.style.cssText = `
-    background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.2);
-    border-radius:10px;padding:12px 16px;margin-bottom:16px;
-    font-size:12px;color:#fbbf24;display:flex;gap:10px;align-items:flex-start;
-  `;
-  const mtpErr = errors?.mtp || 'сервис не запущен';
-  hint.innerHTML = `
-    <span style="font-size:16px;flex-shrink:0">⚠️</span>
-    <div>
-      <b>MTProto сервис недоступен</b> — просмотры постов показаны приблизительно.<br>
-      <span style="color:rgba(251,191,36,.6);font-size:11px">Причина: ${mtpErr}</span><br>
-      <span style="color:rgba(251,191,36,.6);font-size:11px">Запусти: <code style="background:rgba(0,0,0,.3);padding:1px 5px;border-radius:3px">cd mtproto && pip install -r requirements.txt && python service.py</code></span>
-    </div>
-    <button onclick="this.parentElement.remove()" style="background:transparent;border:none;color:#fbbf24;cursor:pointer;font-size:16px;margin-left:auto;flex-shrink:0">✕</button>
-  `;
-  const content = document.querySelector('.content');
-  if(content) content.prepend(hint);
+/* Sum metric across values */
+function sumMetric(insights, names) {
+  if (!insights || !Array.isArray(insights.data)) return null;
+  const item = insights.data.find(d => names.some(n => (d.name || '').toLowerCase() === n.toLowerCase()));
+  if (!item) return null;
+  if (Array.isArray(item.values)) {
+    return item.values.reduce((acc, v) => acc + (Number(v.value) || 0), 0);
+  }
+  return Number(item.value) || null;
 }
 
-function parseDates(insightData, name){
-  const m = insightData.find(x=>x.name===name);
-  if(!m) return makeLabels(PERIOD);
-  return (m.values||[]).map(v=>{ const d=new Date(v.end_time); return d.getDate()+'.'+(d.getMonth()+1).toString().padStart(2,'0'); });
+/* ── View switching ──────────────────────────────────────────── */
+function showLogin() {
+  document.getElementById('login-view').classList.remove('hidden');
+  document.getElementById('dash-view').classList.add('hidden');
+  setTimeout(() => document.getElementById('password')?.focus(), 50);
 }
-function parseValues(insightData, name){
-  const m = insightData.find(x=>x.name===name);
-  return m ? (m.values||[]).map(v=>v.value) : [];
-}
-
-async function refreshData(){
-  if(IS_DEMO){ renderAll(buildDemoData()); return; }
-  await loadRealData();
+function showDash() {
+  document.getElementById('login-view').classList.add('hidden');
+  document.getElementById('dash-view').classList.remove('hidden');
 }
 
-async function clearCache(){
-  if(!SESSION){ alert('Только для авторизованных пользователей'); return; }
-  try { await apiGet('/api/cache'); alert('Кэш очищен'); } catch(e){ alert('Ошибка: '+e.message); }
+/* ── Toast ───────────────────────────────────────────────────── */
+let toastTimer = null;
+function toast(msg, type = 'info') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast show' + (type === 'error' ? ' error' : '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 3000);
 }
 
-// ══════════════════════════════════════════
-// DEMO MODE
-// ══════════════════════════════════════════
-function runDemo(){
-  // Демо только если явно запрошено с логин-экрана — не как фолбэк при ошибке API
-  IS_DEMO = true;
-  document.getElementById('sidebarUserLabel').textContent = 'Демо-режим';
-  setStatus('demo','DEMO');
-  hideLogin();
-  const isIg = MODE==='ig';
-  document.getElementById('sideName').textContent    = isIg?'demo_brand':'Tech Insights RU';
-  document.getElementById('sideHandle').textContent  = isIg?'@demo_brand':'@tech_insights_ru';
-  document.getElementById('sideAvatar').textContent  = isIg?'📸':'✈️';
-  const d = buildDemoData();
-  renderAll(d);
-}
+/* ── Login flow ──────────────────────────────────────────────── */
+document.getElementById('login-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const pw = document.getElementById('password').value;
+  const errEl = document.getElementById('login-error');
+  const btn = document.getElementById('login-btn');
+  errEl.classList.add('hidden');
+  btn.disabled = true;
+  btn.textContent = 'Вход…';
+  try {
+    const res = await API.login(pw);
+    const token = pick(res, ['token','access_token','jwt']);
+    if (!token) throw new Error('Не получен токен от сервера');
+    API.setToken(token);
+    document.getElementById('password').value = '';
+    showDash();
+    loadAll();
+  } catch (err) {
+    errEl.textContent = err.message === 'HTTP 401' ? 'Неверный пароль' : `Ошибка: ${err.message}`;
+    errEl.classList.remove('hidden');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Войти';
+  }
+});
 
-function buildDemoData(){
-  const isIg = MODE==='ig';
-  const mem = isIg?rb(10000,25000):rb(5000,50000);
-  const avgReach = isIg?rb(2000,6000):Math.floor(mem*rb(15,30)/100);
-  const labels = makeLabels(PERIOD);
-  const topics = isIg
-    ?['📸 Новый пост','🔥 Топ контент','✨ Вайб недели','🎯 Маркетинг','💡 Лайфхак','🚀 Запуск']
-    :['🤖 Нейросети 2025','📊 Кейс роста','⚡ Инструменты','🚀 Стартап дня','💡 Инсайт','🔥 Тренд'];
-  const types = isIg?['IMAGE','VIDEO','CAROUSEL_ALBUM']:['text','photo','video','poll'];
-  const posts = Array.from({length:15},(_,i)=>{
-    const views=rb(Math.floor(avgReach*.5),Math.floor(avgReach*1.8));
-    return {id:i+1,text:topics[i%topics.length],type:types[i%types.length],date:new Date(Date.now()-i*1.5*86400000).toLocaleDateString('ru-RU'),views,likes:isIg?Math.floor(views*rb(3,12)/100):0,comments:Math.floor(views*rb(0,3)/100),saves:isIg?Math.floor(views*rb(2,8)/100):0,fwds:Math.floor(views*rb(1,8)/100),reactions:!isIg?Math.floor(views*rb(3,12)/100):0};
+/* ── Logout ──────────────────────────────────────────────────── */
+document.getElementById('logout-btn').addEventListener('click', async () => {
+  try { await API.logout(); } catch(e){}
+  API.clearToken();
+  showLogin();
+});
+
+/* ── Refresh ─────────────────────────────────────────────────── */
+document.getElementById('refresh-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('refresh-btn');
+  btn.classList.add('spin');
+  await loadAll();
+  setTimeout(() => btn.classList.remove('spin'), 400);
+});
+
+/* ── Clear cache ─────────────────────────────────────────────── */
+document.getElementById('clear-cache-btn').addEventListener('click', async () => {
+  try {
+    await API.clearCache();
+    toast('Кэш сброшен. Обновляю данные…');
+    await loadAll();
+  } catch (e) {
+    toast('Не удалось сбросить кэш: ' + e.message, 'error');
+  }
+});
+
+/* ── Period tabs ─────────────────────────────────────────────── */
+let currentPeriod = 7;
+document.getElementById('period-tabs').addEventListener('click', (e) => {
+  const btn = e.target.closest('button');
+  if (!btn) return;
+  document.querySelectorAll('#period-tabs button').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  currentPeriod = parseInt(btn.dataset.period, 10);
+  loadAll();
+});
+
+/* ── Nav (smooth scroll) ─────────────────────────────────────── */
+document.querySelectorAll('.nav a').forEach(a => {
+  a.addEventListener('click', (e) => {
+    e.preventDefault();
+    document.querySelectorAll('.nav a').forEach(x => x.classList.remove('active'));
+    a.classList.add('active');
+    const id = a.dataset.anchor;
+    const el = document.getElementById(id);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
-  return {isIg,mem,avgReach,posts,labels,
-    viewsSeries:labels.map(()=>rb(Math.floor(avgReach*.6),Math.floor(avgReach*1.4))),
-    subsSeries:labels.map(()=>rb(isIg?8:15,isIg?60:120))};
+});
+
+/* ── CSV Export ──────────────────────────────────────────────── */
+document.getElementById('export-btn').addEventListener('click', () => {
+  if (!state.posts || state.posts.length === 0) {
+    toast('Нет данных для экспорта', 'error');
+    return;
+  }
+  const rows = [['Дата','Источник','Подпись','Охват','Лайки','Комментарии','ER']];
+  state.posts.forEach(p => {
+    rows.push([
+      p.date || '',
+      p.source || '',
+      (p.caption || '').replace(/[\n\r"]/g, ' '),
+      p.reach || 0,
+      p.likes || 0,
+      p.comments || 0,
+      p.er || ''
+    ]);
+  });
+  const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `pulse-posts-${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('CSV экспортирован');
+});
+
+/* ================================================================
+   DATA LOADING & RENDERING
+   ================================================================ */
+
+const state = {
+  ig: { profile: null, insights: null, posts: [] },
+  tg: { channel: null, stats: null },
+  posts: [] // unified
+};
+
+/* Sparkline path — values to SVG path (viewBox 200x32) */
+function sparkPath(values) {
+  if (!values || values.length === 0) return '';
+  const w = 200, h = 32, pad = 2;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const step = (w - pad * 2) / Math.max(values.length - 1, 1);
+  return values.map((v, i) => {
+    const x = pad + i * step;
+    const y = h - pad - ((v - min) / range) * (h - pad * 2);
+    return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
 }
 
-// Показываем пустое состояние вместо фейковых данных
-function showEmptyState(message, hint=''){
-  document.querySelector('.content').innerHTML = `
-    <div style="
-      display:flex;flex-direction:column;align-items:center;justify-content:center;
-      min-height:60vh;gap:16px;text-align:center;
-    ">
-      <div style="font-size:48px">📡</div>
-      <div style="font-family:'Playfair Display',serif;font-size:22px;font-weight:700">${message}</div>
-      ${hint?`<div style="font-size:13px;color:var(--text2);max-width:420px;line-height:1.7">${hint}</div>`:''}
-      <div style="display:flex;gap:10px;margin-top:8px;flex-wrap:wrap;justify-content:center">
-        <button class="btn-sm btn-sm-primary" onclick="loadRealData()" style="padding:10px 22px">
-          ↻ Попробовать снова
-        </button>
-        <button class="btn-sm btn-sm-ghost" onclick="location.reload()" style="padding:10px 22px">
-          Перезагрузить
-        </button>
+function sparkAreaPath(values) {
+  if (!values || values.length === 0) return '';
+  const line = sparkPath(values);
+  return `${line} L200,32 L0,32 Z`;
+}
+
+/* Big line chart (viewBox 600x140) */
+function lineChartSvg(values, opts = {}) {
+  if (!values || values.length === 0) {
+    return `<text x="300" y="70" text-anchor="middle" fill="#64748d" font-size="12" font-family="Inter">Нет данных за период</text>`;
+  }
+  const w = 600, h = 140, padX = 10, padY = 12;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = (max - min) || 1;
+  const step = (w - padX * 2) / Math.max(values.length - 1, 1);
+  const pts = values.map((v, i) => {
+    const x = padX + i * step;
+    const y = h - padY - ((v - min) / range) * (h - padY * 2);
+    return [x, y];
+  });
+  const linePath = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+  const areaPath = `${linePath} L${pts[pts.length-1][0].toFixed(1)},${h} L${pts[0][0].toFixed(1)},${h} Z`;
+  const lastX = pts[pts.length-1][0];
+  const lastY = pts[pts.length-1][1];
+
+  return `
+    <line x1="0" y1="35"  x2="600" y2="35"  stroke="#e5edf5" stroke-width="1"/>
+    <line x1="0" y1="70"  x2="600" y2="70"  stroke="#e5edf5" stroke-width="1"/>
+    <line x1="0" y1="105" x2="600" y2="105" stroke="#e5edf5" stroke-width="1"/>
+    <path d="${areaPath}" fill="#533afd" opacity="0.06"/>
+    <path d="${linePath}" fill="none" stroke="#533afd" stroke-width="2"/>
+    <circle cx="${lastX.toFixed(1)}" cy="${lastY.toFixed(1)}" r="4" fill="#533afd"/>
+    <circle cx="${lastX.toFixed(1)}" cy="${lastY.toFixed(1)}" r="8" fill="#533afd" opacity="0.15"/>
+  `;
+}
+
+/* Bar chart (viewBox 360x100, 7 bars) */
+function barChartSvg(values) {
+  if (!values || values.length === 0) {
+    return `<text x="180" y="50" text-anchor="middle" fill="#64748d" font-size="12" font-family="Inter">Нет данных</text>`;
+  }
+  const w = 360, h = 100;
+  const n = values.length;
+  const barW = Math.min(32, (w - 20) / n - 14);
+  const gap = ((w - 20) - barW * n) / Math.max(n - 1, 1);
+  const max = Math.max(...values, 1);
+  return values.map((v, i) => {
+    const barH = Math.max(4, (v / max) * (h - 10));
+    const x = 10 + i * (barW + gap);
+    const y = h - barH;
+    const isLatest = i >= n - 3;
+    const fill = isLatest ? '#533afd' : '#8087ff';
+    return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${barH.toFixed(1)}" fill="${fill}" rx="2"/>`;
+  }).join('');
+}
+
+/* ── KPI rendering ───────────────────────────────────────────── */
+function renderKpiSkeletons() {
+  const grid = document.getElementById('kpi-grid');
+  grid.innerHTML = Array(4).fill(0).map((_, i) => `
+    <div class="kpi-card${i === 0 ? ' feature' : ''}">
+      <div class="kpi-label skeleton" style="height: 11px; width: 60%;">&nbsp;</div>
+      <div class="skeleton" style="height: 32px; width: 70%; margin-top: 12px;">&nbsp;</div>
+      <div class="skeleton" style="height: 11px; width: 40%; margin-top: 12px;">&nbsp;</div>
+    </div>
+  `).join('');
+}
+
+function renderKpis() {
+  const grid = document.getElementById('kpi-grid');
+  const igFollowers = pick(state.ig.profile, ['followers_count','followers','subscribers']) || 0;
+  const tgMembers   = pick(state.tg.channel, ['members_count','member_count','subscribers']) || 0;
+  const total = igFollowers + tgMembers;
+
+  // Reach from IG insights
+  const igReach = sumMetric(state.ig.insights, ['reach']) || 0;
+  const igImpressions = sumMetric(state.ig.insights, ['impressions','views']) || 0;
+  const igProfileViews = sumMetric(state.ig.insights, ['profile_views']) || 0;
+
+  // Engagement from posts
+  let totalLikes = 0, totalComments = 0, postCount = 0;
+  state.posts.forEach(p => {
+    totalLikes += Number(p.likes) || 0;
+    totalComments += Number(p.comments) || 0;
+    if (p.reach || p.likes) postCount++;
+  });
+  const er = igFollowers > 0 ? ((totalLikes + totalComments) / igFollowers / Math.max(postCount,1)) * 100 : 0;
+
+  const cards = [
+    {
+      feature: true,
+      label: 'Подписчики · всего',
+      value: fmt.num(total),
+      delta: total > 0 ? '▲ IG ' + fmt.short(igFollowers) + ' · TG ' + fmt.short(tgMembers) : null,
+      deltaClass: 'muted',
+      spark: extractSeries(state.ig.insights).map(p => p.value).filter(v => v != null)
+    },
+    {
+      label: 'Охват',
+      value: fmt.num(igReach),
+      delta: igReach > 0 ? '▲ Instagram, ' + currentPeriod + ' дн.' : null,
+      deltaClass: '',
+      spark: extractSeries(state.ig.insights).map(p => p.value).filter(v => v != null)
+    },
+    {
+      label: 'Вовлечённость',
+      value: er > 0 ? er.toFixed(2) + '%' : '—',
+      delta: postCount > 0 ? `по ${postCount} постам` : null,
+      deltaClass: 'muted',
+      spark: []
+    },
+    {
+      label: 'Постов за период',
+      value: fmt.num(postCount),
+      delta: igImpressions > 0 ? fmt.short(igImpressions) + ' показов' : null,
+      deltaClass: 'muted',
+      spark: []
+    }
+  ];
+
+  grid.innerHTML = cards.map(c => `
+    <div class="kpi-card${c.feature ? ' feature' : ''}">
+      <div class="kpi-label">${c.label}</div>
+      <div class="kpi-value">${c.value}</div>
+      ${c.delta ? `<div class="kpi-delta ${c.deltaClass || ''}">${c.delta}</div>` : ''}
+      ${c.spark && c.spark.length > 1 ? `
+        <svg class="kpi-spark" viewBox="0 0 200 32" preserveAspectRatio="none">
+          <path d="${sparkAreaPath(c.spark)}" fill="#533afd" opacity="0.08"/>
+          <path d="${sparkPath(c.spark)}" fill="none" stroke="#533afd" stroke-width="1.5"/>
+        </svg>
+      ` : ''}
+    </div>
+  `).join('');
+}
+
+/* ── IG panel rendering ──────────────────────────────────────── */
+function renderIg() {
+  const p = state.ig.profile;
+  const username = pick(p, ['username','name']) || '';
+  const followers = pick(p, ['followers_count','followers']) || 0;
+  const following = pick(p, ['follows_count','following_count','following']) || 0;
+  const posts = pick(p, ['media_count','posts_count']) || 0;
+  const pic = pick(p, ['profile_picture_url','profile_pic_url','avatar_url']);
+
+  document.getElementById('ig-username').textContent = username ? '@' + username + ' · Бизнес-аккаунт' : 'Не подключено';
+  document.getElementById('ig-display-name').textContent = pick(p, ['name','full_name']) || (username ? '@' + username : '—');
+  document.getElementById('ig-meta').textContent = p
+    ? `Подписчиков: ${fmt.num(followers)} · Подписок: ${fmt.num(following)} · Постов: ${fmt.num(posts)}`
+    : '—';
+
+  const picEl = document.getElementById('ig-pic');
+  if (pic) {
+    picEl.outerHTML = `<img id="ig-pic" class="profile-pic" src="${pic}" alt="" referrerpolicy="no-referrer">`;
+  } else {
+    picEl.classList.remove('skeleton');
+  }
+
+  if (username) {
+    document.getElementById('ig-open').href = 'https://instagram.com/' + username;
+  }
+
+  // Stat row
+  const reach = sumMetric(state.ig.insights, ['reach']) || 0;
+  const impressions = sumMetric(state.ig.insights, ['impressions','views']) || 0;
+  const profileViews = sumMetric(state.ig.insights, ['profile_views']) || 0;
+  document.getElementById('ig-stats').innerHTML = `
+    <div class="stat-cell">
+      <div class="label">Охват</div>
+      <div class="val">${fmt.short(reach)}</div>
+      <div class="sub">за ${currentPeriod}&nbsp;дн.</div>
+    </div>
+    <div class="stat-cell">
+      <div class="label">Показы</div>
+      <div class="val">${fmt.short(impressions)}</div>
+      <div class="sub">за ${currentPeriod}&nbsp;дн.</div>
+    </div>
+    <div class="stat-cell">
+      <div class="label">Просм. профиля</div>
+      <div class="val">${fmt.short(profileViews)}</div>
+      <div class="sub">за ${currentPeriod}&nbsp;дн.</div>
+    </div>
+  `;
+
+  // Chart
+  const series = extractSeries(state.ig.insights).map(s => Number(s.value) || 0);
+  document.getElementById('ig-chart').innerHTML = lineChartSvg(series);
+}
+
+/* ── TG panel rendering ──────────────────────────────────────── */
+function renderTg() {
+  const c = state.tg.channel;
+  const username = pick(c, ['username','channel_username']) || '';
+  const title = pick(c, ['title','name']) || '';
+  const members = pick(c, ['members_count','member_count','subscribers']) || 0;
+
+  document.getElementById('tg-username').textContent = username ? '@' + username : (title || 'Не подключено');
+  if (username) {
+    document.getElementById('tg-open').href = 'https://t.me/' + username;
+  }
+
+  // Build stats series — try multiple shapes
+  let memberSeries = [];
+  if (state.tg.stats) {
+    if (Array.isArray(state.tg.stats.members)) memberSeries = state.tg.stats.members.map(x => x.value || x.count || x);
+    else if (Array.isArray(state.tg.stats.timeline)) memberSeries = state.tg.stats.timeline.map(x => x.members || x.value || 0);
+    else if (Array.isArray(state.tg.stats)) memberSeries = state.tg.stats.map(x => x.value || x);
+  }
+  const weeklyChange = memberSeries.length >= 2 ? (memberSeries[memberSeries.length-1] - memberSeries[0]) : null;
+
+  const postsPerWeek = pick(state.tg.stats, ['posts_per_week','weekly_posts']) || '—';
+
+  document.getElementById('tg-stats').innerHTML = `
+    <div class="stat-cell">
+      <div class="label">Подписчики</div>
+      <div class="val">${fmt.num(members)}</div>
+      <div class="sub" style="${weeklyChange != null && weeklyChange > 0 ? 'color: var(--color-accent-green);' : (weeklyChange != null && weeklyChange < 0 ? 'color: var(--color-vibrant-orange);' : '')}">
+        ${weeklyChange != null ? (weeklyChange >= 0 ? '▲ +' : '▼ ') + fmt.num(Math.abs(weeklyChange)) : 'данные ограничены'}
       </div>
     </div>
+    <div class="stat-cell">
+      <div class="label">Постов в&nbsp;неделю</div>
+      <div class="val">${typeof postsPerWeek === 'number' ? fmt.num(postsPerWeek) : postsPerWeek}</div>
+      <div class="sub">в&nbsp;среднем</div>
+    </div>
   `;
-}
 
-// ══════════════════════════════════════════
-// NAVIGATION
-// ══════════════════════════════════════════
-function showPage(id,btn){
-  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
-  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
-  document.getElementById('page-'+id).classList.add('active');
-  btn.classList.add('active');
-  document.getElementById('pageTitle').textContent = PAGE_TITLES[id]||id;
-}
+  // Bar chart — last 7 points or fallback to flat
+  const last7 = memberSeries.slice(-7);
+  document.getElementById('tg-chart').innerHTML = barChartSvg(last7);
+  document.getElementById('tg-chart-labels').innerHTML = last7.length === 7
+    ? ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map(d => `<span>${d}</span>`).join('')
+    : last7.map((_, i) => `<span>${i + 1}</span>`).join('');
 
-function switchPlatform(mode){
-  MODE = mode;
-  document.body.className = 'mode-'+mode;
-  document.getElementById('pillIg').className='pill'+(mode==='ig'?' active-ig':'');
-  document.getElementById('pillTg').className='pill'+(mode==='tg'?' active-tg':'');
-  document.getElementById('sideAvatar').textContent = mode==='ig'?'📸':'✈️';
-  if(IS_DEMO) runDemo(); else loadRealData();
-}
-
-function setPeriod(n,btn){
-  PERIOD=n;
-  document.querySelectorAll('.period-opt').forEach(b=>b.classList.remove('active'));
-  btn.classList.add('active');
-  if(IS_DEMO) renderAll(buildDemoData()); else loadRealData();
-}
-
-// ══════════════════════════════════════════
-// UTILS
-// ══════════════════════════════════════════
-function dc(id){ if(charts[id]){charts[id].destroy();delete charts[id];} }
-function fmtN(n){ n=parseInt(n)||0; if(n>=1e6)return(n/1e6).toFixed(1)+'M'; if(n>=1e3)return(n/1e3).toFixed(1)+'K'; return n.toString(); }
-function rb(a,b){ return Math.floor(Math.random()*(b-a)+a); }
-function ra(n,a,b){ return Array.from({length:n},()=>rb(a,b)); }
-function avg(arr){ return arr.length?arr.reduce((a,v)=>a+v,0)/arr.length:0; }
-function makeLabels(n){ return Array.from({length:n},(_,i)=>{ const d=new Date(); d.setDate(d.getDate()-n+1+i); return d.getDate()+'.'+(d.getMonth()+1).toString().padStart(2,'0'); }); }
-function acSolid(){ return MODE==='ig'?'#dd2a7b':'#2aabee'; }
-function acColor(a){ return MODE==='ig'?`rgba(221,42,123,${a})`:`rgba(42,171,238,${a})`; }
-function acGrd(){ return MODE==='ig'?['#f58529','#dd2a7b','#8134af']:['#2aabee','#5b8dee','#7c4dff']; }
-
-function co(ex={}){
-  return {responsive:true,maintainAspectRatio:true,plugins:{legend:{labels:{color:'#4a5280',font:{size:10,family:'DM Sans'},boxWidth:10,padding:12}},tooltip:{backgroundColor:'#121525',borderColor:'rgba(255,255,255,.08)',borderWidth:1,titleColor:'#f0f2ff',bodyColor:'#8b92b8',padding:10}},scales:{x:{ticks:{color:'#2e3558',font:{size:9,family:'JetBrains Mono'},maxTicksLimit:8},grid:{color:'rgba(255,255,255,.03)'}},y:{ticks:{color:'#2e3558',font:{size:9,family:'JetBrains Mono'}},grid:{color:'rgba(255,255,255,.03)'}}}, ...ex};
-}
-function coNS(ex={}){ return {responsive:true,maintainAspectRatio:true,plugins:{legend:{labels:{color:'#4a5280',font:{size:10,family:'DM Sans'},boxWidth:10}},tooltip:{backgroundColor:'#121525',borderColor:'rgba(255,255,255,.08)',borderWidth:1,titleColor:'#f0f2ff',bodyColor:'#8b92b8',padding:10}},...ex}; }
-
-// ══════════════════════════════════════════
-// RENDER ALL SECTIONS
-// ══════════════════════════════════════════
-function renderAll(d){ renderOverview(d);renderContent(d);renderEngagement(d);renderGrowth(d);renderVirality(d);renderInsights(d); }
-
-function renderOverview({labels,mem,avgReach,posts,isIg,viewsSeries,subsSeries,realTotals}){
-  // Используем реальные данные — НЕ генерируем случайные если данных нет
-  const hasViews = viewsSeries && viewsSeries.length > 0;
-  const hasSubs  = subsSeries  && subsSeries.length  > 0;
-  const vs = hasViews ? viewsSeries : labels.map(()=>0);
-  const ss = hasSubs  ? subsSeries  : labels.map(()=>0);
-
-  const rt  = realTotals || {};
-  const tL  = posts.reduce((a,p)=>a+(p.likes||0),0);
-  const tC  = posts.reduce((a,p)=>a+(p.comments||0),0);
-  const tR  = rt.totalReactions != null ? rt.totalReactions : posts.reduce((a,p)=>a+(p.reactions||0),0);
-  const tFw = rt.totalForwards  != null ? rt.totalForwards  : posts.reduce((a,p)=>a+(p.fwds||0),0);
-  const tSv = posts.reduce((a,p)=>a+(p.saves||0),0);
-  const tV  = rt.totalViews     != null ? rt.totalViews     : vs.reduce((a,b)=>a+b,0);
-  const tS  = ss.reduce((a,b)=>a+b,0);
-  const erN = mem && avgReach ? (isIg
-    ? (posts.length ? (tL+tC)/posts.length/mem*100 : 0)
-    : avgReach/mem*100) : 0;
-  document.getElementById('kpiRow').innerHTML=[
-    {e:'👥',v:fmtN(mem),l:'Подписчики',d:'+'+fmtN(tS),pos:true,s:'прирост'},
-    {e:'👁',v:fmtN(tV),l:isIg?'Охват':'Просмотры',d:null,s:'за период'},
-    {e:isIg?'❤️':'↗️',v:fmtN(isIg?tL:tFw),l:isIg?'Лайки':'Репосты',d:null,s:''},
-    {e:'💬',v:fmtN(tC),l:'Комментарии',d:null,s:''},
-    {e:isIg?'🔖':'❤️',v:fmtN(isIg?tSv:tR),l:isIg?'Сохранения':'Реакции',d:null,s:''},
-    {e:'🔥',v:erN.toFixed(2)+'%',l:isIg?'Avg ER%':'Avg ERR%',d:erN>=(isIg?2:15)?'Хорошо':'Норма',pos:erN>=(isIg?2:15),s:isIg?'engagement rate':'views/subs'},
-  ].map(k=>`<div class="kpi"><div class="kpi-top"><div class="kpi-emoji">${k.e}</div>${k.d?`<span class="delta ${k.pos?'pos':'neu'}">${k.d}</span>`:''}</div><div class="kpi-val">${k.v}</div><div class="kpi-lbl">${k.l}</div>${k.s?`<div class="kpi-sub">${k.s}</div>`:''}</div>`).join('');
-  dc('mainChart');charts.mainChart=new Chart(document.getElementById('mainChart'),{type:'line',data:{labels,datasets:[{label:isIg?'Охват':'Просмотры',data:vs,borderColor:acSolid(),backgroundColor:acColor(.07),fill:true,tension:.4,pointRadius:2,borderWidth:2}]},options:co()});
-  document.getElementById('chipMain').textContent=isIg?'REACH':'VIEWS';
-  document.getElementById('chipMain').className='chip '+(isIg?'chip-ig':'chip-tg');
-  const fm=tV||1;
-  const fD=isIg?[{l:'Показы',v:Math.floor(tV*1.4),c:'#8134af'},{l:'Охват',v:tV,c:'#dd2a7b'},{l:'Лайки',v:tL,c:'#f58529'},{l:'Коммент.',v:tC,c:'#22d3a0'},{l:'Сохранения',v:tSv,c:'#fbbf24'}]:[{l:'Показы',v:Math.floor(tV*1.2),c:'#5b8dee'},{l:'Просмотры',v:tV,c:'#2aabee'},{l:'Реакции',v:tR,c:'#22d3a0'},{l:'Репосты',v:tFw,c:'#fbbf24'},{l:'Коммент.',v:tC,c:'#a78bfa'}];
-  document.getElementById('funnelList').innerHTML=fD.map(f=>`<div class="funnel-item"><div class="fn-label">${f.l}</div><div class="fn-track"><div class="fn-fill" style="width:${Math.min(100,f.v/fm*100)}%;background:${f.c}"><span class="fn-val">${fmtN(f.v)}</span></div></div><div class="fn-pct">${(f.v/fm*100).toFixed(1)}%</div></div>`).join('');
-  dc('subsChart');charts.subsChart=new Chart(document.getElementById('subsChart'),{type:'bar',data:{labels,datasets:[{label:'Новые подписчики',data:ss,backgroundColor:acColor(.6),borderRadius:5}]},options:co()});
-  document.getElementById('engLabel').textContent=isIg?'Лайки & Сохранения':'Просмотры / пост';
-  dc('engChart');charts.engChart=new Chart(document.getElementById('engChart'),{type:'bar',data:{labels:posts.map((_,i)=>'#'+(i+1)),datasets:isIg?[{label:'Лайки',data:posts.map(p=>p.likes||0),backgroundColor:acColor(.65),borderRadius:4},{label:'Сохранения',data:posts.map(p=>p.saves||0),backgroundColor:'rgba(251,191,36,.5)',borderRadius:4}]:[{label:'Просмотры',data:posts.map(p=>p.views||avgReach),backgroundColor:acColor(.6),borderRadius:4}]},options:co()});
-  dc('reactChart');const rD=isIg?{l:['Лайки','Коммент.','Сохран.','Репосты'],d:[55,20,15,10],c:['#dd2a7b','#f58529','#8134af','#515bd4']}:{l:['❤️','👍','🔥','🎉','😮'],d:[35,25,20,12,8],c:['#f43f5e','#2aabee','#ff9100','#22d3a0','#a78bfa']};
-  charts.reactChart=new Chart(document.getElementById('reactChart'),{type:'doughnut',data:{labels:rD.l,datasets:[{data:rD.d,backgroundColor:rD.c,borderWidth:0,hoverOffset:6}]},options:coNS({cutout:'60%'})});
-  const erN2=erN;const ins=isIg?[{c:'#22d3a0',t:'Engagement Rate',b:`ER ${erN2.toFixed(2)}% — ${erN2>=3?'выше нормы для аккаунтов 10–50К (2–3%)':'есть потенциал, норма 2–3%'}. Первый час после публикации критичен.`},{c:'#fbbf24',t:'Лучшее время',b:'Пик: 19:00–22:00 и 9:00–11:00. Посты в это время получают +35–50% просмотров.'},{c:acSolid(),t:'Виральность',b:'Сохранения — главный сигнал алгоритму. Текущий уровень: '+fmtN(tSv)+' сохранений за период.'}]:[{c:'#2aabee',t:'ERR% канала',b:`ERR ${erN2.toFixed(1)}% — ${erN2>=20?'отличный показатель! Продолжай.':'попробуй 1–2 поста в день — частота снижает ERR.'}`},{c:'#22d3a0',t:'Виральность',b:'Репосты — главный инструмент роста в Telegram. Делай посты с чёткой ценностью для пересылки.'},{c:'#fbbf24',t:'Тайминг',b:'85% просмотров — первые 24 часа. Публикуй в 19:00–21:00 для максимального охвата.'}];
-  document.getElementById('insightStream').innerHTML=ins.map(i=>`<div class="insight-item"><div class="ins-dot" style="background:${i.c};box-shadow:0 0 8px ${i.c}"></div><div><div class="ins-title">${i.t}</div><div class="ins-body">${i.b}</div></div></div>`).join('');
-}
-
-function renderContent({labels,mem,avgReach,posts,isIg}){
-  const types=isIg?['IMAGE','VIDEO','CAROUSEL_ALBUM']:['text','photo','video','poll'];
-  const tLbl=isIg?['Фото','Видео','Карусель']:['Текст','Фото','Видео','Опрос'];
-  // Только реальные данные из постов
-  const tCnt=types.map(t=>posts.filter(p=>p.type===t).length);
-
-  dc('cTypeChart');charts.cTypeChart=new Chart(document.getElementById('cTypeChart'),{type:'doughnut',data:{labels:tLbl,datasets:[{data:tCnt,backgroundColor:isIg?['#f58529','#dd2a7b','#8134af']:['#2aabee','#5b8dee','#22d3a0','#fbbf24'],borderWidth:0,hoverOffset:6}]},options:coNS({cutout:'58%'})});
-
-  // Лучшее время — считаем из реальных постов по часу публикации
-  const hourCounts = Array(24).fill(0);
-  const hourViews  = Array(24).fill(0);
-  posts.forEach(p=>{
-    if(!p.date) return;
-    // date может быть ISO строкой или локальной датой
-    const d = new Date(p.rawDate || p.date);
-    if(!isNaN(d)){
-      const h = d.getHours();
-      hourCounts[h]++;
-      hourViews[h] += p.views || 0;
+  // Insight box (best day)
+  if (memberSeries.length >= 2) {
+    const diffs = memberSeries.slice(1).map((v, i) => v - memberSeries[i]);
+    const maxDiff = Math.max(...diffs);
+    if (maxDiff > 0) {
+      const idx = diffs.indexOf(maxDiff);
+      document.getElementById('tg-insight').classList.remove('hidden');
+      document.getElementById('tg-insight-title').textContent = 'Лучший день периода';
+      document.getElementById('tg-insight-desc').textContent = `+${fmt.num(maxDiff)} подписчиков (день ${idx + 2} из ${memberSeries.length}).`;
     }
-  });
-  // avgViews per hour или 0 если постов не было
-  const hD = hourCounts.map((cnt,h)=> cnt>0 ? Math.round(hourViews[h]/cnt) : 0);
-  dc('hoursChart');charts.hoursChart=new Chart(document.getElementById('hoursChart'),{type:'bar',data:{labels:Array.from({length:24},(_,i)=>i+':00'),datasets:[{label:'Avg просмотров',data:hD,backgroundColor:hD.map(v=>{ const mx=Math.max(...hD); return v===mx&&mx>0?acSolid():v>mx*0.6?acColor(.5):'rgba(255,255,255,.05)'; }),borderRadius:4}]},options:{...co(),plugins:{...co().plugins,legend:{display:false}}}});
-
-  // Лучший день недели — из реальных постов
-  const dowLabels=['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
-  const dowViews = Array(7).fill(0);
-  const dowCounts = Array(7).fill(0);
-  posts.forEach(p=>{
-    const d = new Date(p.rawDate || p.date);
-    if(!isNaN(d)){ const dow=(d.getDay()+6)%7; dowCounts[dow]++; dowViews[dow]+=(p.views||0); }
-  });
-  const dD = dowCounts.map((cnt,i)=> cnt>0 ? Math.round(dowViews[i]/cnt) : 0);
-  dc('dowChart');charts.dowChart=new Chart(document.getElementById('dowChart'),{type:'bar',data:{labels:dowLabels,datasets:[{label:'Avg просмотров',data:dD,backgroundColor:dD.map(v=>{ const mx=Math.max(...dD); return v===mx&&mx>0?acSolid():acColor(.3); }),borderRadius:7}]},options:co()});
-
-  // ER по типу — из реальных постов
-  document.getElementById('erByTypeTitle').textContent=isIg?'ER% по типу контента':'ERR% по формату';
-  const erByType = types.map(t=>{
-    const tp = posts.filter(p=>p.type===t);
-    if(!tp.length || !mem) return 0;
-    const avgE = tp.reduce((a,p)=>a+(isIg?(p.likes||0)+(p.comments||0):p.views||0),0)/tp.length;
-    return +(avgE/mem*100).toFixed(2);
-  });
-  dc('erTypeChart');charts.erTypeChart=new Chart(document.getElementById('erTypeChart'),{type:'bar',data:{labels:tLbl,datasets:[{label:isIg?'Avg ER%':'Avg ERR%',data:erByType,backgroundColor:isIg?['rgba(245,133,41,.7)','rgba(221,42,123,.7)','rgba(129,52,175,.7)']:['rgba(42,171,238,.7)','rgba(91,141,238,.7)','rgba(34,211,160,.6)','rgba(251,191,36,.6)'],borderRadius:8}]},options:co()});
-
-  // Тепловая карта — из реальных постов
-  const heatData = {};
-  posts.forEach(p=>{
-    const d = new Date(p.rawDate || p.date);
-    if(!isNaN(d)){
-      const dow=(d.getDay()+6)%7;
-      const h=d.getHours();
-      const k=`${dow}_${h}`;
-      if(!heatData[k]) heatData[k]={views:0,count:0};
-      heatData[k].views += p.views||0;
-      heatData[k].count++;
-    }
-  });
-  const maxHeat = Math.max(1, ...Object.values(heatData).map(v=>v.views/v.count));
-  const days=['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
-  let hmH=`<div class="hm-lbl"></div>`;
-  for(let h=0;h<24;h++) hmH+=`<div class="hm-hdr">${h}</div>`;
-  days.forEach((day,di)=>{
-    hmH+=`<div class="hm-lbl">${day}</div>`;
-    for(let h=0;h<24;h++){
-      const cell=heatData[`${di}_${h}`];
-      const intensity=cell ? Math.min(1,(cell.views/cell.count)/maxHeat) : 0;
-      hmH+=`<div class="hm-cell" style="background:${acColor(intensity.toFixed(2))}" title="${day} ${h}:00${cell?` — ${fmtN(Math.round(cell.views/cell.count))} просм.`:''}"></div>`;
-    }
-  });
-  document.getElementById('heatmapGrid').innerHTML=hmH;
-
-  // Хэштеги — парсим из реальных текстов постов
-  const tagFreq={};
-  posts.forEach(p=>{
-    const text = p.text||p.caption||'';
-    (text.match(/#[\wа-яёА-ЯЁ]+/gi)||[]).forEach(tag=>{
-      tagFreq[tag]=(tagFreq[tag]||0)+1;
-    });
-  });
-  const sortedTags=Object.entries(tagFreq).sort((a,b)=>b[1]-a[1]).slice(0,15);
-  const maxFreq=sortedTags[0]?.[1]||1;
-  document.getElementById('tagCloud').innerHTML = sortedTags.length
-    ? sortedTags.map(([t,f])=>`<div class="tag-pill ${f>=maxFreq*.7?'h1':f>=maxFreq*.4?'h2':''}">${t} <span style="opacity:.5;font-size:9px">${f}</span></div>`).join('')
-    : '<div style="color:var(--text3);font-size:12px">Хэштеги не найдены в постах</div>';
-
-  // Таблица постов
-  const icons={IMAGE:'🖼️',VIDEO:'🎬',CAROUSEL_ALBUM:'🎠',text:'📝',photo:'🖼️',video:'🎬',poll:'📊',link:'🔗',document:'📄',voice:'🎙️'};
-  document.getElementById('col1h').textContent=isIg?'❤️ Лайки':'❤️ Реакции';
-  document.getElementById('col4h').textContent=isIg?'👁 Охват':'👁 Просмотры';
-  document.getElementById('erColH').textContent=isIg?'ER%':'ERR%';
-  document.getElementById('postsBody').innerHTML = posts.length
-    ? posts.map((p,i)=>{
-        const erv=mem?((isIg?(p.likes||0)+(p.comments||0):p.views||0)/mem*100).toFixed(2):'—';
-        const ervN=parseFloat(erv)||0;
-        return`<tr>
-          <td style="font-family:'JetBrains Mono';font-size:10px;color:var(--text3)">${i+1}</td>
-          <td style="max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${(p.text||p.caption||'—').slice(0,40)}</td>
-          <td>${icons[p.type]||icons[p.media_type]||'📝'}</td>
-          <td style="font-family:'JetBrains Mono';font-size:10px;color:var(--text3)">${p.date||''}</td>
-          <td><b>${fmtN(isIg?p.likes||0:p.reactions||0)}</b></td>
-          <td>${fmtN(p.comments||0)}</td>
-          <td>${fmtN(p.fwds||p.forwards||p.shares||0)}</td>
-          <td>${fmtN(p.views||p.reach||0)}</td>
-          <td style="font-family:'JetBrains Mono';font-size:11px;font-weight:700;color:${ervN>=(isIg?3:25)?'var(--green)':ervN>=(isIg?1.5:12)?'var(--yellow)':'var(--text3)'}">${erv}%</td>
-        </tr>`;
-      }).join('')
-    : `<tr><td colspan="9" style="text-align:center;padding:32px;color:var(--text3)">Посты не загружены — MTProto сервис недоступен</td></tr>`;
+  }
 }
 
-function renderEngagement({mem,avgReach,posts,isIg}){
-  const erN=mem?((isIg?avg(posts.map(p=>(p.likes||0)+(p.comments||0)))/mem*100:avgReach/mem*100)):0;
-  // Регулярность — считаем из реальных постов (дней с публикациями / всего дней)
-  const daysWithPosts = new Set(posts.map(p=>p.date)).size;
-  const consistency = posts.length ? Math.min(100, Math.round(daysWithPosts / 30 * 100)) : 0;
-  // Виральность — из реальных репостов
-  const totalFwds = posts.reduce((a,p)=>a+(p.fwds||p.forwards||0),0);
-  const totalViews = posts.reduce((a,p)=>a+(p.views||0),0);
-  const viralScore = totalViews ? Math.min(100, Math.round(totalFwds/totalViews*1000)) : 0;
-  // Рост — из ERR
-  const growthScore = Math.min(100, Math.round(erN * (isIg?15:3)));
-
-  function ring(pct,color,label,val){const r=28,cx=35,cy=35,circ=2*Math.PI*r,dash=circ*(Math.min(100,pct)/100);return`<div class="ring-item"><svg class="ring-svg" viewBox="0 0 70 70"><circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="rgba(255,255,255,.05)" stroke-width="7"/><circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${color}" stroke-width="7" stroke-dasharray="${dash} ${circ}" stroke-dashoffset="${circ/4}" stroke-linecap="round"/><text x="${cx}" y="${cy+5}" text-anchor="middle" fill="${color}" font-size="11" font-weight="700" font-family="DM Sans">${val}</text></svg><div class="ring-label">${label}</div></div>`;}
-  document.getElementById('scoreRings').innerHTML=
-    ring(Math.min(100,erN*(isIg?20:3)),acSolid(),'ER SCORE',erN.toFixed(1)+'%')+
-    ring(consistency,'#22d3a0','РЕГУЛ.',consistency+'/100')+
-    ring(viralScore,'#fbbf24','ВИРАЛЬ.',viralScore+'/100')+
-    ring(growthScore,'#a78bfa','РОСТ',growthScore+'/100');
-
-  document.getElementById('benchTitle').textContent=isIg?'ER% Benchmark':'ERR% Benchmark';
-  const bench=isIg
-    ?[{n:'Твой ER',v:erN,m:10,c:acSolid()},{n:'Микро (1–10К)',v:3.5,m:10,c:'#a78bfa'},{n:'Средний (10–100К)',v:2.2,m:10,c:'#22d3a0'},{n:'Крупный (100К+)',v:1.1,m:10,c:'#fbbf24'}]
-    :[{n:'Твой ERR',v:erN,m:50,c:acSolid()},{n:'Малый (до 1К)',v:30,m:50,c:'#a78bfa'},{n:'Средний (1–10К)',v:20,m:50,c:'#22d3a0'},{n:'Крупный (10–100К)',v:12,m:50,c:'#fbbf24'},{n:'Мега (100К+)',v:5,m:50,c:'#f43f5e'}];
-  document.getElementById('benchList').innerHTML=bench.map(b=>`<div class="bench-item"><div class="bench-row"><span class="bench-name">${b.n}</span><span class="bench-val">${b.v.toFixed(1)}%</span></div><div class="bench-track"><div class="bench-fill" style="width:${b.v/b.m*100}%;background:${b.c}"></div></div></div>`).join('');
-
-  // ER trend — из реальных постов по неделям
-  const weeklyER = [0,0,0,0,0,0,0,0];
-  const weeklyCount = [0,0,0,0,0,0,0,0];
-  posts.forEach(p=>{
-    const d = new Date(p.rawDate||p.date);
-    if(!isNaN(d)){
-      const weeksAgo = Math.min(7, Math.floor((Date.now()-d)/604800000));
-      const idx = 7-weeksAgo;
-      if(idx>=0&&idx<8){
-        const engagement = isIg?(p.likes||0)+(p.comments||0):p.views||0;
-        if(mem) weeklyER[idx] += engagement/mem*100;
-        weeklyCount[idx]++;
-      }
-    }
-  });
-  const erTrendData = weeklyER.map((v,i)=>weeklyCount[i]>0?+(v/weeklyCount[i]).toFixed(2):null);
-  dc('erTrendChart');charts.erTrendChart=new Chart(document.getElementById('erTrendChart'),{
-    type:'line',
-    data:{labels:['Нед -7','Нед -6','Нед -5','Нед -4','Нед -3','Нед -2','Нед -1','Эта нед'],
-      datasets:[{label:'ER%',data:erTrendData,borderColor:acSolid(),backgroundColor:acColor(.07),fill:true,tension:.4,pointRadius:4,pointBackgroundColor:acSolid(),borderWidth:2,spanGaps:true}]},
-    options:co()
-  });
-
-  // Scatter — реальные данные постов
-  dc('scatterChart');charts.scatterChart=new Chart(document.getElementById('scatterChart'),{
-    type:'scatter',
-    data:{datasets:[{label:'Посты',data:posts.map(p=>({x:p.views||0,y:isIg?(p.likes||0)+(p.comments||0):p.reactions||0})),backgroundColor:acColor(.6),pointRadius:7}]},
-    options:co({scales:{x:{...co().scales.x,title:{display:true,text:'Просмотры',color:'#4a5280'}},y:{...co().scales.y,title:{display:true,text:isIg?'Лайки+Коммент.':'Реакции',color:'#4a5280'}}}})
-  });
+/* ── Posts rendering ─────────────────────────────────────────── */
+function renderPosts() {
+  const list = document.getElementById('posts-list');
+  if (!state.posts || state.posts.length === 0) {
+    list.innerHTML = `<div class="empty-state">
+      <div class="em-title">Постов пока нет</div>
+      <div>Проверь подключение Instagram и&nbsp;Telegram в&nbsp;.env</div>
+    </div>`;
+    return;
+  }
+  const sorted = [...state.posts].sort((a, b) => (b.reach || 0) - (a.reach || 0));
+  list.innerHTML = sorted.slice(0, 20).map(p => {
+    const er = p.er != null ? p.er : (p.likes && p.reach ? (p.likes / p.reach * 100) : null);
+    const erTag = er == null ? '<span class="num muted">—</span>'
+      : `<span class="tag ${er >= 6 ? 'green' : er >= 3 ? 'violet' : 'orange'}">${er.toFixed(1)}%</span>`;
+    const thumb = p.thumb
+      ? `<img class="post-thumb" src="${p.thumb}" alt="" referrerpolicy="no-referrer">`
+      : `<div class="post-thumb"></div>`;
+    const sourceTag = `<span class="tag violet">${p.source || '—'}</span>`;
+    const caption = (p.caption || 'Без подписи').slice(0, 80);
+    return `
+      <div class="posts-row">
+        ${thumb}
+        <div class="post-caption">
+          <div class="title">${escapeHtml(caption)}</div>
+          <div class="date">${escapeHtml(fmt.date(p.date) || '')}</div>
+        </div>
+        <div style="text-align: right;">${sourceTag}</div>
+        <div class="num">${fmt.num(p.reach)}</div>
+        <div class="num">${fmt.num(p.likes)}</div>
+        <div class="num" style="text-align: right;">${erTag}</div>
+      </div>
+    `;
+  }).join('');
 }
 
-function renderGrowth({labels,mem,avgReach,posts,isIg,subsSeries}){
-  // Прирост подписчиков — только если реальные данные есть
-  const hasSubs = subsSeries && subsSeries.some(v=>v>0);
-  const ss = hasSubs ? subsSeries : labels.map(()=>0);
-  const da = hasSubs ? (avg(ss)||0) : 0;
-  const base = mem||0;
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
 
-  // Накопленный график — только если есть реальные данные о приросте
-  const cum = hasSubs
-    ? ss.reduce((acc,v,i)=>{acc.push((acc[i-1]||(base-ss.reduce((a,b)=>a+b,0)))+v);return acc;},[])
-    : labels.map(()=>base); // горизонтальная линия на уровне текущих подписчиков
+/* ── Hero rendering ──────────────────────────────────────────── */
+function renderHero() {
+  document.getElementById('hero-eyebrow').textContent = fmt.todayLabel();
 
-  const fL=Array.from({length:30},(_,i)=>{const d=new Date();d.setDate(d.getDate()+i+1);return d.getDate()+'.'+(d.getMonth()+1).toString().padStart(2,'0');});
-  const last=cum[cum.length-1]||base;
-  // Прогноз только если есть реальный прирост
-  const fD = da>0
-    ? Array.from({length:30},(_,i)=>Math.round(last+da*(i+1)))
-    : Array(30).fill(null);
+  const igFollowers = pick(state.ig.profile, ['followers_count','followers']) || 0;
+  const tgMembers   = pick(state.tg.channel, ['members_count','member_count','subscribers']) || 0;
+  const reach = sumMetric(state.ig.insights, ['reach']) || 0;
 
-  dc('forecastChart');charts.forecastChart=new Chart(document.getElementById('forecastChart'),{
-    type:'line',
-    data:{labels:[...labels.slice(-15),...fL],datasets:[
-      {label:'Подписчики',data:[...cum.slice(-15),...Array(30).fill(null)],borderColor:acSolid(),backgroundColor:acColor(.07),fill:true,tension:.4,pointRadius:2,borderWidth:2},
-      ...(da>0?[{label:'Прогноз',data:[...Array(15).fill(null),...fD],borderColor:'#fbbf24',backgroundColor:'rgba(251,191,36,.05)',fill:true,tension:.4,pointRadius:2,borderWidth:2,borderDash:[6,3]}]:[])
-    ]},
-    options:co()
-  });
-
-  // Скорость роста по неделям — только реальные данные
-  const weeklyGrowth = hasSubs
-    ? Array.from({length:Math.min(8,Math.ceil(ss.length/7))},(_,i)=>{
-        const chunk=ss.slice(i*7,(i+1)*7);
-        return chunk.length?+(chunk.reduce((a,b)=>a+b,0)/base*100).toFixed(2):null;
-      })
-    : Array(8).fill(null);
-  dc('velocityChart');charts.velocityChart=new Chart(document.getElementById('velocityChart'),{
-    type:'line',
-    data:{labels:Array.from({length:8},(_,i)=>`Нед ${i+1}`),
-      datasets:[{label:'% прироста/нед',data:weeklyGrowth,borderColor:'#22d3a0',backgroundColor:'rgba(34,211,160,.07)',fill:true,tension:.4,pointRadius:4,pointBackgroundColor:'#22d3a0',borderWidth:2,spanGaps:false}]},
-    options:co()
-  });
-
-  // Частота постинга vs охват — из реальных постов
-  const freqMap={};
-  posts.forEach(p=>{
-    const d=new Date(p.rawDate||p.date);
-    if(!isNaN(d)){
-      const wk=Math.floor((Date.now()-d)/604800000);
-      if(wk<8){ if(!freqMap[wk])freqMap[wk]={posts:0,views:0}; freqMap[wk].posts++; freqMap[wk].views+=p.views||0; }
-    }
-  });
-  const freqPoints=Object.values(freqMap).filter(w=>w.posts>0);
-  dc('freqChart');
-  if(freqPoints.length>=2){
-    charts.freqChart=new Chart(document.getElementById('freqChart'),{
-      type:'scatter',
-      data:{datasets:[{label:'Постов/нед vs Avg просмотров',data:freqPoints.map(w=>({x:w.posts,y:Math.round(w.views/w.posts)})),backgroundColor:acColor(.7),pointRadius:8}]},
-      options:co({scales:{x:{...co().scales.x,title:{display:true,text:'Постов в неделю',color:'#4a5280'}},y:{...co().scales.y,title:{display:true,text:'Avg просмотров/пост',color:'#4a5280'}}}})
-    });
+  let highlight = '';
+  if (reach > 0) {
+    highlight = `<em>${fmt.short(reach)}</em> охвата`;
+  } else if (igFollowers + tgMembers > 0) {
+    highlight = `<em>${fmt.short(igFollowers + tgMembers)}</em> подписчиков`;
   } else {
-    dc('freqChart');
-    document.getElementById('freqChart').style.display='none';
-    document.getElementById('freqChart').insertAdjacentHTML('afterend','<div style="color:var(--text3);font-size:12px;padding:16px 0">Недостаточно данных — нужно минимум 2 недели постов</div>');
+    highlight = `всё <em>под контролем</em>`;
   }
 
-  // Источники подписчиков — недоступны в Telegram API, карточка удалена из HTML
-
-  // Метрики роста — только реальные
-  document.getElementById('growthMetrics').innerHTML=[
-    {e:'👥',n:'Подписчиков сейчас',v:fmtN(mem)||'—'},
-    {e:'📈',n:'Дневной прирост',v:da>0?Math.round(da)+' подп./день':'Нет данных'},
-    {e:'📅',n:'Прогноз 30 дней',v:da>0?'+'+fmtN(Math.round(da*30)):'Нет данных'},
-    {e:'📝',n:'Постов загружено',v:posts.length+''},
-    {e:'👁',n:'Avg просмотров/пост',v:posts.length?fmtN(Math.round(posts.reduce((a,p)=>a+(p.views||0),0)/posts.length)):'—'},
-    {e:'↗️',n:'Avg репостов/пост',v:posts.length?fmtN(Math.round(posts.reduce((a,p)=>a+(p.fwds||p.forwards||0),0)/posts.length)):'—'},
-  ].map(m=>`<div class="metric-item"><div class="metric-icon">${m.e}</div><div><div class="metric-name">${m.n}</div><div class="metric-val">${m.v}</div></div></div>`).join('');
+  document.getElementById('hero-title').innerHTML = `${fmt.greeting()}. ${highlight} за&nbsp;последние ${currentPeriod}&nbsp;дн.`;
+  document.getElementById('hero-sub').innerHTML = `Сводка по&nbsp;Instagram и&nbsp;Telegram. Кэш обновляется каждые 10&nbsp;минут.`;
 }
 
-function renderVirality({labels,avgReach,posts,isIg}){
-  // Репосты по дням — из реальных постов
-  const fwdByDay={};
-  posts.forEach(p=>{
-    const d=new Date(p.rawDate||p.date);
-    if(!isNaN(d)){
-      const day=d.getDate()+'.'+(d.getMonth()+1).toString().padStart(2,'0');
-      fwdByDay[day]=(fwdByDay[day]||0)+(p.fwds||p.forwards||0);
-    }
-  });
-  const fwdLabels=labels;
-  const fwdData=labels.map(l=>fwdByDay[l]||0);
-
-  dc('fwdChart');charts.fwdChart=new Chart(document.getElementById('fwdChart'),{
-    type:'bar',
-    data:{labels:fwdLabels,datasets:[{label:'Репосты',data:fwdData,backgroundColor:'rgba(251,191,36,.6)',borderRadius:5}]},
-    options:co()
-  });
-
-  // Виральный коэф — из реальных данных
-  const viralData=labels.map(l=>{
-    const day_posts=posts.filter(p=>{
-      const d=new Date(p.rawDate||p.date);
-      return !isNaN(d)&&d.getDate()+'.'+(d.getMonth()+1).toString().padStart(2,'0')===l;
-    });
-    if(!day_posts.length) return null;
-    const dayViews=day_posts.reduce((a,p)=>a+(p.views||0),0);
-    const dayFwds=day_posts.reduce((a,p)=>a+(p.fwds||p.forwards||0),0);
-    return dayViews>0?+(dayFwds/dayViews*100).toFixed(2):null;
-  });
-  dc('viralChart');charts.viralChart=new Chart(document.getElementById('viralChart'),{
-    type:'line',
-    data:{labels,datasets:[{label:'Viral %',data:viralData,borderColor:'#fbbf24',backgroundColor:'rgba(251,191,36,.07)',fill:true,tension:.4,pointRadius:2,borderWidth:2,spanGaps:true}]},
-    options:co()
-  });
-
-  // Сохранения/Репосты — из реальных постов
-  dc('savesChart');charts.savesChart=new Chart(document.getElementById('savesChart'),{
-    type:'bar',
-    data:{labels:posts.map((_,i)=>'#'+(i+1)),datasets:isIg
-      ?[{label:'Сохранения',data:posts.map(p=>p.saves||0),backgroundColor:acColor(.65),borderRadius:4},{label:'Репосты',data:posts.map(p=>p.fwds||0),backgroundColor:'rgba(251,191,36,.5)',borderRadius:4}]
-      :[{label:'Репосты',data:posts.map(p=>p.fwds||p.forwards||0),backgroundColor:'rgba(251,191,36,.6)',borderRadius:4},{label:'Реакции',data:posts.map(p=>p.reactions||0),backgroundColor:acColor(.5),borderRadius:4}]
-    },
-    options:co()
-  });
-
-  // CTR ссылок — недоступен в Telegram API, карточка удалена из HTML
+/* ── Status pill ─────────────────────────────────────────────── */
+function setStatus(text, ok = true) {
+  document.getElementById('status-text').textContent = text;
+  const pill = document.getElementById('status-pill');
+  pill.classList.toggle('warn', !ok);
 }
 
-function renderInsights({mem,avgReach,posts,isIg}){
-  const erN=mem?((isIg?avg(posts.map(p=>(p.likes||0)+(p.comments||0)))/mem*100:avgReach/mem*100)):0;
-  const totalFwdsR=posts.reduce((a,p)=>a+(p.fwds||p.forwards||0),0);
-  const totalViewsR=posts.reduce((a,p)=>a+(p.views||0),0);
-  const hasVideo=posts.some(p=>p.type==='video'||p.type==='VIDEO'),hasPoll=posts.some(p=>p.type==='poll');
-  const ins=isIg?[{e:'🔥',t:'Engagement Rate',b:`ER ${erN.toFixed(2)}% — ${erN>=3?'выше нормы для 10–50К (2–3%)!':'норма 2–3%, фокус на призывах к действию.'}`,c:'good'},{e:'🎬',t:'Видеоконтент',b:hasVideo?'Рилсы дают до 3× охвата — увеличь долю до 40–50%.':'Добавь Рилсы — главный инструмент органического охвата.',c:hasVideo?'good':'warn'},{e:'🎠',t:'Карусели',b:'Собирают на 30% больше сохранений. Рекоменд. 2–3/нед.',c:'tip'},{e:'⏰',t:'Тайминг',b:'19:00–22:00 и 9:00–11:00. Охват в первый час +40%.',c:'tip'}]:[{e:'📊',t:'ERR% канала',b:`ERR ${erN.toFixed(1)}% — ${erN>=20?'отлично! Продолжай.':'1–2 поста/день — оптимальная частота для ERR.'}`,c:erN>=20?'good':'warn'},{e:'🎬',t:'Видеоконтент',b:hasVideo?'Видео есть. Автозапуск привлекает внимание.':'Добавь видео — +30–60% просмотров за счёт автозапуска.',c:hasVideo?'good':'warn'},{e:'📊',t:'Опросы',b:hasPoll?'Опросы дают +40% вовлечённости. Продолжай!':'Добавь 1–2 опроса/нед — в 1.5× больше взаимодействий.',c:hasPoll?'good':'warn'},{e:'⏰',t:'Тайминг',b:'19:00–21:00 — пик просмотров определяет итоговый охват.',c:'tip'}];
-  const recs=isIg?[{e:'🚀',t:'Запусти Рилсы',b:'2–3 видео (15–30 сек) в неделю. 85% смотрят без звука — добавляй субтитры.',c:'good'},{e:'💬',t:'Отвечай на комменты',b:'Ответ в первые 60 минут +25% ER. Алгоритм замечает активность.',c:'good'},{e:'📖',t:'Ежедневные сторис',b:'5–10 сторис + опросы и стикеры. Удерживает аудиторию в ленте.',c:'warn'},{e:'🤝',t:'Коллаборации',b:'Совместные посты с похожими аккаунтами без затрат на рекламу.',c:'warn'}]:[{e:'🔔',t:'Включи уведомления',b:'Напомни подписчикам включить уведомления — +20–30% первочасовых просмотров.',c:'good'},{e:'📌',t:'Закреплённый пост',b:'Обнови закреп: навигация, топ-контент, CTA — первое впечатление.',c:'good'},{e:'🤝',t:'Взаимный пиар',b:'3–5 каналов похожей тематики. Дешёвый источник целевых подписчиков.',c:'warn'},{e:'💬',t:'Добавь комментарии',b:'Посты с активными комментами +15–25% просмотров за счёт уведомлений.',c:'warn'}];
-  const bc={good:'chip-green',warn:'chip-yellow',tip:'chip-tg'},bt={good:'ХОРОШО',warn:'УЛУЧШИТЬ',tip:'СОВЕТ'};
-  const card=(i)=>`<div style="background:var(--layer2);border:1px solid var(--border);border-radius:14px;padding:18px;display:flex;gap:14px"><div style="font-size:22px;flex-shrink:0">${i.e}</div><div><div style="font-size:13px;font-weight:600;margin-bottom:4px">${i.t}</div><div style="font-size:12px;color:var(--text2);line-height:1.65">${i.b}</div><span class="chip ${bc[i.c]}" style="margin-top:10px;display:inline-block">${bt[i.c]}</span></div></div>`;
-  document.getElementById('insightsFull').innerHTML=ins.map(card).join('');
-  document.getElementById('recsFull').innerHTML=recs.map(card).join('');
-  dc('compareChart');charts.compareChart=new Chart(document.getElementById('compareChart'),{type:'bar',data:{labels:['Просмотры','Реакции','Репосты','Коммент.','ER%'],datasets:[{label:'Реальные данные',data:[100,100,100,100,100],backgroundColor:acColor(.7),borderRadius:5}]},options:co()});
-  // Radar — только ERR реальный, остальное убираем или считаем из постов
-  const radarER=Math.min(100,erN*(isIg?15:3));
-  const radarViral=totalFwdsR>0&&totalViewsR>0?Math.min(100,Math.round(totalFwdsR/totalViewsR*1000)):0;
-  const radarConsist=posts.length?Math.min(100,Math.round(new Set(posts.map(p=>p.date)).size/30*100)):0;
-  dc('radarChart');charts.radarChart=new Chart(document.getElementById('radarChart'),{type:'radar',data:{labels:['ERR%','Виральность','Регулярность','Вовлечённость','Охват'],datasets:[{label:'Твой канал',data:[radarER,radarViral,radarConsist,radarER,Math.min(100,erN*2)],backgroundColor:acColor(.12),borderColor:acSolid(),pointBackgroundColor:acSolid(),borderWidth:2},{label:'Эталон',data:[60,60,60,60,60],backgroundColor:'rgba(255,255,255,.03)',borderColor:'rgba(255,255,255,.15)',pointBackgroundColor:'rgba(255,255,255,.3)',borderWidth:1,borderDash:[4,2]}]},options:{responsive:true,maintainAspectRatio:true,plugins:{legend:{labels:{color:'#4a5280',font:{size:10,family:'DM Sans'},boxWidth:10}}},scales:{r:{ticks:{color:'#2e3558',font:{size:9},backdropColor:'transparent'},grid:{color:'rgba(255,255,255,.05)'},pointLabels:{color:'#8b92b8',font:{size:11,family:'DM Sans'}}}}}});
+/* ================================================================
+   MAIN LOAD ROUTINE
+   ================================================================ */
+async function loadAll() {
+  setStatus('Загрузка…', true);
+  renderKpiSkeletons();
+
+  // Health check (non-blocking)
+  API.health().catch(() => {});
+
+  // Run all in parallel; tolerate individual failures
+  const tasks = [
+    API.igProfile().then(d => state.ig.profile = d).catch(e => { console.warn('IG profile:', e.message); state.ig.profile = null; }),
+    API.igInsights(currentPeriod).then(d => state.ig.insights = d).catch(e => { console.warn('IG insights:', e.message); state.ig.insights = null; }),
+    API.igPosts(20).then(d => {
+      const arr = Array.isArray(d) ? d : (d && d.data) || [];
+      state.ig.posts = arr.map(p => ({
+        id: p.id,
+        source: 'IG',
+        caption: p.caption || '',
+        date: p.timestamp || p.created_at,
+        thumb: p.thumbnail_url || p.media_url,
+        reach: pick(p.insights, ['reach']) || pick(p, ['reach']) || 0,
+        likes: p.like_count || p.likes || 0,
+        comments: p.comments_count || p.comments || 0,
+        er: null
+      }));
+    }).catch(e => { console.warn('IG posts:', e.message); state.ig.posts = []; }),
+    API.tgChannel().then(d => state.tg.channel = d).catch(e => { console.warn('TG channel:', e.message); state.tg.channel = null; }),
+    API.tgStats().then(d => state.tg.stats = d).catch(e => { console.warn('TG stats:', e.message); state.tg.stats = null; })
+  ];
+  await Promise.all(tasks);
+
+  // Unified posts list
+  state.posts = [...state.ig.posts];
+
+  // Determine status
+  const igOk = !!state.ig.profile;
+  const tgOk = !!state.tg.channel;
+  if (igOk && tgOk) setStatus('Все источники активны', true);
+  else if (igOk || tgOk) setStatus(igOk ? 'Только Instagram' : 'Только Telegram', false);
+  else setStatus('Источники недоступны', false);
+
+  // Render
+  renderHero();
+  renderKpis();
+  renderIg();
+  renderTg();
+  renderPosts();
 }
 
-// ══════════════════════════════════════════
-// INIT — проверяем сохранённую сессию
-// ══════════════════════════════════════════
-document.addEventListener('DOMContentLoaded', async ()=>{
-  const saved = localStorage.getItem('pulse_session');
-  if(saved){
-    try{
-      const res = await fetch(`${API_BASE}/api/auth/check`,{headers:{'x-session-token':saved}});
-      if(res.ok){
-        SESSION = saved; IS_DEMO = false;
-        document.getElementById('sidebarUserLabel').textContent='🔒 Команда';
-        setStatus('live','LIVE API');
-        hideLogin();
-        await loadRealData();
-        return;
-      }
-    }catch{}
-    localStorage.removeItem('pulse_session');
+/* ================================================================
+   BOOT
+   ================================================================ */
+(async function init() {
+  if (!API.getToken()) {
+    showLogin();
+    return;
   }
-  // Показываем экран логина
-  document.getElementById('loginScreen').style.display='flex';
-});
+  // Verify token
+  try {
+    await API.check();
+    showDash();
+    loadAll();
+  } catch (e) {
+    API.clearToken();
+    showLogin();
+  }
+})();
 </script>
+
 </body>
 </html>
