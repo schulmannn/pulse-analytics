@@ -1,7 +1,6 @@
 // ═══════════════════════════════════════════════════════════════
 //  Pulse Analytics — Backend Server
 //  Node.js + Express
-//  Запуск: node server/index.js
 // ═══════════════════════════════════════════════════════════════
 
 require('dotenv').config();
@@ -19,17 +18,15 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '../public')));
 
-// Rate limiting — защита от спама
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 минут
+  windowMs: 15 * 60 * 1000,
   max: 100,
   message: { error: 'Слишком много запросов. Попробуй через 15 минут.' }
 });
 app.use('/api/', limiter);
 
 // ── Простая in-memory авторизация ───────────────────────────────
-// Команда вводит пароль → получает токен на 8 часов
-const sessions = new Map(); // token → { expires }
+const sessions = new Map();
 
 function generateToken() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -48,9 +45,8 @@ function requireAuth(req, res, next) {
 }
 
 // ── In-memory кэш ───────────────────────────────────────────────
-// Чтобы не долбить API при каждом обновлении страницы
-const cache = new Map(); // key → { data, expires }
-const CACHE_TTL = 10 * 60 * 1000; // 10 минут
+const cache = new Map();
+const CACHE_TTL = 10 * 60 * 1000;
 
 function cacheGet(key) {
   const entry = cache.get(key);
@@ -65,7 +61,6 @@ function cacheSet(key, data) {
 //  AUTH ROUTES
 // ════════════════════════════════════════════════════════════════
 
-// POST /api/auth/login  { password }
 app.post('/api/auth/login', (req, res) => {
   const { password } = req.body;
   if (!password) return res.status(400).json({ error: 'Укажи пароль' });
@@ -75,26 +70,23 @@ app.post('/api/auth/login', (req, res) => {
   }
 
   const token   = generateToken();
-  const expires = Date.now() + 8 * 60 * 60 * 1000; // 8 часов
+  const expires = Date.now() + 8 * 60 * 60 * 1000;
   sessions.set(token, { expires });
 
   res.json({ token, expiresAt: new Date(expires).toISOString() });
 });
 
-// POST /api/auth/logout
 app.post('/api/auth/logout', requireAuth, (req, res) => {
   sessions.delete(req.headers['x-session-token']);
   res.json({ ok: true });
 });
 
-// GET /api/auth/check  — проверка сессии
 app.get('/api/auth/check', requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
 // ════════════════════════════════════════════════════════════════
 //  INSTAGRAM ROUTES
-//  Документация: https://developers.facebook.com/docs/instagram-api
 // ════════════════════════════════════════════════════════════════
 
 const IG_BASE      = 'https://graph.facebook.com/v19.0';
@@ -111,14 +103,14 @@ async function igFetch(path, params = {}) {
   return json;
 }
 
-// GET /api/ig/profile — профиль аккаунта
+// GET /api/ig/profile — профиль аккаунта (теперь с аватаркой)
 app.get('/api/ig/profile', requireAuth, async (req, res) => {
   try {
     const cached = cacheGet('ig:profile');
     if (cached) return res.json(cached);
 
     const data = await igFetch(`/${IG_ACCOUNT}`, {
-      fields: 'username,name,followers_count,follows_count,media_count,biography,website'
+      fields: 'username,name,followers_count,follows_count,media_count,biography,website,profile_picture_url'
     });
     cacheSet('ig:profile', data);
     res.json(data);
@@ -151,7 +143,7 @@ app.get('/api/ig/insights', requireAuth, async (req, res) => {
   }
 });
 
-// GET /api/ig/posts?limit=20 — последние посты с инсайтами
+// GET /api/ig/posts?limit=20 — последние посты с инсайтами и превью
 app.get('/api/ig/posts', requireAuth, async (req, res) => {
   const limit = Math.min(25, parseInt(req.query.limit) || 20);
   const cacheKey = `ig:posts:${limit}`;
@@ -159,13 +151,11 @@ app.get('/api/ig/posts', requireAuth, async (req, res) => {
     const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
 
-    // 1. Список постов
     const mediaRes = await igFetch(`/${IG_ACCOUNT}/media`, {
-      fields: 'id,caption,media_type,timestamp,like_count,comments_count',
+      fields: 'id,caption,media_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count',
       limit
     });
 
-    // 2. Инсайты по каждому посту параллельно
     const posts = await Promise.all(
       (mediaRes.data || []).map(async (post) => {
         try {
@@ -192,7 +182,7 @@ app.get('/api/ig/posts', requireAuth, async (req, res) => {
 });
 
 // ════════════════════════════════════════════════════════════════
-//  TELEGRAM — Bot API (базовые данные)
+//  TELEGRAM — Bot API
 // ════════════════════════════════════════════════════════════════
 
 const TG_BASE    = 'https://api.telegram.org/bot';
@@ -208,7 +198,6 @@ async function tgFetch(method, params = {}) {
   return json.result;
 }
 
-// GET /api/tg/channel — базовая информация о канале (Bot API)
 app.get('/api/tg/channel', requireAuth, async (req, res) => {
   try {
     const cached = cacheGet('tg:channel');
@@ -236,9 +225,7 @@ app.get('/api/tg/channel', requireAuth, async (req, res) => {
 });
 
 // ════════════════════════════════════════════════════════════════
-//  TELEGRAM — MTProto прокси (реальная аналитика)
-//  Python-сервис слушает на MTPROTO_PORT (по умолчанию 8001)
-//  Node.js проксирует запросы к нему, добавляя внутренний токен
+//  TELEGRAM — MTProto прокси
 // ════════════════════════════════════════════════════════════════
 
 const MTPROTO_URL  = process.env.MTPROTO_URL || 'http://localhost:8001';
@@ -257,7 +244,6 @@ async function mtprotoFetch(path, params = {}) {
   return res.json();
 }
 
-// GET /api/tg/mtproto/health — статус Python-сервиса
 app.get('/api/tg/mtproto/health', requireAuth, async (req, res) => {
   try {
     const data = await mtprotoFetch('/health');
@@ -267,22 +253,19 @@ app.get('/api/tg/mtproto/health', requireAuth, async (req, res) => {
   }
 });
 
-// GET /api/tg/mtproto/channel — полная информация о канале через MTProto
 app.get('/api/tg/mtproto/channel', requireAuth, async (req, res) => {
   const cacheKey = 'mtproto:channel';
   try {
     const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
-
     const data = await mtprotoFetch('/channel');
     cacheSet(cacheKey, data);
     res.json(data);
   } catch (e) {
-    res.status(500).json({ error: e.message, hint: 'MTProto сервис недоступен — запусти mtproto/service.py' });
+    res.status(500).json({ error: e.message, hint: 'MTProto сервис недоступен' });
   }
 });
 
-// GET /api/tg/mtproto/posts?limit=30&offset_id=0 — посты с РЕАЛЬНЫМИ просмотрами
 app.get('/api/tg/mtproto/posts', requireAuth, async (req, res) => {
   const limit     = Math.min(100, parseInt(req.query.limit)     || 30);
   const offsetId  = parseInt(req.query.offset_id) || 0;
@@ -290,58 +273,49 @@ app.get('/api/tg/mtproto/posts', requireAuth, async (req, res) => {
   try {
     const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
-
     const data = await mtprotoFetch('/posts', { limit, offset_id: offsetId });
     cacheSet(cacheKey, data);
     res.json(data);
   } catch (e) {
-    res.status(500).json({ error: e.message, hint: 'MTProto сервис недоступен — запусти mtproto/service.py' });
+    res.status(500).json({ error: e.message, hint: 'MTProto сервис недоступен' });
   }
 });
 
-// GET /api/tg/mtproto/views_summary?limit=30 — агрегированная сводка просмотров
 app.get('/api/tg/mtproto/views_summary', requireAuth, async (req, res) => {
   const limit    = Math.min(100, parseInt(req.query.limit) || 30);
   const cacheKey = `mtproto:views:${limit}`;
   try {
     const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
-
     const data = await mtprotoFetch('/views_summary', { limit });
     cacheSet(cacheKey, data);
     res.json(data);
   } catch (e) {
-    res.status(500).json({ error: e.message, hint: 'MTProto сервис недоступен — запусти mtproto/service.py' });
+    res.status(500).json({ error: e.message, hint: 'MTProto сервис недоступен' });
   }
 });
 
-// GET /api/tg/mtproto/stats — нативная статистика Telegram (500+ подп.)
 app.get('/api/tg/mtproto/stats', requireAuth, async (req, res) => {
   const cacheKey = 'mtproto:stats';
   try {
     const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
-
     const data = await mtprotoFetch('/stats');
     cacheSet(cacheKey, data);
     res.json(data);
   } catch (e) {
-    // Это необязательный эндпоинт — не ломаем всё если недоступен
     res.status(200).json({
       error:     e.message,
       available: false,
-      hint:      'Статистика доступна только для каналов с 500+ подписчиков с включённой статистикой'
+      hint:      'Статистика доступна только для каналов с 500+ подписчиков'
     });
   }
 });
 
-// GET /api/tg/full — всё сразу: Bot API + MTProto (для первичной загрузки дашборда)
 app.get('/api/tg/full', requireAuth, async (req, res) => {
   const limit = Math.min(100, parseInt(req.query.limit) || 30);
   try {
-    // Запускаем Bot API и MTProto параллельно
     const [botChannel, mtChannel, viewsSummary, posts] = await Promise.allSettled([
-      // Bot API — всегда доступен
       (async () => {
         const [chat, count] = await Promise.all([
           tgFetch('getChat',            { chat_id: TG_CHANNEL }),
@@ -349,7 +323,6 @@ app.get('/api/tg/full', requireAuth, async (req, res) => {
         ]);
         return { title: chat.title, username: chat.username, description: chat.description || '', memberCount: count };
       })(),
-      // MTProto — может быть недоступен
       mtprotoFetch('/channel'),
       mtprotoFetch('/views_summary', { limit }),
       mtprotoFetch('/posts', { limit }),
@@ -361,11 +334,9 @@ app.get('/api/tg/full', requireAuth, async (req, res) => {
     const ps   = posts.status       === 'fulfilled' ? posts.value       : null;
 
     res.json({
-      // Объединяем: MTProto данные приоритетнее Bot API там где пересекаются
       channel: {
         ...(bot || {}),
         ...(mtp || {}),
-        // memberCount из Bot API надёжнее
         memberCount: bot?.memberCount || mtp?.members || 0,
         source: mtp ? 'mtproto+bot_api' : 'bot_api',
       },
@@ -388,7 +359,6 @@ app.get('/api/tg/full', requireAuth, async (req, res) => {
 //  ОБЩИЕ ROUTES
 // ════════════════════════════════════════════════════════════════
 
-// GET /api/health — статус сервера
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
@@ -403,13 +373,11 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// DELETE /api/cache — сброс кэша (только авторизованным)
 app.delete('/api/cache', requireAuth, (req, res) => {
   cache.clear();
   res.json({ ok: true, message: 'Кэш сброшен' });
 });
 
-// SPA fallback — отдаём index.html для всех неизвестных маршрутов
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/index.html'));
 });
