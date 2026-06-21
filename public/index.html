@@ -2242,7 +2242,7 @@ function breakdownRows(items) {
 }
 
 /* Simple bar chart with variable width/height (e.g. hourly distribution) */
-function barsChartSvg(values, w = 600, h = 120) {
+function barsChartSvg(values, w = 600, h = 120, titles) {
   if (!values || !values.length) return `<text x="${w/2}" y="${h/2}" text-anchor="middle" fill="#64748d" font-size="12" font-family="Inter">Нет данных</text>`;
   const n = values.length, gap = n > 30 ? 1 : 2;
   const barW = (w - gap * (n - 1)) / n;
@@ -2250,7 +2250,8 @@ function barsChartSvg(values, w = 600, h = 120) {
   return values.map((v, i) => {
     const bh = Math.max(2, ((Number(v) || 0) / max) * (h - 8));
     const x = i * (barW + gap);
-    return `<rect x="${x.toFixed(1)}" y="${(h - bh).toFixed(1)}" width="${barW.toFixed(1)}" height="${bh.toFixed(1)}" fill="${Number(v) === max ? '#533afd' : '#8087ff'}" rx="1.5"/>`;
+    const tip = (titles && titles[i] != null) ? `<title>${escapeHtml(titles[i])}</title>` : '';
+    return `<rect x="${x.toFixed(1)}" y="${(h - bh).toFixed(1)}" width="${barW.toFixed(1)}" height="${bh.toFixed(1)}" fill="${Number(v) === max ? '#533afd' : '#8087ff'}" rx="1.5">${tip}</rect>`;
   }).join('');
 }
 
@@ -2262,7 +2263,7 @@ function setBreakdown(id, items) {
 }
 
 /* Diverging bars around a zero baseline (e.g. net subscribers per day) */
-function divergingBarsSvg(values, w = 600, h = 120) {
+function divergingBarsSvg(values, w = 600, h = 120, titles) {
   if (!values || !values.length) return `<text x="${w/2}" y="${h/2}" text-anchor="middle" fill="#64748d" font-size="12" font-family="Inter">Нет данных</text>`;
   const n = values.length, gap = n > 30 ? 1 : 2;
   const barW = (w - gap * (n - 1)) / n;
@@ -2273,7 +2274,8 @@ function divergingBarsSvg(values, w = 600, h = 120) {
     const bh = Math.max(1, (Math.abs(val) / maxAbs) * (h / 2 - 4));
     const x = i * (barW + gap);
     const y = val >= 0 ? mid - bh : mid;
-    return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${bh.toFixed(1)}" fill="${val >= 0 ? '#533afd' : '#ff6118'}" rx="1"/>`;
+    const tip = (titles && titles[i] != null) ? `<title>${escapeHtml(titles[i])}</title>` : '';
+    return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${bh.toFixed(1)}" fill="${val >= 0 ? '#533afd' : '#ff6118'}" rx="1">${tip}</rect>`;
   }).join('');
   return `<line x1="0" y1="${mid}" x2="${w}" y2="${mid}" stroke="#d8d6df" stroke-width="1"/>` + bars;
 }
@@ -2400,7 +2402,8 @@ function renderTgAnalytics() {
   if (hoursEl) {
     const th = graphs.top_hours;
     const vals = (th && th.values) ? th.values.map(Number) : [];
-    hoursEl.innerHTML = barsChartSvg(vals, 600, 120);
+    const hourTitles = vals.map((v, i) => `${(th && th.hours && th.hours[i] != null) ? th.hours[i] : i}:00 — ${fmt.num(v)}`);
+    hoursEl.innerHTML = barsChartSvg(vals, 600, 120, hourTitles);
     if (hoursLabels) {
       hoursLabels.innerHTML = vals.length
         ? (th.hours || vals.map((_, i) => i)).map((h, i) => `<span style="${i % 3 === 0 ? '' : 'visibility:hidden'}">${h}ч</span>`).join('')
@@ -2430,7 +2433,8 @@ function renderTgAnalytics() {
       const j = Number(joined.values[i]) || 0, l = Number(left.values[i]) || 0;
       joinedTotal += j; leftTotal += l; net.push(j - l);
     }
-    if (netEl) netEl.innerHTML = divergingBarsSvg(net.slice(-30), 600, 120);
+    const net30 = net.slice(-30);
+    if (netEl) netEl.innerHTML = divergingBarsSvg(net30, 600, 120, net30.map(v => `${v >= 0 ? '+' : ''}${fmt.num(v)} за день`));
     if (netSum) { const tot = joinedTotal - leftTotal; netSum.textContent = `${tot >= 0 ? '+' : ''}${fmt.num(tot)} за период`; }
   } else {
     if (netEl) netEl.innerHTML = divergingBarsSvg([]);
@@ -2457,14 +2461,15 @@ function renderTgAnalytics() {
   const wdOrder = [1, 2, 3, 4, 5, 6, 0], wdLabels = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
   const wdAvg = wdOrder.map(i => wdCount[i] ? Math.round(wdViews[i] / wdCount[i]) : 0);
   const wdCnt = wdOrder.map(i => wdCount[i]);
-  const setBars = (svgId, labelsId, vals) => {
+  const setBars = (svgId, labelsId, vals, unit) => {
     const el = document.getElementById(svgId);
-    if (el) el.innerHTML = vals.some(v => v > 0) ? barsChartSvg(vals, 600, 120) : barsChartSvg([]);
+    const titles = vals.map((v, i) => `${wdLabels[i]} — ${fmt.num(v)}${unit ? ' ' + unit : ''}`);
+    if (el) el.innerHTML = vals.some(v => v > 0) ? barsChartSvg(vals, 600, 120, titles) : barsChartSvg([]);
     const lab = document.getElementById(labelsId);
     if (lab) lab.innerHTML = wdLabels.map(d => `<span>${d}</span>`).join('');
   };
-  setBars('tg-weekday-views', 'tg-weekday-vlabels', wdAvg);
-  setBars('tg-weekday-count', 'tg-weekday-clabels', wdCnt);
+  setBars('tg-weekday-views', 'tg-weekday-vlabels', wdAvg, 'просм.');
+  setBars('tg-weekday-count', 'tg-weekday-clabels', wdCnt, 'постов');
   const wbEl = document.getElementById('tg-weekday-best');
   if (wbEl) {
     const maxAvg = Math.max(...wdAvg);
