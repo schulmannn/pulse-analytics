@@ -1207,6 +1207,16 @@
       </div>
       <div class="two-col" style="margin-top: 16px;">
         <div class="panel">
+          <div class="chart-head"><span class="chart-title">Просмотры (динамика)</span></div>
+          <svg id="tg-interactions-views" viewBox="0 0 600 140" width="100%" height="140" preserveAspectRatio="none"></svg>
+        </div>
+        <div class="panel">
+          <div class="chart-head"><span class="chart-title">Репосты (динамика)</span></div>
+          <svg id="tg-interactions-shares" viewBox="0 0 600 140" width="100%" height="140" preserveAspectRatio="none"></svg>
+        </div>
+      </div>
+      <div class="two-col" style="margin-top: 16px;">
+        <div class="panel">
           <div class="chart-head"><span class="chart-title">Источники новых подписчиков</span></div>
           <div id="tg-followers-source" class="breakdown-box"></div>
         </div>
@@ -2389,6 +2399,20 @@ function renderTgAnalytics() {
         growthLabels.innerHTML = [0, Math.floor(xs.length / 2), xs.length - 1].map(i => `<span>${fd(xs[i])}</span>`).join('');
       } else growthLabels.innerHTML = '';
     }
+  }
+
+  // Views & reposts over time (interactions, ~45-day window)
+  const inter = graphs.interactions;
+  const ivEl = document.getElementById('tg-interactions-views');
+  const isEl = document.getElementById('tg-interactions-shares');
+  if (inter && inter.series && inter.series.length) {
+    const views  = inter.series.find(s => /view|просмотр/i.test(s.name)) || inter.series[0];
+    const shares = inter.series.find(s => /share|репост/i.test(s.name)) || inter.series[1];
+    if (ivEl) ivEl.innerHTML = lineChartSvg(views ? views.values.map(Number) : []);
+    if (isEl) isEl.innerHTML = lineChartSvg(shares ? shares.values.map(Number) : []);
+  } else {
+    if (ivEl) ivEl.innerHTML = lineChartSvg([]);
+    if (isEl) isEl.innerHTML = lineChartSvg([]);
   }
 
   setBreakdown('tg-views-source', (graphs.views_by_source || []).map(s => ({ label: srcName(s.label), value: s.value })));

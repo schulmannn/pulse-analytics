@@ -324,6 +324,7 @@ async def get_graphs(x_internal_token: str = Header(default='')):
             'new_followers_by_source':  aggregate(await resolve(getattr(stats, 'new_followers_by_source_graph', None))),
             'languages':                aggregate(await resolve(getattr(stats, 'languages_graph', None)), top=6),
             'reactions_sentiment':      aggregate(await resolve(getattr(stats, 'reactions_by_emotion_graph', None))),
+            'interactions':             timeseries(await resolve(getattr(stats, 'interactions_graph', None))),
             'top_hours':                top_hours,
         }
     except Exception as e:
