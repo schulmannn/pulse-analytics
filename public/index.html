@@ -1695,6 +1695,7 @@ function lineChartSvg(values, opts = {}) {
     <path d="${linePath}" fill="none" stroke="#533afd" stroke-width="2"/>
     <circle cx="${lastX.toFixed(1)}" cy="${lastY.toFixed(1)}" r="4" fill="#533afd"/>
     <circle cx="${lastX.toFixed(1)}" cy="${lastY.toFixed(1)}" r="8" fill="#533afd" opacity="0.15"/>
+    <line class="hover-line" x1="-5" y1="0" x2="-5" y2="140" stroke="#533afd" stroke-width="1" stroke-dasharray="3 3" opacity="0"/>
   `;
 }
 
@@ -2299,8 +2300,9 @@ function breakdownRows(items) {
   const max = Math.max(...items.map(i => i.value), 1);
   return items.map(item => {
     const pct = (item.value / max) * 100;
+    const tipStr = `${item.label ? item.label + ': ' : ''}${fmt.num(item.value)}`;
     return `
-      <div class="breakdown-row">
+      <div class="breakdown-row" title="${escapeHtml(tipStr)}">
         <div class="breakdown-label">
           ${item.icon ? `<span class="breakdown-icon">${item.icon}</span>` : ''}
           ${item.label ? `<span>${escapeHtml(item.label)}</span>` : ''}
@@ -2379,6 +2381,13 @@ function initTip(el) {
     if (!rect.width) return;
     const frac = Math.max(0, Math.min(0.9999, (e.clientX - rect.left) / rect.width));
     const idx = Math.max(0, Math.min(n - 1, kind === 'line' ? Math.round(frac * (n - 1)) : Math.floor(frac * n)));
+    if (kind === 'line') {
+      const guide = el.querySelector('.hover-line');
+      if (guide) {
+        const vx = 10 + idx * (580 / Math.max(n - 1, 1));
+        guide.setAttribute('x1', vx); guide.setAttribute('x2', vx); guide.setAttribute('opacity', '0.5');
+      }
+    }
     const tip = document.getElementById('chart-tip');
     if (!tip || labels[idx] == null) return;
     tip.textContent = labels[idx];
@@ -2386,7 +2395,10 @@ function initTip(el) {
     tip.style.left = e.clientX + 'px';
     tip.style.top = e.clientY + 'px';
   };
-  el.onmouseleave = () => { const tip = document.getElementById('chart-tip'); if (tip) tip.style.display = 'none'; };
+  el.onmouseleave = () => {
+    const tip = document.getElementById('chart-tip'); if (tip) tip.style.display = 'none';
+    const guide = el.querySelector('.hover-line'); if (guide) guide.setAttribute('opacity', '0');
+  };
 }
 
 /* ── Chart expand modal ───────────────────────────────────────── */
