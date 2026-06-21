@@ -1236,6 +1236,18 @@
           <div id="tg-churn" class="breakdown-box"></div>
         </div>
       </div>
+      <div class="two-col" style="margin-top: 16px;">
+        <div class="panel">
+          <div class="chart-head"><span class="chart-title">Ср. просмотры по&nbsp;дню недели</span><span id="tg-weekday-best" style="font-size:var(--text-caption);color:var(--color-deep-violet);font-weight:600;"></span></div>
+          <svg id="tg-weekday-views" viewBox="0 0 600 120" width="100%" height="120" preserveAspectRatio="none"></svg>
+          <div id="tg-weekday-vlabels" style="display:flex;justify-content:space-between;font-size:var(--text-caption);color:var(--color-ghost-gray);padding-top:6px;"></div>
+        </div>
+        <div class="panel">
+          <div class="chart-head"><span class="chart-title">Постов по&nbsp;дню недели</span></div>
+          <svg id="tg-weekday-count" viewBox="0 0 600 120" width="100%" height="120" preserveAspectRatio="none"></svg>
+          <div id="tg-weekday-clabels" style="display:flex;justify-content:space-between;font-size:var(--text-caption);color:var(--color-ghost-gray);padding-top:6px;"></div>
+        </div>
+      </div>
     </div>
 
     <!-- Top posts -->
@@ -2431,6 +2443,32 @@ function renderTgAnalytics() {
       { icon: '➖', label: 'Отписалось',  value: leftTotal, color: 'var(--color-vibrant-orange)' }
     ].filter(i => i.value > 0);
     churnEl.innerHTML = items.length ? breakdownRows(items) : EMPTY_BREAKDOWN;
+  }
+
+  // Weekday performance (computed from posts: avg views + count by day of week)
+  const wdViews = Array(7).fill(0), wdCount = Array(7).fill(0);
+  (posts || []).forEach(p => {
+    if (!p.date) return;
+    const d = new Date(p.date).getDay();
+    if (isNaN(d)) return;
+    wdViews[d] += Number(p.views) || 0;
+    wdCount[d] += 1;
+  });
+  const wdOrder = [1, 2, 3, 4, 5, 6, 0], wdLabels = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+  const wdAvg = wdOrder.map(i => wdCount[i] ? Math.round(wdViews[i] / wdCount[i]) : 0);
+  const wdCnt = wdOrder.map(i => wdCount[i]);
+  const setBars = (svgId, labelsId, vals) => {
+    const el = document.getElementById(svgId);
+    if (el) el.innerHTML = vals.some(v => v > 0) ? barsChartSvg(vals, 600, 120) : barsChartSvg([]);
+    const lab = document.getElementById(labelsId);
+    if (lab) lab.innerHTML = wdLabels.map(d => `<span>${d}</span>`).join('');
+  };
+  setBars('tg-weekday-views', 'tg-weekday-vlabels', wdAvg);
+  setBars('tg-weekday-count', 'tg-weekday-clabels', wdCnt);
+  const wbEl = document.getElementById('tg-weekday-best');
+  if (wbEl) {
+    const maxAvg = Math.max(...wdAvg);
+    wbEl.textContent = maxAvg > 0 ? `лучший день: ${wdLabels[wdAvg.indexOf(maxAvg)]}` : '';
   }
 }
 
