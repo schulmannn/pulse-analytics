@@ -1032,6 +1032,10 @@
         </nav>
       </div>
       <div class="header-right">
+        <div class="tabs source-toggle" id="source-toggle">
+          <button data-source="telegram" class="active">✈&nbsp;Telegram</button>
+          <button data-source="instagram">Ⓘ&nbsp;Instagram</button>
+        </div>
         <span id="status-pill" class="pill"><span class="dot"></span><span id="status-text">Загрузка…</span></span>
         <button id="refresh-btn" class="icon-btn" title="Обновить">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>
@@ -1076,9 +1080,9 @@
     </div>
 
     <!-- Two-column: IG + TG -->
-    <div class="section">
-      <div class="two-col">
-        <div class="panel" id="instagram">
+    <div class="section" id="sources-section">
+      <div class="two-col" id="sources-grid" style="grid-template-columns: 1fr;">
+        <div class="panel hidden" id="instagram">
           <div class="panel-head">
             <div class="panel-title">
               <div class="src-mark ig">Ⓘ</div>
@@ -1146,6 +1150,38 @@
           </div>
 
           <div id="tg-breakdown" class="breakdown-box hidden"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Telegram analytics -->
+    <div class="section hidden" id="tg-analytics">
+      <div class="section-head">
+        <div>
+          <h2>Аналитика Telegram</h2>
+          <p>Просмотры, реакции и&nbsp;вовлечённость · твой профиль (MTProto)</p>
+        </div>
+      </div>
+      <div class="kpi-grid" id="tg-channel-stats" style="margin-bottom: 16px;"></div>
+      <div class="two-col">
+        <div class="panel">
+          <div class="chart-head"><span class="chart-title">Просмотры по дням</span></div>
+          <svg id="tg-views-chart" viewBox="0 0 600 140" width="100%" height="140" preserveAspectRatio="none"></svg>
+          <div id="tg-views-labels" style="display:flex;justify-content:space-between;font-size:var(--text-caption);color:var(--color-ghost-gray);padding-top:6px;"></div>
+        </div>
+        <div class="panel">
+          <div class="chart-head"><span class="chart-title">Реакции по&nbsp;эмодзи</span></div>
+          <div id="tg-emoji-breakdown" class="breakdown-box"></div>
+        </div>
+      </div>
+      <div class="two-col" style="margin-top: 16px;">
+        <div class="panel">
+          <div class="chart-head"><span class="chart-title">Состав вовлечённости</span></div>
+          <div id="tg-engagement-breakdown" class="breakdown-box"></div>
+        </div>
+        <div class="panel">
+          <div class="chart-head"><span class="chart-title">Средние просмотры по&nbsp;типу контента</span></div>
+          <div id="tg-type-breakdown" class="breakdown-box"></div>
         </div>
       </div>
     </div>
@@ -1244,6 +1280,7 @@ const API = {
   igPosts(l=20)    { return this.req(`/api/ig/posts?limit=${l}`); },
   tgChannel()      { return this.req('/api/tg/channel'); },
   tgFull()         { return this.req('/api/tg/full?limit=30'); },
+  tgStats()        { return this.req('/api/tg/mtproto/stats'); },
   health()         { return this.req('/api/health'); },
   clearCache()     { return this.req('/api/cache', { method: 'DELETE' }); }
 };
@@ -1414,6 +1451,13 @@ document.getElementById('period-tabs').addEventListener('click', (e) => {
   loadAll();
 });
 
+/* ── Source toggle (Telegram / Instagram) ────────────────────── */
+document.getElementById('source-toggle').addEventListener('click', (e) => {
+  const btn = e.target.closest('button');
+  if (!btn) return;
+  setSource(btn.dataset.source);
+});
+
 /* ── Nav (smooth scroll) ─────────────────────────────────────── */
 document.querySelectorAll('.nav a').forEach(a => {
   a.addEventListener('click', (e) => {
@@ -1460,8 +1504,9 @@ document.getElementById('export-btn').addEventListener('click', () => {
    ================================================================ */
 
 const state = {
+  source: 'telegram',
   ig: { profile: null, insights: null, posts: [] },
-  tg: { channel: null, stats: null },
+  tg: { channel: null, stats: null, channelStats: null },
   posts: [] // unified
 };
 
@@ -1577,7 +1622,7 @@ function renderKpis() {
 
   const reachSeries = extractSeries(state.ig.insights).map(p => p.value).filter(v => v != null);
 
-  const cards = [
+  const igCards = [
     {
       feature: true,
       label: 'Подписчики · всего',
@@ -1627,6 +1672,43 @@ function renderKpis() {
       spark: []
     }
   ];
+
+  // ── Telegram KPI cards (rich MTProto data) ──
+  const tgCards = (() => {
+    const vs = state.tg.viewsSummary || {};
+    const cs = state.tg.channelStats || {};
+    const members = tgMembers;
+    const totalViews = vs.total_views || 0;
+    const totalReactions = vs.total_reactions || 0;
+    const totalForwards = vs.total_forwards || 0;
+    const totalReplies = vs.total_replies || 0;
+    const avgViews = vs.avg_views || 0;
+    const postsAnalyzed = vs.posts_analyzed || 0;
+    const erVal = members > 0 ? ((totalReactions + totalReplies + totalForwards) / members * 100) : 0;
+    const notif = cs.enabled_notifications || null;
+    const vbd = (vs.views_by_day && typeof vs.views_by_day === 'object') ? vs.views_by_day : null;
+    const spark = vbd ? Object.entries(vbd).map(([day, v]) => {
+      const [d, m] = day.split('.').map(Number);
+      return { ts: new Date(new Date().getFullYear(), (m || 1) - 1, d || 1).getTime(), v: Number(v) || 0 };
+    }).sort((a, b) => a.ts - b.ts).map(e => e.v) : [];
+    const cur = (o) => (o && o.current != null) ? o.current : null;
+    return [
+      { feature: true, label: 'Подписчики', value: fmt.num(members),
+        delta: (notif && notif.total) ? `${Math.round(notif.part / notif.total * 100)}% с уведомлениями` : 'в канале', deltaClass: 'muted', spark },
+      { label: 'Просмотры за период', value: fmt.short(totalViews),
+        delta: postsAnalyzed ? `по ${postsAnalyzed} постам` : null, deltaClass: 'muted', spark },
+      { label: 'Ср. охват поста', value: fmt.short(avgViews),
+        delta: cur(cs.views_per_post) != null ? `${fmt.short(cur(cs.views_per_post))} по статистике` : null, deltaClass: 'muted', spark: [] },
+      { label: 'Реакции', value: fmt.short(totalReactions),
+        delta: postsAnalyzed ? `${(totalReactions / Math.max(postsAnalyzed, 1)).toFixed(1)} на пост` : null, deltaClass: 'muted', spark: [] },
+      { label: 'Репосты', value: fmt.short(totalForwards),
+        delta: totalReplies ? `${fmt.short(totalReplies)} комментариев` : null, deltaClass: 'muted', spark: [] },
+      { label: 'Вовлечённость (ER)', value: erVal > 0 ? erVal.toFixed(2) + '%' : '—',
+        delta: '(реакции+репосты+комменты) / подписчики', deltaClass: 'muted', spark: [] }
+    ];
+  })();
+
+  const cards = state.source === 'telegram' ? tgCards : igCards;
 
   grid.innerHTML = cards.map(c => `
     <div class="kpi-card${c.feature ? ' feature' : ''}">
@@ -1914,7 +1996,11 @@ function renderPosts() {
   const topGrid = document.getElementById('top-posts-grid');
   const list = document.getElementById('posts-list');
 
-  if (!state.posts || state.posts.length === 0) {
+  const activePosts = state.source === 'instagram'
+    ? state.posts.filter(p => p.source === 'IG')
+    : state.posts.filter(p => p.source === 'TG');
+
+  if (!activePosts || activePosts.length === 0) {
     if (topGrid) topGrid.innerHTML = '';
     list.innerHTML = `<div class="empty-state">
       <div class="em-title">Постов пока нет</div>
@@ -1924,7 +2010,7 @@ function renderPosts() {
     return;
   }
 
-  const sorted = [...state.posts].sort((a, b) => (b.reach || 0) - (a.reach || 0));
+  const sorted = [...activePosts].sort((a, b) => (b.reach || 0) - (a.reach || 0));
 
   // ── Top 3 posts ─────────────────────────────────────
   const top3 = sorted.slice(0, 3).filter(p => (p.reach || 0) > 0);
@@ -2019,25 +2105,177 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
+/* ── Source toggle (Telegram / Instagram) ────────────────────── */
+function setSource(src) {
+  if (src !== 'telegram' && src !== 'instagram') return;
+  state.source = src;
+  applySource(src);
+}
+
+function applySource(src) {
+  document.querySelectorAll('#source-toggle button').forEach(b =>
+    b.classList.toggle('active', b.dataset.source === src));
+
+  const tgMode = src === 'telegram';
+  const igPanel = document.getElementById('instagram');
+  const tgPanel = document.getElementById('telegram');
+  const tgAnalytics = document.getElementById('tg-analytics');
+  const igNav = document.querySelector('.nav a[data-anchor="instagram"]');
+  const tgNav = document.querySelector('.nav a[data-anchor="telegram"]');
+
+  if (igPanel) igPanel.classList.toggle('hidden', tgMode);
+  if (tgPanel) tgPanel.classList.toggle('hidden', !tgMode);
+  if (tgAnalytics) tgAnalytics.classList.toggle('hidden', !(tgMode && state.tg.mtprotoAvailable));
+  if (igNav) igNav.classList.toggle('hidden', tgMode);
+  if (tgNav) tgNav.classList.toggle('hidden', !tgMode);
+
+  renderHero();
+  renderKpis();
+  renderPosts();
+}
+
+/* Aggregate reactions across TG posts → [{emoji, count}] desc */
+function aggregateReactions(posts) {
+  const map = {};
+  (posts || []).forEach(p => {
+    (p.reactions_detail || p.reactionsDetail || []).forEach(r => {
+      if (!r || !r.emoji) return;
+      map[r.emoji] = (map[r.emoji] || 0) + (Number(r.count) || 0);
+    });
+  });
+  return Object.entries(map).map(([emoji, count]) => ({ emoji, count }))
+    .sort((a, b) => b.count - a.count);
+}
+
+/* Horizontal breakdown bars: items = [{icon?, label, value, display?}] */
+function breakdownRows(items) {
+  const max = Math.max(...items.map(i => i.value), 1);
+  return items.map(item => {
+    const pct = (item.value / max) * 100;
+    return `
+      <div class="breakdown-row">
+        <div class="breakdown-label">
+          ${item.icon ? `<span class="breakdown-icon">${item.icon}</span>` : ''}
+          ${item.label ? `<span>${escapeHtml(item.label)}</span>` : ''}
+        </div>
+        <div class="breakdown-bar"><div class="breakdown-fill" style="width:${pct.toFixed(1)}%"></div></div>
+        <div class="breakdown-val">${item.display != null ? item.display : fmt.short(item.value)}</div>
+      </div>`;
+  }).join('');
+}
+
+const EMPTY_BREAKDOWN = `<div class="breakdown-title" style="color:var(--color-ghost-gray)">Нет данных за&nbsp;период</div>`;
+
+/* ── Telegram analytics section ──────────────────────────────── */
+function renderTgAnalytics() {
+  const vs = state.tg.viewsSummary || {};
+  const posts = state.tg.fullPosts || [];
+  const cs = state.tg.channelStats || {};
+
+  // Channel stats KPI row (from GetBroadcastStats)
+  const statsGrid = document.getElementById('tg-channel-stats');
+  if (statsGrid) {
+    const cur = (o) => (o && o.current != null) ? o.current : null;
+    const vpp = cur(cs.views_per_post);
+    const spp = cur(cs.shares_per_post);
+    const rpp = cur(cs.reactions_per_post);
+    const notif = cs.enabled_notifications || null;
+    const notifPct = notif && notif.total ? (notif.part / notif.total * 100) : null;
+    const cards = [
+      { label: 'Просмотров / пост', value: fmt.short(vpp != null ? vpp : (vs.avg_views || 0)), delta: vs.posts_analyzed ? `по ${vs.posts_analyzed} постам` : null },
+      { label: 'Репостов / пост',   value: spp != null ? fmt.short(spp) : '—', delta: vs.total_forwards ? `${fmt.short(vs.total_forwards)} всего` : null },
+      { label: 'Реакций / пост',    value: rpp != null ? fmt.short(rpp) : '—', delta: vs.total_reactions ? `${fmt.short(vs.total_reactions)} всего` : null },
+      { label: 'Уведомления вкл.',  value: notifPct != null ? notifPct.toFixed(1) + '%' : '—', delta: notif ? `${fmt.short(notif.part)} из ${fmt.short(notif.total)}` : null }
+    ];
+    statsGrid.style.gridTemplateColumns = 'repeat(4, 1fr)';
+    statsGrid.innerHTML = cards.map(c => `
+      <div class="kpi-card">
+        <div class="kpi-label">${c.label}</div>
+        <div class="kpi-value">${c.value}</div>
+        ${c.delta ? `<div class="kpi-delta muted">${c.delta}</div>` : ''}
+      </div>`).join('');
+  }
+
+  // Views by day — line chart
+  const chartEl = document.getElementById('tg-views-chart');
+  const labelsEl = document.getElementById('tg-views-labels');
+  const vbd = (vs.views_by_day && typeof vs.views_by_day === 'object') ? vs.views_by_day : null;
+  if (chartEl) {
+    if (vbd) {
+      const entries = Object.entries(vbd).map(([day, v]) => {
+        const [d, m] = day.split('.').map(Number);
+        const ts = new Date(new Date().getFullYear(), (m || 1) - 1, d || 1).getTime();
+        return { day, v: Number(v) || 0, ts };
+      }).sort((a, b) => a.ts - b.ts).slice(-14);
+      chartEl.innerHTML = lineChartSvg(entries.map(e => e.v));
+      if (labelsEl) labelsEl.innerHTML = entries.map((e, i) => {
+        const show = entries.length <= 8 || i % 2 === 0 || i === entries.length - 1;
+        return `<span style="${show ? '' : 'visibility:hidden'}">${e.day}</span>`;
+      }).join('');
+    } else {
+      chartEl.innerHTML = lineChartSvg([]);
+      if (labelsEl) labelsEl.innerHTML = '';
+    }
+  }
+
+  // Reactions by emoji
+  const emojiEl = document.getElementById('tg-emoji-breakdown');
+  if (emojiEl) {
+    const reactions = aggregateReactions(posts).slice(0, 8);
+    emojiEl.innerHTML = reactions.length
+      ? breakdownRows(reactions.map(r => ({ icon: r.emoji, label: '', value: r.count })))
+      : EMPTY_BREAKDOWN;
+  }
+
+  // Engagement composition
+  const engEl = document.getElementById('tg-engagement-breakdown');
+  if (engEl) {
+    const items = [
+      { icon: '❤️', label: 'Реакции',     value: vs.total_reactions || 0 },
+      { icon: '↗️', label: 'Репосты',      value: vs.total_forwards || 0 },
+      { icon: '💬', label: 'Комментарии',  value: vs.total_replies || 0 }
+    ].filter(i => i.value > 0);
+    engEl.innerHTML = items.length ? breakdownRows(items) : EMPTY_BREAKDOWN;
+  }
+
+  // Avg views by content type
+  const typeEl = document.getElementById('tg-type-breakdown');
+  if (typeEl) {
+    const abt = (vs.avg_views_by_type && typeof vs.avg_views_by_type === 'object') ? vs.avg_views_by_type : {};
+    const icons = { photo: '🖼', video: '🎬', poll: '📊', document: '📎', text: '📝', audio: '🎵', voice: '🎙', link: '🔗' };
+    const names = { photo: 'Фото', video: 'Видео', poll: 'Опросы', document: 'Файлы', text: 'Текст', audio: 'Аудио', voice: 'Голос', link: 'Ссылки' };
+    const items = Object.entries(abt)
+      .map(([t, v]) => ({ icon: icons[t] || '·', label: names[t] || t, value: Number(v) || 0 }))
+      .filter(i => i.value > 0).sort((a, b) => b.value - a.value);
+    typeEl.innerHTML = items.length ? breakdownRows(items) : EMPTY_BREAKDOWN;
+  }
+}
+
 /* ── Hero rendering ──────────────────────────────────────────── */
 function renderHero() {
   document.getElementById('hero-eyebrow').textContent = fmt.todayLabel();
 
   const igFollowers = pick(state.ig.profile, ['followers_count','followers']) || 0;
   const tgMembers   = pick(state.tg.channel, ['memberCount','members_count','member_count','subscribers']) || 0;
-  const reach = sumMetric(state.ig.insights, ['reach']) || 0;
 
   let highlight = '';
-  if (reach > 0) {
-    highlight = `<em>${fmt.short(reach)}</em> охвата`;
-  } else if (igFollowers + tgMembers > 0) {
-    highlight = `<em>${fmt.short(igFollowers + tgMembers)}</em> подписчиков`;
+  let sub = 'Сводка по&nbsp;Instagram и&nbsp;Telegram. Кэш обновляется каждые 10&nbsp;минут.';
+  if (state.source === 'telegram') {
+    const totalViews = (state.tg.viewsSummary && state.tg.viewsSummary.total_views) || 0;
+    if (totalViews > 0)      highlight = `<em>${fmt.short(totalViews)}</em> просмотров`;
+    else if (tgMembers > 0)  highlight = `<em>${fmt.short(tgMembers)}</em> подписчиков`;
+    else                     highlight = `всё <em>под контролем</em>`;
+    sub = 'Telegram-аналитика через твой профиль (MTProto). Кэш обновляется каждые 10&nbsp;минут.';
   } else {
-    highlight = `всё <em>под контролем</em>`;
+    const reach = sumMetric(state.ig.insights, ['reach']) || 0;
+    if (reach > 0)            highlight = `<em>${fmt.short(reach)}</em> охвата`;
+    else if (igFollowers > 0) highlight = `<em>${fmt.short(igFollowers)}</em> подписчиков`;
+    else                      highlight = `всё <em>под контролем</em>`;
+    sub = 'Instagram-аналитика. Кэш обновляется каждые 10&nbsp;минут.';
   }
 
   document.getElementById('hero-title').innerHTML = `${fmt.greeting()}. ${highlight} за&nbsp;последние ${currentPeriod}&nbsp;дн.`;
-  document.getElementById('hero-sub').innerHTML = `Сводка по&nbsp;Instagram и&nbsp;Telegram. Кэш обновляется каждые 10&nbsp;минут.`;
+  document.getElementById('hero-sub').innerHTML = sub;
 }
 
 /* ── Status pill ─────────────────────────────────────────────── */
@@ -2095,7 +2333,8 @@ async function loadAll() {
       state.tg.fullPosts = [];
       state.tg.viewsSummary = null;
       state.tg.mtprotoAvailable = false;
-    })
+    }),
+    API.tgStats().then(d => state.tg.channelStats = d).catch(() => { state.tg.channelStats = null; })
   ];
   await Promise.all(tasks);
 
@@ -2133,7 +2372,9 @@ async function loadAll() {
   renderKpis();
   renderIg();
   renderTg();
+  renderTgAnalytics();
   renderPosts();
+  applySource(state.source);
 }
 
 /* ================================================================
