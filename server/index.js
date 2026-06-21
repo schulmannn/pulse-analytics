@@ -203,19 +203,41 @@ app.get('/api/tg/channel', requireAuth, async (req, res) => {
     const cached = cacheGet('tg:channel');
     if (cached) return res.json(cached);
 
-    const [chat, memberCount] = await Promise.all([
-      tgFetch('getChat',            { chat_id: TG_CHANNEL }),
-      tgFetch('getChatMemberCount', { chat_id: TG_CHANNEL })
-    ]);
+    // Основной источник — Bot API (только если задан токен бота)
+    if (TG_TOKEN) {
+      try {
+        const [chat, memberCount] = await Promise.all([
+          tgFetch('getChat',            { chat_id: TG_CHANNEL }),
+          tgFetch('getChatMemberCount', { chat_id: TG_CHANNEL })
+        ]);
+        const data = {
+          id:          chat.id,
+          title:       chat.title,
+          username:    chat.username,
+          description: chat.description || '',
+          memberCount,
+          online:      0,
+          inviteLink:  chat.invite_link || null,
+          source:      'bot_api',
+        };
+        cacheSet('tg:channel', data);
+        return res.json(data);
+      } catch (_botErr) {
+        // бот недоступен → падаем в MTProto-фолбэк ниже
+      }
+    }
 
+    // Фолбэк — MTProto через твой личный аккаунт (работает без бота)
+    const mt = await mtprotoFetch('/channel');
     const data = {
-      id:          chat.id,
-      title:       chat.title,
-      username:    chat.username,
-      description: chat.description || '',
-      memberCount,
-      inviteLink:  chat.invite_link || null,
-      source:      'bot_api',
+      id:          mt.id,
+      title:       mt.title,
+      username:    mt.username,
+      description: mt.description || '',
+      memberCount: mt.members || 0,
+      online:      mt.online || 0,
+      inviteLink:  null,
+      source:      'mtproto',
     };
     cacheSet('tg:channel', data);
     res.json(data);

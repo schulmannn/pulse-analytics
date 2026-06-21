@@ -5,7 +5,6 @@ Python + Telethon + FastAPI
 
 import asyncio
 import os
-import base64
 import logging
 from typing import Optional
 
@@ -13,21 +12,17 @@ from fastapi import FastAPI, HTTPException, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from telethon import TelegramClient
+from telethon.sessions import StringSession
 from telethon.tl.functions.stats import GetBroadcastStatsRequest
 from telethon.tl.functions.channels import GetFullChannelRequest
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# ── Восстанавливаем сессию из переменной окружения ───────
-_session_b64 = os.getenv('TG_SESSION_B64', '')
-if _session_b64:
-    try:
-        with open('pulse.session', 'wb') as _f:
-            _f.write(base64.b64decode(_session_b64 + '=='))
-        print('[INFO] Session restored from TG_SESSION_B64')
-    except Exception as _e:
-        print(f'[WARN] Could not restore session: {_e}')
+# ── Сессия твоего ЛИЧНОГО аккаунта (StringSession) ────────
+# Генерируется один раз локально и кладётся в переменную окружения TG_SESSION.
+# Через личный профиль доступны просмотры, репосты, реакции и статистика канала,
+# которых нет в Bot API. Это не файл-сессия — base64 больше не нужен.
 
 # ── Logging ──────────────────────────────────────────────
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
@@ -36,6 +31,7 @@ log = logging.getLogger(__name__)
 # ── Config ───────────────────────────────────────────────
 API_ID       = int(os.getenv('TG_API_ID', '0'))
 API_HASH     = os.getenv('TG_API_HASH', '')
+SESSION      = os.getenv('TG_SESSION', '')
 PHONE        = os.getenv('TG_PHONE', '')
 CHANNEL      = os.getenv('TG_CHANNEL', '')
 TEAM_PASS    = os.getenv('TEAM_PASSWORD', '')
@@ -59,9 +55,13 @@ async def get_client() -> TelegramClient:
     global client
     if client and client.is_connected():
         return client
-    client = TelegramClient('pulse', API_ID, API_HASH)
-    await client.start(phone=PHONE)
-    log.info('Telethon client connected')
+    if not SESSION:
+        raise RuntimeError('TG_SESSION не задан — добавь строку сессии в переменные окружения')
+    client = TelegramClient(StringSession(SESSION), API_ID, API_HASH)
+    await client.connect()
+    if not await client.is_user_authorized():
+        raise RuntimeError('TG_SESSION недействителен или истёк — сгенерируй заново')
+    log.info('Telethon client connected (StringSession)')
     return client
 
 
@@ -253,8 +253,8 @@ async def get_stats(x_internal_token: str = Header(default='')):
 
 @app.on_event('startup')
 async def startup():
-    if not API_ID or not API_HASH:
-        log.warning('TG_API_ID / TG_API_HASH не заданы')
+    if not API_ID or not API_HASH or not SESSION:
+        log.warning('TG_API_ID / TG_API_HASH / TG_SESSION не заданы — MTProto выключен')
         return
     try:
         await get_client()
@@ -271,4 +271,4 @@ async def shutdown():
 
 
 if __name__ == '__main__':
-    uvicorn.run('service:app', host='0.0.0.0', port=MTPROTO_PORT, reload=False)
+    uvicorn.run(app, host='0.0.0.0', port=MTPROTO_PORT)
