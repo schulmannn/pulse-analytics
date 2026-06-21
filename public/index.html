@@ -686,7 +686,7 @@
   }
   .breakdown-row {
     display: grid;
-    grid-template-columns: 90px 1fr 50px;
+    grid-template-columns: 124px 1fr 50px;
     gap: 10px;
     align-items: center;
     margin-bottom: 8px;
@@ -696,8 +696,14 @@
     display: flex;
     align-items: center;
     gap: 6px;
+    min-width: 0;
     font-size: var(--text-body);
     color: var(--color-midnight-ink);
+  }
+  .breakdown-label span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .breakdown-icon { font-size: 14px; line-height: 1; }
   .breakdown-bar {
@@ -1207,7 +1213,7 @@
       </div>
       <div class="two-col" style="margin-top: 16px;">
         <div class="panel">
-          <div class="chart-head"><span class="chart-title">Активность аудитории по&nbsp;часам</span></div>
+          <div class="chart-head"><span class="chart-title">Активность аудитории по&nbsp;часам</span><span id="tg-hours-peak" style="font-size:var(--text-caption);color:var(--color-deep-violet);font-weight:600;"></span></div>
           <svg id="tg-hours-chart" viewBox="0 0 600 120" width="100%" height="120" preserveAspectRatio="none"></svg>
           <div id="tg-hours-labels" style="display:flex;justify-content:space-between;font-size:var(--text-caption);color:var(--color-ghost-gray);padding-top:6px;"></div>
         </div>
@@ -1240,7 +1246,7 @@
         </div>
       </div>
       <div class="posts-table" id="posts-table">
-        <div class="posts-row head">
+        <div class="posts-row head" id="posts-head">
           <div></div>
           <div>Пост</div>
           <div style="text-align: right;">Источник</div>
@@ -1509,8 +1515,10 @@ document.getElementById('export-btn').addEventListener('click', () => {
     toast('Нет данных для экспорта', 'error');
     return;
   }
-  const rows = [['Дата','Источник','Подпись','Охват','Лайки','Комментарии','ER']];
-  state.posts.forEach(p => {
+  const rows = [['Дата','Источник','Подпись','Просмотры/Охват','Реакции/Лайки','Комментарии','Репосты','ER']];
+  const src = state.source === 'instagram' ? 'IG' : 'TG';
+  const exp = state.posts.filter(p => p.source === src);
+  (exp.length ? exp : state.posts).forEach(p => {
     rows.push([
       p.date || '',
       p.source || '',
@@ -1518,6 +1526,7 @@ document.getElementById('export-btn').addEventListener('click', () => {
       p.reach || 0,
       p.likes || 0,
       p.comments || 0,
+      p.shares || 0,
       p.er || ''
     ]);
   });
@@ -2033,6 +2042,15 @@ function renderPosts() {
     ? state.posts.filter(p => p.source === 'IG')
     : state.posts.filter(p => p.source === 'TG');
 
+  // Source-aware table header
+  const head = document.getElementById('posts-head');
+  if (head) {
+    const cols = state.source === 'instagram'
+      ? ['', 'Пост', 'Источник', 'Охват', 'Показы', 'Лайки', '💬', '🔖/↗', 'ER']
+      : ['', 'Пост', 'Источник', 'Просмотры', 'Показы', 'Реакции', 'Комменты', 'Репосты', 'ER'];
+    head.innerHTML = cols.map((c, i) => i <= 1 ? `<div>${c}</div>` : `<div style="text-align: right;">${c}</div>`).join('');
+  }
+
   if (!activePosts || activePosts.length === 0) {
     if (topGrid) topGrid.innerHTML = '';
     list.innerHTML = `<div class="empty-state">
@@ -2344,6 +2362,14 @@ function renderTgAnalytics() {
         ? (th.hours || vals.map((_, i) => i)).map((h, i) => `<span style="${i % 3 === 0 ? '' : 'visibility:hidden'}">${h}ч</span>`).join('')
         : '';
     }
+    const pk = document.getElementById('tg-hours-peak');
+    if (pk) {
+      if (vals.length) {
+        const peakIdx = vals.indexOf(Math.max(...vals));
+        const hourLabel = (th.hours && th.hours[peakIdx] != null) ? th.hours[peakIdx] : peakIdx;
+        pk.textContent = `пик активности ~ ${hourLabel}:00`;
+      } else pk.textContent = '';
+    }
   }
 }
 
@@ -2446,7 +2472,7 @@ async function loadAll() {
     permalink: tgUsername && p.id ? `https://t.me/${tgUsername}/${p.id}` : null,
     mediaType: p.media_type || null,
     reach: p.views || p.view_count || 0,
-    impressions: p.views || 0,
+    impressions: 0,
     likes: p.reactions || p.reactions_count || 0,
     comments: p.replies || p.comments_count || 0,
     shares: p.forwards || 0,
