@@ -1222,6 +1222,16 @@
           <div id="tg-reactions-sentiment" class="breakdown-box"></div>
         </div>
       </div>
+      <div class="two-col" style="margin-top: 16px;">
+        <div class="panel">
+          <div class="chart-head"><span class="chart-title">Прирост подписчиков по&nbsp;дням</span><span id="tg-net-sum" style="font-size:var(--text-caption);color:var(--color-ghost-gray);"></span></div>
+          <svg id="tg-net-chart" viewBox="0 0 600 120" width="100%" height="120" preserveAspectRatio="none"></svg>
+        </div>
+        <div class="panel">
+          <div class="chart-head"><span class="chart-title">Привлечение и&nbsp;отписки</span></div>
+          <div id="tg-churn" class="breakdown-box"></div>
+        </div>
+      </div>
     </div>
 
     <!-- Top posts -->
@@ -1317,7 +1327,7 @@ const API = {
   igInsights(d=7)  { return this.req(`/api/ig/insights?days=${d}`); },
   igPosts(l=20)    { return this.req(`/api/ig/posts?limit=${l}`); },
   tgChannel()      { return this.req('/api/tg/channel'); },
-  tgFull()         { return this.req('/api/tg/full?limit=30'); },
+  tgFull(limit=30) { return this.req('/api/tg/full?limit=' + Math.min(100, limit)); },
   tgStats()        { return this.req('/api/tg/mtproto/stats'); },
   tgGraphs()       { return this.req('/api/tg/mtproto/graphs'); },
   health()         { return this.req('/api/health'); },
@@ -2235,6 +2245,23 @@ function setBreakdown(id, items) {
   el.innerHTML = valid.length ? breakdownRows(valid) : EMPTY_BREAKDOWN;
 }
 
+/* Diverging bars around a zero baseline (e.g. net subscribers per day) */
+function divergingBarsSvg(values, w = 600, h = 120) {
+  if (!values || !values.length) return `<text x="${w/2}" y="${h/2}" text-anchor="middle" fill="#64748d" font-size="12" font-family="Inter">Нет данных</text>`;
+  const n = values.length, gap = n > 30 ? 1 : 2;
+  const barW = (w - gap * (n - 1)) / n;
+  const maxAbs = Math.max(1, ...values.map(v => Math.abs(Number(v) || 0)));
+  const mid = h / 2;
+  const bars = values.map((v, i) => {
+    const val = Number(v) || 0;
+    const bh = Math.max(1, (Math.abs(val) / maxAbs) * (h / 2 - 4));
+    const x = i * (barW + gap);
+    const y = val >= 0 ? mid - bh : mid;
+    return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${bh.toFixed(1)}" fill="${val >= 0 ? '#533afd' : '#ff6118'}" rx="1"/>`;
+  }).join('');
+  return `<line x1="0" y1="${mid}" x2="${w}" y2="${mid}" stroke="#d8d6df" stroke-width="1"/>` + bars;
+}
+
 const SRC_NAMES = { 'Followers':'Подписчики', 'URL':'Ссылки', 'Search':'Поиск', 'Telegram Search':'Поиск', 'Groups':'Группы', 'Channels':'Каналы', 'PM':'Личные сообщения', 'Other':'Прочее', 'Shareable Chat Folders':'Папки', 'Shareable Folder Links':'Папки' };
 function srcName(n) { return SRC_NAMES[n] || n; }
 function sentName(n) { return ({ Positive:'Положительные', Other:'Прочие', Negative:'Отрицательные' })[n] || n; }
@@ -2371,6 +2398,35 @@ function renderTgAnalytics() {
       } else pk.textContent = '';
     }
   }
+
+  // Net new subscribers per day (joined - left) + churn totals
+  const f = graphs.followers;
+  let joinedTotal = 0, leftTotal = 0;
+  const netEl = document.getElementById('tg-net-chart');
+  const netSum = document.getElementById('tg-net-sum');
+  if (f && f.series && f.series.length >= 2) {
+    const joined = f.series.find(s => /join|подпис/i.test(s.name)) || f.series[0];
+    const left   = f.series.find(s => /left|отпис/i.test(s.name)) || f.series[1];
+    const m = Math.min(joined.values.length, left.values.length);
+    const net = [];
+    for (let i = 0; i < m; i++) {
+      const j = Number(joined.values[i]) || 0, l = Number(left.values[i]) || 0;
+      joinedTotal += j; leftTotal += l; net.push(j - l);
+    }
+    if (netEl) netEl.innerHTML = divergingBarsSvg(net.slice(-30), 600, 120);
+    if (netSum) { const tot = joinedTotal - leftTotal; netSum.textContent = `${tot >= 0 ? '+' : ''}${fmt.num(tot)} за период`; }
+  } else {
+    if (netEl) netEl.innerHTML = divergingBarsSvg([]);
+    if (netSum) netSum.textContent = '';
+  }
+  const churnEl = document.getElementById('tg-churn');
+  if (churnEl) {
+    const items = [
+      { icon: '➕', label: 'Подписалось', value: joinedTotal },
+      { icon: '➖', label: 'Отписалось',  value: leftTotal }
+    ].filter(i => i.value > 0);
+    churnEl.innerHTML = items.length ? breakdownRows(items) : EMPTY_BREAKDOWN;
+  }
 }
 
 /* ── Hero rendering ──────────────────────────────────────────── */
@@ -2414,6 +2470,9 @@ async function loadAll() {
   setStatus('Загрузка…', true);
   renderKpiSkeletons();
 
+  // TG window scales with the selected period
+  const tgLimit = currentPeriod <= 1 ? 15 : currentPeriod <= 7 ? 30 : currentPeriod <= 30 ? 60 : 100;
+
   // Health check (non-blocking)
   API.health().catch(() => {});
 
@@ -2441,7 +2500,7 @@ async function loadAll() {
       }));
     }).catch(e => { console.warn('IG posts:', e.message); state.ig.posts = []; }),
     API.tgChannel().then(d => state.tg.channel = d).catch(e => { console.warn('TG channel:', e.message); state.tg.channel = null; }),
-    API.tgFull().then(d => {
+    API.tgFull(tgLimit).then(d => {
       // /api/tg/full returns: { channel, views_summary, posts, mtproto_available, errors }
       // Channel info from /api/tg/channel is more focused — keep it as primary source
       // but extract views/posts/timeline data from /api/tg/full for charts
