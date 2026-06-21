@@ -1533,6 +1533,12 @@ document.getElementById('source-toggle').addEventListener('click', (e) => {
   setSource(btn.dataset.source);
 });
 
+/* ── Posts table: open post on click (safe — no inline JS) ─────── */
+document.getElementById('posts-list').addEventListener('click', (e) => {
+  const row = e.target.closest('.posts-row');
+  if (row && row.dataset.href) window.open(row.dataset.href, '_blank', 'noopener');
+});
+
 /* ── Nav (smooth scroll) ─────────────────────────────────────── */
 document.querySelectorAll('.nav a').forEach(a => {
   a.addEventListener('click', (e) => {
@@ -2168,7 +2174,7 @@ function renderPosts() {
     const sourceTag = `<span class="tag ${p.source === 'TG' ? 'green' : 'violet'}">${p.source || '—'}</span>`;
     const caption = (p.caption || 'Без подписи').slice(0, 80);
     const sharesOrSaved = (p.saved || 0) + (p.shares || 0);
-    const clickAttr = p.permalink ? ` onclick="window.open('${escapeHtml(p.permalink)}','_blank','noopener')" style="cursor:pointer"` : '';
+    const clickAttr = p.permalink ? ` data-href="${escapeHtml(p.permalink)}" style="cursor:pointer"` : '';
 
     return `
       <div class="posts-row"${clickAttr}>

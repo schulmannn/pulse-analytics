@@ -51,20 +51,26 @@ app.add_middleware(
 
 # ── Telethon client ──────────────────────────────────────
 client: Optional[TelegramClient] = None
+_CLIENT_LOCK = asyncio.Lock()
 
 
 async def get_client() -> TelegramClient:
     global client
     if client and client.is_connected():
         return client
-    if not SESSION:
-        raise RuntimeError('TG_SESSION не задан — добавь строку сессии в переменные окружения')
-    client = TelegramClient(StringSession(SESSION), API_ID, API_HASH)
-    await client.connect()
-    if not await client.is_user_authorized():
-        raise RuntimeError('TG_SESSION недействителен или истёк — сгенерируй заново')
-    log.info('Telethon client connected (StringSession)')
-    return client
+    async with _CLIENT_LOCK:
+        # double-check: another coroutine may have (re)connected while we waited
+        if client and client.is_connected():
+            return client
+        if not SESSION:
+            raise RuntimeError('TG_SESSION не задан — добавь строку сессии в переменные окружения')
+        new_client = TelegramClient(StringSession(SESSION), API_ID, API_HASH)
+        await new_client.connect()
+        if not await new_client.is_user_authorized():
+            raise RuntimeError('TG_SESSION недействителен или истёк — сгенерируй заново')
+        client = new_client
+        log.info('Telethon client connected (StringSession)')
+        return client
 
 
 def check_auth(x_internal_token: str = Header(default='')):
@@ -333,6 +339,7 @@ async def get_graphs(x_internal_token: str = Header(default='')):
 
 
 _THUMB_CACHE = {}
+_THUMB_CACHE_MAX = 500
 
 @app.get('/thumb/{msg_id}')
 async def get_thumb(msg_id: int, x_internal_token: str = Header(default='')):
@@ -356,6 +363,8 @@ async def get_thumb(msg_id: int, x_internal_token: str = Header(default='')):
                 continue
         if not data:
             raise HTTPException(status_code=404, detail='no thumbnail')
+        if len(_THUMB_CACHE) >= _THUMB_CACHE_MAX:
+            _THUMB_CACHE.pop(next(iter(_THUMB_CACHE)), None)
         _THUMB_CACHE[msg_id] = data
         return Response(content=data, media_type='image/jpeg',
                         headers={'Cache-Control': 'public, max-age=86400'})
