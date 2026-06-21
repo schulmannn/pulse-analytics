@@ -5,6 +5,7 @@ Python + Telethon + FastAPI
 
 import asyncio
 import os
+import json
 import logging
 from typing import Optional
 
@@ -13,8 +14,9 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from telethon import TelegramClient
 from telethon.sessions import StringSession
-from telethon.tl.functions.stats import GetBroadcastStatsRequest
+from telethon.tl.functions.stats import GetBroadcastStatsRequest, LoadAsyncGraphRequest
 from telethon.tl.functions.channels import GetFullChannelRequest
+from telethon.tl.types import StatsGraph, StatsGraphAsync
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -249,6 +251,84 @@ async def get_stats(x_internal_token: str = Header(default='')):
 
     except Exception as e:
         return {'available': False, 'error': str(e)}
+
+
+@app.get('/graphs')
+async def get_graphs(x_internal_token: str = Header(default='')):
+    """Rich channel stats graphs: subscriber growth, view/follower sources,
+    audience by hour, languages, reaction sentiment."""
+    check_auth(x_internal_token)
+    try:
+        tg = await get_client()
+        entity = await tg.get_entity(CHANNEL)
+        stats = await tg(GetBroadcastStatsRequest(channel=entity, dark=False))
+
+        async def resolve(g):
+            if isinstance(g, StatsGraphAsync):
+                try:
+                    g = await tg(LoadAsyncGraphRequest(token=g.token))
+                except Exception:
+                    return None
+            if isinstance(g, StatsGraph):
+                try:
+                    return json.loads(g.json.data)
+                except Exception:
+                    return None
+            return None
+
+        def cols_of(data):
+            cols  = data.get('columns', [])
+            names = data.get('names', {})
+            types = data.get('types', {})
+            x, series = [], []
+            for c in cols:
+                cid, vals = c[0], c[1:]
+                if cid == 'x':
+                    x = vals
+                else:
+                    series.append({'name': names.get(cid, cid),
+                                   'type': types.get(cid, 'line'),
+                                   'values': vals})
+            return x, series
+
+        def timeseries(data, last=45):
+            if not data:
+                return None
+            x, series = cols_of(data)
+            x = x[-last:]
+            for s in series:
+                s['values'] = s['values'][-last:]
+            return {'x': x, 'series': series}
+
+        def aggregate(data, top=8):
+            if not data:
+                return None
+            _, series = cols_of(data)
+            agg = [{'label': s['name'], 'value': sum(v or 0 for v in s['values'])} for s in series]
+            agg = [a for a in agg if a['value'] > 0]
+            agg.sort(key=lambda a: a['value'], reverse=True)
+            return agg[:top]
+
+        top_hours = None
+        th = await resolve(getattr(stats, 'top_hours_graph', None))
+        if th:
+            x, series = cols_of(th)
+            if series:
+                top_hours = {'hours': x, 'values': series[0]['values'], 'name': series[0]['name']}
+
+        return {
+            'available':                True,
+            'growth':                   timeseries(await resolve(getattr(stats, 'growth_graph', None))),
+            'followers':                timeseries(await resolve(getattr(stats, 'followers_graph', None))),
+            'views_by_source':          aggregate(await resolve(getattr(stats, 'views_by_source_graph', None))),
+            'new_followers_by_source':  aggregate(await resolve(getattr(stats, 'new_followers_by_source_graph', None))),
+            'languages':                aggregate(await resolve(getattr(stats, 'languages_graph', None)), top=6),
+            'reactions_sentiment':      aggregate(await resolve(getattr(stats, 'reactions_by_emotion_graph', None))),
+            'top_hours':                top_hours,
+        }
+    except Exception as e:
+        log.error(f'get_graphs error: {e}')
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.on_event('startup')

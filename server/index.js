@@ -25,20 +25,30 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
-// ── Простая in-memory авторизация ───────────────────────────────
-const sessions = new Map();
+// ── Авторизация: stateless HMAC-токены (переживают рестарт/редеплой) ──
+const crypto = require('crypto');
+const AUTH_SECRET = process.env.TEAM_PASSWORD || 'pulse-dev-secret';
 
-function generateToken() {
-  return Math.random().toString(36).slice(2) + Date.now().toString(36);
+function signToken(expires) {
+  const payload = String(expires);
+  const sig = crypto.createHmac('sha256', AUTH_SECRET).update(payload).digest('base64url');
+  return Buffer.from(payload).toString('base64url') + '.' + sig;
+}
+
+function verifyToken(token) {
+  if (!token || typeof token !== 'string' || token.indexOf('.') < 0) return false;
+  const [p, sig] = token.split('.');
+  let payload;
+  try { payload = Buffer.from(p, 'base64url').toString('utf8'); } catch (e) { return false; }
+  const expected = crypto.createHmac('sha256', AUTH_SECRET).update(payload).digest('base64url');
+  if (!sig || sig.length !== expected.length) return false;
+  if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return false;
+  const expires = parseInt(payload, 10);
+  return !!expires && expires > Date.now();
 }
 
 function requireAuth(req, res, next) {
-  const token = req.headers['x-session-token'];
-  if (!token) return res.status(401).json({ error: 'Требуется авторизация' });
-
-  const session = sessions.get(token);
-  if (!session || session.expires < Date.now()) {
-    sessions.delete(token);
+  if (!verifyToken(req.headers['x-session-token'])) {
     return res.status(401).json({ error: 'Сессия истекла, войди снова' });
   }
   next();
@@ -69,15 +79,14 @@ app.post('/api/auth/login', (req, res) => {
     return res.status(403).json({ error: 'Неверный пароль' });
   }
 
-  const token   = generateToken();
   const expires = Date.now() + 8 * 60 * 60 * 1000;
-  sessions.set(token, { expires });
+  const token   = signToken(expires);
 
   res.json({ token, expiresAt: new Date(expires).toISOString() });
 });
 
 app.post('/api/auth/logout', requireAuth, (req, res) => {
-  sessions.delete(req.headers['x-session-token']);
+  // stateless — клиент просто удаляет токен у себя
   res.json({ ok: true });
 });
 
@@ -334,6 +343,19 @@ app.get('/api/tg/mtproto/stats', requireAuth, async (req, res) => {
   }
 });
 
+app.get('/api/tg/mtproto/graphs', requireAuth, async (req, res) => {
+  const cacheKey = 'mtproto:graphs';
+  try {
+    const cached = cacheGet(cacheKey);
+    if (cached) return res.json(cached);
+    const data = await mtprotoFetch('/graphs');
+    cacheSet(cacheKey, data);
+    res.json(data);
+  } catch (e) {
+    res.status(200).json({ error: e.message, available: false });
+  }
+});
+
 app.get('/api/tg/full', requireAuth, async (req, res) => {
   const limit = Math.min(100, parseInt(req.query.limit) || 30);
   try {
@@ -386,7 +408,7 @@ app.get('/api/health', (req, res) => {
     status: 'ok',
     uptime: Math.round(process.uptime()),
     cache:  cache.size,
-    sessions: sessions.size,
+    sessions: 'stateless',
     env: {
       ig:  !!IG_TOKEN && !!IG_ACCOUNT,
       tg:  !!TG_TOKEN && !!TG_CHANNEL,

@@ -1184,6 +1184,38 @@
           <div id="tg-type-breakdown" class="breakdown-box"></div>
         </div>
       </div>
+      <div class="two-col" style="margin-top: 16px;">
+        <div class="panel">
+          <div class="chart-head"><span class="chart-title">Рост подписчиков</span></div>
+          <svg id="tg-growth-chart" viewBox="0 0 600 140" width="100%" height="140" preserveAspectRatio="none"></svg>
+          <div id="tg-growth-labels" style="display:flex;justify-content:space-between;font-size:var(--text-caption);color:var(--color-ghost-gray);padding-top:6px;"></div>
+        </div>
+        <div class="panel">
+          <div class="chart-head"><span class="chart-title">Источники просмотров</span></div>
+          <div id="tg-views-source" class="breakdown-box"></div>
+        </div>
+      </div>
+      <div class="two-col" style="margin-top: 16px;">
+        <div class="panel">
+          <div class="chart-head"><span class="chart-title">Источники новых подписчиков</span></div>
+          <div id="tg-followers-source" class="breakdown-box"></div>
+        </div>
+        <div class="panel">
+          <div class="chart-head"><span class="chart-title">Языки аудитории</span></div>
+          <div id="tg-languages" class="breakdown-box"></div>
+        </div>
+      </div>
+      <div class="two-col" style="margin-top: 16px;">
+        <div class="panel">
+          <div class="chart-head"><span class="chart-title">Активность аудитории по&nbsp;часам</span></div>
+          <svg id="tg-hours-chart" viewBox="0 0 600 120" width="100%" height="120" preserveAspectRatio="none"></svg>
+          <div id="tg-hours-labels" style="display:flex;justify-content:space-between;font-size:var(--text-caption);color:var(--color-ghost-gray);padding-top:6px;"></div>
+        </div>
+        <div class="panel">
+          <div class="chart-head"><span class="chart-title">Тональность реакций</span></div>
+          <div id="tg-reactions-sentiment" class="breakdown-box"></div>
+        </div>
+      </div>
     </div>
 
     <!-- Top posts -->
@@ -1281,6 +1313,7 @@ const API = {
   tgChannel()      { return this.req('/api/tg/channel'); },
   tgFull()         { return this.req('/api/tg/full?limit=30'); },
   tgStats()        { return this.req('/api/tg/mtproto/stats'); },
+  tgGraphs()       { return this.req('/api/tg/mtproto/graphs'); },
   health()         { return this.req('/api/health'); },
   clearCache()     { return this.req('/api/cache', { method: 'DELETE' }); }
 };
@@ -1506,7 +1539,7 @@ document.getElementById('export-btn').addEventListener('click', () => {
 const state = {
   source: 'telegram',
   ig: { profile: null, insights: null, posts: [] },
-  tg: { channel: null, stats: null, channelStats: null },
+  tg: { channel: null, stats: null, channelStats: null, graphs: null },
   posts: [] // unified
 };
 
@@ -2164,6 +2197,31 @@ function breakdownRows(items) {
   }).join('');
 }
 
+/* Simple bar chart with variable width/height (e.g. hourly distribution) */
+function barsChartSvg(values, w = 600, h = 120) {
+  if (!values || !values.length) return `<text x="${w/2}" y="${h/2}" text-anchor="middle" fill="#64748d" font-size="12" font-family="Inter">Нет данных</text>`;
+  const n = values.length, gap = n > 30 ? 1 : 2;
+  const barW = (w - gap * (n - 1)) / n;
+  const max = Math.max(...values, 1);
+  return values.map((v, i) => {
+    const bh = Math.max(2, ((Number(v) || 0) / max) * (h - 8));
+    const x = i * (barW + gap);
+    return `<rect x="${x.toFixed(1)}" y="${(h - bh).toFixed(1)}" width="${barW.toFixed(1)}" height="${bh.toFixed(1)}" fill="${Number(v) === max ? '#533afd' : '#8087ff'}" rx="1.5"/>`;
+  }).join('');
+}
+
+function setBreakdown(id, items) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const valid = (items || []).filter(i => i.value > 0);
+  el.innerHTML = valid.length ? breakdownRows(valid) : EMPTY_BREAKDOWN;
+}
+
+const SRC_NAMES = { 'Followers':'Подписчики', 'URL':'Ссылки', 'Search':'Поиск', 'Telegram Search':'Поиск', 'Groups':'Группы', 'Channels':'Каналы', 'PM':'Личные сообщения', 'Other':'Прочее', 'Shareable Chat Folders':'Папки', 'Shareable Folder Links':'Папки' };
+function srcName(n) { return SRC_NAMES[n] || n; }
+function sentName(n) { return ({ Positive:'Положительные', Other:'Прочие', Negative:'Отрицательные' })[n] || n; }
+function sentIcon(n) { return ({ Positive:'😊', Other:'😐', Negative:'😠' })[n] || ''; }
+
 const EMPTY_BREAKDOWN = `<div class="breakdown-title" style="color:var(--color-ghost-gray)">Нет данных за&nbsp;период</div>`;
 
 /* ── Telegram analytics section ──────────────────────────────── */
@@ -2248,6 +2306,44 @@ function renderTgAnalytics() {
       .map(([t, v]) => ({ icon: icons[t] || '·', label: names[t] || t, value: Number(v) || 0 }))
       .filter(i => i.value > 0).sort((a, b) => b.value - a.value);
     typeEl.innerHTML = items.length ? breakdownRows(items) : EMPTY_BREAKDOWN;
+  }
+
+  // ── Stats graphs: growth, sources, hours, languages, sentiment ──
+  const graphs = state.tg.graphs || {};
+
+  // Subscriber growth (line)
+  const growthEl = document.getElementById('tg-growth-chart');
+  const growthLabels = document.getElementById('tg-growth-labels');
+  if (growthEl) {
+    const g = graphs.growth;
+    const vals = (g && g.series && g.series[0]) ? g.series[0].values.map(Number) : [];
+    growthEl.innerHTML = lineChartSvg(vals);
+    if (growthLabels) {
+      if (g && g.x && g.x.length) {
+        const fd = ts => { const d = new Date(Number(ts)); return d.getDate() + '.' + (d.getMonth() + 1); };
+        const xs = g.x;
+        growthLabels.innerHTML = [0, Math.floor(xs.length / 2), xs.length - 1].map(i => `<span>${fd(xs[i])}</span>`).join('');
+      } else growthLabels.innerHTML = '';
+    }
+  }
+
+  setBreakdown('tg-views-source', (graphs.views_by_source || []).map(s => ({ label: srcName(s.label), value: s.value })));
+  setBreakdown('tg-followers-source', (graphs.new_followers_by_source || []).map(s => ({ label: srcName(s.label), value: s.value })));
+  setBreakdown('tg-languages', (graphs.languages || []).map(s => ({ label: s.label, value: s.value })));
+  setBreakdown('tg-reactions-sentiment', (graphs.reactions_sentiment || []).map(s => ({ icon: sentIcon(s.label), label: sentName(s.label), value: s.value })));
+
+  // Audience by hour (bars)
+  const hoursEl = document.getElementById('tg-hours-chart');
+  const hoursLabels = document.getElementById('tg-hours-labels');
+  if (hoursEl) {
+    const th = graphs.top_hours;
+    const vals = (th && th.values) ? th.values.map(Number) : [];
+    hoursEl.innerHTML = barsChartSvg(vals, 600, 120);
+    if (hoursLabels) {
+      hoursLabels.innerHTML = vals.length
+        ? (th.hours || vals.map((_, i) => i)).map((h, i) => `<span style="${i % 3 === 0 ? '' : 'visibility:hidden'}">${h}ч</span>`).join('')
+        : '';
+    }
   }
 }
 
@@ -2334,7 +2430,8 @@ async function loadAll() {
       state.tg.viewsSummary = null;
       state.tg.mtprotoAvailable = false;
     }),
-    API.tgStats().then(d => state.tg.channelStats = d).catch(() => { state.tg.channelStats = null; })
+    API.tgStats().then(d => state.tg.channelStats = d).catch(() => { state.tg.channelStats = null; }),
+    API.tgGraphs().then(d => state.tg.graphs = d).catch(() => { state.tg.graphs = null; })
   ];
   await Promise.all(tasks);
 
