@@ -2077,6 +2077,7 @@ function renderTg() {
     if (chartTitleEl) chartTitleEl.textContent = 'Просмотры по дням';
     chartEl.innerHTML = barChartSvg(values);
     setYAxis('tg-chart', 0, Math.max(0, ...values));
+    setTip(chartEl, last.map(e => `${e.day}: ${fmt.num(e.views)} просмотров`), 'bar');
     labelsEl.innerHTML = last.map((e, i) => {
       // Show every 2nd label if too dense
       const showLabel = last.length <= 7 || i % 2 === 0 || i === last.length - 1;
@@ -2089,6 +2090,7 @@ function renderTg() {
     if (chartTitleEl) chartTitleEl.textContent = 'Просмотры последних постов';
     chartEl.innerHTML = barChartSvg(views);
     setYAxis('tg-chart', 0, Math.max(0, ...views));
+    setTip(chartEl, lastPosts.map(p => { const d = p.date ? new Date(p.date) : null; return `${d ? d.getDate() + '.' + (d.getMonth() + 1) : '·'}: ${fmt.num(p.views || 0)} просмотров`; }), 'bar');
     labelsEl.innerHTML = lastPosts.map(p => {
       const d = p.date ? new Date(p.date) : null;
       return `<span>${d ? d.getDate() + '.' + (d.getMonth() + 1) : '·'}</span>`;
@@ -2170,6 +2172,8 @@ function renderTg() {
   } else {
     document.getElementById('tg-insight').classList.add('hidden');
   }
+
+  addExpandButtons('#telegram');
 }
 
 /* ── Posts rendering ─────────────────────────────────────────── */
@@ -2490,15 +2494,15 @@ function setXAxis(id, labels, every) {
 
 /* ── Chart expand modal ───────────────────────────────────────── */
 function addExpandButtons(scopeSel) {
-  document.querySelectorAll(scopeSel + ' .panel').forEach(panel => {
-    const head = panel.querySelector('.chart-head');
-    if (!head || head.querySelector('.expand-btn')) return;
-    if (!panel.querySelector('svg, .breakdown-box')) return;
+  document.querySelectorAll(scopeSel + ' .chart-head').forEach(head => {
+    if (head.querySelector('.expand-btn')) return;
+    const container = head.closest('.panel, .chart-card');
+    if (!container || !container.querySelector('svg, .breakdown-box')) return;
     const btn = document.createElement('button');
     btn.className = 'expand-btn';
     btn.title = 'Развернуть';
     btn.textContent = '⤢';
-    btn.addEventListener('click', () => openChartModal(panel));
+    btn.addEventListener('click', () => openChartModal(container));
     head.appendChild(btn);
   });
 }
