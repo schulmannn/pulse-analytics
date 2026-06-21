@@ -315,12 +315,24 @@ async def get_graphs(x_internal_token: str = Header(default='')):
             agg.sort(key=lambda a: a['value'], reverse=True)
             return agg[:top]
 
+        def sum_daily(data):
+            """Sum all y-series per x-point → {x, values} (e.g. total reactions/day)."""
+            if not data:
+                return None
+            x, series = cols_of(data)
+            if not series:
+                return None
+            n = len(series[0]['values'])
+            return {'x': x, 'values': [sum((s['values'][i] or 0) for s in series) for i in range(n)]}
+
         top_hours = None
         th = await resolve(getattr(stats, 'top_hours_graph', None))
         if th:
             x, series = cols_of(th)
             if series:
                 top_hours = {'hours': x, 'values': series[0]['values'], 'name': series[0]['name']}
+
+        emotion = await resolve(getattr(stats, 'reactions_by_emotion_graph', None))
 
         return {
             'available':                True,
@@ -329,7 +341,8 @@ async def get_graphs(x_internal_token: str = Header(default='')):
             'views_by_source':          aggregate(await resolve(getattr(stats, 'views_by_source_graph', None))),
             'new_followers_by_source':  aggregate(await resolve(getattr(stats, 'new_followers_by_source_graph', None))),
             'languages':                aggregate(await resolve(getattr(stats, 'languages_graph', None)), top=6),
-            'reactions_sentiment':      aggregate(await resolve(getattr(stats, 'reactions_by_emotion_graph', None))),
+            'reactions_sentiment':      aggregate(emotion),
+            'reactions_daily':          sum_daily(emotion),
             'interactions':             timeseries(await resolve(getattr(stats, 'interactions_graph', None))),
             'top_hours':                top_hours,
         }

@@ -1029,6 +1029,8 @@
     width: 30px; height: 30px; border-radius: 50%;
     color: var(--color-midnight-ink); font-size: 14px;
   }
+  .kpi-delta.up   { color: var(--color-accent-green); }
+  .kpi-delta.down { color: var(--color-vibrant-orange); }
 </style>
 </head>
 <body>
@@ -1731,6 +1733,28 @@ function renderKpiSkeletons() {
   `).join('');
 }
 
+/* ── Trend deltas vs previous period (computed from daily series) ── */
+function makeTrend(abs, pct, n) {
+  const up = abs >= 0;
+  return { dir: up ? 'up' : 'down', text: `${up ? '▲' : '▼'} ${up ? '+' : ''}${fmt.num(abs)} · ${pct >= 0 ? '+' : ''}${pct.toFixed(1)}% за ${n} дн` };
+}
+function trendFromStock(vals, n) {            // cumulative metric (subscribers): now vs n days ago
+  if (!vals || vals.length < 2) return null;
+  const cur = Number(vals[vals.length - 1]);
+  const prev = Number(vals[Math.max(0, vals.length - 1 - n)]);
+  if (isNaN(cur) || isNaN(prev)) return null;
+  return makeTrend(cur - prev, prev ? ((cur - prev) / prev * 100) : 0, n);
+}
+function trendFromFlow(vals, n) {             // per-day metric (views/reactions): sum(last n) vs sum(prev n)
+  if (!vals || vals.length < 2) return null;
+  const arr = vals.map(Number);
+  const last = arr.slice(-n).reduce((a, b) => a + (b || 0), 0);
+  const prevArr = arr.slice(-2 * n, -n);
+  if (!prevArr.length) return null;
+  const prev = prevArr.reduce((a, b) => a + (b || 0), 0);
+  return makeTrend(last - prev, prev ? ((last - prev) / prev * 100) : 0, n);
+}
+
 function renderKpis() {
   const grid = document.getElementById('kpi-grid');
   const igFollowers = pick(state.ig.profile, ['followers_count','followers','subscribers']) || 0;
@@ -1815,6 +1839,16 @@ function renderKpis() {
     const vs = state.tg.viewsSummary || {};
     const cs = state.tg.channelStats || {};
     const members = tgMembers;
+    const graphs = state.tg.graphs || {};
+    const growthVals = (graphs.growth && graphs.growth.series && graphs.growth.series[0]) ? graphs.growth.series[0].values : null;
+    const interSeries = (graphs.interactions && graphs.interactions.series) ? graphs.interactions.series : [];
+    const interViews = (interSeries.find(s => /view|просмотр/i.test(s.name)) || interSeries[0] || {}).values;
+    const interShares = (interSeries.find(s => /share|репост/i.test(s.name)) || interSeries[1] || {}).values;
+    const reactDaily = (graphs.reactions_daily && graphs.reactions_daily.values) ? graphs.reactions_daily.values : null;
+    const subTrend = trendFromStock(growthVals, currentPeriod);
+    const viewTrend = trendFromFlow(interViews, currentPeriod);
+    const repTrend = trendFromFlow(interShares, currentPeriod);
+    const reactTrend = trendFromFlow(reactDaily, currentPeriod);
     const totalViews = vs.total_views || 0;
     const totalReactions = vs.total_reactions || 0;
     const totalForwards = vs.total_forwards || 0;
@@ -1830,15 +1864,15 @@ function renderKpis() {
     }).sort((a, b) => a.ts - b.ts).map(e => e.v) : [];
     const cur = (o) => (o && o.current != null) ? o.current : null;
     return [
-      { feature: true, label: 'Подписчики', value: fmt.num(members),
+      { feature: true, label: 'Подписчики', value: fmt.num(members), trend: subTrend,
         delta: (notif && notif.total) ? `${Math.round(notif.part / notif.total * 100)}% с уведомлениями` : 'в канале', deltaClass: 'muted', spark },
-      { label: 'Просмотры за период', value: fmt.short(totalViews),
+      { label: 'Просмотры за период', value: fmt.short(totalViews), trend: viewTrend,
         delta: postsAnalyzed ? `по ${postsAnalyzed} постам` : null, deltaClass: 'muted', spark },
       { label: 'Ср. охват поста', value: fmt.short(avgViews),
         delta: cur(cs.views_per_post) != null ? `${fmt.short(cur(cs.views_per_post))} по статистике` : null, deltaClass: 'muted', spark: [] },
-      { label: 'Реакции', value: fmt.short(totalReactions),
+      { label: 'Реакции', value: fmt.short(totalReactions), trend: reactTrend,
         delta: postsAnalyzed ? `${(totalReactions / Math.max(postsAnalyzed, 1)).toFixed(1)} на пост` : null, deltaClass: 'muted', spark: [] },
-      { label: 'Репосты', value: fmt.short(totalForwards),
+      { label: 'Репосты', value: fmt.short(totalForwards), trend: repTrend,
         delta: totalReplies ? `${fmt.short(totalReplies)} комментариев` : null, deltaClass: 'muted', spark: [] },
       { label: 'Вовлечённость (ER)', value: erVal > 0 ? erVal.toFixed(2) + '%' : '—',
         delta: '(реакции+репосты+комменты) / подписчики', deltaClass: 'muted', spark: [] }
@@ -1851,7 +1885,7 @@ function renderKpis() {
     <div class="kpi-card${c.feature ? ' feature' : ''}">
       <div class="kpi-label">${c.label}</div>
       <div class="kpi-value">${c.value}</div>
-      ${c.delta ? `<div class="kpi-delta ${c.deltaClass || ''}">${c.delta}</div>` : ''}
+      ${c.trend ? `<div class="kpi-delta ${c.trend.dir}">${c.trend.text}</div>` : (c.delta ? `<div class="kpi-delta ${c.deltaClass || ''}">${c.delta}</div>` : '')}
       ${c.spark && c.spark.length > 1 ? `
         <svg class="kpi-spark" viewBox="0 0 200 32" preserveAspectRatio="none">
           <path d="${sparkAreaPath(c.spark)}" fill="#533afd" opacity="0.08"/>
