@@ -2168,9 +2168,10 @@ function renderPosts() {
     const sourceTag = `<span class="tag ${p.source === 'TG' ? 'green' : 'violet'}">${p.source || '—'}</span>`;
     const caption = (p.caption || 'Без подписи').slice(0, 80);
     const sharesOrSaved = (p.saved || 0) + (p.shares || 0);
+    const clickAttr = p.permalink ? ` onclick="window.open('${escapeHtml(p.permalink)}','_blank','noopener')" style="cursor:pointer"` : '';
 
     return `
-      <div class="posts-row">
+      <div class="posts-row"${clickAttr}>
         ${thumb}
         <div class="post-caption">
           <div class="title">${escapeHtml(caption)}</div>
