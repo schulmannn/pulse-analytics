@@ -993,6 +993,42 @@
     .posts-row > .col-hide { display: none; }
     .stat-row { grid-template-columns: repeat(2, 1fr) !important; }
   }
+
+  /* ================================================================
+     CHART INTERACTIVITY (tooltip + expand modal)
+     ================================================================ */
+  .chart-tip {
+    position: fixed; z-index: 1000; display: none;
+    background: var(--color-midnight-ink); color: #fff;
+    font-size: 12px; padding: 6px 9px; border-radius: 4px;
+    pointer-events: none; white-space: nowrap; box-shadow: var(--shadow-soft);
+    transform: translate(-50%, calc(-100% - 10px));
+  }
+  .expand-btn {
+    background: transparent; border: none; color: var(--color-ghost-gray);
+    cursor: pointer; font-size: 15px; line-height: 1; padding: 2px 5px;
+    border-radius: 3px; margin-left: 8px;
+  }
+  .expand-btn:hover { background: var(--color-powder-blue); color: var(--color-midnight-ink); }
+  .chart-modal {
+    position: fixed; inset: 0; z-index: 900;
+    background: rgba(6,27,49,0.55);
+    display: flex; align-items: center; justify-content: center; padding: 32px;
+  }
+  .chart-modal-card {
+    position: relative; background: var(--color-platinum);
+    border-radius: var(--radius-card); box-shadow: var(--shadow-elev);
+    width: min(1040px, 94vw); max-height: 90vh; overflow: auto; padding: 28px 24px 24px;
+  }
+  .chart-modal-card .chart-title { font-size: var(--text-subhead); }
+  .chart-modal-card svg { height: auto; min-height: 300px; }
+  .chart-modal-card .breakdown-row { margin-bottom: 12px; }
+  .chart-modal-close {
+    position: absolute; top: 12px; right: 12px;
+    background: var(--color-powder-blue); border: none; cursor: pointer;
+    width: 30px; height: 30px; border-radius: 50%;
+    color: var(--color-midnight-ink); font-size: 14px;
+  }
 </style>
 </head>
 <body>
@@ -1304,6 +1340,15 @@
 
 <div id="toast" class="toast"></div>
 
+<div id="chart-tip" class="chart-tip"></div>
+
+<div id="chart-modal" class="chart-modal hidden">
+  <div class="chart-modal-card">
+    <button id="chart-modal-close" class="chart-modal-close" title="Закрыть">✕</button>
+    <div id="chart-modal-body"></div>
+  </div>
+</div>
+
 <script>
 /* ================================================================
    APP — vanilla JS
@@ -1538,6 +1583,13 @@ document.getElementById('posts-list').addEventListener('click', (e) => {
   const row = e.target.closest('.posts-row');
   if (row && row.dataset.href) window.open(row.dataset.href, '_blank', 'noopener');
 });
+
+/* ── Chart expand modal: close handlers ───────────────────────── */
+document.getElementById('chart-modal-close').addEventListener('click', closeChartModal);
+document.getElementById('chart-modal').addEventListener('click', (e) => {
+  if (e.target.id === 'chart-modal') closeChartModal();
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeChartModal(); });
 
 /* ── Nav (smooth scroll) ─────────────────────────────────────── */
 document.querySelectorAll('.nav a').forEach(a => {
@@ -2113,8 +2165,9 @@ function renderPosts() {
       const er = p.er != null
         ? p.er
         : (p.likes && p.reach ? (p.likes / p.reach * 100) : null);
+      const cardThumbSrc = p.thumb ? (p.source === 'TG' ? p.thumb + '?size=lg' : p.thumb) : '';
       const thumb = p.thumb
-        ? `<img class="top-post-thumb" src="${p.thumb}" alt="" referrerpolicy="no-referrer">`
+        ? `<img class="top-post-thumb" src="${cardThumbSrc}" alt="" referrerpolicy="no-referrer">`
         : `<div class="top-post-thumb"></div>`;
       const sourceClass = p.source === 'TG' ? 'tg-source' : '';
       const mediaType = p.mediaType ? mediaTypeLabel(p.mediaType) : '';
@@ -2305,6 +2358,69 @@ function sentColor(n) { return ({ Positive:'var(--color-accent-green)', Negative
 
 const EMPTY_BREAKDOWN = `<div class="breakdown-title" style="color:var(--color-ghost-gray)">Нет данных за&nbsp;период</div>`;
 
+/* ── Chart tooltips (hover an SVG chart → exact value) ─────────── */
+function setTip(el, labels, kind) {
+  if (!el) return;
+  if (!labels || !labels.length) { el.removeAttribute('data-tip'); el.onmousemove = null; return; }
+  el.dataset.tip = JSON.stringify(labels);
+  el.dataset.tipkind = kind || 'bar';
+  initTip(el);
+}
+function initTip(el) {
+  if (!el || !el.dataset.tip) return;
+  let labels;
+  try { labels = JSON.parse(el.dataset.tip); } catch (e) { return; }
+  const kind = el.dataset.tipkind || 'bar';
+  const n = labels.length;
+  if (!n) return;
+  el.style.cursor = 'crosshair';
+  el.onmousemove = (e) => {
+    const rect = el.getBoundingClientRect();
+    if (!rect.width) return;
+    const frac = Math.max(0, Math.min(0.9999, (e.clientX - rect.left) / rect.width));
+    const idx = Math.max(0, Math.min(n - 1, kind === 'line' ? Math.round(frac * (n - 1)) : Math.floor(frac * n)));
+    const tip = document.getElementById('chart-tip');
+    if (!tip || labels[idx] == null) return;
+    tip.textContent = labels[idx];
+    tip.style.display = 'block';
+    tip.style.left = e.clientX + 'px';
+    tip.style.top = e.clientY + 'px';
+  };
+  el.onmouseleave = () => { const tip = document.getElementById('chart-tip'); if (tip) tip.style.display = 'none'; };
+}
+
+/* ── Chart expand modal ───────────────────────────────────────── */
+function addExpandButtons(scopeSel) {
+  document.querySelectorAll(scopeSel + ' .panel').forEach(panel => {
+    const head = panel.querySelector('.chart-head');
+    if (!head || head.querySelector('.expand-btn')) return;
+    if (!panel.querySelector('svg, .breakdown-box')) return;
+    const btn = document.createElement('button');
+    btn.className = 'expand-btn';
+    btn.title = 'Развернуть';
+    btn.textContent = '⤢';
+    btn.addEventListener('click', () => openChartModal(panel));
+    head.appendChild(btn);
+  });
+}
+function openChartModal(panel) {
+  const body = document.getElementById('chart-modal-body');
+  if (!body) return;
+  const clone = panel.cloneNode(true);
+  clone.querySelectorAll('.expand-btn').forEach(b => b.remove());
+  clone.querySelectorAll('svg').forEach(s => s.setAttribute('height', '420'));
+  body.innerHTML = '';
+  body.appendChild(clone);
+  clone.querySelectorAll('svg[data-tip]').forEach(initTip);
+  document.getElementById('chart-modal').classList.remove('hidden');
+}
+function closeChartModal() {
+  const m = document.getElementById('chart-modal');
+  if (m) m.classList.add('hidden');
+  const tip = document.getElementById('chart-tip');
+  if (tip) tip.style.display = 'none';
+}
+
 /* ── Telegram analytics section ──────────────────────────────── */
 function renderTgAnalytics() {
   const vs = state.tg.viewsSummary || {};
@@ -2347,12 +2463,14 @@ function renderTgAnalytics() {
         return { day, v: Number(v) || 0, ts };
       }).sort((a, b) => a.ts - b.ts).slice(-14);
       chartEl.innerHTML = lineChartSvg(entries.map(e => e.v));
+      setTip(chartEl, entries.map(e => `${e.day}: ${fmt.num(e.v)} просмотров`), 'line');
       if (labelsEl) labelsEl.innerHTML = entries.map((e, i) => {
         const show = entries.length <= 8 || i % 2 === 0 || i === entries.length - 1;
         return `<span style="${show ? '' : 'visibility:hidden'}">${e.day}</span>`;
       }).join('');
     } else {
       chartEl.innerHTML = lineChartSvg([]);
+      setTip(chartEl, [], 'line');
       if (labelsEl) labelsEl.innerHTML = '';
     }
   }
@@ -2399,6 +2517,9 @@ function renderTgAnalytics() {
     const g = graphs.growth;
     const vals = (g && g.series && g.series[0]) ? g.series[0].values.map(Number) : [];
     growthEl.innerHTML = lineChartSvg(vals);
+    setTip(growthEl, (g && g.x && g.x.length)
+      ? g.x.map((ts, i) => { const d = new Date(Number(ts)); return `${d.getDate()}.${d.getMonth() + 1}: ${fmt.num(vals[i])} подписчиков`; })
+      : vals.map(v => `${fmt.num(v)} подписчиков`), 'line');
     if (growthLabels) {
       if (g && g.x && g.x.length) {
         const fd = ts => { const d = new Date(Number(ts)); return d.getDate() + '.' + (d.getMonth() + 1); };
@@ -2415,11 +2536,12 @@ function renderTgAnalytics() {
   if (inter && inter.series && inter.series.length) {
     const views  = inter.series.find(s => /view|просмотр/i.test(s.name)) || inter.series[0];
     const shares = inter.series.find(s => /share|репост/i.test(s.name)) || inter.series[1];
-    if (ivEl) ivEl.innerHTML = lineChartSvg(views ? views.values.map(Number) : []);
-    if (isEl) isEl.innerHTML = lineChartSvg(shares ? shares.values.map(Number) : []);
+    const ix = (inter.x || []).map(ts => { const d = new Date(Number(ts)); return `${d.getDate()}.${d.getMonth() + 1}`; });
+    if (ivEl) { const vv = views ? views.values.map(Number) : []; ivEl.innerHTML = lineChartSvg(vv); setTip(ivEl, vv.map((v, i) => `${ix[i] || ''}: ${fmt.num(v)} просмотров`), 'line'); }
+    if (isEl) { const sv = shares ? shares.values.map(Number) : []; isEl.innerHTML = lineChartSvg(sv); setTip(isEl, sv.map((v, i) => `${ix[i] || ''}: ${fmt.num(v)} репостов`), 'line'); }
   } else {
-    if (ivEl) ivEl.innerHTML = lineChartSvg([]);
-    if (isEl) isEl.innerHTML = lineChartSvg([]);
+    if (ivEl) { ivEl.innerHTML = lineChartSvg([]); setTip(ivEl, [], 'line'); }
+    if (isEl) { isEl.innerHTML = lineChartSvg([]); setTip(isEl, [], 'line'); }
   }
 
   setBreakdown('tg-views-source', (graphs.views_by_source || []).map(s => ({ label: srcName(s.label), value: s.value })));
@@ -2435,6 +2557,7 @@ function renderTgAnalytics() {
     const vals = (th && th.values) ? th.values.map(Number) : [];
     const hourTitles = vals.map((v, i) => `${(th && th.hours && th.hours[i] != null) ? th.hours[i] : i}:00 — ${fmt.num(v)}`);
     hoursEl.innerHTML = barsChartSvg(vals, 600, 120, hourTitles);
+    setTip(hoursEl, vals.length ? hourTitles : [], 'bar');
     if (hoursLabels) {
       hoursLabels.innerHTML = vals.length
         ? (th.hours || vals.map((_, i) => i)).map((h, i) => `<span style="${i % 3 === 0 ? '' : 'visibility:hidden'}">${h}ч</span>`).join('')
@@ -2465,7 +2588,8 @@ function renderTgAnalytics() {
       joinedTotal += j; leftTotal += l; net.push(j - l);
     }
     const net30 = net.slice(-30);
-    if (netEl) netEl.innerHTML = divergingBarsSvg(net30, 600, 120, net30.map(v => `${v >= 0 ? '+' : ''}${fmt.num(v)} за день`));
+    const netTitles = net30.map(v => `${v >= 0 ? '+' : ''}${fmt.num(v)} за день`);
+    if (netEl) { netEl.innerHTML = divergingBarsSvg(net30, 600, 120, netTitles); setTip(netEl, netTitles, 'bar'); }
     if (netSum) { const tot = joinedTotal - leftTotal; netSum.textContent = `${tot >= 0 ? '+' : ''}${fmt.num(tot)} за период`; }
   } else {
     if (netEl) netEl.innerHTML = divergingBarsSvg([]);
@@ -2495,7 +2619,8 @@ function renderTgAnalytics() {
   const setBars = (svgId, labelsId, vals, unit) => {
     const el = document.getElementById(svgId);
     const titles = vals.map((v, i) => `${wdLabels[i]} — ${fmt.num(v)}${unit ? ' ' + unit : ''}`);
-    if (el) el.innerHTML = vals.some(v => v > 0) ? barsChartSvg(vals, 600, 120, titles) : barsChartSvg([]);
+    const has = vals.some(v => v > 0);
+    if (el) { el.innerHTML = has ? barsChartSvg(vals, 600, 120, titles) : barsChartSvg([]); setTip(el, has ? titles : [], 'bar'); }
     const lab = document.getElementById(labelsId);
     if (lab) lab.innerHTML = wdLabels.map(d => `<span>${d}</span>`).join('');
   };
@@ -2506,6 +2631,8 @@ function renderTgAnalytics() {
     const maxAvg = Math.max(...wdAvg);
     wbEl.textContent = maxAvg > 0 ? `лучший день: ${wdLabels[wdAvg.indexOf(maxAvg)]}` : '';
   }
+
+  addExpandButtons('#tg-analytics');
 }
 
 /* ── Hero rendering ──────────────────────────────────────────── */

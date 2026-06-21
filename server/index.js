@@ -361,8 +361,9 @@ app.get('/api/tg/mtproto/graphs', requireAuth, async (req, res) => {
 app.get('/api/tg/mtproto/thumb/:id', async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!id) return res.status(400).end();
+  const size = req.query.size === 'lg' ? 'lg' : 'sm';
   try {
-    const r = await fetch(`${MTPROTO_URL}/thumb/${id}`, { headers: { 'x-internal-token': MTPROTO_PASS } });
+    const r = await fetch(`${MTPROTO_URL}/thumb/${id}?size=${size}`, { headers: { 'x-internal-token': MTPROTO_PASS } });
     if (!r.ok) return res.status(r.status).end();
     const buf = await r.buffer();
     res.set('Content-Type', r.headers.get('content-type') || 'image/jpeg');
