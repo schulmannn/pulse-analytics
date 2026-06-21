@@ -2127,7 +2127,7 @@ function renderPosts() {
       ? '<span class="num muted">—</span>'
       : `<span class="tag ${er >= 6 ? 'green' : er >= 3 ? 'violet' : 'orange'}">${er.toFixed(1)}%</span>`;
     const thumb = p.thumb
-      ? `<img class="post-thumb" src="${p.thumb}" alt="" referrerpolicy="no-referrer">`
+      ? `<img class="post-thumb" src="${p.thumb}" alt="" loading="lazy" referrerpolicy="no-referrer">`
       : `<div class="post-thumb"></div>`;
     const sourceTag = `<span class="tag ${p.source === 'TG' ? 'green' : 'violet'}">${p.source || '—'}</span>`;
     const caption = (p.caption || 'Без подписи').slice(0, 80);
@@ -2468,7 +2468,7 @@ async function loadAll() {
     source: 'TG',
     caption: p.text || p.caption || '',
     date: p.date,
-    thumb: p.media_url || null,
+    thumb: (p.media_type === 'photo' || p.media_type === 'video') && p.id != null ? `/api/tg/mtproto/thumb/${p.id}` : null,
     permalink: tgUsername && p.id ? `https://t.me/${tgUsername}/${p.id}` : null,
     mediaType: p.media_type || null,
     reach: p.views || p.view_count || 0,

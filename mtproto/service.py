@@ -9,7 +9,7 @@ import json
 import logging
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Header, Query
+from fastapi import FastAPI, HTTPException, Header, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from telethon import TelegramClient
@@ -328,6 +328,40 @@ async def get_graphs(x_internal_token: str = Header(default='')):
         }
     except Exception as e:
         log.error(f'get_graphs error: {e}')
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+_THUMB_CACHE = {}
+
+@app.get('/thumb/{msg_id}')
+async def get_thumb(msg_id: int, x_internal_token: str = Header(default='')):
+    """Small JPEG thumbnail of a post's media (cached). For <img> tags."""
+    check_auth(x_internal_token)
+    if msg_id in _THUMB_CACHE:
+        return Response(content=_THUMB_CACHE[msg_id], media_type='image/jpeg',
+                        headers={'Cache-Control': 'public, max-age=86400'})
+    try:
+        tg = await get_client()
+        msg = await tg.get_messages(CHANNEL, ids=msg_id)
+        if not msg or not (msg.photo or msg.video or msg.document):
+            raise HTTPException(status_code=404, detail='no media')
+        data = None
+        for idx in (1, 0):          # idx 1 ≈ small real thumb; idx 0 = tiny fallback
+            try:
+                data = await tg.download_media(msg, thumb=idx, file=bytes)
+                if data:
+                    break
+            except Exception:
+                continue
+        if not data:
+            raise HTTPException(status_code=404, detail='no thumbnail')
+        _THUMB_CACHE[msg_id] = data
+        return Response(content=data, media_type='image/jpeg',
+                        headers={'Cache-Control': 'public, max-age=86400'})
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f'get_thumb error: {e}')
         raise HTTPException(status_code=500, detail=str(e))
 
 

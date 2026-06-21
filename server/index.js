@@ -356,6 +356,23 @@ app.get('/api/tg/mtproto/graphs', requireAuth, async (req, res) => {
   }
 });
 
+// Post thumbnail (binary) — open route so <img src> works without a header.
+// Low sensitivity: only serves thumbnails of the configured (public) channel.
+app.get('/api/tg/mtproto/thumb/:id', async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).end();
+  try {
+    const r = await fetch(`${MTPROTO_URL}/thumb/${id}`, { headers: { 'x-internal-token': MTPROTO_PASS } });
+    if (!r.ok) return res.status(r.status).end();
+    const buf = await r.buffer();
+    res.set('Content-Type', r.headers.get('content-type') || 'image/jpeg');
+    res.set('Cache-Control', 'public, max-age=86400');
+    res.send(buf);
+  } catch (e) {
+    res.status(502).end();
+  }
+});
+
 app.get('/api/tg/full', requireAuth, async (req, res) => {
   const limit = Math.min(100, parseInt(req.query.limit) || 30);
   try {
