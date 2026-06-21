@@ -983,6 +983,9 @@
     .app-shell { padding: 16px; }
     .hero-title { font-size: var(--text-h); }
     .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+    #tg-channel-stats { grid-template-columns: repeat(2, 1fr) !important; }
+    #freshness { display: none; }
+    .source-toggle button { padding: 6px 8px; }
     .top-posts-grid { grid-template-columns: 1fr; }
     .two-col { grid-template-columns: 1fr; }
     .nav { display: none; }
@@ -2220,7 +2223,7 @@ function breakdownRows(items) {
           ${item.icon ? `<span class="breakdown-icon">${item.icon}</span>` : ''}
           ${item.label ? `<span>${escapeHtml(item.label)}</span>` : ''}
         </div>
-        <div class="breakdown-bar"><div class="breakdown-fill" style="width:${pct.toFixed(1)}%"></div></div>
+        <div class="breakdown-bar"><div class="breakdown-fill" style="width:${pct.toFixed(1)}%${item.color ? ';background:' + item.color : ''}"></div></div>
         <div class="breakdown-val">${item.display != null ? item.display : fmt.short(item.value)}</div>
       </div>`;
   }).join('');
@@ -2267,6 +2270,7 @@ const SRC_NAMES = { 'Followers':'Подписчики', 'URL':'Ссылки', 'S
 function srcName(n) { return SRC_NAMES[n] || n; }
 function sentName(n) { return ({ Positive:'Положительные', Other:'Прочие', Negative:'Отрицательные' })[n] || n; }
 function sentIcon(n) { return ({ Positive:'😊', Other:'😐', Negative:'😠' })[n] || ''; }
+function sentColor(n) { return ({ Positive:'var(--color-accent-green)', Negative:'var(--color-vibrant-orange)', Other:'var(--color-soft-violet)' })[n] || ''; }
 
 const EMPTY_BREAKDOWN = `<div class="breakdown-title" style="color:var(--color-ghost-gray)">Нет данных за&nbsp;период</div>`;
 
@@ -2376,7 +2380,7 @@ function renderTgAnalytics() {
   setBreakdown('tg-views-source', (graphs.views_by_source || []).map(s => ({ label: srcName(s.label), value: s.value })));
   setBreakdown('tg-followers-source', (graphs.new_followers_by_source || []).map(s => ({ label: srcName(s.label), value: s.value })));
   setBreakdown('tg-languages', (graphs.languages || []).map(s => ({ label: s.label, value: s.value })));
-  setBreakdown('tg-reactions-sentiment', (graphs.reactions_sentiment || []).map(s => ({ icon: sentIcon(s.label), label: sentName(s.label), value: s.value })));
+  setBreakdown('tg-reactions-sentiment', (graphs.reactions_sentiment || []).map(s => ({ icon: sentIcon(s.label), label: sentName(s.label), value: s.value, color: sentColor(s.label) })));
 
   // Audience by hour (bars)
   const hoursEl = document.getElementById('tg-hours-chart');
@@ -2423,8 +2427,8 @@ function renderTgAnalytics() {
   const churnEl = document.getElementById('tg-churn');
   if (churnEl) {
     const items = [
-      { icon: '➕', label: 'Подписалось', value: joinedTotal },
-      { icon: '➖', label: 'Отписалось',  value: leftTotal }
+      { icon: '➕', label: 'Подписалось', value: joinedTotal, color: 'var(--color-accent-green)' },
+      { icon: '➖', label: 'Отписалось',  value: leftTotal, color: 'var(--color-vibrant-orange)' }
     ].filter(i => i.value > 0);
     churnEl.innerHTML = items.length ? breakdownRows(items) : EMPTY_BREAKDOWN;
   }
