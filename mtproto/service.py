@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from telethon import TelegramClient
 from telethon.sessions import StringSession
-from telethon.tl.functions.stats import GetBroadcastStatsRequest, LoadAsyncGraphRequest
+from telethon.tl.functions.stats import GetBroadcastStatsRequest, LoadAsyncGraphRequest, GetMessageStatsRequest
 from telethon.tl.functions.channels import GetFullChannelRequest
 from telethon.tl.types import StatsGraph, StatsGraphAsync
 from dotenv import load_dotenv
@@ -349,6 +349,61 @@ async def get_graphs(x_internal_token: str = Header(default='')):
     except Exception as e:
         log.error(f'get_graphs error: {e}')
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get('/post_stats/{msg_id}')
+async def get_post_stats(msg_id: int, x_internal_token: str = Header(default='')):
+    """Per-post detailed stats (GetMessageStats): views-over-time + reactions.
+    May be unavailable for posts with too few views."""
+    check_auth(x_internal_token)
+    try:
+        tg = await get_client()
+        entity = await tg.get_entity(CHANNEL)
+        st = await tg(GetMessageStatsRequest(channel=entity, msg_id=msg_id, dark=False))
+
+        async def resolve(g):
+            if isinstance(g, StatsGraphAsync):
+                try:
+                    g = await tg(LoadAsyncGraphRequest(token=g.token))
+                except Exception:
+                    return None
+            if isinstance(g, StatsGraph):
+                try:
+                    return json.loads(g.json.data)
+                except Exception:
+                    return None
+            return None
+
+        def cols_of(data):
+            cols = data.get('columns', [])
+            names = data.get('names', {})
+            types = data.get('types', {})
+            x, series = [], []
+            for c in cols:
+                cid, vals = c[0], c[1:]
+                if cid == 'x':
+                    x = vals
+                else:
+                    series.append({'name': names.get(cid, cid), 'type': types.get(cid, 'line'), 'values': vals})
+            return x, series
+
+        views = None
+        vg = await resolve(getattr(st, 'views_graph', None))
+        if vg:
+            x, series = cols_of(vg)
+            views = {'x': x, 'series': series}
+
+        reactions = None
+        rg = await resolve(getattr(st, 'reactions_by_emotion_graph', None))
+        if rg:
+            _, rseries = cols_of(rg)
+            agg = [{'label': s['name'], 'value': sum(v or 0 for v in s['values'])} for s in rseries]
+            reactions = sorted([a for a in agg if a['value'] > 0], key=lambda a: a['value'], reverse=True)
+
+        return {'available': True, 'views_graph': views, 'reactions': reactions}
+    except Exception as e:
+        log.error(f'get_post_stats error: {e}')
+        return {'available': False, 'error': str(e)}
 
 
 _THUMB_CACHE = {}

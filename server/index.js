@@ -356,6 +356,21 @@ app.get('/api/tg/mtproto/graphs', requireAuth, async (req, res) => {
   }
 });
 
+app.get('/api/tg/mtproto/post_stats/:id', requireAuth, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ error: 'bad id' });
+  const cacheKey = 'mtproto:poststats:' + id;
+  try {
+    const cached = cacheGet(cacheKey);
+    if (cached) return res.json(cached);
+    const data = await mtprotoFetch('/post_stats/' + id);
+    cacheSet(cacheKey, data);
+    res.json(data);
+  } catch (e) {
+    res.status(200).json({ available: false, error: e.message });
+  }
+});
+
 // Post thumbnail (binary) — open route so <img src> works without a header.
 // Low sensitivity: only serves thumbnails of the configured (public) channel.
 app.get('/api/tg/mtproto/thumb/:id', async (req, res) => {

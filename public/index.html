@@ -1583,7 +1583,11 @@ document.getElementById('source-toggle').addEventListener('click', (e) => {
 /* ── Posts table: open post on click (safe — no inline JS) ─────── */
 document.getElementById('posts-list').addEventListener('click', (e) => {
   const row = e.target.closest('.posts-row');
-  if (row && row.dataset.href) window.open(row.dataset.href, '_blank', 'noopener');
+  if (row && row.dataset.postid) openPostModal(row.dataset.postid);
+});
+document.getElementById('top-posts-grid').addEventListener('click', (e) => {
+  const card = e.target.closest('.top-post-card');
+  if (card && card.dataset.postid) openPostModal(card.dataset.postid);
 });
 
 /* ── Chart expand modal: close handlers ───────────────────────── */
@@ -2210,7 +2214,7 @@ function renderPosts() {
       const permalink = p.permalink || '#';
 
       return `
-        <a class="top-post-card" href="${escapeHtml(permalink)}" target="_blank" rel="noopener">
+        <div class="top-post-card" data-postid="${escapeHtml(String(p.id))}" style="cursor:pointer">
           <div style="position: relative;">
             ${thumb}
             <div class="top-post-rank">#${i + 1}</div>
@@ -2241,7 +2245,7 @@ function renderPosts() {
               </div>
             </div>
           </div>
-        </a>
+        </div>
       `;
     }).join('');
   } else if (topGrid) {
@@ -2262,7 +2266,7 @@ function renderPosts() {
     const sourceTag = `<span class="tag ${p.source === 'TG' ? 'green' : 'violet'}">${p.source || '—'}</span>`;
     const caption = (p.caption || 'Без подписи').slice(0, 80);
     const sharesOrSaved = (p.saved || 0) + (p.shares || 0);
-    const clickAttr = p.permalink ? ` data-href="${escapeHtml(p.permalink)}" style="cursor:pointer"` : '';
+    const clickAttr = (p.id != null) ? ` data-postid="${escapeHtml(String(p.id))}" style="cursor:pointer"` : '';
 
     return `
       <div class="posts-row"${clickAttr}>
@@ -2465,6 +2469,48 @@ function closeChartModal() {
   if (m) m.classList.add('hidden');
   const tip = document.getElementById('chart-tip');
   if (tip) tip.style.display = 'none';
+}
+
+/* ── Per-post drill-down (GetMessageStats) ────────────────────── */
+async function openPostModal(postId) {
+  const post = (state.posts || []).find(p => String(p.id) === String(postId)) || {};
+  const body = document.getElementById('chart-modal-body');
+  if (!body) return;
+  const cap = post.caption ? escapeHtml(post.caption.slice(0, 160)) : 'Без подписи';
+  const meta = [];
+  if (post.reach != null) meta.push(`${fmt.num(post.reach)} просмотров`);
+  if (post.likes) meta.push(`${fmt.num(post.likes)} реакций`);
+  if (post.shares) meta.push(`${fmt.num(post.shares)} репостов`);
+  if (post.comments) meta.push(`${fmt.num(post.comments)} комментариев`);
+  if (post.date) meta.push(escapeHtml(fmt.date(post.date) || ''));
+  const tgLink = post.permalink ? `<a href="${escapeHtml(post.permalink)}" target="_blank" rel="noopener" class="btn-outline" style="display:inline-block;padding:6px 12px;font-size:var(--text-caption);text-decoration:none;margin-top:8px;">Открыть в Telegram ↗</a>` : '';
+  body.innerHTML = `
+    <div class="chart-head"><span class="chart-title">«${cap}»</span></div>
+    <div style="color:var(--color-slate-blue);font-size:var(--text-caption);margin-bottom:6px">${meta.join(' · ')}</div>
+    ${tgLink}
+    <div id="post-stats-body" style="margin-top:14px;color:var(--color-ghost-gray)">Загрузка детальной статистики…</div>`;
+  document.getElementById('chart-modal').classList.remove('hidden');
+
+  let data = null;
+  try { data = await API.req(`/api/tg/mtproto/post_stats/${postId}`); } catch (e) { data = null; }
+  const sb = document.getElementById('post-stats-body');
+  if (!sb) return;
+  const vseries = data && data.views_graph && data.views_graph.series && data.views_graph.series[0];
+  if (data && data.available && vseries && vseries.values.length > 1) {
+    const vals = vseries.values.map(Number);
+    const xs = (data.views_graph.x || []).map(ts => { const d = new Date(Number(ts)); return `${d.getDate()}.${d.getMonth() + 1} ${String(d.getHours()).padStart(2, '0')}:00`; });
+    let html = `<div class="chart-head"><span class="chart-title">Просмотры во времени</span></div>
+      <svg id="post-views-chart" viewBox="0 0 600 140" width="100%" height="260" preserveAspectRatio="none">${lineChartSvg(vals)}</svg>`;
+    if (data.reactions && data.reactions.length) {
+      html += `<div class="chart-head" style="margin-top:16px"><span class="chart-title">Реакции</span></div>
+        <div class="breakdown-box">${breakdownRows(data.reactions.map(r => ({ label: r.label, value: r.value })))}</div>`;
+    }
+    sb.innerHTML = html;
+    sb.style.color = '';
+    setTip(document.getElementById('post-views-chart'), vals.map((v, i) => `${xs[i] || ''}: ${fmt.num(v)} просмотров`), 'line');
+  } else {
+    sb.textContent = 'Детальная статистика по этому посту недоступна — Telegram отдаёт её только для постов с достаточным охватом.';
+  }
 }
 
 /* ── Telegram analytics section ──────────────────────────────── */
