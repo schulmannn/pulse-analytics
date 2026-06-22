@@ -53,9 +53,9 @@ const SESSION_TTL = 8 * 60 * 60 * 1000;
 
 // Legacy/break-glass token: payload is just the expiry (no account) → superuser.
 function signToken(expires) {
-  const payload = String(expires);
-  const sig = crypto.createHmac('sha256', AUTH_SECRET).update(payload).digest('base64url');
-  return Buffer.from(payload).toString('base64url') + '.' + sig;
+  const body = Buffer.from(String(expires)).toString('base64url');
+  const sig = crypto.createHmac('sha256', AUTH_SECRET).update(body).digest('base64url');
+  return body + '.' + sig;
 }
 
 // Account session token: carries { uid, role, exp }, HMAC-signed (stateless).
