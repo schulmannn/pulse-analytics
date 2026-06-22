@@ -1322,7 +1322,7 @@
         <div style="display:flex;align-items:center;gap:6px;justify-content:flex-end;margin-top:10px;font-size:var(--text-caption);color:var(--color-ghost-gray)">меньше<span style="width:12px;height:12px;border-radius:3px;background:rgba(83,58,253,0.18)"></span><span style="width:12px;height:12px;border-radius:3px;background:rgba(83,58,253,0.5)"></span><span style="width:12px;height:12px;border-radius:3px;background:rgba(83,58,253,1)"></span>больше ERV</div>
       </div>
       <div class="panel" style="margin-top: 16px;">
-        <div class="chart-head"><span class="chart-title">Скорость набора просмотров · «золотой час»</span><span id="tg-velocity-note" style="font-size:var(--text-caption);color:var(--color-deep-violet);font-weight:600;"></span></div>
+        <div class="chart-head"><span class="chart-title">Скорость набора просмотров · жизнь поста</span><span id="tg-velocity-note" style="font-size:var(--text-caption);color:var(--color-deep-violet);font-weight:600;"></span></div>
         <svg id="tg-velocity-chart" viewBox="0 0 600 140" width="100%" height="140" preserveAspectRatio="none"></svg>
         <div id="tg-velocity-labels" style="display:flex;justify-content:space-between;font-size:var(--text-caption);color:var(--color-ghost-gray);padding-top:6px;"></div>
       </div>
@@ -2616,22 +2616,21 @@ async function openPostModal(postId) {
   if (data && data.available && vseries && vseries.values.length > 1) {
     const vals = vseries.values.map(Number);
     const xs = (data.views_graph.x || []).map(ts => { const d = new Date(Number(ts)); return `${d.getDate()}.${d.getMonth() + 1} ${String(d.getHours()).padStart(2, '0')}:00`; });
-    // velocity / golden hour for this post
+    // post lifecycle — views_graph is INCREMENTAL (new views per bucket), usually daily
     let velLine = '';
     const rawx = (data.views_graph.x || []).map(Number);
-    if (rawx.length >= 3 && rawx.length === vals.length) {
+    if (rawx.length >= 2 && rawx.length === vals.length) {
       const t0 = rawx[0];
-      const th = rawx.map(t => (t - t0) / 3600000);
-      const final = vals[vals.length - 1] || 0;
-      if (final > 0) {
-        const cross = f => { const tgt = f * final; for (let i = 0; i < vals.length; i++) if (vals[i] >= tgt) return th[i]; return null; };
-        const interp = H => { if (H < th[0] || H > th[th.length - 1]) return null; for (let i = 1; i < th.length; i++) { if (th[i] >= H) { const t1 = th[i - 1], t2 = th[i], v1 = vals[i - 1], v2 = vals[i]; return t2 === t1 ? v2 : v1 + (v2 - v1) * (H - t1) / (t2 - t1); } } return vals[vals.length - 1]; };
-        const t50 = cross(0.5), t80 = cross(0.8), i1 = interp(1);
-        const parts = [];
-        if (i1 != null) parts.push(`за 1ч — ${(i1 / final * 100).toFixed(0)}%`);
-        if (t50 != null) parts.push(`50% за ${t50.toFixed(1)}ч`);
-        if (t80 != null) parts.push(`80% за ${t80.toFixed(1)}ч`);
-        if (parts.length) velLine = `<div style="font-size:var(--text-caption);color:var(--color-deep-violet);font-weight:600;margin-bottom:6px">⚡ Скорость: ${parts.join(' · ')}</div>`;
+      const total = vals.reduce((a, b) => a + b, 0);
+      if (total > 0) {
+        const day = {};
+        vals.forEach((v, i) => { const d = Math.floor((rawx[i] - t0) / 86400000); day[d] = (day[d] || 0) + v; });
+        const d0 = (day[0] || 0) / total * 100;
+        let cum = 0, t80 = null;
+        for (let d = 0; d < 14; d++) { cum += (day[d] || 0); if (cum / total * 100 >= 80) { t80 = d + 1; break; } }
+        const parts = [`за 1-е сутки — ${d0.toFixed(0)}% охвата`];
+        if (t80) parts.push(`80% за ${t80} дн`);
+        velLine = `<div style="font-size:var(--text-caption);color:var(--color-deep-violet);font-weight:600;margin-bottom:6px">⚡ ${parts.join(' · ')}</div>`;
       }
     }
     let html = `<div class="chart-head"><span class="chart-title">Просмотры во времени</span></div>
@@ -2987,27 +2986,22 @@ function renderVelocity() {
   const labels = document.getElementById('tg-velocity-labels');
   if (!el) return;
   const v = state.tg.velocity;
-  if (!v || !v.available || !Array.isArray(v.curve) || v.curve.length < 2) {
+  if (!v || !v.available || !Array.isArray(v.by_day) || v.by_day.length < 2) {
     el.innerHTML = lineChartSvg([]);
     setTip(el, [], 'line');
     if (note) note.textContent = '';
     if (labels) labels.innerHTML = '';
     return;
   }
-  const vals = v.curve.map(p => p.pct);
-  const hrs = v.curve.map(p => p.h);
-  el.innerHTML = lineChartSvg(vals);
-  setYAxis('tg-velocity-chart', 0, Math.max(...vals));
-  setTip(el, v.curve.map(p => `${p.h}ч после публикации: ${p.pct}% финального охвата`), 'line');
-  if (labels) {
-    const step = Math.max(1, Math.ceil(hrs.length / 8));
-    labels.innerHTML = hrs.map((h, i) => `<span style="${(i % step === 0 || i === hrs.length - 1) ? '' : 'visibility:hidden'}">${h}ч</span>`).join('');
-  }
+  const cum = v.by_day.map(p => p.cum);
+  el.innerHTML = lineChartSvg(cum);
+  setYAxis('tg-velocity-chart', 0, Math.max(...cum));
+  setTip(el, v.by_day.map(p => `${p.day + 1}-е сутки: накоплено ${p.cum}% охвата · доля дня ${p.share}%`), 'line');
+  if (labels) labels.innerHTML = v.by_day.map(p => `<span>${p.day + 1}д</span>`).join('');
   if (note) {
     const parts = [];
-    if (v.pct_1h != null) parts.push(`за 1ч — ${v.pct_1h}%`);
-    if (v.t50 != null) parts.push(`50% за ${v.t50}ч`);
-    if (v.t80 != null) parts.push(`80% за ${v.t80}ч`);
+    if (v.day1_share != null) parts.push(`за 1-е сутки — ${v.day1_share}%`);
+    if (v.t80_days != null) parts.push(`80% за ${v.t80_days} дн`);
     if (v.posts_used) parts.push(`по ${v.posts_used} постам`);
     note.textContent = parts.join(' · ');
   }

@@ -478,24 +478,25 @@ async def get_post_stats(msg_id: int, x_internal_token: str = Header(default='')
 @app.get('/velocity')
 async def get_velocity(
     limit: int = Query(default=40, le=100),
-    top: int = Query(default=10, le=20),
+    top: int = Query(default=12, le=20),
     x_internal_token: str = Header(default=''),
 ):
-    """Channel-level "post lifecycle": average % of final reach gained per hour
-    since publish, plus median time-to-50%/80% (golden hour). Aggregated from
-    GetMessageStats views-over-time of the most recent high-view posts."""
+    """Channel-level "post lifecycle": how a post's views accrue over the days
+    after publishing. Telegram's per-message views_graph is INCREMENTAL (new
+    views per bucket) and usually DAILY, so we aggregate increments into
+    day-since-publish buckets and average the share of total reach per day."""
     check_auth(x_internal_token)
     try:
         tg = await get_client()
         entity = await tg.get_entity(CHANNEL)
         msgs = await tg.get_messages(CHANNEL, limit=limit)
         posts = [_build_post(g) for g in _logical_posts(msgs)]
-        # most recent posts with enough views (recent → hourly stats granularity)
-        cand = [p for p in posts if p['views'] >= 50][:top]
+        cand = [p for p in posts if p['views'] >= 80][:top]
 
-        grid = list(range(0, 25))            # hours 0..24 since first data point
-        acc = {h: [] for h in grid}
-        t50s, t80s, p1h, p3h = [], [], [], []
+        MAXD = 7
+        share_by_day = [[] for _ in range(MAXD)]   # per day: list of per-post % shares
+        cum_by_day   = [[] for _ in range(MAXD)]
+        day1, t80d = [], []
         used = 0
 
         for p in cand:
@@ -507,50 +508,44 @@ async def get_velocity(
             if not data:
                 continue
             x, series = _cols_of(data)
-            if not series or not x or len(x) < 3:
+            if not series or not x or len(x) < 2:
                 continue
-            vals = [float(v or 0) for v in series[0]['values']]
-            if len(vals) != len(x):
+            raw = [float(v or 0) for v in series[0]['values']]   # incremental new views per bucket
+            if len(raw) != len(x):
+                continue
+            total = sum(raw)
+            if total <= 0:
                 continue
             t0 = float(x[0])
-            th = [(float(t) - t0) / 3600000.0 for t in x]   # hours since first point
-            if (th[1] - th[0]) > 2:
-                continue   # daily-resolution graph → not useful for hourly "golden hour"
-            final = vals[-1] if vals else 0
-            if final <= 0:
-                continue
-            span = th[-1]
-
-            def interp(H):
-                if H < th[0] or H > span:
-                    return None
-                for i in range(1, len(th)):
-                    if th[i] >= H:
-                        t1, t2, v1, v2 = th[i - 1], th[i], vals[i - 1], vals[i]
-                        return v2 if t2 == t1 else v1 + (v2 - v1) * (H - t1) / (t2 - t1)
-                return vals[-1]
-
-            def cross(frac):
-                target = frac * final
-                for i in range(len(vals)):
-                    if vals[i] >= target:
-                        return th[i]
-                return None
-
-            for H in grid:
-                iv = interp(H)
-                if iv is not None:
-                    acc[H].append(iv / final * 100.0)
-            t50, t80 = cross(0.5), cross(0.8)
-            if t50 is not None: t50s.append(t50)
-            if t80 is not None: t80s.append(t80)
-            i1, i3 = interp(1.0), interp(3.0)
-            if i1 is not None: p1h.append(i1 / final * 100.0)
-            if i3 is not None: p3h.append(i3 / final * 100.0)
+            last_d = int((float(x[-1]) - t0) // 86400000)
+            if last_d < 2:
+                continue   # too young: lifecycle not settled → would bias the curve
+            day = [0.0] * MAXD
+            for i, v in enumerate(raw):
+                d = int((float(x[i]) - t0) // 86400000)   # full days since first bucket
+                if 0 <= d < MAXD:
+                    day[d] += v
+            days_present = min(MAXD, last_d + 1)           # only count days the post has actually lived
+            cum = 0.0
+            cumpct = []
+            for d in range(days_present):
+                cum += day[d]
+                cp = cum / total * 100.0
+                cumpct.append(cp)
+                share_by_day[d].append(day[d] / total * 100.0)
+                cum_by_day[d].append(cp)
+            day1.append(day[0] / total * 100.0)
+            for d in range(days_present):
+                if cumpct[d] >= 80:
+                    t80d.append(d)
+                    break
             used += 1
 
         if used < 1:
-            return {'available': False, 'reason': 'no hourly stats', 'posts_used': 0}
+            return {'available': False, 'posts_used': 0}
+
+        def avg(a):
+            return round(sum(a) / len(a), 1) if a else None
 
         def med(a):
             if not a:
@@ -558,18 +553,15 @@ async def get_velocity(
             a = sorted(a); n = len(a)
             return a[n // 2] if n % 2 else (a[n // 2 - 1] + a[n // 2]) / 2
 
-        def avg(a):
-            return round(sum(a) / len(a), 1) if a else None
-
-        curve = [{'h': H, 'pct': round(sum(acc[H]) / len(acc[H]), 1)} for H in grid if acc[H]]
+        by_day = [{'day': d, 'share': avg(share_by_day[d]), 'cum': avg(cum_by_day[d])}
+                  for d in range(MAXD) if share_by_day[d]]
+        t80_med = med(t80d)
         return {
             'available':  True,
             'posts_used': used,
-            'curve':      curve,
-            't50':        round(med(t50s), 1) if t50s else None,
-            't80':        round(med(t80s), 1) if t80s else None,
-            'pct_1h':     avg(p1h),
-            'pct_3h':     avg(p3h),
+            'by_day':     by_day,
+            'day1_share': avg(day1),
+            't80_days':   (int(t80_med) + 1) if t80_med is not None else None,
         }
     except Exception as e:
         log.error(f'velocity error: {e}')
