@@ -509,7 +509,7 @@ app.post('/api/ingest/daily', async (req, res) => {
   if (!db.enabled) return res.status(200).json({ ok: false, reason: 'DATABASE_URL не задан — БД выключена' });
   try {
     const [graphs, posts] = await Promise.all([
-      mtprotoFetch('/graphs').catch(() => null),
+      mtprotoFetch('/graphs', { points: 400 }).catch(() => null),   // full range for the archive (dashboard uses 45)
       mtprotoFetch('/posts', { limit: 100 }).catch(() => null),
     ]);
 

@@ -338,7 +338,7 @@ async def get_stats(x_internal_token: str = Header(default='')):
 
 
 @app.get('/graphs')
-async def get_graphs(x_internal_token: str = Header(default='')):
+async def get_graphs(points: int = Query(default=45, le=400), x_internal_token: str = Header(default='')):
     """Rich channel stats graphs: subscriber growth, view/follower sources,
     audience by hour, languages, reaction sentiment."""
     check_auth(x_internal_token)
@@ -414,14 +414,14 @@ async def get_graphs(x_internal_token: str = Header(default='')):
 
         return {
             'available':                True,
-            'growth':                   timeseries(await resolve(getattr(stats, 'growth_graph', None))),
-            'followers':                timeseries(await resolve(getattr(stats, 'followers_graph', None))),
+            'growth':                   timeseries(await resolve(getattr(stats, 'growth_graph', None)), points),
+            'followers':                timeseries(await resolve(getattr(stats, 'followers_graph', None)), points),
             'views_by_source':          aggregate(await resolve(getattr(stats, 'views_by_source_graph', None))),
             'new_followers_by_source':  aggregate(await resolve(getattr(stats, 'new_followers_by_source_graph', None))),
             'languages':                aggregate(await resolve(getattr(stats, 'languages_graph', None)), top=6),
             'reactions_sentiment':      aggregate(emotion),
             'reactions_daily':          sum_daily(emotion),
-            'interactions':             timeseries(await resolve(getattr(stats, 'interactions_graph', None))),
+            'interactions':             timeseries(await resolve(getattr(stats, 'interactions_graph', None)), points),
             'top_hours':                top_hours,
         }
     except Exception as e:
