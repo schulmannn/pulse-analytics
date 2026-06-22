@@ -663,6 +663,7 @@ async def get_mentions(x_internal_token: str = Header(default='')):
                 date_raw = getattr(msg, 'date', None)
                 found[key] = {
                     'channel_id': peer.channel_id,
+                    'msg_id':     msg.id,
                     'title':      getattr(ch, 'title', 'канал') if ch else 'канал',
                     'username':   uname,
                     'link':       f'https://t.me/{uname}/{msg.id}' if uname else None,
@@ -694,6 +695,7 @@ async def get_mentions(x_internal_token: str = Header(default='')):
             'by_day':          by_day,
             'top_channels':    top_channels,
             'recent':          recent,
+            'all':             mentions,   # full deduped list — server persists to archive, then strips
             'quota':           quota,
             'queried':         queried,
             'skipped':         skipped,

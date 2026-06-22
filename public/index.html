@@ -1225,6 +1225,11 @@
       </div>
       <div class="panel" id="tg-digest" style="margin-bottom: 16px;"></div>
       <div class="kpi-grid" id="tg-channel-stats" style="margin-bottom: 16px;"></div>
+      <div class="panel hidden" id="tg-history-panel" style="margin-bottom: 16px;">
+        <div class="chart-head"><span class="chart-title">Архив подписчиков · вся история (БД)</span><span id="tg-history-note" style="font-size:var(--text-caption);color:var(--color-ghost-gray);"></span></div>
+        <svg id="tg-history-chart" viewBox="0 0 600 140" width="100%" height="140" preserveAspectRatio="none"></svg>
+        <div id="tg-history-labels" style="display:flex;justify-content:space-between;font-size:var(--text-caption);color:var(--color-ghost-gray);padding-top:6px;"></div>
+      </div>
       <div class="two-col">
         <div class="panel">
           <div class="chart-head"><span class="chart-title">Просмотры по дням</span></div>
@@ -1453,6 +1458,7 @@ const API = {
   tgGraphs()       { return this.req('/api/tg/mtproto/graphs'); },
   tgVelocity()     { return this.req('/api/tg/mtproto/velocity'); },
   tgMentions()     { return this.req('/api/tg/mtproto/mentions'); },
+  history(days=730){ return this.req('/api/history/channel?days=' + days); },
   health()         { return this.req('/api/health'); },
   clearCache()     { return this.req('/api/cache', { method: 'DELETE' }); }
 };
@@ -2967,8 +2973,32 @@ function renderTgAnalytics() {
   renderHashtags();
   renderHeatmap();
   renderVelocity();
+  renderHistory();
   renderDigest();
   addExpandButtons('#tg-analytics');
+}
+
+/* ── Long-range subscriber history from the DB archive (optional) ── */
+function renderHistory() {
+  const panel = document.getElementById('tg-history-panel');
+  const el = document.getElementById('tg-history-chart');
+  const note = document.getElementById('tg-history-note');
+  const labels = document.getElementById('tg-history-labels');
+  if (!panel || !el) return;
+  const h = state.tg.history;
+  const rows = (h && h.enabled && Array.isArray(h.rows)) ? h.rows.filter(r => r.subscribers != null) : [];
+  if (rows.length < 2) { panel.classList.add('hidden'); return; }
+  panel.classList.remove('hidden');
+  const vals = rows.map(r => Number(r.subscribers));
+  el.innerHTML = lineChartSvg(vals);
+  setYAxis('tg-history-chart', Math.min(...vals), Math.max(...vals));
+  setTip(el, rows.map(r => `${r.day}: ${fmt.num(r.subscribers)} подписчиков`), 'line');
+  const ddmm = s => { const p = String(s).split('-'); return p[2] + '.' + p[1]; };
+  if (labels) {
+    const idx = [0, Math.floor(rows.length / 2), rows.length - 1];
+    labels.innerHTML = idx.map(i => `<span>${ddmm(rows[i].day)}</span>`).join('');
+  }
+  if (note) note.textContent = `${rows.length} дн в архиве · с ${ddmm(rows[0].day)}`;
 }
 
 /* ── A2: best-time heatmap (weekday × hour, coloured by avg ERV) ── */
@@ -3315,7 +3345,8 @@ async function loadAll() {
     }),
     API.tgStats().then(d => state.tg.channelStats = d).catch(() => { state.tg.channelStats = null; }),
     API.tgGraphs().then(d => state.tg.graphs = d).catch(() => { state.tg.graphs = null; }),
-    API.tgVelocity().then(d => state.tg.velocity = d).catch(() => { state.tg.velocity = null; })
+    API.tgVelocity().then(d => state.tg.velocity = d).catch(() => { state.tg.velocity = null; }),
+    API.history().then(d => state.tg.history = d).catch(() => { state.tg.history = null; })
   ];
   await Promise.all(tasks);
 

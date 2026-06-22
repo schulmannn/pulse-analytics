@@ -9,9 +9,13 @@ const cors       = require('cors');
 const fetch      = require('node-fetch');
 const rateLimit  = require('express-rate-limit');
 const path       = require('path');
+const db         = require('./db');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
+
+// История (Postgres) — поднимаем схему, если БД подключена; иначе тихо выключено.
+db.init().catch(e => console.error('[db] init failed:', e.message));
 
 // ── Middleware ───────────────────────────────────────────────────
 app.use(cors());
@@ -378,7 +382,14 @@ app.get('/api/tg/mtproto/mentions', requireAuth, async (req, res) => {
     const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
     const data = await mtprotoFetch('/mentions');
-    if (data && data.available) cacheSet(cacheKey, data);   // don't cache failures
+    if (data && data.available) {
+      // accumulate the full deduped list into the archive (history beyond searchPosts' window)
+      if (Array.isArray(data.all)) {
+        db.upsertMentions(data.all).catch(e => console.error('[db] mentions upsert:', e.message));
+      }
+      delete data.all;                 // don't ship the full list to the client
+      cacheSet(cacheKey, data);         // don't cache failures
+    }
     res.json(data);
   } catch (e) {
     res.status(200).json({ error: e.message, available: false });
@@ -482,6 +493,66 @@ app.get('/api/health', (req, res) => {
 app.delete('/api/cache', requireAuth, (req, res) => {
   cache.clear();
   res.json({ ok: true, message: 'Кэш сброшен' });
+});
+
+// ════════════════════════════════════════════════════════════════
+//  ИСТОРИЯ (Postgres) — снэпшоты сверх 3-месячного окна Telegram
+// ════════════════════════════════════════════════════════════════
+
+// Снимок дня: тянет дневные серии из /graphs (+ посты) и upsert'ит в БД.
+// Защищён отдельным токеном (НЕ командный пароль) — дёргается cron'ом.
+app.post('/api/ingest/daily', async (req, res) => {
+  const token = req.query.token || req.headers['x-ingest-token'];
+  if (!process.env.INGEST_TOKEN || token !== process.env.INGEST_TOKEN) {
+    return res.status(403).json({ ok: false, error: 'forbidden' });
+  }
+  if (!db.enabled) return res.status(200).json({ ok: false, reason: 'DATABASE_URL не задан — БД выключена' });
+  try {
+    const [graphs, posts] = await Promise.all([
+      mtprotoFetch('/graphs').catch(() => null),
+      mtprotoFetch('/posts', { limit: 100 }).catch(() => null),
+    ]);
+
+    const dailyRows = db.graphsToDailyRows(graphs);
+    const nDaily = await db.upsertChannelDaily(dailyRows);
+
+    let nPosts = 0;
+    if (posts && Array.isArray(posts.posts)) {
+      const prows = posts.posts.map(p => {
+        const reach = p.views || 0;
+        const eng = (p.reactions || 0) + (p.forwards || 0) + (p.replies || 0);
+        return {
+          post_id: p.id, date_published: p.date,
+          views: p.views || 0, reactions: p.reactions || 0, forwards: p.forwards || 0, replies: p.replies || 0,
+          erv: reach > 0 ? eng / reach * 100 : null,
+          virality: reach > 0 ? (p.forwards || 0) / reach * 100 : null,
+          media_type: p.media_type, caption: (p.text || '').slice(0, 500), hashtags: p.hashtags || [],
+        };
+      });
+      nPosts = await db.upsertPosts(prows);
+    }
+    res.json({ ok: true, channel_daily: nDaily, posts: nPosts });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.get('/api/history/channel', requireAuth, async (req, res) => {
+  const days = Math.min(1000, parseInt(req.query.days) || 365);
+  try {
+    res.json({ enabled: db.enabled, rows: await db.getChannelHistory(days) });
+  } catch (e) {
+    res.status(200).json({ enabled: db.enabled, rows: [], error: e.message });
+  }
+});
+
+app.get('/api/history/mentions', requireAuth, async (req, res) => {
+  try {
+    const h = await db.getMentionsHistory();
+    res.json({ enabled: db.enabled, ...(h || {}) });
+  } catch (e) {
+    res.status(200).json({ enabled: db.enabled, error: e.message });
+  }
 });
 
 app.get('*', (req, res) => {

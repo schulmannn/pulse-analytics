@@ -1,0 +1,23 @@
+name: Daily history snapshot
+
+# Снимает дневные метрики канала в Postgres сверх 3-месячного окна Telegram.
+# Требует секрет INGEST_TOKEN (тот же, что в переменных Railway-сервиса).
+on:
+  schedule:
+    - cron: '0 3 * * *'   # ежедневно 03:00 UTC (06:00 МСК)
+  workflow_dispatch: {}
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger ingestion endpoint
+        env:
+          BASE: https://pulse-analytics-production-daf3.up.railway.app
+          TOKEN: ${{ secrets.INGEST_TOKEN }}
+        run: |
+          set -e
+          if [ -z "$TOKEN" ]; then echo "INGEST_TOKEN secret is empty"; exit 1; fi
+          code=$(curl -sS -o /tmp/out -w "%{http_code}" -X POST "$BASE/api/ingest/daily?token=$TOKEN")
+          echo "HTTP $code"; cat /tmp/out; echo
+          test "$code" = "200"
