@@ -18,6 +18,7 @@ jobs:
         run: |
           set -e
           if [ -z "$TOKEN" ]; then echo "INGEST_TOKEN secret is empty"; exit 1; fi
-          code=$(curl -sS -o /tmp/out -w "%{http_code}" -X POST "$BASE/api/ingest/daily?token=$TOKEN")
+          # token via header (avoids URL-encoding issues with +,/,= in the token)
+          code=$(curl -sS -o /tmp/out -w "%{http_code}" -X POST -H "x-ingest-token: $TOKEN" "$BASE/api/ingest/daily")
           echo "HTTP $code"; cat /tmp/out; echo
           test "$code" = "200"
