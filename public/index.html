@@ -1329,6 +1329,23 @@
       </div>
     </div>
 
+    <!-- Brand mentions -->
+    <div class="section hidden" id="tg-mentions-section">
+      <div class="section-head" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;">
+        <div>
+          <h2>Упоминания бренда</h2>
+          <p>Публичные каналы Telegram · channels.searchPosts (Premium)</p>
+        </div>
+        <button id="mentions-load-btn" class="btn-outline" style="padding:8px 14px;white-space:nowrap;">Загрузить упоминания</button>
+      </div>
+      <div id="tg-mentions-body">
+        <div class="empty-state" style="padding:24px">
+          <div class="em-title">Упоминания не загружены</div>
+          <div>Поиск тратит бесплатную квоту Premium (~10&nbsp;запросов/день), поэтому грузим по&nbsp;кнопке, а&nbsp;не автоматически.</div>
+        </div>
+      </div>
+    </div>
+
     <!-- Top posts -->
     <div class="section" id="top-posts-section">
       <div class="section-head">
@@ -1435,6 +1452,7 @@ const API = {
   tgStats()        { return this.req('/api/tg/mtproto/stats'); },
   tgGraphs()       { return this.req('/api/tg/mtproto/graphs'); },
   tgVelocity()     { return this.req('/api/tg/mtproto/velocity'); },
+  tgMentions()     { return this.req('/api/tg/mtproto/mentions'); },
   health()         { return this.req('/api/health'); },
   clearCache()     { return this.req('/api/cache', { method: 'DELETE' }); }
 };
@@ -1678,6 +1696,25 @@ document.getElementById('export-btn').addEventListener('click', () => {
   a.click();
   URL.revokeObjectURL(url);
   toast('CSV экспортирован');
+});
+
+/* ── Brand mentions: load on demand (preserves searchPosts quota) ── */
+document.getElementById('mentions-load-btn')?.addEventListener('click', async () => {
+  const btn = document.getElementById('mentions-load-btn');
+  const body = document.getElementById('tg-mentions-body');
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Ищу…';
+  if (body) body.innerHTML = '<div class="empty-state" style="padding:24px">Идёт поиск по публичным каналам…</div>';
+  try {
+    const data = await API.tgMentions();
+    state.tg.mentions = data;
+    renderMentions(data);
+  } catch (e) {
+    if (body) body.innerHTML = `<div class="empty-state" style="padding:24px"><div class="em-title">Ошибка</div><div>${escapeHtml(e.message)}</div></div>`;
+  } finally {
+    btn.disabled = false;
+    if (btn.textContent === 'Ищу…') btn.textContent = orig;
+  }
 });
 
 /* ================================================================
@@ -2377,18 +2414,21 @@ function applySource(src) {
   const igPanel = document.getElementById('instagram');
   const tgPanel = document.getElementById('telegram');
   const tgAnalytics = document.getElementById('tg-analytics');
+  const tgMentions = document.getElementById('tg-mentions-section');
   const igNav = document.querySelector('.nav a[data-anchor="instagram"]');
   const tgNav = document.querySelector('.nav a[data-anchor="telegram"]');
 
   if (igPanel) igPanel.classList.toggle('hidden', tgMode);
   if (tgPanel) tgPanel.classList.toggle('hidden', !tgMode);
   if (tgAnalytics) tgAnalytics.classList.toggle('hidden', !(tgMode && state.tg.mtprotoAvailable));
+  if (tgMentions) tgMentions.classList.toggle('hidden', !(tgMode && state.tg.mtprotoAvailable));
   if (igNav) igNav.classList.toggle('hidden', tgMode);
   if (tgNav) tgNav.classList.toggle('hidden', !tgMode);
 
   renderHero();
   renderKpis();
   renderPosts();
+  if (tgMode && state.tg.mentions) renderMentions(state.tg.mentions);
 }
 
 /* Aggregate reactions across TG posts → [{emoji, count}] desc */
@@ -3005,6 +3045,87 @@ function renderVelocity() {
     if (v.t80_days != null) parts.push(`80% за ${v.t80_days} дн`);
     if (v.posts_used) parts.push(`по ${v.posts_used} постам`);
     note.textContent = parts.join(' · ');
+  }
+}
+
+/* ── B3: brand mentions (channels.searchPosts, on-demand) ────── */
+function renderMentions(data) {
+  const body = document.getElementById('tg-mentions-body');
+  const btn = document.getElementById('mentions-load-btn');
+  if (!body) return;
+  if (!data || !data.available) {
+    const err = (data && data.error) || '';
+    const hint = /premium/i.test(err) ? 'Нужен аккаунт с Telegram Premium.' : (err ? escapeHtml(err) : 'Поиск недоступен.');
+    body.innerHTML = `<div class="empty-state" style="padding:24px"><div class="em-title">Не удалось загрузить</div><div>${hint}</div></div>`;
+    return;
+  }
+  if (btn) btn.textContent = 'Обновить';
+  const quota = data.quota ? `квота: ${data.quota.remains != null ? data.quota.remains : '—'}/${data.quota.total != null ? data.quota.total : '—'} бесплатных` : '';
+  const skipped = (data.skipped && data.skipped.length) ? ` · пропущено по квоте: ${data.skipped.map(escapeHtml).join(', ')}` : '';
+
+  const kpis = [
+    { label: 'Упоминаний', value: fmt.num(data.total) },
+    { label: 'Каналов', value: fmt.num(data.unique_channels) },
+    { label: 'Суммарный охват', value: fmt.short(data.total_views) }
+  ];
+  let html = `<div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:16px">
+    ${kpis.map(c => `<div class="kpi-card"><div class="kpi-label">${c.label}</div><div class="kpi-value">${c.value}</div></div>`).join('')}
+  </div>
+  <div class="two-col">
+    <div class="panel">
+      <div class="chart-head"><span class="chart-title">Упоминаний по дням</span></div>
+      <svg id="mentions-day-chart" viewBox="0 0 600 120" width="100%" height="120" preserveAspectRatio="none"></svg>
+      <div id="mentions-day-labels" style="display:flex;justify-content:space-between;font-size:var(--text-caption);color:var(--color-ghost-gray);padding-top:6px;"></div>
+    </div>
+    <div class="panel">
+      <div class="chart-head"><span class="chart-title">Кто упоминает · топ каналов</span></div>
+      <div id="mentions-channels" class="breakdown-box"></div>
+    </div>
+  </div>
+  <div class="panel" style="margin-top:16px">
+    <div class="chart-head"><span class="chart-title">Последние упоминания</span><span style="font-size:var(--text-caption);color:var(--color-ghost-gray)">${escapeHtml(quota)}${escapeHtml(skipped)}</span></div>
+    <div id="mentions-list" style="margin-top:8px"></div>
+  </div>`;
+  body.innerHTML = html;
+
+  const bd = (data.by_day && typeof data.by_day === 'object') ? data.by_day : {};
+  const entries = Object.entries(bd).map(([day, c]) => {
+    const [d, m] = day.split('.').map(Number);
+    return { day, c: Number(c) || 0, ts: new Date(new Date().getFullYear(), (m || 1) - 1, d || 1).getTime() };
+  }).sort((a, b) => a.ts - b.ts).slice(-14);
+  const vals = entries.map(e => e.c);
+  const dayEl = document.getElementById('mentions-day-chart');
+  if (dayEl) {
+    dayEl.innerHTML = vals.length ? barsChartSvg(vals, 600, 120, entries.map(e => `${e.day}: ${e.c}`)) : barsChartSvg([]);
+    setYAxis('mentions-day-chart', 0, Math.max(0, ...vals));
+    setTip(dayEl, vals.length ? entries.map(e => `${e.day}: ${e.c} упоминаний`) : [], 'bar');
+    const lab = document.getElementById('mentions-day-labels');
+    if (lab) lab.innerHTML = entries.map((e, i) => { const show = entries.length <= 8 || i % 2 === 0 || i === entries.length - 1; return `<span style="${show ? '' : 'visibility:hidden'}">${e.day}</span>`; }).join('');
+  }
+
+  const chEl = document.getElementById('mentions-channels');
+  if (chEl) {
+    const items = (data.top_channels || []).map(c => ({ label: c.username ? '@' + c.username : c.title, value: c.count, display: `${c.count} · ${fmt.short(c.views)} охв` }));
+    chEl.innerHTML = items.length ? breakdownRows(items) : EMPTY_BREAKDOWN;
+  }
+
+  const listEl = document.getElementById('mentions-list');
+  if (listEl) {
+    const items = data.recent || [];
+    listEl.innerHTML = items.length ? items.map(m => {
+      const when = m.date ? fmt.date(m.date) : '';
+      const tag = m.username ? `<span style="color:var(--color-ghost-gray);font-size:var(--text-caption)">@${escapeHtml(m.username)}</span>` : '';
+      const title = m.link
+        ? `<a href="${escapeHtml(m.link)}" target="_blank" rel="noopener" style="color:var(--color-deep-violet);text-decoration:none">${escapeHtml(m.title)}</a>`
+        : escapeHtml(m.title);
+      return `<div style="padding:10px 0;border-bottom:1px solid var(--color-powder-blue)">
+        <div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline">
+          <div style="font-weight:500;min-width:0">${title} ${tag}</div>
+          <div style="color:var(--color-ghost-gray);font-size:var(--text-caption);white-space:nowrap">${fmt.short(m.views)} просм · ${escapeHtml(when)}</div>
+        </div>
+        <div style="color:var(--color-slate-blue);font-size:var(--text-caption);margin-top:2px">${escapeHtml(m.snippet || '')}</div>
+      </div>`;
+    }).join('') : `<div class="empty-state" style="padding:16px">Упоминаний не найдено.</div>`;
   }
 }
 

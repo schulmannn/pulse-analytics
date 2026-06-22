@@ -16,8 +16,8 @@ import uvicorn
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telethon.tl.functions.stats import GetBroadcastStatsRequest, LoadAsyncGraphRequest, GetMessageStatsRequest
-from telethon.tl.functions.channels import GetFullChannelRequest
-from telethon.tl.types import StatsGraph, StatsGraphAsync
+from telethon.tl.functions.channels import GetFullChannelRequest, SearchPostsRequest, CheckSearchPostsFloodRequest
+from telethon.tl.types import StatsGraph, StatsGraphAsync, InputPeerEmpty, PeerChannel
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -39,6 +39,15 @@ PHONE        = os.getenv('TG_PHONE', '')
 CHANNEL      = os.getenv('TG_CHANNEL', '')
 TEAM_PASS    = os.getenv('TEAM_PASSWORD', '')
 MTPROTO_PORT = int(os.getenv('MTPROTO_PORT', '8001'))
+
+# ── Mentions (channels.searchPosts — requires Premium; ~10 free searches/day) ──
+_DEFAULT_MENTION_QUERIES = ['nōtem', 'notem', '@bynotem']
+MENTION_QUERIES = [q.strip() for q in os.getenv('MENTION_QUERIES', '').split(',') if q.strip()] or _DEFAULT_MENTION_QUERIES
+# channels NOT counted as mentions (own brand channel); default = configured channel
+_own = (CHANNEL or '').lstrip('@').lower()
+MENTION_EXCLUDE = set(u.strip().lstrip('@').lower()
+                      for u in (os.getenv('MENTION_EXCLUDE') or _own or 'bynotem').split(',') if u.strip())
+MENTION_SMART_FILTER = os.getenv('MENTION_SMART_FILTER', '1') != '0'
 
 # ── FastAPI ──────────────────────────────────────────────
 app = FastAPI(title='Pulse MTProto Service', version='1.0.0')
@@ -565,6 +574,132 @@ async def get_velocity(
         }
     except Exception as e:
         log.error(f'velocity error: {e}')
+        return {'available': False, 'error': str(e)}
+
+
+# ── Mentions helpers (reused from notem-mention-monitor) ──
+_CYRILLIC_RE = re.compile('[а-яё]')
+
+
+def _mention_channel_username(chat):
+    if getattr(chat, 'username', None):
+        return chat.username
+    for u in (getattr(chat, 'usernames', None) or []):
+        if getattr(u, 'active', False):
+            return u.username
+    return None
+
+
+def _mention_relevant(text):
+    """Smart noise filter: keep posts with Cyrillic OR an explicit latin brand
+    token (nōtem with macron / bynotem); drop foreign-language noise."""
+    low = (text or '').lower()
+    if not MENTION_SMART_FILTER:
+        return True
+    if _CYRILLIC_RE.search(low):
+        return True
+    return ('nōtem' in low) or ('bynotem' in low)
+
+
+def _mention_snippet(text, query, n=220):
+    text = re.sub(r'\s+', ' ', (text or '').strip())
+    if not text:
+        return ''
+    if len(text) <= n:
+        return text
+    idx = text.lower().find(query.lstrip('@').lower())
+    if idx == -1:
+        return text[:n] + '…'
+    start = max(0, idx - n // 3)
+    end = min(len(text), start + n)
+    return ('…' if start > 0 else '') + text[start:end] + ('…' if end < len(text) else '')
+
+
+@app.get('/mentions')
+async def get_mentions(x_internal_token: str = Header(default='')):
+    """Brand mentions in public channels via channels.searchPosts (Premium).
+    On-demand: each query consumes one of ~10 free daily searches, so we check
+    the free quota first and never spend Stars."""
+    check_auth(x_internal_token)
+    try:
+        tg = await get_client()
+        found = {}
+        queried, skipped = [], []
+        quota = None
+        for q in MENTION_QUERIES:
+            try:
+                flood = await tg(CheckSearchPostsFloodRequest(query=q))
+                free = getattr(flood, 'query_is_free', False)
+                remains = getattr(flood, 'remains', None)
+                total = getattr(flood, 'total_daily', None)
+                quota = {'remains': remains, 'total': total}
+                if not (free or (remains and remains > 0)):
+                    skipped.append(q)
+                    continue
+            except Exception:
+                pass   # quota check failed → try the search anyway (won't pay Stars: API errors instead)
+            try:
+                res = await tg(SearchPostsRequest(
+                    query=q, offset_rate=0, offset_peer=InputPeerEmpty(), offset_id=0, limit=100))
+            except Exception as e:
+                log.error(f'searchPosts «{q}»: {e}')
+                skipped.append(q)
+                continue
+            queried.append(q)
+            chats = {c.id: c for c in getattr(res, 'chats', [])}
+            for msg in getattr(res, 'messages', []):
+                peer = getattr(msg, 'peer_id', None)
+                if not isinstance(peer, PeerChannel):
+                    continue
+                if not _mention_relevant(getattr(msg, 'message', None)):
+                    continue
+                ch = chats.get(peer.channel_id)
+                uname = _mention_channel_username(ch) if ch else None
+                if uname and uname.lower() in MENTION_EXCLUDE:
+                    continue
+                key = f'{peer.channel_id}:{msg.id}'
+                if key in found:
+                    continue
+                date_raw = getattr(msg, 'date', None)
+                found[key] = {
+                    'channel_id': peer.channel_id,
+                    'title':      getattr(ch, 'title', 'канал') if ch else 'канал',
+                    'username':   uname,
+                    'link':       f'https://t.me/{uname}/{msg.id}' if uname else None,
+                    'snippet':    _mention_snippet(getattr(msg, 'message', None), q),
+                    'date':       date_raw.isoformat() if date_raw else None,
+                    'views':      getattr(msg, 'views', 0) or 0,
+                    'query':      q,
+                }
+
+        mentions = list(found.values())
+        by_day, chan, total_views = {}, {}, 0
+        for m in mentions:
+            total_views += m['views']
+            if m['date']:
+                d = m['date'][8:10] + '.' + m['date'][5:7]
+                by_day[d] = by_day.get(d, 0) + 1
+            c = chan.setdefault(m['channel_id'],
+                                {'title': m['title'], 'username': m['username'], 'count': 0, 'views': 0})
+            c['count'] += 1
+            c['views'] += m['views']
+        top_channels = sorted(chan.values(), key=lambda c: (c['count'], c['views']), reverse=True)[:10]
+        recent = sorted(mentions, key=lambda m: (m['date'] or ''), reverse=True)[:30]
+
+        return {
+            'available':       True,
+            'total':           len(mentions),
+            'unique_channels': len(chan),
+            'total_views':     total_views,
+            'by_day':          by_day,
+            'top_channels':    top_channels,
+            'recent':          recent,
+            'quota':           quota,
+            'queried':         queried,
+            'skipped':         skipped,
+        }
+    except Exception as e:
+        log.error(f'mentions error: {e}')
         return {'available': False, 'error': str(e)}
 
 

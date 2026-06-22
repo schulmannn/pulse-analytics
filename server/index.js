@@ -369,6 +369,22 @@ app.get('/api/tg/mtproto/velocity', requireAuth, async (req, res) => {
   }
 });
 
+// Brand mentions — cached longer (searchPosts has a ~10/day free quota) to avoid
+// burning it on repeated loads. Cache TTL here is the 10-min default; the Python
+// side also checks free quota before each search and never spends Stars.
+app.get('/api/tg/mtproto/mentions', requireAuth, async (req, res) => {
+  const cacheKey = 'mtproto:mentions';
+  try {
+    const cached = cacheGet(cacheKey);
+    if (cached) return res.json(cached);
+    const data = await mtprotoFetch('/mentions');
+    if (data && data.available) cacheSet(cacheKey, data);   // don't cache failures
+    res.json(data);
+  } catch (e) {
+    res.status(200).json({ error: e.message, available: false });
+  }
+});
+
 app.get('/api/tg/mtproto/post_stats/:id', requireAuth, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!id) return res.status(400).json({ error: 'bad id' });
