@@ -190,6 +190,38 @@ async function getMentionsHistory() {
   return { total: total.rows[0], by_month: byMonth.rows };
 }
 
+// Full mentions panel from the archive — same shape renderMentions() expects from
+// the live search, so the dashboard can show stored mentions without spending quota.
+async function getMentionsArchive(limit = 30) {
+  if (!enabled) return null;
+  const totals = await pool.query(
+    `SELECT count(*)::int AS total, count(distinct channel_id)::int AS unique_channels,
+            COALESCE(sum(views),0)::bigint AS total_views FROM mentions`);
+  const byDay = await pool.query(
+    `SELECT to_char(COALESCE(post_date, first_seen),'DD.MM') AS d, count(*)::int AS c
+       FROM mentions WHERE COALESCE(post_date, first_seen) >= (CURRENT_DATE - 60) GROUP BY 1`);
+  const channels = await pool.query(
+    `SELECT max(title) AS title, max(username) AS username, count(*)::int AS count,
+            COALESCE(sum(views),0)::int AS views
+       FROM mentions GROUP BY channel_id ORDER BY count(*) DESC, sum(views) DESC NULLS LAST LIMIT 10`);
+  const recent = await pool.query(
+    `SELECT channel_id, msg_id, title, username, link, snippet, views,
+            to_char(COALESCE(post_date, first_seen),'YYYY-MM-DD"T"HH24:MI:SS') AS date
+       FROM mentions ORDER BY COALESCE(post_date, first_seen) DESC LIMIT $1`, [limit]);
+  const t = totals.rows[0] || {};
+  const by_day = {};
+  for (const r of byDay.rows) by_day[r.d] = r.c;
+  return {
+    available: true,
+    total: t.total || 0,
+    unique_channels: t.unique_channels || 0,
+    total_views: Number(t.total_views || 0),
+    by_day,
+    top_channels: channels.rows,
+    recent: recent.rows,
+  };
+}
+
 async function createBug({ text, severity, context, kind }) {
   if (!enabled) return null;
   const sev = BUG_SEVERITIES.includes(severity) ? severity : 'medium';
@@ -258,7 +290,7 @@ async function getAttachment(id) {
 module.exports = {
   enabled, init, graphsToDailyRows,
   upsertChannelDaily, upsertPosts, upsertMentions,
-  getChannelHistory, getMentionsHistory,
+  getChannelHistory, getMentionsHistory, getMentionsArchive,
   createBug, listBugs, updateBug, deleteBug, BUG_STATUSES, BUG_SEVERITIES, BUG_KINDS,
   bugExists, addAttachmentIfRoom, getAttachment,
 };

@@ -548,10 +548,10 @@ app.get('/api/history/channel', requireAuth, async (req, res) => {
 
 app.get('/api/history/mentions', requireAuth, async (req, res) => {
   try {
-    const h = await db.getMentionsHistory();
-    res.json({ enabled: db.enabled, ...(h || {}) });
+    const data = await db.getMentionsArchive(30);
+    res.json({ enabled: db.enabled, ...(data || { available: false }) });
   } catch (e) {
-    res.status(200).json({ enabled: db.enabled, error: e.message });
+    res.status(200).json({ enabled: db.enabled, available: false, error: e.message });
   }
 });
 

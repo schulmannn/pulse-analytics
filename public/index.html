@@ -1543,6 +1543,7 @@ const API = {
   tgVelocity()     { return this.req('/api/tg/mtproto/velocity'); },
   tgMentions()     { return this.req('/api/tg/mtproto/mentions'); },
   history(days=730){ return this.req('/api/history/channel?days=' + days); },
+  mentionsArchive() { return this.req('/api/history/mentions'); },
   bugList()        { return this.req('/api/bugs'); },
   bugCreate(text, severity, context, kind) { return this.req('/api/bugs', { method: 'POST', body: JSON.stringify({ text, severity, context, kind }) }); },
   bugStatus(id, status)              { return this.req('/api/bugs/' + id, { method: 'PATCH', body: JSON.stringify({ status }) }); },
@@ -2048,14 +2049,14 @@ function lineChartSvg(values, opts = {}) {
   const lastY = pts[pts.length-1][1];
 
   return `
-    <line x1="0" y1="35"  x2="600" y2="35"  stroke="#e5edf5" stroke-width="1"/>
-    <line x1="0" y1="70"  x2="600" y2="70"  stroke="#e5edf5" stroke-width="1"/>
-    <line x1="0" y1="105" x2="600" y2="105" stroke="#e5edf5" stroke-width="1"/>
+    <line x1="0" y1="35"  x2="600" y2="35"  stroke="#e5edf5" stroke-width="1" vector-effect="non-scaling-stroke"/>
+    <line x1="0" y1="70"  x2="600" y2="70"  stroke="#e5edf5" stroke-width="1" vector-effect="non-scaling-stroke"/>
+    <line x1="0" y1="105" x2="600" y2="105" stroke="#e5edf5" stroke-width="1" vector-effect="non-scaling-stroke"/>
     <path d="${areaPath}" fill="#533afd" opacity="0.06"/>
-    <path d="${linePath}" fill="none" stroke="#533afd" stroke-width="2"/>
+    <path d="${linePath}" fill="none" stroke="#533afd" stroke-width="2" vector-effect="non-scaling-stroke"/>
     <circle cx="${lastX.toFixed(1)}" cy="${lastY.toFixed(1)}" r="4" fill="#533afd"/>
     <circle cx="${lastX.toFixed(1)}" cy="${lastY.toFixed(1)}" r="8" fill="#533afd" opacity="0.15"/>
-    <line class="hover-line" x1="-5" y1="0" x2="-5" y2="140" stroke="#533afd" stroke-width="1" stroke-dasharray="3 3" opacity="0"/>
+    <line class="hover-line" x1="-5" y1="0" x2="-5" y2="140" stroke="#533afd" stroke-width="1" stroke-dasharray="3 3" opacity="0" vector-effect="non-scaling-stroke"/>
   `;
 }
 
@@ -2137,7 +2138,7 @@ function barChartSvg(values) {
     const fill = i >= n - 3 ? '#533afd' : '#8087ff';
     return `<rect data-i="${i}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${barH.toFixed(1)}" fill="${fill}" rx="2"/>`;
   }).join('');
-  return bars + `<line class="hover-line" x1="-5" y1="0" x2="-5" y2="${h}" stroke="#533afd" stroke-width="1" stroke-dasharray="3 3" opacity="0"/>`;
+  return bars + `<line class="hover-line" x1="-5" y1="0" x2="-5" y2="${h}" stroke="#533afd" stroke-width="1" stroke-dasharray="3 3" opacity="0" vector-effect="non-scaling-stroke"/>`;
 }
 
 /* ── KPI rendering ───────────────────────────────────────────── */
@@ -2308,7 +2309,7 @@ function renderKpis() {
       ${c.spark && c.spark.length > 1 ? `
         <svg class="kpi-spark" viewBox="0 0 200 32" preserveAspectRatio="none">
           <path d="${sparkAreaPath(c.spark)}" fill="#533afd" opacity="0.08"/>
-          <path d="${sparkPath(c.spark)}" fill="none" stroke="#533afd" stroke-width="1.5"/>
+          <path d="${sparkPath(c.spark)}" fill="none" stroke="#533afd" stroke-width="1.5" vector-effect="non-scaling-stroke"/>
         </svg>
       ` : ''}
     </div>
@@ -2813,7 +2814,7 @@ function barsChartSvg(values, w = 600, h = 120, titles) {
     const tip = (titles && titles[i] != null) ? `<title>${escapeHtml(titles[i])}</title>` : '';
     return `<rect data-i="${i}" x="${x.toFixed(1)}" y="${(h - bh).toFixed(1)}" width="${barW.toFixed(1)}" height="${bh.toFixed(1)}" fill="${Number(v) === max ? '#533afd' : '#8087ff'}" rx="1.5">${tip}</rect>`;
   }).join('');
-  return bars + `<line class="hover-line" x1="-5" y1="0" x2="-5" y2="${h}" stroke="#533afd" stroke-width="1" stroke-dasharray="3 3" opacity="0"/>`;
+  return bars + `<line class="hover-line" x1="-5" y1="0" x2="-5" y2="${h}" stroke="#533afd" stroke-width="1" stroke-dasharray="3 3" opacity="0" vector-effect="non-scaling-stroke"/>`;
 }
 
 function setBreakdown(id, items) {
@@ -2838,7 +2839,7 @@ function divergingBarsSvg(values, w = 600, h = 120, titles) {
     const tip = (titles && titles[i] != null) ? `<title>${escapeHtml(titles[i])}</title>` : '';
     return `<rect data-i="${i}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${bh.toFixed(1)}" fill="${val >= 0 ? '#533afd' : '#ff6118'}" rx="1">${tip}</rect>`;
   }).join('');
-  return `<line x1="0" y1="${mid}" x2="${w}" y2="${mid}" stroke="#d8d6df" stroke-width="1"/>` + bars + `<line class="hover-line" x1="-5" y1="0" x2="-5" y2="${h}" stroke="#533afd" stroke-width="1" stroke-dasharray="3 3" opacity="0"/>`;
+  return `<line x1="0" y1="${mid}" x2="${w}" y2="${mid}" stroke="#d8d6df" stroke-width="1" vector-effect="non-scaling-stroke"/>` + bars + `<line class="hover-line" x1="-5" y1="0" x2="-5" y2="${h}" stroke="#533afd" stroke-width="1" stroke-dasharray="3 3" opacity="0" vector-effect="non-scaling-stroke"/>`;
 }
 
 const SRC_NAMES = { 'Followers':'Подписчики', 'URL':'Ссылки', 'Search':'Поиск', 'Telegram Search':'Поиск', 'Groups':'Группы', 'Channels':'Каналы', 'PM':'Личные сообщения', 'Other':'Прочее', 'Shareable Chat Folders':'Папки', 'Shareable Folder Links':'Папки' };
@@ -3744,8 +3745,7 @@ async function loadAll() {
     }),
     API.tgStats().then(d => state.tg.channelStats = d).catch(() => { state.tg.channelStats = null; }),
     API.tgGraphs().then(d => state.tg.graphs = d).catch(() => { state.tg.graphs = null; }),
-    API.tgVelocity().then(d => state.tg.velocity = d).catch(() => { state.tg.velocity = null; }),
-    API.history().then(d => state.tg.history = d).catch(() => { state.tg.history = null; })
+    API.tgVelocity().then(d => state.tg.velocity = d).catch(() => { state.tg.velocity = null; })
   ];
   await Promise.all(tasks);
 
@@ -3801,6 +3801,25 @@ async function loadAll() {
   applySource(state.source);
   lastUpdated = Date.now();
   updateFreshness();
+
+  // Non-critical, DB-backed panels — load AFTER first paint so they don't block it.
+  loadArchives();
+}
+
+/* Long-range subscriber history + brand-mention archive (Postgres). Deferred so the
+   730-day query / mentions list never delay the main dashboard render. */
+function loadArchives() {
+  API.history()
+    .then(d => { state.tg.history = d; renderHistory(); })
+    .catch(() => { state.tg.history = null; });
+  API.mentionsArchive()
+    .then(d => {
+      if (d && d.available && ((d.total || 0) > 0 || (Array.isArray(d.recent) && d.recent.length))) {
+        state.tg.mentions = d;
+        if (state.source === 'telegram' && state.tg.mtprotoAvailable) renderMentions(d);
+      }
+    })
+    .catch(() => {});
 }
 
 /* ── Freshness + auto-refresh ─────────────────────────────────── */
