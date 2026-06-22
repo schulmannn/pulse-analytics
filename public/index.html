@@ -55,6 +55,7 @@
 
   html, body {
     background: var(--color-platinum);
+    scroll-padding-top: 76px;   /* keep nav-anchor jumps clear of the sticky header */
     color: var(--color-midnight-ink);
     font-family: var(--font-sans);
     font-size: var(--text-body);
@@ -266,7 +267,7 @@
   .app-shell {
     max-width: 1280px;
     margin: 0 auto;
-    padding: 24px 32px 96px;
+    padding: 24px 32px 32px;
   }
   .app-header {
     display: flex;
@@ -275,6 +276,47 @@
     padding: 16px 0;
     border-bottom: 1px solid var(--color-powder-blue);
     margin-bottom: 0;
+    position: sticky;
+    top: 0;
+    z-index: 50;   /* above content; below toast(100)/modals(900). If switched to position:fixed, raise above 100 */
+    background: var(--color-platinum);
+  }
+  .app-footer {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: var(--gap-section);
+    padding: 24px 0 4px;
+    border-top: 1px solid var(--color-powder-blue);
+    color: var(--color-ghost-gray);
+    font-size: var(--text-caption);
+  }
+  .app-footer a { color: var(--color-slate-blue); text-decoration: none; }
+  .app-footer a:hover { color: var(--color-deep-violet); text-decoration: underline; }
+  .app-footer .sep { opacity: .45; }
+  .app-footer .grow { flex: 1; }
+  .chart-modal-tf {
+    display: flex;
+    gap: 6px;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+  }
+  .chart-modal-tf button {
+    padding: 4px 12px;
+    border: 1px solid var(--color-powder-blue);
+    background: var(--color-platinum);
+    color: var(--color-slate-blue);
+    border-radius: var(--radius-button);
+    font: inherit;
+    font-size: var(--text-caption);
+    cursor: pointer;
+  }
+  .chart-modal-tf button.active {
+    background: var(--color-deep-violet);
+    color: #fff;
+    border-color: var(--color-deep-violet);
   }
   .app-brand {
     display: flex;
@@ -1391,6 +1433,14 @@
       </div>
     </div>
 
+    <footer class="app-footer">
+      <span>© 2026 Pulse Analytics</span>
+      <span class="sep">·</span>
+      <span>аналитика Telegram-каналов</span>
+      <span class="grow"></span>
+      <a href="https://github.com/schulmannn/pulse-analytics" target="_blank" rel="noopener">GitHub</a>
+    </footer>
+
   </div>
 </div>
 
@@ -1412,6 +1462,11 @@
     <div style="margin:12px 0 16px">
       <textarea id="bug-text" rows="3" placeholder="Опиши баг: что сломалось, где, что ожидалось…" style="width:100%;box-sizing:border-box;padding:10px;border:1px solid var(--color-powder-blue);border-radius:8px;font:inherit;resize:vertical"></textarea>
       <div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap">
+        <select id="bug-kind" style="padding:8px;border:1px solid var(--color-powder-blue);border-radius:8px;font:inherit">
+          <option value="bug" selected>🐞 Баг</option>
+          <option value="feature">💡 Новая фича</option>
+          <option value="change">✏️ Правка</option>
+        </select>
         <select id="bug-severity" style="padding:8px;border:1px solid var(--color-powder-blue);border-radius:8px;font:inherit">
           <option value="low">Низкая</option>
           <option value="medium" selected>Средняя</option>
@@ -1489,7 +1544,7 @@ const API = {
   tgMentions()     { return this.req('/api/tg/mtproto/mentions'); },
   history(days=730){ return this.req('/api/history/channel?days=' + days); },
   bugList()        { return this.req('/api/bugs'); },
-  bugCreate(text, severity, context) { return this.req('/api/bugs', { method: 'POST', body: JSON.stringify({ text, severity, context }) }); },
+  bugCreate(text, severity, context, kind) { return this.req('/api/bugs', { method: 'POST', body: JSON.stringify({ text, severity, context, kind }) }); },
   bugStatus(id, status)              { return this.req('/api/bugs/' + id, { method: 'PATCH', body: JSON.stringify({ status }) }); },
   bugDelete(id)    { return this.req('/api/bugs/' + id, { method: 'DELETE' }); },
   bugUpload(id, data, mime) { return this.req('/api/bugs/' + id + '/screenshot', { method: 'POST', body: JSON.stringify({ data, mime }) }); },
@@ -1760,6 +1815,7 @@ document.getElementById('mentions-load-btn')?.addEventListener('click', async ()
 /* ── Bug tracker ─────────────────────────────────────────────── */
 const BUG_STATUS = { open: { l: 'Открыт', c: 'orange' }, in_progress: { l: 'В работе', c: 'violet' }, done: { l: 'Готово', c: 'green' }, wont_fix: { l: 'Не баг', c: '' } };
 const BUG_SEV = { low: 'Низкая', medium: 'Средняя', high: 'Высокая' };
+const BUG_KIND = { bug: { l: 'Баг', c: 'orange' }, feature: { l: 'Фича', c: 'green' }, change: { l: 'Правка', c: 'violet' } };
 let bugPending = [];   // [{ dataUrl, mime }] — screenshots queued before submit
 
 function openBugModal() {
@@ -1845,12 +1901,13 @@ function renderBugs(data) {
   list.innerHTML = bugs.map(b => {
     const sev = BUG_SEV[b.severity] || b.severity;
     const sevCls = b.severity === 'high' ? 'orange' : b.severity === 'low' ? 'green' : 'violet';
+    const knd = BUG_KIND[b.kind] || BUG_KIND.bug;
     const dim = (b.status === 'done' || b.status === 'wont_fix') ? 'opacity:.55;' : '';
     return `<div class="bug-row" style="padding:10px 0;border-bottom:1px solid var(--color-powder-blue);${dim}">
       <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
         <div style="min-width:0;flex:1">
           <div style="white-space:pre-wrap;word-break:break-word">${escapeHtml(b.text)}</div>
-          <div style="font-size:var(--text-caption);color:var(--color-ghost-gray);margin-top:3px">#${b.id} · <span class="tag ${sevCls}">${escapeHtml(sev)}</span> · ${escapeHtml(fmt.date(b.created_at) || '')}</div>
+          <div style="font-size:var(--text-caption);color:var(--color-ghost-gray);margin-top:3px">#${b.id} · <span class="tag ${knd.c}">${escapeHtml(knd.l)}</span> · <span class="tag ${sevCls}">${escapeHtml(sev)}</span> · ${escapeHtml(fmt.date(b.created_at) || '')}</div>
           ${(Array.isArray(b.attachments) && b.attachments.length) ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">${b.attachments.map(a => `<img class="bug-thumb" data-att="${a.id}" alt="screenshot" title="Открыть" style="width:54px;height:54px;object-fit:cover;border-radius:6px;border:1px solid var(--color-powder-blue);cursor:pointer;background:var(--color-powder-blue)">`).join('')}</div>` : ''}
         </div>
         <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;flex:0 0 auto">
@@ -1871,13 +1928,14 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeBugModa
 document.getElementById('bug-submit')?.addEventListener('click', async () => {
   const ta = document.getElementById('bug-text');
   const sev = document.getElementById('bug-severity');
+  const knd = document.getElementById('bug-kind');
   const msg = document.getElementById('bug-msg');
   const btn = document.getElementById('bug-submit');
   const text = (ta.value || '').trim();
   if (!text) { msg.style.color = 'var(--color-vibrant-orange)'; msg.textContent = 'Опиши баг'; return; }
   btn.disabled = true; msg.style.color = 'var(--color-ghost-gray)'; msg.textContent = 'Сохраняю…';
   try {
-    const bug = await API.bugCreate(text, sev.value, 'source=' + state.source);
+    const bug = await API.bugCreate(text, sev.value, 'source=' + state.source, knd ? knd.value : 'bug');
     let failed = 0;
     if (bugPending.length && bug && bug.id) {
       for (let i = 0; i < bugPending.length; i++) {
@@ -1999,6 +2057,67 @@ function lineChartSvg(values, opts = {}) {
     <circle cx="${lastX.toFixed(1)}" cy="${lastY.toFixed(1)}" r="8" fill="#533afd" opacity="0.15"/>
     <line class="hover-line" x1="-5" y1="0" x2="-5" y2="140" stroke="#533afd" stroke-width="1" stroke-dasharray="3 3" opacity="0"/>
   `;
+}
+
+const CHART_MAX_POINTS = 140;   // max points drawn in one 600px-wide line chart (keeps it crisp)
+
+/* Largest-Triangle-Three-Buckets downsample: shrink a long series to ~`threshold`
+   points while keeping its visual shape (peaks/troughs) and the first & last point.
+   Returns a SUBSET of the original rows so day labels / tooltips stay aligned —
+   crucial because the chart viewBox is a fixed 600px (730 raw points → sub-pixel
+   steps → a blurred line). `valueOf(row)` extracts the numeric y; x is the index. */
+function lttbDownsample(rows, threshold, valueOf) {
+  const n = rows.length;
+  if (threshold >= n || threshold < 3) return rows.slice();
+  const sampled = [rows[0]];
+  const bucket = (n - 2) / (threshold - 2);
+  let a = 0;
+  for (let i = 0; i < threshold - 2; i++) {
+    let rangeStart = Math.floor((i + 1) * bucket) + 1;
+    let rangeEnd = Math.min(Math.floor((i + 2) * bucket) + 1, n);
+    const avgLen = (rangeEnd - rangeStart) || 1;
+    let avgX = 0, avgY = 0;
+    for (let j = rangeStart; j < rangeEnd; j++) { avgX += j; avgY += valueOf(rows[j]); }
+    avgX /= avgLen; avgY /= avgLen;
+    const curStart = Math.floor(i * bucket) + 1;
+    const curEnd = Math.floor((i + 1) * bucket) + 1;
+    const ax = a, ay = valueOf(rows[a]);
+    let maxArea = -1, pick = curStart;
+    for (let j = curStart; j < curEnd; j++) {
+      const area = Math.abs((ax - avgX) * (valueOf(rows[j]) - ay) - (ax - j) * (avgY - ay));
+      if (area > maxArea) { maxArea = area; pick = j; }
+    }
+    sampled.push(rows[pick]);
+    a = pick;
+  }
+  sampled.push(rows[n - 1]);
+  return sampled;
+}
+
+/* Stash a line chart's full series on its <svg> so the expand-modal can re-window
+   it to a shorter timeframe (task: per-chart timeframe) without touching the page. */
+function chartFull(svg, values, tipLabels, xLabels, xLabelsId) {
+  if (!svg) return;
+  try {
+    svg.dataset.full = JSON.stringify({ v: values || [], t: tipLabels || [], x: xLabels || [] });
+    if (xLabelsId) svg.dataset.xlabels = xLabelsId;
+  } catch (e) { /* ignore — windowing just won't be offered for this chart */ }
+}
+
+/* Window parallel series arrays (values + tooltip + x-label) to the last `days`
+   points (0 = all), then downsample if still denser than `maxPoints`. Keeps the
+   three arrays aligned and every render crisp. Assumes 1 point = 1 day. */
+function windowSeries(v, t, x, days, maxPoints) {
+  const n = v.length;
+  const keep = (!days || days >= n) ? n : days;
+  const from = n - keep;
+  let vS = v.slice(from), tS = t.slice(from), xS = x.slice(from);
+  if (vS.length > maxPoints) {
+    const objs = vS.map((val, i) => ({ v: val, t: tS[i], x: xS[i] }));
+    const ds = lttbDownsample(objs, maxPoints, o => Number(o.v));
+    vS = ds.map(o => o.v); tS = ds.map(o => o.t); xS = ds.map(o => o.x);
+  }
+  return { v: vS, t: tS, x: xS };
 }
 
 /* Bar chart (viewBox 360x100, 7 bars) */
@@ -2797,7 +2916,14 @@ function setYAxis(svgId, yMin, yMax) {
     ya.className = 'chart-yaxis';
     plot.appendChild(ya);
   }
-  const ya = plot.querySelector('.chart-yaxis');
+  applyYAxisEl(svg, yMin, yMax);
+}
+
+/* Update the y-axis overlay for a given svg ELEMENT (not id) — used inside the
+   expand-modal clone, where ids are duplicated and getElementById is unsafe. */
+function applyYAxisEl(svg, yMin, yMax) {
+  const plot = svg && svg.parentNode;
+  const ya = (plot && plot.querySelector) ? plot.querySelector('.chart-yaxis') : null;
   if (!ya) return;
   if (!isFinite(yMin) || !isFinite(yMax)) { ya.innerHTML = ''; return; }
   if (yMax === yMin) { ya.innerHTML = `<span>${fmt.short(yMax)}</span>`; return; }
@@ -2831,6 +2957,35 @@ function addExpandButtons(scopeSel) {
     head.appendChild(btn);
   });
 }
+/* Timeframe windows offered inside the chart modal (d = days kept, 0 = all). */
+const CHART_MODAL_WINDOWS = [
+  { l: '1М', d: 30 }, { l: '3М', d: 90 }, { l: '6М', d: 180 }, { l: '1Г', d: 365 }, { l: 'Всё', d: 0 },
+];
+
+/* Re-window every line chart inside `scope` (the modal clone) to the last `days`
+   points (0 = all), slicing the stashed full series so line/y-axis/labels/tooltips
+   stay aligned. This is the per-chart timeframe override, on top of the master filter. */
+function applyChartWindow(scope, days) {
+  scope.querySelectorAll('svg[data-full]').forEach(svg => {
+    let full; try { full = JSON.parse(svg.dataset.full); } catch (e) { return; }
+    if (!full.v || !full.v.length) return;
+    const { v: vS, t: tS, x: xS } = windowSeries(full.v, full.t || [], full.x || [], days, CHART_MAX_POINTS);
+    if (!vS.length) return;
+    svg.innerHTML = lineChartSvg(vS);
+    applyYAxisEl(svg, Math.min(...vS), Math.max(...vS));
+    if (tS.length) { svg.dataset.tip = JSON.stringify(tS); svg.dataset.tipkind = 'line'; initTip(svg); }
+    const xid = svg.dataset.xlabels;
+    if (xid && xS.length) {
+      const cont = scope.querySelector('#' + xid);
+      if (cont) {
+        const step = Math.max(1, Math.ceil(xS.length / 8));
+        cont.innerHTML = xS.map((l, i) =>
+          `<span style="${(i % step === 0 || i === xS.length - 1) ? '' : 'visibility:hidden'}">${escapeHtml(String(l))}</span>`).join('');
+      }
+    }
+  });
+}
+
 function openChartModal(panel) {
   const body = document.getElementById('chart-modal-body');
   if (!body) return;
@@ -2838,6 +2993,26 @@ function openChartModal(panel) {
   clone.querySelectorAll('.expand-btn').forEach(b => b.remove());
   clone.querySelectorAll('svg').forEach(s => s.setAttribute('height', '420'));
   body.innerHTML = '';
+  // Per-chart timeframe selector — only for line charts that stashed a full series
+  let maxN = 0;
+  clone.querySelectorAll('svg[data-full]').forEach(svg => {
+    try { maxN = Math.max(maxN, (JSON.parse(svg.dataset.full).v || []).length); } catch (e) { /* ignore */ }
+  });
+  const wins = CHART_MODAL_WINDOWS.filter(w => w.d === 0 || w.d < maxN);
+  if (wins.length >= 2) {
+    const bar = document.createElement('div');
+    bar.className = 'chart-modal-tf';
+    bar.innerHTML = wins.map((w, i) =>
+      `<button data-d="${w.d}"${i === wins.length - 1 ? ' class="active"' : ''}>${w.l}</button>`).join('');
+    bar.addEventListener('click', e => {
+      const b = e.target.closest('button[data-d]');
+      if (!b) return;
+      bar.querySelectorAll('button').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      applyChartWindow(clone, parseInt(b.dataset.d, 10));
+    });
+    body.appendChild(bar);
+  }
   body.appendChild(clone);
   clone.querySelectorAll('svg[data-tip]').forEach(initTip);
   document.getElementById('chart-modal').classList.remove('hidden');
@@ -3060,16 +3235,18 @@ function renderTgAnalytics() {
   if (growthEl) {
     const g = graphs.growth;
     const vals = (g && g.series && g.series[0]) ? g.series[0].values.map(Number) : [];
+    const gfd = ts => { const d = new Date(Number(ts)); return d.getDate() + '.' + (d.getMonth() + 1); };
+    const gTips = (g && g.x && g.x.length)
+      ? g.x.map((ts, i) => `${gfd(ts)}: ${fmt.num(vals[i])} подписчиков`)
+      : vals.map(v => `${fmt.num(v)} подписчиков`);
     growthEl.innerHTML = lineChartSvg(vals);
     setYAxis('tg-growth-chart', Math.min(...vals), Math.max(...vals));
-    setTip(growthEl, (g && g.x && g.x.length)
-      ? g.x.map((ts, i) => { const d = new Date(Number(ts)); return `${d.getDate()}.${d.getMonth() + 1}: ${fmt.num(vals[i])} подписчиков`; })
-      : vals.map(v => `${fmt.num(v)} подписчиков`), 'line');
+    setTip(growthEl, gTips, 'line');
+    chartFull(growthEl, vals, gTips, (g && g.x && g.x.length) ? g.x.map(gfd) : [], 'tg-growth-labels');
     if (growthLabels) {
       if (g && g.x && g.x.length) {
-        const fd = ts => { const d = new Date(Number(ts)); return d.getDate() + '.' + (d.getMonth() + 1); };
         const xs = g.x;
-        growthLabels.innerHTML = [0, Math.floor(xs.length / 2), xs.length - 1].map(i => `<span>${fd(xs[i])}</span>`).join('');
+        growthLabels.innerHTML = [0, Math.floor(xs.length / 2), xs.length - 1].map(i => `<span>${gfd(xs[i])}</span>`).join('');
       } else growthLabels.innerHTML = '';
     }
   }
@@ -3082,8 +3259,8 @@ function renderTgAnalytics() {
     const views  = inter.series.find(s => /view|просмотр/i.test(s.name)) || inter.series[0];
     const shares = inter.series.find(s => /share|репост/i.test(s.name)) || inter.series[1];
     const ix = (inter.x || []).map(ts => { const d = new Date(Number(ts)); return `${d.getDate()}.${d.getMonth() + 1}`; });
-    if (ivEl) { const vv = views ? views.values.map(Number) : []; ivEl.innerHTML = lineChartSvg(vv); setYAxis('tg-interactions-views', Math.min(...vv), Math.max(...vv)); setXAxis('tg-interactions-views-labels', ix); setTip(ivEl, vv.map((v, i) => `${ix[i] || ''}: ${fmt.num(v)} просмотров`), 'line'); }
-    if (isEl) { const sv = shares ? shares.values.map(Number) : []; isEl.innerHTML = lineChartSvg(sv); setYAxis('tg-interactions-shares', Math.min(...sv), Math.max(...sv)); setXAxis('tg-interactions-shares-labels', ix); setTip(isEl, sv.map((v, i) => `${ix[i] || ''}: ${fmt.num(v)} репостов`), 'line'); }
+    if (ivEl) { const vv = views ? views.values.map(Number) : []; const vt = vv.map((v, i) => `${ix[i] || ''}: ${fmt.num(v)} просмотров`); ivEl.innerHTML = lineChartSvg(vv); setYAxis('tg-interactions-views', Math.min(...vv), Math.max(...vv)); setXAxis('tg-interactions-views-labels', ix); setTip(ivEl, vt, 'line'); chartFull(ivEl, vv, vt, ix, 'tg-interactions-views-labels'); }
+    if (isEl) { const sv = shares ? shares.values.map(Number) : []; const st = sv.map((v, i) => `${ix[i] || ''}: ${fmt.num(v)} репостов`); isEl.innerHTML = lineChartSvg(sv); setYAxis('tg-interactions-shares', Math.min(...sv), Math.max(...sv)); setXAxis('tg-interactions-shares-labels', ix); setTip(isEl, st, 'line'); chartFull(isEl, sv, st, ix, 'tg-interactions-shares-labels'); }
   } else {
     if (ivEl) { ivEl.innerHTML = lineChartSvg([]); setTip(ivEl, [], 'line'); }
     if (isEl) { isEl.innerHTML = lineChartSvg([]); setTip(isEl, [], 'line'); }
@@ -3200,19 +3377,27 @@ function renderHistory() {
   const labels = document.getElementById('tg-history-labels');
   if (!panel || !el) return;
   const h = state.tg.history;
-  const rows = (h && h.enabled && Array.isArray(h.rows)) ? h.rows.filter(r => r.subscribers != null) : [];
-  if (rows.length < 2) { panel.classList.add('hidden'); return; }
+  const all = (h && h.enabled && Array.isArray(h.rows)) ? h.rows.filter(r => r.subscribers != null) : [];
+  if (all.length < 2) { panel.classList.add('hidden'); return; }
   panel.classList.remove('hidden');
+  // Downsample long archives (up to 730 days) so the fixed-width SVG stays crisp.
+  const rows = lttbDownsample(all, CHART_MAX_POINTS, r => Number(r.subscribers));
   const vals = rows.map(r => Number(r.subscribers));
+  const ddmm = s => { const p = String(s).split('-'); return p[2] + '.' + p[1]; };
+  const tips = rows.map(r => `${r.day}: ${fmt.num(r.subscribers)} подписчиков`);
   el.innerHTML = lineChartSvg(vals);
   setYAxis('tg-history-chart', Math.min(...vals), Math.max(...vals));
-  setTip(el, rows.map(r => `${r.day}: ${fmt.num(r.subscribers)} подписчиков`), 'line');
-  const ddmm = s => { const p = String(s).split('-'); return p[2] + '.' + p[1]; };
+  setTip(el, tips, 'line');
+  // Stash the FULL daily series so the modal windows by real days (re-downsamples each slice).
+  chartFull(el, all.map(r => Number(r.subscribers)), all.map(r => `${r.day}: ${fmt.num(r.subscribers)} подписчиков`), all.map(r => ddmm(r.day)), 'tg-history-labels');
   if (labels) {
     const idx = [0, Math.floor(rows.length / 2), rows.length - 1];
     labels.innerHTML = idx.map(i => `<span>${ddmm(rows[i].day)}</span>`).join('');
   }
-  if (note) note.textContent = `${rows.length} дн в архиве · с ${ddmm(rows[0].day)}`;
+  if (note) {
+    const base = `${all.length} дн в архиве · с ${ddmm(all[0].day)}`;
+    note.textContent = rows.length < all.length ? `${base} · сглажено` : base;
+  }
 }
 
 /* ── A2: best-time heatmap (weekday × hour, coloured by avg ERV) ── */

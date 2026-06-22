@@ -54,6 +54,8 @@ CREATE TABLE IF NOT EXISTS bugs (
   text TEXT NOT NULL,
   context TEXT
 );
+-- kind: тип обращения (баг / фича / правка). Идемпотентно для уже существующих БД.
+ALTER TABLE bugs ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'bug';
 CREATE TABLE IF NOT EXISTS bug_attachments (
   id SERIAL PRIMARY KEY,
   bug_id INTEGER REFERENCES bugs(id) ON DELETE CASCADE,
@@ -66,6 +68,7 @@ CREATE INDEX IF NOT EXISTS bug_attachments_bug_id_idx ON bug_attachments(bug_id)
 
 const BUG_STATUSES = ['open', 'in_progress', 'done', 'wont_fix'];
 const BUG_SEVERITIES = ['low', 'medium', 'high'];
+const BUG_KINDS = ['bug', 'feature', 'change'];
 
 async function init() {
   if (!enabled) { console.log('[db] disabled (no DATABASE_URL) — history off'); return; }
@@ -187,13 +190,14 @@ async function getMentionsHistory() {
   return { total: total.rows[0], by_month: byMonth.rows };
 }
 
-async function createBug({ text, severity, context }) {
+async function createBug({ text, severity, context, kind }) {
   if (!enabled) return null;
   const sev = BUG_SEVERITIES.includes(severity) ? severity : 'medium';
+  const knd = BUG_KINDS.includes(kind) ? kind : 'bug';
   const { rows } = await pool.query(
-    `INSERT INTO bugs (text, severity, context) VALUES ($1,$2,$3)
-     RETURNING id, to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SS') AS created_at, status, severity, text, context`,
-    [String(text).slice(0, 4000), sev, context ? String(context).slice(0, 500) : null]);
+    `INSERT INTO bugs (text, severity, context, kind) VALUES ($1,$2,$3,$4)
+     RETURNING id, to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SS') AS created_at, status, severity, kind, text, context`,
+    [String(text).slice(0, 4000), sev, context ? String(context).slice(0, 500) : null, knd]);
   return rows[0];
 }
 
@@ -201,7 +205,7 @@ async function listBugs(status) {
   if (!enabled) return [];
   const filter = BUG_STATUSES.includes(status) ? status : null;
   const { rows } = await pool.query(
-    `SELECT id, to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SS') AS created_at, status, severity, text, context,
+    `SELECT id, to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SS') AS created_at, status, severity, kind, text, context,
        (SELECT COALESCE(json_agg(json_build_object('id', a.id, 'mime', a.mime) ORDER BY a.id), '[]')
           FROM bug_attachments a WHERE a.bug_id = bugs.id) AS attachments
      FROM bugs ${filter ? 'WHERE status=$1' : ''} ORDER BY
@@ -216,7 +220,7 @@ async function updateBug(id, status) {
   if (!BUG_STATUSES.includes(status)) throw new Error('bad status');
   const { rows } = await pool.query(
     `UPDATE bugs SET status=$2, updated_at=now() WHERE id=$1
-     RETURNING id, to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SS') AS created_at, status, severity, text, context`,
+     RETURNING id, to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SS') AS created_at, status, severity, kind, text, context`,
     [id, status]);
   return rows[0] || null;
 }
@@ -255,6 +259,6 @@ module.exports = {
   enabled, init, graphsToDailyRows,
   upsertChannelDaily, upsertPosts, upsertMentions,
   getChannelHistory, getMentionsHistory,
-  createBug, listBugs, updateBug, deleteBug, BUG_STATUSES, BUG_SEVERITIES,
+  createBug, listBugs, updateBug, deleteBug, BUG_STATUSES, BUG_SEVERITIES, BUG_KINDS,
   bugExists, addAttachmentIfRoom, getAttachment,
 };

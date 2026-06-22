@@ -563,14 +563,14 @@ app.post('/api/bugs', requireAuth, async (req, res) => {
   const text = ((req.body && req.body.text) || '').trim();
   if (!text) return res.status(400).json({ error: 'Опиши баг' });
   try {
-    const bug = await db.createBug({ text, severity: req.body.severity, context: req.body.context });
+    const bug = await db.createBug({ text, severity: req.body.severity, context: req.body.context, kind: req.body.kind });
     res.json(bug);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get('/api/bugs', requireAuth, async (req, res) => {
   try {
-    res.json({ enabled: db.enabled, statuses: db.BUG_STATUSES, bugs: await db.listBugs(req.query.status) });
+    res.json({ enabled: db.enabled, statuses: db.BUG_STATUSES, kinds: db.BUG_KINDS, bugs: await db.listBugs(req.query.status) });
   } catch (e) { res.status(200).json({ enabled: db.enabled, bugs: [], error: e.message }); }
 });
 
