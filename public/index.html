@@ -1098,6 +1098,7 @@
         </div>
         <span id="freshness" style="font-size:var(--text-caption);color:var(--color-ghost-gray);white-space:nowrap;"></span>
         <span id="status-pill" class="pill"><span class="dot"></span><span id="status-text">Загрузка…</span></span>
+        <button id="bug-btn" class="icon-btn" title="Сообщить о баге" style="font-size:15px;line-height:1;">🐞</button>
         <button id="refresh-btn" class="icon-btn" title="Обновить">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>
         </button>
@@ -1404,6 +1405,27 @@
   </div>
 </div>
 
+<div id="bug-modal" class="chart-modal hidden">
+  <div class="chart-modal-card">
+    <button id="bug-modal-close" class="chart-modal-close" title="Закрыть">✕</button>
+    <div class="chart-head"><span class="chart-title">🐞 Баги</span></div>
+    <div style="margin:12px 0 16px">
+      <textarea id="bug-text" rows="3" placeholder="Опиши баг: что сломалось, где, что ожидалось…" style="width:100%;box-sizing:border-box;padding:10px;border:1px solid var(--color-powder-blue);border-radius:8px;font:inherit;resize:vertical"></textarea>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap">
+        <select id="bug-severity" style="padding:8px;border:1px solid var(--color-powder-blue);border-radius:8px;font:inherit">
+          <option value="low">Низкая</option>
+          <option value="medium" selected>Средняя</option>
+          <option value="high">Высокая</option>
+        </select>
+        <button id="bug-submit" class="btn-primary sm">Отправить</button>
+        <span id="bug-msg" style="font-size:var(--text-caption);color:var(--color-ghost-gray)"></span>
+      </div>
+    </div>
+    <div class="chart-head" style="border-top:1px solid var(--color-powder-blue);padding-top:12px"><span class="chart-title" style="font-size:var(--text-body)">Список багов</span></div>
+    <div id="bug-list" style="margin-top:8px;max-height:46vh;overflow:auto"></div>
+  </div>
+</div>
+
 <script>
 /* ================================================================
    APP — vanilla JS
@@ -1459,6 +1481,10 @@ const API = {
   tgVelocity()     { return this.req('/api/tg/mtproto/velocity'); },
   tgMentions()     { return this.req('/api/tg/mtproto/mentions'); },
   history(days=730){ return this.req('/api/history/channel?days=' + days); },
+  bugList()        { return this.req('/api/bugs'); },
+  bugCreate(text, severity, context) { return this.req('/api/bugs', { method: 'POST', body: JSON.stringify({ text, severity, context }) }); },
+  bugStatus(id, status)              { return this.req('/api/bugs/' + id, { method: 'PATCH', body: JSON.stringify({ status }) }); },
+  bugDelete(id)    { return this.req('/api/bugs/' + id, { method: 'DELETE' }); },
   health()         { return this.req('/api/health'); },
   clearCache()     { return this.req('/api/cache', { method: 'DELETE' }); }
 };
@@ -1721,6 +1747,94 @@ document.getElementById('mentions-load-btn')?.addEventListener('click', async ()
     btn.disabled = false;
     if (btn.textContent === 'Ищу…') btn.textContent = orig;
   }
+});
+
+/* ── Bug tracker ─────────────────────────────────────────────── */
+const BUG_STATUS = { open: { l: 'Открыт', c: 'orange' }, in_progress: { l: 'В работе', c: 'violet' }, done: { l: 'Готово', c: 'green' }, wont_fix: { l: 'Не баг', c: '' } };
+const BUG_SEV = { low: 'Низкая', medium: 'Средняя', high: 'Высокая' };
+
+function openBugModal() {
+  document.getElementById('bug-modal').classList.remove('hidden');
+  const msg = document.getElementById('bug-msg'); if (msg) msg.textContent = '';
+  setTimeout(() => document.getElementById('bug-text')?.focus(), 50);
+  loadBugs();
+}
+function closeBugModal() { document.getElementById('bug-modal')?.classList.add('hidden'); }
+
+async function loadBugs() {
+  const list = document.getElementById('bug-list');
+  if (!list) return;
+  list.innerHTML = '<div style="color:var(--color-ghost-gray);padding:8px">Загрузка…</div>';
+  try { renderBugs(await API.bugList()); }
+  catch (e) { list.innerHTML = `<div style="color:var(--color-ghost-gray);padding:8px">Ошибка: ${escapeHtml(e.message)}</div>`; }
+}
+
+function renderBugs(data) {
+  const list = document.getElementById('bug-list');
+  if (!list) return;
+  if (data && data.enabled === false) {
+    list.innerHTML = '<div style="color:var(--color-ghost-gray);padding:8px">БД не подключена — баги не сохраняются.</div>';
+    return;
+  }
+  const bugs = (data && data.bugs) || [];
+  if (!bugs.length) { list.innerHTML = '<div style="color:var(--color-ghost-gray);padding:8px">Багов пока нет 🎉</div>'; return; }
+  const opts = (cur) => Object.entries(BUG_STATUS).map(([k, v]) => `<option value="${k}"${k === cur ? ' selected' : ''}>${v.l}</option>`).join('');
+  list.innerHTML = bugs.map(b => {
+    const sev = BUG_SEV[b.severity] || b.severity;
+    const sevCls = b.severity === 'high' ? 'orange' : b.severity === 'low' ? 'green' : 'violet';
+    const dim = (b.status === 'done' || b.status === 'wont_fix') ? 'opacity:.55;' : '';
+    return `<div class="bug-row" style="padding:10px 0;border-bottom:1px solid var(--color-powder-blue);${dim}">
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
+        <div style="min-width:0;flex:1">
+          <div style="white-space:pre-wrap;word-break:break-word">${escapeHtml(b.text)}</div>
+          <div style="font-size:var(--text-caption);color:var(--color-ghost-gray);margin-top:3px">#${b.id} · <span class="tag ${sevCls}">${escapeHtml(sev)}</span> · ${escapeHtml(fmt.date(b.created_at) || '')}</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;flex:0 0 auto">
+          <select class="bug-status" data-bugid="${b.id}" style="padding:6px;border:1px solid var(--color-powder-blue);border-radius:6px;font:inherit">${opts(b.status)}</select>
+          <button class="bug-del" data-bugid="${b.id}" title="Удалить" style="border:none;background:none;cursor:pointer;color:var(--color-ghost-gray);font-size:var(--text-caption);padding:0">✕ удалить</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+document.getElementById('bug-btn')?.addEventListener('click', openBugModal);
+document.getElementById('bug-modal-close')?.addEventListener('click', closeBugModal);
+document.getElementById('bug-modal')?.addEventListener('click', e => { if (e.target.id === 'bug-modal') closeBugModal(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeBugModal(); });
+
+document.getElementById('bug-submit')?.addEventListener('click', async () => {
+  const ta = document.getElementById('bug-text');
+  const sev = document.getElementById('bug-severity');
+  const msg = document.getElementById('bug-msg');
+  const btn = document.getElementById('bug-submit');
+  const text = (ta.value || '').trim();
+  if (!text) { msg.style.color = 'var(--color-vibrant-orange)'; msg.textContent = 'Опиши баг'; return; }
+  btn.disabled = true; msg.style.color = 'var(--color-ghost-gray)'; msg.textContent = 'Сохраняю…';
+  try {
+    await API.bugCreate(text, sev.value, 'source=' + state.source);
+    ta.value = ''; msg.style.color = 'var(--color-accent-green)'; msg.textContent = 'Сохранено ✓';
+    toast('Баг сохранён');
+    loadBugs();
+  } catch (e) {
+    msg.style.color = 'var(--color-vibrant-orange)'; msg.textContent = 'Ошибка: ' + e.message;
+  } finally { btn.disabled = false; }
+});
+
+document.getElementById('bug-list')?.addEventListener('change', async (e) => {
+  const sel = e.target.closest('select.bug-status');
+  if (!sel) return;
+  sel.disabled = true;
+  try { await API.bugStatus(sel.dataset.bugid, sel.value); await loadBugs(); }
+  catch (err) { toast('Не удалось обновить статус: ' + err.message, 'error'); sel.disabled = false; }
+});
+
+document.getElementById('bug-list')?.addEventListener('click', async (e) => {
+  const del = e.target.closest('.bug-del');
+  if (!del) return;
+  if (!confirm('Удалить баг #' + del.dataset.bugid + '?')) return;
+  try { await API.bugDelete(del.dataset.bugid); await loadBugs(); }
+  catch (err) { toast('Не удалось удалить: ' + err.message, 'error'); }
 });
 
 /* ================================================================

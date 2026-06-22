@@ -45,7 +45,19 @@ CREATE TABLE IF NOT EXISTS mentions (
   title TEXT, username TEXT, link TEXT, snippet TEXT, views INTEGER, query TEXT,
   PRIMARY KEY (channel_id, msg_id)
 );
+CREATE TABLE IF NOT EXISTS bugs (
+  id SERIAL PRIMARY KEY,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  status TEXT NOT NULL DEFAULT 'open',
+  severity TEXT NOT NULL DEFAULT 'medium',
+  text TEXT NOT NULL,
+  context TEXT
+);
 `;
+
+const BUG_STATUSES = ['open', 'in_progress', 'done', 'wont_fix'];
+const BUG_SEVERITIES = ['low', 'medium', 'high'];
 
 async function init() {
   if (!enabled) { console.log('[db] disabled (no DATABASE_URL) — history off'); return; }
@@ -167,8 +179,47 @@ async function getMentionsHistory() {
   return { total: total.rows[0], by_month: byMonth.rows };
 }
 
+async function createBug({ text, severity, context }) {
+  if (!enabled) return null;
+  const sev = BUG_SEVERITIES.includes(severity) ? severity : 'medium';
+  const { rows } = await pool.query(
+    `INSERT INTO bugs (text, severity, context) VALUES ($1,$2,$3)
+     RETURNING id, to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SS') AS created_at, status, severity, text, context`,
+    [String(text).slice(0, 4000), sev, context ? String(context).slice(0, 500) : null]);
+  return rows[0];
+}
+
+async function listBugs(status) {
+  if (!enabled) return [];
+  const filter = BUG_STATUSES.includes(status) ? status : null;
+  const { rows } = await pool.query(
+    `SELECT id, to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SS') AS created_at, status, severity, text, context
+     FROM bugs ${filter ? 'WHERE status=$1' : ''} ORDER BY
+       CASE status WHEN 'open' THEN 0 WHEN 'in_progress' THEN 1 WHEN 'done' THEN 2 ELSE 3 END,
+       created_at DESC
+     LIMIT 300`, filter ? [filter] : []);
+  return rows;
+}
+
+async function updateBug(id, status) {
+  if (!enabled) return null;
+  if (!BUG_STATUSES.includes(status)) throw new Error('bad status');
+  const { rows } = await pool.query(
+    `UPDATE bugs SET status=$2, updated_at=now() WHERE id=$1
+     RETURNING id, to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SS') AS created_at, status, severity, text, context`,
+    [id, status]);
+  return rows[0] || null;
+}
+
+async function deleteBug(id) {
+  if (!enabled) return false;
+  await pool.query('DELETE FROM bugs WHERE id=$1', [id]);
+  return true;
+}
+
 module.exports = {
   enabled, init, graphsToDailyRows,
   upsertChannelDaily, upsertPosts, upsertMentions,
   getChannelHistory, getMentionsHistory,
+  createBug, listBugs, updateBug, deleteBug, BUG_STATUSES, BUG_SEVERITIES,
 };
