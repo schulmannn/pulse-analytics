@@ -12,11 +12,16 @@ const enabled = !!(DATABASE_URL && Pool);
 
 let pool = null;
 if (enabled) {
-  pool = new Pool({
-    connectionString: DATABASE_URL,
-    ssl: { rejectUnauthorized: false },   // Railway/managed Postgres
-    max: 4,
-  });
+  // SSL: Railway's PRIVATE url (*.railway.internal) needs NO ssl; external/public
+  // managed Postgres usually does. Override with PGSSL=disable|require if needed.
+  const internal = /\.railway\.internal/i.test(DATABASE_URL);
+  const sslMode = (process.env.PGSSL || '').toLowerCase();
+  let ssl;
+  if (sslMode === 'disable') ssl = false;
+  else if (sslMode === 'require') ssl = { rejectUnauthorized: false };
+  else ssl = internal ? false : { rejectUnauthorized: false };   // smart default
+
+  pool = new Pool({ connectionString: DATABASE_URL, ssl, max: 4 });
   pool.on('error', (e) => console.error('[db] pool error:', e.message));
 }
 
