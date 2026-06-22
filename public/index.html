@@ -884,6 +884,7 @@
     object-fit: cover;
     flex-shrink: 0;
   }
+  .post-caption { min-width: 0; }
   .post-caption .title {
     font-size: var(--text-body);
     color: var(--color-midnight-ink);
@@ -2314,13 +2315,13 @@ function renderPosts() {
     const sourceTag = `<span class="tag ${isTg ? 'green' : 'violet'}">${p.source || '—'}</span>`;
     const caption = (p.caption || 'Без подписи').slice(0, 80);
     const albumBadge = (p.albumSize > 1)
-      ? ` <span class="tag" style="background:var(--color-powder-blue);color:var(--color-slate-blue)">📷 ${p.albumSize}</span>`
+      ? ` · <span style="color:var(--color-slate-blue)">📷 ${p.albumSize}</span>`
       : '';
     const clickAttr = (p.id != null) ? ` data-postid="${escapeHtml(String(p.id))}" style="cursor:pointer"` : '';
     const captionCell = `
         <div class="post-caption">
-          <div class="title">${escapeHtml(caption)}${albumBadge}</div>
-          <div class="date">${escapeHtml(fmt.date(p.date) || '')}</div>
+          <div class="title">${escapeHtml(caption)}</div>
+          <div class="date">${escapeHtml(fmt.date(p.date) || '')}${albumBadge}</div>
         </div>`;
 
     if (isTg) {
