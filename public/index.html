@@ -1548,6 +1548,7 @@ const API = {
   bugCreate(text, severity, context, kind) { return this.req('/api/bugs', { method: 'POST', body: JSON.stringify({ text, severity, context, kind }) }); },
   bugStatus(id, status)              { return this.req('/api/bugs/' + id, { method: 'PATCH', body: JSON.stringify({ status }) }); },
   bugDelete(id)    { return this.req('/api/bugs/' + id, { method: 'DELETE' }); },
+  bugClaudeFix(id) { return this.req('/api/bugs/' + id + '/claude-fix', { method: 'POST' }); },
   bugUpload(id, data, mime) { return this.req('/api/bugs/' + id + '/screenshot', { method: 'POST', body: JSON.stringify({ data, mime }) }); },
   health()         { return this.req('/api/health'); },
   clearCache()     { return this.req('/api/cache', { method: 'DELETE' }); }
@@ -1913,6 +1914,7 @@ function renderBugs(data) {
         </div>
         <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;flex:0 0 auto">
           <select class="bug-status" data-bugid="${b.id}" style="padding:6px;border:1px solid var(--color-powder-blue);border-radius:6px;font:inherit">${opts(b.status)}</select>
+          <button class="bug-claude" data-bugid="${b.id}" title="Отдать Claude — попробует починить и откроет PR в GitHub" style="border:1px solid var(--color-washed-violet);background:none;cursor:pointer;color:var(--color-deep-violet);font-size:var(--text-caption);padding:3px 8px;border-radius:6px;white-space:nowrap">🤖 Claude</button>
           <button class="bug-del" data-bugid="${b.id}" title="Удалить" style="border:none;background:none;cursor:pointer;color:var(--color-ghost-gray);font-size:var(--text-caption);padding:0">✕ удалить</button>
         </div>
       </div>
@@ -1989,6 +1991,14 @@ document.getElementById('bug-list')?.addEventListener('change', async (e) => {
 document.getElementById('bug-list')?.addEventListener('click', async (e) => {
   const thumb = e.target.closest('img.bug-thumb');
   if (thumb) { if (thumb.dataset.full) window.open(thumb.dataset.full, '_blank', 'noopener'); return; }
+  const claude = e.target.closest('.bug-claude');
+  if (claude) {
+    if (!confirm('Отдать баг #' + claude.dataset.bugid + ' Claude? Он попробует починить и откроет PR в GitHub.')) return;
+    claude.disabled = true; const orig = claude.textContent; claude.textContent = '⏳…';
+    try { await API.bugClaudeFix(claude.dataset.bugid); toast('Claude взялся за баг #' + claude.dataset.bugid + ' — PR появится в GitHub', 'info'); await loadBugs(); }
+    catch (err) { toast('Не удалось запустить Claude: ' + err.message, 'error'); claude.disabled = false; claude.textContent = orig; }
+    return;
+  }
   const del = e.target.closest('.bug-del');
   if (!del) return;
   if (!confirm('Удалить баг #' + del.dataset.bugid + '?')) return;

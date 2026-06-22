@@ -1,0 +1,53 @@
+name: Claude bug fix
+
+# Manual gate: the dashboard fires a repository_dispatch (POST /api/bugs/:id/claude-fix)
+# when the team clicks "🤖 Claude" on a bug. Claude attempts a fix and opens a PR.
+# It NEVER pushes to main directly (main auto-deploys to Railway) — a human merges.
+on:
+  repository_dispatch:
+    types: [bug-fix-request]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: claude-bugfix-${{ github.event.client_payload.id }}
+  cancel-in-progress: false
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Claude — diagnose & fix bug, open PR
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: "--max-turns 25"
+          prompt: |
+            You are fixing a bug reported in the pulse-analytics dashboard bug tracker.
+            FIRST read CLAUDE.md at the repo root — it has the conventions and gotchas you must follow.
+
+            BUG #${{ github.event.client_payload.id }}
+            kind: ${{ github.event.client_payload.kind }} · severity: ${{ github.event.client_payload.severity }}
+            context: ${{ github.event.client_payload.context }}
+            screenshots in tracker: ${{ github.event.client_payload.attachments }} (NOT available here — reason from the text + code)
+
+            Description:
+            ${{ github.event.client_payload.text }}
+
+            Steps:
+            1. Locate the relevant code (public/index.html, server/index.js, server/db.js, or mtproto/service.py).
+            2. Diagnose the root cause. The CI runner CANNOT run the live app (no Telethon session / Postgres /
+               real Telegram data) — do NOT try to start it. Reason from the description, the code, and the
+               stub-based test approach in CLAUDE.md.
+            3. Make a MINIMAL, surgical fix in the style of the surrounding code. Add or adjust a unit test using
+               the stub pattern from CLAUDE.md when it's feasible.
+            4. Verify what you can: `node --check` on changed server files; parse the inline <script> of
+               index.html via vm.Script if you touched the frontend; `python -m py_compile` if you touched Python.
+            5. Open a PULL REQUEST against `main` titled "fix: bug #${{ github.event.client_payload.id }} — <short summary>".
+               In the PR body: root cause, the fix, your reproduction reasoning, and a note that live verification is
+               pending the Railway deploy. DO NOT merge. DO NOT push to main directly.

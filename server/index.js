@@ -593,6 +593,51 @@ app.delete('/api/bugs/:id', requireAuth, async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Hand a bug to Claude Code (manual gate) ──
+// Fires a GitHub repository_dispatch → the claude-bugfix workflow attempts a fix and
+// opens a PR (never pushes to main, which auto-deploys). Needs GITHUB_REPO +
+// GITHUB_DISPATCH_TOKEN (PAT with repo/contents write) in the env; soft-off otherwise.
+const GH_REPO  = process.env.GITHUB_REPO || '';            // e.g. "schulmannn/pulse-analytics"
+const GH_TOKEN = process.env.GITHUB_DISPATCH_TOKEN || '';
+
+app.post('/api/bugs/:id/claude-fix', requireAuth, async (req, res) => {
+  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
+  if (!GH_REPO || !GH_TOKEN) return res.status(503).json({ error: 'Не настроено: задай GITHUB_REPO и GITHUB_DISPATCH_TOKEN' });
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ error: 'bad id' });
+  try {
+    const bug = await db.getBug(id);
+    if (!bug) return res.status(404).json({ error: 'баг не найден' });
+    const r = await fetch(`https://api.github.com/repos/${GH_REPO}/dispatches`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${GH_TOKEN}`,
+        'Accept': 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+        'Content-Type': 'application/json',
+        'User-Agent': 'pulse-analytics-bugbot',
+      },
+      body: JSON.stringify({
+        event_type: 'bug-fix-request',
+        client_payload: {
+          id: bug.id,
+          text: String(bug.text || '').slice(0, 4000),
+          severity: bug.severity,
+          kind: bug.kind,
+          context: bug.context || '',
+          attachments: bug.attachment_count || 0,
+        },
+      }),
+    });
+    if (r.status !== 204) {
+      const detail = await r.text().catch(() => '');
+      return res.status(502).json({ error: `GitHub dispatch failed (${r.status})`, detail: detail.slice(0, 300) });
+    }
+    await db.updateBug(id, 'in_progress').catch(() => {});   // reflect that Claude is on it
+    res.json({ ok: true, status: 'in_progress' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── Bug screenshots ──
 // SECURITY INVARIANT: ALLOWED_IMG must stay raster-only. NEVER add image/svg+xml
 // (or any scriptable type) — GET serves stored bytes with this mime, and SVG would

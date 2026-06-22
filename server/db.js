@@ -269,6 +269,15 @@ async function bugExists(id) {
   return rows.length > 0;
 }
 
+async function getBug(id) {
+  if (!enabled) return null;
+  const { rows } = await pool.query(
+    `SELECT id, to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SS') AS created_at, status, severity, kind, text, context,
+       (SELECT count(*)::int FROM bug_attachments a WHERE a.bug_id = bugs.id) AS attachment_count
+     FROM bugs WHERE id=$1`, [id]);
+  return rows[0] || null;
+}
+
 // Atomic cap: insert only if the bug has < max attachments. Returns the row,
 // or null when full — closes the count-then-insert race (concurrent uploads).
 async function addAttachmentIfRoom(bugId, mime, buf, max) {
@@ -292,5 +301,5 @@ module.exports = {
   upsertChannelDaily, upsertPosts, upsertMentions,
   getChannelHistory, getMentionsHistory, getMentionsArchive,
   createBug, listBugs, updateBug, deleteBug, BUG_STATUSES, BUG_SEVERITIES, BUG_KINDS,
-  bugExists, addAttachmentIfRoom, getAttachment,
+  bugExists, getBug, addAttachmentIfRoom, getAttachment,
 };
