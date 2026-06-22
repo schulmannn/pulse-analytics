@@ -356,6 +356,19 @@ app.get('/api/tg/mtproto/graphs', requireAuth, async (req, res) => {
   }
 });
 
+app.get('/api/tg/mtproto/velocity', requireAuth, async (req, res) => {
+  const cacheKey = 'mtproto:velocity';
+  try {
+    const cached = cacheGet(cacheKey);
+    if (cached) return res.json(cached);
+    const data = await mtprotoFetch('/velocity');
+    cacheSet(cacheKey, data);
+    res.json(data);
+  } catch (e) {
+    res.status(200).json({ error: e.message, available: false });
+  }
+});
+
 app.get('/api/tg/mtproto/post_stats/:id', requireAuth, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!id) return res.status(400).json({ error: 'bad id' });

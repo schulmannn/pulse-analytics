@@ -1316,6 +1316,16 @@
           <div id="tg-weekday-clabels" style="display:flex;justify-content:space-between;font-size:var(--text-caption);color:var(--color-ghost-gray);padding-top:6px;"></div>
         </div>
       </div>
+      <div class="panel" style="margin-top: 16px;">
+        <div class="chart-head"><span class="chart-title">Когда постить · день&nbsp;×&nbsp;час</span><span id="tg-heatmap-note" style="font-size:var(--text-caption);color:var(--color-deep-violet);font-weight:600;"></span></div>
+        <div id="tg-heatmap" style="overflow-x:auto;"></div>
+        <div style="display:flex;align-items:center;gap:6px;justify-content:flex-end;margin-top:10px;font-size:var(--text-caption);color:var(--color-ghost-gray)">меньше<span style="width:12px;height:12px;border-radius:3px;background:rgba(83,58,253,0.18)"></span><span style="width:12px;height:12px;border-radius:3px;background:rgba(83,58,253,0.5)"></span><span style="width:12px;height:12px;border-radius:3px;background:rgba(83,58,253,1)"></span>больше ERV</div>
+      </div>
+      <div class="panel" style="margin-top: 16px;">
+        <div class="chart-head"><span class="chart-title">Скорость набора просмотров · «золотой час»</span><span id="tg-velocity-note" style="font-size:var(--text-caption);color:var(--color-deep-violet);font-weight:600;"></span></div>
+        <svg id="tg-velocity-chart" viewBox="0 0 600 140" width="100%" height="140" preserveAspectRatio="none"></svg>
+        <div id="tg-velocity-labels" style="display:flex;justify-content:space-between;font-size:var(--text-caption);color:var(--color-ghost-gray);padding-top:6px;"></div>
+      </div>
     </div>
 
     <!-- Top posts -->
@@ -1423,6 +1433,7 @@ const API = {
   tgFull(limit=30) { return this.req('/api/tg/full?limit=' + Math.min(100, limit)); },
   tgStats()        { return this.req('/api/tg/mtproto/stats'); },
   tgGraphs()       { return this.req('/api/tg/mtproto/graphs'); },
+  tgVelocity()     { return this.req('/api/tg/mtproto/velocity'); },
   health()         { return this.req('/api/health'); },
   clearCache()     { return this.req('/api/cache', { method: 'DELETE' }); }
 };
@@ -2605,7 +2616,26 @@ async function openPostModal(postId) {
   if (data && data.available && vseries && vseries.values.length > 1) {
     const vals = vseries.values.map(Number);
     const xs = (data.views_graph.x || []).map(ts => { const d = new Date(Number(ts)); return `${d.getDate()}.${d.getMonth() + 1} ${String(d.getHours()).padStart(2, '0')}:00`; });
+    // velocity / golden hour for this post
+    let velLine = '';
+    const rawx = (data.views_graph.x || []).map(Number);
+    if (rawx.length >= 3 && rawx.length === vals.length) {
+      const t0 = rawx[0];
+      const th = rawx.map(t => (t - t0) / 3600000);
+      const final = vals[vals.length - 1] || 0;
+      if (final > 0) {
+        const cross = f => { const tgt = f * final; for (let i = 0; i < vals.length; i++) if (vals[i] >= tgt) return th[i]; return null; };
+        const interp = H => { if (H < th[0] || H > th[th.length - 1]) return null; for (let i = 1; i < th.length; i++) { if (th[i] >= H) { const t1 = th[i - 1], t2 = th[i], v1 = vals[i - 1], v2 = vals[i]; return t2 === t1 ? v2 : v1 + (v2 - v1) * (H - t1) / (t2 - t1); } } return vals[vals.length - 1]; };
+        const t50 = cross(0.5), t80 = cross(0.8), i1 = interp(1);
+        const parts = [];
+        if (i1 != null) parts.push(`за 1ч — ${(i1 / final * 100).toFixed(0)}%`);
+        if (t50 != null) parts.push(`50% за ${t50.toFixed(1)}ч`);
+        if (t80 != null) parts.push(`80% за ${t80.toFixed(1)}ч`);
+        if (parts.length) velLine = `<div style="font-size:var(--text-caption);color:var(--color-deep-violet);font-weight:600;margin-bottom:6px">⚡ Скорость: ${parts.join(' · ')}</div>`;
+      }
+    }
     let html = `<div class="chart-head"><span class="chart-title">Просмотры во времени</span></div>
+      ${velLine}
       <svg id="post-views-chart" viewBox="0 0 600 140" width="100%" height="260" preserveAspectRatio="none">${lineChartSvg(vals)}</svg>
       <div id="post-views-labels" style="display:flex;justify-content:space-between;font-size:var(--text-caption);color:var(--color-ghost-gray);padding-top:6px;"></div>`;
     if (data.reactions && data.reactions.length) {
@@ -2895,8 +2925,92 @@ function renderTgAnalytics() {
   }
 
   renderHashtags();
+  renderHeatmap();
+  renderVelocity();
   renderDigest();
   addExpandButtons('#tg-analytics');
+}
+
+/* ── A2: best-time heatmap (weekday × hour, coloured by avg ERV) ── */
+function renderHeatmap() {
+  const host = document.getElementById('tg-heatmap');
+  const note = document.getElementById('tg-heatmap-note');
+  if (!host) return;
+  const days = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+  const toMon = (jsDay) => (jsDay + 6) % 7;   // JS 0=Sun→6, 1=Mon→0
+  const cells = Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => ({ n: 0, erv: 0, reach: 0 })));
+  (state.posts || []).filter(p => p.source === 'TG' && p.date).forEach(p => {
+    const d = new Date(p.date); if (isNaN(d)) return;
+    const c = cells[toMon(d.getDay())][d.getHours()];
+    c.n += 1; c.reach += p.reach || 0;
+    if (p.erv != null) c.erv += p.erv;
+  });
+
+  let maxErv = 0, best = null;
+  for (let r = 0; r < 7; r++) for (let h = 0; h < 24; h++) {
+    const c = cells[r][h];
+    if (!c.n) continue;
+    const a = c.erv / c.n;
+    if (a > maxErv) maxErv = a;
+    const score = a * (c.n >= 2 ? 1.15 : 1);   // light tie-break toward repeatable slots
+    if (!best || score > best.score) best = { r, h, a, n: c.n, score };
+  }
+
+  if (!best) { host.innerHTML = `<div class="breakdown-title" style="color:var(--color-ghost-gray)">Мало постов для тепловой карты.</div>`; if (note) note.textContent = ''; return; }
+  if (note) note.textContent = `лучший слот: ${days[best.r]} ${best.h}:00 · ERV ${best.a.toFixed(1)}%`;
+
+  const grid = 'display:grid;grid-template-columns:30px repeat(24,minmax(15px,1fr));gap:2px;align-items:center;min-width:430px';
+  let html = `<div style="${grid}">`;
+  html += `<div></div>` + Array.from({ length: 24 }, (_, h) => `<div style="font-size:10px;color:var(--color-ghost-gray);text-align:center">${h % 3 === 0 ? h : ''}</div>`).join('');
+  for (let r = 0; r < 7; r++) {
+    html += `<div style="font-size:11px;color:var(--color-slate-blue)">${days[r]}</div>`;
+    for (let h = 0; h < 24; h++) {
+      const c = cells[r][h];
+      const a = c.n ? c.erv / c.n : 0;
+      const op = (c.n && maxErv > 0) ? Math.max(0.18, a / maxErv) : 0;
+      const isBest = best && r === best.r && h === best.h;
+      const bg = c.n ? `rgba(83,58,253,${op.toFixed(2)})` : 'var(--color-powder-blue)';
+      const tip = c.n
+        ? `${days[r]} ${h}:00 · ${c.n} пост${c.n === 1 ? '' : 'ов'} · ERV ${a.toFixed(1)}% · ср.охват ${fmt.short(c.reach / c.n)}`
+        : `${days[r]} ${h}:00 · нет постов`;
+      html += `<div title="${escapeHtml(tip)}" style="height:16px;border-radius:3px;background:${bg};${c.n ? '' : 'opacity:.5;'}${isBest ? 'outline:2px solid var(--color-accent-green);outline-offset:-1px;' : ''}"></div>`;
+    }
+  }
+  html += `</div>`;
+  host.innerHTML = html;
+}
+
+/* ── A3: post-lifecycle velocity ("golden hour") ──────────────── */
+function renderVelocity() {
+  const el = document.getElementById('tg-velocity-chart');
+  const note = document.getElementById('tg-velocity-note');
+  const labels = document.getElementById('tg-velocity-labels');
+  if (!el) return;
+  const v = state.tg.velocity;
+  if (!v || !v.available || !Array.isArray(v.curve) || v.curve.length < 2) {
+    el.innerHTML = lineChartSvg([]);
+    setTip(el, [], 'line');
+    if (note) note.textContent = '';
+    if (labels) labels.innerHTML = '';
+    return;
+  }
+  const vals = v.curve.map(p => p.pct);
+  const hrs = v.curve.map(p => p.h);
+  el.innerHTML = lineChartSvg(vals);
+  setYAxis('tg-velocity-chart', 0, Math.max(...vals));
+  setTip(el, v.curve.map(p => `${p.h}ч после публикации: ${p.pct}% финального охвата`), 'line');
+  if (labels) {
+    const step = Math.max(1, Math.ceil(hrs.length / 8));
+    labels.innerHTML = hrs.map((h, i) => `<span style="${(i % step === 0 || i === hrs.length - 1) ? '' : 'visibility:hidden'}">${h}ч</span>`).join('');
+  }
+  if (note) {
+    const parts = [];
+    if (v.pct_1h != null) parts.push(`за 1ч — ${v.pct_1h}%`);
+    if (v.t50 != null) parts.push(`50% за ${v.t50}ч`);
+    if (v.t80 != null) parts.push(`80% за ${v.t80}ч`);
+    if (v.posts_used) parts.push(`по ${v.posts_used} постам`);
+    note.textContent = parts.join(' · ');
+  }
 }
 
 /* ── Hashtag effectiveness: lift of avg ERV (tagged vs untagged) ── */
@@ -3084,7 +3198,8 @@ async function loadAll() {
       state.tg.mtprotoAvailable = false;
     }),
     API.tgStats().then(d => state.tg.channelStats = d).catch(() => { state.tg.channelStats = null; }),
-    API.tgGraphs().then(d => state.tg.graphs = d).catch(() => { state.tg.graphs = null; })
+    API.tgGraphs().then(d => state.tg.graphs = d).catch(() => { state.tg.graphs = null; }),
+    API.tgVelocity().then(d => state.tg.velocity = d).catch(() => { state.tg.velocity = null; })
   ];
   await Promise.all(tasks);
 

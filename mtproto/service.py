@@ -169,6 +169,35 @@ def _build_post(group):
     }
 
 
+# ── Stats-graph helpers (shared by velocity / future endpoints) ──
+async def _resolve_graph(tg, g):
+    if isinstance(g, StatsGraphAsync):
+        try:
+            g = await tg(LoadAsyncGraphRequest(token=g.token))
+        except Exception:
+            return None
+    if isinstance(g, StatsGraph):
+        try:
+            return json.loads(g.json.data)
+        except Exception:
+            return None
+    return None
+
+
+def _cols_of(data):
+    cols = data.get('columns', [])
+    names = data.get('names', {})
+    types = data.get('types', {})
+    x, series = [], []
+    for c in cols:
+        cid, vals = c[0], c[1:]
+        if cid == 'x':
+            x = vals
+        else:
+            series.append({'name': names.get(cid, cid), 'type': types.get(cid, 'line'), 'values': vals})
+    return x, series
+
+
 @app.get('/health')
 async def health():
     return {
@@ -443,6 +472,107 @@ async def get_post_stats(msg_id: int, x_internal_token: str = Header(default='')
         return {'available': True, 'views_graph': views, 'reactions': reactions}
     except Exception as e:
         log.error(f'get_post_stats error: {e}')
+        return {'available': False, 'error': str(e)}
+
+
+@app.get('/velocity')
+async def get_velocity(
+    limit: int = Query(default=40, le=100),
+    top: int = Query(default=10, le=20),
+    x_internal_token: str = Header(default=''),
+):
+    """Channel-level "post lifecycle": average % of final reach gained per hour
+    since publish, plus median time-to-50%/80% (golden hour). Aggregated from
+    GetMessageStats views-over-time of the most recent high-view posts."""
+    check_auth(x_internal_token)
+    try:
+        tg = await get_client()
+        entity = await tg.get_entity(CHANNEL)
+        msgs = await tg.get_messages(CHANNEL, limit=limit)
+        posts = [_build_post(g) for g in _logical_posts(msgs)]
+        # most recent posts with enough views (recent → hourly stats granularity)
+        cand = [p for p in posts if p['views'] >= 50][:top]
+
+        grid = list(range(0, 25))            # hours 0..24 since first data point
+        acc = {h: [] for h in grid}
+        t50s, t80s, p1h, p3h = [], [], [], []
+        used = 0
+
+        for p in cand:
+            try:
+                st = await tg(GetMessageStatsRequest(channel=entity, msg_id=p['id'], dark=False))
+            except Exception:
+                continue
+            data = await _resolve_graph(tg, getattr(st, 'views_graph', None))
+            if not data:
+                continue
+            x, series = _cols_of(data)
+            if not series or not x or len(x) < 3:
+                continue
+            vals = [float(v or 0) for v in series[0]['values']]
+            if len(vals) != len(x):
+                continue
+            t0 = float(x[0])
+            th = [(float(t) - t0) / 3600000.0 for t in x]   # hours since first point
+            if (th[1] - th[0]) > 2:
+                continue   # daily-resolution graph → not useful for hourly "golden hour"
+            final = vals[-1] if vals else 0
+            if final <= 0:
+                continue
+            span = th[-1]
+
+            def interp(H):
+                if H < th[0] or H > span:
+                    return None
+                for i in range(1, len(th)):
+                    if th[i] >= H:
+                        t1, t2, v1, v2 = th[i - 1], th[i], vals[i - 1], vals[i]
+                        return v2 if t2 == t1 else v1 + (v2 - v1) * (H - t1) / (t2 - t1)
+                return vals[-1]
+
+            def cross(frac):
+                target = frac * final
+                for i in range(len(vals)):
+                    if vals[i] >= target:
+                        return th[i]
+                return None
+
+            for H in grid:
+                iv = interp(H)
+                if iv is not None:
+                    acc[H].append(iv / final * 100.0)
+            t50, t80 = cross(0.5), cross(0.8)
+            if t50 is not None: t50s.append(t50)
+            if t80 is not None: t80s.append(t80)
+            i1, i3 = interp(1.0), interp(3.0)
+            if i1 is not None: p1h.append(i1 / final * 100.0)
+            if i3 is not None: p3h.append(i3 / final * 100.0)
+            used += 1
+
+        if used < 1:
+            return {'available': False, 'reason': 'no hourly stats', 'posts_used': 0}
+
+        def med(a):
+            if not a:
+                return None
+            a = sorted(a); n = len(a)
+            return a[n // 2] if n % 2 else (a[n // 2 - 1] + a[n // 2]) / 2
+
+        def avg(a):
+            return round(sum(a) / len(a), 1) if a else None
+
+        curve = [{'h': H, 'pct': round(sum(acc[H]) / len(acc[H]), 1)} for H in grid if acc[H]]
+        return {
+            'available':  True,
+            'posts_used': used,
+            'curve':      curve,
+            't50':        round(med(t50s), 1) if t50s else None,
+            't80':        round(med(t80s), 1) if t80s else None,
+            'pct_1h':     avg(p1h),
+            'pct_3h':     avg(p3h),
+        }
+    except Exception as e:
+        log.error(f'velocity error: {e}')
         return {'available': False, 'error': str(e)}
 
 
