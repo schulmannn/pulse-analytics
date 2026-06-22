@@ -19,7 +19,7 @@ db.init().catch(e => console.error('[db] init failed:', e.message));
 
 // ── Middleware ───────────────────────────────────────────────────
 app.use(cors());
-app.use(express.json());
+app.use(express.json());   // default 100kb — большие тела только на upload-маршруте (route-local парсер)
 app.use(express.static(path.join(__dirname, '../public')));
 
 const limiter = rateLimit({
@@ -591,6 +591,64 @@ app.delete('/api/bugs/:id', requireAuth, async (req, res) => {
   if (!id) return res.status(400).json({ error: 'bad id' });
   try { await db.deleteBug(id); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Bug screenshots ──
+// SECURITY INVARIANT: ALLOWED_IMG must stay raster-only. NEVER add image/svg+xml
+// (or any scriptable type) — GET serves stored bytes with this mime, and SVG would
+// enable stored XSS despite nosniff.
+const ALLOWED_IMG = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
+const MAX_IMG_BYTES = 5 * 1024 * 1024;
+const MAX_ATTACH_PER_BUG = 5;
+
+// Verify the decoded bytes really are the claimed image type (magic bytes).
+function sniffImage(mime, buf) {
+  if (buf.length < 12) return false;
+  if (mime === 'image/png')  return buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47;
+  if (mime === 'image/jpeg') return buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF;
+  if (mime === 'image/gif')  return buf.slice(0, 4).toString('latin1') === 'GIF8';
+  if (mime === 'image/webp') return buf.slice(0, 4).toString('latin1') === 'RIFF' && buf.slice(8, 12).toString('latin1') === 'WEBP';
+  return false;
+}
+
+// route-local parser (after requireAuth) so only this authed route accepts big bodies
+app.post('/api/bugs/:id/screenshot', requireAuth, express.json({ limit: '7mb' }), async (req, res) => {
+  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ error: 'bad id' });
+  let { data, mime } = req.body || {};
+  if (typeof data !== 'string' || !data) return res.status(400).json({ error: 'нет данных изображения' });
+  const m = data.match(/^data:([^;,]+)[;,]/);          // data URL → trust its declared type (matches bytes)
+  if (m) mime = m[1];
+  data = data.replace(/^data:[^,]+,/, '');
+  if (!mime) return res.status(400).json({ error: 'не удалось определить тип' });
+  if (!ALLOWED_IMG.has(mime)) return res.status(415).json({ error: 'только изображения (png/jpeg/webp/gif)' });
+  if (data.length > MAX_IMG_BYTES * 4 / 3 + 64) return res.status(413).json({ error: 'изображение больше 5 МБ' });
+  const buf = Buffer.from(data, 'base64');
+  if (!buf.length) return res.status(400).json({ error: 'пустое или битое изображение' });
+  if (buf.length > MAX_IMG_BYTES) return res.status(413).json({ error: 'изображение больше 5 МБ' });
+  if (!sniffImage(mime, buf)) return res.status(415).json({ error: 'это не похоже на изображение' });
+  try {
+    if (!(await db.bugExists(id))) return res.status(404).json({ error: 'баг не найден' });
+    const att = await db.addAttachmentIfRoom(id, mime, buf, MAX_ATTACH_PER_BUG);
+    if (!att) return res.status(409).json({ error: `максимум ${MAX_ATTACH_PER_BUG} вложений на баг` });
+    res.json(att);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Served under auth (frontend fetches with the session token → blob URL).
+app.get('/api/bug-attachment/:id', requireAuth, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).end();
+  try {
+    const a = await db.getAttachment(id);
+    if (!a) return res.status(404).end();
+    res.set('Content-Type', ALLOWED_IMG.has(a.mime) ? a.mime : 'application/octet-stream');
+    res.set('X-Content-Type-Options', 'nosniff');
+    res.set('Content-Disposition', 'inline');
+    res.set('Cache-Control', 'private, max-age=3600');
+    res.send(a.data);
+  } catch (e) { res.status(500).end(); }
 });
 
 app.get('*', (req, res) => {

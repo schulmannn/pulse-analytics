@@ -54,6 +54,14 @@ CREATE TABLE IF NOT EXISTS bugs (
   text TEXT NOT NULL,
   context TEXT
 );
+CREATE TABLE IF NOT EXISTS bug_attachments (
+  id SERIAL PRIMARY KEY,
+  bug_id INTEGER REFERENCES bugs(id) ON DELETE CASCADE,
+  mime TEXT NOT NULL,
+  data BYTEA NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS bug_attachments_bug_id_idx ON bug_attachments(bug_id);
 `;
 
 const BUG_STATUSES = ['open', 'in_progress', 'done', 'wont_fix'];
@@ -193,7 +201,9 @@ async function listBugs(status) {
   if (!enabled) return [];
   const filter = BUG_STATUSES.includes(status) ? status : null;
   const { rows } = await pool.query(
-    `SELECT id, to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SS') AS created_at, status, severity, text, context
+    `SELECT id, to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SS') AS created_at, status, severity, text, context,
+       (SELECT COALESCE(json_agg(json_build_object('id', a.id, 'mime', a.mime) ORDER BY a.id), '[]')
+          FROM bug_attachments a WHERE a.bug_id = bugs.id) AS attachments
      FROM bugs ${filter ? 'WHERE status=$1' : ''} ORDER BY
        CASE status WHEN 'open' THEN 0 WHEN 'in_progress' THEN 1 WHEN 'done' THEN 2 ELSE 3 END,
        created_at DESC
@@ -217,9 +227,34 @@ async function deleteBug(id) {
   return true;
 }
 
+async function bugExists(id) {
+  if (!enabled) return false;
+  const { rows } = await pool.query('SELECT 1 FROM bugs WHERE id=$1', [id]);
+  return rows.length > 0;
+}
+
+// Atomic cap: insert only if the bug has < max attachments. Returns the row,
+// or null when full — closes the count-then-insert race (concurrent uploads).
+async function addAttachmentIfRoom(bugId, mime, buf, max) {
+  if (!enabled) return null;
+  const { rows } = await pool.query(
+    `INSERT INTO bug_attachments (bug_id, mime, data)
+     SELECT $1, $2, $3
+     WHERE (SELECT count(*) FROM bug_attachments WHERE bug_id = $1) < $4
+     RETURNING id, mime`, [bugId, mime, buf, max]);
+  return rows[0] || null;
+}
+
+async function getAttachment(id) {
+  if (!enabled) return null;
+  const { rows } = await pool.query('SELECT mime, data FROM bug_attachments WHERE id=$1', [id]);
+  return rows[0] || null;
+}
+
 module.exports = {
   enabled, init, graphsToDailyRows,
   upsertChannelDaily, upsertPosts, upsertMentions,
   getChannelHistory, getMentionsHistory,
   createBug, listBugs, updateBug, deleteBug, BUG_STATUSES, BUG_SEVERITIES,
+  bugExists, addAttachmentIfRoom, getAttachment,
 };
