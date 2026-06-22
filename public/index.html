@@ -6,30 +6,36 @@
 <title>Pulse Analytics</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
   /* ================================================================
      STRIPE / REFERO DESIGN TOKENS
      ================================================================ */
   :root {
-    --color-midnight-ink:   #061b31;
-    --color-slate-blue:     #50617a;
-    --color-ghost-gray:     #64748d;
-    --color-stone-gray:     #d8d6df;
-    --color-powder-blue:    #e5edf5;
-    --color-porcelain:      #f8fafd;
-    --color-platinum:       #ffffff;
+    /* Warm-neutral analytics palette — ONE accent (orange) for data/active only */
+    --color-midnight-ink:   #211d1a;   /* primary text (warm near-black) */
+    --color-slate-blue:     #5c554e;   /* secondary text */
+    --color-ghost-gray:     #8f8a82;   /* muted / tertiary text */
+    --color-stone-gray:     #d9d4cb;   /* stronger border */
+    --color-powder-blue:    #ece8e1;   /* hairline borders / dividers / soft fills */
+    --color-porcelain:      #f2efe9;   /* subtle inset / skeleton */
+    --color-platinum:       #ffffff;   /* card surfaces */
+    --color-canvas:         #f7f5f1;   /* page background (warm off-white) */
 
-    --color-deep-violet:    #533afd;
-    --color-soft-violet:    #8087ff;
-    --color-washed-violet:  #b9b9f9;
-    --color-accent-green:   #81b81a;
-    --color-vibrant-orange: #ff6118;
+    --color-deep-violet:    #ff682c;   /* ACCENT — chart data, active states, highlights */
+    --color-soft-violet:    #ff9a6b;   /* accent, softer */
+    --color-washed-violet:  #ffe2d4;   /* accent wash */
+    --accent:               #ff682c;
+    --accent-soft:          #ff9a6b;
+    --accent-wash:          #ffe2d4;
+    --color-accent-green:   #4f9d5b;   /* positive delta (muted) */
+    --color-vibrant-orange: #ff682c;
 
-    --gradient-dreamy:   radial-gradient(circle at 30% 20%, rgb(127,125,252), rgb(244,75,204) 33%, rgb(229,237,245) 66%);
-    --gradient-sunburst: linear-gradient(90deg, rgb(114,50,241) 3.13%, rgb(251,118,250) 50%, rgb(255,207,94));
+    --gradient-dreamy:   none;
+    --gradient-sunburst: none;
 
     --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --font-display: 'Space Grotesk', 'Inter', ui-sans-serif, system-ui, sans-serif;
 
     --text-caption:   11px;
     --text-body:      14px;
@@ -38,13 +44,14 @@
     --text-h:         32px;
     --text-h-lg:      44px;
 
-    --radius-button: 4px;
-    --radius-card:   6px;
+    --radius-button: 8px;
+    --radius-card:   12px;
+    --radius-pill:   999px;
 
-    --shadow-feature: rgba(0,0,0,0.18) 0px 0px 32px 8px;
-    --shadow-hover:   rgba(50,50,93,0.12) 0px 16px 32px 0px;
-    --shadow-soft:    rgba(23,23,23,0.06) 0px 3px 6px 0px;
-    --shadow-elev:    rgba(23,23,23,0.08) 0px 15px 35px 0px;
+    --shadow-feature: rgba(33,29,26,0.05) 0px 1px 2px 0px;
+    --shadow-hover:   rgba(33,29,26,0.08) 0px 6px 20px 0px;
+    --shadow-soft:    rgba(33,29,26,0.04) 0px 1px 2px 0px;
+    --shadow-elev:    rgba(33,29,26,0.10) 0px 12px 32px 0px;
 
     --gap-section: 64px;
     --gap-element: 8px;
@@ -54,7 +61,7 @@
   * { box-sizing: border-box; margin: 0; padding: 0; }
 
   html, body {
-    background: var(--color-platinum);
+    background: var(--color-canvas);
     scroll-padding-top: 76px;   /* keep nav-anchor jumps clear of the sticky header */
     color: var(--color-midnight-ink);
     font-family: var(--font-sans);
@@ -102,7 +109,7 @@
     position: absolute;
     bottom: -240px; left: -240px;
     width: 600px; height: 600px;
-    background: radial-gradient(circle, rgba(83,58,253,0.6), rgba(255,207,94,0.2) 50%, transparent 70%);
+    background: radial-gradient(circle, rgba(255,104,44,0.6), rgba(255,207,94,0.2) 50%, transparent 70%);
     opacity: 0.18;
     filter: blur(60px);
     border-radius: 50%;
@@ -173,8 +180,8 @@
   }
   .form-input:focus {
     outline: none;
-    border-color: var(--color-deep-violet);
-    box-shadow: 0 0 0 3px rgba(83, 58, 253, 0.12);
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(255, 104, 44, 0.14);
   }
   .login-error {
     margin-top: 12px;
@@ -196,13 +203,13 @@
      BUTTONS
      ================================================================ */
   .btn-primary {
-    background: var(--color-deep-violet);
+    background: var(--color-midnight-ink);
     color: var(--color-platinum);
     border: none;
-    border-radius: var(--radius-button);
-    padding: 12px 24px;
+    border-radius: var(--radius-pill);
+    padding: 11px 22px;
     font-size: var(--text-body);
-    font-weight: 400;
+    font-weight: 500;
     cursor: pointer;
     transition: background .15s, transform .1s;
     display: inline-flex;
@@ -210,26 +217,27 @@
     gap: 6px;
     justify-content: center;
   }
-  .btn-primary:hover { background: #4429e8; }
+  .btn-primary:hover { background: #3a322c; }
   .btn-primary:active { transform: translateY(1px); }
-  .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+  .btn-primary:disabled { opacity: 0.55; cursor: not-allowed; }
   .btn-primary.full { width: 100%; }
-  .btn-primary.sm { padding: 8px 14px; font-size: var(--text-body); }
+  .btn-primary.sm { padding: 8px 16px; font-size: var(--text-body); }
 
   .btn-outline {
     background: transparent;
-    color: var(--color-deep-violet);
-    border: 1px solid var(--color-washed-violet);
-    border-radius: var(--radius-button);
-    padding: 7px 14px;
+    color: var(--color-midnight-ink);
+    border: 1px solid var(--color-stone-gray);
+    border-radius: var(--radius-pill);
+    padding: 8px 16px;
     font-size: var(--text-body);
+    font-weight: 500;
     cursor: pointer;
-    transition: background .15s;
+    transition: background .15s, border-color .15s;
     display: inline-flex;
     align-items: center;
     gap: 6px;
   }
-  .btn-outline:hover { background: rgba(83,58,253,0.05); }
+  .btn-outline:hover { background: var(--color-porcelain); border-color: var(--color-ghost-gray); }
 
   .btn-ghost {
     background: transparent;
@@ -327,9 +335,10 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 16px;
-    font-weight: 400;
-    letter-spacing: -0.01em;
+    font-family: var(--font-display);
+    font-size: 17px;
+    font-weight: 500;
+    letter-spacing: -0.02em;
   }
   .brand-mark {
     width: 24px; height: 24px;
@@ -426,18 +435,16 @@
     margin-bottom: 12px;
   }
   .hero-title {
+    font-family: var(--font-display);
     font-size: var(--text-h-lg);
-    font-weight: 300;
-    line-height: 1.1;
-    letter-spacing: -0.025em;
+    font-weight: 500;
+    line-height: 1.05;
+    letter-spacing: -0.03em;
     margin-bottom: 12px;
   }
   .hero-title em {
     font-style: normal;
-    background: var(--gradient-sunburst);
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
+    color: var(--accent);
   }
   .hero-sub {
     font-size: var(--text-subhead);
@@ -462,9 +469,10 @@
     flex-wrap: wrap;
   }
   .section-head h2 {
+    font-family: var(--font-display);
     font-size: var(--text-h-sm);
-    font-weight: 300;
-    letter-spacing: -0.01em;
+    font-weight: 500;
+    letter-spacing: -0.02em;
     line-height: 1.2;
   }
   .section-head p {
@@ -506,14 +514,16 @@
     grid-column: span 1;
   }
   .kpi-card {
-    background: var(--color-powder-blue);
+    background: var(--color-platinum);
+    border: 1px solid var(--color-powder-blue);
     border-radius: var(--radius-card);
     padding: 20px;
     position: relative;
-    transition: box-shadow .2s;
+    transition: box-shadow .2s, border-color .2s;
   }
   .kpi-card.feature {
-    background: var(--color-porcelain);
+    background: var(--color-platinum);
+    border-color: var(--color-stone-gray);
     box-shadow: var(--shadow-feature);
   }
   .kpi-label {
@@ -524,8 +534,9 @@
     margin-bottom: 12px;
   }
   .kpi-value {
+    font-family: var(--font-display);
     font-size: var(--text-h);
-    font-weight: 300;
+    font-weight: 500;
     letter-spacing: -0.02em;
     line-height: 1.1;
     font-feature-settings: "tnum";
@@ -555,11 +566,12 @@
     gap: 12px;
   }
   .panel {
-    background: var(--color-porcelain);
+    background: var(--color-platinum);
+    border: 1px solid var(--color-powder-blue);
     border-radius: var(--radius-card);
     padding: 20px;
   }
-  .panel.tg-panel { background: var(--color-powder-blue); }
+  .panel.tg-panel { background: var(--color-platinum); }
   .panel-head {
     display: flex;
     align-items: center;
@@ -655,6 +667,7 @@
 
   .chart-card {
     background: var(--color-platinum);
+    border: 1px solid var(--color-powder-blue);
     border-radius: var(--radius-card);
     padding: 16px;
   }
@@ -956,7 +969,7 @@
     white-space: nowrap;
   }
   .tag.green { color: var(--color-accent-green); border-color: rgba(129,184,26,0.3); background: rgba(129,184,26,0.06); }
-  .tag.violet { color: var(--color-deep-violet); border-color: var(--color-washed-violet); background: rgba(83,58,253,0.04); }
+  .tag.violet { color: var(--color-deep-violet); border-color: var(--color-washed-violet); background: rgba(255,104,44,0.04); }
   .tag.orange { color: var(--color-vibrant-orange); border-color: rgba(255,97,24,0.3); background: rgba(255,97,24,0.06); }
 
   /* ================================================================
@@ -1388,7 +1401,7 @@
       <div class="panel" style="margin-top: 16px;">
         <div class="chart-head"><span class="chart-title">Когда постить · день&nbsp;×&nbsp;час</span><span id="tg-heatmap-note" style="font-size:var(--text-caption);color:var(--color-deep-violet);font-weight:600;"></span></div>
         <div id="tg-heatmap" style="overflow-x:auto;"></div>
-        <div style="display:flex;align-items:center;gap:6px;justify-content:flex-end;margin-top:10px;font-size:var(--text-caption);color:var(--color-ghost-gray)">меньше<span style="width:12px;height:12px;border-radius:3px;background:rgba(83,58,253,0.18)"></span><span style="width:12px;height:12px;border-radius:3px;background:rgba(83,58,253,0.5)"></span><span style="width:12px;height:12px;border-radius:3px;background:rgba(83,58,253,1)"></span>больше ERV</div>
+        <div style="display:flex;align-items:center;gap:6px;justify-content:flex-end;margin-top:10px;font-size:var(--text-caption);color:var(--color-ghost-gray)">меньше<span style="width:12px;height:12px;border-radius:3px;background:rgba(255,104,44,0.18)"></span><span style="width:12px;height:12px;border-radius:3px;background:rgba(255,104,44,0.5)"></span><span style="width:12px;height:12px;border-radius:3px;background:rgba(255,104,44,1)"></span>больше ERV</div>
       </div>
       <div class="panel" style="margin-top: 16px;">
         <div class="chart-head"><span class="chart-title">Скорость набора просмотров · жизнь поста</span><span id="tg-velocity-note" style="font-size:var(--text-caption);color:var(--color-deep-violet);font-weight:600;"></span></div>
@@ -2182,6 +2195,8 @@ const state = {
 };
 
 /* Sparkline path — values to SVG path (viewBox 200x32) */
+const ACCENT = '#ff682c';        // chart data accent — swap here to re-theme all charts
+const ACCENT_SOFT = '#ff9a6b';
 function sparkPath(values) {
   if (!values || values.length === 0) return '';
   const w = 200, h = 32, pad = 2;
@@ -2205,7 +2220,7 @@ function sparkAreaPath(values) {
 /* Big line chart (viewBox 600x140) */
 function lineChartSvg(values, opts = {}) {
   if (!values || values.length === 0) {
-    return `<text x="300" y="70" text-anchor="middle" fill="#64748d" font-size="12" font-family="Inter">Нет данных за период</text>`;
+    return `<text x="300" y="70" text-anchor="middle" fill="#8f8a82" font-size="12" font-family="Inter">Нет данных за период</text>`;
   }
   const w = 600, h = 140, padX = 10, padY = 12;
   const min = Math.min(...values);
@@ -2223,14 +2238,14 @@ function lineChartSvg(values, opts = {}) {
   const lastY = pts[pts.length-1][1];
 
   return `
-    <line x1="0" y1="35"  x2="600" y2="35"  stroke="#e5edf5" stroke-width="1" vector-effect="non-scaling-stroke"/>
-    <line x1="0" y1="70"  x2="600" y2="70"  stroke="#e5edf5" stroke-width="1" vector-effect="non-scaling-stroke"/>
-    <line x1="0" y1="105" x2="600" y2="105" stroke="#e5edf5" stroke-width="1" vector-effect="non-scaling-stroke"/>
-    <path d="${areaPath}" fill="#533afd" opacity="0.06"/>
-    <path d="${linePath}" fill="none" stroke="#533afd" stroke-width="2" vector-effect="non-scaling-stroke"/>
-    <circle cx="${lastX.toFixed(1)}" cy="${lastY.toFixed(1)}" r="4" fill="#533afd"/>
-    <circle cx="${lastX.toFixed(1)}" cy="${lastY.toFixed(1)}" r="8" fill="#533afd" opacity="0.15"/>
-    <line class="hover-line" x1="-5" y1="0" x2="-5" y2="140" stroke="#533afd" stroke-width="1" stroke-dasharray="3 3" opacity="0" vector-effect="non-scaling-stroke"/>
+    <line x1="0" y1="35"  x2="600" y2="35"  stroke="#ece8e1" stroke-width="1" vector-effect="non-scaling-stroke"/>
+    <line x1="0" y1="70"  x2="600" y2="70"  stroke="#ece8e1" stroke-width="1" vector-effect="non-scaling-stroke"/>
+    <line x1="0" y1="105" x2="600" y2="105" stroke="#ece8e1" stroke-width="1" vector-effect="non-scaling-stroke"/>
+    <path d="${areaPath}" fill="${ACCENT}" opacity="0.06"/>
+    <path d="${linePath}" fill="none" stroke="${ACCENT}" stroke-width="2" vector-effect="non-scaling-stroke"/>
+    <circle cx="${lastX.toFixed(1)}" cy="${lastY.toFixed(1)}" r="4" fill="${ACCENT}"/>
+    <circle cx="${lastX.toFixed(1)}" cy="${lastY.toFixed(1)}" r="8" fill="${ACCENT}" opacity="0.15"/>
+    <line class="hover-line" x1="-5" y1="0" x2="-5" y2="140" stroke="${ACCENT}" stroke-width="1" stroke-dasharray="3 3" opacity="0" vector-effect="non-scaling-stroke"/>
   `;
 }
 
@@ -2298,7 +2313,7 @@ function windowSeries(v, t, x, days, maxPoints) {
 /* Bar chart (viewBox 360x100, 7 bars) */
 function barChartSvg(values) {
   if (!values || values.length === 0) {
-    return `<text x="180" y="50" text-anchor="middle" fill="#64748d" font-size="12" font-family="Inter">Нет данных</text>`;
+    return `<text x="180" y="50" text-anchor="middle" fill="#8f8a82" font-size="12" font-family="Inter">Нет данных</text>`;
   }
   const w = 360, h = 100;
   const n = values.length;
@@ -2309,10 +2324,10 @@ function barChartSvg(values) {
     const barH = Math.max(4, (v / max) * (h - 10));
     const x = 10 + i * (barW + gap);
     const y = h - barH;
-    const fill = i >= n - 3 ? '#533afd' : '#8087ff';
+    const fill = i >= n - 3 ? ACCENT : ACCENT_SOFT;
     return `<rect data-i="${i}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${barH.toFixed(1)}" fill="${fill}" rx="2"/>`;
   }).join('');
-  return bars + `<line class="hover-line" x1="-5" y1="0" x2="-5" y2="${h}" stroke="#533afd" stroke-width="1" stroke-dasharray="3 3" opacity="0" vector-effect="non-scaling-stroke"/>`;
+  return bars + `<line class="hover-line" x1="-5" y1="0" x2="-5" y2="${h}" stroke="${ACCENT}" stroke-width="1" stroke-dasharray="3 3" opacity="0" vector-effect="non-scaling-stroke"/>`;
 }
 
 /* ── KPI rendering ───────────────────────────────────────────── */
@@ -2482,8 +2497,8 @@ function renderKpis() {
       ${c.trend ? `<div class="kpi-delta ${c.trend.dir}">${c.trend.text}</div>` : (c.delta ? `<div class="kpi-delta ${c.deltaClass || ''}">${c.delta}</div>` : '')}
       ${c.spark && c.spark.length > 1 ? `
         <svg class="kpi-spark" viewBox="0 0 200 32" preserveAspectRatio="none">
-          <path d="${sparkAreaPath(c.spark)}" fill="#533afd" opacity="0.08"/>
-          <path d="${sparkPath(c.spark)}" fill="none" stroke="#533afd" stroke-width="1.5" vector-effect="non-scaling-stroke"/>
+          <path d="${sparkAreaPath(c.spark)}" fill="${ACCENT}" opacity="0.08"/>
+          <path d="${sparkPath(c.spark)}" fill="none" stroke="${ACCENT}" stroke-width="1.5" vector-effect="non-scaling-stroke"/>
         </svg>
       ` : ''}
     </div>
@@ -2677,7 +2692,7 @@ function renderTg() {
   } else {
     if (chartTitleEl) chartTitleEl.textContent = 'Активность канала';
     chartEl.innerHTML = `
-      <text x="180" y="45" text-anchor="middle" fill="#64748d" font-size="12" font-family="Inter">
+      <text x="180" y="45" text-anchor="middle" fill="#8f8a82" font-size="12" font-family="Inter">
         Расширенная аналитика недоступна
       </text>
       <text x="180" y="62" text-anchor="middle" fill="#8492a8" font-size="10" font-family="Inter">
@@ -2978,7 +2993,7 @@ function breakdownRows(items) {
 
 /* Simple bar chart with variable width/height (e.g. hourly distribution) */
 function barsChartSvg(values, w = 600, h = 120, titles) {
-  if (!values || !values.length) return `<text x="${w/2}" y="${h/2}" text-anchor="middle" fill="#64748d" font-size="12" font-family="Inter">Нет данных</text>`;
+  if (!values || !values.length) return `<text x="${w/2}" y="${h/2}" text-anchor="middle" fill="#8f8a82" font-size="12" font-family="Inter">Нет данных</text>`;
   const n = values.length, gap = n > 30 ? 1 : 2;
   const barW = (w - gap * (n - 1)) / n;
   const max = Math.max(...values, 1);
@@ -2986,9 +3001,9 @@ function barsChartSvg(values, w = 600, h = 120, titles) {
     const bh = Math.max(2, ((Number(v) || 0) / max) * (h - 8));
     const x = i * (barW + gap);
     const tip = (titles && titles[i] != null) ? `<title>${escapeHtml(titles[i])}</title>` : '';
-    return `<rect data-i="${i}" x="${x.toFixed(1)}" y="${(h - bh).toFixed(1)}" width="${barW.toFixed(1)}" height="${bh.toFixed(1)}" fill="${Number(v) === max ? '#533afd' : '#8087ff'}" rx="1.5">${tip}</rect>`;
+    return `<rect data-i="${i}" x="${x.toFixed(1)}" y="${(h - bh).toFixed(1)}" width="${barW.toFixed(1)}" height="${bh.toFixed(1)}" fill="${Number(v) === max ? ACCENT : ACCENT_SOFT}" rx="1.5">${tip}</rect>`;
   }).join('');
-  return bars + `<line class="hover-line" x1="-5" y1="0" x2="-5" y2="${h}" stroke="#533afd" stroke-width="1" stroke-dasharray="3 3" opacity="0" vector-effect="non-scaling-stroke"/>`;
+  return bars + `<line class="hover-line" x1="-5" y1="0" x2="-5" y2="${h}" stroke="${ACCENT}" stroke-width="1" stroke-dasharray="3 3" opacity="0" vector-effect="non-scaling-stroke"/>`;
 }
 
 function setBreakdown(id, items) {
@@ -3000,7 +3015,7 @@ function setBreakdown(id, items) {
 
 /* Diverging bars around a zero baseline (e.g. net subscribers per day) */
 function divergingBarsSvg(values, w = 600, h = 120, titles) {
-  if (!values || !values.length) return `<text x="${w/2}" y="${h/2}" text-anchor="middle" fill="#64748d" font-size="12" font-family="Inter">Нет данных</text>`;
+  if (!values || !values.length) return `<text x="${w/2}" y="${h/2}" text-anchor="middle" fill="#8f8a82" font-size="12" font-family="Inter">Нет данных</text>`;
   const n = values.length, gap = n > 30 ? 1 : 2;
   const barW = (w - gap * (n - 1)) / n;
   const maxAbs = Math.max(1, ...values.map(v => Math.abs(Number(v) || 0)));
@@ -3011,9 +3026,9 @@ function divergingBarsSvg(values, w = 600, h = 120, titles) {
     const x = i * (barW + gap);
     const y = val >= 0 ? mid - bh : mid;
     const tip = (titles && titles[i] != null) ? `<title>${escapeHtml(titles[i])}</title>` : '';
-    return `<rect data-i="${i}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${bh.toFixed(1)}" fill="${val >= 0 ? '#533afd' : '#ff6118'}" rx="1">${tip}</rect>`;
+    return `<rect data-i="${i}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${bh.toFixed(1)}" fill="${val >= 0 ? ACCENT : '#c9c2b8'}" rx="1">${tip}</rect>`;
   }).join('');
-  return `<line x1="0" y1="${mid}" x2="${w}" y2="${mid}" stroke="#d8d6df" stroke-width="1" vector-effect="non-scaling-stroke"/>` + bars + `<line class="hover-line" x1="-5" y1="0" x2="-5" y2="${h}" stroke="#533afd" stroke-width="1" stroke-dasharray="3 3" opacity="0" vector-effect="non-scaling-stroke"/>`;
+  return `<line x1="0" y1="${mid}" x2="${w}" y2="${mid}" stroke="#d9d4cb" stroke-width="1" vector-effect="non-scaling-stroke"/>` + bars + `<line class="hover-line" x1="-5" y1="0" x2="-5" y2="${h}" stroke="${ACCENT}" stroke-width="1" stroke-dasharray="3 3" opacity="0" vector-effect="non-scaling-stroke"/>`;
 }
 
 const SRC_NAMES = { 'Followers':'Подписчики', 'URL':'Ссылки', 'Search':'Поиск', 'Telegram Search':'Поиск', 'Groups':'Группы', 'Channels':'Каналы', 'PM':'Личные сообщения', 'Other':'Прочее', 'Shareable Chat Folders':'Папки', 'Shareable Folder Links':'Папки' };
@@ -3613,7 +3628,7 @@ function renderHeatmap() {
       const a = c.n ? c.erv / c.n : 0;
       const op = (c.n && maxErv > 0) ? Math.max(0.18, a / maxErv) : 0;
       const isBest = best && r === best.r && h === best.h;
-      const bg = c.n ? `rgba(83,58,253,${op.toFixed(2)})` : 'var(--color-powder-blue)';
+      const bg = c.n ? `rgba(255,104,44,${op.toFixed(2)})` : 'var(--color-powder-blue)';
       const tip = c.n
         ? `${days[r]} ${h}:00 · ${c.n} пост${c.n === 1 ? '' : 'ов'} · ERV ${a.toFixed(1)}% · ср.охват ${fmt.short(c.reach / c.n)}`
         : `${days[r]} ${h}:00 · нет постов`;
