@@ -22,14 +22,14 @@
     --color-platinum:       #ffffff;   /* card surfaces */
     --color-canvas:         #f7f5f1;   /* page background (warm off-white) */
 
-    --color-deep-violet:    #ff682c;   /* ACCENT — chart data, active states, highlights */
-    --color-soft-violet:    #ff9a6b;   /* accent, softer */
-    --color-washed-violet:  #ffe2d4;   /* accent wash */
-    --accent:               #ff682c;
-    --accent-soft:          #ff9a6b;
-    --accent-wash:          #ffe2d4;
+    --color-deep-violet:    #3ba6f1;   /* ACCENT — chart data, active states, highlights */
+    --color-soft-violet:    #7cc0f5;   /* accent, softer */
+    --color-washed-violet:  #d6ebfb;   /* accent wash */
+    --accent:               #3ba6f1;
+    --accent-soft:          #7cc0f5;
+    --accent-wash:          #d6ebfb;
     --color-accent-green:   #4f9d5b;   /* positive delta (muted) */
-    --color-vibrant-orange: #ff682c;
+    --color-vibrant-orange: #e8632a;   /* warning / error / negative — distinct from blue accent */
 
     --gradient-dreamy:   none;
     --gradient-sunburst: none;
@@ -109,7 +109,7 @@
     position: absolute;
     bottom: -240px; left: -240px;
     width: 600px; height: 600px;
-    background: radial-gradient(circle, rgba(255,104,44,0.6), rgba(255,207,94,0.2) 50%, transparent 70%);
+    background: radial-gradient(circle, rgba(59,166,241,0.6), rgba(255,207,94,0.2) 50%, transparent 70%);
     opacity: 0.18;
     filter: blur(60px);
     border-radius: 50%;
@@ -181,7 +181,7 @@
   .form-input:focus {
     outline: none;
     border-color: var(--accent);
-    box-shadow: 0 0 0 3px rgba(255, 104, 44, 0.14);
+    box-shadow: 0 0 0 3px rgba(59, 166, 241, 0.14);
   }
   .login-error {
     margin-top: 12px;
@@ -273,22 +273,32 @@
      APP SHELL
      ================================================================ */
   .app-shell {
-    max-width: 1280px;
+    max-width: 1340px;
     margin: 0 auto;
-    padding: 24px 32px 32px;
+    padding: 0;
+    display: grid;
+    grid-template-columns: 220px minmax(0, 1fr);
+    align-items: start;
   }
-  .app-header {
+  .app-header {                       /* LEFT SIDEBAR */
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 16px 0;
-    border-bottom: 1px solid var(--color-powder-blue);
-    margin-bottom: 0;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 20px;
+    padding: 22px 14px;
+    border-right: 1px solid var(--color-powder-blue);
+    background: var(--color-platinum);
     position: sticky;
     top: 0;
-    z-index: 50;   /* above content; below toast(100)/modals(900). If switched to position:fixed, raise above 100 */
-    background: var(--color-platinum);
+    height: 100vh;
+    overflow-y: auto;
+    z-index: 50;
   }
+  .main {
+    min-width: 0;
+    padding: 24px 32px 32px;
+  }
+  .sidebar-actions { display: flex; gap: 4px; }
   .app-footer {
     display: flex;
     align-items: center;
@@ -328,9 +338,11 @@
   }
   .app-brand {
     display: flex;
-    align-items: center;
-    gap: 32px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 18px;
   }
+  .brand { padding: 2px 8px 4px; }
   .brand {
     display: flex;
     align-items: center;
@@ -351,30 +363,31 @@
     font-weight: 500;
     font-size: 14px;
   }
-  .nav { display: flex; gap: 24px; }
+  .nav { display: flex; flex-direction: column; gap: 2px; }
   .nav a {
     color: var(--color-slate-blue);
     text-decoration: none;
     font-size: var(--text-body);
-    padding: 6px 0;
-    position: relative;
-    transition: color .15s;
+    padding: 8px 12px;
+    border-radius: var(--radius-button);
+    transition: color .15s, background .15s;
     cursor: pointer;
   }
-  .nav a:hover { color: var(--color-midnight-ink); }
-  .nav a.active { color: var(--color-midnight-ink); }
-  .nav a.active::after {
-    content: '';
-    position: absolute;
-    left: 0; right: 0; bottom: -17px;
-    height: 2px;
-    background: var(--color-deep-violet);
+  .nav a:hover { color: var(--color-midnight-ink); background: var(--color-porcelain); }
+  .nav a.active {
+    color: var(--color-midnight-ink);
+    background: var(--accent-wash);
+    font-weight: 500;
   }
   .header-right {
     display: flex;
-    align-items: center;
-    gap: 8px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    margin-top: auto;
   }
+  .header-right .source-toggle { display: flex; width: 100%; }
+  .header-right .source-toggle button { flex: 1; }
   .pill {
     display: inline-flex;
     align-items: center;
@@ -969,7 +982,7 @@
     white-space: nowrap;
   }
   .tag.green { color: var(--color-accent-green); border-color: rgba(129,184,26,0.3); background: rgba(129,184,26,0.06); }
-  .tag.violet { color: var(--color-deep-violet); border-color: var(--color-washed-violet); background: rgba(255,104,44,0.04); }
+  .tag.violet { color: var(--color-deep-violet); border-color: var(--color-washed-violet); background: rgba(59,166,241,0.04); }
   .tag.orange { color: var(--color-vibrant-orange); border-color: rgba(255,97,24,0.3); background: rgba(255,97,24,0.06); }
 
   /* ================================================================
@@ -1036,7 +1049,23 @@
     .posts-row > .col-shares { display: none; }
   }
   @media (max-width: 960px) {
-    .app-shell { padding: 16px; }
+    .app-shell { grid-template-columns: 1fr; }
+    .app-header {
+      flex-direction: row;
+      flex-wrap: wrap;
+      align-items: center;
+      height: auto;
+      position: static;
+      overflow: visible;
+      border-right: none;
+      border-bottom: 1px solid var(--color-powder-blue);
+      gap: 12px;
+    }
+    .app-brand { flex-direction: row; align-items: center; gap: 16px; flex: 1; }
+    .nav { flex-direction: row; flex-wrap: wrap; gap: 4px; }
+    .header-right { flex-direction: row; align-items: center; margin-top: 0; gap: 8px; }
+    .header-right .source-toggle { width: auto; }
+    .main { padding: 16px; }
     .hero-title { font-size: var(--text-h); }
     .kpi-grid { grid-template-columns: repeat(2, 1fr); }
     #tg-channel-stats { grid-template-columns: repeat(2, 1fr) !important; }
@@ -1044,7 +1073,6 @@
     .source-toggle button { padding: 6px 8px; }
     .top-posts-grid { grid-template-columns: 1fr; }
     .two-col { grid-template-columns: 1fr; }
-    .nav { display: none; }
     .posts-row { grid-template-columns: 48px 1fr 60px 80px; }
     .posts-row > .col-hide { display: none; }
     .stat-row { grid-template-columns: repeat(2, 1fr) !important; }
@@ -1172,6 +1200,7 @@
         </div>
         <span id="freshness" style="font-size:var(--text-caption);color:var(--color-ghost-gray);white-space:nowrap;"></span>
         <span id="status-pill" class="pill"><span class="dot"></span><span id="status-text">Загрузка…</span></span>
+        <div class="sidebar-actions">
         <button id="bug-btn" class="icon-btn" title="Сообщить о проблеме"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg></button>
         <button id="refresh-btn" class="icon-btn" title="Обновить">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>
@@ -1180,9 +1209,11 @@
         <button id="logout-btn" class="icon-btn" title="Выйти">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
         </button>
+        </div>
       </div>
     </div>
 
+    <main class="main">
     <!-- Hero -->
     <div class="hero">
       <div class="hero-content">
@@ -1401,7 +1432,7 @@
       <div class="panel" style="margin-top: 16px;">
         <div class="chart-head"><span class="chart-title">Когда постить · день&nbsp;×&nbsp;час</span><span id="tg-heatmap-note" style="font-size:var(--text-caption);color:var(--color-deep-violet);font-weight:600;"></span></div>
         <div id="tg-heatmap" style="overflow-x:auto;"></div>
-        <div style="display:flex;align-items:center;gap:6px;justify-content:flex-end;margin-top:10px;font-size:var(--text-caption);color:var(--color-ghost-gray)">меньше<span style="width:12px;height:12px;border-radius:3px;background:rgba(255,104,44,0.18)"></span><span style="width:12px;height:12px;border-radius:3px;background:rgba(255,104,44,0.5)"></span><span style="width:12px;height:12px;border-radius:3px;background:rgba(255,104,44,1)"></span>больше ERV</div>
+        <div style="display:flex;align-items:center;gap:6px;justify-content:flex-end;margin-top:10px;font-size:var(--text-caption);color:var(--color-ghost-gray)">меньше<span style="width:12px;height:12px;border-radius:3px;background:rgba(59,166,241,0.18)"></span><span style="width:12px;height:12px;border-radius:3px;background:rgba(59,166,241,0.5)"></span><span style="width:12px;height:12px;border-radius:3px;background:rgba(59,166,241,1)"></span>больше ERV</div>
       </div>
       <div class="panel" style="margin-top: 16px;">
         <div class="chart-head"><span class="chart-title">Скорость набора просмотров · жизнь поста</span><span id="tg-velocity-note" style="font-size:var(--text-caption);color:var(--color-deep-violet);font-weight:600;"></span></div>
@@ -1473,6 +1504,7 @@
       <span class="grow"></span>
       <a href="https://github.com/schulmannn/pulse-analytics" target="_blank" rel="noopener">GitHub</a>
     </footer>
+    </main>
 
   </div>
 </div>
@@ -2195,8 +2227,9 @@ const state = {
 };
 
 /* Sparkline path — values to SVG path (viewBox 200x32) */
-const ACCENT = '#ff682c';        // chart data accent — swap here to re-theme all charts
-const ACCENT_SOFT = '#ff9a6b';
+const ACCENT = '#3ba6f1';        // chart data accent — swap here to re-theme all charts
+const ACCENT_SOFT = '#7cc0f5';
+const MON_EN = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 function sparkPath(values) {
   if (!values || values.length === 0) return '';
   const w = 200, h = 32, pad = 2;
@@ -2683,11 +2716,11 @@ function renderTg() {
     if (chartTitleEl) chartTitleEl.textContent = 'Просмотры последних постов';
     chartEl.innerHTML = barChartSvg(views);
     setYAxis('tg-chart', 0, Math.max(0, ...views));
-    setTip(chartEl, lastPosts.map(p => { const d = p.date ? new Date(p.date) : null; return `${d ? d.getDate() + '.' + (d.getMonth() + 1) : '·'}: ${fmt.num(p.views || 0)} просмотров`; }), 'bar');
+    setTip(chartEl, lastPosts.map(p => { const d = p.date ? new Date(p.date) : null; return `${d ? d.getDate() + ' ' + MON_EN[d.getMonth()] : '·'}: ${fmt.num(p.views || 0)} просмотров`; }), 'bar');
     attachBarClick(chartEl, lastPosts.length, (idx) => { const p = lastPosts[idx]; if (p && p.id != null) openPostModal(p.id); });
     labelsEl.innerHTML = lastPosts.map(p => {
       const d = p.date ? new Date(p.date) : null;
-      return `<span>${d ? d.getDate() + '.' + (d.getMonth() + 1) : '·'}</span>`;
+      return `<span>${d ? d.getDate() + ' ' + MON_EN[d.getMonth()] : '·'}</span>`;
     }).join('');
   } else {
     if (chartTitleEl) chartTitleEl.textContent = 'Активность канала';
@@ -3241,7 +3274,7 @@ async function openPostModal(postId) {
   const vseries = data && data.views_graph && data.views_graph.series && data.views_graph.series[0];
   if (data && data.available && vseries && vseries.values.length > 1) {
     const vals = vseries.values.map(Number);
-    const xs = (data.views_graph.x || []).map(ts => { const d = new Date(Number(ts)); return `${d.getDate()}.${d.getMonth() + 1} ${String(d.getHours()).padStart(2, '0')}:00`; });
+    const xs = (data.views_graph.x || []).map(ts => { const d = new Date(Number(ts)); return `${d.getDate()} ${MON_EN[d.getMonth()]} ${String(d.getHours()).padStart(2, '0')}:00`; });
     // post lifecycle — views_graph is INCREMENTAL (new views per bucket), usually daily
     let velLine = '';
     const rawx = (data.views_graph.x || []).map(Number);
@@ -3425,7 +3458,7 @@ function renderTgAnalytics() {
   if (growthEl) {
     const g = graphs.growth;
     const vals = (g && g.series && g.series[0]) ? g.series[0].values.map(Number) : [];
-    const gfd = ts => { const d = new Date(Number(ts)); return d.getDate() + '.' + (d.getMonth() + 1); };
+    const gfd = ts => { const d = new Date(Number(ts)); return d.getDate() + ' ' + MON_EN[d.getMonth()]; };
     const gTips = (g && g.x && g.x.length)
       ? g.x.map((ts, i) => `${gfd(ts)}: ${fmt.num(vals[i])} подписчиков`)
       : vals.map(v => `${fmt.num(v)} подписчиков`);
@@ -3448,7 +3481,7 @@ function renderTgAnalytics() {
   if (inter && inter.series && inter.series.length) {
     const views  = inter.series.find(s => /view|просмотр/i.test(s.name)) || inter.series[0];
     const shares = inter.series.find(s => /share|репост/i.test(s.name)) || inter.series[1];
-    const ix = (inter.x || []).map(ts => { const d = new Date(Number(ts)); return `${d.getDate()}.${d.getMonth() + 1}`; });
+    const ix = (inter.x || []).map(ts => { const d = new Date(Number(ts)); return `${d.getDate()} ${MON_EN[d.getMonth()]}`; });
     if (ivEl) { const vv = views ? views.values.map(Number) : []; const vt = vv.map((v, i) => `${ix[i] || ''}: ${fmt.num(v)} просмотров`); ivEl.innerHTML = lineChartSvg(vv); setYAxis('tg-interactions-views', Math.min(...vv), Math.max(...vv)); setXAxis('tg-interactions-views-labels', ix); setTip(ivEl, vt, 'line'); chartFull(ivEl, vv, vt, ix, 'tg-interactions-views-labels'); }
     if (isEl) { const sv = shares ? shares.values.map(Number) : []; const st = sv.map((v, i) => `${ix[i] || ''}: ${fmt.num(v)} репостов`); isEl.innerHTML = lineChartSvg(sv); setYAxis('tg-interactions-shares', Math.min(...sv), Math.max(...sv)); setXAxis('tg-interactions-shares-labels', ix); setTip(isEl, st, 'line'); chartFull(isEl, sv, st, ix, 'tg-interactions-shares-labels'); }
   } else {
@@ -3506,7 +3539,7 @@ function renderTgAnalytics() {
       netEl.innerHTML = divergingBarsSvg(net30, 600, 120, netTitles);
       const nMax = Math.max(1, ...net30.map(v => Math.abs(v)));
       setYAxis('tg-net-chart', -nMax, nMax);
-      setXAxis('tg-net-labels', (f.x || []).slice(-30).map(ts => { const d = new Date(Number(ts)); return `${d.getDate()}.${d.getMonth() + 1}`; }));
+      setXAxis('tg-net-labels', (f.x || []).slice(-30).map(ts => { const d = new Date(Number(ts)); return `${d.getDate()} ${MON_EN[d.getMonth()]}`; }));
       setTip(netEl, netTitles, 'bar');
     }
     if (netSum) { const tot = joinedTotal - leftTotal; netSum.textContent = `${tot >= 0 ? '+' : ''}${fmt.num(tot)} за период`; }
@@ -3573,7 +3606,7 @@ function renderHistory() {
   // Downsample long archives (up to 730 days) so the fixed-width SVG stays crisp.
   const rows = lttbDownsample(all, CHART_MAX_POINTS, r => Number(r.subscribers));
   const vals = rows.map(r => Number(r.subscribers));
-  const ddmm = s => { const p = String(s).split('-'); return p[2] + '.' + p[1]; };
+  const ddmm = s => { const p = String(s).split('-'); return (+p[2]) + ' ' + MON_EN[(+p[1]) - 1]; };
   const tips = rows.map(r => `${r.day}: ${fmt.num(r.subscribers)} подписчиков`);
   el.innerHTML = lineChartSvg(vals);
   setYAxis('tg-history-chart', Math.min(...vals), Math.max(...vals));
@@ -3628,7 +3661,7 @@ function renderHeatmap() {
       const a = c.n ? c.erv / c.n : 0;
       const op = (c.n && maxErv > 0) ? Math.max(0.18, a / maxErv) : 0;
       const isBest = best && r === best.r && h === best.h;
-      const bg = c.n ? `rgba(255,104,44,${op.toFixed(2)})` : 'var(--color-powder-blue)';
+      const bg = c.n ? `rgba(59,166,241,${op.toFixed(2)})` : 'var(--color-powder-blue)';
       const tip = c.n
         ? `${days[r]} ${h}:00 · ${c.n} пост${c.n === 1 ? '' : 'ов'} · ERV ${a.toFixed(1)}% · ср.охват ${fmt.short(c.reach / c.n)}`
         : `${days[r]} ${h}:00 · нет постов`;
@@ -3828,17 +3861,17 @@ function renderDigest() {
     peakHour = (th.hours && th.hours[pi] != null) ? th.hours[pi] : pi;
   }
 
-  const I = (icon, text) => `<div style="display:flex;gap:10px;align-items:flex-start;padding:5px 0"><span style="font-size:16px;flex:0 0 auto">${icon}</span><span>${text}</span></div>`;
+  const I = (text) => `<div style="display:flex;gap:10px;align-items:flex-start;padding:6px 0"><span style="width:6px;height:6px;border-radius:50%;background:var(--accent);flex:0 0 auto;margin-top:7px"></span><span>${text}</span></div>`;
   const lines = [];
-  lines.push(I('👁', `<b>${fmt.short(totalViews)}</b> просмотров за период · ${postsN} постов · в среднем <b>${fmt.short(avgViews)}</b> на пост.`));
-  if (net != null) lines.push(I(net >= 0 ? '📈' : '📉', `Подписчики: <b>${net >= 0 ? '+' : ''}${fmt.num(net)}</b> чистыми за период.`));
-  if (avgErv != null) lines.push(I('💬', `Средний ERV <b>${avgErv.toFixed(1)}%</b> — вовлечённость на просмотр.`));
-  if (best && best.reach) lines.push(I('🏆', `Топ-пост: «${escapeHtml((best.caption || 'без подписи').slice(0, 70))}» — <b>${fmt.short(best.reach)}</b> просмотров${best.erv != null ? `, ERV ${best.erv.toFixed(1)}%` : ''}.`));
+  lines.push(I(`<b>${fmt.short(totalViews)}</b> просмотров за период · ${postsN} постов · в среднем <b>${fmt.short(avgViews)}</b> на пост.`));
+  if (net != null) lines.push(I(`Подписчики: <b>${net >= 0 ? '+' : ''}${fmt.num(net)}</b> чистыми за период.`));
+  if (avgErv != null) lines.push(I(`Средний ERV <b>${avgErv.toFixed(1)}%</b> — вовлечённость на просмотр.`));
+  if (best && best.reach) lines.push(I(`Топ-пост: «${escapeHtml((best.caption || 'без подписи').slice(0, 70))}» — <b>${fmt.short(best.reach)}</b> просмотров${best.erv != null ? `, ERV ${best.erv.toFixed(1)}%` : ''}.`));
   if (bestWd || peakHour != null) {
     const rec = [];
     if (bestWd) rec.push(`день — <b>${bestWd}</b>`);
     if (peakHour != null) rec.push(`час — <b>${peakHour}:00</b>`);
-    lines.push(I('🎯', `Когда постить: ${rec.join(', ')}.`));
+    lines.push(I(`Когда постить: ${rec.join(', ')}.`));
   }
 
   el.innerHTML = `
