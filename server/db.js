@@ -64,8 +64,18 @@ CREATE TABLE IF NOT EXISTS bug_attachments (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS bug_attachments_bug_id_idx ON bug_attachments(bug_id);
+CREATE TABLE IF NOT EXISTS users (
+  id SERIAL PRIMARY KEY,
+  email TEXT UNIQUE NOT NULL,
+  pass_hash TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'user',
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at TIMESTAMPTZ DEFAULT now()
+);
 `;
 
+const USER_ROLES = ['user', 'superuser'];
+const USER_STATUSES = ['pending', 'active', 'disabled'];
 const BUG_STATUSES = ['open', 'in_progress', 'done', 'wont_fix'];
 const BUG_SEVERITIES = ['low', 'medium', 'high'];
 const BUG_KINDS = ['bug', 'feature', 'change'];
@@ -222,6 +232,66 @@ async function getMentionsArchive(limit = 30) {
   };
 }
 
+// ── Users / accounts ──
+async function countUsers() {
+  if (!enabled) return 0;
+  const { rows } = await pool.query('SELECT count(*)::int AS n FROM users');
+  return rows[0].n;
+}
+
+async function createUser({ email, pass_hash, role, status }) {
+  if (!enabled) return null;
+  const r = USER_ROLES.includes(role) ? role : 'user';
+  const s = USER_STATUSES.includes(status) ? status : 'pending';
+  const { rows } = await pool.query(
+    `INSERT INTO users (email, pass_hash, role, status) VALUES ($1,$2,$3,$4)
+     RETURNING id, email, role, status, to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SS') AS created_at`,
+    [String(email).toLowerCase().trim(), pass_hash, r, s]);
+  return rows[0];
+}
+
+async function getUserByEmail(email) {
+  if (!enabled) return null;
+  const { rows } = await pool.query(
+    'SELECT id, email, pass_hash, role, status FROM users WHERE email=$1',
+    [String(email).toLowerCase().trim()]);
+  return rows[0] || null;
+}
+
+async function getUserById(id) {
+  if (!enabled) return null;
+  const { rows } = await pool.query('SELECT id, email, role, status FROM users WHERE id=$1', [id]);
+  return rows[0] || null;
+}
+
+async function listUsers() {
+  if (!enabled) return [];
+  const { rows } = await pool.query(
+    `SELECT id, email, role, status, to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SS') AS created_at
+     FROM users ORDER BY created_at ASC`);
+  return rows;
+}
+
+async function updateUser(id, { role, status }) {
+  if (!enabled) return null;
+  const sets = [], vals = [];
+  let i = 1;
+  if (role != null)   { if (!USER_ROLES.includes(role))     throw new Error('bad role');   sets.push(`role=$${i++}`);   vals.push(role); }
+  if (status != null) { if (!USER_STATUSES.includes(status)) throw new Error('bad status'); sets.push(`status=$${i++}`); vals.push(status); }
+  if (!sets.length) return getUserById(id);
+  vals.push(id);
+  const { rows } = await pool.query(
+    `UPDATE users SET ${sets.join(', ')} WHERE id=$${i}
+     RETURNING id, email, role, status, to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SS') AS created_at`, vals);
+  return rows[0] || null;
+}
+
+async function setUserPassword(id, pass_hash) {
+  if (!enabled) return false;
+  await pool.query('UPDATE users SET pass_hash=$2 WHERE id=$1', [id, pass_hash]);
+  return true;
+}
+
 async function createBug({ text, severity, context, kind }) {
   if (!enabled) return null;
   const sev = BUG_SEVERITIES.includes(severity) ? severity : 'medium';
@@ -298,6 +368,8 @@ async function getAttachment(id) {
 
 module.exports = {
   enabled, init, graphsToDailyRows,
+  USER_ROLES, USER_STATUSES,
+  countUsers, createUser, getUserByEmail, getUserById, listUsers, updateUser, setUserPassword,
   upsertChannelDaily, upsertPosts, upsertMentions,
   getChannelHistory, getMentionsHistory, getMentionsArchive,
   createBug, listBugs, updateBug, deleteBug, BUG_STATUSES, BUG_SEVERITIES, BUG_KINDS,

@@ -13,9 +13,11 @@ const db         = require('./db');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
+app.set('trust proxy', 1);   // behind Railway's proxy → correct client IP for rate-limit / req.ip
 
 // История (Postgres) — поднимаем схему, если БД подключена; иначе тихо выключено.
-db.init().catch(e => console.error('[db] init failed:', e.message));
+// После схемы — бутстрап админ-аккаунта из ADMIN_EMAIL/ADMIN_PASSWORD (если заданы).
+db.init().then(bootstrapAdmin).catch(e => console.error('[db] init failed:', e.message));
 
 // ── Middleware ───────────────────────────────────────────────────
 app.use(cors());
@@ -29,32 +31,109 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
+// Stricter limiter for auth endpoints (brute-force / enumeration hardening).
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: { error: 'Слишком много попыток входа. Подожди 15 минут.' }
+});
+
 // ── Авторизация: stateless HMAC-токены (переживают рестарт/редеплой) ──
 const crypto = require('crypto');
-const AUTH_SECRET = process.env.TEAM_PASSWORD || 'pulse-dev-secret';
+// Token signing secret. Prefer a dedicated SESSION_SECRET (separable from the
+// team/MTProto password); fall back to TEAM_PASSWORD; never a hardcoded default —
+// if neither is set, use an ephemeral random secret (tokens won't survive restart).
+const AUTH_SECRET = process.env.SESSION_SECRET || process.env.TEAM_PASSWORD || crypto.randomBytes(32).toString('hex');
+if (!process.env.SESSION_SECRET && !process.env.TEAM_PASSWORD) {
+  console.warn('[auth] no SESSION_SECRET/TEAM_PASSWORD set — using a random ephemeral secret; sessions will not survive restart');
+}
 
+const ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || '').toLowerCase().trim();
+const SESSION_TTL = 8 * 60 * 60 * 1000;
+
+// Legacy/break-glass token: payload is just the expiry (no account) → superuser.
 function signToken(expires) {
   const payload = String(expires);
   const sig = crypto.createHmac('sha256', AUTH_SECRET).update(payload).digest('base64url');
   return Buffer.from(payload).toString('base64url') + '.' + sig;
 }
 
-function verifyToken(token) {
-  if (!token || typeof token !== 'string' || token.indexOf('.') < 0) return false;
-  const [p, sig] = token.split('.');
-  let payload;
-  try { payload = Buffer.from(p, 'base64url').toString('utf8'); } catch (e) { return false; }
-  const expected = crypto.createHmac('sha256', AUTH_SECRET).update(payload).digest('base64url');
-  if (!sig || sig.length !== expected.length) return false;
-  if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return false;
-  const expires = parseInt(payload, 10);
-  return !!expires && expires > Date.now();
+// Account session token: carries { uid, role, exp }, HMAC-signed (stateless).
+function signSession(payload) {
+  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const sig = crypto.createHmac('sha256', AUTH_SECRET).update(body).digest('base64url');
+  return body + '.' + sig;
 }
 
-function requireAuth(req, res, next) {
-  if (!verifyToken(req.headers['x-session-token'])) {
-    return res.status(401).json({ error: 'Сессия истекла, войди снова' });
-  }
+// Verify + decode either token form → { uid, role } or null.
+function parseToken(token) {
+  try {
+    if (!token || typeof token !== 'string' || token.indexOf('.') < 0) return null;
+    const [body, sig] = token.split('.');
+    const expected = crypto.createHmac('sha256', AUTH_SECRET).update(body).digest('base64url');
+    if (!sig || sig.length !== expected.length) return null;
+    if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
+    const decoded = Buffer.from(body, 'base64url').toString('utf8');
+    let p;
+    if (decoded[0] === '{') p = JSON.parse(decoded);
+    else p = { exp: parseInt(decoded, 10), uid: null, role: 'superuser' };  // legacy/break-glass
+    if (!p.exp || p.exp <= Date.now()) return null;
+    return { uid: (p.uid == null ? null : p.uid), role: p.role || 'user' };
+  } catch (e) { return null; }
+}
+
+// scrypt cost pinned + encoded in the hash, so verification is independent of any
+// future change to Node's defaults. Format: scrypt$N$r$p$saltHex$hashHex.
+const SCRYPT = { N: 16384, r: 8, p: 1 };
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16);
+  const hash = crypto.scryptSync(String(password), salt, 64, SCRYPT);
+  return `scrypt$${SCRYPT.N}$${SCRYPT.r}$${SCRYPT.p}$${salt.toString('hex')}$${hash.toString('hex')}`;
+}
+function verifyPassword(password, stored) {
+  if (!stored || typeof stored !== 'string' || !stored.startsWith('scrypt$')) return false;
+  const parts = stored.split('$');
+  let N = SCRYPT.N, r = SCRYPT.r, p = SCRYPT.p, saltHex, hashHex;
+  if (parts.length === 6) { N = +parts[1]; r = +parts[2]; p = +parts[3]; saltHex = parts[4]; hashHex = parts[5]; }
+  else if (parts.length === 3) { saltHex = parts[1]; hashHex = parts[2]; }   // legacy (no params)
+  else return false;
+  let salt, expected, test;
+  try {
+    salt = Buffer.from(saltHex, 'hex'); expected = Buffer.from(hashHex, 'hex');
+    if (!salt.length || !expected.length) return false;
+    test = crypto.scryptSync(String(password), salt, expected.length, { N, r, p });
+  } catch (e) { return false; }
+  return crypto.timingSafeEqual(expected, test);
+}
+
+// Optional bootstrap: create the ADMIN_EMAIL account as an active superuser at startup
+// (needs ADMIN_PASSWORD). Removes the register-time race for the admin email.
+async function bootstrapAdmin() {
+  if (!db.enabled || !ADMIN_EMAIL || !process.env.ADMIN_PASSWORD) return;
+  try {
+    if (!(await db.getUserByEmail(ADMIN_EMAIL))) {
+      await db.createUser({ email: ADMIN_EMAIL, pass_hash: hashPassword(process.env.ADMIN_PASSWORD), role: 'superuser', status: 'active' });
+      console.log('[auth] bootstrapped admin account:', ADMIN_EMAIL);
+    }
+  } catch (e) { console.error('[auth] admin bootstrap failed:', e.message); }
+}
+
+// Auth: validates the token; for account sessions re-checks the user is still active
+// (so role changes / disable take effect immediately, not only on next login).
+async function requireAuth(req, res, next) {
+  const sess = parseToken(req.headers['x-session-token']);
+  if (!sess) return res.status(401).json({ error: 'Сессия истекла, войди снова' });
+  if (sess.uid == null) { req.user = { uid: null, role: 'superuser', email: null }; return next(); }
+  try {
+    const u = await db.getUserById(sess.uid);
+    if (!u || u.status !== 'active') return res.status(401).json({ error: 'Аккаунт неактивен — войди снова' });
+    req.user = { uid: u.id, role: u.role, email: u.email };
+    next();
+  } catch (e) { res.status(500).json({ error: e.message }); }
+}
+
+function requireSuper(req, res, next) {
+  if (!req.user || req.user.role !== 'superuser') return res.status(403).json({ error: 'Доступ только для администратора' });
   next();
 }
 
@@ -75,27 +154,98 @@ function cacheSet(key, data) {
 //  AUTH ROUTES
 // ════════════════════════════════════════════════════════════════
 
-app.post('/api/auth/login', (req, res) => {
-  const { password } = req.body;
-  if (!password) return res.status(400).json({ error: 'Укажи пароль' });
+// Registration: new accounts are 'pending' (no access) until a superuser approves.
+// The ADMIN_EMAIL (env) registers straight as an active superuser (bootstrap owner).
+app.post('/api/auth/register', authLimiter, async (req, res) => {
+  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена — регистрация недоступна' });
+  const email = String((req.body && req.body.email) || '').toLowerCase().trim();
+  const password = String((req.body && req.body.password) || '');
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ error: 'Некорректный email' });
+  if (password.length < 8) return res.status(400).json({ error: 'Пароль минимум 8 символов' });
+  try {
+    // Everyone registers as a pending normal user; a superuser approves in the admin panel
+    // (the ADMIN_EMAIL account is created at startup by bootstrapAdmin, not here → no race).
+    await db.createUser({ email, pass_hash: hashPassword(password), role: 'user', status: 'pending' });
+    res.json({ status: 'pending', message: 'Аккаунт создан. Доступ откроется после одобрения администратором.' });
+  } catch (e) {
+    if (e.code === '23505') return res.status(409).json({ error: 'Этот email уже зарегистрирован' });
+    res.status(500).json({ error: e.message });
+  }
+});
 
-  if (password !== process.env.TEAM_PASSWORD) {
-    return res.status(403).json({ error: 'Неверный пароль' });
+// Login: account (email+password) OR break-glass (team password, no email → superuser).
+app.post('/api/auth/login', authLimiter, async (req, res) => {
+  const email = String((req.body && req.body.email) || '').toLowerCase().trim();
+  const password = String((req.body && req.body.password) || '');
+  if (!password) return res.status(400).json({ error: 'Укажи пароль' });
+  const expires = Date.now() + SESSION_TTL;
+
+  if (email) {
+    if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
+    try {
+      const u = await db.getUserByEmail(email);
+      if (!u || !verifyPassword(password, u.pass_hash)) return res.status(403).json({ error: 'Неверный email или пароль' });
+      if (u.status === 'pending')  return res.status(403).json({ error: 'Аккаунт ждёт одобрения администратором' });
+      if (u.status !== 'active')   return res.status(403).json({ error: 'Аккаунт отключён' });
+      return res.json({ token: signSession({ uid: u.id, role: u.role, exp: expires }),
+        expiresAt: new Date(expires).toISOString(), user: { email: u.email, role: u.role } });
+    } catch (e) { return res.status(500).json({ error: e.message }); }
   }
 
-  const expires = Date.now() + 8 * 60 * 60 * 1000;
-  const token   = signToken(expires);
-
-  res.json({ token, expiresAt: new Date(expires).toISOString() });
+  // break-glass: shared team password → superuser session (no account)
+  if (process.env.TEAM_PASSWORD && password === process.env.TEAM_PASSWORD) {
+    return res.json({ token: signToken(expires), expiresAt: new Date(expires).toISOString(), user: { email: null, role: 'superuser' } });
+  }
+  return res.status(403).json({ error: 'Неверный пароль' });
 });
 
 app.post('/api/auth/logout', requireAuth, (req, res) => {
-  // stateless — клиент просто удаляет токен у себя
-  res.json({ ok: true });
+  res.json({ ok: true });   // stateless — клиент просто удаляет токен
 });
 
 app.get('/api/auth/check', requireAuth, (req, res) => {
-  res.json({ ok: true });
+  res.json({ ok: true, role: req.user.role, email: req.user.email });
+});
+
+app.get('/api/auth/me', requireAuth, (req, res) => {
+  res.json({ uid: req.user.uid, email: req.user.email, role: req.user.role });
+});
+
+app.post('/api/auth/change-password', requireAuth, async (req, res) => {
+  if (req.user.uid == null) return res.status(400).json({ error: 'Командный вход не имеет аккаунта для смены пароля' });
+  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
+  const cur = String((req.body && req.body.current) || '');
+  const next = String((req.body && req.body.next) || '');
+  if (next.length < 8) return res.status(400).json({ error: 'Новый пароль минимум 8 символов' });
+  try {
+    const u = await db.getUserByEmail(req.user.email);
+    if (!u || !verifyPassword(cur, u.pass_hash)) return res.status(403).json({ error: 'Текущий пароль неверен' });
+    await db.setUserPassword(u.id, hashPassword(next));
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Admin: user management (superuser only) ──
+app.get('/api/admin/users', requireAuth, requireSuper, async (req, res) => {
+  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
+  try {
+    res.json({ users: await db.listUsers(), roles: db.USER_ROLES, statuses: db.USER_STATUSES, me: req.user.uid });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.patch('/api/admin/users/:id', requireAuth, requireSuper, async (req, res) => {
+  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ error: 'bad id' });
+  // don't let an admin lock themselves out
+  if (req.user.uid === id && (req.body.role === 'user' || req.body.status === 'disabled')) {
+    return res.status(400).json({ error: 'Нельзя понизить или отключить собственный аккаунт' });
+  }
+  try {
+    const u = await db.updateUser(id, { role: req.body.role, status: req.body.status });
+    if (!u) return res.status(404).json({ error: 'Пользователь не найден' });
+    res.json(u);
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 // ════════════════════════════════════════════════════════════════
@@ -490,7 +640,7 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-app.delete('/api/cache', requireAuth, (req, res) => {
+app.delete('/api/cache', requireAuth, requireSuper, (req, res) => {
   cache.clear();
   res.json({ ok: true, message: 'Кэш сброшен' });
 });
@@ -558,7 +708,7 @@ app.get('/api/history/mentions', requireAuth, async (req, res) => {
 // ════════════════════════════════════════════════════════════════
 //  БАГ-ТРЕКЕР (Postgres)
 // ════════════════════════════════════════════════════════════════
-app.post('/api/bugs', requireAuth, async (req, res) => {
+app.post('/api/bugs', requireAuth, requireSuper, async (req, res) => {
   if (!db.enabled) return res.status(503).json({ error: 'БД не подключена — баги негде сохранять' });
   const text = ((req.body && req.body.text) || '').trim();
   if (!text) return res.status(400).json({ error: 'Опиши баг' });
@@ -568,13 +718,13 @@ app.post('/api/bugs', requireAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/bugs', requireAuth, async (req, res) => {
+app.get('/api/bugs', requireAuth, requireSuper, async (req, res) => {
   try {
     res.json({ enabled: db.enabled, statuses: db.BUG_STATUSES, kinds: db.BUG_KINDS, bugs: await db.listBugs(req.query.status) });
   } catch (e) { res.status(200).json({ enabled: db.enabled, bugs: [], error: e.message }); }
 });
 
-app.patch('/api/bugs/:id', requireAuth, async (req, res) => {
+app.patch('/api/bugs/:id', requireAuth, requireSuper, async (req, res) => {
   if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
   const id = parseInt(req.params.id, 10);
   if (!id) return res.status(400).json({ error: 'bad id' });
@@ -585,7 +735,7 @@ app.patch('/api/bugs/:id', requireAuth, async (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-app.delete('/api/bugs/:id', requireAuth, async (req, res) => {
+app.delete('/api/bugs/:id', requireAuth, requireSuper, async (req, res) => {
   if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
   const id = parseInt(req.params.id, 10);
   if (!id) return res.status(400).json({ error: 'bad id' });
@@ -600,7 +750,7 @@ app.delete('/api/bugs/:id', requireAuth, async (req, res) => {
 const GH_REPO  = process.env.GITHUB_REPO || '';            // e.g. "schulmannn/pulse-analytics"
 const GH_TOKEN = process.env.GITHUB_DISPATCH_TOKEN || '';
 
-app.post('/api/bugs/:id/claude-fix', requireAuth, async (req, res) => {
+app.post('/api/bugs/:id/claude-fix', requireAuth, requireSuper, async (req, res) => {
   if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
   if (!GH_REPO || !GH_TOKEN) return res.status(503).json({ error: 'Не настроено: задай GITHUB_REPO и GITHUB_DISPATCH_TOKEN' });
   const id = parseInt(req.params.id, 10);
@@ -657,7 +807,7 @@ function sniffImage(mime, buf) {
 }
 
 // route-local parser (after requireAuth) so only this authed route accepts big bodies
-app.post('/api/bugs/:id/screenshot', requireAuth, express.json({ limit: '7mb' }), async (req, res) => {
+app.post('/api/bugs/:id/screenshot', requireAuth, requireSuper, express.json({ limit: '7mb' }), async (req, res) => {
   if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
   const id = parseInt(req.params.id, 10);
   if (!id) return res.status(400).json({ error: 'bad id' });
@@ -682,7 +832,7 @@ app.post('/api/bugs/:id/screenshot', requireAuth, express.json({ limit: '7mb' })
 });
 
 // Served under auth (frontend fetches with the session token → blob URL).
-app.get('/api/bug-attachment/:id', requireAuth, async (req, res) => {
+app.get('/api/bug-attachment/:id', requireAuth, requireSuper, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!id) return res.status(400).end();
   try {
