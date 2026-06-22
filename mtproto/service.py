@@ -7,6 +7,7 @@ import asyncio
 import os
 import json
 import logging
+import re
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Header, Query, Response
@@ -78,6 +79,96 @@ def check_auth(x_internal_token: str = Header(default='')):
         raise HTTPException(status_code=401, detail='Unauthorized')
 
 
+# ── Album-aware post building ─────────────────────────────
+# Telegram albums (media groups) arrive as several messages sharing one
+# `grouped_id`. Treating each as a separate post inflates post counts, daily
+# views and pollutes the top-posts list with caption-less fragments. We collapse
+# a group into ONE logical post before counting anything.
+
+_HASHTAG_RE = re.compile('#([0-9A-Za-z_Ѐ-ӿ]{2,})')
+
+
+def _extract_hashtags(text):
+    if not text:
+        return []
+    out, seen = [], set()
+    for tag in _HASHTAG_RE.findall(text):
+        low = tag.lower()
+        if low not in seen:
+            seen.add(low)
+            out.append('#' + tag)
+    return out[:15]
+
+
+def _react_total(msg):
+    if msg and msg.reactions and msg.reactions.results:
+        return sum(r.count for r in msg.reactions.results)
+    return 0
+
+
+def _media_type(msg):
+    if msg.photo:       return 'photo'
+    if msg.video:       return 'video'
+    if msg.document:    return 'document'
+    if msg.poll:        return 'poll'
+    if msg.audio:       return 'audio'
+    if msg.voice:       return 'voice'
+    if msg.web_preview: return 'link'
+    return 'text'
+
+
+def _logical_posts(messages):
+    """Collapse album (grouped_id) messages into single logical posts,
+    preserving the newest-first order Telethon returns."""
+    groups = {}
+    ordered = []
+    for msg in messages:
+        if not msg or msg.action:
+            continue
+        gid = getattr(msg, 'grouped_id', None)
+        if gid:
+            if gid not in groups:
+                groups[gid] = []
+                ordered.append(('g', gid))
+            groups[gid].append(msg)
+        else:
+            ordered.append(('m', [msg]))
+    return [groups[v] if kind == 'g' else v for kind, v in ordered]
+
+
+def _build_post(group):
+    """Build one post dict from a group of messages (1 = normal post, >1 = album)."""
+    rep       = max(group, key=lambda m: (m.views or 0))                # most-viewed → used for thumb/per-post stats
+    cap_msg   = next((m for m in group if (m.text or m.message)), rep)  # the message carrying the caption
+    react_msg = max(group, key=_react_total)                            # album reactions live on a single message
+    earliest  = min(group, key=lambda m: m.id)                          # album posts share a moment; first id = post time
+
+    reactions_detail, reactions_total = [], 0
+    if react_msg.reactions and react_msg.reactions.results:
+        for r in react_msg.reactions.results:
+            emoji = getattr(r.reaction, 'emoticon', '?')
+            reactions_detail.append({'emoji': emoji, 'count': r.count})
+            reactions_total += r.count
+
+    full_text = ' '.join((m.text or m.message or '') for m in group)
+    caption   = (cap_msg.text or cap_msg.message or '')
+
+    return {
+        'id':               rep.id,
+        'date':             earliest.date.isoformat(),
+        'text':             caption[:200],
+        'views':            max((m.views or 0) for m in group),
+        'forwards':         max((m.forwards or 0) for m in group),
+        'replies':          max((getattr(m.replies, 'replies', 0) if m.replies else 0) for m in group),
+        'reactions':        reactions_total,
+        'reactions_detail': reactions_detail,
+        'media_type':       _media_type(rep),
+        'hashtags':         _extract_hashtags(full_text),
+        'album_size':       len(group) if len(group) > 1 else 0,
+        'pinned':           any(bool(m.pinned) for m in group),
+    }
+
+
 @app.get('/health')
 async def health():
     return {
@@ -120,42 +211,7 @@ async def get_posts(
     try:
         tg = await get_client()
         messages = await tg.get_messages(CHANNEL, limit=limit, offset_id=offset_id or 0)
-
-        posts = []
-        for msg in messages:
-            if not msg or msg.action:
-                continue
-
-            reactions_detail = []
-            reactions_total = 0
-            if msg.reactions and msg.reactions.results:
-                for r in msg.reactions.results:
-                    emoji = getattr(r.reaction, 'emoticon', '?')
-                    reactions_detail.append({'emoji': emoji, 'count': r.count})
-                    reactions_total += r.count
-
-            media_type = 'text'
-            if msg.photo:         media_type = 'photo'
-            elif msg.video:       media_type = 'video'
-            elif msg.document:    media_type = 'document'
-            elif msg.poll:        media_type = 'poll'
-            elif msg.audio:       media_type = 'audio'
-            elif msg.voice:       media_type = 'voice'
-            elif msg.web_preview: media_type = 'link'
-
-            posts.append({
-                'id':               msg.id,
-                'date':             msg.date.isoformat(),
-                'text':             (msg.text or msg.message or '')[:200],
-                'views':            msg.views or 0,
-                'forwards':         msg.forwards or 0,
-                'replies':          getattr(msg.replies, 'replies', 0) if msg.replies else 0,
-                'reactions':        reactions_total,
-                'reactions_detail': reactions_detail,
-                'media_type':       media_type,
-                'pinned':           msg.pinned or False,
-            })
-
+        posts = [_build_post(g) for g in _logical_posts(messages)]
         return {'posts': posts, 'count': len(posts)}
 
     except Exception as e:
@@ -172,54 +228,38 @@ async def get_views_summary(
     try:
         tg = await get_client()
         msgs = await tg.get_messages(CHANNEL, limit=limit)
+        posts = [_build_post(g) for g in _logical_posts(msgs)]   # album-collapsed
 
-        total_views = 0
-        total_forwards = 0
-        total_reactions = 0
-        total_replies = 0
+        total_views = total_forwards = total_reactions = total_replies = 0
         views_by_day = {}
         views_by_type = {}
 
-        for msg in msgs:
-            if not msg or msg.action:
-                continue
+        for p in posts:
+            v = p['views']
+            total_views     += v
+            total_forwards  += p['forwards']
+            total_reactions += p['reactions']
+            total_replies   += p['replies']
 
-            v = msg.views or 0
-            f = msg.forwards or 0
-            r = sum(x.count for x in (msg.reactions.results if msg.reactions else []))
-            rep = getattr(msg.replies, 'replies', 0) if msg.replies else 0
-
-            total_views += v
-            total_forwards += f
-            total_reactions += r
-            total_replies += rep
-
-            day = msg.date.strftime('%d.%m')
+            day = p['date'][8:10] + '.' + p['date'][5:7]   # DD.MM from ISO date
             views_by_day[day] = views_by_day.get(day, 0) + v
 
-            mtype = 'text'
-            if msg.photo:      mtype = 'photo'
-            elif msg.video:    mtype = 'video'
-            elif msg.poll:     mtype = 'poll'
-            elif msg.document: mtype = 'document'
-
-            if mtype not in views_by_type:
-                views_by_type[mtype] = []
-            views_by_type[mtype].append(v)
+            views_by_type.setdefault(p['media_type'], []).append(v)
 
         avg_by_type = {
             t: int(sum(vs) / len(vs))
             for t, vs in views_by_type.items() if vs
         }
+        n = len(posts)
 
         return {
             'total_views':       total_views,
             'total_forwards':    total_forwards,
             'total_reactions':   total_reactions,
             'total_replies':     total_replies,
-            'posts_analyzed':    limit,
-            'avg_views':         total_views // max(limit, 1),
-            'avg_forwards':      total_forwards // max(limit, 1),
+            'posts_analyzed':    n,
+            'avg_views':         total_views // max(n, 1),
+            'avg_forwards':      total_forwards // max(n, 1),
             'views_by_day':      views_by_day,
             'avg_views_by_type': avg_by_type,
         }

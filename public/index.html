@@ -1222,6 +1222,7 @@
           <p>Просмотры, реакции и&nbsp;вовлечённость · твой профиль (MTProto)</p>
         </div>
       </div>
+      <div class="panel" id="tg-digest" style="margin-bottom: 16px;"></div>
       <div class="kpi-grid" id="tg-channel-stats" style="margin-bottom: 16px;"></div>
       <div class="two-col">
         <div class="panel">
@@ -1243,6 +1244,10 @@
           <div class="chart-head"><span class="chart-title">Средние просмотры по&nbsp;типу контента</span></div>
           <div id="tg-type-breakdown" class="breakdown-box"></div>
         </div>
+      </div>
+      <div class="panel" style="margin-top: 16px;">
+        <div class="chart-head"><span class="chart-title">Эффективность хэштегов · lift к&nbsp;ERV</span><span id="tg-hashtags-note" style="font-size:var(--text-caption);color:var(--color-ghost-gray);"></span></div>
+        <div id="tg-hashtags" class="breakdown-box"></div>
       </div>
       <div class="two-col" style="margin-top: 16px;">
         <div class="panel">
@@ -1634,9 +1639,10 @@ document.getElementById('export-btn').addEventListener('click', () => {
     toast('Нет данных для экспорта', 'error');
     return;
   }
-  const rows = [['Дата','Источник','Подпись','Просмотры/Охват','Реакции/Лайки','Комментарии','Репосты','ER']];
+  const rows = [['Дата','Источник','Подпись','Просмотры/Охват','Реакции/Лайки','Комментарии','Репосты','ER %','ERV %','Виральность %']];
   const src = state.source === 'instagram' ? 'IG' : 'TG';
   const exp = state.posts.filter(p => p.source === src);
+  const r1 = (v) => (v == null || isNaN(v)) ? '' : v.toFixed(1);
   (exp.length ? exp : state.posts).forEach(p => {
     rows.push([
       p.date || '',
@@ -1646,7 +1652,9 @@ document.getElementById('export-btn').addEventListener('click', () => {
       p.likes || 0,
       p.comments || 0,
       p.shares || 0,
-      p.er || ''
+      r1(p.er),
+      r1(p.erv),
+      r1(p.virality)
     ]);
   });
   const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
@@ -2194,6 +2202,13 @@ function mediaTypeLabel(mt) {
   return t;
 }
 
+/* Percentage value → coloured tag (green/violet/orange) or muted dash */
+function pctTag(v, hi = 6, mid = 3) {
+  if (v == null || isNaN(v)) return '<span class="num muted">—</span>';
+  const cls = v >= hi ? 'green' : v >= mid ? 'violet' : 'orange';
+  return `<span class="tag ${cls}">${v.toFixed(1)}%</span>`;
+}
+
 function renderPosts() {
   const topGrid = document.getElementById('top-posts-grid');
   const list = document.getElementById('posts-list');
@@ -2207,7 +2222,7 @@ function renderPosts() {
   if (head) {
     const cols = state.source === 'instagram'
       ? ['', 'Пост', 'Источник', 'Охват', 'Показы', 'Лайки', '💬', '🔖/↗', 'ER']
-      : ['', 'Пост', 'Источник', 'Просмотры', 'Показы', 'Реакции', 'Комменты', 'Репосты', 'ER'];
+      : ['', 'Пост', 'Ист.', 'Просмотры', 'Реакции', 'Репосты', 'Вирал.', 'ERV', 'ER'];
     head.innerHTML = cols.map((c, i) => i <= 1 ? `<div>${c}</div>` : `<div style="text-align: right;">${c}</div>`).join('');
   }
 
@@ -2281,34 +2296,51 @@ function renderPosts() {
 
   // ── Posts table ────────────────────────────────────
   list.innerHTML = sorted.slice(0, 25).map(p => {
-    const er = p.er != null
-      ? p.er
-      : (p.likes && p.reach ? (p.likes / p.reach * 100) : null);
-    const erTag = er == null
-      ? '<span class="num muted">—</span>'
-      : `<span class="tag ${er >= 6 ? 'green' : er >= 3 ? 'violet' : 'orange'}">${er.toFixed(1)}%</span>`;
+    const isTg = p.source === 'TG';
     const thumb = p.thumb
       ? `<img class="post-thumb" src="${p.thumb}" alt="" loading="lazy" referrerpolicy="no-referrer">`
       : `<div class="post-thumb"></div>`;
-    const sourceTag = `<span class="tag ${p.source === 'TG' ? 'green' : 'violet'}">${p.source || '—'}</span>`;
+    const sourceTag = `<span class="tag ${isTg ? 'green' : 'violet'}">${p.source || '—'}</span>`;
     const caption = (p.caption || 'Без подписи').slice(0, 80);
-    const sharesOrSaved = (p.saved || 0) + (p.shares || 0);
+    const albumBadge = (p.albumSize > 1)
+      ? ` <span class="tag" style="background:var(--color-powder-blue);color:var(--color-slate-blue)">📷 ${p.albumSize}</span>`
+      : '';
     const clickAttr = (p.id != null) ? ` data-postid="${escapeHtml(String(p.id))}" style="cursor:pointer"` : '';
+    const captionCell = `
+        <div class="post-caption">
+          <div class="title">${escapeHtml(caption)}${albumBadge}</div>
+          <div class="date">${escapeHtml(fmt.date(p.date) || '')}</div>
+        </div>`;
 
+    if (isTg) {
+      return `
+      <div class="posts-row"${clickAttr}>
+        ${thumb}
+        ${captionCell}
+        <div style="text-align: right;">${sourceTag}</div>
+        <div class="num">${fmt.num(p.reach)}</div>
+        <div class="num">${fmt.num(p.likes)}</div>
+        <div class="num">${p.shares ? fmt.num(p.shares) : '<span class="muted">—</span>'}</div>
+        <div class="num" style="text-align: right;">${p.virality != null ? p.virality.toFixed(1) + '%' : '<span class="muted">—</span>'}</div>
+        <div class="num" style="text-align: right;">${pctTag(p.erv)}</div>
+        <div class="num" style="text-align: right;">${pctTag(p.er, 1.5, 0.5)}</div>
+      </div>`;
+    }
+
+    // Instagram row (unchanged layout)
+    const er = p.er != null ? p.er : (p.likes && p.reach ? (p.likes / p.reach * 100) : null);
+    const sharesOrSaved = (p.saved || 0) + (p.shares || 0);
     return `
       <div class="posts-row"${clickAttr}>
         ${thumb}
-        <div class="post-caption">
-          <div class="title">${escapeHtml(caption)}</div>
-          <div class="date">${escapeHtml(fmt.date(p.date) || '')}</div>
-        </div>
+        ${captionCell}
         <div style="text-align: right;">${sourceTag}</div>
         <div class="num">${fmt.num(p.reach)}</div>
         <div class="num">${p.impressions ? fmt.num(p.impressions) : '<span class="muted">—</span>'}</div>
         <div class="num">${fmt.num(p.likes)}</div>
         <div class="num">${p.comments ? fmt.num(p.comments) : '<span class="muted">—</span>'}</div>
         <div class="num">${sharesOrSaved ? fmt.num(sharesOrSaved) : '<span class="muted">—</span>'}</div>
-        <div class="num" style="text-align: right;">${erTag}</div>
+        <div class="num" style="text-align: right;">${pctTag(er)}</div>
       </div>
     `;
   }).join('');
@@ -2648,13 +2680,21 @@ function renderTgAnalytics() {
     const rpp = cur(cs.reactions_per_post);
     const notif = cs.enabled_notifications || null;
     const notifPct = notif && notif.total ? (notif.part / notif.total * 100) : null;
+    // Sprint 1: average ERV & virality from per-post metrics
+    const tgp = (state.posts || []).filter(p => p.source === 'TG');
+    const ervVals = tgp.map(p => p.erv).filter(v => v != null);
+    const virVals = tgp.map(p => p.virality).filter(v => v != null);
+    const avgErv = ervVals.length ? ervVals.reduce((a, b) => a + b, 0) / ervVals.length : null;
+    const avgVir = virVals.length ? virVals.reduce((a, b) => a + b, 0) / virVals.length : null;
     const cards = [
       { label: 'Просмотров / пост', value: fmt.short(vpp != null ? vpp : (vs.avg_views || 0)), delta: vs.posts_analyzed ? `по ${vs.posts_analyzed} постам` : null },
+      { label: 'Ср. ERV',          value: avgErv != null ? avgErv.toFixed(1) + '%' : '—', delta: 'вовлечённость на просмотр' },
+      { label: 'Виральность',      value: avgVir != null ? avgVir.toFixed(1) + '%' : '—', delta: 'репосты / просмотры' },
       { label: 'Репостов / пост',   value: spp != null ? fmt.short(spp) : '—', delta: vs.total_forwards ? `${fmt.short(vs.total_forwards)} всего` : null },
       { label: 'Реакций / пост',    value: rpp != null ? fmt.short(rpp) : '—', delta: vs.total_reactions ? `${fmt.short(vs.total_reactions)} всего` : null },
       { label: 'Уведомления вкл.',  value: notifPct != null ? notifPct.toFixed(1) + '%' : '—', delta: notif ? `${fmt.short(notif.part)} из ${fmt.short(notif.total)}` : null }
     ];
-    statsGrid.style.gridTemplateColumns = 'repeat(4, 1fr)';
+    statsGrid.style.gridTemplateColumns = 'repeat(auto-fit, minmax(150px, 1fr))';
     statsGrid.innerHTML = cards.map(c => `
       <div class="kpi-card">
         <div class="kpi-label">${c.label}</div>
@@ -2854,7 +2894,107 @@ function renderTgAnalytics() {
     wbEl.textContent = maxAvg > 0 ? `лучший день: ${wdLabels[wdAvg.indexOf(maxAvg)]}` : '';
   }
 
+  renderHashtags();
+  renderDigest();
   addExpandButtons('#tg-analytics');
+}
+
+/* ── Hashtag effectiveness: lift of avg ERV (tagged vs untagged) ── */
+function renderHashtags() {
+  const el = document.getElementById('tg-hashtags');
+  const note = document.getElementById('tg-hashtags-note');
+  if (!el) return;
+  const tgp = (state.posts || []).filter(p => p.source === 'TG' && p.erv != null);
+  const tagMap = {};            // lowercased tag → { count, sum, label }
+  let baseSum = 0, baseCount = 0;
+  tgp.forEach(p => {
+    const tags = Array.isArray(p.hashtags) ? p.hashtags : [];
+    if (!tags.length) { baseSum += p.erv; baseCount++; return; }
+    const uniq = {};
+    tags.forEach(t => { uniq[t.toLowerCase()] = t; });
+    Object.entries(uniq).forEach(([low, label]) => {
+      if (!tagMap[low]) tagMap[low] = { count: 0, sum: 0, label };
+      tagMap[low].count += 1;
+      tagMap[low].sum += p.erv;
+    });
+  });
+  const baseAvg = baseCount ? baseSum / baseCount : null;
+  const items = Object.values(tagMap)
+    .map(o => ({ label: o.label, count: o.count, avgErv: o.sum / o.count, lift: baseAvg ? (o.sum / o.count) / baseAvg : null }))
+    .filter(x => x.count >= 2)
+    .sort((a, b) => ((b.lift != null ? b.lift : b.avgErv) - (a.lift != null ? a.lift : a.avgErv)))
+    .slice(0, 10);
+
+  if (!items.length) {
+    el.innerHTML = `<div class="breakdown-title" style="color:var(--color-ghost-gray)">Мало данных: нужно ≥2 поста с одним хэштегом.</div>`;
+    if (note) note.textContent = '';
+    return;
+  }
+  if (note) note.textContent = baseAvg != null ? `база без тегов: ${baseAvg.toFixed(1)}% ERV` : '';
+  el.innerHTML = breakdownRows(items.map(x => ({
+    label: x.label,
+    value: x.lift != null ? x.lift : x.avgErv,
+    display: x.lift != null ? `×${x.lift.toFixed(2)} · ${x.count}п` : `${x.avgErv.toFixed(1)}% · ${x.count}п`,
+    color: x.lift != null ? (x.lift >= 1 ? 'var(--color-accent-green)' : 'var(--color-vibrant-orange)') : undefined
+  })));
+}
+
+/* ── Weekly digest: rule-based "итоги недели" narrative ────────── */
+function renderDigest() {
+  const el = document.getElementById('tg-digest');
+  if (!el) return;
+  const vs = state.tg.viewsSummary || {};
+  const graphs = state.tg.graphs || {};
+  const tgp = (state.posts || []).filter(p => p.source === 'TG');
+
+  const totalViews = vs.total_views || 0;
+  const postsN = vs.posts_analyzed || tgp.length;
+  const avgViews = vs.avg_views || 0;
+
+  let net = null;
+  const f = graphs.followers;
+  if (f && f.series && f.series.length >= 2) {
+    const j = f.series.find(s => /join|подпис/i.test(s.name)) || f.series[0];
+    const l = f.series.find(s => /left|отпис/i.test(s.name)) || f.series[1];
+    const m = Math.min(j.values.length, l.values.length);
+    let jt = 0, lt = 0;
+    for (let i = 0; i < m; i++) { jt += Number(j.values[i]) || 0; lt += Number(l.values[i]) || 0; }
+    net = jt - lt;
+  }
+
+  const ervVals = tgp.map(p => p.erv).filter(v => v != null);
+  const avgErv = ervVals.length ? ervVals.reduce((a, b) => a + b, 0) / ervVals.length : null;
+  const best = [...tgp].sort((a, b) => (b.reach || 0) - (a.reach || 0))[0];
+
+  const wdViews = Array(7).fill(0), wdCount = Array(7).fill(0);
+  tgp.forEach(p => { if (!p.date) return; const d = new Date(p.date).getDay(); if (isNaN(d)) return; wdViews[d] += p.reach || 0; wdCount[d] += 1; });
+  const wdOrder = [1, 2, 3, 4, 5, 6, 0], wdLabels = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+  const wdAvg = wdOrder.map(i => wdCount[i] ? wdViews[i] / wdCount[i] : 0);
+  const bestWd = Math.max(...wdAvg) > 0 ? wdLabels[wdAvg.indexOf(Math.max(...wdAvg))] : null;
+
+  let peakHour = null;
+  const th = graphs.top_hours;
+  if (th && th.values && th.values.length) {
+    const pi = th.values.indexOf(Math.max(...th.values));
+    peakHour = (th.hours && th.hours[pi] != null) ? th.hours[pi] : pi;
+  }
+
+  const I = (icon, text) => `<div style="display:flex;gap:10px;align-items:flex-start;padding:5px 0"><span style="font-size:16px;flex:0 0 auto">${icon}</span><span>${text}</span></div>`;
+  const lines = [];
+  lines.push(I('👁', `<b>${fmt.short(totalViews)}</b> просмотров за период · ${postsN} постов · в среднем <b>${fmt.short(avgViews)}</b> на пост.`));
+  if (net != null) lines.push(I(net >= 0 ? '📈' : '📉', `Подписчики: <b>${net >= 0 ? '+' : ''}${fmt.num(net)}</b> чистыми за период.`));
+  if (avgErv != null) lines.push(I('💬', `Средний ERV <b>${avgErv.toFixed(1)}%</b> — вовлечённость на просмотр.`));
+  if (best && best.reach) lines.push(I('🏆', `Топ-пост: «${escapeHtml((best.caption || 'без подписи').slice(0, 70))}» — <b>${fmt.short(best.reach)}</b> просмотров${best.erv != null ? `, ERV ${best.erv.toFixed(1)}%` : ''}.`));
+  if (bestWd || peakHour != null) {
+    const rec = [];
+    if (bestWd) rec.push(`день — <b>${bestWd}</b>`);
+    if (peakHour != null) rec.push(`час — <b>${peakHour}:00</b>`);
+    lines.push(I('🎯', `Когда постить: ${rec.join(', ')}.`));
+  }
+
+  el.innerHTML = `
+    <div class="chart-head"><span class="chart-title">Итоги за ${currentPeriod} дн.</span><span style="font-size:var(--text-caption);color:var(--color-ghost-gray)">авто-сводка</span></div>
+    <div style="font-size:var(--text-body);line-height:1.45">${lines.join('')}</div>`;
 }
 
 /* ── Hero rendering ──────────────────────────────────────────── */
@@ -2950,24 +3090,37 @@ async function loadAll() {
 
   // Unified posts list — merge IG + TG posts
   const tgUsername = pick(state.tg.channel, ['username','channel_username']) || '';
-  const tgPostsNormalized = (state.tg.fullPosts || []).map(p => ({
-    id: p.id,
-    source: 'TG',
-    caption: p.text || p.caption || '',
-    date: p.date,
-    thumb: (p.media_type === 'photo' || p.media_type === 'video') && p.id != null ? `/api/tg/mtproto/thumb/${p.id}` : null,
-    permalink: tgUsername && p.id ? `https://t.me/${tgUsername}/${p.id}` : null,
-    mediaType: p.media_type || null,
-    reach: p.views || p.view_count || 0,
-    impressions: 0,
-    likes: p.reactions || p.reactions_count || 0,
-    comments: p.replies || p.comments_count || 0,
-    shares: p.forwards || 0,
-    saved: 0,
-    reactionsDetail: Array.isArray(p.reactions_detail) ? p.reactions_detail : [],
-    pinned: !!p.pinned,
-    er: null
-  }));
+  const tgFollowers = pick(state.tg.channel, ['memberCount','members_count','member_count','subscribers']) || 0;
+  const tgPostsNormalized = (state.tg.fullPosts || []).map(p => {
+    const reach   = p.views || p.view_count || 0;
+    const likes   = p.reactions || p.reactions_count || 0;
+    const comments = p.replies || p.comments_count || 0;
+    const shares  = p.forwards || 0;
+    const eng     = likes + shares + comments;             // total interactions
+    return {
+      id: p.id,
+      source: 'TG',
+      caption: p.text || p.caption || '',
+      date: p.date,
+      thumb: (p.media_type === 'photo' || p.media_type === 'video') && p.id != null ? `/api/tg/mtproto/thumb/${p.id}` : null,
+      permalink: tgUsername && p.id ? `https://t.me/${tgUsername}/${p.id}` : null,
+      mediaType: p.media_type || null,
+      reach,
+      impressions: 0,
+      likes,
+      comments,
+      shares,
+      saved: 0,
+      reactionsDetail: Array.isArray(p.reactions_detail) ? p.reactions_detail : [],
+      hashtags: Array.isArray(p.hashtags) ? p.hashtags : [],
+      albumSize: p.album_size || 0,
+      pinned: !!p.pinned,
+      // derived metrics (Sprint 1)
+      erv:      reach > 0 ? (eng / reach) * 100 : null,        // interactions per view — fair, follower-independent
+      virality: reach > 0 ? (shares / reach) * 100 : null,     // organic spread
+      er:       tgFollowers > 0 ? (eng / tgFollowers) * 100 : null
+    };
+  });
   state.posts = [...state.ig.posts, ...tgPostsNormalized];
 
   // Determine status
