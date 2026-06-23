@@ -8,6 +8,7 @@ import os
 import json
 import logging
 import re
+from collections import OrderedDict
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Header, Query, Response
@@ -573,8 +574,10 @@ async def get_velocity(
             't80_days':   (int(t80_med) + 1) if t80_med is not None else None,
         }
     except Exception as e:
+        # реальный сбой (сеть/сессия/неожиданное) → честный 5xx для мониторинга.
+        # Легитимный «нет подходящих постов» отдаётся выше как 200 {available:False}.
         log.error(f'velocity error: {e}')
-        return {'available': False, 'error': str(e)}
+        raise HTTPException(status_code=503, detail=str(e))
 
 
 # ── Mentions helpers (reused from notem-mention-monitor) ──
@@ -701,11 +704,13 @@ async def get_mentions(x_internal_token: str = Header(default='')):
             'skipped':         skipped,
         }
     except Exception as e:
+        # внешний сбой (get_client / неожиданное); пер-запросные ошибки searchPosts
+        # уже обработаны внутри цикла (skip). → честный 5xx для мониторинга.
         log.error(f'mentions error: {e}')
-        return {'available': False, 'error': str(e)}
+        raise HTTPException(status_code=503, detail=str(e))
 
 
-_THUMB_CACHE = {}
+_THUMB_CACHE = OrderedDict()   # LRU: move_to_end on hit, popitem(last=False) drops the least-recently-used
 _THUMB_CACHE_MAX = 500
 
 @app.get('/thumb/{msg_id}')
@@ -715,6 +720,7 @@ async def get_thumb(msg_id: int, size: str = Query(default='sm'), x_internal_tok
     check_auth(x_internal_token)
     key = f'{msg_id}:{size}'
     if key in _THUMB_CACHE:
+        _THUMB_CACHE.move_to_end(key)   # mark recently used (LRU)
         return Response(content=_THUMB_CACHE[key], media_type='image/jpeg',
                         headers={'Cache-Control': 'public, max-age=86400'})
     try:
@@ -734,9 +740,10 @@ async def get_thumb(msg_id: int, size: str = Query(default='sm'), x_internal_tok
                 continue
         if not data:
             raise HTTPException(status_code=404, detail='no thumbnail')
-        if len(_THUMB_CACHE) >= _THUMB_CACHE_MAX:
-            _THUMB_CACHE.pop(next(iter(_THUMB_CACHE)), None)
         _THUMB_CACHE[key] = data
+        _THUMB_CACHE.move_to_end(key)
+        while len(_THUMB_CACHE) > _THUMB_CACHE_MAX:
+            _THUMB_CACHE.popitem(last=False)   # evict least-recently-used
         return Response(content=data, media_type='image/jpeg',
                         headers={'Cache-Control': 'public, max-age=86400'})
     except HTTPException:

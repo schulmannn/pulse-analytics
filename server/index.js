@@ -20,7 +20,12 @@ app.set('trust proxy', 1);   // behind Railway's proxy → correct client IP for
 db.init().then(bootstrapAdmin).catch(e => console.error('[db] init failed:', e.message));
 
 // ── Middleware ───────────────────────────────────────────────────
-app.use(cors());
+// CORS: дашборд обслуживается тем же origin (Express отдаёт и статику, и API),
+// поэтому кросс-доменный доступ по умолчанию не нужен → не отдаём wildcard ACAO.
+// Для будущих внешних API-клиентов origin'ы можно явно разрешить через
+// CORS_ORIGINS (список через запятую).
+const CORS_ORIGINS = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
+app.use(cors({ origin: CORS_ORIGINS.length ? CORS_ORIGINS : false, credentials: false }));
 app.use(express.json());   // default 100kb — большие тела только на upload-маршруте (route-local парсер)
 app.use(express.static(path.join(__dirname, '../public')));
 
@@ -511,11 +516,10 @@ app.get('/api/tg/mtproto/stats', requireAuth, async (req, res) => {
     cacheSet(cacheKey, data);
     res.json(data);
   } catch (e) {
-    res.status(200).json({
-      error:     e.message,
-      available: false,
-      hint:      'Статистика доступна только для каналов с 500+ подписчиков'
-    });
+    // Сюда попадаем только при РЕАЛЬНОМ сбое (MTProto-сервис недоступен): кейс
+    // «нет статистики у мелкого канала» Python отдаёт как 200 {available:false}
+    // и оно проходит насквозь. Поэтому здесь честный 503 для мониторинга.
+    res.status(503).json({ error: e.message, available: false, hint: 'MTProto сервис недоступен' });
   }
 });
 
@@ -528,7 +532,7 @@ app.get('/api/tg/mtproto/graphs', requireAuth, async (req, res) => {
     cacheSet(cacheKey, data);
     res.json(data);
   } catch (e) {
-    res.status(200).json({ error: e.message, available: false });
+    res.status(503).json({ error: e.message, available: false });
   }
 });
 
@@ -559,7 +563,7 @@ app.get('/api/tg/mtproto/velocity', requireAuth, async (req, res) => {
     }
     res.json(data);
   } catch (e) {
-    res.status(200).json({ error: e.message, available: false });
+    res.status(503).json({ error: e.message, available: false });
   }
 });
 
@@ -582,7 +586,7 @@ app.get('/api/tg/mtproto/mentions', requireAuth, async (req, res) => {
     }
     res.json(data);
   } catch (e) {
-    res.status(200).json({ error: e.message, available: false });
+    res.status(503).json({ error: e.message, available: false });
   }
 });
 
@@ -597,7 +601,7 @@ app.get('/api/tg/mtproto/post_stats/:id', requireAuth, async (req, res) => {
     cacheSet(cacheKey, data);
     res.json(data);
   } catch (e) {
-    res.status(200).json({ available: false, error: e.message });
+    res.status(503).json({ available: false, error: e.message });
   }
 });
 
