@@ -78,6 +78,20 @@ CREATE TABLE IF NOT EXISTS user_prefs (
   prefs JSONB NOT NULL DEFAULT '{}'::jsonb,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Email verification / password-reset tokens (Sprint 1B). The raw token is sent
+-- only in the email; we store its sha256. Single-use (used_at) + expiry, hashed
+-- at rest so a DB read can't forge a link.
+CREATE TABLE IF NOT EXISTS email_tokens (
+  id SERIAL PRIMARY KEY,
+  uid INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,                  -- 'verify' | 'reset'
+  token_hash TEXT NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  used_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS email_tokens_hash_idx ON email_tokens(token_hash);
+CREATE INDEX IF NOT EXISTS email_tokens_uid_kind_idx ON email_tokens(uid, kind);
 -- Снапшот "velocity" (жизнь поста). Считается тяжело (до ~12 последовательных
 -- GetMessageStats), поэтому строится в ingest-кроне раз в день и кэшируется здесь,
 -- чтобы дашборд-эндпоинт читал готовый JSON, а не дёргал Telegram в HTTP-запросе.
@@ -138,7 +152,7 @@ CREATE INDEX IF NOT EXISTS mentions_owner_idx ON mentions(owner_channel_id);
 `;
 
 const USER_ROLES = ['user', 'superuser'];
-const USER_STATUSES = ['pending', 'active', 'disabled'];
+const USER_STATUSES = ['unverified', 'pending', 'active', 'disabled'];
 const BUG_STATUSES = ['open', 'in_progress', 'done', 'wont_fix'];
 const BUG_SEVERITIES = ['low', 'medium', 'high'];
 const BUG_KINDS = ['bug', 'feature', 'change'];
@@ -450,6 +464,42 @@ async function setUserPassword(id, pass_hash) {
   return true;
 }
 
+async function setUserStatus(id, status) {
+  if (!enabled) return null;
+  if (!USER_STATUSES.includes(status)) throw new Error('bad status');
+  const { rows } = await pool.query(
+    'UPDATE users SET status=$2 WHERE id=$1 RETURNING id, email, role, status', [id, status]);
+  return rows[0] || null;
+}
+
+// ── Email tokens (verify / reset) ─────────────────────────────────
+// Issuing a new token of a kind invalidates the user's prior unused ones of that
+// kind, so only the latest emailed link works.
+async function createEmailToken(uid, kind, tokenHash, expiresAt) {
+  if (!enabled) return null;
+  // Per-account cooldown (independent of IP rate-limit): at most one email per
+  // minute per uid+kind → blocks email-bombing a victim / burning the send quota.
+  const recent = await pool.query(
+    "SELECT 1 FROM email_tokens WHERE uid=$1 AND kind=$2 AND created_at > now() - interval '60 seconds' LIMIT 1", [uid, kind]);
+  if (recent.rows.length) return null;
+  await pool.query('UPDATE email_tokens SET used_at=now() WHERE uid=$1 AND kind=$2 AND used_at IS NULL', [uid, kind]);
+  const { rows } = await pool.query(
+    'INSERT INTO email_tokens (uid, kind, token_hash, expires_at) VALUES ($1,$2,$3,$4) RETURNING id',
+    [uid, kind, tokenHash, expiresAt]);
+  return rows[0] ? rows[0].id : null;
+}
+
+// Atomically consume a token: single-use + expiry enforced in one UPDATE … RETURNING,
+// so concurrent double-clicks can't both succeed. Returns { uid } or null.
+async function useEmailToken(tokenHash, kind) {
+  if (!enabled) return null;
+  const { rows } = await pool.query(
+    `UPDATE email_tokens SET used_at=now()
+       WHERE token_hash=$1 AND kind=$2 AND used_at IS NULL AND expires_at > now()
+       RETURNING uid`, [tokenHash, kind]);
+  return rows[0] ? { uid: rows[0].uid } : null;
+}
+
 /* ── Персональная раскладка дашборда ─────────────────────────────
    Возвращает сохранённый объект prefs (или null, если ничего нет /
    нет БД / гость без аккаунта). Запись — upsert по uid. */
@@ -568,6 +618,7 @@ module.exports = {
   enabled, init, graphsToDailyRows,
   USER_ROLES, USER_STATUSES,
   countUsers, createUser, getUserByEmail, getUserById, listUsers, updateUser, setUserPassword,
+  setUserStatus, createEmailToken, useEmailToken,
   getPrefs, setPrefs,
   adoptOwnerChannel, listChannels, getChannel, getChannelById, getOwnerChannelId, setChannelTgId,
   saveVelocity, getLatestVelocity,
