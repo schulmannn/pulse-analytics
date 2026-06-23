@@ -3568,7 +3568,7 @@ function renderTgAnalytics() {
       const prevEntries = sortedAll.slice(-28, -14);   // equal-length window just before
       const vd = entries.map(e => e.v);
       const pv = prevEntries.map(e => e.v);
-      const hasPrev = pv.length > 0;
+      const hasPrev = pv.length === vd.length;   // only overlay a full equal-length window (else x-misaligns)
       const lo = Math.min(...vd, ...(hasPrev ? pv : []));
       const hi = Math.max(...vd, ...(hasPrev ? pv : []));
       chartEl.innerHTML = lineChartSvg(vd, hasPrev ? { prev: pv, min: lo, max: hi } : {});
