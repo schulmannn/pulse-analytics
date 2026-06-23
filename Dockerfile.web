@@ -1,0 +1,18 @@
+# Pulse Analytics — WEB-сервис (Node/Express + дашборд).
+# Публичный сервис на Railway ($PORT). К MTProto-микросервису ходит по ПРИВАТНОЙ
+# сети Railway через MTPROTO_URL (напр. http://mtproto.railway.internal:8001).
+# Часть сплита рантаймов: Python в этом образе НЕТ (см. Dockerfile.mtproto).
+FROM node:20-slim
+
+ENV NODE_ENV=production
+WORKDIR /app
+
+# Node-зависимости (lock-файла нет → обычный install)
+COPY package.json ./
+RUN npm install --omit=dev
+
+# Только то, что нужно вебу (mtproto/ — отдельный сервис, сюда не копируем)
+COPY server ./server
+COPY public ./public
+
+CMD ["node", "server/index.js"]

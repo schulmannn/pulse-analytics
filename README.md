@@ -8,22 +8,37 @@
 
 ## Архитектура
 
-Один контейнер запускает **два процесса**:
+**Прод (Railway): два независимых сервиса**, связанные приватной сетью —
+веб может рестартовать/скейлиться/деплоиться отдельно от тяжёлого MTProto-клиента,
+а падение Python не утаскивает дашборд и не мешает логам.
 
 ```
 pulse-analytics/
-├── server/index.js     ← Node/Express: отдаёт дашборд + API на публичном $PORT,
-│                          проксирует /api/tg/mtproto/* на Python-сервис
+├── server/index.js     ← Node/Express: дашборд + API на публичном $PORT,
+│                          проксирует /api/tg/mtproto/* в MTProto-сервис
 ├── public/index.html   ← фронтенд (vanilla JS, inline-SVG графики, без CDN)
 ├── mtproto/
-│   ├── service.py       ← Python/FastAPI + Telethon (MTProto) на внутреннем :8001
+│   ├── service.py       ← Python/FastAPI + Telethon (MTProto), слушает :8001
 │   └── requirements.txt
-├── Dockerfile          ← собирает Node + Python в один образ
+├── Dockerfile.web       ← образ WEB-сервиса (только Node)        ← публичный
+├── Dockerfile.mtproto   ← образ MTProto-сервиса (только Python)  ← приватный
+├── Dockerfile           ← LEGACY: оба процесса в одном образе (локалка/миграция)
 └── package.json
 ```
 
-`Dockerfile` CMD: `python3 mtproto/service.py & exec node server/index.js`.
-Node ходит к Python по `MTPROTO_URL` (по умолчанию `http://localhost:8001`).
+```
+[браузер] ──► WEB (Node, $PORT, публичный домен)
+                   │  MTPROTO_URL=http://mtproto.railway.internal:8001
+                   ▼
+              MTPROTO (Python/Telethon, :8001, приватный, без домена) ──► Telegram
+```
+
+Web ходит к Python по `MTPROTO_URL`; аутентификация межсервисная — заголовок
+`x-internal-token: TEAM_PASSWORD` (общий секрет на обоих сервисах).
+
+Для **локальной разработки** удобнее legacy-режим (оба процесса разом) — см.
+«Запуск локально». Корневой `Dockerfile` оставлен ради него и zero-downtime
+миграции; после катовера его можно удалить.
 
 ## Переменные окружения
 
@@ -33,7 +48,8 @@ Node ходит к Python по `MTPROTO_URL` (по умолчанию `http://lo
 | `TG_API_ID` / `TG_API_HASH` | приложение Telegram с my.telegram.org (та же пара, которой создавалась сессия) |
 | `TG_SESSION` | **StringSession** твоего аккаунта (см. ниже) |
 | `TG_CHANNEL` | канал, напр. `@bynotem` |
-| `MTPROTO_PORT` | внутренний порт Python-сервиса (по умолчанию `8001`) |
+| `MTPROTO_PORT` | порт, который слушает Python-сервис (по умолчанию `8001`) |
+| `MTPROTO_URL` | **(web)** адрес MTProto-сервиса; при сплите — `http://<mtproto>.railway.internal:8001`; локально/legacy — `http://localhost:8001` |
 | `PORT` | порт Node (на Railway выставить `8080` и навести домен на него) |
 | `TG_BOT_TOKEN` | *опционально* — Bot API как резерв; MTProto работает и без него |
 | `IG_ACCESS_TOKEN` / `IG_ACCOUNT_ID` | *опционально* — Instagram (пока не используется) |
@@ -61,14 +77,46 @@ python3 mtproto/service.py &     # MTProto на :8001
 npm start                        # сайт на http://localhost:3000
 ```
 
-## Деплой на Railway
+## Деплой на Railway — два сервиса (рекомендуется)
 
-1. New Project → Deploy from GitHub → этот репозиторий.
-2. **Settings → Root Directory: пусто** (чтобы собирался корневой `Dockerfile`,
-   а не папка `mtproto`). **Custom Start Command: пусто** (используется CMD из Dockerfile).
-3. **Variables:** задать переменные из таблицы выше (`PORT=8080`).
-4. **Networking:** домен → target port **8080** (порт Node).
-5. Пуш в `main` → автодеплой.
+Оба сервиса деплоятся из ЭТОГО же репозитория, отличаются только Dockerfile'ом
+(Settings → Build → **Dockerfile Path**, либо переменная `RAILWAY_DOCKERFILE_PATH`).
+`TEAM_PASSWORD` и `TG_CHANNEL` должны совпадать на обоих.
+
+**1. MTProto-сервис (приватный) — создать первым:**
+- New Service → Deploy from GitHub → этот репозиторий.
+- **Dockerfile Path:** `Dockerfile.mtproto`.
+- **Variables:** `TG_API_ID`, `TG_API_HASH`, `TG_SESSION`, `TG_CHANNEL`,
+  `TEAM_PASSWORD`, `MTPROTO_PORT=8001` (+ опц. `MENTION_QUERIES`, `MENTION_EXCLUDE`).
+- **Networking:** публичный домен НЕ создавать (сервис только во внутренней сети).
+- Деплой → проверить по логам, что Telethon подключился.
+
+**2. WEB-сервис (публичный):**
+- Либо переиспользовать текущий сервис, либо создать новый из репозитория.
+- **Dockerfile Path:** `Dockerfile.web`.
+- **Variables:** `TEAM_PASSWORD` (тот же!), `TG_CHANNEL` (тот же), `PORT=8080`,
+  `DATABASE_URL`, `INGEST_TOKEN`, `SESSION_SECRET`, `ADMIN_EMAIL`/`ADMIN_PASSWORD`,
+  `GITHUB_REPO`/`GITHUB_DISPATCH_TOKEN`, опц. `TG_BOT_TOKEN`, `IG_*`, и главное —
+  **`MTPROTO_URL=http://<имя-mtproto-сервиса>.railway.internal:8001`**.
+- **Networking:** публичный домен → target port **8080**.
+
+**Порядок катовера (zero-downtime):** mtproto подняли и проверили → затем
+переключили web на `Dockerfile.web` + добавили `MTPROTO_URL` → проверили дашборд →
+старый одно-контейнерный сервис вывели из-под домена и удалили.
+
+**Откат:** вернуть web на корневой `Dockerfile` (legacy, оба процесса в одном
+образе) и убрать `MTPROTO_URL` — сайт снова самодостаточен.
+
+> Ingest-крон (`.github/workflows/ingest.yml`) бьёт в публичный web
+> `/api/ingest/daily`, поэтому при сплите его менять не нужно — web сам ходит в
+> mtproto по приватной сети.
+
+### Legacy: один сервис (один контейнер)
+
+Корневой `Dockerfile` собирает оба процесса в один образ
+(`python3 mtproto/service.py & exec node server/index.js`). Для него: Root
+Directory пусто, `MTPROTO_URL` не задавать (дефолт `http://localhost:8001`),
+`PORT=8080`, домен на 8080. Подходит для быстрого старта и локалки.
 
 ## ⚠️ Важно: версия Telethon
 
