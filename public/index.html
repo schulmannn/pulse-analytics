@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Pulse Analytics</title>
+<script>try{if(localStorage.getItem('pulse_theme')==='dark')document.documentElement.dataset.theme='dark';}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
@@ -57,7 +58,45 @@
     --gap-section: 64px;
     --gap-element: 8px;
     --pad-card:    12px;
+
+    --chart-grid:  #e5edf5;                 /* SVG gridlines (recoloured in dark) */
+    --yaxis-bg:    rgba(248,250,253,0.8);   /* y-axis label chip background */
+    --accent-text: var(--color-deep-violet);/* accent used as TEXT (lightened in dark) */
   }
+
+  /* ================================================================
+     DARK THEME — overrides token VALUES only; component rules unchanged.
+     Surfaces flip via --color-platinum/porcelain/canvas; text via
+     --color-midnight-ink/slate-blue/ghost-gray. Accent/green/orange kept.
+     ================================================================ */
+  html[data-theme="dark"] {
+    --color-midnight-ink:   #e8eef7;   /* primary text → light */
+    --color-slate-blue:     #aab8cc;   /* body / secondary text */
+    --color-ghost-gray:     #8593a8;   /* muted helper text */
+    --color-pewter:         #768499;   /* tertiary / prev-period line */
+    --color-stone-gray:     #30404f;   /* stronger border */
+    --color-powder-blue:    #222e3c;   /* borders / dividers / subtle fills */
+    --color-porcelain:      #161f29;   /* soft inset surface */
+    --color-platinum:       #1a232f;   /* cards / panels / top bar / elevated */
+    --color-canvas:         #0d141c;   /* page background — near-black blue */
+    --accent-wash:          #262247;   /* active nav / chip / ghost-hover */
+    --color-washed-violet:  #2b2856;
+    --chart-grid:           #243140;
+    --yaxis-bg:             rgba(13,20,28,0.85);
+    --gradient-sunburst:    linear-gradient(90deg, #7b68ff, #aab8cc);  /* brighter hero on dark */
+    --accent-text:          #9a8cff;   /* accent-as-text, lightened for dark contrast */
+    --gradient-dreamy:      radial-gradient(circle, #3a2f8a, #6a2a66 33%, #1a232f 66%);  /* dark placeholders + glow */
+    --shadow-feature: rgba(0,0,0,0.35) 0px 3px 6px 0px;
+    --shadow-hover:   rgba(0,0,0,0.45) 0px 16px 32px 0px;
+    --shadow-soft:    rgba(0,0,0,0.35) 0px 3px 6px 0px;
+    --shadow-elev:    rgba(0,0,0,0.5)  0px 15px 35px 0px;
+  }
+  html[data-theme="dark"] body { color-scheme: dark; }
+  /* SVG gridlines/baselines drawn with the light Mist hex → recolour via attr selector (no JS change) */
+  svg line[stroke="#e5edf5"] { stroke: var(--chart-grid); }
+  svg text[fill="#64748d"] { fill: var(--color-ghost-gray); }                    /* empty-state text follows theme */
+  html[data-theme="dark"] svg [stroke="#533afd"] { stroke: var(--accent-text); } /* brighten chart data line on dark */
+  html[data-theme="dark"] svg [fill="#533afd"]   { fill:   var(--accent-text); } /* …and its area / dots / bars */
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -238,7 +277,7 @@
     align-items: center;
     gap: 6px;
   }
-  .btn-outline:hover { background: var(--color-midnight-ink); color: #ffffff; border-color: var(--color-midnight-ink); }
+  .btn-outline:hover { background: var(--color-midnight-ink); color: var(--color-platinum); border-color: var(--color-midnight-ink); }
 
   .btn-ghost {
     background: transparent;
@@ -267,7 +306,7 @@
     transition: background .15s;
   }
   .icon-btn:hover { background: var(--color-powder-blue); color: var(--color-midnight-ink); }
-  .icon-btn.active-edit { background: var(--accent-wash); color: var(--color-deep-violet); }
+  .icon-btn.active-edit { background: var(--accent-wash); color: var(--accent-text); }
   .icon-btn.spin svg { animation: spin 1s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -312,7 +351,7 @@
     font-size: var(--text-caption);
   }
   .app-footer a { color: var(--color-slate-blue); text-decoration: none; }
-  .app-footer a:hover { color: var(--color-deep-violet); text-decoration: underline; }
+  .app-footer a:hover { color: var(--accent-text); text-decoration: underline; }
   .app-footer .sep { opacity: .45; }
   .app-footer .grow { flex: 1; }
   .chart-modal-tf {
@@ -335,7 +374,7 @@
   .chart-modal-tf button.active {
     background: var(--color-deep-violet);
     color: #fff;
-    border-color: var(--color-deep-violet);
+    border-color: var(--accent-text);
   }
   .app-brand {
     display: flex;
@@ -442,7 +481,7 @@
   .hero-content { position: relative; z-index: 1; max-width: 760px; }
   .hero-eyebrow {
     font-size: var(--text-caption);
-    color: var(--color-deep-violet);
+    color: var(--accent-text);
     text-transform: uppercase;
     letter-spacing: 0.12em;
     margin-bottom: 12px;
@@ -840,7 +879,7 @@
     height: 28px;
     border-radius: 999px;
     background: var(--color-platinum);
-    color: var(--color-deep-violet);
+    color: var(--accent-text);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -856,7 +895,7 @@
     background: var(--color-platinum);
     border-radius: var(--radius-button);
     font-size: var(--text-caption);
-    color: var(--color-deep-violet);
+    color: var(--accent-text);
     box-shadow: var(--shadow-soft);
   }
   .top-post-source.tg-source { color: var(--color-accent-green); }
@@ -991,7 +1030,7 @@
     white-space: nowrap;
   }
   .tag.green { color: var(--color-accent-green); border-color: rgba(129,184,26,0.3); background: rgba(129,184,26,0.06); }
-  .tag.violet { color: var(--color-deep-violet); border-color: var(--color-washed-violet); background: rgba(83,58,253,0.04); }
+  .tag.violet { color: var(--accent-text); border-color: var(--color-washed-violet); background: rgba(83,58,253,0.04); }
   .tag.orange { color: var(--color-vibrant-orange); border-color: rgba(255,97,24,0.3); background: rgba(255,97,24,0.06); }
 
   /* ================================================================
@@ -1085,7 +1124,7 @@
      ================================================================ */
   .chart-tip {
     position: fixed; z-index: 1000; display: none;
-    background: var(--color-midnight-ink); color: #fff;
+    background: var(--color-midnight-ink); color: var(--color-platinum);
     font-size: 12px; padding: 6px 9px; border-radius: 4px;
     pointer-events: none; white-space: nowrap; box-shadow: var(--shadow-soft);
     transform: translate(-50%, calc(-100% - 10px));
@@ -1127,7 +1166,7 @@
   }
   .chart-yaxis span {
     font-size: 9px; line-height: 1; color: var(--color-ghost-gray);
-    background: rgba(248,250,253,0.8); padding: 1px 3px; border-radius: 2px;
+    background: var(--yaxis-bg); padding: 1px 3px; border-radius: 2px;
   }
 
   /* ================================================================
@@ -1286,7 +1325,7 @@
       <input id="password" type="password" class="form-input" autocomplete="current-password" required>
       <div id="login-error" class="login-error hidden"></div>
       <button type="submit" id="login-btn" class="btn-primary full" style="margin-top: 20px;">Войти</button>
-      <p class="login-foot" style="margin-top:14px"><a id="breakglass-link" style="cursor:pointer;color:var(--color-deep-violet)">Войти по командному паролю</a></p>
+      <p class="login-foot" style="margin-top:14px"><a id="breakglass-link" style="cursor:pointer;color:var(--accent-text)">Войти по командному паролю</a></p>
     </form>
 
     <form id="register-form" class="hidden" autocomplete="off">
@@ -1330,6 +1369,7 @@
         <span id="freshness" style="font-size:var(--text-caption);color:var(--color-ghost-gray);white-space:nowrap;"></span>
         <span id="status-pill" class="pill"><span class="dot"></span><span id="status-text">Загрузка…</span></span>
         <div class="header-actions">
+        <button id="theme-btn" class="icon-btn" title="Тёмная тема"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
         <button id="layout-edit-btn" class="icon-btn" title="Настроить дашборд"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg></button>
         <button id="bug-btn" class="icon-btn" title="Сообщить о проблеме"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg></button>
         <button id="refresh-btn" class="icon-btn" title="Обновить">
@@ -1549,7 +1589,7 @@
       </div>
       <div class="two-col" style="margin-top: 16px;">
         <div class="panel">
-          <div class="chart-head"><span class="chart-title">Активность аудитории по&nbsp;часам</span><span id="tg-hours-peak" style="font-size:var(--text-caption);color:var(--color-deep-violet);font-weight:600;"></span></div>
+          <div class="chart-head"><span class="chart-title">Активность аудитории по&nbsp;часам</span><span id="tg-hours-peak" style="font-size:var(--text-caption);color:var(--accent-text);font-weight:600;"></span></div>
           <svg id="tg-hours-chart" viewBox="0 0 600 120" width="100%" height="120" preserveAspectRatio="none"></svg>
           <div id="tg-hours-labels" style="display:flex;justify-content:space-between;font-size:var(--text-caption);color:var(--color-ghost-gray);padding-top:6px;"></div>
         </div>
@@ -1571,7 +1611,7 @@
       </div>
       <div class="two-col" style="margin-top: 16px;">
         <div class="panel">
-          <div class="chart-head"><span class="chart-title">Ср. просмотры по&nbsp;дню недели</span><span id="tg-weekday-best" style="font-size:var(--text-caption);color:var(--color-deep-violet);font-weight:600;"></span></div>
+          <div class="chart-head"><span class="chart-title">Ср. просмотры по&nbsp;дню недели</span><span id="tg-weekday-best" style="font-size:var(--text-caption);color:var(--accent-text);font-weight:600;"></span></div>
           <svg id="tg-weekday-views" viewBox="0 0 600 120" width="100%" height="120" preserveAspectRatio="none"></svg>
           <div id="tg-weekday-vlabels" style="display:flex;justify-content:space-between;font-size:var(--text-caption);color:var(--color-ghost-gray);padding-top:6px;"></div>
         </div>
@@ -1582,12 +1622,12 @@
         </div>
       </div>
       <div class="panel" style="margin-top: 16px;">
-        <div class="chart-head"><span class="chart-title">Когда постить · день&nbsp;×&nbsp;час</span><span id="tg-heatmap-note" style="font-size:var(--text-caption);color:var(--color-deep-violet);font-weight:600;"></span></div>
+        <div class="chart-head"><span class="chart-title">Когда постить · день&nbsp;×&nbsp;час</span><span id="tg-heatmap-note" style="font-size:var(--text-caption);color:var(--accent-text);font-weight:600;"></span></div>
         <div id="tg-heatmap" style="overflow-x:auto;"></div>
         <div style="display:flex;align-items:center;gap:6px;justify-content:flex-end;margin-top:10px;font-size:var(--text-caption);color:var(--color-ghost-gray)">меньше<span style="width:12px;height:12px;border-radius:3px;background:rgba(83,58,253,0.18)"></span><span style="width:12px;height:12px;border-radius:3px;background:rgba(83,58,253,0.5)"></span><span style="width:12px;height:12px;border-radius:3px;background:rgba(83,58,253,1)"></span>больше ERV</div>
       </div>
       <div class="panel" style="margin-top: 16px;">
-        <div class="chart-head"><span class="chart-title">Скорость набора просмотров · жизнь поста</span><span id="tg-velocity-note" style="font-size:var(--text-caption);color:var(--color-deep-violet);font-weight:600;"></span></div>
+        <div class="chart-head"><span class="chart-title">Скорость набора просмотров · жизнь поста</span><span id="tg-velocity-note" style="font-size:var(--text-caption);color:var(--accent-text);font-weight:600;"></span></div>
         <svg id="tg-velocity-chart" viewBox="0 0 600 140" width="100%" height="140" preserveAspectRatio="none"></svg>
         <div id="tg-velocity-labels" style="display:flex;justify-content:space-between;font-size:var(--text-caption);color:var(--color-ghost-gray);padding-top:6px;"></div>
       </div>
@@ -2226,7 +2266,7 @@ function renderBugPending() {
   el.innerHTML = bugPending.map((p, i) => `
     <div style="position:relative">
       <img src="${p.dataUrl}" alt="" style="width:60px;height:60px;object-fit:cover;border-radius:4px;border:1px solid var(--color-powder-blue)">
-      <button class="bug-pending-del" data-i="${i}" title="Убрать" style="position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:50%;border:none;background:var(--color-midnight-ink);color:#fff;cursor:pointer;font-size:11px;line-height:1;padding:0">✕</button>
+      <button class="bug-pending-del" data-i="${i}" title="Убрать" style="position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:50%;border:none;background:var(--color-midnight-ink);color:var(--color-platinum);cursor:pointer;font-size:11px;line-height:1;padding:0">✕</button>
     </div>`).join('');
 }
 
@@ -2278,7 +2318,7 @@ function renderBugs(data) {
         </div>
         <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;flex:0 0 auto">
           <select class="bug-status" data-bugid="${b.id}" style="padding:6px;border:1px solid var(--color-powder-blue);border-radius:4px;font:inherit">${opts(b.status)}</select>
-          <button class="bug-claude" data-bugid="${b.id}" title="Отдать Claude — попробует починить и откроет PR в GitHub" style="border:1px solid var(--color-washed-violet);background:none;cursor:pointer;color:var(--color-deep-violet);font-size:var(--text-caption);padding:3px 8px;border-radius:4px;white-space:nowrap">Передать Claude</button>
+          <button class="bug-claude" data-bugid="${b.id}" title="Отдать Claude — попробует починить и откроет PR в GitHub" style="border:1px solid var(--color-washed-violet);background:none;cursor:pointer;color:var(--accent-text);font-size:var(--text-caption);padding:3px 8px;border-radius:4px;white-space:nowrap">Передать Claude</button>
           <button class="bug-del" data-bugid="${b.id}" title="Удалить" style="border:none;background:none;cursor:pointer;color:var(--color-ghost-gray);font-size:var(--text-caption);padding:0">✕ удалить</button>
         </div>
       </div>
@@ -3467,7 +3507,7 @@ async function openPostModal(postId) {
         for (let d = 0; d < 14; d++) { cum += (day[d] || 0); if (cum / total * 100 >= 80) { t80 = d + 1; break; } }
         const parts = [`за 1-е сутки — ${d0.toFixed(0)}% охвата`];
         if (t80) parts.push(`80% за ${t80} дн`);
-        velLine = `<div style="font-size:var(--text-caption);color:var(--color-deep-violet);font-weight:600;margin-bottom:6px">⚡ ${parts.join(' · ')}</div>`;
+        velLine = `<div style="font-size:var(--text-caption);color:var(--accent-text);font-weight:600;margin-bottom:6px">⚡ ${parts.join(' · ')}</div>`;
       }
     }
     let html = `<div class="chart-head"><span class="chart-title">Просмотры во времени</span></div>
@@ -3963,7 +4003,7 @@ function renderMentions(data) {
       const when = m.date ? fmt.date(m.date) : '';
       const tag = m.username ? `<span style="color:var(--color-ghost-gray);font-size:var(--text-caption)">@${escapeHtml(m.username)}</span>` : '';
       const title = m.link
-        ? `<a href="${escapeHtml(m.link)}" target="_blank" rel="noopener" style="color:var(--color-deep-violet);text-decoration:none">${escapeHtml(m.title)}</a>`
+        ? `<a href="${escapeHtml(m.link)}" target="_blank" rel="noopener" style="color:var(--accent-text);text-decoration:none">${escapeHtml(m.title)}</a>`
         : escapeHtml(m.title);
       return `<div style="padding:10px 0;border-bottom:1px solid var(--color-powder-blue)">
         <div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline">
@@ -4454,6 +4494,32 @@ const TGTABS = (() => {
   return { init };
 })();
 TGTABS.init();
+
+/* ── Theme toggle (light / dark), persisted in localStorage ──────
+   Initial attribute is set by a tiny <head> script to avoid a flash;
+   this syncs the button icon and wires the click. */
+const THEME_KEY = 'pulse_theme';
+const THEME_ICONS = {
+  moon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>',
+  sun:  '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
+};
+function applyTheme(t) {
+  const dark = t === 'dark';
+  document.documentElement.dataset.theme = dark ? 'dark' : '';
+  const btn = document.getElementById('theme-btn');
+  if (btn) { btn.innerHTML = dark ? THEME_ICONS.sun : THEME_ICONS.moon; btn.title = dark ? 'Светлая тема' : 'Тёмная тема'; }
+}
+(function initTheme() {
+  let saved = 'light';
+  try { if (localStorage.getItem(THEME_KEY) === 'dark') saved = 'dark'; } catch (e) {}
+  applyTheme(saved);
+  const btn = document.getElementById('theme-btn');
+  if (btn) btn.addEventListener('click', () => {
+    const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+    try { localStorage.setItem(THEME_KEY, next); } catch (e) {}
+    applyTheme(next);
+  });
+})();
 
 /* ================================================================
    BOOT
