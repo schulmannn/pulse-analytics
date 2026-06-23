@@ -1,4 +1,9 @@
-# Pulse Analytics — один контейнер запускает СРАЗУ два процесса:
+# Pulse Analytics — LEGACY одно-контейнерная сборка (два процесса в одном образе).
+# Оставлена для локальной разработки и zero-downtime миграции на сплит.
+# ПРОД переезжает на ДВА Railway-сервиса: Dockerfile.web (Node) + Dockerfile.mtproto
+# (Python), связанные приватной сетью. Этот файл можно удалить после катовера.
+#
+# Один контейнер запускает СРАЗУ два процесса:
 #   • Node/Express (server/index.js) → отдаёт дашборд + API на Railway $PORT (публично)
 #   • Python/FastAPI + Telethon (mtproto/service.py) → внутренний MTProto на :8001,
 #     Node ходит к нему через MTPROTO_URL (по умолчанию http://localhost:8001)

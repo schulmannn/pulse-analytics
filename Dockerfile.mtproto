@@ -1,0 +1,16 @@
+# Pulse Analytics — MTProto-микросервис (Python/FastAPI + Telethon).
+# ПРИВАТНЫЙ сервис на Railway (без публичного домена). Слушает MTPROTO_PORT
+# (по умолчанию 8001) на 0.0.0.0; web-сервис зовёт его по приватной сети.
+# Часть сплита рантаймов: Node в этом образе НЕТ (см. Dockerfile.web).
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1
+WORKDIR /app
+
+COPY mtproto/requirements.txt ./mtproto/requirements.txt
+RUN pip install --no-cache-dir -r mtproto/requirements.txt
+
+COPY mtproto ./mtproto
+
+EXPOSE 8001
+CMD ["python3", "mtproto/service.py"]
