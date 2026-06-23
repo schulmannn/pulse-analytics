@@ -617,21 +617,34 @@
   }
   .period-custom-btn:hover { color: var(--color-midnight-ink); border-color: var(--color-stone-gray); }
   .period-custom-btn.active { background: var(--accent-wash); color: var(--accent-text); border-color: transparent; }
+  .period-custom-btn.icon { padding: 6px 8px; }
   .period-pop {
     position: absolute; top: calc(100% + 8px); right: 0; z-index: 100;
     background: var(--color-platinum);
     border: 1px solid var(--color-powder-blue);
     border-radius: var(--radius-card);
     box-shadow: var(--shadow-hover);
-    padding: 12px; display: flex; flex-direction: column; gap: 10px; min-width: 230px;
+    padding: 12px; display: flex; flex-direction: column; gap: 10px; width: 300px;
   }
-  .period-pop .pp-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: var(--text-body); color: var(--color-slate-blue); }
-  .period-pop input[type="date"] {
-    font: inherit; padding: 6px 8px;
-    border: 1px solid var(--color-powder-blue); border-radius: var(--radius-button);
-    background: var(--color-platinum); color: var(--color-midnight-ink);
-  }
-  .period-pop .pp-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 2px; }
+  /* date-range calendar */
+  .dr-fields { display: flex; gap: 8px; }
+  .dr-field { flex: 1; display: flex; flex-direction: column; gap: 2px; font-size: var(--text-caption); color: var(--color-ghost-gray); border: 1px solid var(--color-powder-blue); border-radius: var(--radius-button); padding: 6px 10px; }
+  .dr-field b { color: var(--color-midnight-ink); font-weight: 500; font-size: var(--text-body); }
+  .dr-head { display: flex; align-items: center; justify-content: space-between; }
+  .dr-month { font-weight: 500; color: var(--color-midnight-ink); font-size: var(--text-body); }
+  .dr-nav { background: none; border: none; color: var(--color-slate-blue); cursor: pointer; font-size: 18px; line-height: 1; padding: 2px 10px; border-radius: var(--radius-button); }
+  .dr-nav:hover { background: var(--color-powder-blue); color: var(--color-midnight-ink); }
+  .dr-wd { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+  .dr-wd span { text-align: center; font-size: var(--text-caption); color: var(--color-ghost-gray); padding: 2px 0; }
+  .dr-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+  .dr-day { aspect-ratio: 1; border: none; background: none; color: var(--color-midnight-ink); font: inherit; font-size: var(--text-body); border-radius: var(--radius-button); cursor: pointer; }
+  .dr-day.empty { visibility: hidden; cursor: default; }
+  .dr-day:hover:not(.disabled):not(.sel) { background: var(--color-powder-blue); }
+  .dr-day.in-range { background: var(--accent-wash); border-radius: 0; }
+  .dr-day.sel { background: var(--accent); color: #fff; }
+  .dr-day.today:not(.sel) { box-shadow: inset 0 0 0 1px var(--accent); }
+  .dr-day.disabled { color: var(--color-pewter); opacity: .45; cursor: default; }
+  .dr-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 2px; }
 
   /* ================================================================
      KPI GRID
@@ -1529,15 +1542,8 @@
             <button data-period="30">30д</button>
             <button data-period="90">90д</button>
           </div>
-          <button id="period-custom-btn" class="period-custom-btn" title="Произвольный диапазон дат" aria-haspopup="true" aria-expanded="false"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/></svg><span id="period-custom-label">Свои даты</span></button>
-          <div id="period-pop" class="period-pop hidden">
-            <label class="pp-row">С<input type="date" id="period-from"></label>
-            <label class="pp-row">По<input type="date" id="period-to"></label>
-            <div class="pp-actions">
-              <button id="period-reset" class="btn-ghost" style="padding:6px 10px">Сброс</button>
-              <button id="period-apply" class="btn-primary sm">Применить</button>
-            </div>
-          </div>
+          <button id="period-custom-btn" class="period-custom-btn icon" title="Свой диапазон дат" aria-label="Свой диапазон дат" aria-haspopup="true" aria-expanded="false"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/></svg></button>
+          <div id="period-pop" class="period-pop hidden"></div>
         </div>
       </div>
       <div class="kpi-grid" id="kpi-grid">
@@ -2250,9 +2256,7 @@ function inRange(p) {            // post within the active custom window? (no-op
 function clearCustomPeriod() {
   customRange = null;
   const cb = document.getElementById('period-custom-btn');
-  if (cb) cb.classList.remove('active');
-  const lbl = document.getElementById('period-custom-label');
-  if (lbl) lbl.textContent = 'Свои даты';
+  if (cb) { cb.classList.remove('active'); cb.title = 'Свой диапазон дат'; }
 }
 document.getElementById('period-tabs').addEventListener('click', (e) => {
   const btn = e.target.closest('button');
@@ -2264,50 +2268,91 @@ document.getElementById('period-tabs').addEventListener('click', (e) => {
   loadAll();
 });
 
-/* ── Custom date range (calendar) ───────────────────────────────── */
+/* ── Custom date range (inline calendar with range selection) ───── */
 (function initPeriodCustom() {
   const btn = document.getElementById('period-custom-btn');
   const pop = document.getElementById('period-pop');
   if (!btn || !pop) return;
-  const fromI = document.getElementById('period-from');
-  const toI = document.getElementById('period-to');
-  const iso = (ms) => new Date(ms).toISOString().slice(0, 10);
-  btn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const open = !pop.classList.toggle('hidden');
-    btn.setAttribute('aria-expanded', String(open));
-    if (open) {
-      const today = Date.now();
-      toI.max = iso(today); fromI.max = iso(today);
-      if (!toI.value) toI.value = iso(today);
-      if (!fromI.value) fromI.value = iso(today - (currentPeriod - 1) * DAY_MS);
+  const WD = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+  const MON = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+  let selFrom = null, selTo = null, viewY, viewM;
+  const mid = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const key = (d) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+  const lbl = (d) => `${d.getDate()} ${MON_EN[d.getMonth()]}`;
+  function render() {
+    const today = mid(new Date());
+    const first = new Date(viewY, viewM, 1);
+    const startWd = (first.getDay() + 6) % 7;
+    const daysIn = new Date(viewY, viewM + 1, 0).getDate();
+    let cells = '';
+    for (let i = 0; i < startWd; i++) cells += '<div class="dr-day empty"></div>';
+    for (let d = 1; d <= daysIn; d++) {
+      const cur = new Date(viewY, viewM, d), t = cur.getTime();
+      const fut = t > today.getTime();
+      const isSel = (selFrom && t === selFrom.getTime()) || (selTo && t === selTo.getTime());
+      const inR = selFrom && selTo && t > selFrom.getTime() && t < selTo.getTime();
+      const cls = ['dr-day'];
+      if (fut) cls.push('disabled');
+      if (isSel) cls.push('sel');
+      if (inR) cls.push('in-range');
+      if (t === today.getTime()) cls.push('today');
+      cells += `<button type="button" class="${cls.join(' ')}" data-d="${key(cur)}"${fut ? ' disabled' : ''}>${d}</button>`;
     }
-  });
-  document.addEventListener('click', (e) => {
-    if (!pop.classList.contains('hidden') && !e.target.closest('.period-controls')) {
-      pop.classList.add('hidden'); btn.setAttribute('aria-expanded', 'false');
+    pop.innerHTML = `
+      <div class="dr-fields">
+        <div class="dr-field">С<b>${selFrom ? lbl(selFrom) : '—'}</b></div>
+        <div class="dr-field">По<b>${selTo ? lbl(selTo) : '—'}</b></div>
+      </div>
+      <div class="dr-head">
+        <button type="button" class="dr-nav" data-nav="-1" aria-label="Предыдущий месяц">‹</button>
+        <span class="dr-month">${MON[viewM]} ${viewY}</span>
+        <button type="button" class="dr-nav" data-nav="1" aria-label="Следующий месяц">›</button>
+      </div>
+      <div class="dr-wd">${WD.map(w => `<span>${w}</span>`).join('')}</div>
+      <div class="dr-grid">${cells}</div>
+      <div class="dr-actions">
+        <button type="button" class="btn-ghost" data-act="cancel" style="padding:6px 12px">Отмена</button>
+        <button type="button" class="btn-primary sm" data-act="apply">Применить</button>
+      </div>`;
+  }
+  function openPop() {
+    const base = customRange ? new Date(customRange.from) : new Date();
+    selFrom = customRange ? mid(new Date(customRange.from)) : null;
+    selTo = customRange ? mid(new Date(customRange.to)) : null;
+    viewY = base.getFullYear(); viewM = base.getMonth();
+    render();
+    pop.classList.remove('hidden'); btn.setAttribute('aria-expanded', 'true');
+  }
+  function closePop() { pop.classList.add('hidden'); btn.setAttribute('aria-expanded', 'false'); }
+  btn.addEventListener('click', (e) => { e.stopPropagation(); pop.classList.contains('hidden') ? openPop() : closePop(); });
+  document.addEventListener('click', (e) => { if (!pop.classList.contains('hidden') && !e.target.closest('.period-controls')) closePop(); });
+  pop.addEventListener('click', (e) => {
+    const nav = e.target.closest('[data-nav]');
+    if (nav) { viewM += +nav.dataset.nav; if (viewM < 0) { viewM = 11; viewY--; } if (viewM > 11) { viewM = 0; viewY++; } render(); return; }
+    const day = e.target.closest('.dr-day[data-d]');
+    if (day && !day.disabled) {
+      const p = day.dataset.d.split('-').map(Number), d = new Date(p[0], p[1], p[2]);
+      if (!selFrom || selTo) { selFrom = d; selTo = null; }
+      else if (d.getTime() < selFrom.getTime()) { selTo = selFrom; selFrom = d; }
+      else selTo = d;
+      render(); return;
     }
-  });
-  document.getElementById('period-apply').addEventListener('click', () => {
-    if (!fromI.value || !toI.value) { toast('Укажите обе даты', 'error'); return; }
-    let from = new Date(fromI.value + 'T00:00:00').getTime();
-    let to = new Date(toI.value + 'T23:59:59').getTime();
-    if (from > to) { const t = from; from = to; to = t; }
-    customRange = { from, to };
-    currentPeriod = Math.max(1, Math.round((to - from) / DAY_MS));
-    document.querySelectorAll('#period-tabs button').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    document.getElementById('period-custom-label').textContent = periodLabel();
-    pop.classList.add('hidden'); btn.setAttribute('aria-expanded', 'false');
-    loadAll();
-  });
-  document.getElementById('period-reset').addEventListener('click', () => {
-    clearCustomPeriod();
-    currentPeriod = 7;
-    const def = document.querySelector('#period-tabs button[data-period="7"]');
-    document.querySelectorAll('#period-tabs button').forEach(b => b.classList.toggle('active', b === def));
-    pop.classList.add('hidden'); btn.setAttribute('aria-expanded', 'false');
-    loadAll();
+    const act = e.target.closest('[data-act]');
+    if (!act) return;
+    if (act.dataset.act === 'cancel') { closePop(); return; }
+    if (act.dataset.act === 'apply') {
+      if (!selFrom) { toast('Выберите дату', 'error'); return; }
+      const a = selFrom, b = selTo || selFrom;
+      const from = new Date(a.getFullYear(), a.getMonth(), a.getDate(), 0, 0, 0).getTime();
+      const to = new Date(b.getFullYear(), b.getMonth(), b.getDate(), 23, 59, 59).getTime();
+      customRange = { from, to };
+      currentPeriod = Math.max(1, Math.round((to - from) / DAY_MS));
+      document.querySelectorAll('#period-tabs button').forEach(x => x.classList.remove('active'));
+      btn.classList.add('active');
+      btn.title = periodLabel();
+      closePop();
+      loadAll();
+    }
   });
 })();
 
