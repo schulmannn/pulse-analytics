@@ -2327,6 +2327,7 @@ document.getElementById('period-tabs').addEventListener('click', (e) => {
   btn.addEventListener('click', (e) => { e.stopPropagation(); pop.classList.contains('hidden') ? openPop() : closePop(); });
   document.addEventListener('click', (e) => { if (!pop.classList.contains('hidden') && !e.target.closest('.period-controls')) closePop(); });
   pop.addEventListener('click', (e) => {
+    e.stopPropagation();   // re-render detaches the target; don't let the click bubble to the outside-close handler
     const nav = e.target.closest('[data-nav]');
     if (nav) { viewM += +nav.dataset.nav; if (viewM < 0) { viewM = 11; viewY--; } if (viewM > 11) { viewM = 0; viewY++; } render(); return; }
     const day = e.target.closest('.dr-day[data-d]');
