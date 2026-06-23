@@ -2903,6 +2903,7 @@ function renderKpis() {
     const leftV = ((fSeries.find(s => /left|leave|отпис/i.test(s.name)) || fSeries[1] || {}).values) || [];
     const joinedN = joinV.slice(-currentPeriod).reduce((a, b) => a + (Number(b) || 0), 0);
     const leftN = leftV.slice(-currentPeriod).reduce((a, b) => a + (Number(b) || 0), 0);
+    const netN = joinedN - leftN;
     const subFlow = joinV.length > 0 || leftV.length > 0;
     const subTrend = trendFromStock(growthVals, currentPeriod);
     const viewTrend = trendFromFlow(interViews, currentPeriod);
@@ -2923,8 +2924,9 @@ function renderKpis() {
     }).sort((a, b) => a.ts - b.ts).map(e => e.v) : [];
     const cur = (o) => (o && o.current != null) ? o.current : null;
     return [
-      { feature: true, label: 'Подписчики', value: fmt.num(members), trend: subTrend,
-        delta: subFlow ? `+${fmt.num(joinedN)} пришло · −${fmt.num(leftN)} ушло` : ((notif && notif.total) ? `${Math.round(notif.part / notif.total * 100)}% с уведомлениями` : 'в канале'), deltaClass: 'muted', spark },
+      { feature: true, label: 'Подписчики', value: fmt.num(members),
+        trend: subFlow ? null : subTrend,
+        delta: subFlow ? `+${fmt.num(joinedN)} пришло · −${fmt.num(leftN)} ушло · ${netN >= 0 ? '+' : '−'}${fmt.num(Math.abs(netN))} итог` : ((notif && notif.total) ? `${Math.round(notif.part / notif.total * 100)}% с уведомлениями` : 'в канале'), deltaClass: 'muted', spark },
       { label: 'Просмотры за период', value: fmt.short(totalViews), trend: viewTrend,
         delta: postsAnalyzed ? `по ${postsAnalyzed} постам` : null, deltaClass: 'muted', spark },
       { label: 'Ср. охват поста', value: fmt.short(avgViews),
