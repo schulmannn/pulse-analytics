@@ -1214,6 +1214,45 @@
     #dash-grid > .section,
     #dash-grid > .section[data-span="1"] { grid-column: 1 / -1; }
   }
+
+  /* ================================================================
+     THEMED TABS — «Аналитика Telegram» (панели раскидывает TGTABS)
+     ================================================================ */
+  .tg-tabs {
+    display: flex;
+    gap: 2px;
+    flex-wrap: wrap;
+    border-bottom: 1px solid var(--color-powder-blue);
+    margin-bottom: 16px;
+  }
+  .tg-tabs button {
+    background: none;
+    border: none;
+    font: inherit;
+    font-size: var(--text-body);
+    padding: 10px 14px;
+    color: var(--color-slate-blue);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+  }
+  .tg-tabs button:hover { color: var(--color-midnight-ink); }
+  .tg-tabs button.active {
+    color: var(--color-midnight-ink);
+    border-bottom-color: var(--accent);
+    font-weight: 500;
+  }
+  .tg-tabpane { display: none; }
+  .tg-tabpane.active {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    align-items: start;
+  }
+  .tg-tabpane > .panel { margin: 0 !important; }
+  .tg-tabpane > .panel.span-full { grid-column: 1 / -1; }
+  #dash-grid > .section[data-span="1"] .tg-tabpane.active { grid-template-columns: 1fr; }
+  @media (max-width: 960px) { .tg-tabpane.active { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
@@ -1424,6 +1463,23 @@
       </div>
       <div class="panel" id="tg-digest" style="margin-bottom: 16px;"></div>
       <div class="kpi-grid" id="tg-channel-stats" style="margin-bottom: 16px;"></div>
+
+      <!-- Themed tabs: panels distributed by JS (TGTABS); all child ids preserved -->
+      <div class="tg-tabs" id="tg-tabs">
+        <button data-tab="reach" class="active">Охват</button>
+        <button data-tab="audience">Аудитория</button>
+        <button data-tab="engagement">Вовлечённость</button>
+        <button data-tab="timing">Время</button>
+        <button data-tab="content">Контент</button>
+      </div>
+      <div id="tg-tabs-host">
+        <div class="tg-tabpane active" data-tab="reach"></div>
+        <div class="tg-tabpane" data-tab="audience"></div>
+        <div class="tg-tabpane" data-tab="engagement"></div>
+        <div class="tg-tabpane" data-tab="timing"></div>
+        <div class="tg-tabpane" data-tab="content"></div>
+      </div>
+
       <div class="panel hidden" id="tg-history-panel" style="margin-bottom: 16px;">
         <div class="chart-head"><span class="chart-title">Архив подписчиков · вся история (БД)</span><span id="tg-history-note" style="font-size:var(--text-caption);color:var(--color-ghost-gray);"></span></div>
         <svg id="tg-history-chart" viewBox="0 0 600 140" width="100%" height="140" preserveAspectRatio="none"></svg>
@@ -4320,6 +4376,41 @@ const LAYOUT = (() => {
   return { init, apply, syncFromServer };
 })();
 LAYOUT.init();
+
+/* ================================================================
+   TGTABS — группировка графиков «Аналитики Telegram» по темам.
+   Панели разносятся по вкладкам кодом (id сохранены, JS-рендер не трогаем).
+   ================================================================ */
+const TGTABS = (() => {
+  const MAP = [
+    ['tg-views-chart','reach'], ['tg-views-source','reach'], ['tg-interactions-views','reach'], ['tg-velocity-chart','reach'],
+    ['tg-history-chart','audience'], ['tg-growth-chart','audience'], ['tg-net-chart','audience'], ['tg-churn','audience'], ['tg-followers-source','audience'], ['tg-languages','audience'],
+    ['tg-emoji-breakdown','engagement'], ['tg-engagement-breakdown','engagement'], ['tg-interactions-shares','engagement'], ['tg-reactions-sentiment','engagement'],
+    ['tg-hours-chart','timing'], ['tg-weekday-views','timing'], ['tg-weekday-count','timing'], ['tg-heatmap','timing'],
+    ['tg-type-breakdown','content'], ['tg-hashtags','content'],
+  ];
+  const WIDE = new Set(['tg-history-chart','tg-heatmap','tg-velocity-chart','tg-hashtags']);
+  function activate(tab) {
+    document.querySelectorAll('#tg-tabs button[data-tab]').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+    document.querySelectorAll('#tg-tabs-host .tg-tabpane').forEach(p => p.classList.toggle('active', p.dataset.tab === tab));
+  }
+  function init() {
+    const host = document.getElementById('tg-tabs-host'); if (!host) return;
+    MAP.forEach(([id, tab]) => {
+      const el = document.getElementById(id); if (!el) return;
+      const panel = el.closest('.panel'); if (!panel) return;
+      const pane = host.querySelector('.tg-tabpane[data-tab="' + tab + '"]'); if (!pane) return;
+      if (WIDE.has(id)) panel.classList.add('span-full');
+      pane.appendChild(panel);
+    });
+    document.querySelectorAll('#tg-analytics .two-col').forEach(r => { if (!r.querySelector('.panel')) r.remove(); });
+    const bar = document.getElementById('tg-tabs');
+    if (bar) bar.addEventListener('click', (e) => { const b = e.target.closest('button[data-tab]'); if (b) activate(b.dataset.tab); });
+    activate('reach');
+  }
+  return { init };
+})();
+TGTABS.init();
 
 /* ================================================================
    BOOT
