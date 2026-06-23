@@ -714,6 +714,7 @@
   }
   .chart-legend .leg.violet::before { background: var(--color-deep-violet); }
   .chart-legend .leg.soft::before   { background: var(--color-soft-violet); }
+  .chart-legend .leg.prev::before   { background: var(--color-pewter); }
 
   .insight-box {
     background: var(--color-platinum);
@@ -1487,7 +1488,7 @@
       </div>
       <div class="two-col">
         <div class="panel">
-          <div class="chart-head"><span class="chart-title">Просмотры по дням</span></div>
+          <div class="chart-head"><span class="chart-title">Просмотры по дням</span><div class="chart-legend"><span class="leg violet">Текущий период</span><span class="leg prev" id="tg-views-leg-prev">Прошлый период</span></div></div>
           <svg id="tg-views-chart" viewBox="0 0 600 140" width="100%" height="140" preserveAspectRatio="none"></svg>
           <div id="tg-views-labels" style="display:flex;justify-content:space-between;font-size:var(--text-caption);color:var(--color-ghost-gray);padding-top:6px;"></div>
         </div>
@@ -2408,24 +2409,33 @@ function lineChartSvg(values, opts = {}) {
     return `<text x="300" y="70" text-anchor="middle" fill="#64748d" font-size="12" font-family="Inter">Нет данных за период</text>`;
   }
   const w = 600, h = 140, padX = 10, padY = 12;
-  const min = Math.min(...values);
-  const max = Math.max(...values);
+  // optional previous-period ghost line; shared scale so the two are comparable
+  const prev = (Array.isArray(opts.prev) && opts.prev.length) ? opts.prev.map(Number) : null;
+  const pool = prev ? values.concat(prev) : values;
+  const min = (opts.min != null) ? opts.min : Math.min(...pool);
+  const max = (opts.max != null) ? opts.max : Math.max(...pool);
   const range = (max - min) || 1;
-  const step = (w - padX * 2) / Math.max(values.length - 1, 1);
-  const pts = values.map((v, i) => {
-    const x = padX + i * step;
-    const y = h - padY - ((v - min) / range) * (h - padY * 2);
-    return [x, y];
-  });
+  const project = (arr) => {
+    const step = (w - padX * 2) / Math.max(arr.length - 1, 1);
+    return arr.map((v, i) => [padX + i * step, h - padY - ((Number(v) - min) / range) * (h - padY * 2)]);
+  };
+  const pts = project(values);
   const linePath = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
   const areaPath = `${linePath} L${pts[pts.length-1][0].toFixed(1)},${h} L${pts[0][0].toFixed(1)},${h} Z`;
   const lastX = pts[pts.length-1][0];
   const lastY = pts[pts.length-1][1];
 
+  let prevLayer = '';
+  if (prev) {
+    const prevPath = project(prev).map((p, i) => `${i === 0 ? 'M' : 'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+    prevLayer = `<path d="${prevPath}" fill="none" stroke="#7d8ba4" stroke-width="1.5" stroke-dasharray="4 4" opacity="0.7" vector-effect="non-scaling-stroke"/>`;
+  }
+
   return `
     <line x1="0" y1="35"  x2="600" y2="35"  stroke="#e5edf5" stroke-width="1" vector-effect="non-scaling-stroke"/>
     <line x1="0" y1="70"  x2="600" y2="70"  stroke="#e5edf5" stroke-width="1" vector-effect="non-scaling-stroke"/>
     <line x1="0" y1="105" x2="600" y2="105" stroke="#e5edf5" stroke-width="1" vector-effect="non-scaling-stroke"/>
+    ${prevLayer}
     <path d="${areaPath}" fill="${ACCENT}" opacity="0.06"/>
     <path d="${linePath}" fill="none" stroke="${ACCENT}" stroke-width="2" vector-effect="non-scaling-stroke"/>
     <circle cx="${lastX.toFixed(1)}" cy="${lastY.toFixed(1)}" r="4" fill="${ACCENT}"/>
@@ -3549,15 +3559,23 @@ function renderTgAnalytics() {
   const vbd = (vs.views_by_day && typeof vs.views_by_day === 'object') ? vs.views_by_day : null;
   if (chartEl) {
     if (vbd) {
-      const entries = Object.entries(vbd).map(([day, v]) => {
+      const sortedAll = Object.entries(vbd).map(([day, v]) => {
         const [d, m] = day.split('.').map(Number);
         const ts = new Date(new Date().getFullYear(), (m || 1) - 1, d || 1).getTime();
         return { day, v: Number(v) || 0, ts };
-      }).sort((a, b) => a.ts - b.ts).slice(-14);
+      }).sort((a, b) => a.ts - b.ts);
+      const entries = sortedAll.slice(-14);
+      const prevEntries = sortedAll.slice(-28, -14);   // equal-length window just before
       const vd = entries.map(e => e.v);
-      chartEl.innerHTML = lineChartSvg(vd);
-      setYAxis('tg-views-chart', Math.min(...vd), Math.max(...vd));
+      const pv = prevEntries.map(e => e.v);
+      const hasPrev = pv.length > 0;
+      const lo = Math.min(...vd, ...(hasPrev ? pv : []));
+      const hi = Math.max(...vd, ...(hasPrev ? pv : []));
+      chartEl.innerHTML = lineChartSvg(vd, hasPrev ? { prev: pv, min: lo, max: hi } : {});
+      setYAxis('tg-views-chart', hasPrev ? lo : Math.min(...vd), hasPrev ? hi : Math.max(...vd));
       setTip(chartEl, entries.map(e => `${e.day}: ${fmt.num(e.v)} просмотров`), 'line');
+      const legPrev = document.getElementById('tg-views-leg-prev');
+      if (legPrev) legPrev.style.display = hasPrev ? '' : 'none';
       if (labelsEl) labelsEl.innerHTML = entries.map((e, i) => {
         const show = entries.length <= 8 || i % 2 === 0 || i === entries.length - 1;
         return `<span style="${show ? '' : 'visibility:hidden'}">${e.day}</span>`;
