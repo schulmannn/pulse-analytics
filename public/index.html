@@ -1480,6 +1480,7 @@
         </nav>
       </div>
       <div class="header-right">
+        <select id="channel-switcher" title="Канал" style="display:none;background:var(--color-platinum);color:var(--color-midnight-ink);border:1px solid var(--color-powder-blue);border-radius:4px;padding:6px 10px;font-size:var(--text-caption);font-weight:600;cursor:pointer;max-width:200px;"></select>
         <div class="tabs source-toggle" id="source-toggle">
           <button data-source="telegram" class="active">Telegram</button>
           <button data-source="instagram">Instagram</button>
@@ -1898,6 +1899,7 @@ const STORAGE_KEY = 'pulse_token';
 const STORAGE_EXP = 'pulse_token_exp';
 
 /* ── API client ──────────────────────────────────────────────── */
+let SELECTED_CHANNEL = null;   // current channel id, sent as X-Channel-Id on every data call
 const API = {
   getToken() {
     const t = localStorage.getItem(STORAGE_KEY);
@@ -1917,6 +1919,7 @@ const API = {
     const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
     const token = this.getToken();
     if (token) headers['X-Session-Token'] = token;
+    if (SELECTED_CHANNEL != null) headers['X-Channel-Id'] = String(SELECTED_CHANNEL);
     const res = await fetch(path, { ...opts, headers });
     if (res.status === 401) {
       this.clearToken();
@@ -1945,6 +1948,7 @@ const API = {
   igInsights(d=7)  { return this.req(`/api/ig/insights?days=${d}`); },
   igPosts(l=20)    { return this.req(`/api/ig/posts?limit=${l}`); },
   tgChannel()      { return this.req('/api/tg/channel'); },
+  listChannels()   { return this.req('/api/channels'); },
   tgFull(limit=30) { return this.req('/api/tg/full?limit=' + Math.min(100, limit)); },
   tgStats()        { return this.req('/api/tg/mtproto/stats'); },
   tgGraphs()       { return this.req('/api/tg/mtproto/graphs'); },
@@ -2096,7 +2100,7 @@ function enterDashboard(res) {
   state.user = res.user || null;
   applyRole();
   showDash();
-  loadAll();
+  boot();
   LAYOUT.syncFromServer();
 }
 
@@ -2650,6 +2654,7 @@ document.getElementById('bug-list')?.addEventListener('click', async (e) => {
 const state = {
   source: 'telegram',
   user: null,   // { email, role } — заполняется при логине/boot
+  channels: [], selectedChannel: null, channelsLoaded: false,   // multitenancy (Sprint 1A)
   ig: { profile: null, insights: null, posts: [] },
   tg: { channel: null, stats: null, channelStats: null, graphs: null },
   posts: [] // unified
@@ -4413,7 +4418,47 @@ function setStatus(text, ok = true) {
 /* ================================================================
    MAIN LOAD ROUTINE
    ================================================================ */
+// ── Channels (tenants): load the user's channels, drive the switcher ──
+async function loadChannels() {
+  try {
+    const r = await API.listChannels();
+    state.channels = (r && r.channels) || [];
+    state.selectedChannel = (r && r.selected != null) ? r.selected : (state.channels[0] ? state.channels[0].id : null);
+    state.channelsLoaded = true;
+  } catch (e) { console.warn('channels:', e.message); }   // leave channelsLoaded false → don't block the dashboard
+  SELECTED_CHANNEL = state.selectedChannel;
+  renderChannelSwitcher();
+}
+
+function renderChannelSwitcher() {
+  const sel = document.getElementById('channel-switcher');
+  if (!sel) return;
+  const chans = state.channels || [];
+  if (chans.length < 2) { sel.style.display = 'none'; return; }   // nothing to switch (single channel)
+  sel.innerHTML = chans.map(c => `<option value="${c.id}">${escapeHtml('@' + (c.username || c.title || c.id))}</option>`).join('');
+  sel.value = String(state.selectedChannel);
+  sel.style.display = '';
+  sel.onchange = () => { SELECTED_CHANNEL = parseInt(sel.value, 10); state.selectedChannel = SELECTED_CHANNEL; loadAll(); };
+}
+
+function renderNoChannels() {
+  setStatus('Нет каналов', false);
+  const grid = document.getElementById('kpi-grid');
+  if (grid) grid.innerHTML =
+    `<div class="empty-state" style="grid-column:1/-1;padding:48px 24px;text-align:center">
+       <div class="em-title">Нет подключённых каналов</div>
+       <div style="color:var(--color-ghost-gray);margin-top:8px">Подключение канала появится в одном из ближайших обновлений.</div>
+     </div>`;
+}
+
+// Boot: resolve the user's channels first, then load the selected channel's data.
+async function boot() {
+  await loadChannels();
+  loadAll();
+}
+
 async function loadAll() {
+  if (state.channelsLoaded && !state.channels.length) { renderNoChannels(); return; }
   setStatus('Загрузка…', true);
   renderKpiSkeletons();
 
@@ -4881,7 +4926,7 @@ function applyTheme(t) {
     state.user = { email: r.email, role: r.role };
     applyRole();
     showDash();
-    loadAll();
+    boot();
     LAYOUT.syncFromServer();
   } catch (e) {
     API.clearToken();

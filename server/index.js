@@ -16,8 +16,11 @@ const PORT = process.env.PORT || 3000;
 app.set('trust proxy', 1);   // behind Railway's proxy → correct client IP for rate-limit / req.ip
 
 // История (Postgres) — поднимаем схему, если БД подключена; иначе тихо выключено.
-// После схемы — бутстрап админ-аккаунта из ADMIN_EMAIL/ADMIN_PASSWORD (если заданы).
-db.init().then(bootstrapAdmin).catch(e => console.error('[db] init failed:', e.message));
+// После схемы — бутстрап админ-аккаунта, затем привязка central-канала к админу.
+// dbReady гейтит data-роуты, пока идёт миграция (app.listen стартует синхронно).
+let dbReady = false;
+db.init().then(bootstrapAdmin).then(claimOwnerChannel).then(() => { dbReady = true; })
+  .catch(e => { console.error('[db] init failed:', e.message); dbReady = true; });
 
 // ── Middleware ───────────────────────────────────────────────────
 // CORS: дашборд обслуживается тем же origin (Express отдаёт и статику, и API),
@@ -123,6 +126,17 @@ async function bootstrapAdmin() {
   } catch (e) { console.error('[auth] admin bootstrap failed:', e.message); }
 }
 
+// Claim the orphan central channel for the admin once its account exists (the
+// owner channel may be created with owner_uid NULL at first boot if the admin
+// row isn't there yet). Idempotent — no-op once owned.
+async function claimOwnerChannel() {
+  if (!db.enabled || !ADMIN_EMAIL) return;
+  try {
+    const u = await db.getUserByEmail(ADMIN_EMAIL);
+    if (u) await db.adoptOwnerChannel(u.id);
+  } catch (e) { console.error('[db] adopt owner channel failed:', e.message); }
+}
+
 // Auth: validates the token; for account sessions re-checks the user is still active
 // (so role changes / disable take effect immediately, not only on next login).
 async function requireAuth(req, res, next) {
@@ -140,6 +154,37 @@ async function requireAuth(req, res, next) {
 function requireSuper(req, res, next) {
   if (!req.user || req.user.role !== 'superuser') return res.status(403).json({ error: 'Доступ только для администратора' });
   next();
+}
+
+// ── Channel (tenant) resolution & isolation ──────────────────────
+// Resolve the channel for a data request and authorize it against req.user.
+// Channel id from ?channel= or X-Channel-Id; default = the user's first channel.
+// No DB → behave as the single legacy 'central' channel (live MTProto only).
+// Zero channels → { empty:true } so the frontend shows the onboarding state.
+async function resolveChannel(req, res, next) {
+  if (!db.enabled) { req.channel = { id: null, source: 'central', username: '' }; return next(); }
+  if (!dbReady) return res.status(503).json({ error: 'Сервис запускается, попробуй через секунду' });
+  let cid = parseInt(req.query.channel || req.headers['x-channel-id'], 10) || 0;
+  try {
+    if (!cid) {
+      const list = await db.listChannels(req.user);
+      if (!list.length) return res.json({ enabled: true, empty: true, channels: [] });
+      cid = list[0].id;
+    }
+    const ch = await db.getChannel(cid, req.user);
+    if (!ch) return res.status(403).json({ error: 'Нет доступа к этому каналу' });
+    req.channel = ch;
+    next();
+  } catch (e) { res.status(500).json({ error: e.message }); }
+}
+
+// Live MTProto exists only for the 'central' channel (the owner's session).
+// Other channels are fed by collectors → their data comes from Postgres, so the
+// live-proxy routes answer with a soft "not live" marker for them.
+function notCentral(req, res) {
+  if (req.channel && req.channel.source === 'central') return false;
+  res.json({ available: false, source: 'collector', empty: true });
+  return true;
 }
 
 // ── In-memory кэш ───────────────────────────────────────────────
@@ -388,9 +433,23 @@ async function tgFetch(method, params = {}) {
   return json.result;
 }
 
-app.get('/api/tg/channel', requireAuth, async (req, res) => {
+// Channels (tenants) the user owns — drives the dashboard channel switcher.
+// No DB → one synthetic 'central' channel (id 0) so the legacy single-channel
+// dashboard still works locally without Postgres.
+app.get('/api/channels', requireAuth, async (req, res) => {
+  if (!db.enabled) return res.json({ enabled: false, channels: [{ id: 0, username: '', title: '', source: 'central' }], selected: 0 });
+  if (!dbReady) return res.status(503).json({ error: 'Сервис запускается' });
   try {
-    const cached = cacheGet('tg:channel');
+    const channels = await db.listChannels(req.user);
+    res.json({ enabled: true, channels, selected: channels[0] ? channels[0].id : null });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/tg/channel', requireAuth, resolveChannel, async (req, res) => {
+  if (notCentral(req, res)) return;
+  const cacheKey = `tg:channel:${req.channel.id}`;
+  try {
+    const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
 
     // Основной источник — Bot API (только если задан токен бота)
@@ -410,7 +469,7 @@ app.get('/api/tg/channel', requireAuth, async (req, res) => {
           inviteLink:  chat.invite_link || null,
           source:      'bot_api',
         };
-        cacheSet('tg:channel', data);
+        cacheSet(cacheKey, data);
         return res.json(data);
       } catch (_botErr) {
         // бот недоступен → падаем в MTProto-фолбэк ниже
@@ -429,7 +488,8 @@ app.get('/api/tg/channel', requireAuth, async (req, res) => {
       inviteLink:  null,
       source:      'mtproto',
     };
-    cacheSet('tg:channel', data);
+    if (req.channel.id && mt.id) db.setChannelTgId(req.channel.id, mt.id).catch(() => {});   // populate tg_channel_id once
+    cacheSet(cacheKey, data);
     res.json(data);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -465,8 +525,9 @@ app.get('/api/tg/mtproto/health', requireAuth, async (req, res) => {
   }
 });
 
-app.get('/api/tg/mtproto/channel', requireAuth, async (req, res) => {
-  const cacheKey = 'mtproto:channel';
+app.get('/api/tg/mtproto/channel', requireAuth, resolveChannel, async (req, res) => {
+  if (notCentral(req, res)) return;
+  const cacheKey = `mtproto:channel:${req.channel.id}`;
   try {
     const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
@@ -478,10 +539,11 @@ app.get('/api/tg/mtproto/channel', requireAuth, async (req, res) => {
   }
 });
 
-app.get('/api/tg/mtproto/posts', requireAuth, async (req, res) => {
+app.get('/api/tg/mtproto/posts', requireAuth, resolveChannel, async (req, res) => {
+  if (notCentral(req, res)) return;
   const limit     = Math.min(100, parseInt(req.query.limit)     || 30);
   const offsetId  = parseInt(req.query.offset_id) || 0;
-  const cacheKey  = `mtproto:posts:${limit}:${offsetId}`;
+  const cacheKey  = `mtproto:posts:${req.channel.id}:${limit}:${offsetId}`;
   try {
     const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
@@ -493,9 +555,10 @@ app.get('/api/tg/mtproto/posts', requireAuth, async (req, res) => {
   }
 });
 
-app.get('/api/tg/mtproto/views_summary', requireAuth, async (req, res) => {
+app.get('/api/tg/mtproto/views_summary', requireAuth, resolveChannel, async (req, res) => {
+  if (notCentral(req, res)) return;
   const limit    = Math.min(100, parseInt(req.query.limit) || 30);
-  const cacheKey = `mtproto:views:${limit}`;
+  const cacheKey = `mtproto:views:${req.channel.id}:${limit}`;
   try {
     const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
@@ -507,8 +570,9 @@ app.get('/api/tg/mtproto/views_summary', requireAuth, async (req, res) => {
   }
 });
 
-app.get('/api/tg/mtproto/stats', requireAuth, async (req, res) => {
-  const cacheKey = 'mtproto:stats';
+app.get('/api/tg/mtproto/stats', requireAuth, resolveChannel, async (req, res) => {
+  if (notCentral(req, res)) return;
+  const cacheKey = `mtproto:stats:${req.channel.id}`;
   try {
     const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
@@ -523,8 +587,9 @@ app.get('/api/tg/mtproto/stats', requireAuth, async (req, res) => {
   }
 });
 
-app.get('/api/tg/mtproto/graphs', requireAuth, async (req, res) => {
-  const cacheKey = 'mtproto:graphs';
+app.get('/api/tg/mtproto/graphs', requireAuth, resolveChannel, async (req, res) => {
+  if (notCentral(req, res)) return;
+  const cacheKey = `mtproto:graphs:${req.channel.id}`;
   try {
     const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
@@ -540,14 +605,14 @@ app.get('/api/tg/mtproto/graphs', requireAuth, async (req, res) => {
 // пользовательском запросе НЕТ тяжёлых последовательных вызовов Telegram.
 // Live-расчёт остаётся только fallback'ом: первый запуск до первого крона или
 // режим без БД — тогда считаем на лету один раз и кэшируем.
-app.get('/api/tg/mtproto/velocity', requireAuth, async (req, res) => {
-  const cacheKey = 'mtproto:velocity';
+app.get('/api/tg/mtproto/velocity', requireAuth, resolveChannel, async (req, res) => {
+  const cacheKey = `mtproto:velocity:${req.channel.id}`;
   try {
     const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
 
-    if (db.enabled) {
-      const snap = await db.getLatestVelocity().catch(() => null);
+    if (db.enabled && req.channel.id) {
+      const snap = await db.getLatestVelocity(req.channel.id).catch(() => null);
       if (snap && snap.data) {
         const out = { ...snap.data, source: 'db', computed_at: snap.computed_at };
         cacheSet(cacheKey, out);
@@ -555,7 +620,9 @@ app.get('/api/tg/mtproto/velocity', requireAuth, async (req, res) => {
       }
     }
 
-    // нет снапшота (до первого крона) или БД выключена → считаем live, один раз
+    // нет снапшота (до первого крона) → live-расчёт ТОЛЬКО для central-канала
+    // (у остальных данные приходят коллектором в Postgres).
+    if (req.channel.source !== 'central') return res.json({ available: false, source: 'collector', empty: true });
     const data = await mtprotoFetch('/velocity');
     if (data && data.available) {
       data.source = 'live';
@@ -570,16 +637,17 @@ app.get('/api/tg/mtproto/velocity', requireAuth, async (req, res) => {
 // Brand mentions — cached longer (searchPosts has a ~10/day free quota) to avoid
 // burning it on repeated loads. Cache TTL here is the 10-min default; the Python
 // side also checks free quota before each search and never spends Stars.
-app.get('/api/tg/mtproto/mentions', requireAuth, async (req, res) => {
-  const cacheKey = 'mtproto:mentions';
+app.get('/api/tg/mtproto/mentions', requireAuth, resolveChannel, async (req, res) => {
+  if (notCentral(req, res)) return;   // live brand-search is central-only
+  const cacheKey = `mtproto:mentions:${req.channel.id}`;
   try {
     const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
     const data = await mtprotoFetch('/mentions');
     if (data && data.available) {
       // accumulate the full deduped list into the archive (history beyond searchPosts' window)
-      if (Array.isArray(data.all)) {
-        db.upsertMentions(data.all).catch(e => console.error('[db] mentions upsert:', e.message));
+      if (Array.isArray(data.all) && req.channel.id) {
+        db.upsertMentions(req.channel.id, data.all).catch(e => console.error('[db] mentions upsert:', e.message));
       }
       delete data.all;                 // don't ship the full list to the client
       cacheSet(cacheKey, data);         // don't cache failures
@@ -590,10 +658,11 @@ app.get('/api/tg/mtproto/mentions', requireAuth, async (req, res) => {
   }
 });
 
-app.get('/api/tg/mtproto/post_stats/:id', requireAuth, async (req, res) => {
+app.get('/api/tg/mtproto/post_stats/:id', requireAuth, resolveChannel, async (req, res) => {
+  if (notCentral(req, res)) return;
   const id = parseInt(req.params.id, 10);
   if (!id) return res.status(400).json({ error: 'bad id' });
-  const cacheKey = 'mtproto:poststats:' + id;
+  const cacheKey = `mtproto:poststats:${req.channel.id}:${id}`;
   try {
     const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
@@ -623,7 +692,8 @@ app.get('/api/tg/mtproto/thumb/:id', async (req, res) => {
   }
 });
 
-app.get('/api/tg/full', requireAuth, async (req, res) => {
+app.get('/api/tg/full', requireAuth, resolveChannel, async (req, res) => {
+  if (notCentral(req, res)) return;
   const limit = Math.min(100, parseInt(req.query.limit) || 30);
   try {
     const [botChannel, mtChannel, viewsSummary, posts] = await Promise.allSettled([
@@ -701,6 +771,8 @@ app.post('/api/ingest/daily', async (req, res) => {
     return res.status(403).json({ ok: false, error: 'forbidden' });
   }
   if (!db.enabled) return res.status(200).json({ ok: false, reason: 'DATABASE_URL не задан — БД выключена' });
+  const channelId = await db.getOwnerChannelId();   // central channel = "collector #0"
+  if (!channelId) return res.status(503).json({ ok: false, reason: 'central channel not ready' });
   try {
     const [graphs, posts] = await Promise.all([
       mtprotoFetch('/graphs', { points: 400 }).catch(() => null),   // full range for the archive (dashboard uses 45)
@@ -708,7 +780,7 @@ app.post('/api/ingest/daily', async (req, res) => {
     ]);
 
     const dailyRows = db.graphsToDailyRows(graphs);
-    const nDaily = await db.upsertChannelDaily(dailyRows);
+    const nDaily = await db.upsertChannelDaily(channelId, dailyRows);
 
     let nPosts = 0;
     if (posts && Array.isArray(posts.posts)) {
@@ -723,7 +795,7 @@ app.post('/api/ingest/daily', async (req, res) => {
           media_type: p.media_type, caption: (p.text || '').slice(0, 500), hashtags: p.hashtags || [],
         };
       });
-      nPosts = await db.upsertPosts(prows);
+      nPosts = await db.upsertPosts(channelId, prows);
     }
 
     // Velocity ("жизнь поста") — тяжёлый расчёт (до ~12 последовательных
@@ -733,7 +805,7 @@ app.post('/api/ingest/daily', async (req, res) => {
     let velocityOk = false;
     const velocity = await mtprotoFetch('/velocity').catch(() => null);
     if (velocity && velocity.available) {
-      await db.saveVelocity(velocity).catch(e => console.error('[db] velocity save:', e.message));
+      await db.saveVelocity(channelId, velocity).catch(e => console.error('[db] velocity save:', e.message));
       velocityOk = true;
     }
 
@@ -743,18 +815,18 @@ app.post('/api/ingest/daily', async (req, res) => {
   }
 });
 
-app.get('/api/history/channel', requireAuth, async (req, res) => {
+app.get('/api/history/channel', requireAuth, resolveChannel, async (req, res) => {
   const days = Math.min(1000, parseInt(req.query.days) || 365);
   try {
-    res.json({ enabled: db.enabled, rows: await db.getChannelHistory(days) });
+    res.json({ enabled: db.enabled, rows: await db.getChannelHistory(req.channel.id, days) });
   } catch (e) {
     res.status(200).json({ enabled: db.enabled, rows: [], error: e.message });
   }
 });
 
-app.get('/api/history/mentions', requireAuth, async (req, res) => {
+app.get('/api/history/mentions', requireAuth, resolveChannel, async (req, res) => {
   try {
-    const data = await db.getMentionsArchive(30);
+    const data = await db.getMentionsArchive(req.channel.id, 30);
     res.json({ enabled: db.enabled, ...(data || { available: false }) });
   } catch (e) {
     res.status(200).json({ enabled: db.enabled, available: false, error: e.message });

@@ -86,6 +86,55 @@ CREATE TABLE IF NOT EXISTS velocity_daily (
   data JSONB NOT NULL,
   computed_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- ── Multitenancy (Sprint 1A): channel = tenant, owned by a user ──────────────
+-- Each user owns N channels. The owner's existing @bynotem data lives under a
+-- single 'central' channel (fed by the cron/pulse-mtproto = "collector #0");
+-- other users' channels are fed by their own collectors (later phase).
+CREATE TABLE IF NOT EXISTS channels (
+  id            SERIAL PRIMARY KEY,
+  owner_uid     INTEGER REFERENCES users(id) ON DELETE CASCADE,   -- nullable: tolerates bootstrap race
+  tg_channel_id BIGINT,                                           -- populated lazily from /channel .id
+  username      TEXT,
+  title         TEXT,
+  status        TEXT NOT NULL DEFAULT 'active',
+  source        TEXT NOT NULL DEFAULT 'collector',                -- 'central' = owner (cron/pulse-mtproto)
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS channels_owner_idx ON channels(owner_uid);
+CREATE UNIQUE INDEX IF NOT EXISTS channels_owner_tgid_uniq ON channels(owner_uid, tg_channel_id) WHERE tg_channel_id IS NOT NULL;
+-- At most one 'central' channel (singleton owner feed) → makes find-or-create race-safe.
+CREATE UNIQUE INDEX IF NOT EXISTS channels_one_central ON channels(source) WHERE source = 'central';
+
+-- Scope the data tables per channel. Drop the old single-column PKs (so two
+-- channels can share a day/post_id) and replace with composite UNIQUE INDEXes —
+-- CREATE UNIQUE INDEX IF NOT EXISTS is idempotent (Postgres lacks ADD CONSTRAINT
+-- IF NOT EXISTS) and ON CONFLICT works against a unique index. NULL channel_id
+-- rows stay distinct under the index until the boot-time backfill stamps them.
+ALTER TABLE channel_daily ADD COLUMN IF NOT EXISTS channel_id INTEGER REFERENCES channels(id) ON DELETE CASCADE;
+DO $$ BEGIN IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname='channel_daily_pkey') THEN
+  ALTER TABLE channel_daily DROP CONSTRAINT channel_daily_pkey; END IF; END $$;
+CREATE UNIQUE INDEX IF NOT EXISTS channel_daily_chan_day_uniq ON channel_daily(channel_id, day);
+CREATE INDEX IF NOT EXISTS channel_daily_chan_idx ON channel_daily(channel_id);
+
+ALTER TABLE posts ADD COLUMN IF NOT EXISTS channel_id INTEGER REFERENCES channels(id) ON DELETE CASCADE;
+DO $$ BEGIN IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname='posts_pkey') THEN
+  ALTER TABLE posts DROP CONSTRAINT posts_pkey; END IF; END $$;
+CREATE UNIQUE INDEX IF NOT EXISTS posts_chan_post_uniq ON posts(channel_id, post_id);
+CREATE INDEX IF NOT EXISTS posts_chan_idx ON posts(channel_id);
+
+ALTER TABLE velocity_daily ADD COLUMN IF NOT EXISTS channel_id INTEGER REFERENCES channels(id) ON DELETE CASCADE;
+DO $$ BEGIN IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname='velocity_daily_pkey') THEN
+  ALTER TABLE velocity_daily DROP CONSTRAINT velocity_daily_pkey; END IF; END $$;
+CREATE UNIQUE INDEX IF NOT EXISTS velocity_chan_day_uniq ON velocity_daily(channel_id, day);
+
+-- mentions already has channel_id = the MENTIONING channel; the tenant key is a
+-- distinct column to avoid the name clash.
+ALTER TABLE mentions ADD COLUMN IF NOT EXISTS owner_channel_id INTEGER REFERENCES channels(id) ON DELETE CASCADE;
+DO $$ BEGIN IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname='mentions_pkey') THEN
+  ALTER TABLE mentions DROP CONSTRAINT mentions_pkey; END IF; END $$;
+CREATE UNIQUE INDEX IF NOT EXISTS mentions_owner_src_msg_uniq ON mentions(owner_channel_id, channel_id, msg_id);
+CREATE INDEX IF NOT EXISTS mentions_owner_idx ON mentions(owner_channel_id);
 `;
 
 const USER_ROLES = ['user', 'superuser'];
@@ -97,7 +146,102 @@ const BUG_KINDS = ['bug', 'feature', 'change'];
 async function init() {
   if (!enabled) { console.log('[db] disabled (no DATABASE_URL) — history off'); return; }
   await pool.query(SCHEMA);
+  await migrateOwnerChannel();
   console.log('[db] schema ready');
+}
+
+// ── Channels (tenants) ───────────────────────────────────────────
+const OWNER_CHANNEL = process.env.OWNER_CHANNEL || process.env.TG_CHANNEL || '@bynotem';
+
+/* Find-or-create the singleton 'central' channel (the owner's @bynotem feed) and
+   stamp every pre-existing global data row onto it. Idempotent + double-boot-safe:
+   the partial unique index makes the INSERT race-safe, and the backfill UPDATEs
+   match nothing once the rows are stamped. The admin user may not exist yet at
+   first boot (bootstrapAdmin runs after init) → create with owner_uid NULL and
+   let adoptOwnerChannel() claim it once the admin row exists. */
+async function migrateOwnerChannel() {
+  if (!enabled) return;
+  let { rows } = await pool.query(`SELECT id FROM channels WHERE source='central' LIMIT 1`);
+  let ownerId = rows[0] && rows[0].id;
+  if (!ownerId) {
+    const adminEmail = String(process.env.ADMIN_EMAIL || '').toLowerCase().trim();
+    let adminId = null;
+    if (adminEmail) {
+      const u = await pool.query('SELECT id FROM users WHERE email=$1', [adminEmail]);
+      adminId = u.rows[0] ? u.rows[0].id : null;
+    }
+    const uname = String(OWNER_CHANNEL).replace(/^@/, '');
+    const ins = await pool.query(
+      `INSERT INTO channels (owner_uid, username, title, status, source)
+       VALUES ($1,$2,$2,'active','central') ON CONFLICT DO NOTHING RETURNING id`,
+      [adminId, uname]);
+    ownerId = ins.rows[0] ? ins.rows[0].id
+      : (await pool.query(`SELECT id FROM channels WHERE source='central' LIMIT 1`)).rows[0]?.id;
+  }
+  if (!ownerId) return;
+  await pool.query(`UPDATE channel_daily  SET channel_id=$1 WHERE channel_id IS NULL`, [ownerId]);
+  await pool.query(`UPDATE posts          SET channel_id=$1 WHERE channel_id IS NULL`, [ownerId]);
+  await pool.query(`UPDATE velocity_daily SET channel_id=$1 WHERE channel_id IS NULL`, [ownerId]);
+  await pool.query(`UPDATE mentions       SET owner_channel_id=$1 WHERE owner_channel_id IS NULL`, [ownerId]);
+}
+
+// Claim the orphan central channel for the admin once its account exists
+// (chained after bootstrapAdmin in index.js). No-op once owned → idempotent.
+async function adoptOwnerChannel(adminUid) {
+  if (!enabled || adminUid == null) return false;
+  await pool.query(`UPDATE channels SET owner_uid=$1 WHERE owner_uid IS NULL AND source='central'`, [adminUid]);
+  return true;
+}
+
+const CHANNEL_COLS = 'id, username, title, status, source, tg_channel_id, owner_uid';
+const isOperator = (u) => u && u.uid == null && u.role === 'superuser';   // break-glass = central-only
+
+// Channels visible to a user. Break-glass superuser (no account) sees the central channel only.
+async function listChannels(user) {
+  if (!enabled) return [];
+  if (isOperator(user)) {
+    const { rows } = await pool.query(
+      `SELECT ${CHANNEL_COLS} FROM channels WHERE source='central' ORDER BY created_at ASC`);
+    return rows;
+  }
+  const uid = user && user.uid;
+  if (uid == null) return [];
+  const { rows } = await pool.query(
+    `SELECT ${CHANNEL_COLS} FROM channels WHERE owner_uid=$1 AND status<>'disabled' ORDER BY created_at ASC`, [uid]);
+  return rows;
+}
+
+// Ownership-checked fetch: returns the channel row only if it belongs to the user
+// (or is central, for the break-glass operator). Routes turn null → 403.
+async function getChannel(id, user) {
+  if (!enabled || !id) return null;
+  if (isOperator(user)) {
+    const { rows } = await pool.query(`SELECT ${CHANNEL_COLS} FROM channels WHERE id=$1 AND source='central'`, [id]);
+    return rows[0] || null;
+  }
+  const uid = user && user.uid;
+  if (uid == null) return null;
+  const { rows } = await pool.query(`SELECT ${CHANNEL_COLS} FROM channels WHERE id=$1 AND owner_uid=$2`, [id, uid]);
+  return rows[0] || null;
+}
+
+// Unscoped lookup (internal use: cron, etc.)
+async function getChannelById(id) {
+  if (!enabled || !id) return null;
+  const { rows } = await pool.query(`SELECT ${CHANNEL_COLS} FROM channels WHERE id=$1`, [id]);
+  return rows[0] || null;
+}
+
+async function getOwnerChannelId() {
+  if (!enabled) return null;
+  const { rows } = await pool.query(`SELECT id FROM channels WHERE source='central' LIMIT 1`);
+  return rows[0] ? rows[0].id : null;
+}
+
+async function setChannelTgId(id, tgId) {
+  if (!enabled || !id || tgId == null) return false;
+  await pool.query(`UPDATE channels SET tg_channel_id=$2 WHERE id=$1 AND tg_channel_id IS NULL`, [id, tgId]);
+  return true;
 }
 
 const num = (v) => (v == null || isNaN(v)) ? null : Math.round(Number(v));
@@ -134,11 +278,11 @@ function graphsToDailyRows(graphs) {
   return Object.values(map);
 }
 
-async function upsertChannelDaily(rows) {
-  if (!enabled || !rows || !rows.length) return 0;
-  const sql = `INSERT INTO channel_daily (day, subscribers, joins, leaves, views, forwards, reactions, captured_at)
-    VALUES ($1,$2,$3,$4,$5,$6,$7, now())
-    ON CONFLICT (day) DO UPDATE SET
+async function upsertChannelDaily(channelId, rows) {
+  if (!enabled || !channelId || !rows || !rows.length) return 0;
+  const sql = `INSERT INTO channel_daily (channel_id, day, subscribers, joins, leaves, views, forwards, reactions, captured_at)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now())
+    ON CONFLICT (channel_id, day) DO UPDATE SET
       subscribers=COALESCE(EXCLUDED.subscribers, channel_daily.subscribers),
       joins=COALESCE(EXCLUDED.joins, channel_daily.joins),
       leaves=COALESCE(EXCLUDED.leaves, channel_daily.leaves),
@@ -149,18 +293,18 @@ async function upsertChannelDaily(rows) {
   const client = await pool.connect();
   try {
     for (const r of rows) {
-      await client.query(sql, [r.day, r.subscribers ?? null, r.joins ?? null, r.leaves ?? null,
+      await client.query(sql, [channelId, r.day, r.subscribers ?? null, r.joins ?? null, r.leaves ?? null,
         r.views ?? null, r.forwards ?? null, r.reactions ?? null]);
     }
   } finally { client.release(); }
   return rows.length;
 }
 
-async function upsertPosts(rows) {
-  if (!enabled || !rows || !rows.length) return 0;
-  const sql = `INSERT INTO posts (post_id, date_published, views, reactions, forwards, replies, erv, virality, media_type, caption, hashtags, updated_at)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now())
-    ON CONFLICT (post_id) DO UPDATE SET
+async function upsertPosts(channelId, rows) {
+  if (!enabled || !channelId || !rows || !rows.length) return 0;
+  const sql = `INSERT INTO posts (channel_id, post_id, date_published, views, reactions, forwards, replies, erv, virality, media_type, caption, hashtags, updated_at)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, now())
+    ON CONFLICT (channel_id, post_id) DO UPDATE SET
       date_published=COALESCE(EXCLUDED.date_published, posts.date_published),
       views=EXCLUDED.views, reactions=EXCLUDED.reactions, forwards=EXCLUDED.forwards, replies=EXCLUDED.replies,
       erv=EXCLUDED.erv, virality=EXCLUDED.virality, media_type=EXCLUDED.media_type,
@@ -168,7 +312,7 @@ async function upsertPosts(rows) {
   const client = await pool.connect();
   try {
     for (const r of rows) {
-      await client.query(sql, [r.post_id, r.date_published || null, r.views ?? null, r.reactions ?? null,
+      await client.query(sql, [channelId, r.post_id, r.date_published || null, r.views ?? null, r.reactions ?? null,
         r.forwards ?? null, r.replies ?? null, r.erv ?? null, r.virality ?? null,
         r.media_type || null, r.caption || null, JSON.stringify(r.hashtags || [])]);
     }
@@ -176,11 +320,11 @@ async function upsertPosts(rows) {
   return rows.length;
 }
 
-async function upsertMentions(list) {
-  if (!enabled || !list || !list.length) return 0;
-  const sql = `INSERT INTO mentions (channel_id, msg_id, post_date, first_seen, last_seen, title, username, link, snippet, views, query)
-    VALUES ($1,$2,$3, now(), now(), $4,$5,$6,$7,$8,$9)
-    ON CONFLICT (channel_id, msg_id) DO UPDATE SET
+async function upsertMentions(channelId, list) {
+  if (!enabled || !channelId || !list || !list.length) return 0;
+  const sql = `INSERT INTO mentions (owner_channel_id, channel_id, msg_id, post_date, first_seen, last_seen, title, username, link, snippet, views, query)
+    VALUES ($1,$2,$3,$4, now(), now(), $5,$6,$7,$8,$9,$10)
+    ON CONFLICT (owner_channel_id, channel_id, msg_id) DO UPDATE SET
       last_seen=now(), views=EXCLUDED.views, title=EXCLUDED.title, username=EXCLUDED.username,
       link=EXCLUDED.link, snippet=EXCLUDED.snippet, query=EXCLUDED.query`;
   const client = await pool.connect();
@@ -188,7 +332,7 @@ async function upsertMentions(list) {
   try {
     for (const m of list) {
       if (m.channel_id == null || m.msg_id == null) continue;
-      await client.query(sql, [m.channel_id, m.msg_id, m.date || null, m.title || null, m.username || null,
+      await client.query(sql, [channelId, m.channel_id, m.msg_id, m.date || null, m.title || null, m.username || null,
         m.link || null, m.snippet || null, m.views ?? null, m.query || null]);
       n++;
     }
@@ -196,42 +340,42 @@ async function upsertMentions(list) {
   return n;
 }
 
-async function getChannelHistory(days = 400) {
-  if (!enabled) return [];
+async function getChannelHistory(channelId, days = 400) {
+  if (!enabled || !channelId) return [];
   const { rows } = await pool.query(
     `SELECT to_char(day,'YYYY-MM-DD') AS day, subscribers, joins, leaves, views, forwards, reactions
-     FROM channel_daily WHERE day >= (CURRENT_DATE - $1::int) ORDER BY day ASC`, [days]);
+     FROM channel_daily WHERE channel_id=$1 AND day >= (CURRENT_DATE - $2::int) ORDER BY day ASC`, [channelId, days]);
   return rows;
 }
 
-async function getMentionsHistory() {
-  if (!enabled) return null;
+async function getMentionsHistory(channelId) {
+  if (!enabled || !channelId) return null;
   const total = await pool.query(
-    'SELECT count(*)::int AS total, count(distinct channel_id)::int AS channels, COALESCE(sum(views),0)::bigint AS views FROM mentions');
+    'SELECT count(*)::int AS total, count(distinct channel_id)::int AS channels, COALESCE(sum(views),0)::bigint AS views FROM mentions WHERE owner_channel_id=$1', [channelId]);
   const byMonth = await pool.query(
     `SELECT to_char(date_trunc('month', COALESCE(post_date, first_seen)),'YYYY-MM') AS month, count(*)::int AS c
-     FROM mentions GROUP BY 1 ORDER BY 1`);
+     FROM mentions WHERE owner_channel_id=$1 GROUP BY 1 ORDER BY 1`, [channelId]);
   return { total: total.rows[0], by_month: byMonth.rows };
 }
 
 // Full mentions panel from the archive — same shape renderMentions() expects from
 // the live search, so the dashboard can show stored mentions without spending quota.
-async function getMentionsArchive(limit = 30) {
-  if (!enabled) return null;
+async function getMentionsArchive(channelId, limit = 30) {
+  if (!enabled || !channelId) return null;
   const totals = await pool.query(
     `SELECT count(*)::int AS total, count(distinct channel_id)::int AS unique_channels,
-            COALESCE(sum(views),0)::bigint AS total_views FROM mentions`);
+            COALESCE(sum(views),0)::bigint AS total_views FROM mentions WHERE owner_channel_id=$1`, [channelId]);
   const byDay = await pool.query(
     `SELECT to_char(COALESCE(post_date, first_seen),'DD.MM') AS d, count(*)::int AS c
-       FROM mentions WHERE COALESCE(post_date, first_seen) >= (CURRENT_DATE - 60) GROUP BY 1`);
+       FROM mentions WHERE owner_channel_id=$1 AND COALESCE(post_date, first_seen) >= (CURRENT_DATE - 60) GROUP BY 1`, [channelId]);
   const channels = await pool.query(
     `SELECT max(title) AS title, max(username) AS username, count(*)::int AS count,
             COALESCE(sum(views),0)::int AS views
-       FROM mentions GROUP BY channel_id ORDER BY count(*) DESC, sum(views) DESC NULLS LAST LIMIT 10`);
+       FROM mentions WHERE owner_channel_id=$1 GROUP BY channel_id ORDER BY count(*) DESC, sum(views) DESC NULLS LAST LIMIT 10`, [channelId]);
   const recent = await pool.query(
     `SELECT channel_id, msg_id, title, username, link, snippet, views,
             to_char(COALESCE(post_date, first_seen),'YYYY-MM-DD"T"HH24:MI:SS') AS date
-       FROM mentions ORDER BY COALESCE(post_date, first_seen) DESC LIMIT $1`, [limit]);
+       FROM mentions WHERE owner_channel_id=$1 ORDER BY COALESCE(post_date, first_seen) DESC LIMIT $2`, [channelId, limit]);
   const t = totals.rows[0] || {};
   const by_day = {};
   for (const r of byDay.rows) by_day[r.d] = r.c;
@@ -329,20 +473,20 @@ async function setPrefs(uid, prefs) {
    Сохраняем готовый объект /velocity целиком (форма не меняется), upsert по
    текущему дню. Чтение — самый свежий день. Пустые/недоступные снимки не
    пишем (guard в вызывающем коде), чтобы не затирать хороший снапшот. */
-async function saveVelocity(data) {
-  if (!enabled || !data) return false;
+async function saveVelocity(channelId, data) {
+  if (!enabled || !channelId || !data) return false;
   await pool.query(
-    `INSERT INTO velocity_daily (day, data, computed_at) VALUES (CURRENT_DATE, $1, now())
-     ON CONFLICT (day) DO UPDATE SET data = EXCLUDED.data, computed_at = now()`,
-    [data]);
+    `INSERT INTO velocity_daily (channel_id, day, data, computed_at) VALUES ($1, CURRENT_DATE, $2, now())
+     ON CONFLICT (channel_id, day) DO UPDATE SET data = EXCLUDED.data, computed_at = now()`,
+    [channelId, data]);
   return true;
 }
 
-async function getLatestVelocity() {
-  if (!enabled) return null;
+async function getLatestVelocity(channelId) {
+  if (!enabled || !channelId) return null;
   const { rows } = await pool.query(
     `SELECT data, to_char(computed_at,'YYYY-MM-DD"T"HH24:MI:SS') AS computed_at
-       FROM velocity_daily ORDER BY day DESC LIMIT 1`);
+       FROM velocity_daily WHERE channel_id=$1 ORDER BY day DESC LIMIT 1`, [channelId]);
   return rows[0] || null;   // { data, computed_at } | null
 }
 
@@ -425,6 +569,7 @@ module.exports = {
   USER_ROLES, USER_STATUSES,
   countUsers, createUser, getUserByEmail, getUserById, listUsers, updateUser, setUserPassword,
   getPrefs, setPrefs,
+  adoptOwnerChannel, listChannels, getChannel, getChannelById, getOwnerChannelId, setChannelTgId,
   saveVelocity, getLatestVelocity,
   upsertChannelDaily, upsertPosts, upsertMentions,
   getChannelHistory, getMentionsHistory, getMentionsArchive,
