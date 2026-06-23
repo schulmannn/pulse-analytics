@@ -532,13 +532,31 @@ app.get('/api/tg/mtproto/graphs', requireAuth, async (req, res) => {
   }
 });
 
+// Velocity сервится из Postgres-снапшота (его строит ingest-крон), поэтому в
+// пользовательском запросе НЕТ тяжёлых последовательных вызовов Telegram.
+// Live-расчёт остаётся только fallback'ом: первый запуск до первого крона или
+// режим без БД — тогда считаем на лету один раз и кэшируем.
 app.get('/api/tg/mtproto/velocity', requireAuth, async (req, res) => {
   const cacheKey = 'mtproto:velocity';
   try {
     const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
+
+    if (db.enabled) {
+      const snap = await db.getLatestVelocity().catch(() => null);
+      if (snap && snap.data) {
+        const out = { ...snap.data, source: 'db', computed_at: snap.computed_at };
+        cacheSet(cacheKey, out);
+        return res.json(out);
+      }
+    }
+
+    // нет снапшота (до первого крона) или БД выключена → считаем live, один раз
     const data = await mtprotoFetch('/velocity');
-    cacheSet(cacheKey, data);
+    if (data && data.available) {
+      data.source = 'live';
+      cacheSet(cacheKey, data);   // не кэшируем неуспех
+    }
     res.json(data);
   } catch (e) {
     res.status(200).json({ error: e.message, available: false });
@@ -703,7 +721,19 @@ app.post('/api/ingest/daily', async (req, res) => {
       });
       nPosts = await db.upsertPosts(prows);
     }
-    res.json({ ok: true, channel_daily: nDaily, posts: nPosts });
+
+    // Velocity ("жизнь поста") — тяжёлый расчёт (до ~12 последовательных
+    // GetMessageStats к Telegram). Делаем его ЗДЕСЬ, в кроне (последовательно
+    // после graphs/posts, чтобы не нагружать единственную Telethon-сессию
+    // параллельно), и кладём снапшот в Postgres. Дашборд читает готовое из БД.
+    let velocityOk = false;
+    const velocity = await mtprotoFetch('/velocity').catch(() => null);
+    if (velocity && velocity.available) {
+      await db.saveVelocity(velocity).catch(e => console.error('[db] velocity save:', e.message));
+      velocityOk = true;
+    }
+
+    res.json({ ok: true, channel_daily: nDaily, posts: nPosts, velocity: velocityOk });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
