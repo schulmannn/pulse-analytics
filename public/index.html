@@ -493,11 +493,11 @@
      HERO
      ================================================================ */
   .hero {
-    padding: 48px 0 40px;
+    padding: 32px 0 28px;
     position: relative;
     overflow: hidden;
     border-bottom: 1px solid var(--color-powder-blue);
-    margin-bottom: 32px;
+    margin-bottom: 24px;
   }
   .hero::before {
     content: '';
@@ -1327,6 +1327,27 @@
     vertical-align: middle;
   }
   .tg-tabs button.active .tab-count { background: var(--accent-wash); color: var(--accent-text); }
+  .charts-config-wrap { margin-left: auto; position: relative; align-self: center; }
+  .tg-config-btn {
+    border: none; background: none; color: var(--color-slate-blue);
+    cursor: pointer; padding: 6px; border-radius: var(--radius-button);
+    display: flex; align-items: center; margin-bottom: 4px;
+  }
+  .tg-config-btn:hover { background: var(--color-powder-blue); color: var(--color-midnight-ink); }
+  .charts-config {
+    position: absolute; top: calc(100% + 6px); right: 0;
+    width: 260px; max-height: 360px; overflow-y: auto;
+    background: var(--color-platinum);
+    border: 1px solid var(--color-powder-blue);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-hover);
+    padding: 8px; z-index: 100;
+  }
+  .charts-config .cc-head { font-weight: 500; font-size: var(--text-body); color: var(--color-midnight-ink); padding: 4px 8px 8px; }
+  .charts-config .cc-group { font-size: var(--text-caption); text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-ghost-gray); padding: 8px 8px 4px; }
+  .charts-config .cc-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: var(--radius-button); cursor: pointer; font-size: var(--text-body); color: var(--color-slate-blue); }
+  .charts-config .cc-item:hover { background: var(--color-porcelain); color: var(--color-midnight-ink); }
+  .charts-config .cc-item input { accent-color: var(--accent); flex: 0 0 auto; }
   .tg-tabpane { display: none; }
   .tg-tabpane.active {
     display: grid;
@@ -1565,6 +1586,10 @@
         <button data-tab="timing">Время</button>
         <button data-tab="content">Контент</button>
         <button data-tab="other" style="display:none">Прочее</button>
+        <div class="charts-config-wrap">
+          <button id="charts-config-btn" class="tg-config-btn" title="Показать / скрыть графики" aria-label="Показать или скрыть графики"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg></button>
+          <div id="charts-config" class="charts-config hidden"></div>
+        </div>
       </div>
       <div id="tg-tabs-host">
         <div class="tg-tabpane active" data-tab="reach"></div>
@@ -4534,8 +4559,15 @@ const TGTABS = (() => {
   ];
   const WIDE = new Set(['tg-history-chart','tg-heatmap','tg-velocity-chart','tg-hashtags']);
   const TAB_KEY = 'pulse_tg_tab';
+  const HIDE_KEY = 'pulse_hidden_charts';
+  const TAB_LABELS = { reach:'Охват', audience:'Аудитория', engagement:'Вовлечённость', timing:'Время', content:'Контент', other:'Прочее' };
   const paneOf = (t) => document.querySelector('#tg-tabs-host .tg-tabpane[data-tab="' + t + '"]');
   const btnOf  = (t) => document.querySelector('#tg-tabs button[data-tab="' + t + '"]');
+  const panelOfChart = (id) => { const el = document.getElementById(id); return el ? el.closest('.panel') : null; };
+  let hidden = new Set();
+  function loadHidden() { try { const a = JSON.parse(localStorage.getItem(HIDE_KEY) || '[]'); if (Array.isArray(a)) hidden = new Set(a.filter(x => typeof x === 'string')); } catch (e) {} }
+  function saveHidden() { try { localStorage.setItem(HIDE_KEY, JSON.stringify([...hidden])); } catch (e) {} }
+
   function activate(tab) {
     document.querySelectorAll('#tg-tabs button[data-tab]').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
     document.querySelectorAll('#tg-tabs-host .tg-tabpane').forEach(p => p.classList.toggle('active', p.dataset.tab === tab));
@@ -4551,13 +4583,42 @@ const TGTABS = (() => {
       else if (badge) badge.remove();
     });
   }
+  function ensureActiveVisible() {
+    const ab = document.querySelector('#tg-tabs button.active');
+    if (!ab || ab.style.display === 'none') {
+      const fv = [...document.querySelectorAll('#tg-tabs button[data-tab]')].find(b => b.style.display !== 'none');
+      if (fv) activate(fv.dataset.tab);
+    }
+  }
+  function applyHidden() {                        // per-chart show/hide (user choice, persisted)
+    MAP.forEach(([id]) => { const p = panelOfChart(id); if (p) p.classList.toggle('pref-hidden', hidden.has(id)); });
+    refreshTabs();
+  }
+  function labelOf(id) { const p = panelOfChart(id); const t = p && p.querySelector('.chart-title'); return t ? t.textContent.trim() : id; }
+  function buildConfig() {
+    const box = document.getElementById('charts-config'); if (!box) return;
+    const groups = {};
+    MAP.forEach(([id, tab]) => { (groups[tab] || (groups[tab] = [])).push(id); });
+    let html = '<div class="cc-head">Показать графики</div>';
+    Object.keys(groups).forEach(tab => {
+      const ids = groups[tab].filter(id => document.getElementById(id));
+      if (!ids.length) return;
+      html += '<div class="cc-group">' + (TAB_LABELS[tab] || tab) + '</div>';
+      ids.forEach(id => {
+        html += '<label class="cc-item"><input type="checkbox" data-chart="' + id + '"' + (hidden.has(id) ? '' : ' checked') + '><span>' + escapeHtml(labelOf(id)) + '</span></label>';
+      });
+    });
+    box.innerHTML = html;
+  }
   function init() {
     const host = document.getElementById('tg-tabs-host'); if (!host) return;
+    loadHidden();
     MAP.forEach(([id, tab]) => {
       const el = document.getElementById(id); if (!el) return;
       const panel = el.closest('.panel'); if (!panel) return;
-      const pane = paneOf(tab); if (!pane) return;
+      panel.dataset.chart = id;
       if (WIDE.has(id)) panel.classList.add('span-full');
+      const pane = paneOf(tab); if (!pane) return;
       pane.appendChild(panel);
     });
     const other = paneOf('other');               // unmapped chart panels → fallback "Прочее" (never lost)
@@ -4566,9 +4627,21 @@ const TGTABS = (() => {
       other.appendChild(p);
     });
     document.querySelectorAll('#tg-analytics .two-col').forEach(r => { if (!r.querySelector('.panel')) r.remove(); });
-    refreshTabs();
+    applyHidden();
+    buildConfig();
     const bar = document.getElementById('tg-tabs');
     if (bar) bar.addEventListener('click', (e) => { const b = e.target.closest('button[data-tab]'); if (b) activate(b.dataset.tab); });
+    const cfgBtn = document.getElementById('charts-config-btn');
+    const cfgBox = document.getElementById('charts-config');
+    if (cfgBtn && cfgBox) {
+      cfgBtn.addEventListener('click', (e) => { e.stopPropagation(); cfgBox.classList.toggle('hidden'); });
+      document.addEventListener('click', (e) => { if (!cfgBox.classList.contains('hidden') && !e.target.closest('.charts-config-wrap')) cfgBox.classList.add('hidden'); });
+      cfgBox.addEventListener('change', (e) => {
+        const cb = e.target.closest('input[data-chart]'); if (!cb) return;
+        if (cb.checked) hidden.delete(cb.dataset.chart); else hidden.add(cb.dataset.chart);
+        saveHidden(); applyHidden(); ensureActiveVisible();
+      });
+    }
     let saved = 'reach';
     try { const s = localStorage.getItem(TAB_KEY); if (s) saved = s; } catch (e) {}
     const sb = btnOf(saved);
