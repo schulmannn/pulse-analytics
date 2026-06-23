@@ -1595,10 +1595,6 @@
             <a id="tg-open" class="btn-outline" target="_blank" rel="noopener" href="#" style="padding: 6px 12px; font-size: var(--text-caption); text-decoration: none;">Открыть канал</a>
           </div>
 
-          <div class="stat-row" id="tg-stats" style="grid-template-columns: 1fr 1fr;">
-            <!-- rendered by JS -->
-          </div>
-
           <div class="chart-card">
             <div class="chart-head">
               <span class="chart-title" id="tg-chart-title">Активность канала</span>
@@ -1784,7 +1780,7 @@
       <div class="section-head">
         <div>
           <h2>Топ-посты</h2>
-          <p>3 поста с&nbsp;лучшим охватом за&nbsp;период</p>
+          <p id="top-posts-sub">Посты с&nbsp;лучшим охватом за&nbsp;период</p>
         </div>
       </div>
       <div class="top-posts-grid" id="top-posts-grid">
@@ -2901,6 +2897,13 @@ function renderKpis() {
     const interViews = (interSeries.find(s => /view|просмотр/i.test(s.name)) || interSeries[0] || {}).values;
     const interShares = (interSeries.find(s => /share|репост/i.test(s.name)) || interSeries[1] || {}).values;
     const reactDaily = (graphs.reactions_daily && graphs.reactions_daily.values) ? graphs.reactions_daily.values : null;
+    // joined / left over the selected window (for the subscriber KPI breakdown)
+    const fSeries = (graphs.followers && graphs.followers.series) ? graphs.followers.series : [];
+    const joinV = ((fSeries.find(s => /join|подпис/i.test(s.name)) || fSeries[0] || {}).values) || [];
+    const leftV = ((fSeries.find(s => /left|leave|отпис/i.test(s.name)) || fSeries[1] || {}).values) || [];
+    const joinedN = joinV.slice(-currentPeriod).reduce((a, b) => a + (Number(b) || 0), 0);
+    const leftN = leftV.slice(-currentPeriod).reduce((a, b) => a + (Number(b) || 0), 0);
+    const subFlow = joinV.length > 0 || leftV.length > 0;
     const subTrend = trendFromStock(growthVals, currentPeriod);
     const viewTrend = trendFromFlow(interViews, currentPeriod);
     const repTrend = trendFromFlow(interShares, currentPeriod);
@@ -2921,7 +2924,7 @@ function renderKpis() {
     const cur = (o) => (o && o.current != null) ? o.current : null;
     return [
       { feature: true, label: 'Подписчики', value: fmt.num(members), trend: subTrend,
-        delta: (notif && notif.total) ? `${Math.round(notif.part / notif.total * 100)}% с уведомлениями` : 'в канале', deltaClass: 'muted', spark },
+        delta: subFlow ? `+${fmt.num(joinedN)} пришло · −${fmt.num(leftN)} ушло` : ((notif && notif.total) ? `${Math.round(notif.part / notif.total * 100)}% с уведомлениями` : 'в канале'), deltaClass: 'muted', spark },
       { label: 'Просмотры за период', value: fmt.short(totalViews), trend: viewTrend,
         delta: postsAnalyzed ? `по ${postsAnalyzed} постам` : null, deltaClass: 'muted', spark },
       { label: 'Ср. охват поста', value: fmt.short(avgViews),
@@ -3054,8 +3057,8 @@ function renderTg() {
   }
 
   // ─── Stats grid ──────────────────────────────────────
-  const statsEl = document.getElementById('tg-stats');
-  if (mtprotoOk) {
+  const statsEl = document.getElementById('tg-stats');   // removed from the UI (duplicated KPIs); guarded below
+  if (statsEl && mtprotoOk) {
     statsEl.style.gridTemplateColumns = 'repeat(4, 1fr)';
     statsEl.innerHTML = `
       <div class="stat-cell">
@@ -3079,7 +3082,7 @@ function renderTg() {
         <div class="sub">${postsPerWeek} постов / нед.</div>
       </div>
     `;
-  } else {
+  } else if (statsEl) {
     statsEl.style.gridTemplateColumns = 'repeat(2, 1fr)';
     statsEl.innerHTML = `
       <div class="stat-cell">
@@ -3263,8 +3266,23 @@ function renderPosts() {
 
   const sorted = [...activePosts].sort((a, b) => (b.reach || 0) - (a.reach || 0));
 
-  // ── Top 3 posts ─────────────────────────────────────
-  const top3 = sorted.slice(0, 3).filter(p => (p.reach || 0) > 0);
+  // ── Top posts ───────────────────────────────────────
+  // TG: by engagement (reactions + comments + shares); "top" = above the period average.
+  // IG: by reach (top 3), unchanged.
+  let top3;
+  const subEl = document.getElementById('top-posts-sub');
+  if (state.source === 'telegram') {
+    const eng = p => (Number(p.likes) || 0) + (Number(p.comments) || 0) + (Number(p.shares) || 0);
+    const withEng = activePosts.filter(p => eng(p) > 0);
+    const avg = withEng.length ? withEng.reduce((a, p) => a + eng(p), 0) / withEng.length : 0;
+    top3 = withEng.filter(p => eng(p) > avg).sort((a, b) => eng(b) - eng(a));
+    if (!top3.length) top3 = [...withEng].sort((a, b) => eng(b) - eng(a)).slice(0, 3);
+    top3 = top3.slice(0, 6);
+    if (subEl) subEl.textContent = 'Посты с вовлечением выше среднего за период';
+  } else {
+    top3 = sorted.slice(0, 3).filter(p => (p.reach || 0) > 0);
+    if (subEl) subEl.textContent = 'Посты с лучшим охватом за период';
+  }
   if (topGrid && top3.length > 0) {
     document.getElementById('top-posts-section')?.classList.remove('hidden');
     topGrid.innerHTML = top3.map((p, i) => {
