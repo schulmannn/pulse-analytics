@@ -1594,24 +1594,6 @@
             </div>
             <a id="tg-open" class="btn-outline" target="_blank" rel="noopener" href="#" style="padding: 6px 12px; font-size: var(--text-caption); text-decoration: none;">Открыть канал</a>
           </div>
-
-          <div class="chart-card">
-            <div class="chart-head">
-              <span class="chart-title" id="tg-chart-title">Активность канала</span>
-            </div>
-            <svg id="tg-chart" viewBox="0 0 360 100" width="100%" height="100" preserveAspectRatio="none"></svg>
-            <div id="tg-chart-labels" style="display: flex; justify-content: space-between; font-size: var(--text-caption); color: var(--color-ghost-gray); padding-top: 6px;"></div>
-          </div>
-
-          <div id="tg-insight" class="insight-box hidden">
-            <div class="insight-icon">↑</div>
-            <div>
-              <div class="title" id="tg-insight-title"></div>
-              <div class="desc" id="tg-insight-desc"></div>
-            </div>
-          </div>
-
-          <div id="tg-breakdown" class="breakdown-box hidden"></div>
         </div>
       </div>
     </div>
@@ -2926,7 +2908,7 @@ function renderKpis() {
     return [
       { feature: true, label: 'Подписчики', value: fmt.num(members),
         trend: subFlow ? null : subTrend,
-        delta: subFlow ? `+${fmt.num(joinedN)} пришло · −${fmt.num(leftN)} ушло · ${netN >= 0 ? '+' : '−'}${fmt.num(Math.abs(netN))} итог` : ((notif && notif.total) ? `${Math.round(notif.part / notif.total * 100)}% с уведомлениями` : 'в канале'), deltaClass: 'muted', spark },
+        delta: subFlow ? `<span style="color:var(--color-accent-green)">▲ ${fmt.num(joinedN)} пришло</span> · <span style="color:var(--color-vibrant-orange)">▼ ${fmt.num(leftN)} ушло</span> · <span style="color:${netN >= 0 ? 'var(--color-accent-green)' : 'var(--color-vibrant-orange)'}">${netN >= 0 ? '▲' : '▼'} ${fmt.num(Math.abs(netN))} итог</span>` : ((notif && notif.total) ? `${Math.round(notif.part / notif.total * 100)}% с уведомлениями` : 'в канале'), deltaClass: 'muted', spark },
       { label: 'Просмотры за период', value: fmt.short(totalViews), trend: viewTrend,
         delta: postsAnalyzed ? `по ${postsAnalyzed} постам` : null, deltaClass: 'muted', spark },
       { label: 'Ср. охват поста', value: fmt.short(avgViews),
@@ -3105,7 +3087,8 @@ function renderTg() {
   const labelsEl = document.getElementById('tg-chart-labels');
   const chartTitleEl = document.getElementById('tg-chart-title');
 
-  if (mtprotoOk && viewsByDay && Object.keys(viewsByDay).length > 0) {
+  if (!chartEl) { /* chart removed from profile panel (duplicated the Охват tab) */ }
+  else if (mtprotoOk && viewsByDay && Object.keys(viewsByDay).length > 0) {
     // Sort days chronologically (DD.MM format → year boundary handled simply)
     const entries = Object.entries(viewsByDay).map(([day, views]) => {
       const [d, m] = day.split('.').map(Number);
@@ -3156,7 +3139,8 @@ function renderTg() {
 
   // ─── Media type breakdown ────────────────────────────
   const breakdownEl = document.getElementById('tg-breakdown');
-  if (mtprotoOk && avgByType && Object.keys(avgByType).length > 0) {
+  if (!breakdownEl) { /* breakdown removed from profile panel (duplicated the Контент tab) */ }
+  else if (mtprotoOk && avgByType && Object.keys(avgByType).length > 0) {
     const typeIcons = { photo: '🖼', video: '🎬', poll: '📊', document: '📎', text: '📝', audio: '🎵', voice: '🎙', link: '🔗' };
     const typeNames = { photo: 'Фото', video: 'Видео', poll: 'Опросы', document: 'Файлы', text: 'Текст', audio: 'Аудио', voice: 'Голос', link: 'Ссылки' };
 
@@ -3194,7 +3178,8 @@ function renderTg() {
   }
 
   // ─── Insight: top post ──────────────────────────────
-  if (mtprotoOk && tgPosts.length > 0) {
+  if (!document.getElementById('tg-insight')) { /* insight removed from profile panel */ }
+  else if (mtprotoOk && tgPosts.length > 0) {
     const sortedByViews = [...tgPosts].sort((a, b) => (b.views || 0) - (a.views || 0));
     const top = sortedByViews[0];
     if (top && (top.views || 0) > 0) {
