@@ -3848,8 +3848,9 @@ function renderHistory() {
   if (!panel || !el) return;
   const h = state.tg.history;
   const all = (h && h.enabled && Array.isArray(h.rows)) ? h.rows.filter(r => r.subscribers != null) : [];
-  if (all.length < 2) { panel.classList.add('hidden'); return; }
+  if (all.length < 2) { panel.classList.add('hidden'); TGTABS.refresh(); return; }
   panel.classList.remove('hidden');
+  TGTABS.refresh();
   // Downsample long archives (up to 730 days) so the fixed-width SVG stays crisp.
   const rows = lttbDownsample(all, CHART_MAX_POINTS, r => Number(r.subscribers));
   const vals = rows.map(r => Number(r.subscribers));
@@ -4496,7 +4497,7 @@ const TGTABS = (() => {
   function refreshTabs() {                       // hide empty tabs + show a count badge
     document.querySelectorAll('#tg-tabs button[data-tab]').forEach(btn => {
       const pane = paneOf(btn.dataset.tab);
-      const n = pane ? pane.querySelectorAll(':scope > .panel').length : 0;
+      const n = pane ? pane.querySelectorAll(':scope > .panel:not(.hidden):not(.pref-hidden)').length : 0;
       btn.style.display = n ? '' : 'none';
       let badge = btn.querySelector('.tab-count');
       if (n) { if (!badge) { badge = document.createElement('span'); badge.className = 'tab-count'; btn.appendChild(badge); } badge.textContent = n; }
@@ -4527,7 +4528,7 @@ const TGTABS = (() => {
     if (sb && sb.style.display !== 'none') activate(saved);
     else { const fv = [...document.querySelectorAll('#tg-tabs button[data-tab]')].find(b => b.style.display !== 'none'); activate(fv ? fv.dataset.tab : 'reach'); }
   }
-  return { init };
+  return { init, refresh: refreshTabs };
 })();
 TGTABS.init();
 
