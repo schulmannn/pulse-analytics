@@ -200,26 +200,88 @@ function cacheSet(key, data) {
   cache.set(key, { data, expires: Date.now() + CACHE_TTL });
 }
 
+// ── Email (verification / password reset) via Resend — no new dependency ──
+const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
+const EMAIL_FROM = process.env.EMAIL_FROM || 'Pulse Analytics <onboarding@resend.dev>';
+const APP_URL = (process.env.APP_URL || '').replace(/\/$/, '');
+// Hosts honoured from the request when APP_URL isn't set — defends emailed links
+// against Host-header poisoning (reset link → account takeover). Best practice:
+// set APP_URL in production. Override the allowlist with TRUSTED_HOSTS (comma-sep).
+const TRUSTED_HOSTS = new Set(
+  (process.env.TRUSTED_HOSTS || 'pulse-analytics-production-daf3.up.railway.app')
+    .split(',').map(s => s.trim().toLowerCase()).filter(Boolean));
+const VERIFY_TTL = 24 * 60 * 60 * 1000;
+const RESET_TTL  = 60 * 60 * 1000;
+const sha256   = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
+const newToken = () => crypto.randomBytes(32).toString('base64url');
+const escHtml  = (s) => String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+// Public origin for emailed links. NEVER trust a raw Host header (poisonable):
+// use APP_URL, else only an allow-listed / localhost host, else the canonical default.
+function appBase(req) {
+  if (APP_URL) return APP_URL;
+  const host = String((req && req.get && req.get('host')) || '').toLowerCase();
+  if (TRUSTED_HOSTS.has(host)) return 'https://' + host;                        // prod → https (never reflect X-Forwarded-Proto)
+  if (/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host)) return 'http://' + host;  // local dev
+  return 'https://' + [...TRUSTED_HOSTS][0];                                    // untrusted host → canonical default
+}
+// Fixed-cost hash so login spends scrypt time even when the email doesn't exist
+// (kills the "skip the hash on missing user" enumeration timing oracle).
+const DUMMY_HASH = `scrypt$${SCRYPT.N}$${SCRYPT.r}$${SCRYPT.p}$${'0'.repeat(32)}$${'0'.repeat(128)}`;
+
+// Send via Resend (plain fetch). No key → log only non-secret metadata (never the
+// rendered link/token). Never throws (auth flows stay generic on email failure).
+async function sendEmail(to, subject, html) {
+  if (!RESEND_API_KEY) { console.log(`[email:dev] to=${to} · "${subject}" (RESEND_API_KEY unset — not sent)`); return true; }
+  try {
+    const r = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: EMAIL_FROM, to, subject, html }),
+    });
+    if (!r.ok) { console.error('[email] resend', r.status, (await r.text().catch(() => '')).slice(0, 200)); return false; }
+    return true;
+  } catch (e) { console.error('[email] send error:', e.message); return false; }
+}
+const emailShell = (title, body) =>
+  `<div style="font-family:system-ui,Segoe UI,sans-serif;max-width:480px;color:#061b31"><h2 style="font-weight:600">${title}</h2>${body}</div>`;
+const emailBtn = (href, label) =>
+  `<p><a href="${escHtml(href)}" style="display:inline-block;padding:10px 18px;background:#533afd;color:#fff;border-radius:6px;text-decoration:none">${label}</a></p>`;
+const verifyEmailHtml = (link) => emailShell('Подтверди email',
+  `<p>Активируй аккаунт в Pulse Analytics:</p>${emailBtn(link, 'Подтвердить email')}<p style="color:#64748d;font-size:13px">Ссылка действует 24 часа. Если это были не вы — проигнорируйте письмо.</p>`);
+const resetEmailHtml = (link) => emailShell('Сброс пароля',
+  `<p>Задай новый пароль:</p>${emailBtn(link, 'Сбросить пароль')}<p style="color:#64748d;font-size:13px">Ссылка действует 1 час. Если это были не вы — проигнорируйте, пароль не изменится.</p>`);
+const existsEmailHtml = (base) => emailShell('Аккаунт уже существует',
+  `<p>На этот email уже есть аккаунт Pulse Analytics. Забыли пароль — <a href="${escHtml(base)}/?forgot=1">сбросьте его</a>.</p>`);
+
 // ════════════════════════════════════════════════════════════════
 //  AUTH ROUTES
 // ════════════════════════════════════════════════════════════════
 
-// Registration: new accounts are 'pending' (no access) until a superuser approves.
-// The ADMIN_EMAIL (env) registers straight as an active superuser (bootstrap owner).
+// Registration (self-serve, Sprint 1B): create an 'unverified' account and email
+// a verification link. Anti-enumeration — always the same generic response; an
+// already-registered email gets an "account exists" nudge instead.
 app.post('/api/auth/register', authLimiter, async (req, res) => {
   if (!db.enabled) return res.status(503).json({ error: 'БД не подключена — регистрация недоступна' });
   const email = String((req.body && req.body.email) || '').toLowerCase().trim();
   const password = String((req.body && req.body.password) || '');
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ error: 'Некорректный email' });
   if (password.length < 8) return res.status(400).json({ error: 'Пароль минимум 8 символов' });
+  const generic = { status: 'check_email', message: 'Проверь почту — если email свободен, мы отправили ссылку для подтверждения.' };
+  res.json(generic);          // respond first → constant-time, no existing-vs-new timing oracle
   try {
-    // Everyone registers as a pending normal user; a superuser approves in the admin panel
-    // (the ADMIN_EMAIL account is created at startup by bootstrapAdmin, not here → no race).
-    await db.createUser({ email, pass_hash: hashPassword(password), role: 'user', status: 'pending' });
-    res.json({ status: 'pending', message: 'Аккаунт создан. Доступ откроется после одобрения администратором.' });
+    const base = appBase(req);
+    const existing = await db.getUserByEmail(email);
+    if (existing) {           // don't reveal it's taken; nudge the real owner, cooldown-gated like real tokens
+      const eid = await db.createEmailToken(existing.id, 'exists', sha256(newToken()), new Date(Date.now() + 60000));
+      if (eid) sendEmail(email, 'Аккаунт Pulse уже существует', existsEmailHtml(base)).catch(() => {});
+      return;
+    }
+    const u = await db.createUser({ email, pass_hash: hashPassword(password), role: 'user', status: 'unverified' });
+    const raw = newToken();
+    const id = await db.createEmailToken(u.id, 'verify', sha256(raw), new Date(Date.now() + VERIFY_TTL));
+    if (id) await sendEmail(email, 'Подтверди email — Pulse Analytics', verifyEmailHtml(`${base}/api/auth/verify?token=${raw}`));
   } catch (e) {
-    if (e.code === '23505') return res.status(409).json({ error: 'Этот email уже зарегистрирован' });
-    res.status(500).json({ error: e.message });
+    if (e.code !== '23505') console.error('[register]', e.message);   // already responded generically
   }
 });
 
@@ -234,9 +296,11 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
     if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
     try {
       const u = await db.getUserByEmail(email);
-      if (!u || !verifyPassword(password, u.pass_hash)) return res.status(403).json({ error: 'Неверный email или пароль' });
-      if (u.status === 'pending')  return res.status(403).json({ error: 'Аккаунт ждёт одобрения администратором' });
-      if (u.status !== 'active')   return res.status(403).json({ error: 'Аккаунт отключён' });
+      const ok = u ? verifyPassword(password, u.pass_hash) : verifyPassword(password, DUMMY_HASH);  // constant-cost
+      if (!u || !ok) return res.status(403).json({ error: 'Неверный email или пароль' });
+      if (u.status === 'unverified') return res.status(403).json({ error: 'Подтверди email — ссылка пришла при регистрации', code: 'unverified' });
+      if (u.status === 'pending')    return res.status(403).json({ error: 'Аккаунт ждёт одобрения администратором' });
+      if (u.status !== 'active')     return res.status(403).json({ error: 'Аккаунт отключён' });
       return res.json({ token: signSession({ uid: u.id, role: u.role, exp: expires }),
         expiresAt: new Date(expires).toISOString(), user: { email: u.email, role: u.role } });
     } catch (e) { return res.status(500).json({ error: e.message }); }
@@ -259,6 +323,82 @@ app.get('/api/auth/check', requireAuth, (req, res) => {
 
 app.get('/api/auth/me', requireAuth, (req, res) => {
   res.json({ uid: req.user.uid, email: req.user.email, role: req.user.role });
+});
+
+// Email verification. GET serves an interstitial that does NOT consume the token —
+// link-prefetchers (Outlook SafeLinks, AV scanners) issue GETs and a single-use
+// token must survive that. The explicit button POSTs to consume + activate.
+app.get('/api/auth/verify', (req, res) => {
+  const tokenJs = JSON.stringify(String(req.query.token || '')).replace(/</g, '\\u003c');  // safe embed
+  res.set('Content-Type', 'text/html; charset=utf-8').set('Cache-Control', 'no-store').set('Referrer-Policy', 'no-referrer')
+    .send(`<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Подтверждение email</title>
+<style>body{font-family:system-ui,Segoe UI,sans-serif;background:#e5edf5;color:#061b31;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}.c{background:#fff;padding:32px;border-radius:8px;max-width:380px;text-align:center;box-shadow:0 4px 24px rgba(6,27,49,.08)}button{margin-top:18px;padding:11px 22px;background:#533afd;color:#fff;border:0;border-radius:6px;font-size:15px;cursor:pointer}.m{margin-top:14px;font-size:13px;color:#64748d}</style></head>
+<body><div class="c"><h2>Подтверждение email</h2><p>Активируй аккаунт в Pulse Analytics.</p><button id="b">Подтвердить email</button><div class="m" id="m"></div></div>
+<script>var t=${tokenJs};document.getElementById('b').onclick=function(){var b=this;b.disabled=true;b.textContent='…';fetch('/api/auth/verify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:t})}).then(function(r){return r.json().catch(function(){return{}})}).then(function(j){if(j&&j.ok){location.href='/?verified=1';}else{document.getElementById('m').textContent=(j&&j.error)||'Ссылка недействительна или истекла';b.style.display='none';}}).catch(function(){document.getElementById('m').textContent='Ошибка сети';b.disabled=false;b.textContent='Подтвердить email';});};</script></body></html>`);
+});
+
+app.post('/api/auth/verify', authLimiter, async (req, res) => {
+  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
+  const raw = String((req.body && req.body.token) || '');
+  if (!raw) return res.status(400).json({ error: 'Ссылка недействительна' });
+  try {
+    const t = await db.useEmailToken(sha256(raw), 'verify');
+    if (!t) return res.status(400).json({ error: 'Ссылка недействительна или истекла' });
+    const u = await db.getUserById(t.uid);
+    if (u && u.status === 'unverified') { await db.setUserStatus(t.uid, 'active'); return res.json({ ok: true }); }
+    if (u && u.status === 'active') return res.json({ ok: true });             // already verified — idempotent
+    return res.status(400).json({ error: 'Аккаунт нельзя активировать' });     // disabled/pending: NOT via verify
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Password reset request — always generic (no account enumeration).
+app.post('/api/auth/forgot', authLimiter, async (req, res) => {
+  const email = String((req.body && req.body.email) || '').toLowerCase().trim();
+  res.json({ ok: true, message: 'Если такой аккаунт есть — мы отправили ссылку для сброса.' });   // respond first
+  if (!db.enabled || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return;
+  try {
+    const base = appBase(req);
+    const u = await db.getUserByEmail(email);
+    if (u && u.status !== 'disabled') {
+      const raw = newToken();
+      const id = await db.createEmailToken(u.id, 'reset', sha256(raw), new Date(Date.now() + RESET_TTL));
+      if (id) await sendEmail(email, 'Сброс пароля — Pulse Analytics', resetEmailHtml(`${base}/?reset=${raw}`));
+    }
+  } catch (e) { console.error('[forgot]', e.message); }   // already responded generically
+});
+
+// Password reset — consume token, set new password. Only promotes 'unverified'→'active'
+// (a reset proves email ownership); never re-activates a disabled/pending account.
+app.post('/api/auth/reset', authLimiter, async (req, res) => {
+  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
+  const raw = String((req.body && req.body.token) || '');
+  const password = String((req.body && req.body.password) || '');
+  if (password.length < 8) return res.status(400).json({ error: 'Пароль минимум 8 символов' });
+  if (!raw) return res.status(400).json({ error: 'Ссылка недействительна' });
+  try {
+    const t = await db.useEmailToken(sha256(raw), 'reset');
+    if (!t) return res.status(400).json({ error: 'Ссылка недействительна или истекла' });
+    await db.setUserPassword(t.uid, hashPassword(password));
+    const u = await db.getUserById(t.uid);
+    if (u && u.status === 'unverified') await db.setUserStatus(t.uid, 'active');
+    res.json({ ok: true, message: 'Пароль обновлён — войди с новым паролем.' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Resend verification email (generic; only acts for an 'unverified' account).
+app.post('/api/auth/resend-verification', authLimiter, async (req, res) => {
+  const email = String((req.body && req.body.email) || '').toLowerCase().trim();
+  res.json({ ok: true, message: 'Если аккаунт ждёт подтверждения — письмо отправлено снова.' });   // respond first
+  if (!db.enabled) return;
+  try {
+    const base = appBase(req);
+    const u = await db.getUserByEmail(email);
+    if (u && u.status === 'unverified') {
+      const raw = newToken();
+      const id = await db.createEmailToken(u.id, 'verify', sha256(raw), new Date(Date.now() + VERIFY_TTL));
+      if (id) await sendEmail(email, 'Подтверди email — Pulse Analytics', verifyEmailHtml(`${base}/api/auth/verify?token=${raw}`));
+    }
+  } catch (e) { console.error('[resend]', e.message); }
 });
 
 // ── Персональная раскладка дашборда (порядок/скрытие/ширина блоков) ──

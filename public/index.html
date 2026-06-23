@@ -1443,7 +1443,7 @@
       <input id="password" type="password" class="form-input" autocomplete="current-password" required>
       <div id="login-error" class="login-error hidden"></div>
       <button type="submit" id="login-btn" class="btn-primary full" style="margin-top: 20px;">Войти</button>
-      <p class="login-foot" style="margin-top:14px"><a id="breakglass-link" style="cursor:pointer;color:var(--accent-text)">Войти по командному паролю</a></p>
+      <p class="login-foot" style="margin-top:14px"><a id="forgot-link" style="cursor:pointer;color:var(--accent-text)">Забыли пароль?</a> · <a id="breakglass-link" style="cursor:pointer;color:var(--accent-text)">командный пароль</a></p>
     </form>
 
     <form id="register-form" class="hidden" autocomplete="off">
@@ -1453,7 +1453,22 @@
       <input id="reg-password" type="password" class="form-input" autocomplete="new-password" required>
       <div id="register-msg" class="login-error hidden"></div>
       <button type="submit" id="register-btn" class="btn-primary full" style="margin-top: 20px;">Зарегистрироваться</button>
-      <p class="login-foot" style="margin-top:14px">Доступ откроется после одобрения администратором.</p>
+      <p class="login-foot" style="margin-top:14px">На указанный email придёт ссылка для подтверждения.</p>
+    </form>
+
+    <form id="forgot-form" class="hidden" autocomplete="off">
+      <label class="form-label" for="forgot-email">Email для сброса пароля</label>
+      <input id="forgot-email" type="email" class="form-input" autocomplete="username" placeholder="you@example.com" required>
+      <div id="forgot-msg" class="login-error hidden"></div>
+      <button type="submit" id="forgot-btn" class="btn-primary full" style="margin-top: 20px;">Отправить ссылку</button>
+      <p class="login-foot" style="margin-top:14px"><a id="forgot-back" style="cursor:pointer;color:var(--accent-text)">← Назад ко входу</a></p>
+    </form>
+
+    <form id="reset-form" class="hidden" autocomplete="off">
+      <label class="form-label" for="reset-password">Новый пароль (мин. 8 символов)</label>
+      <input id="reset-password" type="password" class="form-input" autocomplete="new-password" required>
+      <div id="reset-msg" class="login-error hidden"></div>
+      <button type="submit" id="reset-btn" class="btn-primary full" style="margin-top: 20px;">Сохранить пароль</button>
     </form>
 
     <p class="login-foot">Сессия живёт 8&nbsp;часов · Защищено rate&#8209;limit</p>
@@ -1900,6 +1915,7 @@ const STORAGE_EXP = 'pulse_token_exp';
 
 /* ── API client ──────────────────────────────────────────────── */
 let SELECTED_CHANNEL = null;   // current channel id, sent as X-Channel-Id on every data call
+let RESET_TOKEN = null;        // password-reset token from the email link (?reset=)
 const API = {
   getToken() {
     const t = localStorage.getItem(STORAGE_KEY);
@@ -1927,15 +1943,18 @@ const API = {
       throw new Error('unauthorized');
     }
     if (!res.ok) {
-      let msg = `HTTP ${res.status}`;
-      try { const j = await res.json(); if (j && j.error) msg = j.error; } catch(e){}
-      throw new Error(msg);
+      let msg = `HTTP ${res.status}`, code = null;
+      try { const j = await res.json(); if (j) { if (j.error) msg = j.error; code = j.code || null; } } catch(e){}
+      const err = new Error(msg); err.code = code; throw err;
     }
     if (res.status === 204) return null;
     return res.json();
   },
   login(email, password) { return this.req('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }); },
   register(email, password) { return this.req('/api/auth/register', { method: 'POST', body: JSON.stringify({ email, password }) }); },
+  forgot(email)             { return this.req('/api/auth/forgot', { method: 'POST', body: JSON.stringify({ email }) }); },
+  reset(token, password)    { return this.req('/api/auth/reset', { method: 'POST', body: JSON.stringify({ token, password }) }); },
+  resendVerification(email) { return this.req('/api/auth/resend-verification', { method: 'POST', body: JSON.stringify({ email }) }); },
   logout()         { return this.req('/api/auth/logout', { method: 'POST' }); },
   check()          { return this.req('/api/auth/check'); },
   me()             { return this.req('/api/auth/me'); },
@@ -2104,12 +2123,54 @@ function enterDashboard(res) {
   LAYOUT.syncFromServer();
 }
 
+// Show exactly one auth form; hide the login/register tabs for forgot/reset.
+function showAuthForm(which) {
+  ['login','register','forgot','reset'].forEach(f =>
+    document.getElementById(f + '-form')?.classList.toggle('hidden', f !== which));
+  const tabs = document.getElementById('auth-tabs');
+  if (tabs) tabs.style.display = (which === 'login' || which === 'register') ? '' : 'none';
+  if (which === 'login' || which === 'register')
+    document.querySelectorAll('#auth-tabs button').forEach(x => x.classList.toggle('active', x.dataset.auth === which));
+}
+
 document.getElementById('auth-tabs')?.addEventListener('click', (e) => {
   const b = e.target.closest('button[data-auth]'); if (!b) return;
-  const mode = b.dataset.auth;
-  document.querySelectorAll('#auth-tabs button').forEach(x => x.classList.toggle('active', x === b));
-  document.getElementById('login-form').classList.toggle('hidden', mode !== 'login');
-  document.getElementById('register-form').classList.toggle('hidden', mode !== 'register');
+  showAuthForm(b.dataset.auth);
+});
+
+document.getElementById('forgot-link')?.addEventListener('click', () => showAuthForm('forgot'));
+document.getElementById('forgot-back')?.addEventListener('click', () => showAuthForm('login'));
+
+document.getElementById('forgot-form')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const email = document.getElementById('forgot-email').value.trim();
+  const msg = document.getElementById('forgot-msg');
+  const btn = document.getElementById('forgot-btn');
+  msg.classList.add('hidden'); btn.disabled = true; btn.textContent = '…';
+  try {
+    const r = await API.forgot(email);
+    msg.style.color = 'var(--color-accent-green)';
+    msg.textContent = (r && r.message) || 'Если такой аккаунт есть — мы отправили ссылку.';
+  } catch (err) {
+    msg.style.color = 'var(--color-vibrant-orange)'; msg.textContent = err.message;
+  } finally { msg.classList.remove('hidden'); btn.disabled = false; btn.textContent = 'Отправить ссылку'; }
+});
+
+document.getElementById('reset-form')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const pw = document.getElementById('reset-password').value;
+  const msg = document.getElementById('reset-msg');
+  const btn = document.getElementById('reset-btn');
+  msg.classList.add('hidden'); btn.disabled = true; btn.textContent = '…';
+  try {
+    await API.reset(RESET_TOKEN, pw);
+    RESET_TOKEN = null;
+    document.getElementById('reset-password').value = '';
+    toast('Пароль обновлён — войди с новым паролем', 'info');
+    showAuthForm('login');
+  } catch (err) {
+    msg.style.color = 'var(--color-vibrant-orange)'; msg.textContent = err.message; msg.classList.remove('hidden');
+  } finally { btn.disabled = false; btn.textContent = 'Сохранить пароль'; }
 });
 
 document.getElementById('breakglass-link')?.addEventListener('click', () => {
@@ -2131,7 +2192,15 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
     enterDashboard(await API.login(email, pw));
     document.getElementById('password').value = '';
   } catch (err) {
-    errEl.textContent = err.message; errEl.classList.remove('hidden');
+    errEl.innerHTML = escapeHtml(err.message);
+    if (err.code === 'unverified' && email) {
+      errEl.innerHTML += ' · <a id="resend-link" style="cursor:pointer;text-decoration:underline">отправить ещё раз</a>';
+      errEl.querySelector('#resend-link')?.addEventListener('click', async () => {
+        try { const r = await API.resendVerification(email); toast((r && r.message) || 'Письмо отправлено', 'info'); }
+        catch (e2) { toast(e2.message, 'error'); }
+      });
+    }
+    errEl.classList.remove('hidden');
   } finally { btn.disabled = false; btn.textContent = 'Войти'; }
 });
 
@@ -4920,6 +4989,13 @@ function applyTheme(t) {
    BOOT
    ================================================================ */
 (async function init() {
+  // Email-link landings (verify / reset / forgot) — handle before the normal auth boot.
+  const q = new URLSearchParams(location.search);
+  const cleanUrl = () => history.replaceState(null, '', location.pathname);
+  if (q.get('reset'))            { RESET_TOKEN = q.get('reset'); cleanUrl(); showLogin(); showAuthForm('reset'); return; }
+  if (q.get('forgot') === '1')   { cleanUrl(); showLogin(); showAuthForm('forgot'); return; }
+  if (q.get('verified') === '1') { cleanUrl(); toast('Email подтверждён — войди', 'info'); }
+  if (q.get('verify') === 'bad') { cleanUrl(); toast('Ссылка недействительна или истекла', 'error'); }
   if (!API.getToken()) { showLogin(); return; }
   try {
     const r = await API.check();
