@@ -715,6 +715,9 @@
   .chart-legend .leg.violet::before { background: var(--color-deep-violet); }
   .chart-legend .leg.soft::before   { background: var(--color-soft-violet); }
   .chart-legend .leg.prev::before   { background: var(--color-pewter); }
+  .chart-legend .leg.toggle { cursor: pointer; user-select: none; }
+  .chart-legend .leg.off { opacity: .45; text-decoration: line-through; }
+  .hide-prev .prev-line { display: none; }
 
   .insight-box {
     background: var(--color-platinum);
@@ -1488,7 +1491,7 @@
       </div>
       <div class="two-col">
         <div class="panel">
-          <div class="chart-head"><span class="chart-title">Просмотры по дням</span><div class="chart-legend"><span class="leg violet">Текущий период</span><span class="leg prev" id="tg-views-leg-prev">Прошлый период</span></div></div>
+          <div class="chart-head"><span class="chart-title">Просмотры по дням</span><div class="chart-legend"><span class="leg violet">Текущий период</span><span class="leg prev toggle" id="tg-views-leg-prev">Прошлый период</span></div></div>
           <svg id="tg-views-chart" viewBox="0 0 600 140" width="100%" height="140" preserveAspectRatio="none"></svg>
           <div id="tg-views-labels" style="display:flex;justify-content:space-between;font-size:var(--text-caption);color:var(--color-ghost-gray);padding-top:6px;"></div>
         </div>
@@ -2428,7 +2431,7 @@ function lineChartSvg(values, opts = {}) {
   let prevLayer = '';
   if (prev) {
     const prevPath = project(prev).map((p, i) => `${i === 0 ? 'M' : 'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
-    prevLayer = `<path d="${prevPath}" fill="none" stroke="#7d8ba4" stroke-width="1.5" stroke-dasharray="4 4" opacity="0.7" vector-effect="non-scaling-stroke"/>`;
+    prevLayer = `<path class="prev-line" d="${prevPath}" fill="none" stroke="#7d8ba4" stroke-width="1.5" stroke-dasharray="4 4" opacity="0.7" vector-effect="non-scaling-stroke"/>`;
   }
 
   return `
@@ -3287,6 +3290,19 @@ function initTip(el) {
   };
 }
 
+/* Clickable chart legend → toggle the previous-period ghost line on the nearest
+   panel's chart. Delegated so it also works inside the expand-modal clone
+   (cloneNode does not copy onclick handlers) and survives chart re-renders. */
+document.addEventListener('click', (e) => {
+  const leg = e.target.closest && e.target.closest('.leg.prev.toggle');
+  if (!leg) return;
+  const panel = leg.closest('.panel');
+  const svg = panel && panel.querySelector('svg');
+  if (!svg) return;
+  const off = svg.classList.toggle('hide-prev');
+  leg.classList.toggle('off', off);
+});
+
 /* ── Y-axis: overlay max / mid / min on the left of a chart svg ── */
 function setYAxis(svgId, yMin, yMax) {
   const svg = document.getElementById(svgId);
@@ -3573,9 +3589,16 @@ function renderTgAnalytics() {
       const hi = Math.max(...vd, ...(hasPrev ? pv : []));
       chartEl.innerHTML = lineChartSvg(vd, hasPrev ? { prev: pv, min: lo, max: hi } : {});
       setYAxis('tg-views-chart', hasPrev ? lo : Math.min(...vd), hasPrev ? hi : Math.max(...vd));
-      setTip(chartEl, entries.map(e => `${e.day}: ${fmt.num(e.v)} просмотров`), 'line');
+      const tipLabels = entries.map((e, i) => {
+        if (!hasPrev) return `${e.day}: ${fmt.num(e.v)} просмотров`;
+        const p = pv[i];
+        const dPct = p ? (e.v - p) / p * 100 : null;
+        const dStr = dPct == null ? '' : ` (${dPct >= 0 ? '+' : ''}${dPct.toFixed(0)}%)`;
+        return `${e.day}: ${fmt.num(e.v)} · пред. ${fmt.num(p)}${dStr}`;
+      });
+      setTip(chartEl, tipLabels, 'line');
       const legPrev = document.getElementById('tg-views-leg-prev');
-      if (legPrev) legPrev.style.display = hasPrev ? '' : 'none';
+      if (legPrev) legPrev.style.display = hasPrev ? '' : 'none';   // toggle wired via delegated listener (also works in modal clone)
       if (labelsEl) labelsEl.innerHTML = entries.map((e, i) => {
         const show = entries.length <= 8 || i % 2 === 0 || i === entries.length - 1;
         return `<span style="${show ? '' : 'visibility:hidden'}">${e.day}</span>`;
@@ -3584,6 +3607,8 @@ function renderTgAnalytics() {
       chartEl.innerHTML = lineChartSvg([]);
       setTip(chartEl, [], 'line');
       if (labelsEl) labelsEl.innerHTML = '';
+      const lp = document.getElementById('tg-views-leg-prev');
+      if (lp) lp.style.display = 'none';
     }
   }
 
