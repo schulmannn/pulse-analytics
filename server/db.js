@@ -72,6 +72,12 @@ CREATE TABLE IF NOT EXISTS users (
   status TEXT NOT NULL DEFAULT 'pending',
   created_at TIMESTAMPTZ DEFAULT now()
 );
+-- Персональная раскладка дашборда (порядок/скрытие/ширина блоков) per-user.
+CREATE TABLE IF NOT EXISTS user_prefs (
+  uid INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  prefs JSONB NOT NULL DEFAULT '{}'::jsonb,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 `;
 
 const USER_ROLES = ['user', 'superuser'];
@@ -292,6 +298,25 @@ async function setUserPassword(id, pass_hash) {
   return true;
 }
 
+/* ── Персональная раскладка дашборда ─────────────────────────────
+   Возвращает сохранённый объект prefs (или null, если ничего нет /
+   нет БД / гость без аккаунта). Запись — upsert по uid. */
+async function getPrefs(uid) {
+  if (!enabled || uid == null) return null;
+  const { rows } = await pool.query('SELECT prefs FROM user_prefs WHERE uid=$1', [uid]);
+  return rows[0] ? rows[0].prefs : null;
+}
+
+async function setPrefs(uid, prefs) {
+  if (!enabled || uid == null) return false;
+  await pool.query(
+    `INSERT INTO user_prefs (uid, prefs, updated_at) VALUES ($1, $2, now())
+     ON CONFLICT (uid) DO UPDATE SET prefs = EXCLUDED.prefs, updated_at = now()`,
+    [uid, prefs]
+  );
+  return true;
+}
+
 async function createBug({ text, severity, context, kind }) {
   if (!enabled) return null;
   const sev = BUG_SEVERITIES.includes(severity) ? severity : 'medium';
@@ -370,6 +395,7 @@ module.exports = {
   enabled, init, graphsToDailyRows,
   USER_ROLES, USER_STATUSES,
   countUsers, createUser, getUserByEmail, getUserById, listUsers, updateUser, setUserPassword,
+  getPrefs, setPrefs,
   upsertChannelDaily, upsertPosts, upsertMentions,
   getChannelHistory, getMentionsHistory, getMentionsArchive,
   createBug, listBugs, updateBug, deleteBug, BUG_STATUSES, BUG_SEVERITIES, BUG_KINDS,

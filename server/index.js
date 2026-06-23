@@ -211,6 +211,28 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
   res.json({ uid: req.user.uid, email: req.user.email, role: req.user.role });
 });
 
+// ── Персональная раскладка дашборда (порядок/скрытие/ширина блоков) ──
+// Гость без аккаунта (break-glass uid=null) и режим без БД → null/no-op:
+// клиент сам хранит раскладку в localStorage.
+app.get('/api/prefs', requireAuth, async (req, res) => {
+  if (req.user.uid == null) return res.json({ prefs: null });
+  try { res.json({ prefs: await db.getPrefs(req.user.uid) }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/prefs', requireAuth, async (req, res) => {
+  const prefs = req.body && req.body.prefs;
+  if (prefs == null || typeof prefs !== 'object' || Array.isArray(prefs)) {
+    return res.status(400).json({ error: 'prefs должен быть объектом' });
+  }
+  if (JSON.stringify(prefs).length > 8000) {
+    return res.status(413).json({ error: 'prefs слишком большой' });
+  }
+  if (req.user.uid == null) return res.json({ ok: true, stored: false });
+  try { await db.setPrefs(req.user.uid, prefs); res.json({ ok: true, stored: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/auth/change-password', requireAuth, async (req, res) => {
   if (req.user.uid == null) return res.status(400).json({ error: 'Командный вход не имеет аккаунта для смены пароля' });
   if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
