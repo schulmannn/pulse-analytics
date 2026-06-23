@@ -605,6 +605,33 @@
     color: var(--color-midnight-ink);
     box-shadow: var(--shadow-soft);
   }
+  .period-controls { display: flex; gap: 8px; align-items: center; position: relative; flex-wrap: wrap; }
+  .period-custom-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 12px;
+    border: 1px solid var(--color-powder-blue);
+    background: var(--color-platinum);
+    color: var(--color-slate-blue);
+    border-radius: var(--radius-button);
+    font: inherit; font-size: var(--text-caption); cursor: pointer;
+  }
+  .period-custom-btn:hover { color: var(--color-midnight-ink); border-color: var(--color-stone-gray); }
+  .period-custom-btn.active { background: var(--accent-wash); color: var(--accent-text); border-color: transparent; }
+  .period-pop {
+    position: absolute; top: calc(100% + 8px); right: 0; z-index: 100;
+    background: var(--color-platinum);
+    border: 1px solid var(--color-powder-blue);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-hover);
+    padding: 12px; display: flex; flex-direction: column; gap: 10px; min-width: 230px;
+  }
+  .period-pop .pp-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: var(--text-body); color: var(--color-slate-blue); }
+  .period-pop input[type="date"] {
+    font: inherit; padding: 6px 8px;
+    border: 1px solid var(--color-powder-blue); border-radius: var(--radius-button);
+    background: var(--color-platinum); color: var(--color-midnight-ink);
+  }
+  .period-pop .pp-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 2px; }
 
   /* ================================================================
      KPI GRID
@@ -1495,11 +1522,22 @@
           <h2>Ключевые метрики</h2>
           <p>Сравнение с&nbsp;предыдущим периодом</p>
         </div>
-        <div class="tabs" id="period-tabs">
-          <button data-period="1">24ч</button>
-          <button data-period="7" class="active">7д</button>
-          <button data-period="30">30д</button>
-          <button data-period="90">90д</button>
+        <div class="period-controls">
+          <div class="tabs" id="period-tabs">
+            <button data-period="1">24ч</button>
+            <button data-period="7" class="active">7д</button>
+            <button data-period="30">30д</button>
+            <button data-period="90">90д</button>
+          </div>
+          <button id="period-custom-btn" class="period-custom-btn" title="Произвольный диапазон дат" aria-haspopup="true" aria-expanded="false"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="16" y1="2" x2="16" y2="6"/></svg><span id="period-custom-label">Свои даты</span></button>
+          <div id="period-pop" class="period-pop hidden">
+            <label class="pp-row">С<input type="date" id="period-from"></label>
+            <label class="pp-row">По<input type="date" id="period-to"></label>
+            <div class="pp-actions">
+              <button id="period-reset" class="btn-ghost" style="padding:6px 10px">Сброс</button>
+              <button id="period-apply" class="btn-primary sm">Применить</button>
+            </div>
+          </div>
         </div>
       </div>
       <div class="kpi-grid" id="kpi-grid">
@@ -2219,14 +2257,81 @@ document.getElementById('clear-cache-btn').addEventListener('click', async () =>
 
 /* ── Period tabs ─────────────────────────────────────────────── */
 let currentPeriod = 7;
+let customRange = null;   // {from, to} ms when a custom date range is active
+const DAY_MS = 86400000;
+function periodLabel() {
+  if (!customRange) return `${currentPeriod} дн.`;
+  const f = new Date(customRange.from), t = new Date(customRange.to);
+  return `${f.getDate()} ${MON_EN[f.getMonth()]} – ${t.getDate()} ${MON_EN[t.getMonth()]}`;
+}
+function inRange(p) {            // post within the active custom window? (no-op for presets)
+  if (!customRange) return true;
+  const t = p && p.date ? new Date(p.date).getTime() : 0;
+  return t >= customRange.from && t <= customRange.to;
+}
+function clearCustomPeriod() {
+  customRange = null;
+  const cb = document.getElementById('period-custom-btn');
+  if (cb) cb.classList.remove('active');
+  const lbl = document.getElementById('period-custom-label');
+  if (lbl) lbl.textContent = 'Свои даты';
+}
 document.getElementById('period-tabs').addEventListener('click', (e) => {
   const btn = e.target.closest('button');
   if (!btn) return;
   document.querySelectorAll('#period-tabs button').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
+  clearCustomPeriod();
   currentPeriod = parseInt(btn.dataset.period, 10);
   loadAll();
 });
+
+/* ── Custom date range (calendar) ───────────────────────────────── */
+(function initPeriodCustom() {
+  const btn = document.getElementById('period-custom-btn');
+  const pop = document.getElementById('period-pop');
+  if (!btn || !pop) return;
+  const fromI = document.getElementById('period-from');
+  const toI = document.getElementById('period-to');
+  const iso = (ms) => new Date(ms).toISOString().slice(0, 10);
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const open = !pop.classList.toggle('hidden');
+    btn.setAttribute('aria-expanded', String(open));
+    if (open) {
+      const today = Date.now();
+      toI.max = iso(today); fromI.max = iso(today);
+      if (!toI.value) toI.value = iso(today);
+      if (!fromI.value) fromI.value = iso(today - (currentPeriod - 1) * DAY_MS);
+    }
+  });
+  document.addEventListener('click', (e) => {
+    if (!pop.classList.contains('hidden') && !e.target.closest('.period-controls')) {
+      pop.classList.add('hidden'); btn.setAttribute('aria-expanded', 'false');
+    }
+  });
+  document.getElementById('period-apply').addEventListener('click', () => {
+    if (!fromI.value || !toI.value) { toast('Укажите обе даты', 'error'); return; }
+    let from = new Date(fromI.value + 'T00:00:00').getTime();
+    let to = new Date(toI.value + 'T23:59:59').getTime();
+    if (from > to) { const t = from; from = to; to = t; }
+    customRange = { from, to };
+    currentPeriod = Math.max(1, Math.round((to - from) / DAY_MS));
+    document.querySelectorAll('#period-tabs button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('period-custom-label').textContent = periodLabel();
+    pop.classList.add('hidden'); btn.setAttribute('aria-expanded', 'false');
+    loadAll();
+  });
+  document.getElementById('period-reset').addEventListener('click', () => {
+    clearCustomPeriod();
+    currentPeriod = 7;
+    const def = document.querySelector('#period-tabs button[data-period="7"]');
+    document.querySelectorAll('#period-tabs button').forEach(b => b.classList.toggle('active', b === def));
+    pop.classList.add('hidden'); btn.setAttribute('aria-expanded', 'false');
+    loadAll();
+  });
+})();
 
 /* ── Source toggle (Telegram / Instagram) ────────────────────── */
 document.getElementById('source-toggle').addEventListener('click', (e) => {
@@ -2746,7 +2851,7 @@ function renderKpis() {
     {
       label: 'Охват',
       value: fmt.short(igReach),
-      delta: igReach > 0 ? `Instagram · ${currentPeriod} дн.` : null,
+      delta: igReach > 0 ? `Instagram · ${periodLabel()}` : null,
       deltaClass: 'muted',
       spark: reachSeries
     },
@@ -2884,22 +2989,22 @@ function renderIg() {
     <div class="stat-cell">
       <div class="label">Охват</div>
       <div class="val">${fmt.short(reach)}</div>
-      <div class="sub">за ${currentPeriod}&nbsp;дн.</div>
+      <div class="sub">за ${periodLabel()}</div>
     </div>
     <div class="stat-cell">
       <div class="label">Показы</div>
       <div class="val">${fmt.short(impressions)}</div>
-      <div class="sub">за ${currentPeriod}&nbsp;дн.</div>
+      <div class="sub">за ${periodLabel()}</div>
     </div>
     <div class="stat-cell">
       <div class="label">Просм. профиля</div>
       <div class="val">${fmt.short(profileViews)}</div>
-      <div class="sub">за ${currentPeriod}&nbsp;дн.</div>
+      <div class="sub">за ${periodLabel()}</div>
     </div>
     <div class="stat-cell">
       <div class="label">Кликов на сайт</div>
       <div class="val">${fmt.short(websiteClicks)}</div>
-      <div class="sub">за ${currentPeriod}&nbsp;дн.</div>
+      <div class="sub">за ${periodLabel()}</div>
     </div>
   `;
 
@@ -3134,8 +3239,8 @@ function renderPosts() {
   const list = document.getElementById('posts-list');
 
   const activePosts = state.source === 'instagram'
-    ? state.posts.filter(p => p.source === 'IG')
-    : state.posts.filter(p => p.source === 'TG');
+    ? state.posts.filter(p => p.source === 'IG' && inRange(p))
+    : state.posts.filter(p => p.source === 'TG' && inRange(p));
 
   // Source-aware table header
   const head = document.getElementById('posts-head');
@@ -3692,7 +3797,7 @@ function renderTgAnalytics() {
     const notif = cs.enabled_notifications || null;
     const notifPct = notif && notif.total ? (notif.part / notif.total * 100) : null;
     // Sprint 1: average ERV & virality from per-post metrics
-    const tgp = (state.posts || []).filter(p => p.source === 'TG');
+    const tgp = (state.posts || []).filter(p => p.source === 'TG' && inRange(p));
     const ervVals = tgp.map(p => p.erv).filter(v => v != null);
     const virVals = tgp.map(p => p.virality).filter(v => v != null);
     const avgErv = ervVals.length ? ervVals.reduce((a, b) => a + b, 0) / ervVals.length : null;
@@ -3972,7 +4077,7 @@ function renderHeatmap() {
   const days = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
   const toMon = (jsDay) => (jsDay + 6) % 7;   // JS 0=Sun→6, 1=Mon→0
   const cells = Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => ({ n: 0, erv: 0, reach: 0 })));
-  (state.posts || []).filter(p => p.source === 'TG' && p.date).forEach(p => {
+  (state.posts || []).filter(p => p.source === 'TG' && p.date && inRange(p)).forEach(p => {
     const d = new Date(p.date); if (isNaN(d)) return;
     const c = cells[toMon(d.getDay())][d.getHours()];
     c.n += 1; c.reach += p.reach || 0;
@@ -4127,7 +4232,7 @@ function renderHashtags() {
   const el = document.getElementById('tg-hashtags');
   const note = document.getElementById('tg-hashtags-note');
   if (!el) return;
-  const tgp = (state.posts || []).filter(p => p.source === 'TG' && p.erv != null);
+  const tgp = (state.posts || []).filter(p => p.source === 'TG' && p.erv != null && inRange(p));
   const tagMap = {};            // lowercased tag → { count, sum, label }
   let baseSum = 0, baseCount = 0;
   tgp.forEach(p => {
@@ -4168,7 +4273,7 @@ function renderDigest() {
   if (!el) return;
   const vs = state.tg.viewsSummary || {};
   const graphs = state.tg.graphs || {};
-  const tgp = (state.posts || []).filter(p => p.source === 'TG');
+  const tgp = (state.posts || []).filter(p => p.source === 'TG' && inRange(p));
 
   const totalViews = vs.total_views || 0;
   const postsN = vs.posts_analyzed || tgp.length;
@@ -4216,7 +4321,7 @@ function renderDigest() {
   }
 
   el.innerHTML = `
-    <div class="chart-head"><span class="chart-title">Итоги за ${currentPeriod} дн.</span><span style="font-size:var(--text-caption);color:var(--color-ghost-gray)">авто-сводка</span></div>
+    <div class="chart-head"><span class="chart-title">Итоги за ${periodLabel()}</span><span style="font-size:var(--text-caption);color:var(--color-ghost-gray)">авто-сводка</span></div>
     <div style="font-size:var(--text-body);line-height:1.45">${lines.join('')}</div>`;
 }
 
@@ -4243,7 +4348,7 @@ function renderHero() {
     sub = 'Аналитика Instagram.';
   }
 
-  document.getElementById('hero-title').innerHTML = `${fmt.greeting()}. ${highlight} за&nbsp;последние ${currentPeriod}&nbsp;дн.`;
+  document.getElementById('hero-title').innerHTML = `${fmt.greeting()}. ${highlight} за&nbsp;${customRange ? periodLabel() : 'последние ' + currentPeriod + ' дн.'}`;
   document.getElementById('hero-sub').innerHTML = sub;
 }
 
