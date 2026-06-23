@@ -3290,6 +3290,19 @@ function initTip(el) {
   };
 }
 
+/* Clickable chart legend → toggle the previous-period ghost line on the nearest
+   panel's chart. Delegated so it also works inside the expand-modal clone
+   (cloneNode does not copy onclick handlers) and survives chart re-renders. */
+document.addEventListener('click', (e) => {
+  const leg = e.target.closest && e.target.closest('.leg.prev.toggle');
+  if (!leg) return;
+  const panel = leg.closest('.panel');
+  const svg = panel && panel.querySelector('svg');
+  if (!svg) return;
+  const off = svg.classList.toggle('hide-prev');
+  leg.classList.toggle('off', off);
+});
+
 /* ── Y-axis: overlay max / mid / min on the left of a chart svg ── */
 function setYAxis(svgId, yMin, yMax) {
   const svg = document.getElementById(svgId);
@@ -3585,15 +3598,7 @@ function renderTgAnalytics() {
       });
       setTip(chartEl, tipLabels, 'line');
       const legPrev = document.getElementById('tg-views-leg-prev');
-      if (legPrev) {
-        legPrev.style.display = hasPrev ? '' : 'none';
-        legPrev.classList.remove('off');
-        chartEl.classList.remove('hide-prev');
-        legPrev.onclick = () => {                       // click legend → toggle ghost line
-          const off = chartEl.classList.toggle('hide-prev');
-          legPrev.classList.toggle('off', off);
-        };
-      }
+      if (legPrev) legPrev.style.display = hasPrev ? '' : 'none';   // toggle wired via delegated listener (also works in modal clone)
       if (labelsEl) labelsEl.innerHTML = entries.map((e, i) => {
         const show = entries.length <= 8 || i % 2 === 0 || i === entries.length - 1;
         return `<span style="${show ? '' : 'visibility:hidden'}">${e.day}</span>`;
@@ -3602,6 +3607,8 @@ function renderTgAnalytics() {
       chartEl.innerHTML = lineChartSvg([]);
       setTip(chartEl, [], 'line');
       if (labelsEl) labelsEl.innerHTML = '';
+      const lp = document.getElementById('tg-views-leg-prev');
+      if (lp) lp.style.display = 'none';
     }
   }
 
