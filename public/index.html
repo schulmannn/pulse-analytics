@@ -61,6 +61,7 @@
 
     --chart-grid:  #e5edf5;                 /* SVG gridlines (recoloured in dark) */
     --yaxis-bg:    rgba(248,250,253,0.8);   /* y-axis label chip background */
+    --accent-text: var(--color-deep-violet);/* accent used as TEXT (lightened in dark) */
   }
 
   /* ================================================================
@@ -83,6 +84,8 @@
     --chart-grid:           #243140;
     --yaxis-bg:             rgba(13,20,28,0.85);
     --gradient-sunburst:    linear-gradient(90deg, #7b68ff, #aab8cc);  /* brighter hero on dark */
+    --accent-text:          #9a8cff;   /* accent-as-text, lightened for dark contrast */
+    --gradient-dreamy:      radial-gradient(circle, #3a2f8a, #6a2a66 33%, #1a232f 66%);  /* dark placeholders + glow */
     --shadow-feature: rgba(0,0,0,0.35) 0px 3px 6px 0px;
     --shadow-hover:   rgba(0,0,0,0.45) 0px 16px 32px 0px;
     --shadow-soft:    rgba(0,0,0,0.35) 0px 3px 6px 0px;
@@ -91,6 +94,9 @@
   html[data-theme="dark"] body { color-scheme: dark; }
   /* SVG gridlines/baselines drawn with the light Mist hex → recolour via attr selector (no JS change) */
   svg line[stroke="#e5edf5"] { stroke: var(--chart-grid); }
+  svg text[fill="#64748d"] { fill: var(--color-ghost-gray); }                    /* empty-state text follows theme */
+  html[data-theme="dark"] svg [stroke="#533afd"] { stroke: var(--accent-text); } /* brighten chart data line on dark */
+  html[data-theme="dark"] svg [fill="#533afd"]   { fill:   var(--accent-text); } /* …and its area / dots / bars */
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -300,7 +306,7 @@
     transition: background .15s;
   }
   .icon-btn:hover { background: var(--color-powder-blue); color: var(--color-midnight-ink); }
-  .icon-btn.active-edit { background: var(--accent-wash); color: var(--color-deep-violet); }
+  .icon-btn.active-edit { background: var(--accent-wash); color: var(--accent-text); }
   .icon-btn.spin svg { animation: spin 1s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -345,7 +351,7 @@
     font-size: var(--text-caption);
   }
   .app-footer a { color: var(--color-slate-blue); text-decoration: none; }
-  .app-footer a:hover { color: var(--color-deep-violet); text-decoration: underline; }
+  .app-footer a:hover { color: var(--accent-text); text-decoration: underline; }
   .app-footer .sep { opacity: .45; }
   .app-footer .grow { flex: 1; }
   .chart-modal-tf {
@@ -368,7 +374,7 @@
   .chart-modal-tf button.active {
     background: var(--color-deep-violet);
     color: #fff;
-    border-color: var(--color-deep-violet);
+    border-color: var(--accent-text);
   }
   .app-brand {
     display: flex;
@@ -475,7 +481,7 @@
   .hero-content { position: relative; z-index: 1; max-width: 760px; }
   .hero-eyebrow {
     font-size: var(--text-caption);
-    color: var(--color-deep-violet);
+    color: var(--accent-text);
     text-transform: uppercase;
     letter-spacing: 0.12em;
     margin-bottom: 12px;
@@ -873,7 +879,7 @@
     height: 28px;
     border-radius: 999px;
     background: var(--color-platinum);
-    color: var(--color-deep-violet);
+    color: var(--accent-text);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -889,7 +895,7 @@
     background: var(--color-platinum);
     border-radius: var(--radius-button);
     font-size: var(--text-caption);
-    color: var(--color-deep-violet);
+    color: var(--accent-text);
     box-shadow: var(--shadow-soft);
   }
   .top-post-source.tg-source { color: var(--color-accent-green); }
@@ -1024,7 +1030,7 @@
     white-space: nowrap;
   }
   .tag.green { color: var(--color-accent-green); border-color: rgba(129,184,26,0.3); background: rgba(129,184,26,0.06); }
-  .tag.violet { color: var(--color-deep-violet); border-color: var(--color-washed-violet); background: rgba(83,58,253,0.04); }
+  .tag.violet { color: var(--accent-text); border-color: var(--color-washed-violet); background: rgba(83,58,253,0.04); }
   .tag.orange { color: var(--color-vibrant-orange); border-color: rgba(255,97,24,0.3); background: rgba(255,97,24,0.06); }
 
   /* ================================================================
@@ -1319,7 +1325,7 @@
       <input id="password" type="password" class="form-input" autocomplete="current-password" required>
       <div id="login-error" class="login-error hidden"></div>
       <button type="submit" id="login-btn" class="btn-primary full" style="margin-top: 20px;">Войти</button>
-      <p class="login-foot" style="margin-top:14px"><a id="breakglass-link" style="cursor:pointer;color:var(--color-deep-violet)">Войти по командному паролю</a></p>
+      <p class="login-foot" style="margin-top:14px"><a id="breakglass-link" style="cursor:pointer;color:var(--accent-text)">Войти по командному паролю</a></p>
     </form>
 
     <form id="register-form" class="hidden" autocomplete="off">
@@ -1583,7 +1589,7 @@
       </div>
       <div class="two-col" style="margin-top: 16px;">
         <div class="panel">
-          <div class="chart-head"><span class="chart-title">Активность аудитории по&nbsp;часам</span><span id="tg-hours-peak" style="font-size:var(--text-caption);color:var(--color-deep-violet);font-weight:600;"></span></div>
+          <div class="chart-head"><span class="chart-title">Активность аудитории по&nbsp;часам</span><span id="tg-hours-peak" style="font-size:var(--text-caption);color:var(--accent-text);font-weight:600;"></span></div>
           <svg id="tg-hours-chart" viewBox="0 0 600 120" width="100%" height="120" preserveAspectRatio="none"></svg>
           <div id="tg-hours-labels" style="display:flex;justify-content:space-between;font-size:var(--text-caption);color:var(--color-ghost-gray);padding-top:6px;"></div>
         </div>
@@ -1605,7 +1611,7 @@
       </div>
       <div class="two-col" style="margin-top: 16px;">
         <div class="panel">
-          <div class="chart-head"><span class="chart-title">Ср. просмотры по&nbsp;дню недели</span><span id="tg-weekday-best" style="font-size:var(--text-caption);color:var(--color-deep-violet);font-weight:600;"></span></div>
+          <div class="chart-head"><span class="chart-title">Ср. просмотры по&nbsp;дню недели</span><span id="tg-weekday-best" style="font-size:var(--text-caption);color:var(--accent-text);font-weight:600;"></span></div>
           <svg id="tg-weekday-views" viewBox="0 0 600 120" width="100%" height="120" preserveAspectRatio="none"></svg>
           <div id="tg-weekday-vlabels" style="display:flex;justify-content:space-between;font-size:var(--text-caption);color:var(--color-ghost-gray);padding-top:6px;"></div>
         </div>
@@ -1616,12 +1622,12 @@
         </div>
       </div>
       <div class="panel" style="margin-top: 16px;">
-        <div class="chart-head"><span class="chart-title">Когда постить · день&nbsp;×&nbsp;час</span><span id="tg-heatmap-note" style="font-size:var(--text-caption);color:var(--color-deep-violet);font-weight:600;"></span></div>
+        <div class="chart-head"><span class="chart-title">Когда постить · день&nbsp;×&nbsp;час</span><span id="tg-heatmap-note" style="font-size:var(--text-caption);color:var(--accent-text);font-weight:600;"></span></div>
         <div id="tg-heatmap" style="overflow-x:auto;"></div>
         <div style="display:flex;align-items:center;gap:6px;justify-content:flex-end;margin-top:10px;font-size:var(--text-caption);color:var(--color-ghost-gray)">меньше<span style="width:12px;height:12px;border-radius:3px;background:rgba(83,58,253,0.18)"></span><span style="width:12px;height:12px;border-radius:3px;background:rgba(83,58,253,0.5)"></span><span style="width:12px;height:12px;border-radius:3px;background:rgba(83,58,253,1)"></span>больше ERV</div>
       </div>
       <div class="panel" style="margin-top: 16px;">
-        <div class="chart-head"><span class="chart-title">Скорость набора просмотров · жизнь поста</span><span id="tg-velocity-note" style="font-size:var(--text-caption);color:var(--color-deep-violet);font-weight:600;"></span></div>
+        <div class="chart-head"><span class="chart-title">Скорость набора просмотров · жизнь поста</span><span id="tg-velocity-note" style="font-size:var(--text-caption);color:var(--accent-text);font-weight:600;"></span></div>
         <svg id="tg-velocity-chart" viewBox="0 0 600 140" width="100%" height="140" preserveAspectRatio="none"></svg>
         <div id="tg-velocity-labels" style="display:flex;justify-content:space-between;font-size:var(--text-caption);color:var(--color-ghost-gray);padding-top:6px;"></div>
       </div>
@@ -2312,7 +2318,7 @@ function renderBugs(data) {
         </div>
         <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;flex:0 0 auto">
           <select class="bug-status" data-bugid="${b.id}" style="padding:6px;border:1px solid var(--color-powder-blue);border-radius:4px;font:inherit">${opts(b.status)}</select>
-          <button class="bug-claude" data-bugid="${b.id}" title="Отдать Claude — попробует починить и откроет PR в GitHub" style="border:1px solid var(--color-washed-violet);background:none;cursor:pointer;color:var(--color-deep-violet);font-size:var(--text-caption);padding:3px 8px;border-radius:4px;white-space:nowrap">Передать Claude</button>
+          <button class="bug-claude" data-bugid="${b.id}" title="Отдать Claude — попробует починить и откроет PR в GitHub" style="border:1px solid var(--color-washed-violet);background:none;cursor:pointer;color:var(--accent-text);font-size:var(--text-caption);padding:3px 8px;border-radius:4px;white-space:nowrap">Передать Claude</button>
           <button class="bug-del" data-bugid="${b.id}" title="Удалить" style="border:none;background:none;cursor:pointer;color:var(--color-ghost-gray);font-size:var(--text-caption);padding:0">✕ удалить</button>
         </div>
       </div>
@@ -3501,7 +3507,7 @@ async function openPostModal(postId) {
         for (let d = 0; d < 14; d++) { cum += (day[d] || 0); if (cum / total * 100 >= 80) { t80 = d + 1; break; } }
         const parts = [`за 1-е сутки — ${d0.toFixed(0)}% охвата`];
         if (t80) parts.push(`80% за ${t80} дн`);
-        velLine = `<div style="font-size:var(--text-caption);color:var(--color-deep-violet);font-weight:600;margin-bottom:6px">⚡ ${parts.join(' · ')}</div>`;
+        velLine = `<div style="font-size:var(--text-caption);color:var(--accent-text);font-weight:600;margin-bottom:6px">⚡ ${parts.join(' · ')}</div>`;
       }
     }
     let html = `<div class="chart-head"><span class="chart-title">Просмотры во времени</span></div>
@@ -3997,7 +4003,7 @@ function renderMentions(data) {
       const when = m.date ? fmt.date(m.date) : '';
       const tag = m.username ? `<span style="color:var(--color-ghost-gray);font-size:var(--text-caption)">@${escapeHtml(m.username)}</span>` : '';
       const title = m.link
-        ? `<a href="${escapeHtml(m.link)}" target="_blank" rel="noopener" style="color:var(--color-deep-violet);text-decoration:none">${escapeHtml(m.title)}</a>`
+        ? `<a href="${escapeHtml(m.link)}" target="_blank" rel="noopener" style="color:var(--accent-text);text-decoration:none">${escapeHtml(m.title)}</a>`
         : escapeHtml(m.title);
       return `<div style="padding:10px 0;border-bottom:1px solid var(--color-powder-blue)">
         <div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline">
