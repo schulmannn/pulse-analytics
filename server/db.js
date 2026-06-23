@@ -78,6 +78,14 @@ CREATE TABLE IF NOT EXISTS user_prefs (
   prefs JSONB NOT NULL DEFAULT '{}'::jsonb,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Снапшот "velocity" (жизнь поста). Считается тяжело (до ~12 последовательных
+-- GetMessageStats), поэтому строится в ingest-кроне раз в день и кэшируется здесь,
+-- чтобы дашборд-эндпоинт читал готовый JSON, а не дёргал Telegram в HTTP-запросе.
+CREATE TABLE IF NOT EXISTS velocity_daily (
+  day DATE PRIMARY KEY,
+  data JSONB NOT NULL,
+  computed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 `;
 
 const USER_ROLES = ['user', 'superuser'];
@@ -317,6 +325,27 @@ async function setPrefs(uid, prefs) {
   return true;
 }
 
+/* ── Velocity snapshot (жизнь поста) ─────────────────────────────
+   Сохраняем готовый объект /velocity целиком (форма не меняется), upsert по
+   текущему дню. Чтение — самый свежий день. Пустые/недоступные снимки не
+   пишем (guard в вызывающем коде), чтобы не затирать хороший снапшот. */
+async function saveVelocity(data) {
+  if (!enabled || !data) return false;
+  await pool.query(
+    `INSERT INTO velocity_daily (day, data, computed_at) VALUES (CURRENT_DATE, $1, now())
+     ON CONFLICT (day) DO UPDATE SET data = EXCLUDED.data, computed_at = now()`,
+    [data]);
+  return true;
+}
+
+async function getLatestVelocity() {
+  if (!enabled) return null;
+  const { rows } = await pool.query(
+    `SELECT data, to_char(computed_at,'YYYY-MM-DD"T"HH24:MI:SS') AS computed_at
+       FROM velocity_daily ORDER BY day DESC LIMIT 1`);
+  return rows[0] || null;   // { data, computed_at } | null
+}
+
 async function createBug({ text, severity, context, kind }) {
   if (!enabled) return null;
   const sev = BUG_SEVERITIES.includes(severity) ? severity : 'medium';
@@ -396,6 +425,7 @@ module.exports = {
   USER_ROLES, USER_STATUSES,
   countUsers, createUser, getUserByEmail, getUserById, listUsers, updateUser, setUserPassword,
   getPrefs, setPrefs,
+  saveVelocity, getLatestVelocity,
   upsertChannelDaily, upsertPosts, upsertMentions,
   getChannelHistory, getMentionsHistory, getMentionsArchive,
   createBug, listBugs, updateBug, deleteBug, BUG_STATUSES, BUG_SEVERITIES, BUG_KINDS,
