@@ -1285,6 +1285,16 @@
     border-bottom-color: var(--accent);
     font-weight: 500;
   }
+  .tg-tabs button .tab-count {
+    margin-left: 6px;
+    font-size: 11px;
+    color: var(--color-ghost-gray);
+    background: var(--color-powder-blue);
+    border-radius: 999px;
+    padding: 1px 6px;
+    vertical-align: middle;
+  }
+  .tg-tabs button.active .tab-count { background: var(--accent-wash); color: var(--accent-text); }
   .tg-tabpane { display: none; }
   .tg-tabpane.active {
     display: grid;
@@ -1515,6 +1525,7 @@
         <button data-tab="engagement">Вовлечённость</button>
         <button data-tab="timing">Время</button>
         <button data-tab="content">Контент</button>
+        <button data-tab="other" style="display:none">Прочее</button>
       </div>
       <div id="tg-tabs-host">
         <div class="tg-tabpane active" data-tab="reach"></div>
@@ -1522,6 +1533,7 @@
         <div class="tg-tabpane" data-tab="engagement"></div>
         <div class="tg-tabpane" data-tab="timing"></div>
         <div class="tg-tabpane" data-tab="content"></div>
+        <div class="tg-tabpane" data-tab="other"></div>
       </div>
 
       <div class="panel hidden" id="tg-history-panel" style="margin-bottom: 16px;">
@@ -4245,7 +4257,7 @@ async function loadAll() {
   const igOk = !!state.ig.profile;
   const tgOk = !!state.tg.channel;
   if (igOk && tgOk) setStatus('Все источники активны', true);
-  else if (igOk || tgOk) setStatus(igOk ? 'Только Instagram' : 'Только Telegram', false);
+  else if (igOk || tgOk) setStatus(igOk ? 'Только Instagram' : 'Только Telegram', true);   // single source is normal, not a warning
   else setStatus('Источники недоступны', false);
 
   // Render
@@ -4473,23 +4485,47 @@ const TGTABS = (() => {
     ['tg-type-breakdown','content'], ['tg-hashtags','content'],
   ];
   const WIDE = new Set(['tg-history-chart','tg-heatmap','tg-velocity-chart','tg-hashtags']);
+  const TAB_KEY = 'pulse_tg_tab';
+  const paneOf = (t) => document.querySelector('#tg-tabs-host .tg-tabpane[data-tab="' + t + '"]');
+  const btnOf  = (t) => document.querySelector('#tg-tabs button[data-tab="' + t + '"]');
   function activate(tab) {
     document.querySelectorAll('#tg-tabs button[data-tab]').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
     document.querySelectorAll('#tg-tabs-host .tg-tabpane').forEach(p => p.classList.toggle('active', p.dataset.tab === tab));
+    try { localStorage.setItem(TAB_KEY, tab); } catch (e) {}
+  }
+  function refreshTabs() {                       // hide empty tabs + show a count badge
+    document.querySelectorAll('#tg-tabs button[data-tab]').forEach(btn => {
+      const pane = paneOf(btn.dataset.tab);
+      const n = pane ? pane.querySelectorAll(':scope > .panel').length : 0;
+      btn.style.display = n ? '' : 'none';
+      let badge = btn.querySelector('.tab-count');
+      if (n) { if (!badge) { badge = document.createElement('span'); badge.className = 'tab-count'; btn.appendChild(badge); } badge.textContent = n; }
+      else if (badge) badge.remove();
+    });
   }
   function init() {
     const host = document.getElementById('tg-tabs-host'); if (!host) return;
     MAP.forEach(([id, tab]) => {
       const el = document.getElementById(id); if (!el) return;
       const panel = el.closest('.panel'); if (!panel) return;
-      const pane = host.querySelector('.tg-tabpane[data-tab="' + tab + '"]'); if (!pane) return;
+      const pane = paneOf(tab); if (!pane) return;
       if (WIDE.has(id)) panel.classList.add('span-full');
       pane.appendChild(panel);
     });
+    const other = paneOf('other');               // unmapped chart panels → fallback "Прочее" (never lost)
+    if (other) [...document.querySelectorAll('#tg-analytics .panel')].forEach(p => {
+      if (p.id === 'tg-digest' || p.closest('#tg-tabs-host')) return;
+      other.appendChild(p);
+    });
     document.querySelectorAll('#tg-analytics .two-col').forEach(r => { if (!r.querySelector('.panel')) r.remove(); });
+    refreshTabs();
     const bar = document.getElementById('tg-tabs');
     if (bar) bar.addEventListener('click', (e) => { const b = e.target.closest('button[data-tab]'); if (b) activate(b.dataset.tab); });
-    activate('reach');
+    let saved = 'reach';
+    try { const s = localStorage.getItem(TAB_KEY); if (s) saved = s; } catch (e) {}
+    const sb = btnOf(saved);
+    if (sb && sb.style.display !== 'none') activate(saved);
+    else { const fv = [...document.querySelectorAll('#tg-tabs button[data-tab]')].find(b => b.style.display !== 'none'); activate(fv ? fv.dataset.tab : 'reach'); }
   }
   return { init };
 })();
