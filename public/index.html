@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
 <style>
   /* ================================================================
      STRIPE / REFERO DESIGN TOKENS
@@ -137,70 +138,187 @@
   /* ================================================================
      LOGIN VIEW
      ================================================================ */
+  /* The landing forces a dark palette regardless of the app theme — redefining
+     the tokens here cascades dark values into .login-card / .form-input /
+     .form-label / .login-error / .tabs without touching their own rules. */
   #login-view {
+    --color-canvas:       #0b1119;
+    --color-platinum:     #131c27;
+    --color-porcelain:    #0f1722;
+    --color-midnight-ink: #eef3fa;
+    --color-slate-blue:   #aeb9c9;
+    --color-ghost-gray:   #7d8aa0;
+    --color-stone-gray:   #2a3a4a;
+    --color-powder-blue:  #1f2b39;
+    --accent-text:        #9a8cff;
     min-height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 40px 20px;
+    display: block;
     position: relative;
-    overflow: hidden;
-    background: var(--color-canvas);
+    color: var(--color-midnight-ink);
+    background:
+      radial-gradient(900px 520px at 80% -10%, rgba(83,58,253,0.18), transparent 60%),
+      radial-gradient(680px 480px at 8% 112%, rgba(83,58,253,0.10), transparent 60%),
+      linear-gradient(180deg, #0c131d 0%, #080c12 100%);
   }
-  #login-view::before {
-    content: '';
-    position: absolute;
-    top: -200px; right: -200px;
-    width: 720px; height: 720px;
-    background: var(--gradient-dreamy);
-    opacity: 0.18;
-    filter: blur(50px);
-    border-radius: 50%;
-    pointer-events: none;
+  #login-view::before, #login-view::after { content: none; }
+
+  /* ── Top nav ── */
+  .lp-nav {
+    position: sticky; top: 0; z-index: 20;
+    display: flex; align-items: center; justify-content: space-between; gap: 24px;
+    padding: 15px clamp(20px, 5vw, 56px);
+    background: rgba(8,12,18,0.6); backdrop-filter: blur(12px);
+    border-bottom: 1px solid rgba(255,255,255,0.06);
   }
-  #login-view::after {
-    content: '';
-    position: absolute;
-    bottom: -240px; left: -240px;
-    width: 600px; height: 600px;
-    background: radial-gradient(circle, rgba(83,58,253,0.6), rgba(83,58,253,0.15) 50%, transparent 70%);
-    opacity: 0.18;
-    filter: blur(60px);
-    border-radius: 50%;
-    pointer-events: none;
+  .lp-nav-left { display: flex; align-items: center; gap: 26px; }
+  .lp-brand { display: flex; align-items: center; gap: 9px; }
+  .lp-brand span { font-size: 17px; font-weight: 500; letter-spacing: -.01em; }
+  .lp-menu { display: flex; align-items: center; gap: 2px; }
+  .lp-menu-item { position: relative; }
+  .lp-menu-trigger {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 8px 12px; border: none; background: none; cursor: pointer;
+    font: inherit; font-size: 14px; color: var(--color-slate-blue);
+    border-radius: var(--radius-button); transition: color .15s;
   }
+  .lp-menu-trigger svg { width: 11px; height: 11px; opacity: .55; transition: transform .18s; }
+  .lp-menu-item:hover .lp-menu-trigger { color: var(--color-midnight-ink); }
+  .lp-menu-item:hover .lp-menu-trigger svg { transform: rotate(180deg); }
+  .lp-menu-panel {
+    position: absolute; top: calc(100% + 6px); left: 0; min-width: 230px;
+    padding: 8px; display: flex; flex-direction: column; gap: 1px;
+    background: #131c27; border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 12px; box-shadow: 0 20px 54px rgba(0,0,0,0.55);
+    opacity: 0; visibility: hidden; transform: translateY(-6px);
+    transition: opacity .16s, transform .16s, visibility .16s;
+  }
+  .lp-menu-item:hover .lp-menu-panel { opacity: 1; visibility: visible; transform: translateY(0); }
+  .lp-dd-link {
+    padding: 9px 10px; border-radius: 8px; font-size: 14px;
+    color: var(--color-slate-blue); cursor: pointer; transition: background .12s, color .12s;
+  }
+  .lp-dd-link:hover { background: rgba(255,255,255,0.05); color: var(--color-midnight-ink); }
+  .lp-dd-link small { display: block; font-size: 12px; color: var(--color-ghost-gray); margin-top: 2px; }
+  .lp-nav-right { display: flex; align-items: center; gap: 8px; }
+  .lp-link {
+    padding: 8px 12px; font-size: 14px; color: var(--color-slate-blue);
+    cursor: pointer; border-radius: var(--radius-button); transition: color .15s;
+  }
+  .lp-link:hover { color: var(--color-midnight-ink); }
+  .lp-cta {
+    padding: 9px 18px; font-size: 14px; font-weight: 500; color: #0b1018;
+    background: #f4f6fb; border-radius: var(--radius-pill); cursor: pointer;
+    transition: box-shadow .15s, background .15s;
+  }
+  .lp-cta:hover { background: #fff; box-shadow: 0 6px 22px rgba(255,255,255,0.16); }
+
+  /* ── Hero ── */
+  .lp-hero {
+    display: grid; grid-template-columns: 1.1fr 0.9fr; align-items: center;
+    gap: clamp(28px, 6vw, 80px); max-width: 1180px; margin: 0 auto;
+    padding: clamp(44px, 8vh, 104px) clamp(20px, 5vw, 56px) 60px;
+  }
+  .lp-eyebrow {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 6px 14px; margin-bottom: 24px; font-size: 13px;
+    color: var(--color-slate-blue);
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.09);
+    border-radius: var(--radius-pill);
+  }
+  .lp-eyebrow b { color: var(--accent-text); font-weight: 600; }
+  .lp-h1 {
+    font-family: 'Instrument Serif', Georgia, serif; font-weight: 400;
+    letter-spacing: -.005em; line-height: 0.96; font-size: clamp(46px, 7vw, 92px);
+    margin: 0 0 22px;
+  }
+  .lp-h1 em { font-style: italic; color: var(--accent-text); }
+  .lp-sub {
+    font-size: clamp(16px, 1.4vw, 19px); line-height: 1.55;
+    color: var(--color-slate-blue); max-width: 30em; margin: 0 0 32px;
+  }
+  .lp-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .lp-btn-primary {
+    padding: 13px 24px; font-size: 15px; font-weight: 500; color: #fff;
+    background: var(--color-deep-violet); border: none;
+    border-radius: var(--radius-button); cursor: pointer;
+    transition: transform .12s, box-shadow .18s, background .15s;
+  }
+  .lp-btn-primary:hover { background: #6a52ff; box-shadow: 0 10px 30px rgba(83,58,253,0.4); transform: translateY(-1px); }
+  .lp-btn-ghost {
+    padding: 13px 22px; font-size: 15px; font-weight: 500; color: var(--color-midnight-ink);
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.12);
+    border-radius: var(--radius-button); cursor: pointer;
+    transition: background .15s, border-color .15s;
+  }
+  .lp-btn-ghost:hover { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.2); }
+
+  /* ── Auth card (right column) — inherits the dark tokens above ── */
   .login-card {
-    background: var(--color-platinum);
-    border-radius: var(--radius-card);
-    padding: 40px;
-    width: 100%;
-    max-width: 400px;
-    box-shadow: var(--shadow-soft);
-    position: relative;
-    z-index: 1;
+    background: rgba(20,29,40,0.72); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 14px; padding: 28px; width: 100%; max-width: 400px;
+    margin-left: auto; box-shadow: 0 24px 60px rgba(0,0,0,0.45);
+    position: relative; z-index: 1; backdrop-filter: blur(6px);
   }
-  .login-logo {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 32px;
-  }
+  .login-logo { display: flex; align-items: center; gap: 10px; margin-bottom: 22px; }
   .login-logo-mark {
-    width: 28px; height: 28px;
-    background: var(--color-deep-violet);
-    border-radius: var(--radius-button);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: white;
-    font-weight: 500;
-    font-size: 16px;
+    width: 28px; height: 28px; background: var(--color-deep-violet);
+    border-radius: var(--radius-button); display: flex; align-items: center;
+    justify-content: center; color: #fff; font-weight: 500; font-size: 16px;
   }
-  .login-logo-text {
-    font-size: 18px;
-    font-weight: 400;
-    letter-spacing: -0.01em;
+  .login-logo-text { font-size: 18px; font-weight: 400; letter-spacing: -0.01em; }
+
+  /* ── Feature strip (placeholder copy — refine later) ── */
+  .lp-strip {
+    max-width: 1180px; margin: 0 auto;
+    padding: 4px clamp(20px,5vw,56px) 80px;
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px;
   }
+  .lp-feature {
+    padding: 22px; border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 12px; background: rgba(255,255,255,0.02);
+  }
+  .lp-feature h3 { font-size: 16px; font-weight: 600; margin: 0 0 8px; }
+  .lp-feature p { font-size: 14px; line-height: 1.5; color: var(--color-ghost-gray); margin: 0; }
+
+  @media (max-width: 880px) {
+    .lp-menu { display: none; }
+    .lp-hero { grid-template-columns: 1fr; padding-top: 36px; }
+    .login-card { margin: 0 auto; }
+    .lp-strip { grid-template-columns: 1fr; }
+  }
+
+  /* ── Hero: пустой слот под будущий визуал (без анимаций) ── */
+  .lp-hero-slot{min-height:380px;border-radius:16px;border:1px dashed rgba(154,140,255,.16);background:rgba(255,255,255,.015)}
+
+  /* ── Auth view — resend-style dark page ── */
+  #auth-view{
+    --color-platinum:#131c27;--color-porcelain:#0f1722;--color-midnight-ink:#eef3fa;
+    --color-slate-blue:#aeb9c9;--color-ghost-gray:#7d8aa0;--color-stone-gray:#2a3a4a;
+    --color-powder-blue:#1f2b39;--accent-text:#9a8cff;
+    position:relative;min-height:100vh;display:flex;align-items:center;justify-content:center;
+    padding:64px 20px;color:var(--color-midnight-ink);
+    background:radial-gradient(720px 460px at 88% 12%, rgba(83,58,253,.18), transparent 62%),radial-gradient(560px 420px at 6% 96%, rgba(83,58,253,.10), transparent 60%),linear-gradient(180deg,#0b0f16,#06090e);
+  }
+  .av-glow{position:absolute;top:-12%;right:-8%;width:520px;height:760px;background:radial-gradient(closest-side, rgba(120,110,255,.16), transparent 70%);filter:blur(22px);pointer-events:none;transform:skewX(-12deg)}
+  .av-back{position:absolute;top:22px;left:22px;background:none;border:0;color:var(--color-slate-blue);font:500 14px/1 Inter,system-ui,sans-serif;cursor:pointer;padding:8px;border-radius:6px;transition:color .15s;z-index:2}
+  .av-back:hover{color:#fff}
+  .av-box{position:relative;z-index:1;width:100%;max-width:380px;text-align:center}
+  .av-logo{display:flex;justify-content:center;margin-bottom:18px}
+  .av-logo .login-logo-mark{width:38px;height:38px;border-radius:9px;font-size:20px}
+  .av-title{font-size:26px;font-weight:500;letter-spacing:-.01em;margin:0 0 6px}
+  .av-switch{font-size:14px;color:var(--color-slate-blue);margin:0 0 26px}
+  .av-switch a{color:#fff;font-weight:500;cursor:pointer;text-decoration:none}
+  .av-switch a:hover{text-decoration:underline}
+  .av-oauth{display:flex;flex-direction:column;gap:10px;margin-bottom:18px}
+  .av-oauth-btn{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;padding:11px 14px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:var(--color-midnight-ink);font:500 14px/1 Inter,system-ui,sans-serif;cursor:pointer;transition:background .15s,border-color .15s}
+  .av-oauth-btn:hover{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.2)}
+  .av-divider{display:flex;align-items:center;gap:12px;margin:0 0 18px;color:var(--color-ghost-gray);font-size:13px}
+  .av-divider::before,.av-divider::after{content:"";flex:1;height:1px;background:rgba(255,255,255,.1)}
+  #auth-view form{text-align:left}
+  #auth-view .form-input{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.14)}
+  #auth-view .btn-primary.full{width:100%}
+  .av-terms{margin-top:20px;font-size:12px;line-height:1.5;color:var(--color-ghost-gray)}
+  .av-terms a{color:var(--color-slate-blue);text-decoration:underline;cursor:pointer}
   .login-card h1 {
     font-size: var(--text-h);
     font-weight: 300;
@@ -508,11 +626,11 @@
      HERO
      ================================================================ */
   .hero {
-    padding: 32px 0 28px;
+    padding: 22px 0 20px;
     position: relative;
     overflow: hidden;
     border-bottom: 1px solid var(--color-powder-blue);
-    margin-bottom: 24px;
+    margin-bottom: 18px;
   }
   .hero::before {
     content: '';
@@ -531,15 +649,15 @@
     color: var(--accent-text);
     text-transform: uppercase;
     letter-spacing: 0.12em;
-    margin-bottom: 12px;
+    margin-bottom: 8px;
   }
   .hero-title {
     font-family: var(--font-display);
-    font-size: var(--text-h-lg);
+    font-size: 36px;
     font-weight: 300;
-    line-height: 1.07;
-    letter-spacing: -0.028em;
-    margin-bottom: 12px;
+    line-height: 1.1;
+    letter-spacing: -0.024em;
+    margin-bottom: 8px;
     background: var(--gradient-sunburst);
     -webkit-background-clip: text;
     background-clip: text;
@@ -556,7 +674,7 @@
     color: var(--color-slate-blue);
     font-weight: 300;
     letter-spacing: -0.009em;
-    margin-bottom: 24px;
+    margin-bottom: 16px;
   }
   .hero-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
@@ -1422,17 +1540,97 @@
      LOGIN VIEW
      ============================================================ -->
 <div id="login-view">
-  <div class="login-card">
-    <div class="login-logo">
-      <div class="login-logo-mark">P</div>
-      <div class="login-logo-text">Pulse</div>
+  <nav class="lp-nav">
+    <div class="lp-nav-left">
+      <div class="lp-brand"><div class="login-logo-mark">P</div><span>Pulse</span></div>
+      <div class="lp-menu">
+        <div class="lp-menu-item">
+          <button class="lp-menu-trigger" type="button">Продукт <svg viewBox="0 0 12 12" fill="none"><path d="M3 4.5 6 7.5 9 4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          <div class="lp-menu-panel">
+            <a class="lp-dd-link">Обзор<small>Дашборд Telegram и Instagram</small></a>
+            <a class="lp-dd-link">Telegram-аналитика<small>Просмотры, ER, виральность</small></a>
+            <a class="lp-dd-link">Упоминания бренда<small>Где о тебе говорят</small></a>
+            <a class="lp-dd-link">Коллектор каналов<small>Подключи любой канал</small></a>
+          </div>
+        </div>
+        <div class="lp-menu-item">
+          <button class="lp-menu-trigger" type="button">Возможности <svg viewBox="0 0 12 12" fill="none"><path d="M3 4.5 6 7.5 9 4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          <div class="lp-menu-panel">
+            <a class="lp-dd-link">Графики и тренды</a>
+            <a class="lp-dd-link">Лучшее время постинга</a>
+            <a class="lp-dd-link">Экспорт CSV</a>
+            <a class="lp-dd-link">История и архив</a>
+          </div>
+        </div>
+        <div class="lp-menu-item">
+          <button class="lp-menu-trigger" type="button">Ресурсы <svg viewBox="0 0 12 12" fill="none"><path d="M3 4.5 6 7.5 9 4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          <div class="lp-menu-panel">
+            <a class="lp-dd-link">Документация</a>
+            <a class="lp-dd-link">Как подключить канал</a>
+            <a class="lp-dd-link">FAQ</a>
+          </div>
+        </div>
+        <div class="lp-menu-item">
+          <button class="lp-menu-trigger" type="button">Компания <svg viewBox="0 0 12 12" fill="none"><path d="M3 4.5 6 7.5 9 4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          <div class="lp-menu-panel">
+            <a class="lp-dd-link">О нас</a>
+            <a class="lp-dd-link">Философия</a>
+            <a class="lp-dd-link">Контакты</a>
+          </div>
+        </div>
+        <div class="lp-menu-item"><a class="lp-menu-trigger">Тарифы</a></div>
+      </div>
     </div>
-    <h1>Доступ к&nbsp;аналитике</h1>
+    <div class="lp-nav-right">
+      <a class="lp-link" id="nav-login">Войти</a>
+      <a class="lp-cta" id="nav-getstarted">Начать</a>
+    </div>
+  </nav>
 
-    <div class="tabs" id="auth-tabs" style="margin:4px 0 18px">
-      <button type="button" data-auth="login" class="active">Вход</button>
-      <button type="button" data-auth="register">Регистрация</button>
+  <section class="lp-hero">
+    <div class="lp-hero-copy">
+      <span class="lp-eyebrow"><b>Новое</b> · Коллектор любых каналов →</span>
+      <h1 class="lp-h1">Аналитика<br><em>для авторов</em></h1>
+      <p class="lp-sub">Метрики, динамика и упоминания твоих Telegram-каналов — в одном понятном дашборде. Без ботов и без доступа к твоему аккаунту.</p>
+      <div class="lp-actions">
+        <button class="lp-btn-primary" id="hero-getstarted" type="button">Начать бесплатно</button>
+        <a class="lp-btn-ghost">Документация</a>
+      </div>
     </div>
+
+    <div class="lp-hero-slot" aria-hidden="true"></div>
+  </section>
+
+  <section class="lp-strip">
+    <div class="lp-feature"><h3>Telegram-аналитика</h3><p>Просмотры, ER, виральность и динамика подписчиков по каждому посту — с учётом альбомов.</p></div>
+    <div class="lp-feature"><h3>Упоминания бренда</h3><p>Отслеживай, где о тебе говорят в публичных каналах — с охватом и контекстом.</p></div>
+    <div class="lp-feature"><h3>Твои данные — твои</h3><p>Коллектор считает метрики у тебя локально; мы не храним твою сессию Telegram.</p></div>
+  </section>
+</div>
+
+<!-- ============================================================
+     AUTH VIEW — resend-style отдельная страница входа/регистрации
+     ============================================================ -->
+<div id="auth-view" class="hidden">
+  <div class="av-glow" aria-hidden="true"></div>
+  <button class="av-back" id="av-back" type="button">← На главную</button>
+  <div class="av-box">
+    <div class="av-logo"><span class="login-logo-mark">P</span></div>
+    <h1 class="av-title" id="auth-title">Создать аккаунт Pulse</h1>
+    <p class="av-switch" id="auth-switch">Уже есть аккаунт? <a id="auth-switch-link">Войти</a></p>
+
+    <div class="av-oauth" id="auth-oauth">
+      <button type="button" class="av-oauth-btn" data-oauth="google">
+        <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.76h3.56c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.56-2.76c-.98.66-2.23 1.06-3.72 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A11 11 0 0 0 12 23z"/><path fill="#FBBC05" d="M5.84 14.11a6.6 6.6 0 0 1 0-4.22V7.05H2.18a11 11 0 0 0 0 9.9l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.05l3.66 2.84C6.71 7.31 9.14 5.38 12 5.38z"/></svg>
+        Продолжить с Google
+      </button>
+      <button type="button" class="av-oauth-btn" data-oauth="github">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="#e8eef7" aria-hidden="true"><path d="M12 1.3a10.7 10.7 0 0 0-3.38 20.86c.53.1.73-.23.73-.51l-.01-1.8c-2.98.65-3.6-1.44-3.6-1.44-.49-1.24-1.19-1.57-1.19-1.57-.97-.66.07-.65.07-.65 1.08.08 1.64 1.11 1.64 1.11.96 1.64 2.52 1.16 3.13.89.1-.7.37-1.16.68-1.43-2.38-.27-4.88-1.19-4.88-5.3 0-1.17.42-2.13 1.11-2.88-.11-.27-.48-1.36.11-2.84 0 0 .9-.29 2.96 1.1a10.3 10.3 0 0 1 5.4 0c2.05-1.39 2.95-1.1 2.95-1.1.59 1.48.22 2.57.11 2.84.69.75 1.1 1.71 1.1 2.88 0 4.12-2.5 5.03-4.89 5.29.38.33.72.98.72 1.98l-.01 2.93c0 .29.2.62.74.51A10.7 10.7 0 0 0 12 1.3z"/></svg>
+        Продолжить с GitHub
+      </button>
+    </div>
+
+    <div class="av-divider" id="auth-divider"><span>или</span></div>
 
     <form id="login-form" autocomplete="off">
       <div id="login-email-wrap">
@@ -1452,7 +1650,7 @@
       <label class="form-label" for="reg-password" style="margin-top:12px">Пароль (мин. 8 символов)</label>
       <input id="reg-password" type="password" class="form-input" autocomplete="new-password" required>
       <div id="register-msg" class="login-error hidden"></div>
-      <button type="submit" id="register-btn" class="btn-primary full" style="margin-top: 20px;">Зарегистрироваться</button>
+      <button type="submit" id="register-btn" class="btn-primary full" style="margin-top: 20px;">Создать аккаунт</button>
       <p class="login-foot" style="margin-top:14px">На указанный email придёт ссылка для подтверждения.</p>
     </form>
 
@@ -1471,7 +1669,7 @@
       <button type="submit" id="reset-btn" class="btn-primary full" style="margin-top: 20px;">Сохранить пароль</button>
     </form>
 
-    <p class="login-foot">Сессия живёт 8&nbsp;часов · Защищено rate&#8209;limit</p>
+    <p class="av-terms">Регистрируясь, ты принимаешь <a>Условия</a> и <a>Политику конфиденциальности</a>.</p>
   </div>
 </div>
 
@@ -2083,13 +2281,24 @@ function sumMetric(insights, names) {
 }
 
 /* ── View switching ──────────────────────────────────────────── */
-function showLogin() {
+function showLanding() {
   document.getElementById('login-view').classList.remove('hidden');
+  document.getElementById('auth-view').classList.add('hidden');
   document.getElementById('dash-view').classList.add('hidden');
-  setTimeout(() => document.getElementById('password')?.focus(), 50);
 }
+function showAuthView(which) {
+  document.getElementById('login-view').classList.add('hidden');
+  document.getElementById('auth-view').classList.remove('hidden');
+  document.getElementById('dash-view').classList.add('hidden');
+  showAuthForm(which || 'register');
+  window.scrollTo(0, 0);
+  setTimeout(() => document.getElementById(which === 'login' ? 'login-email' : 'reg-email')?.focus(), 60);
+}
+// Public entry point = the marketing landing; auth lives on its own page.
+function showLogin() { showLanding(); }
 function showDash() {
   document.getElementById('login-view').classList.add('hidden');
+  document.getElementById('auth-view').classList.add('hidden');
   document.getElementById('dash-view').classList.remove('hidden');
 }
 
@@ -2133,23 +2342,39 @@ function enterDashboard(res) {
   LAYOUT.syncFromServer();
 }
 
-// Show exactly one auth form; hide the login/register tabs for forgot/reset.
+// Show exactly one auth form + update the resend-style header (title + switch
+// link). OAuth + divider only make sense for login/register, not forgot/reset.
 function showAuthForm(which) {
   ['login','register','forgot','reset'].forEach(f =>
     document.getElementById(f + '-form')?.classList.toggle('hidden', f !== which));
-  const tabs = document.getElementById('auth-tabs');
-  if (tabs) tabs.style.display = (which === 'login' || which === 'register') ? '' : 'none';
-  if (which === 'login' || which === 'register')
-    document.querySelectorAll('#auth-tabs button').forEach(x => x.classList.toggle('active', x.dataset.auth === which));
+  const social = (which === 'login' || which === 'register');
+  const oauth = document.getElementById('auth-oauth');
+  const divider = document.getElementById('auth-divider');
+  if (oauth) oauth.style.display = social ? '' : 'none';
+  if (divider) divider.style.display = social ? '' : 'none';
+  const title = document.getElementById('auth-title');
+  const sw = document.getElementById('auth-switch');
+  if (title && sw) {
+    if (which === 'register')      { title.textContent = 'Создать аккаунт Pulse'; sw.innerHTML = 'Уже есть аккаунт? <a id="auth-switch-link">Войти</a>'; }
+    else if (which === 'login')    { title.textContent = 'С возвращением';        sw.innerHTML = 'Нет аккаунта? <a id="auth-switch-link">Создать</a>'; }
+    else if (which === 'forgot')   { title.textContent = 'Сброс пароля';          sw.innerHTML = '<a id="auth-switch-link">← Назад ко входу</a>'; }
+    else                           { title.textContent = 'Новый пароль';          sw.innerHTML = ''; }
+    const link = document.getElementById('auth-switch-link');
+    if (link) link.addEventListener('click', () =>
+      showAuthForm(which === 'register' ? 'login' : (which === 'login' ? 'register' : 'login')));
+  }
 }
-
-document.getElementById('auth-tabs')?.addEventListener('click', (e) => {
-  const b = e.target.closest('button[data-auth]'); if (!b) return;
-  showAuthForm(b.dataset.auth);
-});
 
 document.getElementById('forgot-link')?.addEventListener('click', () => showAuthForm('forgot'));
 document.getElementById('forgot-back')?.addEventListener('click', () => showAuthForm('login'));
+
+/* ── Лендинг → отдельная страница входа/регистрации (resend-style) ── */
+document.getElementById('nav-getstarted')?.addEventListener('click', () => showAuthView('register'));
+document.getElementById('hero-getstarted')?.addEventListener('click', () => showAuthView('register'));
+document.getElementById('nav-login')?.addEventListener('click', () => showAuthView('login'));
+document.getElementById('av-back')?.addEventListener('click', showLanding);
+document.querySelectorAll('.av-oauth-btn').forEach(b =>
+  b.addEventListener('click', () => toast('Вход через ' + (b.dataset.oauth === 'google' ? 'Google' : 'GitHub') + ' скоро будет', 'info')));
 
 document.getElementById('forgot-form')?.addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -5086,8 +5311,8 @@ function applyTheme(t) {
   // Email-link landings (verify / reset / forgot) — handle before the normal auth boot.
   const q = new URLSearchParams(location.search);
   const cleanUrl = () => history.replaceState(null, '', location.pathname);
-  if (q.get('reset'))            { RESET_TOKEN = q.get('reset'); cleanUrl(); showLogin(); showAuthForm('reset'); return; }
-  if (q.get('forgot') === '1')   { cleanUrl(); showLogin(); showAuthForm('forgot'); return; }
+  if (q.get('reset'))            { RESET_TOKEN = q.get('reset'); cleanUrl(); showAuthView('reset'); return; }
+  if (q.get('forgot') === '1')   { cleanUrl(); showAuthView('forgot'); return; }
   if (q.get('verified') === '1') { cleanUrl(); toast('Email подтверждён — войди', 'info'); }
   if (q.get('verify') === 'bad') { cleanUrl(); toast('Ссылка недействительна или истекла', 'error'); }
   if (!API.getToken()) { showLogin(); return; }
