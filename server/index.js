@@ -29,7 +29,14 @@ db.init().then(bootstrapAdmin).then(claimOwnerChannel).then(() => { dbReady = tr
 // CORS_ORIGINS (список через запятую).
 const CORS_ORIGINS = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
 app.use(cors({ origin: CORS_ORIGINS.length ? CORS_ORIGINS : false, credentials: false }));
-app.use(express.json());   // default 100kb — большие тела только на upload-маршруте (route-local парсер)
+// JSON body parser — default 100kb. Big-body routes (collector ingest, bug
+// screenshots) carry their own higher-limit parser, so skip them here; otherwise
+// this 100kb parser would reject their large payloads before the route is reached.
+const jsonSmall = express.json();
+app.use((req, res, next) => {
+  if (req.path === '/api/collector/ingest' || /\/screenshot$/.test(req.path)) return next();
+  jsonSmall(req, res, next);
+});
 app.use(express.static(path.join(__dirname, '../public')));
 
 const limiter = rateLimit({
@@ -184,6 +191,16 @@ async function resolveChannel(req, res, next) {
 function notCentral(req, res) {
   if (req.channel && req.channel.source === 'central') return false;
   res.json({ available: false, source: 'collector', empty: true });
+  return true;
+}
+
+// Non-central channel → serve a field from its stored collector snapshot (or a
+// soft "no data yet" marker). Returns true if it handled the response.
+async function serveSnapshot(req, res, pick) {
+  if (req.channel && req.channel.source === 'central') return false;   // central → caller serves live
+  const snap = (req.channel && req.channel.id) ? await db.getSnapshot(req.channel.id).catch(() => null) : null;
+  const val = snap && snap.data ? pick(snap.data, snap) : null;
+  res.json(val != null ? val : { available: false, source: 'collector', empty: true });
   return true;
 }
 
@@ -585,8 +602,126 @@ app.get('/api/channels', requireAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Create a channel (self-serve). Real accounts only (not the break-glass operator).
+app.post('/api/channels', requireAuth, async (req, res) => {
+  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
+  if (req.user.uid == null) return res.status(403).json({ error: 'Командный вход не может создавать каналы' });
+  const username = String((req.body && req.body.username) || '').replace(/^@/, '').trim();
+  const title = String((req.body && req.body.title) || '').trim().slice(0, 120);
+  if (!/^[a-zA-Z0-9_]{3,64}$/.test(username)) return res.status(400).json({ error: 'Некорректный @username канала' });
+  try {
+    const mine = await db.listChannels(req.user);
+    if (mine.length >= 20) return res.status(409).json({ error: 'Достигнут лимит каналов' });   // soft cap; tiers in Sprint 2
+    res.json(await db.createChannel({ owner_uid: req.user.uid, username, title }));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/channels/:id', requireAuth, async (req, res) => {
+  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
+  const id = parseInt(req.params.id, 10);
+  if (!id || req.user.uid == null) return res.status(400).json({ error: 'bad id' });
+  try { res.json({ ok: await db.deleteChannel(id, req.user.uid) }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Generate an API key for a channel the user owns — the raw key is shown ONCE.
+app.post('/api/channels/:id/key', requireAuth, async (req, res) => {
+  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
+  const id = parseInt(req.params.id, 10);
+  if (!id || req.user.uid == null) return res.status(400).json({ error: 'bad id' });
+  try {
+    const ch = await db.getChannel(id, req.user);
+    if (!ch) return res.status(403).json({ error: 'Нет доступа к каналу' });
+    if (ch.source === 'central') return res.status(400).json({ error: 'central-канал не использует collector-ключи' });
+    const raw = 'pa_' + crypto.randomBytes(24).toString('base64url');
+    const rec = await db.createApiKey(id, sha256(raw), raw.slice(0, 11), String((req.body && req.body.label) || '').slice(0, 60) || null);
+    res.json({ ...rec, key: raw });   // raw key — never stored, shown once
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/channels/:id/keys', requireAuth, async (req, res) => {
+  if (!db.enabled) return res.json({ keys: [] });
+  const id = parseInt(req.params.id, 10);
+  if (!id || req.user.uid == null) return res.status(400).json({ error: 'bad id' });
+  try { res.json({ keys: await db.listApiKeys(id, req.user.uid) }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/channels/:id/key/:keyId', requireAuth, async (req, res) => {
+  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
+  const keyId = parseInt(req.params.keyId, 10);
+  if (!keyId || req.user.uid == null) return res.status(400).json({ error: 'bad id' });
+  try { res.json({ ok: await db.revokeApiKey(keyId, req.user.uid) }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Collector ingest (Variant A) ──────────────────────────────────
+// A user's collector computes its channel's metrics LOCALLY (their own session)
+// and pushes ready JSON here, authenticated by the channel's API key. We never
+// see/store their TG session — only the derived data, under their channel.
+const ingestLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, max: 60,
+  keyGenerator: (req) => {   // per-key (hashed); mirror requireApiKey's credential extraction so x-api-key callers are also per-key limited
+    const h = String(req.get('authorization') || '');
+    const raw = h.startsWith('Bearer ') ? h.slice(7).trim() : String(req.get('x-api-key') || '').trim();
+    return raw ? sha256(raw) : ('ip:' + (req.ip || ''));
+  },
+  message: { error: 'Слишком много ingest-запросов' },
+});
+async function requireApiKey(req, res, next) {
+  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
+  if (!dbReady)    return res.status(503).json({ error: 'Сервис запускается' });
+  const hdr = String(req.get('authorization') || '');
+  const raw = hdr.startsWith('Bearer ') ? hdr.slice(7).trim() : String(req.get('x-api-key') || '').trim();
+  if (!raw) return res.status(401).json({ error: 'Нет API-ключа' });
+  try {
+    const ch = await db.getChannelByApiKey(sha256(raw));
+    if (!ch || ch.status === 'disabled' || ch.source === 'central') return res.status(401).json({ error: 'Неверный или отозванный ключ' });
+    req.channel = ch;
+    next();
+  } catch (e) { res.status(500).json({ error: e.message }); }
+}
+
+app.post('/api/collector/ingest', ingestLimiter, requireApiKey, express.json({ limit: '4mb' }), async (req, res) => {
+  const ch = req.channel;
+  const body = req.body || {};
+  const MAX_ROWS = 500;   // hard cap on any per-request array → bounds DB round-trips on the small pool
+  try {
+    const posts = Array.isArray(body.posts) ? body.posts.slice(0, MAX_ROWS) : [];
+    const snapshot = {
+      channel:       body.channel || null,
+      stats:         body.stats || null,
+      graphs:        body.graphs || null,
+      views_summary: body.views_summary || null,
+      posts:         posts.slice(0, 200),
+    };
+    if (JSON.stringify(snapshot).length > 2000000) return res.status(413).json({ error: 'Слишком большой snapshot' });
+    await db.saveSnapshot(ch.id, snapshot);
+    // Time-series archives — capped + can never throw the request
+    let nDaily = 0, nPosts = 0, velocityOk = false, nMentions = 0;
+    let dailyRows = [];
+    try { dailyRows = db.graphsToDailyRows(body.graphs).slice(0, MAX_ROWS); } catch (_) { dailyRows = []; }
+    if (dailyRows.length) nDaily = await db.upsertChannelDaily(ch.id, dailyRows).catch(() => 0);
+    if (posts.length) {
+      const prows = posts.map(p => {
+        const reach = p.views || 0, eng = (p.reactions || 0) + (p.forwards || 0) + (p.replies || 0);
+        return { post_id: p.id, date_published: p.date, views: p.views || 0, reactions: p.reactions || 0,
+          forwards: p.forwards || 0, replies: p.replies || 0,
+          erv: reach > 0 ? eng / reach * 100 : null, virality: reach > 0 ? (p.forwards || 0) / reach * 100 : null,
+          media_type: p.media_type, caption: (p.text || '').slice(0, 500), hashtags: p.hashtags || [] };
+      }).filter(p => p.post_id != null);
+      nPosts = await db.upsertPosts(ch.id, prows).catch(() => 0);
+    }
+    if (body.velocity && body.velocity.available) { await db.saveVelocity(ch.id, body.velocity).catch(() => {}); velocityOk = true; }
+    const mentions = Array.isArray(body.mentions) ? body.mentions.slice(0, MAX_ROWS) : [];
+    if (mentions.length) nMentions = await db.upsertMentions(ch.id, mentions).catch(() => 0);
+    if (body.channel && body.channel.id) db.setChannelTgId(ch.id, body.channel.id).catch(() => {});
+    res.json({ ok: true, channel_id: ch.id, snapshot: true, channel_daily: nDaily, posts: nPosts, velocity: velocityOk, mentions: nMentions });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/tg/channel', requireAuth, resolveChannel, async (req, res) => {
-  if (notCentral(req, res)) return;
+  if (await serveSnapshot(req, res, d => d.channel)) return;
   const cacheKey = `tg:channel:${req.channel.id}`;
   try {
     const cached = cacheGet(cacheKey);
@@ -666,7 +801,7 @@ app.get('/api/tg/mtproto/health', requireAuth, async (req, res) => {
 });
 
 app.get('/api/tg/mtproto/channel', requireAuth, resolveChannel, async (req, res) => {
-  if (notCentral(req, res)) return;
+  if (await serveSnapshot(req, res, d => d.channel)) return;
   const cacheKey = `mtproto:channel:${req.channel.id}`;
   try {
     const cached = cacheGet(cacheKey);
@@ -680,7 +815,7 @@ app.get('/api/tg/mtproto/channel', requireAuth, resolveChannel, async (req, res)
 });
 
 app.get('/api/tg/mtproto/posts', requireAuth, resolveChannel, async (req, res) => {
-  if (notCentral(req, res)) return;
+  if (await serveSnapshot(req, res, d => ({ posts: d.posts || [], count: (d.posts || []).length }))) return;
   const limit     = Math.min(100, parseInt(req.query.limit)     || 30);
   const offsetId  = parseInt(req.query.offset_id) || 0;
   const cacheKey  = `mtproto:posts:${req.channel.id}:${limit}:${offsetId}`;
@@ -696,7 +831,7 @@ app.get('/api/tg/mtproto/posts', requireAuth, resolveChannel, async (req, res) =
 });
 
 app.get('/api/tg/mtproto/views_summary', requireAuth, resolveChannel, async (req, res) => {
-  if (notCentral(req, res)) return;
+  if (await serveSnapshot(req, res, d => d.views_summary)) return;
   const limit    = Math.min(100, parseInt(req.query.limit) || 30);
   const cacheKey = `mtproto:views:${req.channel.id}:${limit}`;
   try {
@@ -711,7 +846,7 @@ app.get('/api/tg/mtproto/views_summary', requireAuth, resolveChannel, async (req
 });
 
 app.get('/api/tg/mtproto/stats', requireAuth, resolveChannel, async (req, res) => {
-  if (notCentral(req, res)) return;
+  if (await serveSnapshot(req, res, d => d.stats)) return;
   const cacheKey = `mtproto:stats:${req.channel.id}`;
   try {
     const cached = cacheGet(cacheKey);
@@ -728,7 +863,7 @@ app.get('/api/tg/mtproto/stats', requireAuth, resolveChannel, async (req, res) =
 });
 
 app.get('/api/tg/mtproto/graphs', requireAuth, resolveChannel, async (req, res) => {
-  if (notCentral(req, res)) return;
+  if (await serveSnapshot(req, res, d => d.graphs)) return;
   const cacheKey = `mtproto:graphs:${req.channel.id}`;
   try {
     const cached = cacheGet(cacheKey);
@@ -833,7 +968,11 @@ app.get('/api/tg/mtproto/thumb/:id', async (req, res) => {
 });
 
 app.get('/api/tg/full', requireAuth, resolveChannel, async (req, res) => {
-  if (notCentral(req, res)) return;
+  if (req.channel && req.channel.source !== 'central') {   // collector channel → from snapshot
+    const snap = req.channel.id ? await db.getSnapshot(req.channel.id).catch(() => null) : null;
+    const d = (snap && snap.data) || {};
+    return res.json({ channel: d.channel || {}, views_summary: d.views_summary || null, posts: d.posts || [], mtproto_available: !!d.channel, source: 'collector' });
+  }
   const limit = Math.min(100, parseInt(req.query.limit) || 30);
   try {
     const [botChannel, mtChannel, viewsSummary, posts] = await Promise.allSettled([
