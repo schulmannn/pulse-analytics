@@ -1534,7 +1534,7 @@
         <h1 class="hero-title" id="hero-title">Привет.</h1>
         <p class="hero-sub" id="hero-sub">Сводка по&nbsp;Instagram и&nbsp;Telegram.</p>
         <div class="hero-actions">
-          <button class="btn-primary sm" onclick="window.location.hash='#posts'">Открыть посты</button>
+          <button class="btn-primary sm" id="open-posts-btn">Открыть посты</button>
           <button class="btn-outline" id="export-btn">Экспорт CSV</button>
           <button class="btn-ghost" id="clear-cache-btn">Сбросить кэш</button>
         </div>
@@ -2560,6 +2560,9 @@ document.querySelectorAll('.nav a').forEach(a => {
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
 });
+
+/* ── Hero «Открыть посты» (раньше inline onclick — убрано под nonce-CSP) ── */
+document.getElementById('open-posts-btn')?.addEventListener('click', () => { window.location.hash = '#posts'; });
 
 /* ── CSV Export ──────────────────────────────────────────────── */
 document.getElementById('export-btn').addEventListener('click', () => {

@@ -13,4 +13,12 @@ RUN pip install --no-cache-dir -r mtproto/requirements.txt
 COPY mtproto ./mtproto
 
 EXPOSE 8001
+
+# Контейнерный healthcheck → /health (есть в service.py). Помечает образ
+# healthy/unhealthy для docker и оркестратора. На Railway дополнительно задать
+# healthcheckPath=/health в настройках сервиса pulse-mtproto (авто-рестарт при
+# падении + корректный статус на канвасе — это уже через дашборд, не из репо).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+  CMD python3 -c "import os,urllib.request,sys; p=os.getenv('MTPROTO_PORT','8001'); sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:'+p+'/health',timeout=3).status==200 else 1)"
+
 CMD ["python3", "mtproto/service.py"]

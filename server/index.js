@@ -9,6 +9,7 @@ const cors       = require('cors');
 const fetch      = require('node-fetch');
 const rateLimit  = require('express-rate-limit');
 const path       = require('path');
+const fs         = require('fs');
 const db         = require('./db');
 
 const app  = express();
@@ -37,7 +38,41 @@ app.use((req, res, next) => {
   if (req.path === '/api/collector/ingest' || /\/screenshot$/.test(req.path)) return next();
   jsonSmall(req, res, next);
 });
-app.use(express.static(path.join(__dirname, '../public')));
+// ── App shell + strict nonce-CSP ──────────────────────────────────
+// index.html is the only HTML surface that renders collector-snapshot data.
+// A per-request nonce on its inline <script> tags + `script-src 'nonce-…'`
+// (no 'unsafe-inline') means an injected <script> or inline event handler can't
+// execute — closes the snapshot self-XSS class (defence-in-depth on top of the
+// server-side escape/Number coercion). Inline styles stay allowed (style
+// injection isn't code execution); only Google Fonts is external.
+const APP_HTML_PATH = path.join(__dirname, '../public/index.html');
+let APP_HTML = '';
+try { APP_HTML = fs.readFileSync(APP_HTML_PATH, 'utf8'); }
+catch (e) { console.error('[csp] index.html read failed:', e.message); }
+const cspHeader = (nonce) => [
+  "default-src 'self'",
+  "base-uri 'none'",
+  "object-src 'none'",
+  "frame-ancestors 'none'",
+  `script-src 'nonce-${nonce}'`,
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "font-src https://fonts.gstatic.com",
+  "img-src 'self' data: https:",
+  "connect-src 'self'",
+].join('; ');
+function sendApp(req, res) {
+  const nonce = crypto.randomBytes(16).toString('base64');
+  let src = APP_HTML;
+  if (!src) { try { src = fs.readFileSync(APP_HTML_PATH, 'utf8'); } catch { return res.status(500).end(); } }
+  const html = src.split('<script>').join(`<script nonce="${nonce}">`);
+  res.set('Content-Security-Policy', cspHeader(nonce))
+     .set('X-Content-Type-Options', 'nosniff')
+     .set('Referrer-Policy', 'no-referrer')
+     .set('Content-Type', 'text/html; charset=utf-8')
+     .send(html);
+}
+app.get(['/', '/index.html'], sendApp);
+app.use(express.static(path.join(__dirname, '../public'), { index: false }));
 
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -1253,9 +1288,7 @@ app.get('/api/bug-attachment/:id', requireAuth, requireSuper, async (req, res) =
   } catch (e) { res.status(500).end(); }
 });
 
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, '../public/index.html'));
-});
+app.get('*', sendApp);
 
 // ── Запуск ──────────────────────────────────────────────────────
 app.listen(PORT, () => {
