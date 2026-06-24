@@ -4,19 +4,40 @@
 
 ## Контекст для нового чата
 
-**Что это:** дашборд аналитики Telegram-канала. Repo `github.com/schulmannn/pulse-analytics`, локально `C:\Tools\pulse-analytics`. Деплой на **Railway** (домен `pulse-analytics-production-daf3.up.railway.app`), один Docker-контейнер: Node/Express (`server/index.js`, фронт `public/index.html`) + Python/Telethon MTProto (`mtproto/service.py`, внутр. :8001). **Postgres** подключён (история + баги). `gh` авторизован как schulmannn.
+**Что это:** дашборд аналитики Telegram-канала → публичный мультитенантный SaaS. Repo `github.com/schulmannn/pulse-analytics`, локально `C:\Tools\pulse-analytics`. Деплой на **Railway** (проект `believable-surprise`, домен `pulse-analytics-production-daf3.up.railway.app`). `gh` авторизован как schulmannn. Детали в памяти Claude: [[project_pulse_split_runtimes]], [[project_pulse_sprint1_multitenant]].
 
-**Что уже сделано (этот цикл):** альбом-фикс (grouped_id); ER/ERV/виральность по постам; хэштег-lift; авто-дайджест «итоги недели» (rule-based); heatmap «когда постить»; velocity «жизнь поста»; мониторинг упоминаний (searchPosts, on-demand, квота ~10/день); архив истории в Postgres (channel_daily/posts/mentions) + ежедневный GH Actions ingestion; баг-трекер со статусами + скриншоты (bytea, хардненинг после адверсариал-ревью).
+**Архитектура (после рефакторинга 2026-06-23/24):** ДВА Railway-сервиса в одном репо —
+- **`pulse-analytics`** (web): Node/Express `server/index.js` + Postgres `server/db.js` + фронт `public/index.html`. Образ `Dockerfile.web`. Публичный.
+- **`pulse-mtproto`** (приватный): Python/Telethon `mtproto/service.py` :8001. Образ `Dockerfile.mtproto`. Web ходит к нему через `MTPROTO_URL` по приватной сети.
+- **Postgres** подключён. Корневой `Dockerfile` (legacy одно-контейнерный) оставлен для локалки/отката.
 
-**Ключевые грабли (НЕ повторять):** `views_graph` из GetMessageStats — ИНКРЕМЕНТАЛЬНЫЙ и ДНЕВНОЙ; альбомы = grouped_id; приватный Railway DATABASE_URL без ssl; глубокая статистика TG только у аккаунта-**админа** канала (бот не даёт); searchPosts квота ~10/день; ingest-токен слать заголовком (URL ломает спецсимволы).
+**Модель данных — МУЛЬТИТЕНАНТ (tenant = канал):** таблица `channels` (owner_uid → users), данные per-channel (`channel_daily`/`posts`/`velocity_daily`/`mentions` с channel_id; `channel_snapshots` JSONB). Канал `source='central'` = владелец @bynotem (live через pulse-mtproto + крон); `source='collector'` = чужие каналы (данные шлёт collector в Postgres). Аккаунты: `users` (email+scrypt), self-serve регистрация с email-верификацией.
 
-**Текущая авторизация:** один общий `TEAM_PASSWORD` + stateless HMAC. НЕ мультиюзер.
+**Ключевые грабли (НЕ повторять):** `views_graph` из GetMessageStats — ИНКРЕМЕНТАЛЬНЫЙ+ДНЕВНОЙ; альбомы = grouped_id; приватный Railway DATABASE_URL без ssl; глубокая статистика TG только у аккаунта-**админа** канала; searchPosts квота ~10/день; ingest-токен заголовком; **миграция 1A однонаправленная** (композитные PK; откод кода = fix-forward); collector-snapshot XSS = **self-XSS** (рендерит только владелец).
 
 ## Архитектурное решение: Variant A (collector на стороне юзера)
 
 Публичный SaaS строим так, чтобы **НЕ хранить сессии юзеров** (в TG нет read-only/скоуп-токена; StringSession = полный доступ к аккаунту → юр-риск + риск банов).
 
-**Поток:** юзер при онбординге: (1) создаёт свои api_id/api_hash на my.telegram.org; (2) запускает наш **collector-агент** у себя (one-click: GitHub Actions template / Docker / десктоп-хелпер — переиспользовать паттерн `notem-mention-monitor`) со своей сессией ЛОКАЛЬНО; (3) агент считает метрики и шлёт нам **только готовый JSON** по per-user API-ключу. Мы храним лишь производные данные. Детализация — полная (агент = админ локально). Опц. платный «managed» тариф: подключение через ОТДЕЛЬНЫЙ TG-аккаунт-админ + шифрование at-rest + явное согласие + лёгкий revoke.
+**Поток:** юзер при онбординге: (1) создаёт свои api_id/api_hash на my.telegram.org; (2) запускает наш **collector-агент** у себя (one-click: GitHub Actions template / Docker / десктоп-хелпер — переиспользовать паттерн `notem-mention-monitor`) со своей сессией ЛОКАЛЬНО; (3) агент считает метрики и шлёт нам **только готовый JSON** на `POST /api/collector/ingest` по per-channel API-ключу. Мы храним лишь производные данные. Опц. платный «managed» тариф: ОТДЕЛЬНЫЙ TG-аккаунт-админ + шифрование at-rest + явное согласие + revoke.
+
+---
+
+## ✅ СДЕЛАНО (Sprint 1 — фундамент SaaS, 2026-06-23/24)
+
+Всё задеплоено в прод и верифицировано. Каждая фаза прошла многоагентный adversarial security review.
+
+- **Split рантаймов** — web (Node) и mtproto (Python) разнесены на 2 Railway-сервиса (PR #20 + ручной катовер). Healthcheck на pulse-mtproto НЕ настроен (в канвасе «offline», но работает).
+- **1A — мультитенантность** (PR #21): `channels`-таблица, данные per-channel, `resolveChannel`-изоляция (403 чужой канал), channel switcher, миграция+бэкфилл @bynotem в central. ⚠️ миграция однонаправленная.
+- **1B — self-serve auth** (PR #22): регистрация → email-верификация → active (Resend, без новых зависимостей); сброс пароля + resend; single-use sha256-токены. 10+5 security-находок пофикшено.
+- **1C — collector ingest** (PR #23): per-channel API-ключи (генерация/revoke в ЛК) + `POST /api/collector/ingest` + `channel_snapshots`; non-central дашборды читают из Postgres. 11+4 находки пофикшены.
+
+## ⏭️ БЛИЖАЙШИЕ ШАГИ (старт нового чата)
+
+1. **Конфиг Railway, чтобы включить self-serve (1B) — ДЕЙСТВИЕ ЮЗЕРА:** на web-сервисе `pulse-analytics` задать `RESEND_API_KEY` (создать на resend.com), `EMAIL_FROM` (верифиц. домен Resend; для теста `onboarding@resend.dev` шлёт только себе), `APP_URL=https://pulse-analytics-production-daf3.up.railway.app`. Без них владелец работает (break-glass `TEAM_PASSWORD` / bootstrap admin), но письма не шлются. *(1C ключи/ingest работают сразу, доп. env не нужен.)*
+2. **1D — collector-агент** (последняя часть Variant A, P0/L): локальный артефакт, который юзер запускает у себя. Считает метрики своей сессией Telethon (переиспользовать `mtproto/service.py` + паттерн `notem-mention-monitor`) и POST'ит готовый JSON на `/api/collector/ingest` с `Authorization: Bearer <ключ>`. Контракт payload уже задокументирован в ingest-роуте (`{channel, stats, graphs, views_summary, posts, velocity, mentions}`). Форм-фактор выбрать: GH Actions шаблон (zero local infra) / Docker / desktop.
+3. **Хардненинг-хвост (по желанию, P2):** strict nonce-CSP + server-side numeric coercion снапшота (закрыть self-XSS класс до любой shared-view фичи); healthcheck `/health` на pulse-mtproto (авто-рестарт); убрать стрэй `pip install` build-command на web; удалить корневой legacy `Dockerfile`.
+4. **Параллельно (research, без кода):** #21 ресёрч конкурентов (кормит цену) — перед Sprint 2.
 
 ---
 
@@ -35,13 +56,14 @@
 | 12 | Футер (ссылки, копирайт). | P2 | S |
 | 15 | *Решение:* пай-чарты — использовать минимально (плохо сравнивать >3 категорий; наши breakdown-бары лучше). Только там, где 2–3 доли. | dec | S |
 
-### Sprint 1 — Фундамент SaaS №1: мультитенантность + collector (ГЛАВНЫЙ enabler)
-| # | Задача | Приоритет | Труд |
-|---|---|---|---|
-| — | **Collector-агент (Variant A)** + per-user API-ключ + эндпоинт приёма JSON. Ядро всего паблика. | P0 | L |
-| 8 | **Регистрация/авторизация** (email+пароль, верификация, сброс, сессии). `user_id` во ВСЕ таблицы, изоляция данных. | P0 | L |
-| — | Переархитектура модели данных под мультитенант (канал/история/упоминания/баги — per user). | P0 | L |
-| 10 | *Ответ:* Railway инфраструктуру тянет (домен, Postgres, реплики); бутылочное горлышко — не Railway, а MTProto-доступ (решён collector'ом). | dec | — |
+### Sprint 1 — Фундамент SaaS №1: мультитенантность + collector (ГЛАВНЫЙ enabler) — ПОЧТИ ВЕСЬ ✅
+| # | Задача | Статус |
+|---|---|---|
+| 1A | Переархитектура модели данных под мультитенант (per-channel) + изоляция + switcher | ✅ PR #21 |
+| 1B (#8) | Регистрация/авторизация: email + верификация + сброс (self-serve, Resend) | ✅ PR #22 |
+| 1C | Per-channel API-ключи + `POST /api/collector/ingest` + snapshot-дашборды | ✅ PR #23 |
+| **1D** | **Collector-агент (Variant A)** — локальный артефакт у юзера. **ЕДИНСТВЕННОЕ, ЧТО ОСТАЛОСЬ В Sprint 1.** | ⏳ next, P0/L |
+| 10 | *Ответ:* Railway тянет; узкое место — MTProto-доступ, решён collector'ом. | dec ✅ |
 
 ### Sprint 2 — Фундамент SaaS №2: монетизация + онбординг + go-live
 | # | Задача | Приоритет | Труд |
@@ -95,4 +117,4 @@
 - **#22 Claude-интеграция?** Классный дифференциатор (MCP), но отложить до стабильного ядра.
 
 ## Рекомендуемый порядок
-Sprint 0 (быстрые победы, текущий продукт) → research-трек (#21/#23, параллельно) + решения по ребренду/цене → Sprint 1 (мультитенант+collector) → Sprint 2 (оплата+лендинг+.com) → Sprint 3 (UX) → Sprint 4 (коллаб по багам) → Sprint 5 (рост/advanced).
+Sprint 0 ✅ → split рантаймов ✅ → Sprint 1: 1A ✅ / 1B ✅ / 1C ✅ → **сейчас: 1D collector-агент** (+ конфиг Resend env) → research-трек (#21/#23) + решения по ребренду/цене → Sprint 2 (оплата+лендинг+.com) → Sprint 3 (UX) → Sprint 4 (коллаб по багам) → Sprint 5 (рост/advanced).
