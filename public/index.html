@@ -1894,6 +1894,16 @@
       </div>
     </form>
 
+    <div id="account-channels" class="hidden">
+      <div class="chart-head" style="border-top:1px solid var(--color-powder-blue);padding-top:12px"><span class="chart-title" style="font-size:var(--text-body)">Каналы</span><span style="font-size:var(--text-caption);color:var(--color-ghost-gray)">подключи свой через collector</span></div>
+      <div id="channels-list" style="margin-top:8px"></div>
+      <form id="add-channel-form" autocomplete="off" style="display:flex;gap:8px;margin-top:10px">
+        <input id="add-channel-input" class="form-input" placeholder="@username канала" style="flex:1">
+        <button type="submit" class="btn-primary sm">Добавить</button>
+      </form>
+      <div id="add-channel-msg" style="font-size:var(--text-caption);margin-top:6px"></div>
+    </div>
+
     <div id="account-admin" class="hidden">
       <div class="chart-head" style="border-top:1px solid var(--color-powder-blue);padding-top:12px"><span class="chart-title" style="font-size:var(--text-body)">Пользователи</span><span style="font-size:var(--text-caption);color:var(--color-ghost-gray)">одобряй и меняй роли</span></div>
       <div id="admin-users-list" style="margin-top:8px;max-height:40vh;overflow:auto"></div>
@@ -2243,9 +2253,90 @@ function openAccountModal() {
   { const _ae = document.getElementById('account-email'); if (_ae) { _ae.textContent = u.email || 'Командный вход'; _ae.title = u.email || ''; } }
   document.getElementById('account-role').textContent = ADMIN_ROLE_L[u.role] || u.role || '—';
   document.getElementById('change-pw-form').classList.toggle('hidden', !u.email);  // break-glass: аккаунта нет
+  document.getElementById('account-channels').classList.toggle('hidden', !u.email);
+  if (u.email) renderChannelsSettings();
   m.classList.remove('hidden');
   if (u.role === 'superuser') loadAdminUsers();
 }
+
+// ── Channel settings (Sprint 1C): add channel, API keys, collector setup ──
+function isCentralChannel() {
+  const c = (state.channels || []).find(x => x.id === state.selectedChannel);
+  return !c || c.source === 'central';   // default true (central / no-DB synthetic)
+}
+
+async function renderChannelsSettings() {
+  const list = document.getElementById('channels-list');
+  if (!list) return;
+  const chans = state.channels || [];
+  if (!chans.length) { list.innerHTML = '<div style="color:var(--color-ghost-gray);font-size:var(--text-caption);padding:6px 0">Каналов пока нет — добавь свой ниже.</div>'; return; }
+  list.innerHTML = chans.map(c => {
+    const name = escapeHtml('@' + (c.username || c.title || c.id));
+    const ctrls = c.source === 'central'
+      ? '<span class="tag" style="font-size:11px">central</span>'
+      : `<button class="btn-outline sm js-key" data-cid="${c.id}">API-ключ</button> <button class="btn-outline sm js-del" data-cid="${c.id}" title="Удалить канал">✕</button>`;
+    return `<div style="border-top:1px solid var(--color-powder-blue);padding:8px 0">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><b>${name}</b><span style="display:flex;gap:6px;white-space:nowrap">${ctrls}</span></div>
+      <div class="js-keys" data-cid="${c.id}" style="margin-top:6px"></div>
+    </div>`;
+  }).join('');
+  list.querySelectorAll('.js-key').forEach(b => b.onclick = () => channelKeys(+b.dataset.cid));
+  list.querySelectorAll('.js-del').forEach(b => b.onclick = () => channelDelete(+b.dataset.cid));
+}
+
+async function channelKeys(cid) {
+  const box = document.querySelector(`.js-keys[data-cid="${cid}"]`);
+  if (!box) return;
+  box.innerHTML = 'Загрузка…';
+  try {
+    const r = await API.req('/api/channels/' + cid + '/keys');
+    const keys = (r && r.keys) || [];
+    box.innerHTML = keys.map(k =>
+      `<div style="font-size:var(--text-caption);display:flex;justify-content:space-between;gap:8px;padding:2px 0">
+        <code>${escapeHtml(k.key_prefix)}…</code>
+        <span>${k.revoked ? '<span style="color:var(--color-ghost-gray)">отозван</span>' : `<a class="js-revoke" data-kid="${k.id}" style="cursor:pointer;color:var(--color-vibrant-orange)">отозвать</a>`}</span>
+      </div>`).join('') +
+      `<button class="btn-primary sm js-newkey" style="margin-top:6px">Создать ключ</button>`;
+    box.querySelectorAll('.js-revoke').forEach(a => a.onclick = async () => { try { await API.req('/api/channels/' + cid + '/key/' + a.dataset.kid, { method: 'DELETE' }); channelKeys(cid); } catch (e) { toast(e.message, 'error'); } });
+    box.querySelector('.js-newkey').onclick = () => channelNewKey(cid);
+  } catch (e) { box.innerHTML = '<span style="color:var(--color-vibrant-orange)">' + escapeHtml(e.message) + '</span>'; }
+}
+
+async function channelNewKey(cid) {
+  const box = document.querySelector(`.js-keys[data-cid="${cid}"]`);
+  try {
+    const r = await API.req('/api/channels/' + cid + '/key', { method: 'POST', body: JSON.stringify({}) });
+    const ingestUrl = location.origin + '/api/collector/ingest';
+    box.innerHTML = `<div style="background:var(--color-porcelain);border:1px solid var(--color-powder-blue);border-radius:6px;padding:10px;font-size:var(--text-caption)">
+      <div style="color:var(--color-vibrant-orange);font-weight:600">Скопируй ключ — он показывается один раз:</div>
+      <code id="newkey-${cid}" style="word-break:break-all;display:block;margin:6px 0">${escapeHtml(r.key)}</code>
+      <button class="btn-outline sm js-copy">Копировать</button>
+      <div style="margin-top:8px;color:var(--color-ghost-gray)">Collector шлёт метрики POST'ом на <code>${escapeHtml(ingestUrl)}</code> с заголовком <code>Authorization: Bearer &lt;ключ&gt;</code>.</div>
+    </div>`;
+    box.querySelector('.js-copy').onclick = () => { const t = document.getElementById('newkey-' + cid)?.textContent || ''; if (navigator.clipboard) navigator.clipboard.writeText(t).then(() => toast('Скопировано', 'info')); };
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function channelDelete(cid) {
+  if (!window.confirm('Удалить канал и все его данные? Это необратимо.')) return;
+  try { await API.req('/api/channels/' + cid, { method: 'DELETE' }); await loadChannels(); renderChannelsSettings(); }
+  catch (e) { toast(e.message, 'error'); }
+}
+
+document.getElementById('add-channel-form')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const input = document.getElementById('add-channel-input');
+  const msg = document.getElementById('add-channel-msg');
+  const username = input.value.replace(/^@/, '').trim();
+  msg.textContent = '';
+  try {
+    await API.req('/api/channels', { method: 'POST', body: JSON.stringify({ username }) });
+    input.value = '';
+    await loadChannels();
+    renderChannelsSettings();
+    msg.style.color = 'var(--color-accent-green)'; msg.textContent = 'Канал добавлен';
+  } catch (err) { msg.style.color = 'var(--color-vibrant-orange)'; msg.textContent = err.message; }
+});
 async function loadAdminUsers() {
   try { renderAdminUsers(await API.adminUsers()); }
   catch (e) { const el = document.getElementById('admin-users-list'); if (el) el.innerHTML = `<div style="color:var(--color-ghost-gray);padding:8px">${escapeHtml(e.message)}</div>`; }
@@ -3173,7 +3264,7 @@ function renderTg() {
       <div class="stat-cell">
         <div class="label">Ср. просмотров</div>
         <div class="val">${fmt.short(avgViews)}</div>
-        <div class="sub">${postsAnalyzed ? `по ${postsAnalyzed} постам` : '—'}</div>
+        <div class="sub">${postsAnalyzed ? `по ${escapeHtml(String(postsAnalyzed))} постам` : '—'}</div>
       </div>
       <div class="stat-cell">
         <div class="label">Реакций</div>
@@ -3279,7 +3370,7 @@ function renderTg() {
             <div class="breakdown-row">
               <div class="breakdown-label">
                 <span class="breakdown-icon">${typeIcons[item.type] || '·'}</span>
-                <span>${typeNames[item.type] || item.type}</span>
+                <span>${escapeHtml(typeNames[item.type] || item.type)}</span>
               </div>
               <div class="breakdown-bar">
                 <div class="breakdown-fill" style="width: ${pct.toFixed(1)}%"></div>
@@ -3398,7 +3489,7 @@ function renderPosts() {
         : (p.likes && p.reach ? (p.likes / p.reach * 100) : null);
       const cardThumbSrc = p.thumb ? (p.source === 'TG' ? p.thumb + '?size=lg' : p.thumb) : '';
       const thumb = p.thumb
-        ? `<img class="top-post-thumb" src="${cardThumbSrc}" alt="" referrerpolicy="no-referrer">`
+        ? `<img class="top-post-thumb" src="${escapeHtml(cardThumbSrc)}" alt="" referrerpolicy="no-referrer">`
         : `<div class="top-post-thumb"></div>`;
       const sourceClass = p.source === 'TG' ? 'tg-source' : '';
       const mediaType = p.mediaType ? mediaTypeLabel(p.mediaType) : '';
@@ -3411,7 +3502,7 @@ function renderPosts() {
             ${thumb}
             <div class="top-post-rank">#${i + 1}</div>
             <div class="top-post-source ${sourceClass}">${p.source || '—'}</div>
-            ${mediaType ? `<div class="media-type-badge">${mediaType}</div>` : ''}
+            ${mediaType ? `<div class="media-type-badge">${escapeHtml(mediaType)}</div>` : ''}
           </div>
           <div class="top-post-body">
             <div class="top-post-caption">${escapeHtml(caption)}</div>
@@ -3448,7 +3539,7 @@ function renderPosts() {
   list.innerHTML = sorted.slice(0, 25).map(p => {
     const isTg = p.source === 'TG';
     const thumb = p.thumb
-      ? `<img class="post-thumb" src="${p.thumb}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+      ? `<img class="post-thumb" src="${escapeHtml(p.thumb)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
       : `<div class="post-thumb"></div>`;
     const sourceTag = `<span class="tag ${isTg ? 'green' : 'violet'}">${p.source || '—'}</span>`;
     const caption = (p.caption || 'Без подписи').slice(0, 80);
@@ -3554,11 +3645,11 @@ function breakdownRows(items) {
     return `
       <div class="breakdown-row" title="${escapeHtml(tipStr)}">
         <div class="breakdown-label">
-          ${item.icon ? `<span class="breakdown-icon">${item.icon}</span>` : ''}
+          ${item.icon ? `<span class="breakdown-icon">${escapeHtml(item.icon)}</span>` : ''}
           ${item.label ? `<span>${escapeHtml(item.label)}</span>` : ''}
         </div>
-        <div class="breakdown-bar"><div class="breakdown-fill" style="width:${pct.toFixed(1)}%${item.color ? ';background:' + item.color : ''}"></div></div>
-        <div class="breakdown-val">${item.display != null ? item.display : fmt.short(item.value)}</div>
+        <div class="breakdown-bar"><div class="breakdown-fill" style="width:${pct.toFixed(1)}%${item.color ? ';background:' + escapeHtml(String(item.color)) : ''}"></div></div>
+        <div class="breakdown-val">${item.display != null ? escapeHtml(String(item.display)) : fmt.short(item.value)}</div>
       </div>`;
   }).join('');
 }
@@ -3891,9 +3982,9 @@ function openDayModal(entry) {
   } else {
     html += dayPosts.map(p => {
       const cap = escapeHtml((p.caption || 'Без подписи').slice(0, 90));
-      const thumb = (p.source === 'TG' && p.id != null) ? `/api/tg/mtproto/thumb/${p.id}` : null;
+      const thumb = (p.source === 'TG' && p.id != null && isCentralChannel()) ? `/api/tg/mtproto/thumb/${p.id}` : (p.thumb || null);
       return `<div class="day-post" data-postid="${escapeHtml(String(p.id))}" style="display:flex;gap:12px;align-items:center;padding:8px;border-radius:4px;cursor:pointer">
-        ${thumb ? `<img src="${thumb}" loading="lazy" referrerpolicy="no-referrer" style="width:46px;height:46px;border-radius:4px;object-fit:cover;flex:0 0 auto">` : `<div style="width:46px;height:46px;border-radius:4px;background:var(--color-powder-blue);flex:0 0 auto"></div>`}
+        ${thumb ? `<img src="${escapeHtml(thumb)}" loading="lazy" referrerpolicy="no-referrer" style="width:46px;height:46px;border-radius:4px;object-fit:cover;flex:0 0 auto">` : `<div style="width:46px;height:46px;border-radius:4px;background:var(--color-powder-blue);flex:0 0 auto"></div>`}
         <div style="flex:1;min-width:0">
           <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${cap}</div>
           <div style="font-size:var(--text-caption);color:var(--color-slate-blue)">${fmt.num(p.reach)} просм · ${fmt.num(p.likes)} реакц · ${fmt.num(p.shares)} репост</div>
@@ -4076,7 +4167,7 @@ function renderTgAnalytics() {
     setTip(hoursEl, vals.length ? hourTitles : [], 'bar');
     if (hoursLabels) {
       hoursLabels.innerHTML = vals.length
-        ? (th.hours || vals.map((_, i) => i)).map((h, i) => `<span style="${i % 3 === 0 ? '' : 'visibility:hidden'}">${h}ч</span>`).join('')
+        ? (th.hours || vals.map((_, i) => i)).map((h, i) => `<span style="${i % 3 === 0 ? '' : 'visibility:hidden'}">${escapeHtml(String(h))}ч</span>`).join('')
         : '';
     }
     const pk = document.getElementById('tg-hours-peak');
@@ -4261,7 +4352,7 @@ function renderVelocity() {
   el.innerHTML = lineChartSvg(cum);
   setYAxis('tg-velocity-chart', 0, Math.max(...cum));
   setTip(el, v.by_day.map(p => `${p.day + 1}-е сутки: накоплено ${p.cum}% охвата · доля дня ${p.share}%`), 'line');
-  if (labels) labels.innerHTML = v.by_day.map(p => `<span>${p.day + 1}д</span>`).join('');
+  if (labels) labels.innerHTML = v.by_day.map(p => `<span>${Number(p.day) + 1}д</span>`).join('');
   if (note) {
     const parts = [];
     if (v.day1_share != null) parts.push(`за 1-е сутки — ${v.day1_share}%`);
@@ -4440,8 +4531,8 @@ function renderDigest() {
   if (best && best.reach) lines.push(I(`Топ-пост: «${escapeHtml((best.caption || 'без подписи').slice(0, 70))}» — <b>${fmt.short(best.reach)}</b> просмотров${best.erv != null ? `, ERV ${best.erv.toFixed(1)}%` : ''}.`));
   if (bestWd || peakHour != null) {
     const rec = [];
-    if (bestWd) rec.push(`день — <b>${bestWd}</b>`);
-    if (peakHour != null) rec.push(`час — <b>${peakHour}:00</b>`);
+    if (bestWd) rec.push(`день — <b>${escapeHtml(String(bestWd))}</b>`);
+    if (peakHour != null) rec.push(`час — <b>${escapeHtml(String(peakHour))}:00</b>`);
     lines.push(I(`Когда постить: ${rec.join(', ')}.`));
   }
 
@@ -4596,7 +4687,7 @@ async function loadAll() {
       source: 'TG',
       caption: p.text || p.caption || '',
       date: p.date,
-      thumb: (p.media_type === 'photo' || p.media_type === 'video') && p.id != null ? `/api/tg/mtproto/thumb/${p.id}` : null,
+      thumb: ((p.media_type === 'photo' || p.media_type === 'video') && p.id != null && isCentralChannel()) ? `/api/tg/mtproto/thumb/${p.id}` : (p.thumb || null),
       permalink: tgUsername && p.id ? `https://t.me/${tgUsername}/${p.id}` : null,
       mediaType: p.media_type || null,
       reach,

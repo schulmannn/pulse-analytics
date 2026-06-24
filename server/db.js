@@ -149,6 +149,30 @@ DO $$ BEGIN IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname='mentions_pkey'
   ALTER TABLE mentions DROP CONSTRAINT mentions_pkey; END IF; END $$;
 CREATE UNIQUE INDEX IF NOT EXISTS mentions_owner_src_msg_uniq ON mentions(owner_channel_id, channel_id, msg_id);
 CREATE INDEX IF NOT EXISTS mentions_owner_idx ON mentions(owner_channel_id);
+
+-- ── Collector ingest (Sprint 1C): per-channel API keys + current snapshot ──
+-- API key authenticates a collector to push its channel's data. The raw key is
+-- shown once; only sha256 is stored. key_prefix is shown in the UI to identify it.
+CREATE TABLE IF NOT EXISTS api_keys (
+  id           SERIAL PRIMARY KEY,
+  channel_id   INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+  key_hash     TEXT NOT NULL,
+  key_prefix   TEXT NOT NULL,
+  label        TEXT,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_used_at TIMESTAMPTZ,
+  revoked_at   TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX IF NOT EXISTS api_keys_hash_uniq ON api_keys(key_hash);
+CREATE INDEX IF NOT EXISTS api_keys_channel_idx ON api_keys(channel_id);
+-- Current computed dashboard state per channel (channel meta + stats + graphs +
+-- views_summary + posts), pushed by the collector. Time-series go to the
+-- per-channel tables (channel_daily / posts / velocity_daily / mentions).
+CREATE TABLE IF NOT EXISTS channel_snapshots (
+  channel_id INTEGER PRIMARY KEY REFERENCES channels(id) ON DELETE CASCADE,
+  data       JSONB NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 `;
 
 const USER_ROLES = ['user', 'superuser'];
@@ -500,6 +524,80 @@ async function useEmailToken(tokenHash, kind) {
   return rows[0] ? { uid: rows[0].uid } : null;
 }
 
+// ── Channels (collector onboarding) + API keys + snapshot — Sprint 1C ──
+async function createChannel({ owner_uid, username, title }) {
+  if (!enabled || owner_uid == null) return null;
+  const uname = String(username || '').replace(/^@/, '').trim();
+  const { rows } = await pool.query(
+    `INSERT INTO channels (owner_uid, username, title, status, source)
+     VALUES ($1,$2,$3,'active','collector') RETURNING ${CHANNEL_COLS}`,
+    [owner_uid, uname || null, title || uname || null]);
+  return rows[0] || null;
+}
+
+// Delete a channel the user owns (cascades data/keys/snapshot). Never the central one.
+async function deleteChannel(id, uid) {
+  if (!enabled || !id || uid == null) return false;
+  const { rowCount } = await pool.query(
+    "DELETE FROM channels WHERE id=$1 AND owner_uid=$2 AND source<>'central'", [id, uid]);
+  return rowCount > 0;
+}
+
+async function createApiKey(channelId, keyHash, keyPrefix, label) {
+  if (!enabled || !channelId) return null;
+  const { rows } = await pool.query(
+    `INSERT INTO api_keys (channel_id, key_hash, key_prefix, label) VALUES ($1,$2,$3,$4)
+     RETURNING id, key_prefix, label, to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SS') AS created_at`,
+    [channelId, keyHash, keyPrefix, label || null]);
+  return rows[0] || null;
+}
+
+// Authenticate a collector by API-key hash → the channel row (active key only).
+// Atomically touches last_used_at. Returns the channel or null.
+async function getChannelByApiKey(keyHash) {
+  if (!enabled) return null;
+  const { rows } = await pool.query(
+    'UPDATE api_keys SET last_used_at=now() WHERE key_hash=$1 AND revoked_at IS NULL RETURNING channel_id', [keyHash]);
+  return rows[0] ? getChannelById(rows[0].channel_id) : null;
+}
+
+// Keys of a channel the user owns (ownership enforced via the join).
+async function listApiKeys(channelId, uid) {
+  if (!enabled || !channelId || uid == null) return [];
+  const { rows } = await pool.query(
+    `SELECT k.id, k.key_prefix, k.label,
+            to_char(k.created_at,'YYYY-MM-DD"T"HH24:MI:SS') AS created_at,
+            to_char(k.last_used_at,'YYYY-MM-DD"T"HH24:MI:SS') AS last_used_at,
+            (k.revoked_at IS NOT NULL) AS revoked
+       FROM api_keys k JOIN channels c ON c.id=k.channel_id
+      WHERE k.channel_id=$1 AND c.owner_uid=$2 ORDER BY k.created_at DESC`, [channelId, uid]);
+  return rows;
+}
+
+async function revokeApiKey(keyId, uid) {
+  if (!enabled || !keyId || uid == null) return false;
+  const { rowCount } = await pool.query(
+    `UPDATE api_keys k SET revoked_at=now() FROM channels c
+      WHERE k.id=$1 AND k.channel_id=c.id AND c.owner_uid=$2 AND k.revoked_at IS NULL`, [keyId, uid]);
+  return rowCount > 0;
+}
+
+async function saveSnapshot(channelId, data) {
+  if (!enabled || !channelId || !data) return false;
+  await pool.query(
+    `INSERT INTO channel_snapshots (channel_id, data, updated_at) VALUES ($1,$2,now())
+     ON CONFLICT (channel_id) DO UPDATE SET data=EXCLUDED.data, updated_at=now()`, [channelId, data]);
+  return true;
+}
+
+async function getSnapshot(channelId) {
+  if (!enabled || !channelId) return null;
+  const { rows } = await pool.query(
+    `SELECT data, to_char(updated_at,'YYYY-MM-DD"T"HH24:MI:SS') AS updated_at
+       FROM channel_snapshots WHERE channel_id=$1`, [channelId]);
+  return rows[0] || null;   // { data, updated_at } | null
+}
+
 /* ── Персональная раскладка дашборда ─────────────────────────────
    Возвращает сохранённый объект prefs (или null, если ничего нет /
    нет БД / гость без аккаунта). Запись — upsert по uid. */
@@ -621,6 +719,8 @@ module.exports = {
   setUserStatus, createEmailToken, useEmailToken,
   getPrefs, setPrefs,
   adoptOwnerChannel, listChannels, getChannel, getChannelById, getOwnerChannelId, setChannelTgId,
+  createChannel, deleteChannel, createApiKey, getChannelByApiKey, listApiKeys, revokeApiKey,
+  saveSnapshot, getSnapshot,
   saveVelocity, getLatestVelocity,
   upsertChannelDaily, upsertPosts, upsertMentions,
   getChannelHistory, getMentionsHistory, getMentionsArchive,
