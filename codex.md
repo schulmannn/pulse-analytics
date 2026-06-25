@@ -447,3 +447,67 @@ dist/assets/index-uAolFtU8.js  380.76 kB │ gzip: 109.29 kB
 реально re-window'ится по полному архиву (`rows.slice(-days)` + LTTB, дефолт 90). Чистый `npm ci`
 зелёный (vitest-3 сохранён — деплой не регрессирует), build + 18 тестов passed. **Отличная работа.**
 Дизайн-полиш affordance/модалки — на мне (при общем проходе).
+
+---
+
+### 🟢 TASK-007 — Tenant в React Query keys (+ отмена in-flight при свитче)
+
+**Зачем.** Ключи каналозависимых запросов (`['tg-full', days]`, `['tg-stats']`, `['tg-graphs']`,
+`['velocity']`, `['mentions']`, `['history-channel', days]`, `['post-stats', id]`) НЕ содержат
+channelId. Канал — глобальная переменная (`lib/channel.ts`) + `invalidateQueries()` при свитче.
+Риск (когда появится 2-й канал): медленный запрос канала A приходит после переключения на B и
+пишется в общий ключ → данные A показываются как B; кэши каналов смешаны. Сейчас 1 канал —
+эффекта нет, но фикс нужен ДО реального мультиканала.
+
+**Что сделать:**
+1. Сделать выбранный канал РЕАКТИВНЫМ через React-контекст (по образцу `PeriodProvider` в
+   `lib/period.tsx`): `ChannelProvider` + `useSelectedChannel()` → `{ channelId: number | null,
+   setChannelId }`. Провайдер обернуть вокруг `<App/>` в `main.tsx`.
+   - `lib/channel.ts` (синхронный модульный стор, который читают `apiGet`/`apiSend` для заголовка
+     `X-Channel-Id`) ОСТАВИТЬ. `setChannelId` обязан **синхронно** обновлять И модульный стор
+     (`setSelectedChannel(id)`), И React-стейт — чтобы к моменту запуска queryFn заголовок уже был
+     = новый канал.
+   - Инициализация channelId — из поля `selected` ответа `/api/channels` (как сейчас в `ChannelSwitcher`).
+2. Каналозависимые хуки в `queries.ts` читают `useSelectedChannel().channelId` ВНУТРИ и кладут его
+   в queryKey ПЕРВЫМ полем: `['tg-full', channelId, days]`, `['tg-stats', channelId]`,
+   `['tg-graphs', channelId]`, `['velocity', channelId]`, `['mentions', channelId]`,
+   `['history-channel', channelId, days]`, `['post-stats', channelId, id]`.
+   **Сигнатуры хуков для панелей НЕ меняй** (channelId берётся из контекста внутри хука) — панели
+   не трогаем. НЕ-каналозависимые (`me`, `channels`, `admin-users`, `bugs`, `channel-keys`) — без
+   изменений.
+3. `ChannelSwitcher` (`DashboardLayout`) перевести на `useSelectedChannel()` (вместо локального
+   useState + прямого `setSelectedChannel`). При смене: `setChannelId(id)` + опц.
+   `queryClient.cancelQueries()` (отменить in-flight). Прежний безусловный `invalidateQueries()`
+   при свитче убрать — смена channelId в ключах сама вызовет фетч нового канала, а данные прошлого
+   останутся в своём кэш-слоте (быстрый возврат).
+4. Поведение для 1 канала — не меняется.
+
+**Критерии приёмки:** `npm run build` + `npm test` зелёные; каналозависимые queryKey содержат
+channelId; запрос, стартовавший для канала A, при resolve пишется в ключ A (не в B); `X-Channel-Id`
+в заголовке соответствует каналу на момент запроса; для 1 канала поведение прежнее.
+
+#### Отчёт Codex
+_(пусто — заполнит Codex)_
+
+---
+
+### 🟢 TASK-008 — Dev-логирование дрейфа Zod-схем
+
+**Зачем.** Схемы намеренно пермиссивные (`optional/nullable/passthrough`) — но при дрейфе API
+парс может «тихо» пройти/упасть, и панель пустеет без явной диагностики. Нужна видимость в DEV.
+
+**Что сделать (только `src/api/client.ts`, минимально):**
+- В `apiGet` и `apiSend` заменить `schema.parse(data)` на `schema.safeParse(data)`:
+  - при `!success`: в DEV (`import.meta.env.DEV`) → `console.warn('[api-drift]', method ?? 'GET',
+    path, result.error.issues)` (видно путь поля + причину), затем бросить как сейчас (поведение
+    не меняется — ошибка всплывает как `isError`; можно бросить `result.error`);
+  - при `success` → вернуть `result.data`.
+- В prod лишнего лога нет, поведение идентично текущему.
+
+**Не делать:** не менять сами схемы; не глушить ошибки (всё ещё throw); без новых зависимостей.
+
+**Критерии приёмки:** `npm run build` + `npm test` зелёные; при намеренно битом ответе в DEV в
+консоли виден `[api-drift]` с путём поля; в остальном `apiGet`/`apiSend` ведут себя как прежде.
+
+#### Отчёт Codex
+_(пусто — заполнит Codex)_
