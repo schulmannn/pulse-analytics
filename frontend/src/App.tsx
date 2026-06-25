@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react';
+import { Routes, Route } from 'react-router-dom';
 import { useMe } from '@/api/queries';
 import { ApiError } from '@/api/client';
+import { DashboardLayout } from '@/components/DashboardLayout';
 import { Hero } from '@/panels/Hero';
 import { KpiGrid } from '@/panels/KpiGrid';
 import { Charts } from '@/panels/Charts';
@@ -11,18 +13,14 @@ export default function App() {
   const me = useMe();
 
   if (me.isLoading) {
-    return (
-      <Shell>
-        <p className="text-sm text-muted-foreground">Загрузка…</p>
-      </Shell>
-    );
+    return <Centered><p className="text-sm text-muted-foreground">Загрузка…</p></Centered>;
   }
 
   if (me.isError) {
     const unauthorized = me.error instanceof ApiError && me.error.status === 401;
     return (
-      <Shell>
-        <div className="rounded-lg border bg-card p-6">
+      <Centered>
+        <div className="max-w-sm rounded-lg border bg-card p-6 text-center">
           <h2 className="text-lg font-semibold">{unauthorized ? 'Нужен вход' : 'Не удалось загрузить'}</h2>
           <p className="mt-2 text-sm text-muted-foreground">
             {unauthorized
@@ -35,35 +33,37 @@ export default function App() {
             ← На главный дашборд
           </a>
         </div>
-      </Shell>
+      </Centered>
     );
   }
 
   return (
-    <Shell>
-      <Hero />
-      <KpiGrid />
-      <Charts />
-      <Posts />
-      <Mentions />
-    </Shell>
+    <Routes>
+      <Route element={<DashboardLayout email={me.data?.email} role={me.data?.role} />}>
+        <Route index element={<Overview />} />
+        <Route path="charts" element={<Charts />} />
+        <Route path="posts" element={<Posts />} />
+        <Route path="mentions" element={<Mentions />} />
+        <Route path="*" element={<Overview />} />
+      </Route>
+    </Routes>
   );
 }
 
-function Shell({ children }: { children: ReactNode }) {
+/** Landing tab — greeting + KPI cards. */
+function Overview() {
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <header className="border-b bg-card">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <span className="text-sm font-semibold tracking-tight">
-            Pulse <span className="text-primary">/app</span>
-          </span>
-          <span className="rounded-full border px-2.5 py-1 text-xs text-muted-foreground">
-            3F · новый стек
-          </span>
-        </div>
-      </header>
-      <main className="mx-auto max-w-6xl space-y-8 px-6 py-8">{children}</main>
+    <div className="space-y-8">
+      <Hero />
+      <KpiGrid />
+    </div>
+  );
+}
+
+function Centered({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background p-6 text-foreground">
+      {children}
     </div>
   );
 }
