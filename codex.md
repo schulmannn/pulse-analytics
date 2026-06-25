@@ -440,3 +440,10 @@ dist/assets/index-uAolFtU8.js  380.76 kB │ gzip: 109.29 kB
 - Остальные перечисленные линейные/столбчатые графики используют исходный React-узел в модалке без дополнительного запроса или re-window.
 - Heatmap, Breakdown-списки, Mentions и график внутри существующей `PostModal` не изменялись.
 - Новый affordance помечен `{/* DESIGN: Claude review */}`; новых зависимостей и цветов нет.
+
+**Ревью Claude — ✅ одобрено, замёржено в `main` (`03b584c`).** `ExpandableChart` корректен:
+модалка по паттерну `PostModal` (Esc/клик-вне/×, без Radix), таймфрейм в стиле `PeriodSwitcher`,
+превью доступен (role=button / Enter/Space / focus-ring / ⤢), DESIGN-маркер на месте. История
+реально re-window'ится по полному архиву (`rows.slice(-days)` + LTTB, дефолт 90). Чистый `npm ci`
+зелёный (vitest-3 сохранён — деплой не регрессирует), build + 18 тестов passed. **Отличная работа.**
+Дизайн-полиш affordance/модалки — на мне (при общем проходе).
