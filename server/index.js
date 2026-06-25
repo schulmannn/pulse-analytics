@@ -999,23 +999,6 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// TEMP — REMOVE after setting trust proxy. Unauthenticated proxy diagnostic to
-// determine Railway's real proxy depth so `trust proxy` can be configured without
-// guessing. Returns ONLY the caller's own request forwarding metadata (no secrets);
-// obscure path; deleted once the proxy chain is known.
-app.get('/api/__pxdiag_7f3a9c2e', (req, res) => {
-  res.set('Cache-Control', 'no-store').json({
-    trust_proxy: req.app.get('trust proxy'),
-    req_ip: req.ip,
-    req_ips: req.ips,
-    x_forwarded_for: req.headers['x-forwarded-for'] || null,
-    x_real_ip: req.headers['x-real-ip'] || null,
-    forwarded: req.headers['forwarded'] || null,
-    socket_remote: (req.socket && req.socket.remoteAddress) || null,
-    protocol: req.protocol,
-  });
-});
-
 app.get('/api/ready', async (req, res) => {
   if (!dbReady) return res.status(503).json({ status: 'starting', request_id: req.requestId });
   try {
