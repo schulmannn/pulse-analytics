@@ -643,7 +643,7 @@
     pointer-events: none;
     border-radius: 50%;
   }
-  .hero-content { position: relative; z-index: 1; max-width: 760px; }
+  .hero-content { position: relative; z-index: 1; max-width: 1100px; }
   .hero-eyebrow {
     font-size: var(--text-caption);
     color: var(--accent-text);
@@ -656,7 +656,6 @@
     font-size: 36px;
     font-weight: 300;
     line-height: 1.1;
-    white-space: nowrap;
     letter-spacing: -0.024em;
     margin-bottom: 8px;
     background: var(--gradient-sunburst);
@@ -1313,7 +1312,7 @@
     .nav { flex-wrap: wrap; }
     .header-right { margin-left: 0; flex-wrap: wrap; gap: 8px; }
     .main { padding: 16px; }
-    .hero-title { font-size: var(--text-h); white-space: normal; }
+    .hero-title { font-size: var(--text-h); }
     .kpi-grid { grid-template-columns: repeat(2, 1fr); }
     #tg-channel-stats { grid-template-columns: repeat(2, 1fr) !important; }
     #freshness { display: none; }
@@ -2576,6 +2575,14 @@ function clearCustomPeriod() {
   const cb = document.getElementById('period-custom-btn');
   if (cb) { cb.classList.remove('active'); cb.title = 'Свой диапазон дат'; }
 }
+// Coalesce rapid timeframe clicks into a single refetch — each loadAll() fires ~9
+// API calls, so un-debounced clicking 24ч/7д/30д/90д quickly burns the /api rate
+// limit and the sources go "недоступны".
+let _periodReloadTimer = null;
+function reloadForPeriod() {
+  clearTimeout(_periodReloadTimer);
+  _periodReloadTimer = setTimeout(() => loadAll(), 300);
+}
 document.getElementById('period-tabs').addEventListener('click', (e) => {
   const btn = e.target.closest('button');
   if (!btn) return;
@@ -2583,7 +2590,7 @@ document.getElementById('period-tabs').addEventListener('click', (e) => {
   btn.classList.add('active');
   clearCustomPeriod();
   currentPeriod = parseInt(btn.dataset.period, 10);
-  loadAll();
+  reloadForPeriod();
 });
 
 /* ── Custom date range (inline calendar with range selection) ───── */
