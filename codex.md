@@ -511,6 +511,16 @@ Test Files  4 passed (4)
 - Сброс channelId при logout предотвращает наследование tenant-контекста другим пользователем в той же вкладке.
 - Для одного канала выбор по-прежнему инициализируется из `selected` ответа `/api/channels`.
 
+**Ревью Claude — ✅ одобрено, замёржено в `main`.** `ChannelProvider`/`useSelectedChannel`
+корректны: `setChannelId` синхронно обновляет модульный store (`setSelectedChannel`) ДО React-стейта,
+поэтому к запуску queryFn заголовок `X-Channel-Id` уже = новый канал. channelId стоит ПЕРВЫМ полем
+во всех channel-dependent ключах (`tg-full/tg-stats/tg-graphs/velocity/mentions/history-channel/
+post-stats`); неканальные (`me/channels/admin/bugs/keys`) не тронуты. Свитч → `cancelQueries()`
+(без глобального invalidate — данные канала остаются в своём слоте), logout сбрасывает channelId
+(нет утечки tenant между юзерами в одной вкладке). `ChannelProvider` обёрнут вокруг `<App/>` внутри
+`QueryClientProvider`. Прогнал сам: build 123 modules + 18 тестов зелёные. Для 1 канала поведение
+прежнее. **Отличная работа.**
+
 ---
 
 ### ✅ TASK-008 — Dev-логирование дрейфа Zod-схем
@@ -552,3 +562,10 @@ Test Files  4 passed (4)
 - Для `apiGet` в лог передаётся `GET`, для `apiSend` — фактический method.
 - В production предупреждение отсутствует; успешные ответы возвращают `result.data`, неуспешные по-прежнему приводят к throw/isError.
 - Схемы и зависимости не изменялись.
+
+**Ревью Claude — ✅ одобрено, замёржено в `main`.** `parseResponse(method, path, schema, data)`
+через `safeParse`: в DEV (`import.meta.env.DEV`) → `console.warn('[api-drift]', method, path,
+issues)` с путём поля, затем throw исходного Zod-error (поведение `isError` не изменилось); в prod
+лог отсутствует, успех возвращает `result.data`. `apiGet` логирует `GET`, `apiSend` — фактический
+метод. `vite-env.d.ts` добавил `vite/client` для типизации `import.meta.env`. Схемы/зависимости не
+тронуты, build + тесты зелёные. **Отличная работа.**
