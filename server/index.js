@@ -83,8 +83,11 @@ function sendApp(req, res) {
      .set('Content-Type', 'text/html; charset=utf-8')
      .send(html);
 }
-app.get(['/', '/index.html'], sendApp);
-app.use(express.static(path.join(__dirname, '../public'), { index: false }));
+// 3F-3 catover: '/' now serves the new Vite/React SPA (wired in the tail below). The
+// legacy nonce-shell is reachable at /legacy as a reversible escape hatch until B2
+// cleanup. Only its /js asset is still served from public/ (public/index.html is no
+// longer routed — the SPA fallback owns '/').
+app.use('/js', express.static(path.join(__dirname, '../public/js')));
 
 // General read limiter for the authed dashboard (~9 reads per refresh). Keyed PER
 // USER, not per IP: behind Railway's proxy `trust proxy: 1` can resolve req.ip to a
@@ -289,7 +292,7 @@ app.post('/api/auth/register', authLimiter, async (req, res) => {
     const u = await db.createUser({ email, pass_hash: hashPassword(password), role: 'user', status: 'unverified' });
     const raw = newToken();
     const id = await db.createEmailToken(u.id, 'verify', sha256(raw), new Date(Date.now() + VERIFY_TTL));
-    if (id) await sendEmail(email, 'Подтверди email — Pulse Analytics', verifyEmailHtml(`${base}/api/auth/verify?token=${raw}`));
+    if (id) await sendEmail(email, 'Подтверди email — Pulse Analytics', verifyEmailHtml(`${base}/verify?token=${raw}`));
   } catch (e) {
     if (e.code !== '23505') console.error('[register]', e.message);   // already responded generically
   }
@@ -381,7 +384,7 @@ app.post('/api/auth/forgot', authLimiter, async (req, res) => {
     if (u && u.status !== 'disabled') {
       const raw = newToken();
       const id = await db.createEmailToken(u.id, 'reset', sha256(raw), new Date(Date.now() + RESET_TTL));
-      if (id) await sendEmail(email, 'Сброс пароля — Pulse Analytics', resetEmailHtml(`${base}/?reset=${raw}`));
+      if (id) await sendEmail(email, 'Сброс пароля — Pulse Analytics', resetEmailHtml(`${base}/reset?token=${raw}`));
     }
   } catch (e) { console.error('[forgot]', e.message); }   // already responded generically
 });
@@ -415,7 +418,7 @@ app.post('/api/auth/resend-verification', authLimiter, async (req, res) => {
     if (u && u.status === 'unverified') {
       const raw = newToken();
       const id = await db.createEmailToken(u.id, 'verify', sha256(raw), new Date(Date.now() + VERIFY_TTL));
-      if (id) await sendEmail(email, 'Подтверди email — Pulse Analytics', verifyEmailHtml(`${base}/api/auth/verify?token=${raw}`));
+      if (id) await sendEmail(email, 'Подтверди email — Pulse Analytics', verifyEmailHtml(`${base}/verify?token=${raw}`));
     }
   } catch (e) { console.error('[resend]', e.message); }
 });
@@ -1234,11 +1237,11 @@ app.get('/api/bug-attachment/:id', requireAuth, requireSuper, async (req, res) =
   } catch (e) { res.status(500).end(); }
 });
 
-// ── Sprint 3F (strangler-fig): new Vite/React SPA served under /app ───────────────
-// Coexists with the legacy dashboard at '/'. The dist/ bundle is produced by the
-// Dockerfile.web build stage. Stricter CSP than the legacy shell: the new app has NO
-// inline scripts (JSX auto-escapes), so script-src is plain 'self' — no nonce. The
-// legacy '/' keeps its per-request nonce-CSP via sendApp until 3F-3 catover.
+// ── Sprint 3F-3 catover: new Vite/React SPA is the primary dashboard, served at '/' ──
+// The dist/ bundle is produced by the Dockerfile.web build stage. CSP is stricter than
+// the legacy shell: the new app has NO inline scripts (JSX auto-escapes), so script-src
+// is plain 'self' — no nonce. The legacy nonce-shell stays at /legacy as a reversible
+// escape hatch until the B2 cleanup (then this becomes the only HTML surface).
 const APP_DIST = path.join(__dirname, '../frontend/dist');
 const appCspHeader = [
   "default-src 'self'",
@@ -1256,14 +1259,24 @@ function setAppHeaders(res) {
      .set('X-Content-Type-Options', 'nosniff')
      .set('Referrer-Policy', 'no-referrer');
 }
-app.use('/app', (req, res, next) => { setAppHeaders(res); next(); },
+// Hashed SPA assets at root (/assets/*). Security headers set per response.
+app.use((req, res, next) => { setAppHeaders(res); next(); },
   express.static(APP_DIST, { index: false }));
-app.get(['/app', '/app/*'], (req, res) => {            // SPA fallback for client routes
+
+// Pre-catover bookmarks under /app → root equivalent (302; temporary during catover).
+app.get(['/app', '/app/*'], (req, res) => {
+  const target = req.originalUrl.replace(/^\/app(?=[/?]|$)/, '') || '/';
+  res.redirect(302, target.startsWith('/') ? target : '/' + target);
+});
+
+// Legacy nonce-shell — reversible escape hatch, removed in 3F-3 B2 cleanup.
+app.get('/legacy', sendApp);
+
+// SPA fallback: every other (non-/api, non-asset) GET serves the new app shell.
+app.get('*', (req, res) => {
   setAppHeaders(res);
   res.sendFile(path.join(APP_DIST, 'index.html'), (err) => { if (err) res.status(404).end(); });
 });
-
-app.get('*', sendApp);
 
 // ── Запуск ──────────────────────────────────────────────────────
 app.listen(PORT, () => {

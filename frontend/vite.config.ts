@@ -2,10 +2,11 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { fileURLToPath, URL } from 'node:url';
 
-// The new app is served by Express under /app (strangler-fig migration), so `base`
-// must match that mount path — built asset URLs resolve to /app/assets/*.
+// 3F-3 catover: the new app is now the primary dashboard served at '/', so `base` is
+// root — built asset URLs resolve to /assets/*. (Was '/app/' during the strangler-fig
+// phase.) The legacy shell stays reachable at /legacy until the B2 cleanup.
 export default defineConfig({
-  base: '/app/',
+  base: '/',
   plugins: [react()],
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
