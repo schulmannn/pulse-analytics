@@ -8,7 +8,8 @@
 
 ## Архитектура
 
-**Прод (Railway): два независимых сервиса**, связанные приватной сетью —
+**Прод (Railway): два независимых сервиса**, связанные приватной сетью, плюс
+локальный collector для пользовательских каналов:
 веб может рестартовать/скейлиться/деплоиться отдельно от тяжёлого MTProto-клиента,
 а падение Python не утаскивает дашборд и не мешает логам.
 
@@ -16,13 +17,16 @@
 pulse-analytics/
 ├── server/index.js     ← Node/Express: дашборд + API на публичном $PORT,
 │                          проксирует /api/tg/mtproto/* в MTProto-сервис
-├── public/index.html   ← фронтенд (vanilla JS, inline-SVG графики, без CDN)
+├── server/migrations/  ← версионированные SQL-миграции
+├── public/             ← vanilla JS + inline-SVG графики
 ├── mtproto/
 │   ├── service.py       ← Python/FastAPI + Telethon (MTProto), слушает :8001
 │   └── requirements.txt
+├── collector/
+│   └── pulse_collector.py ← локальный агент: queue/retry/doctor
 ├── Dockerfile.web       ← образ WEB-сервиса (только Node)        ← публичный
 ├── Dockerfile.mtproto   ← образ MTProto-сервиса (только Python)  ← приватный
-├── Dockerfile           ← LEGACY: оба процесса в одном образе (локалка/миграция)
+├── Dockerfile.collector ← опциональный локальный образ collector
 └── package.json
 ```
 
@@ -31,20 +35,23 @@ pulse-analytics/
                    │  MTPROTO_URL=http://mtproto.railway.internal:8001
                    ▼
               MTPROTO (Python/Telethon, :8001, приватный, без домена) ──► Telegram
+
+[collector пользователя] ──► POST /api/collector/ingest ──► Postgres
+       │
+       └── TG_SESSION остаётся локально и никогда не отправляется в SaaS
 ```
 
 Web ходит к Python по `MTPROTO_URL`; аутентификация межсервисная — заголовок
 `x-internal-token: TEAM_PASSWORD` (общий секрет на обоих сервисах).
 
-Для **локальной разработки** удобнее legacy-режим (оба процесса разом) — см.
-«Запуск локально». Корневой `Dockerfile` оставлен ради него и zero-downtime
-миграции; после катовера его можно удалить.
-
 ## Переменные окружения
 
 | Переменная | Назначение |
 |---|---|
-| `TEAM_PASSWORD` | пароль для входа команды (он же секрет подписи stateless-токенов) |
+| `TEAM_PASSWORD` | break-glass пароль команды и межсервисный MTProto-секрет |
+| `SESSION_SECRET` | отдельный секрет подписи web-сессий; обязателен в проде |
+| `DATABASE_URL` | Postgres; `npm start` применяет SQL-миграции перед запуском web |
+| `COLLECTOR_STALE_HOURS` | через сколько часов без ingest показать предупреждение (по умолчанию `24`) |
 | `TG_API_ID` / `TG_API_HASH` | приложение Telegram с my.telegram.org (та же пара, которой создавалась сессия) |
 | `TG_SESSION` | **StringSession** твоего аккаунта (см. ниже) |
 | `TG_CHANNEL` | канал, напр. `@bynotem` |
@@ -74,7 +81,41 @@ npm install
 pip install -r mtproto/requirements.txt
 # выставь переменные окружения (например через .env + dotenv)
 python3 mtproto/service.py &     # MTProto на :8001
-npm start                        # сайт на http://localhost:3000
+npm start                        # миграции, затем сайт на http://localhost:3000
+```
+
+## Пользовательский collector
+
+Collector запускается на машине пользователя, использует его `TG_SESSION`
+локально и отправляет только готовые метрики. Создай канал и API-ключ в кабинете,
+затем выставь:
+
+```env
+PULSE_API_URL=https://pulse-analytics-production-daf3.up.railway.app
+PULSE_API_KEY=pa_...
+TG_API_ID=123456
+TG_API_HASH=...
+TG_SESSION=...
+TG_CHANNEL=@your_channel
+```
+
+Проверка и запуск:
+
+```bash
+python collector/pulse_collector.py doctor
+python collector/pulse_collector.py once
+python collector/pulse_collector.py run
+```
+
+Неотправленные payload сохраняются в локальной SQLite-очереди и повторяются с
+exponential backoff. Повтор безопасен: сервер дедуплицирует запросы по
+`(channel_id, ingest_id)`. Docker-вариант:
+
+```bash
+docker build -f Dockerfile.collector -t pulse-collector .
+docker run --env-file .env -v pulse-collector-data:/data pulse-collector doctor
+docker run -d --restart unless-stopped --env-file .env \
+  -v pulse-collector-data:/data pulse-collector run
 ```
 
 ## Деплой на Railway — два сервиса (рекомендуется)
@@ -100,23 +141,9 @@ npm start                        # сайт на http://localhost:3000
   **`MTPROTO_URL=http://<имя-mtproto-сервиса>.railway.internal:8001`**.
 - **Networking:** публичный домен → target port **8080**.
 
-**Порядок катовера (zero-downtime):** mtproto подняли и проверили → затем
-переключили web на `Dockerfile.web` + добавили `MTPROTO_URL` → проверили дашборд →
-старый одно-контейнерный сервис вывели из-под домена и удалили.
-
-**Откат:** вернуть web на корневой `Dockerfile` (legacy, оба процесса в одном
-образе) и убрать `MTPROTO_URL` — сайт снова самодостаточен.
-
 > Ingest-крон (`.github/workflows/ingest.yml`) бьёт в публичный web
 > `/api/ingest/daily`, поэтому при сплите его менять не нужно — web сам ходит в
 > mtproto по приватной сети.
-
-### Legacy: один сервис (один контейнер)
-
-Корневой `Dockerfile` собирает оба процесса в один образ
-(`python3 mtproto/service.py & exec node server/index.js`). Для него: Root
-Directory пусто, `MTPROTO_URL` не задавать (дефолт `http://localhost:8001`),
-`PORT=8080`, домен на 8080. Подходит для быстрого старта и локалки.
 
 ## ⚠️ Важно: версия Telethon
 
@@ -130,19 +157,28 @@ Directory пусто, `MTPROTO_URL` не задавать (дефолт `http://
 
 | Метод | URL | Описание |
 |---|---|---|
-| `POST` | `/api/auth/login` | вход (пароль → stateless-токен на 8 ч) |
+| `POST` | `/api/auth/login` | вход (подписанная сессия на 8 ч с server-side отзывом) |
 | `GET` | `/api/auth/check` | проверка сессии |
+| `GET` | `/api/collector/compatibility` | версия ingest-контракта и лимиты |
+| `POST` | `/api/collector/ingest` | транзакционный, идемпотентный приём collector payload |
+| `GET` | `/api/channels/:id/collector-status` | последний успешный ingest/ошибка |
 | `GET` | `/api/tg/channel` | инфо о канале (bot API → фолбэк на MTProto) |
 | `GET` | `/api/tg/full?limit=N` | агрегат: канал + views_summary + посты |
 | `GET` | `/api/tg/mtproto/stats` | GetBroadcastStats (скаляры) |
 | `GET` | `/api/tg/mtproto/graphs` | нормализованные графики статистики |
 | `GET` | `/api/tg/mtproto/thumb/:id` | превью медиа поста (image/jpeg) |
-| `GET` | `/api/health` | статус |
+| `GET` | `/api/health` | liveness web-процесса |
+| `GET` | `/api/ready` | readiness с проверкой Postgres |
 
 ## Безопасность
 
 - Токены/сессия — только в переменных окружения, не в коде.
-- Авторизация: stateless HMAC-токен (подписан `TEAM_PASSWORD`), переживает рестарт.
+- Авторизация: HMAC-токен, подписанный `SESSION_SECRET`; `token_version` позволяет
+  отозвать все сессии при logout, смене пароля, роли или статуса.
+- API-ключи collector хранятся только как SHA-256; сырой ключ показывается один раз.
+- Collector payload проходит строгую нормализацию чисел/строк и версионируется.
+- Ingest пишет receipt, snapshot и архивы одной транзакцией.
+- Security-события пишутся в `audit_events` без секретов и сырых IP.
 - Rate limiting на `/api/`, кэш ответов ~10 минут.
 - `/api/tg/mtproto/thumb/:id` — открытый роут (img-теги не шлют заголовки), отдаёт
   только превью постов настроенного (публичного) канала.

@@ -7,12 +7,12 @@ FROM node:20-slim
 ENV NODE_ENV=production
 WORKDIR /app
 
-# Node-зависимости (lock-файла нет → обычный install)
-COPY package.json ./
-RUN npm install --omit=dev
+# Reproducible production dependencies.
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
 
 # Только то, что нужно вебу (mtproto/ — отдельный сервис, сюда не копируем)
 COPY server ./server
 COPY public ./public
 
-CMD ["node", "server/index.js"]
+CMD ["npm", "start"]

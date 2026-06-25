@@ -2113,6 +2113,7 @@
   </div>
 </div>
 
+<script src="/js/collector-settings.js"></script>
 <script>
 /* ================================================================
    APP — vanilla JS
@@ -2490,78 +2491,15 @@ function isCentralChannel() {
   return !c || c.source === 'central';   // default true (central / no-DB synthetic)
 }
 
-async function renderChannelsSettings() {
-  const list = document.getElementById('channels-list');
-  if (!list) return;
-  const chans = state.channels || [];
-  if (!chans.length) { list.innerHTML = '<div style="color:var(--color-ghost-gray);font-size:var(--text-caption);padding:6px 0">Каналов пока нет — добавь свой ниже.</div>'; return; }
-  list.innerHTML = chans.map(c => {
-    const name = escapeHtml('@' + (c.username || c.title || c.id));
-    const ctrls = c.source === 'central'
-      ? '<span class="tag" style="font-size:11px">central</span>'
-      : `<button class="btn-outline sm js-key" data-cid="${c.id}">API-ключ</button> <button class="btn-outline sm js-del" data-cid="${c.id}" title="Удалить канал">✕</button>`;
-    return `<div style="border-top:1px solid var(--color-powder-blue);padding:8px 0">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><b>${name}</b><span style="display:flex;gap:6px;white-space:nowrap">${ctrls}</span></div>
-      <div class="js-keys" data-cid="${c.id}" style="margin-top:6px"></div>
-    </div>`;
-  }).join('');
-  list.querySelectorAll('.js-key').forEach(b => b.onclick = () => channelKeys(+b.dataset.cid));
-  list.querySelectorAll('.js-del').forEach(b => b.onclick = () => channelDelete(+b.dataset.cid));
-}
-
-async function channelKeys(cid) {
-  const box = document.querySelector(`.js-keys[data-cid="${cid}"]`);
-  if (!box) return;
-  box.innerHTML = 'Загрузка…';
-  try {
-    const r = await API.req('/api/channels/' + cid + '/keys');
-    const keys = (r && r.keys) || [];
-    box.innerHTML = keys.map(k =>
-      `<div style="font-size:var(--text-caption);display:flex;justify-content:space-between;gap:8px;padding:2px 0">
-        <code>${escapeHtml(k.key_prefix)}…</code>
-        <span>${k.revoked ? '<span style="color:var(--color-ghost-gray)">отозван</span>' : `<a class="js-revoke" data-kid="${k.id}" style="cursor:pointer;color:var(--color-vibrant-orange)">отозвать</a>`}</span>
-      </div>`).join('') +
-      `<button class="btn-primary sm js-newkey" style="margin-top:6px">Создать ключ</button>`;
-    box.querySelectorAll('.js-revoke').forEach(a => a.onclick = async () => { try { await API.req('/api/channels/' + cid + '/key/' + a.dataset.kid, { method: 'DELETE' }); channelKeys(cid); } catch (e) { toast(e.message, 'error'); } });
-    box.querySelector('.js-newkey').onclick = () => channelNewKey(cid);
-  } catch (e) { box.innerHTML = '<span style="color:var(--color-vibrant-orange)">' + escapeHtml(e.message) + '</span>'; }
-}
-
-async function channelNewKey(cid) {
-  const box = document.querySelector(`.js-keys[data-cid="${cid}"]`);
-  try {
-    const r = await API.req('/api/channels/' + cid + '/key', { method: 'POST', body: JSON.stringify({}) });
-    const ingestUrl = location.origin + '/api/collector/ingest';
-    box.innerHTML = `<div style="background:var(--color-porcelain);border:1px solid var(--color-powder-blue);border-radius:6px;padding:10px;font-size:var(--text-caption)">
-      <div style="color:var(--color-vibrant-orange);font-weight:600">Скопируй ключ — он показывается один раз:</div>
-      <code id="newkey-${cid}" style="word-break:break-all;display:block;margin:6px 0">${escapeHtml(r.key)}</code>
-      <button class="btn-outline sm js-copy">Копировать</button>
-      <div style="margin-top:8px;color:var(--color-ghost-gray)">Collector шлёт метрики POST'ом на <code>${escapeHtml(ingestUrl)}</code> с заголовком <code>Authorization: Bearer &lt;ключ&gt;</code>.</div>
-    </div>`;
-    box.querySelector('.js-copy').onclick = () => { const t = document.getElementById('newkey-' + cid)?.textContent || ''; if (navigator.clipboard) navigator.clipboard.writeText(t).then(() => toast('Скопировано', 'info')); };
-  } catch (e) { toast(e.message, 'error'); }
-}
-
-async function channelDelete(cid) {
-  if (!window.confirm('Удалить канал и все его данные? Это необратимо.')) return;
-  try { await API.req('/api/channels/' + cid, { method: 'DELETE' }); await loadChannels(); renderChannelsSettings(); }
-  catch (e) { toast(e.message, 'error'); }
-}
-
-document.getElementById('add-channel-form')?.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const input = document.getElementById('add-channel-input');
-  const msg = document.getElementById('add-channel-msg');
-  const username = input.value.replace(/^@/, '').trim();
-  msg.textContent = '';
-  try {
-    await API.req('/api/channels', { method: 'POST', body: JSON.stringify({ username }) });
-    input.value = '';
-    await loadChannels();
-    renderChannelsSettings();
-    msg.style.color = 'var(--color-accent-green)'; msg.textContent = 'Канал добавлен';
-  } catch (err) { msg.style.color = 'var(--color-vibrant-orange)'; msg.textContent = err.message; }
+const collectorSettings = window.createCollectorSettings({
+  API,
+  getChannels: () => state.channels,
+  escapeHtml,
+  toast,
+  reloadChannels: loadChannels,
 });
+const renderChannelsSettings = () => collectorSettings.render();
+collectorSettings.bindAddForm();
 async function loadAdminUsers() {
   try { renderAdminUsers(await API.adminUsers()); }
   catch (e) { const el = document.getElementById('admin-users-list'); if (el) el.innerHTML = `<div style="color:var(--color-ghost-gray);padding:8px">${escapeHtml(e.message)}</div>`; }

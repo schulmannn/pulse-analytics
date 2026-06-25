@@ -9,7 +9,8 @@
 **Архитектура (после рефакторинга 2026-06-23/24):** ДВА Railway-сервиса в одном репо —
 - **`pulse-analytics`** (web): Node/Express `server/index.js` + Postgres `server/db.js` + фронт `public/index.html`. Образ `Dockerfile.web`. Публичный.
 - **`pulse-mtproto`** (приватный): Python/Telethon `mtproto/service.py` :8001. Образ `Dockerfile.mtproto`. Web ходит к нему через `MTPROTO_URL` по приватной сети.
-- **Postgres** подключён. Корневой `Dockerfile` (legacy одно-контейнерный) оставлен для локалки/отката.
+- **Postgres** подключён. Схема развивается через `server/migrations/*.sql`;
+  web-образ применяет миграции перед запуском приложения.
 
 **Модель данных — МУЛЬТИТЕНАНТ (tenant = канал):** таблица `channels` (owner_uid → users), данные per-channel (`channel_daily`/`posts`/`velocity_daily`/`mentions` с channel_id; `channel_snapshots` JSONB). Канал `source='central'` = владелец @bynotem (live через pulse-mtproto + крон); `source='collector'` = чужие каналы (данные шлёт collector в Postgres). Аккаунты: `users` (email+scrypt), self-serve регистрация с email-верификацией.
 
@@ -32,11 +33,14 @@
 - **1B — self-serve auth** (PR #22): регистрация → email-верификация → active (Resend, без новых зависимостей); сброс пароля + resend; single-use sha256-токены. 10+5 security-находок пофикшено.
 - **1C — collector ingest** (PR #23): per-channel API-ключи (генерация/revoke в ЛК) + `POST /api/collector/ingest` + `channel_snapshots`; non-central дашборды читают из Postgres. 11+4 находки пофикшены.
 
-## ⏭️ БЛИЖАЙШИЕ ШАГИ (старт нового чата)
+## ⏭️ БЛИЖАЙШИЕ ШАГИ
 
 1. **Конфиг Railway, чтобы включить self-serve (1B) — ДЕЙСТВИЕ ЮЗЕРА:** на web-сервисе `pulse-analytics` задать `RESEND_API_KEY` (создать на resend.com), `EMAIL_FROM` (верифиц. домен Resend; для теста `onboarding@resend.dev` шлёт только себе), `APP_URL=https://pulse-analytics-production-daf3.up.railway.app`. Без них владелец работает (break-glass `TEAM_PASSWORD` / bootstrap admin), но письма не шлются. *(1C ключи/ingest работают сразу, доп. env не нужен.)*
-2. **1D — collector-агент** (последняя часть Variant A, P0/L): локальный артефакт, который юзер запускает у себя. Считает метрики своей сессией Telethon (переиспользовать `mtproto/service.py` + паттерн `notem-mention-monitor`) и POST'ит готовый JSON на `/api/collector/ingest` с `Authorization: Bearer <ключ>`. Контракт payload уже задокументирован в ingest-роуте (`{channel, stats, graphs, views_summary, posts, velocity, mentions}`). Форм-фактор выбрать: GH Actions шаблон (zero local infra) / Docker / desktop.
-3. **Хардненинг-хвост (по желанию, P2):** strict nonce-CSP + server-side numeric coercion снапшота (закрыть self-XSS класс до любой shared-view фичи); healthcheck `/health` на pulse-mtproto (авто-рестарт); убрать стрэй `pip install` build-command на web; удалить корневой legacy `Dockerfile`.
+2. **Смержить и задеплоить hardening/1D PR:** локальный Python/Docker collector,
+   SQLite queue + retry/backoff + doctor, schema-versioned/idempotent ingest,
+   транзакционные bulk-upsert, SQL-миграции, versioned sessions, audit/readiness.
+3. **Провести пилот collector:** подключить тестовый non-central канал, проверить
+   повторную доставку, отзыв ключа и алерт по устаревшему `last_success_at`.
 4. **Параллельно (research, без кода):** #21 ресёрч конкурентов (кормит цену) — перед Sprint 2.
 
 ---
@@ -56,13 +60,13 @@
 | 12 | Футер (ссылки, копирайт). | P2 | S |
 | 15 | *Решение:* пай-чарты — использовать минимально (плохо сравнивать >3 категорий; наши breakdown-бары лучше). Только там, где 2–3 доли. | dec | S |
 
-### Sprint 1 — Фундамент SaaS №1: мультитенантность + collector (ГЛАВНЫЙ enabler) — ПОЧТИ ВЕСЬ ✅
+### Sprint 1 — Фундамент SaaS №1: мультитенантность + collector (ГЛАВНЫЙ enabler)
 | # | Задача | Статус |
 |---|---|---|
 | 1A | Переархитектура модели данных под мультитенант (per-channel) + изоляция + switcher | ✅ PR #21 |
 | 1B (#8) | Регистрация/авторизация: email + верификация + сброс (self-serve, Resend) | ✅ PR #22 |
 | 1C | Per-channel API-ключи + `POST /api/collector/ingest` + snapshot-дашборды | ✅ PR #23 |
-| **1D** | **Collector-агент (Variant A)** — локальный артефакт у юзера. **ЕДИНСТВЕННОЕ, ЧТО ОСТАЛОСЬ В Sprint 1.** | ⏳ next, P0/L |
+| **1D** | **Collector-агент (Variant A)** — Python CLI + Docker, локальная очередь/retry/doctor | 🛠 реализовано, PR pending |
 | 10 | *Ответ:* Railway тянет; узкое место — MTProto-доступ, решён collector'ом. | dec ✅ |
 
 ### Sprint 2 — Фундамент SaaS №2: монетизация + онбординг + go-live
@@ -117,4 +121,7 @@
 - **#22 Claude-интеграция?** Классный дифференциатор (MCP), но отложить до стабильного ядра.
 
 ## Рекомендуемый порядок
-Sprint 0 ✅ → split рантаймов ✅ → Sprint 1: 1A ✅ / 1B ✅ / 1C ✅ → **сейчас: 1D collector-агент** (+ конфиг Resend env) → research-трек (#21/#23) + решения по ребренду/цене → Sprint 2 (оплата+лендинг+.com) → Sprint 3 (UX) → Sprint 4 (коллаб по багам) → Sprint 5 (рост/advanced).
+Sprint 0 ✅ → split рантаймов ✅ → Sprint 1: 1A ✅ / 1B ✅ / 1C ✅ /
+1D 🛠 → **сейчас: merge/deploy + pilot collector + Resend env** → research-трек
+(#21/#23) + решения по ребренду/цене → Sprint 2 (оплата+лендинг+.com) →
+Sprint 3 (UX) → Sprint 4 (коллаб по багам) → Sprint 5 (рост/advanced).

@@ -6,6 +6,7 @@
 
 let Pool = null;
 try { ({ Pool } = require('pg')); } catch (_e) { /* pg не установлен — БД выключена */ }
+const { runMigrations } = require('./migrations');
 
 const DATABASE_URL = process.env.DATABASE_URL || '';
 const enabled = !!(DATABASE_URL && Pool);
@@ -25,7 +26,8 @@ if (enabled) {
   pool.on('error', (e) => console.error('[db] pool error:', e.message));
 }
 
-const SCHEMA = `
+/* Historical inline schema retained as a comment for one release only.
+   Source of truth is server/migrations/*.sql; startup never executes this block.
 CREATE TABLE IF NOT EXISTS channel_daily (
   day DATE PRIMARY KEY,
   subscribers INTEGER, joins INTEGER, leaves INTEGER,
@@ -173,7 +175,7 @@ CREATE TABLE IF NOT EXISTS channel_snapshots (
   data       JSONB NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-`;
+*/
 
 const USER_ROLES = ['user', 'superuser'];
 const USER_STATUSES = ['unverified', 'pending', 'active', 'disabled'];
@@ -183,9 +185,25 @@ const BUG_KINDS = ['bug', 'feature', 'change'];
 
 async function init() {
   if (!enabled) { console.log('[db] disabled (no DATABASE_URL) — history off'); return; }
-  await pool.query(SCHEMA);
+  await pool.query('SELECT 1 FROM channels LIMIT 1');
   await migrateOwnerChannel();
-  console.log('[db] schema ready');
+  console.log('[db] connection ready');
+}
+
+async function migrate() {
+  if (!enabled) return [];
+  return runMigrations(pool);
+}
+
+async function ping() {
+  if (!enabled) return { enabled: false, ok: true };
+  const started = Date.now();
+  await pool.query('SELECT 1');
+  return { enabled: true, ok: true, latency_ms: Date.now() - started };
+}
+
+async function close() {
+  if (pool) await pool.end();
 }
 
 // ── Channels (tenants) ───────────────────────────────────────────
@@ -276,9 +294,9 @@ async function getOwnerChannelId() {
   return rows[0] ? rows[0].id : null;
 }
 
-async function setChannelTgId(id, tgId) {
+async function setChannelTgId(id, tgId, executor = pool) {
   if (!enabled || !id || tgId == null) return false;
-  await pool.query(`UPDATE channels SET tg_channel_id=$2 WHERE id=$1 AND tg_channel_id IS NULL`, [id, tgId]);
+  await executor.query(`UPDATE channels SET tg_channel_id=$2 WHERE id=$1 AND tg_channel_id IS NULL`, [id, tgId]);
   return true;
 }
 
@@ -316,10 +334,15 @@ function graphsToDailyRows(graphs) {
   return Object.values(map);
 }
 
-async function upsertChannelDaily(channelId, rows) {
+async function upsertChannelDaily(channelId, rows, executor = pool) {
   if (!enabled || !channelId || !rows || !rows.length) return 0;
-  const sql = `INSERT INTO channel_daily (channel_id, day, subscribers, joins, leaves, views, forwards, reactions, captured_at)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now())
+  const sql = `INSERT INTO channel_daily
+      (channel_id, day, subscribers, joins, leaves, views, forwards, reactions, captured_at)
+    SELECT $1, x.day::date, x.subscribers, x.joins, x.leaves, x.views, x.forwards, x.reactions, now()
+      FROM jsonb_to_recordset($2::jsonb) AS x(
+        day text, subscribers integer, joins integer, leaves integer,
+        views integer, forwards integer, reactions integer
+      )
     ON CONFLICT (channel_id, day) DO UPDATE SET
       subscribers=COALESCE(EXCLUDED.subscribers, channel_daily.subscribers),
       joins=COALESCE(EXCLUDED.joins, channel_daily.joins),
@@ -328,54 +351,49 @@ async function upsertChannelDaily(channelId, rows) {
       forwards=COALESCE(EXCLUDED.forwards, channel_daily.forwards),
       reactions=COALESCE(EXCLUDED.reactions, channel_daily.reactions),
       captured_at=now()`;
-  const client = await pool.connect();
-  try {
-    for (const r of rows) {
-      await client.query(sql, [channelId, r.day, r.subscribers ?? null, r.joins ?? null, r.leaves ?? null,
-        r.views ?? null, r.forwards ?? null, r.reactions ?? null]);
-    }
-  } finally { client.release(); }
+  await executor.query(sql, [channelId, JSON.stringify(rows)]);
   return rows.length;
 }
 
-async function upsertPosts(channelId, rows) {
+async function upsertPosts(channelId, rows, executor = pool) {
   if (!enabled || !channelId || !rows || !rows.length) return 0;
-  const sql = `INSERT INTO posts (channel_id, post_id, date_published, views, reactions, forwards, replies, erv, virality, media_type, caption, hashtags, updated_at)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, now())
+  const sql = `INSERT INTO posts
+      (channel_id, post_id, date_published, views, reactions, forwards, replies,
+       erv, virality, media_type, caption, hashtags, updated_at)
+    SELECT $1, x.post_id, x.date_published, x.views, x.reactions, x.forwards, x.replies,
+           x.erv, x.virality, x.media_type, x.caption, x.hashtags, now()
+      FROM jsonb_to_recordset($2::jsonb) AS x(
+        post_id bigint, date_published timestamptz, views integer, reactions integer,
+        forwards integer, replies integer, erv numeric, virality numeric,
+        media_type text, caption text, hashtags jsonb
+      )
     ON CONFLICT (channel_id, post_id) DO UPDATE SET
       date_published=COALESCE(EXCLUDED.date_published, posts.date_published),
       views=EXCLUDED.views, reactions=EXCLUDED.reactions, forwards=EXCLUDED.forwards, replies=EXCLUDED.replies,
       erv=EXCLUDED.erv, virality=EXCLUDED.virality, media_type=EXCLUDED.media_type,
       caption=EXCLUDED.caption, hashtags=EXCLUDED.hashtags, updated_at=now()`;
-  const client = await pool.connect();
-  try {
-    for (const r of rows) {
-      await client.query(sql, [channelId, r.post_id, r.date_published || null, r.views ?? null, r.reactions ?? null,
-        r.forwards ?? null, r.replies ?? null, r.erv ?? null, r.virality ?? null,
-        r.media_type || null, r.caption || null, JSON.stringify(r.hashtags || [])]);
-    }
-  } finally { client.release(); }
+  await executor.query(sql, [channelId, JSON.stringify(rows)]);
   return rows.length;
 }
 
-async function upsertMentions(channelId, list) {
+async function upsertMentions(channelId, list, executor = pool) {
   if (!enabled || !channelId || !list || !list.length) return 0;
-  const sql = `INSERT INTO mentions (owner_channel_id, channel_id, msg_id, post_date, first_seen, last_seen, title, username, link, snippet, views, query)
-    VALUES ($1,$2,$3,$4, now(), now(), $5,$6,$7,$8,$9,$10)
+  const clean = list.filter(m => m.channel_id != null && m.msg_id != null);
+  if (!clean.length) return 0;
+  const sql = `INSERT INTO mentions
+      (owner_channel_id, channel_id, msg_id, post_date, first_seen, last_seen,
+       title, username, link, snippet, views, query)
+    SELECT $1, x.channel_id, x.msg_id, x.date, now(), now(),
+           x.title, x.username, x.link, x.snippet, x.views, x.query
+      FROM jsonb_to_recordset($2::jsonb) AS x(
+        channel_id bigint, msg_id bigint, date timestamptz, title text, username text,
+        link text, snippet text, views integer, query text
+      )
     ON CONFLICT (owner_channel_id, channel_id, msg_id) DO UPDATE SET
       last_seen=now(), views=EXCLUDED.views, title=EXCLUDED.title, username=EXCLUDED.username,
       link=EXCLUDED.link, snippet=EXCLUDED.snippet, query=EXCLUDED.query`;
-  const client = await pool.connect();
-  let n = 0;
-  try {
-    for (const m of list) {
-      if (m.channel_id == null || m.msg_id == null) continue;
-      await client.query(sql, [channelId, m.channel_id, m.msg_id, m.date || null, m.title || null, m.username || null,
-        m.link || null, m.snippet || null, m.views ?? null, m.query || null]);
-      n++;
-    }
-  } finally { client.release(); }
-  return n;
+  await executor.query(sql, [channelId, JSON.stringify(clean)]);
+  return clean.length;
 }
 
 async function getChannelHistory(channelId, days = 400) {
@@ -441,7 +459,8 @@ async function createUser({ email, pass_hash, role, status }) {
   const s = USER_STATUSES.includes(status) ? status : 'pending';
   const { rows } = await pool.query(
     `INSERT INTO users (email, pass_hash, role, status) VALUES ($1,$2,$3,$4)
-     RETURNING id, email, role, status, to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SS') AS created_at`,
+     RETURNING id, email, role, status, token_version,
+       to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SS') AS created_at`,
     [String(email).toLowerCase().trim(), pass_hash, r, s]);
   return rows[0];
 }
@@ -449,14 +468,15 @@ async function createUser({ email, pass_hash, role, status }) {
 async function getUserByEmail(email) {
   if (!enabled) return null;
   const { rows } = await pool.query(
-    'SELECT id, email, pass_hash, role, status FROM users WHERE email=$1',
+    'SELECT id, email, pass_hash, role, status, token_version FROM users WHERE email=$1',
     [String(email).toLowerCase().trim()]);
   return rows[0] || null;
 }
 
 async function getUserById(id) {
   if (!enabled) return null;
-  const { rows } = await pool.query('SELECT id, email, role, status FROM users WHERE id=$1', [id]);
+  const { rows } = await pool.query(
+    'SELECT id, email, role, status, token_version FROM users WHERE id=$1', [id]);
   return rows[0] || null;
 }
 
@@ -477,22 +497,32 @@ async function updateUser(id, { role, status }) {
   if (!sets.length) return getUserById(id);
   vals.push(id);
   const { rows } = await pool.query(
-    `UPDATE users SET ${sets.join(', ')} WHERE id=$${i}
+    `UPDATE users SET ${sets.join(', ')}, token_version=token_version+1 WHERE id=$${i}
      RETURNING id, email, role, status, to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SS') AS created_at`, vals);
   return rows[0] || null;
 }
 
 async function setUserPassword(id, pass_hash) {
   if (!enabled) return false;
-  await pool.query('UPDATE users SET pass_hash=$2 WHERE id=$1', [id, pass_hash]);
+  await pool.query(
+    'UPDATE users SET pass_hash=$2, token_version=token_version+1 WHERE id=$1',
+    [id, pass_hash]);
   return true;
+}
+
+async function revokeUserSessions(id) {
+  if (!enabled || id == null) return false;
+  const { rowCount } = await pool.query(
+    'UPDATE users SET token_version=token_version+1 WHERE id=$1', [id]);
+  return rowCount > 0;
 }
 
 async function setUserStatus(id, status) {
   if (!enabled) return null;
   if (!USER_STATUSES.includes(status)) throw new Error('bad status');
   const { rows } = await pool.query(
-    'UPDATE users SET status=$2 WHERE id=$1 RETURNING id, email, role, status', [id, status]);
+    `UPDATE users SET status=$2, token_version=token_version+1
+      WHERE id=$1 RETURNING id, email, role, status, token_version`, [id, status]);
   return rows[0] || null;
 }
 
@@ -582,9 +612,9 @@ async function revokeApiKey(keyId, uid) {
   return rowCount > 0;
 }
 
-async function saveSnapshot(channelId, data) {
+async function saveSnapshot(channelId, data, executor = pool) {
   if (!enabled || !channelId || !data) return false;
-  await pool.query(
+  await executor.query(
     `INSERT INTO channel_snapshots (channel_id, data, updated_at) VALUES ($1,$2,now())
      ON CONFLICT (channel_id) DO UPDATE SET data=EXCLUDED.data, updated_at=now()`, [channelId, data]);
   return true;
@@ -596,6 +626,136 @@ async function getSnapshot(channelId) {
     `SELECT data, to_char(updated_at,'YYYY-MM-DD"T"HH24:MI:SS') AS updated_at
        FROM channel_snapshots WHERE channel_id=$1`, [channelId]);
   return rows[0] || null;   // { data, updated_at } | null
+}
+
+/* Atomically accept a collector delivery. The receipt, current snapshot and all
+   normalized archives commit together, so the dashboard never observes a new
+   snapshot with only half of its history written. */
+async function ingestCollectorPayload(channelId, meta, data) {
+  if (!enabled || !channelId) throw new Error('database unavailable');
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const inserted = await client.query(
+      `INSERT INTO ingest_receipts
+        (channel_id, ingest_id, schema_version, collector_version, collected_at, payload_hash)
+       VALUES ($1,$2,$3,$4,$5,$6)
+       ON CONFLICT (channel_id, ingest_id) DO NOTHING
+       RETURNING status, result, payload_hash`,
+      [channelId, meta.ingest_id, meta.schema_version, meta.collector_version,
+        meta.collected_at, meta.payload_hash]);
+
+    if (!inserted.rows.length) {
+      const prior = await client.query(
+        `SELECT status, result, payload_hash FROM ingest_receipts
+          WHERE channel_id=$1 AND ingest_id=$2 FOR UPDATE`,
+        [channelId, meta.ingest_id]);
+      const receipt = prior.rows[0];
+      if (!receipt || receipt.payload_hash !== meta.payload_hash) {
+        const error = new Error('ingest_id already used with a different payload');
+        error.code = 'INGEST_ID_CONFLICT';
+        throw error;
+      }
+      if (receipt.status === 'completed') {
+        await client.query('COMMIT');
+        return { ...(receipt.result || {}), duplicate: true };
+      }
+      await client.query(
+        `UPDATE ingest_receipts
+            SET status='processing', error=NULL, received_at=now()
+          WHERE channel_id=$1 AND ingest_id=$2`,
+        [channelId, meta.ingest_id]);
+    }
+
+    await saveSnapshot(channelId, data.snapshot, client);
+    const nDaily = await upsertChannelDaily(channelId, data.dailyRows, client);
+    const nPosts = await upsertPosts(channelId, data.postRows, client);
+    const nMentions = await upsertMentions(channelId, data.mentions, client);
+    let velocityOk = false;
+    if (data.velocity && data.velocity.available) {
+      await saveVelocity(channelId, data.velocity, client);
+      velocityOk = true;
+    }
+    if (data.tgChannelId != null) await setChannelTgId(channelId, data.tgChannelId, client);
+
+    const result = {
+      ok: true,
+      channel_id: channelId,
+      ingest_id: meta.ingest_id,
+      schema_version: meta.schema_version,
+      snapshot: true,
+      channel_daily: nDaily,
+      posts: nPosts,
+      velocity: velocityOk,
+      mentions: nMentions,
+    };
+    await client.query(
+      `UPDATE ingest_receipts
+          SET status='completed', completed_at=now(), result=$3, error=NULL
+        WHERE channel_id=$1 AND ingest_id=$2`,
+      [channelId, meta.ingest_id, result]);
+    await client.query(
+      `INSERT INTO collector_status
+        (channel_id, collector_version, last_ingest_id, last_attempt_at, last_success_at, last_error)
+       VALUES ($1,$2,$3,now(),now(),NULL)
+       ON CONFLICT (channel_id) DO UPDATE SET
+         collector_version=EXCLUDED.collector_version,
+         last_ingest_id=EXCLUDED.last_ingest_id,
+         last_attempt_at=now(), last_success_at=now(), last_error=NULL, updated_at=now()`,
+      [channelId, meta.collector_version, meta.ingest_id]);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    if (error.code !== 'INGEST_ID_CONFLICT') {
+      const message = String(error.message || error).slice(0, 1000);
+      await pool.query(
+        `INSERT INTO ingest_receipts
+          (channel_id, ingest_id, schema_version, collector_version, collected_at,
+           payload_hash, status, completed_at, error)
+         VALUES ($1,$2,$3,$4,$5,$6,'failed',now(),$7)
+         ON CONFLICT (channel_id, ingest_id) DO UPDATE SET
+           status='failed', completed_at=now(), error=EXCLUDED.error
+         WHERE ingest_receipts.status <> 'completed'`,
+        [channelId, meta.ingest_id, meta.schema_version, meta.collector_version,
+          meta.collected_at, meta.payload_hash, message]).catch(() => {});
+      await pool.query(
+        `INSERT INTO collector_status
+          (channel_id, collector_version, last_ingest_id, last_attempt_at, last_error)
+         VALUES ($1,$2,$3,now(),$4)
+         ON CONFLICT (channel_id) DO UPDATE SET
+           collector_version=EXCLUDED.collector_version,
+           last_ingest_id=EXCLUDED.last_ingest_id,
+           last_attempt_at=now(), last_error=EXCLUDED.last_error, updated_at=now()`,
+        [channelId, meta.collector_version, meta.ingest_id, message]).catch(() => {});
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function getCollectorStatus(channelId, user) {
+  if (!enabled || !channelId || !user || user.uid == null) return null;
+  const { rows } = await pool.query(
+    `SELECT s.collector_version, s.last_ingest_id,
+            to_char(s.last_attempt_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS last_attempt_at,
+            to_char(s.last_success_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS last_success_at,
+            s.last_error
+       FROM collector_status s
+       JOIN channels c ON c.id=s.channel_id
+      WHERE s.channel_id=$1 AND c.owner_uid=$2`,
+    [channelId, user.uid]);
+  return rows[0] || null;
+}
+
+async function recordAuditEvent({ uid = null, channel_id = null, action, request_id = null, ip_hash = null, metadata = {} }) {
+  if (!enabled || !action) return false;
+  await pool.query(
+    `INSERT INTO audit_events (uid, channel_id, action, request_id, ip_hash, metadata)
+     VALUES ($1,$2,$3,$4,$5,$6)`,
+    [uid, channel_id, String(action).slice(0, 100), request_id, ip_hash, metadata]);
+  return true;
 }
 
 /* ── Персональная раскладка дашборда ─────────────────────────────
@@ -621,9 +781,9 @@ async function setPrefs(uid, prefs) {
    Сохраняем готовый объект /velocity целиком (форма не меняется), upsert по
    текущему дню. Чтение — самый свежий день. Пустые/недоступные снимки не
    пишем (guard в вызывающем коде), чтобы не затирать хороший снапшот. */
-async function saveVelocity(channelId, data) {
+async function saveVelocity(channelId, data, executor = pool) {
   if (!enabled || !channelId || !data) return false;
-  await pool.query(
+  await executor.query(
     `INSERT INTO velocity_daily (channel_id, day, data, computed_at) VALUES ($1, CURRENT_DATE, $2, now())
      ON CONFLICT (channel_id, day) DO UPDATE SET data = EXCLUDED.data, computed_at = now()`,
     [channelId, data]);
@@ -713,14 +873,14 @@ async function getAttachment(id) {
 }
 
 module.exports = {
-  enabled, init, graphsToDailyRows,
+  enabled, init, migrate, ping, close, graphsToDailyRows,
   USER_ROLES, USER_STATUSES,
   countUsers, createUser, getUserByEmail, getUserById, listUsers, updateUser, setUserPassword,
-  setUserStatus, createEmailToken, useEmailToken,
+  revokeUserSessions, setUserStatus, createEmailToken, useEmailToken,
   getPrefs, setPrefs,
   adoptOwnerChannel, listChannels, getChannel, getChannelById, getOwnerChannelId, setChannelTgId,
   createChannel, deleteChannel, createApiKey, getChannelByApiKey, listApiKeys, revokeApiKey,
-  saveSnapshot, getSnapshot,
+  saveSnapshot, getSnapshot, ingestCollectorPayload, getCollectorStatus, recordAuditEvent,
   saveVelocity, getLatestVelocity,
   upsertChannelDaily, upsertPosts, upsertMentions,
   getChannelHistory, getMentionsHistory, getMentionsArchive,
