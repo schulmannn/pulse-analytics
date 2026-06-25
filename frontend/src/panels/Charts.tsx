@@ -3,12 +3,46 @@ import { lttbDownsample } from '@/lib/downsample';
 import { LineChart } from '@/components/LineChart';
 import { fmt } from '@/lib/format';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { ExpandableChart } from '@/components/ExpandableChart';
 import { inRangeByDays, usePeriod } from '@/lib/period';
 
 interface HeatmapCell {
   n: number;
   ervSum: number;
   reachSum: number;
+}
+
+interface SubscriberRow {
+  day: string;
+  subscribers?: number | null;
+}
+
+function ddmm(dayStr: string) {
+  const parts = dayStr.split('-');
+  if (parts.length !== 3) return dayStr;
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const monthLabel = months[Number(parts[1]) - 1] ?? '';
+  return `${Number(parts[2])} ${monthLabel}`;
+}
+
+function SubscriberHistoryChart({ rows }: { rows: SubscriberRow[] }) {
+  const sampled = lttbDownsample(rows, 140, (row) => Number(row.subscribers));
+  const values = sampled.map((row) => Number(row.subscribers));
+  const titles = sampled.map((row) => `${ddmm(row.day)}: ${fmt.num(row.subscribers)} подписчиков`);
+  const firstRow = sampled[0];
+  const midRow = sampled[Math.floor(sampled.length / 2)];
+  const lastRow = sampled[sampled.length - 1];
+  const labels = [firstRow?.day ?? '', midRow?.day ?? '', lastRow?.day ?? ''].map(ddmm);
+
+  return (
+    <LineChart
+      values={values}
+      yMin={Math.min(...values)}
+      yMax={Math.max(...values)}
+      titles={titles}
+      labels={labels}
+    />
+  );
 }
 
 export function Charts() {
@@ -39,30 +73,6 @@ function HistoryChartBlock() {
   const rows = rawRows.filter((r) => r.subscribers != null);
   if (rows.length < 2) return null;
 
-  const sampled = lttbDownsample(rows, 140, (r) => Number(r.subscribers));
-  const val = sampled.map((r) => Number(r.subscribers));
-
-  const ddmm = (dayStr: string) => {
-    const parts = dayStr.split('-');
-    if (parts.length !== 3) return dayStr;
-    const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    const mIdx = Number(parts[1]) - 1;
-    const monthLabel = MON[mIdx] ?? '';
-    return `${Number(parts[2])} ${monthLabel}`;
-  };
-
-  const titles = sampled.map((r) => `${ddmm(r.day)}: ${fmt.num(r.subscribers)} подписчиков`);
-
-  const firstRow = sampled[0];
-  const midRow = sampled[Math.floor(sampled.length / 2)];
-  const lastRow = sampled[sampled.length - 1];
-
-  const labels = [
-    firstRow ? firstRow.day : '',
-    midRow ? midRow.day : '',
-    lastRow ? lastRow.day : '',
-  ].map(ddmm);
-
   const isDownsampled = rawRows.length > 140;
   const caption = `${rawRows.length} дн в архиве${isDownsampled ? ' · сглажено' : ''}`;
 
@@ -74,13 +84,15 @@ function HistoryChartBlock() {
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <LineChart
-          values={val}
-          yMin={Math.min(...val)}
-          yMax={Math.max(...val)}
-          titles={titles}
-          labels={labels}
-        />
+        <ExpandableChart
+          title="История подписчиков"
+          renderExpanded={(days) => {
+            const windowRows = days === 0 ? rows : rows.slice(-days);
+            return <SubscriberHistoryChart rows={windowRows} />;
+          }}
+        >
+          <SubscriberHistoryChart rows={rows} />
+        </ExpandableChart>
         <div className="mt-3 text-xs font-medium text-muted-foreground">{caption}</div>
       </CardContent>
     </Card>
@@ -257,7 +269,9 @@ function VelocityChartBlock() {
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <LineChart values={cum} yMin={0} yMax={Math.max(...cum, 1)} titles={titles} labels={labels} />
+        <ExpandableChart title="Скорость набора просмотров">
+          <LineChart values={cum} yMin={0} yMax={Math.max(...cum, 1)} titles={titles} labels={labels} />
+        </ExpandableChart>
         {captions.length > 0 && (
           <div className="mt-3 text-xs font-medium text-muted-foreground">{captions.join(' · ')}</div>
         )}

@@ -5,6 +5,7 @@ import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { Breakdown } from '@/components/Breakdown';
 import { DivergingBars } from '@/components/DivergingBars';
+import { ExpandableChart } from '@/components/ExpandableChart';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { inRangeByDays, usePeriod } from '@/lib/period';
 
@@ -248,7 +249,11 @@ export function TgAnalytics() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {last14Dates.length >= 2 && (
           <Card><CardHeader><CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Просмотры по дням</CardTitle></CardHeader>
-          <CardContent><LineChart values={vbdValues} labels={[last14Dates[0] ?? '', last14Dates[Math.floor(last14Dates.length / 2)] ?? '', last14Dates[last14Dates.length - 1] ?? '']} titles={vbdTitles} /></CardContent></Card>
+          <CardContent>
+            <ExpandableChart title="Просмотры по дням">
+              <LineChart values={vbdValues} labels={[last14Dates[0] ?? '', last14Dates[Math.floor(last14Dates.length / 2)] ?? '', last14Dates[last14Dates.length - 1] ?? '']} titles={vbdTitles} />
+            </ExpandableChart>
+          </CardContent></Card>
         )}
 
         {topEmojis.length > 0 && (
@@ -269,11 +274,13 @@ export function TgAnalytics() {
         {hasGrowth && growthGroup && growthSeries && (
           <Card><CardHeader><CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Рост подписчиков</CardTitle></CardHeader>
           <CardContent>
-            <LineChart
-              values={growthSeries.values}
-              titles={growthSeries.values.map((v, i) => `${growthGroup.x[i] ? formatMsDate(growthGroup.x[i]!) : ''}: ${fmt.num(v)} подписчиков`)}
-              labels={interLabels(growthGroup)}
-            />
+            <ExpandableChart title="Рост подписчиков">
+              <LineChart
+                values={growthSeries.values}
+                titles={growthSeries.values.map((v, i) => `${growthGroup.x[i] ? formatMsDate(growthGroup.x[i]!) : ''}: ${fmt.num(v)} подписчиков`)}
+                labels={interLabels(growthGroup)}
+              />
+            </ExpandableChart>
           </CardContent></Card>
         )}
 
@@ -282,11 +289,15 @@ export function TgAnalytics() {
           <CardContent className="space-y-4">
             <div>
               <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{viewSeries.name || 'Просмотры'}</div>
-              <LineChart values={viewSeries.values} labels={interLabels(interGroup)} />
+              <ExpandableChart title={viewSeries.name || 'Просмотры'}>
+                <LineChart values={viewSeries.values} labels={interLabels(interGroup)} />
+              </ExpandableChart>
             </div>
             <div>
               <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{shareSeries.name || 'Репосты'}</div>
-              <LineChart values={shareSeries.values} labels={interLabels(interGroup)} />
+              <ExpandableChart title={shareSeries.name || 'Репосты'}>
+                <LineChart values={shareSeries.values} labels={interLabels(interGroup)} />
+              </ExpandableChart>
             </div>
           </CardContent></Card>
         )}
@@ -311,7 +322,9 @@ export function TgAnalytics() {
         {hasHours && thData && (
           <Card><CardHeader><CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Активность по часам</CardTitle></CardHeader>
           <CardContent>
-            <BarChart values={thData.values} labels={thData.hours.map(String)} titles={thData.values.map((v, i) => `${thData.hours[i] ?? i}:00 — ${fmt.num(v)}`)} />
+            <ExpandableChart title="Активность по часам">
+              <BarChart values={thData.values} labels={thData.hours.map(String)} titles={thData.values.map((v, i) => `${thData.hours[i] ?? i}:00 — ${fmt.num(v)}`)} />
+            </ExpandableChart>
             {peakHourStr && <div className="mt-3 text-xs font-medium text-muted-foreground">{peakHourStr}</div>}
           </CardContent></Card>
         )}
@@ -319,7 +332,9 @@ export function TgAnalytics() {
         {net30Values.length > 0 && (
           <Card><CardHeader><CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Чистый прирост подписчиков (30д)</CardTitle></CardHeader>
           <CardContent>
-            <DivergingBars values={net30Values} titles={net30Titles} />
+            <ExpandableChart title="Чистый прирост подписчиков (30д)">
+              <DivergingBars values={net30Values} titles={net30Titles} />
+            </ExpandableChart>
             {netSummaryStr && <div className="mt-3 text-xs font-medium text-muted-foreground">прирост: {netSummaryStr}</div>}
           </CardContent></Card>
         )}
@@ -339,11 +354,15 @@ export function TgAnalytics() {
           <CardContent className="space-y-4">
             <div>
               <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Ср. просмотры</div>
-              <BarChart values={wdAvgValues} labels={wdLabels} titles={wdAvgValues.map((v, i) => `${wdLabels[i]}: ${fmt.num(v)} ср. просмотров`)} />
+              <ExpandableChart title="Средние просмотры по дням недели">
+                <BarChart values={wdAvgValues} labels={wdLabels} titles={wdAvgValues.map((v, i) => `${wdLabels[i]}: ${fmt.num(v)} ср. просмотров`)} />
+              </ExpandableChart>
             </div>
             <div>
               <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Количество постов</div>
-              <BarChart values={wdCountValues} labels={wdLabels} titles={wdCountValues.map((v, i) => `${wdLabels[i]}: ${fmt.num(v)} постов`)} />
+              <ExpandableChart title="Количество постов по дням недели">
+                <BarChart values={wdCountValues} labels={wdLabels} titles={wdCountValues.map((v, i) => `${wdLabels[i]}: ${fmt.num(v)} постов`)} />
+              </ExpandableChart>
             </div>
             {bestWdLabel && <div className="mt-1 text-xs font-medium text-muted-foreground">лучший день: <strong className="text-foreground">{bestWdLabel}</strong></div>}
           </CardContent></Card>
