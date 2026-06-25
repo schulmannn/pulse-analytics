@@ -8,6 +8,7 @@ import { DivergingBars } from '@/components/DivergingBars';
 import { ExpandableChart } from '@/components/ExpandableChart';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { inRangeByDays, usePeriod } from '@/lib/period';
+import { Skeleton } from '@/components/ui/skeleton';
 
 const SRC_NAMES: Record<string, string> = {
   Followers: 'Подписчики',
@@ -44,6 +45,16 @@ export function TgAnalytics() {
 
   if (isFullLoading || isStatsLoading || isGraphsLoading) {
     return <TgAnalyticsSkeletons />;
+  }
+
+  if (!full && !cs && !graphs) {
+    return (
+      <Card>
+        <CardContent className="py-8 text-center text-sm text-muted-foreground">
+          Данных аналитики пока нет.
+        </CardContent>
+      </Card>
+    );
   }
 
   const vs = full?.views_summary;
@@ -374,20 +385,21 @@ export function TgAnalytics() {
 
 function TgAnalyticsSkeletons() {
   return (
-    <div className="animate-pulse space-y-6">
+    <div className="space-y-6">
+      {/* DESIGN: Claude review */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
         {Array.from({ length: 6 }).map((_, i) => (
           <Card key={i}><CardContent className="space-y-2 p-4">
-            <div className="h-3 w-2/3 rounded bg-muted" />
-            <div className="h-6 w-1/2 rounded bg-muted" />
+            <Skeleton className="h-3 w-2/3" />
+            <Skeleton className="h-6 w-1/2" />
           </CardContent></Card>
         ))}
       </div>
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {Array.from({ length: 4 }).map((_, i) => (
           <Card key={i}><CardContent className="space-y-4 p-5">
-            <div className="h-4 w-1/4 rounded bg-muted" />
-            <div className="h-32 w-full rounded bg-muted" />
+            <Skeleton className="h-4 w-1/4" />
+            <Skeleton className="h-32 w-full" />
           </CardContent></Card>
         ))}
       </div>

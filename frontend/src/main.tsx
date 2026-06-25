@@ -5,6 +5,7 @@ import { BrowserRouter } from 'react-router-dom';
 import App from '@/App';
 import { ChannelProvider } from '@/lib/channel-context';
 import { PeriodProvider } from '@/lib/period';
+import { ThemeProvider } from '@/lib/theme';
 import '@/index.css';
 
 // Client-cache defaults: dedupe in-flight requests, serve stale-then-revalidate, and
@@ -24,11 +25,13 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <ChannelProvider>
-        <PeriodProvider>
-          <BrowserRouter basename="/">
-            <App />
-          </BrowserRouter>
-        </PeriodProvider>
+        <ThemeProvider>
+          <PeriodProvider>
+            <BrowserRouter basename="/">
+              <App />
+            </BrowserRouter>
+          </PeriodProvider>
+        </ThemeProvider>
       </ChannelProvider>
     </QueryClientProvider>
   </StrictMode>,

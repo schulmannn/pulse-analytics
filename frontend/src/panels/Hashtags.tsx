@@ -3,6 +3,7 @@ import { normalizeTgPosts } from '@/lib/posts';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Breakdown } from '@/components/Breakdown';
 import { inRangeByDays, usePeriod } from '@/lib/period';
+import { Skeleton } from '@/components/ui/skeleton';
 
 interface TagStats {
   count: number;
@@ -15,9 +16,9 @@ export function Hashtags() {
 
   if (isLoading) {
     return (
-      <Card className="animate-pulse">
-        <CardHeader><div className="h-4 w-1/4 rounded bg-muted" /></CardHeader>
-        <CardContent><div className="h-32 w-full rounded bg-muted" /></CardContent>
+      <Card>
+        <CardHeader><Skeleton className="h-4 w-1/4" /></CardHeader>
+        <CardContent><Skeleton className="h-32 w-full" /></CardContent>
       </Card>
     );
   }

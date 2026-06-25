@@ -2,6 +2,7 @@ import { useState, type FormEvent, type ChangeEvent } from 'react';
 import { useBugs, useCreateBug, useUpdateBugStatus, useDeleteBug } from '@/api/queries';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { fmt } from '@/lib/format';
+import { Skeleton } from '@/components/ui/skeleton';
 
 const KIND_LABELS: Record<string, string> = { bug: 'Баг', feature: 'Фича', change: 'Правка' };
 const SEVERITY_LABELS: Record<string, string> = { low: 'Низкая', medium: 'Средняя', high: 'Высокая' };
@@ -211,15 +212,15 @@ function BugRowCard({ bug, availableStatuses, onDelete }: BugRowCardProps) {
 
 function BugsSkeleton() {
   return (
-    <div className="animate-pulse space-y-6">
+    <div className="space-y-6">
       <div className="space-y-2">
-        <div className="h-6 w-1/4 rounded bg-muted" />
-        <div className="h-3 w-1/3 rounded bg-muted" />
+        <Skeleton className="h-6 w-1/4" />
+        <Skeleton className="h-3 w-1/3" />
       </div>
-      <Card><CardContent className="h-28 bg-muted/40" /></Card>
+      <Card><CardContent className="p-5"><Skeleton className="h-20 w-full" /></CardContent></Card>
       <div className="space-y-3">
         {Array.from({ length: 3 }).map((_, i) => (
-          <Card key={i}><CardContent className="h-24 bg-muted/40" /></Card>
+          <Card key={i}><CardContent className="space-y-3 p-4"><Skeleton className="h-4 w-3/4" /><Skeleton className="h-8 w-full" /></CardContent></Card>
         ))}
       </div>
     </div>

@@ -1,6 +1,7 @@
 import { useTgFull } from '@/api/queries';
 import { fmt } from '@/lib/format';
 import { usePeriod } from '@/lib/period';
+import { Skeleton } from '@/components/ui/skeleton';
 
 /**
  * Hero greeting — ported from legacy renderHero() (Telegram path). Reads the aggregate
@@ -8,7 +9,21 @@ import { usePeriod } from '@/lib/period';
  */
 export function Hero() {
   const { days } = usePeriod();
-  const { data } = useTgFull(days);
+  const { data, isLoading } = useTgFull(days);
+
+  if (isLoading) {
+    return (
+      <section className="space-y-2">
+        {/* DESIGN: Claude review */}
+        <Skeleton className="h-4 w-36" />
+        <Skeleton className="h-9 w-3/4 max-w-xl" />
+      </section>
+    );
+  }
+
+  if (!data) {
+    return <p className="text-sm text-muted-foreground">Данные канала пока недоступны.</p>;
+  }
   const members = data?.channel?.memberCount ?? data?.channel?.members ?? 0;
   const totalViews = data?.views_summary?.total_views ?? 0;
 

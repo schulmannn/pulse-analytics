@@ -4,6 +4,7 @@ import { LineChart } from '@/components/LineChart';
 import { fmt } from '@/lib/format';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { ExpandableChart } from '@/components/ExpandableChart';
+import { Skeleton } from '@/components/ui/skeleton';
 import { inRangeByDays, usePeriod } from '@/lib/period';
 
 interface HeatmapCell {
@@ -67,11 +68,28 @@ function HistoryChartBlock() {
   const { data, isLoading, isError } = useHistory(730);
 
   if (isLoading) return <ChartSkeleton title="История подписчиков" />;
-  if (isError || !data || !data.enabled) return null;
+  if (isError) return null;
+  if (!data || !data.enabled) {
+    return (
+      <Card>
+        <CardContent className="py-8 text-center text-sm text-muted-foreground">
+          История подписчиков пока недоступна.
+        </CardContent>
+      </Card>
+    );
+  }
 
   const rawRows = data.rows ?? [];
   const rows = rawRows.filter((r) => r.subscribers != null);
-  if (rows.length < 2) return null;
+  if (rows.length < 2) {
+    return (
+      <Card>
+        <CardContent className="py-8 text-center text-sm text-muted-foreground">
+          История подписчиков пока пуста.
+        </CardContent>
+      </Card>
+    );
+  }
 
   const isDownsampled = rawRows.length > 140;
   const caption = `${rawRows.length} дн в архиве${isDownsampled ? ' · сглажено' : ''}`;
@@ -282,15 +300,15 @@ function VelocityChartBlock() {
 
 function ChartSkeleton({ title }: { title: string }) {
   return (
-    <Card className="animate-pulse">
+    <Card>
       <CardHeader>
         <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
           {title}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
-        <div className="h-32 w-full rounded bg-muted" />
-        <div className="h-3 w-1/6 rounded bg-muted" />
+        <Skeleton className="h-32 w-full" />
+        <Skeleton className="h-3 w-1/6" />
       </CardContent>
     </Card>
   );

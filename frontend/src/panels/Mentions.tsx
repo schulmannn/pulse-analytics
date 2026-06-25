@@ -3,6 +3,7 @@ import { fmt } from '@/lib/format';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { BarChart } from '@/components/BarChart';
 import { Breakdown } from '@/components/Breakdown';
+import { Skeleton } from '@/components/ui/skeleton';
 
 export function Mentions() {
   const { data, isFetching, isError, error, refetch, isFetched } = useMentions();
@@ -247,21 +248,22 @@ export function Mentions() {
 
 function MentionsSkeletons() {
   return (
-    <div className="animate-pulse space-y-6">
+    <div className="space-y-6">
+      {/* DESIGN: Claude review */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="w-full space-y-2 sm:w-1/3">
-          <div className="h-6 w-3/4 rounded bg-muted" />
-          <div className="h-3 w-1/2 rounded bg-muted" />
+          <Skeleton className="h-6 w-3/4" />
+          <Skeleton className="h-3 w-1/2" />
         </div>
-        <div className="h-9 w-32 shrink-0 rounded bg-muted" />
+        <Skeleton className="h-9 w-32 shrink-0" />
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         {Array.from({ length: 3 }).map((_, i) => (
           <Card key={i}>
             <CardContent className="space-y-3 p-5">
-              <div className="h-3 w-1/2 rounded bg-muted" />
-              <div className="h-8 w-2/3 rounded bg-muted" />
+              <Skeleton className="h-3 w-1/2" />
+              <Skeleton className="h-8 w-2/3" />
             </CardContent>
           </Card>
         ))}
@@ -270,17 +272,17 @@ function MentionsSkeletons() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card>
           <CardContent className="space-y-4 p-5">
-            <div className="h-4 w-1/4 rounded bg-muted" />
-            <div className="h-40 w-full rounded bg-muted" />
+            <Skeleton className="h-4 w-1/4" />
+            <Skeleton className="h-40 w-full" />
           </CardContent>
         </Card>
         <Card>
           <CardContent className="space-y-4 p-5">
-            <div className="h-4 w-1/3 rounded bg-muted" />
+            <Skeleton className="h-4 w-1/3" />
             <div className="space-y-2.5">
-              <div className="h-8 w-full rounded bg-muted" />
-              <div className="h-8 w-11/12 rounded bg-muted" />
-              <div className="h-8 w-4/5 rounded bg-muted" />
+              <Skeleton className="h-8 w-full" />
+              <Skeleton className="h-8 w-11/12" />
+              <Skeleton className="h-8 w-4/5" />
             </div>
           </CardContent>
         </Card>
@@ -288,15 +290,15 @@ function MentionsSkeletons() {
 
       <Card>
         <CardContent className="space-y-4 p-5">
-          <div className="h-4 w-1/4 rounded bg-muted" />
+          <Skeleton className="h-4 w-1/4" />
           <div className="space-y-3">
             {Array.from({ length: 3 }).map((_, i) => (
               <div key={i} className="space-y-2 border-b border-border/50 py-3 last:border-0">
                 <div className="flex items-center justify-between">
-                  <div className="h-4 w-1/3 rounded bg-muted" />
-                  <div className="h-3 w-1/5 rounded bg-muted" />
+                  <Skeleton className="h-4 w-1/3" />
+                  <Skeleton className="h-3 w-1/5" />
                 </div>
-                <div className="h-3 w-3/4 rounded bg-muted" />
+                <Skeleton className="h-3 w-3/4" />
               </div>
             ))}
           </div>

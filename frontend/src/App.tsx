@@ -16,6 +16,7 @@ import { Digest } from '@/panels/Digest';
 import { Settings } from '@/panels/Settings';
 import { Admin } from '@/panels/Admin';
 import { Bugs } from '@/panels/Bugs';
+import { Skeleton } from '@/components/ui/skeleton';
 
 export default function App() {
   return (
@@ -43,7 +44,15 @@ function ProtectedLayout() {
   const me = useMe();
 
   if (me.isLoading) {
-    return <Centered><p className="text-sm text-muted-foreground">Загрузка…</p></Centered>;
+    return (
+      <Centered>
+        <div className="w-full max-w-sm space-y-3">
+          <Skeleton className="h-5 w-1/3" />
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-10 w-full" />
+        </div>
+      </Centered>
+    );
   }
 
   if (me.isError) {

@@ -584,7 +584,7 @@ issues)` с путём поля, затем throw исходного Zod-error (
 > (общие файлы). Все правила выше в силе (без `any`, без `import React`, токены не хардкод-hex,
 > не трогать `public/`/`/legacy`/CSP/`Dockerfile`, чистый `npm ci`+build зелёные).
 
-### 🟢 TASK-009 — Тёмная тема: провайдер + переключатель + персист
+### ✅ TASK-009 — Тёмная тема: провайдер + переключатель + персист
 
 **Зачем.** Токены тёмной темы уже есть (`src/index.css` блок `.dark`: фон/текст/primary/border…),
 но переключателя нет. Эталонные дашборды (Linear/Stripe/Vercel) дают свет/тьму. Нужен глобальный
@@ -615,11 +615,33 @@ issues)` с путём поля, затем throw исходного Zod-error (
 читаемы (нет «белым по белому»).
 
 #### Отчёт Codex
-_(пусто — заполнит Codex)_
+
+Изменённые файлы:
+- `frontend/src/lib/theme.tsx` — `ThemeProvider`/`useTheme`, системная тема по умолчанию, `pulse_theme` в localStorage, управление классом `.dark` на `<html>`.
+- `frontend/src/components/ThemeToggle.tsx` — минимальная кнопка солнце/луна с DESIGN-маркером.
+- `frontend/src/main.tsx` — `ThemeProvider` подключён внутри `QueryClientProvider`.
+- `frontend/src/components/DashboardLayout.tsx` — временно смонтирован `ThemeToggle`, без перевёрстки shell.
+- `codex.md` — статус задачи и отчёт.
+
+Проверка:
+```text
+✓ 127 modules transformed.
+✓ built in 7.89s
+
+Test Files  4 passed (4)
+     Tests  18 passed (18)
+  Duration  1.64s
+```
+
+Решения/сомнения:
+- Сохранённый `pulse_theme` имеет приоритет; при первом визите используется `prefers-color-scheme: dark`.
+- `setTheme` и `toggle` сразу сохраняют выбор; эффект переключает класс `.dark` на `document.documentElement`.
+- Аудит dashboard-кода не нашёл новых hex/rgb или `bg-white/text-black`; `bg-black/50` оставлен только у modal backdrop. Landing/Auth не менялись по условию.
+- Автоматическая браузерная проверка локального dashboard была ограничена политикой локальной навигации среды; проводка проверена TypeScript/build и аудитом semantic tokens.
 
 ---
 
-### 🟢 TASK-010 — Skeleton-загрузка + пустые состояния панелей
+### ✅ TASK-010 — Skeleton-загрузка + пустые состояния панелей
 
 **Зачем.** Сейчас в `isLoading`-ветках панелей просто текст «Загрузка…». Эталонные дашборды
 показывают skeleton-плейсхолдеры (форму контента), а на пустых данных — осмысленное пустое
@@ -644,7 +666,29 @@ skeleton (видно при throttling/первом запросе), при пу
 `isError` без изменений.
 
 #### Отчёт Codex
-_(пусто — заполнит Codex)_
+
+Изменённые файлы:
+- `frontend/src/components/ui/skeleton.tsx` — общий Tailwind Skeleton (`animate-pulse`, `bg-muted`, `rounded-md`).
+- `frontend/src/App.tsx` — skeleton вместо текстовой загрузки auth guard.
+- `frontend/src/panels/Hero.tsx` — добавлен отсутствовавший loading skeleton и нейтральное состояние без данных.
+- `frontend/src/panels/KpiGrid.tsx`, `Charts.tsx`, `Posts.tsx`, `Mentions.tsx`, `TgAnalytics.tsx`, `Hashtags.tsx`, `Digest.tsx` — skeleton-плейсхолдеры формы контента на общем primitive.
+- `frontend/src/panels/Admin.tsx`, `Bugs.tsx`, `Settings.tsx` — существующие дублированные pulse-блоки и текстовая загрузка ключей переведены на общий Skeleton.
+- `codex.md` — статус задачи и отчёт.
+
+Проверка:
+```text
+✓ 127 modules transformed.
+✓ built in 7.89s
+
+Test Files  4 passed (4)
+     Tests  18 passed (18)
+  Duration  1.64s
+```
+
+Решения/сомнения:
+- Error-ветки не переписывались.
+- Добавлены единообразные нейтральные empty states для Hero, истории подписчиков, TgAnalytics и Digest; существующие empty states остальных панелей сохранены.
+- Поиск по `frontend/src` подтверждает: текстовых «Загрузка…» и локальных `animate-pulse` больше нет, анимация централизована в `Skeleton`.
 
 ---
 

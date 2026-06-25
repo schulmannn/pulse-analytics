@@ -5,6 +5,7 @@ import { fmt } from '@/lib/format';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { LineChart } from '@/components/LineChart';
 import { inRangeByDays, usePeriod } from '@/lib/period';
+import { Skeleton } from '@/components/ui/skeleton';
 
 export function Posts() {
   const { days } = usePeriod();
@@ -300,9 +301,14 @@ function PostModal({ post, onClose }: PostModalProps) {
 
           <div className="border-t border-border pt-4">
             {stats.isLoading ? (
-              <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
-                <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-                <span>Загрузка детальной статистики…</span>
+              <div className="space-y-4 py-4">
+                <Skeleton className="h-4 w-1/3" />
+                <Skeleton className="h-40 w-full" />
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {Array.from({ length: 3 }).map((_, index) => (
+                    <Skeleton key={index} className="h-9 w-full" />
+                  ))}
+                </div>
               </div>
             ) : hasGraphData ? (
               <div className="space-y-6">
@@ -344,16 +350,17 @@ function PostModal({ post, onClose }: PostModalProps) {
 
 function PostsSkeletons() {
   return (
-    <div className="animate-pulse space-y-8">
+    <div className="space-y-8">
+      {/* DESIGN: Claude review */}
       <div className="space-y-3">
-        <div className="h-4 w-1/6 rounded bg-muted" />
+        <Skeleton className="h-4 w-1/6" />
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 3 }).map((_, i) => (
             <Card key={i} className="flex h-48 flex-col justify-between">
-              <div className="h-24 w-full bg-muted" />
+              <Skeleton className="h-24 w-full rounded-none" />
               <div className="space-y-2 p-4">
-                <div className="h-3 w-full rounded bg-muted" />
-                <div className="h-3 w-4/5 rounded bg-muted" />
+                <Skeleton className="h-3 w-full" />
+                <Skeleton className="h-3 w-4/5" />
               </div>
             </Card>
           ))}
@@ -361,14 +368,14 @@ function PostsSkeletons() {
       </div>
       <Card>
         <CardContent className="p-0">
-          <div className="h-12 w-full border-b border-border bg-muted/50" />
+          <Skeleton className="h-12 w-full rounded-none border-b border-border" />
           <div className="space-y-4 p-4">
             {Array.from({ length: 5 }).map((_, i) => (
               <div key={i} className="flex items-center gap-4">
-                <div className="h-10 w-10 rounded bg-muted" />
+                <Skeleton className="h-10 w-10" />
                 <div className="flex-1 space-y-2">
-                  <div className="h-4 w-1/3 rounded bg-muted" />
-                  <div className="h-3 w-1/4 rounded bg-muted" />
+                  <Skeleton className="h-4 w-1/3" />
+                  <Skeleton className="h-3 w-1/4" />
                 </div>
               </div>
             ))}

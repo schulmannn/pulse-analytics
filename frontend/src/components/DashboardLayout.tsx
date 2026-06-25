@@ -3,6 +3,7 @@ import type { ChangeEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useChannels, useLogout } from '@/api/queries';
+import { ThemeToggle } from '@/components/ThemeToggle';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { usePeriod } from '@/lib/period';
 import type { PeriodDays } from '@/lib/period';
@@ -55,6 +56,8 @@ export function DashboardLayout({ email, role }: DashboardLayoutProps) {
           </span>
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <ChannelSwitcher />
+            {/* DESIGN: Claude review */}
+            <ThemeToggle />
             {email && <span className="max-w-[180px] truncate">{email}</span>}
             {role === 'superuser' && (
               <span className="rounded-full border px-2 py-0.5 font-medium">super</span>

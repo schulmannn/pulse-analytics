@@ -1,6 +1,7 @@
 import { useTgFull } from '@/api/queries';
 import { fmt, sparkAreaPath, sparkPath } from '@/lib/format';
 import { Card, CardContent } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
 import { inRangeByDays, usePeriod } from '@/lib/period';
 
 interface Kpi {
@@ -115,9 +116,9 @@ function KpiSkeletons() {
       {Array.from({ length: 6 }).map((_, i) => (
         <Card key={i}>
           <CardContent className="p-5">
-            <div className="h-3 w-3/5 animate-pulse rounded bg-muted" />
-            <div className="mt-3 h-8 w-2/3 animate-pulse rounded bg-muted" />
-            <div className="mt-3 h-3 w-2/5 animate-pulse rounded bg-muted" />
+            <Skeleton className="h-3 w-3/5" />
+            <Skeleton className="mt-3 h-8 w-2/3" />
+            <Skeleton className="mt-3 h-3 w-2/5" />
           </CardContent>
         </Card>
       ))}

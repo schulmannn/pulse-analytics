@@ -2,6 +2,7 @@ import type { ChangeEvent } from 'react';
 import { useAdminUsers, useUpdateUser } from '@/api/queries';
 import { Card, CardContent } from '@/components/ui/card';
 import { fmt } from '@/lib/format';
+import { Skeleton } from '@/components/ui/skeleton';
 
 const ROLE_LABELS: Record<string, string> = { user: 'Пользователь', superuser: 'Админ' };
 const STATUS_LABELS: Record<string, string> = {
@@ -113,14 +114,14 @@ function UserRowCard({ user, availableRoles, availableStatuses, isMe }: UserRowC
 
 function AdminSkeleton() {
   return (
-    <div className="animate-pulse space-y-6">
+    <div className="space-y-6">
       <div className="space-y-2">
-        <div className="h-6 w-1/4 rounded bg-muted" />
-        <div className="h-3 w-1/3 rounded bg-muted" />
+        <Skeleton className="h-6 w-1/4" />
+        <Skeleton className="h-3 w-1/3" />
       </div>
       <div className="space-y-3">
         {Array.from({ length: 4 }).map((_, i) => (
-          <Card key={i}><CardContent className="h-16 bg-muted/40" /></Card>
+          <Card key={i}><CardContent className="p-4"><Skeleton className="h-8 w-full" /></CardContent></Card>
         ))}
       </div>
     </div>

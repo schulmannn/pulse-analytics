@@ -4,6 +4,7 @@ import { normalizeTgPosts } from '@/lib/posts';
 import { fmt } from '@/lib/format';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { inRangeByDays, usePeriod } from '@/lib/period';
+import { Skeleton } from '@/components/ui/skeleton';
 
 export function Digest() {
   const { days } = usePeriod();
@@ -12,12 +13,12 @@ export function Digest() {
 
   if (isFullLoading || isGraphsLoading) {
     return (
-      <Card className="animate-pulse">
-        <CardHeader><div className="h-4 w-1/3 rounded bg-muted" /></CardHeader>
+      <Card>
+        <CardHeader><Skeleton className="h-4 w-1/3" /></CardHeader>
         <CardContent className="space-y-3">
-          <div className="h-3 w-full rounded bg-muted" />
-          <div className="h-3 w-5/6 rounded bg-muted" />
-          <div className="h-3 w-4/5 rounded bg-muted" />
+          <Skeleton className="h-3 w-full" />
+          <Skeleton className="h-3 w-5/6" />
+          <Skeleton className="h-3 w-4/5" />
         </CardContent>
       </Card>
     );
@@ -75,6 +76,16 @@ export function Digest() {
   }
 
   const hasSchedulingAdvice = bestWd || peakHour !== null;
+
+  if (posts.length === 0 && !graphs) {
+    return (
+      <Card>
+        <CardContent className="py-8 text-center text-sm text-muted-foreground">
+          Недостаточно данных для авто-сводки.
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card>

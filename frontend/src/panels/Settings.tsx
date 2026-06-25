@@ -10,6 +10,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { fmt } from '@/lib/format';
 import { ApiError } from '@/api/client';
+import { Skeleton } from '@/components/ui/skeleton';
 
 export function Settings() {
   const { data, isLoading, isError, error } = useChannels();
@@ -177,7 +178,14 @@ function ChannelKeysPanel({ channelId }: { channelId: number }) {
   const [oneTimeKey, setOneTimeKey] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-  if (isLoading) return <div className="animate-pulse text-xs text-muted-foreground">Загрузка ключей…</div>;
+  if (isLoading) {
+    return (
+      <div className="space-y-2">
+        <Skeleton className="h-4 w-1/3" />
+        <Skeleton className="h-8 w-full" />
+      </div>
+    );
+  }
   if (isError) return <div className="text-xs text-destructive">Не удалось загрузить ключи</div>;
 
   const keys = data?.keys ?? [];
@@ -274,15 +282,15 @@ function ChannelKeysPanel({ channelId }: { channelId: number }) {
 
 function SettingsSkeleton() {
   return (
-    <div className="animate-pulse space-y-6">
+    <div className="space-y-6">
       <div className="space-y-2">
-        <div className="h-6 w-1/4 rounded bg-muted" />
-        <div className="h-3 w-1/3 rounded bg-muted" />
+        <Skeleton className="h-6 w-1/4" />
+        <Skeleton className="h-3 w-1/3" />
       </div>
-      <Card><CardContent className="h-20 bg-muted/40" /></Card>
+      <Card><CardContent className="p-5"><Skeleton className="h-12 w-full" /></CardContent></Card>
       <div className="space-y-3">
         {Array.from({ length: 3 }).map((_, i) => (
-          <Card key={i}><CardContent className="h-16 bg-muted/40" /></Card>
+          <Card key={i}><CardContent className="p-4"><Skeleton className="h-8 w-full" /></CardContent></Card>
         ))}
       </div>
     </div>
