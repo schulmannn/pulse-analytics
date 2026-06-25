@@ -170,3 +170,10 @@ dist/assets/index-DGBdZhVB.js  376.61 kB │ gzip: 108.24 kB
 - Тела запросов совпадают с хендлерами: login/register `{email,password}`, verify `{token}`, forgot `{email}`, reset `{token,password}`, logout без тела.
 - Logout очищает localStorage и при успешном ответе, и при сетевой/серверной ошибке.
 - Текущие email-ссылки сервера всё ещё ведут на legacy `/api/auth/verify?token=...` и `/?reset=...`; новые `/verify?token=...` и `/reset?token=...` реализованы, но переключение URL писем относится к катоверу/серверному скоупу Claude.
+
+**Ревью Claude — ✅ одобрено, замёржено в `main`.** Схемы сверены с сервером: `/api/auth/login`
+реально отдаёт `{token, expiresAt, user}`, break-glass без email учтён; тела запросов совпадают;
+guards/logout/redirect корректны; `npm run build` зелёный; правило №8 соблюдено; формы на
+существующих примитивах с DESIGN-маркерами. Follow-up (мой скоуп, не блокеры):
+🎨 визуальный полиш форм + лендинг; переключение серверных email-URL на `/verify`//`/reset` —
+в рамках 3F-3; (+ из TASK-001) мультиканал-инит-синк. **Отличная работа.**
