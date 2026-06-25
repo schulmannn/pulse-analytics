@@ -1,0 +1,76 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Brand palette (Stripe-system) mapped onto shadcn's semantic tokens, in HSL channels.
+   Light = default; dark via the `.dark` class (Sprint 3 theme toggle wires the switch).
+   Values are the exact legacy --color-* hexes converted to HSL. Radius = 4px (brand). */
+@layer base {
+  :root {
+    --background: 210 44% 93%;
+    --foreground: 211 78% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 211 78% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 211 78% 11%;
+    --primary: 248 98% 61%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 216 56% 98%;
+    --secondary-foreground: 211 78% 11%;
+    --muted: 216 56% 98%;
+    --muted-foreground: 217 17% 47%;
+    --accent: 236 100% 94%;
+    --accent-foreground: 248 98% 61%;
+    --destructive: 19 100% 55%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 213 30% 88%;
+    --input: 213 30% 88%;
+    --ring: 248 98% 61%;
+    --radius: 0.25rem;
+
+    /* Brand data accents (charts, deltas, sparklines). */
+    --brand-iris: 248 98% 61%;
+    --brand-iris-soft: 237 100% 75%;
+    --brand-verdant: 81 75% 41%;
+    --brand-ember: 19 100% 55%;
+  }
+
+  .dark {
+    --background: 212 37% 8%;
+    --foreground: 216 48% 94%;
+    --card: 214 29% 14%;
+    --card-foreground: 216 48% 94%;
+    --popover: 214 29% 14%;
+    --popover-foreground: 216 48% 94%;
+    --primary: 237 100% 75%;
+    --primary-foreground: 212 37% 8%;
+    --secondary: 212 30% 12%;
+    --secondary-foreground: 216 48% 94%;
+    --muted: 212 30% 12%;
+    --muted-foreground: 216 17% 59%;
+    --accent: 246 35% 21%;
+    --accent-foreground: 247 100% 77%;
+    --destructive: 19 100% 55%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 209 24% 25%;
+    --input: 209 24% 25%;
+    --ring: 237 100% 75%;
+
+    --brand-iris: 247 100% 77%;
+    --brand-iris-soft: 237 100% 75%;
+    --brand-verdant: 81 75% 41%;
+    --brand-ember: 19 100% 55%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+}

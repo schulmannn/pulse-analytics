@@ -1234,6 +1234,35 @@ app.get('/api/bug-attachment/:id', requireAuth, requireSuper, async (req, res) =
   } catch (e) { res.status(500).end(); }
 });
 
+// ── Sprint 3F (strangler-fig): new Vite/React SPA served under /app ───────────────
+// Coexists with the legacy dashboard at '/'. The dist/ bundle is produced by the
+// Dockerfile.web build stage. Stricter CSP than the legacy shell: the new app has NO
+// inline scripts (JSX auto-escapes), so script-src is plain 'self' — no nonce. The
+// legacy '/' keeps its per-request nonce-CSP via sendApp until 3F-3 catover.
+const APP_DIST = path.join(__dirname, '../frontend/dist');
+const appCspHeader = [
+  "default-src 'self'",
+  "base-uri 'none'",
+  "object-src 'none'",
+  "frame-ancestors 'none'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "font-src https://fonts.gstatic.com",
+  "img-src 'self' data: https:",
+  "connect-src 'self'",
+].join('; ');
+function setAppHeaders(res) {
+  res.set('Content-Security-Policy', appCspHeader)
+     .set('X-Content-Type-Options', 'nosniff')
+     .set('Referrer-Policy', 'no-referrer');
+}
+app.use('/app', (req, res, next) => { setAppHeaders(res); next(); },
+  express.static(APP_DIST, { index: false }));
+app.get(['/app', '/app/*'], (req, res) => {            // SPA fallback for client routes
+  setAppHeaders(res);
+  res.sendFile(path.join(APP_DIST, 'index.html'), (err) => { if (err) res.status(404).end(); });
+});
+
 app.get('*', sendApp);
 
 // ── Запуск ──────────────────────────────────────────────────────

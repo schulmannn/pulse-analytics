@@ -1,5 +1,8 @@
 .git
-node_modules
+**/node_modules
 **/__pycache__
 *.session
 .env
+# Frontend build output is produced inside the image (Dockerfile.web stage 1),
+# never copied from the build context.
+frontend/dist

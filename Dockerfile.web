@@ -2,6 +2,19 @@
 # Публичный сервис на Railway ($PORT). К MTProto-микросервису ходит по ПРИВАТНОЙ
 # сети Railway через MTPROTO_URL (напр. http://mtproto.railway.internal:8001).
 # Часть сплита рантаймов: Python в этом образе НЕТ (см. Dockerfile.mtproto).
+
+# ── Stage 1: build the new frontend (Sprint 3F — Vite/React/TS SPA → static dist) ──
+# Strangler-fig: this dist/ is served by Express under /app, alongside the legacy
+# public/index.html at '/'. If this stage fails, the whole image fails — so `npm run
+# build` is verified locally before this Dockerfile change ships.
+FROM node:20-slim AS frontend
+WORKDIR /fe
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
+# ── Stage 2: server runtime ──
 FROM node:20-slim
 
 ENV NODE_ENV=production
@@ -14,5 +27,7 @@ RUN npm ci --omit=dev
 # Только то, что нужно вебу (mtproto/ — отдельный сервис, сюда не копируем)
 COPY server ./server
 COPY public ./public
+# New frontend build output (served at /app).
+COPY --from=frontend /fe/dist ./frontend/dist
 
 CMD ["npm", "start"]
