@@ -255,7 +255,7 @@ dist/assets/index-DhYTdilb.js  377.86 kB │ gzip: 108.68 kB
 
 ---
 
-### 🟢 TASK-004 — Мультиканал: инвалидация при первичной установке канала
+### ✅ TASK-004 — Мультиканал: инвалидация при первичной установке канала
 
 **Зачем.** В `ChannelSwitcher` (`DashboardLayout`, из TASK-001) при ПЕРВИЧНОЙ авто-установке
 канала (`useEffect`) нет инвалидации кэша. Для ≥2 каналов, если серверный дефолт ≠ `channels[0]`,
@@ -268,11 +268,26 @@ dist/assets/index-DhYTdilb.js  377.86 kB │ gzip: 108.68 kB
 **Критерии приёмки:** build зелёный; для 1 канала поведение и число рефетчей не меняются;
 для ≥2 каналов первичный выбор инвалидирует кэш ровно один раз.
 
-_(TASK-003 принят → TASK-004 активна)_
+#### Отчёт Codex
+
+Изменённые файлы:
+- `frontend/src/components/DashboardLayout.tsx` — после первичной установки канала вызывается `queryClient.invalidateQueries()` только при `channels.length >= 2`; `queryClient` добавлен в зависимости эффекта.
+- `codex.md` — статус задачи и отчёт.
+
+Проверка:
+```text
+✓ 121 modules transformed.
+✓ built in 4.59s
+```
+
+Решения/сомнения:
+- При одном канале ветка инвалидации не выполняется.
+- При двух и более каналах эффект инвалидирует кэш один раз: после установки локального `selectedChannelId` следующий запуск эффекта сразу выходит по guard `selectedChannelId != null`.
+- Сомнений по реализации нет.
 
 ---
 
-### 🟢 TASK-005 — Юнит-тесты ядра логики (Vitest)
+### ✅ TASK-005 — Юнит-тесты ядра логики (Vitest)
 
 **Зачем.** Перед катовером зафиксировать портированные формулы/хелперы, чтобы катовер и будущие
 правки молча их не сломали.
@@ -306,4 +321,35 @@ _(TASK-003 принят → TASK-004 активна)_
 хвост `npm test` (сколько passed).
 
 #### Отчёт Codex
-_(пусто — заполнит Codex)_
+
+Изменённые файлы:
+- `frontend/package.json`, `frontend/package-lock.json` — dev-dependency `vitest` и скрипт `"test": "vitest run"`.
+- `frontend/vitest.config.ts` — node environment и алиас `@/`; DOM-окружение не подключалось.
+- `frontend/src/lib/format.test.ts` — `fmt.num/short/pct`, `sparkPath`, `sparkAreaPath`.
+- `frontend/src/lib/posts.test.ts` — метрики/формулы, fallback-поля, media thumb/permalink, reactionsDetail и нулевой reach.
+- `frontend/src/lib/period.test.ts` — все пресеты `tgLimit`, all-time/невалидные даты и точная временная граница.
+- `frontend/src/lib/downsample.test.ts` — no-op режимы, длина threshold, сохранение первого/последнего элементов и subset исходных данных.
+- `codex.md` — статус задачи и отчёт.
+
+Хвост `npm test`:
+```text
+Test Files  4 passed (4)
+     Tests  18 passed (18)
+  Duration  2.36s
+```
+
+Хвост `npm run build`:
+```text
+✓ 121 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                  0.71 kB │ gzip:   0.39 kB
+dist/assets/index-BVKWIWZm.css  22.41 kB │ gzip:   5.07 kB
+dist/assets/index-DQ_GLdrT.js  377.89 kB │ gzip: 108.69 kB
+✓ built in 4.59s
+```
+
+Решения/сомнения:
+- Тесты используют только Vitest в `node` environment; `jsdom`, Testing Library, сеть и DOM не используются.
+- `npm install` сообщил о 2 audit-находках в дереве зависимостей (1 moderate, 1 high); автоматический `npm audit fix --force` не запускался, чтобы не вносить несанкционированные breaking-обновления.
+- Сомнений по тестовому покрытию заявленного скоупа нет.

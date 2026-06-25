@@ -130,7 +130,8 @@ function ChannelSwitcher() {
     const initial = data.selected ?? channels[0].id;
     setSelectedChannel(initial);
     setSelectedChannelId(initial);
-  }, [channels, data, selectedChannelId]);
+    if (channels.length >= 2) void queryClient.invalidateQueries();
+  }, [channels, data, queryClient, selectedChannelId]);
 
   if (channels.length < 2 || selectedChannelId == null) return null;
 
