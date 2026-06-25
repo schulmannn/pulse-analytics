@@ -1,4 +1,5 @@
 import type { z } from 'zod';
+import { getSessionToken } from '@/lib/session';
 
 /** Thrown on non-2xx responses; `status` lets callers special-case 401 etc. */
 export class ApiError extends Error {
@@ -11,15 +12,16 @@ export class ApiError extends Error {
 }
 
 /**
- * Typed GET against the existing Express API. Same-origin (cookie session is sent
- * automatically), then the JSON is validated/narrowed through a Zod schema so the
- * return type is inferred — no `any` leaks into panels.
+ * Typed GET against the existing Express API. Auth mirrors the legacy dashboard: the
+ * HMAC session token lives in localStorage (shared with '/' — same origin) and is sent
+ * as the `X-Session-Token` header (NOT a cookie). The JSON is then validated/narrowed
+ * through a Zod schema so the return type is inferred — no `any` leaks into panels.
  */
 export async function apiGet<S extends z.ZodTypeAny>(path: string, schema: S): Promise<z.infer<S>> {
-  const res = await fetch(path, {
-    credentials: 'same-origin',
-    headers: { Accept: 'application/json' },
-  });
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  const token = getSessionToken();
+  if (token) headers['X-Session-Token'] = token;
+  const res = await fetch(path, { credentials: 'same-origin', headers });
   if (!res.ok) {
     let message = `${res.status} ${res.statusText}`;
     try {

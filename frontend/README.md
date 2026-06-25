@@ -30,7 +30,10 @@ usually means you'll hit the “Нужен вход” gate. Real data shows on 
 ```
 src/
   api/
-    client.ts      apiGet(path, zodSchema) → typed, throws ApiError (has .status)
+    client.ts      apiGet(path, zodSchema) → typed, throws ApiError (.status).
+                   Auth is transparent: sends the legacy X-Session-Token header
+                   (token read from localStorage, shared with '/' — same origin).
+    session.ts     getSessionToken() — reads pulse_token from localStorage
     schemas.ts     Zod schemas — PERMISSIVE (optional/nullable/.passthrough)
     queries.ts     TanStack useQuery hooks (one per endpoint)
   components/ui/   shadcn primitives (Card, …) — add with `npx shadcn@latest add <x>`
