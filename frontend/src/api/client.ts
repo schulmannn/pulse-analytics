@@ -1,4 +1,5 @@
 import type { z } from 'zod';
+import { getSelectedChannel } from '@/lib/channel';
 import { getSessionToken } from '@/lib/session';
 
 /** Thrown on non-2xx responses; `status` lets callers special-case 401 etc. */
@@ -20,7 +21,9 @@ export class ApiError extends Error {
 export async function apiGet<S extends z.ZodTypeAny>(path: string, schema: S): Promise<z.infer<S>> {
   const headers: Record<string, string> = { Accept: 'application/json' };
   const token = getSessionToken();
+  const channelId = getSelectedChannel();
   if (token) headers['X-Session-Token'] = token;
+  if (channelId != null) headers['X-Channel-Id'] = String(channelId);
   const res = await fetch(path, { credentials: 'same-origin', headers });
   if (!res.ok) {
     let message = `${res.status} ${res.statusText}`;
@@ -56,7 +59,9 @@ export async function apiSend(
 ): Promise<unknown> {
   const headers: Record<string, string> = { Accept: 'application/json' };
   const token = getSessionToken();
+  const channelId = getSelectedChannel();
   if (token) headers['X-Session-Token'] = token;
+  if (channelId != null) headers['X-Channel-Id'] = String(channelId);
   const init: RequestInit = { method, credentials: 'same-origin', headers };
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json';

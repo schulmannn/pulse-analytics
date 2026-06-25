@@ -51,7 +51,7 @@ strict + Tailwind3 + shadcn + TanStack Query + Zod), Express отдаёт его
 
 ## Задачи
 
-### 🟢 TASK-001 — Channel switcher + `X-Channel-Id` (мультитенантность)
+### ✅ TASK-001 — Channel switcher + `X-Channel-Id` (мультитенантность)
 
 **Зачем.** Мультиканальность на бэке работает через заголовок `X-Channel-Id` (см. легаси
 `public/index.html` ~стр. 2137: `API.req` шлёт `X-Channel-Id: SELECTED_CHANNEL` на каждый
@@ -86,7 +86,28 @@ strict + Tailwind3 + shadcn + TanStack Query + Zod), Express отдаёт его
 - `getSelectedChannel()` читается синхронно из `apiGet`/`apiSend` (не через React-хук).
 
 #### Отчёт Codex
-_(пусто — заполнит Codex: список изменённых файлов, хвост `npm run build`, решения/сомнения)_
+
+Изменённые файлы:
+- `frontend/src/lib/channel.ts` — синхронный модульный стор выбранного канала.
+- `frontend/src/api/client.ts` — `apiGet` и `apiSend` добавляют `X-Channel-Id`, когда канал выбран.
+- `frontend/src/components/DashboardLayout.tsx` — свитчер из `useChannels()`, скрытый при `< 2` каналах; инициализация из `selected`/первого канала и полная инвалидация query-кэша при смене.
+- `codex.md` — статус задачи и отчёт.
+
+Хвост `cd frontend && npm run build`:
+```text
+✓ 119 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                  0.71 kB │ gzip:   0.39 kB
+dist/assets/index-DXG_Pph5.css  22.39 kB │ gzip:   5.06 kB
+dist/assets/index-DskEtBxb.js  368.71 kB │ gzip: 106.47 kB
+✓ built in 2.95s
+```
+
+Решения/сомнения:
+- Переиспользованы существующие `ChannelSchema`, `ChannelsResponseSchema`, `useChannels()` и классы `<select>` из `Admin.tsx`; новых цветов и зависимостей нет.
+- Стор оставлен модульным без `localStorage`: персист был опциональным, а серверный `selected` остаётся источником начального выбора.
+- Сомнений по реализации нет.
 
 ---
 

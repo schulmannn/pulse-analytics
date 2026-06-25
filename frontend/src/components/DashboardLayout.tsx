@@ -1,4 +1,9 @@
+import { useEffect, useState } from 'react';
+import type { ChangeEvent } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { NavLink, Outlet } from 'react-router-dom';
+import { useChannels } from '@/api/queries';
+import { getSelectedChannel, setSelectedChannel } from '@/lib/channel';
 
 const BASE_TABS = [
   { to: '/', label: 'Обзор', end: true },
@@ -30,14 +35,13 @@ export function DashboardLayout({ email, role }: DashboardLayoutProps) {
           <span className="text-sm font-semibold tracking-tight">
             Pulse <span className="text-primary">/app</span>
           </span>
-          {email && (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span className="max-w-[180px] truncate">{email}</span>
-              {role === 'superuser' && (
-                <span className="rounded-full border px-2 py-0.5 font-medium">super</span>
-              )}
-            </div>
-          )}
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <ChannelSwitcher />
+            {email && <span className="max-w-[180px] truncate">{email}</span>}
+            {role === 'superuser' && (
+              <span className="rounded-full border px-2 py-0.5 font-medium">super</span>
+            )}
+          </div>
         </div>
         <nav className="mx-auto flex max-w-6xl gap-1 overflow-x-auto px-4">
           {tabs.map((t) => (
@@ -62,5 +66,42 @@ export function DashboardLayout({ email, role }: DashboardLayoutProps) {
         <Outlet />
       </main>
     </div>
+  );
+}
+
+function ChannelSwitcher() {
+  const queryClient = useQueryClient();
+  const { data } = useChannels();
+  const [selectedChannelId, setSelectedChannelId] = useState<number | null>(() => getSelectedChannel());
+  const channels = data?.channels ?? [];
+
+  useEffect(() => {
+    if (!data || selectedChannelId != null || channels.length === 0) return;
+    const initial = data.selected ?? channels[0].id;
+    setSelectedChannel(initial);
+    setSelectedChannelId(initial);
+  }, [channels, data, selectedChannelId]);
+
+  if (channels.length < 2 || selectedChannelId == null) return null;
+
+  const handleChange = (event: ChangeEvent<HTMLSelectElement>) => {
+    const id = Number(event.target.value);
+    setSelectedChannel(id);
+    setSelectedChannelId(id);
+    void queryClient.invalidateQueries();
+  };
+
+  return (
+    <select
+      value={selectedChannelId}
+      onChange={handleChange}
+      className="rounded border border-border bg-background px-2 py-1.5 text-xs font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+    >
+      {channels.map((channel) => (
+        <option key={channel.id} value={channel.id}>
+          @{channel.username || channel.title || channel.id}
+        </option>
+      ))}
+    </select>
   );
 }
