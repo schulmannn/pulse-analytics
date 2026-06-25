@@ -80,9 +80,15 @@ function sendApp(req, res) {
 app.get(['/', '/index.html'], sendApp);
 app.use(express.static(path.join(__dirname, '../public'), { index: false }));
 
+// The authed dashboard makes ~9 read calls per refresh (and per timeframe change),
+// so 100/15min throttled normal use → mtproto proxy 429s → "Источники недоступны"
+// (and login under the same limiter → "Слишком много запросов"). 600 fits real
+// dashboard usage while staying a coarse abuse guard. NOTE: behind Railway's proxy
+// `trust proxy: 1` may resolve req.ip to a shared upstream IP, making this limit
+// effectively global; revisit with a per-user key once the proxy depth is confirmed.
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100,
+  max: 600,
   message: { error: 'Слишком много запросов. Попробуй через 15 минут.' }
 });
 app.use('/api/', limiter);
