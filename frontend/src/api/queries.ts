@@ -1,6 +1,13 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiGet } from '@/api/client';
-import { MentionsSchema, MeSchema, TgFullSchema } from '@/api/schemas';
+import {
+  HistorySchema,
+  MentionsSchema,
+  MeSchema,
+  PostStatsSchema,
+  TgFullSchema,
+  VelocitySchema,
+} from '@/api/schemas';
 
 /** Current session. retry:false so a 401 surfaces immediately (→ login gate). */
 export function useMe() {
@@ -28,5 +35,30 @@ export function useMentions() {
     enabled: false,
     queryKey: ['mentions'],
     queryFn: () => apiGet('/api/tg/mtproto/mentions', MentionsSchema),
+  });
+}
+
+/** Subscriber history (Postgres channel_daily). Default 730 days. */
+export function useHistory(days = 730) {
+  return useQuery({
+    queryKey: ['history-channel', days],
+    queryFn: () => apiGet(`/api/history/channel?days=${days}`, HistorySchema),
+  });
+}
+
+/** View-velocity snapshot (how fast posts accumulate reach). */
+export function useVelocity() {
+  return useQuery({
+    queryKey: ['velocity'],
+    queryFn: () => apiGet('/api/tg/mtproto/velocity', VelocitySchema),
+  });
+}
+
+/** Per-post drill-down (views-over-time + reactions). Runs only when a post is open. */
+export function usePostStats(id: number | null) {
+  return useQuery({
+    enabled: id != null,
+    queryKey: ['post-stats', id],
+    queryFn: () => apiGet(`/api/tg/mtproto/post_stats/${id}`, PostStatsSchema),
   });
 }

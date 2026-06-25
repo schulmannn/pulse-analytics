@@ -28,11 +28,44 @@ export const ViewsSummarySchema = z
   })
   .passthrough();
 
+export const PostSchema = z
+  .object({
+    id: z.coerce.number().optional().nullable(),
+    text: z.string().optional().nullable(),
+    caption: z.string().optional().nullable(),
+    date: z.string().optional().nullable(),
+    views: z.coerce.number().optional().nullable(),
+    view_count: z.coerce.number().optional().nullable(),
+    reactions: z.coerce.number().optional().nullable(),
+    reactions_count: z.coerce.number().optional().nullable(),
+    replies: z.coerce.number().optional().nullable(),
+    comments_count: z.coerce.number().optional().nullable(),
+    forwards: z.coerce.number().optional().nullable(),
+    media_type: z.string().optional().nullable(),
+    thumb: z.string().optional().nullable(),
+    reactions_detail: z
+      .array(
+        z
+          .object({
+            emoji: z.string().optional().nullable(),
+            count: z.coerce.number().optional().nullable(),
+          })
+          .passthrough(),
+      )
+      .optional()
+      .nullable(),
+    hashtags: z.array(z.string()).optional().nullable(),
+    album_size: z.coerce.number().optional().nullable(),
+    pinned: z.boolean().optional().nullable(),
+  })
+  .passthrough();
+export type TgPost = z.infer<typeof PostSchema>;
+
 export const TgFullSchema = z
   .object({
     channel: TgChannelSchema.optional().default({}),
     views_summary: ViewsSummarySchema.nullable().optional(),
-    posts: z.array(z.unknown()).optional().default([]),
+    posts: z.array(PostSchema).optional().default([]),
     mtproto_available: z.boolean().optional().default(false),
     source: z.string().optional(),
   })
@@ -95,3 +128,72 @@ export const MentionsSchema = z
   })
   .passthrough();
 export type Mentions = z.infer<typeof MentionsSchema>;
+
+export const HistoryRowSchema = z
+  .object({
+    day: z.string(),
+    subscribers: z.coerce.number().optional().nullable(),
+    joins: z.coerce.number().optional().nullable(),
+    leaves: z.coerce.number().optional().nullable(),
+    views: z.coerce.number().optional().nullable(),
+    forwards: z.coerce.number().optional().nullable(),
+    reactions: z.coerce.number().optional().nullable(),
+  })
+  .passthrough();
+
+export const HistorySchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    error: z.string().optional().nullable(),
+    rows: z.array(HistoryRowSchema).optional().default([]),
+  })
+  .passthrough();
+export type HistoryData = z.infer<typeof HistorySchema>;
+
+export const VelocityDaySchema = z
+  .object({
+    day: z.coerce.number(),
+    cum: z.coerce.number(),
+    share: z.coerce.number(),
+  })
+  .passthrough();
+
+export const VelocitySchema = z
+  .object({
+    available: z.boolean().optional(),
+    by_day: z.array(VelocityDaySchema).optional().default([]),
+    day1_share: z.coerce.number().optional().nullable(),
+    t80_days: z.coerce.number().optional().nullable(),
+    posts_used: z.coerce.number().optional().nullable(),
+    source: z.string().optional().nullable(),
+  })
+  .passthrough();
+export type VelocityData = z.infer<typeof VelocitySchema>;
+
+export const PostStatsSchema = z
+  .object({
+    available: z.boolean().optional(),
+    views_graph: z
+      .object({
+        x: z.array(z.coerce.number()).optional().default([]),
+        series: z
+          .array(
+            z
+              .object({
+                name: z.string().optional().nullable(),
+                values: z.array(z.coerce.number()).optional().default([]),
+              })
+              .passthrough(),
+          )
+          .optional()
+          .default([]),
+      })
+      .optional()
+      .nullable(),
+    reactions: z
+      .array(z.object({ label: z.string(), value: z.coerce.number() }).passthrough())
+      .optional()
+      .nullable(),
+  })
+  .passthrough();
+export type PostStats = z.infer<typeof PostStatsSchema>;

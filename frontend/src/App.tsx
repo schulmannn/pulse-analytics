@@ -3,6 +3,8 @@ import { useMe } from '@/api/queries';
 import { ApiError } from '@/api/client';
 import { Hero } from '@/panels/Hero';
 import { KpiGrid } from '@/panels/KpiGrid';
+import { Charts } from '@/panels/Charts';
+import { Posts } from '@/panels/Posts';
 import { Mentions } from '@/panels/Mentions';
 
 export default function App() {
@@ -41,6 +43,8 @@ export default function App() {
     <Shell>
       <Hero />
       <KpiGrid />
+      <Charts />
+      <Posts />
       <Mentions />
     </Shell>
   );
