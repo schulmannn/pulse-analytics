@@ -1,6 +1,6 @@
 # Codex changes
 
-Дата и время: 2026-06-25 05:55:36 (America/Buenos_Aires)
+Дата и время: 2026-06-25 05:57:14 (America/Buenos_Aires)
 
 - Добавлен локальный Telegram collector (`collector/pulse_collector.py`) с режимами `doctor`, `once`, `run`, `flush`.
 - Добавлен Docker-образ collector (`Dockerfile.collector`); Telegram-сессия остаётся на стороне пользователя.
