@@ -45,7 +45,11 @@ strict + Tailwind3 + shadcn + TanStack Query + Zod), Express отдаёт его
   `import type { FormEvent, ChangeEvent, ReactNode } from 'react'` (НЕ `React.FormEvent` —
   это ts2686); импорты через алиас `@/`.
 - Мутации: `useMutation` + `onSuccess: () => qc.invalidateQueries(...)` (refetch-after-mutate).
-- Не вводи новые npm-зависимости без явного разрешения в задаче.
+- Не вводи новые npm-зависимости без явного разрешения в задаче. При разрешённой новой
+  зависимости — ставь версию, **совместимую с нашим `vite 5` / `React 18`** (проверь её
+  `peerDependencies`! напр. `vitest@4` пир-требует `vite ^6` → бери `vitest@^3`). После
+  добавления прогони **чистый `npm ci`** (а не только `npm install`) — peer-конфликт всплывает
+  именно на `npm ci` (Docker/Railway), а локальный `npm install`/`build` его маскирует.
 
 ---
 
