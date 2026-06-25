@@ -656,6 +656,7 @@
     font-size: 36px;
     font-weight: 300;
     line-height: 1.1;
+    white-space: nowrap;
     letter-spacing: -0.024em;
     margin-bottom: 8px;
     background: var(--gradient-sunburst);
@@ -1312,7 +1313,7 @@
     .nav { flex-wrap: wrap; }
     .header-right { margin-left: 0; flex-wrap: wrap; gap: 8px; }
     .main { padding: 16px; }
-    .hero-title { font-size: var(--text-h); }
+    .hero-title { font-size: var(--text-h); white-space: normal; }
     .kpi-grid { grid-template-columns: repeat(2, 1fr); }
     #tg-channel-stats { grid-template-columns: repeat(2, 1fr) !important; }
     #freshness { display: none; }
@@ -1688,7 +1689,7 @@
         <nav class="nav">
           <a class="active" data-anchor="overview">Обзор</a>
           <a data-anchor="instagram">Instagram</a>
-          <a data-anchor="telegram">Telegram</a>
+          <a data-anchor="tg-analytics">Telegram</a>
           <a data-anchor="posts">Посты</a>
         </nav>
       </div>
@@ -1730,7 +1731,7 @@
       <div class="hero-content">
         <div class="hero-eyebrow" id="hero-eyebrow">Загрузка данных…</div>
         <h1 class="hero-title" id="hero-title">Привет.</h1>
-        <p class="hero-sub" id="hero-sub">Сводка по&nbsp;Instagram и&nbsp;Telegram.</p>
+        <p class="hero-sub" id="hero-sub" style="display:none"></p>
         <div class="hero-actions">
           <button class="btn-primary sm" id="open-posts-btn">Открыть посты</button>
           <button class="btn-outline" id="export-btn">Экспорт CSV</button>
@@ -1766,7 +1767,7 @@
     </div>
 
     <!-- Two-column: IG + TG -->
-    <div class="section" id="sources-section" data-label="Профили (IG / TG)">
+    <div class="section hidden" id="sources-section" data-label="Профили (IG / TG)">
       <div class="two-col" id="sources-grid" style="grid-template-columns: 1fr;">
         <div class="panel hidden" id="instagram">
           <div class="panel-head">
@@ -1803,18 +1804,8 @@
           </div>
         </div>
 
-        <div class="panel tg-panel" id="telegram">
-          <div class="panel-head">
-            <div class="panel-title">
-              <div class="src-mark tg">✈</div>
-              <div>
-                <h3>Telegram</h3>
-                <small id="tg-username">загрузка…</small>
-              </div>
-            </div>
-            <a id="tg-open" class="btn-outline" target="_blank" rel="noopener" href="#" style="padding: 6px 12px; font-size: var(--text-caption); text-decoration: none;">Открыть канал</a>
-          </div>
-        </div>
+        <!-- Telegram profile card (channel header) removed -->
+
       </div>
     </div>
 
@@ -3385,12 +3376,10 @@ function renderTg() {
   const members = pick(c, ['memberCount','members_count','member_count','subscribers']) || 0;
   const onlineMembers = pick(c, ['online','online_count']) || 0;
 
-  document.getElementById('tg-username').textContent = username
-    ? '@' + username
-    : (title || 'Не подключено');
-  if (username) {
-    document.getElementById('tg-open').href = 'https://t.me/' + username;
-  }
+  const tgUn = document.getElementById('tg-username');
+  if (tgUn) tgUn.textContent = username ? '@' + username : (title || 'Не подключено');
+  const tgOpen = document.getElementById('tg-open');
+  if (tgOpen && username) tgOpen.href = 'https://t.me/' + username;
 
   // Posts from /api/tg/full (MTProto)
   const tgPosts = state.tg.fullPosts || [];
@@ -3774,7 +3763,7 @@ function applySource(src) {
   const tgAnalytics = document.getElementById('tg-analytics');
   const tgMentions = document.getElementById('tg-mentions-section');
   const igNav = document.querySelector('.nav a[data-anchor="instagram"]');
-  const tgNav = document.querySelector('.nav a[data-anchor="telegram"]');
+  const tgNav = document.querySelector('.nav a[data-anchor="tg-analytics"]');
 
   if (igPanel) igPanel.classList.toggle('hidden', tgMode);
   if (tgPanel) tgPanel.classList.toggle('hidden', !tgMode);
@@ -4721,7 +4710,7 @@ function renderHero() {
     if (totalViews > 0)      highlight = `<em>${fmt.short(totalViews)}</em> просмотров`;
     else if (tgMembers > 0)  highlight = `<em>${fmt.short(tgMembers)}</em> подписчиков`;
     else                     highlight = `всё <em>под контролем</em>`;
-    sub = 'Аналитика Telegram-канала.';
+    sub = '';
   } else {
     const reach = sumMetric(state.ig.insights, ['reach']) || 0;
     if (reach > 0)            highlight = `<em>${fmt.short(reach)}</em> охвата`;
@@ -4731,7 +4720,9 @@ function renderHero() {
   }
 
   document.getElementById('hero-title').innerHTML = `${fmt.greeting()}. ${highlight} за&nbsp;${customRange ? periodLabel() : 'последние ' + currentPeriod + ' дн.'}`;
-  document.getElementById('hero-sub').innerHTML = sub;
+  const heroSub = document.getElementById('hero-sub');
+  heroSub.innerHTML = sub;
+  heroSub.style.display = sub ? '' : 'none';
 }
 
 /* ── Status pill ─────────────────────────────────────────────── */
