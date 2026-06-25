@@ -247,9 +247,15 @@ dist/assets/index-DhYTdilb.js  377.86 kB │ gzip: 108.68 kB
 - `days=0` пропускает все посты, включая записи без даты; для остальных пресетов записи без валидной даты исключаются.
 - Кастомный диапазон, `useHistory` и `useVelocity` не изменялись; сомнений по реализации нет.
 
+**Ревью Claude — ✅ одобрено, замёржено в `main` (`933deef`).** `period.tsx` корректен (контекст,
+`tgLimit` зеркалит легаси-масштабирование, `inRangeByDays` с защитой от невалидных дат);
+`useTgFull(days)` — queryKey включает `days`, `staleTime` сохранён; `PeriodSwitcher` на
+существующих tab-стилях (без нового дизайна); build зелёный, без `any`/`import React`.
+Дефолт-30 ≈ прежнее поведение. **Отличная работа.**
+
 ---
 
-### ⏸ TASK-004 — Мультиканал: инвалидация при первичной установке канала
+### 🟢 TASK-004 — Мультиканал: инвалидация при первичной установке канала
 
 **Зачем.** В `ChannelSwitcher` (`DashboardLayout`, из TASK-001) при ПЕРВИЧНОЙ авто-установке
 канала (`useEffect`) нет инвалидации кэша. Для ≥2 каналов, если серверный дефолт ≠ `channels[0]`,
@@ -262,4 +268,42 @@ dist/assets/index-DhYTdilb.js  377.86 kB │ gzip: 108.68 kB
 **Критерии приёмки:** build зелёный; для 1 канала поведение и число рефетчей не меняются;
 для ≥2 каналов первичный выбор инвалидирует кэш ровно один раз.
 
-_(активировать после ревью TASK-003)_
+_(TASK-003 принят → TASK-004 активна)_
+
+---
+
+### 🟢 TASK-005 — Юнит-тесты ядра логики (Vitest)
+
+**Зачем.** Перед катовером зафиксировать портированные формулы/хелперы, чтобы катовер и будущие
+правки молча их не сломали.
+
+**Разрешение на зависимости:** можно добавить dev-deps **vitest** (и при нужде
+`@vitest/coverage-v8`). НЕ добавляй jsdom / Testing Library — тестируем ЧИСТУЮ логику, не
+компоненты/DOM.
+
+**Что сделать:**
+1. Подключить vitest: конфиг (`vitest`-секция в `vite.config.ts` или отдельный `vitest.config.ts`),
+   скрипт в `frontend/package.json`: `"test": "vitest run"`. `npm run build` (tsc + vite) НЕ
+   должен сломаться (vitest идёт отдельно от build).
+2. Тесты (`src/**/*.test.ts`) на чистые функции:
+   - `lib/format.ts`: `fmt.num` (группировка, `—` на null/NaN), `fmt.short` (k/M, обрезка `.0`),
+     `fmt.pct`, `sparkPath`/`sparkAreaPath` (форма/длина path). `greeting`/`todayLabel` зависят от
+     времени — мокни `Date` или пропусти.
+   - `lib/posts.ts`: `normalizeTgPosts` — `reach/likes/comments/shares/eng`, `erv=eng/reach*100`,
+     `virality=shares/reach*100`, `er=eng/followers*100`, фоллбэк-цепочки (`views||view_count`…),
+     `thumb`-URL для photo/video, `permalink`, фильтр `reactionsDetail` без emoji, `reach=0 →
+     erv/virality=null`.
+   - `lib/period.ts`: `tgLimit` (7→30, 30→60, 90/365/0→100), `inRangeByDays` (0→true; невалид/null
+     →false; граница `now-days`).
+   - `lib/downsample.ts`: `lttbDownsample` (`threshold>=n || <3` → исходный массив; сохраняет
+     первый/последний элемент; длина = threshold для больших n).
+3. Только чистые функции; без сети/DOM/React.
+
+**Не трогать:** `.github/workflows/ci.yml` (CI подключу отдельно), серверные тесты в корне репо.
+
+**Критерии приёмки:** `cd frontend && npm run build` зелёный; `npm test` (vitest run) зелёный;
+тесты реально проверяют формулы (значимые ассерты, не заглушки). В отчёт — список тест-файлов +
+хвост `npm test` (сколько passed).
+
+#### Отчёт Codex
+_(пусто — заполнит Codex)_
