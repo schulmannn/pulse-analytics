@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter } from 'react-router-dom';
 import App from '@/App';
+import { ChannelProvider } from '@/lib/channel-context';
 import { PeriodProvider } from '@/lib/period';
 import '@/index.css';
 
@@ -22,11 +23,13 @@ const queryClient = new QueryClient({
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <PeriodProvider>
-        <BrowserRouter basename="/app">
-          <App />
-        </BrowserRouter>
-      </PeriodProvider>
+      <ChannelProvider>
+        <PeriodProvider>
+          <BrowserRouter basename="/app">
+            <App />
+          </BrowserRouter>
+        </PeriodProvider>
+      </ChannelProvider>
     </QueryClientProvider>
   </StrictMode>,
 );

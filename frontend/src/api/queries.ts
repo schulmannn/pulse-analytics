@@ -23,6 +23,7 @@ import {
   VelocitySchema,
 } from '@/api/schemas';
 import { clearSessionToken, setSessionToken } from '@/lib/session';
+import { useSelectedChannel } from '@/lib/channel-context';
 import { tgLimit } from '@/lib/period';
 import type { PeriodDays } from '@/lib/period';
 
@@ -89,22 +90,28 @@ export function useReset() {
 
 export function useLogout() {
   const qc = useQueryClient();
+  const { setChannelId } = useSelectedChannel();
+  const clearLocalSession = () => {
+    clearSessionToken();
+    setChannelId(null);
+  };
   return useMutation({
     mutationFn: () => apiSend('POST', '/api/auth/logout', undefined, AuthOkSchema),
     onSuccess: () => {
-      clearSessionToken();
+      clearLocalSession();
       return qc.invalidateQueries();
     },
-    onError: () => clearSessionToken(),
+    onError: clearLocalSession,
     onSettled: () => qc.clear(),
   });
 }
 
 /** Aggregate channel snapshot: channel info + views summary + recent posts. */
 export function useTgFull(days: PeriodDays) {
+  const { channelId } = useSelectedChannel();
   const limit = tgLimit(days);
   return useQuery({
-    queryKey: ['tg-full', days],
+    queryKey: ['tg-full', channelId, days],
     queryFn: () => apiGet(`/api/tg/full?limit=${limit}`, TgFullSchema),
   });
 }
@@ -114,45 +121,57 @@ export function useTgFull(days: PeriodDays) {
  * (~10/day), so it only runs on an explicit "load/refresh" press, never on mount.
  */
 export function useMentions() {
+  const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: false,
-    queryKey: ['mentions'],
+    queryKey: ['mentions', channelId],
     queryFn: () => apiGet('/api/tg/mtproto/mentions', MentionsSchema),
   });
 }
 
 /** Subscriber history (Postgres channel_daily). Default 730 days. */
 export function useHistory(days = 730) {
+  const { channelId } = useSelectedChannel();
   return useQuery({
-    queryKey: ['history-channel', days],
+    queryKey: ['history-channel', channelId, days],
     queryFn: () => apiGet(`/api/history/channel?days=${days}`, HistorySchema),
   });
 }
 
 /** View-velocity snapshot (how fast posts accumulate reach). */
 export function useVelocity() {
+  const { channelId } = useSelectedChannel();
   return useQuery({
-    queryKey: ['velocity'],
+    queryKey: ['velocity', channelId],
     queryFn: () => apiGet('/api/tg/mtproto/velocity', VelocitySchema),
   });
 }
 
 /** Per-post drill-down (views-over-time + reactions). Runs only when a post is open. */
 export function usePostStats(id: number | null) {
+  const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: id != null,
-    queryKey: ['post-stats', id],
+    queryKey: ['post-stats', channelId, id],
     queryFn: () => apiGet(`/api/tg/mtproto/post_stats/${id}`, PostStatsSchema),
   });
 }
 
 // ── TG analytics ──
 export function useTgStats() {
-  return useQuery({ queryKey: ['tg-stats'], queryFn: () => apiGet('/api/tg/mtproto/stats', StatsSchema) });
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    queryKey: ['tg-stats', channelId],
+    queryFn: () => apiGet('/api/tg/mtproto/stats', StatsSchema),
+  });
 }
 
 export function useTgGraphs() {
-  return useQuery({ queryKey: ['tg-graphs'], queryFn: () => apiGet('/api/tg/mtproto/graphs', GraphsSchema) });
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    queryKey: ['tg-graphs', channelId],
+    queryFn: () => apiGet('/api/tg/mtproto/graphs', GraphsSchema),
+  });
 }
 
 // ── Account cluster: channels / keys / admin / bugs ──

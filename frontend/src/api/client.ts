@@ -12,6 +12,20 @@ export class ApiError extends Error {
   }
 }
 
+function parseResponse<S extends z.ZodTypeAny>(
+  method: string,
+  path: string,
+  schema: S,
+  data: unknown,
+): z.infer<S> {
+  const result = schema.safeParse(data);
+  if (!result.success) {
+    if (import.meta.env.DEV) console.warn('[api-drift]', method, path, result.error.issues);
+    throw result.error;
+  }
+  return result.data;
+}
+
 /**
  * Typed GET against the existing Express API. Auth mirrors the legacy dashboard: the
  * HMAC session token lives in localStorage (shared with '/' — same origin) and is sent
@@ -36,7 +50,7 @@ export async function apiGet<S extends z.ZodTypeAny>(path: string, schema: S): P
     throw new ApiError(res.status, message);
   }
   const data: unknown = await res.json();
-  return schema.parse(data);
+  return parseResponse('GET', path, schema, data);
 }
 
 /**
@@ -80,5 +94,5 @@ export async function apiSend(
   }
   if (res.status === 204) return null;
   const data: unknown = await res.json().catch(() => null);
-  return schema ? schema.parse(data) : data;
+  return schema ? parseResponse(method, path, schema, data) : data;
 }

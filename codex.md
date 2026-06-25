@@ -450,7 +450,7 @@ dist/assets/index-uAolFtU8.js  380.76 kB │ gzip: 109.29 kB
 
 ---
 
-### 🟢 TASK-007 — Tenant в React Query keys (+ отмена in-flight при свитче)
+### ✅ TASK-007 — Tenant в React Query keys (+ отмена in-flight при свитче)
 
 **Зачем.** Ключи каналозависимых запросов (`['tg-full', days]`, `['tg-stats']`, `['tg-graphs']`,
 `['velocity']`, `['mentions']`, `['history-channel', days]`, `['post-stats', id]`) НЕ содержат
@@ -487,11 +487,33 @@ channelId; запрос, стартовавший для канала A, при 
 в заголовке соответствует каналу на момент запроса; для 1 канала поведение прежнее.
 
 #### Отчёт Codex
-_(пусто — заполнит Codex)_
+
+Изменённые файлы:
+- `frontend/src/lib/channel-context.tsx` — `ChannelProvider`/`useSelectedChannel`; `setChannelId` сначала синхронно обновляет существующий модульный store через `setSelectedChannel`, затем React state.
+- `frontend/src/main.tsx` — `ChannelProvider` подключён внутри `QueryClientProvider` вокруг приложения.
+- `frontend/src/api/queries.ts` — channelId добавлен в ключи `tg-full`, `tg-stats`, `tg-graphs`, `velocity`, `mentions`, `history-channel`, `post-stats`; сигнатуры хуков для панелей не менялись. Logout сбрасывает context и header-store.
+- `frontend/src/components/DashboardLayout.tsx` — `ChannelSwitcher` переведён на контекст; глобальные `invalidateQueries()` удалены, при ручном переключении вызывается `cancelQueries()`.
+- `codex.md` — статус задачи и отчёт.
+
+Проверка:
+```text
+✓ 123 modules transformed.
+✓ built in 4.89s
+
+Test Files  4 passed (4)
+     Tests  18 passed (18)
+  Duration  3.82s
+```
+
+Решения/сомнения:
+- Ключи имеют вид `['tg-full', channelId, days]`, `['history-channel', channelId, days]` и аналогично для остальных channel-dependent запросов; неканальные ключи оставлены прежними.
+- Запрос канала A продолжает принадлежать ключу A даже после перехода на B; новый queryFn запускается после синхронного обновления `X-Channel-Id` store.
+- Сброс channelId при logout предотвращает наследование tenant-контекста другим пользователем в той же вкладке.
+- Для одного канала выбор по-прежнему инициализируется из `selected` ответа `/api/channels`.
 
 ---
 
-### 🟢 TASK-008 — Dev-логирование дрейфа Zod-схем
+### ✅ TASK-008 — Dev-логирование дрейфа Zod-схем
 
 **Зачем.** Схемы намеренно пермиссивные (`optional/nullable/passthrough`) — но при дрейфе API
 парс может «тихо» пройти/упасть, и панель пустеет без явной диагностики. Нужна видимость в DEV.
@@ -510,4 +532,23 @@ _(пусто — заполнит Codex)_
 консоли виден `[api-drift]` с путём поля; в остальном `apiGet`/`apiSend` ведут себя как прежде.
 
 #### Отчёт Codex
-_(пусто — заполнит Codex)_
+
+Изменённые файлы:
+- `frontend/src/api/client.ts` — общий `parseResponse` использует `safeParse`; в DEV при ошибке пишет `console.warn('[api-drift]', method, path, issues)` и затем бросает исходный Zod error.
+- `frontend/src/vite-env.d.ts` — стандартная декларация `vite/client` для типизации `import.meta.env.DEV`.
+- `codex.md` — статус задачи и отчёт.
+
+Проверка:
+```text
+✓ 123 modules transformed.
+✓ built in 4.89s
+
+Test Files  4 passed (4)
+     Tests  18 passed (18)
+  Duration  3.82s
+```
+
+Решения/сомнения:
+- Для `apiGet` в лог передаётся `GET`, для `apiSend` — фактический method.
+- В production предупреждение отсутствует; успешные ответы возвращают `result.data`, неуспешные по-прежнему приводят к throw/isError.
+- Схемы и зависимости не изменялись.

@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import type { ChangeEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useChannels, useLogout } from '@/api/queries';
-import { getSelectedChannel, setSelectedChannel } from '@/lib/channel';
+import { useSelectedChannel } from '@/lib/channel-context';
 import { usePeriod } from '@/lib/period';
 import type { PeriodDays } from '@/lib/period';
 
@@ -122,29 +122,26 @@ function PeriodSwitcher() {
 function ChannelSwitcher() {
   const queryClient = useQueryClient();
   const { data } = useChannels();
-  const [selectedChannelId, setSelectedChannelId] = useState<number | null>(() => getSelectedChannel());
+  const { channelId, setChannelId } = useSelectedChannel();
   const channels = data?.channels ?? [];
 
   useEffect(() => {
-    if (!data || selectedChannelId != null || channels.length === 0) return;
+    if (!data || channelId != null || channels.length === 0) return;
     const initial = data.selected ?? channels[0].id;
-    setSelectedChannel(initial);
-    setSelectedChannelId(initial);
-    if (channels.length >= 2) void queryClient.invalidateQueries();
-  }, [channels, data, queryClient, selectedChannelId]);
+    setChannelId(initial);
+  }, [channelId, channels, data, setChannelId]);
 
-  if (channels.length < 2 || selectedChannelId == null) return null;
+  if (channels.length < 2 || channelId == null) return null;
 
   const handleChange = (event: ChangeEvent<HTMLSelectElement>) => {
     const id = Number(event.target.value);
-    setSelectedChannel(id);
-    setSelectedChannelId(id);
-    void queryClient.invalidateQueries();
+    setChannelId(id);
+    void queryClient.cancelQueries();
   };
 
   return (
     <select
-      value={selectedChannelId}
+      value={channelId}
       onChange={handleChange}
       className="rounded border border-border bg-background px-2 py-1.5 text-xs font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
     >
