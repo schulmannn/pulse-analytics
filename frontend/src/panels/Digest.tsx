@@ -3,9 +3,11 @@ import { useTgFull, useTgGraphs } from '@/api/queries';
 import { normalizeTgPosts } from '@/lib/posts';
 import { fmt } from '@/lib/format';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { inRangeByDays, usePeriod } from '@/lib/period';
 
 export function Digest() {
-  const { data: full, isLoading: isFullLoading } = useTgFull();
+  const { days } = usePeriod();
+  const { data: full, isLoading: isFullLoading } = useTgFull(days);
   const { data: graphs, isLoading: isGraphsLoading } = useTgGraphs();
 
   if (isFullLoading || isGraphsLoading) {
@@ -21,11 +23,12 @@ export function Digest() {
     );
   }
 
-  const vs = full?.views_summary;
-  const posts = normalizeTgPosts(full?.posts ?? [], full?.channel ?? {});
-  const totalViews = vs?.total_views || 0;
-  const postsN = vs?.posts_analyzed || posts.length;
-  const avgViews = vs?.avg_views || 0;
+  const posts = normalizeTgPosts(full?.posts ?? [], full?.channel ?? {}).filter((post) =>
+    inRangeByDays(post.date, days),
+  );
+  const totalViews = posts.reduce((sum, post) => sum + post.reach, 0);
+  const postsN = posts.length;
+  const avgViews = postsN > 0 ? totalViews / postsN : 0;
 
   let netSubscribers: number | null = null;
   const fSeries = graphs?.followers?.series ?? [];
@@ -50,7 +53,7 @@ export function Digest() {
   const wdViews: number[] = Array(7).fill(0);
   const wdCount: number[] = Array(7).fill(0);
   full?.posts?.forEach((p) => {
-    if (!p.date) return;
+    if (!inRangeByDays(p.date, days) || !p.date) return;
     const day = new Date(p.date).getDay();
     wdViews[day] += Number(p.views ?? p.view_count ?? 0);
     wdCount[day] += 1;

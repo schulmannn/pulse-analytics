@@ -6,6 +6,7 @@ import { BarChart } from '@/components/BarChart';
 import { Breakdown } from '@/components/Breakdown';
 import { DivergingBars } from '@/components/DivergingBars';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { inRangeByDays, usePeriod } from '@/lib/period';
 
 const SRC_NAMES: Record<string, string> = {
   Followers: 'Подписчики',
@@ -35,7 +36,8 @@ const SENT_ICON: Record<string, string> = {
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 export function TgAnalytics() {
-  const { data: full, isLoading: isFullLoading } = useTgFull();
+  const { days } = usePeriod();
+  const { data: full, isLoading: isFullLoading } = useTgFull(days);
   const { data: cs, isLoading: isStatsLoading } = useTgStats();
   const { data: graphs, isLoading: isGraphsLoading } = useTgGraphs();
 
@@ -44,7 +46,9 @@ export function TgAnalytics() {
   }
 
   const vs = full?.views_summary;
-  const posts = normalizeTgPosts(full?.posts ?? [], full?.channel ?? {});
+  const posts = normalizeTgPosts(full?.posts ?? [], full?.channel ?? {}).filter((post) =>
+    inRangeByDays(post.date, days),
+  );
 
   const cur = (o: { current?: number | null } | null | undefined) =>
     o && o.current != null ? o.current : null;

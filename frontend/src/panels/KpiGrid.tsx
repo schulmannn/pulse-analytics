@@ -1,6 +1,7 @@
 import { useTgFull } from '@/api/queries';
 import { fmt, sparkAreaPath, sparkPath } from '@/lib/format';
 import { Card, CardContent } from '@/components/ui/card';
+import { inRangeByDays, usePeriod } from '@/lib/period';
 
 interface Kpi {
   label: string;
@@ -16,7 +17,8 @@ interface Kpi {
  * (Δ vs previous period) come later when the charts panel migrates its extra endpoints.
  */
 export function KpiGrid() {
-  const { data, isLoading, isError, error } = useTgFull();
+  const { days } = usePeriod();
+  const { data, isLoading, isError, error } = useTgFull(days);
 
   if (isLoading) return <KpiSkeletons />;
   if (isError) {
@@ -30,24 +32,29 @@ export function KpiGrid() {
   }
 
   const members = data?.channel?.memberCount ?? data?.channel?.members ?? 0;
-  const vs = data?.views_summary ?? null;
-  const totalViews = vs?.total_views ?? 0;
-  const totalReactions = vs?.total_reactions ?? 0;
-  const totalForwards = vs?.total_forwards ?? 0;
-  const totalReplies = vs?.total_replies ?? 0;
-  const avgViews = vs?.avg_views ?? 0;
-  const postsAnalyzed = vs?.posts_analyzed ?? 0;
+  const posts = (data?.posts ?? []).filter((post) => inRangeByDays(post.date, days));
+  const totalViews = posts.reduce((sum, post) => sum + Number(post.views ?? post.view_count ?? 0), 0);
+  const totalReactions = posts.reduce(
+    (sum, post) => sum + Number(post.reactions ?? post.reactions_count ?? 0),
+    0,
+  );
+  const totalForwards = posts.reduce((sum, post) => sum + Number(post.forwards ?? 0), 0);
+  const totalReplies = posts.reduce((sum, post) => sum + Number(post.replies ?? post.comments_count ?? 0), 0);
+  const postsAnalyzed = posts.length;
+  const avgViews = postsAnalyzed > 0 ? totalViews / postsAnalyzed : 0;
   const er = members > 0 ? ((totalReactions + totalReplies + totalForwards) / members) * 100 : 0;
 
-  const spark = vs?.views_by_day
-    ? Object.entries(vs.views_by_day)
-        .map(([day, v]) => {
-          const [d, m] = day.split('.').map(Number);
-          return { ts: new Date(new Date().getFullYear(), (m || 1) - 1, d || 1).getTime(), v: Number(v) || 0 };
-        })
-        .sort((a, b) => a.ts - b.ts)
-        .map((e) => e.v)
-    : [];
+  const viewsByDay = new Map<string, number>();
+  posts.forEach((post) => {
+    if (!post.date) return;
+    const timestamp = Date.parse(post.date);
+    if (!Number.isFinite(timestamp)) return;
+    const key = new Date(timestamp).toISOString().slice(0, 10);
+    viewsByDay.set(key, (viewsByDay.get(key) ?? 0) + Number(post.views ?? post.view_count ?? 0));
+  });
+  const spark = [...viewsByDay.entries()]
+    .sort(([dayA], [dayB]) => dayA.localeCompare(dayB))
+    .map(([, views]) => views);
 
   const cards: Kpi[] = [
     { feature: true, label: 'Подписчики', value: fmt.num(members), delta: 'в канале', spark },

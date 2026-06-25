@@ -23,6 +23,8 @@ import {
   VelocitySchema,
 } from '@/api/schemas';
 import { clearSessionToken, setSessionToken } from '@/lib/session';
+import { tgLimit } from '@/lib/period';
+import type { PeriodDays } from '@/lib/period';
 
 /** Current session. retry:false so a 401 surfaces immediately (→ login gate). */
 export function useMe() {
@@ -99,10 +101,11 @@ export function useLogout() {
 }
 
 /** Aggregate channel snapshot: channel info + views summary + recent posts. */
-export function useTgFull(limit = 30) {
+export function useTgFull(days: PeriodDays) {
+  const limit = tgLimit(days);
   return useQuery({
-    queryKey: ['tg-full', limit],
-    queryFn: () => apiGet(`/api/tg/full?limit=${Math.min(100, limit)}`, TgFullSchema),
+    queryKey: ['tg-full', days],
+    queryFn: () => apiGet(`/api/tg/full?limit=${limit}`, TgFullSchema),
   });
 }
 

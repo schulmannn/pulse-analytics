@@ -1,12 +1,14 @@
 import { useTgFull } from '@/api/queries';
 import { fmt } from '@/lib/format';
+import { usePeriod } from '@/lib/period';
 
 /**
  * Hero greeting — ported from legacy renderHero() (Telegram path). Reads the aggregate
  * /api/tg/full snapshot: total views if available, else subscriber count.
  */
 export function Hero() {
-  const { data } = useTgFull();
+  const { days } = usePeriod();
+  const { data } = useTgFull(days);
   const members = data?.channel?.memberCount ?? data?.channel?.members ?? 0;
   const totalViews = data?.views_summary?.total_views ?? 0;
 
@@ -14,12 +16,13 @@ export function Hero() {
   if (totalViews > 0) highlight = `${fmt.short(totalViews)} просмотров`;
   else if (members > 0) highlight = `${fmt.short(members)} подписчиков`;
   else highlight = 'всё под контролем';
+  const periodLabel = days === 0 ? 'за всё время' : `за последние ${days} дн.`;
 
   return (
     <section>
       <p className="text-sm text-muted-foreground">{fmt.todayLabel()}</p>
       <h1 className="mt-1 text-3xl font-light tracking-tight">
-        {fmt.greeting()}. <span className="font-medium text-primary">{highlight}</span> за последние 30 дн.
+        {fmt.greeting()}. <span className="font-medium text-primary">{highlight}</span> {periodLabel}
       </h1>
     </section>
   );

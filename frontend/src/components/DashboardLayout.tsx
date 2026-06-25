@@ -4,6 +4,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useChannels, useLogout } from '@/api/queries';
 import { getSelectedChannel, setSelectedChannel } from '@/lib/channel';
+import { usePeriod } from '@/lib/period';
+import type { PeriodDays } from '@/lib/period';
 
 const BASE_TABS = [
   { to: '/', label: 'Обзор', end: true },
@@ -17,6 +19,14 @@ const BASE_TABS = [
 const SUPER_TABS = [
   { to: '/admin', label: 'Админ', end: false },
   { to: '/bugs', label: 'Баги', end: false },
+];
+
+const PERIODS: Array<{ days: PeriodDays; label: string }> = [
+  { days: 7, label: '7д' },
+  { days: 30, label: '30д' },
+  { days: 90, label: '90д' },
+  { days: 365, label: 'Год' },
+  { days: 0, label: 'Всё' },
 ];
 
 interface DashboardLayoutProps {
@@ -76,11 +86,35 @@ export function DashboardLayout({ email, role }: DashboardLayoutProps) {
               {t.label}
             </NavLink>
           ))}
+          <PeriodSwitcher />
         </nav>
       </header>
       <main className="mx-auto max-w-6xl px-6 py-8">
         <Outlet />
       </main>
+    </div>
+  );
+}
+
+function PeriodSwitcher() {
+  const { days, setDays } = usePeriod();
+
+  return (
+    <div className="ml-auto flex shrink-0">
+      {PERIODS.map((period) => (
+        <button
+          key={period.days}
+          type="button"
+          onClick={() => setDays(period.days)}
+          className={`whitespace-nowrap border-b-2 px-2 py-2.5 text-xs font-medium transition-colors ${
+            days === period.days
+              ? 'border-primary text-foreground'
+              : 'border-transparent text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          {period.label}
+        </button>
+      ))}
     </div>
   );
 }

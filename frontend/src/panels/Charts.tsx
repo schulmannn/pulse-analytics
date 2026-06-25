@@ -3,6 +3,7 @@ import { lttbDownsample } from '@/lib/downsample';
 import { LineChart } from '@/components/LineChart';
 import { fmt } from '@/lib/format';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { inRangeByDays, usePeriod } from '@/lib/period';
 
 interface HeatmapCell {
   n: number;
@@ -87,7 +88,8 @@ function HistoryChartBlock() {
 }
 
 function HeatmapChartBlock() {
-  const { data: tgData, isLoading } = useTgFull();
+  const { days } = usePeriod();
+  const { data: tgData, isLoading } = useTgFull(days);
 
   if (isLoading) return <ChartSkeleton title="Тепловая карта (день × час)" />;
 
@@ -99,7 +101,7 @@ function HeatmapChartBlock() {
   );
 
   posts.forEach((p) => {
-    if (!p.date) return;
+    if (!inRangeByDays(p.date, days) || !p.date) return;
     const d = new Date(p.date);
     if (isNaN(d.getTime())) return;
 
