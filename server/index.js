@@ -19,7 +19,13 @@ const { registerCollectorRoutes } = require('./routes/collector');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
-app.set('trust proxy', 1);   // behind Railway's proxy → correct client IP for rate-limit / req.ip
+// Railway forwarding chain (confirmed via the proxy diagnostic): the app's socket
+// peer is Railway's internal LB (100.64.0.0/10) and X-Forwarded-For = "client, edge".
+// So the address list (socket → outward) is [LB, edge, client] and we must trust 2
+// hops to land on the real client IP. `trust proxy: 1` returned the shared edge IP
+// (152.x) for everyone → a global rate-limit bucket. NOT `true` (that trusts client-
+// supplied XFF and is spoofable); the fixed count 2 ignores any prefixed fake hops.
+app.set('trust proxy', 2);
 
 // История (Postgres) — поднимаем схему, если БД подключена; иначе тихо выключено.
 // После схемы — бутстрап админ-аккаунта, затем привязка central-канала к админу.
