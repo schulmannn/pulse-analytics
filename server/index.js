@@ -12,7 +12,7 @@ const path       = require('path');
 const fs         = require('fs');
 const crypto     = require('crypto');
 const db         = require('./db');
-const { createAuth, hashPassword, verifyPassword, SCRYPT } = require('./lib/auth');
+const { createAuth, hashPassword, verifyPassword, SCRYPT, rateLimitKey } = require('./lib/auth');
 const { log, requestContext, hashIp } = require('./lib/observability');
 const { makeResolveChannel, makeServeSnapshot } = require('./middleware/tenant');
 const { registerCollectorRoutes } = require('./routes/collector');
@@ -80,15 +80,18 @@ function sendApp(req, res) {
 app.get(['/', '/index.html'], sendApp);
 app.use(express.static(path.join(__dirname, '../public'), { index: false }));
 
-// The authed dashboard makes ~9 read calls per refresh (and per timeframe change),
-// so 100/15min throttled normal use → mtproto proxy 429s → "Источники недоступны"
-// (and login under the same limiter → "Слишком много запросов"). 600 fits real
-// dashboard usage while staying a coarse abuse guard. NOTE: behind Railway's proxy
-// `trust proxy: 1` may resolve req.ip to a shared upstream IP, making this limit
-// effectively global; revisit with a per-user key once the proxy depth is confirmed.
+// General read limiter for the authed dashboard (~9 reads per refresh). Keyed PER
+// USER, not per IP: behind Railway's proxy `trust proxy: 1` can resolve req.ip to a
+// shared upstream address, so an IP-keyed limit would be effectively global — one
+// user (or an external probe hitting /api/health etc.) could throttle everyone,
+// surfacing as "Источники недоступны" and login "Слишком много запросов". A signed
+// session token can't be forged and parseToken (defined below) rejects garbage, so
+// keying by uid is safe and token-rotation can't escape it; unauthenticated requests
+// fall back to a per-IP bucket. 600/15min is generous for real dashboard usage.
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 600,
+  keyGenerator: (req) => rateLimitKey(parseToken(req.headers['x-session-token']), req.ip),
   message: { error: 'Слишком много запросов. Попробуй через 15 минут.' }
 });
 app.use('/api/', limiter);

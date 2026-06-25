@@ -74,4 +74,13 @@ function verifyPassword(password, stored) {
   }
 }
 
-module.exports = { createAuth, hashPassword, verifyPassword, SCRYPT };
+// Rate-limit bucket key for the general /api limiter. Authenticated requests are
+// keyed per user (uid) — stable across token refreshes and isolated from other
+// users; break-glass (no uid) and unauthenticated/forged-token requests fall back
+// to a per-IP bucket. `session` is the parseToken() result (or null).
+function rateLimitKey(session, ip) {
+  if (session) return session.uid != null ? `u:${session.uid}` : `op:${ip || 'x'}`;
+  return `ip:${ip || 'unknown'}`;
+}
+
+module.exports = { createAuth, hashPassword, verifyPassword, SCRYPT, rateLimitKey };
