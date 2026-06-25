@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: npm install
+      - run: npm run check
+      - run: python -m py_compile mtproto/service.py collector/pulse_collector.py
+      - run: python -m unittest discover -s test -p "test_*.py"
+      - name: Parse inline browser scripts
+        run: |
+          node - <<'NODE'
+          const fs = require('fs'), vm = require('vm');
+          const html = fs.readFileSync('public/index.html', 'utf8');
+          const re = /<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi;
+          let match;
+          while ((match = re.exec(html))) new vm.Script(match[1]);
+          NODE

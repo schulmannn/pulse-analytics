@@ -10,7 +10,12 @@ const fetch      = require('node-fetch');
 const rateLimit  = require('express-rate-limit');
 const path       = require('path');
 const fs         = require('fs');
+const crypto     = require('crypto');
 const db         = require('./db');
+const { createAuth, hashPassword, verifyPassword, SCRYPT } = require('./lib/auth');
+const { log, requestContext, hashIp } = require('./lib/observability');
+const { makeResolveChannel, makeServeSnapshot } = require('./middleware/tenant');
+const { registerCollectorRoutes } = require('./routes/collector');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -21,7 +26,7 @@ app.set('trust proxy', 1);   // behind Railway's proxy → correct client IP for
 // dbReady гейтит data-роуты, пока идёт миграция (app.listen стартует синхронно).
 let dbReady = false;
 db.init().then(bootstrapAdmin).then(claimOwnerChannel).then(() => { dbReady = true; })
-  .catch(e => { console.error('[db] init failed:', e.message); dbReady = true; });
+  .catch(e => { log('error', 'db_init_failed', { error: e.message }); dbReady = false; });
 
 // ── Middleware ───────────────────────────────────────────────────
 // CORS: дашборд обслуживается тем же origin (Express отдаёт и статику, и API),
@@ -30,6 +35,7 @@ db.init().then(bootstrapAdmin).then(claimOwnerChannel).then(() => { dbReady = tr
 // CORS_ORIGINS (список через запятую).
 const CORS_ORIGINS = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
 app.use(cors({ origin: CORS_ORIGINS.length ? CORS_ORIGINS : false, credentials: false }));
+app.use(requestContext);
 // JSON body parser — default 100kb. Big-body routes (collector ingest, bug
 // screenshots) carry their own higher-limit parser, so skip them here; otherwise
 // this 100kb parser would reject their large payloads before the route is reached.
@@ -54,7 +60,7 @@ const cspHeader = (nonce) => [
   "base-uri 'none'",
   "object-src 'none'",
   "frame-ancestors 'none'",
-  `script-src 'nonce-${nonce}'`,
+  `script-src 'self' 'nonce-${nonce}'`,
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src https://fonts.gstatic.com",
   "img-src 'self' data: https:",
@@ -89,7 +95,6 @@ const authLimiter = rateLimit({
 });
 
 // ── Авторизация: stateless HMAC-токены (переживают рестарт/редеплой) ──
-const crypto = require('crypto');
 // Token signing secret. Prefer a dedicated SESSION_SECRET (separable from the
 // team/MTProto password); fall back to TEAM_PASSWORD; never a hardcoded default —
 // if neither is set, use an ephemeral random secret (tokens won't survive restart).
@@ -100,60 +105,21 @@ if (!process.env.SESSION_SECRET && !process.env.TEAM_PASSWORD) {
 
 const ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || '').toLowerCase().trim();
 const SESSION_TTL = 8 * 60 * 60 * 1000;
+const auth = createAuth({ secret: AUTH_SECRET });
+const signToken = auth.signBreakGlass;
+const signSession = auth.signSession;
+const parseToken = auth.parseToken;
 
-// Legacy/break-glass token: payload is just the expiry (no account) → superuser.
-function signToken(expires) {
-  const body = Buffer.from(String(expires)).toString('base64url');
-  const sig = crypto.createHmac('sha256', AUTH_SECRET).update(body).digest('base64url');
-  return body + '.' + sig;
-}
-
-// Account session token: carries { uid, role, exp }, HMAC-signed (stateless).
-function signSession(payload) {
-  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
-  const sig = crypto.createHmac('sha256', AUTH_SECRET).update(body).digest('base64url');
-  return body + '.' + sig;
-}
-
-// Verify + decode either token form → { uid, role } or null.
-function parseToken(token) {
-  try {
-    if (!token || typeof token !== 'string' || token.indexOf('.') < 0) return null;
-    const [body, sig] = token.split('.');
-    const expected = crypto.createHmac('sha256', AUTH_SECRET).update(body).digest('base64url');
-    if (!sig || sig.length !== expected.length) return null;
-    if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
-    const decoded = Buffer.from(body, 'base64url').toString('utf8');
-    let p;
-    if (decoded[0] === '{') p = JSON.parse(decoded);
-    else p = { exp: parseInt(decoded, 10), uid: null, role: 'superuser' };  // legacy/break-glass
-    if (!p.exp || p.exp <= Date.now()) return null;
-    return { uid: (p.uid == null ? null : p.uid), role: p.role || 'user' };
-  } catch (e) { return null; }
-}
-
-// scrypt cost pinned + encoded in the hash, so verification is independent of any
-// future change to Node's defaults. Format: scrypt$N$r$p$saltHex$hashHex.
-const SCRYPT = { N: 16384, r: 8, p: 1 };
-function hashPassword(password) {
-  const salt = crypto.randomBytes(16);
-  const hash = crypto.scryptSync(String(password), salt, 64, SCRYPT);
-  return `scrypt$${SCRYPT.N}$${SCRYPT.r}$${SCRYPT.p}$${salt.toString('hex')}$${hash.toString('hex')}`;
-}
-function verifyPassword(password, stored) {
-  if (!stored || typeof stored !== 'string' || !stored.startsWith('scrypt$')) return false;
-  const parts = stored.split('$');
-  let N = SCRYPT.N, r = SCRYPT.r, p = SCRYPT.p, saltHex, hashHex;
-  if (parts.length === 6) { N = +parts[1]; r = +parts[2]; p = +parts[3]; saltHex = parts[4]; hashHex = parts[5]; }
-  else if (parts.length === 3) { saltHex = parts[1]; hashHex = parts[2]; }   // legacy (no params)
-  else return false;
-  let salt, expected, test;
-  try {
-    salt = Buffer.from(saltHex, 'hex'); expected = Buffer.from(hashHex, 'hex');
-    if (!salt.length || !expected.length) return false;
-    test = crypto.scryptSync(String(password), salt, expected.length, { N, r, p });
-  } catch (e) { return false; }
-  return crypto.timingSafeEqual(expected, test);
+async function audit(req, action, metadata = {}) {
+  if (!db.enabled) return false;
+  return db.recordAuditEvent({
+    uid: req.user && req.user.uid != null ? req.user.uid : null,
+    channel_id: req.channel && req.channel.id != null ? req.channel.id : null,
+    action,
+    request_id: req.requestId,
+    ip_hash: hashIp(req.ip, AUTH_SECRET),
+    metadata,
+  });
 }
 
 // Optional bootstrap: create the ADMIN_EMAIL account as an active superuser at startup
@@ -184,10 +150,14 @@ async function claimOwnerChannel() {
 async function requireAuth(req, res, next) {
   const sess = parseToken(req.headers['x-session-token']);
   if (!sess) return res.status(401).json({ error: 'Сессия истекла, войди снова' });
+  req.session = sess;
   if (sess.uid == null) { req.user = { uid: null, role: 'superuser', email: null }; return next(); }
   try {
     const u = await db.getUserById(sess.uid);
     if (!u || u.status !== 'active') return res.status(401).json({ error: 'Аккаунт неактивен — войди снова' });
+    if (sess.tokenVersion !== u.token_version) {
+      return res.status(401).json({ error: 'Сессия отозвана — войди снова' });
+    }
     req.user = { uid: u.id, role: u.role, email: u.email };
     next();
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -199,26 +169,7 @@ function requireSuper(req, res, next) {
 }
 
 // ── Channel (tenant) resolution & isolation ──────────────────────
-// Resolve the channel for a data request and authorize it against req.user.
-// Channel id from ?channel= or X-Channel-Id; default = the user's first channel.
-// No DB → behave as the single legacy 'central' channel (live MTProto only).
-// Zero channels → { empty:true } so the frontend shows the onboarding state.
-async function resolveChannel(req, res, next) {
-  if (!db.enabled) { req.channel = { id: null, source: 'central', username: '' }; return next(); }
-  if (!dbReady) return res.status(503).json({ error: 'Сервис запускается, попробуй через секунду' });
-  let cid = parseInt(req.query.channel || req.headers['x-channel-id'], 10) || 0;
-  try {
-    if (!cid) {
-      const list = await db.listChannels(req.user);
-      if (!list.length) return res.json({ enabled: true, empty: true, channels: [] });
-      cid = list[0].id;
-    }
-    const ch = await db.getChannel(cid, req.user);
-    if (!ch) return res.status(403).json({ error: 'Нет доступа к этому каналу' });
-    req.channel = ch;
-    next();
-  } catch (e) { res.status(500).json({ error: e.message }); }
-}
+const resolveChannel = makeResolveChannel({ db, isReady: () => dbReady });
 
 // Live MTProto exists only for the 'central' channel (the owner's session).
 // Other channels are fed by collectors → their data comes from Postgres, so the
@@ -229,15 +180,7 @@ function notCentral(req, res) {
   return true;
 }
 
-// Non-central channel → serve a field from its stored collector snapshot (or a
-// soft "no data yet" marker). Returns true if it handled the response.
-async function serveSnapshot(req, res, pick) {
-  if (req.channel && req.channel.source === 'central') return false;   // central → caller serves live
-  const snap = (req.channel && req.channel.id) ? await db.getSnapshot(req.channel.id).catch(() => null) : null;
-  const val = snap && snap.data ? pick(snap.data, snap) : null;
-  res.json(val != null ? val : { available: false, source: 'collector', empty: true });
-  return true;
-}
+const serveSnapshot = makeServeSnapshot({ db });
 
 // ── In-memory кэш ───────────────────────────────────────────────
 const cache = new Map();
@@ -353,7 +296,10 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
       if (u.status === 'unverified') return res.status(403).json({ error: 'Подтверди email — ссылка пришла при регистрации', code: 'unverified' });
       if (u.status === 'pending')    return res.status(403).json({ error: 'Аккаунт ждёт одобрения администратором' });
       if (u.status !== 'active')     return res.status(403).json({ error: 'Аккаунт отключён' });
-      return res.json({ token: signSession({ uid: u.id, role: u.role, exp: expires }),
+      const token = signSession({ uid: u.id, role: u.role, exp: expires, tokenVersion: u.token_version });
+      req.user = { uid: u.id, role: u.role, email: u.email };
+      audit(req, 'auth.login', {}).catch(() => {});
+      return res.json({ token,
         expiresAt: new Date(expires).toISOString(), user: { email: u.email, role: u.role } });
     } catch (e) { return res.status(500).json({ error: e.message }); }
   }
@@ -365,8 +311,14 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
   return res.status(403).json({ error: 'Неверный пароль' });
 });
 
-app.post('/api/auth/logout', requireAuth, (req, res) => {
-  res.json({ ok: true });   // stateless — клиент просто удаляет токен
+app.post('/api/auth/logout', requireAuth, async (req, res) => {
+  try {
+    if (req.user.uid != null) await db.revokeUserSessions(req.user.uid);
+    audit(req, 'auth.logout', {}).catch(() => {});
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.get('/api/auth/check', requireAuth, (req, res) => {
@@ -485,6 +437,7 @@ app.post('/api/auth/change-password', requireAuth, async (req, res) => {
     const u = await db.getUserByEmail(req.user.email);
     if (!u || !verifyPassword(cur, u.pass_hash)) return res.status(403).json({ error: 'Текущий пароль неверен' });
     await db.setUserPassword(u.id, hashPassword(next));
+    audit(req, 'auth.password_changed', {}).catch(() => {});
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -646,8 +599,11 @@ app.post('/api/channels', requireAuth, async (req, res) => {
   if (!/^[a-zA-Z0-9_]{3,64}$/.test(username)) return res.status(400).json({ error: 'Некорректный @username канала' });
   try {
     const mine = await db.listChannels(req.user);
-    if (mine.length >= 20) return res.status(409).json({ error: 'Достигнут лимит каналов' });   // soft cap; tiers in Sprint 2
-    res.json(await db.createChannel({ owner_uid: req.user.uid, username, title }));
+      if (mine.length >= 20) return res.status(409).json({ error: 'Достигнут лимит каналов' });   // soft cap; tiers in Sprint 2
+      const channel = await db.createChannel({ owner_uid: req.user.uid, username, title });
+      req.channel = channel;
+      audit(req, 'channel.created', { username }).catch(() => {});
+      res.json(channel);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -655,7 +611,11 @@ app.delete('/api/channels/:id', requireAuth, async (req, res) => {
   if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
   const id = parseInt(req.params.id, 10);
   if (!id || req.user.uid == null) return res.status(400).json({ error: 'bad id' });
-  try { res.json({ ok: await db.deleteChannel(id, req.user.uid) }); }
+  try {
+    const ok = await db.deleteChannel(id, req.user.uid);
+    if (ok) audit(req, 'channel.deleted', { channel_id: id }).catch(() => {});
+    res.json({ ok });
+  }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -668,9 +628,11 @@ app.post('/api/channels/:id/key', requireAuth, async (req, res) => {
     const ch = await db.getChannel(id, req.user);
     if (!ch) return res.status(403).json({ error: 'Нет доступа к каналу' });
     if (ch.source === 'central') return res.status(400).json({ error: 'central-канал не использует collector-ключи' });
-    const raw = 'pa_' + crypto.randomBytes(24).toString('base64url');
-    const rec = await db.createApiKey(id, sha256(raw), raw.slice(0, 11), String((req.body && req.body.label) || '').slice(0, 60) || null);
-    res.json({ ...rec, key: raw });   // raw key — never stored, shown once
+      const raw = 'pa_' + crypto.randomBytes(24).toString('base64url');
+      const rec = await db.createApiKey(id, sha256(raw), raw.slice(0, 11), String((req.body && req.body.label) || '').slice(0, 60) || null);
+      req.channel = ch;
+      audit(req, 'api_key.created', { key_id: rec.id, key_prefix: rec.key_prefix }).catch(() => {});
+      res.json({ ...rec, key: raw });   // raw key — never stored, shown once
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -686,73 +648,24 @@ app.delete('/api/channels/:id/key/:keyId', requireAuth, async (req, res) => {
   if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
   const keyId = parseInt(req.params.keyId, 10);
   if (!keyId || req.user.uid == null) return res.status(400).json({ error: 'bad id' });
-  try { res.json({ ok: await db.revokeApiKey(keyId, req.user.uid) }); }
+  try {
+    const ok = await db.revokeApiKey(keyId, req.user.uid);
+    if (ok) audit(req, 'api_key.revoked', { key_id: keyId }).catch(() => {});
+    res.json({ ok });
+  }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ── Collector ingest (Variant A) ──────────────────────────────────
-// A user's collector computes its channel's metrics LOCALLY (their own session)
-// and pushes ready JSON here, authenticated by the channel's API key. We never
-// see/store their TG session — only the derived data, under their channel.
-const ingestLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, max: 60,
-  keyGenerator: (req) => {   // per-key (hashed); mirror requireApiKey's credential extraction so x-api-key callers are also per-key limited
-    const h = String(req.get('authorization') || '');
-    const raw = h.startsWith('Bearer ') ? h.slice(7).trim() : String(req.get('x-api-key') || '').trim();
-    return raw ? sha256(raw) : ('ip:' + (req.ip || ''));
-  },
-  message: { error: 'Слишком много ingest-запросов' },
-});
-async function requireApiKey(req, res, next) {
-  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
-  if (!dbReady)    return res.status(503).json({ error: 'Сервис запускается' });
-  const hdr = String(req.get('authorization') || '');
-  const raw = hdr.startsWith('Bearer ') ? hdr.slice(7).trim() : String(req.get('x-api-key') || '').trim();
-  if (!raw) return res.status(401).json({ error: 'Нет API-ключа' });
-  try {
-    const ch = await db.getChannelByApiKey(sha256(raw));
-    if (!ch || ch.status === 'disabled' || ch.source === 'central') return res.status(401).json({ error: 'Неверный или отозванный ключ' });
-    req.channel = ch;
-    next();
-  } catch (e) { res.status(500).json({ error: e.message }); }
-}
-
-app.post('/api/collector/ingest', ingestLimiter, requireApiKey, express.json({ limit: '4mb' }), async (req, res) => {
-  const ch = req.channel;
-  const body = req.body || {};
-  const MAX_ROWS = 500;   // hard cap on any per-request array → bounds DB round-trips on the small pool
-  try {
-    const posts = Array.isArray(body.posts) ? body.posts.slice(0, MAX_ROWS) : [];
-    const snapshot = {
-      channel:       body.channel || null,
-      stats:         body.stats || null,
-      graphs:        body.graphs || null,
-      views_summary: body.views_summary || null,
-      posts:         posts.slice(0, 200),
-    };
-    if (JSON.stringify(snapshot).length > 2000000) return res.status(413).json({ error: 'Слишком большой snapshot' });
-    await db.saveSnapshot(ch.id, snapshot);
-    // Time-series archives — capped + can never throw the request
-    let nDaily = 0, nPosts = 0, velocityOk = false, nMentions = 0;
-    let dailyRows = [];
-    try { dailyRows = db.graphsToDailyRows(body.graphs).slice(0, MAX_ROWS); } catch (_) { dailyRows = []; }
-    if (dailyRows.length) nDaily = await db.upsertChannelDaily(ch.id, dailyRows).catch(() => 0);
-    if (posts.length) {
-      const prows = posts.map(p => {
-        const reach = p.views || 0, eng = (p.reactions || 0) + (p.forwards || 0) + (p.replies || 0);
-        return { post_id: p.id, date_published: p.date, views: p.views || 0, reactions: p.reactions || 0,
-          forwards: p.forwards || 0, replies: p.replies || 0,
-          erv: reach > 0 ? eng / reach * 100 : null, virality: reach > 0 ? (p.forwards || 0) / reach * 100 : null,
-          media_type: p.media_type, caption: (p.text || '').slice(0, 500), hashtags: p.hashtags || [] };
-      }).filter(p => p.post_id != null);
-      nPosts = await db.upsertPosts(ch.id, prows).catch(() => 0);
-    }
-    if (body.velocity && body.velocity.available) { await db.saveVelocity(ch.id, body.velocity).catch(() => {}); velocityOk = true; }
-    const mentions = Array.isArray(body.mentions) ? body.mentions.slice(0, MAX_ROWS) : [];
-    if (mentions.length) nMentions = await db.upsertMentions(ch.id, mentions).catch(() => 0);
-    if (body.channel && body.channel.id) db.setChannelTgId(ch.id, body.channel.id).catch(() => {});
-    res.json({ ok: true, channel_id: ch.id, snapshot: true, channel_daily: nDaily, posts: nPosts, velocity: velocityOk, mentions: nMentions });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+// Collector protocol is isolated in its own route module. The handler validates
+// and normalizes the envelope before a single transactional DB call.
+registerCollectorRoutes({
+  app,
+  db,
+  express,
+  rateLimit,
+  isReady: () => dbReady,
+  requireAuth,
+  audit,
 });
 
 app.get('/api/tg/channel', requireAuth, resolveChannel, async (req, res) => {
@@ -1057,15 +970,33 @@ app.get('/api/tg/full', requireAuth, resolveChannel, async (req, res) => {
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
+    service: 'pulse-analytics-web',
     uptime: Math.round(process.uptime()),
     cache:  cache.size,
-    sessions: 'stateless',
+    sessions: 'signed+versioned',
+    database_ready: dbReady,
+    request_id: req.requestId,
     env: {
       ig:  !!IG_TOKEN && !!IG_ACCOUNT,
       tg:  !!TG_TOKEN && !!TG_CHANNEL,
       auth: !!process.env.TEAM_PASSWORD
     }
   });
+});
+
+app.get('/api/ready', async (req, res) => {
+  if (!dbReady) return res.status(503).json({ status: 'starting', request_id: req.requestId });
+  try {
+    const database = await db.ping();
+    res.json({ status: 'ready', database, request_id: req.requestId });
+  } catch (error) {
+    log('error', 'readiness_failed', { request_id: req.requestId, error: error.message });
+    res.status(503).json({
+      status: 'not_ready',
+      database: { enabled: db.enabled, ok: false },
+      request_id: req.requestId,
+    });
+  }
 });
 
 app.delete('/api/cache', requireAuth, requireSuper, (req, res) => {
