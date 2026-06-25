@@ -4,6 +4,7 @@ import { useMe } from '@/api/queries';
 import { ApiError } from '@/api/client';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { LoginPage, RegisterPage, ResetPage, VerifyPage } from '@/pages/Auth';
+import { Landing } from '@/pages/Landing';
 import { Hero } from '@/panels/Hero';
 import { KpiGrid } from '@/panels/KpiGrid';
 import { Charts } from '@/panels/Charts';
@@ -47,7 +48,7 @@ function ProtectedLayout() {
 
   if (me.isError) {
     const unauthorized = me.error instanceof ApiError && me.error.status === 401;
-    if (unauthorized) return <Navigate to="/login" replace />;
+    if (unauthorized) return <Landing />;
     return (
       <Centered>
         <div className="max-w-sm rounded-lg border bg-card p-6 text-center">
