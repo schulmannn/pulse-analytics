@@ -1,10 +1,17 @@
 import { NavLink, Outlet } from 'react-router-dom';
 
-const TABS = [
+const BASE_TABS = [
   { to: '/', label: 'Обзор', end: true },
+  { to: '/analytics', label: 'Аналитика', end: false },
   { to: '/charts', label: 'Графики', end: false },
   { to: '/posts', label: 'Посты', end: false },
   { to: '/mentions', label: 'Упоминания', end: false },
+  { to: '/settings', label: 'Настройки', end: false },
+];
+
+const SUPER_TABS = [
+  { to: '/admin', label: 'Админ', end: false },
+  { to: '/bugs', label: 'Баги', end: false },
 ];
 
 interface DashboardLayoutProps {
@@ -14,6 +21,8 @@ interface DashboardLayoutProps {
 
 /** App shell: sticky top bar with brand, the current user, and tab navigation. */
 export function DashboardLayout({ email, role }: DashboardLayoutProps) {
+  const tabs = role === 'superuser' ? [...BASE_TABS, ...SUPER_TABS] : BASE_TABS;
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="sticky top-0 z-40 border-b bg-card/95 backdrop-blur">
@@ -31,7 +40,7 @@ export function DashboardLayout({ email, role }: DashboardLayoutProps) {
           )}
         </div>
         <nav className="mx-auto flex max-w-6xl gap-1 overflow-x-auto px-4">
-          {TABS.map((t) => (
+          {tabs.map((t) => (
             <NavLink
               key={t.to}
               to={t.to}

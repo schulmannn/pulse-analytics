@@ -35,3 +35,45 @@ export async function apiGet<S extends z.ZodTypeAny>(path: string, schema: S): P
   const data: unknown = await res.json();
   return schema.parse(data);
 }
+
+/**
+ * Typed write (POST/PATCH/DELETE) against the API. Same auth as apiGet (X-Session-Token).
+ * JSON body when provided; validates the response through the given Zod schema. Throws
+ * ApiError (with .status + server `error` message) on non-2xx.
+ */
+export async function apiSend<S extends z.ZodTypeAny>(
+  method: string,
+  path: string,
+  body: unknown,
+  schema: S,
+): Promise<z.infer<S>>;
+export async function apiSend(method: string, path: string, body?: unknown): Promise<unknown>;
+export async function apiSend(
+  method: string,
+  path: string,
+  body?: unknown,
+  schema?: z.ZodTypeAny,
+): Promise<unknown> {
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  const token = getSessionToken();
+  if (token) headers['X-Session-Token'] = token;
+  const init: RequestInit = { method, credentials: 'same-origin', headers };
+  if (body !== undefined) {
+    headers['Content-Type'] = 'application/json';
+    init.body = JSON.stringify(body);
+  }
+  const res = await fetch(path, init);
+  if (!res.ok) {
+    let message = `${res.status} ${res.statusText}`;
+    try {
+      const errBody = await res.json();
+      if (errBody && typeof errBody.error === 'string') message = errBody.error;
+    } catch {
+      /* error body was not JSON */
+    }
+    throw new ApiError(res.status, message);
+  }
+  if (res.status === 204) return null;
+  const data: unknown = await res.json().catch(() => null);
+  return schema ? schema.parse(data) : data;
+}

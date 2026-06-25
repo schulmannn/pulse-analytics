@@ -8,6 +8,12 @@ import { KpiGrid } from '@/panels/KpiGrid';
 import { Charts } from '@/panels/Charts';
 import { Posts } from '@/panels/Posts';
 import { Mentions } from '@/panels/Mentions';
+import { TgAnalytics } from '@/panels/TgAnalytics';
+import { Hashtags } from '@/panels/Hashtags';
+import { Digest } from '@/panels/Digest';
+import { Settings } from '@/panels/Settings';
+import { Admin } from '@/panels/Admin';
+import { Bugs } from '@/panels/Bugs';
 
 export default function App() {
   const me = useMe();
@@ -41,9 +47,13 @@ export default function App() {
     <Routes>
       <Route element={<DashboardLayout email={me.data?.email} role={me.data?.role} />}>
         <Route index element={<Overview />} />
+        <Route path="analytics" element={<Analytics />} />
         <Route path="charts" element={<Charts />} />
         <Route path="posts" element={<Posts />} />
         <Route path="mentions" element={<Mentions />} />
+        <Route path="settings" element={<Settings />} />
+        <Route path="admin" element={<Admin />} />
+        <Route path="bugs" element={<Bugs />} />
         <Route path="*" element={<Overview />} />
       </Route>
     </Routes>
@@ -56,6 +66,17 @@ function Overview() {
     <div className="space-y-8">
       <Hero />
       <KpiGrid />
+    </div>
+  );
+}
+
+/** Analytics tab — TG breakdowns + hashtag lift + auto-digest. */
+function Analytics() {
+  return (
+    <div className="space-y-8">
+      <TgAnalytics />
+      <Hashtags />
+      <Digest />
     </div>
   );
 }
