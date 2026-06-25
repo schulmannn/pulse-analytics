@@ -4,6 +4,8 @@ import { apiGet, apiSend } from '@/api/client';
 import {
   AdminUserSchema,
   AdminUsersResponseSchema,
+  AuthMessageSchema,
+  AuthOkSchema,
   BugSchema,
   BugsResponseSchema,
   ChannelSchema,
@@ -12,6 +14,7 @@ import {
   GraphsSchema,
   HistorySchema,
   KeySchema,
+  LoginResponseSchema,
   MentionsSchema,
   MeSchema,
   PostStatsSchema,
@@ -19,6 +22,7 @@ import {
   TgFullSchema,
   VelocitySchema,
 } from '@/api/schemas';
+import { clearSessionToken, setSessionToken } from '@/lib/session';
 
 /** Current session. retry:false so a 401 surfaces immediately (→ login gate). */
 export function useMe() {
@@ -26,6 +30,71 @@ export function useMe() {
     queryKey: ['me'],
     queryFn: () => apiGet('/api/auth/me', MeSchema),
     retry: false,
+  });
+}
+
+function sessionTtl(expiresAt?: string | null): number | undefined {
+  if (!expiresAt) return undefined;
+  const ttlMs = Date.parse(expiresAt) - Date.now();
+  return Number.isFinite(ttlMs) && ttlMs > 0 ? ttlMs : undefined;
+}
+
+export function useLogin() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { email: string; password: string }) =>
+      apiSend('POST', '/api/auth/login', body, LoginResponseSchema),
+    onSuccess: (data) => {
+      setSessionToken(data.token, sessionTtl(data.expiresAt));
+      return qc.invalidateQueries();
+    },
+  });
+}
+
+export function useRegister() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { email: string; password: string }) =>
+      apiSend('POST', '/api/auth/register', body, AuthMessageSchema),
+    onSuccess: () => qc.invalidateQueries(),
+  });
+}
+
+export function useVerify() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { token: string }) => apiSend('POST', '/api/auth/verify', body, AuthOkSchema),
+    onSuccess: () => qc.invalidateQueries(),
+  });
+}
+
+export function useForgot() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { email: string }) => apiSend('POST', '/api/auth/forgot', body, AuthMessageSchema),
+    onSuccess: () => qc.invalidateQueries(),
+  });
+}
+
+export function useReset() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { token: string; password: string }) =>
+      apiSend('POST', '/api/auth/reset', body, AuthMessageSchema),
+    onSuccess: () => qc.invalidateQueries(),
+  });
+}
+
+export function useLogout() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiSend('POST', '/api/auth/logout', undefined, AuthOkSchema),
+    onSuccess: () => {
+      clearSessionToken();
+      return qc.invalidateQueries();
+    },
+    onError: () => clearSessionToken(),
+    onSettled: () => qc.clear(),
   });
 }
 

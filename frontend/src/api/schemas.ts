@@ -81,6 +81,30 @@ export const MeSchema = z
   .passthrough();
 export type Me = z.infer<typeof MeSchema>;
 
+export const LoginResponseSchema = z
+  .object({
+    token: z.string(),
+    expiresAt: z.string().optional().nullable(),
+    user: z
+      .object({
+        email: z.string().optional().nullable(),
+        role: z.string().optional().nullable(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
+
+export const AuthMessageSchema = z
+  .object({
+    ok: z.boolean().optional(),
+    status: z.string().optional(),
+    message: z.string().optional(),
+  })
+  .passthrough();
+
+export const AuthOkSchema = z.object({ ok: z.boolean() }).passthrough();
+
 export const MentionsSchema = z
   .object({
     available: z.boolean().optional(),

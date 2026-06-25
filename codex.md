@@ -117,7 +117,7 @@ Dockerfile) не тронуто. Мелочь на потом (не блокер
 
 ---
 
-### 🟢 TASK-002 — Auth в новом аппе (ЛОГИКА; дизайн форм/лендинга — за Claude)
+### ✅ TASK-002 — Auth в новом аппе (ЛОГИКА; дизайн форм/лендинга — за Claude)
 
 **Зачем.** Сейчас логин только через старый дашборд `/` (новый апп читает общий
 localStorage-токен `pulse_token`). Это **блокер катовера 3F-3**: когда `/` станет новым аппом,
@@ -142,4 +142,31 @@ localStorage-токен `pulse_token`). Это **блокер катовера 3
 **Критерии приёмки:** build зелёный; существующий верифицированный юзер логинится прямо в новом
 аппе (токен в localStorage, редирект на Обзор); logout чистит токен и кидает на `/login`.
 
-_(активируется после ревью TASK-001)_
+#### Отчёт Codex
+
+Изменённые файлы:
+- `frontend/src/lib/session.ts` — добавлены `setSessionToken`/`clearSessionToken`, TTL по умолчанию 8 часов.
+- `frontend/src/api/schemas.ts` — permissive Zod-схемы ответов login и остальных auth-операций.
+- `frontend/src/api/queries.ts` — `useLogin/useRegister/useVerify/useForgot/useReset/useLogout` через `apiSend`.
+- `frontend/src/pages/Auth.tsx` — функциональные формы login/register/verify/reset и forgot-режим формы входа; оставлена пометка `DESIGN: Claude review`.
+- `frontend/src/App.tsx` — публичные auth-роуты и guard с редиректом неавторизованного пользователя на `/login`.
+- `frontend/src/components/DashboardLayout.tsx` — logout с очисткой сессии и редиректом на `/login`.
+- `frontend/src/main.tsx` — React runtime переведён на именованные импорты без `import React`.
+- `codex.md` — статус задачи и отчёт.
+
+Хвост `cd frontend && npm run build`:
+```text
+✓ 120 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                  0.71 kB │ gzip:   0.39 kB
+dist/assets/index-DXG_Pph5.css  22.39 kB │ gzip:   5.06 kB
+dist/assets/index-DGBdZhVB.js  376.61 kB │ gzip: 108.24 kB
+✓ built in 4.11s
+```
+
+Решения/сомнения:
+- `/api/auth/login` действительно возвращает `token` и `expiresAt`; токен сохраняется до редиректа, TTL вычисляется из серверного `expiresAt`.
+- Тела запросов совпадают с хендлерами: login/register `{email,password}`, verify `{token}`, forgot `{email}`, reset `{token,password}`, logout без тела.
+- Logout очищает localStorage и при успешном ответе, и при сетевой/серверной ошибке.
+- Текущие email-ссылки сервера всё ещё ведут на legacy `/api/auth/verify?token=...` и `/?reset=...`; новые `/verify?token=...` и `/reset?token=...` реализованы, но переключение URL писем относится к катоверу/серверному скоупу Claude.

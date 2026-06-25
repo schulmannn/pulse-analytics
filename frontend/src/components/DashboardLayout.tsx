@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { NavLink, Outlet } from 'react-router-dom';
-import { useChannels } from '@/api/queries';
+import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { useChannels, useLogout } from '@/api/queries';
 import { getSelectedChannel, setSelectedChannel } from '@/lib/channel';
 
 const BASE_TABS = [
@@ -27,6 +27,14 @@ interface DashboardLayoutProps {
 /** App shell: sticky top bar with brand, the current user, and tab navigation. */
 export function DashboardLayout({ email, role }: DashboardLayoutProps) {
   const tabs = role === 'superuser' ? [...BASE_TABS, ...SUPER_TABS] : BASE_TABS;
+  const navigate = useNavigate();
+  const logoutMutation = useLogout();
+
+  const handleLogout = () => {
+    logoutMutation.mutate(undefined, {
+      onSettled: () => navigate('/login', { replace: true }),
+    });
+  };
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -41,6 +49,14 @@ export function DashboardLayout({ email, role }: DashboardLayoutProps) {
             {role === 'superuser' && (
               <span className="rounded-full border px-2 py-0.5 font-medium">super</span>
             )}
+            <button
+              type="button"
+              onClick={handleLogout}
+              disabled={logoutMutation.isPending}
+              className="rounded border bg-background px-2 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+            >
+              {logoutMutation.isPending ? 'Выход…' : 'Выйти'}
+            </button>
           </div>
         </div>
         <nav className="mx-auto flex max-w-6xl gap-1 overflow-x-auto px-4">
