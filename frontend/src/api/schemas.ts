@@ -46,3 +46,52 @@ export const MeSchema = z
   })
   .passthrough();
 export type Me = z.infer<typeof MeSchema>;
+
+export const MentionsSchema = z
+  .object({
+    available: z.boolean().optional(),
+    error: z.string().optional().nullable(),
+    quota: z
+      .object({
+        remains: z.coerce.number().optional().nullable(),
+        total: z.coerce.number().optional().nullable(),
+      })
+      .passthrough()
+      .optional()
+      .nullable(),
+    skipped: z.array(z.string()).optional().nullable(),
+    total: z.coerce.number().optional().nullable(),
+    unique_channels: z.coerce.number().optional().nullable(),
+    total_views: z.coerce.number().optional().nullable(),
+    by_day: z.record(z.string(), z.coerce.number()).optional().nullable(),
+    top_channels: z
+      .array(
+        z
+          .object({
+            username: z.string().optional().nullable(),
+            title: z.string().optional().nullable(),
+            count: z.coerce.number(),
+            views: z.coerce.number().optional().nullable(),
+          })
+          .passthrough(),
+      )
+      .optional()
+      .nullable(),
+    recent: z
+      .array(
+        z
+          .object({
+            date: z.string().optional().nullable(),
+            username: z.string().optional().nullable(),
+            title: z.string().optional().nullable(),
+            link: z.string().optional().nullable(),
+            views: z.coerce.number().optional().nullable(),
+            snippet: z.string().optional().nullable(),
+          })
+          .passthrough(),
+      )
+      .optional()
+      .nullable(),
+  })
+  .passthrough();
+export type Mentions = z.infer<typeof MentionsSchema>;

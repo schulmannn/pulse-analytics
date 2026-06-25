@@ -3,6 +3,7 @@ import { useMe } from '@/api/queries';
 import { ApiError } from '@/api/client';
 import { Hero } from '@/panels/Hero';
 import { KpiGrid } from '@/panels/KpiGrid';
+import { Mentions } from '@/panels/Mentions';
 
 export default function App() {
   const me = useMe();
@@ -40,6 +41,7 @@ export default function App() {
     <Shell>
       <Hero />
       <KpiGrid />
+      <Mentions />
     </Shell>
   );
 }
