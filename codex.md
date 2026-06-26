@@ -870,7 +870,22 @@ Stripe/Raycast) — палитра команд по `⌘K`/`Ctrl+K`: мгнов
 collector-канал С данными показывают обычный дашборд; loading/error не регрессируют.
 
 #### Отчёт Codex
-_(пусто — заполнит Codex)_
+
+**Выполнено:** 2026-06-26  
+**Ветка:** `codex/task-014` (коммит 10c8448)  
+**Файлы:**
+- создан: `frontend/src/components/CollectorEmptyState.tsx`
+- изменён: `frontend/src/App.tsx` (добавлены 4 импорта; `Overview` расширен логикой пустого состояния)
+
+**Сборка:** `npm run build` → ✅ зелёная (tsc --noEmit + vite build, 131 модуль)  
+**Тесты:** `npm test` → ✅ зелёные (26 тестов / 6 файлов)
+
+**Решения:**
+- Хуки: `useTgFull` и `useChannels` в `@/api/queries`, `usePeriod` в `@/lib/period`.
+- Поле username: `Channel.username` (nullable string) — `channel?.username ?? ''`.
+- Пустота проверяется только при !isLoading && !isError, чтобы не скрывать ошибки.
+- CRLF-файл: замены сделаны CRLF-совместимо.
+- Ветка `codex/task-014` создана локально, в main не смерджена.
 
 ---
 
