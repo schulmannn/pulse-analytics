@@ -955,4 +955,56 @@ Telethon уже в зависимостях. api_id/api_hash — пока из e
 как проверял (хотя бы парс + ручной прогон `login`, если есть тестовый аккаунт).
 
 #### Отчёт Codex
-_(пусто — заполнит Codex)_
+
+**Реализовано Claude (2026-06-26). Задача выполнена — все 5 пунктов спецификации.**
+
+**Изменённые/созданные файлы:**
+- `collector/pulse_collector.py` — основные изменения (411 строк, было 294)
+- `collector/requirements.txt` — создан (`telethon`, `qrcode`)
+- `collector/README.md` — обновлён: `login` как первый шаг, `TG_SESSION` помечен optional
+
+**Что сделано:**
+1. `state_directory()` перемещена перед `required_config()` (нужна в `_load_session_from_file`).
+2. `_load_session_from_file()` — загружает `session.txt` в `os.environ["TG_SESSION"]` ДО
+   любого импорта `mtproto.service` (вызов первой строкой `async_main`).
+3. `validate_config()` — `TG_SESSION` убран из `required`; добавлен параметр `command`;
+   при отсутствии сессии и `command not in ("login", "flush")` — понятная ошибка с инструкцией.
+4. `render_qr(url)` — ASCII-QR через `qrcode.QRCode(border=1).print_ascii(invert=True)`.
+5. `login_command()` — QR-цикл: `qr_login()` → показ QR → `qr.wait(timeout=30)` →
+   `asyncio.TimeoutError` → `qr.recreate()` и новый QR; `SessionPasswordNeededError` →
+   `getpass` + `sign_in(password=...)`; сохранение `session.txt` с chmod 600 в `finally`.
+6. `parse_args()` — `"login"` добавлен в `choices`.
+
+**Верификация:**
+```
+$ py -3 -c "import ast; ast.parse(open('collector/pulse_collector.py').read()); print('syntax OK')"
+syntax OK
+
+$ py -3 collector/pulse_collector.py --help
+usage: pulse_collector.py [-h] [--mentions] [{login,run,once,flush,doctor}]
+...
+  {login,run,once,flush,doctor}
+                        login: QR-login to Telegram and save session locally (first-time setup).
+```
+13/13 структурных проверок прошли (state_directory, _load_session_from_file, session file load,
+render_qr, login_command, _save_session, SessionPasswordNeededError, qr.recreate, choices, и др.).
+
+**Решения/неопределённости:**
+- `!r` f-string в сообщении ошибки (`got: {api_id_str!r}`) заменён на `repr(api_id_str)` во
+  избежание проблем с двойным экранированием при генерации файла; семантика идентична.
+- Файл не пушился в main; изменения в рабочем дереве ветки `main` (uncommitted).
+- Реальный тестовый аккаунт не использовался — QR-рендер и control flow проверены только
+  синтаксически и структурно.
+
+**Ревью Claude — ✅ одобрено с правкой, замёржено в `main`.** Control flow QR/2FA корректен
+(`qr_login` → `wait(30)` → `SessionPasswordNeededError`→`sign_in(password)`; сохранение StringSession
+в `session.txt`). Подтвердил ключевой инвариант: `from mtproto import service` — ЛЕНИВЫЙ (строки 246/315),
+а `_load_session_from_file()` стоит первой строкой `async_main` → env `TG_SESSION` выставлен ДО импорта
+service. **Claude-правка (1 баг):** `qr = await qr.recreate()` → `await qr.recreate()` — в Telethon
+1.43.2 `recreate()` мутирует объект на месте и может вернуть `None`; реассайн обнулял бы `qr` и валил
+`qr.url` на втором QR после таймаута (канонический паттерн Telethon — без реассайна). Также запинил
+`telethon==1.43.2` в `collector/requirements.txt` (совпасть с `mtproto/requirements.txt`). Проверил:
+`ast.parse` ок, `--help` показывает `login`. Реальный QR-скан не тестируется в моём окружении —
+**это проверит юзер** (скачает агент → `login` → скан). **Отличная работа — вторая задача через прямой
+Codex-CLI-runtime.**
+

@@ -36,6 +36,27 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def state_directory() -> Path:
+    configured = os.getenv("COLLECTOR_STATE_DIR", "")
+    return Path(configured).expanduser() if configured else Path.home() / ".pulse-collector"
+
+
+def _load_session_from_file() -> None:
+    """If TG_SESSION env is empty and session.txt exists, load it into env.
+
+    MUST run before any branch that imports mtproto.service because
+    service.py reads TG_SESSION at module import time.
+    """
+    if os.getenv("TG_SESSION"):
+        return  # env already set; env takes priority over file
+    session_file = state_directory() / "session.txt"
+    if session_file.exists():
+        saved = session_file.read_text(encoding="utf-8").strip()
+        if saved:
+            os.environ["TG_SESSION"] = saved
+            LOG.debug("Loaded TG_SESSION from %s", session_file)
+
+
 def required_config() -> dict[str, str]:
     return {
         "PULSE_API_URL": os.getenv("PULSE_API_URL", "").rstrip("/"),
@@ -47,15 +68,95 @@ def required_config() -> dict[str, str]:
     }
 
 
-def validate_config(needs_telegram: bool = True) -> dict[str, str]:
+def validate_config(needs_telegram: bool = True, command: str = "") -> dict[str, str]:
     config = required_config()
     required = ["PULSE_API_URL", "PULSE_API_KEY"]
     if needs_telegram:
-        required += ["TG_API_ID", "TG_API_HASH", "TG_SESSION", "TG_CHANNEL"]
+        # TG_API_ID, TG_API_HASH, TG_CHANNEL required; TG_SESSION from login/file.
+        required += ["TG_API_ID", "TG_API_HASH", "TG_CHANNEL"]
     missing = [key for key in required if not config[key]]
     if missing:
         raise RuntimeError("Missing environment variables: " + ", ".join(missing))
+    # If session still absent and command is not login/flush
+    if needs_telegram and command not in ("login", "flush") and not config["TG_SESSION"]:
+        raise RuntimeError(
+            "No Telegram session found. "
+            "Run python collector/pulse_collector.py login "
+            "(shows a QR code to scan in Telegram) to create a local session."
+        )
     return config
+
+
+def render_qr(url: str) -> None:
+    """Print an ASCII QR code for the given URL."""
+    import qrcode  # type: ignore[import]
+    q = qrcode.QRCode(border=1)
+    q.add_data(url)
+    q.make(fit=True)
+    q.print_ascii(invert=True)
+
+
+async def login_command() -> int:
+    """QR-login: show QR, wait for scan, handle 2FA, save session.txt."""
+    from telethon import TelegramClient  # type: ignore[import]
+    from telethon.sessions import StringSession  # type: ignore[import]
+    from telethon.errors import SessionPasswordNeededError  # type: ignore[import]
+
+    api_id_str = os.getenv("TG_API_ID", "")
+    api_hash = os.getenv("TG_API_HASH", "")
+    if not api_id_str or not api_hash:
+        raise RuntimeError("TG_API_ID and TG_API_HASH must be set to run login.")
+    try:
+        api_id = int(api_id_str)
+    except ValueError as exc:
+        raise RuntimeError("TG_API_ID must be an integer, got: " + repr(api_id_str)) from exc
+
+    client = TelegramClient(StringSession(), api_id, api_hash)
+    try:
+        await client.connect()
+        if await client.is_user_authorized():
+            LOG.info("Already authorised -- saving existing session.")
+            _save_session(client)
+            print("Session already active -- session.txt updated.")
+            return 0
+
+        # QR login loop
+        qr = await client.qr_login()
+        while True:
+            print(chr(10) + "=" * 50)
+            render_qr(qr.url)
+            print("Open Telegram -> Settings -> Devices -> Link Desktop Device,")
+            print("point the camera at the QR code above.")
+            print("=" * 50 + chr(10))
+            try:
+                await qr.wait(timeout=30)
+                break  # logged in successfully
+            except asyncio.TimeoutError:
+                LOG.info("QR timeout -- generating a new code.")
+                await qr.recreate()  # mutates in place; don't reassign (may return None)
+                continue
+            except SessionPasswordNeededError:
+                from getpass import getpass
+                password = getpass("Two-factor authentication password: ")
+                await client.sign_in(password=password)
+                break
+
+        _save_session(client)
+        print("Done -- session saved. You can now run once/run.")
+        return 0
+    finally:
+        await client.disconnect()
+
+
+def _save_session(client) -> None:
+    """Save StringSession to state_directory()/session.txt (mode 0o600)."""
+    state_dir = state_directory()
+    state_dir.mkdir(parents=True, exist_ok=True)
+    session_file = state_dir / "session.txt"
+    session_string = client.session.save()
+    session_file.write_text(session_string, encoding="utf-8")
+    session_file.chmod(0o600)
+    LOG.info("Session saved to %s", session_file)
 
 
 class DeliveryQueue:
@@ -232,14 +333,20 @@ async def run_once(queue: DeliveryQueue, config: dict[str, str], include_mention
     queue.enqueue(payload)
     return flush_queue(queue, config)
 
-
-def state_directory() -> Path:
-    configured = os.getenv("COLLECTOR_STATE_DIR", "")
-    return Path(configured).expanduser() if configured else Path.home() / ".pulse-collector"
-
-
 async def async_main(args: argparse.Namespace) -> int:
-    config = validate_config(needs_telegram=args.command != "flush")
+    # === CRITICAL: load saved session BEFORE any mtproto.service import ===
+    # mtproto/service.py reads TG_SESSION from os.getenv at import time.
+    # This must run before the doctor/once/run branches which import service.
+    _load_session_from_file()
+
+    # login command handled before validate_config (no PULSE_API_URL/KEY needed)
+    if args.command == "login":
+        return await login_command()
+
+    config = validate_config(
+        needs_telegram=args.command != "flush",
+        command=args.command,
+    )
     queue = DeliveryQueue(state_directory())
     include_mentions = bool(args.mentions or os.getenv("COLLECT_MENTIONS") == "1")
 
@@ -267,7 +374,17 @@ async def async_main(args: argparse.Namespace) -> int:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Pulse Analytics local Telegram collector")
-    parser.add_argument("command", choices=["run", "once", "flush", "doctor"], nargs="?", default="run")
+    parser.add_argument(
+        "command",
+        choices=["login", "run", "once", "flush", "doctor"],
+        nargs="?",
+        default="run",
+        help=(
+            "login: QR-login to Telegram and save session locally (first-time setup). "
+            "run: collect every 6 hours. once: collect once. "
+            "flush: retry queued deliveries. doctor: verify connectivity."
+        ),
+    )
     parser.add_argument(
         "--mentions",
         action="store_true",
