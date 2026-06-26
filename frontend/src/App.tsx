@@ -20,6 +20,11 @@ import { Bugs } from '@/panels/Bugs';
 import { Skeleton } from '@/components/ui/skeleton';
 import { CommandPalette } from '@/components/CommandPalette';
 
+import { useChannels, useTgFull } from '@/api/queries';
+import { useSelectedChannel } from '@/lib/channel-context';
+import { usePeriod } from '@/lib/period';
+import { CollectorEmptyState } from '@/components/CollectorEmptyState';
+
 export default function App() {
   return (
     <Routes>
@@ -83,6 +88,20 @@ function ProtectedLayout() {
 
 /** Landing tab — greeting + KPI cards. */
 function Overview() {
+  const { channelId } = useSelectedChannel();
+  const { data: channelsData } = useChannels();
+  const { days } = usePeriod();
+  const { data, isLoading, isError } = useTgFull(days);
+
+  const channel = channelsData?.channels.find((c) => c.id === channelId);
+  const isCollector = channel?.source === 'collector';
+  const isEmpty =
+    !isLoading && !isError && !data?.channel && (data?.posts?.length ?? 0) === 0;
+
+  if (isCollector && isEmpty) {
+    return <CollectorEmptyState username={channel?.username ?? ''} />;
+  }
+
   return (
     <div className="space-y-8">
       <Hero />
