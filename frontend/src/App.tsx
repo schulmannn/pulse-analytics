@@ -5,6 +5,7 @@ import { ApiError } from '@/api/client';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { LoginPage, RegisterPage, ResetPage, VerifyPage } from '@/pages/Auth';
 import { Landing } from '@/pages/Landing';
+import { Connect } from '@/pages/Connect';
 import { Hero } from '@/panels/Hero';
 import { KpiGrid } from '@/panels/KpiGrid';
 import { Charts } from '@/panels/Charts';
@@ -35,6 +36,7 @@ export default function App() {
         <Route path="settings" element={<Settings />} />
         <Route path="admin" element={<Admin />} />
         <Route path="bugs" element={<Bugs />} />
+        <Route path="connect" element={<Connect />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

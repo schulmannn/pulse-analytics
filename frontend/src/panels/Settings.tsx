@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { Link } from 'react-router-dom';
 import {
   useChannels,
   useCreateChannel,
@@ -213,7 +214,10 @@ function ChannelKeysPanel({ channelId }: { channelId: number }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-4">
-        <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Ключи внешних коллекторов</h4>
+        <div className="flex items-baseline gap-3">
+          <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Ключи внешних коллекторов</h4>
+          <Link to="/connect" className="text-[11px] text-primary hover:underline">Что делать с ключом? →</Link>
+        </div>
         <button
           onClick={handleCreateKey}
           disabled={createKeyMutation.isPending}
