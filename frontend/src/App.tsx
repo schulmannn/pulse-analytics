@@ -17,6 +17,7 @@ import { Settings } from '@/panels/Settings';
 import { Admin } from '@/panels/Admin';
 import { Bugs } from '@/panels/Bugs';
 import { Skeleton } from '@/components/ui/skeleton';
+import { CommandPalette } from '@/components/CommandPalette';
 
 export default function App() {
   return (
@@ -70,7 +71,12 @@ function ProtectedLayout() {
     );
   }
 
-  return <DashboardLayout email={me.data?.email} role={me.data?.role} />;
+  return (
+    <>
+      <DashboardLayout email={me.data?.email} role={me.data?.role} />
+      <CommandPalette />
+    </>
+  );
 }
 
 /** Landing tab — greeting + KPI cards. */
