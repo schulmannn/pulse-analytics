@@ -1,4 +1,7 @@
+import { useRef, useState } from 'react';
+import type { MouseEvent as ReactMouseEvent } from 'react';
 import { fmt } from '@/lib/format';
+import { ChartTooltip } from '@/components/ChartTooltip';
 
 interface LineChartProps {
   values: number[];
@@ -9,7 +12,16 @@ interface LineChartProps {
   height?: number;
 }
 
+interface Hover {
+  i: number;
+  x: number;
+  y: number;
+}
+
 export function LineChart({ values, labels, titles, yMin, yMax, height }: LineChartProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [hover, setHover] = useState<Hover | null>(null);
+
   if (!values || values.length < 2) {
     return (
       <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
@@ -46,65 +58,52 @@ export function LineChart({ values, labels, titles, yMin, yMax, height }: LineCh
   const yGridValues = [max, (max + min) / 2, min];
   const yGridPositions = [padY, h / 2, h - padY];
 
+  const tipText = (i: number) => titles?.[i] ?? fmt.num(values[i]);
+  const onMove = (i: number) => (event: ReactMouseEvent) => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setHover({ i, x: event.clientX - rect.left, y: event.clientY - rect.top });
+  };
+
+  const hovered = hover ? points[hover.i] : null;
+
   return (
-    <div className="w-full">
+    <div ref={containerRef} className="relative w-full" onMouseLeave={() => setHover(null)}>
       <svg className="h-auto w-full" viewBox={`0 0 600 ${h}`}>
         {/* Gridlines */}
         {yGridPositions.map((yPos, idx) => (
-          <line
-            key={idx}
-            x1={0}
-            y1={yPos}
-            x2={600}
-            y2={yPos}
-            stroke="hsl(var(--border))"
-            strokeDasharray="4 4"
-            strokeWidth="1"
-          />
+          <line key={idx} x1={0} y1={yPos} x2={600} y2={yPos} stroke="hsl(var(--border))" strokeDasharray="4 4" strokeWidth="1" />
         ))}
 
         {/* Area + line */}
         <path d={areaPath} fill="hsl(var(--brand-iris))" opacity="0.06" />
-        <path
-          d={linePath}
-          fill="none"
-          stroke="hsl(var(--brand-iris))"
-          strokeWidth="2"
-          vectorEffect="non-scaling-stroke"
-        />
+        <path d={linePath} fill="none" stroke="hsl(var(--brand-iris))" strokeWidth="2" vectorEffect="non-scaling-stroke" />
 
         {/* Last-point marker */}
         <circle cx={lastPt.x} cy={lastPt.y} r="8" fill="hsl(var(--brand-iris))" opacity="0.15" />
         <circle cx={lastPt.x} cy={lastPt.y} r="4" fill="hsl(var(--brand-iris))" />
 
+        {/* Hovered-point crosshair + marker */}
+        {hovered && (
+          <>
+            <line x1={hovered.x} y1={0} x2={hovered.x} y2={h} stroke="hsl(var(--brand-iris))" strokeWidth="1" opacity="0.35" />
+            <circle cx={hovered.x} cy={hovered.y} r="4" fill="hsl(var(--brand-iris))" stroke="hsl(var(--background))" strokeWidth="1.5" />
+          </>
+        )}
+
         {/* Y-axis labels */}
         {yGridValues.map((yVal, idx) => (
-          <text
-            key={idx}
-            x={padX + 4}
-            y={yGridPositions[idx] + (idx === 0 ? 12 : idx === 2 ? -4 : 4)}
-            className="select-none fill-muted-foreground text-[11px] font-medium"
-          >
+          <text key={idx} x={padX + 4} y={yGridPositions[idx] + (idx === 0 ? 12 : idx === 2 ? -4 : 4)} className="pointer-events-none select-none fill-muted-foreground text-[11px] font-medium">
             {fmt.short(yVal)}
           </text>
         ))}
 
-        {/* Per-point hover targets → native tooltips */}
+        {/* Per-point hover targets */}
         {points.map((p, i) => {
           const xStart = i === 0 ? 0 : p.x - step / 2;
           const xEnd = i === n - 1 ? 600 : p.x + step / 2;
           return (
-            <rect
-              key={i}
-              x={xStart}
-              y={0}
-              width={Math.max(xEnd - xStart, 1)}
-              height={h}
-              fill="transparent"
-              className="cursor-pointer"
-            >
-              {titles && <title>{titles[i]}</title>}
-            </rect>
+            <rect key={i} x={xStart} y={0} width={Math.max(xEnd - xStart, 1)} height={h} fill="transparent" className="cursor-pointer" onMouseMove={onMove(i)} />
           );
         })}
       </svg>
@@ -117,6 +116,8 @@ export function LineChart({ values, labels, titles, yMin, yMax, height }: LineCh
           <span>{labels[labels.length - 1]}</span>
         </div>
       )}
+
+      <ChartTooltip tip={hover ? { x: hover.x, y: hover.y, text: tipText(hover.i) } : null} />
     </div>
   );
 }

@@ -1,3 +1,7 @@
+import { useRef, useState } from 'react';
+import type { MouseEvent as ReactMouseEvent } from 'react';
+import { ChartTooltip } from '@/components/ChartTooltip';
+
 interface BarChartProps {
   values: number[];
   labels?: string[];
@@ -5,7 +9,16 @@ interface BarChartProps {
   height?: number;
 }
 
+interface Hover {
+  i: number;
+  x: number;
+  y: number;
+}
+
 export function BarChart({ values, labels, titles, height = 200 }: BarChartProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [hover, setHover] = useState<Hover | null>(null);
+
   if (!values || values.length === 0) {
     return (
       <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
@@ -24,44 +37,63 @@ export function BarChart({ values, labels, titles, height = 200 }: BarChartProps
   const barWidth = itemWidth * 0.7;
   const barGap = itemWidth * 0.3;
 
+  const tipText = (i: number) => titles?.[i] ?? `${labels?.[i] ?? ''}: ${values[i]}`;
+  const onMove = (i: number) => (event: ReactMouseEvent) => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setHover({ i, x: event.clientX - rect.left, y: event.clientY - rect.top });
+  };
+
   return (
-    <svg
-      className="h-auto w-full"
-      viewBox={`0 0 ${chartWidth} ${chartHeight}`}
-      preserveAspectRatio="xMidYMid meet"
-    >
-      {values.map((val, i) => {
-        const barHeight = (val / max) * graphHeight;
-        const x = i * itemWidth + barGap / 2;
-        const y = graphHeight - barHeight;
+    <div ref={containerRef} className="relative" onMouseLeave={() => setHover(null)}>
+      <svg
+        className="h-auto w-full"
+        viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+        preserveAspectRatio="xMidYMid meet"
+      >
+        {values.map((val, i) => {
+          const barHeight = (val / max) * graphHeight;
+          const x = i * itemWidth + barGap / 2;
+          const y = graphHeight - barHeight;
+          const showLabel = labels?.[i] && (i === 0 || i === values.length - 1 || i % 2 === 0);
 
-        // Показывать подписи выборочно (первая, последняя, каждая вторая), чтобы избежать наложения
-        const showLabel = labels?.[i] && (i === 0 || i === values.length - 1 || i % 2 === 0);
-
-        return (
-          <g key={i}>
-            <title>{titles?.[i] ?? `${labels?.[i] ?? ''}: ${val}`}</title>
-            <rect
-              x={x}
-              y={y}
-              width={barWidth}
-              height={Math.max(barHeight, 2)}
-              fill="hsl(var(--brand-iris))"
-              rx={2}
-            />
-            {showLabel && (
-              <text
-                x={x + barWidth / 2}
-                y={chartHeight - 6}
-                textAnchor="middle"
-                className="select-none fill-muted-foreground text-[11px] font-medium"
-              >
-                {labels?.[i]}
-              </text>
-            )}
-          </g>
-        );
-      })}
-    </svg>
+          return (
+            <g key={i}>
+              <rect
+                x={x}
+                y={y}
+                width={barWidth}
+                height={Math.max(barHeight, 2)}
+                fill="hsl(var(--brand-iris))"
+                rx={2}
+                className="pointer-events-none transition-opacity"
+                opacity={hover && hover.i !== i ? 0.55 : 1}
+              />
+              {showLabel && (
+                <text
+                  x={x + barWidth / 2}
+                  y={chartHeight - 6}
+                  textAnchor="middle"
+                  className="pointer-events-none select-none fill-muted-foreground text-[11px] font-medium"
+                >
+                  {labels?.[i]}
+                </text>
+              )}
+              {/* Wide transparent hit-area: hover anywhere over the column */}
+              <rect
+                x={i * itemWidth}
+                y={0}
+                width={itemWidth}
+                height={graphHeight}
+                fill="transparent"
+                className="cursor-pointer"
+                onMouseMove={onMove(i)}
+              />
+            </g>
+          );
+        })}
+      </svg>
+      <ChartTooltip tip={hover ? { x: hover.x, y: hover.y, text: tipText(hover.i) } : null} />
+    </div>
   );
 }

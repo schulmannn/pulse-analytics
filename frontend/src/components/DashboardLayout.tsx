@@ -26,7 +26,6 @@ const PERIODS: Array<{ days: PeriodDays; label: string }> = [
   { days: 7, label: '7д' },
   { days: 30, label: '30д' },
   { days: 90, label: '90д' },
-  { days: 365, label: 'Год' },
   { days: 0, label: 'Всё' },
 ];
 

@@ -12,7 +12,6 @@ const WINDOWS = [
   { days: 30, label: '1М' },
   { days: 90, label: '3М' },
   { days: 180, label: '6М' },
-  { days: 365, label: '1Г' },
   { days: 0, label: 'Всё' },
 ];
 

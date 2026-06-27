@@ -1,7 +1,7 @@
 import { createContext, useContext, useState } from 'react';
 import type { ReactNode } from 'react';
 
-export type PeriodDays = 7 | 30 | 90 | 365 | 0;
+export type PeriodDays = 7 | 30 | 90 | 0;
 
 interface PeriodContextValue {
   days: PeriodDays;

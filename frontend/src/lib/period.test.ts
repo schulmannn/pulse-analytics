@@ -6,7 +6,6 @@ describe('tgLimit', () => {
     [7, 30],
     [30, 60],
     [90, 100],
-    [365, 100],
     [0, 100],
   ] as const)('maps %s days to limit %s', (days, expected) => {
     expect(tgLimit(days)).toBe(expected);
