@@ -1,74 +1,58 @@
-import { useMentions } from '@/api/queries';
+import { useMentions, useMentionsArchive } from '@/api/queries';
 import { fmt } from '@/lib/format';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { BarChart } from '@/components/BarChart';
 import { Breakdown } from '@/components/Breakdown';
 import { Skeleton } from '@/components/ui/skeleton';
+import type { Mentions as MentionsData } from '@/api/schemas';
 
 export function Mentions() {
-  const { data, isFetching, isError, error, refetch, isFetched } = useMentions();
+  // Archive (Postgres) loads on mount — free. The live MTProto search only runs on the
+  // explicit "Обновить" press (it spends the ~10/day searchPosts quota) and, when it
+  // succeeds, supersedes the archive for this view.
+  const archive = useMentionsArchive();
+  const live = useMentions();
 
-  if (isFetching) {
-    return <MentionsSkeletons />;
-  }
+  const liveOk = live.isFetched && !!live.data && live.data.available !== false;
+  const data: MentionsData | undefined = liveOk ? live.data : archive.data;
 
-  if (isError) {
-    return (
-      <Card className="border-destructive/40">
-        <CardContent className="py-8 text-center text-sm text-muted-foreground">
-          Не удалось загрузить данные: {error instanceof Error ? error.message : 'ошибка сервера'}
-          <div className="mt-4">
-            <button
-              onClick={() => refetch()}
-              className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90"
-            >
-              Попробовать снова
-            </button>
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
+  const refresh = () => live.refetch();
+  const refreshing = live.isFetching;
 
-  // Заглушка до первого ручного запроса для экономии квоты
-  if (!isFetched) {
+  // A failed live search (quota/premium/error) — surfaced inline without wiping the archive.
+  const liveError = (() => {
+    if (live.isFetched && live.data && live.data.available === false) {
+      return /premium/i.test(live.data.error || '')
+        ? 'Нужен аккаунт с Telegram Premium.'
+        : live.data.error || 'Поиск недоступен.';
+    }
+    if (live.isError) return live.error instanceof Error ? live.error.message : 'Ошибка запроса';
+    return null;
+  })();
+
+  // First archive load with nothing to show yet.
+  if (archive.isLoading && !data) return <MentionsSkeletons />;
+
+  const hasData =
+    !!data && data.available !== false && ((data.total ?? 0) > 0 || (data.recent?.length ?? 0) > 0);
+
+  // Nothing archived yet (and no live result) → invite the quota-costing search.
+  if (!hasData) {
     return (
       <Card className="border-dashed">
         <CardContent className="flex flex-col items-center justify-center py-12 text-center">
           <h3 className="mb-1 text-base font-semibold text-foreground">Аналитика упоминаний бренда</h3>
           <p className="mb-5 max-w-md text-sm text-muted-foreground">
-            Запрос задействует поиск MTProto API и расходует ежедневную лимит-квоту аккаунта.
+            В архиве пока нет упоминаний. Поиск задействует MTProto API и расходует ежедневную
+            лимит-квоту аккаунта.
           </p>
+          {liveError && <p className="mb-4 text-sm text-destructive">{liveError}</p>}
           <button
-            onClick={() => refetch()}
-            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90"
+            onClick={refresh}
+            disabled={refreshing}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90 disabled:opacity-50"
           >
-            Загрузить упоминания
-          </button>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  // Обработка состояния недоступности функции поиска
-  if (data && data.available === false) {
-    const isPremiumError = data.error ? /premium/i.test(data.error) : false;
-    const hint = isPremiumError
-      ? 'Нужен аккаунт с Telegram Premium.'
-      : data.error || 'Поиск недоступен.';
-
-    return (
-      <Card className="border-destructive/40">
-        <CardHeader>
-          <CardTitle className="text-lg text-destructive">Не удалось загрузить</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="mb-4 text-sm text-muted-foreground">{hint}</p>
-          <button
-            onClick={() => refetch()}
-            className="rounded-md bg-secondary px-4 py-2 text-sm font-medium text-secondary-foreground transition-colors hover:bg-secondary/80"
-          >
-            Повторить запрос
+            {refreshing ? 'Поиск…' : 'Загрузить упоминания'}
           </button>
         </CardContent>
       </Card>
@@ -108,22 +92,29 @@ export function Mentions() {
 
   return (
     <div className="space-y-6">
-      {/* Заголовок панели с кнопкой обновления */}
+      {/* Заголовок панели с кнопкой живого обновления */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-xl font-bold tracking-tight">Упоминания бренда</h2>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            Прямой поиск по контенту публичных Telegram-каналов
+            Сохранённый архив · «Обновить» запускает поиск по Telegram (расход квоты)
           </p>
         </div>
         <button
-          onClick={() => refetch()}
-          disabled={isFetching}
+          onClick={refresh}
+          disabled={refreshing}
           className="shrink-0 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90 disabled:opacity-50"
         >
-          Обновить данные
+          {refreshing ? 'Обновление…' : 'Обновить'}
         </button>
       </div>
+
+      {/* Живой поиск не удался — архив остаётся виден */}
+      {liveError && (
+        <div className="rounded-md border border-destructive/40 bg-destructive/5 px-4 py-2.5 text-sm text-muted-foreground">
+          Не удалось обновить: {liveError} Показаны сохранённые данные.
+        </div>
+      )}
 
       {/* KPI Метрики */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">

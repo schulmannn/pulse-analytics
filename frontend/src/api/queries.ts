@@ -118,8 +118,8 @@ export function useTgFull(days: PeriodDays) {
 }
 
 /**
- * Brand mentions. enabled:false + manual refetch() — fetching costs searchPosts quota
- * (~10/day), so it only runs on an explicit "load/refresh" press, never on mount.
+ * Live brand mentions. enabled:false + manual refetch() — fetching costs searchPosts
+ * quota (~10/day), so it only runs on an explicit "refresh" press, never on mount.
  */
 export function useMentions() {
   const { channelId } = useSelectedChannel();
@@ -127,6 +127,18 @@ export function useMentions() {
     enabled: false,
     queryKey: ['mentions', channelId],
     queryFn: () => apiGet('/api/tg/mtproto/mentions', MentionsSchema),
+  });
+}
+
+/**
+ * Archived brand mentions (Postgres). Free — no MTProto quota — so it loads on mount;
+ * the live search above only refreshes/extends it on demand. Same response shape.
+ */
+export function useMentionsArchive() {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    queryKey: ['mentions-archive', channelId],
+    queryFn: () => apiGet('/api/history/mentions', MentionsSchema),
   });
 }
 
