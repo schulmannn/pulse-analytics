@@ -60,6 +60,7 @@ const TITLES: Record<string, string> = {
   '/admin': 'Админ',
   '/bugs': 'Баги',
   '/connect': 'Подключение данных',
+  '/instagram': 'Instagram',
 };
 
 const PERIODS: Array<{ days: PeriodDays; label: string }> = [
@@ -71,8 +72,8 @@ const PERIODS: Array<{ days: PeriodDays; label: string }> = [
 
 // Platform brand colors (platform identity, not the app palette — intentional hex).
 const PLATFORMS = [
-  { key: 'tg', name: 'Telegram', color: '#229ED9', active: true, soon: false },
-  { key: 'ig', name: 'Instagram', color: '#E1306C', active: false, soon: false },
+  { key: 'tg', name: 'Telegram', color: '#229ED9', to: '/' },
+  { key: 'ig', name: 'Instagram', color: '#E1306C', to: '/instagram' },
 ];
 
 /** Brand glyph for the platform chip (white, on the brand-colored square). */
@@ -481,31 +482,37 @@ function PeriodSwitcher() {
   );
 }
 
-/** Network selector. Only Telegram is live today; others are forthcoming. */
+/** Network selector — switches the dashboard between platforms (Telegram ↔ Instagram). */
 function PlatformSwitcher() {
+  const { pathname } = useLocation();
+  const navigate = useNavigate();
+  const igActive = pathname.startsWith('/instagram');
   return (
     <div className="mb-6 flex flex-wrap gap-2">
-      {PLATFORMS.map((p) => (
-        <div
-          key={p.key}
-          aria-current={p.active ? 'true' : undefined}
-          className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
-            p.active ? 'border-primary/40 bg-primary/10 text-foreground' : 'text-muted-foreground'
-          } ${p.soon ? 'opacity-60' : ''}`}
-        >
-          <span
-            className="flex h-5 w-5 items-center justify-center rounded text-white"
-            style={{ backgroundColor: p.color }}
+      {PLATFORMS.map((p) => {
+        const active = p.key === 'ig' ? igActive : !igActive;
+        return (
+          <button
+            key={p.key}
+            type="button"
+            onClick={() => navigate(p.to)}
+            aria-current={active ? 'true' : undefined}
+            className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors ${
+              active
+                ? 'border-primary/40 bg-primary/10 text-foreground'
+                : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'
+            }`}
           >
-            <PlatformGlyph k={p.key} className="h-3 w-3" />
-          </span>
-          <span className="font-medium">{p.name}</span>
-          {p.active && <span className="sr-only">— активно</span>}
-          {p.soon && (
-            <span className="rounded-full border px-1.5 py-0.5 text-[10px] text-muted-foreground">скоро</span>
-          )}
-        </div>
-      ))}
+            <span
+              className="flex h-5 w-5 items-center justify-center rounded text-white"
+              style={{ backgroundColor: p.color }}
+            >
+              <PlatformGlyph k={p.key} className="h-3 w-3" />
+            </span>
+            <span className="font-medium">{p.name}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }

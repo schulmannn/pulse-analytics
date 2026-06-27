@@ -13,6 +13,9 @@ import {
   CreateKeyResponseSchema,
   GraphsSchema,
   HistorySchema,
+  IgInsightsSchema,
+  IgPostsSchema,
+  IgProfileSchema,
   KeySchema,
   LoginResponseSchema,
   MentionsSchema,
@@ -157,6 +160,30 @@ export function useVelocity() {
   return useQuery({
     queryKey: ['velocity', channelId],
     queryFn: () => apiGet('/api/tg/mtproto/velocity', VelocitySchema),
+  });
+}
+
+// ── Instagram (single account from env; mock-backed until real credentials are set) ──
+export function useIgProfile() {
+  return useQuery({
+    queryKey: ['ig-profile'],
+    queryFn: () => apiGet('/api/ig/profile', IgProfileSchema),
+  });
+}
+
+/** Always fetch the full 90-day window (the server cap); the panel slices to the active
+ *  period client-side and uses the extra history as the previous window for deltas. */
+export function useIgInsights() {
+  return useQuery({
+    queryKey: ['ig-insights', 90],
+    queryFn: () => apiGet('/api/ig/insights?days=90', IgInsightsSchema),
+  });
+}
+
+export function useIgPosts(limit = 20) {
+  return useQuery({
+    queryKey: ['ig-posts', limit],
+    queryFn: () => apiGet(`/api/ig/posts?limit=${limit}`, IgPostsSchema),
   });
 }
 

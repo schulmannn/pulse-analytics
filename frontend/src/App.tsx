@@ -9,6 +9,7 @@ import { Connect } from '@/pages/Connect';
 import { Overview } from '@/panels/Overview';
 import { Posts } from '@/panels/Posts';
 import { Mentions } from '@/panels/Mentions';
+import { Instagram } from '@/panels/Instagram';
 import { TgAnalytics } from '@/panels/TgAnalytics';
 import { Hashtags } from '@/panels/Hashtags';
 import { Digest } from '@/panels/Digest';
@@ -30,6 +31,7 @@ export default function App() {
         <Route path="analytics" element={<Analytics />} />
         <Route path="posts" element={<Posts />} />
         <Route path="mentions" element={<Mentions />} />
+        <Route path="instagram" element={<Instagram />} />
         <Route path="settings" element={<Settings />} />
         <Route path="admin" element={<Admin />} />
         <Route path="bugs" element={<Bugs />} />

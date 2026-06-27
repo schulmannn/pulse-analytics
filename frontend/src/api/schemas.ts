@@ -349,3 +349,69 @@ export const BugsResponseSchema = z
   .passthrough();
 export type Bug = z.infer<typeof BugSchema>;
 export type BugsResponse = z.infer<typeof BugsResponseSchema>;
+
+// ── Instagram (Graph API shapes; mock-backed until a real account is connected) ──
+export const IgProfileSchema = z
+  .object({
+    mock: z.boolean().optional(),
+    username: z.string().optional().nullable(),
+    name: z.string().optional().nullable(),
+    followers_count: z.coerce.number().optional().nullable(),
+    follows_count: z.coerce.number().optional().nullable(),
+    media_count: z.coerce.number().optional().nullable(),
+    biography: z.string().optional().nullable(),
+    website: z.string().optional().nullable(),
+    profile_picture_url: z.string().optional().nullable(),
+    error: z.string().optional().nullable(),
+  })
+  .passthrough();
+export type IgProfile = z.infer<typeof IgProfileSchema>;
+
+export const IgInsightValueSchema = z
+  .object({
+    value: z.coerce.number().optional().nullable(),
+    end_time: z.string().optional().nullable(),
+  })
+  .passthrough();
+export const IgInsightMetricSchema = z
+  .object({
+    name: z.string(),
+    period: z.string().optional().nullable(),
+    values: z.array(IgInsightValueSchema).optional().default([]),
+  })
+  .passthrough();
+export const IgInsightsSchema = z
+  .object({
+    mock: z.boolean().optional(),
+    data: z.array(IgInsightMetricSchema).optional().default([]),
+    error: z.string().optional().nullable(),
+  })
+  .passthrough();
+export type IgInsights = z.infer<typeof IgInsightsSchema>;
+
+export const IgPostSchema = z
+  .object({
+    id: z.string().optional(),
+    caption: z.string().optional().nullable(),
+    media_type: z.string().optional().nullable(),
+    media_url: z.string().optional().nullable(),
+    thumbnail_url: z.string().optional().nullable(),
+    permalink: z.string().optional().nullable(),
+    timestamp: z.string().optional().nullable(),
+    like_count: z.coerce.number().optional().nullable(),
+    comments_count: z.coerce.number().optional().nullable(),
+    reach: z.coerce.number().optional().nullable(),
+    impressions: z.coerce.number().optional().nullable(),
+    shares: z.coerce.number().optional().nullable(),
+    saved: z.coerce.number().optional().nullable(),
+  })
+  .passthrough();
+export const IgPostsSchema = z
+  .object({
+    mock: z.boolean().optional(),
+    data: z.array(IgPostSchema).optional().default([]),
+    error: z.string().optional().nullable(),
+  })
+  .passthrough();
+export type IgPost = z.infer<typeof IgPostSchema>;
+export type IgPosts = z.infer<typeof IgPostsSchema>;

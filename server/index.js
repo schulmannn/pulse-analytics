@@ -490,6 +490,10 @@ app.patch('/api/admin/users/:id', requireAuth, requireSuper, async (req, res) =>
 const IG_BASE      = 'https://graph.facebook.com/v19.0';
 const IG_TOKEN     = process.env.IG_ACCESS_TOKEN;
 const IG_ACCOUNT   = process.env.IG_ACCOUNT_ID;
+const igMock       = require('./ig_mock');
+// No real credentials yet → serve deterministic mock payloads (same Graph API shape) so
+// the IG analytics UI can be built/previewed ahead of a real account connection.
+const igConfigured = () => !!IG_TOKEN && !!IG_ACCOUNT;
 
 async function igFetch(path, params = {}) {
   params.access_token = IG_TOKEN;
@@ -504,6 +508,7 @@ async function igFetch(path, params = {}) {
 // GET /api/ig/profile — профиль аккаунта (теперь с аватаркой)
 app.get('/api/ig/profile', requireAuth, async (req, res) => {
   try {
+    if (!igConfigured()) return res.json(igMock.igMockProfile());
     const cached = cacheGet('ig:profile');
     if (cached) return res.json(cached);
 
@@ -522,6 +527,7 @@ app.get('/api/ig/insights', requireAuth, async (req, res) => {
   const days = Math.min(90, parseInt(req.query.days) || 30);
   const cacheKey = `ig:insights:${days}`;
   try {
+    if (!igConfigured()) return res.json(igMock.igMockInsights(days));
     const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
 
@@ -546,6 +552,7 @@ app.get('/api/ig/posts', requireAuth, async (req, res) => {
   const limit = Math.min(25, parseInt(req.query.limit) || 20);
   const cacheKey = `ig:posts:${limit}`;
   try {
+    if (!igConfigured()) return res.json(igMock.igMockPosts(limit));
     const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
 
