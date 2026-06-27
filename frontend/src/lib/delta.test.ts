@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { pctDelta, subscriberDelta, sumPostWindows } from '@/lib/delta';
+import { avgReachWindowDelta, dailyWindowDelta, pctDelta, subscriberDelta, sumPostWindows } from '@/lib/delta';
 
 describe('pctDelta', () => {
   it('returns direction and absolute percentage', () => {
@@ -61,5 +61,49 @@ describe('subscriberDelta', () => {
         now,
       ),
     ).toEqual({ pct: 10, dir: 'up' });
+  });
+});
+
+describe('dailyWindowDelta', () => {
+  const now = Date.parse('2026-06-25T12:00:00.000Z');
+  const rows = [
+    { day: '2026-06-24', views: 100 }, // current window
+    { day: '2026-06-20', views: 50 }, //  current window
+    { day: '2026-06-16', views: 40 }, //  previous window
+    { day: '2026-06-12', views: 40 }, //  previous window
+  ];
+
+  it('sums a daily metric over current vs previous window', () => {
+    // current = 150, previous = 80 → +87.5%
+    expect(dailyWindowDelta(rows, (r) => Number(r.views), 7, now)).toEqual({ pct: 87.5, dir: 'up' });
+  });
+
+  it('returns null when a window has no data', () => {
+    expect(dailyWindowDelta([{ day: '2026-06-24', views: 100 }], (r) => Number(r.views), 7, now)).toBeNull();
+    expect(dailyWindowDelta(rows, (r) => Number(r.views), 0, now)).toBeNull(); // all-time
+  });
+});
+
+describe('avgReachWindowDelta', () => {
+  const now = Date.parse('2026-06-25T12:00:00.000Z');
+
+  it('compares average views/post across windows', () => {
+    // current avg = (100+200)/2 = 150, previous avg = 100/1 = 100 → +50%
+    const delta = avgReachWindowDelta(
+      [
+        { date: '2026-06-24T00:00:00.000Z', views: 100 },
+        { date: '2026-06-20T00:00:00.000Z', views: 200 },
+        { date: '2026-06-15T00:00:00.000Z', views: 100 },
+      ],
+      7,
+      now,
+    );
+    expect(delta).toEqual({ pct: 50, dir: 'up' });
+  });
+
+  it('returns null when the previous window has no posts', () => {
+    expect(
+      avgReachWindowDelta([{ date: '2026-06-24T00:00:00.000Z', views: 100 }], 7, now),
+    ).toBeNull();
   });
 });

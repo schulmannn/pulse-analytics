@@ -3,7 +3,7 @@ import { fmt, sparkAreaPath, sparkPath } from '@/lib/format';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { usePeriod } from '@/lib/period';
-import { pctDelta, subscriberDelta, sumPostWindows } from '@/lib/delta';
+import { avgReachWindowDelta, dailyWindowDelta, pctDelta, subscriberDelta, sumPostWindows } from '@/lib/delta';
 import type { MetricDelta } from '@/lib/delta';
 
 interface Kpi {
@@ -66,6 +66,32 @@ export function KpiGrid() {
     ? windowTotals.previous.reactions + windowTotals.previous.forwards + windowTotals.previous.replies
     : null;
 
+  // Δ vs the previous period. Prefer the channel_daily archive (reliable, like the
+  // subscriber delta); fall back to the post-window sum when there's no daily archive
+  // (e.g. a collector channel). Sparse data → null → no pill, never a misleading number.
+  const historyRows = history?.rows ?? [];
+  const viewsTrend =
+    dailyWindowDelta(historyRows, (r) => Number(r.views ?? 0), days)
+    ?? (windowTotals ? pctDelta(windowTotals.current.views, windowTotals.previous.views) : null);
+  const reactionsTrend =
+    dailyWindowDelta(historyRows, (r) => Number(r.reactions ?? 0), days)
+    ?? (windowTotals ? pctDelta(windowTotals.current.reactions, windowTotals.previous.reactions) : null);
+  const forwardsTrend =
+    dailyWindowDelta(historyRows, (r) => Number(r.forwards ?? 0), days)
+    ?? (windowTotals ? pctDelta(windowTotals.current.forwards, windowTotals.previous.forwards) : null);
+  const erTrend =
+    dailyWindowDelta(historyRows, (r) => Number(r.reactions ?? 0) + Number(r.forwards ?? 0), days)
+    ?? (members > 0 && currentEngagement != null && previousEngagement != null
+      ? pctDelta(currentEngagement / members, previousEngagement / members)
+      : null);
+  const avgReachTrend = avgReachWindowDelta(
+    (data?.posts ?? []).map((post) => ({
+      date: post.date,
+      views: Number(post.views ?? post.view_count ?? 0),
+    })),
+    days,
+  );
+
   const viewsByDay = new Map<string, number>();
   posts.forEach((post) => {
     if (!post.date) return;
@@ -91,35 +117,27 @@ export function KpiGrid() {
       label: 'Просмотры за период',
       value: fmt.short(totalViews),
       delta: postsAnalyzed ? `по ${postsAnalyzed} постам` : null,
-      trend: windowTotals
-        ? pctDelta(windowTotals.current.views, windowTotals.previous.views)
-        : null,
+      trend: viewsTrend,
       spark,
     },
-    { label: 'Ср. охват поста', value: fmt.short(avgViews) },
+    { label: 'Ср. охват поста', value: fmt.short(avgViews), trend: avgReachTrend },
     {
       label: 'Реакции',
       value: fmt.short(totalReactions),
       delta: postsAnalyzed ? `${(totalReactions / Math.max(postsAnalyzed, 1)).toFixed(1)} на пост` : null,
-      trend: windowTotals
-        ? pctDelta(windowTotals.current.reactions, windowTotals.previous.reactions)
-        : null,
+      trend: reactionsTrend,
     },
     {
       label: 'Репосты',
       value: fmt.short(totalForwards),
       delta: totalReplies ? `${fmt.short(totalReplies)} комментариев` : null,
-      trend: windowTotals
-        ? pctDelta(windowTotals.current.forwards, windowTotals.previous.forwards)
-        : null,
+      trend: forwardsTrend,
     },
     {
       label: 'Вовлечённость (ER)',
       value: er > 0 ? er.toFixed(2) + '%' : '—',
       delta: '(реакции+репосты+комменты) / подписчики',
-      trend: members > 0 && currentEngagement != null && previousEngagement != null
-        ? pctDelta(currentEngagement / members, previousEngagement / members)
-        : null,
+      trend: erTrend,
     },
   ];
 

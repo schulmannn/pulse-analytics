@@ -113,3 +113,82 @@ export function subscriberDelta(
 
   return pctDelta(latest.subscribers, baseline.subscribers);
 }
+
+/**
+ * Period-over-period delta for a daily FLOW metric (views / forwards / reactions) read
+ * from the channel_daily archive — the same reliable source the subscriber delta uses.
+ * Sums `pick(row)` over the current window [now-days, now] vs the previous window
+ * [now-2·days, now-days]. Returns null unless BOTH windows have at least one data point,
+ * so a sparse channel never shows a misleading delta. days<=0 (all-time) → null.
+ */
+export function dailyWindowDelta<T extends { day: string }>(
+  rows: T[],
+  pick: (row: T) => number,
+  days: number,
+  now = Date.now(),
+): MetricDelta | null {
+  if (!Number.isFinite(days) || days <= 0) return null;
+
+  const currentStart = now - days * DAY_MS;
+  const previousStart = now - days * 2 * DAY_MS;
+
+  let current = 0;
+  let previous = 0;
+  let hasCurrent = false;
+  let hasPrevious = false;
+
+  for (const row of rows) {
+    const timestamp = Date.parse(row.day);
+    if (!Number.isFinite(timestamp) || timestamp > now) continue;
+    const value = pick(row);
+    if (!Number.isFinite(value)) continue;
+    if (timestamp >= currentStart) {
+      current += value;
+      hasCurrent = true;
+    } else if (timestamp >= previousStart) {
+      previous += value;
+      hasPrevious = true;
+    }
+  }
+
+  if (!hasCurrent || !hasPrevious) return null;
+  return pctDelta(current, previous);
+}
+
+/**
+ * Δ of average reach (views per post) between the current and previous windows. Per-post
+ * averages have no daily archive, so this is post-derived: null unless BOTH windows hold
+ * at least one post (a sparse channel shows no pill rather than a misleading one).
+ */
+export function avgReachWindowDelta(
+  posts: { date?: string | null; views: number }[],
+  days: number,
+  now = Date.now(),
+): MetricDelta | null {
+  if (!Number.isFinite(days) || days <= 0) return null;
+
+  const currentStart = now - days * DAY_MS;
+  const previousStart = now - days * 2 * DAY_MS;
+
+  let currentViews = 0;
+  let currentCount = 0;
+  let previousViews = 0;
+  let previousCount = 0;
+
+  for (const post of posts) {
+    const timestamp = post.date ? Date.parse(post.date) : Number.NaN;
+    if (!Number.isFinite(timestamp) || timestamp > now) continue;
+    const views = Number(post.views);
+    if (!Number.isFinite(views)) continue;
+    if (timestamp >= currentStart) {
+      currentViews += views;
+      currentCount += 1;
+    } else if (timestamp >= previousStart) {
+      previousViews += views;
+      previousCount += 1;
+    }
+  }
+
+  if (currentCount === 0 || previousCount === 0) return null;
+  return pctDelta(currentViews / currentCount, previousViews / previousCount);
+}
