@@ -276,6 +276,7 @@ export const ChannelSchema = z
     source: z.string().optional().nullable(),
     tg_channel_id: z.unknown().optional(),
     owner_uid: z.coerce.number().optional().nullable(),
+    memberCount: z.coerce.number().optional().nullable(),
   })
   .passthrough();
 export const ChannelsResponseSchema = z

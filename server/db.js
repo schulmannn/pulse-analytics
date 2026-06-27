@@ -253,17 +253,24 @@ const CHANNEL_COLS = 'id, username, title, status, source, tg_channel_id, owner_
 const isOperator = (u) => u && u.uid == null && u.role === 'superuser';   // break-glass = central-only
 
 // Channels visible to a user. Break-glass superuser (no account) sees the central channel only.
+// Latest known subscriber count per channel (cheap: newest channel_daily row).
+// Null for channels without daily history (e.g. a fresh collector channel).
+const MEMBER_COUNT_COL =
+  `(SELECT cd.subscribers FROM channel_daily cd
+      WHERE cd.channel_id = channels.id AND cd.subscribers IS NOT NULL
+      ORDER BY cd.day DESC LIMIT 1) AS "memberCount"`;
+
 async function listChannels(user) {
   if (!enabled) return [];
   if (isOperator(user)) {
     const { rows } = await pool.query(
-      `SELECT ${CHANNEL_COLS} FROM channels WHERE source='central' ORDER BY created_at ASC`);
+      `SELECT ${CHANNEL_COLS}, ${MEMBER_COUNT_COL} FROM channels WHERE source='central' ORDER BY created_at ASC`);
     return rows;
   }
   const uid = user && user.uid;
   if (uid == null) return [];
   const { rows } = await pool.query(
-    `SELECT ${CHANNEL_COLS} FROM channels WHERE owner_uid=$1 AND status<>'disabled' ORDER BY created_at ASC`, [uid]);
+    `SELECT ${CHANNEL_COLS}, ${MEMBER_COUNT_COL} FROM channels WHERE owner_uid=$1 AND status<>'disabled' ORDER BY created_at ASC`, [uid]);
   return rows;
 }
 

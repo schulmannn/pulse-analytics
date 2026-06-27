@@ -7,6 +7,7 @@ import { useSelectedChannel } from '@/lib/channel-context';
 import { usePeriod } from '@/lib/period';
 import type { PeriodDays } from '@/lib/period';
 import { useTheme } from '@/lib/theme';
+import { fmt } from '@/lib/format';
 import { Icon, type IconName } from '@/components/nav-icons';
 
 /** Close a popover/dropdown on Escape, and (when a ref is given) on outside mousedown.
@@ -70,9 +71,30 @@ const PERIODS: Array<{ days: PeriodDays; label: string }> = [
 
 // Platform brand colors (platform identity, not the app palette — intentional hex).
 const PLATFORMS = [
-  { key: 'tg', name: 'Telegram', initial: 'T', color: '#229ED9', active: true, soon: false },
-  { key: 'ig', name: 'Instagram', initial: 'Ig', color: '#E1306C', active: false, soon: false },
+  { key: 'tg', name: 'Telegram', color: '#229ED9', active: true, soon: false },
+  { key: 'ig', name: 'Instagram', color: '#E1306C', active: false, soon: false },
 ];
+
+/** Brand glyph for the platform chip (white, on the brand-colored square). */
+function PlatformGlyph({ k, className }: { k: string; className?: string }) {
+  if (k === 'tg') {
+    return (
+      <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+        <path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z" />
+      </svg>
+    );
+  }
+  if (k === 'ig') {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className} aria-hidden="true">
+        <rect x="2.5" y="2.5" width="19" height="19" rx="5.5" />
+        <circle cx="12" cy="12" r="4.2" />
+        <circle cx="17.4" cy="6.6" r="1.1" fill="currentColor" stroke="none" />
+      </svg>
+    );
+  }
+  return null;
+}
 
 interface DashboardLayoutProps {
   email?: string;
@@ -86,6 +108,10 @@ export function DashboardLayout({ email, role }: DashboardLayoutProps) {
       <Sidebar role={role} />
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar email={email} role={role} />
+        {/* Channel identity + switcher for mobile (the sidebar card is hidden below md). */}
+        <div className="border-b py-2 md:hidden">
+          <ChannelCard />
+        </div>
         <MobileNav role={role} />
         <main className="flex-1 px-4 py-5 sm:px-6">
           <div className="mx-auto w-full max-w-screen-2xl">
@@ -194,7 +220,13 @@ function ChannelCard() {
   const current = channels.find((c) => c.id === channelId) ?? channels[0];
   const handle = current ? `@${current.username || current.title || current.id}` : '@—';
   const initial = (current?.username || current?.title || 'T').slice(0, 1).toUpperCase();
-  const subtitle = current?.source === 'collector' ? 'Collector' : 'Telegram';
+  const count = current?.memberCount;
+  const subtitle =
+    count != null && count > 0
+      ? `${fmt.short(count)} подписчиков`
+      : current?.source === 'collector'
+        ? 'Collector'
+        : 'Telegram';
   const multi = channels.length >= 2;
 
   const pick = (id: number) => {
@@ -462,10 +494,10 @@ function PlatformSwitcher() {
           } ${p.soon ? 'opacity-60' : ''}`}
         >
           <span
-            className="flex h-5 w-5 items-center justify-center rounded text-[10px] font-bold text-white"
+            className="flex h-5 w-5 items-center justify-center rounded text-white"
             style={{ backgroundColor: p.color }}
           >
-            {p.initial}
+            <PlatformGlyph k={p.key} className="h-3 w-3" />
           </span>
           <span className="font-medium">{p.name}</span>
           {p.active && <span className="sr-only">— активно</span>}
