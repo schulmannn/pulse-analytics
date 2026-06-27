@@ -1,6 +1,8 @@
+import { useRef, useState } from 'react';
 import { useHistory, useVelocity, useTgFull } from '@/api/queries';
 import { lttbDownsample } from '@/lib/downsample';
 import { LineChart } from '@/components/LineChart';
+import { ChartTooltip, type TooltipState } from '@/components/ChartTooltip';
 import { fmt } from '@/lib/format';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { ExpandableChart } from '@/components/ExpandableChart';
@@ -42,6 +44,7 @@ function SubscriberHistoryChart({ rows }: { rows: SubscriberRow[] }) {
       yMax={Math.max(...values)}
       titles={titles}
       labels={labels}
+      height={260}
     />
   );
 }
@@ -102,6 +105,8 @@ export function HistoryChartBlock() {
 export function HeatmapChartBlock() {
   const { days, inRange } = usePeriod();
   const { data: tgData, isLoading } = useTgFull(days);
+  const [tip, setTip] = useState<TooltipState>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
 
   if (isLoading) return <ChartSkeleton title="Тепловая карта (день × час)" />;
 
@@ -163,6 +168,7 @@ export function HeatmapChartBlock() {
         </CardTitle>
       </CardHeader>
       <CardContent>
+        <div ref={wrapRef} className="relative" onMouseLeave={() => setTip(null)}>
         <div className="overflow-x-auto pb-2">
           <div className="min-w-[420px] space-y-[2px]">
             <div className="grid gap-[2px]" style={{ gridTemplateColumns: '30px repeat(24, minmax(14px, 1fr))' }}>
@@ -186,7 +192,13 @@ export function HeatmapChartBlock() {
                   {Array.from({ length: 24 }).map((_, hr) => {
                     const cell = currentRow[hr];
                     if (!cell || cell.n === 0) {
-                      return <div key={hr} className="h-4 rounded-sm bg-muted/40" title="нет постов" />;
+                      return (
+                        <div
+                          key={hr}
+                          className="h-4 rounded-sm bg-muted/40"
+                          onMouseMove={() => setTip(null)}
+                        />
+                      );
                     }
                     const avgErv = cell.ervSum / cell.n;
                     const opacity = maxErv > 0 ? Math.max(0.18, avgErv / maxErv) : 0;
@@ -195,13 +207,16 @@ export function HeatmapChartBlock() {
                     return (
                       <div
                         key={hr}
-                        className="relative h-4 rounded-sm"
+                        className="relative h-4 cursor-pointer rounded-sm"
                         style={{
                           backgroundColor: 'hsl(var(--brand-iris))',
                           opacity,
                           border: isBest ? '2px solid hsl(var(--brand-verdant))' : undefined,
                         }}
-                        title={titleText}
+                        onMouseMove={(event) => {
+                          const rect = wrapRef.current?.getBoundingClientRect();
+                          if (rect) setTip({ x: event.clientX - rect.left, y: event.clientY - rect.top, text: titleText });
+                        }}
                       />
                     );
                   })}
@@ -209,6 +224,8 @@ export function HeatmapChartBlock() {
               );
             })}
           </div>
+        </div>
+        <ChartTooltip tip={tip} />
         </div>
 
         <div className="mt-3 text-xs font-medium text-muted-foreground">

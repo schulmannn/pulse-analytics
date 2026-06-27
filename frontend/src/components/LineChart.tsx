@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { fmt } from '@/lib/format';
 import { ChartTooltip } from '@/components/ChartTooltip';
@@ -21,6 +21,20 @@ interface Hover {
 export function LineChart({ values, labels, titles, yMin, yMax, height }: LineChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<Hover | null>(null);
+  // Measure the real render width so the viewBox is 1:1 with CSS pixels — otherwise a
+  // fixed 600-wide viewBox stretched to a wide container magnifies text + markers 2-3×.
+  const [width, setWidth] = useState(600);
+
+  useLayoutEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const measure = () => setWidth(el.clientWidth || 600);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   if (!values || values.length < 2) {
     return (
@@ -30,7 +44,8 @@ export function LineChart({ values, labels, titles, yMin, yMax, height }: LineCh
     );
   }
 
-  const h = height ?? 160;
+  const h = height ?? 200;
+  const W = Math.max(width, 1);
   const padX = 10;
   const padY = 12;
 
@@ -41,7 +56,7 @@ export function LineChart({ values, labels, titles, yMin, yMax, height }: LineCh
   const range = max - min || 1;
 
   const n = values.length;
-  const step = (600 - 2 * padX) / Math.max(n - 1, 1);
+  const step = (W - 2 * padX) / Math.max(n - 1, 1);
 
   const points = values.map((v, i) => {
     const x = padX + i * step;
@@ -69,10 +84,10 @@ export function LineChart({ values, labels, titles, yMin, yMax, height }: LineCh
 
   return (
     <div ref={containerRef} className="relative w-full" onMouseLeave={() => setHover(null)}>
-      <svg className="h-auto w-full" viewBox={`0 0 600 ${h}`}>
+      <svg className="block w-full" height={h} viewBox={`0 0 ${W} ${h}`} preserveAspectRatio="none">
         {/* Gridlines */}
         {yGridPositions.map((yPos, idx) => (
-          <line key={idx} x1={0} y1={yPos} x2={600} y2={yPos} stroke="hsl(var(--border))" strokeDasharray="4 4" strokeWidth="1" />
+          <line key={idx} x1={0} y1={yPos} x2={W} y2={yPos} stroke="hsl(var(--border))" strokeDasharray="4 4" strokeWidth="1" vectorEffect="non-scaling-stroke" />
         ))}
 
         {/* Area + line */}
@@ -86,7 +101,7 @@ export function LineChart({ values, labels, titles, yMin, yMax, height }: LineCh
         {/* Hovered-point crosshair + marker */}
         {hovered && (
           <>
-            <line x1={hovered.x} y1={0} x2={hovered.x} y2={h} stroke="hsl(var(--brand-iris))" strokeWidth="1" opacity="0.35" />
+            <line x1={hovered.x} y1={0} x2={hovered.x} y2={h} stroke="hsl(var(--brand-iris))" strokeWidth="1" opacity="0.35" vectorEffect="non-scaling-stroke" />
             <circle cx={hovered.x} cy={hovered.y} r="4" fill="hsl(var(--brand-iris))" stroke="hsl(var(--background))" strokeWidth="1.5" />
           </>
         )}
@@ -101,7 +116,7 @@ export function LineChart({ values, labels, titles, yMin, yMax, height }: LineCh
         {/* Per-point hover targets */}
         {points.map((p, i) => {
           const xStart = i === 0 ? 0 : p.x - step / 2;
-          const xEnd = i === n - 1 ? 600 : p.x + step / 2;
+          const xEnd = i === n - 1 ? W : p.x + step / 2;
           return (
             <rect key={i} x={xStart} y={0} width={Math.max(xEnd - xStart, 1)} height={h} fill="transparent" className="cursor-pointer" onMouseMove={onMove(i)} />
           );

@@ -413,7 +413,7 @@ function PeriodSwitcher() {
                   type="date"
                   value={from}
                   onChange={(event) => setFrom(event.target.value)}
-                  className="mt-1 w-full rounded border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  className="mt-1 w-full rounded-md border bg-background px-2.5 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
                 />
               </label>
               <label className="block text-[11px] font-medium text-muted-foreground">
@@ -422,7 +422,7 @@ function PeriodSwitcher() {
                   type="date"
                   value={to}
                   onChange={(event) => setTo(event.target.value)}
-                  className="mt-1 w-full rounded border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  className="mt-1 w-full rounded-md border bg-background px-2.5 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
                 />
               </label>
               <div className="flex gap-2 pt-1">

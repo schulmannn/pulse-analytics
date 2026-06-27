@@ -7,6 +7,7 @@
    Values are the exact legacy --color-* hexes converted to HSL. Radius = 4px (brand). */
 @layer base {
   :root {
+    color-scheme: light;
     --background: 210 44% 93%;
     --foreground: 211 78% 11%;
     --card: 0 0% 100%;
@@ -36,6 +37,7 @@
   }
 
   .dark {
+    color-scheme: dark;
     --background: 212 37% 8%;
     --foreground: 216 48% 94%;
     --card: 214 29% 14%;
