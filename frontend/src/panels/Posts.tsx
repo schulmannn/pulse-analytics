@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { LineChart } from '@/components/LineChart';
 import { usePeriod } from '@/lib/period';
 import { Skeleton } from '@/components/ui/skeleton';
+import { TopPosts } from '@/panels/TopPosts';
 
 export function Posts() {
   const { days, inRange } = usePeriod();
@@ -37,16 +38,6 @@ export function Posts() {
     );
   }
 
-  // Топ постов (алгоритм легаси: вовлечение выше среднего)
-  const withEng = posts.filter((p) => p.eng > 0);
-  let topPosts: NormalizedPost[] = [];
-  if (withEng.length > 0) {
-    const avgEng = withEng.reduce((sum, p) => sum + p.eng, 0) / withEng.length;
-    const aboveAvg = withEng.filter((p) => p.eng > avgEng);
-    topPosts = (aboveAvg.length > 0 ? [...aboveAvg] : [...withEng]).sort((a, b) => b.eng - a.eng);
-  }
-  topPosts = topPosts.slice(0, 6);
-
   // Таблица — по охвату, топ 25
   const tablePosts = [...posts].sort((a, b) => b.reach - a.reach).slice(0, 25);
 
@@ -54,72 +45,13 @@ export function Posts() {
 
   return (
     <div className="space-y-8">
-      {/* Топ постов */}
-      {topPosts.length > 0 && (
-        <div className="space-y-4">
-          <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            Топ постов за период
-          </h3>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {topPosts.map((post, idx) => (
-              <Card key={post.id ?? idx} className="flex flex-col justify-between overflow-hidden">
-                <div>
-                  <div className="relative flex aspect-video w-full items-center justify-center overflow-hidden bg-muted/50">
-                    {post.thumb ? (
-                      <img
-                        src={`${post.thumb}?size=lg`}
-                        alt=""
-                        referrerPolicy="no-referrer"
-                        className="h-full w-full object-cover"
-                      />
-                    ) : (
-                      <span className="font-mono text-xs text-muted-foreground">Текстовый пост</span>
-                    )}
-                    <div className="absolute left-2 top-2 rounded bg-background/90 px-2 py-0.5 text-xs font-bold text-foreground shadow-sm">
-                      #{idx + 1}
-                    </div>
-                    <div className="absolute right-2 top-2 rounded bg-primary px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary-foreground">
-                      TG
-                    </div>
-                  </div>
-                  <div className="space-y-3 p-4">
-                    <p className="line-clamp-3 text-sm leading-relaxed text-foreground">
-                      {post.caption || <span className="italic text-muted-foreground">Без подписи</span>}
-                    </p>
-                    {post.reactionsDetail.length > 0 && (
-                      <div className="flex flex-wrap gap-1 pt-1">
-                        {post.reactionsDetail.slice(0, 5).map((r, i) => (
-                          <span
-                            key={i}
-                            className="inline-flex items-center gap-1 rounded-full bg-secondary px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-secondary-foreground"
-                          >
-                            <span>{r.emoji}</span>
-                            <span>{fmt.short(r.count)}</span>
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <div className="grid grid-cols-3 gap-2 border-t border-border/40 bg-muted/10 p-4 pt-0 text-center">
-                  <div className="pt-2">
-                    <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Просмотры</div>
-                    <div className="mt-0.5 text-sm font-semibold tabular-nums">{fmt.short(post.reach)}</div>
-                  </div>
-                  <div className="pt-2">
-                    <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Реакции</div>
-                    <div className="mt-0.5 text-sm font-semibold tabular-nums">{fmt.short(post.likes)}</div>
-                  </div>
-                  <div className="pt-2">
-                    <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Репосты</div>
-                    <div className="mt-0.5 text-sm font-semibold tabular-nums">{fmt.short(post.shares)}</div>
-                  </div>
-                </div>
-              </Card>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* Топ постов (общий компонент, переиспользуется в Обзоре) */}
+      <div className="space-y-4">
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          Топ постов за период
+        </h3>
+        <TopPosts />
+      </div>
 
       {/* Таблица публикаций */}
       <Card>

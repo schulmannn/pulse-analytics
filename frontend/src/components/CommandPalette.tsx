@@ -34,7 +34,6 @@ export function useCommandPalette() {
 const ROUTES = [
   { path: '/', label: 'Обзор' },
   { path: '/analytics', label: 'Аналитика' },
-  { path: '/charts', label: 'Графики' },
   { path: '/posts', label: 'Посты' },
   { path: '/mentions', label: 'Упоминания' },
   { path: '/settings', label: 'Настройки' },

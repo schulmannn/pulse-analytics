@@ -46,25 +46,7 @@ function SubscriberHistoryChart({ rows }: { rows: SubscriberRow[] }) {
   );
 }
 
-export function Charts() {
-  return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-xl font-bold tracking-tight">Графики аналитики</h2>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          Динамика развития, активность аудитории и скорость дистрибуции контента
-        </p>
-      </div>
-      <div className="grid grid-cols-1 gap-6">
-        <HistoryChartBlock />
-        <HeatmapChartBlock />
-        <VelocityChartBlock />
-      </div>
-    </div>
-  );
-}
-
-function HistoryChartBlock() {
+export function HistoryChartBlock() {
   const { data, isLoading, isError } = useHistory(730);
 
   if (isLoading) return <ChartSkeleton title="История подписчиков" />;
@@ -117,7 +99,7 @@ function HistoryChartBlock() {
   );
 }
 
-function HeatmapChartBlock() {
+export function HeatmapChartBlock() {
   const { days, inRange } = usePeriod();
   const { data: tgData, isLoading } = useTgFull(days);
 
@@ -247,7 +229,7 @@ function HeatmapChartBlock() {
   );
 }
 
-function VelocityChartBlock() {
+export function VelocityChartBlock() {
   const { data, isLoading } = useVelocity();
 
   if (isLoading) return <ChartSkeleton title="Скорость набора просмотров" />;

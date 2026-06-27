@@ -41,7 +41,6 @@ interface NavLinkDef {
 const NAV: NavLinkDef[] = [
   { to: '/', label: 'Обзор', icon: 'overview', end: true },
   { to: '/analytics', label: 'Аналитика', icon: 'analytics' },
-  { to: '/charts', label: 'Графики', icon: 'charts' },
   { to: '/posts', label: 'Посты', icon: 'posts' },
   { to: '/mentions', label: 'Упоминания', icon: 'mentions' },
 ];
@@ -54,7 +53,6 @@ const SUPER_NAV: NavLinkDef[] = [
 const TITLES: Record<string, string> = {
   '/': 'Обзор',
   '/analytics': 'Аналитика',
-  '/charts': 'Графики',
   '/posts': 'Посты',
   '/mentions': 'Упоминания',
   '/settings': 'Настройки',
@@ -74,8 +72,6 @@ const PERIODS: Array<{ days: PeriodDays; label: string }> = [
 const PLATFORMS = [
   { key: 'tg', name: 'Telegram', initial: 'T', color: '#229ED9', active: true, soon: false },
   { key: 'ig', name: 'Instagram', initial: 'Ig', color: '#E1306C', active: false, soon: false },
-  { key: 'vk', name: 'VK', initial: 'VK', color: '#0077FF', active: false, soon: true },
-  { key: 'yt', name: 'YouTube', initial: 'YT', color: '#FF0000', active: false, soon: true },
 ];
 
 interface DashboardLayoutProps {

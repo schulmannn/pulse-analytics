@@ -6,9 +6,7 @@ import { DashboardLayout } from '@/components/DashboardLayout';
 import { LoginPage, RegisterPage, ResetPage, VerifyPage } from '@/pages/Auth';
 import { Landing } from '@/pages/Landing';
 import { Connect } from '@/pages/Connect';
-import { Hero } from '@/panels/Hero';
-import { KpiGrid } from '@/panels/KpiGrid';
-import { Charts } from '@/panels/Charts';
+import { Overview } from '@/panels/Overview';
 import { Posts } from '@/panels/Posts';
 import { Mentions } from '@/panels/Mentions';
 import { TgAnalytics } from '@/panels/TgAnalytics';
@@ -20,11 +18,6 @@ import { Bugs } from '@/panels/Bugs';
 import { Skeleton } from '@/components/ui/skeleton';
 import { CommandPalette } from '@/components/CommandPalette';
 
-import { useChannels, useTgFull } from '@/api/queries';
-import { useSelectedChannel } from '@/lib/channel-context';
-import { usePeriod } from '@/lib/period';
-import { CollectorEmptyState } from '@/components/CollectorEmptyState';
-
 export default function App() {
   return (
     <Routes>
@@ -35,7 +28,6 @@ export default function App() {
       <Route element={<ProtectedLayout />}>
         <Route index element={<Overview />} />
         <Route path="analytics" element={<Analytics />} />
-        <Route path="charts" element={<Charts />} />
         <Route path="posts" element={<Posts />} />
         <Route path="mentions" element={<Mentions />} />
         <Route path="settings" element={<Settings />} />
@@ -83,30 +75,6 @@ function ProtectedLayout() {
       <DashboardLayout email={me.data?.email} role={me.data?.role} />
       <CommandPalette />
     </>
-  );
-}
-
-/** Landing tab — greeting + KPI cards. */
-function Overview() {
-  const { channelId } = useSelectedChannel();
-  const { data: channelsData } = useChannels();
-  const { days } = usePeriod();
-  const { data, isLoading, isError } = useTgFull(days);
-
-  const channel = channelsData?.channels.find((c) => c.id === channelId);
-  const isCollector = channel?.source === 'collector';
-  const isEmpty =
-    !isLoading && !isError && !data?.channel && (data?.posts?.length ?? 0) === 0;
-
-  if (isCollector && isEmpty) {
-    return <CollectorEmptyState username={channel?.username ?? ''} />;
-  }
-
-  return (
-    <div className="space-y-8">
-      <Hero />
-      <KpiGrid />
-    </div>
   );
 }
 
