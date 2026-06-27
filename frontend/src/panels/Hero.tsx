@@ -8,7 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton';
  * /api/tg/full snapshot: total views if available, else subscriber count.
  */
 export function Hero() {
-  const { days } = usePeriod();
+  const { days, range } = usePeriod();
   const { data, isLoading } = useTgFull(days);
 
   if (isLoading) {
@@ -31,7 +31,12 @@ export function Hero() {
   if (totalViews > 0) highlight = `${fmt.short(totalViews)} просмотров`;
   else if (members > 0) highlight = `${fmt.short(members)} подписчиков`;
   else highlight = 'всё под контролем';
-  const periodLabel = days === 0 ? 'за всё время' : `за последние ${days} дн.`;
+  const fmtDay = (ms: number) => new Date(ms).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+  const periodLabel = range
+    ? `за ${fmtDay(range.from)} – ${fmtDay(range.to)}`
+    : days === 0
+      ? 'за всё время'
+      : `за последние ${days} дн.`;
 
   return (
     <section>

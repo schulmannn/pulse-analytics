@@ -24,7 +24,7 @@ import {
 } from '@/api/schemas';
 import { clearSessionToken, setSessionToken } from '@/lib/session';
 import { useSelectedChannel } from '@/lib/channel-context';
-import { tgLimit } from '@/lib/period';
+import { effectiveLimit, usePeriod } from '@/lib/period';
 import type { PeriodDays } from '@/lib/period';
 
 /** Current session. retry:false so a 401 surfaces immediately (→ login gate). */
@@ -109,9 +109,10 @@ export function useLogout() {
 /** Aggregate channel snapshot: channel info + views summary + recent posts. */
 export function useTgFull(days: PeriodDays) {
   const { channelId } = useSelectedChannel();
-  const limit = tgLimit(days);
+  const { range } = usePeriod();
+  const limit = effectiveLimit(days, range);
   return useQuery({
-    queryKey: ['tg-full', channelId, days],
+    queryKey: ['tg-full', channelId, days, range?.from ?? 0, range?.to ?? 0],
     queryFn: () => apiGet(`/api/tg/full?limit=${limit}`, TgFullSchema),
   });
 }

@@ -2,7 +2,7 @@ import { useTgFull } from '@/api/queries';
 import { normalizeTgPosts } from '@/lib/posts';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Breakdown } from '@/components/Breakdown';
-import { inRangeByDays, usePeriod } from '@/lib/period';
+import { usePeriod } from '@/lib/period';
 import { Skeleton } from '@/components/ui/skeleton';
 
 interface TagStats {
@@ -11,7 +11,7 @@ interface TagStats {
 }
 
 export function Hashtags() {
-  const { days } = usePeriod();
+  const { days, inRange } = usePeriod();
   const { data: full, isLoading, isError } = useTgFull(days);
 
   if (isLoading) {
@@ -34,7 +34,7 @@ export function Hashtags() {
   }
 
   const posts = normalizeTgPosts(full.posts ?? [], full.channel ?? {}).filter(
-    (post) => post.erv !== null && inRangeByDays(post.date, days),
+    (post) => post.erv !== null && inRange(post.date),
   );
 
   let baseSum = 0;

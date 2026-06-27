@@ -4,11 +4,11 @@ import { normalizeTgPosts, type NormalizedPost } from '@/lib/posts';
 import { fmt } from '@/lib/format';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { LineChart } from '@/components/LineChart';
-import { inRangeByDays, usePeriod } from '@/lib/period';
+import { usePeriod } from '@/lib/period';
 import { Skeleton } from '@/components/ui/skeleton';
 
 export function Posts() {
-  const { days } = usePeriod();
+  const { days, inRange } = usePeriod();
   const { data, isLoading, isError, error } = useTgFull(days);
   const [openId, setOpenId] = useState<number | null>(null);
 
@@ -25,7 +25,7 @@ export function Posts() {
 
   const rawPosts = data?.posts ?? [];
   const channelContext = data?.channel ?? {};
-  const posts = normalizeTgPosts(rawPosts, channelContext).filter((post) => inRangeByDays(post.date, days));
+  const posts = normalizeTgPosts(rawPosts, channelContext).filter((post) => inRange(post.date));
 
   if (posts.length === 0) {
     return (

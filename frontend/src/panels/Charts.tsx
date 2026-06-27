@@ -5,7 +5,7 @@ import { fmt } from '@/lib/format';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { ExpandableChart } from '@/components/ExpandableChart';
 import { Skeleton } from '@/components/ui/skeleton';
-import { inRangeByDays, usePeriod } from '@/lib/period';
+import { usePeriod } from '@/lib/period';
 
 interface HeatmapCell {
   n: number;
@@ -118,7 +118,7 @@ function HistoryChartBlock() {
 }
 
 function HeatmapChartBlock() {
-  const { days } = usePeriod();
+  const { days, inRange } = usePeriod();
   const { data: tgData, isLoading } = useTgFull(days);
 
   if (isLoading) return <ChartSkeleton title="Тепловая карта (день × час)" />;
@@ -131,7 +131,7 @@ function HeatmapChartBlock() {
   );
 
   posts.forEach((p) => {
-    if (!inRangeByDays(p.date, days) || !p.date) return;
+    if (!inRange(p.date) || !p.date) return;
     const d = new Date(p.date);
     if (isNaN(d.getTime())) return;
 

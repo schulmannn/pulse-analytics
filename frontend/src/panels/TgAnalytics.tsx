@@ -7,7 +7,7 @@ import { Breakdown } from '@/components/Breakdown';
 import { DivergingBars } from '@/components/DivergingBars';
 import { ExpandableChart } from '@/components/ExpandableChart';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { inRangeByDays, usePeriod } from '@/lib/period';
+import { usePeriod } from '@/lib/period';
 import { Skeleton } from '@/components/ui/skeleton';
 
 const SRC_NAMES: Record<string, string> = {
@@ -38,7 +38,7 @@ const SENT_ICON: Record<string, string> = {
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 export function TgAnalytics() {
-  const { days } = usePeriod();
+  const { days, inRange } = usePeriod();
   const { data: full, isLoading: isFullLoading } = useTgFull(days);
   const { data: cs, isLoading: isStatsLoading } = useTgStats();
   const { data: graphs, isLoading: isGraphsLoading } = useTgGraphs();
@@ -59,7 +59,7 @@ export function TgAnalytics() {
 
   const vs = full?.views_summary;
   const posts = normalizeTgPosts(full?.posts ?? [], full?.channel ?? {}).filter((post) =>
-    inRangeByDays(post.date, days),
+    inRange(post.date),
   );
 
   const cur = (o: { current?: number | null } | null | undefined) =>

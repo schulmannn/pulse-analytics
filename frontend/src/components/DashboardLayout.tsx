@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
@@ -98,25 +98,107 @@ export function DashboardLayout({ email, role }: DashboardLayoutProps) {
   );
 }
 
+const tabBtn = (active: boolean) =>
+  `whitespace-nowrap border-b-2 px-2 py-2.5 text-xs font-medium transition-colors ${
+    active ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
+  }`;
+
+const shortDate = (ms: number) =>
+  new Date(ms).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+
 function PeriodSwitcher() {
-  const { days, setDays } = usePeriod();
+  const { days, setDays, range, setRange } = usePeriod();
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const btnRef = useRef<HTMLButtonElement>(null);
+
+  const toggle = () => {
+    if (open) return setOpen(false);
+    const r = btnRef.current?.getBoundingClientRect();
+    if (r) setPos({ top: r.bottom + 4, right: Math.max(8, window.innerWidth - r.right) });
+    setOpen(true);
+  };
+
+  const apply = () => {
+    const f = Date.parse(from);
+    const t = Date.parse(to);
+    if (!Number.isFinite(f) || !Number.isFinite(t) || f > t) return;
+    setRange({ from: f, to: t + 24 * 60 * 60 * 1000 - 1 }); // inclusive end-of-day
+    setOpen(false);
+  };
+
+  const reset = () => {
+    setFrom('');
+    setTo('');
+    setDays(30); // also clears the range
+    setOpen(false);
+  };
 
   return (
-    <div className="ml-auto flex shrink-0">
+    <div className="ml-auto flex shrink-0 items-stretch">
       {PERIODS.map((period) => (
         <button
           key={period.days}
           type="button"
           onClick={() => setDays(period.days)}
-          className={`whitespace-nowrap border-b-2 px-2 py-2.5 text-xs font-medium transition-colors ${
-            days === period.days
-              ? 'border-primary text-foreground'
-              : 'border-transparent text-muted-foreground hover:text-foreground'
-          }`}
+          className={tabBtn(range === null && days === period.days)}
         >
           {period.label}
         </button>
       ))}
+      {/* DESIGN: Claude review */}
+      <button ref={btnRef} type="button" onClick={toggle} className={tabBtn(range !== null)} title="Произвольный период">
+        {range ? `${shortDate(range.from)}–${shortDate(range.to)}` : '⋯'}
+      </button>
+
+      {open && pos && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div
+            className="fixed z-50 w-60 rounded-md border bg-popover p-3 text-popover-foreground shadow-md"
+            style={{ top: pos.top, right: pos.right }}
+          >
+            <div className="space-y-2">
+              <label className="block text-[11px] font-medium text-muted-foreground">
+                С
+                <input
+                  type="date"
+                  value={from}
+                  onChange={(event) => setFrom(event.target.value)}
+                  className="mt-1 w-full rounded border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+              </label>
+              <label className="block text-[11px] font-medium text-muted-foreground">
+                По
+                <input
+                  type="date"
+                  value={to}
+                  onChange={(event) => setTo(event.target.value)}
+                  className="mt-1 w-full rounded border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+              </label>
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={apply}
+                  className="flex-1 rounded bg-primary px-2 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                >
+                  Применить
+                </button>
+                <button
+                  type="button"
+                  onClick={reset}
+                  className="rounded border px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  Сброс
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

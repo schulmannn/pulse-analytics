@@ -2,7 +2,7 @@ import { useHistory, useTgFull } from '@/api/queries';
 import { fmt, sparkAreaPath, sparkPath } from '@/lib/format';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { inRangeByDays, usePeriod } from '@/lib/period';
+import { usePeriod } from '@/lib/period';
 import { pctDelta, subscriberDelta, sumPostWindows } from '@/lib/delta';
 import type { MetricDelta } from '@/lib/delta';
 
@@ -21,7 +21,7 @@ interface Kpi {
  * (Δ vs previous period) come later when the charts panel migrates its extra endpoints.
  */
 export function KpiGrid() {
-  const { days } = usePeriod();
+  const { days, inRange } = usePeriod();
   const { data, isLoading, isError, error } = useTgFull(days);
   const { data: history } = useHistory(730);
 
@@ -37,7 +37,7 @@ export function KpiGrid() {
   }
 
   const members = data?.channel?.memberCount ?? data?.channel?.members ?? 0;
-  const posts = (data?.posts ?? []).filter((post) => inRangeByDays(post.date, days));
+  const posts = (data?.posts ?? []).filter((post) => inRange(post.date));
   const totalViews = posts.reduce((sum, post) => sum + Number(post.views ?? post.view_count ?? 0), 0);
   const totalReactions = posts.reduce(
     (sum, post) => sum + Number(post.reactions ?? post.reactions_count ?? 0),
