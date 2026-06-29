@@ -1,7 +1,8 @@
-import { useChannels, useTgFull } from '@/api/queries';
+import { useChannels, useHistory, useTgFull } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { usePeriod } from '@/lib/period';
 import { fmt } from '@/lib/format';
+import { freshness, latestHistoryDay } from '@/lib/freshness';
 import { Skeleton } from '@/components/ui/skeleton';
 
 /**
@@ -14,9 +15,11 @@ export function Hero() {
   const { data: channelsData, isLoading: channelsLoading } = useChannels();
   const { channelId } = useSelectedChannel();
   const { data, isLoading } = useTgFull(days);
+  const { data: history } = useHistory(730);
 
   const channels = channelsData?.channels ?? [];
   const current = channels.find((c) => c.id === channelId) ?? channels[0];
+  const fresh = freshness(latestHistoryDay(history), Date.now());
 
   // Identity comes from the channels query, so gate the skeleton on it too (not just tg-full).
   if ((channelsLoading || isLoading) && !current) {
@@ -43,8 +46,19 @@ export function Hero() {
       <div className="min-w-0">
         {/* A div, not an h1 — the top bar already owns the page's single <h1> (route title). */}
         <div className="truncate text-xl font-semibold tracking-tight">{handle}</div>
-        <p className="truncate text-sm text-muted-foreground">
-          Telegram{members > 0 ? ` · ${fmt.num(members)} подписчиков` : ''}
+        <p className="flex flex-wrap items-center gap-x-1.5 text-sm text-muted-foreground">
+          <span>Telegram{members > 0 ? ` · ${fmt.num(members)} подписчиков` : ''}</span>
+          {fresh && (
+            <>
+              <span aria-hidden="true">·</span>
+              <span
+                className={fresh.stale ? 'text-ember' : undefined}
+                title={fresh.stale ? 'Данные устарели — последний сбор был давно' : undefined}
+              >
+                {fresh.label}
+              </span>
+            </>
+          )}
         </p>
       </div>
     </section>
