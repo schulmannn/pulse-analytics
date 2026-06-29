@@ -146,6 +146,24 @@ export function KpiGrid() {
       ? `${subChange > 0 ? '+' : '−'}${fmt.num(Math.abs(subChange))} за ${periodLabel}`
       : 'в канале';
 
+  // Absolute "+N к пред. периоду" captions (current vs previous equal-length window). Like the
+  // subscriber Δ, only for preset windows — a custom range overrides the preset, so the paired
+  // window math wouldn't match the shown range. ER is expressed in percentage points.
+  const signedAbs = (n: number) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${fmt.num(Math.abs(n))}`;
+  const vsPrev = (cur: number, prev: number): string | null =>
+    range ? null : `${signedAbs(cur - prev)} к пред. периоду`;
+  const viewsAbsCaption = windowTotals ? vsPrev(windowTotals.current.views, windowTotals.previous.views) : null;
+  const reactionsCaption = windowTotals ? vsPrev(windowTotals.current.reactions, windowTotals.previous.reactions) : null;
+  const forwardsCaption = windowTotals ? vsPrev(windowTotals.current.forwards, windowTotals.previous.forwards) : null;
+  const erPp =
+    !range && members > 0 && currentEngagement != null && previousEngagement != null
+      ? ((currentEngagement - previousEngagement) / members) * 100
+      : null;
+  const erCaption =
+    erPp != null && Math.abs(erPp) >= 0.05 ? `${erPp > 0 ? '+' : '−'}${Math.abs(erPp).toFixed(1)} п.п.` : null;
+  const viewsBase = postsAnalyzed ? `по ${postsAnalyzed} постам` : null;
+  const viewsCaption = [viewsBase, viewsAbsCaption].filter(Boolean).join(' · ') || null;
+
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -153,20 +171,21 @@ export function KpiGrid() {
           label="Просмотры за период"
           value={fmt.short(totalViews)}
           trend={viewsTrend}
-          caption={postsAnalyzed ? `по ${postsAnalyzed} постам` : null}
+          caption={viewsCaption}
           spark={viewsSpark}
         />
         <FeaturedKpi label="Подписчики" value={fmt.num(displayMembers)} trend={subscriberTrend} caption={subCaption} spark={subsSpark} />
       </div>
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatTile label="Ср. охват поста" value={fmt.short(avgViews)} trend={avgReachTrend} spark={viewsSpark} />
-        <StatTile label="Реакции" value={fmt.short(totalReactions)} trend={reactionsTrend} spark={reactionsSpark} />
-        <StatTile label="Репосты" value={fmt.short(totalForwards)} trend={forwardsTrend} spark={forwardsSpark} />
+        <StatTile label="Реакции" value={fmt.short(totalReactions)} trend={reactionsTrend} spark={reactionsSpark} caption={reactionsCaption} />
+        <StatTile label="Репосты" value={fmt.short(totalForwards)} trend={forwardsTrend} spark={forwardsSpark} caption={forwardsCaption} />
         <StatTile
           label="Вовлечённость (ER)"
           value={er > 0 ? er.toFixed(2) + '%' : '—'}
           trend={erTrend}
           spark={engagementSpark}
+          caption={erCaption}
         />
       </div>
     </div>
@@ -225,9 +244,10 @@ interface StatTileProps {
   value: string;
   trend?: MetricDelta | null;
   spark?: DailySeries;
+  caption?: string | null;
 }
 
-function StatTile({ label, value, trend, spark }: StatTileProps) {
+function StatTile({ label, value, trend, spark, caption }: StatTileProps) {
   const [num, unit] = splitUnit(value);
   return (
     <Card>
@@ -248,6 +268,9 @@ function StatTile({ label, value, trend, spark }: StatTileProps) {
             interactive
             className="mt-2.5 h-6 w-full"
           />
+        ) : null}
+        {caption ? (
+          <div className="mt-1.5 truncate text-[10px] tabular-nums text-muted-foreground">{caption}</div>
         ) : null}
       </CardContent>
     </Card>
