@@ -7,7 +7,10 @@ import { useSelectedChannel } from '@/lib/channel-context';
 import { usePeriod } from '@/lib/period';
 import type { PeriodDays } from '@/lib/period';
 import { useTheme } from '@/lib/theme';
+import { useMediaQuery } from '@/lib/useMediaQuery';
+import { railMode, useSidebarCollapsed } from '@/lib/sidebar';
 import { fmt } from '@/lib/format';
+import { cn } from '@/lib/utils';
 import { Icon, type IconName } from '@/components/nav-icons';
 
 /** Close a popover/dropdown on Escape, and (when a ref is given) on outside mousedown.
@@ -125,37 +128,117 @@ export function DashboardLayout({ email, role }: DashboardLayoutProps) {
   );
 }
 
+/**
+ * Reveal-on-peek class strings: an element is hidden in the icon-rail and shown when the
+ * panel is hovered OR keyboard focus enters it. The focus-within companion is essential —
+ * `:hover` never fires on Tab, so without it a keyboard user sees an icon-only rail. Pairs
+ * with `focus-within:w-60` on the panel so focusing a rail control expands the peek too.
+ */
+const REVEAL_BLOCK = 'hidden group-hover/sb:block group-focus-within/sb:block';
+const REVEAL_INLINE = 'hidden group-hover/sb:inline group-focus-within/sb:inline';
+
+/**
+ * Three-state sidebar. ≥lg: full (w-60) with a manual collapse toggle (persisted).
+ * md–lg: auto icon-rail (w-16), labels accessible via title/aria + a hover/focus peek that
+ * expands the rail into an overlay (absolute, so content never reflows). <md: hidden
+ * (MobileNav takes over). In rail mode the visible panel is absolutely positioned and the
+ * w-16 <aside> stays as a layout spacer, so peeking overlays the content instead of
+ * pushing it. The aside stays `h-screen sticky top-0`, so the topbar/SectionNav offsets
+ * (top-0 / top-14, in the content column) are untouched.
+ */
 function Sidebar({ role }: { role?: string }) {
+  const isLg = useMediaQuery('(min-width: 1024px)');
+  const { collapsed, toggle } = useSidebarCollapsed();
+  const rail = railMode(isLg, collapsed);
+
   return (
-    <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r bg-card/30 md:flex">
-      <div className="flex items-center gap-2.5 px-5 pt-5">
-        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-base font-semibold text-primary-foreground">
-          P
-        </span>
-        <span className="text-[15px] font-semibold tracking-tight">Pulse</span>
-      </div>
+    <aside
+      className={cn(
+        'sticky top-0 hidden h-screen shrink-0 md:block',
+        rail ? 'w-16' : 'w-60',
+      )}
+    >
+      <div
+        className={cn(
+          'group/sb flex h-full flex-col border-r',
+          rail
+            ? 'absolute inset-y-0 left-0 z-30 w-16 overflow-hidden bg-card transition-[width,box-shadow] duration-200 hover:w-60 hover:shadow-xl focus-within:w-60 focus-within:shadow-xl'
+            : 'w-full bg-card/30',
+        )}
+      >
+        <div className="flex items-center gap-2.5 px-4 pt-5">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-base font-semibold text-primary-foreground">
+            P
+          </span>
+          <span className={cn('flex-1 whitespace-nowrap text-[15px] font-semibold tracking-tight', rail && REVEAL_BLOCK)}>
+            Pulse
+          </span>
+        </div>
 
-      <div className="mt-4">
-        <ChannelCard />
-      </div>
+        <div className="mt-4">
+          <ChannelCard rail={rail} />
+        </div>
 
-      <nav className="mt-4 flex-1 space-y-0.5 overflow-y-auto px-3">
-        {NAV.map((item) => (
-          <NavItem key={item.to} {...item} />
-        ))}
-        <p className="px-3 pb-1 pt-5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-          Система
-        </p>
-        {SYSTEM_NAV.map((item) => (
-          <NavItem key={item.to} {...item} />
-        ))}
-        {role === 'superuser' && SUPER_NAV.map((item) => <NavItem key={item.to} {...item} />)}
-      </nav>
+        <nav className="mt-4 flex-1 space-y-0.5 overflow-y-auto px-3">
+          {NAV.map((item) => (
+            <NavItem key={item.to} {...item} rail={rail} />
+          ))}
+          {rail ? (
+            <div className="px-2 pb-1 pt-4">
+              <div className="border-t group-hover/sb:hidden group-focus-within/sb:hidden" aria-hidden="true" />
+              <p
+                className={cn(
+                  'whitespace-nowrap pt-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground',
+                  REVEAL_BLOCK,
+                )}
+              >
+                Система
+              </p>
+            </div>
+          ) : (
+            <p className="px-3 pb-1 pt-5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+              Система
+            </p>
+          )}
+          {SYSTEM_NAV.map((item) => (
+            <NavItem key={item.to} {...item} rail={rail} />
+          ))}
+          {role === 'superuser' && SUPER_NAV.map((item) => <NavItem key={item.to} {...item} rail={rail} />)}
+        </nav>
 
-      <div className="px-3 pb-4">
-        <SearchBox />
+        <div className="space-y-1 px-3 pb-4">
+          <SearchBox rail={rail} />
+          {/* Manual collapse only exists at lg; below it the rail is responsive-forced.
+              Kept always-visible + focusable (never display:none) so a keyboard/touch user
+              who collapses can always re-expand. */}
+          {isLg && <CollapseToggle collapsed={collapsed} onToggle={toggle} rail={rail} />}
+        </div>
       </div>
     </aside>
+  );
+}
+
+/** Bottom collapse/expand control (lg only). Always rendered + tabbable, even in the rail. */
+function CollapseToggle({ collapsed, onToggle, rail }: { collapsed: boolean; onToggle: () => void; rail: boolean }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-label={collapsed ? 'Развернуть боковую панель' : 'Свернуть боковую панель'}
+      title={collapsed ? 'Развернуть' : 'Свернуть'}
+      className={cn(
+        'flex w-full items-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
+        rail
+          ? 'justify-center px-1 py-2 group-hover/sb:justify-start group-hover/sb:gap-2 group-hover/sb:px-3 group-focus-within/sb:justify-start group-focus-within/sb:gap-2 group-focus-within/sb:px-3'
+          : 'gap-2 px-3 py-2',
+      )}
+    >
+      <Icon
+        name="chevron"
+        className={cn('h-4 w-4 shrink-0 transition-transform', collapsed ? '-rotate-90' : 'rotate-90')}
+      />
+      <span className={cn('text-xs', rail && REVEAL_INLINE)}>{collapsed ? 'Развернуть' : 'Свернуть'}</span>
+    </button>
   );
 }
 
@@ -183,26 +266,29 @@ function MobileNav({ role }: { role?: string }) {
   );
 }
 
-function NavItem({ to, label, icon, end }: NavLinkDef) {
+function NavItem({ to, label, icon, end, rail }: NavLinkDef & { rail?: boolean }) {
   return (
     <NavLink
       to={to}
       end={end}
+      title={rail ? label : undefined}
+      aria-label={rail ? label : undefined}
       className={({ isActive }) =>
-        `flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
+        cn(
+          'flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
           isActive
             ? 'bg-primary/15 font-medium text-foreground'
-            : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'
-        }`
+            : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
+        )
       }
     >
       <Icon name={icon} className="h-[18px] w-[18px] shrink-0" />
-      <span className="truncate">{label}</span>
+      <span className={cn('whitespace-nowrap', rail && REVEAL_INLINE)}>{label}</span>
     </NavLink>
   );
 }
 
-function ChannelCard() {
+function ChannelCard({ rail = false }: { rail?: boolean }) {
   const { data } = useChannels();
   const { channelId, setChannelId } = useSelectedChannel();
   const queryClient = useQueryClient();
@@ -237,22 +323,35 @@ function ChannelCard() {
   };
 
   return (
-    <div ref={cardRef} className="relative px-3">
+    // In the rail the dropdown can only be opened while peeked; closing it when the pointer
+    // leaves the card (descendants included) stops it being left clipped once the peek collapses.
+    <div ref={cardRef} className="relative px-3" onMouseLeave={() => rail && setOpen(false)}>
       <button
         type="button"
         onClick={() => multi && setOpen((o) => !o)}
-        className={`flex w-full items-center gap-2.5 rounded-lg border bg-card px-2.5 py-2 text-left transition-colors ${
-          multi ? 'hover:bg-muted/50' : 'cursor-default'
-        }`}
+        title={rail ? handle : undefined}
+        aria-label={rail ? `Канал ${handle}` : undefined}
+        className={cn(
+          'flex w-full items-center rounded-lg border text-left transition-colors',
+          rail
+            ? 'justify-center border-transparent bg-transparent px-1 py-1.5 group-hover/sb:justify-start group-hover/sb:gap-2.5 group-hover/sb:border-border group-hover/sb:bg-card group-hover/sb:px-2.5 group-hover/sb:py-2 group-focus-within/sb:justify-start group-focus-within/sb:gap-2.5 group-focus-within/sb:border-border group-focus-within/sb:bg-card group-focus-within/sb:px-2.5 group-focus-within/sb:py-2'
+            : 'gap-2.5 border-border bg-card px-2.5 py-2',
+          multi ? 'cursor-pointer hover:bg-muted/50' : 'cursor-default',
+        )}
       >
         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary text-sm font-semibold text-primary-foreground">
           {initial}
         </span>
-        <span className="min-w-0 flex-1">
+        <span className={cn('min-w-0 flex-1', rail && REVEAL_BLOCK)}>
           <span className="block truncate text-sm font-medium text-foreground">{handle}</span>
           <span className="block truncate text-xs text-muted-foreground">{subtitle}</span>
         </span>
-        {multi && <Icon name="chevron" className="h-4 w-4 shrink-0 text-muted-foreground" />}
+        {multi && (
+          <Icon
+            name="chevron"
+            className={cn('h-4 w-4 shrink-0 text-muted-foreground', rail && REVEAL_BLOCK)}
+          />
+        )}
       </button>
 
       {open && multi && (
@@ -277,7 +376,7 @@ function ChannelCard() {
   );
 }
 
-function SearchBox() {
+function SearchBox({ rail = false }: { rail?: boolean }) {
   // Opens the global ⌘K command palette (mounted in App.tsx) by replaying the shortcut.
   const openPalette = () =>
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true, ctrlKey: true }));
@@ -285,11 +384,18 @@ function SearchBox() {
     <button
       type="button"
       onClick={openPalette}
-      className="flex w-full items-center gap-2 rounded-lg border bg-card px-3 py-2 text-xs text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+      title={rail ? 'Поиск (⌘K)' : undefined}
+      aria-label={rail ? 'Поиск (⌘K)' : undefined}
+      className={cn(
+        'flex w-full items-center rounded-lg border bg-card text-xs text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground',
+        rail
+          ? 'justify-center px-1 py-2 group-hover/sb:justify-start group-hover/sb:gap-2 group-hover/sb:px-3 group-focus-within/sb:justify-start group-focus-within/sb:gap-2 group-focus-within/sb:px-3'
+          : 'gap-2 px-3 py-2',
+      )}
     >
       <Icon name="search" className="h-4 w-4 shrink-0" />
-      <span className="flex-1 text-left">Поиск</span>
-      <kbd className="rounded border px-1.5 py-0.5 font-mono text-[10px]">⌘K</kbd>
+      <span className={cn('flex-1 text-left', rail && REVEAL_BLOCK)}>Поиск</span>
+      <kbd className={cn('rounded border px-1.5 py-0.5 font-mono text-[10px]', rail && REVEAL_BLOCK)}>⌘K</kbd>
     </button>
   );
 }
