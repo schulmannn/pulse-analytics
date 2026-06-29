@@ -417,9 +417,10 @@ function Topbar({ email, role }: { email?: string; role?: string }) {
   const { pathname } = useLocation();
   const title = TITLES[pathname] ?? 'Pulse';
   return (
-    <header className="sticky top-0 z-20 flex h-14 items-center justify-between gap-4 border-b bg-background/80 px-4 backdrop-blur sm:px-6">
-      <h1 className="truncate text-lg font-semibold">{title}</h1>
-      <div className="flex items-center gap-2">
+    <header className="sticky top-0 z-20 flex h-14 items-center justify-between gap-3 border-b bg-background/80 px-4 backdrop-blur sm:gap-4 sm:px-6">
+      {/* min-w-0 lets the title truncate instead of shoving the controls off a narrow screen. */}
+      <h1 className="min-w-0 truncate text-lg font-semibold">{title}</h1>
+      <div className="flex shrink-0 items-center gap-2">
         <PeriodSwitcher />
         <ThemeToggle />
         <MoreMenu email={email} role={role} />
@@ -438,7 +439,7 @@ function ThemeToggle() {
       onClick={toggle}
       aria-label={dark ? 'Светлая тема' : 'Тёмная тема'}
       title={dark ? 'Светлая тема' : 'Тёмная тема'}
-      className="rounded-lg border p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      className="rounded-lg border p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
     >
       <Icon name={dark ? 'sun' : 'moon'} className="h-4 w-4" />
     </button>
@@ -460,7 +461,7 @@ function MoreMenu({ email, role }: { email?: string; role?: string }) {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="rounded-lg border p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        className="rounded-lg border p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
         aria-label="Меню"
       >
         <Icon name="more" strokeWidth={2.4} className="h-4 w-4" />
