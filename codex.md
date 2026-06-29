@@ -1008,3 +1008,79 @@ service. **Claude-правка (1 баг):** `qr = await qr.recreate()` → `awa
 **это проверит юзер** (скачает агент → `login` → скан). **Отличная работа — вторая задача через прямой
 Codex-CLI-runtime.**
 
+---
+
+### 🟢 TASK-016 — Настоящая ⌘K-палитра на `cmdk` (заменить самописную)
+
+> **Параллельность.** Claude в это же время делает дизайн-пасс **D4** в рабочем дереве `main`
+> (файлы: `panels/Hero.tsx`, `panels/KpiGrid.tsx`, `components/LineChart.tsx`,
+> `components/BarChart.tsx`, `components/Sparkline.tsx`). **НЕ трогай эти файлы.** Чтобы не
+> мешать незакоммиченным правкам Claude — работай в отдельном worktree:
+> `git worktree add ../pulse-d2 -b codex/task-016` → `cd ../pulse-d2/frontend` и всё там
+> (свой `node_modules` после `npm install`). Claude отревьюит ветку `codex/task-016` и смержит.
+
+**Зачем.** Текущая `CommandPalette.tsx` (TASK-011) — самописная модалка (только маршруты + смена
+канала + выход). Эталоны (Linear/Vercel/Raycast) дают полноценную ⌘K с группами, fuzzy и недавними.
+Переходим на **`cmdk`** (фактический стандарт; бандлится в JS → CSP-safe при `script-src 'self'`).
+
+**Разрешение на зависимость:** можно добавить **`cmdk`** (только её). ⚠️ КРИТИЧНО: проверь
+`peerDependencies` cmdk — должна быть совместима с нашим **React 18 / Vite 5** (cmdk `^1`
+требует react >=18 — подходит; НЕ ставь версию, тянущую react 19 / vite 6). **НЕ через
+`shadcn add command`** — его `CommandDialog` тянет ещё и `@radix-ui/react-dialog` (лишняя
+зависимость). Ставь `npm install cmdk` напрямую и используй примитив `<Command>` **внутри нашего
+существующего модал-паттерна** (`fixed inset-0 bg-black/50` + центр-`Card`, как в `PostModal`/
+текущей палитре). После добавления — **обязательно чистый `npm ci`** (peer-конфликт всплывает
+только на нём; деплой = строгий `npm ci`; `vitest` запинен `^3` — не дай ничему подтянуть vite 6).
+
+**Что сделать (`src/components/CommandPalette.tsx` — переписать на cmdk; хук открытия сохранить):**
+1. **Сохранить ОБА способа открытия** (не сломать!):
+   - глобальный слушатель `⌘K`/`Ctrl+K` (как сейчас в `useCommandPalette`);
+   - `DashboardLayout` → `SearchBox` диспатчит синтетический `KeyboardEvent('keydown',
+     {key:'k', metaKey:true, ctrlKey:true})` на `window` — этот листенер должен его ловить.
+   Палитра по-прежнему смонтирована один раз в `App.tsx`. Esc/клик-вне закрывают.
+2. **Группы команд** (`Command.Group` с заголовками), порядок:
+   - **«Раздел»** — прыжок к любой секции страницы. Экспортируй `SECTIONS` из
+     `panels/Overview.tsx` (5 секций: ids `metrics/growth/timing/velocity/top-posts`) и из
+     `panels/Instagram.tsx` (15 секций: `ig-metrics … ig-actions`) — добавь `export` к
+     существующим `const SECTIONS` (содержимое НЕ меняй). Для каждой секции команда
+     `Перейти к разделу: <label>`. Действие: если текущий `pathname` не на нужной странице
+     (Overview-секции → `/`; IG-секции → `/instagram`) — сперва `navigate(путь)`, затем
+     **после смены роута** проскроллить: `document.getElementById(id)?.scrollIntoView(
+     {behavior:'smooth', block:'start'})`. Навигация асинхронна → паттерн «отложенный скролл»:
+     положи `pendingScrollId` в ref/state и выполни scroll в `useEffect` по смене `pathname`
+     (или `requestAnimationFrame`/малый таймаут после navigate). Если уже на странице — сразу.
+   - **«Навигация»** — Обзор `/`, Аналитика `/analytics`, Посты `/posts`, Упоминания
+     `/mentions`, Настройки `/settings` (+ Админ `/admin`, Баги `/bugs` только для superuser —
+     роль из `useMe()`).
+   - **«Платформа»** — Telegram → `/`, Instagram → `/instagram`.
+   - **«Канал»** — только если `useChannels().channels.length >= 2`: для каждого канала
+     `Сменить канал: @<username|title|id>` → `useSelectedChannel().setChannelId(id)`.
+   - **«Период»** — `usePeriod().setDays`: 7д→7, 30д→30, 90д→90, Всё→0.
+   - **«Выйти»** — `useLogout()` (как сейчас: `mutate(undefined, {onSettled: () =>
+     navigate('/login', {replace:true})})`).
+3. **Недавние** — последние ~8 ВЫПОЛНЕННЫХ команд в `localStorage` (ключ `pulse_cmdk_recents`,
+   массив `{id,label}`; dedupe по id, cap 8, новые сверху, try/catch как в `theme.tsx`).
+   Показывать группой **«Недавние»** ТОЛЬКО при пустом запросе (как печатать начал — скрыть,
+   показывать отфильтрованные группы). При выполнении любой команды — записать в недавние.
+4. **Fuzzy/подстрочный поиск** — встроен в cmdk (по `value` каждого `Command.Item`; задавай
+   осмысленный `value`, напр. `"раздел метрики"`/`"навигация посты"`, чтобы матчилось по-русски).
+   ↑/↓/Enter (встроены), Esc/клик-вне закрыть, autofocus на инпуте, `role="dialog"`/`aria-modal`/
+   `aria-label` сохранить. После выполнения — закрыть палитру и сбросить запрос.
+5. **Стиль** — нашими семантик-токенами (`bg-popover`, `text-foreground`,
+   `text-muted-foreground`, `bg-muted`/`bg-accent` для выделенного `Command.Item[data-selected]`,
+   `border`). Без hex. Функциональный минимум + `{/* DESIGN: Claude review */}` — полиш за Claude.
+
+**Не делать:** не трогать `DashboardLayout` (полагайся на его существующий синтетический keydown),
+не трогать D4-файлы Claude (см. шапку), не `shadcn add command` (Radix), не пушить в `main`,
+не менять `public/`/CSP/`Dockerfile`. Серверный код не нужен.
+
+**Критерии приёмки:** **чистый `npm ci`** + `npm run build` + `npm test` зелёные (приложи хвосты);
+⌘K И клик по «Поиск» в сайдбаре открывают палитру; группы Раздел/Навигация/Платформа/Канал/Период/
+Выйти на месте; недавние показываются при пустом запросе и обновляются; fuzzy-фильтр работает;
+прыжок к секции скроллит (с навигацией на нужную страницу, если не на ней); Админ/Баги скрыты для
+не-superuser; CSP `'self'` не нарушен (cmdk бандлится, без внешних скриптов).
+
+#### Отчёт Codex
+
+_(заполнит Codex)_
+
