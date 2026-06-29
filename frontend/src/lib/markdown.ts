@@ -13,9 +13,25 @@ export type MdNode =
 // Only http(s) links are followed; anything else (javascript:, data:, …) renders as literal text.
 const SAFE_URL = /^https?:\/\//i;
 
-// Order matters: links, then ** (bold) before * (italic), then `code`. `_` is intentionally NOT
-// treated as italic — it collides with snake_case identifiers and @handles in real captions.
-const TOKEN = /\[([^\]\n]+)\]\(([^)\s]+)\)|\*\*([^*\n]+)\*\*|`([^`\n]+)`|\*([^*\n]+)\*/g;
+// Order matters: links, then ** / __ (bold) before * (italic), then `code`. A single `_` is
+// intentionally NOT italic — it collides with snake_case identifiers and @handles in real
+// captions. Paired `__…__` (Telegram MarkdownV2 underline / common emphasis) IS rendered as
+// bold: the reviewer wants it shown as emphasis, not as literal underscores.
+const TOKEN =
+  /\[([^\]\n]+)\]\(([^)\s]+)\)|\*\*([^*\n]+)\*\*|__([^_\n]+)__|`([^`\n]+)`|\*([^*\n]+)\*/g;
+
+// Captions frequently arrive with broken/unclosed markdown (e.g. a leading "**Сегодня" with no
+// closing pair). Those never tokenize, so we strip orphan `**` from the literal text that's left
+// over rather than render the raw asterisks. `__` orphans are left alone — bare double-underscores
+// occur in identifiers (`__init__`, `a__b`) far more than as broken markup.
+function stripOrphanMarks(text: string): string {
+  return text.replace(/\*\*/g, '');
+}
+
+function pushText(nodes: MdNode[], value: string): void {
+  const cleaned = stripOrphanMarks(value);
+  if (cleaned) nodes.push({ type: 'text', value: cleaned });
+}
 
 /** Parse a single string of inline markdown into a flat list of nodes (no nesting). */
 export function parseInlineMarkdown(rawInput: string): MdNode[] {
@@ -28,20 +44,22 @@ export function parseInlineMarkdown(rawInput: string): MdNode[] {
   let match: RegExpExecArray | null;
   TOKEN.lastIndex = 0;
   while ((match = TOKEN.exec(input)) !== null) {
-    if (match.index > last) nodes.push({ type: 'text', value: input.slice(last, match.index) });
+    if (match.index > last) pushText(nodes, input.slice(last, match.index));
     if (match[1] !== undefined) {
       const href = match[2];
       if (SAFE_URL.test(href)) nodes.push({ type: 'link', value: match[1], href });
-      else nodes.push({ type: 'text', value: match[0] }); // unsafe scheme → keep literal
+      else pushText(nodes, match[0]); // unsafe scheme → keep literal
     } else if (match[3] !== undefined) {
-      nodes.push({ type: 'bold', value: match[3] });
+      nodes.push({ type: 'bold', value: match[3] }); // **bold**
     } else if (match[4] !== undefined) {
-      nodes.push({ type: 'code', value: match[4] });
+      nodes.push({ type: 'bold', value: match[4] }); // __bold__ (rendered as emphasis)
     } else if (match[5] !== undefined) {
-      nodes.push({ type: 'italic', value: match[5] });
+      nodes.push({ type: 'code', value: match[5] });
+    } else if (match[6] !== undefined) {
+      nodes.push({ type: 'italic', value: match[6] });
     }
     last = TOKEN.lastIndex;
   }
-  if (last < input.length) nodes.push({ type: 'text', value: input.slice(last) });
+  if (last < input.length) pushText(nodes, input.slice(last));
   return nodes;
 }

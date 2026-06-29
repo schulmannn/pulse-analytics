@@ -33,10 +33,26 @@ describe('parseInlineMarkdown', () => {
     expect(parseInlineMarkdown('[x](javascript:alert)').some((n) => n.type === 'link')).toBe(false);
   });
 
-  it('does not treat underscores (snake_case / @handles) as italic', () => {
+  it('does not treat single underscores (snake_case / @handles) as italic', () => {
     expect(parseInlineMarkdown('media_product_type')).toEqual([
       { type: 'text', value: 'media_product_type' },
     ]);
+  });
+
+  it('renders paired __double underscore__ as bold emphasis', () => {
+    expect(parseInlineMarkdown('a __b__ c')).toEqual([
+      { type: 'text', value: 'a ' },
+      { type: 'bold', value: 'b' },
+      { type: 'text', value: ' c' },
+    ]);
+  });
+
+  it('strips orphan ** from broken/unclosed markdown', () => {
+    // The classic broken-caption case: a leading bold marker with no closing pair.
+    expect(parseInlineMarkdown('**Сегодня празднуем')).toEqual([
+      { type: 'text', value: 'Сегодня празднуем' },
+    ]);
+    expect(parseInlineMarkdown('a ** b')).toEqual([{ type: 'text', value: 'a  b' }]);
   });
 
   it('handles empty input', () => {
