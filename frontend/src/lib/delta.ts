@@ -115,6 +115,34 @@ export function subscriberDelta(
 }
 
 /**
+ * Absolute subscriber change (latest − baseline) over the `days` window — the signed integer
+ * behind the subscriber percent delta ("−108 за период"). Mirrors subscriberDelta's point
+ * selection. Returns null if either endpoint is missing; days<=0 (all-time) → null.
+ */
+export function subscriberChange(
+  rows: SubscriberHistoryRow[],
+  days: number,
+  now = Date.now(),
+): number | null {
+  if (!Number.isFinite(days) || days <= 0) return null;
+
+  const target = now - days * DAY_MS;
+  const points = rows
+    .filter((row) => row.subscribers != null)
+    .map((row) => ({ timestamp: Date.parse(row.day), subscribers: Number(row.subscribers) }))
+    .filter(
+      (point) =>
+        Number.isFinite(point.timestamp) && point.timestamp <= now && Number.isFinite(point.subscribers),
+    )
+    .sort((a, b) => a.timestamp - b.timestamp);
+
+  const latest = points.at(-1);
+  const baseline = points.filter((point) => point.timestamp <= target).at(-1);
+  if (!latest || !baseline) return null;
+  return latest.subscribers - baseline.subscribers;
+}
+
+/**
  * Period-over-period delta for a daily FLOW metric (views / forwards / reactions) read
  * from the channel_daily archive — the same reliable source the subscriber delta uses.
  * Sums `pick(row)` over the current window [now-days, now] vs the previous window

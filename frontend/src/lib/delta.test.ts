@@ -1,5 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import { avgReachWindowDelta, dailyWindowDelta, pctDelta, subscriberDelta, sumPostWindows } from '@/lib/delta';
+import { avgReachWindowDelta, dailyWindowDelta, pctDelta, subscriberChange, subscriberDelta, sumPostWindows } from '@/lib/delta';
+
+describe('subscriberChange', () => {
+  const now = Date.parse('2026-06-25T12:00:00.000Z');
+  const rows = [
+    { day: '2026-05-20', subscribers: 5000 },
+    { day: '2026-05-26', subscribers: 4950 }, // ~30d baseline
+    { day: '2026-06-25', subscribers: 4892 }, // latest
+  ];
+
+  it('returns the signed latest-minus-baseline change over the window', () => {
+    expect(subscriberChange(rows, 30, now)).toBe(4892 - 4950);
+  });
+
+  it('returns null for all-time (days<=0) or when an endpoint is missing', () => {
+    expect(subscriberChange(rows, 0, now)).toBeNull();
+    expect(subscriberChange([{ day: '2026-06-25', subscribers: 100 }], 30, now)).toBeNull();
+  });
+});
 
 describe('pctDelta', () => {
   it('returns direction and absolute percentage', () => {

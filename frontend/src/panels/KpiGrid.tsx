@@ -5,7 +5,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Sparkline } from '@/components/Sparkline';
 import { Skeleton } from '@/components/ui/skeleton';
 import { usePeriod } from '@/lib/period';
-import { avgReachWindowDelta, dailyWindowDelta, pctDelta, subscriberDelta, sumPostWindows } from '@/lib/delta';
+import { avgReachWindowDelta, dailyWindowDelta, pctDelta, subscriberChange, subscriberDelta, sumPostWindows } from '@/lib/delta';
 import type { MetricDelta } from '@/lib/delta';
 
 /** Sparkline hue: green/red when the metric is trending, brand iris when flat/unknown. */
@@ -28,7 +28,7 @@ function splitUnit(value: string): [string, string] {
  * the post-window sum; sparse data → null → no pill, never a made-up number.
  */
 export function KpiGrid() {
-  const { days, inRange } = usePeriod();
+  const { days, range, inRange } = usePeriod();
   const { data, isLoading, isError, error } = useTgFull(days);
   const { data: history } = useHistory(730);
   const { channelId } = useSelectedChannel();
@@ -46,8 +46,10 @@ export function KpiGrid() {
   }
 
   const members = data?.channel?.memberCount ?? data?.channel?.members ?? 0;
-  // Displayed subscriber count prefers the channel_daily archive (same source as the Hero and as
-  // subscriberTrend/subsSpark below), so the headline number agrees with its own trend visuals.
+  // Displayed subscriber count comes from the channels list (server-derived from the latest
+  // channel_daily row — the same archive the Hero uses), falling back to the live /api/tg/full
+  // count. The trend pill + sparkline read that archive via /api/history (a separate endpoint /
+  // cache), so the shown Δ is directional context, not exact (headline − baseline) arithmetic.
   // The live `members` above stays the ER/avg divisor (parity with the legacy formula).
   const current = channelsData?.channels.find((c) => c.id === channelId);
   const displayMembers = current?.memberCount ?? members;
@@ -129,6 +131,15 @@ export function KpiGrid() {
     .filter((row) => row.subscribers != null && inRange(row.day))
     .sort((a, b) => a.day.localeCompare(b.day))
     .map((row) => Number(row.subscribers));
+  // Absolute subscriber change ("−108 за 30 дн.") — more legible than the % alone. Only for the
+  // `days` presets: a custom date range overrides the preset window, so a preset-based number +
+  // label would contradict the (range-filtered) sparkline → fall back to a neutral caption.
+  const subChange = range ? null : subscriberChange(historyRows, days);
+  const periodLabel = days === 0 ? 'всё время' : `${days} дн.`;
+  const subCaption =
+    subChange != null && subChange !== 0
+      ? `${subChange > 0 ? '+' : '−'}${fmt.num(Math.abs(subChange))} за ${periodLabel}`
+      : 'в канале';
 
   return (
     <div className="space-y-4">
@@ -140,7 +151,7 @@ export function KpiGrid() {
           caption={postsAnalyzed ? `по ${postsAnalyzed} постам` : null}
           spark={viewsSpark}
         />
-        <FeaturedKpi label="Подписчики" value={fmt.num(displayMembers)} trend={subscriberTrend} caption="в канале" spark={subsSpark} />
+        <FeaturedKpi label="Подписчики" value={fmt.num(displayMembers)} trend={subscriberTrend} caption={subCaption} spark={subsSpark} />
       </div>
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatTile label="Ср. охват поста" value={fmt.short(avgViews)} trend={avgReachTrend} spark={viewsSpark} />
@@ -180,7 +191,10 @@ function FeaturedKpi({ label, value, trend, caption, spark }: FeaturedKpiProps) 
         </div>
         {caption ? <div className="mt-1.5 text-xs text-muted-foreground">{caption}</div> : null}
         {spark && spark.length > 1 ? (
-          <Sparkline values={spark} area strokeWidth={2} className="mt-4 h-12 w-full" />
+          <div className="mt-4">
+            <Sparkline values={spark} area strokeWidth={2} className="h-12 w-full" />
+            <div className="mt-1 text-[10px] text-muted-foreground">по дням</div>
+          </div>
         ) : null}
       </CardContent>
     </Card>

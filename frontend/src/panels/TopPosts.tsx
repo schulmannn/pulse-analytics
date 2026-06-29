@@ -23,13 +23,31 @@ export function TopPosts() {
   );
 
   const withEng = posts.filter((post) => post.eng > 0);
+  const avg = (pick: (p: NormalizedPost) => number) =>
+    withEng.length ? withEng.reduce((sum, p) => sum + pick(p), 0) / withEng.length : 0;
+  const avgEng = avg((p) => p.eng);
+  const avgReach = avg((p) => p.reach);
+  const avgShares = avg((p) => p.shares);
+
   let topPosts: NormalizedPost[] = [];
   if (withEng.length > 0) {
-    const avgEng = withEng.reduce((sum, post) => sum + post.eng, 0) / withEng.length;
     const aboveAvg = withEng.filter((post) => post.eng > avgEng);
     topPosts = (aboveAvg.length > 0 ? [...aboveAvg] : [...withEng]).sort((a, b) => b.eng - a.eng);
   }
   topPosts = topPosts.slice(0, 6);
+
+  // "Why it's in the top" — the metric where this post most exceeds the period average, so the
+  // ranking reads as an insight ("+42% к среднему по репостам") rather than a wall of numbers.
+  const reasonFor = (post: NormalizedPost): string | null => {
+    const opts = [
+      { label: 'вовлечённости', ratio: avgEng > 0 ? post.eng / avgEng : 0 },
+      { label: 'охвату', ratio: avgReach > 0 ? post.reach / avgReach : 0 },
+      { label: 'репостам', ratio: avgShares > 0 && post.shares > 0 ? post.shares / avgShares : 0 },
+    ];
+    const best = opts.reduce((a, b) => (b.ratio > a.ratio ? b : a));
+    const pct = Math.round((best.ratio - 1) * 100);
+    return pct > 0 ? `+${pct}% к среднему по ${best.label}` : null;
+  };
 
   if (topPosts.length === 0) {
     return (
@@ -43,7 +61,9 @@ export function TopPosts() {
 
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      {topPosts.map((post, idx) => (
+      {topPosts.map((post, idx) => {
+        const reason = reasonFor(post);
+        return (
         <Card key={post.id ?? idx} className="flex flex-col justify-between overflow-hidden">
           <div>
             <div className="relative flex aspect-video w-full items-center justify-center overflow-hidden bg-muted/50">
@@ -68,9 +88,15 @@ export function TopPosts() {
               <p className="line-clamp-3 text-sm leading-relaxed text-foreground">
                 {post.caption ? <RichText text={post.caption} /> : <span className="italic text-muted-foreground">Без подписи</span>}
               </p>
+              {reason && (
+                <div className="flex items-center gap-1 text-[11px] font-medium text-verdant">
+                  <span aria-hidden="true">▲</span>
+                  <span className="truncate">{reason}</span>
+                </div>
+              )}
               {post.reactionsDetail.length > 0 && (
                 <div className="flex flex-wrap gap-1 pt-1">
-                  {post.reactionsDetail.slice(0, 5).map((r, i) => (
+                  {post.reactionsDetail.slice(0, 3).map((r, i) => (
                     <span
                       key={i}
                       className="inline-flex items-center gap-1 rounded-full bg-secondary px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-secondary-foreground"
@@ -98,7 +124,8 @@ export function TopPosts() {
             </div>
           </div>
         </Card>
-      ))}
+        );
+      })}
     </div>
   );
 }
