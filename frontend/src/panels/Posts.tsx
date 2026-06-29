@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { LineChart } from '@/components/LineChart';
 import { usePeriod } from '@/lib/period';
 import { Skeleton } from '@/components/ui/skeleton';
+import { RichText } from '@/components/RichText';
 import { TopPosts } from '@/panels/TopPosts';
 
 export function Posts() {
@@ -47,7 +48,7 @@ export function Posts() {
     <div className="space-y-8">
       {/* Топ постов (общий компонент, переиспользуется в Обзоре) */}
       <div className="space-y-4">
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+        <h3 className="text-sm font-semibold tracking-wide text-muted-foreground">
           Топ постов за период
         </h3>
         <TopPosts />
@@ -56,14 +57,14 @@ export function Posts() {
       {/* Таблица публикаций */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+          <CardTitle className="text-sm font-medium tracking-wide text-muted-foreground">
             Последние публикации (Топ-25 по охвату)
           </CardTitle>
         </CardHeader>
         <CardContent className="overflow-x-auto p-0">
           <table className="w-full border-collapse text-left text-sm">
             <thead>
-              <tr className="border-b border-border bg-muted/40 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              <tr className="border-b border-border bg-muted/40 text-xs font-semibold tracking-wider text-muted-foreground">
                 <th className="w-12 p-4 text-center"></th>
                 <th className="min-w-[240px] p-4">Пост</th>
                 <th className="p-4 text-right">Просмотры</th>
@@ -94,14 +95,14 @@ export function Posts() {
                             className="h-full w-full object-cover"
                           />
                         ) : (
-                          <span className="text-[9px] font-bold uppercase text-muted-foreground">Текст</span>
+                          <span className="text-[9px] font-bold text-muted-foreground">Текст</span>
                         )}
                       </div>
                     </td>
                     <td className="p-4">
                       <div className="max-w-sm space-y-1 md:max-w-md lg:max-w-lg">
                         <div className="line-clamp-1 font-medium text-foreground transition-colors group-hover:text-primary">
-                          {post.caption ? post.caption.slice(0, 80) : <span className="italic text-muted-foreground">Без подписи</span>}
+                          {post.caption ? <RichText text={post.caption} /> : <span className="italic text-muted-foreground">Без подписи</span>}
                         </div>
                         <div className="flex items-center gap-2 text-xs text-muted-foreground">
                           <span>{fmt.date(post.date)}</span>
@@ -212,7 +213,7 @@ function PostModal({ post, onClose }: PostModalProps) {
 
         <CardHeader className="pr-12">
           <CardTitle className="text-base font-semibold leading-snug text-foreground">
-            {post.caption ? post.caption.slice(0, 160) : <span className="italic text-muted-foreground">Без подписи</span>}
+            {post.caption ? <RichText text={post.caption} /> : <span className="italic text-muted-foreground">Без подписи</span>}
           </CardTitle>
           <div className="pt-1.5 text-xs tabular-nums text-muted-foreground">
             {fmt.short(post.reach)} просм · {fmt.short(post.likes)} реакц · {fmt.short(post.shares)} реп · {fmt.date(post.date)}
@@ -245,7 +246,7 @@ function PostModal({ post, onClose }: PostModalProps) {
             ) : hasGraphData ? (
               <div className="space-y-6">
                 <div>
-                  <h4 className="mb-3 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                  <h4 className="mb-3 text-xs font-bold tracking-wider text-muted-foreground">
                     Динамика набора просмотров
                   </h4>
                   <LineChart values={graphValues} titles={chartTitles} labels={chartLabels} />
@@ -253,7 +254,7 @@ function PostModal({ post, onClose }: PostModalProps) {
 
                 {reactionsList.length > 0 && (
                   <div className="space-y-2">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Реакции</h4>
+                    <h4 className="text-xs font-bold tracking-wider text-muted-foreground">Реакции</h4>
                     <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                       {reactionsList.map((react, i) => (
                         <div

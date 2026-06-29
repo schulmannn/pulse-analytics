@@ -90,7 +90,7 @@ export function Digest() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Итоги · авто-сводка</CardTitle>
+        <CardTitle className="text-xs font-bold tracking-wider text-muted-foreground">Итоги · авто-сводка</CardTitle>
       </CardHeader>
       <CardContent>
         <ul className="space-y-3.5 text-sm leading-relaxed">

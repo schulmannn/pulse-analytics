@@ -82,7 +82,7 @@ export function HistoryChartBlock() {
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+        <CardTitle className="text-sm font-medium tracking-wide text-muted-foreground">
           История подписчиков
         </CardTitle>
       </CardHeader>
@@ -163,7 +163,7 @@ export function HeatmapChartBlock() {
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+        <CardTitle className="text-sm font-medium tracking-wide text-muted-foreground">
           Тепловая карта активности (день × час)
         </CardTitle>
       </CardHeader>
@@ -258,7 +258,7 @@ export function VelocityChartBlock() {
     return (
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+          <CardTitle className="text-sm font-medium tracking-wide text-muted-foreground">
             Скорость набора просмотров
           </CardTitle>
         </CardHeader>
@@ -281,7 +281,7 @@ export function VelocityChartBlock() {
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+        <CardTitle className="text-sm font-medium tracking-wide text-muted-foreground">
           Скорость набора просмотров
         </CardTitle>
       </CardHeader>
@@ -301,7 +301,7 @@ function ChartSkeleton({ title }: { title: string }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+        <CardTitle className="text-sm font-medium tracking-wide text-muted-foreground">
           {title}
         </CardTitle>
       </CardHeader>

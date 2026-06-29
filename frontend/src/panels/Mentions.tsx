@@ -120,19 +120,19 @@ export function Mentions() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <Card>
           <CardContent className="p-5">
-            <div className="text-xs uppercase tracking-wide text-muted-foreground">Упоминаний</div>
+            <div className="text-xs tracking-wide text-muted-foreground">Упоминаний</div>
             <div className="mt-2 text-3xl font-semibold tabular-nums tracking-tight">{fmt.num(total)}</div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-5">
-            <div className="text-xs uppercase tracking-wide text-muted-foreground">Каналов</div>
+            <div className="text-xs tracking-wide text-muted-foreground">Каналов</div>
             <div className="mt-2 text-3xl font-semibold tabular-nums tracking-tight">{fmt.num(uniqueChannels)}</div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-5">
-            <div className="text-xs uppercase tracking-wide text-muted-foreground">Суммарный охват</div>
+            <div className="text-xs tracking-wide text-muted-foreground">Суммарный охват</div>
             <div className="mt-2 text-3xl font-semibold tabular-nums tracking-tight">{fmt.short(totalViews)}</div>
           </CardContent>
         </Card>
@@ -142,7 +142,7 @@ export function Mentions() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+            <CardTitle className="text-sm font-medium tracking-wide text-muted-foreground">
               Упоминаний по дням
             </CardTitle>
           </CardHeader>
@@ -155,7 +155,7 @@ export function Mentions() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+            <CardTitle className="text-sm font-medium tracking-wide text-muted-foreground">
               Кто упоминает · топ каналов
             </CardTitle>
           </CardHeader>
@@ -168,7 +168,7 @@ export function Mentions() {
       {/* Лента последних упоминаний */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+          <CardTitle className="text-sm font-medium tracking-wide text-muted-foreground">
             Последние упоминания
           </CardTitle>
         </CardHeader>

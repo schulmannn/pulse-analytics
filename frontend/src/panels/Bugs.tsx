@@ -64,7 +64,7 @@ export function Bugs() {
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Сообщить о баге / предложить фичу</CardTitle>
+          <CardTitle className="text-sm font-semibold tracking-wide text-muted-foreground">Сообщить о баге / предложить фичу</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmitBug} className="space-y-4">
@@ -112,7 +112,7 @@ export function Bugs() {
       </Card>
 
       <div className="space-y-3">
-        <h3 className="px-1 text-xs font-bold uppercase tracking-wider text-muted-foreground">Тикеты</h3>
+        <h3 className="px-1 text-xs font-bold tracking-wider text-muted-foreground">Тикеты</h3>
         {bugs.length === 0 ? (
           <div className="rounded-lg border border-dashed bg-muted/20 py-8 text-center text-sm text-muted-foreground">
             Багов пока нет.
@@ -184,7 +184,7 @@ function BugRowCard({ bug, availableStatuses, onDelete }: BugRowCardProps) {
         <div className="flex flex-col gap-3 border-t border-border/40 pt-2 text-xs sm:flex-row sm:items-center sm:justify-between">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 font-mono text-[11px] text-muted-foreground">
             <span className="font-bold text-foreground">#{bug.id}</span>
-            <span className={`rounded px-1.5 py-0.5 font-sans text-[10px] font-bold uppercase tracking-wide ${currentKindClass}`}>
+            <span className={`rounded px-1.5 py-0.5 font-sans text-[10px] font-bold tracking-wide ${currentKindClass}`}>
               {KIND_LABELS[bug.kind ?? ''] || bug.kind}
             </span>
             <span className={`font-sans font-semibold ${currentSeverityClass}`}>

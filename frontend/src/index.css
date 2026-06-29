@@ -94,6 +94,27 @@
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
   }
+  /* Quieter scrollbars — tinted to the surface instead of the loud system default (but never
+     hidden). Firefox via scrollbar-*; WebKit/Chromium via the pseudo-elements. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 999px;
+    border: 3px solid hsl(var(--background));
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.6);
+  }
   /* Visible keyboard focus across the whole app (WCAG 2.4.7) — one rule for every
      button/link/tab; inputs keep their own focus:ring. */
   button:focus-visible,

@@ -226,32 +226,32 @@ export function TgAnalytics() {
       {/* 1) KPI */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
         <Card><CardContent className="p-4">
-          <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Просмотров / пост</div>
+          <div className="text-[11px] font-medium tracking-wider text-muted-foreground">Просмотров / пост</div>
           <div className="mt-1 text-xl font-bold tabular-nums">{fmt.short(cur(cs?.views_per_post) ?? vs?.avg_views ?? 0)}</div>
           {vs?.posts_analyzed ? <div className="mt-1 truncate text-[10px] text-muted-foreground">по {vs.posts_analyzed} постам</div> : null}
         </CardContent></Card>
         <Card><CardContent className="p-4">
-          <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Ср. ERV</div>
+          <div className="text-[11px] font-medium tracking-wider text-muted-foreground">Ср. ERV</div>
           <div className="mt-1 text-xl font-bold tabular-nums">{avgErv != null ? `${avgErv.toFixed(1)}%` : '—'}</div>
           <div className="mt-1 truncate text-[10px] text-muted-foreground">вовлечённость на просмотр</div>
         </CardContent></Card>
         <Card><CardContent className="p-4">
-          <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Виральность</div>
+          <div className="text-[11px] font-medium tracking-wider text-muted-foreground">Виральность</div>
           <div className="mt-1 text-xl font-bold tabular-nums">{avgVir != null ? `${avgVir.toFixed(1)}%` : '—'}</div>
           <div className="mt-1 truncate text-[10px] text-muted-foreground">репосты / просмотры</div>
         </CardContent></Card>
         <Card><CardContent className="p-4">
-          <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Репостов / пост</div>
+          <div className="text-[11px] font-medium tracking-wider text-muted-foreground">Репостов / пост</div>
           <div className="mt-1 text-xl font-bold tabular-nums">{cur(cs?.shares_per_post) != null ? fmt.short(cur(cs?.shares_per_post)!) : '—'}</div>
           {vs?.total_forwards ? <div className="mt-1 truncate text-[10px] text-muted-foreground">{fmt.short(vs.total_forwards)} всего</div> : null}
         </CardContent></Card>
         <Card><CardContent className="p-4">
-          <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Реакций / пост</div>
+          <div className="text-[11px] font-medium tracking-wider text-muted-foreground">Реакций / пост</div>
           <div className="mt-1 text-xl font-bold tabular-nums">{cur(cs?.reactions_per_post) != null ? fmt.short(cur(cs?.reactions_per_post)!) : '—'}</div>
           {vs?.total_reactions ? <div className="mt-1 truncate text-[10px] text-muted-foreground">{fmt.short(vs.total_reactions)} всего</div> : null}
         </CardContent></Card>
         <Card><CardContent className="p-4">
-          <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Уведомления вкл.</div>
+          <div className="text-[11px] font-medium tracking-wider text-muted-foreground">Уведомления вкл.</div>
           <div className="mt-1 text-xl font-bold tabular-nums">{notifPct != null ? `${notifPct.toFixed(1)}%` : '—'}</div>
           {notif ? <div className="mt-1 truncate text-[10px] text-muted-foreground">{fmt.short(notif.part ?? 0)} из {fmt.short(notif.total ?? 0)}</div> : null}
         </CardContent></Card>
@@ -259,7 +259,7 @@ export function TgAnalytics() {
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {last14Dates.length >= 2 && (
-          <Card><CardHeader><CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Просмотры по дням</CardTitle></CardHeader>
+          <Card><CardHeader><CardTitle className="text-xs font-bold tracking-wider text-muted-foreground">Просмотры по дням</CardTitle></CardHeader>
           <CardContent>
             <ExpandableChart title="Просмотры по дням">
               <LineChart values={vbdValues} labels={[last14Dates[0] ?? '', last14Dates[Math.floor(last14Dates.length / 2)] ?? '', last14Dates[last14Dates.length - 1] ?? '']} titles={vbdTitles} />
@@ -268,22 +268,22 @@ export function TgAnalytics() {
         )}
 
         {topEmojis.length > 0 && (
-          <Card><CardHeader><CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Реакции по эмодзи</CardTitle></CardHeader>
+          <Card><CardHeader><CardTitle className="text-xs font-bold tracking-wider text-muted-foreground">Реакции по эмодзи</CardTitle></CardHeader>
           <CardContent><Breakdown items={topEmojis.map((e) => ({ label: e.label, value: e.value, display: fmt.num(e.value) }))} /></CardContent></Card>
         )}
 
         {engagementComposition.length > 0 && (
-          <Card><CardHeader><CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Состав вовлечённости</CardTitle></CardHeader>
+          <Card><CardHeader><CardTitle className="text-xs font-bold tracking-wider text-muted-foreground">Состав вовлечённости</CardTitle></CardHeader>
           <CardContent><Breakdown items={engagementComposition.map((c) => ({ label: c.label, value: c.value, display: fmt.num(c.value) }))} /></CardContent></Card>
         )}
 
         {viewsByType.length > 0 && (
-          <Card><CardHeader><CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Ср. охват по типу</CardTitle></CardHeader>
+          <Card><CardHeader><CardTitle className="text-xs font-bold tracking-wider text-muted-foreground">Ср. охват по типу</CardTitle></CardHeader>
           <CardContent><Breakdown items={viewsByType.map((t) => ({ label: t.label, value: t.value, display: fmt.num(t.value) }))} /></CardContent></Card>
         )}
 
         {hasGrowth && growthGroup && growthSeries && (
-          <Card><CardHeader><CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Рост подписчиков</CardTitle></CardHeader>
+          <Card><CardHeader><CardTitle className="text-xs font-bold tracking-wider text-muted-foreground">Рост подписчиков</CardTitle></CardHeader>
           <CardContent>
             <ExpandableChart title="Рост подписчиков">
               <LineChart
@@ -296,16 +296,16 @@ export function TgAnalytics() {
         )}
 
         {interGroup && viewSeries && shareSeries && (
-          <Card><CardHeader><CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Просмотры и репосты</CardTitle></CardHeader>
+          <Card><CardHeader><CardTitle className="text-xs font-bold tracking-wider text-muted-foreground">Просмотры и репосты</CardTitle></CardHeader>
           <CardContent className="space-y-4">
             <div>
-              <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{viewSeries.name || 'Просмотры'}</div>
+              <div className="mb-2 text-[11px] font-semibold tracking-wider text-muted-foreground">{viewSeries.name || 'Просмотры'}</div>
               <ExpandableChart title={viewSeries.name || 'Просмотры'}>
                 <LineChart values={viewSeries.values} labels={interLabels(interGroup)} />
               </ExpandableChart>
             </div>
             <div>
-              <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{shareSeries.name || 'Репосты'}</div>
+              <div className="mb-2 text-[11px] font-semibold tracking-wider text-muted-foreground">{shareSeries.name || 'Репосты'}</div>
               <ExpandableChart title={shareSeries.name || 'Репосты'}>
                 <LineChart values={shareSeries.values} labels={interLabels(interGroup)} />
               </ExpandableChart>
@@ -314,24 +314,24 @@ export function TgAnalytics() {
         )}
 
         {vbsItems.length > 0 && (
-          <Card><CardHeader><CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Просмотры по источникам</CardTitle></CardHeader>
+          <Card><CardHeader><CardTitle className="text-xs font-bold tracking-wider text-muted-foreground">Просмотры по источникам</CardTitle></CardHeader>
           <CardContent><Breakdown items={vbsItems} /></CardContent></Card>
         )}
         {nfsItems.length > 0 && (
-          <Card><CardHeader><CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Новые подписчики по источникам</CardTitle></CardHeader>
+          <Card><CardHeader><CardTitle className="text-xs font-bold tracking-wider text-muted-foreground">Новые подписчики по источникам</CardTitle></CardHeader>
           <CardContent><Breakdown items={nfsItems} /></CardContent></Card>
         )}
         {langItems.length > 0 && (
-          <Card><CardHeader><CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Языки аудитории</CardTitle></CardHeader>
+          <Card><CardHeader><CardTitle className="text-xs font-bold tracking-wider text-muted-foreground">Языки аудитории</CardTitle></CardHeader>
           <CardContent><Breakdown items={langItems} /></CardContent></Card>
         )}
         {sentItems.length > 0 && (
-          <Card><CardHeader><CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Тональность реакций</CardTitle></CardHeader>
+          <Card><CardHeader><CardTitle className="text-xs font-bold tracking-wider text-muted-foreground">Тональность реакций</CardTitle></CardHeader>
           <CardContent><Breakdown items={sentItems} /></CardContent></Card>
         )}
 
         {hasHours && thData && (
-          <Card><CardHeader><CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Активность по часам</CardTitle></CardHeader>
+          <Card><CardHeader><CardTitle className="text-xs font-bold tracking-wider text-muted-foreground">Активность по часам</CardTitle></CardHeader>
           <CardContent>
             <ExpandableChart title="Активность по часам">
               <BarChart values={thData.values} labels={thData.hours.map(String)} titles={thData.values.map((v, i) => `${thData.hours[i] ?? i}:00 — ${fmt.num(v)}`)} />
@@ -341,7 +341,7 @@ export function TgAnalytics() {
         )}
 
         {net30Values.length > 0 && (
-          <Card><CardHeader><CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Чистый прирост подписчиков (30д)</CardTitle></CardHeader>
+          <Card><CardHeader><CardTitle className="text-xs font-bold tracking-wider text-muted-foreground">Чистый прирост подписчиков (30д)</CardTitle></CardHeader>
           <CardContent>
             <ExpandableChart title="Чистый прирост подписчиков (30д)">
               <DivergingBars values={net30Values} titles={net30Titles} />
@@ -351,7 +351,7 @@ export function TgAnalytics() {
         )}
 
         {(joinedTotal > 0 || leftTotal > 0) && (
-          <Card><CardHeader><CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Динамика оттока</CardTitle></CardHeader>
+          <Card><CardHeader><CardTitle className="text-xs font-bold tracking-wider text-muted-foreground">Динамика оттока</CardTitle></CardHeader>
           <CardContent>
             <Breakdown items={[
               { label: 'Подписалось', value: joinedTotal, display: fmt.num(joinedTotal), icon: '➕' },
@@ -361,16 +361,16 @@ export function TgAnalytics() {
         )}
 
         {maxWdAvg > 0 && (
-          <Card><CardHeader><CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground">По дням недели</CardTitle></CardHeader>
+          <Card><CardHeader><CardTitle className="text-xs font-bold tracking-wider text-muted-foreground">По дням недели</CardTitle></CardHeader>
           <CardContent className="space-y-4">
             <div>
-              <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Ср. просмотры</div>
+              <div className="mb-2 text-[11px] font-semibold tracking-wider text-muted-foreground">Ср. просмотры</div>
               <ExpandableChart title="Средние просмотры по дням недели">
                 <BarChart values={wdAvgValues} labels={wdLabels} titles={wdAvgValues.map((v, i) => `${wdLabels[i]}: ${fmt.num(v)} ср. просмотров`)} />
               </ExpandableChart>
             </div>
             <div>
-              <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Количество постов</div>
+              <div className="mb-2 text-[11px] font-semibold tracking-wider text-muted-foreground">Количество постов</div>
               <ExpandableChart title="Количество постов по дням недели">
                 <BarChart values={wdCountValues} labels={wdLabels} titles={wdCountValues.map((v, i) => `${wdLabels[i]}: ${fmt.num(v)} постов`)} />
               </ExpandableChart>

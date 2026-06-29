@@ -78,7 +78,7 @@ export function Hashtags() {
     return (
       <Card>
         <CardHeader>
-          <CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Аналитика хэштегов</CardTitle>
+          <CardTitle className="text-xs font-bold tracking-wider text-muted-foreground">Аналитика хэштегов</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="py-6 text-center text-sm text-muted-foreground">
@@ -99,7 +99,7 @@ export function Hashtags() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Влияние хэштегов на ERV</CardTitle>
+        <CardTitle className="text-xs font-bold tracking-wider text-muted-foreground">Влияние хэштегов на ERV</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <Breakdown items={breakdownItems} />

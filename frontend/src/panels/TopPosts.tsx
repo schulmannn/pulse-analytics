@@ -3,6 +3,7 @@ import { normalizeTgPosts, type NormalizedPost } from '@/lib/posts';
 import { fmt } from '@/lib/format';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import { RichText } from '@/components/RichText';
 import { usePeriod } from '@/lib/period';
 
 /**
@@ -59,13 +60,13 @@ export function TopPosts() {
               <div className="absolute left-2 top-2 rounded bg-background/90 px-2 py-0.5 text-xs font-bold text-foreground shadow-sm">
                 #{idx + 1}
               </div>
-              <div className="absolute right-2 top-2 rounded bg-primary px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary-foreground">
-                TG
+              <div className="absolute right-2 top-2 rounded bg-primary px-2 py-0.5 text-[10px] font-bold tracking-wide text-primary-foreground">
+                Telegram
               </div>
             </div>
             <div className="space-y-3 p-4">
               <p className="line-clamp-3 text-sm leading-relaxed text-foreground">
-                {post.caption || <span className="italic text-muted-foreground">Без подписи</span>}
+                {post.caption ? <RichText text={post.caption} /> : <span className="italic text-muted-foreground">Без подписи</span>}
               </p>
               {post.reactionsDetail.length > 0 && (
                 <div className="flex flex-wrap gap-1 pt-1">
@@ -84,15 +85,15 @@ export function TopPosts() {
           </div>
           <div className="grid grid-cols-3 gap-2 border-t border-border/40 bg-muted/10 p-4 pt-0 text-center">
             <div className="pt-2">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Просмотры</div>
+              <div className="text-[10px] font-semibold tracking-wider text-muted-foreground">Просмотры</div>
               <div className="mt-0.5 text-sm font-semibold tabular-nums">{fmt.short(post.reach)}</div>
             </div>
             <div className="pt-2">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Реакции</div>
+              <div className="text-[10px] font-semibold tracking-wider text-muted-foreground">Реакции</div>
               <div className="mt-0.5 text-sm font-semibold tabular-nums">{fmt.short(post.likes)}</div>
             </div>
             <div className="pt-2">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Репосты</div>
+              <div className="text-[10px] font-semibold tracking-wider text-muted-foreground">Репосты</div>
               <div className="mt-0.5 text-sm font-semibold tabular-nums">{fmt.short(post.shares)}</div>
             </div>
           </div>

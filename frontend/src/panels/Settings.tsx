@@ -77,7 +77,7 @@ export function Settings() {
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Добавить канал</CardTitle>
+          <CardTitle className="text-sm font-semibold tracking-wide text-muted-foreground">Добавить канал</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleAddChannel} className="flex flex-col gap-3 sm:flex-row">
@@ -105,7 +105,7 @@ export function Settings() {
       </Card>
 
       <div className="space-y-3">
-        <h3 className="px-1 text-xs font-bold uppercase tracking-wider text-muted-foreground">Подключённые каналы</h3>
+        <h3 className="px-1 text-xs font-bold tracking-wider text-muted-foreground">Подключённые каналы</h3>
         {channels.length === 0 ? (
           <div className="rounded-lg border border-dashed bg-muted/20 py-6 text-center text-sm text-muted-foreground">
             Список каналов пуст.
@@ -130,7 +130,7 @@ export function Settings() {
                     </div>
                     <div className="flex shrink-0 items-center gap-2 self-end sm:self-auto">
                       {isCentral ? (
-                        <span className="inline-flex select-none items-center rounded bg-primary/10 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-primary">
+                        <span className="inline-flex select-none items-center rounded bg-primary/10 px-2 py-0.5 text-[11px] font-bold tracking-wide text-primary">
                           central
                         </span>
                       ) : (
@@ -215,7 +215,7 @@ function ChannelKeysPanel({ channelId }: { channelId: number }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-baseline gap-3">
-          <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Ключи внешних коллекторов</h4>
+          <h4 className="text-xs font-bold tracking-wider text-muted-foreground">Ключи внешних коллекторов</h4>
           <Link to="/connect" className="text-[11px] text-primary hover:underline">Что делать с ключом? →</Link>
         </div>
         <button

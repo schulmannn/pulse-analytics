@@ -170,7 +170,7 @@ function FeaturedKpi({ label, value, trend, caption, spark }: FeaturedKpiProps) 
   return (
     <Card>
       <CardContent className="relative overflow-hidden p-5">
-        <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
+        <div className="text-xs tracking-wide text-muted-foreground">{label}</div>
         <div className="mt-2 flex items-baseline gap-2.5">
           <div className="text-4xl font-semibold tabular-nums tracking-tight">
             {num}
@@ -199,7 +199,7 @@ function StatTile({ label, value, trend, spark }: StatTileProps) {
   return (
     <Card>
       <CardContent className="p-4">
-        <div className="truncate text-[11px] uppercase tracking-wide text-muted-foreground">{label}</div>
+        <div className="truncate text-[11px] tracking-wide text-muted-foreground">{label}</div>
         <div className="mt-1.5 flex items-baseline justify-between gap-2">
           <div className="text-2xl font-semibold tabular-nums tracking-tight">
             {num}

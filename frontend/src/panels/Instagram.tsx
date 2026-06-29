@@ -17,6 +17,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { Breakdown } from '@/components/Breakdown';
+import { RichText } from '@/components/RichText';
 import { ExpandableChart } from '@/components/ExpandableChart';
 import { ChartTooltip, type TooltipState } from '@/components/ChartTooltip';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -516,7 +517,7 @@ function IgSection({ id, title, children }: { id: string; title: string; childre
 function ClusterHeading({ children }: { children: ReactNode }) {
   return (
     <div className="flex items-center gap-3 pt-2">
-      <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{children}</span>
+      <span className="text-xs font-semibold tracking-wider text-muted-foreground">{children}</span>
       <span className="h-px flex-1 bg-border" />
     </div>
   );
@@ -526,7 +527,7 @@ function TrendCard({ title, series }: { title: string; series: Point[] }) {
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">{title}</CardTitle>
+        <CardTitle className="text-sm font-medium tracking-wide text-muted-foreground">{title}</CardTitle>
       </CardHeader>
       <CardContent>
         {series.length > 1 ? (
@@ -569,7 +570,7 @@ function AudienceBlock({ breakdowns, followers }: { breakdowns: IgBreakdowns | u
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">Возраст</CardTitle>
+            <CardTitle className="text-sm font-medium tracking-wide text-muted-foreground">Возраст</CardTitle>
           </CardHeader>
           <CardContent>
             {age.length > 0 ? (
@@ -588,7 +589,7 @@ function AudienceBlock({ breakdowns, followers }: { breakdowns: IgBreakdowns | u
         </Card>
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">Пол</CardTitle>
+            <CardTitle className="text-sm font-medium tracking-wide text-muted-foreground">Пол</CardTitle>
           </CardHeader>
           <CardContent className="p-5">
             <Breakdown
@@ -607,7 +608,7 @@ function AudienceBlock({ breakdowns, followers }: { breakdowns: IgBreakdowns | u
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">Топ стран</CardTitle>
+            <CardTitle className="text-sm font-medium tracking-wide text-muted-foreground">Топ стран</CardTitle>
           </CardHeader>
           <CardContent className="p-5">
             <Breakdown
@@ -622,7 +623,7 @@ function AudienceBlock({ breakdowns, followers }: { breakdowns: IgBreakdowns | u
         </Card>
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">Топ городов</CardTitle>
+            <CardTitle className="text-sm font-medium tracking-wide text-muted-foreground">Топ городов</CardTitle>
           </CardHeader>
           <CardContent className="p-5">
             <Breakdown items={cities.map((c) => ({ label: c.label, value: c.value, display: fmt.short(c.value) }))} />
@@ -734,7 +735,7 @@ function ReelsBlock({ posts }: { posts: IgPost[] }) {
       </div>
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">Ср. время просмотра по Reels</CardTitle>
+          <CardTitle className="text-sm font-medium tracking-wide text-muted-foreground">Ср. время просмотра по Reels</CardTitle>
         </CardHeader>
         <CardContent>
           <ExpandableChart title="Ср. время просмотра по Reels">
@@ -886,7 +887,7 @@ function PeriodCompareBlock({ rows }: { rows: { label: string; pair: ReturnType<
       <CardContent className="overflow-x-auto p-0">
         <table className="w-full text-left text-sm">
           <thead>
-            <tr className="border-b border-border bg-muted/40 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            <tr className="border-b border-border bg-muted/40 text-xs font-semibold tracking-wider text-muted-foreground">
               <th className="p-4">Метрика</th>
               <th className="p-4 text-right">Текущий</th>
               <th className="p-4 text-right">Предыдущий</th>
@@ -979,7 +980,7 @@ function HashtagsBlock({ posts }: { posts: IgPost[] }) {
       <CardContent className="overflow-x-auto p-0">
         <table className="w-full text-left text-sm">
           <thead>
-            <tr className="border-b border-border bg-muted/40 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            <tr className="border-b border-border bg-muted/40 text-xs font-semibold tracking-wider text-muted-foreground">
               <th className="p-4">Хэштег</th>
               <th className="p-4 text-right">Постов</th>
               <th className="p-4 text-right">Ср. охват</th>
@@ -1059,7 +1060,7 @@ function CompareBlock({ posts }: { posts: IgPost[] }) {
           <CardContent className="overflow-x-auto p-0">
             <table className="w-full text-left text-sm">
               <thead>
-                <tr className="border-b border-border bg-muted/40 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                <tr className="border-b border-border bg-muted/40 text-xs font-semibold tracking-wider text-muted-foreground">
                   <th className="p-4">Метрика</th>
                   {chosen.map((c) => (
                     <th key={c.i} className="p-4 text-right">#{c.i + 1} {MEDIA_TYPE_LABEL[c.post.media_type ?? ''] ?? 'Пост'}</th>
@@ -1142,7 +1143,7 @@ function StoriesBlock({ stories }: { stories: IgStory[] | undefined }) {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">Навигация по историям</CardTitle>
+            <CardTitle className="text-sm font-medium tracking-wide text-muted-foreground">Навигация по историям</CardTitle>
           </CardHeader>
           <CardContent className="p-5">
             <Breakdown items={navItems.map((n) => ({ label: n.label, value: n.value, display: fmt.short(n.value) }))} />
@@ -1150,7 +1151,7 @@ function StoriesBlock({ stories }: { stories: IgStory[] | undefined }) {
         </Card>
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">По историям</CardTitle>
+            <CardTitle className="text-sm font-medium tracking-wide text-muted-foreground">По историям</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 p-5">
             {list.map((s, i) => (
@@ -1193,7 +1194,7 @@ function KpiCard({ label, value, hint, feature, trend }: KpiCardProps) {
   return (
     <Card className={feature ? 'border-primary/40' : undefined}>
       <CardContent className="p-5">
-        <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
+        <div className="text-xs tracking-wide text-muted-foreground">{label}</div>
         <div className="mt-2 flex items-center gap-2">
           <div className="text-3xl font-semibold tabular-nums tracking-tight">{value}</div>
           <DeltaPill delta={trend} />
@@ -1228,11 +1229,11 @@ function IgPostCard({ post, rank }: { post: IgPost; rank: number }) {
             <span className="font-mono text-xs text-muted-foreground">{typeLabel}</span>
           )}
           <div className="absolute left-2 top-2 rounded bg-background/90 px-2 py-0.5 text-xs font-bold text-foreground shadow-sm">#{rank}</div>
-          <div className="absolute right-2 top-2 rounded bg-primary px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary-foreground">{typeLabel}</div>
+          <div className="absolute right-2 top-2 rounded bg-primary px-2 py-0.5 text-[10px] font-bold tracking-wide text-primary-foreground">{typeLabel}</div>
         </div>
         <div className="p-4">
           <p className="line-clamp-3 text-sm leading-relaxed text-foreground">
-            {post.caption || <span className="italic text-muted-foreground">Без подписи</span>}
+            {post.caption ? <RichText text={post.caption} /> : <span className="italic text-muted-foreground">Без подписи</span>}
           </p>
         </div>
       </div>
@@ -1249,7 +1250,7 @@ function IgPostCard({ post, rank }: { post: IgPost; rank: number }) {
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="pt-2">
-      <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="text-[10px] font-semibold tracking-wider text-muted-foreground">{label}</div>
       <div className="mt-0.5 text-sm font-semibold tabular-nums">{value}</div>
     </div>
   );
