@@ -154,7 +154,11 @@ function Sidebar({ role }: { role?: string }) {
   return (
     <aside
       className={cn(
-        'sticky top-0 hidden h-screen shrink-0 md:block',
+        // z-30: the aside is `sticky`, so it owns a stacking context; without a z-index the
+        // peek panel can't paint above the positive-z-index Topbar (z-20) / SectionNav (z-10)
+        // and content bleeds through it. z-30 lifts the whole sidebar above all content while
+        // staying under the period scrim (z-40) and modals (z-50).
+        'sticky top-0 z-30 hidden h-screen shrink-0 md:block',
         rail ? 'w-16' : 'w-60',
       )}
     >
