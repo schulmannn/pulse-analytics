@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Dispatch, RefObject, SetStateAction } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { useChannels, useLogout } from '@/api/queries';
+import { useChannels, useIgProfile, useLogout } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { usePeriod } from '@/lib/period';
 import type { PeriodDays } from '@/lib/period';
@@ -612,27 +612,40 @@ function PlatformSwitcher() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const igActive = pathname.startsWith('/instagram');
+  // Instagram is demo/mock-backed until a real account is connected. Reflect that honestly so
+  // the two networks don't read as equally live. `mock === true` (not just "no data") avoids a
+  // false "не подключён" flash during the initial load.
+  const igProfile = useIgProfile();
+  const igNotConnected = igProfile.data?.mock === true;
   return (
     <div className="mb-6 flex flex-wrap gap-2">
       {PLATFORMS.map((p) => {
         const active = p.key === 'ig' ? igActive : !igActive;
+        const notConnected = p.key === 'ig' && igNotConnected;
         return (
           <button
             key={p.key}
             type="button"
             onClick={() => navigate(p.to)}
             aria-current={active ? 'true' : undefined}
-            className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm transition-colors ${
+            className={cn(
+              'flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm transition-colors',
               active
                 ? 'border-primary/30 bg-primary/5 text-foreground'
-                : 'border-transparent text-muted-foreground hover:bg-muted/50 hover:text-foreground'
-            }`}
+                : 'border-transparent text-muted-foreground hover:bg-muted/50 hover:text-foreground',
+              notConnected && !active && 'opacity-70',
+            )}
           >
             {/* Brand-coloured glyph (platform identity) without the heavy filled square. */}
             <span className="shrink-0" style={{ color: p.color }}>
               <PlatformGlyph k={p.key} className="h-4 w-4" />
             </span>
             <span className="font-medium">{p.name}</span>
+            {notConnected && (
+              <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                не подключён
+              </span>
+            )}
           </button>
         );
       })}
