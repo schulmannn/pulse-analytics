@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useId, useLayoutEffect, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { ChartTooltip } from '@/components/ChartTooltip';
 
@@ -21,6 +21,8 @@ export function BarChart({ values, labels, titles, height = 200 }: BarChartProps
   // Measure render width so the viewBox is 1:1 with CSS pixels — a fixed 600-wide viewBox
   // scaled to fit would render labels/bars at inconsistent, fuzzy sizes.
   const [width, setWidth] = useState(600);
+  // Strip colons from useId — valid in ids, but break SVG url(#…) refs in some browsers.
+  const gradientId = `bc${useId().replace(/:/g, '')}`;
 
   useLayoutEffect(() => {
     const el = containerRef.current;
@@ -61,6 +63,12 @@ export function BarChart({ values, labels, titles, height = 200 }: BarChartProps
   return (
     <div ref={containerRef} className="relative w-full" onMouseLeave={() => setHover(null)}>
       <svg className="block w-full" height={chartHeight} viewBox={`0 0 ${chartWidth} ${chartHeight}`} preserveAspectRatio="none">
+        <defs>
+          <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="hsl(var(--brand-iris))" stopOpacity="1" />
+            <stop offset="100%" stopColor="hsl(var(--brand-iris))" stopOpacity="0.55" />
+          </linearGradient>
+        </defs>
         {values.map((val, i) => {
           const barHeight = (val / max) * graphHeight;
           const x = i * itemWidth + barGap / 2;
@@ -74,7 +82,7 @@ export function BarChart({ values, labels, titles, height = 200 }: BarChartProps
                 y={y}
                 width={barWidth}
                 height={Math.max(barHeight, 2)}
-                fill="hsl(var(--brand-iris))"
+                fill={`url(#${gradientId})`}
                 rx={2}
                 className="pointer-events-none transition-opacity"
                 opacity={hover && hover.i !== i ? 0.55 : 1}

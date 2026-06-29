@@ -1,49 +1,52 @@
-import { useTgFull } from '@/api/queries';
-import { fmt } from '@/lib/format';
+import { useChannels, useTgFull } from '@/api/queries';
+import { useSelectedChannel } from '@/lib/channel-context';
 import { usePeriod } from '@/lib/period';
+import { fmt } from '@/lib/format';
 import { Skeleton } from '@/components/ui/skeleton';
 
 /**
- * Hero greeting — ported from legacy renderHero() (Telegram path). Reads the aggregate
- * /api/tg/full snapshot: total views if available, else subscriber count.
+ * Overview header — the channel's identity (avatar + @handle + network · subscribers).
+ * Anchors the page and works on mobile where the sidebar card is hidden. The period lives
+ * in the top bar, so it isn't repeated here. Metrics are carried by the KPI cards below.
  */
 export function Hero() {
-  const { days, range } = usePeriod();
+  const { days } = usePeriod();
+  const { data: channelsData, isLoading: channelsLoading } = useChannels();
+  const { channelId } = useSelectedChannel();
   const { data, isLoading } = useTgFull(days);
 
-  if (isLoading) {
+  const channels = channelsData?.channels ?? [];
+  const current = channels.find((c) => c.id === channelId) ?? channels[0];
+
+  // Identity comes from the channels query, so gate the skeleton on it too (not just tg-full).
+  if ((channelsLoading || isLoading) && !current) {
     return (
-      <section className="space-y-2">
-        {/* DESIGN: Claude review */}
-        <Skeleton className="h-4 w-36" />
-        <Skeleton className="h-9 w-3/4 max-w-xl" />
+      <section className="flex items-center gap-3.5">
+        <Skeleton className="h-12 w-12 rounded-xl" />
+        <div className="space-y-2">
+          <Skeleton className="h-5 w-44" />
+          <Skeleton className="h-3.5 w-28" />
+        </div>
       </section>
     );
   }
 
-  if (!data) {
-    return <p className="text-sm text-muted-foreground">Данные канала пока недоступны.</p>;
-  }
-  const members = data?.channel?.memberCount ?? data?.channel?.members ?? 0;
-  const totalViews = data?.views_summary?.total_views ?? 0;
-
-  let highlight: string;
-  if (totalViews > 0) highlight = `${fmt.short(totalViews)} просмотров`;
-  else if (members > 0) highlight = `${fmt.short(members)} подписчиков`;
-  else highlight = 'всё под контролем';
-  const fmtDay = (ms: number) => new Date(ms).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
-  const periodLabel = range
-    ? `за ${fmtDay(range.from)} – ${fmtDay(range.to)}`
-    : days === 0
-      ? 'за всё время'
-      : `за последние ${days} дн.`;
+  const handle = current ? `@${current.username || current.title || current.id}` : '@—';
+  const initial = (current?.username || current?.title || 'T').slice(0, 1).toUpperCase();
+  const members = current?.memberCount ?? data?.channel?.memberCount ?? data?.channel?.members ?? 0;
 
   return (
-    <section>
-      <p className="text-sm text-muted-foreground">{fmt.todayLabel()}</p>
-      <h1 className="mt-1 text-3xl font-light tracking-tight">
-        {fmt.greeting()}. <span className="font-medium text-primary">{highlight}</span> {periodLabel}
-      </h1>
+    <section className="flex items-center gap-3.5">
+      <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary text-lg font-semibold text-primary-foreground">
+        {initial}
+      </span>
+      <div className="min-w-0">
+        {/* A div, not an h1 — the top bar already owns the page's single <h1> (route title). */}
+        <div className="truncate text-xl font-semibold tracking-tight">{handle}</div>
+        <p className="truncate text-sm text-muted-foreground">
+          Telegram{members > 0 ? ` · ${fmt.num(members)} подписчиков` : ''}
+        </p>
+      </div>
     </section>
   );
 }

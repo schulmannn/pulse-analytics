@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useId, useLayoutEffect, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { fmt } from '@/lib/format';
 import { ChartTooltip } from '@/components/ChartTooltip';
@@ -24,6 +24,8 @@ export function LineChart({ values, labels, titles, yMin, yMax, height }: LineCh
   // Measure the real render width so the viewBox is 1:1 with CSS pixels — otherwise a
   // fixed 600-wide viewBox stretched to a wide container magnifies text + markers 2-3×.
   const [width, setWidth] = useState(600);
+  // Strip colons from useId — valid in ids, but break SVG url(#…) refs in some browsers.
+  const gradientId = `lc${useId().replace(/:/g, '')}`;
 
   useLayoutEffect(() => {
     const el = containerRef.current;
@@ -85,24 +87,31 @@ export function LineChart({ values, labels, titles, yMin, yMax, height }: LineCh
   return (
     <div ref={containerRef} className="relative w-full" onMouseLeave={() => setHover(null)}>
       <svg className="block w-full" height={h} viewBox={`0 0 ${W} ${h}`} preserveAspectRatio="none">
+        <defs>
+          <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="hsl(var(--brand-iris))" stopOpacity="0.25" />
+            <stop offset="100%" stopColor="hsl(var(--brand-iris))" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+
         {/* Gridlines */}
         {yGridPositions.map((yPos, idx) => (
-          <line key={idx} x1={0} y1={yPos} x2={W} y2={yPos} stroke="hsl(var(--border))" strokeDasharray="4 4" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+          <line key={idx} x1={0} y1={yPos} x2={W} y2={yPos} stroke="hsl(var(--border))" strokeDasharray="4 6" strokeWidth="1" vectorEffect="non-scaling-stroke" />
         ))}
 
-        {/* Area + line */}
-        <path d={areaPath} fill="hsl(var(--brand-iris))" opacity="0.06" />
-        <path d={linePath} fill="none" stroke="hsl(var(--brand-iris))" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+        {/* Gradient area + line */}
+        <path d={areaPath} fill={`url(#${gradientId})`} />
+        <path d={linePath} fill="none" stroke="hsl(var(--brand-iris))" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
 
-        {/* Last-point marker */}
-        <circle cx={lastPt.x} cy={lastPt.y} r="8" fill="hsl(var(--brand-iris))" opacity="0.15" />
-        <circle cx={lastPt.x} cy={lastPt.y} r="4" fill="hsl(var(--brand-iris))" />
+        {/* Last-point marker — soft glow + crisp dot knocked out from the background */}
+        <circle cx={lastPt.x} cy={lastPt.y} r="9" fill="hsl(var(--brand-iris))" opacity="0.16" />
+        <circle cx={lastPt.x} cy={lastPt.y} r="4" fill="hsl(var(--brand-iris))" stroke="hsl(var(--card))" strokeWidth="2" vectorEffect="non-scaling-stroke" />
 
         {/* Hovered-point crosshair + marker */}
         {hovered && (
           <>
             <line x1={hovered.x} y1={0} x2={hovered.x} y2={h} stroke="hsl(var(--brand-iris))" strokeWidth="1" opacity="0.35" vectorEffect="non-scaling-stroke" />
-            <circle cx={hovered.x} cy={hovered.y} r="4" fill="hsl(var(--brand-iris))" stroke="hsl(var(--background))" strokeWidth="1.5" />
+            <circle cx={hovered.x} cy={hovered.y} r="4" fill="hsl(var(--brand-iris))" stroke="hsl(var(--card))" strokeWidth="1.5" />
           </>
         )}
 

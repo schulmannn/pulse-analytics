@@ -1,29 +1,38 @@
-import { useHistory, useTgFull } from '@/api/queries';
-import { fmt, sparkAreaPath, sparkPath } from '@/lib/format';
+import { useChannels, useHistory, useTgFull } from '@/api/queries';
+import { useSelectedChannel } from '@/lib/channel-context';
+import { fmt } from '@/lib/format';
 import { Card, CardContent } from '@/components/ui/card';
+import { Sparkline } from '@/components/Sparkline';
 import { Skeleton } from '@/components/ui/skeleton';
 import { usePeriod } from '@/lib/period';
 import { avgReachWindowDelta, dailyWindowDelta, pctDelta, subscriberDelta, sumPostWindows } from '@/lib/delta';
 import type { MetricDelta } from '@/lib/delta';
 
-interface Kpi {
-  label: string;
-  value: string;
-  delta?: string | null;
-  trend?: MetricDelta | null;
-  feature?: boolean;
-  spark?: number[];
+/** Sparkline hue: green/red when the metric is trending, brand iris when flat/unknown. */
+function sparkColor(trend?: MetricDelta | null): string {
+  if (trend?.dir === 'up') return 'hsl(var(--brand-verdant))';
+  if (trend?.dir === 'down') return 'hsl(var(--brand-ember))';
+  return 'hsl(var(--brand-iris))';
+}
+
+/** Split a formatted value ("7.9k" / "8.20%") into [number, unit] so the unit reads quieter. */
+function splitUnit(value: string): [string, string] {
+  const match = value.match(/^([\d\s.,]+)(.*)$/);
+  return match ? [match[1], match[2]] : [value, ''];
 }
 
 /**
- * Telegram KPI cards — ported from legacy renderKpis() (TG branch), wired to the data
- * /api/tg/full actually returns (channel + views_summary). Graph-derived trend deltas
- * (Δ vs previous period) come later when the charts panel migrates its extra endpoints.
+ * Telegram KPI cards with a clear hierarchy: two featured metrics (large number + gradient
+ * sparkline) lead, the rest follow as a compact stat strip with trend-coloured sparklines.
+ * Δ vs the previous period comes from the channel_daily archive (reliable), falling back to
+ * the post-window sum; sparse data → null → no pill, never a made-up number.
  */
 export function KpiGrid() {
   const { days, inRange } = usePeriod();
   const { data, isLoading, isError, error } = useTgFull(days);
   const { data: history } = useHistory(730);
+  const { channelId } = useSelectedChannel();
+  const { data: channelsData } = useChannels();
 
   if (isLoading) return <KpiSkeletons />;
   if (isError) {
@@ -37,6 +46,11 @@ export function KpiGrid() {
   }
 
   const members = data?.channel?.memberCount ?? data?.channel?.members ?? 0;
+  // Displayed subscriber count prefers the channel_daily archive (same source as the Hero and as
+  // subscriberTrend/subsSpark below), so the headline number agrees with its own trend visuals.
+  // The live `members` above stays the ER/avg divisor (parity with the legacy formula).
+  const current = channelsData?.channels.find((c) => c.id === channelId);
+  const displayMembers = current?.memberCount ?? members;
   const posts = (data?.posts ?? []).filter((post) => inRange(post.date));
   const totalViews = posts.reduce((sum, post) => sum + Number(post.views ?? post.view_count ?? 0), 0);
   const totalReactions = posts.reduce(
@@ -66,9 +80,6 @@ export function KpiGrid() {
     ? windowTotals.previous.reactions + windowTotals.previous.forwards + windowTotals.previous.replies
     : null;
 
-  // Δ vs the previous period. Prefer the channel_daily archive (reliable, like the
-  // subscriber delta); fall back to the post-window sum when there's no daily archive
-  // (e.g. a collector channel). Sparse data → null → no pill, never a misleading number.
   const historyRows = history?.rows ?? [];
   const viewsTrend =
     dailyWindowDelta(historyRows, (r) => Number(r.views ?? 0), days)
@@ -92,111 +103,166 @@ export function KpiGrid() {
     days,
   );
 
-  const viewsByDay = new Map<string, number>();
-  posts.forEach((post) => {
-    if (!post.date) return;
-    const timestamp = Date.parse(post.date);
-    if (!Number.isFinite(timestamp)) return;
-    const key = new Date(timestamp).toISOString().slice(0, 10);
-    viewsByDay.set(key, (viewsByDay.get(key) ?? 0) + Number(post.views ?? post.view_count ?? 0));
-  });
-  const spark = [...viewsByDay.entries()]
-    .sort(([dayA], [dayB]) => dayA.localeCompare(dayB))
-    .map(([, views]) => views);
-
-  const cards: Kpi[] = [
-    {
-      feature: true,
-      label: 'Подписчики',
-      value: fmt.num(members),
-      delta: 'в канале',
-      trend: subscriberTrend,
-      spark,
-    },
-    {
-      label: 'Просмотры за период',
-      value: fmt.short(totalViews),
-      delta: postsAnalyzed ? `по ${postsAnalyzed} постам` : null,
-      trend: viewsTrend,
-      spark,
-    },
-    { label: 'Ср. охват поста', value: fmt.short(avgViews), trend: avgReachTrend },
-    {
-      label: 'Реакции',
-      value: fmt.short(totalReactions),
-      delta: postsAnalyzed ? `${(totalReactions / Math.max(postsAnalyzed, 1)).toFixed(1)} на пост` : null,
-      trend: reactionsTrend,
-    },
-    {
-      label: 'Репосты',
-      value: fmt.short(totalForwards),
-      delta: totalReplies ? `${fmt.short(totalReplies)} комментариев` : null,
-      trend: forwardsTrend,
-    },
-    {
-      label: 'Вовлечённость (ER)',
-      value: er > 0 ? er.toFixed(2) + '%' : '—',
-      delta: '(реакции+репосты+комменты) / подписчики',
-      trend: erTrend,
-    },
-  ];
+  // Per-metric daily series for the inline sparklines (within the active window).
+  const dailySeries = (value: (post: (typeof posts)[number]) => number): number[] => {
+    const byDay = new Map<string, number>();
+    posts.forEach((post) => {
+      if (!post.date) return;
+      const timestamp = Date.parse(post.date);
+      if (!Number.isFinite(timestamp)) return;
+      const key = new Date(timestamp).toISOString().slice(0, 10);
+      byDay.set(key, (byDay.get(key) ?? 0) + value(post));
+    });
+    return [...byDay.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, v]) => v);
+  };
+  const viewsSpark = dailySeries((post) => Number(post.views ?? post.view_count ?? 0));
+  const reactionsSpark = dailySeries((post) => Number(post.reactions ?? post.reactions_count ?? 0));
+  const forwardsSpark = dailySeries((post) => Number(post.forwards ?? 0));
+  const engagementSpark = dailySeries(
+    (post) =>
+      Number(post.reactions ?? post.reactions_count ?? 0) +
+      Number(post.forwards ?? 0) +
+      Number(post.replies ?? post.comments_count ?? 0),
+  );
+  // Subscriber trend from the daily archive (reliable, unlike post-derived views).
+  const subsSpark = historyRows
+    .filter((row) => row.subscribers != null && inRange(row.day))
+    .sort((a, b) => a.day.localeCompare(b.day))
+    .map((row) => Number(row.subscribers));
 
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      {cards.map((c, i) => (
-        <Card key={i} className={c.feature ? 'border-primary/40' : undefined}>
-          <CardContent className="relative overflow-hidden p-5">
-            <div className="text-xs uppercase tracking-wide text-muted-foreground">{c.label}</div>
-            <div className="mt-2 flex items-center gap-2">
-              <div className="text-3xl font-semibold tabular-nums tracking-tight">{c.value}</div>
-              {/* DESIGN: Claude review */}
-              <DeltaPill delta={c.trend} />
-            </div>
-            {c.delta ? <div className="mt-2 text-xs text-muted-foreground">{c.delta}</div> : null}
-            {c.spark && c.spark.length > 1 ? (
-              <svg className="mt-3 h-8 w-full" viewBox="0 0 200 32" preserveAspectRatio="none">
-                <path d={sparkAreaPath(c.spark)} fill="hsl(var(--brand-iris))" opacity="0.08" />
-                <path
-                  d={sparkPath(c.spark)}
-                  fill="none"
-                  stroke="hsl(var(--brand-iris))"
-                  strokeWidth="1.5"
-                  vectorEffect="non-scaling-stroke"
-                />
-              </svg>
-            ) : null}
-          </CardContent>
-        </Card>
-      ))}
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <FeaturedKpi
+          label="Просмотры за период"
+          value={fmt.short(totalViews)}
+          trend={viewsTrend}
+          caption={postsAnalyzed ? `по ${postsAnalyzed} постам` : null}
+          spark={viewsSpark}
+        />
+        <FeaturedKpi label="Подписчики" value={fmt.num(displayMembers)} trend={subscriberTrend} caption="в канале" spark={subsSpark} />
+      </div>
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <StatTile label="Ср. охват поста" value={fmt.short(avgViews)} trend={avgReachTrend} spark={viewsSpark} />
+        <StatTile label="Реакции" value={fmt.short(totalReactions)} trend={reactionsTrend} spark={reactionsSpark} />
+        <StatTile label="Репосты" value={fmt.short(totalForwards)} trend={forwardsTrend} spark={forwardsSpark} />
+        <StatTile
+          label="Вовлечённость (ER)"
+          value={er > 0 ? er.toFixed(2) + '%' : '—'}
+          trend={erTrend}
+          spark={engagementSpark}
+        />
+      </div>
     </div>
   );
 }
 
-function DeltaPill({ delta }: { delta?: MetricDelta | null }) {
+interface FeaturedKpiProps {
+  label: string;
+  value: string;
+  trend?: MetricDelta | null;
+  caption?: string | null;
+  spark?: number[];
+}
+
+function FeaturedKpi({ label, value, trend, caption, spark }: FeaturedKpiProps) {
+  const [num, unit] = splitUnit(value);
+  return (
+    <Card>
+      <CardContent className="relative overflow-hidden p-5">
+        <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
+        <div className="mt-2 flex items-baseline gap-2.5">
+          <div className="text-4xl font-semibold tabular-nums tracking-tight">
+            {num}
+            {unit ? <span className="font-medium text-muted-foreground">{unit}</span> : null}
+          </div>
+          <DeltaPill delta={trend} />
+        </div>
+        {caption ? <div className="mt-1.5 text-xs text-muted-foreground">{caption}</div> : null}
+        {spark && spark.length > 1 ? (
+          <Sparkline values={spark} area strokeWidth={2} className="mt-4 h-12 w-full" />
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+interface StatTileProps {
+  label: string;
+  value: string;
+  trend?: MetricDelta | null;
+  spark?: number[];
+}
+
+function StatTile({ label, value, trend, spark }: StatTileProps) {
+  const [num, unit] = splitUnit(value);
+  return (
+    <Card>
+      <CardContent className="p-4">
+        <div className="truncate text-[11px] uppercase tracking-wide text-muted-foreground">{label}</div>
+        <div className="mt-1.5 flex items-baseline justify-between gap-2">
+          <div className="text-2xl font-semibold tabular-nums tracking-tight">
+            {num}
+            {unit ? <span className="text-base font-medium text-muted-foreground">{unit}</span> : null}
+          </div>
+          <DeltaPill delta={trend} subtle />
+        </div>
+        {spark && spark.length > 1 ? (
+          <Sparkline values={spark} color={sparkColor(trend)} className="mt-2.5 h-6 w-full" />
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+function DeltaPill({ delta, subtle = false }: { delta?: MetricDelta | null; subtle?: boolean }) {
   if (!delta || delta.dir === 'flat') return null;
   const direction = delta.dir === 'up' ? '↑' : '↓';
   const color = delta.dir === 'up' ? 'text-verdant' : 'text-ember';
   const percentage = delta.pct >= 100 ? delta.pct.toFixed(0) : delta.pct.toFixed(1);
-
+  if (subtle) {
+    return (
+      <span className={`shrink-0 text-xs font-semibold tabular-nums ${color}`}>
+        {direction}
+        {percentage}%
+      </span>
+    );
+  }
+  // Trend-tinted chip (not bg-muted, which is ~invisible on the white light-theme card).
+  const chip = delta.dir === 'up' ? 'text-verdant bg-verdant/10' : 'text-ember bg-ember/10';
   return (
-    <span className={`rounded-full bg-muted px-2 py-0.5 text-xs font-semibold tabular-nums ${color}`}>
-      {direction}{percentage}%
+    <span className={`rounded-full ${chip} px-2 py-0.5 text-xs font-semibold tabular-nums`}>
+      {direction}
+      {percentage}%
     </span>
   );
 }
 
 function KpiSkeletons() {
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      {Array.from({ length: 6 }).map((_, i) => (
-        <Card key={i}>
-          <CardContent className="p-5">
-            <Skeleton className="h-3 w-3/5" />
-            <Skeleton className="mt-3 h-8 w-2/3" />
-            <Skeleton className="mt-3 h-3 w-2/5" />
-          </CardContent>
-        </Card>
-      ))}
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        {Array.from({ length: 2 }).map((_, i) => (
+          <Card key={i}>
+            <CardContent className="p-5">
+              <Skeleton className="h-3 w-2/5" />
+              <Skeleton className="mt-3 h-9 w-1/2" />
+              <Skeleton className="mt-4 h-12 w-full" />
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <Card key={i}>
+            <CardContent className="p-4">
+              <Skeleton className="h-3 w-3/5" />
+              <Skeleton className="mt-2 h-7 w-2/3" />
+              <Skeleton className="mt-3 h-6 w-full" />
+            </CardContent>
+          </Card>
+        ))}
+      </div>
     </div>
   );
 }
