@@ -13,9 +13,12 @@ import {
   CreateKeyResponseSchema,
   GraphsSchema,
   HistorySchema,
+  IgBreakdownsSchema,
   IgInsightsSchema,
+  IgOnlineSchema,
   IgPostsSchema,
   IgProfileSchema,
+  IgStoriesSchema,
   KeySchema,
   LoginResponseSchema,
   MentionsSchema,
@@ -184,6 +187,30 @@ export function useIgPosts(limit = 20) {
   return useQuery({
     queryKey: ['ig-posts', limit],
     queryFn: () => apiGet(`/api/ig/posts?limit=${limit}`, IgPostsSchema),
+  });
+}
+
+/** Audience demographics + format/contact breakdowns (total_value envelope). */
+export function useIgBreakdowns(timeframe = 'last_30_days') {
+  return useQuery({
+    queryKey: ['ig-breakdowns', timeframe],
+    queryFn: () => apiGet(`/api/ig/breakdowns?timeframe=${timeframe}`, IgBreakdownsSchema),
+  });
+}
+
+/** Online-followers hourly map (best-time heatmap). Degrades to empty gracefully. */
+export function useIgOnline() {
+  return useQuery({
+    queryKey: ['ig-online'],
+    queryFn: () => apiGet('/api/ig/online', IgOnlineSchema),
+  });
+}
+
+/** Active stories (last 24h) + per-story insights. */
+export function useIgStories() {
+  return useQuery({
+    queryKey: ['ig-stories'],
+    queryFn: () => apiGet('/api/ig/stories', IgStoriesSchema),
   });
 }
 

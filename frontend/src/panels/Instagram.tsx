@@ -1,22 +1,71 @@
-import { useIgProfile, useIgInsights, useIgPosts } from '@/api/queries';
-import type { IgInsights, IgPost } from '@/api/schemas';
+import { useRef, useState } from 'react';
+import type { ReactNode } from 'react';
+import {
+  useIgProfile,
+  useIgInsights,
+  useIgPosts,
+  useIgBreakdowns,
+  useIgOnline,
+  useIgStories,
+} from '@/api/queries';
+import type { IgBreakdowns, IgInsights, IgOnline, IgPost, IgStory } from '@/api/schemas';
 import { fmt } from '@/lib/format';
-import { dailyWindowDelta } from '@/lib/delta';
+import { pctDelta } from '@/lib/delta';
 import type { MetricDelta } from '@/lib/delta';
 import { usePeriod } from '@/lib/period';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
+import { Breakdown } from '@/components/Breakdown';
+import { ExpandableChart } from '@/components/ExpandableChart';
+import { ChartTooltip, type TooltipState } from '@/components/ChartTooltip';
 import { Skeleton } from '@/components/ui/skeleton';
+import { SectionNav, type Section } from '@/components/SectionNav';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+const SECTIONS: readonly Section[] = [
+  { id: 'ig-metrics', label: 'Метрики' },
+  { id: 'ig-trends', label: 'Динамика' },
+  { id: 'ig-formats', label: 'Форматы' },
+  { id: 'ig-growth', label: 'Рост' },
+  { id: 'ig-audience', label: 'Аудитория' },
+  { id: 'ig-timing', label: 'Время' },
+  { id: 'ig-reels', label: 'Reels' },
+  { id: 'ig-posts', label: 'Посты' },
+  { id: 'ig-stories', label: 'Stories' },
+  { id: 'ig-actions', label: 'Профиль' },
+];
+
+const MEDIA_PRODUCT_LABEL: Record<string, string> = {
+  POST: 'Лента', FEED: 'Лента', REEL: 'Reels', REELS: 'Reels', STORY: 'Stories', CAROUSEL_ALBUM: 'Карусель',
+};
+// Post card badge keys off media_type (IMAGE/VIDEO/CAROUSEL_ALBUM/REELS), not product_type.
+const MEDIA_TYPE_LABEL: Record<string, string> = {
+  IMAGE: 'Фото', VIDEO: 'Видео', CAROUSEL_ALBUM: 'Карусель', REELS: 'Reels',
+};
+const GENDER_LABEL: Record<string, string> = { F: 'Женщины', M: 'Мужчины', U: 'Не указан' };
+const AGE_ORDER = ['13-17', '18-24', '25-34', '35-44', '45-54', '55-64', '65+'];
+const CONTACT_LABEL: Record<string, string> = {
+  WEBSITE: 'Сайт', EMAIL: 'Почта', CALL: 'Звонок', DIRECTION: 'Маршрут', TEXT: 'Сообщение', BOOK_NOW: 'Бронь',
+};
+const CONTACT_ICON: Record<string, string> = {
+  WEBSITE: '🔗', EMAIL: '✉️', CALL: '📞', DIRECTION: '📍', TEXT: '💬', BOOK_NOW: '🗓️',
+};
+const COUNTRY_NAME: Record<string, string> = {
+  US: 'США', GB: 'Великобритания', DE: 'Германия', BR: 'Бразилия', RU: 'Россия', UA: 'Украина',
+  PL: 'Польша', ES: 'Испания', FR: 'Франция', IN: 'Индия', CA: 'Канада', IT: 'Италия',
+};
+const NAV_LABEL: Record<string, string> = {
+  tap_forward: 'Вперёд', tap_back: 'Назад', tap_exit: 'Выход', swipe_forward: 'Свайп к следующему',
+};
 
 interface Point {
   day: string;
   value: number;
 }
 
-/** Pull one Graph-API insight metric out as a {day,value}[] series (oldest→newest). */
+/** Daily time_series metric → {day,value}[] (oldest→newest). */
 function metricSeries(insights: IgInsights | undefined, name: string): Point[] {
   const metric = insights?.data?.find((m) => m.name === name);
   return (metric?.values ?? [])
@@ -24,29 +73,59 @@ function metricSeries(insights: IgInsights | undefined, name: string): Point[] {
     .filter((p) => p.day !== '');
 }
 
+/** total_value breakdown reader → {label,value}[] for a metric+dimension. */
+function tvBreakdown(data: IgBreakdowns['data'] | undefined, name: string, dim: string): { label: string; value: number }[] {
+  for (const entry of (data ?? []).filter((m) => m.name === name)) {
+    const block = entry.total_value?.breakdowns?.find((b) => (b.dimension_keys ?? []).includes(dim));
+    if (block) {
+      return (block.results ?? []).map((r) => ({ label: r.dimension_values?.[0] ?? '', value: Number(r.value ?? 0) }));
+    }
+  }
+  return [];
+}
+
 const fmtDay = (iso: string) => {
   const t = Date.parse(iso);
-  return Number.isFinite(t)
-    ? new Date(t).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
-    : '';
+  return Number.isFinite(t) ? new Date(t).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }) : '';
 };
 
-const MEDIA_LABEL: Record<string, string> = {
-  IMAGE: 'Фото',
-  CAROUSEL_ALBUM: 'Карусель',
-  REELS: 'Reels',
-  VIDEO: 'Видео',
+const flag = (iso: string) => {
+  const cc = (iso || '').toUpperCase();
+  if (!/^[A-Z]{2}$/.test(cc)) return '';
+  return String.fromCodePoint(...[...cc].map((c) => 127397 + c.charCodeAt(0)));
 };
+
+/** Sum a daily series over the current vs previous window (for ratio/Δ math). */
+function windowPair(series: Point[], windowDays: number, now: number) {
+  const curStart = now - windowDays * DAY_MS;
+  const prevStart = now - 2 * windowDays * DAY_MS;
+  let cur = 0;
+  let prev = 0;
+  let hasCur = false;
+  let hasPrev = false;
+  for (const p of series) {
+    const t = Date.parse(p.day);
+    if (!Number.isFinite(t) || t > now) continue;
+    if (t >= curStart) { cur += p.value; hasCur = true; }
+    else if (t >= prevStart) { prev += p.value; hasPrev = true; }
+  }
+  return { cur, prev, hasCur, hasPrev };
+}
+const pairDelta = (p: ReturnType<typeof windowPair>): MetricDelta | null =>
+  p.hasCur && p.hasPrev ? pctDelta(p.cur, p.prev) : null;
 
 export function Instagram() {
-  const { days } = usePeriod();
+  const { days, range } = usePeriod();
+  const timeframe = days === 7 ? 'last_14_days' : days === 90 || days === 0 ? 'last_90_days' : 'last_30_days';
+
   const profile = useIgProfile();
   const insights = useIgInsights();
   const posts = useIgPosts(24);
+  const breakdowns = useIgBreakdowns(timeframe);
+  const online = useIgOnline();
+  const stories = useIgStories();
 
-  const isLoading = profile.isLoading || insights.isLoading || posts.isLoading;
-  if (isLoading) return <InstagramSkeleton />;
-
+  if (profile.isLoading || insights.isLoading || posts.isLoading) return <InstagramSkeleton />;
   if (profile.isError && insights.isError) {
     return (
       <Card className="border-destructive/40">
@@ -57,68 +136,72 @@ export function Instagram() {
     );
   }
 
-  const windowDays = days && days > 0 ? Math.min(days, 90) : 90;
-  const since = Date.now() - windowDays * DAY_MS;
+  // Window: custom range (from the shared period picker) overrides the days preset.
+  // Instagram insights cap at ~90 days, so the window is clamped accordingly.
+  const now = Date.now();
+  let windowDays: number;
+  let since: number;
+  let until = now;
+  if (range) {
+    since = range.from;
+    until = range.to;
+    windowDays = Math.min(90, Math.max(1, Math.ceil((range.to - range.from) / DAY_MS)));
+  } else {
+    windowDays = days && days > 0 ? Math.min(days, 90) : 90;
+    since = now - windowDays * DAY_MS;
+  }
   const inWindow = (iso: string) => {
     const t = Date.parse(iso);
-    return Number.isFinite(t) && t >= since;
+    return Number.isFinite(t) && t >= since && t <= until;
   };
-  const sumWindow = (series: Point[]) =>
-    series.filter((p) => inWindow(p.day)).reduce((acc, p) => acc + p.value, 0);
 
-  const reachSeriesAll = metricSeries(insights.data, 'reach');
-  const imprSeriesAll = metricSeries(insights.data, 'impressions');
-  const pvSeriesAll = metricSeries(insights.data, 'profile_views');
-  const followerSeriesAll = metricSeries(insights.data, 'follower_count');
+  const reachS = metricSeries(insights.data, 'reach');
+  const viewsS = metricSeries(insights.data, 'views');
+  const tiS = metricSeries(insights.data, 'total_interactions');
+  const engagedS = metricSeries(insights.data, 'accounts_engaged');
+  const followerS = metricSeries(insights.data, 'follower_count');
+  const savesS = metricSeries(insights.data, 'saves');
 
-  const reachWindow = reachSeriesAll.filter((p) => inWindow(p.day));
-  const followerWindow = followerSeriesAll.filter((p) => inWindow(p.day));
+  const reachP = windowPair(reachS, windowDays, until);
+  const viewsP = windowPair(viewsS, windowDays, until);
+  const tiP = windowPair(tiS, windowDays, until);
+  const engagedP = windowPair(engagedS, windowDays, until);
+  const followerP = windowPair(followerS, windowDays, until);
+  const savesP = windowPair(savesS, windowDays, until);
 
   const followers = profile.data?.followers_count ?? 0;
-  const igPosts = posts.data?.data ?? [];
-  const likesTotal = igPosts.reduce((acc, p) => acc + Number(p.like_count ?? 0), 0);
-  const savedTotal = igPosts.reduce((acc, p) => acc + Number(p.saved ?? 0), 0);
+  const erReach = reachP.cur > 0 ? (tiP.cur / reachP.cur) * 100 : 0;
+  const erReachPrev = reachP.prev > 0 ? (tiP.prev / reachP.prev) * 100 : 0;
 
-  const isMock = !!(profile.data?.mock || insights.data?.mock || posts.data?.mock);
+  const igPosts = posts.data?.data ?? [];
+  const isMock = !!(profile.data?.mock || insights.data?.mock || posts.data?.mock || breakdowns.data?.mock);
 
   const kpis: KpiCardProps[] = [
+    { label: 'Подписчики', value: fmt.num(followers), feature: true, trend: pairDelta(followerP), hint: 'всего в аккаунте' },
+    { label: 'Охват за период', value: fmt.short(reachP.cur), trend: pairDelta(reachP) },
+    { label: 'Просмотры', value: fmt.short(viewsP.cur), trend: pairDelta(viewsP) },
     {
-      label: 'Подписчики',
-      value: fmt.num(followers),
-      feature: true,
-      trend: dailyWindowDelta(followerSeriesAll, (p) => p.value, windowDays),
-      hint: 'всего в аккаунте',
+      label: 'Вовлечённость (ER)',
+      value: erReach > 0 ? `${erReach.toFixed(2)}%` : '—',
+      trend: reachP.hasCur && reachP.hasPrev && erReachPrev > 0 ? pctDelta(erReach, erReachPrev) : null,
+      hint: 'взаимодействия / охват',
     },
-    {
-      label: 'Охват за период',
-      value: fmt.short(sumWindow(reachSeriesAll)),
-      trend: dailyWindowDelta(reachSeriesAll, (p) => p.value, windowDays),
-    },
-    {
-      label: 'Показы',
-      value: fmt.short(sumWindow(imprSeriesAll)),
-      trend: dailyWindowDelta(imprSeriesAll, (p) => p.value, windowDays),
-    },
-    {
-      label: 'Просмотры профиля',
-      value: fmt.short(sumWindow(pvSeriesAll)),
-      trend: dailyWindowDelta(pvSeriesAll, (p) => p.value, windowDays),
-    },
-    { label: 'Лайки', value: fmt.short(likesTotal), hint: `по ${igPosts.length} постам` },
-    { label: 'Сохранения', value: fmt.short(savedTotal) },
+    { label: 'Вовлечено аккаунтов', value: fmt.short(engagedP.cur), trend: pairDelta(engagedP) },
+    { label: 'Сохранения', value: fmt.short(savesP.cur), trend: pairDelta(savesP) },
   ];
 
-  const topPosts = [...igPosts].sort((a, b) => Number(b.reach ?? 0) - Number(a.reach ?? 0)).slice(0, 9);
+  // New followers per day — Graph `follower_count` is daily new followers; show recent 30.
+  const newFollowersByDay = followerS.filter((p) => inWindow(p.day)).slice(-30);
 
   return (
-    <div className="space-y-8">
+    <div>
       <section className="flex flex-wrap items-center gap-3">
         <div>
           <h2 className="text-xl font-bold tracking-tight">
             Instagram{profile.data?.username ? ` · @${profile.data.username}` : ''}
           </h2>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            Обзор аккаунта · охват, вовлечённость и лучшие публикации
+            Аккаунт, аудитория, форматы и публикации
           </p>
         </div>
         {isMock && (
@@ -128,75 +211,152 @@ export function Instagram() {
         )}
       </section>
 
-      {/* KPI */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {kpis.map((k) => (
-          <KpiCard key={k.label} {...k} />
-        ))}
-      </div>
+      <SectionNav sections={SECTIONS} />
 
-      {/* Charts */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
-              Охват по дням
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {reachWindow.length > 1 ? (
-              <LineChart
-                values={reachWindow.map((p) => p.value)}
-                labels={pickLabels(reachWindow)}
-                titles={reachWindow.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)}`)}
-                height={220}
-              />
-            ) : (
-              <EmptyChart />
-            )}
-          </CardContent>
-        </Card>
+      <div className="space-y-12">
+        {/* Метрики */}
+        <IgSection id="ig-metrics" title="Ключевые метрики">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {kpis.map((k) => <KpiCard key={k.label} {...k} />)}
+          </div>
+        </IgSection>
 
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
-              Новые подписчики по дням
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {followerWindow.length > 0 ? (
-              <BarChart
-                values={followerWindow.map((p) => p.value)}
-                labels={followerWindow.map((p) => fmtDay(p.day))}
-                titles={followerWindow.map((p) => `${fmtDay(p.day)}: +${fmt.num(p.value)}`)}
-              />
-            ) : (
-              <EmptyChart />
-            )}
-          </CardContent>
-        </Card>
-      </div>
+        {/* Динамика */}
+        <IgSection id="ig-trends" title="Динамика охвата и просмотров">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <TrendCard title="Охват по дням" series={reachS.filter((p) => inWindow(p.day))} />
+            <TrendCard title="Просмотры по дням" series={viewsS.filter((p) => inWindow(p.day))} />
+          </div>
+        </IgSection>
 
-      {/* Top posts */}
-      <section className="space-y-4">
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          Лучшие публикации по охвату
-        </h3>
-        {topPosts.length === 0 ? (
+        {/* Форматы */}
+        <IgSection id="ig-formats" title="Вовлечённость по форматам">
           <Card>
-            <CardContent className="py-8 text-center text-sm text-muted-foreground">
-              Публикаций пока нет.
+            <CardContent className="p-5">
+              <Breakdown
+                items={tvBreakdown(breakdowns.data?.data, 'total_interactions', 'media_product_type')
+                  .sort((a, b) => b.value - a.value)
+                  .map((it) => ({
+                    label: MEDIA_PRODUCT_LABEL[it.label] ?? it.label,
+                    value: it.value,
+                    display: fmt.short(it.value),
+                  }))}
+              />
             </CardContent>
           </Card>
-        ) : (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {topPosts.map((post, idx) => (
-              <IgPostCard key={post.id ?? idx} post={post} rank={idx + 1} />
-            ))}
-          </div>
-        )}
-      </section>
+        </IgSection>
+
+        {/* Рост */}
+        <IgSection id="ig-growth" title="Новые подписчики по дням">
+          <Card>
+            <CardContent className="p-5">
+              {newFollowersByDay.length > 0 ? (
+                <ExpandableChart title="Новые подписчики по дням">
+                  <BarChart
+                    values={newFollowersByDay.map((d) => d.value)}
+                    labels={newFollowersByDay.map((d) => fmtDay(d.day))}
+                    titles={newFollowersByDay.map((d) => `${fmtDay(d.day)}: +${fmt.num(d.value)}`)}
+                  />
+                </ExpandableChart>
+              ) : (
+                <EmptyChart />
+              )}
+              <p className="mt-3 text-xs font-medium text-muted-foreground">
+                Всего за период: <span className="text-verdant">+{fmt.num(followerP.cur)}</span> новых подписчиков
+              </p>
+            </CardContent>
+          </Card>
+        </IgSection>
+
+        {/* Аудитория */}
+        <IgSection id="ig-audience" title="Аудитория">
+          <AudienceBlock breakdowns={breakdowns.data} followers={followers} />
+        </IgSection>
+
+        {/* Лучшее время */}
+        <IgSection id="ig-timing" title="Лучшее время для публикации">
+          <Card>
+            <CardContent className="p-5">
+              <BestTimeHeatmap online={online.data} />
+            </CardContent>
+          </Card>
+        </IgSection>
+
+        {/* Reels */}
+        <IgSection id="ig-reels" title="Reels: удержание и просмотры">
+          <ReelsBlock posts={igPosts} />
+        </IgSection>
+
+        {/* Топ-посты */}
+        <IgSection id="ig-posts" title="Лучшие публикации">
+          <TopPostsBlock posts={igPosts} />
+        </IgSection>
+
+        {/* Stories */}
+        <IgSection id="ig-stories" title="Stories за 24 часа">
+          <StoriesBlock stories={stories.data?.data} />
+        </IgSection>
+
+        {/* Профиль */}
+        <IgSection id="ig-actions" title="Действия в профиле">
+          <Card>
+            <CardContent className="p-5">
+              {(() => {
+                const items = tvBreakdown(breakdowns.data?.data, 'profile_links_taps', 'contact_button_type')
+                  .sort((a, b) => b.value - a.value);
+                return items.length > 0 ? (
+                  <Breakdown
+                    items={items.map((it) => ({
+                      label: CONTACT_LABEL[it.label] ?? it.label,
+                      value: it.value,
+                      display: fmt.short(it.value),
+                      icon: CONTACT_ICON[it.label],
+                    }))}
+                  />
+                ) : (
+                  <p className="py-6 text-center text-sm text-muted-foreground">Нет данных о действиях.</p>
+                );
+              })()}
+            </CardContent>
+          </Card>
+        </IgSection>
+
+        {isMock && <DataHealthNote />}
+      </div>
     </div>
+  );
+}
+
+function IgSection({ id, title, children }: { id: string; title: string; children: ReactNode }) {
+  return (
+    <section id={id} className="scroll-mt-28 space-y-4">
+      <h3 className="text-lg font-semibold tracking-tight">{title}</h3>
+      {children}
+    </section>
+  );
+}
+
+function TrendCard({ title, series }: { title: string; series: Point[] }) {
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">{title}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {series.length > 1 ? (
+          <ExpandableChart title={title}>
+            <LineChart
+              values={series.map((p) => p.value)}
+              labels={pickLabels(series)}
+              titles={series.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)}`)}
+              height={220}
+            />
+          </ExpandableChart>
+        ) : (
+          <EmptyChart />
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -208,6 +368,324 @@ function pickLabels(series: Point[]): string[] {
   return [first?.day ?? '', mid?.day ?? '', last?.day ?? ''].map(fmtDay);
 }
 
+function AudienceBlock({ breakdowns, followers }: { breakdowns: IgBreakdowns | undefined; followers: number }) {
+  const ageRaw = tvBreakdown(breakdowns?.data, 'follower_demographics', 'age');
+  const age = AGE_ORDER.map((bucket) => ageRaw.find((a) => a.label === bucket)).filter(Boolean) as { label: string; value: number }[];
+  const gender = tvBreakdown(breakdowns?.data, 'follower_demographics', 'gender');
+  const countries = tvBreakdown(breakdowns?.data, 'follower_demographics', 'country').sort((a, b) => b.value - a.value).slice(0, 8);
+  const cities = tvBreakdown(breakdowns?.data, 'follower_demographics', 'city').sort((a, b) => b.value - a.value).slice(0, 8);
+
+  const covered = age.reduce((acc, a) => acc + a.value, 0);
+  const coverage = followers > 0 && covered > 0 ? covered / followers : 1;
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">Возраст</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {age.length > 0 ? (
+              <ExpandableChart title="Возраст аудитории">
+                <BarChart
+                  values={age.map((a) => a.value)}
+                  labels={age.map((a) => a.label)}
+                  titles={age.map((a) => `${a.label}: ${fmt.num(a.value)}`)}
+                  height={200}
+                />
+              </ExpandableChart>
+            ) : (
+              <EmptyChart />
+            )}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">Пол</CardTitle>
+          </CardHeader>
+          <CardContent className="p-5">
+            <Breakdown
+              items={gender
+                .sort((a, b) => b.value - a.value)
+                .map((g) => ({ label: GENDER_LABEL[g.label] ?? g.label, value: g.value, display: fmt.short(g.value) }))}
+            />
+          </CardContent>
+        </Card>
+      </div>
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">Топ стран</CardTitle>
+          </CardHeader>
+          <CardContent className="p-5">
+            <Breakdown
+              items={countries.map((c) => ({
+                label: COUNTRY_NAME[c.label] ?? c.label,
+                value: c.value,
+                display: fmt.short(c.value),
+                icon: flag(c.label),
+              }))}
+            />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">Топ городов</CardTitle>
+          </CardHeader>
+          <CardContent className="p-5">
+            <Breakdown items={cities.map((c) => ({ label: c.label, value: c.value, display: fmt.short(c.value) }))} />
+          </CardContent>
+        </Card>
+      </div>
+      {coverage < 0.98 && (
+        <p className="px-1 text-xs text-muted-foreground">
+          Данные частичны (≈{Math.round(coverage * 100)}% аудитории) — Instagram отдаёт демографию только по топ-сегментам и при 100+ подписчиках.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function BestTimeHeatmap({ online }: { online: IgOnline | undefined }) {
+  const [tip, setTip] = useState<TooltipState>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const dayValues = online?.data?.[0]?.values ?? [];
+  const dayNames = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+
+  const sum: number[][] = Array.from({ length: 7 }, () => Array<number>(24).fill(0));
+  const cnt: number[][] = Array.from({ length: 7 }, () => Array<number>(24).fill(0));
+  dayValues.forEach((d) => {
+    const t = Date.parse(d.end_time ?? '');
+    if (!Number.isFinite(t)) return;
+    const w = (new Date(t).getUTCDay() + 6) % 7;
+    const map = d.value ?? {};
+    for (let h = 0; h < 24; h++) {
+      const v = Number(map[String(h)] ?? 0);
+      if (!Number.isFinite(v)) continue;
+      sum[w][h] += v;
+      cnt[w][h] += 1;
+    }
+  });
+  const grid = sum.map((row, w) => row.map((s, h) => (cnt[w][h] ? s / cnt[w][h] : 0)));
+  const max = Math.max(1, ...grid.flat());
+
+  let best = { w: -1, h: -1, v: -1 };
+  grid.forEach((row, w) => row.forEach((v, h) => { if (v > best.v) best = { w, h, v }; }));
+
+  if (dayValues.length === 0) {
+    return (
+      <p className="py-8 text-center text-sm text-muted-foreground">
+        Недостаточно данных об активности аудитории (метрика требует 100+ подписчиков и иногда недоступна).
+      </p>
+    );
+  }
+
+  return (
+    <div ref={wrapRef} className="relative" onMouseLeave={() => setTip(null)}>
+      <div className="overflow-x-auto pb-2">
+        <div className="min-w-[440px] space-y-[2px]">
+          <div className="grid gap-[2px]" style={{ gridTemplateColumns: '30px repeat(24, minmax(14px, 1fr))' }}>
+            <div />
+            {Array.from({ length: 24 }).map((_, h) => (
+              <div key={h} className="select-none text-center text-[10px] font-semibold text-muted-foreground">
+                {h % 3 === 0 ? `${h}` : ''}
+              </div>
+            ))}
+          </div>
+          {dayNames.map((name, w) => (
+            <div key={w} className="grid items-center gap-[2px]" style={{ gridTemplateColumns: '30px repeat(24, minmax(14px, 1fr))' }}>
+              <div className="select-none text-[11px] font-bold text-muted-foreground">{name}</div>
+              {Array.from({ length: 24 }).map((_, h) => {
+                const v = grid[w][h];
+                const opacity = max > 0 ? Math.max(0.06, v / max) : 0;
+                const isBest = best.w === w && best.h === h;
+                return (
+                  <div
+                    key={h}
+                    className="h-4 cursor-pointer rounded-sm"
+                    style={{
+                      backgroundColor: 'hsl(var(--brand-iris))',
+                      opacity,
+                      border: isBest ? '2px solid hsl(var(--brand-verdant))' : undefined,
+                    }}
+                    onMouseMove={(event) => {
+                      const rect = wrapRef.current?.getBoundingClientRect();
+                      if (rect) setTip({ x: event.clientX - rect.left, y: event.clientY - rect.top, text: `${name} ${h}:00 · ${fmt.short(v)} онлайн` });
+                    }}
+                  />
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+      <ChartTooltip tip={tip} />
+      <div className="mt-3 text-xs font-medium text-muted-foreground">
+        {best.w >= 0 ? (
+          <span>лучший слот: <strong className="text-foreground">{dayNames[best.w]} {best.h}:00</strong></span>
+        ) : 'Мало данных.'}
+      </div>
+    </div>
+  );
+}
+
+function ReelsBlock({ posts }: { posts: IgPost[] }) {
+  const reels = posts.filter((p) => p.media_product_type === 'REELS');
+  if (reels.length === 0) {
+    return (
+      <Card>
+        <CardContent className="py-8 text-center text-sm text-muted-foreground">Reels пока нет.</CardContent>
+      </Card>
+    );
+  }
+  const avgSec = (r: IgPost) => Math.round(Number(r.ig_reels_avg_watch_time ?? 0) / 1000);
+  const totalWatchHours = reels.reduce((acc, r) => acc + Number(r.ig_reels_video_view_total_time ?? 0) / 1000 / 3600, 0);
+  const avgWatchAll = reels.length ? Math.round(reels.reduce((acc, r) => acc + avgSec(r), 0) / reels.length) : 0;
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <KpiCard label="Reels" value={fmt.num(reels.length)} />
+        <KpiCard label="Ср. время просмотра" value={`${avgWatchAll} сек`} />
+        <KpiCard label="Суммарно просмотрено" value={`${fmt.short(Math.round(totalWatchHours))} ч`} />
+      </div>
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">Ср. время просмотра по Reels</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ExpandableChart title="Ср. время просмотра по Reels">
+            <BarChart
+              values={reels.map(avgSec)}
+              labels={reels.map((_, i) => `R${i + 1}`)}
+              titles={reels.map((r, i) => `R${i + 1}: ${avgSec(r)} сек · ${fmt.short(Number(r.views ?? 0))} просм`)}
+            />
+          </ExpandableChart>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+type SortKey = 'reach' | 'views' | 'saved' | 'shares';
+const SORT_LABEL: Record<SortKey, string> = { reach: 'Охват', views: 'Просмотры', saved: 'Сохранения', shares: 'Репосты' };
+
+function TopPostsBlock({ posts }: { posts: IgPost[] }) {
+  const [sort, setSort] = useState<SortKey>('reach');
+  if (posts.length === 0) {
+    return (
+      <Card>
+        <CardContent className="py-8 text-center text-sm text-muted-foreground">Публикаций пока нет.</CardContent>
+      </Card>
+    );
+  }
+  const top = [...posts].sort((a, b) => Number(b[sort] ?? 0) - Number(a[sort] ?? 0)).slice(0, 9);
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-1">
+        {(Object.keys(SORT_LABEL) as SortKey[]).map((key) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setSort(key)}
+            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+              sort === key ? 'bg-primary/15 text-foreground' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'
+            }`}
+          >
+            {SORT_LABEL[key]}
+          </button>
+        ))}
+      </div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {top.map((post, idx) => <IgPostCard key={post.id ?? idx} post={post} rank={idx + 1} />)}
+      </div>
+    </div>
+  );
+}
+
+function StoriesBlock({ stories }: { stories: IgStory[] | undefined }) {
+  const list = stories ?? [];
+  if (list.length === 0) {
+    return (
+      <Card>
+        <CardContent className="py-8 text-center text-sm text-muted-foreground">Активных историй нет.</CardContent>
+      </Card>
+    );
+  }
+  const sum = (k: keyof IgStory) => list.reduce((acc, s) => acc + Number(s[k] ?? 0), 0);
+  const completion = (s: IgStory) => {
+    const v = Number(s.views ?? 0);
+    if (v <= 0) return 0;
+    const drop = Number(s.navigation?.tap_exit ?? 0) + Number(s.navigation?.swipe_forward ?? 0);
+    return Math.max(0, Math.min(1, 1 - drop / v));
+  };
+  const avgCompletion = list.length ? list.reduce((acc, s) => acc + completion(s), 0) / list.length : 0;
+  const nav = ['tap_forward', 'tap_back', 'tap_exit', 'swipe_forward'];
+  const navItems = nav
+    .map((k) => ({ label: NAV_LABEL[k] ?? k, value: list.reduce((acc, s) => acc + Number(s.navigation?.[k] ?? 0), 0) }))
+    .filter((x) => x.value > 0);
+
+  const soonest = list
+    .map((s) => Date.parse(s.expires_at ?? ''))
+    .filter((t) => Number.isFinite(t))
+    .sort((a, b) => a - b)[0];
+  const hoursLeft = soonest ? Math.max(0, Math.round((soonest - Date.now()) / 3600000)) : null;
+
+  return (
+    <div className="space-y-4">
+      {hoursLeft != null && (
+        <p className="px-1 text-xs text-ember">Данные историй исчезнут через ~{hoursLeft} ч (24-часовое окно Instagram).</p>
+      )}
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <KpiCard label="Историй" value={fmt.num(list.length)} />
+        <KpiCard label="Охват" value={fmt.short(sum('reach'))} />
+        <KpiCard label="Ответы" value={fmt.num(sum('replies'))} />
+        <KpiCard label="Досматриваемость" value={`${Math.round(avgCompletion * 100)}%`} />
+      </div>
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">Навигация по историям</CardTitle>
+          </CardHeader>
+          <CardContent className="p-5">
+            <Breakdown items={navItems.map((n) => ({ label: n.label, value: n.value, display: fmt.short(n.value) }))} />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium uppercase tracking-wide text-muted-foreground">По историям</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 p-5">
+            {list.map((s, i) => (
+              <div key={s.id ?? i} className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">{s.media_type === 'VIDEO' ? 'Видео' : 'Фото'} · {fmtDay(s.timestamp ?? '')}</span>
+                <span className="tabular-nums">
+                  {fmt.short(Number(s.reach ?? 0))} охв · {Math.round(completion(s) * 100)}%
+                </span>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function DataHealthNote() {
+  return (
+    <Card className="border-dashed">
+      <CardContent className="space-y-1.5 p-5 text-xs text-muted-foreground">
+        <p className="font-semibold text-foreground">О данных Instagram</p>
+        <p>• <span className="text-foreground">impressions</span> и <span className="text-foreground">website_clicks</span> отключены Meta в 2025 — используем <span className="text-foreground">просмотры (views)</span> и <span className="text-foreground">действия в профиле</span>.</p>
+        <p>• Демография — только топ-сегменты и при 100+ подписчиках; возможна задержка до 48 ч.</p>
+        <p>• Активность по часам (лучшее время) — метрика нестабильна, иногда пуста.</p>
+        <p>• Stories живут 24 ч; для истории нужен снапшот в БД (запланировано).</p>
+      </CardContent>
+    </Card>
+  );
+}
+
 interface KpiCardProps {
   label: string;
   value: string;
@@ -215,7 +693,6 @@ interface KpiCardProps {
   feature?: boolean;
   trend?: MetricDelta | null;
 }
-
 function KpiCard({ label, value, hint, feature, trend }: KpiCardProps) {
   return (
     <Card className={feature ? 'border-primary/40' : undefined}>
@@ -244,27 +721,18 @@ function DeltaPill({ delta }: { delta?: MetricDelta | null }) {
 }
 
 function IgPostCard({ post, rank }: { post: IgPost; rank: number }) {
-  const typeLabel = MEDIA_LABEL[post.media_type ?? ''] ?? 'Пост';
+  const typeLabel = MEDIA_TYPE_LABEL[post.media_type ?? ''] ?? 'Пост';
   return (
     <Card className="flex flex-col justify-between overflow-hidden">
       <div>
         <div className="relative flex aspect-video w-full items-center justify-center overflow-hidden bg-muted/50">
           {post.thumbnail_url || post.media_url ? (
-            <img
-              src={post.thumbnail_url || post.media_url || ''}
-              alt=""
-              referrerPolicy="no-referrer"
-              className="h-full w-full object-cover"
-            />
+            <img src={post.thumbnail_url || post.media_url || ''} alt="" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
           ) : (
             <span className="font-mono text-xs text-muted-foreground">{typeLabel}</span>
           )}
-          <div className="absolute left-2 top-2 rounded bg-background/90 px-2 py-0.5 text-xs font-bold text-foreground shadow-sm">
-            #{rank}
-          </div>
-          <div className="absolute right-2 top-2 rounded bg-primary px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary-foreground">
-            {typeLabel}
-          </div>
+          <div className="absolute left-2 top-2 rounded bg-background/90 px-2 py-0.5 text-xs font-bold text-foreground shadow-sm">#{rank}</div>
+          <div className="absolute right-2 top-2 rounded bg-primary px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary-foreground">{typeLabel}</div>
         </div>
         <div className="p-4">
           <p className="line-clamp-3 text-sm leading-relaxed text-foreground">
@@ -274,9 +742,9 @@ function IgPostCard({ post, rank }: { post: IgPost; rank: number }) {
       </div>
       <div className="grid grid-cols-4 gap-1 border-t border-border/40 bg-muted/10 p-4 pt-0 text-center">
         <Stat label="Охват" value={fmt.short(Number(post.reach ?? 0))} />
-        <Stat label="Лайки" value={fmt.short(Number(post.like_count ?? 0))} />
-        <Stat label="Комм." value={fmt.short(Number(post.comments_count ?? 0))} />
+        <Stat label="Просм." value={fmt.short(Number(post.views ?? 0))} />
         <Stat label="Сохр." value={fmt.short(Number(post.saved ?? 0))} />
+        <Stat label="Репосты" value={fmt.short(Number(post.shares ?? 0))} />
       </div>
     </Card>
   );
@@ -292,11 +760,7 @@ function Stat({ label, value }: { label: string; value: string }) {
 }
 
 function EmptyChart() {
-  return (
-    <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
-      Нет данных за период
-    </div>
-  );
+  return <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">Нет данных за период</div>;
 }
 
 function InstagramSkeleton() {

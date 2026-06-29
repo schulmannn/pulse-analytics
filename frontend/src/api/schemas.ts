@@ -367,6 +367,26 @@ export const IgProfileSchema = z
   .passthrough();
 export type IgProfile = z.infer<typeof IgProfileSchema>;
 
+// total_value + breakdowns envelope (modern Graph v22+ for demographics / format splits).
+export const IgBreakdownResultSchema = z
+  .object({
+    dimension_values: z.array(z.string()).optional().default([]),
+    value: z.coerce.number().optional().nullable(),
+  })
+  .passthrough();
+export const IgBreakdownSchema = z
+  .object({
+    dimension_keys: z.array(z.string()).optional().default([]),
+    results: z.array(IgBreakdownResultSchema).optional().default([]),
+  })
+  .passthrough();
+export const IgTotalValueSchema = z
+  .object({
+    value: z.coerce.number().optional().nullable(),
+    breakdowns: z.array(IgBreakdownSchema).optional().default([]),
+  })
+  .passthrough();
+
 export const IgInsightValueSchema = z
   .object({
     value: z.coerce.number().optional().nullable(),
@@ -378,6 +398,7 @@ export const IgInsightMetricSchema = z
     name: z.string(),
     period: z.string().optional().nullable(),
     values: z.array(IgInsightValueSchema).optional().default([]),
+    total_value: IgTotalValueSchema.optional().nullable(),
   })
   .passthrough();
 export const IgInsightsSchema = z
@@ -389,11 +410,46 @@ export const IgInsightsSchema = z
   .passthrough();
 export type IgInsights = z.infer<typeof IgInsightsSchema>;
 
+// Breakdowns endpoint reuses the metric envelope (each entry carries a total_value).
+export const IgBreakdownsSchema = z
+  .object({
+    mock: z.boolean().optional(),
+    timeframe: z.string().optional().nullable(),
+    data: z.array(IgInsightMetricSchema).optional().default([]),
+    error: z.string().optional().nullable(),
+  })
+  .passthrough();
+export type IgBreakdowns = z.infer<typeof IgBreakdownsSchema>;
+
+// online_followers — each value is an hour→count map ({ "0": n, … "23": n }).
+export const IgOnlineValueSchema = z
+  .object({
+    value: z.record(z.string(), z.coerce.number()).optional().nullable(),
+    end_time: z.string().optional().nullable(),
+  })
+  .passthrough();
+export const IgOnlineMetricSchema = z
+  .object({
+    name: z.string().optional(),
+    period: z.string().optional().nullable(),
+    values: z.array(IgOnlineValueSchema).optional().default([]),
+  })
+  .passthrough();
+export const IgOnlineSchema = z
+  .object({
+    mock: z.boolean().optional(),
+    data: z.array(IgOnlineMetricSchema).optional().default([]),
+    error: z.string().optional().nullable(),
+  })
+  .passthrough();
+export type IgOnline = z.infer<typeof IgOnlineSchema>;
+
 export const IgPostSchema = z
   .object({
     id: z.string().optional(),
     caption: z.string().optional().nullable(),
     media_type: z.string().optional().nullable(),
+    media_product_type: z.string().optional().nullable(),
     media_url: z.string().optional().nullable(),
     thumbnail_url: z.string().optional().nullable(),
     permalink: z.string().optional().nullable(),
@@ -401,9 +457,13 @@ export const IgPostSchema = z
     like_count: z.coerce.number().optional().nullable(),
     comments_count: z.coerce.number().optional().nullable(),
     reach: z.coerce.number().optional().nullable(),
+    views: z.coerce.number().optional().nullable(),
     impressions: z.coerce.number().optional().nullable(),
     shares: z.coerce.number().optional().nullable(),
     saved: z.coerce.number().optional().nullable(),
+    total_interactions: z.coerce.number().optional().nullable(),
+    ig_reels_avg_watch_time: z.coerce.number().optional().nullable(),
+    ig_reels_video_view_total_time: z.coerce.number().optional().nullable(),
   })
   .passthrough();
 export const IgPostsSchema = z
@@ -415,3 +475,32 @@ export const IgPostsSchema = z
   .passthrough();
 export type IgPost = z.infer<typeof IgPostSchema>;
 export type IgPosts = z.infer<typeof IgPostsSchema>;
+
+export const IgStorySchema = z
+  .object({
+    id: z.string().optional(),
+    media_type: z.string().optional().nullable(),
+    timestamp: z.string().optional().nullable(),
+    expires_at: z.string().optional().nullable(),
+    permalink: z.string().optional().nullable(),
+    thumbnail_url: z.string().optional().nullable(),
+    reach: z.coerce.number().optional().nullable(),
+    views: z.coerce.number().optional().nullable(),
+    replies: z.coerce.number().optional().nullable(),
+    shares: z.coerce.number().optional().nullable(),
+    follows: z.coerce.number().optional().nullable(),
+    profile_visits: z.coerce.number().optional().nullable(),
+    total_interactions: z.coerce.number().optional().nullable(),
+    navigation_total: z.coerce.number().optional().nullable(),
+    navigation: z.record(z.string(), z.coerce.number()).optional().nullable(),
+  })
+  .passthrough();
+export const IgStoriesSchema = z
+  .object({
+    mock: z.boolean().optional(),
+    data: z.array(IgStorySchema).optional().default([]),
+    error: z.string().optional().nullable(),
+  })
+  .passthrough();
+export type IgStory = z.infer<typeof IgStorySchema>;
+export type IgStories = z.infer<typeof IgStoriesSchema>;

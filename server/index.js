@@ -487,7 +487,7 @@ app.patch('/api/admin/users/:id', requireAuth, requireSuper, async (req, res) =>
 //  INSTAGRAM ROUTES
 // ════════════════════════════════════════════════════════════════
 
-const IG_BASE      = 'https://graph.facebook.com/v19.0';
+const IG_BASE      = 'https://graph.facebook.com/v22.0'; // v19 404s on views/demographics/total_value metrics
 const IG_TOKEN     = process.env.IG_ACCESS_TOKEN;
 const IG_ACCOUNT   = process.env.IG_ACCOUNT_ID;
 const igMock       = require('./ig_mock');
@@ -524,7 +524,7 @@ app.get('/api/ig/profile', requireAuth, async (req, res) => {
 
 // GET /api/ig/insights?days=30 — метрики аккаунта
 app.get('/api/ig/insights', requireAuth, async (req, res) => {
-  const days = Math.min(90, parseInt(req.query.days) || 30);
+  const days = Math.min(90, parseInt(req.query.days, 10) || 30);
   const cacheKey = `ig:insights:${days}`;
   try {
     if (!igConfigured()) return res.json(igMock.igMockInsights(days));
@@ -534,12 +534,16 @@ app.get('/api/ig/insights', requireAuth, async (req, res) => {
     const since = Math.floor(Date.now() / 1000) - days * 86400;
     const until = Math.floor(Date.now() / 1000);
 
-    const data = await igFetch(`/${IG_ACCOUNT}/insights`, {
-      metric: 'reach,impressions,profile_views,follower_count,website_clicks',
-      period: 'day',
-      since,
-      until
-    });
+    // impressions + website_clicks were deprecated in 2025 → views + profile_links_taps.
+    // Two groups via allSettled so one unsupported metric can't blank the whole panel.
+    const groups = [
+      'reach,views,profile_views,follower_count',
+      'total_interactions,accounts_engaged,likes,comments,saves,shares',
+    ];
+    const settled = await Promise.allSettled(
+      groups.map((metric) => igFetch(`/${IG_ACCOUNT}/insights`, { metric, period: 'day', since, until })),
+    );
+    const data = { data: settled.filter((s) => s.status === 'fulfilled').flatMap((s) => s.value?.data || []) };
     cacheSet(cacheKey, data);
     res.json(data);
   } catch (e) {
@@ -549,7 +553,7 @@ app.get('/api/ig/insights', requireAuth, async (req, res) => {
 
 // GET /api/ig/posts?limit=20 — последние посты с инсайтами и превью
 app.get('/api/ig/posts', requireAuth, async (req, res) => {
-  const limit = Math.min(25, parseInt(req.query.limit) || 20);
+  const limit = Math.min(25, parseInt(req.query.limit, 10) || 20);
   const cacheKey = `ig:posts:${limit}`;
   try {
     if (!igConfigured()) return res.json(igMock.igMockPosts(limit));
@@ -557,19 +561,24 @@ app.get('/api/ig/posts', requireAuth, async (req, res) => {
     if (cached) return res.json(cached);
 
     const mediaRes = await igFetch(`/${IG_ACCOUNT}/media`, {
-      fields: 'id,caption,media_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count',
+      fields: 'id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count',
       limit
     });
 
     const posts = await Promise.all(
       (mediaRes.data || []).map(async (post) => {
+        // impressions deprecated 2025 → views. Reels carry watch-time (ms), only valid on REELS.
+        const base = 'reach,views,shares,saved,total_interactions';
+        const metric = post.media_product_type === 'REELS'
+          ? `${base},ig_reels_avg_watch_time,ig_reels_video_view_total_time`
+          : base;
         try {
-          const ins = await igFetch(`/${post.id}/insights`, {
-            metric: 'reach,impressions,shares,saved'
-          });
+          const ins = await igFetch(`/${post.id}/insights`, { metric, metric_type: 'total_value' });
           const metrics = {};
-          (ins.data || []).forEach(m => {
-            metrics[m.name] = m.values?.[0]?.value || 0;
+          (ins.data || []).forEach((m) => {
+            metrics[m.name] = (m.total_value && m.total_value.value != null)
+              ? m.total_value.value
+              : (m.values && m.values[0] ? m.values[0].value : 0);
           });
           return { ...post, ...metrics };
         } catch {
@@ -583,6 +592,97 @@ app.get('/api/ig/posts', requireAuth, async (req, res) => {
     res.json(result);
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/ig/breakdowns — audience demographics + format/contact breakdowns (modern
+// total_value envelope, Graph v22+). Mock-backed when no creds.
+app.get('/api/ig/breakdowns', requireAuth, async (req, res) => {
+  const allowed = ['last_14_days', 'last_30_days', 'last_90_days'];
+  const timeframe = allowed.includes(req.query.timeframe) ? req.query.timeframe : 'last_30_days';
+  try {
+    if (!igConfigured()) return res.json(igMock.igMockBreakdowns(timeframe));
+    const cacheKey = `ig:breakdowns:${timeframe}`;
+    const cached = cacheGet(cacheKey);
+    if (cached) return res.json(cached);
+    const calls = [
+      { metric: 'follower_demographics', breakdown: 'age', period: 'lifetime', metric_type: 'total_value', timeframe },
+      { metric: 'follower_demographics', breakdown: 'gender', period: 'lifetime', metric_type: 'total_value', timeframe },
+      { metric: 'follower_demographics', breakdown: 'country', period: 'lifetime', metric_type: 'total_value', timeframe },
+      { metric: 'follower_demographics', breakdown: 'city', period: 'lifetime', metric_type: 'total_value', timeframe },
+      { metric: 'total_interactions', breakdown: 'media_product_type', period: 'day', metric_type: 'total_value' },
+      { metric: 'profile_links_taps', breakdown: 'contact_button_type', period: 'day', metric_type: 'total_value' },
+    ];
+    const settled = await Promise.allSettled(
+      calls.map((c) => igFetch(`/${IG_ACCOUNT}/insights`, c)),
+    );
+    const data = settled
+      .filter((s) => s.status === 'fulfilled')
+      .flatMap((s) => s.value?.data || []);
+    const result = { data };
+    cacheSet(cacheKey, result);
+    res.json(result);
+  } catch (e) {
+    res.status(200).json({ data: [], error: e.message }); // graceful: section degrades, page survives
+  }
+});
+
+// GET /api/ig/online — online-followers hourly map (best-time heatmap). Flaky metric →
+// always 200, empty data[] on failure so the heatmap degrades instead of crashing.
+app.get('/api/ig/online', requireAuth, async (req, res) => {
+  try {
+    if (!igConfigured()) return res.json(igMock.igMockOnlineFollowers());
+    const cacheKey = 'ig:online';
+    const cached = cacheGet(cacheKey);
+    if (cached) return res.json(cached);
+    const data = await igFetch(`/${IG_ACCOUNT}/insights`, { metric: 'online_followers', period: 'lifetime' });
+    const result = { data: data?.data || [] };
+    cacheSet(cacheKey, result);
+    res.json(result);
+  } catch (e) {
+    res.status(200).json({ data: [], error: e.message });
+  }
+});
+
+// GET /api/ig/stories — active stories (last 24h) + per-story insights/navigation. Live
+// window → not cached; tolerates per-story errors (#10 <5 viewers) and returns [] gracefully.
+app.get('/api/ig/stories', requireAuth, async (req, res) => {
+  try {
+    if (!igConfigured()) return res.json(igMock.igMockStories());
+    const list = await igFetch(`/${IG_ACCOUNT}/stories`, {
+      fields: 'id,media_type,timestamp,permalink,thumbnail_url',
+    });
+    const stories = await Promise.all(
+      (list.data || []).map(async (s) => {
+        try {
+          const ins = await igFetch(`/${s.id}/insights`, {
+            metric: 'reach,views,replies,shares,follows,profile_visits,total_interactions,navigation',
+            metric_type: 'total_value',
+            breakdown: 'story_navigation_action_type',
+          });
+          const out = { ...s };
+          (ins.data || []).forEach((m) => {
+            if (m.name === 'navigation' && m.total_value && m.total_value.breakdowns && m.total_value.breakdowns[0]) {
+              const nav = {};
+              (m.total_value.breakdowns[0].results || []).forEach((r) => {
+                const k = r.dimension_values && r.dimension_values[0];
+                if (k) nav[k] = r.value;
+              });
+              out.navigation = nav;
+              out.navigation_total = m.total_value.value || 0;
+            } else {
+              out[m.name] = (m.total_value && m.total_value.value != null) ? m.total_value.value : (m.values && m.values[0] ? m.values[0].value : 0);
+            }
+          });
+          return out;
+        } catch {
+          return null;
+        }
+      }),
+    );
+    res.json({ data: stories.filter(Boolean) });
+  } catch (e) {
+    res.status(200).json({ data: [], error: e.message });
   }
 });
 
