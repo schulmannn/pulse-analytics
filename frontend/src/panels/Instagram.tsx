@@ -21,6 +21,7 @@ import { ExpandableChart } from '@/components/ExpandableChart';
 import { ChartTooltip, type TooltipState } from '@/components/ChartTooltip';
 import { Skeleton } from '@/components/ui/skeleton';
 import { SectionNav, type Section } from '@/components/SectionNav';
+import { downloadCsv, type CsvRow } from '@/lib/csv';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -33,6 +34,8 @@ const SECTIONS: readonly Section[] = [
   { id: 'ig-timing', label: 'Время' },
   { id: 'ig-reels', label: 'Reels' },
   { id: 'ig-posts', label: 'Посты' },
+  { id: 'ig-hashtags', label: 'Хэштеги' },
+  { id: 'ig-compare', label: 'Сравнение' },
   { id: 'ig-stories', label: 'Stories' },
   { id: 'ig-actions', label: 'Профиль' },
 ];
@@ -193,6 +196,42 @@ export function Instagram() {
   // New followers per day — Graph `follower_count` is daily new followers; show recent 30.
   const newFollowersByDay = followerS.filter((p) => inWindow(p.day)).slice(-30);
 
+  const exportPosts = () =>
+    downloadCsv(
+      'instagram-posts.csv',
+      igPosts.map((p) => ({
+        date: p.timestamp ?? '',
+        type: p.media_type ?? '',
+        reach: p.reach ?? 0,
+        views: p.views ?? 0,
+        likes: p.like_count ?? 0,
+        comments: p.comments_count ?? 0,
+        saved: p.saved ?? 0,
+        shares: p.shares ?? 0,
+        caption: (p.caption ?? '').replace(/\s+/g, ' ').slice(0, 200),
+        permalink: p.permalink ?? '',
+      })),
+    );
+
+  const exportDaily = () => {
+    const byDay = new Map<string, CsvRow>();
+    const put = (series: Point[], key: string) =>
+      series.forEach((p) => {
+        const d = p.day.slice(0, 10);
+        const row = byDay.get(d) ?? { day: d };
+        row[key] = p.value;
+        byDay.set(d, row);
+      });
+    put(reachS, 'reach');
+    put(viewsS, 'views');
+    put(tiS, 'total_interactions');
+    put(engagedS, 'accounts_engaged');
+    put(followerS, 'new_followers');
+    put(savesS, 'saves');
+    const rows = [...byDay.values()].sort((a, b) => String(a.day).localeCompare(String(b.day)));
+    downloadCsv('instagram-daily.csv', rows);
+  };
+
   return (
     <div>
       <section className="flex flex-wrap items-center gap-3">
@@ -209,6 +248,22 @@ export function Instagram() {
             Демо-данные · подключите аккаунт для реальных
           </span>
         )}
+        <div className="ml-auto flex gap-2">
+          <button
+            type="button"
+            onClick={exportPosts}
+            className="rounded-lg border px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+          >
+            Экспорт постов
+          </button>
+          <button
+            type="button"
+            onClick={exportDaily}
+            className="rounded-lg border px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+          >
+            Экспорт метрик
+          </button>
+        </div>
       </section>
 
       <SectionNav sections={SECTIONS} />
@@ -290,6 +345,16 @@ export function Instagram() {
         {/* Топ-посты */}
         <IgSection id="ig-posts" title="Лучшие публикации">
           <TopPostsBlock posts={igPosts} />
+        </IgSection>
+
+        {/* Хэштеги */}
+        <IgSection id="ig-hashtags" title="Эффективность хэштегов">
+          <HashtagsBlock posts={igPosts} />
+        </IgSection>
+
+        {/* Сравнение публикаций */}
+        <IgSection id="ig-compare" title="Сравнение публикаций">
+          <CompareBlock posts={igPosts} />
         </IgSection>
 
         {/* Stories */}
@@ -600,6 +665,185 @@ function TopPostsBlock({ posts }: { posts: IgPost[] }) {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {top.map((post, idx) => <IgPostCard key={post.id ?? idx} post={post} rank={idx + 1} />)}
       </div>
+    </div>
+  );
+}
+
+interface HashtagStat {
+  tag: string;
+  count: number;
+  avgReach: number;
+  avgEr: number;
+  lift: number;
+}
+
+const postEr = (p: IgPost): number => {
+  const reach = Number(p.reach ?? 0);
+  if (reach <= 0) return 0;
+  const ti =
+    Number(p.total_interactions ?? 0) ||
+    Number(p.like_count ?? 0) + Number(p.comments_count ?? 0) + Number(p.saved ?? 0) + Number(p.shares ?? 0);
+  return (ti / reach) * 100;
+};
+
+function hashtagStats(posts: IgPost[]): HashtagStat[] {
+  const map = new Map<string, { count: number; reach: number; er: number }>();
+  let erSum = 0;
+  let erCount = 0;
+  for (const p of posts) {
+    const reach = Number(p.reach ?? 0);
+    if (reach <= 0) continue; // skip zero-reach posts for BOTH the baseline and per-tag stats
+    const er = postEr(p);
+    erSum += er;
+    erCount += 1;
+    const tags = (p.caption ?? '').match(/#[\p{L}\p{N}_]+/gu) ?? [];
+    for (const tag of new Set(tags.map((t) => t.toLowerCase()))) {
+      const e = map.get(tag) ?? { count: 0, reach: 0, er: 0 };
+      e.count += 1;
+      e.reach += reach;
+      e.er += er;
+      map.set(tag, e);
+    }
+  }
+  const globalEr = erCount > 0 ? erSum / erCount : 0;
+  return [...map.entries()]
+    .map(([tag, e]) => ({
+      tag,
+      count: e.count,
+      avgReach: e.reach / e.count,
+      avgEr: e.er / e.count,
+      lift: globalEr > 0 ? ((e.er / e.count - globalEr) / globalEr) * 100 : 0,
+    }))
+    .sort((a, b) => b.count - a.count || b.avgEr - a.avgEr);
+}
+
+function HashtagsBlock({ posts }: { posts: IgPost[] }) {
+  const stats = hashtagStats(posts).slice(0, 12);
+  if (stats.length === 0) {
+    return (
+      <Card>
+        <CardContent className="py-8 text-center text-sm text-muted-foreground">
+          В публикациях нет хэштегов.
+        </CardContent>
+      </Card>
+    );
+  }
+  return (
+    <Card>
+      <CardContent className="overflow-x-auto p-0">
+        <table className="w-full text-left text-sm">
+          <thead>
+            <tr className="border-b border-border bg-muted/40 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              <th className="p-4">Хэштег</th>
+              <th className="p-4 text-right">Постов</th>
+              <th className="p-4 text-right">Ср. охват</th>
+              <th className="p-4 text-right">ER</th>
+              <th className="p-4 text-right">Lift к ER</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {stats.map((s) => (
+              <tr key={s.tag} className="transition-colors hover:bg-muted/30">
+                <td className="p-4 font-medium text-foreground">{s.tag}</td>
+                <td className="p-4 text-right tabular-nums text-muted-foreground">{s.count}</td>
+                <td className="p-4 text-right tabular-nums">{fmt.short(s.avgReach)}</td>
+                <td className="p-4 text-right tabular-nums">{s.avgEr.toFixed(2)}%</td>
+                <td className="p-4 text-right font-semibold tabular-nums">
+                  {Math.abs(s.lift) < 0.5 ? (
+                    <span className="text-muted-foreground/60">≈0%</span>
+                  ) : (
+                    <span className={s.lift > 0 ? 'text-verdant' : 'text-ember'}>
+                      {s.lift > 0 ? '+' : ''}{s.lift.toFixed(0)}%
+                    </span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </CardContent>
+    </Card>
+  );
+}
+
+const COMPARE_ROWS: { label: string; get: (p: IgPost) => number; pct?: boolean }[] = [
+  { label: 'Охват', get: (p) => Number(p.reach ?? 0) },
+  { label: 'Просмотры', get: (p) => Number(p.views ?? 0) },
+  { label: 'Лайки', get: (p) => Number(p.like_count ?? 0) },
+  { label: 'Комментарии', get: (p) => Number(p.comments_count ?? 0) },
+  { label: 'Сохранения', get: (p) => Number(p.saved ?? 0) },
+  { label: 'Репосты', get: (p) => Number(p.shares ?? 0) },
+  { label: 'ER', get: (p) => postEr(p), pct: true },
+];
+
+function CompareBlock({ posts }: { posts: IgPost[] }) {
+  const pool = posts.slice(0, 12);
+  const [sel, setSel] = useState<number[]>(() => [0, 1].filter((i) => i < pool.length));
+  const toggle = (i: number) =>
+    setSel((cur) => (cur.includes(i) ? cur.filter((x) => x !== i) : cur.length < 4 ? [...cur, i] : cur));
+  const chosen = sel.map((i) => ({ i, post: pool[i] })).filter((x) => x.post);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-2">
+        {pool.map((p, i) => (
+          <button
+            key={p.id ?? i}
+            type="button"
+            onClick={() => toggle(i)}
+            aria-pressed={sel.includes(i)}
+            className={`max-w-[220px] truncate rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+              sel.includes(i)
+                ? 'border-primary/40 bg-primary/10 text-foreground'
+                : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'
+            }`}
+          >
+            #{i + 1} {MEDIA_TYPE_LABEL[p.media_type ?? ''] ?? 'Пост'}: {(p.caption ?? 'Без подписи').slice(0, 22)}
+          </button>
+        ))}
+      </div>
+      {chosen.length < 2 ? (
+        <Card>
+          <CardContent className="py-8 text-center text-sm text-muted-foreground">
+            Выберите минимум 2 публикации для сравнения (до 4).
+          </CardContent>
+        </Card>
+      ) : (
+        <Card>
+          <CardContent className="overflow-x-auto p-0">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted/40 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  <th className="p-4">Метрика</th>
+                  {chosen.map((c) => (
+                    <th key={c.i} className="p-4 text-right">#{c.i + 1} {MEDIA_TYPE_LABEL[c.post.media_type ?? ''] ?? 'Пост'}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {COMPARE_ROWS.map((row) => {
+                  const values = chosen.map((c) => row.get(c.post));
+                  const max = Math.max(...values, 0);
+                  return (
+                    <tr key={row.label} className="hover:bg-muted/30">
+                      <td className="p-4 text-muted-foreground">{row.label}</td>
+                      {chosen.map((c, idx) => {
+                        const v = values[idx];
+                        const best = chosen.length > 1 && max > 0 && v === max;
+                        return (
+                          <td key={c.i} className={`p-4 text-right tabular-nums ${best ? 'font-semibold text-verdant' : ''}`}>
+                            {row.pct ? `${v.toFixed(2)}%` : fmt.short(v)}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
