@@ -105,8 +105,9 @@ export function KpiGrid() {
     days,
   );
 
-  // Per-metric daily series for the inline sparklines (within the active window).
-  const dailySeries = (value: (post: (typeof posts)[number]) => number): number[] => {
+  // Per-metric daily series for the inline sparklines (within the active window). Carries the
+  // day labels alongside the values so the interactive read-out can name the hovered point.
+  const dailySeries = (value: (post: (typeof posts)[number]) => number): DailySeries => {
     const byDay = new Map<string, number>();
     posts.forEach((post) => {
       if (!post.date) return;
@@ -115,7 +116,8 @@ export function KpiGrid() {
       const key = new Date(timestamp).toISOString().slice(0, 10);
       byDay.set(key, (byDay.get(key) ?? 0) + value(post));
     });
-    return [...byDay.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, v]) => v);
+    const entries = [...byDay.entries()].sort(([a], [b]) => a.localeCompare(b));
+    return { labels: entries.map(([k]) => fmt.day(k)), values: entries.map(([, v]) => v) };
   };
   const viewsSpark = dailySeries((post) => Number(post.views ?? post.view_count ?? 0));
   const reactionsSpark = dailySeries((post) => Number(post.reactions ?? post.reactions_count ?? 0));
@@ -127,10 +129,13 @@ export function KpiGrid() {
       Number(post.replies ?? post.comments_count ?? 0),
   );
   // Subscriber trend from the daily archive (reliable, unlike post-derived views).
-  const subsSpark = historyRows
+  const subsRows = historyRows
     .filter((row) => row.subscribers != null && inRange(row.day))
-    .sort((a, b) => a.day.localeCompare(b.day))
-    .map((row) => Number(row.subscribers));
+    .sort((a, b) => a.day.localeCompare(b.day));
+  const subsSpark: DailySeries = {
+    labels: subsRows.map((row) => fmt.day(row.day)),
+    values: subsRows.map((row) => Number(row.subscribers)),
+  };
   // Absolute subscriber change ("−108 за 30 дн.") — more legible than the % alone. Only for the
   // `days` presets: a custom date range overrides the preset window, so a preset-based number +
   // label would contradict the (range-filtered) sparkline → fall back to a neutral caption.
@@ -168,12 +173,18 @@ export function KpiGrid() {
   );
 }
 
+/** A daily metric series for the inline sparklines: aligned day labels + values. */
+interface DailySeries {
+  labels: string[];
+  values: number[];
+}
+
 interface FeaturedKpiProps {
   label: string;
   value: string;
   trend?: MetricDelta | null;
   caption?: string | null;
-  spark?: number[];
+  spark?: DailySeries;
 }
 
 function FeaturedKpi({ label, value, trend, caption, spark }: FeaturedKpiProps) {
@@ -190,10 +201,18 @@ function FeaturedKpi({ label, value, trend, caption, spark }: FeaturedKpiProps) 
           <DeltaPill delta={trend} />
         </div>
         {caption ? <div className="mt-1.5 text-xs text-muted-foreground">{caption}</div> : null}
-        {spark && spark.length > 1 ? (
+        {spark && spark.values.length > 1 ? (
           <div className="mt-4">
-            <Sparkline values={spark} area strokeWidth={2} className="h-12 w-full" />
-            <div className="mt-1 text-[10px] text-muted-foreground">по дням</div>
+            <Sparkline
+              values={spark.values}
+              labels={spark.labels}
+              area
+              strokeWidth={2}
+              interactive
+              caption="по дням"
+              formatValue={fmt.short}
+              className="h-12 w-full"
+            />
           </div>
         ) : null}
       </CardContent>
@@ -205,7 +224,7 @@ interface StatTileProps {
   label: string;
   value: string;
   trend?: MetricDelta | null;
-  spark?: number[];
+  spark?: DailySeries;
 }
 
 function StatTile({ label, value, trend, spark }: StatTileProps) {
@@ -221,8 +240,14 @@ function StatTile({ label, value, trend, spark }: StatTileProps) {
           </div>
           <DeltaPill delta={trend} subtle />
         </div>
-        {spark && spark.length > 1 ? (
-          <Sparkline values={spark} color={sparkColor(trend)} className="mt-2.5 h-6 w-full" />
+        {spark && spark.values.length > 1 ? (
+          <Sparkline
+            values={spark.values}
+            labels={spark.labels}
+            color={sparkColor(trend)}
+            interactive
+            className="mt-2.5 h-6 w-full"
+          />
         ) : null}
       </CardContent>
     </Card>

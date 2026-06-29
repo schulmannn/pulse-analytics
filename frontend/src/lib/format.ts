@@ -20,6 +20,15 @@ export const fmt = {
     if (p == null || isNaN(p)) return '—';
     return (p >= 0 ? '+' : '') + p.toFixed(digits) + '%';
   },
+  /** Short localized day ("5 июн."). Accepts an ISO date or a "YYYY-MM-DD" archive key. */
+  day(iso?: string | null): string {
+    if (!iso) return '';
+    try {
+      return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+    } catch {
+      return '';
+    }
+  },
   /** Localized date + time ("5 июн., 14:30"). */
   date(iso?: string | null): string {
     if (!iso) return '';
