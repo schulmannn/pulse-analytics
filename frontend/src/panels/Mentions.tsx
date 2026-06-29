@@ -188,7 +188,7 @@ export function Mentions() {
                           href={item.link}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-sm font-semibold text-primary hover:underline"
+                          className="text-sm font-semibold text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary"
                         >
                           {item.title || 'Канал'}
                         </a>

@@ -8,32 +8,34 @@
 @layer base {
   :root {
     color-scheme: light;
-    --background: 210 44% 93%;
+    /* Near-white page (#18): less blue tint than before, so white cards read clean, not
+       "grey on grey". */
+    --background: 214 28% 97%;
     --foreground: 211 78% 11%;
     --card: 0 0% 100%;
     --card-foreground: 211 78% 11%;
     --popover: 0 0% 100%;
     --popover-foreground: 211 78% 11%;
-    --primary: 248 98% 61%;
+    --primary: 216 82% 48%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 216 56% 98%;
+    --secondary: 214 28% 96%;
     --secondary-foreground: 211 78% 11%;
-    --muted: 216 56% 98%;
+    --muted: 214 28% 96%;
     --muted-foreground: 217 19% 42%;
-    --accent: 236 100% 94%;
-    --accent-foreground: 248 98% 61%;
+    --accent: 214 90% 95%;
+    --accent-foreground: 216 82% 48%;
     --destructive: 19 100% 55%;
     --destructive-foreground: 0 0% 100%;
-    --border: 213 30% 88%;
-    --input: 213 30% 88%;
-    --ring: 248 98% 61%;
+    --border: 214 24% 91%;
+    --input: 214 24% 91%;
+    --ring: 216 82% 48%;
     --radius: 0.25rem;
 
-    /* Brand data accents (charts, deltas, sparklines). Light-mode verdant/ember are
-       darkened to clear WCAG AA on white/near-white cards — the bright values only read
-       on the dark canvas, so they live in .dark below. */
-    --brand-iris: 248 98% 61%;
-    --brand-iris-soft: 237 100% 75%;
+    /* Brand accent (charts, deltas, sparklines) — analytical blue (#6 "deep": replaced the
+       Electric-Iris violet so data + chrome read as a tool, not a neon admin). Light values are
+       deepened for WCAG AA on white cards; bright values live in .dark. verdant/ember unchanged. */
+    --brand-iris: 216 82% 48%;
+    --brand-iris-soft: 212 84% 60%;
     --brand-verdant: 82 75% 26%;
     --brand-ember: 14 82% 44%;
 
@@ -55,22 +57,23 @@
     --card-foreground: 216 48% 94%;
     --popover: 214 29% 14%;
     --popover-foreground: 216 48% 94%;
-    --primary: 237 100% 75%;
+    --primary: 217 74% 63%;
     --primary-foreground: 212 37% 8%;
     --secondary: 212 30% 12%;
     --secondary-foreground: 216 48% 94%;
     --muted: 212 30% 12%;
     --muted-foreground: 216 17% 59%;
-    --accent: 246 35% 21%;
-    --accent-foreground: 247 100% 77%;
+    --accent: 216 45% 24%;
+    --accent-foreground: 213 85% 74%;
     --destructive: 19 100% 55%;
     --destructive-foreground: 0 0% 100%;
     --border: 209 24% 25%;
     --input: 209 24% 25%;
-    --ring: 237 100% 75%;
+    --ring: 217 74% 63%;
 
-    --brand-iris: 247 100% 77%;
-    --brand-iris-soft: 237 100% 75%;
+    /* Analytical blue (#6 "deep") — chrome + data; brighter than the light values for the dark canvas. */
+    --brand-iris: 213 80% 67%;
+    --brand-iris-soft: 205 85% 70%;
     --brand-verdant: 81 75% 41%;
     --brand-ember: 19 100% 55%;
 

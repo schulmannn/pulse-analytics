@@ -12,6 +12,7 @@ import { railMode, useSidebarCollapsed } from '@/lib/sidebar';
 import { fmt } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { Icon, type IconName } from '@/components/nav-icons';
+import { PulseMark } from '@/components/PulseMark';
 
 /** Close a popover/dropdown on Escape, and (when a ref is given) on outside mousedown.
     Outside-click via a document listener instead of a scrim avoids stacking-context traps. */
@@ -172,8 +173,8 @@ function Sidebar({ role }: { role?: string }) {
         )}
       >
         <div className="flex items-center gap-2.5 px-4 pt-5">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-base font-semibold text-primary-foreground">
-            P
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+            <PulseMark className="h-[18px] w-[18px]" />
           </span>
           <span className={cn('flex-1 whitespace-nowrap text-[15px] font-semibold tracking-tight', rail && REVEAL_BLOCK)}>
             Pulse
@@ -280,15 +281,23 @@ function NavItem({ to, label, icon, end, rail }: NavLinkDef & { rail?: boolean }
       aria-label={rail ? label : undefined}
       className={({ isActive }) =>
         cn(
-          'flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
+          'relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
           isActive
             ? 'bg-primary/15 font-medium text-foreground'
             : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
         )
       }
     >
-      <Icon name={icon} className="h-[18px] w-[18px] shrink-0" />
-      <span className={cn('whitespace-nowrap', rail && REVEAL_INLINE)}>{label}</span>
+      {({ isActive }) => (
+        <>
+          {/* Left accent bar marks the active section clearly (beyond just the tint). */}
+          {isActive && (
+            <span aria-hidden="true" className="absolute inset-y-1.5 left-0 w-1 rounded-r-full bg-primary" />
+          )}
+          <Icon name={icon} className={cn('h-[18px] w-[18px] shrink-0', isActive && 'text-primary')} />
+          <span className={cn('whitespace-nowrap', rail && REVEAL_INLINE)}>{label}</span>
+        </>
+      )}
     </NavLink>
   );
 }

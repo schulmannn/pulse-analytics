@@ -237,7 +237,7 @@ export function LoginPage() {
         <p className="mt-3.5 text-sm text-muted-foreground">
           <button
             type="button"
-            className="cursor-pointer text-primary hover:underline"
+            className="cursor-pointer text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary"
             onClick={() => {
               loginMutation.reset();
               setForgotMode(true);
@@ -353,7 +353,7 @@ export function VerifyPage() {
           <p className="mt-3 text-sm text-muted-foreground">Email подтверждён.</p>
         )}
         <p className="mt-4 text-sm">
-          <Link to="/login" className="text-primary hover:underline">
+          <Link to="/login" className="text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary">
             Перейти ко входу
           </Link>
         </p>
@@ -403,7 +403,7 @@ export function ResetPage() {
           <p className="mt-3 text-sm text-destructive">{errorMessage(resetMutation.error)}</p>
         )}
         <p className="mt-4 text-sm">
-          <Link to="/login" className="text-primary hover:underline">
+          <Link to="/login" className="text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary">
             Вернуться ко входу
           </Link>
         </p>

@@ -216,7 +216,7 @@ function ChannelKeysPanel({ channelId }: { channelId: number }) {
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-baseline gap-3">
           <h4 className="text-xs font-bold tracking-wider text-muted-foreground">Ключи внешних коллекторов</h4>
-          <Link to="/connect" className="text-[11px] text-primary hover:underline">Что делать с ключом? →</Link>
+          <Link to="/connect" className="text-[11px] text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary">Что делать с ключом? →</Link>
         </div>
         <button
           onClick={handleCreateKey}

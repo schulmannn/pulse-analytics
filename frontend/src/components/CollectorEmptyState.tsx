@@ -48,7 +48,7 @@ export function CollectorEmptyState({ username }: CollectorEmptyStateProps) {
                 <div className="text-sm font-medium text-foreground">{step.title}</div>
                 <p className="text-sm text-muted-foreground">{step.body}</p>
                 {step.to && step.cta && (
-                  <Link to={step.to} className="inline-block text-sm font-medium text-primary hover:underline">
+                  <Link to={step.to} className="inline-block text-sm font-medium text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary">
                     {step.cta} →
                   </Link>
                 )}

@@ -71,14 +71,14 @@ export function Connect() {
       <Card>
         <CardContent className="px-5 py-1">
           <Step n={1} title="Получи API-ключ канала">
-            <Link to="/settings" className="text-primary hover:underline">Настройки</Link> → канал{' '}
+            <Link to="/settings" className="text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary">Настройки</Link> → канал{' '}
             <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">{handle}</code> → «Создать ключ» →
             скопируй <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">pa_…</code> (показывается один раз).
           </Step>
 
           <Step n={2} title="Создай Telegram-приложение">
             Открой{' '}
-            <a href="https://my.telegram.org" target="_blank" rel="noreferrer" className="text-primary hover:underline">
+            <a href="https://my.telegram.org" target="_blank" rel="noreferrer" className="text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary">
               my.telegram.org
             </a>{' '}
             → API development tools → создай app → запиши{' '}

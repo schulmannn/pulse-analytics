@@ -226,7 +226,7 @@ function PostModal({ post, onClose }: PostModalProps) {
               href={post.permalink}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline"
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary"
             >
               Открыть публикацию в Telegram
             </a>
