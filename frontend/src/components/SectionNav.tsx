@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useScrollSpy } from '@/lib/useScrollSpy';
+import { cn } from '@/lib/utils';
 
 export interface Section {
   id: string;
@@ -48,13 +49,21 @@ export function SectionNav({ sections }: { sections: readonly Section[] }) {
                 type="button"
                 onClick={() => go(s.id)}
                 aria-current={isActive ? 'true' : undefined}
-                className={`shrink-0 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors focus-visible:ring-inset focus-visible:ring-offset-0 ${
-                  isActive
-                    ? 'bg-primary text-primary-foreground'
-                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                }`}
+                className={cn(
+                  // Editorial underline tab: an indicator bar marks the active section instead of
+                  // a heavy filled pill, so the active blue reads as an accent, not a button.
+                  'relative shrink-0 rounded-md px-3 py-1.5 text-sm font-medium transition-colors focus-visible:ring-inset focus-visible:ring-offset-0',
+                  isActive ? 'text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                )}
               >
                 {s.label}
+                {isActive && (
+                  // -bottom-2 lands the bar on the nav's own bottom border (nav has py-2).
+                  <span
+                    aria-hidden="true"
+                    className="absolute inset-x-2 -bottom-2 h-0.5 rounded-full bg-primary"
+                  />
+                )}
               </button>
             </span>
           );
