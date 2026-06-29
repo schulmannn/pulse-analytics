@@ -3,6 +3,7 @@ import { useSelectedChannel } from '@/lib/channel-context';
 import { usePeriod } from '@/lib/period';
 import { fmt } from '@/lib/format';
 import { freshness, latestHistoryDay } from '@/lib/freshness';
+import { ChannelAvatar } from '@/components/ChannelAvatar';
 import { Skeleton } from '@/components/ui/skeleton';
 
 /**
@@ -40,9 +41,7 @@ export function Hero() {
 
   return (
     <section className="flex items-center gap-3.5">
-      <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary text-lg font-semibold text-primary-foreground">
-        {initial}
-      </span>
+      <ChannelAvatar source={current?.source} initial={initial} className="h-12 w-12 rounded-xl text-lg" />
       <div className="min-w-0">
         {/* A div, not an h1 — the top bar already owns the page's single <h1> (route title). */}
         <div className="truncate text-xl font-semibold tracking-tight">{handle}</div>

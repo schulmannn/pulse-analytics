@@ -753,6 +753,31 @@ async def get_thumb(msg_id: int, size: str = Query(default='sm'), x_internal_tok
         raise HTTPException(status_code=500, detail=str(e))
 
 
+_CHANNEL_PHOTO_CACHE: dict = {}   # {'jpeg': bytes} — single configured channel; cleared on restart
+
+@app.get('/channel/photo')
+async def get_channel_photo(x_internal_token: str = Header(default='')):
+    """JPEG of the configured channel's profile photo (cached). For <img> tags.
+    404 when the channel has no photo — the frontend then falls back to initials."""
+    check_auth(x_internal_token)
+    if 'jpeg' in _CHANNEL_PHOTO_CACHE:
+        return Response(content=_CHANNEL_PHOTO_CACHE['jpeg'], media_type='image/jpeg',
+                        headers={'Cache-Control': 'public, max-age=86400'})
+    try:
+        tg = await get_client()
+        data = await tg.download_profile_photo(CHANNEL, file=bytes)
+        if not data:
+            raise HTTPException(status_code=404, detail='no profile photo')
+        _CHANNEL_PHOTO_CACHE['jpeg'] = data
+        return Response(content=data, media_type='image/jpeg',
+                        headers={'Cache-Control': 'public, max-age=86400'})
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f'get_channel_photo error: {e}')
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.on_event('startup')
 async def startup():
     if not API_ID or not API_HASH or not SESSION:

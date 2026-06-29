@@ -13,6 +13,7 @@ import { fmt } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { Icon, type IconName } from '@/components/nav-icons';
 import { PulseMark } from '@/components/PulseMark';
+import { ChannelAvatar } from '@/components/ChannelAvatar';
 
 /** Close a popover/dropdown on Escape, and (when a ref is given) on outside mousedown.
     Outside-click via a document listener instead of a scrim avoids stacking-context traps. */
@@ -353,9 +354,7 @@ function ChannelCard({ rail = false }: { rail?: boolean }) {
           multi ? 'cursor-pointer hover:bg-muted/50' : 'cursor-default',
         )}
       >
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary text-sm font-semibold text-primary-foreground">
-          {initial}
-        </span>
+        <ChannelAvatar source={current?.source} initial={initial} className="h-9 w-9 rounded-md text-sm" />
         <span className={cn('min-w-0 flex-1', rail && REVEAL_BLOCK)}>
           <span className="block truncate text-sm font-medium text-foreground">{handle}</span>
           <span className="block truncate text-xs text-muted-foreground">{subtitle}</span>

@@ -1040,6 +1040,21 @@ app.get('/api/tg/mtproto/thumb/:id', async (req, res) => {
   }
 });
 
+// Channel avatar (binary) — open route so <img src> works without a header.
+// Low sensitivity: only the configured (public, 'central') channel's profile photo.
+app.get('/api/tg/mtproto/channel/photo', async (req, res) => {
+  try {
+    const r = await fetch(`${MTPROTO_URL}/channel/photo`, { headers: { 'x-internal-token': MTPROTO_PASS } });
+    if (!r.ok) return res.status(r.status).end();
+    const buf = await r.buffer();
+    res.set('Content-Type', r.headers.get('content-type') || 'image/jpeg');
+    res.set('Cache-Control', 'public, max-age=86400');
+    res.send(buf);
+  } catch (e) {
+    res.status(502).end();
+  }
+});
+
 app.get('/api/tg/full', requireAuth, resolveChannel, async (req, res) => {
   if (req.channel && req.channel.source !== 'central') {   // collector channel → from snapshot
     const snap = req.channel.id ? await db.getSnapshot(req.channel.id).catch(() => null) : null;
