@@ -5,6 +5,7 @@ import { usePeriod } from '@/lib/period';
 import { CollectorEmptyState } from '@/components/CollectorEmptyState';
 import { SectionNav, type Section } from '@/components/SectionNav';
 import { Hero } from '@/panels/Hero';
+import { Digest } from '@/panels/Digest';
 import { KpiGrid } from '@/panels/KpiGrid';
 import { TopPosts } from '@/panels/TopPosts';
 import { HistoryChartBlock, HeatmapChartBlock, VelocityChartBlock } from '@/panels/Charts';
@@ -39,6 +40,10 @@ export function Overview() {
   return (
     <div>
       <Hero />
+      {/* Lead auto-summary — answers "что произошло / что делать" before the detailed sections. */}
+      <div className="mt-6">
+        <Digest />
+      </div>
       <SectionNav sections={SECTIONS} />
       <div className="space-y-12">
         <OverviewSection id="metrics" title="Ключевые метрики">

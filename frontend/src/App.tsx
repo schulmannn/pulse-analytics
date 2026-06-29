@@ -12,7 +12,6 @@ import { Mentions } from '@/panels/Mentions';
 import { Instagram } from '@/panels/Instagram';
 import { TgAnalytics } from '@/panels/TgAnalytics';
 import { Hashtags } from '@/panels/Hashtags';
-import { Digest } from '@/panels/Digest';
 import { Settings } from '@/panels/Settings';
 import { Admin } from '@/panels/Admin';
 import { Bugs } from '@/panels/Bugs';
@@ -80,13 +79,12 @@ function ProtectedLayout() {
   );
 }
 
-/** Analytics tab — TG breakdowns + hashtag lift + auto-digest. */
+/** Analytics tab — TG breakdowns + hashtag lift. (The auto-digest now leads the Overview.) */
 function Analytics() {
   return (
     <div className="space-y-8">
       <TgAnalytics />
       <Hashtags />
-      <Digest />
     </div>
   );
 }
