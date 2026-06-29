@@ -1,9 +1,11 @@
+import { useState } from 'react';
 import { useTgFull } from '@/api/queries';
 import { normalizeTgPosts, type NormalizedPost } from '@/lib/posts';
 import { fmt } from '@/lib/format';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { RichText } from '@/components/RichText';
+import { PostDetailModal } from '@/components/PostDetailModal';
 import { usePeriod } from '@/lib/period';
 
 /**
@@ -14,6 +16,8 @@ import { usePeriod } from '@/lib/period';
 export function TopPosts() {
   const { days, inRange } = usePeriod();
   const { data, isLoading, isError } = useTgFull(days);
+  // The opened post + its rank/reason, so the detail modal can stand alone.
+  const [selected, setSelected] = useState<{ post: NormalizedPost; rank: number; reason: string | null } | null>(null);
 
   if (isLoading) return <TopPostsSkeleton />;
   if (isError) return null;
@@ -60,73 +64,95 @@ export function TopPosts() {
   }
 
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      {topPosts.map((post, idx) => {
-        const reason = reasonFor(post);
-        return (
-        <Card key={post.id ?? idx} className="flex flex-col justify-between overflow-hidden">
-          <div>
-            <div className="relative flex aspect-video w-full items-center justify-center overflow-hidden bg-muted/50">
-              {post.thumb ? (
-                <img
-                  src={`${post.thumb}?size=lg`}
-                  alt=""
-                  referrerPolicy="no-referrer"
-                  className="h-full w-full object-cover"
-                />
-              ) : (
-                <span className="font-mono text-xs text-muted-foreground">Текстовый пост</span>
-              )}
-              <div className="absolute left-2 top-2 rounded bg-background/90 px-2 py-0.5 text-xs font-bold text-foreground shadow-sm">
-                #{idx + 1}
-              </div>
-              <div className="absolute right-2 top-2 rounded bg-primary px-2 py-0.5 text-[10px] font-bold tracking-wide text-primary-foreground">
-                Telegram
-              </div>
-            </div>
-            <div className="space-y-3 p-4">
-              <p className="line-clamp-3 text-sm leading-relaxed text-foreground">
-                {post.caption ? <RichText text={post.caption} /> : <span className="italic text-muted-foreground">Без подписи</span>}
-              </p>
-              {reason && (
-                <div className="flex items-center gap-1 text-[11px] font-medium text-verdant">
-                  <span aria-hidden="true">▲</span>
-                  <span className="truncate">{reason}</span>
+    <>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {topPosts.map((post, idx) => {
+          const reason = reasonFor(post);
+          const rank = idx + 1;
+          const open = () => setSelected({ post, rank, reason });
+          return (
+            <Card
+              key={post.id ?? idx}
+              role="button"
+              tabIndex={0}
+              onClick={open}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  open();
+                }
+              }}
+              title="Открыть детали поста"
+              className="group flex cursor-pointer flex-col justify-between overflow-hidden transition-colors hover:border-primary/40 focus-visible:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            >
+              <div>
+                <div className="relative flex aspect-video w-full items-center justify-center overflow-hidden bg-muted/50">
+                  {post.thumb ? (
+                    <img
+                      src={`${post.thumb}?size=lg`}
+                      alt={`Превью поста №${rank}`}
+                      referrerPolicy="no-referrer"
+                      className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
+                    />
+                  ) : (
+                    <span className="font-mono text-xs text-muted-foreground">Текстовый пост</span>
+                  )}
+                  <div className="absolute left-2 top-2 rounded bg-background/90 px-2 py-0.5 text-xs font-bold tabular-nums text-foreground shadow-sm">
+                    №{rank}
+                  </div>
                 </div>
-              )}
-              {post.reactionsDetail.length > 0 && (
-                <div className="flex flex-wrap gap-1 pt-1">
-                  {post.reactionsDetail.slice(0, 3).map((r, i) => (
-                    <span
-                      key={i}
-                      className="inline-flex items-center gap-1 rounded-full bg-secondary px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-secondary-foreground"
-                    >
-                      <span>{r.emoji}</span>
-                      <span>{fmt.short(r.count)}</span>
-                    </span>
-                  ))}
+                <div className="space-y-3 p-4">
+                  <p className="line-clamp-3 text-sm leading-relaxed text-foreground">
+                    {post.caption ? <RichText text={post.caption} /> : <span className="italic text-muted-foreground">Без подписи</span>}
+                  </p>
+                  {reason && (
+                    <div className="flex items-center gap-1 text-[11px] font-medium text-verdant">
+                      <span aria-hidden="true">▲</span>
+                      <span className="truncate">{reason}</span>
+                    </div>
+                  )}
+                  {post.reactionsDetail.length > 0 && (
+                    <div className="flex flex-wrap gap-1 pt-1">
+                      {post.reactionsDetail.slice(0, 3).map((r, i) => (
+                        <span
+                          key={i}
+                          className="inline-flex items-center gap-1 rounded-full bg-secondary px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-secondary-foreground"
+                        >
+                          <span>{r.emoji}</span>
+                          <span>{fmt.short(r.count)}</span>
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-          </div>
-          <div className="grid grid-cols-3 gap-2 border-t border-border/40 bg-muted/10 p-4 pt-0 text-center">
-            <div className="pt-2">
-              <div className="text-[10px] font-semibold tracking-wider text-muted-foreground">Просмотры</div>
-              <div className="mt-0.5 text-sm font-semibold tabular-nums">{fmt.short(post.reach)}</div>
-            </div>
-            <div className="pt-2">
-              <div className="text-[10px] font-semibold tracking-wider text-muted-foreground">Реакции</div>
-              <div className="mt-0.5 text-sm font-semibold tabular-nums">{fmt.short(post.likes)}</div>
-            </div>
-            <div className="pt-2">
-              <div className="text-[10px] font-semibold tracking-wider text-muted-foreground">Репосты</div>
-              <div className="mt-0.5 text-sm font-semibold tabular-nums">{fmt.short(post.shares)}</div>
-            </div>
-          </div>
-        </Card>
-        );
-      })}
-    </div>
+              </div>
+              <div className="grid grid-cols-3 gap-2 border-t border-border/40 bg-muted/10 p-4 pt-0 text-center">
+                <div className="pt-2">
+                  <div className="text-[10px] font-semibold tracking-wider text-muted-foreground">Просмотры</div>
+                  <div className="mt-0.5 text-sm font-semibold tabular-nums">{fmt.short(post.reach)}</div>
+                </div>
+                <div className="pt-2">
+                  <div className="text-[10px] font-semibold tracking-wider text-muted-foreground">Реакции</div>
+                  <div className="mt-0.5 text-sm font-semibold tabular-nums">{fmt.short(post.likes)}</div>
+                </div>
+                <div className="pt-2">
+                  <div className="text-[10px] font-semibold tracking-wider text-muted-foreground">Репосты</div>
+                  <div className="mt-0.5 text-sm font-semibold tabular-nums">{fmt.short(post.shares)}</div>
+                </div>
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+      {selected && (
+        <PostDetailModal
+          post={selected.post}
+          rank={selected.rank}
+          reason={selected.reason}
+          onClose={() => setSelected(null)}
+        />
+      )}
+    </>
   );
 }
 
