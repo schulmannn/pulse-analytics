@@ -28,21 +28,21 @@ import { loadIgGoals, saveIgGoals, goalPct, type IgGoals } from '@/lib/igGoals';
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 const SECTIONS: readonly Section[] = [
-  { id: 'ig-metrics', label: 'Метрики' },
-  { id: 'ig-insights', label: 'Инсайты' },
-  { id: 'ig-goals', label: 'Цели' },
-  { id: 'ig-periods', label: 'Период' },
-  { id: 'ig-trends', label: 'Динамика' },
-  { id: 'ig-formats', label: 'Форматы' },
-  { id: 'ig-growth', label: 'Рост' },
-  { id: 'ig-audience', label: 'Аудитория' },
-  { id: 'ig-timing', label: 'Время' },
-  { id: 'ig-reels', label: 'Reels' },
-  { id: 'ig-posts', label: 'Посты' },
-  { id: 'ig-hashtags', label: 'Хэштеги' },
-  { id: 'ig-compare', label: 'Сравнение' },
-  { id: 'ig-stories', label: 'Stories' },
-  { id: 'ig-actions', label: 'Профиль' },
+  { id: 'ig-metrics', label: 'Метрики', group: 'Обзор' },
+  { id: 'ig-insights', label: 'Инсайты', group: 'Обзор' },
+  { id: 'ig-goals', label: 'Цели', group: 'Обзор' },
+  { id: 'ig-periods', label: 'Период', group: 'Обзор' },
+  { id: 'ig-trends', label: 'Динамика', group: 'Динамика' },
+  { id: 'ig-formats', label: 'Форматы', group: 'Динамика' },
+  { id: 'ig-growth', label: 'Рост', group: 'Динамика' },
+  { id: 'ig-audience', label: 'Аудитория', group: 'Аудитория' },
+  { id: 'ig-timing', label: 'Время', group: 'Аудитория' },
+  { id: 'ig-reels', label: 'Reels', group: 'Публикации' },
+  { id: 'ig-posts', label: 'Посты', group: 'Публикации' },
+  { id: 'ig-hashtags', label: 'Хэштеги', group: 'Публикации' },
+  { id: 'ig-compare', label: 'Сравнение', group: 'Публикации' },
+  { id: 'ig-stories', label: 'Stories', group: 'Stories' },
+  { id: 'ig-actions', label: 'Профиль', group: 'Профиль' },
 ];
 
 const MEDIA_PRODUCT_LABEL: Record<string, string> = {
@@ -321,7 +321,7 @@ export function Instagram() {
           </p>
         </div>
         {isMock && (
-          <span className="rounded-full border border-ember/40 bg-ember/10 px-2.5 py-1 text-xs font-medium text-ember">
+          <span className="rounded-full border border-ember/40 bg-card px-2.5 py-1 text-xs font-medium text-ember">
             Демо-данные · подключите аккаунт для реальных
           </span>
         )}
@@ -346,6 +346,7 @@ export function Instagram() {
       <SectionNav sections={SECTIONS} />
 
       <div className="space-y-12">
+        <ClusterHeading>Обзор</ClusterHeading>
         {/* Метрики */}
         <IgSection id="ig-metrics" title="Ключевые метрики">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -368,6 +369,7 @@ export function Instagram() {
           <PeriodCompareBlock rows={periodRows} />
         </IgSection>
 
+        <ClusterHeading>Динамика</ClusterHeading>
         {/* Динамика */}
         <IgSection id="ig-trends" title="Динамика охвата и просмотров">
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -415,6 +417,7 @@ export function Instagram() {
           </Card>
         </IgSection>
 
+        <ClusterHeading>Аудитория</ClusterHeading>
         {/* Аудитория */}
         <IgSection id="ig-audience" title="Аудитория">
           <AudienceBlock breakdowns={breakdowns.data} followers={followers} />
@@ -429,6 +432,7 @@ export function Instagram() {
           </Card>
         </IgSection>
 
+        <ClusterHeading>Публикации</ClusterHeading>
         {/* Reels */}
         <IgSection id="ig-reels" title="Reels: удержание и просмотры">
           <ReelsBlock posts={igPosts} />
@@ -449,11 +453,13 @@ export function Instagram() {
           <CompareBlock posts={igPosts} />
         </IgSection>
 
+        <ClusterHeading>Stories</ClusterHeading>
         {/* Stories */}
         <IgSection id="ig-stories" title="Stories за 24 часа">
           <StoriesBlock stories={stories.data?.data} />
         </IgSection>
 
+        <ClusterHeading>Профиль</ClusterHeading>
         {/* Профиль */}
         <IgSection id="ig-actions" title="Действия в профиле">
           <Card>
@@ -490,6 +496,16 @@ function IgSection({ id, title, children }: { id: string; title: string; childre
       <h3 className="text-lg font-semibold tracking-tight">{title}</h3>
       {children}
     </section>
+  );
+}
+
+/** Group divider that chunks the long page into labeled clusters (label + hairline rule). */
+function ClusterHeading({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex items-center gap-3 pt-2">
+      <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{children}</span>
+      <span className="h-px flex-1 bg-border" />
+    </div>
   );
 }
 
@@ -1143,7 +1159,7 @@ function KpiCard({ label, value, hint, feature, trend }: KpiCardProps) {
       <CardContent className="p-5">
         <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
         <div className="mt-2 flex items-center gap-2">
-          <div className="text-3xl font-semibold tabular-nums">{value}</div>
+          <div className="text-3xl font-semibold tabular-nums tracking-tight">{value}</div>
           <DeltaPill delta={trend} />
         </div>
         {hint ? <div className="mt-2 text-xs text-muted-foreground">{hint}</div> : null}

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { ChartTooltip } from '@/components/ChartTooltip';
 
@@ -18,6 +18,20 @@ interface Hover {
 export function BarChart({ values, labels, titles, height = 200 }: BarChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<Hover | null>(null);
+  // Measure render width so the viewBox is 1:1 with CSS pixels — a fixed 600-wide viewBox
+  // scaled to fit would render labels/bars at inconsistent, fuzzy sizes.
+  const [width, setWidth] = useState(600);
+
+  useLayoutEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const measure = () => setWidth(el.clientWidth || 600);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   if (!values || values.length === 0) {
     return (
@@ -28,7 +42,7 @@ export function BarChart({ values, labels, titles, height = 200 }: BarChartProps
   }
 
   const max = Math.max(...values, 1);
-  const chartWidth = 600;
+  const chartWidth = Math.max(width, 1);
   const chartHeight = height;
   const paddingBottom = labels && labels.length > 0 ? 24 : 0;
   const graphHeight = chartHeight - paddingBottom;
@@ -45,12 +59,8 @@ export function BarChart({ values, labels, titles, height = 200 }: BarChartProps
   };
 
   return (
-    <div ref={containerRef} className="relative" onMouseLeave={() => setHover(null)}>
-      <svg
-        className="h-auto w-full"
-        viewBox={`0 0 ${chartWidth} ${chartHeight}`}
-        preserveAspectRatio="xMidYMid meet"
-      >
+    <div ref={containerRef} className="relative w-full" onMouseLeave={() => setHover(null)}>
+      <svg className="block w-full" height={chartHeight} viewBox={`0 0 ${chartWidth} ${chartHeight}`} preserveAspectRatio="none">
         {values.map((val, i) => {
           const barHeight = (val / max) * graphHeight;
           const x = i * itemWidth + barGap / 2;

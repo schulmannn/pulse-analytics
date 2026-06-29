@@ -148,7 +148,7 @@ export function KpiGrid() {
           <CardContent className="relative overflow-hidden p-5">
             <div className="text-xs uppercase tracking-wide text-muted-foreground">{c.label}</div>
             <div className="mt-2 flex items-center gap-2">
-              <div className="text-3xl font-semibold tabular-nums">{c.value}</div>
+              <div className="text-3xl font-semibold tabular-nums tracking-tight">{c.value}</div>
               {/* DESIGN: Claude review */}
               <DeltaPill delta={c.trend} />
             </div>

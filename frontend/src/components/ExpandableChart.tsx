@@ -44,7 +44,7 @@ export function ExpandableChart({ title, children, renderExpanded }: ExpandableC
         aria-label={`Развернуть график: ${title}`}
         onClick={() => setIsOpen(true)}
         onKeyDown={handlePreviewKeyDown}
-        className="group relative cursor-zoom-in rounded focus:outline-none focus:ring-1 focus:ring-primary"
+        className="group relative cursor-zoom-in rounded focus-visible:ring-inset focus-visible:ring-offset-0"
       >
         {children}
         <span

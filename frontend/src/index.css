@@ -19,7 +19,7 @@
     --secondary: 216 56% 98%;
     --secondary-foreground: 211 78% 11%;
     --muted: 216 56% 98%;
-    --muted-foreground: 217 17% 47%;
+    --muted-foreground: 217 19% 42%;
     --accent: 236 100% 94%;
     --accent-foreground: 248 98% 61%;
     --destructive: 19 100% 55%;
@@ -29,11 +29,13 @@
     --ring: 248 98% 61%;
     --radius: 0.25rem;
 
-    /* Brand data accents (charts, deltas, sparklines). */
+    /* Brand data accents (charts, deltas, sparklines). Light-mode verdant/ember are
+       darkened to clear WCAG AA on white/near-white cards — the bright values only read
+       on the dark canvas, so they live in .dark below. */
     --brand-iris: 248 98% 61%;
     --brand-iris-soft: 237 100% 75%;
-    --brand-verdant: 81 75% 41%;
-    --brand-ember: 19 100% 55%;
+    --brand-verdant: 82 75% 26%;
+    --brand-ember: 14 82% 44%;
   }
 
   .dark {
@@ -74,5 +76,13 @@
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
+  }
+  /* Visible keyboard focus across the whole app (WCAG 2.4.7) — one rule for every
+     button/link/tab; inputs keep their own focus:ring. */
+  button:focus-visible,
+  a:focus-visible,
+  [role='button']:focus-visible,
+  [role='tab']:focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
   }
 }

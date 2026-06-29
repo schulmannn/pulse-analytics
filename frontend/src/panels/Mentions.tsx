@@ -121,19 +121,19 @@ export function Mentions() {
         <Card>
           <CardContent className="p-5">
             <div className="text-xs uppercase tracking-wide text-muted-foreground">Упоминаний</div>
-            <div className="mt-2 text-3xl font-semibold tabular-nums">{fmt.num(total)}</div>
+            <div className="mt-2 text-3xl font-semibold tabular-nums tracking-tight">{fmt.num(total)}</div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-5">
             <div className="text-xs uppercase tracking-wide text-muted-foreground">Каналов</div>
-            <div className="mt-2 text-3xl font-semibold tabular-nums">{fmt.num(uniqueChannels)}</div>
+            <div className="mt-2 text-3xl font-semibold tabular-nums tracking-tight">{fmt.num(uniqueChannels)}</div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-5">
             <div className="text-xs uppercase tracking-wide text-muted-foreground">Суммарный охват</div>
-            <div className="mt-2 text-3xl font-semibold tabular-nums">{fmt.short(totalViews)}</div>
+            <div className="mt-2 text-3xl font-semibold tabular-nums tracking-tight">{fmt.short(totalViews)}</div>
           </CardContent>
         </Card>
       </div>
