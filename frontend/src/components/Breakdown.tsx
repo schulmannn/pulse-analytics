@@ -39,6 +39,13 @@ export function Breakdown({ items }: BreakdownProps) {
               style={{ width: `${percentage}%`, ...bgStyle }}
             />
             <span className="relative z-10 flex max-w-[65%] items-center gap-1.5 truncate text-sm font-medium text-foreground">
+              {item.color && (
+                <span
+                  className="h-2 w-2 shrink-0 rounded-full"
+                  style={{ backgroundColor: item.color }}
+                  aria-hidden="true"
+                />
+              )}
               {item.icon && <span className="shrink-0 select-none">{item.icon}</span>}
               <span className="truncate">{item.label}</span>
             </span>

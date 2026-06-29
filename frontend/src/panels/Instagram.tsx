@@ -48,6 +48,18 @@ const SECTIONS: readonly Section[] = [
 const MEDIA_PRODUCT_LABEL: Record<string, string> = {
   POST: 'Лента', FEED: 'Лента', REEL: 'Reels', REELS: 'Reels', STORY: 'Stories', CAROUSEL_ALBUM: 'Карусель',
 };
+// Stable format → chart-series colour, keyed off media_product_type so a format keeps its hue
+// regardless of sort order. Uses the categorical data-viz palette (index.css --chart-*).
+const MEDIA_PRODUCT_CHART: Record<string, string> = {
+  POST: 'hsl(var(--chart-1))', FEED: 'hsl(var(--chart-1))',
+  REEL: 'hsl(var(--chart-2))', REELS: 'hsl(var(--chart-2))',
+  STORY: 'hsl(var(--chart-3))', CAROUSEL_ALBUM: 'hsl(var(--chart-4))',
+};
+// Cycle through the palette for categorical breakdowns without a fixed per-category colour.
+const CHART_CYCLE = [
+  'hsl(var(--chart-1))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))',
+  'hsl(var(--chart-4))', 'hsl(var(--chart-5))', 'hsl(var(--chart-6))',
+];
 // Post card badge keys off media_type (IMAGE/VIDEO/CAROUSEL_ALBUM/REELS), not product_type.
 const MEDIA_TYPE_LABEL: Record<string, string> = {
   IMAGE: 'Фото', VIDEO: 'Видео', CAROUSEL_ALBUM: 'Карусель', REELS: 'Reels',
@@ -389,6 +401,7 @@ export function Instagram() {
                     label: MEDIA_PRODUCT_LABEL[it.label] ?? it.label,
                     value: it.value,
                     display: fmt.short(it.value),
+                    color: MEDIA_PRODUCT_CHART[it.label],
                   }))}
               />
             </CardContent>
@@ -581,7 +594,12 @@ function AudienceBlock({ breakdowns, followers }: { breakdowns: IgBreakdowns | u
             <Breakdown
               items={gender
                 .sort((a, b) => b.value - a.value)
-                .map((g) => ({ label: GENDER_LABEL[g.label] ?? g.label, value: g.value, display: fmt.short(g.value) }))}
+                .map((g, i) => ({
+                  label: GENDER_LABEL[g.label] ?? g.label,
+                  value: g.value,
+                  display: fmt.short(g.value),
+                  color: CHART_CYCLE[i % CHART_CYCLE.length],
+                }))}
             />
           </CardContent>
         </Card>
@@ -624,6 +642,10 @@ function BestTimeHeatmap({ online }: { online: IgOnline | undefined }) {
   const [tip, setTip] = useState<TooltipState>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const { dayValues, grid, max, best } = aggregateOnline(online);
+  // `max` is clamped to a floor of 1, so an all-zero grid still yields best={w:0,h:0,v:0}. Only treat
+  // a slot as "best" on a real signal — otherwise the check would render faded (opacity 0.06) and the
+  // caption/aria-label would announce a meaningless "Пн 0:00".
+  const hasSignal = best.v > 0;
 
   if (dayValues.length === 0) {
     return (
@@ -651,21 +673,29 @@ function BestTimeHeatmap({ online }: { online: IgOnline | undefined }) {
               {Array.from({ length: 24 }).map((_, h) => {
                 const v = grid[w][h];
                 const opacity = max > 0 ? Math.max(0.06, v / max) : 0;
-                const isBest = best.w === w && best.h === h;
+                const isBest = hasSignal && best.w === w && best.h === h;
                 return (
                   <div
                     key={h}
-                    className="h-4 cursor-pointer rounded-sm"
+                    className="flex h-4 cursor-pointer items-center justify-center rounded-sm"
                     style={{
                       backgroundColor: 'hsl(var(--brand-iris))',
                       opacity,
                       border: isBest ? '2px solid hsl(var(--brand-verdant))' : undefined,
                     }}
+                    aria-label={isBest ? `Лучший слот: ${name} ${h}:00` : undefined}
                     onMouseMove={(event) => {
                       const rect = wrapRef.current?.getBoundingClientRect();
                       if (rect) setTip({ x: event.clientX - rect.left, y: event.clientY - rect.top, text: `${name} ${h}:00 · ${fmt.short(v)} онлайн` });
                     }}
-                  />
+                  >
+                    {/* Non-colour cue for the best slot (a11y) — a ✓ that contrasts on iris in both themes. */}
+                    {isBest && (
+                      <svg viewBox="0 0 24 24" className="h-2.5 w-2.5" fill="none" stroke="hsl(var(--primary-foreground))" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M5 13l4 4L19 7" />
+                      </svg>
+                    )}
+                  </div>
                 );
               })}
             </div>
@@ -674,7 +704,7 @@ function BestTimeHeatmap({ online }: { online: IgOnline | undefined }) {
       </div>
       <ChartTooltip tip={tip} />
       <div className="mt-3 text-xs font-medium text-muted-foreground">
-        {best.w >= 0 ? (
+        {hasSignal ? (
           <span>лучший слот: <strong className="text-foreground">{DAY_NAMES[best.w]} {best.h}:00</strong></span>
         ) : 'Мало данных.'}
       </div>
@@ -1048,6 +1078,12 @@ function CompareBlock({ posts }: { posts: IgPost[] }) {
                         const best = chosen.length > 1 && max > 0 && v === max;
                         return (
                           <td key={c.i} className={`p-4 text-right tabular-nums ${best ? 'font-semibold text-verdant' : ''}`}>
+                            {best && (
+                              <>
+                                <span className="sr-only">лучший: </span>
+                                <span aria-hidden="true">▲ </span>
+                              </>
+                            )}
                             {row.pct ? `${v.toFixed(2)}%` : fmt.short(v)}
                           </td>
                         );

@@ -36,6 +36,15 @@
     --brand-iris-soft: 237 100% 75%;
     --brand-verdant: 82 75% 26%;
     --brand-ember: 14 82% 44%;
+
+    /* Categorical data-viz palette (chart series) — separate from the brand accents above.
+       Six hues spread around the wheel; light theme = deeper for legibility on white cards. */
+    --chart-1: 245 70% 56%;
+    --chart-2: 192 75% 40%;
+    --chart-3: 38 85% 47%;
+    --chart-4: 340 72% 52%;
+    --chart-5: 150 55% 38%;
+    --chart-6: 280 55% 56%;
   }
 
   .dark {
@@ -64,6 +73,14 @@
     --brand-iris-soft: 237 100% 75%;
     --brand-verdant: 81 75% 41%;
     --brand-ember: 19 100% 55%;
+
+    /* Dark: lighter + slightly desaturated so the hues pop on the dark canvas. */
+    --chart-1: 245 85% 72%;
+    --chart-2: 190 70% 58%;
+    --chart-3: 40 88% 62%;
+    --chart-4: 340 80% 70%;
+    --chart-5: 150 58% 55%;
+    --chart-6: 280 70% 72%;
   }
 }
 

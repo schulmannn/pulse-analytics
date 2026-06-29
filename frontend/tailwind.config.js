@@ -24,6 +24,15 @@ export default {
         iris: { DEFAULT: 'hsl(var(--brand-iris))', soft: 'hsl(var(--brand-iris-soft))' },
         verdant: 'hsl(var(--brand-verdant))',
         ember: 'hsl(var(--brand-ember))',
+        // Categorical data-viz series (distinct from the brand accents; see index.css --chart-*).
+        chart: {
+          1: 'hsl(var(--chart-1))',
+          2: 'hsl(var(--chart-2))',
+          3: 'hsl(var(--chart-3))',
+          4: 'hsl(var(--chart-4))',
+          5: 'hsl(var(--chart-5))',
+          6: 'hsl(var(--chart-6))',
+        },
       },
       borderRadius: {
         lg: 'var(--radius)',
