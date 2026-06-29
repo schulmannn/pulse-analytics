@@ -22,11 +22,16 @@ import { ChartTooltip, type TooltipState } from '@/components/ChartTooltip';
 import { Skeleton } from '@/components/ui/skeleton';
 import { SectionNav, type Section } from '@/components/SectionNav';
 import { downloadCsv, type CsvRow } from '@/lib/csv';
+import { buildIgInsights, type IgInsight } from '@/lib/igInsights';
+import { loadIgGoals, saveIgGoals, goalPct, type IgGoals } from '@/lib/igGoals';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 const SECTIONS: readonly Section[] = [
   { id: 'ig-metrics', label: 'Метрики' },
+  { id: 'ig-insights', label: 'Инсайты' },
+  { id: 'ig-goals', label: 'Цели' },
+  { id: 'ig-periods', label: 'Период' },
   { id: 'ig-trends', label: 'Динамика' },
   { id: 'ig-formats', label: 'Форматы' },
   { id: 'ig-growth', label: 'Рост' },
@@ -99,23 +104,52 @@ const flag = (iso: string) => {
 };
 
 /** Sum a daily series over the current vs previous window (for ratio/Δ math). */
-function windowPair(series: Point[], windowDays: number, now: number) {
-  const curStart = now - windowDays * DAY_MS;
-  const prevStart = now - 2 * windowDays * DAY_MS;
+// Sum a daily series over the window [startMs, endMs] vs the equal-length window right
+// before it. Explicit bounds so a custom date range maps to its exact span (not a
+// windowDays reconstruction that drifts on >90d / non-day-aligned picks).
+function windowPair(series: Point[], startMs: number, endMs: number) {
+  const span = Math.max(endMs - startMs, DAY_MS);
+  const prevStart = startMs - span;
   let cur = 0;
   let prev = 0;
   let hasCur = false;
   let hasPrev = false;
   for (const p of series) {
     const t = Date.parse(p.day);
-    if (!Number.isFinite(t) || t > now) continue;
-    if (t >= curStart) { cur += p.value; hasCur = true; }
+    if (!Number.isFinite(t) || t > endMs) continue;
+    if (t >= startMs) { cur += p.value; hasCur = true; }
     else if (t >= prevStart) { prev += p.value; hasPrev = true; }
   }
   return { cur, prev, hasCur, hasPrev };
 }
 const pairDelta = (p: ReturnType<typeof windowPair>): MetricDelta | null =>
   p.hasCur && p.hasPrev ? pctDelta(p.cur, p.prev) : null;
+
+const DAY_NAMES = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+
+/** Aggregate the online_followers daily hour-maps into a weekday×hour grid + best slot. */
+function aggregateOnline(online: IgOnline | undefined) {
+  const dayValues = online?.data?.[0]?.values ?? [];
+  const sum: number[][] = Array.from({ length: 7 }, () => Array<number>(24).fill(0));
+  const cnt: number[][] = Array.from({ length: 7 }, () => Array<number>(24).fill(0));
+  dayValues.forEach((d) => {
+    const t = Date.parse(d.end_time ?? '');
+    if (!Number.isFinite(t)) return;
+    const w = (new Date(t).getUTCDay() + 6) % 7;
+    const map = d.value ?? {};
+    for (let h = 0; h < 24; h++) {
+      const v = Number(map[String(h)] ?? 0);
+      if (!Number.isFinite(v)) continue;
+      sum[w][h] += v;
+      cnt[w][h] += 1;
+    }
+  });
+  const grid = sum.map((row, w) => row.map((s, h) => (cnt[w][h] ? s / cnt[w][h] : 0)));
+  const max = Math.max(1, ...grid.flat());
+  let best = { w: -1, h: -1, v: -1 };
+  grid.forEach((row, w) => row.forEach((v, h) => { if (v > best.v) best = { w, h, v }; }));
+  return { dayValues, grid, max, best };
+}
 
 export function Instagram() {
   const { days, range } = usePeriod();
@@ -165,12 +199,12 @@ export function Instagram() {
   const followerS = metricSeries(insights.data, 'follower_count');
   const savesS = metricSeries(insights.data, 'saves');
 
-  const reachP = windowPair(reachS, windowDays, until);
-  const viewsP = windowPair(viewsS, windowDays, until);
-  const tiP = windowPair(tiS, windowDays, until);
-  const engagedP = windowPair(engagedS, windowDays, until);
-  const followerP = windowPair(followerS, windowDays, until);
-  const savesP = windowPair(savesS, windowDays, until);
+  const reachP = windowPair(reachS, since, until);
+  const viewsP = windowPair(viewsS, since, until);
+  const tiP = windowPair(tiS, since, until);
+  const engagedP = windowPair(engagedS, since, until);
+  const followerP = windowPair(followerS, since, until);
+  const savesP = windowPair(savesS, since, until);
 
   const followers = profile.data?.followers_count ?? 0;
   const erReach = reachP.cur > 0 ? (tiP.cur / reachP.cur) * 100 : 0;
@@ -232,6 +266,49 @@ export function Instagram() {
     downloadCsv('instagram-daily.csv', rows);
   };
 
+  // Period-over-period comparison rows (current window vs the equal-length prior window).
+  const likesS = metricSeries(insights.data, 'likes');
+  const commentsS = metricSeries(insights.data, 'comments');
+  const sharesS = metricSeries(insights.data, 'shares');
+  const periodRows: { label: string; pair: ReturnType<typeof windowPair> }[] = [
+    { label: 'Охват', pair: reachP },
+    { label: 'Просмотры', pair: viewsP },
+    { label: 'Взаимодействия', pair: tiP },
+    { label: 'Вовлечено аккаунтов', pair: engagedP },
+    { label: 'Новые подписчики', pair: followerP },
+    { label: 'Лайки', pair: windowPair(likesS, since, until) },
+    { label: 'Комментарии', pair: windowPair(commentsS, since, until) },
+    { label: 'Сохранения', pair: savesP },
+    { label: 'Репосты', pair: windowPair(sharesS, since, until) },
+  ];
+
+  // Auto-insight inputs (derived from the sections' own data).
+  const formatItems = tvBreakdown(breakdowns.data?.data, 'total_interactions', 'media_product_type');
+  const formatTotal = formatItems.reduce((acc, it) => acc + it.value, 0);
+  const topFormat = [...formatItems].sort((a, b) => b.value - a.value)[0];
+  const onlineBest = aggregateOnline(online.data).best;
+  // For the insight, surface the highest-LIFT hashtag (used ≥2×), not the most frequent.
+  const topTag = [...hashtagStats(igPosts)].filter((t) => t.count >= 2).sort((a, b) => b.lift - a.lift)[0];
+  const topCountryRaw = [...tvBreakdown(breakdowns.data?.data, 'follower_demographics', 'country')]
+    .sort((a, b) => b.value - a.value)[0];
+  const topAgeRaw = [...tvBreakdown(breakdowns.data?.data, 'follower_demographics', 'age')]
+    .sort((a, b) => b.value - a.value)[0];
+  const autoInsights = buildIgInsights({
+    followersDelta: pairDelta(followerP),
+    newFollowers: followerP.cur,
+    erReach,
+    erReachPrev,
+    bestFormat:
+      topFormat && formatTotal > 0
+        ? { label: MEDIA_PRODUCT_LABEL[topFormat.label] ?? topFormat.label, sharePct: (topFormat.value / formatTotal) * 100 }
+        : null,
+    bestSlot: onlineBest.w >= 0 ? { day: DAY_NAMES[onlineBest.w], hour: onlineBest.h } : null,
+    topHashtag: topTag ? { tag: topTag.tag, lift: topTag.lift } : null,
+    topPostReach: igPosts.length ? Math.max(...igPosts.map((p) => Number(p.reach ?? 0))) : null,
+    topCountry: topCountryRaw ? COUNTRY_NAME[topCountryRaw.label] ?? topCountryRaw.label : null,
+    topAge: topAgeRaw ? topAgeRaw.label : null,
+  });
+
   return (
     <div>
       <section className="flex flex-wrap items-center gap-3">
@@ -274,6 +351,21 @@ export function Instagram() {
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {kpis.map((k) => <KpiCard key={k.label} {...k} />)}
           </div>
+        </IgSection>
+
+        {/* Авто-инсайты */}
+        <IgSection id="ig-insights" title="Авто-инсайты">
+          <InsightsBlock insights={autoInsights} />
+        </IgSection>
+
+        {/* Цели */}
+        <IgSection id="ig-goals" title="Цели и ориентиры">
+          <GoalsBlock followers={followers} erReach={erReach} reachCur={reachP.cur} accountKey={profile.data?.username ?? 'default'} />
+        </IgSection>
+
+        {/* Период vs предыдущий */}
+        <IgSection id="ig-periods" title="Период vs предыдущий">
+          <PeriodCompareBlock rows={periodRows} />
         </IgSection>
 
         {/* Динамика */}
@@ -515,28 +607,7 @@ function AudienceBlock({ breakdowns, followers }: { breakdowns: IgBreakdowns | u
 function BestTimeHeatmap({ online }: { online: IgOnline | undefined }) {
   const [tip, setTip] = useState<TooltipState>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
-  const dayValues = online?.data?.[0]?.values ?? [];
-  const dayNames = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
-
-  const sum: number[][] = Array.from({ length: 7 }, () => Array<number>(24).fill(0));
-  const cnt: number[][] = Array.from({ length: 7 }, () => Array<number>(24).fill(0));
-  dayValues.forEach((d) => {
-    const t = Date.parse(d.end_time ?? '');
-    if (!Number.isFinite(t)) return;
-    const w = (new Date(t).getUTCDay() + 6) % 7;
-    const map = d.value ?? {};
-    for (let h = 0; h < 24; h++) {
-      const v = Number(map[String(h)] ?? 0);
-      if (!Number.isFinite(v)) continue;
-      sum[w][h] += v;
-      cnt[w][h] += 1;
-    }
-  });
-  const grid = sum.map((row, w) => row.map((s, h) => (cnt[w][h] ? s / cnt[w][h] : 0)));
-  const max = Math.max(1, ...grid.flat());
-
-  let best = { w: -1, h: -1, v: -1 };
-  grid.forEach((row, w) => row.forEach((v, h) => { if (v > best.v) best = { w, h, v }; }));
+  const { dayValues, grid, max, best } = aggregateOnline(online);
 
   if (dayValues.length === 0) {
     return (
@@ -558,7 +629,7 @@ function BestTimeHeatmap({ online }: { online: IgOnline | undefined }) {
               </div>
             ))}
           </div>
-          {dayNames.map((name, w) => (
+          {DAY_NAMES.map((name, w) => (
             <div key={w} className="grid items-center gap-[2px]" style={{ gridTemplateColumns: '30px repeat(24, minmax(14px, 1fr))' }}>
               <div className="select-none text-[11px] font-bold text-muted-foreground">{name}</div>
               {Array.from({ length: 24 }).map((_, h) => {
@@ -588,7 +659,7 @@ function BestTimeHeatmap({ online }: { online: IgOnline | undefined }) {
       <ChartTooltip tip={tip} />
       <div className="mt-3 text-xs font-medium text-muted-foreground">
         {best.w >= 0 ? (
-          <span>лучший слот: <strong className="text-foreground">{dayNames[best.w]} {best.h}:00</strong></span>
+          <span>лучший слот: <strong className="text-foreground">{DAY_NAMES[best.w]} {best.h}:00</strong></span>
         ) : 'Мало данных.'}
       </div>
     </div>
@@ -666,6 +737,135 @@ function TopPostsBlock({ posts }: { posts: IgPost[] }) {
         {top.map((post, idx) => <IgPostCard key={post.id ?? idx} post={post} rank={idx + 1} />)}
       </div>
     </div>
+  );
+}
+
+function InsightsBlock({ insights }: { insights: IgInsight[] }) {
+  if (insights.length === 0) {
+    return (
+      <Card>
+        <CardContent className="py-8 text-center text-sm text-muted-foreground">
+          Недостаточно данных для инсайтов.
+        </CardContent>
+      </Card>
+    );
+  }
+  const dot = (t: IgInsight['tone']) => (t === 'up' ? 'bg-verdant' : t === 'down' ? 'bg-ember' : 'bg-primary');
+  return (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      {insights.map((ins, i) => (
+        <Card key={i}>
+          <CardContent className="flex items-start gap-3 p-4">
+            <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${dot(ins.tone)}`} />
+            <p className="text-sm leading-relaxed text-foreground">{ins.text}</p>
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+function GoalsBlock({ followers, erReach, reachCur, accountKey }: { followers: number; erReach: number; reachCur: number; accountKey: string }) {
+  const defaults: IgGoals = {
+    followers: Math.ceil((followers || 1000) / 1000) * 1000 + 1000,
+    er: 3,
+    reach: Math.max(1000, Math.round((reachCur || 5000) * 1.25)),
+  };
+  const [goals, setGoals] = useState<IgGoals>(() => loadIgGoals(defaults, accountKey));
+  // Draft string per field so the user can clear/retype freely; only a finite >0 value is
+  // committed + persisted (an empty/invalid entry never clobbers the saved target).
+  const [draft, setDraft] = useState<Partial<Record<keyof IgGoals, string>>>({});
+  const onType = (key: keyof IgGoals, raw: string) => {
+    setDraft((d) => ({ ...d, [key]: raw }));
+    const n = Number(raw);
+    if (Number.isFinite(n) && n > 0) {
+      const next = { ...goals, [key]: n };
+      setGoals(next);
+      saveIgGoals(next, accountKey);
+    }
+  };
+  const commit = (key: keyof IgGoals) =>
+    setDraft((d) => {
+      const next = { ...d };
+      delete next[key];
+      return next;
+    });
+  const bars = [
+    { key: 'followers' as const, label: 'Подписчики', current: followers, target: goals.followers, render: (n: number) => fmt.num(Math.round(n)), step: 100 },
+    { key: 'er' as const, label: 'Вовлечённость (ER), %', current: erReach, target: goals.er, render: (n: number) => n.toFixed(2), step: 0.1 },
+    { key: 'reach' as const, label: 'Охват за период', current: reachCur, target: goals.reach, render: (n: number) => fmt.short(n), step: 100 },
+  ];
+  return (
+    <Card>
+      <CardContent className="space-y-5 p-5">
+        {bars.map((b) => {
+          const pct = goalPct(b.current, b.target);
+          return (
+            <div key={b.key} className="space-y-1.5">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                <span className="text-muted-foreground">{b.label}</span>
+                <span className="flex items-center gap-1.5">
+                  <span className="tabular-nums text-foreground">{b.render(b.current)}</span>
+                  <span className="text-muted-foreground">/</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step={b.step}
+                    value={draft[b.key] ?? String(b.target)}
+                    onChange={(e) => onType(b.key, e.target.value)}
+                    onBlur={() => commit(b.key)}
+                    className="w-24 rounded-md border bg-background px-2 py-1 text-right text-xs tabular-nums text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                    aria-label={`Цель: ${b.label}`}
+                  />
+                </span>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-muted">
+                <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${pct}%` }} />
+              </div>
+              <div className="text-right text-xs tabular-nums text-muted-foreground">{Math.round(pct)}%</div>
+            </div>
+          );
+        })}
+        <p className="text-xs text-muted-foreground">
+          Ориентиры: ER 1–3% — норма, выше 3% — отлично. Цели хранятся локально в браузере.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+function PeriodCompareBlock({ rows }: { rows: { label: string; pair: ReturnType<typeof windowPair> }[] }) {
+  return (
+    <Card>
+      <CardContent className="overflow-x-auto p-0">
+        <table className="w-full text-left text-sm">
+          <thead>
+            <tr className="border-b border-border bg-muted/40 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              <th className="p-4">Метрика</th>
+              <th className="p-4 text-right">Текущий</th>
+              <th className="p-4 text-right">Предыдущий</th>
+              <th className="p-4 text-right">Δ</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {rows.map((r) => (
+              <tr key={r.label} className="hover:bg-muted/30">
+                <td className="p-4 text-muted-foreground">{r.label}</td>
+                <td className="p-4 text-right font-medium tabular-nums">{fmt.short(r.pair.cur)}</td>
+                <td className="p-4 text-right tabular-nums text-muted-foreground">
+                  {r.pair.hasPrev ? fmt.short(r.pair.prev) : '—'}
+                </td>
+                <td className="p-4 text-right">
+                  <span className="inline-flex justify-end">
+                    <DeltaPill delta={pairDelta(r.pair)} />
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </CardContent>
+    </Card>
   );
 }
 
