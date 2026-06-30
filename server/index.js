@@ -542,25 +542,15 @@ app.get('/api/ig/insights', requireAuth, async (req, res) => {
         const qs = new URLSearchParams({ ...params, access_token: IG_TOKEN }).toString();
         const r = await fetch(`${IG_BASE}/${IG_ACCOUNT}/insights?${qs}`);
         const j = await r.json();
-        const m = j && j.data && j.data[0];
-        return {
-          label,
-          status: r.status,
-          total_value: m ? m.total_value : undefined,
-          values: m ? (m.values || []).slice(-5) : undefined,
-          error: j && j.error ? j.error.message : undefined,
-        };
+        return { label, status: r.status, data: j.data, error: j && j.error ? j.error.message : undefined };
       } catch (e) { return { label, error: e.message }; }
     };
     const F = 'follows_and_unfollows';
     const out = [];
-    // Bogus breakdown → the error lists the breakdown(s) follows_and_unfollows accepts.
-    out.push(await probe('bogus-breakdown', { metric: F, metric_type: 'total_value', breakdown: '__bogus__', period: 'day', since: now - 30 * SEC, until: now }));
+    // Daily series WITH the follow_type breakdown — full shape, to see if per-day follows/unfollows
+    // (and thus a real daily net line) is available, or only a period aggregate.
+    out.push(await probe('series+follow_type', { metric: F, breakdown: 'follow_type', period: 'day', since: now - 14 * SEC, until: now }));
     out.push(await probe('tv+follow_type', { metric: F, metric_type: 'total_value', breakdown: 'follow_type', period: 'day', since: now - 30 * SEC, until: now }));
-    out.push(await probe('tv+no-breakdown', { metric: F, metric_type: 'total_value', period: 'day', since: now - 30 * SEC, until: now }));
-    out.push(await probe('tv+lifetime', { metric: F, metric_type: 'total_value', period: 'lifetime' }));
-    out.push(await probe('series+follow_type', { metric: F, breakdown: 'follow_type', period: 'day', since: now - 30 * SEC, until: now }));
-    out.push(await probe('series+no-breakdown', { metric: F, period: 'day', since: now - 30 * SEC, until: now }));
     return res.json({ probe: true, ig_account: IG_ACCOUNT, probes: out });
   }
 
