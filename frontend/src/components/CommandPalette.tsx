@@ -123,7 +123,7 @@ export function CommandPalette() {
         role="dialog"
         aria-modal="true"
         aria-label="Командная палитра"
-        className="w-full max-w-xl overflow-hidden shadow-xl"
+        className="w-full max-w-xl overflow-hidden"
         onClick={(event) => event.stopPropagation()}
       >
         <CardHeader className="flex-row items-center justify-between space-y-0 border-b p-4">

@@ -171,8 +171,8 @@ function Sidebar({ role }: { role?: string }) {
         className={cn(
           'group/sb flex h-full flex-col border-r',
           rail
-            ? 'absolute inset-y-0 left-0 z-30 w-16 overflow-hidden bg-card transition-[width,box-shadow] duration-200 hover:w-60 hover:shadow-xl focus-within:w-60 focus-within:shadow-xl'
-            : 'w-full bg-card/30',
+            ? 'absolute inset-y-0 left-0 z-30 w-16 overflow-hidden bg-background transition-[width] duration-200 hover:w-60 focus-within:w-60'
+            : 'w-full',
         )}
       >
         <div className="flex items-center gap-2.5 px-4 pt-5">
@@ -386,7 +386,7 @@ function ChannelCard({ rail = false }: { rail?: boolean }) {
       </button>
 
       {open && multi && (
-        <div className="absolute inset-x-3 top-full z-30 mt-1 overflow-hidden rounded-lg border bg-popover p-1 shadow-md">
+        <div className="absolute inset-x-3 top-full z-30 mt-1 overflow-hidden rounded-lg border bg-popover p-1">
           {channels.map((channel) => (
             <button
               key={channel.id}
@@ -485,7 +485,7 @@ function MoreMenu({ email, role }: { email?: string; role?: string }) {
         <Icon name="more" strokeWidth={2.4} className="h-4 w-4" />
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-40 mt-1 w-56 overflow-hidden rounded-lg border bg-popover p-1.5 text-sm shadow-md">
+        <div className="absolute right-0 top-full z-40 mt-1 w-56 overflow-hidden rounded-lg border bg-popover p-1.5 text-sm">
           {/* Identity block: who you are. */}
           {email && (
             <div className="px-2.5 py-1.5">
@@ -523,10 +523,12 @@ function PeriodSwitcher() {
   const btnRef = useRef<HTMLButtonElement>(null);
   useDismiss(open, setOpen); // Escape closes; outside-click handled by the scrim (date inputs stay safe)
 
-  const seg = (active: boolean) =>
-    `rounded-md px-3 py-1 text-xs font-medium transition-colors ${
-      active ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-    }`;
+  // Underline tab — active = blue underline bar, no fill (Refined Technical).
+  const tab = (active: boolean) =>
+    cn(
+      'relative px-0.5 pb-1.5 pt-1 text-xs font-medium tabular-nums transition-colors',
+      active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
+    );
 
   const toggle = () => {
     if (open) return setOpen(false);
@@ -552,26 +554,39 @@ function PeriodSwitcher() {
 
   return (
     <div className="flex items-center">
-      <div className="inline-flex items-center rounded-lg border bg-muted p-0.5">
-        {PERIODS.map((period) => (
-          <button
-            key={period.days}
-            type="button"
-            onClick={() => setDays(period.days)}
-            className={seg(range === null && days === period.days)}
-          >
-            {period.label}
-          </button>
-        ))}
+      <div className="flex items-center gap-3">
+        {PERIODS.map((period) => {
+          const active = range === null && days === period.days;
+          return (
+            <button
+              key={period.days}
+              type="button"
+              onClick={() => setDays(period.days)}
+              className={tab(active)}
+            >
+              {period.label}
+              {active && <span aria-hidden="true" className="absolute inset-x-0 -bottom-px h-px bg-primary" />}
+            </button>
+          );
+        })}
+        {/* hairline divider before the custom-range control */}
+        <span aria-hidden="true" className="h-4 w-px bg-border" />
         <button
           ref={btnRef}
           type="button"
           onClick={toggle}
-          className={`${seg(range !== null)} inline-flex items-center gap-1`}
+          className={cn(tab(range !== null), 'inline-flex items-center gap-1')}
           title="Произвольный период"
           aria-label="Произвольный период"
         >
-          {range ? `${shortDate(range.from)}–${shortDate(range.to)}` : <Icon name="calendar" className="h-3.5 w-3.5" />}
+          {range ? (
+            <>
+              {`${shortDate(range.from)}–${shortDate(range.to)}`}
+              <span aria-hidden="true" className="absolute inset-x-0 -bottom-px h-px bg-primary" />
+            </>
+          ) : (
+            <Icon name="calendar" className="h-3.5 w-3.5" />
+          )}
         </button>
       </div>
 
@@ -579,7 +594,7 @@ function PeriodSwitcher() {
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div
-            className="fixed z-50 w-60 rounded-md border bg-popover p-3 text-popover-foreground shadow-md"
+            className="fixed z-50 w-60 rounded-md border bg-popover p-3 text-popover-foreground"
             style={{ top: pos.top, right: pos.right }}
           >
             <div className="space-y-2">
@@ -605,14 +620,14 @@ function PeriodSwitcher() {
                 <button
                   type="button"
                   onClick={apply}
-                  className="flex-1 rounded bg-primary px-2 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                  className="btn-pill flex-1 bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
                 >
                   Применить
                 </button>
                 <button
                   type="button"
                   onClick={reset}
-                  className="rounded border px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  className="btn-pill border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                 >
                   Сброс
                 </button>

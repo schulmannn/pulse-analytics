@@ -103,7 +103,7 @@ export function InfoTooltip({ title, children, className }: InfoTooltipProps) {
             onMouseEnter={openNow}
             onMouseLeave={scheduleClose}
             style={{ position: 'fixed', top: pos.top, left: pos.left, width: POP_WIDTH }}
-            className="z-50 rounded-md border bg-popover p-2.5 text-left text-xs font-normal leading-relaxed text-popover-foreground shadow-md"
+            className="z-50 rounded-md border bg-popover p-2.5 text-left text-xs font-normal leading-relaxed text-popover-foreground"
           >
             <span className="mb-1 block font-semibold text-foreground">{title}</span>
             {children}

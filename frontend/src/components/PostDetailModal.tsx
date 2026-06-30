@@ -63,7 +63,7 @@ export function PostDetailModal({ post, rank, reason, onClose }: PostDetailModal
       <div
         ref={panelRef}
         tabIndex={-1}
-        className="relative z-10 flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl border bg-card shadow-xl focus:outline-none sm:rounded-2xl"
+        className="relative z-10 flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl border bg-card focus:outline-none sm:rounded-2xl"
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b px-5 py-3">

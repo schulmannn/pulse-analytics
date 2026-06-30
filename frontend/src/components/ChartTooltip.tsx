@@ -7,7 +7,7 @@ export function ChartTooltip({ tip }: { tip: TooltipState }) {
   if (!tip) return null;
   return (
     <div
-      className="pointer-events-none absolute z-20 max-w-[240px] -translate-x-1/2 -translate-y-full rounded-md border bg-popover px-2.5 py-1.5 text-xs font-medium leading-snug text-popover-foreground shadow-md"
+      className="pointer-events-none absolute z-20 max-w-[240px] -translate-x-1/2 -translate-y-full rounded-md border bg-popover px-2.5 py-1.5 text-xs font-medium leading-snug text-popover-foreground"
       style={{ left: tip.x, top: tip.y - 10 }}
     >
       {tip.text}

@@ -60,7 +60,7 @@ export function ExpandableChart({ title, children, renderExpanded }: ExpandableC
           onClick={() => setIsOpen(false)}
         >
           <Card
-            className="relative max-h-[90vh] w-full max-w-5xl overflow-y-auto shadow-xl"
+            className="relative max-h-[90vh] w-full max-w-5xl overflow-y-auto"
             onClick={(event) => event.stopPropagation()}
           >
             <button

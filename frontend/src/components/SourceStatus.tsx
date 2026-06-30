@@ -18,11 +18,27 @@ const TEXT: Record<Tone, string> = {
   muted: 'text-muted-foreground',
 };
 
-function StatusRow({ tone, text, cta, compact }: { tone: Tone; text: string; cta?: boolean; compact?: boolean }) {
+function StatusRow({
+  tone,
+  text,
+  cta,
+  compact,
+  monoSuffix,
+}: {
+  tone: Tone;
+  text: string;
+  cta?: boolean;
+  compact?: boolean;
+  /** Technical readout (timestamp / collector version) rendered in Roboto Mono. */
+  monoSuffix?: string;
+}) {
   return (
     <span className={cn('flex min-w-0 items-center gap-1.5', compact ? 'text-xs' : 'text-[13px]')}>
       <span aria-hidden="true" className={cn('h-2 w-2 shrink-0 rounded-full', DOT[tone])} />
-      <span className={cn('min-w-0 break-words', TEXT[tone])}>{text}</span>
+      <span className={cn('min-w-0 break-words', TEXT[tone])}>
+        {text}
+        {monoSuffix && <span className="font-mono tabular-nums text-ink3">{monoSuffix}</span>}
+      </span>
       {cta && !compact && (
         <Link to="/connect" className="shrink-0 font-medium text-primary hover:underline">
           Подробнее →
@@ -64,5 +80,5 @@ export function SourceStatus({
   }
   const when = status.last_success_at ? fmt.date(status.last_success_at) : '—';
   const ver = status.collector_version ? ` · v${status.collector_version}` : '';
-  return <StatusRow tone="ok" text={`Последний сбор: ${when}${ver}`} compact={compact} />;
+  return <StatusRow tone="ok" text="Последний сбор: " monoSuffix={`${when}${ver}`} compact={compact} />;
 }
