@@ -487,7 +487,10 @@ app.patch('/api/admin/users/:id', requireAuth, requireSuper, async (req, res) =>
 //  INSTAGRAM ROUTES
 // ════════════════════════════════════════════════════════════════
 
-const IG_BASE      = 'https://graph.facebook.com/v22.0'; // v19 404s on views/demographics/total_value metrics
+// "Instagram API with Instagram Login" (no Facebook Page): the IG user access token works
+// against graph.instagram.com, NOT graph.facebook.com. IG_ACCESS_TOKEN/IG_ACCOUNT_ID is the
+// quick single-account path; per-channel OAuth tokens (ig_accounts) layer on top next.
+const IG_BASE      = 'https://graph.instagram.com/v22.0';
 const IG_TOKEN     = process.env.IG_ACCESS_TOKEN;
 const IG_ACCOUNT   = process.env.IG_ACCOUNT_ID;
 const igMock       = require('./ig_mock');
