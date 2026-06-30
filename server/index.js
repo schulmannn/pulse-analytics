@@ -674,12 +674,22 @@ app.get('/api/ig/online', requireAuth, async (req, res) => {
 
 // GET /api/ig/stories — active stories (last 24h) + per-story insights/navigation. Live
 // window → not cached; tolerates per-story errors (#10 <5 viewers) and returns [] gracefully.
+// Per-story metrics fetched INDEPENDENTLY (allSettled): on the Instagram-Login API a single
+// unsupported story metric makes a *combined* /insights call fail wholesale, which previously
+// dropped the entire story to null → the section showed "no stories" even when stories existed.
+const STORY_METRICS = ['reach', 'views', 'replies', 'shares', 'follows', 'profile_visits', 'total_interactions'];
+const igMetricVal = (j) => {
+  const m = j && j.data && j.data[0];
+  if (!m) return null;
+  if (m.total_value && m.total_value.value != null) return m.total_value.value;
+  if (m.values && m.values[0] && m.values[0].value != null) return m.values[0].value;
+  return null;
+};
+
 app.get('/api/ig/stories', requireAuth, async (req, res) => {
-  // ── TEMP diagnostic (superuser + ?debug=1) ──────────────────────────────────
-  // Stories come back as an empty data[] with no error, so we can't tell from the proxy
-  // whether the /stories edge is unsupported on the Instagram-Login API, needs a different
-  // id/path, or there simply are no live stories. This probes the raw upstream (read-only,
-  // never echoes the token) so we can root-cause it, then it gets removed in the real fix.
+  // ── TEMP diagnostic (superuser + ?debug=1) — removed once the fix is verified on prod ──
+  // Probes the raw upstream (read-only, token never echoed): which id/path returns stories, and
+  // for a live story which insight metrics are valid + the navigation breakdown's dimension keys.
   if (req.query.debug === '1' && req.user && req.user.role === 'superuser') {
     if (!igConfigured()) return res.json({ debug: true, configured: false });
     const probe = async (path, params) => {
@@ -691,15 +701,24 @@ app.get('/api/ig/stories', requireAuth, async (req, res) => {
       } catch (e) { return { path, error: e.message }; }
     };
     const me = await probe('/me', { fields: 'user_id,username,account_type,media_count' });
-    const userId = me.json && me.json.user_id;
     const probes = [me];
     probes.push(await probe(`/${IG_ACCOUNT}/stories`, { fields: 'id,media_type,timestamp,permalink,thumbnail_url' }));
-    probes.push(await probe(`/${IG_ACCOUNT}/stories`, { fields: 'id,media_type,timestamp' }));
-    probes.push(await probe('/me/stories', { fields: 'id,media_type,timestamp' }));
-    if (userId && String(userId) !== String(IG_ACCOUNT)) {
-      probes.push(await probe(`/${userId}/stories`, { fields: 'id,media_type,timestamp' }));
+    const storyId = (() => {
+      for (const p of probes) { const d = p.json && p.json.data; if (Array.isArray(d) && d[0] && d[0].id) return d[0].id; }
+      return null;
+    })();
+    const insProbes = [];
+    if (storyId) {
+      // Combined call (the old request) — its error message names the offending metric.
+      insProbes.push(await probe(`/${storyId}/insights`, { metric: 'reach,views,replies,shares,follows,profile_visits,total_interactions,navigation', metric_type: 'total_value', breakdown: 'story_navigation_action_type' }));
+      // Per-metric validity (incl. legacy names) to learn the real supported set.
+      for (const metric of ['reach', 'views', 'replies', 'shares', 'follows', 'profile_visits', 'total_interactions', 'navigation', 'impressions', 'exits', 'taps_forward', 'taps_back', 'profile_activity']) {
+        insProbes.push(await probe(`/${storyId}/insights`, { metric, metric_type: 'total_value' }));
+      }
+      // Navigation breakdown keys.
+      insProbes.push(await probe(`/${storyId}/insights`, { metric: 'navigation', metric_type: 'total_value', breakdown: 'story_navigation_action_type' }));
     }
-    return res.json({ debug: true, ig_account: IG_ACCOUNT, ig_base: IG_BASE, probes });
+    return res.json({ debug: true, ig_account: IG_ACCOUNT, ig_base: IG_BASE, story_id: storyId, probes, ins_probes: insProbes });
   }
   try {
     if (!igConfigured()) return res.json(igMock.igMockStories());
@@ -708,33 +727,45 @@ app.get('/api/ig/stories', requireAuth, async (req, res) => {
     });
     const stories = await Promise.all(
       (list.data || []).map(async (s) => {
+        const out = { ...s };
+        // Each metric independently — one unsupported metric blanks only itself; the story and
+        // its remaining metrics always survive (the story is never dropped).
+        const settled = await Promise.allSettled(
+          STORY_METRICS.map((metric) => igFetch(`/${s.id}/insights`, { metric, metric_type: 'total_value' })),
+        );
+        settled.forEach((r, i) => {
+          if (r.status !== 'fulfilled') return;
+          const v = igMetricVal(r.value);
+          if (v != null) out[STORY_METRICS[i]] = v;
+        });
+        // Navigation breakdown (tap_forward/back/exit, swipe_forward) — isolated so a breakdown
+        // failure can't blank the numeric metrics above.
         try {
-          const ins = await igFetch(`/${s.id}/insights`, {
-            metric: 'reach,views,replies,shares,follows,profile_visits,total_interactions,navigation',
-            metric_type: 'total_value',
-            breakdown: 'story_navigation_action_type',
+          const navRes = await igFetch(`/${s.id}/insights`, {
+            metric: 'navigation', metric_type: 'total_value', breakdown: 'story_navigation_action_type',
           });
-          const out = { ...s };
-          (ins.data || []).forEach((m) => {
-            if (m.name === 'navigation' && m.total_value && m.total_value.breakdowns && m.total_value.breakdowns[0]) {
+          const m = (navRes.data || []).find((x) => x.name === 'navigation');
+          if (m && m.total_value) {
+            const block = m.total_value.breakdowns && m.total_value.breakdowns[0];
+            if (block) {
               const nav = {};
-              (m.total_value.breakdowns[0].results || []).forEach((r) => {
+              (block.results || []).forEach((r) => {
                 const k = r.dimension_values && r.dimension_values[0];
                 if (k) nav[k] = r.value;
               });
               out.navigation = nav;
-              out.navigation_total = m.total_value.value || 0;
-            } else {
-              out[m.name] = (m.total_value && m.total_value.value != null) ? m.total_value.value : (m.values && m.values[0] ? m.values[0].value : 0);
             }
-          });
-          return out;
-        } catch {
-          return null;
+            out.navigation_total = m.total_value.value != null ? m.total_value.value : 0;
+          }
+        } catch { /* navigation optional */ }
+        // Derive total_interactions if the metric itself was unsupported for this media type.
+        if (out.total_interactions == null) {
+          out.total_interactions = Number(out.replies || 0) + Number(out.shares || 0);
         }
+        return out;
       }),
     );
-    res.json({ data: stories.filter(Boolean) });
+    res.json({ data: stories }); // never filter — a story must survive insight failures
   } catch (e) {
     res.status(200).json({ data: [], error: e.message });
   }

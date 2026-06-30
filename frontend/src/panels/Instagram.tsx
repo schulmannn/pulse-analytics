@@ -223,12 +223,15 @@ export function Instagram() {
   const followerS = metricSeries(insights.data, 'follower_count');
   const savesS = metricSeries(insights.data, 'saves');
 
+  const profileViewsS = metricSeries(insights.data, 'profile_views');
+
   const reachP = windowPair(reachS, since, until);
   const viewsP = windowPair(viewsS, since, until);
   const tiP = windowPair(tiS, since, until);
   const engagedP = windowPair(engagedS, since, until);
   const followerP = windowPair(followerS, since, until);
   const savesP = windowPair(savesS, since, until);
+  const profileViewsP = windowPair(profileViewsS, since, until);
 
   const followers = profile.data?.followers_count ?? 0;
   const erReach = reachP.cur > 0 ? (tiP.cur / reachP.cur) * 100 : 0;
@@ -475,17 +478,30 @@ export function Instagram() {
           {(() => {
             const items = tvBreakdown(breakdowns.data?.data, 'profile_links_taps', 'contact_button_type')
               .sort((a, b) => b.value - a.value);
-            return items.length > 0 ? (
-              <Breakdown
-                items={items.map((it) => ({
-                  label: CONTACT_LABEL[it.label] ?? it.label,
-                  value: it.value,
-                  display: fmt.short(it.value),
-                  icon: CONTACT_ICON[it.label],
-                }))}
-              />
-            ) : (
-              <p className="py-6 text-center text-sm text-muted-foreground">Нет данных о действиях.</p>
+            const hasViews = profileViewsP.hasCur && profileViewsP.cur > 0;
+            if (!hasViews && items.length === 0) {
+              return <p className="py-6 text-center text-sm text-muted-foreground">Нет данных о действиях.</p>;
+            }
+            const contactTotal = items.reduce((acc, it) => acc + it.value, 0);
+            return (
+              <div className="space-y-4">
+                {hasViews && (
+                  <div className="grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-2">
+                    <KpiCard label="Визиты профиля" value={fmt.short(profileViewsP.cur)} trend={pairDelta(profileViewsP)} hint="за период" />
+                    <KpiCard label="Клики по кнопкам контакта" value={fmt.short(contactTotal)} hint="сайт · почта · звонок" />
+                  </div>
+                )}
+                {items.length > 0 && (
+                  <Breakdown
+                    items={items.map((it) => ({
+                      label: CONTACT_LABEL[it.label] ?? it.label,
+                      value: it.value,
+                      display: fmt.short(it.value),
+                      icon: CONTACT_ICON[it.label],
+                    }))}
+                  />
+                )}
+              </div>
             );
           })()}
         </IgSection>
@@ -1135,8 +1151,8 @@ function StoriesBlock({ stories }: { stories: IgStory[] | undefined }) {
 function DemoModeBanner() {
   const [open, setOpen] = useState(false);
   const steps = [
-    'Аккаунт Instagram Business или Creator, привязанный к странице Facebook.',
-    'Приложение Facebook с доступом к Instagram Graph API.',
+    'Аккаунт Instagram Business или Creator (страница Facebook не нужна).',
+    'Приложение Meta с продуктом «Instagram API with Instagram Login».',
     'Добавить в окружение сервера IG_ACCESS_TOKEN (long-lived) и IG_ACCOUNT_ID.',
   ];
   const unlocks = [
