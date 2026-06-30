@@ -2,67 +2,90 @@ import { useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useForgot, useLogin, useRegister, useReset, useVerify } from '@/api/queries';
+import { PulseMark } from '@/components/PulseMark';
 
-// Resend-style dark auth view (wrapped in `.dark` so dark tokens apply regardless of app theme).
-// Semantic/brand tokens only — no hex.
+// "Pulse Refined Technical" auth — light, quiet, calmer than the dashboard. Warm paper canvas,
+// hairline-bordered fields, pill primary button, one calm blue accent. Semantic/brand tokens only.
 
 const INPUT_CLASS =
-  'w-full rounded-md border border-white/15 bg-white/[0.04] px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50';
+  'w-full rounded-[8px] border border-border bg-card px-3.5 py-2.5 text-sm text-foreground placeholder:text-ink3 focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50';
 const BUTTON_CLASS =
-  'mt-5 w-full rounded-md bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50';
-const LABEL_CLASS = 'mb-1.5 block text-sm font-medium text-muted-foreground';
-const LINK_CLASS = 'cursor-pointer font-medium text-foreground hover:underline';
-
-const GLOW_BG = {
-  backgroundImage: [
-    'radial-gradient(720px 460px at 88% 12%, hsl(var(--primary) / 0.18), transparent 62%)',
-    'radial-gradient(560px 420px at 6% 96%, hsl(var(--primary) / 0.10), transparent 60%)',
-    'linear-gradient(180deg, hsl(var(--background)), hsl(var(--background)))',
-  ].join(','),
-};
+  'btn-pill mt-5 w-full bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50';
+const LABEL_CLASS = 'mb-1.5 block text-[13px] font-medium text-ink2';
+const LINK_CLASS = 'cursor-pointer font-medium text-primary hover:underline';
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Не удалось выполнить запрос';
 }
 
-/** Dark page shell: glow, back-to-landing link, centered box with logo mark + title. */
+/** Light page shell: brand top-left, a centered, left-aligned form column (quieter than the app). */
 function AuthShell({
   title,
-  switchLine,
+  subtitle,
   children,
 }: {
   title: string;
-  switchLine?: ReactNode;
+  subtitle?: ReactNode;
   children: ReactNode;
 }) {
   return (
-    <div
-      className="dark relative flex min-h-screen items-center justify-center px-5 py-16 text-foreground"
-      style={GLOW_BG}
-    >
-      {/* skewed iris glow */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute -top-[12%] right-[-8%] h-[760px] w-[520px] -skew-x-12 blur-[22px]"
-        style={{ background: 'radial-gradient(closest-side, hsl(var(--primary) / 0.16), transparent 70%)' }}
-      />
-      <Link
-        to="/"
-        className="absolute left-5 top-5 z-10 rounded p-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
-      >
-        ← На главную
+    <div className="relative flex min-h-screen items-center justify-center bg-background px-5 py-16 text-foreground">
+      <Link to="/" className="absolute left-6 top-6 flex items-center gap-2.5">
+        <PulseMark className="h-[18px] w-[18px] text-primary" />
+        <span className="text-[17px] font-medium tracking-tight text-foreground">Pulse</span>
       </Link>
 
-      <div className="relative z-[1] w-full max-w-[380px] text-center">
-        <div className="mb-4 flex justify-center">
-          <span className="flex h-[38px] w-[38px] items-center justify-center rounded-[9px] bg-primary text-xl font-medium text-primary-foreground">
-            P
-          </span>
-        </div>
-        <h1 className="mb-1.5 text-[26px] font-medium tracking-tight">{title}</h1>
-        {switchLine && <p className="mb-6 text-sm text-muted-foreground">{switchLine}</p>}
-        {children}
+      <div className="w-full max-w-[380px]">
+        <h1 className="text-[24px] font-medium tracking-tight text-foreground">{title}</h1>
+        {subtitle && <p className="mt-2 text-sm leading-relaxed text-ink2">{subtitle}</p>}
+        <div className="mt-6">{children}</div>
       </div>
+    </div>
+  );
+}
+
+/** Small "real" data-health card under the login form — the product proof (no live data). */
+function DataCard() {
+  return (
+    <div className="mt-6 flex items-center gap-3 rounded-[10px] border border-border bg-card px-3 py-3">
+      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-avatar text-[12px] font-medium text-ink2">
+        N
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium text-foreground">@newsroom</div>
+        <div className="font-mono text-[11px] text-ink3">синхр. 2 ч назад</div>
+      </div>
+      <div className="flex shrink-0 items-center gap-1.5 font-mono text-[11px] text-ink3">
+        <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-verdant" />
+        API 200 OK
+      </div>
+    </div>
+  );
+}
+
+function TrustIcon({ d }: { d: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 shrink-0 text-ink2" aria-hidden="true">
+      <path d={d} />
+    </svg>
+  );
+}
+
+/** Register trust block — what we don't do with the user's data. */
+function Trust() {
+  const items = [
+    { d: 'M5 11h14v9H5z M8 11V8a4 4 0 0 1 8 0v3', text: 'Telegram-сессия не хранится в Pulse' },
+    { d: 'M4 5h16v11H4z M2 20h20', text: 'Collector работает локально' },
+    { d: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z M9 12a3 3 0 1 0 6 0 3 3 0 0 0-6 0', text: 'Instagram можно открыть в демо-режиме' },
+  ];
+  return (
+    <div className="mt-6 space-y-3 border-t border-border pt-5">
+      {items.map((it) => (
+        <div key={it.text} className="flex items-center gap-2.5 text-[13px] text-ink2">
+          <TrustIcon d={it.d} />
+          {it.text}
+        </div>
+      ))}
     </div>
   );
 }
@@ -90,22 +113,8 @@ export function LoginPage() {
 
   if (forgotMode) {
     return (
-      <AuthShell
-        title="Сброс пароля"
-        switchLine={
-          <button
-            type="button"
-            className={LINK_CLASS}
-            onClick={() => {
-              forgotMutation.reset();
-              setForgotMode(false);
-            }}
-          >
-            ← Назад ко входу
-          </button>
-        }
-      >
-        <form onSubmit={handleForgot} className="text-left">
+      <AuthShell title="Сброс пароля">
+        <form onSubmit={handleForgot}>
           <label className={LABEL_CLASS} htmlFor="forgot-email">
             Email для сброса пароля
           </label>
@@ -126,28 +135,30 @@ export function LoginPage() {
             <p className="mt-3 text-sm text-destructive">{errorMessage(forgotMutation.error)}</p>
           )}
           {forgotMutation.isSuccess && (
-            <p className="mt-3 text-sm text-muted-foreground">
+            <p className="mt-3 text-sm text-ink2">
               {forgotMutation.data.message || 'Если такой аккаунт есть — ссылка отправлена.'}
             </p>
           )}
+          <div className="mt-5 border-t border-border pt-5 text-sm text-ink2">
+            <button
+              type="button"
+              className={LINK_CLASS}
+              onClick={() => {
+                forgotMutation.reset();
+                setForgotMode(false);
+              }}
+            >
+              ← Назад ко входу
+            </button>
+          </div>
         </form>
       </AuthShell>
     );
   }
 
   return (
-    <AuthShell
-      title="С возвращением"
-      switchLine={
-        <>
-          Нет аккаунта?{' '}
-          <Link to="/register" className={LINK_CLASS}>
-            Создать
-          </Link>
-        </>
-      }
-    >
-      <form onSubmit={handleLogin} className="text-left">
+    <AuthShell title="Войти в Pulse">
+      <form onSubmit={handleLogin}>
         <label className={LABEL_CLASS} htmlFor="login-email">
           Email
         </label>
@@ -161,7 +172,7 @@ export function LoginPage() {
           disabled={loginMutation.isPending}
           className={INPUT_CLASS}
         />
-        <label className={`${LABEL_CLASS} mt-3`} htmlFor="login-password">
+        <label className={`${LABEL_CLASS} mt-4`} htmlFor="login-password">
           Пароль
         </label>
         <input
@@ -180,10 +191,10 @@ export function LoginPage() {
         {loginMutation.isError && (
           <p className="mt-3 text-sm text-destructive">{errorMessage(loginMutation.error)}</p>
         )}
-        <p className="mt-3.5 text-sm text-muted-foreground">
+        <div className="mt-3 flex justify-end">
           <button
             type="button"
-            className="cursor-pointer text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary"
+            className="cursor-pointer text-[13px] text-primary hover:underline"
             onClick={() => {
               loginMutation.reset();
               setForgotMode(true);
@@ -191,8 +202,15 @@ export function LoginPage() {
           >
             Забыли пароль?
           </button>
-        </p>
+        </div>
+        <div className="mt-5 border-t border-border pt-5 text-sm text-ink2">
+          Нет аккаунта?{' '}
+          <Link to="/register" className={LINK_CLASS}>
+            Создать
+          </Link>
+        </div>
       </form>
+      <DataCard />
     </AuthShell>
   );
 }
@@ -210,16 +228,9 @@ export function RegisterPage() {
   return (
     <AuthShell
       title="Создать аккаунт Pulse"
-      switchLine={
-        <>
-          Уже есть аккаунт?{' '}
-          <Link to="/login" className={LINK_CLASS}>
-            Войти
-          </Link>
-        </>
-      }
+      subtitle="Подключите канал и получите обзор просмотров, постов и состояния сбора."
     >
-      <form onSubmit={handleSubmit} className="text-left">
+      <form onSubmit={handleSubmit}>
         <label className={LABEL_CLASS} htmlFor="reg-email">
           Email
         </label>
@@ -234,15 +245,15 @@ export function RegisterPage() {
           disabled={registerMutation.isPending}
           className={INPUT_CLASS}
         />
-        <label className={`${LABEL_CLASS} mt-3`} htmlFor="reg-password">
-          Пароль (мин. 8 символов)
+        <label className={`${LABEL_CLASS} mt-4`} htmlFor="reg-password">
+          Пароль
         </label>
         <input
           id="reg-password"
           type="password"
           value={password}
           onChange={(event) => setPassword(event.target.value)}
-          placeholder="••••••••"
+          placeholder="минимум 8 символов"
           minLength={8}
           autoComplete="new-password"
           required
@@ -255,16 +266,19 @@ export function RegisterPage() {
         {registerMutation.isError && (
           <p className="mt-3 text-sm text-destructive">{errorMessage(registerMutation.error)}</p>
         )}
-        {registerMutation.isSuccess ? (
-          <p className="mt-3 text-sm text-muted-foreground">
+        {registerMutation.isSuccess && (
+          <p className="mt-3 text-sm text-ink2">
             {registerMutation.data.message || 'Проверьте почту для подтверждения аккаунта.'}
           </p>
-        ) : (
-          <p className="mt-3.5 text-xs leading-relaxed text-muted-foreground">
-            На указанный email придёт ссылка для подтверждения.
-          </p>
         )}
+        <div className="mt-5 border-t border-border pt-5 text-sm text-ink2">
+          Уже есть аккаунт?{' '}
+          <Link to="/login" className={LINK_CLASS}>
+            Войти
+          </Link>
+        </div>
       </form>
+      <Trust />
     </AuthShell>
   );
 }
@@ -281,9 +295,9 @@ export function VerifyPage() {
 
   return (
     <AuthShell title="Подтверждение email">
-      <form onSubmit={handleSubmit} className="text-left">
-        <p className="text-sm text-muted-foreground">
-          {token ? 'Активируй аккаунт в Pulse Analytics.' : 'В ссылке отсутствует токен подтверждения.'}
+      <form onSubmit={handleSubmit}>
+        <p className="text-sm text-ink2">
+          {token ? 'Активируй аккаунт в Pulse.' : 'В ссылке отсутствует токен подтверждения.'}
         </p>
         {token && !verifyMutation.isSuccess && (
           <button type="submit" disabled={verifyMutation.isPending} className={BUTTON_CLASS}>
@@ -293,14 +307,12 @@ export function VerifyPage() {
         {verifyMutation.isError && (
           <p className="mt-3 text-sm text-destructive">{errorMessage(verifyMutation.error)}</p>
         )}
-        {verifyMutation.isSuccess && (
-          <p className="mt-3 text-sm text-muted-foreground">Email подтверждён.</p>
-        )}
-        <p className="mt-4 text-sm">
-          <Link to="/login" className="text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary">
+        {verifyMutation.isSuccess && <p className="mt-3 text-sm text-ink2">Email подтверждён.</p>}
+        <div className="mt-5 border-t border-border pt-5 text-sm">
+          <Link to="/login" className={LINK_CLASS}>
             Перейти ко входу
           </Link>
-        </p>
+        </div>
       </form>
     </AuthShell>
   );
@@ -324,17 +336,17 @@ export function ResetPage() {
 
   return (
     <AuthShell title="Новый пароль">
-      <form onSubmit={handleSubmit} className="text-left">
+      <form onSubmit={handleSubmit}>
         {!token && <p className="mb-2 text-sm text-destructive">В ссылке отсутствует токен сброса.</p>}
         <label className={LABEL_CLASS} htmlFor="reset-password">
-          Новый пароль (мин. 8 символов)
+          Новый пароль
         </label>
         <input
           id="reset-password"
           type="password"
           value={password}
           onChange={(event) => setPassword(event.target.value)}
-          placeholder="••••••••"
+          placeholder="минимум 8 символов"
           minLength={8}
           required
           disabled={!token || resetMutation.isPending}
@@ -346,11 +358,11 @@ export function ResetPage() {
         {resetMutation.isError && (
           <p className="mt-3 text-sm text-destructive">{errorMessage(resetMutation.error)}</p>
         )}
-        <p className="mt-4 text-sm">
-          <Link to="/login" className="text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary">
+        <div className="mt-5 border-t border-border pt-5 text-sm">
+          <Link to="/login" className={LINK_CLASS}>
             Вернуться ко входу
           </Link>
-        </p>
+        </div>
       </form>
     </AuthShell>
   );
