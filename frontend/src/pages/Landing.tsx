@@ -366,6 +366,7 @@ function FloatBob({
       transition={{ ...SPRING, delay: reduce ? 0 : delay }}
     >
       <motion.div
+        className="will-change-transform [backface-visibility:hidden]"
         animate={reduce ? undefined : { y: [0, -6, 0] }}
         transition={reduce ? undefined : { duration: bob, repeat: Infinity, ease: 'easeInOut', delay }}
       >
@@ -377,7 +378,7 @@ function FloatBob({
 
 function FloatCard({ children }: { children: ReactNode }) {
   return (
-    <div className="rounded-xl border border-border bg-card/95 px-3 py-2 shadow-[0_20px_44px_-22px_rgba(20,24,40,0.5)] backdrop-blur-sm">
+    <div className="rounded-xl border border-border bg-card px-3 py-2 shadow-[0_20px_44px_-22px_rgba(20,24,40,0.5)]">
       {children}
     </div>
   );
