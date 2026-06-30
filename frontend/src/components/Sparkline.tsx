@@ -105,9 +105,11 @@ export function Sparkline({
   );
 
   return (
-    <div className={className}>
+    // Flex column so the chart fills the height that's LEFT after the caption — otherwise the chart
+    // took the full height (h-full) and the caption overflowed below the box onto whatever followed.
+    <div className={cn('flex flex-col', className)}>
       <div
-        className="relative h-full w-full"
+        className="relative min-h-0 w-full flex-1"
         onMouseMove={interactive ? onMove : undefined}
         onMouseLeave={interactive ? () => setHover(null) : undefined}
       >
