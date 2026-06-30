@@ -48,7 +48,7 @@ export function Posts() {
     <div className="space-y-8">
       {/* Топ постов (общий компонент, переиспользуется в Обзоре) */}
       <div className="space-y-4">
-        <h3 className="text-sm font-semibold tracking-wide text-muted-foreground">
+        <h3 className="text-sm font-medium tracking-wide text-muted-foreground">
           Топ постов за период
         </h3>
         <TopPosts />
@@ -62,7 +62,7 @@ export function Posts() {
         <div className="overflow-x-auto">
           <table className="w-full border-collapse text-left text-sm">
             <thead>
-              <tr className="border-b border-border text-xs font-semibold tracking-wider text-muted-foreground">
+              <tr className="border-b border-border text-xs font-medium tracking-wider text-muted-foreground">
                 <th className="w-12 p-4 text-center"></th>
                 <th className="min-w-[240px] p-4">Пост</th>
                 <th className="p-4 text-right">Просмотры</th>
@@ -93,7 +93,7 @@ export function Posts() {
                             className="h-full w-full object-cover"
                           />
                         ) : (
-                          <span className="text-[9px] font-bold text-muted-foreground">Текст</span>
+                          <span className="text-[9px] font-medium text-muted-foreground">Текст</span>
                         )}
                       </div>
                     </td>
@@ -105,7 +105,7 @@ export function Posts() {
                         <div className="flex items-center gap-2 text-xs text-muted-foreground">
                           <span>{fmt.date(post.date)}</span>
                           {post.albumSize > 1 && (
-                            <span className="inline-flex items-center rounded bg-secondary px-1.5 py-0.5 text-[10px] font-bold text-secondary-foreground">
+                            <span className="inline-flex items-center rounded bg-secondary px-1.5 py-0.5 text-[10px] font-medium text-secondary-foreground">
                               {post.albumSize} фото
                             </span>
                           )}
@@ -144,7 +144,7 @@ function PctTag({ value, green, violet }: { value: number | null; green: number;
   let colorClass = 'text-ember';
   if (value >= green) colorClass = 'text-verdant';
   else if (value >= violet) colorClass = 'text-primary';
-  return <span className={`font-semibold ${colorClass}`}>{value.toFixed(1)}%</span>;
+  return <span className={`font-medium ${colorClass}`}>{value.toFixed(1)}%</span>;
 }
 
 interface PostModalProps {
@@ -210,7 +210,7 @@ function PostModal({ post, onClose }: PostModalProps) {
         </button>
 
         <CardHeader className="pr-12">
-          <CardTitle className="text-base font-semibold leading-snug text-foreground">
+          <CardTitle className="text-base font-medium leading-snug text-foreground">
             {post.caption ? <RichText text={post.caption} /> : <span className="italic text-muted-foreground">Без подписи</span>}
           </CardTitle>
           <div className="pt-1.5 text-xs tabular-nums text-muted-foreground">
@@ -224,7 +224,7 @@ function PostModal({ post, onClose }: PostModalProps) {
               href={post.permalink}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 text-xs font-semibold text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary"
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary"
             >
               Открыть публикацию в Telegram
             </a>
@@ -244,7 +244,7 @@ function PostModal({ post, onClose }: PostModalProps) {
             ) : hasGraphData ? (
               <div className="space-y-6">
                 <div>
-                  <h4 className="mb-3 text-xs font-bold tracking-wider text-muted-foreground">
+                  <h4 className="mb-3 text-xs font-medium tracking-wider text-muted-foreground">
                     Динамика набора просмотров
                   </h4>
                   <LineChart values={graphValues} titles={chartTitles} labels={chartLabels} />
@@ -252,7 +252,7 @@ function PostModal({ post, onClose }: PostModalProps) {
 
                 {reactionsList.length > 0 && (
                   <div className="space-y-2">
-                    <h4 className="text-xs font-bold tracking-wider text-muted-foreground">Реакции</h4>
+                    <h4 className="text-xs font-medium tracking-wider text-muted-foreground">Реакции</h4>
                     <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                       {reactionsList.map((react, i) => (
                         <div
@@ -260,7 +260,7 @@ function PostModal({ post, onClose }: PostModalProps) {
                           className="flex items-center justify-between rounded border border-border/20 bg-muted/40 p-2 text-xs font-medium"
                         >
                           <span className="text-sm">{react.label}</span>
-                          <span className="font-semibold tabular-nums text-muted-foreground">{fmt.num(react.value)}</span>
+                          <span className="font-medium tabular-nums text-muted-foreground">{fmt.num(react.value)}</span>
                         </div>
                       ))}
                     </div>

@@ -25,7 +25,7 @@ function Step({ n, title, children }: { n: number; title: string; children: Reac
         {n}
       </span>
       <div className="min-w-0 flex-1">
-        <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+        <h3 className="text-sm font-medium text-foreground">{title}</h3>
         <div className="mt-1 text-sm leading-relaxed text-muted-foreground">{children}</div>
       </div>
     </div>
@@ -44,7 +44,7 @@ export function Connect() {
         <Link to="/settings" className="text-xs text-muted-foreground hover:text-foreground">
           ← Назад к настройкам
         </Link>
-        <h1 className="mt-3 text-2xl font-semibold tracking-tight text-foreground">
+        <h1 className="mt-3 text-2xl font-medium tracking-tight text-foreground">
           Подключение данных канала
         </h1>
         <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
@@ -124,7 +124,7 @@ python collector/pulse_collector.py run      # дальше каждые 6 ч`}<
 
       <Card>
         <CardContent className="space-y-2 p-5">
-          <h2 className="text-xs font-bold tracking-wider text-muted-foreground">Если что-то не так</h2>
+          <h2 className="text-xs font-medium tracking-wider text-muted-foreground">Если что-то не так</h2>
           <ul className="list-disc space-y-1.5 pl-5 text-sm text-muted-foreground">
             <li>
               <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">doctor</code> пишет «Missing env» →

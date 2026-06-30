@@ -180,7 +180,7 @@ function Sidebar({ role }: { role?: string }) {
           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
             <PulseMark className="h-[18px] w-[18px]" />
           </span>
-          <span className={cn('flex-1 whitespace-nowrap text-[15px] font-semibold tracking-tight', rail && REVEAL_BLOCK)}>
+          <span className={cn('flex-1 whitespace-nowrap text-[15px] font-medium tracking-tight', rail && REVEAL_BLOCK)}>
             Pulse
           </span>
         </div>
@@ -442,7 +442,7 @@ function Topbar({ email, role }: { email?: string; role?: string }) {
   return (
     <header className="sticky top-0 z-20 flex h-14 items-center justify-between gap-3 border-b bg-background/80 px-4 backdrop-blur sm:gap-4 sm:px-6">
       {/* min-w-0 lets the title truncate instead of shoving the controls off a narrow screen. */}
-      <h1 className="min-w-0 truncate text-lg font-semibold">{title}</h1>
+      <h1 className="min-w-0 truncate text-lg font-medium">{title}</h1>
       <div className="flex shrink-0 items-center gap-2">
         <PeriodSwitcher />
         <ThemeToggle />

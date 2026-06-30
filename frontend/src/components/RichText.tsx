@@ -12,7 +12,7 @@ export function RichText({ text }: { text: string }) {
         switch (node.type) {
           case 'bold':
             return (
-              <strong key={i} className="font-semibold">
+              <strong key={i} className="font-medium">
                 {node.value}
               </strong>
             );

@@ -41,7 +41,7 @@ export function CollectorEmptyState({ username }: CollectorEmptyStateProps) {
         <ol className="space-y-4">
           {STEPS.map((step, i) => (
             <li key={i} className="flex gap-3">
-              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-xs font-semibold text-muted-foreground">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-xs font-medium text-muted-foreground">
                 {i + 1}
               </span>
               <div className="space-y-1">

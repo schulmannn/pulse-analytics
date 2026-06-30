@@ -152,7 +152,7 @@ export function Digest() {
 function TierLabel({ tone, children }: { tone: 'insight' | 'evidence' | 'action'; children: ReactNode }) {
   const dot = tone === 'insight' ? 'bg-primary' : tone === 'evidence' ? 'bg-chart-3' : 'bg-verdant';
   return (
-    <div className="flex items-center gap-1.5 text-[11px] font-semibold tracking-wide text-muted-foreground">
+    <div className="flex items-center gap-1.5 text-[11px] font-medium tracking-wide text-muted-foreground">
       <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${dot}`} />
       {children}
     </div>

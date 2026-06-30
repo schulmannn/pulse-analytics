@@ -47,7 +47,7 @@ export function Hero() {
       <ChannelAvatar source={current?.source} initial={initial} className="h-12 w-12 rounded-xl text-lg" />
       <div className="min-w-0">
         {/* A div, not an h1 — the top bar already owns the page's single <h1> (route title). */}
-        <div className="truncate text-xl font-semibold tracking-tight">{handle}</div>
+        <div className="truncate text-xl font-medium tracking-tight">{handle}</div>
         <p className="flex flex-wrap items-center gap-x-1.5 text-sm text-muted-foreground">
           <span>Telegram{members > 0 ? ` · ${fmt.num(members)} подписчиков` : ''}</span>
           {fresh && (

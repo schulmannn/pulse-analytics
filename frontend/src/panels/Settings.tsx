@@ -128,7 +128,7 @@ export function Settings() {
                   <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
                     <div className="space-y-0.5">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-semibold text-foreground">{displayTitle}</span>
+                        <span className="text-sm font-medium text-foreground">{displayTitle}</span>
                         {channel.username && <span className="font-mono text-xs text-muted-foreground">@{channel.username}</span>}
                       </div>
                       <div className="font-mono text-[11px] text-muted-foreground">
@@ -139,7 +139,7 @@ export function Settings() {
                     </div>
                     <div className="flex shrink-0 items-center gap-2 self-end sm:self-auto">
                       {isCentral ? (
-                        <span className="inline-flex select-none items-center rounded bg-primary/10 px-2 py-0.5 text-[11px] font-bold tracking-wide text-primary">
+                        <span className="inline-flex select-none items-center rounded bg-primary/10 px-2 py-0.5 text-[11px] font-medium tracking-wide text-primary">
                           central
                         </span>
                       ) : (
@@ -239,7 +239,7 @@ function ChannelKeysPanel({ channelId }: { channelId: number }) {
       {oneTimeKey && (
         <Card className="border-verdant/40 bg-background">
           <CardContent className="space-y-2.5 p-3.5">
-            <div className="text-xs font-semibold text-verdant">⚠️ Скопируйте токен сейчас — он показывается ОДИН раз:</div>
+            <div className="text-xs font-medium text-verdant">⚠️ Скопируйте токен сейчас — он показывается ОДИН раз:</div>
             <div className="relative flex items-center gap-2 break-all rounded bg-muted/60 p-2 font-mono text-xs text-foreground">
               <span className="flex-1 select-all pr-16">{oneTimeKey}</span>
               <button
@@ -266,7 +266,7 @@ function ChannelKeysPanel({ channelId }: { channelId: number }) {
               className={`flex items-center justify-between rounded border border-border/40 bg-background p-2 font-mono text-xs ${k.revoked ? 'opacity-50' : ''}`}
             >
               <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
-                <span className="font-semibold text-foreground">{k.key_prefix}…</span>
+                <span className="font-medium text-foreground">{k.key_prefix}…</span>
                 <span className="font-sans text-[11px] text-muted-foreground">[{k.label || 'коллектор'}]</span>
                 {k.last_used_at && <span className="font-sans text-[10px] text-muted-foreground">использован: {fmt.date(k.last_used_at)}</span>}
               </div>

@@ -166,7 +166,7 @@ export function Compare() {
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead>
-                <tr className="border-b border-border text-xs font-semibold tracking-wider text-muted-foreground">
+                <tr className="border-b border-border text-xs font-medium tracking-wider text-muted-foreground">
                   <th className="p-4">Метрика</th>
                   <th className="p-4 text-right">Текущий</th>
                   <th className="p-4 text-right">Предыдущий</th>

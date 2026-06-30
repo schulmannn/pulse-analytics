@@ -70,11 +70,11 @@ function UserRowCard({ user, availableRoles, availableStatuses, isMe }: UserRowC
       <div className="flex flex-col justify-between gap-4 p-4 md:flex-row md:items-center">
         <div className="space-y-0.5">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="max-w-xs truncate text-sm font-semibold text-foreground">
+            <span className="max-w-xs truncate text-sm font-medium text-foreground">
               {user.email || <span className="italic text-muted-foreground">без email</span>}
             </span>
             {isMe && (
-              <span className="select-none rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold text-primary">(вы)</span>
+              <span className="select-none rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">(вы)</span>
             )}
           </div>
           <div className="font-mono text-xs text-muted-foreground">

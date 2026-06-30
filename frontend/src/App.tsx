@@ -65,7 +65,7 @@ function ProtectedLayout() {
     return (
       <Centered>
         <div className="max-w-sm rounded-lg border bg-card p-6 text-center">
-          <h2 className="text-lg font-semibold">Не удалось загрузить</h2>
+          <h2 className="text-lg font-medium">Не удалось загрузить</h2>
           <p className="mt-2 text-sm text-muted-foreground">
             {me.error instanceof Error ? me.error.message : 'Неизвестная ошибка'}
           </p>

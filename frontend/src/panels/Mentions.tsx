@@ -133,15 +133,15 @@ export function Mentions() {
       <div className="grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-3">
         <div className="bg-background p-5">
           <div className="text-xs tracking-wide text-muted-foreground">Упоминаний</div>
-          <div className="mt-2 text-3xl font-semibold tabular-nums tracking-tight">{fmt.num(total)}</div>
+          <div className="mt-2 text-3xl font-medium tabular-nums tracking-tight">{fmt.num(total)}</div>
         </div>
         <div className="bg-background p-5">
           <div className="text-xs tracking-wide text-muted-foreground">Каналов</div>
-          <div className="mt-2 text-3xl font-semibold tabular-nums tracking-tight">{fmt.num(uniqueChannels)}</div>
+          <div className="mt-2 text-3xl font-medium tabular-nums tracking-tight">{fmt.num(uniqueChannels)}</div>
         </div>
         <div className="bg-background p-5">
           <div className="text-xs tracking-wide text-muted-foreground">Суммарный охват</div>
-          <div className="mt-2 text-3xl font-semibold tabular-nums tracking-tight">{fmt.short(totalViews)}</div>
+          <div className="mt-2 text-3xl font-medium tabular-nums tracking-tight">{fmt.short(totalViews)}</div>
         </div>
       </div>
 
@@ -175,12 +175,12 @@ export function Mentions() {
                         href={item.link}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-sm font-semibold text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary"
+                        className="text-sm font-medium text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary"
                       >
                         {item.title || 'Канал'}
                       </a>
                     ) : (
-                      <span className="text-sm font-semibold text-foreground">
+                      <span className="text-sm font-medium text-foreground">
                         {item.title || 'Канал'}
                       </span>
                     )}

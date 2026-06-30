@@ -17,7 +17,7 @@ function Stat({ label, value, accent }: { label: string; value: string; accent?:
   return (
     <div className="rounded-lg bg-muted/40 p-3">
       <div className="text-[11px] tracking-wide text-muted-foreground">{label}</div>
-      <div className={`mt-0.5 text-lg font-semibold tabular-nums ${accent ? 'text-primary' : ''}`}>
+      <div className={`mt-0.5 text-lg font-medium tabular-nums ${accent ? 'text-primary' : ''}`}>
         {value}
       </div>
     </div>
@@ -68,7 +68,7 @@ export function PostDetailModal({ post, rank, reason, onClose }: PostDetailModal
         {/* Header */}
         <div className="flex items-center justify-between border-b px-5 py-3">
           <div className="flex items-center gap-2.5">
-            <span className="rounded bg-secondary px-2 py-0.5 text-xs font-bold tabular-nums text-secondary-foreground">
+            <span className="rounded bg-secondary px-2 py-0.5 text-xs font-medium tabular-nums text-secondary-foreground">
               №{rank}
             </span>
             {post.date && (

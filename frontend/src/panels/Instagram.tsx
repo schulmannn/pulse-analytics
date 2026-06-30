@@ -512,7 +512,7 @@ function ChartSection({ title, children }: { title: string; children: ReactNode 
 function ClusterHeading({ children }: { children: ReactNode }) {
   return (
     <div className="flex items-center gap-3 pt-2">
-      <span className="text-xs font-semibold tracking-wider text-muted-foreground">{children}</span>
+      <span className="text-xs font-medium tracking-wider text-muted-foreground">{children}</span>
       <span className="h-px flex-1 bg-border" />
     </div>
   );
@@ -633,14 +633,14 @@ function BestTimeHeatmap({ online }: { online: IgOnline | undefined }) {
           <div className="grid gap-[2px]" style={{ gridTemplateColumns: '30px repeat(24, minmax(14px, 1fr))' }}>
             <div />
             {Array.from({ length: 24 }).map((_, h) => (
-              <div key={h} className="select-none text-center text-[10px] font-semibold text-muted-foreground">
+              <div key={h} className="select-none text-center text-[10px] font-medium text-muted-foreground">
                 {h % 3 === 0 ? `${h}` : ''}
               </div>
             ))}
           </div>
           {DAY_NAMES.map((name, w) => (
             <div key={w} className="grid items-center gap-[2px]" style={{ gridTemplateColumns: '30px repeat(24, minmax(14px, 1fr))' }}>
-              <div className="select-none text-[11px] font-bold text-muted-foreground">{name}</div>
+              <div className="select-none text-[11px] font-medium text-muted-foreground">{name}</div>
               {Array.from({ length: 24 }).map((_, h) => {
                 const v = grid[w][h];
                 const opacity = max > 0 ? Math.max(0.06, v / max) : 0;
@@ -847,7 +847,7 @@ function PeriodCompareBlock({ rows }: { rows: { label: string; pair: ReturnType<
     <div className="overflow-x-auto">
       <table className="w-full text-left text-sm">
         <thead>
-          <tr className="border-b border-border text-xs font-semibold tracking-wider text-muted-foreground">
+          <tr className="border-b border-border text-xs font-medium tracking-wider text-muted-foreground">
             <th className="p-4">Метрика</th>
             <th className="p-4 text-right">Текущий</th>
             <th className="p-4 text-right">Предыдущий</th>
@@ -938,7 +938,7 @@ function HashtagsBlock({ posts }: { posts: IgPost[] }) {
     <div className="overflow-x-auto">
       <table className="w-full text-left text-sm">
         <thead>
-          <tr className="border-b border-border text-xs font-semibold tracking-wider text-muted-foreground">
+          <tr className="border-b border-border text-xs font-medium tracking-wider text-muted-foreground">
             <th className="p-4">Хэштег</th>
             <th className="p-4 text-right">Постов</th>
             <th className="p-4 text-right">Ср. охват</th>
@@ -953,7 +953,7 @@ function HashtagsBlock({ posts }: { posts: IgPost[] }) {
               <td className="p-4 text-right tabular-nums text-muted-foreground">{s.count}</td>
               <td className="p-4 text-right tabular-nums">{fmt.short(s.avgReach)}</td>
               <td className="p-4 text-right tabular-nums">{s.avgEr.toFixed(2)}%</td>
-              <td className="p-4 text-right font-semibold tabular-nums">
+              <td className="p-4 text-right font-medium tabular-nums">
                 {Math.abs(s.lift) < 0.5 ? (
                   <span className="text-muted-foreground/60">≈0%</span>
                 ) : (
@@ -1016,7 +1016,7 @@ function CompareBlock({ posts }: { posts: IgPost[] }) {
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead>
-              <tr className="border-b border-border text-xs font-semibold tracking-wider text-muted-foreground">
+              <tr className="border-b border-border text-xs font-medium tracking-wider text-muted-foreground">
                 <th className="p-4">Метрика</th>
                 {chosen.map((c) => (
                   <th key={c.i} className="p-4 text-right">#{c.i + 1} {MEDIA_TYPE_LABEL[c.post.media_type ?? ''] ?? 'Пост'}</th>
@@ -1034,7 +1034,7 @@ function CompareBlock({ posts }: { posts: IgPost[] }) {
                       const v = values[idx];
                       const best = chosen.length > 1 && max > 0 && v === max;
                       return (
-                        <td key={c.i} className={`p-4 text-right tabular-nums ${best ? 'font-semibold text-verdant' : ''}`}>
+                        <td key={c.i} className={`p-4 text-right tabular-nums ${best ? 'font-medium text-verdant' : ''}`}>
                           {best && (
                             <>
                               <span className="sr-only">лучший: </span>
@@ -1149,7 +1149,7 @@ function DemoModeBanner() {
             </span>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="text-sm font-semibold text-foreground">Демо-режим</h3>
+                <h3 className="text-sm font-medium text-foreground">Демо-режим</h3>
                 <span className="rounded-full bg-chart-3/15 px-1.5 py-0.5 text-[10px] font-medium text-chart-3">
                   примерные данные
                 </span>
@@ -1173,11 +1173,11 @@ function DemoModeBanner() {
         {open && (
           <div className="mt-4 grid gap-5 border-t pt-4 sm:grid-cols-2">
             <div>
-              <div className="text-[11px] font-semibold tracking-wide text-muted-foreground">Что нужно для подключения</div>
+              <div className="text-[11px] font-medium tracking-wide text-muted-foreground">Что нужно для подключения</div>
               <ol className="mt-2 space-y-2">
                 {steps.map((step, i) => (
                   <li key={i} className="flex gap-2 text-sm text-muted-foreground">
-                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[11px] font-semibold">
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[11px] font-medium">
                       {i + 1}
                     </span>
                     <span className="leading-relaxed">{step}</span>
@@ -1187,7 +1187,7 @@ function DemoModeBanner() {
               <p className="mt-2 text-xs text-muted-foreground">После этого демо-режим отключится автоматически.</p>
             </div>
             <div>
-              <div className="text-[11px] font-semibold tracking-wide text-muted-foreground">Что станет доступно</div>
+              <div className="text-[11px] font-medium tracking-wide text-muted-foreground">Что станет доступно</div>
               <ul className="mt-2 space-y-1.5">
                 {unlocks.map((item, i) => (
                   <li key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
@@ -1210,7 +1210,7 @@ function DataHealthNote() {
   return (
     <Card className="border-dashed">
       <CardContent className="space-y-1.5 p-5 text-xs text-muted-foreground">
-        <p className="font-semibold text-foreground">О данных Instagram</p>
+        <p className="font-medium text-foreground">О данных Instagram</p>
         <p>• <span className="text-foreground">impressions</span> и <span className="text-foreground">website_clicks</span> отключены Meta в 2025 — используем <span className="text-foreground">просмотры (views)</span> и <span className="text-foreground">действия в профиле</span>.</p>
         <p>• Демография — только топ-сегменты и при 100+ подписчиках; возможна задержка до 48 ч.</p>
         <p>• Активность по часам (лучшее время) — метрика нестабильна, иногда пуста.</p>
@@ -1232,7 +1232,7 @@ function KpiCard({ label, value, hint, feature, trend }: KpiCardProps) {
     <div className={`bg-background p-4${feature ? ' ring-1 ring-inset ring-primary/40' : ''}`}>
       <div className="text-xs tracking-wide text-muted-foreground">{label}</div>
       <div className="mt-2 flex items-center gap-2">
-        <div className="text-3xl font-semibold tabular-nums tracking-tight">{value}</div>
+        <div className="text-3xl font-medium tabular-nums tracking-tight">{value}</div>
         <DeltaPill delta={trend} />
       </div>
       {hint ? <div className="mt-2 text-xs text-muted-foreground">{hint}</div> : null}
@@ -1252,8 +1252,8 @@ function IgPostCard({ post, rank }: { post: IgPost; rank: number }) {
           ) : (
             <span className="font-mono text-xs text-muted-foreground">{typeLabel}</span>
           )}
-          <div className="absolute left-2 top-2 rounded bg-background/90 px-2 py-0.5 text-xs font-bold text-foreground">#{rank}</div>
-          <div className="absolute right-2 top-2 rounded bg-primary px-2 py-0.5 text-[10px] font-bold tracking-wide text-primary-foreground">{typeLabel}</div>
+          <div className="absolute left-2 top-2 rounded bg-background/90 px-2 py-0.5 text-xs font-medium text-foreground">#{rank}</div>
+          <div className="absolute right-2 top-2 rounded bg-primary px-2 py-0.5 text-[10px] font-medium tracking-wide text-primary-foreground">{typeLabel}</div>
         </div>
         <div className="p-4">
           <p className="line-clamp-3 text-sm leading-relaxed text-foreground">
@@ -1274,8 +1274,8 @@ function IgPostCard({ post, rank }: { post: IgPost; rank: number }) {
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="pt-2">
-      <div className="text-[10px] font-semibold tracking-wider text-muted-foreground">{label}</div>
-      <div className="mt-0.5 text-sm font-semibold tabular-nums">{value}</div>
+      <div className="text-[10px] font-medium tracking-wider text-muted-foreground">{label}</div>
+      <div className="mt-0.5 text-sm font-medium tabular-nums">{value}</div>
     </div>
   );
 }

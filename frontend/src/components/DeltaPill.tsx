@@ -13,7 +13,7 @@ export function DeltaPill({ delta, subtle = false }: { delta?: MetricDelta | nul
   const percentage = delta.pct >= 100 ? delta.pct.toFixed(0) : delta.pct.toFixed(1);
   if (subtle) {
     return (
-      <span className={`shrink-0 text-xs font-semibold tabular-nums ${color}`}>
+      <span className={`shrink-0 text-xs font-medium tabular-nums ${color}`}>
         {direction}
         {percentage}%
       </span>
@@ -22,7 +22,7 @@ export function DeltaPill({ delta, subtle = false }: { delta?: MetricDelta | nul
   // ember-strong text on the ember tint clears AA in light mode (plain text-ember does not).
   const chip = delta.dir === 'up' ? 'text-verdant bg-verdant/10' : 'text-ember-strong bg-ember/10';
   return (
-    <span className={`rounded-full ${chip} px-2 py-0.5 text-xs font-semibold tabular-nums`}>
+    <span className={`rounded-full ${chip} px-2 py-0.5 text-xs font-medium tabular-nums`}>
       {direction}
       {percentage}%
     </span>

@@ -150,7 +150,7 @@ export function KpiDrillDown({ metricKey, posts, subsSeries, total, trend, capti
               <MetricInfo def={def} />
             </div>
             <div className="mt-0.5 flex items-baseline gap-2">
-              <span className="text-2xl font-semibold tabular-nums tracking-tight">{total}</span>
+              <span className="text-2xl font-medium tabular-nums tracking-tight">{total}</span>
               <DeltaPill delta={trend} />
             </div>
             {caption && <div className="text-xs text-muted-foreground">{caption}</div>}
@@ -171,7 +171,7 @@ export function KpiDrillDown({ metricKey, posts, subsSeries, total, trend, capti
         <div className="space-y-5 overflow-y-auto p-5">
           {/* Per-day breakdown */}
           <div>
-            <div className="mb-2 text-[11px] font-semibold tracking-wide text-muted-foreground">
+            <div className="mb-2 text-[11px] font-medium tracking-wide text-muted-foreground">
               {DAY_TITLE[metricKey] ?? 'По дням'}
             </div>
             {metricKey === 'subscribers' ? (
@@ -200,7 +200,7 @@ export function KpiDrillDown({ metricKey, posts, subsSeries, total, trend, capti
           {/* Contributing posts (post-based metrics only) */}
           {field && (
             <div>
-              <div className="mb-2 text-[11px] font-semibold tracking-wide text-muted-foreground">
+              <div className="mb-2 text-[11px] font-medium tracking-wide text-muted-foreground">
                 Топ постов по {CONTRIB_LABEL[metricKey] ?? 'метрике'}
               </div>
               {contributors.length > 0 ? (
@@ -216,7 +216,7 @@ export function KpiDrillDown({ metricKey, posts, subsSeries, total, trend, capti
                           onClick={() => setOpenPost(post)}
                           className="flex w-full items-center gap-3 rounded-lg border border-transparent p-2 text-left transition-colors hover:border-border hover:bg-muted/40"
                         >
-                          <span className="w-5 shrink-0 text-center text-xs font-semibold tabular-nums text-muted-foreground">
+                          <span className="w-5 shrink-0 text-center text-xs font-medium tabular-nums text-muted-foreground">
                             {i + 1}
                           </span>
                           {post.thumb ? (
@@ -233,7 +233,7 @@ export function KpiDrillDown({ metricKey, posts, subsSeries, total, trend, capti
                           )}
                           <span className="min-w-0 flex-1 truncate text-sm text-foreground">{text}</span>
                           <span className="shrink-0 text-right">
-                            <span className="block text-sm font-semibold tabular-nums">{fmt.short(value)}</span>
+                            <span className="block text-sm font-medium tabular-nums">{fmt.short(value)}</span>
                             {share > 0 && (
                               <span className="block text-[10px] text-muted-foreground">
                                 {share}

@@ -40,7 +40,7 @@ export function ChannelAvatar({ source, initial, className }: ChannelAvatarProps
   return (
     <span
       className={cn(
-        'flex shrink-0 items-center justify-center bg-primary font-semibold text-primary-foreground',
+        'flex shrink-0 items-center justify-center bg-primary font-medium text-primary-foreground',
         className,
       )}
     >

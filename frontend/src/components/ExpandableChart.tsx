@@ -75,7 +75,7 @@ export function ExpandableChart({ title, children, renderExpanded }: ExpandableC
             </button>
 
             <CardHeader className="pr-12">
-              <CardTitle className="text-base font-semibold text-foreground">{title}</CardTitle>
+              <CardTitle className="text-base font-medium text-foreground">{title}</CardTitle>
               {renderExpanded && (
                 <div className="flex flex-wrap pt-2">
                   {WINDOWS.map((window) => (

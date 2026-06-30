@@ -260,7 +260,7 @@ function FeaturedKpi({ label, value, trend, caption, spark, info, onDrill }: Fea
       <div className="mt-2 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
           <div className="flex items-baseline gap-2.5">
-            <DrillValue label={label} onDrill={onDrill} className="text-[44px] font-semibold leading-none tabular-nums tracking-tight">
+            <DrillValue label={label} onDrill={onDrill} className="text-[44px] font-medium leading-none tabular-nums tracking-tight">
               {num}
               {unit ? <span className="text-2xl font-medium text-muted-foreground">{unit}</span> : null}
             </DrillValue>
@@ -344,7 +344,7 @@ function StatTile({ label, value, trend, spark, caption, info, onDrill }: StatTi
         {info && <MetricInfo def={info} />}
       </div>
       <div className="mt-1.5 flex items-baseline justify-between gap-2">
-        <DrillValue label={label} onDrill={onDrill} className="text-2xl font-semibold tabular-nums tracking-tight">
+        <DrillValue label={label} onDrill={onDrill} className="text-2xl font-medium tabular-nums tracking-tight">
           {num}
           {unit ? <span className="text-base font-medium text-muted-foreground">{unit}</span> : null}
         </DrillValue>
