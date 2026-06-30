@@ -103,15 +103,14 @@ export function LineChart({ values, labels, titles, yMin, yMax, height }: LineCh
         <path d={areaPath} fill={`url(#${gradientId})`} />
         <path d={linePath} fill="none" stroke="hsl(var(--brand-iris))" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
 
-        {/* Last-point marker — soft glow + crisp dot knocked out from the background */}
-        <circle cx={lastPt.x} cy={lastPt.y} r="9" fill="hsl(var(--brand-iris))" opacity="0.16" />
-        <circle cx={lastPt.x} cy={lastPt.y} r="4" fill="hsl(var(--brand-iris))" stroke="hsl(var(--card))" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+        {/* Last-point marker — flat crisp dot knocked out from the paper surface (no glow halo) */}
+        <circle cx={lastPt.x} cy={lastPt.y} r="4" fill="hsl(var(--brand-iris))" stroke="hsl(var(--background))" strokeWidth="2" vectorEffect="non-scaling-stroke" />
 
         {/* Hovered-point crosshair + marker */}
         {hovered && (
           <>
             <line x1={hovered.x} y1={0} x2={hovered.x} y2={h} stroke="hsl(var(--brand-iris))" strokeWidth="1" opacity="0.35" vectorEffect="non-scaling-stroke" />
-            <circle cx={hovered.x} cy={hovered.y} r="4" fill="hsl(var(--brand-iris))" stroke="hsl(var(--card))" strokeWidth="1.5" />
+            <circle cx={hovered.x} cy={hovered.y} r="4" fill="hsl(var(--brand-iris))" stroke="hsl(var(--background))" strokeWidth="1.5" />
           </>
         )}
 

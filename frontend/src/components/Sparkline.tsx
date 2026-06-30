@@ -90,9 +90,9 @@ export function Sparkline({
       className={cn(
         'pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 rounded-full',
         kind === 'active'
-          ? 'h-2.5 w-2.5 ring-2 ring-card'
+          ? 'h-2.5 w-2.5 ring-2 ring-background'
           : kind === 'peak'
-            ? 'h-1.5 w-1.5 ring-2 ring-card'
+            ? 'h-1.5 w-1.5 ring-2 ring-background'
             : 'h-1.5 w-1.5',
       )}
       style={{
