@@ -119,7 +119,6 @@ export function CommandPalette() {
       className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-4 pt-[15vh]"
       onClick={close}
     >
-      {/* DESIGN: Claude review */}
       <Card
         role="dialog"
         aria-modal="true"

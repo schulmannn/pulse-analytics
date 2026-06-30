@@ -37,7 +37,6 @@ export function ExpandableChart({ title, children, renderExpanded }: ExpandableC
 
   return (
     <>
-      {/* DESIGN: Claude review */}
       <div
         role="button"
         tabIndex={0}

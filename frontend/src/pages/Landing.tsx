@@ -1,8 +1,7 @@
 import { Link } from 'react-router-dom';
 
-/*  DESIGN: Claude — public marketing landing, ported from the legacy `.lp-*` dark
-    resend-style page (public/index.html). Forces the dark theme regardless of app
-    theme by wrapping in `.dark` and uses only semantic/brand tokens (no hex). */
+// Public marketing landing — resend-style dark page. Forces the dark theme by wrapping in
+// `.dark` and uses only semantic/brand tokens (no hex).
 
 const SERIF = "'Instrument Serif', Georgia, serif";
 
