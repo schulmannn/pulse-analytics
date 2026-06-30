@@ -3,10 +3,13 @@ import { useSelectedChannel } from '@/lib/channel-context';
 import { fmt } from '@/lib/format';
 import { Card, CardContent } from '@/components/ui/card';
 import { Sparkline } from '@/components/Sparkline';
+import { MetricInfo } from '@/components/InfoTooltip';
 import { Skeleton } from '@/components/ui/skeleton';
 import { usePeriod } from '@/lib/period';
 import { avgReachWindowDelta, dailyWindowDelta, pctDelta, subscriberChange, subscriberDelta, sumPostWindows } from '@/lib/delta';
 import type { MetricDelta } from '@/lib/delta';
+import { METRIC_DEFS } from '@/lib/metricDefs';
+import type { MetricDef } from '@/lib/metricDefs';
 
 /** Sparkline hue: green/red when the metric is trending, brand iris when flat/unknown. */
 function sparkColor(trend?: MetricDelta | null): string {
@@ -173,19 +176,21 @@ export function KpiGrid() {
           trend={viewsTrend}
           caption={viewsCaption}
           spark={viewsSpark}
+          info={METRIC_DEFS.views}
         />
-        <FeaturedKpi label="Подписчики" value={fmt.num(displayMembers)} trend={subscriberTrend} caption={subCaption} spark={subsSpark} />
+        <FeaturedKpi label="Подписчики" value={fmt.num(displayMembers)} trend={subscriberTrend} caption={subCaption} spark={subsSpark} info={METRIC_DEFS.subscribers} />
       </div>
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatTile label="Ср. охват поста" value={fmt.short(avgViews)} trend={avgReachTrend} spark={viewsSpark} />
-        <StatTile label="Реакции" value={fmt.short(totalReactions)} trend={reactionsTrend} spark={reactionsSpark} caption={reactionsCaption} />
-        <StatTile label="Репосты" value={fmt.short(totalForwards)} trend={forwardsTrend} spark={forwardsSpark} caption={forwardsCaption} />
+        <StatTile label="Ср. охват поста" value={fmt.short(avgViews)} trend={avgReachTrend} spark={viewsSpark} info={METRIC_DEFS.avgReach} />
+        <StatTile label="Реакции" value={fmt.short(totalReactions)} trend={reactionsTrend} spark={reactionsSpark} caption={reactionsCaption} info={METRIC_DEFS.reactions} />
+        <StatTile label="Репосты" value={fmt.short(totalForwards)} trend={forwardsTrend} spark={forwardsSpark} caption={forwardsCaption} info={METRIC_DEFS.forwards} />
         <StatTile
           label="Вовлечённость (ER)"
           value={er > 0 ? er.toFixed(2) + '%' : '—'}
           trend={erTrend}
           spark={engagementSpark}
           caption={erCaption}
+          info={METRIC_DEFS.er}
         />
       </div>
     </div>
@@ -204,14 +209,18 @@ interface FeaturedKpiProps {
   trend?: MetricDelta | null;
   caption?: string | null;
   spark?: DailySeries;
+  info?: MetricDef;
 }
 
-function FeaturedKpi({ label, value, trend, caption, spark }: FeaturedKpiProps) {
+function FeaturedKpi({ label, value, trend, caption, spark, info }: FeaturedKpiProps) {
   const [num, unit] = splitUnit(value);
   return (
     <Card>
       <CardContent className="relative overflow-hidden p-5">
-        <div className="text-xs tracking-wide text-muted-foreground">{label}</div>
+        <div className="flex items-center gap-1 text-xs tracking-wide text-muted-foreground">
+          <span>{label}</span>
+          {info && <MetricInfo def={info} />}
+        </div>
         <div className="mt-2 flex items-baseline gap-2.5">
           <div className="text-4xl font-semibold tabular-nums tracking-tight">
             {num}
@@ -245,14 +254,18 @@ interface StatTileProps {
   trend?: MetricDelta | null;
   spark?: DailySeries;
   caption?: string | null;
+  info?: MetricDef;
 }
 
-function StatTile({ label, value, trend, spark, caption }: StatTileProps) {
+function StatTile({ label, value, trend, spark, caption, info }: StatTileProps) {
   const [num, unit] = splitUnit(value);
   return (
     <Card>
       <CardContent className="p-4">
-        <div className="truncate text-[11px] tracking-wide text-muted-foreground">{label}</div>
+        <div className="flex items-center gap-1 text-[11px] tracking-wide text-muted-foreground">
+          <span className="truncate">{label}</span>
+          {info && <MetricInfo def={info} />}
+        </div>
         <div className="mt-1.5 flex items-baseline justify-between gap-2">
           <div className="text-2xl font-semibold tabular-nums tracking-tight">
             {num}

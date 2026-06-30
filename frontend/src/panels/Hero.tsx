@@ -4,6 +4,8 @@ import { usePeriod } from '@/lib/period';
 import { fmt } from '@/lib/format';
 import { freshness, latestHistoryDay } from '@/lib/freshness';
 import { ChannelAvatar } from '@/components/ChannelAvatar';
+import { MetricInfo } from '@/components/InfoTooltip';
+import { METRIC_DEFS } from '@/lib/metricDefs';
 import { Skeleton } from '@/components/ui/skeleton';
 
 /**
@@ -56,6 +58,7 @@ export function Hero() {
               >
                 {fresh.label}
               </span>
+              <MetricInfo def={METRIC_DEFS.freshness} />
             </>
           )}
         </p>
