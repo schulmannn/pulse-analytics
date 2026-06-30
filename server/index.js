@@ -675,6 +675,32 @@ app.get('/api/ig/online', requireAuth, async (req, res) => {
 // GET /api/ig/stories — active stories (last 24h) + per-story insights/navigation. Live
 // window → not cached; tolerates per-story errors (#10 <5 viewers) and returns [] gracefully.
 app.get('/api/ig/stories', requireAuth, async (req, res) => {
+  // ── TEMP diagnostic (superuser + ?debug=1) ──────────────────────────────────
+  // Stories come back as an empty data[] with no error, so we can't tell from the proxy
+  // whether the /stories edge is unsupported on the Instagram-Login API, needs a different
+  // id/path, or there simply are no live stories. This probes the raw upstream (read-only,
+  // never echoes the token) so we can root-cause it, then it gets removed in the real fix.
+  if (req.query.debug === '1' && req.user && req.user.role === 'superuser') {
+    if (!igConfigured()) return res.json({ debug: true, configured: false });
+    const probe = async (path, params) => {
+      try {
+        const qs = new URLSearchParams({ ...params, access_token: IG_TOKEN }).toString();
+        const r = await fetch(`${IG_BASE}${path}?${qs}`);
+        const j = await r.json();
+        return { path, status: r.status, data_len: Array.isArray(j.data) ? j.data.length : null, json: j };
+      } catch (e) { return { path, error: e.message }; }
+    };
+    const me = await probe('/me', { fields: 'user_id,username,account_type,media_count' });
+    const userId = me.json && me.json.user_id;
+    const probes = [me];
+    probes.push(await probe(`/${IG_ACCOUNT}/stories`, { fields: 'id,media_type,timestamp,permalink,thumbnail_url' }));
+    probes.push(await probe(`/${IG_ACCOUNT}/stories`, { fields: 'id,media_type,timestamp' }));
+    probes.push(await probe('/me/stories', { fields: 'id,media_type,timestamp' }));
+    if (userId && String(userId) !== String(IG_ACCOUNT)) {
+      probes.push(await probe(`/${userId}/stories`, { fields: 'id,media_type,timestamp' }));
+    }
+    return res.json({ debug: true, ig_account: IG_ACCOUNT, ig_base: IG_BASE, probes });
+  }
   try {
     if (!igConfigured()) return res.json(igMock.igMockStories());
     const list = await igFetch(`/${IG_ACCOUNT}/stories`, {
