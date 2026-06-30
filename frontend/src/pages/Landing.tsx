@@ -1,112 +1,409 @@
 import { Link } from 'react-router-dom';
+import type { ReactNode } from 'react';
+import { PulseMark } from '@/components/PulseMark';
 
-// Public marketing landing — resend-style dark page. Forces the dark theme by wrapping in
-// `.dark` and uses only semantic/brand tokens (no hex).
+/**
+ * Public marketing landing — "Pulse Refined Technical" (light, product-forward, Steep-style).
+ * Light by default (no forced .dark): warm paper canvas, hairline section dividers, one calm blue
+ * accent, pill CTAs. The product itself does the selling — a static (data-free) dashboard preview
+ * in the hero and real product fragments down the page.
+ */
 
-const SERIF = "'Instrument Serif', Georgia, serif";
+const MAXW = 'mx-auto w-full max-w-[1200px] px-6 sm:px-10';
 
-/** Iris radial-glow background built from the brand token (matches legacy gradients). */
-const GLOW_BG = {
-  backgroundImage: [
-    'radial-gradient(900px 520px at 80% -10%, hsl(var(--primary) / 0.18), transparent 60%)',
-    'radial-gradient(680px 480px at 8% 112%, hsl(var(--primary) / 0.10), transparent 60%)',
-    'linear-gradient(180deg, hsl(var(--background)), hsl(var(--background)))',
-  ].join(','),
-};
-
-function BrandMark() {
+// ── tiny inline icons (stroke = currentColor) ──────────────────────────────
+function Check({ className }: { className?: string }) {
   return (
-    <div className="flex items-center gap-2.5">
-      <span className="flex h-7 w-7 items-center justify-center rounded bg-primary text-base font-medium text-primary-foreground">
-        P
-      </span>
-      <span className="text-[17px] font-medium tracking-tight">Pulse</span>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <path d="M5 12.5l4 4 10-11" />
+    </svg>
+  );
+}
+function Calendar({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <rect x="4" y="5" width="16" height="16" rx="2.2" />
+      <path d="M3.5 9.5h17M8 2.8v3.6M16 2.8v3.6" />
+    </svg>
+  );
+}
+
+// ── product preview: a static, data-free mock of the Обзор screen ──────────
+function Sparkline() {
+  const line = 'M0,44 L18,40 L36,42 L54,33 L72,35 L90,27 L108,29 L126,20 L144,22 L162,12 L180,15 L200,6';
+  return (
+    <svg viewBox="0 0 200 52" preserveAspectRatio="none" className="h-[52px] w-full" aria-hidden="true">
+      <defs>
+        <linearGradient id="lp-spark" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity="0.16" />
+          <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path d={`${line} L200,52 L0,52 Z`} fill="url(#lp-spark)" />
+      <path d={line} fill="none" stroke="hsl(var(--foreground))" strokeWidth="1.5" />
+      <circle cx="200" cy="6" r="3" fill="hsl(var(--primary))" />
+    </svg>
+  );
+}
+
+function MiniNav({ label, active }: { label: string; active?: boolean }) {
+  return (
+    <div className={`flex items-center gap-2 rounded px-2 py-1 ${active ? 'text-foreground' : 'text-ink3'}`}>
+      <span className={`h-1.5 w-1.5 rounded-sm ${active ? 'bg-primary' : 'bg-ink3/50'}`} />
+      <span className="text-[10px]">{label}</span>
     </div>
+  );
+}
+
+function Col({ label, value, delta, up }: { label: string; value: string; delta: string; up?: boolean }) {
+  return (
+    <div className="flex-1 border-l border-border pl-3 first:border-l-0 first:pl-0">
+      <div className="text-[9px] text-ink3">{label}</div>
+      <div className="mt-1 flex items-baseline gap-1">
+        <span className="text-[15px] font-medium tabular-nums text-foreground">{value}</span>
+        <span className={`text-[9px] tabular-nums ${up ? 'text-verdant' : 'text-ember'}`}>{delta}</span>
+      </div>
+    </div>
+  );
+}
+
+function PostRow({ n, title, views, er, delta, up }: { n: number; title: string; views: string; er: string; delta: string; up?: boolean }) {
+  return (
+    <div className="flex items-center gap-3 border-t border-border py-2 text-[10px]">
+      <span className="w-3 text-ink3 tabular-nums">{n}</span>
+      <span className="min-w-0 flex-1 truncate text-foreground">{title}</span>
+      <span className="w-12 text-right tabular-nums text-ink2">{views}</span>
+      <span className="w-8 text-right tabular-nums text-ink2">{er}</span>
+      <span className={`w-9 text-right tabular-nums ${up ? 'text-verdant' : 'text-ember'}`}>{delta}</span>
+    </div>
+  );
+}
+
+function DashboardPreview() {
+  return (
+    <div className="flex w-full overflow-hidden text-foreground">
+      {/* sidebar */}
+      <div className="hidden w-[132px] shrink-0 flex-col gap-3 border-r border-border bg-background p-3 sm:flex">
+        <div className="flex items-center gap-1.5">
+          <PulseMark className="h-3.5 w-3.5 text-primary" />
+          <span className="text-[11px] font-medium">Pulse</span>
+        </div>
+        <div className="flex items-center gap-1.5 rounded-md border border-border bg-card px-1.5 py-1">
+          <span className="flex h-5 w-5 items-center justify-center rounded bg-avatar text-[9px] font-medium text-ink2">N</span>
+          <div className="min-w-0">
+            <div className="truncate text-[10px] font-medium">@newsroom</div>
+            <div className="truncate text-[8px] text-ink3">4 781 подписчик</div>
+          </div>
+        </div>
+        <div>
+          <div className="px-2 pb-1 text-[8px] text-ink3">Платформа</div>
+          <MiniNav label="Telegram" active />
+          <MiniNav label="Instagram" />
+        </div>
+        <div className="space-y-0.5">
+          <MiniNav label="Обзор" active />
+          <MiniNav label="Аналитика" />
+          <MiniNav label="Посты" />
+          <MiniNav label="Упоминания" />
+        </div>
+      </div>
+
+      {/* main */}
+      <div className="min-w-0 flex-1 bg-card p-4">
+        <div className="flex items-center justify-between border-b border-border pb-2.5">
+          <span className="text-[11px] font-medium">Обзор</span>
+          <div className="flex items-center gap-2 text-[9px] text-ink3">
+            <span>7д</span>
+            <span className="relative text-foreground">30д<span className="absolute inset-x-0 -bottom-1 h-px bg-primary" /></span>
+            <span>90д</span>
+            <span className="h-2.5 w-px bg-border" />
+            <Calendar className="h-3 w-3 text-ink2" />
+          </div>
+        </div>
+
+        <div className="pt-3">
+          <div className="text-[9px] text-ink3">Просмотры · 30 дней</div>
+          <div className="mt-1 flex items-end justify-between gap-3">
+            <div className="flex items-baseline gap-2">
+              <span className="text-[34px] font-medium leading-none tabular-nums">48 210</span>
+              <span className="rounded bg-green-tint px-1.5 py-0.5 text-[9px] font-medium tabular-nums text-verdant">↑ 8.4%</span>
+            </div>
+            <div className="w-[46%]"><Sparkline /></div>
+          </div>
+        </div>
+
+        <div className="mt-3 flex gap-3 border-t border-border pt-3">
+          <Col label="Подписчики" value="4 781" delta="−108" />
+          <Col label="Ср. охват" value="2 835" delta="+4%" up />
+          <Col label="Реакции" value="1 204" delta="+58" up />
+          <Col label="Вовлечённость" value="6.7%" delta="+0.4" up />
+        </div>
+
+        <div className="mt-3 border-t border-border pt-2">
+          <div className="pb-1 text-[9px] text-ink3">Топ постов</div>
+          <PostRow n={1} title="Как мы выбираем темы для канала" views="12 480" er="9.1%" delta="+24%" up />
+          <PostRow n={2} title="Большой гайд по продуктивности" views="8 902" er="7.4%" delta="−6%" />
+          <PostRow n={3} title="Подкаст: итоги сезона и планы" views="7 415" er="6.2%" delta="+11%" up />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── page sections ──────────────────────────────────────────────────────────
+function Header() {
+  return (
+    <header className="sticky top-0 z-20 border-b border-border bg-background/90 backdrop-blur">
+      <div className={`${MAXW} flex h-[68px] items-center justify-between`}>
+        <Link to="/" className="flex items-center gap-2.5">
+          <PulseMark className="h-[18px] w-[18px] text-primary" />
+          <span className="text-[17px] font-medium tracking-tight text-foreground">Pulse</span>
+        </Link>
+        <nav className="flex items-center gap-6 sm:gap-7">
+          <a href="#features" className="hidden text-sm text-ink2 transition-colors hover:text-foreground sm:block">Возможности</a>
+          <a href="#security" className="hidden text-sm text-ink2 transition-colors hover:text-foreground sm:block">Безопасность</a>
+          <Link to="/login" className="text-sm font-medium text-foreground transition-colors hover:text-primary">Войти</Link>
+          <Link to="/register" className="btn-pill bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90">
+            Начать
+          </Link>
+        </nav>
+      </div>
+    </header>
+  );
+}
+
+function Hero() {
+  return (
+    <section className="border-b border-border">
+      <div className={`${MAXW} grid items-center gap-12 py-14 md:grid-cols-[minmax(0,420px)_1fr] md:py-20`}>
+        <div>
+          <h1 className="text-[clamp(54px,8vw,76px)] font-medium leading-[0.95] tracking-tight text-foreground">Pulse</h1>
+          <p className="mt-5 max-w-[22em] text-[clamp(18px,1.6vw,22px)] leading-snug text-ink2">
+            Аналитика Telegram и Instagram без лишнего шума
+          </p>
+          <div className="mt-8 flex flex-wrap items-center gap-3">
+            <Link to="/register" className="btn-pill bg-primary px-5 py-3 text-[15px] font-medium text-primary-foreground transition-colors hover:bg-primary/90">
+              Создать аккаунт
+            </Link>
+            <Link to="/login" className="btn-pill border border-border bg-card px-5 py-3 text-[15px] font-medium text-foreground transition-colors hover:bg-muted">
+              Посмотреть демо
+            </Link>
+          </div>
+          <p className="mt-5 text-[13px] text-ink3">Демо доступно без регистрации · данные собираются локально</p>
+        </div>
+        <div className="hidden overflow-hidden rounded-xl border border-border bg-card md:block">
+          <DashboardPreview />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function Pillars() {
+  const items = [
+    { h: 'Локальный сбор данных', p: 'Collector работает на вашей стороне. Сессия Telegram не попадает в Pulse.' },
+    { h: 'Инсайты по постам', p: 'Сигнал → тезис → действие по каждому посту, а не просто графики.' },
+    { h: 'Состояние источников', p: 'Источник, последний сбор, версия сборщика и статус API — на виду.' },
+  ];
+  return (
+    <section id="security" className="border-b border-border">
+      <div className={`${MAXW} py-16`}>
+        <div className="text-[13px] font-medium text-ink3">Почему Pulse</div>
+        <h2 className="mt-2 max-w-[16em] text-[clamp(24px,3vw,30px)] font-medium tracking-tight text-foreground">
+          Спокойная аналитика, которой можно доверять
+        </h2>
+        <div className="mt-10 grid gap-px overflow-hidden md:grid-cols-3">
+          {items.map((it, i) => (
+            <div key={it.h} className={i > 0 ? 'md:border-l md:border-border md:pl-10' : 'md:pr-10'}>
+              <Check className="h-5 w-5 text-foreground" />
+              <h3 className="mt-3 text-[17px] font-medium text-foreground">{it.h}</h3>
+              <p className="mt-2 max-w-[20em] text-sm leading-relaxed text-ink2">{it.p}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function Panel({ children }: { children: ReactNode }) {
+  return <div className="overflow-hidden rounded-xl border border-border bg-card p-5">{children}</div>;
+}
+
+function KpiFragment() {
+  return (
+    <Panel>
+      <div className="text-[11px] text-ink3">Просмотры · 30 дней</div>
+      <div className="mt-1 flex items-end justify-between gap-4">
+        <div className="flex items-baseline gap-2">
+          <span className="text-[40px] font-medium leading-none tabular-nums text-foreground">48 210</span>
+          <span className="rounded bg-green-tint px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-verdant">↑ 8.4%</span>
+        </div>
+        <div className="w-[42%]"><Sparkline /></div>
+      </div>
+      <div className="mt-4 flex gap-3 border-t border-border pt-4">
+        <Col label="Подписчики" value="4 781" delta="−108" />
+        <Col label="Ср. охват" value="2 835" delta="+4%" up />
+        <Col label="Реакции" value="1 204" delta="+58" up />
+      </div>
+    </Panel>
+  );
+}
+
+function InsightFragment() {
+  return (
+    <Panel>
+      <div className="text-[11px] text-ink3">Инсайт</div>
+      <div className="mt-3 flex items-center gap-2.5">
+        <span className="rounded bg-amber-tint px-1.5 py-0.5 text-[11px] font-medium text-status-warn">Риск</span>
+        <span className="text-[15px] font-medium text-foreground">Охват растёт, база сжимается</span>
+      </div>
+      <p className="mt-3 text-sm leading-relaxed text-ink2">
+        Подписчиков стало меньше на 108 при росте просмотров на 8%.
+      </p>
+      <p className="mt-3 flex items-start gap-2 text-sm text-ink2">
+        <span className="text-primary">→</span>
+        Проверьте посты перед оттоком в разделе «Рост».
+      </p>
+      <div className="mt-3 text-[13px] font-medium text-primary">Топ-пост: «Как мы выбираем темы» →</div>
+    </Panel>
+  );
+}
+
+function HealthRow({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="flex items-center justify-between border-t border-border py-2.5 first:border-t-0 first:pt-0">
+      <span className="text-[13px] text-ink2">{label}</span>
+      <span className="font-mono text-[12px] tabular-nums text-ink3">{value}</span>
+    </div>
+  );
+}
+
+function HealthFragment() {
+  return (
+    <Panel>
+      <div className="text-[11px] text-ink3">Состояние данных</div>
+      <div className="mt-3">
+        <HealthRow label="Источник" value="Telegram · MTProto" />
+        <HealthRow label="Последний сбор" value="09:14 · 2 ч назад" />
+        <HealthRow label="Сборщик" value="v1.0.5" />
+        <HealthRow
+          label="API"
+          value={<span className="inline-flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-verdant" />200 OK</span>}
+        />
+      </div>
+      <div className="mt-3 text-[13px] font-medium text-primary">Настроить сбор →</div>
+    </Panel>
+  );
+}
+
+function Feature({
+  eyebrow,
+  title,
+  body,
+  bullets,
+  fragment,
+  reverse,
+}: {
+  eyebrow: string;
+  title: string;
+  body: string;
+  bullets: string[];
+  fragment: ReactNode;
+  reverse?: boolean;
+}) {
+  return (
+    <section className="border-b border-border">
+      <div className={`${MAXW} grid items-center gap-12 py-16 md:grid-cols-2`}>
+        <div className={reverse ? 'md:order-2' : ''}>
+          <div className="text-[13px] font-medium text-primary">{eyebrow}</div>
+          <h2 className="mt-3 max-w-[12em] text-[clamp(24px,3vw,30px)] font-medium tracking-tight text-foreground">{title}</h2>
+          <p className="mt-3 max-w-[26em] text-base leading-relaxed text-ink2">{body}</p>
+          <ul className="mt-5 space-y-2.5">
+            {bullets.map((b) => (
+              <li key={b} className="flex items-center gap-2.5 text-sm text-ink2">
+                <Check className="h-4 w-4 shrink-0 text-primary" />
+                {b}
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div className={reverse ? 'md:order-1' : ''}>{fragment}</div>
+      </div>
+    </section>
+  );
+}
+
+function CtaBand() {
+  return (
+    <section className="bg-blue-tint">
+      <div className={`${MAXW} flex flex-col items-center py-20 text-center`}>
+        <h2 className="text-[clamp(28px,4vw,36px)] font-medium tracking-tight text-foreground">Начните за минуту</h2>
+        <p className="mt-4 max-w-[28em] text-[17px] text-ink2">Подключите канал или откройте демо без регистрации.</p>
+        <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
+          <Link to="/register" className="btn-pill bg-primary px-5 py-3 text-[15px] font-medium text-primary-foreground transition-colors hover:bg-primary/90">
+            Создать аккаунт
+          </Link>
+          <Link to="/login" className="btn-pill border border-border bg-card px-5 py-3 text-[15px] font-medium text-foreground transition-colors hover:bg-muted">
+            Посмотреть демо
+          </Link>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function Footer() {
+  return (
+    <footer className="border-t border-border">
+      <div className={`${MAXW} flex flex-col items-start justify-between gap-4 py-10 sm:flex-row sm:items-center`}>
+        <div className="flex items-center gap-2.5 text-[13px] text-ink3">
+          <PulseMark className="h-[18px] w-[18px] text-ink3" />
+          Pulse · спокойная аналитика
+        </div>
+        <nav className="flex items-center gap-6 text-[13px] text-ink3">
+          <a href="#features" className="transition-colors hover:text-foreground">Возможности</a>
+          <a href="#security" className="transition-colors hover:text-foreground">Безопасность</a>
+          <Link to="/login" className="transition-colors hover:text-foreground">Войти</Link>
+          <Link to="/register" className="transition-colors hover:text-foreground">Создать аккаунт</Link>
+        </nav>
+      </div>
+    </footer>
   );
 }
 
 export function Landing() {
   return (
-    <div className="dark min-h-screen text-foreground" style={GLOW_BG}>
-      {/* ── Top nav ── */}
-      <nav className="sticky top-0 z-20 flex items-center justify-between gap-6 border-b border-white/5 bg-background/60 px-5 py-3.5 backdrop-blur sm:px-10">
-        <div className="flex items-center gap-7">
-          <BrandMark />
-          <div className="hidden items-center gap-1 md:flex">
-            {['О нас', 'Философия', 'Тарифы'].map((label) => (
-              <span
-                key={label}
-                className="cursor-default rounded px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
-              >
-                {label}
-              </span>
-            ))}
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Link
-            to="/login"
-            className="rounded px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
-          >
-            Войти
-          </Link>
-          <Link
-            to="/register"
-            className="rounded-full bg-foreground px-4 py-2 text-sm font-medium text-background transition-shadow hover:shadow-[0_6px_22px_hsl(var(--foreground)/0.16)]"
-          >
-            Начать
-          </Link>
-        </div>
-      </nav>
-
-      {/* ── Hero ── */}
-      <section className="mx-auto grid max-w-[1180px] items-center gap-10 px-5 pb-16 pt-12 sm:px-10 md:grid-cols-[1.1fr_0.9fr] md:gap-20 md:pt-24">
-        <div>
-          <span className="mb-6 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3.5 py-1.5 text-[13px] text-muted-foreground">
-            <b className="font-semibold text-primary">Новое</b> · Коллектор любых каналов →
-          </span>
-          <h1
-            className="mb-5 text-[clamp(46px,7vw,92px)] font-normal leading-[0.96] tracking-tight"
-            style={{ fontFamily: SERIF }}
-          >
-            Аналитика
-            <br />
-            <em className="italic text-primary">для авторов</em>
-          </h1>
-          <p className="mb-8 max-w-[30em] text-[clamp(16px,1.4vw,19px)] leading-relaxed text-muted-foreground">
-            Метрики, динамика и упоминания твоих Telegram-каналов — в одном понятном дашборде.
-            Без ботов и без доступа к твоему аккаунту.
-          </p>
-          <div className="flex flex-wrap items-center gap-3">
-            <Link
-              to="/register"
-              className="rounded bg-primary px-6 py-3 text-[15px] font-medium text-primary-foreground transition-all hover:-translate-y-px hover:shadow-[0_10px_30px_hsl(var(--primary)/0.4)]"
-            >
-              Начать бесплатно
-            </Link>
-            <span className="cursor-default rounded border border-white/10 bg-white/5 px-5 py-3 text-[15px] font-medium transition-colors hover:bg-white/10">
-              Документация
-            </span>
-          </div>
-        </div>
-
-        {/* Empty hero slot (kept from legacy — visual added later). */}
-        <div className="hidden min-h-[380px] rounded-2xl border border-dashed border-primary/20 bg-white/[0.015] md:block" aria-hidden="true" />
-      </section>
-
-      {/* ── Feature strip ── */}
-      <section className="mx-auto grid max-w-[1180px] gap-4 px-5 pb-20 sm:px-10 md:grid-cols-3">
-        {[
-          { h: 'Telegram-аналитика', p: 'Просмотры, ER, виральность и динамика подписчиков по каждому посту — с учётом альбомов.' },
-          { h: 'Упоминания бренда', p: 'Отслеживай, где о тебе говорят в публичных каналах — с охватом и контекстом.' },
-          { h: 'Твои данные — твои', p: 'Коллектор считает метрики у тебя локально; мы не храним твою сессию Telegram.' },
-        ].map((f) => (
-          <div key={f.h} className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-6">
-            <h3 className="mb-2 text-base font-semibold">{f.h}</h3>
-            <p className="text-sm leading-relaxed text-muted-foreground">{f.p}</p>
-          </div>
-        ))}
-      </section>
+    <div className="min-h-screen bg-background text-foreground">
+      <Header />
+      <Hero />
+      <div id="features">
+        <Feature
+          eyebrow="Обзор"
+          title="Весь канал на одном экране"
+          body="Просмотры, охват, реакции и вовлечённость — одним взглядом, с дельтой к прошлому периоду."
+          bullets={['Главная метрика + спарклайн с пиками', 'KPI-ledger: 4 показателя в строке', 'Сравнение с прошлым периодом']}
+          fragment={<KpiFragment />}
+        />
+        <Feature
+          eyebrow="Инсайты"
+          title="Инсайты, а не просто графики"
+          body="Каждый сигнал — это готовый вывод и следующий шаг, а не ещё один график, который надо толковать."
+          bullets={['Сигнал: Риск или Рост', 'Тезис простым языком', 'Действие и ссылка-доказательство']}
+          fragment={<InsightFragment />}
+          reverse
+        />
+        <Feature
+          eyebrow="Данные"
+          title="Источники под контролем"
+          body="Видно, откуда данные, когда собраны в последний раз и здоров ли сборщик — без догадок."
+          bullets={['Источник и последний сбор', 'Версия сборщика', 'Статус API в реальном времени']}
+          fragment={<HealthFragment />}
+        />
+      </div>
+      <Pillars />
+      <CtaBand />
+      <Footer />
     </div>
   );
 }
