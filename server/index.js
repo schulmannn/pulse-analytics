@@ -537,27 +537,30 @@ app.get('/api/ig/insights', requireAuth, async (req, res) => {
     if (!igConfigured()) return res.json({ probe: true, configured: false });
     const SEC = 86400;
     const now = Math.floor(Date.now() / 1000);
-    const probe = async (params) => {
+    const probe = async (label, params) => {
       try {
         const qs = new URLSearchParams({ ...params, access_token: IG_TOKEN }).toString();
         const r = await fetch(`${IG_BASE}/${IG_ACCOUNT}/insights?${qs}`);
         const j = await r.json();
         const m = j && j.data && j.data[0];
         return {
-          metric: params.metric,
-          type: params.metric_type || 'series',
+          label,
           status: r.status,
-          sample: m ? (m.total_value ? m.total_value.value : (m.values || []).slice(-5).map((v) => v.value)) : null,
+          total_value: m ? m.total_value : undefined,
+          values: m ? (m.values || []).slice(-5) : undefined,
           error: j && j.error ? j.error.message : undefined,
         };
-      } catch (e) { return { metric: params.metric, error: e.message }; }
+      } catch (e) { return { label, error: e.message }; }
     };
+    const F = 'follows_and_unfollows';
     const out = [];
-    out.push(await probe({ metric: '__list_all__', period: 'day', since: now - 30 * SEC, until: now }));
-    for (const metric of ['follows_and_unfollows', 'unfollows', 'follows', 'net_follower_growth', 'follower_count']) {
-      out.push(await probe({ metric, period: 'day', since: now - 30 * SEC, until: now }));
-      out.push(await probe({ metric, metric_type: 'total_value', period: 'day', since: now - 30 * SEC, until: now }));
-    }
+    // Bogus breakdown → the error lists the breakdown(s) follows_and_unfollows accepts.
+    out.push(await probe('bogus-breakdown', { metric: F, metric_type: 'total_value', breakdown: '__bogus__', period: 'day', since: now - 30 * SEC, until: now }));
+    out.push(await probe('tv+follow_type', { metric: F, metric_type: 'total_value', breakdown: 'follow_type', period: 'day', since: now - 30 * SEC, until: now }));
+    out.push(await probe('tv+no-breakdown', { metric: F, metric_type: 'total_value', period: 'day', since: now - 30 * SEC, until: now }));
+    out.push(await probe('tv+lifetime', { metric: F, metric_type: 'total_value', period: 'lifetime' }));
+    out.push(await probe('series+follow_type', { metric: F, breakdown: 'follow_type', period: 'day', since: now - 30 * SEC, until: now }));
+    out.push(await probe('series+no-breakdown', { metric: F, period: 'day', since: now - 30 * SEC, until: now }));
     return res.json({ probe: true, ig_account: IG_ACCOUNT, probes: out });
   }
 
