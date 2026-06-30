@@ -510,6 +510,32 @@ async function igFetch(path, params = {}) {
 
 // GET /api/ig/profile — профиль аккаунта (теперь с аватаркой)
 app.get('/api/ig/profile', requireAuth, async (req, res) => {
+  // ── TEMP diagnostic (superuser + ?probe=mentions): which brand-mention surfaces our token can
+  // read — the /tags edge (media we're tagged in), the user-node field list (bogus field → error
+  // lists valid fields), hashtag search, mentioned_media. Read-only; removed once we know.
+  if (req.query.probe === 'mentions' && req.user && req.user.role === 'superuser') {
+    if (!igConfigured()) return res.json({ probe: true, configured: false });
+    const probe = async (label, url) => {
+      try {
+        const sep = url.includes('?') ? '&' : '?';
+        const r = await fetch(`${url}${sep}access_token=${encodeURIComponent(IG_TOKEN)}`);
+        const j = await r.json();
+        return {
+          label,
+          status: r.status,
+          data_len: Array.isArray(j.data) ? j.data.length : null,
+          sample: Array.isArray(j.data) ? j.data.slice(0, 3) : (j.error ? undefined : j),
+          error: j && j.error ? j.error.message : undefined,
+        };
+      } catch (e) { return { label, error: e.message }; }
+    };
+    const out = [];
+    out.push(await probe('tags', `${IG_BASE}/${IG_ACCOUNT}/tags?fields=id,caption,username,permalink,timestamp,media_type,like_count,comments_count&limit=5`));
+    out.push(await probe('user-fields(bogus)', `${IG_BASE}/${IG_ACCOUNT}?fields=__bogus__`));
+    out.push(await probe('hashtag-search', `${IG_BASE}/ig_hashtag_search?user_id=${IG_ACCOUNT}&q=notem`));
+    out.push(await probe('mentioned_media-field', `${IG_BASE}/${IG_ACCOUNT}?fields=id,username,mentioned_media.limit(2){id,caption,permalink}`));
+    return res.json({ probe: true, ig_account: IG_ACCOUNT, ig_base: IG_BASE, probes: out });
+  }
   try {
     if (!igConfigured()) return res.json(igMock.igMockProfile());
     const cached = cacheGet('ig:profile');
