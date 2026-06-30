@@ -13,7 +13,7 @@ import { fmt } from '@/lib/format';
 import { pctDelta } from '@/lib/delta';
 import type { MetricDelta } from '@/lib/delta';
 import { usePeriod } from '@/lib/period';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { Breakdown } from '@/components/Breakdown';
@@ -327,7 +327,7 @@ export function Instagram() {
     <div>
       <section className="flex flex-wrap items-center gap-3">
         <div>
-          <h2 className="text-xl font-bold tracking-tight">
+          <h2 className="text-xl font-medium tracking-tight">
             Instagram{profile.data?.username ? ` · @${profile.data.username}` : ''}
           </h2>
           <p className="mt-0.5 text-xs text-muted-foreground">
@@ -360,7 +360,7 @@ export function Instagram() {
         <ClusterHeading>Обзор</ClusterHeading>
         {/* Метрики */}
         <IgSection id="ig-metrics" title="Ключевые метрики">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-2 lg:grid-cols-3">
             {kpis.map((k) => <KpiCard key={k.label} {...k} />)}
           </div>
         </IgSection>
@@ -391,42 +391,34 @@ export function Instagram() {
 
         {/* Форматы */}
         <IgSection id="ig-formats" title="Вовлечённость по форматам">
-          <Card>
-            <CardContent className="p-5">
-              <Breakdown
-                items={tvBreakdown(breakdowns.data?.data, 'total_interactions', 'media_product_type')
-                  .sort((a, b) => b.value - a.value)
-                  .map((it) => ({
-                    label: MEDIA_PRODUCT_LABEL[it.label] ?? it.label,
-                    value: it.value,
-                    display: fmt.short(it.value),
-                    color: MEDIA_PRODUCT_CHART[it.label],
-                  }))}
-              />
-            </CardContent>
-          </Card>
+          <Breakdown
+            items={tvBreakdown(breakdowns.data?.data, 'total_interactions', 'media_product_type')
+              .sort((a, b) => b.value - a.value)
+              .map((it) => ({
+                label: MEDIA_PRODUCT_LABEL[it.label] ?? it.label,
+                value: it.value,
+                display: fmt.short(it.value),
+                color: MEDIA_PRODUCT_CHART[it.label],
+              }))}
+          />
         </IgSection>
 
         {/* Рост */}
         <IgSection id="ig-growth" title="Новые подписчики по дням">
-          <Card>
-            <CardContent className="p-5">
-              {newFollowersByDay.length > 0 ? (
-                <ExpandableChart title="Новые подписчики по дням">
-                  <BarChart
-                    values={newFollowersByDay.map((d) => d.value)}
-                    labels={newFollowersByDay.map((d) => fmtDay(d.day))}
-                    titles={newFollowersByDay.map((d) => `${fmtDay(d.day)}: +${fmt.num(d.value)}`)}
-                  />
-                </ExpandableChart>
-              ) : (
-                <EmptyChart />
-              )}
-              <p className="mt-3 text-xs font-medium text-muted-foreground">
-                Всего за период: <span className="text-verdant">+{fmt.num(followerP.cur)}</span> новых подписчиков
-              </p>
-            </CardContent>
-          </Card>
+          {newFollowersByDay.length > 0 ? (
+            <ExpandableChart title="Новые подписчики по дням">
+              <BarChart
+                values={newFollowersByDay.map((d) => d.value)}
+                labels={newFollowersByDay.map((d) => fmtDay(d.day))}
+                titles={newFollowersByDay.map((d) => `${fmtDay(d.day)}: +${fmt.num(d.value)}`)}
+              />
+            </ExpandableChart>
+          ) : (
+            <EmptyChart />
+          )}
+          <p className="mt-3 text-xs font-medium text-muted-foreground">
+            Всего за период: <span className="text-verdant">+{fmt.num(followerP.cur)}</span> новых подписчиков
+          </p>
         </IgSection>
 
         <ClusterHeading>Аудитория</ClusterHeading>
@@ -437,11 +429,7 @@ export function Instagram() {
 
         {/* Лучшее время */}
         <IgSection id="ig-timing" title="Лучшее время для публикации">
-          <Card>
-            <CardContent className="p-5">
-              <BestTimeHeatmap online={online.data} />
-            </CardContent>
-          </Card>
+          <BestTimeHeatmap online={online.data} />
         </IgSection>
 
         <ClusterHeading>Публикации</ClusterHeading>
@@ -474,26 +462,22 @@ export function Instagram() {
         <ClusterHeading>Профиль</ClusterHeading>
         {/* Профиль */}
         <IgSection id="ig-actions" title="Действия в профиле">
-          <Card>
-            <CardContent className="p-5">
-              {(() => {
-                const items = tvBreakdown(breakdowns.data?.data, 'profile_links_taps', 'contact_button_type')
-                  .sort((a, b) => b.value - a.value);
-                return items.length > 0 ? (
-                  <Breakdown
-                    items={items.map((it) => ({
-                      label: CONTACT_LABEL[it.label] ?? it.label,
-                      value: it.value,
-                      display: fmt.short(it.value),
-                      icon: CONTACT_ICON[it.label],
-                    }))}
-                  />
-                ) : (
-                  <p className="py-6 text-center text-sm text-muted-foreground">Нет данных о действиях.</p>
-                );
-              })()}
-            </CardContent>
-          </Card>
+          {(() => {
+            const items = tvBreakdown(breakdowns.data?.data, 'profile_links_taps', 'contact_button_type')
+              .sort((a, b) => b.value - a.value);
+            return items.length > 0 ? (
+              <Breakdown
+                items={items.map((it) => ({
+                  label: CONTACT_LABEL[it.label] ?? it.label,
+                  value: it.value,
+                  display: fmt.short(it.value),
+                  icon: CONTACT_ICON[it.label],
+                }))}
+              />
+            ) : (
+              <p className="py-6 text-center text-sm text-muted-foreground">Нет данных о действиях.</p>
+            );
+          })()}
         </IgSection>
 
         {isMock && <DataHealthNote />}
@@ -505,7 +489,20 @@ export function Instagram() {
 function IgSection({ id, title, children }: { id: string; title: string; children: ReactNode }) {
   return (
     <section id={id} className="scroll-mt-28 space-y-4">
-      <h3 className="text-lg font-semibold tracking-tight">{title}</h3>
+      <h3 className="text-lg font-medium tracking-tight">{title}</h3>
+      {children}
+    </section>
+  );
+}
+
+/** Hairline-delimited chart section (no card) — a title with a 1px rule + the chart body. */
+function ChartSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="space-y-3">
+      <h3 className="flex items-center gap-3 text-xs font-medium tracking-wider text-muted-foreground">
+        <span className="whitespace-nowrap">{title}</span>
+        <span aria-hidden="true" className="h-px flex-1 bg-border" />
+      </h3>
       {children}
     </section>
   );
@@ -523,25 +520,20 @@ function ClusterHeading({ children }: { children: ReactNode }) {
 
 function TrendCard({ title, series }: { title: string; series: Point[] }) {
   return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-sm font-medium tracking-wide text-muted-foreground">{title}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        {series.length > 1 ? (
-          <ExpandableChart title={title}>
-            <LineChart
-              values={series.map((p) => p.value)}
-              labels={pickLabels(series)}
-              titles={series.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)}`)}
-              height={220}
-            />
-          </ExpandableChart>
-        ) : (
-          <EmptyChart />
-        )}
-      </CardContent>
-    </Card>
+    <ChartSection title={title}>
+      {series.length > 1 ? (
+        <ExpandableChart title={title}>
+          <LineChart
+            values={series.map((p) => p.value)}
+            labels={pickLabels(series)}
+            titles={series.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)}`)}
+            height={220}
+          />
+        </ExpandableChart>
+      ) : (
+        <EmptyChart />
+      )}
+    </ChartSection>
   );
 }
 
@@ -566,67 +558,47 @@ function AudienceBlock({ breakdowns, followers }: { breakdowns: IgBreakdowns | u
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium tracking-wide text-muted-foreground">Возраст</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {age.length > 0 ? (
-              <ExpandableChart title="Возраст аудитории">
-                <BarChart
-                  values={age.map((a) => a.value)}
-                  labels={age.map((a) => a.label)}
-                  titles={age.map((a) => `${a.label}: ${fmt.num(a.value)}`)}
-                  height={200}
-                />
-              </ExpandableChart>
-            ) : (
-              <EmptyChart />
-            )}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium tracking-wide text-muted-foreground">Пол</CardTitle>
-          </CardHeader>
-          <CardContent className="p-5">
-            <Breakdown
-              items={gender
-                .sort((a, b) => b.value - a.value)
-                .map((g, i) => ({
-                  label: GENDER_LABEL[g.label] ?? g.label,
-                  value: g.value,
-                  display: fmt.short(g.value),
-                  color: CHART_CYCLE[i % CHART_CYCLE.length],
-                }))}
-            />
-          </CardContent>
-        </Card>
+        <ChartSection title="Возраст">
+          {age.length > 0 ? (
+            <ExpandableChart title="Возраст аудитории">
+              <BarChart
+                values={age.map((a) => a.value)}
+                labels={age.map((a) => a.label)}
+                titles={age.map((a) => `${a.label}: ${fmt.num(a.value)}`)}
+                height={200}
+              />
+            </ExpandableChart>
+          ) : (
+            <EmptyChart />
+          )}
+        </ChartSection>
+        <ChartSection title="Пол">
+          <Breakdown
+            items={gender
+              .sort((a, b) => b.value - a.value)
+              .map((g, i) => ({
+                label: GENDER_LABEL[g.label] ?? g.label,
+                value: g.value,
+                display: fmt.short(g.value),
+                color: CHART_CYCLE[i % CHART_CYCLE.length],
+              }))}
+          />
+        </ChartSection>
       </div>
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium tracking-wide text-muted-foreground">Топ стран</CardTitle>
-          </CardHeader>
-          <CardContent className="p-5">
-            <Breakdown
-              items={countries.map((c) => ({
-                label: COUNTRY_NAME[c.label] ?? c.label,
-                value: c.value,
-                display: fmt.short(c.value),
-                icon: flag(c.label),
-              }))}
-            />
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium tracking-wide text-muted-foreground">Топ городов</CardTitle>
-          </CardHeader>
-          <CardContent className="p-5">
-            <Breakdown items={cities.map((c) => ({ label: c.label, value: c.value, display: fmt.short(c.value) }))} />
-          </CardContent>
-        </Card>
+        <ChartSection title="Топ стран">
+          <Breakdown
+            items={countries.map((c) => ({
+              label: COUNTRY_NAME[c.label] ?? c.label,
+              value: c.value,
+              display: fmt.short(c.value),
+              icon: flag(c.label),
+            }))}
+          />
+        </ChartSection>
+        <ChartSection title="Топ городов">
+          <Breakdown items={cities.map((c) => ({ label: c.label, value: c.value, display: fmt.short(c.value) }))} />
+        </ChartSection>
       </div>
       {coverage < 0.98 && (
         <p className="px-1 text-xs text-muted-foreground">
@@ -726,25 +698,20 @@ function ReelsBlock({ posts }: { posts: IgPost[] }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-3">
         <KpiCard label="Reels" value={fmt.num(reels.length)} />
         <KpiCard label="Ср. время просмотра" value={`${avgWatchAll} сек`} />
         <KpiCard label="Суммарно просмотрено" value={`${fmt.short(Math.round(totalWatchHours))} ч`} />
       </div>
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-medium tracking-wide text-muted-foreground">Ср. время просмотра по Reels</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ExpandableChart title="Ср. время просмотра по Reels">
-            <BarChart
-              values={reels.map(avgSec)}
-              labels={reels.map((_, i) => `R${i + 1}`)}
-              titles={reels.map((r, i) => `R${i + 1}: ${avgSec(r)} сек · ${fmt.short(Number(r.views ?? 0))} просм`)}
-            />
-          </ExpandableChart>
-        </CardContent>
-      </Card>
+      <ChartSection title="Ср. время просмотра по Reels">
+        <ExpandableChart title="Ср. время просмотра по Reels">
+          <BarChart
+            values={reels.map(avgSec)}
+            labels={reels.map((_, i) => `R${i + 1}`)}
+            titles={reels.map((r, i) => `R${i + 1}: ${avgSec(r)} сек · ${fmt.short(Number(r.views ?? 0))} просм`)}
+          />
+        </ExpandableChart>
+      </ChartSection>
     </div>
   );
 }
@@ -797,14 +764,12 @@ function InsightsBlock({ insights }: { insights: IgInsight[] }) {
   }
   const dot = (t: IgInsight['tone']) => (t === 'up' ? 'bg-verdant' : t === 'down' ? 'bg-ember' : 'bg-primary');
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+    <div className="grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-2">
       {insights.map((ins, i) => (
-        <Card key={i}>
-          <CardContent className="flex items-start gap-3 p-4">
-            <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${dot(ins.tone)}`} />
-            <p className="text-sm leading-relaxed text-foreground">{ins.text}</p>
-          </CardContent>
-        </Card>
+        <div key={i} className="flex items-start gap-3 bg-background p-4">
+          <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${dot(ins.tone)}`} />
+          <p className="text-sm leading-relaxed text-foreground">{ins.text}</p>
+        </div>
       ))}
     </div>
   );
@@ -841,76 +806,72 @@ function GoalsBlock({ followers, erReach, reachCur, accountKey }: { followers: n
     { key: 'reach' as const, label: 'Охват за период', current: reachCur, target: goals.reach, render: (n: number) => fmt.short(n), step: 100 },
   ];
   return (
-    <Card>
-      <CardContent className="space-y-5 p-5">
-        {bars.map((b) => {
-          const pct = goalPct(b.current, b.target);
-          return (
-            <div key={b.key} className="space-y-1.5">
-              <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-                <span className="text-muted-foreground">{b.label}</span>
-                <span className="flex items-center gap-1.5">
-                  <span className="tabular-nums text-foreground">{b.render(b.current)}</span>
-                  <span className="text-muted-foreground">/</span>
-                  <input
-                    type="number"
-                    min={0}
-                    step={b.step}
-                    value={draft[b.key] ?? String(b.target)}
-                    onChange={(e) => onType(b.key, e.target.value)}
-                    onBlur={() => commit(b.key)}
-                    className="w-24 rounded-md border bg-background px-2 py-1 text-right text-xs tabular-nums text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                    aria-label={`Цель: ${b.label}`}
-                  />
-                </span>
-              </div>
-              <div className="h-2 overflow-hidden rounded-full bg-muted">
-                <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${pct}%` }} />
-              </div>
-              <div className="text-right text-xs tabular-nums text-muted-foreground">{Math.round(pct)}%</div>
+    <div className="space-y-5">
+      {bars.map((b) => {
+        const pct = goalPct(b.current, b.target);
+        return (
+          <div key={b.key} className="space-y-1.5">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+              <span className="text-muted-foreground">{b.label}</span>
+              <span className="flex items-center gap-1.5">
+                <span className="tabular-nums text-foreground">{b.render(b.current)}</span>
+                <span className="text-muted-foreground">/</span>
+                <input
+                  type="number"
+                  min={0}
+                  step={b.step}
+                  value={draft[b.key] ?? String(b.target)}
+                  onChange={(e) => onType(b.key, e.target.value)}
+                  onBlur={() => commit(b.key)}
+                  className="w-24 rounded-md border bg-background px-2 py-1 text-right text-xs tabular-nums text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  aria-label={`Цель: ${b.label}`}
+                />
+              </span>
             </div>
-          );
-        })}
-        <p className="text-xs text-muted-foreground">
-          Ориентиры: ER 1–3% — норма, выше 3% — отлично. Цели хранятся локально в браузере.
-        </p>
-      </CardContent>
-    </Card>
+            <div className="h-2 overflow-hidden rounded-full bg-muted">
+              <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${pct}%` }} />
+            </div>
+            <div className="text-right text-xs tabular-nums text-muted-foreground">{Math.round(pct)}%</div>
+          </div>
+        );
+      })}
+      <p className="text-xs text-muted-foreground">
+        Ориентиры: ER 1–3% — норма, выше 3% — отлично. Цели хранятся локально в браузере.
+      </p>
+    </div>
   );
 }
 
 function PeriodCompareBlock({ rows }: { rows: { label: string; pair: ReturnType<typeof windowPair> }[] }) {
   return (
-    <Card>
-      <CardContent className="overflow-x-auto p-0">
-        <table className="w-full text-left text-sm">
-          <thead>
-            <tr className="border-b border-border bg-muted/40 text-xs font-semibold tracking-wider text-muted-foreground">
-              <th className="p-4">Метрика</th>
-              <th className="p-4 text-right">Текущий</th>
-              <th className="p-4 text-right">Предыдущий</th>
-              <th className="p-4 text-right">Δ</th>
+    <div className="overflow-x-auto">
+      <table className="w-full text-left text-sm">
+        <thead>
+          <tr className="border-b border-border text-xs font-semibold tracking-wider text-muted-foreground">
+            <th className="p-4">Метрика</th>
+            <th className="p-4 text-right">Текущий</th>
+            <th className="p-4 text-right">Предыдущий</th>
+            <th className="p-4 text-right">Δ</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border">
+          {rows.map((r) => (
+            <tr key={r.label} className="hover:bg-hover-row">
+              <td className="p-4 text-muted-foreground">{r.label}</td>
+              <td className="p-4 text-right font-medium tabular-nums">{fmt.short(r.pair.cur)}</td>
+              <td className="p-4 text-right tabular-nums text-muted-foreground">
+                {r.pair.hasPrev ? fmt.short(r.pair.prev) : '—'}
+              </td>
+              <td className="p-4 text-right">
+                <span className="inline-flex justify-end">
+                  <DeltaPill delta={pairDelta(r.pair)} />
+                </span>
+              </td>
             </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {rows.map((r) => (
-              <tr key={r.label} className="hover:bg-muted/30">
-                <td className="p-4 text-muted-foreground">{r.label}</td>
-                <td className="p-4 text-right font-medium tabular-nums">{fmt.short(r.pair.cur)}</td>
-                <td className="p-4 text-right tabular-nums text-muted-foreground">
-                  {r.pair.hasPrev ? fmt.short(r.pair.prev) : '—'}
-                </td>
-                <td className="p-4 text-right">
-                  <span className="inline-flex justify-end">
-                    <DeltaPill delta={pairDelta(r.pair)} />
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </CardContent>
-    </Card>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -974,40 +935,38 @@ function HashtagsBlock({ posts }: { posts: IgPost[] }) {
     );
   }
   return (
-    <Card>
-      <CardContent className="overflow-x-auto p-0">
-        <table className="w-full text-left text-sm">
-          <thead>
-            <tr className="border-b border-border bg-muted/40 text-xs font-semibold tracking-wider text-muted-foreground">
-              <th className="p-4">Хэштег</th>
-              <th className="p-4 text-right">Постов</th>
-              <th className="p-4 text-right">Ср. охват</th>
-              <th className="p-4 text-right">ER</th>
-              <th className="p-4 text-right">Lift к ER</th>
+    <div className="overflow-x-auto">
+      <table className="w-full text-left text-sm">
+        <thead>
+          <tr className="border-b border-border text-xs font-semibold tracking-wider text-muted-foreground">
+            <th className="p-4">Хэштег</th>
+            <th className="p-4 text-right">Постов</th>
+            <th className="p-4 text-right">Ср. охват</th>
+            <th className="p-4 text-right">ER</th>
+            <th className="p-4 text-right">Lift к ER</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border">
+          {stats.map((s) => (
+            <tr key={s.tag} className="transition-colors hover:bg-hover-row">
+              <td className="p-4 font-medium text-foreground">{s.tag}</td>
+              <td className="p-4 text-right tabular-nums text-muted-foreground">{s.count}</td>
+              <td className="p-4 text-right tabular-nums">{fmt.short(s.avgReach)}</td>
+              <td className="p-4 text-right tabular-nums">{s.avgEr.toFixed(2)}%</td>
+              <td className="p-4 text-right font-semibold tabular-nums">
+                {Math.abs(s.lift) < 0.5 ? (
+                  <span className="text-muted-foreground/60">≈0%</span>
+                ) : (
+                  <span className={s.lift > 0 ? 'text-verdant' : 'text-ember'}>
+                    {s.lift > 0 ? '+' : ''}{s.lift.toFixed(0)}%
+                  </span>
+                )}
+              </td>
             </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {stats.map((s) => (
-              <tr key={s.tag} className="transition-colors hover:bg-muted/30">
-                <td className="p-4 font-medium text-foreground">{s.tag}</td>
-                <td className="p-4 text-right tabular-nums text-muted-foreground">{s.count}</td>
-                <td className="p-4 text-right tabular-nums">{fmt.short(s.avgReach)}</td>
-                <td className="p-4 text-right tabular-nums">{s.avgEr.toFixed(2)}%</td>
-                <td className="p-4 text-right font-semibold tabular-nums">
-                  {Math.abs(s.lift) < 0.5 ? (
-                    <span className="text-muted-foreground/60">≈0%</span>
-                  ) : (
-                    <span className={s.lift > 0 ? 'text-verdant' : 'text-ember'}>
-                      {s.lift > 0 ? '+' : ''}{s.lift.toFixed(0)}%
-                    </span>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </CardContent>
-    </Card>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -1054,46 +1013,44 @@ function CompareBlock({ posts }: { posts: IgPost[] }) {
           </CardContent>
         </Card>
       ) : (
-        <Card>
-          <CardContent className="overflow-x-auto p-0">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-border bg-muted/40 text-xs font-semibold tracking-wider text-muted-foreground">
-                  <th className="p-4">Метрика</th>
-                  {chosen.map((c) => (
-                    <th key={c.i} className="p-4 text-right">#{c.i + 1} {MEDIA_TYPE_LABEL[c.post.media_type ?? ''] ?? 'Пост'}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {COMPARE_ROWS.map((row) => {
-                  const values = chosen.map((c) => row.get(c.post));
-                  const max = Math.max(...values, 0);
-                  return (
-                    <tr key={row.label} className="hover:bg-muted/30">
-                      <td className="p-4 text-muted-foreground">{row.label}</td>
-                      {chosen.map((c, idx) => {
-                        const v = values[idx];
-                        const best = chosen.length > 1 && max > 0 && v === max;
-                        return (
-                          <td key={c.i} className={`p-4 text-right tabular-nums ${best ? 'font-semibold text-verdant' : ''}`}>
-                            {best && (
-                              <>
-                                <span className="sr-only">лучший: </span>
-                                <span aria-hidden="true">▲ </span>
-                              </>
-                            )}
-                            {row.pct ? `${v.toFixed(2)}%` : fmt.short(v)}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </CardContent>
-        </Card>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="border-b border-border text-xs font-semibold tracking-wider text-muted-foreground">
+                <th className="p-4">Метрика</th>
+                {chosen.map((c) => (
+                  <th key={c.i} className="p-4 text-right">#{c.i + 1} {MEDIA_TYPE_LABEL[c.post.media_type ?? ''] ?? 'Пост'}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {COMPARE_ROWS.map((row) => {
+                const values = chosen.map((c) => row.get(c.post));
+                const max = Math.max(...values, 0);
+                return (
+                  <tr key={row.label} className="hover:bg-hover-row">
+                    <td className="p-4 text-muted-foreground">{row.label}</td>
+                    {chosen.map((c, idx) => {
+                      const v = values[idx];
+                      const best = chosen.length > 1 && max > 0 && v === max;
+                      return (
+                        <td key={c.i} className={`p-4 text-right tabular-nums ${best ? 'font-semibold text-verdant' : ''}`}>
+                          {best && (
+                            <>
+                              <span className="sr-only">лучший: </span>
+                              <span aria-hidden="true">▲ </span>
+                            </>
+                          )}
+                          {row.pct ? `${v.toFixed(2)}%` : fmt.short(v)}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
@@ -1132,36 +1089,28 @@ function StoriesBlock({ stories }: { stories: IgStory[] | undefined }) {
       {hoursLeft != null && (
         <p className="px-1 text-xs text-ember">Данные историй исчезнут через ~{hoursLeft} ч (24-часовое окно Instagram).</p>
       )}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border lg:grid-cols-4">
         <KpiCard label="Историй" value={fmt.num(list.length)} />
         <KpiCard label="Охват" value={fmt.short(sum('reach'))} />
         <KpiCard label="Ответы" value={fmt.num(sum('replies'))} />
         <KpiCard label="Досматриваемость" value={`${Math.round(avgCompletion * 100)}%`} />
       </div>
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium tracking-wide text-muted-foreground">Навигация по историям</CardTitle>
-          </CardHeader>
-          <CardContent className="p-5">
-            <Breakdown items={navItems.map((n) => ({ label: n.label, value: n.value, display: fmt.short(n.value) }))} />
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium tracking-wide text-muted-foreground">По историям</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 p-5">
+        <ChartSection title="Навигация по историям">
+          <Breakdown items={navItems.map((n) => ({ label: n.label, value: n.value, display: fmt.short(n.value) }))} />
+        </ChartSection>
+        <ChartSection title="По историям">
+          <div className="space-y-2">
             {list.map((s, i) => (
               <div key={s.id ?? i} className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">{s.media_type === 'VIDEO' ? 'Видео' : 'Фото'} · {fmtDay(s.timestamp ?? '')}</span>
+                <span className="text-muted-foreground">{s.media_type === 'VIDEO' ? 'Видео' : 'Фото'} · <span className="font-mono">{fmtDay(s.timestamp ?? '')}</span></span>
                 <span className="tabular-nums">
                   {fmt.short(Number(s.reach ?? 0))} охв · {Math.round(completion(s) * 100)}%
                 </span>
               </div>
             ))}
-          </CardContent>
-        </Card>
+          </div>
+        </ChartSection>
       </div>
     </div>
   );
@@ -1188,7 +1137,7 @@ function DemoModeBanner() {
     'Метрики Stories и действий в профиле',
   ];
   return (
-    <Card className="mt-4 border-chart-3/40 bg-chart-3/[0.04]">
+    <Card className="mt-4 border-chart-3/40 bg-chart-3/[0.02]">
       <CardContent className="p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex items-start gap-3">
@@ -1280,16 +1229,14 @@ interface KpiCardProps {
 }
 function KpiCard({ label, value, hint, feature, trend }: KpiCardProps) {
   return (
-    <Card className={feature ? 'border-primary/40' : undefined}>
-      <CardContent className="p-5">
-        <div className="text-xs tracking-wide text-muted-foreground">{label}</div>
-        <div className="mt-2 flex items-center gap-2">
-          <div className="text-3xl font-semibold tabular-nums tracking-tight">{value}</div>
-          <DeltaPill delta={trend} />
-        </div>
-        {hint ? <div className="mt-2 text-xs text-muted-foreground">{hint}</div> : null}
-      </CardContent>
-    </Card>
+    <div className={`bg-background p-4${feature ? ' ring-1 ring-inset ring-primary/40' : ''}`}>
+      <div className="text-xs tracking-wide text-muted-foreground">{label}</div>
+      <div className="mt-2 flex items-center gap-2">
+        <div className="text-3xl font-semibold tabular-nums tracking-tight">{value}</div>
+        <DeltaPill delta={trend} />
+      </div>
+      {hint ? <div className="mt-2 text-xs text-muted-foreground">{hint}</div> : null}
+    </div>
   );
 }
 
@@ -1305,7 +1252,7 @@ function IgPostCard({ post, rank }: { post: IgPost; rank: number }) {
           ) : (
             <span className="font-mono text-xs text-muted-foreground">{typeLabel}</span>
           )}
-          <div className="absolute left-2 top-2 rounded bg-background/90 px-2 py-0.5 text-xs font-bold text-foreground shadow-sm">#{rank}</div>
+          <div className="absolute left-2 top-2 rounded bg-background/90 px-2 py-0.5 text-xs font-bold text-foreground">#{rank}</div>
           <div className="absolute right-2 top-2 rounded bg-primary px-2 py-0.5 text-[10px] font-bold tracking-wide text-primary-foreground">{typeLabel}</div>
         </div>
         <div className="p-4">
