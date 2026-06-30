@@ -2,13 +2,13 @@
 // takeaways. Each insight carries the numbers behind it and a confidence level, so the UI reads
 // like an analyst's note ("here's the claim, here's the proof, here's how sure we are"), not a
 // generic AI summary. Pure + testable: the panel gathers inputs, this decides what's worth saying.
-import type { MetricDelta } from '@/lib/delta';
-
 export type Confidence = 'high' | 'medium' | 'low';
 
 export interface IgInsightInput {
-  followersDelta?: MetricDelta | null;
-  newFollowers?: number;
+  /** Real subscriber movement for the window: net = gross follows − gross unfollows. */
+  netFollowers?: number | null;
+  follows?: number | null;
+  unfollows?: number | null;
   erReach?: number;
   erReachPrev?: number;
   /** Best format by interactions, with the raw share so the evidence is concrete. */
@@ -43,22 +43,35 @@ export function buildIgInsights(i: IgInsightInput): IgInsight[] {
   const out: IgInsight[] = [];
   const n = i.postCount ?? 0;
 
-  // Follower growth pace — the headline signal.
-  if (i.newFollowers != null && i.newFollowers > 0) {
-    const d = i.followersDelta;
-    if (d && d.dir !== 'flat') {
+  // Real subscriber movement (net = follows − unfollows) — the headline signal. A net loss matters
+  // as much as growth, so it's surfaced too (the old logic only ever reported gross follows).
+  if (i.netFollowers != null) {
+    const ev =
+      i.follows != null && i.unfollows != null
+        ? `подписки +${fmtInt(i.follows)}, отписки −${fmtInt(i.unfollows)}`
+        : undefined;
+    const net = i.netFollowers;
+    if (net < 0) {
       out.push({
-        tone: d.dir === 'up' ? 'up' : 'down',
-        text: `Прирост подписчиков ${d.dir === 'up' ? 'ускорился' : 'замедлился'}.`,
-        evidence: `+${fmtInt(i.newFollowers)} за период · ${d.dir === 'up' ? '↑' : '↓'}${d.pct.toFixed(0)}% к прошлому окну`,
+        tone: 'down',
+        text: 'Канал теряет подписчиков — отписок больше, чем подписок.',
+        evidence: [`чистый прирост −${fmtInt(Math.abs(net))} за период`, ev].filter(Boolean).join(' · '),
+        confidence: 'high',
+        priority: 95,
+      });
+    } else if (net > 0) {
+      out.push({
+        tone: 'up',
+        text: 'Канал растёт по подписчикам.',
+        evidence: [`чистый прирост +${fmtInt(net)} за период`, ev].filter(Boolean).join(' · '),
         confidence: 'high',
         priority: 90,
       });
     } else {
       out.push({
         tone: 'neutral',
-        text: 'Подписчики растут ровным темпом.',
-        evidence: `+${fmtInt(i.newFollowers)} за период`,
+        text: 'Подписчики на месте — подписки и отписки уравновешены.',
+        evidence: ev,
         confidence: 'medium',
         priority: 55,
       });

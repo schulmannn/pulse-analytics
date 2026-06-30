@@ -530,30 +530,6 @@ app.get('/api/ig/insights', requireAuth, async (req, res) => {
   const days = Math.min(90, parseInt(req.query.days, 10) || 30);
   const cacheKey = `ig:insights:${days}`;
 
-  // ── TEMP diagnostic (superuser + ?probe=follows): does the Instagram-Login API expose unfollows
-  // or net follower movement? A bogus metric's error lists every valid account metric; we also try
-  // candidate metric names directly. Read-only, token never echoed; removed once we know.
-  if (req.query.probe === 'follows' && req.user && req.user.role === 'superuser') {
-    if (!igConfigured()) return res.json({ probe: true, configured: false });
-    const SEC = 86400;
-    const now = Math.floor(Date.now() / 1000);
-    const probe = async (label, params) => {
-      try {
-        const qs = new URLSearchParams({ ...params, access_token: IG_TOKEN }).toString();
-        const r = await fetch(`${IG_BASE}/${IG_ACCOUNT}/insights?${qs}`);
-        const j = await r.json();
-        return { label, status: r.status, data: j.data, error: j && j.error ? j.error.message : undefined };
-      } catch (e) { return { label, error: e.message }; }
-    };
-    const F = 'follows_and_unfollows';
-    const out = [];
-    // Daily series WITH the follow_type breakdown — full shape, to see if per-day follows/unfollows
-    // (and thus a real daily net line) is available, or only a period aggregate.
-    out.push(await probe('series+follow_type', { metric: F, breakdown: 'follow_type', period: 'day', since: now - 14 * SEC, until: now }));
-    out.push(await probe('tv+follow_type', { metric: F, metric_type: 'total_value', breakdown: 'follow_type', period: 'day', since: now - 30 * SEC, until: now }));
-    return res.json({ probe: true, ig_account: IG_ACCOUNT, probes: out });
-  }
-
   try {
     if (!igConfigured()) return res.json(igMock.igMockInsights(days));
     const cached = cacheGet(cacheKey);
@@ -579,23 +555,50 @@ app.get('/api/ig/insights', requireAuth, async (req, res) => {
     const fetchTv = (s, u) => Promise.allSettled(
       tvNames.map((metric) => igFetch(`/${IG_ACCOUNT}/insights`, { metric, metric_type: 'total_value', period: 'day', since: s, until: u })),
     );
-    const [dailyR, curR, prevR] = await Promise.all([
+    // follows_and_unfollows → real gross follows (FOLLOWER) AND unfollows (NON_FOLLOWER) for the
+    // window (period aggregate only — the daily breakdown is empty). Surfaced as `follows`/`unfollows`
+    // so the panel can show the channel's REAL movement (net = follows − unfollows), not just gross
+    // new follows (which the dashboard previously reported as growth, ignoring unfollows).
+    const fetchFau = (s, u) =>
+      igFetch(`/${IG_ACCOUNT}/insights`, { metric: 'follows_and_unfollows', metric_type: 'total_value', breakdown: 'follow_type', period: 'day', since: s, until: u });
+    const fauVal = (res) => {
+      const block = res && res.data && res.data[0] && res.data[0].total_value && res.data[0].total_value.breakdowns;
+      const results = (block && block[0] && block[0].results) || [];
+      let follows = null, unfollows = null;
+      results.forEach((r) => {
+        const k = r.dimension_values && r.dimension_values[0];
+        if (k === 'FOLLOWER') follows = r.value;
+        else if (k === 'NON_FOLLOWER') unfollows = r.value;
+      });
+      return { follows, unfollows };
+    };
+    const [dailyR, curR, prevR, fauCurR, fauPrevR] = await Promise.all([
       dailyCall.catch(() => null),
       fetchTv(curSince, curUntil),
       fetchTv(prevSince, prevUntil),
+      fetchFau(curSince, curUntil).catch(() => null),
+      fetchFau(prevSince, prevUntil).catch(() => null),
     ]);
     const out = dailyR && dailyR.data ? [...dailyR.data] : [];
     const curPoint = new Date(curUntil * 1000).toISOString();
     const prevPoint = new Date((prevSince + Math.floor((days * SEC) / 2)) * 1000).toISOString();
-    tvNames.forEach((metric, i) => {
-      const cur = curR[i].status === 'fulfilled' ? tvVal(curR[i].value) : null;
-      const prev = prevR[i].status === 'fulfilled' ? tvVal(prevR[i].value) : null;
+    const pushAgg = (metric, cur, prev) => {
       if (cur == null && prev == null) return;
       const values = [];
       if (prev != null) values.push({ value: prev, end_time: prevPoint });
       if (cur != null) values.push({ value: cur, end_time: curPoint });
       out.push({ name: metric, period: 'day', values, total_value: { value: cur } });
+    };
+    tvNames.forEach((metric, i) => {
+      pushAgg(
+        metric,
+        curR[i].status === 'fulfilled' ? tvVal(curR[i].value) : null,
+        prevR[i].status === 'fulfilled' ? tvVal(prevR[i].value) : null,
+      );
     });
+    const fauCur = fauVal(fauCurR), fauPrev = fauVal(fauPrevR);
+    pushAgg('follows', fauCur.follows, fauPrev.follows);
+    pushAgg('unfollows', fauCur.unfollows, fauPrev.unfollows);
     const data = { data: out };
     cacheSet(cacheKey, data);
     res.json(data);

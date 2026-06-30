@@ -6,13 +6,21 @@ describe('buildIgInsights', () => {
     expect(buildIgInsights({})).toEqual([]);
   });
 
-  it('phrases accelerating growth as an up-insight with grouped numbers in the evidence', () => {
-    const [growth] = buildIgInsights({ newFollowers: 1240, followersDelta: { dir: 'up', pct: 18 } });
-    expect(growth.tone).toBe('up');
-    expect(growth.text).toContain('ускорился');
-    expect(growth.evidence).toContain('+1 240');
-    expect(growth.evidence).toContain('↑18%');
-    expect(growth.confidence).toBe('high');
+  it('reports net growth (follows > unfollows) with both numbers as evidence', () => {
+    const [g] = buildIgInsights({ netFollowers: 1240, follows: 1858, unfollows: 618 });
+    expect(g.tone).toBe('up');
+    expect(g.text).toContain('растёт');
+    expect(g.evidence).toContain('+1 240');
+    expect(g.evidence).toContain('отписки −618');
+    expect(g.confidence).toBe('high');
+  });
+
+  it('flags a net loss when unfollows exceed follows', () => {
+    const [g] = buildIgInsights({ netFollowers: -23, follows: 595, unfollows: 618 });
+    expect(g.tone).toBe('down');
+    expect(g.text).toContain('теряет');
+    expect(g.evidence).toContain('−23');
+    expect(g.evidence).toContain('подписки +595');
   });
 
   it('marks a falling ER as a down-insight, numbers as evidence', () => {

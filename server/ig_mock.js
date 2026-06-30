@@ -69,6 +69,8 @@ function igMockInsights(days = 30) {
       buildMetric('comments', 70, 60),
       buildMetric('saves', 130, 120),
       buildMetric('shares', 90, 90),
+      buildMetric('follows', 70, 60), // gross new follows (FOLLOWER)
+      buildMetric('unfollows', 48, 44), // gross unfollows (NON_FOLLOWER) — net positive in the demo
     ],
   };
 }

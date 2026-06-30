@@ -36,22 +36,34 @@ export function EmptyChart() {
   return <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">Нет данных за период</div>;
 }
 
+/** Signed integer with a typographic minus, e.g. +595 / −23 / 0. */
+export const signedNum = (n: number): string => `${n > 0 ? '+' : n < 0 ? '−' : ''}${fmt.num(Math.abs(n))}`;
+
 export interface KpiCardProps {
   label: string;
   value: string;
   hint?: string;
   feature?: boolean;
   trend?: MetricDelta | null;
+  /** A pre-formatted inline delta (e.g. "−23"); shown instead of the percent pill when set. */
+  deltaText?: string;
+  deltaTone?: 'up' | 'down' | 'flat';
 }
 
 /** A single ledger cell — label, big number, optional delta + hint. Sits in a `gap-px` grid. */
-export function KpiCard({ label, value, hint, feature, trend }: KpiCardProps) {
+export function KpiCard({ label, value, hint, feature, trend, deltaText, deltaTone }: KpiCardProps) {
+  const deltaColor =
+    deltaTone === 'up' ? 'text-verdant' : deltaTone === 'down' ? 'text-ember' : 'text-muted-foreground';
   return (
     <div className={`bg-background p-4${feature ? ' ring-1 ring-inset ring-primary/40' : ''}`}>
       <div className="text-xs tracking-wide text-muted-foreground">{label}</div>
       <div className="mt-2 flex items-center gap-2">
         <div className="text-3xl font-medium tabular-nums tracking-tight">{value}</div>
-        <DeltaPill delta={trend} />
+        {deltaText ? (
+          <span className={`shrink-0 text-xs font-medium tabular-nums ${deltaColor}`}>{deltaText}</span>
+        ) : (
+          <DeltaPill delta={trend} />
+        )}
       </div>
       {hint ? <div className="mt-2 text-xs text-muted-foreground">{hint}</div> : null}
     </div>

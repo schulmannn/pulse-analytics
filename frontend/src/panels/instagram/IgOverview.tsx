@@ -3,7 +3,7 @@ import { fmt } from '@/lib/format';
 import { pctDelta } from '@/lib/delta';
 import { pairDelta } from '@/lib/igMetrics';
 import type { IgData } from '@/lib/useIgData';
-import { KpiHero, KpiCard } from '@/components/instagram/shared';
+import { KpiHero, KpiCard, signedNum } from '@/components/instagram/shared';
 import { InsightsBlock } from '@/components/instagram/insights';
 import { TopPostsBlock } from '@/components/instagram/content';
 import { IgDataHealth } from '@/components/instagram/health';
@@ -30,7 +30,12 @@ export function IgOverview() {
           series={ig.series.reach.filter((p) => ig.inWindow(p.day))}
         />
         <div className="grid grid-cols-2 gap-px border-t border-border bg-border lg:grid-cols-4">
-          <KpiCard label="Подписчики" value={fmt.num(ig.followers)} trend={pairDelta(ig.pairs.follower)} />
+          <KpiCard
+            label="Подписчики"
+            value={fmt.num(ig.followers)}
+            deltaText={ig.netMovement.hasCur ? signedNum(ig.netMovement.cur) : undefined}
+            deltaTone={ig.netMovement.cur > 0 ? 'up' : ig.netMovement.cur < 0 ? 'down' : 'flat'}
+          />
           <KpiCard label="Просмотры" value={fmt.short(ig.pairs.views.cur)} trend={pairDelta(ig.pairs.views)} />
           <KpiCard label="Вовлечённость" value={ig.erReach > 0 ? `${ig.erReach.toFixed(2)}%` : '—'} trend={erTrend} />
           <KpiCard label="Взаимодействия" value={fmt.short(ig.pairs.ti.cur)} trend={pairDelta(ig.pairs.ti)} />

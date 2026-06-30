@@ -13,12 +13,10 @@ import { usePeriod } from '@/lib/period';
 import {
   metricSeries,
   windowPair,
-  pairDelta,
   tvBreakdown,
   aggregateOnline,
   hashtagStats,
   hasDailySeries,
-  cumulativeFollowers,
   MEDIA_PRODUCT_LABEL,
   DAY_NAMES,
   DAY_MS,
@@ -69,6 +67,8 @@ export function useIgData() {
     comments: metricSeries(ins, 'comments'),
     shares: metricSeries(ins, 'shares'),
     profileViews: metricSeries(ins, 'profile_views'),
+    follows: metricSeries(ins, 'follows'), // gross new follows (FOLLOWER)
+    unfollows: metricSeries(ins, 'unfollows'), // gross unfollows (NON_FOLLOWER)
   };
   const pairs = {
     reach: windowPair(series.reach, since, until),
@@ -81,6 +81,17 @@ export function useIgData() {
     comments: windowPair(series.comments, since, until),
     shares: windowPair(series.shares, since, until),
     profileViews: windowPair(series.profileViews, since, until),
+    follows: windowPair(series.follows, since, until),
+    unfollows: windowPair(series.unfollows, since, until),
+  };
+
+  // Real subscriber movement for the window: net = gross follows − gross unfollows. This is the
+  // honest growth number — the dashboard previously reported gross follows alone as "growth".
+  const netMovement = {
+    cur: pairs.follows.cur - pairs.unfollows.cur,
+    prev: pairs.follows.prev - pairs.unfollows.prev,
+    hasCur: pairs.follows.hasCur || pairs.unfollows.hasCur,
+    hasPrev: pairs.follows.hasPrev || pairs.unfollows.hasPrev,
   };
 
   const followers = profileQ.data?.followers_count ?? 0;
@@ -99,8 +110,9 @@ export function useIgData() {
     : null;
 
   const insights = buildIgInsights({
-    followersDelta: pairDelta(pairs.follower),
-    newFollowers: pairs.follower.cur,
+    netFollowers: netMovement.hasCur ? netMovement.cur : null,
+    follows: pairs.follows.hasCur ? pairs.follows.cur : null,
+    unfollows: pairs.unfollows.hasCur ? pairs.unfollows.cur : null,
     erReach,
     erReachPrev,
     bestFormat:
@@ -156,8 +168,7 @@ export function useIgData() {
     insights,
     reachHasDaily: hasDailySeries(series.reach),
     followerHasDaily: hasDailySeries(series.follower),
-    // Cumulative subscriber total per day (reconstructed from net-new + the current total).
-    followerCumulative: cumulativeFollowers(series.follower, followers),
+    netMovement,
     queries: { profile: profileQ, insights: insightsQ, posts: postsQ, breakdowns: breakdownsQ, online: onlineQ, stories: storiesQ },
   };
 }
