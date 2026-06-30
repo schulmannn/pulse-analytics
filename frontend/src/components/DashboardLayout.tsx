@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Dispatch, RefObject, SetStateAction } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { useChannels, useIgProfile, useLogout } from '@/api/queries';
+import { useChannels, useHistory, useIgProfile, useLogout, useTgFull } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { usePeriod } from '@/lib/period';
 import type { PeriodDays } from '@/lib/period';
@@ -11,6 +11,10 @@ import { useMediaQuery } from '@/lib/useMediaQuery';
 import { railMode, useSidebarCollapsed } from '@/lib/sidebar';
 import { fmt } from '@/lib/format';
 import { cn } from '@/lib/utils';
+import { downloadCsv } from '@/lib/csv';
+import { freshness, latestHistoryDay } from '@/lib/freshness';
+import { markdownToPlainText } from '@/lib/markdown';
+import { normalizeTgPosts } from '@/lib/posts';
 import { Icon, type IconName } from '@/components/nav-icons';
 import { PulseMark } from '@/components/PulseMark';
 import { ChannelAvatar } from '@/components/ChannelAvatar';
@@ -115,13 +119,7 @@ export function DashboardLayout({ email, role }: DashboardLayoutProps) {
       <Sidebar role={role} />
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar email={email} role={role} />
-        {/* Single mobile context bar: channel identity + source switcher (sidebar is hidden < md). */}
-        <div className="flex items-center gap-2 border-b py-2 pr-3 md:hidden">
-          <div className="min-w-0 flex-1">
-            <ChannelCard />
-          </div>
-          <PlatformNav variant="compact" />
-        </div>
+        <MobileHeader email={email} role={role} />
         {/* Extra bottom padding on mobile clears the fixed bottom nav; md+ navigates via the sidebar. */}
         <main className="flex-1 px-4 pb-24 pt-5 sm:px-6 md:pb-5">
           <div className="mx-auto w-full max-w-screen-2xl">
@@ -177,8 +175,9 @@ function Sidebar({ role }: { role?: string }) {
         )}
       >
         <div className="flex items-center gap-2.5 px-4 pt-5">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <PulseMark className="h-[18px] w-[18px]" />
+          {/* Brand glyph on paper (no filled tile) — Figma renders the mark itself in accent blue. */}
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center text-primary">
+            <PulseMark className="h-6 w-6" />
           </span>
           <span className={cn('flex-1 whitespace-nowrap text-[15px] font-medium tracking-tight', rail && REVEAL_BLOCK)}>
             Pulse
@@ -190,7 +189,7 @@ function Sidebar({ role }: { role?: string }) {
         </div>
 
         <nav className="mt-4 flex-1 space-y-0.5 overflow-y-auto px-3">
-          {/* Источник данных (платформа) — выше, чем виды дашборда. */}
+          {/* Платформа данных (платформа) — выше, чем виды дашборда. */}
           {rail ? (
             <p
               className={cn(
@@ -198,10 +197,10 @@ function Sidebar({ role }: { role?: string }) {
                 REVEAL_BLOCK,
               )}
             >
-              Источник
+              Платформа
             </p>
           ) : (
-            <p className="px-3 pb-1 text-[11px] font-medium tracking-wider text-muted-foreground">Источник</p>
+            <p className="px-3 pb-1 text-[11px] font-medium tracking-wider text-muted-foreground">Платформа</p>
           )}
           <PlatformNav variant="sidebar" rail={rail} />
           <div className="mx-1 my-2 border-t" aria-hidden="true" />
@@ -238,9 +237,33 @@ function Sidebar({ role }: { role?: string }) {
               Kept always-visible + focusable (never display:none) so a keyboard/touch user
               who collapses can always re-expand. */}
           {isLg && <CollapseToggle collapsed={collapsed} onToggle={toggle} rail={rail} />}
+          <SidebarStatus rail={rail} />
         </div>
       </div>
     </aside>
+  );
+}
+
+/** Sidebar footer freshness — a status dot + "обновлено <time>" (mono). Rail collapses to the dot. */
+function SidebarStatus({ rail }: { rail?: boolean }) {
+  const { data: history } = useHistory(730);
+  const fresh = freshness(latestHistoryDay(history), Date.now());
+  if (!fresh) return null;
+  return (
+    <div
+      title={rail ? `обновлено ${fresh.label}` : undefined}
+      className={cn(
+        'flex items-center gap-2 px-3 pt-1 text-[11px] text-muted-foreground',
+        rail &&
+          'justify-center px-1 group-hover/sb:justify-start group-hover/sb:px-3 group-focus-within/sb:justify-start group-focus-within/sb:px-3',
+      )}
+    >
+      <span
+        aria-hidden="true"
+        className={cn('h-1.5 w-1.5 shrink-0 rounded-full', fresh.stale ? 'bg-status-warn' : 'bg-verdant')}
+      />
+      <span className={cn('truncate font-mono', rail && REVEAL_INLINE)}>обновлено {fresh.label}</span>
+    </div>
   );
 }
 
@@ -307,7 +330,7 @@ function NavItem({ to, label, icon, end, rail }: NavLinkDef & { rail?: boolean }
         cn(
           'relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
           isActive
-            ? 'bg-primary/15 font-medium text-foreground'
+            ? 'font-medium text-foreground'
             : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
         )
       }
@@ -436,19 +459,89 @@ function SearchBox({ rail = false }: { rail?: boolean }) {
   );
 }
 
+/** Desktop top bar (md+; mobile uses MobileHeader). Title + period + export + theme + account. */
 function Topbar({ email, role }: { email?: string; role?: string }) {
   const { pathname } = useLocation();
   const title = TITLES[pathname] ?? 'Pulse';
   return (
-    <header className="sticky top-0 z-20 flex h-14 items-center justify-between gap-3 border-b bg-background/80 px-4 backdrop-blur sm:gap-4 sm:px-6">
+    <header className="sticky top-0 z-20 hidden h-14 items-center justify-between gap-3 border-b bg-background/80 px-4 backdrop-blur sm:gap-4 sm:px-6 md:flex">
       {/* min-w-0 lets the title truncate instead of shoving the controls off a narrow screen. */}
       <h1 className="min-w-0 truncate text-lg font-medium">{title}</h1>
       <div className="flex shrink-0 items-center gap-2">
         <PeriodSwitcher />
+        <ExportButton />
         <ThemeToggle />
-        <MoreMenu email={email} role={role} />
+        <AccountMenu email={email} role={role} />
       </div>
     </header>
+  );
+}
+
+/**
+ * Mobile header (md:hidden) — replaces the desktop top bar below md (Figma 390). Row 1: channel
+ * identity + account avatar. Row 2: full-width segmented platform switch. Row 3: a compact period
+ * strip sitting just above the content (Figma places the period by the KPI hero).
+ */
+function MobileHeader({ email, role }: { email?: string; role?: string }) {
+  return (
+    <div className="md:hidden">
+      <div className="flex items-center gap-2 border-b py-2 pr-3">
+        <div className="min-w-0 flex-1">
+          <ChannelCard />
+        </div>
+        <AccountMenu email={email} role={role} />
+      </div>
+      <div className="border-b px-3 py-2">
+        <PlatformNav variant="segment" />
+      </div>
+      <div className="flex justify-end border-b px-3 py-1.5">
+        <PeriodSwitcher />
+      </div>
+    </div>
+  );
+}
+
+/** Export the active channel's Telegram posts (current period) to CSV. Shown only on TG data views. */
+function ExportButton() {
+  const { pathname } = useLocation();
+  const { days, inRange } = usePeriod();
+  const { data } = useTgFull(days);
+  if (!['/', '/analytics', '/posts'].includes(pathname)) return null;
+  const posts = normalizeTgPosts(data?.posts ?? [], data?.channel ?? {}).filter((p) => inRange(p.date));
+  const onExport = () =>
+    downloadCsv(
+      'telegram-posts.csv',
+      posts.map((p) => ({
+        Дата: p.date,
+        Просмотры: p.reach,
+        Реакции: p.likes,
+        Репосты: p.shares,
+        ER: p.er != null ? `${p.er.toFixed(1)}%` : '',
+        Пост: markdownToPlainText(p.caption || ''),
+      })),
+    );
+  return (
+    <button
+      type="button"
+      onClick={onExport}
+      disabled={posts.length === 0}
+      title="Экспорт постов в CSV"
+      className="btn-pill inline-flex items-center gap-1.5 border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50"
+    >
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="h-3.5 w-3.5"
+        aria-hidden="true"
+      >
+        <path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14" />
+      </svg>
+      Экспорт
+    </button>
   );
 }
 
@@ -469,13 +562,21 @@ function ThemeToggle() {
   );
 }
 
-function MoreMenu({ email, role }: { email?: string; role?: string }) {
+/**
+ * Account menu — an avatar (user initials) that opens identity + logout (Figma replaces the kebab
+ * with an avatar). On mobile it also carries the theme toggle and the system links (Настройки /
+ * Админ / Баги), which on md+ live in the top bar / sidebar instead (those rows are md:hidden).
+ */
+function AccountMenu({ email, role }: { email?: string; role?: string }) {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
+  const { theme, toggle: toggleTheme } = useTheme();
   const logoutMutation = useLogout();
   const menuRef = useRef<HTMLDivElement>(null);
   useDismiss(open, setOpen, menuRef);
 
+  const initials =
+    (email ? email.replace(/@.*/, '').replace(/[^\p{L}]/gu, '').slice(0, 2).toUpperCase() : '') || '?';
   const handleLogout = () =>
     logoutMutation.mutate(undefined, { onSettled: () => navigate('/login', { replace: true }) });
 
@@ -484,10 +585,10 @@ function MoreMenu({ email, role }: { email?: string; role?: string }) {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="rounded-lg border p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-        aria-label="Меню"
+        aria-label="Аккаунт"
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-avatar text-[11px] font-medium text-ink2 transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
       >
-        <Icon name="more" strokeWidth={2.4} className="h-4 w-4" />
+        {initials}
       </button>
       {open && (
         <div className="absolute right-0 top-full z-40 mt-1 w-56 overflow-hidden rounded-lg border bg-popover p-1.5 text-sm">
@@ -501,8 +602,17 @@ function MoreMenu({ email, role }: { email?: string; role?: string }) {
             </div>
           )}
           <div className="my-1 border-t" aria-hidden="true" />
-          {/* System links — mobile only; the bottom bar carries primary views, the sidebar
-              carries these on md+. */}
+          {/* Theme — only in the mobile menu (md+ has the standalone toggle in the top bar). */}
+          <button
+            type="button"
+            onClick={toggleTheme}
+            className="flex w-full items-center gap-2.5 rounded px-2.5 py-1.5 text-left text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:hidden"
+          >
+            <Icon name={theme === 'dark' ? 'sun' : 'moon'} className="h-4 w-4" />
+            {theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
+          </button>
+          {/* System links — mobile only; the bottom bar carries primary views, the sidebar carries
+              these on md+. */}
           <div className="md:hidden">
             {(role === 'superuser' ? [...SYSTEM_NAV, ...SUPER_NAV] : SYSTEM_NAV).map((item) => (
               <NavLink
@@ -514,7 +624,7 @@ function MoreMenu({ email, role }: { email?: string; role?: string }) {
                   cn(
                     'flex items-center gap-2.5 rounded px-2.5 py-1.5 transition-colors',
                     isActive
-                      ? 'bg-primary/15 text-foreground'
+                      ? 'font-medium text-foreground'
                       : 'text-muted-foreground hover:bg-muted hover:text-foreground',
                   )
                 }
@@ -523,8 +633,8 @@ function MoreMenu({ email, role }: { email?: string; role?: string }) {
                 {item.label}
               </NavLink>
             ))}
-            <div className="my-1 border-t" aria-hidden="true" />
           </div>
+          <div className="my-1 border-t md:hidden" aria-hidden="true" />
           {/* Logout: calm by default, destructive only on hover (it's important, not an alarm). */}
           <button
             type="button"
@@ -676,7 +786,7 @@ function PeriodSwitcher() {
  * demo/mock-backed until connected; `mock === true` (not just "no data") avoids a false flag
  * during the initial load.
  */
-function PlatformNav({ variant, rail = false }: { variant: 'sidebar' | 'compact'; rail?: boolean }) {
+function PlatformNav({ variant, rail = false }: { variant: 'sidebar' | 'compact' | 'segment'; rail?: boolean }) {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const igActive = pathname.startsWith('/instagram');
@@ -688,6 +798,37 @@ function PlatformNav({ variant, rail = false }: { variant: 'sidebar' | 'compact'
     active: p.key === 'ig' ? igActive : !igActive,
     demo: p.key === 'ig' && igDemo,
   }));
+
+  if (variant === 'segment') {
+    // Mobile: full-width two-half segmented control (Figma 390) — glyph + text label + демо chip,
+    // active half on a blue tint; the gap-px over bg-border draws the centre hairline.
+    return (
+      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border">
+        {items.map((p) => (
+          <button
+            key={p.key}
+            type="button"
+            onClick={() => navigate(p.to)}
+            aria-current={p.active ? 'true' : undefined}
+            className={cn(
+              'flex items-center justify-center gap-2 px-3 py-2 text-sm transition-colors',
+              p.active ? 'bg-accent font-medium text-foreground' : 'bg-background text-muted-foreground',
+            )}
+          >
+            <span className="shrink-0" style={{ color: p.color }}>
+              <PlatformGlyph k={p.key} className="h-4 w-4" />
+            </span>
+            <span className="whitespace-nowrap">{p.name}</span>
+            {p.demo && (
+              <span className="rounded-full bg-status-warn/15 px-1.5 py-0.5 text-[10px] font-medium text-status-warn">
+                демо
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+    );
+  }
 
   if (variant === 'compact') {
     // Mobile: icon pills sitting next to the channel card in the single context bar.
@@ -740,7 +881,7 @@ function PlatformNav({ variant, rail = false }: { variant: 'sidebar' | 'compact'
               ? 'justify-center px-1 py-2 group-hover/sb:justify-start group-hover/sb:gap-3 group-hover/sb:px-3 group-focus-within/sb:justify-start group-focus-within/sb:gap-3 group-focus-within/sb:px-3'
               : 'gap-3 px-3 py-2',
             p.active
-              ? 'bg-primary/10 font-medium text-foreground'
+              ? 'font-medium text-foreground'
               : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
           )}
         >

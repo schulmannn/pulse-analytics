@@ -27,6 +27,22 @@ function Calendar({ className }: { className?: string }) {
     </svg>
   );
 }
+function Shield({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <path d="M12 3l7 3v6c0 4-3 7-7 8-4-1-7-4-7-8V6l7-3z" />
+    </svg>
+  );
+}
+function Lightbulb({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <path d="M9 18h6" />
+      <path d="M10 21h4" />
+      <path d="M12 3a6 6 0 0 0-4 10c.7.7 1 1.3 1 2h6c0-.7.3-1.3 1-2a6 6 0 0 0-4-10z" />
+    </svg>
+  );
+}
 
 // ── product preview: a static, data-free mock of the Обзор screen ──────────
 function Sparkline() {
@@ -46,11 +62,12 @@ function Sparkline() {
   );
 }
 
-function MiniNav({ label, active }: { label: string; active?: boolean }) {
+function MiniNav({ label, active, demo }: { label: string; active?: boolean; demo?: boolean }) {
   return (
-    <div className={`flex items-center gap-2 rounded px-2 py-1 ${active ? 'text-foreground' : 'text-ink3'}`}>
+    <div className={`flex w-full items-center gap-2 rounded px-2 py-1 ${active ? 'text-foreground' : 'text-ink3'}`}>
       <span className={`h-1.5 w-1.5 rounded-sm ${active ? 'bg-primary' : 'bg-ink3/50'}`} />
       <span className="text-[10px]">{label}</span>
+      {demo && <span className="ml-auto rounded bg-status-warn/15 px-1 text-[7px] font-medium text-status-warn">демо</span>}
     </div>
   );
 }
@@ -98,7 +115,7 @@ function DashboardPreview() {
         <div>
           <div className="px-2 pb-1 text-[8px] text-ink3">Платформа</div>
           <MiniNav label="Telegram" active />
-          <MiniNav label="Instagram" />
+          <MiniNav label="Instagram" demo />
         </div>
         <div className="space-y-0.5">
           <MiniNav label="Обзор" active />
@@ -130,6 +147,7 @@ function DashboardPreview() {
             </div>
             <div className="w-[46%]"><Sparkline /></div>
           </div>
+          <div className="mt-1 text-[8px] text-ink3">к прошлому периоду · ≈2 835 на пост</div>
         </div>
 
         <div className="mt-3 flex gap-3 border-t border-border pt-3">
@@ -144,6 +162,8 @@ function DashboardPreview() {
           <PostRow n={1} title="Как мы выбираем темы для канала" views="12 480" er="9.1%" delta="+24%" up />
           <PostRow n={2} title="Большой гайд по продуктивности" views="8 902" er="7.4%" delta="−6%" />
           <PostRow n={3} title="Подкаст: итоги сезона и планы" views="7 415" er="6.2%" delta="+11%" up />
+          <PostRow n={4} title="Гайд: как мы пишем посты для канала" views="6 240" er="5.4%" delta="+3%" up />
+          <PostRow n={5} title="Анонс нового сезона рассылки" views="5 102" er="4.8%" delta="−2%" />
         </div>
       </div>
     </div>
@@ -201,9 +221,9 @@ function Hero() {
 
 function Pillars() {
   const items = [
-    { h: 'Локальный сбор данных', p: 'Collector работает на вашей стороне. Сессия Telegram не попадает в Pulse.' },
-    { h: 'Инсайты по постам', p: 'Сигнал → тезис → действие по каждому посту, а не просто графики.' },
-    { h: 'Состояние источников', p: 'Источник, последний сбор, версия сборщика и статус API — на виду.' },
+    { h: 'Локальный сбор данных', p: 'Collector работает на вашей стороне. Сессия Telegram не попадает в Pulse.', icon: Shield },
+    { h: 'Инсайты по постам', p: 'Сигнал → тезис → действие по каждому посту, а не просто графики.', icon: Lightbulb },
+    { h: 'Состояние источников', p: 'Источник, последний сбор, версия сборщика и статус API — на виду.', icon: PulseMark },
   ];
   return (
     <section id="security" className="border-b border-border">
@@ -213,13 +233,16 @@ function Pillars() {
           Спокойная аналитика, которой можно доверять
         </h2>
         <div className="mt-10 grid gap-px overflow-hidden md:grid-cols-3">
-          {items.map((it, i) => (
+          {items.map((it, i) => {
+            const Ico = it.icon;
+            return (
             <div key={it.h} className={i > 0 ? 'md:border-l md:border-border md:pl-10' : 'md:pr-10'}>
-              <Check className="h-5 w-5 text-foreground" />
+              <Ico className="h-5 w-5 text-foreground" />
               <h3 className="mt-3 text-[17px] font-medium text-foreground">{it.h}</h3>
               <p className="mt-2 max-w-[20em] text-sm leading-relaxed text-ink2">{it.p}</p>
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </section>
@@ -241,10 +264,12 @@ function KpiFragment() {
         </div>
         <div className="w-[42%]"><Sparkline /></div>
       </div>
+      <div className="mt-1.5 text-[11px] text-ink3">к прошлому периоду · ≈2 835 на пост</div>
       <div className="mt-4 flex gap-3 border-t border-border pt-4">
         <Col label="Подписчики" value="4 781" delta="−108" />
         <Col label="Ср. охват" value="2 835" delta="+4%" up />
         <Col label="Реакции" value="1 204" delta="+58" up />
+        <Col label="Вовлечённость" value="6.7%" delta="+0.4" up />
       </div>
     </Panel>
   );
@@ -377,6 +402,7 @@ export function Landing() {
     <div className="min-h-screen bg-background text-foreground">
       <Header />
       <Hero />
+      <Pillars />
       <div id="features">
         <Feature
           eyebrow="Обзор"
@@ -401,7 +427,6 @@ export function Landing() {
           fragment={<HealthFragment />}
         />
       </div>
-      <Pillars />
       <CtaBand />
       <Footer />
     </div>

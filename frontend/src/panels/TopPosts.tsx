@@ -90,7 +90,7 @@ export function TopPosts() {
 
   return (
     <>
-      <div className="overflow-x-auto">
+      <div className="hidden overflow-x-auto md:block">
         <div className="min-w-[560px]">
           {/* header */}
           <div className="flex items-center gap-3 border-b border-border pb-2 text-[11px] text-muted-foreground">
@@ -157,6 +157,37 @@ export function TopPosts() {
             );
           })}
         </div>
+      </div>
+
+      {/* mobile: compact list rows (no column header, no horizontal scroll) */}
+      <div className="md:hidden">
+        {sorted.map((post, idx) => {
+          const reason = reasonFor(post);
+          const title = post.caption ? markdownToPlainText(post.caption) : 'Без подписи';
+          return (
+            <button
+              key={post.id ?? idx}
+              type="button"
+              onClick={() => setSelected({ post, rank: idx + 1, reason })}
+              className="group flex w-full items-center gap-3 border-b border-border py-3 text-left transition-colors hover:bg-hover-row focus-visible:bg-hover-row focus-visible:outline-none"
+            >
+              <span className="w-5 shrink-0 text-center text-xs tabular-nums text-ink3">{idx + 1}</span>
+              <span className="min-w-0 flex-1">
+                <span className={cn('block truncate text-sm', post.caption ? 'text-foreground' : 'italic text-muted-foreground')}>
+                  {title}
+                </span>
+                <span className="mt-0.5 block truncate text-[11px] text-ink2">
+                  {fmt.short(post.reach)} просмотров · {fmt.short(post.likes)} · ER {post.er != null ? `${post.er.toFixed(1)}%` : '—'}
+                </span>
+              </span>
+              <span className="flex w-5 shrink-0 justify-end text-ink3 transition-colors group-hover:text-foreground">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden="true">
+                  <path d="M9 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       {selected && (

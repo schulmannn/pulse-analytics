@@ -109,14 +109,14 @@ export function Digest() {
       <div className="mt-3 space-y-4">
         {/* INSIGHT — что произошло (доминирует) */}
         <div>
-          <TierLabel tone="insight">Итог</TierLabel>
+          <TierLabel>Итог</TierLabel>
           <p className="mt-1.5 text-[15px] font-medium leading-relaxed text-foreground">{insightLead}</p>
         </div>
 
         {/* EVIDENCE — где доказательство */}
         {hasBest && (
           <div className="border-t pt-4">
-            <TierLabel tone="evidence">Доказательство</TierLabel>
+            <TierLabel>Доказательство</TierLabel>
             <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
               Сильнее всего сработал пост «<span className="text-foreground">{bestCaption}</span>» —{' '}
               <span className="font-medium text-foreground">{fmt.short(bestPost!.reach)}</span> просмотров
@@ -140,7 +140,7 @@ export function Digest() {
 
         {/* ACTION — что сделать */}
         <div className="border-t pt-4">
-          <TierLabel tone="action">Что сделать</TierLabel>
+          <TierLabel>Что сделать</TierLabel>
           <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{actionText}</p>
         </div>
       </div>
@@ -148,12 +148,11 @@ export function Digest() {
   );
 }
 
-/** Tier marker for the summary — a coloured dot + label that encodes the three-part hierarchy. */
-function TierLabel({ tone, children }: { tone: 'insight' | 'evidence' | 'action'; children: ReactNode }) {
-  const dot = tone === 'insight' ? 'bg-primary' : tone === 'evidence' ? 'bg-chart-3' : 'bg-verdant';
+/** Tier marker for the summary — a neutral hairline dot + label (no decorative colour per the DS). */
+function TierLabel({ children }: { children: ReactNode }) {
   return (
     <div className="flex items-center gap-1.5 text-[11px] font-medium tracking-wide text-muted-foreground">
-      <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${dot}`} />
+      <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-ink3/60" />
       {children}
     </div>
   );

@@ -44,7 +44,7 @@ export function Overview() {
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-sm font-medium tracking-wide text-muted-foreground">Топ постов</h2>
           <Link to="/analytics" className="shrink-0 text-[13px] font-medium text-primary hover:underline">
-            Открыть аналитику →
+            <span className="md:hidden">Аналитика →</span><span className="hidden md:inline">Открыть аналитику →</span>
           </Link>
         </div>
         <TopPosts />

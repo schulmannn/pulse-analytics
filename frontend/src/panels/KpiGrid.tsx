@@ -20,13 +20,6 @@ import type { MetricDef } from '@/lib/metricDefs';
 /** KPI cards that support a drill-down (subset of MetricKey that maps to a shown KPI). */
 type DrillKey = 'views' | 'subscribers' | 'avgReach' | 'reactions' | 'forwards' | 'er';
 
-/** Sparkline hue: green/red when the metric is trending, brand iris when flat/unknown. */
-function sparkColor(trend?: MetricDelta | null): string {
-  if (trend?.dir === 'up') return 'hsl(var(--brand-verdant))';
-  if (trend?.dir === 'down') return 'hsl(var(--brand-ember))';
-  return 'hsl(var(--brand-iris))';
-}
-
 /** Split a formatted value ("7.9k" / "8.20%") into [number, unit] so the unit reads quieter. */
 function splitUnit(value: string): [string, string] {
   const match = value.match(/^([\d\s.,]+)(.*)$/);
@@ -133,13 +126,6 @@ export function KpiGrid() {
     return { labels: entries.map(([k]) => fmt.day(k)), values: entries.map(([, v]) => v) };
   };
   const viewsSpark = dailySeries((post) => Number(post.views ?? post.view_count ?? 0));
-  const reactionsSpark = dailySeries((post) => Number(post.reactions ?? post.reactions_count ?? 0));
-  const engagementSpark = dailySeries(
-    (post) =>
-      Number(post.reactions ?? post.reactions_count ?? 0) +
-      Number(post.forwards ?? 0) +
-      Number(post.replies ?? post.comments_count ?? 0),
-  );
   // Subscriber trend from the daily archive (reliable, unlike post-derived views).
   const subsRows = historyRows
     .filter((row) => row.subscribers != null && inRange(row.day))
@@ -176,6 +162,12 @@ export function KpiGrid() {
   const viewsBase = postsAnalyzed ? `по ${postsAnalyzed} постам` : null;
   const viewsCaption = [viewsBase, viewsAbsCaption].filter(Boolean).join(' · ') || null;
 
+  // Compact inline ledger deltas (Figma: signed-absolute next to subs/reactions, ER in п.п.; avg-reach
+  // keeps the percent pill). Preset windows only — a custom range has no paired previous window.
+  const subDelta = subChange != null && subChange !== 0 ? signedAbs(subChange) : null;
+  const reactionsDiff = !range && windowTotals ? windowTotals.current.reactions - windowTotals.previous.reactions : null;
+  const reactionsDelta = reactionsDiff ? signedAbs(reactionsDiff) : null;
+
   // Normalized posts in the active window — the per-post attribution source for the drill-down.
   // Uses the same fields the KPI totals sum, so the breakdown reconciles with the headline.
   const normPosts = normalizeTgPosts(data?.posts ?? [], data?.channel ?? {}).filter((post) => inRange(post.date));
@@ -192,7 +184,7 @@ export function KpiGrid() {
     <div className="space-y-5">
       {/* HERO — primary metric: big number + area sparkline (Figma Overview lead). */}
       <FeaturedKpi
-        label="Просмотры за период"
+        label={`Просмотры · ${periodLabel}`}
         value={fmt.short(totalViews)}
         trend={viewsTrend}
         caption={viewsCaption}
@@ -200,17 +192,17 @@ export function KpiGrid() {
         info={METRIC_DEFS.views}
         onDrill={() => setDrill('views')}
       />
-      {/* LEDGER — secondary metrics as hairline columns (Figma: Подписчики / Ср.охват / Реакции / ER). */}
+      {/* LEDGER — secondary metrics as hairline columns (Figma: Подписчики / Ср.охват / Реакции / ER).
+          Clean cells: label + value + one inline delta (no per-cell sparkline, no caption line). */}
       <div className="grid grid-cols-2 gap-px border-t border-border bg-border lg:grid-cols-4">
-        <StatTile label="Подписчики" value={fmt.num(displayMembers)} trend={subscriberTrend} spark={subsSpark} caption={subCaption} info={METRIC_DEFS.subscribers} onDrill={() => setDrill('subscribers')} />
-        <StatTile label="Ср. охват поста" value={fmt.short(avgViews)} trend={avgReachTrend} spark={viewsSpark} info={METRIC_DEFS.avgReach} onDrill={() => setDrill('avgReach')} />
-        <StatTile label="Реакции" value={fmt.short(totalReactions)} trend={reactionsTrend} spark={reactionsSpark} caption={reactionsCaption} info={METRIC_DEFS.reactions} onDrill={() => setDrill('reactions')} />
+        <StatTile label="Подписчики" value={fmt.num(displayMembers)} trend={subscriberTrend} deltaText={subDelta} info={METRIC_DEFS.subscribers} onDrill={() => setDrill('subscribers')} />
+        <StatTile label="Ср. охват" value={fmt.short(avgViews)} trend={avgReachTrend} info={METRIC_DEFS.avgReach} onDrill={() => setDrill('avgReach')} />
+        <StatTile label="Реакции" value={fmt.short(totalReactions)} trend={reactionsTrend} deltaText={reactionsDelta} info={METRIC_DEFS.reactions} onDrill={() => setDrill('reactions')} />
         <StatTile
-          label="Вовлечённость (ER)"
+          label="Вовлечённость"
           value={er > 0 ? er.toFixed(2) + '%' : '—'}
           trend={erTrend}
-          spark={engagementSpark}
-          caption={erCaption}
+          deltaText={erCaption}
           info={METRIC_DEFS.er}
           onDrill={() => setDrill('er')}
         />
@@ -322,8 +314,8 @@ interface StatTileProps {
   label: string;
   value: string;
   trend?: MetricDelta | null;
-  spark?: DailySeries;
-  caption?: string | null;
+  /** Short inline delta (signed-absolute / п.п.); falls back to the percent pill when omitted. */
+  deltaText?: string | null;
   info?: MetricDef;
   onDrill?: () => void;
 }
@@ -332,36 +324,30 @@ interface StatTileProps {
  * One ledger cell (no card — a hairline-delimited column in the StatTile grid). The grid's
  * gap-px over a bg-border container draws the 1px dividers; the cell sits on the paper canvas.
  */
-function StatTile({ label, value, trend, spark, caption, info, onDrill }: StatTileProps) {
+function StatTile({ label, value, trend, deltaText, info, onDrill }: StatTileProps) {
   const [num, unit] = splitUnit(value);
   const cell = onDrill
     ? { onClick: onDrill, title: 'Подробный разбор', className: 'cursor-pointer bg-background p-4 transition-colors hover:bg-muted/60' }
     : { className: 'bg-background p-4' };
+  const deltaColor =
+    trend?.dir === 'up' ? 'text-verdant' : trend?.dir === 'down' ? 'text-ember' : 'text-muted-foreground';
   return (
     <div {...cell}>
       <div className="flex items-center gap-1 text-[11px] tracking-wide text-muted-foreground">
         <span className="truncate">{label}</span>
         {info && <MetricInfo def={info} />}
       </div>
-      <div className="mt-1.5 flex items-baseline justify-between gap-2">
+      <div className="mt-1.5 flex items-baseline gap-2">
         <DrillValue label={label} onDrill={onDrill} className="text-2xl font-medium tabular-nums tracking-tight">
           {num}
           {unit ? <span className="text-base font-medium text-muted-foreground">{unit}</span> : null}
         </DrillValue>
-        <DeltaPill delta={trend} subtle />
+        {deltaText ? (
+          <span className={cn('shrink-0 text-xs font-medium tabular-nums', deltaColor)}>{deltaText}</span>
+        ) : (
+          <DeltaPill delta={trend} subtle />
+        )}
       </div>
-      {spark && spark.values.length > 1 ? (
-        <Sparkline
-          values={spark.values}
-          labels={spark.labels}
-          color={sparkColor(trend)}
-          interactive
-          className="mt-2.5 h-6 w-full"
-        />
-      ) : null}
-      {caption ? (
-        <div className="mt-1.5 truncate text-[10px] tabular-nums text-muted-foreground">{caption}</div>
-      ) : null}
     </div>
   );
 }

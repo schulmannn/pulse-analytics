@@ -8,7 +8,7 @@ import { PulseMark } from '@/components/PulseMark';
 // hairline-bordered fields, pill primary button, one calm blue accent. Semantic/brand tokens only.
 
 const INPUT_CLASS =
-  'w-full rounded-[8px] border border-border bg-card px-3.5 py-2.5 text-sm text-foreground placeholder:text-ink3 focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50';
+  'w-full rounded-[4px] border border-border bg-card px-3.5 py-2.5 text-sm text-foreground placeholder:text-ink3 focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50';
 const BUTTON_CLASS =
   'btn-pill mt-5 w-full bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50';
 const LABEL_CLASS = 'mb-1.5 block text-[13px] font-medium text-ink2';
@@ -271,7 +271,7 @@ export function RegisterPage() {
             {registerMutation.data.message || 'Проверьте почту для подтверждения аккаунта.'}
           </p>
         )}
-        <div className="mt-5 border-t border-border pt-5 text-sm text-ink2">
+        <div className="mt-6 text-sm text-ink2">
           Уже есть аккаунт?{' '}
           <Link to="/login" className={LINK_CLASS}>
             Войти
