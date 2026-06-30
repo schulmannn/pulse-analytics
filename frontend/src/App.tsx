@@ -9,7 +9,11 @@ import { Connect } from '@/pages/Connect';
 import { Overview } from '@/panels/Overview';
 import { Posts } from '@/panels/Posts';
 import { Mentions } from '@/panels/Mentions';
-import { Instagram } from '@/panels/Instagram';
+import { InstagramLayout } from '@/panels/instagram/Layout';
+import { IgOverview } from '@/panels/instagram/IgOverview';
+import { IgAnalytics } from '@/panels/instagram/IgAnalytics';
+import { IgContent } from '@/panels/instagram/IgContent';
+import { IgAudience } from '@/panels/instagram/IgAudience';
 import { TgAnalytics } from '@/panels/TgAnalytics';
 import { Insights } from '@/panels/Insights';
 import { Compare } from '@/panels/Compare';
@@ -33,7 +37,12 @@ export default function App() {
         <Route path="analytics" element={<Analytics />} />
         <Route path="posts" element={<Posts />} />
         <Route path="mentions" element={<Mentions />} />
-        <Route path="instagram" element={<Instagram />} />
+        <Route path="instagram" element={<InstagramLayout />}>
+          <Route index element={<IgOverview />} />
+          <Route path="analytics" element={<IgAnalytics />} />
+          <Route path="content" element={<IgContent />} />
+          <Route path="audience" element={<IgAudience />} />
+        </Route>
         <Route path="settings" element={<Settings />} />
         <Route path="admin" element={<Admin />} />
         <Route path="bugs" element={<Bugs />} />

@@ -1,0 +1,223 @@
+// Pure Instagram metric math + label/geo helpers. No React, no UI — the views and the
+// useIgData hook gather raw API payloads and lean on this to shape them. Kept separate so the
+// "what the numbers mean" logic is testable and the panels stay presentational.
+import type { IgBreakdowns, IgInsights, IgOnline, IgPost } from '@/api/schemas';
+import { pctDelta, type MetricDelta } from '@/lib/delta';
+
+export const DAY_MS = 24 * 60 * 60 * 1000;
+export const DAY_NAMES = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+
+// media_product_type → label / stable chart hue (a format keeps its colour across sorts).
+export const MEDIA_PRODUCT_LABEL: Record<string, string> = {
+  POST: 'Лента', FEED: 'Лента', REEL: 'Reels', REELS: 'Reels', STORY: 'Stories', CAROUSEL_ALBUM: 'Карусель',
+};
+export const MEDIA_PRODUCT_CHART: Record<string, string> = {
+  POST: 'hsl(var(--chart-1))', FEED: 'hsl(var(--chart-1))',
+  REEL: 'hsl(var(--chart-2))', REELS: 'hsl(var(--chart-2))',
+  STORY: 'hsl(var(--chart-3))', CAROUSEL_ALBUM: 'hsl(var(--chart-4))',
+};
+export const CHART_CYCLE = [
+  'hsl(var(--chart-1))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))',
+  'hsl(var(--chart-4))', 'hsl(var(--chart-5))', 'hsl(var(--chart-6))',
+];
+// Post card badge keys off media_type (IMAGE/VIDEO/CAROUSEL_ALBUM/REELS).
+export const MEDIA_TYPE_LABEL: Record<string, string> = {
+  IMAGE: 'Фото', VIDEO: 'Видео', CAROUSEL_ALBUM: 'Карусель', REELS: 'Reels',
+};
+export const GENDER_LABEL: Record<string, string> = { F: 'Женщины', M: 'Мужчины', U: 'Не указан' };
+export const AGE_ORDER = ['13-17', '18-24', '25-34', '35-44', '45-54', '55-64', '65+'];
+export const CONTACT_LABEL: Record<string, string> = {
+  WEBSITE: 'Сайт', EMAIL: 'Почта', CALL: 'Звонок', DIRECTION: 'Маршрут', TEXT: 'Сообщение', BOOK_NOW: 'Бронь',
+};
+export const CONTACT_ICON: Record<string, string> = {
+  WEBSITE: '🔗', EMAIL: '✉️', CALL: '📞', DIRECTION: '📍', TEXT: '💬', BOOK_NOW: '🗓️',
+};
+export const NAV_LABEL: Record<string, string> = {
+  tap_forward: 'Вперёд', tap_back: 'Назад', tap_exit: 'Выход', swipe_forward: 'Свайп к следующему',
+};
+
+export interface Point {
+  day: string;
+  value: number;
+}
+
+/** Daily time_series metric → {day,value}[] (oldest→newest). On the Instagram-Login API the
+    engagement metrics (views/saves/total_interactions/…) arrive as a single total_value aggregate
+    with no daily series — surfaced as one synthetic point so the window math reads the real number. */
+export function metricSeries(insights: IgInsights | undefined, name: string): Point[] {
+  const metric = insights?.data?.find((m) => m.name === name);
+  if (!metric) return [];
+  const series = (metric.values ?? [])
+    .map((v) => ({ day: v.end_time ?? '', value: Number(typeof v.value === 'object' ? 0 : v.value ?? 0) }))
+    .filter((p) => p.day !== '');
+  if (series.length) return series;
+  const tv = metric.total_value?.value;
+  return tv != null ? [{ day: 'total', value: Number(tv) }] : [];
+}
+
+/** Which metrics arrive as a real daily series (≥2 dated points) vs a windowed aggregate. Only the
+    real series may be drawn as a daily chart — aggregates are shown as period comparisons instead. */
+export function hasDailySeries(series: Point[]): boolean {
+  return series.filter((p) => p.day !== 'total' && Number.isFinite(Date.parse(p.day))).length >= 2;
+}
+
+export interface WindowPair {
+  cur: number;
+  prev: number;
+  hasCur: boolean;
+  hasPrev: boolean;
+}
+
+/** Sum a daily series over [startMs, endMs] vs the equal-length window right before it. Explicit
+    bounds so a custom date range maps to its exact span (not a windowDays reconstruction). */
+export function windowPair(series: Point[], startMs: number, endMs: number): WindowPair {
+  const span = Math.max(endMs - startMs, DAY_MS);
+  const prevStart = startMs - span;
+  let cur = 0;
+  let prev = 0;
+  let hasCur = false;
+  let hasPrev = false;
+  for (const p of series) {
+    const t = Date.parse(p.day);
+    if (!Number.isFinite(t) || t > endMs) continue;
+    if (t >= startMs) { cur += p.value; hasCur = true; }
+    else if (t >= prevStart) { prev += p.value; hasPrev = true; }
+  }
+  return { cur, prev, hasCur, hasPrev };
+}
+
+export const pairDelta = (p: WindowPair): MetricDelta | null =>
+  p.hasCur && p.hasPrev ? pctDelta(p.cur, p.prev) : null;
+
+/** total_value breakdown reader → {label,value}[] for a metric+dimension. */
+export function tvBreakdown(
+  data: IgBreakdowns['data'] | undefined,
+  name: string,
+  dim: string,
+): { label: string; value: number }[] {
+  for (const entry of (data ?? []).filter((m) => m.name === name)) {
+    const block = entry.total_value?.breakdowns?.find((b) => (b.dimension_keys ?? []).includes(dim));
+    if (block) {
+      return (block.results ?? []).map((r) => ({ label: r.dimension_values?.[0] ?? '', value: Number(r.value ?? 0) }));
+    }
+  }
+  return [];
+}
+
+export const fmtDay = (iso: string) => {
+  const t = Date.parse(iso);
+  return Number.isFinite(t) ? new Date(t).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }) : '';
+};
+
+export const flag = (iso: string) => {
+  const cc = (iso || '').toUpperCase();
+  if (!/^[A-Z]{2}$/.test(cc)) return '';
+  return String.fromCodePoint(...[...cc].map((c) => 127397 + c.charCodeAt(0)));
+};
+
+// ── Geo normalization ──
+// Instagram returns cities as "City, Region" (region often redundant or in English:
+// "London, England", "Москва, Москва", "Yekaterinburg, Sverdlovsk Oblast"). Show the city only.
+export const cityName = (raw: string): string => (raw || '').split(',')[0].trim() || raw;
+
+// Country codes → Russian names via the platform Intl data (covers every ISO-3166 code, not a hand
+// list). Falls back to the raw code if the runtime can't resolve it.
+let regionNames: Intl.DisplayNames | null = null;
+try {
+  regionNames = new Intl.DisplayNames(['ru'], { type: 'region' });
+} catch {
+  regionNames = null;
+}
+export const countryName = (code: string): string => {
+  const cc = (code || '').toUpperCase();
+  if (!/^[A-Z]{2}$/.test(cc)) return code;
+  try {
+    return regionNames?.of(cc) ?? code;
+  } catch {
+    return code;
+  }
+};
+
+// ── online_followers (best-time) ──
+export interface OnlineAgg {
+  dayValues: NonNullable<IgOnline['data']>[number]['values'];
+  grid: number[][];
+  max: number;
+  best: { w: number; h: number; v: number };
+  /** True only when the metric actually returned activity — the new API often returns empty hour
+      maps, and without this guard the all-zero grid would still yield a bogus "best slot" (Пн 0:00). */
+  hasSignal: boolean;
+}
+
+/** Aggregate the online_followers daily hour-maps into a weekday×hour grid + best slot. */
+export function aggregateOnline(online: IgOnline | undefined): OnlineAgg {
+  const dayValues = online?.data?.[0]?.values ?? [];
+  const sum: number[][] = Array.from({ length: 7 }, () => Array<number>(24).fill(0));
+  const cnt: number[][] = Array.from({ length: 7 }, () => Array<number>(24).fill(0));
+  dayValues.forEach((d) => {
+    const t = Date.parse(d.end_time ?? '');
+    if (!Number.isFinite(t)) return;
+    const w = (new Date(t).getUTCDay() + 6) % 7;
+    const map = d.value ?? {};
+    for (let h = 0; h < 24; h++) {
+      const v = Number(map[String(h)] ?? 0);
+      if (!Number.isFinite(v)) continue;
+      sum[w][h] += v;
+      cnt[w][h] += 1;
+    }
+  });
+  const grid = sum.map((row, w) => row.map((s, h) => (cnt[w][h] ? s / cnt[w][h] : 0)));
+  const max = Math.max(1, ...grid.flat());
+  let best = { w: -1, h: -1, v: -1 };
+  grid.forEach((row, w) => row.forEach((v, h) => { if (v > best.v) best = { w, h, v }; }));
+  return { dayValues, grid, max, best, hasSignal: best.v > 0 };
+}
+
+// ── hashtags ──
+export interface HashtagStat {
+  tag: string;
+  count: number;
+  avgReach: number;
+  avgEr: number;
+  lift: number;
+}
+
+export const postEr = (p: IgPost): number => {
+  const reach = Number(p.reach ?? 0);
+  if (reach <= 0) return 0;
+  const ti =
+    Number(p.total_interactions ?? 0) ||
+    Number(p.like_count ?? 0) + Number(p.comments_count ?? 0) + Number(p.saved ?? 0) + Number(p.shares ?? 0);
+  return (ti / reach) * 100;
+};
+
+export function hashtagStats(posts: IgPost[]): HashtagStat[] {
+  const map = new Map<string, { count: number; reach: number; er: number }>();
+  let erSum = 0;
+  let erCount = 0;
+  for (const p of posts) {
+    const reach = Number(p.reach ?? 0);
+    if (reach <= 0) continue; // skip zero-reach posts for BOTH the baseline and per-tag stats
+    const er = postEr(p);
+    erSum += er;
+    erCount += 1;
+    const tags = (p.caption ?? '').match(/#[\p{L}\p{N}_]+/gu) ?? [];
+    for (const tag of new Set(tags.map((t) => t.toLowerCase()))) {
+      const e = map.get(tag) ?? { count: 0, reach: 0, er: 0 };
+      e.count += 1;
+      e.reach += reach;
+      e.er += er;
+      map.set(tag, e);
+    }
+  }
+  const globalEr = erCount > 0 ? erSum / erCount : 0;
+  return [...map.entries()]
+    .map(([tag, e]) => ({
+      tag,
+      count: e.count,
+      avgReach: e.reach / e.count,
+      avgEr: e.er / e.count,
+      lift: globalEr > 0 ? ((e.er / e.count - globalEr) / globalEr) * 100 : 0,
+    }))
+    .sort((a, b) => b.count - a.count || b.avgEr - a.avgEr);
+}

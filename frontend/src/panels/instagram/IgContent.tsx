@@ -1,0 +1,55 @@
+import { useOutletContext } from 'react-router-dom';
+import type { IgData } from '@/lib/useIgData';
+import { Section } from '@/components/instagram/shared';
+import {
+  TopPostsBlock,
+  ReelsBlock,
+  FormatsBlock,
+  HashtagsBlock,
+  CompareBlock,
+  StoriesBlock,
+} from '@/components/instagram/content';
+import { exportIgPosts } from '@/lib/igExport';
+
+/** IG Контент — everything publication-level: top posts, Reels, formats, hashtags, compare, stories. */
+export function IgContent() {
+  const ig = useOutletContext<IgData>();
+  return (
+    <div className="space-y-10">
+      <Section
+        title="Лучшие публикации"
+        action={
+          <button
+            type="button"
+            onClick={() => exportIgPosts(ig.posts)}
+            className="rounded-lg border px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+          >
+            Экспорт постов
+          </button>
+        }
+      >
+        <TopPostsBlock posts={ig.posts} />
+      </Section>
+
+      <Section title="Reels: удержание и просмотры">
+        <ReelsBlock posts={ig.posts} />
+      </Section>
+
+      <Section title="Вовлечённость по форматам">
+        <FormatsBlock items={ig.formatItems} />
+      </Section>
+
+      <Section title="Эффективность хэштегов">
+        <HashtagsBlock posts={ig.posts} />
+      </Section>
+
+      <Section title="Сравнение публикаций">
+        <CompareBlock posts={ig.posts} />
+      </Section>
+
+      <Section title="Stories за 24 часа">
+        <StoriesBlock stories={ig.stories} />
+      </Section>
+    </div>
+  );
+}
