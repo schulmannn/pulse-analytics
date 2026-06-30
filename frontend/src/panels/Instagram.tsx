@@ -1,5 +1,6 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   useIgProfile,
   useIgInsights,
@@ -185,6 +186,16 @@ export function Instagram() {
   const breakdowns = useIgBreakdowns(timeframe);
   const online = useIgOnline();
   const stories = useIgStories();
+
+  // Deep-link from the sidebar / bottom nav (#ig-…): scroll to that section once content is mounted.
+  const location = useLocation();
+  const dataReady = !(profile.isLoading || insights.isLoading || posts.isLoading);
+  useEffect(() => {
+    if (!dataReady) return;
+    const id = location.hash.replace(/^#/, '');
+    if (!id) return;
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [dataReady, location.hash]);
 
   if (profile.isLoading || insights.isLoading || posts.isLoading) return <InstagramSkeleton />;
   if (profile.isError && insights.isError) {

@@ -687,39 +687,6 @@ const igMetricVal = (j) => {
 };
 
 app.get('/api/ig/stories', requireAuth, async (req, res) => {
-  // ── TEMP diagnostic (superuser + ?debug=1) — removed once the fix is verified on prod ──
-  // Probes the raw upstream (read-only, token never echoed): which id/path returns stories, and
-  // for a live story which insight metrics are valid + the navigation breakdown's dimension keys.
-  if (req.query.debug === '1' && req.user && req.user.role === 'superuser') {
-    if (!igConfigured()) return res.json({ debug: true, configured: false });
-    const probe = async (path, params) => {
-      try {
-        const qs = new URLSearchParams({ ...params, access_token: IG_TOKEN }).toString();
-        const r = await fetch(`${IG_BASE}${path}?${qs}`);
-        const j = await r.json();
-        return { path, status: r.status, data_len: Array.isArray(j.data) ? j.data.length : null, json: j };
-      } catch (e) { return { path, error: e.message }; }
-    };
-    const me = await probe('/me', { fields: 'user_id,username,account_type,media_count' });
-    const probes = [me];
-    probes.push(await probe(`/${IG_ACCOUNT}/stories`, { fields: 'id,media_type,timestamp,permalink,thumbnail_url' }));
-    const storyId = (() => {
-      for (const p of probes) { const d = p.json && p.json.data; if (Array.isArray(d) && d[0] && d[0].id) return d[0].id; }
-      return null;
-    })();
-    const insProbes = [];
-    if (storyId) {
-      // Combined call (the old request) — its error message names the offending metric.
-      insProbes.push(await probe(`/${storyId}/insights`, { metric: 'reach,views,replies,shares,follows,profile_visits,total_interactions,navigation', metric_type: 'total_value', breakdown: 'story_navigation_action_type' }));
-      // Per-metric validity (incl. legacy names) to learn the real supported set.
-      for (const metric of ['reach', 'views', 'replies', 'shares', 'follows', 'profile_visits', 'total_interactions', 'navigation', 'impressions', 'exits', 'taps_forward', 'taps_back', 'profile_activity']) {
-        insProbes.push(await probe(`/${storyId}/insights`, { metric, metric_type: 'total_value' }));
-      }
-      // Navigation breakdown keys.
-      insProbes.push(await probe(`/${storyId}/insights`, { metric: 'navigation', metric_type: 'total_value', breakdown: 'story_navigation_action_type' }));
-    }
-    return res.json({ debug: true, ig_account: IG_ACCOUNT, ig_base: IG_BASE, story_id: storyId, probes, ins_probes: insProbes });
-  }
   try {
     if (!igConfigured()) return res.json(igMock.igMockStories());
     const list = await igFetch(`/${IG_ACCOUNT}/stories`, {

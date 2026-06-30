@@ -47,19 +47,62 @@ interface NavLinkDef {
   label: string;
   icon: IconName;
   end?: boolean;
+  /** Instagram is a single route with scroll sections; its nav items deep-link to a section id. */
+  hash?: string;
 }
 
-const NAV: NavLinkDef[] = [
+// Telegram's dashboard is split into real routes…
+const TG_NAV: NavLinkDef[] = [
   { to: '/', label: 'Обзор', icon: 'overview', end: true },
   { to: '/analytics', label: 'Аналитика', icon: 'analytics' },
   { to: '/posts', label: 'Посты', icon: 'posts' },
   { to: '/mentions', label: 'Упоминания', icon: 'mentions' },
+];
+// …Instagram is one page (/instagram) with scroll sections, so its nav deep-links into those
+// sections instead of changing route. Keeping the nav platform-aware stops IG clicks landing on
+// Telegram routes.
+const IG_NAV: NavLinkDef[] = [
+  { to: '/instagram', label: 'Обзор', icon: 'overview', end: true },
+  { to: '/instagram', label: 'Динамика', icon: 'analytics', hash: 'ig-trends' },
+  { to: '/instagram', label: 'Аудитория', icon: 'audience', hash: 'ig-audience' },
+  { to: '/instagram', label: 'Посты', icon: 'posts', hash: 'ig-posts' },
+  { to: '/instagram', label: 'Stories', icon: 'stories', hash: 'ig-stories' },
 ];
 const SYSTEM_NAV: NavLinkDef[] = [{ to: '/settings', label: 'Настройки', icon: 'settings' }];
 const SUPER_NAV: NavLinkDef[] = [
   { to: '/admin', label: 'Админ', icon: 'admin' },
   { to: '/bugs', label: 'Баги', icon: 'bugs' },
 ];
+
+/** The nav set for the active platform — Telegram routes vs Instagram section deep-links. */
+function usePlatformNav(): NavLinkDef[] {
+  const { pathname } = useLocation();
+  return pathname.startsWith('/instagram') ? IG_NAV : TG_NAV;
+}
+
+/**
+ * Instagram section navigation. /instagram is a single route, so a nav click deep-links to a
+ * section id (#ig-…) and scrolls there. `isActive` reflects the current hash; `go` navigates and,
+ * when already on /instagram (pathname unchanged → the router won't scroll), scrolls on the next
+ * frame. Cross-page jumps are scrolled by the Instagram panel's own hash effect once it mounts.
+ */
+function useIgSectionNav() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const onIg = location.pathname.startsWith('/instagram');
+  const curHash = location.hash.replace(/^#/, '');
+  const isActive = (hash?: string) => onIg && (hash ? curHash === hash : curHash === '');
+  const go = (hash?: string) => {
+    navigate(hash ? `/instagram#${hash}` : '/instagram');
+    if (onIg) {
+      requestAnimationFrame(() => {
+        if (hash) document.getElementById(hash)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        else window.scrollTo({ top: 0, behavior: 'smooth' });
+      });
+    }
+  };
+  return { isActive, go };
+}
 
 const TITLES: Record<string, string> = {
   '/': 'Обзор',
@@ -155,6 +198,7 @@ function Sidebar({ role }: { role?: string }) {
   const isLg = useMediaQuery('(min-width: 1024px)');
   const { collapsed, toggle } = useSidebarCollapsed();
   const rail = railMode(isLg, collapsed);
+  const nav = usePlatformNav();
 
   return (
     <aside
@@ -207,8 +251,8 @@ function Sidebar({ role }: { role?: string }) {
           <PlatformNav variant="sidebar" rail={rail} />
           <div className="mx-1 my-2 border-t" aria-hidden="true" />
 
-          {NAV.map((item) => (
-            <NavItem key={item.to} {...item} rail={rail} />
+          {nav.map((item) => (
+            <NavItem key={item.label} {...item} rail={rail} />
           ))}
           {rail ? (
             <div className="px-2 pb-1 pt-4">
@@ -299,29 +343,60 @@ function CollapseToggle({ collapsed, onToggle, rail }: { collapsed: boolean; onT
  * the bar stays uncrowded. Icon tints via currentColor, so `text-primary` colours the active glyph.
  */
 function MobileBottomNav() {
+  const nav = usePlatformNav();
+  const igNav = useIgSectionNav();
+  const cls = (active: boolean) =>
+    cn(
+      'flex flex-col items-center justify-center gap-1 py-2.5 text-[11px] font-medium transition-colors',
+      active ? 'text-primary' : 'text-muted-foreground hover:text-foreground',
+    );
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 border-t bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden">
-      {NAV.map((item) => (
-        <NavLink
-          key={item.to}
-          to={item.to}
-          end={item.end}
-          className={({ isActive }) =>
-            cn(
-              'flex flex-col items-center justify-center gap-1 py-2.5 text-[11px] font-medium transition-colors',
-              isActive ? 'text-primary' : 'text-muted-foreground hover:text-foreground',
-            )
-          }
-        >
-          <Icon name={item.icon} className="h-5 w-5" />
-          {item.label}
-        </NavLink>
-      ))}
+    <nav
+      className="fixed inset-x-0 bottom-0 z-30 grid border-t bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden"
+      style={{ gridTemplateColumns: `repeat(${nav.length}, minmax(0, 1fr))` }}
+    >
+      {nav.map((item) =>
+        item.to === '/instagram' ? (
+          <button key={item.label} type="button" onClick={() => igNav.go(item.hash)} aria-current={igNav.isActive(item.hash) ? 'page' : undefined} className={cls(igNav.isActive(item.hash))}>
+            <Icon name={item.icon} className="h-5 w-5" />
+            {item.label}
+          </button>
+        ) : (
+          <NavLink key={item.label} to={item.to} end={item.end} className={({ isActive }) => cls(isActive)}>
+            <Icon name={item.icon} className="h-5 w-5" />
+            {item.label}
+          </NavLink>
+        ),
+      )}
     </nav>
   );
 }
 
-function NavItem({ to, label, icon, end, rail }: NavLinkDef & { rail?: boolean }) {
+function NavItem({ to, label, icon, end, hash, rail }: NavLinkDef & { rail?: boolean }) {
+  const igNav = useIgSectionNav();
+
+  // Instagram section item: deep-link + scroll instead of a route change.
+  if (to === '/instagram') {
+    const active = igNav.isActive(hash);
+    return (
+      <button
+        type="button"
+        onClick={() => igNav.go(hash)}
+        title={rail ? label : undefined}
+        aria-label={rail ? label : undefined}
+        aria-current={active ? 'page' : undefined}
+        className={cn(
+          'relative flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
+          active ? 'font-medium text-foreground' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
+        )}
+      >
+        {active && <span aria-hidden="true" className="absolute inset-y-1.5 left-0 w-1 rounded-r-full bg-primary" />}
+        <Icon name={icon} className={cn('h-[18px] w-[18px] shrink-0', active && 'text-primary')} />
+        <span className={cn('whitespace-nowrap', rail && REVEAL_INLINE)}>{label}</span>
+      </button>
+    );
+  }
+
   return (
     <NavLink
       to={to}
@@ -760,8 +835,8 @@ function PlatformNav({ variant, rail = false }: { variant: 'sidebar' | 'segment'
   }));
 
   if (variant === 'segment') {
-    // Mobile: full-width two-half segmented control (Figma 390) — glyph + text label + демо chip,
-    // active half on a blue tint; the gap-px over bg-border draws the centre hairline.
+    // Mobile: full-width two-half segmented control (Figma 390). The active half is tinted with the
+    // platform's brand colour + a brand underline so the selected platform reads at a glance.
     return (
       <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border">
         {items.map((p) => (
@@ -771,11 +846,11 @@ function PlatformNav({ variant, rail = false }: { variant: 'sidebar' | 'segment'
             onClick={() => navigate(p.to)}
             aria-current={p.active ? 'true' : undefined}
             className={cn(
-              'flex items-center justify-center gap-2 px-3 py-2 text-sm transition-colors',
+              'relative flex items-center justify-center gap-2 px-3 py-2 text-sm transition-colors',
               p.active ? 'bg-accent font-medium text-foreground' : 'bg-background text-muted-foreground',
             )}
           >
-            <span className="shrink-0" style={{ color: p.color }}>
+            <span className="shrink-0" style={{ color: p.color, opacity: p.active ? 1 : 0.5 }}>
               <PlatformGlyph k={p.key} className="h-4 w-4" />
             </span>
             <span className="whitespace-nowrap">{p.name}</span>
@@ -784,6 +859,7 @@ function PlatformNav({ variant, rail = false }: { variant: 'sidebar' | 'segment'
                 демо
               </span>
             )}
+            {p.active && <span aria-hidden="true" className="absolute inset-x-0 bottom-0 h-0.5" style={{ background: p.color }} />}
           </button>
         ))}
       </div>
@@ -801,6 +877,7 @@ function PlatformNav({ variant, rail = false }: { variant: 'sidebar' | 'segment'
           aria-current={p.active ? 'true' : undefined}
           title={rail ? (p.demo ? `${p.name} · демо` : p.name) : undefined}
           aria-label={rail ? p.name : undefined}
+          style={{ backgroundColor: p.active ? `${p.color}14` : undefined }}
           className={cn(
             'relative flex w-full items-center rounded-lg text-sm transition-colors',
             rail
@@ -811,7 +888,12 @@ function PlatformNav({ variant, rail = false }: { variant: 'sidebar' | 'segment'
               : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
           )}
         >
-          <span className="shrink-0" style={{ color: p.color }}>
+          {/* Active platform marked by its own brand colour — a left accent bar that reads as
+              "Telegram selected" (blue) vs "Instagram selected" (magenta). */}
+          {p.active && (
+            <span aria-hidden="true" className="absolute inset-y-1.5 left-0 w-1 rounded-r-full" style={{ background: p.color }} />
+          )}
+          <span className="shrink-0" style={{ color: p.color, opacity: p.active ? 1 : 0.5 }}>
             <PlatformGlyph k={p.key} className="h-[18px] w-[18px]" />
           </span>
           <span className={cn('whitespace-nowrap', rail && REVEAL_INLINE)}>{p.name}</span>
