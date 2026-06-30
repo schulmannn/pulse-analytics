@@ -85,7 +85,7 @@ function ProtectedLayout() {
 
   return (
     <>
-      <DashboardLayout email={me.data?.email} role={me.data?.role} />
+      <DashboardLayout email={me.data?.email} role={me.data?.role} avatar={me.data?.avatar} />
       <CommandPalette />
     </>
   );

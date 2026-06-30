@@ -126,16 +126,17 @@ function PlatformGlyph({ k, className }: { k: string; className?: string }) {
 interface DashboardLayoutProps {
   email?: string;
   role?: string;
+  avatar?: string | null;
 }
 
 /** App shell: left sidebar (brand + channel + nav) and a top bar (title + period + menu). */
-export function DashboardLayout({ email, role }: DashboardLayoutProps) {
+export function DashboardLayout({ email, role, avatar }: DashboardLayoutProps) {
   return (
     <div className="flex min-h-screen bg-background text-foreground">
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
-        <Topbar email={email} role={role} />
-        <MobileHeader email={email} role={role} />
+        <Topbar email={email} role={role} avatar={avatar} />
+        <MobileHeader email={email} role={role} avatar={avatar} />
         {/* Extra bottom padding on mobile clears the fixed bottom nav; md+ navigates via the sidebar. */}
         <main className="flex-1 px-4 pb-24 pt-5 sm:px-6 md:pb-5">
           <div className="mx-auto w-full max-w-screen-2xl">
@@ -456,7 +457,7 @@ function SearchBox({ rail = false }: { rail?: boolean }) {
 }
 
 /** Desktop top bar (md+; mobile uses MobileHeader). Title + period + export + theme + account. */
-function Topbar({ email, role }: { email?: string; role?: string }) {
+function Topbar({ email, role, avatar }: { email?: string; role?: string; avatar?: string | null }) {
   const { pathname } = useLocation();
   const title = TITLES[pathname] ?? (pathname.startsWith('/instagram') ? 'Instagram' : 'Pulse');
   return (
@@ -466,7 +467,7 @@ function Topbar({ email, role }: { email?: string; role?: string }) {
       <div className="flex shrink-0 items-center gap-2">
         <PeriodSwitcher />
         <ExportButton />
-        <AccountMenu email={email} role={role} />
+        <AccountMenu email={email} role={role} avatar={avatar} />
       </div>
     </header>
   );
@@ -477,14 +478,14 @@ function Topbar({ email, role }: { email?: string; role?: string }) {
  * identity + account avatar. Row 2: full-width segmented platform switch. Row 3: a compact period
  * strip sitting just above the content (Figma places the period by the KPI hero).
  */
-function MobileHeader({ email, role }: { email?: string; role?: string }) {
+function MobileHeader({ email, role, avatar }: { email?: string; role?: string; avatar?: string | null }) {
   return (
     <div className="md:hidden">
       <div className="flex items-center gap-2 border-b py-2 pr-3">
         <div className="min-w-0 flex-1">
           <ChannelCard />
         </div>
-        <AccountMenu email={email} role={role} />
+        <AccountMenu email={email} role={role} avatar={avatar} />
       </div>
       <div className="border-b px-3 py-2">
         <PlatformNav />
@@ -545,7 +546,7 @@ function ExportButton() {
  * and logout (Claude-style). This is the single home for account + system controls on every
  * breakpoint, so they're out of the sidebar and top bar.
  */
-function AccountMenu({ email, role }: { email?: string; role?: string }) {
+function AccountMenu({ email, role, avatar }: { email?: string; role?: string; avatar?: string | null }) {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
   const { theme, toggle: toggleTheme } = useTheme();
@@ -564,9 +565,9 @@ function AccountMenu({ email, role }: { email?: string; role?: string }) {
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-label="Аккаунт"
-        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-avatar text-[11px] font-medium text-ink2 transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+        className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-avatar text-[11px] font-medium text-ink2 transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
       >
-        {initials}
+        {avatar ? <img src={avatar} alt="" className="h-full w-full object-cover" /> : initials}
       </button>
       {open && (
         <div className="absolute right-0 top-full z-40 mt-1 w-56 overflow-hidden rounded-lg border bg-popover p-1.5 text-sm">

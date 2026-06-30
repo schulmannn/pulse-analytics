@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type ReactNode } from 'react';
+import { useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
   useChannels,
@@ -7,10 +7,14 @@ import {
   useChannelKeys,
   useCreateKey,
   useRevokeKey,
+  useMe,
+  useUpdateAvatar,
+  useRemoveAvatar,
 } from '@/api/queries';
 import { Card, CardContent } from '@/components/ui/card';
 import { fmt } from '@/lib/format';
 import { ApiError } from '@/api/client';
+import { resizeImageToDataUrl } from '@/lib/image';
 import { Skeleton } from '@/components/ui/skeleton';
 import { SourceStatus } from '@/components/SourceStatus';
 
@@ -27,6 +31,87 @@ function ChartSection({ title, children }: { title: string; children: ReactNode 
 }
 
 export function Settings() {
+  return (
+    <div className="space-y-8">
+      <div>
+        <h2 className="text-xl font-medium tracking-tight">Настройки</h2>
+      </div>
+      <ProfileSection />
+      <ChannelsSettings />
+    </div>
+  );
+}
+
+/** Personal cabinet — account identity + avatar upload (resized client-side, stored in Postgres). */
+function ProfileSection() {
+  const me = useMe();
+  const updateAvatar = useUpdateAvatar();
+  const removeAvatar = useRemoveAvatar();
+  const [err, setErr] = useState<string | null>(null);
+
+  const avatar = me.data?.avatar;
+  const email = me.data?.email ?? '';
+  const initials = (email ? email.replace(/@.*/, '').replace(/[^\p{L}]/gu, '').slice(0, 2).toUpperCase() : '') || '?';
+  const teamLogin = me.data?.uid == null; // break-glass team login has no user row
+
+  const onFile = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setErr(null);
+    try {
+      const dataUrl = await resizeImageToDataUrl(file, 256, 0.85);
+      await updateAvatar.mutateAsync(dataUrl);
+    } catch (error) {
+      setErr(error instanceof ApiError ? error.message : error instanceof Error ? error.message : 'Не удалось загрузить фото');
+    }
+  };
+
+  return (
+    <ChartSection title="Профиль">
+      <div className="flex items-center gap-4">
+        <span className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full bg-avatar text-lg font-medium text-ink2">
+          {avatar ? <img src={avatar} alt="" className="h-full w-full object-cover" /> : initials}
+        </span>
+        <div className="min-w-0 space-y-1.5">
+          <div className="truncate text-sm font-medium text-foreground">{email || 'Аккаунт'}</div>
+          {teamLogin ? (
+            <p className="text-xs text-muted-foreground">Командный вход — фото профиля недоступно.</p>
+          ) : (
+            <>
+              <div className="flex items-center gap-2">
+                <label className="cursor-pointer rounded-md border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted">
+                  {updateAvatar.isPending ? 'Загрузка…' : avatar ? 'Сменить фото' : 'Загрузить фото'}
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    className="hidden"
+                    onChange={onFile}
+                    disabled={updateAvatar.isPending}
+                  />
+                </label>
+                {avatar && (
+                  <button
+                    type="button"
+                    onClick={() => removeAvatar.mutate()}
+                    disabled={removeAvatar.isPending}
+                    className="rounded-md border border-destructive/20 px-3 py-1.5 text-xs font-medium text-destructive transition-colors hover:bg-destructive/5 disabled:opacity-50"
+                  >
+                    Удалить
+                  </button>
+                )}
+              </div>
+              {err && <p className="text-xs font-medium text-destructive">{err}</p>}
+              <p className="text-[11px] text-muted-foreground">PNG, JPEG или WebP — уменьшим до 256 px.</p>
+            </>
+          )}
+        </div>
+      </div>
+    </ChartSection>
+  );
+}
+
+function ChannelsSettings() {
   const { data, isLoading, isError, error } = useChannels();
   const createChannelMutation = useCreateChannel();
   const deleteChannelMutation = useDeleteChannel();

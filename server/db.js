@@ -487,6 +487,17 @@ async function getUserById(id) {
   return rows[0] || null;
 }
 
+// Avatar kept off getUserById (which runs on every auth lookup) — fetched only when /me asks.
+async function getUserAvatar(id) {
+  if (!enabled) return null;
+  const { rows } = await pool.query('SELECT avatar_url FROM users WHERE id=$1', [id]);
+  return rows[0] ? rows[0].avatar_url : null;
+}
+async function setUserAvatar(id, dataUrl) {
+  if (!enabled) return;
+  await pool.query('UPDATE users SET avatar_url=$1 WHERE id=$2', [dataUrl, id]);
+}
+
 async function listUsers() {
   if (!enabled) return [];
   const { rows } = await pool.query(
@@ -924,7 +935,7 @@ async function deleteIgAccount(channelId) {
 module.exports = {
   enabled, init, migrate, ping, close, graphsToDailyRows,
   USER_ROLES, USER_STATUSES,
-  countUsers, createUser, getUserByEmail, getUserById, listUsers, updateUser, setUserPassword,
+  countUsers, createUser, getUserByEmail, getUserById, getUserAvatar, setUserAvatar, listUsers, updateUser, setUserPassword,
   revokeUserSessions, setUserStatus, createEmailToken, useEmailToken,
   getPrefs, setPrefs,
   adoptOwnerChannel, listChannels, getChannel, getChannelById, getOwnerChannelId, setChannelTgId,

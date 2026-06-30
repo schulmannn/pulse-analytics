@@ -343,8 +343,37 @@ app.get('/api/auth/check', requireAuth, (req, res) => {
   res.json({ ok: true, role: req.user.role, email: req.user.email });
 });
 
-app.get('/api/auth/me', requireAuth, (req, res) => {
-  res.json({ uid: req.user.uid, email: req.user.email, role: req.user.role });
+app.get('/api/auth/me', requireAuth, async (req, res) => {
+  let avatar = null;
+  if (db.enabled && req.user.uid != null) {
+    avatar = await db.getUserAvatar(req.user.uid).catch(() => null);
+  }
+  res.json({ uid: req.user.uid, email: req.user.email, role: req.user.role, avatar });
+});
+
+// Personal avatar — a small base64 data URL on the user row (resized client-side). Own-route JSON
+// limit (the global parser is 100KB); the regex + length cap keep a giant payload out of the DB.
+// The break-glass team login has no user row, so it can't set an avatar.
+app.post('/api/me/avatar', requireAuth, express.json({ limit: '1mb' }), async (req, res) => {
+  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
+  if (req.user.uid == null) return res.status(403).json({ error: 'Командный вход не поддерживает фото' });
+  const dataUrl = req.body && req.body.dataUrl;
+  if (typeof dataUrl !== 'string' || !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(dataUrl)) {
+    return res.status(400).json({ error: 'Нужен PNG, JPEG или WebP' });
+  }
+  if (dataUrl.length > 400000) return res.status(413).json({ error: 'Слишком большое изображение (до ~280 КБ)' });
+  try {
+    await db.setUserAvatar(req.user.uid, dataUrl);
+    res.json({ ok: true, avatar: dataUrl });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.delete('/api/me/avatar', requireAuth, async (req, res) => {
+  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
+  if (req.user.uid == null) return res.status(403).json({ error: 'Командный вход не поддерживает фото' });
+  try {
+    await db.setUserAvatar(req.user.uid, null);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // Email verification. GET serves an interstitial that does NOT consume the token —

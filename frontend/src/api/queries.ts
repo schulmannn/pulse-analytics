@@ -43,6 +43,22 @@ export function useMe() {
   });
 }
 
+/** Set / remove the current user's profile photo (base64 data URL, resized client-side). */
+export function useUpdateAvatar() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (dataUrl: string) => apiSend('POST', '/api/me/avatar', { dataUrl }, AuthOkSchema),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['me'] }),
+  });
+}
+export function useRemoveAvatar() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiSend('DELETE', '/api/me/avatar', undefined, AuthOkSchema),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['me'] }),
+  });
+}
+
 function sessionTtl(expiresAt?: string | null): number | undefined {
   if (!expiresAt) return undefined;
   const ttlMs = Date.parse(expiresAt) - Date.now();

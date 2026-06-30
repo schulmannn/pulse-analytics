@@ -75,8 +75,10 @@ export type TgFull = z.infer<typeof TgFullSchema>;
 
 export const MeSchema = z
   .object({
+    uid: z.coerce.number().optional().nullable(),
     email: z.string().optional(),
     role: z.string().optional(),
+    avatar: z.string().optional().nullable(), // base64 data URL profile photo
   })
   .passthrough();
 export type Me = z.infer<typeof MeSchema>;
