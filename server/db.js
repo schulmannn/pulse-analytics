@@ -879,6 +879,48 @@ async function getAttachment(id) {
   return rows[0] || null;
 }
 
+// ── Instagram accounts (per-channel OAuth connection) ─────────────
+// One IG professional account per channel. The access token is stored already-encrypted
+// (callers encrypt via lib/ig_crypto before persisting) — db.js never sees plaintext.
+async function saveIgAccount(channelId, { ig_user_id, username, access_token_enc, token_expires_at, scopes }) {
+  if (!enabled || !channelId) return false;
+  await pool.query(
+    `INSERT INTO ig_accounts (channel_id, ig_user_id, username, access_token_enc, token_expires_at, scopes, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6, now())
+     ON CONFLICT (channel_id) DO UPDATE SET
+       ig_user_id=EXCLUDED.ig_user_id, username=EXCLUDED.username,
+       access_token_enc=EXCLUDED.access_token_enc, token_expires_at=EXCLUDED.token_expires_at,
+       scopes=EXCLUDED.scopes, updated_at=now()`,
+    [channelId, ig_user_id, username || null, access_token_enc, token_expires_at || null, scopes || null]);
+  return true;
+}
+
+// Full row incl. the encrypted token (callers decrypt). Returns null when not connected.
+async function getIgAccount(channelId) {
+  if (!enabled || !channelId) return null;
+  const { rows } = await pool.query(
+    `SELECT channel_id, ig_user_id, username, access_token_enc, scopes,
+            to_char(token_expires_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS token_expires_at,
+            to_char(connected_at,'YYYY-MM-DD"T"HH24:MI:SS') AS connected_at
+       FROM ig_accounts WHERE channel_id=$1`, [channelId]);
+  return rows[0] || null;
+}
+
+// Refresh path: rotate the encrypted token + expiry without touching identity columns.
+async function updateIgToken(channelId, access_token_enc, token_expires_at) {
+  if (!enabled || !channelId) return false;
+  await pool.query(
+    'UPDATE ig_accounts SET access_token_enc=$2, token_expires_at=$3, updated_at=now() WHERE channel_id=$1',
+    [channelId, access_token_enc, token_expires_at || null]);
+  return true;
+}
+
+async function deleteIgAccount(channelId) {
+  if (!enabled || !channelId) return false;
+  const { rowCount } = await pool.query('DELETE FROM ig_accounts WHERE channel_id=$1', [channelId]);
+  return rowCount > 0;
+}
+
 module.exports = {
   enabled, init, migrate, ping, close, graphsToDailyRows,
   USER_ROLES, USER_STATUSES,
@@ -893,4 +935,5 @@ module.exports = {
   getChannelHistory, getMentionsHistory, getMentionsArchive,
   createBug, listBugs, updateBug, deleteBug, BUG_STATUSES, BUG_SEVERITIES, BUG_KINDS,
   bugExists, getBug, addAttachmentIfRoom, getAttachment,
+  saveIgAccount, getIgAccount, updateIgToken, deleteIgAccount,
 };
