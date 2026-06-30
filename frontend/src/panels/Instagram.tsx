@@ -333,11 +333,6 @@ export function Instagram() {
             Аккаунт, аудитория, форматы и публикации
           </p>
         </div>
-        {isMock && (
-          <span className="rounded-full border border-ember/40 bg-card px-2.5 py-1 text-xs font-medium text-ember">
-            Демо-данные · подключите аккаунт для реальных
-          </span>
-        )}
         <div className="ml-auto flex gap-2">
           <button
             type="button"
@@ -355,6 +350,8 @@ export function Instagram() {
           </button>
         </div>
       </section>
+
+      {isMock && <DemoModeBanner />}
 
       <SectionNav sections={SECTIONS} />
 
@@ -1166,6 +1163,96 @@ function StoriesBlock({ stories }: { stories: IgStory[] | undefined }) {
         </Card>
       </div>
     </div>
+  );
+}
+
+/**
+ * Prominent demo-mode state for the IG tab (shown while data is mock-backed). Replaces the
+ * old quiet badge: an explicit "Демо-режим" header, a "Подключить Instagram" CTA that reveals
+ * the connection requirements (there's no OAuth flow — connecting = configuring server env),
+ * and a "что станет доступно" list so the value is clear before anyone wires it up.
+ */
+function DemoModeBanner() {
+  const [open, setOpen] = useState(false);
+  const steps = [
+    'Аккаунт Instagram Business или Creator, привязанный к странице Facebook.',
+    'Приложение Facebook с доступом к Instagram Graph API.',
+    'Добавить в окружение сервера IG_ACCESS_TOKEN (long-lived) и IG_ACCOUNT_ID.',
+  ];
+  const unlocks = [
+    'Охват и просмотры по дням',
+    'Вовлечённость по форматам (Reels / посты / Stories)',
+    'Демография и география аудитории',
+    'Лучшее время для публикации',
+    'Метрики Stories и действий в профиле',
+  ];
+  return (
+    <Card className="mt-4 border-chart-3/40 bg-chart-3/[0.04]">
+      <CardContent className="p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-chart-3/15 text-chart-3">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden="true">
+                <circle cx="12" cy="12" r="9" />
+                <path d="M12 8h.01M11 12h1v4h1" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </span>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-semibold text-foreground">Демо-режим</h3>
+                <span className="rounded-full bg-chart-3/15 px-1.5 py-0.5 text-[10px] font-medium text-chart-3">
+                  примерные данные
+                </span>
+              </div>
+              <p className="mt-1 max-w-prose text-sm text-muted-foreground">
+                Цифры на этой странице — образец. Подключите аккаунт Instagram Business, чтобы видеть
+                реальные охваты, аудиторию и публикации.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setOpen((o) => !o)}
+            aria-expanded={open}
+            className="shrink-0 rounded-lg bg-primary px-3.5 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+          >
+            Подключить Instagram
+          </button>
+        </div>
+
+        {open && (
+          <div className="mt-4 grid gap-5 border-t pt-4 sm:grid-cols-2">
+            <div>
+              <div className="text-[11px] font-semibold tracking-wide text-muted-foreground">Что нужно для подключения</div>
+              <ol className="mt-2 space-y-2">
+                {steps.map((step, i) => (
+                  <li key={i} className="flex gap-2 text-sm text-muted-foreground">
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[11px] font-semibold">
+                      {i + 1}
+                    </span>
+                    <span className="leading-relaxed">{step}</span>
+                  </li>
+                ))}
+              </ol>
+              <p className="mt-2 text-xs text-muted-foreground">После этого демо-режим отключится автоматически.</p>
+            </div>
+            <div>
+              <div className="text-[11px] font-semibold tracking-wide text-muted-foreground">Что станет доступно</div>
+              <ul className="mt-2 space-y-1.5">
+                {unlocks.map((item, i) => (
+                  <li key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="mt-0.5 h-3.5 w-3.5 shrink-0 text-verdant" aria-hidden="true">
+                      <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    <span className="leading-relaxed">{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
