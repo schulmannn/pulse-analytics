@@ -1,15 +1,36 @@
+import { useRef } from 'react';
 import { Link } from 'react-router-dom';
 import type { ReactNode } from 'react';
+import {
+  motion,
+  useScroll,
+  useTransform,
+  useReducedMotion,
+  useMotionValue,
+  cubicBezier,
+  type MotionValue,
+} from 'framer-motion';
 import { PulseMark } from '@/components/PulseMark';
 
 /**
  * Public marketing landing — "Pulse Refined Technical" (light, product-forward, Steep-style).
  * Light by default (no forced .dark): warm paper canvas, hairline section dividers, one calm blue
- * accent, pill CTAs. The product itself does the selling — a static (data-free) dashboard preview
- * in the hero and real product fragments down the page.
+ * accent, pill CTAs. The product itself does the selling — a dashboard that *assembles itself* in
+ * the hero on scroll (scroll-scrubbed), and real product fragments that rise into view down the page.
+ *
+ * Motion: a pinned hero whose dashboard pieces (KPI cards, sparkline, headline metric, post rows,
+ * insight) scrub in as you scroll; sections below reveal on entry. All of it collapses to a static,
+ * fully-assembled state under `prefers-reduced-motion` and on mobile (where the mock is hidden).
  */
 
 const MAXW = 'mx-auto w-full max-w-[1200px] px-6 sm:px-10';
+
+const EASE = cubicBezier(0.22, 1, 0.36, 1);
+const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
+
+// shared sparkline geometry (static fragment + animated hero share one path)
+const SPARK_LINE =
+  'M0,44 L18,40 L36,42 L54,33 L72,35 L90,27 L108,29 L126,20 L144,22 L162,12 L180,15 L200,6';
 
 // ── tiny inline icons (stroke = currentColor) ──────────────────────────────
 function Check({ className }: { className?: string }) {
@@ -44,9 +65,8 @@ function Lightbulb({ className }: { className?: string }) {
   );
 }
 
-// ── product preview: a static, data-free mock of the Обзор screen ──────────
+// ── shared product-preview atoms ────────────────────────────────────────────
 function Sparkline() {
-  const line = 'M0,44 L18,40 L36,42 L54,33 L72,35 L90,27 L108,29 L126,20 L144,22 L162,12 L180,15 L200,6';
   return (
     <svg viewBox="0 0 200 52" preserveAspectRatio="none" className="h-[52px] w-full" aria-hidden="true">
       <defs>
@@ -55,8 +75,8 @@ function Sparkline() {
           <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity="0" />
         </linearGradient>
       </defs>
-      <path d={`${line} L200,52 L0,52 Z`} fill="url(#lp-spark)" />
-      <path d={line} fill="none" stroke="hsl(var(--foreground))" strokeWidth="1.5" />
+      <path d={`${SPARK_LINE} L200,52 L0,52 Z`} fill="url(#lp-spark)" />
+      <path d={SPARK_LINE} fill="none" stroke="hsl(var(--foreground))" strokeWidth="1.5" />
       <circle cx="200" cy="6" r="3" fill="hsl(var(--primary))" />
     </svg>
   );
@@ -96,11 +116,96 @@ function PostRow({ n, title, views, er, delta, up }: { n: number; title: string;
   );
 }
 
-function DashboardPreview() {
+// ── animated hero: a dashboard that assembles itself on scroll ───────────────
+
+// one KPI tile that flies in from `from*` and docks into the grid as p → end
+function useScatter(p: MotionValue<number>, fx: number, fy: number, frot: number, a: number, b: number) {
+  const x = useTransform(p, [a, b], [fx, 0], { ease: EASE });
+  const y = useTransform(p, [a, b], [fy, 0], { ease: EASE });
+  const rotate = useTransform(p, [a, b], [frot, 0], { ease: EASE });
+  const scale = useTransform(p, [a, b], [0.85, 1], { ease: EASE });
+  const opacity = useTransform(p, [a - 0.06, a + 0.04], [0, 1]);
+  const boxShadow = useTransform(
+    p,
+    [a, b],
+    ['0 18px 34px -16px rgba(20,24,40,0.5)', '0 0 0 0 rgba(20,24,40,0)'],
+  );
+  return { x, y, rotate, scale, opacity, boxShadow };
+}
+
+function KpiTile({
+  p, label, value, delta, up, fx, fy, frot, a, b,
+}: {
+  p: MotionValue<number>; label: string; value: string; delta: string; up?: boolean;
+  fx: number; fy: number; frot: number; a: number; b: number;
+}) {
+  const style = useScatter(p, fx, fy, frot, a, b);
   return (
-    <div className="flex w-full overflow-hidden text-foreground">
+    <motion.div style={style} className="rounded-lg border border-border bg-card px-2.5 py-2 will-change-transform">
+      <div className="text-[9px] text-ink3">{label}</div>
+      <div className="mt-1 flex items-baseline gap-1">
+        <span className="text-[15px] font-medium tabular-nums text-foreground">{value}</span>
+        <span className={`text-[9px] tabular-nums ${up ? 'text-verdant' : 'text-ember'}`}>{delta}</span>
+      </div>
+    </motion.div>
+  );
+}
+
+function HeroSparkline({ p }: { p: MotionValue<number> }) {
+  const draw = useTransform(p, [0.16, 0.5], [0, 1], { ease: EASE });
+  const areaOpacity = useTransform(draw, [0, 1], [0, 1]);
+  const dotOpacity = useTransform(draw, [0.85, 1], [0, 1]);
+  return (
+    <svg viewBox="0 0 200 52" preserveAspectRatio="none" className="h-[52px] w-full" aria-hidden="true">
+      <defs>
+        <linearGradient id="lp-spark-h" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity="0.16" />
+          <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <motion.path d={`${SPARK_LINE} L200,52 L0,52 Z`} fill="url(#lp-spark-h)" style={{ opacity: areaOpacity }} />
+      <motion.path d={SPARK_LINE} fill="none" stroke="hsl(var(--foreground))" strokeWidth="1.5" style={{ pathLength: draw }} />
+      <motion.circle cx="200" cy="6" r="3" fill="hsl(var(--primary))" style={{ opacity: dotOpacity }} />
+    </svg>
+  );
+}
+
+const RISK_LINE = 'Охват растёт на 8%, а подписчиков стало меньше на 108.';
+
+function DashboardMock({ p }: { p: MotionValue<number> }) {
+  const frameOpacity = useTransform(p, [0, 0.1], [0.55, 1]);
+  const sidebarX = useTransform(p, [0.03, 0.2], [-16, 0], { ease: EASE });
+  const sidebarOpacity = useTransform(p, [0.03, 0.2], [0, 1]);
+
+  const viewsNum = useTransform(p, [0.12, 0.46], [0, 48210], { ease: EASE });
+  const viewsText = useTransform(viewsNum, (v) => Math.round(v).toLocaleString('ru-RU'));
+  const pillOpacity = useTransform(p, [0.46, 0.56], [0, 1]);
+
+  const typed = useTransform(p, (v) =>
+    RISK_LINE.slice(0, Math.round(RISK_LINE.length * clamp01((v - 0.64) / 0.14))),
+  );
+  const caretOpacity = useTransform(p, [0.64, 0.66, 0.8, 0.84], [0, 1, 1, 0]);
+  const insightOpacity = useTransform(p, [0.6, 0.7], [0, 1]);
+  const insightY = useTransform(p, [0.6, 0.7], [8, 0], { ease: EASE });
+
+  const postsOpacity = [
+    useTransform(p, [0.48, 0.6], [0, 1]),
+    useTransform(p, [0.53, 0.65], [0, 1]),
+    useTransform(p, [0.58, 0.7], [0, 1]),
+  ];
+  const postsY = [
+    useTransform(p, [0.48, 0.6], [8, 0], { ease: EASE }),
+    useTransform(p, [0.53, 0.65], [8, 0], { ease: EASE }),
+    useTransform(p, [0.58, 0.7], [8, 0], { ease: EASE }),
+  ];
+
+  return (
+    <motion.div style={{ opacity: frameOpacity }} className="flex w-full text-foreground">
       {/* sidebar */}
-      <div className="hidden w-[132px] shrink-0 flex-col gap-3 border-r border-border bg-background p-3 sm:flex">
+      <motion.div
+        style={{ x: sidebarX, opacity: sidebarOpacity }}
+        className="hidden w-[132px] shrink-0 flex-col gap-3 border-r border-border bg-background p-3 sm:flex"
+      >
         <div className="flex items-center gap-1.5">
           <PulseMark className="h-3.5 w-3.5 text-primary" />
           <span className="text-[11px] font-medium">Pulse</span>
@@ -123,7 +228,7 @@ function DashboardPreview() {
           <MiniNav label="Посты" />
           <MiniNav label="Упоминания" />
         </div>
-      </div>
+      </motion.div>
 
       {/* main */}
       <div className="min-w-0 flex-1 bg-card p-4">
@@ -142,31 +247,131 @@ function DashboardPreview() {
           <div className="text-[9px] text-ink3">Просмотры · 30 дней</div>
           <div className="mt-1 flex items-end justify-between gap-3">
             <div className="flex items-baseline gap-2">
-              <span className="text-[34px] font-medium leading-none tabular-nums">48 210</span>
-              <span className="rounded bg-green-tint px-1.5 py-0.5 text-[9px] font-medium tabular-nums text-verdant">↑ 8.4%</span>
+              <motion.span className="text-[34px] font-medium leading-none tabular-nums">{viewsText}</motion.span>
+              <motion.span style={{ opacity: pillOpacity }} className="rounded bg-green-tint px-1.5 py-0.5 text-[9px] font-medium tabular-nums text-verdant">↑ 8.4%</motion.span>
             </div>
-            <div className="w-[46%]"><Sparkline /></div>
+            <div className="w-[46%]"><HeroSparkline p={p} /></div>
           </div>
           <div className="mt-1 text-[8px] text-ink3">к прошлому периоду · ≈2 835 на пост</div>
         </div>
 
-        <div className="mt-3 flex gap-3 border-t border-border pt-3">
-          <Col label="Подписчики" value="4 781" delta="−108" />
-          <Col label="Ср. охват" value="2 835" delta="+4%" up />
-          <Col label="Реакции" value="1 204" delta="+58" up />
-          <Col label="Вовлечённость" value="6.7%" delta="+0.4" up />
+        {/* KPI tiles assemble here */}
+        <div className="mt-3 grid grid-cols-4 gap-2 border-t border-border pt-3">
+          <KpiTile p={p} label="Подписчики" value="4 781" delta="−108" fx={-120} fy={-28} frot={-6} a={0.22} b={0.44} />
+          <KpiTile p={p} label="Ср. охват" value="2 835" delta="+4%" up fx={44} fy={-104} frot={5} a={0.28} b={0.50} />
+          <KpiTile p={p} label="Реакции" value="1 204" delta="+58" up fx={-34} fy={104} frot={4} a={0.34} b={0.56} />
+          <KpiTile p={p} label="Вовлечённость" value="6.7%" delta="+0.4" up fx={128} fy={40} frot={-6} a={0.40} b={0.62} />
         </div>
 
         <div className="mt-3 border-t border-border pt-2">
           <div className="pb-1 text-[9px] text-ink3">Топ постов</div>
-          <PostRow n={1} title="Как мы выбираем темы для канала" views="12 480" er="9.1%" delta="+24%" up />
-          <PostRow n={2} title="Большой гайд по продуктивности" views="8 902" er="7.4%" delta="−6%" />
-          <PostRow n={3} title="Подкаст: итоги сезона и планы" views="7 415" er="6.2%" delta="+11%" up />
-          <PostRow n={4} title="Гайд: как мы пишем посты для канала" views="6 240" er="5.4%" delta="+3%" up />
-          <PostRow n={5} title="Анонс нового сезона рассылки" views="5 102" er="4.8%" delta="−2%" />
+          <motion.div style={{ opacity: postsOpacity[0], y: postsY[0] }}>
+            <PostRow n={1} title="Как мы выбираем темы для канала" views="12 480" er="9.1%" delta="+24%" up />
+          </motion.div>
+          <motion.div style={{ opacity: postsOpacity[1], y: postsY[1] }}>
+            <PostRow n={2} title="Большой гайд по продуктивности" views="8 902" er="7.4%" delta="−6%" />
+          </motion.div>
+          <motion.div style={{ opacity: postsOpacity[2], y: postsY[2] }}>
+            <PostRow n={3} title="Подкаст: итоги сезона и планы" views="7 415" er="6.2%" delta="+11%" up />
+          </motion.div>
+        </div>
+
+        {/* self-typing insight */}
+        <motion.div style={{ opacity: insightOpacity, y: insightY }} className="mt-3 flex items-start gap-2 border-t border-border pt-2.5">
+          <span className="mt-0.5 rounded bg-amber-tint px-1 py-0.5 text-[8px] font-medium text-status-warn">Риск</span>
+          <p className="text-[10px] leading-snug text-ink2">
+            <motion.span>{typed}</motion.span>
+            <motion.span style={{ opacity: caretOpacity }} className="ml-px inline-block text-primary">▍</motion.span>
+          </p>
+        </motion.div>
+      </div>
+    </motion.div>
+  );
+}
+
+function HeroCopy({ reduce }: { reduce: boolean }) {
+  const container = { hidden: {}, show: { transition: { staggerChildren: 0.08, delayChildren: 0.05 } } };
+  const item = {
+    hidden: { opacity: 0, y: 16 },
+    show: { opacity: 1, y: 0, transition: { duration: 0.6, ease: EASE } },
+  };
+  return (
+    <motion.div variants={container} initial={reduce ? false : 'hidden'} animate="show">
+      <motion.div variants={item} className="text-[13px] font-medium text-primary">Telegram + Instagram</motion.div>
+      <motion.h1 variants={item} className="mt-4 text-[clamp(54px,8vw,76px)] font-medium leading-[0.95] tracking-tight text-foreground">Pulse</motion.h1>
+      <motion.p variants={item} className="mt-5 max-w-[22em] text-[clamp(18px,1.6vw,22px)] leading-snug text-ink2">
+        Аналитика Telegram и Instagram без лишнего шума
+      </motion.p>
+      <motion.div variants={item} className="mt-8 flex flex-wrap items-center gap-3">
+        <Link to="/register" className="btn-pill bg-primary px-5 py-3 text-[15px] font-medium text-primary-foreground transition-colors hover:bg-primary/90">
+          Создать аккаунт
+        </Link>
+        <Link to="/login" className="btn-pill border border-border bg-card px-5 py-3 text-[15px] font-medium text-foreground transition-colors hover:bg-muted">
+          Посмотреть демо
+        </Link>
+      </motion.div>
+      <motion.p variants={item} className="mt-5 text-[13px] text-ink3">Демо доступно без регистрации · данные собираются локально</motion.p>
+    </motion.div>
+  );
+}
+
+function Hero() {
+  const reduce = useReducedMotion() ?? false;
+  const heroRef = useRef<HTMLElement>(null);
+  const { scrollYProgress } = useScroll({ target: heroRef, offset: ['start start', 'end start'] });
+  const staticP = useMotionValue(1);
+  const p = reduce ? staticP : scrollYProgress;
+
+  const runway = reduce ? '' : 'md:h-[200vh]';
+  const stage = reduce
+    ? ''
+    : 'md:sticky md:top-[68px] md:flex md:h-[calc(100vh-68px)] md:items-center md:overflow-hidden';
+  const gridPad = reduce ? 'py-14 md:py-20' : 'py-14 md:py-0';
+
+  return (
+    <section ref={heroRef} className={`relative border-b border-border ${runway}`}>
+      <div className={stage}>
+        {/* soft blue halo behind the dashboard */}
+        <ScrollHalo p={p} />
+        <div className={`${MAXW} relative z-[1] grid w-full items-center gap-12 ${gridPad} md:grid-cols-[minmax(0,420px)_1fr]`}>
+          <HeroCopy reduce={reduce} />
+          <div className="relative hidden md:block">
+            <div className="overflow-hidden rounded-xl border border-border bg-card shadow-[0_30px_70px_-40px_rgba(20,24,40,0.28)]">
+              <DashboardMock p={p} />
+            </div>
+          </div>
         </div>
       </div>
-    </div>
+    </section>
+  );
+}
+
+function ScrollHalo({ p }: { p: MotionValue<number> }) {
+  const opacity = useTransform(p, [0.08, 0.42], [0, 0.9]);
+  return (
+    <motion.div
+      aria-hidden="true"
+      style={{ opacity }}
+      className="pointer-events-none absolute right-[6%] top-1/2 hidden h-[680px] w-[680px] -translate-y-1/2 rounded-full md:block"
+    >
+      <div className="h-full w-full rounded-full bg-primary/10 blur-3xl" />
+    </motion.div>
+  );
+}
+
+// ── scroll-reveal wrapper for the sections below the hero ────────────────────
+function Reveal({ children, className, delay = 0 }: { children: ReactNode; className?: string; delay?: number }) {
+  const reduce = useReducedMotion() ?? false;
+  return (
+    <motion.div
+      className={className}
+      initial={reduce ? false : { opacity: 0, y: 24 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true, margin: '-80px' }}
+      transition={{ duration: 0.6, ease: EASE, delay }}
+    >
+      {children}
+    </motion.div>
   );
 }
 
@@ -192,33 +397,6 @@ function Header() {
   );
 }
 
-function Hero() {
-  return (
-    <section className="border-b border-border">
-      <div className={`${MAXW} grid items-center gap-12 py-14 md:grid-cols-[minmax(0,420px)_1fr] md:py-20`}>
-        <div>
-          <h1 className="text-[clamp(54px,8vw,76px)] font-medium leading-[0.95] tracking-tight text-foreground">Pulse</h1>
-          <p className="mt-5 max-w-[22em] text-[clamp(18px,1.6vw,22px)] leading-snug text-ink2">
-            Аналитика Telegram и Instagram без лишнего шума
-          </p>
-          <div className="mt-8 flex flex-wrap items-center gap-3">
-            <Link to="/register" className="btn-pill bg-primary px-5 py-3 text-[15px] font-medium text-primary-foreground transition-colors hover:bg-primary/90">
-              Создать аккаунт
-            </Link>
-            <Link to="/login" className="btn-pill border border-border bg-card px-5 py-3 text-[15px] font-medium text-foreground transition-colors hover:bg-muted">
-              Посмотреть демо
-            </Link>
-          </div>
-          <p className="mt-5 text-[13px] text-ink3">Демо доступно без регистрации · данные собираются локально</p>
-        </div>
-        <div className="hidden overflow-hidden rounded-xl border border-border bg-card md:block">
-          <DashboardPreview />
-        </div>
-      </div>
-    </section>
-  );
-}
-
 function Pillars() {
   const items = [
     { h: 'Локальный сбор данных', p: 'Collector работает на вашей стороне. Сессия Telegram не попадает в Pulse.', icon: Shield },
@@ -227,7 +405,7 @@ function Pillars() {
   ];
   return (
     <section id="security" className="border-b border-border">
-      <div className={`${MAXW} py-16`}>
+      <Reveal className={`${MAXW} py-16`}>
         <div className="text-[13px] font-medium text-ink3">Почему Pulse</div>
         <h2 className="mt-2 max-w-[16em] text-[clamp(24px,3vw,30px)] font-medium tracking-tight text-foreground">
           Спокойная аналитика, которой можно доверять
@@ -244,7 +422,7 @@ function Pillars() {
             );
           })}
         </div>
-      </div>
+      </Reveal>
     </section>
   );
 }
@@ -340,7 +518,7 @@ function Feature({
   return (
     <section className="border-b border-border">
       <div className={`${MAXW} grid items-center gap-12 py-16 md:grid-cols-2`}>
-        <div className={reverse ? 'md:order-2' : ''}>
+        <Reveal className={reverse ? 'md:order-2' : ''}>
           <div className="text-[13px] font-medium text-primary">{eyebrow}</div>
           <h2 className="mt-3 max-w-[12em] text-[clamp(24px,3vw,30px)] font-medium tracking-tight text-foreground">{title}</h2>
           <p className="mt-3 max-w-[26em] text-base leading-relaxed text-ink2">{body}</p>
@@ -352,8 +530,8 @@ function Feature({
               </li>
             ))}
           </ul>
-        </div>
-        <div className={reverse ? 'md:order-1' : ''}>{fragment}</div>
+        </Reveal>
+        <Reveal className={reverse ? 'md:order-1' : ''} delay={0.1}>{fragment}</Reveal>
       </div>
     </section>
   );
@@ -362,7 +540,7 @@ function Feature({
 function CtaBand() {
   return (
     <section className="bg-blue-tint">
-      <div className={`${MAXW} flex flex-col items-center py-20 text-center`}>
+      <Reveal className={`${MAXW} flex flex-col items-center py-20 text-center`}>
         <h2 className="text-[clamp(28px,4vw,36px)] font-medium tracking-tight text-foreground">Начните за минуту</h2>
         <p className="mt-4 max-w-[28em] text-[17px] text-ink2">Подключите канал или откройте демо без регистрации.</p>
         <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
@@ -373,7 +551,7 @@ function CtaBand() {
             Посмотреть демо
           </Link>
         </div>
-      </div>
+      </Reveal>
     </section>
   );
 }
