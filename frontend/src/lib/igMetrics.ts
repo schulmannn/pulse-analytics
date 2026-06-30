@@ -89,6 +89,25 @@ export function windowPair(series: Point[], startMs: number, endMs: number): Win
 export const pairDelta = (p: WindowPair): MetricDelta | null =>
   p.hasCur && p.hasPrev ? pctDelta(p.cur, p.prev) : null;
 
+/**
+ * Reconstruct the cumulative subscriber total per day. `follower_count` is a daily NET-NEW series
+ * (joins − leaves), not a running total, so we anchor the most recent point at the real current
+ * total (from the profile) and walk backwards: total at end of day i = total at end of day i+1
+ * minus the net-new gained on day i+1. Honest — derived from the real daily series, not invented.
+ */
+export function cumulativeFollowers(dailyNetNew: Point[], currentTotal: number): Point[] {
+  const series = dailyNetNew
+    .filter((p) => p.day !== 'total' && Number.isFinite(Date.parse(p.day)))
+    .sort((a, b) => a.day.localeCompare(b.day));
+  if (series.length === 0 || !Number.isFinite(currentTotal) || currentTotal <= 0) return [];
+  const out: Point[] = new Array(series.length);
+  out[series.length - 1] = { day: series[series.length - 1].day, value: currentTotal };
+  for (let i = series.length - 2; i >= 0; i--) {
+    out[i] = { day: series[i].day, value: out[i + 1].value - series[i + 1].value };
+  }
+  return out;
+}
+
 /** total_value breakdown reader → {label,value}[] for a metric+dimension. */
 export function tvBreakdown(
   data: IgBreakdowns['data'] | undefined,

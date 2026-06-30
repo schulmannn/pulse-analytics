@@ -16,6 +16,7 @@ import { fmtDay, type Point, type WindowPair } from '@/lib/igMetrics';
 export function IgAnalytics() {
   const ig = useOutletContext<IgData>();
   const reachWin = ig.series.reach.filter((p) => ig.inWindow(p.day));
+  const followerCumWin = ig.followerCumulative.filter((p) => ig.inWindow(p.day));
   const newFollowersByDay = ig.series.follower.filter((p) => ig.inWindow(p.day)).slice(-30);
 
   const periodRows: { label: string; pair: WindowPair }[] = [
@@ -58,9 +59,10 @@ export function IgAnalytics() {
           Дневной график строим только по метрикам, которые Instagram отдаёт по дням — охват и подписчики.
         </p>
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <TrendCard title="Рост подписчиков" series={followerCumWin} />
           <TrendCard title="Охват по дням" series={reachWin} />
-          <NewFollowersCard data={newFollowersByDay} total={ig.pairs.follower.cur} />
         </div>
+        <NewFollowersCard data={newFollowersByDay} total={ig.pairs.follower.cur} />
       </Section>
 
       <Section title="Период vs предыдущий">

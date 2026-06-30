@@ -18,6 +18,7 @@ import {
   aggregateOnline,
   hashtagStats,
   hasDailySeries,
+  cumulativeFollowers,
   MEDIA_PRODUCT_LABEL,
   DAY_NAMES,
   DAY_MS,
@@ -155,6 +156,8 @@ export function useIgData() {
     insights,
     reachHasDaily: hasDailySeries(series.reach),
     followerHasDaily: hasDailySeries(series.follower),
+    // Cumulative subscriber total per day (reconstructed from net-new + the current total).
+    followerCumulative: cumulativeFollowers(series.follower, followers),
     queries: { profile: profileQ, insights: insightsQ, posts: postsQ, breakdowns: breakdownsQ, online: onlineQ, stories: storiesQ },
   };
 }
