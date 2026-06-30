@@ -1,149 +1,164 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useTgFull } from '@/api/queries';
 import { normalizeTgPosts, type NormalizedPost } from '@/lib/posts';
 import { fmt } from '@/lib/format';
-import { Card, CardContent } from '@/components/ui/card';
+import { markdownToPlainText } from '@/lib/markdown';
+import { cn } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
-import { RichText } from '@/components/RichText';
 import { PostDetailModal } from '@/components/PostDetailModal';
 import { usePeriod } from '@/lib/period';
 
 /**
- * Top posts grid (legacy "выше среднего по вовлечению" algorithm). Heading-less and
- * self-contained — used both on the Posts panel and inside the unified Overview, so each
- * caller supplies its own surrounding heading/section.
+ * Top posts (legacy "выше среднего по вовлечению" algorithm) as a hairline table. Heading-less and
+ * self-contained — used both on the Posts panel and inside the unified Overview, so each caller
+ * supplies its own surrounding heading. Sortable numeric columns; rows open the detail modal.
+ * No fake Δ column — per-post period-delta isn't in the data; the "+% к среднему" insight lives as
+ * a sub-line instead.
  */
+
+type SortKey = 'reach' | 'likes' | 'shares' | 'er';
+interface Column {
+  key: SortKey;
+  label: string;
+  width: string;
+  get: (p: NormalizedPost) => number;
+  render: (p: NormalizedPost) => string;
+}
+const COLUMNS: Column[] = [
+  { key: 'reach', label: 'Просмотры', width: 'w-20', get: (p) => p.reach, render: (p) => fmt.short(p.reach) },
+  { key: 'likes', label: 'Реакции', width: 'w-16', get: (p) => p.likes, render: (p) => fmt.short(p.likes) },
+  { key: 'shares', label: 'Репосты', width: 'w-16', get: (p) => p.shares, render: (p) => fmt.short(p.shares) },
+  { key: 'er', label: 'ER', width: 'w-14', get: (p) => p.er ?? 0, render: (p) => (p.er != null ? `${p.er.toFixed(1)}%` : '—') },
+];
+
 export function TopPosts() {
   const { days, inRange } = usePeriod();
   const { data, isLoading, isError } = useTgFull(days);
-  // The opened post + its rank/reason, so the detail modal can stand alone.
   const [selected, setSelected] = useState<{ post: NormalizedPost; rank: number; reason: string | null } | null>(null);
+  const [sortKey, setSortKey] = useState<SortKey>('reach');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+
+  const { rows, reasonFor } = useMemo(() => {
+    const posts = normalizeTgPosts(data?.posts ?? [], data?.channel ?? {}).filter((post) => inRange(post.date));
+    const withEng = posts.filter((post) => post.eng > 0);
+    const avg = (pick: (p: NormalizedPost) => number) =>
+      withEng.length ? withEng.reduce((sum, p) => sum + pick(p), 0) / withEng.length : 0;
+    const avgEng = avg((p) => p.eng);
+    const avgReach = avg((p) => p.reach);
+    const avgShares = avg((p) => p.shares);
+
+    let top: NormalizedPost[] = [];
+    if (withEng.length > 0) {
+      const aboveAvg = withEng.filter((post) => post.eng > avgEng);
+      top = (aboveAvg.length > 0 ? [...aboveAvg] : [...withEng]).sort((a, b) => b.eng - a.eng).slice(0, 6);
+    }
+
+    const reasonFor = (post: NormalizedPost): string | null => {
+      const opts = [
+        { label: 'вовлечённости', ratio: avgEng > 0 ? post.eng / avgEng : 0 },
+        { label: 'охвату', ratio: avgReach > 0 ? post.reach / avgReach : 0 },
+        { label: 'репостам', ratio: avgShares > 0 && post.shares > 0 ? post.shares / avgShares : 0 },
+      ];
+      const best = opts.reduce((a, b) => (b.ratio > a.ratio ? b : a));
+      const pct = Math.round((best.ratio - 1) * 100);
+      return pct > 0 ? `+${pct}% к среднему по ${best.label}` : null;
+    };
+
+    return { rows: top, reasonFor };
+  }, [data, inRange]);
 
   if (isLoading) return <TopPostsSkeleton />;
   if (isError) return null;
-
-  const posts = normalizeTgPosts(data?.posts ?? [], data?.channel ?? {}).filter((post) =>
-    inRange(post.date),
-  );
-
-  const withEng = posts.filter((post) => post.eng > 0);
-  const avg = (pick: (p: NormalizedPost) => number) =>
-    withEng.length ? withEng.reduce((sum, p) => sum + pick(p), 0) / withEng.length : 0;
-  const avgEng = avg((p) => p.eng);
-  const avgReach = avg((p) => p.reach);
-  const avgShares = avg((p) => p.shares);
-
-  let topPosts: NormalizedPost[] = [];
-  if (withEng.length > 0) {
-    const aboveAvg = withEng.filter((post) => post.eng > avgEng);
-    topPosts = (aboveAvg.length > 0 ? [...aboveAvg] : [...withEng]).sort((a, b) => b.eng - a.eng);
-  }
-  topPosts = topPosts.slice(0, 6);
-
-  // "Why it's in the top" — the metric where this post most exceeds the period average, so the
-  // ranking reads as an insight ("+42% к среднему по репостам") rather than a wall of numbers.
-  const reasonFor = (post: NormalizedPost): string | null => {
-    const opts = [
-      { label: 'вовлечённости', ratio: avgEng > 0 ? post.eng / avgEng : 0 },
-      { label: 'охвату', ratio: avgReach > 0 ? post.reach / avgReach : 0 },
-      { label: 'репостам', ratio: avgShares > 0 && post.shares > 0 ? post.shares / avgShares : 0 },
-    ];
-    const best = opts.reduce((a, b) => (b.ratio > a.ratio ? b : a));
-    const pct = Math.round((best.ratio - 1) * 100);
-    return pct > 0 ? `+${pct}% к среднему по ${best.label}` : null;
-  };
-
-  if (topPosts.length === 0) {
+  if (rows.length === 0) {
     return (
-      <Card>
-        <CardContent className="py-8 text-center text-sm text-muted-foreground">
-          Недостаточно данных для топа постов.
-        </CardContent>
-      </Card>
+      <div className="border-t border-border py-8 text-center text-sm text-muted-foreground">
+        Недостаточно данных для топа постов.
+      </div>
     );
   }
 
+  const col = COLUMNS.find((c) => c.key === sortKey)!;
+  const sorted = [...rows].sort((a, b) => (sortDir === 'desc' ? col.get(b) - col.get(a) : col.get(a) - col.get(b)));
+
+  const toggleSort = (key: SortKey) => {
+    if (key === sortKey) setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+    else {
+      setSortKey(key);
+      setSortDir('desc');
+    }
+  };
+
   return (
     <>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {topPosts.map((post, idx) => {
-          const reason = reasonFor(post);
-          const rank = idx + 1;
-          const open = () => setSelected({ post, rank, reason });
-          return (
-            <Card
-              key={post.id ?? idx}
-              role="button"
-              tabIndex={0}
-              onClick={open}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  open();
-                }
-              }}
-              title="Открыть детали поста"
-              className="group flex cursor-pointer flex-col justify-between overflow-hidden transition-colors hover:border-primary/40 focus-visible:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-            >
-              <div>
-                <div className="relative flex aspect-video w-full items-center justify-center overflow-hidden bg-muted/50">
-                  {post.thumb ? (
-                    <img
-                      src={`${post.thumb}?size=lg`}
-                      alt={`Превью поста №${rank}`}
-                      referrerPolicy="no-referrer"
-                      className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
-                    />
-                  ) : (
-                    <span className="font-mono text-xs text-muted-foreground">Текстовый пост</span>
+      <div className="overflow-x-auto">
+        <div className="min-w-[560px]">
+          {/* header */}
+          <div className="flex items-center gap-3 border-b border-border pb-2 text-[11px] text-muted-foreground">
+            <span className="w-5 shrink-0" />
+            <span className="flex-1">Пост</span>
+            {COLUMNS.map((c) => {
+              const active = c.key === sortKey;
+              return (
+                <button
+                  key={c.key}
+                  type="button"
+                  onClick={() => toggleSort(c.key)}
+                  className={cn(
+                    'flex shrink-0 items-center justify-end gap-1 tabular-nums transition-colors',
+                    c.width,
+                    active ? 'font-medium text-primary' : 'hover:text-foreground',
                   )}
-                  <div className="absolute left-2 top-2 rounded bg-background/90 px-2 py-0.5 text-xs font-bold tabular-nums text-foreground shadow-sm">
-                    №{rank}
-                  </div>
-                </div>
-                <div className="space-y-3 p-4">
-                  <p className="line-clamp-3 text-sm leading-relaxed text-foreground">
-                    {post.caption ? <RichText text={post.caption} /> : <span className="italic text-muted-foreground">Без подписи</span>}
-                  </p>
+                >
+                  {c.label}
+                  <span aria-hidden="true" className={cn('text-[10px]', !active && 'text-ink3/60')}>
+                    {active ? (sortDir === 'desc' ? '↓' : '↑') : '↕'}
+                  </span>
+                </button>
+              );
+            })}
+            <span className="w-5 shrink-0" />
+          </div>
+
+          {/* rows */}
+          {sorted.map((post, idx) => {
+            const reason = reasonFor(post);
+            const title = post.caption ? markdownToPlainText(post.caption) : 'Без подписи';
+            return (
+              <button
+                key={post.id ?? idx}
+                type="button"
+                onClick={() => setSelected({ post, rank: idx + 1, reason })}
+                title="Открыть детали поста"
+                className="group flex w-full items-center gap-3 border-b border-border py-3 text-left transition-colors hover:bg-hover-row focus-visible:bg-hover-row focus-visible:outline-none"
+              >
+                <span className="w-5 shrink-0 text-center text-xs tabular-nums text-ink3">{idx + 1}</span>
+                <span className="min-w-0 flex-1">
+                  <span className={cn('block truncate text-sm', post.caption ? 'text-foreground' : 'italic text-muted-foreground')}>
+                    {title}
+                  </span>
                   {reason && (
-                    <div className="flex items-center gap-1 text-[11px] font-medium text-verdant">
-                      <span aria-hidden="true">▲</span>
-                      <span className="truncate">{reason}</span>
-                    </div>
+                    <span className="mt-0.5 block truncate text-[11px] text-verdant">▲ {reason}</span>
                   )}
-                  {post.reactionsDetail.length > 0 && (
-                    <div className="flex flex-wrap gap-1 pt-1">
-                      {post.reactionsDetail.slice(0, 3).map((r, i) => (
-                        <span
-                          key={i}
-                          className="inline-flex items-center gap-1 rounded-full bg-secondary px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-secondary-foreground"
-                        >
-                          <span>{r.emoji}</span>
-                          <span>{fmt.short(r.count)}</span>
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div className="grid grid-cols-3 gap-2 border-t border-border/40 bg-muted/10 p-4 pt-0 text-center">
-                <div className="pt-2">
-                  <div className="text-[10px] font-semibold tracking-wider text-muted-foreground">Просмотры</div>
-                  <div className="mt-0.5 text-sm font-semibold tabular-nums">{fmt.short(post.reach)}</div>
-                </div>
-                <div className="pt-2">
-                  <div className="text-[10px] font-semibold tracking-wider text-muted-foreground">Реакции</div>
-                  <div className="mt-0.5 text-sm font-semibold tabular-nums">{fmt.short(post.likes)}</div>
-                </div>
-                <div className="pt-2">
-                  <div className="text-[10px] font-semibold tracking-wider text-muted-foreground">Репосты</div>
-                  <div className="mt-0.5 text-sm font-semibold tabular-nums">{fmt.short(post.shares)}</div>
-                </div>
-              </div>
-            </Card>
-          );
-        })}
+                </span>
+                {COLUMNS.map((c) => (
+                  <span
+                    key={c.key}
+                    className={cn('shrink-0 text-right text-sm tabular-nums', c.width, c.key === sortKey ? 'text-foreground' : 'text-ink2')}
+                  >
+                    {c.render(post)}
+                  </span>
+                ))}
+                <span className="flex w-5 shrink-0 justify-end text-ink3 transition-colors group-hover:text-foreground">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden="true">
+                    <path d="M9 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </div>
+
       {selected && (
         <PostDetailModal
           post={selected.post}
@@ -158,15 +173,16 @@ export function TopPosts() {
 
 function TopPostsSkeleton() {
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      {Array.from({ length: 3 }).map((_, i) => (
-        <Card key={i} className="flex h-56 flex-col justify-between">
-          <Skeleton className="h-28 w-full rounded-none" />
-          <div className="space-y-2 p-4">
-            <Skeleton className="h-3 w-full" />
-            <Skeleton className="h-3 w-4/5" />
-          </div>
-        </Card>
+    <div className="space-y-px">
+      <div className="flex items-center gap-3 border-b border-border pb-2">
+        <Skeleton className="h-3 w-24" />
+      </div>
+      {Array.from({ length: 5 }).map((_, i) => (
+        <div key={i} className="flex items-center gap-3 border-b border-border py-3">
+          <Skeleton className="h-3 w-5" />
+          <Skeleton className="h-3 flex-1" />
+          <Skeleton className="h-3 w-16" />
+        </div>
       ))}
     </div>
   );
