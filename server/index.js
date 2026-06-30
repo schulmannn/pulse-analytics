@@ -537,15 +537,17 @@ app.get('/api/ig/insights', requireAuth, async (req, res) => {
     const since = Math.floor(Date.now() / 1000) - days * 86400;
     const until = Math.floor(Date.now() / 1000);
 
-    // impressions + website_clicks were deprecated in 2025 → views + profile_links_taps.
-    // Two groups via allSettled so one unsupported metric can't blank the whole panel.
-    const groups = [
-      'reach,views,profile_views,follower_count',
-      'total_interactions,accounts_engaged,likes,comments,saves,shares',
-    ];
-    const settled = await Promise.allSettled(
-      groups.map((metric) => igFetch(`/${IG_ACCOUNT}/insights`, { metric, period: 'day', since, until })),
+    // Instagram API with Instagram Login (graph.instagram.com): only `reach` + `follower_count`
+    // return a daily time-series (period=day). The engagement/visibility metrics are aggregate
+    // `total_value` over the window — request them with metric_type=total_value (period=day made
+    // the API silently drop them). Per-metric allSettled so one unsupported metric can't blank
+    // the rest (e.g. profile_views isn't available on every account).
+    const tsCall = igFetch(`/${IG_ACCOUNT}/insights`, { metric: 'reach,follower_count', period: 'day', since, until });
+    const tvNames = ['views', 'profile_views', 'accounts_engaged', 'total_interactions', 'likes', 'comments', 'saves', 'shares'];
+    const tvCalls = tvNames.map((metric) =>
+      igFetch(`/${IG_ACCOUNT}/insights`, { metric, metric_type: 'total_value', period: 'day', since, until }),
     );
+    const settled = await Promise.allSettled([tsCall, ...tvCalls]);
     const data = { data: settled.filter((s) => s.status === 'fulfilled').flatMap((s) => s.value?.data || []) };
     cacheSet(cacheKey, data);
     res.json(data);

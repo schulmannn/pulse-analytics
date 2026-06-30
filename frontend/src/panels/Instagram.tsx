@@ -87,12 +87,18 @@ interface Point {
   value: number;
 }
 
-/** Daily time_series metric → {day,value}[] (oldest→newest). */
+/** Daily time_series metric → {day,value}[] (oldest→newest). On the Instagram-Login API the
+    engagement metrics (views/saves/total_interactions/…) come as a single total_value aggregate
+    with no daily series — surface that as one point so KPI sums read the real per-period number. */
 function metricSeries(insights: IgInsights | undefined, name: string): Point[] {
   const metric = insights?.data?.find((m) => m.name === name);
-  return (metric?.values ?? [])
-    .map((v) => ({ day: v.end_time ?? '', value: Number(v.value ?? 0) }))
+  if (!metric) return [];
+  const series = (metric.values ?? [])
+    .map((v) => ({ day: v.end_time ?? '', value: Number(typeof v.value === 'object' ? 0 : v.value ?? 0) }))
     .filter((p) => p.day !== '');
+  if (series.length) return series;
+  const tv = metric.total_value?.value;
+  return tv != null ? [{ day: 'total', value: Number(tv) }] : [];
 }
 
 /** total_value breakdown reader → {label,value}[] for a metric+dimension. */
