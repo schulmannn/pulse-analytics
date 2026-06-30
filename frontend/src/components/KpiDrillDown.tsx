@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { NormalizedPost } from '@/lib/posts';
 import type { MetricDelta } from '@/lib/delta';
@@ -6,6 +6,7 @@ import type { MetricKey } from '@/lib/metricDefs';
 import { METRIC_DEFS } from '@/lib/metricDefs';
 import { fmt } from '@/lib/format';
 import { markdownToPlainText } from '@/lib/markdown';
+import { useFocusTrap } from '@/lib/useFocusTrap';
 import { DeltaPill } from '@/components/DeltaPill';
 import { MetricInfo } from '@/components/InfoTooltip';
 import { BarChart } from '@/components/BarChart';
@@ -29,6 +30,20 @@ const CONTRIB_LABEL: Partial<Record<MetricKey, string>> = {
   er: 'вовлечённости',
 };
 
+// Per-day section heading. Ratio metrics (avgReach/ER) are derived from a sum, so the bars show
+// that underlying sum (reach / engagement), not the ratio itself — the heading says so.
+const DAY_TITLE: Partial<Record<MetricKey, string>> = {
+  subscribers: 'Подписчики по дням',
+  avgReach: 'Просмотры по дням',
+  er: 'Вовлечённость по дням',
+};
+// What a per-post contribution is a share OF. For ratio metrics the share is of the underlying
+// sum (total reach / total engagement), NOT of the shown average/percentage.
+const SHARE_LABEL: Partial<Record<MetricKey, string>> = {
+  avgReach: '% охвата',
+  er: '% вовлечённости',
+};
+
 interface DailySeries {
   labels: string[];
   values: number[];
@@ -43,6 +58,8 @@ interface KpiDrillDownProps {
   total: string;
   trend?: MetricDelta | null;
   caption?: string | null;
+  /** Subscriber count — the ER divisor, used to reconcile the ER drill (ER = Σ eng ÷ members). */
+  members?: number;
   onClose: () => void;
 }
 
@@ -61,13 +78,17 @@ function bucketByDay(posts: NormalizedPost[], field: keyof NormalizedPost): Dail
 
 /**
  * Drill-down for a KPI: how the number breaks down by day and which posts drove it. Opened from
- * a KPI card. Uses the same per-post fields the KPI total sums, so the attribution reconciles.
- * Subscribers (a channel count, not a post sum) instead shows the daily subscriber line. Rows
- * open the full post detail. Reuses the PostDetailModal shell pattern (portal, Escape, scroll
- * lock); Escape closes the post sub-modal first, then this.
+ * a KPI card. For SUM metrics (views/reactions/forwards) the per-post attribution reconciles
+ * exactly with the headline. For RATIO metrics (avgReach = Σviews÷posts, ER = Σeng÷members) the
+ * headline is a derived ratio, so the breakdown shows the underlying SUM it's built from and the
+ * footer states the reconciliation explicitly. Subscribers (a channel count) shows the daily
+ * line. Rows open the full post detail. Reuses the PostDetailModal shell (portal, Escape, scroll
+ * lock, focus trap); Escape closes the post sub-modal first, then this.
  */
-export function KpiDrillDown({ metricKey, posts, subsSeries, total, trend, caption, onClose }: KpiDrillDownProps) {
+export function KpiDrillDown({ metricKey, posts, subsSeries, total, trend, caption, members, onClose }: KpiDrillDownProps) {
   const [openPost, setOpenPost] = useState<NormalizedPost | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(panelRef);
   const def = METRIC_DEFS[metricKey];
   const field = FIELD[metricKey];
 
@@ -95,6 +116,19 @@ export function KpiDrillDown({ metricKey, posts, subsSeries, total, trend, capti
   const contribTotal = field ? contributors.reduce((s, p) => s + Number(p[field] ?? 0), 0) : 0;
   const fieldSumAll = field ? posts.reduce((s, p) => s + Number(p[field] ?? 0), 0) : 0;
 
+  // Footer line: for ratio metrics, show the reconciliation (sum ÷ divisor = headline); for sum
+  // metrics, how much of the period the shown posts account for.
+  let reconcile = '';
+  if (field) {
+    if (metricKey === 'er' && members && members > 0) {
+      reconcile = `ER = ${fmt.short(fieldSumAll)} вовлечений ÷ ${fmt.num(members)} подписчиков × 100% = ${total}`;
+    } else if (metricKey === 'avgReach' && posts.length > 0) {
+      reconcile = `Средний охват = ${fmt.short(fieldSumAll)} просмотров ÷ ${posts.length} постов = ${total}`;
+    } else if (contributors.length > 0 && contribTotal > 0 && fieldSumAll > 0) {
+      reconcile = `Эти ${contributors.length} постов дали ${Math.round((contribTotal / fieldSumAll) * 100)}% от периода.`;
+    }
+  }
+
   return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-end justify-center sm:items-center"
@@ -103,7 +137,11 @@ export function KpiDrillDown({ metricKey, posts, subsSeries, total, trend, capti
       aria-label={`Разбор: ${def.term}`}
     >
       <div className="absolute inset-0 bg-background/70 backdrop-blur-sm" onClick={onClose} aria-hidden="true" />
-      <div className="relative z-10 flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl border bg-card shadow-xl sm:rounded-2xl">
+      <div
+        ref={panelRef}
+        tabIndex={-1}
+        className="relative z-10 flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl border bg-card shadow-xl focus:outline-none sm:rounded-2xl"
+      >
         {/* Header */}
         <div className="flex items-start justify-between gap-3 border-b px-5 py-3">
           <div className="min-w-0">
@@ -134,7 +172,7 @@ export function KpiDrillDown({ metricKey, posts, subsSeries, total, trend, capti
           {/* Per-day breakdown */}
           <div>
             <div className="mb-2 text-[11px] font-semibold tracking-wide text-muted-foreground">
-              {metricKey === 'subscribers' ? 'Подписчики по дням' : 'По дням'}
+              {DAY_TITLE[metricKey] ?? 'По дням'}
             </div>
             {metricKey === 'subscribers' ? (
               daily.values.length > 1 ? (
@@ -196,7 +234,12 @@ export function KpiDrillDown({ metricKey, posts, subsSeries, total, trend, capti
                           <span className="min-w-0 flex-1 truncate text-sm text-foreground">{text}</span>
                           <span className="shrink-0 text-right">
                             <span className="block text-sm font-semibold tabular-nums">{fmt.short(value)}</span>
-                            {share > 0 && <span className="block text-[10px] text-muted-foreground">{share}% периода</span>}
+                            {share > 0 && (
+                              <span className="block text-[10px] text-muted-foreground">
+                                {share}
+                                {SHARE_LABEL[metricKey] ?? '% периода'}
+                              </span>
+                            )}
                           </span>
                         </button>
                       </li>
@@ -206,11 +249,7 @@ export function KpiDrillDown({ metricKey, posts, subsSeries, total, trend, capti
               ) : (
                 <EmptyHint />
               )}
-              {contributors.length > 0 && contribTotal > 0 && fieldSumAll > 0 && (
-                <p className="mt-2 text-xs text-muted-foreground">
-                  Эти {contributors.length} постов дали {Math.round((contribTotal / fieldSumAll) * 100)}% от периода.
-                </p>
-              )}
+              {reconcile && <p className="mt-2 text-xs text-muted-foreground">{reconcile}</p>}
             </div>
           )}
         </div>

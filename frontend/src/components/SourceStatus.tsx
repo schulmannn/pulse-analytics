@@ -7,24 +7,24 @@ type Tone = 'ok' | 'warn' | 'error' | 'muted';
 
 const DOT: Record<Tone, string> = {
   ok: 'bg-verdant',
-  warn: 'bg-chart-3',
+  warn: 'bg-status-warn',
   error: 'bg-ember',
   muted: 'bg-muted-foreground/50',
 };
 const TEXT: Record<Tone, string> = {
   ok: 'text-muted-foreground',
-  warn: 'text-chart-3',
-  error: 'text-ember',
+  warn: 'text-status-warn',
+  error: 'text-ember-strong',
   muted: 'text-muted-foreground',
 };
 
 function StatusRow({ tone, text, cta, compact }: { tone: Tone; text: string; cta?: boolean; compact?: boolean }) {
   return (
-    <span className={cn('inline-flex items-center gap-1.5', compact ? 'text-xs' : 'text-[13px]')}>
+    <span className={cn('flex min-w-0 items-center gap-1.5', compact ? 'text-xs' : 'text-[13px]')}>
       <span aria-hidden="true" className={cn('h-2 w-2 shrink-0 rounded-full', DOT[tone])} />
-      <span className={TEXT[tone]}>{text}</span>
+      <span className={cn('min-w-0 break-words', TEXT[tone])}>{text}</span>
       {cta && !compact && (
-        <Link to="/connect" className="font-medium text-primary hover:underline">
+        <Link to="/connect" className="shrink-0 font-medium text-primary hover:underline">
           Подробнее →
         </Link>
       )}

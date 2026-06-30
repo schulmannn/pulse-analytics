@@ -38,6 +38,10 @@
     --brand-iris-soft: 212 84% 60%;
     --brand-verdant: 82 75% 26%;
     --brand-ember: 14 82% 44%;
+    /* Deeper ember for text on a translucent ember tint (clears AA 4.5:1 on the pill chip). */
+    --brand-ember-strong: 14 82% 38%;
+    /* Amber status (collector stale) — a dedicated, AA-legible warn hue (chart-3 is too light on white). */
+    --status-warn: 38 95% 32%;
 
     /* Categorical data-viz palette (chart series) — separate from the brand accents above.
        Six hues spread around the wheel; light theme = deeper for legibility on white cards. */
@@ -76,6 +80,8 @@
     --brand-iris-soft: 205 85% 70%;
     --brand-verdant: 81 75% 41%;
     --brand-ember: 19 100% 55%;
+    --brand-ember-strong: 19 100% 60%;
+    --status-warn: 40 88% 62%;
 
     /* Dark: lighter + slightly desaturated so the hues pop on the dark canvas. */
     --chart-1: 245 85% 72%;

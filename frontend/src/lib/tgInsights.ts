@@ -75,12 +75,13 @@ export function buildTgInsights(i: TgInsightInput): TgInsight[] {
     });
   }
 
-  // Engagement-rate trend.
+  // Engagement trend. erDelta is a reactions+forwards flow-delta (direction), NOT the per-member
+  // ER ratio — so we report direction/magnitude only and don't pin an "ER Y%" level to it.
   if (i.erDelta && i.erDelta.dir !== 'flat') {
     const up = i.erDelta.dir === 'up';
     out.push({
       tone: up ? 'up' : 'down',
-      statement: `Вовлечённость ${up ? 'выросла' : 'снизилась'} на ${pctStr(i.erDelta)}%${i.er ? ` (ER ${i.er.toFixed(2)}%)` : ''}.`,
+      statement: `Вовлечённость ${up ? 'выросла' : 'снизилась'} на ${pctStr(i.erDelta)}% к прошлому периоду.`,
       action: up ? undefined : 'Добавьте вопросы, опросы и явные призывы к реакции.',
     });
   }

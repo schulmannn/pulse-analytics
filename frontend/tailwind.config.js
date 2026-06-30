@@ -24,6 +24,8 @@ export default {
         iris: { DEFAULT: 'hsl(var(--brand-iris))', soft: 'hsl(var(--brand-iris-soft))' },
         verdant: 'hsl(var(--brand-verdant))',
         ember: 'hsl(var(--brand-ember))',
+        'ember-strong': 'hsl(var(--brand-ember-strong))',
+        'status-warn': 'hsl(var(--status-warn))',
         // Categorical data-viz series (distinct from the brand accents; see index.css --chart-*).
         chart: {
           1: 'hsl(var(--chart-1))',

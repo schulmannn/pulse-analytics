@@ -1,7 +1,8 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import type { NormalizedPost } from '@/lib/posts';
 import { fmt } from '@/lib/format';
+import { useFocusTrap } from '@/lib/useFocusTrap';
 import { RichText } from '@/components/RichText';
 
 interface PostDetailModalProps {
@@ -30,6 +31,8 @@ function Stat({ label, value, accent }: { label: string; value: string; accent?:
  * Closes on Escape, backdrop click, or the × button; locks body scroll while open.
  */
 export function PostDetailModal({ post, rank, reason, onClose }: PostDetailModalProps) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(panelRef);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
@@ -57,7 +60,11 @@ export function PostDetailModal({ post, rank, reason, onClose }: PostDetailModal
         onClick={onClose}
         aria-hidden="true"
       />
-      <div className="relative z-10 flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl border bg-card shadow-xl sm:rounded-2xl">
+      <div
+        ref={panelRef}
+        tabIndex={-1}
+        className="relative z-10 flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl border bg-card shadow-xl focus:outline-none sm:rounded-2xl"
+      >
         {/* Header */}
         <div className="flex items-center justify-between border-b px-5 py-3">
           <div className="flex items-center gap-2.5">

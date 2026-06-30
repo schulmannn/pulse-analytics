@@ -19,7 +19,8 @@ export function DeltaPill({ delta, subtle = false }: { delta?: MetricDelta | nul
       </span>
     );
   }
-  const chip = delta.dir === 'up' ? 'text-verdant bg-verdant/10' : 'text-ember bg-ember/10';
+  // ember-strong text on the ember tint clears AA in light mode (plain text-ember does not).
+  const chip = delta.dir === 'up' ? 'text-verdant bg-verdant/10' : 'text-ember-strong bg-ember/10';
   return (
     <span className={`rounded-full ${chip} px-2 py-0.5 text-xs font-semibold tabular-nums`}>
       {direction}

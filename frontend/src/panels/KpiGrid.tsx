@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
+import type { ReactNode } from 'react';
 import { useChannels, useHistory, useTgFull } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { fmt } from '@/lib/format';
+import { cn } from '@/lib/utils';
 import { normalizeTgPosts } from '@/lib/posts';
 import { Card, CardContent } from '@/components/ui/card';
 import { Sparkline } from '@/components/Sparkline';
@@ -225,6 +226,7 @@ export function KpiGrid() {
           total={drillMeta[drill].total}
           trend={drillMeta[drill].trend}
           caption={drillMeta[drill].caption}
+          members={members}
           onClose={() => setDrill(null)}
         />
       )}
@@ -258,10 +260,10 @@ function FeaturedKpi({ label, value, trend, caption, spark, info, onDrill }: Fea
           {info && <MetricInfo def={info} />}
         </div>
         <div className="mt-2 flex items-baseline gap-2.5">
-          <div className="text-4xl font-semibold tabular-nums tracking-tight">
+          <DrillValue label={label} onDrill={onDrill} className="text-4xl font-semibold tabular-nums tracking-tight">
             {num}
             {unit ? <span className="font-medium text-muted-foreground">{unit}</span> : null}
-          </div>
+          </DrillValue>
           <DeltaPill delta={trend} />
         </div>
         {caption ? <div className="mt-1.5 text-xs text-muted-foreground">{caption}</div> : null}
@@ -284,23 +286,49 @@ function FeaturedKpi({ label, value, trend, caption, spark, info, onDrill }: Fea
   );
 }
 
-/** Card props that make a KPI card a keyboard-accessible drill-down trigger (or nothing). */
+/**
+ * Card props that make the whole KPI card a mouse click target for the drill-down. NOT
+ * role=button — the card contains the ⓘ info button, and a button must not nest another
+ * interactive control. Keyboard/AT users get a dedicated <DrillValue> button on the number.
+ */
 function drillProps(onDrill?: () => void) {
   if (!onDrill) return {};
   return {
-    role: 'button',
-    tabIndex: 0,
     onClick: onDrill,
-    onKeyDown: (e: ReactKeyboardEvent) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        onDrill();
-      }
-    },
     title: 'Подробный разбор',
-    className:
-      'cursor-pointer transition-colors hover:border-primary/40 focus-visible:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+    className: 'cursor-pointer transition-colors hover:border-primary/40',
   };
+}
+
+/** The KPI number — a real button (keyboard-accessible drill trigger) when onDrill is set. */
+function DrillValue({
+  label,
+  onDrill,
+  className,
+  children,
+}: {
+  label: string;
+  onDrill?: () => void;
+  className: string;
+  children: ReactNode;
+}) {
+  if (!onDrill) return <div className={className}>{children}</div>;
+  return (
+    <button
+      type="button"
+      aria-label={`Разбор: ${label}`}
+      onClick={(e) => {
+        e.stopPropagation();
+        onDrill();
+      }}
+      className={cn(
+        'rounded text-left transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+        className,
+      )}
+    >
+      {children}
+    </button>
+  );
 }
 
 interface StatTileProps {
@@ -323,10 +351,10 @@ function StatTile({ label, value, trend, spark, caption, info, onDrill }: StatTi
           {info && <MetricInfo def={info} />}
         </div>
         <div className="mt-1.5 flex items-baseline justify-between gap-2">
-          <div className="text-2xl font-semibold tabular-nums tracking-tight">
+          <DrillValue label={label} onDrill={onDrill} className="text-2xl font-semibold tabular-nums tracking-tight">
             {num}
             {unit ? <span className="text-base font-medium text-muted-foreground">{unit}</span> : null}
-          </div>
+          </DrillValue>
           <DeltaPill delta={trend} subtle />
         </div>
         {spark && spark.values.length > 1 ? (

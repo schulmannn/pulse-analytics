@@ -69,7 +69,8 @@ export function Insights() {
   const wdCount = Array<number>(7).fill(0);
   posts.forEach((p) => {
     if (!p.date) return;
-    const d = new Date(p.date).getDay();
+    // UTC to match the UTC day-keys the daily charts/drill-down bucket by.
+    const d = new Date(p.date).getUTCDay();
     wdViews[d] += p.reach;
     wdCount[d] += 1;
   });
