@@ -529,6 +529,38 @@ app.get('/api/ig/profile', requireAuth, async (req, res) => {
 app.get('/api/ig/insights', requireAuth, async (req, res) => {
   const days = Math.min(90, parseInt(req.query.days, 10) || 30);
   const cacheKey = `ig:insights:${days}`;
+
+  // ── TEMP diagnostic (superuser + ?probe=follows): does the Instagram-Login API expose unfollows
+  // or net follower movement? A bogus metric's error lists every valid account metric; we also try
+  // candidate metric names directly. Read-only, token never echoed; removed once we know.
+  if (req.query.probe === 'follows' && req.user && req.user.role === 'superuser') {
+    if (!igConfigured()) return res.json({ probe: true, configured: false });
+    const SEC = 86400;
+    const now = Math.floor(Date.now() / 1000);
+    const probe = async (params) => {
+      try {
+        const qs = new URLSearchParams({ ...params, access_token: IG_TOKEN }).toString();
+        const r = await fetch(`${IG_BASE}/${IG_ACCOUNT}/insights?${qs}`);
+        const j = await r.json();
+        const m = j && j.data && j.data[0];
+        return {
+          metric: params.metric,
+          type: params.metric_type || 'series',
+          status: r.status,
+          sample: m ? (m.total_value ? m.total_value.value : (m.values || []).slice(-5).map((v) => v.value)) : null,
+          error: j && j.error ? j.error.message : undefined,
+        };
+      } catch (e) { return { metric: params.metric, error: e.message }; }
+    };
+    const out = [];
+    out.push(await probe({ metric: '__list_all__', period: 'day', since: now - 30 * SEC, until: now }));
+    for (const metric of ['follows_and_unfollows', 'unfollows', 'follows', 'net_follower_growth', 'follower_count']) {
+      out.push(await probe({ metric, period: 'day', since: now - 30 * SEC, until: now }));
+      out.push(await probe({ metric, metric_type: 'total_value', period: 'day', since: now - 30 * SEC, until: now }));
+    }
+    return res.json({ probe: true, ig_account: IG_ACCOUNT, probes: out });
+  }
+
   try {
     if (!igConfigured()) return res.json(igMock.igMockInsights(days));
     const cached = cacheGet(cacheKey);
