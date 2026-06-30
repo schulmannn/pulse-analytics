@@ -518,6 +518,9 @@ app.get('/api/ig/profile', requireAuth, async (req, res) => {
     const data = await igFetch(`/${IG_ACCOUNT}`, {
       fields: 'username,name,followers_count,follows_count,media_count,biography,website,profile_picture_url'
     });
+    // Real last-sync time: when we actually fetched from Instagram. Lives in the cached payload (10m
+    // TTL), so the UI shows the true sync moment, not when React Query happened to receive a response.
+    data.synced_at = Date.now();
     cacheSet('ig:profile', data);
     res.json(data);
   } catch (e) {

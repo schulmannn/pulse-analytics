@@ -117,8 +117,44 @@ export const flag = (iso: string) => {
 
 // ── Geo normalization ──
 // Instagram returns cities as "City, Region" (region often redundant or in English:
-// "London, England", "Москва, Москва", "Yekaterinburg, Sverdlovsk Oblast"). Show the city only.
-export const cityName = (raw: string): string => (raw || '').split(',')[0].trim() || raw;
+// "London, England", "Moscow, Moscow", "Yekaterinburg, Sverdlovsk Oblast"). Keep the city only, and
+// localize the common RU/CIS cities (Instagram transliterates them) so the audience reads natively.
+const CITY_RU: Record<string, string> = {
+  Moscow: 'Москва',
+  'Saint Petersburg': 'Санкт-Петербург',
+  'St Petersburg': 'Санкт-Петербург',
+  'St. Petersburg': 'Санкт-Петербург',
+  Yekaterinburg: 'Екатеринбург',
+  Ekaterinburg: 'Екатеринбург',
+  Novosibirsk: 'Новосибирск',
+  'Nizhny Novgorod': 'Нижний Новгород',
+  Kazan: 'Казань',
+  Chelyabinsk: 'Челябинск',
+  Samara: 'Самара',
+  'Rostov-on-Don': 'Ростов-на-Дону',
+  Ufa: 'Уфа',
+  Krasnoyarsk: 'Красноярск',
+  Perm: 'Пермь',
+  Voronezh: 'Воронеж',
+  Volgograd: 'Волгоград',
+  Krasnodar: 'Краснодар',
+  Saratov: 'Саратов',
+  Tyumen: 'Тюмень',
+  Sochi: 'Сочи',
+  Kyiv: 'Киев',
+  Kiev: 'Киев',
+  Minsk: 'Минск',
+  Almaty: 'Алматы',
+  Tashkent: 'Ташкент',
+  Baku: 'Баку',
+  Yerevan: 'Ереван',
+  Tbilisi: 'Тбилиси',
+  Bishkek: 'Бишкек',
+};
+export const cityName = (raw: string): string => {
+  const city = (raw || '').split(',')[0].trim();
+  return CITY_RU[city] || city || raw;
+};
 
 // Country codes → Russian names via the platform Intl data (covers every ISO-3166 code, not a hand
 // list). Falls back to the raw code if the runtime can't resolve it.

@@ -379,6 +379,7 @@ export const IgProfileSchema = z
     biography: z.string().optional().nullable(),
     website: z.string().optional().nullable(),
     profile_picture_url: z.string().optional().nullable(),
+    synced_at: z.coerce.number().optional().nullable(), // real last-sync time (ms) from the server
     error: z.string().optional().nullable(),
   })
   .passthrough();

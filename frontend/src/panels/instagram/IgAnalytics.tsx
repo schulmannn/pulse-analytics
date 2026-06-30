@@ -64,9 +64,6 @@ export function IgAnalytics() {
           </button>
         }
       >
-        <p className="text-xs text-muted-foreground">
-          Дневной график строим только по метрикам, которые Instagram отдаёт по дням — охват и подписки.
-        </p>
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <TrendCard title="Охват по дням" series={reachWin} />
           <FollowsByDayCard data={followsByDay} total={followsPair.cur} />
@@ -74,10 +71,7 @@ export function IgAnalytics() {
       </Section>
 
       <Section title="Период vs предыдущий">
-        <p className="text-xs text-muted-foreground">
-          Просмотры, сохранения, лайки и репосты Instagram отдаёт суммой за период (без дневного ряда) — поэтому
-          честнее сравнить окна, чем рисовать график.
-        </p>
+        <p className="text-xs text-muted-foreground">Просмотры, лайки и сохранения сравниваются по периодам.</p>
         <PeriodCompareBlock rows={periodRows} />
       </Section>
 
@@ -124,9 +118,7 @@ function SubscriberMovement({
           </div>
         ))}
       </div>
-      <p className="px-1 text-xs text-muted-foreground">
-        Instagram отдаёт подписки и отписки только суммой за период (без разбивки по дням). Чистый прирост = подписки − отписки.
-      </p>
+      <p className="px-1 text-xs text-muted-foreground">Чистый прирост = подписки − отписки за период.</p>
     </div>
   );
 }
@@ -146,8 +138,7 @@ function FollowsByDayCard({ data, total }: { data: Point[]; total: number }) {
         <EmptyChart />
       )}
       <p className="mt-3 text-xs text-muted-foreground">
-        Всего подписок за период: <span className="font-medium text-verdant">+{fmt.num(total)}</span>. Отписки Instagram по дням
-        не отдаёт — общий итог в «Движении подписчиков».
+        Всего подписок за период: <span className="font-medium text-verdant">+{fmt.num(total)}</span>
       </p>
     </ChartSection>
   );

@@ -74,8 +74,8 @@ export function AudienceBlock({ breakdowns, followers }: { breakdowns: IgBreakdo
         </ChartSection>
       </div>
       {coverage < 0.98 && (
-        <p className="px-1 text-xs text-muted-foreground">
-          Данные частичны (≈{Math.round(coverage * 100)}% аудитории) — Instagram отдаёт демографию только по топ-сегментам и при 100+ подписчиках.
+        <p className="px-1 text-[11px] text-muted-foreground/70">
+          Охвачено ≈{Math.round(coverage * 100)}% аудитории — Instagram показывает только топ-сегменты.
         </p>
       )}
     </div>

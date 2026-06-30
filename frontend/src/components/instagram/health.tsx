@@ -34,36 +34,36 @@ function Row({ label, value, tone }: { label: string; value: ReactNode; tone?: '
  */
 export function IgDataHealth({ accountName, lastSync, isMock }: { accountName?: string | null; lastSync: number; isMock: boolean }) {
   const [open, setOpen] = useState(false);
-  const status = isMock ? 'демо-данные' : '200 OK';
-  const tone: 'ok' | 'warn' = isMock ? 'warn' : 'ok';
-  const synced = isMock ? '—' : ago(lastSync);
-
+  const synced = ago(lastSync);
   return (
     <div>
+      {/* One-line status by default — the full technical detail is one click away, not on the first
+          level. Status reads as a sentence, not a table. */}
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="flex w-full items-center justify-between gap-2 text-left md:pointer-events-none md:cursor-default"
+        className="flex w-full items-center gap-2 text-left text-[13px]"
       >
-        <span className="text-[13px] font-medium text-ink3">Состояние данных</span>
-        <span className="flex items-center gap-2 md:hidden">
-          {!open && (
-            <span className="flex items-center gap-1.5 font-mono text-[12px] tabular-nums text-ink3">
-              <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${tone === 'ok' ? 'bg-verdant' : 'bg-status-warn'}`} />
-              {status} · {synced}
-            </span>
-          )}
-          <Icon name="chevron" className={cn('h-4 w-4 shrink-0 text-ink3 transition-transform', open && 'rotate-180')} />
+        <span
+          aria-hidden="true"
+          className={`h-1.5 w-1.5 shrink-0 rounded-full ${isMock ? 'bg-status-warn' : 'bg-verdant'}`}
+        />
+        <span className="min-w-0 truncate text-ink2">
+          {isMock ? 'Демо-данные' : 'Данные актуальны'}
+          {accountName ? <span className="font-mono text-ink3"> · @{accountName}</span> : null}
+          {!isMock ? <span className="text-ink3"> · обновлено {synced}</span> : null}
         </span>
+        <Icon name="chevron" className={cn('ml-auto h-3.5 w-3.5 shrink-0 text-ink3 transition-transform', open && 'rotate-180')} />
       </button>
-      <div className={cn('mt-3', open ? 'block' : 'hidden md:block')}>
-        <Row label="Источник" value="Instagram API" />
-        <Row label="Аккаунт" value={accountName ? `@${accountName}` : '—'} />
-        <Row label="Синхронизация" value={synced} />
-        <Row label="Статус" value={status} tone={tone} />
-        <Row label="Доступ" value="Аналитика, медиа" />
-      </div>
+      {open && (
+        <div className="mt-3 max-w-sm">
+          <Row label="Источник" value="Instagram API" />
+          <Row label="Статус" value={isMock ? 'демо-данные' : '200 OK'} tone={isMock ? 'warn' : 'ok'} />
+          <Row label="Доступ" value="аналитика, медиа" />
+          {!isMock && <Row label="Синхронизация" value={synced} />}
+        </div>
+      )}
     </div>
   );
 }

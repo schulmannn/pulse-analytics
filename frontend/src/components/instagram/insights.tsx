@@ -2,13 +2,7 @@ import { fmt } from '@/lib/format';
 import { DeltaPill } from '@/components/DeltaPill';
 import { Card, CardContent } from '@/components/ui/card';
 import { pairDelta, type WindowPair } from '@/lib/igMetrics';
-import { CONFIDENCE_LABEL, type Confidence, type IgInsight } from '@/lib/igInsights';
-
-const CONF_CLASS: Record<Confidence, string> = {
-  high: 'bg-verdant/10 text-verdant',
-  medium: 'bg-status-warn/15 text-status-warn',
-  low: 'bg-muted text-muted-foreground',
-};
+import type { IgInsight } from '@/lib/igInsights';
 
 /** Auto-insights as analyst notes: a tone dot, the takeaway, the numbers behind it, and how sure
     we are. `limit` lets the Overview surface just the single strongest insight. */
@@ -32,9 +26,12 @@ export function InsightsBlock({ insights, limit }: { insights: IgInsight[]; limi
           <div className="min-w-0">
             <p className="text-sm font-medium leading-relaxed text-foreground">{ins.text}</p>
             {ins.evidence && <p className="mt-1 text-xs tabular-nums text-muted-foreground">{ins.evidence}</p>}
-            <span className={`mt-2 inline-block rounded-full px-1.5 py-0.5 text-[10px] font-medium ${CONF_CLASS[ins.confidence]}`}>
-              {CONFIDENCE_LABEL[ins.confidence]}
-            </span>
+            {/* Surface confidence only when it's a caveat — a quiet "мало данных", never a boast. */}
+            {ins.confidence === 'low' && (
+              <span className="mt-2 inline-block rounded-full bg-status-warn/15 px-1.5 py-0.5 text-[10px] font-medium text-status-warn">
+                мало данных
+              </span>
+            )}
           </div>
         </div>
       ))}

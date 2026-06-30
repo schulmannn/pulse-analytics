@@ -136,12 +136,11 @@ export function useIgData() {
   const isMock = !!(profileQ.data?.mock || insightsQ.data?.mock || postsQ.data?.mock || breakdownsQ.data?.mock);
   const loading = profileQ.isLoading || insightsQ.isLoading || postsQ.isLoading;
   const error = profileQ.isError && insightsQ.isError;
-  const lastSync = Math.max(
-    profileQ.dataUpdatedAt || 0,
-    insightsQ.dataUpdatedAt || 0,
-    postsQ.dataUpdatedAt || 0,
-    breakdownsQ.dataUpdatedAt || 0,
-  );
+  // Real last-sync time the server stamped when it fetched from Instagram (falls back to the React
+  // Query receive time only if the server didn't provide one, e.g. demo mode).
+  const lastSync =
+    profileQ.data?.synced_at ||
+    Math.max(profileQ.dataUpdatedAt || 0, insightsQ.dataUpdatedAt || 0, postsQ.dataUpdatedAt || 0);
 
   return {
     loading,

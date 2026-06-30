@@ -207,21 +207,18 @@ function Sidebar({ role }: { role?: string }) {
         </div>
 
         <nav className="mt-4 flex-1 space-y-0.5 overflow-y-auto px-3">
-          {/* Платформа данных (платформа) — выше, чем виды дашборда. */}
-          {rail ? (
-            <p
-              className={cn(
-                'whitespace-nowrap px-3 pb-1 text-[11px] font-medium tracking-wider text-muted-foreground',
-                REVEAL_BLOCK,
-              )}
-            >
-              Платформа
-            </p>
-          ) : (
-            <p className="px-3 pb-1 text-[11px] font-medium tracking-wider text-muted-foreground">Платформа</p>
-          )}
-          <PlatformNav variant="sidebar" rail={rail} />
-          <div className="mx-1 my-2 border-t" aria-hidden="true" />
+          {/* Источник данных — контекст-переключатель (сегмент в строку, как на мобайле), не пункт меню. */}
+          <p
+            className={cn(
+              'px-3 pb-1.5 text-[11px] font-medium tracking-wider text-muted-foreground',
+              rail && 'whitespace-nowrap',
+              rail && REVEAL_BLOCK,
+            )}
+          >
+            Источник
+          </p>
+          <PlatformNav rail={rail} />
+          <div className="mx-1 my-3 border-t" aria-hidden="true" />
 
           {nav.map((item) => (
             <NavItem key={item.label} {...item} rail={rail} />
@@ -511,7 +508,7 @@ function MobileHeader({ email, role }: { email?: string; role?: string }) {
         <AccountMenu email={email} role={role} />
       </div>
       <div className="border-b px-3 py-2">
-        <PlatformNav variant="segment" />
+        <PlatformNav />
       </div>
       <div className="flex justify-end border-b px-3 py-1.5">
         <PeriodSwitcher />
@@ -763,7 +760,7 @@ function PeriodSwitcher() {
  * demo/mock-backed until connected; `mock === true` (not just "no data") avoids a false flag
  * during the initial load.
  */
-function PlatformNav({ variant, rail = false }: { variant: 'sidebar' | 'segment'; rail?: boolean }) {
+function PlatformNav({ rail = false }: { rail?: boolean }) {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const igActive = pathname.startsWith('/instagram');
@@ -776,41 +773,12 @@ function PlatformNav({ variant, rail = false }: { variant: 'sidebar' | 'segment'
     demo: p.key === 'ig' && igDemo,
   }));
 
-  if (variant === 'segment') {
-    // Mobile: full-width two-half segmented control (Figma 390). The active half is tinted with the
-    // platform's brand colour + a brand underline so the selected platform reads at a glance.
-    return (
-      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border">
-        {items.map((p) => (
-          <button
-            key={p.key}
-            type="button"
-            onClick={() => navigate(p.to)}
-            aria-current={p.active ? 'true' : undefined}
-            className={cn(
-              'relative flex items-center justify-center gap-2 px-3 py-2 text-sm transition-colors',
-              p.active ? 'bg-accent font-medium text-foreground' : 'bg-background text-muted-foreground',
-            )}
-          >
-            <span className="shrink-0" style={{ color: p.color, opacity: p.active ? 1 : 0.5 }}>
-              <PlatformGlyph k={p.key} className="h-4 w-4" />
-            </span>
-            <span className="whitespace-nowrap">{p.name}</span>
-            {p.demo && (
-              <span className="rounded-full bg-status-warn/15 px-1.5 py-0.5 text-[10px] font-medium text-status-warn">
-                демо
-              </span>
-            )}
-            {p.active && <span aria-hidden="true" className="absolute inset-x-0 bottom-0 h-0.5" style={{ background: p.color }} />}
-          </button>
-        ))}
-      </div>
-    );
-  }
-
-  // Sidebar: source-level rows (rail-aware), styled like nav items but with brand glyphs.
+  // One horizontal segmented control everywhere (desktop sidebar + mobile context bar). The active
+  // half is a calm neutral surface with a thin brand underline; the brand colour lives ONLY on the
+  // icon, so Telegram-blue / Instagram-magenta read as identifiers, not as the UI's main colour.
+  // Rail-aware: labels collapse to icons in the icon-rail and reappear on hover/focus peek.
   return (
-    <div className="space-y-0.5">
+    <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border">
       {items.map((p) => (
         <button
           key={p.key}
@@ -819,36 +787,26 @@ function PlatformNav({ variant, rail = false }: { variant: 'sidebar' | 'segment'
           aria-current={p.active ? 'true' : undefined}
           title={rail ? (p.demo ? `${p.name} · демо` : p.name) : undefined}
           aria-label={rail ? p.name : undefined}
-          style={{ backgroundColor: p.active ? `${p.color}14` : undefined }}
           className={cn(
-            'relative flex w-full items-center rounded-lg text-sm transition-colors',
-            rail
-              ? 'justify-center px-1 py-2 group-hover/sb:justify-start group-hover/sb:gap-3 group-hover/sb:px-3 group-focus-within/sb:justify-start group-focus-within/sb:gap-3 group-focus-within/sb:px-3'
-              : 'gap-3 px-3 py-2',
-            p.active
-              ? 'font-medium text-foreground'
-              : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
+            'relative flex items-center justify-center gap-2 px-2 py-2 text-sm transition-colors',
+            p.active ? 'bg-muted/60 font-medium text-foreground' : 'bg-background text-muted-foreground hover:text-foreground',
           )}
         >
-          {/* Active platform marked by its own brand colour — a left accent bar that reads as
-              "Telegram selected" (blue) vs "Instagram selected" (magenta). */}
-          {p.active && (
-            <span aria-hidden="true" className="absolute inset-y-1.5 left-0 w-1 rounded-r-full" style={{ background: p.color }} />
-          )}
-          <span className="shrink-0" style={{ color: p.color, opacity: p.active ? 1 : 0.5 }}>
-            <PlatformGlyph k={p.key} className="h-[18px] w-[18px]" />
+          <span className="shrink-0" style={{ color: p.color, opacity: p.active ? 1 : 0.55 }}>
+            <PlatformGlyph k={p.key} className="h-4 w-4" />
           </span>
           <span className={cn('whitespace-nowrap', rail && REVEAL_INLINE)}>{p.name}</span>
           {p.demo && (
             <span
               className={cn(
-                'ml-auto rounded-full bg-status-warn/15 px-1.5 py-0.5 text-[10px] font-medium text-status-warn',
+                'rounded-full bg-status-warn/15 px-1.5 py-0.5 text-[10px] font-medium text-status-warn',
                 rail && REVEAL_INLINE,
               )}
             >
               демо
             </span>
           )}
+          {p.active && <span aria-hidden="true" className="absolute inset-x-0 bottom-0 h-0.5" style={{ background: p.color }} />}
         </button>
       ))}
     </div>
