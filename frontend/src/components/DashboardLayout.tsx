@@ -786,7 +786,7 @@ function PeriodSwitcher() {
  * demo/mock-backed until connected; `mock === true` (not just "no data") avoids a false flag
  * during the initial load.
  */
-function PlatformNav({ variant, rail = false }: { variant: 'sidebar' | 'compact' | 'segment'; rail?: boolean }) {
+function PlatformNav({ variant, rail = false }: { variant: 'sidebar' | 'segment'; rail?: boolean }) {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const igActive = pathname.startsWith('/instagram');
@@ -823,40 +823,6 @@ function PlatformNav({ variant, rail = false }: { variant: 'sidebar' | 'compact'
               <span className="rounded-full bg-status-warn/15 px-1.5 py-0.5 text-[10px] font-medium text-status-warn">
                 демо
               </span>
-            )}
-          </button>
-        ))}
-      </div>
-    );
-  }
-
-  if (variant === 'compact') {
-    // Mobile: icon pills sitting next to the channel card in the single context bar.
-    return (
-      <div className="flex shrink-0 items-center gap-1">
-        {items.map((p) => (
-          <button
-            key={p.key}
-            type="button"
-            onClick={() => navigate(p.to)}
-            aria-current={p.active ? 'true' : undefined}
-            aria-label={p.demo ? `${p.name} · демо` : p.name}
-            title={p.demo ? `${p.name} · демо` : p.name}
-            className={cn(
-              'relative flex h-8 w-8 items-center justify-center rounded-lg border transition-colors',
-              p.active
-                ? 'border-primary/40 bg-primary/10 text-foreground'
-                : 'border-transparent text-muted-foreground hover:bg-muted/50',
-            )}
-          >
-            <span className="shrink-0" style={{ color: p.color }}>
-              <PlatformGlyph k={p.key} className="h-4 w-4" />
-            </span>
-            {p.demo && (
-              <span
-                aria-hidden="true"
-                className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-status-warn ring-2 ring-background"
-              />
             )}
           </button>
         ))}
