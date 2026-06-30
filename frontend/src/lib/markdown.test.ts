@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseInlineMarkdown } from './markdown';
+import { markdownToPlainText, parseInlineMarkdown } from './markdown';
 
 describe('parseInlineMarkdown', () => {
   it('returns a single text node for plain text', () => {
@@ -57,5 +57,13 @@ describe('parseInlineMarkdown', () => {
 
   it('handles empty input', () => {
     expect(parseInlineMarkdown('')).toEqual([]);
+  });
+});
+
+describe('markdownToPlainText', () => {
+  it('strips markers, keeps content, collapses whitespace', () => {
+    expect(markdownToPlainText('**Сегодня** скидка [тут](https://x.io)')).toBe('Сегодня скидка тут');
+    expect(markdownToPlainText('__важно__   и  `код`')).toBe('важно и код');
+    expect(markdownToPlainText('**Сегодня без закрытия')).toBe('Сегодня без закрытия');
   });
 });

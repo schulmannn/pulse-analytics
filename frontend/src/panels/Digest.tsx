@@ -2,7 +2,8 @@ import type { ReactNode } from 'react';
 import { useTgFull, useTgGraphs } from '@/api/queries';
 import { normalizeTgPosts } from '@/lib/posts';
 import { fmt } from '@/lib/format';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { markdownToPlainText } from '@/lib/markdown';
+import { Card, CardContent } from '@/components/ui/card';
 import { usePeriod } from '@/lib/period';
 import { Skeleton } from '@/components/ui/skeleton';
 
@@ -14,11 +15,11 @@ export function Digest() {
   if (isFullLoading || isGraphsLoading) {
     return (
       <Card>
-        <CardHeader><Skeleton className="h-4 w-1/3" /></CardHeader>
-        <CardContent className="space-y-3">
-          <Skeleton className="h-3 w-full" />
+        <CardContent className="space-y-3 p-5">
+          <Skeleton className="h-3 w-20" />
+          <Skeleton className="h-4 w-full" />
           <Skeleton className="h-3 w-5/6" />
-          <Skeleton className="h-3 w-4/5" />
+          <Skeleton className="h-3 w-3/5" />
         </CardContent>
       </Card>
     );
@@ -29,7 +30,6 @@ export function Digest() {
   );
   const totalViews = posts.reduce((sum, post) => sum + post.reach, 0);
   const postsN = posts.length;
-  const avgViews = postsN > 0 ? totalViews / postsN : 0;
 
   let netSubscribers: number | null = null;
   const fSeries = graphs?.followers?.series ?? [];
@@ -75,8 +75,6 @@ export function Digest() {
     peakHour = thData.hours[pi] ?? pi;
   }
 
-  const hasSchedulingAdvice = bestWd || peakHour !== null;
-
   if (posts.length === 0 && !graphs) {
     return (
       <Card>
@@ -87,67 +85,80 @@ export function Digest() {
     );
   }
 
+  // ── Three-tier summary: Insight (что произошло) → Evidence (где доказательство) → Action (что делать) ──
+  const signed = (n: number) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${fmt.num(Math.abs(n))}`;
+  const insightLead =
+    `За период — ${postsN} ${postsN === 1 ? 'пост' : 'постов'} и ${fmt.short(totalViews)} просмотров` +
+    (netSubscribers !== null ? `, подписчики ${signed(netSubscribers)}` : '') +
+    (avgErv !== null ? `. Средний ERV ${avgErv.toFixed(1)}%` : '') +
+    '.';
+
+  const hasBest = !!bestPost && bestPost.reach > 0;
+  const bestCaptionRaw = bestPost?.caption ? markdownToPlainText(bestPost.caption) : '';
+  const bestCaption = bestCaptionRaw
+    ? bestCaptionRaw.length > 64
+      ? `${bestCaptionRaw.slice(0, 64)}…`
+      : bestCaptionRaw
+    : 'без подписи';
+
+  let actionText: string;
+  if (bestWd && peakHour !== null) actionText = `Публикуйте в ${bestWd} около ${peakHour}:00 — в этот слот выше охват.`;
+  else if (bestWd) actionText = `Публикуйте в ${bestWd} — в этот день выше охват.`;
+  else if (peakHour !== null) actionText = `Публикуйте около ${peakHour}:00 — в этот час выше охват.`;
+  else if (hasBest) actionText = 'Повторите тему топ-поста — она набрала больше всего.';
+  else actionText = 'Накопите больше постов — тогда появятся рекомендации.';
+
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="text-xs font-bold tracking-wider text-muted-foreground">Итоги · авто-сводка</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <ul className="space-y-3.5 text-sm leading-relaxed">
-          <li className="flex items-start gap-2">
-            <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
-            <span>
-              <strong className="font-semibold text-foreground">{fmt.short(totalViews)}</strong> просмотров за период ·{' '}
-              {postsN} постов · в среднем <strong className="font-semibold text-foreground">{fmt.short(avgViews)}</strong> на пост.
-            </span>
-          </li>
+      <CardContent className="space-y-4 p-5">
+        {/* INSIGHT — что произошло (доминирует) */}
+        <div>
+          <TierLabel tone="insight">Итог</TierLabel>
+          <p className="mt-1.5 text-[15px] font-medium leading-relaxed text-foreground">{insightLead}</p>
+        </div>
 
-          {netSubscribers !== null && (
-            <li className="flex items-start gap-2">
-              <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
-              <span>
-                Подписчики:{' '}
-                <strong className="font-semibold text-foreground">{netSubscribers >= 0 ? '+' : ''}{fmt.num(netSubscribers)}</strong>{' '}
-                чистыми за период.
-              </span>
-            </li>
-          )}
+        {/* EVIDENCE — где доказательство */}
+        {hasBest && (
+          <div className="border-t pt-4">
+            <TierLabel tone="evidence">Доказательство</TierLabel>
+            <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+              Сильнее всего сработал пост «<span className="text-foreground">{bestCaption}</span>» —{' '}
+              <span className="font-medium text-foreground">{fmt.short(bestPost!.reach)}</span> просмотров
+              {bestPost!.erv !== null ? `, ERV ${bestPost!.erv.toFixed(1)}%` : ''}.
+              {bestPost!.permalink && (
+                <>
+                  {' '}
+                  <a
+                    href={bestPost!.permalink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-medium text-primary hover:underline"
+                  >
+                    Открыть →
+                  </a>
+                </>
+              )}
+            </p>
+          </div>
+        )}
 
-          {avgErv !== null && (
-            <li className="flex items-start gap-2">
-              <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
-              <span>Средний ERV <strong className="font-semibold text-foreground">{avgErv.toFixed(1)}%</strong> — вовлечённость на просмотр.</span>
-            </li>
-          )}
-
-          {bestPost && bestPost.reach > 0 && (
-            <li className="flex items-start gap-2">
-              <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
-              <span>
-                Топ-пост: «{(bestPost.caption || 'без подписи').slice(0, 70)}» —{' '}
-                <strong className="font-semibold text-foreground">{fmt.short(bestPost.reach)}</strong> просмотров
-                {bestPost.erv !== null ? `, ERV ${bestPost.erv.toFixed(1)}%` : ''}.
-              </span>
-            </li>
-          )}
-
-          {hasSchedulingAdvice && (
-            <li className="flex items-start gap-2">
-              <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
-              <span>
-                Когда постить:{' '}
-                {[
-                  bestWd ? <span key="wd">день — <strong className="font-semibold text-foreground">{bestWd}</strong></span> : null,
-                  peakHour !== null ? <span key="hr">час — <strong className="font-semibold text-foreground">{peakHour}:00</strong></span> : null,
-                ]
-                  .filter(Boolean)
-                  .reduce<ReactNode[]>((acc, elem, idx) => (idx === 0 ? [elem] : [...acc, ', ', elem]), [])}
-                .
-              </span>
-            </li>
-          )}
-        </ul>
+        {/* ACTION — что сделать */}
+        <div className="border-t pt-4">
+          <TierLabel tone="action">Что сделать</TierLabel>
+          <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{actionText}</p>
+        </div>
       </CardContent>
     </Card>
+  );
+}
+
+/** Tier marker for the summary — a coloured dot + label that encodes the three-part hierarchy. */
+function TierLabel({ tone, children }: { tone: 'insight' | 'evidence' | 'action'; children: ReactNode }) {
+  const dot = tone === 'insight' ? 'bg-primary' : tone === 'evidence' ? 'bg-chart-3' : 'bg-verdant';
+  return (
+    <div className="flex items-center gap-1.5 text-[11px] font-semibold tracking-wide text-muted-foreground">
+      <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${dot}`} />
+      {children}
+    </div>
   );
 }

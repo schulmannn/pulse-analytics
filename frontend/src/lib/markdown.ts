@@ -63,3 +63,16 @@ export function parseInlineMarkdown(rawInput: string): MdNode[] {
   if (last < input.length) pushText(nodes, input.slice(last));
   return nodes;
 }
+
+/**
+ * Flatten inline markdown to plain text — drops the markers but keeps link/bold/italic/code
+ * content. For places that show a caption *snippet* (e.g. the auto-summary) where rendering
+ * React nodes is overkill but raw `**…**` must never leak. Whitespace is collapsed.
+ */
+export function markdownToPlainText(text: string): string {
+  return parseInlineMarkdown(text)
+    .map((node) => node.value)
+    .join('')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
