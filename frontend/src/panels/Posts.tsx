@@ -55,16 +55,14 @@ export function Posts() {
       </div>
 
       {/* Таблица публикаций */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm font-medium tracking-wide text-muted-foreground">
-            Последние публикации (Топ-25 по охвату)
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="overflow-x-auto p-0">
+      <div className="space-y-4">
+        <h3 className="text-sm font-medium tracking-wide text-muted-foreground">
+          Последние публикации (Топ-25 по охвату)
+        </h3>
+        <div className="overflow-x-auto">
           <table className="w-full border-collapse text-left text-sm">
             <thead>
-              <tr className="border-b border-border bg-muted/40 text-xs font-semibold tracking-wider text-muted-foreground">
+              <tr className="border-b border-border text-xs font-semibold tracking-wider text-muted-foreground">
                 <th className="w-12 p-4 text-center"></th>
                 <th className="min-w-[240px] p-4">Пост</th>
                 <th className="p-4 text-right">Просмотры</th>
@@ -82,7 +80,7 @@ export function Posts() {
                   <tr
                     key={post.id ?? idx}
                     onClick={isClickable ? () => setOpenId(post.id) : undefined}
-                    className={`group transition-colors hover:bg-muted/30 ${isClickable ? 'cursor-pointer' : ''}`}
+                    className={`group transition-colors hover:bg-hover-row ${isClickable ? 'cursor-pointer' : ''}`}
                   >
                     <td className="p-4 text-center">
                       <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded border border-border/40 bg-muted">
@@ -133,8 +131,8 @@ export function Posts() {
               })}
             </tbody>
           </table>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       {openId !== null && selectedPost && <PostModal post={selectedPost} onClose={() => setOpenId(null)} />}
     </div>
@@ -198,7 +196,7 @@ function PostModal({ post, onClose }: PostModalProps) {
       onClick={onClose}
     >
       <Card
-        className="relative max-h-[85vh] w-full max-w-2xl overflow-y-auto shadow-xl"
+        className="relative max-h-[85vh] w-full max-w-2xl overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <button

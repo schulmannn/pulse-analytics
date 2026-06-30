@@ -203,7 +203,7 @@ export function KpiGrid() {
         />
         <FeaturedKpi label="Подписчики" value={fmt.num(displayMembers)} trend={subscriberTrend} caption={subCaption} spark={subsSpark} info={METRIC_DEFS.subscribers} onDrill={() => setDrill('subscribers')} />
       </div>
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border lg:grid-cols-4">
         <StatTile label="Ср. охват поста" value={fmt.short(avgViews)} trend={avgReachTrend} spark={viewsSpark} info={METRIC_DEFS.avgReach} onDrill={() => setDrill('avgReach')} />
         <StatTile label="Реакции" value={fmt.short(totalReactions)} trend={reactionsTrend} spark={reactionsSpark} caption={reactionsCaption} info={METRIC_DEFS.reactions} onDrill={() => setDrill('reactions')} />
         <StatTile label="Репосты" value={fmt.short(totalForwards)} trend={forwardsTrend} spark={forwardsSpark} caption={forwardsCaption} info={METRIC_DEFS.forwards} onDrill={() => setDrill('forwards')} />
@@ -341,36 +341,41 @@ interface StatTileProps {
   onDrill?: () => void;
 }
 
+/**
+ * One ledger cell (no card — a hairline-delimited column in the StatTile grid). The grid's
+ * gap-px over a bg-border container draws the 1px dividers; the cell sits on the paper canvas.
+ */
 function StatTile({ label, value, trend, spark, caption, info, onDrill }: StatTileProps) {
   const [num, unit] = splitUnit(value);
+  const cell = onDrill
+    ? { onClick: onDrill, title: 'Подробный разбор', className: 'cursor-pointer bg-background p-4 transition-colors hover:bg-muted/60' }
+    : { className: 'bg-background p-4' };
   return (
-    <Card {...drillProps(onDrill)}>
-      <CardContent className="p-4">
-        <div className="flex items-center gap-1 text-[11px] tracking-wide text-muted-foreground">
-          <span className="truncate">{label}</span>
-          {info && <MetricInfo def={info} />}
-        </div>
-        <div className="mt-1.5 flex items-baseline justify-between gap-2">
-          <DrillValue label={label} onDrill={onDrill} className="text-2xl font-semibold tabular-nums tracking-tight">
-            {num}
-            {unit ? <span className="text-base font-medium text-muted-foreground">{unit}</span> : null}
-          </DrillValue>
-          <DeltaPill delta={trend} subtle />
-        </div>
-        {spark && spark.values.length > 1 ? (
-          <Sparkline
-            values={spark.values}
-            labels={spark.labels}
-            color={sparkColor(trend)}
-            interactive
-            className="mt-2.5 h-6 w-full"
-          />
-        ) : null}
-        {caption ? (
-          <div className="mt-1.5 truncate text-[10px] tabular-nums text-muted-foreground">{caption}</div>
-        ) : null}
-      </CardContent>
-    </Card>
+    <div {...cell}>
+      <div className="flex items-center gap-1 text-[11px] tracking-wide text-muted-foreground">
+        <span className="truncate">{label}</span>
+        {info && <MetricInfo def={info} />}
+      </div>
+      <div className="mt-1.5 flex items-baseline justify-between gap-2">
+        <DrillValue label={label} onDrill={onDrill} className="text-2xl font-semibold tabular-nums tracking-tight">
+          {num}
+          {unit ? <span className="text-base font-medium text-muted-foreground">{unit}</span> : null}
+        </DrillValue>
+        <DeltaPill delta={trend} subtle />
+      </div>
+      {spark && spark.values.length > 1 ? (
+        <Sparkline
+          values={spark.values}
+          labels={spark.labels}
+          color={sparkColor(trend)}
+          interactive
+          className="mt-2.5 h-6 w-full"
+        />
+      ) : null}
+      {caption ? (
+        <div className="mt-1.5 truncate text-[10px] tabular-nums text-muted-foreground">{caption}</div>
+      ) : null}
+    </div>
   );
 }
 
