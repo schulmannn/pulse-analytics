@@ -6,6 +6,7 @@ import { CollectorEmptyState } from '@/components/CollectorEmptyState';
 import { SectionNav, type Section } from '@/components/SectionNav';
 import { Hero } from '@/panels/Hero';
 import { Digest } from '@/panels/Digest';
+import { Insights } from '@/panels/Insights';
 import { KpiGrid } from '@/panels/KpiGrid';
 import { TopPosts } from '@/panels/TopPosts';
 import { Compare } from '@/panels/Compare';
@@ -13,6 +14,7 @@ import { HistoryChartBlock, HeatmapChartBlock, VelocityChartBlock } from '@/pane
 
 const SECTIONS: readonly Section[] = [
   { id: 'metrics', label: 'Метрики' },
+  { id: 'insights', label: 'Инсайты' },
   { id: 'growth', label: 'Рост' },
   { id: 'timing', label: 'Лучшее время' },
   { id: 'velocity', label: 'Скорость' },
@@ -50,6 +52,9 @@ export function Overview() {
       <div className="space-y-12">
         <OverviewSection id="metrics" title="Ключевые метрики">
           <KpiGrid />
+        </OverviewSection>
+        <OverviewSection id="insights" title="Авто-инсайты">
+          <Insights />
         </OverviewSection>
         <OverviewSection id="growth" title="Рост">
           <HistoryChartBlock />
