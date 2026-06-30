@@ -6,7 +6,7 @@ import { ExpandableChart } from '@/components/ExpandableChart';
 import { BarChart } from '@/components/BarChart';
 import { RichText } from '@/components/RichText';
 import { ChartSection, KpiCard, Stat } from '@/components/instagram/shared';
-import type { IgPost, IgStory } from '@/api/schemas';
+import type { IgPost, IgStory, IgTag } from '@/api/schemas';
 import {
   hashtagStats,
   postEr,
@@ -268,6 +268,51 @@ export function CompareBlock({ posts }: { posts: IgPost[] }) {
           </table>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Tags (media where we're @-tagged — brand mentions) ──
+export function TagsBlock({ tags, mock }: { tags: IgTag[]; mock?: boolean }) {
+  if (tags.length === 0) {
+    return (
+      <Card>
+        <CardContent className="py-8 text-center text-sm text-muted-foreground">
+          Пока вас никто не отметил на фото. Новые отметки появятся здесь автоматически
+          {mock ? '.' : ' и сохранятся в истории.'}
+        </CardContent>
+      </Card>
+    );
+  }
+  return (
+    <div className="space-y-2">
+      {tags.map((t, i) => (
+        <a
+          key={t.id ?? i}
+          href={t.permalink ?? undefined}
+          target="_blank"
+          rel="noreferrer"
+          className="flex items-start gap-3 rounded-lg border border-border p-3 transition-colors hover:bg-hover-row"
+        >
+          <span className="mt-0.5 shrink-0 rounded bg-muted px-2 py-0.5 text-[10px] font-medium tracking-wide text-muted-foreground">
+            {MEDIA_TYPE_LABEL[t.media_type ?? ''] ?? 'Пост'}
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-x-2 text-sm">
+              <span className="font-medium text-primary">@{t.username ?? '—'}</span>
+              {t.timestamp && <span className="font-mono text-xs text-muted-foreground">{fmtDay(t.timestamp)}</span>}
+            </div>
+            {t.caption && <p className="mt-0.5 line-clamp-2 text-sm text-muted-foreground">{t.caption}</p>}
+            <div className="mt-1 flex gap-3 text-xs tabular-nums text-muted-foreground">
+              <span>{fmt.short(Number(t.like_count ?? 0))} лайков</span>
+              <span>{fmt.num(Number(t.comments_count ?? 0))} комм.</span>
+            </div>
+          </div>
+          <svg viewBox="0 0 24 24" className="mt-1 h-3.5 w-3.5 shrink-0 text-muted-foreground" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+            <path d="M7 17L17 7M17 7H8M17 7v9" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </a>
+      ))}
     </div>
   );
 }

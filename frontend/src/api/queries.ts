@@ -20,6 +20,7 @@ import {
   IgPostsSchema,
   IgProfileSchema,
   IgStoriesSchema,
+  IgTagsSchema,
   KeySchema,
   LoginResponseSchema,
   MentionsSchema,
@@ -229,6 +230,14 @@ export function useIgStories() {
   return useQuery({
     queryKey: ['ig-stories'],
     queryFn: () => apiGet('/api/ig/stories', IgStoriesSchema),
+  });
+}
+
+/** Tags — media where the account is @-tagged (live edge + DB archive). */
+export function useIgTags() {
+  return useQuery({
+    queryKey: ['ig-tags'],
+    queryFn: () => apiGet('/api/ig/tags', IgTagsSchema),
   });
 }
 

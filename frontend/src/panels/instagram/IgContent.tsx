@@ -1,5 +1,6 @@
 import { useOutletContext } from 'react-router-dom';
 import type { IgData } from '@/lib/useIgData';
+import { useIgTags } from '@/api/queries';
 import { Section } from '@/components/instagram/shared';
 import {
   TopPostsBlock,
@@ -8,14 +9,20 @@ import {
   HashtagsBlock,
   CompareBlock,
   StoriesBlock,
+  TagsBlock,
 } from '@/components/instagram/content';
 import { exportIgPosts } from '@/lib/igExport';
 
 /** IG Контент — everything publication-level: top posts, Reels, formats, hashtags, compare, stories. */
 export function IgContent() {
   const ig = useOutletContext<IgData>();
+  const tags = useIgTags();
   return (
     <div className="space-y-10">
+      <Section title="Отметки на фото">
+        <TagsBlock tags={tags.data?.data ?? []} mock={tags.data?.mock} />
+      </Section>
+
       <Section
         title="Лучшие публикации"
         action={

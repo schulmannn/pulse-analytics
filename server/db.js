@@ -498,6 +498,37 @@ async function setUserAvatar(id, dataUrl) {
   await pool.query('UPDATE users SET avatar_url=$1 WHERE id=$2', [dataUrl, id]);
 }
 
+// Instagram tags (media where we're @-tagged) — archive so they persist past the live edge's window.
+async function upsertIgTags(rows) {
+  if (!enabled || !rows || !rows.length) return 0;
+  let n = 0;
+  for (const r of rows) {
+    if (!r || !r.id) continue;
+    await pool.query(
+      `INSERT INTO ig_tags (media_id, username, caption, permalink, media_type, like_count, comments_count, posted_at, last_seen)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now())
+       ON CONFLICT (media_id) DO UPDATE SET
+         username=EXCLUDED.username, caption=EXCLUDED.caption, permalink=EXCLUDED.permalink,
+         media_type=EXCLUDED.media_type, like_count=EXCLUDED.like_count,
+         comments_count=EXCLUDED.comments_count, posted_at=EXCLUDED.posted_at, last_seen=now()`,
+      [String(r.id), r.username || null, r.caption || null, r.permalink || null, r.media_type || null,
+       r.like_count != null ? Number(r.like_count) : null, r.comments_count != null ? Number(r.comments_count) : null,
+       r.timestamp || null],
+    );
+    n++;
+  }
+  return n;
+}
+async function getIgTags(limit = 100) {
+  if (!enabled) return [];
+  const { rows } = await pool.query(
+    `SELECT media_id AS id, username, caption, permalink, media_type, like_count, comments_count,
+            to_char(posted_at,'YYYY-MM-DD"T"HH24:MI:SS') AS timestamp,
+            to_char(first_seen,'YYYY-MM-DD"T"HH24:MI:SS') AS first_seen
+     FROM ig_tags ORDER BY posted_at DESC NULLS LAST, first_seen DESC LIMIT $1`, [limit]);
+  return rows;
+}
+
 async function listUsers() {
   if (!enabled) return [];
   const { rows } = await pool.query(
@@ -942,7 +973,7 @@ module.exports = {
   createChannel, deleteChannel, createApiKey, getChannelByApiKey, listApiKeys, revokeApiKey,
   saveSnapshot, getSnapshot, ingestCollectorPayload, getCollectorStatus, recordAuditEvent,
   saveVelocity, getLatestVelocity,
-  upsertChannelDaily, upsertPosts, upsertMentions,
+  upsertChannelDaily, upsertPosts, upsertMentions, upsertIgTags, getIgTags,
   getChannelHistory, getMentionsHistory, getMentionsArchive,
   createBug, listBugs, updateBug, deleteBug, BUG_STATUSES, BUG_SEVERITIES, BUG_KINDS,
   bugExists, getBug, addAttachmentIfRoom, getAttachment,

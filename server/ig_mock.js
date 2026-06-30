@@ -292,6 +292,30 @@ function igMockStories() {
   return { mock: true, data };
 }
 
+// Tags — media where the account is @-tagged on someone else's post (the brand-mentions surface).
+function igMockTags() {
+  const now = Date.now();
+  const samples = [
+    { user: 'coffee.lab', cap: 'Зажгли любимую свечу @bynotem за завтраком ✨ #notem', type: 'IMAGE', likes: 142, comments: 8, ageH: 5 },
+    { user: 'home.and.calm', cap: 'Идеальный вечер: плед, чай и аромат @bynotem 🕯', type: 'CAROUSEL_ALBUM', likes: 318, comments: 21, ageH: 28 },
+    { user: 'marie.styles', cap: 'Распаковка нового объекта @bynotem — обзор в сторис', type: 'VIDEO', likes: 96, comments: 4, ageH: 51 },
+    { user: 'slowliving.ru', cap: 'Ритуалы повседневности с @bynotem 🤍', type: 'IMAGE', likes: 205, comments: 12, ageH: 96 },
+  ];
+  return {
+    mock: true,
+    data: samples.map((s, i) => ({
+      id: `mock_tag_${i}`,
+      username: s.user,
+      caption: s.cap,
+      permalink: `https://instagram.com/p/MOCKTAG${i}/`,
+      media_type: s.type,
+      like_count: s.likes,
+      comments_count: s.comments,
+      timestamp: new Date(now - s.ageH * 3600000).toISOString(),
+    })),
+  };
+}
+
 module.exports = {
   igMockProfile,
   igMockInsights,
@@ -299,4 +323,5 @@ module.exports = {
   igMockBreakdowns,
   igMockOnlineFollowers,
   igMockStories,
+  igMockTags,
 };

@@ -524,3 +524,28 @@ export const IgStoriesSchema = z
   .passthrough();
 export type IgStory = z.infer<typeof IgStorySchema>;
 export type IgStories = z.infer<typeof IgStoriesSchema>;
+
+// Tags — media where the account is @-tagged (the brand-mentions surface). Archived in `ig_tags`.
+export const IgTagSchema = z
+  .object({
+    id: z.string().optional(),
+    username: z.string().optional().nullable(),
+    caption: z.string().optional().nullable(),
+    permalink: z.string().optional().nullable(),
+    media_type: z.string().optional().nullable(),
+    like_count: z.coerce.number().optional().nullable(),
+    comments_count: z.coerce.number().optional().nullable(),
+    timestamp: z.string().optional().nullable(),
+    first_seen: z.string().optional().nullable(),
+  })
+  .passthrough();
+export const IgTagsSchema = z
+  .object({
+    mock: z.boolean().optional(),
+    data: z.array(IgTagSchema).optional().default([]),
+    live_count: z.coerce.number().optional().nullable(),
+    error: z.string().optional().nullable(),
+  })
+  .passthrough();
+export type IgTag = z.infer<typeof IgTagSchema>;
+export type IgTags = z.infer<typeof IgTagsSchema>;
