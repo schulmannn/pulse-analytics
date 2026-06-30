@@ -56,38 +56,36 @@ export function DataHealth() {
   }
 
   const apiDot = apiTone === 'ok' ? 'bg-verdant' : apiTone === 'warn' ? 'bg-status-warn' : 'bg-ember';
+  const statusLabel = apiTone === 'ok' ? 'Данные актуальны' : apiTone === 'warn' ? 'Данные устарели' : 'Ошибка сбора';
 
   return (
     <div>
-      {/* Header: a static label on md+; on mobile a tap-target that toggles the detail rows and
-          shows a one-line health summary (API · last collect) while collapsed, to save vertical
-          space. CSS keeps the detail always visible on md+ regardless of the toggle state. */}
+      {/* One-line status by default (all breakpoints) — the full Источник/Сборщик/API table is one
+          click away, not on the first level. */}
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="flex w-full items-center justify-between gap-2 text-left md:pointer-events-none md:cursor-default"
+        className="flex w-full items-center gap-2 text-left text-[13px]"
       >
-        <span className="text-[13px] font-medium text-ink3">Состояние данных</span>
-        <span className="flex items-center gap-2 md:hidden">
-          {!open && (
-            <span className="flex items-center gap-1.5 font-mono text-[12px] tabular-nums text-ink3">
-              <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${apiDot}`} />
-              {apiText} · {lastCollect}
-            </span>
-          )}
-          <Icon name="chevron" className={cn('h-4 w-4 shrink-0 text-ink3 transition-transform', open && 'rotate-180')} />
+        <span aria-hidden="true" className={`h-1.5 w-1.5 shrink-0 rounded-full ${apiDot}`} />
+        <span className="min-w-0 truncate text-ink2">
+          {statusLabel}
+          <span className="text-ink3"> · обновлено {lastCollect}</span>
         </span>
+        <Icon name="chevron" className={cn('ml-auto h-3.5 w-3.5 shrink-0 text-ink3 transition-transform', open && 'rotate-180')} />
       </button>
-      <div className={cn('mt-3', open ? 'block' : 'hidden md:block')}>
-        <Row label="Источник" value={source} />
-        <Row label="Последний сбор" value={lastCollect} />
-        <Row label="Сборщик" value={collectorVer} />
-        <Row label="API" value={apiText} tone={apiTone} />
-        <Link to="/connect" className="mt-3 inline-block text-[13px] font-medium text-primary hover:underline">
-          Настроить сбор →
-        </Link>
-      </div>
+      {open && (
+        <div className="mt-3 max-w-sm">
+          <Row label="Источник" value={source} />
+          <Row label="Последний сбор" value={lastCollect} />
+          <Row label="Сборщик" value={collectorVer} />
+          <Row label="API" value={apiText} tone={apiTone} />
+          <Link to="/connect" className="mt-3 inline-block text-[13px] font-medium text-primary hover:underline">
+            Настроить сбор →
+          </Link>
+        </div>
+      )}
     </div>
   );
 }

@@ -249,32 +249,31 @@ function FeaturedKpi({ label, value, trend, caption, spark, info, onDrill }: Fea
         <span>{label}</span>
         {info && <MetricInfo def={info} />}
       </div>
-      <div className="mt-2 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div className="min-w-0">
-          <div className="flex items-baseline gap-2.5">
-            <DrillValue label={label} onDrill={onDrill} className="text-[44px] font-medium leading-none tabular-nums tracking-tight">
-              {num}
-              {unit ? <span className="text-2xl font-medium text-muted-foreground">{unit}</span> : null}
-            </DrillValue>
-            <DeltaPill delta={trend} />
-          </div>
-          {caption ? <div className="mt-2 text-xs text-muted-foreground">{caption}</div> : null}
-        </div>
-        {spark && spark.values.length > 1 ? (
-          <div className="w-full sm:w-1/2 sm:max-w-[440px]">
-            <Sparkline
-              values={spark.values}
-              labels={spark.labels}
-              area
-              strokeWidth={2}
-              interactive
-              caption="по дням"
-              formatValue={fmt.short}
-              className="h-16 w-full"
-            />
-          </div>
-        ) : null}
+      {/* Number + delta, then the sparkline as a strip BELOW it (capped width, left-aligned) — same
+          shape as the Instagram hero. The old side-by-side layout pushed the chart to the far right
+          on wide screens (justify-between), leaving it visually unanchored. */}
+      <div className="mt-2 flex items-baseline gap-2.5">
+        <DrillValue label={label} onDrill={onDrill} className="text-[44px] font-medium leading-none tabular-nums tracking-tight">
+          {num}
+          {unit ? <span className="text-2xl font-medium text-muted-foreground">{unit}</span> : null}
+        </DrillValue>
+        <DeltaPill delta={trend} />
       </div>
+      {caption ? <div className="mt-2 text-xs text-muted-foreground">{caption}</div> : null}
+      {spark && spark.values.length > 1 ? (
+        <div className="mt-4 max-w-2xl">
+          <Sparkline
+            values={spark.values}
+            labels={spark.labels}
+            area
+            strokeWidth={2}
+            interactive
+            caption="по дням"
+            formatValue={fmt.short}
+            className="h-16 w-full"
+          />
+        </div>
+      ) : null}
     </div>
   );
 }

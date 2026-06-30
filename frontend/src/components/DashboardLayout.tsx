@@ -132,7 +132,7 @@ interface DashboardLayoutProps {
 export function DashboardLayout({ email, role }: DashboardLayoutProps) {
   return (
     <div className="flex min-h-screen bg-background text-foreground">
-      <Sidebar role={role} />
+      <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar email={email} role={role} />
         <MobileHeader email={email} role={role} />
@@ -166,7 +166,7 @@ const REVEAL_INLINE = 'hidden group-hover/sb:inline group-focus-within/sb:inline
  * pushing it. The aside stays `h-screen sticky top-0`, so the topbar/SectionNav offsets
  * (top-0 / top-14, in the content column) are untouched.
  */
-function Sidebar({ role }: { role?: string }) {
+function Sidebar() {
   const isLg = useMediaQuery('(min-width: 1024px)');
   const { collapsed, toggle } = useSidebarCollapsed();
   const rail = railMode(isLg, collapsed);
@@ -223,27 +223,7 @@ function Sidebar({ role }: { role?: string }) {
           {nav.map((item) => (
             <NavItem key={item.label} {...item} rail={rail} />
           ))}
-          {rail ? (
-            <div className="px-2 pb-1 pt-4">
-              <div className="border-t group-hover/sb:hidden group-focus-within/sb:hidden" aria-hidden="true" />
-              <p
-                className={cn(
-                  'whitespace-nowrap pt-1 text-[11px] font-medium tracking-wider text-muted-foreground',
-                  REVEAL_BLOCK,
-                )}
-              >
-                Система
-              </p>
-            </div>
-          ) : (
-            <p className="px-3 pb-1 pt-5 text-[11px] font-medium tracking-wider text-muted-foreground">
-              Система
-            </p>
-          )}
-          {SYSTEM_NAV.map((item) => (
-            <NavItem key={item.to} {...item} rail={rail} />
-          ))}
-          {role === 'superuser' && SUPER_NAV.map((item) => <NavItem key={item.to} {...item} rail={rail} />)}
+          {/* System links (Настройки / Админ / Баги) live in the account menu under the avatar now. */}
         </nav>
 
         <div className="space-y-1 px-3 pb-4">
@@ -486,7 +466,6 @@ function Topbar({ email, role }: { email?: string; role?: string }) {
       <div className="flex shrink-0 items-center gap-2">
         <PeriodSwitcher />
         <ExportButton />
-        <ThemeToggle />
         <AccountMenu email={email} role={role} />
       </div>
     </header>
@@ -561,27 +540,10 @@ function ExportButton() {
   );
 }
 
-/** Light/dark toggle as a top-bar icon button (sun in dark mode, moon in light). */
-function ThemeToggle() {
-  const { theme, toggle } = useTheme();
-  const dark = theme === 'dark';
-  return (
-    <button
-      type="button"
-      onClick={toggle}
-      aria-label={dark ? 'Светлая тема' : 'Тёмная тема'}
-      title={dark ? 'Светлая тема' : 'Тёмная тема'}
-      className="rounded-lg border p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-    >
-      <Icon name={dark ? 'sun' : 'moon'} className="h-4 w-4" />
-    </button>
-  );
-}
-
 /**
- * Account menu — an avatar (user initials) that opens identity + logout (Figma replaces the kebab
- * with an avatar). On mobile it also carries the theme toggle and the system links (Настройки /
- * Админ / Баги), which on md+ live in the top bar / sidebar instead (those rows are md:hidden).
+ * Account menu — an avatar that opens identity, theme, the system links (Настройки / Админ / Баги),
+ * and logout (Claude-style). This is the single home for account + system controls on every
+ * breakpoint, so they're out of the sidebar and top bar.
  */
 function AccountMenu({ email, role }: { email?: string; role?: string }) {
   const [open, setOpen] = useState(false);
@@ -618,18 +580,17 @@ function AccountMenu({ email, role }: { email?: string; role?: string }) {
             </div>
           )}
           <div className="my-1 border-t" aria-hidden="true" />
-          {/* Theme — only in the mobile menu (md+ has the standalone toggle in the top bar). */}
+          {/* Theme toggle — lives in this menu now (the standalone top-bar toggle is gone). */}
           <button
             type="button"
             onClick={toggleTheme}
-            className="flex w-full items-center gap-2.5 rounded px-2.5 py-1.5 text-left text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:hidden"
+            className="flex w-full items-center gap-2.5 rounded px-2.5 py-1.5 text-left text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
             <Icon name={theme === 'dark' ? 'sun' : 'moon'} className="h-4 w-4" />
             {theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
           </button>
-          {/* System links — mobile only; the bottom bar carries primary views, the sidebar carries
-              these on md+. */}
-          <div className="md:hidden">
+          {/* System links (Настройки / Админ / Баги) — Claude-style, all under the avatar now. */}
+          <div>
             {(role === 'superuser' ? [...SYSTEM_NAV, ...SUPER_NAV] : SYSTEM_NAV).map((item) => (
               <NavLink
                 key={item.to}
@@ -650,7 +611,7 @@ function AccountMenu({ email, role }: { email?: string; role?: string }) {
               </NavLink>
             ))}
           </div>
-          <div className="my-1 border-t md:hidden" aria-hidden="true" />
+          <div className="my-1 border-t" aria-hidden="true" />
           {/* Logout: calm by default, destructive only on hover (it's important, not an alarm). */}
           <button
             type="button"
