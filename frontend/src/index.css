@@ -2,94 +2,106 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Brand palette (Stripe-system) mapped onto shadcn's semantic tokens, in HSL channels.
-   Light = default; dark via the `.dark` class (Sprint 3 theme toggle wires the switch).
-   Values are the exact legacy --color-* hexes converted to HSL. Radius = 4px (brand). */
+/* "Pulse Refined Technical" tokens (Refined UI + Swiss Modern + Technical UI), in HSL channels.
+   Light = default; dark via the `.dark` class. Warm paper canvas + warm ink scale + warm hairlines
+   replace the prior cool/analytical system; one calm blue accent (#2d6be0). Panels (#fff) are used
+   sparingly — sections are delimited by hairlines, not card chrome. Radius 4px (buttons pill via util). */
 @layer base {
   :root {
     color-scheme: light;
-    /* Near-white page (#18): less blue tint than before, so white cards read clean, not
-       "grey on grey". */
-    --background: 214 28% 97%;
-    --foreground: 211 78% 11%;
-    --card: 0 0% 100%;
-    --card-foreground: 211 78% 11%;
+    --background: 45 28% 97%;          /* paper  #faf9f6 — warm off-white */
+    --foreground: 60 6% 10%;           /* ink    #1a1a17 */
+    --card: 0 0% 100%;                 /* panel  #ffffff (sparingly) */
+    --card-foreground: 60 6% 10%;
     --popover: 0 0% 100%;
-    --popover-foreground: 211 78% 11%;
-    --primary: 216 82% 48%;
+    --popover-foreground: 60 6% 10%;
+    --primary: 219 74% 53%;            /* accent #2d6be0 — links / active / brand only */
     --primary-foreground: 0 0% 100%;
-    --secondary: 214 28% 96%;
-    --secondary-foreground: 211 78% 11%;
-    --muted: 214 28% 96%;
-    --muted-foreground: 217 19% 42%;
-    --accent: 214 90% 95%;
-    --accent-foreground: 216 82% 48%;
-    --destructive: 19 100% 55%;
+    --secondary: 45 20% 95%;
+    --secondary-foreground: 60 6% 10%;
+    --muted: 45 20% 95%;
+    --muted-foreground: 49 5% 40%;     /* ink3   #6c6a61 */
+    --accent: 220 79% 96%;             /* blue-tint #eef3fd */
+    --accent-foreground: 219 74% 53%;
+    --destructive: 11 64% 45%;         /* down   #bb4429 */
     --destructive-foreground: 0 0% 100%;
-    --border: 214 24% 91%;
-    --input: 214 24% 91%;
-    --ring: 216 82% 48%;
-    --radius: 0.25rem;
+    --border: 48 16% 88%;              /* hairline #e5e3db — warm 1px line */
+    --input: 48 16% 88%;
+    --ring: 219 74% 53%;
+    --radius: 0.25rem;                 /* 4px panels; buttons get a pill radius via utility */
 
-    /* Brand accent (charts, deltas, sparklines) — analytical blue (#6 "deep": replaced the
-       Electric-Iris violet so data + chrome read as a tool, not a neon admin). Light values are
-       deepened for WCAG AA on white cards; bright values live in .dark. verdant/ember unchanged. */
-    --brand-iris: 216 82% 48%;
-    --brand-iris-soft: 212 84% 60%;
-    --brand-verdant: 82 75% 26%;
-    --brand-ember: 14 82% 44%;
-    /* Deeper ember for text on a translucent ember tint (clears AA 4.5:1 on the pill chip). */
-    --brand-ember-strong: 14 82% 38%;
-    /* Amber status (collector stale) — a dedicated, AA-legible warn hue (chart-3 is too light on white). */
-    --status-warn: 38 95% 32%;
+    /* Warm ink scale for secondary / tertiary text (size + shade for hierarchy, not weight). */
+    --ink2: 53 5% 29%;                 /* #4e4d46 */
+    --ink3: 49 5% 40%;                 /* #6c6a61 */
 
-    /* Categorical data-viz palette (chart series) — separate from the brand accents above.
-       Six hues spread around the wheel; light theme = deeper for legibility on white cards. */
-    --chart-1: 245 70% 56%;
-    --chart-2: 192 75% 40%;
-    --chart-3: 38 85% 47%;
-    --chart-4: 340 72% 52%;
-    --chart-5: 150 55% 38%;
-    --chart-6: 280 55% 56%;
+    /* Data accent = the brand blue (single hue; no separate violet). Deltas only for up/down. */
+    --brand-iris: 219 74% 53%;         /* #2d6be0 */
+    --brand-iris-soft: 219 74% 64%;
+    --brand-verdant: 147 52% 36%;      /* up     #2c8a57 */
+    --brand-ember: 11 64% 45%;         /* down   #bb4429 */
+    --brand-ember-strong: 11 64% 40%;  /* deeper, clears AA on a 10% ember tint */
+    --status-warn: 39 84% 36%;         /* amber  #a9740f — status (Риск / демо / collector stale) */
+
+    /* Subtle status tints (badge + section backgrounds). */
+    --amber-tint: 42 53% 92%;          /* #f5eede */
+    --green-tint: 138 26% 93%;         /* #e7f1ea */
+    --blue-tint: 220 79% 96%;          /* #eef3fd */
+    --hover-row: 47 31% 94%;           /* #f5f3ec — table row hover */
+    --avatar: 45 21% 89%;              /* #e9e6dd — fallback avatar field */
+
+    /* Categorical data-viz palette (multi-series only; single metrics use --brand-iris). */
+    --chart-1: 219 74% 53%;
+    --chart-2: 192 65% 40%;
+    --chart-3: 39 84% 40%;
+    --chart-4: 340 60% 50%;
+    --chart-5: 147 45% 38%;
+    --chart-6: 270 45% 55%;
   }
 
   .dark {
     color-scheme: dark;
-    --background: 212 37% 8%;
-    --foreground: 216 48% 94%;
-    --card: 214 29% 14%;
-    --card-foreground: 216 48% 94%;
-    --popover: 214 29% 14%;
-    --popover-foreground: 216 48% 94%;
-    --primary: 217 74% 63%;
-    --primary-foreground: 212 37% 8%;
-    --secondary: 212 30% 12%;
-    --secondary-foreground: 216 48% 94%;
-    --muted: 212 30% 12%;
-    --muted-foreground: 216 17% 59%;
-    --accent: 216 45% 24%;
-    --accent-foreground: 213 85% 74%;
-    --destructive: 19 100% 55%;
+    --background: 50 6% 9%;            /* warm near-black */
+    --foreground: 45 14% 92%;          /* warm off-white */
+    --card: 48 5% 13%;
+    --card-foreground: 45 14% 92%;
+    --popover: 48 5% 13%;
+    --popover-foreground: 45 14% 92%;
+    --primary: 219 80% 68%;
+    --primary-foreground: 50 6% 9%;
+    --secondary: 48 5% 14%;
+    --secondary-foreground: 45 14% 92%;
+    --muted: 48 5% 14%;
+    --muted-foreground: 45 6% 60%;
+    --accent: 219 40% 22%;
+    --accent-foreground: 219 80% 78%;
+    --destructive: 11 70% 55%;
     --destructive-foreground: 0 0% 100%;
-    --border: 209 24% 25%;
-    --input: 209 24% 25%;
-    --ring: 217 74% 63%;
+    --border: 45 5% 24%;
+    --input: 45 5% 24%;
+    --ring: 219 80% 68%;
 
-    /* Analytical blue (#6 "deep") — chrome + data; brighter than the light values for the dark canvas. */
-    --brand-iris: 213 80% 67%;
-    --brand-iris-soft: 205 85% 70%;
-    --brand-verdant: 81 75% 41%;
-    --brand-ember: 19 100% 55%;
-    --brand-ember-strong: 19 100% 60%;
-    --status-warn: 40 88% 62%;
+    --ink2: 45 8% 72%;
+    --ink3: 45 6% 60%;
 
-    /* Dark: lighter + slightly desaturated so the hues pop on the dark canvas. */
-    --chart-1: 245 85% 72%;
-    --chart-2: 190 70% 58%;
-    --chart-3: 40 88% 62%;
-    --chart-4: 340 80% 70%;
-    --chart-5: 150 58% 55%;
-    --chart-6: 280 70% 72%;
+    --brand-iris: 219 80% 70%;
+    --brand-iris-soft: 219 80% 76%;
+    --brand-verdant: 147 45% 52%;
+    --brand-ember: 11 78% 62%;
+    --brand-ember-strong: 11 78% 66%;
+    --status-warn: 39 80% 58%;
+
+    --amber-tint: 39 30% 18%;
+    --green-tint: 147 25% 16%;
+    --blue-tint: 219 40% 20%;
+    --hover-row: 48 5% 16%;
+    --avatar: 48 5% 22%;
+
+    --chart-1: 219 80% 70%;
+    --chart-2: 190 65% 58%;
+    --chart-3: 40 85% 62%;
+    --chart-4: 340 70% 70%;
+    --chart-5: 147 50% 55%;
+    --chart-6: 270 60% 70%;
   }
 }
 
@@ -131,5 +143,18 @@
   [role='button']:focus-visible,
   [role='tab']:focus-visible {
     @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+}
+
+@layer components {
+  /* Pill button radius (Steep-style). Apply to chrome buttons/CTAs; inputs keep --radius. */
+  .btn-pill {
+    border-radius: 9999px;
+  }
+  /* Roboto Mono is scoped to data-health readouts (timestamps / collector version / API status)
+     and other technical figures — never for body copy. */
+  .font-mono,
+  .tnum-mono {
+    font-feature-settings: 'tnum' 1;
   }
 }

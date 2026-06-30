@@ -7,12 +7,25 @@ export default {
   theme: {
     container: { center: true, padding: '1.5rem', screens: { '2xl': '1200px' } },
     extend: {
+      fontFamily: {
+        // Inter for everything; Roboto Mono is scoped (timestamps / collector version / API status).
+        sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+        mono: ['Roboto Mono', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
+      },
       colors: {
         border: 'hsl(var(--border))',
         input: 'hsl(var(--input))',
         ring: 'hsl(var(--ring))',
         background: 'hsl(var(--background))',
         foreground: 'hsl(var(--foreground))',
+        // Warm ink scale (secondary / tertiary text) + status tints (badge / section backgrounds).
+        ink2: 'hsl(var(--ink2))',
+        ink3: 'hsl(var(--ink3))',
+        'amber-tint': 'hsl(var(--amber-tint))',
+        'green-tint': 'hsl(var(--green-tint))',
+        'blue-tint': 'hsl(var(--blue-tint))',
+        'hover-row': 'hsl(var(--hover-row))',
+        avatar: 'hsl(var(--avatar))',
         primary: { DEFAULT: 'hsl(var(--primary))', foreground: 'hsl(var(--primary-foreground))' },
         secondary: { DEFAULT: 'hsl(var(--secondary))', foreground: 'hsl(var(--secondary-foreground))' },
         destructive: { DEFAULT: 'hsl(var(--destructive))', foreground: 'hsl(var(--destructive-foreground))' },
