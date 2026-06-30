@@ -134,7 +134,6 @@ export function KpiGrid() {
   };
   const viewsSpark = dailySeries((post) => Number(post.views ?? post.view_count ?? 0));
   const reactionsSpark = dailySeries((post) => Number(post.reactions ?? post.reactions_count ?? 0));
-  const forwardsSpark = dailySeries((post) => Number(post.forwards ?? 0));
   const engagementSpark = dailySeries(
     (post) =>
       Number(post.reactions ?? post.reactions_count ?? 0) +
@@ -190,23 +189,22 @@ export function KpiGrid() {
   };
 
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <FeaturedKpi
-          label="Просмотры за период"
-          value={fmt.short(totalViews)}
-          trend={viewsTrend}
-          caption={viewsCaption}
-          spark={viewsSpark}
-          info={METRIC_DEFS.views}
-          onDrill={() => setDrill('views')}
-        />
-        <FeaturedKpi label="Подписчики" value={fmt.num(displayMembers)} trend={subscriberTrend} caption={subCaption} spark={subsSpark} info={METRIC_DEFS.subscribers} onDrill={() => setDrill('subscribers')} />
-      </div>
-      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border lg:grid-cols-4">
+    <div className="space-y-5">
+      {/* HERO — primary metric: big number + area sparkline (Figma Overview lead). */}
+      <FeaturedKpi
+        label="Просмотры за период"
+        value={fmt.short(totalViews)}
+        trend={viewsTrend}
+        caption={viewsCaption}
+        spark={viewsSpark}
+        info={METRIC_DEFS.views}
+        onDrill={() => setDrill('views')}
+      />
+      {/* LEDGER — secondary metrics as hairline columns (Figma: Подписчики / Ср.охват / Реакции / ER). */}
+      <div className="grid grid-cols-2 gap-px border-t border-border bg-border lg:grid-cols-4">
+        <StatTile label="Подписчики" value={fmt.num(displayMembers)} trend={subscriberTrend} spark={subsSpark} caption={subCaption} info={METRIC_DEFS.subscribers} onDrill={() => setDrill('subscribers')} />
         <StatTile label="Ср. охват поста" value={fmt.short(avgViews)} trend={avgReachTrend} spark={viewsSpark} info={METRIC_DEFS.avgReach} onDrill={() => setDrill('avgReach')} />
         <StatTile label="Реакции" value={fmt.short(totalReactions)} trend={reactionsTrend} spark={reactionsSpark} caption={reactionsCaption} info={METRIC_DEFS.reactions} onDrill={() => setDrill('reactions')} />
-        <StatTile label="Репосты" value={fmt.short(totalForwards)} trend={forwardsTrend} spark={forwardsSpark} caption={forwardsCaption} info={METRIC_DEFS.forwards} onDrill={() => setDrill('forwards')} />
         <StatTile
           label="Вовлечённость (ER)"
           value={er > 0 ? er.toFixed(2) + '%' : '—'}
@@ -250,25 +248,28 @@ interface FeaturedKpiProps {
   onDrill?: () => void;
 }
 
+/** Hero KPI — the primary metric on the canvas (no card): big number + delta + area sparkline. */
 function FeaturedKpi({ label, value, trend, caption, spark, info, onDrill }: FeaturedKpiProps) {
   const [num, unit] = splitUnit(value);
   return (
-    <Card {...drillProps(onDrill)}>
-      <CardContent className="relative overflow-hidden p-5">
-        <div className="flex items-center gap-1 text-xs tracking-wide text-muted-foreground">
-          <span>{label}</span>
-          {info && <MetricInfo def={info} />}
+    <div>
+      <div className="flex items-center gap-1 text-xs tracking-wide text-muted-foreground">
+        <span>{label}</span>
+        {info && <MetricInfo def={info} />}
+      </div>
+      <div className="mt-2 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex items-baseline gap-2.5">
+            <DrillValue label={label} onDrill={onDrill} className="text-[44px] font-semibold leading-none tabular-nums tracking-tight">
+              {num}
+              {unit ? <span className="text-2xl font-medium text-muted-foreground">{unit}</span> : null}
+            </DrillValue>
+            <DeltaPill delta={trend} />
+          </div>
+          {caption ? <div className="mt-2 text-xs text-muted-foreground">{caption}</div> : null}
         </div>
-        <div className="mt-2 flex items-baseline gap-2.5">
-          <DrillValue label={label} onDrill={onDrill} className="text-4xl font-semibold tabular-nums tracking-tight">
-            {num}
-            {unit ? <span className="font-medium text-muted-foreground">{unit}</span> : null}
-          </DrillValue>
-          <DeltaPill delta={trend} />
-        </div>
-        {caption ? <div className="mt-1.5 text-xs text-muted-foreground">{caption}</div> : null}
         {spark && spark.values.length > 1 ? (
-          <div className="mt-4">
+          <div className="w-full sm:w-1/2 sm:max-w-[440px]">
             <Sparkline
               values={spark.values}
               labels={spark.labels}
@@ -277,27 +278,13 @@ function FeaturedKpi({ label, value, trend, caption, spark, info, onDrill }: Fea
               interactive
               caption="по дням"
               formatValue={fmt.short}
-              className="h-12 w-full"
+              className="h-16 w-full"
             />
           </div>
         ) : null}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
-}
-
-/**
- * Card props that make the whole KPI card a mouse click target for the drill-down. NOT
- * role=button — the card contains the ⓘ info button, and a button must not nest another
- * interactive control. Keyboard/AT users get a dedicated <DrillValue> button on the number.
- */
-function drillProps(onDrill?: () => void) {
-  if (!onDrill) return {};
-  return {
-    onClick: onDrill,
-    title: 'Подробный разбор',
-    className: 'cursor-pointer transition-colors hover:border-primary/40',
-  };
 }
 
 /** The KPI number — a real button (keyboard-accessible drill trigger) when onDrill is set. */

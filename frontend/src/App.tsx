@@ -11,6 +11,9 @@ import { Posts } from '@/panels/Posts';
 import { Mentions } from '@/panels/Mentions';
 import { Instagram } from '@/panels/Instagram';
 import { TgAnalytics } from '@/panels/TgAnalytics';
+import { Insights } from '@/panels/Insights';
+import { Compare } from '@/panels/Compare';
+import { HistoryChartBlock, HeatmapChartBlock, VelocityChartBlock } from '@/panels/Charts';
 import { Hashtags } from '@/panels/Hashtags';
 import { Settings } from '@/panels/Settings';
 import { Admin } from '@/panels/Admin';
@@ -79,13 +82,35 @@ function ProtectedLayout() {
   );
 }
 
-/** Analytics tab — TG breakdowns + hashtag lift. (The auto-digest now leads the Overview.) */
+/**
+ * Analytics — the deep breakdowns. The Overview is now a focused summary (Figma), so the detailed
+ * sections that used to sit there (auto-insights, рост/история, лучшее время, скорость, сравнение)
+ * live here alongside the TG breakdowns + hashtag lift.
+ */
 function Analytics() {
   return (
-    <div className="space-y-8">
+    <div className="space-y-10">
       <TgAnalytics />
+      <AnalyticsSection title="Авто-инсайты">
+        <Insights />
+      </AnalyticsSection>
+      <HistoryChartBlock />
+      <HeatmapChartBlock />
+      <VelocityChartBlock />
+      <AnalyticsSection title="Сравнение периодов">
+        <Compare />
+      </AnalyticsSection>
       <Hashtags />
     </div>
+  );
+}
+
+function AnalyticsSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="space-y-4">
+      <h2 className="text-base font-medium tracking-tight text-foreground">{title}</h2>
+      {children}
+    </section>
   );
 }
 

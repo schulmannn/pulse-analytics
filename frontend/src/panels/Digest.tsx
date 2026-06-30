@@ -3,7 +3,6 @@ import { useTgFull, useTgGraphs } from '@/api/queries';
 import { normalizeTgPosts } from '@/lib/posts';
 import { fmt } from '@/lib/format';
 import { markdownToPlainText } from '@/lib/markdown';
-import { Card, CardContent } from '@/components/ui/card';
 import { usePeriod } from '@/lib/period';
 import { Skeleton } from '@/components/ui/skeleton';
 
@@ -14,14 +13,12 @@ export function Digest() {
 
   if (isFullLoading || isGraphsLoading) {
     return (
-      <Card>
-        <CardContent className="space-y-3 p-5">
-          <Skeleton className="h-3 w-20" />
-          <Skeleton className="h-4 w-full" />
-          <Skeleton className="h-3 w-5/6" />
-          <Skeleton className="h-3 w-3/5" />
-        </CardContent>
-      </Card>
+      <div className="space-y-3">
+        <Skeleton className="h-3 w-20" />
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-3 w-5/6" />
+        <Skeleton className="h-3 w-3/5" />
+      </div>
     );
   }
 
@@ -77,11 +74,9 @@ export function Digest() {
 
   if (posts.length === 0 && !graphs) {
     return (
-      <Card>
-        <CardContent className="py-8 text-center text-sm text-muted-foreground">
-          Недостаточно данных для авто-сводки.
-        </CardContent>
-      </Card>
+      <div className="py-8 text-center text-sm text-muted-foreground">
+        Недостаточно данных для авто-сводки.
+      </div>
     );
   }
 
@@ -109,8 +104,9 @@ export function Digest() {
   else actionText = 'Накопите больше постов — тогда появятся рекомендации.';
 
   return (
-    <Card>
-      <CardContent className="space-y-4 p-5">
+    <div>
+      <div className="text-[13px] font-medium text-ink3">Инсайт</div>
+      <div className="mt-3 space-y-4">
         {/* INSIGHT — что произошло (доминирует) */}
         <div>
           <TierLabel tone="insight">Итог</TierLabel>
@@ -147,8 +143,8 @@ export function Digest() {
           <TierLabel tone="action">Что сделать</TierLabel>
           <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{actionText}</p>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }
 
