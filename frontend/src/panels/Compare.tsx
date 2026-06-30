@@ -1,0 +1,251 @@
+import { useTgFull } from '@/api/queries';
+import { normalizeTgPosts, type NormalizedPost } from '@/lib/posts';
+import { fmt } from '@/lib/format';
+import { pctDelta } from '@/lib/delta';
+import { usePeriod } from '@/lib/period';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
+import { DeltaPill } from '@/components/DeltaPill';
+import { BarChart } from '@/components/BarChart';
+import { Breakdown } from '@/components/Breakdown';
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const WD_ORDER = [1, 2, 3, 4, 5, 6, 0];
+const WD_LABELS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+const CHART_CYCLE = [
+  'hsl(var(--chart-1))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))',
+  'hsl(var(--chart-4))', 'hsl(var(--chart-5))', 'hsl(var(--chart-6))',
+];
+
+interface Agg {
+  views: number;
+  reactions: number;
+  forwards: number;
+  replies: number;
+  eng: number;
+  count: number;
+  avgReach: number;
+  er: number;
+}
+
+function aggregate(list: NormalizedPost[], members: number): Agg {
+  const views = list.reduce((s, p) => s + p.reach, 0);
+  const reactions = list.reduce((s, p) => s + p.likes, 0);
+  const forwards = list.reduce((s, p) => s + p.shares, 0);
+  const replies = list.reduce((s, p) => s + p.comments, 0);
+  const eng = list.reduce((s, p) => s + p.eng, 0);
+  const count = list.length;
+  return {
+    views,
+    reactions,
+    forwards,
+    replies,
+    eng,
+    count,
+    avgReach: count ? views / count : 0,
+    er: members > 0 ? (eng / members) * 100 : 0,
+  };
+}
+
+function formatLabel(mediaType: string | null, albumSize: number): string {
+  if (albumSize > 1) return 'Альбом';
+  if (mediaType === 'photo') return 'Фото';
+  if (mediaType === 'video') return 'Видео';
+  if (mediaType === 'document') return 'Файл';
+  return 'Текст';
+}
+
+/**
+ * First-class comparison for the Telegram channel: this period vs the previous equal-length
+ * window, plus how the period splits by weekday and by post format. The previous window is
+ * symmetric (same span immediately before the current one), so a custom date range compares
+ * fairly too; all-time has no "previous" → the period table shows a hint instead.
+ * (Channel-vs-channel comparison is a separate, heavier feature — it needs multi-channel fetch.)
+ */
+export function Compare() {
+  const { days, range } = usePeriod();
+  const { data, isLoading, isError } = useTgFull(days);
+
+  if (isLoading) return <CompareSkeleton />;
+  if (isError) return null;
+
+  const members = data?.channel?.memberCount ?? data?.channel?.members ?? 0;
+  const all = normalizeTgPosts(data?.posts ?? [], data?.channel ?? {});
+
+  const now = Date.now();
+  const to = range ? range.to : now;
+  const from = range ? range.from : days > 0 ? now - days * DAY_MS : Number.NEGATIVE_INFINITY;
+  const span = to - from;
+  const prevFrom = from - span;
+
+  const cur: NormalizedPost[] = [];
+  const prev: NormalizedPost[] = [];
+  for (const post of all) {
+    if (!post.date) continue;
+    const t = Date.parse(post.date);
+    if (!Number.isFinite(t)) continue;
+    if (t >= from && t <= to) cur.push(post);
+    else if (t >= prevFrom && t < from) prev.push(post);
+  }
+
+  if (cur.length === 0) {
+    return (
+      <Card>
+        <CardContent className="py-8 text-center text-sm text-muted-foreground">
+          Недостаточно данных для сравнения.
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const a = aggregate(cur, members);
+  const b = aggregate(prev, members);
+  const hasPrev = prev.length > 0;
+
+  const rows: { label: string; cur: number; prev: number; render: (n: number) => string }[] = [
+    { label: 'Просмотры', cur: a.views, prev: b.views, render: fmt.short },
+    { label: 'Ср. охват', cur: a.avgReach, prev: b.avgReach, render: fmt.short },
+    { label: 'Реакции', cur: a.reactions, prev: b.reactions, render: fmt.short },
+    { label: 'Репосты', cur: a.forwards, prev: b.forwards, render: fmt.short },
+    { label: 'Комментарии', cur: a.replies, prev: b.replies, render: fmt.short },
+    { label: 'Постов', cur: a.count, prev: b.count, render: fmt.num },
+    { label: 'ER', cur: a.er, prev: b.er, render: (n) => `${n.toFixed(2)}%` },
+  ];
+
+  // By weekday (avg views over the current window).
+  const wdViews = Array<number>(7).fill(0);
+  const wdCount = Array<number>(7).fill(0);
+  cur.forEach((p) => {
+    if (!p.date) return;
+    const d = new Date(p.date).getDay();
+    wdViews[d] += p.reach;
+    wdCount[d] += 1;
+  });
+  const wdAvg = WD_ORDER.map((i) => (wdCount[i] ? wdViews[i] / wdCount[i] : 0));
+  const hasWeekday = wdAvg.some((v) => v > 0);
+
+  // By format (total views per media format over the current window).
+  const byFormat = new Map<string, { views: number; count: number }>();
+  cur.forEach((p) => {
+    const key = formatLabel(p.mediaType, p.albumSize);
+    const e = byFormat.get(key) ?? { views: 0, count: 0 };
+    e.views += p.reach;
+    e.count += 1;
+    byFormat.set(key, e);
+  });
+  const formatItems = [...byFormat.entries()]
+    .sort((x, y) => y[1].views - x[1].views)
+    .map(([label, v], i) => ({
+      label,
+      value: v.views,
+      display: `${fmt.short(v.views)} · ${v.count} шт`,
+      color: CHART_CYCLE[i % CHART_CYCLE.length],
+    }));
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-medium tracking-wide text-muted-foreground">
+            Период vs предыдущий
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          {hasPrev ? (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-muted/40 text-xs font-semibold tracking-wider text-muted-foreground">
+                    <th className="p-4">Метрика</th>
+                    <th className="p-4 text-right">Текущий</th>
+                    <th className="p-4 text-right">Предыдущий</th>
+                    <th className="p-4 text-right">Δ</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {rows.map((r) => (
+                    <tr key={r.label} className="hover:bg-muted/30">
+                      <td className="p-4 text-muted-foreground">{r.label}</td>
+                      <td className="p-4 text-right font-medium tabular-nums">{r.render(r.cur)}</td>
+                      <td className="p-4 text-right tabular-nums text-muted-foreground">{r.render(r.prev)}</td>
+                      <td className="p-4 text-right">
+                        <span className="inline-flex justify-end">
+                          <DeltaPill delta={pctDelta(r.cur, r.prev)} />
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="px-4 py-8 text-center text-sm text-muted-foreground">
+              {days === 0 && !range
+                ? 'Для режима «Всё время» нет предыдущего периода. Выберите 7д / 30д / 90д или диапазон.'
+                : 'Недостаточно истории, чтобы сравнить с предыдущим периодом.'}
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium tracking-wide text-muted-foreground">
+              Охват по дням недели
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {hasWeekday ? (
+              <BarChart
+                values={wdAvg}
+                labels={WD_LABELS}
+                titles={wdAvg.map((v, i) => `${WD_LABELS[i]}: ${fmt.short(v)} ср. охват`)}
+                height={200}
+              />
+            ) : (
+              <EmptyHint />
+            )}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium tracking-wide text-muted-foreground">
+              По форматам (просмотры)
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-5">
+            {formatItems.length > 0 ? <Breakdown items={formatItems} /> : <EmptyHint />}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function EmptyHint() {
+  return <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">Нет данных за период</div>;
+}
+
+function CompareSkeleton() {
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardContent className="space-y-3 p-5">
+          <Skeleton className="h-4 w-1/3" />
+          <Skeleton className="h-32 w-full" />
+        </CardContent>
+      </Card>
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        {Array.from({ length: 2 }).map((_, i) => (
+          <Card key={i}>
+            <CardContent className="space-y-3 p-5">
+              <Skeleton className="h-4 w-1/4" />
+              <Skeleton className="h-44 w-full" />
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}

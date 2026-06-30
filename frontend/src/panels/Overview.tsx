@@ -8,6 +8,7 @@ import { Hero } from '@/panels/Hero';
 import { Digest } from '@/panels/Digest';
 import { KpiGrid } from '@/panels/KpiGrid';
 import { TopPosts } from '@/panels/TopPosts';
+import { Compare } from '@/panels/Compare';
 import { HistoryChartBlock, HeatmapChartBlock, VelocityChartBlock } from '@/panels/Charts';
 
 const SECTIONS: readonly Section[] = [
@@ -15,6 +16,7 @@ const SECTIONS: readonly Section[] = [
   { id: 'growth', label: 'Рост' },
   { id: 'timing', label: 'Лучшее время' },
   { id: 'velocity', label: 'Скорость' },
+  { id: 'compare', label: 'Сравнение' },
   { id: 'top-posts', label: 'Топ-посты' },
 ];
 
@@ -57,6 +59,9 @@ export function Overview() {
         </OverviewSection>
         <OverviewSection id="velocity" title="Скорость">
           <VelocityChartBlock />
+        </OverviewSection>
+        <OverviewSection id="compare" title="Сравнение">
+          <Compare />
         </OverviewSection>
         <OverviewSection id="top-posts" title="Топ-посты">
           <TopPosts />

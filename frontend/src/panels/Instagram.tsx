@@ -17,6 +17,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { Breakdown } from '@/components/Breakdown';
+import { DeltaPill } from '@/components/DeltaPill';
 import { RichText } from '@/components/RichText';
 import { ExpandableChart } from '@/components/ExpandableChart';
 import { ChartTooltip, type TooltipState } from '@/components/ChartTooltip';
@@ -1292,17 +1293,6 @@ function KpiCard({ label, value, hint, feature, trend }: KpiCardProps) {
   );
 }
 
-function DeltaPill({ delta }: { delta?: MetricDelta | null }) {
-  if (!delta || delta.dir === 'flat') return null;
-  const direction = delta.dir === 'up' ? '↑' : '↓';
-  const color = delta.dir === 'up' ? 'text-verdant' : 'text-ember';
-  const percentage = delta.pct >= 100 ? delta.pct.toFixed(0) : delta.pct.toFixed(1);
-  return (
-    <span className={`rounded-full bg-muted px-2 py-0.5 text-xs font-semibold tabular-nums ${color}`}>
-      {direction}{percentage}%
-    </span>
-  );
-}
 
 function IgPostCard({ post, rank }: { post: IgPost; rank: number }) {
   const typeLabel = MEDIA_TYPE_LABEL[post.media_type ?? ''] ?? 'Пост';
