@@ -37,10 +37,10 @@
     /* Data accent = the brand blue (single hue; no separate violet). Deltas only for up/down. */
     --brand-iris: 219 74% 53%;         /* #2d6be0 */
     --brand-iris-soft: 219 74% 64%;
-    --brand-verdant: 147 52% 36%;      /* up     #2c8a57 */
+    --brand-verdant: 147 52% 30%;      /* up     #257449 — deepened to clear AA 4.5 as text + on a 10% tint */
     --brand-ember: 11 64% 45%;         /* down   #bb4429 */
     --brand-ember-strong: 11 64% 40%;  /* deeper, clears AA on a 10% ember tint */
-    --status-warn: 39 84% 36%;         /* amber  #a9740f — status (Риск / демо / collector stale) */
+    --status-warn: 39 84% 28%;         /* amber  #83590b — status (Риск / демо / collector stale); deepened for AA */
 
     /* Subtle status tints (badge + section backgrounds). */
     --amber-tint: 42 53% 92%;          /* #f5eede */

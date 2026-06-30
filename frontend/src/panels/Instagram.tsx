@@ -1137,11 +1137,11 @@ function DemoModeBanner() {
     'Метрики Stories и действий в профиле',
   ];
   return (
-    <Card className="mt-4 border-chart-3/40 bg-chart-3/[0.02]">
+    <Card className="mt-4 border-status-warn/40 bg-status-warn/[0.02]">
       <CardContent className="p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex items-start gap-3">
-            <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-chart-3/15 text-chart-3">
+            <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-status-warn/15 text-status-warn">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden="true">
                 <circle cx="12" cy="12" r="9" />
                 <path d="M12 8h.01M11 12h1v4h1" strokeLinecap="round" strokeLinejoin="round" />
@@ -1150,7 +1150,7 @@ function DemoModeBanner() {
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-sm font-medium text-foreground">Демо-режим</h3>
-                <span className="rounded-full bg-chart-3/15 px-1.5 py-0.5 text-[10px] font-medium text-chart-3">
+                <span className="rounded-full bg-status-warn/15 px-1.5 py-0.5 text-[10px] font-medium text-status-warn">
                   примерные данные
                 </span>
               </div>

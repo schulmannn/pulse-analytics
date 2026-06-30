@@ -714,7 +714,7 @@ function PlatformNav({ variant, rail = false }: { variant: 'sidebar' | 'compact'
             {p.demo && (
               <span
                 aria-hidden="true"
-                className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-chart-3 ring-2 ring-background"
+                className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-status-warn ring-2 ring-background"
               />
             )}
           </button>
@@ -751,7 +751,7 @@ function PlatformNav({ variant, rail = false }: { variant: 'sidebar' | 'compact'
           {p.demo && (
             <span
               className={cn(
-                'ml-auto rounded-full bg-chart-3/15 px-1.5 py-0.5 text-[10px] font-medium text-chart-3',
+                'ml-auto rounded-full bg-status-warn/15 px-1.5 py-0.5 text-[10px] font-medium text-status-warn',
                 rail && REVEAL_INLINE,
               )}
             >
