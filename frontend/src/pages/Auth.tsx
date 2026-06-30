@@ -44,25 +44,6 @@ function AuthShell({
   );
 }
 
-/** Small "real" data-health card under the login form — the product proof (no live data). */
-function DataCard() {
-  return (
-    <div className="mt-6 flex items-center gap-3 rounded-[10px] border border-border bg-card px-3 py-3">
-      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-avatar text-[12px] font-medium text-ink2">
-        N
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium text-foreground">@newsroom</div>
-        <div className="font-mono text-[11px] text-ink3">синхр. 2 ч назад</div>
-      </div>
-      <div className="flex shrink-0 items-center gap-1.5 font-mono text-[11px] text-ink3">
-        <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-verdant" />
-        API 200 OK
-      </div>
-    </div>
-  );
-}
-
 function TrustIcon({ d }: { d: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 shrink-0 text-ink2" aria-hidden="true">
@@ -210,7 +191,6 @@ export function LoginPage() {
           </Link>
         </div>
       </form>
-      <DataCard />
     </AuthShell>
   );
 }
