@@ -5,6 +5,7 @@ import { fmt } from '@/lib/format';
 import { freshness, latestHistoryDay } from '@/lib/freshness';
 import { ChannelAvatar } from '@/components/ChannelAvatar';
 import { MetricInfo } from '@/components/InfoTooltip';
+import { SourceStatus } from '@/components/SourceStatus';
 import { METRIC_DEFS } from '@/lib/metricDefs';
 import { Skeleton } from '@/components/ui/skeleton';
 
@@ -62,6 +63,11 @@ export function Hero() {
             </>
           )}
         </p>
+        {current && current.source === 'collector' && (
+          <div className="mt-1">
+            <SourceStatus channelId={current.id} source={current.source} compact />
+          </div>
+        )}
       </div>
     </section>
   );

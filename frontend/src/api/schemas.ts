@@ -303,6 +303,23 @@ export const CreateKeyResponseSchema = KeySchema.extend({ key: z.string().option
 export type ApiKey = z.infer<typeof KeySchema>;
 export type CreateKeyResponse = z.infer<typeof CreateKeyResponseSchema>;
 
+// Collector health for a channel (GET /api/channels/:id/collector-status). `stale` and
+// `stale_after_hours` are computed by the server; the rest come from the collector_status row.
+export const CollectorStatusSchema = z
+  .object({
+    collector_version: z.string().optional().nullable(),
+    last_attempt_at: z.string().optional().nullable(),
+    last_success_at: z.string().optional().nullable(),
+    last_error: z.string().optional().nullable(),
+    stale: z.boolean().optional(),
+    stale_after_hours: z.coerce.number().optional().nullable(),
+  })
+  .passthrough();
+export const CollectorStatusResponseSchema = z
+  .object({ status: CollectorStatusSchema.nullable().optional() })
+  .passthrough();
+export type CollectorStatus = z.infer<typeof CollectorStatusSchema>;
+
 export const AdminUserSchema = z
   .object({
     id: z.coerce.number(),

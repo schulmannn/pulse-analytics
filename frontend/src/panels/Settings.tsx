@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { fmt } from '@/lib/format';
 import { ApiError } from '@/api/client';
 import { Skeleton } from '@/components/ui/skeleton';
+import { SourceStatus } from '@/components/SourceStatus';
 
 export function Settings() {
   const { data, isLoading, isError, error } = useChannels();
@@ -127,6 +128,7 @@ export function Settings() {
                         UID: {channel.id}
                         {channel.owner_uid ? ` · Owner: ${channel.owner_uid}` : ''}
                       </div>
+                      <SourceStatus channelId={channel.id} source={channel.source} />
                     </div>
                     <div className="flex shrink-0 items-center gap-2 self-end sm:self-auto">
                       {isCentral ? (

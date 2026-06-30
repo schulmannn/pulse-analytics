@@ -10,6 +10,7 @@ import {
   BugsResponseSchema,
   ChannelSchema,
   ChannelsResponseSchema,
+  CollectorStatusResponseSchema,
   CreateKeyResponseSchema,
   GraphsSchema,
   HistorySchema,
@@ -253,6 +254,14 @@ export function useChannelKeys(id: number | null) {
     enabled: id != null,
     queryKey: ['channel-keys', id],
     queryFn: () => apiGet(`/api/channels/${id}/keys`, z.object({ keys: z.array(KeySchema) }).passthrough()),
+  });
+}
+
+export function useCollectorStatus(id: number | null) {
+  return useQuery({
+    enabled: id != null,
+    queryKey: ['collector-status', id],
+    queryFn: () => apiGet(`/api/channels/${id}/collector-status`, CollectorStatusResponseSchema),
   });
 }
 
