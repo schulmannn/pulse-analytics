@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useState, type FormEvent, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
   useChannels,
@@ -8,11 +8,23 @@ import {
   useCreateKey,
   useRevokeKey,
 } from '@/api/queries';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { fmt } from '@/lib/format';
 import { ApiError } from '@/api/client';
 import { Skeleton } from '@/components/ui/skeleton';
 import { SourceStatus } from '@/components/SourceStatus';
+
+function ChartSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="space-y-3">
+      <h3 className="flex items-center gap-3 text-xs font-medium tracking-wider text-muted-foreground">
+        <span className="whitespace-nowrap">{title}</span>
+        <span aria-hidden="true" className="h-px flex-1 bg-border" />
+      </h3>
+      {children}
+    </section>
+  );
+}
 
 export function Settings() {
   const { data, isLoading, isError, error } = useChannels();
@@ -70,43 +82,38 @@ export function Settings() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-bold tracking-tight">Настройки сбора</h2>
+        <h2 className="text-xl font-medium tracking-tight">Настройки сбора</h2>
         <p className="mt-0.5 text-xs text-muted-foreground">
           Подключённые Telegram-каналы и токены внешних коллекторов
         </p>
       </div>
 
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-semibold tracking-wide text-muted-foreground">Добавить канал</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleAddChannel} className="flex flex-col gap-3 sm:flex-row">
-            <div className="relative flex-1">
-              <span className="absolute left-3 top-2.5 select-none font-mono text-sm text-muted-foreground">@</span>
-              <input
-                type="text"
-                value={usernameInput}
-                onChange={(e) => setUsernameInput(e.target.value)}
-                placeholder="channel_username"
-                disabled={createChannelMutation.isPending}
-                className="w-full rounded-md border bg-background py-2 pl-7 pr-3 font-mono text-sm focus:outline-none focus:ring-1 focus:ring-primary"
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={createChannelMutation.isPending || !usernameInput.trim()}
-              className="shrink-0 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-            >
-              {createChannelMutation.isPending ? 'Добавление…' : 'Подключить'}
-            </button>
-          </form>
-          {errorMessage && <p className="mt-2.5 text-xs font-medium text-destructive">{errorMessage}</p>}
-        </CardContent>
-      </Card>
+      <ChartSection title="Добавить канал">
+        <form onSubmit={handleAddChannel} className="flex flex-col gap-3 sm:flex-row">
+          <div className="relative flex-1">
+            <span className="absolute left-3 top-2.5 select-none font-mono text-sm text-muted-foreground">@</span>
+            <input
+              type="text"
+              value={usernameInput}
+              onChange={(e) => setUsernameInput(e.target.value)}
+              placeholder="channel_username"
+              disabled={createChannelMutation.isPending}
+              className="w-full rounded-md border bg-background py-2 pl-7 pr-3 font-mono text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={createChannelMutation.isPending || !usernameInput.trim()}
+            className="shrink-0 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+          >
+            {createChannelMutation.isPending ? 'Добавление…' : 'Подключить'}
+          </button>
+        </form>
+        {errorMessage && <p className="mt-2.5 text-xs font-medium text-destructive">{errorMessage}</p>}
+      </ChartSection>
 
       <div className="space-y-3">
-        <h3 className="px-1 text-xs font-bold tracking-wider text-muted-foreground">Подключённые каналы</h3>
+        <h3 className="px-1 text-xs font-medium tracking-wider text-muted-foreground">Подключённые каналы</h3>
         {channels.length === 0 ? (
           <div className="rounded-lg border border-dashed bg-muted/20 py-6 text-center text-sm text-muted-foreground">
             Список каналов пуст.
@@ -217,7 +224,7 @@ function ChannelKeysPanel({ channelId }: { channelId: number }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-baseline gap-3">
-          <h4 className="text-xs font-bold tracking-wider text-muted-foreground">Ключи внешних коллекторов</h4>
+          <h4 className="text-xs font-medium tracking-wider text-muted-foreground">Ключи внешних коллекторов</h4>
           <Link to="/connect" className="text-[11px] text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary">Что делать с ключом? →</Link>
         </div>
         <button

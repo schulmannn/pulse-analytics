@@ -34,14 +34,14 @@ export function Admin() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-bold tracking-tight">Управление пользователями</h2>
+        <h2 className="text-xl font-medium tracking-tight">Управление пользователями</h2>
         <p className="mt-0.5 text-xs text-muted-foreground">Роли доступа и статусы аккаунтов</p>
       </div>
 
       {users.length === 0 ? (
         <div className="py-6 text-center text-sm text-muted-foreground">Пользователи не найдены.</div>
       ) : (
-        <div className="grid grid-cols-1 gap-3">
+        <div className="grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-border bg-border">
           {users.map((user) => (
             <UserRowCard key={user.id} user={user} availableRoles={roles} availableStatuses={statuses} isMe={me === user.id} />
           ))}
@@ -66,8 +66,8 @@ function UserRowCard({ user, availableRoles, availableStatuses, isMe }: UserRowC
   const handleStatusChange = (e: ChangeEvent<HTMLSelectElement>) => updateUserMutation.mutate({ status: e.target.value });
 
   return (
-    <Card className={isMe ? 'border-primary/20 bg-muted/10' : undefined}>
-      <CardContent className="flex flex-col justify-between gap-4 p-4 md:flex-row md:items-center">
+    <div className={isMe ? 'bg-muted/30' : 'bg-background'}>
+      <div className="flex flex-col justify-between gap-4 p-4 md:flex-row md:items-center">
         <div className="space-y-0.5">
           <div className="flex flex-wrap items-center gap-2">
             <span className="max-w-xs truncate text-sm font-semibold text-foreground">
@@ -107,8 +107,8 @@ function UserRowCard({ user, availableRoles, availableStatuses, isMe }: UserRowC
             ))}
           </select>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }
 

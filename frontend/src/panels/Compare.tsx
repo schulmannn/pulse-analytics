@@ -1,13 +1,26 @@
+import type { ReactNode } from 'react';
 import { useTgFull } from '@/api/queries';
 import { normalizeTgPosts, type NormalizedPost } from '@/lib/posts';
 import { fmt } from '@/lib/format';
 import { pctDelta } from '@/lib/delta';
 import { usePeriod } from '@/lib/period';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { DeltaPill } from '@/components/DeltaPill';
 import { BarChart } from '@/components/BarChart';
 import { Breakdown } from '@/components/Breakdown';
+
+function ChartSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="space-y-3">
+      <h3 className="flex items-center gap-3 text-xs font-medium tracking-wider text-muted-foreground">
+        <span className="whitespace-nowrap">{title}</span>
+        <span aria-hidden="true" className="h-px flex-1 bg-border" />
+      </h3>
+      {children}
+    </section>
+  );
+}
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const WD_ORDER = [1, 2, 3, 4, 5, 6, 0];
@@ -145,80 +158,62 @@ export function Compare() {
 
   return (
     <div className="space-y-6">
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-medium tracking-wide text-muted-foreground">
-            Период vs предыдущий
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          {hasPrev ? (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="border-b border-border bg-muted/40 text-xs font-semibold tracking-wider text-muted-foreground">
-                    <th className="p-4">Метрика</th>
-                    <th className="p-4 text-right">Текущий</th>
-                    <th className="p-4 text-right">Предыдущий</th>
-                    <th className="p-4 text-right">Δ</th>
+      <div className="space-y-4">
+        <h3 className="text-sm font-medium tracking-wide text-muted-foreground">
+          Период vs предыдущий
+        </h3>
+        {hasPrev ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-border text-xs font-semibold tracking-wider text-muted-foreground">
+                  <th className="p-4">Метрика</th>
+                  <th className="p-4 text-right">Текущий</th>
+                  <th className="p-4 text-right">Предыдущий</th>
+                  <th className="p-4 text-right">Δ</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {rows.map((r) => (
+                  <tr key={r.label} className="hover:bg-hover-row">
+                    <td className="p-4 text-muted-foreground">{r.label}</td>
+                    <td className="p-4 text-right font-medium tabular-nums">{r.render(r.cur)}</td>
+                    <td className="p-4 text-right tabular-nums text-muted-foreground">{r.render(r.prev)}</td>
+                    <td className="p-4 text-right">
+                      <span className="inline-flex justify-end">
+                        <DeltaPill delta={pctDelta(r.cur, r.prev)} />
+                      </span>
+                    </td>
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {rows.map((r) => (
-                    <tr key={r.label} className="hover:bg-muted/30">
-                      <td className="p-4 text-muted-foreground">{r.label}</td>
-                      <td className="p-4 text-right font-medium tabular-nums">{r.render(r.cur)}</td>
-                      <td className="p-4 text-right tabular-nums text-muted-foreground">{r.render(r.prev)}</td>
-                      <td className="p-4 text-right">
-                        <span className="inline-flex justify-end">
-                          <DeltaPill delta={pctDelta(r.cur, r.prev)} />
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <p className="px-4 py-8 text-center text-sm text-muted-foreground">
-              {days === 0 && !range
-                ? 'Для режима «Всё время» нет предыдущего периода. Выберите 7д / 30д / 90д или диапазон.'
-                : 'Недостаточно истории, чтобы сравнить с предыдущим периодом.'}
-            </p>
-          )}
-        </CardContent>
-      </Card>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="px-4 py-8 text-center text-sm text-muted-foreground">
+            {days === 0 && !range
+              ? 'Для режима «Всё время» нет предыдущего периода. Выберите 7д / 30д / 90д или диапазон.'
+              : 'Недостаточно истории, чтобы сравнить с предыдущим периодом.'}
+          </p>
+        )}
+      </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium tracking-wide text-muted-foreground">
-              Охват по дням недели
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {hasWeekday ? (
-              <BarChart
-                values={wdAvg}
-                labels={WD_LABELS}
-                titles={wdAvg.map((v, i) => `${WD_LABELS[i]}: ${fmt.short(v)} ср. охват`)}
-                height={200}
-              />
-            ) : (
-              <EmptyHint />
-            )}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium tracking-wide text-muted-foreground">
-              По форматам (просмотры)
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-5">
-            {formatItems.length > 0 ? <Breakdown items={formatItems} /> : <EmptyHint />}
-          </CardContent>
-        </Card>
+        <ChartSection title="Охват по дням недели">
+          {hasWeekday ? (
+            <BarChart
+              values={wdAvg}
+              labels={WD_LABELS}
+              titles={wdAvg.map((v, i) => `${WD_LABELS[i]}: ${fmt.short(v)} ср. охват`)}
+              height={200}
+            />
+          ) : (
+            <EmptyHint />
+          )}
+        </ChartSection>
+        <ChartSection title="По форматам (просмотры)">
+          {formatItems.length > 0 ? <Breakdown items={formatItems} /> : <EmptyHint />}
+        </ChartSection>
       </div>
     </div>
   );

@@ -1,10 +1,23 @@
 import { useMentions, useMentionsArchive } from '@/api/queries';
 import { fmt } from '@/lib/format';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { BarChart } from '@/components/BarChart';
 import { Breakdown } from '@/components/Breakdown';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { Mentions as MentionsData } from '@/api/schemas';
+import type { ReactNode } from 'react';
+
+function ChartSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="space-y-3">
+      <h3 className="flex items-center gap-3 text-xs font-medium tracking-wider text-muted-foreground">
+        <span className="whitespace-nowrap">{title}</span>
+        <span aria-hidden="true" className="h-px flex-1 bg-border" />
+      </h3>
+      {children}
+    </section>
+  );
+}
 
 export function Mentions() {
   // Archive (Postgres) loads on mount — free. The live MTProto search only runs on the
@@ -41,7 +54,7 @@ export function Mentions() {
     return (
       <Card className="border-dashed">
         <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-          <h3 className="mb-1 text-base font-semibold text-foreground">Аналитика упоминаний бренда</h3>
+          <h3 className="mb-1 text-base font-medium text-foreground">Аналитика упоминаний бренда</h3>
           <p className="mb-5 max-w-md text-sm text-muted-foreground">
             В архиве пока нет упоминаний. Поиск задействует MTProto API и расходует ежедневную
             лимит-квоту аккаунта.
@@ -50,7 +63,7 @@ export function Mentions() {
           <button
             onClick={refresh}
             disabled={refreshing}
-            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90 disabled:opacity-50"
+            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
           >
             {refreshing ? 'Поиск…' : 'Загрузить упоминания'}
           </button>
@@ -95,7 +108,7 @@ export function Mentions() {
       {/* Заголовок панели с кнопкой живого обновления */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-xl font-bold tracking-tight">Упоминания бренда</h2>
+          <h2 className="text-xl font-medium tracking-tight">Упоминания бренда</h2>
           <p className="mt-0.5 text-xs text-muted-foreground">
             Сохранённый архив · «Обновить» запускает поиск по Telegram (расход квоты)
           </p>
@@ -103,7 +116,7 @@ export function Mentions() {
         <button
           onClick={refresh}
           disabled={refreshing}
-          className="shrink-0 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90 disabled:opacity-50"
+          className="shrink-0 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
         >
           {refreshing ? 'Обновление…' : 'Обновить'}
         </button>
@@ -117,107 +130,80 @@ export function Mentions() {
       )}
 
       {/* KPI Метрики */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <Card>
-          <CardContent className="p-5">
-            <div className="text-xs tracking-wide text-muted-foreground">Упоминаний</div>
-            <div className="mt-2 text-3xl font-semibold tabular-nums tracking-tight">{fmt.num(total)}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-5">
-            <div className="text-xs tracking-wide text-muted-foreground">Каналов</div>
-            <div className="mt-2 text-3xl font-semibold tabular-nums tracking-tight">{fmt.num(uniqueChannels)}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-5">
-            <div className="text-xs tracking-wide text-muted-foreground">Суммарный охват</div>
-            <div className="mt-2 text-3xl font-semibold tabular-nums tracking-tight">{fmt.short(totalViews)}</div>
-          </CardContent>
-        </Card>
+      <div className="grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-3">
+        <div className="bg-background p-5">
+          <div className="text-xs tracking-wide text-muted-foreground">Упоминаний</div>
+          <div className="mt-2 text-3xl font-semibold tabular-nums tracking-tight">{fmt.num(total)}</div>
+        </div>
+        <div className="bg-background p-5">
+          <div className="text-xs tracking-wide text-muted-foreground">Каналов</div>
+          <div className="mt-2 text-3xl font-semibold tabular-nums tracking-tight">{fmt.num(uniqueChannels)}</div>
+        </div>
+        <div className="bg-background p-5">
+          <div className="text-xs tracking-wide text-muted-foreground">Суммарный охват</div>
+          <div className="mt-2 text-3xl font-semibold tabular-nums tracking-tight">{fmt.short(totalViews)}</div>
+        </div>
       </div>
 
       {/* Аналитические блоки */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm font-medium tracking-wide text-muted-foreground">
-              Упоминаний по дням
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="pt-2">
-              <BarChart values={chartValues} labels={last14Dates} titles={chartTitles} />
-            </div>
-          </CardContent>
-        </Card>
+        <ChartSection title="Упоминаний по дням">
+          <div className="pt-2">
+            <BarChart values={chartValues} labels={last14Dates} titles={chartTitles} />
+          </div>
+        </ChartSection>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm font-medium tracking-wide text-muted-foreground">
-              Кто упоминает · топ каналов
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Breakdown items={breakdownItems} />
-          </CardContent>
-        </Card>
+        <ChartSection title="Кто упоминает · топ каналов">
+          <Breakdown items={breakdownItems} />
+        </ChartSection>
       </div>
 
       {/* Лента последних упоминаний */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm font-medium tracking-wide text-muted-foreground">
-            Последние упоминания
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {recent.length === 0 ? (
-            <div className="py-6 text-center text-sm text-muted-foreground">
-              Упоминаний не найдено.
-            </div>
-          ) : (
-            <div className="divide-y divide-border">
-              {recent.map((item, idx) => (
-                <div key={idx} className="py-3.5 first:pt-0 last:pb-0">
-                  <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      {item.link ? (
-                        <a
-                          href={item.link}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-sm font-semibold text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary"
-                        >
-                          {item.title || 'Канал'}
-                        </a>
-                      ) : (
-                        <span className="text-sm font-semibold text-foreground">
-                          {item.title || 'Канал'}
-                        </span>
-                      )}
-                      {item.username && (
-                        <span className="font-mono text-xs text-muted-foreground">
-                          @{item.username}
-                        </span>
-                      )}
-                    </div>
-                    <div className="shrink-0 text-xs tabular-nums text-muted-foreground sm:text-right">
-                      {fmt.short(item.views ?? 0)} просм · {fmt.date(item.date)}
-                    </div>
+      <ChartSection title="Последние упоминания">
+        {recent.length === 0 ? (
+          <div className="py-6 text-center text-sm text-muted-foreground">
+            Упоминаний не найдено.
+          </div>
+        ) : (
+          <div className="divide-y divide-border">
+            {recent.map((item, idx) => (
+              <div key={idx} className="py-3.5 first:pt-0 last:pb-0">
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {item.link ? (
+                      <a
+                        href={item.link}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm font-semibold text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary"
+                      >
+                        {item.title || 'Канал'}
+                      </a>
+                    ) : (
+                      <span className="text-sm font-semibold text-foreground">
+                        {item.title || 'Канал'}
+                      </span>
+                    )}
+                    {item.username && (
+                      <span className="font-mono text-xs text-muted-foreground">
+                        @{item.username}
+                      </span>
+                    )}
                   </div>
-                  {item.snippet && (
-                    <p className="mt-1 line-clamp-2 text-sm leading-relaxed text-muted-foreground">
-                      {item.snippet}
-                    </p>
-                  )}
+                  <div className="shrink-0 text-xs tabular-nums text-muted-foreground sm:text-right">
+                    {fmt.short(item.views ?? 0)} просм · {fmt.date(item.date)}
+                  </div>
                 </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                {item.snippet && (
+                  <p className="mt-1 line-clamp-2 text-sm leading-relaxed text-muted-foreground">
+                    {item.snippet}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </ChartSection>
 
       {/* Лимиты и квоты */}
       {quota || skipped.length > 0 ? (
