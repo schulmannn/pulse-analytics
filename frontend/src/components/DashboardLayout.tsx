@@ -18,6 +18,7 @@ import { normalizeTgPosts } from '@/lib/posts';
 import { Icon, type IconName } from '@/components/nav-icons';
 import { PulseMark } from '@/components/PulseMark';
 import { ChannelAvatar } from '@/components/ChannelAvatar';
+import { DateRangePicker } from '@/components/DateRangePicker';
 
 /** Close a popover/dropdown on Escape, and (when a ref is given) on outside mousedown.
     Outside-click via a document listener instead of a scrim avoids stacking-context traps. */
@@ -168,9 +169,10 @@ function Sidebar({ role }: { role?: string }) {
     >
       <div
         className={cn(
-          'group/sb flex h-full flex-col border-r',
+          // White panel sidebar on the warm-paper canvas (Figma) — separated from content by border-r.
+          'group/sb flex h-full flex-col border-r bg-card',
           rail
-            ? 'absolute inset-y-0 left-0 z-30 w-16 overflow-hidden bg-background transition-[width] duration-200 hover:w-60 focus-within:w-60'
+            ? 'absolute inset-y-0 left-0 z-30 w-16 overflow-hidden bg-card transition-[width] duration-200 hover:w-60 focus-within:w-60'
             : 'w-full',
         )}
       >
@@ -657,10 +659,8 @@ function PeriodSwitcher() {
   const { days, setDays, range, setRange } = usePeriod();
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
   const btnRef = useRef<HTMLButtonElement>(null);
-  useDismiss(open, setOpen); // Escape closes; outside-click handled by the scrim (date inputs stay safe)
+  useDismiss(open, setOpen); // Escape closes; outside-click handled by the scrim
 
   // Underline tab — active = blue underline bar, no fill (Refined Technical).
   const tab = (active: boolean) =>
@@ -674,21 +674,6 @@ function PeriodSwitcher() {
     const r = btnRef.current?.getBoundingClientRect();
     if (r) setPos({ top: r.bottom + 6, right: Math.max(8, window.innerWidth - r.right) });
     setOpen(true);
-  };
-
-  const apply = () => {
-    const f = Date.parse(from);
-    const t = Date.parse(to);
-    if (!Number.isFinite(f) || !Number.isFinite(t) || f > t) return;
-    setRange({ from: f, to: t + 24 * 60 * 60 * 1000 - 1 }); // inclusive end-of-day
-    setOpen(false);
-  };
-
-  const reset = () => {
-    setFrom('');
-    setTo('');
-    setDays(30); // also clears the range
-    setOpen(false);
   };
 
   return (
@@ -733,45 +718,20 @@ function PeriodSwitcher() {
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div
-            className="fixed z-50 w-60 rounded-md border bg-popover p-3 text-popover-foreground"
+            className="fixed z-50 w-auto rounded-lg border bg-popover p-4 text-popover-foreground"
             style={{ top: pos.top, right: pos.right }}
           >
-            <div className="space-y-2">
-              <label className="block text-[11px] font-medium text-muted-foreground">
-                С
-                <input
-                  type="date"
-                  value={from}
-                  onChange={(event) => setFrom(event.target.value)}
-                  className="mt-1 w-full rounded-md border bg-background px-2.5 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                />
-              </label>
-              <label className="block text-[11px] font-medium text-muted-foreground">
-                По
-                <input
-                  type="date"
-                  value={to}
-                  onChange={(event) => setTo(event.target.value)}
-                  className="mt-1 w-full rounded-md border bg-background px-2.5 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                />
-              </label>
-              <div className="flex gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={apply}
-                  className="btn-pill flex-1 bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-                >
-                  Применить
-                </button>
-                <button
-                  type="button"
-                  onClick={reset}
-                  className="btn-pill border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                >
-                  Сброс
-                </button>
-              </div>
-            </div>
+            <DateRangePicker
+              value={range}
+              onApply={(r) => {
+                setRange(r);
+                setOpen(false);
+              }}
+              onReset={() => {
+                setDays(30); // also clears the range
+                setOpen(false);
+              }}
+            />
           </div>
         </>
       )}
