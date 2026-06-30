@@ -39,6 +39,7 @@ export function InfoTooltip({ title, children, className, align = 'left' }: Info
       className={cn('relative inline-flex align-middle', className)}
       onMouseEnter={() => setOpen(true)}
       onMouseLeave={() => setOpen(false)}
+      onClick={(e) => e.stopPropagation()}
     >
       <button
         type="button"
@@ -47,7 +48,10 @@ export function InfoTooltip({ title, children, className, align = 'left' }: Info
         aria-describedby={open ? id : undefined}
         onFocus={() => setOpen(true)}
         onBlur={() => setOpen(false)}
-        onClick={() => setOpen((o) => !o)}
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((o) => !o);
+        }}
         className="inline-flex h-4 w-4 items-center justify-center rounded-full text-muted-foreground/70 transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
       >
         <Icon name="info" className="h-3.5 w-3.5" />

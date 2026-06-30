@@ -1,15 +1,23 @@
+import { useState } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useChannels, useHistory, useTgFull } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { fmt } from '@/lib/format';
+import { normalizeTgPosts } from '@/lib/posts';
 import { Card, CardContent } from '@/components/ui/card';
 import { Sparkline } from '@/components/Sparkline';
 import { MetricInfo } from '@/components/InfoTooltip';
+import { DeltaPill } from '@/components/DeltaPill';
+import { KpiDrillDown } from '@/components/KpiDrillDown';
 import { Skeleton } from '@/components/ui/skeleton';
 import { usePeriod } from '@/lib/period';
 import { avgReachWindowDelta, dailyWindowDelta, pctDelta, subscriberChange, subscriberDelta, sumPostWindows } from '@/lib/delta';
 import type { MetricDelta } from '@/lib/delta';
 import { METRIC_DEFS } from '@/lib/metricDefs';
 import type { MetricDef } from '@/lib/metricDefs';
+
+/** KPI cards that support a drill-down (subset of MetricKey that maps to a shown KPI). */
+type DrillKey = 'views' | 'subscribers' | 'avgReach' | 'reactions' | 'forwards' | 'er';
 
 /** Sparkline hue: green/red when the metric is trending, brand iris when flat/unknown. */
 function sparkColor(trend?: MetricDelta | null): string {
@@ -36,6 +44,7 @@ export function KpiGrid() {
   const { data: history } = useHistory(730);
   const { channelId } = useSelectedChannel();
   const { data: channelsData } = useChannels();
+  const [drill, setDrill] = useState<DrillKey | null>(null);
 
   if (isLoading) return <KpiSkeletons />;
   if (isError) {
@@ -167,6 +176,18 @@ export function KpiGrid() {
   const viewsBase = postsAnalyzed ? `по ${postsAnalyzed} постам` : null;
   const viewsCaption = [viewsBase, viewsAbsCaption].filter(Boolean).join(' · ') || null;
 
+  // Normalized posts in the active window — the per-post attribution source for the drill-down.
+  // Uses the same fields the KPI totals sum, so the breakdown reconciles with the headline.
+  const normPosts = normalizeTgPosts(data?.posts ?? [], data?.channel ?? {}).filter((post) => inRange(post.date));
+  const drillMeta: Record<DrillKey, { total: string; trend?: MetricDelta | null; caption?: string | null }> = {
+    views: { total: fmt.short(totalViews), trend: viewsTrend, caption: viewsCaption },
+    subscribers: { total: fmt.num(displayMembers), trend: subscriberTrend, caption: subCaption },
+    avgReach: { total: fmt.short(avgViews), trend: avgReachTrend, caption: null },
+    reactions: { total: fmt.short(totalReactions), trend: reactionsTrend, caption: reactionsCaption },
+    forwards: { total: fmt.short(totalForwards), trend: forwardsTrend, caption: forwardsCaption },
+    er: { total: er > 0 ? er.toFixed(2) + '%' : '—', trend: erTrend, caption: erCaption },
+  };
+
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -177,13 +198,14 @@ export function KpiGrid() {
           caption={viewsCaption}
           spark={viewsSpark}
           info={METRIC_DEFS.views}
+          onDrill={() => setDrill('views')}
         />
-        <FeaturedKpi label="Подписчики" value={fmt.num(displayMembers)} trend={subscriberTrend} caption={subCaption} spark={subsSpark} info={METRIC_DEFS.subscribers} />
+        <FeaturedKpi label="Подписчики" value={fmt.num(displayMembers)} trend={subscriberTrend} caption={subCaption} spark={subsSpark} info={METRIC_DEFS.subscribers} onDrill={() => setDrill('subscribers')} />
       </div>
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatTile label="Ср. охват поста" value={fmt.short(avgViews)} trend={avgReachTrend} spark={viewsSpark} info={METRIC_DEFS.avgReach} />
-        <StatTile label="Реакции" value={fmt.short(totalReactions)} trend={reactionsTrend} spark={reactionsSpark} caption={reactionsCaption} info={METRIC_DEFS.reactions} />
-        <StatTile label="Репосты" value={fmt.short(totalForwards)} trend={forwardsTrend} spark={forwardsSpark} caption={forwardsCaption} info={METRIC_DEFS.forwards} />
+        <StatTile label="Ср. охват поста" value={fmt.short(avgViews)} trend={avgReachTrend} spark={viewsSpark} info={METRIC_DEFS.avgReach} onDrill={() => setDrill('avgReach')} />
+        <StatTile label="Реакции" value={fmt.short(totalReactions)} trend={reactionsTrend} spark={reactionsSpark} caption={reactionsCaption} info={METRIC_DEFS.reactions} onDrill={() => setDrill('reactions')} />
+        <StatTile label="Репосты" value={fmt.short(totalForwards)} trend={forwardsTrend} spark={forwardsSpark} caption={forwardsCaption} info={METRIC_DEFS.forwards} onDrill={() => setDrill('forwards')} />
         <StatTile
           label="Вовлечённость (ER)"
           value={er > 0 ? er.toFixed(2) + '%' : '—'}
@@ -191,8 +213,21 @@ export function KpiGrid() {
           spark={engagementSpark}
           caption={erCaption}
           info={METRIC_DEFS.er}
+          onDrill={() => setDrill('er')}
         />
       </div>
+
+      {drill && (
+        <KpiDrillDown
+          metricKey={drill}
+          posts={normPosts}
+          subsSeries={subsSpark}
+          total={drillMeta[drill].total}
+          trend={drillMeta[drill].trend}
+          caption={drillMeta[drill].caption}
+          onClose={() => setDrill(null)}
+        />
+      )}
     </div>
   );
 }
@@ -210,12 +245,13 @@ interface FeaturedKpiProps {
   caption?: string | null;
   spark?: DailySeries;
   info?: MetricDef;
+  onDrill?: () => void;
 }
 
-function FeaturedKpi({ label, value, trend, caption, spark, info }: FeaturedKpiProps) {
+function FeaturedKpi({ label, value, trend, caption, spark, info, onDrill }: FeaturedKpiProps) {
   const [num, unit] = splitUnit(value);
   return (
-    <Card>
+    <Card {...drillProps(onDrill)}>
       <CardContent className="relative overflow-hidden p-5">
         <div className="flex items-center gap-1 text-xs tracking-wide text-muted-foreground">
           <span>{label}</span>
@@ -248,6 +284,25 @@ function FeaturedKpi({ label, value, trend, caption, spark, info }: FeaturedKpiP
   );
 }
 
+/** Card props that make a KPI card a keyboard-accessible drill-down trigger (or nothing). */
+function drillProps(onDrill?: () => void) {
+  if (!onDrill) return {};
+  return {
+    role: 'button',
+    tabIndex: 0,
+    onClick: onDrill,
+    onKeyDown: (e: ReactKeyboardEvent) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        onDrill();
+      }
+    },
+    title: 'Подробный разбор',
+    className:
+      'cursor-pointer transition-colors hover:border-primary/40 focus-visible:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+  };
+}
+
 interface StatTileProps {
   label: string;
   value: string;
@@ -255,12 +310,13 @@ interface StatTileProps {
   spark?: DailySeries;
   caption?: string | null;
   info?: MetricDef;
+  onDrill?: () => void;
 }
 
-function StatTile({ label, value, trend, spark, caption, info }: StatTileProps) {
+function StatTile({ label, value, trend, spark, caption, info, onDrill }: StatTileProps) {
   const [num, unit] = splitUnit(value);
   return (
-    <Card>
+    <Card {...drillProps(onDrill)}>
       <CardContent className="p-4">
         <div className="flex items-center gap-1 text-[11px] tracking-wide text-muted-foreground">
           <span className="truncate">{label}</span>
@@ -287,29 +343,6 @@ function StatTile({ label, value, trend, spark, caption, info }: StatTileProps) 
         ) : null}
       </CardContent>
     </Card>
-  );
-}
-
-function DeltaPill({ delta, subtle = false }: { delta?: MetricDelta | null; subtle?: boolean }) {
-  if (!delta || delta.dir === 'flat') return null;
-  const direction = delta.dir === 'up' ? '↑' : '↓';
-  const color = delta.dir === 'up' ? 'text-verdant' : 'text-ember';
-  const percentage = delta.pct >= 100 ? delta.pct.toFixed(0) : delta.pct.toFixed(1);
-  if (subtle) {
-    return (
-      <span className={`shrink-0 text-xs font-semibold tabular-nums ${color}`}>
-        {direction}
-        {percentage}%
-      </span>
-    );
-  }
-  // Trend-tinted chip (not bg-muted, which is ~invisible on the white light-theme card).
-  const chip = delta.dir === 'up' ? 'text-verdant bg-verdant/10' : 'text-ember bg-ember/10';
-  return (
-    <span className={`rounded-full ${chip} px-2 py-0.5 text-xs font-semibold tabular-nums`}>
-      {direction}
-      {percentage}%
-    </span>
   );
 }
 
