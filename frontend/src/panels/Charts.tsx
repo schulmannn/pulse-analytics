@@ -1,13 +1,25 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { useHistory, useVelocity, useTgFull } from '@/api/queries';
 import { lttbDownsample } from '@/lib/downsample';
 import { LineChart } from '@/components/LineChart';
 import { ChartTooltip, type TooltipState } from '@/components/ChartTooltip';
 import { fmt } from '@/lib/format';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { ExpandableChart } from '@/components/ExpandableChart';
 import { Skeleton } from '@/components/ui/skeleton';
 import { usePeriod } from '@/lib/period';
+
+/** Section header = label + hairline rule (no card), matching TgAnalytics/Compare. */
+function ChartSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="space-y-3">
+      <h3 className="flex items-center gap-3 text-xs font-medium tracking-wider text-muted-foreground">
+        <span className="whitespace-nowrap">{title}</span>
+        <span aria-hidden="true" className="h-px flex-1 bg-border" />
+      </h3>
+      {children}
+    </section>
+  );
+}
 
 interface HeatmapCell {
   n: number;
@@ -56,11 +68,11 @@ export function HistoryChartBlock() {
   if (isError) return null;
   if (!data || !data.enabled) {
     return (
-      <Card>
-        <CardContent className="py-8 text-center text-sm text-muted-foreground">
+      <ChartSection title="История подписчиков">
+        <p className="py-8 text-center text-sm text-muted-foreground">
           История подписчиков пока недоступна.
-        </CardContent>
-      </Card>
+        </p>
+      </ChartSection>
     );
   }
 
@@ -68,11 +80,11 @@ export function HistoryChartBlock() {
   const rows = rawRows.filter((r) => r.subscribers != null);
   if (rows.length < 2) {
     return (
-      <Card>
-        <CardContent className="py-8 text-center text-sm text-muted-foreground">
+      <ChartSection title="История подписчиков">
+        <p className="py-8 text-center text-sm text-muted-foreground">
           История подписчиков пока пуста.
-        </CardContent>
-      </Card>
+        </p>
+      </ChartSection>
     );
   }
 
@@ -80,25 +92,18 @@ export function HistoryChartBlock() {
   const caption = `${rawRows.length} дн в архиве${isDownsampled ? ' · сглажено' : ''}`;
 
   return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-sm font-medium tracking-wide text-muted-foreground">
-          История подписчиков
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <ExpandableChart
-          title="История подписчиков"
-          renderExpanded={(days) => {
-            const windowRows = days === 0 ? rows : rows.slice(-days);
-            return <SubscriberHistoryChart rows={windowRows} />;
-          }}
-        >
-          <SubscriberHistoryChart rows={rows} />
-        </ExpandableChart>
-        <div className="mt-3 text-xs font-medium text-muted-foreground">{caption}</div>
-      </CardContent>
-    </Card>
+    <ChartSection title="История подписчиков">
+      <ExpandableChart
+        title="История подписчиков"
+        renderExpanded={(days) => {
+          const windowRows = days === 0 ? rows : rows.slice(-days);
+          return <SubscriberHistoryChart rows={windowRows} />;
+        }}
+      >
+        <SubscriberHistoryChart rows={rows} />
+      </ExpandableChart>
+      <div className="mt-3 text-xs font-medium text-muted-foreground">{caption}</div>
+    </ChartSection>
   );
 }
 
@@ -108,7 +113,7 @@ export function HeatmapChartBlock() {
   const [tip, setTip] = useState<TooltipState>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
 
-  if (isLoading) return <ChartSkeleton title="Тепловая карта (день × час)" />;
+  if (isLoading) return <ChartSkeleton title="Тепловая карта активности (день × час)" />;
 
   const posts = tgData?.posts ?? [];
   const dayNames = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
@@ -161,20 +166,14 @@ export function HeatmapChartBlock() {
   }
 
   return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-sm font-medium tracking-wide text-muted-foreground">
-          Тепловая карта активности (день × час)
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div ref={wrapRef} className="relative" onMouseLeave={() => setTip(null)}>
+    <ChartSection title="Тепловая карта активности (день × час)">
+      <div ref={wrapRef} className="relative" onMouseLeave={() => setTip(null)}>
         <div className="overflow-x-auto pb-2">
           <div className="min-w-[420px] space-y-[2px]">
             <div className="grid gap-[2px]" style={{ gridTemplateColumns: '30px repeat(24, minmax(14px, 1fr))' }}>
               <div />
               {Array.from({ length: 24 }).map((_, hr) => (
-                <div key={hr} className="select-none text-center text-[10px] font-semibold text-muted-foreground">
+                <div key={hr} className="select-none text-center text-[10px] font-medium text-muted-foreground">
                   {hr % 3 === 0 ? `${hr}` : ''}
                 </div>
               ))}
@@ -188,7 +187,7 @@ export function HeatmapChartBlock() {
                   className="grid items-center gap-[2px]"
                   style={{ gridTemplateColumns: '30px repeat(24, minmax(14px, 1fr))' }}
                 >
-                  <div className="select-none text-[11px] font-bold text-muted-foreground">{dayName}</div>
+                  <div className="select-none text-[11px] font-medium text-muted-foreground">{dayName}</div>
                   {Array.from({ length: 24 }).map((_, hr) => {
                     const cell = currentRow[hr];
                     if (!cell || cell.n === 0) {
@@ -241,8 +240,7 @@ export function HeatmapChartBlock() {
             'Мало постов для тепловой карты.'
           )}
         </div>
-      </CardContent>
-    </Card>
+    </ChartSection>
   );
 }
 
@@ -256,16 +254,9 @@ export function VelocityChartBlock() {
 
   if (!available || byDay.length < 2) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm font-medium tracking-wide text-muted-foreground">
-            Скорость набора просмотров
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <LineChart values={[]} />
-        </CardContent>
-      </Card>
+      <ChartSection title="Скорость набора просмотров">
+        <LineChart values={[]} />
+      </ChartSection>
     );
   }
 
@@ -279,36 +270,24 @@ export function VelocityChartBlock() {
   if (data?.posts_used != null) captions.push(`по ${data.posts_used} постам`);
 
   return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-sm font-medium tracking-wide text-muted-foreground">
-          Скорость набора просмотров
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <ExpandableChart title="Скорость набора просмотров">
-          <LineChart values={cum} yMin={0} yMax={Math.max(...cum, 1)} titles={titles} labels={labels} />
-        </ExpandableChart>
-        {captions.length > 0 && (
-          <div className="mt-3 text-xs font-medium text-muted-foreground">{captions.join(' · ')}</div>
-        )}
-      </CardContent>
-    </Card>
+    <ChartSection title="Скорость набора просмотров">
+      <ExpandableChart title="Скорость набора просмотров">
+        <LineChart values={cum} yMin={0} yMax={Math.max(...cum, 1)} titles={titles} labels={labels} />
+      </ExpandableChart>
+      {captions.length > 0 && (
+        <div className="mt-3 text-xs font-medium text-muted-foreground">{captions.join(' · ')}</div>
+      )}
+    </ChartSection>
   );
 }
 
 function ChartSkeleton({ title }: { title: string }) {
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-sm font-medium tracking-wide text-muted-foreground">
-          {title}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
+    <ChartSection title={title}>
+      <div className="space-y-3">
         <Skeleton className="h-32 w-full" />
         <Skeleton className="h-3 w-1/6" />
-      </CardContent>
-    </Card>
+      </div>
+    </ChartSection>
   );
 }
