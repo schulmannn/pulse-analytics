@@ -122,13 +122,14 @@ export function DashboardLayout({ email, role }: DashboardLayoutProps) {
           </div>
           <PlatformNav variant="compact" />
         </div>
-        <MobileNav role={role} />
-        <main className="flex-1 px-4 py-5 sm:px-6">
+        {/* Extra bottom padding on mobile clears the fixed bottom nav; md+ navigates via the sidebar. */}
+        <main className="flex-1 px-4 pb-24 pt-5 sm:px-6 md:pb-5">
           <div className="mx-auto w-full max-w-screen-2xl">
             <Outlet />
           </div>
         </main>
       </div>
+      <MobileBottomNav />
     </div>
   );
 }
@@ -267,23 +268,27 @@ function CollapseToggle({ collapsed, onToggle, rail }: { collapsed: boolean; onT
   );
 }
 
-/** Horizontal nav for mobile (the sidebar is hidden below md). */
-function MobileNav({ role }: { role?: string }) {
-  const items = role === 'superuser' ? [...NAV, ...SYSTEM_NAV, ...SUPER_NAV] : [...NAV, ...SYSTEM_NAV];
+/**
+ * Fixed bottom tab bar for mobile (sidebar is hidden below md). Figma 390 shows the four
+ * primary views here; system links (Настройки / Админ / Баги) move into the account menu so
+ * the bar stays uncrowded. Icon tints via currentColor, so `text-primary` colours the active glyph.
+ */
+function MobileBottomNav() {
   return (
-    <nav className="flex gap-1 overflow-x-auto border-b px-3 py-2 md:hidden">
-      {items.map((item) => (
+    <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 border-t bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden">
+      {NAV.map((item) => (
         <NavLink
           key={item.to}
           to={item.to}
           end={item.end}
           className={({ isActive }) =>
-            `flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${
-              isActive ? 'bg-primary/15 text-foreground' : 'text-muted-foreground hover:text-foreground'
-            }`
+            cn(
+              'flex flex-col items-center justify-center gap-1 py-2.5 text-[11px] font-medium transition-colors',
+              isActive ? 'text-primary' : 'text-muted-foreground hover:text-foreground',
+            )
           }
         >
-          <Icon name={item.icon} className="h-4 w-4" />
+          <Icon name={item.icon} className="h-5 w-5" />
           {item.label}
         </NavLink>
       ))}
@@ -496,6 +501,30 @@ function MoreMenu({ email, role }: { email?: string; role?: string }) {
             </div>
           )}
           <div className="my-1 border-t" aria-hidden="true" />
+          {/* System links — mobile only; the bottom bar carries primary views, the sidebar
+              carries these on md+. */}
+          <div className="md:hidden">
+            {(role === 'superuser' ? [...SYSTEM_NAV, ...SUPER_NAV] : SYSTEM_NAV).map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.end}
+                onClick={() => setOpen(false)}
+                className={({ isActive }) =>
+                  cn(
+                    'flex items-center gap-2.5 rounded px-2.5 py-1.5 transition-colors',
+                    isActive
+                      ? 'bg-primary/15 text-foreground'
+                      : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                  )
+                }
+              >
+                <Icon name={item.icon} className="h-4 w-4" />
+                {item.label}
+              </NavLink>
+            ))}
+            <div className="my-1 border-t" aria-hidden="true" />
+          </div>
           {/* Logout: calm by default, destructive only on hover (it's important, not an alarm). */}
           <button
             type="button"
