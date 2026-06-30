@@ -175,12 +175,13 @@ export function useIgProfile() {
   });
 }
 
-/** Always fetch the full 90-day window (the server cap); the panel slices to the active
- *  period client-side and uses the extra history as the previous window for deltas. */
-export function useIgInsights() {
+/** Fetch insights for the selected window. reach/follower come as a 90-day daily series (windowed
+ *  client-side); the aggregate metrics (views/saves/…) are computed by the server for this exact
+ *  window + the previous one (for deltas), since they have no daily series to slice. */
+export function useIgInsights(days = 90) {
   return useQuery({
-    queryKey: ['ig-insights', 90],
-    queryFn: () => apiGet('/api/ig/insights?days=90', IgInsightsSchema),
+    queryKey: ['ig-insights', days],
+    queryFn: () => apiGet(`/api/ig/insights?days=${days}`, IgInsightsSchema),
   });
 }
 

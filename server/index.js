@@ -534,21 +534,44 @@ app.get('/api/ig/insights', requireAuth, async (req, res) => {
     const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
 
-    const since = Math.floor(Date.now() / 1000) - days * 86400;
-    const until = Math.floor(Date.now() / 1000);
+    const SEC = 86400;
+    const now = Math.floor(Date.now() / 1000);
+    const curUntil = now, curSince = now - days * SEC;
+    const prevUntil = curSince, prevSince = curSince - days * SEC;
 
     // Instagram API with Instagram Login (graph.instagram.com): only `reach` + `follower_count`
-    // return a daily time-series (period=day). The engagement/visibility metrics are aggregate
-    // `total_value` over the window — request them with metric_type=total_value (period=day made
-    // the API silently drop them). Per-metric allSettled so one unsupported metric can't blank
-    // the rest (e.g. profile_views isn't available on every account).
-    const tsCall = igFetch(`/${IG_ACCOUNT}/insights`, { metric: 'reach,follower_count', period: 'day', since, until });
+    // return a daily time-series. Fetch the full 90-day series so the panel can window the
+    // selected period (cur vs prev) for these as before.
+    const dailyCall = igFetch(`/${IG_ACCOUNT}/insights`, { metric: 'reach,follower_count', period: 'day', since: now - 90 * SEC, until: now });
+
+    // Engagement/visibility metrics are window AGGREGATES (total_value) with no daily series, so
+    // they can't be windowed client-side. Fetch each for the current and previous selected window
+    // (per-metric allSettled → one unsupported metric, e.g. profile_views, can't blank the rest),
+    // then re-shape each as two synthetic daily points (prev-window + current-window) placed inside
+    // those windows, so the panel's existing windowPair() KPI/delta math reads them unchanged.
     const tvNames = ['views', 'profile_views', 'accounts_engaged', 'total_interactions', 'likes', 'comments', 'saves', 'shares'];
-    const tvCalls = tvNames.map((metric) =>
-      igFetch(`/${IG_ACCOUNT}/insights`, { metric, metric_type: 'total_value', period: 'day', since, until }),
+    const tvVal = (r) => { const m = r && r.data && r.data[0]; return m && m.total_value && m.total_value.value != null ? m.total_value.value : null; };
+    const fetchTv = (s, u) => Promise.allSettled(
+      tvNames.map((metric) => igFetch(`/${IG_ACCOUNT}/insights`, { metric, metric_type: 'total_value', period: 'day', since: s, until: u })),
     );
-    const settled = await Promise.allSettled([tsCall, ...tvCalls]);
-    const data = { data: settled.filter((s) => s.status === 'fulfilled').flatMap((s) => s.value?.data || []) };
+    const [dailyR, curR, prevR] = await Promise.all([
+      dailyCall.catch(() => null),
+      fetchTv(curSince, curUntil),
+      fetchTv(prevSince, prevUntil),
+    ]);
+    const out = dailyR && dailyR.data ? [...dailyR.data] : [];
+    const curPoint = new Date(curUntil * 1000).toISOString();
+    const prevPoint = new Date((prevSince + Math.floor((days * SEC) / 2)) * 1000).toISOString();
+    tvNames.forEach((metric, i) => {
+      const cur = curR[i].status === 'fulfilled' ? tvVal(curR[i].value) : null;
+      const prev = prevR[i].status === 'fulfilled' ? tvVal(prevR[i].value) : null;
+      if (cur == null && prev == null) return;
+      const values = [];
+      if (prev != null) values.push({ value: prev, end_time: prevPoint });
+      if (cur != null) values.push({ value: cur, end_time: curPoint });
+      out.push({ name: metric, period: 'day', values, total_value: { value: cur } });
+    });
+    const data = { data: out };
     cacheSet(cacheKey, data);
     res.json(data);
   } catch (e) {

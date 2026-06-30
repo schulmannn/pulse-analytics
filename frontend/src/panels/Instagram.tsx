@@ -174,9 +174,13 @@ function aggregateOnline(online: IgOnline | undefined) {
 export function Instagram() {
   const { days, range } = usePeriod();
   const timeframe = days === 7 ? 'last_14_days' : days === 90 || days === 0 ? 'last_90_days' : 'last_30_days';
+  // Insights window = selected period (drives the server-side aggregate metrics + their prev window).
+  const insDays = range
+    ? Math.min(90, Math.max(1, Math.ceil((range.to - range.from) / 86400000)))
+    : days && days > 0 ? Math.min(days, 90) : 90;
 
   const profile = useIgProfile();
-  const insights = useIgInsights();
+  const insights = useIgInsights(insDays);
   const posts = useIgPosts(24);
   const breakdowns = useIgBreakdowns(timeframe);
   const online = useIgOnline();
