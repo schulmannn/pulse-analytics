@@ -162,3 +162,16 @@
     font-feature-settings: 'tnum' 1;
   }
 }
+
+/* ── Design governance (Atlavue Refined Technical) — intentional rules, documented so future
+   work doesn't "helpfully" regress them. Type scale + radius live in tailwind.config.js. ──────
+   • Depth = HAIRLINES + z-index ONLY. No box-shadows / blur / glow — tooltips, popovers and
+     modals are borders-only. This is a deliberate "designed, not generated" signal; do not add
+     shadows to make things "pop".
+   • Icons = the lean STROKE-ONLY set (see components/nav-icons). No filled icons, no emoji-as-icons.
+   • Status colours = the utilities `text-verdant` / `text-ember` / `text-status-warn` (+ `bg-*`
+     tints), generated from --brand-* / --status-warn. Use these CLASSES in markup; raw
+     `hsl(var(--brand-*))` is reserved for SVG chart fills / strokes / gradients (CSS classes can't
+     reach SVG paint). verdant / ember = deltas & up/down only; status-warn (amber) = caution /
+     demo / stale data — never the red ember for a non-error caution.
+   • Chart area-gradient opacity scale: peak 1 · mid 0.55 · fade 0 (see BarChart / LineChart stops). */

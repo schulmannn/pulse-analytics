@@ -120,7 +120,7 @@ export function Insights() {
   // Hairline ledger (gap-px over bg-border draws the 1px dividers), matching IgInsights.
   // An odd last cell spans both columns so no empty border-coloured half-row is left behind.
   return (
-    <div className="grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-2">
+    <div className="grid grid-cols-1 gap-px border-t border-border bg-border sm:grid-cols-2">
       {insights.map((ins, i) => (
         <InsightCell
           key={i}
@@ -167,7 +167,7 @@ function InsightCell({ insight, spanFull }: { insight: TgInsight; spanFull?: boo
 
 function InsightsSkeleton() {
   return (
-    <div className="grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-2">
+    <div className="grid grid-cols-1 gap-px border-t border-border bg-border sm:grid-cols-2">
       {Array.from({ length: 4 }).map((_, i) => (
         <div key={i} className="space-y-2 bg-background p-4">
           <Skeleton className="h-3.5 w-5/6" />

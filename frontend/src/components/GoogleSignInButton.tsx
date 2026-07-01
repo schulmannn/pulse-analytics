@@ -81,7 +81,7 @@ export function GoogleSignInButton({ text = 'continue_with' }: { text?: 'continu
 
   return (
     <div className="mt-5">
-      <div className="mb-4 flex items-center gap-3 text-[13px] text-ink3">
+      <div className="mb-4 flex items-center gap-3 text-sm text-ink3">
         <span className="h-px flex-1 bg-border" />
         или
         <span className="h-px flex-1 bg-border" />

@@ -173,7 +173,7 @@ export function HeatmapChartBlock() {
             <div className="grid gap-[2px]" style={{ gridTemplateColumns: '30px repeat(24, minmax(14px, 1fr))' }}>
               <div />
               {Array.from({ length: 24 }).map((_, hr) => (
-                <div key={hr} className="select-none text-center text-[10px] font-medium text-muted-foreground">
+                <div key={hr} className="select-none text-center text-2xs font-medium text-muted-foreground">
                   {hr % 3 === 0 ? `${hr}` : ''}
                 </div>
               ))}
@@ -187,7 +187,7 @@ export function HeatmapChartBlock() {
                   className="grid items-center gap-[2px]"
                   style={{ gridTemplateColumns: '30px repeat(24, minmax(14px, 1fr))' }}
                 >
-                  <div className="select-none text-[11px] font-medium text-muted-foreground">{dayName}</div>
+                  <div className="select-none text-2xs font-medium text-muted-foreground">{dayName}</div>
                   {Array.from({ length: 24 }).map((_, hr) => {
                     const cell = currentRow[hr];
                     if (!cell || cell.n === 0) {

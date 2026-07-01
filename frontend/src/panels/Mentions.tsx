@@ -63,7 +63,7 @@ export function Mentions() {
           <button
             onClick={refresh}
             disabled={refreshing}
-            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+            className="rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
           >
             {refreshing ? 'Поиск…' : 'Загрузить упоминания'}
           </button>
@@ -116,7 +116,7 @@ export function Mentions() {
         <button
           onClick={refresh}
           disabled={refreshing}
-          className="shrink-0 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+          className="shrink-0 rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
         >
           {refreshing ? 'Обновление…' : 'Обновить'}
         </button>
@@ -124,13 +124,13 @@ export function Mentions() {
 
       {/* Живой поиск не удался — архив остаётся виден */}
       {liveError && (
-        <div className="rounded-md border border-destructive/40 bg-destructive/5 px-4 py-2.5 text-sm text-muted-foreground">
+        <div className="rounded border border-destructive/40 bg-destructive/5 px-4 py-2.5 text-sm text-muted-foreground">
           Не удалось обновить: {liveError} Показаны сохранённые данные.
         </div>
       )}
 
       {/* KPI Метрики */}
-      <div className="grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-px border-t border-border bg-border sm:grid-cols-3">
         <div className="bg-background p-5">
           <div className="text-xs tracking-wide text-muted-foreground">Упоминаний</div>
           <div className="mt-2 text-3xl font-medium tabular-nums tracking-tight">{fmt.num(total)}</div>

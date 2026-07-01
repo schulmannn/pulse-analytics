@@ -93,7 +93,7 @@ export function TopPosts() {
       <div className="hidden overflow-x-auto md:block">
         <div className="min-w-[560px]">
           {/* header */}
-          <div className="flex items-center gap-3 border-b border-border pb-2 text-[11px] text-muted-foreground">
+          <div className="flex items-center gap-3 border-b border-border pb-2 text-2xs text-muted-foreground">
             <span className="w-5 shrink-0" />
             <span className="flex-1">Пост</span>
             {COLUMNS.map((c) => {
@@ -110,7 +110,7 @@ export function TopPosts() {
                   )}
                 >
                   {c.label}
-                  <span aria-hidden="true" className={cn('text-[10px]', !active && 'text-ink3/60')}>
+                  <span aria-hidden="true" className={cn('text-2xs', !active && 'text-ink3/60')}>
                     {active ? (sortDir === 'desc' ? '↓' : '↑') : '↕'}
                   </span>
                 </button>
@@ -137,7 +137,7 @@ export function TopPosts() {
                     {title}
                   </span>
                   {reason && (
-                    <span className="mt-0.5 block truncate text-[11px] text-verdant">▲ {reason}</span>
+                    <span className="mt-0.5 block truncate text-2xs text-verdant">▲ {reason}</span>
                   )}
                 </span>
                 {COLUMNS.map((c) => (
@@ -176,7 +176,7 @@ export function TopPosts() {
                 <span className={cn('block truncate text-sm', post.caption ? 'text-foreground' : 'italic text-muted-foreground')}>
                   {title}
                 </span>
-                <span className="mt-0.5 block truncate text-[11px] text-ink2">
+                <span className="mt-0.5 block truncate text-2xs text-ink2">
                   {fmt.short(post.reach)} просмотров · {fmt.short(post.likes)} · ER {post.er != null ? `${post.er.toFixed(1)}%` : '—'}
                 </span>
               </span>

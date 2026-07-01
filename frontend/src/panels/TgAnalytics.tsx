@@ -238,36 +238,36 @@ export function TgAnalytics() {
   return (
     <div className="space-y-6">
       {/* 1) KPI — hairline ledger (gap-px over bg-border draws the 1px dividers) */}
-      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-3 lg:grid-cols-6">
+      <div className="grid grid-cols-2 gap-px border-t border-border bg-border sm:grid-cols-3 lg:grid-cols-6">
         <div className="bg-background p-4">
-          <div className="text-[11px] font-medium tracking-wider text-muted-foreground">Просмотров / пост</div>
+          <div className="text-2xs font-medium tracking-wider text-muted-foreground">Просмотров / пост</div>
           <div className="mt-1 text-xl font-medium tabular-nums">{fmt.short(cur(cs?.views_per_post) ?? vs?.avg_views ?? 0)}</div>
-          {vs?.posts_analyzed ? <div className="mt-1 truncate text-[10px] text-muted-foreground">по {vs.posts_analyzed} постам</div> : null}
+          {vs?.posts_analyzed ? <div className="mt-1 truncate text-2xs text-muted-foreground">по {vs.posts_analyzed} постам</div> : null}
         </div>
         <div className="bg-background p-4">
-          <div className="text-[11px] font-medium tracking-wider text-muted-foreground">Ср. ERV</div>
+          <div className="text-2xs font-medium tracking-wider text-muted-foreground">Ср. ERV</div>
           <div className="mt-1 text-xl font-medium tabular-nums">{avgErv != null ? `${avgErv.toFixed(1)}%` : '—'}</div>
-          <div className="mt-1 truncate text-[10px] text-muted-foreground">вовлечённость на просмотр</div>
+          <div className="mt-1 truncate text-2xs text-muted-foreground">вовлечённость на просмотр</div>
         </div>
         <div className="bg-background p-4">
-          <div className="text-[11px] font-medium tracking-wider text-muted-foreground">Виральность</div>
+          <div className="text-2xs font-medium tracking-wider text-muted-foreground">Виральность</div>
           <div className="mt-1 text-xl font-medium tabular-nums">{avgVir != null ? `${avgVir.toFixed(1)}%` : '—'}</div>
-          <div className="mt-1 truncate text-[10px] text-muted-foreground">репосты / просмотры</div>
+          <div className="mt-1 truncate text-2xs text-muted-foreground">репосты / просмотры</div>
         </div>
         <div className="bg-background p-4">
-          <div className="text-[11px] font-medium tracking-wider text-muted-foreground">Репостов / пост</div>
+          <div className="text-2xs font-medium tracking-wider text-muted-foreground">Репостов / пост</div>
           <div className="mt-1 text-xl font-medium tabular-nums">{cur(cs?.shares_per_post) != null ? fmt.short(cur(cs?.shares_per_post)!) : '—'}</div>
-          {vs?.total_forwards ? <div className="mt-1 truncate text-[10px] text-muted-foreground">{fmt.short(vs.total_forwards)} всего</div> : null}
+          {vs?.total_forwards ? <div className="mt-1 truncate text-2xs text-muted-foreground">{fmt.short(vs.total_forwards)} всего</div> : null}
         </div>
         <div className="bg-background p-4">
-          <div className="text-[11px] font-medium tracking-wider text-muted-foreground">Реакций / пост</div>
+          <div className="text-2xs font-medium tracking-wider text-muted-foreground">Реакций / пост</div>
           <div className="mt-1 text-xl font-medium tabular-nums">{cur(cs?.reactions_per_post) != null ? fmt.short(cur(cs?.reactions_per_post)!) : '—'}</div>
-          {vs?.total_reactions ? <div className="mt-1 truncate text-[10px] text-muted-foreground">{fmt.short(vs.total_reactions)} всего</div> : null}
+          {vs?.total_reactions ? <div className="mt-1 truncate text-2xs text-muted-foreground">{fmt.short(vs.total_reactions)} всего</div> : null}
         </div>
         <div className="bg-background p-4">
-          <div className="text-[11px] font-medium tracking-wider text-muted-foreground">Уведомления вкл.</div>
+          <div className="text-2xs font-medium tracking-wider text-muted-foreground">Уведомления вкл.</div>
           <div className="mt-1 text-xl font-medium tabular-nums">{notifPct != null ? `${notifPct.toFixed(1)}%` : '—'}</div>
-          {notif ? <div className="mt-1 truncate text-[10px] text-muted-foreground">{fmt.short(notif.part ?? 0)} из {fmt.short(notif.total ?? 0)}</div> : null}
+          {notif ? <div className="mt-1 truncate text-2xs text-muted-foreground">{fmt.short(notif.part ?? 0)} из {fmt.short(notif.total ?? 0)}</div> : null}
         </div>
       </div>
 
@@ -314,13 +314,13 @@ export function TgAnalytics() {
           <ChartSection title="Просмотры и репосты">
             <div className="space-y-4">
               <div>
-                <div className="mb-2 text-[11px] font-medium tracking-wider text-muted-foreground">{viewSeries.name || 'Просмотры'}</div>
+                <div className="mb-2 text-2xs font-medium tracking-wider text-muted-foreground">{viewSeries.name || 'Просмотры'}</div>
                 <ExpandableChart title={viewSeries.name || 'Просмотры'}>
                   <LineChart values={viewSeries.values} labels={interLabels(interGroup)} />
                 </ExpandableChart>
               </div>
               <div>
-                <div className="mb-2 text-[11px] font-medium tracking-wider text-muted-foreground">{shareSeries.name || 'Репосты'}</div>
+                <div className="mb-2 text-2xs font-medium tracking-wider text-muted-foreground">{shareSeries.name || 'Репосты'}</div>
                 <ExpandableChart title={shareSeries.name || 'Репосты'}>
                   <LineChart values={shareSeries.values} labels={interLabels(interGroup)} />
                 </ExpandableChart>
@@ -381,13 +381,13 @@ export function TgAnalytics() {
           <ChartSection title="По дням недели">
             <div className="space-y-4">
               <div>
-                <div className="mb-2 text-[11px] font-medium tracking-wider text-muted-foreground">Ср. просмотры</div>
+                <div className="mb-2 text-2xs font-medium tracking-wider text-muted-foreground">Ср. просмотры</div>
                 <ExpandableChart title="Средние просмотры по дням недели">
                   <BarChart values={wdAvgValues} labels={wdLabels} titles={wdAvgValues.map((v, i) => `${wdLabels[i]}: ${fmt.num(v)} ср. просмотров`)} />
                 </ExpandableChart>
               </div>
               <div>
-                <div className="mb-2 text-[11px] font-medium tracking-wider text-muted-foreground">Количество постов</div>
+                <div className="mb-2 text-2xs font-medium tracking-wider text-muted-foreground">Количество постов</div>
                 <ExpandableChart title="Количество постов по дням недели">
                   <BarChart values={wdCountValues} labels={wdLabels} titles={wdCountValues.map((v, i) => `${wdLabels[i]}: ${fmt.num(v)} постов`)} />
                 </ExpandableChart>
@@ -402,22 +402,23 @@ export function TgAnalytics() {
 }
 
 function TgAnalyticsSkeletons() {
+  // Mirror the real render — open KPI ledger + hairline chart sections — so nothing swaps on load.
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+      <div className="grid grid-cols-2 gap-px border-t border-border bg-border sm:grid-cols-3 lg:grid-cols-6">
         {Array.from({ length: 6 }).map((_, i) => (
-          <Card key={i}><CardContent className="space-y-2 p-4">
-            <Skeleton className="h-3 w-2/3" />
-            <Skeleton className="h-6 w-1/2" />
-          </CardContent></Card>
+          <div key={i} className="bg-background p-4">
+            <Skeleton className="h-2.5 w-2/3" />
+            <Skeleton className="mt-2 h-5 w-1/2" />
+          </div>
         ))}
       </div>
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {Array.from({ length: 4 }).map((_, i) => (
-          <Card key={i}><CardContent className="space-y-4 p-5">
-            <Skeleton className="h-4 w-1/4" />
-            <Skeleton className="h-32 w-full" />
-          </CardContent></Card>
+          <div key={i} className="space-y-3">
+            <Skeleton className="h-3 w-1/4" />
+            <Skeleton className="h-40 w-full" />
+          </div>
         ))}
       </div>
     </div>

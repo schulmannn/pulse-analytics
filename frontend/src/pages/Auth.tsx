@@ -12,7 +12,7 @@ const INPUT_CLASS =
   'w-full rounded-[4px] border border-border bg-card px-3.5 py-2.5 text-sm text-foreground placeholder:text-ink3 focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50';
 const BUTTON_CLASS =
   'btn-pill mt-5 w-full bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50';
-const LABEL_CLASS = 'mb-1.5 block text-[13px] font-medium text-ink2';
+const LABEL_CLASS = 'mb-1.5 block text-sm font-medium text-ink2';
 const LINK_CLASS = 'cursor-pointer font-medium text-primary hover:underline';
 
 function errorMessage(error: unknown): string {
@@ -33,11 +33,11 @@ function AuthShell({
     <div className="relative flex min-h-screen items-center justify-center bg-background px-5 py-16 text-foreground">
       <Link to="/" className="absolute left-6 top-6 flex items-center gap-2.5">
         <AtlavueMark className="h-[18px] w-[18px] text-primary" />
-        <span className="text-[17px] font-medium tracking-tight text-foreground">Atlavue</span>
+        <span className="text-lg font-medium tracking-tight text-foreground">Atlavue</span>
       </Link>
 
       <div className="w-full max-w-[380px]">
-        <h1 className="text-[24px] font-medium tracking-tight text-foreground">{title}</h1>
+        <h1 className="text-2xl font-medium tracking-tight text-foreground">{title}</h1>
         {subtitle && <p className="mt-2 text-sm leading-relaxed text-ink2">{subtitle}</p>}
         <div className="mt-6">{children}</div>
       </div>
@@ -63,7 +63,7 @@ function Trust() {
   return (
     <div className="mt-6 space-y-3 border-t border-border pt-5">
       {items.map((it) => (
-        <div key={it.text} className="flex items-center gap-2.5 text-[13px] text-ink2">
+        <div key={it.text} className="flex items-center gap-2.5 text-sm text-ink2">
           <TrustIcon d={it.d} />
           {it.text}
         </div>
@@ -177,7 +177,7 @@ export function LoginPage() {
         <div className="mt-3 flex justify-end">
           <button
             type="button"
-            className="cursor-pointer text-[13px] text-primary hover:underline"
+            className="cursor-pointer text-sm text-primary hover:underline"
             onClick={() => {
               loginMutation.reset();
               setForgotMode(true);

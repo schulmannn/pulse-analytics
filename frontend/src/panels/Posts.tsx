@@ -93,7 +93,7 @@ export function Posts() {
                             className="h-full w-full object-cover"
                           />
                         ) : (
-                          <span className="text-[9px] font-medium text-muted-foreground">Текст</span>
+                          <span className="text-2xs font-medium text-muted-foreground">Текст</span>
                         )}
                       </div>
                     </td>
@@ -105,7 +105,7 @@ export function Posts() {
                         <div className="flex items-center gap-2 text-xs text-muted-foreground">
                           <span>{fmt.date(post.date)}</span>
                           {post.albumSize > 1 && (
-                            <span className="inline-flex items-center rounded bg-secondary px-1.5 py-0.5 text-[10px] font-medium text-secondary-foreground">
+                            <span className="inline-flex items-center rounded bg-secondary px-1.5 py-0.5 text-2xs font-medium text-secondary-foreground">
                               {post.albumSize} фото
                             </span>
                           )}

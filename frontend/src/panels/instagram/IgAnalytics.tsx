@@ -107,7 +107,7 @@ function SubscriberMovement({
   ];
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-px border-t border-border bg-border sm:grid-cols-3">
         {cells.map((c) => (
           <div key={c.label} className="bg-background p-4">
             <div className="text-xs tracking-wide text-muted-foreground">{c.label}</div>

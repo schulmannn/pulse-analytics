@@ -171,7 +171,7 @@ export function KpiDrillDown({ metricKey, posts, subsSeries, total, trend, capti
         <div className="space-y-5 overflow-y-auto p-5">
           {/* Per-day breakdown */}
           <div>
-            <div className="mb-2 text-[11px] font-medium tracking-wide text-muted-foreground">
+            <div className="mb-2 text-2xs font-medium tracking-wide text-muted-foreground">
               {DAY_TITLE[metricKey] ?? 'По дням'}
             </div>
             {metricKey === 'subscribers' ? (
@@ -200,7 +200,7 @@ export function KpiDrillDown({ metricKey, posts, subsSeries, total, trend, capti
           {/* Contributing posts (post-based metrics only) */}
           {field && (
             <div>
-              <div className="mb-2 text-[11px] font-medium tracking-wide text-muted-foreground">
+              <div className="mb-2 text-2xs font-medium tracking-wide text-muted-foreground">
                 Топ постов по {CONTRIB_LABEL[metricKey] ?? 'метрике'}
               </div>
               {contributors.length > 0 ? (
@@ -227,7 +227,7 @@ export function KpiDrillDown({ metricKey, posts, subsSeries, total, trend, capti
                               className="h-9 w-9 shrink-0 rounded object-cover"
                             />
                           ) : (
-                            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded bg-muted text-[9px] text-muted-foreground">
+                            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded bg-muted text-2xs text-muted-foreground">
                               текст
                             </span>
                           )}
@@ -235,7 +235,7 @@ export function KpiDrillDown({ metricKey, posts, subsSeries, total, trend, capti
                           <span className="shrink-0 text-right">
                             <span className="block text-sm font-medium tabular-nums">{fmt.short(value)}</span>
                             {share > 0 && (
-                              <span className="block text-[10px] text-muted-foreground">
+                              <span className="block text-2xs text-muted-foreground">
                                 {share}
                                 {SHARE_LABEL[metricKey] ?? '% периода'}
                               </span>

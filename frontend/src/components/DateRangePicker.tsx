@@ -121,7 +121,7 @@ export function DateRangePicker({ value, onApply, onReset }: Props) {
             key={p.label}
             type="button"
             onClick={p.run}
-            className="rounded-full border border-border px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            className="rounded-full border border-border px-2.5 py-1 text-2xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
             {p.label}
           </button>
@@ -137,7 +137,7 @@ export function DateRangePicker({ value, onApply, onReset }: Props) {
         >
           <Chevron dir="left" />
         </button>
-        <div className="text-[13px] font-medium tabular-nums">
+        <div className="text-sm font-medium tabular-nums">
           {MONTHS[view.getMonth()]} {view.getFullYear()}
         </div>
         <button
@@ -150,7 +150,7 @@ export function DateRangePicker({ value, onApply, onReset }: Props) {
         </button>
       </div>
 
-      <div className="grid grid-cols-7 gap-0.5 pb-1 text-center text-[10px] text-muted-foreground">
+      <div className="grid grid-cols-7 gap-0.5 pb-1 text-center text-2xs text-muted-foreground">
         {WD.map((w) => (
           <div key={w}>{w}</div>
         ))}
@@ -168,7 +168,7 @@ export function DateRangePicker({ value, onApply, onReset }: Props) {
               onClick={() => pickDay(ts)}
               onMouseEnter={() => setHover(ts)}
               className={cn(
-                'flex h-8 items-center justify-center rounded text-[12px] tabular-nums transition-colors',
+                'flex h-8 items-center justify-center rounded text-xs tabular-nums transition-colors',
                 isEdge
                   ? 'bg-primary font-medium text-primary-foreground'
                   : inRange(ts)
@@ -183,7 +183,7 @@ export function DateRangePicker({ value, onApply, onReset }: Props) {
         })}
       </div>
 
-      <div className="mt-3 font-mono text-[11px] tabular-nums text-muted-foreground">
+      <div className="mt-3 font-mono text-2xs tabular-nums text-muted-foreground">
         {from != null ? fmtDate(from) : '—'} → {to != null ? fmtDate(to) : '…'}
       </div>
 

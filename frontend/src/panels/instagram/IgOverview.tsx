@@ -52,7 +52,7 @@ export function IgOverview() {
       <section className="mt-8 space-y-4 border-t border-border pt-8">
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-sm font-medium tracking-wide text-muted-foreground">Топ публикаций</h2>
-          <Link to="/instagram/content" className="shrink-0 text-[13px] font-medium text-primary hover:underline">
+          <Link to="/instagram/content" className="shrink-0 text-sm font-medium text-primary hover:underline">
             Открыть контент →
           </Link>
         </div>

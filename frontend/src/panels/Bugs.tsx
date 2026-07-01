@@ -74,7 +74,7 @@ export function Bugs() {
               placeholder="Опишите проблему или предложение…"
               rows={3}
               disabled={createBugMutation.isPending}
-              className="w-full resize-y rounded-md border bg-background p-2.5 text-sm leading-relaxed focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
+              className="w-full resize-y rounded border bg-background p-2.5 text-sm leading-relaxed focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
             />
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div className="flex items-center gap-3">
@@ -102,7 +102,7 @@ export function Bugs() {
               <button
                 type="submit"
                 disabled={createBugMutation.isPending || !textInput.trim()}
-                className="rounded-md bg-primary px-4 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+                className="rounded bg-primary px-4 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
               >
                 {createBugMutation.isPending ? 'Отправка…' : 'Создать тикет'}
               </button>
@@ -182,9 +182,9 @@ function BugRowCard({ bug, availableStatuses, onDelete }: BugRowCardProps) {
         </div>
 
         <div className="flex flex-col gap-3 border-t border-border/40 pt-2 text-xs sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 font-mono text-[11px] text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 font-mono text-2xs text-muted-foreground">
             <span className="font-medium text-foreground">#{bug.id}</span>
-            <span className={`rounded px-1.5 py-0.5 font-sans text-[10px] font-medium tracking-wide ${currentKindClass}`}>
+            <span className={`rounded px-1.5 py-0.5 font-sans text-2xs font-medium tracking-wide ${currentKindClass}`}>
               {KIND_LABELS[bug.kind ?? ''] || bug.kind}
             </span>
             <span className={`font-sans font-medium ${currentSeverityClass}`}>

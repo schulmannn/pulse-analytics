@@ -50,36 +50,55 @@ being a "wall of 20 charts". D1 + D4 fix the bulk of the "looks templated" feeli
 **Goal / acceptance:** no `text-[Npx]` magic sizes; one radius language (4px + pill); Card reserved
 for forms/modals/floating; skeletons match final layout; status colors documented as tokens.
 
-### D1.1 Type scale (the #1 tell — 9 sizes measured on one screen)
-- [ ] Define a disciplined scale (~6 steps), e.g. `xs 11 · sm 12/13 · base 14 · lg 16 · display 24 · hero 44`; add to Tailwind config or an index.css comment as the canonical scale.
-- [ ] Global sweep: replace every `text-[Npx]` with a scale token. Grep `text-\[` across `frontend/src`.
-- [ ] `panels/Digest.tsx:108` `text-[13px]`→`text-xs`; `:113` `text-[15px]`→`text-sm`.
-- [ ] `panels/Overview.tsx:105` SubscriberGrowth hero `text-3xl`→`text-[44px]` to match Views hero (`panels/KpiGrid.tsx:256`). Both heroes = 44px.
-- [ ] Data-health / SourceStatus / KPI rows: kill inline `text-[13px]`/`text-[10px]`; map to scale (reserve 10px for timestamps/metadata only).
-- [ ] `panels/TgAnalytics.tsx` KPI subtitles (`text-[10px]`): add `leading-tight` so descenders don't collide (or bump to 11px).
+### D1.1 Type scale (the #1 tell — 9 sizes measured on one screen) — ✅ DONE
+Shipped scale (canonical, documented in `tailwind.config.js`): `2xs 11 · xs 12 · sm 14 · base 16 ·
+lg 18 · 2xl 24 · 3xl 30 · hero 44` — 6 primary steps + 2 intermediates (lg, 3xl). Chose the
+**low-shift** variant: keep Tailwind-native px, add only `2xs`(11) + `hero`(44), and fold every magic
+`text-[Npx]` onto the nearest native step (mostly imperceptible +1px up). Preserves the tuned public
+pages. Verified live (demo mode): `.text-hero`=44px, `.text-2xs`=11px, 0 console errors.
+- [x] Disciplined scale defined + two tokens (`2xs`, `hero`) + canonical-scale comment added to `tailwind.config.js`.
+- [x] Global sweep: 97 `text-[Npx]` → scale tokens across 29 files; **0 residual** magic sizes. `pages/Landing.tsx` **exempt** (its 7–11px are a scaled mock-dashboard preview — forcing an 11px floor breaks the miniature; handled in D2).
+- [x] `panels/Digest.tsx:108` `text-[13px]`→`text-sm`; `:113` `text-[15px]`→`text-base` (folded **up** per the uniform rule — the :113 lead is a dominant element, so emphasis tier is correct).
+- [x] `panels/Overview.tsx:105` SubscriberGrowth hero `text-3xl`→`text-hero` (44) to match Views hero (`panels/KpiGrid.tsx:256`, also `text-hero`). Both heroes = 44px — confirmed live.
+- [x] Data-health / SourceStatus / KPI rows: inline `text-[13px]`/`text-[12px]`/`text-[10px]` mapped to scale (13→sm, 12→xs, 10/11→2xs). *(DataHealth label/value inversion is a D2 semantic fix, not a size remap.)*
+- [x] `panels/TgAnalytics.tsx` KPI subtitles `text-[10px]`→`text-2xs` (11px): descender collision resolved by the token's paired `line-height:15px` (no separate `leading-tight` needed).
 
-### D1.2 Radius — one language (4px panels, pill buttons)
-- [ ] `components/ui/card.tsx` Card: `rounded-lg` (8px) → `rounded` (4px). (Verify Tailwind `rounded` maps to `--radius: 0.25rem`.)
-- [ ] Instagram panels/components: replace all `rounded-lg` → `rounded` (Layout.tsx, IgOverview, IgAnalytics, IgPostCard, section wrappers).
-- [ ] `components/Breakdown.tsx:35` `rounded-md` (6px) → `rounded`.
-- [ ] `IgConnectPanel` (`components/instagram/health.tsx:125`) accent button `rounded-lg` → `.btn-pill`.
-- [ ] Consolidate pill usage: DeltaPill / status pills use `.btn-pill` (or a `rounded-pill` util) as single source, not raw `rounded-full`.
+### D1.2 Radius — one language (4px panels, pill buttons) — ✅ DONE
+**Config finding:** `tailwind.config.js` already overrides `borderRadius.lg` → `var(--radius)` = **4px**
+(not Tailwind's default 8px). So `rounded-lg` and `rounded` render **identically** at 4px here — the
+audit's "8px→4px" premise doesn't apply; the radius language was already visually at 4px. The only
+*real* deviation was `rounded-md` (2px). Verified live: base `Card` now `rounded border bg-card`, 0 console errors.
+- [x] `components/ui/card.tsx` Card `rounded-lg` → `rounded` (canonical base; `rounded` = `--radius` = 4px, confirmed).
+- [x] `rounded-md` (2px) → `rounded` (4px) **app-wide** — 19 sites / 10 files (Settings, Mentions, Bugs buttons; ChartTooltip, InfoTooltip, SectionNav, skeleton, Connect, Breakdown). Kills every orphan 2px radius → everything is now 4px or pill.
+- [x] `components/Breakdown.tsx:35` `rounded-md` → `rounded` (covered by the sweep above; was 2px here, not 6px).
+- [x] `IgConnectPanel` (`components/instagram/health.tsx:125`) accent CTA `rounded-lg` → `.btn-pill` (matches the Export/Apply pill-CTA language).
+- [x] **Decided — skip** `rounded-full`→`.btn-pill` consolidation: `.btn-pill` is button-named and the `rounded-full` sites are all legit circles/dots/avatars/progress-bars/status-chips — semantically correct as-is; converting is a visual no-op with a naming mismatch.
+- [~] IG `rounded-lg` → `rounded` on ledger-box wrappers + sort toggles: **folded into D1.3/D2** (those sprints rewrite the `grid gap-px … bg-border` wrappers → hairline, and turn IG toggles → pill), so the naming unifies there as a byproduct instead of churning the same lines twice. Deferred (not skipped): modal `rounded-2xl` → D1.3 (Card/modal reservation); avatar `rounded-xl` = intentional soft-square (leave).
 
-### D1.3 Hairlines, not cards (the app violates its own principle — ~288 Card usages)
-- [ ] **Skeletons must match final layout.** `panels/KpiGrid.tsx:357–378` KpiSkeletons use Card+gap-4; real render is hairline ledger (gap-px). Rebuild skeleton as `grid gap-px border-t border-border bg-border` cells on `bg-background` (kills the "system swap on load" flash).
-- [ ] `panels/TgAnalytics.tsx:241` — KPI grid wrapped in `rounded-lg border bg-border` card box → remove wrapper, let the `gap-px` grid sit open on paper.
-- [ ] `panels/TgAnalytics.tsx:409–420` drill-down KPI Cards → hairline grid.
-- [ ] `components/instagram/content.tsx` IgPostCard: drop Card wrapper → `border-t border-border pt-4` rows; move rank/type badges into a header row (no positioned overlays).
-- [ ] Remove decorative tint fills (border-only): DemoBanner (`DashboardLayout`), Settings/destructive cards → `border-*/30` only, no `bg-*/[0.04]`.
-- [ ] `pages/Landing.tsx` CtaBand `bg-blue-tint` (a data-viz status token) → `bg-primary/[0.04]` (don't hijack the status palette for marketing).
-- [ ] Follow-up audit: reserve `Card` for forms (Settings), modals (KpiDrillDown/PostModal), floating (popovers). Everything tabular/grid → `gap-px` hairline pattern.
+### D1.3 Hairlines, not cards (the app violates its own principle — ~288 Card usages) — 🚧 IN PROGRESS
+- [x] **Skeletons must match final layout.** `panels/KpiGrid.tsx` `KpiSkeletons` rebuilt: was Card+gap-4; now mirrors the real render — hero block + `grid gap-px border-t border-border bg-border` ledger with `bg-background` cells. Kills the "card → ledger swap on load" flash.
+- [x] `panels/TgAnalytics.tsx:241` — KPI grid boxed-ledger (`overflow-hidden rounded-lg border bg-border`) → **open ledger** (`border-t border-border bg-border` + `gap-px`). Verified live: border-top 1px only, no box border/radius; `bg-border` draws internal hairlines through the gaps.
+- [~] Remove decorative tint fills (border-only): **DemoBanner** (`DashboardLayout`) + **Overview stale-data banner** done (dropped `bg-*/[0.04]`, kept border + text/dot color; `rounded-lg`→`rounded`). *Deferred to D2 (per-screen): Settings/Mentions destructive boxes, `instagram/Layout.tsx:62` ok/error notice — those are functional status feedback, handled with their screens.*
+- [x] **Rolled the open-ledger to the sibling boxed-ledgers** — 10 sites / 8 files (`Admin:44`, `Insights:123/170`, `Mentions:133`, `instagram/IgAudience:33`, `instagram/IgAnalytics:110`, `instagram/content:124/354`, `instagram/insights:22`). ⚠️ Substring sweep over-reached into `DashboardLayout` `PlatformNav` (the Telegram/Instagram **switcher**) — caught via live inspect and **reverted to a bounded segmented control** (`overflow-hidden rounded border`), since a switcher needs the box, not an open ledger.
+- [x] `panels/TgAnalytics.tsx:409–420` (the `TgAnalyticsSkeletons` Card grid) → hairline: rebuilt to mirror the open KPI ledger + flat chart-section skeletons.
+- [~] `components/instagram/content.tsx` IgPostCard: **deferred to D2 IG pass** — it's a thumbnail-grid media card (image + overlaid rank/type badges); de-carding it to `border-t` rows is a grid→list restructure that needs live iteration, done cohesively with the rest of the IG polish.
+- [~] `pages/Landing.tsx` CtaBand `bg-blue-tint` → `bg-primary/[0.04]` — **folded into the D2 Landing pass** (keep Landing chrome changes cohesive).
+- [~] Follow-up Card-reservation audit: **remaining non-reserved `Card` usages = empty/error states** (KpiGrid:46, TgAnalytics:66, content.tsx ×6, Bugs, Settings) → these become the **D2 standard empty-state pattern** (`rounded border border-dashed`). Card stays reserved for forms/modals/popovers.
 
-### D1.4 Token governance (colors, gradients, spacing)
-- [ ] Make status colors explicit tokens: add `@layer utilities` exporting `.text-verdant`/`.text-ember`/`.text-status-warn` = `hsl(var(--brand-*))`; stop scattering naked class names / inline hsl in InsightCell dots (`panels/Insights.tsx`), PctTag (`panels/Posts.tsx`), DataHealth.
-- [ ] Story expiry warning `text-ember` → `text-status-warn` (amber caution, not red alert) — `components/instagram/content.tsx:352`.
-- [ ] Document chart gradient opacity scale in index.css (peak 1 / mid 0.55 / fade 0), optionally as `--chart-gradient-*` vars.
-- [ ] Spacing: adopt an 8px-baseline scale (4/8/12/16/24); fix cramped rhythms (Digest sections `border-t pt-4`→`mt-3 border-t pt-3`; Settings `space-y-8`→`space-y-6`).
-- [ ] **Document as intentional (no code):** zero-shadow borders-only depth; lean stroke-only icon set.
+### D1.4 Token governance (colors, gradients, spacing) — ✅ DONE
+- [x] Status colours: `.text-verdant`/`.text-ember`/`.text-status-warn` (+ `bg-*` tints) are **already generated** from `tailwind.config.js` colours — documented in `index.css` as the canonical status utilities. Raw `hsl(var(--brand-*))` is **legitimately** reserved for SVG chart paint (fills/strokes/gradients — CSS classes can't reach SVG). *(Hashtags lift color + heatmap best-slot border stay inline → D3 chart-craft.)*
+- [x] Story-expiry warning `text-ember` → `text-status-warn` (amber caution, not red alert) — `components/instagram/content.tsx:352`.
+- [x] Chart area-gradient opacity scale documented in `index.css` (peak 1 · mid 0.55 · fade 0).
+- [x] Spacing: `Settings` `space-y-8` → `space-y-6`. *(Digest micro-rhythm + `Posts`/`instagram/Layout` `space-y-8` left as-is — subjective, shipped fine; revisit per-screen in D2 if it reads cramped.)*
+- [x] **Documented as intentional** in `index.css`: zero-shadow borders-only depth + lean stroke-only icon set (so future work doesn't add shadows/emoji).
+
+---
+
+> **Sprint D1 — ✅ COMPLETE** (uncommitted). Foundation done: one type ladder (11–44, no magic px),
+> one radius language (4px / pill), hairlines-not-cards (skeletons match, boxed→open ledgers,
+> decorative tints removed), governed status tokens + documented intentional patterns. Verified
+> live in demo mode; build + 81 tests green. Deferred into D2 (cohesive per-screen work): IgPostCard
+> de-card, empty-state Card→hairline pattern, Landing CtaBand tint, Settings/Mentions destructive tints.
 
 ---
 

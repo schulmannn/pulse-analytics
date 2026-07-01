@@ -116,7 +116,7 @@ export function LineChart({ values, labels, titles, yMin, yMax, height }: LineCh
 
         {/* Y-axis labels */}
         {yGridValues.map((yVal, idx) => (
-          <text key={idx} x={padX + 4} y={yGridPositions[idx] + (idx === 0 ? 12 : idx === 2 ? -4 : 4)} className="pointer-events-none select-none fill-muted-foreground text-[11px] font-medium">
+          <text key={idx} x={padX + 4} y={yGridPositions[idx] + (idx === 0 ? 12 : idx === 2 ? -4 : 4)} className="pointer-events-none select-none fill-muted-foreground text-2xs font-medium">
             {fmt.short(yVal)}
           </text>
         ))}
@@ -133,7 +133,7 @@ export function LineChart({ values, labels, titles, yMin, yMax, height }: LineCh
 
       {/* X-axis labels */}
       {labels && labels.length > 0 && (
-        <div className="mt-1.5 flex select-none justify-between px-1 text-[11px] font-medium text-muted-foreground">
+        <div className="mt-1.5 flex select-none justify-between px-1 text-2xs font-medium text-muted-foreground">
           <span>{labels[0]}</span>
           <span>{labels[Math.floor(labels.length / 2)]}</span>
           <span>{labels[labels.length - 1]}</span>

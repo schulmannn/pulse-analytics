@@ -103,7 +103,7 @@ export function InfoTooltip({ title, children, className }: InfoTooltipProps) {
             onMouseEnter={openNow}
             onMouseLeave={scheduleClose}
             style={{ position: 'fixed', top: pos.top, left: pos.left, width: POP_WIDTH }}
-            className="z-50 rounded-md border bg-popover p-2.5 text-left text-xs font-normal leading-relaxed text-popover-foreground"
+            className="z-50 rounded border bg-popover p-2.5 text-left text-xs font-normal leading-relaxed text-popover-foreground"
           >
             <span className="mb-1 block font-medium text-foreground">{title}</span>
             {children}
@@ -121,7 +121,7 @@ export function MetricInfo({ def }: { def: MetricDef }) {
       <span className="block space-y-1 text-muted-foreground">
         {def.formula && <span className="block">{def.formula}</span>}
         {def.included && <span className="block">{def.included}</span>}
-        {def.source && <span className="block text-[11px] opacity-80">Источник: {def.source}</span>}
+        {def.source && <span className="block text-2xs opacity-80">Источник: {def.source}</span>}
       </span>
     </InfoTooltip>
   );

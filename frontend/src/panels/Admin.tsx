@@ -41,7 +41,7 @@ export function Admin() {
       {users.length === 0 ? (
         <div className="py-6 text-center text-sm text-muted-foreground">Пользователи не найдены.</div>
       ) : (
-        <div className="grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-border bg-border">
+        <div className="grid grid-cols-1 gap-px border-t border-border bg-border">
           {users.map((user) => (
             <UserRowCard key={user.id} user={user} availableRoles={roles} availableStatuses={statuses} isMe={me === user.id} />
           ))}
@@ -74,7 +74,7 @@ function UserRowCard({ user, availableRoles, availableStatuses, isMe }: UserRowC
               {user.email || <span className="italic text-muted-foreground">без email</span>}
             </span>
             {isMe && (
-              <span className="select-none rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">(вы)</span>
+              <span className="select-none rounded bg-primary/10 px-1.5 py-0.5 text-2xs font-medium text-primary">(вы)</span>
             )}
           </div>
           <div className="font-mono text-xs text-muted-foreground">

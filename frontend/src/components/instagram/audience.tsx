@@ -74,7 +74,7 @@ export function AudienceBlock({ breakdowns, followers }: { breakdowns: IgBreakdo
         </ChartSection>
       </div>
       {coverage < 0.98 && (
-        <p className="px-1 text-[11px] text-muted-foreground/70">
+        <p className="px-1 text-2xs text-muted-foreground/70">
           Охвачено ≈{Math.round(coverage * 100)}% аудитории — Instagram показывает только топ-сегменты.
         </p>
       )}
@@ -107,14 +107,14 @@ export function BestTimeHeatmap({ online }: { online: IgOnline | undefined }) {
           <div className="grid gap-[2px]" style={{ gridTemplateColumns: '30px repeat(24, minmax(14px, 1fr))' }}>
             <div />
             {Array.from({ length: 24 }).map((_, h) => (
-              <div key={h} className="select-none text-center text-[10px] font-medium text-muted-foreground">
+              <div key={h} className="select-none text-center text-2xs font-medium text-muted-foreground">
                 {h % 3 === 0 ? `${h}` : ''}
               </div>
             ))}
           </div>
           {DAY_NAMES.map((name, w) => (
             <div key={w} className="grid items-center gap-[2px]" style={{ gridTemplateColumns: '30px repeat(24, minmax(14px, 1fr))' }}>
-              <div className="select-none text-[11px] font-medium text-muted-foreground">{name}</div>
+              <div className="select-none text-2xs font-medium text-muted-foreground">{name}</div>
               {Array.from({ length: 24 }).map((_, h) => {
                 const v = grid[w][h];
                 const opacity = max > 0 ? Math.max(0.06, v / max) : 0;

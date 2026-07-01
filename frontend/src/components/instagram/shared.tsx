@@ -108,7 +108,7 @@ export function KpiHero({
 export function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="pt-2">
-      <div className="text-[10px] font-medium tracking-wider text-muted-foreground">{label}</div>
+      <div className="text-2xs font-medium tracking-wider text-muted-foreground">{label}</div>
       <div className="mt-0.5 text-sm font-medium tabular-nums">{value}</div>
     </div>
   );

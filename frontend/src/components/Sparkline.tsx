@@ -159,7 +159,7 @@ export function Sparkline({
       </div>
 
       {interactive && caption !== undefined && (
-        <div className="mt-1 truncate text-[10px] tabular-nums text-muted-foreground">{readout}</div>
+        <div className="mt-1 truncate text-2xs tabular-nums text-muted-foreground">{readout}</div>
       )}
     </div>
   );

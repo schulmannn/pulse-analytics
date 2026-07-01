@@ -36,7 +36,7 @@ function ChartSection({ title, children }: { title: string; children: ReactNode 
 
 export function Settings() {
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <div>
         <h2 className="text-xl font-medium tracking-tight">Настройки</h2>
       </div>
@@ -70,7 +70,7 @@ function InstagramSection() {
                 <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-verdant" />
                 <span className="text-sm font-medium text-foreground">@{s.username || s.ig_user_id}</span>
               </div>
-              <div className="font-mono text-[11px] text-muted-foreground">
+              <div className="font-mono text-2xs text-muted-foreground">
                 Подключён: {s.connected_at ? fmt.date(s.connected_at) : '—'}
                 {s.token_expires_at ? ` · токен до ${fmt.date(s.token_expires_at)}` : ''}
               </div>
@@ -81,7 +81,7 @@ function InstagramSection() {
                 if (window.confirm('Отключить Instagram от этого канала?')) disconnect.mutate();
               }}
               disabled={disconnect.isPending}
-              className="shrink-0 rounded-md border border-destructive/20 px-3 py-1.5 text-xs font-medium text-destructive transition-colors hover:bg-destructive/5 disabled:opacity-50"
+              className="shrink-0 rounded border border-destructive/20 px-3 py-1.5 text-xs font-medium text-destructive transition-colors hover:bg-destructive/5 disabled:opacity-50"
             >
               {disconnect.isPending ? 'Отключение…' : 'Отключить'}
             </button>
@@ -99,7 +99,7 @@ function InstagramSection() {
               type="button"
               onClick={() => connect.mutate()}
               disabled={connect.isPending || !s?.server_ready}
-              className="shrink-0 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-60"
+              className="shrink-0 rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-60"
             >
               {connect.isPending ? 'Открываю Instagram…' : 'Подключить Instagram'}
             </button>
@@ -149,7 +149,7 @@ function ProfileSection() {
           ) : (
             <>
               <div className="flex items-center gap-2">
-                <label className="cursor-pointer rounded-md border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted">
+                <label className="cursor-pointer rounded border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted">
                   {updateAvatar.isPending ? 'Загрузка…' : avatar ? 'Сменить фото' : 'Загрузить фото'}
                   <input
                     type="file"
@@ -164,14 +164,14 @@ function ProfileSection() {
                     type="button"
                     onClick={() => removeAvatar.mutate()}
                     disabled={removeAvatar.isPending}
-                    className="rounded-md border border-destructive/20 px-3 py-1.5 text-xs font-medium text-destructive transition-colors hover:bg-destructive/5 disabled:opacity-50"
+                    className="rounded border border-destructive/20 px-3 py-1.5 text-xs font-medium text-destructive transition-colors hover:bg-destructive/5 disabled:opacity-50"
                   >
                     Удалить
                   </button>
                 )}
               </div>
               {err && <p className="text-xs font-medium text-destructive">{err}</p>}
-              <p className="text-[11px] text-muted-foreground">PNG, JPEG или WebP — уменьшим до 256 px.</p>
+              <p className="text-2xs text-muted-foreground">PNG, JPEG или WebP — уменьшим до 256 px.</p>
             </>
           )}
         </div>
@@ -252,13 +252,13 @@ function ChannelsSettings() {
               onChange={(e) => setUsernameInput(e.target.value)}
               placeholder="channel_username"
               disabled={createChannelMutation.isPending}
-              className="w-full rounded-md border bg-background py-2 pl-7 pr-3 font-mono text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+              className="w-full rounded border bg-background py-2 pl-7 pr-3 font-mono text-sm focus:outline-none focus:ring-1 focus:ring-primary"
             />
           </div>
           <button
             type="submit"
             disabled={createChannelMutation.isPending || !usernameInput.trim()}
-            className="shrink-0 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+            className="shrink-0 rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
           >
             {createChannelMutation.isPending ? 'Добавление…' : 'Подключить'}
           </button>
@@ -285,7 +285,7 @@ function ChannelsSettings() {
                         <span className="text-sm font-medium text-foreground">{displayTitle}</span>
                         {channel.username && <span className="font-mono text-xs text-muted-foreground">@{channel.username}</span>}
                       </div>
-                      <div className="font-mono text-[11px] text-muted-foreground">
+                      <div className="font-mono text-2xs text-muted-foreground">
                         UID: {channel.id}
                         {channel.owner_uid ? ` · Owner: ${channel.owner_uid}` : ''}
                       </div>
@@ -293,7 +293,7 @@ function ChannelsSettings() {
                     </div>
                     <div className="flex shrink-0 items-center gap-2 self-end sm:self-auto">
                       {isCentral ? (
-                        <span className="inline-flex select-none items-center rounded bg-primary/10 px-2 py-0.5 text-[11px] font-medium tracking-wide text-primary">
+                        <span className="inline-flex select-none items-center rounded bg-primary/10 px-2 py-0.5 text-2xs font-medium tracking-wide text-primary">
                           central
                         </span>
                       ) : (
@@ -379,12 +379,12 @@ function ChannelKeysPanel({ channelId }: { channelId: number }) {
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-baseline gap-3">
           <h4 className="text-xs font-medium tracking-wider text-muted-foreground">Ключи внешних коллекторов</h4>
-          <Link to="/connect" className="text-[11px] text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary">Что делать с ключом? →</Link>
+          <Link to="/connect" className="text-2xs text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary">Что делать с ключом? →</Link>
         </div>
         <button
           onClick={handleCreateKey}
           disabled={createKeyMutation.isPending}
-          className="rounded bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+          className="rounded bg-primary px-2.5 py-1 text-2xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
         >
           {createKeyMutation.isPending ? 'Генерация…' : 'Создать ключ'}
         </button>
@@ -398,12 +398,12 @@ function ChannelKeysPanel({ channelId }: { channelId: number }) {
               <span className="flex-1 select-all pr-16">{oneTimeKey}</span>
               <button
                 onClick={() => handleCopy(oneTimeKey)}
-                className="absolute right-2 top-1.5 rounded border bg-background px-2 py-1 font-sans text-[10px] font-medium transition-colors hover:bg-secondary"
+                className="absolute right-2 top-1.5 rounded border bg-background px-2 py-1 font-sans text-2xs font-medium transition-colors hover:bg-secondary"
               >
                 {copied ? 'Скопировано' : 'Копировать'}
               </button>
             </div>
-            <div className="text-[11px] leading-normal text-muted-foreground">
+            <div className="text-2xs leading-normal text-muted-foreground">
               Ingest URL: <code className="rounded bg-muted px-1 py-0.5 font-mono text-foreground">{ingestUrl}</code>
             </div>
           </CardContent>
@@ -421,19 +421,19 @@ function ChannelKeysPanel({ channelId }: { channelId: number }) {
             >
               <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
                 <span className="font-medium text-foreground">{k.key_prefix}…</span>
-                <span className="font-sans text-[11px] text-muted-foreground">[{k.label || 'коллектор'}]</span>
-                {k.last_used_at && <span className="font-sans text-[10px] text-muted-foreground">использован: {fmt.date(k.last_used_at)}</span>}
+                <span className="font-sans text-2xs text-muted-foreground">[{k.label || 'коллектор'}]</span>
+                {k.last_used_at && <span className="font-sans text-2xs text-muted-foreground">использован: {fmt.date(k.last_used_at)}</span>}
               </div>
               <div>
                 {k.revoked ? (
-                  <span className="font-sans text-[11px] italic text-muted-foreground">отозван</span>
+                  <span className="font-sans text-2xs italic text-muted-foreground">отозван</span>
                 ) : (
                   <button
                     onClick={() => {
                       if (window.confirm('Отозвать ключ? Коллектор потеряет доступ.')) revokeKeyMutation.mutate(k.id);
                     }}
                     disabled={revokeKeyMutation.isPending}
-                    className="font-sans text-[11px] text-destructive hover:underline disabled:opacity-50"
+                    className="font-sans text-2xs text-destructive hover:underline disabled:opacity-50"
                   >
                     отозвать
                   </button>

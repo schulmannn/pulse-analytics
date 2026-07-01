@@ -30,7 +30,7 @@ export function IgAudience() {
         ) : (
           <div className="space-y-4">
             {hasViews && (
-              <div className="grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-px border-t border-border bg-border sm:grid-cols-2">
                 <KpiCard label="Визиты профиля" value={fmt.short(profileViews.cur)} trend={pairDelta(profileViews)} hint="за период" />
                 <KpiCard label="Клики по кнопкам контакта" value={fmt.short(contactTotal)} hint="сайт · почта · звонок" />
               </div>

@@ -32,7 +32,7 @@ export function Breakdown({ items }: BreakdownProps) {
         return (
           <div
             key={i}
-            className="relative flex items-center justify-between overflow-hidden rounded-md p-2"
+            className="relative flex items-center justify-between overflow-hidden rounded p-2"
           >
             <div
               className="absolute bottom-0 left-0 top-0 rounded-sm transition-all"

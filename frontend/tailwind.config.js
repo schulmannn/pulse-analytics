@@ -12,6 +12,21 @@ export default {
         sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
         mono: ['Roboto Mono', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
       },
+      // Canonical type scale ("Atlavue Refined Technical") — ONE ladder, no magic `text-[Npx]`.
+      // Hierarchy comes from size + ink shade, not weight (we ship only 400/500). Keep ≲4 steps on
+      // a single screen. Native Tailwind steps are left untouched; we add only the two ends (2xs, hero).
+      //   text-2xs  11 — meta: timestamps · API/collector status · axis ticks · micro-labels
+      //   text-xs   12 — caption: sublabels · secondary muted · table meta            (native)
+      //   text-sm   14 — body: default text · table cells · most UI                   (native)
+      //   text-base 16 — emphasis: channel/brand name · card titles · section leads   (native)
+      //   text-lg   18 — sub-heading  [intermediate — use sparingly, don't stack]     (native)
+      //   text-2xl  24 — title: page & modal headings                                 (native)
+      //   text-3xl  30 — secondary metric [intermediate — Mentions / IG KPI numbers]  (native)
+      //   text-hero 44 — primary KPI hero (Views · Subscribers)
+      fontSize: {
+        '2xs': ['0.6875rem', { lineHeight: '0.9375rem' }],
+        hero: ['2.75rem', { lineHeight: '1' }],
+      },
       colors: {
         border: 'hsl(var(--border))',
         input: 'hsl(var(--input))',

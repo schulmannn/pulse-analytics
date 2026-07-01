@@ -253,7 +253,7 @@ function FeaturedKpi({ label, value, trend, caption, spark, info, onDrill }: Fea
           shape as the Instagram hero. The old side-by-side layout pushed the chart to the far right
           on wide screens (justify-between), leaving it visually unanchored. */}
       <div className="mt-2 flex items-baseline gap-2.5">
-        <DrillValue label={label} onDrill={onDrill} className="text-[44px] font-medium leading-none tabular-nums tracking-tight">
+        <DrillValue label={label} onDrill={onDrill} className="text-hero font-medium leading-none tabular-nums tracking-tight">
           {num}
           {unit ? <span className="text-2xl font-medium text-muted-foreground">{unit}</span> : null}
         </DrillValue>
@@ -332,7 +332,7 @@ function StatTile({ label, value, trend, deltaText, info, onDrill }: StatTilePro
     trend?.dir === 'up' ? 'text-verdant' : trend?.dir === 'down' ? 'text-ember' : 'text-muted-foreground';
   return (
     <div {...cell}>
-      <div className="flex items-center gap-1 text-[11px] tracking-wide text-muted-foreground">
+      <div className="flex items-center gap-1 text-2xs tracking-wide text-muted-foreground">
         <span className="truncate">{label}</span>
         {info && <MetricInfo def={info} />}
       </div>
@@ -352,28 +352,23 @@ function StatTile({ label, value, trend, deltaText, info, onDrill }: StatTilePro
 }
 
 function KpiSkeletons() {
+  // Mirror the real render exactly — hero + hairline ledger — so nothing reflows or swaps
+  // "card → ledger" when the data lands (the load flash the audit flagged).
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        {Array.from({ length: 2 }).map((_, i) => (
-          <Card key={i}>
-            <CardContent className="p-5">
-              <Skeleton className="h-3 w-2/5" />
-              <Skeleton className="mt-3 h-9 w-1/2" />
-              <Skeleton className="mt-4 h-12 w-full" />
-            </CardContent>
-          </Card>
-        ))}
+    <div className="space-y-5">
+      {/* HERO */}
+      <div>
+        <Skeleton className="h-3 w-28" />
+        <Skeleton className="mt-2 h-11 w-40" />
+        <Skeleton className="mt-4 h-16 w-full max-w-2xl" />
       </div>
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      {/* LEDGER — same scaffold (border-t / gap-px / bg-border cells on paper) as the live grid */}
+      <div className="grid grid-cols-2 gap-px border-t border-border bg-border lg:grid-cols-4">
         {Array.from({ length: 4 }).map((_, i) => (
-          <Card key={i}>
-            <CardContent className="p-4">
-              <Skeleton className="h-3 w-3/5" />
-              <Skeleton className="mt-2 h-7 w-2/3" />
-              <Skeleton className="mt-3 h-6 w-full" />
-            </CardContent>
-          </Card>
+          <div key={i} className="bg-background p-4">
+            <Skeleton className="h-2.5 w-16" />
+            <Skeleton className="mt-2 h-6 w-20" />
+          </div>
         ))}
       </div>
     </div>

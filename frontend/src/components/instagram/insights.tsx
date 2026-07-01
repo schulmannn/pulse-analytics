@@ -19,7 +19,7 @@ export function InsightsBlock({ insights, limit }: { insights: IgInsight[]; limi
   }
   const dot = (t: IgInsight['tone']) => (t === 'up' ? 'bg-verdant' : t === 'down' ? 'bg-ember' : 'bg-primary');
   return (
-    <div className="grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-2">
+    <div className="grid grid-cols-1 gap-px border-t border-border bg-border sm:grid-cols-2">
       {list.map((ins, i) => (
         <div key={i} className="flex items-start gap-3 bg-background p-4">
           <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${dot(ins.tone)}`} />
@@ -28,7 +28,7 @@ export function InsightsBlock({ insights, limit }: { insights: IgInsight[]; limi
             {ins.evidence && <p className="mt-1 text-xs tabular-nums text-muted-foreground">{ins.evidence}</p>}
             {/* Surface confidence only when it's a caveat — a quiet "мало данных", never a boast. */}
             {ins.confidence === 'low' && (
-              <span className="mt-2 inline-block rounded-full bg-status-warn/15 px-1.5 py-0.5 text-[10px] font-medium text-status-warn">
+              <span className="mt-2 inline-block rounded-full bg-status-warn/15 px-1.5 py-0.5 text-2xs font-medium text-status-warn">
                 мало данных
               </span>
             )}

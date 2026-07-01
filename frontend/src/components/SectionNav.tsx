@@ -52,7 +52,7 @@ export function SectionNav({ sections }: { sections: readonly Section[] }) {
                 className={cn(
                   // Editorial underline tab: an indicator bar marks the active section instead of
                   // a heavy filled pill, so the active blue reads as an accent, not a button.
-                  'relative shrink-0 rounded-md px-3 py-1.5 text-sm font-medium transition-colors focus-visible:ring-inset focus-visible:ring-offset-0',
+                  'relative shrink-0 rounded px-3 py-1.5 text-sm font-medium transition-colors focus-visible:ring-inset focus-visible:ring-offset-0',
                   isActive ? 'text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground',
                 )}
               >

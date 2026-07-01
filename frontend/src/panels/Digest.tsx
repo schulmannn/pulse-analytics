@@ -105,12 +105,12 @@ export function Digest() {
 
   return (
     <div>
-      <div className="text-[13px] font-medium text-ink3">Инсайт</div>
+      <div className="text-sm font-medium text-ink3">Инсайт</div>
       <div className="mt-3 space-y-4">
         {/* INSIGHT — что произошло (доминирует) */}
         <div>
           <TierLabel>Итог</TierLabel>
-          <p className="mt-1.5 text-[15px] font-medium leading-relaxed text-foreground">{insightLead}</p>
+          <p className="mt-1.5 text-base font-medium leading-relaxed text-foreground">{insightLead}</p>
         </div>
 
         {/* EVIDENCE — где доказательство */}
@@ -151,7 +151,7 @@ export function Digest() {
 /** Tier marker for the summary — a neutral hairline dot + label (no decorative colour per the DS). */
 function TierLabel({ children }: { children: ReactNode }) {
   return (
-    <div className="flex items-center gap-1.5 text-[11px] font-medium tracking-wide text-muted-foreground">
+    <div className="flex items-center gap-1.5 text-2xs font-medium tracking-wide text-muted-foreground">
       <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-ink3/60" />
       {children}
     </div>

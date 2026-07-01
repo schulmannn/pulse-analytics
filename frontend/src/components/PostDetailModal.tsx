@@ -16,7 +16,7 @@ interface PostDetailModalProps {
 function Stat({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (
     <div className="rounded-lg bg-muted/40 p-3">
-      <div className="text-[11px] tracking-wide text-muted-foreground">{label}</div>
+      <div className="text-2xs tracking-wide text-muted-foreground">{label}</div>
       <div className={`mt-0.5 text-lg font-medium tabular-nums ${accent ? 'text-primary' : ''}`}>
         {value}
       </div>
@@ -130,7 +130,7 @@ export function PostDetailModal({ post, rank, reason, onClose }: PostDetailModal
 
           {post.reactionsDetail.length > 0 && (
             <div>
-              <div className="mb-1.5 text-[11px] tracking-wide text-muted-foreground">Реакции</div>
+              <div className="mb-1.5 text-2xs tracking-wide text-muted-foreground">Реакции</div>
               <div className="flex flex-wrap gap-1.5">
                 {post.reactionsDetail.map((r, i) => (
                   <span

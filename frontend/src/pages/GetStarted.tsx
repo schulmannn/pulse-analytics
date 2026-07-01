@@ -79,7 +79,7 @@ export function GetStarted() {
 
       <div className="mt-12 w-full border-t border-border pt-5">
         <p className="text-xs text-muted-foreground">Нужна помощь с настройкой?</p>
-        <div className="mt-2 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-[13px]">
+        <div className="mt-2 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-sm">
           <button
             type="button"
             onClick={() => navigate('/connect')}

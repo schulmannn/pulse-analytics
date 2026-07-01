@@ -33,7 +33,7 @@ function StatusRow({
   monoSuffix?: string;
 }) {
   return (
-    <span className={cn('flex min-w-0 items-center gap-1.5', compact ? 'text-xs' : 'text-[13px]')}>
+    <span className={cn('flex min-w-0 items-center gap-1.5', compact ? 'text-xs' : 'text-sm')}>
       <span aria-hidden="true" className={cn('h-2 w-2 shrink-0 rounded-full', DOT[tone])} />
       <span className={cn('min-w-0 break-words', TEXT[tone])}>
         {text}

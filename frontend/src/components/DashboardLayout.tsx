@@ -156,13 +156,13 @@ function DemoBanner() {
   const { demo, exitDemo } = useDemo();
   if (!demo) return null;
   return (
-    <div className="mb-5 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-primary/30 bg-primary/[0.04] px-4 py-2.5 text-sm">
+    <div className="mb-5 flex flex-wrap items-center gap-x-3 gap-y-2 rounded border border-primary/30 px-4 py-2.5 text-sm">
       <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
       <span className="text-foreground">Демо-режим — данные примерные, для ознакомления.</span>
       <button
         type="button"
         onClick={exitDemo}
-        className="ml-auto shrink-0 rounded-md border border-border bg-background px-3 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+        className="ml-auto shrink-0 rounded border border-border bg-background px-3 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted"
       >
         Выйти из демо
       </button>
@@ -219,7 +219,7 @@ function Sidebar() {
           <span className="flex h-8 w-8 shrink-0 items-center justify-center text-primary">
             <AtlavueMark className="h-6 w-6" />
           </span>
-          <span className={cn('flex-1 whitespace-nowrap text-[15px] font-medium tracking-tight', rail && REVEAL_BLOCK)}>
+          <span className={cn('flex-1 whitespace-nowrap text-base font-medium tracking-tight', rail && REVEAL_BLOCK)}>
             Atlavue
           </span>
         </div>
@@ -232,7 +232,7 @@ function Sidebar() {
           {/* Источник данных — контекст-переключатель (сегмент в строку, как на мобайле), не пункт меню. */}
           <p
             className={cn(
-              'px-3 pb-1.5 text-[11px] font-medium tracking-wider text-muted-foreground',
+              'px-3 pb-1.5 text-2xs font-medium tracking-wider text-muted-foreground',
               rail && 'whitespace-nowrap',
               rail && REVEAL_BLOCK,
             )}
@@ -270,7 +270,7 @@ function SidebarStatus({ rail }: { rail?: boolean }) {
     <div
       title={rail ? `обновлено ${fresh.label}` : undefined}
       className={cn(
-        'flex items-center gap-2 px-3 pt-1 text-[11px] text-muted-foreground',
+        'flex items-center gap-2 px-3 pt-1 text-2xs text-muted-foreground',
         rail &&
           'justify-center px-1 group-hover/sb:justify-start group-hover/sb:px-3 group-focus-within/sb:justify-start group-focus-within/sb:px-3',
       )}
@@ -324,7 +324,7 @@ function MobileBottomNav() {
           end={item.end}
           className={({ isActive }) =>
             cn(
-              'flex flex-col items-center justify-center gap-1 py-2.5 text-[11px] font-medium transition-colors',
+              'flex flex-col items-center justify-center gap-1 py-2.5 text-2xs font-medium transition-colors',
               isActive ? 'text-primary' : 'text-muted-foreground hover:text-foreground',
             )
           }
@@ -418,7 +418,7 @@ function ChannelCard({ rail = false }: { rail?: boolean }) {
           multi ? 'cursor-pointer hover:bg-muted/50' : 'cursor-default',
         )}
       >
-        <ChannelAvatar source={current?.source} initial={initial} className="h-9 w-9 rounded-md text-sm" />
+        <ChannelAvatar source={current?.source} initial={initial} className="h-9 w-9 rounded text-sm" />
         <span className={cn('min-w-0 flex-1', rail && REVEAL_BLOCK)}>
           <span className="block truncate text-sm font-medium text-foreground">{handle}</span>
           <span className="block truncate text-xs text-muted-foreground">{subtitle}</span>
@@ -472,7 +472,7 @@ function SearchBox({ rail = false }: { rail?: boolean }) {
     >
       <Icon name="search" className="h-4 w-4 shrink-0" />
       <span className={cn('flex-1 text-left', rail && REVEAL_BLOCK)}>Поиск</span>
-      <kbd className={cn('rounded border px-1.5 py-0.5 font-mono text-[10px]', rail && REVEAL_BLOCK)}>⌘K</kbd>
+      <kbd className={cn('rounded border px-1.5 py-0.5 font-mono text-2xs', rail && REVEAL_BLOCK)}>⌘K</kbd>
     </button>
   );
 }
@@ -586,7 +586,7 @@ function AccountMenu({ email, role, avatar }: { email?: string; role?: string; a
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-label="Аккаунт"
-        className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-avatar text-[11px] font-medium text-ink2 transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+        className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-avatar text-2xs font-medium text-ink2 transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
       >
         {avatar ? <img src={avatar} alt="" className="h-full w-full object-cover" /> : initials}
       </button>
@@ -597,7 +597,7 @@ function AccountMenu({ email, role, avatar }: { email?: string; role?: string; a
             <div className="px-2.5 py-1.5">
               <div className="truncate text-xs font-medium text-foreground">{email}</div>
               {role === 'superuser' && (
-                <div className="text-[11px] text-muted-foreground">Администратор</div>
+                <div className="text-2xs text-muted-foreground">Администратор</div>
               )}
             </div>
           )}
@@ -761,7 +761,7 @@ function PlatformNav({ rail = false }: { rail?: boolean }) {
   // icon, so Telegram-blue / Instagram-magenta read as identifiers, not as the UI's main colour.
   // Rail-aware: labels collapse to icons in the icon-rail and reappear on hover/focus peek.
   return (
-    <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border">
+    <div className="grid grid-cols-2 gap-px overflow-hidden rounded border border-border bg-border">
       {items.map((p) => (
         <button
           key={p.key}
@@ -782,7 +782,7 @@ function PlatformNav({ rail = false }: { rail?: boolean }) {
           {p.demo && (
             <span
               className={cn(
-                'rounded-full bg-status-warn/15 px-1.5 py-0.5 text-[10px] font-medium text-status-warn',
+                'rounded-full bg-status-warn/15 px-1.5 py-0.5 text-2xs font-medium text-status-warn',
                 rail && REVEAL_INLINE,
               )}
             >

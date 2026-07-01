@@ -12,7 +12,7 @@ const INGEST_URL = `${window.location.origin}/api/collector/ingest`;
 
 function CodeBlock({ children }: { children: ReactNode }) {
   return (
-    <pre className="mt-2 overflow-x-auto rounded-md border bg-muted px-3 py-2.5 font-mono text-xs leading-relaxed text-foreground">
+    <pre className="mt-2 overflow-x-auto rounded border bg-muted px-3 py-2.5 font-mono text-xs leading-relaxed text-foreground">
       {children}
     </pre>
   );

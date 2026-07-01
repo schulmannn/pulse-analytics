@@ -16,9 +16,9 @@ import { Icon } from '@/components/nav-icons';
 function Row({ label, value, tone }: { label: string; value: ReactNode; tone?: 'ok' | 'warn' | 'error' }) {
   const dot = tone === 'ok' ? 'bg-verdant' : tone === 'warn' ? 'bg-status-warn' : tone === 'error' ? 'bg-ember' : null;
   return (
-    <div className="flex items-center justify-between gap-3 border-t border-border py-2.5 text-[13px] first:border-t-0 first:pt-0">
+    <div className="flex items-center justify-between gap-3 border-t border-border py-2.5 text-sm first:border-t-0 first:pt-0">
       <span className="shrink-0 text-ink2">{label}</span>
-      <span className="flex min-w-0 items-center gap-1.5 truncate font-mono text-[12px] tabular-nums text-ink3">
+      <span className="flex min-w-0 items-center gap-1.5 truncate font-mono text-xs tabular-nums text-ink3">
         {dot && <span aria-hidden="true" className={`h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} />}
         {value}
       </span>
@@ -66,7 +66,7 @@ export function DataHealth({ defaultOpen = false }: { defaultOpen?: boolean } = 
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="flex w-full items-center gap-2 text-left text-[13px]"
+        className="flex w-full items-center gap-2 text-left text-sm"
       >
         <span aria-hidden="true" className={`h-1.5 w-1.5 shrink-0 rounded-full ${apiDot}`} />
         <span className="min-w-0 truncate text-ink2">
@@ -81,7 +81,7 @@ export function DataHealth({ defaultOpen = false }: { defaultOpen?: boolean } = 
           <Row label="Последний сбор" value={lastCollect} />
           <Row label="Сборщик" value={collectorVer} />
           <Row label="API" value={apiText} tone={apiTone} />
-          <Link to="/connect" className="mt-3 inline-block text-[13px] font-medium text-primary hover:underline">
+          <Link to="/connect" className="mt-3 inline-block text-sm font-medium text-primary hover:underline">
             Настроить сбор →
           </Link>
         </div>

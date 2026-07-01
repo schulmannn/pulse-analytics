@@ -57,7 +57,7 @@ export function Overview() {
       <section className="mt-8 space-y-4 border-t border-border pt-8">
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-sm font-medium tracking-wide text-muted-foreground">Топ постов</h2>
-          <Link to="/analytics" className="shrink-0 text-[13px] font-medium text-primary hover:underline">
+          <Link to="/analytics" className="shrink-0 text-sm font-medium text-primary hover:underline">
             <span className="md:hidden">Аналитика →</span><span className="hidden md:inline">Открыть аналитику →</span>
           </Link>
         </div>
@@ -73,7 +73,7 @@ function StaleWarning() {
   const fresh = freshness(latestHistoryDay(history), Date.now());
   if (!fresh || !fresh.stale) return null;
   return (
-    <div className="mb-6 flex flex-wrap items-center gap-2 rounded-lg border border-status-warn/30 bg-status-warn/[0.04] px-3 py-2 text-sm text-status-warn">
+    <div className="mb-6 flex flex-wrap items-center gap-2 rounded border border-status-warn/30 px-3 py-2 text-sm text-status-warn">
       <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-status-warn" />
       Данные устарели — обновлено {fresh.label}.
       <Link to="/settings" className="ml-auto text-xs font-medium underline underline-offset-2">Настроить сбор →</Link>
@@ -102,7 +102,7 @@ function SubscriberGrowth() {
     <div>
       <h2 className="text-sm font-medium tracking-wide text-muted-foreground">Рост подписчиков · {periodLabel}</h2>
       <div className="mt-3 flex items-baseline gap-2.5">
-        <div className="text-3xl font-medium tabular-nums tracking-tight">{fmt.num(currentSubs)}</div>
+        <div className="text-hero font-medium leading-none tabular-nums tracking-tight">{fmt.num(currentSubs)}</div>
         {change != null && change !== 0 && (
           <span className={`text-sm font-medium tabular-nums ${change > 0 ? 'text-verdant' : 'text-ember'}`}>
             {change > 0 ? '+' : '−'}{fmt.num(Math.abs(change))}

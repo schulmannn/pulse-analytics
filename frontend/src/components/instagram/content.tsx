@@ -87,7 +87,7 @@ export function IgPostCard({ post, rank }: { post: IgPost; rank: number }) {
             <span className="font-mono text-xs text-muted-foreground">{typeLabel}</span>
           )}
           <div className="absolute left-2 top-2 rounded bg-background/90 px-2 py-0.5 text-xs font-medium text-foreground">#{rank}</div>
-          <div className="absolute right-2 top-2 rounded bg-primary px-2 py-0.5 text-[10px] font-medium tracking-wide text-primary-foreground">{typeLabel}</div>
+          <div className="absolute right-2 top-2 rounded bg-primary px-2 py-0.5 text-2xs font-medium tracking-wide text-primary-foreground">{typeLabel}</div>
         </div>
         <div className="p-4">
           <p className="line-clamp-3 text-sm leading-relaxed text-foreground">
@@ -121,7 +121,7 @@ export function ReelsBlock({ posts }: { posts: IgPost[] }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-px border-t border-border bg-border sm:grid-cols-3">
         <KpiCard label="Reels" value={fmt.num(reels.length)} />
         <KpiCard label="Ср. время просмотра" value={`${avgWatchAll} сек`} />
         <KpiCard label="Суммарно просмотрено" value={`${fmt.short(Math.round(totalWatchHours))} ч`} />
@@ -294,7 +294,7 @@ export function TagsBlock({ tags, mock }: { tags: IgTag[]; mock?: boolean }) {
           rel="noreferrer"
           className="flex items-start gap-3 rounded-lg border border-border p-3 transition-colors hover:bg-hover-row"
         >
-          <span className="mt-0.5 shrink-0 rounded bg-muted px-2 py-0.5 text-[10px] font-medium tracking-wide text-muted-foreground">
+          <span className="mt-0.5 shrink-0 rounded bg-muted px-2 py-0.5 text-2xs font-medium tracking-wide text-muted-foreground">
             {MEDIA_TYPE_LABEL[t.media_type ?? ''] ?? 'Пост'}
           </span>
           <div className="min-w-0 flex-1">
@@ -349,9 +349,9 @@ export function StoriesBlock({ stories }: { stories: IgStory[] | undefined }) {
   return (
     <div className="space-y-4">
       {hoursLeft != null && (
-        <p className="px-1 text-xs text-ember">Данные историй исчезнут через ~{hoursLeft} ч (24-часовое окно Instagram).</p>
+        <p className="px-1 text-xs text-status-warn">Данные историй исчезнут через ~{hoursLeft} ч (24-часовое окно Instagram).</p>
       )}
-      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-px border-t border-border bg-border lg:grid-cols-4">
         <KpiCard label="Историй" value={fmt.num(list.length)} />
         <KpiCard label="Охват" value={fmt.short(sum('reach'))} />
         <KpiCard label="Ответы" value={fmt.num(sum('replies'))} />

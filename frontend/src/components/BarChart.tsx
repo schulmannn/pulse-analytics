@@ -92,7 +92,7 @@ export function BarChart({ values, labels, titles, height = 200 }: BarChartProps
                   x={x + barWidth / 2}
                   y={chartHeight - 6}
                   textAnchor="middle"
-                  className="pointer-events-none select-none fill-muted-foreground text-[11px] font-medium"
+                  className="pointer-events-none select-none fill-muted-foreground text-2xs font-medium"
                 >
                   {labels?.[i]}
                 </text>
