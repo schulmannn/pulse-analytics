@@ -17,6 +17,7 @@ import { ApiError } from '@/api/client';
 import { resizeImageToDataUrl } from '@/lib/image';
 import { Skeleton } from '@/components/ui/skeleton';
 import { SourceStatus } from '@/components/SourceStatus';
+import { DataHealth } from '@/components/DataHealth';
 
 function ChartSection({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -37,6 +38,9 @@ export function Settings() {
         <h2 className="text-xl font-medium tracking-tight">Настройки</h2>
       </div>
       <ProfileSection />
+      <ChartSection title="Состояние данных">
+        <DataHealth defaultOpen />
+      </ChartSection>
       <ChannelsSettings />
     </div>
   );

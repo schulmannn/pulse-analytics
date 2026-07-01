@@ -1,6 +1,6 @@
 import { Outlet } from 'react-router-dom';
 import { useIgData } from '@/lib/useIgData';
-import { IgConnectPanel } from '@/components/instagram/health';
+import { IgConnectPanel, IgDataHealth } from '@/components/instagram/health';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 
@@ -26,7 +26,7 @@ export function InstagramLayout() {
 
   return (
     <div className="space-y-6">
-      <header className="flex flex-wrap items-center justify-between gap-3">
+      <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-xl font-medium tracking-tight">
             Instagram{ig.profile?.username ? ` · @${ig.profile.username}` : ''}
@@ -34,6 +34,10 @@ export function InstagramLayout() {
           <p className="mt-0.5 text-xs text-muted-foreground">
             {ig.isMock ? 'Демо-режим — примерные данные' : 'Аккаунт, аудитория, форматы и публикации'}
           </p>
+        </div>
+        {/* Tiny data-status indicator lives in the header (account-card area), not the content column. */}
+        <div className="min-w-[180px] shrink-0 pt-1">
+          <IgDataHealth accountName={ig.profile?.username} lastSync={ig.lastSync} isMock={ig.isMock} />
         </div>
       </header>
       {ig.isMock && <IgConnectPanel />}

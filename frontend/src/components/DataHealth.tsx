@@ -26,8 +26,8 @@ function Row({ label, value, tone }: { label: string; value: ReactNode; tone?: '
   );
 }
 
-export function DataHealth() {
-  const [open, setOpen] = useState(false);
+export function DataHealth({ defaultOpen = false }: { defaultOpen?: boolean } = {}) {
+  const [open, setOpen] = useState(defaultOpen);
   const { channelId } = useSelectedChannel();
   const { data: channelsData } = useChannels();
   const current = channelsData?.channels.find((c) => c.id === channelId) ?? channelsData?.channels[0];
