@@ -1,4 +1,4 @@
-# Pulse Analytics — WEB-сервис (Node/Express + дашборд).
+# Atlavue — WEB-сервис (Node/Express + дашборд).
 # Публичный сервис на Railway ($PORT). К MTProto-микросервису ходит по ПРИВАТНОЙ
 # сети Railway через MTPROTO_URL (напр. http://mtproto.railway.internal:8001).
 # Часть сплита рантаймов: Python в этом образе НЕТ (см. Dockerfile.mtproto).

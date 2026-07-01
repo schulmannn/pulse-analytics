@@ -1,4 +1,4 @@
-# Pulse Analytics
+# Atlavue
 
 Дашборд аналитики Telegram-канала (+ задел под Instagram). Данные по Telegram
 тянутся **через твой личный профиль по MTProto** (Telethon) — это даёт куда

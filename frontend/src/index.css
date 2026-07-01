@@ -2,7 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-/* "Pulse Refined Technical" tokens (Refined UI + Swiss Modern + Technical UI), in HSL channels.
+/* "Atlavue Refined Technical" tokens (Refined UI + Swiss Modern + Technical UI), in HSL channels.
    Light = default; dark via the `.dark` class. Warm paper canvas + warm ink scale + warm hairlines
    replace the prior cool/analytical system; one calm blue accent (#2d6be0). Panels (#fff) are used
    sparingly — sections are delimited by hairlines, not card chrome. Radius 4px (buttons pill via util). */

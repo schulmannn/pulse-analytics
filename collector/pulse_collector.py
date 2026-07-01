@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Pulse Analytics collector.
+"""Atlavue collector.
 
 Runs next to the user's Telegram session, computes metrics through the existing
-Telethon implementation and sends only derived JSON to Pulse Analytics.
+Telethon implementation and sends only derived JSON to Atlavue.
 """
 
 from __future__ import annotations
@@ -236,9 +236,9 @@ def api_request(config: dict[str, str], path: str, payload: dict[str, Any] | Non
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as error:
         body = error.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Pulse API HTTP {error.code}: {body[:500]}") from error
+        raise RuntimeError(f"Atlavue API HTTP {error.code}: {body[:500]}") from error
     except urllib.error.URLError as error:
-        raise RuntimeError(f"Pulse API unavailable: {error.reason}") from error
+        raise RuntimeError(f"Atlavue API unavailable: {error.reason}") from error
 
 
 async def collect_payload(include_mentions: bool = False) -> dict[str, Any]:
@@ -304,12 +304,12 @@ def flush_queue(queue: DeliveryQueue, config: dict[str, str]) -> bool:
 
 
 async def doctor(config: dict[str, str]) -> None:
-    LOG.info("Checking Pulse API compatibility")
+    LOG.info("Checking Atlavue API compatibility")
     compatibility = api_request(config, "/api/collector/compatibility")
     supported = compatibility.get("supported_schema_versions", [])
     if SCHEMA_VERSION not in supported:
         raise RuntimeError(f"Server does not support collector schema {SCHEMA_VERSION}: {supported}")
-    LOG.info("Pulse API OK; channel_id=%s", compatibility.get("channel_id"))
+    LOG.info("Atlavue API OK; channel_id=%s", compatibility.get("channel_id"))
 
     LOG.info("Checking Telegram session and channel access")
     from mtproto import service
@@ -373,7 +373,7 @@ async def async_main(args: argparse.Namespace) -> int:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Pulse Analytics local Telegram collector")
+    parser = argparse.ArgumentParser(description="Atlavue local Telegram collector")
     parser.add_argument(
         "command",
         choices=["login", "run", "once", "flush", "doctor"],

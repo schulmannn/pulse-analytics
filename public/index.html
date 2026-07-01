@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Pulse Analytics</title>
+<title>Atlavue</title>
 <script>try{if(localStorage.getItem('pulse_theme')==='dark')document.documentElement.dataset.theme='dark';}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1542,7 +1542,7 @@
 <div id="login-view">
   <nav class="lp-nav">
     <div class="lp-nav-left">
-      <div class="lp-brand"><div class="login-logo-mark">P</div><span>Pulse</span></div>
+      <div class="lp-brand"><div class="login-logo-mark">A</div><span>Atlavue</span></div>
       <div class="lp-menu">
         <div class="lp-menu-item">
           <button class="lp-menu-trigger" type="button">Продукт <svg viewBox="0 0 12 12" fill="none"><path d="M3 4.5 6 7.5 9 4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
@@ -1615,8 +1615,8 @@
   <div class="av-glow" aria-hidden="true"></div>
   <button class="av-back" id="av-back" type="button">← На главную</button>
   <div class="av-box">
-    <div class="av-logo"><span class="login-logo-mark">P</span></div>
-    <h1 class="av-title" id="auth-title">Создать аккаунт Pulse</h1>
+    <div class="av-logo"><span class="login-logo-mark">A</span></div>
+    <h1 class="av-title" id="auth-title">Создать аккаунт Atlavue</h1>
     <p class="av-switch" id="auth-switch">Уже есть аккаунт? <a id="auth-switch-link">Войти</a></p>
 
     <div class="av-oauth" id="auth-oauth">
@@ -1683,7 +1683,7 @@
       <div class="app-brand">
         <div class="brand">
           <div class="brand-mark">P</div>
-          <span>Pulse</span>
+          <span>Atlavue</span>
         </div>
         <nav class="nav">
           <a class="active" data-anchor="overview">Обзор</a>
@@ -2008,7 +2008,7 @@
     </div><!-- /#dash-grid -->
 
     <footer class="app-footer">
-      <span>© 2026 Pulse Analytics</span>
+      <span>© 2026 Atlavue</span>
       <span class="sep">·</span>
       <span>аналитика Telegram-каналов</span>
       <span class="grow"></span>
@@ -2346,7 +2346,7 @@ function showAuthForm(which) {
   const title = document.getElementById('auth-title');
   const sw = document.getElementById('auth-switch');
   if (title && sw) {
-    if (which === 'register')      { title.textContent = 'Создать аккаунт Pulse'; sw.innerHTML = 'Уже есть аккаунт? <a id="auth-switch-link">Войти</a>'; }
+    if (which === 'register')      { title.textContent = 'Создать аккаунт Atlavue'; sw.innerHTML = 'Уже есть аккаунт? <a id="auth-switch-link">Войти</a>'; }
     else if (which === 'login')    { title.textContent = 'С возвращением';        sw.innerHTML = 'Нет аккаунта? <a id="auth-switch-link">Создать</a>'; }
     else if (which === 'forgot')   { title.textContent = 'Сброс пароля';          sw.innerHTML = '<a id="auth-switch-link">← Назад ко входу</a>'; }
     else                           { title.textContent = 'Новый пароль';          sw.innerHTML = ''; }

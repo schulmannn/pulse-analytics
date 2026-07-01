@@ -1,5 +1,5 @@
 """
-Pulse Analytics — MTProto микросервис
+Atlavue — MTProto микросервис
 Python + Telethon + FastAPI
 """
 
@@ -51,7 +51,7 @@ MENTION_EXCLUDE = set(u.strip().lstrip('@').lower()
 MENTION_SMART_FILTER = os.getenv('MENTION_SMART_FILTER', '1') != '0'
 
 # ── FastAPI ──────────────────────────────────────────────
-app = FastAPI(title='Pulse MTProto Service', version='1.0.0')
+app = FastAPI(title='Atlavue MTProto Service', version='1.0.0')
 
 app.add_middleware(
     CORSMiddleware,

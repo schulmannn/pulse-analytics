@@ -1,4 +1,4 @@
-# Pulse frontend (Sprint 3F — Vite + React + TS)
+# Atlavue frontend (Sprint 3F — Vite + React + TS)
 
 New dashboard frontend. Replaces the legacy `public/index.html` (~5k lines, inline
 `<script>`, manual `renderX()` + a global `state` object) **panel by panel** —

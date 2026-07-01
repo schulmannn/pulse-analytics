@@ -1,1 +1,1 @@
-"""Pulse Analytics MTProto package."""
+"""Atlavue MTProto package."""

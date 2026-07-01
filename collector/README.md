@@ -1,7 +1,7 @@
-# Pulse Collector
+# Atlavue Collector
 
 Collector runs with your Telegram credentials on your own machine and sends only
-derived analytics to Pulse Analytics. `TG_SESSION`, `TG_API_HASH` and phone data
+derived analytics to Atlavue. `TG_SESSION`, `TG_API_HASH` and phone data
 are never sent to the SaaS.
 
 ## First-time setup: QR login
