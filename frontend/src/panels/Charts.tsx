@@ -206,11 +206,10 @@ export function HeatmapChartBlock() {
                     return (
                       <div
                         key={hr}
-                        className="relative h-4 cursor-pointer rounded-sm"
+                        className={`relative h-4 cursor-pointer rounded-sm${isBest ? ' border-2 border-verdant' : ''}`}
                         style={{
                           backgroundColor: 'hsl(var(--brand-iris))',
                           opacity,
-                          border: isBest ? '2px solid hsl(var(--brand-verdant))' : undefined,
                         }}
                         onMouseMove={(event) => {
                           const rect = wrapRef.current?.getBoundingClientRect();

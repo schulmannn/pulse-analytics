@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { Navigate, Routes, Route } from 'react-router-dom';
+import { cn } from '@/lib/utils';
 import { useMe } from '@/api/queries';
 import { ApiError } from '@/api/client';
 import { DashboardLayout } from '@/components/DashboardLayout';
@@ -96,20 +98,67 @@ function ProtectedLayout() {
  * sections that used to sit there (auto-insights, рост/история, лучшее время, скорость, сравнение)
  * live here alongside the TG breakdowns + hashtag lift.
  */
+const ANALYTICS_TABS = [
+  { key: 'dynamics', label: 'Динамика' },
+  { key: 'audience', label: 'Аудитория' },
+  { key: 'content', label: 'Контент' },
+  { key: 'compare', label: 'Сравнение' },
+] as const;
+type AnalyticsTab = (typeof ANALYTICS_TABS)[number]['key'];
+
 function Analytics() {
+  const [tab, setTab] = useState<AnalyticsTab>('dynamics');
   return (
-    <div className="space-y-10">
-      <TgAnalytics />
-      <AnalyticsSection title="Авто-инсайты">
-        <Insights />
-      </AnalyticsSection>
-      <HistoryChartBlock />
-      <HeatmapChartBlock />
-      <VelocityChartBlock />
-      <AnalyticsSection title="Сравнение периодов">
-        <Compare />
-      </AnalyticsSection>
-      <Hashtags />
+    <div className="space-y-8">
+      {/* Grouped tabs break the 20-chart wall into Динамика / Аудитория / Контент / Сравнение —
+          each tab renders only its section family (progressive disclosure). */}
+      <div role="tablist" aria-label="Разделы аналитики" className="flex gap-1 overflow-x-auto border-b border-border">
+        {ANALYTICS_TABS.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            role="tab"
+            aria-selected={tab === t.key}
+            onClick={() => setTab(t.key)}
+            className={cn(
+              'shrink-0 border-b-2 px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none',
+              tab === t.key ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground',
+            )}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'dynamics' && (
+        <div className="space-y-10">
+          <TgAnalytics group="dynamics" />
+          <HistoryChartBlock />
+          <VelocityChartBlock />
+        </div>
+      )}
+      {tab === 'audience' && (
+        <div className="space-y-10">
+          <TgAnalytics group="audience" />
+          <HeatmapChartBlock />
+        </div>
+      )}
+      {tab === 'content' && (
+        <div className="space-y-10">
+          <TgAnalytics group="content" />
+          <Hashtags />
+        </div>
+      )}
+      {tab === 'compare' && (
+        <div className="space-y-10">
+          <AnalyticsSection title="Сравнение периодов">
+            <Compare />
+          </AnalyticsSection>
+          <AnalyticsSection title="Авто-инсайты">
+            <Insights />
+          </AnalyticsSection>
+        </div>
+      )}
     </div>
   );
 }

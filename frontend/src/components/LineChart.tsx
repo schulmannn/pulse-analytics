@@ -96,7 +96,7 @@ export function LineChart({ values, labels, titles, yMin, yMax, height }: LineCh
 
         {/* Gridlines */}
         {yGridPositions.map((yPos, idx) => (
-          <line key={idx} x1={0} y1={yPos} x2={W} y2={yPos} stroke="hsl(var(--border))" strokeDasharray="4 6" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+          <line key={idx} x1={0} y1={yPos} x2={W} y2={yPos} stroke="hsl(var(--border))" strokeDasharray="4 6" strokeWidth="1" opacity="0.6" vectorEffect="non-scaling-stroke" />
         ))}
 
         {/* Gradient area + line */}

@@ -52,6 +52,8 @@ export function BarChart({ values, labels, titles, height = 200 }: BarChartProps
   const itemWidth = chartWidth / values.length;
   const barWidth = itemWidth * 0.7;
   const barGap = itemWidth * 0.3;
+  // Thin x-labels on narrow widths so dense series (e.g. 14 days) don't overlap.
+  const labelStride = Math.max(1, Math.ceil(values.length / Math.max(2, Math.floor(chartWidth / 56))));
 
   const tipText = (i: number) => titles?.[i] ?? `${labels?.[i] ?? ''}: ${values[i]}`;
   const onMove = (i: number) => (event: ReactMouseEvent) => {
@@ -73,7 +75,7 @@ export function BarChart({ values, labels, titles, height = 200 }: BarChartProps
           const barHeight = (val / max) * graphHeight;
           const x = i * itemWidth + barGap / 2;
           const y = graphHeight - barHeight;
-          const showLabel = labels?.[i] && (i === 0 || i === values.length - 1 || i % 2 === 0);
+          const showLabel = labels?.[i] && (i === 0 || i === values.length - 1 || i % labelStride === 0);
 
           return (
             <g key={i}>

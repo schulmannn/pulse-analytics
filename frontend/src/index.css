@@ -53,13 +53,16 @@
     --hover-row: 47 31% 94%;           /* #f5f3ec — table row hover */
     --avatar: 45 21% 89%;              /* #e9e6dd — fallback avatar field */
 
-    /* Categorical data-viz palette (multi-series only; single metrics use --brand-iris). */
-    --chart-1: 219 74% 53%;
-    --chart-2: 192 65% 40%;
-    --chart-3: 39 84% 40%;
-    --chart-4: 340 60% 50%;
-    --chart-5: 147 45% 38%;
-    --chart-6: 270 45% 55%;
+    /* Categorical data-viz palette (multi-series only; single metrics use --brand-iris).
+       Okabe-Ito-based for colour-blind safety: chart-1 = brand blue, chart-2 orange is its
+       high-contrast pair; the two blues (1 and 6) sit farthest apart in the cycle. Series always
+       carry a text label/legend too — never colour-alone (see Breakdown dots + labels). */
+    --chart-1: 219 74% 53%;   /* brand blue #2d6be0 (kept) */
+    --chart-2: 41 96% 45%;    /* orange */
+    --chart-3: 164 90% 30%;   /* bluish green */
+    --chart-4: 24 95% 43%;    /* vermillion */
+    --chart-5: 326 44% 62%;   /* reddish purple */
+    --chart-6: 202 72% 55%;   /* sky blue (2nd blue — placed last) */
   }
 
   .dark {
@@ -100,12 +103,12 @@
     --hover-row: 48 5% 16%;
     --avatar: 48 5% 22%;
 
-    --chart-1: 219 80% 70%;
-    --chart-2: 190 65% 58%;
-    --chart-3: 40 85% 62%;
-    --chart-4: 340 70% 70%;
-    --chart-5: 147 50% 55%;
-    --chart-6: 270 60% 70%;
+    --chart-1: 219 80% 70%;   /* brand blue (light) */
+    --chart-2: 41 90% 60%;    /* orange */
+    --chart-3: 164 60% 52%;   /* bluish green */
+    --chart-4: 24 88% 62%;    /* vermillion */
+    --chart-5: 326 55% 70%;   /* reddish purple */
+    --chart-6: 202 75% 66%;   /* sky blue */
   }
 }
 

@@ -11,6 +11,7 @@ export const fmt = {
   short(n?: number | null): string {
     if (n == null || isNaN(n)) return '—';
     const abs = Math.abs(n);
+    if (abs >= 1e9) return (n / 1e9).toFixed(1).replace('.0', '') + 'B';
     if (abs >= 1e6) return (n / 1e6).toFixed(1).replace('.0', '') + 'M';
     if (abs >= 1e3) return (n / 1e3).toFixed(1).replace('.0', '') + 'k';
     return String(Math.round(n));

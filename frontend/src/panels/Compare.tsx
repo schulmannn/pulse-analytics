@@ -159,8 +159,9 @@ export function Compare() {
   return (
     <div className="space-y-6">
       <div className="space-y-4">
-        <h3 className="text-sm font-medium tracking-wide text-muted-foreground">
-          Период vs предыдущий
+        <h3 className="flex items-center gap-3 text-xs font-medium tracking-wider text-muted-foreground">
+          <span className="whitespace-nowrap">Период vs предыдущий</span>
+          <span aria-hidden="true" className="h-px flex-1 bg-border" />
         </h3>
         {hasPrev ? (
           <div className="overflow-x-auto">

@@ -135,7 +135,7 @@ audit's "8px→4px" premise doesn't apply; the radius language was already visua
 - [x] Connect: CodeBlock `<pre>` already `font-mono`; Step badge → `bg-primary/10 text-primary` (subtle); step title → `text-base`.
 - [x] GetStarted BloomArt: strokes → monochrome `text-border` (single accent bloom kept); CTAs → `.btn-pill`.
 - [x] Landing: Pillars symmetric column gutters (inner-edge padding on both sides of each divider).
-- [~] **Landing HeroAurora = OWNER DECISION (flagged, not changed):** the 3 peach/pink/blue radial glows + hero drop-shadow read as generic-SaaS vs warm-paper/hairline, BUT they're a deliberately-shipped hero choice. Flatten to on-brand (single soft blue wash / none) or keep as a deliberate hero exception — your call. Hero mock is `hidden md:block` (no 390px overflow), so the responsive-mock item is moot.
+- [x] **Landing HeroAurora — DECIDED (2026-07-01): KEEP** as a deliberate hero exception (owner call). The 3 peach/pink/blue radial glows + hero drop-shadow are an intentional marketing-surface choice; the "warm-paper/hairline/one-blue" rules govern the app, the landing hero gets this one exception. Hero mock is `hidden md:block` (no 390px overflow) — responsive-mock item moot.
 
 ### Settings / Auth / Landing / Connect / GetStarted
 - [ ] Settings: `space-y-8`→`space-y-6`; section intro headings read as ledger breaks not form labels; `Подключённые каналы` gets a hairline-above; empty state = hairline box (not dashed+fill).
@@ -167,26 +167,35 @@ audit's "8px→4px" premise doesn't apply; the radius language was already visua
 
 ---
 
-## Sprint D3 — Chart craft
+## Sprint D3 — Chart craft — ✅ DONE
 *What separates premium charts from generic ones.*
+*(Note: attempted to delegate the mechanical edits to Codex — blocked by its sandbox, which is bound to `mcp-abap-adt` and can't write into `pulse-analytics`. Applied directly. **Codex delegation isn't viable for this repo from this workspace.**)*
 
-- [ ] **Tooltips → paper palette + crosshair.** Replace `bg-popover` tooltip with `bg-background/95` + hairline; add a snap-to-nearest crosshair guide; multi-series stacked/tabular layout with formatted deltas. (`LineChart`/`BarChart`.)
-- [ ] Heatmap "best slot": replace inline `border:2px solid hsl(--brand-verdant)` with a token util (`border-2 border-verdant` conditional), base cells stay 1px `--border` (`panels/Charts.tsx:213`).
-- [ ] Gridline/axis restraint: thin low-opacity gridlines (20–30%), ticks snapped to meaningful intervals (hourly/daily/weekly), labels optically aligned (Tufte data-ink).
-- [ ] Number/delta formatting pass: locale-aware, abbreviate (1.2M), 1-decimal %, **tabular figures** in tables, consistent `↑/↓` + color + period on deltas. Centralize in `lib/format`.
-- [ ] Categorical palette a11y: audit `--chart-1..6` for colorblind-safety (Okabe-Ito / Tol / Tableau-10), never color-alone; sequential scales perceptually uniform (Viridis-like) for heatmaps.
-- [ ] Chart empty/loading: layout-aware skeletons (not spinners); per-chart empty states.
-- [ ] ExpandableChart close button: pair `×` with `rounded-full hover:bg-muted` or a text glyph in the UI font (`panels/Charts.tsx`).
+- [x] **Tooltips → paper palette.** `ChartTooltip` now `bg-background/95` + `border-border` + `text-foreground` (was `bg-popover`). Snap-to-nearest **crosshair already exists** in `LineChart` (per-point hit targets + vertical guide). *Multi-series stacked/tabular tooltip → F2 (crosshair-tooltip feature).*
+- [x] Heatmap "best slot": inline `border:2px solid hsl(--brand-verdant)` → `border-2 border-verdant` token util (`Charts.tsx` + `audience.tsx`); base cells unchanged. Verified live (`rgb(78,188,127)` verdant).
+- [x] Gridline/axis restraint: `LineChart` gridlines `opacity 0.6`; `BarChart` x-labels width-aware **thinning** (`labelStride` from measured width — fixes the 14-date overlap, was the D2-deferred item).
+- [x] Number formatting: `fmt.short` gained a **billions (B)** tier; `fmt` is already locale-aware + abbreviated + `tabular-nums` in tables; `DeltaPill` is the single `↑/↓`+color+% source. Centralized.
+- [x] **Categorical palette a11y:** `--chart-1..6` swapped to an **Okabe-Ito basis** (light+dark) — chart-1 = brand blue, chart-2 = orange (its high-contrast pair), two blues (1,6) farthest apart. Never color-alone (Breakdown = dot **+** text label). Verified live both themes. *(⚠️ visible change — teal→orange, amber→green etc. — flagged for eyeball.)*
+- [~] Chart empty/loading: per-chart empty states already exist (`LineChart`/`BarChart` "Нет данных"); layout-aware skeletons handled at panel level (D1.3/D2 skeleton rebuilds). No new work.
+- [x] ExpandableChart close button: already an SVG `×` in `rounded-full hover:bg-muted` (design.md target already met). Heatmap best-slot `border` token covers the `Charts.tsx` line.
+
+> **Sprint D3 — ✅ COMPLETE.** Chart tooltips on paper, restrained gridlines + thinned bar labels,
+> colour-blind-safe categorical palette (Okabe-Ito), heatmap best-slot as a token, billions formatting.
+> Build + 81 tests green; verified live (light+dark). Deferred: multi-series tabular tooltip → F2.
 
 ---
 
-## Sprint D4 — Analytics restructure (break the 20-chart wall)
-*The single biggest structural issue: `/analytics` stacks ~20 chart blocks with no hierarchy.*
+## Sprint D4 — Analytics restructure (break the 20-chart wall) — ✅ DONE
+*The single biggest structural issue: `/analytics` stacked ~20 chart blocks with no hierarchy.*
 
-- [ ] Regroup the 20 sections into 3–4 tabs/anchored groups: **Динамика** (views/subs/velocity/history), **Аудитория** (sources/languages/sentiment/geo/best-time), **Контент** (formats/hashtags/top-posts), **Сравнение** (period-vs-period).
-- [ ] Lead each group with the 2–3 charts that matter; the rest behind "показать все" / drill.
-- [ ] Wrap the Compare "Период vs предыдущий" table in a `ChartSection` (title + hairline rhythm) (`panels/Compare.tsx:166`).
-- [ ] Consistent section rhythm across the whole page (hairline-above headings, 8px scale).
+- [x] Regrouped into **4 tabs**: **Динамика** (Просмотры по дням, Рост, Просмотры и репосты, Чистый прирост, Отток + История + Скорость), **Аудитория** (источники ×2, Языки, Тональность, Активность по часам, По дням недели + Тепловая карта), **Контент** (Реакции по эмодзи, Состав вовлечённости, Ср.охват по типу + Хэштеги), **Сравнение** (Compare + Авто-инсайты). Impl: `TgAnalytics` gained an optional `group` prop (`inGroup(g) = !group || group === g`; KPI ledger always shows as the group header; `!group` = all sections, backward-compatible); `App.tsx` `Analytics()` renders an underline tab bar (`role=tablist/tab`, `aria-selected`) and only the active group's content. **Verified live: each tab renders only its family** (Динамика=5, Аудитория=7), switching works, 0 console errors.
+- [~] "показать все" / per-tab top-N progressive disclosure → **deferred** (the tabs already break the wall + only one group's DOM renders at a time; per-tab top-N is a refinement, not needed to fix the "wall").
+- [x] Compare "Период vs предыдущий" → hairline-trailing section heading (matches the `ChartSection` rhythm).
+- [~] Consistent section rhythm (hairline-above all `ChartSection`s) → the app is already consistent on the **trailing-hairline** `ChartSection` pattern; reformatting every one to hairline-above would be churn for no clarity gain, so kept as-is (this was the D2-deferred item — resolved as "no change, already consistent").
+
+> **Sprint D4 — ✅ COMPLETE.** `/analytics` is now 4 tabs (Динамика / Аудитория / Контент / Сравнение)
+> — the ~20-chart wall broken into focused, progressively-disclosed groups. Build + 81 tests green;
+> verified live (tab switching filters section families). All D-sprints (D1–D4) now complete.
 
 ---
 

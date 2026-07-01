@@ -120,11 +120,10 @@ export function BestTimeHeatmap({ online }: { online: IgOnline | undefined }) {
                 return (
                   <div
                     key={h}
-                    className="flex h-4 cursor-pointer items-center justify-center rounded-sm"
+                    className={`flex h-4 cursor-pointer items-center justify-center rounded-sm${isBest ? ' border-2 border-verdant' : ''}`}
                     style={{
                       backgroundColor: 'hsl(var(--brand-iris))',
                       opacity,
-                      border: isBest ? '2px solid hsl(var(--brand-verdant))' : undefined,
                     }}
                     aria-label={isBest ? `Лучший слот: ${name} ${h}:00` : undefined}
                     onMouseMove={(event) => {

@@ -53,7 +53,12 @@ function ChartSection({ title, children }: { title: string; children: ReactNode 
   );
 }
 
-export function TgAnalytics() {
+export type TgAnalyticsGroup = 'dynamics' | 'audience' | 'content';
+
+/** `group` renders only that section family (the Analytics tabs); undefined = all sections. The KPI
+    ledger always shows as the group header. */
+export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
+  const inGroup = (g: TgAnalyticsGroup) => !group || group === g;
   const { days, inRange } = usePeriod();
   const { data: full, isLoading: isFullLoading } = useTgFull(days);
   const { data: cs, isLoading: isStatsLoading } = useTgStats();
@@ -268,7 +273,7 @@ export function TgAnalytics() {
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        {last14Dates.length >= 2 && (
+        {inGroup('dynamics') && last14Dates.length >= 2 && (
           <ChartSection title="Просмотры по дням">
             <ExpandableChart title="Просмотры по дням">
               <LineChart values={vbdValues} labels={[last14Dates[0] ?? '', last14Dates[Math.floor(last14Dates.length / 2)] ?? '', last14Dates[last14Dates.length - 1] ?? '']} titles={vbdTitles} />
@@ -276,25 +281,25 @@ export function TgAnalytics() {
           </ChartSection>
         )}
 
-        {topEmojis.length > 0 && (
+        {inGroup('content') && topEmojis.length > 0 && (
           <ChartSection title="Реакции по эмодзи">
             <Breakdown items={topEmojis.map((e) => ({ label: e.label, value: e.value, display: fmt.num(e.value) }))} />
           </ChartSection>
         )}
 
-        {engagementComposition.length > 0 && (
+        {inGroup('content') && engagementComposition.length > 0 && (
           <ChartSection title="Состав вовлечённости">
             <Breakdown items={engagementComposition.map((c) => ({ label: c.label, value: c.value, display: fmt.num(c.value), color: c.color }))} />
           </ChartSection>
         )}
 
-        {viewsByType.length > 0 && (
+        {inGroup('content') && viewsByType.length > 0 && (
           <ChartSection title="Ср. охват по типу">
             <Breakdown items={viewsByType.map((t) => ({ label: t.label, value: t.value, display: fmt.num(t.value) }))} />
           </ChartSection>
         )}
 
-        {hasGrowth && growthGroup && growthSeries && (
+        {inGroup('dynamics') && hasGrowth && growthGroup && growthSeries && (
           <ChartSection title="Рост подписчиков">
             <ExpandableChart title="Рост подписчиков">
               <LineChart
@@ -306,7 +311,7 @@ export function TgAnalytics() {
           </ChartSection>
         )}
 
-        {interGroup && viewSeries && shareSeries && (
+        {inGroup('dynamics') && interGroup && viewSeries && shareSeries && (
           <ChartSection title="Просмотры и репосты">
             <div className="space-y-4">
               <div>
@@ -325,28 +330,28 @@ export function TgAnalytics() {
           </ChartSection>
         )}
 
-        {vbsItems.length > 0 && (
+        {inGroup('audience') && vbsItems.length > 0 && (
           <ChartSection title="Просмотры по источникам">
             <Breakdown items={vbsItems} />
           </ChartSection>
         )}
-        {nfsItems.length > 0 && (
+        {inGroup('audience') && nfsItems.length > 0 && (
           <ChartSection title="Новые подписчики по источникам">
             <Breakdown items={nfsItems} />
           </ChartSection>
         )}
-        {langItems.length > 0 && (
+        {inGroup('audience') && langItems.length > 0 && (
           <ChartSection title="Языки аудитории">
             <Breakdown items={langItems} />
           </ChartSection>
         )}
-        {sentItems.length > 0 && (
+        {inGroup('audience') && sentItems.length > 0 && (
           <ChartSection title="Тональность реакций">
             <Breakdown items={sentItems} />
           </ChartSection>
         )}
 
-        {hasHours && thData && (
+        {inGroup('audience') && hasHours && thData && (
           <ChartSection title="Активность по часам">
             <ExpandableChart title="Активность по часам">
               <BarChart values={thData.values} labels={thData.hours.map(String)} titles={thData.values.map((v, i) => `${thData.hours[i] ?? i}:00 — ${fmt.num(v)}`)} />
@@ -355,7 +360,7 @@ export function TgAnalytics() {
           </ChartSection>
         )}
 
-        {net30Values.length > 0 && (
+        {inGroup('dynamics') && net30Values.length > 0 && (
           <ChartSection title="Чистый прирост подписчиков (30д)">
             <ExpandableChart title="Чистый прирост подписчиков (30д)">
               <DivergingBars values={net30Values} titles={net30Titles} />
@@ -364,7 +369,7 @@ export function TgAnalytics() {
           </ChartSection>
         )}
 
-        {(joinedTotal > 0 || leftTotal > 0) && (
+        {inGroup('dynamics') && (joinedTotal > 0 || leftTotal > 0) && (
           <ChartSection title="Динамика оттока">
             <Breakdown items={[
               { label: 'Подписалось', value: joinedTotal, display: fmt.num(joinedTotal), color: 'hsl(var(--brand-verdant))' },
@@ -373,7 +378,7 @@ export function TgAnalytics() {
           </ChartSection>
         )}
 
-        {maxWdAvg > 0 && (
+        {inGroup('audience') && maxWdAvg > 0 && (
           <ChartSection title="По дням недели">
             <div className="space-y-4">
               <div>
