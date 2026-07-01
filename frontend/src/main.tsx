@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter } from 'react-router-dom';
 import App from '@/App';
 import { ChannelProvider } from '@/lib/channel-context';
+import { DemoProvider } from '@/lib/demo-context';
 import { PeriodProvider } from '@/lib/period';
 import { ThemeProvider } from '@/lib/theme';
 import '@/index.css';
@@ -28,7 +29,9 @@ createRoot(document.getElementById('root')!).render(
         <ThemeProvider>
           <PeriodProvider>
             <BrowserRouter basename="/">
-              <App />
+              <DemoProvider>
+                <App />
+              </DemoProvider>
             </BrowserRouter>
           </PeriodProvider>
         </ThemeProvider>

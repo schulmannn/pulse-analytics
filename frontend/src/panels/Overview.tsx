@@ -6,6 +6,8 @@ import { subscriberChange } from '@/lib/delta';
 import { fmt } from '@/lib/format';
 import { freshness, latestHistoryDay } from '@/lib/freshness';
 import { CollectorEmptyState } from '@/components/CollectorEmptyState';
+import { GetStarted } from '@/pages/GetStarted';
+import { useDemo } from '@/lib/demo-context';
 import { Sparkline } from '@/components/Sparkline';
 import { Digest } from '@/panels/Digest';
 import { KpiGrid } from '@/panels/KpiGrid';
@@ -18,10 +20,17 @@ import { TopPosts } from '@/panels/TopPosts';
  * something is wrong. The full status lives in Настройки. Analytics deep-dives are one click away.
  */
 export function Overview() {
+  const { demo } = useDemo();
   const { channelId } = useSelectedChannel();
   const { data: channelsData } = useChannels();
   const { days } = usePeriod();
   const { data, isLoading, isError } = useTgFull(days);
+
+  // First-run: a signed-in user with no channels (and not exploring the demo) gets onboarding
+  // instead of an empty dashboard.
+  if (!demo && channelsData && (channelsData.channels?.length ?? 0) === 0) {
+    return <GetStarted />;
+  }
 
   const channel = channelsData?.channels.find((c) => c.id === channelId);
   const isCollector = channel?.source === 'collector';

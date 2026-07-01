@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useChannels, useHistory, useIgProfile, useLogout, useTgFull } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
+import { useDemo } from '@/lib/demo-context';
 import { usePeriod } from '@/lib/period';
 import type { PeriodDays } from '@/lib/period';
 import { useTheme } from '@/lib/theme';
@@ -140,11 +141,31 @@ export function DashboardLayout({ email, role, avatar }: DashboardLayoutProps) {
         {/* Extra bottom padding on mobile clears the fixed bottom nav; md+ navigates via the sidebar. */}
         <main className="flex-1 px-4 pb-24 pt-5 sm:px-6 md:pb-5">
           <div className="mx-auto w-full max-w-screen-2xl">
+            <DemoBanner />
             <Outlet />
           </div>
         </main>
       </div>
       <MobileBottomNav />
+    </div>
+  );
+}
+
+/** Persistent banner while demo mode is on — labels the sample data and offers a one-click exit. */
+function DemoBanner() {
+  const { demo, exitDemo } = useDemo();
+  if (!demo) return null;
+  return (
+    <div className="mb-5 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-primary/30 bg-primary/[0.04] px-4 py-2.5 text-sm">
+      <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
+      <span className="text-foreground">Демо-режим — данные примерные, для ознакомления.</span>
+      <button
+        type="button"
+        onClick={exitDemo}
+        className="ml-auto shrink-0 rounded-md border border-border bg-background px-3 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+      >
+        Выйти из демо
+      </button>
     </div>
   );
 }

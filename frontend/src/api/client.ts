@@ -1,6 +1,8 @@
 import type { z } from 'zod';
 import { getSelectedChannel } from '@/lib/channel';
 import { getSessionToken } from '@/lib/session';
+import { isDemoMode } from '@/lib/demo';
+import { demoFixture } from '@/lib/demoFixtures';
 
 /** Thrown on non-2xx responses; `status` lets callers special-case 401 etc. */
 export class ApiError extends Error {
@@ -33,6 +35,12 @@ function parseResponse<S extends z.ZodTypeAny>(
  * through a Zod schema so the return type is inferred — no `any` leaks into panels.
  */
 export async function apiGet<S extends z.ZodTypeAny>(path: string, schema: S): Promise<z.infer<S>> {
+  // Demo mode: serve bundled sample data for covered endpoints; anything not covered (Instagram,
+  // auth) falls through to the real server below.
+  if (isDemoMode()) {
+    const fixture = demoFixture(path);
+    if (fixture !== undefined) return parseResponse('GET', path, schema, fixture);
+  }
   const headers: Record<string, string> = { Accept: 'application/json' };
   const token = getSessionToken();
   const channelId = getSelectedChannel();
@@ -71,6 +79,11 @@ export async function apiSend(
   body?: unknown,
   schema?: z.ZodTypeAny,
 ): Promise<unknown> {
+  // Demo mode is read-only: block writes (except auth, so login/logout still work) with a clear
+  // message rather than silently no-op'ing or hitting the server.
+  if (isDemoMode() && !path.startsWith('/api/auth/')) {
+    throw new ApiError(400, 'Действие недоступно в демо-режиме');
+  }
   const headers: Record<string, string> = { Accept: 'application/json' };
   const token = getSessionToken();
   const channelId = getSelectedChannel();
