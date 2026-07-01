@@ -518,17 +518,31 @@ app.patch('/api/admin/users/:id', requireAuth, requireSuper, async (req, res) =>
 
 // "Instagram API with Instagram Login" (no Facebook Page): the IG user access token works
 // against graph.instagram.com, NOT graph.facebook.com. IG_ACCESS_TOKEN/IG_ACCOUNT_ID is the
-// quick single-account path; per-channel OAuth tokens (ig_accounts) layer on top next.
-const IG_BASE      = 'https://graph.instagram.com/v22.0';
+// global single-account fallback; per-channel OAuth tokens (ig_accounts) layer on top and take
+// precedence when a channel has connected its own account (see resolveIg below).
+const IG_BASE      = 'https://graph.instagram.com/v22.0';   // versioned data edges
+const IG_GRAPH     = 'https://graph.instagram.com';         // token exchange / refresh / me (unversioned)
 const IG_TOKEN     = process.env.IG_ACCESS_TOKEN;
 const IG_ACCOUNT   = process.env.IG_ACCOUNT_ID;
+const IG_CLIENT_ID     = process.env.IG_CLIENT_ID;
+const IG_CLIENT_SECRET = process.env.IG_CLIENT_SECRET;
+// Insights edges (reach / views / follower_count / follows_and_unfollows, media & story insights)
+// require instagram_business_manage_insights — instagram_business_basic alone is NOT enough. Both
+// are requested at connect time (Meta blog 2025-03-24).
+const IG_OAUTH_SCOPES  = 'instagram_business_basic,instagram_business_manage_insights';
+const igCrypto     = require('./lib/ig_crypto');
 const igMock       = require('./ig_mock');
-// No real credentials yet → serve deterministic mock payloads (same Graph API shape) so
-// the IG analytics UI can be built/previewed ahead of a real account connection.
+// Global env single-account is "configured" when both token + account id are present.
 const igConfigured = () => !!IG_TOKEN && !!IG_ACCOUNT;
+// The per-channel OAuth connect flow needs app credentials, the token-encryption key, and a DB
+// (tokens are stored encrypted, one per channel). Without all three, connect is unavailable and
+// IG falls back to the global env account (or mock).
+const igOauthConfigured = () => !!IG_CLIENT_ID && !!IG_CLIENT_SECRET && igCrypto.configured() && db.enabled;
 
-async function igFetch(path, params = {}) {
-  params.access_token = IG_TOKEN;
+// Single choke-point for all Graph data calls. `token` defaults to the global env token so any
+// legacy caller keeps working; the IG routes pass the per-request token (req.ig.token).
+async function igFetch(path, params = {}, token = IG_TOKEN) {
+  params.access_token = token;
   const qs  = new URLSearchParams(params).toString();
   const url = `${IG_BASE}${path}?${qs}`;
   const res = await fetch(url);
@@ -537,20 +551,112 @@ async function igFetch(path, params = {}) {
   return json;
 }
 
-// GET /api/ig/profile — профиль аккаунта (теперь с аватаркой)
-app.get('/api/ig/profile', requireAuth, async (req, res) => {
+// Long-lived IG tokens live ~60 days and can be refreshed once ≥24h old. Refresh opportunistically
+// on read when within 10 days of expiry (and not already dead): the fresh 60-day token is
+// re-encrypted and persisted. Any failure is swallowed — the current token is returned so the
+// request never breaks; a truly-expired token surfaces as a Graph error → reconnect needed.
+const IG_REFRESH_WINDOW_MS = 10 * 24 * 60 * 60 * 1000;
+async function refreshIgIfNeeded(channelId, token, expiresAtStr) {
   try {
-    if (!igConfigured()) return res.json(igMock.igMockProfile());
-    const cached = cacheGet('ig:profile');
+    if (!expiresAtStr) return token;
+    const exp = new Date(expiresAtStr).getTime();
+    if (!Number.isFinite(exp)) return token;
+    const now = Date.now();
+    if (exp <= now || exp - now > IG_REFRESH_WINDOW_MS) return token;   // dead, or not due yet
+    const r = await fetch(`${IG_GRAPH}/refresh_access_token?` + new URLSearchParams({
+      grant_type: 'ig_refresh_token', access_token: token }).toString());
+    const j = await r.json();
+    if (j && j.access_token && j.expires_in) {
+      await db.updateIgToken(channelId, igCrypto.encrypt(j.access_token), new Date(now + j.expires_in * 1000)).catch(() => {});
+      return j.access_token;
+    }
+  } catch (e) { log('warn', 'ig_token_refresh_failed', { channelId, error: e.message }); }
+  return token;
+}
+
+// Per-request IG identity: resolve { accountId, token, source } for THIS request's channel.
+// Priority: (1) the channel's own OAuth token from ig_accounts (decrypted + refreshed);
+// (2) the global env single-account token; (3) null → the route serves mock. Unlike
+// resolveChannel it never short-circuits on a missing channel and never 500s on a decrypt
+// failure — the IG UI must always render (real, env-fallback, or mock). Requires requireAuth
+// upstream (uses req.user for the channel ownership check).
+async function resolveIg(req, res, next) {
+  req.ig = null;
+  try {
+    const channelId = parseInt(req.query.channel || req.headers['x-channel-id'], 10) || 0;
+    if (db.enabled && channelId && igCrypto.configured()) {
+      const ch  = await db.getChannel(channelId, req.user).catch(() => null);
+      const acc = ch ? await db.getIgAccount(channelId).catch(() => null) : null;
+      if (acc && acc.access_token_enc) {
+        try {
+          let token = igCrypto.decrypt(acc.access_token_enc);
+          token = await refreshIgIfNeeded(channelId, token, acc.token_expires_at);
+          req.ig = { accountId: acc.ig_user_id, token, source: 'channel', channelId, username: acc.username };
+        } catch (e) {
+          log('warn', 'ig_token_decrypt_failed', { channelId, error: e.message });   // fall through to env/mock
+        }
+      }
+    }
+    // Env single-account fallback = the superuser's own account (@bynotem via IG_ACCESS_TOKEN). Gate
+    // it to the superuser (or local dev with no DB): a regular user requesting a channel they don't
+    // own must NOT be served the env account's real data — they get mock (the connect prompt). This
+    // closes the X-Channel-Id spoof where getChannel() denies but the code fell through to env.
+    if (!req.ig && igConfigured() && (!db.enabled || (req.user && req.user.role === 'superuser'))) {
+      req.ig = { accountId: IG_ACCOUNT, token: IG_TOKEN, source: 'env', channelId: null };
+    }
+  } catch (e) {
+    log('warn', 'resolve_ig_failed', { error: e.message });
+  }
+  next();
+}
+
+// Drop cached IG payloads for one account id (keys look like `ig:<kind>:<accountId>[:...]`),
+// so a connect/disconnect flips the UI immediately instead of waiting out the 10-min TTL.
+function igCachePurge(accountId) {
+  if (!accountId) return;
+  const id = String(accountId);
+  // Delimiter-aware: match the account id as a whole ':'-segment, so purging id 123 never touches
+  // 1234's keys (a substring `includes(':123')` would). Keys look like ig:<kind>:<accountId>[:<param>].
+  for (const k of cache.keys()) if (k.startsWith('ig:') && k.split(':').includes(id)) cache.delete(k);
+}
+
+// OAuth "state": a signed, expiring blob binding the connect flow to (uid, channelId). The
+// callback lands WITHOUT a session header (top-level browser redirect from Instagram), so the
+// signed state is the only trustworthy attribution — HMAC(AUTH_SECRET) + 10-min expiry + nonce.
+const IG_STATE_TTL = 10 * 60 * 1000;
+function signIgState(payload) {
+  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const sig  = crypto.createHmac('sha256', AUTH_SECRET).update(body).digest('base64url');
+  return `${body}.${sig}`;
+}
+function parseIgState(state) {
+  try {
+    if (!state || typeof state !== 'string' || state.indexOf('.') < 0) return null;
+    const [body, sig] = state.split('.');
+    const expected = crypto.createHmac('sha256', AUTH_SECRET).update(body).digest('base64url');
+    if (!sig || sig.length !== expected.length) return null;
+    if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
+    const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
+    if (!payload.exp || payload.exp <= Date.now()) return null;
+    return payload;
+  } catch { return null; }
+}
+
+// GET /api/ig/profile — профиль аккаунта (теперь с аватаркой)
+app.get('/api/ig/profile', requireAuth, resolveIg, async (req, res) => {
+  try {
+    if (!req.ig) return res.json(igMock.igMockProfile());
+    const cacheKey = `ig:profile:${req.ig.accountId}`;
+    const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
 
-    const data = await igFetch(`/${IG_ACCOUNT}`, {
+    const data = await igFetch(`/${req.ig.accountId}`, {
       fields: 'username,name,followers_count,follows_count,media_count,biography,website,profile_picture_url'
-    });
+    }, req.ig.token);
     // Real last-sync time: when we actually fetched from Instagram. Lives in the cached payload (10m
     // TTL), so the UI shows the true sync moment, not when React Query happened to receive a response.
     data.synced_at = Date.now();
-    cacheSet('ig:profile', data);
+    cacheSet(cacheKey, data);
     res.json(data);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -561,19 +667,23 @@ app.get('/api/ig/profile', requireAuth, async (req, res) => {
 // keyword search on Instagram). The live edge only returns recent items, so we archive them in
 // `ig_tags` and serve the accumulated history (DB) — they persist even after the live window drops
 // them. Degrades to mock samples without a token, and to live-only without a DB.
-app.get('/api/ig/tags', requireAuth, async (req, res) => {
+app.get('/api/ig/tags', requireAuth, resolveIg, async (req, res) => {
   try {
-    if (!igConfigured()) return res.json(igMock.igMockTags());
+    if (!req.ig) return res.json(igMock.igMockTags());
     let live = [];
     try {
-      const r = await igFetch(`/${IG_ACCOUNT}/tags`, {
+      const r = await igFetch(`/${req.ig.accountId}/tags`, {
         fields: 'id,caption,username,permalink,timestamp,media_type,like_count,comments_count',
         limit: 50,
-      });
+      }, req.ig.token);
       live = r.data || [];
     } catch { /* tags edge can be empty / unavailable — fall back to the archive */ }
-    if (db.enabled && live.length) await db.upsertIgTags(live).catch(() => {});
-    const data = db.enabled ? await db.getIgTags(100).catch(() => live) : live;
+    // The ig_tags archive is global (not yet per-channel), so only archive + serve it for the
+    // global env account; per-channel connections serve the live window only until ig_tags is
+    // keyed by channel (avoids cross-channel tag leakage).
+    const useArchive = db.enabled && req.ig.source === 'env';
+    if (useArchive && live.length) await db.upsertIgTags(live).catch(() => {});
+    const data = useArchive ? await db.getIgTags(100).catch(() => live) : live;
     res.json({ data, live_count: live.length });
   } catch (e) {
     res.status(200).json({ data: [], error: e.message }); // section degrades, page survives
@@ -581,12 +691,12 @@ app.get('/api/ig/tags', requireAuth, async (req, res) => {
 });
 
 // GET /api/ig/insights?days=30 — метрики аккаунта
-app.get('/api/ig/insights', requireAuth, async (req, res) => {
+app.get('/api/ig/insights', requireAuth, resolveIg, async (req, res) => {
   const days = Math.min(90, parseInt(req.query.days, 10) || 30);
-  const cacheKey = `ig:insights:${days}`;
 
   try {
-    if (!igConfigured()) return res.json(igMock.igMockInsights(days));
+    if (!req.ig) return res.json(igMock.igMockInsights(days));
+    const cacheKey = `ig:insights:${req.ig.accountId}:${days}`;
     const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
 
@@ -598,7 +708,7 @@ app.get('/api/ig/insights', requireAuth, async (req, res) => {
     // Instagram API with Instagram Login (graph.instagram.com): only `reach` + `follower_count`
     // return a daily time-series. Fetch the full 90-day series so the panel can window the
     // selected period (cur vs prev) for these as before.
-    const dailyCall = igFetch(`/${IG_ACCOUNT}/insights`, { metric: 'reach,follower_count', period: 'day', since: now - 90 * SEC, until: now });
+    const dailyCall = igFetch(`/${req.ig.accountId}/insights`, { metric: 'reach,follower_count', period: 'day', since: now - 90 * SEC, until: now }, req.ig.token);
 
     // Engagement/visibility metrics are window AGGREGATES (total_value) with no daily series, so
     // they can't be windowed client-side. Fetch each for the current and previous selected window
@@ -608,14 +718,14 @@ app.get('/api/ig/insights', requireAuth, async (req, res) => {
     const tvNames = ['views', 'profile_views', 'accounts_engaged', 'total_interactions', 'likes', 'comments', 'saves', 'shares'];
     const tvVal = (r) => { const m = r && r.data && r.data[0]; return m && m.total_value && m.total_value.value != null ? m.total_value.value : null; };
     const fetchTv = (s, u) => Promise.allSettled(
-      tvNames.map((metric) => igFetch(`/${IG_ACCOUNT}/insights`, { metric, metric_type: 'total_value', period: 'day', since: s, until: u })),
+      tvNames.map((metric) => igFetch(`/${req.ig.accountId}/insights`, { metric, metric_type: 'total_value', period: 'day', since: s, until: u }, req.ig.token)),
     );
     // follows_and_unfollows → real gross follows (FOLLOWER) AND unfollows (NON_FOLLOWER) for the
     // window (period aggregate only — the daily breakdown is empty). Surfaced as `follows`/`unfollows`
     // so the panel can show the channel's REAL movement (net = follows − unfollows), not just gross
     // new follows (which the dashboard previously reported as growth, ignoring unfollows).
     const fetchFau = (s, u) =>
-      igFetch(`/${IG_ACCOUNT}/insights`, { metric: 'follows_and_unfollows', metric_type: 'total_value', breakdown: 'follow_type', period: 'day', since: s, until: u });
+      igFetch(`/${req.ig.accountId}/insights`, { metric: 'follows_and_unfollows', metric_type: 'total_value', breakdown: 'follow_type', period: 'day', since: s, until: u }, req.ig.token);
     const fauVal = (res) => {
       const block = res && res.data && res.data[0] && res.data[0].total_value && res.data[0].total_value.breakdowns;
       const results = (block && block[0] && block[0].results) || [];
@@ -663,18 +773,18 @@ app.get('/api/ig/insights', requireAuth, async (req, res) => {
 });
 
 // GET /api/ig/posts?limit=20 — последние посты с инсайтами и превью
-app.get('/api/ig/posts', requireAuth, async (req, res) => {
+app.get('/api/ig/posts', requireAuth, resolveIg, async (req, res) => {
   const limit = Math.min(25, parseInt(req.query.limit, 10) || 20);
-  const cacheKey = `ig:posts:${limit}`;
   try {
-    if (!igConfigured()) return res.json(igMock.igMockPosts(limit));
+    if (!req.ig) return res.json(igMock.igMockPosts(limit));
+    const cacheKey = `ig:posts:${req.ig.accountId}:${limit}`;
     const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
 
-    const mediaRes = await igFetch(`/${IG_ACCOUNT}/media`, {
+    const mediaRes = await igFetch(`/${req.ig.accountId}/media`, {
       fields: 'id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count',
       limit
-    });
+    }, req.ig.token);
 
     const posts = await Promise.all(
       (mediaRes.data || []).map(async (post) => {
@@ -684,7 +794,7 @@ app.get('/api/ig/posts', requireAuth, async (req, res) => {
           ? `${base},ig_reels_avg_watch_time,ig_reels_video_view_total_time`
           : base;
         try {
-          const ins = await igFetch(`/${post.id}/insights`, { metric, metric_type: 'total_value' });
+          const ins = await igFetch(`/${post.id}/insights`, { metric, metric_type: 'total_value' }, req.ig.token);
           const metrics = {};
           (ins.data || []).forEach((m) => {
             metrics[m.name] = (m.total_value && m.total_value.value != null)
@@ -708,12 +818,12 @@ app.get('/api/ig/posts', requireAuth, async (req, res) => {
 
 // GET /api/ig/breakdowns — audience demographics + format/contact breakdowns (modern
 // total_value envelope, Graph v22+). Mock-backed when no creds.
-app.get('/api/ig/breakdowns', requireAuth, async (req, res) => {
+app.get('/api/ig/breakdowns', requireAuth, resolveIg, async (req, res) => {
   const allowed = ['last_14_days', 'last_30_days', 'last_90_days'];
   const timeframe = allowed.includes(req.query.timeframe) ? req.query.timeframe : 'last_30_days';
   try {
-    if (!igConfigured()) return res.json(igMock.igMockBreakdowns(timeframe));
-    const cacheKey = `ig:breakdowns:${timeframe}`;
+    if (!req.ig) return res.json(igMock.igMockBreakdowns(timeframe));
+    const cacheKey = `ig:breakdowns:${req.ig.accountId}:${timeframe}`;
     const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
     const calls = [
@@ -725,7 +835,7 @@ app.get('/api/ig/breakdowns', requireAuth, async (req, res) => {
       { metric: 'profile_links_taps', breakdown: 'contact_button_type', period: 'day', metric_type: 'total_value' },
     ];
     const settled = await Promise.allSettled(
-      calls.map((c) => igFetch(`/${IG_ACCOUNT}/insights`, c)),
+      calls.map((c) => igFetch(`/${req.ig.accountId}/insights`, c, req.ig.token)),
     );
     const data = settled
       .filter((s) => s.status === 'fulfilled')
@@ -740,13 +850,13 @@ app.get('/api/ig/breakdowns', requireAuth, async (req, res) => {
 
 // GET /api/ig/online — online-followers hourly map (best-time heatmap). Flaky metric →
 // always 200, empty data[] on failure so the heatmap degrades instead of crashing.
-app.get('/api/ig/online', requireAuth, async (req, res) => {
+app.get('/api/ig/online', requireAuth, resolveIg, async (req, res) => {
   try {
-    if (!igConfigured()) return res.json(igMock.igMockOnlineFollowers());
-    const cacheKey = 'ig:online';
+    if (!req.ig) return res.json(igMock.igMockOnlineFollowers());
+    const cacheKey = `ig:online:${req.ig.accountId}`;
     const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
-    const data = await igFetch(`/${IG_ACCOUNT}/insights`, { metric: 'online_followers', period: 'lifetime' });
+    const data = await igFetch(`/${req.ig.accountId}/insights`, { metric: 'online_followers', period: 'lifetime' }, req.ig.token);
     const result = { data: data?.data || [] };
     cacheSet(cacheKey, result);
     res.json(result);
@@ -769,19 +879,19 @@ const igMetricVal = (j) => {
   return null;
 };
 
-app.get('/api/ig/stories', requireAuth, async (req, res) => {
+app.get('/api/ig/stories', requireAuth, resolveIg, async (req, res) => {
   try {
-    if (!igConfigured()) return res.json(igMock.igMockStories());
-    const list = await igFetch(`/${IG_ACCOUNT}/stories`, {
+    if (!req.ig) return res.json(igMock.igMockStories());
+    const list = await igFetch(`/${req.ig.accountId}/stories`, {
       fields: 'id,media_type,timestamp,permalink,thumbnail_url',
-    });
+    }, req.ig.token);
     const stories = await Promise.all(
       (list.data || []).map(async (s) => {
         const out = { ...s };
         // Each metric independently — one unsupported metric blanks only itself; the story and
         // its remaining metrics always survive (the story is never dropped).
         const settled = await Promise.allSettled(
-          STORY_METRICS.map((metric) => igFetch(`/${s.id}/insights`, { metric, metric_type: 'total_value' })),
+          STORY_METRICS.map((metric) => igFetch(`/${s.id}/insights`, { metric, metric_type: 'total_value' }, req.ig.token)),
         );
         settled.forEach((r, i) => {
           if (r.status !== 'fulfilled') return;
@@ -793,7 +903,7 @@ app.get('/api/ig/stories', requireAuth, async (req, res) => {
         try {
           const navRes = await igFetch(`/${s.id}/insights`, {
             metric: 'navigation', metric_type: 'total_value', breakdown: 'story_navigation_action_type',
-          });
+          }, req.ig.token);
           const m = (navRes.data || []).find((x) => x.name === 'navigation');
           if (m && m.total_value) {
             const block = m.total_value.breakdowns && m.total_value.breakdowns[0];
@@ -819,6 +929,146 @@ app.get('/api/ig/stories', requireAuth, async (req, res) => {
   } catch (e) {
     res.status(200).json({ data: [], error: e.message });
   }
+});
+
+// ── Instagram OAuth (per-channel connect) ─────────────────────────
+// "Business Login for Instagram" (Instagram API with Instagram Login, no Facebook Page).
+// Flow: start (authed, returns authorize_url) → user authorizes on instagram.com → callback
+// (credential-free, trusts the signed state) → code→short→long-lived token → stored encrypted
+// against the channel. Inert until IG_CLIENT_ID/IG_CLIENT_SECRET/IG_TOKEN_KEY + a DB are set.
+
+// POST /api/ig/oauth/start — begin connecting an Instagram account to the selected channel.
+// Returns { authorize_url } for a top-level browser navigation (a session header can't survive
+// the OAuth redirect, so we can't 302 here). The (uid, channelId) are bound into a signed state.
+app.post('/api/ig/oauth/start', requireAuth, async (req, res) => {
+  if (!igOauthConfigured()) return res.status(400).json({ error: 'Подключение Instagram не настроено на сервере' });
+  const channelId = parseInt(req.query.channel || req.headers['x-channel-id'], 10) || 0;
+  if (!channelId) return res.status(400).json({ error: 'Выбери канал, к которому подключить Instagram' });
+  const ch = await db.getChannel(channelId, req.user).catch(() => null);
+  if (!ch) return res.status(403).json({ error: 'Нет доступа к этому каналу' });
+  const state = signIgState({ uid: req.user.uid, channelId, nonce: crypto.randomBytes(12).toString('base64url'), exp: Date.now() + IG_STATE_TTL });
+  const authorizeUrl = 'https://www.instagram.com/oauth/authorize?' + new URLSearchParams({
+    client_id: IG_CLIENT_ID,
+    redirect_uri: `${appBase(req)}/api/ig/oauth/callback`,
+    response_type: 'code',
+    scope: IG_OAUTH_SCOPES,
+    state,
+  }).toString();
+  await audit(req, 'ig_oauth_start', { channelId });
+  res.json({ authorize_url: authorizeUrl });
+});
+
+// GET /api/ig/oauth/callback — Instagram redirects the user's browser here after they authorize.
+// No session header (top-level redirect), so trust comes from the signed state. Exchanges the code
+// for a long-lived token, stores it encrypted against the channel, then bounces the browser back
+// into the SPA with a success/error flag. Never renders tokens; logs stay secret-free.
+app.get('/api/ig/oauth/callback', async (req, res) => {
+  const back = (q) => res.redirect(302, `${appBase(req)}/instagram?${q}`);
+  try {
+    if (req.query.error) return back('ig_error=denied');
+    if (!igOauthConfigured()) return back('ig_error=server');
+    const st = parseIgState(req.query.state);
+    const code = String(req.query.code || '');
+    if (!st || !code) return back('ig_error=state');
+
+    // Re-verify the user still exists/active and still owns the target channel (state can outlive
+    // a permission change). Break-glass superuser sessions carry uid=null.
+    let user;
+    if (st.uid == null) user = { uid: null, role: 'superuser', email: null };
+    else {
+      const u = await db.getUserById(st.uid).catch(() => null);
+      if (!u || u.status !== 'active') return back('ig_error=auth');
+      user = { uid: u.id, role: u.role, email: u.email };
+    }
+    const ch = await db.getChannel(st.channelId, user).catch(() => null);
+    if (!ch) return back('ig_error=channel');
+    const redirectUri = `${appBase(req)}/api/ig/oauth/callback`;
+
+    // 1) authorization code → short-lived token (api.instagram.com, form-encoded POST).
+    const shortRes = await fetch('https://api.instagram.com/oauth/access_token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: IG_CLIENT_ID,
+        client_secret: IG_CLIENT_SECRET,
+        grant_type: 'authorization_code',
+        redirect_uri: redirectUri,
+        code,
+      }).toString(),
+    });
+    const shortJson = await shortRes.json().catch(() => ({}));
+    if (!shortJson.access_token) {
+      log('warn', 'ig_oauth_short_failed', { channelId: st.channelId, err: shortJson.error_message || shortJson.error_type || 'no_token' });
+      return back('ig_error=exchange');
+    }
+
+    // 2) short-lived → long-lived (~60d) token (graph.instagram.com). If this fails we must NOT
+    // silently persist the 1-hour short token under a 60-day expiry (the connection would die in an
+    // hour with no refresh path) — bail with an error flag and let the user retry.
+    const longRes = await fetch(`${IG_GRAPH}/access_token?` + new URLSearchParams({
+      grant_type: 'ig_exchange_token', client_secret: IG_CLIENT_SECRET, access_token: shortJson.access_token }).toString());
+    const longJson = await longRes.json().catch(() => ({}));
+    if (!longJson.access_token || !longJson.expires_in) {
+      log('warn', 'ig_oauth_long_failed', { channelId: st.channelId, err: longJson.error_message || (longJson.error && longJson.error.message) || longJson.error || 'no_long_token' });
+      return back('ig_error=exchange');
+    }
+    const longToken = longJson.access_token;
+    const expiresIn = Number(longJson.expires_in);
+
+    // 3) identity — the IG user id + username to display and to build data-edge paths.
+    const meRes = await fetch(`${IG_GRAPH}/me?` + new URLSearchParams({ fields: 'id,username,account_type', access_token: longToken }).toString());
+    const me = await meRes.json().catch(() => ({}));
+    const igUserId = me.id || String(shortJson.user_id || '');
+    if (!igUserId) return back('ig_error=identity');
+
+    await db.saveIgAccount(st.channelId, {
+      ig_user_id: igUserId,
+      username: me.username || null,
+      access_token_enc: igCrypto.encrypt(longToken),
+      token_expires_at: new Date(Date.now() + expiresIn * 1000),
+      scopes: IG_OAUTH_SCOPES,
+    });
+    igCachePurge(igUserId);   // clear any stale cached payloads for this account id
+    req.user = user; req.channel = { id: st.channelId };
+    await audit(req, 'ig_oauth_connected', { channelId: st.channelId, username: me.username || null });
+    return back('ig=connected');
+  } catch (e) {
+    log('error', 'ig_oauth_callback_error', { error: e.message });
+    return back('ig_error=exchange');
+  }
+});
+
+// DELETE /api/ig/oauth — disconnect the Instagram account from the selected channel.
+app.delete('/api/ig/oauth', requireAuth, async (req, res) => {
+  const channelId = parseInt(req.query.channel || req.headers['x-channel-id'], 10) || 0;
+  if (!channelId) return res.status(400).json({ error: 'Канал не выбран' });
+  const ch = await db.getChannel(channelId, req.user).catch(() => null);
+  if (!ch) return res.status(403).json({ error: 'Нет доступа к этому каналу' });
+  const acc = await db.getIgAccount(channelId).catch(() => null);
+  const removed = await db.deleteIgAccount(channelId);
+  if (acc && acc.ig_user_id) igCachePurge(acc.ig_user_id);
+  await audit(req, 'ig_oauth_disconnected', { channelId });
+  res.json({ ok: true, removed });
+});
+
+// GET /api/ig/oauth/status — connection state for Settings + the connect panel (no token leaked).
+app.get('/api/ig/oauth/status', requireAuth, async (req, res) => {
+  const channelId = parseInt(req.query.channel || req.headers['x-channel-id'], 10) || 0;
+  let acc = null;
+  if (db.enabled && channelId) {
+    const ch = await db.getChannel(channelId, req.user).catch(() => null);
+    if (ch) acc = await db.getIgAccount(channelId).catch(() => null);
+  }
+  res.json({
+    server_ready: igOauthConfigured(),   // app credentials + encryption key + DB all present
+    env_fallback: igConfigured(),        // a global env account is serving IG in the meantime
+    connected: !!acc,
+    channel_id: channelId || null,
+    username: acc ? acc.username : null,
+    ig_user_id: acc ? acc.ig_user_id : null,
+    connected_at: acc ? acc.connected_at : null,
+    token_expires_at: acc ? acc.token_expires_at : null,
+  });
 });
 
 // ════════════════════════════════════════════════════════════════

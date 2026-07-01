@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { Icon } from '@/components/nav-icons';
 import { Card, CardContent } from '@/components/ui/card';
+import { useConnectIg, useIgOauthStatus } from '@/api/queries';
 
 /** Relative "last synced" readout — product language, not a raw timestamp. */
 function ago(ms: number): string {
@@ -69,16 +70,22 @@ export function IgDataHealth({ accountName, lastSync, isMock }: { accountName?: 
 }
 
 /**
- * Connect panel for the demo / not-connected state — product language only. Explains, in plain
- * terms, what a real connection needs (a Business/Creator account, analytics access) without ever
- * showing environment variables or token names. The actual OAuth flow lands in a later phase.
+ * Connect panel for the demo / not-connected state. The primary button starts the real OAuth flow
+ * (POST /api/ig/oauth/start → top-level redirect to Instagram). When the server isn't configured for
+ * connecting (no app credentials / encryption key / DB), the button is disabled with a plain-language
+ * hint. Product language only — no environment-variable or token names.
  */
 export function IgConnectPanel() {
   const [open, setOpen] = useState(false);
+  const status = useIgOauthStatus();
+  const connect = useConnectIg();
+  const serverReady = status.data?.server_ready ?? false;
+  const notReady = status.isSuccess && !serverReady;
+  const connectError = connect.error instanceof Error ? connect.error.message : null;
   const requirements = [
     'Аккаунт Instagram Business или Creator.',
-    'Доступ к статистике аккаунта — выдаётся при подключении.',
-    'Подключение настраивает администратор рабочего пространства.',
+    'Вы — администратор этого аккаунта в Instagram.',
+    'Нажмите «Подключить» и подтвердите доступ в открывшемся окне Instagram.',
   ];
   const unlocks = [
     'Реальные охваты и просмотры',
@@ -110,15 +117,32 @@ export function IgConnectPanel() {
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() => setOpen((o) => !o)}
-            aria-expanded={open}
-            className="shrink-0 rounded-lg bg-primary px-3.5 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-          >
-            Подключить аккаунт
-          </button>
+          <div className="flex shrink-0 flex-col items-stretch gap-1.5">
+            <button
+              type="button"
+              onClick={() => connect.mutate()}
+              disabled={connect.isPending || notReady}
+              className="rounded-lg bg-primary px-3.5 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-60"
+            >
+              {connect.isPending ? 'Открываю Instagram…' : 'Подключить Instagram'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setOpen((o) => !o)}
+              aria-expanded={open}
+              className="text-center text-[11px] text-muted-foreground underline decoration-muted-foreground/40 underline-offset-2 hover:text-foreground"
+            >
+              {open ? 'Скрыть' : 'Что нужно и что даёт'}
+            </button>
+          </div>
         </div>
+
+        {connectError && <p className="mt-3 text-xs font-medium text-destructive">{connectError}</p>}
+        {notReady && (
+          <p className="mt-3 text-xs text-muted-foreground">
+            Подключение Instagram ещё не настроено на сервере{status.data?.env_fallback ? ' — пока показан общий аккаунт' : ''}.
+          </p>
+        )}
 
         {open && (
           <div className="mt-4 grid gap-5 border-t pt-4 sm:grid-cols-2">

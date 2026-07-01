@@ -10,6 +10,9 @@ import {
   useMe,
   useUpdateAvatar,
   useRemoveAvatar,
+  useIgOauthStatus,
+  useConnectIg,
+  useDisconnectIg,
 } from '@/api/queries';
 import { Card, CardContent } from '@/components/ui/card';
 import { fmt } from '@/lib/format';
@@ -41,8 +44,70 @@ export function Settings() {
       <ChartSection title="Состояние данных">
         <DataHealth defaultOpen />
       </ChartSection>
+      <InstagramSection />
       <ChannelsSettings />
     </div>
+  );
+}
+
+/** Instagram connection for the selected channel — connect (OAuth) / disconnect + status. */
+function InstagramSection() {
+  const status = useIgOauthStatus();
+  const connect = useConnectIg();
+  const disconnect = useDisconnectIg();
+  const s = status.data;
+  const connectError = connect.error instanceof Error ? connect.error.message : null;
+
+  return (
+    <ChartSection title="Instagram">
+      {status.isLoading ? (
+        <Skeleton className="h-16 w-full" />
+      ) : s?.connected ? (
+        <Card>
+          <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-2">
+                <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-verdant" />
+                <span className="text-sm font-medium text-foreground">@{s.username || s.ig_user_id}</span>
+              </div>
+              <div className="font-mono text-[11px] text-muted-foreground">
+                Подключён: {s.connected_at ? fmt.date(s.connected_at) : '—'}
+                {s.token_expires_at ? ` · токен до ${fmt.date(s.token_expires_at)}` : ''}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                if (window.confirm('Отключить Instagram от этого канала?')) disconnect.mutate();
+              }}
+              disabled={disconnect.isPending}
+              className="shrink-0 rounded-md border border-destructive/20 px-3 py-1.5 text-xs font-medium text-destructive transition-colors hover:bg-destructive/5 disabled:opacity-50"
+            >
+              {disconnect.isPending ? 'Отключение…' : 'Отключить'}
+            </button>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card className="border-dashed">
+          <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-muted-foreground">
+              {s?.server_ready
+                ? 'Подключите бизнес-аккаунт Instagram, чтобы видеть реальные охваты, аудиторию и публикации этого канала.'
+                : `Подключение Instagram ещё не настроено на сервере${s?.env_fallback ? ' — сейчас показан общий аккаунт' : ''}.`}
+            </p>
+            <button
+              type="button"
+              onClick={() => connect.mutate()}
+              disabled={connect.isPending || !s?.server_ready}
+              className="shrink-0 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-60"
+            >
+              {connect.isPending ? 'Открываю Instagram…' : 'Подключить Instagram'}
+            </button>
+          </CardContent>
+        </Card>
+      )}
+      {connectError && <p className="mt-2 text-xs font-medium text-destructive">{connectError}</p>}
+    </ChartSection>
   );
 }
 

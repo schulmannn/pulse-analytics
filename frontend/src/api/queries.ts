@@ -184,10 +184,13 @@ export function useVelocity() {
   });
 }
 
-// ── Instagram (single account from env; mock-backed until real credentials are set) ──
+// ── Instagram (per-channel OAuth token, or the global env account, or mock) ──
+// Every IG query is keyed by the selected channel: IG is now per-channel, so switching the
+// active channel must refetch (a bare ['ig-*'] key would show the previous channel's cached data).
 export function useIgProfile() {
+  const { channelId } = useSelectedChannel();
   return useQuery({
-    queryKey: ['ig-profile'],
+    queryKey: ['ig-profile', channelId],
     queryFn: () => apiGet('/api/ig/profile', IgProfileSchema),
   });
 }
@@ -196,48 +199,100 @@ export function useIgProfile() {
  *  client-side); the aggregate metrics (views/saves/…) are computed by the server for this exact
  *  window + the previous one (for deltas), since they have no daily series to slice. */
 export function useIgInsights(days = 90) {
+  const { channelId } = useSelectedChannel();
   return useQuery({
-    queryKey: ['ig-insights', days],
+    queryKey: ['ig-insights', channelId, days],
     queryFn: () => apiGet(`/api/ig/insights?days=${days}`, IgInsightsSchema),
   });
 }
 
 export function useIgPosts(limit = 20) {
+  const { channelId } = useSelectedChannel();
   return useQuery({
-    queryKey: ['ig-posts', limit],
+    queryKey: ['ig-posts', channelId, limit],
     queryFn: () => apiGet(`/api/ig/posts?limit=${limit}`, IgPostsSchema),
   });
 }
 
 /** Audience demographics + format/contact breakdowns (total_value envelope). */
 export function useIgBreakdowns(timeframe = 'last_30_days') {
+  const { channelId } = useSelectedChannel();
   return useQuery({
-    queryKey: ['ig-breakdowns', timeframe],
+    queryKey: ['ig-breakdowns', channelId, timeframe],
     queryFn: () => apiGet(`/api/ig/breakdowns?timeframe=${timeframe}`, IgBreakdownsSchema),
   });
 }
 
 /** Online-followers hourly map (best-time heatmap). Degrades to empty gracefully. */
 export function useIgOnline() {
+  const { channelId } = useSelectedChannel();
   return useQuery({
-    queryKey: ['ig-online'],
+    queryKey: ['ig-online', channelId],
     queryFn: () => apiGet('/api/ig/online', IgOnlineSchema),
   });
 }
 
 /** Active stories (last 24h) + per-story insights. */
 export function useIgStories() {
+  const { channelId } = useSelectedChannel();
   return useQuery({
-    queryKey: ['ig-stories'],
+    queryKey: ['ig-stories', channelId],
     queryFn: () => apiGet('/api/ig/stories', IgStoriesSchema),
   });
 }
 
 /** Tags — media where the account is @-tagged (live edge + DB archive). */
 export function useIgTags() {
+  const { channelId } = useSelectedChannel();
   return useQuery({
-    queryKey: ['ig-tags'],
+    queryKey: ['ig-tags', channelId],
     queryFn: () => apiGet('/api/ig/tags', IgTagsSchema),
+  });
+}
+
+// ── Instagram OAuth (per-channel connect) ──
+const IgOauthStatusSchema = z
+  .object({
+    server_ready: z.boolean(),
+    env_fallback: z.boolean(),
+    connected: z.boolean(),
+    channel_id: z.number().nullable(),
+    username: z.string().nullable(),
+    ig_user_id: z.string().nullable(),
+    connected_at: z.string().nullable(),
+    token_expires_at: z.string().nullable(),
+  })
+  .passthrough();
+export type IgOauthStatus = z.infer<typeof IgOauthStatusSchema>;
+const IgConnectStartSchema = z.object({ authorize_url: z.string().url() }).passthrough();
+
+/** Connection state for the current channel (Settings + connect panel). No token is ever exposed. */
+export function useIgOauthStatus() {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    queryKey: ['ig-oauth-status', channelId],
+    queryFn: () => apiGet('/api/ig/oauth/status', IgOauthStatusSchema),
+  });
+}
+
+/** Begin the connect flow: ask the server for an authorize_url, then hand the browser to Instagram
+ *  (a top-level navigation — the session header can't survive the OAuth redirect). */
+export function useConnectIg() {
+  return useMutation({
+    mutationFn: async () => {
+      const res = await apiSend('POST', '/api/ig/oauth/start', undefined, IgConnectStartSchema);
+      window.location.href = res.authorize_url;
+      return res;
+    },
+  });
+}
+
+/** Disconnect the Instagram account from the current channel; refetch IG data + status. */
+export function useDisconnectIg() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiSend('DELETE', '/api/ig/oauth', undefined, OkSchema),
+    onSuccess: () => qc.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).startsWith('ig-') }),
   });
 }
 
