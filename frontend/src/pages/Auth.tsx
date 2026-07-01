@@ -2,9 +2,9 @@ import { useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useForgot, useLogin, useRegister, useReset, useVerify } from '@/api/queries';
-import { PulseMark } from '@/components/PulseMark';
+import { AtlavueMark } from '@/components/AtlavueMark';
 
-// "Pulse Refined Technical" auth — light, quiet, calmer than the dashboard. Warm paper canvas,
+// "Atlavue Refined Technical" auth — light, quiet, calmer than the dashboard. Warm paper canvas,
 // hairline-bordered fields, pill primary button, one calm blue accent. Semantic/brand tokens only.
 
 const INPUT_CLASS =
@@ -31,8 +31,8 @@ function AuthShell({
   return (
     <div className="relative flex min-h-screen items-center justify-center bg-background px-5 py-16 text-foreground">
       <Link to="/" className="absolute left-6 top-6 flex items-center gap-2.5">
-        <PulseMark className="h-[18px] w-[18px] text-primary" />
-        <span className="text-[17px] font-medium tracking-tight text-foreground">Pulse</span>
+        <AtlavueMark className="h-[18px] w-[18px] text-primary" />
+        <span className="text-[17px] font-medium tracking-tight text-foreground">Atlavue</span>
       </Link>
 
       <div className="w-full max-w-[380px]">
@@ -55,7 +55,7 @@ function TrustIcon({ d }: { d: string }) {
 /** Register trust block — what we don't do with the user's data. */
 function Trust() {
   const items = [
-    { d: 'M5 11h14v9H5z M8 11V8a4 4 0 0 1 8 0v3', text: 'Telegram-сессия не хранится в Pulse' },
+    { d: 'M5 11h14v9H5z M8 11V8a4 4 0 0 1 8 0v3', text: 'Telegram-сессия не хранится в Atlavue' },
     { d: 'M4 5h16v11H4z M2 20h20', text: 'Collector работает локально' },
     { d: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z M9 12a3 3 0 1 0 6 0 3 3 0 0 0-6 0', text: 'Instagram можно открыть в демо-режиме' },
   ];
@@ -138,7 +138,7 @@ export function LoginPage() {
   }
 
   return (
-    <AuthShell title="Войти в Pulse">
+    <AuthShell title="Войти в Atlavue">
       <form onSubmit={handleLogin}>
         <label className={LABEL_CLASS} htmlFor="login-email">
           Email
@@ -207,7 +207,7 @@ export function RegisterPage() {
 
   return (
     <AuthShell
-      title="Создать аккаунт Pulse"
+      title="Создать аккаунт Atlavue"
       subtitle="Подключите канал и получите обзор просмотров, постов и состояния сбора."
     >
       <form onSubmit={handleSubmit}>
@@ -277,7 +277,7 @@ export function VerifyPage() {
     <AuthShell title="Подтверждение email">
       <form onSubmit={handleSubmit}>
         <p className="text-sm text-ink2">
-          {token ? 'Активируй аккаунт в Pulse.' : 'В ссылке отсутствует токен подтверждения.'}
+          {token ? 'Активируй аккаунт в Atlavue.' : 'В ссылке отсутствует токен подтверждения.'}
         </p>
         {token && !verifyMutation.isSuccess && (
           <button type="submit" disabled={verifyMutation.isPending} className={BUTTON_CLASS}>

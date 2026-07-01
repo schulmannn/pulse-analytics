@@ -17,7 +17,7 @@ import { freshness, latestHistoryDay } from '@/lib/freshness';
 import { markdownToPlainText } from '@/lib/markdown';
 import { normalizeTgPosts } from '@/lib/posts';
 import { Icon, type IconName } from '@/components/nav-icons';
-import { PulseMark } from '@/components/PulseMark';
+import { AtlavueMark } from '@/components/AtlavueMark';
 import { ChannelAvatar } from '@/components/ChannelAvatar';
 import { DateRangePicker } from '@/components/DateRangePicker';
 
@@ -217,10 +217,10 @@ function Sidebar() {
         <div className="flex items-center gap-2.5 px-4 pt-5">
           {/* Brand glyph on paper (no filled tile) — Figma renders the mark itself in accent blue. */}
           <span className="flex h-8 w-8 shrink-0 items-center justify-center text-primary">
-            <PulseMark className="h-6 w-6" />
+            <AtlavueMark className="h-6 w-6" />
           </span>
           <span className={cn('flex-1 whitespace-nowrap text-[15px] font-medium tracking-tight', rail && REVEAL_BLOCK)}>
-            Pulse
+            Atlavue
           </span>
         </div>
 
@@ -480,7 +480,7 @@ function SearchBox({ rail = false }: { rail?: boolean }) {
 /** Desktop top bar (md+; mobile uses MobileHeader). Title + period + export + theme + account. */
 function Topbar({ email, role, avatar }: { email?: string; role?: string; avatar?: string | null }) {
   const { pathname } = useLocation();
-  const title = TITLES[pathname] ?? (pathname.startsWith('/instagram') ? 'Instagram' : 'Pulse');
+  const title = TITLES[pathname] ?? (pathname.startsWith('/instagram') ? 'Instagram' : 'Atlavue');
   return (
     <header className="sticky top-0 z-20 hidden h-14 items-center justify-between gap-3 border-b bg-background/80 px-4 backdrop-blur sm:gap-4 sm:px-6 md:flex">
       {/* min-w-0 lets the title truncate instead of shoving the controls off a narrow screen. */}

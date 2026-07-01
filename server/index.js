@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════
-//  Pulse Analytics — Backend Server
+//  Atlavue — Backend Server
 //  Node.js + Express
 // ═══════════════════════════════════════════════════════════════
 
@@ -215,7 +215,7 @@ function cacheSet(key, data) {
 
 // ── Email (verification / password reset) via Resend — no new dependency ──
 const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
-const EMAIL_FROM = process.env.EMAIL_FROM || 'Pulse Analytics <onboarding@resend.dev>';
+const EMAIL_FROM = process.env.EMAIL_FROM || 'Atlavue <onboarding@resend.dev>';
 const APP_URL = (process.env.APP_URL || '').replace(/\/$/, '');
 // Hosts honoured from the request when APP_URL isn't set — defends emailed links
 // against Host-header poisoning (reset link → account takeover). Best practice:
@@ -260,11 +260,11 @@ const emailShell = (title, body) =>
 const emailBtn = (href, label) =>
   `<p><a href="${escHtml(href)}" style="display:inline-block;padding:10px 18px;background:#533afd;color:#fff;border-radius:6px;text-decoration:none">${label}</a></p>`;
 const verifyEmailHtml = (link) => emailShell('Подтверди email',
-  `<p>Активируй аккаунт в Pulse Analytics:</p>${emailBtn(link, 'Подтвердить email')}<p style="color:#64748d;font-size:13px">Ссылка действует 24 часа. Если это были не вы — проигнорируйте письмо.</p>`);
+  `<p>Активируй аккаунт в Atlavue:</p>${emailBtn(link, 'Подтвердить email')}<p style="color:#64748d;font-size:13px">Ссылка действует 24 часа. Если это были не вы — проигнорируйте письмо.</p>`);
 const resetEmailHtml = (link) => emailShell('Сброс пароля',
   `<p>Задай новый пароль:</p>${emailBtn(link, 'Сбросить пароль')}<p style="color:#64748d;font-size:13px">Ссылка действует 1 час. Если это были не вы — проигнорируйте, пароль не изменится.</p>`);
 const existsEmailHtml = (base) => emailShell('Аккаунт уже существует',
-  `<p>На этот email уже есть аккаунт Pulse Analytics. Забыли пароль — <a href="${escHtml(base)}/?forgot=1">сбросьте его</a>.</p>`);
+  `<p>На этот email уже есть аккаунт Atlavue. Забыли пароль — <a href="${escHtml(base)}/?forgot=1">сбросьте его</a>.</p>`);
 
 // ════════════════════════════════════════════════════════════════
 //  AUTH ROUTES
@@ -286,13 +286,13 @@ app.post('/api/auth/register', authLimiter, async (req, res) => {
     const existing = await db.getUserByEmail(email);
     if (existing) {           // don't reveal it's taken; nudge the real owner, cooldown-gated like real tokens
       const eid = await db.createEmailToken(existing.id, 'exists', sha256(newToken()), new Date(Date.now() + 60000));
-      if (eid) sendEmail(email, 'Аккаунт Pulse уже существует', existsEmailHtml(base)).catch(() => {});
+      if (eid) sendEmail(email, 'Аккаунт Atlavue уже существует', existsEmailHtml(base)).catch(() => {});
       return;
     }
     const u = await db.createUser({ email, pass_hash: hashPassword(password), role: 'user', status: 'unverified' });
     const raw = newToken();
     const id = await db.createEmailToken(u.id, 'verify', sha256(raw), new Date(Date.now() + VERIFY_TTL));
-    if (id) await sendEmail(email, 'Подтверди email — Pulse Analytics', verifyEmailHtml(`${base}/verify?token=${raw}`));
+    if (id) await sendEmail(email, 'Подтверди email — Atlavue', verifyEmailHtml(`${base}/verify?token=${raw}`));
   } catch (e) {
     if (e.code !== '23505') console.error('[register]', e.message);   // already responded generically
   }
@@ -384,7 +384,7 @@ app.get('/api/auth/verify', (req, res) => {
   res.set('Content-Type', 'text/html; charset=utf-8').set('Cache-Control', 'no-store').set('Referrer-Policy', 'no-referrer')
     .send(`<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Подтверждение email</title>
 <style>body{font-family:system-ui,Segoe UI,sans-serif;background:#e5edf5;color:#061b31;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}.c{background:#fff;padding:32px;border-radius:8px;max-width:380px;text-align:center;box-shadow:0 4px 24px rgba(6,27,49,.08)}button{margin-top:18px;padding:11px 22px;background:#533afd;color:#fff;border:0;border-radius:6px;font-size:15px;cursor:pointer}.m{margin-top:14px;font-size:13px;color:#64748d}</style></head>
-<body><div class="c"><h2>Подтверждение email</h2><p>Активируй аккаунт в Pulse Analytics.</p><button id="b">Подтвердить email</button><div class="m" id="m"></div></div>
+<body><div class="c"><h2>Подтверждение email</h2><p>Активируй аккаунт в Atlavue.</p><button id="b">Подтвердить email</button><div class="m" id="m"></div></div>
 <script>var t=${tokenJs};document.getElementById('b').onclick=function(){var b=this;b.disabled=true;b.textContent='…';fetch('/api/auth/verify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:t})}).then(function(r){return r.json().catch(function(){return{}})}).then(function(j){if(j&&j.ok){location.href='/?verified=1';}else{document.getElementById('m').textContent=(j&&j.error)||'Ссылка недействительна или истекла';b.style.display='none';}}).catch(function(){document.getElementById('m').textContent='Ошибка сети';b.disabled=false;b.textContent='Подтвердить email';});};</script></body></html>`);
 });
 
@@ -413,7 +413,7 @@ app.post('/api/auth/forgot', authLimiter, async (req, res) => {
     if (u && u.status !== 'disabled') {
       const raw = newToken();
       const id = await db.createEmailToken(u.id, 'reset', sha256(raw), new Date(Date.now() + RESET_TTL));
-      if (id) await sendEmail(email, 'Сброс пароля — Pulse Analytics', resetEmailHtml(`${base}/reset?token=${raw}`));
+      if (id) await sendEmail(email, 'Сброс пароля — Atlavue', resetEmailHtml(`${base}/reset?token=${raw}`));
     }
   } catch (e) { console.error('[forgot]', e.message); }   // already responded generically
 });
@@ -447,7 +447,7 @@ app.post('/api/auth/resend-verification', authLimiter, async (req, res) => {
     if (u && u.status === 'unverified') {
       const raw = newToken();
       const id = await db.createEmailToken(u.id, 'verify', sha256(raw), new Date(Date.now() + VERIFY_TTL));
-      if (id) await sendEmail(email, 'Подтверди email — Pulse Analytics', verifyEmailHtml(`${base}/verify?token=${raw}`));
+      if (id) await sendEmail(email, 'Подтверди email — Atlavue', verifyEmailHtml(`${base}/verify?token=${raw}`));
     }
   } catch (e) { console.error('[resend]', e.message); }
 });
@@ -1789,7 +1789,7 @@ app.get('*', (req, res) => {
 app.listen(PORT, () => {
   console.log(`
 ╔══════════════════════════════════════════╗
-║        Pulse Analytics Server            ║
+║        Atlavue Server            ║
 ╠══════════════════════════════════════════╣
 ║  URL:      http://localhost:${PORT}          ║
 ║  IG API:   ${IG_TOKEN ? '✅ настроен' : '❌ не задан (IG_ACCESS_TOKEN)'}           ║

@@ -24,12 +24,12 @@ function igMockProfile() {
   return {
     mock: true,
     id: 'mock_account',
-    username: 'pulse.demo',
-    name: 'Pulse Demo',
+    username: 'atlavue.demo',
+    name: 'Atlavue Demo',
     followers_count: FOLLOWERS,
     follows_count: 312,
     media_count: 248,
-    biography: 'Демо-аккаунт для предпросмотра аналитики Pulse',
+    biography: 'Демо-аккаунт для предпросмотра аналитики Atlavue',
     website: 'https://atlavue.com',
     profile_picture_url: '',
   };

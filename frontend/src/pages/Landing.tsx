@@ -9,10 +9,10 @@ import {
   animate,
   cubicBezier,
 } from 'framer-motion';
-import { PulseMark } from '@/components/PulseMark';
+import { AtlavueMark } from '@/components/AtlavueMark';
 
 /**
- * Public marketing landing — "Pulse Refined Technical" (light, product-forward, Steep-style).
+ * Public marketing landing — "Atlavue Refined Technical" (light, product-forward, Steep-style).
  * Light by default (no forced .dark): warm paper canvas, hairline section dividers, one calm blue
  * accent, pill CTAs. The product itself does the selling — a dashboard that *assembles itself*
  * (autoplay on load) plus floating UI cards that pop in from the corners, steep.app-style.
@@ -227,8 +227,8 @@ function DashboardMock({ reduce }: { reduce: boolean }) {
         className="hidden w-[132px] shrink-0 flex-col gap-3 border-r border-border bg-background p-3 sm:flex"
       >
         <div className="flex items-center gap-1.5">
-          <PulseMark className="h-3.5 w-3.5 text-primary" />
-          <span className="text-[11px] font-medium">Pulse</span>
+          <AtlavueMark className="h-3.5 w-3.5 text-primary" />
+          <span className="text-[11px] font-medium">Atlavue</span>
         </div>
         <div className="flex items-center gap-1.5 rounded-md border border-border bg-card px-1.5 py-1">
           <span className="flex h-5 w-5 items-center justify-center rounded bg-avatar text-[9px] font-medium text-ink2">N</span>
@@ -316,7 +316,7 @@ function HeroCopy({ reduce }: { reduce: boolean }) {
   return (
     <motion.div variants={container} initial={reduce ? false : 'hidden'} animate="show">
       <motion.div variants={item} className="text-[13px] font-medium text-primary">Telegram + Instagram</motion.div>
-      <motion.h1 variants={item} className="mt-4 text-[clamp(54px,8vw,76px)] font-medium leading-[0.95] tracking-tight text-foreground">Pulse</motion.h1>
+      <motion.h1 variants={item} className="mt-4 text-[clamp(54px,8vw,76px)] font-medium leading-[0.95] tracking-tight text-foreground">Atlavue</motion.h1>
       <motion.p variants={item} className="mt-5 max-w-[22em] text-[clamp(18px,1.6vw,22px)] leading-snug text-ink2">
         Аналитика Telegram и Instagram без лишнего шума
       </motion.p>
@@ -454,8 +454,8 @@ function Header() {
     <header className="sticky top-0 z-20 border-b border-border bg-background/90 backdrop-blur">
       <div className={`${MAXW} flex h-[68px] items-center justify-between`}>
         <Link to="/" className="flex items-center gap-2.5">
-          <PulseMark className="h-[18px] w-[18px] text-primary" />
-          <span className="text-[17px] font-medium tracking-tight text-foreground">Pulse</span>
+          <AtlavueMark className="h-[18px] w-[18px] text-primary" />
+          <span className="text-[17px] font-medium tracking-tight text-foreground">Atlavue</span>
         </Link>
         <nav className="flex items-center gap-6 sm:gap-7">
           <a href="#features" className="hidden text-sm text-ink2 transition-colors hover:text-foreground sm:block">Возможности</a>
@@ -472,14 +472,14 @@ function Header() {
 
 function Pillars() {
   const items = [
-    { h: 'Локальный сбор данных', p: 'Collector работает на вашей стороне. Сессия Telegram не попадает в Pulse.', icon: Shield },
+    { h: 'Локальный сбор данных', p: 'Collector работает на вашей стороне. Сессия Telegram не попадает в Atlavue.', icon: Shield },
     { h: 'Инсайты по постам', p: 'Сигнал → тезис → действие по каждому посту, а не просто графики.', icon: Lightbulb },
-    { h: 'Состояние источников', p: 'Источник, последний сбор, версия сборщика и статус API — на виду.', icon: PulseMark },
+    { h: 'Состояние источников', p: 'Источник, последний сбор, версия сборщика и статус API — на виду.', icon: AtlavueMark },
   ];
   return (
     <section id="security" className="border-b border-border">
       <Reveal className={`${MAXW} py-16`}>
-        <div className="text-[13px] font-medium text-ink3">Почему Pulse</div>
+        <div className="text-[13px] font-medium text-ink3">Почему Atlavue</div>
         <h2 className="mt-2 max-w-[16em] text-[clamp(24px,3vw,30px)] font-medium tracking-tight text-foreground">
           Спокойная аналитика, которой можно доверять
         </h2>
@@ -634,8 +634,8 @@ function Footer() {
     <footer className="border-t border-border">
       <div className={`${MAXW} flex flex-col items-start justify-between gap-4 py-10 sm:flex-row sm:items-center`}>
         <div className="flex items-center gap-2.5 text-[13px] text-ink3">
-          <PulseMark className="h-[18px] w-[18px] text-ink3" />
-          Pulse · спокойная аналитика
+          <AtlavueMark className="h-[18px] w-[18px] text-ink3" />
+          Atlavue · спокойная аналитика
         </div>
         <nav className="flex items-center gap-6 text-[13px] text-ink3">
           <a href="#features" className="transition-colors hover:text-foreground">Возможности</a>
