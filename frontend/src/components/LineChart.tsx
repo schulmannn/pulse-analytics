@@ -1,6 +1,7 @@
 import { useId, useLayoutEffect, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { fmt } from '@/lib/format';
+import { detectAnomalies } from '@/lib/anomaly';
 import { ChartTooltip } from '@/components/ChartTooltip';
 
 interface LineChartProps {
@@ -10,6 +11,10 @@ interface LineChartProps {
   yMin?: number;
   yMax?: number;
   height?: number;
+  /** Overlay hollow amber rings on statistically unusual points (local-outlier detection). */
+  markAnomalies?: boolean;
+  /** A faded dashed previous-period series, drawn on the same y-scale for visual comparison. */
+  ghost?: number[];
 }
 
 interface Hover {
@@ -18,7 +23,7 @@ interface Hover {
   y: number;
 }
 
-export function LineChart({ values, labels, titles, yMin, yMax, height }: LineChartProps) {
+export function LineChart({ values, labels, titles, yMin, yMax, height, markAnomalies, ghost }: LineChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<Hover | null>(null);
   // Measure the real render width so the viewBox is 1:1 with CSS pixels — otherwise a
@@ -51,8 +56,9 @@ export function LineChart({ values, labels, titles, yMin, yMax, height }: LineCh
   const padX = 10;
   const padY = 12;
 
-  const computedMin = Math.min(...values);
-  const computedMax = Math.max(...values);
+  const scaleVals = ghost && ghost.length ? [...values, ...ghost] : values;
+  const computedMin = Math.min(...scaleVals);
+  const computedMax = Math.max(...scaleVals);
   const min = yMin ?? computedMin;
   const max = yMax ?? computedMax;
   const range = max - min || 1;
@@ -69,13 +75,30 @@ export function LineChart({ values, labels, titles, yMin, yMax, height }: LineCh
   const firstPt = points[0];
   const lastPt = points[n - 1];
 
+  const anomalyIdx = markAnomalies ? detectAnomalies(values) : [];
+  const anomalySet = new Set(anomalyIdx);
+
   const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
   const areaPath = `${linePath} L ${lastPt.x} ${h - padY} L ${firstPt.x} ${h - padY} Z`;
+
+  const ghostPath =
+    ghost && ghost.length >= 2
+      ? ghost
+          .map((v, i) => {
+            const gx = padX + i * step;
+            const gy = h - padY - ((v - min) / range) * (h - 2 * padY);
+            return `${i === 0 ? 'M' : 'L'} ${gx} ${gy}`;
+          })
+          .join(' ')
+      : '';
 
   const yGridValues = [max, (max + min) / 2, min];
   const yGridPositions = [padY, h / 2, h - padY];
 
-  const tipText = (i: number) => titles?.[i] ?? fmt.num(values[i]);
+  const tipText = (i: number) => {
+    const base = titles?.[i] ?? fmt.num(values[i]);
+    return anomalySet.has(i) ? `${base} · аномалия` : base;
+  };
   const onMove = (i: number) => (event: ReactMouseEvent) => {
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return;
@@ -99,9 +122,19 @@ export function LineChart({ values, labels, titles, yMin, yMax, height }: LineCh
           <line key={idx} x1={0} y1={yPos} x2={W} y2={yPos} stroke="hsl(var(--border))" strokeDasharray="4 6" strokeWidth="1" opacity="0.6" vectorEffect="non-scaling-stroke" />
         ))}
 
+        {/* Previous-period ghost line (faded dashed) — same y-scale for comparison */}
+        {ghostPath && (
+          <path d={ghostPath} fill="none" stroke="hsl(var(--muted-foreground))" strokeWidth="1.5" strokeDasharray="3 4" opacity="0.45" vectorEffect="non-scaling-stroke" />
+        )}
+
         {/* Gradient area + line */}
         <path d={areaPath} fill={`url(#${gradientId})`} />
         <path d={linePath} fill="none" stroke="hsl(var(--brand-iris))" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+
+        {/* Anomaly markers — hollow amber rings on statistically unusual points */}
+        {anomalyIdx.map((i) => (
+          <circle key={`a${i}`} cx={points[i].x} cy={points[i].y} r="5" fill="none" stroke="hsl(var(--status-warn))" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+        ))}
 
         {/* Last-point marker — flat crisp dot knocked out from the paper surface (no glow halo) */}
         <circle cx={lastPt.x} cy={lastPt.y} r="4" fill="hsl(var(--brand-iris))" stroke="hsl(var(--background))" strokeWidth="2" vectorEffect="non-scaling-stroke" />

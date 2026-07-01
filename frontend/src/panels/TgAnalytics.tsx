@@ -99,6 +99,9 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
   const last14Dates = sortedDates.slice(-14);
   const vbdValues = last14Dates.map((d) => Number(viewsByDayRaw[d] ?? 0));
   const vbdTitles = last14Dates.map((d) => `${d}: ${fmt.num(viewsByDayRaw[d] ?? 0)} просмотров`);
+  // Ghost overlay = the previous equal-length window (the "vs прошлый период" comparison on the chart).
+  const prev14Dates = sortedDates.slice(-28, -14);
+  const vbdPrev = prev14Dates.length >= 2 ? prev14Dates.map((d) => Number(viewsByDayRaw[d] ?? 0)) : undefined;
 
   // 3) Reactions by emoji
   const emojiMap: Record<string, number> = {};
@@ -131,6 +134,24 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
         .filter((item) => item.value > 0)
         .sort((a, b) => b.value - a.value)
     : [];
+
+  // 5b) Engagement quality by format — avg ERV per media type (which formats actually engage,
+  // not just which get views). Computed from the in-range posts.
+  const formatPerf = (() => {
+    const g: Record<string, { n: number; ervSum: number; ervN: number }> = {};
+    posts.forEach((p) => {
+      const t = p.mediaType || 'text';
+      (g[t] ??= { n: 0, ervSum: 0, ervN: 0 }).n++;
+      if (p.erv != null) {
+        g[t].ervSum += p.erv;
+        g[t].ervN++;
+      }
+    });
+    return Object.entries(g)
+      .map(([t, v]) => ({ label: typeNames[t] || t, avgErv: v.ervN ? v.ervSum / v.ervN : 0, n: v.n }))
+      .filter((x) => x.n > 0 && x.avgErv > 0)
+      .sort((a, b) => b.avgErv - a.avgErv);
+  })();
 
   const formatMsDate = (ts: number) => {
     const d = new Date(ts);
@@ -276,8 +297,9 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
         {inGroup('dynamics') && last14Dates.length >= 2 && (
           <ChartSection title="Просмотры по дням">
             <ExpandableChart title="Просмотры по дням">
-              <LineChart values={vbdValues} labels={[last14Dates[0] ?? '', last14Dates[Math.floor(last14Dates.length / 2)] ?? '', last14Dates[last14Dates.length - 1] ?? '']} titles={vbdTitles} />
+              <LineChart values={vbdValues} labels={[last14Dates[0] ?? '', last14Dates[Math.floor(last14Dates.length / 2)] ?? '', last14Dates[last14Dates.length - 1] ?? '']} titles={vbdTitles} markAnomalies ghost={vbdPrev} />
             </ExpandableChart>
+            {vbdPrev && <div className="mt-2 text-2xs text-muted-foreground">Пунктир — прошлый период (для сравнения).</div>}
           </ChartSection>
         )}
 
@@ -299,6 +321,12 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
           </ChartSection>
         )}
 
+        {inGroup('content') && formatPerf.length > 0 && (
+          <ChartSection title="Вовлечённость по формату">
+            <Breakdown items={formatPerf.map((f) => ({ label: f.label, value: f.avgErv, display: `${f.avgErv.toFixed(1)}% ERV · ${f.n} шт` }))} />
+          </ChartSection>
+        )}
+
         {inGroup('dynamics') && hasGrowth && growthGroup && growthSeries && (
           <ChartSection title="Рост подписчиков">
             <ExpandableChart title="Рост подписчиков">
@@ -306,6 +334,7 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
                 values={growthSeries.values}
                 titles={growthSeries.values.map((v, i) => `${growthGroup.x[i] ? formatMsDate(growthGroup.x[i]!) : ''}: ${fmt.num(v)} подписчиков`)}
                 labels={interLabels(growthGroup)}
+                markAnomalies
               />
             </ExpandableChart>
           </ChartSection>
@@ -317,7 +346,7 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
               <div>
                 <div className="mb-2 text-2xs font-medium tracking-wider text-muted-foreground">{viewSeries.name || 'Просмотры'}</div>
                 <ExpandableChart title={viewSeries.name || 'Просмотры'}>
-                  <LineChart values={viewSeries.values} labels={interLabels(interGroup)} />
+                  <LineChart values={viewSeries.values} labels={interLabels(interGroup)} markAnomalies />
                 </ExpandableChart>
               </div>
               <div>

@@ -200,16 +200,25 @@ audit's "8px→4px" premise doesn't apply; the radius language was already visua
 ---
 
 ## Sprint F1 — Analytics features · batch 1
-- [ ] **Timeline annotations / event markers** — mark campaigns/launches/algorithm-changes on charts to explain spikes. Store per-channel; toggle; tag-filter. *(fits "insight→action" ethos; Mixpanel/GA standard.)*
-- [ ] **Ghost previous-period overlay on the charts themselves** (faded prior period), not just the Compare table. *(partial: TG had a ghost-overlay experiment; make it a first-class, everywhere toggle.)*
-- [ ] **Content breakdown by format/type** aggregated (IG Reels/Stories/Posts; TG text/media) — which formats drive engagement. *(per-post exists; add aggregate + comparison.)*
-- [ ] **Engagement composition over time** (likes/comments/shares/saves as a stacked trend) — quality of interaction, not just totals.
+- [⏸] **Timeline annotations / event markers** — **NEEDS BACKEND + DB** (per-channel annotations table + CRUD API to mark campaigns/launches/algorithm-changes on charts). Deferred pending confirmation that Railway Postgres (`DATABASE_URL`) is set. *(A localStorage-only v1 is possible but per-browser / not shared — not built.)*
+- [x] **Ghost previous-period overlay** — `LineChart` `ghost` prop draws the previous equal-length window as a faded dashed line on the **same y-scale**, with a "Пунктир — прошлый период" hint. Wired on "Просмотры по дням" (previous 14 days via `views_by_day.slice(-28,-14)`, guarded when history is long enough). Verified live (dashed line renders, 0 errors). *(everywhere-toggle + more trend charts → follow-up.)*
+- [x] **Content breakdown by format** — new "Вовлечённость по формату" section (Контент tab): avg **ERV per media type** from in-range posts (which formats *engage*, complementing "Ср. охват по типу" = which get views). Sorted desc, "X% ERV · N шт". Verified live. *(IG format aggregate + period comparison → follow-up.)*
+- [⏸] **Engagement composition over time** (stacked likes/comments/shares/saves) — **DATA-BLOCKED for TG**: the graphs API exposes only `views_by_day` + `interactions` (views/shares), no daily reactions/replies series. Totals live in "Состав вовлечённости"; format-quality in the new "Вовлечённость по формату". *(Revisit if a daily engagement series is added, or do it for IG.)*
 
 ## Sprint F2 — Analytics features · batch 2
-- [ ] **Interactive charts standardized:** crosshair tooltip (F0 above) + **brush-to-zoom** (drag to zoom a range) + **click-to-drill** with breadcrumbs (generalize the existing KpiDrillDown across chart types).
-- [ ] **Anomaly / trend markers on charts** — flag statistically unusual spikes/drops (rolling baseline, >2–3σ) with an in-chart marker + "почему" tie-in to auto-insights. *(builds on tgInsights/igInsights.)*
-- [ ] **Post leaderboard** — ranked, sortable-by-any-metric list (generalize TopPosts).
-- [ ] **Saved views / presets** — named dashboard configs ("Обзор для руководителя / Контент / Конкуренты"). *(partial: per-user layout prefs exist — extend to named, switchable views.)*
+- [~] **Interactive charts standardized:** **crosshair — done** (LineChart snap-to-nearest guide + paper tooltip, D3). **brush-to-zoom → deferred** (largely redundant with `ExpandableChart`'s window presets 1М/3М/6М/Всё; high interaction complexity vs payoff). **click-to-drill on charts → deferred** (large; `KpiDrillDown` already covers KPI drill).
+- [x] **Anomaly / trend markers on charts** — `lib/anomaly.ts` `detectAnomalies` (local-outlier: rolling neighbourhood mean±σ, flag >2.5σ, never flags a smooth trend) + `LineChart markAnomalies` prop → hollow amber rings on outlier points + "· аномалия" appended to the hover tooltip. Enabled on История подписчиков / Просмотры по дням / Рост подписчиков. **+6 unit tests** (87 total). Verified live (ring renders, 0 errors). *(Deeper "почему" tie-in to auto-insights → follow-up.)*
+- [x] **Post leaderboard** — the Posts "Публикации · топ-25" table is now **sortable by any of 6 metrics** (Просмотры / Реакции / Репосты / Вирал. / ERV / ER) via clickable headers with ↑/↓/↕ indicators (toggle asc/desc). Verified live (ER sort reorders rows + moves the active indicator). *(mobile list follows the active sort.)*
+- [⏸] **Saved views / presets** — **NEEDS BACKEND + DB** (extend `user_prefs` to named configs + API). Deferred pending the DB confirmation. *(per-user layout prefs already persist; this adds named/switchable views.)*
+
+> **F1/F2 progress (frontend, UNCOMMITTED — user reviewing before commit/deploy):**
+> ✅ anomaly markers (F2), ✅ post leaderboard (F2), ✅ ghost previous-period overlay (F1),
+> ✅ content breakdown by format (F1). Build + **87 tests** green; each verified live in demo mode.
+> ⏸ **Blocked on backend/DB:** timeline annotations (F1) + saved-views (F2) — need Railway Postgres
+> (`DATABASE_URL`); **data-blocked:** engagement-over-time (no daily reactions series in TG graphs).
+> **Deferred:** brush-zoom (redundant with the window presets), chart-drill (large; KPI drill exists).
+
+---
 
 ## Sprint F3 — Reporting & sharing
 - [ ] **Export PNG + PDF** (chart→PNG preserving fonts/colors; dashboard→paginated PDF) on top of existing CSV (`lib/igExport`, `downloadCsv`).

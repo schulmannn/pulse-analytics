@@ -57,6 +57,7 @@ function SubscriberHistoryChart({ rows }: { rows: SubscriberRow[] }) {
       titles={titles}
       labels={labels}
       height={260}
+      markAnomalies
     />
   );
 }

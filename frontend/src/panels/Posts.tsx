@@ -11,10 +11,29 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { RichText } from '@/components/RichText';
 import { TopPosts } from '@/panels/TopPosts';
 
+type SortKey = 'reach' | 'likes' | 'shares' | 'virality' | 'erv' | 'er';
+const SORT_COLUMNS: { key: SortKey; label: string; get: (p: NormalizedPost) => number }[] = [
+  { key: 'reach', label: 'Просмотры', get: (p) => p.reach },
+  { key: 'likes', label: 'Реакции', get: (p) => p.likes },
+  { key: 'shares', label: 'Репосты', get: (p) => p.shares ?? 0 },
+  { key: 'virality', label: 'Вирал.', get: (p) => p.virality ?? 0 },
+  { key: 'erv', label: 'ERV', get: (p) => p.erv ?? 0 },
+  { key: 'er', label: 'ER', get: (p) => p.er ?? 0 },
+];
+
 export function Posts() {
   const { days, inRange } = usePeriod();
   const { data, isLoading, isError, error } = useTgFull(days);
   const [openId, setOpenId] = useState<number | null>(null);
+  const [sortKey, setSortKey] = useState<SortKey>('reach');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const toggleSort = (key: SortKey) => {
+    if (key === sortKey) setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+    else {
+      setSortKey(key);
+      setSortDir('desc');
+    }
+  };
 
   if (isLoading) return <PostsSkeletons />;
   if (isError) {
@@ -41,8 +60,11 @@ export function Posts() {
     );
   }
 
-  // Таблица — по охвату, топ 25
-  const tablePosts = [...posts].sort((a, b) => b.reach - a.reach).slice(0, 25);
+  // Таблица — сортируемый лидерборд (по любому столбцу), топ 25
+  const sortGet = SORT_COLUMNS.find((c) => c.key === sortKey)!.get;
+  const tablePosts = [...posts]
+    .sort((a, b) => (sortDir === 'desc' ? sortGet(b) - sortGet(a) : sortGet(a) - sortGet(b)))
+    .slice(0, 25);
 
   const selectedPost = posts.find((p) => p.id === openId);
 
@@ -59,7 +81,7 @@ export function Posts() {
       {/* Таблица публикаций */}
       <div className="space-y-4">
         <h3 className="text-sm font-medium tracking-wide text-muted-foreground">
-          Последние публикации (Топ-25 по охвату)
+          Публикации · топ-25 (нажмите на столбец для сортировки)
         </h3>
         <div className="hidden overflow-x-auto md:block">
           <table className="w-full border-collapse text-left text-sm">
@@ -67,12 +89,23 @@ export function Posts() {
               <tr className="border-b border-border text-xs font-medium tracking-wider text-muted-foreground">
                 <th className="w-12 p-4 text-center"></th>
                 <th className="min-w-[240px] p-4">Пост</th>
-                <th className="p-4 text-right">Просмотры</th>
-                <th className="p-4 text-right">Реакции</th>
-                <th className="p-4 text-right">Репосты</th>
-                <th className="p-4 text-right">Вирал.</th>
-                <th className="p-4 text-right">ERV</th>
-                <th className="p-4 text-right">ER</th>
+                {SORT_COLUMNS.map((c) => {
+                  const active = c.key === sortKey;
+                  return (
+                    <th key={c.key} className="p-4 text-right">
+                      <button
+                        type="button"
+                        onClick={() => toggleSort(c.key)}
+                        className={cn('ml-auto inline-flex items-center gap-1 tabular-nums transition-colors', active ? 'text-primary' : 'hover:text-foreground')}
+                      >
+                        {c.label}
+                        <span aria-hidden="true" className={cn('text-2xs', !active && 'text-ink3/60')}>
+                          {active ? (sortDir === 'desc' ? '↓' : '↑') : '↕'}
+                        </span>
+                      </button>
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
