@@ -106,27 +106,36 @@ audit's "8px→4px" premise doesn't apply; the radius language was already visua
 *Every remaining per-screen finding. Group the work by screen.*
 
 ### Overview / TG
-- [ ] TopPosts empty state → 3-part (heading + reason + link to /analytics) instead of bare text (`panels/TopPosts.tsx:74`).
-- [ ] Metric hierarchy in TopPosts/Posts: primary (Просмотры) dark/semibold, secondary muted, derived (ER) dimmest.
+- [x] TopPosts empty state → 3-part `EmptyState` (heading + reason + link to /analytics) (`panels/TopPosts.tsx`).
+- [x] Metric hierarchy in TopPosts cells: `COLUMN_TONE` — Просмотры `text-foreground` (primary) → Реакции/Репосты `text-ink2` → ER `text-ink3` (dimmest); active sort column gets a weight bump (affordance stays in the header arrow). *(Posts full table already had Просмотры-dark / secondary-muted; ERV/ER keep the meaningful PctTag colour-coding.)*
 
 ### Posts / Mentions
-- [ ] Posts row hover: drop `group-hover:text-primary` (`Posts.tsx:102`) — let the row-bg shift carry the affordance (no double shout).
-- [ ] Album badge → inline text `· N фото` (drop the categorical `bg-secondary` pill) (`Posts.tsx:108`).
-- [ ] Posts mobile: replace 8-col horizontal-scroll table with a card list < md (reuse `TopPosts.tsx:93–191` pattern).
-- [ ] PostModal stat boxes `rounded-lg bg-muted/40` → `rounded border border-border bg-background`; reason "badge" → plain `text-verdant` statement (no pill).
-- [ ] Mentions KPI hierarchy (Упоминаний primary / Каналов secondary / Охват tertiary).
-- [ ] Mentions empty state: solid hairline (not `border-dashed`); quota meter → a SourceStatus-style badge above charts (not a footnote).
-- [ ] Mentions section titles → hairline-above label (`border-t pt-4`), not full-width flex divider; BarChart x-labels: rotate/thin on mobile (14 dates overlap).
+- [x] Posts row hover: dropped `group-hover:text-primary` — the `hover:bg-hover-row` row shift carries it.
+- [x] Album badge → inline `· N фото` (dropped the `bg-secondary` pill).
+- [x] Posts mobile: 8-col horizontal-scroll table → **card list < md** (reuses the TopPosts row shape). Verified: at 375px the table is `display:none`, the list shows.
+- [x] PostModal (`Posts.tsx`) reaction stat boxes `border-border/20 bg-muted/40` → `border-border bg-background`; **`PostDetailModal`** reason pill → plain `text-verdant` statement (verified: not a pill) + its Stat boxes → `rounded border border-border bg-background` (7 hairline stat boxes, 0 muted).
+- [x] Mentions KPI hierarchy — shade ramp Упоминаний `foreground` / Каналов `ink2` / Охват `ink3` (verified live: rgb 27→78→107).
+- [x] Mentions empty state: `border-dashed` Card → **solid hairline** de-carded box; `MentionsSkeletons` rebuilt to the open-ledger scaffold (no card→ledger flash); removed unused `Card` import.
+- [~] Deferred: Mentions quota meter → SourceStatus badge (minor); section titles → hairline-above → **D4** (needs to change all `ChartSection`s together for consistency); BarChart x-label rotate/thin on mobile → **D3** (chart-craft, BarChart component).
 
-### Instagram (parity pass)
-- [ ] IG post cards: drop Card chrome (see D1.3); sort buttons → small pill toggles (not `rounded-lg px-3 py-1.5`).
-- [ ] `font-mono` ONLY for timestamps — remove from media_type/type labels (`content.tsx:87,368`).
-- [ ] Reels KPI grid → 2-mobile/4-desktop to align with other KPI blocks.
-- [ ] Tags card: make whole card a link (native `<a>`), add hover underline on @username.
-- [ ] DataHealth rows: label small (`text-xs`), value `text-sm font-mono` (currently inverted) (`health.tsx:23`).
-- [ ] Insights: single-insight (Overview) → plain text+evidence, no grid; grid only for limit>1 (`insights.tsx`).
-- [ ] BestTimeHeatmap responsive: `min-w-full lg:min-w-[440px]` + mobile fallback (`audience.tsx`).
-- [ ] Empty states → hairline sections (not Cards) across health/content/insights.
+### Instagram (parity pass) — ✅ DONE
+- [x] IgPostCard de-carded: dropped `Card` → `border-t` hairline cell; rank/type moved into a header row (no positioned image overlays); dropped the `bg-muted/10` stat tint + the `font-mono` on the type label. Verified live: 0 card wrappers, rank headers present.
+- [x] Sort buttons → `.btn-pill` toggles (verified: border-radius 9999px). `font-mono` now timestamp-only (Tags/Stories timestamps keep it; type labels don't).
+- [x] Tags card is a native `<a>` (already) + `group-hover:underline` on @username + `rounded`.
+- [x] DataHealth rows: label `text-xs`, value `text-sm font-mono` (fixed the inversion).
+- [x] IG Insights: single insight → plain analyst note (no grid chrome); 2+ → hairline ledger. Empty → `EmptyState`.
+- [x] BestTimeHeatmap responsive: `min-w-full lg:min-w-[440px]` (verified live).
+- [x] Empty states → `EmptyState` across content (6) + insights; health has none.
+- [~] **Skipped:** Reels KPI grid 2-mobile — 3 KPIs don't tile cleanly into 2/4 cols (an empty half-cell); left `grid-cols-1 sm:grid-cols-3`. **Side effect noted:** removing `Breakdown.icon` dropped the country-flag emoji + contact-type emoji (audience/IgAudience) — consistent with no-emoji-in-data-views; labels (country names / CONTACT_LABEL) carry the meaning. Dead `icon:` props + `flag`/`CONTACT_ICON` imports cleaned up.
+
+### Settings / Auth / Landing / Connect / GetStarted — ✅ DONE
+- [x] Settings: `space-y-6` (D1.4); `Подключённые каналы` gets a `border-t` hairline-above; empty states (channels list + DB-disabled) → solid hairline boxes (dropped `border-dashed` + `bg-muted/20` fill).
+- [x] Settings ChannelKeysPanel `⚠️` → inline SVG alert (done in the emoji-purge pass).
+- [x] Auth: AtlavueMark `h-5 w-5`; Trust icons normalized to `strokeWidth 1.5`; input radius `rounded-[4px]`→`rounded`.
+- [x] Connect: CodeBlock `<pre>` already `font-mono`; Step badge → `bg-primary/10 text-primary` (subtle); step title → `text-base`.
+- [x] GetStarted BloomArt: strokes → monochrome `text-border` (single accent bloom kept); CTAs → `.btn-pill`.
+- [x] Landing: Pillars symmetric column gutters (inner-edge padding on both sides of each divider).
+- [~] **Landing HeroAurora = OWNER DECISION (flagged, not changed):** the 3 peach/pink/blue radial glows + hero drop-shadow read as generic-SaaS vs warm-paper/hairline, BUT they're a deliberately-shipped hero choice. Flatten to on-brand (single soft blue wash / none) or keep as a deliberate hero exception — your call. Hero mock is `hidden md:block` (no 390px overflow), so the responsive-mock item is moot.
 
 ### Settings / Auth / Landing / Connect / GetStarted
 - [ ] Settings: `space-y-8`→`space-y-6`; section intro headings read as ledger breaks not form labels; `Подключённые каналы` gets a hairline-above; empty state = hairline box (not dashed+fill).
@@ -136,12 +145,25 @@ audit's "8px→4px" premise doesn't apply; the radius language was already visua
 - [ ] Connect: `font-mono` on the CodeBlock `<pre>` itself; Step badge → `bg-primary/10 text-primary` (subtle) + bump step title to `text-base`.
 - [ ] GetStarted BloomArt: monochrome strokes (border) + single accent bloom (drop `text-ink3` on decorative strokes).
 
-### Emoji-as-icons purge (AI-tell)
-- [ ] Remove 😊😐😠 (sentiment), ❤️↗️💬 (engagement), ➕➖ (churn) from `panels/TgAnalytics.tsx` + `panels/Insights.tsx` → color dots (Breakdown coding) + text.
-- [ ] (Single flavor-emoji in a true empty state is acceptable; decoration emoji in data views is not.)
+### Emoji-as-icons purge (AI-tell) — ✅ DONE
+- [x] Removed 😊😐😠 (sentiment), ❤️↗️💬 (engagement), ➕➖ (churn) from `panels/TgAnalytics.tsx` → `Breakdown` **colour dots**: sentiment verdant/ink3/ember (matches delta palette), engagement chart-1/2/3, churn verdant/ember. Repurposed `mapSourceItems`' 3rd param emoji→colour; **removed the now-dead `icon` prop** from `Breakdown`. (`Insights.tsx` had none.) Verified live: 6 colour dots, 0 purged emoji in DOM.
+- [x] Settings `⚠️` → inline **stroke SVG alert triangle** + recoloured the one-time-key caution `text-verdant`→`text-status-warn` (amber caution, was mis-green).
+- [x] Kept legitimately: **reaction-emoji data** ("Реакции по эмодзи" shows the actual 👍🔥❤️ reactions — that's the data, not a decorative icon) and demo post-text emoji.
 
-### Empty-state pattern (make one, use everywhere)
-- [ ] Standard: `rounded border border-dashed bg-background py-8 text-center` + heading + reason + optional action link. Apply to CollectorEmptyState, TgAnalytics no-data, Bugs/Admin empty, Mentions.
+### Empty-state pattern (make one, use everywhere) — ✅ DONE
+- [x] Created `components/EmptyState.tsx` — the one pattern: `rounded border border-dashed border-border bg-background py-8 text-center` + heading + optional reason + optional action link (hairline box, not a Card).
+- [x] Applied: `TgAnalytics` no-data, all 6 IG `content.tsx` empty states, IG Insights, `TopPosts` (with `/analytics` action link), `Bugs` (DB-disabled + Багов пока нет). `Mentions` + `Settings` empties use the **solid** hairline variant (actionable/section context, not dashed). `CollectorEmptyState` de-carded (kept the 3-step checklist, dropped the Card).
+- *(Two empty-state flavors, intentional: **dashed** `EmptyState` = passive "no data"; **solid** hairline = actionable panel / section container — Mentions, Settings.)*
+
+---
+
+> **Sprint D2 — ✅ COMPLETE** (see per-section marks above). Emoji-icon purge, one reusable
+> empty-state, metric hierarchy, Posts/Mentions mobile + hierarchy, full IG parity (de-card, pill
+> toggles, font-mono scope, DataHealth, single-insight, responsive heatmap), Auth/Connect/GetStarted/
+> Landing/Settings polish. Verified live; build + 81 tests green. **One open owner decision: Landing
+> HeroAurora** (flatten vs keep). Consciously deferred out of D2: Reels KPI tiling; a few items
+> routed to D3 (BarChart mobile x-labels, heatmap best-slot border token) / D4 (section-title
+> hairline-above consistency, Mentions quota badge).
 
 ---
 

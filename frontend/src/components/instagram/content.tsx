@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { fmt } from '@/lib/format';
-import { Card, CardContent } from '@/components/ui/card';
+import { EmptyState } from '@/components/EmptyState';
 import { Breakdown } from '@/components/Breakdown';
 import { ExpandableChart } from '@/components/ExpandableChart';
 import { BarChart } from '@/components/BarChart';
@@ -44,9 +44,7 @@ export function TopPostsBlock({ posts, limit = 9, showSort = true }: { posts: Ig
   const [sort, setSort] = useState<SortKey>('reach');
   if (posts.length === 0) {
     return (
-      <Card>
-        <CardContent className="py-8 text-center text-sm text-muted-foreground">Публикаций пока нет.</CardContent>
-      </Card>
+      <EmptyState title="Публикаций пока нет." />
     );
   }
   const top = [...posts].sort((a, b) => Number(b[sort] ?? 0) - Number(a[sort] ?? 0)).slice(0, limit);
@@ -59,7 +57,7 @@ export function TopPostsBlock({ posts, limit = 9, showSort = true }: { posts: Ig
               key={key}
               type="button"
               onClick={() => setSort(key)}
-              className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+              className={`btn-pill px-3 py-1 text-xs font-medium transition-colors ${
                 sort === key ? 'bg-primary/15 text-foreground' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'
               }`}
             >
@@ -78,30 +76,29 @@ export function TopPostsBlock({ posts, limit = 9, showSort = true }: { posts: Ig
 export function IgPostCard({ post, rank }: { post: IgPost; rank: number }) {
   const typeLabel = MEDIA_TYPE_LABEL[post.media_type ?? ''] ?? 'Пост';
   return (
-    <Card className="flex flex-col justify-between overflow-hidden">
-      <div>
-        <div className="relative flex aspect-video w-full items-center justify-center overflow-hidden bg-muted/50">
-          {post.thumbnail_url || post.media_url ? (
-            <img src={post.thumbnail_url || post.media_url || ''} alt="" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
-          ) : (
-            <span className="font-mono text-xs text-muted-foreground">{typeLabel}</span>
-          )}
-          <div className="absolute left-2 top-2 rounded bg-background/90 px-2 py-0.5 text-xs font-medium text-foreground">#{rank}</div>
-          <div className="absolute right-2 top-2 rounded bg-primary px-2 py-0.5 text-2xs font-medium tracking-wide text-primary-foreground">{typeLabel}</div>
-        </div>
-        <div className="p-4">
-          <p className="line-clamp-3 text-sm leading-relaxed text-foreground">
-            {post.caption ? <RichText text={post.caption} /> : <span className="italic text-muted-foreground">Без подписи</span>}
-          </p>
-        </div>
+    <div className="flex flex-col border-t border-border pt-3">
+      {/* header row — rank + type as a hairline label (no positioned overlays on the image) */}
+      <div className="mb-2 flex items-center justify-between text-2xs font-medium tracking-wide">
+        <span className="tabular-nums text-ink3">#{rank}</span>
+        <span className="text-muted-foreground">{typeLabel}</span>
       </div>
-      <div className="grid grid-cols-4 gap-1 border-t border-border/40 bg-muted/10 p-4 pt-0 text-center">
+      <div className="flex aspect-video w-full items-center justify-center overflow-hidden rounded bg-muted/50">
+        {post.thumbnail_url || post.media_url ? (
+          <img src={post.thumbnail_url || post.media_url || ''} alt="" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
+        ) : (
+          <span className="text-2xs text-muted-foreground">{typeLabel}</span>
+        )}
+      </div>
+      <p className="mt-3 line-clamp-3 flex-1 text-sm leading-relaxed text-foreground">
+        {post.caption ? <RichText text={post.caption} /> : <span className="italic text-muted-foreground">Без подписи</span>}
+      </p>
+      <div className="mt-3 grid grid-cols-4 gap-1 border-t border-border pt-3 text-center">
         <Stat label="Охват" value={fmt.short(Number(post.reach ?? 0))} />
         <Stat label="Просм." value={fmt.short(Number(post.views ?? 0))} />
         <Stat label="Сохр." value={fmt.short(Number(post.saved ?? 0))} />
         <Stat label="Репосты" value={fmt.short(Number(post.shares ?? 0))} />
       </div>
-    </Card>
+    </div>
   );
 }
 
@@ -110,9 +107,7 @@ export function ReelsBlock({ posts }: { posts: IgPost[] }) {
   const reels = posts.filter((p) => p.media_product_type === 'REELS');
   if (reels.length === 0) {
     return (
-      <Card>
-        <CardContent className="py-8 text-center text-sm text-muted-foreground">Reels пока нет.</CardContent>
-      </Card>
+      <EmptyState title="Reels пока нет." />
     );
   }
   const avgSec = (r: IgPost) => Math.round(Number(r.ig_reels_avg_watch_time ?? 0) / 1000);
@@ -144,9 +139,7 @@ export function HashtagsBlock({ posts }: { posts: IgPost[] }) {
   const stats = hashtagStats(posts).slice(0, 12);
   if (stats.length === 0) {
     return (
-      <Card>
-        <CardContent className="py-8 text-center text-sm text-muted-foreground">В публикациях нет хэштегов.</CardContent>
-      </Card>
+      <EmptyState title="В публикациях нет хэштегов." />
     );
   }
   return (
@@ -223,11 +216,7 @@ export function CompareBlock({ posts }: { posts: IgPost[] }) {
         ))}
       </div>
       {chosen.length < 2 ? (
-        <Card>
-          <CardContent className="py-8 text-center text-sm text-muted-foreground">
-            Выберите минимум 2 публикации для сравнения (до 4).
-          </CardContent>
-        </Card>
+        <EmptyState title="Выберите минимум 2 публикации для сравнения (до 4)." />
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
@@ -276,12 +265,10 @@ export function CompareBlock({ posts }: { posts: IgPost[] }) {
 export function TagsBlock({ tags, mock }: { tags: IgTag[]; mock?: boolean }) {
   if (tags.length === 0) {
     return (
-      <Card>
-        <CardContent className="py-8 text-center text-sm text-muted-foreground">
-          Пока вас никто не отметил на фото. Новые отметки появятся здесь автоматически
-          {mock ? '.' : ' и сохранятся в истории.'}
-        </CardContent>
-      </Card>
+      <EmptyState
+        title="Пока вас никто не отметил на фото."
+        reason={`Новые отметки появятся здесь автоматически${mock ? '.' : ' и сохранятся в истории.'}`}
+      />
     );
   }
   return (
@@ -292,14 +279,14 @@ export function TagsBlock({ tags, mock }: { tags: IgTag[]; mock?: boolean }) {
           href={t.permalink ?? undefined}
           target="_blank"
           rel="noreferrer"
-          className="flex items-start gap-3 rounded-lg border border-border p-3 transition-colors hover:bg-hover-row"
+          className="group flex items-start gap-3 rounded border border-border p-3 transition-colors hover:bg-hover-row"
         >
           <span className="mt-0.5 shrink-0 rounded bg-muted px-2 py-0.5 text-2xs font-medium tracking-wide text-muted-foreground">
             {MEDIA_TYPE_LABEL[t.media_type ?? ''] ?? 'Пост'}
           </span>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-x-2 text-sm">
-              <span className="font-medium text-primary">@{t.username ?? '—'}</span>
+              <span className="font-medium text-primary decoration-primary/40 underline-offset-2 group-hover:underline">@{t.username ?? '—'}</span>
               {t.timestamp && <span className="font-mono text-xs text-muted-foreground">{fmtDay(t.timestamp)}</span>}
             </div>
             {t.caption && <p className="mt-0.5 line-clamp-2 text-sm text-muted-foreground">{t.caption}</p>}
@@ -322,9 +309,7 @@ export function StoriesBlock({ stories }: { stories: IgStory[] | undefined }) {
   const list = stories ?? [];
   if (list.length === 0) {
     return (
-      <Card>
-        <CardContent className="py-8 text-center text-sm text-muted-foreground">Активных историй нет.</CardContent>
-      </Card>
+      <EmptyState title="Активных историй нет." />
     );
   }
   const sum = (k: keyof IgStory) => list.reduce((acc, s) => acc + Number(s[k] ?? 0), 0);

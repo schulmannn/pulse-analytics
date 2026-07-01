@@ -1,5 +1,4 @@
 import { Link } from 'react-router-dom';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 interface CollectorEmptyStateProps {
   username: string;
@@ -30,15 +29,15 @@ const STEPS: { title: string; body: string; to: string | null; cta: string | nul
     next-step checklist rather than a bare "нет данных". */
 export function CollectorEmptyState({ username }: CollectorEmptyStateProps) {
   return (
-    <Card className="max-w-lg">
-      <CardHeader>
-        <CardTitle className="text-foreground">Канал @{username} подключён — ждём первые данные</CardTitle>
+    <div className="max-w-lg rounded border border-border bg-background p-6">
+      <div className="space-y-1.5">
+        <h3 className="font-medium leading-none tracking-tight text-foreground">Канал @{username} подключён — ждём первые данные</h3>
         <p className="text-sm text-muted-foreground">
           Collector-агент считает метрики у вас локально. Осталось три шага:
         </p>
-      </CardHeader>
-      <CardContent>
-        <ol className="space-y-4">
+      </div>
+      <div>
+        <ol className="mt-6 space-y-4">
           {STEPS.map((step, i) => (
             <li key={i} className="flex gap-3">
               <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-xs font-medium text-muted-foreground">
@@ -56,7 +55,7 @@ export function CollectorEmptyState({ username }: CollectorEmptyStateProps) {
             </li>
           ))}
         </ol>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }

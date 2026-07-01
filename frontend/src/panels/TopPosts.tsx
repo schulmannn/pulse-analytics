@@ -6,6 +6,7 @@ import { markdownToPlainText } from '@/lib/markdown';
 import { cn } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PostDetailModal } from '@/components/PostDetailModal';
+import { EmptyState } from '@/components/EmptyState';
 import { usePeriod } from '@/lib/period';
 
 /**
@@ -30,6 +31,15 @@ const COLUMNS: Column[] = [
   { key: 'shares', label: 'Репосты', width: 'w-16', get: (p) => p.shares, render: (p) => fmt.short(p.shares) },
   { key: 'er', label: 'ER', width: 'w-14', get: (p) => p.er ?? 0, render: (p) => (p.er != null ? `${p.er.toFixed(1)}%` : '—') },
 ];
+
+// Static metric hierarchy (size+shade, not sort state): Просмотры primary → ER derived/dimmest.
+// The sort affordance lives in the header (arrow + accent); the active column just gets a weight bump.
+const COLUMN_TONE: Record<SortKey, string> = {
+  reach: 'text-foreground',
+  likes: 'text-ink2',
+  shares: 'text-ink2',
+  er: 'text-ink3',
+};
 
 export function TopPosts() {
   const { days, inRange } = usePeriod();
@@ -71,9 +81,11 @@ export function TopPosts() {
   if (isError) return null;
   if (rows.length === 0) {
     return (
-      <div className="border-t border-border py-8 text-center text-sm text-muted-foreground">
-        Недостаточно данных для топа постов.
-      </div>
+      <EmptyState
+        title="Недостаточно данных для топа постов."
+        reason="Нужно больше постов с вовлечением, чтобы выделить лучшие."
+        action={{ to: '/analytics', label: 'Открыть аналитику' }}
+      />
     );
   }
 
@@ -143,7 +155,7 @@ export function TopPosts() {
                 {COLUMNS.map((c) => (
                   <span
                     key={c.key}
-                    className={cn('shrink-0 text-right text-sm tabular-nums', c.width, c.key === sortKey ? 'text-foreground' : 'text-ink2')}
+                    className={cn('shrink-0 text-right text-sm tabular-nums', c.width, COLUMN_TONE[c.key], c.key === sortKey && 'font-medium')}
                   >
                     {c.render(post)}
                   </span>

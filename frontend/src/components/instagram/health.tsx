@@ -20,8 +20,8 @@ function Row({ label, value, tone }: { label: string; value: ReactNode; tone?: '
   const dot = tone === 'ok' ? 'bg-verdant' : tone === 'warn' ? 'bg-status-warn' : null;
   return (
     <div className="flex items-center justify-between gap-3 border-t border-border py-2.5 text-sm first:border-t-0 first:pt-0">
-      <span className="shrink-0 text-ink2">{label}</span>
-      <span className="flex min-w-0 items-center gap-1.5 truncate font-mono text-xs tabular-nums text-ink3">
+      <span className="shrink-0 text-xs text-ink2">{label}</span>
+      <span className="flex min-w-0 items-center gap-1.5 truncate font-mono text-sm tabular-nums text-ink3">
         {dot && <span aria-hidden="true" className={`h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} />}
         {value}
       </span>

@@ -7,7 +7,7 @@ import { Breakdown } from '@/components/Breakdown';
 import { DivergingBars } from '@/components/DivergingBars';
 import { ExpandableChart } from '@/components/ExpandableChart';
 import type { ReactNode } from 'react';
-import { Card, CardContent } from '@/components/ui/card';
+import { EmptyState } from '@/components/EmptyState';
 import { usePeriod } from '@/lib/period';
 import { Skeleton } from '@/components/ui/skeleton';
 
@@ -30,10 +30,12 @@ const SENT_NAME: Record<string, string> = {
   Negative: 'Отрицательные',
 };
 
-const SENT_ICON: Record<string, string> = {
-  Positive: '😊',
-  Other: '😐',
-  Negative: '😠',
+// Sentiment coding via colour dots (Breakdown), not emoji: verdant = positive, ember = negative,
+// ink3 = neutral/other — consistent with the delta palette (verdant up / ember down).
+const SENT_COLOR: Record<string, string> = {
+  Positive: 'hsl(var(--brand-verdant))',
+  Other: 'hsl(var(--ink3))',
+  Negative: 'hsl(var(--brand-ember))',
 };
 
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -62,13 +64,7 @@ export function TgAnalytics() {
   }
 
   if (!full && !cs && !graphs) {
-    return (
-      <Card>
-        <CardContent className="py-8 text-center text-sm text-muted-foreground">
-          Данных аналитики пока нет.
-        </CardContent>
-      </Card>
-    );
+    return <EmptyState title="Данных аналитики пока нет." reason="Как только collector-агент пришлёт первый снимок, здесь появятся графики." />;
   }
 
   const vs = full?.views_summary;
@@ -113,9 +109,9 @@ export function TgAnalytics() {
 
   // 4) Engagement composition
   const engagementComposition = [
-    { label: '❤️ Реакции', value: Number(vs?.total_reactions ?? 0) },
-    { label: '↗️ Репосты', value: Number(vs?.total_forwards ?? 0) },
-    { label: '💬 Комментарии', value: Number(vs?.total_replies ?? 0) },
+    { label: 'Реакции', value: Number(vs?.total_reactions ?? 0), color: 'hsl(var(--chart-1))' },
+    { label: 'Репосты', value: Number(vs?.total_forwards ?? 0), color: 'hsl(var(--chart-2))' },
+    { label: 'Комментарии', value: Number(vs?.total_replies ?? 0), color: 'hsl(var(--chart-3))' },
   ].filter((item) => item.value > 0);
 
   // 5) Avg views by type
@@ -151,7 +147,7 @@ export function TgAnalytics() {
   const mapSourceItems = (
     arr: Array<{ label?: string | null; value?: number | null }> | null | undefined,
     mapper?: Record<string, string>,
-    prefixMapper?: Record<string, string>,
+    colorMapper?: Record<string, string>,
   ) => {
     if (!arr) return [];
     return arr
@@ -160,7 +156,7 @@ export function TgAnalytics() {
         return {
           label: mapper ? mapper[rawLabel] || rawLabel : rawLabel,
           value: Number(item.value ?? 0),
-          icon: prefixMapper ? prefixMapper[rawLabel] : undefined,
+          color: colorMapper ? colorMapper[rawLabel] : undefined,
           display: fmt.num(Number(item.value ?? 0)),
         };
       })
@@ -169,7 +165,7 @@ export function TgAnalytics() {
   const vbsItems = mapSourceItems(graphs?.views_by_source, SRC_NAMES);
   const nfsItems = mapSourceItems(graphs?.new_followers_by_source, SRC_NAMES);
   const langItems = mapSourceItems(graphs?.languages);
-  const sentItems = mapSourceItems(graphs?.reactions_sentiment, SENT_NAME, SENT_ICON);
+  const sentItems = mapSourceItems(graphs?.reactions_sentiment, SENT_NAME, SENT_COLOR);
 
   // 9) Hours
   const thData = graphs?.top_hours;
@@ -288,7 +284,7 @@ export function TgAnalytics() {
 
         {engagementComposition.length > 0 && (
           <ChartSection title="Состав вовлечённости">
-            <Breakdown items={engagementComposition.map((c) => ({ label: c.label, value: c.value, display: fmt.num(c.value) }))} />
+            <Breakdown items={engagementComposition.map((c) => ({ label: c.label, value: c.value, display: fmt.num(c.value), color: c.color }))} />
           </ChartSection>
         )}
 
@@ -371,8 +367,8 @@ export function TgAnalytics() {
         {(joinedTotal > 0 || leftTotal > 0) && (
           <ChartSection title="Динамика оттока">
             <Breakdown items={[
-              { label: 'Подписалось', value: joinedTotal, display: fmt.num(joinedTotal), icon: '➕' },
-              { label: 'Отписалось', value: leftTotal, display: fmt.num(leftTotal), icon: '➖' },
+              { label: 'Подписалось', value: joinedTotal, display: fmt.num(joinedTotal), color: 'hsl(var(--brand-verdant))' },
+              { label: 'Отписалось', value: leftTotal, display: fmt.num(leftTotal), color: 'hsl(var(--brand-ember))' },
             ].filter((i) => i.value > 0)} />
           </ChartSection>
         )}

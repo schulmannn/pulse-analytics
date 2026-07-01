@@ -9,7 +9,7 @@ import { GoogleSignInButton } from '@/components/GoogleSignInButton';
 // hairline-bordered fields, pill primary button, one calm blue accent. Semantic/brand tokens only.
 
 const INPUT_CLASS =
-  'w-full rounded-[4px] border border-border bg-card px-3.5 py-2.5 text-sm text-foreground placeholder:text-ink3 focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50';
+  'w-full rounded border border-border bg-card px-3.5 py-2.5 text-sm text-foreground placeholder:text-ink3 focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50';
 const BUTTON_CLASS =
   'btn-pill mt-5 w-full bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50';
 const LABEL_CLASS = 'mb-1.5 block text-sm font-medium text-ink2';
@@ -32,7 +32,7 @@ function AuthShell({
   return (
     <div className="relative flex min-h-screen items-center justify-center bg-background px-5 py-16 text-foreground">
       <Link to="/" className="absolute left-6 top-6 flex items-center gap-2.5">
-        <AtlavueMark className="h-[18px] w-[18px] text-primary" />
+        <AtlavueMark className="h-5 w-5 text-primary" />
         <span className="text-lg font-medium tracking-tight text-foreground">Atlavue</span>
       </Link>
 
@@ -47,7 +47,7 @@ function AuthShell({
 
 function TrustIcon({ d }: { d: string }) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 shrink-0 text-ink2" aria-hidden="true">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 shrink-0 text-ink2" aria-hidden="true">
       <path d={d} />
     </svg>
   );

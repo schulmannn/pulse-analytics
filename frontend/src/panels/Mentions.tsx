@@ -1,6 +1,5 @@
 import { useMentions, useMentionsArchive } from '@/api/queries';
 import { fmt } from '@/lib/format';
-import { Card, CardContent } from '@/components/ui/card';
 import { BarChart } from '@/components/BarChart';
 import { Breakdown } from '@/components/Breakdown';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -52,23 +51,21 @@ export function Mentions() {
   // Nothing archived yet (and no live result) → invite the quota-costing search.
   if (!hasData) {
     return (
-      <Card className="border-dashed">
-        <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-          <h3 className="mb-1 text-base font-medium text-foreground">Аналитика упоминаний бренда</h3>
-          <p className="mb-5 max-w-md text-sm text-muted-foreground">
-            В архиве пока нет упоминаний. Поиск задействует MTProto API и расходует ежедневную
-            лимит-квоту аккаунта.
-          </p>
-          {liveError && <p className="mb-4 text-sm text-destructive">{liveError}</p>}
-          <button
-            onClick={refresh}
-            disabled={refreshing}
-            className="rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-          >
-            {refreshing ? 'Поиск…' : 'Загрузить упоминания'}
-          </button>
-        </CardContent>
-      </Card>
+      <div className="flex flex-col items-center justify-center rounded border border-border bg-background px-4 py-12 text-center">
+        <h3 className="mb-1 text-base font-medium text-foreground">Аналитика упоминаний бренда</h3>
+        <p className="mb-5 max-w-md text-sm text-muted-foreground">
+          В архиве пока нет упоминаний. Поиск задействует MTProto API и расходует ежедневную
+          лимит-квоту аккаунта.
+        </p>
+        {liveError && <p className="mb-4 text-sm text-destructive">{liveError}</p>}
+        <button
+          onClick={refresh}
+          disabled={refreshing}
+          className="rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+        >
+          {refreshing ? 'Поиск…' : 'Загрузить упоминания'}
+        </button>
+      </div>
     );
   }
 
@@ -137,11 +134,11 @@ export function Mentions() {
         </div>
         <div className="bg-background p-5">
           <div className="text-xs tracking-wide text-muted-foreground">Каналов</div>
-          <div className="mt-2 text-3xl font-medium tabular-nums tracking-tight">{fmt.num(uniqueChannels)}</div>
+          <div className="mt-2 text-3xl font-medium tabular-nums tracking-tight text-ink2">{fmt.num(uniqueChannels)}</div>
         </div>
         <div className="bg-background p-5">
           <div className="text-xs tracking-wide text-muted-foreground">Суммарный охват</div>
-          <div className="mt-2 text-3xl font-medium tabular-nums tracking-tight">{fmt.short(totalViews)}</div>
+          <div className="mt-2 text-3xl font-medium tabular-nums tracking-tight text-ink3">{fmt.short(totalViews)}</div>
         </div>
       </div>
 
@@ -234,52 +231,39 @@ function MentionsSkeletons() {
         <Skeleton className="h-9 w-32 shrink-0" />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      {/* KPI — open ledger scaffold (matches the live render, no card→ledger swap on load) */}
+      <div className="grid grid-cols-1 gap-px border-t border-border bg-border sm:grid-cols-3">
         {Array.from({ length: 3 }).map((_, i) => (
-          <Card key={i}>
-            <CardContent className="space-y-3 p-5">
-              <Skeleton className="h-3 w-1/2" />
-              <Skeleton className="h-8 w-2/3" />
-            </CardContent>
-          </Card>
+          <div key={i} className="bg-background p-5">
+            <Skeleton className="h-3 w-1/2" />
+            <Skeleton className="mt-2 h-8 w-2/3" />
+          </div>
         ))}
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <Card>
-          <CardContent className="space-y-4 p-5">
-            <Skeleton className="h-4 w-1/4" />
+        {Array.from({ length: 2 }).map((_, i) => (
+          <div key={i} className="space-y-3">
+            <Skeleton className="h-3 w-1/4" />
             <Skeleton className="h-40 w-full" />
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="space-y-4 p-5">
-            <Skeleton className="h-4 w-1/3" />
-            <div className="space-y-2.5">
-              <Skeleton className="h-8 w-full" />
-              <Skeleton className="h-8 w-11/12" />
-              <Skeleton className="h-8 w-4/5" />
-            </div>
-          </CardContent>
-        </Card>
+          </div>
+        ))}
       </div>
 
-      <Card>
-        <CardContent className="space-y-4 p-5">
-          <Skeleton className="h-4 w-1/4" />
-          <div className="space-y-3">
-            {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="space-y-2 border-b border-border/50 py-3 last:border-0">
-                <div className="flex items-center justify-between">
-                  <Skeleton className="h-4 w-1/3" />
-                  <Skeleton className="h-3 w-1/5" />
-                </div>
-                <Skeleton className="h-3 w-3/4" />
+      <div className="space-y-3">
+        <Skeleton className="h-3 w-1/4" />
+        <div className="space-y-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="space-y-2 border-b border-border/50 py-3 last:border-0">
+              <div className="flex items-center justify-between">
+                <Skeleton className="h-4 w-1/3" />
+                <Skeleton className="h-3 w-1/5" />
               </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+              <Skeleton className="h-3 w-3/4" />
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

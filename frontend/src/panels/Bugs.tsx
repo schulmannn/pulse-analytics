@@ -1,6 +1,7 @@
 import { useState, type FormEvent, type ChangeEvent } from 'react';
 import { useBugs, useCreateBug, useUpdateBugStatus, useDeleteBug } from '@/api/queries';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { EmptyState } from '@/components/EmptyState';
 import { fmt } from '@/lib/format';
 import { Skeleton } from '@/components/ui/skeleton';
 
@@ -30,11 +31,7 @@ export function Bugs() {
 
   if (data?.enabled === false) {
     return (
-      <Card className="border-dashed">
-        <CardContent className="py-8 text-center text-sm text-muted-foreground">
-          БД не подключена. Баг-трекер недоступен.
-        </CardContent>
-      </Card>
+      <EmptyState title="БД не подключена." reason="Баг-трекер недоступен." />
     );
   }
 
@@ -114,9 +111,7 @@ export function Bugs() {
       <div className="space-y-3">
         <h3 className="px-1 text-xs font-medium tracking-wider text-muted-foreground">Тикеты</h3>
         {bugs.length === 0 ? (
-          <div className="rounded-lg border border-dashed bg-muted/20 py-8 text-center text-sm text-muted-foreground">
-            Багов пока нет.
-          </div>
+          <EmptyState title="Багов пока нет." />
         ) : (
           <div className="space-y-3">
             {bugs.map((bug) => (

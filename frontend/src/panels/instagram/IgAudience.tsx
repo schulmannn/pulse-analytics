@@ -1,6 +1,6 @@
 import { useOutletContext } from 'react-router-dom';
 import { fmt } from '@/lib/format';
-import { pairDelta, tvBreakdown, CONTACT_LABEL, CONTACT_ICON } from '@/lib/igMetrics';
+import { pairDelta, tvBreakdown, CONTACT_LABEL } from '@/lib/igMetrics';
 import type { IgData } from '@/lib/useIgData';
 import { Section, KpiCard } from '@/components/instagram/shared';
 import { AudienceBlock, BestTimeHeatmap } from '@/components/instagram/audience';
@@ -41,7 +41,6 @@ export function IgAudience() {
                   label: CONTACT_LABEL[it.label] ?? it.label,
                   value: it.value,
                   display: fmt.short(it.value),
-                  icon: CONTACT_ICON[it.label],
                 }))}
               />
             )}

@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { useTgFull, usePostStats } from '@/api/queries';
 import { normalizeTgPosts, type NormalizedPost } from '@/lib/posts';
 import { fmt } from '@/lib/format';
+import { cn } from '@/lib/utils';
+import { markdownToPlainText } from '@/lib/markdown';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { LineChart } from '@/components/LineChart';
 import { usePeriod } from '@/lib/period';
@@ -59,7 +61,7 @@ export function Posts() {
         <h3 className="text-sm font-medium tracking-wide text-muted-foreground">
           Последние публикации (Топ-25 по охвату)
         </h3>
-        <div className="overflow-x-auto">
+        <div className="hidden overflow-x-auto md:block">
           <table className="w-full border-collapse text-left text-sm">
             <thead>
               <tr className="border-b border-border text-xs font-medium tracking-wider text-muted-foreground">
@@ -99,16 +101,12 @@ export function Posts() {
                     </td>
                     <td className="p-4">
                       <div className="max-w-sm space-y-1 md:max-w-md lg:max-w-lg">
-                        <div className="line-clamp-1 font-medium text-foreground transition-colors group-hover:text-primary">
+                        <div className="line-clamp-1 font-medium text-foreground">
                           {post.caption ? <RichText text={post.caption} /> : <span className="italic text-muted-foreground">Без подписи</span>}
                         </div>
                         <div className="flex items-center gap-2 text-xs text-muted-foreground">
                           <span>{fmt.date(post.date)}</span>
-                          {post.albumSize > 1 && (
-                            <span className="inline-flex items-center rounded bg-secondary px-1.5 py-0.5 text-2xs font-medium text-secondary-foreground">
-                              {post.albumSize} фото
-                            </span>
-                          )}
+                          {post.albumSize > 1 && <span>· {post.albumSize} фото</span>}
                         </div>
                       </div>
                     </td>
@@ -131,6 +129,37 @@ export function Posts() {
               })}
             </tbody>
           </table>
+        </div>
+        {/* mobile: card list (no horizontal scroll) — reuses the TopPosts row shape */}
+        <div className="divide-y divide-border md:hidden">
+          {tablePosts.map((post, idx) => {
+            const isClickable = post.id != null;
+            const title = post.caption ? markdownToPlainText(post.caption) : null;
+            return (
+              <button
+                key={post.id ?? idx}
+                type="button"
+                onClick={isClickable ? () => setOpenId(post.id) : undefined}
+                className={cn('flex w-full items-center gap-3 py-3 text-left transition-colors hover:bg-hover-row', isClickable && 'cursor-pointer')}
+              >
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded border border-border/40 bg-muted">
+                  {post.thumb ? (
+                    <img loading="lazy" src={post.thumb} alt="" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
+                  ) : (
+                    <span className="text-2xs font-medium text-muted-foreground">Текст</span>
+                  )}
+                </div>
+                <span className="min-w-0 flex-1">
+                  <span className={cn('block truncate text-sm', title ? 'text-foreground' : 'italic text-muted-foreground')}>
+                    {title ?? 'Без подписи'}
+                  </span>
+                  <span className="mt-0.5 block truncate text-2xs text-ink2">
+                    {fmt.num(post.reach)} просмотров · {fmt.num(post.likes)} · ER {post.er != null ? `${post.er.toFixed(1)}%` : '—'}
+                  </span>
+                </span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -257,7 +286,7 @@ function PostModal({ post, onClose }: PostModalProps) {
                       {reactionsList.map((react, i) => (
                         <div
                           key={i}
-                          className="flex items-center justify-between rounded border border-border/20 bg-muted/40 p-2 text-xs font-medium"
+                          className="flex items-center justify-between rounded border border-border bg-background p-2 text-xs font-medium"
                         >
                           <span className="text-sm">{react.label}</span>
                           <span className="font-medium tabular-nums text-muted-foreground">{fmt.num(react.value)}</span>

@@ -21,11 +21,11 @@ function CodeBlock({ children }: { children: ReactNode }) {
 function Step({ n, title, children }: { n: number; title: string; children: ReactNode }) {
   return (
     <div className="flex gap-3 border-t py-5">
-      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground">
+      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary">
         {n}
       </span>
       <div className="min-w-0 flex-1">
-        <h3 className="text-sm font-medium text-foreground">{title}</h3>
+        <h3 className="text-base font-medium text-foreground">{title}</h3>
         <div className="mt-1 text-sm leading-relaxed text-muted-foreground">{children}</div>
       </div>
     </div>

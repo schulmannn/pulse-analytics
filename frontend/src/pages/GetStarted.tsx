@@ -6,7 +6,7 @@ import { useDemo } from '@/lib/demo-context';
 function BloomArt() {
   return (
     <svg viewBox="0 0 240 190" className="h-40 w-52" fill="none" aria-hidden="true">
-      <g stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-ink3">
+      <g stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-border">
         {/* ground */}
         <path d="M40 168 H150" strokeDasharray="2 7" className="text-border" />
         <path d="M168 168 H206" strokeDasharray="2 7" className="text-border" />
@@ -17,7 +17,7 @@ function BloomArt() {
         <path d="M99 128 C88 122 82 128 82 136 C92 137 99 133 99 128 Z" className="text-border" />
       </g>
       {/* right — open bloom with the single accent */}
-      <g stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-ink3">
+      <g stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-border">
         <path d="M162 168 C168 128 160 96 150 74" />
         <path d="M150 74 C138 66 132 74 134 82 C144 84 150 80 150 74 Z" className="text-border" />
       </g>
@@ -64,14 +64,14 @@ export function GetStarted() {
         <button
           type="button"
           onClick={() => navigate('/settings')}
-          className="rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+          className="btn-pill bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
         >
           Подключить данные
         </button>
         <button
           type="button"
           onClick={enterDemo}
-          className="rounded-lg border border-border bg-background px-5 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+          className="btn-pill border border-border bg-background px-5 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted"
         >
           Демо-данные
         </button>

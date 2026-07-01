@@ -202,11 +202,9 @@ function ChannelsSettings() {
 
   if (data?.enabled === false) {
     return (
-      <Card className="border-dashed">
-        <CardContent className="py-8 text-center text-sm text-muted-foreground">
-          БД не подключена. Управление каналами и токенами недоступно.
-        </CardContent>
-      </Card>
+      <div className="rounded border border-border bg-background py-8 text-center text-sm text-muted-foreground">
+        БД не подключена. Управление каналами и токенами недоступно.
+      </div>
     );
   }
 
@@ -266,10 +264,10 @@ function ChannelsSettings() {
         {errorMessage && <p className="mt-2.5 text-xs font-medium text-destructive">{errorMessage}</p>}
       </ChartSection>
 
-      <div className="space-y-3">
+      <div className="space-y-3 border-t border-border pt-6">
         <h3 className="px-1 text-xs font-medium tracking-wider text-muted-foreground">Подключённые каналы</h3>
         {channels.length === 0 ? (
-          <div className="rounded-lg border border-dashed bg-muted/20 py-6 text-center text-sm text-muted-foreground">
+          <div className="rounded border border-border bg-background py-6 text-center text-sm text-muted-foreground">
             Список каналов пуст.
           </div>
         ) : (
@@ -391,9 +389,15 @@ function ChannelKeysPanel({ channelId }: { channelId: number }) {
       </div>
 
       {oneTimeKey && (
-        <Card className="border-verdant/40 bg-background">
+        <Card className="border-status-warn/40 bg-background">
           <CardContent className="space-y-2.5 p-3.5">
-            <div className="text-xs font-medium text-verdant">⚠️ Скопируйте токен сейчас — он показывается ОДИН раз:</div>
+            <div className="flex items-center gap-1.5 text-xs font-medium text-status-warn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-3.5 w-3.5 shrink-0" aria-hidden="true">
+                <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M12 9v4M12 17h.01" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              <span>Скопируйте токен сейчас — он показывается ОДИН раз:</span>
+            </div>
             <div className="relative flex items-center gap-2 break-all rounded bg-muted/60 p-2 font-mono text-xs text-foreground">
               <span className="flex-1 select-all pr-16">{oneTimeKey}</span>
               <button

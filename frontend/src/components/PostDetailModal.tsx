@@ -15,7 +15,7 @@ interface PostDetailModalProps {
 /** A labelled metric cell (tabular-aligned). */
 function Stat({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (
-    <div className="rounded-lg bg-muted/40 p-3">
+    <div className="rounded border border-border bg-background p-3">
       <div className="text-2xs tracking-wide text-muted-foreground">{label}</div>
       <div className={`mt-0.5 text-lg font-medium tabular-nums ${accent ? 'text-primary' : ''}`}>
         {value}
@@ -99,10 +99,10 @@ export function PostDetailModal({ post, rank, reason, onClose }: PostDetailModal
           )}
 
           {reason && (
-            <div className="inline-flex items-center gap-1.5 rounded-full bg-verdant/10 px-2.5 py-1 text-xs font-medium text-verdant">
+            <p className="flex items-center gap-1.5 text-xs font-medium text-verdant">
               <span aria-hidden="true">▲</span>
               {reason}
-            </div>
+            </p>
           )}
 
           <p className="whitespace-pre-line text-sm leading-relaxed text-foreground">

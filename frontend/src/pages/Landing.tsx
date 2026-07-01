@@ -487,7 +487,7 @@ function Pillars() {
           {items.map((it, i) => {
             const Ico = it.icon;
             return (
-            <div key={it.h} className={i > 0 ? 'md:border-l md:border-border md:pl-10' : 'md:pr-10'}>
+            <div key={it.h} className={`${i > 0 ? 'md:border-l md:border-border md:pl-10' : ''} ${i < items.length - 1 ? 'md:pr-10' : ''}`}>
               <Ico className="h-5 w-5 text-foreground" />
               <h3 className="mt-3 text-[17px] font-medium text-foreground">{it.h}</h3>
               <p className="mt-2 max-w-[20em] text-sm leading-relaxed text-ink2">{it.p}</p>

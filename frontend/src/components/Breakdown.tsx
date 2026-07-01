@@ -2,8 +2,7 @@ interface BreakdownItem {
   label: string;
   value: number;
   display?: string;
-  color?: string; // optional HSL color for the bar fill
-  icon?: string; // optional emoji prefix
+  color?: string; // optional HSL color for the bar fill + a leading dot
 }
 
 interface BreakdownProps {
@@ -46,7 +45,6 @@ export function Breakdown({ items }: BreakdownProps) {
                   aria-hidden="true"
                 />
               )}
-              {item.icon && <span className="shrink-0 select-none">{item.icon}</span>}
               <span className="truncate">{item.label}</span>
             </span>
             <span className="relative z-10 ml-2 shrink-0 text-sm tabular-nums text-muted-foreground">

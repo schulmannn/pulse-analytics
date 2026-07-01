@@ -11,7 +11,6 @@ import {
   aggregateOnline,
   cityName,
   countryName,
-  flag,
   GENDER_LABEL,
   AGE_ORDER,
   CHART_CYCLE,
@@ -65,7 +64,6 @@ export function AudienceBlock({ breakdowns, followers }: { breakdowns: IgBreakdo
               label: countryName(c.label),
               value: c.value,
               display: fmt.short(c.value),
-              icon: flag(c.label),
             }))}
           />
         </ChartSection>
@@ -103,7 +101,7 @@ export function BestTimeHeatmap({ online }: { online: IgOnline | undefined }) {
   return (
     <div ref={wrapRef} className="relative" onMouseLeave={() => setTip(null)}>
       <div className="overflow-x-auto pb-2">
-        <div className="min-w-[440px] space-y-[2px]">
+        <div className="min-w-full space-y-[2px] lg:min-w-[440px]">
           <div className="grid gap-[2px]" style={{ gridTemplateColumns: '30px repeat(24, minmax(14px, 1fr))' }}>
             <div />
             {Array.from({ length: 24 }).map((_, h) => (
