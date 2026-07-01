@@ -7,7 +7,11 @@
    replace the prior cool/analytical system; one calm blue accent (#2d6be0). Panels (#fff) are used
    sparingly — sections are delimited by hairlines, not card chrome. Radius 4px (buttons pill via util). */
 @layer base {
-  :root {
+  /* `.force-light` carries the same light palette as :root, so a subtree tagged with it renders
+     light even under a `.dark` <html> (custom properties inherit from the nearest ancestor that
+     sets them). Used to keep logged-out marketing surfaces (landing) always light. */
+  :root,
+  .force-light {
     color-scheme: light;
     --background: 45 28% 97%;          /* paper  #faf9f6 — warm off-white */
     --foreground: 60 6% 10%;           /* ink    #1a1a17 */

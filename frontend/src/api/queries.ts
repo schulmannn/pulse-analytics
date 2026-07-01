@@ -87,6 +87,30 @@ export function useRegister() {
   });
 }
 
+const ConfigSchema = z.object({ google_client_id: z.string().nullable() }).passthrough();
+
+/** Public runtime config — currently the Google client id (drives whether the Google button shows). */
+export function useConfig() {
+  return useQuery({
+    queryKey: ['config'],
+    queryFn: () => apiGet('/api/config', ConfigSchema),
+    staleTime: Infinity,
+    retry: false,
+  });
+}
+
+/** Sign in with Google — exchange the GSI ID token for our session (same response shape as login). */
+export function useGoogleLogin() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (credential: string) => apiSend('POST', '/api/auth/google', { credential }, LoginResponseSchema),
+    onSuccess: (data) => {
+      setSessionToken(data.token, sessionTtl(data.expiresAt));
+      return qc.invalidateQueries();
+    },
+  });
+}
+
 export function useVerify() {
   const qc = useQueryClient();
   return useMutation({

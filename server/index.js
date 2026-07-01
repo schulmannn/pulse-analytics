@@ -127,6 +127,10 @@ const auth = createAuth({ secret: AUTH_SECRET });
 const signToken = auth.signBreakGlass;
 const signSession = auth.signSession;
 const parseToken = auth.parseToken;
+// "Sign in with Google" (Google Identity Services). The client id is public — it's both the GSI
+// button's client_id AND the audience we verify the returned ID token against. No client secret is
+// needed for the ID-token flow. Unset → the feature is inert (frontend hides the button).
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 
 async function audit(req, action, metadata = {}) {
   if (!db.enabled) return false;
@@ -327,6 +331,64 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
     return res.json({ token: signToken(expires), expiresAt: new Date(expires).toISOString(), user: { email: null, role: 'superuser' } });
   }
   return res.status(403).json({ error: 'Неверный пароль' });
+});
+
+// Public runtime config for the SPA (no secrets). Currently just the Google client id so the login
+// UI can decide whether to show the "Sign in with Google" button.
+app.get('/api/config', (req, res) => {
+  res.json({ google_client_id: GOOGLE_CLIENT_ID || null });
+});
+
+// "Sign in with Google": the frontend GSI button returns an ID token (JWT); we verify it with Google
+// (validates signature + expiry), check it was minted for THIS app and carries a verified email,
+// then create/find the account and issue our own session. A verified Google email means we can skip
+// our email-verify step (account is active immediately). Existing email/password accounts with the
+// same verified email are linked (logged into).
+app.post('/api/auth/google', authLimiter, async (req, res) => {
+  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
+  if (!GOOGLE_CLIENT_ID) return res.status(400).json({ error: 'Вход через Google не настроен на сервере' });
+  const credential = String((req.body && req.body.credential) || '');
+  if (!credential) return res.status(400).json({ error: 'Нет токена Google' });
+  try {
+    const r = await fetch('https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(credential), { timeout: 8000 });
+    const info = await r.json().catch(() => ({}));
+    // aud = our app; iss = Google; email must be Google-verified. (tokeninfo already rejects a bad
+    // signature or an expired token with a non-200, so a valid `sub` here means the JWT is genuine.)
+    if (!r.ok || !info.sub) {
+      log('warn', 'google_tokeninfo_rejected', { status: r.status });
+      return res.status(401).json({ error: 'Google не подтвердил вход' });
+    }
+    if (info.aud !== GOOGLE_CLIENT_ID) return res.status(401).json({ error: 'Токен не для этого приложения' });
+    if (info.iss !== 'accounts.google.com' && info.iss !== 'https://accounts.google.com') return res.status(401).json({ error: 'Неверный источник токена' });
+    if (String(info.email_verified) !== 'true' || !info.email) return res.status(401).json({ error: 'Email Google не подтверждён' });
+    const email = String(info.email).toLowerCase().trim();
+    let u = await db.getUserByEmail(email);
+    if (u && u.status === 'disabled') return res.status(403).json({ error: 'Аккаунт отключён' });
+    if (!u) {
+      // New account — Google already verified the email, so it's active with an unusable password
+      // (password login stays impossible until the user sets one via "forgot password").
+      const randomPass = hashPassword(crypto.randomBytes(32).toString('hex'));
+      u = await db.createUser({ email, pass_hash: randomPass, role: 'user', status: 'active' });
+    } else if (u.status !== 'active') {
+      // Existing but never-verified account (created via email/password; ownership unproven — it could
+      // be an attacker pre-registration seeded with a known password). Google now proves the CURRENT
+      // user owns the email, so activate it — but first WIPE the pre-seeded password to a random
+      // unusable value, neutralising a pre-hijack. setUserPassword + setUserStatus both bump
+      // token_version, so any pre-existing session is revoked too. Owner uses Google (or "forgot
+      // password" to set their own) going forward.
+      await db.setUserPassword(u.id, hashPassword(crypto.randomBytes(32).toString('hex')));
+      await db.setUserStatus(u.id, 'active');
+      u = await db.getUserById(u.id);
+    }
+    const expires = Date.now() + SESSION_TTL;
+    const token = signSession({ uid: u.id, role: u.role, exp: expires, tokenVersion: u.token_version });
+    req.user = { uid: u.id, role: u.role, email: u.email };
+    audit(req, 'auth.google', {}).catch(() => {});
+    return res.json({ token, expiresAt: new Date(expires).toISOString(), user: { email: u.email, role: u.role } });
+  } catch (e) {
+    log('error', 'google_auth_error', { error: e.message });
+    return res.status(500).json({ error: 'Ошибка входа через Google' });
+  }
 });
 
 app.post('/api/auth/logout', requireAuth, async (req, res) => {
@@ -1755,11 +1817,14 @@ const appCspHeader = [
   "base-uri 'none'",
   "object-src 'none'",
   "frame-ancestors 'none'",
-  "script-src 'self'",
+  // accounts.google.com is needed for "Sign in with Google" (GIS loads its client script, opens an
+  // iframe for the button/One-Tap, and calls its endpoints). All trusted Google origins.
+  "script-src 'self' https://accounts.google.com https://apis.google.com",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src https://fonts.gstatic.com",
   "img-src 'self' data: https:",
-  "connect-src 'self'",
+  "connect-src 'self' https://accounts.google.com",
+  "frame-src https://accounts.google.com",
 ].join('; ');
 function setAppHeaders(res) {
   res.set('Content-Security-Policy', appCspHeader)

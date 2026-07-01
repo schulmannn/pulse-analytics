@@ -650,7 +650,7 @@ function Footer() {
 
 export function Landing() {
   return (
-    <div className="min-h-screen overflow-x-hidden bg-background text-foreground">
+    <div className="force-light min-h-screen overflow-x-hidden bg-background text-foreground">
       <Header />
       <Hero />
       <Pillars />

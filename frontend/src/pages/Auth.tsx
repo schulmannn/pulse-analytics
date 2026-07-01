@@ -3,6 +3,7 @@ import type { FormEvent, ReactNode } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useForgot, useLogin, useRegister, useReset, useVerify } from '@/api/queries';
 import { AtlavueMark } from '@/components/AtlavueMark';
+import { GoogleSignInButton } from '@/components/GoogleSignInButton';
 
 // "Atlavue Refined Technical" auth — light, quiet, calmer than the dashboard. Warm paper canvas,
 // hairline-bordered fields, pill primary button, one calm blue accent. Semantic/brand tokens only.
@@ -172,6 +173,7 @@ export function LoginPage() {
         {loginMutation.isError && (
           <p className="mt-3 text-sm text-destructive">{errorMessage(loginMutation.error)}</p>
         )}
+        <GoogleSignInButton text="continue_with" />
         <div className="mt-3 flex justify-end">
           <button
             type="button"
@@ -251,6 +253,7 @@ export function RegisterPage() {
             {registerMutation.data.message || 'Проверьте почту для подтверждения аккаунта.'}
           </p>
         )}
+        <GoogleSignInButton text="signup_with" />
         <div className="mt-6 text-sm text-ink2">
           Уже есть аккаунт?{' '}
           <Link to="/login" className={LINK_CLASS}>
