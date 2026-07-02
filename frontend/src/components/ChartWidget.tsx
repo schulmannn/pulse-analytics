@@ -9,7 +9,7 @@ import { BarChart } from '@/components/BarChart';
 import { Breakdown } from '@/components/Breakdown';
 import { PieChart } from '@/components/PieChart';
 import { DivergingBars } from '@/components/DivergingBars';
-import { ChartExpandOverlay, type ChartExpandConfig } from '@/components/ExpandableChart';
+import { ChartExpandOverlay, ExpandedChartHeightContext, type ChartExpandConfig } from '@/components/ExpandableChart';
 import { DEFAULT_WIDGET_DAYS, WidgetPeriodProvider, widgetPeriodValue } from '@/lib/period';
 import type { PeriodDays, WidgetPeriodValue } from '@/lib/period';
 
@@ -63,6 +63,18 @@ const SIZE_COL_SPAN: Record<WidgetSize, string> = {
   third: 'lg:col-span-2',
   half: 'lg:col-span-3',
   full: 'lg:col-span-6',
+};
+
+/** Fixed card height per size on the ≥lg grid (steep tiles) — so a row never mixes a tall card
+    with a short one and the chart body fills the leftover space instead of leaving пустоты.
+    `third`/`half` SHARE rows (2/6 + 3/6 pack together), so they lock to ONE exact height and stay
+    aligned whatever they hold; `full` spans the whole row (never shares one) and carries hero/table
+    content that must be free to grow, so it only gets a floor. Mobile is single-column — no
+    row-mates to align with — so heights apply from lg up only. */
+const SIZE_H: Record<WidgetSize, string> = {
+  third: 'lg:h-[272px]',
+  half: 'lg:h-[272px]',
+  full: 'lg:min-h-[320px]',
 };
 
 /** One presentation of a widget's data (line / bar / list …), chosen in the edit dialog. */
@@ -793,12 +805,31 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
   const [expandOpen, setExpandOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const sectionRef = useRef<HTMLElement>(null);
+  // The chart-body region (flex-1 inside the fixed-height card). We feed its measured pixel
+  // height to variant charts so they fill the tile (steep) — see the effect + provider below.
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [bodyH, setBodyH] = useState<number | null>(null);
   useStoreTick();
 
   // Depend on the STABLE register callback, not the ctx object (recreated every group
   // render) — otherwise the cleanup/register cycle feeds the group's state in a loop.
   const register = group?.register;
   useEffect(() => register?.(widgetId, title, sectionRef.current), [register, widgetId, title]);
+
+  // Measure the body region so variant charts fill the fixed tile height. The region is flex-1
+  // inside a fixed-height card, so its clientHeight IS the space left after header/pills/caption —
+  // no per-card height guesswork. A vertical scrollbar (long lists) trims width, never height, so
+  // this never feedback-loops. null until measured → charts fall back to their own default height.
+  useLayoutEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    const measure = () => setBodyH(el.clientHeight || null);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -918,12 +949,12 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
       onPointerCancel={reorder ? () => group?.dragEnd() : undefined}
     >
       <div
-        className={`rounded-xl border border-border bg-card p-4 sm:p-5 ${reorder ? 'widget-jiggle' : ''} ${
+        className={`flex flex-col ${SIZE_H[effectiveSize]} rounded-xl border border-border bg-card p-4 sm:p-5 ${reorder ? 'widget-jiggle' : ''} ${
           isDragging ? 'shadow-lg' : ''
         }`}
         style={innerStyle}
       >
-      <div className="flex items-center gap-3">
+      <div className="flex shrink-0 items-center gap-3">
         <h3 className="min-w-0 flex-1 truncate text-xs font-medium tracking-wider text-muted-foreground">
           {prefs.title || title}
         </h3>
@@ -1053,8 +1084,25 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
           hidden={reorder}
         />
       )}
-      <div className={`mt-3 ${reorder ? 'pointer-events-none' : ''}`}>
-        {bodyNode}
+      <div className={`mt-3 flex min-h-0 flex-1 flex-col ${reorder ? 'pointer-events-none' : ''}`}>
+        <WidgetPeriodProvider value={widgetPeriod}>
+          {/* Chart region — flex-1 eats the tile's leftover height; overflow-y-auto lets a long list
+              (Breakdown / pie legend) scroll instead of blowing the fixed height. Variant charts read
+              the measured height via the provider and fill; `children`-only cards render at their own
+              height so intentional sizes (e.g. KpiHero's mini-sparkline) survive. */}
+          <div ref={bodyRef} className="min-h-0 flex-1 overflow-y-auto">
+            {activeVariant ? (
+              <ExpandedChartHeightContext.Provider value={bodyH}>
+                {activeVariant.render}
+              </ExpandedChartHeightContext.Provider>
+            ) : (
+              children
+            )}
+          </div>
+          {/* Caption (shared children under a variant — «лучший день» / «пик активности» / totals)
+              sits below the chart at its natural height, never squeezed by the fill. */}
+          {activeVariant && children != null && <div className="shrink-0">{children}</div>}
+        </WidgetPeriodProvider>
       </div>
       </div>
 
