@@ -1,22 +1,14 @@
 import { Suspense, lazy } from 'react';
 import type { ComponentType, ReactNode } from 'react';
-import { Navigate, Routes, Route, useSearchParams } from 'react-router-dom';
-import { cn } from '@/lib/utils';
+import { Routes, Route } from 'react-router-dom';
 import { useMe } from '@/api/queries';
 import { ApiError } from '@/api/client';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { PeriodUrlSync } from '@/lib/period-url';
-import { Overview } from '@/panels/Overview';
+import { TgFeed } from '@/panels/TgFeed';
 import { MetricPage } from '@/panels/MetricPage';
 import { ReportPage } from '@/panels/ReportPage';
-import { Posts } from '@/panels/Posts';
-import { Mentions } from '@/panels/Mentions';
-import { TgAnalytics } from '@/panels/TgAnalytics';
-import { Insights } from '@/panels/Insights';
-import { Compare } from '@/panels/Compare';
-import { HistoryChartBlock, HeatmapChartBlock, VelocityChartBlock } from '@/panels/Charts';
-import { Hashtags } from '@/panels/Hashtags';
 import { Settings } from '@/panels/Settings';
 import { Skeleton } from '@/components/ui/skeleton';
 import { CommandPalette } from '@/components/CommandPalette';
@@ -57,12 +49,8 @@ export default function App() {
       <Route path="verify" element={<AuthSuspense><VerifyPage /></AuthSuspense>} />
       <Route path="reset" element={<AuthSuspense><ResetPage /></AuthSuspense>} />
       <Route element={<ProtectedLayout />}>
-        <Route index element={<Overview />} />
         <Route path="metrics/:key" element={<MetricPage />} />
         <Route path="report" element={<ReportPage />} />
-        <Route path="analytics" element={<Analytics />} />
-        <Route path="posts" element={<Posts />} />
-        <Route path="mentions" element={<Mentions />} />
         <Route path="instagram" element={<PanelSuspense><InstagramLayout /></PanelSuspense>}>
           <Route index element={<PanelSuspense><IgOverview /></PanelSuspense>} />
           <Route path="analytics" element={<PanelSuspense><IgAnalytics /></PanelSuspense>} />
@@ -73,7 +61,10 @@ export default function App() {
         <Route path="admin" element={<PanelSuspense><Admin /></PanelSuspense>} />
         <Route path="bugs" element={<PanelSuspense><Bugs /></PanelSuspense>} />
         <Route path="connect" element={<PanelSuspense><Connect /></PanelSuspense>} />
-        <Route path="*" element={<Navigate to="/" replace />} />
+        {/* The TG feed serves '/', '/analytics', '/posts', '/mentions' as ONE scrolled page —
+            a single optional-param route so the scrollspy's replace-navigation never remounts
+            it. Unknown sections redirect home inside the feed. */}
+        <Route path=":section?" element={<TgFeed />} />
       </Route>
     </Routes>
   );
@@ -207,103 +198,6 @@ function ProtectedLayout() {
       <DashboardLayout email={me.data?.email ?? undefined} role={me.data?.role} avatar={me.data?.avatar} />
       <CommandPalette />
     </ErrorBoundary>
-  );
-}
-
-/**
- * Analytics — the deep breakdowns. The Overview is now a focused summary (Figma), so the detailed
- * sections that used to sit there (auto-insights, рост/история, лучшее время, скорость, сравнение)
- * live here alongside the TG breakdowns + hashtag lift.
- */
-const ANALYTICS_TABS = [
-  { key: 'dynamics', label: 'Динамика' },
-  { key: 'audience', label: 'Аудитория' },
-  { key: 'content', label: 'Контент' },
-  { key: 'compare', label: 'Сравнение' },
-] as const;
-type AnalyticsTab = (typeof ANALYTICS_TABS)[number]['key'];
-
-const isAnalyticsTab = (raw: string | null): raw is AnalyticsTab =>
-  ANALYTICS_TABS.some((t) => t.key === raw);
-
-function Analytics() {
-  // The active tab lives in ?tab= (replace, not push) so a shared /analytics link restores
-  // it; the default «Динамика» keeps the URL clean. Period params (?p / ?from&to) coexist.
-  const [params, setParams] = useSearchParams();
-  const rawTab = params.get('tab');
-  const tab: AnalyticsTab = isAnalyticsTab(rawTab) ? rawTab : 'dynamics';
-  const setTab = (next: AnalyticsTab) => {
-    setParams(
-      (prev) => {
-        const merged = new URLSearchParams(prev);
-        if (next === 'dynamics') merged.delete('tab');
-        else merged.set('tab', next);
-        return merged;
-      },
-      { replace: true },
-    );
-  };
-  return (
-    <div className="space-y-8">
-      {/* Grouped tabs break the 20-chart wall into Динамика / Аудитория / Контент / Сравнение —
-          each tab renders only its section family (progressive disclosure). */}
-      <div role="tablist" aria-label="Разделы аналитики" className="flex gap-1 overflow-x-auto border-b border-border">
-        {ANALYTICS_TABS.map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            role="tab"
-            aria-selected={tab === t.key}
-            onClick={() => setTab(t.key)}
-            className={cn(
-              'shrink-0 border-b-2 px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none',
-              tab === t.key ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground',
-            )}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {tab === 'dynamics' && (
-        <div className="space-y-10">
-          <TgAnalytics group="dynamics" />
-          <HistoryChartBlock />
-          <VelocityChartBlock />
-        </div>
-      )}
-      {tab === 'audience' && (
-        <div className="space-y-10">
-          <TgAnalytics group="audience" />
-          <HeatmapChartBlock />
-        </div>
-      )}
-      {tab === 'content' && (
-        <div className="space-y-10">
-          <TgAnalytics group="content" />
-          <Hashtags />
-        </div>
-      )}
-      {tab === 'compare' && (
-        <div className="space-y-10">
-          <AnalyticsSection title="Сравнение периодов">
-            <Compare />
-          </AnalyticsSection>
-          <AnalyticsSection title="Авто-инсайты">
-            <Insights />
-          </AnalyticsSection>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function AnalyticsSection({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="space-y-4">
-      <h2 className="text-base font-medium tracking-tight text-foreground">{title}</h2>
-      {children}
-    </section>
   );
 }
 

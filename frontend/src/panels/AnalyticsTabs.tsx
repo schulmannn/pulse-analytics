@@ -1,0 +1,106 @@
+import { useSearchParams } from 'react-router-dom';
+import type { ReactNode } from 'react';
+import { cn } from '@/lib/utils';
+import { TgAnalytics } from '@/panels/TgAnalytics';
+import { Insights } from '@/panels/Insights';
+import { Compare } from '@/panels/Compare';
+import { HistoryChartBlock, HeatmapChartBlock, VelocityChartBlock } from '@/panels/Charts';
+import { Hashtags } from '@/panels/Hashtags';
+
+/**
+ * Analytics — the deep breakdowns. The Overview is a focused summary (Figma), so the detailed
+ * sections that used to sit there (auto-insights, рост/история, лучшее время, скорость,
+ * сравнение) live here alongside the TG breakdowns + hashtag lift. Moved out of App.tsx so
+ * the TG feed can compose it as a block.
+ */
+const ANALYTICS_TABS = [
+  { key: 'dynamics', label: 'Динамика' },
+  { key: 'audience', label: 'Аудитория' },
+  { key: 'content', label: 'Контент' },
+  { key: 'compare', label: 'Сравнение' },
+] as const;
+type AnalyticsTab = (typeof ANALYTICS_TABS)[number]['key'];
+
+const isAnalyticsTab = (raw: string | null): raw is AnalyticsTab =>
+  ANALYTICS_TABS.some((t) => t.key === raw);
+
+export function Analytics() {
+  // The active tab lives in ?tab= (replace, not push) so a shared /analytics link restores
+  // it; the default «Динамика» keeps the URL clean. Period params (?p / ?from&to) coexist.
+  const [params, setParams] = useSearchParams();
+  const rawTab = params.get('tab');
+  const tab: AnalyticsTab = isAnalyticsTab(rawTab) ? rawTab : 'dynamics';
+  const setTab = (next: AnalyticsTab) => {
+    setParams(
+      (prev) => {
+        const merged = new URLSearchParams(prev);
+        if (next === 'dynamics') merged.delete('tab');
+        else merged.set('tab', next);
+        return merged;
+      },
+      { replace: true },
+    );
+  };
+  return (
+    <div className="space-y-8">
+      {/* Grouped tabs break the 20-chart wall into Динамика / Аудитория / Контент / Сравнение —
+          each tab renders only its section family (progressive disclosure). */}
+      <div role="tablist" aria-label="Разделы аналитики" className="flex gap-1 overflow-x-auto border-b border-border">
+        {ANALYTICS_TABS.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            role="tab"
+            aria-selected={tab === t.key}
+            onClick={() => setTab(t.key)}
+            className={cn(
+              'shrink-0 border-b-2 px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none',
+              tab === t.key ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground',
+            )}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'dynamics' && (
+        <div className="space-y-10">
+          <TgAnalytics group="dynamics" />
+          <HistoryChartBlock />
+          <VelocityChartBlock />
+        </div>
+      )}
+      {tab === 'audience' && (
+        <div className="space-y-10">
+          <TgAnalytics group="audience" />
+          <HeatmapChartBlock />
+        </div>
+      )}
+      {tab === 'content' && (
+        <div className="space-y-10">
+          <TgAnalytics group="content" />
+          <Hashtags />
+        </div>
+      )}
+      {tab === 'compare' && (
+        <div className="space-y-10">
+          <AnalyticsSection title="Сравнение периодов">
+            <Compare />
+          </AnalyticsSection>
+          <AnalyticsSection title="Авто-инсайты">
+            <Insights />
+          </AnalyticsSection>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AnalyticsSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="space-y-4">
+      <h2 className="text-base font-medium tracking-tight text-foreground">{title}</h2>
+      {children}
+    </section>
+  );
+}
