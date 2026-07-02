@@ -64,6 +64,47 @@ export const fmt = {
   },
 };
 
+// ── Russian localisation for API-shaped chart strings ────────────────────────────────────────
+// The Telegram graphs pipeline delivers English month tokens ("18 May", "24 Jun 21:00") and
+// English series names ("Views", "Shares") verbatim; these two helpers keep the Russian UI
+// Russian without touching the numeric payloads.
+
+/** English 3-letter month token → Russian genitive short form (axis-label style). */
+const RU_MONTH: Record<string, string> = {
+  Jan: 'янв', Feb: 'фев', Mar: 'мар', Apr: 'апр', May: 'мая', Jun: 'июн',
+  Jul: 'июл', Aug: 'авг', Sep: 'сен', Oct: 'окт', Nov: 'ноя', Dec: 'дек',
+};
+
+/**
+ * Translate the 12 English month tokens inside a pre-formatted axis label to Russian,
+ * preserving everything else: "24 Jun 21:00" → "24 июн 21:00", "18 May" → "18 мая".
+ * Unknown/already-Russian labels pass through unchanged.
+ */
+export function ruAxisLabel(label: string): string {
+  if (!label) return label;
+  return label.replace(/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b/g, (m) => RU_MONTH[m] ?? m);
+}
+
+/** English series names the graphs API ships as-is → Russian UI names (lowercased keys). */
+const RU_SERIES: Record<string, string> = {
+  views: 'Просмотры',
+  shares: 'Репосты',
+  forwards: 'Репосты',
+  followers: 'Подписчики',
+  subscribers: 'Подписчики',
+  reactions: 'Реакции',
+  comments: 'Комментарии',
+  joined: 'Подписались',
+  left: 'Отписались',
+};
+
+/** Russian name for an API-provided series ("Views" → "Просмотры"); fallback = the original. */
+export function ruSeriesName(name?: string | null): string {
+  const raw = (name ?? '').trim();
+  if (!raw) return '';
+  return RU_SERIES[raw.toLowerCase()] ?? raw;
+}
+
 /** Sparkline SVG path for a value series (viewBox 200×32). */
 export function sparkPath(values: number[]): string {
   if (!values || values.length === 0) return '';

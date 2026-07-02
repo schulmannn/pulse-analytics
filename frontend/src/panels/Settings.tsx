@@ -35,11 +35,9 @@ function ChartSection({ title, children }: { title: string; children: ReactNode 
 }
 
 export function Settings() {
+  // No in-body page title — the topbar already renders the route's «Настройки» heading.
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-xl font-medium tracking-tight">Настройки</h2>
-      </div>
       <ProfileSection />
       <ChartSection title="Состояние данных">
         <DataHealth defaultOpen />
@@ -99,7 +97,7 @@ function InstagramSection() {
               type="button"
               onClick={() => connect.mutate()}
               disabled={connect.isPending || !s?.server_ready}
-              className="shrink-0 rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-60"
+              className="btn-pill shrink-0 bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-60"
             >
               {connect.isPending ? 'Открываю Instagram…' : 'Подключить Instagram'}
             </button>
@@ -182,6 +180,9 @@ function ProfileSection() {
 
 function ChannelsSettings() {
   const { data, isLoading, isError, error } = useChannels();
+  const me = useMe();
+  // UID/Owner are internal identifiers — admin debugging info, not product language.
+  const isSuperuser = me.data?.role === 'superuser';
   const createChannelMutation = useCreateChannel();
   const deleteChannelMutation = useDeleteChannel();
 
@@ -256,7 +257,7 @@ function ChannelsSettings() {
           <button
             type="submit"
             disabled={createChannelMutation.isPending || !usernameInput.trim()}
-            className="shrink-0 rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+            className="btn-pill shrink-0 bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
           >
             {createChannelMutation.isPending ? 'Добавление…' : 'Подключить'}
           </button>
@@ -283,10 +284,12 @@ function ChannelsSettings() {
                         <span className="text-sm font-medium text-foreground">{displayTitle}</span>
                         {channel.username && <span className="font-mono text-xs text-muted-foreground">@{channel.username}</span>}
                       </div>
-                      <div className="font-mono text-2xs text-muted-foreground">
-                        UID: {channel.id}
-                        {channel.owner_uid ? ` · Owner: ${channel.owner_uid}` : ''}
-                      </div>
+                      {isSuperuser && (
+                        <div className="font-mono text-2xs text-muted-foreground">
+                          UID: {channel.id}
+                          {channel.owner_uid ? ` · Owner: ${channel.owner_uid}` : ''}
+                        </div>
+                      )}
                       <SourceStatus channelId={channel.id} source={channel.source} />
                     </div>
                     <div className="flex shrink-0 items-center gap-2 self-end sm:self-auto">

@@ -3,7 +3,7 @@ import { useHistory, useVelocity, useTgFull } from '@/api/queries';
 import { lttbDownsample } from '@/lib/downsample';
 import { LineChart } from '@/components/LineChart';
 import { ChartTooltip, type TooltipState } from '@/components/ChartTooltip';
-import { fmt } from '@/lib/format';
+import { fmt, ruAxisLabel } from '@/lib/format';
 import { ExpandableChart } from '@/components/ExpandableChart';
 import { Skeleton } from '@/components/ui/skeleton';
 import { usePeriod } from '@/lib/period';
@@ -37,7 +37,8 @@ function ddmm(dayStr: string) {
   if (parts.length !== 3) return dayStr;
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const monthLabel = months[Number(parts[1]) - 1] ?? '';
-  return `${Number(parts[2])} ${monthLabel}`;
+  // ruAxisLabel: «18 May» → «18 мая» — chart axes/tooltips must be Russian in the RU UI.
+  return ruAxisLabel(`${Number(parts[2])} ${monthLabel}`);
 }
 
 function SubscriberHistoryChart({ rows }: { rows: SubscriberRow[] }) {
@@ -58,6 +59,7 @@ function SubscriberHistoryChart({ rows }: { rows: SubscriberRow[] }) {
       labels={labels}
       height={260}
       markAnomalies
+      markExtremes
     />
   );
 }

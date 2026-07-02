@@ -53,6 +53,12 @@
     --hover-row: 47 31% 94%;           /* #f5f3ec — table row hover */
     --avatar: 45 21% 89%;              /* #e9e6dd — fallback avatar field */
 
+    /* Breakdown row-fill alphas (see components/Breakdown). Theme-scoped: the same 0.15
+       categorical tint that reads as a soft pastel on paper turns muddy olive-brown over the
+       dark canvas (esp. chart-2 orange), so dark gets its own, lower alphas below. */
+    --row-tint-colored: 0.15;
+    --row-tint-neutral: 0.08;
+
     /* Categorical data-viz palette (multi-series only; single metrics use --brand-iris).
        Okabe-Ito-based for colour-blind safety: chart-1 = brand blue, chart-2 orange is its
        high-contrast pair; the two blues (1 and 6) sit farthest apart in the cycle. Series always
@@ -102,6 +108,10 @@
     --blue-tint: 219 40% 20%;
     --hover-row: 48 5% 16%;
     --avatar: 48 5% 22%;
+
+    /* Quieter Breakdown row fills in dark — colour identity stays on the leading dot. */
+    --row-tint-colored: 0.09;
+    --row-tint-neutral: 0.07;
 
     --chart-1: 219 80% 70%;   /* brand blue (light) */
     --chart-2: 41 90% 60%;    /* orange */

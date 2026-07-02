@@ -1,6 +1,12 @@
-import { useEffect, useState } from 'react';
-import type { KeyboardEvent, ReactNode } from 'react';
+import { createContext, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import type { ReactNode } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { useFocusTrap } from '@/lib/useFocusTrap';
+
+/** True while rendering inside the expanded (modal) chart view. Charts opt into richer
+    annotations there (value labels, y ticks) without prop plumbing through the panels. */
+export const ChartExpandedContext = createContext(false);
 
 interface ExpandableChartProps {
   title: string;
@@ -15,94 +21,132 @@ const WINDOWS = [
   { days: 0, label: 'Всё' },
 ];
 
+/**
+ * Chart wrapper with an explicit expand affordance. The chart body itself is NOT
+ * clickable — hovering/reading points must never hijack into the modal — expansion
+ * happens only via the ↗ button in the corner.
+ */
 export function ExpandableChart({ title, children, renderExpanded }: ExpandableChartProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [days, setDays] = useState(90);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key === 'Escape') setIsOpen(false);
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen]);
-
-  const handlePreviewKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      setIsOpen(true);
-    }
-  };
-
   return (
     <>
-      <div
-        role="button"
-        tabIndex={0}
-        aria-label={`Развернуть график: ${title}`}
-        onClick={() => setIsOpen(true)}
-        onKeyDown={handlePreviewKeyDown}
-        className="group relative cursor-zoom-in rounded focus-visible:ring-inset focus-visible:ring-offset-0"
-      >
+      <div className="relative">
         {children}
-        <span
-          aria-hidden="true"
-          className="pointer-events-none absolute right-1 top-1 text-xs text-muted-foreground opacity-60 transition-opacity group-hover:opacity-100"
+        <button
+          type="button"
+          onClick={() => setIsOpen(true)}
+          aria-label="Развернуть график"
+          title="Развернуть график"
+          className="absolute right-1 top-1 z-10 rounded border border-transparent p-1 text-muted-foreground transition-colors hover:border-border hover:bg-background hover:text-foreground"
         >
-          ⤢
-        </span>
+          <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+            <path d="M7 17 17 7M9 7h8v8" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
       </div>
 
       {isOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
-          onClick={() => setIsOpen(false)}
+        <ExpandedChartDialog
+          title={title}
+          days={days}
+          setDays={setDays}
+          renderExpanded={renderExpanded}
+          onClose={() => setIsOpen(false)}
         >
-          <Card
-            className="relative max-h-[90vh] w-full max-w-5xl overflow-y-auto"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <button
-              type="button"
-              onClick={() => setIsOpen(false)}
-              className="absolute right-4 top-4 rounded-full p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              aria-label="Закрыть"
-            >
-              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-
-            <CardHeader className="pr-12">
-              <CardTitle className="text-base font-medium text-foreground">{title}</CardTitle>
-              {renderExpanded && (
-                <div className="flex flex-wrap pt-2">
-                  {WINDOWS.map((window) => (
-                    <button
-                      key={window.days}
-                      type="button"
-                      onClick={() => setDays(window.days)}
-                      className={`whitespace-nowrap border-b-2 px-3 py-2 text-xs font-medium transition-colors ${
-                        days === window.days
-                          ? 'border-primary text-foreground'
-                          : 'border-transparent text-muted-foreground hover:text-foreground'
-                      }`}
-                    >
-                      {window.label}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </CardHeader>
-            <CardContent>
-              <div className="min-h-[280px] w-full [&_svg]:min-h-[280px]">
-                {renderExpanded ? renderExpanded(days) : children}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+          {children}
+        </ExpandedChartDialog>
       )}
     </>
+  );
+}
+
+interface ExpandedChartDialogProps extends ExpandableChartProps {
+  days: number;
+  setDays: (days: number) => void;
+  onClose: () => void;
+}
+
+/**
+ * Expanded chart overlay. Same dialog contract as PostDetailModal/KpiDrillDown:
+ * portal, role="dialog" + aria-modal, focus trap, body scroll lock, Escape/backdrop/×
+ * to close. The backdrop is semi-transparent paper from the first frame (an opaque
+ * black flash is what bg-black/50 produced while the blur composited).
+ */
+function ExpandedChartDialog({ title, children, renderExpanded, days, setDays, onClose }: ExpandedChartDialogProps) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(panelRef);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [onClose]);
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`График: ${title}`}
+    >
+      <div className="absolute inset-0 bg-background/70 backdrop-blur-sm" onClick={onClose} aria-hidden="true" />
+      <Card
+        ref={panelRef}
+        tabIndex={-1}
+        className="relative z-10 max-h-[90vh] w-full max-w-5xl overflow-y-auto focus:outline-none"
+      >
+        <button
+          type="button"
+          onClick={onClose}
+          className="absolute right-4 top-4 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          aria-label="Закрыть"
+        >
+          <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+
+        <CardHeader className="pr-12">
+          <CardTitle className="text-base font-medium text-foreground">{title}</CardTitle>
+          {renderExpanded && (
+            <div className="flex flex-wrap pt-2">
+              {WINDOWS.map((window) => (
+                <button
+                  key={window.days}
+                  type="button"
+                  onClick={() => setDays(window.days)}
+                  className={`whitespace-nowrap border-b-2 px-3 py-2 text-xs font-medium transition-colors ${
+                    days === window.days
+                      ? 'border-primary text-foreground'
+                      : 'border-transparent text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {window.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </CardHeader>
+        <CardContent>
+          {/* No forced svg min-height here: stretching a fixed-viewBox svg with CSS
+              distorts the axis/value text vertically in the expanded view. */}
+          <ChartExpandedContext.Provider value={true}>
+            <div className="min-h-[280px] w-full">
+              {renderExpanded ? renderExpanded(days) : children}
+            </div>
+          </ChartExpandedContext.Provider>
+        </CardContent>
+      </Card>
+    </div>,
+    document.body,
   );
 }

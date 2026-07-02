@@ -24,9 +24,12 @@ export function Breakdown({ items }: BreakdownProps) {
     <div className="space-y-2">
       {items.map((item, i) => {
         const percentage = (item.value / maxValue) * 100;
+        // Fill alpha is a theme token (--row-tint-*): the light-theme 0.15 pastel turns muddy
+        // olive-brown on the dark canvas, so dark ships lower alphas; the coloured dot next to
+        // the label stays the category signal in both themes.
         const bgStyle = item.color
-          ? { backgroundColor: item.color, opacity: 0.15 }
-          : { backgroundColor: 'hsl(var(--brand-iris))', opacity: 0.08 };
+          ? { backgroundColor: item.color, opacity: 'var(--row-tint-colored, 0.15)' }
+          : { backgroundColor: 'hsl(var(--brand-iris))', opacity: 'var(--row-tint-neutral, 0.08)' };
 
         return (
           <div

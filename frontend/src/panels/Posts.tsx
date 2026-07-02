@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useTgFull, usePostStats } from '@/api/queries';
 import { normalizeTgPosts, type NormalizedPost } from '@/lib/posts';
-import { fmt } from '@/lib/format';
+import { fmt, ruAxisLabel } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { markdownToPlainText } from '@/lib/markdown';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -65,6 +65,11 @@ export function Posts() {
   const tablePosts = [...posts]
     .sort((a, b) => (sortDir === 'desc' ? sortGet(b) - sortGet(a) : sortGet(a) - sortGet(b)))
     .slice(0, 25);
+
+  // ERV/ER колонки красим ТОЛЬКО у относительных выбросов среди видимых строк (≥1.5× / ≤0.5×
+  // медианы колонки) — иначе почти каждая ячейка получала цвет и колонки читались «радугой».
+  const ervMedian = median(tablePosts.map((p) => p.erv).filter((v): v is number => v != null));
+  const erMedian = median(tablePosts.map((p) => p.er).filter((v): v is number => v != null));
 
   const selectedPost = posts.find((p) => p.id === openId);
 
@@ -152,10 +157,10 @@ export function Posts() {
                       {post.virality != null ? `${post.virality.toFixed(1)}%` : <span className="text-muted-foreground/40">—</span>}
                     </td>
                     <td className="p-4 text-right font-medium tabular-nums">
-                      <PctTag value={post.erv} green={6} violet={3} />
+                      <PctTag value={post.erv} median={ervMedian} />
                     </td>
                     <td className="p-4 text-right font-medium tabular-nums">
-                      <PctTag value={post.er} green={1.5} violet={0.5} />
+                      <PctTag value={post.er} median={erMedian} />
                     </td>
                   </tr>
                 );
@@ -201,12 +206,27 @@ export function Posts() {
   );
 }
 
-function PctTag({ value, green, violet }: { value: number | null; green: number; violet: number }) {
+/** Median of a numeric list; null for an empty list. */
+function median(values: number[]): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
+}
+
+/**
+ * ERV/ER cell — neutral by default; colour marks only relative outliers within the visible
+ * rows: verdant at ≥1.5× the column median, ember at ≤0.5×. (Absolute thresholds painted
+ * nearly every row before.) DeltaPill semantics elsewhere are untouched.
+ */
+function PctTag({ value, median }: { value: number | null; median: number | null }) {
   if (value == null) return <span className="text-muted-foreground/40">—</span>;
-  let colorClass = 'text-ember';
-  if (value >= green) colorClass = 'text-verdant';
-  else if (value >= violet) colorClass = 'text-primary';
-  return <span className={`font-medium ${colorClass}`}>{value.toFixed(1)}%</span>;
+  let colorClass = 'text-ink2';
+  if (median != null && median > 0) {
+    if (value >= median * 1.5) colorClass = 'font-medium text-verdant';
+    else if (value <= median * 0.5) colorClass = 'font-medium text-ember';
+  }
+  return <span className={colorClass}>{value.toFixed(1)}%</span>;
 }
 
 interface PostModalProps {
@@ -242,7 +262,8 @@ function PostModal({ post, onClose }: PostModalProps) {
       const d = new Date(ts);
       const mon = months[d.getMonth()] ?? '';
       const hh = String(d.getHours()).padStart(2, '0');
-      return `${d.getDate()} ${mon} ${hh}:00`;
+      // ruAxisLabel: «24 Jun 21:00» → «24 июн 21:00» — axis labels must be Russian in the RU UI.
+      return ruAxisLabel(`${d.getDate()} ${mon} ${hh}:00`);
     };
     const first = graphX[0];
     const mid = graphX[Math.floor(graphX.length / 2)];

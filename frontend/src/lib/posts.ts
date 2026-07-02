@@ -31,6 +31,28 @@ interface ChannelContext {
 }
 
 /**
+ * Strip raw Telegram markdown from a caption for display. Captions arrive with literal
+ * `[текст](https://…)`, `**…**`, `__…__` and `` ` `` markers that leaked verbatim into table
+ * rows and modals. Conservative, display-only: keeps the human text, drops the markers/urls,
+ * collapses doubled spaces. Newlines are preserved (modals show multi-line captions); single
+ * `*`/`_` are left alone (snake_case, @handles, bullet-asterisks are common in real captions).
+ */
+export function stripTgMarkdown(text: string): string {
+  if (!text) return '';
+  return (
+    text
+      // [text](url) → text (url must be a single non-space token — same shape RichText accepts)
+      .replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, '$1')
+      .replace(/\*\*([^*\n]+)\*\*/g, '$1') // **bold**
+      .replace(/__([^_\n]+)__/g, '$1') // __underline/emphasis__
+      .replace(/`([^`\n]+)`/g, '$1') // `code`
+      .replace(/\*\*/g, '') // orphan ** from broken/unclosed markup
+      .replace(/[ \t]{2,}/g, ' ') // collapse doubled spaces the removals leave behind
+      .trim()
+  );
+}
+
+/**
  * Normalize raw TG posts into the unified shape the panel renders. Ported verbatim from
  * legacy tgPostsNormalized — keeps the same field-fallback chains and metric formulas:
  *   ERV = engagement / views,  ER = engagement / followers,  virality = forwards / views.
@@ -49,7 +71,10 @@ export function normalizeTgPosts(rawPosts: TgPost[], channel: ChannelContext): N
     const shares = Number(raw.forwards ?? 0);
     const eng = likes + shares + comments;
 
-    const caption = raw.text ?? raw.caption ?? '';
+    // Display caption: markdown markers stripped once here so every consumer (tables, top
+    // posts, modals, insights, CSV) shows clean text. Permalinks/thumbs are separate fields —
+    // hrefs are never touched by the strip.
+    const caption = stripTgMarkdown(raw.text ?? raw.caption ?? '');
     const mediaType = raw.media_type ?? null;
 
     let thumb: string | null;

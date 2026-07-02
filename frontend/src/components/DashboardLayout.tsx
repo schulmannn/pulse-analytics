@@ -284,7 +284,9 @@ function SidebarStatus({ rail }: { rail?: boolean }) {
   );
 }
 
-/** Bottom collapse/expand control (lg only). Always rendered + tabbable, even in the rail. */
+/** Bottom collapse/expand control (lg only). Always rendered + tabbable, even in the rail.
+    Styled as a real bordered control (like the search box), not bare muted text — the footer
+    «Развернуть» must be discoverable, with an icon + label and a clear hover state. */
 function CollapseToggle({ collapsed, onToggle, rail }: { collapsed: boolean; onToggle: () => void; rail: boolean }) {
   return (
     <button
@@ -293,7 +295,7 @@ function CollapseToggle({ collapsed, onToggle, rail }: { collapsed: boolean; onT
       aria-label={collapsed ? 'Развернуть боковую панель' : 'Свернуть боковую панель'}
       title={collapsed ? 'Развернуть' : 'Свернуть'}
       className={cn(
-        'flex w-full items-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
+        'flex w-full items-center rounded-lg border bg-card text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground',
         rail
           ? 'justify-center px-1 py-2 group-hover/sb:justify-start group-hover/sb:gap-2 group-hover/sb:px-3 group-focus-within/sb:justify-start group-focus-within/sb:gap-2 group-focus-within/sb:px-3'
           : 'gap-2 px-3 py-2',
@@ -303,7 +305,7 @@ function CollapseToggle({ collapsed, onToggle, rail }: { collapsed: boolean; onT
         name="chevron"
         className={cn('h-4 w-4 shrink-0 transition-transform', collapsed ? '-rotate-90' : 'rotate-90')}
       />
-      <span className={cn('text-xs', rail && REVEAL_INLINE)}>{collapsed ? 'Развернуть' : 'Свернуть'}</span>
+      <span className={cn('text-xs font-medium', rail && REVEAL_INLINE)}>{collapsed ? 'Развернуть' : 'Свернуть'}</span>
     </button>
   );
 }

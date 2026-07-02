@@ -61,7 +61,7 @@ export function Mentions() {
         <button
           onClick={refresh}
           disabled={refreshing}
-          className="rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+          className="btn-pill bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
         >
           {refreshing ? 'Поиск…' : 'Загрузить упоминания'}
         </button>
@@ -113,7 +113,7 @@ export function Mentions() {
         <button
           onClick={refresh}
           disabled={refreshing}
-          className="shrink-0 rounded bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+          className="btn-pill shrink-0 bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
         >
           {refreshing ? 'Обновление…' : 'Обновить'}
         </button>

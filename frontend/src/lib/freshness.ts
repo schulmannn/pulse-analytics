@@ -3,6 +3,8 @@ import type { HistoryData } from '@/api/schemas';
 const DAY_MS = 86_400_000;
 
 export interface Freshness {
+  /** Bare relative part — "сегодня" / "вчера" / "N дн. назад". Consumers compose the
+      surrounding copy ("обновлено {label}", "последний сбор {label}") exactly once. */
   label: string;
   /** True when the newest archived day is ≥2 days old — surfaced as a warning tone. */
   stale: boolean;
@@ -19,8 +21,10 @@ export function latestHistoryDay(history?: HistoryData | null): string | null {
 }
 
 /**
- * Human "обновлено …" label from the newest archived day. The archive is daily, so granularity
- * is день — we say сегодня / вчера / N дн. назад rather than inventing hours. Returns null when
+ * Human relative-freshness label from the newest archived day. The archive is daily, so
+ * granularity is день — we say сегодня / вчера / N дн. назад rather than inventing hours.
+ * Returns the BARE relative part (no leading "обновлено" — every consumer prepends its own
+ * verb once, which previously doubled into "обновлено обновлено сегодня"). Returns null when
  * there's nothing archived yet (caller then shows a neutral subtitle).
  */
 export function freshness(latestDay: string | null, nowMs: number): Freshness | null {
@@ -36,5 +40,5 @@ export function freshness(latestDay: string | null, nowMs: number): Freshness | 
   else if (diffDays === 1) when = 'вчера';
   else when = `${diffDays} дн. назад`;
 
-  return { label: `обновлено ${when}`, stale: diffDays >= 2 };
+  return { label: when, stale: diffDays >= 2 };
 }

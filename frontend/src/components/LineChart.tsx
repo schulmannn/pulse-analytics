@@ -1,5 +1,4 @@
-import { useId, useLayoutEffect, useRef, useState } from 'react';
-import type { MouseEvent as ReactMouseEvent } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { fmt } from '@/lib/format';
 import { detectAnomalies } from '@/lib/anomaly';
 import { ChartTooltip } from '@/components/ChartTooltip';
@@ -15,15 +14,28 @@ interface LineChartProps {
   markAnomalies?: boolean;
   /** A faded dashed previous-period series, drawn on the same y-scale for visual comparison. */
   ghost?: number[];
+  /** Bare value labels at the max point and the last point (no pills — Refined Technical). */
+  markExtremes?: boolean;
 }
 
 interface Hover {
   i: number;
-  x: number;
-  y: number;
 }
 
-export function LineChart({ values, labels, titles, yMin, yMax, height, markAnomalies, ghost }: LineChartProps) {
+// Approximate glyph width of the 11px tabular numerals used for axis/value labels.
+const CHAR_W = 6.6;
+
+export function LineChart({
+  values,
+  labels,
+  titles,
+  yMin,
+  yMax,
+  height,
+  markAnomalies,
+  ghost,
+  markExtremes = false,
+}: LineChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<Hover | null>(null);
   // Measure the real render width so the viewBox is 1:1 with CSS pixels — otherwise a
@@ -43,6 +55,20 @@ export function LineChart({ values, labels, titles, yMin, yMax, height, markAnom
     return () => ro.disconnect();
   }, []);
 
+  // The readout must not linger once the chart scrolls under the sticky header or the
+  // window loses focus — mouseleave alone does not fire during wheel scrolling.
+  const hasHover = hover !== null;
+  useEffect(() => {
+    if (!hasHover) return;
+    const clear = () => setHover(null);
+    window.addEventListener('scroll', clear, true);
+    window.addEventListener('blur', clear);
+    return () => {
+      window.removeEventListener('scroll', clear, true);
+      window.removeEventListener('blur', clear);
+    };
+  }, [hasHover]);
+
   if (!values || values.length < 2) {
     return (
       <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
@@ -53,7 +79,7 @@ export function LineChart({ values, labels, titles, yMin, yMax, height, markAnom
 
   const h = height ?? 200;
   const W = Math.max(width, 1);
-  const padX = 10;
+  const padR = 10;
   const padY = 12;
 
   const scaleVals = ghost && ghost.length ? [...values, ...ghost] : values;
@@ -63,11 +89,19 @@ export function LineChart({ values, labels, titles, yMin, yMax, height, markAnom
   const max = yMax ?? computedMax;
   const range = max - min || 1;
 
+  const yGridValues = [max, (max + min) / 2, min];
+  const yGridPositions = [padY, h / 2, h - padY];
+  const yLabels = yGridValues.map((v) => fmt.short(v));
+  // Left gutter reserved for the y labels (right-aligned inside it) so they never sit
+  // on the line/area and the first label is never clipped by the container edge.
+  const gutterW = Math.max(28, Math.round(Math.max(...yLabels.map((l) => l.length)) * CHAR_W) + 14);
+
   const n = values.length;
-  const step = (W - 2 * padX) / Math.max(n - 1, 1);
+  const plotW = Math.max(W - gutterW - padR, 10);
+  const step = plotW / Math.max(n - 1, 1);
 
   const points = values.map((v, i) => {
-    const x = padX + i * step;
+    const x = gutterW + i * step;
     const y = h - padY - ((v - min) / range) * (h - 2 * padY);
     return { x, y, v };
   });
@@ -85,30 +119,49 @@ export function LineChart({ values, labels, titles, yMin, yMax, height, markAnom
     ghost && ghost.length >= 2
       ? ghost
           .map((v, i) => {
-            const gx = padX + i * step;
+            const gx = gutterW + i * step;
             const gy = h - padY - ((v - min) / range) * (h - 2 * padY);
             return `${i === 0 ? 'M' : 'L'} ${gx} ${gy}`;
           })
           .join(' ')
       : '';
 
-  const yGridValues = [max, (max + min) / 2, min];
-  const yGridPositions = [padY, h / 2, h - padY];
+  // Bare value labels at the max point and the last point (deduped when they coincide),
+  // placed above the point and flipped below when the top edge would clip them, clamped
+  // into the plot area horizontally.
+  const extremes = (() => {
+    if (!markExtremes) return [];
+    let maxI = 0;
+    for (let k = 1; k < n; k++) if (values[k] > values[maxI]) maxI = k;
+    const idxs = maxI === n - 1 ? [n - 1] : [maxI, n - 1];
+    return idxs.map((k) => {
+      const p = points[k];
+      const text = fmt.short(values[k]);
+      const halfW = (text.length * CHAR_W) / 2;
+      const x = Math.min(Math.max(p.x, gutterW + halfW), Math.max(W - padR - halfW, gutterW + halfW));
+      const fitsAbove = p.y - 18 >= 0;
+      const y = fitsAbove ? p.y - 8 : p.y + 16;
+      return { key: k, x, y, text };
+    });
+  })();
 
   const tipText = (i: number) => {
     const base = titles?.[i] ?? fmt.num(values[i]);
     return anomalySet.has(i) ? `${base} · аномалия` : base;
   };
-  const onMove = (i: number) => (event: ReactMouseEvent) => {
-    const rect = containerRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    setHover({ i, x: event.clientX - rect.left, y: event.clientY - rect.top });
+  const onEnter = (i: number) => () => {
+    setHover((prev) => (prev && prev.i === i ? prev : { i }));
   };
 
-  const hovered = hover ? points[hover.i] : null;
+  const hovered = hover && hover.i < n ? points[hover.i] : null;
 
   return (
-    <div ref={containerRef} className="relative w-full" onMouseLeave={() => setHover(null)}>
+    <div
+      ref={containerRef}
+      className="relative w-full"
+      onMouseLeave={() => setHover(null)}
+      onPointerLeave={() => setHover(null)}
+    >
       <svg className="block w-full" height={h} viewBox={`0 0 ${W} ${h}`} preserveAspectRatio="none">
         <defs>
           <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
@@ -117,9 +170,9 @@ export function LineChart({ values, labels, titles, yMin, yMax, height, markAnom
           </linearGradient>
         </defs>
 
-        {/* Gridlines */}
+        {/* Gridlines — start after the label gutter */}
         {yGridPositions.map((yPos, idx) => (
-          <line key={idx} x1={0} y1={yPos} x2={W} y2={yPos} stroke="hsl(var(--border))" strokeDasharray="4 6" strokeWidth="1" opacity="0.6" vectorEffect="non-scaling-stroke" />
+          <line key={idx} x1={gutterW} y1={yPos} x2={W} y2={yPos} stroke="hsl(var(--border))" strokeDasharray="4 6" strokeWidth="1" opacity="0.6" vectorEffect="non-scaling-stroke" />
         ))}
 
         {/* Previous-period ghost line (faded dashed) — same y-scale for comparison */}
@@ -147,19 +200,26 @@ export function LineChart({ values, labels, titles, yMin, yMax, height, markAnom
           </>
         )}
 
-        {/* Y-axis labels */}
-        {yGridValues.map((yVal, idx) => (
-          <text key={idx} x={padX + 4} y={yGridPositions[idx] + (idx === 0 ? 12 : idx === 2 ? -4 : 4)} className="pointer-events-none select-none fill-muted-foreground text-2xs font-medium">
-            {fmt.short(yVal)}
+        {/* Max / last value labels (markExtremes) — bare tabular text, no boxes */}
+        {extremes.map((e) => (
+          <text key={`e${e.key}`} x={e.x} y={e.y} textAnchor="middle" className="pointer-events-none select-none fill-ink2 text-2xs font-medium tabular-nums">
+            {e.text}
           </text>
         ))}
 
-        {/* Per-point hover targets */}
+        {/* Y-axis labels — right-aligned in the reserved gutter */}
+        {yGridValues.map((_, idx) => (
+          <text key={idx} x={gutterW - 8} y={yGridPositions[idx] + 3.5} textAnchor="end" className="pointer-events-none select-none fill-muted-foreground text-2xs font-medium tabular-nums">
+            {yLabels[idx]}
+          </text>
+        ))}
+
+        {/* Per-point hover targets (snap to nearest point) */}
         {points.map((p, i) => {
           const xStart = i === 0 ? 0 : p.x - step / 2;
           const xEnd = i === n - 1 ? W : p.x + step / 2;
           return (
-            <rect key={i} x={xStart} y={0} width={Math.max(xEnd - xStart, 1)} height={h} fill="transparent" className="cursor-pointer" onMouseMove={onMove(i)} />
+            <rect key={i} x={xStart} y={0} width={Math.max(xEnd - xStart, 1)} height={h} fill="transparent" className="cursor-crosshair" onMouseMove={onEnter(i)} />
           );
         })}
       </svg>
@@ -173,7 +233,8 @@ export function LineChart({ values, labels, titles, yMin, yMax, height, markAnom
         </div>
       )}
 
-      <ChartTooltip tip={hover ? { x: hover.x, y: hover.y, text: tipText(hover.i) } : null} />
+      {/* Readout anchored to the snapped data point (not the cursor) so it stays inside the chart */}
+      <ChartTooltip tip={hovered ? { x: hovered.x, y: hovered.y, text: tipText(hover!.i) } : null} />
     </div>
   );
 }

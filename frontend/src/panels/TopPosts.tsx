@@ -71,7 +71,9 @@ export function TopPosts() {
       ];
       const best = opts.reduce((a, b) => (b.ratio > a.ratio ? b : a));
       const pct = Math.round((best.ratio - 1) * 100);
-      return pct > 0 ? `+${pct}% к среднему по ${best.label}` : null;
+      // Badge only for real outliers (≥2× the average) — a top list where every row is
+      // "выше среднего" is tautological, so a mild +N% on all six rows is just noise.
+      return pct >= 100 ? `+${pct}% к среднему по ${best.label}` : null;
     };
 
     return { rows: top, reasonFor };

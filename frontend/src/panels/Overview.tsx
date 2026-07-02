@@ -75,7 +75,7 @@ function StaleWarning() {
   return (
     <div className="mb-6 flex flex-wrap items-center gap-2 rounded border border-status-warn/30 px-3 py-2 text-sm text-status-warn">
       <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-status-warn" />
-      Данные устарели — обновлено {fresh.label}.
+      Данные устарели — последний сбор {fresh.label}.
       <Link to="/settings" className="ml-auto text-xs font-medium underline underline-offset-2">Настроить сбор →</Link>
     </div>
   );

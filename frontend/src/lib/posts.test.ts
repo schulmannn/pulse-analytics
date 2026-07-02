@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeTgPosts } from '@/lib/posts';
+import { normalizeTgPosts, stripTgMarkdown } from '@/lib/posts';
 
 describe('normalizeTgPosts', () => {
   it('calculates engagement formulas and media links', () => {
@@ -89,5 +89,37 @@ describe('normalizeTgPosts', () => {
     expect(post?.erv).toBeNull();
     expect(post?.virality).toBeNull();
     expect(post?.er).toBeCloseTo(4);
+  });
+
+  it('strips raw Telegram markdown from the display caption', () => {
+    const [post] = normalizeTgPosts(
+      [{ id: 9, text: '[Хлопок и шалфей](https://notem.ru/products/1) — **новинка** уже __в магазине__' }],
+      {},
+    );
+    expect(post?.caption).toBe('Хлопок и шалфей — новинка уже в магазине');
+  });
+});
+
+describe('stripTgMarkdown', () => {
+  it('unwraps links, keeping the text and dropping the url', () => {
+    expect(stripTgMarkdown('[Хлопок и шалфей](https://notem.ru/x?utm=1)')).toBe('Хлопок и шалфей');
+  });
+
+  it('removes bold, underline and backtick markers but keeps the content', () => {
+    expect(stripTgMarkdown('**Сегодня** __важно__ `код`')).toBe('Сегодня важно код');
+  });
+
+  it('drops orphan ** from unclosed markup and collapses doubled spaces', () => {
+    expect(stripTgMarkdown('**Сегодня празднуем')).toBe('Сегодня празднуем');
+    expect(stripTgMarkdown('a ** b  c')).toBe('a b c');
+  });
+
+  it('leaves single underscores/asterisks and newlines alone', () => {
+    expect(stripTgMarkdown('media_product_type и *звёздочка')).toBe('media_product_type и *звёздочка');
+    expect(stripTgMarkdown('строка один\nстрока два')).toBe('строка один\nстрока два');
+  });
+
+  it('handles empty input', () => {
+    expect(stripTgMarkdown('')).toBe('');
   });
 });

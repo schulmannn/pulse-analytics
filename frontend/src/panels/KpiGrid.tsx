@@ -11,7 +11,7 @@ import { MetricInfo } from '@/components/InfoTooltip';
 import { DeltaPill } from '@/components/DeltaPill';
 import { KpiDrillDown } from '@/components/KpiDrillDown';
 import { Skeleton } from '@/components/ui/skeleton';
-import { usePeriod } from '@/lib/period';
+import { effectiveLimit, usePeriod } from '@/lib/period';
 import { avgReachWindowDelta, dailyWindowDelta, pctDelta, subscriberChange, subscriberDelta, sumPostWindows } from '@/lib/delta';
 import type { MetricDelta } from '@/lib/delta';
 import { METRIC_DEFS } from '@/lib/metricDefs';
@@ -159,7 +159,14 @@ export function KpiGrid() {
       : null;
   const erCaption =
     erPp != null && Math.abs(erPp) >= 0.05 ? `${erPp > 0 ? '+' : '−'}${Math.abs(erPp).toFixed(1)} п.п.` : null;
-  const viewsBase = postsAnalyzed ? `по ${postsAnalyzed} постам` : null;
+  // «Всё» на деле означает «последние 100 постов» (fetch-лимит) — когда выборка упирается в
+  // кап, честно говорим «по последним N постам», а не молча выдаём срез за «всё время».
+  const atFetchCap = days === 0 && !range && (data?.posts?.length ?? 0) >= effectiveLimit(days, range);
+  const viewsBase = postsAnalyzed
+    ? atFetchCap
+      ? `по последним ${postsAnalyzed} постам`
+      : `по ${postsAnalyzed} постам`
+    : null;
   const viewsCaption = [viewsBase, viewsAbsCaption].filter(Boolean).join(' · ') || null;
 
   // Compact inline ledger deltas (Figma: signed-absolute next to subs/reactions, ER in п.п.; avg-reach

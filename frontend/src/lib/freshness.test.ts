@@ -19,10 +19,10 @@ describe('latestHistoryDay', () => {
 });
 
 describe('freshness', () => {
-  it('labels today / yesterday / older and flags stale at ≥2 days', () => {
-    expect(freshness('2026-06-29', NOW)).toEqual({ label: 'обновлено сегодня', stale: false });
-    expect(freshness('2026-06-28', NOW)).toEqual({ label: 'обновлено вчера', stale: false });
-    expect(freshness('2026-06-25', NOW)).toEqual({ label: 'обновлено 4 дн. назад', stale: true });
+  it('returns the bare relative part (consumers compose «обновлено {label}» once) and flags stale at ≥2 days', () => {
+    expect(freshness('2026-06-29', NOW)).toEqual({ label: 'сегодня', stale: false });
+    expect(freshness('2026-06-28', NOW)).toEqual({ label: 'вчера', stale: false });
+    expect(freshness('2026-06-25', NOW)).toEqual({ label: '4 дн. назад', stale: true });
   });
 
   it('returns null when there is no day', () => {

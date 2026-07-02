@@ -9,6 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { DeltaPill } from '@/components/DeltaPill';
 import { BarChart } from '@/components/BarChart';
 import { Breakdown } from '@/components/Breakdown';
+import { EmptyState } from '@/components/EmptyState';
 
 function ChartSection({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -115,6 +116,18 @@ export function Compare() {
   const b = aggregate(prev, members);
   const hasPrev = prev.length > 0;
 
+  // For the "not enough history" explainer: the comparison needs data covering BOTH windows
+  // (2×N days), while the archive of loaded posts may cover less — that's also why the Обзор
+  // insight (graphs deltas from Telegram) can report a change this tab can't reproduce.
+  const periodDays = range ? Math.max(1, Math.round(span / DAY_MS)) : days;
+  const oldestTs = all.reduce<number | null>((min, p) => {
+    if (!p.date) return min;
+    const t = Date.parse(p.date);
+    if (!Number.isFinite(t)) return min;
+    return min === null || t < min ? t : min;
+  }, null);
+  const collectedDays = oldestTs != null ? Math.max(1, Math.ceil((now - oldestTs) / DAY_MS)) : null;
+
   const rows: { label: string; cur: number; prev: number; render: (n: number) => string }[] = [
     { label: 'Просмотры', cur: a.views, prev: b.views, render: fmt.short },
     { label: 'Ср. охват', cur: a.avgReach, prev: b.avgReach, render: fmt.short },
@@ -190,12 +203,22 @@ export function Compare() {
               </tbody>
             </table>
           </div>
+        ) : days === 0 && !range ? (
+          <EmptyState
+            title="Для режима «Всё время» нет предыдущего периода"
+            reason="Выберите 7д / 30д / 90д или произвольный диапазон, чтобы сравнить его с таким же окном до него."
+          />
         ) : (
-          <p className="px-4 py-8 text-center text-sm text-muted-foreground">
-            {days === 0 && !range
-              ? 'Для режима «Всё время» нет предыдущего периода. Выберите 7д / 30д / 90д или диапазон.'
-              : 'Недостаточно истории, чтобы сравнить с предыдущим периодом.'}
-          </p>
+          <EmptyState
+            title="Недостаточно истории в архиве"
+            reason={
+              `Для сравнения периодов нужно ${fmt.num(periodDays * 2)} дн. данных в архиве` +
+              (collectedDays != null && collectedDays < periodDays * 2
+                ? ` — собрано ${fmt.num(collectedDays)} дн.`
+                : ' — за предыдущий период постов не найдено.') +
+              ' Дельты на Обзоре считаются по данным Telegram, а это сравнение — по архиву собранных постов, поэтому они могут не совпадать.'
+            }
+          />
         )}
       </div>
 

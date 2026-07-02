@@ -1,6 +1,6 @@
 import { useTgFull, useTgStats, useTgGraphs } from '@/api/queries';
 import { normalizeTgPosts } from '@/lib/posts';
-import { fmt } from '@/lib/format';
+import { fmt, ruAxisLabel, ruSeriesName } from '@/lib/format';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { Breakdown } from '@/components/Breakdown';
@@ -9,6 +9,7 @@ import { ExpandableChart } from '@/components/ExpandableChart';
 import type { ReactNode } from 'react';
 import { EmptyState } from '@/components/EmptyState';
 import { usePeriod } from '@/lib/period';
+import { cn } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
 
 const SRC_NAMES: Record<string, string> = {
@@ -155,7 +156,8 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
 
   const formatMsDate = (ts: number) => {
     const d = new Date(ts);
-    return `${d.getDate()} ${MON[d.getMonth()] ?? ''}`;
+    // ruAxisLabel: axis labels/tooltips must read Russian («18 May» → «18 мая»).
+    return ruAxisLabel(`${d.getDate()} ${MON[d.getMonth()] ?? ''}`);
   };
 
   // 6) Subscriber growth
@@ -293,11 +295,18 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <div
+        className={cn(
+          'grid grid-cols-1 gap-6 lg:grid-cols-2',
+          // Аудитория: каждая секция — самостоятельная ячейка сетки; при нечётном числе секций
+          // последняя растягивается на обе колонки, чтобы рядом не оставалось пустой дыры.
+          group === 'audience' && 'lg:[&>section:last-child:nth-child(odd)]:col-span-2',
+        )}
+      >
         {inGroup('dynamics') && last14Dates.length >= 2 && (
           <ChartSection title="Просмотры по дням">
             <ExpandableChart title="Просмотры по дням">
-              <LineChart values={vbdValues} labels={[last14Dates[0] ?? '', last14Dates[Math.floor(last14Dates.length / 2)] ?? '', last14Dates[last14Dates.length - 1] ?? '']} titles={vbdTitles} markAnomalies ghost={vbdPrev} />
+              <LineChart values={vbdValues} labels={[last14Dates[0] ?? '', last14Dates[Math.floor(last14Dates.length / 2)] ?? '', last14Dates[last14Dates.length - 1] ?? '']} titles={vbdTitles} markAnomalies markExtremes ghost={vbdPrev} />
             </ExpandableChart>
             {vbdPrev && <div className="mt-2 text-2xs text-muted-foreground">Пунктир — прошлый период (для сравнения).</div>}
           </ChartSection>
@@ -344,14 +353,15 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
           <ChartSection title="Просмотры и репосты">
             <div className="space-y-4">
               <div>
-                <div className="mb-2 text-2xs font-medium tracking-wider text-muted-foreground">{viewSeries.name || 'Просмотры'}</div>
-                <ExpandableChart title={viewSeries.name || 'Просмотры'}>
+                {/* Series names arrive in English from the graphs API — localise for the RU UI. */}
+                <div className="mb-2 text-2xs font-medium tracking-wider text-muted-foreground">{ruSeriesName(viewSeries.name) || 'Просмотры'}</div>
+                <ExpandableChart title={ruSeriesName(viewSeries.name) || 'Просмотры'}>
                   <LineChart values={viewSeries.values} labels={interLabels(interGroup)} markAnomalies />
                 </ExpandableChart>
               </div>
               <div>
-                <div className="mb-2 text-2xs font-medium tracking-wider text-muted-foreground">{shareSeries.name || 'Репосты'}</div>
-                <ExpandableChart title={shareSeries.name || 'Репосты'}>
+                <div className="mb-2 text-2xs font-medium tracking-wider text-muted-foreground">{ruSeriesName(shareSeries.name) || 'Репосты'}</div>
+                <ExpandableChart title={ruSeriesName(shareSeries.name) || 'Репосты'}>
                   <LineChart values={shareSeries.values} labels={interLabels(interGroup)} />
                 </ExpandableChart>
               </div>
@@ -407,23 +417,25 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
           </ChartSection>
         )}
 
+        {/* Раньше оба графика жили в одной двойной секции — её ячейка была вдвое выше соседних и
+            оставляла в сетке огромную пустую область. Теперь каждая секция — своя ячейка. */}
         {inGroup('audience') && maxWdAvg > 0 && (
           <ChartSection title="По дням недели">
-            <div className="space-y-4">
-              <div>
-                <div className="mb-2 text-2xs font-medium tracking-wider text-muted-foreground">Ср. просмотры</div>
-                <ExpandableChart title="Средние просмотры по дням недели">
-                  <BarChart values={wdAvgValues} labels={wdLabels} titles={wdAvgValues.map((v, i) => `${wdLabels[i]}: ${fmt.num(v)} ср. просмотров`)} />
-                </ExpandableChart>
-              </div>
-              <div>
-                <div className="mb-2 text-2xs font-medium tracking-wider text-muted-foreground">Количество постов</div>
-                <ExpandableChart title="Количество постов по дням недели">
-                  <BarChart values={wdCountValues} labels={wdLabels} titles={wdCountValues.map((v, i) => `${wdLabels[i]}: ${fmt.num(v)} постов`)} />
-                </ExpandableChart>
-              </div>
-              {bestWdLabel && <div className="mt-1 text-xs font-medium text-muted-foreground">лучший день: <strong className="text-foreground">{bestWdLabel}</strong></div>}
+            <div>
+              <div className="mb-2 text-2xs font-medium tracking-wider text-muted-foreground">Ср. просмотры</div>
+              <ExpandableChart title="Средние просмотры по дням недели">
+                <BarChart values={wdAvgValues} labels={wdLabels} titles={wdAvgValues.map((v, i) => `${wdLabels[i]}: ${fmt.num(v)} ср. просмотров`)} />
+              </ExpandableChart>
+              {bestWdLabel && <div className="mt-3 text-xs font-medium text-muted-foreground">лучший день: <strong className="text-foreground">{bestWdLabel}</strong></div>}
             </div>
+          </ChartSection>
+        )}
+
+        {inGroup('audience') && maxWdAvg > 0 && (
+          <ChartSection title="Количество постов">
+            <ExpandableChart title="Количество постов по дням недели">
+              <BarChart values={wdCountValues} labels={wdLabels} titles={wdCountValues.map((v, i) => `${wdLabels[i]}: ${fmt.num(v)} постов`)} />
+            </ExpandableChart>
           </ChartSection>
         )}
       </div>

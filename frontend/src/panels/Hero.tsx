@@ -57,7 +57,7 @@ export function Hero() {
                 className={fresh.stale ? 'text-ember' : undefined}
                 title={fresh.stale ? 'Данные устарели — последний сбор был давно' : undefined}
               >
-                {fresh.label}
+                обновлено {fresh.label}
               </span>
               <MetricInfo def={METRIC_DEFS.freshness} />
             </>

@@ -73,8 +73,28 @@ export function TopPostsBlock({ posts, limit = 9, showSort = true }: { posts: Ig
   );
 }
 
+/** Neutral stroke glyph for cards without a media preview — play for video, photo otherwise. */
+function MediaPlaceholderGlyph({ video }: { video: boolean }) {
+  return video ? (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-7 w-7" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M10 8.7l5.4 3.3-5.4 3.3z" strokeLinejoin="round" />
+    </svg>
+  ) : (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-7 w-7" aria-hidden="true">
+      <rect x="3.5" y="5" width="17" height="14" rx="2" />
+      <circle cx="9" cy="10" r="1.6" />
+      <path d="m6 16.5 4-4 3 3 2.5-2.5 2.5 2.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export function IgPostCard({ post, rank }: { post: IgPost; rank: number }) {
   const typeLabel = MEDIA_TYPE_LABEL[post.media_type ?? ''] ?? 'Пост';
+  const isVideo = post.media_type === 'VIDEO' || post.media_product_type === 'REELS';
+  // For video posts media_url points at the video file — useless in <img> (renders a blank
+  // hole). Only a real thumbnail counts as a cover there; images may fall back to media_url.
+  const cover = post.thumbnail_url || (!isVideo ? post.media_url : null) || null;
   return (
     <div className="flex flex-col border-t border-border pt-3">
       {/* header row — rank + type as a hairline label (no positioned overlays on the image) */}
@@ -82,11 +102,13 @@ export function IgPostCard({ post, rank }: { post: IgPost; rank: number }) {
         <span className="tabular-nums text-ink3">#{rank}</span>
         <span className="text-muted-foreground">{typeLabel}</span>
       </div>
-      <div className="flex aspect-video w-full items-center justify-center overflow-hidden rounded bg-muted/50">
-        {post.thumbnail_url || post.media_url ? (
-          <img src={post.thumbnail_url || post.media_url || ''} alt="" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
+      {/* Uniform 4:5 cover (Instagram portrait) keeps the grid rows aligned; missing previews
+          get a neutral placeholder tile instead of an empty box. */}
+      <div className="flex aspect-[4/5] w-full items-center justify-center overflow-hidden rounded bg-muted text-muted-foreground">
+        {cover ? (
+          <img src={cover} alt="" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
         ) : (
-          <span className="text-2xs text-muted-foreground">{typeLabel}</span>
+          <MediaPlaceholderGlyph video={isVideo} />
         )}
       </div>
       <p className="mt-3 line-clamp-3 flex-1 text-sm leading-relaxed text-foreground">
