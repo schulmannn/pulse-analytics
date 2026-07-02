@@ -16,6 +16,8 @@ interface LineChartProps {
   ghost?: number[];
   /** Bare value labels at the max point and the last point (no pills — Refined Technical). */
   markExtremes?: boolean;
+  /** Hollow rings on every data point (steep-style reading aid for daily series). */
+  showPoints?: boolean;
 }
 
 interface Hover {
@@ -76,6 +78,7 @@ export function LineChart({
   markAnomalies,
   ghost,
   markExtremes = false,
+  showPoints = false,
 }: LineChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<Hover | null>(null);
@@ -239,6 +242,13 @@ export function LineChart({
         {/* Gradient area + line */}
         <path d={areaPath} fill={`url(#${gradientId})`} />
         <path d={linePath} fill="none" stroke="hsl(var(--brand-iris))" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+
+        {/* Per-point hollow rings (steep-style) — knocked out from the paper so the line reads
+            as a dotted sequence of measurements, not a continuous estimate */}
+        {showPoints &&
+          points.map((p, i) => (
+            <circle key={`pt${i}`} cx={p.x} cy={p.y} r="3" fill="hsl(var(--background))" stroke="hsl(var(--brand-iris))" strokeWidth="1.5" vectorEffect="non-scaling-stroke" className="pointer-events-none" />
+          ))}
 
         {/* Anomaly markers — hollow amber rings on statistically unusual points */}
         {anomalyIdx.map((i) => (

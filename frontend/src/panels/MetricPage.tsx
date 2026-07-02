@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Link, Navigate, useParams } from 'react-router-dom';
+import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom';
 import { useChannels, useHistory, useTgFull } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { usePeriod } from '@/lib/period';
@@ -15,6 +15,9 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { DeltaPill } from '@/components/DeltaPill';
 import { LineChart } from '@/components/LineChart';
+import { BarChart } from '@/components/BarChart';
+import { ChartExpandedContext } from '@/components/ExpandableChart';
+import { Breakdown } from '@/components/Breakdown';
 import { PostDetailModal } from '@/components/PostDetailModal';
 import { ChartSection } from '@/components/instagram/shared';
 
@@ -50,6 +53,15 @@ const SHARE_LABEL: Partial<Record<DrillKey, string>> = {
   avgReach: '% охвата',
   er: '% вовлечённости',
 };
+
+/** Post format for the breakdown rows (same buckets as the Compare tab). */
+function formatLabel(mediaType: string | null, albumSize: number): string {
+  if (albumSize > 1) return 'Альбом';
+  if (mediaType === 'photo') return 'Фото';
+  if (mediaType === 'video') return 'Видео';
+  if (mediaType === 'document') return 'Файл';
+  return 'Текст';
+}
 
 // Volume metrics start the y-axis at zero (bar-like honesty for sums); the subscriber count is a
 // stock metric where the zoomed band is the story, so it keeps the fitted scale.
@@ -120,6 +132,22 @@ export function MetricPage() {
   const { channelId } = useSelectedChannel();
   const { data: channelsData } = useChannels();
   const [openPost, setOpenPost] = useState<NormalizedPost | null>(null);
+  // Chart type lives in ?chart= (replace) — a shared link restores the view; line is default.
+  const [params, setParams] = useSearchParams();
+  const chartType: 'line' | 'bar' = params.get('chart') === 'bar' ? 'bar' : 'line';
+  const setChartType = (next: 'line' | 'bar') => {
+    setParams(
+      (prev) => {
+        const merged = new URLSearchParams(prev);
+        if (next === 'line') merged.delete('chart');
+        else merged.set('chart', next);
+        return merged;
+      },
+      { replace: true },
+    );
+  };
+  // The previous-period ghost is a toggle (steep's Compare row), on by default when available.
+  const [showGhost, setShowGhost] = useState(true);
 
   const derived = useMemo(
     () => deriveKpis(data, history, channelsData, channelId, days, range, inRange),
@@ -218,6 +246,22 @@ export function MetricPage() {
     }
   }
 
+  // Format breakdown for the Explore rail (post-attributed metrics: sums of the metric's
+  // underlying field per format — same buckets as the Compare tab).
+  const breakdownItems = field
+    ? (() => {
+        const byFormat = new Map<string, number>();
+        for (const post of normPosts) {
+          const label = formatLabel(post.mediaType, post.albumSize);
+          byFormat.set(label, (byFormat.get(label) ?? 0) + Number(post[field] ?? 0));
+        }
+        return [...byFormat.entries()]
+          .filter(([, value]) => value > 0)
+          .sort(([, a], [, b]) => b - a)
+          .map(([label, value]) => ({ label, value, display: fmt.short(value) }));
+      })()
+    : [];
+
   // «Сравнение» ledger: current vs the previous equal-length window (presets only).
   const compare = buildCompare(metricKey, {
     range: range != null,
@@ -253,21 +297,42 @@ export function MetricPage() {
       <div className="grid grid-cols-1 gap-10 lg:grid-cols-[minmax(0,1fr)_300px]">
         {/* Main column — the big daily chart + contributing posts. */}
         <div className="min-w-0 space-y-8">
-          <ChartSection title={DAY_TITLE[metricKey] ?? 'По дням'}>
-            <LineChart
-              values={series.values}
-              labels={series.labels}
-              titles={titles}
-              height={280}
-              markExtremes
-              markAnomalies={metricKey === 'views' || metricKey === 'subscribers'}
-              ghost={ghost}
-              yMin={ZERO_BASED[metricKey] && series.values.length > 1 ? 0 : undefined}
-            />
-            {ghost ? (
-              <p className="text-2xs text-muted-foreground">Пунктир — прошлый период той же длины.</p>
-            ) : null}
-          </ChartSection>
+          <section className="space-y-3">
+            {/* ChartSection header + the chart-type switcher (steep's Explore icons) inline. */}
+            <div className="flex items-center gap-3">
+              <h3 className="whitespace-nowrap text-xs font-medium tracking-wider text-muted-foreground">
+                {DAY_TITLE[metricKey] ?? 'По дням'}
+              </h3>
+              <span aria-hidden="true" className="h-px flex-1 bg-border" />
+              <div role="group" aria-label="Тип графика" className="flex overflow-hidden rounded border border-border">
+                <ChartTypeButton kind="line" active={chartType === 'line'} onSelect={setChartType} />
+                <ChartTypeButton kind="bar" active={chartType === 'bar'} onSelect={setChartType} />
+              </div>
+            </div>
+            {chartType === 'line' ? (
+              <>
+                <LineChart
+                  values={series.values}
+                  labels={series.labels}
+                  titles={titles}
+                  height={280}
+                  markExtremes
+                  markAnomalies={metricKey === 'views' || metricKey === 'subscribers'}
+                  showPoints={series.values.length > 1 && series.values.length <= 45}
+                  ghost={showGhost ? ghost : undefined}
+                  yMin={ZERO_BASED[metricKey] && series.values.length > 1 ? 0 : undefined}
+                />
+                {ghost && showGhost ? (
+                  <p className="text-2xs text-muted-foreground">Пунктир — прошлый период той же длины.</p>
+                ) : null}
+              </>
+            ) : (
+              /* Expanded context switches BarChart into its rich mode (y ticks + value labels). */
+              <ChartExpandedContext.Provider value={true}>
+                <BarChart values={series.values} labels={series.labels} titles={titles} height={280} />
+              </ChartExpandedContext.Provider>
+            )}
+          </section>
 
           {field && (
             <ChartSection title={`Топ постов по ${CONTRIB_LABEL[metricKey] ?? 'метрике'}`}>
@@ -322,9 +387,36 @@ export function MetricPage() {
           )}
         </div>
 
-        {/* Explore rail — comparison + the plain-language definition (steep's About). */}
+        {/* Explore rail — breakdown + comparison + the plain-language definition (steep). */}
         <aside className="space-y-8">
+          {breakdownItems.length > 0 && (
+            <ChartSection title="Разбивка по формату">
+              <Breakdown items={breakdownItems} />
+            </ChartSection>
+          )}
+
           <ChartSection title="Сравнение">
+            {ghost && chartType === 'line' ? (
+              <button
+                type="button"
+                role="switch"
+                aria-checked={showGhost}
+                onClick={() => setShowGhost((v) => !v)}
+                className="mb-3 flex w-full items-center justify-between gap-2 text-left text-xs text-muted-foreground transition-colors hover:text-foreground"
+              >
+                <span>Прошлый период на графике</span>
+                <span
+                  aria-hidden="true"
+                  className={
+                    showGhost
+                      ? 'rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-2xs font-medium text-primary'
+                      : 'rounded-full border border-border px-2 py-0.5 text-2xs font-medium text-muted-foreground'
+                  }
+                >
+                  {showGhost ? 'вкл' : 'выкл'}
+                </span>
+              </button>
+            ) : null}
             {compare ? (
               <div className="space-y-2 text-sm">
                 <CompareRow label="Текущий период" value={compare.current} strong />
@@ -442,6 +534,43 @@ function buildCompare(
       // headline (daily-archive based) already carries the direction.
       return null;
   }
+}
+
+/** One cell of the line/bar chart-type switcher (steep's Explore icons, bounded segment). */
+function ChartTypeButton({
+  kind,
+  active,
+  onSelect,
+}: {
+  kind: 'line' | 'bar';
+  active: boolean;
+  onSelect: (k: 'line' | 'bar') => void;
+}) {
+  const label = kind === 'line' ? 'Линия' : 'Столбцы';
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      title={label}
+      aria-label={`Тип графика: ${label}`}
+      onClick={() => onSelect(kind)}
+      className={`flex h-7 w-8 items-center justify-center transition-colors first:border-r first:border-border ${
+        active ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+      }`}
+    >
+      {kind === 'line' ? (
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-3.5 w-3.5" aria-hidden="true">
+          <path d="M1.5 11.5 5.5 7l3 2.5 5.5-6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5" aria-hidden="true">
+          <rect x="2" y="8" width="3" height="6" rx="0.5" />
+          <rect x="6.5" y="4" width="3" height="10" rx="0.5" />
+          <rect x="11" y="6" width="3" height="8" rx="0.5" />
+        </svg>
+      )}
+    </button>
+  );
 }
 
 function CompareRow({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
