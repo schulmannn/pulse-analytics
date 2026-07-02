@@ -123,16 +123,29 @@ function SubscriberMovement({
 
 function FollowsByDayCard({ data, total }: { data: Point[]; total: number }) {
   return (
-    <ChartSection title="Подписки по дням">
-      {data.length > 0 ? (
-        <BarChart
-          values={data.map((d) => d.value)}
-          labels={data.map((d) => fmtDay(d.day))}
-          titles={data.map((d) => `${fmtDay(d.day)}: +${fmt.num(d.value)}`)}
-        />
-      ) : (
-        <EmptyChart />
-      )}
+    <ChartSection
+      title="Подписки по дням"
+      // Bars as a VARIANT so they fill the fixed tile height (bare children would sit at the
+      // default 200 and leave a gap); the period total stays as the caption below.
+      variants={
+        data.length > 0
+          ? [
+              {
+                key: 'bar',
+                label: 'Столбцы',
+                render: (
+                  <BarChart
+                    values={data.map((d) => d.value)}
+                    labels={data.map((d) => fmtDay(d.day))}
+                    titles={data.map((d) => `${fmtDay(d.day)}: +${fmt.num(d.value)}`)}
+                  />
+                ),
+              },
+            ]
+          : undefined
+      }
+    >
+      {data.length === 0 && <EmptyChart />}
       <p className="mt-3 text-xs text-muted-foreground">
         Всего подписок за период: <span className="font-medium text-verdant">+{fmt.num(total)}</span>
       </p>

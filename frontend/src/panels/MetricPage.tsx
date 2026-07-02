@@ -481,6 +481,7 @@ export function MetricPage() {
           <ChartWidget
             id={`metric-${metricKey}`}
             title={chartTitle}
+            defaultSize="full"
             action={
               <div role="group" aria-label="Тип графика" className="flex shrink-0 overflow-hidden rounded border border-border">
                 {chartTypes.map((kind) => (

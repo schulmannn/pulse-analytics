@@ -124,20 +124,33 @@ export function pickLabels(series: Point[]): string[] {
 
 /** A daily line chart for a metric that genuinely has a daily series (reach / new followers).
     Renders as a WIDGET card (chart surfaces are widgets now); the flat ChartSection above
-    stays exported for non-chart hosts (metric-page rail, the report document). */
+    stays exported for non-chart hosts (metric-page rail, the report document). The chart rides
+    the widget's fill context as a VARIANT (not bare children) so it fills the fixed tile height
+    instead of sitting at its default 200 and leaving a gap / a stray scrollbar. */
 export function TrendCard({ title, series }: { title: string; series: Point[] }) {
-  return (
-    <WidgetChartSection title={title}>
-      {series.length > 1 ? (
-        /* Standard 1×-tile height (LineChart default 200); the overlay sets its own 400. */
-        <LineChart
-          values={series.map((p) => p.value)}
-          labels={pickLabels(series)}
-          titles={series.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)}`)}
-        />
-      ) : (
+  if (series.length <= 1) {
+    return (
+      <WidgetChartSection title={title}>
         <EmptyChart />
-      )}
-    </WidgetChartSection>
+      </WidgetChartSection>
+    );
+  }
+  return (
+    <WidgetChartSection
+      title={title}
+      variants={[
+        {
+          key: 'line',
+          label: 'Линия',
+          render: (
+            <LineChart
+              values={series.map((p) => p.value)}
+              labels={pickLabels(series)}
+              titles={series.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)}`)}
+            />
+          ),
+        },
+      ]}
+    />
   );
 }

@@ -6,7 +6,6 @@ import { compareDdMm } from '@/lib/dates';
 import { fmt, ruAxisLabel, ruSeriesName } from '@/lib/format';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
-import { Breakdown } from '@/components/Breakdown';
 import { ChartSection, WidgetGroup, breakdownVariants, seriesBarValuesVariant } from '@/components/ChartWidget';
 import { DivergingBars } from '@/components/DivergingBars';
 import { EmptyState } from '@/components/EmptyState';
@@ -570,19 +569,29 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
         )}
 
         {inGroup('dynamics') && net30Values.length > 0 && (
-          <ChartSection title="Чистый прирост подписчиков (30д)">
-            <DivergingBars values={net30Values} titles={net30Titles} />
+          // Single-variant (no type switcher) so the diverging bars render THROUGH the widget's
+          // fill context and fill the tile — as bare children they'd sit at the fixed ~120px and
+          // leave dead space. The «прирост» total stays as the caption below.
+          <ChartSection
+            title="Чистый прирост подписчиков (30д)"
+            variants={[
+              { key: 'bar', label: 'Столбцы', render: <DivergingBars values={net30Values} titles={net30Titles} /> },
+            ]}
+          >
             {netSummaryStr && <div className="mt-3 text-xs font-medium text-muted-foreground">прирост: {netSummaryStr}</div>}
           </ChartSection>
         )}
 
         {inGroup('dynamics') && (joinedTotal > 0 || leftTotal > 0) && (
-          <ChartSection title="Динамика оттока">
-            <Breakdown items={[
-              { label: 'Подписалось', value: joinedTotal, display: fmt.num(joinedTotal), color: 'hsl(var(--brand-verdant))' },
-              { label: 'Отписалось', value: leftTotal, display: fmt.num(leftTotal), color: 'hsl(var(--brand-ember))' },
-            ].filter((i) => i.value > 0)} />
-          </ChartSection>
+          <ChartSection
+            title="Динамика оттока"
+            variants={breakdownVariants(
+              [
+                { label: 'Подписалось', value: joinedTotal, display: fmt.num(joinedTotal), color: 'hsl(var(--brand-verdant))' },
+                { label: 'Отписалось', value: leftTotal, display: fmt.num(leftTotal), color: 'hsl(var(--brand-ember))' },
+              ].filter((i) => i.value > 0),
+            )}
+          />
         )}
 
         {/* Раньше оба графика жили в одной двойной секции — её ячейка была вдвое выше соседних и

@@ -68,13 +68,14 @@ const SIZE_COL_SPAN: Record<WidgetSize, string> = {
 /** Fixed card height per size on the ≥lg grid (steep tiles) — so a row never mixes a tall card
     with a short one and the chart body fills the leftover space instead of leaving пустоты.
     `third`/`half` SHARE rows (2/6 + 3/6 pack together), so they lock to ONE exact height and stay
-    aligned whatever they hold; `full` spans the whole row (never shares one) and carries hero/table
-    content that must be free to grow, so it only gets a floor. Mobile is single-column — no
-    row-mates to align with — so heights apply from lg up only. */
+    aligned whatever they hold. `full` spans the whole row — it never shares one, so it needs no
+    fixed height and stays content-height (hero KPI grids, post tables and bar+ledger self-size;
+    a forced height would only pad short ones). Two half rows (264·2 + gap) clear a ~800px viewport
+    under the KPI ledger + tabs. Mobile is single-column — no row-mates — so heights apply from lg up. */
 const SIZE_H: Record<WidgetSize, string> = {
-  third: 'lg:h-[272px]',
-  half: 'lg:h-[272px]',
-  full: 'lg:min-h-[320px]',
+  third: 'lg:h-[264px]',
+  half: 'lg:h-[264px]',
+  full: '',
 };
 
 /** One presentation of a widget's data (line / bar / list …), chosen in the edit dialog. */
@@ -806,7 +807,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
   const menuRef = useRef<HTMLDivElement>(null);
   const sectionRef = useRef<HTMLElement>(null);
   // The chart-body region (flex-1 inside the fixed-height card). We feed its measured pixel
-  // height to variant charts so they fill the tile (steep) — see the effect + provider below.
+  // height to the charts inside so they fill the tile (steep) — see the effect + fillHeight below.
   const bodyRef = useRef<HTMLDivElement>(null);
   const [bodyH, setBodyH] = useState<number | null>(null);
   useStoreTick();
@@ -816,7 +817,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
   const register = group?.register;
   useEffect(() => register?.(widgetId, title, sectionRef.current), [register, widgetId, title]);
 
-  // Measure the body region so variant charts fill the fixed tile height. The region is flex-1
+  // Measure the body region so the charts inside fill the fixed tile height. The region is flex-1
   // inside a fixed-height card, so its clientHeight IS the space left after header/pills/caption —
   // no per-card height guesswork. A vertical scrollbar (long lists) trims width, never height, so
   // this never feedback-loops. null until measured → charts fall back to their own default height.
@@ -880,6 +881,10 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
   // never renders in a third. col-span is applied on the OUTER section below.
   const chosenSize: WidgetSize = prefs.size ?? defaultSize ?? 'half';
   const effectiveSize = maxSize(chosenSize, activeVariant?.minSize ?? 'third');
+  // Height fed to every chart in the body so it fills the tile. Only for the FIXED sizes
+  // (third/half); a `full` card is content-height, so it passes null and charts keep their own
+  // height (e.g. KpiHero's deliberate 64px mini-sparkline, the metric page's 280px chart).
+  const fillHeight = effectiveSize === 'full' ? null : bodyH;
 
   // The widget's own body — the active variant plus the shared children (captions etc.). Reused
   // as the Tier-1 overlay content: the same chart, just rendered at full explorer axes. Wrapped
@@ -1087,17 +1092,13 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
       <div className={`mt-3 flex min-h-0 flex-1 flex-col ${reorder ? 'pointer-events-none' : ''}`}>
         <WidgetPeriodProvider value={widgetPeriod}>
           {/* Chart region — flex-1 eats the tile's leftover height; overflow-y-auto lets a long list
-              (Breakdown / pie legend) scroll instead of blowing the fixed height. Variant charts read
-              the measured height via the provider and fill; `children`-only cards render at their own
-              height so intentional sizes (e.g. KpiHero's mini-sparkline) survive. */}
+              (Breakdown / pie legend) scroll instead of blowing the fixed height. fillHeight feeds
+              the leftover height to EVERY chart inside (variant or bare children) so they fill; a
+              `full` card passes null, so its charts keep their own/explicit height. */}
           <div ref={bodyRef} className="min-h-0 flex-1 overflow-y-auto">
-            {activeVariant ? (
-              <ExpandedChartHeightContext.Provider value={bodyH}>
-                {activeVariant.render}
-              </ExpandedChartHeightContext.Provider>
-            ) : (
-              children
-            )}
+            <ExpandedChartHeightContext.Provider value={fillHeight}>
+              {activeVariant ? activeVariant.render : children}
+            </ExpandedChartHeightContext.Provider>
           </div>
           {/* Caption (shared children under a variant — «лучший день» / «пик активности» / totals)
               sits below the chart at its natural height, never squeezed by the fill. */}

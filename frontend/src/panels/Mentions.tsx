@@ -151,8 +151,9 @@ export function Mentions() {
         <ChartSection title="Кто упоминает · топ каналов" variants={breakdownVariants(breakdownItems)} />
       </WidgetGroup>
 
-      {/* Лента последних упоминаний */}
-      <ChartSection title="Последние упоминания">
+      {/* Лента последних упоминаний — full = content-height so the feed grows instead of
+          scrolling inside a fixed tile. */}
+      <ChartSection title="Последние упоминания" defaultSize="full">
         {recent.length === 0 ? (
           <div className="py-6 text-center text-sm text-muted-foreground">
             Упоминаний не найдено.

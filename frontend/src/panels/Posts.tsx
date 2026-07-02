@@ -77,7 +77,8 @@ export function Posts() {
     <div className="space-y-8">
       {/* «Топ постов за период» убран: он дублировал Обзор, а сортируемый лидерборд ниже
           покрывает топ (D6.4). Таблица — виджет, как и всё остальное. */}
-      <ChartSection title="Публикации · топ-25">
+      {/* full = content-height: a 25-row table must grow, not scroll inside a fixed tile. */}
+      <ChartSection title="Публикации · топ-25" defaultSize="full">
         <div className="hidden overflow-x-auto md:block">
           <table className="w-full border-collapse text-left text-sm">
             <thead>
