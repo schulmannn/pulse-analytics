@@ -8,6 +8,7 @@ import os
 import json
 import logging
 import re
+import secrets
 from collections import OrderedDict
 from typing import Optional
 
@@ -39,7 +40,10 @@ API_HASH     = os.getenv('TG_API_HASH', '')
 SESSION      = os.getenv('TG_SESSION', '')
 PHONE        = os.getenv('TG_PHONE', '')
 CHANNEL      = os.getenv('TG_CHANNEL', '')
-TEAM_PASS    = os.getenv('TEAM_PASSWORD', '')
+# Internal-auth token for web → mtproto calls; the web service sends the same
+# value in x-internal-token. Fail-closed: when unset, data routes answer 503
+# instead of serving openly (see check_auth).
+MTPROTO_TOKEN = os.getenv('MTPROTO_TOKEN', '')
 MTPROTO_PORT = int(os.getenv('MTPROTO_PORT', '8001'))
 
 # ── Mentions (channels.searchPosts — requires Premium; ~10 free searches/day) ──
@@ -103,7 +107,11 @@ async def get_client() -> TelegramClient:
 
 
 def check_auth(x_internal_token: str = Header(default='')):
-    if TEAM_PASS and x_internal_token != TEAM_PASS:
+    # FAIL-CLOSED: an unset token must never mean "auth off" (the legacy shared-
+    # password behaviour served everything openly when the env was empty).
+    if not MTPROTO_TOKEN:
+        raise HTTPException(status_code=503, detail='token_not_configured')
+    if not secrets.compare_digest(x_internal_token, MTPROTO_TOKEN):
         raise HTTPException(status_code=401, detail='Unauthorized')
 
 
@@ -230,11 +238,9 @@ def _cols_of(data):
 
 @app.get('/health')
 async def health():
-    return {
-        'status': 'ok',
-        'connected': client.is_connected() if client else False,
-        'channel': CHANNEL,
-    }
+    # Liveness only. Unauthenticated (container healthcheck hits it), so it must
+    # not leak config — no channel name, no connection details.
+    return {'ok': True}
 
 
 @app.get('/channel')

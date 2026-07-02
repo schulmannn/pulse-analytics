@@ -111,7 +111,7 @@ function registerCollectorRoutes({
   );
   app.get('/api/channels/:id/collector-status', requireAuth, async (req, res, next) => {
     const channelId = parseInt(req.params.id, 10);
-    if (!channelId || req.user.uid == null) return res.status(400).json({ error: 'bad id' });
+    if (!channelId) return res.status(400).json({ error: 'bad id' });
     try {
       const channel = await db.getChannel(channelId, req.user);
       if (!channel) return res.status(403).json({ error: 'Нет доступа к каналу' });

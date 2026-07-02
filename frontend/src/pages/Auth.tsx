@@ -151,6 +151,7 @@ export function LoginPage() {
           onChange={(event) => setEmail(event.target.value)}
           placeholder="you@example.com"
           autoComplete="username"
+          required
           disabled={loginMutation.isPending}
           className={INPUT_CLASS}
         />

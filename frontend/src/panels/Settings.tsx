@@ -119,7 +119,6 @@ function ProfileSection() {
   const avatar = me.data?.avatar;
   const email = me.data?.email ?? '';
   const initials = (email ? email.replace(/@.*/, '').replace(/[^\p{L}]/gu, '').slice(0, 2).toUpperCase() : '') || '?';
-  const teamLogin = me.data?.uid == null; // break-glass team login has no user row
 
   const onFile = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -142,36 +141,30 @@ function ProfileSection() {
         </span>
         <div className="min-w-0 space-y-1.5">
           <div className="truncate text-sm font-medium text-foreground">{email || 'Аккаунт'}</div>
-          {teamLogin ? (
-            <p className="text-xs text-muted-foreground">Командный вход — фото профиля недоступно.</p>
-          ) : (
-            <>
-              <div className="flex items-center gap-2">
-                <label className="cursor-pointer rounded border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted">
-                  {updateAvatar.isPending ? 'Загрузка…' : avatar ? 'Сменить фото' : 'Загрузить фото'}
-                  <input
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp"
-                    className="hidden"
-                    onChange={onFile}
-                    disabled={updateAvatar.isPending}
-                  />
-                </label>
-                {avatar && (
-                  <button
-                    type="button"
-                    onClick={() => removeAvatar.mutate()}
-                    disabled={removeAvatar.isPending}
-                    className="rounded border border-destructive/20 px-3 py-1.5 text-xs font-medium text-destructive transition-colors hover:bg-destructive/5 disabled:opacity-50"
-                  >
-                    Удалить
-                  </button>
-                )}
-              </div>
-              {err && <p className="text-xs font-medium text-destructive">{err}</p>}
-              <p className="text-2xs text-muted-foreground">PNG, JPEG или WebP — уменьшим до 256 px.</p>
-            </>
-          )}
+          <div className="flex items-center gap-2">
+            <label className="cursor-pointer rounded border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted">
+              {updateAvatar.isPending ? 'Загрузка…' : avatar ? 'Сменить фото' : 'Загрузить фото'}
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                className="hidden"
+                onChange={onFile}
+                disabled={updateAvatar.isPending}
+              />
+            </label>
+            {avatar && (
+              <button
+                type="button"
+                onClick={() => removeAvatar.mutate()}
+                disabled={removeAvatar.isPending}
+                className="rounded border border-destructive/20 px-3 py-1.5 text-xs font-medium text-destructive transition-colors hover:bg-destructive/5 disabled:opacity-50"
+              >
+                Удалить
+              </button>
+            )}
+          </div>
+          {err && <p className="text-xs font-medium text-destructive">{err}</p>}
+          <p className="text-2xs text-muted-foreground">PNG, JPEG или WebP — уменьшим до 256 px.</p>
         </div>
       </div>
     </ChartSection>
