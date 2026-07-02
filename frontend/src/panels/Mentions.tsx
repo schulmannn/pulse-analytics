@@ -1,4 +1,5 @@
 import { useMentions, useMentionsArchive } from '@/api/queries';
+import { compareDdMm } from '@/lib/dates';
 import { fmt } from '@/lib/format';
 import { BarChart } from '@/components/BarChart';
 import { Breakdown } from '@/components/Breakdown';
@@ -42,8 +43,8 @@ export function Mentions() {
     return null;
   })();
 
-  // First archive load with nothing to show yet.
-  if (archive.isLoading && !data) return <MentionsSkeletons />;
+  // First archive load with nothing to show yet (isPending also covers the pre-channel gate).
+  if (archive.isPending && !data) return <MentionsSkeletons />;
 
   const hasData =
     !!data && data.available !== false && ((data.total ?? 0) > 0 || (data.recent?.length ?? 0) > 0);
@@ -79,15 +80,9 @@ export function Mentions() {
   const topChannels = data?.top_channels ?? [];
   const recent = data?.recent ?? [];
 
-  // Подготовка данных графика (последние 14 дней, сортировка по дате "DD.MM")
-  const currentYear = new Date().getFullYear();
-  const sortedDates = Object.keys(byDay).sort((a, b) => {
-    const [dayA, monthA] = a.split('.').map(Number);
-    const [dayB, monthB] = b.split('.').map(Number);
-    const timeA = new Date(currentYear, monthA - 1, dayA).getTime();
-    const timeB = new Date(currentYear, monthB - 1, dayB).getTime();
-    return timeA - timeB;
-  });
+  // Подготовка данных графика (последние 14 дней, сортировка по «dd.mm» с учётом
+  // перехода через Новый год — 28.12 должен идти раньше 03.01).
+  const sortedDates = Object.keys(byDay).sort((a, b) => compareDdMm(a, b));
 
   const last14Dates = sortedDates.slice(-14);
   const chartValues = last14Dates.map((date) => byDay[date] ?? 0);

@@ -11,6 +11,25 @@ export default defineConfig({
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // Stable vendor chunk (framework + data layer) separate from app code: it changes
+        // only on dependency bumps, so returning users keep it cached across app deploys.
+        // framer-motion is deliberately NOT listed — only the lazy-loaded Landing imports
+        // it, so Rollup places it in the Landing async chunk (never in the entry).
+        manualChunks(id: string) {
+          if (!id.includes('node_modules')) return undefined;
+          if (/[\\/]node_modules[\\/](react|react-dom|scheduler|react-router|react-router-dom|@remix-run)[\\/]/.test(id)) {
+            return 'vendor';
+          }
+          if (/[\\/]node_modules[\\/]@tanstack[\\/]/.test(id)) return 'vendor';
+          if (/[\\/]node_modules[\\/]zod[\\/]/.test(id)) return 'vendor';
+          return undefined;
+        },
+      },
+    },
+  },
   server: {
     port: 5173,
     // Dev only: proxy API calls to the local Express server (run `npm run dev` in repo root).

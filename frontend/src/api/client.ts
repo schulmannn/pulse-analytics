@@ -14,6 +14,21 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Per-request options threaded from the calling hook:
+ * - `signal` — TanStack Query's AbortSignal, forwarded into fetch so cancelQueries()
+ *   actually aborts the network request (not just ignores the result).
+ * - `channelId` — the channel captured at render time by the hook (the same value baked
+ *   into the query key). Passing it explicitly closes the race where a retry fired after
+ *   a channel switch would read the NEW channel from the module singleton and cache
+ *   channel-B data under channel-A's key. `undefined` = fall back to the singleton
+ *   (non-channel endpoints / mutations); `null` = explicitly no channel header.
+ */
+export interface ApiOptions {
+  signal?: AbortSignal;
+  channelId?: number | null;
+}
+
 function parseResponse<S extends z.ZodTypeAny>(
   method: string,
   path: string,
@@ -23,9 +38,19 @@ function parseResponse<S extends z.ZodTypeAny>(
   const result = schema.safeParse(data);
   if (!result.success) {
     if (import.meta.env.DEV) console.warn('[api-drift]', method, path, result.error.issues);
-    throw result.error;
+    // Surface schema drift as a friendly ApiError, not a raw ZodError issue dump. status 0
+    // marks it client-side: never retried (see the retry predicate) and never auth-handled.
+    throw new ApiError(0, 'Формат данных не совпадает с ожидаемым');
   }
   return result.data;
+}
+
+function buildHeaders(channelId: number | null): Record<string, string> {
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  const token = getSessionToken();
+  if (token) headers['X-Session-Token'] = token;
+  if (channelId != null) headers['X-Channel-Id'] = String(channelId);
+  return headers;
 }
 
 /**
@@ -34,19 +59,23 @@ function parseResponse<S extends z.ZodTypeAny>(
  * as the `X-Session-Token` header (NOT a cookie). The JSON is then validated/narrowed
  * through a Zod schema so the return type is inferred — no `any` leaks into panels.
  */
-export async function apiGet<S extends z.ZodTypeAny>(path: string, schema: S): Promise<z.infer<S>> {
+export async function apiGet<S extends z.ZodTypeAny>(
+  path: string,
+  schema: S,
+  opts: ApiOptions = {},
+): Promise<z.infer<S>> {
   // Demo mode: serve bundled sample data for covered endpoints; anything not covered (Instagram,
   // auth) falls through to the real server below.
   if (isDemoMode()) {
     const fixture = demoFixture(path);
     if (fixture !== undefined) return parseResponse('GET', path, schema, fixture);
   }
-  const headers: Record<string, string> = { Accept: 'application/json' };
-  const token = getSessionToken();
-  const channelId = getSelectedChannel();
-  if (token) headers['X-Session-Token'] = token;
-  if (channelId != null) headers['X-Channel-Id'] = String(channelId);
-  const res = await fetch(path, { credentials: 'same-origin', headers });
+  const channelId = opts.channelId !== undefined ? opts.channelId : getSelectedChannel();
+  const res = await fetch(path, {
+    credentials: 'same-origin',
+    headers: buildHeaders(channelId),
+    signal: opts.signal,
+  });
   if (!res.ok) {
     let message = `${res.status} ${res.statusText}`;
     try {
@@ -71,6 +100,7 @@ export async function apiSend<S extends z.ZodTypeAny>(
   path: string,
   body: unknown,
   schema: S,
+  opts?: ApiOptions,
 ): Promise<z.infer<S>>;
 export async function apiSend(method: string, path: string, body?: unknown): Promise<unknown>;
 export async function apiSend(
@@ -78,18 +108,16 @@ export async function apiSend(
   path: string,
   body?: unknown,
   schema?: z.ZodTypeAny,
+  opts: ApiOptions = {},
 ): Promise<unknown> {
   // Demo mode is read-only: block writes (except auth, so login/logout still work) with a clear
   // message rather than silently no-op'ing or hitting the server.
   if (isDemoMode() && !path.startsWith('/api/auth/')) {
     throw new ApiError(400, 'Действие недоступно в демо-режиме');
   }
-  const headers: Record<string, string> = { Accept: 'application/json' };
-  const token = getSessionToken();
-  const channelId = getSelectedChannel();
-  if (token) headers['X-Session-Token'] = token;
-  if (channelId != null) headers['X-Channel-Id'] = String(channelId);
-  const init: RequestInit = { method, credentials: 'same-origin', headers };
+  const channelId = opts.channelId !== undefined ? opts.channelId : getSelectedChannel();
+  const headers = buildHeaders(channelId);
+  const init: RequestInit = { method, credentials: 'same-origin', headers, signal: opts.signal };
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json';
     init.body = JSON.stringify(body);

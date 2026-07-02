@@ -78,9 +78,9 @@ function formatLabel(mediaType: string | null, albumSize: number): string {
  */
 export function Compare() {
   const { days, range } = usePeriod();
-  const { data, isLoading, isError } = useTgFull(days);
+  const { data, isPending, isError } = useTgFull(days);
 
-  if (isLoading) return <CompareSkeleton />;
+  if (isPending) return <CompareSkeleton />;
   if (isError) return null;
 
   const members = data?.channel?.memberCount ?? data?.channel?.members ?? 0;

@@ -39,7 +39,7 @@ import type { PeriodDays } from '@/lib/period';
 export function useMe() {
   return useQuery({
     queryKey: ['me'],
-    queryFn: () => apiGet('/api/auth/me', MeSchema),
+    queryFn: ({ signal }) => apiGet('/api/auth/me', MeSchema, { signal }),
     retry: false,
   });
 }
@@ -93,7 +93,7 @@ const ConfigSchema = z.object({ google_client_id: z.string().nullable() }).passt
 export function useConfig() {
   return useQuery({
     queryKey: ['config'],
-    queryFn: () => apiGet('/api/config', ConfigSchema),
+    queryFn: ({ signal }) => apiGet('/api/config', ConfigSchema, { signal }),
     staleTime: Infinity,
     retry: false,
   });
@@ -154,14 +154,23 @@ export function useLogout() {
   });
 }
 
-/** Aggregate channel snapshot: channel info + views summary + recent posts. */
+/**
+ * Aggregate channel snapshot: channel info + views summary + recent posts.
+ *
+ * Like every channel-scoped hook below, it (a) waits for the channel to be known
+ * (`enabled: channelId != null` — no wasted null-channel fetch on bootstrap), and
+ * (b) passes the render-time channelId + TanStack's abort signal into apiGet, so the
+ * request provably matches the query key and cancelQueries() aborts it. NOTE: disabled
+ * queries report `isPending` (not `isLoading`) — consumers gate skeletons on isPending.
+ */
 export function useTgFull(days: PeriodDays) {
   const { channelId } = useSelectedChannel();
   const { range } = usePeriod();
   const limit = effectiveLimit(days, range);
   return useQuery({
+    enabled: channelId != null,
     queryKey: ['tg-full', channelId, days, range?.from ?? 0, range?.to ?? 0],
-    queryFn: () => apiGet(`/api/tg/full?limit=${limit}`, TgFullSchema),
+    queryFn: ({ signal }) => apiGet(`/api/tg/full?limit=${limit}`, TgFullSchema, { signal, channelId }),
   });
 }
 
@@ -174,7 +183,7 @@ export function useMentions() {
   return useQuery({
     enabled: false,
     queryKey: ['mentions', channelId],
-    queryFn: () => apiGet('/api/tg/mtproto/mentions', MentionsSchema),
+    queryFn: ({ signal }) => apiGet('/api/tg/mtproto/mentions', MentionsSchema, { signal, channelId }),
   });
 }
 
@@ -185,8 +194,9 @@ export function useMentions() {
 export function useMentionsArchive() {
   const { channelId } = useSelectedChannel();
   return useQuery({
+    enabled: channelId != null,
     queryKey: ['mentions-archive', channelId],
-    queryFn: () => apiGet('/api/history/mentions', MentionsSchema),
+    queryFn: ({ signal }) => apiGet('/api/history/mentions', MentionsSchema, { signal, channelId }),
   });
 }
 
@@ -194,8 +204,9 @@ export function useMentionsArchive() {
 export function useHistory(days = 730) {
   const { channelId } = useSelectedChannel();
   return useQuery({
+    enabled: channelId != null,
     queryKey: ['history-channel', channelId, days],
-    queryFn: () => apiGet(`/api/history/channel?days=${days}`, HistorySchema),
+    queryFn: ({ signal }) => apiGet(`/api/history/channel?days=${days}`, HistorySchema, { signal, channelId }),
   });
 }
 
@@ -203,8 +214,9 @@ export function useHistory(days = 730) {
 export function useVelocity() {
   const { channelId } = useSelectedChannel();
   return useQuery({
+    enabled: channelId != null,
     queryKey: ['velocity', channelId],
-    queryFn: () => apiGet('/api/tg/mtproto/velocity', VelocitySchema),
+    queryFn: ({ signal }) => apiGet('/api/tg/mtproto/velocity', VelocitySchema, { signal, channelId }),
   });
 }
 
@@ -214,8 +226,9 @@ export function useVelocity() {
 export function useIgProfile() {
   const { channelId } = useSelectedChannel();
   return useQuery({
+    enabled: channelId != null,
     queryKey: ['ig-profile', channelId],
-    queryFn: () => apiGet('/api/ig/profile', IgProfileSchema),
+    queryFn: ({ signal }) => apiGet('/api/ig/profile', IgProfileSchema, { signal, channelId }),
   });
 }
 
@@ -225,16 +238,18 @@ export function useIgProfile() {
 export function useIgInsights(days = 90) {
   const { channelId } = useSelectedChannel();
   return useQuery({
+    enabled: channelId != null,
     queryKey: ['ig-insights', channelId, days],
-    queryFn: () => apiGet(`/api/ig/insights?days=${days}`, IgInsightsSchema),
+    queryFn: ({ signal }) => apiGet(`/api/ig/insights?days=${days}`, IgInsightsSchema, { signal, channelId }),
   });
 }
 
 export function useIgPosts(limit = 20) {
   const { channelId } = useSelectedChannel();
   return useQuery({
+    enabled: channelId != null,
     queryKey: ['ig-posts', channelId, limit],
-    queryFn: () => apiGet(`/api/ig/posts?limit=${limit}`, IgPostsSchema),
+    queryFn: ({ signal }) => apiGet(`/api/ig/posts?limit=${limit}`, IgPostsSchema, { signal, channelId }),
   });
 }
 
@@ -242,8 +257,9 @@ export function useIgPosts(limit = 20) {
 export function useIgBreakdowns(timeframe = 'last_30_days') {
   const { channelId } = useSelectedChannel();
   return useQuery({
+    enabled: channelId != null,
     queryKey: ['ig-breakdowns', channelId, timeframe],
-    queryFn: () => apiGet(`/api/ig/breakdowns?timeframe=${timeframe}`, IgBreakdownsSchema),
+    queryFn: ({ signal }) => apiGet(`/api/ig/breakdowns?timeframe=${timeframe}`, IgBreakdownsSchema, { signal, channelId }),
   });
 }
 
@@ -251,8 +267,9 @@ export function useIgBreakdowns(timeframe = 'last_30_days') {
 export function useIgOnline() {
   const { channelId } = useSelectedChannel();
   return useQuery({
+    enabled: channelId != null,
     queryKey: ['ig-online', channelId],
-    queryFn: () => apiGet('/api/ig/online', IgOnlineSchema),
+    queryFn: ({ signal }) => apiGet('/api/ig/online', IgOnlineSchema, { signal, channelId }),
   });
 }
 
@@ -260,8 +277,9 @@ export function useIgOnline() {
 export function useIgStories() {
   const { channelId } = useSelectedChannel();
   return useQuery({
+    enabled: channelId != null,
     queryKey: ['ig-stories', channelId],
-    queryFn: () => apiGet('/api/ig/stories', IgStoriesSchema),
+    queryFn: ({ signal }) => apiGet('/api/ig/stories', IgStoriesSchema, { signal, channelId }),
   });
 }
 
@@ -269,8 +287,9 @@ export function useIgStories() {
 export function useIgTags() {
   const { channelId } = useSelectedChannel();
   return useQuery({
+    enabled: channelId != null,
     queryKey: ['ig-tags', channelId],
-    queryFn: () => apiGet('/api/ig/tags', IgTagsSchema),
+    queryFn: ({ signal }) => apiGet('/api/ig/tags', IgTagsSchema, { signal, channelId }),
   });
 }
 
@@ -294,8 +313,9 @@ const IgConnectStartSchema = z.object({ authorize_url: z.string().url() }).passt
 export function useIgOauthStatus() {
   const { channelId } = useSelectedChannel();
   return useQuery({
+    enabled: channelId != null,
     queryKey: ['ig-oauth-status', channelId],
-    queryFn: () => apiGet('/api/ig/oauth/status', IgOauthStatusSchema),
+    queryFn: ({ signal }) => apiGet('/api/ig/oauth/status', IgOauthStatusSchema, { signal, channelId }),
   });
 }
 
@@ -324,9 +344,9 @@ export function useDisconnectIg() {
 export function usePostStats(id: number | null) {
   const { channelId } = useSelectedChannel();
   return useQuery({
-    enabled: id != null,
+    enabled: id != null && channelId != null,
     queryKey: ['post-stats', channelId, id],
-    queryFn: () => apiGet(`/api/tg/mtproto/post_stats/${id}`, PostStatsSchema),
+    queryFn: ({ signal }) => apiGet(`/api/tg/mtproto/post_stats/${id}`, PostStatsSchema, { signal, channelId }),
   });
 }
 
@@ -334,16 +354,18 @@ export function usePostStats(id: number | null) {
 export function useTgStats() {
   const { channelId } = useSelectedChannel();
   return useQuery({
+    enabled: channelId != null,
     queryKey: ['tg-stats', channelId],
-    queryFn: () => apiGet('/api/tg/mtproto/stats', StatsSchema),
+    queryFn: ({ signal }) => apiGet('/api/tg/mtproto/stats', StatsSchema, { signal, channelId }),
   });
 }
 
 export function useTgGraphs() {
   const { channelId } = useSelectedChannel();
   return useQuery({
+    enabled: channelId != null,
     queryKey: ['tg-graphs', channelId],
-    queryFn: () => apiGet('/api/tg/mtproto/graphs', GraphsSchema),
+    queryFn: ({ signal }) => apiGet('/api/tg/mtproto/graphs', GraphsSchema, { signal, channelId }),
   });
 }
 
@@ -351,14 +373,18 @@ export function useTgGraphs() {
 const OkSchema = z.object({ ok: z.boolean() }).passthrough();
 
 export function useChannels() {
-  return useQuery({ queryKey: ['channels'], queryFn: () => apiGet('/api/channels', ChannelsResponseSchema) });
+  return useQuery({
+    queryKey: ['channels'],
+    queryFn: ({ signal }) => apiGet('/api/channels', ChannelsResponseSchema, { signal }),
+  });
 }
 
 export function useChannelKeys(id: number | null) {
   return useQuery({
     enabled: id != null,
     queryKey: ['channel-keys', id],
-    queryFn: () => apiGet(`/api/channels/${id}/keys`, z.object({ keys: z.array(KeySchema) }).passthrough()),
+    queryFn: ({ signal }) =>
+      apiGet(`/api/channels/${id}/keys`, z.object({ keys: z.array(KeySchema) }).passthrough(), { signal }),
   });
 }
 
@@ -366,16 +392,22 @@ export function useCollectorStatus(id: number | null) {
   return useQuery({
     enabled: id != null,
     queryKey: ['collector-status', id],
-    queryFn: () => apiGet(`/api/channels/${id}/collector-status`, CollectorStatusResponseSchema),
+    queryFn: ({ signal }) => apiGet(`/api/channels/${id}/collector-status`, CollectorStatusResponseSchema, { signal }),
   });
 }
 
 export function useAdminUsers() {
-  return useQuery({ queryKey: ['admin-users'], queryFn: () => apiGet('/api/admin/users', AdminUsersResponseSchema) });
+  return useQuery({
+    queryKey: ['admin-users'],
+    queryFn: ({ signal }) => apiGet('/api/admin/users', AdminUsersResponseSchema, { signal }),
+  });
 }
 
 export function useBugs() {
-  return useQuery({ queryKey: ['bugs'], queryFn: () => apiGet('/api/bugs', BugsResponseSchema) });
+  return useQuery({
+    queryKey: ['bugs'],
+    queryFn: ({ signal }) => apiGet('/api/bugs', BugsResponseSchema, { signal }),
+  });
 }
 
 export function useCreateChannel() {

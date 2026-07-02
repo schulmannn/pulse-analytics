@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { fmt } from '@/lib/format';
 import { detectAnomalies } from '@/lib/anomaly';
 import { ChartTooltip } from '@/components/ChartTooltip';
@@ -69,6 +69,14 @@ export function LineChart({
     };
   }, [hasHover]);
 
+  // Anomaly detection is O(n·window) statistics — memoized on the series so hover-driven
+  // re-renders (setHover fires per crosshair move) don't re-run it. Before the early return
+  // to keep the hook order stable.
+  const anomalyIdx = useMemo(
+    () => (markAnomalies && values && values.length >= 2 ? detectAnomalies(values) : []),
+    [markAnomalies, values],
+  );
+
   if (!values || values.length < 2) {
     return (
       <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
@@ -109,7 +117,6 @@ export function LineChart({
   const firstPt = points[0];
   const lastPt = points[n - 1];
 
-  const anomalyIdx = markAnomalies ? detectAnomalies(values) : [];
   const anomalySet = new Set(anomalyIdx);
 
   const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');

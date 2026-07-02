@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useChannels, useLogout, useMe } from '@/api/queries';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useSelectedChannel } from '@/lib/channel-context';
+import { setCommandPaletteOpen, toggleCommandPalette, useCommandPaletteOpen } from '@/lib/command-palette';
 
 interface PaletteCommand {
   id: string;
@@ -11,16 +12,18 @@ interface PaletteCommand {
   run: () => void;
 }
 
+/** Open-state lives in the shared store (lib/command-palette) so any control can call
+    openCommandPalette(); this hook adds the ⌘K / Ctrl+K / Escape keyboard wiring. */
 export function useCommandPalette() {
-  const [open, setOpen] = useState(false);
+  const { open, setOpen } = useCommandPaletteOpen();
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
-        setOpen((current) => !current);
+        toggleCommandPalette();
       } else if (event.key === 'Escape') {
-        setOpen(false);
+        setCommandPaletteOpen(false);
       }
     };
 

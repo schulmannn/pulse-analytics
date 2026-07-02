@@ -1,12 +1,15 @@
+import { useMemo } from 'react';
+import type { ReactNode } from 'react';
 import { useTgFull, useTgStats, useTgGraphs } from '@/api/queries';
+import type { TgFull, TgGraphs, TgStats } from '@/api/schemas';
 import { normalizeTgPosts } from '@/lib/posts';
+import { compareDdMm } from '@/lib/dates';
 import { fmt, ruAxisLabel, ruSeriesName } from '@/lib/format';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { Breakdown } from '@/components/Breakdown';
 import { DivergingBars } from '@/components/DivergingBars';
 import { ExpandableChart } from '@/components/ExpandableChart';
-import type { ReactNode } from 'react';
 import { EmptyState } from '@/components/EmptyState';
 import { usePeriod } from '@/lib/period';
 import { cn } from '@/lib/utils';
@@ -56,23 +59,28 @@ function ChartSection({ title, children }: { title: string; children: ReactNode 
 
 export type TgAnalyticsGroup = 'dynamics' | 'audience' | 'content';
 
-/** `group` renders only that section family (the Analytics tabs); undefined = all sections. The KPI
-    ledger always shows as the group header. */
-export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
-  const inGroup = (g: TgAnalyticsGroup) => !group || group === g;
-  const { days, inRange } = usePeriod();
-  const { data: full, isLoading: isFullLoading } = useTgFull(days);
-  const { data: cs, isLoading: isStatsLoading } = useTgStats();
-  const { data: graphs, isLoading: isGraphsLoading } = useTgGraphs();
+const WD_LABELS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 
-  if (isFullLoading || isStatsLoading || isGraphsLoading) {
-    return <TgAnalyticsSkeletons />;
-  }
+const formatMsDate = (ts: number) => {
+  const d = new Date(ts);
+  // ruAxisLabel: axis labels/tooltips must read Russian («18 May» → «18 мая»).
+  return ruAxisLabel(`${d.getDate()} ${MON[d.getMonth()] ?? ''}`);
+};
 
-  if (!full && !cs && !graphs) {
-    return <EmptyState title="Данных аналитики пока нет." reason="Как только collector-агент пришлёт первый снимок, здесь появятся графики." />;
-  }
+const interLabels = (g: { x: number[] }) =>
+  [g.x[0], g.x[Math.floor(g.x.length / 2)], g.x[g.x.length - 1]].map((ts) => (ts ? formatMsDate(ts) : ''));
 
+/**
+ * All normalisation/aggregation for the TG analytics sections, extracted so the component
+ * can memoize it — previously these ~180 lines re-ran on every render for all four tab
+ * groups. Pure: depends only on the three query payloads + the period predicate.
+ */
+function deriveTgAnalytics(
+  full: TgFull | undefined,
+  cs: TgStats | undefined,
+  graphs: TgGraphs | undefined,
+  inRange: (dateISO: string | null | undefined) => boolean,
+) {
   const vs = full?.views_summary;
   const posts = normalizeTgPosts(full?.posts ?? [], full?.channel ?? {}).filter((post) =>
     inRange(post.date),
@@ -89,14 +97,9 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
   const notif = cs?.enabled_notifications;
   const notifPct = notif?.total ? (Number(notif.part ?? 0) / Number(notif.total)) * 100 : null;
 
-  // 2) Views by day
+  // 2) Views by day — «dd.mm» keys sorted with year-rollover inference (Dec < Jan across NY).
   const viewsByDayRaw: Record<string, number> = vs?.views_by_day ?? {};
-  const currentYear = new Date().getFullYear();
-  const sortedDates = Object.keys(viewsByDayRaw).sort((a, b) => {
-    const [dA, mA] = a.split('.').map(Number);
-    const [dB, mB] = b.split('.').map(Number);
-    return new Date(currentYear, (mA ?? 1) - 1, dA).getTime() - new Date(currentYear, (mB ?? 1) - 1, dB).getTime();
-  });
+  const sortedDates = Object.keys(viewsByDayRaw).sort((a, b) => compareDdMm(a, b));
   const last14Dates = sortedDates.slice(-14);
   const vbdValues = last14Dates.map((d) => Number(viewsByDayRaw[d] ?? 0));
   const vbdTitles = last14Dates.map((d) => `${d}: ${fmt.num(viewsByDayRaw[d] ?? 0)} просмотров`);
@@ -153,12 +156,6 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
       .filter((x) => x.n > 0 && x.avgErv > 0)
       .sort((a, b) => b.avgErv - a.avgErv);
   })();
-
-  const formatMsDate = (ts: number) => {
-    const d = new Date(ts);
-    // ruAxisLabel: axis labels/tooltips must read Russian («18 May» → «18 мая»).
-    return ruAxisLabel(`${d.getDate()} ${MON[d.getMonth()] ?? ''}`);
-  };
 
   // 6) Subscriber growth
   const growthGroup = graphs?.growth;
@@ -247,17 +244,60 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
     wdCount[day] += 1;
   });
   const wdOrder = [1, 2, 3, 4, 5, 6, 0];
-  const wdLabels = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
   const wdAvgValues = wdOrder.map((idx) => {
     const count = wdCount[idx] ?? 0;
     return count ? Math.round((wdViews[idx] ?? 0) / count) : 0;
   });
   const wdCountValues = wdOrder.map((idx) => wdCount[idx] ?? 0);
   const maxWdAvg = Math.max(...wdAvgValues);
-  const bestWdLabel = maxWdAvg > 0 ? wdLabels[wdAvgValues.indexOf(maxWdAvg)] ?? '' : '';
+  const bestWdLabel = maxWdAvg > 0 ? WD_LABELS[wdAvgValues.indexOf(maxWdAvg)] ?? '' : '';
 
-  const interLabels = (g: { x: number[] }) =>
-    [g.x[0], g.x[Math.floor(g.x.length / 2)], g.x[g.x.length - 1]].map((ts) => (ts ? formatMsDate(ts) : ''));
+  return {
+    vs, cur, avgErv, avgVir, notif, notifPct,
+    last14Dates, vbdValues, vbdTitles, vbdPrev,
+    topEmojis, engagementComposition, viewsByType, formatPerf,
+    growthGroup, growthSeries, hasGrowth,
+    interGroup, viewSeries, shareSeries,
+    vbsItems, nfsItems, langItems, sentItems,
+    thData, hasHours, peakHourStr,
+    net30Values, net30Titles, netSummaryStr, joinedTotal, leftTotal,
+    wdAvgValues, wdCountValues, maxWdAvg, bestWdLabel,
+  };
+}
+
+/** `group` renders only that section family (the Analytics tabs); undefined = all sections. The KPI
+    ledger always shows as the group header. */
+export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
+  const inGroup = (g: TgAnalyticsGroup) => !group || group === g;
+  const { days, inRange } = usePeriod();
+  // isPending (не isLoading): запросы выключены, пока канал не известен, — скелетоны и там.
+  const { data: full, isPending: isFullPending } = useTgFull(days);
+  const { data: cs, isPending: isStatsPending } = useTgStats();
+  const { data: graphs, isPending: isGraphsPending } = useTgGraphs();
+
+  // Memoized: recompute only when a payload or the period window changes — not on every render.
+  const derived = useMemo(() => deriveTgAnalytics(full, cs, graphs, inRange), [full, cs, graphs, inRange]);
+
+  if (isFullPending || isStatsPending || isGraphsPending) {
+    return <TgAnalyticsSkeletons />;
+  }
+
+  if (!full && !cs && !graphs) {
+    return <EmptyState title="Данных аналитики пока нет." reason="Как только collector-агент пришлёт первый снимок, здесь появятся графики." />;
+  }
+
+  const {
+    vs, cur, avgErv, avgVir, notif, notifPct,
+    last14Dates, vbdValues, vbdTitles, vbdPrev,
+    topEmojis, engagementComposition, viewsByType, formatPerf,
+    growthGroup, growthSeries, hasGrowth,
+    interGroup, viewSeries, shareSeries,
+    vbsItems, nfsItems, langItems, sentItems,
+    thData, hasHours, peakHourStr,
+    net30Values, net30Titles, netSummaryStr, joinedTotal, leftTotal,
+    wdAvgValues, wdCountValues, maxWdAvg, bestWdLabel,
+  } = derived;
+  const wdLabels = WD_LABELS;
 
   return (
     <div className="space-y-6">

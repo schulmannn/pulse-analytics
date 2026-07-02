@@ -1,5 +1,6 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { useHistory, useVelocity, useTgFull } from '@/api/queries';
+import type { TgFull } from '@/api/schemas';
 import { lttbDownsample } from '@/lib/downsample';
 import { LineChart } from '@/components/LineChart';
 import { ChartTooltip, type TooltipState } from '@/components/ChartTooltip';
@@ -65,9 +66,10 @@ function SubscriberHistoryChart({ rows }: { rows: SubscriberRow[] }) {
 }
 
 export function HistoryChartBlock() {
-  const { data, isLoading, isError } = useHistory(730);
+  // isPending (не isLoading): запрос выключен, пока канал не известен, — скелетон и там.
+  const { data, isPending, isError } = useHistory(730);
 
-  if (isLoading) return <ChartSkeleton title="История подписчиков" />;
+  if (isPending) return <ChartSkeleton title="История подписчиков" />;
   if (isError) return null;
   if (!data || !data.enabled) {
     return (
@@ -110,17 +112,21 @@ export function HistoryChartBlock() {
   );
 }
 
-export function HeatmapChartBlock() {
-  const { days, inRange } = usePeriod();
-  const { data: tgData, isLoading } = useTgFull(days);
-  const [tip, setTip] = useState<TooltipState>(null);
-  const wrapRef = useRef<HTMLDivElement>(null);
+const DAY_NAMES = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 
-  if (isLoading) return <ChartSkeleton title="Тепловая карта активности (день × час)" />;
+interface HeatmapBestSlot {
+  weekday: number;
+  hour: number;
+  avgErv: number;
+  n: number;
+  reachSum: number;
+}
 
-  const posts = tgData?.posts ?? [];
-  const dayNames = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
-
+/** Aggregate posts into the 7×24 ERV grid + the best slot. Pure — memoized by the block. */
+function buildHeatmap(
+  posts: NonNullable<TgFull['posts']>,
+  inRange: (dateISO: string | null | undefined) => boolean,
+): { grid: HeatmapCell[][]; maxErv: number; bestSlot: HeatmapBestSlot | null } {
   const grid: HeatmapCell[][] = Array.from({ length: 7 }, () =>
     Array.from({ length: 24 }, () => ({ n: 0, ervSum: 0, reachSum: 0 })),
   );
@@ -148,7 +154,7 @@ export function HeatmapChartBlock() {
   });
 
   let maxErv = 0;
-  let bestSlot: { weekday: number; hour: number; avgErv: number; n: number; reachSum: number } | null = null;
+  let bestSlot: HeatmapBestSlot | null = null;
   let maxScore = -1;
 
   for (let w = 0; w < 7; w++) {
@@ -168,88 +174,122 @@ export function HeatmapChartBlock() {
     }
   }
 
+  return { grid, maxErv, bestSlot };
+}
+
+export function HeatmapChartBlock() {
+  const { days, inRange } = usePeriod();
+  // isPending (не isLoading): запрос выключен, пока канал не известен, — скелетон и там.
+  const { data: tgData, isPending } = useTgFull(days);
+
+  // The 7×24 aggregation is memoized on its inputs; hover/tooltip state lives in the child
+  // below, so a mousemove no longer re-renders this block (and never re-runs the math).
+  const posts = tgData?.posts;
+  const { grid, maxErv, bestSlot } = useMemo(() => buildHeatmap(posts ?? [], inRange), [posts, inRange]);
+
+  if (isPending) return <ChartSkeleton title="Тепловая карта активности (день × час)" />;
+
   return (
     <ChartSection title="Тепловая карта активности (день × час)">
-      <div ref={wrapRef} className="relative" onMouseLeave={() => setTip(null)}>
-        <div className="overflow-x-auto pb-2">
-          <div className="min-w-[420px] space-y-[2px]">
-            <div className="grid gap-[2px]" style={{ gridTemplateColumns: '30px repeat(24, minmax(14px, 1fr))' }}>
-              <div />
-              {Array.from({ length: 24 }).map((_, hr) => (
-                <div key={hr} className="select-none text-center text-2xs font-medium text-muted-foreground">
-                  {hr % 3 === 0 ? `${hr}` : ''}
-                </div>
-              ))}
-            </div>
+      <HeatmapSurface grid={grid} maxErv={maxErv} bestSlot={bestSlot} />
 
-            {dayNames.map((dayName, w) => {
-              const currentRow = grid[w] ?? [];
-              return (
-                <div
-                  key={w}
-                  className="grid items-center gap-[2px]"
-                  style={{ gridTemplateColumns: '30px repeat(24, minmax(14px, 1fr))' }}
-                >
-                  <div className="select-none text-2xs font-medium text-muted-foreground">{dayName}</div>
-                  {Array.from({ length: 24 }).map((_, hr) => {
-                    const cell = currentRow[hr];
-                    if (!cell || cell.n === 0) {
-                      return (
-                        <div
-                          key={hr}
-                          className="h-4 rounded-sm bg-muted/40"
-                          onMouseMove={() => setTip(null)}
-                        />
-                      );
-                    }
-                    const avgErv = cell.ervSum / cell.n;
-                    const opacity = maxErv > 0 ? Math.max(0.18, avgErv / maxErv) : 0;
-                    const isBest = bestSlot && bestSlot.weekday === w && bestSlot.hour === hr;
-                    const titleText = `${dayName} ${hr}:00 · ${cell.n} пост(ов) · ERV ${avgErv.toFixed(1)}% · ср.охват ${fmt.short(cell.reachSum / cell.n)}`;
-                    return (
-                      <div
-                        key={hr}
-                        className={`relative h-4 cursor-pointer rounded-sm${isBest ? ' border-2 border-verdant' : ''}`}
-                        style={{
-                          backgroundColor: 'hsl(var(--brand-iris))',
-                          opacity,
-                        }}
-                        onMouseMove={(event) => {
-                          const rect = wrapRef.current?.getBoundingClientRect();
-                          if (rect) setTip({ x: event.clientX - rect.left, y: event.clientY - rect.top, text: titleText });
-                        }}
-                      />
-                    );
-                  })}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-        <ChartTooltip tip={tip} />
-        </div>
-
-        <div className="mt-3 text-xs font-medium text-muted-foreground">
-          {bestSlot ? (
-            <span>
-              лучший слот:{' '}
-              <strong className="text-foreground">
-                {dayNames[bestSlot.weekday] ?? ''} {bestSlot.hour}:00
-              </strong>{' '}
-              · ERV {bestSlot.avgErv.toFixed(1)}%
-            </span>
-          ) : (
-            'Мало постов для тепловой карты.'
-          )}
-        </div>
+      <div className="mt-3 text-xs font-medium text-muted-foreground">
+        {bestSlot ? (
+          <span>
+            лучший слот:{' '}
+            <strong className="text-foreground">
+              {DAY_NAMES[bestSlot.weekday] ?? ''} {bestSlot.hour}:00
+            </strong>{' '}
+            · ERV {bestSlot.avgErv.toFixed(1)}%
+          </span>
+        ) : (
+          'Мало постов для тепловой карты.'
+        )}
+      </div>
     </ChartSection>
   );
 }
 
-export function VelocityChartBlock() {
-  const { data, isLoading } = useVelocity();
+/** The interactive heatmap surface — owns the tooltip state so hovering re-renders only
+    this leaf (cheap cell mapping), never the parent's aggregation. */
+function HeatmapSurface({
+  grid,
+  maxErv,
+  bestSlot,
+}: {
+  grid: HeatmapCell[][];
+  maxErv: number;
+  bestSlot: HeatmapBestSlot | null;
+}) {
+  const [tip, setTip] = useState<TooltipState>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
 
-  if (isLoading) return <ChartSkeleton title="Скорость набора просмотров" />;
+  return (
+    <div ref={wrapRef} className="relative" onMouseLeave={() => setTip(null)}>
+      <div className="overflow-x-auto pb-2">
+        <div className="min-w-[420px] space-y-[2px]">
+          <div className="grid gap-[2px]" style={{ gridTemplateColumns: '30px repeat(24, minmax(14px, 1fr))' }}>
+            <div />
+            {Array.from({ length: 24 }).map((_, hr) => (
+              <div key={hr} className="select-none text-center text-2xs font-medium text-muted-foreground">
+                {hr % 3 === 0 ? `${hr}` : ''}
+              </div>
+            ))}
+          </div>
+
+          {DAY_NAMES.map((dayName, w) => {
+            const currentRow = grid[w] ?? [];
+            return (
+              <div
+                key={w}
+                className="grid items-center gap-[2px]"
+                style={{ gridTemplateColumns: '30px repeat(24, minmax(14px, 1fr))' }}
+              >
+                <div className="select-none text-2xs font-medium text-muted-foreground">{dayName}</div>
+                {Array.from({ length: 24 }).map((_, hr) => {
+                  const cell = currentRow[hr];
+                  if (!cell || cell.n === 0) {
+                    return (
+                      <div
+                        key={hr}
+                        className="h-4 rounded-sm bg-muted/40"
+                        onMouseMove={() => setTip(null)}
+                      />
+                    );
+                  }
+                  const avgErv = cell.ervSum / cell.n;
+                  const opacity = maxErv > 0 ? Math.max(0.18, avgErv / maxErv) : 0;
+                  const isBest = bestSlot && bestSlot.weekday === w && bestSlot.hour === hr;
+                  const titleText = `${dayName} ${hr}:00 · ${cell.n} пост(ов) · ERV ${avgErv.toFixed(1)}% · ср.охват ${fmt.short(cell.reachSum / cell.n)}`;
+                  return (
+                    <div
+                      key={hr}
+                      className={`relative h-4 cursor-pointer rounded-sm${isBest ? ' border-2 border-verdant' : ''}`}
+                      style={{
+                        backgroundColor: 'hsl(var(--brand-iris))',
+                        opacity,
+                      }}
+                      onMouseMove={(event) => {
+                        const rect = wrapRef.current?.getBoundingClientRect();
+                        if (rect) setTip({ x: event.clientX - rect.left, y: event.clientY - rect.top, text: titleText });
+                      }}
+                    />
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      <ChartTooltip tip={tip} />
+    </div>
+  );
+}
+
+export function VelocityChartBlock() {
+  const { data, isPending } = useVelocity();
+
+  if (isPending) return <ChartSkeleton title="Скорость набора просмотров" />;
 
   const available = data?.available ?? false;
   const byDay = data?.by_day ?? [];

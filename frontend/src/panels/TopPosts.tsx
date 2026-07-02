@@ -43,7 +43,7 @@ const COLUMN_TONE: Record<SortKey, string> = {
 
 export function TopPosts() {
   const { days, inRange } = usePeriod();
-  const { data, isLoading, isError } = useTgFull(days);
+  const { data, isPending, isError } = useTgFull(days);
   const [selected, setSelected] = useState<{ post: NormalizedPost; rank: number; reason: string | null } | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>('reach');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -79,7 +79,7 @@ export function TopPosts() {
     return { rows: top, reasonFor };
   }, [data, inRange]);
 
-  if (isLoading) return <TopPostsSkeleton />;
+  if (isPending) return <TopPostsSkeleton />;
   if (isError) return null;
   if (rows.length === 0) {
     return (

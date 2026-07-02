@@ -8,10 +8,12 @@ import { Skeleton } from '@/components/ui/skeleton';
 
 export function Digest() {
   const { days, inRange } = usePeriod();
-  const { data: full, isLoading: isFullLoading } = useTgFull(days);
-  const { data: graphs, isLoading: isGraphsLoading } = useTgGraphs();
+  // isPending (не isLoading): канал-скоупные запросы выключены, пока канал не известен, —
+  // скелетон должен показываться и в этом состоянии (isLoading у disabled-запроса = false).
+  const { data: full, isPending: isFullPending } = useTgFull(days);
+  const { data: graphs, isPending: isGraphsPending } = useTgGraphs();
 
-  if (isFullLoading || isGraphsLoading) {
+  if (isFullPending || isGraphsPending) {
     return (
       <div className="space-y-3">
         <Skeleton className="h-3 w-20" />

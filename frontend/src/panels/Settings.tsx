@@ -58,7 +58,7 @@ function InstagramSection() {
 
   return (
     <ChartSection title="Instagram">
-      {status.isLoading ? (
+      {status.isPending ? (
         <Skeleton className="h-16 w-full" />
       ) : s?.connected ? (
         <Card>

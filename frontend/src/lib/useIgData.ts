@@ -1,6 +1,7 @@
 // Single source of derived Instagram state. Each of the four IG views calls this; the underlying
 // React Query hooks dedupe, so the data is fetched once and the math runs in one place. Keeps the
 // view components presentational — they read slices of this bundle, they don't compute metrics.
+import { useCallback, useMemo } from 'react';
 import {
   useIgProfile,
   useIgInsights,
@@ -38,7 +39,9 @@ export function useIgData() {
   const storiesQ = useIgStories();
 
   // Selected window (custom range overrides the days preset; IG insights cap at ~90 days).
-  const now = Date.now();
+  // Quantized to the minute: a raw Date.now() in render produced a new value every render,
+  // which would defeat the memos below (and subtly shift the window between sibling views).
+  const now = Math.floor(Date.now() / 60_000) * 60_000;
   let windowDays: number;
   let since: number;
   let until = now;
@@ -50,40 +53,51 @@ export function useIgData() {
     windowDays = days && days > 0 ? Math.min(days, 90) : 90;
     since = now - windowDays * DAY_MS;
   }
-  const inWindow = (iso: string) => {
-    const t = Date.parse(iso);
-    return Number.isFinite(t) && t >= since && t <= until;
-  };
+  const inWindow = useCallback(
+    (iso: string) => {
+      const t = Date.parse(iso);
+      return Number.isFinite(t) && t >= since && t <= until;
+    },
+    [since, until],
+  );
 
   const ins = insightsQ.data;
-  const series = {
-    reach: metricSeries(ins, 'reach'),
-    views: metricSeries(ins, 'views'),
-    ti: metricSeries(ins, 'total_interactions'),
-    engaged: metricSeries(ins, 'accounts_engaged'),
-    follower: metricSeries(ins, 'follower_count'),
-    saves: metricSeries(ins, 'saves'),
-    likes: metricSeries(ins, 'likes'),
-    comments: metricSeries(ins, 'comments'),
-    shares: metricSeries(ins, 'shares'),
-    profileViews: metricSeries(ins, 'profile_views'),
-    follows: metricSeries(ins, 'follows'), // gross new follows (FOLLOWER)
-    unfollows: metricSeries(ins, 'unfollows'), // gross unfollows (NON_FOLLOWER)
-  };
-  const pairs = {
-    reach: windowPair(series.reach, since, until),
-    views: windowPair(series.views, since, until),
-    ti: windowPair(series.ti, since, until),
-    engaged: windowPair(series.engaged, since, until),
-    follower: windowPair(series.follower, since, until),
-    saves: windowPair(series.saves, since, until),
-    likes: windowPair(series.likes, since, until),
-    comments: windowPair(series.comments, since, until),
-    shares: windowPair(series.shares, since, until),
-    profileViews: windowPair(series.profileViews, since, until),
-    follows: windowPair(series.follows, since, until),
-    unfollows: windowPair(series.unfollows, since, until),
-  };
+  // The 12× daily-series extraction re-ran on every render of every IG view; the payload ref
+  // only changes on refetch, so key the memo on it.
+  const series = useMemo(
+    () => ({
+      reach: metricSeries(ins, 'reach'),
+      views: metricSeries(ins, 'views'),
+      ti: metricSeries(ins, 'total_interactions'),
+      engaged: metricSeries(ins, 'accounts_engaged'),
+      follower: metricSeries(ins, 'follower_count'),
+      saves: metricSeries(ins, 'saves'),
+      likes: metricSeries(ins, 'likes'),
+      comments: metricSeries(ins, 'comments'),
+      shares: metricSeries(ins, 'shares'),
+      profileViews: metricSeries(ins, 'profile_views'),
+      follows: metricSeries(ins, 'follows'), // gross new follows (FOLLOWER)
+      unfollows: metricSeries(ins, 'unfollows'), // gross unfollows (NON_FOLLOWER)
+    }),
+    [ins],
+  );
+  const pairs = useMemo(
+    () => ({
+      reach: windowPair(series.reach, since, until),
+      views: windowPair(series.views, since, until),
+      ti: windowPair(series.ti, since, until),
+      engaged: windowPair(series.engaged, since, until),
+      follower: windowPair(series.follower, since, until),
+      saves: windowPair(series.saves, since, until),
+      likes: windowPair(series.likes, since, until),
+      comments: windowPair(series.comments, since, until),
+      shares: windowPair(series.shares, since, until),
+      profileViews: windowPair(series.profileViews, since, until),
+      follows: windowPair(series.follows, since, until),
+      unfollows: windowPair(series.unfollows, since, until),
+    }),
+    [series, since, until],
+  );
 
   // Real subscriber movement for the window: net = gross follows − gross unfollows. This is the
   // honest growth number — the dashboard previously reported gross follows alone as "growth".
@@ -98,16 +112,21 @@ export function useIgData() {
   const erReach = pairs.reach.cur > 0 ? (pairs.ti.cur / pairs.reach.cur) * 100 : 0;
   const erReachPrev = pairs.reach.prev > 0 ? (pairs.ti.prev / pairs.reach.prev) * 100 : 0;
 
-  const posts = postsQ.data?.data ?? [];
+  const posts = useMemo(() => postsQ.data?.data ?? [], [postsQ.data]);
   const breakdowns = breakdownsQ.data;
-  const formatItems = tvBreakdown(breakdowns?.data, 'total_interactions', 'media_product_type');
-  const formatTotal = formatItems.reduce((acc, it) => acc + it.value, 0);
-  const topFormat = [...formatItems].sort((a, b) => b.value - a.value)[0];
-  const onlineAgg = aggregateOnline(onlineQ.data);
-  const topTag = [...hashtagStats(posts)].filter((t) => t.count >= 2).sort((a, b) => b.lift - a.lift)[0];
-  const topPost = posts.length
-    ? [...posts].sort((a, b) => Number(b.reach ?? 0) - Number(a.reach ?? 0))[0]
-    : null;
+  const onlineData = onlineQ.data;
+  // Posts/breakdowns/online aggregation, keyed on the payload refs (sorts + hashtag stats).
+  const { formatItems, formatTotal, topFormat, onlineAgg, topTag, topPost } = useMemo(() => {
+    const formatItems = tvBreakdown(breakdowns?.data, 'total_interactions', 'media_product_type');
+    const formatTotal = formatItems.reduce((acc, it) => acc + it.value, 0);
+    const topFormat = [...formatItems].sort((a, b) => b.value - a.value)[0];
+    const onlineAgg = aggregateOnline(onlineData);
+    const topTag = [...hashtagStats(posts)].filter((t) => t.count >= 2).sort((a, b) => b.lift - a.lift)[0];
+    const topPost = posts.length
+      ? [...posts].sort((a, b) => Number(b.reach ?? 0) - Number(a.reach ?? 0))[0]
+      : null;
+    return { formatItems, formatTotal, topFormat, onlineAgg, topTag, topPost };
+  }, [breakdowns, onlineData, posts]);
 
   const insights = buildIgInsights({
     netFollowers: netMovement.hasCur ? netMovement.cur : null,
@@ -134,7 +153,8 @@ export function useIgData() {
   });
 
   const isMock = !!(profileQ.data?.mock || insightsQ.data?.mock || postsQ.data?.mock || breakdownsQ.data?.mock);
-  const loading = profileQ.isLoading || insightsQ.isLoading || postsQ.isLoading;
+  // isPending (не isLoading): пока канал не известен, IG-запросы выключены — это тоже «загрузка».
+  const loading = profileQ.isPending || insightsQ.isPending || postsQ.isPending;
   const error = profileQ.isError && insightsQ.isError;
   // Real last-sync time the server stamped when it fetched from Instagram (falls back to the React
   // Query receive time only if the server didn't provide one, e.g. demo mode).

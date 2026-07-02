@@ -23,7 +23,7 @@ const SORT_COLUMNS: { key: SortKey; label: string; get: (p: NormalizedPost) => n
 
 export function Posts() {
   const { days, inRange } = usePeriod();
-  const { data, isLoading, isError, error } = useTgFull(days);
+  const { data, isPending, isError, error } = useTgFull(days);
   const [openId, setOpenId] = useState<number | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>('reach');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -35,7 +35,7 @@ export function Posts() {
     }
   };
 
-  if (isLoading) return <PostsSkeletons />;
+  if (isPending) return <PostsSkeletons />;
   if (isError) {
     return (
       <Card className="border-destructive/40">
@@ -314,7 +314,7 @@ function PostModal({ post, onClose }: PostModalProps) {
           )}
 
           <div className="border-t border-border pt-4">
-            {stats.isLoading ? (
+            {stats.isPending ? (
               <div className="space-y-4 py-4">
                 <Skeleton className="h-4 w-1/3" />
                 <Skeleton className="h-40 w-full" />

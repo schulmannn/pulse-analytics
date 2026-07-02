@@ -1,57 +1,155 @@
-import { useState } from 'react';
-import type { ReactNode } from 'react';
-import { Navigate, Routes, Route } from 'react-router-dom';
+import { Suspense, lazy } from 'react';
+import type { ComponentType, ReactNode } from 'react';
+import { Navigate, Routes, Route, useSearchParams } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { useMe } from '@/api/queries';
 import { ApiError } from '@/api/client';
 import { DashboardLayout } from '@/components/DashboardLayout';
-import { LoginPage, RegisterPage, ResetPage, VerifyPage } from '@/pages/Auth';
-import { Landing } from '@/pages/Landing';
-import { Connect } from '@/pages/Connect';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { PeriodUrlSync } from '@/lib/period-url';
 import { Overview } from '@/panels/Overview';
 import { Posts } from '@/panels/Posts';
 import { Mentions } from '@/panels/Mentions';
-import { InstagramLayout } from '@/panels/instagram/Layout';
-import { IgOverview } from '@/panels/instagram/IgOverview';
-import { IgAnalytics } from '@/panels/instagram/IgAnalytics';
-import { IgContent } from '@/panels/instagram/IgContent';
-import { IgAudience } from '@/panels/instagram/IgAudience';
 import { TgAnalytics } from '@/panels/TgAnalytics';
 import { Insights } from '@/panels/Insights';
 import { Compare } from '@/panels/Compare';
 import { HistoryChartBlock, HeatmapChartBlock, VelocityChartBlock } from '@/panels/Charts';
 import { Hashtags } from '@/panels/Hashtags';
 import { Settings } from '@/panels/Settings';
-import { Admin } from '@/panels/Admin';
-import { Bugs } from '@/panels/Bugs';
 import { Skeleton } from '@/components/ui/skeleton';
 import { CommandPalette } from '@/components/CommandPalette';
+
+// ── Code splitting ────────────────────────────────────────────────────────────
+// The heavy/rare route groups load on demand instead of riding in the entry chunk:
+// Landing carries framer-motion (~100 kB) that a logged-in user never needs; the IG
+// cluster, Admin/Bugs (superuser-only), Connect and the auth pages are visited rarely.
+// The IG five all import the same barrel, so they land in ONE async chunk.
+const Landing = lazy(() => import('@/pages/Landing').then((m) => ({ default: m.Landing })));
+const LoginPage = lazyFrom(() => import('@/pages/Auth'), 'LoginPage');
+const RegisterPage = lazyFrom(() => import('@/pages/Auth'), 'RegisterPage');
+const VerifyPage = lazyFrom(() => import('@/pages/Auth'), 'VerifyPage');
+const ResetPage = lazyFrom(() => import('@/pages/Auth'), 'ResetPage');
+const InstagramLayout = lazyFrom(() => import('@/panels/instagram/ig-cluster'), 'InstagramLayout');
+const IgOverview = lazyFrom(() => import('@/panels/instagram/ig-cluster'), 'IgOverview');
+const IgAnalytics = lazyFrom(() => import('@/panels/instagram/ig-cluster'), 'IgAnalytics');
+const IgContent = lazyFrom(() => import('@/panels/instagram/ig-cluster'), 'IgContent');
+const IgAudience = lazyFrom(() => import('@/panels/instagram/ig-cluster'), 'IgAudience');
+const Admin = lazyFrom(() => import('@/panels/Admin'), 'Admin');
+const Bugs = lazyFrom(() => import('@/panels/Bugs'), 'Bugs');
+const Connect = lazyFrom(() => import('@/pages/Connect'), 'Connect');
+
+/** React.lazy over a NAMED export (all pages here export by name, not default). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function lazyFrom<M extends Record<K, ComponentType<any>>, K extends keyof M & string>(
+  load: () => Promise<M>,
+  name: K,
+) {
+  return lazy(() => load().then((m) => ({ default: m[name] })));
+}
 
 export default function App() {
   return (
     <Routes>
-      <Route path="login" element={<LoginPage />} />
-      <Route path="register" element={<RegisterPage />} />
-      <Route path="verify" element={<VerifyPage />} />
-      <Route path="reset" element={<ResetPage />} />
+      <Route path="login" element={<AuthSuspense><LoginPage /></AuthSuspense>} />
+      <Route path="register" element={<AuthSuspense><RegisterPage /></AuthSuspense>} />
+      <Route path="verify" element={<AuthSuspense><VerifyPage /></AuthSuspense>} />
+      <Route path="reset" element={<AuthSuspense><ResetPage /></AuthSuspense>} />
       <Route element={<ProtectedLayout />}>
         <Route index element={<Overview />} />
         <Route path="analytics" element={<Analytics />} />
         <Route path="posts" element={<Posts />} />
         <Route path="mentions" element={<Mentions />} />
-        <Route path="instagram" element={<InstagramLayout />}>
-          <Route index element={<IgOverview />} />
-          <Route path="analytics" element={<IgAnalytics />} />
-          <Route path="content" element={<IgContent />} />
-          <Route path="audience" element={<IgAudience />} />
+        <Route path="instagram" element={<PanelSuspense><InstagramLayout /></PanelSuspense>}>
+          <Route index element={<PanelSuspense><IgOverview /></PanelSuspense>} />
+          <Route path="analytics" element={<PanelSuspense><IgAnalytics /></PanelSuspense>} />
+          <Route path="content" element={<PanelSuspense><IgContent /></PanelSuspense>} />
+          <Route path="audience" element={<PanelSuspense><IgAudience /></PanelSuspense>} />
         </Route>
         <Route path="settings" element={<Settings />} />
-        <Route path="admin" element={<Admin />} />
-        <Route path="bugs" element={<Bugs />} />
-        <Route path="connect" element={<Connect />} />
+        <Route path="admin" element={<PanelSuspense><Admin /></PanelSuspense>} />
+        <Route path="bugs" element={<PanelSuspense><Bugs /></PanelSuspense>} />
+        <Route path="connect" element={<PanelSuspense><Connect /></PanelSuspense>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>
+  );
+}
+
+// ── Suspense fallbacks — layout-matching skeleton scaffolds, never spinners ──
+
+/** Content-area scaffold (inside the dashboard shell): section title + ledger + block. */
+function PanelSuspense({ children }: { children: ReactNode }) {
+  return (
+    <Suspense
+      fallback={
+        <div className="space-y-6">
+          <Skeleton className="h-6 w-48" />
+          <div className="grid grid-cols-2 gap-px border-t border-border bg-border lg:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="bg-background p-4">
+                <Skeleton className="h-2.5 w-16" />
+                <Skeleton className="mt-2 h-6 w-20" />
+              </div>
+            ))}
+          </div>
+          <Skeleton className="h-40 w-full" />
+        </div>
+      }
+    >
+      {children}
+    </Suspense>
+  );
+}
+
+/** Auth page scaffold: brand mark corner + the centered 380px form column (mirrors AuthShell). */
+function AuthSuspense({ children }: { children: ReactNode }) {
+  return (
+    <Suspense
+      fallback={
+        <div className="relative flex min-h-screen items-center justify-center bg-background px-5 py-16">
+          <div className="absolute left-6 top-6">
+            <Skeleton className="h-5 w-24" />
+          </div>
+          <div className="w-full max-w-[380px]">
+            <Skeleton className="h-8 w-2/3" />
+            <Skeleton className="mt-3 h-4 w-full" />
+            <div className="mt-6 space-y-4">
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="mt-5 h-10 w-full rounded-full" />
+            </div>
+          </div>
+        </div>
+      }
+    >
+      {children}
+    </Suspense>
+  );
+}
+
+/** Landing scaffold: top nav row + hero copy column + CTA pills (mirrors the page grid). */
+function LandingFallback() {
+  return (
+    <div className="min-h-screen bg-background text-foreground">
+      <div className="mx-auto w-full max-w-[1200px] px-6 sm:px-10">
+        <div className="flex items-center justify-between py-5">
+          <Skeleton className="h-6 w-28" />
+          <div className="flex items-center gap-3">
+            <Skeleton className="h-9 w-20 rounded-full" />
+            <Skeleton className="h-9 w-36 rounded-full" />
+          </div>
+        </div>
+        <div className="max-w-xl space-y-4 pt-16 sm:pt-24">
+          <Skeleton className="h-12 w-full" />
+          <Skeleton className="h-12 w-4/5" />
+          <Skeleton className="h-4 w-2/3" />
+          <div className="flex gap-3 pt-4">
+            <Skeleton className="h-11 w-40 rounded-full" />
+            <Skeleton className="h-11 w-32 rounded-full" />
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -72,7 +170,13 @@ function ProtectedLayout() {
 
   if (me.isError) {
     const unauthorized = me.error instanceof ApiError && me.error.status === 401;
-    if (unauthorized) return <Landing />;
+    if (unauthorized) {
+      return (
+        <Suspense fallback={<LandingFallback />}>
+          <Landing />
+        </Suspense>
+      );
+    }
     return (
       <Centered>
         <div className="max-w-sm rounded-lg border bg-card p-6 text-center">
@@ -80,16 +184,25 @@ function ProtectedLayout() {
           <p className="mt-2 text-sm text-muted-foreground">
             {me.error instanceof Error ? me.error.message : 'Неизвестная ошибка'}
           </p>
+          <button
+            type="button"
+            onClick={() => void me.refetch()}
+            disabled={me.isFetching}
+            className="btn-pill mt-5 bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+          >
+            {me.isFetching ? 'Загрузка…' : 'Повторить'}
+          </button>
         </div>
       </Centered>
     );
   }
 
   return (
-    <>
+    <ErrorBoundary>
+      <PeriodUrlSync />
       <DashboardLayout email={me.data?.email ?? undefined} role={me.data?.role} avatar={me.data?.avatar} />
       <CommandPalette />
-    </>
+    </ErrorBoundary>
   );
 }
 
@@ -106,8 +219,26 @@ const ANALYTICS_TABS = [
 ] as const;
 type AnalyticsTab = (typeof ANALYTICS_TABS)[number]['key'];
 
+const isAnalyticsTab = (raw: string | null): raw is AnalyticsTab =>
+  ANALYTICS_TABS.some((t) => t.key === raw);
+
 function Analytics() {
-  const [tab, setTab] = useState<AnalyticsTab>('dynamics');
+  // The active tab lives in ?tab= (replace, not push) so a shared /analytics link restores
+  // it; the default «Динамика» keeps the URL clean. Period params (?p / ?from&to) coexist.
+  const [params, setParams] = useSearchParams();
+  const rawTab = params.get('tab');
+  const tab: AnalyticsTab = isAnalyticsTab(rawTab) ? rawTab : 'dynamics';
+  const setTab = (next: AnalyticsTab) => {
+    setParams(
+      (prev) => {
+        const merged = new URLSearchParams(prev);
+        if (next === 'dynamics') merged.delete('tab');
+        else merged.set('tab', next);
+        return merged;
+      },
+      { replace: true },
+    );
+  };
   return (
     <div className="space-y-8">
       {/* Grouped tabs break the 20-chart wall into Динамика / Аудитория / Контент / Сравнение —

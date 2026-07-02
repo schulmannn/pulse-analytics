@@ -12,9 +12,9 @@ interface TagStats {
 
 export function Hashtags() {
   const { days, inRange } = usePeriod();
-  const { data: full, isLoading, isError } = useTgFull(days);
+  const { data: full, isPending, isError } = useTgFull(days);
 
-  if (isLoading) {
+  if (isPending) {
     return (
       <Card>
         <CardHeader><Skeleton className="h-4 w-1/4" /></CardHeader>

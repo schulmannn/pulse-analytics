@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useChannels, useHistory, useTgFull } from '@/api/queries';
+import type { ChannelsResponse, HistoryData, TgFull } from '@/api/schemas';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { fmt } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -12,6 +13,7 @@ import { DeltaPill } from '@/components/DeltaPill';
 import { KpiDrillDown } from '@/components/KpiDrillDown';
 import { Skeleton } from '@/components/ui/skeleton';
 import { effectiveLimit, usePeriod } from '@/lib/period';
+import type { DateRange, PeriodDays } from '@/lib/period';
 import { avgReachWindowDelta, dailyWindowDelta, pctDelta, subscriberChange, subscriberDelta, sumPostWindows } from '@/lib/delta';
 import type { MetricDelta } from '@/lib/delta';
 import { METRIC_DEFS } from '@/lib/metricDefs';
@@ -34,13 +36,21 @@ function splitUnit(value: string): [string, string] {
  */
 export function KpiGrid() {
   const { days, range, inRange } = usePeriod();
-  const { data, isLoading, isError, error } = useTgFull(days);
+  // isPending: канал-скоупный запрос выключен, пока канал не известен, — скелетон и там.
+  const { data, isPending, isError, error } = useTgFull(days);
   const { data: history } = useHistory(730);
   const { channelId } = useSelectedChannel();
   const { data: channelsData } = useChannels();
   const [drill, setDrill] = useState<DrillKey | null>(null);
 
-  if (isLoading) return <KpiSkeletons />;
+  // Все пять reduce-проходов + оконная математика мемоизированы: открытие/закрытие
+  // drill-модалки (setDrill) не должно пересчитывать агрегаты по всем постам заново.
+  const derived = useMemo(
+    () => deriveKpis(data, history, channelsData, channelId, days, range, inRange),
+    [data, history, channelsData, channelId, days, range, inRange],
+  );
+
+  if (isPending) return <KpiSkeletons />;
   if (isError) {
     return (
       <Card>
@@ -51,12 +61,76 @@ export function KpiGrid() {
     );
   }
 
+  const {
+    members, displayMembers, totalViews, totalReactions, avgViews, er,
+    subscriberTrend, viewsTrend, reactionsTrend, erTrend, avgReachTrend,
+    viewsSpark, subsSpark, periodLabel, viewsCaption, subDelta, reactionsDelta, erCaption,
+    normPosts, drillMeta,
+  } = derived;
+  return (
+    <div className="space-y-5">
+      {/* HERO — primary metric: big number + area sparkline (Figma Overview lead). */}
+      <FeaturedKpi
+        label={`Просмотры · ${periodLabel}`}
+        value={fmt.short(totalViews)}
+        trend={viewsTrend}
+        caption={viewsCaption}
+        spark={viewsSpark}
+        info={METRIC_DEFS.views}
+        onDrill={() => setDrill('views')}
+      />
+      {/* LEDGER — secondary metrics as hairline columns (Figma: Подписчики / Ср.охват / Реакции / ER).
+          Clean cells: label + value + one inline delta (no per-cell sparkline, no caption line). */}
+      <div className="grid grid-cols-2 gap-px border-t border-border bg-border lg:grid-cols-4">
+        <StatTile label="Подписчики" value={fmt.num(displayMembers)} trend={subscriberTrend} deltaText={subDelta} info={METRIC_DEFS.subscribers} onDrill={() => setDrill('subscribers')} />
+        <StatTile label="Ср. охват" value={fmt.short(avgViews)} trend={avgReachTrend} info={METRIC_DEFS.avgReach} onDrill={() => setDrill('avgReach')} />
+        <StatTile label="Реакции" value={fmt.short(totalReactions)} trend={reactionsTrend} deltaText={reactionsDelta} info={METRIC_DEFS.reactions} onDrill={() => setDrill('reactions')} />
+        <StatTile
+          label="Вовлечённость"
+          value={er > 0 ? er.toFixed(2) + '%' : '—'}
+          trend={erTrend}
+          deltaText={erCaption}
+          info={METRIC_DEFS.er}
+          onDrill={() => setDrill('er')}
+        />
+      </div>
+
+      {drill && (
+        <KpiDrillDown
+          metricKey={drill}
+          posts={normPosts}
+          subsSeries={subsSpark}
+          total={drillMeta[drill].total}
+          trend={drillMeta[drill].trend}
+          caption={drillMeta[drill].caption}
+          members={members}
+          onClose={() => setDrill(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Every KPI aggregate/window/series in one pure pass — extracted for useMemo (the drill
+ * modal toggle used to re-run all five reduce passes on every render).
+ *
+ * Displayed subscriber count comes from the channels list (server-derived from the latest
+ * channel_daily row), falling back to the live /api/tg/full count. The trend pill + sparkline
+ * read that archive via /api/history (a separate endpoint / cache), so the shown Δ is
+ * directional context, not exact (headline − baseline) arithmetic. The live `members`
+ * stays the ER/avg divisor (parity with the legacy formula).
+ */
+function deriveKpis(
+  data: TgFull | undefined,
+  history: HistoryData | undefined,
+  channelsData: ChannelsResponse | undefined,
+  channelId: number | null,
+  days: PeriodDays,
+  range: DateRange | null,
+  inRange: (dateISO: string | null | undefined) => boolean,
+) {
   const members = data?.channel?.memberCount ?? data?.channel?.members ?? 0;
-  // Displayed subscriber count comes from the channels list (server-derived from the latest
-  // channel_daily row — the same archive the Hero uses), falling back to the live /api/tg/full
-  // count. The trend pill + sparkline read that archive via /api/history (a separate endpoint /
-  // cache), so the shown Δ is directional context, not exact (headline − baseline) arithmetic.
-  // The live `members` above stays the ER/avg divisor (parity with the legacy formula).
   const current = channelsData?.channels.find((c) => c.id === channelId);
   const displayMembers = current?.memberCount ?? members;
   const posts = (data?.posts ?? []).filter((post) => inRange(post.date));
@@ -187,48 +261,12 @@ export function KpiGrid() {
     er: { total: er > 0 ? er.toFixed(2) + '%' : '—', trend: erTrend, caption: erCaption },
   };
 
-  return (
-    <div className="space-y-5">
-      {/* HERO — primary metric: big number + area sparkline (Figma Overview lead). */}
-      <FeaturedKpi
-        label={`Просмотры · ${periodLabel}`}
-        value={fmt.short(totalViews)}
-        trend={viewsTrend}
-        caption={viewsCaption}
-        spark={viewsSpark}
-        info={METRIC_DEFS.views}
-        onDrill={() => setDrill('views')}
-      />
-      {/* LEDGER — secondary metrics as hairline columns (Figma: Подписчики / Ср.охват / Реакции / ER).
-          Clean cells: label + value + one inline delta (no per-cell sparkline, no caption line). */}
-      <div className="grid grid-cols-2 gap-px border-t border-border bg-border lg:grid-cols-4">
-        <StatTile label="Подписчики" value={fmt.num(displayMembers)} trend={subscriberTrend} deltaText={subDelta} info={METRIC_DEFS.subscribers} onDrill={() => setDrill('subscribers')} />
-        <StatTile label="Ср. охват" value={fmt.short(avgViews)} trend={avgReachTrend} info={METRIC_DEFS.avgReach} onDrill={() => setDrill('avgReach')} />
-        <StatTile label="Реакции" value={fmt.short(totalReactions)} trend={reactionsTrend} deltaText={reactionsDelta} info={METRIC_DEFS.reactions} onDrill={() => setDrill('reactions')} />
-        <StatTile
-          label="Вовлечённость"
-          value={er > 0 ? er.toFixed(2) + '%' : '—'}
-          trend={erTrend}
-          deltaText={erCaption}
-          info={METRIC_DEFS.er}
-          onDrill={() => setDrill('er')}
-        />
-      </div>
-
-      {drill && (
-        <KpiDrillDown
-          metricKey={drill}
-          posts={normPosts}
-          subsSeries={subsSpark}
-          total={drillMeta[drill].total}
-          trend={drillMeta[drill].trend}
-          caption={drillMeta[drill].caption}
-          members={members}
-          onClose={() => setDrill(null)}
-        />
-      )}
-    </div>
-  );
+  return {
+    members, displayMembers, totalViews, totalReactions, avgViews, er,
+    subscriberTrend, viewsTrend, reactionsTrend, erTrend, avgReachTrend,
+    viewsSpark, subsSpark, periodLabel, viewsCaption, subDelta, reactionsDelta, erCaption,
+    normPosts, drillMeta,
+  };
 }
 
 /** A daily metric series for the inline sparklines: aligned day labels + values. */

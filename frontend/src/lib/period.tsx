@@ -20,9 +20,45 @@ interface PeriodContextValue {
 
 const PeriodContext = createContext<PeriodContextValue | null>(null);
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+const P_TO_DAYS: Record<string, PeriodDays> = { '7d': 7, '30d': 30, '90d': 90, all: 0 };
+
+/** Parse a YYYY-MM-DD query param into local-midnight epoch ms (null if malformed). */
+function parseDayParam(raw: string | null): number | null {
+  if (!raw || !/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
+  const [y, m, d] = raw.split('-').map(Number);
+  const ts = new Date(y!, m! - 1, d!).getTime();
+  return Number.isFinite(ts) ? ts : null;
+}
+
+/**
+ * Initial period from the URL (?p=7d|30d|90d|all, or ?from&to=YYYY-MM-DD for a shifted /
+ * custom window) — a shared link restores the exact window on load. Read synchronously
+ * here (plain location.search, no Router needed); writing back is PeriodUrlSync's job.
+ */
+function initialPeriodFromUrl(): { days: PeriodDays; range: DateRange | null } {
+  const fallback = { days: 30 as PeriodDays, range: null };
+  if (typeof window === 'undefined') return fallback;
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const from = parseDayParam(params.get('from'));
+    const to = parseDayParam(params.get('to'));
+    if (from != null && to != null && from <= to) {
+      // `to` is inclusive — extend to the end of that day (matches the DateRangePicker).
+      return { days: 30, range: { from, to: to + DAY_MS - 1 } };
+    }
+    const preset = P_TO_DAYS[params.get('p') ?? ''];
+    if (preset !== undefined) return { days: preset, range: null };
+  } catch {
+    /* malformed URL — fall back to the default window */
+  }
+  return fallback;
+}
+
 export function PeriodProvider({ children }: { children: ReactNode }) {
-  const [days, setDaysState] = useState<PeriodDays>(30);
-  const [range, setRangeState] = useState<DateRange | null>(null);
+  const [initial] = useState(initialPeriodFromUrl);
+  const [days, setDaysState] = useState<PeriodDays>(initial.days);
+  const [range, setRangeState] = useState<DateRange | null>(initial.range);
 
   // Picking a preset clears any custom range; picking a range leaves `days` as the fallback.
   const setDays = useCallback((next: PeriodDays) => {

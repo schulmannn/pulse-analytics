@@ -42,12 +42,12 @@ function topHashtagLift(posts: NormalizedPost[]): { tag: string; lift: number } 
  */
 export function Insights() {
   const { days, range, inRange } = usePeriod();
-  const { data, isLoading } = useTgFull(days);
+  const { data, isPending } = useTgFull(days);
   const { data: graphs } = useTgGraphs();
   const { data: history } = useHistory(730);
   const { data: velocity } = useVelocity();
 
-  if (isLoading) return <InsightsSkeleton />;
+  if (isPending) return <InsightsSkeleton />;
 
   const members = data?.channel?.memberCount ?? data?.channel?.members ?? 0;
   const posts = normalizeTgPosts(data?.posts ?? [], data?.channel ?? {}).filter((p) => inRange(p.date));

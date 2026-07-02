@@ -24,7 +24,7 @@ export function Overview() {
   const { channelId } = useSelectedChannel();
   const { data: channelsData } = useChannels();
   const { days } = usePeriod();
-  const { data, isLoading, isError } = useTgFull(days);
+  const { data, isPending, isError } = useTgFull(days);
 
   // First-run: a signed-in user with no channels (and not exploring the demo) gets onboarding
   // instead of an empty dashboard.
@@ -34,7 +34,7 @@ export function Overview() {
 
   const channel = channelsData?.channels.find((c) => c.id === channelId);
   const isCollector = channel?.source === 'collector';
-  const isEmpty = !isLoading && !isError && !data?.channel && (data?.posts?.length ?? 0) === 0;
+  const isEmpty = !isPending && !isError && !data?.channel && (data?.posts?.length ?? 0) === 0;
 
   if (isCollector && isEmpty) {
     return <CollectorEmptyState username={channel?.username ?? ''} />;

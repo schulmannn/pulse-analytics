@@ -5,6 +5,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useChannels, useHistory, useIgProfile, useLogout, useTgFull } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { useDemo } from '@/lib/demo-context';
+import { openCommandPalette } from '@/lib/command-palette';
 import { usePeriod } from '@/lib/period';
 import type { PeriodDays } from '@/lib/period';
 import { useTheme } from '@/lib/theme';
@@ -132,12 +133,19 @@ interface DashboardLayoutProps {
 
 /** App shell: left sidebar (brand + channel + nav) and a top bar (title + period + menu). */
 export function DashboardLayout({ email, role, avatar }: DashboardLayoutProps) {
+  // ONE header at a time. The old `hidden md:flex` + `md:hidden` pair mounted BOTH headers
+  // simultaneously — every control (period switcher, account menu, channel card) ran its
+  // hooks/effects twice. Conditional render keeps a single instance per breakpoint.
+  const isMd = useMediaQuery('(min-width: 768px)');
   return (
     <div className="flex min-h-screen bg-background text-foreground">
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
-        <Topbar email={email} role={role} avatar={avatar} />
-        <MobileHeader email={email} role={role} avatar={avatar} />
+        {isMd ? (
+          <Topbar email={email} role={role} avatar={avatar} />
+        ) : (
+          <MobileHeader email={email} role={role} avatar={avatar} />
+        )}
         {/* Extra bottom padding on mobile clears the fixed bottom nav; md+ navigates via the sidebar. */}
         <main className="flex-1 px-4 pb-24 pt-5 sm:px-6 md:pb-5">
           <div className="mx-auto w-full max-w-screen-2xl">
@@ -377,10 +385,14 @@ function ChannelCard({ rail = false }: { rail?: boolean }) {
   const cardRef = useRef<HTMLDivElement>(null);
   const channels = data?.channels ?? [];
 
-  // Initialise the selected channel once the list loads (drives X-Channel-Id).
+  // Initialise the selected channel once the list loads (drives X-Channel-Id). Also validates
+  // a persisted id (localStorage) against the loaded list: a stale/foreign id falls back to the
+  // server's `selected`, then the first channel — otherwise every query would 404 forever.
   useEffect(() => {
-    if (!data || channelId != null || channels.length === 0) return;
-    setChannelId(data.selected ?? channels[0].id);
+    if (!data || channels.length === 0) return;
+    if (channelId != null && channels.some((c) => c.id === channelId)) return;
+    const serverSelected = channels.find((c) => c.id === data.selected)?.id;
+    setChannelId(serverSelected ?? channels[0].id);
   }, [channelId, channels, data, setChannelId]);
 
   useDismiss(open, setOpen, cardRef);
@@ -456,13 +468,12 @@ function ChannelCard({ rail = false }: { rail?: boolean }) {
 }
 
 function SearchBox({ rail = false }: { rail?: boolean }) {
-  // Opens the global ⌘K command palette (mounted in App.tsx) by replaying the shortcut.
-  const openPalette = () =>
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true, ctrlKey: true }));
+  // Opens the global ⌘K command palette (mounted in App.tsx) through the shared store —
+  // no synthetic KeyboardEvent replay coupling this button to the shortcut handler.
   return (
     <button
       type="button"
-      onClick={openPalette}
+      onClick={openCommandPalette}
       title={rail ? 'Поиск (⌘K)' : undefined}
       aria-label={rail ? 'Поиск (⌘K)' : undefined}
       className={cn(
@@ -479,12 +490,12 @@ function SearchBox({ rail = false }: { rail?: boolean }) {
   );
 }
 
-/** Desktop top bar (md+; mobile uses MobileHeader). Title + period + export + theme + account. */
+/** Desktop top bar (md+; mobile uses MobileHeader — conditionally, never both mounted). */
 function Topbar({ email, role, avatar }: { email?: string; role?: string; avatar?: string | null }) {
   const { pathname } = useLocation();
   const title = TITLES[pathname] ?? (pathname.startsWith('/instagram') ? 'Instagram' : 'Atlavue');
   return (
-    <header className="sticky top-0 z-20 hidden h-14 items-center justify-between gap-3 border-b bg-background/80 px-4 backdrop-blur sm:gap-4 sm:px-6 md:flex">
+    <header className="sticky top-0 z-20 flex h-14 items-center justify-between gap-3 border-b bg-background/80 px-4 backdrop-blur sm:gap-4 sm:px-6">
       {/* min-w-0 lets the title truncate instead of shoving the controls off a narrow screen. */}
       <h1 className="min-w-0 truncate text-lg font-medium">{title}</h1>
       <div className="flex shrink-0 items-center gap-2">
@@ -503,7 +514,7 @@ function Topbar({ email, role, avatar }: { email?: string; role?: string; avatar
  */
 function MobileHeader({ email, role, avatar }: { email?: string; role?: string; avatar?: string | null }) {
   return (
-    <div className="md:hidden">
+    <div>
       <div className="flex items-center gap-2 border-b py-2 pr-3">
         <div className="min-w-0 flex-1">
           <ChannelCard />
@@ -654,6 +665,15 @@ function AccountMenu({ email, role, avatar }: { email?: string; role?: string; a
 const shortDate = (ms: number) =>
   new Date(ms).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
 
+const DAY_MS = 86_400_000;
+const startOfDayMs = (ms: number) => {
+  const d = new Date(ms);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+};
+/** How far back the pager may step — the channel_daily archive keeps ~730 days. */
+const PAGER_FLOOR_DAYS = 730;
+
 function PeriodSwitcher() {
   const { days, setDays, range, setRange } = usePeriod();
   const [open, setOpen] = useState(false);
@@ -674,6 +694,34 @@ function PeriodSwitcher() {
     if (r) setPos({ top: r.bottom + 6, right: Math.max(8, window.innerWidth - r.right) });
     setOpen(true);
   };
+
+  // ‹ › pager (steep pattern): step the active window to the adjacent window of equal
+  // length, expressed through the existing custom-range mechanism (preset 30д + ‹ = a
+  // custom range covering the previous 30 days; the range button shows «dd.mm–dd.mm»).
+  // Stepping forward past "now" returns to the rolling preset; «Всё» has no finite window.
+  const today = startOfDayMs(Date.now());
+  const winTo = range ? startOfDayMs(range.to) : today;
+  const winFrom = range ? startOfDayMs(range.from) : days !== 0 ? today - (days - 1) * DAY_MS : null;
+  const lenDays = winFrom != null ? Math.round((winTo - winFrom) / DAY_MS) + 1 : 0;
+  const floor = today - PAGER_FLOOR_DAYS * DAY_MS;
+  const canPrev = winFrom != null && winFrom - lenDays * DAY_MS >= floor;
+  // The rolling window already ends at "now" — only a shifted (custom) window can step forward.
+  const canNext = winFrom != null && range !== null;
+  const step = (dir: -1 | 1) => {
+    if (winFrom == null) return;
+    const nextFrom = winFrom + dir * lenDays * DAY_MS;
+    const nextTo = winTo + dir * lenDays * DAY_MS;
+    if (dir === 1 && nextTo >= today) {
+      setDays(days); // caught up with the present → back to the rolling preset window
+      return;
+    }
+    setRange({ from: nextFrom, to: nextTo + DAY_MS - 1 });
+  };
+  const pagerBtn = (enabled: boolean) =>
+    cn(
+      'flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors',
+      enabled ? 'hover:bg-muted/60 hover:text-foreground' : 'opacity-30',
+    );
 
   return (
     <div className="flex items-center">
@@ -711,6 +759,30 @@ function PeriodSwitcher() {
             <Icon name="calendar" className="h-3.5 w-3.5" />
           )}
         </button>
+        {/* hairline divider before the ‹ › pager (quiet ghost buttons, no boxes) */}
+        <span aria-hidden="true" className="h-4 w-px bg-border" />
+        <div className="flex items-center gap-0.5">
+          <button
+            type="button"
+            onClick={() => step(-1)}
+            disabled={!canPrev}
+            title="Предыдущий период"
+            aria-label="Предыдущий период"
+            className={pagerBtn(canPrev)}
+          >
+            <Icon name="chevron" className="h-3.5 w-3.5 rotate-90" />
+          </button>
+          <button
+            type="button"
+            onClick={() => step(1)}
+            disabled={!canNext}
+            title="Следующий период"
+            aria-label="Следующий период"
+            className={pagerBtn(canNext)}
+          >
+            <Icon name="chevron" className="h-3.5 w-3.5 -rotate-90" />
+          </button>
+        </div>
       </div>
 
       {open && pos && (
