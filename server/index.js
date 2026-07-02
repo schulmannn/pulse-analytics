@@ -1228,6 +1228,49 @@ app.delete('/api/channels/:id/key/:keyId', requireAuth, async (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Timeline annotations (F1): per-channel event markers on the trend charts ──
+app.get('/api/channels/:id/annotations', requireAuth, async (req, res) => {
+  if (!db.enabled) return res.json({ annotations: [] });
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ error: 'bad id' });
+  try {
+    const ch = await db.getChannel(id, req.user);
+    if (!ch) return res.status(403).json({ error: 'Нет доступа к каналу' });
+    res.json({ annotations: await db.listAnnotations(id) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/channels/:id/annotations', requireAuth, async (req, res) => {
+  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
+  const id = parseInt(req.params.id, 10);
+  const day = String((req.body && req.body.day) || '').trim();
+  const label = String((req.body && req.body.label) || '').trim();
+  if (!id) return res.status(400).json({ error: 'bad id' });
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return res.status(400).json({ error: 'day = YYYY-MM-DD' });
+  if (!label) return res.status(400).json({ error: 'label обязателен' });
+  try {
+    const ch = await db.getChannel(id, req.user);
+    if (!ch) return res.status(403).json({ error: 'Нет доступа к каналу' });
+    const rec = await db.createAnnotation(id, { day, label: label.slice(0, 120), createdBy: req.user.uid });
+    audit(req, 'annotation.created', { channel_id: id, annotation_id: rec && rec.id }).catch(() => {});
+    res.json(rec);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/channels/:id/annotations/:annId', requireAuth, async (req, res) => {
+  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
+  const id = parseInt(req.params.id, 10);
+  const annId = parseInt(req.params.annId, 10);
+  if (!id || !annId) return res.status(400).json({ error: 'bad id' });
+  try {
+    const ch = await db.getChannel(id, req.user);
+    if (!ch) return res.status(403).json({ error: 'Нет доступа к каналу' });
+    const ok = await db.deleteAnnotation(annId, id);
+    if (ok) audit(req, 'annotation.deleted', { channel_id: id, annotation_id: annId }).catch(() => {});
+    res.json({ ok });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Collector protocol is isolated in its own route module. The handler validates
 // and normalizes the envelope before a single transactional DB call.
 registerCollectorRoutes({

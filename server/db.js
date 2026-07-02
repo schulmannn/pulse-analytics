@@ -963,6 +963,33 @@ async function deleteIgAccount(channelId) {
   return rowCount > 0;
 }
 
+// ── Timeline annotations (per-channel event markers on the trend charts) ──
+async function listAnnotations(channelId) {
+  if (!enabled || !channelId) return [];
+  const { rows } = await pool.query(
+    `SELECT id, to_char(day,'YYYY-MM-DD') AS day, label,
+            to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SS') AS created_at
+       FROM chart_annotations WHERE channel_id=$1 ORDER BY day ASC, id ASC`, [channelId]);
+  return rows;
+}
+
+async function createAnnotation(channelId, { day, label, createdBy }) {
+  if (!enabled || !channelId) return null;
+  const { rows } = await pool.query(
+    `INSERT INTO chart_annotations (channel_id, day, label, created_by) VALUES ($1,$2,$3,$4)
+     RETURNING id, to_char(day,'YYYY-MM-DD') AS day, label,
+       to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SS') AS created_at`,
+    [channelId, day, String(label).slice(0, 120), createdBy ?? null]);
+  return rows[0] || null;
+}
+
+async function deleteAnnotation(id, channelId) {
+  if (!enabled || !id || !channelId) return false;
+  const { rowCount } = await pool.query(
+    'DELETE FROM chart_annotations WHERE id=$1 AND channel_id=$2', [id, channelId]);
+  return rowCount > 0;
+}
+
 module.exports = {
   enabled, init, migrate, ping, close, graphsToDailyRows,
   USER_ROLES, USER_STATUSES,
@@ -978,4 +1005,5 @@ module.exports = {
   createBug, listBugs, updateBug, deleteBug, BUG_STATUSES, BUG_SEVERITIES, BUG_KINDS,
   bugExists, getBug, addAttachmentIfRoom, getAttachment,
   saveIgAccount, getIgAccount, updateIgToken, deleteIgAccount,
+  listAnnotations, createAnnotation, deleteAnnotation,
 };
