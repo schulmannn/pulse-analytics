@@ -448,12 +448,12 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
       <WidgetGroup
         id={`tg-${group ?? 'all'}`}
         className={cn(
-          // grid-flow-dense: с широкими (span-2) вариантами обычная раскладка оставляла бы
-          // дыры при переносе — плотная упаковка подтягивает одинарные плитки в свободные ячейки.
-          'grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-2',
-          // Аудитория: каждая секция — самостоятельная ячейка сетки; при нечётном числе секций
-          // последняя растягивается на обе колонки, чтобы рядом не оставалось пустой дыры.
-          group === 'audience' && 'lg:[&>section:last-child:nth-child(odd)]:col-span-2',
+          // grid-flow-dense: с широкими (full) вариантами обычная раскладка оставляла бы
+          // дыры при переносе — плотная упаковка подтягивает узкие плитки в свободные ячейки.
+          'grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6',
+          // Аудитория: каждая секция — самостоятельная ячейка сетки; при нечётном числе
+          // half-плиток последняя дотягивается до полного ряда, чтобы рядом не зияла пустая дыра.
+          group === 'audience' && 'lg:[&>section:last-child:nth-child(odd)]:col-span-6',
         )}
       >
         {inGroup('dynamics') && last14Dates.length >= 2 && (

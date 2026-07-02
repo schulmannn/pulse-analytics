@@ -227,9 +227,9 @@ export function HeatmapChartBlock() {
   if (isPending) return <ChartSkeleton title="Тепловая карта активности (день × час)" />;
 
   return (
-    // The 7×24 grid is genuinely wide content → a 2× tile (full row) wherever the section
-    // lands in a widget grid, never squeezed into one column.
-    <ChartSection title="Тепловая карта активности (день × час)" className="lg:col-span-2">
+    // The 7×24 grid is genuinely wide content → a full-row tile wherever the section lands in
+    // a widget grid, never squeezed into a fraction of it.
+    <ChartSection title="Тепловая карта активности (день × час)" defaultSize="full">
       <HeatmapSurface grid={grid} maxErv={maxErv} bestSlot={bestSlot} />
 
       <div className="mt-3 text-xs font-medium text-muted-foreground">

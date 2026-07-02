@@ -70,7 +70,7 @@ export function Analytics() {
           {/* Standard 1× tiles side by side — stacked full-width they rendered as two
               200px-high «islands» stretched across the whole row. Wide (span-2) variants
               still take the full row via the widgets' own variant span. */}
-          <WidgetGroup id="analytics-dynamics" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-2">
+          <WidgetGroup id="analytics-dynamics" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
             <HistoryChartBlock />
             <VelocityChartBlock />
           </WidgetGroup>

@@ -127,7 +127,7 @@ export function Mentions() {
       </div>
 
       {/* Аналитические блоки */}
-      <WidgetGroup id="mentions" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-2">
+      <WidgetGroup id="mentions" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
         <ChartSection
           title="Упоминаний по дням"
           variants={[

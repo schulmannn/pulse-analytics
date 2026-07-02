@@ -7,6 +7,7 @@ import { isDemoMode } from '@/lib/demo';
 import { fmt } from '@/lib/format';
 import { BarChart } from '@/components/BarChart';
 import { Breakdown } from '@/components/Breakdown';
+import { PieChart } from '@/components/PieChart';
 import { DivergingBars } from '@/components/DivergingBars';
 import { ChartExpandOverlay, type ChartExpandConfig } from '@/components/ExpandableChart';
 import { DEFAULT_WIDGET_DAYS, WidgetPeriodProvider, widgetPeriodValue } from '@/lib/period';
@@ -28,6 +29,9 @@ import type { PeriodDays, WidgetPeriodValue } from '@/lib/period';
 const PREFS_KEY = 'pulse_widget_prefs';
 const ORDER_KEY = 'pulse_widget_order';
 
+/** Widget footprint on the 6-column group grid: third (2/6) · half (3/6) · full (6/6). */
+export type WidgetSize = 'third' | 'half' | 'full';
+
 interface WidgetPrefs {
   /** chart token index 1..6; undefined = brand accent */
   color?: number;
@@ -41,14 +45,30 @@ interface WidgetPrefs {
   variant?: string;
   /** per-widget time window (a PeriodDays preset); undefined = the 30д default */
   period?: PeriodDays;
+  /** chosen footprint on the group grid; undefined = the card's defaultSize (else 'half') */
+  size?: WidgetSize;
 }
+
+/** Rank the sizes so a variant's `minSize` can clamp the user's choice UP. */
+const SIZE_RANK: Record<WidgetSize, number> = { third: 0, half: 1, full: 2 };
+/** Effective size = the larger of the user's choice and the active variant's floor. */
+function maxSize(a: WidgetSize, b: WidgetSize): WidgetSize {
+  return SIZE_RANK[a] >= SIZE_RANK[b] ? a : b;
+}
+/** col-span on the 6-col grid: third → 2/6, half → 3/6, full → 6/6. */
+const SIZE_COL_SPAN: Record<WidgetSize, string> = {
+  third: 'lg:col-span-2',
+  half: 'lg:col-span-3',
+  full: 'lg:col-span-6',
+};
 
 /** One presentation of a widget's data (line / bar / list …), chosen in the edit dialog. */
 export interface WidgetVariant {
   key: string;
   label: string;
-  /** Grid columns the widget card spans while this variant is active (default 1). */
-  span?: 1 | 2;
+  /** Smallest footprint this presentation reads well at — clamps the card's size UP while the
+      variant is active (default 'third'). The wide bar+ledger presentations set 'full'. */
+  minSize?: WidgetSize;
   render: ReactNode;
 }
 
@@ -95,8 +115,8 @@ function BarValuesLayout({ chart, rows }: { chart: ReactNode; rows: LedgerRow[] 
   );
 }
 
-/** The common «tint-row list ↔ bar chart» set for Breakdown-style category data, plus the
-    wide «Столбцы + значения» presentation (bar chart + value ledger, spans 2 grid columns). */
+/** The common «tint-row list ↔ bar chart ↔ pie» set for Breakdown-style category data, plus
+    the wide «Столбцы + значения» presentation (bar chart + value ledger, needs the full row). */
 export function breakdownVariants(items: BreakdownLikeItem[]): WidgetVariant[] {
   const values = items.map((i) => i.value);
   const labels = items.map((i) => i.label);
@@ -109,9 +129,14 @@ export function breakdownVariants(items: BreakdownLikeItem[]): WidgetVariant[] {
       render: <BarChart values={values} labels={labels} titles={titles} />,
     },
     {
+      key: 'pie',
+      label: 'Круговая',
+      render: <PieChart values={values} labels={labels} titles={titles} colors={items.map((i) => i.color)} />,
+    },
+    {
       key: 'bar-values',
       label: 'Столбцы + значения',
-      span: 2,
+      minSize: 'full',
       render: (
         <BarValuesLayout
           chart={<BarChart values={values} labels={labels} titles={titles} />}
@@ -133,7 +158,7 @@ interface SeriesBarValuesOptions {
 }
 
 /** The wide «Столбцы + значения» variant for SERIES charts: bars (flex-1) plus a right-hand
-    ledger of the LAST 6 points (label → value, newest first). Spans 2 grid columns. */
+    ledger of the LAST 6 points (label → value, newest first). Needs the full grid row. */
 export function seriesBarValuesVariant(
   values: number[],
   labels: string[],
@@ -150,7 +175,7 @@ export function seriesBarValuesVariant(
   return {
     key: 'bar-values',
     label: 'Столбцы + значения',
-    span: 2,
+    minSize: 'full',
     render: (
       <BarValuesLayout
         chart={
@@ -193,7 +218,15 @@ function setPrefs(id: string, prefs: WidgetPrefs) {
   try {
     const all = readJson<Record<string, WidgetPrefs>>(PREFS_KEY, {});
     // `period` can be 0 («Всё») — a falsy but real value, so test for undefined, not truthiness.
-    if (!prefs.color && !prefs.tinted && !prefs.hidden && !prefs.title && !prefs.variant && prefs.period === undefined)
+    if (
+      !prefs.color &&
+      !prefs.tinted &&
+      !prefs.hidden &&
+      !prefs.title &&
+      !prefs.variant &&
+      prefs.period === undefined &&
+      prefs.size === undefined
+    )
       delete all[id];
     else all[id] = prefs;
     localStorage.setItem(PREFS_KEY, JSON.stringify(all));
@@ -670,6 +703,10 @@ interface ChartSectionProps {
   variants?: WidgetVariant[] | ((period: WidgetPeriodValue) => WidgetVariant[]);
   /** Extra classes on the card (grid spans etc.). */
   className?: string;
+  /** Footprint this card takes when the user hasn't chosen one — 'full' for hero/table cards
+      that want the whole row, else 'half' (the default). Still clamped up by the active
+      variant's minSize. */
+  defaultSize?: WidgetSize;
   /** RICH (Tier-2) explorer config for the «Развернуть» overlay: period pills, line↔bar
       toggle, stats strip. Undefined = Tier-1 — the overlay renders the widget's own body
       (active variant or children) at full explorer axes. */
@@ -685,7 +722,7 @@ interface ChartSectionProps {
   children?: ReactNode;
 }
 
-export function ChartSection({ id, title, action, variants, className, expand, periodControl, children }: ChartSectionProps) {
+export function ChartSection({ id, title, action, variants, className, defaultSize, expand, periodControl, children }: ChartSectionProps) {
   const widgetId = id ?? title;
   const group = useContext(GroupCtx);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -735,11 +772,16 @@ export function ChartSection({ id, title, action, variants, className, expand, p
     [variants, widgetPeriod],
   );
 
-  // The active variant drives the card's grid span (wide «Столбцы + значения» takes 2 cells).
   const activeVariant =
     resolvedVariants && resolvedVariants.length > 0
       ? (resolvedVariants.find((v) => v.key === prefs.variant) ?? resolvedVariants[0])
       : null;
+
+  // Effective footprint on the 6-col group grid: the user's choice (or the card's defaultSize,
+  // else 'half'), clamped UP to the active variant's minSize so a wide bar+ledger presentation
+  // never renders in a third. col-span is applied on the OUTER section below.
+  const chosenSize: WidgetSize = prefs.size ?? defaultSize ?? 'half';
+  const effectiveSize = maxSize(chosenSize, activeVariant?.minSize ?? 'third');
 
   // The widget's own body — the active variant plus the shared children (captions etc.). Reused
   // as the Tier-1 overlay content: the same chart, just rendered at full explorer axes. Wrapped
@@ -787,7 +829,7 @@ export function ChartSection({ id, title, action, variants, className, expand, p
     <section
       ref={sectionRef}
       className={`${reorder ? 'cursor-grab touch-none select-none active:cursor-grabbing' : ''} ${
-        activeVariant?.span === 2 ? 'lg:col-span-2' : ''
+        SIZE_COL_SPAN[effectiveSize]
       } ${className ?? ''}`}
       style={outerStyle}
       onPointerDown={
@@ -940,6 +982,9 @@ export function ChartSection({ id, title, action, variants, className, expand, p
           prefs={prefs}
           variants={resolvedVariants}
           showPeriod={!!periodControl}
+          showSize={!!group}
+          defaultSize={defaultSize ?? 'half'}
+          minSize={activeVariant?.minSize ?? 'third'}
           onChange={update}
           onClose={() => setEditOpen(false)}
         />
@@ -1036,11 +1081,23 @@ interface EditWidgetDialogProps {
   variants?: WidgetVariant[];
   /** Show the «Период» segment — only for cards that read useWidgetPeriod() (see periodControl). */
   showPeriod?: boolean;
+  /** Show the «Размер» segment — only inside a WidgetGroup (a lone card can't be resized). */
+  showSize?: boolean;
+  /** The card's size when the user hasn't chosen one (defaultSize prop, else 'half'). */
+  defaultSize?: WidgetSize;
+  /** Active variant's floor — sizes below it are disabled (the variant needs the width). */
+  minSize?: WidgetSize;
   onChange: (next: WidgetPrefs) => void;
   onClose: () => void;
 }
 
-function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, onChange, onClose }: EditWidgetDialogProps) {
+const SIZE_OPTIONS: Array<{ size: WidgetSize; label: string }> = [
+  { size: 'third', label: 'Треть' },
+  { size: 'half', label: 'Половина' },
+  { size: 'full', label: 'Полный' },
+];
+
+function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, showSize, defaultSize = 'half', minSize = 'third', onChange, onClose }: EditWidgetDialogProps) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -1079,9 +1136,9 @@ function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, onChange,
             <div className="mt-2 flex snap-x gap-3 overflow-x-auto pb-1">
               {variants.map((v) => {
                 const active = (prefs.variant ?? variants[0].key) === v.key;
-                // Wide (span-2) variants preview at half the scale so the whole chart+ledger
-                // row fits the same w-56 preview card.
-                const wide = v.span === 2;
+                // Wide (minSize:'full') variants preview at half the scale so the whole
+                // chart+ledger row fits the same w-56 preview card.
+                const wide = v.minSize === 'full';
                 const previewStyle: CSSProperties = {};
                 if (prefs.color) (previewStyle as Record<string, string>)['--brand-iris'] = `var(--chart-${prefs.color})`;
                 if (prefs.tinted)
@@ -1119,6 +1176,41 @@ function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, onChange,
                   </button>
                 );
               })}
+            </div>
+          </div>
+        )}
+
+        {showSize && (
+          <div className="mt-4">
+            <span className="text-2xs tracking-wide text-muted-foreground">Размер</span>
+            {/* Треть / Половина / Полный on the 6-col grid. Selecting the card's defaultSize
+                clears the pref (fall back to the default). Sizes below the active variant's
+                floor are disabled — that presentation needs the width. */}
+            <div className="mt-2 flex overflow-hidden rounded border border-border">
+              {(() => {
+                // Highlight the EFFECTIVE size (a full-only variant clamps the card up even when
+                // the stored/default is smaller) — never a disabled button that the card ignores.
+                const chosen = prefs.size ?? defaultSize;
+                const shownSize = SIZE_RANK[chosen] < SIZE_RANK[minSize] ? minSize : chosen;
+                return SIZE_OPTIONS.map((o) => {
+                const active = shownSize === o.size;
+                const disabled = SIZE_RANK[o.size] < SIZE_RANK[minSize];
+                return (
+                  <button
+                    key={o.size}
+                    type="button"
+                    aria-pressed={active}
+                    disabled={disabled}
+                    onClick={() => onChange({ ...prefs, size: o.size === defaultSize ? undefined : o.size })}
+                    className={`flex-1 border-r border-border px-2 py-1.5 text-xs font-medium transition-colors last:border-r-0 disabled:cursor-not-allowed disabled:opacity-40 ${
+                      active ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+                    }`}
+                  >
+                    {o.label}
+                  </button>
+                );
+                });
+              })()}
             </div>
           </div>
         )}

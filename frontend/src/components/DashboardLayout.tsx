@@ -740,7 +740,8 @@ function AccountMenu({ email, role, avatar }: { email?: string; role?: string; a
 }
 
 /**
- * User row pinned to the sidebar bottom (steep-style): avatar + truncated email + up-chevron,
+ * User row pinned to the sidebar bottom (steep-style): avatar + truncated email + a chevron
+ * (down at rest, flips up while the menu is open, standard dropdown affordance),
  * separated from the scrollable nav by a hairline. Opens the SAME account menu as the mobile
  * avatar, but UPWARD (anchored bottom-left) since the trigger sits at the viewport edge —
  * hairline + paper (border-border bg-card), no shadow. Rail: avatar only, the popover overhangs
@@ -780,7 +781,7 @@ function SidebarUserRow({
         {!rail && (
           <>
             <span className="min-w-0 flex-1 truncate text-sm text-foreground">{email ?? 'Аккаунт'}</span>
-            <Icon name="chevron" className="h-4 w-4 shrink-0 rotate-180 text-muted-foreground" />
+            <Icon name="chevron" className={cn('h-4 w-4 shrink-0 text-muted-foreground transition-transform', open && 'rotate-180')} />
           </>
         )}
       </button>

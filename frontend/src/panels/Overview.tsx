@@ -51,13 +51,13 @@ export function Overview() {
       {/* Показатели | Инсайт | Рост подписчиков | Топ постов — ONE reorderable widget grid
           (owner call: the hero is a widget like everything else; grid-flow-dense backfills
           the holes a CSS-order move of a span-2 card would otherwise leave). */}
-      <WidgetGroup id="overview" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-2">
+      <WidgetGroup id="overview" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
         {/* Explicit ids: the Аналитика block renders widgets with the same display titles on
             the SAME feed page — default title-ids would make them share prefs (hide one →
             both vanish). */}
         {/* Widget label «Показатели», NOT «Обзор» — the feed block's h2 right above already
             says «Обзор»; repeating it in the menu row would read as a stutter. */}
-        <ChartSection id="overview-hero" title="Показатели" className="lg:col-span-2" periodControl>
+        <ChartSection id="overview-hero" title="Показатели" defaultSize="full" periodControl>
           {/* KPI hero (Просмотры · окно виджета) + ledger (Подписчики / Ср.охват / Реакции / ER) */}
           <KpiGrid />
         </ChartSection>
@@ -70,7 +70,7 @@ export function Overview() {
         <ChartSection
           id="overview-top-posts"
           title="Топ постов"
-          className="lg:col-span-2"
+          defaultSize="full"
           periodControl
           action={
             <Link to="/analytics" className="shrink-0 text-xs font-medium text-primary hover:underline">
