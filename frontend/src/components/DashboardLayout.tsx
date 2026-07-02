@@ -258,10 +258,11 @@ function Sidebar({ email, role, avatar }: { email?: string; role?: string; avata
     <aside
       aria-label="Боковая панель"
       className={cn(
-        // Quiet column on the shared paper canvas: right hairline only, no panel, no shadow.
-        // z-30 lets the overhanging popovers (rail-mode channel dropdown, user-row menu) paint
-        // above the sticky Topbar (z-20) while staying under the period scrim (z-40) and modals (z-50).
-        'sticky top-0 z-30 hidden h-screen shrink-0 flex-col border-r border-border bg-background md:flex print:hidden',
+        // Floating panel (Claude-style): inset 0.5rem all round, rounded, a full hairline, on the
+        // card surface so it reads a shade apart from the canvas — no shadow (DS restraint; the
+        // surface contrast + inset carry the float). z-30 lets the overhanging popovers (rail
+        // dropdown, user-row menu) paint above the sticky Topbar (z-20), under scrim/modals.
+        'sticky top-2 z-30 m-2 hidden h-[calc(100vh-1rem)] shrink-0 flex-col rounded-xl border border-border bg-card md:flex print:hidden',
         'transition-[width] duration-200 motion-reduce:transition-none',
         rail ? 'w-16' : 'w-60',
       )}
