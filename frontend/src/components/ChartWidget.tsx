@@ -132,6 +132,12 @@ interface GroupCtxValue {
   register: (id: string, title: string) => () => void;
   sequence: string[];
   move: (id: string, dir: -1 | 1) => void;
+  /** iOS-style drag-and-drop reordering («jiggle mode»). */
+  reorderMode: boolean;
+  beginReorder: () => void;
+  draggingId: string | null;
+  setDraggingId: (id: string | null) => void;
+  dragOver: (dragId: string, overId: string) => void;
 }
 
 const GroupCtx = createContext<GroupCtxValue | null>(null);
@@ -144,12 +150,28 @@ interface WidgetGroupProps {
 
 export function WidgetGroup({ id, className, children }: WidgetGroupProps) {
   const [registered, setRegistered] = useState<Registered[]>([]);
+  const [reorderMode, setReorderMode] = useState(false);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  // Jitter dampener for live drag-over swaps: a cooldown + never immediately reverse the
+  // same pair (the reflow puts the swapped widget back under the cursor).
+  const lastSwapAt = useRef(0);
+  const lastSwapPair = useRef('');
   useStoreTick();
 
   const register = useCallback((widgetId: string, title: string) => {
     setRegistered((prev) => (prev.some((r) => r.id === widgetId) ? prev : [...prev, { id: widgetId, title }]));
     return () => setRegistered((prev) => prev.filter((r) => r.id !== widgetId));
   }, []);
+
+  // Exit jiggle mode with Escape, like closing any transient mode.
+  useEffect(() => {
+    if (!reorderMode) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setReorderMode(false);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [reorderMode]);
 
   // Effective sequence: the persisted order first (registered only), newcomers after, in
   // their natural mount order.
@@ -172,11 +194,44 @@ export function WidgetGroup({ id, className, children }: WidgetGroupProps) {
     [id, sequence],
   );
 
+  // Live reorder while dragging: place the dragged widget at the hovered widget's slot.
+  const dragOver = useCallback(
+    (dragId: string, overId: string) => {
+      if (dragId === overId) return;
+      const now = Date.now();
+      if (now - lastSwapAt.current < 160) return;
+      if (lastSwapPair.current === `${overId}>${dragId}` && now - lastSwapAt.current < 450) return;
+      const seq = [...sequence];
+      const from = seq.indexOf(dragId);
+      const to = seq.indexOf(overId);
+      if (from < 0 || to < 0) return;
+      seq.splice(from, 1);
+      seq.splice(to, 0, dragId);
+      setGroupOrder(id, seq);
+      lastSwapAt.current = now;
+      lastSwapPair.current = `${dragId}>${overId}`;
+    },
+    [id, sequence],
+  );
+
+  const beginReorder = useCallback(() => setReorderMode(true), []);
+
   const hidden = registered.filter((r) => getPrefs(r.id).hidden);
 
   return (
-    <GroupCtx.Provider value={{ register, sequence, move }}>
+    <GroupCtx.Provider value={{ register, sequence, move, reorderMode, beginReorder, draggingId, setDraggingId, dragOver }}>
       <div className={className}>{children}</div>
+      {reorderMode &&
+        createPortal(
+          <button
+            type="button"
+            onClick={() => setReorderMode(false)}
+            className="btn-pill fixed bottom-6 left-1/2 z-40 -translate-x-1/2 bg-primary px-6 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+          >
+            Готово
+          </button>,
+          document.body,
+        )}
       {hidden.length > 0 && (
         <div className="mt-3 flex flex-wrap items-center gap-2 text-2xs text-muted-foreground print:hidden">
           <span>Скрытые виджеты:</span>
@@ -251,17 +306,55 @@ export function ChartSection({ id, title, action, variants, children }: ChartSec
   if (seqIndex >= 0) style.order = seqIndex;
   if (prefs.hidden) style.display = 'none';
 
+  const reorder = !!group?.reorderMode;
+  const isDragging = reorder && group?.draggingId === widgetId;
+
   const menuItem =
     'flex w-full items-center gap-2.5 rounded px-2.5 py-1.5 text-left text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40';
 
   return (
-    <section className="rounded-xl border border-border bg-card p-4 sm:p-5" style={style}>
+    <section
+      className={`rounded-xl border border-border bg-card p-4 sm:p-5 ${
+        reorder ? `widget-jiggle cursor-grab select-none ${isDragging ? 'opacity-50' : ''}` : ''
+      }`}
+      style={style}
+      draggable={reorder}
+      onDragStart={
+        reorder
+          ? (e) => {
+              group?.setDraggingId(widgetId);
+              e.dataTransfer.effectAllowed = 'move';
+              e.dataTransfer.setData('text/plain', widgetId);
+            }
+          : undefined
+      }
+      onDragEnd={reorder ? () => group?.setDraggingId(null) : undefined}
+      onDragOver={
+        reorder
+          ? (e) => {
+              const dragId = group?.draggingId;
+              if (!dragId || dragId === widgetId) return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'move';
+              group?.dragOver(dragId, widgetId);
+            }
+          : undefined
+      }
+      onDrop={
+        reorder
+          ? (e) => {
+              e.preventDefault();
+              group?.setDraggingId(null);
+            }
+          : undefined
+      }
+    >
       <div className="flex items-center gap-3">
         <h3 className="min-w-0 flex-1 truncate text-xs font-medium tracking-wider text-muted-foreground">
           {prefs.title || title}
         </h3>
         {action}
-        <div className="relative shrink-0" ref={menuRef}>
+        <div className={`relative shrink-0 ${reorder ? 'pointer-events-none opacity-0' : ''}`} ref={menuRef}>
           <button
             type="button"
             aria-label={`Меню виджета «${prefs.title || title}»`}
@@ -299,6 +392,16 @@ export function ChartSection({ id, title, action, variants, children }: ChartSec
                   >
                     <MenuIcon kind="down" /> Ниже
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      group.beginReorder();
+                    }}
+                    className={menuItem}
+                  >
+                    <MenuIcon kind="drag" /> Переставить
+                  </button>
                   <div aria-hidden="true" className="mx-1 my-1 h-px bg-border" />
                 </>
               )}
@@ -328,7 +431,7 @@ export function ChartSection({ id, title, action, variants, children }: ChartSec
           )}
         </div>
       </div>
-      <div className="mt-3">
+      <div className={`mt-3 ${reorder ? 'pointer-events-none' : ''}`}>
         {variants && variants.length > 0
           ? (variants.find((v) => v.key === prefs.variant) ?? variants[0]).render
           : null}
@@ -348,11 +451,17 @@ export function ChartSection({ id, title, action, variants, children }: ChartSec
   );
 }
 
-function MenuIcon({ kind }: { kind: 'up' | 'down' | 'edit' | 'hide' }) {
+function MenuIcon({ kind }: { kind: 'up' | 'down' | 'edit' | 'hide' | 'drag' }) {
   return (
     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5 shrink-0" aria-hidden="true">
       {kind === 'up' && <path d="m4 10 4-4 4 4" />}
       {kind === 'down' && <path d="m4 6 4 4 4-4" />}
+      {kind === 'drag' && (
+        <>
+          <path d="M8 2v12M2 8h12" />
+          <path d="m6 3.5 2-2 2 2M6 12.5l2 2 2-2M3.5 6l-2 2 2 2M12.5 6l2 2-2 2" />
+        </>
+      )}
       {kind === 'edit' && <path d="M11.5 2.5a1.8 1.8 0 0 1 2.5 2.5L5.5 13.5l-3 .5.5-3z" />}
       {kind === 'hide' && (
         <>
@@ -399,7 +508,7 @@ function EditWidgetDialog({ defaultTitle, prefs, variants, onChange, onClose }: 
       onClick={onClose}
     >
       <div
-        className="w-full max-w-sm rounded-xl border border-border bg-card p-5"
+        className={`w-full ${variants && variants.length > 1 ? 'max-w-lg' : 'max-w-sm'} rounded-xl border border-border bg-card p-5`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="text-sm font-medium text-foreground">Настройка виджета</div>
@@ -407,20 +516,38 @@ function EditWidgetDialog({ defaultTitle, prefs, variants, onChange, onClose }: 
         {variants && variants.length > 1 && (
           <div className="mt-4">
             <span className="text-2xs tracking-wide text-muted-foreground">Тип виджета</span>
-            <div className="mt-1.5 flex overflow-hidden rounded border border-border">
+            {/* Live preview cards (steep Edit widget): each variant renders for real, scaled
+                down, and inherits the chosen accent/tint so what you pick is what you get. */}
+            <div className="mt-2 flex snap-x gap-3 overflow-x-auto pb-1">
               {variants.map((v) => {
                 const active = (prefs.variant ?? variants[0].key) === v.key;
+                const previewStyle: CSSProperties = {};
+                if (prefs.color) (previewStyle as Record<string, string>)['--brand-iris'] = `var(--chart-${prefs.color})`;
+                if (prefs.tinted)
+                  previewStyle.backgroundColor = `hsl(var(${prefs.color ? `--chart-${prefs.color}` : '--brand-iris'}) / 0.07)`;
                 return (
                   <button
                     key={v.key}
                     type="button"
                     aria-pressed={active}
+                    aria-label={`Тип виджета: ${v.label}`}
                     onClick={() => onChange({ ...prefs, variant: v.key === variants[0].key ? undefined : v.key })}
-                    className={`flex-1 border-r border-border px-2 py-1.5 text-xs font-medium transition-colors last:border-r-0 ${
-                      active ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'
+                    className={`w-56 shrink-0 snap-start overflow-hidden rounded-lg border text-left transition-colors ${
+                      active ? 'border-primary ring-1 ring-primary/40' : 'border-border hover:border-ink3/50'
                     }`}
                   >
-                    {v.label}
+                    <div aria-hidden="true" className="pointer-events-none h-32 overflow-hidden bg-card" style={previewStyle}>
+                      <div className="p-3" style={{ width: 448, transform: 'scale(0.5)', transformOrigin: 'top left' }}>
+                        {v.render}
+                      </div>
+                    </div>
+                    <div
+                      className={`border-t px-2.5 py-1.5 text-xs font-medium ${
+                        active ? 'border-primary/40 text-primary' : 'border-border text-muted-foreground'
+                      }`}
+                    >
+                      {v.label}
+                    </div>
                   </button>
                 );
               })}
