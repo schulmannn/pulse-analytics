@@ -1,6 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { CSSProperties, ReactNode } from 'react';
+import { z } from 'zod';
+import { apiGet, apiSend } from '@/api/client';
+import { isDemoMode } from '@/lib/demo';
 import { BarChart } from '@/components/BarChart';
 import { Breakdown } from '@/components/Breakdown';
 
@@ -98,6 +101,7 @@ function setPrefs(id: string, prefs: WidgetPrefs) {
     /* storage blocked — customisation is a nicety */
   }
   notify();
+  schedulePush();
 }
 
 function getGroupOrder(groupId: string): string[] {
@@ -115,12 +119,78 @@ function setGroupOrder(groupId: string, ids: string[]) {
     /* ignore */
   }
   notify();
+  schedulePush();
 }
 
 /** Re-render on any widget-store change (prefs / order). */
 function useStoreTick() {
   const [, force] = useState(0);
   useEffect(() => subscribeStore(() => force((n) => n + 1)), []);
+}
+
+// ── Account sync: mirror the widget store into user_prefs (GET/PUT /api/prefs) ────────────
+// The store stays localStorage-FIRST (instant reads, works offline / without a DB); the
+// server blob makes customisation cross-device. PUT is a full replace, so foreign keys in
+// the blob are round-tripped via `serverExtra`. Until the initial GET succeeds we never
+// push — a blind push could wipe another device's copy or the blob's foreign keys. Demo
+// mode never syncs.
+let syncReady = false;
+let serverExtra: Record<string, unknown> = {};
+let pushTimer: number | null = null;
+
+const PrefsBlobSchema = z.object({ prefs: z.record(z.unknown()).nullable() });
+
+function localBlob() {
+  return {
+    widgets: readJson<Record<string, WidgetPrefs>>(PREFS_KEY, {}),
+    widgetOrder: readJson<Record<string, string[]>>(ORDER_KEY, {}),
+  };
+}
+
+function schedulePush() {
+  if (!syncReady || isDemoMode()) return;
+  if (pushTimer != null) window.clearTimeout(pushTimer);
+  pushTimer = window.setTimeout(() => {
+    pushTimer = null;
+    void apiSend('PUT', '/api/prefs', { prefs: { ...serverExtra, ...localBlob() } }).catch(() => {
+      /* offline / DB off — customisation stays device-local; the next mutation retries */
+    });
+  }, 1500);
+}
+
+/** Hydrate widget prefs/order from the account blob; mount ONCE in the authenticated shell. */
+export function useWidgetPrefsSync() {
+  useEffect(() => {
+    if (isDemoMode()) return;
+    let cancelled = false;
+    void apiGet('/api/prefs', PrefsBlobSchema)
+      .then(({ prefs }) => {
+        if (cancelled) return;
+        const { widgets, widgetOrder, ...rest } = (prefs ?? {}) as Record<string, unknown>;
+        serverExtra = rest;
+        syncReady = true;
+        const local = localBlob();
+        let pushLocal = false;
+        try {
+          // The account copy wins (cross-device intent). A device with local customisation
+          // but no account copy yet ADOPTS its setup as the account's (first sync).
+          if (widgets && typeof widgets === 'object') localStorage.setItem(PREFS_KEY, JSON.stringify(widgets));
+          else if (Object.keys(local.widgets).length) pushLocal = true;
+          if (widgetOrder && typeof widgetOrder === 'object') localStorage.setItem(ORDER_KEY, JSON.stringify(widgetOrder));
+          else if (Object.keys(local.widgetOrder).length) pushLocal = true;
+        } catch {
+          /* storage blocked — server copy just isn't cached locally */
+        }
+        notify();
+        if (pushLocal) schedulePush();
+      })
+      .catch(() => {
+        /* 401 / offline — stay local-only; pushes remain disabled this session */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 }
 
 // ── WidgetGroup: a flex/grid container whose ChartSection children can be reordered ───────

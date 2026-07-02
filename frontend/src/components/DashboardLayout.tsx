@@ -11,6 +11,7 @@ import type { PeriodDays } from '@/lib/period';
 import { useTheme } from '@/lib/theme';
 import { useMediaQuery } from '@/lib/useMediaQuery';
 import { useSidebarMode } from '@/lib/sidebar';
+import { useWidgetPrefsSync } from '@/components/ChartWidget';
 import { fmt } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { downloadCsv } from '@/lib/csv';
@@ -152,6 +153,8 @@ export function DashboardLayout({ email, role, avatar }: DashboardLayoutProps) {
   // simultaneously — every control (period switcher, account menu, channel card) ran its
   // hooks/effects twice. Conditional render keeps a single instance per breakpoint.
   const isMd = useMediaQuery('(min-width: 768px)');
+  // Widget customisation follows the account (user_prefs), not the browser.
+  useWidgetPrefsSync();
   return (
     <div className="flex min-h-screen bg-background text-foreground">
       <Sidebar />
