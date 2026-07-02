@@ -1,5 +1,53 @@
 import { describe, expect, it } from 'vitest';
-import { fmt, ruAxisLabel, ruSeriesName, sparkAreaPath, sparkPath } from '@/lib/format';
+import { fmt, parseDayKey, ruAxisLabel, ruSeriesName, sparkAreaPath, sparkPath } from '@/lib/format';
+
+describe('parseDayKey', () => {
+  it('parses a bare day key as LOCAL midnight of that calendar date', () => {
+    const d = parseDayKey('2026-06-30');
+    expect(d).not.toBeNull();
+    // TZ-independent by construction: local components must equal the key's digits,
+    // whatever zone the test host runs in (new Date('2026-06-30') would give 29 June
+    // local components anywhere west of UTC — the D6.5 minus-one-day bug).
+    expect(d!.getFullYear()).toBe(2026);
+    expect(d!.getMonth()).toBe(5);
+    expect(d!.getDate()).toBe(30);
+    expect(d!.getHours()).toBe(0);
+  });
+
+  it('rejects anything that is not a bare YYYY-MM-DD', () => {
+    expect(parseDayKey('2026-06-30T12:00:00Z')).toBeNull();
+    expect(parseDayKey('30.06')).toBeNull();
+    expect(parseDayKey('')).toBeNull();
+  });
+});
+
+describe('fmt.day / fmt.date timezone semantics', () => {
+  it('renders a day key as its own calendar date in every timezone', () => {
+    expect(fmt.day('2026-06-30')).toBe('30 июн.');
+    expect(fmt.day('2026-01-01')).toBe('1 янв.');
+  });
+
+  it('renders an instant (Date / epoch-ms) as the local day of that instant', () => {
+    const instant = new Date(2026, 5, 30, 15, 0); // local 30 June, 15:00
+    expect(fmt.day(instant)).toBe('30 июн.');
+    expect(fmt.day(instant.getTime())).toBe('30 июн.');
+  });
+
+  it('is empty for nullish or unparseable input', () => {
+    expect(fmt.day(null)).toBe('');
+    expect(fmt.day('')).toBe('');
+    expect(fmt.day('not-a-date')).toBe('');
+  });
+
+  it('fmt.date renders a bare day key without inventing a time of day', () => {
+    expect(fmt.date('2026-06-30')).toBe('30 июн.');
+  });
+
+  it('fmt.date keeps date+time for real timestamps', () => {
+    const local = new Date(2026, 5, 30, 14, 30); // local-clock instant → stable expectation
+    expect(fmt.date(local.toISOString())).toBe('30 июн., 14:30');
+  });
+});
 
 describe('fmt', () => {
   it('formats grouped numbers and invalid values', () => {

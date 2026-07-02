@@ -156,14 +156,9 @@ export function ReportPage() {
       ? filledDailySeries(normPosts, 'reach', winFrom, winTo)
       : sparseDailySeries(normPosts, 'reach');
 
-  const rangeLabel = range
-    ? `${fmt.day(new Date(range.from).toISOString().slice(0, 10))} – ${fmt.day(new Date(range.to).toISOString().slice(0, 10))}`
-    : null;
-  // Local calendar date (toISOString would report yesterday for TZ east of UTC until ~noon).
-  const now = new Date();
-  const generated = fmt.day(
-    `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`,
-  );
+  const rangeLabel = range ? `${fmt.day(range.from)} – ${fmt.day(range.to)}` : null;
+  // An instant renders as the viewer's local day now that fmt.day takes Date/epoch directly.
+  const generated = fmt.day(new Date());
 
   const chipBase = 'rounded-full border px-3 py-1 text-xs font-medium transition-colors';
   const chipActive = 'border-primary/40 bg-primary/10 text-primary';

@@ -700,7 +700,7 @@ export function MetricPage() {
             title="Сбросить произвольный период"
             className="rounded-full border border-primary/40 bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary"
           >
-            {fmt.day(new Date(range.from).toISOString().slice(0, 10))} – {fmt.day(new Date(range.to).toISOString().slice(0, 10))} ×
+            {fmt.day(range.from)} – {fmt.day(range.to)} ×
           </button>
         )}
         <div className="flex items-center">

@@ -1,6 +1,18 @@
 // Formatting helpers ported verbatim from the legacy dashboard so migrated panels
 // render identical strings. Russian locale; thin no-break space as thousands sep.
 
+/**
+ * Parse a bare calendar-day key ("YYYY-MM-DD") as LOCAL midnight. `new Date('YYYY-MM-DD')`
+ * is UTC midnight, and rendering that locally shows the PREVIOUS day to any viewer west of
+ * UTC (D6.5). A day key names a calendar date, not an instant — it must read the same in
+ * every timezone. Full ISO timestamps are NOT day keys and keep instant semantics.
+ */
+export function parseDayKey(s: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (!m) return null;
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+}
+
 export const fmt = {
   /** Full number with grouped thousands (1 234 567). Em-dash for null/NaN. */
   num(n?: number | null): string {
@@ -21,20 +33,28 @@ export const fmt = {
     if (p == null || isNaN(p)) return '—';
     return (p >= 0 ? '+' : '') + p.toFixed(digits) + '%';
   },
-  /** Short localized day ("5 июн."). Accepts an ISO date or a "YYYY-MM-DD" archive key. */
-  day(iso?: string | null): string {
-    if (!iso) return '';
+  /**
+   * Short localized day ("5 июн."). A "YYYY-MM-DD" archive key renders as that calendar
+   * date in every timezone; an ISO timestamp / Date / epoch-ms renders as the viewer's
+   * local day of that instant.
+   */
+  day(v?: string | number | Date | null): string {
+    if (v == null || v === '') return '';
     try {
-      return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+      const d = typeof v === 'string' ? (parseDayKey(v) ?? new Date(v)) : new Date(v);
+      if (isNaN(d.getTime())) return '';
+      return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
     } catch {
       return '';
     }
   },
-  /** Localized date + time ("5 июн., 14:30"). */
+  /** Localized date + time ("5 июн., 14:30"). A bare day key has no instant — no time part. */
   date(iso?: string | null): string {
     if (!iso) return '';
+    if (parseDayKey(iso)) return fmt.day(iso);
     try {
       const d = new Date(iso);
+      if (isNaN(d.getTime())) return '';
       return (
         d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }) +
         ', ' +
