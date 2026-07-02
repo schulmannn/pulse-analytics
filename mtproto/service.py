@@ -11,10 +11,11 @@ import re
 from collections import OrderedDict
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Header, Query, Response
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import Depends, FastAPI, HTTPException, Header, Query, Response
+from fastapi.responses import JSONResponse
 import uvicorn
 from telethon import TelegramClient
+from telethon.errors import FloodWaitError
 from telethon.sessions import StringSession
 from telethon.tl.functions.stats import GetBroadcastStatsRequest, LoadAsyncGraphRequest, GetMessageStatsRequest
 from telethon.tl.functions.channels import GetFullChannelRequest, SearchPostsRequest, CheckSearchPostsFloodRequest
@@ -51,14 +52,31 @@ MENTION_EXCLUDE = set(u.strip().lstrip('@').lower()
 MENTION_SMART_FILTER = os.getenv('MENTION_SMART_FILTER', '1') != '0'
 
 # ── FastAPI ──────────────────────────────────────────────
+# Server-to-server only (the web service calls it over the private network with an
+# internal token) — no browser ever talks to it, so no CORS middleware.
 app = FastAPI(title='Atlavue MTProto Service', version='1.0.0')
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=['*'],
-    allow_methods=['GET'],
-    allow_headers=['*'],
-)
+
+# FloodWait — Telegram throttled the session. An expected condition, not an outage:
+# answer 429 with retry_after so the web proxy can tell the dashboard to retry later.
+# Endpoint-level `except Exception` blocks re-raise FloodWaitError so it lands here.
+@app.exception_handler(FloodWaitError)
+async def flood_wait_handler(request, exc):
+    seconds = int(getattr(exc, 'seconds', 0) or 0)
+    log.warning(f'FloodWait: {seconds}s ({request.url.path})')
+    return JSONResponse(status_code=429, content={'detail': 'flood_wait', 'retry_after': seconds})
+
+
+# One heavy-stats request at a time: parallel GetBroadcastStats/GetMessageStats
+# fan-out on the single Telethon session is exactly what trips FloodWait. Attached
+# as a route dependency so direct function calls (the collector) stay unserialized.
+_STATS_LOCK = asyncio.Semaphore(1)
+
+
+async def _serialize_stats():
+    async with _STATS_LOCK:
+        yield
+
 
 # ── Telethon client ──────────────────────────────────────
 client: Optional[TelegramClient] = None
@@ -184,6 +202,8 @@ async def _resolve_graph(tg, g):
     if isinstance(g, StatsGraphAsync):
         try:
             g = await tg(LoadAsyncGraphRequest(token=g.token))
+        except FloodWaitError:
+            raise          # throttled → the whole request must answer 429, not degrade
         except Exception:
             return None
     if isinstance(g, StatsGraph):
@@ -235,6 +255,8 @@ async def get_channel(x_internal_token: str = Header(default='')):
             'admins':      getattr(fc, 'admins_count', 0),
             'online':      getattr(fc, 'online_count', 0),
         }
+    except FloodWaitError:
+        raise
     except Exception as e:
         log.error(f'get_channel error: {e}')
         raise HTTPException(status_code=500, detail=str(e))
@@ -253,12 +275,14 @@ async def get_posts(
         posts = [_build_post(g) for g in _logical_posts(messages)]
         return {'posts': posts, 'count': len(posts)}
 
+    except FloodWaitError:
+        raise
     except Exception as e:
         log.error(f'get_posts error: {e}')
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get('/views_summary')
+@app.get('/views_summary', dependencies=[Depends(_serialize_stats)])
 async def get_views_summary(
     limit: int = Query(default=30, le=100),
     x_internal_token: str = Header(default=''),
@@ -303,12 +327,14 @@ async def get_views_summary(
             'avg_views_by_type': avg_by_type,
         }
 
+    except FloodWaitError:
+        raise
     except Exception as e:
         log.error(f'views_summary error: {e}')
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get('/stats')
+@app.get('/stats', dependencies=[Depends(_serialize_stats)])
 async def get_stats(x_internal_token: str = Header(default='')):
     check_auth(x_internal_token)
     try:
@@ -334,11 +360,13 @@ async def get_stats(x_internal_token: str = Header(default='')):
             'enabled_notifications': extract(getattr(stats, 'enabled_notifications', None)),
         }
 
+    except FloodWaitError:
+        raise
     except Exception as e:
         return {'available': False, 'error': str(e)}
 
 
-@app.get('/graphs')
+@app.get('/graphs', dependencies=[Depends(_serialize_stats)])
 async def get_graphs(points: int = Query(default=45, le=400), x_internal_token: str = Header(default='')):
     """Rich channel stats graphs: subscriber growth, view/follower sources,
     audience by hour, languages, reaction sentiment."""
@@ -352,6 +380,8 @@ async def get_graphs(points: int = Query(default=45, le=400), x_internal_token: 
             if isinstance(g, StatsGraphAsync):
                 try:
                     g = await tg(LoadAsyncGraphRequest(token=g.token))
+                except FloodWaitError:
+                    raise
                 except Exception:
                     return None
             if isinstance(g, StatsGraph):
@@ -425,12 +455,14 @@ async def get_graphs(points: int = Query(default=45, le=400), x_internal_token: 
             'interactions':             timeseries(await resolve(getattr(stats, 'interactions_graph', None)), points),
             'top_hours':                top_hours,
         }
+    except FloodWaitError:
+        raise
     except Exception as e:
         log.error(f'get_graphs error: {e}')
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get('/post_stats/{msg_id}')
+@app.get('/post_stats/{msg_id}', dependencies=[Depends(_serialize_stats)])
 async def get_post_stats(msg_id: int, x_internal_token: str = Header(default='')):
     """Per-post detailed stats (GetMessageStats): views-over-time + reactions.
     May be unavailable for posts with too few views."""
@@ -444,6 +476,8 @@ async def get_post_stats(msg_id: int, x_internal_token: str = Header(default='')
             if isinstance(g, StatsGraphAsync):
                 try:
                     g = await tg(LoadAsyncGraphRequest(token=g.token))
+                except FloodWaitError:
+                    raise
                 except Exception:
                     return None
             if isinstance(g, StatsGraph):
@@ -480,12 +514,14 @@ async def get_post_stats(msg_id: int, x_internal_token: str = Header(default='')
             reactions = sorted([a for a in agg if a['value'] > 0], key=lambda a: a['value'], reverse=True)
 
         return {'available': True, 'views_graph': views, 'reactions': reactions}
+    except FloodWaitError:
+        raise
     except Exception as e:
         log.error(f'get_post_stats error: {e}')
         return {'available': False, 'error': str(e)}
 
 
-@app.get('/velocity')
+@app.get('/velocity', dependencies=[Depends(_serialize_stats)])
 async def get_velocity(
     limit: int = Query(default=40, le=100),
     top: int = Query(default=12, le=20),
@@ -512,6 +548,8 @@ async def get_velocity(
         for p in cand:
             try:
                 st = await tg(GetMessageStatsRequest(channel=entity, msg_id=p['id'], dark=False))
+            except FloodWaitError:
+                raise
             except Exception:
                 continue
             data = await _resolve_graph(tg, getattr(st, 'views_graph', None))
@@ -573,6 +611,8 @@ async def get_velocity(
             'day1_share': avg(day1),
             't80_days':   (int(t80_med) + 1) if t80_med is not None else None,
         }
+    except FloodWaitError:
+        raise
     except Exception as e:
         # реальный сбой (сеть/сессия/неожиданное) → честный 5xx для мониторинга.
         # Легитимный «нет подходящих постов» отдаётся выше как 200 {available:False}.
@@ -618,7 +658,7 @@ def _mention_snippet(text, query, n=220):
     return ('…' if start > 0 else '') + text[start:end] + ('…' if end < len(text) else '')
 
 
-@app.get('/mentions')
+@app.get('/mentions', dependencies=[Depends(_serialize_stats)])
 async def get_mentions(x_internal_token: str = Header(default='')):
     """Brand mentions in public channels via channels.searchPosts (Premium).
     On-demand: each query consumes one of ~10 free daily searches, so we check
@@ -639,11 +679,15 @@ async def get_mentions(x_internal_token: str = Header(default='')):
                 if not (free or (remains and remains > 0)):
                     skipped.append(q)
                     continue
+            except FloodWaitError:
+                raise
             except Exception:
                 pass   # quota check failed → try the search anyway (won't pay Stars: API errors instead)
             try:
                 res = await tg(SearchPostsRequest(
                     query=q, offset_rate=0, offset_peer=InputPeerEmpty(), offset_id=0, limit=100))
+            except FloodWaitError:
+                raise
             except Exception as e:
                 log.error(f'searchPosts «{q}»: {e}')
                 skipped.append(q)
@@ -703,6 +747,8 @@ async def get_mentions(x_internal_token: str = Header(default='')):
             'queried':         queried,
             'skipped':         skipped,
         }
+    except FloodWaitError:
+        raise
     except Exception as e:
         # внешний сбой (get_client / неожиданное); пер-запросные ошибки searchPosts
         # уже обработаны внутри цикла (skip). → честный 5xx для мониторинга.
@@ -736,6 +782,8 @@ async def get_thumb(msg_id: int, size: str = Query(default='sm'), x_internal_tok
                 data = await tg.download_media(msg, thumb=idx, file=bytes)
                 if data:
                     break
+            except FloodWaitError:
+                raise
             except Exception:
                 continue
         if not data:
@@ -746,7 +794,7 @@ async def get_thumb(msg_id: int, size: str = Query(default='sm'), x_internal_tok
             _THUMB_CACHE.popitem(last=False)   # evict least-recently-used
         return Response(content=data, media_type='image/jpeg',
                         headers={'Cache-Control': 'public, max-age=86400'})
-    except HTTPException:
+    except (HTTPException, FloodWaitError):
         raise
     except Exception as e:
         log.error(f'get_thumb error: {e}')
@@ -771,7 +819,7 @@ async def get_channel_photo(x_internal_token: str = Header(default='')):
         _CHANNEL_PHOTO_CACHE['jpeg'] = data
         return Response(content=data, media_type='image/jpeg',
                         headers={'Cache-Control': 'public, max-age=86400'})
-    except HTTPException:
+    except (HTTPException, FloodWaitError):
         raise
     except Exception as e:
         log.error(f'get_channel_photo error: {e}')

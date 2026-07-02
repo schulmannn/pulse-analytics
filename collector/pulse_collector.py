@@ -29,6 +29,9 @@ if str(ROOT) not in sys.path:
 
 VERSION = "1.0.0"
 SCHEMA_VERSION = 1
+# Retry ceiling for transient delivery errors; a payload the server actively rejects
+# (4xx other than 408/429) is dead-lettered immediately — see flush_queue.
+MAX_DELIVERY_ATTEMPTS = 20
 LOG = logging.getLogger("pulse-collector")
 
 
@@ -173,10 +176,18 @@ class DeliveryQueue:
               attempts INTEGER NOT NULL DEFAULT 0,
               next_attempt REAL NOT NULL DEFAULT 0,
               last_error TEXT,
-              created_at TEXT NOT NULL
+              created_at TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'pending'
             )
             """
         )
+        # Queues created before the dead-letter state lack the column; sqlite has no
+        # "ADD COLUMN IF NOT EXISTS", so probe first. Existing rows default to 'pending'.
+        columns = {row[1] for row in self.db.execute("PRAGMA table_info(deliveries)")}
+        if "status" not in columns:
+            self.db.execute(
+                "ALTER TABLE deliveries ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'"
+            )
         self.db.commit()
 
     def enqueue(self, payload: dict[str, Any]) -> None:
@@ -190,7 +201,7 @@ class DeliveryQueue:
     def due(self, limit: int = 20) -> list[tuple[str, dict[str, Any], int]]:
         rows = self.db.execute(
             """SELECT ingest_id, payload, attempts FROM deliveries
-               WHERE next_attempt <= ? ORDER BY created_at LIMIT ?""",
+               WHERE status='pending' AND next_attempt <= ? ORDER BY created_at LIMIT ?""",
             (time.time(), limit),
         ).fetchall()
         return [(row[0], json.loads(row[1]), row[2]) for row in rows]
@@ -211,11 +222,34 @@ class DeliveryQueue:
         )
         self.db.commit()
 
+    def dead(self, ingest_id: str, error: str) -> None:
+        """Dead-letter: keep the row for inspection, never retry it again."""
+        self.db.execute(
+            """UPDATE deliveries
+               SET status='dead', attempts=attempts+1, last_error=?
+               WHERE ingest_id=?""",
+            (error[:1000], ingest_id),
+        )
+        self.db.commit()
+
     def count(self) -> int:
-        return int(self.db.execute("SELECT count(*) FROM deliveries").fetchone()[0])
+        # deliverable backlog only — dead-lettered rows are kept but no longer "queued"
+        return int(
+            self.db.execute(
+                "SELECT count(*) FROM deliveries WHERE status='pending'"
+            ).fetchone()[0]
+        )
 
     def close(self) -> None:
         self.db.close()
+
+
+class ApiHttpError(RuntimeError):
+    """HTTP error from the Atlavue API — keeps the status code for retry policy."""
+
+    def __init__(self, code: int, message: str):
+        super().__init__(message)
+        self.code = code
 
 
 def api_request(config: dict[str, str], path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -236,7 +270,7 @@ def api_request(config: dict[str, str], path: str, payload: dict[str, Any] | Non
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as error:
         body = error.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Atlavue API HTTP {error.code}: {body[:500]}") from error
+        raise ApiHttpError(error.code, f"Atlavue API HTTP {error.code}: {body[:500]}") from error
     except urllib.error.URLError as error:
         raise RuntimeError(f"Atlavue API unavailable: {error.reason}") from error
 
@@ -283,11 +317,19 @@ async def collect_payload(include_mentions: bool = False) -> dict[str, Any]:
     }
 
 
-def flush_queue(queue: DeliveryQueue, config: dict[str, str]) -> bool:
+def _permanent_rejection(error: Exception) -> bool:
+    """4xx (except 408/429) means the server rejected the payload itself — no retry
+    can ever succeed, so keeping the row live would poison the queue forever."""
+    code = getattr(error, "code", None)
+    return isinstance(code, int) and 400 <= code < 500 and code not in (408, 429)
+
+
+async def flush_queue(queue: DeliveryQueue, config: dict[str, str]) -> bool:
     all_ok = True
     for ingest_id, payload, attempts in queue.due():
         try:
-            result = api_request(config, "/api/collector/ingest", payload)
+            # urllib is blocking — keep it off the event loop that owns the Telethon client
+            result = await asyncio.to_thread(api_request, config, "/api/collector/ingest", payload)
             queue.success(ingest_id)
             LOG.info(
                 "Delivered ingest_id=%s posts=%s daily=%s duplicate=%s",
@@ -298,14 +340,18 @@ def flush_queue(queue: DeliveryQueue, config: dict[str, str]) -> bool:
             )
         except Exception as error:  # queue owns retry policy
             all_ok = False
-            queue.failure(ingest_id, attempts, str(error))
-            LOG.warning("Delivery failed for %s: %s", ingest_id, error)
+            if _permanent_rejection(error) or attempts + 1 >= MAX_DELIVERY_ATTEMPTS:
+                queue.dead(ingest_id, str(error))
+                LOG.error("Delivery abandoned for %s (attempt %s): %s", ingest_id, attempts + 1, error)
+            else:
+                queue.failure(ingest_id, attempts, str(error))
+                LOG.warning("Delivery failed for %s: %s", ingest_id, error)
     return all_ok
 
 
 async def doctor(config: dict[str, str]) -> None:
     LOG.info("Checking Atlavue API compatibility")
-    compatibility = api_request(config, "/api/collector/compatibility")
+    compatibility = await asyncio.to_thread(api_request, config, "/api/collector/compatibility")
     supported = compatibility.get("supported_schema_versions", [])
     if SCHEMA_VERSION not in supported:
         raise RuntimeError(f"Server does not support collector schema {SCHEMA_VERSION}: {supported}")
@@ -328,10 +374,10 @@ async def doctor(config: dict[str, str]) -> None:
 
 
 async def run_once(queue: DeliveryQueue, config: dict[str, str], include_mentions: bool) -> bool:
-    flush_queue(queue, config)
+    await flush_queue(queue, config)
     payload = await collect_payload(include_mentions=include_mentions)
     queue.enqueue(payload)
-    return flush_queue(queue, config)
+    return await flush_queue(queue, config)
 
 async def async_main(args: argparse.Namespace) -> int:
     # === CRITICAL: load saved session BEFORE any mtproto.service import ===
@@ -355,7 +401,7 @@ async def async_main(args: argparse.Namespace) -> int:
         LOG.info("Doctor completed successfully; queued=%s", queue.count())
         return 0
     if args.command == "flush":
-        ok = flush_queue(queue, config)
+        ok = await flush_queue(queue, config)
         LOG.info("Queue flush finished; queued=%s", queue.count())
         return 0 if ok else 1
     if args.command == "once":

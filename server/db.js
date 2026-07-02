@@ -278,13 +278,14 @@ async function listChannels(user) {
 // (or is central, for the break-glass operator). Routes turn null → 403.
 async function getChannel(id, user) {
   if (!enabled || !id) return null;
+  // listChannels hides disabled channels — a direct ?channel=<id> must not bypass that.
   if (isOperator(user)) {
-    const { rows } = await pool.query(`SELECT ${CHANNEL_COLS} FROM channels WHERE id=$1 AND source='central'`, [id]);
+    const { rows } = await pool.query(`SELECT ${CHANNEL_COLS} FROM channels WHERE id=$1 AND source='central' AND status<>'disabled'`, [id]);
     return rows[0] || null;
   }
   const uid = user && user.uid;
   if (uid == null) return null;
-  const { rows } = await pool.query(`SELECT ${CHANNEL_COLS} FROM channels WHERE id=$1 AND owner_uid=$2`, [id, uid]);
+  const { rows } = await pool.query(`SELECT ${CHANNEL_COLS} FROM channels WHERE id=$1 AND owner_uid=$2 AND status<>'disabled'`, [id, uid]);
   return rows[0] || null;
 }
 

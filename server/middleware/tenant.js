@@ -19,7 +19,7 @@ function makeResolveChannel({ db, isReady }) {
       req.channel = channel;
       next();
     } catch (error) {
-      res.status(500).json({ error: error.message });
+      next(error);
     }
   };
 }

@@ -6,13 +6,13 @@
 require('dotenv').config();
 const express    = require('express');
 const cors       = require('cors');
-const fetch      = require('node-fetch');
 const rateLimit  = require('express-rate-limit');
 const path       = require('path');
 const fs         = require('fs');
 const crypto     = require('crypto');
 const db         = require('./db');
 const { createAuth, hashPassword, verifyPassword, SCRYPT, rateLimitKey } = require('./lib/auth');
+const { fetchWithTimeout } = require('./lib/http');
 const { log, requestContext, hashIp } = require('./lib/observability');
 const { makeResolveChannel, makeServeSnapshot } = require('./middleware/tenant');
 const { registerCollectorRoutes } = require('./routes/collector');
@@ -42,6 +42,10 @@ db.init().then(bootstrapAdmin).then(claimOwnerChannel).then(() => { dbReady = tr
 const CORS_ORIGINS = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
 app.use(cors({ origin: CORS_ORIGINS.length ? CORS_ORIGINS : false, credentials: false }));
 app.use(requestContext);
+// A rejected promise in an async route otherwise escapes Express 4 entirely and
+// kills the process (unhandled rejection). Wrap handlers whose awaits are not fully
+// inside try/catch; the terminal error middleware (registered last) does the rest.
+const asyncHandler = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 // JSON body parser — default 100kb. Big-body routes (collector ingest, bug
 // screenshots) carry their own higher-limit parser, so skip them here; otherwise
 // this 100kb parser would reject their large payloads before the route is reached.
@@ -182,7 +186,7 @@ async function requireAuth(req, res, next) {
     }
     req.user = { uid: u.id, role: u.role, email: u.email };
     next();
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { next(e); }
 }
 
 function requireSuper(req, res, next) {
@@ -207,15 +211,33 @@ const serveSnapshot = makeServeSnapshot({ db });
 // ── In-memory кэш ───────────────────────────────────────────────
 const cache = new Map();
 const CACHE_TTL = 10 * 60 * 1000;
+const CACHE_MAX_ENTRIES = 500;
 
 function cacheGet(key) {
   const entry = cache.get(key);
   if (!entry || entry.expires < Date.now()) { cache.delete(key); return null; }
   return entry.data;
 }
-function cacheSet(key, data) {
-  cache.set(key, { data, expires: Date.now() + CACHE_TTL });
+function cacheSet(key, data, ttl = CACHE_TTL) {
+  // Bounded: the key space (per-channel × per-param) is otherwise unbounded and
+  // grows into a slow memory leak. Evict the oldest entry (insertion order ≈ age).
+  if (!cache.has(key) && cache.size >= CACHE_MAX_ENTRIES) {
+    cache.delete(cache.keys().next().value);
+  }
+  cache.set(key, { data, expires: Date.now() + ttl });
 }
+// Expired entries used to be reaped only on re-read, so one-off keys lingered for
+// the process lifetime. unref(): the sweep must not hold the process open (tests).
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of cache) if (entry.expires < now) cache.delete(key);
+}, 60 * 1000).unref();
+
+// Clamp a user-supplied numeric option to the nearest allowed value BEFORE it becomes
+// a cache key — otherwise every distinct value is its own cache miss and a fresh
+// burst of upstream (Graph) calls.
+const nearestOf = (value, allowed) =>
+  allowed.reduce((best, v) => (Math.abs(v - value) < Math.abs(best - value) ? v : best));
 
 // ── Email (verification / password reset) via Resend — no new dependency ──
 const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
@@ -227,9 +249,28 @@ const APP_URL = (process.env.APP_URL || '').replace(/\/$/, '');
 const TRUSTED_HOSTS = new Set(
   (process.env.TRUSTED_HOSTS || 'pulse-analytics-production-daf3.up.railway.app')
     .split(',').map(s => s.trim().toLowerCase()).filter(Boolean));
+// In production an unset APP_URL silently falls back to the TRUSTED_HOSTS default
+// (the legacy Railway host) — emailed verify/reset links and the IG OAuth callback
+// then point at the wrong domain. Loud boot error, deliberately non-fatal: the
+// dashboard itself still works without it.
+if (!APP_URL && (process.env.NODE_ENV === 'production' || process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID)) {
+  console.error([
+    '════════════════════════════════════════════════════════════════════',
+    '[boot] APP_URL is not set in a production environment!',
+    '[boot] Emailed verification/reset links and the Instagram OAuth callback',
+    `[boot] will fall back to "${[...TRUSTED_HOSTS][0]}".`,
+    '[boot] Set APP_URL to the canonical public origin, e.g. https://atlavue.app',
+    '════════════════════════════════════════════════════════════════════',
+  ].join('\n'));
+}
 const VERIFY_TTL = 24 * 60 * 60 * 1000;
 const RESET_TTL  = 60 * 60 * 1000;
 const sha256   = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
+// Constant-time secret compare. Raw `!==` leaks length/prefix timing; timingSafeEqual
+// throws on length mismatch — comparing fixed-length digests avoids both.
+const timingSafeEqualStr = (a, b) => crypto.timingSafeEqual(
+  crypto.createHash('sha256').update(String(a)).digest(),
+  crypto.createHash('sha256').update(String(b)).digest());
 const newToken = () => crypto.randomBytes(32).toString('base64url');
 const escHtml  = (s) => String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 // Public origin for emailed links. NEVER trust a raw Host header (poisonable):
@@ -250,7 +291,7 @@ const DUMMY_HASH = `scrypt$${SCRYPT.N}$${SCRYPT.r}$${SCRYPT.p}$${'0'.repeat(32)}
 async function sendEmail(to, subject, html) {
   if (!RESEND_API_KEY) { console.log(`[email:dev] to=${to} · "${subject}" (RESEND_API_KEY unset — not sent)`); return true; }
   try {
-    const r = await fetch('https://api.resend.com/emails', {
+    const r = await fetchWithTimeout('https://api.resend.com/emails', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ from: EMAIL_FROM, to, subject, html }),
@@ -303,7 +344,7 @@ app.post('/api/auth/register', authLimiter, async (req, res) => {
 });
 
 // Login: account (email+password) OR break-glass (team password, no email → superuser).
-app.post('/api/auth/login', authLimiter, async (req, res) => {
+app.post('/api/auth/login', authLimiter, async (req, res, next) => {
   const email = String((req.body && req.body.email) || '').toLowerCase().trim();
   const password = String((req.body && req.body.password) || '');
   if (!password) return res.status(400).json({ error: 'Укажи пароль' });
@@ -323,7 +364,7 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
       audit(req, 'auth.login', {}).catch(() => {});
       return res.json({ token,
         expiresAt: new Date(expires).toISOString(), user: { email: u.email, role: u.role } });
-    } catch (e) { return res.status(500).json({ error: e.message }); }
+    } catch (e) { return next(e); }
   }
 
   // break-glass: shared team password → superuser session (no account)
@@ -350,7 +391,7 @@ app.post('/api/auth/google', authLimiter, async (req, res) => {
   const credential = String((req.body && req.body.credential) || '');
   if (!credential) return res.status(400).json({ error: 'Нет токена Google' });
   try {
-    const r = await fetch('https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(credential), { timeout: 8000 });
+    const r = await fetchWithTimeout('https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(credential), {}, 8000);
     const info = await r.json().catch(() => ({}));
     // aud = our app; iss = Google; email must be Google-verified. (tokeninfo already rejects a bad
     // signature or an expired token with a non-200, so a valid `sub` here means the JWT is genuine.)
@@ -391,13 +432,13 @@ app.post('/api/auth/google', authLimiter, async (req, res) => {
   }
 });
 
-app.post('/api/auth/logout', requireAuth, async (req, res) => {
+app.post('/api/auth/logout', requireAuth, async (req, res, next) => {
   try {
     if (req.user.uid != null) await db.revokeUserSessions(req.user.uid);
     audit(req, 'auth.logout', {}).catch(() => {});
     res.json({ ok: true });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    next(e);
   }
 });
 
@@ -405,18 +446,18 @@ app.get('/api/auth/check', requireAuth, (req, res) => {
   res.json({ ok: true, role: req.user.role, email: req.user.email });
 });
 
-app.get('/api/auth/me', requireAuth, async (req, res) => {
+app.get('/api/auth/me', requireAuth, asyncHandler(async (req, res) => {
   let avatar = null;
   if (db.enabled && req.user.uid != null) {
     avatar = await db.getUserAvatar(req.user.uid).catch(() => null);
   }
   res.json({ uid: req.user.uid, email: req.user.email, role: req.user.role, avatar });
-});
+}));
 
 // Personal avatar — a small base64 data URL on the user row (resized client-side). Own-route JSON
 // limit (the global parser is 100KB); the regex + length cap keep a giant payload out of the DB.
 // The break-glass team login has no user row, so it can't set an avatar.
-app.post('/api/me/avatar', requireAuth, express.json({ limit: '1mb' }), async (req, res) => {
+app.post('/api/me/avatar', requireAuth, express.json({ limit: '1mb' }), async (req, res, next) => {
   if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
   if (req.user.uid == null) return res.status(403).json({ error: 'Командный вход не поддерживает фото' });
   const dataUrl = req.body && req.body.dataUrl;
@@ -427,15 +468,15 @@ app.post('/api/me/avatar', requireAuth, express.json({ limit: '1mb' }), async (r
   try {
     await db.setUserAvatar(req.user.uid, dataUrl);
     res.json({ ok: true, avatar: dataUrl });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { next(e); }
 });
-app.delete('/api/me/avatar', requireAuth, async (req, res) => {
+app.delete('/api/me/avatar', requireAuth, async (req, res, next) => {
   if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
   if (req.user.uid == null) return res.status(403).json({ error: 'Командный вход не поддерживает фото' });
   try {
     await db.setUserAvatar(req.user.uid, null);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { next(e); }
 });
 
 // Email verification. GET serves an interstitial that does NOT consume the token —
@@ -450,7 +491,7 @@ app.get('/api/auth/verify', (req, res) => {
 <script>var t=${tokenJs};document.getElementById('b').onclick=function(){var b=this;b.disabled=true;b.textContent='…';fetch('/api/auth/verify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:t})}).then(function(r){return r.json().catch(function(){return{}})}).then(function(j){if(j&&j.ok){location.href='/?verified=1';}else{document.getElementById('m').textContent=(j&&j.error)||'Ссылка недействительна или истекла';b.style.display='none';}}).catch(function(){document.getElementById('m').textContent='Ошибка сети';b.disabled=false;b.textContent='Подтвердить email';});};</script></body></html>`);
 });
 
-app.post('/api/auth/verify', authLimiter, async (req, res) => {
+app.post('/api/auth/verify', authLimiter, async (req, res, next) => {
   if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
   const raw = String((req.body && req.body.token) || '');
   if (!raw) return res.status(400).json({ error: 'Ссылка недействительна' });
@@ -458,10 +499,15 @@ app.post('/api/auth/verify', authLimiter, async (req, res) => {
     const t = await db.useEmailToken(sha256(raw), 'verify');
     if (!t) return res.status(400).json({ error: 'Ссылка недействительна или истекла' });
     const u = await db.getUserById(t.uid);
-    if (u && u.status === 'unverified') { await db.setUserStatus(t.uid, 'active'); return res.json({ ok: true }); }
+    if (u && u.status === 'unverified') {
+      await db.setUserStatus(t.uid, 'active');
+      req.user = { uid: t.uid };                    // attribute the audit event (route is unauthenticated)
+      audit(req, 'auth.verified', {}).catch(() => {});
+      return res.json({ ok: true });
+    }
     if (u && u.status === 'active') return res.json({ ok: true });             // already verified — idempotent
     return res.status(400).json({ error: 'Аккаунт нельзя активировать' });     // disabled/pending: NOT via verify
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { next(e); }
 });
 
 // Password reset request — always generic (no account enumeration).
@@ -482,7 +528,7 @@ app.post('/api/auth/forgot', authLimiter, async (req, res) => {
 
 // Password reset — consume token, set new password. Only promotes 'unverified'→'active'
 // (a reset proves email ownership); never re-activates a disabled/pending account.
-app.post('/api/auth/reset', authLimiter, async (req, res) => {
+app.post('/api/auth/reset', authLimiter, async (req, res, next) => {
   if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
   const raw = String((req.body && req.body.token) || '');
   const password = String((req.body && req.body.password) || '');
@@ -494,8 +540,10 @@ app.post('/api/auth/reset', authLimiter, async (req, res) => {
     await db.setUserPassword(t.uid, hashPassword(password));
     const u = await db.getUserById(t.uid);
     if (u && u.status === 'unverified') await db.setUserStatus(t.uid, 'active');
+    req.user = { uid: t.uid };                      // attribute the audit event (route is unauthenticated)
+    audit(req, 'auth.reset', {}).catch(() => {});
     res.json({ ok: true, message: 'Пароль обновлён — войди с новым паролем.' });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { next(e); }
 });
 
 // Resend verification email (generic; only acts for an 'unverified' account).
@@ -517,13 +565,13 @@ app.post('/api/auth/resend-verification', authLimiter, async (req, res) => {
 // ── Персональная раскладка дашборда (порядок/скрытие/ширина блоков) ──
 // Гость без аккаунта (break-glass uid=null) и режим без БД → null/no-op:
 // клиент сам хранит раскладку в localStorage.
-app.get('/api/prefs', requireAuth, async (req, res) => {
+app.get('/api/prefs', requireAuth, async (req, res, next) => {
   if (req.user.uid == null) return res.json({ prefs: null });
   try { res.json({ prefs: await db.getPrefs(req.user.uid) }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { next(e); }
 });
 
-app.put('/api/prefs', requireAuth, async (req, res) => {
+app.put('/api/prefs', requireAuth, async (req, res, next) => {
   const prefs = req.body && req.body.prefs;
   if (prefs == null || typeof prefs !== 'object' || Array.isArray(prefs)) {
     return res.status(400).json({ error: 'prefs должен быть объектом' });
@@ -533,30 +581,30 @@ app.put('/api/prefs', requireAuth, async (req, res) => {
   }
   if (req.user.uid == null) return res.json({ ok: true, stored: false });
   try { await db.setPrefs(req.user.uid, prefs); res.json({ ok: true, stored: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { next(e); }
 });
 
-app.post('/api/auth/change-password', requireAuth, async (req, res) => {
+app.post('/api/auth/change-password', requireAuth, async (req, res, next) => {
   if (req.user.uid == null) return res.status(400).json({ error: 'Командный вход не имеет аккаунта для смены пароля' });
   if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
   const cur = String((req.body && req.body.current) || '');
-  const next = String((req.body && req.body.next) || '');
-  if (next.length < 8) return res.status(400).json({ error: 'Новый пароль минимум 8 символов' });
+  const nextPass = String((req.body && req.body.next) || '');   // don't shadow next()
+  if (nextPass.length < 8) return res.status(400).json({ error: 'Новый пароль минимум 8 символов' });
   try {
     const u = await db.getUserByEmail(req.user.email);
     if (!u || !verifyPassword(cur, u.pass_hash)) return res.status(403).json({ error: 'Текущий пароль неверен' });
-    await db.setUserPassword(u.id, hashPassword(next));
+    await db.setUserPassword(u.id, hashPassword(nextPass));
     audit(req, 'auth.password_changed', {}).catch(() => {});
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { next(e); }
 });
 
 // ── Admin: user management (superuser only) ──
-app.get('/api/admin/users', requireAuth, requireSuper, async (req, res) => {
+app.get('/api/admin/users', requireAuth, requireSuper, async (req, res, next) => {
   if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
   try {
     res.json({ users: await db.listUsers(), roles: db.USER_ROLES, statuses: db.USER_STATUSES, me: req.user.uid });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { next(e); }
 });
 
 app.patch('/api/admin/users/:id', requireAuth, requireSuper, async (req, res) => {
@@ -568,8 +616,14 @@ app.patch('/api/admin/users/:id', requireAuth, requireSuper, async (req, res) =>
     return res.status(400).json({ error: 'Нельзя понизить или отключить собственный аккаунт' });
   }
   try {
+    const before = await db.getUserById(id);
     const u = await db.updateUser(id, { role: req.body.role, status: req.body.status });
     if (!u) return res.status(404).json({ error: 'Пользователь не найден' });
+    audit(req, 'admin.user_updated', {
+      target_uid: id,
+      before: before ? { role: before.role, status: before.status } : null,
+      after: { role: u.role, status: u.status },
+    }).catch(() => {});
     res.json(u);
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
@@ -603,14 +657,31 @@ const igOauthConfigured = () => !!IG_CLIENT_ID && !!IG_CLIENT_SECRET && igCrypto
 
 // Single choke-point for all Graph data calls. `token` defaults to the global env token so any
 // legacy caller keeps working; the IG routes pass the per-request token (req.ig.token).
-async function igFetch(path, params = {}, token = IG_TOKEN) {
+// Singleflight: concurrent identical calls (two tabs, a dashboard fan-out racing the cache)
+// share ONE Graph request instead of multiplying quota burn. Keyed by the full URL — the
+// access token is part of it, so different accounts never share a flight.
+const igInflight = new Map();
+function igFetch(path, params = {}, token = IG_TOKEN) {
   params.access_token = token;
   const qs  = new URLSearchParams(params).toString();
   const url = `${IG_BASE}${path}?${qs}`;
-  const res = await fetch(url);
-  const json = await res.json();
-  if (json.error) throw new Error(`Instagram API: ${json.error.message}`);
-  return json;
+  let flight = igInflight.get(url);
+  if (!flight) {
+    flight = (async () => {
+      const res = await fetchWithTimeout(url);
+      const json = await res.json();
+      if (json.error) {
+        const err = new Error(`Instagram API: ${json.error.message}`);
+        err.status = 502;   // upstream failure — message is safe to surface to the dashboard
+        throw err;
+      }
+      return json;
+    })();
+    igInflight.set(url, flight);
+    // side chain only clears the map; swallow its rejection (callers hold the original promise)
+    flight.finally(() => igInflight.delete(url)).catch(() => {});
+  }
+  return flight;
 }
 
 // Long-lived IG tokens live ~60 days and can be refreshed once ≥24h old. Refresh opportunistically
@@ -625,7 +696,7 @@ async function refreshIgIfNeeded(channelId, token, expiresAtStr) {
     if (!Number.isFinite(exp)) return token;
     const now = Date.now();
     if (exp <= now || exp - now > IG_REFRESH_WINDOW_MS) return token;   // dead, or not due yet
-    const r = await fetch(`${IG_GRAPH}/refresh_access_token?` + new URLSearchParams({
+    const r = await fetchWithTimeout(`${IG_GRAPH}/refresh_access_token?` + new URLSearchParams({
       grant_type: 'ig_refresh_token', access_token: token }).toString());
     const j = await r.json();
     if (j && j.access_token && j.expires_in) {
@@ -705,7 +776,7 @@ function parseIgState(state) {
 }
 
 // GET /api/ig/profile — профиль аккаунта (теперь с аватаркой)
-app.get('/api/ig/profile', requireAuth, resolveIg, async (req, res) => {
+app.get('/api/ig/profile', requireAuth, resolveIg, async (req, res, next) => {
   try {
     if (!req.ig) return res.json(igMock.igMockProfile());
     const cacheKey = `ig:profile:${req.ig.accountId}`;
@@ -721,7 +792,7 @@ app.get('/api/ig/profile', requireAuth, resolveIg, async (req, res) => {
     cacheSet(cacheKey, data);
     res.json(data);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    next(e);
   }
 });
 
@@ -753,8 +824,10 @@ app.get('/api/ig/tags', requireAuth, resolveIg, async (req, res) => {
 });
 
 // GET /api/ig/insights?days=30 — метрики аккаунта
-app.get('/api/ig/insights', requireAuth, resolveIg, async (req, res) => {
-  const days = Math.min(90, parseInt(req.query.days, 10) || 30);
+app.get('/api/ig/insights', requireAuth, resolveIg, async (req, res, next) => {
+  // Snap to a small enum before the cache key: an arbitrary user-supplied `days`
+  // would mint per-value cache entries, each costing the full ~19-call Graph burst.
+  const days = nearestOf(parseInt(req.query.days, 10) || 30, [7, 30, 90]);
 
   try {
     if (!req.ig) return res.json(igMock.igMockInsights(days));
@@ -830,13 +903,15 @@ app.get('/api/ig/insights', requireAuth, resolveIg, async (req, res) => {
     cacheSet(cacheKey, data);
     res.json(data);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    next(e);
   }
 });
 
 // GET /api/ig/posts?limit=20 — последние посты с инсайтами и превью
-app.get('/api/ig/posts', requireAuth, resolveIg, async (req, res) => {
-  const limit = Math.min(25, parseInt(req.query.limit, 10) || 20);
+app.get('/api/ig/posts', requireAuth, resolveIg, async (req, res, next) => {
+  // Snap to a small enum before the cache key (each post costs its own insights call,
+  // so per-value cache entries multiply Graph quota burn).
+  const limit = nearestOf(parseInt(req.query.limit, 10) || 20, [6, 12, 25]);
   try {
     if (!req.ig) return res.json(igMock.igMockPosts(limit));
     const cacheKey = `ig:posts:${req.ig.accountId}:${limit}`;
@@ -874,7 +949,7 @@ app.get('/api/ig/posts', requireAuth, resolveIg, async (req, res) => {
     cacheSet(cacheKey, result);
     res.json(result);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    next(e);
   }
 });
 
@@ -927,9 +1002,10 @@ app.get('/api/ig/online', requireAuth, resolveIg, async (req, res) => {
   }
 });
 
-// GET /api/ig/stories — active stories (last 24h) + per-story insights/navigation. Live
-// window → not cached; tolerates per-story errors (#10 <5 viewers) and returns [] gracefully.
-// Per-story metrics fetched INDEPENDENTLY (allSettled): on the Instagram-Login API a single
+// GET /api/ig/stories — active stories (last 24h) + per-story insights/navigation. Cached
+// briefly (3 min): the fan-out costs 1+~8 Graph calls PER STORY, so serving it uncached on
+// every view self-burns the quota; tolerates per-story errors (#10 <5 viewers), returns []
+// gracefully. Per-story metrics fetched INDEPENDENTLY (allSettled): on the Instagram-Login API a single
 // unsupported story metric makes a *combined* /insights call fail wholesale, which previously
 // dropped the entire story to null → the section showed "no stories" even when stories existed.
 const STORY_METRICS = ['reach', 'views', 'replies', 'shares', 'follows', 'profile_visits', 'total_interactions'];
@@ -941,9 +1017,14 @@ const igMetricVal = (j) => {
   return null;
 };
 
+const IG_STORIES_TTL = 180 * 1000;
+
 app.get('/api/ig/stories', requireAuth, resolveIg, async (req, res) => {
   try {
     if (!req.ig) return res.json(igMock.igMockStories());
+    const cacheKey = `ig:stories:${req.ig.accountId}`;
+    const cached = cacheGet(cacheKey);
+    if (cached) return res.json(cached);
     const list = await igFetch(`/${req.ig.accountId}/stories`, {
       fields: 'id,media_type,timestamp,permalink,thumbnail_url',
     }, req.ig.token);
@@ -987,7 +1068,9 @@ app.get('/api/ig/stories', requireAuth, resolveIg, async (req, res) => {
         return out;
       }),
     );
-    res.json({ data: stories }); // never filter — a story must survive insight failures
+    const result = { data: stories }; // never filter — a story must survive insight failures
+    cacheSet(cacheKey, result, IG_STORIES_TTL);
+    res.json(result);
   } catch (e) {
     res.status(200).json({ data: [], error: e.message });
   }
@@ -1002,7 +1085,7 @@ app.get('/api/ig/stories', requireAuth, resolveIg, async (req, res) => {
 // POST /api/ig/oauth/start — begin connecting an Instagram account to the selected channel.
 // Returns { authorize_url } for a top-level browser navigation (a session header can't survive
 // the OAuth redirect, so we can't 302 here). The (uid, channelId) are bound into a signed state.
-app.post('/api/ig/oauth/start', requireAuth, async (req, res) => {
+app.post('/api/ig/oauth/start', requireAuth, asyncHandler(async (req, res) => {
   if (!igOauthConfigured()) return res.status(400).json({ error: 'Подключение Instagram не настроено на сервере' });
   const channelId = parseInt(req.query.channel || req.headers['x-channel-id'], 10) || 0;
   if (!channelId) return res.status(400).json({ error: 'Выбери канал, к которому подключить Instagram' });
@@ -1018,7 +1101,7 @@ app.post('/api/ig/oauth/start', requireAuth, async (req, res) => {
   }).toString();
   await audit(req, 'ig_oauth_start', { channelId });
   res.json({ authorize_url: authorizeUrl });
-});
+}));
 
 // GET /api/ig/oauth/callback — Instagram redirects the user's browser here after they authorize.
 // No session header (top-level redirect), so trust comes from the signed state. Exchanges the code
@@ -1047,7 +1130,7 @@ app.get('/api/ig/oauth/callback', async (req, res) => {
     const redirectUri = `${appBase(req)}/api/ig/oauth/callback`;
 
     // 1) authorization code → short-lived token (api.instagram.com, form-encoded POST).
-    const shortRes = await fetch('https://api.instagram.com/oauth/access_token', {
+    const shortRes = await fetchWithTimeout('https://api.instagram.com/oauth/access_token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -1067,7 +1150,7 @@ app.get('/api/ig/oauth/callback', async (req, res) => {
     // 2) short-lived → long-lived (~60d) token (graph.instagram.com). If this fails we must NOT
     // silently persist the 1-hour short token under a 60-day expiry (the connection would die in an
     // hour with no refresh path) — bail with an error flag and let the user retry.
-    const longRes = await fetch(`${IG_GRAPH}/access_token?` + new URLSearchParams({
+    const longRes = await fetchWithTimeout(`${IG_GRAPH}/access_token?` + new URLSearchParams({
       grant_type: 'ig_exchange_token', client_secret: IG_CLIENT_SECRET, access_token: shortJson.access_token }).toString());
     const longJson = await longRes.json().catch(() => ({}));
     if (!longJson.access_token || !longJson.expires_in) {
@@ -1078,7 +1161,7 @@ app.get('/api/ig/oauth/callback', async (req, res) => {
     const expiresIn = Number(longJson.expires_in);
 
     // 3) identity — the IG user id + username to display and to build data-edge paths.
-    const meRes = await fetch(`${IG_GRAPH}/me?` + new URLSearchParams({ fields: 'id,username,account_type', access_token: longToken }).toString());
+    const meRes = await fetchWithTimeout(`${IG_GRAPH}/me?` + new URLSearchParams({ fields: 'id,username,account_type', access_token: longToken }).toString());
     const me = await meRes.json().catch(() => ({}));
     const igUserId = me.id || String(shortJson.user_id || '');
     if (!igUserId) return back('ig_error=identity');
@@ -1101,7 +1184,7 @@ app.get('/api/ig/oauth/callback', async (req, res) => {
 });
 
 // DELETE /api/ig/oauth — disconnect the Instagram account from the selected channel.
-app.delete('/api/ig/oauth', requireAuth, async (req, res) => {
+app.delete('/api/ig/oauth', requireAuth, asyncHandler(async (req, res) => {
   const channelId = parseInt(req.query.channel || req.headers['x-channel-id'], 10) || 0;
   if (!channelId) return res.status(400).json({ error: 'Канал не выбран' });
   const ch = await db.getChannel(channelId, req.user).catch(() => null);
@@ -1111,10 +1194,10 @@ app.delete('/api/ig/oauth', requireAuth, async (req, res) => {
   if (acc && acc.ig_user_id) igCachePurge(acc.ig_user_id);
   await audit(req, 'ig_oauth_disconnected', { channelId });
   res.json({ ok: true, removed });
-});
+}));
 
 // GET /api/ig/oauth/status — connection state for Settings + the connect panel (no token leaked).
-app.get('/api/ig/oauth/status', requireAuth, async (req, res) => {
+app.get('/api/ig/oauth/status', requireAuth, asyncHandler(async (req, res) => {
   const channelId = parseInt(req.query.channel || req.headers['x-channel-id'], 10) || 0;
   let acc = null;
   if (db.enabled && channelId) {
@@ -1131,7 +1214,7 @@ app.get('/api/ig/oauth/status', requireAuth, async (req, res) => {
     connected_at: acc ? acc.connected_at : null,
     token_expires_at: acc ? acc.token_expires_at : null,
   });
-});
+}));
 
 // ════════════════════════════════════════════════════════════════
 //  TELEGRAM — Bot API
@@ -1144,7 +1227,7 @@ const TG_CHANNEL = process.env.TG_CHANNEL;
 async function tgFetch(method, params = {}) {
   const url = new URL(`${TG_BASE}${TG_TOKEN}/${method}`);
   Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
-  const res  = await fetch(url.toString());
+  const res  = await fetchWithTimeout(url.toString());
   const json = await res.json();
   if (!json.ok) throw new Error(`Telegram API: ${json.description}`);
   return json.result;
@@ -1153,17 +1236,17 @@ async function tgFetch(method, params = {}) {
 // Channels (tenants) the user owns — drives the dashboard channel switcher.
 // No DB → one synthetic 'central' channel (id 0) so the legacy single-channel
 // dashboard still works locally without Postgres.
-app.get('/api/channels', requireAuth, async (req, res) => {
+app.get('/api/channels', requireAuth, async (req, res, next) => {
   if (!db.enabled) return res.json({ enabled: false, channels: [{ id: 0, username: '', title: '', source: 'central' }], selected: 0 });
   if (!dbReady) return res.status(503).json({ error: 'Сервис запускается' });
   try {
     const channels = await db.listChannels(req.user);
     res.json({ enabled: true, channels, selected: channels[0] ? channels[0].id : null });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { next(e); }
 });
 
 // Create a channel (self-serve). Real accounts only (not the break-glass operator).
-app.post('/api/channels', requireAuth, async (req, res) => {
+app.post('/api/channels', requireAuth, async (req, res, next) => {
   if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
   if (req.user.uid == null) return res.status(403).json({ error: 'Командный вход не может создавать каналы' });
   const username = String((req.body && req.body.username) || '').replace(/^@/, '').trim();
@@ -1176,10 +1259,10 @@ app.post('/api/channels', requireAuth, async (req, res) => {
       req.channel = channel;
       audit(req, 'channel.created', { username }).catch(() => {});
       res.json(channel);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { next(e); }
 });
 
-app.delete('/api/channels/:id', requireAuth, async (req, res) => {
+app.delete('/api/channels/:id', requireAuth, async (req, res, next) => {
   if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
   const id = parseInt(req.params.id, 10);
   if (!id || req.user.uid == null) return res.status(400).json({ error: 'bad id' });
@@ -1188,11 +1271,11 @@ app.delete('/api/channels/:id', requireAuth, async (req, res) => {
     if (ok) audit(req, 'channel.deleted', { channel_id: id }).catch(() => {});
     res.json({ ok });
   }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { next(e); }
 });
 
 // Generate an API key for a channel the user owns — the raw key is shown ONCE.
-app.post('/api/channels/:id/key', requireAuth, async (req, res) => {
+app.post('/api/channels/:id/key', requireAuth, async (req, res, next) => {
   if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
   const id = parseInt(req.params.id, 10);
   if (!id || req.user.uid == null) return res.status(400).json({ error: 'bad id' });
@@ -1205,18 +1288,18 @@ app.post('/api/channels/:id/key', requireAuth, async (req, res) => {
       req.channel = ch;
       audit(req, 'api_key.created', { key_id: rec.id, key_prefix: rec.key_prefix }).catch(() => {});
       res.json({ ...rec, key: raw });   // raw key — never stored, shown once
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { next(e); }
 });
 
-app.get('/api/channels/:id/keys', requireAuth, async (req, res) => {
+app.get('/api/channels/:id/keys', requireAuth, async (req, res, next) => {
   if (!db.enabled) return res.json({ keys: [] });
   const id = parseInt(req.params.id, 10);
   if (!id || req.user.uid == null) return res.status(400).json({ error: 'bad id' });
   try { res.json({ keys: await db.listApiKeys(id, req.user.uid) }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { next(e); }
 });
 
-app.delete('/api/channels/:id/key/:keyId', requireAuth, async (req, res) => {
+app.delete('/api/channels/:id/key/:keyId', requireAuth, async (req, res, next) => {
   if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
   const keyId = parseInt(req.params.keyId, 10);
   if (!keyId || req.user.uid == null) return res.status(400).json({ error: 'bad id' });
@@ -1225,11 +1308,11 @@ app.delete('/api/channels/:id/key/:keyId', requireAuth, async (req, res) => {
     if (ok) audit(req, 'api_key.revoked', { key_id: keyId }).catch(() => {});
     res.json({ ok });
   }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { next(e); }
 });
 
 // ── Timeline annotations (F1): per-channel event markers on the trend charts ──
-app.get('/api/channels/:id/annotations', requireAuth, async (req, res) => {
+app.get('/api/channels/:id/annotations', requireAuth, async (req, res, next) => {
   if (!db.enabled) return res.json({ annotations: [] });
   const id = parseInt(req.params.id, 10);
   if (!id) return res.status(400).json({ error: 'bad id' });
@@ -1237,10 +1320,10 @@ app.get('/api/channels/:id/annotations', requireAuth, async (req, res) => {
     const ch = await db.getChannel(id, req.user);
     if (!ch) return res.status(403).json({ error: 'Нет доступа к каналу' });
     res.json({ annotations: await db.listAnnotations(id) });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { next(e); }
 });
 
-app.post('/api/channels/:id/annotations', requireAuth, async (req, res) => {
+app.post('/api/channels/:id/annotations', requireAuth, async (req, res, next) => {
   if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
   const id = parseInt(req.params.id, 10);
   const day = String((req.body && req.body.day) || '').trim();
@@ -1254,10 +1337,10 @@ app.post('/api/channels/:id/annotations', requireAuth, async (req, res) => {
     const rec = await db.createAnnotation(id, { day, label: label.slice(0, 120), createdBy: req.user.uid });
     audit(req, 'annotation.created', { channel_id: id, annotation_id: rec && rec.id }).catch(() => {});
     res.json(rec);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { next(e); }
 });
 
-app.delete('/api/channels/:id/annotations/:annId', requireAuth, async (req, res) => {
+app.delete('/api/channels/:id/annotations/:annId', requireAuth, async (req, res, next) => {
   if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
   const id = parseInt(req.params.id, 10);
   const annId = parseInt(req.params.annId, 10);
@@ -1268,7 +1351,7 @@ app.delete('/api/channels/:id/annotations/:annId', requireAuth, async (req, res)
     const ok = await db.deleteAnnotation(annId, id);
     if (ok) audit(req, 'annotation.deleted', { channel_id: id, annotation_id: annId }).catch(() => {});
     res.json({ ok });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { next(e); }
 });
 
 // Collector protocol is isolated in its own route module. The handler validates
@@ -1283,7 +1366,7 @@ registerCollectorRoutes({
   audit,
 });
 
-app.get('/api/tg/channel', requireAuth, resolveChannel, async (req, res) => {
+app.get('/api/tg/channel', requireAuth, resolveChannel, asyncHandler(async (req, res) => {
   if (await serveSnapshot(req, res, d => d.channel)) return;
   const cacheKey = `tg:channel:${req.channel.id}`;
   try {
@@ -1330,9 +1413,10 @@ app.get('/api/tg/channel', requireAuth, resolveChannel, async (req, res) => {
     cacheSet(cacheKey, data);
     res.json(data);
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    // both sources failed (bot errors fall through to MTProto above) → upstream outage
+    res.status(503).json({ error: e.message, hint: 'MTProto сервис недоступен' });
   }
-});
+}));
 
 // ════════════════════════════════════════════════════════════════
 //  TELEGRAM — MTProto прокси
@@ -1340,15 +1424,29 @@ app.get('/api/tg/channel', requireAuth, resolveChannel, async (req, res) => {
 
 const MTPROTO_URL  = process.env.MTPROTO_URL || 'http://localhost:8001';
 const MTPROTO_PASS = process.env.TEAM_PASSWORD || '';
+// Heavy Telethon endpoints (stats graphs, velocity, mentions) are serialized on the
+// Python side and can legitimately take minutes when queued — they get a long
+// deadline; everything else fails fast with the default.
+const MTPROTO_TIMEOUT_MS       = 12000;
+const MTPROTO_TIMEOUT_STATS_MS = 60000;
+const MTPROTO_TIMEOUT_HEAVY_MS = 120000;
 
-async function mtprotoFetch(path, params = {}) {
+async function mtprotoFetch(path, params = {}, timeoutMs = MTPROTO_TIMEOUT_MS) {
   const url = new URL(MTPROTO_URL + path);
   Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
-  const res  = await fetch(url.toString(), {
+  const res  = await fetchWithTimeout(url.toString(), {
     headers: { 'x-internal-token': MTPROTO_PASS }
-  });
+  }, timeoutMs);
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
+    if (res.status === 429) {
+      // Telethon FloodWait mapped by the Python side: an expected throttle, not an
+      // outage. Surface as 503-with-message so the dashboard shows "retry later".
+      const e = new Error('Telegram временно ограничил запросы' + (err.retry_after ? ` — повтори через ~${err.retry_after} с` : ''));
+      e.status = 503;
+      if (err.retry_after) e.retryAfter = err.retry_after;
+      throw e;
+    }
     throw new Error(err.detail || `MTProto error ${res.status}`);
   }
   return res.json();
@@ -1363,7 +1461,7 @@ app.get('/api/tg/mtproto/health', requireAuth, async (req, res) => {
   }
 });
 
-app.get('/api/tg/mtproto/channel', requireAuth, resolveChannel, async (req, res) => {
+app.get('/api/tg/mtproto/channel', requireAuth, resolveChannel, asyncHandler(async (req, res) => {
   if (await serveSnapshot(req, res, d => d.channel)) return;
   const cacheKey = `mtproto:channel:${req.channel.id}`;
   try {
@@ -1373,11 +1471,11 @@ app.get('/api/tg/mtproto/channel', requireAuth, resolveChannel, async (req, res)
     cacheSet(cacheKey, data);
     res.json(data);
   } catch (e) {
-    res.status(500).json({ error: e.message, hint: 'MTProto сервис недоступен' });
+    res.status(503).json({ error: e.message, hint: 'MTProto сервис недоступен' });
   }
-});
+}));
 
-app.get('/api/tg/mtproto/posts', requireAuth, resolveChannel, async (req, res) => {
+app.get('/api/tg/mtproto/posts', requireAuth, resolveChannel, asyncHandler(async (req, res) => {
   if (await serveSnapshot(req, res, d => ({ posts: d.posts || [], count: (d.posts || []).length }))) return;
   const limit     = Math.min(100, parseInt(req.query.limit)     || 30);
   const offsetId  = parseInt(req.query.offset_id) || 0;
@@ -1389,32 +1487,32 @@ app.get('/api/tg/mtproto/posts', requireAuth, resolveChannel, async (req, res) =
     cacheSet(cacheKey, data);
     res.json(data);
   } catch (e) {
-    res.status(500).json({ error: e.message, hint: 'MTProto сервис недоступен' });
+    res.status(503).json({ error: e.message, hint: 'MTProto сервис недоступен' });
   }
-});
+}));
 
-app.get('/api/tg/mtproto/views_summary', requireAuth, resolveChannel, async (req, res) => {
+app.get('/api/tg/mtproto/views_summary', requireAuth, resolveChannel, asyncHandler(async (req, res) => {
   if (await serveSnapshot(req, res, d => d.views_summary)) return;
   const limit    = Math.min(100, parseInt(req.query.limit) || 30);
   const cacheKey = `mtproto:views:${req.channel.id}:${limit}`;
   try {
     const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
-    const data = await mtprotoFetch('/views_summary', { limit });
+    const data = await mtprotoFetch('/views_summary', { limit }, MTPROTO_TIMEOUT_STATS_MS);
     cacheSet(cacheKey, data);
     res.json(data);
   } catch (e) {
-    res.status(500).json({ error: e.message, hint: 'MTProto сервис недоступен' });
+    res.status(503).json({ error: e.message, hint: 'MTProto сервис недоступен' });
   }
-});
+}));
 
-app.get('/api/tg/mtproto/stats', requireAuth, resolveChannel, async (req, res) => {
+app.get('/api/tg/mtproto/stats', requireAuth, resolveChannel, asyncHandler(async (req, res) => {
   if (await serveSnapshot(req, res, d => d.stats)) return;
   const cacheKey = `mtproto:stats:${req.channel.id}`;
   try {
     const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
-    const data = await mtprotoFetch('/stats');
+    const data = await mtprotoFetch('/stats', {}, MTPROTO_TIMEOUT_STATS_MS);
     cacheSet(cacheKey, data);
     res.json(data);
   } catch (e) {
@@ -1423,21 +1521,21 @@ app.get('/api/tg/mtproto/stats', requireAuth, resolveChannel, async (req, res) =
     // и оно проходит насквозь. Поэтому здесь честный 503 для мониторинга.
     res.status(503).json({ error: e.message, available: false, hint: 'MTProto сервис недоступен' });
   }
-});
+}));
 
-app.get('/api/tg/mtproto/graphs', requireAuth, resolveChannel, async (req, res) => {
+app.get('/api/tg/mtproto/graphs', requireAuth, resolveChannel, asyncHandler(async (req, res) => {
   if (await serveSnapshot(req, res, d => d.graphs)) return;
   const cacheKey = `mtproto:graphs:${req.channel.id}`;
   try {
     const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
-    const data = await mtprotoFetch('/graphs');
+    const data = await mtprotoFetch('/graphs', {}, MTPROTO_TIMEOUT_HEAVY_MS);
     cacheSet(cacheKey, data);
     res.json(data);
   } catch (e) {
     res.status(503).json({ error: e.message, available: false });
   }
-});
+}));
 
 // Velocity сервится из Postgres-снапшота (его строит ingest-крон), поэтому в
 // пользовательском запросе НЕТ тяжёлых последовательных вызовов Telegram.
@@ -1461,7 +1559,7 @@ app.get('/api/tg/mtproto/velocity', requireAuth, resolveChannel, async (req, res
     // нет снапшота (до первого крона) → live-расчёт ТОЛЬКО для central-канала
     // (у остальных данные приходят коллектором в Postgres).
     if (req.channel.source !== 'central') return res.json({ available: false, source: 'collector', empty: true });
-    const data = await mtprotoFetch('/velocity');
+    const data = await mtprotoFetch('/velocity', {}, MTPROTO_TIMEOUT_HEAVY_MS);
     if (data && data.available) {
       data.source = 'live';
       cacheSet(cacheKey, data);   // не кэшируем неуспех
@@ -1481,7 +1579,7 @@ app.get('/api/tg/mtproto/mentions', requireAuth, resolveChannel, async (req, res
   try {
     const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
-    const data = await mtprotoFetch('/mentions');
+    const data = await mtprotoFetch('/mentions', {}, MTPROTO_TIMEOUT_HEAVY_MS);
     if (data && data.available) {
       // accumulate the full deduped list into the archive (history beyond searchPosts' window)
       if (Array.isArray(data.all) && req.channel.id) {
@@ -1504,7 +1602,7 @@ app.get('/api/tg/mtproto/post_stats/:id', requireAuth, resolveChannel, async (re
   try {
     const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
-    const data = await mtprotoFetch('/post_stats/' + id);
+    const data = await mtprotoFetch('/post_stats/' + id, {}, MTPROTO_TIMEOUT_STATS_MS);
     cacheSet(cacheKey, data);
     res.json(data);
   } catch (e) {
@@ -1519,7 +1617,7 @@ app.get('/api/tg/mtproto/thumb/:id', async (req, res) => {
   if (!id) return res.status(400).end();
   const size = req.query.size === 'lg' ? 'lg' : 'sm';
   try {
-    const r = await fetch(`${MTPROTO_URL}/thumb/${id}?size=${size}`, { headers: { 'x-internal-token': MTPROTO_PASS } });
+    const r = await fetchWithTimeout(`${MTPROTO_URL}/thumb/${id}?size=${size}`, { headers: { 'x-internal-token': MTPROTO_PASS } });
     if (!r.ok) return res.status(r.status).end();
     const buf = await r.buffer();
     res.set('Content-Type', r.headers.get('content-type') || 'image/jpeg');
@@ -1534,7 +1632,7 @@ app.get('/api/tg/mtproto/thumb/:id', async (req, res) => {
 // Low sensitivity: only the configured (public, 'central') channel's profile photo.
 app.get('/api/tg/mtproto/channel/photo', async (req, res) => {
   try {
-    const r = await fetch(`${MTPROTO_URL}/channel/photo`, { headers: { 'x-internal-token': MTPROTO_PASS } });
+    const r = await fetchWithTimeout(`${MTPROTO_URL}/channel/photo`, { headers: { 'x-internal-token': MTPROTO_PASS } });
     if (!r.ok) return res.status(r.status).end();
     const buf = await r.buffer();
     res.set('Content-Type', r.headers.get('content-type') || 'image/jpeg');
@@ -1545,7 +1643,7 @@ app.get('/api/tg/mtproto/channel/photo', async (req, res) => {
   }
 });
 
-app.get('/api/tg/full', requireAuth, resolveChannel, async (req, res) => {
+app.get('/api/tg/full', requireAuth, resolveChannel, asyncHandler(async (req, res, next) => {
   if (req.channel && req.channel.source !== 'central') {   // collector channel → from snapshot
     const snap = req.channel.id ? await db.getSnapshot(req.channel.id).catch(() => null) : null;
     const d = (snap && snap.data) || {};
@@ -1562,7 +1660,7 @@ app.get('/api/tg/full', requireAuth, resolveChannel, async (req, res) => {
         return { title: chat.title, username: chat.username, description: chat.description || '', memberCount: count };
       })(),
       mtprotoFetch('/channel'),
-      mtprotoFetch('/views_summary', { limit }),
+      mtprotoFetch('/views_summary', { limit }, MTPROTO_TIMEOUT_STATS_MS),
       mtprotoFetch('/posts', { limit }),
     ]);
 
@@ -1589,9 +1687,9 @@ app.get('/api/tg/full', requireAuth, resolveChannel, async (req, res) => {
       }
     });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    next(e);
   }
-});
+}));
 
 // ════════════════════════════════════════════════════════════════
 //  ОБЩИЕ ROUTES
@@ -1640,17 +1738,23 @@ app.delete('/api/cache', requireAuth, requireSuper, (req, res) => {
 
 // Снимок дня: тянет дневные серии из /graphs (+ посты) и upsert'ит в БД.
 // Защищён отдельным токеном (НЕ командный пароль) — дёргается cron'ом.
-app.post('/api/ingest/daily', async (req, res) => {
-  const token = req.query.token || req.headers['x-ingest-token'];
-  if (!process.env.INGEST_TOKEN || token !== process.env.INGEST_TOKEN) {
+app.post('/api/ingest/daily', asyncHandler(async (req, res) => {
+  // Preferred source is the x-ingest-token header; the query param keeps the existing
+  // GitHub Actions cron working but is deprecated (tokens in URLs land in proxy logs).
+  const token = req.headers['x-ingest-token'] || req.query.token;
+  if (!process.env.INGEST_TOKEN || typeof token !== 'string' || !token
+      || !timingSafeEqualStr(token, process.env.INGEST_TOKEN)) {
     return res.status(403).json({ ok: false, error: 'forbidden' });
+  }
+  if (!req.headers['x-ingest-token']) {
+    log('warn', 'ingest_token_in_query_deprecated', { request_id: req.requestId });
   }
   if (!db.enabled) return res.status(200).json({ ok: false, reason: 'DATABASE_URL не задан — БД выключена' });
   const channelId = await db.getOwnerChannelId();   // central channel = "collector #0"
   if (!channelId) return res.status(503).json({ ok: false, reason: 'central channel not ready' });
   try {
     const [graphs, posts] = await Promise.all([
-      mtprotoFetch('/graphs', { points: 400 }).catch(() => null),   // full range for the archive (dashboard uses 45)
+      mtprotoFetch('/graphs', { points: 400 }, MTPROTO_TIMEOUT_HEAVY_MS).catch(() => null),   // full range for the archive (dashboard uses 45)
       mtprotoFetch('/posts', { limit: 100 }).catch(() => null),
     ]);
 
@@ -1678,7 +1782,7 @@ app.post('/api/ingest/daily', async (req, res) => {
     // после graphs/posts, чтобы не нагружать единственную Telethon-сессию
     // параллельно), и кладём снапшот в Postgres. Дашборд читает готовое из БД.
     let velocityOk = false;
-    const velocity = await mtprotoFetch('/velocity').catch(() => null);
+    const velocity = await mtprotoFetch('/velocity', {}, MTPROTO_TIMEOUT_HEAVY_MS).catch(() => null);
     if (velocity && velocity.available) {
       await db.saveVelocity(channelId, velocity).catch(e => console.error('[db] velocity save:', e.message));
       velocityOk = true;
@@ -1686,9 +1790,11 @@ app.post('/api/ingest/daily', async (req, res) => {
 
     res.json({ ok: true, channel_daily: nDaily, posts: nPosts, velocity: velocityOk });
   } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
+    // keep the { ok:false } shape for the cron, but never leak internals in the message
+    log('error', 'ingest_daily_failed', { request_id: req.requestId, error: e.message, stack: e.stack });
+    res.status(500).json({ ok: false, error: 'internal_error', request_id: req.requestId });
   }
-});
+}));
 
 app.get('/api/history/channel', requireAuth, resolveChannel, async (req, res) => {
   const days = Math.min(1000, parseInt(req.query.days) || 365);
@@ -1711,14 +1817,14 @@ app.get('/api/history/mentions', requireAuth, resolveChannel, async (req, res) =
 // ════════════════════════════════════════════════════════════════
 //  БАГ-ТРЕКЕР (Postgres)
 // ════════════════════════════════════════════════════════════════
-app.post('/api/bugs', requireAuth, requireSuper, async (req, res) => {
+app.post('/api/bugs', requireAuth, requireSuper, async (req, res, next) => {
   if (!db.enabled) return res.status(503).json({ error: 'БД не подключена — баги негде сохранять' });
   const text = ((req.body && req.body.text) || '').trim();
   if (!text) return res.status(400).json({ error: 'Опиши баг' });
   try {
     const bug = await db.createBug({ text, severity: req.body.severity, context: req.body.context, kind: req.body.kind });
     res.json(bug);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { next(e); }
 });
 
 app.get('/api/bugs', requireAuth, requireSuper, async (req, res) => {
@@ -1738,12 +1844,12 @@ app.patch('/api/bugs/:id', requireAuth, requireSuper, async (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-app.delete('/api/bugs/:id', requireAuth, requireSuper, async (req, res) => {
+app.delete('/api/bugs/:id', requireAuth, requireSuper, async (req, res, next) => {
   if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
   const id = parseInt(req.params.id, 10);
   if (!id) return res.status(400).json({ error: 'bad id' });
   try { await db.deleteBug(id); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { next(e); }
 });
 
 // ── Hand a bug to Claude Code (manual gate) ──
@@ -1753,7 +1859,7 @@ app.delete('/api/bugs/:id', requireAuth, requireSuper, async (req, res) => {
 const GH_REPO  = process.env.GITHUB_REPO || '';            // e.g. "schulmannn/pulse-analytics"
 const GH_TOKEN = process.env.GITHUB_DISPATCH_TOKEN || '';
 
-app.post('/api/bugs/:id/claude-fix', requireAuth, requireSuper, async (req, res) => {
+app.post('/api/bugs/:id/claude-fix', requireAuth, requireSuper, async (req, res, next) => {
   if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
   if (!GH_REPO || !GH_TOKEN) return res.status(503).json({ error: 'Не настроено: задай GITHUB_REPO и GITHUB_DISPATCH_TOKEN' });
   const id = parseInt(req.params.id, 10);
@@ -1761,7 +1867,7 @@ app.post('/api/bugs/:id/claude-fix', requireAuth, requireSuper, async (req, res)
   try {
     const bug = await db.getBug(id);
     if (!bug) return res.status(404).json({ error: 'баг не найден' });
-    const r = await fetch(`https://api.github.com/repos/${GH_REPO}/dispatches`, {
+    const r = await fetchWithTimeout(`https://api.github.com/repos/${GH_REPO}/dispatches`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${GH_TOKEN}`,
@@ -1788,7 +1894,7 @@ app.post('/api/bugs/:id/claude-fix', requireAuth, requireSuper, async (req, res)
     }
     await db.updateBug(id, 'in_progress').catch(() => {});   // reflect that Claude is on it
     res.json({ ok: true, status: 'in_progress' });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { next(e); }
 });
 
 // ── Bug screenshots ──
@@ -1810,7 +1916,7 @@ function sniffImage(mime, buf) {
 }
 
 // route-local parser (after requireAuth) so only this authed route accepts big bodies
-app.post('/api/bugs/:id/screenshot', requireAuth, requireSuper, express.json({ limit: '7mb' }), async (req, res) => {
+app.post('/api/bugs/:id/screenshot', requireAuth, requireSuper, express.json({ limit: '7mb' }), async (req, res, next) => {
   if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
   const id = parseInt(req.params.id, 10);
   if (!id) return res.status(400).json({ error: 'bad id' });
@@ -1831,11 +1937,11 @@ app.post('/api/bugs/:id/screenshot', requireAuth, requireSuper, express.json({ l
     const att = await db.addAttachmentIfRoom(id, mime, buf, MAX_ATTACH_PER_BUG);
     if (!att) return res.status(409).json({ error: `максимум ${MAX_ATTACH_PER_BUG} вложений на баг` });
     res.json(att);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { next(e); }
 });
 
 // Served under auth (frontend fetches with the session token → blob URL).
-app.get('/api/bug-attachment/:id', requireAuth, requireSuper, async (req, res) => {
+app.get('/api/bug-attachment/:id', requireAuth, requireSuper, async (req, res, next) => {
   const id = parseInt(req.params.id, 10);
   if (!id) return res.status(400).end();
   try {
@@ -1846,7 +1952,7 @@ app.get('/api/bug-attachment/:id', requireAuth, requireSuper, async (req, res) =
     res.set('Content-Disposition', 'inline');
     res.set('Cache-Control', 'private, max-age=3600');
     res.send(a.data);
-  } catch (e) { res.status(500).end(); }
+  } catch (e) { next(e); }
 });
 
 // ── Sprint 3F-3 catover: new Vite/React SPA is the primary dashboard, served at '/' ──
@@ -1869,28 +1975,62 @@ const appCspHeader = [
   "connect-src 'self' https://accounts.google.com",
   "frame-src https://accounts.google.com",
 ].join('; ');
-function setAppHeaders(res) {
+function setAppHeaders(req, res) {
   res.set('Content-Security-Policy', appCspHeader)
      .set('X-Content-Type-Options', 'nosniff')
      .set('Referrer-Policy', 'no-referrer');
+  // HSTS only over TLS (Railway terminates it upstream; trust-proxy makes req.secure
+  // honest). Never on plain-HTTP local dev — the browser would pin localhost to https.
+  if (req.secure || req.get('x-forwarded-proto') === 'https') {
+    res.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
 }
 // Hashed SPA assets at root (/assets/*). Security headers set per response.
-app.use((req, res, next) => { setAppHeaders(res); next(); },
+app.use((req, res, next) => { setAppHeaders(req, res); next(); },
   express.static(APP_DIST, { index: false }));
 
 // Pre-catover bookmarks under /app → root equivalent (302; temporary during catover).
 app.get(['/app', '/app/*'], (req, res) => {
   const target = req.originalUrl.replace(/^\/app(?=[/?]|$)/, '') || '/';
-  res.redirect(302, target.startsWith('/') ? target : '/' + target);
+  const local = target.startsWith('/') ? target : '/' + target;
+  // Same-origin only: '//host' (and '/\host') is protocol-relative → open redirect.
+  res.redirect(302, /^\/(?!\/|\\)/.test(local) ? local : '/');
 });
 
 // Legacy nonce-shell — reversible escape hatch, removed in 3F-3 B2 cleanup.
 app.get('/legacy', sendApp);
 
+// Unknown /api/* → JSON 404. Without this the SPA fallback served index.html with a
+// 200 for any mistyped API path — clients parsed HTML, monitoring saw success.
+app.all('/api/*', (req, res) => {
+  res.status(404).json({ error: 'not_found', request_id: req.requestId });
+});
+
 // SPA fallback: every other (non-/api, non-asset) GET serves the new app shell.
 app.get('*', (req, res) => {
-  setAppHeaders(res);
+  setAppHeaders(req, res);
   res.sendFile(path.join(APP_DIST, 'index.html'), (err) => { if (err) res.status(404).end(); });
+});
+
+// Terminal error handler — asyncHandler rejections and next(e) land here. Known
+// upstream failures carry err.status (igFetch → 502, mtprotoFetch flood → 503) and
+// their message is safe to show; anything else is a plain 500 and must NOT leak
+// internals (pg/driver messages) — the client gets a generic shape, the log gets
+// the full error keyed by request id.
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  const status = Number.isInteger(err && err.status) && err.status >= 400 && err.status < 600 ? err.status : 500;
+  log('error', 'unhandled_error', {
+    request_id: req.requestId,
+    method: req.method,
+    path: req.path,
+    status,
+    error: err && err.message,
+    stack: err && err.stack,
+  });
+  const body = { error: status === 500 ? 'internal_error' : String((err && err.message) || 'error'), request_id: req.requestId };
+  if (err && err.retryAfter) body.retry_after = err.retryAfter;
+  res.status(status).json(body);
 });
 
 // ── Запуск ──────────────────────────────────────────────────────

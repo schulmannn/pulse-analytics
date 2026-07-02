@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const { log } = require('../lib/observability');
 const {
   CURRENT_SCHEMA_VERSION,
   SUPPORTED_SCHEMA_VERSIONS,
@@ -47,7 +48,15 @@ function createCollectorHandler({ db, audit }) {
       if (error.code === 'INGEST_ID_CONFLICT') {
         return res.status(409).json({ error: error.message, code: error.code });
       }
-      res.status(500).json({ error: error.message, request_id: req.requestId });
+      // unknown = internal (db/driver): log the real error, answer generic — collectors
+      // must not see internals, and their queue retries on any 5xx anyway.
+      log('error', 'collector_ingest_failed', {
+        request_id: req.requestId,
+        channel_id: req.channel && req.channel.id,
+        error: error.message,
+        stack: error.stack,
+      });
+      res.status(500).json({ error: 'internal_error', request_id: req.requestId });
     }
   };
 }
@@ -80,7 +89,7 @@ function registerCollectorRoutes({
       req.channel = channel;
       next();
     } catch (error) {
-      res.status(500).json({ error: error.message });
+      next(error);
     }
   }
 
@@ -100,7 +109,7 @@ function registerCollectorRoutes({
     express.json({ limit: '4mb' }),
     createCollectorHandler({ db, audit }),
   );
-  app.get('/api/channels/:id/collector-status', requireAuth, async (req, res) => {
+  app.get('/api/channels/:id/collector-status', requireAuth, async (req, res, next) => {
     const channelId = parseInt(req.params.id, 10);
     if (!channelId || req.user.uid == null) return res.status(400).json({ error: 'bad id' });
     try {
@@ -114,7 +123,7 @@ function registerCollectorRoutes({
       const stale = !lastSuccessMs || Date.now() - lastSuccessMs > staleAfterHours * 60 * 60 * 1000;
       res.json({ status: status ? { ...status, stale, stale_after_hours: staleAfterHours } : null });
     } catch (error) {
-      res.status(500).json({ error: error.message });
+      next(error);
     }
   });
 }
