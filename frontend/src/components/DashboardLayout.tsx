@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils';
 import { downloadCsv } from '@/lib/csv';
 import { freshness, latestHistoryDay } from '@/lib/freshness';
 import { markdownToPlainText } from '@/lib/markdown';
+import { METRIC_DEFS } from '@/lib/metricDefs';
 import { normalizeTgPosts } from '@/lib/posts';
 import { Icon, type IconName } from '@/components/nav-icons';
 import { AtlavueMark } from '@/components/AtlavueMark';
@@ -90,6 +91,17 @@ const TITLES: Record<string, string> = {
   '/connect': 'Подключение данных',
   '/instagram': 'Instagram',
 };
+
+/** Topbar h1 for the current route; metric pages resolve to the metric's display name. */
+function routeTitle(pathname: string): string {
+  const exact = TITLES[pathname];
+  if (exact) return exact;
+  if (pathname.startsWith('/metrics/')) {
+    const key = pathname.split('/')[2] as keyof typeof METRIC_DEFS;
+    return METRIC_DEFS[key]?.term ?? 'Метрика';
+  }
+  return pathname.startsWith('/instagram') ? 'Instagram' : 'Atlavue';
+}
 
 const PERIODS: Array<{ days: PeriodDays; label: string }> = [
   { days: 7, label: '7д' },
@@ -545,7 +557,7 @@ function ChannelCard({ rail = false }: { rail?: boolean }) {
 /** Desktop top bar (md+; mobile uses MobileHeader — conditionally, never both mounted). */
 function Topbar({ email, role, avatar }: { email?: string; role?: string; avatar?: string | null }) {
   const { pathname } = useLocation();
-  const title = TITLES[pathname] ?? (pathname.startsWith('/instagram') ? 'Instagram' : 'Atlavue');
+  const title = routeTitle(pathname);
   return (
     <header className="sticky top-0 z-20 flex h-14 items-center justify-between gap-3 border-b bg-background/80 px-4 backdrop-blur sm:gap-4 sm:px-6">
       {/* min-w-0 lets the title truncate instead of shoving the controls off a narrow screen. */}

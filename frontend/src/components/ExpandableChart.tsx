@@ -69,7 +69,7 @@ interface ExpandedChartDialogProps extends ExpandableChartProps {
 }
 
 /**
- * Expanded chart overlay. Same dialog contract as PostDetailModal/KpiDrillDown:
+ * Expanded chart overlay. Same dialog contract as PostDetailModal:
  * portal, role="dialog" + aria-modal, focus trap, body scroll lock, Escape/backdrop/×
  * to close. The backdrop is semi-transparent paper from the first frame (an opaque
  * black flash is what bg-black/50 produced while the blur composited).

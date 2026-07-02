@@ -25,6 +25,47 @@ interface Hover {
 // Approximate glyph width of the 11px tabular numerals used for axis/value labels.
 const CHAR_W = 6.6;
 
+/** Next step up the 1-2-5×10ⁿ ladder (20 → 50 → 100 → 200 …). */
+function nextStep(step: number): number {
+  const mag = 10 ** Math.floor(Math.log10(step));
+  const n = Math.round(step / mag);
+  return n < 2 ? 2 * mag : n < 5 ? 5 * mag : 10 * mag;
+}
+
+/**
+ * Nice y-scale: snap the domain outward to 1/2/5×10ⁿ tick steps so gridlines land on round
+ * values and never format into duplicate labels («4.9k / 4.9k / 4.8k»), capped at 5 ticks.
+ */
+function niceScale(minV: number, maxV: number): { lo: number; hi: number; step: number; ticks: number[] } {
+  let span = maxV - minV;
+  if (!Number.isFinite(span) || span <= 0) span = Math.abs(maxV) || 1;
+  const mag0 = 10 ** Math.floor(Math.log10(Math.max(span / 2.5, 1e-9)));
+  const norm0 = span / 2.5 / mag0;
+  let step = (norm0 >= 5 ? 5 : norm0 >= 2 ? 2 : 1) * mag0;
+  let lo = Math.floor(minV / step) * step;
+  let hi = Math.ceil(maxV / step) * step;
+  while ((hi - lo) / step > 4.5) {
+    step = nextStep(step);
+    lo = Math.floor(minV / step) * step;
+    hi = Math.ceil(maxV / step) * step;
+  }
+  if (hi === lo) hi = lo + step;
+  const ticks: number[] = [];
+  for (let t = hi; t >= lo - step / 2; t -= step) ticks.push(t);
+  return { lo, hi, step, ticks };
+}
+
+/**
+ * Tick label with step-aware precision: k/M abbreviation only when the step itself is coarse
+ * enough to stay distinct after rounding; sub-thousand steps on a thousands scale print full
+ * grouped integers (4 950), because «4.9k / 4.9k» would collide.
+ */
+function axisLabel(v: number, step: number): string {
+  if (Math.abs(v) < 1e-9) return '0';
+  if (step >= 1000 || Math.abs(v) < 1000) return fmt.short(v);
+  return fmt.num(v);
+}
+
 export function LineChart({
   values,
   labels,
@@ -93,13 +134,21 @@ export function LineChart({
   const scaleVals = ghost && ghost.length ? [...values, ...ghost] : values;
   const computedMin = Math.min(...scaleVals);
   const computedMax = Math.max(...scaleVals);
-  const min = yMin ?? computedMin;
-  const max = yMax ?? computedMax;
+  // The caller's yMin/yMax (e.g. a zero base for volume metrics) defines the domain; the nice
+  // scale then only expands it outward to round tick values, never clips.
+  const scale = niceScale(yMin ?? computedMin, yMax ?? computedMax);
+  const min = scale.lo;
+  const max = scale.hi;
   const range = max - min || 1;
 
-  const yGridValues = [max, (max + min) / 2, min];
-  const yGridPositions = [padY, h / 2, h - padY];
-  const yLabels = yGridValues.map((v) => fmt.short(v));
+  const yFor = (v: number) => h - padY - ((v - min) / range) * (h - 2 * padY);
+  // Belt-and-braces dedupe: drop any tick whose formatted label repeats the previous one.
+  const yAxis = scale.ticks
+    .map((v) => ({ v, label: axisLabel(v, scale.step) }))
+    .filter((tick, i, arr) => i === 0 || tick.label !== arr[i - 1].label);
+  const yGridValues = yAxis.map((t) => t.v);
+  const yGridPositions = yGridValues.map(yFor);
+  const yLabels = yAxis.map((t) => t.label);
   // Left gutter reserved for the y labels (right-aligned inside it) so they never sit
   // on the line/area and the first label is never clipped by the container edge.
   const gutterW = Math.max(28, Math.round(Math.max(...yLabels.map((l) => l.length)) * CHAR_W) + 14);

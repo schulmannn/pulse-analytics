@@ -102,7 +102,14 @@ function SubscriberGrowth() {
     <div>
       <h2 className="text-sm font-medium tracking-wide text-muted-foreground">Рост подписчиков · {periodLabel}</h2>
       <div className="mt-3 flex items-baseline gap-2.5">
-        <div className="text-hero font-medium leading-none tabular-nums tracking-tight">{fmt.num(currentSubs)}</div>
+        {/* The number opens the subscriber metric page (same affordance as the KPI ledger). */}
+        <Link
+          to="/metrics/subscribers"
+          aria-label="Страница метрики: Подписчики"
+          className="rounded text-hero font-medium leading-none tabular-nums tracking-tight transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        >
+          {fmt.num(currentSubs)}
+        </Link>
         {change != null && change !== 0 && (
           <span className={`text-sm font-medium tabular-nums ${change > 0 ? 'text-verdant' : 'text-ember'}`}>
             {change > 0 ? '+' : '−'}{fmt.num(Math.abs(change))}

@@ -8,6 +8,7 @@ import { DashboardLayout } from '@/components/DashboardLayout';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { PeriodUrlSync } from '@/lib/period-url';
 import { Overview } from '@/panels/Overview';
+import { MetricPage } from '@/panels/MetricPage';
 import { Posts } from '@/panels/Posts';
 import { Mentions } from '@/panels/Mentions';
 import { TgAnalytics } from '@/panels/TgAnalytics';
@@ -56,6 +57,7 @@ export default function App() {
       <Route path="reset" element={<AuthSuspense><ResetPage /></AuthSuspense>} />
       <Route element={<ProtectedLayout />}>
         <Route index element={<Overview />} />
+        <Route path="metrics/:key" element={<MetricPage />} />
         <Route path="analytics" element={<Analytics />} />
         <Route path="posts" element={<Posts />} />
         <Route path="mentions" element={<Mentions />} />
