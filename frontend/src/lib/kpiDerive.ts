@@ -204,9 +204,11 @@ export function deriveKpis(
   const reactionsDiff = !range && windowTotals ? windowTotals.current.reactions - windowTotals.previous.reactions : null;
   const reactionsDelta = reactionsDiff ? signedAbs(reactionsDiff) : null;
 
-  // Normalized posts in the active window — the per-post attribution source for the metric
-  // pages. Uses the same fields the KPI totals sum, so the breakdown reconciles with the headline.
-  const normPosts = normalizeTgPosts(data?.posts ?? [], data?.channel ?? {}).filter((post) => inRange(post.date));
+  // Normalized posts: the full fetched set (baseline windows live BEFORE the active one) and
+  // the active-window slice — the per-post attribution source for the metric pages. Uses the
+  // same fields the KPI totals sum, so the breakdown reconciles with the headline.
+  const normPostsAll = normalizeTgPosts(data?.posts ?? [], data?.channel ?? {});
+  const normPosts = normPostsAll.filter((post) => inRange(post.date));
   const drillMeta: Record<DrillKey, { total: string; trend?: MetricDelta | null; caption?: string | null }> = {
     views: { total: fmt.short(totalViews), trend: viewsTrend, caption: viewsCaption },
     subscribers: { total: fmt.num(displayMembers), trend: subscriberTrend, caption: subCaption },
@@ -220,7 +222,7 @@ export function deriveKpis(
     members, displayMembers, totalViews, totalReactions, avgViews, er,
     subscriberTrend, viewsTrend, reactionsTrend, erTrend, avgReachTrend,
     viewsSpark, subsSpark, periodLabel, viewsCaption, subDelta, reactionsDelta, erCaption,
-    normPosts, drillMeta,
+    normPosts, normPostsAll, drillMeta,
     // Extras the metric pages need beyond the grid: paired-window totals for the
     // «Сравнение» ledger and the raw archive rows for subscriber window math.
     windowTotals, currentEngagement, previousEngagement, historyRows,
