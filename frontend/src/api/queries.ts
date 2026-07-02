@@ -15,6 +15,7 @@ import {
   GraphsSchema,
   HistorySchema,
   IgBreakdownsSchema,
+  IgHistorySchema,
   IgInsightsSchema,
   IgOnlineSchema,
   IgPostsSchema,
@@ -34,6 +35,7 @@ import {
 } from '@/api/schemas';
 import type { ReportConfig } from '@/api/schemas';
 import { clearSessionToken, setSessionToken } from '@/lib/session';
+import { isDemoMode } from '@/lib/demo';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { effectiveLimit, usePeriod } from '@/lib/period';
 import type { PeriodDays } from '@/lib/period';
@@ -298,6 +300,17 @@ export function useIgTags() {
     enabled: channelId != null,
     queryKey: ['ig-tags', channelId],
     queryFn: ({ signal }) => apiGet('/api/ig/tags', IgTagsSchema, { signal, channelId }),
+  });
+}
+
+/** Persisted IG daily series (Postgres ig_daily) — the DB-first history the cron accumulates past
+ *  the tiny live window. Disabled in demo mode (no DB, no fixture) so panels keep their live series. */
+export function useIgHistory(days = 400) {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    enabled: channelId != null && !isDemoMode(),
+    queryKey: ['ig-history', channelId, days],
+    queryFn: ({ signal }) => apiGet(`/api/ig/history?days=${days}`, IgHistorySchema, { signal, channelId }),
   });
 }
 

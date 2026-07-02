@@ -9,7 +9,9 @@ import {
   useIgBreakdowns,
   useIgOnline,
   useIgStories,
+  useIgHistory,
 } from '@/api/queries';
+import type { IgHistoryRow } from '@/api/schemas';
 import { usePeriod } from '@/lib/period';
 import {
   metricSeries,
@@ -21,7 +23,24 @@ import {
   MEDIA_PRODUCT_LABEL,
   DAY_NAMES,
   DAY_MS,
+  type Point,
 } from '@/lib/igMetrics';
+
+/** Persisted ig_daily rows → {day,value}[] for one column, dropping null/blank days. */
+function histSeries(rows: IgHistoryRow[] | undefined, col: keyof IgHistoryRow): Point[] {
+  return (rows ?? [])
+    .filter((r) => r.day && r[col] != null)
+    .map((r) => ({ day: r.day, value: Number(r[col]) }));
+}
+
+/** Prefer whichever series carries MORE real dated points. The persisted history (accumulated by
+ *  the cron) usually outruns the tiny live API window, but on day 1 the DB is empty — then the live
+ *  series wins and the chart is never blank. Ties keep live (fresher within the shared window). */
+function longerSeries(live: Point[], persisted: Point[]): Point[] {
+  const datedCount = (s: Point[]) =>
+    s.filter((p) => p.day !== 'total' && Number.isFinite(Date.parse(p.day))).length;
+  return datedCount(persisted) > datedCount(live) ? persisted : live;
+}
 import { buildIgInsights } from '@/lib/igInsights';
 
 export function useIgData() {
@@ -37,6 +56,9 @@ export function useIgData() {
   const breakdownsQ = useIgBreakdowns(timeframe);
   const onlineQ = useIgOnline();
   const storiesQ = useIgStories();
+  // DB-first history: the cron accumulates a long ig_daily series past the live API window. Used
+  // below only to LENGTHEN the reach/follows daily lines when it has more points (else live wins).
+  const historyQ = useIgHistory();
 
   // Selected window (custom range overrides the days preset; IG insights cap at ~90 days).
   // Quantized to the minute: a raw Date.now() in render produced a new value every render,
@@ -62,15 +84,21 @@ export function useIgData() {
   );
 
   const ins = insightsQ.data;
+  const histRows = historyQ.data?.rows;
   // The 12× daily-series extraction re-ran on every render of every IG view; the payload ref
-  // only changes on refetch, so key the memo on it.
+  // only changes on refetch, so key the memo on it. reach + follower prefer the PERSISTED series
+  // (ig_daily) whenever it's longer than the live window — that's the whole point of the DB-first
+  // read path (IG retention pain). Empty DB (day 1) → live series → chart never goes blank.
   const series = useMemo(
     () => ({
-      reach: metricSeries(ins, 'reach'),
+      reach: longerSeries(metricSeries(ins, 'reach'), histSeries(histRows, 'reach')),
       views: metricSeries(ins, 'views'),
       ti: metricSeries(ins, 'total_interactions'),
       engaged: metricSeries(ins, 'accounts_engaged'),
-      follower: metricSeries(ins, 'follower_count'),
+      // Оба конца — НЕТТО-прирост: живой follower_count и колонка ig_daily.followers (крон пишет
+      // туда именно follower_count). НЕ мешать с follows (gross новые подписки) — иначе смысл
+      // линии молча менялся бы на day-1 кроссовере live↔persisted.
+      follower: longerSeries(metricSeries(ins, 'follower_count'), histSeries(histRows, 'followers')),
       saves: metricSeries(ins, 'saves'),
       likes: metricSeries(ins, 'likes'),
       comments: metricSeries(ins, 'comments'),
@@ -79,7 +107,7 @@ export function useIgData() {
       follows: metricSeries(ins, 'follows'), // gross new follows (FOLLOWER)
       unfollows: metricSeries(ins, 'unfollows'), // gross unfollows (NON_FOLLOWER)
     }),
-    [ins],
+    [ins, histRows],
   );
   const pairs = useMemo(
     () => ({

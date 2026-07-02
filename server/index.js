@@ -1117,6 +1117,213 @@ app.get('/api/ig/stories', requireAuth, resolveIg, async (req, res) => {
   }
 });
 
+// GET /api/ig/history?days=400 — persisted daily IG series (Postgres ig_daily), mirroring
+// /api/history/channel for TG. This is the DB-first read path: IG's live window is tiny (~30d for
+// follower_count, nothing for reach beyond the API cap), so the accumulated history lives here.
+// resolveIg gives us req.ig.channelId ONLY after getChannel() passed (ownership enforced) — so we
+// serve history for the requester's own connected channel and no one else's. The env/mock fallback
+// (channelId null) has no per-channel rows → [] → the client transparently keeps its live series.
+app.get('/api/ig/history', requireAuth, resolveIg, async (req, res) => {
+  const days = Math.min(1000, parseInt(req.query.days, 10) || 400);
+  const channelId = req.ig && req.ig.channelId;
+  try {
+    res.json({ enabled: db.enabled, rows: channelId ? await db.listIgDaily(channelId, days) : [] });
+  } catch (e) {
+    res.status(200).json({ enabled: db.enabled, rows: [], error: e.message });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════
+//  IG-СБОР ДЛЯ КРОНА — тот же Graph, но пишем в Postgres (история)
+// ════════════════════════════════════════════════════════════════
+// IG отдаёт только короткое окно (сторис 24ч, серия follower_count ~30д, у демографии
+// истории НЕТ). Крон снимает данные раз в день и складывает в БД, чтобы копить историю
+// для будущих графиков. Это НЕ req/res-путь: resolveIg тут неприменим (нет req, нет
+// проверки владельца — крон доверенный). Мы напрямую дешифруем токен и зовём igFetch,
+// как и живые роуты, но каждый вызов обёрнут в свой try/catch: один битый токен или
+// квота-ошибка не должны трогать остальные аккаунты и НИКОГДА не касаются ответа крона
+// (весь IG-сбор идёт fire-and-forget ПОСЛЕ res.json, как processReportSchedules).
+
+// Достаём total_value одной total_value-метрики из ответа /insights.
+const igTvVal = (r) => { const m = r && r.data && r.data[0]; return m && m.total_value && m.total_value.value != null ? m.total_value.value : null; };
+// Разбираем follows_and_unfollows (breakdown=follow_type) → { follows, unfollows }.
+const igFauVal = (res) => {
+  const block = res && res.data && res.data[0] && res.data[0].total_value && res.data[0].total_value.breakdowns;
+  const results = (block && block[0] && block[0].results) || [];
+  let follows = null, unfollows = null;
+  results.forEach((r) => {
+    const k = r.dimension_values && r.dimension_values[0];
+    if (k === 'FOLLOWER') follows = r.value;
+    else if (k === 'NON_FOLLOWER') unfollows = r.value;
+  });
+  return { follows, unfollows };
+};
+const IG_TV_NAMES = ['views', 'profile_views', 'accounts_engaged', 'total_interactions', 'likes', 'comments', 'saves', 'shares'];
+const igNum = (v) => (v == null || isNaN(v)) ? null : Math.round(Number(v));
+
+// Собираем дневные метрики аккаунта ровно за ОДИН календарный день — ВЧЕРА (UTC).
+// Окно строго [вчера 00:00, сегодня 00:00): сегодня частичный/нефинализированный, а окно
+// ШИРЕ одного дня заставило бы соседние прогоны крона перекрываться и удваивать суммы
+// total_value при агрегации по периоду (windowPair на фронте суммирует дневные строки).
+// reach/follower_count — дневная серия (единственная точка за вчера), остальное — window-
+// агрегаты total_value за это же однодневное окно. row.day = вчера (день, к которому относятся данные).
+async function collectIgDailyForAccount(acc, token) {
+  const SEC = 86400;
+  const now = Math.floor(Date.now() / 1000);
+  const todayMidnight = Math.floor(now / SEC) * SEC;   // UTC-полночь сегодня
+  const since = todayMidnight - SEC, until = todayMidnight;   // ровно вчера, одни сутки
+  const targetDay = new Date(since * 1000).toISOString().slice(0, 10);   // YYYY-MM-DD вчера
+  const id = acc.ig_user_id;
+  const row = { day: targetDay };
+  // Дневные серии reach + follower_count — одним вызовом (одна точка за вчерашние сутки).
+  try {
+    const daily = await igFetch(`/${id}/insights`, { metric: 'reach,follower_count', period: 'day', since, until }, token);
+    (daily.data || []).forEach((m) => {
+      const vals = m.values || [];
+      const last = vals.length ? vals[vals.length - 1].value : null;   // финализированная точка за вчера
+      if (m.name === 'reach') row.reach = igNum(last);
+      else if (m.name === 'follower_count') row.followers = igNum(last);
+    });
+  } catch (e) { log('warn', 'ig_cron_daily_series_failed', { channelId: acc.channel_id, error: e.message }); }
+  // Window-агрегаты total_value (каждая метрика независимо — одна неподдерживаемая не рушит остальные).
+  const settled = await Promise.allSettled(
+    IG_TV_NAMES.map((metric) => igFetch(`/${id}/insights`, { metric, metric_type: 'total_value', period: 'day', since, until }, token)));
+  settled.forEach((r, i) => { if (r.status === 'fulfilled') row[IG_TV_NAMES[i]] = igNum(igTvVal(r.value)); });
+  // follows_and_unfollows → follows / unfollows.
+  try {
+    const fau = await igFetch(`/${id}/insights`, { metric: 'follows_and_unfollows', metric_type: 'total_value', breakdown: 'follow_type', period: 'day', since, until }, token);
+    const { follows, unfollows } = igFauVal(fau);
+    row.follows = igNum(follows); row.unfollows = igNum(unfollows);
+  } catch (e) { log('warn', 'ig_cron_fau_failed', { channelId: acc.channel_id, error: e.message }); }
+  await db.upsertIgDaily(acc.channel_id, [row]);
+  return row;
+}
+
+// Per-media lifetime-инсайты. Квота-бюджет: тянем insights только для НОВЫХ или
+// «молодых» медиа (<7 дней) — у старых lifetime-числа почти не двигаются, а фан-аут
+// «25 медиа × N вызовов» каждый день сжигает квоту зря. Одна строка на (media, day) →
+// накопительная траектория.
+const IG_MEDIA_INSIGHT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+async function collectIgMediaForAccount(acc, token, day) {
+  const id = acc.ig_user_id;
+  const mediaRes = await igFetch(`/${id}/media`, {
+    fields: 'id,media_type,media_product_type,timestamp,like_count,comments_count', limit: 25,
+  }, token);
+  const list = (mediaRes.data || []).filter((post) => {
+    const t = post.timestamp ? new Date(post.timestamp).getTime() : NaN;
+    return !Number.isFinite(t) || (Date.now() - t) <= IG_MEDIA_INSIGHT_MAX_AGE_MS;   // новые/молодые
+  });
+  const rows = [];
+  for (const post of list) {   // последовательно — по-доброму к квоте одного токена
+    try {
+      const ins = await igFetch(`/${post.id}/insights`, { metric: 'reach,views,shares,saved,total_interactions', metric_type: 'total_value' }, token);
+      const m = {};
+      (ins.data || []).forEach((x) => { m[x.name] = igNum(x.total_value && x.total_value.value != null ? x.total_value.value : (x.values && x.values[0] ? x.values[0].value : null)); });
+      rows.push({
+        media_id: String(post.id), day,
+        reach: m.reach ?? null, views: m.views ?? null, shares: m.shares ?? null,
+        saved: m.saved ?? null, total_interactions: m.total_interactions ?? null,
+        likes: igNum(post.like_count), comments: igNum(post.comments_count),
+      });
+    } catch (e) { log('warn', 'ig_cron_media_insight_failed', { channelId: acc.channel_id, media: post.id, error: e.message }); }
+  }
+  if (rows.length) await db.upsertIgMediaDaily(acc.channel_id, rows);
+  return rows.length;
+}
+
+// Демография / online / stories — истории у Meta НЕТ (демография = текущий срез,
+// сторис живут 24ч), поэтому снимаем сырой payload «как есть» в raw_snapshots, чтобы
+// СТРОИТЬ свою историю. Каждая секция изолирована: сбой одной не трогает остальные.
+async function collectIgSnapshotsForAccount(acc, token, day) {
+  const id = acc.ig_user_id;
+  // Demographics — те же 6 breakdown-вызовов, что и роут /breakdowns.
+  try {
+    const calls = [
+      { metric: 'follower_demographics', breakdown: 'age', period: 'lifetime', metric_type: 'total_value', timeframe: 'last_30_days' },
+      { metric: 'follower_demographics', breakdown: 'gender', period: 'lifetime', metric_type: 'total_value', timeframe: 'last_30_days' },
+      { metric: 'follower_demographics', breakdown: 'country', period: 'lifetime', metric_type: 'total_value', timeframe: 'last_30_days' },
+      { metric: 'follower_demographics', breakdown: 'city', period: 'lifetime', metric_type: 'total_value', timeframe: 'last_30_days' },
+      { metric: 'total_interactions', breakdown: 'media_product_type', period: 'day', metric_type: 'total_value' },
+      { metric: 'profile_links_taps', breakdown: 'contact_button_type', period: 'day', metric_type: 'total_value' },
+    ];
+    const settled = await Promise.allSettled(calls.map((c) => igFetch(`/${id}/insights`, c, token)));
+    const data = settled.filter((s) => s.status === 'fulfilled').flatMap((s) => s.value?.data || []);
+    if (data.length) await db.saveRawSnapshot(acc.channel_id, 'ig', 'demographics', day, { data });
+  } catch (e) { log('warn', 'ig_cron_demographics_failed', { channelId: acc.channel_id, error: e.message }); }
+  // Online followers — почасовая карта (часто пустая → пишем только непустое).
+  try {
+    const online = await igFetch(`/${id}/insights`, { metric: 'online_followers', period: 'lifetime' }, token);
+    const data = online?.data || [];
+    if (data.length) await db.saveRawSnapshot(acc.channel_id, 'ig', 'online', day, { data });
+  } catch (e) { log('warn', 'ig_cron_online_failed', { channelId: acc.channel_id, error: e.message }); }
+  // Stories — живут ~24ч, снимаем список + per-story insights (allSettled), иначе теряются навсегда.
+  // Кэп фан-аута: каждая сторис = 7 вызовов insights; ограничиваем число обрабатываемых сторис,
+  // чтобы всплеск активных сторис не сжёг квоту токена за один прогон (типично их единицы).
+  const IG_STORY_MAX = 30;
+  try {
+    const listRes = await igFetch(`/${id}/stories`, { fields: 'id,media_type,timestamp,permalink,thumbnail_url' }, token);
+    const storyList = (listRes.data || []).slice(0, IG_STORY_MAX);
+    if ((listRes.data || []).length > IG_STORY_MAX) {
+      log('warn', 'ig_cron_stories_truncated', { channelId: acc.channel_id, total: listRes.data.length, cap: IG_STORY_MAX });
+    }
+    const stories = await Promise.all(storyList.map(async (s) => {
+      const out = { ...s };
+      const st = await Promise.allSettled(STORY_METRICS.map((metric) => igFetch(`/${s.id}/insights`, { metric, metric_type: 'total_value' }, token)));
+      st.forEach((r, i) => { if (r.status === 'fulfilled') { const v = igMetricVal(r.value); if (v != null) out[STORY_METRICS[i]] = v; } });
+      return out;
+    }));
+    if (stories.length) await db.saveRawSnapshot(acc.channel_id, 'ig', 'stories', day, { data: stories });
+  } catch (e) { log('warn', 'ig_cron_stories_failed', { channelId: acc.channel_id, error: e.message }); }
+}
+
+// Полный дневной сбор для одного IG-аккаунта: дешифровка токена (+ opportunistic refresh,
+// чтобы крон заодно держал 60-дневный токен живым), затем daily / media / snapshots. Любой
+// сбой одной секции логируется и НЕ прерывает остальные и не всплывает выше.
+async function collectIgForAccount(acc, day) {
+  let token;
+  try {
+    token = igCrypto.decrypt(acc.access_token_enc);   // бросает при отсутствии/ротации IG_TOKEN_KEY или битом блобе
+  } catch (e) {
+    log('warn', 'ig_token_decrypt_failed', { channelId: acc.channel_id, error: e.message });
+    return;   // один недешифруемый аккаунт не рушит весь прогон
+  }
+  token = await refreshIgIfNeeded(acc.channel_id, token, acc.token_expires_at);   // крон = heartbeat рефреша токена
+  try { await collectIgDailyForAccount(acc, token); }        catch (e) { log('error', 'ig_cron_daily_failed', { channelId: acc.channel_id, error: e.message }); }
+  try { await collectIgMediaForAccount(acc, token, day); }   catch (e) { log('error', 'ig_cron_media_failed', { channelId: acc.channel_id, error: e.message }); }
+  try { await collectIgSnapshotsForAccount(acc, token, day); } catch (e) { log('error', 'ig_cron_snapshots_failed', { channelId: acc.channel_id, error: e.message }); }
+}
+
+// Оркестратор персистенса (вызывается fire-and-forget ПОСЛЕ ответа крона):
+//   (a) сырой снимок TG /graphs для центрального канала (catch-all для серий, которые
+//       не ложатся в channel_daily: views_by_source, languages, top_hours и т.п.);
+//   (b) IG-сбор по КАЖДОМУ аккаунту из ig_accounts (не только центральный — IG цепляется
+//       к любому каналу), ПОСЛЕДОВАТЕЛЬНО, чтобы не устраивать thundering herd;
+//   (c) прунинг raw_snapshots. Ничего не бросает наружу.
+async function processPersistence(centralChannelId, graphs) {
+  if (!db.enabled) return;
+  const day = new Date().toISOString().slice(0, 10);
+  // (a) сырой TG /graphs — payload уже в руках (лишнего mtproto-вызова нет).
+  if (centralChannelId && graphs && graphs.available) {
+    try { await db.saveRawSnapshot(centralChannelId, 'tg', 'graphs', day, graphs); }
+    catch (e) { log('error', 'tg_graphs_snapshot_failed', { channelId: centralChannelId, error: e.message }); }
+  }
+  // (b) IG по каждому подключённому аккаунту. Без IG_TOKEN_KEY токенов нет — пропускаем.
+  if (igCrypto.configured()) {
+    let accounts = [];
+    try { accounts = await db.listIgAccounts(); }
+    catch (e) { log('error', 'ig_list_accounts_failed', { error: e.message }); }
+    for (const acc of accounts) {
+      try { await collectIgForAccount(acc, day); }   // sequential: по-доброму к квоте
+      catch (e) { log('error', 'ig_collect_account_failed', { channelId: acc && acc.channel_id, error: e.message }); }
+    }
+  }
+  // (c) ретеншн — не даём append-only таблицам расти безгранично.
+  try { await db.pruneRawSnapshots(); }
+  catch (e) { log('error', 'raw_snapshots_prune_failed', { error: e.message }); }
+  try { await db.pruneIgMediaDaily(); }
+  catch (e) { log('error', 'ig_media_daily_prune_failed', { error: e.message }); }
+}
+
 // ── Instagram OAuth (per-channel connect) ─────────────────────────
 // "Business Login for Instagram" (Instagram API with Instagram Login, no Facebook Page).
 // Flow: start (authed, returns authorize_url) → user authorizes on instagram.com → callback
@@ -1982,6 +2189,13 @@ app.post('/api/ingest/daily', asyncHandler(async (req, res) => {
     // не должны ни задерживать, ни ломать ingest.
     processReportSchedules(appBase(req)).catch(e =>
       log('error', 'report_schedule_failed', { request_id: req.requestId, error: e.message }));
+
+    // Персистенс истории (сырой TG /graphs + IG-сбор по всем подключённым аккаунтам
+    // + прунинг) — тоже fire-and-forget ПОСЛЕ ответа: сбой Graph/квоты/БД тут НИКОГДА
+    // не должен задержать или уронить TG-ingest, от которого зависит вся система.
+    // `graphs` уже в руках — сырой снимок пишется без лишнего mtproto-вызова.
+    processPersistence(channelId, graphs).catch(e =>
+      log('error', 'persistence_failed', { request_id: req.requestId, error: e.message }));
   } catch (e) {
     // keep the { ok:false } shape for the cron, but never leak internals in the message
     log('error', 'ingest_daily_failed', { request_id: req.requestId, error: e.message, stack: e.stack });

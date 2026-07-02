@@ -177,6 +177,36 @@ export const HistorySchema = z
   .passthrough();
 export type HistoryData = z.infer<typeof HistorySchema>;
 
+// Persisted IG daily series (GET /api/ig/history → Postgres ig_daily). Same tolerant shape as
+// HistoryRowSchema: every metric optional+nullable so a partial cron capture never blocks the chart.
+export const IgHistoryRowSchema = z
+  .object({
+    day: z.string(),
+    followers: z.coerce.number().optional().nullable(),
+    reach: z.coerce.number().optional().nullable(),
+    views: z.coerce.number().optional().nullable(),
+    profile_views: z.coerce.number().optional().nullable(),
+    accounts_engaged: z.coerce.number().optional().nullable(),
+    total_interactions: z.coerce.number().optional().nullable(),
+    likes: z.coerce.number().optional().nullable(),
+    comments: z.coerce.number().optional().nullable(),
+    saves: z.coerce.number().optional().nullable(),
+    shares: z.coerce.number().optional().nullable(),
+    follows: z.coerce.number().optional().nullable(),
+    unfollows: z.coerce.number().optional().nullable(),
+  })
+  .passthrough();
+
+export const IgHistorySchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    error: z.string().optional().nullable(),
+    rows: z.array(IgHistoryRowSchema).optional().default([]),
+  })
+  .passthrough();
+export type IgHistoryRow = z.infer<typeof IgHistoryRowSchema>;
+export type IgHistoryData = z.infer<typeof IgHistorySchema>;
+
 export const VelocityDaySchema = z
   .object({
     day: z.coerce.number(),

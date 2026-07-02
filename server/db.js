@@ -954,6 +954,137 @@ async function deleteIgAccount(channelId) {
   return rowCount > 0;
 }
 
+// Every connected IG account (any channel — central OR collector), incl. the encrypted
+// token so a trusted cron can decrypt + fetch. NO ownership filter (unlike getIgAccount's
+// single-channel scope): the daily persistence cron iterates ALL rows. Callers decrypt.
+async function listIgAccounts() {
+  if (!enabled) return [];
+  const { rows } = await pool.query(
+    `SELECT channel_id, ig_user_id, username, access_token_enc, scopes,
+            to_char(token_expires_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS token_expires_at
+       FROM ig_accounts ORDER BY channel_id ASC`);
+  return rows;
+}
+
+// ── История Instagram + сырые снапшоты (accumulate-now) ──────────────
+// Мы копим историю САМИ, потому что IG отдаёт только короткое окно (сторис 24ч,
+// демография без истории). Идиомы — как upsertChannelDaily/graphsToDailyRows:
+// multi-row VALUES через jsonb_to_recordset + ON CONFLICT, все счётчики nullable
+// с COALESCE(EXCLUDED.x, existing), чтобы повторный прогон дополнял, а не затирал.
+
+// Дневные метрики IG-аккаунта. rows: [{ day, followers, reach, views, profile_views,
+// accounts_engaged, total_interactions, likes, comments, saves, shares, follows, unfollows }].
+async function upsertIgDaily(channelId, rows, executor = pool) {
+  if (!enabled || !channelId || !rows || !rows.length) return 0;
+  const sql = `INSERT INTO ig_daily
+      (channel_id, day, followers, reach, views, profile_views, accounts_engaged,
+       total_interactions, likes, comments, saves, shares, follows, unfollows, captured_at)
+    SELECT $1, x.day::date, x.followers, x.reach, x.views, x.profile_views, x.accounts_engaged,
+           x.total_interactions, x.likes, x.comments, x.saves, x.shares, x.follows, x.unfollows, now()
+      FROM jsonb_to_recordset($2::jsonb) AS x(
+        day text, followers integer, reach integer, views integer, profile_views integer,
+        accounts_engaged integer, total_interactions integer, likes integer, comments integer,
+        saves integer, shares integer, follows integer, unfollows integer
+      )
+    ON CONFLICT (channel_id, day) DO UPDATE SET
+      followers=COALESCE(EXCLUDED.followers, ig_daily.followers),
+      reach=COALESCE(EXCLUDED.reach, ig_daily.reach),
+      views=COALESCE(EXCLUDED.views, ig_daily.views),
+      profile_views=COALESCE(EXCLUDED.profile_views, ig_daily.profile_views),
+      accounts_engaged=COALESCE(EXCLUDED.accounts_engaged, ig_daily.accounts_engaged),
+      total_interactions=COALESCE(EXCLUDED.total_interactions, ig_daily.total_interactions),
+      likes=COALESCE(EXCLUDED.likes, ig_daily.likes),
+      comments=COALESCE(EXCLUDED.comments, ig_daily.comments),
+      saves=COALESCE(EXCLUDED.saves, ig_daily.saves),
+      shares=COALESCE(EXCLUDED.shares, ig_daily.shares),
+      follows=COALESCE(EXCLUDED.follows, ig_daily.follows),
+      unfollows=COALESCE(EXCLUDED.unfollows, ig_daily.unfollows),
+      captured_at=now()`;
+  await executor.query(sql, [channelId, JSON.stringify(rows)]);
+  return rows.length;
+}
+
+// Per-media lifetime-инсайты по дням. rows: [{ media_id, day, reach, likes, comments,
+// saved, shares, views }]. Insights кумулятивны → каждый день — новая точка траектории.
+async function upsertIgMediaDaily(channelId, rows, executor = pool) {
+  if (!enabled || !channelId || !rows || !rows.length) return 0;
+  const clean = rows.filter(r => r && r.media_id != null);
+  if (!clean.length) return 0;
+  const sql = `INSERT INTO ig_media_daily
+      (channel_id, media_id, day, reach, likes, comments, saved, shares, views, captured_at)
+    SELECT $1, x.media_id, x.day::date, x.reach, x.likes, x.comments, x.saved, x.shares, x.views, now()
+      FROM jsonb_to_recordset($2::jsonb) AS x(
+        media_id text, day text, reach integer, likes integer, comments integer,
+        saved integer, shares integer, views integer
+      )
+    ON CONFLICT (channel_id, media_id, day) DO UPDATE SET
+      reach=COALESCE(EXCLUDED.reach, ig_media_daily.reach),
+      likes=COALESCE(EXCLUDED.likes, ig_media_daily.likes),
+      comments=COALESCE(EXCLUDED.comments, ig_media_daily.comments),
+      saved=COALESCE(EXCLUDED.saved, ig_media_daily.saved),
+      shares=COALESCE(EXCLUDED.shares, ig_media_daily.shares),
+      views=COALESCE(EXCLUDED.views, ig_media_daily.views),
+      captured_at=now()`;
+  await executor.query(sql, [channelId, JSON.stringify(clean)]);
+  return clean.length;
+}
+
+// Сырой снапшот «как есть». upsert по (channel,source,kind,day) — повторный прогон
+// за день перезаписывает, а не дублирует (как saveVelocity). day по умолчанию —
+// сегодня; payload обязателен и непустой (guard от затирания хорошего снимка null'ом).
+async function saveRawSnapshot(channelId, source, kind, day, payload, executor = pool) {
+  if (!enabled || !channelId || !source || !kind || payload == null) return false;
+  await executor.query(
+    `INSERT INTO raw_snapshots (channel_id, source, kind, day, payload, created_at)
+     VALUES ($1, $2, $3, COALESCE($4::date, CURRENT_DATE), $5, now())
+     ON CONFLICT (channel_id, source, kind, day)
+       DO UPDATE SET payload = EXCLUDED.payload, created_at = now()`,
+    [channelId, source, kind, day || null, JSON.stringify(payload)]);
+  return true;
+}
+
+// Ретеншн: raw_snapshots — append-only (полный /graphs с points:400 + почасовые
+// карты online_followers весят немало), поэтому кроном подрезаем старьё, иначе
+// таблица растёт безгранично. По умолчанию храним ~400 дней (> года истории).
+async function pruneRawSnapshots(maxAgeDays = 400) {
+  if (!enabled) return 0;
+  const days = Number.isFinite(+maxAgeDays) ? Math.max(1, Math.round(+maxAgeDays)) : 400;
+  const { rowCount } = await pool.query(
+    `DELETE FROM raw_snapshots WHERE day < (CURRENT_DATE - $1::int)`, [days]);
+  return rowCount;
+}
+
+// Ретеншн ig_media_daily: новая строка на (media, day) для каждого «молодого» медиа
+// каждый прогон — растёт по мере появления новых постов, поэтому подрезаем старьё.
+// Горизонт щедрый (~2 года): дневная траектория медиа ценна вдолгую.
+async function pruneIgMediaDaily(maxAgeDays = 730) {
+  if (!enabled) return 0;
+  const days = Number.isFinite(+maxAgeDays) ? Math.max(1, Math.round(+maxAgeDays)) : 730;
+  const { rowCount } = await pool.query(
+    `DELETE FROM ig_media_daily WHERE day < (CURRENT_DATE - $1::int)`, [days]);
+  return rowCount;
+}
+
+// ── Read helpers (история для будущих графиков) ──
+async function listIgDaily(channelId, days = 400) {
+  if (!enabled || !channelId) return [];
+  const { rows } = await pool.query(
+    `SELECT to_char(day,'YYYY-MM-DD') AS day, followers, reach, views, profile_views,
+            accounts_engaged, total_interactions, likes, comments, saves, shares, follows, unfollows
+       FROM ig_daily WHERE channel_id=$1 AND day >= (CURRENT_DATE - $2::int) ORDER BY day ASC`,
+    [channelId, days]);
+  return rows;
+}
+
+async function listIgMediaDaily(channelId, days = 400) {
+  if (!enabled || !channelId) return [];
+  const { rows } = await pool.query(
+    `SELECT media_id, to_char(day,'YYYY-MM-DD') AS day, reach, likes, comments, saved, shares, views
+       FROM ig_media_daily WHERE channel_id=$1 AND day >= (CURRENT_DATE - $2::int)
+       ORDER BY media_id ASC, day ASC`, [channelId, days]);
+  return rows;
+}
+
 // ── Timeline annotations (per-channel event markers on the trend charts) ──
 async function listAnnotations(channelId) {
   if (!enabled || !channelId) return [];
@@ -1071,7 +1202,9 @@ module.exports = {
   getChannelHistory, getMentionsHistory, getMentionsArchive,
   createBug, listBugs, updateBug, deleteBug, BUG_STATUSES, BUG_SEVERITIES, BUG_KINDS,
   bugExists, getBug, addAttachmentIfRoom, getAttachment,
-  saveIgAccount, getIgAccount, updateIgToken, deleteIgAccount,
+  saveIgAccount, getIgAccount, updateIgToken, deleteIgAccount, listIgAccounts,
+  upsertIgDaily, upsertIgMediaDaily, saveRawSnapshot, pruneRawSnapshots, pruneIgMediaDaily,
+  listIgDaily, listIgMediaDaily,
   listAnnotations, createAnnotation, deleteAnnotation,
   REPORT_SCHEDULES, listReports, getReport, createReport, updateReport, deleteReport,
   listDueReports, markReportSent,
