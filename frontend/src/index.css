@@ -225,10 +225,8 @@
 }
 .widget-jiggle {
   animation: widget-jiggle 0.32s ease-in-out infinite;
-}
-.widget-jiggle:nth-child(even) {
-  animation-duration: 0.37s;
-  animation-delay: 0.06s;
+  /* alternate slots get an inline duration/delay from ChartSection — nth-child can't see
+     grid order, and the card is its section's only child since the 2-layer FLIP split */
 }
 @media (prefers-reduced-motion: reduce) {
   .widget-jiggle { animation: none; }
