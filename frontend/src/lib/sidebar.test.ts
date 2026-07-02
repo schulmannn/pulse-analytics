@@ -1,14 +1,32 @@
 import { describe, expect, it } from 'vitest';
-import { railMode } from './sidebar';
+import { effectiveSidebarMode, parseSidebarMode, toggledSidebarMode } from './sidebar';
 
-describe('railMode', () => {
-  it('forces the icon-rail below the lg breakpoint, regardless of the manual flag', () => {
-    expect(railMode(false, false)).toBe(true);
-    expect(railMode(false, true)).toBe(true);
+describe('effectiveSidebarMode', () => {
+  it('defaults to expanded at ≥lg and to the icon-rail below, when the user has not chosen', () => {
+    expect(effectiveSidebarMode(null, true)).toBe('open');
+    expect(effectiveSidebarMode(null, false)).toBe('rail');
   });
 
-  it('honors the manual collapse flag at lg and above', () => {
-    expect(railMode(true, false)).toBe(false);
-    expect(railMode(true, true)).toBe(true);
+  it('honours an explicit persisted choice at every breakpoint', () => {
+    expect(effectiveSidebarMode('rail', true)).toBe('rail');
+    expect(effectiveSidebarMode('open', false)).toBe('open');
+  });
+});
+
+describe('toggledSidebarMode', () => {
+  it('flips between the two modes', () => {
+    expect(toggledSidebarMode('open')).toBe('rail');
+    expect(toggledSidebarMode('rail')).toBe('open');
+  });
+});
+
+describe('parseSidebarMode', () => {
+  it('accepts only the two valid persisted values', () => {
+    expect(parseSidebarMode('open')).toBe('open');
+    expect(parseSidebarMode('rail')).toBe('rail');
+    expect(parseSidebarMode('1')).toBeNull();
+    expect(parseSidebarMode('')).toBeNull();
+    expect(parseSidebarMode(null)).toBeNull();
+    expect(parseSidebarMode(undefined)).toBeNull();
   });
 });

@@ -53,6 +53,17 @@
     --hover-row: 47 31% 94%;           /* #f5f3ec — table row hover */
     --avatar: 45 21% 89%;              /* #e9e6dd — fallback avatar field */
 
+    /* Letter-avatar identity tints (channel chip in the sidebar) — 6 muted bg/ink pairs picked
+       deterministically by a hash of the channel name (see DashboardLayout chipTint). Low
+       saturation on purpose: identity hints on warm paper, never neon. Consumed via the
+       .chip-tint-N component classes below. */
+    --chip-1-bg: 258 24% 92%; --chip-1-ink: 258 22% 38%;   /* muted violet */
+    --chip-2-bg: 150 22% 90%; --chip-2-ink: 150 32% 26%;   /* muted green */
+    --chip-3-bg: 42 42% 89%;  --chip-3-ink: 40 48% 29%;    /* muted amber */
+    --chip-4-bg: 348 30% 92%; --chip-4-ink: 348 34% 37%;   /* muted rose */
+    --chip-5-bg: 187 28% 89%; --chip-5-ink: 190 46% 25%;   /* muted teal */
+    --chip-6-bg: 225 16% 91%; --chip-6-ink: 225 13% 37%;   /* muted slate */
+
     /* Breakdown row-fill alphas (see components/Breakdown). Theme-scoped: the same 0.15
        categorical tint that reads as a soft pastel on paper turns muddy olive-brown over the
        dark canvas (esp. chart-2 orange), so dark gets its own, lower alphas below. */
@@ -108,6 +119,14 @@
     --blue-tint: 219 40% 20%;
     --hover-row: 48 5% 16%;
     --avatar: 48 5% 22%;
+
+    /* Chip identity tints, dark: deeper fields + lifted inks (same 6 hues as light). */
+    --chip-1-bg: 258 16% 24%; --chip-1-ink: 258 32% 80%;
+    --chip-2-bg: 150 16% 20%; --chip-2-ink: 150 28% 68%;
+    --chip-3-bg: 42 24% 20%;  --chip-3-ink: 42 42% 68%;
+    --chip-4-bg: 348 18% 23%; --chip-4-ink: 348 38% 77%;
+    --chip-5-bg: 187 22% 19%; --chip-5-ink: 187 32% 66%;
+    --chip-6-bg: 225 12% 23%; --chip-6-ink: 225 15% 75%;
 
     /* Quieter Breakdown row fills in dark — colour identity stays on the leading dot. */
     --row-tint-colored: 0.09;
@@ -174,6 +193,14 @@
   .tnum-mono {
     font-feature-settings: 'tnum' 1;
   }
+  /* Letter-avatar identity chips — bg + ink travel as one class so a chip can never end up
+     with a mismatched pair. Picked via chipTint() (DashboardLayout); themed via --chip-N-*. */
+  .chip-tint-1 { background-color: hsl(var(--chip-1-bg)); color: hsl(var(--chip-1-ink)); }
+  .chip-tint-2 { background-color: hsl(var(--chip-2-bg)); color: hsl(var(--chip-2-ink)); }
+  .chip-tint-3 { background-color: hsl(var(--chip-3-bg)); color: hsl(var(--chip-3-ink)); }
+  .chip-tint-4 { background-color: hsl(var(--chip-4-bg)); color: hsl(var(--chip-4-ink)); }
+  .chip-tint-5 { background-color: hsl(var(--chip-5-bg)); color: hsl(var(--chip-5-ink)); }
+  .chip-tint-6 { background-color: hsl(var(--chip-6-bg)); color: hsl(var(--chip-6-ink)); }
 }
 
 /* ── Design governance (Atlavue Refined Technical) — intentional rules, documented so future

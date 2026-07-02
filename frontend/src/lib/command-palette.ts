@@ -1,9 +1,9 @@
 import { useSyncExternalStore } from 'react';
 
 /**
- * Tiny external store for the global ⌘K command palette. Any control (sidebar SearchBox,
- * future topbar triggers) opens it through openCommandPalette() — no synthetic KeyboardEvent
- * replay, no coupling to the palette's internal shortcut handler.
+ * Tiny external store for the global ⌘K command palette. Any control (the sidebar header's
+ * search button, future topbar triggers) opens it through openCommandPalette() — no synthetic
+ * KeyboardEvent replay, no coupling to the palette's internal shortcut handler.
  */
 
 let open = false;

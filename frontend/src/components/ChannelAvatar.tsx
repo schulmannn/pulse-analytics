@@ -10,6 +10,9 @@ interface ChannelAvatarProps {
   source?: string | null;
   /** Single-letter fallback shown for collector channels or on any photo error. */
   initial: string;
+  /** Identity tint for the letter chip — a `.chip-tint-N` bg/ink pair (see index.css),
+      picked deterministically from the channel name. Defaults to the brand-blue chip. */
+  tintClassName?: string;
   /** Sizing + radius + text-size utilities, e.g. "h-12 w-12 rounded-xl text-lg". */
   className?: string;
 }
@@ -20,7 +23,7 @@ interface ChannelAvatarProps {
  * initial on a brand-tinted squircle (the previous look). Graceful: if the MTProto service is
  * down or the channel has no photo, the <img> onError quietly swaps in the initial.
  */
-export function ChannelAvatar({ source, initial, className }: ChannelAvatarProps) {
+export function ChannelAvatar({ source, initial, tintClassName, className }: ChannelAvatarProps) {
   const canPhoto = source === 'central';
   const [failed, setFailed] = useState(false);
   // Reset the error gate when switching channels so a new 'central' channel retries the photo.
@@ -40,7 +43,8 @@ export function ChannelAvatar({ source, initial, className }: ChannelAvatarProps
   return (
     <span
       className={cn(
-        'flex shrink-0 items-center justify-center bg-primary font-medium text-primary-foreground',
+        'flex shrink-0 items-center justify-center font-medium',
+        tintClassName ?? 'bg-primary text-primary-foreground',
         className,
       )}
     >

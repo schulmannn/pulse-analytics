@@ -1,40 +1,63 @@
 import { useCallback, useState } from 'react';
 
-const STORAGE_KEY = 'pulse_sidebar_collapsed';
+export type SidebarMode = 'open' | 'rail';
+
+const STORAGE_KEY = 'pulse_sidebar';
+/** Pre-redesign boolean key ('1' = collapsed) — read once for migration, then removed. */
+const LEGACY_KEY = 'pulse_sidebar_collapsed';
 
 /**
- * Effective icon-rail mode: forced below the `lg` breakpoint (auto-rail), and driven by
- * the manual collapse flag at `lg` and above (where a full sidebar fits).
+ * Effective sidebar mode: an explicit persisted user choice wins at every breakpoint;
+ * until the user chooses, the default is responsive — expanded at ≥lg, icon-rail on md–lg.
  */
-export function railMode(isLg: boolean, collapsed: boolean): boolean {
-  return !isLg || collapsed;
+export function effectiveSidebarMode(stored: SidebarMode | null, isLg: boolean): SidebarMode {
+  return stored ?? (isLg ? 'open' : 'rail');
 }
 
-function readCollapsed(): boolean {
+export function toggledSidebarMode(mode: SidebarMode): SidebarMode {
+  return mode === 'open' ? 'rail' : 'open';
+}
+
+/** Narrow a raw persisted string to a valid mode (anything else → no explicit choice). */
+export function parseSidebarMode(raw: string | null | undefined): SidebarMode | null {
+  return raw === 'open' || raw === 'rail' ? raw : null;
+}
+
+function readStoredMode(): SidebarMode | null {
   try {
-    return localStorage.getItem(STORAGE_KEY) === '1';
+    const stored = parseSidebarMode(localStorage.getItem(STORAGE_KEY));
+    if (stored) return stored;
+    const legacy = localStorage.getItem(LEGACY_KEY);
+    if (legacy === '1') return 'rail';
+    if (legacy === '0') return 'open';
+    return null;
   } catch {
-    return false;
+    return null;
   }
 }
 
-function writeCollapsed(value: boolean): void {
+function writeStoredMode(mode: SidebarMode): void {
   try {
-    localStorage.setItem(STORAGE_KEY, value ? '1' : '0');
+    localStorage.setItem(STORAGE_KEY, mode);
+    localStorage.removeItem(LEGACY_KEY);
   } catch {
     /* localStorage may be unavailable */
   }
 }
 
-/** Manual sidebar collapse (full ↔ icon-rail), persisted across reloads. */
-export function useSidebarCollapsed(): { collapsed: boolean; toggle: () => void } {
-  const [collapsed, setCollapsed] = useState<boolean>(readCollapsed);
+/**
+ * Sidebar mode (expanded column ↔ icon-rail), persisted under `pulse_sidebar` once the user
+ * toggles explicitly (header button or Ctrl+B). Both modes push content — there is no overlay.
+ */
+export function useSidebarMode(isLg: boolean): { rail: boolean; toggle: () => void } {
+  const [stored, setStored] = useState<SidebarMode | null>(readStoredMode);
+  const rail = effectiveSidebarMode(stored, isLg) === 'rail';
   const toggle = useCallback(() => {
-    setCollapsed((prev) => {
-      const next = !prev;
-      writeCollapsed(next);
+    setStored((prev) => {
+      const next = toggledSidebarMode(effectiveSidebarMode(prev, isLg));
+      writeStoredMode(next);
       return next;
     });
-  }, []);
-  return { collapsed, toggle };
+  }, [isLg]);
+  return { rail, toggle };
 }

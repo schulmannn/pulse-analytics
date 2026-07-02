@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Dispatch, RefObject, SetStateAction } from 'react';
+import type { Dispatch, ReactNode, RefObject, SetStateAction } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useChannels, useHistory, useIgProfile, useLogout, useTgFull } from '@/api/queries';
@@ -10,7 +10,7 @@ import { usePeriod } from '@/lib/period';
 import type { PeriodDays } from '@/lib/period';
 import { useTheme } from '@/lib/theme';
 import { useMediaQuery } from '@/lib/useMediaQuery';
-import { railMode, useSidebarCollapsed } from '@/lib/sidebar';
+import { useSidebarMode } from '@/lib/sidebar';
 import { fmt } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { downloadCsv } from '@/lib/csv';
@@ -58,21 +58,22 @@ const TG_NAV: NavLinkDef[] = [
   { to: '/posts', label: 'Посты', icon: 'posts' },
   { to: '/mentions', label: 'Упоминания', icon: 'mentions' },
 ];
-// …and Instagram into its own parallel set (Обзор / Аналитика / Контент / Аудитория). Keeping the
-// nav platform-aware stops Instagram clicks landing on Telegram routes.
+// …and Instagram into its own parallel set (Обзор / Аналитика / Контент / Аудитория). The desktop
+// sidebar lists BOTH sets as labeled sections (steep's Teams/Entities pattern); mobile stays
+// platform-aware (usePlatformNav) so the bottom tab bar shows only the active platform's routes.
 const IG_NAV: NavLinkDef[] = [
   { to: '/instagram', label: 'Обзор', icon: 'overview', end: true },
   { to: '/instagram/analytics', label: 'Аналитика', icon: 'analytics' },
   { to: '/instagram/content', label: 'Контент', icon: 'posts' },
   { to: '/instagram/audience', label: 'Аудитория', icon: 'audience' },
 ];
-const SYSTEM_NAV: NavLinkDef[] = [{ to: '/settings', label: 'Настройки', icon: 'settings' }];
+const SYSTEM_NAV: NavLinkDef[] = [{ to: '/settings', label: 'Настройки', icon: 'gear' }];
 const SUPER_NAV: NavLinkDef[] = [
   { to: '/admin', label: 'Админ', icon: 'admin' },
   { to: '/bugs', label: 'Баги', icon: 'bugs' },
 ];
 
-/** The nav set for the active platform — Telegram routes vs Instagram routes. */
+/** The nav set for the active platform (mobile bottom bar) — Telegram routes vs Instagram routes. */
 function usePlatformNav(): NavLinkDef[] {
   const { pathname } = useLocation();
   return pathname.startsWith('/instagram') ? IG_NAV : TG_NAV;
@@ -178,98 +179,178 @@ function DemoBanner() {
   );
 }
 
-/**
- * Reveal-on-peek class strings: an element is hidden in the icon-rail and shown when the
- * panel is hovered OR keyboard focus enters it. The focus-within companion is essential —
- * `:hover` never fires on Tab, so without it a keyboard user sees an icon-only rail. Pairs
- * with `focus-within:w-60` on the panel so focusing a rail control expands the peek too.
- */
-const REVEAL_BLOCK = 'hidden group-hover/sb:block group-focus-within/sb:block';
-const REVEAL_INLINE = 'hidden group-hover/sb:inline group-focus-within/sb:inline';
+/** 6 muted identity tints (see index.css --chip-N-*) picked deterministically from the channel
+    name, so a channel keeps its colour across reloads, themes and dropdown rows. */
+const CHIP_TINTS = ['chip-tint-1', 'chip-tint-2', 'chip-tint-3', 'chip-tint-4', 'chip-tint-5', 'chip-tint-6'];
+function chipTint(name: string): string {
+  let h = 0;
+  for (let i = 0; i < name.length; i += 1) h = (h * 31 + name.charCodeAt(i)) | 0;
+  return CHIP_TINTS[Math.abs(h) % CHIP_TINTS.length];
+}
 
 /**
- * Three-state sidebar. ≥lg: full (w-60) with a manual collapse toggle (persisted).
- * md–lg: auto icon-rail (w-16), labels accessible via title/aria + a hover/focus peek that
- * expands the rail into an overlay (absolute, so content never reflows). <md: hidden
- * (MobileNav takes over). In rail mode the visible panel is absolutely positioned and the
- * w-16 <aside> stays as a layout spacer, so peeking overlays the content instead of
- * pushing it. The aside stays `h-screen sticky top-0`, so the topbar/SectionNav offsets
- * (top-0 / top-14, in the content column) are untouched.
+ * Persistent sidebar (md+), steep-style: a real flex column that PUSHES content — expanded
+ * (w-60) or a quiet icon-rail (w-16), toggled by the header panel button / Ctrl+B and
+ * persisted (localStorage `pulse_sidebar`). No hover-expand overlay: the rail stays a rail
+ * until toggled. Until the user chooses, the default is responsive — expanded at ≥lg, rail
+ * on md–lg. <md the sidebar is hidden (MobileHeader + MobileBottomNav take over).
  */
 function Sidebar() {
+  const isMd = useMediaQuery('(min-width: 768px)');
   const isLg = useMediaQuery('(min-width: 1024px)');
-  const { collapsed, toggle } = useSidebarCollapsed();
-  const rail = railMode(isLg, collapsed);
-  const nav = usePlatformNav();
+  const { rail, toggle } = useSidebarMode(isLg);
+
+  // Global Ctrl+B / ⌘B toggle. Skipped while typing (input / textarea / contenteditable) and
+  // below md (no sidebar to toggle). ⌘K stays with the command palette — no key overlap.
+  useEffect(() => {
+    if (!isMd) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== 'b') return;
+      const t = e.target;
+      if (t instanceof HTMLElement && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      e.preventDefault();
+      toggle();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isMd, toggle]);
 
   return (
     <aside
+      aria-label="Боковая панель"
       className={cn(
-        // z-30: the aside is `sticky`, so it owns a stacking context; without a z-index the
-        // peek panel can't paint above the positive-z-index Topbar (z-20) / SectionNav (z-10)
-        // and content bleeds through it. z-30 lifts the whole sidebar above all content while
-        // staying under the period scrim (z-40) and modals (z-50).
-        'sticky top-0 z-30 hidden h-screen shrink-0 md:block',
+        // Quiet column on the shared paper canvas: right hairline only, no panel, no shadow.
+        // z-30 lets the rail-mode channel dropdown (which overhangs the aside) paint above the
+        // sticky Topbar (z-20) while staying under the period scrim (z-40) and modals (z-50).
+        'sticky top-0 z-30 hidden h-screen shrink-0 flex-col border-r border-border bg-background md:flex',
+        'transition-[width] duration-200 motion-reduce:transition-none',
         rail ? 'w-16' : 'w-60',
       )}
     >
-      <div
-        className={cn(
-          // White panel sidebar on the warm-paper canvas (Figma) — separated from content by border-r.
-          'group/sb flex h-full flex-col border-r bg-card',
-          rail
-            ? 'absolute inset-y-0 left-0 z-30 w-16 overflow-hidden bg-card transition-[width] duration-200 hover:w-60 focus-within:w-60'
-            : 'w-full',
-        )}
-      >
-        <div className="flex items-center gap-2.5 px-4 pt-5">
-          {/* Brand glyph on paper (no filled tile) — Figma renders the mark itself in accent blue. */}
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center text-primary">
-            <AtlavueMark className="h-6 w-6" />
-          </span>
-          <span className={cn('flex-1 whitespace-nowrap text-base font-medium tracking-tight', rail && REVEAL_BLOCK)}>
-            Atlavue
-          </span>
-        </div>
+      <SidebarHeader rail={rail} onToggle={toggle} />
 
-        <div className="mt-4">
-          <ChannelCard rail={rail} />
-        </div>
+      <div className="mt-3">
+        <ChannelCard rail={rail} />
+      </div>
 
-        <nav className="mt-4 flex-1 space-y-0.5 overflow-y-auto px-3">
-          {/* Источник данных — контекст-переключатель (сегмент в строку, как на мобайле), не пункт меню. */}
-          <p
-            className={cn(
-              'px-3 pb-1.5 text-2xs font-medium tracking-wider text-muted-foreground',
-              rail && 'whitespace-nowrap',
-              rail && REVEAL_BLOCK,
-            )}
-          >
-            Источник
-          </p>
-          <PlatformNav rail={rail} />
-          <div className="mx-1 my-3 border-t" aria-hidden="true" />
+      <nav className="mt-5 flex-1 overflow-y-auto overflow-x-hidden px-3">
+        <NavGroup label="Telegram" platform="tg" items={TG_NAV} rail={rail} first />
+        <NavGroup label="Instagram" platform="ig" items={IG_NAV} rail={rail} />
+      </nav>
 
-          {nav.map((item) => (
-            <NavItem key={item.label} {...item} rail={rail} />
-          ))}
-          {/* System links (Настройки / Админ / Баги) live in the account menu under the avatar now. */}
-        </nav>
-
-        <div className="space-y-1 px-3 pb-4">
-          <SearchBox rail={rail} />
-          {/* Manual collapse only exists at lg; below it the rail is responsive-forced.
-              Kept always-visible + focusable (never display:none) so a keyboard/touch user
-              who collapses can always re-expand. */}
-          {isLg && <CollapseToggle collapsed={collapsed} onToggle={toggle} rail={rail} />}
-          <SidebarStatus rail={rail} />
-        </div>
+      <div className="space-y-1 px-3 pb-4 pt-2">
+        {SYSTEM_NAV.map((item) => (
+          <NavItem key={item.to} {...item} rail={rail} />
+        ))}
+        <SidebarStatus rail={rail} />
       </div>
     </aside>
   );
 }
 
-/** Sidebar footer freshness — a status dot + "обновлено <time>" (mono). Rail collapses to the dot. */
+/**
+ * Sidebar header row (steep-style): brand identity on the left (wordmark hidden in the rail),
+ * two quiet ghost icon actions on the right — the panel toggle (Ctrl+B) and search (⌘K, opens
+ * the global command palette). In the rail the actions stack vertically under the mark, so the
+ * toggle always stays reachable.
+ */
+function SidebarHeader({ rail, onToggle }: { rail: boolean; onToggle: () => void }) {
+  return (
+    <div className={cn('flex px-3 pt-4', rail ? 'flex-col items-center gap-1' : 'items-center gap-1')}>
+      <span className="flex h-7 w-7 shrink-0 items-center justify-center text-primary" aria-hidden="true">
+        <AtlavueMark className="h-5 w-5" />
+      </span>
+      {!rail && (
+        <span className="min-w-0 flex-1 truncate pl-1 text-base font-medium tracking-tight">Atlavue</span>
+      )}
+      <GhostIconButton
+        onClick={onToggle}
+        label={rail ? 'Показать панель' : 'Скрыть панель'}
+        title={rail ? 'Показать панель · Ctrl+B' : 'Скрыть панель · Ctrl+B'}
+        expanded={!rail}
+      >
+        <Icon name="panel" className="h-4 w-4" />
+      </GhostIconButton>
+      <GhostIconButton onClick={openCommandPalette} label="Поиск" title="Поиск · ⌘K">
+        <Icon name="search" className="h-4 w-4" />
+      </GhostIconButton>
+    </div>
+  );
+}
+
+/** Quiet 28px ghost icon button for sidebar chrome (no border, hover fill only). */
+function GhostIconButton({
+  onClick,
+  label,
+  title,
+  expanded,
+  children,
+}: {
+  onClick: () => void;
+  label: string;
+  title: string;
+  expanded?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      aria-expanded={expanded}
+      title={title}
+      className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-hover-row hover:text-foreground"
+    >
+      {children}
+    </button>
+  );
+}
+
+/**
+ * Labeled nav section (steep's Teams/Entities pattern) — replaces the old boxed platform
+ * switcher: both platforms are always visible, each under its own quiet uppercase label.
+ * Rail mode: a hairline separator between groups + the platform's tiny brand glyph as the
+ * group marker (both nav sets share the same stroke icons, so the glyph disambiguates).
+ */
+function NavGroup({
+  label,
+  platform,
+  items,
+  rail,
+  first = false,
+}: {
+  label: string;
+  platform: string;
+  items: NavLinkDef[];
+  rail: boolean;
+  first?: boolean;
+}) {
+  const color = PLATFORMS.find((p) => p.key === platform)?.color;
+  return (
+    <div role="group" aria-label={label} className={cn(!first && (rail ? 'mt-3' : 'mt-5'))}>
+      {rail ? (
+        <div className="flex flex-col items-center gap-2 pb-2" aria-hidden="true">
+          {!first && <span className="h-px w-8 bg-border" />}
+          <span title={label} style={{ color, opacity: 0.75 }}>
+            <PlatformGlyph k={platform} className="h-3.5 w-3.5" />
+          </span>
+        </div>
+      ) : (
+        <p aria-hidden="true" className="px-2 pb-1 text-2xs font-medium uppercase tracking-wide text-ink3">
+          {label}
+        </p>
+      )}
+      <div className="space-y-0.5">
+        {items.map((item) => (
+          <NavItem key={item.to} {...item} rail={rail} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Sidebar footer freshness — a status dot + "обновлено <time>" (mono). Rail: dot only,
+    the full text moves into the title tooltip. Always the LAST element of the sidebar. */
 function SidebarStatus({ rail }: { rail?: boolean }) {
   const { data: history } = useHistory(730);
   const fresh = freshness(latestHistoryDay(history), Date.now());
@@ -278,43 +359,16 @@ function SidebarStatus({ rail }: { rail?: boolean }) {
     <div
       title={rail ? `обновлено ${fresh.label}` : undefined}
       className={cn(
-        'flex items-center gap-2 px-3 pt-1 text-2xs text-muted-foreground',
-        rail &&
-          'justify-center px-1 group-hover/sb:justify-start group-hover/sb:px-3 group-focus-within/sb:justify-start group-focus-within/sb:px-3',
+        'flex items-center gap-2 pt-1 text-2xs text-muted-foreground',
+        rail ? 'justify-center' : 'px-2',
       )}
     >
       <span
         aria-hidden="true"
         className={cn('h-1.5 w-1.5 shrink-0 rounded-full', fresh.stale ? 'bg-status-warn' : 'bg-verdant')}
       />
-      <span className={cn('truncate font-mono', rail && REVEAL_INLINE)}>обновлено {fresh.label}</span>
+      {!rail && <span className="truncate font-mono">обновлено {fresh.label}</span>}
     </div>
-  );
-}
-
-/** Bottom collapse/expand control (lg only). Always rendered + tabbable, even in the rail.
-    Styled as a real bordered control (like the search box), not bare muted text — the footer
-    «Развернуть» must be discoverable, with an icon + label and a clear hover state. */
-function CollapseToggle({ collapsed, onToggle, rail }: { collapsed: boolean; onToggle: () => void; rail: boolean }) {
-  return (
-    <button
-      type="button"
-      onClick={onToggle}
-      aria-label={collapsed ? 'Развернуть боковую панель' : 'Свернуть боковую панель'}
-      title={collapsed ? 'Развернуть' : 'Свернуть'}
-      className={cn(
-        'flex w-full items-center rounded-lg border bg-card text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground',
-        rail
-          ? 'justify-center px-1 py-2 group-hover/sb:justify-start group-hover/sb:gap-2 group-hover/sb:px-3 group-focus-within/sb:justify-start group-focus-within/sb:gap-2 group-focus-within/sb:px-3'
-          : 'gap-2 px-3 py-2',
-      )}
-    >
-      <Icon
-        name="chevron"
-        className={cn('h-4 w-4 shrink-0 transition-transform', collapsed ? '-rotate-90' : 'rotate-90')}
-      />
-      <span className={cn('text-xs font-medium', rail && REVEAL_INLINE)}>{collapsed ? 'Развернуть' : 'Свернуть'}</span>
-    </button>
   );
 }
 
@@ -347,6 +401,9 @@ function MobileBottomNav() {
   );
 }
 
+/** Sidebar nav row. Active = full-row neutral highlight (bg-hover-row + medium ink) — blue stays
+    reserved for links/brand. NavLink emits aria-current="page" on the active row by itself.
+    Rail: icon only, centered, with the label as a title tooltip + aria-label. */
 function NavItem({ to, label, icon, end, rail }: NavLinkDef & { rail?: boolean }) {
   return (
     <NavLink
@@ -356,27 +413,26 @@ function NavItem({ to, label, icon, end, rail }: NavLinkDef & { rail?: boolean }
       aria-label={rail ? label : undefined}
       className={({ isActive }) =>
         cn(
-          'relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
+          'flex h-9 items-center rounded text-sm transition-colors',
+          rail ? 'justify-center' : 'gap-2.5 px-2',
           isActive
-            ? 'font-medium text-foreground'
-            : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
+            ? 'bg-hover-row font-medium text-foreground'
+            : 'text-ink2 hover:bg-hover-row/60 hover:text-foreground',
         )
       }
     >
-      {({ isActive }) => (
-        <>
-          {/* Left accent bar marks the active section clearly (beyond just the tint). */}
-          {isActive && (
-            <span aria-hidden="true" className="absolute inset-y-1.5 left-0 w-1 rounded-r-full bg-primary" />
-          )}
-          <Icon name={icon} className={cn('h-[18px] w-[18px] shrink-0', isActive && 'text-primary')} />
-          <span className={cn('whitespace-nowrap', rail && REVEAL_INLINE)}>{label}</span>
-        </>
-      )}
+      <Icon name={icon} className="h-[18px] w-[18px] shrink-0" />
+      {!rail && <span className="truncate whitespace-nowrap">{label}</span>}
     </NavLink>
   );
 }
 
+/**
+ * Channel card — the workspace-switcher slot under the sidebar header (steep's «Alex ⌄»).
+ * Identity = a colored letter-avatar chip (deterministic tint from the channel name; a real
+ * profile photo still wins — see ChannelAvatar). Chrome-less row, hairline-free: hover fill
+ * only. Rail: just the chip; the dropdown still opens and overhangs the rail to the right.
+ */
 function ChannelCard({ rail = false }: { rail?: boolean }) {
   const { data } = useChannels();
   const { channelId, setChannelId } = useSelectedChannel();
@@ -398,8 +454,9 @@ function ChannelCard({ rail = false }: { rail?: boolean }) {
   useDismiss(open, setOpen, cardRef);
 
   const current = channels.find((c) => c.id === channelId) ?? channels[0];
-  const handle = current ? `@${current.username || current.title || current.id}` : '@—';
-  const initial = (current?.username || current?.title || 'T').slice(0, 1).toUpperCase();
+  const name = String(current?.username || current?.title || current?.id || '');
+  const handle = current ? `@${name}` : '@—';
+  const initial = (name || 'T').slice(0, 1).toUpperCase();
   const count = current?.memberCount;
   const subtitle =
     count != null && count > 0
@@ -416,77 +473,72 @@ function ChannelCard({ rail = false }: { rail?: boolean }) {
   };
 
   return (
-    // In the rail the dropdown can only be opened while peeked; closing it when the pointer
-    // leaves the card (descendants included) stops it being left clipped once the peek collapses.
-    <div ref={cardRef} className="relative px-3" onMouseLeave={() => rail && setOpen(false)}>
+    <div ref={cardRef} className={cn('relative', rail ? 'px-2' : 'px-3')}>
       <button
         type="button"
         onClick={() => multi && setOpen((o) => !o)}
         title={rail ? handle : undefined}
         aria-label={rail ? `Канал ${handle}` : undefined}
         className={cn(
-          'flex w-full items-center rounded-lg border text-left transition-colors',
-          rail
-            ? 'justify-center border-transparent bg-transparent px-1 py-1.5 group-hover/sb:justify-start group-hover/sb:gap-2.5 group-hover/sb:border-border group-hover/sb:bg-card group-hover/sb:px-2.5 group-hover/sb:py-2 group-focus-within/sb:justify-start group-focus-within/sb:gap-2.5 group-focus-within/sb:border-border group-focus-within/sb:bg-card group-focus-within/sb:px-2.5 group-focus-within/sb:py-2'
-            : 'gap-2.5 border-border bg-card px-2.5 py-2',
-          multi ? 'cursor-pointer hover:bg-muted/50' : 'cursor-default',
+          'flex w-full items-center rounded text-left transition-colors',
+          rail ? 'justify-center py-1' : 'gap-2.5 px-2 py-1.5',
+          multi ? 'cursor-pointer hover:bg-hover-row/60' : 'cursor-default',
         )}
       >
-        <ChannelAvatar source={current?.source} initial={initial} className="h-9 w-9 rounded text-sm" />
-        <span className={cn('min-w-0 flex-1', rail && REVEAL_BLOCK)}>
-          <span className="block truncate text-sm font-medium text-foreground">{handle}</span>
-          <span className="block truncate text-xs text-muted-foreground">{subtitle}</span>
-        </span>
-        {multi && (
-          <Icon
-            name="chevron"
-            className={cn('h-4 w-4 shrink-0 text-muted-foreground', rail && REVEAL_BLOCK)}
-          />
+        <ChannelAvatar
+          source={current?.source}
+          initial={initial}
+          tintClassName={chipTint(name)}
+          className="h-9 w-9 rounded text-sm"
+        />
+        {!rail && (
+          <>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-medium text-foreground">{handle}</span>
+              <span className="block truncate text-xs text-muted-foreground">{subtitle}</span>
+            </span>
+            {multi && <Icon name="chevron" className="h-4 w-4 shrink-0 text-muted-foreground" />}
+          </>
         )}
       </button>
 
       {open && multi && (
-        <div className="absolute inset-x-3 top-full z-30 mt-1 overflow-hidden rounded-lg border bg-popover p-1">
-          {channels.map((channel) => (
-            <button
-              key={channel.id}
-              type="button"
-              onClick={() => pick(channel.id)}
-              className={`block w-full truncate rounded px-2.5 py-1.5 text-left text-sm transition-colors ${
-                channel.id === channelId
-                  ? 'bg-primary/15 text-foreground'
-                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-              }`}
-            >
-              @{channel.username || channel.title || channel.id}
-            </button>
-          ))}
+        <div
+          className={cn(
+            'absolute top-full z-40 mt-1 overflow-hidden rounded border bg-popover p-1',
+            // In the rail the popover overhangs the 64px column instead of squeezing into it.
+            rail ? 'left-2 w-56' : 'inset-x-3',
+          )}
+        >
+          {channels.map((channel) => {
+            const channelName = String(channel.username || channel.title || channel.id);
+            return (
+              <button
+                key={channel.id}
+                type="button"
+                onClick={() => pick(channel.id)}
+                className={cn(
+                  'flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors',
+                  channel.id === channelId
+                    ? 'bg-hover-row font-medium text-foreground'
+                    : 'text-muted-foreground hover:bg-hover-row/60 hover:text-foreground',
+                )}
+              >
+                <span
+                  className={cn(
+                    'flex h-5 w-5 shrink-0 items-center justify-center rounded text-2xs font-medium',
+                    chipTint(channelName),
+                  )}
+                >
+                  {channelName.slice(0, 1).toUpperCase()}
+                </span>
+                <span className="truncate">@{channelName}</span>
+              </button>
+            );
+          })}
         </div>
       )}
     </div>
-  );
-}
-
-function SearchBox({ rail = false }: { rail?: boolean }) {
-  // Opens the global ⌘K command palette (mounted in App.tsx) through the shared store —
-  // no synthetic KeyboardEvent replay coupling this button to the shortcut handler.
-  return (
-    <button
-      type="button"
-      onClick={openCommandPalette}
-      title={rail ? 'Поиск (⌘K)' : undefined}
-      aria-label={rail ? 'Поиск (⌘K)' : undefined}
-      className={cn(
-        'flex w-full items-center rounded-lg border bg-card text-xs text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground',
-        rail
-          ? 'justify-center px-1 py-2 group-hover/sb:justify-start group-hover/sb:gap-2 group-hover/sb:px-3 group-focus-within/sb:justify-start group-focus-within/sb:gap-2 group-focus-within/sb:px-3'
-          : 'gap-2 px-3 py-2',
-      )}
-    >
-      <Icon name="search" className="h-4 w-4 shrink-0" />
-      <span className={cn('flex-1 text-left', rail && REVEAL_BLOCK)}>Поиск</span>
-      <kbd className={cn('rounded border px-1.5 py-0.5 font-mono text-2xs', rail && REVEAL_BLOCK)}>⌘K</kbd>
-    </button>
   );
 }
 
@@ -811,13 +863,13 @@ function PeriodSwitcher() {
 }
 
 /**
- * Source/network switcher (Telegram ↔ Instagram). Lives at the "data source" level — in the
- * sidebar under the channel card (desktop) and in the mobile context bar — NOT in the page
- * content, so it doesn't read as a per-page filter on Settings/Admin/Bugs. Instagram is
- * demo/mock-backed until connected; `mock === true` (not just "no data") avoids a false flag
- * during the initial load.
+ * Source/network switcher (Telegram ↔ Instagram) — MOBILE ONLY (<md, MobileHeader context bar).
+ * The desktop sidebar now lists both platforms as labeled nav sections instead, but the mobile
+ * bottom tab bar still shows one platform's routes at a time, so this segmented control keeps
+ * Instagram reachable on phones. Instagram is demo/mock-backed until connected; `mock === true`
+ * (not just "no data") avoids a false flag during the initial load.
  */
-function PlatformNav({ rail = false }: { rail?: boolean }) {
+function PlatformNav() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const igActive = pathname.startsWith('/instagram');
@@ -830,10 +882,8 @@ function PlatformNav({ rail = false }: { rail?: boolean }) {
     demo: p.key === 'ig' && igDemo,
   }));
 
-  // One horizontal segmented control everywhere (desktop sidebar + mobile context bar). The active
-  // half is a calm neutral surface with a thin brand underline; the brand colour lives ONLY on the
-  // icon, so Telegram-blue / Instagram-magenta read as identifiers, not as the UI's main colour.
-  // Rail-aware: labels collapse to icons in the icon-rail and reappear on hover/focus peek.
+  // The active half is a calm neutral surface with a thin brand underline; the brand colour lives
+  // ONLY on the icon, so Telegram-blue / Instagram-magenta read as identifiers, not UI colour.
   return (
     <div className="grid grid-cols-2 gap-px overflow-hidden rounded border border-border bg-border">
       {items.map((p) => (
@@ -842,8 +892,6 @@ function PlatformNav({ rail = false }: { rail?: boolean }) {
           type="button"
           onClick={() => navigate(p.to)}
           aria-current={p.active ? 'true' : undefined}
-          title={rail ? (p.demo ? `${p.name} · демо` : p.name) : undefined}
-          aria-label={rail ? p.name : undefined}
           className={cn(
             'relative flex items-center justify-center gap-2 px-2 py-2 text-sm transition-colors',
             p.active ? 'bg-muted/60 font-medium text-foreground' : 'bg-background text-muted-foreground hover:text-foreground',
@@ -852,14 +900,9 @@ function PlatformNav({ rail = false }: { rail?: boolean }) {
           <span className="shrink-0" style={{ color: p.color, opacity: p.active ? 1 : 0.55 }}>
             <PlatformGlyph k={p.key} className="h-4 w-4" />
           </span>
-          <span className={cn('whitespace-nowrap', rail && REVEAL_INLINE)}>{p.name}</span>
+          <span className="whitespace-nowrap">{p.name}</span>
           {p.demo && (
-            <span
-              className={cn(
-                'rounded-full bg-status-warn/15 px-1.5 py-0.5 text-2xs font-medium text-status-warn',
-                rail && REVEAL_INLINE,
-              )}
-            >
+            <span className="rounded-full bg-status-warn/15 px-1.5 py-0.5 text-2xs font-medium text-status-warn">
               демо
             </span>
           )}
