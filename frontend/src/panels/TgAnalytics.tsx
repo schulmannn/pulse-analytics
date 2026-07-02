@@ -146,30 +146,10 @@ function deriveTgAnalytics(
       .sort((a, b) => b.avgErv - a.avgErv);
   })();
 
-  // 6) Subscriber growth
-  const growthGroup = graphs?.growth;
-  const growthSeries = growthGroup?.series?.[0];
-  const hasGrowth = growthSeries && growthSeries.values.length >= 2;
-
-  // 6b) Bar presentation of the growth series = day-over-day DELTAS on a diverging axis.
-  // The raw series is a LEVEL (~4800 подписчиков): zero-based bars of levels all render
-  // full height and a decline becomes invisible. delta[i] = v[i] − v[i−1]; the first point
-  // has no delta and drops.
-  const growthDeltaValues: number[] = [];
-  const growthDeltaLabels: string[] = [];
-  const growthDeltaTitles: string[] = [];
-  if (hasGrowth && growthGroup && growthSeries) {
-    for (let i = 1; i < growthSeries.values.length; i++) {
-      const d = Number(growthSeries.values[i] ?? 0) - Number(growthSeries.values[i - 1] ?? 0);
-      const ts = growthGroup.x[i];
-      const label = ts ? formatMsDate(ts) : '';
-      growthDeltaValues.push(d);
-      growthDeltaLabels.push(label);
-      growthDeltaTitles.push(`${label}: ${d >= 0 ? '+' : ''}${fmt.num(d)} за день`);
-    }
-  }
-
-  // 7) Views & reposts — two separate widgets (daily FLOWS, so zero-based bars are honest)
+  // 6) Views & reposts — two separate widgets (daily FLOWS, so zero-based bars are honest).
+  // (The subscriber-LEVEL «Рост подписчиков» card lived here; removed as a duplicate — the level
+  // trend is «История подписчиков» (full archive + rich explorer) and the daily net is «Чистый
+  // прирост подписчиков» below, so a third level+delta card only repeated both.)
   const interGroup = graphs?.interactions;
   const interSeries = interGroup?.series ?? [];
   const viewSeries = interSeries.find((s) => /view|просмотр/i.test(s.name ?? '')) || interSeries[0];
@@ -275,8 +255,6 @@ function deriveTgAnalytics(
     vs, cur, avgErv, avgVir, notif, notifPct,
     last14Dates, vbdValues, vbdTitles, vbdPrev,
     topEmojis, engagementComposition, viewsByType, formatPerf,
-    growthGroup, growthSeries, hasGrowth,
-    growthDeltaValues, growthDeltaLabels, growthDeltaTitles,
     interGroup, viewSeries, shareSeries,
     interBarLabels, viewBarTitles, shareBarTitles,
     vbsItems, nfsItems, langItems, sentItems,
@@ -398,8 +376,6 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
     vs, cur, avgErv, avgVir, notif, notifPct,
     last14Dates, vbdValues, vbdTitles, vbdPrev,
     topEmojis, engagementComposition, viewsByType, formatPerf,
-    growthGroup, growthSeries, hasGrowth,
-    growthDeltaValues, growthDeltaLabels, growthDeltaTitles,
     interGroup, viewSeries, shareSeries,
     interBarLabels, viewBarTitles, shareBarTitles,
     vbsItems, nfsItems, langItems, sentItems,
@@ -512,40 +488,6 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
                 deriveFormatPerf(full, period.inRange).map((f) => ({ label: f.label, value: f.avgErv, display: `${f.avgErv.toFixed(1)}% ERV · ${f.n} шт` })),
               )
             }
-          />
-        )}
-
-        {inGroup('dynamics') && hasGrowth && growthGroup && growthSeries && (
-          <ChartSection
-            title="Рост подписчиков"
-            variants={[
-              {
-                key: 'line',
-                label: 'Линия',
-                render: (
-                  <LineChart
-                    values={growthSeries.values}
-                    titles={growthSeries.values.map((v, i) => `${growthGroup.x[i] ? formatMsDate(growthGroup.x[i]!) : ''}: ${fmt.num(v)} подписчиков`)}
-                    labels={interLabels(growthGroup)}
-                    markAnomalies
-                  />
-                ),
-              },
-              {
-                // Дельты, не уровни: столбцы от нуля на серии ~4800 подписчиков все были бы
-                // полной высоты — спад просто не виден. Дивергентная ось честно показывает
-                // минусовые дни (ember, ниже базовой линии).
-                key: 'bar',
-                label: 'Столбцы',
-                render: (
-                  <DivergingBars values={growthDeltaValues} labels={growthDeltaLabels} titles={growthDeltaTitles} />
-                ),
-              },
-              seriesBarValuesVariant(growthDeltaValues, growthDeltaLabels, growthDeltaTitles, {
-                diverging: true,
-                format: (v) => `${v >= 0 ? '+' : ''}${fmt.num(v)}`,
-              }),
-            ]}
           />
         )}
 

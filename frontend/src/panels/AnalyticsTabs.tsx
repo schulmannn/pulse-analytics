@@ -14,10 +14,12 @@ import { Hashtags } from '@/panels/Hashtags';
  * сравнение) live here alongside the TG breakdowns + hashtag lift. Moved out of App.tsx so
  * the TG feed can compose it as a block.
  */
+// Order mirrors the Instagram feed (Обзор → Аналитика → Контент → Аудитория) so both platforms
+// read on ONE schema: dynamics/reach → engagement/content → audience/demographics → comparison.
 const ANALYTICS_TABS = [
   { key: 'dynamics', label: 'Динамика' },
-  { key: 'audience', label: 'Аудитория' },
   { key: 'content', label: 'Контент' },
+  { key: 'audience', label: 'Аудитория' },
   { key: 'compare', label: 'Сравнение' },
 ] as const;
 type AnalyticsTab = (typeof ANALYTICS_TABS)[number]['key'];
@@ -76,16 +78,16 @@ export function Analytics() {
           </WidgetGroup>
         </div>
       )}
-      {tab === 'audience' && (
-        <div className="space-y-10">
-          <TgAnalytics group="audience" />
-          <HeatmapChartBlock />
-        </div>
-      )}
       {tab === 'content' && (
         <div className="space-y-10">
           <TgAnalytics group="content" />
           <Hashtags />
+        </div>
+      )}
+      {tab === 'audience' && (
+        <div className="space-y-10">
+          <TgAnalytics group="audience" />
+          <HeatmapChartBlock />
         </div>
       )}
       {tab === 'compare' && (
