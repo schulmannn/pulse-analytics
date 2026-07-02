@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { CSSProperties, ReactNode } from 'react';
 import { BarChart } from '@/components/BarChart';
@@ -129,7 +129,7 @@ interface Registered {
 }
 
 interface GroupCtxValue {
-  register: (id: string, title: string) => () => void;
+  register: (id: string, title: string, node: HTMLElement | null) => () => void;
   sequence: string[];
   move: (id: string, dir: -1 | 1) => void;
   /** iOS-style drag-and-drop reordering («jiggle mode»). */
@@ -156,11 +156,57 @@ export function WidgetGroup({ id, className, children }: WidgetGroupProps) {
   // same pair (the reflow puts the swapped widget back under the cursor).
   const lastSwapAt = useRef(0);
   const lastSwapPair = useRef('');
-  useStoreTick();
 
-  const register = useCallback((widgetId: string, title: string) => {
+  // ── FLIP: displaced widgets GLIDE to their new slots instead of teleporting. ────────────
+  // The store notifies synchronously BEFORE React re-renders, so that's the moment to
+  // snapshot the old positions; the layout effect below inverts and plays after commit.
+  const nodes = useRef(new Map<string, HTMLElement>());
+  const prevRects = useRef(new Map<string, DOMRect>());
+  const [, force] = useState(0);
+  useEffect(
+    () =>
+      subscribeStore(() => {
+        for (const [wid, el] of nodes.current) {
+          const rect = el.getBoundingClientRect();
+          if (rect.width > 0) prevRects.current.set(wid, rect);
+        }
+        force((n) => n + 1);
+      }),
+    [],
+  );
+  useLayoutEffect(() => {
+    if (prevRects.current.size === 0) return;
+    const reduced = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    for (const [wid, el] of nodes.current) {
+      const prev = prevRects.current.get(wid);
+      if (!prev) continue;
+      const now = el.getBoundingClientRect();
+      if (now.width === 0) continue;
+      const dx = prev.left - now.left;
+      const dy = prev.top - now.top;
+      if (!dx && !dy) continue;
+      if (reduced) continue;
+      el.style.transition = 'none';
+      el.style.transform = `translate(${dx}px, ${dy}px)`;
+      void el.offsetHeight; // commit the inverted position before playing
+      el.style.transition = 'transform 260ms cubic-bezier(0.2, 0.7, 0.3, 1)';
+      el.style.transform = '';
+      const clear = () => {
+        el.style.transition = '';
+        el.removeEventListener('transitionend', clear);
+      };
+      el.addEventListener('transitionend', clear);
+    }
+    prevRects.current.clear();
+  });
+
+  const register = useCallback((widgetId: string, title: string, node: HTMLElement | null) => {
+    if (node) nodes.current.set(widgetId, node);
     setRegistered((prev) => (prev.some((r) => r.id === widgetId) ? prev : [...prev, { id: widgetId, title }]));
-    return () => setRegistered((prev) => prev.filter((r) => r.id !== widgetId));
+    return () => {
+      nodes.current.delete(widgetId);
+      setRegistered((prev) => prev.filter((r) => r.id !== widgetId));
+    };
   }, []);
 
   // Exit jiggle mode with Escape, like closing any transient mode.
@@ -274,12 +320,13 @@ export function ChartSection({ id, title, action, variants, className, children 
   const [menuOpen, setMenuOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const sectionRef = useRef<HTMLElement>(null);
   useStoreTick();
 
   // Depend on the STABLE register callback, not the ctx object (recreated every group
   // render) — otherwise the cleanup/register cycle feeds the group's state in a loop.
   const register = group?.register;
-  useEffect(() => register?.(widgetId, title), [register, widgetId, title]);
+  useEffect(() => register?.(widgetId, title, sectionRef.current), [register, widgetId, title]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -302,11 +349,16 @@ export function ChartSection({ id, title, action, variants, className, children 
 
   const seqIndex = group ? group.sequence.indexOf(widgetId) : -1;
   const accentVar = prefs.color ? `--chart-${prefs.color}` : '--brand-iris';
-  const style: CSSProperties = {};
-  if (prefs.color) (style as Record<string, string>)['--brand-iris'] = `var(--chart-${prefs.color})`;
-  if (prefs.tinted) style.backgroundColor = `hsl(var(${accentVar}) / 0.07)`;
-  if (seqIndex >= 0) style.order = seqIndex;
-  if (prefs.hidden) style.display = 'none';
+  // Split the styles across two layers: the OUTER section owns grid placement + the FLIP
+  // translate (set imperatively by WidgetGroup), the INNER div owns the visible card —
+  // its jiggle rotation is a CSS animation on `transform` and would stomp the FLIP glide
+  // if both lived on one element.
+  const outerStyle: CSSProperties = {};
+  if (seqIndex >= 0) outerStyle.order = seqIndex;
+  if (prefs.hidden) outerStyle.display = 'none';
+  const innerStyle: CSSProperties = {};
+  if (prefs.color) (innerStyle as Record<string, string>)['--brand-iris'] = `var(--chart-${prefs.color})`;
+  if (prefs.tinted) innerStyle.backgroundColor = `hsl(var(${accentVar}) / 0.07)`;
 
   const reorder = !!group?.reorderMode;
   const isDragging = reorder && group?.draggingId === widgetId;
@@ -316,10 +368,9 @@ export function ChartSection({ id, title, action, variants, className, children 
 
   return (
     <section
-      className={`rounded-xl border border-border bg-card p-4 sm:p-5 ${
-        reorder ? `widget-jiggle cursor-grab select-none ${isDragging ? 'opacity-50' : ''}` : ''
-      } ${className ?? ''}`}
-      style={style}
+      ref={sectionRef}
+      className={`${reorder ? 'cursor-grab select-none' : ''} ${className ?? ''}`}
+      style={outerStyle}
       draggable={reorder}
       onDragStart={
         reorder
@@ -351,6 +402,12 @@ export function ChartSection({ id, title, action, variants, className, children 
           : undefined
       }
     >
+      <div
+        className={`rounded-xl border border-border bg-card p-4 sm:p-5 ${reorder ? 'widget-jiggle' : ''} ${
+          isDragging ? 'opacity-50' : ''
+        }`}
+        style={innerStyle}
+      >
       <div className="flex items-center gap-3">
         <h3 className="min-w-0 flex-1 truncate text-xs font-medium tracking-wider text-muted-foreground">
           {prefs.title || title}
@@ -438,6 +495,7 @@ export function ChartSection({ id, title, action, variants, className, children 
           ? (variants.find((v) => v.key === prefs.variant) ?? variants[0]).render
           : null}
         {children}
+      </div>
       </div>
 
       {editOpen && (
