@@ -58,6 +58,7 @@ const TG_NAV: NavLinkDef[] = [
   { to: '/analytics', label: 'Аналитика', icon: 'analytics' },
   { to: '/posts', label: 'Посты', icon: 'posts' },
   { to: '/mentions', label: 'Упоминания', icon: 'mentions' },
+  { to: '/report', label: 'Отчёт', icon: 'report' },
 ];
 // …and Instagram into its own parallel set (Обзор / Аналитика / Контент / Аудитория). The desktop
 // sidebar lists BOTH sets as labeled sections (steep's Teams/Entities pattern); mobile stays
@@ -85,6 +86,7 @@ const TITLES: Record<string, string> = {
   '/analytics': 'Аналитика',
   '/posts': 'Посты',
   '/mentions': 'Упоминания',
+  '/report': 'Отчёт',
   '/settings': 'Настройки',
   '/admin': 'Админ',
   '/bugs': 'Баги',
@@ -234,7 +236,7 @@ function Sidebar() {
         // Quiet column on the shared paper canvas: right hairline only, no panel, no shadow.
         // z-30 lets the rail-mode channel dropdown (which overhangs the aside) paint above the
         // sticky Topbar (z-20) while staying under the period scrim (z-40) and modals (z-50).
-        'sticky top-0 z-30 hidden h-screen shrink-0 flex-col border-r border-border bg-background md:flex',
+        'sticky top-0 z-30 hidden h-screen shrink-0 flex-col border-r border-border bg-background md:flex print:hidden',
         'transition-[width] duration-200 motion-reduce:transition-none',
         rail ? 'w-16' : 'w-60',
       )}
@@ -392,7 +394,7 @@ function SidebarStatus({ rail }: { rail?: boolean }) {
 function MobileBottomNav() {
   const nav = usePlatformNav();
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 border-t bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden">
+    <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 border-t bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden print:hidden">
       {nav.map((item) => (
         <NavLink
           key={item.label}
@@ -559,7 +561,7 @@ function Topbar({ email, role, avatar }: { email?: string; role?: string; avatar
   const { pathname } = useLocation();
   const title = routeTitle(pathname);
   return (
-    <header className="sticky top-0 z-20 flex h-14 items-center justify-between gap-3 border-b bg-background/80 px-4 backdrop-blur sm:gap-4 sm:px-6">
+    <header className="sticky top-0 z-20 flex h-14 items-center justify-between gap-3 border-b bg-background/80 px-4 backdrop-blur sm:gap-4 sm:px-6 print:hidden">
       {/* min-w-0 lets the title truncate instead of shoving the controls off a narrow screen. */}
       <h1 className="min-w-0 truncate text-lg font-medium">{title}</h1>
       <div className="flex shrink-0 items-center gap-2">
@@ -578,7 +580,7 @@ function Topbar({ email, role, avatar }: { email?: string; role?: string; avatar
  */
 function MobileHeader({ email, role, avatar }: { email?: string; role?: string; avatar?: string | null }) {
   return (
-    <div>
+    <div className="print:hidden">
       <div className="flex items-center gap-2 border-b py-2 pr-3">
         <div className="min-w-0 flex-1">
           <ChannelCard />

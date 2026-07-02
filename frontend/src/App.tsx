@@ -9,6 +9,7 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { PeriodUrlSync } from '@/lib/period-url';
 import { Overview } from '@/panels/Overview';
 import { MetricPage } from '@/panels/MetricPage';
+import { ReportPage } from '@/panels/ReportPage';
 import { Posts } from '@/panels/Posts';
 import { Mentions } from '@/panels/Mentions';
 import { TgAnalytics } from '@/panels/TgAnalytics';
@@ -58,6 +59,7 @@ export default function App() {
       <Route element={<ProtectedLayout />}>
         <Route index element={<Overview />} />
         <Route path="metrics/:key" element={<MetricPage />} />
+        <Route path="report" element={<ReportPage />} />
         <Route path="analytics" element={<Analytics />} />
         <Route path="posts" element={<Posts />} />
         <Route path="mentions" element={<Mentions />} />

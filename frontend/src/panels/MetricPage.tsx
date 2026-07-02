@@ -3,8 +3,8 @@ import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom';
 import { useChannels, useHistory, useTgFull } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { usePeriod } from '@/lib/period';
-import { deriveKpis, isDrillKey } from '@/lib/kpiDerive';
-import type { DailySeries, DrillKey } from '@/lib/kpiDerive';
+import { deriveKpis, filledDailySeries, isDrillKey, sparseDailySeries } from '@/lib/kpiDerive';
+import type { DailySeries, DrillKey, PostMetricField } from '@/lib/kpiDerive';
 import { METRIC_DEFS } from '@/lib/metricDefs';
 import type { MetricDef } from '@/lib/metricDefs';
 import { fmt } from '@/lib/format';
@@ -24,7 +24,7 @@ import { ChartSection } from '@/components/instagram/shared';
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 // Which NormalizedPost field a metric attributes to. null = no per-post attribution (subscribers).
-const FIELD: Partial<Record<DrillKey, keyof Pick<NormalizedPost, 'reach' | 'likes' | 'shares' | 'eng'>>> = {
+const FIELD: Partial<Record<DrillKey, PostMetricField>> = {
   views: 'reach',
   avgReach: 'reach',
   reactions: 'likes',
@@ -73,49 +73,6 @@ const ZERO_BASED: Record<DrillKey, boolean> = {
   er: true,
   subscribers: false,
 };
-
-/** Zero-filled daily sums over an inclusive [from..to] window (UTC day buckets, like the KPIs). */
-function filledDaily(
-  posts: NormalizedPost[],
-  field: keyof Pick<NormalizedPost, 'reach' | 'likes' | 'shares' | 'eng'>,
-  fromMs: number,
-  toMs: number,
-): DailySeries {
-  const byDay = new Map<string, number>();
-  for (const post of posts) {
-    if (!post.date) continue;
-    const t = Date.parse(post.date);
-    if (!Number.isFinite(t)) continue;
-    const key = new Date(t).toISOString().slice(0, 10);
-    byDay.set(key, (byDay.get(key) ?? 0) + Number(post[field] ?? 0));
-  }
-  const labels: string[] = [];
-  const values: number[] = [];
-  const start = fromMs - (fromMs % DAY_MS);
-  for (let t = start; t <= toMs; t += DAY_MS) {
-    const key = new Date(t).toISOString().slice(0, 10);
-    labels.push(fmt.day(key));
-    values.push(byDay.get(key) ?? 0);
-  }
-  return { labels, values };
-}
-
-/** Sparse daily sums (no zero-fill) — for the unbounded «Всё» window. */
-function sparseDaily(
-  posts: NormalizedPost[],
-  field: keyof Pick<NormalizedPost, 'reach' | 'likes' | 'shares' | 'eng'>,
-): DailySeries {
-  const byDay = new Map<string, number>();
-  for (const post of posts) {
-    if (!post.date) continue;
-    const t = Date.parse(post.date);
-    if (!Number.isFinite(t)) continue;
-    const key = new Date(t).toISOString().slice(0, 10);
-    byDay.set(key, (byDay.get(key) ?? 0) + Number(post[field] ?? 0));
-  }
-  const entries = [...byDay.entries()].sort(([a], [b]) => a.localeCompare(b));
-  return { labels: entries.map(([k]) => fmt.day(k)), values: entries.map(([, v]) => v) };
-}
 
 /**
  * Metric page — the steep-style evolution of the old KPI drill modal: one metric on a full
@@ -204,7 +161,7 @@ export function MetricPage() {
     }
   } else if (field) {
     if (winFrom != null && (winTo - winFrom) / DAY_MS <= 366) {
-      series = filledDaily(normPosts, field, winFrom, winTo);
+      series = filledDailySeries(normPosts, field, winFrom, winTo);
       if (!range && days > 0) {
         const prevFrom = winFrom - days * DAY_MS;
         const prevTo = winFrom - 1;
@@ -213,11 +170,11 @@ export function MetricPage() {
           const t = Date.parse(post.date);
           return Number.isFinite(t) && t >= prevFrom && t <= prevTo;
         });
-        const prev = filledDaily(prevPosts, field, prevFrom, prevTo);
+        const prev = filledDailySeries(prevPosts, field, prevFrom, prevTo);
         if (prev.values.length === series.values.length && prev.values.some((v) => v > 0)) ghost = prev.values;
       }
     } else {
-      series = sparseDaily(normPosts, field);
+      series = sparseDailySeries(normPosts, field);
     }
   } else {
     series = { labels: [], values: [] };

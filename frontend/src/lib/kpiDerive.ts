@@ -1,6 +1,7 @@
 import type { ChannelsResponse, HistoryData, TgFull } from '@/api/schemas';
 import { fmt } from '@/lib/format';
 import { normalizeTgPosts } from '@/lib/posts';
+import type { NormalizedPost } from '@/lib/posts';
 import { effectiveLimit } from '@/lib/period';
 import type { DateRange, PeriodDays } from '@/lib/period';
 import { avgReachWindowDelta, dailyWindowDelta, pctDelta, subscriberChange, subscriberDelta, sumPostWindows } from '@/lib/delta';
@@ -18,6 +19,51 @@ export const DRILL_KEYS: readonly DrillKey[] = ['views', 'subscribers', 'avgReac
 
 export function isDrillKey(raw: string | undefined): raw is DrillKey {
   return DRILL_KEYS.includes(raw as DrillKey);
+}
+
+/** The NormalizedPost field a post-attributed metric sums over. */
+export type PostMetricField = keyof Pick<NormalizedPost, 'reach' | 'likes' | 'shares' | 'eng'>;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Zero-filled daily sums over an inclusive [from..to] window (UTC day buckets, like the KPIs). */
+export function filledDailySeries(
+  posts: NormalizedPost[],
+  field: PostMetricField,
+  fromMs: number,
+  toMs: number,
+): DailySeries {
+  const byDay = new Map<string, number>();
+  for (const post of posts) {
+    if (!post.date) continue;
+    const t = Date.parse(post.date);
+    if (!Number.isFinite(t)) continue;
+    const key = new Date(t).toISOString().slice(0, 10);
+    byDay.set(key, (byDay.get(key) ?? 0) + Number(post[field] ?? 0));
+  }
+  const labels: string[] = [];
+  const values: number[] = [];
+  const start = fromMs - (fromMs % DAY_MS);
+  for (let t = start; t <= toMs; t += DAY_MS) {
+    const key = new Date(t).toISOString().slice(0, 10);
+    labels.push(fmt.day(key));
+    values.push(byDay.get(key) ?? 0);
+  }
+  return { labels, values };
+}
+
+/** Sparse daily sums (no zero-fill) — for the unbounded «Всё» window. */
+export function sparseDailySeries(posts: NormalizedPost[], field: PostMetricField): DailySeries {
+  const byDay = new Map<string, number>();
+  for (const post of posts) {
+    if (!post.date) continue;
+    const t = Date.parse(post.date);
+    if (!Number.isFinite(t)) continue;
+    const key = new Date(t).toISOString().slice(0, 10);
+    byDay.set(key, (byDay.get(key) ?? 0) + Number(post[field] ?? 0));
+  }
+  const entries = [...byDay.entries()].sort(([a], [b]) => a.localeCompare(b));
+  return { labels: entries.map(([k]) => fmt.day(k)), values: entries.map(([, v]) => v) };
 }
 
 /**
