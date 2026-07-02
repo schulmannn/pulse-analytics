@@ -159,7 +159,11 @@ export function ReportPage() {
   const rangeLabel = range
     ? `${fmt.day(new Date(range.from).toISOString().slice(0, 10))} – ${fmt.day(new Date(range.to).toISOString().slice(0, 10))}`
     : null;
-  const generated = fmt.day(new Date().toISOString().slice(0, 10));
+  // Local calendar date (toISOString would report yesterday for TZ east of UTC until ~noon).
+  const now = new Date();
+  const generated = fmt.day(
+    `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`,
+  );
 
   const chipBase = 'rounded-full border px-3 py-1 text-xs font-medium transition-colors';
   const chipActive = 'border-primary/40 bg-primary/10 text-primary';
