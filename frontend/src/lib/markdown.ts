@@ -28,6 +28,18 @@ function stripOrphanMarks(text: string): string {
   return text.replace(/\*\*/g, '');
 }
 
+// Archive captions are 500-char SNIPPETS; older rows were cut over RAW markdown, so the
+// tail can hold a half-token — "[label](https://…" with no closing paren never tokenizes
+// and used to render literally (D6.2). Salvage the label, drop the marker debris. Only the
+// very END of the string is touched: truncation is by definition a tail artefact.
+function repairTruncatedTail(text: string): string {
+  return text
+    .replace(/\[([^\]\n]*)\]\([^)\s]*$/, '$1') // [label](url-cut → label
+    .replace(/\[([^\]\n]*)$/, '$1'); // [label-cut → label
+  // NOT stripping trailing */` dust: a trailing marker is usually the legit CLOSER of a
+  // token («*i*», «`код`») — orphan ** pairs are already handled by stripOrphanMarks.
+}
+
 function pushText(nodes: MdNode[], value: string): void {
   const cleaned = stripOrphanMarks(value);
   if (cleaned) nodes.push({ type: 'text', value: cleaned });
@@ -38,7 +50,7 @@ export function parseInlineMarkdown(rawInput: string): MdNode[] {
   if (!rawInput) return [];
   // Defensive cap: real captions are short (Telegram ≤4096, Instagram ≤2200). Bounding the input
   // keeps the linear-with-quadratic-tail tokenizer cheap even if the data path ever changes.
-  const input = rawInput.length > 8000 ? rawInput.slice(0, 8000) : rawInput;
+  const input = repairTruncatedTail(rawInput.length > 8000 ? rawInput.slice(0, 8000) : rawInput);
   const nodes: MdNode[] = [];
   let last = 0;
   let match: RegExpExecArray | null;
@@ -67,12 +79,15 @@ export function parseInlineMarkdown(rawInput: string): MdNode[] {
 /**
  * Flatten inline markdown to plain text — drops the markers but keeps link/bold/italic/code
  * content. For places that show a caption *snippet* (e.g. the auto-summary) where rendering
- * React nodes is overkill but raw `**…**` must never leak. Whitespace is collapsed.
+ * React nodes is overkill but raw `**…**` must never leak. Line breaks become a « · »
+ * separator — collapsing them to a bare space glued paragraphs into nonsense
+ * («…мастерской Именно…», D6.2); other whitespace is collapsed.
  */
 export function markdownToPlainText(text: string): string {
   return parseInlineMarkdown(text)
     .map((node) => node.value)
     .join('')
-    .replace(/\s+/g, ' ')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\s*\n+\s*/g, ' · ')
     .trim();
 }

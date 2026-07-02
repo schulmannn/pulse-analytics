@@ -1,15 +1,15 @@
-import { useState, useEffect } from 'react';
-import { useTgFull, usePostStats } from '@/api/queries';
+import { useState } from 'react';
+import { useTgFull } from '@/api/queries';
 import { normalizeTgPosts, type NormalizedPost } from '@/lib/posts';
-import { fmt, ruAxisLabel } from '@/lib/format';
+import { fmt } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { markdownToPlainText } from '@/lib/markdown';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { LineChart } from '@/components/LineChart';
+import { Card, CardContent } from '@/components/ui/card';
 import { usePeriod } from '@/lib/period';
 import { Skeleton } from '@/components/ui/skeleton';
 import { RichText } from '@/components/RichText';
 import { ChartSection } from '@/components/ChartWidget';
+import { PostDetailModal } from '@/components/PostDetailModal';
 
 type SortKey = 'reach' | 'likes' | 'shares' | 'virality' | 'erv' | 'er';
 const SORT_COLUMNS: { key: SortKey; label: string; get: (p: NormalizedPost) => number }[] = [
@@ -191,7 +191,10 @@ export function Posts() {
         </div>
       </ChartSection>
 
-      {openId !== null && selectedPost && <PostModal post={selectedPost} onClose={() => setOpenId(null)} />}
+      {/* Общая модалка поста (D6.2): без №-бейджа — порядок таблицы зависит от текущей сортировки. */}
+      {openId !== null && selectedPost && (
+        <PostDetailModal post={selectedPost} reason={null} onClose={() => setOpenId(null)} />
+      )}
     </div>
   );
 }
@@ -217,139 +220,6 @@ function PctTag({ value, median }: { value: number | null; median: number | null
     else if (value <= median * 0.5) colorClass = 'font-medium text-ember';
   }
   return <span className={colorClass}>{value.toFixed(1)}%</span>;
-}
-
-interface PostModalProps {
-  post: NormalizedPost;
-  onClose: () => void;
-}
-
-function PostModal({ post, onClose }: PostModalProps) {
-  const stats = usePostStats(post.id);
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
-
-  const graphX = stats.data?.views_graph?.x ?? [];
-  const graphValues = stats.data?.views_graph?.series?.[0]?.values ?? [];
-  const hasGraphData = (stats.data?.available ?? false) && graphValues.length > 1;
-
-  const chartTitles = graphX.map((ts, i) => {
-    const val = graphValues[i];
-    const dateStr = new Date(ts).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit' });
-    return `${dateStr}: ${fmt.num(val ?? 0)}`;
-  });
-
-  const chartLabels = (() => {
-    if (graphX.length === 0) return [];
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    const formatLabel = (ts: number) => {
-      const d = new Date(ts);
-      const mon = months[d.getMonth()] ?? '';
-      const hh = String(d.getHours()).padStart(2, '0');
-      // ruAxisLabel: «24 Jun 21:00» → «24 июн 21:00» — axis labels must be Russian in the RU UI.
-      return ruAxisLabel(`${d.getDate()} ${mon} ${hh}:00`);
-    };
-    const first = graphX[0];
-    const mid = graphX[Math.floor(graphX.length / 2)];
-    const last = graphX[graphX.length - 1];
-    return [first ? formatLabel(first) : '', mid ? formatLabel(mid) : '', last ? formatLabel(last) : ''];
-  })();
-
-  const reactionsList = stats.data?.reactions ?? [];
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <Card
-        className="relative max-h-[85vh] w-full max-w-2xl overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <button
-          onClick={onClose}
-          className="absolute right-4 top-4 rounded-full p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          aria-label="Закрыть"
-        >
-          <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-
-        <CardHeader className="pr-12">
-          <CardTitle className="text-base font-medium leading-snug text-foreground">
-            {post.caption ? <RichText text={post.caption} /> : <span className="italic text-muted-foreground">Без подписи</span>}
-          </CardTitle>
-          <div className="pt-1.5 text-xs tabular-nums text-muted-foreground">
-            {fmt.short(post.reach)} просм · {fmt.short(post.likes)} реакц · {fmt.short(post.shares)} реп · {fmt.date(post.date)}
-          </div>
-        </CardHeader>
-
-        <CardContent className="space-y-6">
-          {post.permalink && (
-            <a
-              href={post.permalink}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 text-xs font-medium text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary"
-            >
-              Открыть публикацию в Telegram
-            </a>
-          )}
-
-          <div className="border-t border-border pt-4">
-            {stats.isPending ? (
-              <div className="space-y-4 py-4">
-                <Skeleton className="h-4 w-1/3" />
-                <Skeleton className="h-40 w-full" />
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                  {Array.from({ length: 3 }).map((_, index) => (
-                    <Skeleton key={index} className="h-9 w-full" />
-                  ))}
-                </div>
-              </div>
-            ) : hasGraphData ? (
-              <div className="space-y-6">
-                <div>
-                  <h4 className="mb-3 text-xs font-medium tracking-wider text-muted-foreground">
-                    Динамика набора просмотров
-                  </h4>
-                  <LineChart values={graphValues} titles={chartTitles} labels={chartLabels} />
-                </div>
-
-                {reactionsList.length > 0 && (
-                  <div className="space-y-2">
-                    <h4 className="text-xs font-medium tracking-wider text-muted-foreground">Реакции</h4>
-                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                      {reactionsList.map((react, i) => (
-                        <div
-                          key={i}
-                          className="flex items-center justify-between rounded border border-border bg-background p-2 text-xs font-medium"
-                        >
-                          <span className="text-sm">{react.label}</span>
-                          <span className="font-medium tabular-nums text-muted-foreground">{fmt.num(react.value)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="py-8 text-center text-sm text-muted-foreground">
-                Детальная статистика по этому посту недоступна.
-              </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
 }
 
 function PostsSkeletons() {

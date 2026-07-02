@@ -2,7 +2,13 @@ import { Link, useOutletContext } from 'react-router-dom';
 import { fmt } from '@/lib/format';
 import { pctDelta } from '@/lib/delta';
 import { pairDelta } from '@/lib/igMetrics';
+import type { WindowPair } from '@/lib/igMetrics';
 import type { IgData } from '@/lib/useIgData';
+
+// A whole window without a single non-zero sample is «нет данных», not a real zero — the
+// old render showed «0» с «↓100%» рядом с прочерками соседних ячеек (D6.1). Insights quota
+// burn / missing metrics must read as a dash with no delta, never as a crash.
+const isLive = (p: WindowPair) => p.hasCur && p.cur > 0;
 import { KpiHero, KpiCard, signedNum } from '@/components/instagram/shared';
 import { InsightsBlock } from '@/components/instagram/insights';
 import { TopPostsBlock } from '@/components/instagram/content';
@@ -15,7 +21,7 @@ import { TopPostsBlock } from '@/components/instagram/content';
 export function IgOverview() {
   const ig = useOutletContext<IgData>();
   const erTrend =
-    ig.pairs.reach.hasCur && ig.pairs.reach.hasPrev && ig.erReachPrev > 0
+    ig.erReach > 0 && ig.pairs.reach.hasCur && ig.pairs.reach.hasPrev && ig.erReachPrev > 0
       ? pctDelta(ig.erReach, ig.erReachPrev)
       : null;
 
@@ -35,9 +41,17 @@ export function IgOverview() {
             deltaText={ig.netMovement.hasCur ? signedNum(ig.netMovement.cur) : undefined}
             deltaTone={ig.netMovement.cur > 0 ? 'up' : ig.netMovement.cur < 0 ? 'down' : 'flat'}
           />
-          <KpiCard label="Просмотры" value={fmt.short(ig.pairs.views.cur)} trend={pairDelta(ig.pairs.views)} />
+          <KpiCard
+            label="Просмотры"
+            value={isLive(ig.pairs.views) ? fmt.short(ig.pairs.views.cur) : '—'}
+            trend={isLive(ig.pairs.views) ? pairDelta(ig.pairs.views) : null}
+          />
           <KpiCard label="Вовлечённость" value={ig.erReach > 0 ? `${ig.erReach.toFixed(2)}%` : '—'} trend={erTrend} />
-          <KpiCard label="Взаимодействия" value={fmt.short(ig.pairs.ti.cur)} trend={pairDelta(ig.pairs.ti)} />
+          <KpiCard
+            label="Взаимодействия"
+            value={isLive(ig.pairs.ti) ? fmt.short(ig.pairs.ti.cur) : '—'}
+            trend={isLive(ig.pairs.ti) ? pairDelta(ig.pairs.ti) : null}
+          />
         </div>
       </div>
 

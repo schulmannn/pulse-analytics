@@ -1,13 +1,17 @@
 import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { usePostStats } from '@/api/queries';
 import type { NormalizedPost } from '@/lib/posts';
-import { fmt } from '@/lib/format';
+import { fmt, ruAxisLabel } from '@/lib/format';
 import { useFocusTrap } from '@/lib/useFocusTrap';
+import { LineChart } from '@/components/LineChart';
 import { RichText } from '@/components/RichText';
+import { Skeleton } from '@/components/ui/skeleton';
 
 interface PostDetailModalProps {
   post: NormalizedPost;
-  rank: number;
+  /** Leaderboard position badge; omit where the list order is a transient sort. */
+  rank?: number;
   reason: string | null;
   onClose: () => void;
 }
@@ -25,10 +29,12 @@ function Stat({ label, value, accent }: { label: string; value: string; accent?:
 }
 
 /**
- * Post detail overlay opened from a top-post card. Shows the full caption (markdown-rendered),
- * the preview, the complete reactions breakdown, engagement ratios, hashtags, publish time, and
- * a link out to Telegram. Rendered in a portal so the card's `overflow-hidden` never clips it.
- * Closes on Escape, backdrop click, or the × button; locks body scroll while open.
+ * THE post overlay — the app's single post modal (the Posts table used to open its own
+ * simpler one, D6.2). Shows the full caption (markdown-rendered), the preview, the view
+ * velocity graph («жизнь поста», when Telegram has stats), the complete reactions breakdown,
+ * engagement ratios, hashtags, publish time, and a link out to Telegram. Rendered in a portal
+ * so the card's `overflow-hidden` never clips it. Closes on Escape, backdrop click, or the ×
+ * button; locks body scroll while open.
  */
 export function PostDetailModal({ post, rank, reason, onClose }: PostDetailModalProps) {
   const panelRef = useRef<HTMLDivElement>(null);
@@ -53,7 +59,7 @@ export function PostDetailModal({ post, rank, reason, onClose }: PostDetailModal
       className="fixed inset-0 z-50 flex items-end justify-center sm:items-center"
       role="dialog"
       aria-modal="true"
-      aria-label={`Детали поста №${rank}`}
+      aria-label={rank != null ? `Детали поста №${rank}` : 'Детали поста'}
     >
       <div
         className="absolute inset-0 bg-background/70 backdrop-blur-sm"
@@ -68,9 +74,11 @@ export function PostDetailModal({ post, rank, reason, onClose }: PostDetailModal
         {/* Header */}
         <div className="flex items-center justify-between border-b px-5 py-3">
           <div className="flex items-center gap-2.5">
-            <span className="rounded bg-secondary px-2 py-0.5 text-xs font-medium tabular-nums text-secondary-foreground">
-              №{rank}
-            </span>
+            {rank != null && (
+              <span className="rounded bg-secondary px-2 py-0.5 text-xs font-medium tabular-nums text-secondary-foreground">
+                №{rank}
+              </span>
+            )}
             {post.date && (
               <span className="text-sm text-muted-foreground">{fmt.date(post.date)}</span>
             )}
@@ -92,7 +100,7 @@ export function PostDetailModal({ post, rank, reason, onClose }: PostDetailModal
           {post.thumb && (
             <img
               src={`${post.thumb}?size=lg`}
-              alt={`Превью поста №${rank}`}
+              alt={rank != null ? `Превью поста №${rank}` : 'Превью поста'}
               referrerPolicy="no-referrer"
               className="max-h-72 w-full rounded-lg object-cover"
             />
@@ -128,6 +136,8 @@ export function PostDetailModal({ post, rank, reason, onClose }: PostDetailModal
             </div>
           )}
 
+          <PostVelocity postId={post.id} />
+
           {post.reactionsDetail.length > 0 && (
             <div>
               <div className="mb-1.5 text-2xs tracking-wide text-muted-foreground">Реакции</div>
@@ -157,7 +167,7 @@ export function PostDetailModal({ post, rank, reason, onClose }: PostDetailModal
         </div>
 
         {/* Footer */}
-        {post.permalink && (
+        {!!post.permalink && (
           <div className="border-t px-5 py-3">
             <a
               href={post.permalink}
@@ -175,5 +185,52 @@ export function PostDetailModal({ post, rank, reason, onClose }: PostDetailModal
       </div>
     </div>,
     document.body,
+  );
+}
+
+/**
+ * «Жизнь поста» — the incremental view-velocity graph from Telegram's per-post stats
+ * (absorbed from the Posts table's former own modal, D6.2). Quietly renders nothing when
+ * Telegram has no stats for the post — the modal has plenty of content without it.
+ */
+function PostVelocity({ postId }: { postId: number | null }) {
+  const stats = usePostStats(postId);
+
+  if (postId == null) return null;
+  if (stats.isPending) {
+    return (
+      <div className="space-y-3 border-t border-border pt-4">
+        <Skeleton className="h-3 w-1/3" />
+        <Skeleton className="h-32 w-full" />
+      </div>
+    );
+  }
+
+  const graphX = stats.data?.views_graph?.x ?? [];
+  const graphValues = stats.data?.views_graph?.series?.[0]?.values ?? [];
+  if (!(stats.data?.available ?? false) || graphValues.length <= 1) return null;
+
+  const titles = graphX.map((ts, i) => {
+    const dateStr = new Date(ts).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit' });
+    return `${dateStr}: ${fmt.num(graphValues[i] ?? 0)}`;
+  });
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const formatLabel = (ts: number) => {
+    const d = new Date(ts);
+    // ruAxisLabel: «24 Jun 21:00» → «24 июн 21:00» — axis labels must be Russian in the RU UI.
+    return ruAxisLabel(`${d.getDate()} ${months[d.getMonth()] ?? ''} ${String(d.getHours()).padStart(2, '0')}:00`);
+  };
+  const first = graphX[0];
+  const mid = graphX[Math.floor(graphX.length / 2)];
+  const last = graphX[graphX.length - 1];
+  const labels = [first ? formatLabel(first) : '', mid ? formatLabel(mid) : '', last ? formatLabel(last) : ''];
+
+  return (
+    <div className="border-t border-border pt-4">
+      <h4 className="mb-3 text-xs font-medium tracking-wider text-muted-foreground">
+        Динамика набора просмотров
+      </h4>
+      <LineChart values={graphValues} titles={titles} labels={labels} />
+    </div>
   );
 }

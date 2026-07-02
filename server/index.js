@@ -12,6 +12,7 @@ const fs         = require('fs');
 const crypto     = require('crypto');
 const db         = require('./db');
 const { createAuth, hashPassword, verifyPassword, SCRYPT, rateLimitKey } = require('./lib/auth');
+const { captionSnippet } = require('./lib/caption');
 const { fetchWithTimeout } = require('./lib/http');
 const { log, requestContext, hashIp } = require('./lib/observability');
 const { makeResolveChannel, makeServeSnapshot } = require('./middleware/tenant');
@@ -1799,7 +1800,7 @@ app.post('/api/ingest/daily', asyncHandler(async (req, res) => {
           views: p.views || 0, reactions: p.reactions || 0, forwards: p.forwards || 0, replies: p.replies || 0,
           erv: reach > 0 ? eng / reach * 100 : null,
           virality: reach > 0 ? (p.forwards || 0) / reach * 100 : null,
-          media_type: p.media_type, caption: (p.text || '').slice(0, 500), hashtags: p.hashtags || [],
+          media_type: p.media_type, caption: captionSnippet(p.text), hashtags: p.hashtags || [],
         };
       });
       nPosts = await db.upsertPosts(channelId, prows);

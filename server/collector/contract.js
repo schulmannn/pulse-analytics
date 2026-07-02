@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const { captionSnippet } = require('../lib/caption');
 
 const CURRENT_SCHEMA_VERSION = 1;
 const SUPPORTED_SCHEMA_VERSIONS = [1];
@@ -198,7 +199,7 @@ function prepareStorage(normalized, graphsToDailyRows) {
       erv: reach > 0 ? engagement / reach * 100 : null,
       virality: reach > 0 ? post.forwards / reach * 100 : null,
       media_type: post.media_type,
-      caption: post.text.slice(0, 500),
+      caption: captionSnippet(post.text),
       hashtags: post.hashtags,
     };
   });

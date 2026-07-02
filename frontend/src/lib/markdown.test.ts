@@ -58,6 +58,28 @@ describe('parseInlineMarkdown', () => {
   it('handles empty input', () => {
     expect(parseInlineMarkdown('')).toEqual([]);
   });
+
+  it('salvages a link cut in half by the 500-char archive snippet (D6.2)', () => {
+    // Old rows were truncated over RAW markdown — the tail "[label](https://…" never tokenizes.
+    expect(parseInlineMarkdown('приходите в [нашу мастерскую](https://x.io/wor')).toEqual([
+      { type: 'text', value: 'приходите в нашу мастерскую' },
+    ]);
+    expect(parseInlineMarkdown('запись [по ссы')).toEqual([{ type: 'text', value: 'запись по ссы' }]);
+    // Untruncated links elsewhere in the string are untouched.
+    expect(parseInlineMarkdown('[a](https://a.io) и [b](https://b.io)')).toEqual([
+      { type: 'link', value: 'a', href: 'https://a.io' },
+      { type: 'text', value: ' и ' },
+      { type: 'link', value: 'b', href: 'https://b.io' },
+    ]);
+  });
+
+  it('keeps legit closing markers intact (tail repair is link-shaped only)', () => {
+    expect(parseInlineMarkdown('*i*')).toEqual([{ type: 'italic', value: 'i' }]);
+    // Orphan ** dust is still handled by stripOrphanMarks.
+    expect(parseInlineMarkdown('дальше — самое интересное **')).toEqual([
+      { type: 'text', value: 'дальше — самое интересное ' },
+    ]);
+  });
 });
 
 describe('markdownToPlainText', () => {
@@ -65,5 +87,12 @@ describe('markdownToPlainText', () => {
     expect(markdownToPlainText('**Сегодня** скидка [тут](https://x.io)')).toBe('Сегодня скидка тут');
     expect(markdownToPlainText('__важно__   и  `код`')).toBe('важно и код');
     expect(markdownToPlainText('**Сегодня без закрытия')).toBe('Сегодня без закрытия');
+  });
+
+  it('turns line breaks into a « · » separator instead of gluing paragraphs (D6.2)', () => {
+    expect(markdownToPlainText('запись в мастерской\n\nИменно сегодня')).toBe(
+      'запись в мастерской · Именно сегодня',
+    );
+    expect(markdownToPlainText('одна строка')).toBe('одна строка');
   });
 });

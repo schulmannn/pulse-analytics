@@ -1,19 +1,21 @@
 import type { ReactNode } from 'react';
-import { useTgFull, useTgGraphs } from '@/api/queries';
+import { useHistory, useTgFull, useTgGraphs } from '@/api/queries';
 import { normalizeTgPosts } from '@/lib/posts';
+import { subscriberChange } from '@/lib/delta';
 import { fmt } from '@/lib/format';
 import { markdownToPlainText } from '@/lib/markdown';
 import { usePeriod } from '@/lib/period';
 import { Skeleton } from '@/components/ui/skeleton';
 
 export function Digest() {
-  const { days, inRange } = usePeriod();
+  const { days, range, inRange } = usePeriod();
   // isPending (не isLoading): канал-скоупные запросы выключены, пока канал не известен, —
   // скелетон должен показываться и в этом состоянии (isLoading у disabled-запроса = false).
   const { data: full, isPending: isFullPending } = useTgFull(days);
   const { data: graphs, isPending: isGraphsPending } = useTgGraphs();
+  const { data: history, isPending: isHistoryPending } = useHistory(730);
 
-  if (isFullPending || isGraphsPending) {
+  if (isFullPending || isGraphsPending || isHistoryPending) {
     return (
       <div className="space-y-3">
         <Skeleton className="h-3 w-20" />
@@ -30,20 +32,11 @@ export function Digest() {
   const totalViews = posts.reduce((sum, post) => sum + post.reach, 0);
   const postsN = posts.length;
 
-  let netSubscribers: number | null = null;
-  const fSeries = graphs?.followers?.series ?? [];
-  const joinedSeries = fSeries.find((s) => /join|подпис/i.test(s.name ?? ''));
-  const leftSeries = fSeries.find((s) => /left|отпис/i.test(s.name ?? ''));
-  if (joinedSeries && leftSeries) {
-    const mLen = Math.min(joinedSeries.values.length, leftSeries.values.length);
-    let totalJ = 0;
-    let totalL = 0;
-    for (let i = 0; i < mLen; i++) {
-      totalJ += Number(joinedSeries.values[i] ?? 0);
-      totalL += Number(leftSeries.values[i] ?? 0);
-    }
-    netSubscribers = totalJ - totalL;
-  }
+  // Подписчики — тот же источник и та же оконная математика, что у KPI-леджера
+  // (subscriberChange по дневному архиву): дайджест говорил «−166» (сумма joined−left по
+  // ВСЕМУ окну TG-графа), пока леджер показывал «−110» за период — один экран, два числа
+  // (D6.1). Кастомный диапазон, как и в леджере, без клаузы: у него нет пресет-окна.
+  const netSubscribers = range ? null : subscriberChange(history?.rows ?? [], days);
 
   const activeErvs = posts.map((p) => p.erv).filter((v): v is number => v !== null);
   const avgErv = activeErvs.length ? activeErvs.reduce((a, b) => a + b, 0) / activeErvs.length : null;
