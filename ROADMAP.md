@@ -1,13 +1,50 @@
-# pulse-analytics → публичный SaaS: Roadmap по спринтам
+# Atlavue (ex-Pulse) → публичный SaaS: Roadmap
 
 > Хэндофф-документ (память чата заканчивается). Здесь контекст + план. Память проекта Claude (MEMORY.md) тоже актуальна.
 
+## 📍 ТЕКУЩИЙ ФОКУС (обновлено 2026-07-02)
+
+**Идёт «Steep-волна» — вау-фичи по образцу steep.app** (их продукт разобран изнутри, детали в `AUDIT_2026-07-02_arch_design.md` + `design.md` → D5.3/D6.6):
+
+1. **🛠 Metric page (S2, В РАБОТЕ)** — эволюция KpiDrillDown-модалки в полноценную страницу
+   метрики `/metrics/:key`: метрика на весь экран (значение + дельта + большой график с value
+   labels и ghost-сравнением), панель «Explore» (Разбор по дням / вклад постов / сравнение
+   с прошлым окном), блок «О метрике» (определение человеческим языком из `metricDefs.ts`).
+   Вход — клик по KPI в леджерах. Попутно: nice-ticks оси Y + политика «ось от нуля» для
+   объёмных метрик (LineChart).
+2. **Следом: Report-документ (S4 → базис F3)** — страница-отчёт как документ: глобальный
+   фильтр-бар (период/канал/платформа) сверху, чередование метрик-карт и текст-секций;
+   позже — share/PDF/расписание (F3).
+3. Мелочь из той же волны: heat-шейдинг таблицы «Период vs предыдущий», serif-акцент в hero
+   лендинга.
+4. **Потом — «мелочи»: Sprint D6 в `design.md`** (данные спорят: Digest −166 vs леджер −110,
+   IG «0»-метрики; markdown-лик top_posts через серверную обрезку; две модалки поста; болотные
+   плашки в дарке; дубль топ-постов на /posts; локализация «Языков аудитории» и пр.).
+
+**Состояние продукта:** прод https://atlavue.app (Railway, деплой = push в main, сборка 1–6 мин).
+Ребренд Atlavue сделан. Фронт полностью на Vite+React+TS+Tailwind (3F закрыт). Дизайн-система
+«Refined Technical» (warm-paper light-first, hairlines, один синий #2d6be0) — внедрена спринтами
+D1–D5 (см. `design.md`, это рабочий дизайн-трекер с file:line). Аудит архитектуры+дизайна и
+пер-пунктная сверка «что уже починено» — `AUDIT_2026-07-02_arch_design.md` (низ файла).
+
+**Env/операционка:** `TEAM_PASSWORD` удалён (auth на `SESSION_SECRET`+`MTPROTO_TOKEN`) ✅;
+Resend работает (письма регистрации уходят) ✅; **осталось: задать `GOOGLE_CLIENT_ID` на
+web-сервисе Railway** (OAuth Client ID типа Web application из Google Cloud Console, origin
+`https://atlavue.app`; сервер отдаёт его фронту через `/api/config`, кнопка Google появится
+сама). Client secret НЕ нужен.
+
+**Арх-долг (не срочно, из аудита):** `server/index.js` монолит ~1.9k строк без app-factory
+(→ нет supertest); `ChartSection` определён 5×; две пост-модалки (сольются в metric-волне);
+`sortDdMm` год-граница (до декабря); retention email_tokens/receipts/audit; `window.confirm` ×4.
+
+---
+
 ## Контекст для нового чата
 
-**Что это:** дашборд аналитики Telegram-канала → публичный мультитенантный SaaS. Repo `github.com/schulmannn/pulse-analytics`, локально `C:\Tools\pulse-analytics`. Деплой на **Railway** (проект `believable-surprise`, домен `pulse-analytics-production-daf3.up.railway.app`). `gh` авторизован как schulmannn. Детали в памяти Claude: [[project_pulse_split_runtimes]], [[project_pulse_sprint1_multitenant]].
+**Что это:** аналитика Telegram+Instagram → публичный мультитенантный SaaS **Atlavue**. Repo `github.com/schulmannn/pulse-analytics`, локально `C:\Tools\pulse-analytics`. Деплой на **Railway** (проект `believable-surprise`, прод-домен **https://atlavue.app**). `gh` авторизован как schulmannn. Детали в памяти Claude: [[project_pulse_split_runtimes]], [[project_pulse_sprint1_multitenant]], [[project_pulse_design_overhaul]].
 
 **Архитектура (после рефакторинга 2026-06-23/24):** ДВА Railway-сервиса в одном репо —
-- **`pulse-analytics`** (web): Node/Express `server/index.js` + Postgres `server/db.js` + фронт `public/index.html`. Образ `Dockerfile.web`. Публичный.
+- **`pulse-analytics`** (web): Node/Express `server/index.js` + Postgres `server/db.js` + фронт **`frontend/` (Vite+React+TS+Tailwind, SPA)** — собирается build-стадией `Dockerfile.web`, Express отдаёт `dist/`. Публичный.
 - **`pulse-mtproto`** (приватный): Python/Telethon `mtproto/service.py` :8001. Образ `Dockerfile.mtproto`. Web ходит к нему через `MTPROTO_URL` по приватной сети.
 - **Postgres** подключён. Схема развивается через `server/migrations/*.sql`;
   web-образ применяет миграции перед запуском приложения.
@@ -35,13 +72,10 @@
 
 ## ⏭️ БЛИЖАЙШИЕ ШАГИ
 
-1. **Конфиг Railway, чтобы включить self-serve (1B) — ДЕЙСТВИЕ ЮЗЕРА:** на web-сервисе `pulse-analytics` задать `RESEND_API_KEY` (создать на resend.com), `EMAIL_FROM` (верифиц. домен Resend; для теста `onboarding@resend.dev` шлёт только себе), `APP_URL=https://pulse-analytics-production-daf3.up.railway.app`. Без них владелец работает (break-glass `TEAM_PASSWORD` / bootstrap admin), но письма не шлются. *(1C ключи/ingest работают сразу, доп. env не нужен.)*
-2. **Смержить и задеплоить hardening/1D PR:** локальный Python/Docker collector,
-   SQLite queue + retry/backoff + doctor, schema-versioned/idempotent ingest,
-   транзакционные bulk-upsert, SQL-миграции, versioned sessions, audit/readiness.
-3. **Провести пилот collector:** подключить тестовый non-central канал, проверить
-   повторную доставку, отзыв ключа и алерт по устаревшему `last_success_at`.
-4. **Параллельно (research, без кода):** #21 ресёрч конкурентов (кормит цену) — перед Sprint 2.
+> ✅ Пункты этого блока (2026-06-25) выполнены: Resend env настроен (письма уходят), 1D collector
+> смержен и задеплоен, TEAM_PASSWORD удалён. Актуальные шаги — в «📍 ТЕКУЩИЙ ФОКУС» наверху.
+> Открытым из старого списка остался только research-трек: #21 ресёрч конкурентов (кормит цену)
+> перед Sprint 2 (оплата/лендинг-маркетинг).
 
 ---
 
@@ -151,8 +185,9 @@
 - **#22 Claude-интеграция?** Классный дифференциатор (MCP), но отложить до стабильного ядра.
 
 ## Рекомендуемый порядок
-Sprint 0 ✅ → split рантаймов ✅ → Sprint 1: 1A ✅ / 1B ✅ / 1C ✅ /
-1D 🛠 → **сейчас: merge/deploy + pilot collector + Resend env** → research-трек
-(#21/#23) + решения по ребренду/цене → Sprint 2 (оплата+лендинг+.com) →
-Sprint 3F (современный фронт-стек, strangler) → Sprint 3 (UX) → Sprint 4
-(коллаб по багам) → Sprint 5 (рост/advanced).
+Sprint 0 ✅ → split рантаймов ✅ → Sprint 1 (1A/1B/1C/1D) ✅ → Sprint 3F (Vite+React+TS) ✅ →
+ребренд **Atlavue** + домен atlavue.app ✅ → дизайн-оверхол D1–D5 + фичи F1/F2 частично ✅ →
+**сейчас: Steep-волна (metric page → report-документ) + Sprint D6 полировка** (см. «📍 ТЕКУЩИЙ
+ФОКУС») → research-трек (#21/#23) + цена → Sprint 2 (оплата + маркетинг-лендинг) → F3
+(отчёты/шаринг на базе report-документа) + A11y → Sprint 4 (коллаб по багам) → Sprint 5
+(рост/advanced).
