@@ -9,6 +9,7 @@ import { CollectorEmptyState } from '@/components/CollectorEmptyState';
 import { GetStarted } from '@/pages/GetStarted';
 import { useDemo } from '@/lib/demo-context';
 import { Sparkline } from '@/components/Sparkline';
+import { ChartSection, WidgetGroup } from '@/components/ChartWidget';
 import { Digest } from '@/panels/Digest';
 import { KpiGrid } from '@/panels/KpiGrid';
 import { TopPosts } from '@/panels/TopPosts';
@@ -47,22 +48,34 @@ export function Overview() {
       {/* KPI hero (Просмотры) + ledger (Подписчики / Ср.охват / Реакции / ER) */}
       <KpiGrid />
 
-      {/* Главный инсайт | Рост подписчиков (мини-график) */}
-      <div className="mt-8 grid grid-cols-1 gap-8 border-t border-border pt-8 lg:grid-cols-2 lg:gap-12">
-        <Digest />
-        <SubscriberGrowth />
-      </div>
+      {/* Инсайт | Рост подписчиков | Топ постов — customisable widgets (hero+ledger stay open
+          above as the block's «greeting» zone, steep-Home style). */}
+      <WidgetGroup id="overview" className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
+        {/* Explicit ids: the Аналитика block renders widgets with the same display titles on
+            the SAME feed page — default title-ids would make them share prefs (hide one →
+            both vanish). */}
+        <ChartSection id="overview-digest" title="Инсайт">
+          <Digest />
+        </ChartSection>
+        <ChartSection id="overview-growth" title="Рост подписчиков">
+          <SubscriberGrowth />
+        </ChartSection>
+      </WidgetGroup>
 
-      {/* Топ постов */}
-      <section className="mt-8 space-y-4 border-t border-border pt-8">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-sm font-medium tracking-wide text-muted-foreground">Топ постов</h2>
-          <Link to="/analytics" className="shrink-0 text-sm font-medium text-primary hover:underline">
+      {/* Full-width widget OUTSIDE the reorder group: a span-2 card between 1-col cells
+          leaves grid holes when CSS-order moves it, so it keeps Изменить-only chrome. */}
+      <ChartSection
+        id="overview-top-posts"
+        title="Топ постов"
+        className="mt-6"
+        action={
+          <Link to="/analytics" className="shrink-0 text-xs font-medium text-primary hover:underline">
             <span className="md:hidden">Аналитика →</span><span className="hidden md:inline">Открыть аналитику →</span>
           </Link>
-        </div>
+        }
+      >
         <TopPosts />
-      </section>
+      </ChartSection>
     </div>
   );
 }
@@ -100,8 +113,9 @@ function SubscriberGrowth() {
 
   return (
     <div>
-      <h2 className="text-sm font-medium tracking-wide text-muted-foreground">Рост подписчиков · {periodLabel}</h2>
-      <div className="mt-3 flex items-baseline gap-2.5">
+      {/* The widget shell carries the «Рост подписчиков» title; the period label stays as a caption. */}
+      <div className="text-2xs tracking-wide text-muted-foreground">за {periodLabel}</div>
+      <div className="mt-2 flex items-baseline gap-2.5">
         {/* The number opens the subscriber metric page (same affordance as the KPI ledger). */}
         <Link
           to="/metrics/subscribers"

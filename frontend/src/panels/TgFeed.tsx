@@ -160,11 +160,19 @@ export function TgFeed() {
   if (noChannels) return <Overview />;
 
   return (
-    <div ref={containerRef} className="space-y-20">
+    <div ref={containerRef} className="space-y-10">
       {BLOCKS.map((block, i) => (
-        <section key={block.section} data-feed-block={block.section} className="scroll-mt-20">
-          {/* Bold block header (steep Home): a heavy title + air makes the boundary obvious. */}
-          <div className={i === 0 ? 'mb-6' : 'mb-6 border-t border-border pt-14'}>
+        <section
+          key={block.section}
+          data-feed-block={block.section}
+          // One giant widget surface per block (steep Home): a rounded panel a shade apart
+          // from the canvas, with the widget cards layered on top of it. Light theme uses the
+          // full card white (a /50 mix over near-white paper is imperceptible); dark keeps the
+          // half-mix so the canvas→surface→widget layering reads. Mobile trims the side inset —
+          // the surface adds a padding ring on top of the shell + widget cards.
+          className="scroll-mt-20 rounded-2xl border border-border bg-card dark:bg-card/50 px-3 py-4 sm:p-7"
+        >
+          <div className="mb-6">
             <h2 className="text-2xl font-medium tracking-tight text-foreground">{block.title}</h2>
           </div>
           <LazyBlock eager={i <= Math.max(mountedUpTo, 0)} onMount={() => setMountedUpTo((prev) => Math.max(prev, i))}>

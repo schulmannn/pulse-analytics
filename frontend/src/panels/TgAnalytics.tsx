@@ -293,32 +293,32 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
     <div className="space-y-6">
       {/* 1) KPI — hairline ledger (gap-px over bg-border draws the 1px dividers) */}
       <div className="grid grid-cols-2 gap-px border-t border-border bg-border sm:grid-cols-3 lg:grid-cols-6">
-        <div className="bg-background p-4">
+        <div className="bg-card p-4">
           <div className="text-2xs font-medium tracking-wider text-muted-foreground">Просмотров / пост</div>
           <div className="mt-1 text-xl font-medium tabular-nums">{fmt.short(cur(cs?.views_per_post) ?? vs?.avg_views ?? 0)}</div>
           {vs?.posts_analyzed ? <div className="mt-1 truncate text-2xs text-muted-foreground">по {vs.posts_analyzed} постам</div> : null}
         </div>
-        <div className="bg-background p-4">
+        <div className="bg-card p-4">
           <div className="text-2xs font-medium tracking-wider text-muted-foreground">Ср. ERV</div>
           <div className="mt-1 text-xl font-medium tabular-nums">{avgErv != null ? `${avgErv.toFixed(1)}%` : '—'}</div>
           <div className="mt-1 truncate text-2xs text-muted-foreground">вовлечённость на просмотр</div>
         </div>
-        <div className="bg-background p-4">
+        <div className="bg-card p-4">
           <div className="text-2xs font-medium tracking-wider text-muted-foreground">Виральность</div>
           <div className="mt-1 text-xl font-medium tabular-nums">{avgVir != null ? `${avgVir.toFixed(1)}%` : '—'}</div>
           <div className="mt-1 truncate text-2xs text-muted-foreground">репосты / просмотры</div>
         </div>
-        <div className="bg-background p-4">
+        <div className="bg-card p-4">
           <div className="text-2xs font-medium tracking-wider text-muted-foreground">Репостов / пост</div>
           <div className="mt-1 text-xl font-medium tabular-nums">{cur(cs?.shares_per_post) != null ? fmt.short(cur(cs?.shares_per_post)!) : '—'}</div>
           {vs?.total_forwards ? <div className="mt-1 truncate text-2xs text-muted-foreground">{fmt.short(vs.total_forwards)} всего</div> : null}
         </div>
-        <div className="bg-background p-4">
+        <div className="bg-card p-4">
           <div className="text-2xs font-medium tracking-wider text-muted-foreground">Реакций / пост</div>
           <div className="mt-1 text-xl font-medium tabular-nums">{cur(cs?.reactions_per_post) != null ? fmt.short(cur(cs?.reactions_per_post)!) : '—'}</div>
           {vs?.total_reactions ? <div className="mt-1 truncate text-2xs text-muted-foreground">{fmt.short(vs.total_reactions)} всего</div> : null}
         </div>
-        <div className="bg-background p-4">
+        <div className="bg-card p-4">
           <div className="text-2xs font-medium tracking-wider text-muted-foreground">Уведомления вкл.</div>
           <div className="mt-1 text-xl font-medium tabular-nums">{notifPct != null ? `${notifPct.toFixed(1)}%` : '—'}</div>
           {notif ? <div className="mt-1 truncate text-2xs text-muted-foreground">{fmt.short(notif.part ?? 0)} из {fmt.short(notif.total ?? 0)}</div> : null}
@@ -528,7 +528,7 @@ function TgAnalyticsSkeletons() {
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-px border-t border-border bg-border sm:grid-cols-3 lg:grid-cols-6">
         {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} className="bg-background p-4">
+          <div key={i} className="bg-card p-4">
             <Skeleton className="h-2.5 w-2/3" />
             <Skeleton className="mt-2 h-5 w-1/2" />
           </div>

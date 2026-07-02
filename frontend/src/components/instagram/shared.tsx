@@ -4,6 +4,7 @@ import type { MetricDelta } from '@/lib/delta';
 import { DeltaPill } from '@/components/DeltaPill';
 import { LineChart } from '@/components/LineChart';
 import { ExpandableChart } from '@/components/ExpandableChart';
+import { ChartSection as WidgetChartSection } from '@/components/ChartWidget';
 import { fmtDay, type Point } from '@/lib/igMetrics';
 
 /** A top-level view section — an h2 heading with an optional right-aligned action. */
@@ -122,10 +123,12 @@ export function pickLabels(series: Point[]): string[] {
   return [first?.day ?? '', mid?.day ?? '', last?.day ?? ''].map(fmtDay);
 }
 
-/** A daily line chart for a metric that genuinely has a daily series (reach / new followers). */
+/** A daily line chart for a metric that genuinely has a daily series (reach / new followers).
+    Renders as a WIDGET card (chart surfaces are widgets now); the flat ChartSection above
+    stays exported for non-chart hosts (metric-page rail, the report document). */
 export function TrendCard({ title, series }: { title: string; series: Point[] }) {
   return (
-    <ChartSection title={title}>
+    <WidgetChartSection title={title}>
       {series.length > 1 ? (
         <ExpandableChart title={title}>
           <LineChart
@@ -138,6 +141,6 @@ export function TrendCard({ title, series }: { title: string; series: Point[] })
       ) : (
         <EmptyChart />
       )}
-    </ChartSection>
+    </WidgetChartSection>
   );
 }

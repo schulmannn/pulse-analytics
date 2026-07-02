@@ -9,7 +9,7 @@ import { LineChart } from '@/components/LineChart';
 import { usePeriod } from '@/lib/period';
 import { Skeleton } from '@/components/ui/skeleton';
 import { RichText } from '@/components/RichText';
-import { TopPosts } from '@/panels/TopPosts';
+import { ChartSection } from '@/components/ChartWidget';
 
 type SortKey = 'reach' | 'likes' | 'shares' | 'virality' | 'erv' | 'er';
 const SORT_COLUMNS: { key: SortKey; label: string; get: (p: NormalizedPost) => number }[] = [
@@ -75,29 +75,19 @@ export function Posts() {
 
   return (
     <div className="space-y-8">
-      {/* Топ постов (общий компонент, переиспользуется в Обзоре) */}
-      <div className="space-y-4">
-        <h3 className="text-sm font-medium tracking-wide text-muted-foreground">
-          Топ постов за период
-        </h3>
-        <TopPosts />
-      </div>
-
-      {/* Таблица публикаций */}
-      <div className="space-y-4">
-        <h3 className="text-sm font-medium tracking-wide text-muted-foreground">
-          Публикации · топ-25 (нажмите на столбец для сортировки)
-        </h3>
+      {/* «Топ постов за период» убран: он дублировал Обзор, а сортируемый лидерборд ниже
+          покрывает топ (D6.4). Таблица — виджет, как и всё остальное. */}
+      <ChartSection title="Публикации · топ-25">
         <div className="hidden overflow-x-auto md:block">
           <table className="w-full border-collapse text-left text-sm">
             <thead>
               <tr className="border-b border-border text-xs font-medium tracking-wider text-muted-foreground">
-                <th className="w-12 p-4 text-center"></th>
-                <th className="min-w-[240px] p-4">Пост</th>
+                <th className="w-12 py-3 pl-0 pr-3 text-center"></th>
+                <th className="min-w-[240px] px-3 py-3">Пост</th>
                 {SORT_COLUMNS.map((c) => {
                   const active = c.key === sortKey;
                   return (
-                    <th key={c.key} className="p-4 text-right">
+                    <th key={c.key} className="px-3 py-3 text-right last:pr-0">
                       <button
                         type="button"
                         onClick={() => toggleSort(c.key)}
@@ -122,7 +112,7 @@ export function Posts() {
                     onClick={isClickable ? () => setOpenId(post.id) : undefined}
                     className={`group transition-colors hover:bg-hover-row ${isClickable ? 'cursor-pointer' : ''}`}
                   >
-                    <td className="p-4 text-center">
+                    <td className="py-3 pl-0 pr-3 text-center">
                       <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded border border-border/40 bg-muted">
                         {post.thumb ? (
                           <img
@@ -137,7 +127,7 @@ export function Posts() {
                         )}
                       </div>
                     </td>
-                    <td className="p-4">
+                    <td className="px-3 py-3">
                       <div className="max-w-sm space-y-1 md:max-w-md lg:max-w-lg">
                         <div className="line-clamp-1 font-medium text-foreground">
                           {post.caption ? <RichText text={post.caption} /> : <span className="italic text-muted-foreground">Без подписи</span>}
@@ -148,18 +138,18 @@ export function Posts() {
                         </div>
                       </div>
                     </td>
-                    <td className="p-4 text-right font-medium tabular-nums">{fmt.num(post.reach)}</td>
-                    <td className="p-4 text-right font-medium tabular-nums text-muted-foreground">{fmt.num(post.likes)}</td>
-                    <td className="p-4 text-right font-medium tabular-nums text-muted-foreground">
+                    <td className="px-3 py-3 text-right font-medium tabular-nums last:pr-0">{fmt.num(post.reach)}</td>
+                    <td className="px-3 py-3 text-right font-medium tabular-nums last:pr-0 text-muted-foreground">{fmt.num(post.likes)}</td>
+                    <td className="px-3 py-3 text-right font-medium tabular-nums last:pr-0 text-muted-foreground">
                       {post.shares ? fmt.num(post.shares) : <span className="text-muted-foreground/40">—</span>}
                     </td>
-                    <td className="p-4 text-right font-medium tabular-nums text-muted-foreground">
+                    <td className="px-3 py-3 text-right font-medium tabular-nums last:pr-0 text-muted-foreground">
                       {post.virality != null ? `${post.virality.toFixed(1)}%` : <span className="text-muted-foreground/40">—</span>}
                     </td>
-                    <td className="p-4 text-right font-medium tabular-nums">
+                    <td className="px-3 py-3 text-right font-medium tabular-nums last:pr-0">
                       <PctTag value={post.erv} median={ervMedian} />
                     </td>
-                    <td className="p-4 text-right font-medium tabular-nums">
+                    <td className="px-3 py-3 text-right font-medium tabular-nums last:pr-0">
                       <PctTag value={post.er} median={erMedian} />
                     </td>
                   </tr>
@@ -199,7 +189,7 @@ export function Posts() {
             );
           })}
         </div>
-      </div>
+      </ChartSection>
 
       {openId !== null && selectedPost && <PostModal post={selectedPost} onClose={() => setOpenId(null)} />}
     </div>
@@ -363,38 +353,25 @@ function PostModal({ post, onClose }: PostModalProps) {
 }
 
 function PostsSkeletons() {
+  // Mirrors the loaded layout exactly — ONE «Публикации» widget card with title + table rows
+  // (the old top-posts grid ghost promised a section that no longer exists → layout jump).
   return (
     <div className="space-y-8">
-      <div className="space-y-3">
-        <Skeleton className="h-4 w-1/6" />
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <Card key={i} className="flex h-48 flex-col justify-between">
-              <Skeleton className="h-24 w-full rounded-none" />
-              <div className="space-y-2 p-4">
-                <Skeleton className="h-3 w-full" />
-                <Skeleton className="h-3 w-4/5" />
+      <div className="rounded-xl border border-border bg-card p-4 sm:p-5">
+        <Skeleton className="h-3 w-40" />
+        <div className="mt-5 space-y-4">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-4">
+              <Skeleton className="h-10 w-10" />
+              <div className="flex-1 space-y-2">
+                <Skeleton className="h-4 w-1/3" />
+                <Skeleton className="h-3 w-1/4" />
               </div>
-            </Card>
+              <Skeleton className="h-4 w-14" />
+            </div>
           ))}
         </div>
       </div>
-      <Card>
-        <CardContent className="p-0">
-          <Skeleton className="h-12 w-full rounded-none border-b border-border" />
-          <div className="space-y-4 p-4">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-4">
-                <Skeleton className="h-10 w-10" />
-                <div className="flex-1 space-y-2">
-                  <Skeleton className="h-4 w-1/3" />
-                  <Skeleton className="h-3 w-1/4" />
-                </div>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
     </div>
   );
 }

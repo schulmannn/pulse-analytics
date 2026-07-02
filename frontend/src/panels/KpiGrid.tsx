@@ -189,8 +189,8 @@ interface StatTileProps {
 function StatTile({ label, value, trend, deltaText, info, onDrill }: StatTileProps) {
   const [num, unit] = splitUnit(value);
   const cell = onDrill
-    ? { onClick: onDrill, title: 'Подробный разбор', className: 'cursor-pointer bg-background p-4 transition-colors hover:bg-muted/60' }
-    : { className: 'bg-background p-4' };
+    ? { onClick: onDrill, title: 'Подробный разбор', className: 'cursor-pointer bg-card p-4 transition-colors hover:bg-muted/60' }
+    : { className: 'bg-card p-4' };
   const deltaColor =
     trend?.dir === 'up' ? 'text-verdant' : trend?.dir === 'down' ? 'text-ember' : 'text-muted-foreground';
   return (
@@ -228,7 +228,7 @@ function KpiSkeletons() {
       {/* LEDGER — same scaffold (border-t / gap-px / bg-border cells on paper) as the live grid */}
       <div className="grid grid-cols-2 gap-px border-t border-border bg-border lg:grid-cols-4">
         {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="bg-background p-4">
+          <div key={i} className="bg-card p-4">
             <Skeleton className="h-2.5 w-16" />
             <Skeleton className="mt-2 h-6 w-20" />
           </div>

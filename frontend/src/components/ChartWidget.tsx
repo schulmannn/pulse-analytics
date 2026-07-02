@@ -262,11 +262,13 @@ interface ChartSectionProps {
   action?: ReactNode;
   /** Alternative presentations (line / bar / list) selectable in the edit dialog. */
   variants?: WidgetVariant[];
+  /** Extra classes on the card (grid spans etc.). */
+  className?: string;
   /** Body; with `variants` it renders BELOW the active variant (shared captions etc.). */
   children?: ReactNode;
 }
 
-export function ChartSection({ id, title, action, variants, children }: ChartSectionProps) {
+export function ChartSection({ id, title, action, variants, className, children }: ChartSectionProps) {
   const widgetId = id ?? title;
   const group = useContext(GroupCtx);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -316,7 +318,7 @@ export function ChartSection({ id, title, action, variants, children }: ChartSec
     <section
       className={`rounded-xl border border-border bg-card p-4 sm:p-5 ${
         reorder ? `widget-jiggle cursor-grab select-none ${isDragging ? 'opacity-50' : ''}` : ''
-      }`}
+      } ${className ?? ''}`}
       style={style}
       draggable={reorder}
       onDragStart={

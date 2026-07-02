@@ -5,7 +5,8 @@ import { Breakdown } from '@/components/Breakdown';
 import { ExpandableChart } from '@/components/ExpandableChart';
 import { BarChart } from '@/components/BarChart';
 import { RichText } from '@/components/RichText';
-import { ChartSection, KpiCard, Stat } from '@/components/instagram/shared';
+import { KpiCard, Stat } from '@/components/instagram/shared';
+import { ChartSection } from '@/components/ChartWidget';
 import type { IgPost, IgStory, IgTag } from '@/api/schemas';
 import {
   hashtagStats,

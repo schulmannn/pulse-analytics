@@ -138,7 +138,7 @@ function InsightCell({ insight, spanFull }: { insight: TgInsight; spanFull?: boo
   const ev = insight.evidence;
   const evText = ev?.caption ? (ev.caption.length > 52 ? `${ev.caption.slice(0, 52)}…` : ev.caption) : '';
   return (
-    <div className={`flex items-start gap-3 bg-background p-4${spanFull ? ' sm:col-span-2' : ''}`}>
+    <div className={`flex items-start gap-3 bg-card p-4${spanFull ? ' sm:col-span-2' : ''}`}>
       <span aria-hidden="true" className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${dot}`} />
       <div className="min-w-0 space-y-1.5">
         <p className="text-sm font-medium leading-snug text-foreground">{insight.statement}</p>
@@ -169,7 +169,7 @@ function InsightsSkeleton() {
   return (
     <div className="grid grid-cols-1 gap-px border-t border-border bg-border sm:grid-cols-2">
       {Array.from({ length: 4 }).map((_, i) => (
-        <div key={i} className="space-y-2 bg-background p-4">
+        <div key={i} className="space-y-2 bg-card p-4">
           <Skeleton className="h-3.5 w-5/6" />
           <Skeleton className="h-3 w-2/3" />
         </div>

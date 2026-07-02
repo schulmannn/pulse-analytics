@@ -260,8 +260,10 @@ export function ReportPage() {
         </div>
       </ChartSection>
 
-      {/* Инсайт — Итог / Доказательство / Что сделать. */}
-      <Digest />
+      {/* Инсайт — Итог / Доказательство / Что сделать (label now lives on the section). */}
+      <ChartSection title="Инсайт">
+        <Digest />
+      </ChartSection>
 
       {/* Metric cards (steep's 2-up grid); each opens its metric page. */}
       <div className="grid grid-cols-1 gap-10 md:grid-cols-2">

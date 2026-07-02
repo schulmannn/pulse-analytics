@@ -1,7 +1,8 @@
 import { useOutletContext } from 'react-router-dom';
 import { fmt } from '@/lib/format';
 import type { IgData } from '@/lib/useIgData';
-import { Section, ChartSection, TrendCard, EmptyChart, signedNum } from '@/components/instagram/shared';
+import { Section, TrendCard, EmptyChart, signedNum } from '@/components/instagram/shared';
+import { ChartSection } from '@/components/ChartWidget';
 import { ExpandableChart } from '@/components/ExpandableChart';
 import { BarChart } from '@/components/BarChart';
 import { InsightsBlock, PeriodCompareBlock } from '@/components/instagram/insights';
@@ -109,7 +110,7 @@ function SubscriberMovement({
     <div className="space-y-3">
       <div className="grid grid-cols-1 gap-px border-t border-border bg-border sm:grid-cols-3">
         {cells.map((c) => (
-          <div key={c.label} className="bg-background p-4">
+          <div key={c.label} className="bg-card p-4">
             <div className="text-xs tracking-wide text-muted-foreground">{c.label}</div>
             <div className={`mt-2 text-3xl font-medium tabular-nums tracking-tight ${c.color}`}>{c.text}</div>
             {c.label === 'Чистый прирост' && net.hasPrev && (

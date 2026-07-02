@@ -107,8 +107,8 @@ export function Digest() {
 
   return (
     <div>
-      <div className="text-sm font-medium text-ink3">Инсайт</div>
-      <div className="mt-3 space-y-4">
+      {/* The «Инсайт» label is provided by the hosting widget/section (Overview, Report). */}
+      <div className="space-y-4">
         {/* INSIGHT — что произошло (доминирует) */}
         <div>
           <TierLabel>Итог</TierLabel>

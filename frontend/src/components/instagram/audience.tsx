@@ -4,7 +4,8 @@ import { Breakdown } from '@/components/Breakdown';
 import { BarChart } from '@/components/BarChart';
 import { ExpandableChart } from '@/components/ExpandableChart';
 import { ChartTooltip, type TooltipState } from '@/components/ChartTooltip';
-import { ChartSection, EmptyChart } from '@/components/instagram/shared';
+import { EmptyChart } from '@/components/instagram/shared';
+import { ChartSection } from '@/components/ChartWidget';
 import type { IgBreakdowns, IgOnline } from '@/api/schemas';
 import {
   tvBreakdown,
