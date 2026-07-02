@@ -8,14 +8,28 @@ import { cn } from '@/lib/utils';
  * Depth stays in hairlines — no shadows, no card chrome.
  */
 
-/** Small group heading (text-sm medium + trailing hairline) above a bordered row container. */
-export function SettingsGroup({ title, children }: { title: string; children: ReactNode }) {
+/**
+ * Small group heading (text-sm medium + trailing hairline) above a bordered row container.
+ * Optional `description` renders a short muted line under the title (Claude settings pattern).
+ */
+export function SettingsGroup({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description?: ReactNode;
+  children: ReactNode;
+}) {
   return (
     <section className="space-y-3">
-      <h3 className="flex items-center gap-3 text-sm font-medium text-foreground">
-        <span className="whitespace-nowrap">{title}</span>
-        <span aria-hidden="true" className="h-px flex-1 bg-border" />
-      </h3>
+      <div className="space-y-1">
+        <h3 className="flex items-center gap-3 text-sm font-medium text-foreground">
+          <span className="whitespace-nowrap">{title}</span>
+          <span aria-hidden="true" className="h-px flex-1 bg-border" />
+        </h3>
+        {description ? <p className="text-xs leading-relaxed text-ink3">{description}</p> : null}
+      </div>
       <div className="divide-y divide-border rounded border border-border">{children}</div>
     </section>
   );

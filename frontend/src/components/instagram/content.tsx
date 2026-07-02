@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { fmt } from '@/lib/format';
 import { EmptyState } from '@/components/EmptyState';
 import { Breakdown } from '@/components/Breakdown';
-import { ExpandableChart } from '@/components/ExpandableChart';
 import { BarChart } from '@/components/BarChart';
 import { RichText } from '@/components/RichText';
 import { KpiCard, Stat } from '@/components/instagram/shared';
@@ -145,13 +144,11 @@ export function ReelsBlock({ posts }: { posts: IgPost[] }) {
         <KpiCard label="Суммарно просмотрено" value={`${fmt.short(Math.round(totalWatchHours))} ч`} />
       </div>
       <ChartSection title="Ср. время просмотра по Reels">
-        <ExpandableChart title="Ср. время просмотра по Reels">
-          <BarChart
-            values={reels.map(avgSec)}
-            labels={reels.map((_, i) => `R${i + 1}`)}
-            titles={reels.map((r, i) => `R${i + 1}: ${avgSec(r)} сек · ${fmt.short(Number(r.views ?? 0))} просм`)}
-          />
-        </ExpandableChart>
+        <BarChart
+          values={reels.map(avgSec)}
+          labels={reels.map((_, i) => `R${i + 1}`)}
+          titles={reels.map((r, i) => `R${i + 1}: ${avgSec(r)} сек · ${fmt.short(Number(r.views ?? 0))} просм`)}
+        />
       </ChartSection>
     </div>
   );

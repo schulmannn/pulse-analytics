@@ -8,6 +8,7 @@ import { fmt } from '@/lib/format';
 import { BarChart } from '@/components/BarChart';
 import { Breakdown } from '@/components/Breakdown';
 import { DivergingBars } from '@/components/DivergingBars';
+import { ChartExpandOverlay, type ChartExpandConfig } from '@/components/ExpandableChart';
 
 /**
  * Widget system for charts (steep Home): every chart is a card with a «⋯» menu — reorder
@@ -659,15 +660,20 @@ interface ChartSectionProps {
   variants?: WidgetVariant[];
   /** Extra classes on the card (grid spans etc.). */
   className?: string;
+  /** RICH (Tier-2) explorer config for the «Развернуть» overlay: period pills, line↔bar
+      toggle, stats strip. Undefined = Tier-1 — the overlay renders the widget's own body
+      (active variant or children) at full explorer axes. */
+  expand?: ChartExpandConfig;
   /** Body; with `variants` it renders BELOW the active variant (shared captions etc.). */
   children?: ReactNode;
 }
 
-export function ChartSection({ id, title, action, variants, className, children }: ChartSectionProps) {
+export function ChartSection({ id, title, action, variants, className, expand, children }: ChartSectionProps) {
   const widgetId = id ?? title;
   const group = useContext(GroupCtx);
   const [menuOpen, setMenuOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [expandOpen, setExpandOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const sectionRef = useRef<HTMLElement>(null);
   useStoreTick();
@@ -699,6 +705,18 @@ export function ChartSection({ id, title, action, variants, className, children 
   // The active variant drives the card's grid span (wide «Столбцы + значения» takes 2 cells).
   const activeVariant =
     variants && variants.length > 0 ? (variants.find((v) => v.key === prefs.variant) ?? variants[0]) : null;
+
+  // The widget's own body — the active variant plus the shared children (captions etc.). Reused
+  // as the Tier-1 overlay content: the same chart, just rendered at full explorer axes.
+  const bodyNode = (
+    <>
+      {activeVariant ? activeVariant.render : null}
+      {children}
+    </>
+  );
+  // The «Развернуть» affordance renders on every widget. Tier-2 (a rich `expand` config)
+  // drives its own overlay content; Tier-1 falls back to the widget body.
+  const hasRichExpand = !!(expand && (expand.renderExpanded || expand.renderExpandedBar || expand.statsFor));
 
   const seqIndex = group ? group.sequence.indexOf(widgetId) : -1;
   const accentVar = prefs.color ? `--chart-${prefs.color}` : '--brand-iris';
@@ -765,6 +783,19 @@ export function ChartSection({ id, title, action, variants, className, children 
           {prefs.title || title}
         </h3>
         {action}
+        <button
+          type="button"
+          aria-label={`Развернуть виджет «${prefs.title || title}»`}
+          title="Развернуть"
+          onClick={() => setExpandOpen(true)}
+          className={`shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground print:hidden ${
+            reorder ? 'pointer-events-none opacity-0' : ''
+          }`}
+        >
+          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+            <path d="M7 17 17 7M9 7h8v8" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
         <div className={`relative shrink-0 ${reorder ? 'pointer-events-none opacity-0' : ''}`} ref={menuRef}>
           <button
             type="button"
@@ -781,6 +812,17 @@ export function ChartSection({ id, title, action, variants, className, children 
           </button>
           {menuOpen && (
             <div className="absolute right-0 top-full z-20 mt-1 w-48 rounded-lg border border-border bg-card p-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  setExpandOpen(true);
+                }}
+                className={menuItem}
+              >
+                <MenuIcon kind="expand" /> Развернуть
+              </button>
+              <div aria-hidden="true" className="mx-1 my-1 h-px bg-border" />
               {group && (
                 <>
                   <button
@@ -843,8 +885,7 @@ export function ChartSection({ id, title, action, variants, className, children 
         </div>
       </div>
       <div className={`mt-3 ${reorder ? 'pointer-events-none' : ''}`}>
-        {activeVariant ? activeVariant.render : null}
-        {children}
+        {bodyNode}
       </div>
       </div>
 
@@ -857,13 +898,27 @@ export function ChartSection({ id, title, action, variants, className, children 
           onClose={() => setEditOpen(false)}
         />
       )}
+
+      {expandOpen && (
+        <ChartExpandOverlay
+          title={prefs.title || title}
+          renderExpanded={hasRichExpand ? expand?.renderExpanded : undefined}
+          renderExpandedBar={hasRichExpand ? expand?.renderExpandedBar : undefined}
+          statsFor={hasRichExpand ? expand?.statsFor : undefined}
+          statsSum={expand?.statsSum ?? true}
+          onClose={() => setExpandOpen(false)}
+        >
+          {bodyNode}
+        </ChartExpandOverlay>
+      )}
     </section>
   );
 }
 
-function MenuIcon({ kind }: { kind: 'up' | 'down' | 'edit' | 'hide' | 'drag' }) {
+function MenuIcon({ kind }: { kind: 'up' | 'down' | 'edit' | 'hide' | 'drag' | 'expand' }) {
   return (
     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5 shrink-0" aria-hidden="true">
+      {kind === 'expand' && <path d="M5 11 11 5M6.5 5H11v4.5" />}
       {kind === 'up' && <path d="m4 10 4-4 4 4" />}
       {kind === 'down' && <path d="m4 6 4 4 4-4" />}
       {kind === 'drag' && (

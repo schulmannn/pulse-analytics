@@ -17,9 +17,12 @@ export const ExpandedChartHeightContext = createContext<number | null>(null);
 // steep-style explorer sizing: the overlay chart is markedly taller than any inline card.
 const EXPANDED_CHART_HEIGHT = 400;
 
-interface ExpandableChartProps {
-  title: string;
-  children: ReactNode;
+/** The RICH (Tier-2) explorer configuration a chart can supply for its expanded view:
+    period pills, a line↔bar toggle and a Мин/Макс/Среднее/Сумма strip. Every field is
+    optional — with none of them the overlay just renders the given children at full axes
+    (Tier-1). Shared by ExpandableChart and ChartSection's native `expand` prop. */
+export interface ChartExpandConfig {
+  /** Period-windowed line presentation — when provided, the overlay grows 1М/3М/6М/Всё pills. */
   renderExpanded?: (days: number) => ReactNode;
   /** Bar presentation of the same window — when provided, the overlay grows a line↔bar toggle. */
   renderExpandedBar?: (days: number) => ReactNode;
@@ -28,6 +31,11 @@ interface ExpandableChartProps {
   /** Include «Сумма» in the stats strip (default). Off for level/stock series
       (e.g. subscriber counts) where summing the values is meaningless. */
   statsSum?: boolean;
+}
+
+interface ExpandableChartProps extends ChartExpandConfig {
+  title: string;
+  children: ReactNode;
 }
 
 const WINDOWS = [
@@ -41,10 +49,13 @@ const WINDOWS = [
  * Chart wrapper with an explicit expand affordance. The chart body itself is NOT
  * clickable — hovering/reading points must never hijack into the modal — expansion
  * happens only via the ↗ button in the corner.
+ *
+ * Kept as a thin wrapper over the shared {@link ChartExpandOverlay} so standalone callers
+ * (the metric-page main chart etc.) stay untouched. Inside a widget shell, prefer the
+ * ChartSection `expand` prop — it renders one consistent «Развернуть» per card.
  */
 export function ExpandableChart({ title, children, renderExpanded, renderExpandedBar, statsFor, statsSum = true }: ExpandableChartProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [days, setDays] = useState(90);
 
   return (
     <>
@@ -64,10 +75,8 @@ export function ExpandableChart({ title, children, renderExpanded, renderExpande
       </div>
 
       {isOpen && (
-        <ExpandedChartDialog
+        <ChartExpandOverlay
           title={title}
-          days={days}
-          setDays={setDays}
           renderExpanded={renderExpanded}
           renderExpandedBar={renderExpandedBar}
           statsFor={statsFor}
@@ -75,26 +84,32 @@ export function ExpandableChart({ title, children, renderExpanded, renderExpande
           onClose={() => setIsOpen(false)}
         >
           {children}
-        </ExpandedChartDialog>
+        </ChartExpandOverlay>
       )}
     </>
   );
 }
 
-interface ExpandedChartDialogProps extends ExpandableChartProps {
-  days: number;
-  setDays: (days: number) => void;
+interface ChartExpandOverlayProps extends ChartExpandConfig {
+  title: string;
+  children: ReactNode;
   onClose: () => void;
 }
 
 /**
- * Expanded chart overlay. Same dialog contract as PostDetailModal:
- * portal, role="dialog" + aria-modal, focus trap, body scroll lock, Escape/backdrop/×
- * to close. The backdrop is semi-transparent paper from the first frame (an opaque
- * black flash is what bg-black/50 produced while the blur composited).
+ * Expanded chart overlay — the reusable explorer dialog. Same dialog contract as
+ * PostDetailModal: portal, role="dialog" + aria-modal, focus trap, body scroll lock,
+ * Escape/backdrop/× to close. The backdrop is semi-transparent paper from the first frame
+ * (an opaque black flash is what bg-black/50 produced while the blur composited).
+ *
+ * `renderExpanded` opts into period pills; `renderExpandedBar` adds a line↔bar toggle;
+ * `statsFor` adds the stats strip. With none of them the overlay just renders `children`
+ * at full explorer axes (Tier-1). Owns its own period + line/bar state, so a fresh open
+ * always starts on the line at 3М — like the metric pages.
  */
-function ExpandedChartDialog({ title, children, renderExpanded, renderExpandedBar, statsFor, statsSum = true, days, setDays, onClose }: ExpandedChartDialogProps) {
+export function ChartExpandOverlay({ title, children, renderExpanded, renderExpandedBar, statsFor, statsSum = true, onClose }: ChartExpandOverlayProps) {
   const panelRef = useRef<HTMLDivElement>(null);
+  const [days, setDays] = useState(90);
   // Overlay-local presentation; reopening always starts on the line, like metric pages.
   const [kind, setKind] = useState<'line' | 'bar'>('line');
   useFocusTrap(panelRef);

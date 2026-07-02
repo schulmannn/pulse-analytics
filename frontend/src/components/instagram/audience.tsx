@@ -2,7 +2,6 @@ import { useRef, useState } from 'react';
 import { fmt } from '@/lib/format';
 import { Breakdown } from '@/components/Breakdown';
 import { BarChart } from '@/components/BarChart';
-import { ExpandableChart } from '@/components/ExpandableChart';
 import { ChartTooltip, type TooltipState } from '@/components/ChartTooltip';
 import { EmptyChart } from '@/components/instagram/shared';
 import { ChartSection } from '@/components/ChartWidget';
@@ -33,13 +32,11 @@ export function AudienceBlock({ breakdowns, followers }: { breakdowns: IgBreakdo
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <ChartSection title="Возраст">
           {age.length > 0 ? (
-            <ExpandableChart title="Возраст аудитории">
-              <BarChart
-                values={age.map((a) => a.value)}
-                labels={age.map((a) => a.label)}
-                titles={age.map((a) => `${a.label}: ${fmt.num(a.value)}`)}
-              />
-            </ExpandableChart>
+            <BarChart
+              values={age.map((a) => a.value)}
+              labels={age.map((a) => a.label)}
+              titles={age.map((a) => `${a.label}: ${fmt.num(a.value)}`)}
+            />
           ) : (
             <EmptyChart />
           )}

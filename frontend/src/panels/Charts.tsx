@@ -7,7 +7,6 @@ import { DivergingBars } from '@/components/DivergingBars';
 import { LineChart } from '@/components/LineChart';
 import { ChartTooltip, type TooltipState } from '@/components/ChartTooltip';
 import { fmt, ruAxisLabel } from '@/lib/format';
-import { ExpandableChart } from '@/components/ExpandableChart';
 import { Skeleton } from '@/components/ui/skeleton';
 import { usePeriod } from '@/lib/period';
 
@@ -115,29 +114,24 @@ export function HistoryChartBlock() {
   return (
     <ChartSection
       title="История подписчиков"
+      expand={{
+        renderExpanded: (days) => {
+          const windowRows = days === 0 ? rows : rows.slice(-days);
+          return <SubscriberHistoryChart rows={windowRows} />;
+        },
+        renderExpandedBar: (days) => {
+          const windowRows = days === 0 ? rows : rows.slice(-days);
+          return <SubscriberHistoryBars rows={windowRows} />;
+        },
+        statsFor: (days) =>
+          (days === 0 ? rows : rows.slice(-days)).map((row) => Number(row.subscribers)),
+        statsSum: false, // сумма УРОВНЕЙ подписчиков по дням не имеет смысла
+      }}
       variants={[
         {
           key: 'line',
           label: 'Линия',
-          render: (
-            <ExpandableChart
-              title="История подписчиков"
-              renderExpanded={(days) => {
-                const windowRows = days === 0 ? rows : rows.slice(-days);
-                return <SubscriberHistoryChart rows={windowRows} />;
-              }}
-              renderExpandedBar={(days) => {
-                const windowRows = days === 0 ? rows : rows.slice(-days);
-                return <SubscriberHistoryBars rows={windowRows} />;
-              }}
-              statsFor={(days) =>
-                (days === 0 ? rows : rows.slice(-days)).map((row) => Number(row.subscribers))
-              }
-              statsSum={false} // сумма УРОВНЕЙ подписчиков по дням не имеет смысла
-            >
-              <SubscriberHistoryChart rows={rows} />
-            </ExpandableChart>
-          ),
+          render: <SubscriberHistoryChart rows={rows} />,
         },
         { key: 'bar', label: 'Столбцы', render: <SubscriberHistoryBars rows={rows} /> },
         seriesBarValuesVariant(deltas.values, deltas.labels, deltas.titles, {
@@ -363,11 +357,7 @@ export function VelocityChartBlock() {
         {
           key: 'line',
           label: 'Линия',
-          render: (
-            <ExpandableChart title="Скорость набора просмотров">
-              <LineChart values={cum} yMin={0} yMax={Math.max(...cum, 1)} titles={titles} labels={labels} />
-            </ExpandableChart>
-          ),
+          render: <LineChart values={cum} yMin={0} yMax={Math.max(...cum, 1)} titles={titles} labels={labels} />,
         },
         { key: 'bar', label: 'Столбцы', render: <BarChart values={cum} labels={labels} titles={titles} /> },
         seriesBarValuesVariant(cum, labels, titles, { format: (v) => `${v}%` }),

@@ -3,7 +3,6 @@ import { fmt } from '@/lib/format';
 import type { IgData } from '@/lib/useIgData';
 import { Section, TrendCard, EmptyChart, signedNum } from '@/components/instagram/shared';
 import { ChartSection } from '@/components/ChartWidget';
-import { ExpandableChart } from '@/components/ExpandableChart';
 import { BarChart } from '@/components/BarChart';
 import { InsightsBlock, PeriodCompareBlock } from '@/components/instagram/insights';
 import { exportIgDaily } from '@/lib/igExport';
@@ -128,13 +127,11 @@ function FollowsByDayCard({ data, total }: { data: Point[]; total: number }) {
   return (
     <ChartSection title="Подписки по дням">
       {data.length > 0 ? (
-        <ExpandableChart title="Подписки по дням">
-          <BarChart
-            values={data.map((d) => d.value)}
-            labels={data.map((d) => fmtDay(d.day))}
-            titles={data.map((d) => `${fmtDay(d.day)}: +${fmt.num(d.value)}`)}
-          />
-        </ExpandableChart>
+        <BarChart
+          values={data.map((d) => d.value)}
+          labels={data.map((d) => fmtDay(d.day))}
+          titles={data.map((d) => `${fmtDay(d.day)}: +${fmt.num(d.value)}`)}
+        />
       ) : (
         <EmptyChart />
       )}

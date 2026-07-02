@@ -84,28 +84,28 @@
 
   .dark {
     color-scheme: dark;
-    --background: 50 6% 9%;            /* warm near-black */
-    --foreground: 45 14% 92%;          /* warm off-white */
-    --card: 48 5% 13%;
-    --card-foreground: 45 14% 92%;
-    --popover: 48 5% 13%;
-    --popover-foreground: 45 14% 92%;
+    --background: 0 0% 4%;             /* neutral near-black canvas #0a0a0a (steep-style) */
+    --foreground: 0 0% 95%;            /* neutral off-white */
+    --card: 0 0% 8%;                   /* lifted surface #141414 — widgets */
+    --card-foreground: 0 0% 95%;
+    --popover: 0 0% 11%;               /* menus float above #1c1c1c */
+    --popover-foreground: 0 0% 95%;
     --primary: 219 80% 68%;
-    --primary-foreground: 50 6% 9%;
-    --secondary: 48 5% 14%;
-    --secondary-foreground: 45 14% 92%;
-    --muted: 48 5% 14%;
-    --muted-foreground: 45 6% 60%;
+    --primary-foreground: 0 0% 4%;     /* text on blue button = new page black */
+    --secondary: 0 0% 13%;
+    --secondary-foreground: 0 0% 95%;
+    --muted: 0 0% 13%;
+    --muted-foreground: 0 0% 58%;
     --accent: 219 40% 22%;
     --accent-foreground: 219 80% 78%;
     --destructive: 11 70% 55%;
     --destructive-foreground: 0 0% 100%;
-    --border: 45 5% 24%;
-    --input: 45 5% 24%;
+    --border: 0 0% 17%;                /* subtle neutral hairline on black */
+    --input: 0 0% 17%;
     --ring: 219 80% 68%;
 
-    --ink2: 45 8% 72%;
-    --ink3: 45 6% 60%;
+    --ink2: 0 0% 72%;
+    --ink3: 0 0% 55%;
 
     --brand-iris: 219 80% 70%;
     --brand-iris-soft: 219 80% 76%;
@@ -117,8 +117,9 @@
     --amber-tint: 39 30% 18%;
     --green-tint: 147 25% 16%;
     --blue-tint: 219 40% 20%;
-    --hover-row: 48 5% 16%;
-    --avatar: 48 5% 22%;
+    /* Above card (8%) AND popover (11%) so row-hover reads on both surfaces. */
+    --hover-row: 0 0% 15%;
+    --avatar: 0 0% 22%;
 
     /* Chip identity tints, dark: deeper fields + lifted inks (same 6 hues as light). */
     --chip-1-bg: 258 16% 24%; --chip-1-ink: 258 32% 80%;

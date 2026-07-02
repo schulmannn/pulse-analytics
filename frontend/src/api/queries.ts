@@ -65,6 +65,18 @@ export function useRemoveAvatar() {
   });
 }
 
+/**
+ * Change the signed-in user's password (POST /api/auth/change-password, requireAuth).
+ * Server verifies `current` and enforces `next` ≥ 8 chars; surfaces 403 «Текущий пароль неверен»
+ * / 400 «Новый пароль минимум 8 символов» / 503 «БД не подключена» as ApiError messages.
+ */
+export function useChangePassword() {
+  return useMutation({
+    mutationFn: (body: { current: string; next: string }) =>
+      apiSend('POST', '/api/auth/change-password', body, AuthOkSchema),
+  });
+}
+
 function sessionTtl(expiresAt?: string | null): number | undefined {
   if (!expiresAt) return undefined;
   const ttlMs = Date.parse(expiresAt) - Date.now();

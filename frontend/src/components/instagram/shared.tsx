@@ -3,7 +3,6 @@ import { fmt } from '@/lib/format';
 import type { MetricDelta } from '@/lib/delta';
 import { DeltaPill } from '@/components/DeltaPill';
 import { LineChart } from '@/components/LineChart';
-import { ExpandableChart } from '@/components/ExpandableChart';
 import { ChartSection as WidgetChartSection } from '@/components/ChartWidget';
 import { fmtDay, type Point } from '@/lib/igMetrics';
 
@@ -130,14 +129,12 @@ export function TrendCard({ title, series }: { title: string; series: Point[] })
   return (
     <WidgetChartSection title={title}>
       {series.length > 1 ? (
-        <ExpandableChart title={title}>
-          {/* Standard 1×-tile height (LineChart default 200); the overlay sets its own 400. */}
-          <LineChart
-            values={series.map((p) => p.value)}
-            labels={pickLabels(series)}
-            titles={series.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)}`)}
-          />
-        </ExpandableChart>
+        /* Standard 1×-tile height (LineChart default 200); the overlay sets its own 400. */
+        <LineChart
+          values={series.map((p) => p.value)}
+          labels={pickLabels(series)}
+          titles={series.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)}`)}
+        />
       ) : (
         <EmptyChart />
       )}

@@ -9,7 +9,6 @@ import { BarChart } from '@/components/BarChart';
 import { Breakdown } from '@/components/Breakdown';
 import { ChartSection, WidgetGroup, breakdownVariants, seriesBarValuesVariant } from '@/components/ChartWidget';
 import { DivergingBars } from '@/components/DivergingBars';
-import { ExpandableChart } from '@/components/ExpandableChart';
 import { EmptyState } from '@/components/EmptyState';
 import { usePeriod } from '@/lib/period';
 import { cn } from '@/lib/utils';
@@ -378,9 +377,7 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
                 label: 'Линия',
                 render: (
                   <>
-                    <ExpandableChart title="Просмотры по дням">
-                      <LineChart values={vbdValues} labels={[last14Dates[0] ?? '', last14Dates[Math.floor(last14Dates.length / 2)] ?? '', last14Dates[last14Dates.length - 1] ?? '']} titles={vbdTitles} markAnomalies markExtremes ghost={vbdPrev} />
-                    </ExpandableChart>
+                    <LineChart values={vbdValues} labels={[last14Dates[0] ?? '', last14Dates[Math.floor(last14Dates.length / 2)] ?? '', last14Dates[last14Dates.length - 1] ?? '']} titles={vbdTitles} markAnomalies markExtremes ghost={vbdPrev} />
                     {vbdPrev && <div className="mt-2 text-2xs text-muted-foreground">Пунктир — прошлый период (для сравнения).</div>}
                   </>
                 ),
@@ -388,11 +385,7 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
               {
                 key: 'bar',
                 label: 'Столбцы',
-                render: (
-                  <ExpandableChart title="Просмотры по дням">
-                    <BarChart values={vbdValues} labels={last14Dates} titles={vbdTitles} />
-                  </ExpandableChart>
-                ),
+                render: <BarChart values={vbdValues} labels={last14Dates} titles={vbdTitles} />,
               },
             ]}
           />
@@ -422,14 +415,12 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
                 key: 'line',
                 label: 'Линия',
                 render: (
-                  <ExpandableChart title="Рост подписчиков">
-                    <LineChart
-                      values={growthSeries.values}
-                      titles={growthSeries.values.map((v, i) => `${growthGroup.x[i] ? formatMsDate(growthGroup.x[i]!) : ''}: ${fmt.num(v)} подписчиков`)}
-                      labels={interLabels(growthGroup)}
-                      markAnomalies
-                    />
-                  </ExpandableChart>
+                  <LineChart
+                    values={growthSeries.values}
+                    titles={growthSeries.values.map((v, i) => `${growthGroup.x[i] ? formatMsDate(growthGroup.x[i]!) : ''}: ${fmt.num(v)} подписчиков`)}
+                    labels={interLabels(growthGroup)}
+                    markAnomalies
+                  />
                 ),
               },
               {
@@ -463,21 +454,13 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
               {
                 key: 'line',
                 label: 'Линия',
-                render: (
-                  <ExpandableChart title={ruSeriesName(viewSeries.name) || 'Просмотры'}>
-                    <LineChart values={viewSeries.values} labels={interLabels(interGroup)} markAnomalies />
-                  </ExpandableChart>
-                ),
+                render: <LineChart values={viewSeries.values} labels={interLabels(interGroup)} markAnomalies />,
               },
               {
                 // Дневные ПОТОКИ (не уровни) — столбцы от нуля здесь честные.
                 key: 'bar',
                 label: 'Столбцы',
-                render: (
-                  <ExpandableChart title={ruSeriesName(viewSeries.name) || 'Просмотры'}>
-                    <BarChart values={viewSeries.values} labels={interBarLabels} titles={viewBarTitles} />
-                  </ExpandableChart>
-                ),
+                render: <BarChart values={viewSeries.values} labels={interBarLabels} titles={viewBarTitles} />,
               },
               seriesBarValuesVariant(viewSeries.values, interBarLabels, viewBarTitles),
             ]}
@@ -491,20 +474,12 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
               {
                 key: 'line',
                 label: 'Линия',
-                render: (
-                  <ExpandableChart title={ruSeriesName(shareSeries.name) || 'Репосты'}>
-                    <LineChart values={shareSeries.values} labels={interLabels(interGroup)} />
-                  </ExpandableChart>
-                ),
+                render: <LineChart values={shareSeries.values} labels={interLabels(interGroup)} />,
               },
               {
                 key: 'bar',
                 label: 'Столбцы',
-                render: (
-                  <ExpandableChart title={ruSeriesName(shareSeries.name) || 'Репосты'}>
-                    <BarChart values={shareSeries.values} labels={interBarLabels} titles={shareBarTitles} />
-                  </ExpandableChart>
-                ),
+                render: <BarChart values={shareSeries.values} labels={interBarLabels} titles={shareBarTitles} />,
               },
               seriesBarValuesVariant(shareSeries.values, interBarLabels, shareBarTitles),
             ]}
@@ -531,11 +506,7 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
               {
                 key: 'bar',
                 label: 'Столбцы',
-                render: (
-                  <ExpandableChart title="Активность по часам">
-                    <BarChart values={thData.values} labels={thData.hours.map(String)} titles={thData.values.map((v, i) => `${thData.hours[i] ?? i}:00 — ${fmt.num(v)}`)} />
-                  </ExpandableChart>
-                ),
+                render: <BarChart values={thData.values} labels={thData.hours.map(String)} titles={thData.values.map((v, i) => `${thData.hours[i] ?? i}:00 — ${fmt.num(v)}`)} />,
               },
               {
                 key: 'line',
@@ -550,9 +521,7 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
 
         {inGroup('dynamics') && net30Values.length > 0 && (
           <ChartSection title="Чистый прирост подписчиков (30д)">
-            <ExpandableChart title="Чистый прирост подписчиков (30д)">
-              <DivergingBars values={net30Values} titles={net30Titles} />
-            </ExpandableChart>
+            <DivergingBars values={net30Values} titles={net30Titles} />
             {netSummaryStr && <div className="mt-3 text-xs font-medium text-muted-foreground">прирост: {netSummaryStr}</div>}
           </ChartSection>
         )}
@@ -578,9 +547,7 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
                 render: (
                   <div>
                     <div className="mb-2 text-2xs font-medium tracking-wider text-muted-foreground">Ср. просмотры</div>
-                    <ExpandableChart title="Средние просмотры по дням недели">
-                      <BarChart values={wdAvgValues} labels={wdLabels} titles={wdAvgValues.map((v, i) => `${wdLabels[i]}: ${fmt.num(v)} ср. просмотров`)} />
-                    </ExpandableChart>
+                    <BarChart values={wdAvgValues} labels={wdLabels} titles={wdAvgValues.map((v, i) => `${wdLabels[i]}: ${fmt.num(v)} ср. просмотров`)} />
                   </div>
                 ),
               },
@@ -607,9 +574,7 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
                 label: 'Столбцы',
                 render: (
                   <div className="max-w-[560px]">
-                    <ExpandableChart title="Количество постов по дням недели">
-                      <BarChart values={wdCountValues} labels={wdLabels} titles={wdCountValues.map((v, i) => `${wdLabels[i]}: ${fmt.num(v)} постов`)} />
-                    </ExpandableChart>
+                    <BarChart values={wdCountValues} labels={wdLabels} titles={wdCountValues.map((v, i) => `${wdLabels[i]}: ${fmt.num(v)} постов`)} />
                   </div>
                 ),
               },
