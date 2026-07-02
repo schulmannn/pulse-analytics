@@ -290,9 +290,10 @@ steep.app. Полный разбор: `AUDIT_2026-07-02_arch_design.md`. Это 
 - [x] Коллектор: dead-letter на 4xx + cap, неблокирующая доставка. mtproto: FloodWait→429, Semaphore(1), CORS убран.
 - [⏳] **`APP_URL`/`TRUSTED_HOSTS` на Railway** — проверить (дефолт = старый pulse-хост; boot-warning добавлен).
 
-### D5.6 TEAM_PASSWORD removal — 🚧 ветка `remove-team-password` (`47d4d6c`, НЕ в main)
-- [x] Break-glass логин убран, `SESSION_SECRET`/`MTPROTO_TOKEN` обязательны в prod (fail-fast), ключи derived.
-- [⛔] **НЕ мержить, пока не выставлены Railway env** (см. `AUDIT_2026-07-02...` / память): `MTPROTO_TOKEN` на ОБА сервиса + `SESSION_SECRET` на web, потом удалить `TEAM_PASSWORD`.
+### D5.6 TEAM_PASSWORD removal — ✅ MERGED в main (`e368496`)
+- [x] Break-glass логин убран, `SESSION_SECRET`/`MTPROTO_TOKEN` обязательны в prod (fail-fast), ключи derived, mtproto fail-closed.
+- [x] Railway env выставлены владельцем (`MTPROTO_TOKEN` на оба сервиса + `SESSION_SECRET` на web) → ветка влита.
+- [⏳] После зелёного деплоя: удалить `TEAM_PASSWORD` с обоих Railway-сервисов. Все сессии инвалидируются (re-login; break-glass больше нет → нужен обычный суперюзер).
 
 ---
 
