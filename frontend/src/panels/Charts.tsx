@@ -8,7 +8,7 @@ import { LineChart } from '@/components/LineChart';
 import { ChartTooltip, type TooltipState } from '@/components/ChartTooltip';
 import { fmt, ruAxisLabel } from '@/lib/format';
 import { Skeleton } from '@/components/ui/skeleton';
-import { usePeriod } from '@/lib/period';
+import { useWidgetPeriod } from '@/lib/period';
 
 import { ChartSection, seriesBarValuesVariant } from '@/components/ChartWidget';
 
@@ -215,7 +215,7 @@ function buildHeatmap(
 }
 
 export function HeatmapChartBlock() {
-  const { days, inRange } = usePeriod();
+  const { days, inRange } = useWidgetPeriod();
   // isPending (не isLoading): запрос выключен, пока канал не известен, — скелетон и там.
   const { data: tgData, isPending } = useTgFull(days);
 

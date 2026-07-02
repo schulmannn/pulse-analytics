@@ -93,7 +93,18 @@ export function ExpandableChart({ title, children, renderExpanded, renderExpande
 interface ChartExpandOverlayProps extends ChartExpandConfig {
   title: string;
   children: ReactNode;
+  /** Window the overlay opens on (px pills 1М/3М/6М/Всё). Snapped to the nearest available
+      pill; anything without a matching pill falls back to 3М (90д). Used to open a rich-expand
+      chart on the host widget's own period. */
+  initialDays?: number;
   onClose: () => void;
+}
+
+/** Snap an arbitrary day count to the nearest overlay window pill (default 3М). */
+function snapToWindow(days: number | undefined): number {
+  if (days === 0) return 0;
+  if (days != null && WINDOWS.some((w) => w.days === days)) return days;
+  return 90;
 }
 
 /**
@@ -107,9 +118,9 @@ interface ChartExpandOverlayProps extends ChartExpandConfig {
  * at full explorer axes (Tier-1). Owns its own period + line/bar state, so a fresh open
  * always starts on the line at 3М — like the metric pages.
  */
-export function ChartExpandOverlay({ title, children, renderExpanded, renderExpandedBar, statsFor, statsSum = true, onClose }: ChartExpandOverlayProps) {
+export function ChartExpandOverlay({ title, children, renderExpanded, renderExpandedBar, statsFor, statsSum = true, initialDays, onClose }: ChartExpandOverlayProps) {
   const panelRef = useRef<HTMLDivElement>(null);
-  const [days, setDays] = useState(90);
+  const [days, setDays] = useState(() => snapToWindow(initialDays));
   // Overlay-local presentation; reopening always starts on the line, like metric pages.
   const [kind, setKind] = useState<'line' | 'bar'>('line');
   useFocusTrap(panelRef);

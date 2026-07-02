@@ -5,7 +5,7 @@ import { fmt } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { markdownToPlainText } from '@/lib/markdown';
 import { Card, CardContent } from '@/components/ui/card';
-import { usePeriod } from '@/lib/period';
+import { useWidgetPeriod } from '@/lib/period';
 import { Skeleton } from '@/components/ui/skeleton';
 import { RichText } from '@/components/RichText';
 import { ChartSection } from '@/components/ChartWidget';
@@ -22,8 +22,8 @@ const SORT_COLUMNS: { key: SortKey; label: string; get: (p: NormalizedPost) => n
 ];
 
 export function Posts() {
-  const { days, inRange } = usePeriod();
-  const { data, isPending, isError, error } = useTgFull(days);
+  const { inRange } = useWidgetPeriod();
+  const { data, isPending, isError, error } = useTgFull(0);
   const [openId, setOpenId] = useState<number | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>('reach');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');

@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { CSSProperties, ReactNode } from 'react';
 import { z } from 'zod';
@@ -9,6 +9,8 @@ import { BarChart } from '@/components/BarChart';
 import { Breakdown } from '@/components/Breakdown';
 import { DivergingBars } from '@/components/DivergingBars';
 import { ChartExpandOverlay, type ChartExpandConfig } from '@/components/ExpandableChart';
+import { DEFAULT_WIDGET_DAYS, WidgetPeriodProvider, widgetPeriodValue } from '@/lib/period';
+import type { PeriodDays, WidgetPeriodValue } from '@/lib/period';
 
 /**
  * Widget system for charts (steep Home): every chart is a card with a «⋯» menu — reorder
@@ -37,6 +39,8 @@ interface WidgetPrefs {
   title?: string;
   /** chosen presentation (a WidgetVariant key); undefined = the first variant */
   variant?: string;
+  /** per-widget time window (a PeriodDays preset); undefined = the 30д default */
+  period?: PeriodDays;
 }
 
 /** One presentation of a widget's data (line / bar / list …), chosen in the edit dialog. */
@@ -188,7 +192,9 @@ function getPrefs(id: string): WidgetPrefs {
 function setPrefs(id: string, prefs: WidgetPrefs) {
   try {
     const all = readJson<Record<string, WidgetPrefs>>(PREFS_KEY, {});
-    if (!prefs.color && !prefs.tinted && !prefs.hidden && !prefs.title && !prefs.variant) delete all[id];
+    // `period` can be 0 («Всё») — a falsy but real value, so test for undefined, not truthiness.
+    if (!prefs.color && !prefs.tinted && !prefs.hidden && !prefs.title && !prefs.variant && prefs.period === undefined)
+      delete all[id];
     else all[id] = prefs;
     localStorage.setItem(PREFS_KEY, JSON.stringify(all));
   } catch {
@@ -656,19 +662,30 @@ interface ChartSectionProps {
   title: string;
   /** Extra header controls (e.g. the chart-type switcher) between the title and the menu. */
   action?: ReactNode;
-  /** Alternative presentations (line / bar / list) selectable in the edit dialog. */
-  variants?: WidgetVariant[];
+  /**
+   * Alternative presentations (line / bar / list) selectable in the edit dialog. Either a static
+   * array, or a FUNCTION of the card's own window — post-derived charts pass the function form so
+   * their series recompute for THIS card's period (the fn runs with the widget's WidgetPeriodValue).
+   */
+  variants?: WidgetVariant[] | ((period: WidgetPeriodValue) => WidgetVariant[]);
   /** Extra classes on the card (grid spans etc.). */
   className?: string;
   /** RICH (Tier-2) explorer config for the «Развернуть» overlay: period pills, line↔bar
       toggle, stats strip. Undefined = Tier-1 — the overlay renders the widget's own body
       (active variant or children) at full explorer axes. */
   expand?: ChartExpandConfig;
+  /**
+   * Opt into the per-widget period control (header pill row + the «Период» segment in the edit
+   * dialog). ONLY for cards whose body actually reads useWidgetPeriod() — the wired Overview /
+   * TgAnalytics widgets. Off by default so cards that still read the global period (IG / Compare /
+   * Posts / metric-page / report) don't grow a dead control.
+   */
+  periodControl?: boolean;
   /** Body; with `variants` it renders BELOW the active variant (shared captions etc.). */
   children?: ReactNode;
 }
 
-export function ChartSection({ id, title, action, variants, className, expand, children }: ChartSectionProps) {
+export function ChartSection({ id, title, action, variants, className, expand, periodControl, children }: ChartSectionProps) {
   const widgetId = id ?? title;
   const group = useContext(GroupCtx);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -702,17 +719,36 @@ export function ChartSection({ id, title, action, variants, className, expand, c
   const prefs = getPrefs(widgetId);
   const update = (next: WidgetPrefs) => setPrefs(widgetId, next);
 
+  // Per-widget window: the card's own period (default 30д). Charts inside read it via
+  // useWidgetPeriod(); the WidgetPeriodProvider below scopes it to this card's subtree.
+  // Memoized on the scalar `widgetDays` so `inRange`'s identity is stable across re-renders —
+  // consumers key their derive memos on it (a fresh predicate each render would bust them).
+  const widgetDays: PeriodDays = prefs.period ?? DEFAULT_WIDGET_DAYS;
+  const widgetPeriod = useMemo(() => widgetPeriodValue(widgetDays), [widgetDays]);
+
+  // Resolve variants: the function form recomputes its series for THIS card's window (post-derived
+  // charts); the array form is period-agnostic (server-summary / graphs-driven series). Memoized so
+  // the (potentially heavy) function form runs once per (variants identity, widget window) — not on
+  // every ChartSection re-render (menu open/close, hover, scrollspy, store notify).
+  const resolvedVariants = useMemo(
+    () => (typeof variants === 'function' ? variants(widgetPeriod) : variants),
+    [variants, widgetPeriod],
+  );
+
   // The active variant drives the card's grid span (wide «Столбцы + значения» takes 2 cells).
   const activeVariant =
-    variants && variants.length > 0 ? (variants.find((v) => v.key === prefs.variant) ?? variants[0]) : null;
+    resolvedVariants && resolvedVariants.length > 0
+      ? (resolvedVariants.find((v) => v.key === prefs.variant) ?? resolvedVariants[0])
+      : null;
 
   // The widget's own body — the active variant plus the shared children (captions etc.). Reused
-  // as the Tier-1 overlay content: the same chart, just rendered at full explorer axes.
+  // as the Tier-1 overlay content: the same chart, just rendered at full explorer axes. Wrapped
+  // in the widget-period provider so every chart primitive inside filters to THIS card's window.
   const bodyNode = (
-    <>
+    <WidgetPeriodProvider value={widgetPeriod}>
       {activeVariant ? activeVariant.render : null}
       {children}
-    </>
+    </WidgetPeriodProvider>
   );
   // The «Развернуть» affordance renders on every widget. Tier-2 (a rich `expand` config)
   // drives its own overlay content; Tier-1 falls back to the widget body.
@@ -884,6 +920,15 @@ export function ChartSection({ id, title, action, variants, className, expand, c
           )}
         </div>
       </div>
+      {/* Per-widget period — a compact pill row under the header (hidden while reordering / in
+          print). Only on wired cards that read useWidgetPeriod(); the global topbar switcher is gone. */}
+      {periodControl && (
+        <WidgetPeriodPills
+          days={widgetDays}
+          onChange={(next) => update({ ...prefs, period: next === DEFAULT_WIDGET_DAYS ? undefined : next })}
+          hidden={reorder}
+        />
+      )}
       <div className={`mt-3 ${reorder ? 'pointer-events-none' : ''}`}>
         {bodyNode}
       </div>
@@ -893,7 +938,8 @@ export function ChartSection({ id, title, action, variants, className, expand, c
         <EditWidgetDialog
           defaultTitle={title}
           prefs={prefs}
-          variants={variants}
+          variants={resolvedVariants}
+          showPeriod={!!periodControl}
           onChange={update}
           onClose={() => setEditOpen(false)}
         />
@@ -902,6 +948,7 @@ export function ChartSection({ id, title, action, variants, className, expand, c
       {expandOpen && (
         <ChartExpandOverlay
           title={prefs.title || title}
+          initialDays={periodControl ? widgetDays : undefined}
           renderExpanded={hasRichExpand ? expand?.renderExpanded : undefined}
           renderExpandedBar={hasRichExpand ? expand?.renderExpandedBar : undefined}
           statsFor={hasRichExpand ? expand?.statsFor : undefined}
@@ -912,6 +959,50 @@ export function ChartSection({ id, title, action, variants, className, expand, c
         </ChartExpandOverlay>
       )}
     </section>
+  );
+}
+
+// ── Per-widget period control ─────────────────────────────────────────────────────────────
+const WIDGET_PERIODS: Array<{ days: PeriodDays; label: string }> = [
+  { days: 7, label: '7д' },
+  { days: 30, label: '30д' },
+  { days: 90, label: '90д' },
+  { days: 0, label: 'Всё' },
+];
+
+/** Compact underline-tab period row for one widget card (7д / 30д / 90д / Всё). Same visual
+    language as the retired topbar switcher, scoped to this card. Hidden while reordering /
+    in print (period is not a print concern). */
+function WidgetPeriodPills({
+  days,
+  onChange,
+  hidden,
+}: {
+  days: PeriodDays;
+  onChange: (days: PeriodDays) => void;
+  hidden?: boolean;
+}) {
+  if (hidden) return null;
+  return (
+    <div role="group" aria-label="Период виджета" className="mt-2 flex items-center gap-3 print:hidden">
+      {WIDGET_PERIODS.map((p) => {
+        const active = days === p.days;
+        return (
+          <button
+            key={p.days}
+            type="button"
+            aria-pressed={active}
+            onClick={() => onChange(p.days)}
+            className={`relative px-0.5 pb-1 pt-0.5 text-2xs font-medium tabular-nums transition-colors ${
+              active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            {p.label}
+            {active && <span aria-hidden="true" className="absolute inset-x-0 -bottom-px h-px bg-primary" />}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -943,11 +1034,13 @@ interface EditWidgetDialogProps {
   defaultTitle: string;
   prefs: WidgetPrefs;
   variants?: WidgetVariant[];
+  /** Show the «Период» segment — only for cards that read useWidgetPeriod() (see periodControl). */
+  showPeriod?: boolean;
   onChange: (next: WidgetPrefs) => void;
   onClose: () => void;
 }
 
-function EditWidgetDialog({ defaultTitle, prefs, variants, onChange, onClose }: EditWidgetDialogProps) {
+function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, onChange, onClose }: EditWidgetDialogProps) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -1040,6 +1133,32 @@ function EditWidgetDialog({ defaultTitle, prefs, variants, onChange, onClose }: 
             className="mt-1 w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
           />
         </label>
+
+        {showPeriod && (
+          <div className="mt-4">
+            <span className="text-2xs tracking-wide text-muted-foreground">Период</span>
+            {/* Presets only for now (per-widget custom range is a noted follow-up). Selecting the
+                30д default clears the pref so the card falls back to the module default. */}
+            <div className="mt-2 flex overflow-hidden rounded border border-border">
+              {WIDGET_PERIODS.map((p) => {
+                const active = (prefs.period ?? DEFAULT_WIDGET_DAYS) === p.days;
+                return (
+                  <button
+                    key={p.days}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => onChange({ ...prefs, period: p.days === DEFAULT_WIDGET_DAYS ? undefined : p.days })}
+                    className={`flex-1 border-r border-border px-2 py-1.5 text-xs font-medium tabular-nums transition-colors last:border-r-0 ${
+                      active ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         <div className="mt-4">
           <span className="text-2xs tracking-wide text-muted-foreground">Акцент</span>

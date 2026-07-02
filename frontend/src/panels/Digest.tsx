@@ -4,14 +4,16 @@ import { normalizeTgPosts } from '@/lib/posts';
 import { subscriberChange } from '@/lib/delta';
 import { fmt } from '@/lib/format';
 import { markdownToPlainText } from '@/lib/markdown';
-import { usePeriod } from '@/lib/period';
+import { useWidgetPeriod } from '@/lib/period';
 import { Skeleton } from '@/components/ui/skeleton';
 
 export function Digest() {
-  const { days, range, inRange } = usePeriod();
+  // Per-widget window (useWidgetPeriod), not the global period. Presets only — no custom range.
+  const { days, inRange } = useWidgetPeriod();
   // isPending (не isLoading): канал-скоупные запросы выключены, пока канал не известен, —
   // скелетон должен показываться и в этом состоянии (isLoading у disabled-запроса = false).
-  const { data: full, isPending: isFullPending } = useTgFull(days);
+  // Wide fetch (limit 100): shared payload, filtered client-side by inRange.
+  const { data: full, isPending: isFullPending } = useTgFull(0);
   const { data: graphs, isPending: isGraphsPending } = useTgGraphs();
   const { data: history, isPending: isHistoryPending } = useHistory(730);
 
@@ -35,8 +37,8 @@ export function Digest() {
   // Подписчики — тот же источник и та же оконная математика, что у KPI-леджера
   // (subscriberChange по дневному архиву): дайджест говорил «−166» (сумма joined−left по
   // ВСЕМУ окну TG-графа), пока леджер показывал «−110» за период — один экран, два числа
-  // (D6.1). Кастомный диапазон, как и в леджере, без клаузы: у него нет пресет-окна.
-  const netSubscribers = range ? null : subscriberChange(history?.rows ?? [], days);
+  // (D6.1). Per-widget окно — только пресеты, поэтому paired-window Δ всегда применим.
+  const netSubscribers = subscriberChange(history?.rows ?? [], days);
 
   const activeErvs = posts.map((p) => p.erv).filter((v): v is number => v !== null);
   const avgErv = activeErvs.length ? activeErvs.reduce((a, b) => a + b, 0) / activeErvs.length : null;

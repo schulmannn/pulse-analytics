@@ -2,7 +2,7 @@ import { useTgFull } from '@/api/queries';
 import { normalizeTgPosts, type NormalizedPost } from '@/lib/posts';
 import { fmt } from '@/lib/format';
 import { pctDelta } from '@/lib/delta';
-import { usePeriod } from '@/lib/period';
+import { useWidgetPeriod } from '@/lib/period';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { DeltaPill } from '@/components/DeltaPill';
@@ -66,8 +66,8 @@ function formatLabel(mediaType: string | null, albumSize: number): string {
  * (Channel-vs-channel comparison is a separate, heavier feature — it needs multi-channel fetch.)
  */
 export function Compare() {
-  const { days, range } = usePeriod();
-  const { data, isPending, isError } = useTgFull(days, { windowPair: true });
+  const { days } = useWidgetPeriod();
+  const { data, isPending, isError } = useTgFull(0, { windowPair: true });
 
   if (isPending) return <CompareSkeleton />;
   if (isError) return null;
@@ -76,8 +76,8 @@ export function Compare() {
   const all = normalizeTgPosts(data?.posts ?? [], data?.channel ?? {});
 
   const now = Date.now();
-  const to = range ? range.to : now;
-  const from = range ? range.from : days > 0 ? now - days * DAY_MS : Number.NEGATIVE_INFINITY;
+  const to = now;
+  const from = days > 0 ? now - days * DAY_MS : Number.NEGATIVE_INFINITY;
   const span = to - from;
   const prevFrom = from - span;
 
@@ -108,7 +108,7 @@ export function Compare() {
   // For the "not enough history" explainer: the comparison needs data covering BOTH windows
   // (2×N days), while the archive of loaded posts may cover less — that's also why the Обзор
   // insight (graphs deltas from Telegram) can report a change this tab can't reproduce.
-  const periodDays = range ? Math.max(1, Math.round(span / DAY_MS)) : days;
+  const periodDays = days;
   const oldestTs = all.reduce<number | null>((min, p) => {
     if (!p.date) return min;
     const t = Date.parse(p.date);
@@ -192,10 +192,10 @@ export function Compare() {
               </tbody>
             </table>
           </div>
-        ) : days === 0 && !range ? (
+        ) : days === 0 ? (
           <EmptyState
             title="Для режима «Всё время» нет предыдущего периода"
-            reason="Выберите 7д / 30д / 90д или произвольный диапазон, чтобы сравнить его с таким же окном до него."
+            reason="Выберите 7д / 30д / 90д, чтобы сравнить период с таким же окном до него."
           />
         ) : (
           <EmptyState

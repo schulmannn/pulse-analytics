@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PostDetailModal } from '@/components/PostDetailModal';
 import { EmptyState } from '@/components/EmptyState';
-import { usePeriod } from '@/lib/period';
+import { useWidgetPeriod } from '@/lib/period';
 
 /**
  * Top posts (legacy "выше среднего по вовлечению" algorithm) as a hairline table. Heading-less and
@@ -42,8 +42,9 @@ const COLUMN_TONE: Record<SortKey, string> = {
 };
 
 export function TopPosts() {
-  const { days, inRange } = usePeriod();
-  const { data, isPending, isError } = useTgFull(days);
+  // Per-widget window (useWidgetPeriod). Wide fetch (limit 100), filtered client-side by inRange.
+  const { inRange } = useWidgetPeriod();
+  const { data, isPending, isError } = useTgFull(0);
   const [selected, setSelected] = useState<{ post: NormalizedPost; rank: number; reason: string | null } | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>('reach');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');

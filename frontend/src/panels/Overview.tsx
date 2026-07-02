@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { useChannels, useHistory, useTgFull } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
-import { usePeriod } from '@/lib/period';
+import { useWidgetPeriod } from '@/lib/period';
 import { subscriberChange } from '@/lib/delta';
 import { fmt } from '@/lib/format';
 import { freshness, latestHistoryDay } from '@/lib/freshness';
@@ -25,8 +25,10 @@ export function Overview() {
   const { demo } = useDemo();
   const { channelId } = useSelectedChannel();
   const { data: channelsData } = useChannels();
-  const { days } = usePeriod();
-  const { data, isPending, isError } = useTgFull(days);
+  // ONE wide fetch (limit 100 = server cap) for the whole panel — every widget below filters
+  // this payload to its OWN window. The panel-level fetch only gates the empty-state, so it must
+  // NOT depend on any widget's period (a narrow window could wrongly read as "empty").
+  const { data, isPending, isError } = useTgFull(0);
 
   // First-run: a signed-in user with no channels (and not exploring the demo) gets onboarding
   // instead of an empty dashboard.
@@ -55,20 +57,21 @@ export function Overview() {
             both vanish). */}
         {/* Widget label «Показатели», NOT «Обзор» — the feed block's h2 right above already
             says «Обзор»; repeating it in the menu row would read as a stutter. */}
-        <ChartSection id="overview-hero" title="Показатели" className="lg:col-span-2">
-          {/* KPI hero (Просмотры · 30 дн.) + ledger (Подписчики / Ср.охват / Реакции / ER) */}
+        <ChartSection id="overview-hero" title="Показатели" className="lg:col-span-2" periodControl>
+          {/* KPI hero (Просмотры · окно виджета) + ledger (Подписчики / Ср.охват / Реакции / ER) */}
           <KpiGrid />
         </ChartSection>
-        <ChartSection id="overview-digest" title="Инсайт">
+        <ChartSection id="overview-digest" title="Инсайт" periodControl>
           <Digest />
         </ChartSection>
-        <ChartSection id="overview-growth" title="Рост подписчиков">
+        <ChartSection id="overview-growth" title="Рост подписчиков" periodControl>
           <SubscriberGrowth />
         </ChartSection>
         <ChartSection
           id="overview-top-posts"
           title="Топ постов"
           className="lg:col-span-2"
+          periodControl
           action={
             <Link to="/analytics" className="shrink-0 text-xs font-medium text-primary hover:underline">
               <span className="md:hidden">Аналитика →</span><span className="hidden md:inline">Открыть аналитику →</span>
@@ -96,9 +99,10 @@ function StaleWarning() {
   );
 }
 
-/** Subscriber base over the period — the second most important channel state (the hero is views). */
+/** Subscriber base over the period — the second most important channel state (the hero is views).
+    Reads its OWN widget window (useWidgetPeriod), not the global period. */
 function SubscriberGrowth() {
-  const { days, range, inRange } = usePeriod();
+  const { days, inRange } = useWidgetPeriod();
   const { data: history } = useHistory(730);
   const { channelId } = useSelectedChannel();
   const { data: channelsData } = useChannels();
@@ -110,7 +114,8 @@ function SubscriberGrowth() {
   const values = rows.map((r) => Number(r.subscribers));
   const labels = rows.map((r) => fmt.day(r.day));
   const currentSubs = current?.memberCount ?? (values.length ? values[values.length - 1] : 0);
-  const change = range ? null : subscriberChange(history?.rows ?? [], days);
+  // Per-widget windows are presets only (no custom range), so the paired-window Δ always applies.
+  const change = subscriberChange(history?.rows ?? [], days);
   const periodLabel = days === 0 ? 'всё время' : `${days} дн.`;
 
   return (

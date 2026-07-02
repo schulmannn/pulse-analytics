@@ -183,15 +183,20 @@ export function useLogout() {
 export function useTgFull(days: PeriodDays, opts?: { windowPair?: boolean }) {
   const { channelId } = useSelectedChannel();
   const { range } = usePeriod();
-  // Comparison surfaces (metric pages / report / Сравнение) need the PREVIOUS equal-length
-  // window too — the preset limit covers roughly one window, so «Сравнение» came back empty
-  // on prod (60 posts don't reach the prior 30 days). Double it, server caps at 100.
+  // The global custom range only applies to the comparison surfaces (metric pages / report /
+  // Сравнение) that opt into windowPair. Plain feed widgets ignore it — otherwise a lingering
+  // global range (left by a metric/report page) would re-key the SHARED feed fetch on navigation,
+  // spawning a redundant query. So fold `range` into the key + limit only when windowPair is set.
+  const effRange = opts?.windowPair ? range : null;
+  // Comparison surfaces need the PREVIOUS equal-length window too — the preset limit covers roughly
+  // one window, so «Сравнение» came back empty on prod (60 posts don't reach the prior 30 days).
+  // Double it, server caps at 100.
   const limit = opts?.windowPair
-    ? Math.min(100, effectiveLimit(days, range) * 2)
-    : effectiveLimit(days, range);
+    ? Math.min(100, effectiveLimit(days, effRange) * 2)
+    : effectiveLimit(days, effRange);
   return useQuery({
     enabled: channelId != null,
-    queryKey: ['tg-full', channelId, days, range?.from ?? 0, range?.to ?? 0, limit],
+    queryKey: ['tg-full', channelId, days, effRange?.from ?? 0, effRange?.to ?? 0, limit],
     queryFn: ({ signal }) => apiGet(`/api/tg/full?limit=${limit}`, TgFullSchema, { signal, channelId }),
   });
 }

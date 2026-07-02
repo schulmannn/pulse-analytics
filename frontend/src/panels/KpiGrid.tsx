@@ -10,7 +10,7 @@ import { Sparkline } from '@/components/Sparkline';
 import { MetricInfo } from '@/components/InfoTooltip';
 import { DeltaPill } from '@/components/DeltaPill';
 import { Skeleton } from '@/components/ui/skeleton';
-import { usePeriod } from '@/lib/period';
+import { useWidgetPeriod } from '@/lib/period';
 import type { MetricDelta } from '@/lib/delta';
 import { METRIC_DEFS } from '@/lib/metricDefs';
 import type { MetricDef } from '@/lib/metricDefs';
@@ -30,9 +30,13 @@ function splitUnit(value: string): [string, string] {
  * the post-window sum; sparse data → null → no pill, never a made-up number.
  */
 export function KpiGrid() {
-  const { days, range, inRange } = usePeriod();
+  // Per-widget window (useWidgetPeriod), not the global period. No custom range at the widget
+  // level (presets only), so `range` is always null here.
+  const { days, inRange } = useWidgetPeriod();
   // isPending: канал-скоупный запрос выключен, пока канал не известен, — скелетон и там.
-  const { data, isPending, isError, error } = useTgFull(days);
+  // Wide fetch (limit 100 = server cap): one entry shared with the sibling widgets; the window
+  // is applied client-side via inRange, so a narrower widget period never spawns its own request.
+  const { data, isPending, isError, error } = useTgFull(0);
   const { data: history } = useHistory(730);
   const { channelId } = useSelectedChannel();
   const { data: channelsData } = useChannels();
@@ -42,8 +46,8 @@ export function KpiGrid() {
   // Все пять reduce-проходов + оконная математика мемоизированы (shared deriveKpis —
   // те же числа, что на страницах метрик, поэтому заголовок и страница сходятся).
   const derived = useMemo(
-    () => deriveKpis(data, history, channelsData, channelId, days, range, inRange),
-    [data, history, channelsData, channelId, days, range, inRange],
+    () => deriveKpis(data, history, channelsData, channelId, days, null, inRange),
+    [data, history, channelsData, channelId, days, inRange],
   );
 
   if (isPending) return <KpiSkeletons />;

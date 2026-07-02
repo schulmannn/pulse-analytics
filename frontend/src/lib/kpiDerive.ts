@@ -2,7 +2,6 @@ import type { ChannelsResponse, HistoryData, TgFull } from '@/api/schemas';
 import { fmt } from '@/lib/format';
 import { normalizeTgPosts } from '@/lib/posts';
 import type { NormalizedPost } from '@/lib/posts';
-import { effectiveLimit } from '@/lib/period';
 import type { DateRange, PeriodDays } from '@/lib/period';
 import { avgReachWindowDelta, dailyWindowDelta, pctDelta, subscriberChange, subscriberDelta, sumPostWindows } from '@/lib/delta';
 import type { MetricDelta } from '@/lib/delta';
@@ -188,9 +187,12 @@ export function deriveKpis(
       : null;
   const erCaption =
     erPp != null && Math.abs(erPp) >= 0.05 ? `${erPp > 0 ? '+' : '−'}${Math.abs(erPp).toFixed(1)} п.п.` : null;
-  // «Всё» на деле означает «последние 100 постов» (fetch-лимит) — когда выборка упирается в
-  // кап, честно говорим «по последним N постам», а не молча выдаём срез за «всё время».
-  const atFetchCap = days === 0 && !range && (data?.posts?.length ?? 0) >= effectiveLimit(days, range);
+  // Любое окно на деле упирается в fetch-лимит сервера (100 постов): когда выборка на капе И
+  // всё загруженное попадает в окно (значит, более старые посты обрезаны), честно говорим «по
+  // последним N постам», а не молча выдаём урезанный срез как полный — для ЛЮБОГО пресета, не
+  // только «Всё».
+  const fetched = data?.posts?.length ?? 0;
+  const atFetchCap = !range && fetched >= 100 && postsAnalyzed >= fetched;
   const viewsBase = postsAnalyzed
     ? atFetchCap
       ? `по последним ${postsAnalyzed} постам`

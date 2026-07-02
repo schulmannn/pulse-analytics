@@ -112,3 +112,50 @@ export function inRangeByDays(dateISO: string | null | undefined, days: PeriodDa
   const timestamp = Date.parse(dateISO);
   return Number.isFinite(timestamp) && timestamp >= Date.now() - days * 24 * 60 * 60 * 1000;
 }
+
+// ── Per-widget period ──────────────────────────────────────────────────────────────────────
+/**
+ * The window a single widget card is showing. Distinct from the global {@link usePeriod}
+ * (which now serves only the metric-page / report explorers): every chart on a feed reads
+ * its OWN period from the nearest {@link WidgetPeriodContext}, seeded from the card's prefs.
+ *
+ * The default per-widget window is 30д — parity with the old global default, so nothing shifts
+ * for a card the user has never touched.
+ */
+export interface WidgetPeriodValue {
+  days: PeriodDays;
+  /** True if a date is inside this widget's window (preset only — per-widget custom ranges
+      are a noted follow-up). */
+  inRange: (dateISO: string | null | undefined) => boolean;
+}
+
+export const DEFAULT_WIDGET_DAYS: PeriodDays = 30;
+
+/** The fallback window used when a chart reads its period outside any widget shell (metric
+    pages, reports, standalone previews) — a sane 30д so those callers never crash. */
+export const WIDGET_PERIOD_FALLBACK: WidgetPeriodValue = {
+  days: DEFAULT_WIDGET_DAYS,
+  inRange: (dateISO) => inRangeByDays(dateISO, DEFAULT_WIDGET_DAYS),
+};
+
+const WidgetPeriodContext = createContext<WidgetPeriodValue | null>(null);
+
+export function WidgetPeriodProvider({
+  value,
+  children,
+}: {
+  value: WidgetPeriodValue;
+  children: ReactNode;
+}) {
+  return <WidgetPeriodContext.Provider value={value}>{children}</WidgetPeriodContext.Provider>;
+}
+
+/** The nearest widget period, or a 30д fallback when rendered outside a widget shell. */
+export function useWidgetPeriod(): WidgetPeriodValue {
+  return useContext(WidgetPeriodContext) ?? WIDGET_PERIOD_FALLBACK;
+}
+
+/** Build a {@link WidgetPeriodValue} from a bare preset (memo-friendly at the call site). */
+export function widgetPeriodValue(days: PeriodDays): WidgetPeriodValue {
+  return { days, inRange: (dateISO) => inRangeByDays(dateISO, days) };
+}

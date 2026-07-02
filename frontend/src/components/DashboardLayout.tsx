@@ -6,8 +6,6 @@ import { useChannels, useHistory, useIgProfile, useLogout, useTgFull } from '@/a
 import { useSelectedChannel } from '@/lib/channel-context';
 import { useDemo } from '@/lib/demo-context';
 import { openCommandPalette } from '@/lib/command-palette';
-import { usePeriod } from '@/lib/period';
-import type { PeriodDays } from '@/lib/period';
 import { useTheme } from '@/lib/theme';
 import { useMediaQuery } from '@/lib/useMediaQuery';
 import { useSidebarMode } from '@/lib/sidebar';
@@ -21,7 +19,6 @@ import { METRIC_DEFS } from '@/lib/metricDefs';
 import { normalizeTgPosts } from '@/lib/posts';
 import { Icon, type IconName } from '@/components/nav-icons';
 import { ChannelAvatar } from '@/components/ChannelAvatar';
-import { DateRangePicker } from '@/components/DateRangePicker';
 
 /** Close a popover/dropdown on Escape, and (when a ref is given) on outside mousedown.
     Outside-click via a document listener instead of a scrim avoids stacking-context traps. */
@@ -109,13 +106,6 @@ function routeTitle(pathname: string): string {
   if (pathname.startsWith('/reports/')) return 'Отчёт';
   return pathname.startsWith('/instagram') ? 'Instagram' : 'Atlavue';
 }
-
-const PERIODS: Array<{ days: PeriodDays; label: string }> = [
-  { days: 7, label: '7д' },
-  { days: 30, label: '30д' },
-  { days: 90, label: '90д' },
-  { days: 0, label: 'Всё' },
-];
 
 // Platform brand colors (platform identity, not the app palette — intentional hex).
 const PLATFORMS = [
@@ -271,12 +261,12 @@ function Sidebar({ email, role, avatar }: { email?: string; role?: string; avata
 /**
  * Sidebar utility strip — the panel toggle (Ctrl+B) and search (⌘K, opens the global command
  * palette) as quiet ghost actions. No brand block here (the wordmark stays on the Landing page),
- * so the strip is right-aligned chrome and the channel card below is the sidebar's first real
- * content. In the rail the actions stack centered, so the toggle always stays reachable.
+ * so the strip is LEFT-aligned chrome (owner call) and the channel card below is the sidebar's
+ * first real content. In the rail the actions stack centered, so the toggle always stays reachable.
  */
 function SidebarActions({ rail, onToggle }: { rail: boolean; onToggle: () => void }) {
   return (
-    <div className={cn('flex px-3 pt-3', rail ? 'flex-col items-center gap-1' : 'items-center justify-end gap-1')}>
+    <div className={cn('flex px-3 pt-3', rail ? 'flex-col items-center gap-1' : 'items-center justify-start gap-1')}>
       <GhostIconButton
         onClick={onToggle}
         label={rail ? 'Показать панель' : 'Скрыть панель'}
@@ -575,7 +565,6 @@ function Topbar() {
           the empty span keeps justify-between pushing the controls right when there's no title. */}
       {title ? <h1 className="min-w-0 truncate text-lg font-medium">{title}</h1> : <span aria-hidden="true" />}
       <div className="flex shrink-0 items-center gap-2">
-        <PeriodSwitcher />
         <ExportButton />
       </div>
     </header>
@@ -584,8 +573,8 @@ function Topbar() {
 
 /**
  * Mobile header (md:hidden) — replaces the desktop top bar below md (Figma 390). Row 1: channel
- * identity + account avatar. Row 2: full-width segmented platform switch. Row 3: a compact period
- * strip sitting just above the content (Figma places the period by the KPI hero).
+ * identity + account avatar. Row 2: full-width segmented platform switch. The global period strip
+ * is gone — period is now per-widget (each card carries its own 7д/30д/90д/Всё control).
  */
 function MobileHeader({ email, role, avatar }: { email?: string; role?: string; avatar?: string | null }) {
   return (
@@ -599,20 +588,18 @@ function MobileHeader({ email, role, avatar }: { email?: string; role?: string; 
       <div className="border-b px-3 py-2">
         <PlatformNav />
       </div>
-      <div className="flex justify-end border-b px-3 py-1.5">
-        <PeriodSwitcher />
-      </div>
     </div>
   );
 }
 
-/** Export the active channel's Telegram posts (current period) to CSV. Shown only on TG data views. */
+/** Export the active channel's Telegram posts to CSV. Shown only on TG data views. The global
+    period switcher is gone (period is per-widget), so the export ships ALL fetched posts — the
+    wide max-window fetch (limit 100 = server cap), same payload the feed widgets filter from. */
 function ExportButton() {
   const { pathname } = useLocation();
-  const { days, inRange } = usePeriod();
-  const { data } = useTgFull(days);
+  const { data } = useTgFull(0);
   if (!['/', '/analytics', '/posts'].includes(pathname)) return null;
-  const posts = normalizeTgPosts(data?.posts ?? [], data?.channel ?? {}).filter((p) => inRange(p.date));
+  const posts = normalizeTgPosts(data?.posts ?? [], data?.channel ?? {});
   const onExport = () =>
     downloadCsv(
       'telegram-posts.csv',
@@ -806,154 +793,6 @@ function SidebarUserRow({
         >
           <AccountMenuContent email={email} role={role} onClose={() => setOpen(false)} />
         </div>
-      )}
-    </div>
-  );
-}
-
-const shortDate = (ms: number) =>
-  new Date(ms).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
-
-const DAY_MS = 86_400_000;
-const startOfDayMs = (ms: number) => {
-  const d = new Date(ms);
-  d.setHours(0, 0, 0, 0);
-  return d.getTime();
-};
-/** How far back the pager may step — the channel_daily archive keeps ~730 days. */
-const PAGER_FLOOR_DAYS = 730;
-
-function PeriodSwitcher() {
-  const { days, setDays, range, setRange } = usePeriod();
-  const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
-  const btnRef = useRef<HTMLButtonElement>(null);
-  useDismiss(open, setOpen); // Escape closes; outside-click handled by the scrim
-
-  // Underline tab — active = blue underline bar, no fill (Refined Technical).
-  const tab = (active: boolean) =>
-    cn(
-      'relative px-0.5 pb-1.5 pt-1 text-xs font-medium tabular-nums transition-colors',
-      active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
-    );
-
-  const toggle = () => {
-    if (open) return setOpen(false);
-    const r = btnRef.current?.getBoundingClientRect();
-    if (r) setPos({ top: r.bottom + 6, right: Math.max(8, window.innerWidth - r.right) });
-    setOpen(true);
-  };
-
-  // ‹ › pager (steep pattern): step the active window to the adjacent window of equal
-  // length, expressed through the existing custom-range mechanism (preset 30д + ‹ = a
-  // custom range covering the previous 30 days; the range button shows «dd.mm–dd.mm»).
-  // Stepping forward past "now" returns to the rolling preset; «Всё» has no finite window.
-  const today = startOfDayMs(Date.now());
-  const winTo = range ? startOfDayMs(range.to) : today;
-  const winFrom = range ? startOfDayMs(range.from) : days !== 0 ? today - (days - 1) * DAY_MS : null;
-  const lenDays = winFrom != null ? Math.round((winTo - winFrom) / DAY_MS) + 1 : 0;
-  const floor = today - PAGER_FLOOR_DAYS * DAY_MS;
-  const canPrev = winFrom != null && winFrom - lenDays * DAY_MS >= floor;
-  // The rolling window already ends at "now" — only a shifted (custom) window can step forward.
-  const canNext = winFrom != null && range !== null;
-  const step = (dir: -1 | 1) => {
-    if (winFrom == null) return;
-    const nextFrom = winFrom + dir * lenDays * DAY_MS;
-    const nextTo = winTo + dir * lenDays * DAY_MS;
-    if (dir === 1 && nextTo >= today) {
-      setDays(days); // caught up with the present → back to the rolling preset window
-      return;
-    }
-    setRange({ from: nextFrom, to: nextTo + DAY_MS - 1 });
-  };
-  const pagerBtn = (enabled: boolean) =>
-    cn(
-      'flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors',
-      enabled ? 'hover:bg-muted/60 hover:text-foreground' : 'opacity-30',
-    );
-
-  return (
-    <div className="flex items-center">
-      <div className="flex items-center gap-3">
-        {PERIODS.map((period) => {
-          const active = range === null && days === period.days;
-          return (
-            <button
-              key={period.days}
-              type="button"
-              onClick={() => setDays(period.days)}
-              className={tab(active)}
-            >
-              {period.label}
-              {active && <span aria-hidden="true" className="absolute inset-x-0 -bottom-px h-px bg-primary" />}
-            </button>
-          );
-        })}
-        {/* hairline divider before the custom-range control */}
-        <span aria-hidden="true" className="h-4 w-px bg-border" />
-        <button
-          ref={btnRef}
-          type="button"
-          onClick={toggle}
-          className={cn(tab(range !== null), 'inline-flex items-center gap-1')}
-          title="Произвольный период"
-          aria-label="Произвольный период"
-        >
-          {range ? (
-            <>
-              {`${shortDate(range.from)}–${shortDate(range.to)}`}
-              <span aria-hidden="true" className="absolute inset-x-0 -bottom-px h-px bg-primary" />
-            </>
-          ) : (
-            <Icon name="calendar" className="h-3.5 w-3.5" />
-          )}
-        </button>
-        {/* hairline divider before the ‹ › pager (quiet ghost buttons, no boxes) */}
-        <span aria-hidden="true" className="h-4 w-px bg-border" />
-        <div className="flex items-center gap-0.5">
-          <button
-            type="button"
-            onClick={() => step(-1)}
-            disabled={!canPrev}
-            title="Предыдущий период"
-            aria-label="Предыдущий период"
-            className={pagerBtn(canPrev)}
-          >
-            <Icon name="chevron" className="h-3.5 w-3.5 rotate-90" />
-          </button>
-          <button
-            type="button"
-            onClick={() => step(1)}
-            disabled={!canNext}
-            title="Следующий период"
-            aria-label="Следующий период"
-            className={pagerBtn(canNext)}
-          >
-            <Icon name="chevron" className="h-3.5 w-3.5 -rotate-90" />
-          </button>
-        </div>
-      </div>
-
-      {open && pos && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div
-            className="fixed z-50 w-auto rounded-lg border bg-popover p-4 text-popover-foreground"
-            style={{ top: pos.top, right: pos.right }}
-          >
-            <DateRangePicker
-              value={range}
-              onApply={(r) => {
-                setRange(r);
-                setOpen(false);
-              }}
-              onReset={() => {
-                setDays(30); // also clears the range
-                setOpen(false);
-              }}
-            />
-          </div>
-        </>
       )}
     </div>
   );

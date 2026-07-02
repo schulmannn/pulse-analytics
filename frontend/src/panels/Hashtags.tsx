@@ -2,7 +2,7 @@ import { useTgFull } from '@/api/queries';
 import { normalizeTgPosts } from '@/lib/posts';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Breakdown } from '@/components/Breakdown';
-import { usePeriod } from '@/lib/period';
+import { useWidgetPeriod } from '@/lib/period';
 import { Skeleton } from '@/components/ui/skeleton';
 
 interface TagStats {
@@ -11,7 +11,7 @@ interface TagStats {
 }
 
 export function Hashtags() {
-  const { days, inRange } = usePeriod();
+  const { days, inRange } = useWidgetPeriod();
   const { data: full, isPending, isError } = useTgFull(days);
 
   if (isPending) {

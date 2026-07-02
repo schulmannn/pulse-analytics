@@ -10,7 +10,7 @@ import { Breakdown } from '@/components/Breakdown';
 import { ChartSection, WidgetGroup, breakdownVariants, seriesBarValuesVariant } from '@/components/ChartWidget';
 import { DivergingBars } from '@/components/DivergingBars';
 import { EmptyState } from '@/components/EmptyState';
-import { usePeriod } from '@/lib/period';
+import { useWidgetPeriod } from '@/lib/period';
 import { cn } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
 
@@ -252,11 +252,12 @@ function deriveTgAnalytics(
     netSummaryStr = `${netPeriod >= 0 ? '+' : ''}${fmt.num(netPeriod)} за период`;
   }
 
-  // 12) Weekday
+  // 12) Weekday — filtered by the active window (previously iterated ALL fetched posts, ignoring
+  // the period: a latent bug the per-widget model fixes — each weekday card honours its own window).
   const wdViews: number[] = Array(7).fill(0);
   const wdCount: number[] = Array(7).fill(0);
   full?.posts?.forEach((p) => {
-    if (!p.date) return;
+    if (!p.date || !inRange(p.date)) return;
     const day = new Date(p.date).getDay();
     wdViews[day] += Number(p.views ?? p.view_count ?? 0);
     wdCount[day] += 1;
@@ -285,18 +286,105 @@ function deriveTgAnalytics(
   };
 }
 
+/** All-data window predicate — the panel-level derive uses it so that (a) which sections EXIST
+    is decided by the whole fetched payload (sections don't pop in/out as a card's window changes)
+    and (b) graphs-driven series (period-agnostic anyway) render their full server window. */
+const alwaysInRange = () => true;
+
+// ── Focused per-widget derives ──────────────────────────────────────────────────────────────
+// The four post-derived charts recompute their OWN series from the card's window (variants-fn form
+// of ChartSection passes the widget's inRange). Focused helpers instead of re-running the whole
+// deriveTgAnalytics pass — each touches only the ≤100 fetched posts it needs.
+
+const TYPE_NAMES: Record<string, string> = {
+  photo: 'Фото', video: 'Видео', poll: 'Опросы', document: 'Файлы',
+  text: 'Текст', audio: 'Аудио', voice: 'Голос', link: 'Ссылки',
+};
+
+type InRange = (dateISO: string | null | undefined) => boolean;
+
+/** «Реакции по эмодзи» — top-8 emoji reactions over the in-window posts. */
+function deriveEmojis(full: TgFull | undefined, inRange: InRange) {
+  const posts = normalizeTgPosts(full?.posts ?? [], full?.channel ?? {}).filter((p) => inRange(p.date));
+  const emojiMap: Record<string, number> = {};
+  posts.forEach((p) => {
+    p.reactionsDetail.forEach((rd) => {
+      if (rd.emoji) emojiMap[rd.emoji] = (emojiMap[rd.emoji] ?? 0) + rd.count;
+    });
+  });
+  return Object.entries(emojiMap)
+    .map(([label, value]) => ({ label, value }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 8);
+}
+
+/** «Вовлечённость по формату» — avg ERV per media type over the in-window posts. */
+function deriveFormatPerf(full: TgFull | undefined, inRange: InRange) {
+  const posts = normalizeTgPosts(full?.posts ?? [], full?.channel ?? {}).filter((p) => inRange(p.date));
+  const g: Record<string, { n: number; ervSum: number; ervN: number }> = {};
+  posts.forEach((p) => {
+    const t = p.mediaType || 'text';
+    (g[t] ??= { n: 0, ervSum: 0, ervN: 0 }).n++;
+    if (p.erv != null) {
+      g[t].ervSum += p.erv;
+      g[t].ervN++;
+    }
+  });
+  return Object.entries(g)
+    .map(([t, v]) => ({ label: TYPE_NAMES[t] || t, avgErv: v.ervN ? v.ervSum / v.ervN : 0, n: v.n }))
+    .filter((x) => x.n > 0 && x.avgErv > 0)
+    .sort((a, b) => b.avgErv - a.avgErv);
+}
+
+/** Weekday avg-views + post-count over the in-window posts (fixes the old all-posts bug). */
+function deriveWeekday(full: TgFull | undefined, inRange: InRange) {
+  const wdViews: number[] = Array(7).fill(0);
+  const wdCount: number[] = Array(7).fill(0);
+  full?.posts?.forEach((p) => {
+    if (!p.date || !inRange(p.date)) return;
+    const day = new Date(p.date).getDay();
+    wdViews[day] += Number(p.views ?? p.view_count ?? 0);
+    wdCount[day] += 1;
+  });
+  const wdOrder = [1, 2, 3, 4, 5, 6, 0];
+  const wdAvgValues = wdOrder.map((idx) => {
+    const count = wdCount[idx] ?? 0;
+    return count ? Math.round((wdViews[idx] ?? 0) / count) : 0;
+  });
+  const wdCountValues = wdOrder.map((idx) => wdCount[idx] ?? 0);
+  const maxWdAvg = Math.max(...wdAvgValues);
+  const bestWdLabel = maxWdAvg > 0 ? WD_LABELS[wdAvgValues.indexOf(maxWdAvg)] ?? '' : '';
+  return { wdAvgValues, wdCountValues, maxWdAvg, bestWdLabel };
+}
+
+/** «лучший день» caption under «По дням недели» — reads the card's OWN window (useWidgetPeriod),
+    so the best-day claim matches the bars shown, not the panel default. Rendered inside the
+    ChartSection body → inside its WidgetPeriodProvider. */
+function WeekdayBestDay({ full }: { full: TgFull | undefined }) {
+  const { inRange } = useWidgetPeriod();
+  const { bestWdLabel } = deriveWeekday(full, inRange);
+  if (!bestWdLabel) return null;
+  return (
+    <div className="mt-3 text-xs font-medium text-muted-foreground">
+      лучший день: <strong className="text-foreground">{bestWdLabel}</strong>
+    </div>
+  );
+}
+
 /** `group` renders only that section family (the Analytics tabs); undefined = all sections. The KPI
     ledger always shows as the group header. */
 export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
   const inGroup = (g: TgAnalyticsGroup) => !group || group === g;
-  const { days, inRange } = usePeriod();
-  // isPending (не isLoading): запросы выключены, пока канал не известен, — скелетоны и там.
-  const { data: full, isPending: isFullPending } = useTgFull(days);
+  // ONE wide fetch (limit 100 = server cap): every widget below filters this shared payload to its
+  // own window. No global period any more — each ChartSection carries its own 7д/30д/90д/Всё pill.
+  const { data: full, isPending: isFullPending } = useTgFull(0);
   const { data: cs, isPending: isStatsPending } = useTgStats();
   const { data: graphs, isPending: isGraphsPending } = useTgGraphs();
 
-  // Memoized: recompute only when a payload or the period window changes — not on every render.
-  const derived = useMemo(() => deriveTgAnalytics(full, cs, graphs, inRange), [full, cs, graphs, inRange]);
+  // Panel-level derive over the WHOLE fetched payload (alwaysInRange): section-existence gates +
+  // the KPI ledger snapshot + graphs-driven series. Post-derived CHART VALUES are re-derived
+  // per-card inside TgWidgetBody from each card's own window.
+  const derived = useMemo(() => deriveTgAnalytics(full, cs, graphs, alwaysInRange), [full, cs, graphs]);
 
   if (isFullPending || isStatsPending || isGraphsPending) {
     return <TgAnalyticsSkeletons />;
@@ -317,7 +405,7 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
     vbsItems, nfsItems, langItems, sentItems,
     thData, hasHours, peakHourStr,
     net30Values, net30Titles, netSummaryStr, joinedTotal, leftTotal,
-    wdAvgValues, wdCountValues, maxWdAvg, bestWdLabel,
+    maxWdAvg,
   } = derived;
   const wdLabels = WD_LABELS;
 
@@ -391,20 +479,40 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
           />
         )}
 
+        {/* Пост-производный: топ эмодзи считаются по постам ОКНА виджета (variants-fn form). */}
         {inGroup('content') && topEmojis.length > 0 && (
-          <ChartSection title="Реакции по эмодзи" variants={breakdownVariants(topEmojis.map((e) => ({ label: e.label, value: e.value, display: fmt.num(e.value) })))} />
+          <ChartSection
+            title="Реакции по эмодзи"
+            periodControl
+            variants={(period) =>
+              breakdownVariants(
+                deriveEmojis(full, period.inRange).map((e) => ({ label: e.label, value: e.value, display: fmt.num(e.value) })),
+              )
+            }
+          />
         )}
 
+        {/* Серверная сводка (vs.total_*): период-агностично — та же цифра в любом окне. */}
         {inGroup('content') && engagementComposition.length > 0 && (
           <ChartSection title="Состав вовлечённости" variants={breakdownVariants(engagementComposition.map((c) => ({ label: c.label, value: c.value, display: fmt.num(c.value), color: c.color })))} />
         )}
 
+        {/* Серверная сводка (vs.avg_views_by_type): период-агностично. */}
         {inGroup('content') && viewsByType.length > 0 && (
           <ChartSection title="Ср. охват по типу" variants={breakdownVariants(viewsByType.map((t) => ({ label: t.label, value: t.value, display: fmt.num(t.value) })))} />
         )}
 
+        {/* Пост-производный: средний ERV по формату — по постам окна виджета. */}
         {inGroup('content') && formatPerf.length > 0 && (
-          <ChartSection title="Вовлечённость по формату" variants={breakdownVariants(formatPerf.map((f) => ({ label: f.label, value: f.avgErv, display: `${f.avgErv.toFixed(1)}% ERV · ${f.n} шт` })))} />
+          <ChartSection
+            title="Вовлечённость по формату"
+            periodControl
+            variants={(period) =>
+              breakdownVariants(
+                deriveFormatPerf(full, period.inRange).map((f) => ({ label: f.label, value: f.avgErv, display: `${f.avgErv.toFixed(1)}% ERV · ${f.n} шт` })),
+              )
+            }
+          />
         )}
 
         {inGroup('dynamics') && hasGrowth && growthGroup && growthSeries && (
@@ -536,29 +644,35 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
         )}
 
         {/* Раньше оба графика жили в одной двойной секции — её ячейка была вдвое выше соседних и
-            оставляла в сетке огромную пустую область. Теперь каждая секция — своя ячейка. */}
+            оставляла в сетке огромную пустую область. Теперь каждая секция — своя ячейка. Обе —
+            пост-производные: считаются по постам ОКНА виджета (variants-fn + per-widget caption).
+            Раньше они игнорировали период вовсе (шли по ВСЕМ постам) — per-widget модель это чинит. */}
         {inGroup('audience') && maxWdAvg > 0 && (
           <ChartSection
             title="По дням недели"
-            variants={[
-              {
-                key: 'bar',
-                label: 'Столбцы',
-                render: (
-                  <div>
-                    <div className="mb-2 text-2xs font-medium tracking-wider text-muted-foreground">Ср. просмотры</div>
-                    <BarChart values={wdAvgValues} labels={wdLabels} titles={wdAvgValues.map((v, i) => `${wdLabels[i]}: ${fmt.num(v)} ср. просмотров`)} />
-                  </div>
-                ),
-              },
-              {
-                key: 'line',
-                label: 'Линия',
-                render: <LineChart values={wdAvgValues} labels={wdLabels} titles={wdAvgValues.map((v, i) => `${wdLabels[i]}: ${fmt.num(v)} ср. просмотров`)} yMin={0} />,
-              },
-            ]}
+            periodControl
+            variants={(period) => {
+              const { wdAvgValues } = deriveWeekday(full, period.inRange);
+              return [
+                {
+                  key: 'bar',
+                  label: 'Столбцы',
+                  render: (
+                    <div>
+                      <div className="mb-2 text-2xs font-medium tracking-wider text-muted-foreground">Ср. просмотры</div>
+                      <BarChart values={wdAvgValues} labels={wdLabels} titles={wdAvgValues.map((v, i) => `${wdLabels[i]}: ${fmt.num(v)} ср. просмотров`)} />
+                    </div>
+                  ),
+                },
+                {
+                  key: 'line',
+                  label: 'Линия',
+                  render: <LineChart values={wdAvgValues} labels={wdLabels} titles={wdAvgValues.map((v, i) => `${wdLabels[i]}: ${fmt.num(v)} ср. просмотров`)} yMin={0} />,
+                },
+              ];
+            }}
           >
-            {bestWdLabel && <div className="mt-3 text-xs font-medium text-muted-foreground">лучший день: <strong className="text-foreground">{bestWdLabel}</strong></div>}
+            <WeekdayBestDay full={full} />
           </ChartSection>
         )}
 
@@ -568,26 +682,30 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
              пустоте». max-w держит чарт компактным слева (в 1×-плитке кэп не срабатывает). */
           <ChartSection
             title="Количество постов"
-            variants={[
-              {
-                key: 'bar',
-                label: 'Столбцы',
-                render: (
-                  <div className="max-w-[560px]">
-                    <BarChart values={wdCountValues} labels={wdLabels} titles={wdCountValues.map((v, i) => `${wdLabels[i]}: ${fmt.num(v)} постов`)} />
-                  </div>
-                ),
-              },
-              {
-                key: 'line',
-                label: 'Линия',
-                render: (
-                  <div className="max-w-[560px]">
-                    <LineChart values={wdCountValues} labels={wdLabels} titles={wdCountValues.map((v, i) => `${wdLabels[i]}: ${fmt.num(v)} постов`)} yMin={0} />
-                  </div>
-                ),
-              },
-            ]}
+            periodControl
+            variants={(period) => {
+              const { wdCountValues } = deriveWeekday(full, period.inRange);
+              return [
+                {
+                  key: 'bar',
+                  label: 'Столбцы',
+                  render: (
+                    <div className="max-w-[560px]">
+                      <BarChart values={wdCountValues} labels={wdLabels} titles={wdCountValues.map((v, i) => `${wdLabels[i]}: ${fmt.num(v)} постов`)} />
+                    </div>
+                  ),
+                },
+                {
+                  key: 'line',
+                  label: 'Линия',
+                  render: (
+                    <div className="max-w-[560px]">
+                      <LineChart values={wdCountValues} labels={wdLabels} titles={wdCountValues.map((v, i) => `${wdLabels[i]}: ${fmt.num(v)} постов`)} yMin={0} />
+                    </div>
+                  ),
+                },
+              ];
+            }}
           />
         )}
       </WidgetGroup>
