@@ -67,7 +67,7 @@ function formatLabel(mediaType: string | null, albumSize: number): string {
  */
 export function Compare() {
   const { days, range } = usePeriod();
-  const { data, isPending, isError } = useTgFull(days);
+  const { data, isPending, isError } = useTgFull(days, { windowPair: true });
 
   if (isPending) return <CompareSkeleton />;
   if (isError) return null;

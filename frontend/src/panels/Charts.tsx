@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from 'react';
 import { useHistory, useVelocity, useTgFull } from '@/api/queries';
 import type { TgFull } from '@/api/schemas';
 import { lttbDownsample } from '@/lib/downsample';
+import { BarChart } from '@/components/BarChart';
 import { LineChart } from '@/components/LineChart';
 import { ChartTooltip, type TooltipState } from '@/components/ChartTooltip';
 import { fmt, ruAxisLabel } from '@/lib/format';
@@ -54,6 +55,19 @@ function SubscriberHistoryChart({ rows }: { rows: SubscriberRow[] }) {
   );
 }
 
+/** Bar presentation of the same archive (widget «Тип: Столбцы») — coarser sampling, per-bar labels. */
+function SubscriberHistoryBars({ rows }: { rows: SubscriberRow[] }) {
+  const sampled = lttbDownsample(rows, 60, (row) => Number(row.subscribers));
+  return (
+    <BarChart
+      values={sampled.map((row) => Number(row.subscribers))}
+      labels={sampled.map((row) => ddmm(row.day))}
+      titles={sampled.map((row) => `${ddmm(row.day)}: ${fmt.num(row.subscribers)} подписчиков`)}
+      height={260}
+    />
+  );
+}
+
 export function HistoryChartBlock() {
   // isPending (не isLoading): запрос выключен, пока канал не известен, — скелетон и там.
   const { data, isPending, isError } = useHistory(730);
@@ -86,16 +100,27 @@ export function HistoryChartBlock() {
   const caption = `${rawRows.length} дн в архиве${isDownsampled ? ' · сглажено' : ''}`;
 
   return (
-    <ChartSection title="История подписчиков">
-      <ExpandableChart
-        title="История подписчиков"
-        renderExpanded={(days) => {
-          const windowRows = days === 0 ? rows : rows.slice(-days);
-          return <SubscriberHistoryChart rows={windowRows} />;
-        }}
-      >
-        <SubscriberHistoryChart rows={rows} />
-      </ExpandableChart>
+    <ChartSection
+      title="История подписчиков"
+      variants={[
+        {
+          key: 'line',
+          label: 'Линия',
+          render: (
+            <ExpandableChart
+              title="История подписчиков"
+              renderExpanded={(days) => {
+                const windowRows = days === 0 ? rows : rows.slice(-days);
+                return <SubscriberHistoryChart rows={windowRows} />;
+              }}
+            >
+              <SubscriberHistoryChart rows={rows} />
+            </ExpandableChart>
+          ),
+        },
+        { key: 'bar', label: 'Столбцы', render: <SubscriberHistoryBars rows={rows} /> },
+      ]}
+    >
       <div className="mt-3 text-xs font-medium text-muted-foreground">{caption}</div>
     </ChartSection>
   );
@@ -301,10 +326,21 @@ export function VelocityChartBlock() {
   if (data?.posts_used != null) captions.push(`по ${data.posts_used} постам`);
 
   return (
-    <ChartSection title="Скорость набора просмотров">
-      <ExpandableChart title="Скорость набора просмотров">
-        <LineChart values={cum} yMin={0} yMax={Math.max(...cum, 1)} titles={titles} labels={labels} />
-      </ExpandableChart>
+    <ChartSection
+      title="Скорость набора просмотров"
+      variants={[
+        {
+          key: 'line',
+          label: 'Линия',
+          render: (
+            <ExpandableChart title="Скорость набора просмотров">
+              <LineChart values={cum} yMin={0} yMax={Math.max(...cum, 1)} titles={titles} labels={labels} />
+            </ExpandableChart>
+          ),
+        },
+        { key: 'bar', label: 'Столбцы', render: <BarChart values={cum} labels={labels} titles={titles} /> },
+      ]}
+    >
       {captions.length > 0 && (
         <div className="mt-3 text-xs font-medium text-muted-foreground">{captions.join(' · ')}</div>
       )}

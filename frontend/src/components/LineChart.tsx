@@ -38,7 +38,7 @@ function nextStep(step: number): number {
  * Nice y-scale: snap the domain outward to 1/2/5×10ⁿ tick steps so gridlines land on round
  * values and never format into duplicate labels («4.9k / 4.9k / 4.8k»), capped at 5 ticks.
  */
-function niceScale(minV: number, maxV: number): { lo: number; hi: number; step: number; ticks: number[] } {
+export function niceScale(minV: number, maxV: number): { lo: number; hi: number; step: number; ticks: number[] } {
   let span = maxV - minV;
   if (!Number.isFinite(span) || span <= 0) span = Math.abs(maxV) || 1;
   const mag0 = 10 ** Math.floor(Math.log10(Math.max(span / 2.5, 1e-9)));
@@ -62,7 +62,7 @@ function niceScale(minV: number, maxV: number): { lo: number; hi: number; step: 
  * enough to stay distinct after rounding; sub-thousand steps on a thousands scale print full
  * grouped integers (4 950), because «4.9k / 4.9k» would collide.
  */
-function axisLabel(v: number, step: number): string {
+export function axisLabel(v: number, step: number): string {
   if (Math.abs(v) < 1e-9) return '0';
   if (step >= 1000 || Math.abs(v) < 1000) return fmt.short(v);
   return fmt.num(v);

@@ -119,7 +119,7 @@ const LEDGER: Array<{ key: DrillKey; label: string }> = [
  */
 export function ReportPage() {
   const { days, setDays, range, setRange, inRange } = usePeriod();
-  const { data, isPending, isError, error } = useTgFull(days);
+  const { data, isPending, isError, error } = useTgFull(days, { windowPair: true });
   const { data: history } = useHistory(730);
   const { channelId, setChannelId } = useSelectedChannel();
   const { data: channelsData } = useChannels();

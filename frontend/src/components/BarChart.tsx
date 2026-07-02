@@ -1,6 +1,7 @@
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { fmt } from '@/lib/format';
 import { ChartTooltip } from '@/components/ChartTooltip';
+import { axisLabel, niceScale } from '@/components/LineChart';
 import { ChartExpandedContext } from '@/components/ExpandableChart';
 
 interface BarChartProps {
@@ -63,7 +64,11 @@ export function BarChart({ values, labels, titles, height = 200 }: BarChartProps
     );
   }
 
-  const max = Math.max(...values, 1);
+  // Expanded view: bars scale against a NICE domain top (1/2/5×10ⁿ) so the y ticks land on
+  // round values, like LineChart — the old max/mid pair printed «262» next to «2.5k».
+  const rawMax = Math.max(...values, 1);
+  const scale = expanded ? niceScale(0, rawMax) : null;
+  const max = scale ? scale.hi : rawMax;
   const n = values.length;
   const chartWidth = Math.max(width, 1);
   const chartHeight = height;
@@ -73,9 +78,9 @@ export function BarChart({ values, labels, titles, height = 200 }: BarChartProps
   const padTop = expanded ? 18 : 0;
   const usable = Math.max(graphHeight - padTop, 1);
 
-  // Expanded view: y tick labels (max / mid) right-aligned in a reserved left gutter.
-  const yTicks = expanded ? [max, max / 2] : [];
-  const tickLabels = yTicks.map((v) => fmt.short(v));
+  // Expanded view: nice-tick labels right-aligned in a reserved left gutter (0 = baseline).
+  const yTicks = scale ? scale.ticks.filter((t) => t > 0) : [];
+  const tickLabels = yTicks.map((v) => axisLabel(v, scale ? scale.step : 1));
   const gutterW = expanded
     ? Math.max(28, Math.round(Math.max(...tickLabels.map((l) => l.length)) * CHAR_W) + 14)
     : 0;

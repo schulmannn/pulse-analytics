@@ -380,16 +380,36 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
         )}
 
         {inGroup('dynamics') && hasGrowth && growthGroup && growthSeries && (
-          <ChartSection title="Рост подписчиков">
-            <ExpandableChart title="Рост подписчиков">
-              <LineChart
-                values={growthSeries.values}
-                titles={growthSeries.values.map((v, i) => `${growthGroup.x[i] ? formatMsDate(growthGroup.x[i]!) : ''}: ${fmt.num(v)} подписчиков`)}
-                labels={interLabels(growthGroup)}
-                markAnomalies
-              />
-            </ExpandableChart>
-          </ChartSection>
+          <ChartSection
+            title="Рост подписчиков"
+            variants={[
+              {
+                key: 'line',
+                label: 'Линия',
+                render: (
+                  <ExpandableChart title="Рост подписчиков">
+                    <LineChart
+                      values={growthSeries.values}
+                      titles={growthSeries.values.map((v, i) => `${growthGroup.x[i] ? formatMsDate(growthGroup.x[i]!) : ''}: ${fmt.num(v)} подписчиков`)}
+                      labels={interLabels(growthGroup)}
+                      markAnomalies
+                    />
+                  </ExpandableChart>
+                ),
+              },
+              {
+                key: 'bar',
+                label: 'Столбцы',
+                render: (
+                  <BarChart
+                    values={growthSeries.values}
+                    labels={growthGroup.x.map((ts) => (ts ? formatMsDate(ts) : ''))}
+                    titles={growthSeries.values.map((v, i) => `${growthGroup.x[i] ? formatMsDate(growthGroup.x[i]!) : ''}: ${fmt.num(v)} подписчиков`)}
+                  />
+                ),
+              },
+            ]}
+          />
         )}
 
         {inGroup('dynamics') && interGroup && viewSeries && shareSeries && (

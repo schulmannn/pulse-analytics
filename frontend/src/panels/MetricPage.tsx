@@ -193,7 +193,7 @@ function bucketedSubsSeries(
 export function MetricPage() {
   const { key: rawKey } = useParams();
   const { days, setDays, range, setRange, inRange } = usePeriod();
-  const { data, isPending, isError, error } = useTgFull(days);
+  const { data, isPending, isError, error } = useTgFull(days, { windowPair: true });
   const { data: history } = useHistory(730);
   const { channelId } = useSelectedChannel();
   const { data: channelsData } = useChannels();

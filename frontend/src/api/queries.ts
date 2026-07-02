@@ -163,13 +163,18 @@ export function useLogout() {
  * request provably matches the query key and cancelQueries() aborts it. NOTE: disabled
  * queries report `isPending` (not `isLoading`) — consumers gate skeletons on isPending.
  */
-export function useTgFull(days: PeriodDays) {
+export function useTgFull(days: PeriodDays, opts?: { windowPair?: boolean }) {
   const { channelId } = useSelectedChannel();
   const { range } = usePeriod();
-  const limit = effectiveLimit(days, range);
+  // Comparison surfaces (metric pages / report / Сравнение) need the PREVIOUS equal-length
+  // window too — the preset limit covers roughly one window, so «Сравнение» came back empty
+  // on prod (60 posts don't reach the prior 30 days). Double it, server caps at 100.
+  const limit = opts?.windowPair
+    ? Math.min(100, effectiveLimit(days, range) * 2)
+    : effectiveLimit(days, range);
   return useQuery({
     enabled: channelId != null,
-    queryKey: ['tg-full', channelId, days, range?.from ?? 0, range?.to ?? 0],
+    queryKey: ['tg-full', channelId, days, range?.from ?? 0, range?.to ?? 0, limit],
     queryFn: ({ signal }) => apiGet(`/api/tg/full?limit=${limit}`, TgFullSchema, { signal, channelId }),
   });
 }

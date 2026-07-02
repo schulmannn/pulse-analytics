@@ -501,8 +501,21 @@ steep.app. Полный разбор: `AUDIT_2026-07-02_arch_design.md`. Это 
       рендер) → cleanup/register-луп «Maximum update depth» — деп только на стабильный
       `register`-callback; (б) битый HMR маскировал фикс (старый `?t=` в стеке) — рестарт
       dev-сервера (памятка подтвердилась в третий раз); (в) забыл `variant` в emptiness-чеке
-      setPrefs → вариант-only пресет удалялся. *Follow-up: variants для История/Скорость/
-      Рост (нужна прокладка полных labels), IG-панели, prefs→user_prefs.*
+      setPrefs → вариант-only пресет удалялся. *Follow-up: ~~variants для История/Скорость/
+      Рост~~ ✅, ~~prefs→user_prefs~~ ✅, IG-панели (осталось).*
+
+- [x] **Хвосты волны (одним заходом) — SHIPPED.** (1) **prefs/order → аккаунт**:
+      `useWidgetPrefsSync` в DashboardLayout — localStorage-first, зеркало в `user_prefs`
+      (GET/PUT /api/prefs; PUT full-replace → чужие ключи блоба round-trip'ятся; пуши
+      дебаунс 1.5с и заблокированы до успешного GET — слепой пуш мог стереть копию другого
+      девайса; демо не синкает). (2) **variants line↔bar** для История подписчиков
+      (`SubscriberHistoryBars`, LTTB 60 + per-bar labels), Скорости набора, Роста
+      подписчиков (labels из `growthGroup.x`). (3) **BarChart nice-ticks**: expanded-режим
+      берёт `niceScale`/`axisLabel` (экспортированы из LineChart) — бары скейлятся к nice-
+      топу домена, тики круглые, «262 vs 2.5k» ушло. (4) **fetch-limit сравнения**:
+      `useTgFull(days, {windowPair:true})` на MetricPage/ReportPage/Compare — лимит ×2
+      (кэп 100, сервер тоже кэпит), лимит добавлен в queryKey; «Сравнение» на /metrics
+      больше не пустое на 30-дневном пресете.
 
 - [x] **Виджет-дашборд + пер-виджет кастомизация (steep Home) — SHIPPED.** Решение владельца
       (осознанная эволюция «hairlines-не-карточки»: КАРТОЧНАЯ поверхность теперь канон для
