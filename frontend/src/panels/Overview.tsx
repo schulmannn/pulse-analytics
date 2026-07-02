@@ -57,14 +57,14 @@ export function Overview() {
             both vanish). */}
         {/* Widget label «Показатели», NOT «Обзор» — the feed block's h2 right above already
             says «Обзор»; repeating it in the menu row would read as a stutter. */}
-        <ChartSection id="overview-hero" title="Показатели" defaultSize="full" periodControl>
+        <ChartSection id="overview-hero" title="Показатели" defaultSize="full" periodControl homeKey="kpi">
           {/* KPI hero (Просмотры · окно виджета) + ledger (Подписчики / Ср.охват / Реакции / ER) */}
           <KpiGrid />
         </ChartSection>
-        <ChartSection id="overview-digest" title="Инсайт" periodControl>
+        <ChartSection id="overview-digest" title="Инсайт" periodControl homeKey="digest">
           <Digest />
         </ChartSection>
-        <ChartSection id="overview-growth" title="Рост подписчиков" periodControl>
+        <ChartSection id="overview-growth" title="Рост подписчиков" periodControl homeKey="growth">
           <SubscriberGrowth />
         </ChartSection>
         <ChartSection
@@ -72,6 +72,7 @@ export function Overview() {
           title="Топ постов"
           defaultSize="full"
           periodControl
+          homeKey="top-posts"
           action={
             <Link to="/analytics" className="shrink-0 text-xs font-medium text-primary hover:underline">
               <span className="md:hidden">Аналитика →</span><span className="hidden md:inline">Открыть аналитику →</span>
@@ -100,8 +101,9 @@ function StaleWarning() {
 }
 
 /** Subscriber base over the period — the second most important channel state (the hero is views).
-    Reads its OWN widget window (useWidgetPeriod), not the global period. */
-function SubscriberGrowth() {
+    Reads its OWN widget window (useWidgetPeriod), not the global period. Exported (bare content,
+    no own ChartSection) so the personal-Home registry can reuse it under a home-scoped card. */
+export function SubscriberGrowth() {
   const { days, inRange } = useWidgetPeriod();
   const { data: history } = useHistory(730);
   const { channelId } = useSelectedChannel();

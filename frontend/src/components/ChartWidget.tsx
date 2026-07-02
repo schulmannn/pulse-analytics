@@ -28,6 +28,9 @@ import type { PeriodDays, WidgetPeriodValue } from '@/lib/period';
 
 const PREFS_KEY = 'pulse_widget_prefs';
 const ORDER_KEY = 'pulse_widget_order';
+/** Personal Home: the ordered list of pinned widget registry keys (steep «На главную»). Stored
+    as an object `{keys:[]}` so it round-trips through the existing object-only readJson reader. */
+const HOME_KEY = 'pulse_home_blocks';
 
 /** Widget footprint on the 6-column group grid: third (2/6) · half (3/6) · full (6/6). */
 export type WidgetSize = 'third' | 'half' | 'full';
@@ -255,6 +258,52 @@ function setGroupOrder(groupId: string, ids: string[]) {
   schedulePush();
 }
 
+// ── Personal Home: the pinned-widget list ────────────────────────────────────────────────
+// A separate store row (`pulse_home_blocks`) from widget prefs/order: it holds registry KEYS
+// (e.g. 'digest', 'history'), not widget ids, in the order they appear on /home. Same
+// localStorage-first + pub-sub + account-sync pattern as prefs/order. The Home surface renders
+// each key under a `home-<key>` ChartSection, so a pinned widget's Home arrangement (size /
+// title / period / hidden) is a distinct prefs identity from its source-screen copy.
+export function getHomeBlocks(): string[] {
+  const stored = readJson<{ keys?: unknown }>(HOME_KEY, {}).keys;
+  return Array.isArray(stored) ? stored.filter((x): x is string => typeof x === 'string') : [];
+}
+
+export function setHomeBlocks(keys: string[]) {
+  try {
+    localStorage.setItem(HOME_KEY, JSON.stringify({ keys }));
+  } catch {
+    /* storage blocked — pinning is a nicety */
+  }
+  notify();
+  schedulePush();
+}
+
+/** Pin a widget to Home (append once, keeping the existing order). No-op if already pinned. */
+export function pinToHome(key: string) {
+  const keys = getHomeBlocks();
+  if (keys.includes(key)) return;
+  setHomeBlocks([...keys, key]);
+}
+
+/** Unpin a widget from Home. */
+export function unpinFromHome(key: string) {
+  const keys = getHomeBlocks();
+  if (!keys.includes(key)) return;
+  setHomeBlocks(keys.filter((k) => k !== key));
+}
+
+/** Is this registry key currently pinned to Home? */
+export function isPinnedToHome(key: string): boolean {
+  return getHomeBlocks().includes(key);
+}
+
+/** Re-render on any store change; returns the current pinned list (Home reads this). */
+export function useHomeBlocks(): string[] {
+  useStoreTick();
+  return getHomeBlocks();
+}
+
 /** Re-render on any widget-store change (prefs / order). */
 function useStoreTick() {
   const [, force] = useState(0);
@@ -277,6 +326,10 @@ function localBlob() {
   return {
     widgets: readJson<Record<string, WidgetPrefs>>(PREFS_KEY, {}),
     widgetOrder: readJson<Record<string, string[]>>(ORDER_KEY, {}),
+    // The pinned-Home list rides the SAME account blob under `home` (a plain string[]) — no
+    // new endpoint. Destructured OUT of `rest` in the hydrate below so serverExtra never
+    // double-carries it.
+    home: getHomeBlocks(),
   };
 }
 
@@ -299,7 +352,7 @@ export function useWidgetPrefsSync() {
     void apiGet('/api/prefs', PrefsBlobSchema)
       .then(({ prefs }) => {
         if (cancelled) return;
-        const { widgets, widgetOrder, ...rest } = (prefs ?? {}) as Record<string, unknown>;
+        const { widgets, widgetOrder, home, ...rest } = (prefs ?? {}) as Record<string, unknown>;
         serverExtra = rest;
         syncReady = true;
         const local = localBlob();
@@ -311,6 +364,9 @@ export function useWidgetPrefsSync() {
           else if (Object.keys(local.widgets).length) pushLocal = true;
           if (widgetOrder && typeof widgetOrder === 'object') localStorage.setItem(ORDER_KEY, JSON.stringify(widgetOrder));
           else if (Object.keys(local.widgetOrder).length) pushLocal = true;
+          // Home pinned list: same account-wins rule. Stored under `{keys}` so getHomeBlocks reads it.
+          if (Array.isArray(home)) localStorage.setItem(HOME_KEY, JSON.stringify({ keys: home }));
+          else if (local.home.length) pushLocal = true;
         } catch {
           /* storage blocked — server copy just isn't cached locally */
         }
@@ -718,11 +774,18 @@ interface ChartSectionProps {
    * Posts / metric-page / report) don't grow a dead control.
    */
   periodControl?: boolean;
+  /**
+   * Personal-Home registry key (e.g. 'digest'). When set, the ⋯ menu grows a «На главную» /
+   * «Убрать с главной» toggle that pins/unpins this widget on /home. Pass it on the SOURCE-screen
+   * ChartSection so the pin originates where the user browses; the Home render passes the same key
+   * (under its `home-<key>` id) so its menu reads «Убрать с главной» for an in-place unpin.
+   */
+  homeKey?: string;
   /** Body; with `variants` it renders BELOW the active variant (shared captions etc.). */
   children?: ReactNode;
 }
 
-export function ChartSection({ id, title, action, variants, className, defaultSize, expand, periodControl, children }: ChartSectionProps) {
+export function ChartSection({ id, title, action, variants, className, defaultSize, expand, periodControl, homeKey, children }: ChartSectionProps) {
   const widgetId = id ?? title;
   const group = useContext(GroupCtx);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -755,6 +818,10 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
 
   const prefs = getPrefs(widgetId);
   const update = (next: WidgetPrefs) => setPrefs(widgetId, next);
+
+  // Personal-Home pin state (only when this card is registered as pinnable via `homeKey`).
+  // useStoreTick above already re-renders on any store change, so the read stays live.
+  const pinned = homeKey ? isPinnedToHome(homeKey) : false;
 
   // Per-widget window: the card's own period (default 30д). Charts inside read it via
   // useWidgetPeriod(); the WidgetPeriodProvider below scopes it to this card's subtree.
@@ -936,6 +1003,21 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
                   <div aria-hidden="true" className="mx-1 my-1 h-px bg-border" />
                 </>
               )}
+              {/* «На главную» / «Убрать с главной» — only on cards registered as pinnable
+                  (they pass a homeKey). Pins/unpins this widget on the personal /home surface. */}
+              {homeKey && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    if (pinned) unpinFromHome(homeKey);
+                    else pinToHome(homeKey);
+                  }}
+                  className={menuItem}
+                >
+                  <MenuIcon kind="home" /> {pinned ? 'Убрать с главной' : 'На главную'}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => {
@@ -1051,10 +1133,17 @@ function WidgetPeriodPills({
   );
 }
 
-function MenuIcon({ kind }: { kind: 'up' | 'down' | 'edit' | 'hide' | 'drag' | 'expand' }) {
+function MenuIcon({ kind }: { kind: 'up' | 'down' | 'edit' | 'hide' | 'drag' | 'expand' | 'home' }) {
   return (
     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5 shrink-0" aria-hidden="true">
       {kind === 'expand' && <path d="M5 11 11 5M6.5 5H11v4.5" />}
+      {kind === 'home' && (
+        <>
+          <path d="m2 7 6-5 6 5" />
+          <path d="M3.5 6.2V14h9V6.2" />
+          <path d="M6.5 14v-4h3v4" />
+        </>
+      )}
       {kind === 'up' && <path d="m4 10 4-4 4 4" />}
       {kind === 'down' && <path d="m4 6 4 4 4-4" />}
       {kind === 'drag' && (

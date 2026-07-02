@@ -3,6 +3,7 @@ import type { SVGProps } from 'react';
 /** Minimal inline icon set (Lucide-style, stroke + currentColor) for the sidebar shell.
     No icon dependency — keeps the bundle + CSP simple. */
 const PATHS = {
+  home: ['M3 10.5 12 3l9 7.5', 'M5 9.5V21h14V9.5', 'M9 21v-6h6v6'],
   overview: ['M3 3h8v8H3z', 'M13 3h8v8h-8z', 'M13 13h8v8h-8z', 'M3 13h8v8H3z'],
   analytics: ['M3 21h18', 'M7 21V10', 'M12 21V4', 'M17 21v-7'],
   charts: ['M3 3v18h18', 'm7 14 3-3 3 3 5-6'],

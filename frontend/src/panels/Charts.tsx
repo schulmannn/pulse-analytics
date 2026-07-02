@@ -79,15 +79,29 @@ function SubscriberHistoryBars({ rows }: { rows: SubscriberRow[] }) {
   return <DivergingBars values={d.values} labels={d.labels} titles={d.titles} height={200} />;
 }
 
-export function HistoryChartBlock() {
+/**
+ * Charts blocks own their OWN ChartSection. To reuse them on the personal /home surface without
+ * double-wrapping (a card inside a card + a second ⋯ menu), the caller passes a home-scoped
+ * `id`/`homeKey`: the block's existing ChartSection takes that id so its Home prefs (size/title/
+ * period) are a distinct identity from the /analytics copy, and its menu shows «Убрать с главной».
+ * Omitted on /analytics → the block keeps its title-derived id and no pin item.
+ */
+interface HomeBlockProps {
+  /** Home-scoped ChartSection id (e.g. 'home-history'); omit on the source screen. */
+  id?: string;
+  /** Registry key enabling the «На главную»/«Убрать с главной» ⋯ item. */
+  homeKey?: string;
+}
+
+export function HistoryChartBlock({ id, homeKey }: HomeBlockProps = {}) {
   // isPending (не isLoading): запрос выключен, пока канал не известен, — скелетон и там.
   const { data, isPending, isError } = useHistory(730);
 
-  if (isPending) return <ChartSkeleton title="История подписчиков" />;
+  if (isPending) return <ChartSkeleton title="История подписчиков" id={id} homeKey={homeKey} />;
   if (isError) return null;
   if (!data || !data.enabled) {
     return (
-      <ChartSection title="История подписчиков">
+      <ChartSection title="История подписчиков" id={id} homeKey={homeKey}>
         <p className="py-8 text-center text-sm text-muted-foreground">
           История подписчиков пока недоступна.
         </p>
@@ -99,7 +113,7 @@ export function HistoryChartBlock() {
   const rows = rawRows.filter((r) => r.subscribers != null);
   if (rows.length < 2) {
     return (
-      <ChartSection title="История подписчиков">
+      <ChartSection title="История подписчиков" id={id} homeKey={homeKey}>
         <p className="py-8 text-center text-sm text-muted-foreground">
           История подписчиков пока пуста.
         </p>
@@ -114,6 +128,8 @@ export function HistoryChartBlock() {
   return (
     <ChartSection
       title="История подписчиков"
+      id={id}
+      homeKey={homeKey}
       expand={{
         renderExpanded: (days) => {
           const windowRows = days === 0 ? rows : rows.slice(-days);
@@ -325,17 +341,17 @@ function HeatmapSurface({
   );
 }
 
-export function VelocityChartBlock() {
+export function VelocityChartBlock({ id, homeKey }: HomeBlockProps = {}) {
   const { data, isPending } = useVelocity();
 
-  if (isPending) return <ChartSkeleton title="Скорость набора просмотров" />;
+  if (isPending) return <ChartSkeleton title="Скорость набора просмотров" id={id} homeKey={homeKey} />;
 
   const available = data?.available ?? false;
   const byDay = data?.by_day ?? [];
 
   if (!available || byDay.length < 2) {
     return (
-      <ChartSection title="Скорость набора просмотров">
+      <ChartSection title="Скорость набора просмотров" id={id} homeKey={homeKey}>
         <LineChart values={[]} />
       </ChartSection>
     );
@@ -353,6 +369,8 @@ export function VelocityChartBlock() {
   return (
     <ChartSection
       title="Скорость набора просмотров"
+      id={id}
+      homeKey={homeKey}
       variants={[
         {
           key: 'line',
@@ -370,9 +388,9 @@ export function VelocityChartBlock() {
   );
 }
 
-function ChartSkeleton({ title }: { title: string }) {
+function ChartSkeleton({ title, id, homeKey }: { title: string; id?: string; homeKey?: string }) {
   return (
-    <ChartSection title={title}>
+    <ChartSection title={title} id={id} homeKey={homeKey}>
       <div className="space-y-3">
         <Skeleton className="h-32 w-full" />
         <Skeleton className="h-3 w-1/6" />

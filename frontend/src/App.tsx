@@ -7,6 +7,7 @@ import { DashboardLayout } from '@/components/DashboardLayout';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { PeriodUrlSync } from '@/lib/period-url';
 import { TgFeed } from '@/panels/TgFeed';
+import { Home } from '@/panels/Home';
 import { MetricPage } from '@/panels/MetricPage';
 import { ReportPage } from '@/panels/ReportPage';
 import { ReportsList } from '@/panels/ReportsList';
@@ -46,6 +47,9 @@ export default function App() {
       <Route path="verify" element={<AuthSuspense><VerifyPage /></AuthSuspense>} />
       <Route path="reset" element={<AuthSuspense><ResetPage /></AuthSuspense>} />
       <Route element={<ProtectedLayout />}>
+        {/* Personal Home — a per-user board of pinned widgets. Static import (it's light) and
+            declared BEFORE the catch-all `:section?` so /home resolves here, not to the TG feed. */}
+        <Route path="home" element={<Home />} />
         <Route path="metrics/:key" element={<MetricPage />} />
         <Route path="reports" element={<ReportsList />} />
         <Route path="reports/:id" element={<ReportPage />} />

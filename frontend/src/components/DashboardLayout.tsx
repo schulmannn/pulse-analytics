@@ -68,12 +68,15 @@ const IG_FEED_NAV: NavLinkDef[] = [
 ];
 // Network-agnostic route(s) shown after the active network's feed views in BOTH nets.
 const AGNOSTIC_NAV: NavLinkDef[] = [{ to: '/reports', label: 'Отчёты', icon: 'report' }];
+// «Главная» — the personal pinned-widget board. Per-USER (not per-channel), like Отчёты, so it
+// leads BOTH nets at the very top of the nav.
+const HOME_NAV: NavLinkDef = { to: '/home', label: 'Главная', icon: 'home', end: true };
 
-// Full nav sets = active network's feed views + the agnostic tail. These drive both the desktop
-// sidebar list and the mobile bottom bar, so «Отчёты» stays a tab in either network (TG keeps its
-// 5-column bar; IG grows from 4 to 5 — MobileBottomNav's grid-cols follows nav.length).
-const TG_NAV: NavLinkDef[] = [...TG_FEED_NAV, ...AGNOSTIC_NAV];
-const IG_NAV: NavLinkDef[] = [...IG_FEED_NAV, ...AGNOSTIC_NAV];
+// Full nav sets = Главная + active network's feed views + the agnostic tail. These drive both the
+// desktop sidebar list and the mobile bottom bar. Adding «Главная» makes both nets 6 tabs wide
+// (MobileBottomNav's grid-cols follows nav.length).
+const TG_NAV: NavLinkDef[] = [HOME_NAV, ...TG_FEED_NAV, ...AGNOSTIC_NAV];
+const IG_NAV: NavLinkDef[] = [HOME_NAV, ...IG_FEED_NAV, ...AGNOSTIC_NAV];
 
 const SYSTEM_NAV: NavLinkDef[] = [{ to: '/settings', label: 'Настройки', icon: 'gear' }];
 const SUPER_NAV: NavLinkDef[] = [
@@ -97,6 +100,7 @@ function useActiveNetworkNav(): NavLinkDef[] {
 }
 
 const TITLES: Record<string, string> = {
+  '/home': 'Главная',
   '/': 'Обзор',
   '/analytics': 'Аналитика',
   '/posts': 'Посты',
@@ -112,6 +116,8 @@ const TITLES: Record<string, string> = {
     account header + block headers on IG) — a topbar h1 there reads twice (the name in the corner
     AND on the page), so these routes render no topbar title. Covers both feeds' section paths. */
 const FEED_ROUTES = [
+  // Home renders its own «Главная» header, so suppress the topbar h1 (a duplicate otherwise).
+  '/home',
   '/',
   '/analytics',
   '/posts',
@@ -386,14 +392,15 @@ function SidebarStatus({ rail }: { rail?: boolean }) {
 function MobileBottomNav() {
   const nav = useActiveNetworkNav();
   // Column count follows the active-network nav so the tabs fill the bar exactly (a hardcoded
-  // count wraps the extra tab onto a second row / leaves a dead column). Both networks now carry
-  // the network-agnostic «Отчёты» tab, so both are 5 wide — but keep this length-driven in case
-  // a network's feed set changes.
+  // count wraps the extra tab onto a second row / leaves a dead column). Both nets now carry the
+  // «Главная» leader + «Отчёты» tail, so both are 6 wide — but keep this length-driven in case a
+  // network's feed set changes.
+  const GRID_COLS: Record<number, string> = { 4: 'grid-cols-4', 5: 'grid-cols-5', 6: 'grid-cols-6' };
   return (
     <nav
       className={cn(
         'fixed inset-x-0 bottom-0 z-30 grid border-t bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden print:hidden',
-        nav.length === 5 ? 'grid-cols-5' : 'grid-cols-4',
+        GRID_COLS[nav.length] ?? 'grid-cols-5',
       )}
     >
       {nav.map((item) => (
