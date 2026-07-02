@@ -48,11 +48,15 @@ app.use(requestContext);
 // inside try/catch; the terminal error middleware (registered last) does the rest.
 const asyncHandler = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 // JSON body parser — default 100kb. Big-body routes (collector ingest, bug
-// screenshots) carry their own higher-limit parser, so skip them here; otherwise
-// this 100kb parser would reject their large payloads before the route is reached.
+// screenshots, avatar upload) carry their own higher-limit parser, so skip them
+// here; otherwise this 100kb parser would reject their large payloads before the
+// route is reached (body-parser no-ops on an already-parsed body, so the
+// route-local limit would never apply).
 const jsonSmall = express.json();
 app.use((req, res, next) => {
-  if (req.path === '/api/collector/ingest' || /\/screenshot$/.test(req.path)) return next();
+  if (req.path === '/api/collector/ingest'
+    || req.path === '/api/me/avatar'   // own 1mb parser — a 100KB-400KB data URL is a valid avatar
+    || /\/screenshot$/.test(req.path)) return next();
   jsonSmall(req, res, next);
 });
 // ── App shell + strict nonce-CSP ──────────────────────────────────
@@ -279,23 +283,29 @@ const nearestOf = (value, allowed) =>
 const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const EMAIL_FROM = process.env.EMAIL_FROM || 'Atlavue <onboarding@resend.dev>';
 const APP_URL = (process.env.APP_URL || '').replace(/\/$/, '');
+// Canonical public origin (Atlavue rebrand) — last-resort fallback for emailed
+// links / OAuth callbacks when APP_URL is unset and the request Host isn't
+// allow-listed. Constant, not the old Railway host: a stale fallback silently
+// mints links to a domain we no longer present to users.
+const CANONICAL_ORIGIN = 'https://atlavue.app';
 // Hosts honoured from the request when APP_URL isn't set — defends emailed links
 // against Host-header poisoning (reset link → account takeover). Best practice:
 // set APP_URL in production. Override the allowlist with TRUSTED_HOSTS (comma-sep).
 const TRUSTED_HOSTS = new Set(
-  (process.env.TRUSTED_HOSTS || 'pulse-analytics-production-daf3.up.railway.app')
+  (process.env.TRUSTED_HOSTS || new URL(CANONICAL_ORIGIN).host)
     .split(',').map(s => s.trim().toLowerCase()).filter(Boolean));
-// In production an unset APP_URL silently falls back to the TRUSTED_HOSTS default
-// (the legacy Railway host) — emailed verify/reset links and the IG OAuth callback
-// then point at the wrong domain. Loud boot error, deliberately non-fatal: the
+// In production an unset APP_URL silently falls back to CANONICAL_ORIGIN —
+// emailed verify/reset links and the IG OAuth callback then point at the
+// hardcoded default rather than the configured domain. Loud boot error,
+// deliberately NON-FATAL: a missing env var must not crash-loop prod — the
 // dashboard itself still works without it.
 if (!APP_URL && IS_PRODUCTION) {
   console.error([
     '════════════════════════════════════════════════════════════════════',
     '[boot] APP_URL is not set in a production environment!',
     '[boot] Emailed verification/reset links and the Instagram OAuth callback',
-    `[boot] will fall back to "${[...TRUSTED_HOSTS][0]}".`,
-    '[boot] Set APP_URL to the canonical public origin, e.g. https://atlavue.app',
+    `[boot] will fall back to "${CANONICAL_ORIGIN}".`,
+    `[boot] Set APP_URL to the canonical public origin, e.g. ${CANONICAL_ORIGIN}`,
     '════════════════════════════════════════════════════════════════════',
   ].join('\n'));
 }
@@ -316,7 +326,7 @@ function appBase(req) {
   const host = String((req && req.get && req.get('host')) || '').toLowerCase();
   if (TRUSTED_HOSTS.has(host)) return 'https://' + host;                        // prod → https (never reflect X-Forwarded-Proto)
   if (/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host)) return 'http://' + host;  // local dev
-  return 'https://' + [...TRUSTED_HOSTS][0];                                    // untrusted host → canonical default
+  return CANONICAL_ORIGIN;                                                      // untrusted host → canonical default
 }
 // Fixed-cost hash so login spends scrypt time even when the email doesn't exist
 // (kills the "skip the hash on missing user" enumeration timing oracle).
@@ -489,7 +499,8 @@ app.get('/api/auth/me', requireAuth, asyncHandler(async (req, res) => {
 }));
 
 // Personal avatar — a small base64 data URL on the user row (resized client-side). Own-route JSON
-// limit (the global parser is 100KB); the regex + length cap keep a giant payload out of the DB.
+// limit — the global 100kb parser skips this path (see the jsonSmall skip-list above), so this
+// 1mb parser is the one that runs; the regex + length cap keep a giant payload out of the DB.
 app.post('/api/me/avatar', requireAuth, express.json({ limit: '1mb' }), async (req, res, next) => {
   if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
   const dataUrl = req.body && req.body.dataUrl;
@@ -1774,9 +1785,22 @@ app.get('/api/tg/mtproto/post_stats/:id', requireAuth, resolveChannel, async (re
   }
 });
 
+// ── Public media proxies (thumb / channel photo) ─────────────────────────────
+// Deliberately unauthenticated: they back plain <img src> tags, which can't send
+// the x-session-token header. Tradeoff accepted because the central channel is
+// public anyway (the proxy only reveals what t.me already shows); revisit with
+// signed URLs if private channels ever land. Beyond the global /api limiter
+// (per-IP for anonymous traffic), a dedicated modest per-IP limiter keeps an
+// anonymous scraper from hammering the MTProto service through these routes.
+const mediaLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  message: { error: 'Слишком много запросов. Попробуй через минуту.' }
+});
+
 // Post thumbnail (binary) — open route so <img src> works without a header.
 // Low sensitivity: only serves thumbnails of the configured (public) channel.
-app.get('/api/tg/mtproto/thumb/:id', async (req, res) => {
+app.get('/api/tg/mtproto/thumb/:id', mediaLimiter, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!id) return res.status(400).end();
   const size = req.query.size === 'lg' ? 'lg' : 'sm';
@@ -1794,7 +1818,7 @@ app.get('/api/tg/mtproto/thumb/:id', async (req, res) => {
 
 // Channel avatar (binary) — open route so <img src> works without a header.
 // Low sensitivity: only the configured (public, 'central') channel's profile photo.
-app.get('/api/tg/mtproto/channel/photo', async (req, res) => {
+app.get('/api/tg/mtproto/channel/photo', mediaLimiter, async (req, res) => {
   try {
     const r = await fetchWithTimeout(`${MTPROTO_URL}/channel/photo`, { headers: { 'x-internal-token': MTPROTO_TOKEN } });
     if (!r.ok) return res.status(r.status).end();

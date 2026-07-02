@@ -13,7 +13,7 @@ jobs:
     steps:
       - name: Trigger ingestion endpoint
         env:
-          BASE: https://pulse-analytics-production-daf3.up.railway.app
+          BASE: https://atlavue.app
           TOKEN: ${{ secrets.INGEST_TOKEN }}
         run: |
           set -e
