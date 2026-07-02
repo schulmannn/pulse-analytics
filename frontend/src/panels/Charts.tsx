@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useHistory, useVelocity, useTgFull } from '@/api/queries';
 import type { TgFull } from '@/api/schemas';
 import { lttbDownsample } from '@/lib/downsample';
@@ -9,18 +9,7 @@ import { ExpandableChart } from '@/components/ExpandableChart';
 import { Skeleton } from '@/components/ui/skeleton';
 import { usePeriod } from '@/lib/period';
 
-/** Section header = label + hairline rule (no card), matching TgAnalytics/Compare. */
-function ChartSection({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="space-y-3">
-      <h3 className="flex items-center gap-3 text-xs font-medium tracking-wider text-muted-foreground">
-        <span className="whitespace-nowrap">{title}</span>
-        <span aria-hidden="true" className="h-px flex-1 bg-border" />
-      </h3>
-      {children}
-    </section>
-  );
-}
+import { ChartSection } from '@/components/ChartWidget';
 
 interface HeatmapCell {
   n: number;

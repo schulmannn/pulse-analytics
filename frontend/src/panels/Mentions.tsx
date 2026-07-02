@@ -5,19 +5,8 @@ import { BarChart } from '@/components/BarChart';
 import { Breakdown } from '@/components/Breakdown';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { Mentions as MentionsData } from '@/api/schemas';
-import type { ReactNode } from 'react';
 
-function ChartSection({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="space-y-3">
-      <h3 className="flex items-center gap-3 text-xs font-medium tracking-wider text-muted-foreground">
-        <span className="whitespace-nowrap">{title}</span>
-        <span aria-hidden="true" className="h-px flex-1 bg-border" />
-      </h3>
-      {children}
-    </section>
-  );
-}
+import { ChartSection } from '@/components/ChartWidget';
 
 export function Mentions() {
   // Archive (Postgres) loads on mount — free. The live MTProto search only runs on the

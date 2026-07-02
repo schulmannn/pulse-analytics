@@ -1,4 +1,3 @@
-import type { ReactNode } from 'react';
 import { useTgFull } from '@/api/queries';
 import { normalizeTgPosts, type NormalizedPost } from '@/lib/posts';
 import { fmt } from '@/lib/format';
@@ -11,17 +10,7 @@ import { BarChart } from '@/components/BarChart';
 import { Breakdown } from '@/components/Breakdown';
 import { EmptyState } from '@/components/EmptyState';
 
-function ChartSection({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="space-y-3">
-      <h3 className="flex items-center gap-3 text-xs font-medium tracking-wider text-muted-foreground">
-        <span className="whitespace-nowrap">{title}</span>
-        <span aria-hidden="true" className="h-px flex-1 bg-border" />
-      </h3>
-      {children}
-    </section>
-  );
-}
+import { ChartSection } from '@/components/ChartWidget';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const WD_ORDER = [1, 2, 3, 4, 5, 6, 0];

@@ -1,5 +1,4 @@
 import { useMemo } from 'react';
-import type { ReactNode } from 'react';
 import { useTgFull, useTgStats, useTgGraphs } from '@/api/queries';
 import type { TgFull, TgGraphs, TgStats } from '@/api/schemas';
 import { normalizeTgPosts } from '@/lib/posts';
@@ -8,6 +7,7 @@ import { fmt, ruAxisLabel, ruSeriesName } from '@/lib/format';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { Breakdown } from '@/components/Breakdown';
+import { ChartSection } from '@/components/ChartWidget';
 import { DivergingBars } from '@/components/DivergingBars';
 import { ExpandableChart } from '@/components/ExpandableChart';
 import { EmptyState } from '@/components/EmptyState';
@@ -44,18 +44,8 @@ const SENT_COLOR: Record<string, string> = {
 
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-/** Hairline-delimited chart section (no card) — a title with a 1px rule + the chart body. */
-function ChartSection({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="space-y-3">
-      <h3 className="flex items-center gap-3 text-xs font-medium tracking-wider text-muted-foreground">
-        <span className="whitespace-nowrap">{title}</span>
-        <span aria-hidden="true" className="h-px flex-1 bg-border" />
-      </h3>
-      {children}
-    </section>
-  );
-}
+// Chart sections render as customisable widgets (components/ChartWidget) — card surface,
+// per-widget accent/tint menu. Supersedes the old local hairline section (FH3 dedupe).
 
 export type TgAnalyticsGroup = 'dynamics' | 'audience' | 'content';
 

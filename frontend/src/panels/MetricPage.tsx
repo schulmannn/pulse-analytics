@@ -22,6 +22,7 @@ import { RankChart } from '@/components/RankChart';
 import { PivotTable } from '@/components/PivotTable';
 import { PostDetailModal } from '@/components/PostDetailModal';
 import { ChartSection } from '@/components/instagram/shared';
+import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -477,13 +478,11 @@ export function MetricPage() {
       <div className="grid grid-cols-1 gap-10 lg:grid-cols-[minmax(0,1fr)_300px]">
         {/* Main column — the big chart in four projections + contributing posts. */}
         <div className="min-w-0 space-y-8">
-          <section className="space-y-3">
-            <div className="flex items-center gap-3">
-              <h3 className="whitespace-nowrap text-xs font-medium tracking-wider text-muted-foreground">
-                {chartTitle}
-              </h3>
-              <span aria-hidden="true" className="h-px flex-1 bg-border" />
-              <div role="group" aria-label="Тип графика" className="flex overflow-hidden rounded border border-border">
+          <ChartWidget
+            id={`metric-${metricKey}`}
+            title={chartTitle}
+            action={
+              <div role="group" aria-label="Тип графика" className="flex shrink-0 overflow-hidden rounded border border-border">
                 {chartTypes.map((kind) => (
                   <ChartTypeButton
                     key={kind}
@@ -493,8 +492,8 @@ export function MetricPage() {
                   />
                 ))}
               </div>
-            </div>
-
+            }
+          >
             {chartType === 'line' && (
               <>
                 <LineChart
@@ -525,7 +524,7 @@ export function MetricPage() {
             {chartType === 'pivot' && (
               <PivotTable columns={pivot.columns} rows={pivot.rows} valueFmt={fmt.short} />
             )}
-          </section>
+          </ChartWidget>
 
           {field && (
             <ChartSection title={`Топ постов по ${CONTRIB_LABEL[metricKey] ?? 'метрике'}`}>
