@@ -1,4 +1,3 @@
-import { useOutletContext } from 'react-router-dom';
 import type { IgData } from '@/lib/useIgData';
 import { useIgTags } from '@/api/queries';
 import { Section } from '@/components/instagram/shared';
@@ -14,8 +13,7 @@ import {
 import { exportIgPosts } from '@/lib/igExport';
 
 /** IG Контент — everything publication-level: top posts, Reels, formats, hashtags, compare, stories. */
-export function IgContent() {
-  const ig = useOutletContext<IgData>();
+export function IgContent({ ig }: { ig: IgData }) {
   const tags = useIgTags();
   return (
     <div className="space-y-10">

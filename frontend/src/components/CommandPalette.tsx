@@ -62,6 +62,31 @@ const SUPERUSER_ROUTES: Array<{ path: string; label: string; icon: IconName; sea
   { path: '/bugs', label: 'Баги', icon: 'bugs', search: 'баги bugs фидбек' },
 ];
 
+// Networks a source can live on (brand colours are platform identity, intentional hex — same set
+// the sidebar SourceSwitcher uses). Picking a source row navigates to `to` for that network.
+const SOURCE_NETWORKS = [
+  { key: 'tg', name: 'Telegram', color: '#229ED9', to: '/' },
+  { key: 'ig', name: 'Instagram', color: '#E1306C', to: '/instagram' },
+] as const;
+
+/** Tiny brand glyph for a network badge (currentColor; the call site tints it the brand colour). */
+function NetworkGlyph({ k }: { k: 'tg' | 'ig' }) {
+  if (k === 'tg') {
+    return (
+      <svg viewBox="0 0 24 24" fill="currentColor" className="h-1.5 w-1.5" aria-hidden="true">
+        <path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="h-1.5 w-1.5" aria-hidden="true">
+      <rect x="2.5" y="2.5" width="19" height="19" rx="5.5" />
+      <circle cx="12" cy="12" r="4.2" />
+      <circle cx="17.4" cy="6.6" r="1.1" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 // Search history (MRU command ids) — the palette opens on «Недавнее», like Claude's search.
 const RECENTS_KEY = 'pulse_palette_recents';
 const RECENTS_MAX = 6;
@@ -128,21 +153,38 @@ export function CommandPalette() {
     run: () => navigate(`/metrics/${key}`),
   }));
 
+  // Sources = (channel × network). Each channel yields a Telegram row and an Instagram row; picking
+  // one selects the channel AND lands on that network — the Cmd+K twin of the sidebar SourceSwitcher.
   const channels = channelsQuery.data?.channels ?? [];
-  const channelCommands: PaletteCommand[] = channels.length >= 2
-    ? channels.map((channel) => {
-        const name = channel.username || channel.title || String(channel.id);
-        return {
-          id: `channel:${channel.id}`,
-          label: `@${name}`,
-          search: `сменить канал ${name}`.toLowerCase(),
+  const sourceCommands: PaletteCommand[] = channels.length >= 2
+    ? channels.flatMap((channel) => {
+        const name = String(channel.username || channel.title || channel.id);
+        const chip = (
+          <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-sm bg-muted text-2xs font-medium text-muted-foreground">
+            {name.slice(0, 1).toUpperCase()}
+          </span>
+        );
+        return SOURCE_NETWORKS.map((net) => ({
+          id: `source:${net.key}:${channel.id}`,
+          label: `@${name} · ${net.name}`,
+          search: `перейти сменить источник канал ${net.name} ${name}`.toLowerCase(),
           icon: (
-            <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-sm bg-muted text-2xs font-medium text-muted-foreground">
-              {String(name).slice(0, 1).toUpperCase()}
+            <span className="relative flex shrink-0">
+              {chip}
+              <span
+                className="absolute -bottom-1 -right-1 flex h-2.5 w-2.5 items-center justify-center rounded-full border border-border bg-background"
+                style={{ color: net.color }}
+                aria-hidden="true"
+              >
+                <NetworkGlyph k={net.key} />
+              </span>
             </span>
           ),
-          run: () => setChannelId(channel.id),
-        };
+          run: () => {
+            setChannelId(channel.id);
+            navigate(net.to);
+          },
+        }));
       })
     : [];
 
@@ -162,7 +204,7 @@ export function CommandPalette() {
     },
   };
 
-  const commands: PaletteCommand[] = [...routeCommands, ...metricCommands, ...channelCommands, logoutCommand];
+  const commands: PaletteCommand[] = [...routeCommands, ...metricCommands, ...sourceCommands, logoutCommand];
   const normalizedQuery = query.trim().toLowerCase();
 
   // Empty query = browsable groups with the history on top; a query = one flat hit list.
@@ -177,7 +219,7 @@ export function CommandPalette() {
     if (recentItems.length > 0) sections.push({ title: 'Недавнее', items: recentItems });
     sections.push({ title: 'Разделы', items: routeCommands });
     sections.push({ title: 'Метрики', items: metricCommands });
-    if (channelCommands.length > 0) sections.push({ title: 'Каналы', items: channelCommands });
+    if (sourceCommands.length > 0) sections.push({ title: 'Источники', items: sourceCommands });
     sections.push({ title: 'Аккаунт', items: [logoutCommand] });
   }
   const flatCommands = sections.flatMap((s) => s.items);
@@ -245,7 +287,7 @@ export function CommandPalette() {
                 execute(flatCommands[selectedIndex]);
               }
             }}
-            placeholder="Поиск: разделы, метрики, каналы…"
+            placeholder="Поиск: разделы, метрики, источники…"
             className="min-w-0 flex-1 bg-transparent py-3.5 text-sm text-foreground outline-none placeholder:text-muted-foreground"
           />
           <kbd className="rounded border border-border px-1.5 py-0.5 font-mono text-2xs text-muted-foreground">esc</kbd>

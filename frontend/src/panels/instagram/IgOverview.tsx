@@ -1,4 +1,4 @@
-import { Link, useOutletContext } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { fmt } from '@/lib/format';
 import { pctDelta } from '@/lib/delta';
 import { pairDelta } from '@/lib/igMetrics';
@@ -18,8 +18,7 @@ import { TopPostsBlock } from '@/components/instagram/content';
  * series) + a 4-cell ledger, then the strongest takeaways alongside data-health, then a compact
  * top-posts strip with a link into the Контент view. One screen, no anchor soup.
  */
-export function IgOverview() {
-  const ig = useOutletContext<IgData>();
+export function IgOverview({ ig }: { ig: IgData }) {
   const erTrend =
     ig.erReach > 0 && ig.pairs.reach.hasCur && ig.pairs.reach.hasPrev && ig.erReachPrev > 0
       ? pctDelta(ig.erReach, ig.erReachPrev)

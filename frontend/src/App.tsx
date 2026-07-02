@@ -24,11 +24,7 @@ const LoginPage = lazyFrom(() => import('@/pages/Auth'), 'LoginPage');
 const RegisterPage = lazyFrom(() => import('@/pages/Auth'), 'RegisterPage');
 const VerifyPage = lazyFrom(() => import('@/pages/Auth'), 'VerifyPage');
 const ResetPage = lazyFrom(() => import('@/pages/Auth'), 'ResetPage');
-const InstagramLayout = lazyFrom(() => import('@/panels/instagram/ig-cluster'), 'InstagramLayout');
-const IgOverview = lazyFrom(() => import('@/panels/instagram/ig-cluster'), 'IgOverview');
-const IgAnalytics = lazyFrom(() => import('@/panels/instagram/ig-cluster'), 'IgAnalytics');
-const IgContent = lazyFrom(() => import('@/panels/instagram/ig-cluster'), 'IgContent');
-const IgAudience = lazyFrom(() => import('@/panels/instagram/ig-cluster'), 'IgAudience');
+const IgFeed = lazyFrom(() => import('@/panels/instagram/ig-cluster'), 'IgFeed');
 const Admin = lazyFrom(() => import('@/panels/Admin'), 'Admin');
 const Bugs = lazyFrom(() => import('@/panels/Bugs'), 'Bugs');
 const Connect = lazyFrom(() => import('@/pages/Connect'), 'Connect');
@@ -55,12 +51,10 @@ export default function App() {
         <Route path="reports/:id" element={<ReportPage />} />
         {/* Pre-multi-reports bookmarks land on the index. */}
         <Route path="report" element={<Navigate to="/reports" replace />} />
-        <Route path="instagram" element={<PanelSuspense><InstagramLayout /></PanelSuspense>}>
-          <Route index element={<PanelSuspense><IgOverview /></PanelSuspense>} />
-          <Route path="analytics" element={<PanelSuspense><IgAnalytics /></PanelSuspense>} />
-          <Route path="content" element={<PanelSuspense><IgContent /></PanelSuspense>} />
-          <Route path="audience" element={<PanelSuspense><IgAudience /></PanelSuspense>} />
-        </Route>
+        {/* The IG feed serves '/instagram', '/instagram/analytics|content|audience' as ONE scrolled
+            page — a single optional-param route (like the TG feed) so the scrollspy's replace-
+            navigation never remounts it. Unknown sections redirect to /instagram inside the feed. */}
+        <Route path="instagram/:section?" element={<PanelSuspense><IgFeed /></PanelSuspense>} />
         <Route path="settings" element={<Settings />} />
         <Route path="admin" element={<PanelSuspense><Admin /></PanelSuspense>} />
         <Route path="bugs" element={<PanelSuspense><Bugs /></PanelSuspense>} />

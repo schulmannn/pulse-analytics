@@ -1,4 +1,3 @@
-import { useOutletContext } from 'react-router-dom';
 import { fmt } from '@/lib/format';
 import type { IgData } from '@/lib/useIgData';
 import { Section, TrendCard, EmptyChart, signedNum } from '@/components/instagram/shared';
@@ -15,8 +14,7 @@ import { fmtDay, type Point, type WindowPair } from '@/lib/igMetrics';
  * - Daily charts ONLY where Instagram returns a real series (reach, daily follows).
  * - Aggregate metrics (views/saves/likes/…) → period comparison, not a fabricated daily graph.
  */
-export function IgAnalytics() {
-  const ig = useOutletContext<IgData>();
+export function IgAnalytics({ ig }: { ig: IgData }) {
   const reachWin = ig.series.reach.filter((p) => ig.inWindow(p.day));
   const followsByDay = ig.series.follower.filter((p) => ig.inWindow(p.day)).slice(-30);
   const hasMovement = ig.pairs.follows.hasCur || ig.pairs.unfollows.hasCur;

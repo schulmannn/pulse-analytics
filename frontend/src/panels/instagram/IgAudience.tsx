@@ -1,4 +1,3 @@
-import { useOutletContext } from 'react-router-dom';
 import { fmt } from '@/lib/format';
 import { pairDelta, tvBreakdown, CONTACT_LABEL } from '@/lib/igMetrics';
 import type { IgData } from '@/lib/useIgData';
@@ -7,8 +6,7 @@ import { AudienceBlock, BestTimeHeatmap } from '@/components/instagram/audience'
 import { Breakdown } from '@/components/Breakdown';
 
 /** IG Аудитория — demographics, posting time, and profile actions. */
-export function IgAudience() {
-  const ig = useOutletContext<IgData>();
+export function IgAudience({ ig }: { ig: IgData }) {
   const contacts = tvBreakdown(ig.breakdowns?.data, 'profile_links_taps', 'contact_button_type').sort((a, b) => b.value - a.value);
   const profileViews = ig.pairs.profileViews;
   const hasViews = profileViews.hasCur && profileViews.cur > 0;

@@ -49,33 +49,51 @@ interface NavLinkDef {
   end?: boolean;
 }
 
-// Telegram's dashboard is split into routes…
-const TG_NAV: NavLinkDef[] = [
+// Telegram's dashboard is split into routes… Отчёты is network-agnostic (reports are per-USER,
+// not per-channel) so it rides along with the TG set AND is appended to IG below — it must stay
+// reachable in either network. The four feed views (Обзор/Аналитика/Посты/Упоминания) are the
+// network-specific part.
+const TG_FEED_NAV: NavLinkDef[] = [
   { to: '/', label: 'Обзор', icon: 'overview', end: true },
   { to: '/analytics', label: 'Аналитика', icon: 'analytics' },
   { to: '/posts', label: 'Посты', icon: 'posts' },
   { to: '/mentions', label: 'Упоминания', icon: 'mentions' },
-  { to: '/reports', label: 'Отчёты', icon: 'report' },
 ];
-// …and Instagram into its own parallel set (Обзор / Аналитика / Контент / Аудитория). The desktop
-// sidebar lists BOTH sets as labeled sections (steep's Teams/Entities pattern); mobile stays
-// platform-aware (usePlatformNav) so the bottom tab bar shows only the active platform's routes.
-const IG_NAV: NavLinkDef[] = [
+// …and Instagram into its own parallel set (Обзор / Аналитика / Контент / Аудитория).
+const IG_FEED_NAV: NavLinkDef[] = [
   { to: '/instagram', label: 'Обзор', icon: 'overview', end: true },
   { to: '/instagram/analytics', label: 'Аналитика', icon: 'analytics' },
   { to: '/instagram/content', label: 'Контент', icon: 'posts' },
   { to: '/instagram/audience', label: 'Аудитория', icon: 'audience' },
 ];
+// Network-agnostic route(s) shown after the active network's feed views in BOTH nets.
+const AGNOSTIC_NAV: NavLinkDef[] = [{ to: '/reports', label: 'Отчёты', icon: 'report' }];
+
+// Full nav sets = active network's feed views + the agnostic tail. These drive both the desktop
+// sidebar list and the mobile bottom bar, so «Отчёты» stays a tab in either network (TG keeps its
+// 5-column bar; IG grows from 4 to 5 — MobileBottomNav's grid-cols follows nav.length).
+const TG_NAV: NavLinkDef[] = [...TG_FEED_NAV, ...AGNOSTIC_NAV];
+const IG_NAV: NavLinkDef[] = [...IG_FEED_NAV, ...AGNOSTIC_NAV];
+
 const SYSTEM_NAV: NavLinkDef[] = [{ to: '/settings', label: 'Настройки', icon: 'gear' }];
 const SUPER_NAV: NavLinkDef[] = [
   { to: '/admin', label: 'Админ', icon: 'admin' },
   { to: '/bugs', label: 'Баги', icon: 'bugs' },
 ];
 
-/** The nav set for the active platform (mobile bottom bar) — Telegram routes vs Instagram routes. */
-function usePlatformNav(): NavLinkDef[] {
+type Network = 'tg' | 'ig';
+
+/** The active network, derived purely from the URL — the single source of truth that survives
+    deep-links and reloads. /instagram* = Instagram, everything else = Telegram. */
+function useActiveNetwork(): Network {
   const { pathname } = useLocation();
-  return pathname.startsWith('/instagram') ? IG_NAV : TG_NAV;
+  return pathname.startsWith('/instagram') ? 'ig' : 'tg';
+}
+
+/** The nav set for the active network — feed views + Отчёты. Drives BOTH the desktop sidebar's
+    single adaptive list AND the mobile bottom bar (they read the same active-network route set). */
+function useActiveNetworkNav(): NavLinkDef[] {
+  return useActiveNetwork() === 'ig' ? IG_NAV : TG_NAV;
 }
 
 const TITLES: Record<string, string> = {
@@ -88,12 +106,21 @@ const TITLES: Record<string, string> = {
   '/admin': 'Админ',
   '/bugs': 'Баги',
   '/connect': 'Подключение данных',
-  '/instagram': 'Instagram',
 };
 
-/** TG feed routes open with their own block header carrying the same name — a topbar h1 there
-    reads twice («Обзор» in the corner AND on the page), so these routes render no topbar title. */
-const FEED_ROUTES = ['/', '/analytics', '/posts', '/mentions'];
+/** Feed routes open with their own header (the block header on TG; the «Instagram · @handle»
+    account header + block headers on IG) — a topbar h1 there reads twice (the name in the corner
+    AND on the page), so these routes render no topbar title. Covers both feeds' section paths. */
+const FEED_ROUTES = [
+  '/',
+  '/analytics',
+  '/posts',
+  '/mentions',
+  '/instagram',
+  '/instagram/analytics',
+  '/instagram/content',
+  '/instagram/audience',
+];
 
 /** Topbar h1 for the current route; metric pages resolve to the metric's display name. */
 function routeTitle(pathname: string): string {
@@ -242,16 +269,13 @@ function Sidebar({ email, role, avatar }: { email?: string; role?: string; avata
       <SidebarActions rail={rail} onToggle={toggle} />
 
       <div className="mt-2">
-        <ChannelCard rail={rail} />
+        <SourceSwitcher rail={rail} />
         <div className={rail ? 'px-2' : 'px-3'}>
           <SidebarStatus rail={rail} />
         </div>
       </div>
 
-      <nav className="mt-5 flex-1 overflow-y-auto overflow-x-hidden px-3">
-        <NavGroup label="Telegram" platform="tg" items={TG_NAV} rail={rail} first />
-        <NavGroup label="Instagram" platform="ig" items={IG_NAV} rail={rail} />
-      </nav>
+      <SidebarNav rail={rail} />
 
       <SidebarUserRow rail={rail} email={email} role={role} avatar={avatar} />
     </aside>
@@ -311,45 +335,22 @@ function GhostIconButton({
 }
 
 /**
- * Labeled nav section (steep's Teams/Entities pattern) — replaces the old boxed platform
- * switcher: both platforms are always visible, each under its own quiet uppercase label.
- * Rail mode: a hairline separator between groups + the platform's tiny brand glyph as the
- * group marker (both nav sets share the same stroke icons, so the glyph disambiguates).
+ * The single adaptive nav — ONE flat list of the ACTIVE network's routes (no platform label,
+ * no group markers). The source switcher above carries the network identity, so the nav itself
+ * is just "the current source's views": TG → Обзор/Аналитика/Посты/Упоминания/Отчёты, IG →
+ * Обзор/Аналитика/Контент/Аудитория/Отчёты. Switching network (via the switcher) re-derives the
+ * set from the URL, so the same list drives desktop and (via useActiveNetworkNav) the mobile bar.
  */
-function NavGroup({
-  label,
-  platform,
-  items,
-  rail,
-  first = false,
-}: {
-  label: string;
-  platform: string;
-  items: NavLinkDef[];
-  rail: boolean;
-  first?: boolean;
-}) {
-  const color = PLATFORMS.find((p) => p.key === platform)?.color;
+function SidebarNav({ rail }: { rail: boolean }) {
+  const items = useActiveNetworkNav();
   return (
-    <div role="group" aria-label={label} className={cn(!first && (rail ? 'mt-3' : 'mt-5'))}>
-      {rail ? (
-        <div className="flex flex-col items-center gap-2 pb-2" aria-hidden="true">
-          {!first && <span className="h-px w-8 bg-border" />}
-          <span title={label} style={{ color, opacity: 0.75 }}>
-            <PlatformGlyph k={platform} className="h-3.5 w-3.5" />
-          </span>
-        </div>
-      ) : (
-        <p aria-hidden="true" className="px-2 pb-1 text-2xs font-medium uppercase tracking-wide text-ink3">
-          {label}
-        </p>
-      )}
+    <nav className="mt-5 flex-1 overflow-y-auto overflow-x-hidden px-3">
       <div className="space-y-0.5">
         {items.map((item) => (
           <NavItem key={item.to} {...item} rail={rail} />
         ))}
       </div>
-    </div>
+    </nav>
   );
 }
 
@@ -382,9 +383,11 @@ function SidebarStatus({ rail }: { rail?: boolean }) {
  * the bar stays uncrowded. Icon tints via currentColor, so `text-primary` colours the active glyph.
  */
 function MobileBottomNav() {
-  const nav = usePlatformNav();
-  // Column count follows the platform nav (TG has 5 routes since «Отчёты», IG has 4) —
-  // a hardcoded count wraps the extra tab onto a second row / leaves a dead column.
+  const nav = useActiveNetworkNav();
+  // Column count follows the active-network nav so the tabs fill the bar exactly (a hardcoded
+  // count wraps the extra tab onto a second row / leaves a dead column). Both networks now carry
+  // the network-agnostic «Отчёты» tab, so both are 5 wide — but keep this length-driven in case
+  // a network's feed set changes.
   return (
     <nav
       className={cn(
@@ -438,23 +441,59 @@ function NavItem({ to, label, icon, end, rail }: NavLinkDef & { rail?: boolean }
   );
 }
 
+/** A source = (channel, network). The switcher lists one row per (channel × network). */
+interface SourceRow {
+  channelId: number;
+  network: Network;
+  name: string;
+}
+
+/** Small network glyph overlaid on the source avatar (and used as each dropdown row's marker),
+    tinted with the network's brand colour on a tiny paper chip so TG-blue / IG-magenta read as
+    identifiers, not UI colour. */
+function NetworkBadge({ network, className }: { network: Network; className?: string }) {
+  const color = PLATFORMS.find((p) => p.key === network)?.color;
+  return (
+    <span
+      className={cn(
+        'flex items-center justify-center rounded-full border border-border bg-background',
+        className,
+      )}
+      style={{ color }}
+      aria-hidden="true"
+    >
+      <PlatformGlyph k={network} className="h-2.5 w-2.5" />
+    </span>
+  );
+}
+
 /**
- * Channel card — the workspace-switcher slot under the sidebar header (steep's «Alex ⌄»).
- * Identity = a colored letter-avatar chip (deterministic tint from the channel name; a real
- * profile photo still wins — see ChannelAvatar). Chrome-less row, hairline-free: hover fill
- * only. Rail: just the chip; the dropdown still opens and overhangs the rail to the right.
+ * Source switcher — the workspace-switcher slot under the sidebar header, replacing the old
+ * ChannelCard. A "source" is (channel, network): the channel is the selected channelId, the
+ * network is derived from the URL. The trigger shows the active source (avatar + a small network
+ * badge + @handle + subtitle + chevron). The dropdown groups sources by NETWORK — «Telegram» and
+ * «Instagram», each listing every channel (every channel is reachable on both; IG shows demo/mock
+ * until connected) — plus a «Подключить источник» action. Picking a Telegram source selects the
+ * channel and navigates to /; an Instagram source selects it and navigates to /instagram.
+ *
+ * This component OWNS the channel bootstrap effect (moved from the old ChannelCard): it validates
+ * the persisted id against the loaded list and falls back to the server's `selected` → first
+ * channel. That effect is load-bearing — without it every channel-scoped query 404s forever.
  */
-function ChannelCard({ rail = false }: { rail?: boolean }) {
+function SourceSwitcher({ rail = false }: { rail?: boolean }) {
   const { data } = useChannels();
   const { channelId, setChannelId } = useSelectedChannel();
+  const network = useActiveNetwork();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
   const cardRef = useRef<HTMLDivElement>(null);
   const channels = data?.channels ?? [];
 
-  // Initialise the selected channel once the list loads (drives X-Channel-Id). Also validates
-  // a persisted id (localStorage) against the loaded list: a stale/foreign id falls back to the
-  // server's `selected`, then the first channel — otherwise every query would 404 forever.
+  // Initialise / validate the selected channel once the list loads (drives X-Channel-Id). A
+  // stale/foreign persisted id falls back to the server's `selected`, then the first channel —
+  // otherwise every query would 404 forever. (Moved here from the old ChannelCard.)
   useEffect(() => {
     if (!data || channels.length === 0) return;
     if (channelId != null && channels.some((c) => c.id === channelId)) return;
@@ -463,90 +502,163 @@ function ChannelCard({ rail = false }: { rail?: boolean }) {
   }, [channelId, channels, data, setChannelId]);
 
   useDismiss(open, setOpen, cardRef);
+  // Reset the filter whenever the dropdown closes, so it reopens clean.
+  useEffect(() => {
+    if (!open) setQuery('');
+  }, [open]);
+
+  const channelName = (c: { username?: string | null; title?: string | null; id: number }) =>
+    String(c.username || c.title || c.id);
 
   const current = channels.find((c) => c.id === channelId) ?? channels[0];
-  const name = String(current?.username || current?.title || current?.id || '');
+  const name = current ? channelName(current) : '';
   const handle = current ? `@${name}` : '@—';
   const initial = (name || 'T').slice(0, 1).toUpperCase();
   const count = current?.memberCount;
+  // Subtitle names the ACTIVE network so the trigger reads as "this source", not just "this channel".
   const subtitle =
-    count != null && count > 0
-      ? `${fmt.short(count)} подписчиков`
-      : current?.source === 'collector'
-        ? 'Локальный сбор'
-        : 'Telegram';
-  const multi = channels.length >= 2;
+    network === 'ig'
+      ? 'Instagram'
+      : count != null && count > 0
+        ? `${fmt.short(count)} подписчиков`
+        : current?.source === 'collector'
+          ? 'Локальный сбор'
+          : 'Telegram';
 
-  const pick = (id: number) => {
-    setChannelId(id);
+  // The dropdown always opens (even with a single channel) — it's how the user crosses NETWORKS,
+  // not only how they switch channels.
+  const openable = channels.length > 0;
+
+  // Search only when the flat source list gets long (both networks × channels). Mirrors the
+  // command palette's simple substring filter.
+  const totalRows = channels.length * PLATFORMS.length;
+  const showSearch = totalRows > 8;
+
+  const pick = (row: SourceRow) => {
+    setChannelId(row.channelId);
     void queryClient.cancelQueries();
     setOpen(false);
+    navigate(row.network === 'ig' ? '/instagram' : '/');
+  };
+
+  const filtered = (net: Network): SourceRow[] => {
+    const q = query.trim().toLowerCase();
+    return channels
+      .map((c) => ({ channelId: c.id, network: net, name: channelName(c) }))
+      .filter((r) => (q ? r.name.toLowerCase().includes(q) : true));
   };
 
   return (
     <div ref={cardRef} className={cn('relative', rail ? 'px-2' : 'px-3')}>
       <button
         type="button"
-        onClick={() => multi && setOpen((o) => !o)}
+        onClick={() => openable && setOpen((o) => !o)}
         title={rail ? handle : undefined}
-        aria-label={rail ? `Канал ${handle}` : undefined}
+        aria-label={rail ? `Источник ${handle}` : undefined}
+        aria-expanded={openable ? open : undefined}
         className={cn(
           'flex w-full items-center rounded text-left transition-colors',
           rail ? 'justify-center py-1' : 'gap-2.5 px-2 py-1.5',
-          multi ? 'cursor-pointer hover:bg-hover-row/60' : 'cursor-default',
+          openable ? 'cursor-pointer hover:bg-hover-row/60' : 'cursor-default',
         )}
       >
-        <ChannelAvatar
-          source={current?.source}
-          initial={initial}
-          tintClassName={chipTint(name)}
-          className="h-9 w-9 rounded text-sm"
-        />
+        <span className="relative shrink-0">
+          <ChannelAvatar
+            source={current?.source}
+            initial={initial}
+            tintClassName={chipTint(name)}
+            className="h-9 w-9 rounded text-sm"
+          />
+          {/* Network badge overlays the avatar's bottom-right — identifies the active source's net. */}
+          <NetworkBadge network={network} className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5" />
+        </span>
         {!rail && (
           <>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-medium text-foreground">{handle}</span>
               <span className="block truncate text-xs text-muted-foreground">{subtitle}</span>
             </span>
-            {multi && <Icon name="chevron" className="h-4 w-4 shrink-0 text-muted-foreground" />}
+            {openable && <Icon name="chevron" className="h-4 w-4 shrink-0 text-muted-foreground" />}
           </>
         )}
       </button>
 
-      {open && multi && (
+      {open && openable && (
         <div
           className={cn(
             'absolute top-full z-40 mt-1 overflow-hidden rounded border bg-popover p-1',
             // In the rail the popover overhangs the 64px column instead of squeezing into it.
-            rail ? 'left-2 w-56' : 'inset-x-3',
+            rail ? 'left-2 w-60' : 'inset-x-3',
           )}
         >
-          {channels.map((channel) => {
-            const channelName = String(channel.username || channel.title || channel.id);
-            return (
+          {showSearch && (
+            <input
+              autoFocus
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Поиск источника…"
+              className="mb-1 w-full rounded bg-transparent px-2 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground"
+            />
+          )}
+          <div className="max-h-[60vh] overflow-y-auto">
+            {PLATFORMS.map((p) => {
+              const net = p.key as Network;
+              const rows = filtered(net);
+              if (rows.length === 0) return null;
+              return (
+                <div key={net} role="group" aria-label={p.name} className="pt-1 first:pt-0">
+                  <p aria-hidden="true" className="px-2 pb-1 text-2xs font-medium uppercase tracking-wide text-ink3">
+                    {p.name}
+                  </p>
+                  {rows.map((row) => {
+                    const active = row.channelId === channelId && net === network;
+                    return (
+                      <button
+                        key={`${net}:${row.channelId}`}
+                        type="button"
+                        onClick={() => pick(row)}
+                        className={cn(
+                          'flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors',
+                          active
+                            ? 'bg-hover-row font-medium text-foreground'
+                            : 'text-muted-foreground hover:bg-hover-row/60 hover:text-foreground',
+                        )}
+                      >
+                        <span className="relative shrink-0">
+                          <span
+                            className={cn(
+                              'flex h-5 w-5 items-center justify-center rounded text-2xs font-medium',
+                              chipTint(row.name),
+                            )}
+                          >
+                            {row.name.slice(0, 1).toUpperCase()}
+                          </span>
+                          <NetworkBadge network={net} className="absolute -bottom-1 -right-1 h-3 w-3" />
+                        </span>
+                        <span className="truncate">@{row.name}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              );
+            })}
+            {/* «Подключить источник» — add a channel / connect IG lives on the connect flow. */}
+            <div className="mt-1 border-t border-border pt-1">
               <button
-                key={channel.id}
                 type="button"
-                onClick={() => pick(channel.id)}
-                className={cn(
-                  'flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors',
-                  channel.id === channelId
-                    ? 'bg-hover-row font-medium text-foreground'
-                    : 'text-muted-foreground hover:bg-hover-row/60 hover:text-foreground',
-                )}
+                onClick={() => {
+                  setOpen(false);
+                  navigate('/connect');
+                }}
+                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-muted-foreground transition-colors hover:bg-hover-row/60 hover:text-foreground"
               >
-                <span
-                  className={cn(
-                    'flex h-5 w-5 shrink-0 items-center justify-center rounded text-2xs font-medium',
-                    chipTint(channelName),
-                  )}
-                >
-                  {channelName.slice(0, 1).toUpperCase()}
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-dashed border-border text-sm leading-none">
+                  +
                 </span>
-                <span className="truncate">@{channelName}</span>
+                <span className="truncate">Подключить источник</span>
               </button>
-            );
-          })}
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -581,7 +693,7 @@ function MobileHeader({ email, role, avatar }: { email?: string; role?: string; 
     <div className="print:hidden">
       <div className="flex items-center gap-2 border-b py-2 pr-3">
         <div className="min-w-0 flex-1">
-          <ChannelCard />
+          <SourceSwitcher />
         </div>
         <AccountMenu email={email} role={role} avatar={avatar} />
       </div>
