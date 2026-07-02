@@ -13,14 +13,13 @@ function createAuth(options = {}) {
     return `${body}.${signature}`;
   }
 
-  function signBreakGlass(expires) {
-    return sign({ exp: expires, uid: null, role: 'superuser', ver: 0 });
-  }
-
   function signSession({ uid, role, exp, tokenVersion = 0 }) {
     return sign({ uid, role, exp, ver: tokenVersion });
   }
 
+  // Accounts only: a valid token always carries a numeric uid. Anything else —
+  // malformed JSON, a legacy plain-number body, or an old uid=null "operator"
+  // token — is rejected here, so callers can rely on session.uid being a number.
   function parseToken(token) {
     try {
       if (!token || typeof token !== 'string' || token.indexOf('.') < 0) return null;
@@ -28,13 +27,11 @@ function createAuth(options = {}) {
       const expected = crypto.createHmac('sha256', secret).update(body).digest('base64url');
       if (!signature || signature.length !== expected.length) return null;
       if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null;
-      const decoded = Buffer.from(body, 'base64url').toString('utf8');
-      let payload;
-      if (decoded[0] === '{') payload = JSON.parse(decoded);
-      else payload = { exp: parseInt(decoded, 10), uid: null, role: 'superuser', ver: 0 };
+      const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
+      if (!payload || !Number.isInteger(payload.uid)) return null;
       if (!payload.exp || payload.exp <= Date.now()) return null;
       return {
-        uid: payload.uid == null ? null : payload.uid,
+        uid: payload.uid,
         role: payload.role || 'user',
         tokenVersion: Number.isInteger(payload.ver) ? payload.ver : 0,
       };
@@ -43,7 +40,7 @@ function createAuth(options = {}) {
     }
   }
 
-  return { signBreakGlass, signSession, parseToken };
+  return { signSession, parseToken };
 }
 
 function hashPassword(password) {
@@ -76,10 +73,11 @@ function verifyPassword(password, stored) {
 
 // Rate-limit bucket key for the general /api limiter. Authenticated requests are
 // keyed per user (uid) — stable across token refreshes and isolated from other
-// users; break-glass (no uid) and unauthenticated/forged-token requests fall back
-// to a per-IP bucket. `session` is the parseToken() result (or null).
+// users; unauthenticated/forged-token requests fall back to a per-IP bucket.
+// `session` is the parseToken() result (or null) — a non-null session always
+// carries a numeric uid.
 function rateLimitKey(session, ip) {
-  if (session) return session.uid != null ? `u:${session.uid}` : `op:${ip || 'x'}`;
+  if (session) return `u:${session.uid}`;
   return `ip:${ip || 'unknown'}`;
 }
 

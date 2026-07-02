@@ -42,14 +42,15 @@ pulse-analytics/
 ```
 
 Web ходит к Python по `MTPROTO_URL`; аутентификация межсервисная — заголовок
-`x-internal-token: TEAM_PASSWORD` (общий секрет на обоих сервисах).
+`x-internal-token: MTPROTO_TOKEN` (одинаковое значение на обоих сервисах;
+без него MTProto-сервис отвечает 503 — fail-closed).
 
 ## Переменные окружения
 
 | Переменная | Назначение |
 |---|---|
-| `TEAM_PASSWORD` | break-glass пароль команды и межсервисный MTProto-секрет |
-| `SESSION_SECRET` | отдельный секрет подписи web-сессий; обязателен в проде |
+| `SESSION_SECRET` | секрет подписи web-сессий (напр. `openssl rand -hex 32`); **обязателен в проде** — без него web не стартует |
+| `MTPROTO_TOKEN` | межсервисный секрет web ↔ mtproto; задать **одинаковым** на обоих сервисах |
 | `DATABASE_URL` | Postgres; `npm start` применяет SQL-миграции перед запуском web |
 | `COLLECTOR_STALE_HOURS` | через сколько часов без ingest показать предупреждение (по умолчанию `24`) |
 | `TG_API_ID` / `TG_API_HASH` | приложение Telegram с my.telegram.org (та же пара, которой создавалась сессия) |
@@ -122,22 +123,23 @@ docker run -d --restart unless-stopped --env-file .env \
 
 Оба сервиса деплоятся из ЭТОГО же репозитория, отличаются только Dockerfile'ом
 (Settings → Build → **Dockerfile Path**, либо переменная `RAILWAY_DOCKERFILE_PATH`).
-`TEAM_PASSWORD` и `TG_CHANNEL` должны совпадать на обоих.
+`MTPROTO_TOKEN` и `TG_CHANNEL` должны совпадать на обоих.
 
 **1. MTProto-сервис (приватный) — создать первым:**
 - New Service → Deploy from GitHub → этот репозиторий.
 - **Dockerfile Path:** `Dockerfile.mtproto`.
 - **Variables:** `TG_API_ID`, `TG_API_HASH`, `TG_SESSION`, `TG_CHANNEL`,
-  `TEAM_PASSWORD`, `MTPROTO_PORT=8001` (+ опц. `MENTION_QUERIES`, `MENTION_EXCLUDE`).
+  `MTPROTO_TOKEN`, `MTPROTO_PORT=8001` (+ опц. `MENTION_QUERIES`, `MENTION_EXCLUDE`).
 - **Networking:** публичный домен НЕ создавать (сервис только во внутренней сети).
 - Деплой → проверить по логам, что Telethon подключился.
 
 **2. WEB-сервис (публичный):**
 - Либо переиспользовать текущий сервис, либо создать новый из репозитория.
 - **Dockerfile Path:** `Dockerfile.web`.
-- **Variables:** `TEAM_PASSWORD` (тот же!), `TG_CHANNEL` (тот же), `PORT=8080`,
-  `DATABASE_URL`, `INGEST_TOKEN`, `SESSION_SECRET`, `ADMIN_EMAIL`/`ADMIN_PASSWORD`,
-  `GITHUB_REPO`/`GITHUB_DISPATCH_TOKEN`, опц. `TG_BOT_TOKEN`, `IG_*`, и главное —
+- **Variables:** `SESSION_SECRET` (обязателен), `MTPROTO_TOKEN` (тот же, что на
+  mtproto!), `TG_CHANNEL` (тот же), `PORT=8080`, `DATABASE_URL`, `INGEST_TOKEN`,
+  `ADMIN_EMAIL`/`ADMIN_PASSWORD`, `GITHUB_REPO`/`GITHUB_DISPATCH_TOKEN`,
+  опц. `TG_BOT_TOKEN`, `IG_*`, и главное —
   **`MTPROTO_URL=http://<имя-mtproto-сервиса>.railway.internal:8001`**.
 - **Networking:** публичный домен → target port **8080**.
 

@@ -250,9 +250,8 @@ async function adoptOwnerChannel(adminUid) {
 }
 
 const CHANNEL_COLS = 'id, username, title, status, source, tg_channel_id, owner_uid';
-const isOperator = (u) => u && u.uid == null && u.role === 'superuser';   // break-glass = central-only
 
-// Channels visible to a user. Break-glass superuser (no account) sees the central channel only.
+// Channels visible to a user (every session maps to a users row with a numeric uid).
 // Latest known subscriber count per channel (cheap: newest channel_daily row).
 // Null for channels without daily history (e.g. a fresh collector channel).
 const MEMBER_COUNT_COL =
@@ -262,29 +261,20 @@ const MEMBER_COUNT_COL =
 
 async function listChannels(user) {
   if (!enabled) return [];
-  if (isOperator(user)) {
-    const { rows } = await pool.query(
-      `SELECT ${CHANNEL_COLS}, ${MEMBER_COUNT_COL} FROM channels WHERE source='central' ORDER BY created_at ASC`);
-    return rows;
-  }
   const uid = user && user.uid;
-  if (uid == null) return [];
+  if (uid == null) return [];   // defensive: never query ownership with a missing uid
   const { rows } = await pool.query(
     `SELECT ${CHANNEL_COLS}, ${MEMBER_COUNT_COL} FROM channels WHERE owner_uid=$1 AND status<>'disabled' ORDER BY created_at ASC`, [uid]);
   return rows;
 }
 
-// Ownership-checked fetch: returns the channel row only if it belongs to the user
-// (or is central, for the break-glass operator). Routes turn null → 403.
+// Ownership-checked fetch: returns the channel row only if it belongs to the user.
+// Routes turn null → 403.
 async function getChannel(id, user) {
   if (!enabled || !id) return null;
-  // listChannels hides disabled channels — a direct ?channel=<id> must not bypass that.
-  if (isOperator(user)) {
-    const { rows } = await pool.query(`SELECT ${CHANNEL_COLS} FROM channels WHERE id=$1 AND source='central' AND status<>'disabled'`, [id]);
-    return rows[0] || null;
-  }
   const uid = user && user.uid;
-  if (uid == null) return null;
+  if (uid == null) return null;   // defensive: never query ownership with a missing uid
+  // listChannels hides disabled channels — a direct ?channel=<id> must not bypass that.
   const { rows } = await pool.query(`SELECT ${CHANNEL_COLS} FROM channels WHERE id=$1 AND owner_uid=$2 AND status<>'disabled'`, [id, uid]);
   return rows[0] || null;
 }
@@ -810,7 +800,7 @@ async function recordAuditEvent({ uid = null, channel_id = null, action, request
 
 /* ── Персональная раскладка дашборда ─────────────────────────────
    Возвращает сохранённый объект prefs (или null, если ничего нет /
-   нет БД / гость без аккаунта). Запись — upsert по uid. */
+   нет БД). Запись — upsert по uid. */
 async function getPrefs(uid) {
   if (!enabled || uid == null) return null;
   const { rows } = await pool.query('SELECT prefs FROM user_prefs WHERE uid=$1', [uid]);

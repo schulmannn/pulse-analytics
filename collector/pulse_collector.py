@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import random
+import secrets
 import sqlite3
 import sys
 import time
@@ -42,6 +43,17 @@ def utc_now() -> str:
 def state_directory() -> Path:
     configured = os.getenv("COLLECTOR_STATE_DIR", "")
     return Path(configured).expanduser() if configured else Path.home() / ".pulse-collector"
+
+
+def _ensure_internal_token() -> None:
+    """Make in-process mtproto.service calls pass its fail-closed check_auth.
+
+    The collector imports service functions directly (no HTTP server runs), but
+    they still call check_auth, which now 503s when MTPROTO_TOKEN is unset.
+    Mint an ephemeral process-local token BEFORE the import (service.py reads
+    the env at module import time); an operator-provided MTPROTO_TOKEN wins.
+    """
+    os.environ.setdefault("MTPROTO_TOKEN", secrets.token_hex(32))
 
 
 def _load_session_from_file() -> None:
@@ -277,8 +289,9 @@ def api_request(config: dict[str, str], path: str, payload: dict[str, Any] | Non
 
 async def collect_payload(include_mentions: bool = False) -> dict[str, Any]:
     # Import only after env validation. mtproto.service reads Telegram config at import time.
+    _ensure_internal_token()
     from mtproto import service
-    internal_token = service.TEAM_PASS
+    internal_token = service.MTPROTO_TOKEN
 
     LOG.info("Collecting channel metadata")
     channel = await service.get_channel(internal_token)
@@ -358,12 +371,13 @@ async def doctor(config: dict[str, str]) -> None:
     LOG.info("Atlavue API OK; channel_id=%s", compatibility.get("channel_id"))
 
     LOG.info("Checking Telegram session and channel access")
+    _ensure_internal_token()
     from mtproto import service
 
     client = await service.get_client()
     entity = await client.get_entity(os.environ["TG_CHANNEL"])
     LOG.info("Telegram OK; channel=%s", getattr(entity, "title", os.environ["TG_CHANNEL"]))
-    stats = await service.get_stats(service.TEAM_PASS)
+    stats = await service.get_stats(service.MTPROTO_TOKEN)
     if isinstance(stats, dict) and stats.get("available") is False:
         raise RuntimeError(
             "Telegram session can read the channel but cannot read admin statistics: "

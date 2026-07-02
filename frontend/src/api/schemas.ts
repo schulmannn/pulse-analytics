@@ -76,7 +76,7 @@ export type TgFull = z.infer<typeof TgFullSchema>;
 export const MeSchema = z
   .object({
     uid: z.coerce.number().optional().nullable(),
-    email: z.string().optional().nullable(), // null for break-glass / team login (no user row)
+    email: z.string().optional().nullable(), // tolerant: parsing must not crash if the server ever omits/nulls it
     role: z.string().optional(),
     avatar: z.string().optional().nullable(), // base64 data URL profile photo
   })

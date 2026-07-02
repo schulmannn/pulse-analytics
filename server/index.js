@@ -117,18 +117,52 @@ const authLimiter = rateLimit({
 });
 
 // ── Авторизация: stateless HMAC-токены (переживают рестарт/редеплой) ──
-// Token signing secret. Prefer a dedicated SESSION_SECRET (separable from the
-// team/MTProto password); fall back to TEAM_PASSWORD; never a hardcoded default —
-// if neither is set, use an ephemeral random secret (tokens won't survive restart).
-const AUTH_SECRET = process.env.SESSION_SECRET || process.env.TEAM_PASSWORD || crypto.randomBytes(32).toString('hex');
-if (!process.env.SESSION_SECRET && !process.env.TEAM_PASSWORD) {
-  console.warn('[auth] no SESSION_SECRET/TEAM_PASSWORD set — using a random ephemeral secret; sessions will not survive restart');
+// Token signing secret: a dedicated SESSION_SECRET and nothing else. There is no
+// fallback — a shared login password must never double as the session-forgery key.
+// Production refuses to boot without the required secrets (an ephemeral secret
+// would silently log everyone out on each deploy); dev gets a random per-process
+// secret with a warning.
+const IS_PRODUCTION = process.env.NODE_ENV === 'production'
+  || !!process.env.RAILWAY_ENVIRONMENT || !!process.env.RAILWAY_PROJECT_ID;
+{
+  const missing = [];
+  if (!process.env.SESSION_SECRET) {
+    missing.push(
+      'SESSION_SECRET is not set. It signs dashboard session tokens.',
+      '    → Set SESSION_SECRET to a long random value (e.g. `openssl rand -hex 32`).',
+      '      Rotating it invalidates every active session.');
+  }
+  if (process.env.MTPROTO_URL && !process.env.MTPROTO_TOKEN) {
+    missing.push(
+      'MTPROTO_TOKEN is not set, but MTPROTO_URL is configured.',
+      '    → Set MTPROTO_TOKEN to a long random value (e.g. `openssl rand -hex 32`)',
+      '      and set the SAME value on the mtproto service — it authenticates the',
+      '      internal web → mtproto calls (x-internal-token header).');
+  }
+  if (missing.length && IS_PRODUCTION) {
+    console.error([
+      '════════════════════════════════════════════════════════════════════',
+      '[boot] FATAL: required secrets are missing in a production environment.',
+      ...missing.map(l => '[boot] ' + l),
+      '[boot] (The legacy shared team-password env is no longer read — delete it',
+      '[boot]  from both services once SESSION_SECRET/MTPROTO_TOKEN are set.)',
+      '════════════════════════════════════════════════════════════════════',
+    ].join('\n'));
+    process.exit(1);
+  }
 }
+const AUTH_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
+if (!process.env.SESSION_SECRET) {
+  console.warn('[auth] SESSION_SECRET not set (dev) — using an ephemeral random secret; sessions will not survive a restart');
+}
+// Domain-separated subkeys derived from AUTH_SECRET — the raw session-signing
+// secret is never reused directly for other HMAC purposes.
+const IG_STATE_KEY = crypto.createHmac('sha256', AUTH_SECRET).update('ig-state').digest();
+const IP_HASH_KEY  = crypto.createHmac('sha256', AUTH_SECRET).update('ip-hash').digest();
 
 const ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || '').toLowerCase().trim();
 const SESSION_TTL = 8 * 60 * 60 * 1000;
 const auth = createAuth({ secret: AUTH_SECRET });
-const signToken = auth.signBreakGlass;
 const signSession = auth.signSession;
 const parseToken = auth.parseToken;
 // "Sign in with Google" (Google Identity Services). The client id is public — it's both the GSI
@@ -143,7 +177,7 @@ async function audit(req, action, metadata = {}) {
     channel_id: req.channel && req.channel.id != null ? req.channel.id : null,
     action,
     request_id: req.requestId,
-    ip_hash: hashIp(req.ip, AUTH_SECRET),
+    ip_hash: hashIp(req.ip, IP_HASH_KEY),
     metadata,
   });
 }
@@ -171,13 +205,14 @@ async function claimOwnerChannel() {
   } catch (e) { console.error('[db] adopt owner channel failed:', e.message); }
 }
 
-// Auth: validates the token; for account sessions re-checks the user is still active
-// (so role changes / disable take effect immediately, not only on next login).
+// Auth: validates the token, then re-checks the user is still active (so role
+// changes / disable take effect immediately, not only on next login). Every valid
+// session carries a numeric uid (parseToken rejects anything else), so req.user
+// always maps to a real users row.
 async function requireAuth(req, res, next) {
   const sess = parseToken(req.headers['x-session-token']);
   if (!sess) return res.status(401).json({ error: 'Сессия истекла, войди снова' });
   req.session = sess;
-  if (sess.uid == null) { req.user = { uid: null, role: 'superuser', email: null }; return next(); }
   try {
     const u = await db.getUserById(sess.uid);
     if (!u || u.status !== 'active') return res.status(401).json({ error: 'Аккаунт неактивен — войди снова' });
@@ -253,7 +288,7 @@ const TRUSTED_HOSTS = new Set(
 // (the legacy Railway host) — emailed verify/reset links and the IG OAuth callback
 // then point at the wrong domain. Loud boot error, deliberately non-fatal: the
 // dashboard itself still works without it.
-if (!APP_URL && (process.env.NODE_ENV === 'production' || process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID)) {
+if (!APP_URL && IS_PRODUCTION) {
   console.error([
     '════════════════════════════════════════════════════════════════════',
     '[boot] APP_URL is not set in a production environment!',
@@ -286,10 +321,16 @@ function appBase(req) {
 // (kills the "skip the hash on missing user" enumeration timing oracle).
 const DUMMY_HASH = `scrypt$${SCRYPT.N}$${SCRYPT.r}$${SCRYPT.p}$${'0'.repeat(32)}$${'0'.repeat(128)}`;
 
-// Send via Resend (plain fetch). No key → log only non-secret metadata (never the
-// rendered link/token). Never throws (auth flows stay generic on email failure).
-async function sendEmail(to, subject, html) {
-  if (!RESEND_API_KEY) { console.log(`[email:dev] to=${to} · "${subject}" (RESEND_API_KEY unset — not sent)`); return true; }
+// Send via Resend (plain fetch). No key → log only non-secret metadata; in DEV
+// additionally log the action link (`devLink`) so registration/reset flows are
+// completable locally without an email provider — production never prints it.
+// Never throws (auth flows stay generic on email failure).
+async function sendEmail(to, subject, html, devLink) {
+  if (!RESEND_API_KEY) {
+    console.log(`[email:dev] to=${to} · "${subject}" (RESEND_API_KEY unset — not sent)`);
+    if (!IS_PRODUCTION && devLink) console.log(`[email:dev] action link: ${devLink}`);
+    return true;
+  }
   try {
     const r = await fetchWithTimeout('https://api.resend.com/emails', {
       method: 'POST',
@@ -337,41 +378,33 @@ app.post('/api/auth/register', authLimiter, async (req, res) => {
     const u = await db.createUser({ email, pass_hash: hashPassword(password), role: 'user', status: 'unverified' });
     const raw = newToken();
     const id = await db.createEmailToken(u.id, 'verify', sha256(raw), new Date(Date.now() + VERIFY_TTL));
-    if (id) await sendEmail(email, 'Подтверди email — Atlavue', verifyEmailHtml(`${base}/verify?token=${raw}`));
+    const link = `${base}/verify?token=${raw}`;
+    if (id) await sendEmail(email, 'Подтверди email — Atlavue', verifyEmailHtml(link), link);
   } catch (e) {
     if (e.code !== '23505') console.error('[register]', e.message);   // already responded generically
   }
 });
 
-// Login: account (email+password) OR break-glass (team password, no email → superuser).
+// Login: account (email + password) only.
 app.post('/api/auth/login', authLimiter, async (req, res, next) => {
   const email = String((req.body && req.body.email) || '').toLowerCase().trim();
   const password = String((req.body && req.body.password) || '');
-  if (!password) return res.status(400).json({ error: 'Укажи пароль' });
+  if (!email || !password) return res.status(400).json({ error: 'Укажи email и пароль' });
+  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
   const expires = Date.now() + SESSION_TTL;
-
-  if (email) {
-    if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
-    try {
-      const u = await db.getUserByEmail(email);
-      const ok = u ? verifyPassword(password, u.pass_hash) : verifyPassword(password, DUMMY_HASH);  // constant-cost
-      if (!u || !ok) return res.status(403).json({ error: 'Неверный email или пароль' });
-      if (u.status === 'unverified') return res.status(403).json({ error: 'Подтверди email — ссылка пришла при регистрации', code: 'unverified' });
-      if (u.status === 'pending')    return res.status(403).json({ error: 'Аккаунт ждёт одобрения администратором' });
-      if (u.status !== 'active')     return res.status(403).json({ error: 'Аккаунт отключён' });
-      const token = signSession({ uid: u.id, role: u.role, exp: expires, tokenVersion: u.token_version });
-      req.user = { uid: u.id, role: u.role, email: u.email };
-      audit(req, 'auth.login', {}).catch(() => {});
-      return res.json({ token,
-        expiresAt: new Date(expires).toISOString(), user: { email: u.email, role: u.role } });
-    } catch (e) { return next(e); }
-  }
-
-  // break-glass: shared team password → superuser session (no account)
-  if (process.env.TEAM_PASSWORD && password === process.env.TEAM_PASSWORD) {
-    return res.json({ token: signToken(expires), expiresAt: new Date(expires).toISOString(), user: { email: null, role: 'superuser' } });
-  }
-  return res.status(403).json({ error: 'Неверный пароль' });
+  try {
+    const u = await db.getUserByEmail(email);
+    const ok = u ? verifyPassword(password, u.pass_hash) : verifyPassword(password, DUMMY_HASH);  // constant-cost
+    if (!u || !ok) return res.status(403).json({ error: 'Неверный email или пароль' });
+    if (u.status === 'unverified') return res.status(403).json({ error: 'Подтверди email — ссылка пришла при регистрации', code: 'unverified' });
+    if (u.status === 'pending')    return res.status(403).json({ error: 'Аккаунт ждёт одобрения администратором' });
+    if (u.status !== 'active')     return res.status(403).json({ error: 'Аккаунт отключён' });
+    const token = signSession({ uid: u.id, role: u.role, exp: expires, tokenVersion: u.token_version });
+    req.user = { uid: u.id, role: u.role, email: u.email };
+    audit(req, 'auth.login', {}).catch(() => {});
+    return res.json({ token,
+      expiresAt: new Date(expires).toISOString(), user: { email: u.email, role: u.role } });
+  } catch (e) { return next(e); }
 });
 
 // Public runtime config for the SPA (no secrets). Currently just the Google client id so the login
@@ -434,7 +467,7 @@ app.post('/api/auth/google', authLimiter, async (req, res) => {
 
 app.post('/api/auth/logout', requireAuth, async (req, res, next) => {
   try {
-    if (req.user.uid != null) await db.revokeUserSessions(req.user.uid);
+    await db.revokeUserSessions(req.user.uid);
     audit(req, 'auth.logout', {}).catch(() => {});
     res.json({ ok: true });
   } catch (e) {
@@ -448,7 +481,7 @@ app.get('/api/auth/check', requireAuth, (req, res) => {
 
 app.get('/api/auth/me', requireAuth, asyncHandler(async (req, res) => {
   let avatar = null;
-  if (db.enabled && req.user.uid != null) {
+  if (db.enabled) {
     avatar = await db.getUserAvatar(req.user.uid).catch(() => null);
   }
   res.json({ uid: req.user.uid, email: req.user.email, role: req.user.role, avatar });
@@ -456,10 +489,8 @@ app.get('/api/auth/me', requireAuth, asyncHandler(async (req, res) => {
 
 // Personal avatar — a small base64 data URL on the user row (resized client-side). Own-route JSON
 // limit (the global parser is 100KB); the regex + length cap keep a giant payload out of the DB.
-// The break-glass team login has no user row, so it can't set an avatar.
 app.post('/api/me/avatar', requireAuth, express.json({ limit: '1mb' }), async (req, res, next) => {
   if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
-  if (req.user.uid == null) return res.status(403).json({ error: 'Командный вход не поддерживает фото' });
   const dataUrl = req.body && req.body.dataUrl;
   if (typeof dataUrl !== 'string' || !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(dataUrl)) {
     return res.status(400).json({ error: 'Нужен PNG, JPEG или WebP' });
@@ -472,7 +503,6 @@ app.post('/api/me/avatar', requireAuth, express.json({ limit: '1mb' }), async (r
 });
 app.delete('/api/me/avatar', requireAuth, async (req, res, next) => {
   if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
-  if (req.user.uid == null) return res.status(403).json({ error: 'Командный вход не поддерживает фото' });
   try {
     await db.setUserAvatar(req.user.uid, null);
     res.json({ ok: true });
@@ -521,7 +551,8 @@ app.post('/api/auth/forgot', authLimiter, async (req, res) => {
     if (u && u.status !== 'disabled') {
       const raw = newToken();
       const id = await db.createEmailToken(u.id, 'reset', sha256(raw), new Date(Date.now() + RESET_TTL));
-      if (id) await sendEmail(email, 'Сброс пароля — Atlavue', resetEmailHtml(`${base}/reset?token=${raw}`));
+      const link = `${base}/reset?token=${raw}`;
+      if (id) await sendEmail(email, 'Сброс пароля — Atlavue', resetEmailHtml(link), link);
     }
   } catch (e) { console.error('[forgot]', e.message); }   // already responded generically
 });
@@ -557,16 +588,15 @@ app.post('/api/auth/resend-verification', authLimiter, async (req, res) => {
     if (u && u.status === 'unverified') {
       const raw = newToken();
       const id = await db.createEmailToken(u.id, 'verify', sha256(raw), new Date(Date.now() + VERIFY_TTL));
-      if (id) await sendEmail(email, 'Подтверди email — Atlavue', verifyEmailHtml(`${base}/verify?token=${raw}`));
+      const link = `${base}/verify?token=${raw}`;
+      if (id) await sendEmail(email, 'Подтверди email — Atlavue', verifyEmailHtml(link), link);
     }
   } catch (e) { console.error('[resend]', e.message); }
 });
 
 // ── Персональная раскладка дашборда (порядок/скрытие/ширина блоков) ──
-// Гость без аккаунта (break-glass uid=null) и режим без БД → null/no-op:
-// клиент сам хранит раскладку в localStorage.
+// Режим без БД → null / stored:false: клиент сам хранит раскладку в localStorage.
 app.get('/api/prefs', requireAuth, async (req, res, next) => {
-  if (req.user.uid == null) return res.json({ prefs: null });
   try { res.json({ prefs: await db.getPrefs(req.user.uid) }); }
   catch (e) { next(e); }
 });
@@ -579,13 +609,11 @@ app.put('/api/prefs', requireAuth, async (req, res, next) => {
   if (JSON.stringify(prefs).length > 8000) {
     return res.status(413).json({ error: 'prefs слишком большой' });
   }
-  if (req.user.uid == null) return res.json({ ok: true, stored: false });
-  try { await db.setPrefs(req.user.uid, prefs); res.json({ ok: true, stored: true }); }
+  try { const stored = await db.setPrefs(req.user.uid, prefs); res.json({ ok: true, stored: !!stored }); }
   catch (e) { next(e); }
 });
 
 app.post('/api/auth/change-password', requireAuth, async (req, res, next) => {
-  if (req.user.uid == null) return res.status(400).json({ error: 'Командный вход не имеет аккаунта для смены пароля' });
   if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
   const cur = String((req.body && req.body.current) || '');
   const nextPass = String((req.body && req.body.next) || '');   // don't shadow next()
@@ -755,18 +783,19 @@ function igCachePurge(accountId) {
 
 // OAuth "state": a signed, expiring blob binding the connect flow to (uid, channelId). The
 // callback lands WITHOUT a session header (top-level browser redirect from Instagram), so the
-// signed state is the only trustworthy attribution — HMAC(AUTH_SECRET) + 10-min expiry + nonce.
+// signed state is the only trustworthy attribution — HMAC(IG_STATE_KEY, a domain-separated
+// subkey of AUTH_SECRET) + 10-min expiry + nonce.
 const IG_STATE_TTL = 10 * 60 * 1000;
 function signIgState(payload) {
   const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
-  const sig  = crypto.createHmac('sha256', AUTH_SECRET).update(body).digest('base64url');
+  const sig  = crypto.createHmac('sha256', IG_STATE_KEY).update(body).digest('base64url');
   return `${body}.${sig}`;
 }
 function parseIgState(state) {
   try {
     if (!state || typeof state !== 'string' || state.indexOf('.') < 0) return null;
     const [body, sig] = state.split('.');
-    const expected = crypto.createHmac('sha256', AUTH_SECRET).update(body).digest('base64url');
+    const expected = crypto.createHmac('sha256', IG_STATE_KEY).update(body).digest('base64url');
     if (!sig || sig.length !== expected.length) return null;
     if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
     const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
@@ -1117,14 +1146,11 @@ app.get('/api/ig/oauth/callback', async (req, res) => {
     if (!st || !code) return back('ig_error=state');
 
     // Re-verify the user still exists/active and still owns the target channel (state can outlive
-    // a permission change). Break-glass superuser sessions carry uid=null.
-    let user;
-    if (st.uid == null) user = { uid: null, role: 'superuser', email: null };
-    else {
-      const u = await db.getUserById(st.uid).catch(() => null);
-      if (!u || u.status !== 'active') return back('ig_error=auth');
-      user = { uid: u.id, role: u.role, email: u.email };
-    }
+    // a permission change).
+    if (st.uid == null) return back('ig_error=auth');
+    const u = await db.getUserById(st.uid).catch(() => null);
+    if (!u || u.status !== 'active') return back('ig_error=auth');
+    const user = { uid: u.id, role: u.role, email: u.email };
     const ch = await db.getChannel(st.channelId, user).catch(() => null);
     if (!ch) return back('ig_error=channel');
     const redirectUri = `${appBase(req)}/api/ig/oauth/callback`;
@@ -1245,10 +1271,9 @@ app.get('/api/channels', requireAuth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// Create a channel (self-serve). Real accounts only (not the break-glass operator).
+// Create a channel (self-serve).
 app.post('/api/channels', requireAuth, async (req, res, next) => {
   if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
-  if (req.user.uid == null) return res.status(403).json({ error: 'Командный вход не может создавать каналы' });
   const username = String((req.body && req.body.username) || '').replace(/^@/, '').trim();
   const title = String((req.body && req.body.title) || '').trim().slice(0, 120);
   if (!/^[a-zA-Z0-9_]{3,64}$/.test(username)) return res.status(400).json({ error: 'Некорректный @username канала' });
@@ -1265,7 +1290,7 @@ app.post('/api/channels', requireAuth, async (req, res, next) => {
 app.delete('/api/channels/:id', requireAuth, async (req, res, next) => {
   if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
   const id = parseInt(req.params.id, 10);
-  if (!id || req.user.uid == null) return res.status(400).json({ error: 'bad id' });
+  if (!id) return res.status(400).json({ error: 'bad id' });
   try {
     const ok = await db.deleteChannel(id, req.user.uid);
     if (ok) audit(req, 'channel.deleted', { channel_id: id }).catch(() => {});
@@ -1278,7 +1303,7 @@ app.delete('/api/channels/:id', requireAuth, async (req, res, next) => {
 app.post('/api/channels/:id/key', requireAuth, async (req, res, next) => {
   if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
   const id = parseInt(req.params.id, 10);
-  if (!id || req.user.uid == null) return res.status(400).json({ error: 'bad id' });
+  if (!id) return res.status(400).json({ error: 'bad id' });
   try {
     const ch = await db.getChannel(id, req.user);
     if (!ch) return res.status(403).json({ error: 'Нет доступа к каналу' });
@@ -1294,7 +1319,7 @@ app.post('/api/channels/:id/key', requireAuth, async (req, res, next) => {
 app.get('/api/channels/:id/keys', requireAuth, async (req, res, next) => {
   if (!db.enabled) return res.json({ keys: [] });
   const id = parseInt(req.params.id, 10);
-  if (!id || req.user.uid == null) return res.status(400).json({ error: 'bad id' });
+  if (!id) return res.status(400).json({ error: 'bad id' });
   try { res.json({ keys: await db.listApiKeys(id, req.user.uid) }); }
   catch (e) { next(e); }
 });
@@ -1302,7 +1327,7 @@ app.get('/api/channels/:id/keys', requireAuth, async (req, res, next) => {
 app.delete('/api/channels/:id/key/:keyId', requireAuth, async (req, res, next) => {
   if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
   const keyId = parseInt(req.params.keyId, 10);
-  if (!keyId || req.user.uid == null) return res.status(400).json({ error: 'bad id' });
+  if (!keyId) return res.status(400).json({ error: 'bad id' });
   try {
     const ok = await db.revokeApiKey(keyId, req.user.uid);
     if (ok) audit(req, 'api_key.revoked', { key_id: keyId }).catch(() => {});
@@ -1423,7 +1448,10 @@ app.get('/api/tg/channel', requireAuth, resolveChannel, asyncHandler(async (req,
 // ════════════════════════════════════════════════════════════════
 
 const MTPROTO_URL  = process.env.MTPROTO_URL || 'http://localhost:8001';
-const MTPROTO_PASS = process.env.TEAM_PASSWORD || '';
+// Dedicated web→mtproto internal secret; the SAME value must be set as
+// MTPROTO_TOKEN on the mtproto service (which fails closed when unset).
+// Presence is enforced at boot in production when MTPROTO_URL is configured.
+const MTPROTO_TOKEN = process.env.MTPROTO_TOKEN || '';
 // Heavy Telethon endpoints (stats graphs, velocity, mentions) are serialized on the
 // Python side and can legitimately take minutes when queued — they get a long
 // deadline; everything else fails fast with the default.
@@ -1435,7 +1463,7 @@ async function mtprotoFetch(path, params = {}, timeoutMs = MTPROTO_TIMEOUT_MS) {
   const url = new URL(MTPROTO_URL + path);
   Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
   const res  = await fetchWithTimeout(url.toString(), {
-    headers: { 'x-internal-token': MTPROTO_PASS }
+    headers: { 'x-internal-token': MTPROTO_TOKEN }
   }, timeoutMs);
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
@@ -1617,7 +1645,7 @@ app.get('/api/tg/mtproto/thumb/:id', async (req, res) => {
   if (!id) return res.status(400).end();
   const size = req.query.size === 'lg' ? 'lg' : 'sm';
   try {
-    const r = await fetchWithTimeout(`${MTPROTO_URL}/thumb/${id}?size=${size}`, { headers: { 'x-internal-token': MTPROTO_PASS } });
+    const r = await fetchWithTimeout(`${MTPROTO_URL}/thumb/${id}?size=${size}`, { headers: { 'x-internal-token': MTPROTO_TOKEN } });
     if (!r.ok) return res.status(r.status).end();
     const buf = await r.buffer();
     res.set('Content-Type', r.headers.get('content-type') || 'image/jpeg');
@@ -1632,7 +1660,7 @@ app.get('/api/tg/mtproto/thumb/:id', async (req, res) => {
 // Low sensitivity: only the configured (public, 'central') channel's profile photo.
 app.get('/api/tg/mtproto/channel/photo', async (req, res) => {
   try {
-    const r = await fetchWithTimeout(`${MTPROTO_URL}/channel/photo`, { headers: { 'x-internal-token': MTPROTO_PASS } });
+    const r = await fetchWithTimeout(`${MTPROTO_URL}/channel/photo`, { headers: { 'x-internal-token': MTPROTO_TOKEN } });
     if (!r.ok) return res.status(r.status).end();
     const buf = await r.buffer();
     res.set('Content-Type', r.headers.get('content-type') || 'image/jpeg');
@@ -1707,7 +1735,7 @@ app.get('/api/health', (req, res) => {
     env: {
       ig:  !!IG_TOKEN && !!IG_ACCOUNT,
       tg:  !!TG_TOKEN && !!TG_CHANNEL,
-      auth: !!process.env.TEAM_PASSWORD
+      auth: !!process.env.SESSION_SECRET
     }
   });
 });
@@ -2042,7 +2070,8 @@ app.listen(PORT, () => {
 ║  URL:      http://localhost:${PORT}          ║
 ║  IG API:   ${IG_TOKEN ? '✅ настроен' : '❌ не задан (IG_ACCESS_TOKEN)'}           ║
 ║  TG API:   ${TG_TOKEN ? '✅ настроен' : '❌ не задан (TG_BOT_TOKEN)'}             ║
-║  Auth:     ${process.env.TEAM_PASSWORD ? '✅ пароль задан' : '❌ TEAM_PASSWORD не задан'}        ║
+║  Sessions: ${process.env.SESSION_SECRET ? '✅ SESSION_SECRET задан' : '⚠️ ephemeral (dev) — задай SESSION_SECRET'}  ║
+║  MTProto:  ${process.env.MTPROTO_TOKEN ? '✅ MTPROTO_TOKEN задан' : '❌ MTPROTO_TOKEN не задан'}       ║
 ╚══════════════════════════════════════════╝
   `);
 });
