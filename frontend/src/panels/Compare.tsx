@@ -7,10 +7,10 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { DeltaPill } from '@/components/DeltaPill';
 import { BarChart } from '@/components/BarChart';
-import { Breakdown } from '@/components/Breakdown';
 import { EmptyState } from '@/components/EmptyState';
 
-import { ChartSection } from '@/components/ChartWidget';
+import { ChartSection, WidgetGroup, breakdownVariants } from '@/components/ChartWidget';
+import { LineChart } from '@/components/LineChart';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const WD_ORDER = [1, 2, 3, 4, 5, 6, 0];
@@ -211,23 +211,39 @@ export function Compare() {
         )}
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <ChartSection title="Охват по дням недели">
-          {hasWeekday ? (
-            <BarChart
-              values={wdAvg}
-              labels={WD_LABELS}
-              titles={wdAvg.map((v, i) => `${WD_LABELS[i]}: ${fmt.short(v)} ср. охват`)}
-              height={200}
-            />
-          ) : (
-            <EmptyHint />
-          )}
+      <WidgetGroup id="compare" className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <ChartSection
+          title="Охват по дням недели"
+          variants={
+            hasWeekday
+              ? [
+                  {
+                    key: 'bar',
+                    label: 'Столбцы',
+                    render: (
+                      <BarChart
+                        values={wdAvg}
+                        labels={WD_LABELS}
+                        titles={wdAvg.map((v, i) => `${WD_LABELS[i]}: ${fmt.short(v)} ср. охват`)}
+                        height={200}
+                      />
+                    ),
+                  },
+                  {
+                    key: 'line',
+                    label: 'Линия',
+                    render: <LineChart values={wdAvg} labels={WD_LABELS} titles={wdAvg.map((v, i) => `${WD_LABELS[i]}: ${fmt.short(v)} ср. охват`)} yMin={0} height={200} />,
+                  },
+                ]
+              : undefined
+          }
+        >
+          {!hasWeekday && <EmptyHint />}
         </ChartSection>
-        <ChartSection title="По форматам (просмотры)">
-          {formatItems.length > 0 ? <Breakdown items={formatItems} /> : <EmptyHint />}
+        <ChartSection title="По форматам (просмотры)" variants={formatItems.length > 0 ? breakdownVariants(formatItems) : undefined}>
+          {formatItems.length === 0 && <EmptyHint />}
         </ChartSection>
-      </div>
+      </WidgetGroup>
     </div>
   );
 }

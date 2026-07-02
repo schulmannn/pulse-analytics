@@ -2,11 +2,11 @@ import { useMentions, useMentionsArchive } from '@/api/queries';
 import { compareDdMm } from '@/lib/dates';
 import { fmt } from '@/lib/format';
 import { BarChart } from '@/components/BarChart';
-import { Breakdown } from '@/components/Breakdown';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { Mentions as MentionsData } from '@/api/schemas';
 
-import { ChartSection } from '@/components/ChartWidget';
+import { ChartSection, WidgetGroup, breakdownVariants } from '@/components/ChartWidget';
+import { LineChart } from '@/components/LineChart';
 
 export function Mentions() {
   // Archive (Postgres) loads on mount — free. The live MTProto search only runs on the
@@ -127,17 +127,29 @@ export function Mentions() {
       </div>
 
       {/* Аналитические блоки */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <ChartSection title="Упоминаний по дням">
-          <div className="pt-2">
-            <BarChart values={chartValues} labels={last14Dates} titles={chartTitles} />
-          </div>
-        </ChartSection>
+      <WidgetGroup id="mentions" className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <ChartSection
+          title="Упоминаний по дням"
+          variants={[
+            {
+              key: 'bar',
+              label: 'Столбцы',
+              render: (
+                <div className="pt-2">
+                  <BarChart values={chartValues} labels={last14Dates} titles={chartTitles} />
+                </div>
+              ),
+            },
+            {
+              key: 'line',
+              label: 'Линия',
+              render: <LineChart values={chartValues} labels={last14Dates} titles={chartTitles} yMin={0} />,
+            },
+          ]}
+        />
 
-        <ChartSection title="Кто упоминает · топ каналов">
-          <Breakdown items={breakdownItems} />
-        </ChartSection>
-      </div>
+        <ChartSection title="Кто упоминает · топ каналов" variants={breakdownVariants(breakdownItems)} />
+      </WidgetGroup>
 
       {/* Лента последних упоминаний */}
       <ChartSection title="Последние упоминания">
