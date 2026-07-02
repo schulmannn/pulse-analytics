@@ -15,8 +15,9 @@ import { KpiGrid } from '@/panels/KpiGrid';
 import { TopPosts } from '@/panels/TopPosts';
 
 /**
- * Overview — a focused summary: KPI hero + ledger, then Insight | subscriber-growth (the second
- * most important channel signal), then top posts. The data-health tech block is NOT here — a healthy
+ * Overview — a focused summary, all of it widgets: KPI hero + ledger («Показатели»), then
+ * Insight | subscriber-growth (the second most important channel signal), then top posts —
+ * one reorderable WidgetGroup grid. The data-health tech block is NOT here — a healthy
  * status only needs the tiny sidebar indicator; it surfaces on the Overview only as a warning when
  * something is wrong. The full status lives in Настройки. Analytics deep-dives are one click away.
  */
@@ -45,37 +46,38 @@ export function Overview() {
     <div>
       <StaleWarning />
 
-      {/* KPI hero (Просмотры) + ledger (Подписчики / Ср.охват / Реакции / ER) */}
-      <KpiGrid />
-
-      {/* Инсайт | Рост подписчиков | Топ постов — customisable widgets (hero+ledger stay open
-          above as the block's «greeting» zone, steep-Home style). */}
-      <WidgetGroup id="overview" className="mt-8 grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-2">
+      {/* Показатели | Инсайт | Рост подписчиков | Топ постов — ONE reorderable widget grid
+          (owner call: the hero is a widget like everything else; grid-flow-dense backfills
+          the holes a CSS-order move of a span-2 card would otherwise leave). */}
+      <WidgetGroup id="overview" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Explicit ids: the Аналитика block renders widgets with the same display titles on
             the SAME feed page — default title-ids would make them share prefs (hide one →
             both vanish). */}
+        {/* Widget label «Показатели», NOT «Обзор» — the feed block's h2 right above already
+            says «Обзор»; repeating it in the menu row would read as a stutter. */}
+        <ChartSection id="overview-hero" title="Показатели" className="lg:col-span-2">
+          {/* KPI hero (Просмотры · 30 дн.) + ledger (Подписчики / Ср.охват / Реакции / ER) */}
+          <KpiGrid />
+        </ChartSection>
         <ChartSection id="overview-digest" title="Инсайт">
           <Digest />
         </ChartSection>
         <ChartSection id="overview-growth" title="Рост подписчиков">
           <SubscriberGrowth />
         </ChartSection>
+        <ChartSection
+          id="overview-top-posts"
+          title="Топ постов"
+          className="lg:col-span-2"
+          action={
+            <Link to="/analytics" className="shrink-0 text-xs font-medium text-primary hover:underline">
+              <span className="md:hidden">Аналитика →</span><span className="hidden md:inline">Открыть аналитику →</span>
+            </Link>
+          }
+        >
+          <TopPosts />
+        </ChartSection>
       </WidgetGroup>
-
-      {/* Full-width widget OUTSIDE the reorder group: a span-2 card between 1-col cells
-          leaves grid holes when CSS-order moves it, so it keeps Изменить-only chrome. */}
-      <ChartSection
-        id="overview-top-posts"
-        title="Топ постов"
-        className="mt-6"
-        action={
-          <Link to="/analytics" className="shrink-0 text-xs font-medium text-primary hover:underline">
-            <span className="md:hidden">Аналитика →</span><span className="hidden md:inline">Открыть аналитику →</span>
-          </Link>
-        }
-      >
-        <TopPosts />
-      </ChartSection>
     </div>
   );
 }

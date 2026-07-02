@@ -131,11 +131,11 @@ export function TrendCard({ title, series }: { title: string; series: Point[] })
     <WidgetChartSection title={title}>
       {series.length > 1 ? (
         <ExpandableChart title={title}>
+          {/* Standard 1×-tile height (LineChart default 200); the overlay sets its own 400. */}
           <LineChart
             values={series.map((p) => p.value)}
             labels={pickLabels(series)}
             titles={series.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)}`)}
-            height={220}
           />
         </ExpandableChart>
       ) : (

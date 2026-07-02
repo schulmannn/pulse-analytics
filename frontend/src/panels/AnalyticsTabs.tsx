@@ -5,6 +5,7 @@ import { TgAnalytics } from '@/panels/TgAnalytics';
 import { Insights } from '@/panels/Insights';
 import { Compare } from '@/panels/Compare';
 import { HistoryChartBlock, HeatmapChartBlock, VelocityChartBlock } from '@/panels/Charts';
+import { WidgetGroup } from '@/components/ChartWidget';
 import { Hashtags } from '@/panels/Hashtags';
 
 /**
@@ -66,8 +67,13 @@ export function Analytics() {
       {tab === 'dynamics' && (
         <div className="space-y-10">
           <TgAnalytics group="dynamics" />
-          <HistoryChartBlock />
-          <VelocityChartBlock />
+          {/* Standard 1× tiles side by side — stacked full-width they rendered as two
+              200px-high «islands» stretched across the whole row. Wide (span-2) variants
+              still take the full row via the widgets' own variant span. */}
+          <WidgetGroup id="analytics-dynamics" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-2">
+            <HistoryChartBlock />
+            <VelocityChartBlock />
+          </WidgetGroup>
         </div>
       )}
       {tab === 'audience' && (

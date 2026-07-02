@@ -204,7 +204,11 @@ function deriveTgAnalytics(
   };
   const vbsItems = mapSourceItems(graphs?.views_by_source, SRC_NAMES);
   const nfsItems = mapSourceItems(graphs?.new_followers_by_source, SRC_NAMES);
-  const langItems = mapSourceItems(graphs?.languages);
+  // Языки: длинный хвост из десятков языков делал плитку сильно выше коротких соседей —
+  // топ-8, тот же кэп, что у эмодзи/стран/городов (и у леджера «Столбцы + значения»).
+  const langItems = mapSourceItems(graphs?.languages)
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 8);
   const sentItems = mapSourceItems(graphs?.reactions_sentiment, SENT_NAME, SENT_COLOR);
 
   // 9) Hours
@@ -592,6 +596,9 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
         )}
 
         {inGroup('audience') && maxWdAvg > 0 && (
+          /* D6.3: секция — последняя в «Аудитории» и при нечётном числе плиток растягивается
+             на обе колонки; 7 столбиков с кэпом 48px по центру full-width ряда = «острова в
+             пустоте». max-w держит чарт компактным слева (в 1×-плитке кэп не срабатывает). */
           <ChartSection
             title="Количество постов"
             variants={[
@@ -599,15 +606,21 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
                 key: 'bar',
                 label: 'Столбцы',
                 render: (
-                  <ExpandableChart title="Количество постов по дням недели">
-                    <BarChart values={wdCountValues} labels={wdLabels} titles={wdCountValues.map((v, i) => `${wdLabels[i]}: ${fmt.num(v)} постов`)} />
-                  </ExpandableChart>
+                  <div className="max-w-[560px]">
+                    <ExpandableChart title="Количество постов по дням недели">
+                      <BarChart values={wdCountValues} labels={wdLabels} titles={wdCountValues.map((v, i) => `${wdLabels[i]}: ${fmt.num(v)} постов`)} />
+                    </ExpandableChart>
+                  </div>
                 ),
               },
               {
                 key: 'line',
                 label: 'Линия',
-                render: <LineChart values={wdCountValues} labels={wdLabels} titles={wdCountValues.map((v, i) => `${wdLabels[i]}: ${fmt.num(v)} постов`)} yMin={0} />,
+                render: (
+                  <div className="max-w-[560px]">
+                    <LineChart values={wdCountValues} labels={wdLabels} titles={wdCountValues.map((v, i) => `${wdLabels[i]}: ${fmt.num(v)} постов`)} yMin={0} />
+                  </div>
+                ),
               },
             ]}
           />

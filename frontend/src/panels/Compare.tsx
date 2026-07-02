@@ -225,14 +225,13 @@ export function Compare() {
                         values={wdAvg}
                         labels={WD_LABELS}
                         titles={wdAvg.map((v, i) => `${WD_LABELS[i]}: ${fmt.short(v)} ср. охват`)}
-                        height={200}
                       />
                     ),
                   },
                   {
                     key: 'line',
                     label: 'Линия',
-                    render: <LineChart values={wdAvg} labels={WD_LABELS} titles={wdAvg.map((v, i) => `${WD_LABELS[i]}: ${fmt.short(v)} ср. охват`)} yMin={0} height={200} />,
+                    render: <LineChart values={wdAvg} labels={WD_LABELS} titles={wdAvg.map((v, i) => `${WD_LABELS[i]}: ${fmt.short(v)} ср. охват`)} yMin={0} />,
                   },
                 ]
               : undefined

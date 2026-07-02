@@ -42,6 +42,8 @@ function SubscriberHistoryChart({ rows }: { rows: SubscriberRow[] }) {
   const lastRow = sampled[sampled.length - 1];
   const labels = [firstRow?.day ?? '', midRow?.day ?? '', lastRow?.day ?? ''].map(ddmm);
 
+  // Standard 1×-tile chart height (the LineChart default, 200); the expanded overlay
+  // supplies its own 400 via ExpandedChartHeightContext.
   return (
     <LineChart
       values={values}
@@ -49,7 +51,6 @@ function SubscriberHistoryChart({ rows }: { rows: SubscriberRow[] }) {
       yMax={Math.max(...values)}
       titles={titles}
       labels={labels}
-      height={260}
       markAnomalies
       markExtremes
     />
@@ -75,7 +76,8 @@ function subscriberDeltas(rows: SubscriberRow[]) {
 /** Bar presentation of the same archive (widget «Тип: Столбцы») — diverging day-over-day deltas. */
 function SubscriberHistoryBars({ rows }: { rows: SubscriberRow[] }) {
   const d = subscriberDeltas(rows);
-  return <DivergingBars values={d.values} labels={d.labels} titles={d.titles} height={260} />;
+  // 200 = the standard 1×-tile chart height, matching the line presentation.
+  return <DivergingBars values={d.values} labels={d.labels} titles={d.titles} height={200} />;
 }
 
 export function HistoryChartBlock() {
@@ -231,7 +233,9 @@ export function HeatmapChartBlock() {
   if (isPending) return <ChartSkeleton title="Тепловая карта активности (день × час)" />;
 
   return (
-    <ChartSection title="Тепловая карта активности (день × час)">
+    // The 7×24 grid is genuinely wide content → a 2× tile (full row) wherever the section
+    // lands in a widget grid, never squeezed into one column.
+    <ChartSection title="Тепловая карта активности (день × час)" className="lg:col-span-2">
       <HeatmapSurface grid={grid} maxErv={maxErv} bestSlot={bestSlot} />
 
       <div className="mt-3 text-xs font-medium text-muted-foreground">

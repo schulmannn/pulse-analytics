@@ -38,7 +38,6 @@ export function AudienceBlock({ breakdowns, followers }: { breakdowns: IgBreakdo
                 values={age.map((a) => a.value)}
                 labels={age.map((a) => a.label)}
                 titles={age.map((a) => `${a.label}: ${fmt.num(a.value)}`)}
-                height={200}
               />
             </ExpandableChart>
           ) : (
