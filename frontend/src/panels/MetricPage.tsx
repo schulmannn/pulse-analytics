@@ -495,7 +495,9 @@ export function MetricPage() {
             }
           >
             {chartType === 'line' && (
-              <>
+              /* Expanded context: the metric page's big chart always renders the full y-axis
+                 (dashboards are axis-free; the explorer is where the scale lives). */
+              <ChartExpandedContext.Provider value={true}>
                 <LineChart
                   values={series.values}
                   labels={series.labels}
@@ -510,7 +512,7 @@ export function MetricPage() {
                 {ghost && cmpLabel ? (
                   <p className="text-2xs text-muted-foreground">Пунктир — {cmpLabel}.</p>
                 ) : null}
-              </>
+              </ChartExpandedContext.Provider>
             )}
             {chartType === 'bar' && (
               /* Expanded context switches BarChart into its rich mode (y ticks + value labels). */

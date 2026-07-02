@@ -4,8 +4,10 @@ import type { CSSProperties, ReactNode } from 'react';
 import { z } from 'zod';
 import { apiGet, apiSend } from '@/api/client';
 import { isDemoMode } from '@/lib/demo';
+import { fmt } from '@/lib/format';
 import { BarChart } from '@/components/BarChart';
 import { Breakdown } from '@/components/Breakdown';
+import { DivergingBars } from '@/components/DivergingBars';
 
 /**
  * Widget system for charts (steep Home): every chart is a card with a «⋯» menu — reorder
@@ -40,6 +42,8 @@ interface WidgetPrefs {
 export interface WidgetVariant {
   key: string;
   label: string;
+  /** Grid columns the widget card spans while this variant is active (default 1). */
+  span?: 1 | 2;
   render: ReactNode;
 }
 
@@ -50,22 +54,111 @@ interface BreakdownLikeItem {
   color?: string;
 }
 
-/** The common «tint-row list ↔ bar chart» pair for Breakdown-style category data. */
+interface LedgerRow {
+  label: string;
+  value: string;
+}
+
+/** Right-hand value list of the wide «Столбцы + значения» layout (steep Edit widget) —
+    hairline rows like Breakdown minus the tint bars. Caps at 8 rows, «+N ещё» when more. */
+function ValueLedger({ rows }: { rows: LedgerRow[] }) {
+  const shown = rows.slice(0, 8);
+  const extra = rows.length - shown.length;
+  return (
+    <div className="w-56 shrink-0">
+      {shown.map((row, i) => (
+        <div
+          key={i}
+          className="flex items-baseline justify-between gap-3 border-b border-border py-1.5 last:border-b-0"
+        >
+          <span className="min-w-0 truncate text-xs text-muted-foreground">{row.label}</span>
+          <span className="shrink-0 text-sm font-medium tabular-nums text-foreground">{row.value}</span>
+        </div>
+      ))}
+      {extra > 0 && <div className="pt-1.5 text-2xs text-muted-foreground">+{extra} ещё</div>}
+    </div>
+  );
+}
+
+/** The wide chart+ledger row shared by the «Столбцы + значения» variants. */
+function BarValuesLayout({ chart, rows }: { chart: ReactNode; rows: LedgerRow[] }) {
+  return (
+    <div className="flex items-start gap-5">
+      <div className="min-w-0 flex-1">{chart}</div>
+      <ValueLedger rows={rows} />
+    </div>
+  );
+}
+
+/** The common «tint-row list ↔ bar chart» set for Breakdown-style category data, plus the
+    wide «Столбцы + значения» presentation (bar chart + value ledger, spans 2 grid columns). */
 export function breakdownVariants(items: BreakdownLikeItem[]): WidgetVariant[] {
+  const values = items.map((i) => i.value);
+  const labels = items.map((i) => i.label);
+  const titles = items.map((i) => `${i.label}: ${i.display ?? i.value}`);
   return [
     { key: 'list', label: 'Список', render: <Breakdown items={items} /> },
     {
       key: 'bar',
       label: 'Столбцы',
+      render: <BarChart values={values} labels={labels} titles={titles} />,
+    },
+    {
+      key: 'bar-values',
+      label: 'Столбцы + значения',
+      span: 2,
       render: (
-        <BarChart
-          values={items.map((i) => i.value)}
-          labels={items.map((i) => i.label)}
-          titles={items.map((i) => `${i.label}: ${i.display ?? i.value}`)}
+        <BarValuesLayout
+          chart={<BarChart values={values} labels={labels} titles={titles} />}
+          rows={items.map((i) => ({ label: i.label, value: i.display ?? fmt.num(i.value) }))}
         />
       ),
     },
   ];
+}
+
+interface SeriesBarValuesOptions {
+  /** Delta series: diverging bars around a zero baseline instead of zero-based columns. */
+  diverging?: boolean;
+  /** Ledger value formatter (default fmt.num). */
+  format?: (v: number) => string;
+  /** Ledger rows override — when the list should show something other than the plotted
+      values (e.g. subscriber LEVELS beside a delta chart). Default: last 6 points, newest first. */
+  ledger?: LedgerRow[];
+}
+
+/** The wide «Столбцы + значения» variant for SERIES charts: bars (flex-1) plus a right-hand
+    ledger of the LAST 6 points (label → value, newest first). Spans 2 grid columns. */
+export function seriesBarValuesVariant(
+  values: number[],
+  labels: string[],
+  titles: string[],
+  opts: SeriesBarValuesOptions = {},
+): WidgetVariant {
+  const format = opts.format ?? ((v: number) => fmt.num(v));
+  const rows =
+    opts.ledger ??
+    values
+      .map((v, i) => ({ label: labels[i] ?? '', value: format(v) }))
+      .slice(-6)
+      .reverse();
+  return {
+    key: 'bar-values',
+    label: 'Столбцы + значения',
+    span: 2,
+    render: (
+      <BarValuesLayout
+        chart={
+          opts.diverging ? (
+            <DivergingBars values={values} labels={labels} titles={titles} />
+          ) : (
+            <BarChart values={values} labels={labels} titles={titles} />
+          )
+        }
+        rows={rows}
+      />
+    ),
+  };
 }
 
 // ── Tiny persisted store + pub-sub (widgets and groups stay in sync across surfaces) ──────
@@ -603,6 +696,10 @@ export function ChartSection({ id, title, action, variants, className, children 
   const prefs = getPrefs(widgetId);
   const update = (next: WidgetPrefs) => setPrefs(widgetId, next);
 
+  // The active variant drives the card's grid span (wide «Столбцы + значения» takes 2 cells).
+  const activeVariant =
+    variants && variants.length > 0 ? (variants.find((v) => v.key === prefs.variant) ?? variants[0]) : null;
+
   const seqIndex = group ? group.sequence.indexOf(widgetId) : -1;
   const accentVar = prefs.color ? `--chart-${prefs.color}` : '--brand-iris';
   // Split the styles across two layers: the OUTER section owns grid placement + the FLIP
@@ -635,7 +732,9 @@ export function ChartSection({ id, title, action, variants, className, children 
   return (
     <section
       ref={sectionRef}
-      className={`${reorder ? 'cursor-grab touch-none select-none active:cursor-grabbing' : ''} ${className ?? ''}`}
+      className={`${reorder ? 'cursor-grab touch-none select-none active:cursor-grabbing' : ''} ${
+        activeVariant?.span === 2 ? 'lg:col-span-2' : ''
+      } ${className ?? ''}`}
       style={outerStyle}
       onPointerDown={
         reorder
@@ -744,9 +843,7 @@ export function ChartSection({ id, title, action, variants, className, children 
         </div>
       </div>
       <div className={`mt-3 ${reorder ? 'pointer-events-none' : ''}`}>
-        {variants && variants.length > 0
-          ? (variants.find((v) => v.key === prefs.variant) ?? variants[0]).render
-          : null}
+        {activeVariant ? activeVariant.render : null}
         {children}
       </div>
       </div>
@@ -834,6 +931,9 @@ function EditWidgetDialog({ defaultTitle, prefs, variants, onChange, onClose }: 
             <div className="mt-2 flex snap-x gap-3 overflow-x-auto pb-1">
               {variants.map((v) => {
                 const active = (prefs.variant ?? variants[0].key) === v.key;
+                // Wide (span-2) variants preview at half the scale so the whole chart+ledger
+                // row fits the same w-56 preview card.
+                const wide = v.span === 2;
                 const previewStyle: CSSProperties = {};
                 if (prefs.color) (previewStyle as Record<string, string>)['--brand-iris'] = `var(--chart-${prefs.color})`;
                 if (prefs.tinted)
@@ -850,7 +950,14 @@ function EditWidgetDialog({ defaultTitle, prefs, variants, onChange, onClose }: 
                     }`}
                   >
                     <div aria-hidden="true" className="pointer-events-none h-32 overflow-hidden bg-card" style={previewStyle}>
-                      <div className="p-3" style={{ width: 448, transform: 'scale(0.5)', transformOrigin: 'top left' }}>
+                      <div
+                        className="p-3"
+                        style={
+                          wide
+                            ? { width: 896, transform: 'scale(0.25)', transformOrigin: 'top left' }
+                            : { width: 448, transform: 'scale(0.5)', transformOrigin: 'top left' }
+                        }
+                      >
                         {v.render}
                       </div>
                     </div>

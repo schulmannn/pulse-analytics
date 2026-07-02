@@ -7,7 +7,7 @@ import { fmt, ruAxisLabel, ruSeriesName } from '@/lib/format';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { Breakdown } from '@/components/Breakdown';
-import { ChartSection, WidgetGroup, breakdownVariants } from '@/components/ChartWidget';
+import { ChartSection, WidgetGroup, breakdownVariants, seriesBarValuesVariant } from '@/components/ChartWidget';
 import { DivergingBars } from '@/components/DivergingBars';
 import { ExpandableChart } from '@/components/ExpandableChart';
 import { EmptyState } from '@/components/EmptyState';
@@ -152,11 +152,36 @@ function deriveTgAnalytics(
   const growthSeries = growthGroup?.series?.[0];
   const hasGrowth = growthSeries && growthSeries.values.length >= 2;
 
-  // 7) Views & reposts
+  // 6b) Bar presentation of the growth series = day-over-day DELTAS on a diverging axis.
+  // The raw series is a LEVEL (~4800 подписчиков): zero-based bars of levels all render
+  // full height and a decline becomes invisible. delta[i] = v[i] − v[i−1]; the first point
+  // has no delta and drops.
+  const growthDeltaValues: number[] = [];
+  const growthDeltaLabels: string[] = [];
+  const growthDeltaTitles: string[] = [];
+  if (hasGrowth && growthGroup && growthSeries) {
+    for (let i = 1; i < growthSeries.values.length; i++) {
+      const d = Number(growthSeries.values[i] ?? 0) - Number(growthSeries.values[i - 1] ?? 0);
+      const ts = growthGroup.x[i];
+      const label = ts ? formatMsDate(ts) : '';
+      growthDeltaValues.push(d);
+      growthDeltaLabels.push(label);
+      growthDeltaTitles.push(`${label}: ${d >= 0 ? '+' : ''}${fmt.num(d)} за день`);
+    }
+  }
+
+  // 7) Views & reposts — two separate widgets (daily FLOWS, so zero-based bars are honest)
   const interGroup = graphs?.interactions;
   const interSeries = interGroup?.series ?? [];
   const viewSeries = interSeries.find((s) => /view|просмотр/i.test(s.name ?? '')) || interSeries[0];
   const shareSeries = interSeries.find((s) => /share|репост/i.test(s.name ?? '')) || interSeries[1];
+  const interBarLabels = (interGroup?.x ?? []).map((ts) => (ts ? formatMsDate(ts) : ''));
+  const viewBarTitles = (viewSeries?.values ?? []).map(
+    (v, i) => `${interBarLabels[i] ?? ''}: ${fmt.num(v)} просмотров`,
+  );
+  const shareBarTitles = (shareSeries?.values ?? []).map(
+    (v, i) => `${interBarLabels[i] ?? ''}: ${fmt.num(v)} репостов`,
+  );
 
   // 8) Sources / languages / sentiment
   const mapSourceItems = (
@@ -247,7 +272,9 @@ function deriveTgAnalytics(
     last14Dates, vbdValues, vbdTitles, vbdPrev,
     topEmojis, engagementComposition, viewsByType, formatPerf,
     growthGroup, growthSeries, hasGrowth,
+    growthDeltaValues, growthDeltaLabels, growthDeltaTitles,
     interGroup, viewSeries, shareSeries,
+    interBarLabels, viewBarTitles, shareBarTitles,
     vbsItems, nfsItems, langItems, sentItems,
     thData, hasHours, peakHourStr,
     net30Values, net30Titles, netSummaryStr, joinedTotal, leftTotal,
@@ -281,7 +308,9 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
     last14Dates, vbdValues, vbdTitles, vbdPrev,
     topEmojis, engagementComposition, viewsByType, formatPerf,
     growthGroup, growthSeries, hasGrowth,
+    growthDeltaValues, growthDeltaLabels, growthDeltaTitles,
     interGroup, viewSeries, shareSeries,
+    interBarLabels, viewBarTitles, shareBarTitles,
     vbsItems, nfsItems, langItems, sentItems,
     thData, hasHours, peakHourStr,
     net30Values, net30Titles, netSummaryStr, joinedTotal, leftTotal,
@@ -328,7 +357,9 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
       <WidgetGroup
         id={`tg-${group ?? 'all'}`}
         className={cn(
-          'grid grid-cols-1 gap-6 lg:grid-cols-2',
+          // grid-flow-dense: с широкими (span-2) вариантами обычная раскладка оставляла бы
+          // дыры при переносе — плотная упаковка подтягивает одинарные плитки в свободные ячейки.
+          'grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-2',
           // Аудитория: каждая секция — самостоятельная ячейка сетки; при нечётном числе секций
           // последняя растягивается на обе колонки, чтобы рядом не оставалось пустой дыры.
           group === 'audience' && 'lg:[&>section:last-child:nth-child(odd)]:col-span-2',
@@ -398,38 +429,82 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
                 ),
               },
               {
+                // Дельты, не уровни: столбцы от нуля на серии ~4800 подписчиков все были бы
+                // полной высоты — спад просто не виден. Дивергентная ось честно показывает
+                // минусовые дни (ember, ниже базовой линии).
                 key: 'bar',
                 label: 'Столбцы',
                 render: (
-                  <BarChart
-                    values={growthSeries.values}
-                    labels={growthGroup.x.map((ts) => (ts ? formatMsDate(ts) : ''))}
-                    titles={growthSeries.values.map((v, i) => `${growthGroup.x[i] ? formatMsDate(growthGroup.x[i]!) : ''}: ${fmt.num(v)} подписчиков`)}
-                  />
+                  <DivergingBars values={growthDeltaValues} labels={growthDeltaLabels} titles={growthDeltaTitles} />
                 ),
               },
+              seriesBarValuesVariant(growthDeltaValues, growthDeltaLabels, growthDeltaTitles, {
+                diverging: true,
+                format: (v) => `${v >= 0 ? '+' : ''}${fmt.num(v)}`,
+              }),
             ]}
           />
         )}
 
-        {inGroup('dynamics') && interGroup && viewSeries && shareSeries && (
-          <ChartSection title="Просмотры и репосты">
-            <div className="space-y-4">
-              <div>
-                {/* Series names arrive in English from the graphs API — localise for the RU UI. */}
-                <div className="mb-2 text-2xs font-medium tracking-wider text-muted-foreground">{ruSeriesName(viewSeries.name) || 'Просмотры'}</div>
-                <ExpandableChart title={ruSeriesName(viewSeries.name) || 'Просмотры'}>
-                  <LineChart values={viewSeries.values} labels={interLabels(interGroup)} markAnomalies />
-                </ExpandableChart>
-              </div>
-              <div>
-                <div className="mb-2 text-2xs font-medium tracking-wider text-muted-foreground">{ruSeriesName(shareSeries.name) || 'Репосты'}</div>
-                <ExpandableChart title={ruSeriesName(shareSeries.name) || 'Репосты'}>
-                  <LineChart values={shareSeries.values} labels={interLabels(interGroup)} />
-                </ExpandableChart>
-              </div>
-            </div>
-          </ChartSection>
+        {/* Раньше «Просмотры и репосты» были ОДНИМ двойным виджетом (два графика в столбик) —
+            его карточка была вдвое выше соседних и ломала сетку плиток. Теперь каждый график —
+            свой виджет. id-шники явные: на этой же ленте есть «Просмотры по дням», и default
+            title-id столкнулся бы. Series names arrive in English from the graphs API —
+            localise for the RU UI. */}
+        {inGroup('dynamics') && interGroup && viewSeries && (
+          <ChartSection
+            id="tg-views-graph"
+            title={ruSeriesName(viewSeries.name) || 'Просмотры'}
+            variants={[
+              {
+                key: 'line',
+                label: 'Линия',
+                render: (
+                  <ExpandableChart title={ruSeriesName(viewSeries.name) || 'Просмотры'}>
+                    <LineChart values={viewSeries.values} labels={interLabels(interGroup)} markAnomalies />
+                  </ExpandableChart>
+                ),
+              },
+              {
+                // Дневные ПОТОКИ (не уровни) — столбцы от нуля здесь честные.
+                key: 'bar',
+                label: 'Столбцы',
+                render: (
+                  <ExpandableChart title={ruSeriesName(viewSeries.name) || 'Просмотры'}>
+                    <BarChart values={viewSeries.values} labels={interBarLabels} titles={viewBarTitles} />
+                  </ExpandableChart>
+                ),
+              },
+              seriesBarValuesVariant(viewSeries.values, interBarLabels, viewBarTitles),
+            ]}
+          />
+        )}
+        {inGroup('dynamics') && interGroup && shareSeries && (
+          <ChartSection
+            id="tg-shares-graph"
+            title={ruSeriesName(shareSeries.name) || 'Репосты'}
+            variants={[
+              {
+                key: 'line',
+                label: 'Линия',
+                render: (
+                  <ExpandableChart title={ruSeriesName(shareSeries.name) || 'Репосты'}>
+                    <LineChart values={shareSeries.values} labels={interLabels(interGroup)} />
+                  </ExpandableChart>
+                ),
+              },
+              {
+                key: 'bar',
+                label: 'Столбцы',
+                render: (
+                  <ExpandableChart title={ruSeriesName(shareSeries.name) || 'Репосты'}>
+                    <BarChart values={shareSeries.values} labels={interBarLabels} titles={shareBarTitles} />
+                  </ExpandableChart>
+                ),
+              },
+              seriesBarValuesVariant(shareSeries.values, interBarLabels, shareBarTitles),
+            ]}
+          />
         )}
 
         {inGroup('audience') && vbsItems.length > 0 && (

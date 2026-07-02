@@ -1,6 +1,6 @@
 import { Suspense, lazy } from 'react';
 import type { ComponentType, ReactNode } from 'react';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import { useMe } from '@/api/queries';
 import { ApiError } from '@/api/client';
 import { DashboardLayout } from '@/components/DashboardLayout';
@@ -9,6 +9,7 @@ import { PeriodUrlSync } from '@/lib/period-url';
 import { TgFeed } from '@/panels/TgFeed';
 import { MetricPage } from '@/panels/MetricPage';
 import { ReportPage } from '@/panels/ReportPage';
+import { ReportsList } from '@/panels/ReportsList';
 import { Settings } from '@/panels/Settings';
 import { Skeleton } from '@/components/ui/skeleton';
 import { CommandPalette } from '@/components/CommandPalette';
@@ -50,7 +51,10 @@ export default function App() {
       <Route path="reset" element={<AuthSuspense><ResetPage /></AuthSuspense>} />
       <Route element={<ProtectedLayout />}>
         <Route path="metrics/:key" element={<MetricPage />} />
-        <Route path="report" element={<ReportPage />} />
+        <Route path="reports" element={<ReportsList />} />
+        <Route path="reports/:id" element={<ReportPage />} />
+        {/* Pre-multi-reports bookmarks land on the index. */}
+        <Route path="report" element={<Navigate to="/reports" replace />} />
         <Route path="instagram" element={<PanelSuspense><InstagramLayout /></PanelSuspense>}>
           <Route index element={<PanelSuspense><IgOverview /></PanelSuspense>} />
           <Route path="analytics" element={<PanelSuspense><IgAnalytics /></PanelSuspense>} />

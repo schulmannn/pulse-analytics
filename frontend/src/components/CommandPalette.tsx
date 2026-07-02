@@ -49,7 +49,7 @@ const ROUTES: Array<{ path: string; label: string; icon: IconName; search: strin
   { path: '/analytics', label: 'Аналитика', icon: 'analytics', search: 'аналитика графики analytics' },
   { path: '/posts', label: 'Посты', icon: 'posts', search: 'посты публикации posts' },
   { path: '/mentions', label: 'Упоминания', icon: 'mentions', search: 'упоминания mentions' },
-  { path: '/report', label: 'Отчёт', icon: 'report', search: 'отчёт отчет report документ' },
+  { path: '/reports', label: 'Отчёты', icon: 'report', search: 'отчёты отчёт отчет reports report документ' },
   { path: '/instagram', label: 'Instagram · Обзор', icon: 'overview', search: 'instagram инстаграм обзор' },
   { path: '/instagram/analytics', label: 'Instagram · Аналитика', icon: 'analytics', search: 'instagram инстаграм аналитика' },
   { path: '/instagram/content', label: 'Instagram · Контент', icon: 'posts', search: 'instagram инстаграм контент посты' },

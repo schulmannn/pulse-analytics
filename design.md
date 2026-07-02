@@ -460,6 +460,35 @@ steep.app. Полный разбор: `AUDIT_2026-07-02_arch_design.md`. Это 
       на 2 слоя — карточка единственный ребёнок секции). Демо-верифай: лифт/live-swap
       persisted mid-drag/глайд соседа/чистый cleanup стилей.
 
+- [x] **ВОЛНА-3 (steep-хром + оси + мульти-отчёты + тайлы, SHIPPED одним заходом; multi-agent).**
+      (а) **Хром:** лого Atlavue убрано из кабинета (только лендинг); сайдбар-низ = юзер-строка
+      (аватар+email, меню вверх: Настройки/тема/админ/Выйти; общий AccountMenuContent с мобайлом);
+      freshness-строка переехала под карточку канала; топбар md+ без аватара; на фид-роутах
+      топбар БЕЗ заголовка (дубль «Обзора» убит); MobileBottomNav = grid-cols по длине нава.
+      (б) **Оси как у steep:** дашборд-чарты БЕЗ y-осей/гридлайнов (LineChart через
+      ChartExpandedContext + fullAxes-проп; gutter → 6px), полные оси = оверлей + метрик-страницы
+      (line-ветка MetricPage обёрнута в провайдер) + отчёт-карты (fullAxes). ExpandableChart →
+      эксплорер: 400px чарт (ExpandedChartHeightContext), стат-строка Мин/Макс/Среднее[/Сумма —
+      statsSum off для уровней], line↔bar тоггл (renderExpandedBar).
+      (в) **Мульти-отчёты:** миграция 007 (reports: uid FK, name, config jsonb, schedule,
+      last_sent_at) + CRUD /api/reports (ownership в SQL, id ^\d{1,9}$, config ≤16KB, audit) +
+      email-выгрузка v1 на daily-cron (Пн UTC / 1-е число + catch-up >8/>32 дн; скип без
+      RESEND_API_KEY чтобы не штамповать last_sent_at; письмо = ссылка на /reports/:id).
+      Фронт: /reports (hairline-таблица, создать/переименовать/удалить) + /reports/:id =
+      композитный документ (реестр блоков kpi-summary/digest/metric-views/-subscribers/
+      -reactions/weekly-table/insights/top-posts; «Настроить» ↑↓×+добавить, PUT дебаунс 800мс,
+      периodDays в config c гвардом от стомпа шаренных ссылок, schedule-select оптимистичный,
+      печать чистая); /report → redirect. ⚠️ демо-режим отчёты НЕ показывает (осознанный
+      sign-off — фикстур нет). (г) **Тайлы steep:** WidgetVariant.span 1|2 (lg:col-span-2 —
+      НЕ md: сетки 2-кол только с lg), широкий «Столбцы + значения» (BarChart + леджер w-56,
+      кэп 8 + «+N ещё») для breakdownVariants и серий (seriesBarValuesVariant, леджер = 6
+      последних); grid-flow-dense на всех WidgetGroup-сетках; превью wide = 896×scale(.25).
+      **Бар-варианты УРОВНЕЙ честные:** Рост/История подписчиков = дневные ДЕЛЬТЫ на
+      DivergingBars (плюс iris вверх/минус ember вниз; дельты по сырым рядам ДО LTTB);
+      «Просмотры и репосты» распилен на два виджета (tg-views-graph/tg-shares-graph) — сетка
+      тайлится ровно. Процесс: 2 воркфлоу × (3 параллельных + 1 + adversarial review) — 2 major
+      (стомп периода, потерянные «Подписчики» в отчёте) + 10 minor, все закрыты фикс-агентом.
+
 - [x] **МЕГА-ВИДЖЕТЫ: блоки ленты = гигантские поверхности + всё в виджетах (steep Home, SHIPPED).**
       Каждый блок ленты — rounded-2xl панель «на тон от канваса» (light = полный bg-card белый —
       /50-микс на бумаге неразличим, ΔL*≈1.1; dark = bg-card/50 → слои канвас→поверхность→виджет

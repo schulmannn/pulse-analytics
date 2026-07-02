@@ -3,6 +3,7 @@ import { useHistory, useVelocity, useTgFull } from '@/api/queries';
 import type { TgFull } from '@/api/schemas';
 import { lttbDownsample } from '@/lib/downsample';
 import { BarChart } from '@/components/BarChart';
+import { DivergingBars } from '@/components/DivergingBars';
 import { LineChart } from '@/components/LineChart';
 import { ChartTooltip, type TooltipState } from '@/components/ChartTooltip';
 import { fmt, ruAxisLabel } from '@/lib/format';
@@ -10,7 +11,7 @@ import { ExpandableChart } from '@/components/ExpandableChart';
 import { Skeleton } from '@/components/ui/skeleton';
 import { usePeriod } from '@/lib/period';
 
-import { ChartSection } from '@/components/ChartWidget';
+import { ChartSection, seriesBarValuesVariant } from '@/components/ChartWidget';
 
 interface HeatmapCell {
   n: number;
@@ -55,17 +56,26 @@ function SubscriberHistoryChart({ rows }: { rows: SubscriberRow[] }) {
   );
 }
 
-/** Bar presentation of the same archive (widget «Тип: Столбцы») — coarser sampling, per-bar labels. */
+/** Day-over-day deltas of the RAW archive rows, downsampled to ≤60 bars AFTER differencing.
+    The series is a LEVEL (~4800 подписчиков): zero-based bars of levels all render full
+    height and a decline disappears — the bar presentation plots the daily CHANGE instead. */
+function subscriberDeltas(rows: SubscriberRow[]) {
+  const deltas = rows.slice(1).map((row, i) => ({
+    day: row.day,
+    delta: Number(row.subscribers) - Number(rows[i]?.subscribers),
+  }));
+  const sampled = lttbDownsample(deltas, 60, (r) => r.delta);
+  return {
+    values: sampled.map((r) => r.delta),
+    labels: sampled.map((r) => ddmm(r.day)),
+    titles: sampled.map((r) => `${ddmm(r.day)}: ${r.delta >= 0 ? '+' : ''}${fmt.num(r.delta)} за день`),
+  };
+}
+
+/** Bar presentation of the same archive (widget «Тип: Столбцы») — diverging day-over-day deltas. */
 function SubscriberHistoryBars({ rows }: { rows: SubscriberRow[] }) {
-  const sampled = lttbDownsample(rows, 60, (row) => Number(row.subscribers));
-  return (
-    <BarChart
-      values={sampled.map((row) => Number(row.subscribers))}
-      labels={sampled.map((row) => ddmm(row.day))}
-      titles={sampled.map((row) => `${ddmm(row.day)}: ${fmt.num(row.subscribers)} подписчиков`)}
-      height={260}
-    />
-  );
+  const d = subscriberDeltas(rows);
+  return <DivergingBars values={d.values} labels={d.labels} titles={d.titles} height={260} />;
 }
 
 export function HistoryChartBlock() {
@@ -98,6 +108,7 @@ export function HistoryChartBlock() {
 
   const isDownsampled = rawRows.length > 140;
   const caption = `${rawRows.length} дн в архиве${isDownsampled ? ' · сглажено' : ''}`;
+  const deltas = subscriberDeltas(rows);
 
   return (
     <ChartSection
@@ -113,12 +124,28 @@ export function HistoryChartBlock() {
                 const windowRows = days === 0 ? rows : rows.slice(-days);
                 return <SubscriberHistoryChart rows={windowRows} />;
               }}
+              renderExpandedBar={(days) => {
+                const windowRows = days === 0 ? rows : rows.slice(-days);
+                return <SubscriberHistoryBars rows={windowRows} />;
+              }}
+              statsFor={(days) =>
+                (days === 0 ? rows : rows.slice(-days)).map((row) => Number(row.subscribers))
+              }
+              statsSum={false} // сумма УРОВНЕЙ подписчиков по дням не имеет смысла
             >
               <SubscriberHistoryChart rows={rows} />
             </ExpandableChart>
           ),
         },
         { key: 'bar', label: 'Столбцы', render: <SubscriberHistoryBars rows={rows} /> },
+        seriesBarValuesVariant(deltas.values, deltas.labels, deltas.titles, {
+          diverging: true,
+          // Рядом с дельтами леджер показывает УРОВНИ — последние 6 фактических значений.
+          ledger: rows
+            .slice(-6)
+            .reverse()
+            .map((r) => ({ label: ddmm(r.day), value: fmt.num(r.subscribers) })),
+        }),
       ]}
     >
       <div className="mt-3 text-xs font-medium text-muted-foreground">{caption}</div>
@@ -339,6 +366,7 @@ export function VelocityChartBlock() {
           ),
         },
         { key: 'bar', label: 'Столбцы', render: <BarChart values={cum} labels={labels} titles={titles} /> },
+        seriesBarValuesVariant(cum, labels, titles, { format: (v) => `${v}%` }),
       ]}
     >
       {captions.length > 0 && (

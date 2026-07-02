@@ -2,7 +2,7 @@ import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { fmt } from '@/lib/format';
 import { ChartTooltip } from '@/components/ChartTooltip';
 import { axisLabel, niceScale } from '@/components/LineChart';
-import { ChartExpandedContext } from '@/components/ExpandableChart';
+import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
 
 interface BarChartProps {
   values: number[];
@@ -30,6 +30,8 @@ export function BarChart({ values, labels, titles, height = 200 }: BarChartProps
   const [width, setWidth] = useState(600);
   // Expanded (modal) rendering opts into value labels + y ticks.
   const expanded = useContext(ChartExpandedContext);
+  // The overlay dictates its explorer height; inline renders keep the caller's `height`.
+  const ctxHeight = useContext(ExpandedChartHeightContext);
 
   useLayoutEffect(() => {
     const el = containerRef.current;
@@ -71,7 +73,7 @@ export function BarChart({ values, labels, titles, height = 200 }: BarChartProps
   const max = scale ? scale.hi : rawMax;
   const n = values.length;
   const chartWidth = Math.max(width, 1);
-  const chartHeight = height;
+  const chartHeight = ctxHeight ?? height;
   const paddingBottom = labels && labels.length > 0 ? 24 : 0;
   const graphHeight = chartHeight - paddingBottom;
   // Expanded view: headroom for the value labels above full-height bars.

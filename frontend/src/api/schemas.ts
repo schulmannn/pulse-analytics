@@ -549,3 +549,38 @@ export const IgTagsSchema = z
   .passthrough();
 export type IgTag = z.infer<typeof IgTagSchema>;
 export type IgTags = z.infer<typeof IgTagsSchema>;
+
+// ── Reports (saved multi-report documents; per-user, JSONB config round-trips) ──
+// config.blocks = ordered block keys of the composed document (see panels/ReportPage registry);
+// config.periodDays = the persisted period preset (7|30|90|0). `blocks` has NO default on purpose:
+// a missing list (legacy row) falls back to the full default set client-side, while an explicitly
+// emptied report ([]) stays empty.
+export const ReportConfigSchema = z
+  .object({
+    blocks: z.array(z.string()).optional(),
+    periodDays: z.coerce.number().optional().nullable(),
+  })
+  .passthrough();
+export type ReportConfig = z.infer<typeof ReportConfigSchema>;
+
+export const ReportListItemSchema = z
+  .object({
+    id: z.coerce.number(),
+    name: z.string(),
+    schedule: z.string().optional().default('none'),
+    created_at: z.string().optional().nullable(),
+    updated_at: z.string().optional().nullable(),
+  })
+  .passthrough();
+export type ReportListItem = z.infer<typeof ReportListItemSchema>;
+
+export const ReportSchema = ReportListItemSchema.extend({
+  config: ReportConfigSchema.optional().default({}),
+}).passthrough();
+export type Report = z.infer<typeof ReportSchema>;
+
+export const ReportsResponseSchema = z
+  .object({ reports: z.array(ReportListItemSchema).optional().default([]) })
+  .passthrough();
+export const ReportResponseSchema = z.object({ report: ReportSchema }).passthrough();
+export type ReportResponse = z.infer<typeof ReportResponseSchema>;

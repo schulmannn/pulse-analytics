@@ -26,10 +26,13 @@ import {
   MentionsSchema,
   MeSchema,
   PostStatsSchema,
+  ReportResponseSchema,
+  ReportsResponseSchema,
   StatsSchema,
   TgFullSchema,
   VelocitySchema,
 } from '@/api/schemas';
+import type { ReportConfig } from '@/api/schemas';
 import { clearSessionToken, setSessionToken } from '@/lib/session';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { effectiveLimit, usePeriod } from '@/lib/period';
@@ -477,5 +480,63 @@ export function useDeleteBug() {
   return useMutation({
     mutationFn: (id: number) => apiSend('DELETE', `/api/bugs/${id}`, undefined, OkSchema),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['bugs'] }),
+  });
+}
+
+// ── Reports (saved multi-report documents) ──
+// Per-USER, not per-channel: no X-Channel-Id key — ownership is enforced server-side (uid in SQL).
+
+export type ReportSchedule = 'none' | 'weekly' | 'monthly';
+
+/** The saved-reports index. `enabled:false` lets demo mode skip the fetch (no fixture exists). */
+export function useReports(enabled = true) {
+  return useQuery({
+    enabled,
+    queryKey: ['reports'],
+    queryFn: ({ signal }) => apiGet('/api/reports', ReportsResponseSchema, { signal }),
+  });
+}
+
+/** One report with its full config (the composed document). 404 on a foreign/missing id. */
+export function useReport(id: number | null) {
+  return useQuery({
+    enabled: id != null,
+    queryKey: ['report', id],
+    queryFn: ({ signal }) => apiGet(`/api/reports/${id}`, ReportResponseSchema, { signal }),
+  });
+}
+
+export function useCreateReport() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { name: string; config?: ReportConfig }) =>
+      apiSend('POST', '/api/reports', body, ReportResponseSchema),
+    onSuccess: (data) => {
+      // Seed the detail cache so the follow-up navigate renders without a refetch.
+      qc.setQueryData(['report', data.report.id], data);
+      return qc.invalidateQueries({ queryKey: ['reports'] });
+    },
+  });
+}
+
+export function useUpdateReport(id: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { name?: string; config?: ReportConfig; schedule?: ReportSchedule }) =>
+      apiSend('PUT', `/api/reports/${id}`, body, ReportResponseSchema),
+    onSuccess: (data) => {
+      // The PUT echoes the full report — write it straight into the detail cache (no refetch
+      // after every debounced config save) and refresh the list (name / updated_at ordering).
+      qc.setQueryData(['report', id], data);
+      return qc.invalidateQueries({ queryKey: ['reports'] });
+    },
+  });
+}
+
+export function useDeleteReport() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => apiSend('DELETE', `/api/reports/${id}`, undefined, OkSchema),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['reports'] }),
   });
 }

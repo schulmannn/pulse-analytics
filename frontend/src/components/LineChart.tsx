@@ -1,7 +1,8 @@
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { fmt } from '@/lib/format';
 import { detectAnomalies } from '@/lib/anomaly';
 import { ChartTooltip } from '@/components/ChartTooltip';
+import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
 
 interface LineChartProps {
   values: number[];
@@ -18,6 +19,9 @@ interface LineChartProps {
   markExtremes?: boolean;
   /** Hollow rings on every data point (steep-style reading aid for daily series). */
   showPoints?: boolean;
+  /** Force the full y-axis (nice ticks + gridlines + label gutter) regardless of the
+      expanded context. Without it, dashboard cards render axis-free (steep-style). */
+  fullAxes?: boolean;
 }
 
 interface Hover {
@@ -79,12 +83,18 @@ export function LineChart({
   ghost,
   markExtremes = false,
   showPoints = false,
+  fullAxes = false,
 }: LineChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<Hover | null>(null);
   // Measure the real render width so the viewBox is 1:1 with CSS pixels — otherwise a
   // fixed 600-wide viewBox stretched to a wide container magnifies text + markers 2-3×.
   const [width, setWidth] = useState(600);
+  // Dashboard cards are axis-free sparkline-style reads (steep); the expanded overlay and
+  // metric pages provide the context (or set fullAxes) for the full nice-tick y-axis.
+  const expanded = useContext(ChartExpandedContext);
+  const ctxHeight = useContext(ExpandedChartHeightContext);
+  const showAxes = fullAxes || expanded;
   // Strip colons from useId — valid in ids, but break SVG url(#…) refs in some browsers.
   const gradientId = `lc${useId().replace(/:/g, '')}`;
 
@@ -129,7 +139,7 @@ export function LineChart({
     );
   }
 
-  const h = height ?? 200;
+  const h = ctxHeight ?? height ?? 200;
   const W = Math.max(width, 1);
   const padR = 10;
   const padY = 12;
@@ -145,16 +155,22 @@ export function LineChart({
   const range = max - min || 1;
 
   const yFor = (v: number) => h - padY - ((v - min) / range) * (h - 2 * padY);
-  // Belt-and-braces dedupe: drop any tick whose formatted label repeats the previous one.
-  const yAxis = scale.ticks
-    .map((v) => ({ v, label: axisLabel(v, scale.step) }))
-    .filter((tick, i, arr) => i === 0 || tick.label !== arr[i - 1].label);
+  // Full-axes mode only: nice ticks deduped belt-and-braces (drop any tick whose formatted
+  // label repeats the previous one). Minimal mode renders no ticks/gridlines at all.
+  const yAxis = showAxes
+    ? scale.ticks
+        .map((v) => ({ v, label: axisLabel(v, scale.step) }))
+        .filter((tick, i, arr) => i === 0 || tick.label !== arr[i - 1].label)
+    : [];
   const yGridValues = yAxis.map((t) => t.v);
   const yGridPositions = yGridValues.map(yFor);
   const yLabels = yAxis.map((t) => t.label);
   // Left gutter reserved for the y labels (right-aligned inside it) so they never sit
   // on the line/area and the first label is never clipped by the container edge.
-  const gutterW = Math.max(28, Math.round(Math.max(...yLabels.map((l) => l.length)) * CHAR_W) + 14);
+  // Axis-free mode keeps only a sliver so edge markers (rings) don't clip on the viewBox.
+  const gutterW = showAxes
+    ? Math.max(28, Math.round(Math.max(...yLabels.map((l) => l.length)) * CHAR_W) + 14)
+    : 6;
 
   const n = values.length;
   const plotW = Math.max(W - gutterW - padR, 10);

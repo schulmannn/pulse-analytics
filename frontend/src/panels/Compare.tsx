@@ -211,7 +211,7 @@ export function Compare() {
         )}
       </div>
 
-      <WidgetGroup id="compare" className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <WidgetGroup id="compare" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-2">
         <ChartSection
           title="Охват по дням недели"
           variants={

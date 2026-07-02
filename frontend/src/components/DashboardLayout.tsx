@@ -20,7 +20,6 @@ import { markdownToPlainText } from '@/lib/markdown';
 import { METRIC_DEFS } from '@/lib/metricDefs';
 import { normalizeTgPosts } from '@/lib/posts';
 import { Icon, type IconName } from '@/components/nav-icons';
-import { AtlavueMark } from '@/components/AtlavueMark';
 import { ChannelAvatar } from '@/components/ChannelAvatar';
 import { DateRangePicker } from '@/components/DateRangePicker';
 
@@ -59,7 +58,7 @@ const TG_NAV: NavLinkDef[] = [
   { to: '/analytics', label: 'Аналитика', icon: 'analytics' },
   { to: '/posts', label: 'Посты', icon: 'posts' },
   { to: '/mentions', label: 'Упоминания', icon: 'mentions' },
-  { to: '/report', label: 'Отчёт', icon: 'report' },
+  { to: '/reports', label: 'Отчёты', icon: 'report' },
 ];
 // …and Instagram into its own parallel set (Обзор / Аналитика / Контент / Аудитория). The desktop
 // sidebar lists BOTH sets as labeled sections (steep's Teams/Entities pattern); mobile stays
@@ -87,13 +86,17 @@ const TITLES: Record<string, string> = {
   '/analytics': 'Аналитика',
   '/posts': 'Посты',
   '/mentions': 'Упоминания',
-  '/report': 'Отчёт',
+  '/reports': 'Отчёты',
   '/settings': 'Настройки',
   '/admin': 'Админ',
   '/bugs': 'Баги',
   '/connect': 'Подключение данных',
   '/instagram': 'Instagram',
 };
+
+/** TG feed routes open with their own block header carrying the same name — a topbar h1 there
+    reads twice («Обзор» in the corner AND on the page), so these routes render no topbar title. */
+const FEED_ROUTES = ['/', '/analytics', '/posts', '/mentions'];
 
 /** Topbar h1 for the current route; metric pages resolve to the metric's display name. */
 function routeTitle(pathname: string): string {
@@ -103,6 +106,7 @@ function routeTitle(pathname: string): string {
     const key = pathname.split('/')[2] as keyof typeof METRIC_DEFS;
     return METRIC_DEFS[key]?.term ?? 'Метрика';
   }
+  if (pathname.startsWith('/reports/')) return 'Отчёт';
   return pathname.startsWith('/instagram') ? 'Instagram' : 'Atlavue';
 }
 
@@ -147,7 +151,8 @@ interface DashboardLayoutProps {
   avatar?: string | null;
 }
 
-/** App shell: left sidebar (brand + channel + nav) and a top bar (title + period + menu). */
+/** App shell: left sidebar (channel + nav + user row) and a top bar (title + period). The brand
+    wordmark lives on the Landing page only — no logo inside the shell. */
 export function DashboardLayout({ email, role, avatar }: DashboardLayoutProps) {
   // ONE header at a time. The old `hidden md:flex` + `md:hidden` pair mounted BOTH headers
   // simultaneously — every control (period switcher, account menu, channel card) ran its
@@ -157,10 +162,10 @@ export function DashboardLayout({ email, role, avatar }: DashboardLayoutProps) {
   useWidgetPrefsSync();
   return (
     <div className="flex min-h-screen bg-background text-foreground">
-      <Sidebar />
+      <Sidebar email={email} role={role} avatar={avatar} />
       <div className="flex min-w-0 flex-1 flex-col">
         {isMd ? (
-          <Topbar email={email} role={role} avatar={avatar} />
+          <Topbar />
         ) : (
           <MobileHeader email={email} role={role} avatar={avatar} />
         )}
@@ -212,7 +217,7 @@ function chipTint(name: string): string {
  * until toggled. Until the user chooses, the default is responsive — expanded at ≥lg, rail
  * on md–lg. <md the sidebar is hidden (MobileHeader + MobileBottomNav take over).
  */
-function Sidebar() {
+function Sidebar({ email, role, avatar }: { email?: string; role?: string; avatar?: string | null }) {
   const isMd = useMediaQuery('(min-width: 768px)');
   const isLg = useMediaQuery('(min-width: 1024px)');
   const { rail, toggle } = useSidebarMode(isLg);
@@ -237,17 +242,20 @@ function Sidebar() {
       aria-label="Боковая панель"
       className={cn(
         // Quiet column on the shared paper canvas: right hairline only, no panel, no shadow.
-        // z-30 lets the rail-mode channel dropdown (which overhangs the aside) paint above the
-        // sticky Topbar (z-20) while staying under the period scrim (z-40) and modals (z-50).
+        // z-30 lets the overhanging popovers (rail-mode channel dropdown, user-row menu) paint
+        // above the sticky Topbar (z-20) while staying under the period scrim (z-40) and modals (z-50).
         'sticky top-0 z-30 hidden h-screen shrink-0 flex-col border-r border-border bg-background md:flex print:hidden',
         'transition-[width] duration-200 motion-reduce:transition-none',
         rail ? 'w-16' : 'w-60',
       )}
     >
-      <SidebarHeader rail={rail} onToggle={toggle} />
+      <SidebarActions rail={rail} onToggle={toggle} />
 
-      <div className="mt-3">
+      <div className="mt-2">
         <ChannelCard rail={rail} />
+        <div className={rail ? 'px-2' : 'px-3'}>
+          <SidebarStatus rail={rail} />
+        </div>
       </div>
 
       <nav className="mt-5 flex-1 overflow-y-auto overflow-x-hidden px-3">
@@ -255,31 +263,20 @@ function Sidebar() {
         <NavGroup label="Instagram" platform="ig" items={IG_NAV} rail={rail} />
       </nav>
 
-      <div className="space-y-1 px-3 pb-4 pt-2">
-        {SYSTEM_NAV.map((item) => (
-          <NavItem key={item.to} {...item} rail={rail} />
-        ))}
-        <SidebarStatus rail={rail} />
-      </div>
+      <SidebarUserRow rail={rail} email={email} role={role} avatar={avatar} />
     </aside>
   );
 }
 
 /**
- * Sidebar header row (steep-style): brand identity on the left (wordmark hidden in the rail),
- * two quiet ghost icon actions on the right — the panel toggle (Ctrl+B) and search (⌘K, opens
- * the global command palette). In the rail the actions stack vertically under the mark, so the
- * toggle always stays reachable.
+ * Sidebar utility strip — the panel toggle (Ctrl+B) and search (⌘K, opens the global command
+ * palette) as quiet ghost actions. No brand block here (the wordmark stays on the Landing page),
+ * so the strip is right-aligned chrome and the channel card below is the sidebar's first real
+ * content. In the rail the actions stack centered, so the toggle always stays reachable.
  */
-function SidebarHeader({ rail, onToggle }: { rail: boolean; onToggle: () => void }) {
+function SidebarActions({ rail, onToggle }: { rail: boolean; onToggle: () => void }) {
   return (
-    <div className={cn('flex px-3 pt-4', rail ? 'flex-col items-center gap-1' : 'items-center gap-1')}>
-      <span className="flex h-7 w-7 shrink-0 items-center justify-center text-primary" aria-hidden="true">
-        <AtlavueMark className="h-5 w-5" />
-      </span>
-      {!rail && (
-        <span className="min-w-0 flex-1 truncate pl-1 text-base font-medium tracking-tight">Atlavue</span>
-      )}
+    <div className={cn('flex px-3 pt-3', rail ? 'flex-col items-center gap-1' : 'items-center justify-end gap-1')}>
       <GhostIconButton
         onClick={onToggle}
         label={rail ? 'Показать панель' : 'Скрыть панель'}
@@ -366,8 +363,8 @@ function NavGroup({
   );
 }
 
-/** Sidebar footer freshness — a status dot + "обновлено <time>" (mono). Rail: dot only,
-    the full text moves into the title tooltip. Always the LAST element of the sidebar. */
+/** Data-freshness line — a status dot + "обновлено <time>" (mono), sitting directly under the
+    channel card. Rail: dot only, the full text moves into the title tooltip. */
 function SidebarStatus({ rail }: { rail?: boolean }) {
   const { data: history } = useHistory(730);
   const fresh = freshness(latestHistoryDay(history), Date.now());
@@ -396,8 +393,15 @@ function SidebarStatus({ rail }: { rail?: boolean }) {
  */
 function MobileBottomNav() {
   const nav = usePlatformNav();
+  // Column count follows the platform nav (TG has 5 routes since «Отчёты», IG has 4) —
+  // a hardcoded count wraps the extra tab onto a second row / leaves a dead column.
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 border-t bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden print:hidden">
+    <nav
+      className={cn(
+        'fixed inset-x-0 bottom-0 z-30 grid border-t bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden print:hidden',
+        nav.length === 5 ? 'grid-cols-5' : 'grid-cols-4',
+      )}
+    >
       {nav.map((item) => (
         <NavLink
           key={item.label}
@@ -559,18 +563,20 @@ function ChannelCard({ rail = false }: { rail?: boolean }) {
   );
 }
 
-/** Desktop top bar (md+; mobile uses MobileHeader — conditionally, never both mounted). */
-function Topbar({ email, role, avatar }: { email?: string; role?: string; avatar?: string | null }) {
+/** Desktop top bar (md+; mobile uses MobileHeader — conditionally, never both mounted).
+    Account controls live in the sidebar user row on md+, so the bar holds title + period only. */
+function Topbar() {
   const { pathname } = useLocation();
-  const title = routeTitle(pathname);
+  // Feed routes carry their own block header — no h1 here (see FEED_ROUTES).
+  const title = FEED_ROUTES.includes(pathname) ? null : routeTitle(pathname);
   return (
     <header className="sticky top-0 z-20 flex h-14 items-center justify-between gap-3 border-b bg-background/80 px-4 backdrop-blur sm:gap-4 sm:px-6 print:hidden">
-      {/* min-w-0 lets the title truncate instead of shoving the controls off a narrow screen. */}
-      <h1 className="min-w-0 truncate text-lg font-medium">{title}</h1>
+      {/* min-w-0 lets the title truncate instead of shoving the controls off a narrow screen;
+          the empty span keeps justify-between pushing the controls right when there's no title. */}
+      {title ? <h1 className="min-w-0 truncate text-lg font-medium">{title}</h1> : <span aria-hidden="true" />}
       <div className="flex shrink-0 items-center gap-2">
         <PeriodSwitcher />
         <ExportButton />
-        <AccountMenu email={email} role={role} avatar={avatar} />
       </div>
     </header>
   );
@@ -644,23 +650,87 @@ function ExportButton() {
   );
 }
 
+/** Letter-badge fallback for the account avatar — first two letters of the mailbox name. */
+const avatarInitials = (email?: string) =>
+  (email ? email.replace(/@.*/, '').replace(/[^\p{L}]/gu, '').slice(0, 2).toUpperCase() : '') || '?';
+
 /**
- * Account menu — an avatar that opens identity, theme, the system links (Настройки / Админ / Баги),
- * and logout (Claude-style). This is the single home for account + system controls on every
- * breakpoint, so they're out of the sidebar and top bar.
+ * Shared account-menu body — identity, theme toggle, the system links (Настройки / Админ / Баги),
+ * and logout (Claude-style). Rendered inside two popover shells: the mobile-header avatar menu
+ * (opens downward) and the sidebar user row on md+ (opens upward).
  */
-function AccountMenu({ email, role, avatar }: { email?: string; role?: string; avatar?: string | null }) {
-  const [open, setOpen] = useState(false);
+function AccountMenuContent({ email, role, onClose }: { email?: string; role?: string; onClose: () => void }) {
   const navigate = useNavigate();
   const { theme, toggle: toggleTheme } = useTheme();
   const logoutMutation = useLogout();
-  const menuRef = useRef<HTMLDivElement>(null);
-  useDismiss(open, setOpen, menuRef);
-
-  const initials =
-    (email ? email.replace(/@.*/, '').replace(/[^\p{L}]/gu, '').slice(0, 2).toUpperCase() : '') || '?';
   const handleLogout = () =>
     logoutMutation.mutate(undefined, { onSettled: () => navigate('/login', { replace: true }) });
+
+  return (
+    <>
+      {/* Identity block: who you are. */}
+      {email && (
+        <div className="px-2.5 py-1.5">
+          <div className="truncate text-xs font-medium text-foreground">{email}</div>
+          {role === 'superuser' && (
+            <div className="text-2xs text-muted-foreground">Администратор</div>
+          )}
+        </div>
+      )}
+      <div className="my-1 border-t" aria-hidden="true" />
+      {/* Theme toggle — lives in this menu now (the standalone top-bar toggle is gone). */}
+      <button
+        type="button"
+        onClick={toggleTheme}
+        className="flex w-full items-center gap-2.5 rounded px-2.5 py-1.5 text-left text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      >
+        <Icon name={theme === 'dark' ? 'sun' : 'moon'} className="h-4 w-4" />
+        {theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
+      </button>
+      {/* System links (Настройки / Админ / Баги) — Claude-style, all under the account now. */}
+      <div>
+        {(role === 'superuser' ? [...SYSTEM_NAV, ...SUPER_NAV] : SYSTEM_NAV).map((item) => (
+          <NavLink
+            key={item.to}
+            to={item.to}
+            end={item.end}
+            onClick={onClose}
+            className={({ isActive }) =>
+              cn(
+                'flex items-center gap-2.5 rounded px-2.5 py-1.5 transition-colors',
+                isActive
+                  ? 'font-medium text-foreground'
+                  : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+              )
+            }
+          >
+            <Icon name={item.icon} className="h-4 w-4" />
+            {item.label}
+          </NavLink>
+        ))}
+      </div>
+      <div className="my-1 border-t" aria-hidden="true" />
+      {/* Logout: calm by default, destructive only on hover (it's important, not an alarm). */}
+      <button
+        type="button"
+        onClick={handleLogout}
+        disabled={logoutMutation.isPending}
+        className="block w-full rounded px-2.5 py-1.5 text-left text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+      >
+        {logoutMutation.isPending ? 'Выход…' : 'Выйти'}
+      </button>
+    </>
+  );
+}
+
+/**
+ * Account menu — an avatar that opens the shared account-menu body downward. MOBILE ONLY now
+ * (<md, MobileHeader): on md+ the account moved into the sidebar user row (SidebarUserRow).
+ */
+function AccountMenu({ email, role, avatar }: { email?: string; role?: string; avatar?: string | null }) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  useDismiss(open, setOpen, menuRef);
 
   return (
     <div ref={menuRef} className="relative">
@@ -668,63 +738,73 @@ function AccountMenu({ email, role, avatar }: { email?: string; role?: string; a
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-label="Аккаунт"
+        aria-expanded={open}
         className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-avatar text-2xs font-medium text-ink2 transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
       >
-        {avatar ? <img src={avatar} alt="" className="h-full w-full object-cover" /> : initials}
+        {avatar ? <img src={avatar} alt="" className="h-full w-full object-cover" /> : avatarInitials(email)}
       </button>
       {open && (
         <div className="absolute right-0 top-full z-40 mt-1 w-56 overflow-hidden rounded-lg border bg-popover p-1.5 text-sm">
-          {/* Identity block: who you are. */}
-          {email && (
-            <div className="px-2.5 py-1.5">
-              <div className="truncate text-xs font-medium text-foreground">{email}</div>
-              {role === 'superuser' && (
-                <div className="text-2xs text-muted-foreground">Администратор</div>
-              )}
-            </div>
+          <AccountMenuContent email={email} role={role} onClose={() => setOpen(false)} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * User row pinned to the sidebar bottom (steep-style): avatar + truncated email + up-chevron,
+ * separated from the scrollable nav by a hairline. Opens the SAME account menu as the mobile
+ * avatar, but UPWARD (anchored bottom-left) since the trigger sits at the viewport edge —
+ * hairline + paper (border-border bg-card), no shadow. Rail: avatar only, the popover overhangs
+ * the rail to the right (same trick as the channel dropdown).
+ */
+function SidebarUserRow({
+  rail,
+  email,
+  role,
+  avatar,
+}: {
+  rail: boolean;
+  email?: string;
+  role?: string;
+  avatar?: string | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const rowRef = useRef<HTMLDivElement>(null);
+  useDismiss(open, setOpen, rowRef);
+
+  return (
+    <div ref={rowRef} className={cn('relative border-t border-border py-2', rail ? 'px-2' : 'px-3')}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-label="Аккаунт"
+        aria-expanded={open}
+        title={rail ? email : undefined}
+        className={cn(
+          'flex w-full items-center rounded text-left transition-colors hover:bg-hover-row/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+          rail ? 'justify-center py-1' : 'gap-2.5 px-2 py-1.5',
+        )}
+      >
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-avatar text-2xs font-medium text-ink2">
+          {avatar ? <img src={avatar} alt="" className="h-full w-full object-cover" /> : avatarInitials(email)}
+        </span>
+        {!rail && (
+          <>
+            <span className="min-w-0 flex-1 truncate text-sm text-foreground">{email ?? 'Аккаунт'}</span>
+            <Icon name="chevron" className="h-4 w-4 shrink-0 rotate-180 text-muted-foreground" />
+          </>
+        )}
+      </button>
+      {open && (
+        <div
+          className={cn(
+            'absolute bottom-full z-40 mb-1 w-56 overflow-hidden rounded-lg border border-border bg-card p-1.5 text-sm',
+            rail ? 'left-2' : 'left-3',
           )}
-          <div className="my-1 border-t" aria-hidden="true" />
-          {/* Theme toggle — lives in this menu now (the standalone top-bar toggle is gone). */}
-          <button
-            type="button"
-            onClick={toggleTheme}
-            className="flex w-full items-center gap-2.5 rounded px-2.5 py-1.5 text-left text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          >
-            <Icon name={theme === 'dark' ? 'sun' : 'moon'} className="h-4 w-4" />
-            {theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
-          </button>
-          {/* System links (Настройки / Админ / Баги) — Claude-style, all under the avatar now. */}
-          <div>
-            {(role === 'superuser' ? [...SYSTEM_NAV, ...SUPER_NAV] : SYSTEM_NAV).map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.end}
-                onClick={() => setOpen(false)}
-                className={({ isActive }) =>
-                  cn(
-                    'flex items-center gap-2.5 rounded px-2.5 py-1.5 transition-colors',
-                    isActive
-                      ? 'font-medium text-foreground'
-                      : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-                  )
-                }
-              >
-                <Icon name={item.icon} className="h-4 w-4" />
-                {item.label}
-              </NavLink>
-            ))}
-          </div>
-          <div className="my-1 border-t" aria-hidden="true" />
-          {/* Logout: calm by default, destructive only on hover (it's important, not an alarm). */}
-          <button
-            type="button"
-            onClick={handleLogout}
-            disabled={logoutMutation.isPending}
-            className="block w-full rounded px-2.5 py-1.5 text-left text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
-          >
-            {logoutMutation.isPending ? 'Выход…' : 'Выйти'}
-          </button>
+        >
+          <AccountMenuContent email={email} role={role} onClose={() => setOpen(false)} />
         </div>
       )}
     </div>

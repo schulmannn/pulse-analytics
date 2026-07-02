@@ -50,7 +50,7 @@ export function Overview() {
 
       {/* Инсайт | Рост подписчиков | Топ постов — customisable widgets (hero+ledger stay open
           above as the block's «greeting» zone, steep-Home style). */}
-      <WidgetGroup id="overview" className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <WidgetGroup id="overview" className="mt-8 grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Explicit ids: the Аналитика block renders widgets with the same display titles on
             the SAME feed page — default title-ids would make them share prefs (hide one →
             both vanish). */}
