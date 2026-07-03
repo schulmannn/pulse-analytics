@@ -43,15 +43,17 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
   **⚠️ Порядок S5↔S6:** S5-редактор оперирует WidgetConfig, которых нет на surface до S6-монтирования
   → делаю S6 (каталог+store+mount) ПЕРЕД S5 (богатый редактор).
 - **S5 — Универсальный Widget Editor (расширить EditWidgetDialog)** — TODO
-- **S6 — Add-widget catalog + mount (делаю ПЕРЕД S5)** — WIP (S6.1 SHIPPED `<pending>`)
+- **S6 — Add-widget catalog + mount (делаю ПЕРЕД S5)** — WIP (S6.1 SHIPPED `508acda`)
   **S6.1 (done):** `lib/widgetStore.ts` — localStorage-first + pub-sub стор для `WidgetConfig[]`
   (get/set/add/addForMetric/update/remove + `useWidgetConfigs` hook). Всё через `normalizeWidgets`
   (корраптнутый blob → []). Стабильный snapshot-кеш для useSyncExternalStore (иначе loop). Account-
   sync (/api/prefs) — осознанный follow-up (device-local first, нулевой риск текущему prefs-sync).
-  10 тестов со стабом (224 всего). **S6.2 (TODO):** bridge-hook `useWidgetData(config)` (собирает
-  DataContext из useTgFull/useHistory/useChannels/useTgGraphs+period+channel → resolveWidgetMetric) +
-  `<ConfigWidget>` (ChartSection+WidgetRenderer). **S6.3 (TODO, ВИДИМЫЙ):** `WidgetCatalogModal` (поиск/
-  группы CATEGORY) + монтирование custom-виджетов на Home (`custom:<id>` рядом с registry-ключами).
+  10 тестов со стабом (224 всего). **S6.2 (done `<pending>`):** bridge-hook `lib/useWidgetData.ts`
+  (собирает DataContext из useTgFull{windowPair}/useHistory/useTgGraphs/useChannels+config.period+
+  channel → resolveWidgetMetric, memo) + `components/ConfigWidget.tsx` (ChartSection-chrome + WidgetRenderer,
+  ChannelScope при config.source). Typecheck-verified, tree-shaken. **S6.3 (TODO, ПЕРВЫЙ ВИДИМЫЙ):**
+  `WidgetCatalogModal` (поиск/группы CATEGORY) + монтирование custom-виджетов на Home (`custom:<id>`
+  рядом с registry-ключами) — ЖИВАЯ поверхность, гейт build+тесты, финал-глаз юзера на проде.
 - **S7 — Per-widget фильтры `FilterBuilder` + каталог DIMENSIONS** — TODO
 - **S8 — Сравнение как настройка модели** — TODO
 - **S9 — Target / forecast** — TODO
@@ -61,7 +63,7 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
 
 ## Журнал
 
-- 2026-07-03 — **S6.1 SHIPPED** `<pending>`. `lib/widgetStore.ts` + тест. Отложенный из S2 стор.
+- 2026-07-03 — **S6.1 SHIPPED** `508acda`. `lib/widgetStore.ts` + тест. Отложенный из S2 стор.
   Решения: standalone-модуль (не трогаю prefs-sync в ChartWidget); стабильный snapshot-кеш (память:
   useSyncExternalStore без него = loop); account-sync отложен (device-local first); `__resetWidgetStoreCache`
   как тест-seam. **Движок целиком (S1-S4+S6.1) готов и протестирован, но НЕ смонтирован (tree-shaken).**
