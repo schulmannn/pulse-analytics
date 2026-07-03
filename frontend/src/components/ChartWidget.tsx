@@ -317,6 +317,11 @@ export function useHomeBlocks(): string[] {
   return getHomeBlocks();
 }
 
+/** Home edit-mode flag. When /home wraps its WidgetGroup in this provider (value=true), every
+ *  pinnable card (one carrying a `homeKey`) shows a × affordance in its header that unpins it
+ *  from Home. Default false → no edit chrome on any other surface (source screens never wrap it). */
+export const HomeEditContext = createContext(false);
+
 /** Re-render on any widget-store change (prefs / order). */
 function useStoreTick() {
   const [, force] = useState(0);
@@ -801,6 +806,7 @@ interface ChartSectionProps {
 export function ChartSection({ id, title, action, variants, className, defaultSize, expand, periodControl, homeKey, children }: ChartSectionProps) {
   const widgetId = id ?? title;
   const group = useContext(GroupCtx);
+  const homeEditing = useContext(HomeEditContext);
   const [menuOpen, setMenuOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [expandOpen, setExpandOpen] = useState(false);
@@ -854,6 +860,8 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
   // Personal-Home pin state (only when this card is registered as pinnable via `homeKey`).
   // useStoreTick above already re-renders on any store change, so the read stays live.
   const pinned = homeKey ? isPinnedToHome(homeKey) : false;
+  // On /home in edit mode, a pinnable card shows a × that removes it from Home.
+  const showHomeRemove = homeEditing && !!homeKey;
 
   // Per-widget window: the card's own period (default 30д). Charts inside read it via
   // useWidgetPeriod(); the WidgetPeriodProvider below scopes it to this card's subtree.
@@ -964,14 +972,29 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
           {prefs.title || title}
         </h3>
         {action}
+        {showHomeRemove && (
+          <button
+            type="button"
+            aria-label={`Убрать виджет «${prefs.title || title}» с главной`}
+            title="Убрать с главной"
+            onClick={() => homeKey && unpinFromHome(homeKey)}
+            className={`shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-destructive ${
+              reorder ? 'pointer-events-none opacity-0' : ''
+            }`}
+          >
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+              <path d="M6 6l12 12M18 6 6 18" strokeLinecap="round" />
+            </svg>
+          </button>
+        )}
         <button
           type="button"
           aria-label={`Развернуть виджет «${prefs.title || title}»`}
           title="Развернуть"
           onClick={() => setExpandOpen(true)}
           className={`shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground print:hidden ${
-            reorder ? 'pointer-events-none opacity-0' : ''
-          }`}
+            showHomeRemove ? 'hidden' : ''
+          } ${reorder ? 'pointer-events-none opacity-0' : ''}`}
         >
           <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
             <path d="M7 17 17 7M9 7h8v8" strokeLinecap="round" strokeLinejoin="round" />
