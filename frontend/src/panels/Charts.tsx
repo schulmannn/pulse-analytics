@@ -230,7 +230,7 @@ function buildHeatmap(
   return { grid, maxErv, bestSlot };
 }
 
-export function HeatmapChartBlock() {
+export function HeatmapChartBlock({ id, homeKey }: HomeBlockProps = {}) {
   const { days, inRange } = useWidgetPeriod();
   // isPending (не isLoading): запрос выключен, пока канал не известен, — скелетон и там.
   const { data: tgData, isPending } = useTgFull(days);
@@ -240,12 +240,12 @@ export function HeatmapChartBlock() {
   const posts = tgData?.posts;
   const { grid, maxErv, bestSlot } = useMemo(() => buildHeatmap(posts ?? [], inRange), [posts, inRange]);
 
-  if (isPending) return <ChartSkeleton title="Тепловая карта активности (день × час)" />;
+  if (isPending) return <ChartSkeleton title="Тепловая карта активности (день × час)" id={id} homeKey={homeKey} />;
 
   return (
     // The 7×24 grid is genuinely wide content → a full-row tile wherever the section lands in
     // a widget grid, never squeezed into a fraction of it.
-    <ChartSection title="Тепловая карта активности (день × час)" defaultSize="full">
+    <ChartSection title="Тепловая карта активности (день × час)" defaultSize="full" id={id} homeKey={homeKey}>
       <HeatmapSurface grid={grid} maxErv={maxErv} bestSlot={bestSlot} />
 
       <div className="mt-3 text-xs font-medium text-muted-foreground">

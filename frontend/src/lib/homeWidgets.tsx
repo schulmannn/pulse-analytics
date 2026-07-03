@@ -4,7 +4,7 @@ import { KpiGrid } from '@/panels/KpiGrid';
 import { Digest } from '@/panels/Digest';
 import { TopPosts } from '@/panels/TopPosts';
 import { SubscriberGrowth } from '@/panels/Overview';
-import { HistoryChartBlock, VelocityChartBlock } from '@/panels/Charts';
+import { HistoryChartBlock, VelocityChartBlock, HeatmapChartBlock } from '@/panels/Charts';
 
 /**
  * Personal-Home widget registry — the catalogue of widgets a user can pin to /home via the
@@ -31,9 +31,10 @@ import { HistoryChartBlock, VelocityChartBlock } from '@/panels/Charts';
  *   - Mentions blocks («Упоминаний по дням», «Кто упоминает», «Последние упоминания»): their
  *     data is computed in the Mentions() parent (useMentions/useMentionsArchive) and passed to
  *     the ChartSections as pre-baked props — the sections are not self-contained.
- *   - Heatmap (Charts): pinnable in principle, but it calls useTgFull(days) with the WIDGET
- *     period as the FETCH arg, so a non-default Home period spawns an extra request. Left out
- *     of v1 (History + Velocity cover the Charts surface).
+ *
+ * Heatmap (Charts) is now pinnable: it self-fetches useTgFull(30) at a fixed 30д window (its
+ * useWidgetPeriod falls back to 30д outside a period shell — same as the Analytics tab), so it
+ * dedupes with any other 30д fetch and needs no wrapper.
  */
 export interface HomeWidgetDef {
   /** Menu / card label. */
@@ -87,6 +88,14 @@ export const HOME_REGISTRY: Record<string, HomeWidgetDef> = {
   velocity: {
     label: 'Скорость набора просмотров',
     render: () => <VelocityChartBlock id="home-velocity" homeKey="velocity" />,
+  },
+  heatmap: {
+    label: 'Тепловая карта активности',
+    defaultSize: 'full',
+    // Renders its OWN ChartSection (like History/Velocity) — pass the home id/key, don't wrap.
+    // Fixed 30д window (useWidgetPeriod falls back to 30д outside a period shell, same as on the
+    // Analytics tab), so no per-period fetch fan-out — it dedupes with any other 30д useTgFull.
+    render: () => <HeatmapChartBlock id="home-heatmap" homeKey="heatmap" />,
   },
 };
 
