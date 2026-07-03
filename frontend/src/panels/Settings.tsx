@@ -11,6 +11,7 @@ import {
   SecuritySection,
 } from '@/components/settings/AccountSection';
 import { BillingSection } from '@/components/settings/BillingSection';
+import { TeamSection } from '@/components/settings/TeamSection';
 import { DataSection } from '@/components/settings/DataSection';
 import { ChannelsSection } from '@/components/settings/ChannelsSection';
 import { InstagramSection } from '@/components/settings/InstagramSection';
@@ -28,6 +29,7 @@ const ACCOUNT_SECTIONS = [
   { key: 'appearance', label: 'Оформление', icon: 'sun' },
   { key: 'security', label: 'Безопасность', icon: 'lock' },
   { key: 'billing', label: 'Подписка', icon: 'card' },
+  { key: 'team', label: 'Команда', icon: 'users' },
 ] as const;
 const DATA_SECTIONS = [
   { key: 'data', label: 'Данные', icon: 'database' },
@@ -209,6 +211,7 @@ export function Settings() {
               {section === 'appearance' && <AppearanceSection />}
               {section === 'security' && <SecuritySection />}
               {section === 'billing' && <BillingSection />}
+              {section === 'team' && <TeamSection onOpenBilling={() => setSection('billing')} />}
               {section === 'data' && <DataSection onOpenChannels={() => setSection('channels')} />}
               {section === 'channels' && <ChannelsSection />}
               {section === 'instagram' && <InstagramSection />}

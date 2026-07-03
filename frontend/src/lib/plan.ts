@@ -44,6 +44,6 @@ export function usePlan(): PlanId {
 }
 
 /** Paid plans unlock plan-gated UI (team members etc.). */
-export function isPaidPlan(plan: PlanId): boolean {
+export function isPaidPlan(plan: PlanId): plan is 'pro' | 'max' {
   return plan !== 'free';
 }
