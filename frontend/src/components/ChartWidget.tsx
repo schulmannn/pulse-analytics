@@ -968,6 +968,8 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
   const innerStyle: CSSProperties = {};
   if (prefs.color) (innerStyle as Record<string, string>)['--brand-iris'] = `var(--chart-${prefs.color})`;
   if (prefs.tinted) innerStyle.backgroundColor = `hsl(var(${accentVar}) / 0.07)`;
+  // Entrance stagger: one beat per grid slot, capped so deep feeds don't wait forever.
+  (innerStyle as Record<string, string>)['--enter-delay'] = `${Math.min(Math.max(seqIndex, 0), 8) * 35}ms`;
   if (isDragging) {
     // the lifted card stops jiggling and pops slightly (iOS) — the pointer carries it
     innerStyle.animation = 'none';
@@ -1007,9 +1009,9 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
       onPointerCancel={reorder ? () => group?.dragEnd() : undefined}
     >
       <div
-        className={`flex flex-col ${SIZE_H[effectiveSize]} rounded-xl border border-border bg-card p-4 sm:p-5 ${reorder ? 'widget-jiggle' : ''} ${
-          isDragging ? 'shadow-lg' : ''
-        }`}
+        className={`flex flex-col ${SIZE_H[effectiveSize]} rounded-xl border border-border bg-card p-4 sm:p-5 transition-colors hover:border-ink3/40 ${
+          reorder ? 'widget-jiggle' : 'widget-enter'
+        } ${isDragging ? 'shadow-lg' : ''}`}
         style={innerStyle}
       >
       <div className="flex shrink-0 items-center gap-3">

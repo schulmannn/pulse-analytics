@@ -105,5 +105,12 @@ Source of truth прогресса между итерациями. Статус
 
 ## Спринт 6 — Анимации
 
-- [ ] **6.1 Сдержанные анимации ключевых элементов** — TODO
-  Entrance, hover, переходы; prefers-reduced-motion обязателен.
+- [x] **6.1 Сдержанные анимации ключевых элементов** — SHIPPED `PENDING_HASH`
+  **Entrance:** тихий fade-rise (6px, 350ms, cubic-bezier(.2,.7,.3,1)) каждой виджет-карточки при маунте
+  (открытие ленты/переключение таба), stagger 35ms×slot (кэп 8) через `--enter-delay` от seqIndex;
+  на ВНУТРЕННЕМ слое карточки (внешний section несёт FLIP-transform — не конфликтуют), в reorder-режиме
+  класс уступает jiggle (оба владеют animation). `prefers-reduced-motion: reduce` → animation none.
+  **Hover:** hairline карточки чуть углубляется (`hover:border-ink3/40`, transition-colors) — жизнь без теней.
+  **Каунтеры чисел НЕ добавлены осознанно** (в задаче со знаком вопроса): бегущие цифры на паре с
+  tabular-nums-леджерами читались бы как AI-блинг — против «отредактированного» вида. Переходы
+  меню/кнопок/карусели/оверлеев уже были (transition-colors/300ms track/FLIP).
