@@ -1,33 +1,58 @@
+import { useState } from 'react';
 import { ChartSection } from '@/components/ChartWidget';
 import { WidgetRenderer } from '@/components/WidgetRenderer';
+import { ConfigEditDialog } from '@/components/ConfigEditDialog';
 import { ChannelScope } from '@/lib/channel-context';
 import { useWidgetData } from '@/lib/useWidgetData';
 import { getMetric } from '@/lib/widgetMetrics';
+import { updateWidgetConfig } from '@/lib/widgetStore';
 import type { WidgetConfig } from '@/lib/widgetConfig';
 
 /**
  * A config-driven widget card — the metric builder's output rendered on a surface. It reuses the
- * existing ChartSection chrome (title / ⋯ menu / expand / reorder within a WidgetGroup) and fills its
- * body with the WidgetRenderer, fed by the resolver via useWidgetData. Source pinning (config.source)
- * wraps the card in a ChannelScope so the data hooks inside read the pinned channel.
- *
- * The card size follows config.size (via the ChartSection prefs store, keyed by the custom id); the
- * rich per-metric settings (period / grain / comparison / target / filter) come from the WidgetConfig
- * and are edited through the builder dialog (S5), not the legacy prefs dialog.
+ * existing ChartSection chrome (⋯ menu / expand / reorder within a WidgetGroup) and fills its body
+ * with the WidgetRenderer, fed by the resolver via useWidgetData. The card's accent / background /
+ * size / title all come from the WidgetConfig (via the `configEditor` hook on ChartSection), and the
+ * ⋯«Изменить» opens the universal ConfigEditDialog which writes back to the config. Source pinning
+ * (config.source) wraps the card in a ChannelScope so the data hooks inside read the pinned channel.
  */
 export function ConfigWidget({ config, homeKey }: { config: WidgetConfig; homeKey?: string }) {
+  const [editOpen, setEditOpen] = useState(false);
   const metric = getMetric(config.metricId);
+
   const card = (
     <ChartSection
       id={`custom-${config.id}`}
       title={config.title || metric?.label || 'Метрика'}
       homeKey={homeKey}
       defaultSize={config.size}
+      configEditor={{
+        open: () => setEditOpen(true),
+        color: config.style?.color,
+        tinted: config.style?.tinted,
+        size: config.size,
+        // Fixed goal line → charts' WidgetTargetContext (dynamic/forecast targets land in S9).
+        target: config.target?.type === 'fixed' ? config.target.value ?? null : null,
+      }}
     >
       <ConfigWidgetBody config={config} />
     </ChartSection>
   );
-  return config.source != null ? <ChannelScope channelId={config.source}>{card}</ChannelScope> : card;
+  const wrapped = config.source != null ? <ChannelScope channelId={config.source}>{card}</ChannelScope> : card;
+
+  return (
+    <>
+      {wrapped}
+      {editOpen && metric && (
+        <ConfigEditDialog
+          config={config}
+          metric={metric}
+          onChange={(patch) => updateWidgetConfig(config.id, patch)}
+          onClose={() => setEditOpen(false)}
+        />
+      )}
+    </>
+  );
 }
 
 /** Body only — kept a child of ChartSection (inside its ChannelScope + card) so useWidgetData reads

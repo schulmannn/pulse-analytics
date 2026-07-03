@@ -42,7 +42,17 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
   (S6). rank/pivot/table → fallback на data-shape (не рендерятся из WidgetResult).
   **⚠️ Порядок S5↔S6:** S5-редактор оперирует WidgetConfig, которых нет на surface до S6-монтирования
   → делаю S6 (каталог+store+mount) ПЕРЕД S5 (богатый редактор).
-- **S5 — Универсальный Widget Editor (расширить EditWidgetDialog)** — TODO
+- **S5 — Универсальный Widget Editor `components/ConfigEditDialog.tsx`** — SHIPPED `<pending>`
+  Отдельный редактор, пишущий в WidgetConfig (не в prefs): Визуализация (по supportedViz) · Период ·
+  Грануляция (series) · Сравнение (series) · Целевой уровень (series) · Источник · Заголовок · Размер ·
+  Акцент · Цветной фон. ChartSection получил аддитивный проп `configEditor {open,color,tinted,size,
+  target}` — config-виджет открывает ЭТОТ диалог (legacy подавлен `&& !configEditor`), а accent/tint/
+  size/target карточки берутся из config; нормальные prefs-виджеты не задеты (инвариант проверен).
+  **Adversarial-review воркфлоу (10 агентов, 5 осей→verify): 2 реальных дефекта пойманы+пофикшены** —
+  (1) config.target не был прокинут в WidgetTargetContext (оба provider-сайта→`activeTarget`; ConfigWidget
+  прокидывает fixed-goal); (2) Сравнение/Цель показывались для value-метрик без эффекта → gated на series
+  (ghost/goal-линия рендерятся только на графике). 3 находки отклонены (adversarial, одна — live Chromium).
+  Filter→S7, dynamic/forecast target + KPI-прогресс→S9. Гейт build+224.
 - **S6 — Add-widget catalog + mount (делаю ПЕРЕД S5)** — WIP (S6.1 SHIPPED `508acda`)
   **S6.1 (done):** `lib/widgetStore.ts` — localStorage-first + pub-sub стор для `WidgetConfig[]`
   (get/set/add/addForMetric/update/remove + `useWidgetConfigs` hook). Всё через `normalizeWidgets`
@@ -68,6 +78,11 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
 
 ## Журнал
 
+- 2026-07-03 — **S5 SHIPPED** `<pending>`. `ConfigEditDialog` + ChartSection `configEditor`-хук.
+  Ultracode: реализация → adversarial-review воркфлоу (5 осей: chartsection-regression/config-model/
+  live-editing/control-gating/design-a11y, каждая находка verify-скептиком) → 2 фикса. Решения: config-
+  виджет открывает свой диалог, display (accent/tint/size/target) из config; showComparison/showTarget=
+  series-only (мёртвые контролы недопустимы). Legacy prefs-диалог остаётся для registry-виджетов.
 - 2026-07-03 — **S6.3 SHIPPED** `54ba3c6`. `WidgetCatalogModal` + Home-монтаж. **Движок стал
   ВИДИМЫМ:** «Изменить» → «Добавить виджет» → «Метрика из каталога…» → поиск → клик = config-виджет
   на Главной (story-card). Решения: переиспользую ChartSection-chrome (reorder/expand/size/× работают

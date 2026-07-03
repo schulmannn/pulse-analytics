@@ -855,11 +855,25 @@ interface ChartSectionProps {
    * otherwise the controls would be dead.
    */
   seriesOptions?: boolean;
+  /**
+   * Config-driven widgets (the metric builder): the ⋯«Изменить» opens THIS editor (owned by
+   * ConfigWidget, writing to a WidgetConfig) instead of the legacy prefs dialog, and the card's
+   * accent / background / size come from the config via these overrides rather than the prefs
+   * store. Undefined = a normal prefs-driven card (unchanged behaviour).
+   */
+  configEditor?: {
+    open: () => void;
+    color?: number;
+    tinted?: boolean;
+    size?: WidgetSize;
+    /** Goal line for the widget's charts (config.target, fixed goals only in S5). */
+    target?: number | null;
+  };
   /** Body; with `variants` it renders BELOW the active variant (shared captions etc.). */
   children?: ReactNode;
 }
 
-export function ChartSection({ id, title, action, variants, className, defaultSize, expand, periodControl, homeKey, seriesOptions, children }: ChartSectionProps) {
+export function ChartSection({ id, title, action, variants, className, defaultSize, expand, periodControl, homeKey, seriesOptions, configEditor, children }: ChartSectionProps) {
   const widgetId = id ?? title;
   const group = useContext(GroupCtx);
   const homeEditing = useContext(HomeEditContext);
@@ -961,7 +975,12 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
   // Effective footprint on the 6-col group grid: the user's choice (or the card's defaultSize,
   // else 'half'), clamped UP to the active variant's minSize so a wide bar+ledger presentation
   // never renders in a third. col-span is applied on the OUTER section below.
-  const chosenSize: WidgetSize = prefs.size ?? defaultSize ?? 'half';
+  // Config-driven cards source accent / background / size from the WidgetConfig (via configEditor)
+  // instead of the prefs store; a normal card reads prefs as before.
+  const activeColor = configEditor ? configEditor.color : prefs.color;
+  const activeTinted = configEditor ? configEditor.tinted : prefs.tinted;
+  const activeTarget = configEditor ? (configEditor.target ?? null) : (prefs.target ?? null);
+  const chosenSize: WidgetSize = (configEditor ? configEditor.size : prefs.size) ?? defaultSize ?? 'half';
   const effectiveSize = maxSize(chosenSize, activeVariant?.minSize ?? 'third');
   // Height fed to every chart in the body so it fills the tile. Only for the FIXED sizes
   // (third/half); a `full` card is content-height, so it passes null and charts keep their own
@@ -973,7 +992,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
   // in the widget-period provider so every chart primitive inside filters to THIS card's window.
   const bodyNode = (
     <WidgetPeriodProvider value={widgetPeriod}>
-      <WidgetTargetContext.Provider value={prefs.target ?? null}>
+      <WidgetTargetContext.Provider value={activeTarget}>
         {activeVariant ? activeVariant.render : null}
         {children}
       </WidgetTargetContext.Provider>
@@ -984,7 +1003,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
   const hasRichExpand = !!(expand && (expand.renderExpanded || expand.renderExpandedBar || expand.statsFor));
 
   const seqIndex = group ? group.sequence.indexOf(widgetId) : -1;
-  const accentVar = prefs.color ? `--chart-${prefs.color}` : '--brand-iris';
+  const accentVar = activeColor ? `--chart-${activeColor}` : '--brand-iris';
   // Split the styles across two layers: the OUTER section owns grid placement + the FLIP
   // translate (set imperatively by WidgetGroup), the INNER div owns the visible card —
   // its jiggle rotation is a CSS animation on `transform` and would stomp the FLIP glide
@@ -997,8 +1016,8 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
   const isDragging = reorder && group?.draggingId === widgetId;
 
   const innerStyle: CSSProperties = {};
-  if (prefs.color) (innerStyle as Record<string, string>)['--brand-iris'] = `var(--chart-${prefs.color})`;
-  if (prefs.tinted) innerStyle.backgroundColor = `hsl(var(${accentVar}) / 0.07)`;
+  if (activeColor) (innerStyle as Record<string, string>)['--brand-iris'] = `var(--chart-${activeColor})`;
+  if (activeTinted) innerStyle.backgroundColor = `hsl(var(${accentVar}) / 0.07)`;
   // Entrance stagger: one beat per grid slot, capped so deep feeds don't wait forever.
   (innerStyle as Record<string, string>)['--enter-delay'] = `${Math.min(Math.max(seqIndex, 0), 8) * 35}ms`;
   if (isDragging) {
@@ -1159,7 +1178,9 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
                 type="button"
                 onClick={() => {
                   setMenuOpen(false);
-                  setEditOpen(true);
+                  // Config-driven cards open their own editor (writes to the WidgetConfig).
+                  if (configEditor) configEditor.open();
+                  else setEditOpen(true);
                 }}
                 className={menuItem}
               >
@@ -1199,7 +1220,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
       )}
       <div className={`mt-3 flex min-h-0 flex-1 flex-col ${reorder ? 'pointer-events-none' : ''}`}>
         <WidgetPeriodProvider value={widgetPeriod}>
-          <WidgetTargetContext.Provider value={prefs.target ?? null}>
+          <WidgetTargetContext.Provider value={activeTarget}>
             {/* Chart region — flex-1 eats the tile's leftover height; overflow-y-auto lets a long list
                 (Breakdown / pie legend) scroll instead of blowing the fixed height. fillHeight feeds
                 the leftover height to EVERY chart inside (variant or bare children) so they fill; a
@@ -1217,7 +1238,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
       </div>
       </div>
 
-      {editOpen && (
+      {editOpen && !configEditor && (
         <EditWidgetDialog
           defaultTitle={title}
           prefs={prefs}

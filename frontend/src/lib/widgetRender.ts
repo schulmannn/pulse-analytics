@@ -16,6 +16,19 @@ export function bucketLabel(key: string): string {
   return fmt.day(key);
 }
 
+/** Russian labels for the visualisation vocabulary — shared by the catalogue + the editor. */
+export const VIZ_LABEL: Record<WidgetViz, string> = {
+  kpi: 'Число',
+  line: 'Линия',
+  bar: 'Столбцы',
+  donut: 'Круговая',
+  list: 'Список',
+  rank: 'Рейтинг',
+  pivot: 'Сводная',
+  table: 'Таблица',
+  ledger: 'Значения',
+};
+
 /** The number formatter for a unit: percent → «6.5%», views → compact (fmt.short), else fmt.num. */
 export function unitFormat(unit: MetricUnit): (n: number) => string {
   if (unit === 'percent') return (n) => `${n.toFixed(1)}%`;

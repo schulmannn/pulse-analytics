@@ -1,12 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import {
-  CATEGORY_LABEL,
-  CATEGORY_ORDER,
-  metricsForSource,
-  type MetricDef,
-  type WidgetViz,
-} from '@/lib/widgetMetrics';
+import { CATEGORY_LABEL, CATEGORY_ORDER, metricsForSource, type MetricDef } from '@/lib/widgetMetrics';
+import { VIZ_LABEL } from '@/lib/widgetRender';
 
 /**
  * The «Добавить метрику» catalogue — a searchable picker over the whole metric catalogue, grouped
@@ -15,18 +10,6 @@ import {
  * with the metric's default visualisation and pins it). Legacy registry widgets stay addable via the
  * existing picker; this is the metric-first path alongside it.
  */
-
-const VIZ_LABEL: Record<WidgetViz, string> = {
-  kpi: 'Число',
-  line: 'Линия',
-  bar: 'Столбцы',
-  donut: 'Круговая',
-  list: 'Список',
-  rank: 'Рейтинг',
-  pivot: 'Сводная',
-  table: 'Таблица',
-  ledger: 'Значения',
-};
 
 const SOURCE_LABEL: Record<'tg' | 'ig', string> = { tg: 'Telegram', ig: 'Instagram' };
 // Only sources the resolver can actually produce data for are offered — IG resolves to empty until
