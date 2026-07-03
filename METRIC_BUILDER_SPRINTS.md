@@ -48,12 +48,17 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
   (get/set/add/addForMetric/update/remove + `useWidgetConfigs` hook). Всё через `normalizeWidgets`
   (корраптнутый blob → []). Стабильный snapshot-кеш для useSyncExternalStore (иначе loop). Account-
   sync (/api/prefs) — осознанный follow-up (device-local first, нулевой риск текущему prefs-sync).
-  10 тестов со стабом (224 всего). **S6.2 (done `<pending>`):** bridge-hook `lib/useWidgetData.ts`
+  10 тестов со стабом (224 всего). **S6.2 (done `880205b`):** bridge-hook `lib/useWidgetData.ts`
   (собирает DataContext из useTgFull{windowPair}/useHistory/useTgGraphs/useChannels+config.period+
   channel → resolveWidgetMetric, memo) + `components/ConfigWidget.tsx` (ChartSection-chrome + WidgetRenderer,
-  ChannelScope при config.source). Typecheck-verified, tree-shaken. **S6.3 (TODO, ПЕРВЫЙ ВИДИМЫЙ):**
-  `WidgetCatalogModal` (поиск/группы CATEGORY) + монтирование custom-виджетов на Home (`custom:<id>`
-  рядом с registry-ключами) — ЖИВАЯ поверхность, гейт build+тесты, финал-глаз юзера на проде.
+  ChannelScope при config.source). Typecheck-verified, tree-shaken. **S6.3 (SHIPPED `<pending>`, ПЕРВЫЙ ВИДИМЫЙ):**
+  `WidgetCatalogModal` (поиск + группы CATEGORY + карточки метрик с formula/recommended-viz) +
+  монтирование на Home: `known` принимает `custom:<id>`, ветка рендера → `ConfigWidget`, `useWidgetConfigs`
+  подписка, AddWidgetBar → «Метрика из каталога…» (addWidgetForMetric → pinToHome(customKey)). Legacy-
+  пресеты сохранены («Готовые виджеты»). **IG скрыт в каталоге до S11** (резолвит empty). **ПЕРВЫЙ
+  коммит, меняющий бандл** — registry-путь байт-идентичен (обёрнут в else). Гейт build+224. ⚠️ Живой
+  визуал = юзер на проде (authed Home локально не рендерится). Rich-редактор config (period/grain/
+  comparison/target/filter) = S5; сейчас ⋯Изменить правит только prefs (title/color/size) — переходно.
 - **S7 — Per-widget фильтры `FilterBuilder` + каталог DIMENSIONS** — TODO
 - **S8 — Сравнение как настройка модели** — TODO
 - **S9 — Target / forecast** — TODO
@@ -63,6 +68,14 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
 
 ## Журнал
 
+- 2026-07-03 — **S6.3 SHIPPED** `<pending>`. `WidgetCatalogModal` + Home-монтаж. **Движок стал
+  ВИДИМЫМ:** «Изменить» → «Добавить виджет» → «Метрика из каталога…» → поиск → клик = config-виджет
+  на Главной (story-card). Решения: переиспользую ChartSection-chrome (reorder/expand/size/× работают
+  бесплатно); IG-таб скрыт до S11 (иначе пустые карточки); registry-else-ветка байт-идентична. ⚠️
+  ПЕРВЫЙ бандл-меняющий коммит — poll хеша на atlavue.app; живой визуал = юзер (authed локально нет).
+- 2026-07-03 — **S6.2 SHIPPED** `880205b`. `useWidgetData` + `ConfigWidget`. Bridge движок↔React.
+  Решение: ConfigWidget переиспользует ChartSection-chrome (id=`custom-<id>`), данные из config (не prefs);
+  useTgFull windowPair (как MetricPage, для ghost-baseline); ChannelScope при config.source. Ещё НЕ смонтирован.
 - 2026-07-03 — **S6.1 SHIPPED** `508acda`. `lib/widgetStore.ts` + тест. Отложенный из S2 стор.
   Решения: standalone-модуль (не трогаю prefs-sync в ChartWidget); стабильный snapshot-кеш (память:
   useSyncExternalStore без него = loop); account-sync отложен (device-local first); `__resetWidgetStoreCache`
