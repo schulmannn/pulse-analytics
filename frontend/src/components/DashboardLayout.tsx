@@ -7,6 +7,7 @@ import { useSelectedChannel } from '@/lib/channel-context';
 import { useDemo } from '@/lib/demo-context';
 import { openCommandPalette } from '@/lib/command-palette';
 import { useTheme } from '@/lib/theme';
+import { PLAN_LABEL, usePlan } from '@/lib/plan';
 import { useMediaQuery } from '@/lib/useMediaQuery';
 import { useSidebarMode } from '@/lib/sidebar';
 import { useWidgetPrefsSync } from '@/components/ChartWidget';
@@ -856,10 +857,14 @@ function AccountMenuContent({
           <div className="my-1 border-t border-border" aria-hidden="true" />
         </>
       )}
-      {/* Preferences group: Настройки + Тема. */}
+      {/* Preferences group: Настройки + Подписка + Тема. */}
       <NavLink to="/settings" onClick={onClose} className={ACCOUNT_MENU_ITEM}>
         <Icon name="gear" className="h-4 w-4 text-muted-foreground" />
         Настройки
+      </NavLink>
+      <NavLink to="/settings?section=billing" onClick={onClose} className={ACCOUNT_MENU_ITEM}>
+        <Icon name="card" className="h-4 w-4 text-muted-foreground" />
+        Подписка
       </NavLink>
       <ThemeRow />
       {/* Elevated tools (superuser only) — their own group marks them as admin surface. */}
@@ -938,6 +943,7 @@ function SidebarUserRow({
   avatar?: string | null;
 }) {
   const [open, setOpen] = useState(false);
+  const plan = usePlan();
   const rowRef = useRef<HTMLDivElement>(null);
   useDismiss(open, setOpen, rowRef);
 
@@ -959,7 +965,10 @@ function SidebarUserRow({
         </span>
         {!rail && (
           <>
-            <span className="min-w-0 flex-1 truncate text-sm text-foreground">{email ?? 'Аккаунт'}</span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm text-foreground">{email ?? 'Аккаунт'}</span>
+              <span className="block truncate text-2xs text-muted-foreground">План {PLAN_LABEL[plan]}</span>
+            </span>
             <Icon name="chevron" className={cn('h-4 w-4 shrink-0 text-muted-foreground transition-transform', open && 'rotate-180')} />
           </>
         )}
