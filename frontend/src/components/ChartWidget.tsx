@@ -1207,6 +1207,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
           renderExpandedBar={hasRichExpand ? expand?.renderExpandedBar : undefined}
           statsFor={hasRichExpand ? expand?.statsFor : undefined}
           statsSum={expand?.statsSum ?? true}
+          grainable={hasRichExpand ? expand?.grainable : undefined}
           onClose={() => setExpandOpen(false)}
         >
           {bodyNode}

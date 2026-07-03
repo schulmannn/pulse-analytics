@@ -26,16 +26,23 @@ const EXPANDED_CHART_HEIGHT = 400;
     period pills, a line↔bar toggle and a Мин/Макс/Среднее/Сумма strip. Every field is
     optional — with none of them the overlay just renders the given children at full axes
     (Tier-1). Shared by ExpandableChart and ChartSection's native `expand` prop. */
+/** Explorer bucketing of a daily series (mirrors the widget dialog's «Грануляция»). */
+export type ExplorerGrain = 'day' | 'week' | 'month';
+
 export interface ChartExpandConfig {
-  /** Period-windowed line presentation — when provided, the overlay grows 1М/3М/6М/Всё pills. */
-  renderExpanded?: (days: number) => ReactNode;
+  /** Period-windowed line presentation — when provided, the overlay grows 1М/3М/6М/Всё pills.
+      Grainable configs receive the explorer's «День/Неделя/Месяц» choice as the 2nd arg. */
+  renderExpanded?: (days: number, grain?: ExplorerGrain) => ReactNode;
   /** Bar presentation of the same window — when provided, the overlay grows a line↔bar toggle. */
-  renderExpandedBar?: (days: number) => ReactNode;
+  renderExpandedBar?: (days: number, grain?: ExplorerGrain) => ReactNode;
   /** Values visible in the current window — feeds the Мин/Макс/Среднее/Сумма strip. */
-  statsFor?: (days: number) => number[];
+  statsFor?: (days: number, grain?: ExplorerGrain) => number[];
   /** Include «Сумма» in the stats strip (default). Off for level/stock series
       (e.g. subscriber counts) where summing the values is meaningless. */
   statsSum?: boolean;
+  /** The renderers honour the grain arg (flow series bucketed by week/month). Off for level
+      series — bucketing sums would lie there, so the segment stays hidden. */
+  grainable?: boolean;
 }
 
 interface ExpandableChartProps extends ChartExpandConfig {
@@ -59,7 +66,7 @@ const WINDOWS = [
  * (the metric-page main chart etc.) stay untouched. Inside a widget shell, prefer the
  * ChartSection `expand` prop — it renders one consistent «Развернуть» per card.
  */
-export function ExpandableChart({ title, children, renderExpanded, renderExpandedBar, statsFor, statsSum = true }: ExpandableChartProps) {
+export function ExpandableChart({ title, children, renderExpanded, renderExpandedBar, statsFor, statsSum = true, grainable }: ExpandableChartProps) {
   const [isOpen, setIsOpen] = useState(false);
 
   return (
@@ -86,6 +93,7 @@ export function ExpandableChart({ title, children, renderExpanded, renderExpande
           renderExpandedBar={renderExpandedBar}
           statsFor={statsFor}
           statsSum={statsSum}
+          grainable={grainable}
           onClose={() => setIsOpen(false)}
         >
           {children}
@@ -123,12 +131,13 @@ function snapToWindow(days: number | undefined): number {
  * at full explorer axes (Tier-1). Owns its own period + line/bar state, so a fresh open
  * always starts on the line at 3М — like the metric pages.
  */
-export function ChartExpandOverlay({ title, children, renderExpanded, renderExpandedBar, statsFor, statsSum = true, initialDays, onClose }: ChartExpandOverlayProps) {
+export function ChartExpandOverlay({ title, children, renderExpanded, renderExpandedBar, statsFor, statsSum = true, grainable, initialDays, onClose }: ChartExpandOverlayProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const chartRegionRef = useRef<HTMLDivElement>(null);
   const [days, setDays] = useState(() => snapToWindow(initialDays));
   // Overlay-local presentation; reopening always starts on the line, like metric pages.
   const [kind, setKind] = useState<'line' | 'bar'>('line');
+  const [grain, setGrain] = useState<ExplorerGrain>('day');
   // Full-screen explorer: the chart fills the viewport-height panel. Measure the flex-1
   // chart region and feed its height (minus a small breathing band) to the charts inside;
   // the fixed EXPANDED_CHART_HEIGHT stays as the pre-measure fallback.
@@ -202,6 +211,23 @@ export function ChartExpandOverlay({ title, children, renderExpanded, renderExpa
                     {window.label}
                   </button>
                 ))}
+              {grainable && (
+                <div role="group" aria-label="Грануляция" className="flex shrink-0 overflow-hidden rounded border border-border">
+                  {(['day', 'week', 'month'] as const).map((g) => (
+                    <button
+                      key={g}
+                      type="button"
+                      aria-pressed={grain === g}
+                      onClick={() => setGrain(g)}
+                      className={`border-r border-border px-2.5 py-1.5 text-xs font-medium transition-colors last:border-r-0 ${
+                        grain === g ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+                      }`}
+                    >
+                      {g === 'day' ? 'День' : g === 'week' ? 'Неделя' : 'Месяц'}
+                    </button>
+                  ))}
+                </div>
+              )}
               {renderExpandedBar && (
                 <div role="group" aria-label="Тип графика" className="ml-auto flex shrink-0 overflow-hidden rounded border border-border">
                   <OverlayKindButton kind="line" active={kind === 'line'} onSelect={setKind} />
@@ -219,15 +245,15 @@ export function ChartExpandOverlay({ title, children, renderExpanded, renderExpa
             <ChartExpandedContext.Provider value={true}>
               <ExpandedChartHeightContext.Provider value={chartH}>
                 {kind === 'bar' && renderExpandedBar
-                  ? renderExpandedBar(days)
+                  ? renderExpandedBar(days, grain)
                   : renderExpanded
-                    ? renderExpanded(days)
+                    ? renderExpanded(days, grain)
                     : children}
               </ExpandedChartHeightContext.Provider>
             </ChartExpandedContext.Provider>
           </div>
           <div className="shrink-0">
-            <OverlayStats values={statsFor ? statsFor(days) : null} statsSum={statsSum} />
+            <OverlayStats values={statsFor ? statsFor(days, grain) : null} statsSum={statsSum} />
           </div>
         </CardContent>
       </Card>

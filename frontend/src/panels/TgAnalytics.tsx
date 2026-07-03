@@ -552,15 +552,16 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
             // Rich explorer (steep): «Развернуть» grows 1М/3М/6М/Всё pills, a line↔bar toggle and a
             // Мин/Макс/Среднее/Сумма strip — windowing the full graphs series the inline card can't.
             expand={{
-              renderExpanded: (days) => {
-                const w = windowGraphSeries(viewSeries.values, interGroup.x, days, 'просмотров');
+              grainable: true,
+              renderExpanded: (days, grain) => {
+                const w = windowGraphSeries(viewSeries.values, interGroup.x, days, 'просмотров', { grain });
                 return <LineChart values={w.values} labels={w.labels} titles={w.titles} markAnomalies markExtremes />;
               },
-              renderExpandedBar: (days) => {
-                const w = windowGraphSeries(viewSeries.values, interGroup.x, days, 'просмотров');
+              renderExpandedBar: (days, grain) => {
+                const w = windowGraphSeries(viewSeries.values, interGroup.x, days, 'просмотров', { grain });
                 return <BarChart values={w.values} labels={w.labels} titles={w.titles} />;
               },
-              statsFor: (days) => windowGraphSeries(viewSeries.values, interGroup.x, days, 'просмотров').values,
+              statsFor: (days, grain) => windowGraphSeries(viewSeries.values, interGroup.x, days, 'просмотров', { grain }).values,
             }}
             seriesOptions
             variants={(_period, series) => {
@@ -588,15 +589,16 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
             id="tg-shares-graph"
             title={ruSeriesName(shareSeries.name) || 'Репосты'}
             expand={{
-              renderExpanded: (days) => {
-                const w = windowGraphSeries(shareSeries.values, interGroup.x, days, 'репостов');
+              grainable: true,
+              renderExpanded: (days, grain) => {
+                const w = windowGraphSeries(shareSeries.values, interGroup.x, days, 'репостов', { grain });
                 return <LineChart values={w.values} labels={w.labels} titles={w.titles} markAnomalies markExtremes />;
               },
-              renderExpandedBar: (days) => {
-                const w = windowGraphSeries(shareSeries.values, interGroup.x, days, 'репостов');
+              renderExpandedBar: (days, grain) => {
+                const w = windowGraphSeries(shareSeries.values, interGroup.x, days, 'репостов', { grain });
                 return <BarChart values={w.values} labels={w.labels} titles={w.titles} />;
               },
-              statsFor: (days) => windowGraphSeries(shareSeries.values, interGroup.x, days, 'репостов').values,
+              statsFor: (days, grain) => windowGraphSeries(shareSeries.values, interGroup.x, days, 'репостов', { grain }).values,
             }}
             seriesOptions
             variants={(_period, series) => {
