@@ -502,11 +502,9 @@ export function MetricPage() {
                   markAnomalies={effGrain === 'day' && (metricKey === 'views' || metricKey === 'subscribers')}
                   showPoints={series.values.length > 1 && series.values.length <= 45}
                   ghost={ghost}
+                  ghostLabel={cmpLabel ?? undefined}
                   yMin={ZERO_BASED[metricKey] && series.values.length > 1 ? 0 : undefined}
                 />
-                {ghost && cmpLabel ? (
-                  <p className="text-2xs text-muted-foreground">Пунктир — {cmpLabel}.</p>
-                ) : null}
               </ChartExpandedContext.Provider>
             )}
             {chartType === 'bar' && (

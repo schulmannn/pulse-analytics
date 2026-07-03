@@ -491,7 +491,6 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
                 render: (
                   <>
                     <LineChart values={vbdValues} labels={[last14Dates[0] ?? '', last14Dates[Math.floor(last14Dates.length / 2)] ?? '', last14Dates[last14Dates.length - 1] ?? '']} titles={vbdTitles} markAnomalies markExtremes ghost={vbdPrev} />
-                    {vbdPrev && <div className="mt-2 text-2xs text-muted-foreground">Пунктир — прошлый период (для сравнения).</div>}
                   </>
                 ),
               },

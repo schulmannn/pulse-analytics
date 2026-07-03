@@ -13,8 +13,11 @@ interface LineChartProps {
   height?: number;
   /** Overlay hollow amber rings on statistically unusual points (local-outlier detection). */
   markAnomalies?: boolean;
-  /** A faded dashed previous-period series, drawn on the same y-scale for visual comparison. */
+  /** Comparison series (previous period / baseline), drawn dashed in the contrast colour
+      (--chart-2) on the same y-scale, with a built-in legend row under the chart. */
   ghost?: number[];
+  /** Legend name for the ghost series (default «Прошлый период»). */
+  ghostLabel?: string;
   /** Bare value labels at the max point and the last point (no pills — Refined Technical). */
   markExtremes?: boolean;
   /** Hollow rings on every data point (steep-style reading aid for daily series). */
@@ -81,6 +84,7 @@ export function LineChart({
   height,
   markAnomalies,
   ghost,
+  ghostLabel = 'Прошлый период',
   markExtremes = false,
   showPoints = false,
   fullAxes = false,
@@ -254,7 +258,9 @@ export function LineChart({
   })();
 
   const tipText = (i: number) => {
-    const base = titles?.[i] ?? fmt.num(values[i]);
+    let base = titles?.[i] ?? fmt.num(values[i]);
+    // Hovering a compared chart reads both series at once.
+    if (ghost && ghost[i] != null) base = `${base} · пред. ${fmt.short(ghost[i])}`;
     return anomalySet.has(i) ? `${base} · аномалия` : base;
   };
   const onEnter = (i: number) => () => {
@@ -283,9 +289,10 @@ export function LineChart({
           <line key={idx} x1={gutterW} y1={yPos} x2={W} y2={yPos} stroke="hsl(var(--border))" strokeDasharray="4 6" strokeWidth="1" opacity="0.6" vectorEffect="non-scaling-stroke" />
         ))}
 
-        {/* Previous-period ghost line (faded dashed) — same y-scale for comparison */}
+        {/* Comparison series — dashed contrast colour (chart-2, the colorblind-safe pair of the
+            brand blue), same y-scale. The legend row under the chart names both series. */}
         {ghostPath && (
-          <path d={ghostPath} fill="none" stroke="hsl(var(--muted-foreground))" strokeWidth="1.5" strokeDasharray="3 4" opacity="0.45" vectorEffect="non-scaling-stroke" />
+          <path d={ghostPath} fill="none" stroke="hsl(var(--chart-2))" strokeWidth="1.8" strokeDasharray="5 4" opacity="0.8" vectorEffect="non-scaling-stroke" />
         )}
 
         {/* Target level (widget pref) — a dashed goal line with a small right-aligned label */}
@@ -371,6 +378,20 @@ export function LineChart({
           <span>{labels[0]}</span>
           <span>{labels[Math.floor(labels.length / 2)]}</span>
           <span>{labels[labels.length - 1]}</span>
+        </div>
+      )}
+
+      {/* Comparison legend — names both series whenever a ghost is drawn. */}
+      {ghost && ghost.length >= 2 && (
+        <div className="mt-1.5 flex select-none flex-wrap items-center gap-x-4 gap-y-1 px-1 text-2xs font-medium text-muted-foreground">
+          <span className="flex items-center gap-1.5">
+            <span aria-hidden="true" className="h-0.5 w-4 rounded-full" style={{ backgroundColor: 'hsl(var(--brand-iris))' }} />
+            Текущий период
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span aria-hidden="true" className="w-4 border-t-2 border-dashed" style={{ borderColor: 'hsl(var(--chart-2))' }} />
+            {ghostLabel}
+          </span>
         </div>
       )}
 
