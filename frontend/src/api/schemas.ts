@@ -584,13 +584,15 @@ export type IgTag = z.infer<typeof IgTagSchema>;
 export type IgTags = z.infer<typeof IgTagsSchema>;
 
 // ── Reports (saved multi-report documents; per-user, JSONB config round-trips) ──
-// config.blocks = ordered block keys of the composed document (see panels/ReportPage registry);
-// config.periodDays = the persisted period preset (7|30|90|0). `blocks` has NO default on purpose:
-// a missing list (legacy row) falls back to the full default set client-side, while an explicitly
-// emptied report ([]) stays empty.
+// config.blocks = the composed document's ordered blocks. Two shapes coexist and are reconciled
+// client-side (panels/ReportPage normalizeBlocks): legacy `string[]` (preset keys) and the new
+// generic `{ id, type, config }[]`. Kept as `unknown[]` here so parsing never throws on either
+// (the app model owns validation). config.periodDays = the persisted preset (7|30|90|0). `blocks`
+// has NO default on purpose: a missing list (legacy row) falls back to the full default set
+// client-side, while an explicitly emptied report ([]) stays empty.
 export const ReportConfigSchema = z
   .object({
-    blocks: z.array(z.string()).optional(),
+    blocks: z.array(z.unknown()).optional(),
     periodDays: z.coerce.number().optional().nullable(),
   })
   .passthrough();

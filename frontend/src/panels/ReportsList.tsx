@@ -3,7 +3,8 @@ import { useCreateReport, useReports } from '@/api/queries';
 import { useDemo } from '@/lib/demo-context';
 import { fmt } from '@/lib/format';
 import { Skeleton } from '@/components/ui/skeleton';
-import { DEFAULT_REPORT_BLOCKS, ReportsErrorState } from '@/panels/ReportPage';
+import { ReportsErrorState } from '@/panels/ReportPage';
+import { DEFAULT_REPORT_BLOCKS } from '@/lib/reportBlocks';
 
 const SCHEDULE_LABELS: Record<string, string> = {
   none: 'Выкл',

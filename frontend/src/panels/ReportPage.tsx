@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { useChannels, useDeleteReport, useHistory, useReport, useTgFull, useUpdateReport } from '@/api/queries';
@@ -9,14 +9,18 @@ import { useSelectedChannel } from '@/lib/channel-context';
 import { useDemo } from '@/lib/demo-context';
 import { usePeriod } from '@/lib/period';
 import type { PeriodDays } from '@/lib/period';
-import { deriveKpis, filledDailySeries, sparseDailySeries } from '@/lib/kpiDerive';
+import { deriveKpis, filledDailySeries, sparseDailySeries, isDrillKey } from '@/lib/kpiDerive';
 import type { DailySeries, DrillKey, PostMetricField } from '@/lib/kpiDerive';
+import { REPORT_BLOCKS, defaultBlock, isReportBlockKey, normalizeBlocks } from '@/lib/reportBlocks';
+import type { ReportBlock, ReportBlockKey, ReportBlockType } from '@/lib/reportBlocks';
 import { fmt } from '@/lib/format';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { DeltaPill } from '@/components/DeltaPill';
 import { EmptyState } from '@/components/EmptyState';
 import { LineChart } from '@/components/LineChart';
+import { BarChart } from '@/components/BarChart';
+import { ChartExpandedContext } from '@/components/ExpandableChart';
 import { Icon } from '@/components/nav-icons';
 import { ChartSection } from '@/components/instagram/shared';
 import { Digest } from '@/panels/Digest';
@@ -27,38 +31,28 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 type HistoryRow = HistoryData['rows'][number];
 
-// ── Block registry — every section the composed document can render, in the default order ──
-// (the same order the single report used to hard-code). config.blocks stores these keys.
-export type ReportBlockKey =
-  | 'kpi-summary'
-  | 'digest'
-  | 'metric-views'
-  | 'metric-subscribers'
-  | 'metric-reactions'
-  | 'weekly-table'
-  | 'insights'
-  | 'top-posts';
-
-export const REPORT_BLOCKS: Array<{ key: ReportBlockKey; label: string }> = [
-  { key: 'kpi-summary', label: 'Сводка' },
-  { key: 'digest', label: 'Инсайт' },
-  { key: 'metric-views', label: 'Просмотры по дням' },
-  { key: 'metric-subscribers', label: 'Подписчики по дням' },
-  { key: 'metric-reactions', label: 'Реакции по дням' },
-  { key: 'weekly-table', label: 'По неделям' },
-  { key: 'insights', label: 'Наблюдения' },
-  { key: 'top-posts', label: 'Лучшие публикации' },
+// Inline «+» type menu (steep / Notion): the six generic types, then the curated presets.
+const ADD_TYPES: Array<{ type: ReportBlockType; label: string; hint: string }> = [
+  { type: 'text', label: 'Текст', hint: 'Заголовок или абзац' },
+  { type: 'bignumber', label: 'Большое число', hint: 'Метрика с дельтой' },
+  { type: 'chart', label: 'График', hint: 'Линия или столбцы' },
+  { type: 'table', label: 'Таблица', hint: 'Недели · посты · сводка' },
+  { type: 'map', label: 'Карта', hint: 'География аудитории' },
+  { type: 'divider', label: 'Разделитель', hint: 'Горизонтальная линия' },
 ];
-// Default document = the old single report's composition: «Подписчики» right after «Просмотры».
-// «Реакции» stays in the registry (addable via «Настроить») but is not part of the default set.
-export const DEFAULT_REPORT_BLOCKS: ReportBlockKey[] = REPORT_BLOCKS
-  .map((b) => b.key)
-  .filter((key) => key !== 'metric-reactions');
 
-function isReportBlockKey(raw: string): raw is ReportBlockKey {
-  return REPORT_BLOCKS.some((b) => b.key === raw);
-}
-const blockLabel = (key: ReportBlockKey): string => REPORT_BLOCKS.find((b) => b.key === key)?.label ?? key;
+// Chart/big-number metric choices (those with an honest daily series or a KPI headline).
+const CHART_METRICS: Array<{ value: string; label: string }> = [
+  { value: 'views', label: 'Просмотры' },
+  { value: 'reactions', label: 'Реакции' },
+  { value: 'forwards', label: 'Репосты' },
+  { value: 'subscribers', label: 'Подписчики' },
+];
+const TABLE_SOURCES: Array<{ value: string; label: string }> = [
+  { value: 'weekly', label: 'По неделям' },
+  { value: 'top-posts', label: 'Лучшие публикации' },
+  { value: 'kpi-ledger', label: 'Сводка показателей' },
+];
 
 /** Monday-start UTC week key for a YYYY-MM-DD day (date-only strings parse as UTC midnight). */
 function mondayKey(dayISO: string): string | null {
@@ -202,12 +196,12 @@ export function ReportPage() {
 }
 
 /**
- * Отчёт — the steep-Reports adaptation (S4, the F3 base): the period as a readable document,
- * now composed from config.blocks (see REPORT_BLOCKS). A document header + global filter bar
- * (period / channel / platform — the same shared state the topbar drives, surfaced
- * document-style), then the configured blocks in order. Editing chrome (rename, «Настроить»
- * reorder/remove/add, the email-schedule select) is all print-hidden; «Печать / PDF» prints
- * just the document — the poor-man's export until F3 brings real PDF/share.
+ * Отчёт — the steep-Reports document. Composed from config.blocks as generic { id, type, config }
+ * blocks (text / chart / table / bignumber / map / divider) plus `preset` bridges for the curated
+ * sections. Editing is always-on and inline (owner-only surface): a hover «+» in every gap adds a
+ * block, each block has a hover toolbar (↑ / ↓ / ×) and its own inline config controls. All of
+ * that chrome — plus the filter bar, schedule and rename — is print-hidden, so «Печать / PDF»
+ * emits a clean document.
  */
 function ReportDocument({ report }: { report: Report }) {
   const { days, setDays, range, setRange, inRange } = usePeriod();
@@ -220,8 +214,6 @@ function ReportDocument({ report }: { report: Report }) {
   const deleteReport = useDeleteReport();
 
   const [channelOpen, setChannelOpen] = useState(false);
-  const [editing, setEditing] = useState(false);
-  const [addOpen, setAddOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const cancelRename = useRef(false);
 
@@ -242,16 +234,13 @@ function ReportDocument({ report }: { report: Report }) {
   };
 
   // Block layout — client-side truth while editing; the server config is the durable copy.
-  // Unknown keys (older/newer client) are dropped; a MISSING list = the full default set,
-  // while an explicitly emptied report ([]) stays empty.
-  const [blocks, setBlocks] = useState<ReportBlockKey[]>(() => {
-    const listed = report.config.blocks;
-    if (listed == null) return [...DEFAULT_REPORT_BLOCKS];
-    return [...new Set(listed.filter(isReportBlockKey))];
-  });
+  // normalizeBlocks handles legacy string[] / new object[] / missing (default set) / [] (empty).
+  const [blocks, setBlocks] = useState<ReportBlock[]>(() => normalizeBlocks(report.config.blocks));
 
   // ── Debounced config persistence (blocks + periodDays PUT as one JSONB patch) ──
-  const cfgRef = useRef<ReportConfig>({ ...report.config });
+  // Seed cfgRef with the SAME normalized blocks the state holds (one genId pass) so any first
+  // PUT — even a period-only one — writes the migrated object[] shape, not the legacy strings.
+  const cfgRef = useRef<ReportConfig>({ ...report.config, blocks });
   const timerRef = useRef<number | null>(null);
   const dirtyRef = useRef(false);
 
@@ -314,15 +303,15 @@ function ReportDocument({ report }: { report: Report }) {
   const channels = channelsData?.channels ?? [];
   const current = channels.find((c) => c.id === channelId);
   const channelName = String(current?.username || current?.title || current?.id || '');
-  const { drillMeta, normPosts, periodLabel, subsSpark } = derived;
+  const { drillMeta, periodLabel, subsSpark } = derived;
 
   // Daily series for the metric-card blocks (same math as the /metrics pages).
   const winTo = range ? range.to : Date.now();
   const winFrom = range ? range.from : days > 0 ? winTo - (days - 1) * DAY_MS : null;
   const dailyFor = (field: PostMetricField): DailySeries =>
     winFrom != null && (winTo - winFrom) / DAY_MS <= 366
-      ? filledDailySeries(normPosts, field, winFrom, winTo)
-      : sparseDailySeries(normPosts, field);
+      ? filledDailySeries(derived.normPosts, field, winFrom, winTo)
+      : sparseDailySeries(derived.normPosts, field);
   const viewsSeries = dailyFor('reach');
   const reactionsSeries = dailyFor('likes');
 
@@ -334,10 +323,14 @@ function ReportDocument({ report }: { report: Report }) {
   const chipActive = 'border-primary/40 bg-primary/10 text-primary';
   const chipIdle = 'border-border text-muted-foreground hover:text-foreground';
 
-  // ── Edit handlers ──
-  const applyBlocks = (next: ReportBlockKey[]) => {
+  // ── Block edit handlers ──
+  const applyBlocks = (next: ReportBlock[]) => {
     setBlocks(next);
     commitConfig({ blocks: next });
+  };
+  const insertBlock = (at: number, type: ReportBlockType, presetKey?: ReportBlockKey) => {
+    const block = defaultBlock(type, presetKey);
+    applyBlocks([...blocks.slice(0, at), block, ...blocks.slice(at)]);
   };
   const moveBlock = (idx: number, dir: -1 | 1) => {
     const j = idx + dir;
@@ -347,6 +340,9 @@ function ReportDocument({ report }: { report: Report }) {
     applyBlocks(next);
   };
   const removeBlock = (idx: number) => applyBlocks(blocks.filter((_, i) => i !== idx));
+  const setBlockConfig = (idx: number, patch: Record<string, unknown>) =>
+    applyBlocks(blocks.map((b, i) => (i === idx ? { ...b, config: { ...b.config, ...patch } } : b)));
+
   const pickPeriod = (d: PeriodDays) => {
     setDays(d);
     commitConfig({ periodDays: d });
@@ -360,30 +356,74 @@ function ReportDocument({ report }: { report: Report }) {
     if (!window.confirm(`Удалить отчёт «${report.name}»?`)) return;
     deleteReport.mutate(report.id, { onSuccess: () => navigate('/reports', { replace: true }) });
   };
-  const missing = REPORT_BLOCKS.filter((b) => !blocks.includes(b.key));
 
-  // ── Block renderers (key → the section the single report used to hard-code) ──
-  const renderBlock = (key: ReportBlockKey): ReactNode => {
+  // ── Curated (preset) renderers — the sections the single report used to hard-code ──
+  const renderKpiLedger = (): ReactNode => (
+    <div className="grid grid-cols-2 gap-px border-t border-border bg-border sm:grid-cols-3 lg:grid-cols-6">
+      {LEDGER.map(({ key: k, label }) => (
+        <Link key={k} to={`/metrics/${k}`} className="bg-background p-3 transition-colors hover:bg-muted/60">
+          <div className="text-2xs tracking-wide text-muted-foreground">{label}</div>
+          <div className="mt-1 flex items-baseline gap-1.5">
+            <span className="text-xl font-medium tabular-nums tracking-tight">{drillMeta[k].total}</span>
+            <DeltaPill delta={drillMeta[k].trend} subtle />
+          </div>
+        </Link>
+      ))}
+    </div>
+  );
+
+  const renderWeeklyTable = (): ReactNode => {
+    if (!weekly) return null;
+    return (
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[560px] border-collapse text-sm">
+          <thead>
+            <tr>
+              <th className="py-1.5 pr-2 text-left text-2xs font-medium tracking-wide text-muted-foreground">нед. с</th>
+              {weekly.weeks.map((w) => (
+                <th key={w.key} className="px-1 py-1.5 text-right text-2xs font-medium tabular-nums text-muted-foreground">
+                  {w.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {weekly.rows.map((row) => {
+              const rowMax = Math.max(...row.values.map((v) => (v == null ? 0 : Math.abs(v))), 0);
+              return (
+                <tr key={row.label} className="border-t border-border">
+                  <td className="py-1 pr-2 text-xs text-muted-foreground">{row.label}</td>
+                  {row.values.map((value, i) => (
+                    <td key={weekly.weeks[i].key} className="px-1 py-1">
+                      <div className="relative overflow-hidden rounded px-2 py-1 text-right tabular-nums">
+                        <div aria-hidden="true" className="absolute inset-0" style={cellTint(value, rowMax, row.signed)} />
+                        <span className="relative">
+                          {value == null
+                            ? '—'
+                            : row.signed
+                              ? `${value > 0 ? '+' : value < 0 ? '−' : ''}${fmt.num(Math.abs(value))}`
+                              : fmt.short(value)}
+                        </span>
+                      </div>
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        <p className="mt-2 text-2xs text-muted-foreground">
+          Заливка — доля от максимума строки; источник — дневной архив, последняя неделя может быть неполной.
+        </p>
+      </div>
+    );
+  };
+
+  const renderPreset = (key: ReportBlockKey): ReactNode => {
     switch (key) {
       case 'kpi-summary':
-        // Сводка — the six KPIs as a hairline ledger (same numbers as the Overview).
-        return (
-          <ChartSection title="Сводка">
-            <div className="grid grid-cols-2 gap-px border-t border-border bg-border sm:grid-cols-3 lg:grid-cols-6">
-              {LEDGER.map(({ key: k, label }) => (
-                <Link key={k} to={`/metrics/${k}`} className="bg-background p-3 transition-colors hover:bg-muted/60">
-                  <div className="text-2xs tracking-wide text-muted-foreground">{label}</div>
-                  <div className="mt-1 flex items-baseline gap-1.5">
-                    <span className="text-xl font-medium tabular-nums tracking-tight">{drillMeta[k].total}</span>
-                    <DeltaPill delta={drillMeta[k].trend} subtle />
-                  </div>
-                </Link>
-              ))}
-            </div>
-          </ChartSection>
-        );
+        return <ChartSection title="Сводка">{renderKpiLedger()}</ChartSection>;
       case 'digest':
-        // Инсайт — Итог / Доказательство / Что сделать (label lives on the section).
         return (
           <ChartSection title="Инсайт">
             <Digest />
@@ -391,90 +431,23 @@ function ReportDocument({ report }: { report: Report }) {
         );
       case 'metric-views':
         return (
-          <ReportMetricCard
-            title="Просмотры по дням"
-            total={drillMeta.views.total}
-            trend={drillMeta.views.trend}
-            series={viewsSeries}
-            valueFmt={fmt.short}
-            zeroBase
-            to="/metrics/views"
-          />
+          <ReportMetricCard title="Просмотры по дням" total={drillMeta.views.total} trend={drillMeta.views.trend}
+            series={viewsSeries} valueFmt={fmt.short} zeroBase to="/metrics/views" />
         );
       case 'metric-subscribers':
-        // Подписчики — уровень по дням из дневного архива (stock-метрика: fitted scale, без zeroBase).
         return (
-          <ReportMetricCard
-            title="Подписчики по дням"
-            total={drillMeta.subscribers.total}
-            trend={drillMeta.subscribers.trend}
-            series={subsSpark}
-            valueFmt={fmt.num}
-            to="/metrics/subscribers"
-          />
+          <ReportMetricCard title="Подписчики по дням" total={drillMeta.subscribers.total} trend={drillMeta.subscribers.trend}
+            series={subsSpark} valueFmt={fmt.num} to="/metrics/subscribers" />
         );
       case 'metric-reactions':
         return (
-          <ReportMetricCard
-            title="Реакции по дням"
-            total={drillMeta.reactions.total}
-            trend={drillMeta.reactions.trend}
-            series={reactionsSeries}
-            valueFmt={fmt.short}
-            zeroBase
-            to="/metrics/reactions"
-          />
+          <ReportMetricCard title="Реакции по дням" total={drillMeta.reactions.total} trend={drillMeta.reactions.trend}
+            series={reactionsSeries} valueFmt={fmt.short} zeroBase to="/metrics/reactions" />
         );
-      case 'weekly-table':
-        // Понедельный срез с heat-шейдингом (steep Reports table). Needs ≥2 archive weeks.
-        if (!weekly) return null;
-        return (
-          <ChartSection title="По неделям · последние 6">
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[560px] border-collapse text-sm">
-                <thead>
-                  <tr>
-                    <th className="py-1.5 pr-2 text-left text-2xs font-medium tracking-wide text-muted-foreground">
-                      нед. с
-                    </th>
-                    {weekly.weeks.map((w) => (
-                      <th key={w.key} className="px-1 py-1.5 text-right text-2xs font-medium tabular-nums text-muted-foreground">
-                        {w.label}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {weekly.rows.map((row) => {
-                    const rowMax = Math.max(...row.values.map((v) => (v == null ? 0 : Math.abs(v))), 0);
-                    return (
-                      <tr key={row.label} className="border-t border-border">
-                        <td className="py-1 pr-2 text-xs text-muted-foreground">{row.label}</td>
-                        {row.values.map((value, i) => (
-                          <td key={weekly.weeks[i].key} className="px-1 py-1">
-                            <div className="relative overflow-hidden rounded px-2 py-1 text-right tabular-nums">
-                              <div aria-hidden="true" className="absolute inset-0" style={cellTint(value, rowMax, row.signed)} />
-                              <span className="relative">
-                                {value == null
-                                  ? '—'
-                                  : row.signed
-                                    ? `${value > 0 ? '+' : value < 0 ? '−' : ''}${fmt.num(Math.abs(value))}`
-                                    : fmt.short(value)}
-                              </span>
-                            </div>
-                          </td>
-                        ))}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            <p className="text-2xs text-muted-foreground">
-              Заливка — доля от максимума строки; источник — дневной архив, последняя неделя может быть неполной.
-            </p>
-          </ChartSection>
-        );
+      case 'weekly-table': {
+        const table = renderWeeklyTable();
+        return table && <ChartSection title="По неделям · последние 6">{table}</ChartSection>;
+      }
       case 'insights':
         return (
           <ChartSection title="Наблюдения">
@@ -490,17 +463,104 @@ function ReportDocument({ report }: { report: Report }) {
     }
   };
 
-  // Consecutive metric-card blocks share a 2-up grid (the document's original layout);
-  // everything else flows full-width.
-  const groups: ReportBlockKey[][] = [];
-  for (const key of blocks) {
-    const last = groups[groups.length - 1];
-    if (key.startsWith('metric-') && last && last[0].startsWith('metric-')) last.push(key);
-    else groups.push([key]);
-  }
+  // Chart / big-number metric → its daily series + KPI headline (reconciles with the ledger).
+  const chartSpec = (metric: string): { series: DailySeries; valueFmt: (n: number) => string; zeroBase: boolean; label: string; drill: DrillKey } => {
+    switch (metric) {
+      case 'subscribers':
+        return { series: subsSpark, valueFmt: fmt.num, zeroBase: false, label: 'Подписчики по дням', drill: 'subscribers' };
+      case 'reactions':
+        return { series: dailyFor('likes'), valueFmt: fmt.short, zeroBase: true, label: 'Реакции по дням', drill: 'reactions' };
+      case 'forwards':
+        return { series: dailyFor('shares'), valueFmt: fmt.short, zeroBase: true, label: 'Репосты по дням', drill: 'forwards' };
+      case 'views':
+      default:
+        return { series: dailyFor('reach'), valueFmt: fmt.short, zeroBase: true, label: 'Просмотры по дням', drill: 'views' };
+    }
+  };
+
+  // ── Generic block renderer ──
+  const renderContent = (block: ReportBlock, idx: number): ReactNode => {
+    switch (block.type) {
+      case 'preset': {
+        const key = block.config.key;
+        return typeof key === 'string' && isReportBlockKey(key) ? renderPreset(key) : null;
+      }
+      case 'divider':
+        return <hr className="border-0 border-t border-border" />;
+      case 'text':
+        return (
+          <TextBlock
+            value={typeof block.config.text === 'string' ? block.config.text : ''}
+            onChange={(text) => setBlockConfig(idx, { text })}
+          />
+        );
+      case 'bignumber': {
+        const metric: DrillKey = typeof block.config.metric === 'string' && isDrillKey(block.config.metric) ? block.config.metric : 'views';
+        const label = LEDGER.find((l) => l.key === metric)?.label ?? metric;
+        return (
+          <div>
+            <BlockControls>
+              <MiniSelect ariaLabel="Метрика" value={metric} onChange={(v) => setBlockConfig(idx, { metric: v })}
+                options={LEDGER.map((l) => ({ value: l.key, label: l.label }))} />
+            </BlockControls>
+            <div className="text-xs font-medium tracking-wider text-muted-foreground">{label}</div>
+            <div className="mt-2 flex items-baseline gap-2">
+              <span className="text-4xl font-medium tabular-nums tracking-tight">{drillMeta[metric].total}</span>
+              <DeltaPill delta={drillMeta[metric].trend} />
+            </div>
+          </div>
+        );
+      }
+      case 'chart': {
+        const rawMetric = typeof block.config.metric === 'string' ? block.config.metric : 'views';
+        const metric = CHART_METRICS.some((m) => m.value === rawMetric) ? rawMetric : 'views';
+        const viz: 'line' | 'bar' = block.config.viz === 'bar' ? 'bar' : 'line';
+        const spec = chartSpec(metric);
+        return (
+          <section className="min-w-0 space-y-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <h3 className="whitespace-nowrap text-xs font-medium tracking-wider text-muted-foreground">{spec.label}</h3>
+              <span aria-hidden="true" className="h-px flex-1 bg-border" />
+              <BlockControls>
+                <MiniSelect ariaLabel="Метрика" value={metric} onChange={(v) => setBlockConfig(idx, { metric: v })} options={CHART_METRICS} />
+                <Segmented value={viz} onChange={(v) => setBlockConfig(idx, { viz: v })}
+                  options={[{ value: 'line', label: 'Линия' }, { value: 'bar', label: 'Столбцы' }]} />
+              </BlockControls>
+            </div>
+            <div className="flex items-baseline gap-2">
+              <span className="text-2xl font-medium tabular-nums tracking-tight">{drillMeta[spec.drill].total}</span>
+              <DeltaPill delta={drillMeta[spec.drill].trend} subtle />
+            </div>
+            <ReportChart series={spec.series} viz={viz} valueFmt={spec.valueFmt} zeroBase={spec.zeroBase} />
+          </section>
+        );
+      }
+      case 'table': {
+        const rawSource = typeof block.config.source === 'string' ? block.config.source : 'weekly';
+        const source = TABLE_SOURCES.some((s) => s.value === rawSource) ? rawSource : 'weekly';
+        const body =
+          source === 'top-posts' ? <TopPosts /> : source === 'kpi-ledger' ? renderKpiLedger() : renderWeeklyTable();
+        const label = TABLE_SOURCES.find((s) => s.value === source)?.label ?? 'Таблица';
+        return (
+          <section className="space-y-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <h3 className="whitespace-nowrap text-xs font-medium tracking-wider text-muted-foreground">{label}</h3>
+              <span aria-hidden="true" className="h-px flex-1 bg-border" />
+              <BlockControls>
+                <MiniSelect ariaLabel="Источник" value={source} onChange={(v) => setBlockConfig(idx, { source: v })} options={TABLE_SOURCES} />
+              </BlockControls>
+            </div>
+            {body ?? <NotEnough />}
+          </section>
+        );
+      }
+      case 'map':
+        return <MapBlock />;
+    }
+  };
 
   return (
-    <div className="mx-auto w-full max-w-4xl space-y-10">
+    <div className="mx-auto w-full max-w-4xl">
       {/* Document header — the report reads as an artifact, not a dashboard view. */}
       <div>
         <div className="text-xs text-muted-foreground">Отчёт · Telegram · сгенерирован {generated}</div>
@@ -545,7 +605,7 @@ function ReportDocument({ report }: { report: Report }) {
           @{channelName} — {rangeLabel ?? periodLabel}
         </p>
 
-        {/* Global filter bar (steep Reports): period / channel / platform pills + configure + print. */}
+        {/* Global filter bar (steep Reports): period / channel / platform pills + print. */}
         <div className="mt-4 flex flex-wrap items-center gap-2 border-y border-border py-3 print:hidden">
           {PERIOD_CHIPS.map((chip) => (
             <button
@@ -606,14 +666,6 @@ function ReportDocument({ report }: { report: Report }) {
           )}
           <span className={`${chipBase} ${chipIdle} cursor-default`}>Telegram</span>
           <span className="flex-1" />
-          <button
-            type="button"
-            onClick={() => setEditing((v) => !v)}
-            aria-pressed={editing}
-            className={`${chipBase} ${editing ? chipActive : chipIdle}`}
-          >
-            Настроить
-          </button>
           <button type="button" onClick={() => window.print()} className={`${chipBase} ${chipIdle}`}>
             Печать / PDF
           </button>
@@ -643,86 +695,41 @@ function ReportDocument({ report }: { report: Report }) {
         </div>
       </div>
 
-      {/* The composed document: config.blocks in order; consecutive metric cards share a 2-up grid. */}
-      {blocks.length === 0 && (
-        <EmptyState title="В отчёте нет блоков" reason="Включите «Настроить» и добавьте блоки аналитики." />
-      )}
-      {groups.map((group) => {
-        const items = group.map((key) => {
-          const content = renderBlock(key);
-          if (content == null && !editing) return null;
-          const idx = blocks.indexOf(key);
-          return (
-            <BlockFrame
-              key={key}
-              label={blockLabel(key)}
-              editing={editing}
-              idx={idx}
-              count={blocks.length}
-              onMove={moveBlock}
-              onRemove={removeBlock}
-            >
-              {content ?? (
-                <p className="py-6 text-center text-sm text-muted-foreground">Пока недостаточно данных для этого блока.</p>
-              )}
-            </BlockFrame>
-          );
-        });
-        return group[0].startsWith('metric-') ? (
-          <div key={`g-${group[0]}`} className="grid grid-cols-1 gap-10 md:grid-cols-2">
-            {items}
-          </div>
-        ) : (
-          <Fragment key={`g-${group[0]}`}>{items}</Fragment>
-        );
-      })}
+      {/* The composed document: config.blocks in order, single-column. A hover «+» in every gap
+          adds a block; each block carries a hover toolbar + its own inline config controls. */}
+      <div className="mt-8">
+        <InlineAdd onAdd={(type, key) => insertBlock(0, type, key)} />
+        {blocks.map((block, idx) => (
+          <Fragment key={block.id}>
+            <div className="print:mt-6">
+              <BlockFrame idx={idx} count={blocks.length} onMove={moveBlock} onRemove={removeBlock}>
+                {renderContent(block, idx) ?? <NotEnough />}
+              </BlockFrame>
+            </div>
+            <InlineAdd onAdd={(type, key) => insertBlock(idx + 1, type, key)} />
+          </Fragment>
+        ))}
+        {blocks.length === 0 && (
+          <p className="py-8 text-center text-sm text-muted-foreground">
+            Пустой отчёт. Нажмите «+», чтобы добавить блок.
+          </p>
+        )}
+      </div>
 
-      {/* Configure-mode actions: add a missing block / delete the report. Screen-only chrome. */}
-      {editing && (
-        <div className="flex flex-wrap items-center gap-3 print:hidden">
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setAddOpen((v) => !v)}
-              disabled={missing.length === 0}
-              aria-expanded={addOpen}
-              className={`${chipBase} ${chipIdle} disabled:opacity-40`}
-            >
-              + Добавить блок
-            </button>
-            {addOpen && missing.length > 0 && (
-              <div className="absolute bottom-full left-0 z-20 mb-1 w-56 rounded border border-border bg-card p-1">
-                {missing.map((b) => (
-                  <button
-                    key={b.key}
-                    type="button"
-                    onClick={() => {
-                      applyBlocks([...blocks, b.key]);
-                      setAddOpen(false);
-                    }}
-                    className="block w-full rounded px-2.5 py-1.5 text-left text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                  >
-                    {b.label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          <span className="flex-1" />
-          <button
-            type="button"
-            onClick={handleDelete}
-            disabled={deleteReport.isPending}
-            className="text-xs font-medium text-muted-foreground transition-colors hover:text-destructive disabled:opacity-50"
-          >
-            {deleteReport.isPending ? 'Удаление…' : 'Удалить отчёт'}
-          </button>
-        </div>
-      )}
-
-      <p className="border-t border-border pt-3 text-2xs text-muted-foreground">
-        Сгенерировано Atlavue · {generated} · данные: Telegram (MTProto) + дневной архив сборщика.
-      </p>
+      {/* Footer — the printed generation note stays; delete is screen-only owner chrome. */}
+      <div className="mt-10 flex items-start justify-between gap-3 border-t border-border pt-3">
+        <p className="text-2xs text-muted-foreground">
+          Сгенерировано Atlavue · {generated} · данные: Telegram (MTProto) + дневной архив сборщика.
+        </p>
+        <button
+          type="button"
+          onClick={handleDelete}
+          disabled={deleteReport.isPending}
+          className="shrink-0 text-xs font-medium text-muted-foreground transition-colors hover:text-destructive disabled:opacity-50 print:hidden"
+        >
+          {deleteReport.isPending ? 'Удаление…' : 'Удалить отчёт'}
+        </button>
+      </div>
     </div>
   );
 }
@@ -745,9 +752,83 @@ function PencilGlyph({ className }: { className?: string }) {
   );
 }
 
+// ── Inline «+» add-menu — the Notion/steep gap affordance ──────────────────────────────────
+function InlineAdd({ onAdd }: { onAdd: (type: ReportBlockType, presetKey?: ReportBlockKey) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={ref} className="group/add relative flex h-10 items-center justify-center print:hidden">
+      <span
+        aria-hidden="true"
+        className={`absolute inset-x-0 top-1/2 h-px -translate-y-1/2 transition-colors ${open ? 'bg-border' : 'bg-transparent group-hover/add:bg-border'}`}
+      />
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-label="Добавить блок"
+        aria-expanded={open}
+        className={`relative z-10 flex h-6 w-6 items-center justify-center rounded-full border border-border bg-background text-muted-foreground transition-opacity hover:text-foreground ${
+          open ? 'opacity-100' : 'opacity-0 group-hover/add:opacity-100 focus-visible:opacity-100'
+        }`}
+      >
+        <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
+          <path d="M8 3v10M3 8h10" />
+        </svg>
+      </button>
+      {open && (
+        <div className="absolute left-1/2 top-full z-30 mt-1 w-64 -translate-x-1/2 rounded-lg border border-border bg-card p-1.5 text-left">
+          {ADD_TYPES.map((t) => (
+            <button
+              key={t.type}
+              type="button"
+              onClick={() => {
+                onAdd(t.type);
+                setOpen(false);
+              }}
+              className="block w-full rounded px-2.5 py-1.5 text-left transition-colors hover:bg-muted"
+            >
+              <span className="block text-sm text-foreground">{t.label}</span>
+              <span className="block text-2xs text-muted-foreground">{t.hint}</span>
+            </button>
+          ))}
+          <div aria-hidden="true" className="mx-1 my-1 h-px bg-border" />
+          <div className="px-2.5 py-1 text-2xs tracking-wide text-muted-foreground">Готовый блок</div>
+          {REPORT_BLOCKS.map((b) => (
+            <button
+              key={b.key}
+              type="button"
+              onClick={() => {
+                onAdd('preset', b.key);
+                setOpen(false);
+              }}
+              className="block w-full rounded px-2.5 py-1.5 text-left text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              {b.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface BlockFrameProps {
-  label: string;
-  editing: boolean;
   idx: number;
   count: number;
   onMove: (idx: number, dir: -1 | 1) => void;
@@ -756,29 +837,25 @@ interface BlockFrameProps {
 }
 
 /**
- * Configure-mode wrapper: a dashed hairline frame with ↑ / ↓ / × controls above the block.
- * Outside «Настроить» it renders the block bare — the printed document never sees the frame
- * (and even mid-edit the chrome is print-hidden, the border print-stripped).
+ * Always-on inline editing wrapper: a hover toolbar (↑ / ↓ / ×) floats above the block's
+ * top-right corner, revealed on block hover or keyboard focus. It's print-hidden, so the
+ * printed document is just the block content.
  */
-function BlockFrame({ label, editing, idx, count, onMove, onRemove, children }: BlockFrameProps) {
-  if (!editing) return <>{children}</>;
+function BlockFrame({ idx, count, onMove, onRemove, children }: BlockFrameProps) {
   return (
-    <div className="rounded border border-dashed border-border p-3 print:border-0 print:p-0">
-      <div className="mb-2 flex items-center justify-between gap-2 print:hidden">
-        <span className="text-2xs font-medium uppercase tracking-wide text-muted-foreground">{label}</span>
-        <div className="flex items-center gap-0.5">
-          <BlockCtl onClick={() => onMove(idx, -1)} disabled={idx <= 0} label="Переместить выше">
-            <Icon name="chevron" className="h-3.5 w-3.5 rotate-180" />
-          </BlockCtl>
-          <BlockCtl onClick={() => onMove(idx, 1)} disabled={idx >= count - 1} label="Переместить ниже">
-            <Icon name="chevron" className="h-3.5 w-3.5" />
-          </BlockCtl>
-          <BlockCtl onClick={() => onRemove(idx)} label="Убрать блок">
-            <span aria-hidden="true" className="text-sm leading-none">
-              ×
-            </span>
-          </BlockCtl>
-        </div>
+    <div className="group/block relative">
+      <div className="absolute bottom-full right-0 z-20 mb-1 flex items-center gap-0.5 rounded border border-border bg-card p-0.5 opacity-0 transition-opacity group-hover/block:opacity-100 focus-within:opacity-100 print:hidden">
+        <BlockCtl onClick={() => onMove(idx, -1)} disabled={idx <= 0} label="Переместить выше">
+          <Icon name="chevron" className="h-3.5 w-3.5 rotate-180" />
+        </BlockCtl>
+        <BlockCtl onClick={() => onMove(idx, 1)} disabled={idx >= count - 1} label="Переместить ниже">
+          <Icon name="chevron" className="h-3.5 w-3.5" />
+        </BlockCtl>
+        <BlockCtl onClick={() => onRemove(idx)} label="Убрать блок">
+          <span aria-hidden="true" className="text-sm leading-none">
+            ×
+          </span>
+        </BlockCtl>
       </div>
       {children}
     </div>
@@ -811,6 +888,161 @@ function BlockCtl({
   );
 }
 
+/** Print-hidden row of a block's own inline config controls (metric / viz / source). */
+function BlockControls({ children }: { children: ReactNode }) {
+  return <div className="flex flex-wrap items-center gap-2 print:hidden">{children}</div>;
+}
+
+/** Native select styled as a hairline control — accessible + cheap. */
+function MiniSelect({
+  value,
+  options,
+  onChange,
+  ariaLabel,
+}: {
+  value: string;
+  options: Array<{ value: string; label: string }>;
+  onChange: (v: string) => void;
+  ariaLabel: string;
+}) {
+  return (
+    <select
+      aria-label={ariaLabel}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="rounded border border-border bg-background px-2 py-1 text-xs font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+    >
+      {options.map((o) => (
+        <option key={o.value} value={o.value}>
+          {o.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+/** Two/three-way segmented toggle (line ↔ bar). */
+function Segmented({
+  value,
+  options,
+  onChange,
+}: {
+  value: string;
+  options: Array<{ value: string; label: string }>;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="flex overflow-hidden rounded border border-border">
+      {options.map((o) => {
+        const active = o.value === value;
+        return (
+          <button
+            key={o.value}
+            type="button"
+            aria-pressed={active}
+            onClick={() => onChange(o.value)}
+            className={`border-r border-border px-2 py-1 text-xs font-medium transition-colors last:border-r-0 ${
+              active ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+            }`}
+          >
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Freeform text block: a borderless auto-growing textarea on screen (always editable),
+    mirrored by a print-only paragraph so the printed document stays clean. */
+function TextBlock({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, [value]);
+  return (
+    <>
+      <textarea
+        ref={ref}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        rows={1}
+        placeholder="Текст…"
+        aria-label="Текстовый блок"
+        className="block w-full resize-none border-0 bg-transparent p-0 text-base leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/60 print:hidden"
+      />
+      <p className="hidden whitespace-pre-wrap text-base leading-relaxed text-foreground print:block">{value}</p>
+    </>
+  );
+}
+
+/** Audience map — deferred stub: Telegram exposes no geo, so this is an honest placeholder
+    (ready to wire Instagram country/city demographics when a report can target an IG source). */
+function MapBlock() {
+  return (
+    <section className="space-y-3">
+      <h3 className="flex items-center gap-3 text-xs font-medium tracking-wider text-muted-foreground">
+        <span className="whitespace-nowrap">Карта аудитории</span>
+        <span aria-hidden="true" className="h-px flex-1 bg-border" />
+      </h3>
+      <div className="rounded border border-dashed border-border bg-background px-4 py-8 text-center">
+        <p className="text-sm font-medium text-foreground">География недоступна для Telegram</p>
+        <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
+          Telegram не отдаёт географию аудитории. Блок появится для источников с демографией
+          (Instagram: страны и города).
+        </p>
+      </div>
+    </section>
+  );
+}
+
+/** Not-enough-data placeholder for a block whose source is empty this period. */
+function NotEnough() {
+  return <p className="py-6 text-center text-sm text-muted-foreground">Пока недостаточно данных для этого блока.</p>;
+}
+
+/** Generic chart-block renderer: LineChart, or BarChart in rich (ticks + value labels) mode. */
+function ReportChart({
+  series,
+  viz,
+  valueFmt,
+  zeroBase,
+}: {
+  series: DailySeries;
+  viz: 'line' | 'bar';
+  valueFmt: (n: number) => string;
+  zeroBase?: boolean;
+}) {
+  if (series.values.length <= 1) {
+    return (
+      <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">Недостаточно точек за период</div>
+    );
+  }
+  const titles = series.values.map((v, i) => `${series.labels[i]}: ${valueFmt(v)}`);
+  if (viz === 'bar') {
+    return (
+      <ChartExpandedContext.Provider value={true}>
+        <BarChart values={series.values} labels={series.labels} titles={titles} height={200} />
+      </ChartExpandedContext.Provider>
+    );
+  }
+  return (
+    <LineChart
+      values={series.values}
+      labels={series.labels}
+      titles={titles}
+      height={200}
+      fullAxes
+      markExtremes
+      showPoints={series.values.length <= 45}
+      yMin={zeroBase ? 0 : undefined}
+    />
+  );
+}
+
 interface ReportMetricCardProps {
   title: string;
   total: string;
@@ -821,7 +1053,7 @@ interface ReportMetricCardProps {
   to: string;
 }
 
-/** Compact metric card for the report grid: headline + chart + a link to the metric page. */
+/** Compact metric card for a preset metric-* block: headline + chart + a link to the metric page. */
 function ReportMetricCard({ title, total, trend, series, valueFmt, zeroBase, to }: ReportMetricCardProps) {
   return (
     <section className="min-w-0 space-y-3">

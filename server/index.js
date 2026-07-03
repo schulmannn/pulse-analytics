@@ -1602,8 +1602,22 @@ app.delete('/api/channels/:id/annotations/:annId', requireAuth, async (req, res,
 // config — произвольная композиция блоков, целиком принадлежит фронту; сервер
 // проверяет только форму (plain object) и размер сериализованного JSON.
 const REPORT_CONFIG_MAX_CHARS = 16000;
+const REPORT_MAX_BLOCKS = 100;
 function reportConfigError(config) {
   if (typeof config !== 'object' || config === null || Array.isArray(config)) return 'config должен быть объектом';
+  // Blocks stay frontend-owned (generic { id, type, config } or legacy string keys); the server
+  // only checks the coarse shape so a broken client can't persist garbage: an array of strings or
+  // plain objects, capped in count. The 16 KB serialized cap below still bounds everything else.
+  if (config.blocks !== undefined) {
+    if (!Array.isArray(config.blocks)) return 'config.blocks должен быть массивом';
+    if (config.blocks.length > REPORT_MAX_BLOCKS) return `config.blocks: слишком много блоков (макс. ${REPORT_MAX_BLOCKS})`;
+    for (const b of config.blocks) {
+      const t = typeof b;
+      if (t !== 'string' && (t !== 'object' || b === null || Array.isArray(b))) {
+        return 'config.blocks: элемент должен быть строкой или объектом';
+      }
+    }
+  }
   if (JSON.stringify(config).length > REPORT_CONFIG_MAX_CHARS) return `config слишком большой (макс. ${REPORT_CONFIG_MAX_CHARS} символов JSON)`;
   return null;
 }
