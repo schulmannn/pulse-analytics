@@ -120,7 +120,7 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
   фикс сломал бы реальный net-zero — верификатор поймал); (2) [LOW] igFormats терял format-stable цвет
   `MEDIA_PRODUCT_CHART` → фикс. **Живой e2e IG = юзер (IG-подключённый канал).**
   Осталось: SourceField не даёт пинить IG-канал для IG-виджета (follow-switcher ок; follow-up).
-- **S12 — Визуальный слой ПОСЛЕ модели** — SHIPPED `<pending>` (полировка; миграция TgAnalytics отложена)
+- **S12 — Визуальный слой ПОСЛЕ модели** — SHIPPED `8f39ed6` (полировка; миграция TgAnalytics отложена)
   Story-card полировка из ОДНОГО рендерера: **компактный статистика-футер** (Макс · Среднее) под series-
   графиком (`seriesStats` pure+тест) — «ledger»-плотность (steep: линия читается и числами). Hairline,
   2 начертания, без теней/градиентов (governance). +2 теста (269). **Осознанно НЕ сделано:** tonal-фоны
@@ -130,7 +130,7 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
 
 ## Журнал
 
-- 2026-07-03 — **S12 SHIPPED** `<pending>` + **S9** `e52ff2b`. S9: target resolver-owned (fixed+dynamic)
+- 2026-07-03 — **S12 SHIPPED** `8f39ed6` + **S9** `e52ff2b`. S9: target resolver-owned (fixed+dynamic)
   + «N% от цели» (review 0). S12: story-card стат-футер (Макс·Среднее). Tonal-фон/tooltip/TgAnalytics-
   миграция осознанно отложены (governance / риск live-страницы). **ПЛАН S1-S12 ЗАКРЫТ** (кроме опциональной
   миграции TgAnalytics). Итог: 31 метрика (20 TG + 11 IG), 269 тестов, движок→редактор→фильтры→сравнение→
