@@ -1278,6 +1278,179 @@ const SIZE_OPTIONS: Array<{ size: WidgetSize; label: string }> = [
   { size: 'full', label: 'Полный' },
 ];
 
+// Carousel geometry — must match the Tailwind classes on the cards (w-56, gap-3).
+const CAROUSEL_CARD_W = 224;
+const CAROUSEL_GAP = 12;
+
+/**
+ * Variant picker as a steep-style carousel: live preview cards on a translated track
+ * (active card centered, neighbours peeking), ‹ › arrows, dot pagination, pointer swipe.
+ * The centered card IS the chosen presentation — arrows/dots/card clicks all select.
+ */
+function VariantCarousel({
+  variants,
+  prefs,
+  onChange,
+}: {
+  variants: WidgetVariant[];
+  prefs: WidgetPrefs;
+  onChange: (prefs: WidgetPrefs) => void;
+}) {
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const [viewportW, setViewportW] = useState(0);
+  useLayoutEffect(() => {
+    const node = viewportRef.current;
+    if (!node) return;
+    const measure = () => setViewportW(node.clientWidth);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(node);
+    return () => ro.disconnect();
+  }, []);
+
+  const activeKey = prefs.variant ?? variants[0].key;
+  const activeIdx = Math.max(
+    0,
+    variants.findIndex((v) => v.key === activeKey),
+  );
+  const select = (i: number) => {
+    const next = Math.min(variants.length - 1, Math.max(0, i));
+    onChange({ ...prefs, variant: variants[next].key === variants[0].key ? undefined : variants[next].key });
+  };
+
+  // Pointer swipe flips to the neighbour; a real drag suppresses the card's click-select.
+  const dragStartX = useRef<number | null>(null);
+  const dragged = useRef(false);
+  const onPointerDown = (e: React.PointerEvent) => {
+    dragStartX.current = e.clientX;
+    dragged.current = false;
+  };
+  const onPointerUp = (e: React.PointerEvent) => {
+    if (dragStartX.current == null) return;
+    const delta = e.clientX - dragStartX.current;
+    dragStartX.current = null;
+    if (Math.abs(delta) > 40) {
+      dragged.current = true;
+      select(activeIdx + (delta < 0 ? 1 : -1));
+    }
+  };
+
+  // Center the active card: track shift = half viewport − half card − active offset.
+  const offset = viewportW / 2 - CAROUSEL_CARD_W / 2 - activeIdx * (CAROUSEL_CARD_W + CAROUSEL_GAP);
+
+  const arrowCls =
+    'absolute top-1/2 z-10 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-card/90 text-muted-foreground backdrop-blur transition-colors hover:text-foreground disabled:opacity-30 disabled:hover:text-muted-foreground';
+
+  return (
+    <div>
+      <div className="relative">
+        <button
+          type="button"
+          aria-label="Предыдущий тип"
+          disabled={activeIdx === 0}
+          onClick={() => select(activeIdx - 1)}
+          className={`${arrowCls} left-1`}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4" aria-hidden="true">
+            <path d="m15 6-6 6 6 6" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          aria-label="Следующий тип"
+          disabled={activeIdx === variants.length - 1}
+          onClick={() => select(activeIdx + 1)}
+          className={`${arrowCls} right-1`}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4" aria-hidden="true">
+            <path d="m9 6 6 6-6 6" />
+          </svg>
+        </button>
+        <div
+          ref={viewportRef}
+          className="touch-pan-y overflow-hidden"
+          onPointerDown={onPointerDown}
+          onPointerUp={onPointerUp}
+        >
+          <div
+            className={`flex gap-3 motion-reduce:transition-none ${
+              viewportW > 0 ? 'transition-transform duration-300 ease-out' : ''
+            }`}
+            style={{ transform: `translateX(${offset}px)` }}
+          >
+            {variants.map((v, i) => {
+              const active = i === activeIdx;
+              // Wide (minSize:'full') variants preview at half the scale so the whole
+              // chart+ledger row fits the same w-56 preview card.
+              const wide = v.minSize === 'full';
+              const previewStyle: CSSProperties = {};
+              if (prefs.color) (previewStyle as Record<string, string>)['--brand-iris'] = `var(--chart-${prefs.color})`;
+              if (prefs.tinted)
+                previewStyle.backgroundColor = `hsl(var(${prefs.color ? `--chart-${prefs.color}` : '--brand-iris'}) / 0.07)`;
+              return (
+                <button
+                  key={v.key}
+                  type="button"
+                  aria-pressed={active}
+                  aria-label={`Тип виджета: ${v.label}`}
+                  onClick={() => {
+                    if (dragged.current) {
+                      dragged.current = false;
+                      return;
+                    }
+                    select(i);
+                  }}
+                  className={`w-56 shrink-0 overflow-hidden rounded-lg border text-left transition-[opacity,transform,border-color] duration-300 motion-reduce:transition-none ${
+                    active
+                      ? 'border-primary ring-1 ring-primary/40'
+                      : 'scale-[0.96] opacity-60 border-border hover:opacity-90'
+                  }`}
+                >
+                  <div aria-hidden="true" className="pointer-events-none h-32 overflow-hidden bg-card" style={previewStyle}>
+                    <div
+                      className="p-3"
+                      style={
+                        wide
+                          ? { width: 896, transform: 'scale(0.25)', transformOrigin: 'top left' }
+                          : { width: 448, transform: 'scale(0.5)', transformOrigin: 'top left' }
+                      }
+                    >
+                      {v.render}
+                    </div>
+                  </div>
+                  <div
+                    className={`border-t px-2.5 py-1.5 text-xs font-medium ${
+                      active ? 'border-primary/40 text-primary' : 'border-border text-muted-foreground'
+                    }`}
+                  >
+                    {v.label}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+      {/* Dot pagination — one per presentation, the active one stretched. */}
+      <div className="mt-2.5 flex justify-center gap-1.5">
+        {variants.map((v, i) => (
+          <button
+            key={v.key}
+            type="button"
+            aria-label={`Тип ${i + 1}: ${v.label}`}
+            aria-current={i === activeIdx || undefined}
+            onClick={() => select(i)}
+            className={`h-1.5 rounded-full transition-all motion-reduce:transition-none ${
+              i === activeIdx ? 'w-4 bg-primary' : 'w-1.5 bg-border hover:bg-ink3/60'
+            }`}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, showSize, defaultSize = 'half', minSize = 'third', onChange, onClose }: EditWidgetDialogProps) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1312,51 +1485,10 @@ function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, showSize,
         {variants && variants.length > 1 && (
           <div className="mt-4">
             <span className="text-2xs tracking-wide text-muted-foreground">Тип виджета</span>
-            {/* Live preview cards (steep Edit widget): each variant renders for real, scaled
-                down, and inherits the chosen accent/tint so what you pick is what you get. */}
-            <div className="mt-2 flex snap-x gap-3 overflow-x-auto pb-1">
-              {variants.map((v) => {
-                const active = (prefs.variant ?? variants[0].key) === v.key;
-                // Wide (minSize:'full') variants preview at half the scale so the whole
-                // chart+ledger row fits the same w-56 preview card.
-                const wide = v.minSize === 'full';
-                const previewStyle: CSSProperties = {};
-                if (prefs.color) (previewStyle as Record<string, string>)['--brand-iris'] = `var(--chart-${prefs.color})`;
-                if (prefs.tinted)
-                  previewStyle.backgroundColor = `hsl(var(${prefs.color ? `--chart-${prefs.color}` : '--brand-iris'}) / 0.07)`;
-                return (
-                  <button
-                    key={v.key}
-                    type="button"
-                    aria-pressed={active}
-                    aria-label={`Тип виджета: ${v.label}`}
-                    onClick={() => onChange({ ...prefs, variant: v.key === variants[0].key ? undefined : v.key })}
-                    className={`w-56 shrink-0 snap-start overflow-hidden rounded-lg border text-left transition-colors ${
-                      active ? 'border-primary ring-1 ring-primary/40' : 'border-border hover:border-ink3/50'
-                    }`}
-                  >
-                    <div aria-hidden="true" className="pointer-events-none h-32 overflow-hidden bg-card" style={previewStyle}>
-                      <div
-                        className="p-3"
-                        style={
-                          wide
-                            ? { width: 896, transform: 'scale(0.25)', transformOrigin: 'top left' }
-                            : { width: 448, transform: 'scale(0.5)', transformOrigin: 'top left' }
-                        }
-                      >
-                        {v.render}
-                      </div>
-                    </div>
-                    <div
-                      className={`border-t px-2.5 py-1.5 text-xs font-medium ${
-                        active ? 'border-primary/40 text-primary' : 'border-border text-muted-foreground'
-                      }`}
-                    >
-                      {v.label}
-                    </div>
-                  </button>
-                );
-              })}
+            {/* Live preview cards on a steep-style carousel: the centered card is the active
+                presentation; each renders for real, scaled down, and inherits accent/tint. */}
+            <div className="mt-2">
+              <VariantCarousel variants={variants} prefs={prefs} onChange={onChange} />
             </div>
           </div>
         )}

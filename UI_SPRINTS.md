@@ -30,8 +30,12 @@ Source of truth прогресса между итерациями. Статус
 
 ## Спринт 2 — Редактор графика (steep-style)
 
-- [ ] **2.1 Карусель карточек-превью типов графика** — TODO
-  Заменить скролл на карусель (стрелки ‹ › + точки-пагинация, активная по центру).
+- [x] **2.1 Карусель карточек-превью типов графика** — SHIPPED `PENDING_HASH`
+  VariantCarousel в EditWidgetDialog (ChartWidget.tsx): активная карточка центрируется на translated-треке
+  (transition 300ms, motion-reduce off), соседи peek по краям (scale .96 + opacity .6), стрелки ‹ › по бокам
+  (disabled на краях), точки-пагинация снизу (активная вытянута bg-primary), pointer-свайп ≥40px с подавлением
+  click-after-drag; клик по соседней карточке тоже выбирает и центрирует. Live-превью/масштаб wide-вариантов
+  и наследование акцента/тинта сохранены. Скролл-лента удалена.
 - [ ] **2.2 Форма настроек до steep-набора** — TODO
   Metric, Time grain, Comparison period, Target, Breakdown, Filter, color, Colored background, Include today.
 
