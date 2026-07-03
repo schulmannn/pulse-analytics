@@ -261,3 +261,19 @@
   .cartograph-needle, .cartograph-orbit, .cartograph-flag,
   .cartograph-pulse, .cartograph-pulse-2, .cartograph-travel { animation: none; }
 }
+
+/* ── /connect orbital source hub: radiate-from-center entrance. Nodes fly out from the hub to
+   their orbit (per-node --dx/--dy point back to centre = --ring-r × trig), staggered by --i. ── */
+@keyframes connect-radiate {
+  from { opacity: 0; transform: translate(var(--dx, 0px), var(--dy, 0px)) scale(0.35); }
+  to   { opacity: 1; transform: translate(0px, 0px) scale(1); }
+}
+@keyframes connect-hub-pop {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.6); }
+  to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+.connect-orb { animation: connect-radiate 0.6s cubic-bezier(0.2, 0.7, 0.3, 1) both; animation-delay: calc(var(--i, 0) * 0.06s + 0.12s); }
+.connect-hub { animation: connect-hub-pop 0.5s ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  .connect-orb, .connect-hub { animation: none; }
+}

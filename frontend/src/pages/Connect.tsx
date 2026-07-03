@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { useChannels, useConnectIg, useDisconnectIg, useIgOauthStatus } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
@@ -92,6 +92,49 @@ export function Connect() {
     return () => el.removeEventListener('keydown', onKey);
   }, [rotate]);
 
+  // Ring radius (px) for the radiate-from-center entrance — feeds --ring-r so each node's start
+  // offset (--dx/--dy) points back to the exact hub centre at any container size.
+  const [ringR, setRingR] = useState(176);
+  useEffect(() => {
+    const el = ringRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const measure = () => setRingR((el.clientWidth * RADIUS) / 100);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // macOS-dock magnification: the node under the cursor grows most, neighbours a little (a
+  // proximity falloff around the ring). Mouse-only + off under prefers-reduced-motion.
+  useEffect(() => {
+    const ring = ringRef.current;
+    if (!ring) return;
+    if (typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const dots = Array.from(ring.querySelectorAll<HTMLElement>('[data-dot]'));
+    const RANGE = 96;
+    const BUMP = 0.3;
+    const onMove = (e: PointerEvent) => {
+      if (e.pointerType !== 'mouse') return;
+      const scales = dots.map((dot) => {
+        const r = dot.getBoundingClientRect();
+        const dist = Math.hypot(e.clientX - (r.left + r.width / 2), e.clientY - (r.top + r.height / 2));
+        const f = Math.max(0, 1 - dist / RANGE);
+        return f > 0 ? 1 + BUMP * f * f : 1;
+      });
+      dots.forEach((dot, i) => {
+        dot.style.transform = scales[i] > 1 ? `scale(${scales[i].toFixed(3)})` : '';
+      });
+    };
+    const onLeave = () => dots.forEach((dot) => (dot.style.transform = ''));
+    ring.addEventListener('pointermove', onMove);
+    ring.addEventListener('pointerleave', onLeave);
+    return () => {
+      ring.removeEventListener('pointermove', onMove);
+      ring.removeEventListener('pointerleave', onLeave);
+    };
+  }, []);
+
   const active = SERVICES.find((s) => s.id === selected)!;
   const activeState = stateOf(active);
 
@@ -121,6 +164,7 @@ export function Connect() {
             role="radiogroup"
             aria-label="Источники данных"
             tabIndex={0}
+            style={{ '--ring-r': `${ringR}px` } as CSSProperties}
             className="relative aspect-square w-[min(420px,86vw)] rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4 focus-visible:ring-offset-background"
           >
             {/* rings */}
@@ -128,7 +172,7 @@ export function Connect() {
             <div className="absolute inset-[9%] rounded-full border border-dashed border-border opacity-60" aria-hidden="true" />
 
             {/* hub */}
-            <div className="absolute left-1/2 top-1/2 flex aspect-square w-[38%] -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center rounded-full border border-border bg-card px-4 text-center" aria-live="polite">
+            <div className="connect-hub absolute left-1/2 top-1/2 flex aspect-square w-[38%] -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center rounded-full border border-border bg-card px-4 text-center" aria-live="polite">
               <span className="font-mono text-2xs uppercase tracking-[0.1em] text-muted-foreground">Источник</span>
               <span className="mt-1 text-base font-medium tracking-tight text-foreground sm:text-lg">{active.name}</span>
               <span className="mt-0.5 text-2xs text-muted-foreground">
@@ -145,25 +189,35 @@ export function Connect() {
               const isSel = s.id === selected;
               return (
                 <div key={s.id} className="absolute" style={{ left: `${left}%`, top: `${top}%`, transform: 'translate(-50%,-50%)' }}>
-                  <button
-                    type="button"
-                    role="radio"
-                    aria-checked={isSel}
-                    aria-label={`${s.name}${st === 'connected' ? ' — подключён' : st === 'soon' ? ' — скоро' : ' — доступно'}`}
-                    onClick={() => setSelected(s.id)}
-                    className={cn(
-                      'relative flex size-12 items-center justify-center rounded-full border bg-card transition-all sm:size-14',
-                      st === 'connected' && 'border-primary/60 text-primary',
-                      st === 'available' && 'border-border text-muted-foreground hover:border-muted-foreground hover:text-foreground',
-                      st === 'soon' && 'border-dashed border-border text-muted-foreground opacity-60 hover:opacity-100',
-                      isSel && 'scale-110 border-primary bg-primary/10 text-primary',
-                    )}
+                  <div
+                    className="connect-orb"
+                    style={{
+                      '--i': i,
+                      '--dx': `calc(var(--ring-r, 176px) * ${(-Math.sin(theta)).toFixed(4)})`,
+                      '--dy': `calc(var(--ring-r, 176px) * ${Math.cos(theta).toFixed(4)})`,
+                    } as CSSProperties}
                   >
-                    <Glyph id={s.id} className="size-6" />
-                    {st === 'connected' && (
-                      <span aria-hidden="true" className="absolute -right-0.5 -top-0.5 size-3 rounded-full border-2 border-card bg-verdant" />
-                    )}
-                  </button>
+                    <button
+                      data-dot
+                      type="button"
+                      role="radio"
+                      aria-checked={isSel}
+                      aria-label={`${s.name}${st === 'connected' ? ' — подключён' : st === 'soon' ? ' — скоро' : ' — доступно'}`}
+                      onClick={() => setSelected(s.id)}
+                      className={cn(
+                        'relative flex size-12 items-center justify-center rounded-full border bg-card transition-all duration-100 ease-out will-change-transform sm:size-14',
+                        st === 'connected' && 'border-primary/60 text-primary',
+                        st === 'available' && 'border-border text-muted-foreground hover:border-muted-foreground hover:text-foreground',
+                        st === 'soon' && 'border-dashed border-border text-muted-foreground opacity-60 hover:opacity-100',
+                        isSel && 'border-primary bg-primary/10 text-primary',
+                      )}
+                    >
+                      <Glyph id={s.id} className="size-6" />
+                      {st === 'connected' && (
+                        <span aria-hidden="true" className="absolute -right-0.5 -top-0.5 size-3 rounded-full border-2 border-card bg-verdant" />
+                      )}
+                    </button>
+                  </div>
                 </div>
               );
             })}
