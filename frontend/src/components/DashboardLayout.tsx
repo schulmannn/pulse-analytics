@@ -78,7 +78,6 @@ const HOME_NAV: NavLinkDef = { to: '/home', label: 'Главная', icon: 'home
 const TG_NAV: NavLinkDef[] = [HOME_NAV, ...TG_FEED_NAV, ...AGNOSTIC_NAV];
 const IG_NAV: NavLinkDef[] = [HOME_NAV, ...IG_FEED_NAV, ...AGNOSTIC_NAV];
 
-const SYSTEM_NAV: NavLinkDef[] = [{ to: '/settings', label: 'Настройки', icon: 'gear' }];
 const SUPER_NAV: NavLinkDef[] = [
   { to: '/admin', label: 'Админ', icon: 'admin' },
   { to: '/bugs', label: 'Баги', icon: 'bugs' },
@@ -765,69 +764,125 @@ function ExportButton() {
 const avatarInitials = (email?: string) =>
   (email ? email.replace(/@.*/, '').replace(/[^\p{L}]/gu, '').slice(0, 2).toUpperCase() : '') || '?';
 
+/** Popover shell shared by both account menus — Claude-style card: 12px radius, hairline,
+    paper popover surface, 4px inner padding. No shadow (governance). */
+const ACCOUNT_MENU_SHELL = 'overflow-hidden rounded-xl border border-border bg-popover p-1 text-sm';
+
+/** Account-menu row: full-ink label, muted icon, quiet hover — one recipe for links and buttons. */
+const ACCOUNT_MENU_ITEM =
+  'flex w-full items-center gap-2.5 rounded px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-hover-row/60';
+
+const THEME_MODES = [
+  { mode: 'light', icon: 'sun', label: 'Светлая тема' },
+  { mode: 'system', icon: 'monitor', label: 'Как в системе' },
+  { mode: 'dark', icon: 'moon', label: 'Тёмная тема' },
+] as const;
+
+/** «Тема» row — a compact light/system/dark segment on the right (the only way back to
+    «как в системе» outside Настройки, so all three states live here). */
+function ThemeRow() {
+  const { theme, mode, setMode } = useTheme();
+  return (
+    <div className="flex items-center justify-between gap-2.5 rounded px-2.5 py-1">
+      <span className="flex items-center gap-2.5 text-foreground">
+        <Icon name={theme === 'dark' ? 'moon' : 'sun'} className="h-4 w-4 text-muted-foreground" />
+        Тема
+      </span>
+      <div role="radiogroup" aria-label="Тема оформления" className="flex shrink-0 items-center gap-0.5 rounded-full border border-border p-0.5">
+        {THEME_MODES.map((t) => (
+          <button
+            key={t.mode}
+            type="button"
+            role="radio"
+            aria-checked={mode === t.mode}
+            aria-label={t.label}
+            title={t.label}
+            onClick={() => setMode(t.mode)}
+            className={cn(
+              'flex h-6 w-6 items-center justify-center rounded-full transition-colors',
+              mode === t.mode ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            <Icon name={t.icon} className="h-3.5 w-3.5" />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /**
- * Shared account-menu body — identity, theme toggle, the system links (Настройки / Админ / Баги),
- * and logout (Claude-style). Rendered inside two popover shells: the mobile-header avatar menu
- * (opens downward) and the sidebar user row on md+ (opens upward).
+ * Shared account-menu body — Claude-style: identity header (avatar + name + address), theme row,
+ * system links (Настройки / Админ / Баги), logout — groups split by hairlines. Rendered inside
+ * two popover shells: the mobile-header avatar menu (downward) and the sidebar user row (upward).
  */
-function AccountMenuContent({ email, role, onClose }: { email?: string; role?: string; onClose: () => void }) {
+function AccountMenuContent({
+  email,
+  role,
+  avatar,
+  onClose,
+}: {
+  email?: string;
+  role?: string;
+  avatar?: string | null;
+  onClose: () => void;
+}) {
   const navigate = useNavigate();
-  const { theme, toggle: toggleTheme } = useTheme();
   const logoutMutation = useLogout();
   const handleLogout = () =>
     logoutMutation.mutate(undefined, { onSettled: () => navigate('/login', { replace: true }) });
 
   return (
     <>
-      {/* Identity block: who you are. */}
+      {/* Identity header: avatar + mailbox name + full address — who is signed in, at a glance. */}
       {email && (
-        <div className="px-2.5 py-1.5">
-          <div className="truncate text-xs font-medium text-foreground">{email}</div>
-          {role === 'superuser' && (
-            <div className="text-2xs text-muted-foreground">Администратор</div>
-          )}
-        </div>
+        <>
+          <div className="flex items-center gap-2.5 px-2.5 py-2">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-avatar text-2xs font-medium text-ink2">
+              {avatar ? <img src={avatar} alt="" className="h-full w-full object-cover" /> : avatarInitials(email)}
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5">
+                <span className="min-w-0 truncate text-sm font-medium text-foreground">{email.replace(/@.*/, '')}</span>
+                {role === 'superuser' && (
+                  <span className="shrink-0 rounded border border-border px-1 text-2xs leading-4 text-muted-foreground">
+                    Админ
+                  </span>
+                )}
+              </div>
+              <div className="truncate text-2xs text-muted-foreground">{email}</div>
+            </div>
+          </div>
+          <div className="my-1 border-t border-border" aria-hidden="true" />
+        </>
       )}
-      <div className="my-1 border-t" aria-hidden="true" />
-      {/* Theme toggle — lives in this menu now (the standalone top-bar toggle is gone). */}
-      <button
-        type="button"
-        onClick={toggleTheme}
-        className="flex w-full items-center gap-2.5 rounded px-2.5 py-1.5 text-left text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-      >
-        <Icon name={theme === 'dark' ? 'sun' : 'moon'} className="h-4 w-4" />
-        {theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
-      </button>
-      {/* System links (Настройки / Админ / Баги) — Claude-style, all under the account now. */}
-      <div>
-        {(role === 'superuser' ? [...SYSTEM_NAV, ...SUPER_NAV] : SYSTEM_NAV).map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            end={item.end}
-            onClick={onClose}
-            className={({ isActive }) =>
-              cn(
-                'flex items-center gap-2.5 rounded px-2.5 py-1.5 transition-colors',
-                isActive
-                  ? 'font-medium text-foreground'
-                  : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-              )
-            }
-          >
-            <Icon name={item.icon} className="h-4 w-4" />
-            {item.label}
-          </NavLink>
-        ))}
-      </div>
-      <div className="my-1 border-t" aria-hidden="true" />
+      {/* Preferences group: Настройки + Тема. */}
+      <NavLink to="/settings" onClick={onClose} className={ACCOUNT_MENU_ITEM}>
+        <Icon name="gear" className="h-4 w-4 text-muted-foreground" />
+        Настройки
+      </NavLink>
+      <ThemeRow />
+      {/* Elevated tools (superuser only) — their own group marks them as admin surface. */}
+      {role === 'superuser' && (
+        <>
+          <div className="my-1 border-t border-border" aria-hidden="true" />
+          {SUPER_NAV.map((item) => (
+            <NavLink key={item.to} to={item.to} end={item.end} onClick={onClose} className={ACCOUNT_MENU_ITEM}>
+              <Icon name={item.icon} className="h-4 w-4 text-muted-foreground" />
+              {item.label}
+            </NavLink>
+          ))}
+        </>
+      )}
+      <div className="my-1 border-t border-border" aria-hidden="true" />
       {/* Logout: calm by default, destructive only on hover (it's important, not an alarm). */}
       <button
         type="button"
         onClick={handleLogout}
         disabled={logoutMutation.isPending}
-        className="block w-full rounded px-2.5 py-1.5 text-left text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+        className="group flex w-full items-center gap-2.5 rounded px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
       >
+        <Icon name="logout" className="h-4 w-4 text-muted-foreground transition-colors group-hover:text-destructive" />
         {logoutMutation.isPending ? 'Выход…' : 'Выйти'}
       </button>
     </>
@@ -855,8 +910,8 @@ function AccountMenu({ email, role, avatar }: { email?: string; role?: string; a
         {avatar ? <img src={avatar} alt="" className="h-full w-full object-cover" /> : avatarInitials(email)}
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-40 mt-1 w-56 overflow-hidden rounded-lg border bg-popover p-1.5 text-sm">
-          <AccountMenuContent email={email} role={role} onClose={() => setOpen(false)} />
+        <div className={cn('absolute right-0 top-full z-40 mt-1 w-64', ACCOUNT_MENU_SHELL)}>
+          <AccountMenuContent email={email} role={role} avatar={avatar} onClose={() => setOpen(false)} />
         </div>
       )}
     </div>
@@ -912,11 +967,12 @@ function SidebarUserRow({
       {open && (
         <div
           className={cn(
-            'absolute bottom-full z-40 mb-1 w-56 overflow-hidden rounded-lg border border-border bg-card p-1.5 text-sm',
-            rail ? 'left-2' : 'left-3',
+            'absolute bottom-full z-40 mb-1',
+            rail ? 'left-2 w-64' : 'inset-x-3',
+            ACCOUNT_MENU_SHELL,
           )}
         >
-          <AccountMenuContent email={email} role={role} onClose={() => setOpen(false)} />
+          <AccountMenuContent email={email} role={role} avatar={avatar} onClose={() => setOpen(false)} />
         </div>
       )}
     </div>
