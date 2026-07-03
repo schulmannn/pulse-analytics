@@ -607,6 +607,29 @@ async function createChannel({ owner_uid, username, title }) {
   return rows[0] || null;
 }
 
+// Standalone Instagram source — a channels row not backed by any Telegram channel
+// (source='ig', no tg_channel_id). Callers dedup by identity FIRST (findIgChannelByIgUser)
+// so reconnecting the same IG account refreshes its token instead of duplicating the source.
+async function createIgChannel({ owner_uid, username }) {
+  if (!enabled || owner_uid == null) return null;
+  const uname = String(username || '').replace(/^@/, '').trim();
+  const { rows } = await pool.query(
+    `INSERT INTO channels (owner_uid, username, title, status, source)
+     VALUES ($1,$2,$3,'active','ig') RETURNING ${CHANNEL_COLS}`,
+    [owner_uid, uname || null, uname || 'Instagram']);
+  return rows[0] || null;
+}
+
+// The user's channel already holding this Instagram identity (multi-account reconnect dedup).
+async function findIgChannelByIgUser(uid, igUserId) {
+  if (!enabled || uid == null || !igUserId) return null;
+  const { rows } = await pool.query(
+    `SELECT c.id FROM channels c JOIN ig_accounts ia ON ia.channel_id = c.id
+     WHERE c.owner_uid=$1 AND ia.ig_user_id=$2 AND c.status<>'disabled' LIMIT 1`,
+    [uid, String(igUserId)]);
+  return rows[0] ? rows[0].id : null;
+}
+
 // Create/adopt a QR-connected channel (source='qr'). Idempotent per (owner_uid, tg_channel_id)
 // via the partial unique index — re-adding after a re-scan just refreshes title/username and
 // re-activates it, never duplicates. The captured tg_sessions row (same owner_uid) feeds it.
@@ -1256,7 +1279,7 @@ module.exports = {
   revokeUserSessions, setUserStatus, createEmailToken, useEmailToken,
   getPrefs, setPrefs,
   adoptOwnerChannel, listChannels, getChannel, getChannelById, getOwnerChannelId, setChannelTgId,
-  createChannel, createTgChannel, deleteChannel, createApiKey, getChannelByApiKey, listApiKeys, revokeApiKey,
+  createChannel, createTgChannel, createIgChannel, findIgChannelByIgUser, deleteChannel, createApiKey, getChannelByApiKey, listApiKeys, revokeApiKey,
   saveSnapshot, getSnapshot, ingestCollectorPayload, getCollectorStatus, recordAuditEvent,
   saveVelocity, getLatestVelocity,
   upsertChannelDaily, upsertPosts, upsertMentions, upsertIgTags, getIgTags,

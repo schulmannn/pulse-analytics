@@ -71,8 +71,18 @@ Source of truth прогресса между итерациями. Статус
 
 ## Спринт 4 — Instagram мульти-аккаунт
 
-- [ ] **4.1 Несколько IG-аккаунтов как отдельные источники** — TODO
-  Бек-схема (ig_accounts PK), resolveIg, cache-ключи по accountId, свитчер.
+- [x] **4.1 Несколько IG-аккаунтов как отдельные источники** — SHIPPED `PENDING_HASH`
+  **Арх-решение: PK ig_accounts НЕ трогаем** — второй+ IG = отдельный `channels`-row `source='ig'`
+  (tg_channel_id NULL): channels уже tenant, изоляция данных (cache-ключи по accountId + query-keys по
+  channelId) уже была с b4470c3. Бек: `createIgChannel`/`findIgChannelByIgUser` (db.js), OAuth start
+  `?new_source=1` (state.ns, без канала), callback ns-ветка — дедуп по ig_user_id (реконнект той же
+  учётки обновляет токен, НЕ дублирует источник) или создание source='ig' + редирект `ig=connected&ch=<id>`.
+  Фронт: useConnectIg({newSource}) (void-трюк для mutate()), IgFeed-баннер переключает на новый источник
+  (setChannelId+invalidate channels), свитчер: IG-only каналы скрыты из Telegram-группы, кнопка
+  «Подключить ещё один аккаунт» в /connect (connected-ветка, с нотой про смену профиля), SourceStatus
+  'ig'-ветка в настройках Каналов. Гейт: node --check + 16 server + build + 145 front.
+  **Живой e2e второго аккаунта = юзер** (нужен Allow под другой IG-учёткой; в dev-режиме Meta аккаунт
+  должен быть Instagram-тестером app). Delete IG-источника = обычное удаление канала (FK каскад чистит токен).
 
 ## Спринт 5 — Аудит дашборда
 

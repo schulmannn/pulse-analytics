@@ -4,6 +4,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useIgData } from '@/lib/useIgData';
 import type { IgData } from '@/lib/useIgData';
+import { useSelectedChannel } from '@/lib/channel-context';
 import { usePeriod } from '@/lib/period';
 import type { PeriodDays } from '@/lib/period';
 import { IgConnectPanel, IgDataHealth } from '@/components/instagram/health';
@@ -68,6 +69,7 @@ const IG_ERROR_MESSAGES: Record<string, string> = {
  *  then strips the flag from the URL so a reload doesn't re-show the banner. */
 function useIgConnectNotice() {
   const qc = useQueryClient();
+  const { setChannelId } = useSelectedChannel();
   const [params, setParams] = useSearchParams();
   const [notice, setNotice] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null);
   useEffect(() => {
@@ -79,15 +81,25 @@ function useIgConnectNotice() {
         ? { kind: 'ok', msg: 'Instagram подключён — загружаем реальные данные.' }
         : { kind: 'err', msg: IG_ERROR_MESSAGES[err ?? ''] || 'Не удалось подключить Instagram.' },
     );
-    if (connected) qc.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).startsWith('ig-') });
+    if (connected) {
+      // The callback names the (possibly freshly created) source — switch to it so the user
+      // lands on the account they just connected, not whatever was selected before.
+      const ch = parseInt(params.get('ch') ?? '', 10);
+      if (Number.isFinite(ch) && ch > 0) {
+        setChannelId(ch);
+        qc.invalidateQueries({ queryKey: ['channels'] });
+      }
+      qc.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).startsWith('ig-') });
+    }
     // Strip the flag so a reload doesn't re-show it. setParams is stable, so this re-runs the effect
     // once with the flag already gone → early return, no loop. Keeping params in deps makes the
     // banner react to a fresh ?ig= landing even if the component is already mounted.
     const next = new URLSearchParams(params);
     next.delete('ig');
     next.delete('ig_error');
+    next.delete('ch');
     setParams(next, { replace: true });
-  }, [params, qc, setParams]);
+  }, [params, qc, setParams, setChannelId]);
   return { notice, dismiss: () => setNotice(null) };
 }
 

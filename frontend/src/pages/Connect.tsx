@@ -378,14 +378,33 @@ function InstagramPanel() {
             Подключён бизнес-аккаунт <span className="font-mono text-foreground">@{status.data?.username}</span>. Реальные охваты,
             аудитория и публикации этого канала идут из Instagram.
           </p>
-          <button
-            type="button"
-            onClick={() => disconnect.mutate()}
-            disabled={disconnect.isPending}
-            className="btn-pill border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-destructive disabled:opacity-50"
-          >
-            {disconnect.isPending ? 'Отключаю…' : 'Отключить'}
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            {serverReady && (
+              <button
+                type="button"
+                onClick={() => connect.mutate({ newSource: true })}
+                disabled={connect.isPending}
+                className="btn-pill bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-60"
+              >
+                {connect.isPending ? 'Открываю Instagram…' : 'Подключить ещё один аккаунт'}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => disconnect.mutate()}
+              disabled={disconnect.isPending}
+              className="btn-pill border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-destructive disabled:opacity-50"
+            >
+              {disconnect.isPending ? 'Отключаю…' : 'Отключить'}
+            </button>
+          </div>
+          {serverReady && (
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Ещё один аккаунт появится отдельным источником в переключателе — войдите в НЕГО в
+              Instagram перед подтверждением (или смените профиль в окне подключения).
+            </p>
+          )}
+          {connectError && <p className="text-xs font-medium text-destructive">{connectError}</p>}
         </div>
       ) : envAccount ? (
         <div className="mt-4 space-y-4">

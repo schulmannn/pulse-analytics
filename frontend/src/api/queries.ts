@@ -358,11 +358,14 @@ export function useIgOauthStatus() {
 }
 
 /** Begin the connect flow: ask the server for an authorize_url, then hand the browser to Instagram
- *  (a top-level navigation — the session header can't survive the OAuth redirect). */
+ *  (a top-level navigation — the session header can't survive the OAuth redirect).
+ *  `mutate({ newSource: true })` connects the account as its OWN standalone source (a fresh
+ *  channels row, source='ig') instead of attaching it to the selected channel. */
 export function useConnectIg() {
   return useMutation({
-    mutationFn: async () => {
-      const res = await apiSend('POST', '/api/ig/oauth/start', undefined, IgConnectStartSchema);
+    mutationFn: async (opts: { newSource?: boolean } | void) => {
+      const path = opts && opts.newSource ? '/api/ig/oauth/start?new_source=1' : '/api/ig/oauth/start';
+      const res = await apiSend('POST', path, undefined, IgConnectStartSchema);
       window.location.href = res.authorize_url;
       return res;
     },

@@ -1433,11 +1433,16 @@ async function processTgQrCollection() {
 // the OAuth redirect, so we can't 302 here). The (uid, channelId) are bound into a signed state.
 app.post('/api/ig/oauth/start', requireAuth, asyncHandler(async (req, res) => {
   if (!igOauthConfigured()) return res.status(400).json({ error: 'Подключение Instagram не настроено на сервере' });
-  const channelId = parseInt(req.query.channel || req.headers['x-channel-id'], 10) || 0;
-  if (!channelId) return res.status(400).json({ error: 'Выбери канал, к которому подключить Instagram' });
-  const ch = await db.getChannel(channelId, req.user).catch(() => null);
-  if (!ch) return res.status(403).json({ error: 'Нет доступа к этому каналу' });
-  const state = signIgState({ uid: req.user.uid, channelId, nonce: crypto.randomBytes(12).toString('base64url'), exp: Date.now() + IG_STATE_TTL });
+  // ?new_source=1 — connect the account as its OWN standalone source (a fresh channels row is
+  // created in the callback once the identity is known) instead of attaching it to a channel.
+  const newSource = String(req.query.new_source || '') === '1';
+  const channelId = newSource ? 0 : parseInt(req.query.channel || req.headers['x-channel-id'], 10) || 0;
+  if (!newSource) {
+    if (!channelId) return res.status(400).json({ error: 'Выбери канал, к которому подключить Instagram' });
+    const ch = await db.getChannel(channelId, req.user).catch(() => null);
+    if (!ch) return res.status(403).json({ error: 'Нет доступа к этому каналу' });
+  }
+  const state = signIgState({ uid: req.user.uid, channelId, ns: newSource ? 1 : 0, nonce: crypto.randomBytes(12).toString('base64url'), exp: Date.now() + IG_STATE_TTL });
   const authorizeUrl = 'https://www.instagram.com/oauth/authorize?' + new URLSearchParams({
     client_id: IG_CLIENT_ID,
     redirect_uri: `${appBase(req)}/api/ig/oauth/callback`,
@@ -1468,8 +1473,12 @@ app.get('/api/ig/oauth/callback', async (req, res) => {
     const u = await db.getUserById(st.uid).catch(() => null);
     if (!u || u.status !== 'active') return back('ig_error=auth');
     const user = { uid: u.id, role: u.role, email: u.email };
-    const ch = await db.getChannel(st.channelId, user).catch(() => null);
-    if (!ch) return back('ig_error=channel');
+    // Channel-bound connect re-verifies ownership; a new-source connect has no channel yet —
+    // its row is created below, after the Instagram identity is known.
+    if (!st.ns) {
+      const ch = await db.getChannel(st.channelId, user).catch(() => null);
+      if (!ch) return back('ig_error=channel');
+    }
     const redirectUri = `${appBase(req)}/api/ig/oauth/callback`;
 
     // 1) authorization code → short-lived token (api.instagram.com, form-encoded POST).
@@ -1509,7 +1518,21 @@ app.get('/api/ig/oauth/callback', async (req, res) => {
     const igUserId = me.id || String(shortJson.user_id || '');
     if (!igUserId) return back('ig_error=identity');
 
-    await db.saveIgAccount(st.channelId, {
+    // New-source connect: reuse the user's channel that already holds this identity (a
+    // reconnect just refreshes its token), else create a standalone source='ig' row.
+    let targetChannelId = st.channelId;
+    if (st.ns) {
+      const existing = await db.findIgChannelByIgUser(user.uid, igUserId).catch(() => null);
+      if (existing) {
+        targetChannelId = existing;
+      } else {
+        const created = await db.createIgChannel({ owner_uid: user.uid, username: me.username || null }).catch(() => null);
+        if (!created) return back('ig_error=channel');
+        targetChannelId = created.id;
+      }
+    }
+
+    await db.saveIgAccount(targetChannelId, {
       ig_user_id: igUserId,
       username: me.username || null,
       access_token_enc: igCrypto.encrypt(longToken),
@@ -1517,9 +1540,10 @@ app.get('/api/ig/oauth/callback', async (req, res) => {
       scopes: IG_OAUTH_SCOPES,
     });
     igCachePurge(igUserId);   // clear any stale cached payloads for this account id
-    req.user = user; req.channel = { id: st.channelId };
-    await audit(req, 'ig_oauth_connected', { channelId: st.channelId, username: me.username || null });
-    return back('ig=connected');
+    req.user = user; req.channel = { id: targetChannelId };
+    await audit(req, 'ig_oauth_connected', { channelId: targetChannelId, username: me.username || null, newSource: !!st.ns });
+    // ch= lets the SPA switch straight to the (possibly fresh) source after the bounce.
+    return back(`ig=connected&ch=${targetChannelId}`);
   } catch (e) {
     log('error', 'ig_oauth_callback_error', { error: e.message });
     return back('ig_error=exchange');

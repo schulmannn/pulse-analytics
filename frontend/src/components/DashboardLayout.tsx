@@ -556,6 +556,9 @@ function SourceSwitcher({ rail = false }: { rail?: boolean }) {
       // IG group auto-hides below (rows.length === 0 → null), so unconnected workspaces show
       // Telegram only — no more demo/mock IG for every channel.
       .filter((c) => net !== 'ig' || !!c.ig_connected)
+      // Standalone Instagram sources (source='ig') have no Telegram side — never list them
+      // under the Telegram group.
+      .filter((c) => net !== 'tg' || c.source !== 'ig')
       .map((c) => ({ channelId: c.id, network: net, name: channelName(c) }))
       .filter((r) => (q ? r.name.toLowerCase().includes(q) : true));
   };

@@ -64,10 +64,12 @@ export function SourceStatus({
   compact?: boolean;
 }) {
   const isCentral = source === 'central';
-  // Only collector channels have a collector-status row; skip the request for central.
-  const { data, isLoading, isError } = useCollectorStatus(isCentral ? null : channelId);
+  const isIg = source === 'ig';
+  // Only collector channels have a collector-status row; skip the request for central/IG.
+  const { data, isLoading, isError } = useCollectorStatus(isCentral || isIg ? null : channelId);
 
   if (isCentral) return <StatusRow tone="ok" text="Живой источник — Telegram (MTProto)" compact={compact} />;
+  if (isIg) return <StatusRow tone="ok" text="Instagram-источник — данные идут по OAuth" compact={compact} />;
   if (isLoading) return <StatusRow tone="muted" text="Проверяем сборщик…" compact={compact} />;
   if (isError) return <StatusRow tone="muted" text="Статус сборщика недоступен" compact={compact} />;
 
