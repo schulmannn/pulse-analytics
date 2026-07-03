@@ -18,7 +18,7 @@
 // +ghost, and the erv / virality value metrics. TG breakdowns/tables (S3b) and IG (S11) resolve to
 // `{ empty: true }` for now — the architecture is complete; those paths are filled in later sprints.
 
-import type { ChannelsResponse, HistoryData, TgFull } from '@/api/schemas';
+import type { ChannelsResponse, HistoryData, TgFull, TgGraphs } from '@/api/schemas';
 import type { DateRange, PeriodDays } from '@/lib/period';
 import type { MetricDelta } from '@/lib/delta';
 import type { MetricKind, MetricUnit } from '@/lib/widgetMetrics';
@@ -30,6 +30,21 @@ import { normalizeTgPosts } from '@/lib/posts';
 import type { NormalizedPost } from '@/lib/posts';
 import { DAY_MS, alignGhost, bucketKeyOf, bucketKeysInWindow, comparisonWindow } from '@/lib/metricSeries';
 import type { Grain } from '@/lib/metricSeries';
+import {
+  churnBreakdown,
+  emojiBreakdown,
+  engagementComposition,
+  formatPerfBreakdown,
+  hoursBreakdown,
+  languagesBreakdown,
+  newFollowersBySourceBreakdown,
+  postCountBreakdown,
+  sentimentBreakdown,
+  viewsByTypeBreakdown,
+  viewsBySourceBreakdown,
+  weekdayViewsBreakdown,
+  type BreakdownItem,
+} from '@/lib/tgAggregations';
 
 export interface WidgetSeriesPoint {
   /** Bucket key — `YYYY-MM-DD` (day/week Monday) or `YYYY-MM` (month). The renderer formats it. */
@@ -72,6 +87,9 @@ export interface TgDataContext {
   full?: TgFull;
   history?: HistoryData;
   channels?: ChannelsResponse;
+  /** The nested analytics graphs payload (useTgGraphs) — sources / languages / sentiment / hours /
+   *  followers. Period-agnostic (server window), like the existing TG analytics widgets. */
+  graphs?: TgGraphs;
   channelId: number | null;
 }
 
@@ -255,7 +273,67 @@ export function resolveWidgetMetric(config: WidgetConfig, ctx: DataContext): Wid
 
   if (metric.drillKey) return resolveCoreTg(metric.drillKey, config, ctx, out);
   if (metric.id === 'tg.erv' || metric.id === 'tg.virality') return resolveTgRatio(metric.id, ctx, out);
+  if (metric.kind === 'breakdown') return resolveTgBreakdown(metric.id, ctx, out);
 
-  // TG breakdowns / tables — S3b.
+  // TG series-from-graphs (netGrowth) + tables (weeklyTable / topPosts) — S3c.
   return { ...out, empty: true };
+}
+
+/** TG categorical splits — dispatched to the pure aggregators in tgAggregations. Post-derived
+ *  metrics window the fetched posts by ctx.inRange; summary/graphs metrics are period-agnostic
+ *  (server aggregates), matching the existing analytics widgets. */
+function resolveTgBreakdown(metricId: string, ctx: DataContext, out: WidgetResult): WidgetResult {
+  const tg = ctx.tg;
+  if (!tg?.full) return { ...out, empty: true };
+  const full = tg.full;
+
+  let items: BreakdownItem[];
+  switch (metricId) {
+    case 'tg.emoji':
+    case 'tg.formatPerf':
+    case 'tg.weekdayViews':
+    case 'tg.postCount': {
+      const posts = normalizeTgPosts(full.posts ?? [], full.channel ?? {}).filter((p) => ctx.inRange(p.date));
+      items =
+        metricId === 'tg.emoji'
+          ? emojiBreakdown(posts)
+          : metricId === 'tg.formatPerf'
+            ? formatPerfBreakdown(posts)
+            : metricId === 'tg.weekdayViews'
+              ? weekdayViewsBreakdown(posts)
+              : postCountBreakdown(posts);
+      break;
+    }
+    case 'tg.engagementComposition':
+      items = engagementComposition(full.views_summary);
+      break;
+    case 'tg.viewsByType':
+      items = viewsByTypeBreakdown(full.views_summary);
+      break;
+    case 'tg.viewsBySource':
+      items = viewsBySourceBreakdown(tg.graphs);
+      break;
+    case 'tg.newFollowersBySource':
+      items = newFollowersBySourceBreakdown(tg.graphs);
+      break;
+    case 'tg.languages':
+      items = languagesBreakdown(tg.graphs);
+      break;
+    case 'tg.sentiment':
+      items = sentimentBreakdown(tg.graphs);
+      break;
+    case 'tg.hours':
+      items = hoursBreakdown(tg.graphs);
+      break;
+    case 'tg.churn':
+      items = churnBreakdown(tg.graphs);
+      break;
+    default:
+      return { ...out, empty: true };
+  }
+
+  // A breakdown that is empty OR all-zero (e.g. no posts on any weekday) is «no data».
+  if (items.length === 0 || items.every((i) => i.value === 0)) return { ...out, empty: true };
+  out.breakdown = items;
+  return out;
 }

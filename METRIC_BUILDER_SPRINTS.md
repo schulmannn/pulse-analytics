@@ -23,15 +23,16 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
   custom-key хелперы (`custom:<id>` для Home/report слотов). Переиспользует `genId` (reportBlocks),
   `getMetric/isMetricId/WidgetViz` (S1). 23 unit-теста (185 всего). Tree-shaken → прод не меняется.
   Store/sync (localStorage+/api/prefs) отложен до S4 (когда рендерер будет потреблять конфиги).
-- **S3 — Единый резолвер `lib/resolveWidgetMetric.ts`** — WIP (S3a SHIPPED `<pending>`)
-  `resolveWidgetMetric(config, ctx): WidgetResult`. **S3a (done):** ядро — 6 core TG (views/subscribers/
-  avgReach/reactions/forwards/er) как value+delta+caption (из `deriveKpis`) + grain-bakened series +
-  ghost (из `comparisonWindow`/`alignGhost`); erv/virality как value. `DataContext` = pre-resolved
-  окно (`now/days/range/inRange`) + payloads (без фетчей) → резолвер pure/детерминирован. Series =
-  raw bucket keys (не метки — форматирует рендерер). Никогда не бросает (`empty:true`). 10 тестов
-  (195 всего). **S3b (TODO):** TG breakdown/table (emoji/sources/languages/sentiment/formats/weekday/
-  hours/engagementComposition/viewsByType/churn/netGrowth/weeklyTable/topPosts) — извлечь агрегаторы
-  из TgAnalytics. **IG paths → S11.** Nothing imports it yet (tree-shaken).
+- **S3 — Единый резолвер `lib/resolveWidgetMetric.ts`** — WIP (S3a `7386ba5` + S3b `<pending>` SHIPPED)
+  `resolveWidgetMetric(config, ctx): WidgetResult`. **S3a:** ядро — 6 core TG как value+delta+caption
+  (`deriveKpis`) + grain-series + ghost (`comparisonWindow`/`alignGhost`); erv/virality как value.
+  `DataContext` = pre-resolved окно (`now/days/range/inRange`) + payloads → pure/детерминирован. Series
+  = raw bucket keys. Никогда не бросает (`empty:true`). **S3b:** TG breakdown (emoji/formatPerf/weekday/
+  postCount/engagementComposition/viewsByType/viewsBySource/newFollowersBySource/languages/sentiment/
+  hours/churn) через новый pure `lib/tgAggregations.ts` (порт агрегаторов из TgAnalytics, БЕЗ трогания
+  живой страницы — миграция самой TgAnalytics → S12). +graphs в DataContext. all-zero breakdown = empty.
+  **Резолвер покрывает 20 метрик.** 19 тестов (204 всего). **S3c (TODO):** netGrowth (series-из-graphs)
+  + tables (weeklyTable/topPosts). **IG → S11.** Nothing imports it yet (tree-shaken).
 - **S4 — Единый рендерер `components/WidgetRenderer.tsx`** — TODO
 - **S5 — Универсальный Widget Editor (расширить EditWidgetDialog)** — TODO
 - **S6 — Add-widget как searchable catalog `components/WidgetCatalogModal.tsx`** — TODO
@@ -44,7 +45,11 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
 
 ## Журнал
 
-- 2026-07-03 — **S3a SHIPPED** `<pending>`. Резолвер `lib/resolveWidgetMetric.ts` ядро + тест.
+- 2026-07-03 — **S3b SHIPPED** `<pending>`. `lib/tgAggregations.ts` (12 breakdown-агрегаторов, порт
+  из TgAnalytics) + резолвер расширен. Решение: НЕ трогаю живую TgAnalytics (нет локального authed-
+  рендера → нельзя визуально верифицировать) — извлёк+протестировал логику, миграция панели позже (S12).
+  all-zero weekday/hours = empty. графы период-агностичны (как в текущих виджетах).
+- 2026-07-03 — **S3a SHIPPED** `7386ba5`. Резолвер `lib/resolveWidgetMetric.ts` ядро + тест.
   Решения: `DataContext` несёт УЖЕ разрешённое окно (render-слой сворачивает config.period) +
   `now` — резолвер pure/детерминирован (тесты фиксируют now, ни одного Date.now()); series = raw
   bucket keys (форматирует S4-рендерер); value core = строка из deriveKpis (примиряется с ledger);

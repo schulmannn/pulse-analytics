@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { resolveWidgetMetric, type DataContext } from '@/lib/resolveWidgetMetric';
 import type { WidgetConfig } from '@/lib/widgetConfig';
-import type { ChannelsResponse, HistoryData, TgFull } from '@/api/schemas';
+import type { ChannelsResponse, HistoryData, TgFull, TgGraphs } from '@/api/schemas';
 
 // ── Deterministic synthetic fixtures around a fixed «now» (no Date.now() in the resolver). ──
 const DAY = 24 * 60 * 60 * 1000;
@@ -16,7 +16,14 @@ const inRange = (d: string | null | undefined) => {
   return Number.isFinite(t) && t >= WIN_FROM && t <= WIN_TO;
 };
 
-const mkPost = (daysAgo: number, views: number, reactions = 0, forwards = 0, replies = 0) => ({
+const mkPost = (
+  daysAgo: number,
+  views: number,
+  reactions = 0,
+  forwards = 0,
+  replies = 0,
+  reactions_detail?: { emoji: string; count: number }[],
+) => ({
   id: Math.round(daysAgo),
   date: iso(daysAgo),
   views,
@@ -24,17 +31,48 @@ const mkPost = (daysAgo: number, views: number, reactions = 0, forwards = 0, rep
   forwards,
   replies,
   media_type: 'photo',
+  reactions_detail,
 });
 
 const full = {
   channel: { memberCount: 44000, username: 'bynotem' },
+  views_summary: {
+    total_reactions: 175,
+    total_forwards: 35,
+    total_replies: 13,
+    avg_views_by_type: { photo: 1200, video: 800 },
+  },
   posts: [
-    mkPost(1, 1000, 50, 10, 5),
+    mkPost(1, 1000, 50, 10, 5, [{ emoji: '🔥', count: 30 }, { emoji: '👍', count: 20 }]),
     mkPost(5, 2000, 100, 20, 8),
     mkPost(10, 500, 25, 5, 2),
     mkPost(35, 800, 40, 8, 3), // OUTSIDE the active window — only feeds the baseline (ghost)
   ],
 } as unknown as TgFull;
+
+const graphs = {
+  views_by_source: [
+    { label: 'Followers', value: 5000 },
+    { label: 'URL', value: 2000 },
+  ],
+  new_followers_by_source: [{ label: 'Search', value: 120 }],
+  languages: [
+    { label: 'ru', value: 8000 },
+    { label: 'en', value: 1500 },
+  ],
+  reactions_sentiment: [
+    { label: 'Positive', value: 300 },
+    { label: 'Negative', value: 40 },
+  ],
+  top_hours: { hours: [9, 12, 18], values: [100, 250, 400] },
+  followers: {
+    x: [1, 2, 3],
+    series: [
+      { name: 'joined', values: [10, 20, 30] },
+      { name: 'left', values: [3, 5, 7] },
+    ],
+  },
+} as unknown as TgGraphs;
 
 const history = {
   rows: [
@@ -50,7 +88,7 @@ const ctx: DataContext = {
   days: 30,
   range: null,
   inRange,
-  tg: { full, history, channels, channelId: 1 },
+  tg: { full, history, channels, graphs, channelId: 1 },
 };
 
 const cfg = (metricId: string, extra: Partial<WidgetConfig> = {}): WidgetConfig => ({
@@ -117,6 +155,68 @@ describe('resolveWidgetMetric — TG ratio values', () => {
   });
 });
 
+describe('resolveWidgetMetric — TG breakdowns (S3b)', () => {
+  const bd = (metricId: string) => resolveWidgetMetric(cfg(metricId), ctx);
+
+  it('resolves tg.emoji from in-window post reactions (top emoji first)', () => {
+    const r = bd('tg.emoji');
+    expect(r.kind).toBe('breakdown');
+    expect(r.breakdown).toEqual([
+      { label: '🔥', value: 30, display: '30' },
+      { label: '👍', value: 20, display: '20' },
+    ]);
+  });
+
+  it('resolves tg.formatPerf as avg ERV per media type', () => {
+    const r = bd('tg.formatPerf');
+    expect(r.breakdown!.length).toBeGreaterThan(0);
+    expect(r.breakdown!.every((i) => i.value > 0)).toBe(true);
+    expect(r.breakdown![0].display).toMatch(/% ERV · \d+ шт$/);
+  });
+
+  it('resolves tg.engagementComposition + tg.viewsByType from views_summary', () => {
+    expect(bd('tg.engagementComposition').breakdown!.map((i) => i.label)).toEqual(['Реакции', 'Репосты', 'Комментарии']);
+    expect(bd('tg.viewsByType').breakdown!.map((i) => i.label)).toEqual(['Фото', 'Видео']); // sorted desc by value
+  });
+
+  it('resolves graphs breakdowns with localized labels', () => {
+    expect(bd('tg.viewsBySource').breakdown!.map((i) => i.label)).toEqual(['Подписчики', 'Ссылки']);
+    expect(bd('tg.newFollowersBySource').breakdown!.map((i) => i.label)).toEqual(['Поиск']);
+    expect(bd('tg.languages').breakdown!.map((i) => i.label)).toEqual(['ru', 'en']);
+  });
+
+  it('resolves tg.sentiment with sentiment colors', () => {
+    const r = bd('tg.sentiment');
+    expect(r.breakdown!.map((i) => i.label)).toEqual(['Положительные', 'Отрицательные']);
+    expect(r.breakdown![0].color).toBe('hsl(var(--brand-verdant))');
+  });
+
+  it('resolves tg.hours by hour of day', () => {
+    const r = bd('tg.hours');
+    expect(r.breakdown!.map((i) => i.label)).toEqual(['9:00', '12:00', '18:00']);
+    expect(r.breakdown!.map((i) => i.value)).toEqual([100, 250, 400]);
+  });
+
+  it('resolves tg.churn joined vs left totals', () => {
+    const r = bd('tg.churn');
+    expect(r.breakdown).toEqual([
+      { label: 'Подписалось', value: 60, display: '60', color: 'hsl(var(--brand-verdant))' },
+      { label: 'Отписалось', value: 15, display: '15', color: 'hsl(var(--brand-ember))' },
+    ]);
+  });
+
+  it('treats an all-zero weekday breakdown (no posts) as empty', () => {
+    const emptyPosts: DataContext = { ...ctx, tg: { ...ctx.tg!, full: { ...(full as object), posts: [] } as unknown as TgFull } };
+    expect(resolveWidgetMetric(cfg('tg.postCount'), emptyPosts).empty).toBe(true);
+    expect(resolveWidgetMetric(cfg('tg.weekdayViews'), emptyPosts).empty).toBe(true);
+  });
+
+  it('returns empty when graphs are absent', () => {
+    const noGraphs: DataContext = { ...ctx, tg: { ...ctx.tg!, graphs: undefined } };
+    expect(resolveWidgetMetric(cfg('tg.languages'), noGraphs).empty).toBe(true);
+  });
+});
+
 describe('resolveWidgetMetric — stubs + guards (never throws)', () => {
   it('returns empty for an unknown metric', () => {
     expect(resolveWidgetMetric(cfg('nope.metric'), ctx).empty).toBe(true);
@@ -126,8 +226,10 @@ describe('resolveWidgetMetric — stubs + guards (never throws)', () => {
     expect(resolveWidgetMetric(cfg('ig.reach'), ctx).empty).toBe(true);
   });
 
-  it('returns empty for TG breakdowns (S3b not wired yet)', () => {
-    expect(resolveWidgetMetric(cfg('tg.emoji'), ctx).empty).toBe(true);
+  it('returns empty for TG series-from-graphs / tables (S3c not wired yet)', () => {
+    expect(resolveWidgetMetric(cfg('tg.netGrowth'), ctx).empty).toBe(true);
+    expect(resolveWidgetMetric(cfg('tg.weeklyTable'), ctx).empty).toBe(true);
+    expect(resolveWidgetMetric(cfg('tg.topPosts'), ctx).empty).toBe(true);
   });
 
   it('returns empty when the TG payload is missing rather than crashing', () => {
