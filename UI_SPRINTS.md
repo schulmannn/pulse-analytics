@@ -71,7 +71,7 @@ Source of truth прогресса между итерациями. Статус
 
 ## Спринт 4 — Instagram мульти-аккаунт
 
-- [x] **4.1 Несколько IG-аккаунтов как отдельные источники** — SHIPPED `PENDING_HASH`
+- [x] **4.1 Несколько IG-аккаунтов как отдельные источники** — SHIPPED `23cf827`
   **Арх-решение: PK ig_accounts НЕ трогаем** — второй+ IG = отдельный `channels`-row `source='ig'`
   (tg_channel_id NULL): channels уже tenant, изоляция данных (cache-ключи по accountId + query-keys по
   channelId) уже была с b4470c3. Бек: `createIgChannel`/`findIgChannelByIgUser` (db.js), OAuth start
