@@ -968,6 +968,38 @@ async function listIgAccounts() {
   return rows;
 }
 
+// ── Telegram QR sessions (managed connect) ───────────────────────────
+// One encrypted user session per account (callers encrypt via lib/tg_crypto — db.js never sees
+// plaintext). Covers every channel where that user is an admin; QR-connected channels reach it
+// via owner_uid. A StringSession = full account access, so this is the most sensitive row.
+async function saveTgSession(uid, { tg_user_id, username, session_enc }) {
+  if (!enabled || !uid) return false;
+  await pool.query(
+    `INSERT INTO tg_sessions (uid, tg_user_id, username, session_enc, updated_at)
+     VALUES ($1,$2,$3,$4, now())
+     ON CONFLICT (uid) DO UPDATE SET
+       tg_user_id=EXCLUDED.tg_user_id, username=EXCLUDED.username,
+       session_enc=EXCLUDED.session_enc, updated_at=now()`,
+    [uid, tg_user_id || null, username || null, session_enc]);
+  return true;
+}
+
+// Full row incl. the encrypted session (callers decrypt). Returns null when not connected.
+async function getTgSession(uid) {
+  if (!enabled || !uid) return null;
+  const { rows } = await pool.query(
+    `SELECT uid, tg_user_id, username, session_enc,
+            to_char(connected_at,'YYYY-MM-DD"T"HH24:MI:SS') AS connected_at
+       FROM tg_sessions WHERE uid=$1`, [uid]);
+  return rows[0] || null;
+}
+
+async function deleteTgSession(uid) {
+  if (!enabled || !uid) return false;
+  const { rowCount } = await pool.query('DELETE FROM tg_sessions WHERE uid=$1', [uid]);
+  return rowCount > 0;
+}
+
 // ── История Instagram + сырые снапшоты (accumulate-now) ──────────────
 // Мы копим историю САМИ, потому что IG отдаёт только короткое окно (сторис 24ч,
 // демография без истории). Идиомы — как upsertChannelDaily/graphsToDailyRows:
@@ -1205,6 +1237,7 @@ module.exports = {
   createBug, listBugs, updateBug, deleteBug, BUG_STATUSES, BUG_SEVERITIES, BUG_KINDS,
   bugExists, getBug, addAttachmentIfRoom, getAttachment,
   saveIgAccount, getIgAccount, updateIgToken, deleteIgAccount, listIgAccounts,
+  saveTgSession, getTgSession, deleteTgSession,
   upsertIgDaily, upsertIgMediaDaily, saveRawSnapshot, pruneRawSnapshots, pruneIgMediaDaily,
   listIgDaily, listIgMediaDaily,
   listAnnotations, createAnnotation, deleteAnnotation,
