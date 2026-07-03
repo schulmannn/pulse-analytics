@@ -58,6 +58,18 @@ const formatMsDate = (ts: number) => {
 const interLabels = (g: { x: number[] }) =>
   [g.x[0], g.x[Math.floor(g.x.length / 2)], g.x[g.x.length - 1]].map((ts) => (ts ? formatMsDate(ts) : ''));
 
+/** Rich-expand windowing for a graphs (daily-flow) series: the last `days` points (0 = «Всё»),
+    with ms-timestamp labels + RU tooltips. A graphs point ≈ one day, so slicing by count windows
+    by day; a shorter server series just returns all it has (honest — never fabricates points). */
+function windowGraphSeries(values: number[], xs: number[], days: number, unit: string) {
+  const n = days === 0 ? values.length : Math.min(days, values.length);
+  const wValues = values.slice(-n);
+  const wxs = xs.slice(-n);
+  const labels = wValues.map((_, i) => (wxs[i] ? formatMsDate(wxs[i]!) : ''));
+  const titles = wValues.map((v, i) => `${labels[i]}: ${fmt.num(v)} ${unit}`);
+  return { values: wValues, labels, titles };
+}
+
 /**
  * All normalisation/aggregation for the TG analytics sections, extracted so the component
  * can memoize it — previously these ~180 lines re-ran on every render for all four tab
@@ -499,6 +511,19 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
           <ChartSection
             id="tg-views-graph"
             title={ruSeriesName(viewSeries.name) || 'Просмотры'}
+            // Rich explorer (steep): «Развернуть» grows 1М/3М/6М/Всё pills, a line↔bar toggle and a
+            // Мин/Макс/Среднее/Сумма strip — windowing the full graphs series the inline card can't.
+            expand={{
+              renderExpanded: (days) => {
+                const w = windowGraphSeries(viewSeries.values, interGroup.x, days, 'просмотров');
+                return <LineChart values={w.values} labels={w.labels} titles={w.titles} markAnomalies markExtremes />;
+              },
+              renderExpandedBar: (days) => {
+                const w = windowGraphSeries(viewSeries.values, interGroup.x, days, 'просмотров');
+                return <BarChart values={w.values} labels={w.labels} titles={w.titles} />;
+              },
+              statsFor: (days) => windowGraphSeries(viewSeries.values, interGroup.x, days, 'просмотров').values,
+            }}
             variants={[
               {
                 key: 'line',
@@ -519,6 +544,17 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
           <ChartSection
             id="tg-shares-graph"
             title={ruSeriesName(shareSeries.name) || 'Репосты'}
+            expand={{
+              renderExpanded: (days) => {
+                const w = windowGraphSeries(shareSeries.values, interGroup.x, days, 'репостов');
+                return <LineChart values={w.values} labels={w.labels} titles={w.titles} markAnomalies markExtremes />;
+              },
+              renderExpandedBar: (days) => {
+                const w = windowGraphSeries(shareSeries.values, interGroup.x, days, 'репостов');
+                return <BarChart values={w.values} labels={w.labels} titles={w.titles} />;
+              },
+              statsFor: (days) => windowGraphSeries(shareSeries.values, interGroup.x, days, 'репостов').values,
+            }}
             variants={[
               {
                 key: 'line',
