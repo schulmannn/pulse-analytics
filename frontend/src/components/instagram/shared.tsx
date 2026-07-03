@@ -4,7 +4,24 @@ import type { MetricDelta } from '@/lib/delta';
 import { DeltaPill } from '@/components/DeltaPill';
 import { LineChart } from '@/components/LineChart';
 import { ChartSection as WidgetChartSection } from '@/components/ChartWidget';
+import type { ChartExpandConfig } from '@/components/ExpandableChart';
 import { fmtDay, type Point } from '@/lib/igMetrics';
+
+/** Window an IG daily-Point series to the last `days` points (0 = «Всё») for the rich-expand
+    overlay — feeds renderExpanded / renderExpandedBar / statsFor. Drops any 'total' marker point
+    and never fabricates: a shorter series returns all it has. */
+export function windowIgSeries(series: Point[], days: number, unit: string) {
+  const pts = series.filter((p) => p.day !== 'total');
+  const n = days === 0 ? pts.length : Math.min(days, pts.length);
+  const w = pts.slice(-n);
+  return {
+    values: w.map((p) => p.value),
+    // FULL per-point labels (not pickLabels' 3) — LineChart picks first/mid/last itself, and
+    // BarChart needs one label per bar to stride; the 3-label form mislabels the bars.
+    labels: w.map((p) => fmtDay(p.day)),
+    titles: w.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)} ${unit}`),
+  };
+}
 
 /** A top-level view section — an h2 heading with an optional right-aligned action. */
 export function Section({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
@@ -127,7 +144,7 @@ export function pickLabels(series: Point[]): string[] {
     stays exported for non-chart hosts (metric-page rail, the report document). The chart rides
     the widget's fill context as a VARIANT (not bare children) so it fills the fixed tile height
     instead of sitting at its default 200 and leaving a gap / a stray scrollbar. */
-export function TrendCard({ title, series }: { title: string; series: Point[] }) {
+export function TrendCard({ title, series, expand }: { title: string; series: Point[]; expand?: ChartExpandConfig }) {
   if (series.length <= 1) {
     return (
       <WidgetChartSection title={title}>
@@ -138,6 +155,7 @@ export function TrendCard({ title, series }: { title: string; series: Point[] })
   return (
     <WidgetChartSection
       title={title}
+      expand={expand}
       variants={[
         {
           key: 'line',

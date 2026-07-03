@@ -1,8 +1,10 @@
 import { fmt } from '@/lib/format';
 import type { IgData } from '@/lib/useIgData';
-import { Section, TrendCard, EmptyChart, signedNum } from '@/components/instagram/shared';
+import { Section, TrendCard, EmptyChart, signedNum, windowIgSeries } from '@/components/instagram/shared';
 import { ChartSection } from '@/components/ChartWidget';
 import { BarChart } from '@/components/BarChart';
+import { LineChart } from '@/components/LineChart';
+import type { ChartExpandConfig } from '@/components/ExpandableChart';
 import { InsightsBlock, PeriodCompareBlock } from '@/components/instagram/insights';
 import { exportIgDaily } from '@/lib/igExport';
 import { fmtDay, type Point, type WindowPair } from '@/lib/igMetrics';
@@ -19,6 +21,32 @@ export function IgAnalytics({ ig }: { ig: IgData }) {
   const followsByDay = ig.series.follower.filter((p) => ig.inWindow(p.day)).slice(-30);
   const hasMovement = ig.pairs.follows.hasCur || ig.pairs.unfollows.hasCur;
   const followsPair = ig.pairs.follows.hasCur ? ig.pairs.follows : ig.pairs.follower;
+
+  // Rich «Развернуть» explorer (1М/3М/6М/Всё + line↔bar + Мин/Макс/Среднее/Сумма) windowing the
+  // FULL daily series (the inline card shows only the current window) — parity with the TG flow
+  // charts. Reach and daily-follows are the two metrics IG returns as a genuine daily series.
+  const reachExpand: ChartExpandConfig = {
+    renderExpanded: (days) => {
+      const w = windowIgSeries(ig.series.reach, days, 'охвата');
+      return <LineChart values={w.values} labels={w.labels} titles={w.titles} markAnomalies markExtremes />;
+    },
+    renderExpandedBar: (days) => {
+      const w = windowIgSeries(ig.series.reach, days, 'охвата');
+      return <BarChart values={w.values} labels={w.labels} titles={w.titles} />;
+    },
+    statsFor: (days) => windowIgSeries(ig.series.reach, days, 'охвата').values,
+  };
+  const followsExpand: ChartExpandConfig = {
+    renderExpanded: (days) => {
+      const w = windowIgSeries(ig.series.follower, days, 'подписок');
+      return <LineChart values={w.values} labels={w.labels} titles={w.titles} markAnomalies markExtremes />;
+    },
+    renderExpandedBar: (days) => {
+      const w = windowIgSeries(ig.series.follower, days, 'подписок');
+      return <BarChart values={w.values} labels={w.labels} titles={w.titles} />;
+    },
+    statsFor: (days) => windowIgSeries(ig.series.follower, days, 'подписок').values,
+  };
 
   const periodRows: { label: string; pair: WindowPair }[] = [
     { label: 'Подписки', pair: followsPair },
@@ -63,8 +91,8 @@ export function IgAnalytics({ ig }: { ig: IgData }) {
         }
       >
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <TrendCard title="Охват по дням" series={reachWin} />
-          <FollowsByDayCard data={followsByDay} total={followsPair.cur} />
+          <TrendCard title="Охват по дням" series={reachWin} expand={reachExpand} />
+          <FollowsByDayCard data={followsByDay} total={followsPair.cur} expand={followsExpand} />
         </div>
       </Section>
 
@@ -121,10 +149,11 @@ function SubscriberMovement({
   );
 }
 
-function FollowsByDayCard({ data, total }: { data: Point[]; total: number }) {
+function FollowsByDayCard({ data, total, expand }: { data: Point[]; total: number; expand?: ChartExpandConfig }) {
   return (
     <ChartSection
       title="Подписки по дням"
+      expand={expand}
       // Bars as a VARIANT so they fill the fixed tile height (bare children would sit at the
       // default 200 and leave a gap); the period total stays as the caption below.
       variants={
