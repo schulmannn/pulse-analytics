@@ -21,7 +21,7 @@ from telethon import TelegramClient
 from telethon.errors import FloodWaitError, PasswordHashInvalidError, SessionPasswordNeededError
 from telethon.sessions import StringSession
 from telethon.tl.functions.stats import GetBroadcastStatsRequest, LoadAsyncGraphRequest, GetMessageStatsRequest
-from telethon.tl.functions.channels import GetFullChannelRequest, SearchPostsRequest, CheckSearchPostsFloodRequest
+from telethon.tl.functions.channels import GetFullChannelRequest, SearchPostsRequest, CheckSearchPostsFloodRequest, GetAdminedPublicChannelsRequest
 from telethon.tl.types import StatsGraph, StatsGraphAsync, InputPeerEmpty, PeerChannel
 from dotenv import load_dotenv
 
@@ -236,6 +236,37 @@ def _cols_of(data):
         else:
             series.append({'name': names.get(cid, cid), 'type': types.get(cid, 'line'), 'values': vals})
     return x, series
+
+
+def _g_timeseries(data, last=45):
+    if not data:
+        return None
+    x, series = _cols_of(data)
+    x = x[-last:]
+    for s in series:
+        s['values'] = s['values'][-last:]
+    return {'x': x, 'series': series}
+
+
+def _g_aggregate(data, top=8):
+    if not data:
+        return None
+    _, series = _cols_of(data)
+    agg = [{'label': s['name'], 'value': sum(v or 0 for v in s['values'])} for s in series]
+    agg = [a for a in agg if a['value'] > 0]
+    agg.sort(key=lambda a: a['value'], reverse=True)
+    return agg[:top]
+
+
+def _g_sum_daily(data):
+    """Sum all y-series per x-point → {x, values} (e.g. total reactions/day)."""
+    if not data:
+        return None
+    x, series = _cols_of(data)
+    if not series:
+        return None
+    n = len(series[0]['values'])
+    return {'x': x, 'values': [sum((s['values'][i] or 0) for s in series) for i in range(n)]}
 
 
 @app.get('/health')
@@ -890,24 +921,61 @@ async def _qr_gc_loop():
             log.error(f'_qr_gc_loop: {e}')
 
 
+def _is_admin_channel(e):
+    """Channel-like entity (broadcast channel OR megagroup) where the user is creator/admin."""
+    if not (getattr(e, 'broadcast', False) or getattr(e, 'megagroup', False)):
+        return False
+    return bool(getattr(e, 'creator', False) or getattr(e, 'admin_rights', None))
+
+
+def _channel_info(e):
+    """Enriched descriptor for the connect UI. participants_count is best-effort (often None
+    from dialogs / admined-public — we deliberately do NOT spend a GetFullChannel per channel)."""
+    broadcast = bool(getattr(e, 'broadcast', False))
+    return {
+        'id': e.id,
+        'title': getattr(e, 'title', '') or '',
+        'username': getattr(e, 'username', None),
+        'broadcast': broadcast,
+        'megagroup': bool(getattr(e, 'megagroup', False)),
+        'creator': bool(getattr(e, 'creator', False)),
+        'participants': getattr(e, 'participants_count', None),
+        # Only broadcast channels expose stats.getBroadcastStats. Megagroups use a different
+        # API we don't collect yet → the UI greys them out (eligible=False).
+        'eligible': broadcast,
+    }
+
+
 async def _list_admin_channels(tg):
-    """Broadcast channels where the logged-in user is creator or has admin rights.
-    Bounded (limit) so a huge dialog list can't stall login-completion latency."""
-    out = []
+    """Channels (+ megagroups) where the logged-in user is creator or admin. Two complementary
+    sources so a channel can't hide: (1) getAdminedPublicChannels catches PUBLIC channels no
+    matter how stale the dialog is; (2) a full dialog scan across BOTH folders (archived=None)
+    catches private ones + admin-not-creator rights. Was: iter_dialogs(limit=300) alone — a
+    dormant owned channel sank below the 300 most-recent dialogs and never appeared. Bounded for
+    login-completion latency (a huge dialog list still can't stall the scan)."""
+    found = {}
+    # 1. Public channels the user administers — recency-independent.
     try:
-        async for d in tg.iter_dialogs(limit=300):
-            e = d.entity
-            if getattr(e, 'broadcast', False) and (getattr(e, 'creator', False) or getattr(e, 'admin_rights', None)):
-                out.append({
-                    'id': e.id,
-                    'title': getattr(e, 'title', '') or '',
-                    'username': getattr(e, 'username', None),
-                })
+        res = await tg(GetAdminedPublicChannelsRequest())
+        for e in (getattr(res, 'chats', None) or []):
+            if _is_admin_channel(e) and e.id not in found:
+                found[e.id] = _channel_info(e)
     except FloodWaitError:
         raise
     except Exception as ex:
-        log.error(f'_list_admin_channels: {ex}')
-    return out
+        log.error(f'_list_admin_channels admined_public: {ex}')
+    # 2. Every dialog, both the main and archived folders.
+    try:
+        async for d in tg.iter_dialogs(limit=1000, archived=None):
+            e = d.entity
+            if _is_admin_channel(e) and e.id not in found:
+                found[e.id] = _channel_info(e)
+    except FloodWaitError:
+        raise
+    except Exception as ex:
+        log.error(f'_list_admin_channels dialogs: {ex}')
+    # Collectable (broadcast) channels first, then the rest; stable by title.
+    return sorted(found.values(), key=lambda c: (not c['eligible'], (c['title'] or '').lower()))
 
 
 async def _qr_finish(entry):
@@ -1053,6 +1121,161 @@ async def qr_cancel(id: str = Query(...), x_internal_token: str = Header(default
     check_auth(x_internal_token)
     await _qr_drop(id)
     return {'ok': True}
+
+
+# ── Per-session collection (QR-connected channels) ───────────────────────────────
+# Fetch a full dashboard bundle for ONE channel using a stored USER session, on an ephemeral client
+# fully isolated from the central `client`. The daily cron calls this per QR channel and writes the
+# result to Postgres (channel_snapshots + time-series), so the dashboard renders it exactly like a
+# collector channel. Mirrors the central /channel · /posts · /views_summary · /stats · /graphs logic
+# via the shared read helpers — the central endpoints are NOT touched. The session is sensitive
+# (full account access) → it is read from the POST body and NEVER logged.
+
+def _channel_ref(channel):
+    """A stored channel reference → a Telethon-resolvable peer. Numeric ⇒ PeerChannel(id); otherwise
+    a @username string (resolved via API)."""
+    s = str(channel).strip()
+    if s.lstrip('-').isdigit():
+        return PeerChannel(int(s))
+    return s.lstrip('@')
+
+
+async def _resolve_channel_entity(tg, ref):
+    """Resolve a channel on a freshly-connected StringSession client. A username resolves directly
+    (API lookup). A bare-id PeerChannel has NO cached access_hash on a fresh StringSession, so if the
+    direct lookup fails we sync dialogs once (that carries the channel's access_hash into the session
+    cache) and retry — the only way to reach a PRIVATE channel by id."""
+    try:
+        return await tg.get_entity(ref)
+    except (ValueError, TypeError):
+        if isinstance(ref, PeerChannel):
+            async for _ in tg.iter_dialogs(limit=1000, archived=None):
+                pass
+            return await tg.get_entity(ref)
+        raise
+
+
+def _stats_payload(stats):
+    def extract(obj):
+        if obj is None:
+            return None
+        if hasattr(obj, 'current'):
+            return {'current': getattr(obj.current, 'value', obj.current),
+                    'previous': getattr(obj.previous, 'value', None)}
+        return obj
+    return {
+        'followers':             extract(getattr(stats, 'followers', None)),
+        'views_per_post':        extract(getattr(stats, 'views_per_post', None)),
+        'shares_per_post':       extract(getattr(stats, 'shares_per_post', None)),
+        'reactions_per_post':    extract(getattr(stats, 'reactions_per_post', None)),
+        'enabled_notifications': extract(getattr(stats, 'enabled_notifications', None)),
+    }
+
+
+async def _graphs_payload(tg, stats, points):
+    top_hours = None
+    th = await _resolve_graph(tg, getattr(stats, 'top_hours_graph', None))
+    if th:
+        x, series = _cols_of(th)
+        if series:
+            top_hours = {'hours': x, 'values': series[0]['values'], 'name': series[0]['name']}
+    emotion = await _resolve_graph(tg, getattr(stats, 'reactions_by_emotion_graph', None))
+    return {
+        'available':               True,
+        'growth':                  _g_timeseries(await _resolve_graph(tg, getattr(stats, 'growth_graph', None)), points),
+        'followers':               _g_timeseries(await _resolve_graph(tg, getattr(stats, 'followers_graph', None)), points),
+        'views_by_source':         _g_aggregate(await _resolve_graph(tg, getattr(stats, 'views_by_source_graph', None))),
+        'new_followers_by_source': _g_aggregate(await _resolve_graph(tg, getattr(stats, 'new_followers_by_source_graph', None))),
+        'languages':               _g_aggregate(await _resolve_graph(tg, getattr(stats, 'languages_graph', None)), top=6),
+        'reactions_sentiment':     _g_aggregate(emotion),
+        'reactions_daily':         _g_sum_daily(emotion),
+        'interactions':            _g_timeseries(await _resolve_graph(tg, getattr(stats, 'interactions_graph', None)), points),
+        'top_hours':               top_hours,
+    }
+
+
+async def _collect_channel(tg, entity):
+    full = await tg(GetFullChannelRequest(entity))
+    chat = full.chats[0]
+    fc = full.full_chat
+    return {
+        'id':          chat.id,
+        'title':       chat.title,
+        'username':    getattr(chat, 'username', '') or '',
+        'description': getattr(fc, 'about', '') or '',
+        'members':     getattr(fc, 'participants_count', 0) or 0,
+        'admins':      getattr(fc, 'admins_count', 0) or 0,
+        'online':      getattr(fc, 'online_count', 0) or 0,
+    }
+
+
+def _views_summary_of(posts):
+    total_views = total_forwards = total_reactions = total_replies = 0
+    views_by_day, views_by_type = {}, {}
+    for p in posts:
+        v = p['views']
+        total_views += v
+        total_forwards += p['forwards']
+        total_reactions += p['reactions']
+        total_replies += p['replies']
+        day = p['date'][8:10] + '.' + p['date'][5:7]   # DD.MM from ISO date
+        views_by_day[day] = views_by_day.get(day, 0) + v
+        views_by_type.setdefault(p['media_type'], []).append(v)
+    n = len(posts)
+    return {
+        'total_views':       total_views,
+        'total_forwards':    total_forwards,
+        'total_reactions':   total_reactions,
+        'total_replies':     total_replies,
+        'posts_analyzed':    n,
+        'avg_views':         total_views // max(n, 1),
+        'avg_forwards':      total_forwards // max(n, 1),
+        'views_by_day':      views_by_day,
+        'avg_views_by_type': {t: int(sum(vs) / len(vs)) for t, vs in views_by_type.items() if vs},
+    }
+
+
+@app.post('/qr/collect')
+async def qr_collect(session: str = Body(...), channel: str = Body(...),
+                     posts_limit: int = Body(default=100), graph_points: int = Body(default=400),
+                     x_internal_token: str = Header(default='')):
+    check_auth(x_internal_token)
+    if not API_ID or not API_HASH:
+        raise HTTPException(status_code=503, detail='mtproto_not_configured')
+    posts_limit = max(1, min(int(posts_limit or 100), 100))
+    graph_points = max(1, min(int(graph_points or 400), 400))
+    tg = TelegramClient(StringSession(session), API_ID, API_HASH)
+    try:
+        await tg.connect()
+        if not await tg.is_user_authorized():
+            raise HTTPException(status_code=401, detail='session_unauthorized')
+        entity = await _resolve_channel_entity(tg, _channel_ref(channel))
+        posts = [_build_post(g) for g in _logical_posts(await tg.get_messages(entity, limit=posts_limit))]
+        # One GetBroadcastStats feeds both the KPI stats and the graphs (small channels 403 here —
+        # posts/channel meta still come back, so the bundle degrades gracefully instead of failing).
+        try:
+            stats_obj = await tg(GetBroadcastStatsRequest(channel=entity, dark=False))
+            stats_err = None
+        except FloodWaitError:
+            raise
+        except Exception as e:
+            stats_obj, stats_err = None, str(e)
+        return {
+            'channel':       await _collect_channel(tg, entity),
+            'posts':         posts,
+            'views_summary': _views_summary_of(posts),
+            'stats':         _stats_payload(stats_obj) if stats_obj is not None else {'available': False, 'error': stats_err},
+            'graphs':        (await _graphs_payload(tg, stats_obj, graph_points)) if stats_obj is not None else {'available': False, 'error': stats_err},
+        }
+    except FloodWaitError as e:
+        raise HTTPException(status_code=429, detail=f'flood_wait:{getattr(e, "seconds", 0)}')
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f'qr_collect error (channel={channel!r}): {e}')   # NB: the session is never logged
+        raise HTTPException(status_code=500, detail='collect_failed')
+    finally:
+        await _safe_disconnect(tg)
 
 
 @app.on_event('startup')

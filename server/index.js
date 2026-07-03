@@ -1325,6 +1325,85 @@ async function processPersistence(centralChannelId, graphs) {
   catch (e) { log('error', 'ig_media_daily_prune_failed', { error: e.message }); }
 }
 
+// One mtproto post ({id,date,views,reactions,forwards,replies,media_type,text,hashtags}) → a
+// posts-table row. Shared by the central ingest and the QR-channel collection so both compute ERV/
+// virality identically.
+function tgPostToRow(p) {
+  const reach = p.views || 0;
+  const eng = (p.reactions || 0) + (p.forwards || 0) + (p.replies || 0);
+  return {
+    post_id: p.id, date_published: p.date,
+    views: p.views || 0, reactions: p.reactions || 0, forwards: p.forwards || 0, replies: p.replies || 0,
+    erv: reach > 0 ? eng / reach * 100 : null,
+    virality: reach > 0 ? (p.forwards || 0) / reach * 100 : null,
+    media_type: p.media_type, caption: captionSnippet(p.text), hashtags: p.hashtags || [],
+  };
+}
+
+// Write one channel's collected bundle to Postgres exactly like a collector push: the snapshot
+// (what /api/tg/full + the /api/tg/mtproto/* routes serve for non-central channels) plus the
+// time-series (channel_daily from graphs, posts). Best-effort per part.
+async function persistTgBundle(channelId, bundle, day) {
+  if (!channelId || !bundle || typeof bundle !== 'object') return;
+  const posts = Array.isArray(bundle.posts) ? bundle.posts : [];
+  await db.saveSnapshot(channelId, {
+    channel:       bundle.channel || {},
+    views_summary: bundle.views_summary || null,
+    posts,
+    stats:         bundle.stats || null,
+    graphs:        bundle.graphs || null,
+  });
+  if (bundle.graphs && bundle.graphs.available) {
+    const dailyRows = db.graphsToDailyRows(bundle.graphs);
+    if (dailyRows.length) await db.upsertChannelDaily(channelId, dailyRows);
+    await db.saveRawSnapshot(channelId, 'tg', 'graphs', day, bundle.graphs).catch(() => {});
+  }
+  if (posts.length) await db.upsertPosts(channelId, posts.map(tgPostToRow));
+}
+
+// Collect QR-connected channels (source='qr') into Postgres using each user's stored session — the
+// server acts as their collector, so the dashboard renders them like any collector channel. Runs
+// fire-and-forget after the central ingest; sequential + per-channel try/catch so one bad session /
+// channel / FloodWait never blocks the others or the critical central ingest. Sessions are decrypted
+// ONLY here and handed to the isolated mtproto /qr/collect — never logged, never sent to a client.
+const TG_QR_MAX_CHANNELS_PER_RUN = 200;
+
+async function processTgQrCollection() {
+  if (!db.enabled || !tgCrypto.configured() || !MTPROTO_TOKEN) return;
+  const day = new Date().toISOString().slice(0, 10);
+  let sessions = [];
+  try { sessions = await db.listTgSessions(); }
+  catch (e) { log('error', 'tg_qr_list_sessions_failed', { error: e.message }); return; }
+
+  let done = 0, capped = false;
+  for (const s of sessions) {
+    if (done >= TG_QR_MAX_CHANNELS_PER_RUN) { capped = true; break; }
+    let sessionStr;
+    try { sessionStr = tgCrypto.decrypt(s.session_enc); }
+    catch { log('error', 'tg_qr_decrypt_failed', { uid: s.uid }); continue; }
+
+    let chans = [];
+    try { chans = (await db.listChannels({ uid: s.uid })).filter((c) => c.source === 'qr' && c.tg_channel_id != null); }
+    catch (e) { log('error', 'tg_qr_list_channels_failed', { uid: s.uid, error: e.message }); continue; }
+
+    for (const ch of chans) {
+      if (done >= TG_QR_MAX_CHANNELS_PER_RUN) { capped = true; break; }
+      done++;
+      try {
+        const ref = ch.username || String(ch.tg_channel_id);
+        const bundle = await mtprotoPost('/qr/collect', {
+          body: { session: sessionStr, channel: ref, posts_limit: 100, graph_points: 400 },
+          timeoutMs: MTPROTO_TIMEOUT_HEAVY_MS,
+        });
+        await persistTgBundle(ch.id, bundle, day);
+      } catch (e) {
+        log('error', 'tg_qr_collect_failed', { channelId: ch.id, error: e.message });
+      }
+    }
+  }
+  if (capped) log('warn', 'tg_qr_collection_capped', { cap: TG_QR_MAX_CHANNELS_PER_RUN, sessions: sessions.length });
+}
+
 // ── Instagram OAuth (per-channel connect) ─────────────────────────
 // "Business Login for Instagram" (Instagram API with Instagram Login, no Facebook Page).
 // Flow: start (authed, returns authorize_url) → user authorizes on instagram.com → callback
@@ -1890,6 +1969,9 @@ async function tgQrFinish(req, data) {
     username: data.username ?? null,
     channels: (Array.isArray(data.channels) ? data.channels : []).map((c) => ({
       id: c.id, title: c.title || '', username: c.username ?? null,
+      broadcast: c.broadcast ?? undefined, megagroup: c.megagroup ?? undefined,
+      creator: c.creator ?? undefined, participants: c.participants ?? null,
+      eligible: c.eligible ?? undefined,
     })),
   };
 }
@@ -1971,6 +2053,46 @@ app.delete('/api/tg/qr/session', requireAuth, async (req, res, next) => {
     const ok = await db.deleteTgSession(req.user.uid);
     if (ok) audit(req, 'tg.session.revoked', {}).catch(() => {});
     res.json({ ok });
+  } catch (e) { next(e); }
+});
+
+// Persist the admin channels the user ticked as trackable tenants (source='qr'). The list is supplied
+// by the browser (the just-scanned admin channels). We can't re-verify admin rights here yet — that
+// needs a session-based re-listing (P2.2) — but every row is HARD-scoped to owner_uid=req.user.uid
+// and is only ever fed by THAT user's own captured session, so a crafted/ineligible id just creates
+// an empty self-owned row Telegram refuses to hand stats for (no cross-tenant reach). Deduped against
+// the user's existing channels (central + already-added) by tg id AND @username; idempotent. The
+// daily cron (P2.3) does the actual collection.
+app.post('/api/tg/qr/channels', requireAuth, async (req, res, next) => {
+  if (!db.enabled) return res.status(400).json({ error: 'База данных выключена' });
+  try {
+    if (!(await db.getTgSession(req.user.uid))) {
+      return res.status(400).json({ error: 'Сначала подключите Telegram по QR' });
+    }
+    const raw = req.body && Array.isArray(req.body.channels) ? req.body.channels : null;
+    if (!raw || !raw.length) return res.status(400).json({ error: 'Не выбрано ни одного канала' });
+    if (raw.length > 100) return res.status(400).json({ error: 'Слишком много каналов за раз' });
+
+    // Dedup against ALL of the user's channels (central + any already tracked). listChannels hides
+    // disabled rows, so a re-added disabled channel falls through to createTgChannel and reactivates.
+    const mine = await db.listChannels(req.user);
+    const haveTgIds = new Set(mine.map((c) => (c.tg_channel_id == null ? '' : String(c.tg_channel_id))).filter(Boolean));
+    const haveUnames = new Set(mine.map((c) => (c.username ? String(c.username).replace(/^@/, '').toLowerCase() : '')).filter(Boolean));
+
+    let added = 0, skipped = 0;
+    for (const c of raw) {
+      const tgId = Number(c && c.id);
+      if (!Number.isInteger(tgId) || tgId <= 0) { skipped++; continue; }
+      const uname = String((c && c.username) || '').replace(/^@/, '').trim();
+      const title = String((c && c.title) || '').slice(0, 200);
+      if (haveTgIds.has(String(tgId)) || (uname && haveUnames.has(uname.toLowerCase()))) { skipped++; continue; }
+      const row = await db.createTgChannel({
+        owner_uid: req.user.uid, tg_channel_id: tgId, username: uname || null, title: title || null,
+      });
+      if (row) added++; else skipped++;
+    }
+    audit(req, 'tg.qr.channels_added', { added, skipped }).catch(() => {});
+    res.json({ ok: true, added, skipped });
   } catch (e) { next(e); }
 });
 
@@ -2298,17 +2420,7 @@ app.post('/api/ingest/daily', asyncHandler(async (req, res) => {
 
     let nPosts = 0;
     if (posts && Array.isArray(posts.posts)) {
-      const prows = posts.posts.map(p => {
-        const reach = p.views || 0;
-        const eng = (p.reactions || 0) + (p.forwards || 0) + (p.replies || 0);
-        return {
-          post_id: p.id, date_published: p.date,
-          views: p.views || 0, reactions: p.reactions || 0, forwards: p.forwards || 0, replies: p.replies || 0,
-          erv: reach > 0 ? eng / reach * 100 : null,
-          virality: reach > 0 ? (p.forwards || 0) / reach * 100 : null,
-          media_type: p.media_type, caption: captionSnippet(p.text), hashtags: p.hashtags || [],
-        };
-      });
+      const prows = posts.posts.map(tgPostToRow);
       nPosts = await db.upsertPosts(channelId, prows);
     }
 
@@ -2336,6 +2448,11 @@ app.post('/api/ingest/daily', asyncHandler(async (req, res) => {
     // `graphs` уже в руках — сырой снимок пишется без лишнего mtproto-вызова.
     processPersistence(channelId, graphs).catch(e =>
       log('error', 'persistence_failed', { request_id: req.requestId, error: e.message }));
+
+    // QR-connected channels: server-side collection via each user's stored session (own tail so a
+    // slow/broken session never delays the central ingest response above).
+    processTgQrCollection().catch(e =>
+      log('error', 'tg_qr_collection_failed', { request_id: req.requestId, error: e.message }));
   } catch (e) {
     // keep the { ok:false } shape for the cron, but never leak internals in the message
     log('error', 'ingest_daily_failed', { request_id: req.requestId, error: e.message, stack: e.stack });

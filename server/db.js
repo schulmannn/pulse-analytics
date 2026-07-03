@@ -607,6 +607,24 @@ async function createChannel({ owner_uid, username, title }) {
   return rows[0] || null;
 }
 
+// Create/adopt a QR-connected channel (source='qr'). Idempotent per (owner_uid, tg_channel_id)
+// via the partial unique index — re-adding after a re-scan just refreshes title/username and
+// re-activates it, never duplicates. The captured tg_sessions row (same owner_uid) feeds it.
+async function createTgChannel({ owner_uid, tg_channel_id, username, title }) {
+  if (!enabled || owner_uid == null || tg_channel_id == null) return null;
+  const uname = String(username || '').replace(/^@/, '').trim();
+  const { rows } = await pool.query(
+    `INSERT INTO channels (owner_uid, tg_channel_id, username, title, status, source)
+     VALUES ($1,$2,$3,$4,'active','qr')
+     ON CONFLICT (owner_uid, tg_channel_id) WHERE tg_channel_id IS NOT NULL
+     DO UPDATE SET username=COALESCE(EXCLUDED.username, channels.username),
+                   title=COALESCE(EXCLUDED.title, channels.title),
+                   status='active'
+     RETURNING ${CHANNEL_COLS}`,
+    [owner_uid, tg_channel_id, uname || null, title || uname || null]);
+  return rows[0] || null;
+}
+
 // Delete a channel the user owns (cascades data/keys/snapshot). Never the central one.
 async function deleteChannel(id, uid) {
   if (!enabled || !id || uid == null) return false;
@@ -1000,6 +1018,15 @@ async function deleteTgSession(uid) {
   return rowCount > 0;
 }
 
+// Every stored session (encrypted). Internal use only (the daily cron decrypts each to collect that
+// user's QR-connected channels). Never expose session_enc outside the server.
+async function listTgSessions() {
+  if (!enabled) return [];
+  const { rows } = await pool.query(
+    `SELECT uid, tg_user_id, username, session_enc FROM tg_sessions`);
+  return rows;
+}
+
 // ── История Instagram + сырые снапшоты (accumulate-now) ──────────────
 // Мы копим историю САМИ, потому что IG отдаёт только короткое окно (сторис 24ч,
 // демография без истории). Идиомы — как upsertChannelDaily/graphsToDailyRows:
@@ -1229,7 +1256,7 @@ module.exports = {
   revokeUserSessions, setUserStatus, createEmailToken, useEmailToken,
   getPrefs, setPrefs,
   adoptOwnerChannel, listChannels, getChannel, getChannelById, getOwnerChannelId, setChannelTgId,
-  createChannel, deleteChannel, createApiKey, getChannelByApiKey, listApiKeys, revokeApiKey,
+  createChannel, createTgChannel, deleteChannel, createApiKey, getChannelByApiKey, listApiKeys, revokeApiKey,
   saveSnapshot, getSnapshot, ingestCollectorPayload, getCollectorStatus, recordAuditEvent,
   saveVelocity, getLatestVelocity,
   upsertChannelDaily, upsertPosts, upsertMentions, upsertIgTags, getIgTags,
@@ -1237,7 +1264,7 @@ module.exports = {
   createBug, listBugs, updateBug, deleteBug, BUG_STATUSES, BUG_SEVERITIES, BUG_KINDS,
   bugExists, getBug, addAttachmentIfRoom, getAttachment,
   saveIgAccount, getIgAccount, updateIgToken, deleteIgAccount, listIgAccounts,
-  saveTgSession, getTgSession, deleteTgSession,
+  saveTgSession, getTgSession, deleteTgSession, listTgSessions,
   upsertIgDaily, upsertIgMediaDaily, saveRawSnapshot, pruneRawSnapshots, pruneIgMediaDaily,
   listIgDaily, listIgMediaDaily,
   listAnnotations, createAnnotation, deleteAnnotation,

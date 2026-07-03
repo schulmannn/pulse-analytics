@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { Link } from 'react-router-dom';
 import { z } from 'zod';
 import QRCode from 'qrcode';
+import { useQueryClient } from '@tanstack/react-query';
 import { useChannels, useConnectIg, useDisconnectIg, useIgOauthStatus } from '@/api/queries';
 import { apiGet, apiSend } from '@/api/client';
 import { useSelectedChannel } from '@/lib/channel-context';
@@ -424,17 +425,40 @@ const QrStatusSchema = z
   .object({ server_ready: z.boolean(), connected: z.boolean(), username: z.string().nullish(), connected_at: z.string().nullish() })
   .passthrough();
 const QrStartSchema = z.object({ id: z.string(), url: z.string(), expires_in: z.coerce.number().optional() }).passthrough();
-const QrChannelSchema = z.object({ id: z.coerce.number(), title: z.string().optional(), username: z.string().nullish() }).passthrough();
+const QrChannelSchema = z
+  .object({
+    id: z.coerce.number(),
+    title: z.string().optional(),
+    username: z.string().nullish(),
+    broadcast: z.boolean().optional(),
+    megagroup: z.boolean().optional(),
+    creator: z.boolean().optional(),
+    participants: z.coerce.number().nullish(),
+    eligible: z.boolean().optional(),
+  })
+  .passthrough();
 const QrPollSchema = z
   .object({ status: z.string(), url: z.string().nullish(), username: z.string().nullish(), channels: z.array(QrChannelSchema).optional(), error: z.string().nullish() })
   .passthrough();
 const OkSchema = z.object({ ok: z.boolean().optional() }).passthrough();
+const AddChannelsSchema = z
+  .object({ ok: z.boolean().optional(), added: z.coerce.number().optional(), skipped: z.coerce.number().optional() })
+  .passthrough();
 
 interface QrChannel {
   id: number;
   title?: string;
   username?: string | null;
+  broadcast?: boolean;
+  megagroup?: boolean;
+  creator?: boolean;
+  participants?: number | null;
+  eligible?: boolean;
 }
+
+// A channel is collectable when it's a broadcast channel. `eligible === undefined` (a channel from
+// an older mtproto build that didn't send the flag) is treated as eligible so nothing is hidden.
+const isEligible = (c: QrChannel) => c.eligible !== false;
 type QrStatus = { server_ready: boolean; connected: boolean; username?: string | null };
 
 /**
@@ -696,30 +720,117 @@ function TgScanning({
 }
 
 function TgConnected({ username, channels, onDisconnect, busy }: { username: string | null; channels: QrChannel[]; onDisconnect: () => void; busy: boolean }) {
+  const qc = useQueryClient();
+  const { data: channelsData } = useChannels();
+  // Channels already in the dashboard (match the QR channel id against the stored tg_channel_id;
+  // pg returns BIGINT as a string, so compare stringified).
+  const existing = useMemo(
+    () => new Set((channelsData?.channels ?? [])
+      .map((c) => (c.tg_channel_id == null ? '' : String(c.tg_channel_id)))
+      .filter(Boolean)),
+    [channelsData],
+  );
+  const isAdded = useCallback((c: QrChannel) => existing.has(String(c.id)), [existing]);
+
+  const [picked, setPicked] = useState<Set<number>>(new Set());
+  const [adding, setAdding] = useState(false);
+  const [addErr, setAddErr] = useState<string | null>(null);
+  const [addedCount, setAddedCount] = useState<number | null>(null);
+
+  // Seed the pre-selection once per SCAN (when the captured channel list changes) — deliberately NOT
+  // on every ['channels'] refetch. add() below awaits invalidateQueries(['channels']); keying this on
+  // `isAdded`/`existing` would re-run it right after an add, wiping the user's manual ticks and the
+  // «Добавлено» confirmation that add() just set. Already-tracked channels are excluded at render
+  // time via `selected`/`isAdded`, so they don't need excluding here.
+  useEffect(() => {
+    setPicked(new Set(channels.filter(isEligible).map((c) => c.id)));
+    setAddedCount(null);
+    setAddErr(null);
+  }, [channels]);
+
+  const toggle = (id: number) =>
+    setPicked((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+
+  const selected = channels.filter((c) => picked.has(c.id) && isEligible(c) && !isAdded(c));
+
+  const add = async () => {
+    if (!selected.length) return;
+    setAdding(true); setAddErr(null); setAddedCount(null);
+    try {
+      const r = await apiSend(
+        'POST', '/api/tg/qr/channels',
+        { channels: selected.map((c) => ({ id: c.id, title: c.title, username: c.username })) },
+        AddChannelsSchema,
+      );
+      await qc.invalidateQueries({ queryKey: ['channels'] });
+      setAddedCount(r.added ?? selected.length);
+    } catch (e) {
+      setAddErr(e instanceof Error ? e.message : 'Не удалось добавить каналы');
+    } finally {
+      setAdding(false);
+    }
+  };
+
   return (
     <div>
       <div className="flex items-center gap-2 text-sm">
         <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-verdant" />
         <span className="text-foreground">Подключён{username ? <> · <span className="font-mono">@{username}</span></> : null}</span>
       </div>
-      {channels.length > 0 && (
+
+      {channels.length > 0 ? (
         <div className="mt-4">
-          <div className="text-2xs font-medium tracking-wide text-muted-foreground">Каналы, где вы админ</div>
-          <ul className="mt-2 space-y-1.5">
-            {channels.map((c) => (
-              <li key={c.id} className="flex items-center gap-2 text-sm text-foreground">
-                <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-primary" />
-                <span>
-                  {c.title || '(без названия)'}
-                  {c.username ? <span className="font-mono text-muted-foreground"> · @{c.username}</span> : null}
-                </span>
-              </li>
-            ))}
+          <div className="text-2xs font-medium tracking-wide text-muted-foreground">Каналы, где вы админ — выберите, что отслеживать</div>
+          <ul className="mt-2 space-y-0.5">
+            {channels.map((c) => {
+              const added = isAdded(c);
+              const eligible = isEligible(c);
+              const disabled = added || !eligible;
+              return (
+                <li key={c.id}>
+                  <label className={cn('flex items-center gap-2.5 rounded px-2 py-1.5 text-sm',
+                    disabled ? 'cursor-default text-muted-foreground' : 'cursor-pointer text-foreground hover:bg-muted/40')}>
+                    <input
+                      type="checkbox"
+                      disabled={disabled}
+                      checked={!disabled && picked.has(c.id)}
+                      onChange={() => toggle(c.id)}
+                      className="size-4 shrink-0 accent-primary disabled:opacity-50"
+                    />
+                    <span className="min-w-0 flex-1 truncate">
+                      {c.title || '(без названия)'}
+                      {c.username ? <span className="font-mono text-muted-foreground"> · @{c.username}</span> : null}
+                      {typeof c.participants === 'number' ? <span className="text-muted-foreground"> · {c.participants.toLocaleString('ru')}</span> : null}
+                    </span>
+                    {added ? <span className="shrink-0 text-2xs text-verdant">в дашборде</span>
+                      : !eligible ? <span className="shrink-0 text-2xs text-muted-foreground">группа</span> : null}
+                  </label>
+                </li>
+              );
+            })}
           </ul>
+
+          {selected.length > 0 && (
+            <button
+              type="button"
+              onClick={add}
+              disabled={adding}
+              className="btn-pill mt-3 bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-60"
+            >
+              {adding ? 'Добавляю…' : `Добавить выбранные (${selected.length})`}
+            </button>
+          )}
+          {addedCount != null && addedCount > 0 && (
+            <p className="mt-2 text-xs text-verdant">Добавлено: {addedCount}. Каналы появились в переключателе источника.</p>
+          )}
+          {addErr && <p className="mt-2 text-xs font-medium text-destructive">{addErr}</p>}
         </div>
+      ) : (
+        <p className="mt-4 text-xs text-muted-foreground">Каналов, где вы админ, не нашлось.</p>
       )}
+
       <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
-        Аккаунт подключён. Автоматический сбор статистики по этим каналам добавим следующим шагом.
+        Выбранные каналы появляются в переключателе источника. Автоматический сбор статистики по ним подключаем следующим шагом.
       </p>
       <button
         type="button"
