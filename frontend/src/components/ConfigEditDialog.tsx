@@ -6,7 +6,8 @@ import type { PeriodDays } from '@/lib/period';
 import { VIZ_LABEL } from '@/lib/widgetRender';
 import type { MetricDef } from '@/lib/widgetMetrics';
 import type { WidgetSize } from '@/components/ChartWidget';
-import type { ComparisonDisplay, ComparisonMode, WidgetConfig, WidgetGrain } from '@/lib/widgetConfig';
+import { dimensionsFor, type DimensionDef } from '@/lib/dimensions';
+import type { ComparisonDisplay, ComparisonMode, FilterOp, WidgetConfig, WidgetFilter, WidgetGrain } from '@/lib/widgetConfig';
 
 /**
  * The universal metric-builder editor — the steep «Edit widget» for a WidgetConfig. Unlike the
@@ -83,6 +84,7 @@ export function ConfigEditDialog({
   }, [onClose]);
 
   const isSeries = metric.kind === 'series';
+  const filterDims = dimensionsFor(metric.dimensions);
   // Comparison (a ghost line) + target (a goal line) only render on a series chart — a value/KPI has
   // nowhere to draw them and a breakdown is a distribution, so both controls are gated to series to
   // avoid shipping knobs with no visible effect. (KPI delta-comparison + progress caption = S8/S9.)
@@ -188,6 +190,16 @@ export function ConfigEditDialog({
               className="mt-1 w-full rounded border border-border bg-background px-3 py-2 text-sm tabular-nums text-foreground outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
             />
           </label>
+        )}
+
+        {filterDims.length > 0 && (
+          <Field label="Фильтр">
+            <FilterBuilder
+              dims={filterDims}
+              filters={config.filters ?? []}
+              onChange={(filters) => onChange({ filters: filters.length ? filters : undefined })}
+            />
+          </Field>
         )}
 
         <SourceField config={config} onChange={onChange} />
@@ -309,6 +321,80 @@ function Segmented<T extends string>({
           >
             {o.label}
           </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Per-dimension filter chips (S7): each dimension shows include/exclude + selectable value chips.
+ *  A dimension with no selected values contributes no filter (an empty filter list clears it). */
+function FilterBuilder({
+  dims,
+  filters,
+  onChange,
+}: {
+  dims: DimensionDef[];
+  filters: WidgetFilter[];
+  onChange: (filters: WidgetFilter[]) => void;
+}) {
+  const setDim = (dimId: string, op: FilterOp, values: string[]) => {
+    const others = filters.filter((f) => f.dimensionId !== dimId);
+    onChange(values.length ? [...others, { dimensionId: dimId, op, values }] : others);
+  };
+  return (
+    <div className="space-y-3">
+      {dims.map((dim) => {
+        const f = filters.find((x) => x.dimensionId === dim.id);
+        const op: FilterOp = f?.op === 'not_in' ? 'not_in' : 'in';
+        const selected = new Set((f?.values ?? []).map(String));
+        const toggle = (v: string) => {
+          const next = new Set(selected);
+          if (next.has(v)) next.delete(v);
+          else next.add(v);
+          setDim(dim.id, op, [...next]);
+        };
+        return (
+          <div key={dim.id}>
+            <div className="mb-1.5 flex items-center justify-between gap-2">
+              <span className="text-2xs font-medium tracking-wide text-muted-foreground">{dim.label}</span>
+              {selected.size > 0 && (
+                <div role="group" aria-label={`Режим фильтра «${dim.label}»`} className="flex overflow-hidden rounded border border-border">
+                  {(['in', 'not_in'] as FilterOp[]).map((o) => (
+                    <button
+                      key={o}
+                      type="button"
+                      aria-pressed={op === o}
+                      onClick={() => setDim(dim.id, o, [...selected])}
+                      className={`px-1.5 py-0.5 text-2xs font-medium transition-colors ${
+                        op === o ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'
+                      } border-r border-border last:border-r-0`}
+                    >
+                      {o === 'in' ? 'Вкл' : 'Искл'}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {dim.values.map((v) => {
+                const on = selected.has(v);
+                return (
+                  <button
+                    key={v}
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() => toggle(v)}
+                    className={`rounded-full border px-2 py-0.5 text-2xs font-medium transition-colors ${
+                      on ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    {v}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         );
       })}
     </div>

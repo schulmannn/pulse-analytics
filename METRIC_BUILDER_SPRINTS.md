@@ -31,7 +31,7 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
   postCount/engagementComposition/viewsByType/viewsBySource/newFollowersBySource/languages/sentiment/
   hours/churn) через новый pure `lib/tgAggregations.ts` (порт агрегаторов из TgAnalytics, БЕЗ трогания
   живой страницы — миграция самой TgAnalytics → S12). +graphs в DataContext. all-zero breakdown = empty.
-  **Резолвер покрывает 20 метрик.** 19 тестов (204 всего). **S3c (SHIPPED `<pending>`):** netGrowth (series-из-graphs.followers,
+  **Резолвер покрывает 20 метрик.** 19 тестов (204 всего). **S3c (SHIPPED `b9cfad8`):** netGrowth (series-из-graphs.followers,
   net daily=joined−left, flow-бакет+окно; guard data-aware `inWin.length===0`, не мёртвый — урок из
   S11); tables (weeklyTable/topPosts) НЕ в story-card билдере — каталог скрывает kind==='table' (богатая
   таблица не для тайла; живут в Отчётах). +2 теста (246). **Резолвер закрывает все addable-метрики.**
@@ -71,7 +71,17 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
   коммит, меняющий бандл** — registry-путь байт-идентичен (обёрнут в else). Гейт build+224. ⚠️ Живой
   визуал = юзер на проде (authed Home локально не рендерится). Rich-редактор config (period/grain/
   comparison/target/filter) = S5; сейчас ⋯Изменить правит только prefs (title/color/size) — переходно.
-- **S7 — Per-widget фильтры `FilterBuilder` + каталог DIMENSIONS** — TODO
+- **S7 — Per-widget фильтры `FilterBuilder` + каталог DIMENSIONS** — SHIPPED `<pending>`
+  `lib/dimensions.ts` — каталог измерений (tg.format/tg.weekday) + `postMatchesFilters(rawPost,filters)`
+  (pure предикат на raw TgPost; AND; unknown dim→pass; undated→fail-in/pass-not_in). Резолвер:
+  `applyFilters` фильтрует full.posts ДО deriveKpis (core: value/delta/series/normPosts согласованы) +
+  resolveTgBreakdown фильтрует post-derived (emoji/formatPerf/weekday/postCount). Graphs/summary —
+  агрегаты без per-post, фильтр не применяется (редактор не предлагает). Каталог: dimensions на
+  post-derived breakdowns. Редактор: FilterBuilder (per-dim Вкл/Искл + чипы значений). Этап 1 =
+  клиентская фильтрация загруженных постов. +13 тестов (259). **Adversarial-review (3 агента): 1 дефект
+  [HIGH]** — delta-pill core-KPI (views/reactions/forwards) показывал ВЕСЬ канал (архивный тренд) рядом
+  с отфильтрованным value → фикс: recompute из filtered `windowTotals` ИЛИ suppress (null) при отсутствии
+  парного post-окна (avgReach уже post-derived, не трогаю); заперт детерминированным тестом.
 - **S8 — Сравнение как настройка модели** — TODO
 - **S9 — Target / forecast** — TODO
 - **S10 — Богаче grain (day..year, flow vs level)** — SHIPPED `1d308a9`
@@ -99,6 +109,11 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
 
 ## Журнал
 
+- 2026-07-03 — **S7 SHIPPED** `<pending>`. Фильтры: `lib/dimensions.ts` + резолвер applyFilters +
+  FilterBuilder. Ultracode-ревью поймал delta-инконсистентность (архивный тренд рядом с фильтр-value)
+  → recompute/suppress из filtered windowTotals. Грабля: deriveKpis.windowTotals внутри Date.now() →
+  тест suppression дат posts относительно now.
+- 2026-07-03 — **S3c SHIPPED** `b9cfad8`. netGrowth + каталог скрыл table-kind.
 - 2026-07-03 — **S11 SHIPPED** `a64a29d`. IG-пути: `igAggregations.ts` + резолвер IG-ветка +
   `useIgWidgetData` + ConfigWidget TG/IG-диспетч (компонентами, не хук) + каталог раскрыт. Резолвер
   = 31 метрика. Ultracode-ревью поймал 2 дефекта; верификатор скорректировал предложенный фикс

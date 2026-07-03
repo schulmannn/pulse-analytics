@@ -174,7 +174,7 @@ const TG_METRICS: MetricDef[] = [
   // Content breakdowns.
   define({
     id: 'tg.emoji', label: 'Реакции по эмодзи', source: 'tg', kind: 'breakdown', unit: 'number',
-    category: 'content', formula: 'Топ эмодзи-реакций под постами окна.',
+    category: 'content', dimensions: POST_DIMS, formula: 'Топ эмодзи-реакций под постами окна.',
   }),
   define({
     id: 'tg.engagementComposition', label: 'Состав вовлечённости', source: 'tg', kind: 'breakdown',
@@ -187,16 +187,17 @@ const TG_METRICS: MetricDef[] = [
   }),
   define({
     id: 'tg.formatPerf', label: 'Вовлечённость по формату', source: 'tg', kind: 'breakdown', unit: 'percent',
-    category: 'content', formula: 'Средний ERV по типу поста — какие форматы реально вовлекают.',
+    category: 'content', dimensions: ['tg.weekday'],
+    formula: 'Средний ERV по типу поста — какие форматы реально вовлекают.',
   }),
   define({
     id: 'tg.weekdayViews', label: 'По дням недели', source: 'tg', kind: 'breakdown', unit: 'views',
-    category: 'content', defaultViz: 'bar', supportedViz: ['bar', 'line'],
+    category: 'content', defaultViz: 'bar', supportedViz: ['bar', 'line'], dimensions: ['tg.format'],
     formula: 'Средние просмотры поста по дню недели публикации.',
   }),
   define({
     id: 'tg.postCount', label: 'Количество постов', source: 'tg', kind: 'breakdown', unit: 'posts',
-    category: 'content', defaultViz: 'bar', supportedViz: ['bar', 'line'],
+    category: 'content', defaultViz: 'bar', supportedViz: ['bar', 'line'], dimensions: ['tg.format'],
     formula: 'Сколько постов вышло по дню недели.',
   }),
   // Audience breakdowns.

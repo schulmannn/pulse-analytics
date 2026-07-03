@@ -30,6 +30,7 @@ import type {
   TgGraphs,
 } from '@/api/schemas';
 import type { DateRange, PeriodDays } from '@/lib/period';
+import { pctDelta } from '@/lib/delta';
 import type { MetricDelta } from '@/lib/delta';
 import type { MetricKind, MetricUnit } from '@/lib/widgetMetrics';
 import type { WidgetConfig, WidgetGrain } from '@/lib/widgetConfig';
@@ -38,6 +39,7 @@ import { deriveKpis } from '@/lib/kpiDerive';
 import type { DrillKey, PostMetricField } from '@/lib/kpiDerive';
 import { normalizeTgPosts } from '@/lib/posts';
 import type { NormalizedPost } from '@/lib/posts';
+import { postMatchesFilters } from '@/lib/dimensions';
 import { DAY_MS, alignGhost, bucketKeyOf, bucketKeysInWindow, comparisonWindow } from '@/lib/metricSeries';
 import type { SeriesGrain } from '@/lib/metricSeries';
 import { fmt } from '@/lib/format';
@@ -213,6 +215,13 @@ function base(metricId: string, kind: MetricKind, unit: MetricUnit): WidgetResul
   return { metricId, kind, unit };
 }
 
+/** Apply the widget's per-post filters (S7) to a TgFull's posts — the resolver filters the already-
+ *  fetched posts client-side, so a metric aggregates only the matching subset. No-op without filters. */
+function applyFilters(full: TgFull, filters: WidgetConfig['filters']): TgFull {
+  if (!filters || filters.length === 0) return full;
+  return { ...full, posts: (full.posts ?? []).filter((p) => postMatchesFilters(p, filters)) };
+}
+
 /** The six KPI metrics: value/delta/caption from deriveKpis, plus a grain-bucketed series + ghost. */
 function resolveCoreTg(
   drillKey: DrillKey,
@@ -223,11 +232,28 @@ function resolveCoreTg(
   const tg = ctx.tg;
   if (!tg?.full) return { ...out, empty: true };
 
-  const derived = deriveKpis(tg.full, tg.history, tg.channels, tg.channelId, ctx.days, ctx.range, ctx.inRange);
+  // Per-post filters (S7) narrow the posts BEFORE deriveKpis, so value / delta / series / normPosts
+  // all reconcile to the filtered subset. Subscribers (level, no post attribution) declares no
+  // dimensions, so it's never filtered.
+  const full = applyFilters(tg.full, config.filters);
+  const derived = deriveKpis(full, tg.history, tg.channels, tg.channelId, ctx.days, ctx.range, ctx.inRange);
   const meta = derived.drillMeta[drillKey];
   out.value = meta.total;
   out.delta = meta.trend;
   out.caption = meta.caption;
+
+  // Per-post filters: value/caption/series reconcile to the filtered subset, but the KPI trend for
+  // views/reactions/forwards is archive-derived (the day snapshot has no per-post attribution, so it
+  // reflects the WHOLE channel). Recompute it from the filtered post windows (windowTotals is over the
+  // filtered posts) — or SUPPRESS it when there's no paired post window, rather than leave the stale
+  // whole-channel delta beside a filtered headline. avgReach's trend is already post-derived
+  // (avgReachWindowDelta over the filtered posts); subscribers/er expose no dimensions (never filtered).
+  if (config.filters?.length) {
+    const wt = derived.windowTotals;
+    if (drillKey === 'views') out.delta = wt ? pctDelta(wt.current.views, wt.previous.views) : null;
+    else if (drillKey === 'reactions') out.delta = wt ? pctDelta(wt.current.reactions, wt.previous.reactions) : null;
+    else if (drillKey === 'forwards') out.delta = wt ? pctDelta(wt.current.forwards, wt.previous.forwards) : null;
+  }
 
   const grain = effGrain(config.grain);
   const winTo = ctx.range ? ctx.range.to : ctx.now;
@@ -308,7 +334,7 @@ export function resolveWidgetMetric(config: WidgetConfig, ctx: DataContext): Wid
   if (metric.drillKey) return resolveCoreTg(metric.drillKey, config, ctx, out);
   if (metric.id === 'tg.erv' || metric.id === 'tg.virality') return resolveTgRatio(metric.id, ctx, out);
   if (metric.id === 'tg.netGrowth') return resolveTgNetGrowth(config, ctx, out);
-  if (metric.kind === 'breakdown') return resolveTgBreakdown(metric.id, ctx, out);
+  if (metric.kind === 'breakdown') return resolveTgBreakdown(metric.id, config, ctx, out);
 
   // Tables (tg.weeklyTable / tg.topPosts) are served by the report/analytics surfaces, not the
   // story-card builder (a rich table doesn't fit a widget tile) — the catalogue hides table-kind.
@@ -340,9 +366,11 @@ function resolveTgNetGrowth(config: WidgetConfig, ctx: DataContext, out: WidgetR
 /** TG categorical splits — dispatched to the pure aggregators in tgAggregations. Post-derived
  *  metrics window the fetched posts by ctx.inRange; summary/graphs metrics are period-agnostic
  *  (server aggregates), matching the existing analytics widgets. */
-function resolveTgBreakdown(metricId: string, ctx: DataContext, out: WidgetResult): WidgetResult {
+function resolveTgBreakdown(metricId: string, config: WidgetConfig, ctx: DataContext, out: WidgetResult): WidgetResult {
   const tg = ctx.tg;
   if (!tg?.full) return { ...out, empty: true };
+  // Post-derived breakdowns honour the per-post filters (S7); summary/graphs breakdowns are aggregates
+  // with no per-post attribution, so filters don't apply to them (the editor won't offer filters there).
   const full = tg.full;
 
   let items: BreakdownItem[];
@@ -351,7 +379,8 @@ function resolveTgBreakdown(metricId: string, ctx: DataContext, out: WidgetResul
     case 'tg.formatPerf':
     case 'tg.weekdayViews':
     case 'tg.postCount': {
-      const posts = normalizeTgPosts(full.posts ?? [], full.channel ?? {}).filter((p) => ctx.inRange(p.date));
+      const raw = (full.posts ?? []).filter((p) => postMatchesFilters(p, config.filters));
+      const posts = normalizeTgPosts(raw, full.channel ?? {}).filter((p) => ctx.inRange(p.date));
       items =
         metricId === 'tg.emoji'
           ? emojiBreakdown(posts)

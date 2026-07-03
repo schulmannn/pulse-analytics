@@ -239,6 +239,71 @@ describe('resolveWidgetMetric — TG breakdowns (S3b)', () => {
   });
 });
 
+describe('resolveWidgetMetric — per-post filters (S7)', () => {
+  const mixedFull = {
+    channel: { memberCount: 44000, username: 'bynotem' },
+    posts: [
+      mkPost(1, 1000), // photo (mkPost default media_type)
+      { ...mkPost(2, 3000), media_type: 'video' },
+      { ...mkPost(3, 500), media_type: 'video' },
+    ],
+  } as unknown as TgFull;
+  const mixedCtx: DataContext = { ...ctx, tg: { ...ctx.tg!, full: mixedFull } };
+
+  it('filters a series metric (tg.views) to a single format', () => {
+    const r = resolveWidgetMetric(
+      cfg('tg.views', { filters: [{ dimensionId: 'tg.format', op: 'in', values: ['Видео'] }] }),
+      mixedCtx,
+    );
+    expect(r.valueRaw).toBe(3500); // 3000 + 500 video; the 1000 photo is excluded
+  });
+
+  it('filters a breakdown metric (tg.postCount) to a single format', () => {
+    const r = resolveWidgetMetric(
+      cfg('tg.postCount', { filters: [{ dimensionId: 'tg.format', op: 'in', values: ['Фото'] }] }),
+      mixedCtx,
+    );
+    expect(r.breakdown!.reduce((s, i) => s + i.value, 0)).toBe(1); // only the single photo post
+  });
+
+  it('no filters counts every post', () => {
+    expect(resolveWidgetMetric(cfg('tg.views'), mixedCtx).valueRaw).toBe(4500);
+  });
+
+  // The KPI trend for views/reactions/forwards is archive-derived (whole-channel). With a filter it
+  // must NOT sit beside a filtered headline — recompute from filtered post windows, or suppress.
+  // deriveKpis' window math keys off Date.now(), so this test dates posts/archive relative to now.
+  it('does not show the whole-channel delta beside a filtered core KPI (suppress/recompute)', () => {
+    const now = Date.now();
+    const dISO = (daysAgo: number) => new Date(now - daysAgo * DAY).toISOString();
+    const full = {
+      channel: { memberCount: 1000, username: 'x' },
+      posts: [
+        { id: 1, date: dISO(5), views: 1000, media_type: 'video' }, // current window, video
+        { id: 2, date: dISO(6), views: 2000, media_type: 'photo' }, // current window, photo
+        { id: 3, date: dISO(40), views: 5000, media_type: 'photo' }, // previous window, photo
+        { id: 4, date: dISO(65), views: 100, media_type: 'photo' }, // older → windowTotals non-null
+      ],
+    } as unknown as TgFull;
+    const history = { rows: [{ day: dISO(40), views: 5000 }, { day: dISO(5), views: 3000 }] } as unknown as HistoryData;
+    const inRangeNow = (i: string | null | undefined) => {
+      if (!i) return false;
+      const t = Date.parse(i);
+      return Number.isFinite(t) && t >= now - 30 * DAY && t <= now;
+    };
+    const c: DataContext = { now, days: 30, range: null, inRange: inRangeNow, tg: { full, history, channels, channelId: 1 } };
+
+    const unfiltered = resolveWidgetMetric(cfg('tg.views'), c);
+    expect(unfiltered.delta).toBeTruthy(); // whole-channel archive trend is non-null here
+
+    const filtered = resolveWidgetMetric(cfg('tg.views', { filters: [{ dimensionId: 'tg.format', op: 'in', values: ['Видео'] }] }), c);
+    expect(filtered.valueRaw).toBe(1000); // only the single in-window video
+    // No paired video window (no video in the previous 30d) → the stale whole-channel delta is
+    // suppressed, not shown beside the filtered «1000».
+    expect(filtered.delta ?? null).toBeNull();
+  });
+});
+
 describe('resolveWidgetMetric — tg.netGrowth (S3c series-from-graphs)', () => {
   // followers graph x = ms timestamps within the window; joined/left → net daily = joined − left.
   const netGraphs = {
