@@ -39,6 +39,7 @@ const GRAINS: Array<{ value: WidgetGrain; label: string }> = [
 const CMP_MODES: Array<{ value: ComparisonMode; label: string }> = [
   { value: 'none', label: 'Выкл' },
   { value: 'previous_period', label: 'Пред. период' },
+  { value: 'same_period_last_month', label: 'Прошлый месяц' },
   { value: 'same_period_last_year', label: 'Год назад' },
 ];
 

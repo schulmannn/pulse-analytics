@@ -137,6 +137,19 @@ describe('resolveWidgetMetric — TG core series', () => {
     expect(r.ghostLabel).toBeUndefined();
   });
 
+  it('honours the comparison display: «delta» draws no ghost line (S8)', () => {
+    const line = resolveWidgetMetric(cfg('tg.views', { comparison: { mode: 'previous_period', display: 'ghost_line' } }), ctx);
+    expect(line.ghost).toBeDefined();
+    const deltaOnly = resolveWidgetMetric(cfg('tg.views', { comparison: { mode: 'previous_period', display: 'delta' } }), ctx);
+    expect(deltaOnly.ghost).toBeUndefined(); // «Дельта» is a real choice, not a no-op
+  });
+
+  it('supports the same_period_last_month baseline (S8)', () => {
+    const r = resolveWidgetMetric(cfg('tg.views', { comparison: { mode: 'same_period_last_month', display: 'ghost_line' } }), ctx);
+    expect(r.ghost).toBeDefined();
+    expect(r.ghostLabel).toBe('прошлый месяц');
+  });
+
   it('resolves tg.subscribers from the daily archive (level series, last-of-bucket)', () => {
     const r = resolveWidgetMetric(cfg('tg.subscribers'), ctx);
     expect(r.empty).toBeFalsy();
@@ -357,7 +370,7 @@ describe('resolveWidgetMetric — stubs + guards (never throws)', () => {
 // ── Instagram (S11) ────────────────────────────────────────────────────────────────────────────
 const igInsights = {
   data: [
-    { name: 'reach', values: [{ end_time: iso(1), value: 1000 }, { end_time: iso(5), value: 2000 }] },
+    { name: 'reach', values: [{ end_time: iso(1), value: 1000 }, { end_time: iso(5), value: 2000 }, { end_time: iso(35), value: 500 }] },
     { name: 'total_interactions', values: [{ end_time: iso(1), value: 100 }, { end_time: iso(5), value: 200 }] },
     { name: 'follows', values: [{ end_time: iso(2), value: 50 }] },
     { name: 'unfollows', values: [{ end_time: iso(2), value: 10 }] },
@@ -415,6 +428,14 @@ describe('resolveWidgetMetric — Instagram (S11)', () => {
     expect(r.series!.reduce((s, p) => s + p.value, 0)).toBe(3000);
   });
 
+  it('wires the comparison ghost for IG series (S8) + honours «delta»', () => {
+    const line = resolveWidgetMetric(cfg('ig.reach', { comparison: { mode: 'previous_period', display: 'ghost_line' } }), igCtx);
+    expect(line.ghost).toBeDefined(); // the 35-day reach point lands in the baseline window
+    expect(line.ghostLabel).toBe('прошлый период');
+    const deltaOnly = resolveWidgetMetric(cfg('ig.reach', { comparison: { mode: 'previous_period', display: 'delta' } }), igCtx);
+    expect(deltaOnly.ghost).toBeUndefined();
+  });
+
   it('resolves ig.followers from the profile count', () => {
     const r = resolveWidgetMetric(cfg('ig.followers'), igCtx);
     expect(r.valueRaw).toBe(44000);
@@ -441,6 +462,18 @@ describe('resolveWidgetMetric — Instagram (S11)', () => {
 
   it('returns empty for ig.netFollowers when there is no movement data (hasCur false)', () => {
     expect(resolveWidgetMetric(cfg('ig.netFollowers'), { ...igCtx, ig: {} }).empty).toBe(true);
+  });
+
+  it('draws the netFollowers ghost for a genuine net-zero baseline, not just non-zero (S8 Fix 1)', () => {
+    const ins = {
+      data: [
+        { name: 'follows', values: [{ end_time: iso(2), value: 50 }, { end_time: iso(35), value: 20 }] },
+        { name: 'unfollows', values: [{ end_time: iso(2), value: 10 }, { end_time: iso(35), value: 20 }] }, // baseline day nets to 0 (REAL data)
+      ],
+    } as unknown as IgInsights;
+    const c: DataContext = { ...igCtx, ig: { ...igCtx.ig, insights: ins } };
+    const r = resolveWidgetMetric(cfg('ig.netFollowers', { comparison: { mode: 'previous_period', display: 'ghost_line' } }), c);
+    expect(r.ghost).toBeDefined(); // gated on baseline hasCur, so a real net-zero baseline still shows the line
   });
 
   it('resolves ig.erv = interactions ÷ reach × 100', () => {

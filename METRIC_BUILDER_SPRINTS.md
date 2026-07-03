@@ -71,7 +71,7 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
   коммит, меняющий бандл** — registry-путь байт-идентичен (обёрнут в else). Гейт build+224. ⚠️ Живой
   визуал = юзер на проде (authed Home локально не рендерится). Rich-редактор config (period/grain/
   comparison/target/filter) = S5; сейчас ⋯Изменить правит только prefs (title/color/size) — переходно.
-- **S7 — Per-widget фильтры `FilterBuilder` + каталог DIMENSIONS** — SHIPPED `<pending>`
+- **S7 — Per-widget фильтры `FilterBuilder` + каталог DIMENSIONS** — SHIPPED `1b3c8ac`
   `lib/dimensions.ts` — каталог измерений (tg.format/tg.weekday) + `postMatchesFilters(rawPost,filters)`
   (pure предикат на raw TgPost; AND; unknown dim→pass; undated→fail-in/pass-not_in). Резолвер:
   `applyFilters` фильтрует full.posts ДО deriveKpis (core: value/delta/series/normPosts согласованы) +
@@ -82,7 +82,17 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
   [HIGH]** — delta-pill core-KPI (views/reactions/forwards) показывал ВЕСЬ канал (архивный тренд) рядом
   с отфильтрованным value → фикс: recompute из filtered `windowTotals` ИЛИ suppress (null) при отсутствии
   парного post-окна (avgReach уже post-derived, не трогаю); заперт детерминированным тестом.
-- **S8 — Сравнение как настройка модели** — TODO
+- **S8 — Сравнение как настройка модели** — SHIPPED `<pending>`
+  `comparisonBaseline(cmp, winFrom, winTo)` — previous_period/year (metricSeries) + **same_period_last_month**
+  (−30д shift) + **custom** (explicit from/to). `wantsGhostLine` соблюдает `display`: **«Дельта» больше не
+  рисует ghost-линию** (был мёртвый контрол). ghostLabel per mode. Применено к TG field+subscribers.
+  **IG-сравнение оживлено:** `applyIgGhost` (baseline-серия из сдвинутого IG-окна, aligned) в flowSeries
+  (reach/interactions)+netFollowers — раньше редактор показывал контрол для IG series, а резолвер игнорил.
+  +4 теста (263). **Adversarial-review (4 агента): 2 дефекта [LOW] пойманы+пофикшены** — (1) netFollowers
+  ghost глотался при genuine net-zero baseline → gate по baseline `hasCur` (allowZero), reach/interactions
+  сохраняют `!==0`; (2) same_period_last_month fixed-30d ломал выравнивание при календарном grain → grain-
+  aware сдвиг (`shiftMonthsUTC` для month/quarter/year, 30д для day/week) + режим добавлен в редактор.
+  Примечание: 'ghost_line'≈'both' визуально (pill=hero-delta всегда).
 - **S9 — Target / forecast** — TODO
 - **S10 — Богаче grain (day..year, flow vs level)** — SHIPPED `1d308a9`
   `SeriesGrain = Grain | quarter | year` в metricSeries (Grain=day/week/month оставлен для MetricPage
@@ -109,7 +119,10 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
 
 ## Журнал
 
-- 2026-07-03 — **S7 SHIPPED** `<pending>`. Фильтры: `lib/dimensions.ts` + резолвер applyFilters +
+- 2026-07-03 — **S8 SHIPPED** `<pending>`. Сравнение-модель: display honor + month/custom + IG-ghost.
+  Ревью поймало 2 LOW: netFollowers net-zero ghost (hasCur-gate), month-shift календарное выравнивание
+  (grain-aware shiftMonthsUTC). Урок: shared-хелпер applyIgGhost — фикс scoped через opts, не глобально.
+- 2026-07-03 — **S7 SHIPPED** `1b3c8ac`. Фильтры: `lib/dimensions.ts` + резолвер applyFilters +
   FilterBuilder. Ultracode-ревью поймал delta-инконсистентность (архивный тренд рядом с фильтр-value)
   → recompute/suppress из filtered windowTotals. Грабля: deriveKpis.windowTotals внутри Date.now() →
   тест suppression дат posts относительно now.

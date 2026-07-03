@@ -33,7 +33,7 @@ import type { DateRange, PeriodDays } from '@/lib/period';
 import { pctDelta } from '@/lib/delta';
 import type { MetricDelta } from '@/lib/delta';
 import type { MetricKind, MetricUnit } from '@/lib/widgetMetrics';
-import type { WidgetConfig, WidgetGrain } from '@/lib/widgetConfig';
+import type { ComparisonConfig, ComparisonMode, WidgetConfig, WidgetGrain } from '@/lib/widgetConfig';
 import { getMetric } from '@/lib/widgetMetrics';
 import { deriveKpis } from '@/lib/kpiDerive';
 import type { DrillKey, PostMetricField } from '@/lib/kpiDerive';
@@ -155,24 +155,63 @@ const FIELD: Partial<Record<DrillKey, PostMetricField>> = {
   er: 'eng',
 };
 
-const CMP_LABEL: Record<'prev' | 'year', string> = {
-  prev: 'прошлый период',
-  year: 'год назад',
+// ── Comparison (S8): the baseline window + how it's displayed, as a full model setting ──────────
+const COMPARISON_LABEL: Record<ComparisonMode, string> = {
+  none: '',
+  previous_period: 'прошлый период',
+  same_period_last_month: 'прошлый месяц',
+  same_period_last_year: 'год назад',
+  custom: 'выбранный период',
 };
+
+/** Shift an instant back/forward by whole calendar months (UTC), clamping the day so month-end never
+ *  overflows (Mar-31 − 1mo → Feb-28, not Mar-03). Used for the month-shift baseline under CALENDAR
+ *  grains, where a fixed 30-day shift would land on a different bucket count than the active window. */
+function shiftMonthsUTC(ms: number, months: number): number {
+  const d = new Date(ms);
+  const day = d.getUTCDate();
+  d.setUTCDate(1);
+  d.setUTCMonth(d.getUTCMonth() + months);
+  const maxDay = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+  d.setUTCDate(Math.min(day, maxDay));
+  return d.getTime();
+}
+
+/** The baseline window for a comparison config, or null when there's nothing to compare against.
+ *  `custom` uses the explicit from/to; the others shift the active [winFrom..winTo] window. The month
+ *  shift is grain-aware: a fixed 30-day shift keeps day-for-day alignment for day/week grains, but a
+ *  CALENDAR-month shift is needed for month/quarter/year so the baseline lands on the same bucket
+ *  count one position back (else alignGhost would overlay the wrong month). */
+function comparisonBaseline(
+  cmp: ComparisonConfig | undefined,
+  winFrom: number | null,
+  winTo: number,
+  grain: SeriesGrain,
+): { from: number; to: number } | null {
+  if (!cmp || cmp.mode === 'none') return null;
+  if (cmp.mode === 'custom') return cmp.from != null && cmp.to != null ? { from: cmp.from, to: cmp.to } : null;
+  if (winFrom == null) return null; // «Всё» has no shiftable window
+  if (cmp.mode === 'previous_period') return comparisonWindow(winFrom, winTo, 'prev');
+  if (cmp.mode === 'same_period_last_year') return comparisonWindow(winFrom, winTo, 'year');
+  if (cmp.mode === 'same_period_last_month') {
+    if (grain === 'month' || grain === 'quarter' || grain === 'year') {
+      return { from: shiftMonthsUTC(winFrom, -1), to: shiftMonthsUTC(winTo, -1) };
+    }
+    const shift = 30 * DAY_MS; // day/week: fixed shift keeps day-for-day alignment
+    return { from: winFrom - shift, to: winTo - shift };
+  }
+  return null;
+}
+
+/** Whether the comparison should draw the ghost LINE. `display:'delta'` shows only the pill (the
+ *  line is hidden), so «Дельта» is a real choice, not a no-op. Default (undefined) = draw the line. */
+function wantsGhostLine(cmp: ComparisonConfig | undefined): boolean {
+  return (cmp?.display ?? 'ghost_line') !== 'delta';
+}
 
 /** Config grain → the metricSeries bucketing grain (day/week/month/quarter/year; day fallback). */
 function effGrain(grain: WidgetGrain | undefined): SeriesGrain {
   return grain === 'week' || grain === 'month' || grain === 'quarter' || grain === 'year' ? grain : 'day';
-}
-
-/** Map a comparison config to the metricSeries baseline modes it can build today. `previous_period`
- *  → prev, `same_period_last_year` → year; month/custom baselines are S8 follow-ups (no ghost yet). */
-function ghostMode(config: WidgetConfig): 'prev' | 'year' | null {
-  const c = config.comparison;
-  if (!c || c.mode === 'none') return null;
-  if (c.mode === 'previous_period') return 'prev';
-  if (c.mode === 'same_period_last_year') return 'year';
-  return null;
 }
 
 /** Zero-filled per-bucket sums of a post field over [winFrom..winTo] (raw keys; «Всё» = sparse). */
@@ -259,14 +298,15 @@ function resolveCoreTg(
   const winTo = ctx.range ? ctx.range.to : ctx.now;
   const winFrom = ctx.range ? ctx.range.from : ctx.days > 0 ? winTo - (ctx.days - 1) * DAY_MS : null;
 
+  const cmp = config.comparison;
+  const cmpLabel = cmp ? COMPARISON_LABEL[cmp.mode] : undefined;
   const field = FIELD[drillKey];
   if (drillKey === 'subscribers') {
     out.valueRaw = derived.displayMembers;
     const inWin = derived.historyRows.filter((r) => ctx.inRange(r.day));
     out.series = bucketSubsLevel(inWin, grain);
-    const mode = ghostMode(config);
-    if (mode && winFrom != null) {
-      const baseWin = comparisonWindow(winFrom, winTo, mode);
+    const baseWin = wantsGhostLine(cmp) ? comparisonBaseline(cmp, winFrom, winTo, grain) : null;
+    if (baseWin) {
       const baseRows = derived.historyRows.filter((r) => {
         const t = Date.parse(r.day);
         return Number.isFinite(t) && t >= baseWin.from && t <= baseWin.to;
@@ -274,7 +314,7 @@ function resolveCoreTg(
       const gseries = bucketSubsLevel(baseRows, grain);
       if (gseries.length >= 2 && gseries.length === out.series.length) {
         out.ghost = gseries.map((p) => p.value);
-        out.ghostLabel = CMP_LABEL[mode];
+        out.ghostLabel = cmpLabel;
       }
     }
   } else if (field) {
@@ -285,9 +325,8 @@ function resolveCoreTg(
           ? derived.er
           : derived.normPosts.reduce((s, p) => s + Number(p[field] ?? 0), 0);
     out.series = bucketPostField(derived.normPosts, field, winFrom, winTo, grain);
-    const mode = ghostMode(config);
-    if (mode && winFrom != null) {
-      const baseWin = comparisonWindow(winFrom, winTo, mode);
+    const baseWin = wantsGhostLine(cmp) ? comparisonBaseline(cmp, winFrom, winTo, grain) : null;
+    if (baseWin) {
       const postsInBase = derived.normPostsAll.filter((p) => {
         if (!p.date) return false;
         const t = Date.parse(p.date);
@@ -297,7 +336,7 @@ function resolveCoreTg(
       const gv = alignGhost(graw, out.series.length);
       if (gv.some((v) => v > 0)) {
         out.ghost = gv;
-        out.ghostLabel = CMP_LABEL[mode];
+        out.ghostLabel = cmpLabel;
       }
     }
   }
@@ -441,7 +480,28 @@ function resolveIg(metricId: string, config: WidgetConfig, ctx: DataContext, out
   const since = ctx.range ? ctx.range.from : until - windowDays * DAY_MS;
   const grain = effGrain(config.grain);
 
-  /** A windowed flow series (reach / interactions): value + delta + grain-bucketed series. */
+  /** Comparison ghost (S8) for an IG flow series — the baseline window's bucketed series, aligned to
+   *  the active series length. Honours display ('delta' → no line) and every mode (prev/year/month/
+   *  custom). Kept a no-op when there's no comparison, so it's shared by every IG series metric. */
+  const applyIgGhost = (points: { day: string; value: number }[], opts?: { allowZero?: boolean }) => {
+    if (!out.series || !wantsGhostLine(config.comparison)) return;
+    const baseWin = comparisonBaseline(config.comparison, since, until, grain);
+    if (!baseWin) return;
+    const graw = bucketIgSeries(points, baseWin.from, baseWin.to, grain).map((p) => p.value);
+    const gv = alignGhost(graw, out.series.length);
+    // Net-follower series can legitimately net to 0 across every bucket from REAL activity, so gate on
+    // baseline data-presence (hasCur) not value; a non-negative flow (reach/interactions) with an
+    // all-zero baseline genuinely IS no data, so it keeps the value gate.
+    const show = opts?.allowZero
+      ? igWindowValue(points, baseWin.from, baseWin.to).hasCur
+      : gv.some((v) => v !== 0);
+    if (show) {
+      out.ghost = gv;
+      out.ghostLabel = config.comparison ? COMPARISON_LABEL[config.comparison.mode] : undefined;
+    }
+  };
+
+  /** A windowed flow series (reach / interactions): value + delta + grain-bucketed series + ghost. */
   const flowSeries = (name: string): WidgetResult => {
     const points = igSeriesPoints(ig.insights, ig.history, name);
     const { cur, delta } = igWindowValue(points, since, until);
@@ -449,6 +509,7 @@ function resolveIg(metricId: string, config: WidgetConfig, ctx: DataContext, out
     out.valueRaw = cur;
     out.value = fmt.short(cur);
     out.delta = delta;
+    applyIgGhost(points);
     if (out.series.every((p) => p.value === 0) && cur === 0) return { ...out, empty: true };
     return out;
   };
@@ -468,6 +529,7 @@ function resolveIg(metricId: string, config: WidgetConfig, ctx: DataContext, out
       out.series = bucketIgSeries(points, since, until, grain);
       out.valueRaw = cur;
       out.value = `${cur > 0 ? '+' : cur < 0 ? '−' : ''}${fmt.num(Math.abs(cur))}`;
+      applyIgGhost(points, { allowZero: true }); // net-zero across buckets is real data, not «no ghost»
       return out;
     }
     case 'ig.followers': {
