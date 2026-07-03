@@ -23,12 +23,11 @@ import { PivotTable } from '@/components/PivotTable';
 import { PostDetailModal } from '@/components/PostDetailModal';
 import { ChartSection } from '@/components/instagram/shared';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
-
-const DAY_MS = 24 * 60 * 60 * 1000;
+import { DAY_MS, alignGhost, bucketKeyOf, bucketKeysInWindow, comparisonWindow } from '@/lib/metricSeries';
+import type { Grain } from '@/lib/metricSeries';
 
 // ── View state (all in the URL so links restore the exact view, like steep) ──────────────
 type ChartType = 'line' | 'bar' | 'rank' | 'pivot';
-type Grain = 'day' | 'week' | 'month';
 type CompareMode = 'off' | 'prev' | 'year';
 type Dim = 'format' | 'weekday';
 
@@ -101,42 +100,12 @@ function dimLabelOf(post: NormalizedPost, dim: Dim): string | null {
   return WEEKDAYS[(new Date(t).getUTCDay() + 6) % 7];
 }
 
-// ── Grain-aware time buckets (UTC, like every daily key in the app) ─────────────────────
-function bucketKeyOf(t: number, grain: Grain): string {
-  const d = new Date(t);
-  if (grain === 'day') return d.toISOString().slice(0, 10);
-  if (grain === 'week') {
-    d.setUTCHours(0, 0, 0, 0);
-    d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
-    return d.toISOString().slice(0, 10);
-  }
-  return d.toISOString().slice(0, 7);
-}
-
+// ── Grain-aware time buckets (bucketKeyOf / bucketKeysInWindow now live in lib/metricSeries) ─
 function bucketLabelOf(key: string, grain: Grain): string {
   if (grain === 'month') {
     return new Date(`${key}-01T00:00:00Z`).toLocaleDateString('ru-RU', { month: 'short', timeZone: 'UTC' });
   }
   return fmt.day(key);
-}
-
-/** All bucket keys covering [from..to], in order (day steps / Mondays / first-of-month). */
-function bucketKeysInWindow(fromMs: number, toMs: number, grain: Grain): string[] {
-  const keys: string[] = [];
-  if (grain === 'month') {
-    const d = new Date(fromMs);
-    d.setUTCDate(1);
-    d.setUTCHours(0, 0, 0, 0);
-    while (d.getTime() <= toMs) {
-      keys.push(d.toISOString().slice(0, 7));
-      d.setUTCMonth(d.getUTCMonth() + 1);
-    }
-    return keys;
-  }
-  const step = grain === 'week' ? 7 * DAY_MS : DAY_MS;
-  let t = grain === 'week' ? Date.parse(bucketKeyOf(fromMs, 'week')) : fromMs - (fromMs % DAY_MS);
-  for (; t <= toMs; t += step) keys.push(bucketKeyOf(t, grain));
-  return keys;
 }
 
 /** Zero-filled per-bucket sums of a post field over a window. */
@@ -243,12 +212,10 @@ export function MetricPage() {
   const winTo = range ? range.to : Date.now();
   const winFrom = range ? range.from : days > 0 ? winTo - (days - 1) * DAY_MS : null;
   const spanMs = winFrom != null ? winTo - winFrom : null;
+  // comparisonWindow encapsulates the day-aligned baseline (its off-by-one once silently
+  // dropped the on-chart comparison — see lib/metricSeries + metricSeries.test).
   const baseWin =
-    cmp === 'off' || winFrom == null || spanMs == null
-      ? null
-      : cmp === 'prev'
-        ? { from: winFrom - spanMs - DAY_MS, to: winFrom - 1 }
-        : { from: winFrom - 365 * DAY_MS, to: winTo - 365 * DAY_MS };
+    cmp === 'off' || winFrom == null || spanMs == null ? null : comparisonWindow(winFrom, winTo, cmp);
   const cmpLabel = cmp === 'off' ? null : CMP_LABEL[cmp];
 
   // Grain availability follows the window size (a 7-day window has no meaningful months).
@@ -294,7 +261,11 @@ export function MetricPage() {
         : bucketedPostSeries(normPosts, field, null, winTo, effGrain);
     if (baseWin) {
       const base = bucketedPostSeries(postsInBase, field, baseWin.from, baseWin.to, effGrain);
-      if (base.values.length === series.values.length && base.values.some((v) => v > 0)) ghost = base.values;
+      // Align to the active length as a safety net (a residual off-by-one on odd ranges must
+      // not silently drop the comparison): the previous period can overshoot by a day at the
+      // tail, so keep the leading buckets; pad the front with zeros if short.
+      const gv = alignGhost(base.values, series.values.length);
+      if (gv.some((v) => v > 0)) ghost = gv;
     }
   } else {
     series = { labels: [], values: [] };
