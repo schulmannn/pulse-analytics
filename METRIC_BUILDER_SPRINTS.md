@@ -33,7 +33,7 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
   живой страницы — миграция самой TgAnalytics → S12). +graphs в DataContext. all-zero breakdown = empty.
   **Резолвер покрывает 20 метрик.** 19 тестов (204 всего). **S3c (TODO):** netGrowth (series-из-graphs)
   + tables (weeklyTable/topPosts). **IG → S11.** Nothing imports it yet (tree-shaken).
-- **S4 — Единый рендерер + story-card `components/WidgetRenderer.tsx`** — SHIPPED `<pending>`
+- **S4 — Единый рендерер + story-card `components/WidgetRenderer.tsx`** — SHIPPED `1205b65`
   `WidgetRenderer({result, viz})` = story-card ТЕЛО (hero value → DeltaPill → caption → chart);
   читает ТОЛЬКО WidgetResult (не знает TG/IG). viz→primitive: line/bar (LineChart/BarChart+ghost),
   donut (PieChart), list (Breakdown), kpi (hero+спарклайн). Pure-логика в `lib/widgetRender.ts`
@@ -43,7 +43,15 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
   **⚠️ Порядок S5↔S6:** S5-редактор оперирует WidgetConfig, которых нет на surface до S6-монтирования
   → делаю S6 (каталог+store+mount) ПЕРЕД S5 (богатый редактор).
 - **S5 — Универсальный Widget Editor (расширить EditWidgetDialog)** — TODO
-- **S6 — Add-widget как searchable catalog `components/WidgetCatalogModal.tsx`** — TODO
+- **S6 — Add-widget catalog + mount (делаю ПЕРЕД S5)** — WIP (S6.1 SHIPPED `<pending>`)
+  **S6.1 (done):** `lib/widgetStore.ts` — localStorage-first + pub-sub стор для `WidgetConfig[]`
+  (get/set/add/addForMetric/update/remove + `useWidgetConfigs` hook). Всё через `normalizeWidgets`
+  (корраптнутый blob → []). Стабильный snapshot-кеш для useSyncExternalStore (иначе loop). Account-
+  sync (/api/prefs) — осознанный follow-up (device-local first, нулевой риск текущему prefs-sync).
+  10 тестов со стабом (224 всего). **S6.2 (TODO):** bridge-hook `useWidgetData(config)` (собирает
+  DataContext из useTgFull/useHistory/useChannels/useTgGraphs+period+channel → resolveWidgetMetric) +
+  `<ConfigWidget>` (ChartSection+WidgetRenderer). **S6.3 (TODO, ВИДИМЫЙ):** `WidgetCatalogModal` (поиск/
+  группы CATEGORY) + монтирование custom-виджетов на Home (`custom:<id>` рядом с registry-ключами).
 - **S7 — Per-widget фильтры `FilterBuilder` + каталог DIMENSIONS** — TODO
 - **S8 — Сравнение как настройка модели** — TODO
 - **S9 — Target / forecast** — TODO
@@ -53,7 +61,11 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
 
 ## Журнал
 
-- 2026-07-03 — **S4 SHIPPED** `<pending>`. `WidgetRenderer.tsx` (story-card) + `lib/widgetRender.ts`
+- 2026-07-03 — **S6.1 SHIPPED** `<pending>`. `lib/widgetStore.ts` + тест. Отложенный из S2 стор.
+  Решения: standalone-модуль (не трогаю prefs-sync в ChartWidget); стабильный snapshot-кеш (память:
+  useSyncExternalStore без него = loop); account-sync отложен (device-local first); `__resetWidgetStoreCache`
+  как тест-seam. **Движок целиком (S1-S4+S6.1) готов и протестирован, но НЕ смонтирован (tree-shaken).**
+- 2026-07-03 — **S4 SHIPPED** `1205b65`. `WidgetRenderer.tsx` (story-card) + `lib/widgetRender.ts`
   (pure) + тест. Решения: pure-логика форматирования вынесена в lib (RTL/jsdom в проекте нет → компонент
   только typecheck); `effectiveViz` — graceful fallback (rank/pivot/table → data-shape, не рендерятся из
   WidgetResult); монтирование отложено до S6; ПОРЯДОК S5↔S6 переставлен (S6 mount перед S5 editor — редактор
