@@ -23,7 +23,7 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
   custom-key хелперы (`custom:<id>` для Home/report слотов). Переиспользует `genId` (reportBlocks),
   `getMetric/isMetricId/WidgetViz` (S1). 23 unit-теста (185 всего). Tree-shaken → прод не меняется.
   Store/sync (localStorage+/api/prefs) отложен до S4 (когда рендерер будет потреблять конфиги).
-- **S3 — Единый резолвер `lib/resolveWidgetMetric.ts`** — WIP (S3a `7386ba5` + S3b `<pending>` SHIPPED)
+- **S3 — Единый резолвер `lib/resolveWidgetMetric.ts`** — WIP (S3a `7386ba5` + S3b `6a41b82` SHIPPED)
   `resolveWidgetMetric(config, ctx): WidgetResult`. **S3a:** ядро — 6 core TG как value+delta+caption
   (`deriveKpis`) + grain-series + ghost (`comparisonWindow`/`alignGhost`); erv/virality как value.
   `DataContext` = pre-resolved окно (`now/days/range/inRange`) + payloads → pure/детерминирован. Series
@@ -33,7 +33,15 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
   живой страницы — миграция самой TgAnalytics → S12). +graphs в DataContext. all-zero breakdown = empty.
   **Резолвер покрывает 20 метрик.** 19 тестов (204 всего). **S3c (TODO):** netGrowth (series-из-graphs)
   + tables (weeklyTable/topPosts). **IG → S11.** Nothing imports it yet (tree-shaken).
-- **S4 — Единый рендерер `components/WidgetRenderer.tsx`** — TODO
+- **S4 — Единый рендерер + story-card `components/WidgetRenderer.tsx`** — SHIPPED `<pending>`
+  `WidgetRenderer({result, viz})` = story-card ТЕЛО (hero value → DeltaPill → caption → chart);
+  читает ТОЛЬКО WidgetResult (не знает TG/IG). viz→primitive: line/bar (LineChart/BarChart+ghost),
+  donut (PieChart), list (Breakdown), kpi (hero+спарклайн). Pure-логика в `lib/widgetRender.ts`
+  (bucketLabel/unitFormat/seriesToChart/breakdownTitles/`effectiveViz` graceful-fallback) — 10 тестов
+  (214 всего). Charts берут высоту из ExpandedChartHeightContext карточки. Tree-shaken до монтирования
+  (S6). rank/pivot/table → fallback на data-shape (не рендерятся из WidgetResult).
+  **⚠️ Порядок S5↔S6:** S5-редактор оперирует WidgetConfig, которых нет на surface до S6-монтирования
+  → делаю S6 (каталог+store+mount) ПЕРЕД S5 (богатый редактор).
 - **S5 — Универсальный Widget Editor (расширить EditWidgetDialog)** — TODO
 - **S6 — Add-widget как searchable catalog `components/WidgetCatalogModal.tsx`** — TODO
 - **S7 — Per-widget фильтры `FilterBuilder` + каталог DIMENSIONS** — TODO
@@ -45,7 +53,12 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
 
 ## Журнал
 
-- 2026-07-03 — **S3b SHIPPED** `<pending>`. `lib/tgAggregations.ts` (12 breakdown-агрегаторов, порт
+- 2026-07-03 — **S4 SHIPPED** `<pending>`. `WidgetRenderer.tsx` (story-card) + `lib/widgetRender.ts`
+  (pure) + тест. Решения: pure-логика форматирования вынесена в lib (RTL/jsdom в проекте нет → компонент
+  только typecheck); `effectiveViz` — graceful fallback (rank/pivot/table → data-shape, не рендерятся из
+  WidgetResult); монтирование отложено до S6; ПОРЯДОК S5↔S6 переставлен (S6 mount перед S5 editor — редактор
+  нужен config-виджетам, которых нет до монтирования).
+- 2026-07-03 — **S3b SHIPPED** `6a41b82`. `lib/tgAggregations.ts` (12 breakdown-агрегаторов, порт
   из TgAnalytics) + резолвер расширен. Решение: НЕ трогаю живую TgAnalytics (нет локального authed-
   рендера → нельзя визуально верифицировать) — извлёк+протестировал логику, миграция панели позже (S12).
   all-zero weekday/hours = empty. графы период-агностичны (как в текущих виджетах).
