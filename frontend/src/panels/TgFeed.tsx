@@ -1,5 +1,7 @@
-import type { ReactNode } from 'react';
-import { useChannels } from '@/api/queries';
+import { useMemo, type ReactNode } from 'react';
+import { useChannels, useHistory, useTgFull } from '@/api/queries';
+import { latestDataMs } from '@/lib/freshness';
+import { ChannelRecencyProvider } from '@/lib/period';
 import { NotFound } from '@/components/NotFound';
 import { Overview } from '@/panels/Overview';
 import { Analytics } from '@/panels/AnalyticsTabs';
@@ -37,6 +39,12 @@ function renderBlock(section: FeedSection): ReactNode {
 
 export function TgFeed() {
   const { data: channelsData } = useChannels();
+  // Same wide fetch every block already makes (React Query dedupes → no extra request); used only to
+  // learn the channel's newest-data timestamp so widget cards can widen an empty window (dormant /
+  // just-connected channels whose posts are all old otherwise render «0» and look broken).
+  const { data: tgFull } = useTgFull(0);
+  const { data: history } = useHistory(730);
+  const recency = useMemo(() => latestDataMs(tgFull?.posts, history), [tgFull, history]);
   const feed = useFeed(BLOCKS);
 
   if (feed.unknownSection) return <NotFound />;
@@ -47,18 +55,20 @@ export function TgFeed() {
   if (noChannels) return <Overview />;
 
   return (
-    <div ref={feed.containerRef} className="space-y-10">
-      {BLOCKS.map((block, i) => (
-        <FeedBlock
-          key={block.section}
-          section={block.section}
-          title={block.title}
-          eager={i <= Math.max(feed.mountedUpTo, 0)}
-          onMount={() => feed.markMounted(i)}
-        >
-          {renderBlock(block.section)}
-        </FeedBlock>
-      ))}
-    </div>
+    <ChannelRecencyProvider value={recency}>
+      <div ref={feed.containerRef} className="space-y-10">
+        {BLOCKS.map((block, i) => (
+          <FeedBlock
+            key={block.section}
+            section={block.section}
+            title={block.title}
+            eager={i <= Math.max(feed.mountedUpTo, 0)}
+            onMount={() => feed.markMounted(i)}
+          >
+            {renderBlock(block.section)}
+          </FeedBlock>
+        ))}
+      </div>
+    </ChannelRecencyProvider>
   );
 }

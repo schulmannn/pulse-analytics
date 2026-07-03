@@ -159,3 +159,49 @@ export function useWidgetPeriod(): WidgetPeriodValue {
 export function widgetPeriodValue(days: PeriodDays): WidgetPeriodValue {
   return { days, inRange: (dateISO) => inRangeByDays(dateISO, days) };
 }
+
+// ── Channel recency → auto-widen an empty window ─────────────────────────────────────────────
+/**
+ * The current channel's newest data timestamp (epoch ms), or null when unknown. Provided by the
+ * feed root (which has the channel's posts + history) and read by every widget card. It exists to
+ * kill a confusing empty state: a just-connected / dormant channel whose posts are all old renders
+ * «0» under a 7д/30д window and looks broken. When the requested window holds no data but a wider
+ * one does, the card widens to the smallest window that DOES — so numbers show instead of a blank.
+ */
+const ChannelRecencyContext = createContext<number | null>(null);
+
+export function ChannelRecencyProvider({ value, children }: { value: number | null; children: ReactNode }) {
+  return <ChannelRecencyContext.Provider value={value}>{children}</ChannelRecencyContext.Provider>;
+}
+
+/** The channel's newest-data timestamp (ms), or null outside a provider / when the channel is empty. */
+export function useChannelRecency(): number | null {
+  return useContext(ChannelRecencyContext);
+}
+
+/** True if the channel's latest data falls inside a `days` window (0 = «Всё» ⇒ true given any data). */
+export function hasDataWithin(latestDataMs: number | null, days: PeriodDays, now: number = Date.now()): boolean {
+  if (latestDataMs == null) return false;
+  if (days === 0) return true;
+  return latestDataMs >= now - days * DAY_MS;
+}
+
+/** Smallest preset whose window still contains the channel's newest data; «Всё» (0) once the newest
+    data is older than 90д. Falls back to the plain default when recency is unknown. */
+export function recommendPeriod(latestDataMs: number | null, now: number = Date.now()): PeriodDays {
+  if (latestDataMs == null) return DEFAULT_WIDGET_DAYS;
+  const age = now - latestDataMs;
+  if (age <= 7 * DAY_MS) return 7;
+  if (age <= 30 * DAY_MS) return 30;
+  if (age <= 90 * DAY_MS) return 90;
+  return 0;
+}
+
+/** The window a card actually shows: the requested one if it holds data, else widened to the
+    smallest window that does. A no-op (returns `requested`) when recency is unknown — so nothing
+    changes outside the feed, or for a channel with recent data. */
+export function resolveEffectivePeriod(requested: PeriodDays, latestDataMs: number | null, now: number = Date.now()): PeriodDays {
+  if (latestDataMs == null) return requested;
+  if (requested === 0 || hasDataWithin(latestDataMs, requested, now)) return requested;
+  return recommendPeriod(latestDataMs, now);
+}

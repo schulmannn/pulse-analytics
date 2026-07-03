@@ -1,5 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useHistory, useTgFull } from '@/api/queries';
+import { latestDataMs } from '@/lib/freshness';
+import { ChannelRecencyProvider } from '@/lib/period';
 import {
   HomeEditContext,
   WidgetGroup,
@@ -27,6 +30,11 @@ export function Home() {
   // Skip any pinned key whose registry entry is gone (renamed/removed widget) — never crash.
   const known = pinned.filter((key) => HOME_REGISTRY[key]);
   const [editing, setEditing] = useState(false);
+  // Channel recency (same deduped fetch the pinned cards make) → widget cards widen an empty window
+  // so a dormant channel's pinned KPIs aren't blank. See resolveEffectivePeriod / TgFeed.
+  const { data: tgFull } = useTgFull(0);
+  const { data: history } = useHistory(730);
+  const recency = useMemo(() => latestDataMs(tgFull?.posts, history), [tgFull, history]);
 
   return (
     <div>
@@ -53,15 +61,17 @@ export function Home() {
         <HomeEmptyState onEdit={() => setEditing(true)} />
       ) : (
         <HomeEditContext.Provider value={editing}>
-          <WidgetGroup id="home" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
-            {known.map((key) => (
-              // The registry render() returns a complete home-scoped ChartSection (home-<key> id).
-              // React key = the registry key (stable, unique in the list).
-              <div key={key} className="contents">
-                {HOME_REGISTRY[key]!.render()}
-              </div>
-            ))}
-          </WidgetGroup>
+          <ChannelRecencyProvider value={recency}>
+            <WidgetGroup id="home" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
+              {known.map((key) => (
+                // The registry render() returns a complete home-scoped ChartSection (home-<key> id).
+                // React key = the registry key (stable, unique in the list).
+                <div key={key} className="contents">
+                  {HOME_REGISTRY[key]!.render()}
+                </div>
+              ))}
+            </WidgetGroup>
+          </ChannelRecencyProvider>
           {editing && <AddWidgetBar pinned={pinned} />}
         </HomeEditContext.Provider>
       )}

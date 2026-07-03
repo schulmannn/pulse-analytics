@@ -10,7 +10,7 @@ import { Breakdown } from '@/components/Breakdown';
 import { PieChart } from '@/components/PieChart';
 import { DivergingBars } from '@/components/DivergingBars';
 import { ChartExpandOverlay, ExpandedChartHeightContext, type ChartExpandConfig } from '@/components/ExpandableChart';
-import { DEFAULT_WIDGET_DAYS, WidgetPeriodProvider, widgetPeriodValue } from '@/lib/period';
+import { DEFAULT_WIDGET_DAYS, WidgetPeriodProvider, widgetPeriodValue, useChannelRecency, resolveEffectivePeriod } from '@/lib/period';
 import type { PeriodDays, WidgetPeriodValue } from '@/lib/period';
 
 /**
@@ -867,7 +867,17 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
   // useWidgetPeriod(); the WidgetPeriodProvider below scopes it to this card's subtree.
   // Memoized on the scalar `widgetDays` so `inRange`'s identity is stable across re-renders —
   // consumers key their derive memos on it (a fresh predicate each render would bust them).
-  const widgetDays: PeriodDays = prefs.period ?? DEFAULT_WIDGET_DAYS;
+  const requestedDays: PeriodDays = prefs.period ?? DEFAULT_WIDGET_DAYS;
+  // Auto-widen an empty window: when the feed reports the channel's newest data (useChannelRecency)
+  // and the requested window holds none of it, show the smallest window that does. Kills the «0 /
+  // нет данных» that a dormant or just-connected channel (all posts months old) shows under 7д/30д.
+  // No-op when recency is unknown (outside the feed) or the requested window already has data.
+  const channelRecency = useChannelRecency();
+  const widgetDays: PeriodDays = useMemo(
+    () => resolveEffectivePeriod(requestedDays, channelRecency),
+    [requestedDays, channelRecency],
+  );
+  const periodWidened = periodControl === true && widgetDays !== requestedDays;
   const widgetPeriod = useMemo(() => widgetPeriodValue(widgetDays), [widgetDays]);
 
   // Resolve variants: the function form recomputes its series for THIS card's window (post-derived
@@ -1106,11 +1116,18 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
       {/* Per-widget period — a compact pill row under the header (hidden while reordering / in
           print). Only on wired cards that read useWidgetPeriod(); the global topbar switcher is gone. */}
       {periodControl && (
-        <WidgetPeriodPills
-          days={widgetDays}
-          onChange={(next) => update({ ...prefs, period: next === DEFAULT_WIDGET_DAYS ? undefined : next })}
-          hidden={reorder}
-        />
+        <>
+          <WidgetPeriodPills
+            days={widgetDays}
+            onChange={(next) => update({ ...prefs, period: next === DEFAULT_WIDGET_DAYS ? undefined : next })}
+            hidden={reorder}
+          />
+          {periodWidened && !reorder && (
+            <p className="mt-1 text-2xs text-muted-foreground print:hidden">
+              За {PERIOD_WORD[requestedDays]} данных нет — показано за {PERIOD_WORD[widgetDays]}.
+            </p>
+          )}
+        </>
       )}
       <div className={`mt-3 flex min-h-0 flex-1 flex-col ${reorder ? 'pointer-events-none' : ''}`}>
         <WidgetPeriodProvider value={widgetPeriod}>
@@ -1168,6 +1185,9 @@ const WIDGET_PERIODS: Array<{ days: PeriodDays; label: string }> = [
   { days: 90, label: '90д' },
   { days: 0, label: 'Всё' },
 ];
+
+/** Long-form period words for the auto-widen note («За 7 дней данных нет — показано за всё время»). */
+const PERIOD_WORD: Record<PeriodDays, string> = { 7: '7 дней', 30: '30 дней', 90: '90 дней', 0: 'всё время' };
 
 /** Compact underline-tab period row for one widget card (7д / 30д / 90д / Всё). Same visual
     language as the retired topbar switcher, scoped to this card. Hidden while reordering /
