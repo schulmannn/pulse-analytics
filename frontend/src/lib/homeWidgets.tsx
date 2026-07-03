@@ -5,6 +5,7 @@ import { Digest } from '@/panels/Digest';
 import { TopPosts } from '@/panels/TopPosts';
 import { SubscriberGrowth } from '@/panels/Overview';
 import { HistoryChartBlock, VelocityChartBlock, HeatmapChartBlock } from '@/panels/Charts';
+import { HomeMentionsByDay } from '@/panels/Mentions';
 
 /**
  * Personal-Home widget registry — the catalogue of widgets a user can pin to /home via the
@@ -28,9 +29,9 @@ import { HistoryChartBlock, VelocityChartBlock, HeatmapChartBlock } from '@/pane
  *   - All Instagram widgets: they take `ig: IgData` as a PROP (useIgData is called once in
  *     IgFeed and threaded down) and read the GLOBAL usePeriod, not useWidgetPeriod. Pinning one
  *     would pull the whole ig-* cluster + global-period coupling onto Home.
- *   - Mentions blocks («Упоминаний по дням», «Кто упоминает», «Последние упоминания»): their
- *     data is computed in the Mentions() parent (useMentions/useMentionsArchive) and passed to
- *     the ChartSections as pre-baked props — the sections are not self-contained.
+ *   - Mentions «Кто упоминает» / «Последние упоминания»: still computed in the Mentions() parent
+ *     and passed as pre-baked props. («Упоминаний по дням» IS now pinnable — HomeMentionsByDay
+ *     self-fetches the free mentions archive.)
  *
  * Heatmap (Charts) is pinnable: it self-fetches useTgFull(0) and windows client-side, carrying
  * its own period pills (per-widget period, #10), so it needs no wrapper.
@@ -95,6 +96,11 @@ export const HOME_REGISTRY: Record<string, HomeWidgetDef> = {
     // Carries its own 7д/30д/90д/Всё pills (default 30д), windowing one useTgFull(0) fetch
     // client-side — no per-period fetch fan-out.
     render: () => <HeatmapChartBlock id="home-heatmap" homeKey="heatmap" />,
+  },
+  mentions: {
+    label: 'Упоминания по дням',
+    // Self-fetching (free mentions archive, no live-search quota) — no wrapper needed.
+    render: () => <HomeMentionsByDay id="home-mentions" homeKey="mentions" />,
   },
 };
 

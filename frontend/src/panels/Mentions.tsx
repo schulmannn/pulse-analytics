@@ -69,20 +69,6 @@ export function Mentions() {
   const topChannels = data?.top_channels ?? [];
   const recent = data?.recent ?? [];
 
-  // «dd.mm» keys sorted with New-Year rollover (28.12 before 03.01). byDay is the FULL archive,
-  // so the chart windows it by its own widget period (per-widget pills) and the «Развернуть»
-  // overlay windows it further (1М/3М/6М/Всё) — one helper feeds both. Slicing by day count
-  // (not an ISO inRange predicate) because the archive is keyed by dd.mm, one entry per day.
-  const sortedDates = Object.keys(byDay).sort((a, b) => compareDdMm(a, b));
-
-  const mentionWindow = (days: number) => {
-    const dates = days === 0 ? sortedDates : sortedDates.slice(-days);
-    const values = dates.map((date) => byDay[date] ?? 0);
-    const titles = dates.map((date) => `${date}: ${fmt.num(byDay[date] ?? 0)}`);
-    const axisLabels = [dates[0] ?? '', dates[Math.floor(dates.length / 2)] ?? '', dates[dates.length - 1] ?? ''];
-    return { dates, values, titles, axisLabels };
-  };
-
   // Подготовка данных топ каналов
   const breakdownItems = topChannels.map((ch) => ({
     label: ch.username ? `@${ch.username}` : ch.title || 'Без названия',
@@ -134,40 +120,7 @@ export function Mentions() {
 
       {/* Аналитические блоки */}
       <WidgetGroup id="mentions" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
-        <ChartSection
-          title="Упоминаний по дням"
-          periodControl
-          variants={(period) => {
-            const w = mentionWindow(period.days);
-            return [
-              {
-                key: 'bar',
-                label: 'Столбцы',
-                render: (
-                  <div className="pt-2">
-                    <BarChart values={w.values} labels={w.dates} titles={w.titles} />
-                  </div>
-                ),
-              },
-              {
-                key: 'line',
-                label: 'Линия',
-                render: <LineChart values={w.values} labels={w.axisLabels} titles={w.titles} yMin={0} />,
-              },
-            ];
-          }}
-          expand={{
-            renderExpanded: (days) => {
-              const w = mentionWindow(days);
-              return <LineChart values={w.values} labels={w.axisLabels} titles={w.titles} yMin={0} markAnomalies markExtremes />;
-            },
-            renderExpandedBar: (days) => {
-              const w = mentionWindow(days);
-              return <BarChart values={w.values} labels={w.dates} titles={w.titles} />;
-            },
-            statsFor: (days) => mentionWindow(days).values,
-          }}
-        />
+        <MentionsByDayWidget byDay={byDay} />
 
         <ChartSection title="Кто упоминает · топ каналов" variants={breakdownVariants(breakdownItems)} />
       </WidgetGroup>
@@ -236,6 +189,76 @@ export function Mentions() {
       ) : null}
     </div>
   );
+}
+
+/**
+ * «Упоминаний по дням» — reusable so both the Mentions panel and the personal Home render it.
+ * `byDay` is the full archive (dd.mm → count); the widget windows it by its OWN period (the header
+ * pills) and the «Развернуть» overlay windows it further. Slices by day count, since the archive is
+ * keyed by dd.mm (one entry per day), not an ISO date. Pass id/homeKey on Home for a distinct prefs
+ * identity + the «Убрать с главной» menu item.
+ */
+export function MentionsByDayWidget({ byDay, id, homeKey }: { byDay: Record<string, number>; id?: string; homeKey?: string }) {
+  const sortedDates = Object.keys(byDay).sort((a, b) => compareDdMm(a, b));
+  const mentionWindow = (days: number) => {
+    const dates = days === 0 ? sortedDates : sortedDates.slice(-days);
+    const values = dates.map((date) => byDay[date] ?? 0);
+    const titles = dates.map((date) => `${date}: ${fmt.num(byDay[date] ?? 0)}`);
+    const axisLabels = [dates[0] ?? '', dates[Math.floor(dates.length / 2)] ?? '', dates[dates.length - 1] ?? ''];
+    return { dates, values, titles, axisLabels };
+  };
+  return (
+    <ChartSection
+      id={id}
+      homeKey={homeKey}
+      title="Упоминаний по дням"
+      periodControl
+      variants={(period) => {
+        const w = mentionWindow(period.days);
+        return [
+          {
+            key: 'bar',
+            label: 'Столбцы',
+            render: (
+              <div className="pt-2">
+                <BarChart values={w.values} labels={w.dates} titles={w.titles} />
+              </div>
+            ),
+          },
+          {
+            key: 'line',
+            label: 'Линия',
+            render: <LineChart values={w.values} labels={w.axisLabels} titles={w.titles} yMin={0} />,
+          },
+        ];
+      }}
+      expand={{
+        renderExpanded: (days) => {
+          const w = mentionWindow(days);
+          return <LineChart values={w.values} labels={w.axisLabels} titles={w.titles} yMin={0} markAnomalies markExtremes />;
+        },
+        renderExpandedBar: (days) => {
+          const w = mentionWindow(days);
+          return <BarChart values={w.values} labels={w.dates} titles={w.titles} />;
+        },
+        statsFor: (days) => mentionWindow(days).values,
+      }}
+    />
+  );
+}
+
+/** Self-fetching «Упоминаний по дням» for the personal Home — pulls the FREE mentions archive
+    (no live search, no quota) and renders the widget standalone. */
+export function HomeMentionsByDay({ id, homeKey }: { id?: string; homeKey?: string }) {
+  const archive = useMentionsArchive();
+  if (archive.isPending) {
+    return (
+      <ChartSection id={id} homeKey={homeKey} title="Упоминаний по дням">
+        <Skeleton className="h-40 w-full" />
+      </ChartSection>
+    );
+  }
+  return <MentionsByDayWidget byDay={archive.data?.by_day ?? {}} id={id} homeKey={homeKey} />;
 }
 
 function MentionsSkeletons() {
