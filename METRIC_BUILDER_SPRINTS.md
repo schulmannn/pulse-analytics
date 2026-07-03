@@ -51,7 +51,7 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
   10 тестов со стабом (224 всего). **S6.2 (done `880205b`):** bridge-hook `lib/useWidgetData.ts`
   (собирает DataContext из useTgFull{windowPair}/useHistory/useTgGraphs/useChannels+config.period+
   channel → resolveWidgetMetric, memo) + `components/ConfigWidget.tsx` (ChartSection-chrome + WidgetRenderer,
-  ChannelScope при config.source). Typecheck-verified, tree-shaken. **S6.3 (SHIPPED `<pending>`, ПЕРВЫЙ ВИДИМЫЙ):**
+  ChannelScope при config.source). Typecheck-verified, tree-shaken. **S6.3 (SHIPPED `54ba3c6`, ПЕРВЫЙ ВИДИМЫЙ):**
   `WidgetCatalogModal` (поиск + группы CATEGORY + карточки метрик с formula/recommended-viz) +
   монтирование на Home: `known` принимает `custom:<id>`, ветка рендера → `ConfigWidget`, `useWidgetConfigs`
   подписка, AddWidgetBar → «Метрика из каталога…» (addWidgetForMetric → pinToHome(customKey)). Legacy-
@@ -68,7 +68,7 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
 
 ## Журнал
 
-- 2026-07-03 — **S6.3 SHIPPED** `<pending>`. `WidgetCatalogModal` + Home-монтаж. **Движок стал
+- 2026-07-03 — **S6.3 SHIPPED** `54ba3c6`. `WidgetCatalogModal` + Home-монтаж. **Движок стал
   ВИДИМЫМ:** «Изменить» → «Добавить виджет» → «Метрика из каталога…» → поиск → клик = config-виджет
   на Главной (story-card). Решения: переиспользую ChartSection-chrome (reorder/expand/size/× работают
   бесплатно); IG-таб скрыт до S11 (иначе пустые карточки); registry-else-ветка байт-идентична. ⚠️
