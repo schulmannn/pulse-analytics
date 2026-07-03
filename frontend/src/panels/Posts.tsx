@@ -22,18 +22,9 @@ const SORT_COLUMNS: { key: SortKey; label: string; get: (p: NormalizedPost) => n
 ];
 
 export function Posts() {
-  const { inRange } = useWidgetPeriod();
+  // ONE wide fetch (limit 0 = server cap 100); the leaderboard below windows it to its own
+  // widget period. The fetch/skeleton/error stay here; the period-driven view is the child.
   const { data, isPending, isError, error } = useTgFull(0);
-  const [openId, setOpenId] = useState<number | null>(null);
-  const [sortKey, setSortKey] = useState<SortKey>('reach');
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
-  const toggleSort = (key: SortKey) => {
-    if (key === sortKey) setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
-    else {
-      setSortKey(key);
-      setSortDir('desc');
-    }
-  };
 
   if (isPending) return <PostsSkeletons />;
   if (isError) {
@@ -46,11 +37,8 @@ export function Posts() {
     );
   }
 
-  const rawPosts = data?.posts ?? [];
-  const channelContext = data?.channel ?? {};
-  const posts = normalizeTgPosts(rawPosts, channelContext).filter((post) => inRange(post.date));
-
-  if (posts.length === 0) {
+  const allPosts = normalizeTgPosts(data?.posts ?? [], data?.channel ?? {});
+  if (allPosts.length === 0) {
     return (
       <Card>
         <CardContent className="py-8 text-center text-sm text-muted-foreground">
@@ -58,6 +46,46 @@ export function Posts() {
         </CardContent>
       </Card>
     );
+  }
+
+  return (
+    <div className="space-y-8">
+      {/* «Топ постов за период» убран: он дублировал Обзор, а сортируемый лидерборд ниже
+          покрывает топ (D6.4). Таблица — виджет. full = content-height: 25 строк должны РАСТИ,
+          не скроллиться в фикс-тайле. periodControl = свои пилюли периода; окно применяется к
+          лидерборду внутри (PostsLeaderboard читает useWidgetPeriod ЭТОЙ карточки). */}
+      <ChartSection title="Публикации · топ-25" defaultSize="full" periodControl>
+        <PostsLeaderboard allPosts={allPosts} />
+      </ChartSection>
+    </div>
+  );
+}
+
+/**
+ * The sortable top-25 leaderboard, windowed by the card's OWN period. Rendered as ChartSection
+ * children → inside its WidgetPeriodProvider, so `useWidgetPeriod` here reads THIS card's window
+ * and the header pills genuinely filter the table (the hook used to sit at the panel top, above
+ * the card, so the pills couldn't reach it). Owns the sort + open-post state; the empty-state now
+ * sits INSIDE the card, so a narrow window with no posts reads as «nothing in this window», not a
+ * wiped panel.
+ */
+function PostsLeaderboard({ allPosts }: { allPosts: NormalizedPost[] }) {
+  const { inRange } = useWidgetPeriod();
+  const [openId, setOpenId] = useState<number | null>(null);
+  const [sortKey, setSortKey] = useState<SortKey>('reach');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const toggleSort = (key: SortKey) => {
+    if (key === sortKey) setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
+    else {
+      setSortKey(key);
+      setSortDir('desc');
+    }
+  };
+
+  const posts = allPosts.filter((post) => inRange(post.date));
+
+  if (posts.length === 0) {
+    return <div className="py-8 text-center text-sm text-muted-foreground">За выбранный период публикаций нет.</div>;
   }
 
   // Таблица — сортируемый лидерборд (по любому столбцу), топ 25
@@ -74,129 +102,124 @@ export function Posts() {
   const selectedPost = posts.find((p) => p.id === openId);
 
   return (
-    <div className="space-y-8">
-      {/* «Топ постов за период» убран: он дублировал Обзор, а сортируемый лидерборд ниже
-          покрывает топ (D6.4). Таблица — виджет, как и всё остальное. */}
-      {/* full = content-height: a 25-row table must grow, not scroll inside a fixed tile. */}
-      <ChartSection title="Публикации · топ-25" defaultSize="full">
-        <div className="hidden overflow-x-auto md:block">
-          <table className="w-full border-collapse text-left text-sm">
-            <thead>
-              <tr className="border-b border-border text-xs font-medium tracking-wider text-muted-foreground">
-                <th className="w-12 py-3 pl-0 pr-3 text-center"></th>
-                <th className="min-w-[240px] px-3 py-3">Пост</th>
-                {SORT_COLUMNS.map((c) => {
-                  const active = c.key === sortKey;
-                  return (
-                    <th key={c.key} className="px-3 py-3 text-right last:pr-0">
-                      <button
-                        type="button"
-                        onClick={() => toggleSort(c.key)}
-                        className={cn('ml-auto inline-flex items-center gap-1 tabular-nums transition-colors', active ? 'text-primary' : 'hover:text-foreground')}
-                      >
-                        {c.label}
-                        <span aria-hidden="true" className={cn('text-2xs', !active && 'text-ink3/60')}>
-                          {active ? (sortDir === 'desc' ? '↓' : '↑') : '↕'}
-                        </span>
-                      </button>
-                    </th>
-                  );
-                })}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {tablePosts.map((post, idx) => {
-                const isClickable = post.id != null;
+    <>
+      <div className="hidden overflow-x-auto md:block">
+        <table className="w-full border-collapse text-left text-sm">
+          <thead>
+            <tr className="border-b border-border text-xs font-medium tracking-wider text-muted-foreground">
+              <th className="w-12 py-3 pl-0 pr-3 text-center"></th>
+              <th className="min-w-[240px] px-3 py-3">Пост</th>
+              {SORT_COLUMNS.map((c) => {
+                const active = c.key === sortKey;
                 return (
-                  <tr
-                    key={post.id ?? idx}
-                    onClick={isClickable ? () => setOpenId(post.id) : undefined}
-                    className={`group transition-colors hover:bg-hover-row ${isClickable ? 'cursor-pointer' : ''}`}
-                  >
-                    <td className="py-3 pl-0 pr-3 text-center">
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded border border-border/40 bg-muted">
-                        {post.thumb ? (
-                          <img
-                            loading="lazy"
-                            src={post.thumb}
-                            alt=""
-                            referrerPolicy="no-referrer"
-                            className="h-full w-full object-cover"
-                          />
-                        ) : (
-                          <span className="text-2xs font-medium text-muted-foreground">Текст</span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-3 py-3">
-                      <div className="max-w-sm space-y-1 md:max-w-md lg:max-w-lg">
-                        <div className="line-clamp-1 font-medium text-foreground">
-                          {post.caption ? <RichText text={post.caption} /> : <span className="italic text-muted-foreground">Без подписи</span>}
-                        </div>
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <span>{fmt.date(post.date)}</span>
-                          {post.albumSize > 1 && <span>· {post.albumSize} фото</span>}
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-3 py-3 text-right font-medium tabular-nums last:pr-0">{fmt.num(post.reach)}</td>
-                    <td className="px-3 py-3 text-right font-medium tabular-nums last:pr-0 text-muted-foreground">{fmt.num(post.likes)}</td>
-                    <td className="px-3 py-3 text-right font-medium tabular-nums last:pr-0 text-muted-foreground">
-                      {post.shares ? fmt.num(post.shares) : <span className="text-muted-foreground/40">—</span>}
-                    </td>
-                    <td className="px-3 py-3 text-right font-medium tabular-nums last:pr-0 text-muted-foreground">
-                      {post.virality != null ? `${post.virality.toFixed(1)}%` : <span className="text-muted-foreground/40">—</span>}
-                    </td>
-                    <td className="px-3 py-3 text-right font-medium tabular-nums last:pr-0">
-                      <PctTag value={post.erv} median={ervMedian} />
-                    </td>
-                    <td className="px-3 py-3 text-right font-medium tabular-nums last:pr-0">
-                      <PctTag value={post.er} median={erMedian} />
-                    </td>
-                  </tr>
+                  <th key={c.key} className="px-3 py-3 text-right last:pr-0">
+                    <button
+                      type="button"
+                      onClick={() => toggleSort(c.key)}
+                      className={cn('ml-auto inline-flex items-center gap-1 tabular-nums transition-colors', active ? 'text-primary' : 'hover:text-foreground')}
+                    >
+                      {c.label}
+                      <span aria-hidden="true" className={cn('text-2xs', !active && 'text-ink3/60')}>
+                        {active ? (sortDir === 'desc' ? '↓' : '↑') : '↕'}
+                      </span>
+                    </button>
+                  </th>
                 );
               })}
-            </tbody>
-          </table>
-        </div>
-        {/* mobile: card list (no horizontal scroll) — reuses the TopPosts row shape */}
-        <div className="divide-y divide-border md:hidden">
-          {tablePosts.map((post, idx) => {
-            const isClickable = post.id != null;
-            const title = post.caption ? markdownToPlainText(post.caption) : null;
-            return (
-              <button
-                key={post.id ?? idx}
-                type="button"
-                onClick={isClickable ? () => setOpenId(post.id) : undefined}
-                className={cn('flex w-full items-center gap-3 py-3 text-left transition-colors hover:bg-hover-row', isClickable && 'cursor-pointer')}
-              >
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded border border-border/40 bg-muted">
-                  {post.thumb ? (
-                    <img loading="lazy" src={post.thumb} alt="" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
-                  ) : (
-                    <span className="text-2xs font-medium text-muted-foreground">Текст</span>
-                  )}
-                </div>
-                <span className="min-w-0 flex-1">
-                  <span className={cn('block truncate text-sm', title ? 'text-foreground' : 'italic text-muted-foreground')}>
-                    {title ?? 'Без подписи'}
-                  </span>
-                  <span className="mt-0.5 block truncate text-2xs text-ink2">
-                    {fmt.num(post.reach)} просмотров · {fmt.num(post.likes)} · ER {post.er != null ? `${post.er.toFixed(1)}%` : '—'}
-                  </span>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {tablePosts.map((post, idx) => {
+              const isClickable = post.id != null;
+              return (
+                <tr
+                  key={post.id ?? idx}
+                  onClick={isClickable ? () => setOpenId(post.id) : undefined}
+                  className={`group transition-colors hover:bg-hover-row ${isClickable ? 'cursor-pointer' : ''}`}
+                >
+                  <td className="py-3 pl-0 pr-3 text-center">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded border border-border/40 bg-muted">
+                      {post.thumb ? (
+                        <img
+                          loading="lazy"
+                          src={post.thumb}
+                          alt=""
+                          referrerPolicy="no-referrer"
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <span className="text-2xs font-medium text-muted-foreground">Текст</span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-3 py-3">
+                    <div className="max-w-sm space-y-1 md:max-w-md lg:max-w-lg">
+                      <div className="line-clamp-1 font-medium text-foreground">
+                        {post.caption ? <RichText text={post.caption} /> : <span className="italic text-muted-foreground">Без подписи</span>}
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <span>{fmt.date(post.date)}</span>
+                        {post.albumSize > 1 && <span>· {post.albumSize} фото</span>}
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-3 py-3 text-right font-medium tabular-nums last:pr-0">{fmt.num(post.reach)}</td>
+                  <td className="px-3 py-3 text-right font-medium tabular-nums last:pr-0 text-muted-foreground">{fmt.num(post.likes)}</td>
+                  <td className="px-3 py-3 text-right font-medium tabular-nums last:pr-0 text-muted-foreground">
+                    {post.shares ? fmt.num(post.shares) : <span className="text-muted-foreground/40">—</span>}
+                  </td>
+                  <td className="px-3 py-3 text-right font-medium tabular-nums last:pr-0 text-muted-foreground">
+                    {post.virality != null ? `${post.virality.toFixed(1)}%` : <span className="text-muted-foreground/40">—</span>}
+                  </td>
+                  <td className="px-3 py-3 text-right font-medium tabular-nums last:pr-0">
+                    <PctTag value={post.erv} median={ervMedian} />
+                  </td>
+                  <td className="px-3 py-3 text-right font-medium tabular-nums last:pr-0">
+                    <PctTag value={post.er} median={erMedian} />
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {/* mobile: card list (no horizontal scroll) — reuses the TopPosts row shape */}
+      <div className="divide-y divide-border md:hidden">
+        {tablePosts.map((post, idx) => {
+          const isClickable = post.id != null;
+          const title = post.caption ? markdownToPlainText(post.caption) : null;
+          return (
+            <button
+              key={post.id ?? idx}
+              type="button"
+              onClick={isClickable ? () => setOpenId(post.id) : undefined}
+              className={cn('flex w-full items-center gap-3 py-3 text-left transition-colors hover:bg-hover-row', isClickable && 'cursor-pointer')}
+            >
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded border border-border/40 bg-muted">
+                {post.thumb ? (
+                  <img loading="lazy" src={post.thumb} alt="" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
+                ) : (
+                  <span className="text-2xs font-medium text-muted-foreground">Текст</span>
+                )}
+              </div>
+              <span className="min-w-0 flex-1">
+                <span className={cn('block truncate text-sm', title ? 'text-foreground' : 'italic text-muted-foreground')}>
+                  {title ?? 'Без подписи'}
                 </span>
-              </button>
-            );
-          })}
-        </div>
-      </ChartSection>
+                <span className="mt-0.5 block truncate text-2xs text-ink2">
+                  {fmt.num(post.reach)} просмотров · {fmt.num(post.likes)} · ER {post.er != null ? `${post.er.toFixed(1)}%` : '—'}
+                </span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
 
       {/* Общая модалка поста (D6.2): без №-бейджа — порядок таблицы зависит от текущей сортировки. */}
       {openId !== null && selectedPost && (
         <PostDetailModal post={selectedPost} reason={null} onClose={() => setOpenId(null)} />
       )}
-    </div>
+    </>
   );
 }
 
