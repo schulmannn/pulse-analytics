@@ -277,3 +277,28 @@
 @media (prefers-reduced-motion: reduce) {
   .connect-orb, .connect-hub { animation: none; }
 }
+
+/* ── /connect starfield (dark theme only — a night sky behind the compass): sparse twinkle +
+   the occasional shooting star. Rendered/masked in Connect.tsx; fully static under reduced-motion. */
+@keyframes star-twinkle { 0%, 100% { opacity: 0.15; } 50% { opacity: 0.7; } }
+@keyframes star-field-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes star-shoot {
+  0%   { opacity: 0;   transform: translate(0, 0) rotate(24deg) scaleX(0.2); }
+  4%   { opacity: 0.9; transform: translate(6px, 3px) rotate(24deg) scaleX(1); }
+  16%  { opacity: 0.9; transform: translate(200px, 90px) rotate(24deg) scaleX(1); }
+  22%  { opacity: 0;   transform: translate(250px, 112px) rotate(24deg) scaleX(1); }
+  100% { opacity: 0;   transform: translate(250px, 112px) rotate(24deg) scaleX(1); }
+}
+.starfield { animation: star-field-in 1.2s ease-out both; }
+.starfield .star { position: absolute; border-radius: 9999px; background: hsl(var(--foreground)); }
+.starfield .star-tw { animation: star-twinkle var(--star-dur, 3.5s) ease-in-out infinite; animation-delay: var(--star-delay, 0s); }
+.starfield .shooting {
+  position: absolute; height: 1.5px; width: 62px; border-radius: 9999px; opacity: 0;
+  background: linear-gradient(90deg, transparent, hsl(var(--foreground) / 0.9));
+  animation: star-shoot var(--sh-dur, 8s) ease-in infinite; animation-delay: var(--sh-delay, 2s);
+}
+@media (prefers-reduced-motion: reduce) {
+  .starfield { animation: none; }
+  .starfield .star-tw { animation: none; opacity: 0.4; }
+  .starfield .shooting { display: none; }
+}

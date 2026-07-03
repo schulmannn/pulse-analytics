@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { useChannels, useConnectIg, useDisconnectIg, useIgOauthStatus } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
@@ -158,7 +158,8 @@ export function Connect() {
 
       <div className="mt-8 grid items-start gap-8 lg:grid-cols-[minmax(0,420px)_1fr]">
         {/* Orbit */}
-        <div className="flex justify-center">
+        <div className="relative flex justify-center">
+          <Starfield />
           <div
             ref={ringRef}
             role="radiogroup"
@@ -262,6 +263,61 @@ function Legend({ swatch, children }: { swatch: 'connected' | 'available' | 'soo
       />
       {children}
     </span>
+  );
+}
+
+// ── Starfield behind the compass (dark theme only — a night sky for celestial navigation).
+// Sparse faint stars, a slow twinkle on some, two occasional shooting stars, radial-masked to
+// glow around the orbit and fade at the edges. Motion is off under prefers-reduced-motion (the
+// stars stay, static). Positions are randomised once per mount, so each visit gets a fresh sky.
+function Starfield() {
+  const stars = useMemo(
+    () =>
+      Array.from({ length: 42 }, () => ({
+        x: Math.random() * 100,
+        y: Math.random() * 100,
+        size: Math.random() * 1.4 + 0.7,
+        op: Math.random() * 0.4 + 0.25,
+        tw: Math.random() > 0.55,
+        dur: Math.random() * 2.5 + 2.8,
+        delay: Math.random() * 4,
+      })),
+    [],
+  );
+  const shooting = [
+    { top: '8%', left: '16%', dur: '7s', delay: '2.4s' },
+    { top: '4%', left: '48%', dur: '11s', delay: '6s' },
+  ];
+  const mask = 'radial-gradient(circle at 50% 46%, #000 32%, transparent 74%)';
+  return (
+    <div
+      aria-hidden="true"
+      className="starfield pointer-events-none absolute inset-0 hidden dark:block"
+      style={{ maskImage: mask, WebkitMaskImage: mask } as CSSProperties}
+    >
+      {stars.map((st, i) => (
+        <span
+          key={i}
+          className={cn('star', st.tw && 'star-tw')}
+          style={{
+            left: `${st.x}%`,
+            top: `${st.y}%`,
+            width: `${st.size}px`,
+            height: `${st.size}px`,
+            opacity: st.tw ? undefined : st.op,
+            '--star-dur': `${st.dur}s`,
+            '--star-delay': `${st.delay}s`,
+          } as CSSProperties}
+        />
+      ))}
+      {shooting.map((sh, i) => (
+        <span
+          key={`sh-${i}`}
+          className="shooting"
+          style={{ top: sh.top, left: sh.left, '--sh-dur': sh.dur, '--sh-delay': sh.delay } as CSSProperties}
+        />
+      ))}
+    </div>
   );
 }
 
