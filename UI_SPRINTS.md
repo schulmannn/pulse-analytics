@@ -44,7 +44,10 @@ Source of truth прогресса между итерациями. Статус
   на ChartSection. Покрытие: «Просмотры» + «Репосты» (windowGraphSeries+opts); диалог max-h-85vh.
   **N/A по модели данных (задокументировано):** Metric — виджет и есть метрика (metric-select есть в Report-блоках);
   Breakdown/Filter — нет дименсий у series (breakdowns = отдельные виджеты); Comparison period → Спринт 3.3.
-  Follow-up: grain в Tier-2 expand-эксплорер; target на BarChart; rollout seriesOptions на остальные daily-виджеты.
+  Follow-up: grain в Tier-2 expand-эксплорер — ✅ закрыт в 3.2; **target на BarChart — ✅ закрыт `PENDING_HASH`**
+  (BarChart читает тот же WidgetTargetContext: goal-линия переживает line↔bar переключение, домен включает
+  target, pointer-events-none — hover баров не перехватывается); rollout seriesOptions на остальные
+  daily-виджеты — отложен намеренно (Mentions = dd.mm-архив со своим бакетингом, IG инертен до подключения).
 
 ## Спринт 3 — Full-screen графики + визуальное сравнение
 

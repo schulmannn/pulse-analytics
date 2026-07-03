@@ -2,7 +2,7 @@ import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { fmt } from '@/lib/format';
 import { ChartTooltip } from '@/components/ChartTooltip';
 import { axisLabel, niceScale } from '@/components/LineChart';
-import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
+import { ChartExpandedContext, ExpandedChartHeightContext, WidgetTargetContext } from '@/components/ExpandableChart';
 
 interface BarChartProps {
   values: number[];
@@ -32,6 +32,10 @@ export function BarChart({ values, labels, titles, height = 200 }: BarChartProps
   const expanded = useContext(ChartExpandedContext);
   // The overlay dictates its explorer height; inline renders keep the caller's `height`.
   const ctxHeight = useContext(ExpandedChartHeightContext);
+  // Per-widget goal line — same source LineChart reads, so the target survives the
+  // line↔bar variant switch. null everywhere outside a widget with a set target.
+  const targetCtx = useContext(WidgetTargetContext);
+  const target = targetCtx != null && Number.isFinite(targetCtx) ? targetCtx : null;
 
   useLayoutEffect(() => {
     const el = containerRef.current;
@@ -68,7 +72,8 @@ export function BarChart({ values, labels, titles, height = 200 }: BarChartProps
 
   // Expanded view: bars scale against a NICE domain top (1/2/5×10ⁿ) so the y ticks land on
   // round values, like LineChart — the old max/mid pair printed «262» next to «2.5k».
-  const rawMax = Math.max(...values, 1);
+  // The domain also covers the target — a goal above the tallest bar must stay visible.
+  const rawMax = Math.max(...values, 1, target ?? 0);
   const scale = expanded ? niceScale(0, rawMax) : null;
   const max = scale ? scale.hi : rawMax;
   const n = values.length;
@@ -176,6 +181,21 @@ export function BarChart({ values, labels, titles, height = 200 }: BarChartProps
             </g>
           );
         })}
+
+        {/* Target level (widget pref) — dashed goal line + right-aligned label, above the bars */}
+        {target != null && (
+          <>
+            <line x1={gutterW} y1={barTop(target)} x2={chartWidth} y2={barTop(target)} stroke="hsl(var(--muted-foreground))" strokeDasharray="6 4" strokeWidth="1.2" opacity="0.8" className="pointer-events-none" />
+            <text
+              x={chartWidth - 4}
+              y={barTop(target) - 4 < 10 ? barTop(target) + 12 : barTop(target) - 4}
+              textAnchor="end"
+              className="pointer-events-none select-none fill-muted-foreground text-2xs font-medium tabular-nums"
+            >
+              цель {fmt.short(target)}
+            </text>
+          </>
+        )}
       </svg>
       {/* Readout anchored to the hovered bar's top-center (not the cursor) */}
       <ChartTooltip
