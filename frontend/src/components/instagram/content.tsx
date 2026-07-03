@@ -1,11 +1,10 @@
 import { useState } from 'react';
 import { fmt } from '@/lib/format';
 import { EmptyState } from '@/components/EmptyState';
-import { Breakdown } from '@/components/Breakdown';
 import { BarChart } from '@/components/BarChart';
 import { RichText } from '@/components/RichText';
 import { KpiCard, Stat } from '@/components/instagram/shared';
-import { ChartSection } from '@/components/ChartWidget';
+import { ChartSection, breakdownVariants } from '@/components/ChartWidget';
 import type { IgPost, IgStory, IgTag } from '@/api/schemas';
 import {
   hashtagStats,
@@ -18,22 +17,24 @@ import {
 } from '@/lib/igMetrics';
 
 // ── Forms / formats breakdown ──
+/** Own ChartSection widget — the full presentation set (list/bars/pie/bar+ledger) + expand. */
 export function FormatsBlock({ items }: { items: { label: string; value: number }[] }) {
-  if (items.length === 0) {
-    return <p className="py-6 text-center text-sm text-muted-foreground">Нет данных о форматах.</p>;
+  const list = [...items]
+    .sort((a, b) => b.value - a.value)
+    .map((it) => ({
+      label: MEDIA_PRODUCT_LABEL[it.label] ?? it.label,
+      value: it.value,
+      display: fmt.short(it.value),
+      color: MEDIA_PRODUCT_CHART[it.label],
+    }));
+  if (list.length === 0) {
+    return (
+      <ChartSection title="Вовлечённость по форматам">
+        <p className="py-6 text-center text-sm text-muted-foreground">Нет данных о форматах.</p>
+      </ChartSection>
+    );
   }
-  return (
-    <Breakdown
-      items={[...items]
-        .sort((a, b) => b.value - a.value)
-        .map((it) => ({
-          label: MEDIA_PRODUCT_LABEL[it.label] ?? it.label,
-          value: it.value,
-          display: fmt.short(it.value),
-          color: MEDIA_PRODUCT_CHART[it.label],
-        }))}
-    />
-  );
+  return <ChartSection title="Вовлечённость по форматам" variants={breakdownVariants(list)} />;
 }
 
 // ── Top posts ──
@@ -363,9 +364,16 @@ export function StoriesBlock({ stories }: { stories: IgStory[] | undefined }) {
         <KpiCard label="Досматриваемость" value={`${Math.round(avgCompletion * 100)}%`} />
       </div>
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <ChartSection title="Навигация по историям">
-          <Breakdown items={navItems.map((n) => ({ label: n.label, value: n.value, display: fmt.short(n.value) }))} />
-        </ChartSection>
+        {navItems.length > 0 ? (
+          <ChartSection
+            title="Навигация по историям"
+            variants={breakdownVariants(navItems.map((n) => ({ label: n.label, value: n.value, display: fmt.short(n.value) })))}
+          />
+        ) : (
+          <ChartSection title="Навигация по историям">
+            <p className="py-6 text-center text-sm text-muted-foreground">Нет данных о навигации.</p>
+          </ChartSection>
+        )}
         <ChartSection title="По историям">
           <div className="space-y-2">
             {list.map((s, i) => (

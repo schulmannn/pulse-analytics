@@ -1,10 +1,8 @@
 import { useRef, useState } from 'react';
 import { fmt } from '@/lib/format';
-import { Breakdown } from '@/components/Breakdown';
-import { BarChart } from '@/components/BarChart';
 import { ChartTooltip, type TooltipState } from '@/components/ChartTooltip';
 import { EmptyChart } from '@/components/instagram/shared';
-import { ChartSection } from '@/components/ChartWidget';
+import { ChartSection, breakdownVariants, reorderDefault } from '@/components/ChartWidget';
 import type { IgBreakdowns, IgOnline } from '@/api/schemas';
 import {
   tvBreakdown,
@@ -27,46 +25,36 @@ export function AudienceBlock({ breakdowns, followers }: { breakdowns: IgBreakdo
   const covered = age.reduce((acc, a) => acc + a.value, 0);
   const coverage = followers > 0 && covered > 0 ? covered / followers : 1;
 
+  // Every demographic widget goes through breakdownVariants — the full presentation set
+  // (Список/Столбцы/Круговая/Столбцы+значения) + the edit-dialog carousel, like TG widgets.
+  const ageItems = age.map((a) => ({ label: a.label, value: a.value, display: fmt.short(a.value) }));
+  const genderItems = gender
+    .sort((a, b) => b.value - a.value)
+    .map((g, i) => ({
+      label: GENDER_LABEL[g.label] ?? g.label,
+      value: g.value,
+      display: fmt.short(g.value),
+      color: CHART_CYCLE[i % CHART_CYCLE.length],
+    }));
+  const countryItems = countries.map((c) => ({ label: countryName(c.label), value: c.value, display: fmt.short(c.value) }));
+  const cityItems = cities.map((c) => ({ label: cityName(c.label), value: c.value, display: fmt.short(c.value) }));
+
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <ChartSection title="Возраст">
-          {age.length > 0 ? (
-            <BarChart
-              values={age.map((a) => a.value)}
-              labels={age.map((a) => a.label)}
-              titles={age.map((a) => `${a.label}: ${fmt.num(a.value)}`)}
-            />
-          ) : (
+        {ageItems.length > 0 ? (
+          // Возраст default = столбцы (упорядоченные бакеты читаются гистограммой).
+          <ChartSection title="Возраст" variants={reorderDefault(breakdownVariants(ageItems), 'bar')} />
+        ) : (
+          <ChartSection title="Возраст">
             <EmptyChart />
-          )}
-        </ChartSection>
-        <ChartSection title="Пол">
-          <Breakdown
-            items={gender
-              .sort((a, b) => b.value - a.value)
-              .map((g, i) => ({
-                label: GENDER_LABEL[g.label] ?? g.label,
-                value: g.value,
-                display: fmt.short(g.value),
-                color: CHART_CYCLE[i % CHART_CYCLE.length],
-              }))}
-          />
-        </ChartSection>
+          </ChartSection>
+        )}
+        <ChartSection title="Пол" variants={breakdownVariants(genderItems)} />
       </div>
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <ChartSection title="Топ стран">
-          <Breakdown
-            items={countries.map((c) => ({
-              label: countryName(c.label),
-              value: c.value,
-              display: fmt.short(c.value),
-            }))}
-          />
-        </ChartSection>
-        <ChartSection title="Топ городов">
-          <Breakdown items={cities.map((c) => ({ label: cityName(c.label), value: c.value, display: fmt.short(c.value) }))} />
-        </ChartSection>
+        <ChartSection title="Топ стран" variants={breakdownVariants(countryItems)} />
+        <ChartSection title="Топ городов" variants={breakdownVariants(cityItems)} />
       </div>
       {coverage < 0.98 && (
         <p className="px-1 text-2xs text-muted-foreground/70">

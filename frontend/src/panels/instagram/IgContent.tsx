@@ -40,9 +40,8 @@ export function IgContent({ ig }: { ig: IgData }) {
         <ReelsBlock posts={ig.posts} />
       </Section>
 
-      <Section title="Вовлечённость по форматам">
-        <FormatsBlock items={ig.formatItems} />
-      </Section>
+      {/* Свой ChartSection-виджет (карусель типов, pie, expand) — без двойного заголовка. */}
+      <FormatsBlock items={ig.formatItems} />
 
       <Section title="Эффективность хэштегов">
         <HashtagsBlock posts={ig.posts} />

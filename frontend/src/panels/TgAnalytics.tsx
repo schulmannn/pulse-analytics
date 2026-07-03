@@ -583,7 +583,7 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
                   label: 'Столбцы',
                   render: <BarChart values={w.values} labels={w.labels} titles={w.titles} />,
                 },
-                seriesBarValuesVariant(w.values, w.labels, w.titles),
+                seriesBarValuesVariant(w.values, w.labels, w.titles, { sum: true }),
               ];
             }}
           />
@@ -618,7 +618,7 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
                   label: 'Столбцы',
                   render: <BarChart values={w.values} labels={w.labels} titles={w.titles} />,
                 },
-                seriesBarValuesVariant(w.values, w.labels, w.titles),
+                seriesBarValuesVariant(w.values, w.labels, w.titles, { sum: true }),
               ];
             }}
           />

@@ -6,10 +6,12 @@ import { ChannelRecencyProvider } from '@/lib/period';
 import {
   HomeEditContext,
   WidgetGroup,
+  getWidgetSource,
   pinToHome,
   setHomeBlocks,
   useHomeBlocks,
 } from '@/components/ChartWidget';
+import { ChannelScope } from '@/lib/channel-context';
 import { HOME_REGISTRY, HOME_DEFAULT_KEYS } from '@/lib/homeWidgets';
 
 /**
@@ -65,9 +67,13 @@ export function Home() {
             <WidgetGroup id="home" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
               {known.map((key) => (
                 // The registry render() returns a complete home-scoped ChartSection (home-<key> id).
-                // React key = the registry key (stable, unique in the list).
+                // React key = the registry key (stable, unique in the list). ChannelScope pins the
+                // card to its «Источник» (edit dialog): it wraps the RENDER site because the
+                // block's own data hooks must read the override, not just the card body.
                 <div key={key} className="contents">
-                  {HOME_REGISTRY[key]!.render()}
+                  <ChannelScope channelId={getWidgetSource(`home-${key}`) ?? null}>
+                    {HOME_REGISTRY[key]!.render()}
+                  </ChannelScope>
                 </div>
               ))}
             </WidgetGroup>

@@ -1,3 +1,6 @@
+import { useContext } from 'react';
+import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
+
 interface BreakdownItem {
   label: string;
   value: number;
@@ -9,7 +12,16 @@ interface BreakdownProps {
   items: BreakdownItem[];
 }
 
+// One row's vertical pitch: p-2 row (36px) + space-y-2 gap.
+const ROW_PITCH = 44;
+
 export function Breakdown({ items }: BreakdownProps) {
+  // Inside a fixed-height tile the card feeds its body height here — show only the rows that
+  // FIT plus a «+N ещё» line, so a widget never scrolls (steep). The expand overlay
+  // (ChartExpandedContext) and free-height surfaces keep the full list.
+  const expanded = useContext(ChartExpandedContext);
+  const ctxHeight = useContext(ExpandedChartHeightContext);
+
   if (!items || items.length === 0) {
     return (
       <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
@@ -18,11 +30,16 @@ export function Breakdown({ items }: BreakdownProps) {
     );
   }
 
+  const fit =
+    !expanded && ctxHeight != null ? Math.max(2, Math.floor(ctxHeight / ROW_PITCH)) : items.length;
+  const shown = items.length > fit ? items.slice(0, Math.max(1, fit - 1)) : items;
+  const extra = items.length - shown.length;
+
   const maxValue = Math.max(...items.map((item) => item.value), 1);
 
   return (
     <div className="space-y-2">
-      {items.map((item, i) => {
+      {shown.map((item, i) => {
         const percentage = (item.value / maxValue) * 100;
         // Fill alpha is a theme token (--row-tint-*): the light-theme 0.15 pastel turns muddy
         // olive-brown on the dark canvas, so dark ships lower alphas; the coloured dot next to
@@ -56,6 +73,9 @@ export function Breakdown({ items }: BreakdownProps) {
           </div>
         );
       })}
+      {extra > 0 && (
+        <div className="px-2 text-2xs text-muted-foreground">+{extra} ещё — полный список в «Развернуть»</div>
+      )}
     </div>
   );
 }

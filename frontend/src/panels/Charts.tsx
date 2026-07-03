@@ -151,11 +151,10 @@ export function HistoryChartBlock({ id, homeKey }: HomeBlockProps = {}) {
         { key: 'bar', label: 'Столбцы', render: <SubscriberHistoryBars rows={rows} /> },
         seriesBarValuesVariant(deltas.values, deltas.labels, deltas.titles, {
           diverging: true,
-          // Рядом с дельтами леджер показывает УРОВНИ — последние 6 фактических значений.
-          ledger: rows
-            .slice(-6)
-            .reverse()
-            .map((r) => ({ label: ddmm(r.day), value: fmt.num(r.subscribers) })),
+          // Леджер = то, чего на дельта-графике не видно: текущий уровень + сводка движения.
+          extraRows: [{ label: 'Сейчас', value: fmt.num(rows[rows.length - 1]?.subscribers ?? 0) }],
+          sum: true,
+          sumLabel: 'Δ за период',
         }),
       ]}
     >

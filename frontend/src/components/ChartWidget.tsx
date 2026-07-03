@@ -11,6 +11,7 @@ import { PieChart } from '@/components/PieChart';
 import { DivergingBars } from '@/components/DivergingBars';
 import { ChartExpandOverlay, ExpandedChartHeightContext, WidgetTargetContext, type ChartExpandConfig } from '@/components/ExpandableChart';
 import { DEFAULT_WIDGET_DAYS, WidgetPeriodProvider, widgetPeriodValue, useChannelRecency, resolveEffectivePeriod } from '@/lib/period';
+import { useChannels } from '@/api/queries';
 import type { PeriodDays, WidgetPeriodValue } from '@/lib/period';
 
 /**
@@ -65,6 +66,9 @@ interface WidgetPrefs {
   includeToday?: false;
   /** goal line drawn on the widget's line charts; undefined = none */
   target?: number;
+  /** pinned data source (a channel id) for cross-source surfaces (Главная / отчёты);
+      undefined = follow the switcher */
+  source?: number;
 }
 
 /** Rank the sizes so a variant's `minSize` can clamp the user's choice UP. */
@@ -178,18 +182,36 @@ export function breakdownVariants(items: BreakdownLikeItem[]): WidgetVariant[] {
   ];
 }
 
+/** The pinned source (channel id) of a widget, if the user chose one in its edit dialog.
+    Home reads this to wrap each pinned card in a ChannelScope at the RENDER site — the
+    override must sit above the block's own data hooks, not just around the card body. */
+export function getWidgetSource(id: string): number | undefined {
+  return getPrefs(id).source;
+}
+
+/** Reorder a variants list so `key` renders as the default (first) presentation. */
+export function reorderDefault(variants: WidgetVariant[], key: string): WidgetVariant[] {
+  const i = variants.findIndex((v) => v.key === key);
+  return i > 0 ? [variants[i], ...variants.slice(0, i), ...variants.slice(i + 1)] : variants;
+}
+
 interface SeriesBarValuesOptions {
   /** Delta series: diverging bars around a zero baseline instead of zero-based columns. */
   diverging?: boolean;
   /** Ledger value formatter (default fmt.num). */
   format?: (v: number) => string;
-  /** Ledger rows override — when the list should show something other than the plotted
-      values (e.g. subscriber LEVELS beside a delta chart). Default: last 6 points, newest first. */
-  ledger?: LedgerRow[];
+  /** Append «Сумма за период» (flow metrics only — summing levels reads as nonsense). */
+  sum?: boolean;
+  /** Label for the sum row (e.g. «Δ за период» when the plotted values are deltas). */
+  sumLabel?: string;
+  /** Extra ledger rows PREPENDED to the stats (e.g. «Сейчас» — the current level beside
+      a delta chart). */
+  extraRows?: LedgerRow[];
 }
 
 /** The wide «Столбцы + значения» variant for SERIES charts: bars (flex-1) plus a right-hand
-    ledger of the LAST 6 points (label → value, newest first). Needs the full grid row. */
+    SUMMARY ledger (Последнее/Максимум/Минимум/Среднее[, Сумма]) — the side column must add
+    what the chart itself can't show, never re-list the same per-day points (steep). */
 export function seriesBarValuesVariant(
   values: number[],
   labels: string[],
@@ -197,12 +219,20 @@ export function seriesBarValuesVariant(
   opts: SeriesBarValuesOptions = {},
 ): WidgetVariant {
   const format = opts.format ?? ((v: number) => fmt.num(v));
-  const rows =
-    opts.ledger ??
-    values
-      .map((v, i) => ({ label: labels[i] ?? '', value: format(v) }))
-      .slice(-6)
-      .reverse();
+  let rows: LedgerRow[] = opts.extraRows ? [...opts.extraRows] : [];
+  if (values.length > 0) {
+    const last = values[values.length - 1];
+    const max = Math.max(...values);
+    const min = Math.min(...values);
+    const sum = values.reduce((a, b) => a + b, 0);
+    rows = rows.concat([
+      { label: 'Последнее', value: format(last) },
+      { label: 'Максимум', value: format(max) },
+      { label: 'Минимум', value: format(min) },
+      { label: 'Среднее', value: format(Math.round(sum / values.length)) },
+      ...(opts.sum ? [{ label: opts.sumLabel ?? 'Сумма за период', value: format(sum) }] : []),
+    ]);
+  }
   return {
     key: 'bar-values',
     label: 'Столбцы + значения',
@@ -259,7 +289,8 @@ function setPrefs(id: string, prefs: WidgetPrefs) {
       prefs.size === undefined &&
       prefs.grain === undefined &&
       prefs.includeToday === undefined &&
-      prefs.target === undefined
+      prefs.target === undefined &&
+      prefs.source === undefined
     )
       delete all[id];
     else all[id] = prefs;
@@ -1193,6 +1224,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
           variants={resolvedVariants}
           showPeriod={!!periodControl}
           showSeries={!!seriesOptions}
+          showSource={widgetId.startsWith('home-')}
           showSize={!!group}
           defaultSize={defaultSize ?? 'half'}
           minSize={activeVariant?.minSize ?? 'third'}
@@ -1306,6 +1338,9 @@ interface EditWidgetDialogProps {
   /** Show the daily-series options (Грануляция / Включая сегодня / Целевой уровень) —
       only for cards that opted in via `seriesOptions` (their variants consume the opts). */
   showSeries?: boolean;
+  /** Show the «Источник» select — cross-source surfaces only (Home cards; the feeds follow
+      the switcher by design). */
+  showSource?: boolean;
   /** Show the «Размер» segment — only inside a WidgetGroup (a lone card can't be resized). */
   showSize?: boolean;
   /** The card's size when the user hasn't chosen one (defaultSize prop, else 'half'). */
@@ -1501,7 +1536,35 @@ const GRAIN_OPTIONS: Array<{ value: SeriesGrain; label: string }> = [
   { value: 'month', label: 'Месяц' },
 ];
 
-function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, showSeries, showSize, defaultSize = 'half', minSize = 'third', onChange, onClose }: EditWidgetDialogProps) {
+/** «Источник» — pin the widget to a fixed channel (default: follow the switcher). Offered on
+    cross-source surfaces (Home); standalone Instagram sources are excluded — the Home catalog
+    is TG-data widgets, an IG-only source would render them honestly empty. */
+function SourceSelect({ prefs, onChange }: { prefs: WidgetPrefs; onChange: (next: WidgetPrefs) => void }) {
+  const channels = useChannels();
+  const list = (channels.data?.channels ?? []).filter((c) => c.source !== 'ig');
+  return (
+    <label className="mt-4 block">
+      <span className="text-2xs tracking-wide text-muted-foreground">Источник</span>
+      <select
+        value={prefs.source ?? ''}
+        onChange={(e) => {
+          const v = e.target.value;
+          onChange({ ...prefs, source: v === '' ? undefined : Number(v) });
+        }}
+        className="mt-1 w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-1 focus:ring-primary"
+      >
+        <option value="">Как в свитчере</option>
+        {list.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.title || (c.username ? `@${c.username}` : `Канал ${c.id}`)}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, showSeries, showSource, showSize, defaultSize = 'half', minSize = 'third', onChange, onClose }: EditWidgetDialogProps) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -1577,6 +1640,8 @@ function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, showSerie
             </div>
           </div>
         )}
+
+        {showSource && <SourceSelect prefs={prefs} onChange={onChange} />}
 
         <label className="mt-4 block">
           <span className="text-2xs tracking-wide text-muted-foreground">Заголовок</span>
