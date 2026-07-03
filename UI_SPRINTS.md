@@ -36,8 +36,15 @@ Source of truth прогресса между итерациями. Статус
   (disabled на краях), точки-пагинация снизу (активная вытянута bg-primary), pointer-свайп ≥40px с подавлением
   click-after-drag; клик по соседней карточке тоже выбирает и центрирует. Live-превью/масштаб wide-вариантов
   и наследование акцента/тинта сохранены. Скролл-лента удалена.
-- [ ] **2.2 Форма настроек до steep-набора** — TODO
-  Metric, Time grain, Comparison period, Target, Breakdown, Filter, color, Colored background, Include today.
+- [x] **2.2 Форма настроек до steep-набора (где применимо)** — SHIPPED `PENDING_HASH`
+  Добавлено в диалог «Изменить»: **Грануляция** (день/неделя/месяц; неделя=Monday-anchor, месяц=calendar; суммы —
+  flow-метрики) + **«Включая сегодня»** (off = дроп частичного последнего дня) + **«Целевой уровень»** (пунктирная
+  goal-линия на line-чартах через WidgetTargetContext — работает в карточке И в overlay). Prefs: grain/includeToday/
+  target (+emptiness-guard). Threading: variants-fn получил 2-й арг WidgetSeriesOpts; opt-in флаг `seriesOptions`
+  на ChartSection. Покрытие: «Просмотры» + «Репосты» (windowGraphSeries+opts); диалог max-h-85vh.
+  **N/A по модели данных (задокументировано):** Metric — виджет и есть метрика (metric-select есть в Report-блоках);
+  Breakdown/Filter — нет дименсий у series (breakdowns = отдельные виджеты); Comparison period → Спринт 3.3.
+  Follow-up: grain в Tier-2 expand-эксплорер; target на BarChart; rollout seriesOptions на остальные daily-виджеты.
 
 ## Спринт 3 — Full-screen графики + визуальное сравнение
 

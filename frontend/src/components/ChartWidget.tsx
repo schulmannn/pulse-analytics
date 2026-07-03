@@ -9,7 +9,7 @@ import { BarChart } from '@/components/BarChart';
 import { Breakdown } from '@/components/Breakdown';
 import { PieChart } from '@/components/PieChart';
 import { DivergingBars } from '@/components/DivergingBars';
-import { ChartExpandOverlay, ExpandedChartHeightContext, type ChartExpandConfig } from '@/components/ExpandableChart';
+import { ChartExpandOverlay, ExpandedChartHeightContext, WidgetTargetContext, type ChartExpandConfig } from '@/components/ExpandableChart';
 import { DEFAULT_WIDGET_DAYS, WidgetPeriodProvider, widgetPeriodValue, useChannelRecency, resolveEffectivePeriod } from '@/lib/period';
 import type { PeriodDays, WidgetPeriodValue } from '@/lib/period';
 
@@ -35,6 +35,15 @@ const HOME_KEY = 'pulse_home_blocks';
 /** Widget footprint on the 6-column group grid: third (2/6) · half (3/6) · full (6/6). */
 export type WidgetSize = 'third' | 'half' | 'full';
 
+/** Series bucketing for daily-flow widgets that opt into `seriesOptions`. */
+export type SeriesGrain = 'day' | 'week' | 'month';
+
+/** Extra display options threaded into function-form `variants` (grainable series widgets). */
+export interface WidgetSeriesOpts {
+  grain: SeriesGrain;
+  includeToday: boolean;
+}
+
 interface WidgetPrefs {
   /** chart token index 1..6; undefined = brand accent */
   color?: number;
@@ -50,6 +59,12 @@ interface WidgetPrefs {
   period?: PeriodDays;
   /** chosen footprint on the group grid; undefined = the card's defaultSize (else 'half') */
   size?: WidgetSize;
+  /** series bucketing (week/month); undefined = day */
+  grain?: Exclude<SeriesGrain, 'day'>;
+  /** false = drop today's partial point from daily series; undefined = include */
+  includeToday?: false;
+  /** goal line drawn on the widget's line charts; undefined = none */
+  target?: number;
 }
 
 /** Rank the sizes so a variant's `minSize` can clamp the user's choice UP. */
@@ -241,7 +256,10 @@ function setPrefs(id: string, prefs: WidgetPrefs) {
       !prefs.title &&
       !prefs.variant &&
       prefs.period === undefined &&
-      prefs.size === undefined
+      prefs.size === undefined &&
+      prefs.grain === undefined &&
+      prefs.includeToday === undefined &&
+      prefs.target === undefined
     )
       delete all[id];
     else all[id] = prefs;
@@ -774,7 +792,7 @@ interface ChartSectionProps {
    * array, or a FUNCTION of the card's own window — post-derived charts pass the function form so
    * their series recompute for THIS card's period (the fn runs with the widget's WidgetPeriodValue).
    */
-  variants?: WidgetVariant[] | ((period: WidgetPeriodValue) => WidgetVariant[]);
+  variants?: WidgetVariant[] | ((period: WidgetPeriodValue, series: WidgetSeriesOpts) => WidgetVariant[]);
   /** Extra classes on the card (grid spans etc.). */
   className?: string;
   /** Footprint this card takes when the user hasn't chosen one — 'full' for hero/table cards
@@ -799,11 +817,18 @@ interface ChartSectionProps {
    * (under its `home-<key>` id) so its menu reads «Убрать с главной» for an in-place unpin.
    */
   homeKey?: string;
+  /**
+   * Opt into the daily-series display options (steep Edit-widget parity): «Грануляция»
+   * (день/неделя/месяц), «Включая сегодня» and «Целевой уровень» in the edit dialog. ONLY for
+   * cards whose function-form `variants` actually consume the WidgetSeriesOpts argument —
+   * otherwise the controls would be dead.
+   */
+  seriesOptions?: boolean;
   /** Body; with `variants` it renders BELOW the active variant (shared captions etc.). */
   children?: ReactNode;
 }
 
-export function ChartSection({ id, title, action, variants, className, defaultSize, expand, periodControl, homeKey, children }: ChartSectionProps) {
+export function ChartSection({ id, title, action, variants, className, defaultSize, expand, periodControl, homeKey, seriesOptions, children }: ChartSectionProps) {
   const widgetId = id ?? title;
   const group = useContext(GroupCtx);
   const homeEditing = useContext(HomeEditContext);
@@ -884,9 +909,17 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
   // charts); the array form is period-agnostic (server-summary / graphs-driven series). Memoized so
   // the (potentially heavy) function form runs once per (variants identity, widget window) — not on
   // every ChartSection re-render (menu open/close, hover, scrollspy, store notify).
+  // Display options for grainable series widgets — a stable object so the memo below keys on
+  // the two scalars, not a fresh literal every render.
+  const seriesGrain: SeriesGrain = prefs.grain ?? 'day';
+  const seriesIncludeToday = prefs.includeToday !== false;
+  const seriesOpts = useMemo<WidgetSeriesOpts>(
+    () => ({ grain: seriesGrain, includeToday: seriesIncludeToday }),
+    [seriesGrain, seriesIncludeToday],
+  );
   const resolvedVariants = useMemo(
-    () => (typeof variants === 'function' ? variants(widgetPeriod) : variants),
-    [variants, widgetPeriod],
+    () => (typeof variants === 'function' ? variants(widgetPeriod, seriesOpts) : variants),
+    [variants, widgetPeriod, seriesOpts],
   );
 
   const activeVariant =
@@ -909,8 +942,10 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
   // in the widget-period provider so every chart primitive inside filters to THIS card's window.
   const bodyNode = (
     <WidgetPeriodProvider value={widgetPeriod}>
-      {activeVariant ? activeVariant.render : null}
-      {children}
+      <WidgetTargetContext.Provider value={prefs.target ?? null}>
+        {activeVariant ? activeVariant.render : null}
+        {children}
+      </WidgetTargetContext.Provider>
     </WidgetPeriodProvider>
   );
   // The «Развернуть» affordance renders on every widget. Tier-2 (a rich `expand` config)
@@ -1131,18 +1166,20 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
       )}
       <div className={`mt-3 flex min-h-0 flex-1 flex-col ${reorder ? 'pointer-events-none' : ''}`}>
         <WidgetPeriodProvider value={widgetPeriod}>
-          {/* Chart region — flex-1 eats the tile's leftover height; overflow-y-auto lets a long list
-              (Breakdown / pie legend) scroll instead of blowing the fixed height. fillHeight feeds
-              the leftover height to EVERY chart inside (variant or bare children) so they fill; a
-              `full` card passes null, so its charts keep their own/explicit height. */}
-          <div ref={bodyRef} className="min-h-0 flex-1 overflow-y-auto">
-            <ExpandedChartHeightContext.Provider value={fillHeight}>
-              {activeVariant ? activeVariant.render : children}
-            </ExpandedChartHeightContext.Provider>
-          </div>
-          {/* Caption (shared children under a variant — «лучший день» / «пик активности» / totals)
-              sits below the chart at its natural height, never squeezed by the fill. */}
-          {activeVariant && children != null && <div className="shrink-0">{children}</div>}
+          <WidgetTargetContext.Provider value={prefs.target ?? null}>
+            {/* Chart region — flex-1 eats the tile's leftover height; overflow-y-auto lets a long list
+                (Breakdown / pie legend) scroll instead of blowing the fixed height. fillHeight feeds
+                the leftover height to EVERY chart inside (variant or bare children) so they fill; a
+                `full` card passes null, so its charts keep their own/explicit height. */}
+            <div ref={bodyRef} className="min-h-0 flex-1 overflow-y-auto">
+              <ExpandedChartHeightContext.Provider value={fillHeight}>
+                {activeVariant ? activeVariant.render : children}
+              </ExpandedChartHeightContext.Provider>
+            </div>
+            {/* Caption (shared children under a variant — «лучший день» / «пик активности» / totals)
+                sits below the chart at its natural height, never squeezed by the fill. */}
+            {activeVariant && children != null && <div className="shrink-0">{children}</div>}
+          </WidgetTargetContext.Provider>
         </WidgetPeriodProvider>
       </div>
       </div>
@@ -1153,6 +1190,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
           prefs={prefs}
           variants={resolvedVariants}
           showPeriod={!!periodControl}
+          showSeries={!!seriesOptions}
           showSize={!!group}
           defaultSize={defaultSize ?? 'half'}
           minSize={activeVariant?.minSize ?? 'third'}
@@ -1262,6 +1300,9 @@ interface EditWidgetDialogProps {
   variants?: WidgetVariant[];
   /** Show the «Период» segment — only for cards that read useWidgetPeriod() (see periodControl). */
   showPeriod?: boolean;
+  /** Show the daily-series options (Грануляция / Включая сегодня / Целевой уровень) —
+      only for cards that opted in via `seriesOptions` (their variants consume the opts). */
+  showSeries?: boolean;
   /** Show the «Размер» segment — only inside a WidgetGroup (a lone card can't be resized). */
   showSize?: boolean;
   /** The card's size when the user hasn't chosen one (defaultSize prop, else 'half'). */
@@ -1451,7 +1492,13 @@ function VariantCarousel({
   );
 }
 
-function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, showSize, defaultSize = 'half', minSize = 'third', onChange, onClose }: EditWidgetDialogProps) {
+const GRAIN_OPTIONS: Array<{ value: SeriesGrain; label: string }> = [
+  { value: 'day', label: 'День' },
+  { value: 'week', label: 'Неделя' },
+  { value: 'month', label: 'Месяц' },
+];
+
+function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, showSeries, showSize, defaultSize = 'half', minSize = 'third', onChange, onClose }: EditWidgetDialogProps) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -1477,7 +1524,7 @@ function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, showSize,
       onClick={onClose}
     >
       <div
-        className={`w-full ${variants && variants.length > 1 ? 'max-w-lg' : 'max-w-sm'} rounded-xl border border-border bg-card p-5`}
+        className={`max-h-[85vh] w-full ${variants && variants.length > 1 ? 'max-w-lg' : 'max-w-sm'} overflow-y-auto rounded-xl border border-border bg-card p-5`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="text-sm font-medium text-foreground">Настройка виджета</div>
@@ -1563,6 +1610,73 @@ function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, showSize,
               })}
             </div>
           </div>
+        )}
+
+        {showSeries && (
+          <div className="mt-4">
+            <span className="text-2xs tracking-wide text-muted-foreground">Грануляция</span>
+            {/* Bucket the daily series by week/month (sums). День clears the pref. */}
+            <div className="mt-2 flex overflow-hidden rounded border border-border">
+              {GRAIN_OPTIONS.map((g) => {
+                const active = (prefs.grain ?? 'day') === g.value;
+                return (
+                  <button
+                    key={g.value}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => onChange({ ...prefs, grain: g.value === 'day' ? undefined : g.value })}
+                    className={`flex-1 border-r border-border px-2 py-1.5 text-xs font-medium transition-colors last:border-r-0 ${
+                      active ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+                    }`}
+                  >
+                    {g.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {showSeries && (
+          <label className="mt-4 block">
+            <span className="text-2xs tracking-wide text-muted-foreground">Целевой уровень</span>
+            {/* Draws a dashed goal line on the widget's line charts. Empty = none. */}
+            <input
+              type="number"
+              inputMode="numeric"
+              min={0}
+              value={prefs.target ?? ''}
+              placeholder="нет"
+              onChange={(e) => {
+                const raw = e.target.value.trim();
+                const num = raw === '' ? undefined : Number(raw);
+                onChange({ ...prefs, target: num !== undefined && Number.isFinite(num) && num > 0 ? num : undefined });
+              }}
+              className="mt-1 w-full rounded border border-border bg-background px-3 py-2 text-sm tabular-nums text-foreground outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
+            />
+          </label>
+        )}
+
+        {showSeries && (
+          <button
+            type="button"
+            role="switch"
+            aria-checked={prefs.includeToday !== false}
+            onClick={() => onChange({ ...prefs, includeToday: prefs.includeToday === false ? undefined : false })}
+            className="mt-4 flex w-full items-center justify-between gap-2 text-left text-sm text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <span>Включая сегодня</span>
+            <span
+              aria-hidden="true"
+              className={
+                prefs.includeToday !== false
+                  ? 'rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-2xs font-medium text-primary'
+                  : 'rounded-full border border-border px-2 py-0.5 text-2xs font-medium text-muted-foreground'
+              }
+            >
+              {prefs.includeToday !== false ? 'вкл' : 'выкл'}
+            </span>
+          </button>
         )}
 
         <div className="mt-4">

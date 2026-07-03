@@ -55,18 +55,65 @@ const formatMsDate = (ts: number) => {
   return ruAxisLabel(`${d.getDate()} ${MON[d.getMonth()] ?? ''}`);
 };
 
-const interLabels = (g: { x: number[] }) =>
-  [g.x[0], g.x[Math.floor(g.x.length / 2)], g.x[g.x.length - 1]].map((ts) => (ts ? formatMsDate(ts) : ''));
+/** Display options for a daily-flow series (the widget's edit-dialog «Грануляция» /
+    «Включая сегодня»). Mirrors WidgetSeriesOpts, both fields optional at this layer. */
+interface GraphSeriesOpts {
+  grain?: 'day' | 'week' | 'month';
+  includeToday?: boolean;
+}
 
 /** Rich-expand windowing for a graphs (daily-flow) series: the last `days` points (0 = «Всё»),
     with ms-timestamp labels + RU tooltips. A graphs point ≈ one day, so slicing by count windows
-    by day; a shorter server series just returns all it has (honest — never fabricates points). */
-function windowGraphSeries(values: number[], xs: number[], days: number, unit: string) {
-  const n = days === 0 ? values.length : Math.min(days, values.length);
-  const wValues = values.slice(-n);
-  const wxs = xs.slice(-n);
+    by day; a shorter server series just returns all it has (honest — never fabricates points).
+    Optional opts: drop today's partial point («Включая сегодня» off) and bucket the window by
+    ISO week (Monday anchor) or calendar month — sums, since these are flow metrics. */
+function windowGraphSeries(values: number[], xs: number[], days: number, unit: string, opts?: GraphSeriesOpts) {
+  let vals = values;
+  let xss = xs;
+  if (opts?.includeToday === false && xss.length) {
+    const last = new Date(xss[xss.length - 1]!);
+    const now = new Date();
+    if (
+      last.getFullYear() === now.getFullYear() &&
+      last.getMonth() === now.getMonth() &&
+      last.getDate() === now.getDate()
+    ) {
+      vals = vals.slice(0, -1);
+      xss = xss.slice(0, -1);
+    }
+  }
+  const n = days === 0 ? vals.length : Math.min(days, vals.length);
+  let wValues = vals.slice(-n);
+  let wxs = xss.slice(-n);
+  const grain = opts?.grain ?? 'day';
+  if (grain !== 'day') {
+    const buckets = new Map<string, { sum: number; anchor: number }>();
+    wValues.forEach((v, i) => {
+      const ts = wxs[i];
+      if (ts == null) return;
+      const d = new Date(ts);
+      let key: string;
+      let anchor: number;
+      if (grain === 'month') {
+        key = `${d.getFullYear()}-${d.getMonth()}`;
+        anchor = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
+      } else {
+        const back = (d.getDay() + 6) % 7; // Monday-anchored week bucket
+        const mon = new Date(d.getFullYear(), d.getMonth(), d.getDate() - back);
+        key = `${mon.getFullYear()}-${mon.getMonth()}-${mon.getDate()}`;
+        anchor = mon.getTime();
+      }
+      const b = buckets.get(key);
+      if (b) b.sum += v;
+      else buckets.set(key, { sum: v, anchor });
+    });
+    const rows = [...buckets.values()].sort((a, b) => a.anchor - b.anchor);
+    wValues = rows.map((r) => r.sum);
+    wxs = rows.map((r) => r.anchor);
+  }
   const labels = wValues.map((_, i) => (wxs[i] ? formatMsDate(wxs[i]!) : ''));
-  const titles = wValues.map((v, i) => `${labels[i]}: ${fmt.num(v)} ${unit}`);
+  const suffix = grain === 'week' ? ' · неделя' : grain === 'month' ? ' · месяц' : '';
+  const titles = wValues.map((v, i) => `${labels[i]}: ${fmt.num(v)} ${unit}${suffix}`);
   return { values: wValues, labels, titles };
 }
 
@@ -165,13 +212,6 @@ function deriveTgAnalytics(
   const interSeries = interGroup?.series ?? [];
   const viewSeries = interSeries.find((s) => /view|просмотр/i.test(s.name ?? '')) || interSeries[0];
   const shareSeries = interSeries.find((s) => /share|репост/i.test(s.name ?? '')) || interSeries[1];
-  const interBarLabels = (interGroup?.x ?? []).map((ts) => (ts ? formatMsDate(ts) : ''));
-  const viewBarTitles = (viewSeries?.values ?? []).map(
-    (v, i) => `${interBarLabels[i] ?? ''}: ${fmt.num(v)} просмотров`,
-  );
-  const shareBarTitles = (shareSeries?.values ?? []).map(
-    (v, i) => `${interBarLabels[i] ?? ''}: ${fmt.num(v)} репостов`,
-  );
 
   // 8) Sources / languages / sentiment
   const mapSourceItems = (
@@ -267,7 +307,6 @@ function deriveTgAnalytics(
     last14Dates, vbdValues, vbdTitles, vbdPrev,
     topEmojis, engagementComposition, viewsByType, formatPerf,
     interGroup, viewSeries, shareSeries,
-    interBarLabels, viewBarTitles, shareBarTitles,
     vbsItems, nfsItems, langItems, sentItems,
     thData, hasHours, peakHourStr,
     net30Values, net30Titles, netSummaryStr, joinedTotal, leftTotal,
@@ -388,7 +427,6 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
     last14Dates, vbdValues, vbdTitles, vbdPrev,
     topEmojis, engagementComposition, viewsByType, formatPerf,
     interGroup, viewSeries, shareSeries,
-    interBarLabels, viewBarTitles, shareBarTitles,
     vbsItems, nfsItems, langItems, sentItems,
     thData, hasHours, peakHourStr,
     net30Values, net30Titles, netSummaryStr, joinedTotal, leftTotal,
@@ -524,20 +562,25 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
               },
               statsFor: (days) => windowGraphSeries(viewSeries.values, interGroup.x, days, 'просмотров').values,
             }}
-            variants={[
-              {
-                key: 'line',
-                label: 'Линия',
-                render: <LineChart values={viewSeries.values} labels={interLabels(interGroup)} markAnomalies />,
-              },
-              {
-                // Дневные ПОТОКИ (не уровни) — столбцы от нуля здесь честные.
-                key: 'bar',
-                label: 'Столбцы',
-                render: <BarChart values={viewSeries.values} labels={interBarLabels} titles={viewBarTitles} />,
-              },
-              seriesBarValuesVariant(viewSeries.values, interBarLabels, viewBarTitles),
-            ]}
+            seriesOptions
+            variants={(_period, series) => {
+              // Full server window through the edit-dialog display opts (grain / include-today).
+              const w = windowGraphSeries(viewSeries.values, interGroup.x, 0, 'просмотров', series);
+              return [
+                {
+                  key: 'line',
+                  label: 'Линия',
+                  render: <LineChart values={w.values} labels={w.labels} titles={w.titles} markAnomalies />,
+                },
+                {
+                  // Дневные ПОТОКИ (не уровни) — столбцы от нуля здесь честные.
+                  key: 'bar',
+                  label: 'Столбцы',
+                  render: <BarChart values={w.values} labels={w.labels} titles={w.titles} />,
+                },
+                seriesBarValuesVariant(w.values, w.labels, w.titles),
+              ];
+            }}
           />
         )}
         {inGroup('dynamics') && interGroup && shareSeries && (
@@ -555,19 +598,23 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
               },
               statsFor: (days) => windowGraphSeries(shareSeries.values, interGroup.x, days, 'репостов').values,
             }}
-            variants={[
-              {
-                key: 'line',
-                label: 'Линия',
-                render: <LineChart values={shareSeries.values} labels={interLabels(interGroup)} />,
-              },
-              {
-                key: 'bar',
-                label: 'Столбцы',
-                render: <BarChart values={shareSeries.values} labels={interBarLabels} titles={shareBarTitles} />,
-              },
-              seriesBarValuesVariant(shareSeries.values, interBarLabels, shareBarTitles),
-            ]}
+            seriesOptions
+            variants={(_period, series) => {
+              const w = windowGraphSeries(shareSeries.values, interGroup.x, 0, 'репостов', series);
+              return [
+                {
+                  key: 'line',
+                  label: 'Линия',
+                  render: <LineChart values={w.values} labels={w.labels} titles={w.titles} />,
+                },
+                {
+                  key: 'bar',
+                  label: 'Столбцы',
+                  render: <BarChart values={w.values} labels={w.labels} titles={w.titles} />,
+                },
+                seriesBarValuesVariant(w.values, w.labels, w.titles),
+              ];
+            }}
           />
         )}
 

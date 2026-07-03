@@ -14,6 +14,11 @@ export const ChartExpandedContext = createContext(false);
     the same element renders explorer-sized in the modal. */
 export const ExpandedChartHeightContext = createContext<number | null>(null);
 
+/** Per-widget target level («Целевой уровень» in the edit dialog). ChartSection provides it
+    around the widget body (and, via portal context flow, the expanded overlay); LineChart
+    draws a dashed goal line at the value. null = no target — the default everywhere else. */
+export const WidgetTargetContext = createContext<number | null>(null);
+
 // steep-style explorer sizing: the overlay chart is markedly taller than any inline card.
 const EXPANDED_CHART_HEIGHT = 400;
 
