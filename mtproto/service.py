@@ -922,8 +922,9 @@ async def _qr_gc_loop():
 
 
 def _is_admin_channel(e):
-    """Channel-like entity (broadcast channel OR megagroup) where the user is creator/admin."""
-    if not (getattr(e, 'broadcast', False) or getattr(e, 'megagroup', False)):
+    """A BROADCAST channel where the user is creator/admin. Megagroups / discussion groups are
+    excluded — they use a different stats API we don't collect and only clutter the picker."""
+    if not getattr(e, 'broadcast', False):
         return False
     return bool(getattr(e, 'creator', False) or getattr(e, 'admin_rights', None))
 

@@ -1361,6 +1361,32 @@ async function persistTgBundle(channelId, bundle, day) {
   if (posts.length) await db.upsertPosts(channelId, posts.map(tgPostToRow));
 }
 
+// Fetch one QR channel's bundle via the (already-decrypted) session and persist it. Throws on
+// mtproto/collect failure — callers decide how to handle (log + continue).
+async function collectQrChannel(sessionStr, ch, day) {
+  const ref = ch.username || String(ch.tg_channel_id);
+  const bundle = await mtprotoPost('/qr/collect', {
+    body: { session: sessionStr, channel: ref, posts_limit: 100, graph_points: 400 },
+    timeoutMs: MTPROTO_TIMEOUT_HEAVY_MS,
+  });
+  await persistTgBundle(ch.id, bundle, day);
+}
+
+// Immediate best-effort collection for freshly-added channels so the dashboard fills within seconds
+// instead of waiting for the nightly cron. Fire-and-forget; sequential (kind to the user's session's
+// flood limits); never throws to the caller.
+async function collectQrChannelsNow(sess, channels) {
+  if (!sess || !tgCrypto.configured() || !MTPROTO_TOKEN) return;
+  let sessionStr;
+  try { sessionStr = tgCrypto.decrypt(sess.session_enc); } catch { return; }
+  const day = new Date().toISOString().slice(0, 10);
+  for (const ch of channels) {
+    if (!ch || ch.tg_channel_id == null) continue;
+    try { await collectQrChannel(sessionStr, ch, day); }
+    catch (e) { log('error', 'tg_qr_collect_now_failed', { channelId: ch.id, error: e.message }); }
+  }
+}
+
 // Collect QR-connected channels (source='qr') into Postgres using each user's stored session — the
 // server acts as their collector, so the dashboard renders them like any collector channel. Runs
 // fire-and-forget after the central ingest; sequential + per-channel try/catch so one bad session /
@@ -1389,16 +1415,8 @@ async function processTgQrCollection() {
     for (const ch of chans) {
       if (done >= TG_QR_MAX_CHANNELS_PER_RUN) { capped = true; break; }
       done++;
-      try {
-        const ref = ch.username || String(ch.tg_channel_id);
-        const bundle = await mtprotoPost('/qr/collect', {
-          body: { session: sessionStr, channel: ref, posts_limit: 100, graph_points: 400 },
-          timeoutMs: MTPROTO_TIMEOUT_HEAVY_MS,
-        });
-        await persistTgBundle(ch.id, bundle, day);
-      } catch (e) {
-        log('error', 'tg_qr_collect_failed', { channelId: ch.id, error: e.message });
-      }
+      try { await collectQrChannel(sessionStr, ch, day); }
+      catch (e) { log('error', 'tg_qr_collect_failed', { channelId: ch.id, error: e.message }); }
     }
   }
   if (capped) log('warn', 'tg_qr_collection_capped', { cap: TG_QR_MAX_CHANNELS_PER_RUN, sessions: sessions.length });
@@ -2066,9 +2084,8 @@ app.delete('/api/tg/qr/session', requireAuth, async (req, res, next) => {
 app.post('/api/tg/qr/channels', requireAuth, async (req, res, next) => {
   if (!db.enabled) return res.status(400).json({ error: 'База данных выключена' });
   try {
-    if (!(await db.getTgSession(req.user.uid))) {
-      return res.status(400).json({ error: 'Сначала подключите Telegram по QR' });
-    }
+    const sess = await db.getTgSession(req.user.uid);
+    if (!sess) return res.status(400).json({ error: 'Сначала подключите Telegram по QR' });
     const raw = req.body && Array.isArray(req.body.channels) ? req.body.channels : null;
     if (!raw || !raw.length) return res.status(400).json({ error: 'Не выбрано ни одного канала' });
     if (raw.length > 100) return res.status(400).json({ error: 'Слишком много каналов за раз' });
@@ -2080,6 +2097,7 @@ app.post('/api/tg/qr/channels', requireAuth, async (req, res, next) => {
     const haveUnames = new Set(mine.map((c) => (c.username ? String(c.username).replace(/^@/, '').toLowerCase() : '')).filter(Boolean));
 
     let added = 0, skipped = 0;
+    const created = [];
     for (const c of raw) {
       const tgId = Number(c && c.id);
       if (!Number.isInteger(tgId) || tgId <= 0) { skipped++; continue; }
@@ -2089,10 +2107,17 @@ app.post('/api/tg/qr/channels', requireAuth, async (req, res, next) => {
       const row = await db.createTgChannel({
         owner_uid: req.user.uid, tg_channel_id: tgId, username: uname || null, title: title || null,
       });
-      if (row) added++; else skipped++;
+      if (row) { added++; created.push(row); } else skipped++;
     }
     audit(req, 'tg.qr.channels_added', { added, skipped }).catch(() => {});
     res.json({ ok: true, added, skipped });
+
+    // Fill the just-added channels now, so the dashboard shows data within seconds instead of waiting
+    // for the nightly cron. Fire-and-forget AFTER the response — collection latency never blocks it.
+    if (created.length) {
+      collectQrChannelsNow(sess, created).catch((e) =>
+        log('error', 'tg_qr_collect_now_batch_failed', { error: e.message }));
+    }
   } catch (e) { next(e); }
 });
 
