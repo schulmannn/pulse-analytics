@@ -69,13 +69,19 @@ export function Mentions() {
   const topChannels = data?.top_channels ?? [];
   const recent = data?.recent ?? [];
 
-  // Подготовка данных графика (последние 14 дней, сортировка по «dd.mm» с учётом
-  // перехода через Новый год — 28.12 должен идти раньше 03.01).
+  // «dd.mm» keys sorted with New-Year rollover (28.12 before 03.01). byDay is the FULL archive,
+  // so the chart windows it by its own widget period (per-widget pills) and the «Развернуть»
+  // overlay windows it further (1М/3М/6М/Всё) — one helper feeds both. Slicing by day count
+  // (not an ISO inRange predicate) because the archive is keyed by dd.mm, one entry per day.
   const sortedDates = Object.keys(byDay).sort((a, b) => compareDdMm(a, b));
 
-  const last14Dates = sortedDates.slice(-14);
-  const chartValues = last14Dates.map((date) => byDay[date] ?? 0);
-  const chartTitles = last14Dates.map((date) => `${date}: ${fmt.num(byDay[date])}`);
+  const mentionWindow = (days: number) => {
+    const dates = days === 0 ? sortedDates : sortedDates.slice(-days);
+    const values = dates.map((date) => byDay[date] ?? 0);
+    const titles = dates.map((date) => `${date}: ${fmt.num(byDay[date] ?? 0)}`);
+    const axisLabels = [dates[0] ?? '', dates[Math.floor(dates.length / 2)] ?? '', dates[dates.length - 1] ?? ''];
+    return { dates, values, titles, axisLabels };
+  };
 
   // Подготовка данных топ каналов
   const breakdownItems = topChannels.map((ch) => ({
@@ -130,22 +136,37 @@ export function Mentions() {
       <WidgetGroup id="mentions" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
         <ChartSection
           title="Упоминаний по дням"
-          variants={[
-            {
-              key: 'bar',
-              label: 'Столбцы',
-              render: (
-                <div className="pt-2">
-                  <BarChart values={chartValues} labels={last14Dates} titles={chartTitles} />
-                </div>
-              ),
+          periodControl
+          variants={(period) => {
+            const w = mentionWindow(period.days);
+            return [
+              {
+                key: 'bar',
+                label: 'Столбцы',
+                render: (
+                  <div className="pt-2">
+                    <BarChart values={w.values} labels={w.dates} titles={w.titles} />
+                  </div>
+                ),
+              },
+              {
+                key: 'line',
+                label: 'Линия',
+                render: <LineChart values={w.values} labels={w.axisLabels} titles={w.titles} yMin={0} />,
+              },
+            ];
+          }}
+          expand={{
+            renderExpanded: (days) => {
+              const w = mentionWindow(days);
+              return <LineChart values={w.values} labels={w.axisLabels} titles={w.titles} yMin={0} markAnomalies markExtremes />;
             },
-            {
-              key: 'line',
-              label: 'Линия',
-              render: <LineChart values={chartValues} labels={last14Dates} titles={chartTitles} yMin={0} />,
+            renderExpandedBar: (days) => {
+              const w = mentionWindow(days);
+              return <BarChart values={w.values} labels={w.dates} titles={w.titles} />;
             },
-          ]}
+            statsFor: (days) => mentionWindow(days).values,
+          }}
         />
 
         <ChartSection title="Кто упоминает · топ каналов" variants={breakdownVariants(breakdownItems)} />
