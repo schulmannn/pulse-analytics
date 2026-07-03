@@ -30,7 +30,7 @@ Source of truth прогресса между итерациями. Статус
 
 ## Спринт 2 — Редактор графика (steep-style)
 
-- [x] **2.1 Карусель карточек-превью типов графика** — SHIPPED `PENDING_HASH`
+- [x] **2.1 Карусель карточек-превью типов графика** — SHIPPED `5c91c56`
   VariantCarousel в EditWidgetDialog (ChartWidget.tsx): активная карточка центрируется на translated-треке
   (transition 300ms, motion-reduce off), соседи peek по краям (scale .96 + opacity .6), стрелки ‹ › по бокам
   (disabled на краях), точки-пагинация снизу (активная вытянута bg-primary), pointer-свайп ≥40px с подавлением
