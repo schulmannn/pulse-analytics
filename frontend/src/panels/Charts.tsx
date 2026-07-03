@@ -231,23 +231,32 @@ function buildHeatmap(
 }
 
 export function HeatmapChartBlock({ id, homeKey }: HomeBlockProps = {}) {
-  const { days, inRange } = useWidgetPeriod();
-  // isPending (не isLoading): запрос выключен, пока канал не известен, — скелетон и там.
-  const { data: tgData, isPending } = useTgFull(days);
-
-  // The 7×24 aggregation is memoized on its inputs; hover/tooltip state lives in the child
-  // below, so a mousemove no longer re-renders this block (and never re-runs the math).
-  const posts = tgData?.posts;
-  const { grid, maxErv, bestSlot } = useMemo(() => buildHeatmap(posts ?? [], inRange), [posts, inRange]);
+  // ONE wide fetch (all posts); HeatmapBody windows the in-window subset per the card's OWN period,
+  // so the header pills re-window the grid client-side (no per-period refetch). isPending (не
+  // isLoading): запрос выключен, пока канал не известен, — скелетон и там.
+  const { data: tgData, isPending } = useTgFull(0);
 
   if (isPending) return <ChartSkeleton title="Тепловая карта активности (день × час)" id={id} homeKey={homeKey} />;
 
   return (
-    // The 7×24 grid is genuinely wide content → a full-row tile wherever the section lands in
-    // a widget grid, never squeezed into a fraction of it.
-    <ChartSection title="Тепловая карта активности (день × час)" defaultSize="full" id={id} homeKey={homeKey}>
-      <HeatmapSurface grid={grid} maxErv={maxErv} bestSlot={bestSlot} />
+    // The 7×24 grid is genuinely wide content → a full-row tile wherever the section lands in a
+    // widget grid. periodControl = its own 7д/30д/90д/Всё pills; the aggregation lives in
+    // HeatmapBody (a ChartSection child, inside the period provider) so the pills reach it.
+    <ChartSection title="Тепловая карта активности (день × час)" defaultSize="full" periodControl id={id} homeKey={homeKey}>
+      <HeatmapBody posts={tgData?.posts ?? []} />
+    </ChartSection>
+  );
+}
 
+/** Aggregates + renders the 7×24 ERV grid for the card's OWN window (useWidgetPeriod, read INSIDE
+    the ChartSection provider), so the header pills genuinely re-window it. Hover/tooltip state
+    lives further down in HeatmapSurface, so a mousemove never re-runs this aggregation. */
+function HeatmapBody({ posts }: { posts: NonNullable<TgFull['posts']> }) {
+  const { inRange } = useWidgetPeriod();
+  const { grid, maxErv, bestSlot } = useMemo(() => buildHeatmap(posts, inRange), [posts, inRange]);
+  return (
+    <>
+      <HeatmapSurface grid={grid} maxErv={maxErv} bestSlot={bestSlot} />
       <div className="mt-3 text-xs font-medium text-muted-foreground">
         {bestSlot ? (
           <span>
@@ -261,7 +270,7 @@ export function HeatmapChartBlock({ id, homeKey }: HomeBlockProps = {}) {
           'Мало постов для тепловой карты.'
         )}
       </div>
-    </ChartSection>
+    </>
   );
 }
 

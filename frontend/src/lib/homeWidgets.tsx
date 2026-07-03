@@ -32,9 +32,8 @@ import { HistoryChartBlock, VelocityChartBlock, HeatmapChartBlock } from '@/pane
  *     data is computed in the Mentions() parent (useMentions/useMentionsArchive) and passed to
  *     the ChartSections as pre-baked props — the sections are not self-contained.
  *
- * Heatmap (Charts) is now pinnable: it self-fetches useTgFull(30) at a fixed 30д window (its
- * useWidgetPeriod falls back to 30д outside a period shell — same as the Analytics tab), so it
- * dedupes with any other 30д fetch and needs no wrapper.
+ * Heatmap (Charts) is pinnable: it self-fetches useTgFull(0) and windows client-side, carrying
+ * its own period pills (per-widget period, #10), so it needs no wrapper.
  */
 export interface HomeWidgetDef {
   /** Menu / card label. */
@@ -93,8 +92,8 @@ export const HOME_REGISTRY: Record<string, HomeWidgetDef> = {
     label: 'Тепловая карта активности',
     defaultSize: 'full',
     // Renders its OWN ChartSection (like History/Velocity) — pass the home id/key, don't wrap.
-    // Fixed 30д window (useWidgetPeriod falls back to 30д outside a period shell, same as on the
-    // Analytics tab), so no per-period fetch fan-out — it dedupes with any other 30д useTgFull.
+    // Carries its own 7д/30д/90д/Всё pills (default 30д), windowing one useTgFull(0) fetch
+    // client-side — no per-period fetch fan-out.
     render: () => <HeatmapChartBlock id="home-heatmap" homeKey="heatmap" />,
   },
 };
