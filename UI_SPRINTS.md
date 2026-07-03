@@ -126,9 +126,12 @@ Source of truth прогресса между итерациями. Статус
   Select «Источник» («Как в свитчере» + каналы, IG-only исключены — каталог Home = TG-данные)
   в диалоге home-карточек; prefs.source + `ChannelScope` (вложенный channel-провайдер) на МЕСТЕ
   РЕНДЕРА в Home.tsx — override видят и data-хуки self-fetching блоков; изоляция бесплатно
-  (query-keys уже по channelId). **TODO следующей итерации: Report** — у отчёта уже есть пикер
-  канала в шапке (глобальный), но персистентный per-block источник требует распила единого
-  top-level useTgFull на per-block фетчи.
+  (query-keys уже по channelId). **Report — ✅ закрыт `PENDING_HASH` (per-report):** источник
+  отчёта персистентный (`config.channelId` в ReportConfigSchema) — ReportDocument распилен на
+  обёртку с ChannelScope (над top-level фетчами) + Body; шапочный пикер теперь ПИШЕТ В КОНФИГ
+  (мгновенный скоуп + debounced PUT), опция «Как в свитчере» снимает пин, закреплённый chip
+  подсвечен. Per-BLOCK смешение источников в одном отчёте — осознанный follow-up (нужен
+  распил единого useTgFull на per-block фетчи).
 
 ## Спринт 6 — Анимации
 

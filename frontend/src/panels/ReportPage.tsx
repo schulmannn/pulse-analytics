@@ -5,7 +5,7 @@ import { useChannels, useDeleteReport, useHistory, useReport, useTgFull, useUpda
 import type { ReportSchedule } from '@/api/queries';
 import { ApiError } from '@/api/client';
 import type { HistoryData, Report, ReportConfig } from '@/api/schemas';
-import { useSelectedChannel } from '@/lib/channel-context';
+import { ChannelScope, useSelectedChannel } from '@/lib/channel-context';
 import { useDemo } from '@/lib/demo-context';
 import { usePeriod } from '@/lib/period';
 import type { PeriodDays } from '@/lib/period';
@@ -199,10 +199,33 @@ export function ReportPage() {
  * emits a clean document.
  */
 function ReportDocument({ report }: { report: Report }) {
+  // Persistent report source (config.channelId): the whole document — including the top-level
+  // data fetches inside the body — runs under a ChannelScope pinned to it. Local state echoes
+  // the config instantly on pick; the debounced config PUT (inside the body) makes it durable.
+  // null = follow the switcher, like before the field existed.
+  const [source, setSource] = useState<number | null>(
+    typeof report.config.channelId === 'number' ? report.config.channelId : null,
+  );
+  return (
+    <ChannelScope channelId={source}>
+      <ReportDocumentBody report={report} source={source} onPickSource={setSource} />
+    </ChannelScope>
+  );
+}
+
+function ReportDocumentBody({
+  report,
+  source,
+  onPickSource,
+}: {
+  report: Report;
+  source: number | null;
+  onPickSource: (id: number | null) => void;
+}) {
   const { days, setDays, range, setRange, inRange } = usePeriod();
   const { data, isPending, isError, error } = useTgFull(days, { windowPair: true });
   const { data: history } = useHistory(730);
-  const { channelId, setChannelId } = useSelectedChannel();
+  const { channelId } = useSelectedChannel();
   const { data: channelsData } = useChannels();
   const navigate = useNavigate();
   const updateReport = useUpdateReport(report.id);
@@ -617,18 +640,36 @@ function ReportDocument({ report }: { report: Report }) {
             </button>
           )}
           <span aria-hidden="true" className="mx-1 h-4 w-px bg-border" />
-          {channels.length >= 2 ? (
+          {channels.length >= 2 || source != null ? (
+            /* «Источник» отчёта — ПЕРСИСТЕНТНЫЙ (config.channelId), не глобальный свитчер:
+               выбор закрепляет документ за каналом на всех устройствах; «Как в свитчере»
+               возвращает старое поведение. Активный chip подсвечен, когда источник закреплён. */
             <div className="relative">
               <button
                 type="button"
                 onClick={() => setChannelOpen((v) => !v)}
                 aria-expanded={channelOpen}
-                className={`${chipBase} ${chipIdle}`}
+                title={source != null ? 'Источник закреплён за отчётом' : 'Источник — как в свитчере'}
+                className={`${chipBase} ${source != null ? chipActive : chipIdle}`}
               >
                 @{channelName} ⌄
               </button>
               {channelOpen && (
                 <div className="absolute left-0 top-full z-20 mt-1 w-52 rounded border border-border bg-card p-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onPickSource(null);
+                      commitConfig({ channelId: undefined });
+                      setChannelOpen(false);
+                    }}
+                    className={`block w-full rounded px-2.5 py-1.5 text-left text-sm transition-colors hover:bg-muted ${
+                      source == null ? 'text-foreground' : 'text-muted-foreground'
+                    }`}
+                  >
+                    Как в свитчере
+                  </button>
+                  <div className="my-1 border-t border-border" aria-hidden="true" />
                   {channels.map((channel) => {
                     const name = String(channel.username || channel.title || channel.id);
                     return (
@@ -636,7 +677,8 @@ function ReportDocument({ report }: { report: Report }) {
                         key={channel.id}
                         type="button"
                         onClick={() => {
-                          setChannelId(channel.id);
+                          onPickSource(channel.id);
+                          commitConfig({ channelId: channel.id });
                           setChannelOpen(false);
                         }}
                         className={`block w-full rounded px-2.5 py-1.5 text-left text-sm transition-colors hover:bg-muted ${

@@ -594,6 +594,8 @@ export const ReportConfigSchema = z
   .object({
     blocks: z.array(z.unknown()).optional(),
     periodDays: z.coerce.number().optional().nullable(),
+    // Persistent report source (a channel id); missing = follow the switcher.
+    channelId: z.coerce.number().optional().nullable(),
   })
   .passthrough();
 export type ReportConfig = z.infer<typeof ReportConfigSchema>;
