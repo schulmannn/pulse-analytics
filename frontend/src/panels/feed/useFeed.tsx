@@ -192,9 +192,14 @@ export function FeedBlock({
   return (
     <section
       data-feed-block={section}
-      className="scroll-mt-20 rounded-2xl border border-border bg-card dark:bg-card/50 px-3 py-4 sm:p-7"
+      className="scroll-mt-4 rounded-2xl border border-border bg-card dark:bg-card/50 px-3 py-4 sm:p-7"
     >
-      <div className="mb-6">
+      {/* Sticky section title (steep): «Обзор» stays put while the widgets scroll under it. It
+          spans the card width (negative margins cancel the section padding), rounds to match the
+          card top, and carries a blurred card bg + hairline so content slides under cleanly. The
+          topbar is gone on feed routes, so it anchors just below the viewport top. z-10 keeps it
+          under the widget menus/popovers (z-40). */}
+      <div className="sticky top-2 z-10 -mx-3 -mt-4 mb-6 rounded-t-2xl border-b border-border/70 bg-card/95 px-3 pb-3 pt-4 backdrop-blur dark:bg-card/80 sm:-mx-7 sm:-mt-7 sm:px-7 sm:pt-7">
         <h2 className="text-2xl font-medium tracking-tight text-foreground">{title}</h2>
       </div>
       <LazyBlock eager={eager} onMount={onMount}>

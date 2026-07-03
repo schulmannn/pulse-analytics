@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Dispatch, ReactNode, RefObject, SetStateAction } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { useChannels, useHistory, useIgProfile, useLogout, useTgFull } from '@/api/queries';
+import { useChannels, useHistory, useIgProfile, useLogout } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { useDemo } from '@/lib/demo-context';
 import { openCommandPalette } from '@/lib/command-palette';
@@ -13,11 +13,8 @@ import { useSidebarMode } from '@/lib/sidebar';
 import { useWidgetPrefsSync } from '@/components/ChartWidget';
 import { fmt } from '@/lib/format';
 import { cn } from '@/lib/utils';
-import { downloadCsv } from '@/lib/csv';
 import { freshness, latestHistoryDay } from '@/lib/freshness';
-import { markdownToPlainText } from '@/lib/markdown';
 import { METRIC_DEFS } from '@/lib/metricDefs';
-import { normalizeTgPosts } from '@/lib/posts';
 import { Icon, type IconName } from '@/components/nav-icons';
 import { ChannelAvatar } from '@/components/ChannelAvatar';
 
@@ -681,19 +678,16 @@ function SourceSwitcher({ rail = false }: { rail?: boolean }) {
 }
 
 /** Desktop top bar (md+; mobile uses MobileHeader — conditionally, never both mounted).
-    Account controls live in the sidebar user row on md+, so the bar holds title + period only. */
+    Feed routes carry their own block header + sticky section titles, so the bar is suppressed
+    there entirely (no empty strip eating vertical space — steep). It renders ONLY on the
+    routes that have a real h1 (metric pages, admin, bugs, reports). */
 function Topbar() {
   const { pathname } = useLocation();
-  // Feed routes carry their own block header — no h1 here (see FEED_ROUTES).
   const title = FEED_ROUTES.includes(pathname) ? null : routeTitle(pathname);
+  if (!title) return null;
   return (
-    <header className="sticky top-0 z-20 flex h-14 items-center justify-between gap-3 border-b bg-background/80 px-4 backdrop-blur sm:gap-4 sm:px-6 print:hidden">
-      {/* min-w-0 lets the title truncate instead of shoving the controls off a narrow screen;
-          the empty span keeps justify-between pushing the controls right when there's no title. */}
-      {title ? <h1 className="min-w-0 truncate text-lg font-medium">{title}</h1> : <span aria-hidden="true" />}
-      <div className="flex shrink-0 items-center gap-2">
-        <ExportButton />
-      </div>
+    <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b bg-background/80 px-4 backdrop-blur sm:gap-4 sm:px-6 print:hidden">
+      <h1 className="min-w-0 truncate text-lg font-medium">{title}</h1>
     </header>
   );
 }
@@ -716,51 +710,6 @@ function MobileHeader({ email, role, avatar }: { email?: string; role?: string; 
         <PlatformNav />
       </div>
     </div>
-  );
-}
-
-/** Export the active channel's Telegram posts to CSV. Shown only on TG data views. The global
-    period switcher is gone (period is per-widget), so the export ships ALL fetched posts — the
-    wide max-window fetch (limit 100 = server cap), same payload the feed widgets filter from. */
-function ExportButton() {
-  const { pathname } = useLocation();
-  const { data } = useTgFull(0);
-  if (!['/', '/analytics', '/posts'].includes(pathname)) return null;
-  const posts = normalizeTgPosts(data?.posts ?? [], data?.channel ?? {});
-  const onExport = () =>
-    downloadCsv(
-      'telegram-posts.csv',
-      posts.map((p) => ({
-        Дата: p.date,
-        Просмотры: p.reach,
-        Реакции: p.likes,
-        Репосты: p.shares,
-        ER: p.er != null ? `${p.er.toFixed(1)}%` : '',
-        Пост: markdownToPlainText(p.caption || ''),
-      })),
-    );
-  return (
-    <button
-      type="button"
-      onClick={onExport}
-      disabled={posts.length === 0}
-      title="Экспорт постов в CSV"
-      className="btn-pill inline-flex items-center gap-1.5 border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50"
-    >
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        className="h-3.5 w-3.5"
-        aria-hidden="true"
-      >
-        <path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14" />
-      </svg>
-      Экспорт
-    </button>
   );
 }
 
