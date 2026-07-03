@@ -15,7 +15,7 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
   заполняет viz по kind. Ничего в рендере не трогает (tree-shaken → бандл не изменился, прод-верифай
   не нужен). Ключевые экспорты для S2-S6: `WIDGET_METRICS`, `METRIC_BY_ID`, `getMetric`, `isMetricId`,
   `metricsForSource`, `CATEGORY_LABEL/ORDER`.
-- **S2 — Модель `WidgetConfig` `lib/widgetConfig.ts`** — SHIPPED `<pending>`
+- **S2 — Модель `WidgetConfig` `lib/widgetConfig.ts`** — SHIPPED `0a6c8b8`
   React-free `WidgetConfig {id,metricId,viz,title?,period?,grain?,includeToday?,source?,size?,filters?,
   comparison?,target?,style?}` + богатые под-типы (Comparison S8 / Target S9 / Filter S7) СРАЗУ по
   спеке, чтобы поздние спринты не переформировали данные. `normalizeWidget/normalizeWidgets` (валидация/
@@ -23,7 +23,15 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
   custom-key хелперы (`custom:<id>` для Home/report слотов). Переиспользует `genId` (reportBlocks),
   `getMetric/isMetricId/WidgetViz` (S1). 23 unit-теста (185 всего). Tree-shaken → прод не меняется.
   Store/sync (localStorage+/api/prefs) отложен до S4 (когда рендерер будет потреблять конфиги).
-- **S3 — Единый резолвер `lib/resolveWidgetMetric.ts`** — TODO
+- **S3 — Единый резолвер `lib/resolveWidgetMetric.ts`** — WIP (S3a SHIPPED `<pending>`)
+  `resolveWidgetMetric(config, ctx): WidgetResult`. **S3a (done):** ядро — 6 core TG (views/subscribers/
+  avgReach/reactions/forwards/er) как value+delta+caption (из `deriveKpis`) + grain-bakened series +
+  ghost (из `comparisonWindow`/`alignGhost`); erv/virality как value. `DataContext` = pre-resolved
+  окно (`now/days/range/inRange`) + payloads (без фетчей) → резолвер pure/детерминирован. Series =
+  raw bucket keys (не метки — форматирует рендерер). Никогда не бросает (`empty:true`). 10 тестов
+  (195 всего). **S3b (TODO):** TG breakdown/table (emoji/sources/languages/sentiment/formats/weekday/
+  hours/engagementComposition/viewsByType/churn/netGrowth/weeklyTable/topPosts) — извлечь агрегаторы
+  из TgAnalytics. **IG paths → S11.** Nothing imports it yet (tree-shaken).
 - **S4 — Единый рендерер `components/WidgetRenderer.tsx`** — TODO
 - **S5 — Универсальный Widget Editor (расширить EditWidgetDialog)** — TODO
 - **S6 — Add-widget как searchable catalog `components/WidgetCatalogModal.tsx`** — TODO
@@ -36,7 +44,13 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
 
 ## Журнал
 
-- 2026-07-03 — **S2 SHIPPED** `<pending>`. Модель `lib/widgetConfig.ts` + тест. Решения: под-типы
+- 2026-07-03 — **S3a SHIPPED** `<pending>`. Резолвер `lib/resolveWidgetMetric.ts` ядро + тест.
+  Решения: `DataContext` несёт УЖЕ разрешённое окно (render-слой сворачивает config.period) +
+  `now` — резолвер pure/детерминирован (тесты фиксируют now, ни одного Date.now()); series = raw
+  bucket keys (форматирует S4-рендерер); value core = строка из deriveKpis (примиряется с ledger);
+  er/avgReach series = подлежащая сумма (как MetricPage); comparison month/custom → нет ghost (S8).
+  S3b (breakdown-агрегаторы из TgAnalytics) — следующая итерация.
+- 2026-07-03 — **S2 SHIPPED** `0a6c8b8`. Модель `lib/widgetConfig.ts` + тест. Решения: под-типы
   comparison/target/filter по спеке S7-S9 сразу (forward-compat, round-trip fixpoint заперт тестом);
   grain до `year` (S10 форвард); `import type WidgetSize` из ChartWidget (erased, pure lib сохранён);
   store+sync отложен до S4-потребителя (не плодить мёртвый localStorage-ключ). Баг `source:0.4→0`
