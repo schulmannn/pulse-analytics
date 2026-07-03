@@ -510,7 +510,7 @@ export function MetricPage() {
             {chartType === 'bar' && (
               /* Expanded context switches BarChart into its rich mode (y ticks + value labels). */
               <ChartExpandedContext.Provider value={true}>
-                <BarChart values={series.values} labels={series.labels} titles={titles} height={280} />
+                <BarChart values={series.values} labels={series.labels} titles={titles} height={280} ghost={ghost} ghostLabel={cmpLabel ?? undefined} />
               </ChartExpandedContext.Provider>
             )}
             {chartType === 'rank' && (

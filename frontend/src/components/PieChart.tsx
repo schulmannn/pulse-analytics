@@ -135,7 +135,14 @@ export function PieChart({ values, labels, titles, colors, height = 200 }: PieCh
       : big;
 
   const chartHeight = ctxHeight ?? height;
-  const size = Math.min(chartHeight, Math.max(width, 1));
+  // In a FIXED tile (ctxHeight set) the donut sits LEFT and the legend RIGHT so nothing scrolls
+  // off the tile (steep) — the donut is bounded by the tile height AND ~45% of the width so the
+  // legend has room. Expanded keeps its big responsive layout; a free-height surface stacks
+  // the donut over the legend as before.
+  const compactSide = !expanded && ctxHeight != null;
+  const size = compactSide
+    ? Math.min(chartHeight, Math.max(width * 0.45, 1))
+    : Math.min(chartHeight, Math.max(width, 1));
   const cx = size / 2;
   const cy = size / 2;
   const rOuter = size / 2 - 4;
@@ -152,17 +159,31 @@ export function PieChart({ values, labels, titles, colors, height = 200 }: PieCh
   const pct = (v: number) => `${((v / total) * 100).toFixed(1)}%`;
   const tipText = (i: number) => `${arcs[i]?.title ?? ''} · ${pct(arcs[i]?.value ?? 0)}`;
 
-  // Legend: full in the overlay, capped inline with «+N ещё».
-  const legendCap = expanded ? arcs.length : LEGEND_CAP;
+  // Legend: full in the overlay; in a fixed tile capped by how many rows fit the donut height so
+  // the list never scrolls off (steep — «следить чтобы не съезжали»); else the flat 8.
+  const LEGEND_ROW_PX = 30;
+  const legendCap = expanded
+    ? arcs.length
+    : compactSide
+      ? Math.max(2, Math.floor(size / LEGEND_ROW_PX))
+      : LEGEND_CAP;
   const legendRows = arcs.slice(0, legendCap);
   const legendExtra = arcs.length - legendRows.length;
 
+  const containerCls = expanded
+    ? 'flex flex-col items-start gap-6 sm:flex-row sm:items-center'
+    : compactSide
+      ? 'flex items-center gap-4'
+      : '';
+  const donutWidth = expanded || compactSide ? size : '100%';
+  const legendCls = expanded || compactSide ? 'min-w-0 flex-1' : 'mt-4';
+
   return (
     <div ref={containerRef} className="relative w-full">
-      <div className={expanded ? 'flex flex-col items-start gap-6 sm:flex-row sm:items-center' : ''}>
+      <div className={containerCls}>
         <div
           className="relative shrink-0"
-          style={{ width: expanded ? size : '100%', maxWidth: size }}
+          style={{ width: donutWidth, maxWidth: size }}
           onMouseLeave={() => setHover(null)}
           onPointerLeave={() => setHover(null)}
         >
@@ -221,7 +242,7 @@ export function PieChart({ values, labels, titles, colors, height = 200 }: PieCh
 
         {/* Legend: hairline rows (colour dot + label + value·%), reusing the ValueLedger idiom.
             Inline it flows under the ring; in the overlay it sits beside it. */}
-        <ul className={expanded ? 'min-w-0 flex-1' : 'mt-4'}>
+        <ul className={legendCls}>
           {legendRows.map((a, i) => (
             <li
               key={i}

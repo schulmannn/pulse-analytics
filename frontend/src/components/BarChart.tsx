@@ -9,6 +9,11 @@ interface BarChartProps {
   labels?: string[];
   titles?: string[];
   height?: number;
+  /** Comparison series (previous period / baseline), drawn as a dashed --chart-2 overlay
+      line across the bar tops, with a legend row — the visual delta for bar charts. */
+  ghost?: number[];
+  /** Legend name for the ghost series (default «Прошлый период»). */
+  ghostLabel?: string;
 }
 
 interface Hover {
@@ -22,7 +27,7 @@ const BAR_RATIO = 0.7;
 // Approximate glyph width of the 11px tabular numerals used for tick/value labels.
 const CHAR_W = 6.6;
 
-export function BarChart({ values, labels, titles, height = 200 }: BarChartProps) {
+export function BarChart({ values, labels, titles, height = 200, ghost, ghostLabel = 'Прошлый период' }: BarChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<Hover | null>(null);
   // Measure render width so the viewBox is 1:1 with CSS pixels — a fixed 600-wide viewBox
@@ -70,10 +75,11 @@ export function BarChart({ values, labels, titles, height = 200 }: BarChartProps
     );
   }
 
+  const hasGhost = !!ghost && ghost.length === values.length && ghost.length >= 2;
   // Expanded view: bars scale against a NICE domain top (1/2/5×10ⁿ) so the y ticks land on
   // round values, like LineChart — the old max/mid pair printed «262» next to «2.5k».
-  // The domain also covers the target — a goal above the tallest bar must stay visible.
-  const rawMax = Math.max(...values, 1, target ?? 0);
+  // The domain also covers the target and the comparison line — both must stay visible.
+  const rawMax = Math.max(...values, 1, target ?? 0, ...(hasGhost ? ghost! : []));
   const scale = expanded ? niceScale(0, rawMax) : null;
   const max = scale ? scale.hi : rawMax;
   const n = values.length;
@@ -101,7 +107,15 @@ export function BarChart({ values, labels, titles, height = 200 }: BarChartProps
   const labelStride = Math.max(1, Math.ceil(n / Math.max(2, Math.floor(chartWidth / 56))));
 
   const barTop = (val: number) => graphHeight - (val / max) * usable;
-  const tipText = (i: number) => titles?.[i] ?? `${labels?.[i] ?? ''}: ${values[i]}`;
+  const barCenterX = (i: number) => offsetX + i * itemWidth + itemWidth / 2;
+  // Comparison overlay: a dashed line across the previous-period value at each bar centre.
+  const ghostPath = hasGhost
+    ? ghost!.map((v, i) => `${i === 0 ? 'M' : 'L'} ${barCenterX(i)} ${barTop(v)}`).join(' ')
+    : '';
+  const tipText = (i: number) => {
+    const base = titles?.[i] ?? `${labels?.[i] ?? ''}: ${values[i]}`;
+    return hasGhost && ghost![i] != null ? `${base} · пред. ${fmt.short(ghost![i])}` : base;
+  };
   const onEnter = (i: number) => () => {
     setHover((prev) => (prev && prev.i === i ? prev : { i }));
   };
@@ -182,6 +196,17 @@ export function BarChart({ values, labels, titles, height = 200 }: BarChartProps
           );
         })}
 
+        {/* Comparison overlay — dashed --chart-2 line across the previous-period values, plus
+            hollow dots at each point so the delta reads at a glance (steep). */}
+        {hasGhost && (
+          <g className="pointer-events-none">
+            <path d={ghostPath} fill="none" stroke="hsl(var(--chart-2))" strokeWidth="1.8" strokeDasharray="5 4" opacity="0.9" />
+            {ghost!.map((v, i) => (
+              <circle key={`g${i}`} cx={barCenterX(i)} cy={barTop(v)} r="2.5" fill="hsl(var(--card))" stroke="hsl(var(--chart-2))" strokeWidth="1.5" />
+            ))}
+          </g>
+        )}
+
         {/* Target level (widget pref) — dashed goal line + right-aligned label, above the bars */}
         {target != null && (
           <>
@@ -197,6 +222,19 @@ export function BarChart({ values, labels, titles, height = 200 }: BarChartProps
           </>
         )}
       </svg>
+      {/* Comparison legend — names both series whenever a ghost is drawn. */}
+      {hasGhost && (
+        <div className="mt-1.5 flex select-none flex-wrap items-center gap-x-4 gap-y-1 px-1 text-2xs font-medium text-muted-foreground">
+          <span className="flex items-center gap-1.5">
+            <span aria-hidden="true" className="h-2 w-3 rounded-sm" style={{ backgroundColor: 'hsl(var(--brand-iris))' }} />
+            Текущий период
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span aria-hidden="true" className="w-4 border-t-2 border-dashed" style={{ borderColor: 'hsl(var(--chart-2))' }} />
+            {ghostLabel}
+          </span>
+        </div>
+      )}
       {/* Readout anchored to the hovered bar's top-center (not the cursor) */}
       <ChartTooltip
         tip={
