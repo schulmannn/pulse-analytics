@@ -146,6 +146,11 @@ export function LineChart({
   const W = Math.max(width, 1);
   const padR = 10;
   const padY = 12;
+  // Real x-axis (tick marks + date labels INSIDE the svg) in axes mode — the explorer/metric
+  // reading. Needs a taller bottom band; the axis-free cards keep the symmetric pad and the
+  // minimal first/mid/last HTML row below the svg.
+  const hasXAxis = showAxes && !!labels && labels.length > 0;
+  const padB = hasXAxis ? 30 : padY;
 
   // Domain covers the series, the ghost and the target — a goal above the data must be visible.
   const scaleVals = [...values, ...(ghost ?? []), ...(target != null ? [target] : [])];
@@ -158,7 +163,7 @@ export function LineChart({
   const max = scale.hi;
   const range = max - min || 1;
 
-  const yFor = (v: number) => h - padY - ((v - min) / range) * (h - 2 * padY);
+  const yFor = (v: number) => h - padB - ((v - min) / range) * (h - padY - padB);
   // Full-axes mode only: nice ticks deduped belt-and-braces (drop any tick whose formatted
   // label repeats the previous one). Minimal mode renders no ticks/gridlines at all.
   const yAxis = showAxes
@@ -182,8 +187,7 @@ export function LineChart({
 
   const points = values.map((v, i) => {
     const x = gutterW + i * step;
-    const y = h - padY - ((v - min) / range) * (h - 2 * padY);
-    return { x, y, v };
+    return { x, y: yFor(v), v };
   });
 
   const firstPt = points[0];
@@ -192,18 +196,42 @@ export function LineChart({
   const anomalySet = new Set(anomalyIdx);
 
   const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
-  const areaPath = `${linePath} L ${lastPt.x} ${h - padY} L ${firstPt.x} ${h - padY} Z`;
+  const areaPath = `${linePath} L ${lastPt.x} ${h - padB} L ${firstPt.x} ${h - padB} Z`;
 
   const ghostPath =
     ghost && ghost.length >= 2
       ? ghost
           .map((v, i) => {
             const gx = gutterW + i * step;
-            const gy = h - padY - ((v - min) / range) * (h - 2 * padY);
-            return `${i === 0 ? 'M' : 'L'} ${gx} ${gy}`;
+            return `${i === 0 ? 'M' : 'L'} ${gx} ${yFor(v)}`;
           })
           .join(' ')
       : '';
+
+  // Real x-axis ticks (axes mode): width-aware stride so labels never collide — one label
+  // per ~90px, always including the first and the last point.
+  const xTicks = hasXAxis
+    ? (() => {
+        const maxTicks = Math.max(2, Math.floor(plotW / 90));
+        const stride = Math.ceil(n / maxTicks);
+        const idxs: number[] = [];
+        for (let i = 0; i < n; i += stride) idxs.push(i);
+        if (idxs[idxs.length - 1] !== n - 1) {
+          // Replace a too-close neighbour instead of stacking a second label on it.
+          if (n - 1 - idxs[idxs.length - 1] < stride * 0.6) idxs.pop();
+          idxs.push(n - 1);
+        }
+        return idxs
+          .map((i) => {
+            const text = labels?.[i] ?? '';
+            if (!text) return null;
+            const halfW = (text.length * CHAR_W) / 2;
+            const x = Math.min(Math.max(points[i].x, gutterW + halfW), Math.max(W - padR - halfW, gutterW + halfW));
+            return { i, px: points[i].x, x, text };
+          })
+          .filter((t): t is { i: number; px: number; x: number; text: string } => t !== null);
+      })()
+    : [];
 
   // Bare value labels at the max point and the last point (deduped when they coincide),
   // placed above the point and flipped below when the top edge would clip them, clamped
@@ -315,6 +343,16 @@ export function LineChart({
           </text>
         ))}
 
+        {/* X-axis (axes mode) — tick marks + date labels inside the bottom band */}
+        {xTicks.map((t) => (
+          <g key={`x${t.i}`}>
+            <line x1={t.px} y1={h - padB + 3} x2={t.px} y2={h - padB + 7} stroke="hsl(var(--border))" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+            <text x={t.x} y={h - 8} textAnchor="middle" className="pointer-events-none select-none fill-muted-foreground text-2xs font-medium tabular-nums">
+              {t.text}
+            </text>
+          </g>
+        ))}
+
         {/* Per-point hover targets (snap to nearest point) */}
         {points.map((p, i) => {
           const xStart = i === 0 ? 0 : p.x - step / 2;
@@ -325,8 +363,9 @@ export function LineChart({
         })}
       </svg>
 
-      {/* X-axis labels */}
-      {labels && labels.length > 0 && (
+      {/* Minimal x labels (axis-free cards): first / mid / last under the svg. Axes mode
+          draws the real in-svg x-axis above instead. */}
+      {labels && labels.length > 0 && !hasXAxis && (
         <div className="mt-1.5 flex select-none justify-between px-1 text-2xs font-medium text-muted-foreground">
           <span>{labels[0]}</span>
           <span>{labels[Math.floor(labels.length / 2)]}</span>

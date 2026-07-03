@@ -1,4 +1,4 @@
-import { createContext, useEffect, useRef, useState } from 'react';
+import { createContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { ReactNode } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -125,9 +125,25 @@ function snapToWindow(days: number | undefined): number {
  */
 export function ChartExpandOverlay({ title, children, renderExpanded, renderExpandedBar, statsFor, statsSum = true, initialDays, onClose }: ChartExpandOverlayProps) {
   const panelRef = useRef<HTMLDivElement>(null);
+  const chartRegionRef = useRef<HTMLDivElement>(null);
   const [days, setDays] = useState(() => snapToWindow(initialDays));
   // Overlay-local presentation; reopening always starts on the line, like metric pages.
   const [kind, setKind] = useState<'line' | 'bar'>('line');
+  // Full-screen explorer: the chart fills the viewport-height panel. Measure the flex-1
+  // chart region and feed its height (minus a small breathing band) to the charts inside;
+  // the fixed EXPANDED_CHART_HEIGHT stays as the pre-measure fallback.
+  const [regionH, setRegionH] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const node = chartRegionRef.current;
+    if (!node) return;
+    const measure = () => setRegionH(node.clientHeight || null);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(node);
+    return () => ro.disconnect();
+  }, []);
+  const chartH = regionH ? Math.max(240, regionH - 8) : EXPANDED_CHART_HEIGHT;
   useFocusTrap(panelRef);
 
   useEffect(() => {
@@ -154,7 +170,7 @@ export function ChartExpandOverlay({ title, children, renderExpanded, renderExpa
       <Card
         ref={panelRef}
         tabIndex={-1}
-        className="relative z-10 max-h-[90vh] w-full max-w-5xl overflow-y-auto focus:outline-none"
+        className="relative z-10 flex h-full w-full flex-col overflow-hidden focus:outline-none"
       >
         <button
           type="button"
@@ -167,7 +183,7 @@ export function ChartExpandOverlay({ title, children, renderExpanded, renderExpa
           </svg>
         </button>
 
-        <CardHeader className="pr-12">
+        <CardHeader className="shrink-0 pr-12">
           <CardTitle className="text-base font-medium text-foreground">{title}</CardTitle>
           {(renderExpanded || renderExpandedBar) && (
             <div className="flex flex-wrap items-center gap-2 pt-2">
@@ -195,21 +211,24 @@ export function ChartExpandOverlay({ title, children, renderExpanded, renderExpa
             </div>
           )}
         </CardHeader>
-        <CardContent>
+        <CardContent className="flex min-h-0 flex-1 flex-col">
           {/* No forced svg min-height here: stretching a fixed-viewBox svg with CSS
-              distorts the axis/value text vertically in the expanded view. */}
-          <ChartExpandedContext.Provider value={true}>
-            <ExpandedChartHeightContext.Provider value={EXPANDED_CHART_HEIGHT}>
-              <div className="min-h-[420px] w-full">
+              distorts the axis/value text vertically in the expanded view. The flex-1 region
+              is measured and its height fed to the charts — they fill the screen. */}
+          <div ref={chartRegionRef} className="min-h-0 w-full flex-1 overflow-y-auto">
+            <ChartExpandedContext.Provider value={true}>
+              <ExpandedChartHeightContext.Provider value={chartH}>
                 {kind === 'bar' && renderExpandedBar
                   ? renderExpandedBar(days)
                   : renderExpanded
                     ? renderExpanded(days)
                     : children}
-              </div>
-            </ExpandedChartHeightContext.Provider>
-          </ChartExpandedContext.Provider>
-          <OverlayStats values={statsFor ? statsFor(days) : null} statsSum={statsSum} />
+              </ExpandedChartHeightContext.Provider>
+            </ChartExpandedContext.Provider>
+          </div>
+          <div className="shrink-0">
+            <OverlayStats values={statsFor ? statsFor(days) : null} statsSum={statsSum} />
+          </div>
         </CardContent>
       </Card>
     </div>,

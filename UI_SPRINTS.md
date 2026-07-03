@@ -48,7 +48,12 @@ Source of truth прогресса между итерациями. Статус
 
 ## Спринт 3 — Full-screen графики + визуальное сравнение
 
-- [ ] **3.1 Full-screen explorer с реальными осями** — TODO
+- [x] **3.1 Full-screen explorer с реальными осями** — SHIPPED `PENDING_HASH`
+  ChartExpandOverlay → настоящий full-screen (Card h-full flex-col в inset-p4, chart-регион flex-1 измеряется
+  ResizeObserver → высота в ExpandedChartHeightContext — чарт заполняет весь экран, статы/шапка shrink-0,
+  min 240px, фоллбэк 400). LineChart в axes-режиме рисует РЕАЛЬНУЮ ось X внутри svg: stride-тики по ширине
+  (~90px/лейбл, всегда первый+последний, анти-коллизия), tick-марки + даты в нижней полосе padB=30;
+  3-лейбловый HTML-ряд остаётся только на axis-free карточках. Заголовок+период уже были.
 - [ ] **3.2 Выбор типа графика + грануляция + тултипы в explorer** — TODO
 - [ ] **3.3 Визуальное сравнение: период сравнения НА графике вторым цветом** — TODO
 
