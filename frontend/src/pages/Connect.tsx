@@ -68,7 +68,9 @@ export function Connect() {
   const { data: channelsData } = useChannels();
   const igStatus = useIgOauthStatus();
 
-  const igConnected = igStatus.data?.connected ?? false;
+  // IG counts as connected when a per-channel OAuth account is linked OR the global env account is
+  // serving data (env_fallback) — both mean real Instagram numbers are flowing.
+  const igConnected = (igStatus.data?.connected ?? false) || (igStatus.data?.env_fallback ?? false);
   const tgConnected = (channelsData?.channels?.length ?? 0) > 0;
   const stateOf = (s: Service): 'connected' | 'available' | 'soon' => {
     if (s.kind === 'soon') return 'soon';
@@ -353,6 +355,9 @@ function InstagramPanel() {
   const connect = useConnectIg();
   const disconnect = useDisconnectIg();
   const connected = status.data?.connected ?? false;
+  // A global env IG account (IG_ACCESS_TOKEN/IG_ACCOUNT_ID) is serving data even without a
+  // per-channel OAuth connection — real numbers are flowing, so this is NOT «не настроено».
+  const envAccount = status.data?.env_fallback ?? false;
   const serverReady = status.data?.server_ready ?? false;
   const notReady = status.isSuccess && !serverReady;
   const connectError = connect.error instanceof Error ? connect.error.message : null;
@@ -362,7 +367,7 @@ function InstagramPanel() {
       <PanelHead
         id="instagram"
         name="Instagram"
-        pill={connected ? { label: 'Подключён', tone: 'ok' } : { label: 'Доступно', tone: 'go' }}
+        pill={connected ? { label: 'Подключён', tone: 'ok' } : envAccount ? { label: 'Общий аккаунт', tone: 'ok' } : { label: 'Доступно', tone: 'go' }}
       />
 
       {channelId == null ? (
@@ -382,6 +387,34 @@ function InstagramPanel() {
             {disconnect.isPending ? 'Отключаю…' : 'Отключить'}
           </button>
         </div>
+      ) : envAccount ? (
+        <div className="mt-4 space-y-4">
+          <div className="flex items-center gap-2 text-sm">
+            <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-verdant" />
+            <span className="text-foreground">Подключён общий аккаунт</span>
+          </div>
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            Instagram-аналитика уже идёт из аккаунта, настроенного на сервере — охваты, аудитория и
+            публикации доступны в разделе Instagram.
+          </p>
+          {serverReady && (
+            <>
+              <p className="text-sm leading-relaxed text-muted-foreground">
+                Можно подключить <b className="font-medium text-foreground">свой</b> бизнес-аккаунт к
+                этому каналу вместо общего:
+              </p>
+              <button
+                type="button"
+                onClick={() => connect.mutate()}
+                disabled={connect.isPending}
+                className="btn-pill bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-60"
+              >
+                {connect.isPending ? 'Открываю Instagram…' : 'Подключить свой аккаунт'}
+              </button>
+              {connectError && <p className="text-xs font-medium text-destructive">{connectError}</p>}
+            </>
+          )}
+        </div>
       ) : (
         <div className="mt-4 space-y-5">
           <p className="text-sm leading-relaxed text-muted-foreground">
@@ -399,7 +432,7 @@ function InstagramPanel() {
           {connectError && <p className="text-xs font-medium text-destructive">{connectError}</p>}
           {notReady && (
             <p className="text-xs text-muted-foreground">
-              Подключение Instagram ещё не настроено на сервере{status.data?.env_fallback ? ' — пока показан общий аккаунт' : ''}.
+              Подключение Instagram ещё не настроено на сервере.
             </p>
           )}
           <div className="grid gap-5 border-t border-border pt-4 sm:grid-cols-2">
