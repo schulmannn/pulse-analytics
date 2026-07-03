@@ -239,6 +239,34 @@ describe('resolveWidgetMetric — TG breakdowns (S3b)', () => {
   });
 });
 
+describe('resolveWidgetMetric — tg.netGrowth (S3c series-from-graphs)', () => {
+  // followers graph x = ms timestamps within the window; joined/left → net daily = joined − left.
+  const netGraphs = {
+    followers: {
+      x: [NOW - 2 * DAY, NOW - 1 * DAY],
+      series: [
+        { name: 'joined', values: [30, 40] },
+        { name: 'left', values: [10, 5] },
+      ],
+    },
+  } as unknown as TgGraphs;
+  const netCtx: DataContext = { ...ctx, tg: { ...ctx.tg!, graphs: netGraphs } };
+
+  it('resolves net growth as a flow series summing joined − left', () => {
+    const r = resolveWidgetMetric(cfg('tg.netGrowth'), netCtx);
+    expect(r.empty).toBeFalsy();
+    expect(r.kind).toBe('series');
+    expect(r.valueRaw).toBe(55); // (30−10) + (40−5)
+    expect(r.value).toBe('+55');
+    expect(r.series!.reduce((s, p) => s + p.value, 0)).toBe(55);
+  });
+
+  it('returns empty when the followers graph is absent', () => {
+    const noFollowers: DataContext = { ...ctx, tg: { ...ctx.tg!, graphs: {} as unknown as TgGraphs } };
+    expect(resolveWidgetMetric(cfg('tg.netGrowth'), noFollowers).empty).toBe(true);
+  });
+});
+
 describe('resolveWidgetMetric — stubs + guards (never throws)', () => {
   it('returns empty for an unknown metric', () => {
     expect(resolveWidgetMetric(cfg('nope.metric'), ctx).empty).toBe(true);

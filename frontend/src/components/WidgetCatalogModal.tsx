@@ -44,9 +44,11 @@ export function WidgetCatalogModal({
 
   const q = query.trim().toLowerCase();
   // Group the source's metrics by category, applying the search filter (label + formula text).
+  // Table-kind metrics (weekly table / top posts) are served by the report + analytics surfaces —
+  // a rich table doesn't read in a story-card tile — so the builder catalogue omits them.
   const groups = useMemo(() => {
     const all = metricsForSource(source).filter(
-      (m) => !q || m.label.toLowerCase().includes(q) || (m.formula ?? '').toLowerCase().includes(q),
+      (m) => m.kind !== 'table' && (!q || m.label.toLowerCase().includes(q) || (m.formula ?? '').toLowerCase().includes(q)),
     );
     return CATEGORY_ORDER.map((cat) => ({
       cat,

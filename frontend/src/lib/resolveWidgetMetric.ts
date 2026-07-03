@@ -48,6 +48,7 @@ import {
   formatPerfBreakdown,
   hoursBreakdown,
   languagesBreakdown,
+  netGrowthPoints,
   newFollowersBySourceBreakdown,
   postCountBreakdown,
   sentimentBreakdown,
@@ -306,10 +307,34 @@ export function resolveWidgetMetric(config: WidgetConfig, ctx: DataContext): Wid
 
   if (metric.drillKey) return resolveCoreTg(metric.drillKey, config, ctx, out);
   if (metric.id === 'tg.erv' || metric.id === 'tg.virality') return resolveTgRatio(metric.id, ctx, out);
+  if (metric.id === 'tg.netGrowth') return resolveTgNetGrowth(config, ctx, out);
   if (metric.kind === 'breakdown') return resolveTgBreakdown(metric.id, ctx, out);
 
-  // TG series-from-graphs (netGrowth) + tables (weeklyTable / topPosts) — S3c.
+  // Tables (tg.weeklyTable / tg.topPosts) are served by the report/analytics surfaces, not the
+  // story-card builder (a rich table doesn't fit a widget tile) — the catalogue hides table-kind.
   return { ...out, empty: true };
+}
+
+/** «Чистый прирост подписчиков» — net daily (joined − left) from the followers graph, bucketed to
+ *  the widget's window + grain (flow: SUM per bucket). Period-windowed like the metric-page series. */
+function resolveTgNetGrowth(config: WidgetConfig, ctx: DataContext, out: WidgetResult): WidgetResult {
+  const points = netGrowthPoints(ctx.tg?.graphs);
+  if (points.length === 0) return { ...out, empty: true };
+  const winTo = ctx.range ? ctx.range.to : ctx.now;
+  const winFrom = ctx.range ? ctx.range.from : ctx.days > 0 ? winTo - (ctx.days - 1) * DAY_MS : null;
+  // «Всё» → since = earliest dated net point (the graph is a bounded server window anyway).
+  const since = winFrom ?? Math.min(...points.map((p) => Date.parse(p.day)).filter((t) => Number.isFinite(t)));
+  const inWin = points.filter((p) => {
+    const t = Date.parse(p.day);
+    return Number.isFinite(t) && t >= since && t <= winTo;
+  });
+  if (inWin.length === 0) return { ...out, empty: true };
+  const grain = effGrain(config.grain);
+  out.series = bucketIgSeries(points, since, winTo, grain); // generic {day,value} flow bucketer
+  const sum = inWin.reduce((s, p) => s + p.value, 0);
+  out.valueRaw = sum;
+  out.value = `${sum > 0 ? '+' : sum < 0 ? '−' : ''}${fmt.num(Math.abs(sum))}`;
+  return out;
 }
 
 /** TG categorical splits — dispatched to the pure aggregators in tgAggregations. Post-derived

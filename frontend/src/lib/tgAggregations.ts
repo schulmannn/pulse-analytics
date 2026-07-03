@@ -181,6 +181,25 @@ export function hoursBreakdown(graphs: TgGraphs | undefined): BreakdownItem[] {
   });
 }
 
+/** «Чистый прирост подписчиков» — net daily = joined − left, dated from the followers graph x-axis.
+ *  A flow series (the resolver buckets/sums it); returns [] when the graph has no follower series. */
+export function netGrowthPoints(graphs: TgGraphs | undefined): { day: string; value: number }[] {
+  const g = graphs?.followers;
+  const series = g?.series ?? [];
+  const joined = series.find((s) => /join|подпис/i.test(s.name ?? '')) || series[0];
+  const left = series.find((s) => /left|отпис/i.test(s.name ?? '')) || series[1];
+  const x = g?.x ?? [];
+  if (!joined || !left) return [];
+  const n = Math.min(joined.values.length, left.values.length, x.length);
+  const out: { day: string; value: number }[] = [];
+  for (let i = 0; i < n; i++) {
+    const ts = x[i];
+    if (ts == null || !Number.isFinite(ts)) continue;
+    out.push({ day: new Date(ts).toISOString(), value: Number(joined.values[i] ?? 0) - Number(left.values[i] ?? 0) });
+  }
+  return out;
+}
+
 /** «Динамика оттока» — joined vs left totals over the followers graph window. */
 export function churnBreakdown(graphs: TgGraphs | undefined): BreakdownItem[] {
   const series = graphs?.followers?.series ?? [];

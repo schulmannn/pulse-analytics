@@ -31,8 +31,10 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
   postCount/engagementComposition/viewsByType/viewsBySource/newFollowersBySource/languages/sentiment/
   hours/churn) через новый pure `lib/tgAggregations.ts` (порт агрегаторов из TgAnalytics, БЕЗ трогания
   живой страницы — миграция самой TgAnalytics → S12). +graphs в DataContext. all-zero breakdown = empty.
-  **Резолвер покрывает 20 метрик.** 19 тестов (204 всего). **S3c (TODO):** netGrowth (series-из-graphs)
-  + tables (weeklyTable/topPosts). **IG → S11.** Nothing imports it yet (tree-shaken).
+  **Резолвер покрывает 20 метрик.** 19 тестов (204 всего). **S3c (SHIPPED `<pending>`):** netGrowth (series-из-graphs.followers,
+  net daily=joined−left, flow-бакет+окно; guard data-aware `inWin.length===0`, не мёртвый — урок из
+  S11); tables (weeklyTable/topPosts) НЕ в story-card билдере — каталог скрывает kind==='table' (богатая
+  таблица не для тайла; живут в Отчётах). +2 теста (246). **Резолвер закрывает все addable-метрики.**
 - **S4 — Единый рендерер + story-card `components/WidgetRenderer.tsx`** — SHIPPED `1205b65`
   `WidgetRenderer({result, viz})` = story-card ТЕЛО (hero value → DeltaPill → caption → chart);
   читает ТОЛЬКО WidgetResult (не знает TG/IG). viz→primitive: line/bar (LineChart/BarChart+ghost),
@@ -79,7 +81,7 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
   effGrain пропускает quarter/year; flow (bucketPostField) СУММА, level (bucketSubsLevel) ПОСЛЕДНЕЕ —
   инвариант заперт тестом (quarter-сумма views=3500, year-level subs=44000, не сумма). bucketLabel
   «n кв. YYYY»/год. Редактор +Квартал/Год. +8 тестов (232). Adversarial-review boundary+integration.
-- **S11 — IG-пути в резолвере + раскрытие IG в каталоге** — SHIPPED `<pending>`
+- **S11 — IG-пути в резолвере + раскрытие IG в каталоге** — SHIPPED `a64a29d`
   `lib/igAggregations.ts` (pure IG-порт: igSeriesPoints с history-lengthen reach/follower, netFollower
   points, bucketIgSeries flow-сумма, igWindowValue, breakdowns formats/age/gender/countries/cities/hours
   — переиспользует igMetrics + metricSeries). Резолвер: `DataContext.ig` = IgDataContext, `resolveIg`
@@ -97,7 +99,7 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
 
 ## Журнал
 
-- 2026-07-03 — **S11 SHIPPED** `<pending>`. IG-пути: `igAggregations.ts` + резолвер IG-ветка +
+- 2026-07-03 — **S11 SHIPPED** `a64a29d`. IG-пути: `igAggregations.ts` + резолвер IG-ветка +
   `useIgWidgetData` + ConfigWidget TG/IG-диспетч (компонентами, не хук) + каталог раскрыт. Резолвер
   = 31 метрика. Ultracode-ревью поймал 2 дефекта; верификатор скорректировал предложенный фикс
   netFollowers (hasCur, не series-all-zero — иначе сломался бы реальный net-zero). Живой IG = юзер.
