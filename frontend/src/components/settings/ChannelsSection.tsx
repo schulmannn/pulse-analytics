@@ -79,9 +79,9 @@ export function ChannelsSection() {
   return (
     <>
       <SettingsGroup title="Добавить канал">
-        <div className="px-4 py-3.5">
+        <div className="py-4">
           <div className="text-sm font-medium text-foreground">Telegram-канал</div>
-          <p className="mt-0.5 max-w-[46ch] text-xs leading-relaxed text-ink3">
+          <p className="mt-0.5 max-w-[56ch] text-xs leading-relaxed text-ink3">
             Укажите @username публичного канала — начнём собирать статистику.
           </p>
           <form onSubmit={handleAddChannel} className="mt-3 flex flex-col gap-3 sm:flex-row">
@@ -109,13 +109,11 @@ export function ChannelsSection() {
       </SettingsGroup>
 
       {channels.length === 0 ? (
-        <section className="space-y-3">
-          <h3 className="flex items-center gap-3 text-sm font-medium text-foreground">
-            <span className="whitespace-nowrap">Подключённые каналы</span>
-            <span aria-hidden="true" className="h-px flex-1 bg-border" />
-          </h3>
-          <EmptyState title="Список каналов пуст" reason="Добавьте первый канал выше." />
-        </section>
+        <SettingsGroup title="Подключённые каналы">
+          <div className="py-4">
+            <EmptyState title="Список каналов пуст" reason="Добавьте первый канал выше." />
+          </div>
+        </SettingsGroup>
       ) : (
         <SettingsGroup title="Подключённые каналы">
           {channels.map((channel) => {
@@ -124,7 +122,7 @@ export function ChannelsSection() {
             const initial = (channel.username || channel.title || 'T').slice(0, 1).toUpperCase();
             const keysOpen = activeChannelKeysId === channel.id && !isCentral;
             return (
-              <div key={channel.id} className="px-4 py-3.5">
+              <div key={channel.id} className="py-4">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
                   <div className="flex min-w-0 items-start gap-3">
                     <ChannelAvatar
@@ -163,7 +161,7 @@ export function ChannelsSection() {
                           setActiveChannelKeysId(activeChannelKeysId === channel.id ? null : channel.id)
                         }
                         className={cn(
-                          'rounded border px-3 py-1.5 text-xs font-medium transition-colors',
+                          'btn-pill border px-3.5 py-1.5 text-xs font-medium transition-colors',
                           activeChannelKeysId === channel.id
                             ? 'border-border bg-secondary text-foreground'
                             : 'bg-background text-muted-foreground hover:bg-muted hover:text-foreground',

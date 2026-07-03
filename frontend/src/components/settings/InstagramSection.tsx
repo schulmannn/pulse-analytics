@@ -12,9 +12,9 @@ export function InstagramSection() {
   const connectError = connect.error instanceof Error ? connect.error.message : null;
 
   return (
-    <SettingsGroup title="Instagram">
+    <SettingsGroup>
       {status.isPending ? (
-        <div className="px-4 py-3.5">
+        <div className="py-4">
           <Skeleton className="h-10 w-full" />
         </div>
       ) : s?.connected ? (

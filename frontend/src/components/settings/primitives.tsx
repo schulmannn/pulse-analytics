@@ -9,28 +9,27 @@ import { cn } from '@/lib/utils';
  */
 
 /**
- * Small group heading (text-sm medium + trailing hairline) above a bordered row container.
- * Optional `description` renders a short muted line under the title (Claude settings pattern).
+ * Settings group — an OPEN hairline ledger (Claude/steep): optional small heading, then rows
+ * separated by divide-y. No box around the group; with a heading, a top hairline opens the
+ * ledger. Panes whose dialog header already names them skip the heading entirely.
  */
 export function SettingsGroup({
   title,
   description,
   children,
 }: {
-  title: string;
+  title?: string;
   description?: ReactNode;
   children: ReactNode;
 }) {
+  const hasHeading = Boolean(title || description);
   return (
-    <section className="space-y-3">
-      <div className="space-y-1">
-        <h3 className="flex items-center gap-3 text-sm font-medium text-foreground">
-          <span className="whitespace-nowrap">{title}</span>
-          <span aria-hidden="true" className="h-px flex-1 bg-border" />
-        </h3>
-        {description ? <p className="text-xs leading-relaxed text-ink3">{description}</p> : null}
+    <section>
+      {title ? <h3 className="text-sm font-medium text-foreground">{title}</h3> : null}
+      {description ? <p className="mt-1 text-xs leading-relaxed text-ink3">{description}</p> : null}
+      <div className={cn('divide-y divide-border', hasHeading && 'mt-3 border-t border-border')}>
+        {children}
       </div>
-      <div className="divide-y divide-border rounded border border-border">{children}</div>
     </section>
   );
 }
@@ -46,15 +45,16 @@ interface SettingsRowProps {
   className?: string;
 }
 
-/** One setting row: title (sm, medium) + desc (xs, ink3) left, control right; stacks on mobile. */
+/** One setting row: title (sm, medium) + desc (xs, ink3) left, control right (vertically
+    centered against the text block, Claude-style); stacks on mobile. Open ledger — no inset. */
 export function SettingsRow({ title, description, control, footer, className }: SettingsRowProps) {
   return (
-    <div className={cn('px-4 py-3.5', className)}>
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+    <div className={cn('py-4', className)}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
         <div className="min-w-0">
           <div className="text-sm font-medium text-foreground">{title}</div>
           {description ? (
-            <div className="mt-0.5 max-w-[46ch] text-xs leading-relaxed text-ink3">{description}</div>
+            <div className="mt-0.5 max-w-[56ch] text-xs leading-relaxed text-ink3">{description}</div>
           ) : null}
         </div>
         {control ? <div className="flex shrink-0 flex-wrap items-center gap-2">{control}</div> : null}
@@ -64,11 +64,11 @@ export function SettingsRow({ title, description, control, footer, className }: 
   );
 }
 
-// Shared control styles (mirror the app's existing secondary / destructive outline buttons).
+// Shared control styles — pill radius (chrome buttons follow btn-pill; inputs keep --radius).
 export const BTN_SECONDARY =
-  'rounded border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50';
+  'btn-pill border border-border bg-background px-3.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50';
 export const BTN_DESTRUCTIVE =
-  'rounded border border-destructive/20 bg-background px-3 py-1.5 text-xs font-medium text-destructive transition-colors hover:bg-destructive/5 disabled:opacity-50';
+  'btn-pill border border-destructive/20 bg-background px-3.5 py-1.5 text-xs font-medium text-destructive transition-colors hover:bg-destructive/5 disabled:opacity-50';
 
 /** Lean stroke-only glyphs for the settings nav (local — the shell's nav-icons set stays untouched). */
 const PATHS = {
@@ -94,6 +94,10 @@ const PATHS = {
   external: ['M7 17 17 7', 'M9 7h8v8'],
   close: ['M18 6 6 18', 'M6 6l12 12'],
   arrow: ['m9 6 6 6-6 6'],
+  sun: ['M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10z', 'M12 1v2', 'M12 21v2', 'm4.2 4.2 1.4 1.4', 'm18.4 18.4 1.4 1.4', 'M1 12h2', 'M21 12h2', 'm4.2 19.8 1.4-1.4', 'm18.4 5.6 1.4-1.4'],
+  moon: ['M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z'],
+  monitor: ['M4 4h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z', 'M8 21h8', 'M12 17v4'],
+  lock: ['M6 11h12a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2z', 'M8 11V7a4 4 0 0 1 8 0v4'],
 } as const;
 
 export type SettingsIconName = keyof typeof PATHS;

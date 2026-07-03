@@ -5,7 +5,11 @@ import { useMe } from '@/api/queries';
 import { useFocusTrap } from '@/lib/useFocusTrap';
 import { cn } from '@/lib/utils';
 import { SettingsIcon, type SettingsIconName } from '@/components/settings/primitives';
-import { AccountSection } from '@/components/settings/AccountSection';
+import {
+  AppearanceSection,
+  ProfileSection,
+  SecuritySection,
+} from '@/components/settings/AccountSection';
 import { DataSection } from '@/components/settings/DataSection';
 import { ChannelsSection } from '@/components/settings/ChannelsSection';
 import { InstagramSection } from '@/components/settings/InstagramSection';
@@ -14,16 +18,21 @@ import { InstagramSection } from '@/components/settings/InstagramSection';
  * Настройки — a full-screen settings DIALOG over the dashboard (Claude-desktop style), not a page.
  * The /settings route stays; the component renders a fixed overlay: left mini-nav (pane switcher)
  * + one active section of setting rows. The active section lives in ?section= (replace-written,
- * default «account» keeps the URL clean), so section clicks never pollute history and closing is
- * a single Back. Closing returns to the page the dialog was opened from; a deep-link close lands
- * on the overview.
+ * default «account» = Профиль keeps the URL clean), so section clicks never pollute history and
+ * closing is a single Back. Closing returns to the page the dialog was opened from; a deep-link
+ * close lands on the overview.
  */
-const SECTIONS = [
-  { key: 'account', label: 'Аккаунт', icon: 'user' },
+const ACCOUNT_SECTIONS = [
+  { key: 'account', label: 'Профиль', icon: 'user' },
+  { key: 'appearance', label: 'Оформление', icon: 'sun' },
+  { key: 'security', label: 'Безопасность', icon: 'lock' },
+] as const;
+const DATA_SECTIONS = [
   { key: 'data', label: 'Данные', icon: 'database' },
   { key: 'channels', label: 'Каналы', icon: 'signal' },
   { key: 'instagram', label: 'Instagram', icon: 'instagram' },
 ] as const;
+const SECTIONS = [...ACCOUNT_SECTIONS, ...DATA_SECTIONS];
 type SectionKey = (typeof SECTIONS)[number]['key'];
 
 const isSection = (raw: string | null): raw is SectionKey => SECTIONS.some((s) => s.key === raw);
@@ -103,16 +112,21 @@ export function Settings() {
           className="hidden w-[200px] shrink-0 flex-col overflow-y-auto border-r border-border p-3 md:flex"
         >
           <div className="px-2.5 pb-3 pt-1 text-sm font-medium tracking-tight text-foreground">Настройки</div>
-          <SectionNavItem
-            item={SECTIONS[0]}
-            active={section === 'account'}
-            onSelect={() => setSection('account')}
-          />
+          <div className="space-y-0.5">
+            {ACCOUNT_SECTIONS.map((item) => (
+              <SectionNavItem
+                key={item.key}
+                item={item}
+                active={section === item.key}
+                onSelect={() => setSection(item.key)}
+              />
+            ))}
+          </div>
           <p className="px-2.5 pb-1.5 pt-4 text-2xs font-medium tracking-wider text-muted-foreground">
             Данные и подключения
           </p>
           <div className="space-y-0.5">
-            {SECTIONS.slice(1).map((item) => (
+            {DATA_SECTIONS.map((item) => (
               <SectionNavItem
                 key={item.key}
                 item={item}
@@ -188,8 +202,10 @@ export function Settings() {
           </div>
 
           <div className="flex-1 overflow-y-auto px-4 py-5 md:px-8 md:py-6">
-            <div className="mx-auto w-full max-w-[760px] space-y-8">
-              {section === 'account' && <AccountSection />}
+            <div className="mx-auto w-full max-w-[640px] space-y-10">
+              {section === 'account' && <ProfileSection />}
+              {section === 'appearance' && <AppearanceSection />}
+              {section === 'security' && <SecuritySection />}
               {section === 'data' && <DataSection onOpenChannels={() => setSection('channels')} />}
               {section === 'channels' && <ChannelsSection />}
               {section === 'instagram' && <InstagramSection />}
