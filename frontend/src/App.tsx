@@ -31,6 +31,9 @@ const IgFeed = lazyFrom(() => import('@/panels/instagram/ig-cluster'), 'IgFeed')
 const Admin = lazyFrom(() => import('@/panels/Admin'), 'Admin');
 const Bugs = lazyFrom(() => import('@/panels/Bugs'), 'Bugs');
 const Connect = lazyFrom(() => import('@/pages/Connect'), 'Connect');
+// Public legal pages (Instagram / Meta App Review requires reachable Privacy + Data Deletion URLs).
+const Privacy = lazyFrom(() => import('@/pages/Legal'), 'Privacy');
+const DataDeletion = lazyFrom(() => import('@/pages/Legal'), 'DataDeletion');
 
 /** React.lazy over a NAMED export (all pages here export by name, not default). */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -48,6 +51,9 @@ export default function App() {
       <Route path="register" element={<AuthSuspense><RegisterPage /></AuthSuspense>} />
       <Route path="verify" element={<AuthSuspense><VerifyPage /></AuthSuspense>} />
       <Route path="reset" element={<AuthSuspense><ResetPage /></AuthSuspense>} />
+      {/* Public, no-auth legal pages (Meta App Review + user transparency). */}
+      <Route path="privacy" element={<Suspense fallback={<div className="min-h-screen bg-background" />}><Privacy /></Suspense>} />
+      <Route path="data-deletion" element={<Suspense fallback={<div className="min-h-screen bg-background" />}><DataDeletion /></Suspense>} />
       <Route element={<ProtectedLayout />}>
         {/* Personal Home — a per-user board of pinned widgets. Static import (it's light) and
             declared BEFORE the catch-all `:section?` so /home resolves here, not to the TG feed. */}
