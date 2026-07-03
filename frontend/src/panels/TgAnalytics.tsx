@@ -481,7 +481,12 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
           group === 'audience' && 'lg:[&>section:last-child:nth-child(odd)]:col-span-6',
         )}
       >
-        {inGroup('dynamics') && last14Dates.length >= 2 && (
+        {/* Дубль-развязка (аудит 5.1): «Просмотры по дням» (views_summary, фикс-14д + ghost) и
+            «Просмотры» (graphs-серия, rich expand/grain) показывали одни и те же дневные просмотры
+            на каналах с broadcast-статистикой. Теперь эта карточка — ЧЕСТНЫЙ FALLBACK только для
+            каналов без graphs (мелкие/QR: views_summary есть, статистики нет); на больших остаётся
+            один rich «Просмотры», а сравнение периодов живёт на метрик-странице просмотров. */}
+        {inGroup('dynamics') && !viewSeries && last14Dates.length >= 2 && (
           <ChartSection
             title="Просмотры по дням"
             variants={[
