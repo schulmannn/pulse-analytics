@@ -2,6 +2,7 @@ import { useTgFull } from '@/api/queries';
 import type { TgFull } from '@/api/schemas';
 import { normalizeTgPosts } from '@/lib/posts';
 import { ChartSection, breakdownVariants } from '@/components/ChartWidget';
+import { ErrorState } from '@/components/ErrorState';
 import { useWidgetPeriod } from '@/lib/period';
 import { Skeleton } from '@/components/ui/skeleton';
 
@@ -100,7 +101,7 @@ export function Hashtags() {
   if (isError || !full) {
     return (
       <ChartSection title="Влияние хэштегов на ERV" defaultSize="full">
-        <div className="py-6 text-center text-sm text-muted-foreground">Не удалось загрузить хэштеги.</div>
+        <ErrorState title="Не удалось загрузить хэштеги" />
       </ChartSection>
     );
   }

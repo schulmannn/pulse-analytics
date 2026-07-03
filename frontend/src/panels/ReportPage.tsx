@@ -14,10 +14,10 @@ import type { DailySeries, DrillKey, PostMetricField } from '@/lib/kpiDerive';
 import { REPORT_BLOCKS, defaultBlock, isReportBlockKey, normalizeBlocks } from '@/lib/reportBlocks';
 import type { ReportBlock, ReportBlockKey, ReportBlockType } from '@/lib/reportBlocks';
 import { fmt } from '@/lib/format';
-import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { DeltaPill } from '@/components/DeltaPill';
 import { EmptyState } from '@/components/EmptyState';
+import { ErrorState } from '@/components/ErrorState';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { ChartExpandedContext } from '@/components/ExpandableChart';
@@ -156,12 +156,7 @@ export function ReportsErrorState({ error, demo }: { error?: unknown; demo?: boo
   if (error instanceof ApiError && error.status === 404) {
     return <EmptyState title="Отчёт не найден" action={{ to: '/reports', label: 'К списку отчётов' }} />;
   }
-  return (
-    <EmptyState
-      title="Не удалось загрузить отчёт"
-      reason={error instanceof Error ? error.message : 'ошибка'}
-    />
-  );
+  return <ErrorState title="Не удалось загрузить отчёт" reason={error instanceof Error ? error.message : 'ошибка'} />;
 }
 
 /**
@@ -291,13 +286,7 @@ function ReportDocument({ report }: { report: Report }) {
 
   if (isPending) return <ReportSkeleton />;
   if (isError) {
-    return (
-      <Card>
-        <CardContent className="py-8 text-center text-sm text-muted-foreground">
-          Не удалось построить отчёт: {error instanceof Error ? error.message : 'ошибка'}
-        </CardContent>
-      </Card>
-    );
+    return <ErrorState title="Не удалось построить отчёт" reason={error instanceof Error ? error.message : 'ошибка'} />;
   }
 
   const channels = channelsData?.channels ?? [];

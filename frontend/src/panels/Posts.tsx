@@ -5,6 +5,7 @@ import { fmt } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { markdownToPlainText } from '@/lib/markdown';
 import { Card, CardContent } from '@/components/ui/card';
+import { ErrorState } from '@/components/ErrorState';
 import { useWidgetPeriod } from '@/lib/period';
 import { Skeleton } from '@/components/ui/skeleton';
 import { RichText } from '@/components/RichText';
@@ -28,13 +29,7 @@ export function Posts() {
 
   if (isPending) return <PostsSkeletons />;
   if (isError) {
-    return (
-      <Card className="border-destructive/40">
-        <CardContent className="py-8 text-center text-sm text-muted-foreground">
-          Не удалось загрузить публикации: {error instanceof Error ? error.message : 'ошибка сервера'}
-        </CardContent>
-      </Card>
-    );
+    return <ErrorState title="Не удалось загрузить публикации" reason={error instanceof Error ? error.message : 'ошибка сервера'} />;
   }
 
   const allPosts = normalizeTgPosts(data?.posts ?? [], data?.channel ?? {});

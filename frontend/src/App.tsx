@@ -5,6 +5,8 @@ import { useMe } from '@/api/queries';
 import { ApiError } from '@/api/client';
 import { DashboardLayout } from '@/components/DashboardLayout';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { ErrorState } from '@/components/ErrorState';
+import { NotFound } from '@/components/NotFound';
 import { PeriodUrlSync } from '@/lib/period-url';
 import { TgFeed } from '@/panels/TgFeed';
 import { Home } from '@/panels/Home';
@@ -67,6 +69,9 @@ export default function App() {
             a single optional-param route so the scrollspy's replace-navigation never remounts
             it. Unknown sections redirect home inside the feed. */}
         <Route path=":section?" element={<TgFeed />} />
+        {/* Real 404 for multi-segment unknowns (single-segment ones 404 inside the feed's
+            unknown-section guard). Renders in the content area, so the shell/nav stay. */}
+        <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>
   );
@@ -176,20 +181,13 @@ function ProtectedLayout() {
     }
     return (
       <Centered>
-        <div className="max-w-sm rounded-lg border bg-card p-6 text-center">
-          <h2 className="text-lg font-medium">Не удалось загрузить</h2>
-          <p className="mt-2 text-sm text-muted-foreground">
-            {me.error instanceof Error ? me.error.message : 'Неизвестная ошибка'}
-          </p>
-          <button
-            type="button"
-            onClick={() => void me.refetch()}
-            disabled={me.isFetching}
-            className="btn-pill mt-5 bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-          >
-            {me.isFetching ? 'Загрузка…' : 'Повторить'}
-          </button>
-        </div>
+        <ErrorState
+          className="max-w-sm"
+          title="Не удалось загрузить"
+          reason={me.error instanceof Error ? me.error.message : 'Неизвестная ошибка'}
+          onRetry={() => void me.refetch()}
+          retrying={me.isFetching}
+        />
       </Centered>
     );
   }

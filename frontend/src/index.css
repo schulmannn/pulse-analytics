@@ -232,3 +232,32 @@
 @media (prefers-reduced-motion: reduce) {
   .widget-jiggle { animation: none; }
 }
+
+/* ── Cartograph illustrations (error / 404 / empty states) ───────────────────────────────────
+   Line-art crisp at any size; keep vector-effect layered so Tailwind fill and stroke color
+   utilities (in @layer utilities) still win over these defaults. */
+@layer components {
+  .cartograph :where(path, line, circle, ellipse, rect, polygon, polyline) {
+    vector-effect: non-scaling-stroke;
+  }
+}
+
+/* Ambient motion for the cartograph glyphs — a deliberate, subtle exception to the no-motion
+   restraint (it gives the empty/broken states a little life); fully disabled under reduced-motion. */
+@keyframes cartograph-needle { 0%, 100% { transform: rotate(26deg); } 50% { transform: rotate(43deg); } }
+@keyframes cartograph-flag   { 0%, 100% { transform: rotate(-3deg); } 50% { transform: rotate(4deg); } }
+@keyframes cartograph-pulse  { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
+@keyframes cartograph-orbit  { from { transform: translateX(-58px); } to { transform: translateX(58px); } }
+@keyframes cartograph-travel { 0% { offset-distance: 0%; opacity: 0; } 8% { opacity: 1; } 92% { opacity: 1; } 100% { offset-distance: 100%; opacity: 0; } }
+
+.cartograph-needle  { transform-box: view-box; transform-origin: 80px 80px; animation: cartograph-needle 4.4s ease-in-out infinite; }
+.cartograph-orbit   { transform-box: view-box; transform-origin: 80px 80px; animation: cartograph-orbit 6s ease-in-out infinite alternate; }
+.cartograph-flag    { transform-box: fill-box; transform-origin: bottom left; animation: cartograph-flag 3.2s ease-in-out infinite; }
+.cartograph-pulse   { animation: cartograph-pulse 2.6s ease-in-out infinite; }
+.cartograph-pulse-2 { animation: cartograph-pulse 2.6s ease-in-out infinite; animation-delay: 0.4s; }
+.cartograph-travel  { offset-path: path('M54 104 C 84 92 96 118 122 94 S 172 66 198 52'); animation: cartograph-travel 3.4s cubic-bezier(0.5, 0, 0.5, 1) infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .cartograph-needle, .cartograph-orbit, .cartograph-flag,
+  .cartograph-pulse, .cartograph-pulse-2, .cartograph-travel { animation: none; }
+}

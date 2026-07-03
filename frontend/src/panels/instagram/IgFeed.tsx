@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Navigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useIgData } from '@/lib/useIgData';
 import type { IgData } from '@/lib/useIgData';
 import { usePeriod } from '@/lib/period';
 import type { PeriodDays } from '@/lib/period';
 import { IgConnectPanel, IgDataHealth } from '@/components/instagram/health';
-import { Card, CardContent } from '@/components/ui/card';
+import { ErrorState } from '@/components/ErrorState';
+import { NotFound } from '@/components/NotFound';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 import { useFeed, FeedBlock, type FeedBlockDef } from '@/panels/feed/useFeed';
@@ -157,18 +158,14 @@ export function IgFeed() {
   ) : null;
 
   // Unknown section (/instagram/whatever) → back to the IG entry, mirroring TgFeed's home redirect.
-  if (feed.unknownSection) return <Navigate to="/instagram" replace />;
+  if (feed.unknownSection) return <NotFound />;
 
   if (ig.loading) return <div className="space-y-6">{banner}<InstagramSkeleton /></div>;
   if (ig.error) {
     return (
       <div className="space-y-6">
         {banner}
-        <Card className="border-destructive/40">
-          <CardContent className="py-8 text-center text-sm text-muted-foreground">
-            Не удалось загрузить данные Instagram.
-          </CardContent>
-        </Card>
+        <ErrorState title="Не удалось загрузить данные Instagram" />
       </div>
     );
   }

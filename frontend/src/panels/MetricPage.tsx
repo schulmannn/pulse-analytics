@@ -11,8 +11,8 @@ import type { MetricDef } from '@/lib/metricDefs';
 import { fmt } from '@/lib/format';
 import { markdownToPlainText } from '@/lib/markdown';
 import type { NormalizedPost } from '@/lib/posts';
-import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import { ErrorState } from '@/components/ErrorState';
 import { DeltaPill } from '@/components/DeltaPill';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
@@ -231,13 +231,7 @@ export function MetricPage() {
 
   if (isPending) return <MetricSkeleton />;
   if (isError) {
-    return (
-      <Card>
-        <CardContent className="py-8 text-center text-sm text-muted-foreground">
-          Не удалось загрузить метрику: {error instanceof Error ? error.message : 'ошибка'}
-        </CardContent>
-      </Card>
-    );
+    return <ErrorState title="Не удалось загрузить метрику" reason={error instanceof Error ? error.message : 'ошибка'} />;
   }
 
   // Widened to MetricDef: the `satisfies` map narrows each entry, hiding optional fields.

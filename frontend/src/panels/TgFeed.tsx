@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
-import { Navigate } from 'react-router-dom';
 import { useChannels } from '@/api/queries';
+import { NotFound } from '@/components/NotFound';
 import { Overview } from '@/panels/Overview';
 import { Analytics } from '@/panels/AnalyticsTabs';
 import { Posts } from '@/panels/Posts';
@@ -39,7 +39,7 @@ export function TgFeed() {
   const { data: channelsData } = useChannels();
   const feed = useFeed(BLOCKS);
 
-  if (feed.unknownSection) return <Navigate to="/" replace />;
+  if (feed.unknownSection) return <NotFound />;
 
   // Without a single channel the Overview shows the GetStarted onboarding — the rest of the feed
   // would be empty-state noise below it.

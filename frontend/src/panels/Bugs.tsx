@@ -2,6 +2,7 @@ import { useState, type FormEvent, type ChangeEvent } from 'react';
 import { useBugs, useCreateBug, useUpdateBugStatus, useDeleteBug } from '@/api/queries';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { EmptyState } from '@/components/EmptyState';
+import { ErrorState } from '@/components/ErrorState';
 import { fmt } from '@/lib/format';
 import { Skeleton } from '@/components/ui/skeleton';
 
@@ -20,13 +21,7 @@ export function Bugs() {
 
   if (isLoading) return <BugsSkeleton />;
   if (isError) {
-    return (
-      <Card className="border-destructive/40">
-        <CardContent className="py-6 text-center text-sm text-muted-foreground">
-          Ошибка загрузки баг-трекера: {error instanceof Error ? error.message : 'ошибка сервера'}
-        </CardContent>
-      </Card>
-    );
+    return <ErrorState title="Не удалось загрузить баг-трекер" reason={error instanceof Error ? error.message : 'ошибка сервера'} />;
   }
 
   if (data?.enabled === false) {

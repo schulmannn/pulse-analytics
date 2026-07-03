@@ -5,7 +5,7 @@ import { useChannels, useHistory, useTgFull } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { fmt } from '@/lib/format';
 import { cn } from '@/lib/utils';
-import { Card, CardContent } from '@/components/ui/card';
+import { ErrorState } from '@/components/ErrorState';
 import { Sparkline } from '@/components/Sparkline';
 import { MetricInfo } from '@/components/InfoTooltip';
 import { DeltaPill } from '@/components/DeltaPill';
@@ -52,13 +52,7 @@ export function KpiGrid() {
 
   if (isPending) return <KpiSkeletons />;
   if (isError) {
-    return (
-      <Card>
-        <CardContent className="py-8 text-center text-sm text-muted-foreground">
-          Не удалось загрузить метрики: {error instanceof Error ? error.message : 'ошибка'}
-        </CardContent>
-      </Card>
-    );
+    return <ErrorState title="Не удалось загрузить метрики" reason={error instanceof Error ? error.message : 'ошибка'} />;
   }
 
   const {

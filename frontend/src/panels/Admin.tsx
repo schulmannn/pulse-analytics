@@ -1,6 +1,7 @@
 import type { ChangeEvent } from 'react';
 import { useAdminUsers, useUpdateUser } from '@/api/queries';
 import { Card, CardContent } from '@/components/ui/card';
+import { ErrorState } from '@/components/ErrorState';
 import { fmt } from '@/lib/format';
 import { Skeleton } from '@/components/ui/skeleton';
 
@@ -17,13 +18,7 @@ export function Admin() {
 
   if (isLoading) return <AdminSkeleton />;
   if (isError) {
-    return (
-      <Card className="border-destructive/40">
-        <CardContent className="py-6 text-center text-sm text-muted-foreground">
-          Ошибка загрузки админки: {error instanceof Error ? error.message : 'ошибка сервера'}
-        </CardContent>
-      </Card>
-    );
+    return <ErrorState title="Не удалось загрузить админку" reason={error instanceof Error ? error.message : 'ошибка сервера'} />;
   }
 
   const users = data?.users ?? [];
