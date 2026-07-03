@@ -144,7 +144,7 @@ Source of truth прогресса между итерациями. Статус
   в тултипе; домен включает ghost. Прокинут ghost+cmpLabel в BarChart на MetricPage — теперь дельта
   видна и на столбцах (раньше только на линии).
 
-- [x] **7.6 КОРЕНЬ: сравнение на метрик-странице не рисовалось (off-by-one)** — SHIPPED `PENDING_HASH`
+- [x] **7.6 КОРЕНЬ: сравнение на метрик-странице не рисовалось (off-by-one)** — SHIPPED `f1d2320`
   Юзер: сравнения всё ещё нет. **Причина (не в BarChart — тот был верный):** `baseWin.to = winFrom - 1`ms
   при не-полуночном winFrom (winTo=Date.now()) → baseline на 31 day-бакет против 30 у активного окна →
   строгий гейт `base.values.length === series.values.length` молча ронял `ghost=undefined` → сравнение
