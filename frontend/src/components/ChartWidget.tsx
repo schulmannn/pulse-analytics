@@ -91,9 +91,13 @@ const SIZE_COL_SPAN: Record<WidgetSize, string> = {
     fixed height and stays content-height (hero KPI grids, post tables and bar+ledger self-size;
     a forced height would only pad short ones). Two half rows (264·2 + gap) clear a ~800px viewport
     under the KPI ledger + tabs. Mobile is single-column — no row-mates — so heights apply from lg up. */
+// Fixed at EVERY breakpoint (not just lg): below lg the grid collapses to one column and a card with
+// no bounded height let its flex-1 body grow with the chart it measures — a measure→height→content
+// feedback loop that ran a chart to tens of thousands of px around ~900px width. A fixed card height
+// bounds the body (overflow-y-auto scrolls the surplus), killing the loop on mobile/tablet too.
 const SIZE_H: Record<WidgetSize, string> = {
-  third: 'lg:h-[264px]',
-  half: 'lg:h-[264px]',
+  third: 'h-[264px]',
+  half: 'h-[264px]',
   full: '',
 };
 
@@ -900,7 +904,14 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
   useLayoutEffect(() => {
     const el = bodyRef.current;
     if (!el) return;
-    const measure = () => setBodyH(el.clientHeight || null);
+    // Defensive cap: a tile body is never legitimately taller than ~640px, so an absurd measurement
+    // means the card is unbounded and the chart is chasing its own height — feed null (chart falls
+    // back to its own default) rather than a runaway value. Belt-and-braces alongside the fixed
+    // card height, so no future layout change can reintroduce the feedback loop.
+    const measure = () => {
+      const h = el.clientHeight;
+      setBodyH(h > 0 && h < 640 ? h : null);
+    };
     measure();
     if (typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(measure);
@@ -1036,7 +1047,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
   return (
     <section
       ref={sectionRef}
-      className={`${reorder ? 'cursor-grab touch-none select-none active:cursor-grabbing' : ''} ${
+      className={`min-w-0 ${reorder ? 'cursor-grab touch-none select-none active:cursor-grabbing' : ''} ${
         SIZE_COL_SPAN[effectiveSize]
       } ${className ?? ''}`}
       style={outerStyle}
