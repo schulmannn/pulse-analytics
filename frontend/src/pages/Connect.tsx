@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
+import { z } from 'zod';
+import QRCode from 'qrcode';
 import { useChannels, useConnectIg, useDisconnectIg, useIgOauthStatus } from '@/api/queries';
+import { apiGet, apiSend } from '@/api/client';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { cn } from '@/lib/utils';
 
@@ -227,7 +230,7 @@ export function Connect() {
 
         {/* Panel */}
         <div className="min-w-0">
-          {active.kind === 'telegram' && <TelegramPanel connected={tgConnected} channelName={channelName(channelsData)} />}
+          {active.kind === 'telegram' && <TelegramPanel channelName={channelName(channelsData)} />}
           {active.kind === 'instagram' && <InstagramPanel />}
           {active.kind === 'soon' && <SoonPanel name={active.name} glyph={active.id} note={active.soon ?? ''} />}
         </div>
@@ -416,19 +419,328 @@ function InstagramPanel() {
   );
 }
 
-// ── Telegram: collector-agent guide ──
-function TelegramPanel({ connected, channelName }: { connected: boolean; channelName: string | null }) {
-  const handle = channelName ?? '@ваш_канал';
+// ── Telegram: hybrid connect — QR by default, collector agent for pro ──
+const QrStatusSchema = z
+  .object({ server_ready: z.boolean(), connected: z.boolean(), username: z.string().nullish(), connected_at: z.string().nullish() })
+  .passthrough();
+const QrStartSchema = z.object({ id: z.string(), url: z.string(), expires_in: z.coerce.number().optional() }).passthrough();
+const QrChannelSchema = z.object({ id: z.coerce.number(), title: z.string().optional(), username: z.string().nullish() }).passthrough();
+const QrPollSchema = z
+  .object({ status: z.string(), url: z.string().nullish(), username: z.string().nullish(), channels: z.array(QrChannelSchema).optional(), error: z.string().nullish() })
+  .passthrough();
+const OkSchema = z.object({ ok: z.boolean().optional() }).passthrough();
+
+interface QrChannel {
+  id: number;
+  title?: string;
+  username?: string | null;
+}
+type QrStatus = { server_ready: boolean; connected: boolean; username?: string | null };
+
+/**
+ * Telegram connect: «QR-вход» (managed — scan and done) by default, «Через агента» (collector,
+ * privacy-first, session stays on the user's machine) as the pro tab. The QR flow starts a login
+ * on the server, renders the QR, and polls until the scan completes (with a 2FA-password step);
+ * the session is captured + stored server-side (never touches the browser).
+ */
+function TelegramPanel({ channelName }: { channelName: string | null }) {
+  const [tab, setTab] = useState<'qr' | 'agent'>('qr');
+  const [status, setStatus] = useState<QrStatus | null>(null);
+  const [phase, setPhase] = useState<'idle' | 'scanning' | 'password' | 'done'>('idle');
+  const [qrImg, setQrImg] = useState<string | null>(null);
+  const [channels, setChannels] = useState<QrChannel[]>([]);
+  const [password, setPassword] = useState('');
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const idRef = useRef<string | null>(null);
+  const pollRef = useRef<number | null>(null);
+  const urlRef = useRef<string | null>(null);
+  const failRef = useRef(0);
+  const alive = useRef(true);
+
+  useEffect(() => {
+    alive.current = true;
+    apiGet('/api/tg/qr/status', QrStatusSchema)
+      .then((s) => { if (alive.current) setStatus(s); })
+      .catch(() => { if (alive.current) setStatus({ server_ready: false, connected: false }); });
+    return () => {
+      alive.current = false;
+      if (pollRef.current) window.clearTimeout(pollRef.current);
+      // Reclaim a still-pending login server-side when the user navigates away.
+      if (idRef.current) apiSend('POST', '/api/tg/qr/cancel', { id: idRef.current }, OkSchema).catch(() => {});
+    };
+  }, []);
+
+  const stopPoll = () => {
+    if (pollRef.current) { window.clearTimeout(pollRef.current); pollRef.current = null; }
+  };
+
+  const onConnected = (username: string | null, chans: QrChannel[]) => {
+    stopPoll();
+    idRef.current = null;
+    setQrImg(null);
+    setPassword('');
+    setChannels(chans);
+    setPhase('done');
+    setStatus({ server_ready: true, connected: true, username });
+  };
+
+  const poll = async () => {
+    const id = idRef.current;
+    if (!id || !alive.current) return;
+    try {
+      const r = await apiSend('POST', '/api/tg/qr/poll', { id }, QrPollSchema);
+      if (!alive.current) return;
+      failRef.current = 0;
+      if (r.status === 'ok') return onConnected(r.username ?? null, (r.channels ?? []) as QrChannel[]);
+      if (r.status === 'password') return setPhase('password');
+      if (r.status === 'expired') return void start();
+      if (r.status === 'error') { setErr(r.error || 'ошибка'); setPhase('idle'); return; }
+      if (r.status === 'pending') {
+        // The server rotates the QR token as it expires — re-render when the url changes.
+        if (r.url && r.url !== urlRef.current) {
+          urlRef.current = r.url;
+          QRCode.toDataURL(r.url, { margin: 1, width: 208 }).then((img) => { if (alive.current) setQrImg(img); }).catch(() => {});
+        }
+        pollRef.current = window.setTimeout(poll, 2500);
+        return;
+      }
+      setErr('Непонятный ответ сервера'); // unknown status → stop instead of polling forever
+      setPhase('idle');
+    } catch {
+      if (!alive.current) return;
+      failRef.current += 1;
+      if (failRef.current > 6) { setErr('Соединение прервалось — попробуйте снова'); setPhase('idle'); return; }
+      pollRef.current = window.setTimeout(poll, 2500);
+    }
+  };
+
+  const start = async () => {
+    setErr(null);
+    setBusy(true);
+    setChannels([]);
+    try {
+      const r = await apiSend('POST', '/api/tg/qr/start', undefined, QrStartSchema);
+      const img = await QRCode.toDataURL(r.url, { margin: 1, width: 208 });
+      if (!alive.current) return;
+      idRef.current = r.id;
+      urlRef.current = r.url;
+      failRef.current = 0;
+      setQrImg(img);
+      setPhase('scanning');
+      setBusy(false);
+      stopPoll();
+      pollRef.current = window.setTimeout(poll, 2500);
+    } catch (e) {
+      if (!alive.current) return;
+      setBusy(false);
+      setErr(e instanceof Error ? e.message : 'Не удалось начать вход');
+    }
+  };
+
+  const submitPassword = async () => {
+    const id = idRef.current;
+    if (!id || !password) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await apiSend('POST', '/api/tg/qr/password', { id, password }, QrPollSchema);
+      if (!alive.current) return;
+      setBusy(false);
+      if (r.status === 'ok') return onConnected(r.username ?? null, (r.channels ?? []) as QrChannel[]);
+      if (r.error === 'bad_password') return setErr('Неверный пароль');
+      if (r.status === 'expired') { setErr('Код устарел — начните заново'); setPhase('idle'); return; }
+      if (r.status === 'error') { setErr('Не удалось войти — начните заново'); setPhase('idle'); return; }
+      setErr(r.error || 'ошибка');
+    } catch (e) {
+      if (!alive.current) return;
+      setBusy(false);
+      setErr(e instanceof Error ? e.message : 'ошибка');
+    }
+  };
+
+  const disconnect = async () => {
+    setBusy(true);
+    try { await apiSend('DELETE', '/api/tg/qr/session', undefined, OkSchema); } catch { /* ignore */ }
+    if (!alive.current) return;
+    setBusy(false);
+    setPhase('idle');
+    setChannels([]);
+    setStatus({ server_ready: true, connected: false, username: null });
+  };
+
+  const connected = !!status?.connected || phase === 'done';
+
   return (
     <div className="rounded-xl border border-border bg-card p-5 sm:p-6">
-      <PanelHead
-        id="telegram"
-        name="Telegram"
-        pill={connected ? { label: 'Подключён', tone: 'ok' } : { label: 'Доступно', tone: 'go' }}
-      />
-      <p className="mt-4 text-sm leading-relaxed text-muted-foreground">
-        Каналы считает <span className="font-medium text-foreground">collector-агент</span> у вас на компьютере и шлёт сюда
-        только готовые цифры. Telegram-сессию мы не храним. {connected ? `Сейчас подключён ${handle}.` : ''}
+      <PanelHead id="telegram" name="Telegram" pill={connected ? { label: 'Подключён', tone: 'ok' } : { label: 'Доступно', tone: 'go' }} />
+
+      <div className="mt-4 flex gap-1 border-b border-border">
+        <TgTab active={tab === 'qr'} onClick={() => setTab('qr')}>QR-вход</TgTab>
+        <TgTab active={tab === 'agent'} onClick={() => setTab('agent')}>Через агента</TgTab>
+      </div>
+
+      {tab === 'qr' ? (
+        <div className="mt-5">
+          {!status ? (
+            <p className="text-sm text-muted-foreground">Загрузка…</p>
+          ) : !status.server_ready ? (
+            <p className="text-sm leading-relaxed text-muted-foreground">
+              Вход по QR ещё не настроен на сервере. Пока можно подключиться на вкладке «Через агента».
+            </p>
+          ) : connected ? (
+            <TgConnected username={status.username ?? null} channels={channels} onDisconnect={disconnect} busy={busy} />
+          ) : phase === 'scanning' || phase === 'password' ? (
+            <TgScanning
+              img={qrImg}
+              phase={phase === 'password' ? 'password' : 'scanning'}
+              password={password}
+              setPassword={setPassword}
+              onSubmit={submitPassword}
+              err={err}
+              busy={busy}
+            />
+          ) : (
+            <div>
+              <p className="text-sm leading-relaxed text-muted-foreground">
+                Отсканируйте QR-код в своём Telegram — каналы, где вы админ, подключатся автоматически. Устанавливать ничего не нужно.
+              </p>
+              <button
+                type="button"
+                onClick={start}
+                disabled={busy}
+                className="btn-pill mt-4 bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-60"
+              >
+                {busy ? 'Готовим код…' : 'Показать QR-код'}
+              </button>
+              {err && <p className="mt-3 text-xs font-medium text-destructive">{err}</p>}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="mt-5">
+          <CollectorGuide channelName={channelName} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TgTab({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn('relative px-3 py-2 text-sm font-medium transition-colors', active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground')}
+    >
+      {children}
+      {active && <span aria-hidden="true" className="absolute inset-x-0 -bottom-px h-0.5 bg-primary" />}
+    </button>
+  );
+}
+
+function TgScanning({
+  img,
+  phase,
+  password,
+  setPassword,
+  onSubmit,
+  err,
+  busy,
+}: {
+  img: string | null;
+  phase: 'scanning' | 'password';
+  password: string;
+  setPassword: (v: string) => void;
+  onSubmit: () => void;
+  err: string | null;
+  busy: boolean;
+}) {
+  if (phase === 'password') {
+    return (
+      <div className="mx-auto w-full max-w-xs">
+        <p className="text-sm text-muted-foreground">У аккаунта включена двухфакторная защита. Введите облачный пароль Telegram:</p>
+        <input
+          type="password"
+          autoFocus
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') onSubmit(); }}
+          placeholder="Облачный пароль"
+          className="mt-3 w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-1 focus:ring-primary"
+        />
+        {err && <p className="mt-2 text-xs font-medium text-destructive">{err}</p>}
+        <button
+          type="button"
+          onClick={onSubmit}
+          disabled={busy || !password}
+          className="btn-pill mt-3 bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-60"
+        >
+          {busy ? 'Проверяю…' : 'Подтвердить'}
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col items-center text-center">
+      <div className="rounded-xl border border-border bg-white p-3">
+        {img ? <img src={img} alt="QR-код для входа в Telegram" className="h-52 w-52" /> : <div className="h-52 w-52" />}
+      </div>
+      <p className="mt-4 max-w-sm text-sm text-muted-foreground">
+        В Telegram: <b className="text-foreground">Настройки → Устройства → Подключить устройство</b> — наведите камеру на код. Он обновляется автоматически.
+      </p>
+      {err && <p className="mt-2 text-xs font-medium text-destructive">{err}</p>}
+    </div>
+  );
+}
+
+function TgConnected({ username, channels, onDisconnect, busy }: { username: string | null; channels: QrChannel[]; onDisconnect: () => void; busy: boolean }) {
+  return (
+    <div>
+      <div className="flex items-center gap-2 text-sm">
+        <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-verdant" />
+        <span className="text-foreground">Подключён{username ? <> · <span className="font-mono">@{username}</span></> : null}</span>
+      </div>
+      {channels.length > 0 && (
+        <div className="mt-4">
+          <div className="text-2xs font-medium tracking-wide text-muted-foreground">Каналы, где вы админ</div>
+          <ul className="mt-2 space-y-1.5">
+            {channels.map((c) => (
+              <li key={c.id} className="flex items-center gap-2 text-sm text-foreground">
+                <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-primary" />
+                <span>
+                  {c.title || '(без названия)'}
+                  {c.username ? <span className="font-mono text-muted-foreground"> · @{c.username}</span> : null}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
+        Аккаунт подключён. Автоматический сбор статистики по этим каналам добавим следующим шагом.
+      </p>
+      <button
+        type="button"
+        onClick={onDisconnect}
+        disabled={busy}
+        className="btn-pill mt-4 border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-destructive disabled:opacity-50"
+      >
+        {busy ? 'Отключаю…' : 'Отключить'}
+      </button>
+    </div>
+  );
+}
+
+// ── Collector agent guide (the "pro" path — the session stays on the user's machine) ──
+function CollectorGuide({ channelName }: { channelName: string | null }) {
+  const handle = channelName ?? '@ваш_канал';
+  return (
+    <div>
+      <p className="text-sm leading-relaxed text-muted-foreground">
+        Для приватности: каналы считает <span className="font-medium text-foreground">collector-агент</span> у вас на компьютере и шлёт
+        сюда только готовые цифры. Telegram-сессию мы не храним.
       </p>
 
       <div className="mt-4 flex gap-3 rounded-lg border border-primary/30 bg-primary/5 p-3.5">

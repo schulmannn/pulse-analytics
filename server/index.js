@@ -687,6 +687,7 @@ const IG_CLIENT_SECRET = process.env.IG_CLIENT_SECRET;
 // are requested at connect time (Meta blog 2025-03-24).
 const IG_OAUTH_SCOPES  = 'instagram_business_basic,instagram_business_manage_insights';
 const igCrypto     = require('./lib/ig_crypto');
+const tgCrypto     = require('./lib/tg_crypto');
 const igMock       = require('./ig_mock');
 // Global env single-account is "configured" when both token + account id are present.
 const igConfigured = () => !!IG_TOKEN && !!IG_ACCOUNT;
@@ -1847,6 +1848,131 @@ async function mtprotoFetch(path, params = {}, timeoutMs = MTPROTO_TIMEOUT_MS) {
   }
   return res.json();
 }
+
+// POST variant for the QR-login handshake (start/poll/password/cancel).
+async function mtprotoPost(path, { params = {}, body = undefined, timeoutMs = MTPROTO_TIMEOUT_MS } = {}) {
+  const url = new URL(MTPROTO_URL + path);
+  Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
+  const res = await fetchWithTimeout(url.toString(), {
+    method: 'POST',
+    headers: { 'x-internal-token': MTPROTO_TOKEN, ...(body ? { 'content-type': 'application/json' } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  }, timeoutMs);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    if (res.status === 429) {
+      const e = new Error('Telegram временно ограничил запросы' + (err.retry_after ? ` — повтори через ~${err.retry_after} с` : ''));
+      e.status = 503;
+      if (err.retry_after) e.retryAfter = err.retry_after;
+      throw e;
+    }
+    throw new Error(err.detail || `MTProto error ${res.status}`);
+  }
+  return res.json();
+}
+
+// ── Telegram QR connect (managed sessions) ───────────────────────────────
+// «Scan → done» via MTProto QR login on the Telethon service. The session string it
+// returns is encrypted (TG_SESSION_KEY) and stored server-side; it is NEVER sent to the
+// browser. Configured only when the mtproto link + encryption key + DB are all present.
+function tgQrConfigured() {
+  return !!MTPROTO_TOKEN && tgCrypto.configured() && db.enabled;
+}
+
+// On a completed login: encrypt + persist the session, then hand the browser only the
+// username + the admin channels found (never the session itself).
+async function tgQrFinish(req, data) {
+  const session_enc = tgCrypto.encrypt(data.session);
+  await db.saveTgSession(req.user.uid, { tg_user_id: data.tg_user_id, username: data.username, session_enc });
+  audit(req, 'tg.session.connected', { username: data.username || null }).catch(() => {});
+  return {
+    status: 'ok',
+    username: data.username ?? null,
+    channels: (Array.isArray(data.channels) ? data.channels : []).map((c) => ({
+      id: c.id, title: c.title || '', username: c.username ?? null,
+    })),
+  };
+}
+
+app.get('/api/tg/qr/status', requireAuth, async (req, res, next) => {
+  try {
+    if (!tgQrConfigured()) return res.json({ server_ready: false, connected: false });
+    const s = await db.getTgSession(req.user.uid);
+    res.json({ server_ready: true, connected: !!s, username: (s && s.username) || null, connected_at: (s && s.connected_at) || null });
+  } catch (e) { next(e); }
+});
+
+// Bind each QR login id to the uid that started it — a leaked/guessed id must never let
+// another account claim the captured session. In-memory (single web instance) with a TTL; a
+// lost binding (server restart) just makes the client's poll read 'expired' and start fresh.
+const _qrStarts = new Map(); // id -> { uid, at }
+const _QR_START_TTL_MS = 5 * 60 * 1000;
+function _qrOwns(id, uid) {
+  const o = _qrStarts.get(id);
+  return !!o && o.uid === uid;
+}
+
+app.post('/api/tg/qr/start', requireAuth, async (req, res, next) => {
+  if (!tgQrConfigured()) return res.status(400).json({ error: 'Подключение Telegram по QR не настроено на сервере' });
+  try {
+    const now = Date.now();
+    for (const [k, v] of _qrStarts) if (now - v.at > _QR_START_TTL_MS) _qrStarts.delete(k);
+    // One live login per user: cancel any prior pending start before opening a new one.
+    for (const [k, v] of _qrStarts) {
+      if (v.uid === req.user.uid) {
+        _qrStarts.delete(k);
+        mtprotoPost('/qr/cancel', { params: { id: k } }).catch(() => {});
+      }
+    }
+    const data = await mtprotoPost('/qr/start');
+    _qrStarts.set(data.id, { uid: req.user.uid, at: now });
+    res.json({ id: data.id, url: data.url, expires_in: data.expires_in });
+  } catch (e) { next(e); }
+});
+
+app.post('/api/tg/qr/poll', requireAuth, async (req, res, next) => {
+  if (!tgQrConfigured()) return res.status(400).json({ error: 'not_configured' });
+  const id = String((req.body && req.body.id) || '');
+  if (!id) return res.status(400).json({ error: 'id required' });
+  if (!_qrOwns(id, req.user.uid)) return res.json({ status: 'expired' });   // not this user's login
+  try {
+    const data = await mtprotoPost('/qr/poll', { params: { id } });
+    if (data.status === 'ok') { _qrStarts.delete(id); return res.json(await tgQrFinish(req, data)); }
+    if (data.status === 'expired' || data.status === 'error') _qrStarts.delete(id);
+    res.json({ status: data.status, error: data.error });   // pending | password | expired | error
+  } catch (e) { next(e); }
+});
+
+app.post('/api/tg/qr/password', requireAuth, async (req, res, next) => {
+  if (!tgQrConfigured()) return res.status(400).json({ error: 'not_configured' });
+  const id = String((req.body && req.body.id) || '');
+  const password = String((req.body && req.body.password) || '');
+  if (!id || !password) return res.status(400).json({ error: 'id and password required' });
+  if (!_qrOwns(id, req.user.uid)) return res.json({ status: 'expired' });
+  try {
+    const data = await mtprotoPost('/qr/password', { params: { id }, body: { password } });
+    if (data.status === 'ok') { _qrStarts.delete(id); return res.json(await tgQrFinish(req, data)); }
+    res.json({ status: data.status, error: data.error });
+  } catch (e) { next(e); }
+});
+
+// Proactively tear down an abandoned pending login (browser navigates away / gives up), so the
+// ephemeral Telethon client is reclaimed immediately instead of waiting for the mtproto GC.
+app.post('/api/tg/qr/cancel', requireAuth, async (req, res, next) => {
+  const id = String((req.body && req.body.id) || '');
+  if (!id || !_qrOwns(id, req.user.uid)) return res.json({ ok: true });
+  _qrStarts.delete(id);
+  try { await mtprotoPost('/qr/cancel', { params: { id } }); } catch { /* best-effort */ }
+  res.json({ ok: true });
+});
+
+app.delete('/api/tg/qr/session', requireAuth, async (req, res, next) => {
+  try {
+    const ok = await db.deleteTgSession(req.user.uid);
+    if (ok) audit(req, 'tg.session.revoked', {}).catch(() => {});
+    res.json({ ok });
+  } catch (e) { next(e); }
+});
 
 app.get('/api/tg/mtproto/health', requireAuth, async (req, res) => {
   try {

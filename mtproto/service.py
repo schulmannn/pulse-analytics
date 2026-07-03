@@ -9,14 +9,16 @@ import json
 import logging
 import re
 import secrets
+import time
 from collections import OrderedDict
+from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import Depends, FastAPI, HTTPException, Header, Query, Response
+from fastapi import Body, Depends, FastAPI, HTTPException, Header, Query, Response
 from fastapi.responses import JSONResponse
 import uvicorn
 from telethon import TelegramClient
-from telethon.errors import FloodWaitError
+from telethon.errors import FloodWaitError, PasswordHashInvalidError, SessionPasswordNeededError
 from telethon.sessions import StringSession
 from telethon.tl.functions.stats import GetBroadcastStatsRequest, LoadAsyncGraphRequest, GetMessageStatsRequest
 from telethon.tl.functions.channels import GetFullChannelRequest, SearchPostsRequest, CheckSearchPostsFloodRequest
@@ -832,8 +834,232 @@ async def get_channel_photo(x_internal_token: str = Header(default='')):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ── QR login (managed connect): capture a user session by scanning a QR ──────────
+# Isolated from the global central-channel `client`: every /qr/start spins up a fresh
+# ephemeral StringSession client + a background task that waits for the scan. The web
+# service polls /qr/poll and, on success, receives the session string (which IT encrypts
+# and stores) plus the user's admin channels. Pending logins live in memory (single
+# uvicorn worker) with a short TTL. This never reads or mutates the central session.
+_QR = {}                # id -> {client, qr, status, url, session, channels, tg_user_id, username, error, created, task}
+_QR_TTL = 180           # seconds a pending/abandoned login stays in memory before GC
+_QR_TOKEN_WAIT = 25     # wait per QR token (< Telegram's ~30s TTL) before recreating it
+_QR_TOTAL = 150         # overall seconds to keep offering fresh QR tokens for one login
+_QR_MAX_PENDING = 40    # cap on concurrent in-flight logins (shared-worker protection)
+_QR_GC_TASK = None
+
+
+async def _safe_disconnect(tg):
+    try:
+        if tg.is_connected():
+            await tg.disconnect()
+    except Exception:
+        pass
+
+
+async def _qr_drop(qid):
+    """Remove a login: cancel its watcher task and disconnect the ephemeral client."""
+    entry = _QR.pop(qid, None)
+    if not entry:
+        return
+    task = entry.get('task')
+    if task and not task.done():
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            pass
+    await _safe_disconnect(entry['client'])
+
+
+async def _qr_gc():
+    now = time.time()
+    for qid in [k for k, v in list(_QR.items()) if now - v.get('created', 0) > _QR_TTL]:
+        await _qr_drop(qid)
+
+
+async def _qr_gc_loop():
+    while True:
+        await asyncio.sleep(30)
+        try:
+            await _qr_gc()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log.error(f'_qr_gc_loop: {e}')
+
+
+async def _list_admin_channels(tg):
+    """Broadcast channels where the logged-in user is creator or has admin rights.
+    Bounded (limit) so a huge dialog list can't stall login-completion latency."""
+    out = []
+    try:
+        async for d in tg.iter_dialogs(limit=300):
+            e = d.entity
+            if getattr(e, 'broadcast', False) and (getattr(e, 'creator', False) or getattr(e, 'admin_rights', None)):
+                out.append({
+                    'id': e.id,
+                    'title': getattr(e, 'title', '') or '',
+                    'username': getattr(e, 'username', None),
+                })
+    except FloodWaitError:
+        raise
+    except Exception as ex:
+        log.error(f'_list_admin_channels: {ex}')
+    return out
+
+
+async def _qr_finish(entry):
+    """Capture the session + identity + admin channels, then disconnect the ephemeral client."""
+    tg = entry['client']
+    entry['session'] = tg.session.save()
+    me = await tg.get_me()
+    entry['tg_user_id'] = me.id
+    entry['username'] = getattr(me, 'username', None)
+    entry['channels'] = await _list_admin_channels(tg)
+    entry['status'] = 'ok'
+    await _safe_disconnect(tg)
+
+
+async def _qr_watch(qid):
+    entry = _QR.get(qid)
+    if not entry:
+        return
+    qr = entry['qr']
+    deadline = time.time() + _QR_TOTAL
+    try:
+        while time.time() < deadline:
+            try:
+                await qr.wait(timeout=_QR_TOKEN_WAIT)     # scanned + confirmed
+                break
+            except asyncio.TimeoutError:
+                try:
+                    await qr.recreate()                   # token expired → mint a fresh one
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    entry['status'] = 'expired'
+                    await _safe_disconnect(entry['client'])
+                    return
+                entry['url'] = qr.url                      # the poller re-renders the fresh QR
+                continue
+        else:
+            entry['status'] = 'expired'                    # deadline reached without a scan
+            await _safe_disconnect(entry['client'])
+            return
+    except SessionPasswordNeededError:
+        entry['status'] = 'password'
+        entry['created'] = time.time()                     # refresh TTL for the password window
+        return
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        entry['status'] = 'error'
+        entry['error'] = str(e)
+        await _safe_disconnect(entry['client'])
+        return
+    try:
+        await _qr_finish(entry)
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        entry['status'] = 'error'
+        entry['error'] = str(e)
+        await _safe_disconnect(entry['client'])
+
+
+@app.post('/qr/start')
+async def qr_start(x_internal_token: str = Header(default='')):
+    check_auth(x_internal_token)
+    if not API_ID or not API_HASH:
+        raise HTTPException(status_code=503, detail='mtproto_not_configured')
+    await _qr_gc()
+    if len(_QR) >= _QR_MAX_PENDING:
+        raise HTTPException(status_code=503, detail='too_many_pending')
+    try:
+        qid = secrets.token_urlsafe(18)
+        tgc = TelegramClient(StringSession(), API_ID, API_HASH)
+        await tgc.connect()
+        qr = await tgc.qr_login()
+        try:
+            expires_in = max(1, int((qr.expires - datetime.now(timezone.utc)).total_seconds()))
+        except Exception:
+            expires_in = 30
+        _QR[qid] = {'client': tgc, 'qr': qr, 'url': qr.url, 'status': 'pending', 'created': time.time()}
+        _QR[qid]['task'] = asyncio.create_task(_qr_watch(qid))
+        return {'id': qid, 'url': qr.url, 'expires_in': expires_in}
+    except FloodWaitError:
+        raise
+    except Exception as e:
+        log.error(f'qr_start: {e}')
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post('/qr/poll')
+async def qr_poll(id: str = Query(...), x_internal_token: str = Header(default='')):
+    check_auth(x_internal_token)
+    entry = _QR.get(id)
+    if not entry:
+        return {'status': 'expired'}
+    st = entry.get('status', 'pending')
+    if st == 'ok':
+        out = {'status': 'ok', 'session': entry['session'], 'channels': entry.get('channels', []),
+               'tg_user_id': entry.get('tg_user_id'), 'username': entry.get('username')}
+        _QR.pop(id, None)
+        return out
+    if st == 'error':
+        err = entry.get('error', 'error')
+        _QR.pop(id, None)
+        return {'status': 'error', 'error': err}
+    if st == 'expired':
+        _QR.pop(id, None)
+        return {'status': 'expired'}
+    if st == 'pending':
+        return {'status': 'pending', 'url': entry.get('url')}   # url rotates as tokens refresh
+    return {'status': st}     # 'password'
+
+
+@app.post('/qr/password')
+async def qr_password(id: str = Query(...), password: str = Body(..., embed=True),
+                      x_internal_token: str = Header(default='')):
+    check_auth(x_internal_token)
+    entry = _QR.get(id)
+    if not entry or entry.get('status') != 'password':
+        return {'status': 'expired'}
+    try:
+        await entry['client'].sign_in(password=password)
+    except PasswordHashInvalidError:
+        return {'status': 'password', 'error': 'bad_password'}      # genuine wrong password
+    except FloodWaitError:
+        raise
+    except Exception as e:
+        log.warning(f'qr_password sign_in failed: {e}')
+        await _qr_drop(id)
+        return {'status': 'error', 'error': 'sign_in_failed'}       # connection/expired/etc.
+    try:
+        await _qr_finish(entry)
+    except Exception as e:
+        _QR.pop(id, None)
+        return {'status': 'error', 'error': str(e)}
+    out = {'status': 'ok', 'session': entry['session'], 'channels': entry.get('channels', []),
+           'tg_user_id': entry.get('tg_user_id'), 'username': entry.get('username')}
+    _QR.pop(id, None)
+    return out
+
+
+@app.post('/qr/cancel')
+async def qr_cancel(id: str = Query(...), x_internal_token: str = Header(default='')):
+    check_auth(x_internal_token)
+    await _qr_drop(id)
+    return {'ok': True}
+
+
 @app.on_event('startup')
 async def startup():
+    # Reap abandoned QR logins on a timer (independent of the central session below).
+    global _QR_GC_TASK
+    _QR_GC_TASK = asyncio.create_task(_qr_gc_loop())
     if not API_ID or not API_HASH or not SESSION:
         log.warning('TG_API_ID / TG_API_HASH / TG_SESSION не заданы — MTProto выключен')
         return
@@ -846,7 +1072,9 @@ async def startup():
 
 @app.on_event('shutdown')
 async def shutdown():
-    global client
+    global client, _QR_GC_TASK
+    if _QR_GC_TASK:
+        _QR_GC_TASK.cancel()
     if client:
         await client.disconnect()
 
