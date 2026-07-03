@@ -148,8 +148,9 @@ export function LineChart({
   const padY = 12;
   // Real x-axis (tick marks + date labels INSIDE the svg) in axes mode — the explorer/metric
   // reading. Needs a taller bottom band; the axis-free cards keep the symmetric pad and the
-  // minimal first/mid/last HTML row below the svg.
-  const hasXAxis = showAxes && !!labels && labels.length > 0;
+  // minimal first/mid/last HTML row below the svg. Requires PER-POINT labels (one per value);
+  // legacy 3-label arrays can't be positioned on the axis and keep the HTML row instead.
+  const hasXAxis = showAxes && !!labels && labels.length === values.length;
   const padB = hasXAxis ? 30 : padY;
 
   // Domain covers the series, the ghost and the target — a goal above the data must be visible.

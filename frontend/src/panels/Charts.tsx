@@ -36,10 +36,9 @@ function SubscriberHistoryChart({ rows }: { rows: SubscriberRow[] }) {
   const sampled = lttbDownsample(rows, 140, (row) => Number(row.subscribers));
   const values = sampled.map((row) => Number(row.subscribers));
   const titles = sampled.map((row) => `${ddmm(row.day)}: ${fmt.num(row.subscribers)} подписчиков`);
-  const firstRow = sampled[0];
-  const midRow = sampled[Math.floor(sampled.length / 2)];
-  const lastRow = sampled[sampled.length - 1];
-  const labels = [firstRow?.day ?? '', midRow?.day ?? '', lastRow?.day ?? ''].map(ddmm);
+  // Full per-point labels: the axis-free card shows first/mid/last itself, the explorer
+  // strides them into a real x-axis (a pre-picked 3-label array would starve the axis).
+  const labels = sampled.map((row) => ddmm(row.day));
 
   // Standard 1×-tile chart height (the LineChart default, 200); the expanded overlay
   // supplies its own 400 via ExpandedChartHeightContext.
