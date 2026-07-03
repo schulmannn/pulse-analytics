@@ -135,6 +135,19 @@ describe('resolveWidgetMetric — TG core series', () => {
     expect(r.valueRaw).toBe(44000); // displayMembers from the channels list
     expect(r.series!.map((p) => p.value)).toEqual([43900, 44000]);
   });
+
+  it('buckets a flow metric by quarter — one bucket summing the whole window (S10)', () => {
+    const r = resolveWidgetMetric(cfg('tg.views', { grain: 'quarter' }), ctx);
+    // The 30-day window (May 17 → Jun 15 2026) is entirely within Q2 2026 → one bucket.
+    expect(r.series).toEqual([{ date: '2026-Q2', value: 3500 }]);
+  });
+
+  it('buckets a LEVEL metric by year — last value in the bucket, not a sum (S10)', () => {
+    const r = resolveWidgetMetric(cfg('tg.subscribers', { grain: 'year' }), ctx);
+    // Both archive rows are in 2026 → one year bucket holding the LAST subscriber count (44000),
+    // never their sum (which would be nonsense for a stock metric).
+    expect(r.series).toEqual([{ date: '2026', value: 44000 }]);
+  });
 });
 
 describe('resolveWidgetMetric — TG ratio values', () => {

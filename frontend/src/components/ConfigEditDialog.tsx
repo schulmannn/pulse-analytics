@@ -31,6 +31,8 @@ const GRAINS: Array<{ value: WidgetGrain; label: string }> = [
   { value: 'day', label: 'День' },
   { value: 'week', label: 'Неделя' },
   { value: 'month', label: 'Месяц' },
+  { value: 'quarter', label: 'Квартал' },
+  { value: 'year', label: 'Год' },
 ];
 
 const CMP_MODES: Array<{ value: ComparisonMode; label: string }> = [

@@ -6,10 +6,16 @@
 
 export const DAY_MS = 24 * 60 * 60 * 1000;
 
+/** The grains the metric page offers (its GRAIN_LABEL/GRAIN_WORD maps are keyed on this). */
 export type Grain = 'day' | 'week' | 'month';
+/** The richer grain set the metric builder offers (S10) — a superset of Grain. quarter/year bucket
+ *  on the calendar like month; flow metrics still SUM per bucket and level metrics take the last
+ *  value in the bucket (the caller chooses the aggregator, so no per-grain special-casing here). */
+export type SeriesGrain = Grain | 'quarter' | 'year';
 
-/** Bucket key for an instant: `YYYY-MM-DD` (day), the Monday of its ISO week, or `YYYY-MM`. */
-export function bucketKeyOf(t: number, grain: Grain): string {
+/** Bucket key for an instant: `YYYY-MM-DD` (day / Monday of the week), `YYYY-MM` (month),
+ *  `YYYY-Qn` (quarter) or `YYYY` (year). All UTC. */
+export function bucketKeyOf(t: number, grain: SeriesGrain): string {
   const d = new Date(t);
   if (grain === 'day') return d.toISOString().slice(0, 10);
   if (grain === 'week') {
@@ -17,19 +23,25 @@ export function bucketKeyOf(t: number, grain: Grain): string {
     d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
     return d.toISOString().slice(0, 10);
   }
-  return d.toISOString().slice(0, 7);
+  if (grain === 'quarter') return `${d.getUTCFullYear()}-Q${Math.floor(d.getUTCMonth() / 3) + 1}`;
+  if (grain === 'year') return String(d.getUTCFullYear());
+  return d.toISOString().slice(0, 7); // month
 }
 
-/** All bucket keys covering [from..to], in order (day steps / Mondays / first-of-month). */
-export function bucketKeysInWindow(fromMs: number, toMs: number, grain: Grain): string[] {
+/** All bucket keys covering [from..to], in order (day steps / Mondays / first-of-month / quarter /
+ *  year). Calendar grains (month/quarter/year) walk the calendar; day/week walk fixed steps. */
+export function bucketKeysInWindow(fromMs: number, toMs: number, grain: SeriesGrain): string[] {
   const keys: string[] = [];
-  if (grain === 'month') {
+  if (grain === 'month' || grain === 'quarter' || grain === 'year') {
     const d = new Date(fromMs);
     d.setUTCDate(1);
     d.setUTCHours(0, 0, 0, 0);
+    if (grain === 'quarter') d.setUTCMonth(Math.floor(d.getUTCMonth() / 3) * 3); // first month of the quarter
+    if (grain === 'year') d.setUTCMonth(0);
     while (d.getTime() <= toMs) {
-      keys.push(d.toISOString().slice(0, 7));
-      d.setUTCMonth(d.getUTCMonth() + 1);
+      keys.push(bucketKeyOf(d.getTime(), grain));
+      if (grain === 'year') d.setUTCFullYear(d.getUTCFullYear() + 1);
+      else d.setUTCMonth(d.getUTCMonth() + (grain === 'quarter' ? 3 : 1));
     }
     return keys;
   }

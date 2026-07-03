@@ -7,9 +7,12 @@ import { fmt } from '@/lib/format';
 import type { MetricUnit, WidgetViz } from '@/lib/widgetMetrics';
 import type { WidgetResult } from '@/lib/resolveWidgetMetric';
 
-/** A bucket key → display label. Month keys (`YYYY-MM`) → localized short month; day/week keys
- *  (`YYYY-MM-DD`) → the day formatter (mirrors MetricPage's bucketLabelOf). */
+/** A bucket key → display label. `YYYY-Qn` → «n кв. YYYY»; `YYYY` → year; `YYYY-MM` → localized
+ *  short month; day/week keys (`YYYY-MM-DD`) → the day formatter (mirrors MetricPage's bucketLabelOf). */
 export function bucketLabel(key: string): string {
+  const q = /^(\d{4})-Q([1-4])$/.exec(key);
+  if (q) return `${q[2]} кв. ${q[1]}`;
+  if (/^\d{4}$/.test(key)) return key;
   if (/^\d{4}-\d{2}$/.test(key)) {
     return new Date(`${key}-01T00:00:00Z`).toLocaleDateString('ru-RU', { month: 'short', timeZone: 'UTC' });
   }

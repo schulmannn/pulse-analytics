@@ -42,7 +42,7 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
   (S6). rank/pivot/table → fallback на data-shape (не рендерятся из WidgetResult).
   **⚠️ Порядок S5↔S6:** S5-редактор оперирует WidgetConfig, которых нет на surface до S6-монтирования
   → делаю S6 (каталог+store+mount) ПЕРЕД S5 (богатый редактор).
-- **S5 — Универсальный Widget Editor `components/ConfigEditDialog.tsx`** — SHIPPED `<pending>`
+- **S5 — Универсальный Widget Editor `components/ConfigEditDialog.tsx`** — SHIPPED `8971407`
   Отдельный редактор, пишущий в WidgetConfig (не в prefs): Визуализация (по supportedViz) · Период ·
   Грануляция (series) · Сравнение (series) · Целевой уровень (series) · Источник · Заголовок · Размер ·
   Акцент · Цветной фон. ChartSection получил аддитивный проп `configEditor {open,color,tinted,size,
@@ -72,13 +72,19 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
 - **S7 — Per-widget фильтры `FilterBuilder` + каталог DIMENSIONS** — TODO
 - **S8 — Сравнение как настройка модели** — TODO
 - **S9 — Target / forecast** — TODO
-- **S10 — Богаче grain (day..year, flow vs level)** — TODO
+- **S10 — Богаче grain (day..year, flow vs level)** — SHIPPED `<pending>`
+  `SeriesGrain = Grain | quarter | year` в metricSeries (Grain=day/week/month оставлен для MetricPage
+  Record-мап — живую страницу НЕ трогал; функции расширены до SeriesGrain, Grain остаётся assignable).
+  bucketKeyOf → `YYYY-Qn`/`YYYY`; bucketKeysInWindow — календарный обход month/quarter/year. Резолвер
+  effGrain пропускает quarter/year; flow (bucketPostField) СУММА, level (bucketSubsLevel) ПОСЛЕДНЕЕ —
+  инвариант заперт тестом (quarter-сумма views=3500, year-level subs=44000, не сумма). bucketLabel
+  «n кв. YYYY»/год. Редактор +Квартал/Год. +8 тестов (232). Adversarial-review boundary+integration.
 - **S11 — IG-метрики в каталог (self-fetching)** — TODO
 - **S12 — Визуальный слой ПОСЛЕ модели** — TODO
 
 ## Журнал
 
-- 2026-07-03 — **S5 SHIPPED** `<pending>`. `ConfigEditDialog` + ChartSection `configEditor`-хук.
+- 2026-07-03 — **S5 SHIPPED** `8971407`. `ConfigEditDialog` + ChartSection `configEditor`-хук.
   Ultracode: реализация → adversarial-review воркфлоу (5 осей: chartsection-regression/config-model/
   live-editing/control-gating/design-a11y, каждая находка verify-скептиком) → 2 фикса. Решения: config-
   виджет открывает свой диалог, display (accent/tint/size/target) из config; showComparison/showTarget=

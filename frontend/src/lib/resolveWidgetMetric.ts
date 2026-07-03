@@ -29,7 +29,7 @@ import type { DrillKey, PostMetricField } from '@/lib/kpiDerive';
 import { normalizeTgPosts } from '@/lib/posts';
 import type { NormalizedPost } from '@/lib/posts';
 import { DAY_MS, alignGhost, bucketKeyOf, bucketKeysInWindow, comparisonWindow } from '@/lib/metricSeries';
-import type { Grain } from '@/lib/metricSeries';
+import type { SeriesGrain } from '@/lib/metricSeries';
 import {
   churnBreakdown,
   emojiBreakdown,
@@ -123,9 +123,9 @@ const CMP_LABEL: Record<'prev' | 'year', string> = {
   year: 'год назад',
 };
 
-/** Clamp the config grain to what the buckets currently support (day/week/month; S10 adds the rest). */
-function effGrain(grain: WidgetGrain | undefined): Grain {
-  return grain === 'week' || grain === 'month' ? grain : 'day';
+/** Config grain → the metricSeries bucketing grain (day/week/month/quarter/year; day fallback). */
+function effGrain(grain: WidgetGrain | undefined): SeriesGrain {
+  return grain === 'week' || grain === 'month' || grain === 'quarter' || grain === 'year' ? grain : 'day';
 }
 
 /** Map a comparison config to the metricSeries baseline modes it can build today. `previous_period`
@@ -144,7 +144,7 @@ function bucketPostField(
   field: PostMetricField,
   winFrom: number | null,
   winTo: number,
-  grain: Grain,
+  grain: SeriesGrain,
 ): WidgetSeriesPoint[] {
   const by = new Map<string, number>();
   for (const p of posts) {
@@ -161,7 +161,7 @@ function bucketPostField(
 /** Subscriber LEVEL per bucket (last archive value inside the bucket) — sparse, data-only keys. */
 function bucketSubsLevel(
   rows: { day: string; subscribers?: number | null }[],
-  grain: Grain,
+  grain: SeriesGrain,
 ): WidgetSeriesPoint[] {
   const by = new Map<string, number>();
   rows
