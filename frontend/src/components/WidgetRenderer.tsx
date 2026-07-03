@@ -3,6 +3,7 @@ import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { PieChart } from '@/components/PieChart';
 import { Breakdown } from '@/components/Breakdown';
+import { WidgetTargetContext } from '@/components/ExpandableChart';
 import type { WidgetResult } from '@/lib/resolveWidgetMetric';
 import type { WidgetViz } from '@/lib/widgetMetrics';
 import { breakdownTitles, effectiveViz, seriesToChart } from '@/lib/widgetRender';
@@ -35,6 +36,11 @@ export function WidgetRenderer({ result, viz }: { result: WidgetResult; viz: Wid
   // its chart — its «hero» is the distribution itself, and the card title names it.
   const showHero = hasValue && (eff === 'kpi' || eff === 'line' || eff === 'bar');
 
+  // «N% от цели» (steep) — when a target is set and the metric has a scalar to measure against it.
+  const targetPct = result.targetPct;
+  const progress =
+    targetPct != null && Number.isFinite(targetPct) ? `${Math.round(targetPct)}% от цели` : null;
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       {showHero && (
@@ -45,12 +51,20 @@ export function WidgetRenderer({ result, viz }: { result: WidgetResult; viz: Wid
             </span>
             <DeltaPill delta={result.delta} />
           </div>
-          {result.caption ? <div className="mt-1 text-xs text-muted-foreground">{result.caption}</div> : null}
+          {(result.caption || progress) && (
+            <div className="mt-1 flex flex-wrap items-baseline gap-x-2 text-xs text-muted-foreground">
+              {result.caption ? <span>{result.caption}</span> : null}
+              {progress ? <span className="font-medium text-primary">{progress}</span> : null}
+            </div>
+          )}
         </div>
       )}
-      <div className={`min-h-0 flex-1 ${showHero ? 'mt-3' : ''}`}>
-        <WidgetChart result={result} eff={eff} />
-      </div>
+      {/* The chart's goal line reads the target from this context (config-widget: resolver-computed). */}
+      <WidgetTargetContext.Provider value={result.target ?? null}>
+        <div className={`min-h-0 flex-1 ${showHero ? 'mt-3' : ''}`}>
+          <WidgetChart result={result} eff={eff} />
+        </div>
+      </WidgetTargetContext.Provider>
     </div>
   );
 }

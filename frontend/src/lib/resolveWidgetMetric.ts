@@ -104,6 +104,10 @@ export interface WidgetResult {
   ghostLabel?: string;
   breakdown?: WidgetBreakdownItem[];
   rows?: WidgetLedgerRow[];
+  /** Goal value for the widget's charts (S9) — a number the LineChart/BarChart draw as a dashed line. */
+  target?: number;
+  /** Progress toward the target as a percentage of it («68% от цели»), when both are known. */
+  targetPct?: number;
   /** True when the resolver has no data path for this metric yet (S3b / S11 stubs, or missing data). */
   empty?: boolean;
 }
@@ -357,12 +361,9 @@ function resolveTgRatio(metricId: 'tg.erv' | 'tg.virality', ctx: DataContext, ou
   return out;
 }
 
-/**
- * Resolve one widget config against the loaded data. Never throws — an unknown metric, a missing
- * payload or a not-yet-wired path returns `{ empty: true }` so the renderer shows an honest empty
- * state instead of crashing.
- */
-export function resolveWidgetMetric(config: WidgetConfig, ctx: DataContext): WidgetResult {
+/** The metric dispatch (source/kind → the right resolver). Wrapped by resolveWidgetMetric, which
+ *  layers the target/progress (S9) on top. */
+function resolveMetricCore(config: WidgetConfig, ctx: DataContext): WidgetResult {
   const metric = getMetric(config.metricId);
   if (!metric) return { ...base(config.metricId, 'value', 'number'), empty: true };
 
@@ -378,6 +379,44 @@ export function resolveWidgetMetric(config: WidgetConfig, ctx: DataContext): Wid
   // Tables (tg.weeklyTable / tg.topPosts) are served by the report/analytics surfaces, not the
   // story-card builder (a rich table doesn't fit a widget tile) — the catalogue hides table-kind.
   return { ...out, empty: true };
+}
+
+/** The effective goal value for a target config (S9): fixed → its value; dynamic → the current value
+ *  of another (same-source) metric; forecast is a follow-up (needs projection semantics). null when
+ *  there's no usable target. */
+function resolveTargetValue(config: WidgetConfig, ctx: DataContext): number | null {
+  const t = config.target;
+  if (!t) return null;
+  if (t.type === 'fixed') return t.value != null && Number.isFinite(t.value) && t.value > 0 ? t.value : null;
+  if (t.type === 'dynamic' && t.metricId && t.metricId !== config.metricId) {
+    const tm = getMetric(t.metricId);
+    const cm = getMetric(config.metricId);
+    // Same source only — a widget body carries one source's payloads (ctx.tg XOR ctx.ig).
+    if (tm && cm && tm.source === cm.source) {
+      const r = resolveMetricCore({ id: 'target', metricId: t.metricId, viz: tm.defaultViz }, ctx);
+      return typeof r.valueRaw === 'number' && Number.isFinite(r.valueRaw) && r.valueRaw > 0 ? r.valueRaw : null;
+    }
+  }
+  return null; // forecast — deferred
+}
+
+/**
+ * Resolve one widget config against the loaded data. Never throws — an unknown metric, a missing
+ * payload or a not-yet-wired path returns `{ empty: true }` so the renderer shows an honest empty
+ * state instead of crashing. Layers the target goal line + «N% от цели» progress (S9) on top.
+ */
+export function resolveWidgetMetric(config: WidgetConfig, ctx: DataContext): WidgetResult {
+  const result = resolveMetricCore(config, ctx);
+  if (!result.empty && config.target) {
+    const target = resolveTargetValue(config, ctx);
+    if (target != null) {
+      result.target = target;
+      if (typeof result.valueRaw === 'number' && Number.isFinite(result.valueRaw)) {
+        result.targetPct = (result.valueRaw / target) * 100;
+      }
+    }
+  }
+  return result;
 }
 
 /** «Чистый прирост подписчиков» — net daily (joined − left) from the followers graph, bucketed to

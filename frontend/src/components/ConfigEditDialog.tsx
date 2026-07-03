@@ -4,10 +4,10 @@ import { useChannels } from '@/api/queries';
 import { DEFAULT_WIDGET_DAYS } from '@/lib/period';
 import type { PeriodDays } from '@/lib/period';
 import { VIZ_LABEL } from '@/lib/widgetRender';
-import type { MetricDef } from '@/lib/widgetMetrics';
+import { metricsForSource, type MetricDef } from '@/lib/widgetMetrics';
 import type { WidgetSize } from '@/components/ChartWidget';
 import { dimensionsFor, type DimensionDef } from '@/lib/dimensions';
-import type { ComparisonDisplay, ComparisonMode, FilterOp, WidgetConfig, WidgetFilter, WidgetGrain } from '@/lib/widgetConfig';
+import type { ComparisonDisplay, ComparisonMode, FilterOp, TargetType, WidgetConfig, WidgetFilter, WidgetGrain } from '@/lib/widgetConfig';
 
 /**
  * The universal metric-builder editor — the steep «Edit widget» for a WidgetConfig. Unlike the
@@ -174,24 +174,7 @@ export function ConfigEditDialog({
           </Field>
         )}
 
-        {showTarget && (
-          <label className="mt-4 block">
-            <span className="text-2xs tracking-wide text-muted-foreground">Целевой уровень</span>
-            <input
-              type="number"
-              inputMode="numeric"
-              min={0}
-              value={config.target?.type === 'fixed' && config.target.value != null ? config.target.value : ''}
-              placeholder="нет"
-              onChange={(e) => {
-                const raw = e.target.value.trim();
-                const num = raw === '' ? undefined : Number(raw);
-                onChange({ target: num !== undefined && Number.isFinite(num) && num > 0 ? { type: 'fixed', value: num } : undefined });
-              }}
-              className="mt-1 w-full rounded border border-border bg-background px-3 py-2 text-sm tabular-nums text-foreground outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
-            />
-          </label>
-        )}
+        {showTarget && <TargetField metric={metric} config={config} onChange={onChange} />}
 
         {filterDims.length > 0 && (
           <Field label="Фильтр">
@@ -325,6 +308,63 @@ function Segmented<T extends string>({
         );
       })}
     </div>
+  );
+}
+
+/** «Цель» (S9): a fixed goal value or a dynamic goal = another metric's current value. Forecast is a
+ *  follow-up. «Нет» clears it. The card draws a goal line + «N% от цели» progress. */
+const TARGET_TYPES: Array<{ value: 'none' | TargetType; label: string }> = [
+  { value: 'none', label: 'Нет' },
+  { value: 'fixed', label: 'Число' },
+  { value: 'dynamic', label: 'Метрика' },
+];
+
+function TargetField({ metric, config, onChange }: { metric: MetricDef; config: WidgetConfig; onChange: (patch: Partial<WidgetConfig>) => void }) {
+  const type: 'none' | TargetType = config.target?.type ?? 'none';
+  // Dynamic target candidates: same-source scalar metrics (value/series carry a valueRaw), not self.
+  const candidates = metricsForSource(metric.source === 'ig' ? 'ig' : 'tg').filter(
+    (m) => (m.kind === 'value' || m.kind === 'series') && m.id !== metric.id,
+  );
+  return (
+    <Field label="Цель">
+      <Segmented
+        options={TARGET_TYPES}
+        value={type}
+        onChange={(t) => {
+          if (t === 'none') onChange({ target: undefined });
+          else if (t === 'fixed') onChange({ target: { type: 'fixed', value: config.target?.value } });
+          else onChange({ target: { type: 'dynamic', metricId: config.target?.metricId ?? candidates[0]?.id } });
+        }}
+      />
+      {type === 'fixed' && (
+        <input
+          type="number"
+          inputMode="numeric"
+          min={0}
+          value={config.target?.value != null ? config.target.value : ''}
+          placeholder="значение цели"
+          onChange={(e) => {
+            const raw = e.target.value.trim();
+            const num = raw === '' ? undefined : Number(raw);
+            onChange({ target: { type: 'fixed', value: num !== undefined && Number.isFinite(num) && num > 0 ? num : undefined } });
+          }}
+          className="mt-2 w-full rounded border border-border bg-background px-3 py-2 text-sm tabular-nums text-foreground outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
+        />
+      )}
+      {type === 'dynamic' && (
+        <select
+          value={config.target?.metricId ?? ''}
+          onChange={(e) => onChange({ target: { type: 'dynamic', metricId: e.target.value || undefined } })}
+          className="mt-2 w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-1 focus:ring-primary"
+        >
+          {candidates.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.label}
+            </option>
+          ))}
+        </select>
+      )}
+    </Field>
   );
 }
 

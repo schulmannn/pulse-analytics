@@ -172,6 +172,32 @@ describe('resolveWidgetMetric — TG core series', () => {
   });
 });
 
+describe('resolveWidgetMetric — target / progress (S9)', () => {
+  it('a fixed target sets result.target + «% of target» progress', () => {
+    const r = resolveWidgetMetric(cfg('tg.views', { target: { type: 'fixed', value: 7000 } }), ctx);
+    expect(r.target).toBe(7000);
+    expect(r.targetPct).toBeCloseTo(50, 5); // 3500 / 7000
+  });
+
+  it('a dynamic target resolves another metric’s current value', () => {
+    // target = tg.reactions (valueRaw = 50+100+25 = 175 likes in window)
+    const r = resolveWidgetMetric(cfg('tg.views', { target: { type: 'dynamic', metricId: 'tg.reactions' } }), ctx);
+    expect(r.target).toBe(175);
+    expect(r.targetPct).toBeCloseTo((3500 / 175) * 100, 3);
+  });
+
+  it('ignores a self-referential dynamic target and an unusable fixed value', () => {
+    expect(resolveWidgetMetric(cfg('tg.views', { target: { type: 'dynamic', metricId: 'tg.views' } }), ctx).target).toBeUndefined();
+    expect(resolveWidgetMetric(cfg('tg.views', { target: { type: 'fixed', value: 0 } }), ctx).target).toBeUndefined();
+  });
+
+  it('no target → no target/progress fields', () => {
+    const r = resolveWidgetMetric(cfg('tg.views'), ctx);
+    expect(r.target).toBeUndefined();
+    expect(r.targetPct).toBeUndefined();
+  });
+});
+
 describe('resolveWidgetMetric — TG ratio values', () => {
   it('resolves tg.erv as an average percentage of the in-window posts', () => {
     const r = resolveWidgetMetric(cfg('tg.erv'), ctx);

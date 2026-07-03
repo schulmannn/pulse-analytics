@@ -32,8 +32,8 @@ export function ConfigWidget({ config, homeKey }: { config: WidgetConfig; homeKe
         color: config.style?.color,
         tinted: config.style?.tinted,
         size: config.size,
-        // Fixed goal line → charts' WidgetTargetContext (dynamic/forecast targets land in S9).
-        target: config.target?.type === 'fixed' ? config.target.value ?? null : null,
+        // The goal line is now resolver-computed (result.target) and provided by WidgetRenderer, so
+        // the card-level target override is no longer needed (it also covers dynamic targets, S9).
       }}
     >
       <ConfigWidgetBody config={config} />

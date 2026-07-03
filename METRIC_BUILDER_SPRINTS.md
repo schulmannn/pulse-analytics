@@ -82,7 +82,7 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
   [HIGH]** — delta-pill core-KPI (views/reactions/forwards) показывал ВЕСЬ канал (архивный тренд) рядом
   с отфильтрованным value → фикс: recompute из filtered `windowTotals` ИЛИ suppress (null) при отсутствии
   парного post-окна (avgReach уже post-derived, не трогаю); заперт детерминированным тестом.
-- **S8 — Сравнение как настройка модели** — SHIPPED `<pending>`
+- **S8 — Сравнение как настройка модели** — SHIPPED `f426b96`
   `comparisonBaseline(cmp, winFrom, winTo)` — previous_period/year (metricSeries) + **same_period_last_month**
   (−30д shift) + **custom** (explicit from/to). `wantsGhostLine` соблюдает `display`: **«Дельта» больше не
   рисует ghost-линию** (был мёртвый контрол). ghostLabel per mode. Применено к TG field+subscribers.
@@ -93,7 +93,12 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
   сохраняют `!==0`; (2) same_period_last_month fixed-30d ломал выравнивание при календарном grain → grain-
   aware сдвиг (`shiftMonthsUTC` для month/quarter/year, 30д для day/week) + режим добавлен в редактор.
   Примечание: 'ghost_line'≈'both' визуально (pill=hero-delta всегда).
-- **S9 — Target / forecast** — TODO
+- **S9 — Target / forecast** — SHIPPED `<pending>`
+  Target стал resolver-owned: `resolveWidgetMetric` = wrapper над `resolveMetricCore` + `resolveTargetValue`
+  (fixed→value; **dynamic**→valueRaw другой same-source метрики через рекурсивный core-resolve, self-guard;
+  forecast отложен — семантика фуззи). `result.target`+`result.targetPct`. WidgetRenderer: goal-линия из
+  `WidgetTargetContext=result.target` + **«N% от цели»** (steep-подпись). ConfigWidget убрал configEditor.
+  target. Редактор: TargetField (Нет/Число/Метрика + пикер метрики). +4 теста (267). Adversarial-review.
 - **S10 — Богаче grain (day..year, flow vs level)** — SHIPPED `1d308a9`
   `SeriesGrain = Grain | quarter | year` в metricSeries (Grain=day/week/month оставлен для MetricPage
   Record-мап — живую страницу НЕ трогал; функции расширены до SeriesGrain, Grain остаётся assignable).
@@ -119,7 +124,7 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
 
 ## Журнал
 
-- 2026-07-03 — **S8 SHIPPED** `<pending>`. Сравнение-модель: display honor + month/custom + IG-ghost.
+- 2026-07-03 — **S8 SHIPPED** `f426b96`. Сравнение-модель: display honor + month/custom + IG-ghost.
   Ревью поймало 2 LOW: netFollowers net-zero ghost (hasCur-gate), month-shift календарное выравнивание
   (grain-aware shiftMonthsUTC). Урок: shared-хелпер applyIgGhost — фикс scoped через opts, не глобально.
 - 2026-07-03 — **S7 SHIPPED** `1b3c8ac`. Фильтры: `lib/dimensions.ts` + резолвер applyFilters +
