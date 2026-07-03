@@ -14,7 +14,9 @@ export function IgAudience({ ig }: { ig: IgData }) {
 
   return (
     <div className="space-y-10">
-      <Section title="Аудитория">
+      {/* «Демография», не «Аудитория» — блок фида уже называется «Аудитория», дубль-заголовок
+          подряд читался как заикание (аудит 5.2). */}
+      <Section title="Демография">
         <AudienceBlock breakdowns={ig.breakdowns} followers={ig.followers} />
       </Section>
 
