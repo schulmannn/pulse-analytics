@@ -264,7 +264,9 @@ async function listChannels(user) {
   const uid = user && user.uid;
   if (uid == null) return [];   // defensive: never query ownership with a missing uid
   const { rows } = await pool.query(
-    `SELECT ${CHANNEL_COLS}, ${MEMBER_COUNT_COL} FROM channels WHERE owner_uid=$1 AND status<>'disabled' ORDER BY created_at ASC`, [uid]);
+    `SELECT ${CHANNEL_COLS}, ${MEMBER_COUNT_COL},
+            EXISTS(SELECT 1 FROM ig_accounts ia WHERE ia.channel_id = channels.id) AS ig_connected
+     FROM channels WHERE owner_uid=$1 AND status<>'disabled' ORDER BY created_at ASC`, [uid]);
   return rows;
 }
 

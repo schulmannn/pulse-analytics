@@ -552,6 +552,10 @@ function SourceSwitcher({ rail = false }: { rail?: boolean }) {
   const filtered = (net: Network): SourceRow[] => {
     const q = query.trim().toLowerCase();
     return channels
+      // Instagram is offered ONLY for channels with a linked IG account (ig_connected). An empty
+      // IG group auto-hides below (rows.length === 0 → null), so unconnected workspaces show
+      // Telegram only — no more demo/mock IG for every channel.
+      .filter((c) => net !== 'ig' || !!c.ig_connected)
       .map((c) => ({ channelId: c.id, network: net, name: channelName(c) }))
       .filter((r) => (q ? r.name.toLowerCase().includes(q) : true));
   };

@@ -309,6 +309,9 @@ export const ChannelSchema = z
     tg_channel_id: z.unknown().optional(),
     owner_uid: z.coerce.number().optional().nullable(),
     memberCount: z.coerce.number().optional().nullable(),
+    /** True when this channel has a linked Instagram account (ig_accounts row) — the source
+        switcher only offers an Instagram source for connected channels (hidden otherwise). */
+    ig_connected: z.boolean().optional().nullable(),
   })
   .passthrough();
 export const ChannelsResponseSchema = z

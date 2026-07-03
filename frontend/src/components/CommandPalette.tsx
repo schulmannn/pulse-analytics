@@ -133,16 +133,21 @@ export function CommandPalette() {
 
   const iconFor = (name: IconName) => <Icon name={name} className="h-4 w-4 shrink-0" />;
 
+  // Hide the Instagram nav shortcuts until some channel has a linked IG account — consistent with
+  // the source switcher (no IG surface for unconnected workspaces).
+  const anyIgConnected = (channelsQuery.data?.channels ?? []).some((c) => !!c.ig_connected);
   const routeCommands: PaletteCommand[] = [
     ...ROUTES,
     ...(me.data?.role === 'superuser' ? SUPERUSER_ROUTES : []),
-  ].map((route) => ({
-    id: `route:${route.path}`,
-    label: route.label,
-    search: `перейти ${route.search}`.toLowerCase(),
-    icon: iconFor(route.icon),
-    run: () => navigate(route.path),
-  }));
+  ]
+    .filter((route) => anyIgConnected || !route.path.startsWith('/instagram'))
+    .map((route) => ({
+      id: `route:${route.path}`,
+      label: route.label,
+      search: `перейти ${route.search}`.toLowerCase(),
+      icon: iconFor(route.icon),
+      run: () => navigate(route.path),
+    }));
 
   // Metric pages — first-class search targets (steep's «Jump to» reaches metrics too).
   const metricCommands: PaletteCommand[] = DRILL_KEYS.map((key) => ({
@@ -164,7 +169,10 @@ export function CommandPalette() {
             {name.slice(0, 1).toUpperCase()}
           </span>
         );
-        return SOURCE_NETWORKS.map((net) => ({
+        return SOURCE_NETWORKS
+          // IG source only for channels with a linked account — mirrors the sidebar switcher.
+          .filter((net) => net.key !== 'ig' || !!channel.ig_connected)
+          .map((net) => ({
           id: `source:${net.key}:${channel.id}`,
           label: `@${name} · ${net.name}`,
           search: `перейти сменить источник канал ${net.name} ${name}`.toLowerCase(),

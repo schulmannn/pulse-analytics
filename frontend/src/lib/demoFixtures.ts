@@ -87,7 +87,9 @@ HISTORY_ROWS.slice(-30).forEach((r) => {
 const CHANNELS = {
   enabled: true,
   channels: [
-    { id: DEMO_CHANNEL_ID, username: 'demo_channel', title: 'Демо-канал', status: 'active', source: 'central', memberCount: CURRENT_SUBS, owner_uid: 0 },
+    // ig_connected: true so the demo keeps showcasing Instagram (its endpoints fall through to the
+    // server's ig_mock) — the switcher's IG-gating hides IG only for real unconnected channels.
+    { id: DEMO_CHANNEL_ID, username: 'demo_channel', title: 'Демо-канал', status: 'active', source: 'central', memberCount: CURRENT_SUBS, owner_uid: 0, ig_connected: true },
   ],
   selected: DEMO_CHANNEL_ID,
 };
