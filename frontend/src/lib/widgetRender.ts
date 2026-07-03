@@ -55,6 +55,21 @@ export function seriesToChart(result: WidgetResult): ChartSeries {
   return { values, labels, titles };
 }
 
+/** Compact series stats for the story-card footer (S12): «Макс · Среднее» — the density steep puts
+ *  beside a chart so a line reads as numbers too, not just a shape. Empty for <2 points (nothing to
+ *  summarise beyond the hero). Formatted by the metric unit. */
+export function seriesStats(result: WidgetResult): { label: string; value: string }[] {
+  const vals = (result.series ?? []).map((p) => p.value);
+  if (vals.length < 2) return [];
+  const f = unitFormat(result.unit);
+  const max = Math.max(...vals);
+  const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+  return [
+    { label: 'Макс', value: f(max) },
+    { label: 'Среднее', value: f(Math.round(avg)) },
+  ];
+}
+
 /** Tooltip titles for a breakdown («label: display») — uses the pre-formatted `display` when set. */
 export function breakdownTitles(result: WidgetResult): string[] {
   const items = result.breakdown ?? [];

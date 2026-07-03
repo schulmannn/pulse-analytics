@@ -6,7 +6,7 @@ import { Breakdown } from '@/components/Breakdown';
 import { WidgetTargetContext } from '@/components/ExpandableChart';
 import type { WidgetResult } from '@/lib/resolveWidgetMetric';
 import type { WidgetViz } from '@/lib/widgetMetrics';
-import { breakdownTitles, effectiveViz, seriesToChart } from '@/lib/widgetRender';
+import { breakdownTitles, effectiveViz, seriesStats, seriesToChart } from '@/lib/widgetRender';
 
 /**
  * The single widget renderer — a WidgetResult + a chosen visualisation → the story-card BODY
@@ -65,6 +65,24 @@ export function WidgetRenderer({ result, viz }: { result: WidgetResult; viz: Wid
           <WidgetChart result={result} eff={eff} />
         </div>
       </WidgetTargetContext.Provider>
+      <SeriesStatsFooter result={result} eff={eff} />
+    </div>
+  );
+}
+
+/** Compact «Макс · Среднее» footer under a series chart (S12) — the ledger density that lets a line
+ *  read as numbers too. Hairline-topped, shrink-0 so it never squeezes the chart. */
+function SeriesStatsFooter({ result, eff }: { result: WidgetResult; eff: WidgetViz }) {
+  if (eff !== 'line' && eff !== 'bar') return null;
+  const stats = seriesStats(result);
+  if (stats.length === 0) return null;
+  return (
+    <div className="mt-2 flex shrink-0 flex-wrap items-baseline gap-x-4 gap-y-1 border-t border-border pt-2">
+      {stats.map((s) => (
+        <span key={s.label} className="text-2xs text-muted-foreground">
+          {s.label} <span className="font-medium tabular-nums text-foreground">{s.value}</span>
+        </span>
+      ))}
     </div>
   );
 }

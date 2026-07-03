@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { breakdownTitles, bucketLabel, effectiveViz, seriesToChart, unitFormat } from '@/lib/widgetRender';
+import { breakdownTitles, bucketLabel, effectiveViz, seriesStats, seriesToChart, unitFormat } from '@/lib/widgetRender';
 import type { WidgetResult } from '@/lib/resolveWidgetMetric';
 
 describe('bucketLabel', () => {
@@ -50,6 +50,23 @@ describe('seriesToChart', () => {
     expect(c.values).toEqual([]);
     expect(c.labels).toEqual([]);
     expect(c.titles).toEqual([]);
+  });
+});
+
+describe('seriesStats', () => {
+  it('summarises a series as Макс + Среднее (formatted by unit)', () => {
+    const result = {
+      metricId: 'tg.views', kind: 'series', unit: 'number',
+      series: [{ date: 'a', value: 10 }, { date: 'b', value: 30 }, { date: 'c', value: 20 }],
+    } as WidgetResult;
+    const s = seriesStats(result);
+    expect(s.map((x) => x.label)).toEqual(['Макс', 'Среднее']);
+    expect(s[0].value).toBe('30'); // max
+    expect(s[1].value).toBe('20'); // avg (60/3)
+  });
+  it('returns nothing for <2 points', () => {
+    expect(seriesStats({ metricId: 'x', kind: 'series', unit: 'number', series: [{ date: 'a', value: 5 }] } as WidgetResult)).toEqual([]);
+    expect(seriesStats({ metricId: 'x', kind: 'value', unit: 'number' } as WidgetResult)).toEqual([]);
   });
 });
 

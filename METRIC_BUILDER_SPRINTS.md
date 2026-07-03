@@ -93,7 +93,7 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
   сохраняют `!==0`; (2) same_period_last_month fixed-30d ломал выравнивание при календарном grain → grain-
   aware сдвиг (`shiftMonthsUTC` для month/quarter/year, 30д для day/week) + режим добавлен в редактор.
   Примечание: 'ghost_line'≈'both' визуально (pill=hero-delta всегда).
-- **S9 — Target / forecast** — SHIPPED `<pending>`
+- **S9 — Target / forecast** — SHIPPED `e52ff2b`
   Target стал resolver-owned: `resolveWidgetMetric` = wrapper над `resolveMetricCore` + `resolveTargetValue`
   (fixed→value; **dynamic**→valueRaw другой same-source метрики через рекурсивный core-resolve, self-guard;
   forecast отложен — семантика фуззи). `result.target`+`result.targetPct`. WidgetRenderer: goal-линия из
@@ -120,10 +120,21 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
   фикс сломал бы реальный net-zero — верификатор поймал); (2) [LOW] igFormats терял format-stable цвет
   `MEDIA_PRODUCT_CHART` → фикс. **Живой e2e IG = юзер (IG-подключённый канал).**
   Осталось: SourceField не даёт пинить IG-канал для IG-виджета (follow-switcher ок; follow-up).
-- **S12 — Визуальный слой ПОСЛЕ модели** — TODO
+- **S12 — Визуальный слой ПОСЛЕ модели** — SHIPPED `<pending>` (полировка; миграция TgAnalytics отложена)
+  Story-card полировка из ОДНОГО рендерера: **компактный статистика-футер** (Макс · Среднее) под series-
+  графиком (`seriesStats` pure+тест) — «ledger»-плотность (steep: линия читается и числами). Hairline,
+  2 начертания, без теней/градиентов (governance). +2 теста (269). **Осознанно НЕ сделано:** tonal-фоны
+  по category (конфликт с design-governance «без градиентов»); единый tooltip (у чартов уже есть).
+  **⚠️ Миграция TgAnalytics на резолвер/рендерер ОТЛОЖЕНА** — большой live-refactor страницы, локально
+  не верифицируется (нет authed-рендера); панель уже работает на inline-логике (агрегаторы уже в lib).
 
 ## Журнал
 
+- 2026-07-03 — **S12 SHIPPED** `<pending>` + **S9** `e52ff2b`. S9: target resolver-owned (fixed+dynamic)
+  + «N% от цели» (review 0). S12: story-card стат-футер (Макс·Среднее). Tonal-фон/tooltip/TgAnalytics-
+  миграция осознанно отложены (governance / риск live-страницы). **ПЛАН S1-S12 ЗАКРЫТ** (кроме опциональной
+  миграции TgAnalytics). Итог: 31 метрика (20 TG + 11 IG), 269 тестов, движок→редактор→фильтры→сравнение→
+  цель, всё на проде.
 - 2026-07-03 — **S8 SHIPPED** `f426b96`. Сравнение-модель: display honor + month/custom + IG-ghost.
   Ревью поймало 2 LOW: netFollowers net-zero ghost (hasCur-gate), month-shift календарное выравнивание
   (grain-aware shiftMonthsUTC). Урок: shared-хелпер applyIgGhost — фикс scoped через opts, не глобально.
