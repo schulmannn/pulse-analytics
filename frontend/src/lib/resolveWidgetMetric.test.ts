@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { resolveWidgetMetric, type DataContext } from '@/lib/resolveWidgetMetric';
 import type { WidgetConfig } from '@/lib/widgetConfig';
-import type { ChannelsResponse, HistoryData, TgFull, TgGraphs } from '@/api/schemas';
+import type {
+  ChannelsResponse,
+  HistoryData,
+  IgBreakdowns,
+  IgInsights,
+  IgOnline,
+  IgProfile,
+  TgFull,
+  TgGraphs,
+} from '@/api/schemas';
 
 // ── Deterministic synthetic fixtures around a fixed «now» (no Date.now() in the resolver). ──
 const DAY = 24 * 60 * 60 * 1000;
@@ -235,8 +244,8 @@ describe('resolveWidgetMetric — stubs + guards (never throws)', () => {
     expect(resolveWidgetMetric(cfg('nope.metric'), ctx).empty).toBe(true);
   });
 
-  it('returns empty for IG metrics (S11 not wired yet)', () => {
-    expect(resolveWidgetMetric(cfg('ig.reach'), ctx).empty).toBe(true);
+  it('returns empty for IG metrics when the ctx carries no IG payload', () => {
+    expect(resolveWidgetMetric(cfg('ig.reach'), ctx).empty).toBe(true); // ctx.ig is undefined
   });
 
   it('returns empty for TG series-from-graphs / tables (S3c not wired yet)', () => {
@@ -249,5 +258,139 @@ describe('resolveWidgetMetric — stubs + guards (never throws)', () => {
     const noData: DataContext = { ...ctx, tg: { channelId: null } };
     expect(resolveWidgetMetric(cfg('tg.views'), noData).empty).toBe(true);
     expect(resolveWidgetMetric(cfg('tg.erv'), noData).empty).toBe(true);
+  });
+});
+
+// ── Instagram (S11) ────────────────────────────────────────────────────────────────────────────
+const igInsights = {
+  data: [
+    { name: 'reach', values: [{ end_time: iso(1), value: 1000 }, { end_time: iso(5), value: 2000 }] },
+    { name: 'total_interactions', values: [{ end_time: iso(1), value: 100 }, { end_time: iso(5), value: 200 }] },
+    { name: 'follows', values: [{ end_time: iso(2), value: 50 }] },
+    { name: 'unfollows', values: [{ end_time: iso(2), value: 10 }] },
+  ],
+} as unknown as IgInsights;
+
+const igBreakdowns = {
+  data: [
+    {
+      name: 'total_interactions',
+      total_value: {
+        breakdowns: [
+          {
+            dimension_keys: ['media_product_type'],
+            results: [
+              { dimension_values: ['REEL'], value: 300 },
+              { dimension_values: ['FEED'], value: 200 },
+            ],
+          },
+        ],
+      },
+    },
+    {
+      name: 'follower_demographics',
+      total_value: {
+        breakdowns: [
+          { dimension_keys: ['age'], results: [{ dimension_values: ['25-34'], value: 800 }, { dimension_values: ['18-24'], value: 500 }] },
+          { dimension_keys: ['gender'], results: [{ dimension_values: ['F'], value: 700 }, { dimension_values: ['M'], value: 600 }] },
+          { dimension_keys: ['country'], results: [{ dimension_values: ['RU'], value: 900 }] },
+          { dimension_keys: ['city'], results: [{ dimension_values: ['Moscow, Moscow'], value: 400 }] },
+        ],
+      },
+    },
+  ],
+} as unknown as IgBreakdowns;
+
+const igProfile = { followers_count: 44000 } as unknown as IgProfile;
+const igOnline = { data: [{ values: [{ end_time: iso(3), value: { '9': 10, '12': 25, '18': 40 } }] }] } as unknown as IgOnline;
+
+const igCtx: DataContext = {
+  now: NOW,
+  days: 30,
+  range: null,
+  inRange,
+  ig: { profile: igProfile, insights: igInsights, breakdowns: igBreakdowns, online: igOnline },
+};
+
+describe('resolveWidgetMetric — Instagram (S11)', () => {
+  it('resolves ig.reach as a flow series (sum) + value + delta', () => {
+    const r = resolveWidgetMetric(cfg('ig.reach'), igCtx);
+    expect(r.empty).toBeFalsy();
+    expect(r.kind).toBe('series');
+    expect(r.unit).toBe('views');
+    expect(r.valueRaw).toBe(3000); // 1000 + 2000 in window
+    expect(r.series!.reduce((s, p) => s + p.value, 0)).toBe(3000);
+  });
+
+  it('resolves ig.followers from the profile count', () => {
+    const r = resolveWidgetMetric(cfg('ig.followers'), igCtx);
+    expect(r.valueRaw).toBe(44000);
+    expect(r.value).toBeTruthy();
+  });
+
+  it('resolves ig.netFollowers = follows − unfollows', () => {
+    const r = resolveWidgetMetric(cfg('ig.netFollowers'), igCtx);
+    expect(r.valueRaw).toBe(40); // 50 − 10
+    expect(r.value).toMatch(/^\+/);
+  });
+
+  it('shows a genuine net-zero window (follows == unfollows) as «0», not empty', () => {
+    const zeroIns = {
+      data: [
+        { name: 'follows', values: [{ end_time: iso(2), value: 40 }] },
+        { name: 'unfollows', values: [{ end_time: iso(2), value: 40 }] },
+      ],
+    } as unknown as IgInsights;
+    const r = resolveWidgetMetric(cfg('ig.netFollowers'), { ...igCtx, ig: { ...igCtx.ig, insights: zeroIns } });
+    expect(r.empty).toBeFalsy(); // real data, net 0
+    expect(r.valueRaw).toBe(0);
+  });
+
+  it('returns empty for ig.netFollowers when there is no movement data (hasCur false)', () => {
+    expect(resolveWidgetMetric(cfg('ig.netFollowers'), { ...igCtx, ig: {} }).empty).toBe(true);
+  });
+
+  it('resolves ig.erv = interactions ÷ reach × 100', () => {
+    const r = resolveWidgetMetric(cfg('ig.erv'), igCtx);
+    expect(r.value).toBe('10.0%'); // 300 / 3000 × 100
+    expect(r.valueRaw).toBeCloseTo(10, 5);
+  });
+
+  it('resolves ig.formats with localized labels + format-stable colors, sorted desc', () => {
+    const r = resolveWidgetMetric(cfg('ig.formats'), igCtx);
+    expect(r.breakdown!.map((i) => i.label)).toEqual(['Reels', 'Лента']);
+    expect(r.breakdown!.map((i) => i.value)).toEqual([300, 200]);
+    // format-stable hues (MEDIA_PRODUCT_CHART): REEL → chart-2, FEED → chart-1 — matches the dashboard.
+    expect(r.breakdown![0].color).toBe('hsl(var(--chart-2))');
+    expect(r.breakdown![1].color).toBe('hsl(var(--chart-1))');
+  });
+
+  it('resolves ig.age in chronological bucket order (not by value)', () => {
+    const r = resolveWidgetMetric(cfg('ig.age'), igCtx);
+    expect(r.breakdown!.map((i) => i.label)).toEqual(['18-24', '25-34']); // AGE_ORDER order
+    expect(r.breakdown!.map((i) => i.value)).toEqual([500, 800]);
+  });
+
+  it('resolves ig.gender with localized labels', () => {
+    const r = resolveWidgetMetric(cfg('ig.gender'), igCtx);
+    expect(r.breakdown!.map((i) => i.label)).toEqual(['Женщины', 'Мужчины']);
+  });
+
+  it('resolves ig.countries / ig.cities (top-N, localized)', () => {
+    expect(resolveWidgetMetric(cfg('ig.countries'), igCtx).breakdown![0].value).toBe(900);
+    expect(resolveWidgetMetric(cfg('ig.cities'), igCtx).breakdown![0]).toMatchObject({ label: 'Москва', value: 400 });
+  });
+
+  it('resolves ig.hours by hour of day (summed grid)', () => {
+    const r = resolveWidgetMetric(cfg('ig.hours'), igCtx);
+    expect(r.breakdown).toHaveLength(24);
+    expect(r.breakdown!.find((i) => i.label === '12:00')!.value).toBe(25);
+  });
+
+  it('returns empty for an IG metric with no data (no crash)', () => {
+    const bare: DataContext = { ...igCtx, ig: {} };
+    expect(resolveWidgetMetric(cfg('ig.reach'), bare).empty).toBe(true);
+    expect(resolveWidgetMetric(cfg('ig.followers'), bare).empty).toBe(true);
+    expect(resolveWidgetMetric(cfg('ig.formats'), bare).empty).toBe(true);
   });
 });

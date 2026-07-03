@@ -4,6 +4,7 @@ import { WidgetRenderer } from '@/components/WidgetRenderer';
 import { ConfigEditDialog } from '@/components/ConfigEditDialog';
 import { ChannelScope } from '@/lib/channel-context';
 import { useWidgetData } from '@/lib/useWidgetData';
+import { useIgWidgetData } from '@/lib/useIgWidgetData';
 import { getMetric } from '@/lib/widgetMetrics';
 import { updateWidgetConfig } from '@/lib/widgetStore';
 import type { WidgetConfig } from '@/lib/widgetConfig';
@@ -55,9 +56,20 @@ export function ConfigWidget({ config, homeKey }: { config: WidgetConfig; homeKe
   );
 }
 
-/** Body only — kept a child of ChartSection (inside its ChannelScope + card) so useWidgetData reads
- *  the pinned channel and the chart fills the tile via the card's height context. */
+/** Body only — kept a child of ChartSection (inside its ChannelScope + card) so the data hook reads
+ *  the pinned channel and the chart fills the tile via the card's height context. TG and IG bodies
+ *  are distinct COMPONENTS (not a conditional hook) so a TG widget never mounts the IG queries. */
 function ConfigWidgetBody({ config }: { config: WidgetConfig }) {
+  const metric = getMetric(config.metricId);
+  return metric?.source === 'ig' ? <IgWidgetBody config={config} /> : <TgWidgetBody config={config} />;
+}
+
+function TgWidgetBody({ config }: { config: WidgetConfig }) {
   const result = useWidgetData(config);
+  return <WidgetRenderer result={result} viz={config.viz} />;
+}
+
+function IgWidgetBody({ config }: { config: WidgetConfig }) {
+  const result = useIgWidgetData(config);
   return <WidgetRenderer result={result} viz={config.viz} />;
 }

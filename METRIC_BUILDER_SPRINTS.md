@@ -72,18 +72,36 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
 - **S7 — Per-widget фильтры `FilterBuilder` + каталог DIMENSIONS** — TODO
 - **S8 — Сравнение как настройка модели** — TODO
 - **S9 — Target / forecast** — TODO
-- **S10 — Богаче grain (day..year, flow vs level)** — SHIPPED `<pending>`
+- **S10 — Богаче grain (day..year, flow vs level)** — SHIPPED `1d308a9`
   `SeriesGrain = Grain | quarter | year` в metricSeries (Grain=day/week/month оставлен для MetricPage
   Record-мап — живую страницу НЕ трогал; функции расширены до SeriesGrain, Grain остаётся assignable).
   bucketKeyOf → `YYYY-Qn`/`YYYY`; bucketKeysInWindow — календарный обход month/quarter/year. Резолвер
   effGrain пропускает quarter/year; flow (bucketPostField) СУММА, level (bucketSubsLevel) ПОСЛЕДНЕЕ —
   инвариант заперт тестом (quarter-сумма views=3500, year-level subs=44000, не сумма). bucketLabel
   «n кв. YYYY»/год. Редактор +Квартал/Год. +8 тестов (232). Adversarial-review boundary+integration.
-- **S11 — IG-метрики в каталог (self-fetching)** — TODO
+- **S11 — IG-пути в резолвере + раскрытие IG в каталоге** — SHIPPED `<pending>`
+  `lib/igAggregations.ts` (pure IG-порт: igSeriesPoints с history-lengthen reach/follower, netFollower
+  points, bucketIgSeries flow-сумма, igWindowValue, breakdowns formats/age/gender/countries/cities/hours
+  — переиспользует igMetrics + metricSeries). Резолвер: `DataContext.ig` = IgDataContext, `resolveIg`
+  выводит IG-окно ТОЧНО как useIgData (until/since, 90-cap) → reach/interactions/netFollowers/followers/
+  erv + breakdowns. `lib/useIgWidgetData.ts` (IG query-хуки→ctx.ig). ConfigWidget = диспетч TG/IG
+  **компонентами** (не условный хук → TG-виджет не монтит IG-запросы). Каталог: IG раскрыт
+  (AVAILABLE_SOURCES=['tg','ig']). **Резолвер покрывает 31 метрику (20 TG + 11 IG).** +12 IG-тестов
+  (244) с точными значениями. **Adversarial-review (5 агентов, 3 оси): 2 дефекта пойманы+пофикшены** —
+  (1) [HIGH] ig.netFollowers мёртвый guard (`series.length===0` не срабатывает т.к. bucketKeysInWindow
+  всегда ≥1) → при insights=undefined «0» вместо empty; фикс через `hasCur` из igWindowValue (наивный
+  фикс сломал бы реальный net-zero — верификатор поймал); (2) [LOW] igFormats терял format-stable цвет
+  `MEDIA_PRODUCT_CHART` → фикс. **Живой e2e IG = юзер (IG-подключённый канал).**
+  Осталось: SourceField не даёт пинить IG-канал для IG-виджета (follow-switcher ок; follow-up).
 - **S12 — Визуальный слой ПОСЛЕ модели** — TODO
 
 ## Журнал
 
+- 2026-07-03 — **S11 SHIPPED** `<pending>`. IG-пути: `igAggregations.ts` + резолвер IG-ветка +
+  `useIgWidgetData` + ConfigWidget TG/IG-диспетч (компонентами, не хук) + каталог раскрыт. Резолвер
+  = 31 метрика. Ultracode-ревью поймал 2 дефекта; верификатор скорректировал предложенный фикс
+  netFollowers (hasCur, не series-all-zero — иначе сломался бы реальный net-zero). Живой IG = юзер.
+- 2026-07-03 — **S10 SHIPPED** `1d308a9`. grain quarter/year, review 0 находок.
 - 2026-07-03 — **S5 SHIPPED** `8971407`. `ConfigEditDialog` + ChartSection `configEditor`-хук.
   Ultracode: реализация → adversarial-review воркфлоу (5 осей: chartsection-regression/config-model/
   live-editing/control-gating/design-a11y, каждая находка verify-скептиком) → 2 фикса. Решения: config-

@@ -12,10 +12,9 @@ import { VIZ_LABEL } from '@/lib/widgetRender';
  */
 
 const SOURCE_LABEL: Record<'tg' | 'ig', string> = { tg: 'Telegram', ig: 'Instagram' };
-// Only sources the resolver can actually produce data for are offered — IG resolves to empty until
-// S11 wires its paths, so showing IG metrics now would add cards that render «Нет данных». Add 'ig'
-// here once S11 lands.
-const AVAILABLE_SOURCES: Array<'tg' | 'ig'> = ['tg'];
+// Both sources resolve now (TG: S3; IG: S11). A metric with no data for the active channel still
+// renders an honest «Нет данных» card, but the catalogue only offers metrics the resolver handles.
+const AVAILABLE_SOURCES: Array<'tg' | 'ig'> = ['tg', 'ig'];
 
 export function WidgetCatalogModal({
   onPick,

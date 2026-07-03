@@ -18,7 +18,17 @@
 // +ghost, and the erv / virality value metrics. TG breakdowns/tables (S3b) and IG (S11) resolve to
 // `{ empty: true }` for now — the architecture is complete; those paths are filled in later sprints.
 
-import type { ChannelsResponse, HistoryData, TgFull, TgGraphs } from '@/api/schemas';
+import type {
+  ChannelsResponse,
+  HistoryData,
+  IgBreakdowns,
+  IgHistoryData,
+  IgInsights,
+  IgOnline,
+  IgProfile,
+  TgFull,
+  TgGraphs,
+} from '@/api/schemas';
 import type { DateRange, PeriodDays } from '@/lib/period';
 import type { MetricDelta } from '@/lib/delta';
 import type { MetricKind, MetricUnit } from '@/lib/widgetMetrics';
@@ -30,6 +40,7 @@ import { normalizeTgPosts } from '@/lib/posts';
 import type { NormalizedPost } from '@/lib/posts';
 import { DAY_MS, alignGhost, bucketKeyOf, bucketKeysInWindow, comparisonWindow } from '@/lib/metricSeries';
 import type { SeriesGrain } from '@/lib/metricSeries';
+import { fmt } from '@/lib/format';
 import {
   churnBreakdown,
   emojiBreakdown,
@@ -45,6 +56,18 @@ import {
   weekdayViewsBreakdown,
   type BreakdownItem,
 } from '@/lib/tgAggregations';
+import {
+  bucketIgSeries,
+  igAgeBreakdown,
+  igCitiesBreakdown,
+  igCountriesBreakdown,
+  igFormatsBreakdown,
+  igGenderBreakdown,
+  igHoursBreakdown,
+  igNetFollowerPoints,
+  igSeriesPoints,
+  igWindowValue,
+} from '@/lib/igAggregations';
 
 export interface WidgetSeriesPoint {
   /** Bucket key — `YYYY-MM-DD` (day/week Monday) or `YYYY-MM` (month). The renderer formats it. */
@@ -93,12 +116,23 @@ export interface TgDataContext {
   channelId: number | null;
 }
 
+/** Already-loaded Instagram payloads (useIgProfile / useIgInsights / useIgBreakdowns / useIgOnline /
+ *  useIgHistory). The IG window (since/until) is derived from the ctx window below, mirroring
+ *  useIgData (IG insights cap at ~90 days). */
+export interface IgDataContext {
+  profile?: IgProfile;
+  insights?: IgInsights;
+  breakdowns?: IgBreakdowns;
+  online?: IgOnline;
+  history?: IgHistoryData;
+}
+
 /**
  * Everything the resolver needs, pre-resolved by the render layer:
  *   - `now` / `days` / `range` / `inRange` describe the widget's EFFECTIVE window (the render layer
  *     has already folded in config.period), so the resolver stays pure + deterministic (tests pass a
  *     fixed `now`; nothing calls Date.now() in here);
- *   - `tg` / `ig` are the already-fetched payloads (useTgFull / useHistory / useIgData).
+ *   - `tg` / `ig` are the already-fetched payloads (useTgFull / useHistory / useIgData hooks).
  */
 export interface DataContext {
   now: number;
@@ -106,7 +140,7 @@ export interface DataContext {
   range: DateRange | null;
   inRange: (dateISO: string | null | undefined) => boolean;
   tg?: TgDataContext;
-  ig?: unknown; // S11
+  ig?: IgDataContext;
 }
 
 // Which NormalizedPost field a core series sums (mirrors MetricPage's FIELD; subscribers has none).
@@ -268,8 +302,7 @@ export function resolveWidgetMetric(config: WidgetConfig, ctx: DataContext): Wid
 
   const out = base(metric.id, metric.kind, metric.unit);
 
-  // IG paths are wired in S11.
-  if (metric.source === 'ig') return { ...out, empty: true };
+  if (metric.source === 'ig') return resolveIg(metric.id, config, ctx, out);
 
   if (metric.drillKey) return resolveCoreTg(metric.drillKey, config, ctx, out);
   if (metric.id === 'tg.erv' || metric.id === 'tg.virality') return resolveTgRatio(metric.id, ctx, out);
@@ -333,6 +366,103 @@ function resolveTgBreakdown(metricId: string, ctx: DataContext, out: WidgetResul
   }
 
   // A breakdown that is empty OR all-zero (e.g. no posts on any weekday) is «no data».
+  if (items.length === 0 || items.every((i) => i.value === 0)) return { ...out, empty: true };
+  out.breakdown = items;
+  return out;
+}
+
+/** Resolve an Instagram metric. The IG window (since/until, capped ~90d) is derived from the ctx
+ *  window exactly as useIgData does; series flows SUM per bucket, demographics are period-agnostic
+ *  server aggregates (a follower snapshot, not a windowed count). */
+function resolveIg(metricId: string, config: WidgetConfig, ctx: DataContext, out: WidgetResult): WidgetResult {
+  const ig = ctx.ig;
+  if (!ig) return { ...out, empty: true };
+
+  const until = ctx.range ? ctx.range.to : ctx.now;
+  const windowDays = ctx.range
+    ? Math.min(90, Math.max(1, Math.ceil((ctx.range.to - ctx.range.from) / DAY_MS)))
+    : ctx.days > 0
+      ? Math.min(ctx.days, 90)
+      : 90;
+  const since = ctx.range ? ctx.range.from : until - windowDays * DAY_MS;
+  const grain = effGrain(config.grain);
+
+  /** A windowed flow series (reach / interactions): value + delta + grain-bucketed series. */
+  const flowSeries = (name: string): WidgetResult => {
+    const points = igSeriesPoints(ig.insights, ig.history, name);
+    const { cur, delta } = igWindowValue(points, since, until);
+    out.series = bucketIgSeries(points, since, until, grain);
+    out.valueRaw = cur;
+    out.value = fmt.short(cur);
+    out.delta = delta;
+    if (out.series.every((p) => p.value === 0) && cur === 0) return { ...out, empty: true };
+    return out;
+  };
+
+  switch (metricId) {
+    case 'ig.reach':
+      return flowSeries('reach');
+    case 'ig.interactions':
+      return flowSeries('total_interactions');
+    case 'ig.netFollowers': {
+      const points = igNetFollowerPoints(ig.insights);
+      const { cur, hasCur } = igWindowValue(points, since, until);
+      // hasCur (not series-length) is the real «no data» signal: bucketKeysInWindow always yields ≥1
+      // bucket, so a length check is dead. This mirrors the AudienceMovement panel / netMovement.hasCur
+      // — a genuine net-zero (follows==unfollows) has hasCur=true and legitimately shows «0».
+      if (!hasCur) return { ...out, empty: true };
+      out.series = bucketIgSeries(points, since, until, grain);
+      out.valueRaw = cur;
+      out.value = `${cur > 0 ? '+' : cur < 0 ? '−' : ''}${fmt.num(Math.abs(cur))}`;
+      return out;
+    }
+    case 'ig.followers': {
+      const count = Number(ig.profile?.followers_count ?? 0);
+      if (!count) return { ...out, empty: true };
+      out.valueRaw = count;
+      out.value = fmt.num(count);
+      return out;
+    }
+    case 'ig.erv': {
+      const reach = igWindowValue(igSeriesPoints(ig.insights, ig.history, 'reach'), since, until).cur;
+      const ti = igWindowValue(igSeriesPoints(ig.insights, ig.history, 'total_interactions'), since, until).cur;
+      if (reach <= 0) return { ...out, empty: true };
+      const er = (ti / reach) * 100;
+      out.valueRaw = er;
+      out.value = `${er.toFixed(1)}%`;
+      return out;
+    }
+    default:
+      return resolveIgBreakdown(metricId, ig, out);
+  }
+}
+
+/** Instagram categorical splits — demographics (age/gender/country/city), content formats, and
+ *  followers-online by hour. All period-agnostic server aggregates. */
+function resolveIgBreakdown(metricId: string, ig: IgDataContext, out: WidgetResult): WidgetResult {
+  let items: BreakdownItem[];
+  switch (metricId) {
+    case 'ig.formats':
+      items = igFormatsBreakdown(ig.breakdowns);
+      break;
+    case 'ig.age':
+      items = igAgeBreakdown(ig.breakdowns);
+      break;
+    case 'ig.gender':
+      items = igGenderBreakdown(ig.breakdowns);
+      break;
+    case 'ig.countries':
+      items = igCountriesBreakdown(ig.breakdowns);
+      break;
+    case 'ig.cities':
+      items = igCitiesBreakdown(ig.breakdowns);
+      break;
+    case 'ig.hours':
+      items = igHoursBreakdown(ig.online);
+      break;
+    default:
+      return { ...out, empty: true };
+  }
   if (items.length === 0 || items.every((i) => i.value === 0)) return { ...out, empty: true };
   out.breakdown = items;
   return out;
