@@ -237,6 +237,18 @@ color-toggle + crossfade иконок + remount текста (`index.css:251`, `
 
 ## Журнал
 
+- 2026-07-04 — **P0 Whole-card click opens detail SHIPPED** `d80c0b8` (бандл `index-BVw2hjZ-`; e2e 60 passed
+  +4). Steep-parity: вся карточка = таргет для detail, не только маленькая ↗. ChartSection inner card =
+  labelled `role=button` (Enter/Space + focus-ring + cursor-pointer); клик → тот же `setExpandOpen` что ↗
+  (config→WidgetExplorer / legacy→ChartExpandOverlay, оба portaled). **Гард:** onClick пропускает
+  `closest('button,a,input,select,label,svg,[role=dialog]')` → контролы (⋯меню, ↗, ×, drill-hero=button,
+  графики=svg) и открытые диалоги живут; onKeyDown только на `e.target===currentTarget` (не на дочерних);
+  reorder → onClick/onKeyDown/tabIndex/role = undefined (drag не триггерит). Новый e2e: клик по title →
+  role=dialog открывается, Escape закрывает. **Ultracode review (2 оси→verify): 3 confirmed / 0 refuted
+  (2 issue):** (1) padding/дивайдеры ⋯-дропдауна (НЕ portaled, не buttons) баблили на card → открывали
+  overlay поверх открытого меню → `stopPropagation` на дропдауне; (2) focusable card без role/aria-label =
+  nameless tab-stop (WCAG 4.1.2) → добавил `role=button`+`aria-label` (Codex-acceptance требует keyboard).
+  Гейт: build+318 vitest+60 e2e. Прод-верифай = браузер (клик карточки → detail).
 - 2026-07-04 — **P0 Playwright visual QA SHIPPED** `08b905a` (бандл `index-Dk6zbLNr.js`; e2e 56 passed × 4
   вьюпорта). Regression-gate для отгруженных фиксов. Проверил: Playwright+headless Chromium РАБОТАЮТ в
   среде (smoke). **Подход = demo-mode оффлайн:** `page.route('**/api/auth/me' → 200 user)` (единственный
