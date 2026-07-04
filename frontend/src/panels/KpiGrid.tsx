@@ -72,9 +72,10 @@ export function KpiGrid() {
         info={METRIC_DEFS.views}
         onDrill={() => openMetric('views')}
       />
-      {/* LEDGER — secondary metrics as hairline columns (Figma: Подписчики / Ср.охват / Реакции / ER).
-          Clean cells: label + value + one inline delta (no per-cell sparkline, no caption line). */}
-      <div className="grid grid-cols-2 gap-px border-t border-border bg-border lg:grid-cols-4">
+      {/* LEDGER — secondary metrics (Подписчики / Ср.охват / Реакции / ER). Separated by SPACING,
+          not a hairline grid: the card border already frames them, so inner dividers just read as
+          "lines within lines" (technical). One quiet top hairline splits ledger from the hero. */}
+      <div className="grid grid-cols-2 gap-x-6 gap-y-4 border-t border-border pt-4 lg:grid-cols-4">
         <StatTile label="Подписчики" value={fmt.num(displayMembers)} trend={subscriberTrend} deltaText={subDelta} info={METRIC_DEFS.subscribers} onDrill={() => openMetric('subscribers')} />
         <StatTile label="Ср. охват" value={fmt.short(avgViews)} trend={avgReachTrend} info={METRIC_DEFS.avgReach} onDrill={() => openMetric('avgReach')} />
         <StatTile label="Реакции" value={fmt.short(totalReactions)} trend={reactionsTrend} deltaText={reactionsDelta} info={METRIC_DEFS.reactions} onDrill={() => openMetric('reactions')} />
@@ -186,9 +187,11 @@ interface StatTileProps {
  */
 function StatTile({ label, value, trend, deltaText, info, onDrill }: StatTileProps) {
   const [num, unit] = splitUnit(value);
+  // No per-cell background/border now — cells separate by grid SPACING. A drillable cell gets a
+  // quiet rounded hover surface (bled out with -m so the hit area stays comfortable).
   const cell = onDrill
-    ? { onClick: onDrill, title: 'Подробный разбор', className: 'cursor-pointer bg-card p-4 transition-colors hover:bg-muted/60' }
-    : { className: 'bg-card p-4' };
+    ? { onClick: onDrill, title: 'Подробный разбор', className: 'cursor-pointer rounded-md -m-1.5 p-1.5 transition-colors hover:bg-muted/50' }
+    : {};
   const deltaColor =
     trend?.dir === 'up' ? 'text-verdant' : trend?.dir === 'down' ? 'text-ember' : 'text-muted-foreground';
   return (
@@ -223,10 +226,10 @@ function KpiSkeletons() {
         <Skeleton className="mt-2 h-11 w-40" />
         <Skeleton className="mt-4 h-16 w-full max-w-2xl" />
       </div>
-      {/* LEDGER — same scaffold (border-t / gap-px / bg-border cells on paper) as the live grid */}
-      <div className="grid grid-cols-2 gap-px border-t border-border bg-border lg:grid-cols-4">
+      {/* LEDGER — same scaffold (border-t + spacing) as the live grid, so nothing reflows on load. */}
+      <div className="grid grid-cols-2 gap-x-6 gap-y-4 border-t border-border pt-4 lg:grid-cols-4">
         {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="bg-card p-4">
+          <div key={i}>
             <Skeleton className="h-2.5 w-16" />
             <Skeleton className="mt-2 h-6 w-20" />
           </div>
