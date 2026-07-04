@@ -84,7 +84,9 @@ export function Home() {
 
   return (
     <div>
-      <div className="mb-6 flex items-start justify-between gap-3">
+      {/* Sticky page header — the Edit action stays reachable while scrolling the board (steep).
+          Solid bg + a hairline (no blur/shadow per governance); bg bleeds to the content padding. */}
+      <div className="sticky top-0 z-20 -mx-4 mb-6 flex items-start justify-between gap-3 border-b border-border bg-background px-4 py-3 sm:-mx-6 sm:px-6">
         <div>
           <h2 className="text-2xl font-medium tracking-tight text-foreground">Главная</h2>
           <p className="mt-0.5 text-sm text-muted-foreground">Ваши закреплённые виджеты.</p>
