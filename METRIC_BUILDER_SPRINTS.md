@@ -237,6 +237,20 @@ color-toggle + crossfade иконок + remount текста (`index.css:251`, `
 
 ## Журнал
 
+- 2026-07-04 — **P1 Color contrast audit — SHIPPED `ca4def4`** (321 vitest + **176 e2e**, +64 контраст-прогонов).
+  Два слоя автогейта: (1) `e2e/a11y-contrast.spec.ts` — axe color-contrast (правило, исключённое из основного
+  a11y-гейта) ПО ТЕМАМ (light/dark = разные палитры; `bootDemo` получил `theme`-опцию → pulse_theme до load) на
+  4 маршрутах + detail + home-edit + палитра + widget-editor (там живут disabled), 16 сканов × 4 вьюпорта;
+  (2) `scripts/contrast-tokens.mjs` — non-text ревью (WCAG 1.4.11 не автоматизируется axe): chart-strokes,
+  ghost @0.8 (alpha-composite!), focus ring, дельты на тинтах, chip-пары — hard-fail <4.5 text / <3.0
+  stroke+ring, hairlines = warn-only (декоративны по канону). **Найдено и пофикшено (только light; dark чист):**
+  `--chart-2` 45%→33% L (глубокий янтарь; 4.2:1 plain → dashed-ghost проходит 3:1 ПРЯМО через свою 0.8-опасити,
+  ноль правок компонентов); `--chart-6` 55%→52.5%; `--accent-foreground` 53%→49.5% — калиброван против ОБОИХ
+  синих тинтов (--accent И primary/10-над-бумагой), теперь его юзает active edit-toggle label (axe поймал 3.97
+  с голым --primary). Colorblind-ревью: палитра уже Okabe-Ito (комменты в index.css), серии никогда не
+  colour-alone (легенды/лейблы) — ок. Визуальный чек light: янтарь консистентен warm-палитре (status-warn уже
+  #83590b). Урок: токен-ink для текста-на-tint должен проверяться против ВСЕХ реальных тинтов (composited
+  primary/10 темнее --accent → 51.5% хватало на одном, но не на другом).
 - 2026-07-04 — **P1 Accessibility audit (keyboard/SR/focus) — SHIPPED `aa39890`** (321 vitest + **112 e2e**,
   +48 a11y-прогонов). Ultracode 3 воркфлоу: (1) аудит 5 осей→verify-скептики = **62 находки → 59 confirmed**
   (3 refuted: DateRangePicker = dead code); (2) применение — 6 параллельных агентов на 13 механических файлов
