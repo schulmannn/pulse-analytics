@@ -45,8 +45,13 @@ export function WidgetSkeleton({ viz }: { viz: WidgetViz }) {
 export function WidgetRenderer({ result, viz }: { result: WidgetResult; viz: WidgetViz }) {
   if (result.empty) {
     return (
-      <div className="flex h-full min-h-[6rem] items-center justify-center text-sm text-muted-foreground">
-        Нет данных за период
+      <div className="flex h-full min-h-[6rem] flex-col items-center justify-center gap-1.5 px-3 text-center">
+        <svg className="h-6 w-6 text-ink3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M4 5v14h16" />
+          <path d="M7 14h10" strokeDasharray="2 2.5" opacity="0.7" />
+        </svg>
+        <div className="text-sm font-medium text-foreground">Нет данных за период</div>
+        <p className="text-2xs text-muted-foreground">Попробуйте другой период или источник.</p>
       </div>
     );
   }
