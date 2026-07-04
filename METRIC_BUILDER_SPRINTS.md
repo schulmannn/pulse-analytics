@@ -237,6 +237,16 @@ color-toggle + crossfade иконок + remount текста (`index.css:251`, `
 
 ## Журнал
 
+- 2026-07-04 — **P0 Reusable chart controls — SHIPPED `c395c9d` (acceptance закрыта)** (бандл `index-DR8IdrsV`;
+  321 vitest +3 + 64 e2e). Design-first (Explore): 4/5 acceptance УЖЕ было — `WidgetConfigControls` (единый
+  компонент) юзается в ConfigEditDialog + WidgetExplorer + CreateWidgetDialog (parity ✅), eligibility =
+  `editorSpec.capabilities` ✅, prefs = widgetStore+/api/prefs ✅. **Единственный gap = «disabled states with
+  reason»** (раньше неподходящие контролы ПРЯТАЛИСЬ). Фикс: `EditorSpec.disabledReasons` (метрик-ветка; grain/
+  compare/target→«только series», filter→«нет измерений», viz→«один тип графика»); `WidgetConfigControls`
+  рендерит `DisabledField` (greyed + причина) вместо скрытия; legacy = bare shell (без disabled-мусора). Render-
+  only + spec-metadata, без data-model/persistence изменений. **Границы:** унификация URL-driven MetricPage +
+  callback-driven ChartExpandOverlay на этот компонент нужна config-migration (как TgAnalytics-миграция) — отд.
+  большая работа, НЕ в acceptance. **7 P0 закрыто.** Осталось: backend-кластер (нужны product/архитектур-решения).
 - 2026-07-04 — **P0 Full-screen detail shell — SLICE 2 SHIPPED `f6a5ed3` → ACCEPTANCE ЗАКРЫТА** (бандл
   `index-BxqtRQIQ`; 318 vitest + 64 e2e). Slice 2 = **URL-state**: overlay open-state теперь в `?detail=<widgetId>`
   (не local state) → shareable + browser Back закрывает. ChartSection: `expandOpen = searchParams.get('detail')
