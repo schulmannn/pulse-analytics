@@ -1077,6 +1077,10 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
 
   const menuItem =
     'flex w-full items-center gap-2.5 rounded px-2.5 py-1.5 text-left text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40';
+  // Card header affordances (expand / menu / remove) share ONE quiet circular icon-button shape —
+  // uniform 28px hit target, hover surface, hover colour set per-button (foreground / destructive).
+  const iconBtn =
+    'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted';
 
   return (
     <section
@@ -1120,7 +1124,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
             aria-label={`Убрать виджет «${prefs.title || title}» с главной`}
             title="Убрать с главной"
             onClick={() => homeKey && unpinFromHome(homeKey)}
-            className={`shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-destructive ${
+            className={`${iconBtn} hover:text-destructive ${
               reorder ? 'pointer-events-none opacity-0' : 'home-remove-enter'
             }`}
           >
@@ -1134,7 +1138,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
           aria-label={`Развернуть виджет «${prefs.title || title}»`}
           title="Развернуть"
           onClick={() => setExpandOpen(true)}
-          className={`shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground print:hidden ${
+          className={`${iconBtn} hover:text-foreground print:hidden ${
             showHomeRemove ? 'hidden' : ''
           } ${reorder ? 'pointer-events-none opacity-0' : ''}`}
         >
@@ -1148,7 +1152,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
             aria-label={`Меню виджета «${prefs.title || title}»`}
             aria-expanded={menuOpen}
             onClick={() => setMenuOpen((v) => !v)}
-            className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            className={`${iconBtn} hover:text-foreground`}
           >
             <svg viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4" aria-hidden="true">
               <circle cx="3.5" cy="8" r="1.25" />
