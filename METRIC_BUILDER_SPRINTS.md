@@ -237,6 +237,20 @@ color-toggle + crossfade иконок + remount текста (`index.css:251`, `
 
 ## Журнал
 
+- 2026-07-04 — **P0 Playwright visual QA SHIPPED** `08b905a` (бандл `index-Dk6zbLNr.js`; e2e 56 passed × 4
+  вьюпорта). Regression-gate для отгруженных фиксов. Проверил: Playwright+headless Chromium РАБОТАЮТ в
+  среде (smoke). **Подход = demo-mode оффлайн:** `page.route('**/api/auth/me' → 200 user)` (единственный
+  authed-endpoint без фикстуры) + `addInitScript(pulse_demo='1')` → весь TG-дашборд рендерится из
+  детерминированных client-side фикстур БЕЗ backend/Postgres. `playwright.config.ts`: 4 проекта-вьюпорта
+  (430/768/900/1440), webServer=`npm run dev` (:5173). Спеки: `e2e/dashboard.spec.ts` (no-inner-scrollbars
+  + no-h-scroll + no-runaway-height + screenshot на `/`,`/analytics`,`/posts`) + `e2e/interactions.spec.ts`
+  (detail open/back через drilldown; edit-mode entry/exit по `button.edit-toggle` aria-pressed).
+  `e2e/helpers.ts` bootDemo. **ГЕЙТ ПОЙМАЛ РЕАЛЬНЫЙ БАГ:** «Упоминаний по дням» (Mentions.tsx bar-variant)
+  скроллился +8px — лишний `<div className="pt-2">` вокруг BarChart выталкивал за фикс-тайл → убрал. (Мой
+  ручной прод-замер это пропустил — гейт ценен.) Detail-тест (клик «Разбор:»→/metrics/) доказывает что
+  рендерится AUTHED-дашборд, не landing (не false-green). vitest.config exclude `e2e/**`; `npm run test:e2e`;
+  test-results gitignored. ⚠️ CI: нужен `npx playwright install chromium` перед прогоном. Верификация =
+  сам зелёный suite (self-verifying) + поймал mentions-баг. Гейт: build+318 vitest+56 e2e.
 - 2026-07-04 — **P0 Crash telemetry SHIPPED** `588c8e1` (бандл `index-CqMYWMXO.js`, 318 тестов +6, server 16
   тестов). Прямое продолжение error-boundaries: раньше render-crash = только console `[app-crash]`, страницу
   «интерфейс не смог отрисоваться» нельзя диагностировать. Теперь каждый crash (widget-boundary И app-level)
