@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveWidgetMetric, type DataContext } from '@/lib/resolveWidgetMetric';
+import { pluralRu, resolveWidgetMetric, type DataContext } from '@/lib/resolveWidgetMetric';
 import type { WidgetConfig } from '@/lib/widgetConfig';
 import type {
   ChannelsResponse,
@@ -570,5 +570,102 @@ describe('resolveWidgetMetric — Instagram (S11)', () => {
     expect(resolveWidgetMetric(cfg('ig.reach'), bare).empty).toBe(true);
     expect(resolveWidgetMetric(cfg('ig.followers'), bare).empty).toBe(true);
     expect(resolveWidgetMetric(cfg('ig.formats'), bare).empty).toBe(true);
+  });
+});
+
+describe('resolveWidgetMetric — unified meta (source + data-quality caption)', () => {
+  it('attaches network / period / sample / freshness to a post-derived metric', () => {
+    const r = resolveWidgetMetric(cfg('tg.views'), ctx);
+    expect(r.meta).toBeDefined();
+    expect(r.meta!.network).toBe('tg');
+    expect(r.meta!.periodLabel).toBe('за 30 дн.');
+    expect(r.meta!.samplePosts).toBe(3); // the 35-day post is out of window
+    expect(r.meta!.sourceLabel).toBeUndefined(); // not pinned → follows the switcher, no handle
+    // newest data = the 1-day-old post → «вчера», not stale (fixed NOW keeps this deterministic)
+    expect(r.meta!.fresh?.label).toBe('вчера');
+    expect(r.meta!.fresh?.stale).toBe(false);
+  });
+
+  it('names the pinned source (config.source) via the channels payload', () => {
+    const r = resolveWidgetMetric(cfg('tg.views', { source: 1 }), ctx);
+    expect(r.meta!.sourceLabel).toBe('@bynotem');
+  });
+
+  it('reports archive coverage (not post sample) for archive-derived subscribers', () => {
+    const r = resolveWidgetMetric(cfg('tg.subscribers'), ctx);
+    expect(r.meta!.archiveDays).toBe(2);
+    expect(r.meta!.samplePosts).toBeUndefined();
+  });
+
+  it('explains a coverage-suppressed comparison instead of silently dropping the ghost', () => {
+    const many = Array.from({ length: 100 }, (_, i) => mkPost(1 + (i % 40), 500, 20, 4, 2));
+    const cappedCtx: DataContext = {
+      ...ctx,
+      tg: { ...ctx.tg!, full: { ...(full as object), posts: many } as unknown as TgFull },
+    };
+    const r = resolveWidgetMetric(cfg('tg.views', { comparison: { mode: 'previous_period', display: 'ghost_line' } }), cappedCtx);
+    expect(r.ghost).toBeUndefined();
+    expect(r.meta!.comparisonNote).toBe('сравнение скрыто — недостаточно истории постов');
+  });
+
+  it('keeps the note absent when the comparison IS drawn', () => {
+    const r = resolveWidgetMetric(cfg('tg.views', { comparison: { mode: 'previous_period', display: 'ghost_line' } }), ctx);
+    expect(r.ghost).toBeDefined();
+    expect(r.meta!.comparisonNote).toBeUndefined();
+  });
+
+  it('attaches meta to EMPTY results too (the card must say what was empty)', () => {
+    const bare: DataContext = { now: NOW, days: 7, range: null, inRange };
+    const r = resolveWidgetMetric(cfg('tg.views'), bare);
+    expect(r.empty).toBe(true);
+    expect(r.meta).toBeDefined();
+    expect(r.meta!.network).toBe('tg');
+    expect(r.meta!.periodLabel).toBe('за 7 дн.');
+    expect(r.meta!.fresh).toBeUndefined(); // no payloads → no invented freshness
+  });
+
+  it('counts the ratio sample (erv) from valid per-post values', () => {
+    const r = resolveWidgetMetric(cfg('tg.erv'), ctx);
+    expect(r.meta!.samplePosts).toBe(3);
+  });
+
+  it('pluralRu picks Russian forms', () => {
+    expect(pluralRu(1, ['пост', 'поста', 'постов'])).toBe('пост');
+    expect(pluralRu(3, ['пост', 'поста', 'постов'])).toBe('поста');
+    expect(pluralRu(12, ['пост', 'поста', 'постов'])).toBe('постов');
+    expect(pluralRu(21, ['пост', 'поста', 'постов'])).toBe('пост');
+    expect(pluralRu(114, ['пост', 'поста', 'постов'])).toBe('постов');
+  });
+});
+
+describe('resolveWidgetMetric — meta honesty fixes (verify round)', () => {
+  it('does not claim a window on period-agnostic breakdowns (keeps it on post-derived ones)', () => {
+    const agnostic = resolveWidgetMetric(cfg('tg.viewsBySource'), ctx);
+    expect(agnostic.meta!.periodLabel).toBeUndefined();
+    const postDerived = resolveWidgetMetric(cfg('tg.formatPerf'), ctx);
+    expect(postDerived.meta!.periodLabel).toBe('за 30 дн.');
+  });
+
+  it('explains a comparison with no derivable baseline («Всё» has no shiftable window)', () => {
+    const allCtx: DataContext = { ...ctx, days: 0, inRange: () => true };
+    const r = resolveWidgetMetric(cfg('tg.views', { comparison: { mode: 'previous_period', display: 'ghost_line' } }), allCtx);
+    expect(r.ghost).toBeUndefined();
+    expect(r.meta!.comparisonNote).toBe('сравнение недоступно для этого периода');
+  });
+
+  it('flags the not-yet-supported netGrowth comparison instead of a dead control', () => {
+    const netGraphs = {
+      followers: {
+        x: [NOW - 2 * DAY, NOW - 1 * DAY],
+        series: [
+          { name: 'joined', values: [30, 40] },
+          { name: 'left', values: [10, 5] },
+        ],
+      },
+    } as unknown as TgGraphs;
+    const netCtx: DataContext = { ...ctx, tg: { ...ctx.tg!, graphs: netGraphs } };
+    const r = resolveWidgetMetric(cfg('tg.netGrowth', { comparison: { mode: 'previous_period', display: 'ghost_line' } }), netCtx);
+    expect(r.empty).toBeFalsy();
+    expect(r.meta!.comparisonNote).toBe('сравнение пока не поддерживается для этой метрики');
   });
 });

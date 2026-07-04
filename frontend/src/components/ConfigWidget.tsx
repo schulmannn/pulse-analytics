@@ -76,14 +76,22 @@ export function ConfigWidget({ config, homeKey }: { config: WidgetConfig; homeKe
           : undefined
       }
     >
-      <WidgetBody config={config} onDrill={onDrill} drillLabel={label} />
+      {/* The pin scopes ONLY the card body — not the whole ChartSection: the explorer render-prop
+          must stay OUTSIDE the pin so its draft fully controls its own scope («Как в свитчере» in
+          the sandbox previews switcher data, not the still-pinned original channel). */}
+      {config.source != null ? (
+        <ChannelScope channelId={config.source}>
+          <WidgetBody config={config} onDrill={onDrill} drillLabel={label} />
+        </ChannelScope>
+      ) : (
+        <WidgetBody config={config} onDrill={onDrill} drillLabel={label} />
+      )}
     </ChartSection>
   );
-  const wrapped = config.source != null ? <ChannelScope channelId={config.source}>{card}</ChannelScope> : card;
 
   return (
     <>
-      {wrapped}
+      {card}
       {editOpen && configurable && (
         <ConfigEditDialog
           config={config}

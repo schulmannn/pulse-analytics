@@ -43,6 +43,8 @@ import { postMatchesFilters } from '@/lib/dimensions';
 import { DAY_MS, alignGhost, baselineCoveredByPosts, bucketKeyOf, bucketKeysInWindow, comparisonWindow } from '@/lib/metricSeries';
 import type { SeriesGrain } from '@/lib/metricSeries';
 import { fmt } from '@/lib/format';
+import { freshness, latestDataMs } from '@/lib/freshness';
+import type { Freshness } from '@/lib/freshness';
 import {
   churnBreakdown,
   emojiBreakdown,
@@ -88,6 +90,28 @@ export interface WidgetLedgerRow {
   value: string;
 }
 
+/**
+ * The unified «source + data-quality» caption (one honest line per card): which network/source the
+ * number comes from, over which window, from how much data, how fresh it is, and why a requested
+ * comparison is not drawn. All fields optional — every resolve path fills what it truly knows and
+ * nothing more; the renderer joins the present segments with «·» and never invents copy.
+ */
+export interface WidgetMeta {
+  network?: 'tg' | 'ig';
+  /** Pinned source handle («@name») — absent when the card follows the global switcher. */
+  sourceLabel?: string;
+  /** Human window: «за 30 дн.» / «за всё время» / «выбранный период». */
+  periodLabel?: string;
+  /** Posts behind a post-derived number (the filtered, in-window sample). */
+  samplePosts?: number;
+  /** Archive days behind an archive-derived series (subscribers / net growth). */
+  archiveDays?: number;
+  /** Freshness of the newest loaded post / archived day (see lib/freshness). */
+  fresh?: Freshness;
+  /** Why a REQUESTED comparison is hidden («сравнение скрыто — …»). Absent when drawn or not asked. */
+  comparisonNote?: string;
+}
+
 export interface WidgetResult {
   metricId: string;
   kind: MetricKind;
@@ -110,6 +134,9 @@ export interface WidgetResult {
   targetPct?: number;
   /** True when the resolver has no data path for this metric yet (S3b / S11 stubs, or missing data). */
   empty?: boolean;
+  /** Unified source + data-quality caption — attached to EVERY result, including empty ones (an
+   *  empty card must still say WHAT was empty: network / source / window). */
+  meta?: WidgetMeta;
 }
 
 /** Already-loaded TG payloads + the active channel (no fetching happens here). */
@@ -258,6 +285,57 @@ function base(metricId: string, kind: MetricKind, unit: MetricUnit): WidgetResul
   return { metricId, kind, unit };
 }
 
+/** Russian plural picker: pluralRu(3, ['пост', 'поста', 'постов']) → 'поста'. */
+export function pluralRu(n: number, forms: [one: string, few: string, many: string]): string {
+  const abs = Math.abs(n) % 100;
+  const last = abs % 10;
+  if (abs > 10 && abs < 20) return forms[2];
+  if (last === 1) return forms[0];
+  if (last >= 2 && last <= 4) return forms[1];
+  return forms[2];
+}
+
+/** Local YYYY-MM-DD of an epoch instant — feeds lib/freshness (which reasons in local days). */
+function localDay(ms: number): string {
+  const d = new Date(ms);
+  const p = (x: number) => String(x).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/** The meta fields EVERY result carries: network, pinned-source handle, window label, freshness.
+ *  Pure over the ctx (fresh uses ctx.now, never Date.now()); resolve paths layer sample/coverage/
+ *  comparison specifics on top. */
+function commonMeta(config: WidgetConfig, ctx: DataContext, network: 'tg' | 'ig'): WidgetMeta {
+  const meta: WidgetMeta = {
+    network,
+    periodLabel: ctx.range ? 'выбранный период' : ctx.days > 0 ? `за ${ctx.days} дн.` : 'за всё время',
+  };
+  // The handle is meaningful only when the card is PINNED to a source (config.source) — a card that
+  // follows the global switcher would repeat the sidebar and go stale the moment the user switches.
+  if (config.source != null) {
+    if (network === 'tg') {
+      const c = ctx.tg?.channels?.channels?.find((ch) => ch.id === ctx.tg?.channelId);
+      if (c) meta.sourceLabel = `@${c.username || c.title || c.id}`;
+    } else {
+      const u = ctx.ig?.profile?.username;
+      if (u) meta.sourceLabel = `@${u}`;
+    }
+  }
+  if (network === 'tg' && ctx.tg) {
+    const t = latestDataMs(ctx.tg.full?.posts ?? undefined, ctx.tg.history ?? undefined);
+    const f = t != null ? freshness(localDay(t), ctx.now) : null;
+    if (f) meta.fresh = f;
+  } else if (network === 'ig' && ctx.ig?.history?.rows?.length) {
+    let latest: string | null = null;
+    for (const r of ctx.ig.history.rows) {
+      if (r.day && (latest === null || r.day > latest)) latest = r.day;
+    }
+    const f = freshness(latest, ctx.now);
+    if (f) meta.fresh = f;
+  }
+  return meta;
+}
+
 /** Apply the widget's per-post filters (S7) to a TgFull's posts — the resolver filters the already-
  *  fetched posts client-side, so a metric aggregates only the matching subset. No-op without filters. */
 function applyFilters(full: TgFull, filters: WidgetConfig['filters']): TgFull {
@@ -309,6 +387,9 @@ function resolveCoreTg(
     out.valueRaw = derived.displayMembers;
     const inWin = derived.historyRows.filter((r) => ctx.inRange(r.day));
     out.series = bucketSubsLevel(inWin, grain);
+    // Count only rows that actually FEED the series — partial cron captures may carry views but a
+    // null subscribers, and bucketSubsLevel drops those.
+    out.meta = { ...out.meta, archiveDays: inWin.filter((r) => r.subscribers != null).length };
     const baseWin = wantsGhostLine(cmp) ? comparisonBaseline(cmp, winFrom, winTo, grain) : null;
     if (baseWin) {
       const baseRows = derived.historyRows.filter((r) => {
@@ -319,7 +400,13 @@ function resolveCoreTg(
       if (gseries.length >= 2 && gseries.length === out.series.length) {
         out.ghost = gseries.map((p) => p.value);
         out.ghostLabel = cmpLabel;
+      } else {
+        out.meta = { ...out.meta, comparisonNote: 'сравнение скрыто — не хватает архива' };
       }
+    } else if (cmp && cmp.mode !== 'none' && wantsGhostLine(cmp)) {
+      // A requested comparison with NO derivable baseline («Всё» has no shiftable window; custom
+      // without dates) — say so instead of a control that visibly does nothing.
+      out.meta = { ...out.meta, comparisonNote: 'сравнение недоступно для этого периода' };
     }
   } else if (field) {
     out.valueRaw =
@@ -329,6 +416,7 @@ function resolveCoreTg(
           ? derived.er
           : derived.normPosts.reduce((s, p) => s + Number(p[field] ?? 0), 0);
     out.series = bucketPostField(derived.normPosts, field, winFrom, winTo, grain);
+    out.meta = { ...out.meta, samplePosts: derived.normPosts.length };
     const baseWin = wantsGhostLine(cmp) ? comparisonBaseline(cmp, winFrom, winTo, grain) : null;
     // Only draw the baseline ghost when the sum over it is COMPLETE. The post fetch server-caps at
     // 100 (useTgFull windowPair), so a long (e.g. 90д) prev/year baseline can start before the oldest
@@ -350,7 +438,16 @@ function resolveCoreTg(
       if (gv.some((v) => v > 0)) {
         out.ghost = gv;
         out.ghostLabel = cmpLabel;
+      } else {
+        // Requested, computable, but genuinely nothing there — say so instead of silently no line.
+        out.meta = { ...out.meta, comparisonNote: 'сравнение скрыто — за базовый период пусто' };
       }
+    } else if (baseWin) {
+      // The coverage guard suppressed the ghost (capped fetch, baseline predates loaded posts) —
+      // surface the honest reason the metric page already explains, on the card itself.
+      out.meta = { ...out.meta, comparisonNote: 'сравнение скрыто — недостаточно истории постов' };
+    } else if (cmp && cmp.mode !== 'none' && wantsGhostLine(cmp)) {
+      out.meta = { ...out.meta, comparisonNote: 'сравнение недоступно для этого периода' };
     }
   }
   return out;
@@ -367,6 +464,7 @@ function resolveTgRatio(metricId: 'tg.erv' | 'tg.virality', ctx: DataContext, ou
   const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
   out.valueRaw = avg;
   out.value = `${avg.toFixed(1)}%`;
+  out.meta = { ...out.meta, samplePosts: vals.length };
   return out;
 }
 
@@ -416,6 +514,12 @@ function resolveTargetValue(config: WidgetConfig, ctx: DataContext): number | nu
  */
 export function resolveWidgetMetric(config: WidgetConfig, ctx: DataContext): WidgetResult {
   const result = resolveMetricCore(config, ctx);
+  // The unified caption rides on EVERY result (incl. empty — the card must say WHAT was empty).
+  // Path-specific fields (sample / coverage / comparison notes) were set by the resolve path and
+  // win over the common base. `source: 'all'` (none in the catalogue today) falls back by payload.
+  const src = getMetric(config.metricId)?.source;
+  const network: 'tg' | 'ig' = src === 'ig' ? 'ig' : src === 'tg' ? 'tg' : ctx.ig && !ctx.tg ? 'ig' : 'tg';
+  result.meta = { ...commonMeta(config, ctx, network), ...result.meta };
   if (!result.empty && config.target) {
     const target = resolveTargetValue(config, ctx);
     if (target != null) {
@@ -447,8 +551,19 @@ function resolveTgNetGrowth(config: WidgetConfig, ctx: DataContext, out: WidgetR
   const sum = inWin.reduce((s, p) => s + p.value, 0);
   out.valueRaw = sum;
   out.value = `${sum > 0 ? '+' : sum < 0 ? '−' : ''}${fmt.num(Math.abs(sum))}`;
+  out.meta = { ...out.meta, archiveDays: inWin.length };
+  // The editor offers Сравнение for every series metric, but this path has no ghost yet — be
+  // honest on the card instead of a control that silently does nothing.
+  const cmp = config.comparison;
+  if (cmp && cmp.mode !== 'none' && wantsGhostLine(cmp)) {
+    out.meta = { ...out.meta, comparisonNote: 'сравнение пока не поддерживается для этой метрики' };
+  }
   return out;
 }
+
+/** The TG breakdowns whose items derive from the fetched posts (and so honour the widget window +
+ *  filters) — everything else in resolveTgBreakdown is a period-agnostic server aggregate. */
+const POST_DERIVED_BREAKDOWNS = new Set(['tg.emoji', 'tg.formatPerf', 'tg.weekdayViews', 'tg.postCount']);
 
 /** TG categorical splits — dispatched to the pure aggregators in tgAggregations. Post-derived
  *  metrics window the fetched posts by ctx.inRange; summary/graphs metrics are period-agnostic
@@ -468,6 +583,7 @@ function resolveTgBreakdown(metricId: string, config: WidgetConfig, ctx: DataCon
     case 'tg.postCount': {
       const raw = (full.posts ?? []).filter((p) => postMatchesFilters(p, config.filters));
       const posts = normalizeTgPosts(raw, full.channel ?? {}).filter((p) => ctx.inRange(p.date));
+      out.meta = { ...out.meta, samplePosts: posts.length };
       items =
         metricId === 'tg.emoji'
           ? emojiBreakdown(posts)
@@ -506,6 +622,10 @@ function resolveTgBreakdown(metricId: string, config: WidgetConfig, ctx: DataCon
       return { ...out, empty: true };
   }
 
+  // Summary/graphs breakdowns are period-agnostic server aggregates — the widget window does NOT
+  // window them, so a «за 7 дн.» claim would be false. Post-derived ones (the set above) honour it.
+  if (!POST_DERIVED_BREAKDOWNS.has(metricId)) out.meta = { ...out.meta, periodLabel: undefined };
+
   // A breakdown that is empty OR all-zero (e.g. no posts on any weekday) is «no data».
   if (items.length === 0 || items.every((i) => i.value === 0)) return { ...out, empty: true };
   out.breakdown = items;
@@ -537,6 +657,10 @@ function resolveIg(metricId: string, config: WidgetConfig, ctx: DataContext, out
   const since = ctx.range ? ctx.range.from : until - windowDays * DAY_MS;
   const grain = effGrain(config.grain);
 
+  // «Всё» is a hard 90-day slice on IG (insights cap) — label the window the number actually
+  // covers, not the period the user picked. Followers/breakdowns override this below (agnostic).
+  if (ctx.days === 0 && !ctx.range) out.meta = { ...out.meta, periodLabel: 'за 90 дн.' };
+
   /** Comparison ghost (S8) for an IG flow series — the baseline window's bucketed series, aligned to
    *  the active series length. Honours display ('delta' → no line) and every mode (prev/year/month/
    *  custom). Kept a no-op when there's no comparison, so it's shared by every IG series metric. */
@@ -555,6 +679,8 @@ function resolveIg(metricId: string, config: WidgetConfig, ctx: DataContext, out
     if (show) {
       out.ghost = gv;
       out.ghostLabel = config.comparison ? COMPARISON_LABEL[config.comparison.mode] : undefined;
+    } else {
+      out.meta = { ...out.meta, comparisonNote: 'сравнение скрыто — за базовый период пусто' };
     }
   };
 
@@ -594,6 +720,8 @@ function resolveIg(metricId: string, config: WidgetConfig, ctx: DataContext, out
       if (!count) return { ...out, empty: true };
       out.valueRaw = count;
       out.value = fmt.num(count);
+      // A CURRENT total (profile snapshot) — no window applies to it.
+      out.meta = { ...out.meta, periodLabel: undefined };
       return out;
     }
     case 'ig.erv': {
@@ -613,6 +741,8 @@ function resolveIg(metricId: string, config: WidgetConfig, ctx: DataContext, out
 /** Instagram categorical splits — demographics (age/gender/country/city), content formats, and
  *  followers-online by hour. All period-agnostic server aggregates. */
 function resolveIgBreakdown(metricId: string, ig: IgDataContext, out: WidgetResult): WidgetResult {
+  // Server snapshots — the widget window does not apply (incl. the «за 90 дн.» IG override).
+  out.meta = { ...out.meta, periodLabel: undefined };
   let items: BreakdownItem[];
   switch (metricId) {
     case 'ig.formats':

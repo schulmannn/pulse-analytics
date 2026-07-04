@@ -5,7 +5,8 @@ import { PieChart } from '@/components/PieChart';
 import { Breakdown } from '@/components/Breakdown';
 import { WidgetTargetContext } from '@/components/ExpandableChart';
 import { Skeleton } from '@/components/ui/skeleton';
-import type { WidgetResult } from '@/lib/resolveWidgetMetric';
+import { pluralRu } from '@/lib/resolveWidgetMetric';
+import type { WidgetMeta, WidgetResult } from '@/lib/resolveWidgetMetric';
 import type { WidgetViz } from '@/lib/widgetMetrics';
 import { breakdownTitles, effectiveViz, seriesStats, seriesToChart } from '@/lib/widgetRender';
 
@@ -67,6 +68,8 @@ export function WidgetRenderer({
         </svg>
         <div className="text-sm font-medium text-foreground">Нет данных за период</div>
         <p className="text-2xs text-muted-foreground">Попробуйте другой период или источник.</p>
+        {/* WHAT was empty — the same source/window line a healthy card carries. */}
+        <WidgetMetaLine meta={result.meta} className="max-w-full" />
       </div>
     );
   }
@@ -117,12 +120,56 @@ export function WidgetRenderer({
       )}
       {/* The chart's goal line reads the target from this context (config-widget: resolver-computed). */}
       <WidgetTargetContext.Provider value={result.target ?? null}>
-        <div className={`min-h-0 flex-1 ${showHero ? 'mt-3' : ''}`}>
+        {/* overflow-hidden: fixed-tile charts size their svg from the measured BODY height, which
+            can overrun this flex-1 band and paint under the meta line / stats footer — clip the
+            chart to its allotted band so the caption stays legible. */}
+        <div className={`min-h-0 flex-1 overflow-hidden ${showHero ? 'mt-3' : ''}`}>
           <WidgetChart result={result} eff={eff} onDrill={onDrill} />
         </div>
       </WidgetTargetContext.Provider>
+      <WidgetMetaLine meta={result.meta} className="mt-2" />
       <SeriesStatsFooter result={result} eff={eff} />
     </div>
+  );
+}
+
+/**
+ * The unified «source + data-quality» caption (steep honesty line): network · @source (when pinned) ·
+ * window · sample («12 постов» / «30 дн. в архиве») · freshness · «сравнение скрыто — …». One muted
+ * single line; only the segments the resolver truly knows are rendered, and a stale-data segment
+ * takes the warn tone. shrink-0 + truncate so it never squeezes the chart or wraps the tile.
+ */
+function WidgetMetaLine({ meta, className = '' }: { meta?: WidgetMeta; className?: string }) {
+  if (!meta) return null;
+  const segs: Array<{ key: string; text: string; warn?: boolean }> = [];
+  if (meta.network) segs.push({ key: 'net', text: meta.network === 'ig' ? 'Instagram' : 'Telegram' });
+  if (meta.sourceLabel) segs.push({ key: 'src', text: meta.sourceLabel });
+  if (meta.periodLabel) segs.push({ key: 'per', text: meta.periodLabel });
+  if (meta.samplePosts != null && meta.samplePosts > 0)
+    segs.push({ key: 'smp', text: `${meta.samplePosts} ${pluralRu(meta.samplePosts, ['пост', 'поста', 'постов'])}` });
+  if (meta.archiveDays != null && meta.archiveDays > 0)
+    segs.push({ key: 'arc', text: `${meta.archiveDays} дн. в архиве` });
+  if (meta.fresh) segs.push({ key: 'fr', text: `данные: ${meta.fresh.label}`, warn: meta.fresh.stale });
+  if (meta.comparisonNote) segs.push({ key: 'cmp', text: meta.comparisonNote });
+  if (segs.length === 0) return null;
+  // Inline spans inside one truncating <p> — a genuine single line with an ellipsis, never a wrap
+  // that eats chart height (the tile is fixed; this row is shrink-0 like the stats footer).
+  return (
+    <p className={`min-w-0 shrink-0 truncate text-2xs text-muted-foreground ${className}`}>
+      {segs.map((s, i) => (
+        <span key={s.key}>
+          {/* Spaces stay OUTSIDE aria-hidden — hiding them with the dot glues the segments together
+              for screen readers («Telegramза 30 дн.»). Only the decorative glyph is hidden. */}
+          {i > 0 && (
+            <>
+              {' '}
+              <span aria-hidden="true">·</span>{' '}
+            </>
+          )}
+          <span className={s.warn ? 'text-status-warn' : undefined}>{s.text}</span>
+        </span>
+      ))}
+    </p>
   );
 }
 
