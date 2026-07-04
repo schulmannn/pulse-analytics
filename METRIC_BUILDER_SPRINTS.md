@@ -180,8 +180,78 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
     работа), НЕ shell-adapter. Оставлены на registry-пути намеренно. **Метрик-билдер трек = ЗАКРЫТ.**
 Риск снят юзером («никто не пользуется»); гейт=build+тесты+review, визуал=прод.
 
+## Prod-review фидбек юзера 2026-07-04 — переприоритезация бэклога (ГЛАВНОЕ)
+
+Юзер прогнал прод-ревью (ultrareview-worktree). Вывод: «premium» упирается НЕ в ещё один цвет/border, а
+в КОНСИСТЕНТНОСТЬ МОДЕЛИ — любой виджет = одна сущность, синкается как часть аккаунта, открывается в один
+и тот же explorer, честно объясняет источник/качество данных. Новый порядок приоритетов (сверху = раньше):
+
+**P0 (сначала):**
+- **Account-synced WidgetConfig store.** `lib/widgetStore.ts` сейчас localStorage-only (account-sync
+  осознанно отложен с S6.1). Для premium слабо: настройки виджетов/источников/цветов не переезжают между
+  устройствами. Чинить: hydrate/persist через `/api/prefs` или отдельный `/api/widget-configs`; хранить
+  `WidgetConfig[]` c `updatedAt`/`schemaVersion`; merge local+server; только потом Home = «истина».
+- **IG-редактор показывает TG-источники (BUG, подтверждён на проде).** IG → «Охват» → поле «Источник»
+  показывало TG-каналы (bynotem/tydaaya). Корень: `ConfigEditDialog.tsx` SourceField фильтрует
+  `c.source !== 'ig'` (показывает НЕ-ig). Чинить: source-aware по `getMetric(config.metricId)?.source` —
+  IG-метрика → только ig-каналы, TG → только tg; если IG не подключён → disabled empty-state, НЕ чужие каналы.
+
+**P1:**
+- **Universal explorer parity для КАЖДОГО ChartSection.** Ядро (WidgetExplorer) есть, но own-chrome legacy
+  (history/velocity/heatmap/mentions) живут отдельно, а legacy-композиты («Показатели») shell-only (период/
+  источник/размер/цвет, без viz/comparison). Чинить: «Explorer contract» обязателен для каждого ChartSection
+  (через WidgetConfig ИЛИ adapter, отдающий period/viz/comparison/source capabilities). Долгосрочно: own-chrome
+  → НАСТОЯЩИЕ catalogue-метрики с resolver-поддержкой (не shell-only legacy) — см. U6.3b.
+- **Структура страниц (гибридный scroll-feed).** /analytics всё ещё содержит DOM «Обзор/Посты/Упоминания»
+  (одна длинная проскролленная страница, route-модель `App.tsx`). Sidebar на 5 разделов — ок, если каждый =
+  одна задача. Идея: /overview = executive scroll-summary; /analytics, /posts, /reports = сфокусированные
+  рабочие места (сохранить «не заставлять кликать» через overview-summary).
+- **Source/story/data-quality как ЕДИНАЯ подпись (поднять выше #4/#5).** Связать caption с data-quality:
+  «последняя синхронизация», «окно неполное», «выборка N постов», «сравнение скрыто — baseline неполный».
+  Прямо влияет на ДОВЕРИЕ (объединяет прежние #4/#5 caption + #15 data-quality).
+
+**Новые дискретные пункты (в бэклог):** account-synced WidgetConfig store · IG/TG source-aware editor ·
+universal explorer parity for every ChartSection · Playwright/visual QA @430/768/900/1440 · reduced-motion
+для edit-анимации · export / open-as-metric / add-to-report из меню КАЖДОГО виджета (#7 object-model).
+
+**Posts-table premium (#10):** важен, но ПОСЛЕ того как /posts станет настоящим разделом (иначе улучшения
+таблицы тонут внутри общего feed).
+
+### Motion pass: edit-mode choreography (отдельная задача, высокий ROI — «ощущение качества»)
+Проблема: сейчас Edit = «состояние переключилось», у Steep = «интерфейс вошёл в режим». Кнопка делает лишь
+color-toggle + crossfade иконок + remount текста (`index.css:251`, `Home.tsx:94`) → плоско. Правки:
+- **Fixed-width Edit-кнопка** (min-w 116-124px, labels absolute/grid-overlay) — «Изменить»/«Готово» разной
+  длины, микросдвиг ломает premium.
+- **Настоящий press-state** (:active/pointerdown): scale .96, translateY .5px, фон foreground/6→/9, 70-90ms.
+- **Icon morph/draw** (не crossfade): pencil rotate 0→18° / scale 1→.75 / opacity→0; check scale .75→1 /
+  opacity 0→1 + draw через stroke-dasharray/dashoffset 180-220ms.
+- **Развести timeline (stagger):** 0-90 press → 80-240 icon morph → 100-260 label crossfade → 140-340 card
+  remove-кнопки staggered → 220-380 «+ Добавить виджет» последним. Кнопка «командует», страница отвечает.
+- **Exit-анимация:** держать remove-controls в DOM, переключать opacity/scale/pointer-events (Готово→Изменить
+  тоже плавно).
+- **Прочее:** widget-jiggle слишком iOS/toy → уменьшить амплитуду ИЛИ спокойный edit-state (тонкая active-рамка
+  + drag-handle); ⋯-меню popover-motion (opacity 0→1, scale .98→1, y -2→0, 100-130ms); explorer раскрывать из
+  карточки (FLIP/card-origin scale); catalog→preview один shell с drill-in (не смена модалок); chart tooltip
+  мягче (60-90ms opacity + мелкий y-offset); sidebar active = один sliding pill. Всё под prefers-reduced-motion.
+- Самый высокий ROI: fixed-width кнопка + press physics + drawn check + staggered card controls + мягкий exit.
+
 ## Журнал
 
+- 2026-07-04 — **Chart hover #9 ОСТАТОК SHIPPED** `64cc270`. Drilldown + legend-toggle (последний кусок #9;
+  ядро-tooltip было `6359270`). (1) **Legend-toggle:** comparison-чип в LineChart/BarChart стал aria-pressed
+  кнопкой (скрыть/показать ghost); скрытый ghost выпадает из y-домена → серия рескейлится. (2) **Drilldown:**
+  opt-in `onPointClick` на чартах (hit-rects, pointer-cursor) + keyboard-доступная hero-кнопка в
+  WidgetRenderer; оба от одного `onDrill`, который ConfigWidget берёт из `metric.drillKey` (6 core TG). Previews/
+  explorer/IG/legacy — static (onDrill не прокидывается). **Ultracode adversarial-review (3 оси→verify, 8
+  агентов): 4 confirmed + 1 refuted, все пофикшены:** [HIGH] stale ghostHidden (скрыл→сменил comparison/route→
+  оставался скрыт) → content-signature reset-effect (НЕ по array-identity — иначе чип un-clickable на refetch с
+  нестабильной ссылкой); [HIGH] pinned-source drill показывал ЧУЖОЙ канал (metric-page читает глобальный
+  switcher, не config.source) → drill ПОДАВЛЕН на source-pinned картах (`config.source == null` гейт; proper
+  channel-scoped drill → backlog); [MED] generic hero aria-label → threaded `drillLabel` («Разбор: <метрика>»
+  как KpiGrid DrillValue); [LOW] MetricPage дубль-контрол (page-level «Сравнение» SegSelect + чип десинхрон) →
+  `legendToggle={false}` на metric-page charts (static label вместо toggle). Гейт build+291. Файлы: LineChart/
+  BarChart/WidgetRenderer/ConfigWidget/MetricPage. ⚠️ Живой визуал = прод (authed локально не рендерится).
+  Осталось от #9: click-по-точке уже drill (сделано), клик-по-легенде toggle (сделано) — **#9 ЗАКРЫТ.**
 - 2026-07-03 — **BUGFIX metric-page comparison undercount** (prod-audit находка). /metrics/views:
   hero (archive) показывал −9%, а rail «Сравнение» +969.3% (прошлый период 1.2k). Причина: post-derived
   метрики (views/reactions/…) суммируют `postsInBase` = fetch-capped(~100)/windowed посты за ПРЕДЫДУЩЕЕ
