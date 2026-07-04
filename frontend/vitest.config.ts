@@ -7,5 +7,8 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
+    // e2e/ holds Playwright specs (run via `npm run test:e2e`), not vitest — keep them out of the
+    // unit run so vitest doesn't try to execute @playwright/test files.
+    exclude: ['**/node_modules/**', '**/dist/**', 'e2e/**'],
   },
 });

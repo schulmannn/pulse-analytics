@@ -219,11 +219,9 @@ export function MentionsByDayWidget({ byDay, id, homeKey }: { byDay: Record<stri
           {
             key: 'bar',
             label: 'Столбцы',
-            render: (
-              <div className="pt-2">
-                <BarChart values={w.values} labels={w.dates} titles={w.titles} />
-              </div>
-            ),
+            // No wrapper padding: the chart fills the measured tile body exactly, so an extra pt-*
+            // here would push it past the fixed tile and grow an inner scrollbar.
+            render: <BarChart values={w.values} labels={w.dates} titles={w.titles} />,
           },
           {
             key: 'line',
