@@ -237,6 +237,17 @@ color-toggle + crossfade иконок + remount текста (`index.css:251`, `
 
 ## Журнал
 
+- 2026-07-04 — **P0 Full-screen detail shell — SLICE 1 SHIPPED** `adc3c24` (бандл `index-qYlhdy9t`; e2e 60,
+  P0 ЕЩЁ В РАБОТЕ). Design-first (Plan-агент): 3 detail-поверхности (`ChartExpandOverlay` read / `WidgetExplorer`
+  config-sandbox / `MetricPage` route) — НЕ один компонент, а общий SHELL-chrome + pluggable body. **Slice 1:**
+  извлёк `components/DetailShell.tsx` (portal + role=dialog+aria-modal + focus-trap+restore + scroll-lock +
+  capture-Escape + × + варианты panel/fullscreen); перевёл оба оверлея на него, тела verbatim. → 3/4 acceptance
+  (один shell / legacy fallback / no per-widget bespoke modal) + focus-trap добавлен в config-sandbox +
+  Escape стандартизован. ChartSection open-path + whole-card-click + drill НЕ трогал (low-risk). Верифай =
+  build+318 vitest+60 e2e (оверлеи гоняются напрямую) + self-review (× overlap pr-14, focus-trap, capture-Escape,
+  panel Card, regionH measure — чисто). **Остаток P0 (slice-ами):** 2=URL-state `?detail=` (4-й acceptance);
+  3=export (`lib/csv.ts` reuse); 4=explanation (`METRIC_DEFS` rail); 5=metric-page унификация (последней). Карта
+  «В работе».
 - 2026-07-04 — **P0 Whole-card click opens detail SHIPPED** `d80c0b8` (бандл `index-BVw2hjZ-`; e2e 60 passed
   +4). Steep-parity: вся карточка = таргет для detail, не только маленькая ↗. ChartSection inner card =
   labelled `role=button` (Enter/Space + focus-ring + cursor-pointer); клик → тот же `setExpandOpen` что ↗
