@@ -57,8 +57,9 @@ export const HOME_REGISTRY: Record<string, HomeWidgetDef> = {
   },
   digest: {
     label: 'Инсайт',
+    // Narrative insight takes a content-height `full` card (no fixed tile → no inner scrollbar).
     render: () => (
-      <ChartSection id="home-digest" homeKey="digest" title="Инсайт" periodControl>
+      <ChartSection id="home-digest" homeKey="digest" title="Инсайт" periodControl defaultSize="full">
         <Digest />
       </ChartSection>
     ),

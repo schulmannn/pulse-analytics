@@ -1344,11 +1344,13 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
       <div className={`mt-3 flex min-h-0 flex-1 flex-col ${reorder ? 'pointer-events-none' : ''}`}>
         <WidgetPeriodProvider value={widgetPeriod}>
           <WidgetTargetContext.Provider value={activeTarget}>
-            {/* Chart region — flex-1 eats the tile's leftover height; overflow-y-auto lets a long list
-                (Breakdown / pie legend) scroll instead of blowing the fixed height. fillHeight feeds
-                the leftover height to EVERY chart inside (variant or bare children) so they fill; a
-                `full` card passes null, so its charts keep their own/explicit height. */}
-            <div ref={bodyRef} className="min-h-0 flex-1 overflow-y-auto">
+            {/* Chart region — flex-1 eats the tile's leftover height. overflow-hidden (NOT auto): a
+                dashboard tile must never grow an inner scrollbar — content adapts to the tile instead
+                (charts reserve their below-axis rows so they fit; narrative/heavy widgets take a
+                content-height `full` card). fillHeight feeds the leftover height to EVERY chart inside
+                (variant or bare children) so they fill; a `full` card passes null, so its charts keep
+                their own/explicit height. */}
+            <div ref={bodyRef} className="min-h-0 flex-1 overflow-hidden">
               {/* Per-widget boundary: a body crash becomes a calm in-card fallback, the header + ⋯
                   menu survive (so the broken widget can still be hidden / edited), and every sibling
                   widget and the app shell keep rendering. */}

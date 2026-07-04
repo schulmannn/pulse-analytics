@@ -106,7 +106,11 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
   const max = scale ? scale.hi : rawMax;
   const n = values.length;
   const chartWidth = Math.max(width, 1);
-  const chartHeight = ctxHeight ?? height;
+  // In a fixed-height card tile (ctxHeight set, not the expanded overlay), the comparison legend is
+  // an HTML row BELOW the svg — reserve its height so svg + legend fit the tile with no inner
+  // scrollbar. (X-labels are drawn INSIDE the svg via paddingBottom, so they need no reservation.)
+  const legendRow = ctxHeight != null && !expanded && hasGhost ? 22 : 0;
+  const chartHeight = Math.max((ctxHeight ?? height) - legendRow, 60);
   const paddingBottom = labels && labels.length > 0 ? 24 : 0;
   const graphHeight = chartHeight - paddingBottom;
   // Expanded view: headroom for the value labels above full-height bars.

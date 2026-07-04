@@ -127,6 +127,10 @@ export function LineChart({
   const targetCtx = useContext(WidgetTargetContext);
   const target = targetCtx != null && Number.isFinite(targetCtx) ? targetCtx : null;
   const showAxes = fullAxes || expanded;
+  // Axis-free cards draw a minimal x-label row (first/mid/last) as an HTML row BELOW the svg; axes
+  // mode puts the x-axis inside the svg instead. Computed up here so the svg height can reserve the
+  // row's space in a fixed tile (below).
+  const hasXAxis = showAxes && !!labels && labels.length === values.length;
   // Strip colons from useId — valid in ids, but break SVG url(#…) refs in some browsers.
   const gradientId = `lc${useId().replace(/:/g, '')}`;
 
@@ -171,7 +175,19 @@ export function LineChart({
     );
   }
 
-  const h = ctxHeight ?? height ?? 200;
+  // In a fixed-height card tile (ctxHeight = the tile's leftover height, and NOT the expanded
+  // overlay), the svg shares the tile with the HTML rows drawn below it — the minimal x-label row
+  // and/or the comparison legend. Reserve their height so svg + rows fit the tile exactly: no inner
+  // scrollbar, no clipped axis. Outside a tile (ctxHeight null → content-height card, or the expanded
+  // overlay where labels live inside the svg) nothing is reserved.
+  const X_LABEL_ROW_H = 22;
+  const LEGEND_ROW_H = 22;
+  const belowRows =
+    ctxHeight != null && !expanded
+      ? (labels && labels.length > 0 && !hasXAxis ? X_LABEL_ROW_H : 0) +
+        (ghost && ghost.length >= 2 ? LEGEND_ROW_H : 0)
+      : 0;
+  const h = Math.max((ctxHeight ?? height ?? 200) - belowRows, 80);
   const W = Math.max(width, 1);
   const padR = 10;
   const padY = 12;
@@ -179,7 +195,6 @@ export function LineChart({
   // reading. Needs a taller bottom band; the axis-free cards keep the symmetric pad and the
   // minimal first/mid/last HTML row below the svg. Requires PER-POINT labels (one per value);
   // legacy 3-label arrays can't be positioned on the axis and keep the HTML row instead.
-  const hasXAxis = showAxes && !!labels && labels.length === values.length;
   const padB = hasXAxis ? 30 : padY;
 
   // Toggled off (or absent), the comparison drops out of every draw/measure below; the legend

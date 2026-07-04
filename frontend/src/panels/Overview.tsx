@@ -61,7 +61,9 @@ export function Overview() {
           {/* KPI hero (Просмотры · окно виджета) + ledger (Подписчики / Ср.охват / Реакции / ER) */}
           <KpiGrid />
         </ChartSection>
-        <ChartSection id="overview-digest" title="Инсайт" periodControl homeKey="digest">
+        {/* Narrative insight — a heavy 3-tier read that overflows a fixed half tile; it takes a
+            content-height `full` card so nothing is clipped or trapped behind an inner scrollbar. */}
+        <ChartSection id="overview-digest" title="Инсайт" periodControl homeKey="digest" defaultSize="full">
           <Digest />
         </ChartSection>
         <ChartSection id="overview-growth" title="Рост подписчиков" periodControl homeKey="growth">
