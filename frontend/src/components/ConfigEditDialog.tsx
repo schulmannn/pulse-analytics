@@ -84,16 +84,6 @@ export function ConfigEditDialog({
     };
   }, [onClose]);
 
-  const isSeries = metric.kind === 'series';
-  const filterDims = dimensionsFor(metric.dimensions);
-  // Comparison (a ghost line) + target (a goal line) only render on a series chart — a value/KPI has
-  // nowhere to draw them and a breakdown is a distribution, so both controls are gated to series to
-  // avoid shipping knobs with no visible effect. (KPI delta-comparison + progress caption = S8/S9.)
-  const showComparison = isSeries;
-  const showTarget = isSeries;
-  const cmpMode: ComparisonMode = config.comparison?.mode ?? 'none';
-  const cmpDisplay: ComparisonDisplay = config.comparison?.display ?? 'ghost_line';
-
   const reset = () =>
     onChange({
       viz: metric.defaultViz,
@@ -123,134 +113,7 @@ export function ConfigEditDialog({
           <div className="truncate text-xs text-muted-foreground">{metric.label}</div>
         </div>
 
-        {/* Visualisation — only when the metric supports more than one. */}
-        {metric.supportedViz.length > 1 && (
-          <Field label="Визуализация">
-            <Segmented
-              options={metric.supportedViz.map((v) => ({ value: v, label: VIZ_LABEL[v] }))}
-              value={config.viz}
-              onChange={(viz) => onChange({ viz })}
-            />
-          </Field>
-        )}
-
-        <Field label="Период">
-          <Segmented
-            options={PERIODS.map((p) => ({ value: String(p.days), label: p.label }))}
-            value={String(config.period ?? DEFAULT_WIDGET_DAYS)}
-            onChange={(v) => onChange({ period: Number(v) as PeriodDays })}
-          />
-        </Field>
-
-        {isSeries && (
-          <Field label="Грануляция">
-            <Segmented
-              options={GRAINS.map((g) => ({ value: g.value, label: g.label }))}
-              value={config.grain ?? 'day'}
-              onChange={(v) => onChange({ grain: v as WidgetGrain })}
-            />
-          </Field>
-        )}
-
-        {showComparison && (
-          <Field label="Сравнение">
-            <Segmented
-              options={CMP_MODES.map((m) => ({ value: m.value, label: m.label }))}
-              value={cmpMode}
-              onChange={(v) => {
-                const mode = v as ComparisonMode;
-                onChange({ comparison: mode === 'none' ? undefined : { mode, display: cmpDisplay } });
-              }}
-            />
-            {cmpMode !== 'none' && (
-              <div className="mt-2">
-                <Segmented
-                  options={CMP_DISPLAY.map((d) => ({ value: d.value, label: d.label }))}
-                  value={cmpDisplay}
-                  onChange={(v) => onChange({ comparison: { mode: cmpMode, display: v as ComparisonDisplay } })}
-                />
-              </div>
-            )}
-          </Field>
-        )}
-
-        {showTarget && <TargetField metric={metric} config={config} onChange={onChange} />}
-
-        {filterDims.length > 0 && (
-          <Field label="Фильтр">
-            <FilterBuilder
-              dims={filterDims}
-              filters={config.filters ?? []}
-              onChange={(filters) => onChange({ filters: filters.length ? filters : undefined })}
-            />
-          </Field>
-        )}
-
-        <SourceField config={config} onChange={onChange} />
-
-        <label className="mt-4 block">
-          <span className="text-2xs tracking-wide text-muted-foreground">Заголовок</span>
-          <input
-            value={config.title ?? ''}
-            placeholder={metric.label}
-            onChange={(e) => onChange({ title: e.target.value || undefined })}
-            className="mt-1 w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
-          />
-        </label>
-
-        <Field label="Размер">
-          <Segmented
-            options={SIZES.map((s) => ({ value: s.value, label: s.label }))}
-            value={config.size ?? 'half'}
-            onChange={(v) => onChange({ size: v as WidgetSize })}
-          />
-        </Field>
-
-        {/* Accent + tinted background → config.style. */}
-        <div className="mt-4">
-          <span className="text-2xs tracking-wide text-muted-foreground">Акцент</span>
-          <div className="mt-2 flex items-center gap-2">
-            <button
-              type="button"
-              aria-label="Стандартный акцент"
-              aria-pressed={!config.style?.color}
-              onClick={() => onChange({ style: { ...config.style, color: undefined } })}
-              className={`h-5 w-5 rounded-full transition-shadow ${!config.style?.color ? 'ring-2 ring-foreground/50 ring-offset-2 ring-offset-card' : ''}`}
-              style={{ backgroundColor: 'hsl(var(--primary))' }}
-            />
-            {SWATCHES.map((n) => (
-              <button
-                key={n}
-                type="button"
-                aria-label={`Акцент ${n}`}
-                aria-pressed={config.style?.color === n}
-                onClick={() => onChange({ style: { ...config.style, color: n } })}
-                className={`h-5 w-5 rounded-full transition-shadow ${config.style?.color === n ? 'ring-2 ring-foreground/50 ring-offset-2 ring-offset-card' : ''}`}
-                style={{ backgroundColor: `hsl(var(--chart-${n}))` }}
-              />
-            ))}
-          </div>
-        </div>
-
-        <button
-          type="button"
-          role="switch"
-          aria-checked={!!config.style?.tinted}
-          onClick={() => onChange({ style: { ...config.style, tinted: config.style?.tinted ? undefined : true } })}
-          className="mt-4 flex w-full items-center justify-between gap-2 text-left text-sm text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <span>Цветной фон</span>
-          <span
-            aria-hidden="true"
-            className={
-              config.style?.tinted
-                ? 'rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-2xs font-medium text-primary'
-                : 'rounded-full border border-border px-2 py-0.5 text-2xs font-medium text-muted-foreground'
-            }
-          >
-            {config.style?.tinted ? 'вкл' : 'выкл'}
-          </span>
-        </button>
+        <WidgetConfigControls config={config} metric={metric} onChange={onChange} />
 
         <div className="mt-5 flex items-center justify-between border-t border-border pt-3">
           <button type="button" onClick={reset} className="text-xs text-muted-foreground transition-colors hover:text-foreground">
@@ -267,6 +130,164 @@ export function ConfigEditDialog({
       </div>
     </div>,
     document.body,
+  );
+}
+
+/**
+ * The reusable metric-builder control body — every field (visualisation / period / grain / comparison
+ * / target / filter / source / title / size / accent / background), gated by the metric's shape.
+ * Shared by the edit dialog (writes a stored config) and the create dialog (writes a local draft), so
+ * both feel like one editor. Header + Reset/Done chrome stays with each dialog wrapper.
+ */
+export function WidgetConfigControls({
+  config,
+  metric,
+  onChange,
+}: {
+  config: WidgetConfig;
+  metric: MetricDef;
+  onChange: (patch: Partial<WidgetConfig>) => void;
+}) {
+  const isSeries = metric.kind === 'series';
+  const filterDims = dimensionsFor(metric.dimensions);
+  // Comparison (a ghost line) + target (a goal line) only render on a series chart — a value/KPI has
+  // nowhere to draw them and a breakdown is a distribution, so both controls are gated to series.
+  const showComparison = isSeries;
+  const showTarget = isSeries;
+  const cmpMode: ComparisonMode = config.comparison?.mode ?? 'none';
+  const cmpDisplay: ComparisonDisplay = config.comparison?.display ?? 'ghost_line';
+
+  return (
+    <>
+      {/* Visualisation — only when the metric supports more than one. */}
+      {metric.supportedViz.length > 1 && (
+        <Field label="Визуализация">
+          <Segmented
+            options={metric.supportedViz.map((v) => ({ value: v, label: VIZ_LABEL[v] }))}
+            value={config.viz}
+            onChange={(viz) => onChange({ viz })}
+          />
+        </Field>
+      )}
+
+      <Field label="Период">
+        <Segmented
+          options={PERIODS.map((p) => ({ value: String(p.days), label: p.label }))}
+          value={String(config.period ?? DEFAULT_WIDGET_DAYS)}
+          onChange={(v) => onChange({ period: Number(v) as PeriodDays })}
+        />
+      </Field>
+
+      {isSeries && (
+        <Field label="Грануляция">
+          <Segmented
+            options={GRAINS.map((g) => ({ value: g.value, label: g.label }))}
+            value={config.grain ?? 'day'}
+            onChange={(v) => onChange({ grain: v as WidgetGrain })}
+          />
+        </Field>
+      )}
+
+      {showComparison && (
+        <Field label="Сравнение">
+          <Segmented
+            options={CMP_MODES.map((m) => ({ value: m.value, label: m.label }))}
+            value={cmpMode}
+            onChange={(v) => {
+              const mode = v as ComparisonMode;
+              onChange({ comparison: mode === 'none' ? undefined : { mode, display: cmpDisplay } });
+            }}
+          />
+          {cmpMode !== 'none' && (
+            <div className="mt-2">
+              <Segmented
+                options={CMP_DISPLAY.map((d) => ({ value: d.value, label: d.label }))}
+                value={cmpDisplay}
+                onChange={(v) => onChange({ comparison: { mode: cmpMode, display: v as ComparisonDisplay } })}
+              />
+            </div>
+          )}
+        </Field>
+      )}
+
+      {showTarget && <TargetField metric={metric} config={config} onChange={onChange} />}
+
+      {filterDims.length > 0 && (
+        <Field label="Фильтр">
+          <FilterBuilder
+            dims={filterDims}
+            filters={config.filters ?? []}
+            onChange={(filters) => onChange({ filters: filters.length ? filters : undefined })}
+          />
+        </Field>
+      )}
+
+      <SourceField config={config} onChange={onChange} />
+
+      <label className="mt-4 block">
+        <span className="text-2xs tracking-wide text-muted-foreground">Заголовок</span>
+        <input
+          value={config.title ?? ''}
+          placeholder={metric.label}
+          onChange={(e) => onChange({ title: e.target.value || undefined })}
+          className="mt-1 w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
+        />
+      </label>
+
+      <Field label="Размер">
+        <Segmented
+          options={SIZES.map((s) => ({ value: s.value, label: s.label }))}
+          value={config.size ?? 'half'}
+          onChange={(v) => onChange({ size: v as WidgetSize })}
+        />
+      </Field>
+
+      {/* Accent + tinted background → config.style. */}
+      <div className="mt-4">
+        <span className="text-2xs tracking-wide text-muted-foreground">Акцент</span>
+        <div className="mt-2 flex items-center gap-2">
+          <button
+            type="button"
+            aria-label="Стандартный акцент"
+            aria-pressed={!config.style?.color}
+            onClick={() => onChange({ style: { ...config.style, color: undefined } })}
+            className={`h-5 w-5 rounded-full transition-shadow ${!config.style?.color ? 'ring-2 ring-foreground/50 ring-offset-2 ring-offset-card' : ''}`}
+            style={{ backgroundColor: 'hsl(var(--primary))' }}
+          />
+          {SWATCHES.map((n) => (
+            <button
+              key={n}
+              type="button"
+              aria-label={`Акцент ${n}`}
+              aria-pressed={config.style?.color === n}
+              onClick={() => onChange({ style: { ...config.style, color: n } })}
+              className={`h-5 w-5 rounded-full transition-shadow ${config.style?.color === n ? 'ring-2 ring-foreground/50 ring-offset-2 ring-offset-card' : ''}`}
+              style={{ backgroundColor: `hsl(var(--chart-${n}))` }}
+            />
+          ))}
+        </div>
+      </div>
+
+      <button
+        type="button"
+        role="switch"
+        aria-checked={!!config.style?.tinted}
+        onClick={() => onChange({ style: { ...config.style, tinted: config.style?.tinted ? undefined : true } })}
+        className="mt-4 flex w-full items-center justify-between gap-2 text-left text-sm text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <span>Цветной фон</span>
+        <span
+          aria-hidden="true"
+          className={
+            config.style?.tinted
+              ? 'rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-2xs font-medium text-primary'
+              : 'rounded-full border border-border px-2 py-0.5 text-2xs font-medium text-muted-foreground'
+          }
+        >
+          {config.style?.tinted ? 'вкл' : 'выкл'}
+        </span>
+      </button>
+    </>
   );
 }
 

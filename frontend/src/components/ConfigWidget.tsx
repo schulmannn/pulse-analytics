@@ -36,7 +36,7 @@ export function ConfigWidget({ config, homeKey }: { config: WidgetConfig; homeKe
         // the card-level target override is no longer needed (it also covers dynamic targets, S9).
       }}
     >
-      <ConfigWidgetBody config={config} />
+      <WidgetBody config={config} />
     </ChartSection>
   );
   const wrapped = config.source != null ? <ChannelScope channelId={config.source}>{card}</ChannelScope> : card;
@@ -56,10 +56,10 @@ export function ConfigWidget({ config, homeKey }: { config: WidgetConfig; homeKe
   );
 }
 
-/** Body only — kept a child of ChartSection (inside its ChannelScope + card) so the data hook reads
- *  the pinned channel and the chart fills the tile via the card's height context. TG and IG bodies
- *  are distinct COMPONENTS (not a conditional hook) so a TG widget never mounts the IG queries. */
-function ConfigWidgetBody({ config }: { config: WidgetConfig }) {
+/** Resolved widget body (WidgetRenderer over the config's data) — exported so the create-widget
+ *  preview can render the SAME body it will get once added. TG and IG bodies are distinct COMPONENTS
+ *  (not a conditional hook) so a TG widget never mounts the IG queries. */
+export function WidgetBody({ config }: { config: WidgetConfig }) {
   const metric = getMetric(config.metricId);
   return metric?.source === 'ig' ? <IgWidgetBody config={config} /> : <TgWidgetBody config={config} />;
 }

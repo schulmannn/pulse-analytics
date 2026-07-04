@@ -15,8 +15,9 @@ import { ChannelScope } from '@/lib/channel-context';
 import { HOME_REGISTRY, HOME_DEFAULT_KEYS } from '@/lib/homeWidgets';
 import { ConfigWidget } from '@/components/ConfigWidget';
 import { WidgetCatalogModal } from '@/components/WidgetCatalogModal';
-import { addWidgetForMetric, getWidgetConfig, useWidgetConfigs } from '@/lib/widgetStore';
-import { configIdFromKey, customKey, isCustomKey } from '@/lib/widgetConfig';
+import { CreateWidgetDialog } from '@/components/CreateWidgetDialog';
+import { addWidgetConfig, getWidgetConfig, useWidgetConfigs } from '@/lib/widgetStore';
+import { configIdFromKey, customKey, isCustomKey, type WidgetConfig } from '@/lib/widgetConfig';
 
 /**
  * Personal Home — a per-user board of the widgets the reader pinned via the ⋯ «На главную» item
@@ -111,6 +112,7 @@ export function Home() {
 function AddWidgetBar({ pinned }: { pinned: string[] }) {
   const [open, setOpen] = useState(false);
   const [catalogOpen, setCatalogOpen] = useState(false);
+  const [createMetric, setCreateMetric] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const available = Object.keys(HOME_REGISTRY).filter((key) => !pinned.includes(key));
 
@@ -130,11 +132,15 @@ function AddWidgetBar({ pinned }: { pinned: string[] }) {
     };
   }, [open]);
 
-  // Pick a metric → create a fresh config widget and pin it to Home under its `custom:<id>` key.
+  // Pick a metric → open the build step (preview + config), then pin the configured widget on «Добавить».
   const pickMetric = (metricId: string) => {
-    const w = addWidgetForMetric(metricId);
-    if (w) pinToHome(customKey(w.id));
     setCatalogOpen(false);
+    setCreateMetric(metricId);
+  };
+  const addConfigured = (config: WidgetConfig) => {
+    const w = addWidgetConfig(config);
+    if (w) pinToHome(customKey(w.id));
+    setCreateMetric(null);
   };
 
   return (
@@ -185,6 +191,9 @@ function AddWidgetBar({ pinned }: { pinned: string[] }) {
         </div>
       )}
       {catalogOpen && <WidgetCatalogModal onPick={pickMetric} onClose={() => setCatalogOpen(false)} />}
+      {createMetric && (
+        <CreateWidgetDialog metricId={createMetric} onAdd={addConfigured} onClose={() => setCreateMetric(null)} />
+      )}
     </div>
   );
 }

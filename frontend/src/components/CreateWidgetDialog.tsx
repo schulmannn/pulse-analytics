@@ -1,0 +1,117 @@
+import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { WidgetConfigControls } from '@/components/ConfigEditDialog';
+import { WidgetBody } from '@/components/ConfigWidget';
+import { ExpandedChartHeightContext } from '@/components/ExpandableChart';
+import { ChannelScope } from '@/lib/channel-context';
+import { getMetric } from '@/lib/widgetMetrics';
+import { defaultWidget, normalizeWidget, type WidgetConfig } from '@/lib/widgetConfig';
+
+/**
+ * «Собрать виджет» — the steep create step. After picking a metric from the catalogue the user lands
+ * here: a LIVE preview of the exact card on the left (WidgetBody over a draft config, real data), the
+ * full control set on the right (the same WidgetConfigControls the edit dialog uses), and «Добавить».
+ * So a widget is configured + seen BEFORE it's pinned, instead of dropped onto Home blind.
+ */
+export function CreateWidgetDialog({
+  metricId,
+  onAdd,
+  onClose,
+}: {
+  metricId: string;
+  onAdd: (config: WidgetConfig) => void;
+  onClose: () => void;
+}) {
+  const metric = getMetric(metricId);
+  const [draft, setDraft] = useState<WidgetConfig>(
+    () => defaultWidget(metricId) ?? { id: 'draft', metricId, viz: 'kpi' },
+  );
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    document.addEventListener('keydown', onKey, true);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey, true);
+      document.body.style.overflow = prev;
+    };
+  }, [onClose]);
+
+  if (!metric) return null;
+
+  // Every edit re-validates the whole draft (same path as the store's updateWidgetConfig), so the
+  // preview and the eventual stored widget can never diverge.
+  const patch = (p: Partial<WidgetConfig>) => setDraft((d) => normalizeWidget({ ...d, ...p }) ?? d);
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-background/70 p-4 backdrop-blur-sm sm:p-8"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Собрать виджет «${draft.title || metric.label}»`}
+      onClick={onClose}
+    >
+      <div
+        className="my-auto grid w-full max-w-3xl grid-cols-1 gap-5 rounded-xl border border-border bg-card p-5 sm:grid-cols-[minmax(0,1fr)_300px]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Left — live preview of the card body. */}
+        <div className="min-w-0">
+          <div className="mb-2 text-sm font-medium text-foreground">Предпросмотр</div>
+          <div className="flex h-[280px] flex-col overflow-hidden rounded-xl border border-border bg-card p-4">
+            <div className="text-xs font-medium tracking-wider text-muted-foreground">
+              {draft.title || metric.label}
+            </div>
+            <div className="mt-3 min-h-0 flex-1">
+              {/* null height context → charts use their own default; the box gives a tile-like frame.
+                  ChannelScope so the preview honours the draft's «Источник» like the real card will. */}
+              <ExpandedChartHeightContext.Provider value={null}>
+                {draft.source != null ? (
+                  <ChannelScope channelId={draft.source}>
+                    <WidgetBody config={draft} />
+                  </ChannelScope>
+                ) : (
+                  <WidgetBody config={draft} />
+                )}
+              </ExpandedChartHeightContext.Provider>
+            </div>
+          </div>
+        </div>
+
+        {/* Right — the shared control set + actions. */}
+        <div className="flex max-h-[70vh] min-w-0 flex-col">
+          <div className="flex items-baseline justify-between gap-3">
+            <div className="text-sm font-medium text-foreground">Настройки</div>
+            <div className="truncate text-xs text-muted-foreground">{metric.label}</div>
+          </div>
+          <div className="-mr-1 min-h-0 flex-1 overflow-y-auto pr-1">
+            <WidgetConfigControls config={draft} metric={metric} onChange={patch} />
+          </div>
+          <div className="mt-4 flex items-center justify-end gap-3 border-t border-border pt-3">
+            <button
+              type="button"
+              onClick={onClose}
+              className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+            >
+              Отмена
+            </button>
+            <button
+              type="button"
+              onClick={() => onAdd(draft)}
+              className="btn-pill bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+            >
+              Добавить на главную
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}

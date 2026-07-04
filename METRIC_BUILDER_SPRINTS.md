@@ -128,6 +128,22 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
   **⚠️ Миграция TgAnalytics на резолвер/рендерер ОТЛОЖЕНА** — большой live-refactor страницы, локально
   не верифицируется (нет authed-рендера); панель уже работает на inline-логике (агрегаторы уже в lib).
 
+## Пост-план: унификация системы виджетов (фидбек юзера 2026-07-03)
+
+Цель: стереть грань legacy/metric-виджетов, universal explorer, create-preview, curated Home. Порядок:
+- **U1 — Responsive height bug** — SHIPPED `37a1f21`. Корень: `SIZE_H` third/half был `lg:h-[264px]` →
+  ниже lg карточка content-height, тело flex-1 измеряется и кормит высоту чарта (контент SVG+легенда >
+  высоты) → петля без границы → десятки тысяч px ~900px. Фикс: фикс-высота на ВСЕХ breakpoint + cap
+  измерения (>640→null) + `min-w-0` на grid-элемент. Визуал=прод (900/1280/1440).
+- **U2 — Create-widget preview** — SHIPPED `<pending>`. Извлёк `WidgetConfigControls` (общий edit+create).
+  `CreateWidgetDialog`: живой preview (`WidgetBody` над draft, real data, ChannelScope по source) + те же
+  контролы + «Добавить на главную». Home: каталог→create-step (не мгновенный add). `WidgetBody` экспортнут.
+- **U3 — Universal explorer** (overlay+WidgetRenderer над мутабельным config) — TODO.
+- **U4 — recommendedSize в MetricDef + авто-размер** — TODO.
+- **U5 — убрать неработающие viz (rank/pivot) из редактора** — TODO.
+- **U6 — Home: instances-not-keys + legacy-адаптеры** (самый глубокий, в конце) — TODO.
+Риск снят юзером («никто не пользуется»); гейт=build+тесты+review, визуал=прод.
+
 ## Журнал
 
 - 2026-07-03 — **S12 SHIPPED** `8f39ed6` + **S9** `e52ff2b`. S9: target resolver-owned (fixed+dynamic)
