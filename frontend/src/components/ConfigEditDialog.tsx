@@ -8,6 +8,7 @@ import { DEFAULT_WIDGET_DAYS } from '@/lib/period';
 import type { PeriodDays } from '@/lib/period';
 import { VIZ_LABEL } from '@/lib/widgetRender';
 import { getMetric, metricsForSource } from '@/lib/widgetMetrics';
+import { channelsForSource } from '@/lib/channelSource';
 import { editorSpec, type EditorSpec } from '@/lib/widgetCapabilities';
 import type { WidgetSize } from '@/components/ChartWidget';
 import type { DimensionDef } from '@/lib/dimensions';
@@ -496,7 +497,18 @@ function FilterBuilder({
  *  are excluded (the catalogue is TG-data widgets until S11 wires IG resolution). */
 function SourceField({ config, onChange }: { config: WidgetConfig; onChange: (patch: Partial<WidgetConfig>) => void }) {
   const channels = useChannels();
-  const list = (channels.data?.channels ?? []).filter((c) => c.source !== 'ig');
+  // Scope the source list to the METRIC's network so an Instagram metric never lists Telegram
+  // channels (and vice-versa) — the same rule as the source switcher. Legacy composites carry no
+  // MetricDef and are Telegram, so anything that isn't an IG metric is treated as 'tg' (mirrors the
+  // metric-picker narrowing above).
+  const source = getMetric(config.metricId)?.source === 'ig' ? 'ig' : 'tg';
+  const list = channelsForSource(channels.data?.channels ?? [], source);
+  const igEmpty = source === 'ig' && list.length === 0;
+  // A pin left from before source-aware filtering (e.g. a Telegram channel on an IG widget) is no
+  // longer eligible; surface it as a disabled option so the value still round-trips and the mismatch
+  // is visible, instead of the <select> silently showing a blank/wrong row.
+  const pinned = config.source ?? null;
+  const stalePin = pinned != null && !list.some((c) => c.id === pinned);
   return (
     <label className="mt-4 block">
       <span className="text-2xs tracking-wide text-muted-foreground">Источник</span>
@@ -514,7 +526,17 @@ function SourceField({ config, onChange }: { config: WidgetConfig; onChange: (pa
             {c.title || (c.username ? `@${c.username}` : `Канал ${c.id}`)}
           </option>
         ))}
+        {stalePin && (
+          <option value={pinned} disabled>
+            Недоступный источник — сменить
+          </option>
+        )}
       </select>
+      {igEmpty && (
+        <p className="mt-1 text-2xs text-muted-foreground">
+          Нет подключённых аккаунтов Instagram — источник берётся из свитчера. Подключите в разделе «Источники».
+        </p>
+      )}
     </label>
   );
 }
