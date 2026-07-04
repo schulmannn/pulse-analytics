@@ -237,6 +237,14 @@ color-toggle + crossfade иконок + remount текста (`index.css:251`, `
 
 ## Журнал
 
+- 2026-07-04 — **P0 Full-screen detail shell — SLICE 2 SHIPPED `f6a5ed3` → ACCEPTANCE ЗАКРЫТА** (бандл
+  `index-BxqtRQIQ`; 318 vitest + 64 e2e). Slice 2 = **URL-state**: overlay open-state теперь в `?detail=<widgetId>`
+  (не local state) → shareable + browser Back закрывает. ChartSection: `expandOpen = searchParams.get('detail')
+  === widgetId`; openExpand = push `?detail`; closeExpand (×/Escape/backdrop) = replace-away; Back = pop. Все
+  open-пути (whole-card, keyboard, ↗, ⋯меню) идут через это. Новый e2e: клик→dialog+`?detail`→Back закрывает+
+  чистит. Self-review чист (history push/replace, no param collision, drill/metric-page не задеты, reorder
+  guarded). **4/4 acceptance (один shell / legacy fallback / URL-state / no bespoke modal) → P0 «Готово».**
+  Export/explanation/metric-page-унификация = additive follow-ups из goal-описания (НЕ acceptance) — отдельно.
 - 2026-07-04 — **P0 Full-screen detail shell — SLICE 1 SHIPPED** `adc3c24` (бандл `index-qYlhdy9t`; e2e 60,
   P0 ЕЩЁ В РАБОТЕ). Design-first (Plan-агент): 3 detail-поверхности (`ChartExpandOverlay` read / `WidgetExplorer`
   config-sandbox / `MetricPage` route) — НЕ один компонент, а общий SHELL-chrome + pluggable body. **Slice 1:**
