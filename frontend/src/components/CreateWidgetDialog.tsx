@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { WidgetConfigControls } from '@/components/ConfigEditDialog';
 import { WidgetBody } from '@/components/ConfigWidget';
+import { WidgetErrorBoundary } from '@/components/WidgetErrorBoundary';
 import { ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import { ChannelScope } from '@/lib/channel-context';
 import { editorSpec } from '@/lib/widgetCapabilities';
@@ -73,13 +74,18 @@ export function CreateWidgetDialog({
               {/* null height context → charts use their own default; the box gives a tile-like frame.
                   ChannelScope so the preview honours the draft's «Источник» like the real card will. */}
               <ExpandedChartHeightContext.Provider value={null}>
-                {draft.source != null ? (
-                  <ChannelScope channelId={draft.source}>
+                {/* Guard the live preview: a draft config that throws shows a calm fallback in the
+                    preview frame instead of blanking the app and dropping the user out of the create
+                    flow. resetKeys on the draft signature → a corrected draft auto-recovers. */}
+                <WidgetErrorBoundary variant="inline" label={draft.title || metric.label} resetKeys={[JSON.stringify(draft)]}>
+                  {draft.source != null ? (
+                    <ChannelScope channelId={draft.source}>
+                      <WidgetBody config={draft} />
+                    </ChannelScope>
+                  ) : (
                     <WidgetBody config={draft} />
-                  </ChannelScope>
-                ) : (
-                  <WidgetBody config={draft} />
-                )}
+                  )}
+                </WidgetErrorBoundary>
               </ExpandedChartHeightContext.Provider>
             </div>
           </div>

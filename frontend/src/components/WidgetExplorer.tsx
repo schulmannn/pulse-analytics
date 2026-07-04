@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { WidgetConfigControls } from '@/components/ConfigEditDialog';
 import { WidgetBody } from '@/components/ConfigWidget';
+import { WidgetErrorBoundary } from '@/components/WidgetErrorBoundary';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import { ChannelScope } from '@/lib/channel-context';
 import { editorSpec } from '@/lib/widgetCapabilities';
@@ -46,12 +47,18 @@ export function WidgetExplorer({
   const patch = (p: Partial<WidgetConfig>) => setDraft((d) => normalizeWidget({ ...d, ...p }) ?? d);
   const changed = JSON.stringify(draft) !== JSON.stringify(config);
 
+  // The sandbox is where users deliberately push a widget into edge-case configs, so guard the live
+  // preview: a throwing draft shows a calm fallback here instead of blanking the whole app behind the
+  // overlay. resetKeys on the draft signature → a corrected draft auto-clears the fallback, and the
+  // control panel (right side, outside this boundary) stays usable throughout.
   const chart = (
-    <ChartExpandedContext.Provider value={true}>
-      <ExpandedChartHeightContext.Provider value={420}>
-        <WidgetBody config={draft} />
-      </ExpandedChartHeightContext.Provider>
-    </ChartExpandedContext.Provider>
+    <WidgetErrorBoundary variant="inline" widgetId={`explorer-${draft.id}`} label={draft.title || spec.label} resetKeys={[JSON.stringify(draft)]}>
+      <ChartExpandedContext.Provider value={true}>
+        <ExpandedChartHeightContext.Provider value={420}>
+          <WidgetBody config={draft} />
+        </ExpandedChartHeightContext.Provider>
+      </ChartExpandedContext.Provider>
+    </WidgetErrorBoundary>
   );
 
   return createPortal(

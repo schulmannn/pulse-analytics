@@ -17,6 +17,7 @@ import {
 import { ChannelScope } from '@/lib/channel-context';
 import { HOME_REGISTRY, HOME_DEFAULT_KEYS } from '@/lib/homeWidgets';
 import { ConfigWidget } from '@/components/ConfigWidget';
+import { WidgetErrorBoundary } from '@/components/WidgetErrorBoundary';
 import { isWiredLegacyKey } from '@/components/legacyAdapters';
 import { WidgetCatalogModal } from '@/components/WidgetCatalogModal';
 import { CreateWidgetDialog } from '@/components/CreateWidgetDialog';
@@ -151,11 +152,21 @@ export function Home() {
                 // U6.3b extracts its body. ChannelScope pins it to its «Источник» at the RENDER site.
                 const def = HOME_REGISTRY[key];
                 if (!def) return null;
+                // Own-chrome legacy cards draw their own ChartSection, so a crash in their variant
+                // compute (the one seam the in-card body boundary can't reach) is caught here with a
+                // self-chromed «card» fallback — the flagship Home stays whole per-widget.
                 return (
                   <div key={key} className="contents">
-                    <ChannelScope channelId={getWidgetSource(`home-${key}`) ?? null}>
-                      {def.render()}
-                    </ChannelScope>
+                    <WidgetErrorBoundary
+                      variant="card"
+                      widgetId={`home-${key}`}
+                      label={def.label}
+                      size={getWidgetPrefs(`home-${key}`).size ?? def.defaultSize ?? 'half'}
+                    >
+                      <ChannelScope channelId={getWidgetSource(`home-${key}`) ?? null}>
+                        {def.render()}
+                      </ChannelScope>
+                    </WidgetErrorBoundary>
                   </div>
                 );
               })}

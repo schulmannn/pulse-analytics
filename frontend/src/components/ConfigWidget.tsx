@@ -52,6 +52,9 @@ export function ConfigWidget({ config, homeKey }: { config: WidgetConfig; homeKe
       title={label}
       homeKey={homeKey}
       defaultSize={config.size}
+      // Config signature → when the user reconfigures a crashed widget, the body error boundary
+      // (inside ChartSection) clears the caught error and re-renders the new config automatically.
+      bodyResetKey={JSON.stringify(config)}
       configEditor={{
         open: () => setEditOpen(true),
         color: config.style?.color,

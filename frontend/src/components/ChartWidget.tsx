@@ -11,6 +11,7 @@ import { Breakdown } from '@/components/Breakdown';
 import { PieChart } from '@/components/PieChart';
 import { DivergingBars } from '@/components/DivergingBars';
 import { ChartExpandOverlay, ExpandedChartHeightContext, WidgetTargetContext, type ChartExpandConfig } from '@/components/ExpandableChart';
+import { WidgetErrorBoundary, ThrowInRender } from '@/components/WidgetErrorBoundary';
 import { DEFAULT_WIDGET_DAYS, WidgetPeriodProvider, widgetPeriodValue, useChannelRecency, resolveEffectivePeriod } from '@/lib/period';
 import { useChannels } from '@/api/queries';
 import type { PeriodDays, WidgetPeriodValue } from '@/lib/period';
@@ -946,11 +947,15 @@ interface ChartSectionProps {
   /** A custom full-screen explorer for «Развернуть» — when set, it fully replaces the generic
    *  ChartExpandOverlay (config-widgets pass a mutable-config sandbox). Receives a `close` callback. */
   explorer?: (close: () => void) => ReactNode;
+  /** A signature of the body's inputs (config-widgets pass their WidgetConfig identity). When it
+   *  changes, the per-widget error boundary around the body clears a caught error and re-renders —
+   *  so reconfiguring a crashed widget recovers it without a manual «Повторить». */
+  bodyResetKey?: unknown;
   /** Body; with `variants` it renders BELOW the active variant (shared captions etc.). */
   children?: ReactNode;
 }
 
-export function ChartSection({ id, title, action, variants, className, defaultSize, expand, periodControl, homeKey, seriesOptions, configEditor, explorer, children }: ChartSectionProps) {
+export function ChartSection({ id, title, action, variants, className, defaultSize, expand, periodControl, homeKey, seriesOptions, configEditor, explorer, bodyResetKey, children }: ChartSectionProps) {
   const widgetId = id ?? title;
   const group = useContext(GroupCtx);
   const homeEditing = useContext(HomeEditContext);
@@ -1046,15 +1051,33 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
     () => ({ grain: seriesGrain, includeToday: seriesIncludeToday }),
     [seriesGrain, seriesIncludeToday],
   );
-  const resolvedVariants = useMemo(
-    () => (typeof variants === 'function' ? variants(widgetPeriod, seriesOpts) : variants),
-    [variants, widgetPeriod, seriesOpts],
-  );
+  // Function-form variants compute from live data (post-derived charts) DURING this render — a throw
+  // there escapes ChartSection itself, ABOVE the in-card body boundary (a React boundary can't catch
+  // its own parent's render). Catch it here and re-throw it INSIDE that boundary (via ThrowInRender in
+  // the body) so a derive crash becomes THIS widget's fallback instead of blanking the app shell; the
+  // card chrome and its real col-span survive (activeVariant is null → the section keeps its chosen
+  // size). Array-form variants are already built, so they can't throw here.
+  const variantResult = useMemo<
+    { ok: true; variants: WidgetVariant[] | undefined } | { ok: false; error: unknown }
+  >(() => {
+    if (typeof variants !== 'function') return { ok: true, variants };
+    try {
+      return { ok: true, variants: variants(widgetPeriod, seriesOpts) };
+    } catch (error) {
+      return { ok: false, error };
+    }
+  }, [variants, widgetPeriod, seriesOpts]);
+  const resolvedVariants = variantResult.ok ? variantResult.variants : undefined;
 
   const activeVariant =
     resolvedVariants && resolvedVariants.length > 0
       ? (resolvedVariants.find((v) => v.key === prefs.variant) ?? resolvedVariants[0])
       : null;
+
+  // The body content, with a failed variant-compute surfaced as a throw INSIDE the body boundary.
+  const variantRender = variantResult.ok
+    ? activeVariant?.render ?? null
+    : <ThrowInRender error={variantResult.error} />;
 
   // Effective footprint on the 6-col group grid: the user's choice (or the card's defaultSize,
   // else 'half'), clamped UP to the active variant's minSize so a wide bar+ledger presentation
@@ -1077,7 +1100,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
   const bodyNode = (
     <WidgetPeriodProvider value={widgetPeriod}>
       <WidgetTargetContext.Provider value={activeTarget}>
-        {activeVariant ? activeVariant.render : null}
+        {variantRender}
         {children}
       </WidgetTargetContext.Provider>
     </WidgetPeriodProvider>
@@ -1085,6 +1108,11 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
   // The «Развернуть» affordance renders on every widget. Tier-2 (a rich `expand` config)
   // drives its own overlay content; Tier-1 falls back to the widget body.
   const hasRichExpand = !!(expand && (expand.renderExpanded || expand.renderExpandedBar || expand.statsFor));
+
+  // Reset signal for the per-widget error boundary around the body: the body's inputs (config
+  // signature, active variant, effective window). A fresh array each render is fine — the boundary
+  // compares entries by value, so it only clears a caught error when one of these actually changes.
+  const bodyResetKeys = [bodyResetKey, activeVariant?.key ?? null, widgetDays];
 
   const seqIndex = group ? group.sequence.indexOf(widgetId) : -1;
   const accentVar = activeColor ? `--chart-${activeColor}` : '--brand-iris';
@@ -1321,9 +1349,14 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
                 the leftover height to EVERY chart inside (variant or bare children) so they fill; a
                 `full` card passes null, so its charts keep their own/explicit height. */}
             <div ref={bodyRef} className="min-h-0 flex-1 overflow-y-auto">
-              <ExpandedChartHeightContext.Provider value={fillHeight}>
-                {activeVariant ? activeVariant.render : children}
-              </ExpandedChartHeightContext.Provider>
+              {/* Per-widget boundary: a body crash becomes a calm in-card fallback, the header + ⋯
+                  menu survive (so the broken widget can still be hidden / edited), and every sibling
+                  widget and the app shell keep rendering. */}
+              <WidgetErrorBoundary variant="inline" widgetId={widgetId} label={prefs.title || title} resetKeys={bodyResetKeys}>
+                <ExpandedChartHeightContext.Provider value={fillHeight}>
+                  {variantResult.ok ? (activeVariant ? activeVariant.render : children) : variantRender}
+                </ExpandedChartHeightContext.Provider>
+              </WidgetErrorBoundary>
             </div>
             {/* Caption (shared children under a variant — «лучший день» / «пик активности» / totals)
                 sits below the chart at its natural height, never squeezed by the fill. */}
@@ -1363,7 +1396,9 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
               grainable={hasRichExpand ? expand?.grainable : undefined}
               onClose={() => setExpandOpen(false)}
             >
-              {bodyNode}
+              <WidgetErrorBoundary variant="inline" widgetId={widgetId} label={prefs.title || title} resetKeys={bodyResetKeys}>
+                {bodyNode}
+              </WidgetErrorBoundary>
             </ChartExpandOverlay>
           )}
     </section>

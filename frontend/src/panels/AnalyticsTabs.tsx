@@ -6,6 +6,7 @@ import { Insights } from '@/panels/Insights';
 import { Compare } from '@/panels/Compare';
 import { HistoryChartBlock, HeatmapChartBlock, VelocityChartBlock } from '@/panels/Charts';
 import { WidgetGroup } from '@/components/ChartWidget';
+import { WidgetErrorBoundary } from '@/components/WidgetErrorBoundary';
 import { Hashtags } from '@/panels/Hashtags';
 
 /**
@@ -68,26 +69,43 @@ export function Analytics() {
 
       {tab === 'dynamics' && (
         <div className="space-y-10">
-          <TgAnalytics group="dynamics" />
+          {/* TgAnalytics derives its breakdowns in its OWN render (above every ChartSection), so a
+              panel-level boundary keeps the app shell alive if a top-level derive throws; its
+              per-chart function-form computes are already isolated inside ChartSection. */}
+          <WidgetErrorBoundary variant="inline" widgetId="analytics-tg-dynamics" label="Аналитика">
+            <TgAnalytics group="dynamics" />
+          </WidgetErrorBoundary>
           {/* Standard 1× tiles side by side — stacked full-width they rendered as two
               200px-high «islands» stretched across the whole row. Wide (span-2) variants
-              still take the full row via the widgets' own variant span. */}
+              still take the full row via the widgets' own variant span. History/Velocity build
+              their series in their own render (above ChartSection), so each gets a per-widget card
+              boundary here — the same seam Home protects. */}
           <WidgetGroup id="analytics-dynamics" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
-            <HistoryChartBlock />
-            <VelocityChartBlock />
+            <WidgetErrorBoundary variant="card" size="half" widgetId="analytics-history" label="История подписчиков">
+              <HistoryChartBlock />
+            </WidgetErrorBoundary>
+            <WidgetErrorBoundary variant="card" size="half" widgetId="analytics-velocity" label="Скорость набора просмотров">
+              <VelocityChartBlock />
+            </WidgetErrorBoundary>
           </WidgetGroup>
         </div>
       )}
       {tab === 'content' && (
         <div className="space-y-10">
-          <TgAnalytics group="content" />
+          <WidgetErrorBoundary variant="inline" widgetId="analytics-tg-content" label="Аналитика">
+            <TgAnalytics group="content" />
+          </WidgetErrorBoundary>
           <Hashtags />
         </div>
       )}
       {tab === 'audience' && (
         <div className="space-y-10">
-          <TgAnalytics group="audience" />
-          <HeatmapChartBlock />
+          <WidgetErrorBoundary variant="inline" widgetId="analytics-tg-audience" label="Аналитика">
+            <TgAnalytics group="audience" />
+          </WidgetErrorBoundary>
+          <WidgetErrorBoundary variant="card" size="full" widgetId="analytics-heatmap" label="Тепловая карта активности">
+            <HeatmapChartBlock />
+          </WidgetErrorBoundary>
         </div>
       )}
       {tab === 'compare' && (
