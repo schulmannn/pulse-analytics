@@ -17,7 +17,7 @@ import type { PeriodDays } from '@/lib/period';
 import type { WidgetSize } from '@/components/ChartWidget';
 import { getMetric, isMetricId, recommendedSize, type WidgetViz } from '@/lib/widgetMetrics';
 import { genId } from '@/lib/reportBlocks';
-import { LEGACY_DEFAULT_SIZE, isLegacyKey, legacyKeyForMetricId, legacyMetricId } from '@/lib/legacyWidgets';
+import { LEGACY_DEFAULT_SIZE, isLegacyKey, legacyConfigId, legacyKeyForMetricId, legacyMetricId, type LegacyKey } from '@/lib/legacyWidgets';
 
 /** Series bucketing — richer than the current day/week/month (S10 teaches metricSeries the rest;
  *  until then quarter/year simply round-trip, and the resolver clamps to what it can bucket). */
@@ -130,6 +130,52 @@ export function legacyWidgetConfig(key: string): WidgetConfig | null {
   if (!isLegacyKey(key)) return null;
   const size = LEGACY_DEFAULT_SIZE[key];
   return { id: genId(), metricId: legacyMetricId(key), viz: 'kpi', ...(size ? { size } : {}) };
+}
+
+/** A legacy widget config with a DETERMINISTIC id derived from its key (see {@link legacyConfigId}) —
+ *  the form Home stores/heals for a pinned legacy block, so the same block always maps to the same
+ *  config. Null for an unknown legacy key. */
+export function legacyHomeConfig(key: string): WidgetConfig | null {
+  const base = legacyWidgetConfig(key);
+  if (!base) return null;
+  return { ...base, id: legacyConfigId(key as LegacyKey) };
+}
+
+/** Prefs a pre-U6.3a legacy Home card saved under its old `home-<key>` identity — a structural
+ *  subset of WidgetPrefs (ChartWidget), so a raw prefs snapshot is assignable here. */
+export interface LegacyPrefsSeed {
+  period?: PeriodDays;
+  size?: WidgetSize;
+  title?: string;
+  source?: number;
+  color?: number;
+  tinted?: boolean;
+}
+
+/** Map a legacy card's old per-widget prefs into a WidgetConfig patch (period / size / title /
+ *  source / accent). Pure — the impure prefs read happens at the Home call site. `hidden` is NOT a
+ *  config field (it stays in the prefs store) and is migrated separately. */
+export function legacyConfigSeed(prefs: LegacyPrefsSeed): Partial<WidgetConfig> {
+  const seed: Partial<WidgetConfig> = {};
+  if (prefs.period !== undefined) seed.period = prefs.period;
+  if (prefs.size !== undefined) seed.size = prefs.size;
+  if (prefs.title) seed.title = prefs.title;
+  if (prefs.source !== undefined && prefs.source > 0) seed.source = prefs.source;
+  const style: WidgetStyle = {};
+  if (prefs.color !== undefined) style.color = prefs.color;
+  if (prefs.tinted) style.tinted = true;
+  if (style.color !== undefined || style.tinted) seed.style = style;
+  return seed;
+}
+
+/** A legacy Home config (deterministic id) seeded with the user's old `home-<key>` prefs — the form
+ *  Home stores/heals so a pre-U6.3a card keeps its period / size / title / source / accent instead of
+ *  silently resetting when it moves onto the config-driven card identity. Re-validated through
+ *  normalizeWidget so a stale prefs value can't produce an invalid config. Null for an unknown key. */
+export function healedLegacyConfig(key: string, prefs: LegacyPrefsSeed): WidgetConfig | null {
+  const base = legacyHomeConfig(key);
+  if (!base) return null;
+  return normalizeWidget({ ...base, ...legacyConfigSeed(prefs) }) ?? base;
 }
 
 function normComparison(raw: unknown): ComparisonConfig | undefined {

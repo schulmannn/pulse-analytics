@@ -45,7 +45,7 @@ export interface WidgetSeriesOpts {
   includeToday: boolean;
 }
 
-interface WidgetPrefs {
+export interface WidgetPrefs {
   /** chart token index 1..6; undefined = brand accent */
   color?: number;
   /** tinted card background in the accent colour */
@@ -193,6 +193,20 @@ export function getWidgetSource(id: string): number | undefined {
   return getPrefs(id).source;
 }
 
+/** Read-only snapshot of a widget's stored prefs. Home reads the pre-U6.3a `home-<key>` row to
+    migrate a legacy card's saved settings (period/size/title/source/accent/hidden) into its new
+    config-driven identity. */
+export function getWidgetPrefs(id: string): WidgetPrefs {
+  return getPrefs(id);
+}
+
+/** Set/clear a widget's hidden flag by id (Home carries a hidden legacy card's flag onto its new
+    config-driven ChartSection id during the U6.3a migration). `hidden` lives only in the prefs
+    store, not in the WidgetConfig, so it can't ride the config seed. */
+export function setWidgetHidden(id: string, hidden: boolean) {
+  setPrefs(id, { ...getPrefs(id), hidden: hidden || undefined });
+}
+
 /** Reorder a variants list so `key` renders as the default (first) presentation. */
 export function reorderDefault(variants: WidgetVariant[], key: string): WidgetVariant[] {
   const i = variants.findIndex((v) => v.key === key);
@@ -322,6 +336,19 @@ function setGroupOrder(groupId: string, ids: string[]) {
   }
   notify();
   schedulePush();
+}
+
+/** Rename one entry of a group's persisted order in place (fromId → toId), keeping its slot. No-op
+    when `fromId` isn't stored or `toId` already is — idempotent, so a one-time migration can call it
+    safely (U6.3a: a legacy card's section id changes home-<key> → custom-<configId> and its reorder
+    slot must follow instead of resetting to the tail). */
+export function remapGroupOrder(groupId: string, fromId: string, toId: string) {
+  const cur = getGroupOrder(groupId);
+  const i = cur.indexOf(fromId);
+  if (i < 0 || cur.includes(toId)) return;
+  const next = [...cur];
+  next[i] = toId;
+  setGroupOrder(groupId, next);
 }
 
 // ── Personal Home: the pinned-widget list ────────────────────────────────────────────────
@@ -1298,7 +1325,7 @@ const WIDGET_PERIODS: Array<{ days: PeriodDays; label: string }> = [
 ];
 
 /** Long-form period words for the auto-widen note («За 7 дней данных нет — показано за всё время»). */
-const PERIOD_WORD: Record<PeriodDays, string> = { 7: '7 дней', 30: '30 дней', 90: '90 дней', 0: 'всё время' };
+export const PERIOD_WORD: Record<PeriodDays, string> = { 7: '7 дней', 30: '30 дней', 90: '90 дней', 0: 'всё время' };
 
 /** Compact underline-tab period row for one widget card (7д / 30д / 90д / Всё). Same visual
     language as the retired topbar switcher, scoped to this card. Hidden while reordering /

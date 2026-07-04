@@ -81,3 +81,20 @@ export function legacyKeyForMetricId(metricId: string): LegacyKey | null {
   const key = legacyKeyOf(metricId);
   return isLegacyKey(key) ? key : null;
 }
+
+// ── Deterministic config id for a Home-pinned legacy widget ────────────────────────────────────
+// When a legacy widget is pinned to Home it renders through ConfigWidget, backed by a stored
+// WidgetConfig. That config's id is DERIVED from the legacy key (not random `genId`) so the same
+// pinned block always maps to the same config across renders and devices: Home keeps the bare
+// registry key ('kpi', …) as the stable, account-synced pointer and re-derives / heals the
+// per-instance config locally from it (widgetStore is device-local for now). Distinct namespace
+// from the `legacy:` metricId prefix (uses `-`, not `:`) so the two never collide.
+export const LEGACY_CONFIG_PREFIX = 'legacy-';
+export const legacyConfigId = (key: LegacyKey): string => `${LEGACY_CONFIG_PREFIX}${key}`;
+/** The legacy key a deterministic config id encodes, or null if the id isn't one (a metric id, a
+ *  random id, or a `legacy-<unknown>`). */
+export function legacyKeyFromConfigId(id: string): LegacyKey | null {
+  if (!id.startsWith(LEGACY_CONFIG_PREFIX)) return null;
+  const key = id.slice(LEGACY_CONFIG_PREFIX.length);
+  return isLegacyKey(key) ? key : null;
+}

@@ -6,18 +6,23 @@ import { ChannelRecencyProvider } from '@/lib/period';
 import {
   HomeEditContext,
   WidgetGroup,
+  getWidgetPrefs,
   getWidgetSource,
   pinToHome,
+  remapGroupOrder,
   setHomeBlocks,
+  setWidgetHidden,
   useHomeBlocks,
 } from '@/components/ChartWidget';
 import { ChannelScope } from '@/lib/channel-context';
 import { HOME_REGISTRY, HOME_DEFAULT_KEYS } from '@/lib/homeWidgets';
 import { ConfigWidget } from '@/components/ConfigWidget';
+import { isWiredLegacyKey } from '@/components/legacyAdapters';
 import { WidgetCatalogModal } from '@/components/WidgetCatalogModal';
 import { CreateWidgetDialog } from '@/components/CreateWidgetDialog';
 import { addWidgetConfig, getWidgetConfig, useWidgetConfigs } from '@/lib/widgetStore';
-import { configIdFromKey, customKey, isCustomKey, type WidgetConfig } from '@/lib/widgetConfig';
+import { legacyConfigId } from '@/lib/legacyWidgets';
+import { configIdFromKey, customKey, healedLegacyConfig, isCustomKey, type WidgetConfig } from '@/lib/widgetConfig';
 
 /**
  * Personal Home — a per-user board of the widgets the reader pinned via the ⋯ «На главную» item
@@ -47,6 +52,35 @@ export function Home() {
   const { data: tgFull } = useTgFull(0);
   const { data: history } = useHistory(730);
   const recency = useMemo(() => latestDataMs(tgFull?.posts, history), [tgFull, history]);
+
+  // Persist a deterministic-id WidgetConfig for each pinned WIRED legacy widget (kpi / digest /
+  // growth / top-posts) so its per-instance settings (period / source / title / size / style) stick
+  // when edited. Runs ONCE per device (guarded by !getWidgetConfig) — which is also the one-time
+  // MIGRATION seam: the card's identity moves from the old `home-<key>` prefs row to the config
+  // (`custom-legacy-<key>`), so we carry the user's saved settings across instead of resetting them
+  // (adversarial review found period/size/title/accent AND the pinned source — wrong-channel data —
+  // would otherwise be orphaned). `hidden` isn't a config field → set it on the NEW ChartSection id;
+  // the reorder slot follows via remapGroupOrder. Keyed on the membership string so it only re-runs
+  // when the pinned set changes (getHomeBlocks returns a fresh array each render). The render below
+  // heals from the same old prefs, so there's no first-paint reset before this lands. The bare
+  // registry key stays in the (account-synced) pinned list as the stable cross-device pointer; the
+  // config is device-local (widgetStore) and re-heals per device from that device's prefs.
+  const pinnedSig = pinned.join('|');
+  useEffect(() => {
+    for (const key of pinned) {
+      if (!isWiredLegacyKey(key) || getWidgetConfig(legacyConfigId(key))) continue;
+      const oldId = `home-${key}`;
+      const prefs = getWidgetPrefs(oldId);
+      const cfg = healedLegacyConfig(key, prefs);
+      if (!cfg) continue;
+      addWidgetConfig(cfg);
+      const newId = `custom-${legacyConfigId(key)}`; // ConfigWidget's ChartSection id
+      if (prefs.hidden) setWidgetHidden(newId, true);
+      remapGroupOrder('home', oldId, newId);
+    }
+    // pinned is captured via pinnedSig (its content signature); a fresh array each render is expected.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pinnedSig]);
 
   return (
     <div>
@@ -87,13 +121,30 @@ export function Home() {
                     </div>
                   );
                 }
-                // Legacy registry widget: render() returns a complete home-scoped ChartSection
-                // (home-<key> id). ChannelScope pins it to its «Источник» (edit dialog) at the
-                // RENDER site — the block's own data hooks must read the override.
+                // Wired legacy widget (U6.3a): render through ConfigWidget too, backed by a
+                // deterministic-id config (persisted by the effect above; the fallback heals from the
+                // same old `home-<key>` prefs so the first paint already carries the migrated period /
+                // source / accent — no reset flash, right channel from frame one). homeKey stays the
+                // bare registry key so the ⋯«Убрать с главной» / edit-mode × unpin work unchanged.
+                if (isWiredLegacyKey(key)) {
+                  const config =
+                    getWidgetConfig(legacyConfigId(key)) ?? healedLegacyConfig(key, getWidgetPrefs(`home-${key}`));
+                  if (!config) return null;
+                  return (
+                    <div key={key} className="contents">
+                      <ConfigWidget config={config} homeKey={key} />
+                    </div>
+                  );
+                }
+                // Own-chrome legacy widget (history / velocity / heatmap / mentions): render() returns
+                // a complete home-scoped ChartSection (home-<key> id) — still the legacy path until
+                // U6.3b extracts its body. ChannelScope pins it to its «Источник» at the RENDER site.
+                const def = HOME_REGISTRY[key];
+                if (!def) return null;
                 return (
                   <div key={key} className="contents">
                     <ChannelScope channelId={getWidgetSource(`home-${key}`) ?? null}>
-                      {HOME_REGISTRY[key]!.render()}
+                      {def.render()}
                     </ChannelScope>
                   </div>
                 );

@@ -150,20 +150,42 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
   (резолвер не производит их форму, рендерер не рисует) → редактор предлагает только line/bar. Table-kind
   уже скрыт из каталога (S3c). Тесты обновлены.
 - **U6 — legacy как config-виджеты** (юзер выбрал полный adapter-рефактор). Стадии:
-  - **U6.1 (модель) SHIPPED `<pending>`:** `lib/legacyWidgets.ts` (pure) — LEGACY_KEYS/LABEL/CAPABILITIES +
+  - **U6.1 (модель) SHIPPED `6114c83`:** `lib/legacyWidgets.ts` (pure) — LEGACY_KEYS/LABEL/CAPABILITIES +
     `legacy:<key>` metricId-неймспейс. `normalizeWidget` принимает legacy-конфиги (viz='kpi' sentinel,
     shell-поля валидируются). `legacyWidgetConfig(key)`. +3 теста.
-  - **U6.2 (унификация редактора) SHIPPED `<pending>`:** `lib/widgetCapabilities.ts` — `editorSpec(config)`
+  - **U6.2 (унификация редактора) SHIPPED `6114c83`:** `lib/widgetCapabilities.ts` — `editorSpec(config)`
     (metric→из MetricDef, legacy→из adapter). `WidgetConfigControls` теперь на `spec`+capabilities-гейт
     (не metric.kind). ConfigEditDialog/CreateWidgetDialog/WidgetExplorer больше не требуют MetricDef →
     работают и для legacy. +5 тестов (278). Composite legacy = shell-only (period/source/title/size/style).
-  - **U6.3 (Home-рендер legacy как config) TODO:** `legacyAdapters.tsx` (bare-body рендер) + ConfigWidget
-    legacy-ветка (adapter-тело в period/source-контексте) + миграция Home на единый config-список. Грабля:
-    history/velocity/heatmap/mentions рендерят СВОЙ ChartSection → нужна экстракция bare-тел.
+  - **U6.3a (4 bare-блока как config) SHIPPED `<pending>`:** `components/legacyAdapters.tsx`
+    (`LEGACY_RENDER` bare-тела kpi/digest/growth/top-posts + `isWiredLegacyKey`) + ConfigWidget
+    `WidgetBody`→`LegacyWidgetBody` (adapter в `WidgetPeriodProvider(config.period)`, recency-widen +
+    widen-нота) + editor/explorer ungate (`metric || legacyKey`). Home рендерит wired-legacy через
+    ConfigWidget; own-chrome (history/velocity/heatmap/mentions) пока на HOME_REGISTRY (→U6.3b).
+    **ДЕВИАЦИЯ от «переписать pinned на custom:<id>»:** bare-ключ ОСТАЁТСЯ в account-synced pinned-
+    списке (стабильный cross-device pointer); per-instance config — device-local с ДЕТЕРМИНИРОВАННЫМ id
+    `legacy-<key>` (`legacyConfigId`), heal-per-device. Деструктивный rewrite отвергнут (cross-device
+    blank-Home). **Миграция (adversarial-review поймал 6 confirmed):** `home-<key>` prefs → новый config
+    identity `custom-legacy-<key>` — `healedLegacyConfig`/`legacyConfigSeed` (period/size/title/source/
+    accent), `hidden`→`setWidgetHidden(newId)`, reorder-слот→`remapGroupOrder`; иначе сбрасывались все
+    настройки + pinned source (HIGH: чужой канал/wrong-data). Эффект = one-time seam (guard
+    `!getWidgetConfig`, keyed pinnedSig), idempotent (verify-агент подтвердил). +5 тестов (283).
+    Экспортнуто из ChartWidget: `getWidgetPrefs/setWidgetHidden/remapGroupOrder/PERIOD_WORD/WidgetPrefs`.
+  - **U6.3b (own-chrome 4 блока) TODO:** экстракция bare-тел history/velocity/heatmap/mentions (рендерят
+    СВОЙ ChartSection с variants/expand/periodControl) → адаптеры + LEGACY_RENDER + routing. HeatmapBody
+    уже bare (useWidgetPeriod); History/Velocity = вынести line-вариант; Mentions = HomeMentionsByDay body.
 Риск снят юзером («никто не пользуется»); гейт=build+тесты+review, визуал=прод.
 
 ## Журнал
 
+- 2026-07-03 — **U6.3a SHIPPED** `<pending>`. 4 bare-legacy-блока (kpi/digest/growth/top-posts) рендерятся
+  через ConfigWidget (единый card-chrome/editor/explorer). Решение: НЕ переписывать pinned деструктивно —
+  bare-ключ = стабильный cross-device pointer, config device-local с детерминированным id `legacy-<key>`.
+  Ultracode adversarial-review (5 осей→verify): 6 confirmed находок, ВСЕ один корень — смена identity
+  `home-<key>`→`custom-legacy-<key>` сиротила старые prefs (period/size/title/accent/**source=wrong-channel
+  HIGH**/hidden/reorder). Фикс = one-time миграция (`healedLegacyConfig`+`setWidgetHidden`+`remapGroupOrder`)
+  в persist-эффекте, idempotent (отдельный verify-агент подтвердил: guard+детерминизм+no-op-on-repeat).
+  Widen-нота восстановлена в LegacyWidgetBody. Гейт build+283.
 - 2026-07-03 — **S12 SHIPPED** `8f39ed6` + **S9** `e52ff2b`. S9: target resolver-owned (fixed+dynamic)
   + «N% от цели» (review 0). S12: story-card стат-футер (Макс·Среднее). Tonal-фон/tooltip/TgAnalytics-
   миграция осознанно отложены (governance / риск live-страницы). **ПЛАН S1-S12 ЗАКРЫТ** (кроме опциональной

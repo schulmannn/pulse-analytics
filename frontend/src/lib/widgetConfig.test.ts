@@ -4,12 +4,16 @@ import {
   configIdFromKey,
   customKey,
   defaultWidget,
+  healedLegacyConfig,
   isCustomKey,
+  legacyConfigSeed,
+  legacyHomeConfig,
   legacyWidgetConfig,
   normalizeWidget,
   normalizeWidgets,
   type WidgetConfig,
 } from '@/lib/widgetConfig';
+import { legacyConfigId, legacyKeyFromConfigId } from '@/lib/legacyWidgets';
 
 describe('defaultWidget', () => {
   it('creates a config with the metric default viz', () => {
@@ -89,6 +93,68 @@ describe('legacy widgets (U6) — `legacy:<key>` configs', () => {
       { metricId: 'ghost.metric' },
     ]);
     expect(out.map((w) => w.metricId)).toEqual(['tg.views', 'legacy:kpi']);
+  });
+
+  it('legacyHomeConfig uses a stable id derived from the key (Home pin/heal)', () => {
+    const a = legacyHomeConfig('kpi');
+    const b = legacyHomeConfig('kpi');
+    expect(a).not.toBeNull();
+    expect(a!.id).toBe(legacyConfigId('kpi'));
+    // Deterministic: two calls agree byte-for-byte (no random genId), so a re-derived / healed
+    // config maps to the same stored entry across renders and devices.
+    expect(a).toEqual(b);
+    expect(a!.metricId).toBe('legacy:kpi');
+    expect(a!.size).toBe('full'); // kpi default size carried through
+    expect(legacyKeyFromConfigId(a!.id)).toBe('kpi'); // round-trips id → key
+    expect(legacyHomeConfig('nope')).toBeNull();
+  });
+
+  it('legacyHomeConfig survives store normalisation with its id + shell intact', () => {
+    const a = legacyHomeConfig('digest')!;
+    const stored = normalizeWidget({ ...a, period: 90, title: 'Мой инсайт' })!;
+    expect(stored.id).toBe(legacyConfigId('digest'));
+    expect(stored.metricId).toBe('legacy:digest');
+    expect(stored.period).toBe(90);
+    expect(stored.title).toBe('Мой инсайт');
+  });
+
+  it('legacyKeyFromConfigId only accepts a `legacy-<known>` config id', () => {
+    expect(legacyKeyFromConfigId('legacy-top-posts')).toBe('top-posts');
+    expect(legacyKeyFromConfigId('legacy-heatmap')).toBe('heatmap');
+    expect(legacyKeyFromConfigId('legacy-nope')).toBeNull();
+    expect(legacyKeyFromConfigId('legacy:kpi')).toBeNull(); // metricId form, not a config id
+    expect(legacyKeyFromConfigId('b_random')).toBeNull();
+  });
+
+  it('legacyConfigSeed maps old home-<key> prefs into a config patch (period/size/title/source/style)', () => {
+    expect(legacyConfigSeed({ period: 90, size: 'third', title: 'Мой KPI', source: 4, color: 2, tinted: true })).toEqual({
+      period: 90,
+      size: 'third',
+      title: 'Мой KPI',
+      source: 4,
+      style: { color: 2, tinted: true },
+    });
+    // Empty / default prefs → empty patch (nothing to carry). `hidden` is NOT a config field.
+    expect(legacyConfigSeed({})).toEqual({});
+    // A 0 / negative source is not a real channel → dropped; a lone accent still yields a style.
+    expect(legacyConfigSeed({ source: 0 })).toEqual({});
+    expect(legacyConfigSeed({ color: 5 })).toEqual({ style: { color: 5 } });
+  });
+
+  it('healedLegacyConfig seeds the deterministic legacy config with migrated prefs, re-validated', () => {
+    const w = healedLegacyConfig('kpi', { period: 7, source: 4, color: 3 })!;
+    expect(w.id).toBe(legacyConfigId('kpi')); // stable id preserved
+    expect(w.metricId).toBe('legacy:kpi');
+    expect(w.viz).toBe('kpi'); // legacy sentinel survives normalisation
+    expect(w.period).toBe(7);
+    expect(w.source).toBe(4);
+    expect(w.style).toEqual({ color: 3 });
+    expect(w.size).toBe('full'); // legacy default kept when prefs carry no size
+    // No prefs → the plain deterministic config (equivalent to legacyHomeConfig).
+    expect(healedLegacyConfig('digest', {})).toEqual(legacyHomeConfig('digest'));
+    // A garbage prefs period can't produce an invalid config (normalizeWidget drops it).
+    expect(healedLegacyConfig('kpi', { period: 999 as unknown as 7 })!.period).toBeUndefined();
+    expect(healedLegacyConfig('nope', { period: 7 })).toBeNull();
   });
 });
 
