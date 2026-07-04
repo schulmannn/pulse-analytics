@@ -1,7 +1,7 @@
 import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { fmt } from '@/lib/format';
 import { detectAnomalies } from '@/lib/anomaly';
-import { ChartTooltip } from '@/components/ChartTooltip';
+import { ChartTooltip, type TooltipRow, type TooltipState } from '@/components/ChartTooltip';
 import { ChartExpandedContext, ExpandedChartHeightContext, WidgetTargetContext } from '@/components/ExpandableChart';
 
 interface LineChartProps {
@@ -263,6 +263,25 @@ export function LineChart({
     if (ghost && ghost[i] != null) base = `${base} · пред. ${fmt.short(ghost[i])}`;
     return anomalySet.has(i) ? `${base} · аномалия` : base;
   };
+  // The hover readout: a STRUCTURED card (date · Текущий · comparison · Δ) whenever a ghost series
+  // is present — so the tooltip is an instrument, not a caption. Without a comparison, keep the
+  // metric's own rich title text (velocity/history carry extra context there).
+  const buildTip = (i: number): TooltipState => {
+    const p = points[i];
+    if (ghost && ghost[i] != null) {
+      const cur = values[i];
+      const prev = ghost[i];
+      const rows: TooltipRow[] = [
+        { label: 'Текущий', value: fmt.short(cur), color: 'hsl(var(--brand-iris))' },
+        { label: ghostLabel, value: fmt.short(prev), color: 'hsl(var(--chart-2))' },
+      ];
+      const d = prev !== 0 ? ((cur - prev) / Math.abs(prev)) * 100 : null;
+      if (d != null && Number.isFinite(d)) rows.push({ label: 'Δ', value: `${d >= 0 ? '+' : '−'}${Math.abs(d).toFixed(1)}%` });
+      const title = anomalySet.has(i) ? `${labels?.[i] ?? ''} · аномалия` : labels?.[i];
+      return { x: p.x, y: p.y, title, rows };
+    }
+    return { x: p.x, y: p.y, text: tipText(i) };
+  };
   const onEnter = (i: number) => () => {
     setHover((prev) => (prev && prev.i === i ? prev : { i }));
   };
@@ -329,10 +348,14 @@ export function LineChart({
         {/* Last-point marker — flat crisp dot knocked out from the paper surface (no glow halo) */}
         <circle cx={lastPt.x} cy={lastPt.y} r="4" fill="hsl(var(--brand-iris))" stroke="hsl(var(--background))" strokeWidth="2" vectorEffect="non-scaling-stroke" />
 
-        {/* Hovered-point crosshair + marker */}
+        {/* Hovered-point crosshair + marker (+ the comparison point at the same x, so hovering reads
+            BOTH series). */}
         {hovered && (
           <>
             <line x1={hovered.x} y1={0} x2={hovered.x} y2={h} stroke="hsl(var(--brand-iris))" strokeWidth="1" opacity="0.35" vectorEffect="non-scaling-stroke" />
+            {ghost && ghost[hover!.i] != null && (
+              <circle cx={hovered.x} cy={yFor(ghost[hover!.i])} r="3.5" fill="hsl(var(--card))" stroke="hsl(var(--chart-2))" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+            )}
             <circle cx={hovered.x} cy={hovered.y} r="4" fill="hsl(var(--brand-iris))" stroke="hsl(var(--background))" strokeWidth="1.5" />
           </>
         )}
@@ -396,7 +419,7 @@ export function LineChart({
       )}
 
       {/* Readout anchored to the snapped data point (not the cursor) so it stays inside the chart */}
-      <ChartTooltip tip={hovered ? { x: hovered.x, y: hovered.y, text: tipText(hover!.i) } : null} />
+      <ChartTooltip tip={hovered ? buildTip(hover!.i) : null} />
     </div>
   );
 }

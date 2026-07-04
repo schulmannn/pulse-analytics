@@ -1,6 +1,12 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 
-export type TooltipState = { x: number; y: number; text: string } | null;
+/** One line of a structured readout: a label (with an optional series-colour dot) and a value. */
+export type TooltipRow = { label: string; value: string; color?: string };
+/** Either a plain `text` readout (legacy callers) or a structured `title` + `rows` card (series
+ *  charts showing current vs comparison). `rows` wins when present. */
+export type TooltipState =
+  | { x: number; y: number; text?: string; title?: string; rows?: TooltipRow[] }
+  | null;
 
 /** Floating readout for the SVG charts — anchored to a point inside a `relative` chart
     container. Placed above the anchor and flipped below when it would clip the container's
@@ -42,7 +48,24 @@ export function ChartTooltip({ tip }: { tip: TooltipState }) {
       className="pointer-events-none absolute z-10 max-w-[240px] rounded border border-border bg-background/95 px-2.5 py-1.5 text-xs font-medium leading-snug text-foreground"
       style={{ left: cx - half, top: Math.max(top, 0), visibility: measured ? 'visible' : 'hidden' }}
     >
-      {tip.text}
+      {tip.rows ? (
+        <>
+          {tip.title && <div className="mb-1 whitespace-nowrap text-2xs tracking-wide text-muted-foreground">{tip.title}</div>}
+          <div className="space-y-0.5">
+            {tip.rows.map((r, i) => (
+              <div key={i} className="flex items-center justify-between gap-4 whitespace-nowrap">
+                <span className="flex items-center gap-1.5 text-muted-foreground">
+                  {r.color && <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: r.color }} />}
+                  {r.label}
+                </span>
+                <span className="tabular-nums text-foreground">{r.value}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      ) : (
+        tip.text
+      )}
     </div>
   );
 }

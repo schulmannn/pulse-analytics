@@ -1,6 +1,6 @@
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { fmt } from '@/lib/format';
-import { ChartTooltip } from '@/components/ChartTooltip';
+import { ChartTooltip, type TooltipRow, type TooltipState } from '@/components/ChartTooltip';
 import { axisLabel, niceScale } from '@/components/LineChart';
 import { ChartExpandedContext, ExpandedChartHeightContext, WidgetTargetContext } from '@/components/ExpandableChart';
 
@@ -116,6 +116,24 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
     const base = titles?.[i] ?? `${labels?.[i] ?? ''}: ${values[i]}`;
     return hasGhost && ghost![i] != null ? `${base} · пред. ${fmt.short(ghost![i])}` : base;
   };
+  // Structured readout (label · Текущий · comparison · Δ) when a ghost series is present; else the
+  // metric's own title text. Anchored to the hovered bar's top-centre.
+  const buildTip = (i: number): TooltipState => {
+    const x = barCenterX(i);
+    const y = barTop(values[i]);
+    if (hasGhost && ghost![i] != null) {
+      const cur = values[i];
+      const prev = ghost![i];
+      const rows: TooltipRow[] = [
+        { label: 'Текущий', value: fmt.short(cur), color: 'hsl(var(--brand-iris))' },
+        { label: ghostLabel, value: fmt.short(prev), color: 'hsl(var(--chart-2))' },
+      ];
+      const d = prev !== 0 ? ((cur - prev) / Math.abs(prev)) * 100 : null;
+      if (d != null && Number.isFinite(d)) rows.push({ label: 'Δ', value: `${d >= 0 ? '+' : '−'}${Math.abs(d).toFixed(1)}%` });
+      return { x, y, title: labels?.[i], rows };
+    }
+    return { x, y, text: tipText(i) };
+  };
   const onEnter = (i: number) => () => {
     setHover((prev) => (prev && prev.i === i ? prev : { i }));
   };
@@ -221,6 +239,16 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
             </text>
           </>
         )}
+
+        {/* Hovered-column crosshair + the comparison point on it (parity with LineChart). */}
+        {hover && hover.i < n && (
+          <g className="pointer-events-none">
+            <line x1={barCenterX(hover.i)} y1={0} x2={barCenterX(hover.i)} y2={graphHeight} stroke="hsl(var(--brand-iris))" strokeWidth="1" opacity="0.3" vectorEffect="non-scaling-stroke" />
+            {hasGhost && ghost![hover.i] != null && (
+              <circle cx={barCenterX(hover.i)} cy={barTop(ghost![hover.i])} r="3.5" fill="hsl(var(--card))" stroke="hsl(var(--chart-2))" strokeWidth="1.5" />
+            )}
+          </g>
+        )}
       </svg>
       {/* Comparison legend — names both series whenever a ghost is drawn. */}
       {hasGhost && (
@@ -236,13 +264,7 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
         </div>
       )}
       {/* Readout anchored to the hovered bar's top-center (not the cursor) */}
-      <ChartTooltip
-        tip={
-          hover && hover.i < n
-            ? { x: offsetX + hover.i * itemWidth + itemWidth / 2, y: barTop(values[hover.i]), text: tipText(hover.i) }
-            : null
-        }
-      />
+      <ChartTooltip tip={hover && hover.i < n ? buildTip(hover.i) : null} />
     </div>
   );
 }
