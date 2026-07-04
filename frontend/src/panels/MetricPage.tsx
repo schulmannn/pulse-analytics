@@ -208,6 +208,11 @@ export function MetricPage() {
   const meta = derived.drillMeta[metricKey];
   const { normPosts, normPostsAll, subsSpark, historyRows, members, periodLabel } = derived;
 
+  // Data-source line: which channel these numbers come from, so the metric reads self-explanatory
+  // (steep «источник данных кристально понятен»). The metric page is Telegram-scoped.
+  const currentChannel = channelsData?.channels.find((c) => c.id === channelId);
+  const channelHandle = currentChannel?.username ? `@${currentChannel.username}` : currentChannel?.title ?? null;
+
   // ── Windows: active + comparison baseline ─────────────────────────────────────────────
   const winTo = range ? range.to : Date.now();
   const winFrom = range ? range.from : days > 0 ? winTo - (days - 1) * DAY_MS : null;
@@ -445,6 +450,9 @@ export function MetricPage() {
         <div className="text-xs tracking-wide text-muted-foreground">
           {def.term} · {periodLabel}
         </div>
+        {channelHandle && (
+          <div className="mt-0.5 text-2xs tracking-wide text-ink3">Telegram · {channelHandle}</div>
+        )}
         <div className="mt-2 flex items-baseline gap-2.5">
           <span className="text-hero font-medium leading-none tabular-nums tracking-tight">{meta.total}</span>
           <DeltaPill delta={meta.trend} />
