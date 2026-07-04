@@ -5,11 +5,12 @@
 
 import { useMemo } from 'react';
 import { useIgBreakdowns, useIgHistory, useIgInsights, useIgOnline, useIgProfile } from '@/api/queries';
+import { useSelectedChannel } from '@/lib/channel-context';
 import { DEFAULT_WIDGET_DAYS, widgetPeriodValue } from '@/lib/period';
 import { resolveWidgetMetric, type DataContext, type WidgetResult } from '@/lib/resolveWidgetMetric';
 import type { WidgetConfig } from '@/lib/widgetConfig';
 
-export function useIgWidgetData(config: WidgetConfig): WidgetResult {
+export function useIgWidgetData(config: WidgetConfig): { result: WidgetResult; isLoading: boolean } {
   const days = config.period ?? DEFAULT_WIDGET_DAYS;
   const period = useMemo(() => widgetPeriodValue(days), [days]);
 
@@ -22,8 +23,9 @@ export function useIgWidgetData(config: WidgetConfig): WidgetResult {
   const breakdownsQ = useIgBreakdowns(timeframe);
   const onlineQ = useIgOnline();
   const historyQ = useIgHistory();
+  const { channelId } = useSelectedChannel();
 
-  return useMemo(() => {
+  const result = useMemo(() => {
     const ctx: DataContext = {
       now: Date.now(),
       days,
@@ -40,4 +42,10 @@ export function useIgWidgetData(config: WidgetConfig): WidgetResult {
     return resolveWidgetMetric(config, ctx);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config, days, period, profileQ.data, insightsQ.data, breakdownsQ.data, onlineQ.data, historyQ.data]);
+
+  // Loading = a channel is selected AND the core IG sources (profile + insights) are still pending
+  // → show a shaped skeleton instead of flashing «Нет данных». channelId gate avoids a forever
+  // skeleton when the queries are disabled (no channel = a real empty state, not loading).
+  const isLoading = channelId != null && (profileQ.isPending || insightsQ.isPending);
+  return { result, isLoading };
 }

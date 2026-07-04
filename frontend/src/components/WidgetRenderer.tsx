@@ -4,9 +4,33 @@ import { BarChart } from '@/components/BarChart';
 import { PieChart } from '@/components/PieChart';
 import { Breakdown } from '@/components/Breakdown';
 import { WidgetTargetContext } from '@/components/ExpandableChart';
+import { Skeleton } from '@/components/ui/skeleton';
 import type { WidgetResult } from '@/lib/resolveWidgetMetric';
 import type { WidgetViz } from '@/lib/widgetMetrics';
 import { breakdownTitles, effectiveViz, seriesStats, seriesToChart } from '@/lib/widgetRender';
+
+/**
+ * Loading placeholder shaped like the story card (hero bar + chart area), shown while the widget's
+ * data queries are pending — so a config widget never flashes «Нет данных» (the empty state) before
+ * its data arrives, and loading is visibly distinct from a genuinely empty result (steep #14).
+ */
+export function WidgetSkeleton({ viz }: { viz: WidgetViz }) {
+  // Value/series vizzes lead with a hero number; breakdowns (donut/list) lead with the chart itself.
+  const heroLed = viz === 'kpi' || viz === 'line' || viz === 'bar';
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      {heroLed && (
+        <div className="shrink-0 space-y-2">
+          <Skeleton className="h-7 w-28" />
+          <Skeleton className="h-3 w-40" />
+        </div>
+      )}
+      <div className={`min-h-0 flex-1 ${heroLed ? 'mt-3' : ''}`}>
+        <Skeleton className="h-full min-h-[72px] w-full rounded" />
+      </div>
+    </div>
+  );
+}
 
 /**
  * The single widget renderer — a WidgetResult + a chosen visualisation → the story-card BODY

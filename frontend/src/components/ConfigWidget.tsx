@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { ChartSection, PERIOD_WORD } from '@/components/ChartWidget';
-import { WidgetRenderer } from '@/components/WidgetRenderer';
+import { WidgetRenderer, WidgetSkeleton } from '@/components/WidgetRenderer';
 import { ConfigEditDialog } from '@/components/ConfigEditDialog';
 import { WidgetExplorer } from '@/components/WidgetExplorer';
 import { LEGACY_RENDER } from '@/components/legacyAdapters';
@@ -118,11 +118,13 @@ function LegacyWidgetBody({ legacyKey, config }: { legacyKey: LegacyKey; config:
 }
 
 function TgWidgetBody({ config }: { config: WidgetConfig }) {
-  const result = useWidgetData(config);
+  const { result, isLoading } = useWidgetData(config);
+  if (isLoading) return <WidgetSkeleton viz={config.viz} />;
   return <WidgetRenderer result={result} viz={config.viz} />;
 }
 
 function IgWidgetBody({ config }: { config: WidgetConfig }) {
-  const result = useIgWidgetData(config);
+  const { result, isLoading } = useIgWidgetData(config);
+  if (isLoading) return <WidgetSkeleton viz={config.viz} />;
   return <WidgetRenderer result={result} viz={config.viz} />;
 }
