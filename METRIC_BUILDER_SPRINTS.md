@@ -237,6 +237,28 @@ color-toggle + crossfade иконок + remount текста (`index.css:251`, `
 
 ## Журнал
 
+- 2026-07-04 — **P0 Widget-level error boundaries SHIPPED** `794e2df` (бандл `index-Dqai0_T3.js`, 312
+  тестов, +7). Первая задача НОВОГО P0-трека с Notion-доски (Codex добавил ~14 P0; взял этот, т.к. @codex
+  явно велел «делать ДО следующих крупных UI/metric изменений» — prerequisite, де-рискует остальные +
+  закладывает trace-id для P0 «Crash telemetry» #8). До этого ЛЮБОЙ throw в виджете уходил в один app-level
+  ErrorBoundary → бланк всего shell («интерфейс не смог отрисоваться»). Теперь per-widget изоляция:
+  (1) `lib/widgetErrors.ts` — pure, node-тестируемый reporting (`nextTraceId`/`buildWidgetErrorReport`/
+  `reportWidgetError`/`setWidgetErrorSink` — seam под #8 POST /api/client-errors); (2) `WidgetErrorBoundary`
+  — ловит, репортит (trace id), calm fallback + «Повторить», auto-recovery по `resetKeys`; варианты `inline`
+  (chrome карточки жив → ⋯ меню чинит/убирает битый виджет) + size-aware `card`; (3) ЕДИНЫЙ шов —
+  ChartSection оборачивает body КАЖДОЙ карточки app-wide + **self-protect** function-form variant-compute
+  (try/catch в useMemo → `ThrowInRender` ре-бросает ВНУТРИ boundary, т.к. compute живёт в render-теле
+  ChartSection ВЫШЕ boundary); (4) /analytics: TgAnalytics-панели (inline) + own-chrome History/Velocity/
+  Heatmap (card) + explorer + create-preview sandbox. **Ultracode 2 раунда adversarial-review:** initial
+  (5 осей → verify) = 12 находок, 9 confirmed (hardcoded col-span-3 fallback ломал `full` heatmap на crash;
+  /analytics TgAnalytics + explorer + create-preview НЕ покрыты → HIGH honesty-gap; card fallback терял
+  reorder order) — ВСЕ пофикшены (size-threading fallback, ChartSection self-protect закрыл /analytics
+  variant-compute одним швом, sandbox-wraps); verification-раунд (3 оси) = **0 находок**. 3 refuted корректно
+  (render-loop / sink-leak / counter-reset = спекулятивные, код уже обрабатывает). Гейт: build(tsc+vite)+312
+  тестов+2 ревью-раунда. **Границы (честно):** feature-панели Compare/Insights/Hashtags вне widget-scope
+  (app-boundary); TgAnalytics top-level derives = panel-level (не per-widget, но shell жив). ⚠️ Реальный
+  synthetic-broken-widget E2E = карта Playwright-QA (#1, эта задача её де-рискует). ⚠️ Прод-верифай = no-
+  regression через браузер (authed локально не рендерится).
 - 2026-07-04 — **P0 account-synced WidgetConfig store SHIPPED** `f135279` (бандл `index-BpzyVefZ.js`, 305
   тестов). WidgetConfig[] теперь следует за АККАУНТОМ (cross-device), не браузером. Transport = юзер выбрал
   «extend existing /api/prefs blob» (не новый endpoint). widgetStore: `setWidgetConfigsSyncHook` (write→
