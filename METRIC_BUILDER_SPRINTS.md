@@ -193,8 +193,12 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
   загружены → сумма полна даже для sparse-канала, НЕ over-suppress). resolveWidgetMetric field-ghost
   теперь гейтит с `capped = normPostsAll.length >= 100` (сервер-кап). Backward-compat → старые resolver
   ghost-тесты (4 поста, не capped) зелены; +1 resolver-тест (100 постов capped+uncovered → ghost undefined),
-  +2 helper-теста (290). **Sibling #2 ОТЛОЖЕН:** MetricPage rank/pivot `baseByDim` compare-колонки тоже
-  недосчитывают (низкая видимость).
+  +2 helper-теста (290). **Sibling #2 FIXED** (тот же коммит-волна): MetricPage rank/pivot `baseByDim`
+  compare-колонки теперь гейтятся на `baseCovered` (одна строка — `baseCovered` уже считался) → не
+  недосчитывают и не спорят с подавленным rail «Изменение». **Undercount-класс закрыт целиком** (metric-
+  page rail+ghost, config-widget ghost, rank/pivot compare). Прод-аудит: Home/Analytics/metric-pages/
+  Posts/Overview/edit-dialog — чисто; KpiGrid-дельты archive-based (`dailyWindowDelta` из /api/history,
+  reliable) → +340% на Overview 90д РЕАЛЬНЫЙ (рост-затем-спад, консистентно с 7д−38.7%/30д−9%).
 - 2026-07-03 — **U6.3a SHIPPED** `57fcf0a`. 4 bare-legacy-блока (kpi/digest/growth/top-posts) рендерятся
   через ConfigWidget (единый card-chrome/editor/explorer). Решение: НЕ переписывать pinned деструктивно —
   bare-ключ = стабильный cross-device pointer, config device-local с детерминированным id `legacy-<key>`.

@@ -293,7 +293,10 @@ export function MetricPage() {
     return acc;
   };
   const curByDim = field ? sumByDim(normPosts) : new Map<string, number>();
-  const baseByDim = field && baseWin ? sumByDim(postsInBase) : null;
+  // Gate the rank/pivot per-dimension compare on the same baseline coverage as the rail + ghost —
+  // otherwise the rank "compare" pairs undercount (loaded posts don't span the baseline) and would
+  // disagree with the now-suppressed rail «Изменение» (sibling of the +969% fix).
+  const baseByDim = field && baseWin && baseCovered ? sumByDim(postsInBase) : null;
   const rankItems = [...curByDim.entries()]
     .sort(([, a], [, b]) => b - a)
     .map(([label, value]) => ({
