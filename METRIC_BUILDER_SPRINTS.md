@@ -191,10 +191,10 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
   осознанно отложен с S6.1). Для premium слабо: настройки виджетов/источников/цветов не переезжают между
   устройствами. Чинить: hydrate/persist через `/api/prefs` или отдельный `/api/widget-configs`; хранить
   `WidgetConfig[]` c `updatedAt`/`schemaVersion`; merge local+server; только потом Home = «истина».
-- **IG-редактор показывает TG-источники (BUG, подтверждён на проде).** IG → «Охват» → поле «Источник»
-  показывало TG-каналы (bynotem/tydaaya). Корень: `ConfigEditDialog.tsx` SourceField фильтрует
-  `c.source !== 'ig'` (показывает НЕ-ig). Чинить: source-aware по `getMetric(config.metricId)?.source` —
-  IG-метрика → только ig-каналы, TG → только tg; если IG не подключён → disabled empty-state, НЕ чужие каналы.
+- ~~**IG-редактор показывает TG-источники (BUG).**~~ **SHIPPED `d241a44`** — source-aware `SourceField`
+  через pure `lib/channelSource.ts` (`channelsForSource`, зеркалит switcher: TG=`source!=='ig'`,
+  IG=`ig_connected`) + IG empty-state hint + disabled-опция для stale cross-network пина. 8 unit-тестов,
+  adversarial-review 2 оси → 0 находок.
 
 **P1:**
 - **Universal explorer parity для КАЖДОГО ChartSection.** Ядро (WidgetExplorer) есть, но own-chrome legacy
@@ -237,6 +237,18 @@ color-toggle + crossfade иконок + remount текста (`index.css:251`, `
 
 ## Журнал
 
+- 2026-07-04 — **P0 IG source-aware editor SHIPPED** `d241a44` (бандл `index-UqyoWZ9J.js`, 299 тестов).
+  Прод-баг: редактор виджета в поле «Источник» показывал TG-каналы для IG-метрик (`ConfigEditDialog`
+  SourceField жёстко фильтровал `c.source !== 'ig'` независимо от метрики). Фикс: pure
+  `lib/channelSource.ts` `channelsForSource(channels, 'tg'|'ig')` ЗЕРКАЛИТ shipped-switcher
+  (`DashboardLayout` filtered): TG = `source !== 'ig'` (без standalone-ig), IG = `!!ig_connected`
+  (только каналы с привязанным IG-аккаунтом — это и есть валидный pin для useIgWidgetData). SourceField
+  берёт `source = getMetric(config.metricId)?.source === 'ig' ? 'ig' : 'tg'` (legacy → tg). +IG
+  empty-state hint (нет IG → источник из свитчера, НЕ чужие каналы) +disabled-опция «Недоступный источник»
+  для stale cross-network пина (round-trips, видимо, без деструктивного авто-clear). 8 unit-тестов (299).
+  **Ultracode adversarial-review (2 оси correctness+integration → verify): 0 находок.** Create-flow
+  проверен (draft.metricId выставлен сразу → getMetric резолвит IG). ChartWidget:1620 legacy-picker
+  оставлен (legacy = TG, `source!=='ig'` там корректен). **P0 #2 закрыт; остался P0 account-sync store.**
 - 2026-07-04 — **Chart hover #9 ОСТАТОК SHIPPED** `64cc270`. Drilldown + legend-toggle (последний кусок #9;
   ядро-tooltip было `6359270`). (1) **Legend-toggle:** comparison-чип в LineChart/BarChart стал aria-pressed
   кнопкой (скрыть/показать ghost); скрытый ghost выпадает из y-домена → серия рескейлится. (2) **Drilldown:**
