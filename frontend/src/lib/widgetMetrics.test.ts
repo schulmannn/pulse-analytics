@@ -7,6 +7,7 @@ import {
   getMetric,
   isMetricId,
   metricsForSource,
+  recommendedSize,
   type MetricCategory,
   type WidgetViz,
 } from '@/lib/widgetMetrics';
@@ -110,6 +111,14 @@ describe('widgetMetrics catalogue', () => {
     expect(tg.some((m) => m.id === 'tg.views')).toBe(true);
     expect(ig.some((m) => m.id === 'tg.views')).toBe(false);
     expect(ig.some((m) => m.id === 'ig.reach')).toBe(true);
+  });
+
+  it('recommendedSize picks a sensible footprint by kind/viz (U4)', () => {
+    expect(recommendedSize(getMetric('tg.er')!)).toBe('third'); // value/KPI
+    expect(recommendedSize(getMetric('tg.views')!)).toBe('half'); // line series
+    expect(recommendedSize(getMetric('ig.countries')!)).toBe('third'); // donut default
+    expect(recommendedSize(getMetric('tg.weeklyTable')!)).toBe('full'); // table
+    expect(recommendedSize(getMetric('tg.emoji')!)).toBe('half'); // list breakdown
   });
 
   it('exposes a label + order for all four categories', () => {

@@ -61,10 +61,12 @@ describe('normalizeWidgets', () => {
 describe('normalizeWidget — viz coercion', () => {
   it('keeps a supported viz', () => {
     expect(normalizeWidget({ metricId: 'tg.views', viz: 'bar' })!.viz).toBe('bar');
-    expect(normalizeWidget({ metricId: 'tg.views', viz: 'rank' })!.viz).toBe('rank');
+    expect(normalizeWidget({ metricId: 'tg.views', viz: 'line' })!.viz).toBe('line');
   });
 
   it('coerces an unsupported viz to the metric default', () => {
+    // rank/pivot are no longer offered (not rendered from a WidgetResult) → fall back to line.
+    expect(normalizeWidget({ metricId: 'tg.views', viz: 'rank' })!.viz).toBe('line');
     // tg.er is a value metric → supportedViz [kpi]; a line request falls back to kpi.
     expect(normalizeWidget({ metricId: 'tg.er', viz: 'line' })!.viz).toBe('kpi');
     // garbage viz → default
@@ -211,8 +213,10 @@ describe('custom-key helpers', () => {
 
 // A tiny compile-time-ish shape guard so the exported type stays usable.
 describe('WidgetConfig shape', () => {
-  it('defaultWidget output satisfies the minimal required fields', () => {
+  it('defaultWidget output carries id, metricId, viz + a recommended size', () => {
     const w: WidgetConfig = defaultWidget('ig.reach')!;
-    expect(Object.keys(w).sort()).toEqual(['id', 'metricId', 'viz']);
+    expect(Object.keys(w).sort()).toEqual(['id', 'metricId', 'size', 'viz']);
+    expect(w.size).toBe('half'); // ig.reach is a line series → half
+    expect(defaultWidget('tg.er')!.size).toBe('third'); // value/KPI → third
   });
 });

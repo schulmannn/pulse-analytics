@@ -138,13 +138,17 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
 - **U2 — Create-widget preview** — SHIPPED `13a6277`. Извлёк `WidgetConfigControls` (общий edit+create).
   `CreateWidgetDialog`: живой preview (`WidgetBody` над draft, real data, ChannelScope по source) + те же
   контролы + «Добавить на главную». Home: каталог→create-step (не мгновенный add). `WidgetBody` экспортнут.
-- **U3 — Universal explorer** — SHIPPED `<pending>`. `WidgetExplorer` = полноэкранная ПЕСОЧНИЦА: большой
+- **U3 — Universal explorer** — SHIPPED `bba9774`. `WidgetExplorer` = полноэкранная ПЕСОЧНИЦА: большой
   чарт (full axes, ChartExpandedContext=true, h420) над ЛОКАЛЬНЫМ draft + `WidgetConfigControls` справа;
   «Применить к виджету» коммитит (updateWidgetConfig), иначе виджет не тронут. Подключено через новый
   аддитивный проп `explorer` в ChartSection (config-виджет передаёт песочницу; legacy не задет → старый
   ChartExpandOverlay). Ноль per-chart explorer-кода — работает для любого config-виджета.
-- **U4 — recommendedSize в MetricDef + авто-размер** — TODO.
-- **U5 — убрать неработающие viz (rank/pivot) из редактора** — TODO.
+- **U4 — recommendedSize + авто-размер** — SHIPPED `<pending>`. `recommendedSize(metric)` в widgetMetrics
+  (value→third, donut→third, table→full, else half); `defaultWidget` сидит size → свежий виджет и create-
+  preview стартуют с разумным размером, не всегда half.
+- **U5 — убрать нерендерящиеся viz** — SHIPPED `<pending>`. `vizForKind` series больше не отдаёт rank/pivot
+  (резолвер не производит их форму, рендерер не рисует) → редактор предлагает только line/bar. Table-kind
+  уже скрыт из каталога (S3c). Тесты обновлены.
 - **U6 — Home: instances-not-keys + legacy-адаптеры** (самый глубокий, в конце) — TODO.
 Риск снят юзером («никто не пользуется»); гейт=build+тесты+review, визуал=прод.
 

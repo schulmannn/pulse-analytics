@@ -15,7 +15,7 @@
 
 import type { PeriodDays } from '@/lib/period';
 import type { WidgetSize } from '@/components/ChartWidget';
-import { getMetric, isMetricId, type WidgetViz } from '@/lib/widgetMetrics';
+import { getMetric, isMetricId, recommendedSize, type WidgetViz } from '@/lib/widgetMetrics';
 import { genId } from '@/lib/reportBlocks';
 
 /** Series bucketing — richer than the current day/week/month (S10 teaches metricSeries the rest;
@@ -117,11 +117,11 @@ const isObj = (v: unknown): v is Record<string, unknown> =>
   !!v && typeof v === 'object' && !Array.isArray(v);
 const isFiniteNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
-/** A fresh widget for a metric — its default visualisation, no options. Null for an unknown id. */
+/** A fresh widget for a metric — its default visualisation + recommended size. Null for unknown id. */
 export function defaultWidget(metricId: string): WidgetConfig | null {
   const metric = getMetric(metricId);
   if (!metric) return null;
-  return { id: genId(), metricId, viz: metric.defaultViz };
+  return { id: genId(), metricId, viz: metric.defaultViz, size: recommendedSize(metric) };
 }
 
 function normComparison(raw: unknown): ComparisonConfig | undefined {

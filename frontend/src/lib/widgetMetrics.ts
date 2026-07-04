@@ -16,6 +16,7 @@
 // lands in later sprints; this sprint only establishes the vocabulary.
 
 import type { DrillKey } from '@/lib/kpiDerive';
+import type { WidgetSize } from '@/components/ChartWidget';
 
 /** Where the metric's data comes from. `all` = source-agnostic (rare; reserved). */
 export type MetricSource = 'tg' | 'ig' | 'all';
@@ -77,12 +78,14 @@ export interface MetricDef {
 /** Default viz set per kind — a metric may override, but this keeps the catalogue consistent and
  *  DRY (same spirit as reportBlocks' defaultBlock switch). A series metric that declares
  *  `dimensions` also gains rank/pivot (the metric-page projections). */
-function vizForKind(kind: MetricKind, hasDims: boolean): { defaultViz: WidgetViz; supportedViz: WidgetViz[] } {
+function vizForKind(kind: MetricKind): { defaultViz: WidgetViz; supportedViz: WidgetViz[] } {
   switch (kind) {
     case 'value':
       return { defaultViz: 'kpi', supportedViz: ['kpi'] };
+    // rank/pivot (dimension projections) are NOT rendered from a WidgetResult — the resolver produces
+    // no rank/pivot shape — so the builder only offers line/bar for series (no dead viz options).
     case 'series':
-      return { defaultViz: 'line', supportedViz: hasDims ? ['line', 'bar', 'rank', 'pivot'] : ['line', 'bar'] };
+      return { defaultViz: 'line', supportedViz: ['line', 'bar'] };
     case 'breakdown':
       return { defaultViz: 'list', supportedViz: ['list', 'bar', 'donut'] };
     case 'table':
@@ -96,7 +99,7 @@ type MetricSpec = Omit<MetricDef, 'defaultViz' | 'supportedViz'> &
   Partial<Pick<MetricDef, 'defaultViz' | 'supportedViz'>>;
 
 function define(spec: MetricSpec): MetricDef {
-  const auto = vizForKind(spec.kind, !!spec.dimensions?.length);
+  const auto = vizForKind(spec.kind);
   const supportedViz = spec.supportedViz ?? auto.supportedViz;
   const defaultViz = spec.defaultViz ?? auto.defaultViz;
   return { ...spec, defaultViz, supportedViz };
@@ -303,6 +306,16 @@ export function isMetricId(raw: string | undefined | null): raw is string {
 /** Metrics available for a source: `tg` / `ig` themselves plus any `all` (source-agnostic) ones. */
 export function metricsForSource(source: 'tg' | 'ig'): MetricDef[] {
   return WIDGET_METRICS.filter((m) => m.source === source || m.source === 'all');
+}
+
+/** A sensible default footprint for a fresh widget of this metric (U4): a KPI reads at a third, a
+ *  donut wants a compact square, a table needs the full row, everything else (line/bar/list) a half.
+ *  Seeds `defaultWidget().size` so a new card lands well-proportioned instead of always half. */
+export function recommendedSize(metric: MetricDef): WidgetSize {
+  if (metric.kind === 'table') return 'full';
+  if (metric.kind === 'value') return 'third';
+  if (metric.defaultViz === 'donut') return 'third';
+  return 'half';
 }
 
 /** Human labels + display order for the four catalogue categories (S6 modal groups / headers). */
