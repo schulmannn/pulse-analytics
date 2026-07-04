@@ -160,14 +160,15 @@ export function PieChart({ values, labels, titles, colors, height = 200 }: PieCh
   const tipText = (i: number) => `${arcs[i]?.title ?? ''} · ${pct(arcs[i]?.value ?? 0)}`;
 
   // Legend: full in the overlay; in a fixed tile capped by how many rows fit the donut height so
-  // the list never scrolls off (steep — «следить чтобы не съезжали»); else the flat 8.
-  const LEGEND_ROW_PX = 30;
-  const legendCap = expanded
-    ? arcs.length
-    : compactSide
-      ? Math.max(2, Math.floor(size / LEGEND_ROW_PX))
-      : LEGEND_CAP;
-  const legendRows = arcs.slice(0, legendCap);
+  // the list never scrolls off NOR clips (the tile is overflow-hidden) — «следить чтобы не съезжали»;
+  // else the flat 8. Row pitch matches the rendered li (py-1.5 + a text-sm value line ≈ 34px), and
+  // when the list is truncated one slot is reserved for the «+N ещё» line so rows + that line still
+  // fit — mirrors Breakdown.
+  const LEGEND_ROW_PX = 34;
+  const rowsThatFit = Math.max(2, Math.floor(size / LEGEND_ROW_PX));
+  const legendCap = expanded ? arcs.length : compactSide ? rowsThatFit : LEGEND_CAP;
+  const willTruncate = arcs.length > legendCap;
+  const legendRows = arcs.slice(0, willTruncate ? Math.max(1, legendCap - 1) : legendCap);
   const legendExtra = arcs.length - legendRows.length;
 
   const containerCls = expanded
