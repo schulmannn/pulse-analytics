@@ -9,15 +9,21 @@ const DEMO_ME = { uid: 999, email: 'demo@pulse.local', role: 'user', avatar: nul
  * flag before load, so the whole Telegram dashboard renders from deterministic client-side fixtures —
  * no backend, no real credentials. Waits for the shell + first widget card, then a short settle so
  * ResizeObserver-driven chart heights are final before we measure them.
+ * `opts.theme` pins the pulse_theme preference before load (default: system → the Playwright
+ * environment's light) — the contrast gate scans both palettes explicitly.
  */
-export async function bootDemo(page: Page, route = '/'): Promise<void> {
+export async function bootDemo(page: Page, route = '/', opts: { theme?: 'light' | 'dark' } = {}): Promise<void> {
   await page.route('**/api/auth/me', (r) =>
     r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(DEMO_ME) }),
   );
-  await page.addInitScript(() => {
-    localStorage.setItem('pulse_demo', '1');
-    localStorage.setItem('pulse_channel', '0');
-  });
+  await page.addInitScript(
+    (theme) => {
+      localStorage.setItem('pulse_demo', '1');
+      localStorage.setItem('pulse_channel', '0');
+      if (theme) localStorage.setItem('pulse_theme', theme);
+    },
+    opts.theme ?? '',
+  );
   await page.goto(route);
   // Wait for the authed shell (present on every route incl. an empty /home), then settle so
   // ResizeObserver-driven chart heights are final before any measurement.
