@@ -188,9 +188,10 @@ interface StatTileProps {
 function StatTile({ label, value, trend, deltaText, info, onDrill }: StatTileProps) {
   const [num, unit] = splitUnit(value);
   // No per-cell background/border now — cells separate by grid SPACING. A drillable cell gets a
-  // quiet rounded hover surface (bled out with -m so the hit area stays comfortable).
+  // quiet rounded hover surface; vertical-only padding so it never widens the grid (a horizontal
+  // negative-margin bleed overflowed the card by ~12px on the edge cells).
   const cell = onDrill
-    ? { onClick: onDrill, title: 'Подробный разбор', className: 'cursor-pointer rounded-md -m-1.5 p-1.5 transition-colors hover:bg-muted/50' }
+    ? { onClick: onDrill, title: 'Подробный разбор', className: 'cursor-pointer rounded-md py-1 transition-colors hover:bg-muted/40' }
     : {};
   const deltaColor =
     trend?.dir === 'up' ? 'text-verdant' : trend?.dir === 'down' ? 'text-ember' : 'text-muted-foreground';
