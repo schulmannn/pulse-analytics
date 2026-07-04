@@ -143,13 +143,23 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
   «Применить к виджету» коммитит (updateWidgetConfig), иначе виджет не тронут. Подключено через новый
   аддитивный проп `explorer` в ChartSection (config-виджет передаёт песочницу; legacy не задет → старый
   ChartExpandOverlay). Ноль per-chart explorer-кода — работает для любого config-виджета.
-- **U4 — recommendedSize + авто-размер** — SHIPPED `<pending>`. `recommendedSize(metric)` в widgetMetrics
+- **U4 — recommendedSize + авто-размер** — SHIPPED `c32badb`. `recommendedSize(metric)` в widgetMetrics
   (value→third, donut→third, table→full, else half); `defaultWidget` сидит size → свежий виджет и create-
   preview стартуют с разумным размером, не всегда half.
-- **U5 — убрать нерендерящиеся viz** — SHIPPED `<pending>`. `vizForKind` series больше не отдаёт rank/pivot
+- **U5 — убрать нерендерящиеся viz** — SHIPPED `c32badb`. `vizForKind` series больше не отдаёт rank/pivot
   (резолвер не производит их форму, рендерер не рисует) → редактор предлагает только line/bar. Table-kind
   уже скрыт из каталога (S3c). Тесты обновлены.
-- **U6 — Home: instances-not-keys + legacy-адаптеры** (самый глубокий, в конце) — TODO.
+- **U6 — legacy как config-виджеты** (юзер выбрал полный adapter-рефактор). Стадии:
+  - **U6.1 (модель) SHIPPED `<pending>`:** `lib/legacyWidgets.ts` (pure) — LEGACY_KEYS/LABEL/CAPABILITIES +
+    `legacy:<key>` metricId-неймспейс. `normalizeWidget` принимает legacy-конфиги (viz='kpi' sentinel,
+    shell-поля валидируются). `legacyWidgetConfig(key)`. +3 теста.
+  - **U6.2 (унификация редактора) SHIPPED `<pending>`:** `lib/widgetCapabilities.ts` — `editorSpec(config)`
+    (metric→из MetricDef, legacy→из adapter). `WidgetConfigControls` теперь на `spec`+capabilities-гейт
+    (не metric.kind). ConfigEditDialog/CreateWidgetDialog/WidgetExplorer больше не требуют MetricDef →
+    работают и для legacy. +5 тестов (278). Composite legacy = shell-only (period/source/title/size/style).
+  - **U6.3 (Home-рендер legacy как config) TODO:** `legacyAdapters.tsx` (bare-body рендер) + ConfigWidget
+    legacy-ветка (adapter-тело в period/source-контексте) + миграция Home на единый config-список. Грабля:
+    history/velocity/heatmap/mentions рендерят СВОЙ ChartSection → нужна экстракция bare-тел.
 Риск снят юзером («никто не пользуется»); гейт=build+тесты+review, визуал=прод.
 
 ## Журнал

@@ -4,7 +4,7 @@ import { WidgetConfigControls } from '@/components/ConfigEditDialog';
 import { WidgetBody } from '@/components/ConfigWidget';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import { ChannelScope } from '@/lib/channel-context';
-import type { MetricDef } from '@/lib/widgetMetrics';
+import { editorSpec } from '@/lib/widgetCapabilities';
 import { normalizeWidget, type WidgetConfig } from '@/lib/widgetConfig';
 
 /**
@@ -17,16 +17,15 @@ import { normalizeWidget, type WidgetConfig } from '@/lib/widgetConfig';
  */
 export function WidgetExplorer({
   config,
-  metric,
   onApply,
   onClose,
 }: {
   config: WidgetConfig;
-  metric: MetricDef;
   onApply?: (config: WidgetConfig) => void;
   onClose: () => void;
 }) {
   const [draft, setDraft] = useState<WidgetConfig>(config);
+  const spec = editorSpec(draft);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -56,9 +55,9 @@ export function WidgetExplorer({
   );
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex flex-col bg-background" role="dialog" aria-modal="true" aria-label={`Explorer «${draft.title || metric.label}»`}>
+    <div className="fixed inset-0 z-50 flex flex-col bg-background" role="dialog" aria-modal="true" aria-label={`Explorer «${draft.title || spec.label}»`}>
       <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-3">
-        <div className="min-w-0 truncate text-sm font-medium text-foreground">{draft.title || metric.label}</div>
+        <div className="min-w-0 truncate text-sm font-medium text-foreground">{draft.title || spec.label}</div>
         <div className="flex shrink-0 items-center gap-3">
           {onApply && (
             <button
@@ -91,7 +90,7 @@ export function WidgetExplorer({
         </div>
         <aside className="min-w-0">
           <div className="mb-1 text-2xs font-medium tracking-wider text-muted-foreground">Настройки</div>
-          <WidgetConfigControls config={draft} metric={metric} onChange={patch} />
+          <WidgetConfigControls config={draft} spec={spec} onChange={patch} />
         </aside>
       </div>
     </div>,

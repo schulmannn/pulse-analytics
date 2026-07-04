@@ -4,9 +4,10 @@ import { useChannels } from '@/api/queries';
 import { DEFAULT_WIDGET_DAYS } from '@/lib/period';
 import type { PeriodDays } from '@/lib/period';
 import { VIZ_LABEL } from '@/lib/widgetRender';
-import { metricsForSource, type MetricDef } from '@/lib/widgetMetrics';
+import { getMetric, metricsForSource } from '@/lib/widgetMetrics';
+import { editorSpec, type EditorSpec } from '@/lib/widgetCapabilities';
 import type { WidgetSize } from '@/components/ChartWidget';
-import { dimensionsFor, type DimensionDef } from '@/lib/dimensions';
+import type { DimensionDef } from '@/lib/dimensions';
 import type { ComparisonDisplay, ComparisonMode, FilterOp, TargetType, WidgetConfig, WidgetFilter, WidgetGrain } from '@/lib/widgetConfig';
 
 /**
@@ -59,15 +60,14 @@ const SWATCHES = [1, 2, 3, 4, 5, 6] as const;
 
 export function ConfigEditDialog({
   config,
-  metric,
   onChange,
   onClose,
 }: {
   config: WidgetConfig;
-  metric: MetricDef;
   onChange: (patch: Partial<WidgetConfig>) => void;
   onClose: () => void;
 }) {
+  const spec = editorSpec(config);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -86,7 +86,7 @@ export function ConfigEditDialog({
 
   const reset = () =>
     onChange({
-      viz: metric.defaultViz,
+      viz: getMetric(config.metricId)?.defaultViz ?? 'kpi',
       title: undefined,
       period: undefined,
       grain: undefined,
@@ -104,16 +104,16 @@ export function ConfigEditDialog({
       className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-background/70 p-4 backdrop-blur-sm sm:p-8"
       role="dialog"
       aria-modal="true"
-      aria-label={`Настройка виджета «${config.title || metric.label}»`}
+      aria-label={`Настройка виджета «${config.title || spec.label}»`}
       onClick={onClose}
     >
       <div className="my-auto w-full max-w-md rounded-xl border border-border bg-card p-5" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-baseline justify-between gap-3">
-          <div className="text-sm font-medium text-foreground">Настройка метрики</div>
-          <div className="truncate text-xs text-muted-foreground">{metric.label}</div>
+          <div className="text-sm font-medium text-foreground">Настройка виджета</div>
+          <div className="truncate text-xs text-muted-foreground">{spec.label}</div>
         </div>
 
-        <WidgetConfigControls config={config} metric={metric} onChange={onChange} />
+        <WidgetConfigControls config={config} spec={spec} onChange={onChange} />
 
         <div className="mt-5 flex items-center justify-between border-t border-border pt-3">
           <button type="button" onClick={reset} className="text-xs text-muted-foreground transition-colors hover:text-foreground">
@@ -141,29 +141,24 @@ export function ConfigEditDialog({
  */
 export function WidgetConfigControls({
   config,
-  metric,
+  spec,
   onChange,
 }: {
   config: WidgetConfig;
-  metric: MetricDef;
+  spec: EditorSpec;
   onChange: (patch: Partial<WidgetConfig>) => void;
 }) {
-  const isSeries = metric.kind === 'series';
-  const filterDims = dimensionsFor(metric.dimensions);
-  // Comparison (a ghost line) + target (a goal line) only render on a series chart — a value/KPI has
-  // nowhere to draw them and a breakdown is a distribution, so both controls are gated to series.
-  const showComparison = isSeries;
-  const showTarget = isSeries;
+  const cap = spec.capabilities;
   const cmpMode: ComparisonMode = config.comparison?.mode ?? 'none';
   const cmpDisplay: ComparisonDisplay = config.comparison?.display ?? 'ghost_line';
 
   return (
     <>
-      {/* Visualisation — only when the metric supports more than one. */}
-      {metric.supportedViz.length > 1 && (
+      {/* Visualisation — only when the widget supports switching + has more than one option. */}
+      {cap.viz && spec.supportedViz.length > 1 && (
         <Field label="Визуализация">
           <Segmented
-            options={metric.supportedViz.map((v) => ({ value: v, label: VIZ_LABEL[v] }))}
+            options={spec.supportedViz.map((v) => ({ value: v, label: VIZ_LABEL[v] }))}
             value={config.viz}
             onChange={(viz) => onChange({ viz })}
           />
@@ -178,7 +173,7 @@ export function WidgetConfigControls({
         />
       </Field>
 
-      {isSeries && (
+      {cap.grain && (
         <Field label="Грануляция">
           <Segmented
             options={GRAINS.map((g) => ({ value: g.value, label: g.label }))}
@@ -188,7 +183,7 @@ export function WidgetConfigControls({
         </Field>
       )}
 
-      {showComparison && (
+      {cap.comparison && (
         <Field label="Сравнение">
           <Segmented
             options={CMP_MODES.map((m) => ({ value: m.value, label: m.label }))}
@@ -210,12 +205,12 @@ export function WidgetConfigControls({
         </Field>
       )}
 
-      {showTarget && <TargetField metric={metric} config={config} onChange={onChange} />}
+      {cap.target && <TargetField config={config} onChange={onChange} />}
 
-      {filterDims.length > 0 && (
+      {cap.filter && spec.filterDims.length > 0 && (
         <Field label="Фильтр">
           <FilterBuilder
-            dims={filterDims}
+            dims={spec.filterDims}
             filters={config.filters ?? []}
             onChange={(filters) => onChange({ filters: filters.length ? filters : undefined })}
           />
@@ -228,7 +223,7 @@ export function WidgetConfigControls({
         <span className="text-2xs tracking-wide text-muted-foreground">Заголовок</span>
         <input
           value={config.title ?? ''}
-          placeholder={metric.label}
+          placeholder={spec.label}
           onChange={(e) => onChange({ title: e.target.value || undefined })}
           className="mt-1 w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
         />
@@ -340,12 +335,15 @@ const TARGET_TYPES: Array<{ value: 'none' | TargetType; label: string }> = [
   { value: 'dynamic', label: 'Метрика' },
 ];
 
-function TargetField({ metric, config, onChange }: { metric: MetricDef; config: WidgetConfig; onChange: (patch: Partial<WidgetConfig>) => void }) {
+function TargetField({ config, onChange }: { config: WidgetConfig; onChange: (patch: Partial<WidgetConfig>) => void }) {
+  const metric = getMetric(config.metricId);
   const type: 'none' | TargetType = config.target?.type ?? 'none';
   // Dynamic target candidates: same-source scalar metrics (value/series carry a valueRaw), not self.
-  const candidates = metricsForSource(metric.source === 'ig' ? 'ig' : 'tg').filter(
-    (m) => (m.kind === 'value' || m.kind === 'series') && m.id !== metric.id,
-  );
+  const candidates = metric
+    ? metricsForSource(metric.source === 'ig' ? 'ig' : 'tg').filter(
+        (m) => (m.kind === 'value' || m.kind === 'series') && m.id !== metric.id,
+      )
+    : [];
   return (
     <Field label="Цель">
       <Segmented

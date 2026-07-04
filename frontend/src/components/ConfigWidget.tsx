@@ -42,7 +42,6 @@ export function ConfigWidget({ config, homeKey }: { config: WidgetConfig; homeKe
           ? (close) => (
               <WidgetExplorer
                 config={config}
-                metric={metric}
                 onApply={(next) => updateWidgetConfig(config.id, next)}
                 onClose={close}
               />
@@ -61,7 +60,6 @@ export function ConfigWidget({ config, homeKey }: { config: WidgetConfig; homeKe
       {editOpen && metric && (
         <ConfigEditDialog
           config={config}
-          metric={metric}
           onChange={(patch) => updateWidgetConfig(config.id, patch)}
           onClose={() => setEditOpen(false)}
         />

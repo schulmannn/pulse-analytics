@@ -4,6 +4,7 @@ import { WidgetConfigControls } from '@/components/ConfigEditDialog';
 import { WidgetBody } from '@/components/ConfigWidget';
 import { ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import { ChannelScope } from '@/lib/channel-context';
+import { editorSpec } from '@/lib/widgetCapabilities';
 import { getMetric } from '@/lib/widgetMetrics';
 import { defaultWidget, normalizeWidget, type WidgetConfig } from '@/lib/widgetConfig';
 
@@ -91,7 +92,7 @@ export function CreateWidgetDialog({
             <div className="truncate text-xs text-muted-foreground">{metric.label}</div>
           </div>
           <div className="-mr-1 min-h-0 flex-1 overflow-y-auto pr-1">
-            <WidgetConfigControls config={draft} metric={metric} onChange={patch} />
+            <WidgetConfigControls config={draft} spec={editorSpec(draft)} onChange={patch} />
           </div>
           <div className="mt-4 flex items-center justify-end gap-3 border-t border-border pt-3">
             <button

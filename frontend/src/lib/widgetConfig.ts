@@ -17,6 +17,7 @@ import type { PeriodDays } from '@/lib/period';
 import type { WidgetSize } from '@/components/ChartWidget';
 import { getMetric, isMetricId, recommendedSize, type WidgetViz } from '@/lib/widgetMetrics';
 import { genId } from '@/lib/reportBlocks';
+import { LEGACY_DEFAULT_SIZE, isLegacyKey, legacyKeyForMetricId, legacyMetricId } from '@/lib/legacyWidgets';
 
 /** Series bucketing — richer than the current day/week/month (S10 teaches metricSeries the rest;
  *  until then quarter/year simply round-trip, and the resolver clamps to what it can bucket). */
@@ -124,6 +125,13 @@ export function defaultWidget(metricId: string): WidgetConfig | null {
   return { id: genId(), metricId, viz: metric.defaultViz, size: recommendedSize(metric) };
 }
 
+/** A fresh legacy widget config (its adapter renders it). Null for an unknown legacy key. */
+export function legacyWidgetConfig(key: string): WidgetConfig | null {
+  if (!isLegacyKey(key)) return null;
+  const size = LEGACY_DEFAULT_SIZE[key];
+  return { id: genId(), metricId: legacyMetricId(key), viz: 'kpi', ...(size ? { size } : {}) };
+}
+
 function normComparison(raw: unknown): ComparisonConfig | undefined {
   if (!isObj(raw)) return undefined;
   const mode = typeof raw.mode === 'string' && CMP_MODES.has(raw.mode as ComparisonMode) ? (raw.mode as ComparisonMode) : null;
@@ -175,13 +183,19 @@ function normStyle(raw: unknown): WidgetStyle | undefined {
 export function normalizeWidget(raw: unknown): WidgetConfig | null {
   if (!isObj(raw)) return null;
   const metricId = typeof raw.metricId === 'string' ? raw.metricId : '';
-  const metric = getMetric(metricId);
-  if (!metric) return null;
+  // A `legacy:<key>` id is a composite legacy widget (rendered by an adapter, not the resolver); any
+  // other id must be a known catalogue metric or the config is meaningless.
+  const legacyKey = legacyKeyForMetricId(metricId);
+  const metric = legacyKey ? null : getMetric(metricId);
+  if (!legacyKey && !metric) return null;
 
-  const viz =
-    typeof raw.viz === 'string' && metric.supportedViz.includes(raw.viz as WidgetViz)
+  // Legacy widgets carry no catalogue viz — keep a stable sentinel. Metric widgets coerce to a viz
+  // the metric supports (fallback: its defaultViz).
+  const viz: WidgetViz = metric
+    ? typeof raw.viz === 'string' && metric.supportedViz.includes(raw.viz as WidgetViz)
       ? (raw.viz as WidgetViz)
-      : metric.defaultViz;
+      : metric.defaultViz
+    : 'kpi';
 
   const cfg: WidgetConfig = {
     id: typeof raw.id === 'string' && raw.id ? raw.id : genId(),

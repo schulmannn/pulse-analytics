@@ -5,6 +5,7 @@ import {
   customKey,
   defaultWidget,
   isCustomKey,
+  legacyWidgetConfig,
   normalizeWidget,
   normalizeWidgets,
   type WidgetConfig,
@@ -55,6 +56,39 @@ describe('normalizeWidgets', () => {
     expect(out).toHaveLength(2);
     expect(out[0].id).toBe('dup');
     expect(out[1].id).not.toBe('dup');
+  });
+});
+
+describe('legacy widgets (U6) — `legacy:<key>` configs', () => {
+  it('legacyWidgetConfig builds a config with the legacy metricId + default size', () => {
+    const w = legacyWidgetConfig('kpi');
+    expect(w).not.toBeNull();
+    expect(w!.metricId).toBe('legacy:kpi');
+    expect(w!.viz).toBe('kpi');
+    expect(w!.size).toBe('full'); // kpi default size
+    expect(legacyWidgetConfig('nope')).toBeNull();
+  });
+
+  it('normalizeWidget keeps a known legacy config + its shell fields, drops an unknown legacy key', () => {
+    const w = normalizeWidget({ metricId: 'legacy:digest', viz: 'x', title: 'Мой инсайт', period: 90, size: 'half', source: 4, style: { color: 2 } })!;
+    expect(w.metricId).toBe('legacy:digest');
+    expect(w.viz).toBe('kpi'); // legacy sentinel (no catalogue viz)
+    expect(w.title).toBe('Мой инсайт');
+    expect(w.period).toBe(90);
+    expect(w.size).toBe('half');
+    expect(w.source).toBe(4);
+    expect(w.style).toEqual({ color: 2 });
+    expect(normalizeWidget({ metricId: 'legacy:ghost' })).toBeNull(); // unknown legacy key
+  });
+
+  it('normalizeWidgets mixes metric + legacy configs in one list', () => {
+    const out = normalizeWidgets([
+      { metricId: 'tg.views', viz: 'line' },
+      { metricId: 'legacy:kpi' },
+      { metricId: 'legacy:bad' },
+      { metricId: 'ghost.metric' },
+    ]);
+    expect(out.map((w) => w.metricId)).toEqual(['tg.views', 'legacy:kpi']);
   });
 });
 
