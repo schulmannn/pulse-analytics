@@ -266,6 +266,18 @@ describe('resolveWidgetMetric — TG breakdowns (S3b)', () => {
     expect(r.breakdown![0].color).toBe('hsl(var(--brand-verdant))');
   });
 
+  it('additive breakdowns get a headline total hero (#4.9); averages/percentages do not', () => {
+    // Complete count categories → sum is a meaningful total the card leads with.
+    expect(bd('tg.engagementComposition').valueRaw).toBe(223); // 175 + 35 + 13
+    expect(bd('tg.engagementComposition').value).toBeTruthy();
+    expect(bd('tg.viewsBySource').valueRaw).toBe(7000); // 5000 + 2000
+    expect(bd('tg.sentiment').valueRaw).toBe(340); // 300 + 40
+    // Averages / percentages → a sum is nonsense → left heroless (leads with the chart).
+    expect(bd('tg.viewsByType').value).toBeUndefined(); // avg reach per type
+    expect(bd('tg.viewsByType').valueRaw).toBeUndefined();
+    expect(bd('tg.formatPerf').value).toBeUndefined(); // percent ERV per format
+  });
+
   it('resolves tg.hours by hour of day', () => {
     const r = bd('tg.hours');
     expect(r.breakdown!.map((i) => i.label)).toEqual(['9:00', '12:00', '18:00']);

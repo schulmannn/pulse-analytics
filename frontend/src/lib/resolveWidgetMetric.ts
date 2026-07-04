@@ -509,6 +509,15 @@ function resolveTgBreakdown(metricId: string, config: WidgetConfig, ctx: DataCon
   // A breakdown that is empty OR all-zero (e.g. no posts on any weekday) is «no data».
   if (items.length === 0 || items.every((i) => i.value === 0)) return { ...out, empty: true };
   out.breakdown = items;
+  // Additive breakdown → a headline TOTAL so the distribution card leads with a number instead of
+  // straight into the chart (steep #4.9). Only for metrics flagged `additive` (complete count
+  // categories); averages / percentages / top-N partials are left heroless (a sum would mislead).
+  const metric = getMetric(metricId);
+  if (metric?.additive) {
+    const sum = items.reduce((s, i) => s + i.value, 0);
+    out.valueRaw = sum;
+    out.value = metric.unit === 'posts' ? fmt.num(sum) : fmt.short(sum);
+  }
   return out;
 }
 

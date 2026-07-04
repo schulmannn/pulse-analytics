@@ -61,9 +61,10 @@ export function WidgetRenderer({ result, viz }: { result: WidgetResult; viz: Wid
   const hasValue = result.value != null;
   const eff = effectiveViz(viz, hasSeries, hasBreakdown);
 
-  // The hero belongs to value/series stories (a headline number). A pure breakdown card leads with
-  // its chart — its «hero» is the distribution itself, and the card title names it.
-  const showHero = hasValue && (eff === 'kpi' || eff === 'line' || eff === 'bar');
+  // Lead with a hero headline whenever the resolver provides one — value/series metrics, and now
+  // ADDITIVE breakdowns (a total, steep #4.9). A non-additive breakdown carries no value, so it
+  // still leads with its chart (the distribution IS the story, and the card title names it).
+  const showHero = hasValue;
 
   // «N% от цели» (steep) — when a target is set and the metric has a scalar to measure against it.
   const targetPct = result.targetPct;

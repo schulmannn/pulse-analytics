@@ -65,6 +65,12 @@ export interface MetricDef {
   /** Ties a core TG metric to its kpiDerive DrillKey so the resolver (S3) reuses deriveKpis for the
    *  value/delta/headline without re-deriving. Only the six KPI metrics carry this. */
   drillKey?: DrillKey;
+  /** For a BREAKDOWN metric: does summing all its categories yield a meaningful TOTAL (a complete,
+   *  additive count — e.g. total engagement / total views by source)? If so the resolver sets that
+   *  total as the card's hero value, so a distribution card leads with a headline number instead of
+   *  straight into the chart (steep #4.9). Omit for averages / percentages / top-N partials, where a
+   *  sum is nonsense. */
+  additive?: boolean;
   // ── Plain-language definition (ported from metricDefs.ts; surfaced in the «О метрике» block) ──
   /** How it's calculated, in words. */
   formula?: string;
@@ -171,7 +177,7 @@ const TG_METRICS: MetricDef[] = [
   }),
   define({
     id: 'tg.newFollowersBySource', label: 'Новые подписчики по источникам', source: 'tg', kind: 'breakdown',
-    unit: 'number', category: 'audience',
+    unit: 'number', category: 'audience', additive: true,
     formula: 'Откуда пришли новые подписчики (подписки / ссылки / поиск / …).',
   }),
   // Content breakdowns.
@@ -181,7 +187,7 @@ const TG_METRICS: MetricDef[] = [
   }),
   define({
     id: 'tg.engagementComposition', label: 'Состав вовлечённости', source: 'tg', kind: 'breakdown',
-    unit: 'number', category: 'engagement',
+    unit: 'number', category: 'engagement', additive: true,
     formula: 'Реакции против репостов против комментариев за период.',
   }),
   define({
@@ -201,12 +207,12 @@ const TG_METRICS: MetricDef[] = [
   define({
     id: 'tg.postCount', label: 'Количество постов', source: 'tg', kind: 'breakdown', unit: 'posts',
     category: 'content', defaultViz: 'bar', supportedViz: ['bar', 'line'], dimensions: ['tg.format'],
-    formula: 'Сколько постов вышло по дню недели.',
+    additive: true, formula: 'Сколько постов вышло по дню недели.',
   }),
   // Audience breakdowns.
   define({
     id: 'tg.viewsBySource', label: 'Просмотры по источникам', source: 'tg', kind: 'breakdown', unit: 'views',
-    category: 'audience', formula: 'Откуда пришли просмотры (подписчики / ссылки / поиск / …).',
+    category: 'audience', additive: true, formula: 'Откуда пришли просмотры (подписчики / ссылки / поиск / …).',
   }),
   define({
     id: 'tg.languages', label: 'Языки аудитории', source: 'tg', kind: 'breakdown', unit: 'number',
@@ -214,11 +220,11 @@ const TG_METRICS: MetricDef[] = [
   }),
   define({
     id: 'tg.sentiment', label: 'Тональность реакций', source: 'tg', kind: 'breakdown', unit: 'number',
-    category: 'audience', formula: 'Положительные / нейтральные / отрицательные реакции.',
+    category: 'audience', additive: true, formula: 'Положительные / нейтральные / отрицательные реакции.',
   }),
   define({
     id: 'tg.hours', label: 'Активность по часам', source: 'tg', kind: 'breakdown', unit: 'number',
-    category: 'audience', defaultViz: 'bar', supportedViz: ['bar', 'line'],
+    category: 'audience', defaultViz: 'bar', supportedViz: ['bar', 'line'], additive: true,
     formula: 'Просмотры по часу суток — когда аудитория активнее.',
   }),
   // Tables (also the report presets).
