@@ -154,6 +154,22 @@
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
   }
+  /* Reduced-motion safety net UNDER the hand-managed rules below: any animation/transition a future
+     component forgets to gate collapses to a single imperceptible frame (fill-mode end states still
+     apply, transitionend still fires — unlike `animation: none`, nothing waiting on events breaks).
+     The targeted `animation: none` rules further down stay as the first line of defence for the
+     infinite loops (jiggle, twinkle) and for readability. JS-driven motion (framer on the landing)
+     is gated in-component via useReducedMotion. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
   /* Quieter scrollbars — tinted to the surface instead of the loud system default (but never
      hidden). Firefox via scrollbar-*; WebKit/Chromium via the pseudo-elements. */
   * {
