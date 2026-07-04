@@ -39,4 +39,21 @@ describe('editorSpec — capability model (U6)', () => {
   it('an unknown metric degrades to no capabilities (no crash)', () => {
     expect(capabilitiesFor(cfg('nope.metric'))).toEqual({ metric: false, viz: false, grain: false, comparison: false, target: false, filter: false });
   });
+
+  it('a value metric carries a disabled-reason for every off control (shown disabled, not hidden)', () => {
+    const s = editorSpec(cfg('tg.er')); // value: viz/grain/comparison/target/filter all off
+    expect(s.disabledReasons?.grain).toBeTruthy();
+    expect(s.disabledReasons?.comparison).toBeTruthy();
+    expect(s.disabledReasons?.target).toBeTruthy();
+    expect(s.disabledReasons?.viz).toBeTruthy();
+    expect(s.disabledReasons?.filter).toBeTruthy();
+  });
+
+  it('a fully-enabled series metric has no disabled reasons', () => {
+    expect(editorSpec(cfg('tg.views')).disabledReasons ?? {}).toEqual({});
+  });
+
+  it('a legacy widget carries no disabledReasons (bare shell, not disabled clutter)', () => {
+    expect(editorSpec(cfg('legacy:kpi')).disabledReasons).toBeUndefined();
+  });
 });

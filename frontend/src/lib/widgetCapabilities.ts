@@ -18,6 +18,10 @@ export interface EditorSpec {
   /** Filter dimensions available (empty → no filter control). */
   filterDims: DimensionDef[];
   capabilities: WidgetCapabilities;
+  /** Why an ineligible control is off — the editor shows it DISABLED with this reason instead of
+   *  silently omitting it, so the full control vocabulary is visible and the user learns why (steep).
+   *  Populated only for catalogue metrics; legacy composites keep the bare shell (no disabled clutter). */
+  disabledReasons?: Partial<Record<keyof WidgetCapabilities, string>>;
 }
 
 /** The editor spec for a config — catalogue metrics derive their capabilities from the MetricDef,
@@ -32,20 +36,24 @@ export function editorSpec(config: WidgetConfig): EditorSpec {
 
   const isSeries = metric.kind === 'series';
   const filterDims = dimensionsFor(metric.dimensions);
-  return {
-    label: metric.label,
-    supportedViz: metric.supportedViz,
-    filterDims,
-    capabilities: {
-      metric: false, // swapping the metric = a different widget (add a new one)
-      viz: metric.supportedViz.length > 1,
-      // Grain / comparison / target only render on a series chart; filter needs dimensions.
-      grain: isSeries,
-      comparison: isSeries,
-      target: isSeries,
-      filter: filterDims.length > 0,
-    },
+  const capabilities: WidgetCapabilities = {
+    metric: false, // swapping the metric = a different widget (add a new one)
+    viz: metric.supportedViz.length > 1,
+    // Grain / comparison / target only render on a series chart; filter needs dimensions.
+    grain: isSeries,
+    comparison: isSeries,
+    target: isSeries,
+    filter: filterDims.length > 0,
   };
+  // Reasons for the controls this metric can't use — the editor shows them disabled, not hidden.
+  const seriesOnly = 'Доступно только для метрик-рядов (динамика по времени)';
+  const disabledReasons: Partial<Record<keyof WidgetCapabilities, string>> = {};
+  if (!capabilities.viz) disabledReasons.viz = 'У этой метрики один тип графика';
+  if (!capabilities.grain) disabledReasons.grain = seriesOnly;
+  if (!capabilities.comparison) disabledReasons.comparison = seriesOnly;
+  if (!capabilities.target) disabledReasons.target = seriesOnly;
+  if (!capabilities.filter) disabledReasons.filter = 'У этой метрики нет измерений для фильтра';
+  return { label: metric.label, supportedViz: metric.supportedViz, filterDims, capabilities, disabledReasons };
 }
 
 /** Just the capabilities (for callers that don't need the label/viz/dims). */

@@ -186,8 +186,9 @@ export function WidgetConfigControls({
 
   return (
     <>
-      {/* Visualisation — only when the widget supports switching + has more than one option. */}
-      {cap.viz && spec.supportedViz.length > 1 && (
+      {/* Visualisation — the control when the widget supports switching (>1 option), else a disabled
+          hint (steep: the vocabulary stays visible with a reason). */}
+      {cap.viz && spec.supportedViz.length > 1 ? (
         <Field label="Визуализация">
           <Segmented
             options={spec.supportedViz.map((v) => ({ value: v, label: VIZ_LABEL[v] }))}
@@ -195,6 +196,8 @@ export function WidgetConfigControls({
             onChange={(viz) => onChange({ viz })}
           />
         </Field>
+      ) : (
+        spec.disabledReasons?.viz && <DisabledField label="Визуализация" reason={spec.disabledReasons.viz} />
       )}
 
       <Field label="Период">
@@ -205,7 +208,7 @@ export function WidgetConfigControls({
         />
       </Field>
 
-      {cap.grain && (
+      {cap.grain ? (
         <Field label="Грануляция">
           <Segmented
             options={GRAINS.map((g) => ({ value: g.value, label: g.label }))}
@@ -213,9 +216,11 @@ export function WidgetConfigControls({
             onChange={(v) => onChange({ grain: v as WidgetGrain })}
           />
         </Field>
+      ) : (
+        spec.disabledReasons?.grain && <DisabledField label="Грануляция" reason={spec.disabledReasons.grain} />
       )}
 
-      {cap.comparison && (
+      {cap.comparison ? (
         <Field label="Сравнение">
           <Segmented
             options={CMP_MODES.map((m) => ({ value: m.value, label: m.label }))}
@@ -235,11 +240,17 @@ export function WidgetConfigControls({
             </div>
           )}
         </Field>
+      ) : (
+        spec.disabledReasons?.comparison && <DisabledField label="Сравнение" reason={spec.disabledReasons.comparison} />
       )}
 
-      {cap.target && <TargetField config={config} onChange={onChange} />}
+      {cap.target ? (
+        <TargetField config={config} onChange={onChange} />
+      ) : (
+        spec.disabledReasons?.target && <DisabledField label="Цель" reason={spec.disabledReasons.target} />
+      )}
 
-      {cap.filter && spec.filterDims.length > 0 && (
+      {cap.filter && spec.filterDims.length > 0 ? (
         <Field label="Фильтр">
           <FilterBuilder
             dims={spec.filterDims}
@@ -247,6 +258,8 @@ export function WidgetConfigControls({
             onChange={(filters) => onChange({ filters: filters.length ? filters : undefined })}
           />
         </Field>
+      ) : (
+        spec.disabledReasons?.filter && <DisabledField label="Фильтр" reason={spec.disabledReasons.filter} />
       )}
 
       <SourceField config={config} onChange={onChange} />
@@ -323,6 +336,17 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     <div className="mt-4">
       <span className="text-2xs tracking-wide text-muted-foreground">{label}</span>
       <div className="mt-2">{children}</div>
+    </div>
+  );
+}
+
+/** A control the current metric doesn't support — shown greyed with the reason rather than silently
+ *  omitted, so the full control vocabulary stays visible and the user learns WHY it is off (steep). */
+function DisabledField({ label, reason }: { label: string; reason: string }) {
+  return (
+    <div className="mt-4 opacity-55" aria-disabled="true">
+      <span className="text-2xs tracking-wide text-muted-foreground">{label}</span>
+      <p className="mt-1 text-2xs italic text-muted-foreground">Недоступно · {reason}</p>
     </div>
   );
 }
