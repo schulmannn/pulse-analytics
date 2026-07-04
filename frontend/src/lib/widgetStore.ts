@@ -15,6 +15,7 @@ import {
   normalizeWidgets,
   type WidgetConfig,
 } from '@/lib/widgetConfig';
+import { legacyKeyForMetricId } from '@/lib/legacyWidgets';
 
 const KEY = 'pulse_widget_configs';
 
@@ -28,6 +29,16 @@ function subscribe(l: () => void): () => void {
 }
 function notify() {
   listeners.forEach((l) => l());
+}
+
+// Account-sync seam: the prefs-sync layer (ChartWidget) registers a hook here so a LOCAL mutation
+// mirrors into the account blob (GET/PUT /api/prefs). Kept as a hook rather than an import so this
+// store never depends on the component layer (no import cycle). Hydrating FROM the account uses
+// hydrateWidgetConfigs below, which deliberately does NOT fire this hook — otherwise seeding the
+// server's copy would immediately schedule a push of it straight back.
+let onMutate: (() => void) | null = null;
+export function setWidgetConfigsSyncHook(fn: (() => void) | null) {
+  onMutate = fn;
 }
 
 // Stable snapshot cache — useSyncExternalStore MUST get the same reference when nothing changed, or
@@ -56,6 +67,20 @@ function write(configs: WidgetConfig[]) {
     localStorage.setItem(KEY, JSON.stringify(configs));
   } catch {
     /* storage blocked — the builder is a nicety */
+  }
+  notify();
+  onMutate?.();
+}
+
+/** Seed the store from the account blob (cross-device hydrate) WITHOUT scheduling an account push —
+ *  the data already came from the server. Validated like every other write, so a corrupt/foreign
+ *  blob can never crash a surface. */
+export function hydrateWidgetConfigs(raw: unknown) {
+  const next = normalizeWidgets(raw);
+  try {
+    localStorage.setItem(KEY, JSON.stringify(next));
+  } catch {
+    /* storage blocked — server copy just isn't cached locally */
   }
   notify();
 }
@@ -100,6 +125,43 @@ export function updateWidgetConfig(id: string, patch: Partial<WidgetConfig>) {
 /** Remove a widget by id. */
 export function removeWidgetConfig(id: string) {
   write(getWidgetConfigs().filter((c) => c.id !== id));
+}
+
+// ── Account-sync reconciliation (used by the prefs-sync layer) ───────────────────────────────────
+// Legacy composites (metricId `legacy:<key>`) are re-derived per device from the account-synced Home
+// pins + prefs, so they must stay OUT of the account blob — syncing them would resurrect a card
+// another device intentionally cleared.
+const isLegacyConfig = (c: WidgetConfig): boolean => legacyKeyForMetricId(c.metricId) != null;
+
+/** The builder configs this device should MIRROR to the account — legacy composites excluded. */
+export function syncableWidgetConfigs(): WidgetConfig[] {
+  return getWidgetConfigs().filter((c) => !isLegacyConfig(c));
+}
+
+/**
+ * Reconcile the account's builder configs with this device's local set at hydrate time.
+ *  - Device-local legacy configs are always PRESERVED (they never came from / go to the account).
+ *  - The account's real configs WIN (cross-device intent) — EXCEPT a config that was CREATED IN THIS
+ *    SESSION while the account GET was in flight (its id is absent from `baselineIds`, the snapshot of
+ *    syncable ids taken at mount) and isn't in the account yet: it's UNIONED in so a widget built in
+ *    that window is never silently deleted by account-wins.
+ * The baseline snapshot is what makes this precise: a PRE-EXISTING stale local widget (present at
+ * mount, deleted on another device) is in `baselineIds`, so it is NOT unioned — account-wins drops it
+ * correctly, and only genuinely-new-in-window widgets survive.
+ * Returns the set to seed locally + whether the merge added something the account must be told about.
+ */
+export function reconcileHydratedConfigs(
+  accountRaw: unknown,
+  baselineIds: ReadonlySet<string>,
+): { seed: WidgetConfig[]; pushBack: boolean } {
+  const account = normalizeWidgets(accountRaw).filter((c) => !isLegacyConfig(c));
+  const local = getWidgetConfigs();
+  const localLegacy = local.filter(isLegacyConfig);
+  const accountIds = new Set(account.map((c) => c.id));
+  const racedExtras = local.filter(
+    (c) => !isLegacyConfig(c) && !accountIds.has(c.id) && !baselineIds.has(c.id),
+  );
+  return { seed: [...account, ...racedExtras, ...localLegacy], pushBack: racedExtras.length > 0 };
 }
 
 /** Reactive list of configs for React surfaces (Home / builder). */

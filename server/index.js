@@ -618,7 +618,9 @@ app.put('/api/prefs', requireAuth, async (req, res, next) => {
   if (prefs == null || typeof prefs !== 'object' || Array.isArray(prefs)) {
     return res.status(400).json({ error: 'prefs должен быть объектом' });
   }
-  if (JSON.stringify(prefs).length > 8000) {
+  // The blob carries dashboard layout AND the metric-builder widget configs (WidgetConfig[]), so it
+  // needs more room than the original layout-only 8 KB — 32 KB is still a tight bound per user.
+  if (JSON.stringify(prefs).length > 32000) {
     return res.status(413).json({ error: 'prefs слишком большой' });
   }
   try { const stored = await db.setPrefs(req.user.uid, prefs); res.json({ ok: true, stored: !!stored }); }

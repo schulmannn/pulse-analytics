@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { apiGet, apiSend } from '@/api/client';
 import { isDemoMode } from '@/lib/demo';
 import { fmt } from '@/lib/format';
+import { hydrateWidgetConfigs, reconcileHydratedConfigs, setWidgetConfigsSyncHook, syncableWidgetConfigs } from '@/lib/widgetStore';
 import { BarChart } from '@/components/BarChart';
 import { Breakdown } from '@/components/Breakdown';
 import { PieChart } from '@/components/PieChart';
@@ -417,6 +418,8 @@ function useStoreTick() {
 let syncReady = false;
 let serverExtra: Record<string, unknown> = {};
 let pushTimer: number | null = null;
+// Must match the server's PUT /api/prefs guard (server/index.js) so the client degrades BEFORE a 413.
+const PREFS_MAX = 32000;
 
 const PrefsBlobSchema = z.object({ prefs: z.record(z.unknown()).nullable() });
 
@@ -428,15 +431,26 @@ function localBlob() {
     // new endpoint. Destructured OUT of `rest` in the hydrate below so serverExtra never
     // double-carries it.
     home: getHomeBlocks(),
+    // The metric-builder's WidgetConfig[] rides the same blob under `widgetConfigs` (its own
+    // localStorage-first store); mutations schedule a push via the sync hook registered below. Legacy
+    // composites are excluded (device-local, re-derived from the synced Home pins) so they never
+    // resurrect on a device that cleared them.
+    widgetConfigs: syncableWidgetConfigs(),
   };
 }
 
 function schedulePush() {
+  // Don't push before the account copy is fetched (a blind push could wipe it) or in demo mode. A
+  // widget created in this window is instead recovered by the mount-baseline diff in the hydrate.
   if (!syncReady || isDemoMode()) return;
   if (pushTimer != null) window.clearTimeout(pushTimer);
   pushTimer = window.setTimeout(() => {
     pushTimer = null;
-    void apiSend('PUT', '/api/prefs', { prefs: { ...serverExtra, ...localBlob() } }).catch(() => {
+    const prefs: Record<string, unknown> = { ...serverExtra, ...localBlob() };
+    // If the whole blob would exceed the server cap, drop the builder configs so dashboard LAYOUT
+    // keeps syncing (the too-large builder set stays device-local) instead of a 413 killing ALL sync.
+    if (JSON.stringify(prefs).length > PREFS_MAX) delete prefs.widgetConfigs;
+    void apiSend('PUT', '/api/prefs', { prefs }).catch(() => {
       /* offline / DB off — customisation stays device-local; the next mutation retries */
     });
   }, 1500);
@@ -447,10 +461,18 @@ export function useWidgetPrefsSync() {
   useEffect(() => {
     if (isDemoMode()) return;
     let cancelled = false;
+    // A LOCAL widget-config mutation mirrors into the account blob (schedulePush is debounced and
+    // no-ops until syncReady, so a mutation before hydrate can't blind-push).
+    setWidgetConfigsSyncHook(schedulePush);
+    // Snapshot the syncable config ids at mount. Any syncable id NOT in this baseline when the GET
+    // resolves was created in the fetch window (a genuine raced create) and must survive account-wins;
+    // a pre-existing local id IS in the baseline, so account-wins correctly drops it if another device
+    // deleted it (no resurrection). Legacy configs are never in the baseline (syncable excludes them).
+    const baseline = new Set(syncableWidgetConfigs().map((c) => c.id));
     void apiGet('/api/prefs', PrefsBlobSchema)
       .then(({ prefs }) => {
         if (cancelled) return;
-        const { widgets, widgetOrder, home, ...rest } = (prefs ?? {}) as Record<string, unknown>;
+        const { widgets, widgetOrder, home, widgetConfigs, ...rest } = (prefs ?? {}) as Record<string, unknown>;
         serverExtra = rest;
         syncReady = true;
         const local = localBlob();
@@ -465,6 +487,18 @@ export function useWidgetPrefsSync() {
           // Home pinned list: same account-wins rule. Stored under `{keys}` so getHomeBlocks reads it.
           if (Array.isArray(home)) localStorage.setItem(HOME_KEY, JSON.stringify({ keys: home }));
           else if (local.home.length) pushLocal = true;
+          // Metric-builder configs: account-wins, but a widget created while the GET was in flight
+          // (id absent from the mount `baseline`) is unioned in so it isn't silently deleted, and
+          // device-local legacy composites are preserved. hydrateWidgetConfigs notifies its subscribers
+          // WITHOUT firing the sync hook (no push-back of the just-hydrated copy); pushBack pushes the
+          // genuinely-raced widget up.
+          if (Array.isArray(widgetConfigs)) {
+            const { seed, pushBack } = reconcileHydratedConfigs(widgetConfigs, baseline);
+            hydrateWidgetConfigs(seed);
+            if (pushBack) pushLocal = true;
+          } else if (local.widgetConfigs.length) {
+            pushLocal = true;
+          }
         } catch {
           /* storage blocked — server copy just isn't cached locally */
         }
@@ -476,6 +510,15 @@ export function useWidgetPrefsSync() {
       });
     return () => {
       cancelled = true;
+      setWidgetConfigsSyncHook(null);
+      // Reset the module-global sync state so a prior account's push (or preserved foreign keys)
+      // can never land on the NEXT account after a logout→login within the same page session.
+      syncReady = false;
+      serverExtra = {};
+      if (pushTimer != null) {
+        window.clearTimeout(pushTimer);
+        pushTimer = null;
+      }
     };
   }, []);
 }
