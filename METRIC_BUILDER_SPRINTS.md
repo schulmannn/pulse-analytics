@@ -237,6 +237,15 @@ color-toggle + crossfade иконок + remount текста (`index.css:251`, `
 
 ## Журнал
 
+- 2026-07-04 — **P1 Reduced-motion accessibility — SHIPPED `6f4c114`** (321 vitest + **192 e2e**, +16). Ревизия:
+  рукописные `animation: none` правила уже покрывали jiggle/entry/cartograph/connect/starfield, Landing гейтится
+  через framer `useReducedMotion` (тредится в DashboardMock/hero). Закрыты дыры: (1) **глобальная страховка** в
+  index.css — под prefers-reduced-motion ВСЁ схлопывается в 0.01ms × 1 итерацию (fill-mode финальные кадры
+  применяются, transitionend стреляет — dragEnd-логика жива; `animation: none` так не умеет) → будущие анимации
+  безопасны по умолчанию; (2) Skeleton `motion-reduce:animate-none`. **Гейт** `e2e/reduced-motion.spec.ts`:
+  emulateMedia(reduce) → дашборд/home-edit(без jiggle)/лендинг settle с НУЛЁМ running-анимаций + baseline-sanity
+  (без preference entry-анимации ЕСТЬ — гейт не вакуумный). Грабля: logged-out лендинг оффлайн = стаб 401 на
+  /api/auth/me (без стаба proxy 500-ит и рендерится Cartograph error-state, не Landing).
 - 2026-07-04 — **P1 Color contrast audit — SHIPPED `ca4def4`** (321 vitest + **176 e2e**, +64 контраст-прогонов).
   Два слоя автогейта: (1) `e2e/a11y-contrast.spec.ts` — axe color-contrast (правило, исключённое из основного
   a11y-гейта) ПО ТЕМАМ (light/dark = разные палитры; `bootDemo` получил `theme`-опцию → pulse_theme до load) на
