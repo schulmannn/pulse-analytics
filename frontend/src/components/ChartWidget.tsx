@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useSearchParams } from 'react-router-dom';
 import type { CSSProperties, ReactNode } from 'react';
 import { z } from 'zod';
 import { apiGet, apiSend } from '@/api/client';
@@ -961,7 +962,31 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
   const homeEditing = useContext(HomeEditContext);
   const [menuOpen, setMenuOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
-  const [expandOpen, setExpandOpen] = useState(false);
+  // The detail overlay's open state lives in the URL (?detail=<widgetId>) so it is shareable and the
+  // browser Back button closes it (steep). Deriving it from searchParams — not local state — means
+  // Back / forward / a shared link all Just Work: open pushes a history entry, close replaces it away.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const expandOpen = searchParams.get('detail') === widgetId;
+  const openExpand = useCallback(() => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set('detail', widgetId);
+        return next;
+      },
+      { replace: false },
+    );
+  }, [setSearchParams, widgetId]);
+  const closeExpand = useCallback(() => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('detail');
+        return next;
+      },
+      { replace: true },
+    );
+  }, [setSearchParams]);
   const menuRef = useRef<HTMLDivElement>(null);
   const sectionRef = useRef<HTMLElement>(null);
   // The chart-body region (flex-1 inside the fixed-height card). We feed its measured pixel
@@ -1198,7 +1223,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
             ? undefined
             : (e) => {
                 if ((e.target as HTMLElement).closest('button, a, input, select, label, svg, [role="dialog"]')) return;
-                setExpandOpen(true);
+                openExpand();
               }
         }
         onKeyDown={
@@ -1207,7 +1232,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
             : (e) => {
                 if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
                   e.preventDefault();
-                  setExpandOpen(true);
+                  openExpand();
                 }
               }
         }
@@ -1236,7 +1261,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
           type="button"
           aria-label={`Развернуть виджет «${prefs.title || title}»`}
           title="Развернуть"
-          onClick={() => setExpandOpen(true)}
+          onClick={() => openExpand()}
           className={`${iconBtn} hover:text-foreground print:hidden ${
             showHomeRemove ? 'hidden' : ''
           } ${reorder ? 'pointer-events-none opacity-0' : ''}`}
@@ -1271,7 +1296,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
                 type="button"
                 onClick={() => {
                   setMenuOpen(false);
-                  setExpandOpen(true);
+                  openExpand();
                 }}
                 className={menuItem}
               >
@@ -1417,7 +1442,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
 
       {/* Config-widgets pass a mutable-config explorer that fully replaces the generic overlay. */}
       {expandOpen && explorer
-        ? explorer(() => setExpandOpen(false))
+        ? explorer(closeExpand)
         : expandOpen && (
             <ChartExpandOverlay
               title={prefs.title || title}
@@ -1427,7 +1452,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
               statsFor={hasRichExpand ? expand?.statsFor : undefined}
               statsSum={expand?.statsSum ?? true}
               grainable={hasRichExpand ? expand?.grainable : undefined}
-              onClose={() => setExpandOpen(false)}
+              onClose={closeExpand}
             >
               <WidgetErrorBoundary variant="inline" widgetId={widgetId} label={prefs.title || title} resetKeys={bodyResetKeys}>
                 {bodyNode}

@@ -24,6 +24,16 @@ test('whole-card click opens the detail overlay', async ({ page }) => {
   await expect(page.getByRole('dialog')).toHaveCount(0);
 });
 
+test('detail overlay is URL-stated and closes on browser Back', async ({ page }) => {
+  await bootDemo(page, '/');
+  await page.locator('section:has(h3)').first().locator('h3').first().click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(page).toHaveURL(/[?&]detail=/); // open pushed a shareable URL state
+  await page.goBack();
+  await expect(page.getByRole('dialog')).toHaveCount(0); // Back closes it
+  await expect(page).not.toHaveURL(/[?&]detail=/);
+});
+
 test('edit-mode entry + exit (Home)', async ({ page }) => {
   await bootDemo(page, '/home');
   // The «Изменить»↔«Готово» toggle reflects edit state via aria-pressed — robust whether Home is
