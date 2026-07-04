@@ -157,7 +157,7 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
     (metric→из MetricDef, legacy→из adapter). `WidgetConfigControls` теперь на `spec`+capabilities-гейт
     (не metric.kind). ConfigEditDialog/CreateWidgetDialog/WidgetExplorer больше не требуют MetricDef →
     работают и для legacy. +5 тестов (278). Composite legacy = shell-only (period/source/title/size/style).
-  - **U6.3a (4 bare-блока как config) SHIPPED `<pending>`:** `components/legacyAdapters.tsx`
+  - **U6.3a (4 bare-блока как config) SHIPPED `57fcf0a`:** `components/legacyAdapters.tsx`
     (`LEGACY_RENDER` bare-тела kpi/digest/growth/top-posts + `isWiredLegacyKey`) + ConfigWidget
     `WidgetBody`→`LegacyWidgetBody` (adapter в `WidgetPeriodProvider(config.period)`, recency-widen +
     widen-нота) + editor/explorer ungate (`metric || legacyKey`). Home рендерит wired-legacy через
@@ -178,7 +178,7 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
 
 ## Журнал
 
-- 2026-07-03 — **U6.3a SHIPPED** `<pending>`. 4 bare-legacy-блока (kpi/digest/growth/top-posts) рендерятся
+- 2026-07-03 — **U6.3a SHIPPED** `57fcf0a`. 4 bare-legacy-блока (kpi/digest/growth/top-posts) рендерятся
   через ConfigWidget (единый card-chrome/editor/explorer). Решение: НЕ переписывать pinned деструктивно —
   bare-ключ = стабильный cross-device pointer, config device-local с детерминированным id `legacy-<key>`.
   Ultracode adversarial-review (5 осей→verify): 6 confirmed находок, ВСЕ один корень — смена identity
