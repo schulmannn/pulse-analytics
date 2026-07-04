@@ -40,7 +40,7 @@ import type { DrillKey, PostMetricField } from '@/lib/kpiDerive';
 import { normalizeTgPosts } from '@/lib/posts';
 import type { NormalizedPost } from '@/lib/posts';
 import { postMatchesFilters } from '@/lib/dimensions';
-import { DAY_MS, alignGhost, bucketKeyOf, bucketKeysInWindow, comparisonWindow } from '@/lib/metricSeries';
+import { DAY_MS, alignGhost, baselineCoveredByPosts, bucketKeyOf, bucketKeysInWindow, comparisonWindow } from '@/lib/metricSeries';
 import type { SeriesGrain } from '@/lib/metricSeries';
 import { fmt } from '@/lib/format';
 import {
@@ -330,7 +330,16 @@ function resolveCoreTg(
           : derived.normPosts.reduce((s, p) => s + Number(p[field] ?? 0), 0);
     out.series = bucketPostField(derived.normPosts, field, winFrom, winTo, grain);
     const baseWin = wantsGhostLine(cmp) ? comparisonBaseline(cmp, winFrom, winTo, grain) : null;
-    if (baseWin) {
+    // Only draw the baseline ghost when the sum over it is COMPLETE. The post fetch server-caps at
+    // 100 (useTgFull windowPair), so a long (e.g. 90д) prev/year baseline can start before the oldest
+    // loaded post → the per-post sum undercounts and the dashed line reads as a misleading near-zero
+    // baseline (same root cause as the metric page's +969% rail). `capped` = the fetch hit that cap
+    // (more posts exist); when it didn't, we have all posts and never over-suppress a sparse channel.
+    const capped = derived.normPostsAll.length >= 100;
+    if (
+      baseWin &&
+      baselineCoveredByPosts(derived.normPostsAll.map((p) => (p.date ? Date.parse(p.date) : NaN)), baseWin.from, capped)
+    ) {
       const postsInBase = derived.normPostsAll.filter((p) => {
         if (!p.date) return false;
         const t = Date.parse(p.date);

@@ -131,6 +131,20 @@ describe('resolveWidgetMetric — TG core series', () => {
     expect(r.ghostLabel).toBe('прошлый период');
   });
 
+  it('suppresses the ghost when the fetch is capped and the baseline predates the loaded posts', () => {
+    // 100 posts (>= the 100-post server cap → "capped") spanning only days 1..40. For a 30d window
+    // the previous_period baseline is days ~30..59 — the loaded posts reach only day 40, so days
+    // 40..59 are unloaded and a per-post sum undercounts. The coverage guard suppresses the ghost
+    // (without it, the days 30..40 posts would draw a misleading near-zero baseline line).
+    const many = Array.from({ length: 100 }, (_, i) => mkPost(1 + (i % 40), 500, 20, 4, 2));
+    const cappedCtx: DataContext = {
+      ...ctx,
+      tg: { ...ctx.tg!, full: { ...(full as object), posts: many } as unknown as TgFull },
+    };
+    const r = resolveWidgetMetric(cfg('tg.views', { comparison: { mode: 'previous_period', display: 'ghost_line' } }), cappedCtx);
+    expect(r.ghost).toBeUndefined();
+  });
+
   it('omits the ghost when no comparison is configured', () => {
     const r = resolveWidgetMetric(cfg('tg.views'), ctx);
     expect(r.ghost).toBeUndefined();

@@ -17,6 +17,16 @@ describe('baselineCoveredByPosts — suppress an undercounted comparison', () =>
     expect(baselineCoveredByPosts([NaN, 100, NaN], 150)).toBe(true);
     expect(baselineCoveredByPosts([NaN, 200, NaN], 150)).toBe(false);
   });
+  it('capped=false → always covered (all posts loaded, so the sum is complete even if sparse)', () => {
+    // Would be false under the default capped check (oldest 200 > baseFrom 150), but a non-capped
+    // fetch means we have every post → no undercount → never over-suppress a small/new channel.
+    expect(baselineCoveredByPosts([200, 300], 150, false)).toBe(true);
+    expect(baselineCoveredByPosts([], 150, false)).toBe(true);
+  });
+  it('capped=true (explicit) matches the default oldest-reaches-baseline check', () => {
+    expect(baselineCoveredByPosts([200, 300], 150, true)).toBe(false);
+    expect(baselineCoveredByPosts([100, 300], 150, true)).toBe(true);
+  });
 });
 
 describe('comparisonWindow — day-bucket count invariant', () => {

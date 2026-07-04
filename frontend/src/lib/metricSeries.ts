@@ -77,14 +77,19 @@ export function alignGhost(vals: number[], n: number): number[] {
 }
 
 /**
- * True when the loaded posts reach back to (or before) the baseline window start, so a per-post
- * SUM over that window is complete. Posts are fetched with a cap (~100), so a previous-period /
- * year-ago window often starts BEFORE the oldest loaded post — then the sum undercounts and a
- * comparison % is nonsense (e.g. a metric page showed «прошлый период 1.2k · +969.3%» while the
- * archive-based hero showed −9%). The caller must SUPPRESS the ghost + rail comparison in that case
- * rather than mislead. Empty / all-undated posts → false (can't prove coverage). `postDatesMs` is
- * each loaded post's parsed date in epoch ms (NaN for undated — ignored). */
-export function baselineCoveredByPosts(postDatesMs: number[], baseFrom: number): boolean {
+ * True when a per-post SUM over the baseline window is COMPLETE (so a comparison/ghost off it is
+ * trustworthy). Posts are fetched with a server cap (~100), so a previous-period / year-ago window
+ * often starts BEFORE the oldest loaded post — then the sum undercounts and a comparison % is
+ * nonsense (a metric page showed «прошлый период 1.2k · +969.3%» while the archive-based hero showed
+ * −9%). The caller must SUPPRESS the ghost + rail comparison in that case rather than mislead.
+ *
+ * `capped` = did the fetch hit its limit (more posts may exist beyond the oldest loaded one)? When
+ * FALSE we loaded ALL the channel's posts, so the sum is complete even if the baseline is genuinely
+ * sparse → always covered (never over-suppress a small/new channel). When TRUE (default — the
+ * conservative choice), coverage requires the oldest loaded post to reach the baseline start; empty
+ * / all-undated → false. `postDatesMs` is each loaded post's parsed date in epoch ms (NaN ignored). */
+export function baselineCoveredByPosts(postDatesMs: number[], baseFrom: number, capped = true): boolean {
+  if (!capped) return true;
   let oldest = Infinity;
   for (const t of postDatesMs) if (Number.isFinite(t) && t < oldest) oldest = t;
   return Number.isFinite(oldest) && oldest <= baseFrom;

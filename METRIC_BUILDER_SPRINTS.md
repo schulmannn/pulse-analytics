@@ -188,10 +188,13 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
   окно; когда baseline старше oldest-loaded поста → сумма недосчитывает → бред-%. Тот же корень у sparse
   ghost-линии. Фикс: pure `baselineCoveredByPosts(dates, baseFrom)` в `lib/metricSeries.ts` (+4 теста, 287);
   MetricPage гейтит field-ghost + rail-compare на `baseCovered` (subscribers=archive, не задет). Adversarial-
-  review: 0 дефектов. **ДВА sibling'а ОТЛОЖЕНЫ** (нужен «capped»-сигнал, иначе over-suppress закрытых
-  fixture'ов — 3 resolver-теста упали на наивном гейте, откатил): (1) `resolveWidgetMetric.ts:334` config-
-  widget field-ghost = тот же undercount БЕЗ гейта; (2) MetricPage rank/pivot `baseByDim` compare-колонки
-  тоже недосчитывают. Правильный follow-up = протянуть fetch-cap/«hitLimit» флаг в оба места.
+  review: 0 дефектов. **Sibling #1 FIXED** (след. коммит): `baselineCoveredByPosts` получил опц.
+  `capped=true` (default = поведение MetricPage без изменений); `!capped → всегда covered` (все посты
+  загружены → сумма полна даже для sparse-канала, НЕ over-suppress). resolveWidgetMetric field-ghost
+  теперь гейтит с `capped = normPostsAll.length >= 100` (сервер-кап). Backward-compat → старые resolver
+  ghost-тесты (4 поста, не capped) зелены; +1 resolver-тест (100 постов capped+uncovered → ghost undefined),
+  +2 helper-теста (290). **Sibling #2 ОТЛОЖЕН:** MetricPage rank/pivot `baseByDim` compare-колонки тоже
+  недосчитывают (низкая видимость).
 - 2026-07-03 — **U6.3a SHIPPED** `57fcf0a`. 4 bare-legacy-блока (kpi/digest/growth/top-posts) рендерятся
   через ConfigWidget (единый card-chrome/editor/explorer). Решение: НЕ переписывать pinned деструктивно —
   bare-ключ = стабильный cross-device pointer, config device-local с детерминированным id `legacy-<key>`.
