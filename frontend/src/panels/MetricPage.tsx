@@ -23,7 +23,7 @@ import { PivotTable } from '@/components/PivotTable';
 import { PostDetailModal } from '@/components/PostDetailModal';
 import { ChartSection } from '@/components/instagram/shared';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
-import { DAY_MS, alignGhost, bucketKeyOf, bucketKeysInWindow, comparisonWindow } from '@/lib/metricSeries';
+import { DAY_MS, alignGhost, baselineCoveredByPosts, bucketKeyOf, bucketKeysInWindow, comparisonWindow } from '@/lib/metricSeries';
 import type { Grain } from '@/lib/metricSeries';
 
 // ── View state (all in the URL so links restore the exact view, like steep) ──────────────
@@ -237,6 +237,13 @@ export function MetricPage() {
         return Number.isFinite(t) && t >= baseWin.from && t <= baseWin.to;
       })
     : [];
+  // Do the LOADED posts reach the baseline window start? Posts are fetch-capped (~100), so a prev/
+  // year baseline often predates the oldest loaded post — then a per-post sum undercounts and the
+  // comparison is nonsense (the +969% vs a −9% archive hero). Gate the post-derived ghost + rail
+  // comparison on this. Archive-based paths (subscribers) are unaffected. See baselineCoveredByPosts.
+  const baseCovered = baseWin
+    ? baselineCoveredByPosts(normPostsAll.map((p) => (p.date ? Date.parse(p.date) : NaN)), baseWin.from)
+    : false;
 
   let series: DailySeries;
   let ghost: number[] | undefined;
@@ -259,7 +266,7 @@ export function MetricPage() {
       winFrom != null && winDays <= 400
         ? bucketedPostSeries(normPosts, field, winFrom, winTo, effGrain)
         : bucketedPostSeries(normPosts, field, null, winTo, effGrain);
-    if (baseWin) {
+    if (baseWin && baseCovered) {
       const base = bucketedPostSeries(postsInBase, field, baseWin.from, baseWin.to, effGrain);
       // Align to the active length as a safety net (a residual off-by-one on odd ranges must
       // not silently drop the comparison): the previous period can overshoot by a day at the
@@ -356,7 +363,9 @@ export function MetricPage() {
   const compare = (() => {
     if (!baseWin || cmp === 'off') return null;
     if (field) {
-      if (postsInBase.length === 0) return null;
+      // No baseline posts, OR the loaded window doesn't reach the baseline start (sum would
+      // undercount → a nonsense %) → suppress rather than mislead. Subscribers use the archive below.
+      if (postsInBase.length === 0 || !baseCovered) return null;
       const cur = fieldSumAll;
       const base = postsInBase.reduce((s, p) => s + Number(p[field] ?? 0), 0);
       if (metricKey === 'er' && members > 0) {
@@ -595,7 +604,7 @@ export function MetricPage() {
                   </div>
                 ) : (
                   <p className="text-xs text-muted-foreground">
-                    В выборке нет данных за {cmpLabel} — сравнить не с чем.
+                    В загруженных постах недостаточно данных за {cmpLabel} — сравнить не с чем.
                   </p>
                 )}
               </>

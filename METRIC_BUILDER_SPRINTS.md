@@ -182,6 +182,16 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
 
 ## Журнал
 
+- 2026-07-03 — **BUGFIX metric-page comparison undercount** (prod-audit находка). /metrics/views:
+  hero (archive) показывал −9%, а rail «Сравнение» +969.3% (прошлый период 1.2k). Причина: post-derived
+  метрики (views/reactions/…) суммируют `postsInBase` = fetch-capped(~100)/windowed посты за ПРЕДЫДУЩЕЕ
+  окно; когда baseline старше oldest-loaded поста → сумма недосчитывает → бред-%. Тот же корень у sparse
+  ghost-линии. Фикс: pure `baselineCoveredByPosts(dates, baseFrom)` в `lib/metricSeries.ts` (+4 теста, 287);
+  MetricPage гейтит field-ghost + rail-compare на `baseCovered` (subscribers=archive, не задет). Adversarial-
+  review: 0 дефектов. **ДВА sibling'а ОТЛОЖЕНЫ** (нужен «capped»-сигнал, иначе over-suppress закрытых
+  fixture'ов — 3 resolver-теста упали на наивном гейте, откатил): (1) `resolveWidgetMetric.ts:334` config-
+  widget field-ghost = тот же undercount БЕЗ гейта; (2) MetricPage rank/pivot `baseByDim` compare-колонки
+  тоже недосчитывают. Правильный follow-up = протянуть fetch-cap/«hitLimit» флаг в оба места.
 - 2026-07-03 — **U6.3a SHIPPED** `57fcf0a`. 4 bare-legacy-блока (kpi/digest/growth/top-posts) рендерятся
   через ConfigWidget (единый card-chrome/editor/explorer). Решение: НЕ переписывать pinned деструктивно —
   bare-ключ = стабильный cross-device pointer, config device-local с детерминированным id `legacy-<key>`.

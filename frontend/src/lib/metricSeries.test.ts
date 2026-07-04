@@ -1,5 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import { DAY_MS, alignGhost, bucketKeyOf, bucketKeysInWindow, comparisonWindow } from './metricSeries';
+import { DAY_MS, alignGhost, baselineCoveredByPosts, bucketKeyOf, bucketKeysInWindow, comparisonWindow } from './metricSeries';
+
+describe('baselineCoveredByPosts — suppress an undercounted comparison', () => {
+  it('true when the oldest loaded post is at/before the baseline start', () => {
+    expect(baselineCoveredByPosts([100, 200, 300], 150)).toBe(true); // oldest 100 <= 150
+    expect(baselineCoveredByPosts([100], 100)).toBe(true); // equal = covered
+  });
+  it('false when the baseline predates the oldest loaded post (undercount risk → the +969% bug)', () => {
+    expect(baselineCoveredByPosts([200, 300, 400], 150)).toBe(false); // oldest 200 > 150
+  });
+  it('false for empty / all-undated posts (cannot prove coverage)', () => {
+    expect(baselineCoveredByPosts([], 150)).toBe(false);
+    expect(baselineCoveredByPosts([NaN, NaN], 150)).toBe(false);
+  });
+  it('ignores undated posts (NaN) when finding the oldest', () => {
+    expect(baselineCoveredByPosts([NaN, 100, NaN], 150)).toBe(true);
+    expect(baselineCoveredByPosts([NaN, 200, NaN], 150)).toBe(false);
+  });
+});
 
 describe('comparisonWindow — day-bucket count invariant', () => {
   // Non-midnight winTo (like Date.now()) is exactly what once broke the ghost: the baseline
