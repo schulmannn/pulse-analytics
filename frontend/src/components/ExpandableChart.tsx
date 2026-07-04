@@ -1,9 +1,8 @@
-import { createContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { createContext, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { DetailShell } from '@/components/DetailShell';
 import { fmt } from '@/lib/format';
-import { useFocusTrap } from '@/lib/useFocusTrap';
 
 /** True while rendering inside the expanded (modal) chart view. Charts opt into richer
     annotations there (full y-axis, value labels) without prop plumbing through the panels. */
@@ -132,7 +131,6 @@ function snapToWindow(days: number | undefined): number {
  * always starts on the line at 3М — like the metric pages.
  */
 export function ChartExpandOverlay({ title, children, renderExpanded, renderExpandedBar, statsFor, statsSum = true, grainable, initialDays, onClose }: ChartExpandOverlayProps) {
-  const panelRef = useRef<HTMLDivElement>(null);
   const chartRegionRef = useRef<HTMLDivElement>(null);
   const [days, setDays] = useState(() => snapToWindow(initialDays));
   // Overlay-local presentation; reopening always starts on the line, like metric pages.
@@ -153,45 +151,9 @@ export function ChartExpandOverlay({ title, children, renderExpanded, renderExpa
     return () => ro.disconnect();
   }, []);
   const chartH = regionH ? Math.max(240, regionH - 8) : EXPANDED_CHART_HEIGHT;
-  useFocusTrap(panelRef);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', onKey);
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = prevOverflow;
-    };
-  }, [onClose]);
-
-  return createPortal(
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-label={`График: ${title}`}
-    >
-      <div className="absolute inset-0 bg-background/70 backdrop-blur-sm" onClick={onClose} aria-hidden="true" />
-      <Card
-        ref={panelRef}
-        tabIndex={-1}
-        className="relative z-10 flex h-full w-full flex-col overflow-hidden focus:outline-none"
-      >
-        <button
-          type="button"
-          onClick={onClose}
-          className="absolute right-4 top-4 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          aria-label="Закрыть"
-        >
-          <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-
+  return (
+    <DetailShell variant="panel" ariaLabel={`График: ${title}`} onClose={onClose}>
         <CardHeader className="shrink-0 pr-12">
           <CardTitle className="text-base font-medium text-foreground">{title}</CardTitle>
           {(renderExpanded || renderExpandedBar) && (
@@ -256,9 +218,7 @@ export function ChartExpandOverlay({ title, children, renderExpanded, renderExpa
             <OverlayStats values={statsFor ? statsFor(days, grain) : null} statsSum={statsSum} />
           </div>
         </CardContent>
-      </Card>
-    </div>,
-    document.body,
+    </DetailShell>
   );
 }
 

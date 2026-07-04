@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useState } from 'react';
 import { WidgetConfigControls } from '@/components/ConfigEditDialog';
 import { WidgetBody } from '@/components/ConfigWidget';
 import { WidgetErrorBoundary } from '@/components/WidgetErrorBoundary';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
+import { DetailShell } from '@/components/DetailShell';
 import { ChannelScope } from '@/lib/channel-context';
 import { editorSpec } from '@/lib/widgetCapabilities';
 import { normalizeWidget, type WidgetConfig } from '@/lib/widgetConfig';
@@ -28,22 +28,6 @@ export function WidgetExplorer({
   const [draft, setDraft] = useState<WidgetConfig>(config);
   const spec = editorSpec(draft);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        onClose();
-      }
-    };
-    document.addEventListener('keydown', onKey, true);
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.removeEventListener('keydown', onKey, true);
-      document.body.style.overflow = prev;
-    };
-  }, [onClose]);
-
   const patch = (p: Partial<WidgetConfig>) => setDraft((d) => normalizeWidget({ ...d, ...p }) ?? d);
   const changed = JSON.stringify(draft) !== JSON.stringify(config);
 
@@ -61,9 +45,9 @@ export function WidgetExplorer({
     </WidgetErrorBoundary>
   );
 
-  return createPortal(
-    <div className="fixed inset-0 z-50 flex flex-col bg-background" role="dialog" aria-modal="true" aria-label={`Explorer «${draft.title || spec.label}»`}>
-      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-3">
+  return (
+    <DetailShell variant="fullscreen" ariaLabel={`Explorer «${draft.title || spec.label}»`} onClose={onClose}>
+      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-3 pr-14">
         <div className="min-w-0 truncate text-sm font-medium text-foreground">{draft.title || spec.label}</div>
         <div className="flex shrink-0 items-center gap-3">
           {onApply && (
@@ -79,16 +63,6 @@ export function WidgetExplorer({
               Применить к виджету
             </button>
           )}
-          <button
-            type="button"
-            aria-label="Закрыть"
-            onClick={onClose}
-            className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          >
-            <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-              <path d="M6 6l12 12M18 6 6 18" strokeLinecap="round" />
-            </svg>
-          </button>
         </div>
       </header>
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-6 overflow-y-auto p-4 sm:p-6 lg:grid-cols-[minmax(0,1fr)_320px]">
@@ -100,7 +74,6 @@ export function WidgetExplorer({
           <WidgetConfigControls config={draft} spec={spec} onChange={patch} />
         </aside>
       </div>
-    </div>,
-    document.body,
+    </DetailShell>
   );
 }
