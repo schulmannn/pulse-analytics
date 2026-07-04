@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { CATEGORY_LABEL, CATEGORY_ORDER, metricsForSource, type MetricDef } from '@/lib/widgetMetrics';
-import { VIZ_LABEL } from '@/lib/widgetRender';
+import { CATEGORY_LABEL, CATEGORY_ORDER, metricsForSource, type MetricDef, type WidgetViz } from '@/lib/widgetMetrics';
 
 /**
  * The «Добавить метрику» catalogue — a searchable picker over the whole metric catalogue, grouped
@@ -52,7 +51,11 @@ export function WidgetCatalogModal({
     );
     return CATEGORY_ORDER.map((cat) => ({
       cat,
-      metrics: all.filter((m) => m.category === cat),
+      // Core metrics (those with a dedicated metric page = drillKey) lead their category so the
+      // headline measures surface first for a new user.
+      metrics: all
+        .filter((m) => m.category === cat)
+        .sort((a, b) => (a.drillKey ? 0 : 1) - (b.drillKey ? 0 : 1)),
     })).filter((g) => g.metrics.length > 0);
   }, [source, q]);
 
@@ -113,16 +116,16 @@ export function WidgetCatalogModal({
         </div>
 
         {/* Grouped metric cards. */}
-        <div className="mt-4 max-h-[60vh] space-y-5 overflow-y-auto pr-1">
+        <div className="mt-4 max-h-[60vh] space-y-6 overflow-y-auto pr-1">
           {empty ? (
             <div className="py-10 text-center text-sm text-muted-foreground">Ничего не найдено.</div>
           ) : (
             groups.map((g) => (
               <div key={g.cat}>
-                <div className="mb-2 text-2xs font-medium tracking-wider text-muted-foreground">{CATEGORY_LABEL[g.cat]}</div>
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <div className="mb-2.5 text-2xs font-medium tracking-wider text-muted-foreground">{CATEGORY_LABEL[g.cat]}</div>
+                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
                   {g.metrics.map((m) => (
-                    <MetricCard key={m.id} metric={m} onPick={() => onPick(m.id)} />
+                    <MetricCard key={m.id} metric={m} q={q} onPick={() => onPick(m.id)} />
                   ))}
                 </div>
               </div>
@@ -135,20 +138,85 @@ export function WidgetCatalogModal({
   );
 }
 
-function MetricCard({ metric, onPick }: { metric: MetricDef; onPick: () => void }) {
+function MetricCard({ metric, q, onPick }: { metric: MetricDef; q: string; onPick: () => void }) {
   return (
     <button
       type="button"
       onClick={onPick}
-      className="flex flex-col gap-1 rounded-lg border border-border bg-card p-3 text-left transition-colors hover:border-ink3/40 hover:bg-hover-row"
+      className="flex items-start gap-2.5 rounded-lg border border-border bg-card p-3 text-left transition-colors hover:border-ink3/40 hover:bg-hover-row"
     >
-      <div className="flex items-center justify-between gap-2">
-        <span className="min-w-0 truncate text-sm font-medium text-foreground">{metric.label}</span>
-        <span className="shrink-0 rounded-full border border-border px-1.5 py-0.5 text-2xs font-medium text-muted-foreground">
-          {VIZ_LABEL[metric.defaultViz]}
-        </span>
+      {/* Mini preview glyph — the visualisation the metric renders as (line/bar/donut/list/value). */}
+      <VizGlyph viz={metric.defaultViz} />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5">
+          <span className="min-w-0 truncate text-sm font-medium text-foreground">
+            <Highlight text={metric.label} q={q} />
+          </span>
+          {metric.drillKey && (
+            <span className="shrink-0 rounded-full border border-primary/30 bg-primary/5 px-1.5 py-0.5 text-2xs font-medium text-primary">
+              Основная
+            </span>
+          )}
+        </div>
+        {metric.formula ? (
+          <span className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+            <Highlight text={metric.formula} q={q} />
+          </span>
+        ) : null}
       </div>
-      {metric.formula ? <span className="line-clamp-2 text-xs text-muted-foreground">{metric.formula}</span> : null}
     </button>
   );
 }
+
+/** Highlight the matched search substring (case-insensitive, first match) so a filtered result
+    shows WHY it matched. No match / empty query → plain text. */
+function Highlight({ text, q }: { text: string; q: string }) {
+  if (!q) return <>{text}</>;
+  const i = text.toLowerCase().indexOf(q);
+  if (i < 0) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, i)}
+      <mark className="rounded-sm bg-primary/15 px-0.5 text-inherit">{text.slice(i, i + q.length)}</mark>
+      {text.slice(i + q.length)}
+    </>
+  );
+}
+
+/** A small stroke-only preview of the metric's default visualisation (steep-like «mini chart»
+    hint), on a quiet chip. Kept lean per the icon governance — no fills except the kpi dot. */
+function VizGlyph({ viz }: { viz: WidgetViz }) {
+  const glyph = VIZ_GLYPH[viz] ?? VIZ_GLYPH.line;
+  return (
+    <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border bg-muted/40 text-muted-foreground">
+      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        {glyph}
+      </svg>
+    </span>
+  );
+}
+
+const VIZ_GLYPH: Partial<Record<WidgetViz, JSX.Element>> = {
+  line: <path d="M3 16l5-6 4 3 5-8 4 5" />,
+  bar: (
+    <>
+      <path d="M5 20V11" />
+      <path d="M12 20V5" />
+      <path d="M19 20v-6" />
+    </>
+  ),
+  donut: (
+    <>
+      <circle cx="12" cy="12" r="8" />
+      <circle cx="12" cy="12" r="3.4" />
+    </>
+  ),
+  list: <path d="M4 7h16M4 12h16M4 17h10" />,
+  kpi: (
+    <>
+      <rect x="4" y="6.5" width="16" height="11" rx="2" />
+      <path d="M8 13h6" />
+      <circle cx="8" cy="10" r="0.9" fill="currentColor" stroke="none" />
+    </>
+  ),
+};
