@@ -494,6 +494,7 @@ export function MetricPage() {
                   showPoints={series.values.length > 1 && series.values.length <= 45}
                   ghost={ghost}
                   ghostLabel={cmpLabel ?? undefined}
+                  legendToggle={false}
                   yMin={ZERO_BASED[metricKey] && series.values.length > 1 ? 0 : undefined}
                 />
               </ChartExpandedContext.Provider>
@@ -501,7 +502,7 @@ export function MetricPage() {
             {chartType === 'bar' && (
               /* Expanded context switches BarChart into its rich mode (y ticks + value labels). */
               <ChartExpandedContext.Provider value={true}>
-                <BarChart values={series.values} labels={series.labels} titles={titles} height={280} ghost={ghost} ghostLabel={cmpLabel ?? undefined} />
+                <BarChart values={series.values} labels={series.labels} titles={titles} height={280} ghost={ghost} ghostLabel={cmpLabel ?? undefined} legendToggle={false} />
               </ChartExpandedContext.Provider>
             )}
             {chartType === 'rank' && (

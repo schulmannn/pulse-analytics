@@ -25,6 +25,14 @@ interface LineChartProps {
   /** Force the full y-axis (nice ticks + gridlines + label gutter) regardless of the
       expanded context. Without it, dashboard cards render axis-free (steep-style). */
   fullAxes?: boolean;
+  /** When set, data points become clickable (a drilldown gesture — e.g. open the metric page):
+      the per-point hit area fires this with the point index and shows a pointer cursor. Hover
+      behaviour is unchanged; left unset the chart is hover-only as before. */
+  onPointClick?: (index: number) => void;
+  /** Whether the comparison legend chip is an interactive show/hide toggle (default). Pass false
+      where a page-level compare control already owns turning the comparison on/off (the metric
+      page) — there the chip renders as a static label so the two controls can't desync. */
+  legendToggle?: boolean;
 }
 
 interface Hover {
@@ -88,9 +96,26 @@ export function LineChart({
   markExtremes = false,
   showPoints = false,
   fullAxes = false,
+  onPointClick,
+  legendToggle = true,
 }: LineChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<Hover | null>(null);
+  // The comparison series can be toggled off via its legend chip (steep #9) — a decluttering
+  // reading aid. Hidden, it also drops out of the y-domain below so the current series
+  // reclaims the full height.
+  const [ghostHidden, setGhostHidden] = useState(false);
+  // A freshly-enabled or changed comparison always starts SHOWN: reset the manual hide when the
+  // ghost's content changes (compare turned on, or the metric/route swapped the series). Keyed on a
+  // content signature — not array identity — so a referentially-unstable-but-equal re-render (a
+  // refetch producing an identical series) never resets it, which would make the chip un-clickable.
+  const ghostKey = ghost && ghost.length >= 2 ? ghost.join(',') : '';
+  const prevGhostKey = useRef(ghostKey);
+  useEffect(() => {
+    if (ghostKey === prevGhostKey.current) return;
+    prevGhostKey.current = ghostKey;
+    if (ghostKey) setGhostHidden(false);
+  }, [ghostKey]);
   // Measure the real render width so the viewBox is 1:1 with CSS pixels — otherwise a
   // fixed 600-wide viewBox stretched to a wide container magnifies text + markers 2-3×.
   const [width, setWidth] = useState(600);
@@ -157,8 +182,13 @@ export function LineChart({
   const hasXAxis = showAxes && !!labels && labels.length === values.length;
   const padB = hasXAxis ? 30 : padY;
 
-  // Domain covers the series, the ghost and the target — a goal above the data must be visible.
-  const scaleVals = [...values, ...(ghost ?? []), ...(target != null ? [target] : [])];
+  // Toggled off (or absent), the comparison drops out of every draw/measure below; the legend
+  // chip stays visible so it can be toggled back on.
+  const showGhost = !!ghost && ghost.length >= 2 && !ghostHidden;
+  const activeGhost = showGhost ? ghost : undefined;
+
+  // Domain covers the series, the (shown) ghost and the target — a goal above the data must be visible.
+  const scaleVals = [...values, ...(activeGhost ?? []), ...(target != null ? [target] : [])];
   const computedMin = Math.min(...scaleVals);
   const computedMax = Math.max(...scaleVals);
   // The caller's yMin/yMax (e.g. a zero base for volume metrics) defines the domain; the nice
@@ -204,8 +234,8 @@ export function LineChart({
   const areaPath = `${linePath} L ${lastPt.x} ${h - padB} L ${firstPt.x} ${h - padB} Z`;
 
   const ghostPath =
-    ghost && ghost.length >= 2
-      ? ghost
+    activeGhost && activeGhost.length >= 2
+      ? activeGhost
           .map((v, i) => {
             const gx = gutterW + i * step;
             return `${i === 0 ? 'M' : 'L'} ${gx} ${yFor(v)}`;
@@ -259,8 +289,8 @@ export function LineChart({
 
   const tipText = (i: number) => {
     let base = titles?.[i] ?? fmt.num(values[i]);
-    // Hovering a compared chart reads both series at once.
-    if (ghost && ghost[i] != null) base = `${base} · пред. ${fmt.short(ghost[i])}`;
+    // Hovering a compared chart reads both series at once (comparison shown).
+    if (activeGhost && activeGhost[i] != null) base = `${base} · пред. ${fmt.short(activeGhost[i])}`;
     return anomalySet.has(i) ? `${base} · аномалия` : base;
   };
   // The hover readout: a STRUCTURED card (date · Текущий · comparison · Δ) whenever a ghost series
@@ -268,9 +298,9 @@ export function LineChart({
   // metric's own rich title text (velocity/history carry extra context there).
   const buildTip = (i: number): TooltipState => {
     const p = points[i];
-    if (ghost && ghost[i] != null) {
+    if (activeGhost && activeGhost[i] != null) {
       const cur = values[i];
-      const prev = ghost[i];
+      const prev = activeGhost[i];
       const rows: TooltipRow[] = [
         { label: 'Текущий', value: fmt.short(cur), color: 'hsl(var(--brand-iris))' },
         { label: ghostLabel, value: fmt.short(prev), color: 'hsl(var(--chart-2))' },
@@ -353,8 +383,8 @@ export function LineChart({
         {hovered && (
           <>
             <line x1={hovered.x} y1={0} x2={hovered.x} y2={h} stroke="hsl(var(--brand-iris))" strokeWidth="1" opacity="0.35" vectorEffect="non-scaling-stroke" />
-            {ghost && ghost[hover!.i] != null && (
-              <circle cx={hovered.x} cy={yFor(ghost[hover!.i])} r="3.5" fill="hsl(var(--card))" stroke="hsl(var(--chart-2))" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+            {activeGhost && activeGhost[hover!.i] != null && (
+              <circle cx={hovered.x} cy={yFor(activeGhost[hover!.i])} r="3.5" fill="hsl(var(--card))" stroke="hsl(var(--chart-2))" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
             )}
             <circle cx={hovered.x} cy={hovered.y} r="4" fill="hsl(var(--brand-iris))" stroke="hsl(var(--background))" strokeWidth="1.5" />
           </>
@@ -384,12 +414,23 @@ export function LineChart({
           </g>
         ))}
 
-        {/* Per-point hover targets (snap to nearest point) */}
+        {/* Per-point hover targets (snap to nearest point) — also the drilldown hit area when
+            onPointClick is set (the whole chart width tiles into these, so a click anywhere drills). */}
         {points.map((p, i) => {
           const xStart = i === 0 ? 0 : p.x - step / 2;
           const xEnd = i === n - 1 ? W : p.x + step / 2;
           return (
-            <rect key={i} x={xStart} y={0} width={Math.max(xEnd - xStart, 1)} height={h} fill="transparent" className="cursor-crosshair" onMouseMove={onEnter(i)} />
+            <rect
+              key={i}
+              x={xStart}
+              y={0}
+              width={Math.max(xEnd - xStart, 1)}
+              height={h}
+              fill="transparent"
+              className={onPointClick ? 'cursor-pointer' : 'cursor-crosshair'}
+              onMouseMove={onEnter(i)}
+              onClick={onPointClick ? () => onPointClick(i) : undefined}
+            />
           );
         })}
       </svg>
@@ -404,17 +445,33 @@ export function LineChart({
         </div>
       )}
 
-      {/* Comparison legend — names both series whenever a ghost is drawn. */}
+      {/* Comparison legend — names both series whenever a ghost is present; the comparison chip is a
+          toggle (steep #9): click to hide/show the ghost series (the current-period chip stays put,
+          hiding the metric itself is meaningless). Where a page-level compare control already owns the
+          on/off (legendToggle=false, the metric page) the chip is a static label instead. */}
       {ghost && ghost.length >= 2 && (
-        <div className="mt-1.5 flex select-none flex-wrap items-center gap-x-4 gap-y-1 px-1 text-2xs font-medium text-muted-foreground">
-          <span className="flex items-center gap-1.5">
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-2xs font-medium text-muted-foreground">
+          <span className="flex select-none items-center gap-1.5">
             <span aria-hidden="true" className="h-0.5 w-4 rounded-full" style={{ backgroundColor: 'hsl(var(--brand-iris))' }} />
             Текущий период
           </span>
-          <span className="flex items-center gap-1.5">
-            <span aria-hidden="true" className="w-4 border-t-2 border-dashed" style={{ borderColor: 'hsl(var(--chart-2))' }} />
-            {ghostLabel}
-          </span>
+          {legendToggle ? (
+            <button
+              type="button"
+              aria-pressed={!ghostHidden}
+              onClick={() => setGhostHidden((v) => !v)}
+              title={ghostHidden ? 'Показать сравнение' : 'Скрыть сравнение'}
+              className={`flex select-none items-center gap-1.5 rounded transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${ghostHidden ? 'opacity-40 line-through' : ''}`}
+            >
+              <span aria-hidden="true" className="w-4 border-t-2 border-dashed" style={{ borderColor: 'hsl(var(--chart-2))' }} />
+              {ghostLabel}
+            </button>
+          ) : (
+            <span className="flex select-none items-center gap-1.5">
+              <span aria-hidden="true" className="w-4 border-t-2 border-dashed" style={{ borderColor: 'hsl(var(--chart-2))' }} />
+              {ghostLabel}
+            </span>
+          )}
         </div>
       )}
 

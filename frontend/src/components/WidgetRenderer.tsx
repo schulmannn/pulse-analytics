@@ -42,7 +42,22 @@ export function WidgetSkeleton({ viz }: { viz: WidgetViz }) {
  * chart underneath tells the shape — so even a line chart answers «Просмотры / 388 / +12%» in a
  * second, not just «a wiggly line». Charts fill the tile via the height context the card provides.
  */
-export function WidgetRenderer({ result, viz }: { result: WidgetResult; viz: WidgetViz }) {
+export function WidgetRenderer({
+  result,
+  viz,
+  onDrill,
+  drillLabel,
+}: {
+  result: WidgetResult;
+  viz: WidgetViz;
+  /** When set (a metric with its own page), the hero value and the chart points become a
+      drilldown gesture into that page. Left unset — previews, the explorer sandbox, IG and
+      breakdown metrics — the card is read-only as before. */
+  onDrill?: () => void;
+  /** Metric name for the drill button's accessible label (so multiple drill cards are
+      distinguishable to a screen reader, matching KpiGrid's DrillValue). */
+  drillLabel?: string;
+}) {
   if (result.empty) {
     return (
       <div className="flex h-full min-h-[6rem] flex-col items-center justify-center gap-1.5 px-3 text-center">
@@ -76,9 +91,20 @@ export function WidgetRenderer({ result, viz }: { result: WidgetResult; viz: Wid
       {showHero && (
         <div className="shrink-0">
           <div className="flex items-baseline gap-2.5">
-            <span className="text-2xl font-medium leading-none tabular-nums tracking-tight text-foreground">
-              {result.value}
-            </span>
+            {onDrill ? (
+              <button
+                type="button"
+                onClick={onDrill}
+                aria-label={drillLabel ? `Разбор: ${drillLabel}` : 'Открыть страницу метрики'}
+                className="rounded text-2xl font-medium leading-none tabular-nums tracking-tight text-foreground transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+              >
+                {result.value}
+              </button>
+            ) : (
+              <span className="text-2xl font-medium leading-none tabular-nums tracking-tight text-foreground">
+                {result.value}
+              </span>
+            )}
             <DeltaPill delta={result.delta} />
           </div>
           {(result.caption || progress) && (
@@ -92,7 +118,7 @@ export function WidgetRenderer({ result, viz }: { result: WidgetResult; viz: Wid
       {/* The chart's goal line reads the target from this context (config-widget: resolver-computed). */}
       <WidgetTargetContext.Provider value={result.target ?? null}>
         <div className={`min-h-0 flex-1 ${showHero ? 'mt-3' : ''}`}>
-          <WidgetChart result={result} eff={eff} />
+          <WidgetChart result={result} eff={eff} onDrill={onDrill} />
         </div>
       </WidgetTargetContext.Provider>
       <SeriesStatsFooter result={result} eff={eff} />
@@ -119,7 +145,8 @@ function SeriesStatsFooter({ result, eff }: { result: WidgetResult; eff: WidgetV
 
 /** The chart region — picks a primitive by the effective viz and feeds it the adapted data. Charts
  *  read their height from the card's ExpandedChartHeightContext, so no explicit height here. */
-function WidgetChart({ result, eff }: { result: WidgetResult; eff: WidgetViz }) {
+function WidgetChart({ result, eff, onDrill }: { result: WidgetResult; eff: WidgetViz; onDrill?: () => void }) {
+  const onPointClick = onDrill ? () => onDrill() : undefined;
   if (eff === 'line') {
     const c = seriesToChart(result);
     return (
@@ -131,12 +158,13 @@ function WidgetChart({ result, eff }: { result: WidgetResult; eff: WidgetViz }) 
         ghostLabel={result.ghostLabel}
         markExtremes={c.values.length > 1}
         showPoints={c.values.length > 1 && c.values.length <= 45}
+        onPointClick={onPointClick}
       />
     );
   }
   if (eff === 'bar') {
     const c = seriesToChart(result);
-    return <BarChart values={c.values} labels={c.labels} titles={c.titles} ghost={result.ghost} ghostLabel={result.ghostLabel} />;
+    return <BarChart values={c.values} labels={c.labels} titles={c.titles} ghost={result.ghost} ghostLabel={result.ghostLabel} onPointClick={onPointClick} />;
   }
   if (eff === 'donut') {
     const items = result.breakdown ?? [];
@@ -155,7 +183,7 @@ function WidgetChart({ result, eff }: { result: WidgetResult; eff: WidgetViz }) 
   // kpi — the hero already carries the number; a series (if any) becomes a compact sparkline beneath.
   if (result.series?.length) {
     const c = seriesToChart(result);
-    return <LineChart values={c.values} labels={c.labels} titles={c.titles} height={64} />;
+    return <LineChart values={c.values} labels={c.labels} titles={c.titles} height={64} onPointClick={onPointClick} />;
   }
   return null;
 }

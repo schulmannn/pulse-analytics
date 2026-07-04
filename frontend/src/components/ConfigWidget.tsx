@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ChartSection, PERIOD_WORD } from '@/components/ChartWidget';
 import { WidgetRenderer, WidgetSkeleton } from '@/components/WidgetRenderer';
 import { ConfigEditDialog } from '@/components/ConfigEditDialog';
@@ -30,11 +31,20 @@ import type { WidgetConfig } from '@/lib/widgetConfig';
  */
 export function ConfigWidget({ config, homeKey }: { config: WidgetConfig; homeKey?: string }) {
   const [editOpen, setEditOpen] = useState(false);
+  const navigate = useNavigate();
   const metric = getMetric(config.metricId);
   const legacyKey = legacyKeyForMetricId(config.metricId);
   // Metric widgets and legacy composites both drive the universal editor / explorer.
   const configurable = !!metric || !!legacyKey;
   const label = config.title || metric?.label || (legacyKey ? LEGACY_LABEL[legacyKey] : undefined) || 'Метрика';
+  // Drilldown (steep #9): only the six core TG metrics have a metric page (/metrics/:drillKey), so
+  // only those cards' hero value + chart points navigate. Everything else (IG, breakdowns, legacy)
+  // has no page → no drill. A SOURCE-PINNED card is also not drilled: the metric page reads the
+  // global switcher channel, so drilling a card pinned to a different channel would silently show
+  // the wrong channel's data. (Re-enabling pinned drill needs a channel-scoped metric page — backlog.)
+  // Previews and the explorer sandbox never pass onDrill, so they stay static regardless.
+  const drillKey = metric?.drillKey;
+  const onDrill = drillKey && config.source == null ? () => navigate(`/metrics/${drillKey}`) : undefined;
 
   const card = (
     <ChartSection
@@ -63,7 +73,7 @@ export function ConfigWidget({ config, homeKey }: { config: WidgetConfig; homeKe
           : undefined
       }
     >
-      <WidgetBody config={config} />
+      <WidgetBody config={config} onDrill={onDrill} drillLabel={label} />
     </ChartSection>
   );
   const wrapped = config.source != null ? <ChannelScope channelId={config.source}>{card}</ChannelScope> : card;
@@ -85,11 +95,11 @@ export function ConfigWidget({ config, homeKey }: { config: WidgetConfig; homeKe
 /** Resolved widget body — exported so the create-widget preview / explorer render the SAME body a
  *  pinned card will. A legacy composite routes to its adapter; otherwise the metric resolver. TG and
  *  IG bodies are distinct COMPONENTS (not a conditional hook) so a TG widget never mounts IG queries. */
-export function WidgetBody({ config }: { config: WidgetConfig }) {
+export function WidgetBody({ config, onDrill, drillLabel }: { config: WidgetConfig; onDrill?: () => void; drillLabel?: string }) {
   const legacyKey = legacyKeyForMetricId(config.metricId);
   if (legacyKey) return <LegacyWidgetBody legacyKey={legacyKey} config={config} />;
   const metric = getMetric(config.metricId);
-  return metric?.source === 'ig' ? <IgWidgetBody config={config} /> : <TgWidgetBody config={config} />;
+  return metric?.source === 'ig' ? <IgWidgetBody config={config} /> : <TgWidgetBody config={config} onDrill={onDrill} drillLabel={drillLabel} />;
 }
 
 /** A legacy composite body (KpiGrid / Digest / …) hosted in the unified card. It reads
@@ -117,10 +127,10 @@ function LegacyWidgetBody({ legacyKey, config }: { legacyKey: LegacyKey; config:
   );
 }
 
-function TgWidgetBody({ config }: { config: WidgetConfig }) {
+function TgWidgetBody({ config, onDrill, drillLabel }: { config: WidgetConfig; onDrill?: () => void; drillLabel?: string }) {
   const { result, isLoading } = useWidgetData(config);
   if (isLoading) return <WidgetSkeleton viz={config.viz} />;
-  return <WidgetRenderer result={result} viz={config.viz} />;
+  return <WidgetRenderer result={result} viz={config.viz} onDrill={onDrill} drillLabel={drillLabel} />;
 }
 
 function IgWidgetBody({ config }: { config: WidgetConfig }) {
