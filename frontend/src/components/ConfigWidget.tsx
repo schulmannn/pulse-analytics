@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { ChartSection } from '@/components/ChartWidget';
 import { WidgetRenderer } from '@/components/WidgetRenderer';
 import { ConfigEditDialog } from '@/components/ConfigEditDialog';
+import { WidgetExplorer } from '@/components/WidgetExplorer';
 import { ChannelScope } from '@/lib/channel-context';
 import { useWidgetData } from '@/lib/useWidgetData';
 import { useIgWidgetData } from '@/lib/useIgWidgetData';
@@ -35,6 +36,19 @@ export function ConfigWidget({ config, homeKey }: { config: WidgetConfig; homeKe
         // The goal line is now resolver-computed (result.target) and provided by WidgetRenderer, so
         // the card-level target override is no longer needed (it also covers dynamic targets, S9).
       }}
+      // «Развернуть» opens the universal explorer sandbox (mutable draft; «Применить» commits it).
+      explorer={
+        metric
+          ? (close) => (
+              <WidgetExplorer
+                config={config}
+                metric={metric}
+                onApply={(next) => updateWidgetConfig(config.id, next)}
+                onClose={close}
+              />
+            )
+          : undefined
+      }
     >
       <WidgetBody config={config} />
     </ChartSection>

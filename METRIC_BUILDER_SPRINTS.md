@@ -135,10 +135,14 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
   ниже lg карточка content-height, тело flex-1 измеряется и кормит высоту чарта (контент SVG+легенда >
   высоты) → петля без границы → десятки тысяч px ~900px. Фикс: фикс-высота на ВСЕХ breakpoint + cap
   измерения (>640→null) + `min-w-0` на grid-элемент. Визуал=прод (900/1280/1440).
-- **U2 — Create-widget preview** — SHIPPED `<pending>`. Извлёк `WidgetConfigControls` (общий edit+create).
+- **U2 — Create-widget preview** — SHIPPED `13a6277`. Извлёк `WidgetConfigControls` (общий edit+create).
   `CreateWidgetDialog`: живой preview (`WidgetBody` над draft, real data, ChannelScope по source) + те же
   контролы + «Добавить на главную». Home: каталог→create-step (не мгновенный add). `WidgetBody` экспортнут.
-- **U3 — Universal explorer** (overlay+WidgetRenderer над мутабельным config) — TODO.
+- **U3 — Universal explorer** — SHIPPED `<pending>`. `WidgetExplorer` = полноэкранная ПЕСОЧНИЦА: большой
+  чарт (full axes, ChartExpandedContext=true, h420) над ЛОКАЛЬНЫМ draft + `WidgetConfigControls` справа;
+  «Применить к виджету» коммитит (updateWidgetConfig), иначе виджет не тронут. Подключено через новый
+  аддитивный проп `explorer` в ChartSection (config-виджет передаёт песочницу; legacy не задет → старый
+  ChartExpandOverlay). Ноль per-chart explorer-кода — работает для любого config-виджета.
 - **U4 — recommendedSize в MetricDef + авто-размер** — TODO.
 - **U5 — убрать неработающие viz (rank/pivot) из редактора** — TODO.
 - **U6 — Home: instances-not-keys + legacy-адаптеры** (самый глубокий, в конце) — TODO.

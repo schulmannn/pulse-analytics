@@ -873,11 +873,14 @@ interface ChartSectionProps {
     /** Goal line for the widget's charts (config.target, fixed goals only in S5). */
     target?: number | null;
   };
+  /** A custom full-screen explorer for «Развернуть» — when set, it fully replaces the generic
+   *  ChartExpandOverlay (config-widgets pass a mutable-config sandbox). Receives a `close` callback. */
+  explorer?: (close: () => void) => ReactNode;
   /** Body; with `variants` it renders BELOW the active variant (shared captions etc.). */
   children?: ReactNode;
 }
 
-export function ChartSection({ id, title, action, variants, className, defaultSize, expand, periodControl, homeKey, seriesOptions, configEditor, children }: ChartSectionProps) {
+export function ChartSection({ id, title, action, variants, className, defaultSize, expand, periodControl, homeKey, seriesOptions, configEditor, explorer, children }: ChartSectionProps) {
   const widgetId = id ?? title;
   const group = useContext(GroupCtx);
   const homeEditing = useContext(HomeEditContext);
@@ -1265,20 +1268,23 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
         />
       )}
 
-      {expandOpen && (
-        <ChartExpandOverlay
-          title={prefs.title || title}
-          initialDays={periodControl ? widgetDays : undefined}
-          renderExpanded={hasRichExpand ? expand?.renderExpanded : undefined}
-          renderExpandedBar={hasRichExpand ? expand?.renderExpandedBar : undefined}
-          statsFor={hasRichExpand ? expand?.statsFor : undefined}
-          statsSum={expand?.statsSum ?? true}
-          grainable={hasRichExpand ? expand?.grainable : undefined}
-          onClose={() => setExpandOpen(false)}
-        >
-          {bodyNode}
-        </ChartExpandOverlay>
-      )}
+      {/* Config-widgets pass a mutable-config explorer that fully replaces the generic overlay. */}
+      {expandOpen && explorer
+        ? explorer(() => setExpandOpen(false))
+        : expandOpen && (
+            <ChartExpandOverlay
+              title={prefs.title || title}
+              initialDays={periodControl ? widgetDays : undefined}
+              renderExpanded={hasRichExpand ? expand?.renderExpanded : undefined}
+              renderExpandedBar={hasRichExpand ? expand?.renderExpandedBar : undefined}
+              statsFor={hasRichExpand ? expand?.statsFor : undefined}
+              statsSum={expand?.statsSum ?? true}
+              grainable={hasRichExpand ? expand?.grainable : undefined}
+              onClose={() => setExpandOpen(false)}
+            >
+              {bodyNode}
+            </ChartExpandOverlay>
+          )}
     </section>
   );
 }
