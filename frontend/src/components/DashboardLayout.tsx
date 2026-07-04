@@ -432,16 +432,30 @@ function NavItem({ to, label, icon, end, rail }: NavLinkDef & { rail?: boolean }
       aria-label={rail ? label : undefined}
       className={({ isActive }) =>
         cn(
-          'flex h-9 items-center rounded text-sm transition-colors',
+          'relative flex h-9 items-center rounded text-sm transition-colors',
           rail ? 'justify-center' : 'gap-2.5 px-2',
           isActive
-            ? 'bg-hover-row font-medium text-foreground'
+            ? // Rail (collapsed): no heavy filled square — a thin left indicator pill (below) + the
+              // active glyph reads lighter. Expanded: the full-row neutral highlight stays.
+              rail
+              ? 'font-medium text-foreground'
+              : 'bg-hover-row font-medium text-foreground'
             : 'text-ink2 hover:bg-hover-row/60 hover:text-foreground',
         )
       }
     >
-      <Icon name={icon} className="h-[18px] w-[18px] shrink-0" />
-      {!rail && <span className="truncate whitespace-nowrap">{label}</span>}
+      {({ isActive }) => (
+        <>
+          {rail && isActive && (
+            <span
+              aria-hidden="true"
+              className="absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-full bg-foreground"
+            />
+          )}
+          <Icon name={icon} className="h-[18px] w-[18px] shrink-0" />
+          {!rail && <span className="truncate whitespace-nowrap">{label}</span>}
+        </>
+      )}
     </NavLink>
   );
 }
