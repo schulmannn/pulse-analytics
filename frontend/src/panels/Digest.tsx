@@ -112,7 +112,7 @@ export function Digest() {
 
         {/* EVIDENCE — где доказательство */}
         {hasBest && (
-          <div className="border-t pt-4">
+          <div className="pt-4">
             <TierLabel>Доказательство</TierLabel>
             <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
               Сильнее всего сработал пост «<span className="text-foreground">{bestCaption}</span>» —{' '}
@@ -136,7 +136,7 @@ export function Digest() {
         )}
 
         {/* ACTION — что сделать */}
-        <div className="border-t pt-4">
+        <div className="pt-4">
           <TierLabel>Что сделать</TierLabel>
           <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{actionText}</p>
         </div>

@@ -265,7 +265,7 @@ function Sidebar({ email, role, avatar }: { email?: string; role?: string; avata
         // card surface so it reads a shade apart from the canvas — no shadow (DS restraint; the
         // surface contrast + inset carry the float). z-30 lets the overhanging popovers (rail
         // dropdown, user-row menu) paint above the sticky Topbar (z-20), under scrim/modals.
-        'sticky top-2 z-30 m-2 hidden h-[calc(100vh-1rem)] shrink-0 flex-col rounded-xl border border-border bg-card md:flex print:hidden',
+        'sticky top-2 z-30 m-2 hidden h-[calc(100vh-1rem)] shrink-0 flex-col rounded-xl border border-border bg-card dark:border-white/[0.06] md:flex print:hidden',
         'transition-[width] duration-200 motion-reduce:transition-none',
         rail ? 'w-16' : 'w-60',
       )}

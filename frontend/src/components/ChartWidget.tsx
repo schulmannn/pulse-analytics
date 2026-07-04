@@ -1109,7 +1109,10 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
     >
       <div
         className={`flex flex-col ${SIZE_H[effectiveSize]} rounded-xl border bg-card p-4 sm:p-5 transition-colors hover:border-ink3/40 ${
-          homeEditing && homeKey ? 'border-ink3/25' : 'border-border'
+          // Softer surface edge in dark (a faint white hairline instead of the hard #2b2b2b box —
+          // steep-like "lit surface", less boxed); light mode keeps the full hairline (white cards on
+          // paper need it for definition). Edit mode keeps a visible border.
+          homeEditing && homeKey ? 'border-ink3/25' : 'border-border dark:border-white/[0.06]'
         } ${reorder ? 'widget-jiggle' : 'widget-enter'} ${isDragging ? 'shadow-lg' : ''}`}
         style={innerStyle}
       >
