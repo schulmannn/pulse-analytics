@@ -922,6 +922,19 @@ async function deleteBug(id) {
   return true;
 }
 
+// Client render-crash telemetry lands in the SAME bugs table under kind='crash' — one admin surface,
+// no new table/migration (kind is free TEXT). 'crash' is inserted directly (not via BUG_KINDS, which
+// stays the user-facing kind set), and context gets far more room than the 500-char user-report cap
+// so a full componentStack + trace context fits.
+async function createCrash({ text, context }) {
+  if (!enabled) return null;
+  const { rows } = await pool.query(
+    `INSERT INTO bugs (text, severity, context, kind) VALUES ($1,'high',$2,'crash')
+     RETURNING id, to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SS') AS created_at, status, severity, kind, text, context`,
+    [String(text).slice(0, 4000), context ? String(context).slice(0, 8000) : null]);
+  return rows[0];
+}
+
 async function bugExists(id) {
   if (!enabled) return false;
   const { rows } = await pool.query('SELECT 1 FROM bugs WHERE id=$1', [id]);
@@ -1284,7 +1297,7 @@ module.exports = {
   saveVelocity, getLatestVelocity,
   upsertChannelDaily, upsertPosts, upsertMentions, upsertIgTags, getIgTags,
   getChannelHistory, getMentionsHistory, getMentionsArchive,
-  createBug, listBugs, updateBug, deleteBug, BUG_STATUSES, BUG_SEVERITIES, BUG_KINDS,
+  createBug, createCrash, listBugs, updateBug, deleteBug, BUG_STATUSES, BUG_SEVERITIES, BUG_KINDS,
   bugExists, getBug, addAttachmentIfRoom, getAttachment,
   saveIgAccount, getIgAccount, updateIgToken, deleteIgAccount, listIgAccounts,
   saveTgSession, getTgSession, deleteTgSession, listTgSessions,

@@ -148,7 +148,11 @@ function BugRowCard({ bug, availableStatuses, onDelete }: BugRowCardProps) {
     bug: 'text-ember bg-ember/10',
     feature: 'text-verdant bg-verdant/10',
     change: 'text-primary bg-primary/10',
+    crash: 'text-ember bg-ember/10',
   };
+  // 'crash' is auto-reported (POST /api/client-errors), not a create-form option, so its label lives
+  // here rather than in KIND_LABELS (which drives the ticket form's kind selector).
+  const kindLabel = KIND_LABELS[bug.kind ?? ''] || (bug.kind === 'crash' ? 'Крах' : bug.kind);
   const severityColors: Record<string, string> = { high: 'text-ember', low: 'text-verdant', medium: 'text-primary' };
   const currentKindClass = kindColors[bug.kind ?? ''] || 'text-muted-foreground bg-muted';
   const currentSeverityClass = severityColors[bug.severity ?? ''] || 'text-muted-foreground';
@@ -171,11 +175,24 @@ function BugRowCard({ bug, availableStatuses, onDelete }: BugRowCardProps) {
           </button>
         </div>
 
+        {/* Diagnostic context (crash reports carry trace id / route / componentStack as JSON here) —
+            collapsed by default, rendered as plain text (never HTML). */}
+        {bug.context && (
+          <details className="text-2xs">
+            <summary className="cursor-pointer select-none text-muted-foreground transition-colors hover:text-foreground">
+              Контекст
+            </summary>
+            <pre className="mt-1.5 max-h-64 overflow-auto whitespace-pre-wrap break-all rounded border border-border/60 bg-muted/40 p-2 font-mono text-muted-foreground">
+              {bug.context}
+            </pre>
+          </details>
+        )}
+
         <div className="flex flex-col gap-3 border-t border-border/40 pt-2 text-xs sm:flex-row sm:items-center sm:justify-between">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 font-mono text-2xs text-muted-foreground">
             <span className="font-medium text-foreground">#{bug.id}</span>
             <span className={`rounded px-1.5 py-0.5 font-sans text-2xs font-medium tracking-wide ${currentKindClass}`}>
-              {KIND_LABELS[bug.kind ?? ''] || bug.kind}
+              {kindLabel}
             </span>
             <span className={`font-sans font-medium ${currentSeverityClass}`}>
               Важность: {SEVERITY_LABELS[bug.severity ?? ''] || bug.severity}

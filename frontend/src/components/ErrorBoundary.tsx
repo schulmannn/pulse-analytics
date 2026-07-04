@@ -1,6 +1,8 @@
 import { Component } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
 import { Cartograph } from '@/components/Cartograph';
+import { buildWidgetErrorReport, nextTraceId } from '@/lib/widgetErrors';
+import { reportCrashToServer } from '@/lib/crashReporting';
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -8,6 +10,7 @@ interface ErrorBoundaryProps {
 
 interface ErrorBoundaryState {
   error: Error | null;
+  traceId: string | null;
 }
 
 /**
@@ -16,14 +19,28 @@ interface ErrorBoundaryState {
  * the UI — the full error still lands in the console for diagnostics.
  */
 export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  state: ErrorBoundaryState = { error: null };
+  state: ErrorBoundaryState = { error: null, traceId: null };
 
-  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+  static getDerivedStateFromError(error: Error): Partial<ErrorBoundaryState> {
     return { error };
   }
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
-    console.error('[app-crash]', error, info.componentStack);
+    // Build the report with the PURE helpers (not reportWidgetError, whose sink may be uninstalled if
+    // the shell itself failed to mount) and forward it to telemetry directly with scope 'app'. The
+    // trace id is shown in the fallback so a user can quote it.
+    const report = buildWidgetErrorReport({
+      traceId: nextTraceId(),
+      error,
+      widgetId: 'app-shell',
+      label: 'Приложение',
+      componentStack: info.componentStack ?? undefined,
+      route: typeof location !== 'undefined' ? location.pathname : undefined,
+      at: new Date().toISOString(),
+    });
+    console.error('[app-crash]', report.traceId, error, info.componentStack);
+    reportCrashToServer(report, 'app');
+    this.setState({ traceId: report.traceId });
   }
 
   render(): ReactNode {
@@ -37,6 +54,11 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
           <p className="mt-2 text-sm text-muted-foreground">
             Интерфейс не смог отрисоваться · <span className="font-mono">{error.name || 'Ошибка'}</span>. Обычно помогает обновить страницу.
           </p>
+          {this.state.traceId && (
+            <p className="mt-1 text-2xs text-muted-foreground">
+              Код ошибки: <span className="font-mono">{this.state.traceId}</span>
+            </p>
+          )}
           <button
             type="button"
             onClick={() => window.location.reload()}

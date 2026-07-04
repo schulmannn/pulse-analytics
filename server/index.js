@@ -2567,6 +2567,56 @@ app.delete('/api/bugs/:id', requireAuth, requireSuper, async (req, res, next) =>
   catch (e) { next(e); }
 });
 
+// ── Client render-crash telemetry (P0) ──
+// The widget + app error boundaries POST a caught render crash here so it is diagnosable in the
+// admin Bugs surface (kind='crash') by its trace id — not just a lost console line. Any AUTHENTICATED
+// user reports THEIR OWN crashes (no superuser gate — the point is to catch real users' crashes), so
+// it is tightly rate limited, every field is length-capped, the uid is HASHED (not stored raw), and
+// the server stamps its own deployed commit. Reporting must never fail loudly: storage errors are
+// swallowed and acked, so a crash report can't itself become a crash.
+const crashLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 30,
+  // requireAuth runs BEFORE this limiter, so req.user is always set (no raw-ip fallback needed).
+  keyGenerator: (req) => `crash:u${req.user.uid}`,
+  message: { error: 'Слишком много отчётов об ошибках.' },
+});
+const SERVER_COMMIT = String(process.env.RAILWAY_GIT_COMMIT_SHA || process.env.COMMIT_SHA || 'dev').slice(0, 7);
+const hashUid = (uid) => crypto.createHash('sha256').update(`${uid}:${AUTH_SECRET}`).digest('hex').slice(0, 12);
+app.post('/api/client-errors', requireAuth, crashLimiter, async (req, res) => {
+  try {
+    const b = req.body || {};
+    const str = (v, n) => (typeof v === 'string' ? v.slice(0, n) : undefined);
+    const traceId = str(b.traceId, 40) || '';
+    const name = str(b.name, 120) || 'Error';
+    const message = str(b.message, 500) || '';
+    const scope = b.scope === 'app' ? 'app' : 'widget';
+    const route = str(b.route, 200) || '';
+    const widgetId = str(b.widgetId, 120);
+    const label = str(b.label, 160);
+    // Trace id in the VISIBLE text (not just the context JSON) so an admin finds a crash by the id
+    // the user quotes straight from the Bugs list — no need to expand each row's context.
+    const text = `[crash:${scope}] ${name}: ${message} · ${traceId}`.slice(0, 300);
+    const context = JSON.stringify({
+      traceId, scope, route, widgetId, label,
+      componentStack: str(b.componentStack, 6000),
+      uidHash: hashUid(req.user.uid),
+      commit: SERVER_COMMIT,
+      ua: str(req.headers['user-agent'], 200),
+      at: new Date().toISOString(),
+    });
+    if (db.enabled) {
+      const row = await db.createCrash({ text, context });
+      return res.json({ ok: true, id: row ? row.id : null, traceId });
+    }
+    console.error('[client-crash]', text, context); // no DB — Railway logs still capture it
+    return res.json({ ok: false, traceId });
+  } catch (e) {
+    console.error('[client-crash] store failed', e && e.message);
+    return res.json({ ok: false });
+  }
+});
+
 // ── Hand a bug to Claude Code (manual gate) ──
 // Fires a GitHub repository_dispatch → the claude-bugfix workflow attempts a fix and
 // opens a PR (never pushes to main, which auto-deploys). Needs GITHUB_REPO +
