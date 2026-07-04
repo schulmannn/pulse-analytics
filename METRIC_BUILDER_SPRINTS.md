@@ -237,6 +237,29 @@ color-toggle + crossfade иконок + remount текста (`index.css:251`, `
 
 ## Журнал
 
+- 2026-07-04 — **P1 Accessibility audit (keyboard/SR/focus) — SHIPPED `aa39890`** (321 vitest + **112 e2e**,
+  +48 a11y-прогонов). Ultracode 3 воркфлоу: (1) аудит 5 осей→verify-скептики = **62 находки → 59 confirmed**
+  (3 refuted: DateRangePicker = dead code); (2) применение — 6 параллельных агентов на 13 механических файлов
+  (48 фиксов, 0 skip) + 8 деликатных вручную; (3) **verification-раунд 3 ревьюера = 13 находок, ВСЕ применены**.
+  2 HIGH из verification: `line-clamp-1 block` (block побеждает display:-webkit-box → клэмп мёртв, строки
+  раздуваются); palette-логаут терял `navigate` (mutate-callbacks умирают с unmount'ом observer'а при
+  mount-per-open — навигация теперь синхронная). **Автогейт**: `e2e/a11y.spec.ts` — axe WCAG A/AA (минус
+  color-contrast = отд. карточка) на 7 поверхностях (4 маршрута + detail + edit-mode + палитра) + keyboard
+  smoke (карта→Enter→detail→Escape→focus-restore; Tab-trap диалогов; ⋯-меню; ⌘K combobox aria-activedescendant
+  + restore; edit-диалог trap→trigger). **Ключевые фиксы**: axe nested-interactive — карточка теперь mouse-only
+  onClick, semantic путь = header ↗-кнопка (SR больше не объявляет карту одной кнопкой); useFocusTrap в 4
+  диалога + PaletteDialog (**урок: autoFocus фаерится в commit ДО passive-эффектов → трап снапшотит чужого
+  opener'а и крадёт фокус — все inner-autoFocus заменены на post-trap эффекты; всегда-смонтированный компонент
+  не может держать трап → mount-per-open**); ⋯-меню role=menu/menuitem/separator + aria-haspopup + ArrowDown→
+  первый пункт + roving arrows + **focus-parking на каждом закрывающем пути** (тригger синхронно ДО state-change
+  → трапы диалогов капчурят его как opener; rAF-fallback на edit-toggle/чип скрытых/«Готово»-pill, когда элемент
+  unmount'ится — unpin/hide/reorder); useDismiss(triggerRef) (свитчер/аккаунт-меню/add-widget/report-dropdown);
+  Posts desktop `<tr onClick>` → настоящая кнопка в caption-ячейке (markdownToPlainText, НЕ RichText — nested
+  `<a>` в `<button>`); aria-sort/aria-pressed/aria-current; LineChart/BarChart role=img + data-label (series
+  max, не scale-top); role=alert/status на async-фидбек (Auth/Connect/Mentions/settings; live-регион на
+  вставляемом боксе, не постоянный wrapper — space-y даёт двойной gap); reorder-контролы `invisible` (не
+  opacity-0 — оставались в tab-order, Enter на невидимом × сносил виджет). Отложено осознанно: per-point
+  keyboard-доступ к чартам, arrow-nav вне ⋯-меню, reorder-exit focus.
 - 2026-07-04 — **P0 Reusable chart controls — SHIPPED `c395c9d` (acceptance закрыта)** (бандл `index-DR8IdrsV`;
   321 vitest +3 + 64 e2e). Design-first (Explore): 4/5 acceptance УЖЕ было — `WidgetConfigControls` (единый
   компонент) юзается в ConfigEditDialog + WidgetExplorer + CreateWidgetDialog (parity ✅), eligibility =
