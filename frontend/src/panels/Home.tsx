@@ -186,6 +186,7 @@ function AddWidgetBar({ pinned }: { pinned: string[] }) {
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [createMetric, setCreateMetric] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const available = Object.keys(HOME_REGISTRY).filter((key) => !pinned.includes(key));
 
   useEffect(() => {
@@ -194,7 +195,10 @@ function AddWidgetBar({ pinned }: { pinned: string[] }) {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
+      if (e.key === 'Escape') {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
     };
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
@@ -218,6 +222,7 @@ function AddWidgetBar({ pinned }: { pinned: string[] }) {
   return (
     <div ref={ref} className="add-widget-enter relative mt-6">
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
@@ -231,6 +236,10 @@ function AddWidgetBar({ pinned }: { pinned: string[] }) {
           <button
             type="button"
             onClick={() => {
+              // Trigger first: the catalog's focus trap then snapshots it as opener, and the whole
+              // catalog → create-dialog chain restores focus here on close (the menu item itself
+              // unmounts with the popover).
+              triggerRef.current?.focus();
               setOpen(false);
               setCatalogOpen(true);
             }}
@@ -252,6 +261,7 @@ function AddWidgetBar({ pinned }: { pinned: string[] }) {
                   onClick={() => {
                     pinToHome(key);
                     setOpen(false);
+                    triggerRef.current?.focus();
                   }}
                   className="block w-full rounded px-2.5 py-1.5 text-left text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                 >

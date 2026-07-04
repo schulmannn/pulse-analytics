@@ -19,16 +19,30 @@ import { Icon, type IconName } from '@/components/nav-icons';
 import { ChannelAvatar } from '@/components/ChannelAvatar';
 
 /** Close a popover/dropdown on Escape, and (when a ref is given) on outside mousedown.
-    Outside-click via a document listener instead of a scrim avoids stacking-context traps. */
-function useDismiss(active: boolean, setOpen: Dispatch<SetStateAction<boolean>>, ref?: RefObject<HTMLElement | null>) {
+    Outside-click via a document listener instead of a scrim avoids stacking-context traps.
+    `triggerRef` (optional) gets focus back on Escape — the focused popover content unmounts, and
+    without the restore a keyboard user re-Tabs from the top of the shell. On outside mousedown the
+    restore fires only when focus is INSIDE the popover (never steal from the clicked target). */
+function useDismiss(
+  active: boolean,
+  setOpen: Dispatch<SetStateAction<boolean>>,
+  ref?: RefObject<HTMLElement | null>,
+  triggerRef?: RefObject<HTMLElement | null>,
+) {
   useEffect(() => {
     if (!active) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
+      if (e.key === 'Escape') {
+        setOpen(false);
+        triggerRef?.current?.focus();
+      }
     };
     const onDown = ref
       ? (e: MouseEvent) => {
-          if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+          if (ref.current && !ref.current.contains(e.target as Node)) {
+            setOpen(false);
+            if (triggerRef?.current && ref.current.contains(document.activeElement)) triggerRef.current.focus();
+          }
         }
       : null;
     document.addEventListener('keydown', onKey);
@@ -37,7 +51,7 @@ function useDismiss(active: boolean, setOpen: Dispatch<SetStateAction<boolean>>,
       document.removeEventListener('keydown', onKey);
       if (onDown) document.removeEventListener('mousedown', onDown);
     };
-  }, [active, setOpen, ref]);
+  }, [active, setOpen, ref, triggerRef]);
 }
 
 interface NavLinkDef {
@@ -508,6 +522,7 @@ function SourceSwitcher({ rail = false }: { rail?: boolean }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const cardRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const channels = data?.channels ?? [];
 
   // Initialise / validate the selected channel once the list loads (drives X-Channel-Id). A
@@ -520,7 +535,7 @@ function SourceSwitcher({ rail = false }: { rail?: boolean }) {
     setChannelId(serverSelected ?? channels[0].id);
   }, [channelId, channels, data, setChannelId]);
 
-  useDismiss(open, setOpen, cardRef);
+  useDismiss(open, setOpen, cardRef, triggerRef);
   // Reset the filter whenever the dropdown closes, so it reopens clean.
   useEffect(() => {
     if (!open) setQuery('');
@@ -557,6 +572,9 @@ function SourceSwitcher({ rail = false }: { rail?: boolean }) {
     setChannelId(row.channelId);
     void queryClient.cancelQueries();
     setOpen(false);
+    // The focused row unmounts with the popover — hand focus back to the trigger so a keyboard
+    // user switching sources keeps their place instead of restarting from the document top.
+    triggerRef.current?.focus();
     navigate(row.network === 'ig' ? '/instagram' : '/');
   };
 
@@ -577,6 +595,7 @@ function SourceSwitcher({ rail = false }: { rail?: boolean }) {
   return (
     <div ref={cardRef} className={cn('relative', rail ? 'px-2' : 'px-3')}>
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => openable && setOpen((o) => !o)}
         title={rail ? handle : undefined}
@@ -620,10 +639,11 @@ function SourceSwitcher({ rail = false }: { rail?: boolean }) {
           {showSearch && (
             <input
               autoFocus
+              aria-label="Поиск источника"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Поиск источника…"
-              className="mb-1 w-full rounded bg-transparent px-2 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground"
+              className="mb-1 w-full rounded bg-transparent px-2 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
             />
           )}
           <div className="max-h-[60vh] overflow-y-auto">
@@ -642,6 +662,7 @@ function SourceSwitcher({ rail = false }: { rail?: boolean }) {
                       <button
                         key={`${net}:${row.channelId}`}
                         type="button"
+                        aria-current={active ? 'true' : undefined}
                         onClick={() => pick(row)}
                         className={cn(
                           'flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors',
@@ -867,11 +888,13 @@ function AccountMenuContent({
 function AccountMenu({ email, role, avatar }: { email?: string; role?: string; avatar?: string | null }) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-  useDismiss(open, setOpen, menuRef);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  useDismiss(open, setOpen, menuRef, triggerRef);
 
   return (
     <div ref={menuRef} className="relative">
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-label="Аккаунт"
@@ -911,11 +934,13 @@ function SidebarUserRow({
   const [open, setOpen] = useState(false);
   const plan = usePlan();
   const rowRef = useRef<HTMLDivElement>(null);
-  useDismiss(open, setOpen, rowRef);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  useDismiss(open, setOpen, rowRef, triggerRef);
 
   return (
     <div ref={rowRef} className={cn('relative border-t border-border py-2', rail ? 'px-2' : 'px-3')}>
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-label="Аккаунт"

@@ -117,6 +117,8 @@ export function TopPosts() {
                 <button
                   key={c.key}
                   type="button"
+                  aria-pressed={active}
+                  aria-label={`Сортировка: ${c.label}${active ? (sortDir === 'desc' ? ', по убыванию' : ', по возрастанию') : ''}`}
                   onClick={() => toggleSort(c.key)}
                   className={cn(
                     'flex shrink-0 items-center justify-end gap-1 tabular-nums transition-colors',
@@ -160,6 +162,7 @@ export function TopPosts() {
                     key={c.key}
                     className={cn('shrink-0 text-right text-sm tabular-nums', c.width, COLUMN_TONE[c.key], c.key === sortKey && 'font-medium')}
                   >
+                    <span className="sr-only">{c.label}: </span>
                     {c.render(post)}
                   </span>
                 ))}

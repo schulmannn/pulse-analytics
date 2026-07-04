@@ -83,6 +83,7 @@ function UserRowCard({ user, availableRoles, availableStatuses, isMe }: UserRowC
             value={user.role ?? ''}
             onChange={handleRoleChange}
             disabled={isDisabled}
+            aria-label={`Роль ${user.email || `#${user.id}`}`}
             className="rounded border border-border bg-background px-2 py-1.5 text-xs font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-60"
           >
             <option value="" disabled>Роль</option>
@@ -94,6 +95,7 @@ function UserRowCard({ user, availableRoles, availableStatuses, isMe }: UserRowC
             value={user.status ?? ''}
             onChange={handleStatusChange}
             disabled={isDisabled}
+            aria-label={`Статус ${user.email || `#${user.id}`}`}
             className="rounded border border-border bg-background px-2 py-1.5 text-xs font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-60"
           >
             <option value="" disabled>Статус</option>

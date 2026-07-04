@@ -74,6 +74,7 @@ export function Bugs() {
                   value={kindInput}
                   onChange={(e) => setKindInput(e.target.value)}
                   disabled={createBugMutation.isPending}
+                  aria-label="Тип обращения"
                   className="rounded border border-border bg-background px-2 py-1.5 text-xs font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
                 >
                   {Object.entries(KIND_LABELS).map(([k, label]) => (
@@ -84,6 +85,7 @@ export function Bugs() {
                   value={severityInput}
                   onChange={(e) => setSeverityInput(e.target.value)}
                   disabled={createBugMutation.isPending}
+                  aria-label="Важность"
                   className="rounded border border-border bg-background px-2 py-1.5 text-xs font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
                 >
                   {Object.entries(SEVERITY_LABELS).map(([s, label]) => (
@@ -168,6 +170,7 @@ function BugRowCard({ bug, availableStatuses, onDelete }: BugRowCardProps) {
           </div>
           <button
             onClick={() => onDelete(bug.id)}
+            aria-label="Удалить тикет"
             className="shrink-0 self-end rounded border border-transparent p-1 text-xs text-muted-foreground transition-colors hover:border-border hover:text-destructive sm:self-auto"
             title="Удалить"
           >
@@ -204,6 +207,7 @@ function BugRowCard({ bug, availableStatuses, onDelete }: BugRowCardProps) {
               value={bug.status ?? 'open'}
               onChange={handleStatusChange}
               disabled={updateStatusMutation.isPending}
+              aria-label={`Статус тикета #${bug.id}`}
               className="rounded border border-border bg-background px-2 py-1 text-xs font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
             >
               {availableStatuses.map((st) => (

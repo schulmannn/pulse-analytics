@@ -670,6 +670,7 @@ export function MetricPage() {
           <button
             key={chip.days}
             type="button"
+            aria-pressed={!range && days === chip.days}
             onClick={() => setDays(chip.days)}
             className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors ${
               !range && days === chip.days

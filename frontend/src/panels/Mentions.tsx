@@ -93,11 +93,12 @@ export function Mentions() {
         >
           {refreshing ? 'Обновление…' : 'Обновить'}
         </button>
+        <span role="status" className="sr-only">{refreshing ? 'Обновление…' : liveOk ? 'Данные обновлены' : ''}</span>
       </div>
 
       {/* Живой поиск не удался — архив остаётся виден */}
       {liveError && (
-        <div className="rounded border border-destructive/40 bg-destructive/5 px-4 py-2.5 text-sm text-muted-foreground">
+        <div role="alert" className="rounded border border-destructive/40 bg-destructive/5 px-4 py-2.5 text-sm text-muted-foreground">
           Не удалось обновить: {liveError} Показаны сохранённые данные.
         </div>
       )}

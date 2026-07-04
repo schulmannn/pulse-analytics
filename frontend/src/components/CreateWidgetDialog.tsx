@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useFocusTrap } from '@/lib/useFocusTrap';
 import { WidgetConfigControls } from '@/components/ConfigEditDialog';
 import { WidgetBody } from '@/components/ConfigWidget';
 import { WidgetErrorBoundary } from '@/components/WidgetErrorBoundary';
@@ -28,6 +29,12 @@ export function CreateWidgetDialog({
   const [draft, setDraft] = useState<WidgetConfig>(
     () => defaultWidget(metricId) ?? { id: 'draft', metricId, viz: 'kpi' },
   );
+
+  // Modal focus contract (declared before the `!metric` early return — hooks rule). The catalog that
+  // opened this dialog unmounts in the same commit, so without the trap focus lands on <body> behind
+  // an aria-modal overlay and Tab walks the obscured page.
+  const panelRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(panelRef);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -60,7 +67,9 @@ export function CreateWidgetDialog({
       onClick={onClose}
     >
       <div
-        className="my-auto grid w-full max-w-3xl grid-cols-1 gap-5 rounded-xl border border-border bg-card p-5 sm:grid-cols-[minmax(0,1fr)_300px]"
+        ref={panelRef}
+        tabIndex={-1}
+        className="my-auto grid w-full max-w-3xl grid-cols-1 gap-5 rounded-xl border border-border bg-card p-5 focus:outline-none sm:grid-cols-[minmax(0,1fr)_300px]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Left — live preview of the card body. */}

@@ -114,13 +114,15 @@ export function LoginPage() {
             {forgotMutation.isPending ? 'Отправка…' : 'Отправить ссылку'}
           </button>
           {forgotMutation.isError && (
-            <p className="mt-3 text-sm text-destructive">{errorMessage(forgotMutation.error)}</p>
+            <p role="alert" className="mt-3 text-sm text-destructive">{errorMessage(forgotMutation.error)}</p>
           )}
-          {forgotMutation.isSuccess && (
-            <p className="mt-3 text-sm text-ink2">
-              {forgotMutation.data.message || 'Если такой аккаунт есть — ссылка отправлена.'}
-            </p>
-          )}
+          <div aria-live="polite">
+            {forgotMutation.isSuccess && (
+              <p className="mt-3 text-sm text-ink2">
+                {forgotMutation.data.message || 'Если такой аккаунт есть — ссылка отправлена.'}
+              </p>
+            )}
+          </div>
           <div className="mt-5 border-t border-border pt-5 text-sm text-ink2">
             <button
               type="button"
@@ -172,7 +174,7 @@ export function LoginPage() {
           {loginMutation.isPending ? 'Вход…' : 'Войти'}
         </button>
         {loginMutation.isError && (
-          <p className="mt-3 text-sm text-destructive">{errorMessage(loginMutation.error)}</p>
+          <p role="alert" className="mt-3 text-sm text-destructive">{errorMessage(loginMutation.error)}</p>
         )}
         <GoogleSignInButton text="continue_with" />
         <div className="mt-3 flex justify-end">
@@ -247,13 +249,15 @@ export function RegisterPage() {
           {registerMutation.isPending ? 'Регистрация…' : 'Создать аккаунт'}
         </button>
         {registerMutation.isError && (
-          <p className="mt-3 text-sm text-destructive">{errorMessage(registerMutation.error)}</p>
+          <p role="alert" className="mt-3 text-sm text-destructive">{errorMessage(registerMutation.error)}</p>
         )}
-        {registerMutation.isSuccess && (
-          <p className="mt-3 text-sm text-ink2">
-            {registerMutation.data.message || 'Проверьте почту для подтверждения аккаунта.'}
-          </p>
-        )}
+        <div aria-live="polite">
+          {registerMutation.isSuccess && (
+            <p className="mt-3 text-sm text-ink2">
+              {registerMutation.data.message || 'Проверьте почту для подтверждения аккаунта.'}
+            </p>
+          )}
+        </div>
         <GoogleSignInButton text="signup_with" />
         <div className="mt-6 text-sm text-ink2">
           Уже есть аккаунт?{' '}
@@ -289,9 +293,11 @@ export function VerifyPage() {
           </button>
         )}
         {verifyMutation.isError && (
-          <p className="mt-3 text-sm text-destructive">{errorMessage(verifyMutation.error)}</p>
+          <p role="alert" className="mt-3 text-sm text-destructive">{errorMessage(verifyMutation.error)}</p>
         )}
-        {verifyMutation.isSuccess && <p className="mt-3 text-sm text-ink2">Email подтверждён.</p>}
+        <div aria-live="polite">
+          {verifyMutation.isSuccess && <p className="mt-3 text-sm text-ink2">Email подтверждён.</p>}
+        </div>
         <div className="mt-5 border-t border-border pt-5 text-sm">
           <Link to="/login" className={LINK_CLASS}>
             Перейти ко входу
@@ -340,7 +346,7 @@ export function ResetPage() {
           {resetMutation.isPending ? 'Сохранение…' : 'Сохранить пароль'}
         </button>
         {resetMutation.isError && (
-          <p className="mt-3 text-sm text-destructive">{errorMessage(resetMutation.error)}</p>
+          <p role="alert" className="mt-3 text-sm text-destructive">{errorMessage(resetMutation.error)}</p>
         )}
         <div className="mt-5 border-t border-border pt-5 text-sm">
           <Link to="/login" className={LINK_CLASS}>

@@ -340,7 +340,18 @@ export function LineChart({
       onMouseLeave={() => setHover(null)}
       onPointerLeave={() => setHover(null)}
     >
-      <svg className="block w-full" height={h} viewBox={`0 0 ${W} ${h}`} preserveAspectRatio="none">
+      <svg
+        className="block w-full"
+        height={h}
+        viewBox={`0 0 ${W} ${h}`}
+        preserveAspectRatio="none"
+        // A named graphic for AT (PieChart idiom): role="img" stops screen readers from announcing
+        // the raw axis <text> ticks as loose numbers, and the label carries the data a mouse user
+        // reads from hover (per-point keyboard access is a separate roadmap item). Math.max over
+        // the SERIES — the in-scope `max` is the padded nice-scale top, not the data max.
+        role="img"
+        aria-label={`График: ${values.length} точек, макс ${fmt.short(Math.max(...values))}, последнее ${fmt.short(values[values.length - 1])}`}
+      >
         <defs>
           <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="hsl(var(--brand-iris))" stopOpacity="0.25" />

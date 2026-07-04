@@ -163,6 +163,7 @@ export function ChartExpandOverlay({ title, children, renderExpanded, renderExpa
                   <button
                     key={window.days}
                     type="button"
+                    aria-pressed={days === window.days}
                     onClick={() => setDays(window.days)}
                     className={`whitespace-nowrap border-b-2 px-3 py-2 text-xs font-medium transition-colors ${
                       days === window.days

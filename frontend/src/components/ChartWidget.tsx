@@ -14,6 +14,7 @@ import { DivergingBars } from '@/components/DivergingBars';
 import { ChartExpandOverlay, ExpandedChartHeightContext, WidgetTargetContext, type ChartExpandConfig } from '@/components/ExpandableChart';
 import { WidgetErrorBoundary, ThrowInRender } from '@/components/WidgetErrorBoundary';
 import { DEFAULT_WIDGET_DAYS, WidgetPeriodProvider, widgetPeriodValue, useChannelRecency, resolveEffectivePeriod } from '@/lib/period';
+import { useFocusTrap } from '@/lib/useFocusTrap';
 import { useChannels } from '@/api/queries';
 import type { PeriodDays, WidgetPeriodValue } from '@/lib/period';
 
@@ -859,6 +860,7 @@ export function WidgetGroup({ id, className, children }: WidgetGroupProps) {
         createPortal(
           <button
             type="button"
+            data-reorder-done
             onClick={() => setReorderMode(false)}
             className="btn-pill fixed bottom-6 left-1/2 z-40 -translate-x-1/2 bg-primary px-6 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
           >
@@ -873,6 +875,7 @@ export function WidgetGroup({ id, className, children }: WidgetGroupProps) {
             <button
               key={h.id}
               type="button"
+              data-widget-chip={h.id}
               onClick={() => setPrefs(h.id, { ...getPrefs(h.id), hidden: undefined })}
               className="rounded-full border border-border px-2 py-0.5 font-medium transition-colors hover:text-foreground"
             >
@@ -988,6 +991,9 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
     );
   }, [setSearchParams]);
   const menuRef = useRef<HTMLDivElement>(null);
+  // The ⋯ trigger — menu items refocus it when the menu closes under keyboard focus (Escape / item
+  // click unmounts the focused item, which would otherwise drop focus to <body>).
+  const menuBtnRef = useRef<HTMLButtonElement>(null);
   const sectionRef = useRef<HTMLElement>(null);
   // The chart-body region (flex-1 inside the fixed-height card). We feed its measured pixel
   // height to the charts inside so they fill the tile (steep) — see the effect + fillHeight below.
@@ -1028,7 +1034,11 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMenuOpen(false);
+      if (e.key === 'Escape') {
+        setMenuOpen(false);
+        // APG menu button: Escape returns focus to the trigger (the focused item is unmounting).
+        menuBtnRef.current?.focus();
+      }
     };
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
@@ -1209,31 +1219,21 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
           // steep-like "lit surface", less boxed); light mode keeps the full hairline (white cards on
           // paper need it for definition). Edit mode keeps a visible border.
           homeEditing && homeKey ? 'border-ink3/25' : 'border-border dark:border-white/[0.06]'
-        } ${reorder ? 'widget-jiggle' : 'widget-enter cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40'} ${isDragging ? 'shadow-lg' : ''}`}
+        } ${reorder ? 'widget-jiggle' : 'widget-enter cursor-pointer'} ${isDragging ? 'shadow-lg' : ''}`}
         style={innerStyle}
         // Whole-card click opens the detail overlay (steep — the whole card is the target, not just
         // the small ↗ button). Guarded so header controls, the drill hero, the chart (its own
         // hover/drill) and any open dialog keep their behaviour, and a reorder drag never triggers it.
-        // A labelled role=button so keyboard / assistive-tech users activate it too (Enter/Space).
-        role={reorder ? undefined : 'button'}
-        aria-label={reorder ? undefined : `Развернуть виджет «${prefs.title || title}»`}
-        tabIndex={reorder ? undefined : 0}
+        // Mouse convenience ONLY: the card carries no button role/tabIndex — real controls (↗ ⋯ ×)
+        // nested inside a role="button" are invalid (axe nested-interactive) and make screen readers
+        // announce the whole card as one opaque button. The semantic keyboard/AT path to the same
+        // action is the header's labelled «Развернуть виджет …» button.
         onClick={
           reorder
             ? undefined
             : (e) => {
                 if ((e.target as HTMLElement).closest('button, a, input, select, label, svg, [role="dialog"]')) return;
                 openExpand();
-              }
-        }
-        onKeyDown={
-          reorder
-            ? undefined
-            : (e) => {
-                if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
-                  e.preventDefault();
-                  openExpand();
-                }
               }
         }
       >
@@ -1247,9 +1247,15 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
             type="button"
             aria-label={`Убрать виджет «${prefs.title || title}» с главной`}
             title="Убрать с главной"
-            onClick={() => homeKey && unpinFromHome(homeKey)}
+            onClick={() => {
+              if (!homeKey) return;
+              unpinFromHome(homeKey);
+              // The whole card unmounts with this button — park focus on the sticky «Готово»
+              // edit toggle so a keyboard user removing several widgets never re-Tabs from the top.
+              document.querySelector<HTMLElement>('.edit-toggle')?.focus();
+            }}
             className={`${iconBtn} hover:text-destructive ${
-              reorder ? 'pointer-events-none opacity-0' : 'home-remove-enter'
+              reorder ? 'pointer-events-none invisible' : 'home-remove-enter'
             }`}
           >
             <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
@@ -1264,18 +1270,29 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
           onClick={() => openExpand()}
           className={`${iconBtn} hover:text-foreground print:hidden ${
             showHomeRemove ? 'hidden' : ''
-          } ${reorder ? 'pointer-events-none opacity-0' : ''}`}
+          } ${reorder ? 'pointer-events-none invisible' : ''}`}
         >
           <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
             <path d="M7 17 17 7M9 7h8v8" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </button>
-        <div className={`relative shrink-0 ${reorder ? 'pointer-events-none opacity-0' : ''}`} ref={menuRef}>
+        <div className={`relative shrink-0 ${reorder ? 'pointer-events-none invisible' : ''}`} ref={menuRef}>
           <button
+            ref={menuBtnRef}
             type="button"
             aria-label={`Меню виджета «${prefs.title || title}»`}
             aria-expanded={menuOpen}
+            aria-haspopup="menu"
             onClick={() => setMenuOpen((v) => !v)}
+            onKeyDown={(e) => {
+              // APG menu button: ArrowDown opens the menu and moves focus to its first item.
+              if (e.key !== 'ArrowDown') return;
+              e.preventDefault();
+              if (!menuOpen) setMenuOpen(true);
+              requestAnimationFrame(() =>
+                menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)')?.focus(),
+              );
+            }}
             className={`${iconBtn} hover:text-foreground`}
           >
             <svg viewBox="0 0 16 16" fill="currentColor" className="h-4 w-4" aria-hidden="true">
@@ -1286,15 +1303,41 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
           </button>
           {menuOpen && (
             <div
+              role="menu"
+              aria-label={`Меню виджета «${prefs.title || title}»`}
               className="absolute right-0 top-full z-20 mt-1 w-48 rounded-lg border border-border bg-card p-1.5"
               // This dropdown renders INSIDE the now-clickable card; stop clicks on its padding /
               // dividers (non-button dead space) from bubbling to the card and opening the detail
               // overlay while the menu is open.
               onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                // Arrow/Home/End roving focus over the enabled items (role=menu implies it).
+                if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Home' && e.key !== 'End') return;
+                e.preventDefault();
+                const items = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)'));
+                if (!items.length) return;
+                const i = items.indexOf(document.activeElement as HTMLElement);
+                const next =
+                  e.key === 'Home' || (e.key === 'ArrowDown' && i < 0)
+                    ? 0
+                    : e.key === 'End'
+                      ? items.length - 1
+                      : e.key === 'ArrowDown'
+                        ? (i + 1) % items.length
+                        : i < 0
+                          ? items.length - 1
+                          : (i - 1 + items.length) % items.length;
+                items[next]?.focus();
+              }}
             >
               <button
                 type="button"
+                role="menuitem"
                 onClick={() => {
+                  // Refocus the trigger BEFORE the state change so the detail overlay's focus trap
+                  // captures it as opener (and restores to it on close) — the menu item itself
+                  // unmounts with the menu.
+                  menuBtnRef.current?.focus();
                   setMenuOpen(false);
                   openExpand();
                 }}
@@ -1302,14 +1345,21 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
               >
                 <MenuIcon kind="expand" /> Развернуть
               </button>
-              <div aria-hidden="true" className="mx-1 my-1 h-px bg-border" />
+              <div role="separator" className="mx-1 my-1 h-px bg-border" />
               {group && (
                 <>
                   <button
                     type="button"
+                    role="menuitem"
                     disabled={seqIndex <= 0}
                     onClick={() => {
                       group.move(widgetId, -1);
+                      // Reaching the first slot flips this item to disabled, which blurs it to
+                      // <body> and kills the menu's roving arrows — re-park inside the menu.
+                      requestAnimationFrame(() => {
+                        if (document.activeElement === document.body)
+                          menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)')?.focus();
+                      });
                     }}
                     className={menuItem}
                   >
@@ -1317,9 +1367,14 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
                   </button>
                   <button
                     type="button"
+                    role="menuitem"
                     disabled={seqIndex < 0 || seqIndex >= group.sequence.length - 1}
                     onClick={() => {
                       group.move(widgetId, 1);
+                      requestAnimationFrame(() => {
+                        if (document.activeElement === document.body)
+                          menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)')?.focus();
+                      });
                     }}
                     className={menuItem}
                   >
@@ -1327,15 +1382,21 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
                   </button>
                   <button
                     type="button"
+                    role="menuitem"
                     onClick={() => {
                       setMenuOpen(false);
                       group.beginReorder();
+                      // Reorder mode hides the card controls (visibility:hidden — unfocusable), so
+                      // park focus on the one actionable control: the portaled «Готово» pill.
+                      requestAnimationFrame(() =>
+                        document.querySelector<HTMLElement>('[data-reorder-done]')?.focus(),
+                      );
                     }}
                     className={menuItem}
                   >
                     <MenuIcon kind="drag" /> Переставить
                   </button>
-                  <div aria-hidden="true" className="mx-1 my-1 h-px bg-border" />
+                  <div role="separator" className="mx-1 my-1 h-px bg-border" />
                 </>
               )}
               {/* «На главную» / «Убрать с главной» — only on cards registered as pinnable
@@ -1343,10 +1404,18 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
               {homeKey && (
                 <button
                   type="button"
+                  role="menuitem"
                   onClick={() => {
+                    menuBtnRef.current?.focus();
                     setMenuOpen(false);
                     if (pinned) unpinFromHome(homeKey);
                     else pinToHome(homeKey);
+                    // Unpinning ON /home unmounts this whole card with the just-focused trigger —
+                    // park on the sticky edit toggle then (elsewhere the card survives, keep it).
+                    requestAnimationFrame(() => {
+                      if (!menuBtnRef.current?.isConnected)
+                        document.querySelector<HTMLElement>('.edit-toggle')?.focus();
+                    });
                   }}
                   className={menuItem}
                 >
@@ -1355,7 +1424,11 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
               )}
               <button
                 type="button"
+                role="menuitem"
                 onClick={() => {
+                  // Trigger first: the edit dialog's focus trap then records it as opener and
+                  // restores focus to this card's ⋯ button when the dialog closes.
+                  menuBtnRef.current?.focus();
                   setMenuOpen(false);
                   // Config-driven cards open their own editor (writes to the WidgetConfig).
                   if (configEditor) configEditor.open();
@@ -1368,9 +1441,22 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
               {group && (
                 <button
                   type="button"
+                  role="menuitem"
                   onClick={() => {
                     setMenuOpen(false);
                     update({ ...prefs, hidden: true });
+                    // The card goes display:none in this commit (focus would blur to <body>) —
+                    // park on this widget's restore chip in the «Скрытые виджеты» bar, so Enter
+                    // again un-hides it. dataset match instead of a selector: ids are free-form.
+                    requestAnimationFrame(() => {
+                      const chips = document.querySelectorAll<HTMLElement>('[data-widget-chip]');
+                      for (const chip of chips) {
+                        if (chip.dataset.widgetChip === widgetId) {
+                          chip.focus();
+                          return;
+                        }
+                      }
+                    });
                   }}
                   className={menuItem}
                 >
@@ -1777,6 +1863,15 @@ function SourceSelect({ prefs, onChange }: { prefs: WidgetPrefs; onChange: (next
 }
 
 function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, showSeries, showSource, showSize, defaultSize = 'half', minSize = 'third', onChange, onClose }: EditWidgetDialogProps) {
+  // Modal focus contract. The trap's effect must run BEFORE the title-focus effect (declaration
+  // order) so it snapshots the real opener; an `autoFocus` attribute would fire during commit —
+  // before the trap — corrupting the opener snapshot and then losing focus to panel.focus().
+  const panelRef = useRef<HTMLDivElement>(null);
+  const titleRef = useRef<HTMLInputElement>(null);
+  useFocusTrap(panelRef);
+  useEffect(() => {
+    titleRef.current?.focus();
+  }, []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -1802,7 +1897,9 @@ function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, showSerie
       onClick={onClose}
     >
       <div
-        className={`max-h-[85vh] w-full ${variants && variants.length > 1 ? 'max-w-lg' : 'max-w-sm'} overflow-y-auto rounded-xl border border-border bg-card p-5`}
+        ref={panelRef}
+        tabIndex={-1}
+        className={`max-h-[85vh] w-full ${variants && variants.length > 1 ? 'max-w-lg' : 'max-w-sm'} overflow-y-auto rounded-xl border border-border bg-card p-5 focus:outline-none`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="text-sm font-medium text-foreground">Настройка виджета</div>
@@ -1858,7 +1955,7 @@ function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, showSerie
         <label className="mt-4 block">
           <span className="text-2xs tracking-wide text-muted-foreground">Заголовок</span>
           <input
-            autoFocus
+            ref={titleRef}
             value={prefs.title ?? ''}
             placeholder={defaultTitle}
             onChange={(e) => onChange({ ...prefs, title: e.target.value || undefined })}

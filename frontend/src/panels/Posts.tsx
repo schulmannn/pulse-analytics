@@ -107,7 +107,11 @@ function PostsLeaderboard({ allPosts }: { allPosts: NormalizedPost[] }) {
               {SORT_COLUMNS.map((c) => {
                 const active = c.key === sortKey;
                 return (
-                  <th key={c.key} className="px-3 py-3 text-right last:pr-0">
+                  <th
+                    key={c.key}
+                    aria-sort={active ? (sortDir === 'desc' ? 'descending' : 'ascending') : undefined}
+                    className="px-3 py-3 text-right last:pr-0"
+                  >
                     <button
                       type="button"
                       onClick={() => toggleSort(c.key)}
@@ -148,15 +152,37 @@ function PostsLeaderboard({ allPosts }: { allPosts: NormalizedPost[] }) {
                     </div>
                   </td>
                   <td className="px-3 py-3">
-                    <div className="max-w-sm space-y-1 md:max-w-md lg:max-w-lg">
-                      <div className="line-clamp-1 font-medium text-foreground">
-                        {post.caption ? <RichText text={post.caption} /> : <span className="italic text-muted-foreground">Без подписи</span>}
+                    {isClickable ? (
+                      // A real, focusable control in the row — the tr onClick alone is mouse-only,
+                      // leaving keyboard users no desktop path to the post details. Plain-text
+                      // caption (like the mobile row): RichText renders <a> links, which must not
+                      // nest inside a button. Same destination as the row click, so bubbling is a
+                      // harmless duplicate.
+                      <button
+                        type="button"
+                        onClick={() => setOpenId(post.id)}
+                        className="block w-full max-w-sm space-y-1 text-left md:max-w-md lg:max-w-lg"
+                      >
+                        {/* no `block` here: it would override line-clamp's display:-webkit-box and kill the clamp */}
+                        <span className={cn('line-clamp-1 font-medium', post.caption ? 'text-foreground' : 'italic text-muted-foreground')}>
+                          {post.caption ? markdownToPlainText(post.caption) : 'Без подписи'}
+                        </span>
+                        <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <span>{fmt.date(post.date)}</span>
+                          {post.albumSize > 1 && <span>· {post.albumSize} фото</span>}
+                        </span>
+                      </button>
+                    ) : (
+                      <div className="max-w-sm space-y-1 md:max-w-md lg:max-w-lg">
+                        <div className="line-clamp-1 font-medium text-foreground">
+                          {post.caption ? <RichText text={post.caption} /> : <span className="italic text-muted-foreground">Без подписи</span>}
+                        </div>
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <span>{fmt.date(post.date)}</span>
+                          {post.albumSize > 1 && <span>· {post.albumSize} фото</span>}
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <span>{fmt.date(post.date)}</span>
-                        {post.albumSize > 1 && <span>· {post.albumSize} фото</span>}
-                      </div>
-                    </div>
+                    )}
                   </td>
                   <td className="px-3 py-3 text-right font-medium tabular-nums last:pr-0">{fmt.num(post.reach)}</td>
                   <td className="px-3 py-3 text-right font-medium tabular-nums last:pr-0 text-muted-foreground">{fmt.num(post.likes)}</td>

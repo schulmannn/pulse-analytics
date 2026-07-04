@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useFocusTrap } from '@/lib/useFocusTrap';
 import { useChannels, useLogout, useMe } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { setCommandPaletteOpen, toggleCommandPalette, useCommandPaletteOpen } from '@/lib/command-palette';
@@ -111,25 +112,35 @@ function saveRecent(id: string) {
 
 export function CommandPalette() {
   const { open, setOpen } = useCommandPalette();
+  // The dialog is a separate component mounted per open: an always-mounted component's focus-trap
+  // effect would arm exactly once at app boot with a null panel (CommandPalette lives permanently
+  // in App). Mount-per-open also resets query/selection naturally and lets the trap restore the
+  // ⌘K-time focus position on close.
+  if (!open) return null;
+  return <PaletteDialog close={() => setOpen(false)} />;
+}
+
+function PaletteDialog({ close }: { close: () => void }) {
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const [recents, setRecents] = useState<string[]>([]);
+  // History is read at mount — i.e. per open (another tab may have added entries since last time).
+  const [recents] = useState<string[]>(loadRecents);
   const navigate = useNavigate();
   const me = useMe();
   const channelsQuery = useChannels();
   const logout = useLogout();
   const { setChannelId } = useSelectedChannel();
 
-  // Re-read the history each time the palette opens (another tab may have added entries).
+  // Modal focus contract: the trap arms FIRST (snapshotting the real ⌘K-time opener to restore on
+  // close), then the search field takes initial focus. An `autoFocus` attribute would fire during
+  // commit — before the trap's effect — corrupting the opener snapshot and then losing focus to
+  // the trap's panel.focus().
+  const panelRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  useFocusTrap(panelRef);
   useEffect(() => {
-    if (open) setRecents(loadRecents());
-  }, [open]);
-
-  const close = () => {
-    setOpen(false);
-    setQuery('');
-    setSelectedIndex(0);
-  };
+    inputRef.current?.focus();
+  }, []);
 
   const iconFor = (name: IconName) => <Icon name={name} className="h-4 w-4 shrink-0" />;
 
@@ -206,9 +217,11 @@ export function CommandPalette() {
       </svg>
     ),
     run: () => {
-      logout.mutate(undefined, {
-        onSettled: () => navigate('/login', { replace: true }),
-      });
+      // Navigate synchronously: PaletteDialog unmounts right after run(), and React Query drops
+      // mutate-level callbacks (like an onSettled navigate) when their observer unmounts before
+      // the response. Local session state is cleared by useLogout's own config either way.
+      logout.mutate();
+      navigate('/login', { replace: true });
     },
   };
 
@@ -244,9 +257,7 @@ export function CommandPalette() {
 
   useEffect(() => {
     setSelectedIndex(0);
-  }, [flatCommands.length, normalizedQuery, open]);
-
-  if (!open) return null;
+  }, [flatCommands.length, normalizedQuery]);
 
   const execute = (command: PaletteCommand | undefined) => {
     if (!command) return;
@@ -261,10 +272,12 @@ export function CommandPalette() {
       onClick={close}
     >
       <div
+        ref={panelRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label="Поиск"
-        className="w-full max-w-xl overflow-hidden rounded-xl border border-border bg-card"
+        className="w-full max-w-xl overflow-hidden rounded-xl border border-border bg-card focus:outline-none"
         onClick={(event) => event.stopPropagation()}
       >
         {/* Input-first, no title bar (Claude / steep «Jump to»): icon + field + esc chip. */}
@@ -274,22 +287,31 @@ export function CommandPalette() {
             <path d="m10.5 10.5 3 3" strokeLinecap="round" />
           </svg>
           <input
-            autoFocus
+            ref={inputRef}
+            // ARIA 1.2 combobox: ↑/↓ move a virtual selection while DOM focus stays here, so the
+            // active option must be exposed via aria-activedescendant — without it a screen reader
+            // hears nothing on the advertised «↑↓ — навигация» and Enter runs an unnamed command.
+            role="combobox"
+            aria-label="Поиск"
+            aria-expanded={flatCommands.length > 0}
+            aria-autocomplete="list"
+            aria-controls={flatCommands.length > 0 ? 'cp-list' : undefined}
+            aria-activedescendant={flatCommands.length > 0 ? `cp-opt-${selectedIndex}` : undefined}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === 'ArrowDown') {
+              // Scroll only on KEYBOARD moves (the list scrolls at max-h-[46vh] while ↑/↓ drive a
+              // virtual selection). Hover also moves the selection — scrolling there would jump
+              // the list under a stationary cursor and creep it via re-fired mouseenter.
+              if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
                 event.preventDefault();
-                setSelectedIndex((index) => (
-                  flatCommands.length > 0 ? (index + 1) % flatCommands.length : 0
-                ));
-              } else if (event.key === 'ArrowUp') {
-                event.preventDefault();
-                setSelectedIndex((index) => (
-                  flatCommands.length > 0
-                    ? (index - 1 + flatCommands.length) % flatCommands.length
-                    : 0
-                ));
+                if (flatCommands.length === 0) return;
+                const next =
+                  event.key === 'ArrowDown'
+                    ? (selectedIndex + 1) % flatCommands.length
+                    : (selectedIndex - 1 + flatCommands.length) % flatCommands.length;
+                setSelectedIndex(next);
+                document.getElementById(`cp-opt-${next}`)?.scrollIntoView({ block: 'nearest' });
               } else if (event.key === 'Enter') {
                 event.preventDefault();
                 execute(flatCommands[selectedIndex]);
@@ -303,40 +325,48 @@ export function CommandPalette() {
 
         <div className="max-h-[46vh] overflow-y-auto border-t border-border p-2">
           {flatCommands.length > 0 ? (
-            sections.map((section, s) =>
-              section.items.length === 0 ? null : (
-                <div key={section.title ?? 'hits'}>
-                  {section.title && (
-                    <div className="px-3 pb-1 pt-3 text-2xs uppercase tracking-wider text-muted-foreground first:pt-1.5">
-                      {section.title}
-                    </div>
-                  )}
-                  {section.items.map((command, i) => {
-                    const index = offsets[s] + i;
-                    const active = index === selectedIndex;
-                    return (
-                      <button
-                        key={`${section.title ?? 'hits'}:${command.id}`}
-                        type="button"
-                        onMouseEnter={() => setSelectedIndex(index)}
-                        onClick={() => execute(command)}
-                        className={`flex w-full items-center gap-2.5 rounded px-3 py-2 text-left text-sm transition-colors ${
-                          active ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                        }`}
-                      >
-                        {command.icon ?? <span className="h-4 w-4 shrink-0" aria-hidden="true" />}
-                        <span className="min-w-0 flex-1 truncate">{command.label}</span>
-                        {active && (
-                          <kbd className="shrink-0 rounded border border-border px-1.5 py-0.5 font-mono text-2xs text-muted-foreground">
-                            ⏎
-                          </kbd>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              ),
-            )
+            // The listbox half of the combobox. Sections are role=group children (a listbox may
+            // contain only options/groups), their visual titles hidden from AT in favour of the
+            // groups' accessible names.
+            <div id="cp-list" role="listbox" aria-label="Команды">
+              {sections.map((section, s) =>
+                section.items.length === 0 ? null : (
+                  <div key={section.title ?? 'hits'} role="group" aria-label={section.title ?? 'Результаты'}>
+                    {section.title && (
+                      <div aria-hidden="true" className="px-3 pb-1 pt-3 text-2xs uppercase tracking-wider text-muted-foreground first:pt-1.5">
+                        {section.title}
+                      </div>
+                    )}
+                    {section.items.map((command, i) => {
+                      const index = offsets[s] + i;
+                      const active = index === selectedIndex;
+                      return (
+                        <button
+                          key={`${section.title ?? 'hits'}:${command.id}`}
+                          type="button"
+                          id={`cp-opt-${index}`}
+                          role="option"
+                          aria-selected={active}
+                          onMouseEnter={() => setSelectedIndex(index)}
+                          onClick={() => execute(command)}
+                          className={`flex w-full items-center gap-2.5 rounded px-3 py-2 text-left text-sm transition-colors ${
+                            active ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                          }`}
+                        >
+                          {command.icon ?? <span className="h-4 w-4 shrink-0" aria-hidden="true" />}
+                          <span className="min-w-0 flex-1 truncate">{command.label}</span>
+                          {active && (
+                            <kbd className="shrink-0 rounded border border-border px-1.5 py-0.5 font-mono text-2xs text-muted-foreground">
+                              ⏎
+                            </kbd>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ),
+              )}
+            </div>
           ) : (
             <div className="px-3 py-8 text-center text-sm text-muted-foreground">
               Ничего не нашлось

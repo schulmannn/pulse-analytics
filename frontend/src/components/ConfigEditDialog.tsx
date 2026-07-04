@@ -1,5 +1,6 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { useFocusTrap } from '@/lib/useFocusTrap';
 import { useChannels } from '@/api/queries';
 import { WidgetBody } from '@/components/ConfigWidget';
 import { ChannelScope } from '@/lib/channel-context';
@@ -72,6 +73,10 @@ export function ConfigEditDialog({
   onClose: () => void;
 }) {
   const spec = editorSpec(config);
+  // Modal focus contract (like PostDetailModal/DetailShell): move focus in, trap Tab, restore the
+  // opener on close — without it aria-modal hides content the keyboard is actually walking.
+  const panelRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(panelRef);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -112,7 +117,9 @@ export function ConfigEditDialog({
       onClick={onClose}
     >
       <div
-        className="my-auto grid w-full max-w-3xl grid-cols-1 gap-5 rounded-xl border border-border bg-card p-5 sm:grid-cols-[minmax(0,1fr)_300px]"
+        ref={panelRef}
+        tabIndex={-1}
+        className="my-auto grid w-full max-w-3xl grid-cols-1 gap-5 rounded-xl border border-border bg-card p-5 focus:outline-none sm:grid-cols-[minmax(0,1fr)_300px]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Left — live preview: the SAME body the card shows, over the config being edited, so every

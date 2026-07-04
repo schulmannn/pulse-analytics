@@ -232,8 +232,39 @@ function ReportDocumentBody({
   const deleteReport = useDeleteReport();
 
   const [channelOpen, setChannelOpen] = useState(false);
+  const channelRef = useRef<HTMLDivElement>(null);
+  const channelBtnRef = useRef<HTMLButtonElement>(null);
+  // Close the source dropdown on outside click / Escape (same dismiss wiring as InlineAdd).
+  // Escape refocuses the trigger — the focused row unmounts with the dropdown.
+  useEffect(() => {
+    if (!channelOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (channelRef.current && !channelRef.current.contains(e.target as Node)) setChannelOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setChannelOpen(false);
+        channelBtnRef.current?.focus();
+      }
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [channelOpen]);
+
   const [renaming, setRenaming] = useState(false);
   const cancelRename = useRef(false);
+  // After a rename commits/cancels the input unmounts — return focus to the reappearing
+  // pencil button (guarded so the initial mount, where renaming starts false, is unaffected).
+  const pencilRef = useRef<HTMLButtonElement>(null);
+  const wasRenaming = useRef(false);
+  useEffect(() => {
+    if (wasRenaming.current && !renaming) pencilRef.current?.focus();
+    wasRenaming.current = renaming;
+  }, [renaming]);
 
   // Schedule select — optimistic: local state mirrors report.schedule so the control never
   // snaps back mid-flight; the server echo reconciles it on success, an error reverts it
@@ -597,12 +628,13 @@ function ReportDocumentBody({
                 e.currentTarget.blur();
               }
             }}
-            className="mt-1 w-full border-b border-primary/40 bg-transparent text-3xl font-medium tracking-tight text-foreground focus:outline-none"
+            className="mt-1 w-full border-b border-primary/40 bg-transparent text-3xl font-medium tracking-tight text-foreground focus:border-primary focus:outline-none"
           />
         ) : (
           <h2 className="mt-1 flex items-baseline gap-2 text-3xl font-medium tracking-tight">
             <span className="min-w-0 break-words">{report.name}</span>
             <button
+              ref={pencilRef}
               type="button"
               onClick={() => setRenaming(true)}
               title="Переименовать отчёт"
@@ -644,8 +676,9 @@ function ReportDocumentBody({
             /* «Источник» отчёта — ПЕРСИСТЕНТНЫЙ (config.channelId), не глобальный свитчер:
                выбор закрепляет документ за каналом на всех устройствах; «Как в свитчере»
                возвращает старое поведение. Активный chip подсвечен, когда источник закреплён. */
-            <div className="relative">
+            <div ref={channelRef} className="relative">
               <button
+                ref={channelBtnRef}
                 type="button"
                 onClick={() => setChannelOpen((v) => !v)}
                 aria-expanded={channelOpen}
@@ -659,6 +692,7 @@ function ReportDocumentBody({
                   <button
                     type="button"
                     onClick={() => {
+                      channelBtnRef.current?.focus();
                       onPickSource(null);
                       commitConfig({ channelId: undefined });
                       setChannelOpen(false);
@@ -676,7 +710,9 @@ function ReportDocumentBody({
                       <button
                         key={channel.id}
                         type="button"
+                        aria-current={channel.id === channelId ? 'true' : undefined}
                         onClick={() => {
+                          channelBtnRef.current?.focus();
                           onPickSource(channel.id);
                           commitConfig({ channelId: channel.id });
                           setChannelOpen(false);
@@ -1003,7 +1039,7 @@ function TextBlock({ value, onChange }: { value: string; onChange: (v: string) =
         rows={1}
         placeholder="Текст…"
         aria-label="Текстовый блок"
-        className="block w-full resize-none border-0 bg-transparent p-0 text-base leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/60 print:hidden"
+        className="block w-full resize-none rounded border-0 bg-transparent p-0 text-base leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/60 focus:ring-1 focus:ring-primary print:hidden"
       />
       <p className="hidden whitespace-pre-wrap text-base leading-relaxed text-foreground print:block">{value}</p>
     </>

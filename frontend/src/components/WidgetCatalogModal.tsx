@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useFocusTrap } from '@/lib/useFocusTrap';
 import { CATEGORY_LABEL, CATEGORY_ORDER, metricsForSource, type MetricDef, type WidgetViz } from '@/lib/widgetMetrics';
 
 /**
@@ -24,6 +25,17 @@ export function WidgetCatalogModal({
 }) {
   const [source, setSource] = useState<'tg' | 'ig'>(AVAILABLE_SOURCES[0]);
   const [query, setQuery] = useState('');
+
+  // Modal focus contract. Order matters: useFocusTrap's effect must run FIRST so it snapshots the
+  // real opener before focus moves; the search field is then focused from the second effect (an
+  // `autoFocus` attribute would fire during commit — before the trap — corrupting the opener
+  // snapshot and getting overridden by the trap's panel.focus()).
+  const panelRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  useFocusTrap(panelRef);
+  useEffect(() => {
+    searchRef.current?.focus();
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -70,7 +82,9 @@ export function WidgetCatalogModal({
       onClick={onClose}
     >
       <div
-        className="my-auto w-full max-w-2xl rounded-xl border border-border bg-card p-5"
+        ref={panelRef}
+        tabIndex={-1}
+        className="my-auto w-full max-w-2xl rounded-xl border border-border bg-card p-5 focus:outline-none"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between gap-3">
@@ -107,7 +121,8 @@ export function WidgetCatalogModal({
             </div>
           )}
           <input
-            autoFocus
+            ref={searchRef}
+            aria-label="Поиск метрики"
             value={query}
             placeholder="Поиск метрики…"
             onChange={(e) => setQuery(e.target.value)}

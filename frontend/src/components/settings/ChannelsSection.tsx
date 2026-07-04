@@ -92,6 +92,9 @@ export function ChannelsSection() {
                 value={usernameInput}
                 onChange={(e) => setUsernameInput(e.target.value)}
                 placeholder="channel_username"
+                aria-label="Username Telegram-канала"
+                aria-invalid={errorMessage ? true : undefined}
+                aria-describedby={errorMessage ? 'add-channel-err' : undefined}
                 disabled={createChannelMutation.isPending}
                 className="w-full rounded border bg-background py-2 pl-7 pr-3 font-mono text-sm focus:outline-none focus:ring-1 focus:ring-primary"
               />
@@ -104,7 +107,7 @@ export function ChannelsSection() {
               {createChannelMutation.isPending ? 'Добавление…' : 'Подключить'}
             </button>
           </form>
-          {errorMessage && <p className="mt-2.5 text-xs font-medium text-destructive">{errorMessage}</p>}
+          {errorMessage && <p role="alert" id="add-channel-err" className="mt-2.5 text-xs font-medium text-destructive">{errorMessage}</p>}
         </div>
       </SettingsGroup>
 
@@ -257,40 +260,43 @@ function ChannelKeysPanel({ channelId }: { channelId: number }) {
         </button>
       </div>
 
+      {/* role="status" on the inserted box itself (announced on insertion) — a permanently mounted
+          live-region wrapper would eat two space-y-4 gaps in the default no-token state. */}
       {oneTimeKey && (
-        <div className="space-y-2.5 rounded border border-status-warn/40 bg-background p-3.5">
-          <div className="flex items-center gap-1.5 text-xs font-medium text-status-warn">
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              className="h-3.5 w-3.5 shrink-0"
-              aria-hidden="true"
-            >
-              <path
-                d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-              <path d="M12 9v4M12 17h.01" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-            <span>Скопируйте токен сейчас — он показывается ОДИН раз:</span>
+          <div role="status" className="space-y-2.5 rounded border border-status-warn/40 bg-background p-3.5">
+            <div className="flex items-center gap-1.5 text-xs font-medium text-status-warn">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                className="h-3.5 w-3.5 shrink-0"
+                aria-hidden="true"
+              >
+                <path
+                  d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <path d="M12 9v4M12 17h.01" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              <span>Скопируйте токен сейчас — он показывается ОДИН раз:</span>
+            </div>
+            <div className="relative flex items-center gap-2 break-all rounded bg-muted/60 p-2 font-mono text-xs text-foreground">
+              <span className="flex-1 select-all pr-16">{oneTimeKey}</span>
+              <button
+                type="button"
+                onClick={() => handleCopy(oneTimeKey)}
+                className="absolute right-2 top-1.5 rounded border bg-background px-2 py-1 font-sans text-2xs font-medium transition-colors hover:bg-secondary"
+              >
+                {copied ? 'Скопировано' : 'Копировать'}
+              </button>
+              <span role="status" className="sr-only">{copied ? 'Скопировано' : ''}</span>
+            </div>
+            <div className="text-2xs leading-normal text-muted-foreground">
+              Ingest URL: <code className="rounded bg-muted px-1 py-0.5 font-mono text-foreground">{ingestUrl}</code>
+            </div>
           </div>
-          <div className="relative flex items-center gap-2 break-all rounded bg-muted/60 p-2 font-mono text-xs text-foreground">
-            <span className="flex-1 select-all pr-16">{oneTimeKey}</span>
-            <button
-              type="button"
-              onClick={() => handleCopy(oneTimeKey)}
-              className="absolute right-2 top-1.5 rounded border bg-background px-2 py-1 font-sans text-2xs font-medium transition-colors hover:bg-secondary"
-            >
-              {copied ? 'Скопировано' : 'Копировать'}
-            </button>
-          </div>
-          <div className="text-2xs leading-normal text-muted-foreground">
-            Ingest URL: <code className="rounded bg-muted px-1 py-0.5 font-mono text-foreground">{ingestUrl}</code>
-          </div>
-        </div>
       )}
 
       {keys.length === 0 ? (

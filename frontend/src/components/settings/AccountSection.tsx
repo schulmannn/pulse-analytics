@@ -235,6 +235,7 @@ export function SecuritySection() {
                 autoComplete="new-password"
                 minLength={8}
                 aria-invalid={tooShort || undefined}
+                aria-describedby={tooShort ? 'pw-next-hint' : undefined}
                 className={PW_INPUT}
                 value={next}
                 onChange={(e) => {
@@ -244,7 +245,7 @@ export function SecuritySection() {
                 }}
                 disabled={changePassword.isPending}
               />
-              {tooShort && <p className="mt-1 text-2xs text-ink3">Минимум 8 символов.</p>}
+              {tooShort && <p id="pw-next-hint" className="mt-1 text-2xs text-ink3">Минимум 8 символов.</p>}
             </div>
             <div>
               <label htmlFor="pw-confirm" className={PW_LABEL}>
@@ -255,6 +256,7 @@ export function SecuritySection() {
                 type="password"
                 autoComplete="new-password"
                 aria-invalid={mismatch || undefined}
+                aria-describedby={mismatch ? 'pw-confirm-err' : undefined}
                 className={PW_INPUT}
                 value={confirm}
                 onChange={(e) => {
@@ -264,7 +266,7 @@ export function SecuritySection() {
                 }}
                 disabled={changePassword.isPending}
               />
-              {mismatch && <p className="mt-1 text-2xs text-destructive">Пароли не совпадают.</p>}
+              {mismatch && <p id="pw-confirm-err" className="mt-1 text-2xs text-destructive">Пароли не совпадают.</p>}
             </div>
 
             <div className="flex items-center gap-3 pt-0.5" aria-live="polite">
@@ -273,7 +275,7 @@ export function SecuritySection() {
               </button>
               {done && <span className="text-xs font-medium text-primary">Пароль изменён</span>}
             </div>
-            {err && <p className="text-xs font-medium text-destructive">{err}</p>}
+            {err && <p role="alert" className="text-xs font-medium text-destructive">{err}</p>}
           </form>
         }
       />

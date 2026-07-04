@@ -172,28 +172,26 @@ export function Settings() {
           </header>
 
           {/* Mobile: the mini-nav becomes a horizontal scrollable tab row. */}
-          <div
-            role="tablist"
-            aria-label="Разделы настроек"
-            className="flex shrink-0 gap-1 overflow-x-auto border-b border-border px-3 md:hidden"
-          >
-            {SECTIONS.map((item) => (
-              <button
-                key={item.key}
-                type="button"
-                role="tab"
-                aria-selected={section === item.key}
-                onClick={() => setSection(item.key)}
-                className={cn(
-                  'shrink-0 border-b-2 px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none',
-                  section === item.key
-                    ? 'border-primary text-foreground'
-                    : 'border-transparent text-muted-foreground hover:text-foreground',
-                )}
-              >
-                {item.label}
-              </button>
-            ))}
+          <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-border px-3 md:hidden">
+            <div role="tablist" aria-label="Разделы настроек" className="flex shrink-0 gap-1">
+              {SECTIONS.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  role="tab"
+                  aria-selected={section === item.key}
+                  onClick={() => setSection(item.key)}
+                  className={cn(
+                    'shrink-0 border-b-2 px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none',
+                    section === item.key
+                      ? 'border-primary text-foreground'
+                      : 'border-transparent text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
             {isSuperuser && (
               <Link
                 to="/admin"

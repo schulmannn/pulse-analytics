@@ -404,7 +404,7 @@ function InstagramPanel() {
               Instagram перед подтверждением (или смените профиль в окне подключения).
             </p>
           )}
-          {connectError && <p className="text-xs font-medium text-destructive">{connectError}</p>}
+          {connectError && <p role="alert" className="text-xs font-medium text-destructive">{connectError}</p>}
         </div>
       ) : envAccount ? (
         <div className="mt-4 space-y-4">
@@ -430,7 +430,7 @@ function InstagramPanel() {
               >
                 {connect.isPending ? 'Открываю Instagram…' : 'Подключить свой аккаунт'}
               </button>
-              {connectError && <p className="text-xs font-medium text-destructive">{connectError}</p>}
+              {connectError && <p role="alert" className="text-xs font-medium text-destructive">{connectError}</p>}
             </>
           )}
         </div>
@@ -448,7 +448,7 @@ function InstagramPanel() {
           >
             {connect.isPending ? 'Открываю Instagram…' : 'Войти через Instagram'}
           </button>
-          {connectError && <p className="text-xs font-medium text-destructive">{connectError}</p>}
+          {connectError && <p role="alert" className="text-xs font-medium text-destructive">{connectError}</p>}
           {notReady && (
             <p className="text-xs text-muted-foreground">
               Подключение Instagram ещё не настроено на сервере.
@@ -689,7 +689,7 @@ function TelegramPanel({ channelName }: { channelName: string | null }) {
               >
                 {busy ? 'Готовим код…' : 'Показать QR-код'}
               </button>
-              {err && <p className="mt-3 text-xs font-medium text-destructive">{err}</p>}
+              {err && <p role="alert" className="mt-3 text-xs font-medium text-destructive">{err}</p>}
             </div>
           )}
         </div>
@@ -746,7 +746,7 @@ function TgScanning({
           placeholder="Облачный пароль"
           className="mt-3 w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-1 focus:ring-primary"
         />
-        {err && <p className="mt-2 text-xs font-medium text-destructive">{err}</p>}
+        {err && <p role="alert" className="mt-2 text-xs font-medium text-destructive">{err}</p>}
         <button
           type="button"
           onClick={onSubmit}
@@ -766,7 +766,7 @@ function TgScanning({
       <p className="mt-4 max-w-sm text-sm text-muted-foreground">
         В Telegram: <b className="text-foreground">Настройки → Устройства → Подключить устройство</b> — наведите камеру на код. Он обновляется автоматически.
       </p>
-      {err && <p className="mt-2 text-xs font-medium text-destructive">{err}</p>}
+      {err && <p role="alert" className="mt-2 text-xs font-medium text-destructive">{err}</p>}
     </div>
   );
 }
@@ -825,7 +825,7 @@ function TgConnected({ username, channels, onDisconnect, busy }: { username: str
 
   return (
     <div>
-      <div className="flex items-center gap-2 text-sm">
+      <div role="status" className="flex items-center gap-2 text-sm">
         <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-verdant" />
         <span className="text-foreground">Подключён{username ? <> · <span className="font-mono">@{username}</span></> : null}</span>
       </div>
@@ -872,10 +872,12 @@ function TgConnected({ username, channels, onDisconnect, busy }: { username: str
               {adding ? 'Добавляю…' : `Добавить выбранные (${selected.length})`}
             </button>
           )}
-          {addedCount != null && addedCount > 0 && (
-            <p className="mt-2 text-xs text-verdant">Добавлено: {addedCount}. Каналы появились в переключателе источника.</p>
-          )}
-          {addErr && <p className="mt-2 text-xs font-medium text-destructive">{addErr}</p>}
+          <div aria-live="polite">
+            {addedCount != null && addedCount > 0 && (
+              <p className="mt-2 text-xs text-verdant">Добавлено: {addedCount}. Каналы появились в переключателе источника.</p>
+            )}
+          </div>
+          {addErr && <p role="alert" className="mt-2 text-xs font-medium text-destructive">{addErr}</p>}
         </div>
       ) : (
         <p className="mt-4 text-xs text-muted-foreground">Каналов, где вы админ, не нашлось.</p>

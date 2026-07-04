@@ -171,7 +171,15 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
       onMouseLeave={() => setHover(null)}
       onPointerLeave={() => setHover(null)}
     >
-      <svg className="block w-full" height={chartHeight} viewBox={`0 0 ${chartWidth} ${chartHeight}`} preserveAspectRatio="none">
+      <svg
+        className="block w-full"
+        height={chartHeight}
+        viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+        preserveAspectRatio="none"
+        // Named graphic for AT (PieChart idiom) — see LineChart.tsx: series max, not the scale top.
+        role="img"
+        aria-label={`Столбчатая диаграмма: ${values.length} столбцов, макс ${fmt.short(Math.max(...values))}`}
+      >
         {/* Expanded: y gridlines with tick labels in the gutter */}
         {yTicks.map((v, idx) => {
           const y = barTop(v);
