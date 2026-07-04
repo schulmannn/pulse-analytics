@@ -1184,8 +1184,33 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
           // steep-like "lit surface", less boxed); light mode keeps the full hairline (white cards on
           // paper need it for definition). Edit mode keeps a visible border.
           homeEditing && homeKey ? 'border-ink3/25' : 'border-border dark:border-white/[0.06]'
-        } ${reorder ? 'widget-jiggle' : 'widget-enter'} ${isDragging ? 'shadow-lg' : ''}`}
+        } ${reorder ? 'widget-jiggle' : 'widget-enter cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40'} ${isDragging ? 'shadow-lg' : ''}`}
         style={innerStyle}
+        // Whole-card click opens the detail overlay (steep — the whole card is the target, not just
+        // the small ↗ button). Guarded so header controls, the drill hero, the chart (its own
+        // hover/drill) and any open dialog keep their behaviour, and a reorder drag never triggers it.
+        // A labelled role=button so keyboard / assistive-tech users activate it too (Enter/Space).
+        role={reorder ? undefined : 'button'}
+        aria-label={reorder ? undefined : `Развернуть виджет «${prefs.title || title}»`}
+        tabIndex={reorder ? undefined : 0}
+        onClick={
+          reorder
+            ? undefined
+            : (e) => {
+                if ((e.target as HTMLElement).closest('button, a, input, select, label, svg, [role="dialog"]')) return;
+                setExpandOpen(true);
+              }
+        }
+        onKeyDown={
+          reorder
+            ? undefined
+            : (e) => {
+                if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+                  e.preventDefault();
+                  setExpandOpen(true);
+                }
+              }
+        }
       >
       <div className="flex shrink-0 items-center gap-3">
         <h3 className="min-w-0 flex-1 truncate text-xs font-medium tracking-wider text-muted-foreground">
@@ -1235,7 +1260,13 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
             </svg>
           </button>
           {menuOpen && (
-            <div className="absolute right-0 top-full z-20 mt-1 w-48 rounded-lg border border-border bg-card p-1.5">
+            <div
+              className="absolute right-0 top-full z-20 mt-1 w-48 rounded-lg border border-border bg-card p-1.5"
+              // This dropdown renders INSIDE the now-clickable card; stop clicks on its padding /
+              // dividers (non-button dead space) from bubbling to the card and opening the detail
+              // overlay while the menu is open.
+              onClick={(e) => e.stopPropagation()}
+            >
               <button
                 type="button"
                 onClick={() => {

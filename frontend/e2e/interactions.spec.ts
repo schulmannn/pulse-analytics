@@ -14,6 +14,16 @@ test('detail open + back (metric drilldown)', async ({ page }) => {
   await expect(page).not.toHaveURL(/\/metrics\//);
 });
 
+test('whole-card click opens the detail overlay', async ({ page }) => {
+  await bootDemo(page, '/');
+  // Click the card's own chrome (its title text — not a button/chart), which opens the detail overlay.
+  await page.locator('section:has(h3)').first().locator('h3').first().click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  // …and it closes on Escape, leaving the card intact.
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+});
+
 test('edit-mode entry + exit (Home)', async ({ page }) => {
   await bootDemo(page, '/home');
   // The «Изменить»↔«Готово» toggle reflects edit state via aria-pressed — robust whether Home is
