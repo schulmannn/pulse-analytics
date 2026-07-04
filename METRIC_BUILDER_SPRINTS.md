@@ -171,9 +171,13 @@ Source of truth для этого трека. План: `STEEP_METRIC_BUILDER.md
     настройки + pinned source (HIGH: чужой канал/wrong-data). Эффект = one-time seam (guard
     `!getWidgetConfig`, keyed pinnedSig), idempotent (verify-агент подтвердил). +5 тестов (283).
     Экспортнуто из ChartWidget: `getWidgetPrefs/setWidgetHidden/remapGroupOrder/PERIOD_WORD/WidgetPrefs`.
-  - **U6.3b (own-chrome 4 блока) TODO:** экстракция bare-тел history/velocity/heatmap/mentions (рендерят
-    СВОЙ ChartSection с variants/expand/periodControl) → адаптеры + LEGACY_RENDER + routing. HeatmapBody
-    уже bare (useWidgetPeriod); History/Velocity = вынести line-вариант; Mentions = HomeMentionsByDay body.
+  - **U6.3b (own-chrome 4 блока) — ОСОЗНАННО ОТЛОЖЕН (не делать как adapter-экстракцию):** history/
+    velocity/heatmap/mentions рендерят СВОЙ ChartSection с богатыми `variants` (bar/line switcher) +
+    Tier-2 `expand` (anomaly/extreme-marked overlay). Shell-only config-модель их бы ДЕГРАДИРОВАЛА
+    (потеря switcher'а + rich-expand) ради маргинальной унификации. Плюс дублируют каталог-метрики
+    («История подписчиков» ≈ `tg.subscribers`, heatmap ≈ breakdown). Работают на Home через HOME_REGISTRY.
+    Правильный путь (если делать) = превратить в НАСТОЯЩИЕ каталог-метрики с resolver-поддержкой (большая
+    работа), НЕ shell-adapter. Оставлены на registry-пути намеренно. **Метрик-билдер трек = ЗАКРЫТ.**
 Риск снят юзером («никто не пользуется»); гейт=build+тесты+review, визуал=прод.
 
 ## Журнал

@@ -1,6 +1,9 @@
 import { useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useChannels } from '@/api/queries';
+import { WidgetBody } from '@/components/ConfigWidget';
+import { ChannelScope } from '@/lib/channel-context';
+import { ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import { DEFAULT_WIDGET_DAYS } from '@/lib/period';
 import type { PeriodDays } from '@/lib/period';
 import { VIZ_LABEL } from '@/lib/widgetRender';
@@ -107,25 +110,53 @@ export function ConfigEditDialog({
       aria-label={`Настройка виджета «${config.title || spec.label}»`}
       onClick={onClose}
     >
-      <div className="my-auto w-full max-w-md rounded-xl border border-border bg-card p-5" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-baseline justify-between gap-3">
-          <div className="text-sm font-medium text-foreground">Настройка виджета</div>
-          <div className="truncate text-xs text-muted-foreground">{spec.label}</div>
+      <div
+        className="my-auto grid w-full max-w-3xl grid-cols-1 gap-5 rounded-xl border border-border bg-card p-5 sm:grid-cols-[minmax(0,1fr)_300px]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Left — live preview: the SAME body the card shows, over the config being edited, so every
+            change is seen before it's committed (edits already write through to the store). */}
+        <div className="min-w-0">
+          <div className="mb-2 text-sm font-medium text-foreground">Предпросмотр</div>
+          <div className="flex h-[280px] flex-col overflow-hidden rounded-xl border border-border bg-card p-4">
+            <div className="truncate text-xs font-medium tracking-wider text-muted-foreground">
+              {config.title || spec.label}
+            </div>
+            <div className="mt-3 min-h-0 flex-1">
+              <ExpandedChartHeightContext.Provider value={null}>
+                {config.source != null ? (
+                  <ChannelScope channelId={config.source}>
+                    <WidgetBody config={config} />
+                  </ChannelScope>
+                ) : (
+                  <WidgetBody config={config} />
+                )}
+              </ExpandedChartHeightContext.Provider>
+            </div>
+          </div>
         </div>
 
-        <WidgetConfigControls config={config} spec={spec} onChange={onChange} />
-
-        <div className="mt-5 flex items-center justify-between border-t border-border pt-3">
-          <button type="button" onClick={reset} className="text-xs text-muted-foreground transition-colors hover:text-foreground">
-            Сбросить
-          </button>
-          <button
-            type="button"
-            onClick={onClose}
-            className="btn-pill bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-          >
-            Готово
-          </button>
+        {/* Right — controls + actions. */}
+        <div className="flex max-h-[70vh] min-w-0 flex-col">
+          <div className="flex items-baseline justify-between gap-3">
+            <div className="text-sm font-medium text-foreground">Настройка виджета</div>
+            <div className="truncate text-xs text-muted-foreground">{spec.label}</div>
+          </div>
+          <div className="-mr-1 min-h-0 flex-1 overflow-y-auto pr-1">
+            <WidgetConfigControls config={config} spec={spec} onChange={onChange} />
+          </div>
+          <div className="mt-4 flex items-center justify-between border-t border-border pt-3">
+            <button type="button" onClick={reset} className="text-xs text-muted-foreground transition-colors hover:text-foreground">
+              Сбросить
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="btn-pill bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+            >
+              Готово
+            </button>
+          </div>
         </div>
       </div>
     </div>,
