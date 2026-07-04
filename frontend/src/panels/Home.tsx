@@ -93,13 +93,21 @@ export function Home() {
           type="button"
           onClick={() => setEditing((v) => !v)}
           aria-pressed={editing}
-          className={
-            editing
-              ? 'btn-pill shrink-0 bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90'
-              : 'btn-pill shrink-0 border border-border px-4 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground'
-          }
+          data-active={editing}
+          className="edit-toggle btn-pill inline-flex h-9 shrink-0 items-center gap-1.5 px-3.5 text-sm font-medium"
         >
-          {editing ? 'Готово' : 'Изменить'}
+          <span className="edit-toggle-icons" aria-hidden="true">
+            <svg className="i-edit" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 20h9" />
+              <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" />
+            </svg>
+            <svg className="i-done" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M20 6 9 17l-5-5" />
+            </svg>
+          </span>
+          <span key={editing ? 'done' : 'edit'} className="edit-toggle-label">
+            {editing ? 'Готово' : 'Изменить'}
+          </span>
         </button>
       </div>
 
@@ -195,7 +203,7 @@ function AddWidgetBar({ pinned }: { pinned: string[] }) {
   };
 
   return (
-    <div ref={ref} className="relative mt-6">
+    <div ref={ref} className="add-widget-enter relative mt-6">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}

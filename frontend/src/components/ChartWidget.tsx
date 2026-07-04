@@ -1058,7 +1058,11 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
 
   const innerStyle: CSSProperties = {};
   if (activeColor) (innerStyle as Record<string, string>)['--brand-iris'] = `var(--chart-${activeColor})`;
-  if (activeTinted) innerStyle.backgroundColor = `hsl(var(${accentVar}) / 0.07)`;
+  // Tinted background: a TONAL accent surface (steep-like depth) — a soft top-anchored radial of the
+  // accent hue over the card, not a flat colour slab. Hairline-only depth stays intact (no shadow):
+  // on the dark canvas it reads as a lit surface, on paper as a quiet accent wash.
+  if (activeTinted)
+    innerStyle.background = `radial-gradient(120% 90% at 50% 0%, hsl(var(${accentVar}) / 0.15), transparent 62%), hsl(var(--card))`;
   // Entrance stagger: one beat per grid slot, capped so deep feeds don't wait forever.
   (innerStyle as Record<string, string>)['--enter-delay'] = `${Math.min(Math.max(seqIndex, 0), 8) * 35}ms`;
   if (isDragging) {
@@ -1100,9 +1104,9 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
       onPointerCancel={reorder ? () => group?.dragEnd() : undefined}
     >
       <div
-        className={`flex flex-col ${SIZE_H[effectiveSize]} rounded-xl border border-border bg-card p-4 sm:p-5 transition-colors hover:border-ink3/40 ${
-          reorder ? 'widget-jiggle' : 'widget-enter'
-        } ${isDragging ? 'shadow-lg' : ''}`}
+        className={`flex flex-col ${SIZE_H[effectiveSize]} rounded-xl border bg-card p-4 sm:p-5 transition-colors hover:border-ink3/40 ${
+          homeEditing && homeKey ? 'border-ink3/25' : 'border-border'
+        } ${reorder ? 'widget-jiggle' : 'widget-enter'} ${isDragging ? 'shadow-lg' : ''}`}
         style={innerStyle}
       >
       <div className="flex shrink-0 items-center gap-3">
@@ -1117,7 +1121,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
             title="Убрать с главной"
             onClick={() => homeKey && unpinFromHome(homeKey)}
             className={`shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-destructive ${
-              reorder ? 'pointer-events-none opacity-0' : ''
+              reorder ? 'pointer-events-none opacity-0' : 'home-remove-enter'
             }`}
           >
             <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">

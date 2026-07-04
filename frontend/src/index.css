@@ -248,6 +248,85 @@
   .widget-enter { animation: none; }
 }
 
+/* ── Home edit mode (steep «Edit» feel): a LIGHT page-level toggle + soft reveal of card
+   controls when edit mode opens. No heavy fills / shadows — depth stays hairline-only. ─────── */
+@layer components {
+  /* The Edit ↔ Готово toggle: transparent by default, subtle hover, quiet primary tint when active
+     (never a solid bg-primary slab). Sits on the page title line. */
+  .edit-toggle {
+    color: hsl(var(--foreground));
+    background: transparent;
+    border: 1px solid transparent;
+    transition: background-color 0.18s ease, color 0.18s ease;
+  }
+  .edit-toggle:hover {
+    background: hsl(var(--foreground) / 0.06);
+  }
+  .edit-toggle[data-active='true'] {
+    background: hsl(var(--primary) / 0.1);
+    color: hsl(var(--primary));
+  }
+  /* Pencil ↔ check crossfade: both glyphs stacked, opacity+scale toggled by data-active. */
+  .edit-toggle-icons {
+    position: relative;
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+  }
+  .edit-toggle-icons > svg {
+    position: absolute;
+    inset: 0;
+    width: 16px;
+    height: 16px;
+    transition: opacity 0.2s ease, transform 0.24s cubic-bezier(0.2, 0.7, 0.3, 1);
+  }
+  .edit-toggle-icons .i-done {
+    opacity: 0;
+    transform: scale(0.6) rotate(-8deg);
+  }
+  .edit-toggle[data-active='true'] .i-edit {
+    opacity: 0;
+    transform: scale(0.6) rotate(8deg);
+  }
+  .edit-toggle[data-active='true'] .i-done {
+    opacity: 1;
+    transform: scale(1) rotate(0);
+  }
+}
+/* Label crossfade (keyed remount replays it on Edit↔Готово) + the edit-mode reveals. */
+@keyframes edit-label-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.edit-toggle-label {
+  display: inline-block;
+  animation: edit-label-in 0.2s ease both;
+}
+/* A card's «×» remove affordance appears with a soft scale-in, staggered per grid slot via the
+   card's --enter-delay (inherited from the inner card). */
+@keyframes home-remove-in {
+  from { opacity: 0; transform: scale(0.9) translateY(-3px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+.home-remove-enter {
+  animation: home-remove-in 0.24s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+  animation-delay: var(--enter-delay, 0ms);
+}
+/* «+ Добавить виджет» enters as a fresh grid item (rise + fade) when edit mode opens. */
+@keyframes add-widget-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.add-widget-enter {
+  animation: add-widget-in 0.3s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .edit-toggle-icons > svg { transition: none; }
+  .edit-toggle-label,
+  .home-remove-enter,
+  .add-widget-enter { animation: none; }
+}
+
 /* ── Cartograph illustrations (error / 404 / empty states) ───────────────────────────────────
    Line-art crisp at any size; keep vector-effect layered so Tailwind fill and stroke color
    utilities (in @layer utilities) still win over these defaults. */
