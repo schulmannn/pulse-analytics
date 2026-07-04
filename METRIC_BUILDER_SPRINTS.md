@@ -237,6 +237,24 @@ color-toggle + crossfade иконок + remount текста (`index.css:251`, `
 
 ## Журнал
 
+- 2026-07-04 — **P0 Crash telemetry SHIPPED** `588c8e1` (бандл `index-CqMYWMXO.js`, 318 тестов +6, server 16
+  тестов). Прямое продолжение error-boundaries: раньше render-crash = только console `[app-crash]`, страницу
+  «интерфейс не смог отрисоваться» нельзя диагностировать. Теперь каждый crash (widget-boundary И app-level)
+  POST-ится и виден админу по trace-id в СУЩЕСТВУЮЩЕЙ таблице `bugs`. **Сервер:** `POST /api/client-errors`
+  (requireAuth + отдельный rate-limiter 30/5мин per-uid; все поля обрезаются; uid ХЕШИРУЕТСЯ sha256; commit
+  штампует СЕРВЕР из `RAILWAY_GIT_COMMIT_SHA`) → `db.createCrash` (kind='crash' напрямую, вне BUG_KINDS; context
+  cap 8000 вместо 500); trace-id в ВИДИМЫЙ text (findable из списка). **Клиент:** `lib/crashReporting.ts` —
+  sink ставится на MODULE-LOAD (always-on floor: покрывает first-render crash ДО любого effect'а; никогда не
+  снимается — иначе SPA re-login без reload оставит sink=null); fire-and-forget POST с per-scope бюджетами
+  (widget 12 / app 4 раздельно — widget-шум не голодит app-crash); БЕЗ signature-dedup (иначе retry с новым
+  trace-id не сохранится). App-level ErrorBoundary репортит напрямую (pure builders, не через sink) + показывает
+  trace-id; Bugs-админка = label «Крах» + collapsible context (plain text, не HTML). **Ultracode 2 раунда:**
+  initial (3 оси security→verify) = 6 находок/4 confirmed (first-render sink race [HIGH]; retry trace-id loss;
+  shared-cap starvation; +honesty) — все пофикшены (module-load install, per-scope budgets, no-dedup); verify-
+  раунд (2 оси) = 1 confirmed (logout-cleanup снимал sink → re-login first-render дыра) → **always-on sink**
+  (убрал uninstaller+DashboardLayout-effect). 2 refuted корректно (Ctrl-F находит collapsed details; dead ip-
+  fallback). Гейт: frontend build+318+server node --check+16. **Границы:** реальный synthetic-crash E2E = карта
+  Playwright-QA #1; прод-верифай = authed test-POST → виден в Bugs → delete.
 - 2026-07-04 — **P0 No inner scrollbars SHIPPED** `e98c6a5` (бандл `index-BShDWc4G.js`, 312 тестов). Прод-
   замер (JS в браузере): 3 виджета скроллились внутри тайла — «Инсайт» (+113px), «Просмотры»/«Скорость» (+21px
   каждый). Причина: body тайла = `overflow-y-auto` на фикс-высоте h-[264px]. Dashboard-карточка должна
