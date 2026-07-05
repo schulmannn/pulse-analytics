@@ -188,3 +188,31 @@ test('creation paths canonicalise: createTgChannel gets workspace + shared sourc
 
   await pool.query(`DELETE FROM external_sources WHERE id=$1`, [a.source_id]).catch(() => {});
 });
+
+test('setChannelTgId INSIDE a transaction does not self-deadlock (verify-round regression)', { skip }, async () => {
+  // The exact path that would have frozen the API: collector ingest runs setChannelTgId on its
+  // tx client; ensureChannelCanonical must ride the SAME executor (a pool.query would block on
+  // the tx's own row lock forever — undetectable by Postgres).
+  const u = await mkUser('txuser');
+  const ch = await db.createChannel({ owner_uid: u, username: `tx_${nonce}` });
+  assert.ok(ch, 'collector channel created (no tg id yet)');
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await Promise.race([
+      db.setChannelTgId(ch.id, 987650000 + (Date.now() % 10000), client),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('self-deadlock: setChannelTgId hung inside the tx')), 5000)),
+    ]);
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+
+  const { rows: [row] } = await pool.query(`SELECT source_id, workspace_id FROM channels WHERE id=$1`, [ch.id]);
+  assert.ok(row.workspace_id != null, 'workspace stamped through the tx executor');
+  assert.ok(row.source_id != null, 'source stamped through the tx executor');
+});

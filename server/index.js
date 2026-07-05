@@ -15,7 +15,7 @@ const { createAuth, hashPassword, verifyPassword, SCRYPT, rateLimitKey } = requi
 const { captionSnippet } = require('./lib/caption');
 const { fetchWithTimeout } = require('./lib/http');
 const { log, requestContext, hashIp } = require('./lib/observability');
-const { makeResolveChannel, makeServeSnapshot } = require('./middleware/tenant');
+const { makeResolveChannel, makeServeSnapshot, hasWorkspaceRole } = require('./middleware/tenant');
 const { registerCollectorRoutes } = require('./routes/collector');
 
 const app  = express();
@@ -1443,6 +1443,9 @@ app.post('/api/ig/oauth/start', requireAuth, asyncHandler(async (req, res) => {
     if (!channelId) return res.status(400).json({ error: 'Выбери канал, к которому подключить Instagram' });
     const ch = await db.getChannel(channelId, req.user).catch(() => null);
     if (!ch) return res.status(403).json({ error: 'Нет доступа к этому каналу' });
+    // Rebinding the channel's IG account/token — workspace admins only (ADR-001). The callback
+    // trusts the signed state, so gating the state mint here covers the whole flow.
+    if (!hasWorkspaceRole(ch, req.user, 'admin')) return res.status(403).json({ error: 'Недостаточно прав в этом воркспейсе' });
   }
   const state = signIgState({ uid: req.user.uid, channelId, ns: newSource ? 1 : 0, nonce: crypto.randomBytes(12).toString('base64url'), exp: Date.now() + IG_STATE_TTL });
   const authorizeUrl = 'https://www.instagram.com/oauth/authorize?' + new URLSearchParams({
@@ -1558,6 +1561,7 @@ app.delete('/api/ig/oauth', requireAuth, asyncHandler(async (req, res) => {
   if (!channelId) return res.status(400).json({ error: 'Канал не выбран' });
   const ch = await db.getChannel(channelId, req.user).catch(() => null);
   if (!ch) return res.status(403).json({ error: 'Нет доступа к этому каналу' });
+  if (!hasWorkspaceRole(ch, req.user, 'admin')) return res.status(403).json({ error: 'Недостаточно прав в этом воркспейсе' });
   const acc = await db.getIgAccount(channelId).catch(() => null);
   const removed = await db.deleteIgAccount(channelId);
   if (acc && acc.ig_user_id) igCachePurge(acc.ig_user_id);
@@ -1650,6 +1654,8 @@ app.post('/api/channels/:id/key', requireAuth, async (req, res, next) => {
   try {
     const ch = await db.getChannel(id, req.user);
     if (!ch) return res.status(403).json({ error: 'Нет доступа к каналу' });
+    // A collector key is a standing data-write credential — workspace admins only (ADR-001).
+    if (!hasWorkspaceRole(ch, req.user, 'admin')) return res.status(403).json({ error: 'Недостаточно прав в этом воркспейсе' });
     if (ch.source === 'central') return res.status(400).json({ error: 'central-канал не использует collector-ключи' });
       const raw = 'pa_' + crypto.randomBytes(24).toString('base64url');
       const rec = await db.createApiKey(id, sha256(raw), raw.slice(0, 11), String((req.body && req.body.label) || '').slice(0, 60) || null);
@@ -1702,6 +1708,7 @@ app.post('/api/channels/:id/annotations', requireAuth, async (req, res, next) =>
   try {
     const ch = await db.getChannel(id, req.user);
     if (!ch) return res.status(403).json({ error: 'Нет доступа к каналу' });
+    if (!hasWorkspaceRole(ch, req.user, 'member')) return res.status(403).json({ error: 'Недостаточно прав в этом воркспейсе' });
     const rec = await db.createAnnotation(id, { day, label: label.slice(0, 120), createdBy: req.user.uid });
     audit(req, 'annotation.created', { channel_id: id, annotation_id: rec && rec.id }).catch(() => {});
     res.json(rec);
@@ -1716,6 +1723,7 @@ app.delete('/api/channels/:id/annotations/:annId', requireAuth, async (req, res,
   try {
     const ch = await db.getChannel(id, req.user);
     if (!ch) return res.status(403).json({ error: 'Нет доступа к каналу' });
+    if (!hasWorkspaceRole(ch, req.user, 'member')) return res.status(403).json({ error: 'Недостаточно прав в этом воркспейсе' });
     const ok = await db.deleteAnnotation(annId, id);
     if (ok) audit(req, 'annotation.deleted', { channel_id: id, annotation_id: annId }).catch(() => {});
     res.json({ ok });

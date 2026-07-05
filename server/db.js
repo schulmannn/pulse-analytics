@@ -271,7 +271,7 @@ const MEMBER_COUNT_COL =
       WHERE ((channels.source_id IS NOT NULL AND cd.source_id = channels.source_id)
              OR cd.channel_id = channels.id)
         AND cd.subscribers IS NOT NULL
-      ORDER BY cd.day DESC LIMIT 1) AS "memberCount"`;
+      ORDER BY cd.day DESC, cd.captured_at DESC NULLS LAST LIMIT 1) AS "memberCount"`;
 
 // Access boundary (ADR-001): a channel is visible to its creator (legacy owner_uid — also covers
 // pre-workspace rows like the bootstrap central channel) OR to any member of its workspace.
@@ -328,14 +328,18 @@ async function getOwnerChannelId() {
 
 async function setChannelTgId(id, tgId, executor = pool) {
   if (!enabled || !id || tgId == null) return false;
-  await executor.query(`UPDATE channels SET tg_channel_id=$2 WHERE id=$1 AND tg_channel_id IS NULL`, [id, tgId]);
-  // The platform identity just became known — canonicalise (find-or-create the tg source and
-  // stamp the link). NULL-fill only, so a re-discovery never re-homes an existing link.
-  const { rows } = await executor.query(`SELECT owner_uid, username, title FROM channels WHERE id=$1`, [id]);
-  if (rows[0]) {
-    await ensureChannelCanonical(id, rows[0].owner_uid, {
-      network: 'tg', externalId: tgId, username: rows[0].username, title: rows[0].title,
-    });
+  const upd = await executor.query(`UPDATE channels SET tg_channel_id=$2 WHERE id=$1 AND tg_channel_id IS NULL`, [id, tgId]);
+  // Canonicalise when the platform identity just became known — and short-circuit on the hot
+  // path: this runs on EVERY collector ingest, so an already-stamped channel must cost one SELECT,
+  // not a shared external_sources write (which would briefly serialize tenants of one source).
+  const { rows } = await executor.query(
+    `SELECT owner_uid, username, title, workspace_id, source_id FROM channels WHERE id=$1`, [id]);
+  const row = rows[0];
+  if (row && (upd.rowCount > 0 || row.workspace_id == null || row.source_id == null)) {
+    // Same executor all the way down — see ensureChannelCanonical's executor-discipline note.
+    await ensureChannelCanonical(id, row.owner_uid, {
+      network: 'tg', externalId: tgId, username: row.username, title: row.title,
+    }, executor);
   }
   return true;
 }
@@ -674,12 +678,14 @@ async function ensurePersonalWorkspace(uid, executor = pool) {
 // Find-or-create the deduplicated identity of an external property.
 async function ensureExternalSource(network, externalId, { username, title } = {}, executor = pool) {
   if (!enabled || !network || externalId == null) return null;
+  // Existing metadata WINS (fill NULLs only): the source row is shared across workspaces, so the
+  // last-ingesting link must not keep overwriting the canonical username/title (metadata bleed).
   const { rows } = await executor.query(
     `INSERT INTO external_sources (network, external_id, username, title)
      VALUES ($1, $2, $3, $4)
      ON CONFLICT (network, external_id) DO UPDATE SET
-       username = COALESCE(EXCLUDED.username, external_sources.username),
-       title    = COALESCE(EXCLUDED.title, external_sources.title)
+       username = COALESCE(external_sources.username, EXCLUDED.username),
+       title    = COALESCE(external_sources.title, EXCLUDED.title)
      RETURNING id`,
     [network, String(externalId), username || null, title || null]);
   return rows[0] ? rows[0].id : null;
@@ -687,16 +693,20 @@ async function ensureExternalSource(network, externalId, { username, title } = {
 
 // Stamp a channel row with its workspace (creator's personal one) and, when the platform identity
 // is already known, its canonical source. Fills NULLs only — never re-homes an existing link.
-async function ensureChannelCanonical(channelId, ownerUid, { network, externalId, username, title } = {}) {
+// EXECUTOR DISCIPLINE: every query runs on the caller's executor. A pool.query here while the
+// caller holds the row inside an open transaction (collector ingest → setChannelTgId) would block
+// on the caller's own row lock forever — a self-deadlock Postgres cannot detect (the tx connection
+// is idle-in-transaction, not lock-waiting), and with a small pool it starves the whole API.
+async function ensureChannelCanonical(channelId, ownerUid, { network, externalId, username, title } = {}, executor = pool) {
   if (!enabled || !channelId) return;
-  const wsId = await ensurePersonalWorkspace(ownerUid);
+  const wsId = await ensurePersonalWorkspace(ownerUid, executor);
   if (wsId) {
-    await pool.query(`UPDATE channels SET workspace_id=$2 WHERE id=$1 AND workspace_id IS NULL`, [channelId, wsId]);
+    await executor.query(`UPDATE channels SET workspace_id=$2 WHERE id=$1 AND workspace_id IS NULL`, [channelId, wsId]);
   }
   if (network && externalId != null) {
-    const srcId = await ensureExternalSource(network, externalId, { username, title });
+    const srcId = await ensureExternalSource(network, externalId, { username, title }, executor);
     if (srcId) {
-      await pool.query(`UPDATE channels SET source_id=$2 WHERE id=$1 AND source_id IS NULL`, [channelId, srcId]);
+      await executor.query(`UPDATE channels SET source_id=$2 WHERE id=$1 AND source_id IS NULL`, [channelId, srcId]);
     }
   }
 }

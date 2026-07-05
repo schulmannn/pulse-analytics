@@ -84,6 +84,10 @@ WHERE a.source_id IS NULL
   AND s.network = 'ig' AND s.external_id = a.ig_user_id;
 
 -- Standalone IG channels (source='ig', no TG identity) canonicalise through their IG account.
+-- The source='ig' guard matters: an IG account may be attached to a COLLECTOR channel whose tg id
+-- is simply not discovered yet — stamping IT with the IG source would be permanent (NULL-fill-only
+-- everywhere) and would cross-attribute its future TG data to the IG identity.
 UPDATE channels c SET source_id = a.source_id
 FROM ig_accounts a
-WHERE c.source_id IS NULL AND c.tg_channel_id IS NULL AND a.channel_id = c.id AND a.source_id IS NOT NULL;
+WHERE c.source_id IS NULL AND c.tg_channel_id IS NULL AND c.source = 'ig'
+  AND a.channel_id = c.id AND a.source_id IS NOT NULL;

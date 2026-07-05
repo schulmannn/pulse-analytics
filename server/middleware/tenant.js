@@ -31,14 +31,21 @@ function makeResolveChannel({ db, isReady }) {
      app.post('/api/channels/:id/key', requireAuth, resolveChannel, requireWorkspaceRole('admin'), …) */
 const ROLE_RANK = { viewer: 0, member: 1, admin: 2, owner: 3 };
 
-function requireWorkspaceRole(minRole) {
+/** Pure check for routes that fetch the channel themselves (db.getChannel attaches member_role;
+ *  legacy rows without a workspace are creator-only, which the fallback covers). */
+function hasWorkspaceRole(channel, user, minRole) {
   const need = ROLE_RANK[minRole];
   if (need == null) throw new Error(`unknown workspace role: ${minRole}`);
+  if (!channel || channel.id == null) return true; // DB off (dev in-memory) → single-user mode
+  const role = channel.member_role || (channel.owner_uid === (user && user.uid) ? 'owner' : null);
+  return role != null && ROLE_RANK[role] >= need;
+}
+
+function requireWorkspaceRole(minRole) {
+  // validate eagerly so a typo fails at boot, not on first request
+  if (ROLE_RANK[minRole] == null) throw new Error(`unknown workspace role: ${minRole}`);
   return function workspaceRoleGate(req, res, next) {
-    // DB off (dev, in-memory mode) → single-user installation, everything allowed.
-    if (!req.channel || req.channel.id == null) return next();
-    const role = req.channel.member_role || (req.channel.owner_uid === (req.user && req.user.uid) ? 'owner' : null);
-    if (role != null && ROLE_RANK[role] >= need) return next();
+    if (hasWorkspaceRole(req.channel, req.user, minRole)) return next();
     return res.status(403).json({ error: 'Недостаточно прав в этом воркспейсе' });
   };
 }
@@ -55,4 +62,4 @@ function makeServeSnapshot({ db }) {
   };
 }
 
-module.exports = { makeResolveChannel, makeServeSnapshot, requireWorkspaceRole };
+module.exports = { makeResolveChannel, makeServeSnapshot, requireWorkspaceRole, hasWorkspaceRole };
