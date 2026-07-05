@@ -237,6 +237,19 @@ color-toggle + crossfade иконок + remount текста (`index.css:251`, `
 
 ## Журнал
 
+- 2026-07-05 — **P1 Страницы/IA «Структура страниц» slice 1 — SHIPPED via PR #33 `merge 63e74c6` (feat `c83ab1b`)**
+  (lint + build + 354 vitest + 204 e2e; бандл `index-Dhkuv0mJ.js`). TG-дашборд расцеплён из ЕДИНОЙ
+  скролл-ленты `TgFeed` (4 секции в одном DOM + scrollspy) в **фокус-роуты** `/`·`/analytics`·`/posts`·
+  `/mentions`. Вид секции 1:1 (переиспользована оболочка `FeedBlock` как статик-шелл, без скролл-движка).
+  `TgFeed.tsx`→`TgSectionLayout` (layout-роут: recency-контекст + `<Outlet/>`; noChannels→онбординг Overview)
+  + `TgSection` (панель в FeedBlock eager). `App.tsx`: `:section?`→ `index`+3 роута под layout. **`useFeed`
+  НЕ тронут → IgFeed как прежде** (IG-сплит = follow-up). `DashboardLayout` без изменений (`FEED_ROUTES`
+  уже прячет топбар, NavLink роутит). **Доставлен PR-ом (не push в main): разворот owner-call single-scroll
+  + authed-визуал локально не рендерится → юзер смотрит живьём; юзер смёрджил.** ГРАБЛЯ e2e: chart-hover
+  тест жил на `/` и тянул график через feed-pre-mount Аналитики (Обзор = Sparkline-сводка, БЕЗ labelled
+  LineChart) → переехал на `/analytics`. **Осознанный скоуп:** /overview=существующий Overview (executive-
+  редизайн=slice 2, пересекается с «Visual hierarchy audit»); IG=follow-up. e2e-covered рефактор (без
+  adversarial-ревью per протокол; сам поймал+починил хрупкий тест).
 - 2026-07-05 — **P1 Дизайн/Motion «Card-to-detail shared-element transition» — SHIPPED `a376761`**
   (lint + build + 354 vitest + 204 e2e; бандл `index-UfjILPnG.js`). Overlay детали теперь ВЫРАСТАЕТ из
   кликнутой карточки (steep shared-element), а не появляется модалкой. framer НЕ трогаю (только лендинг) —
