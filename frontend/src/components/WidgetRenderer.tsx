@@ -1,9 +1,12 @@
+import { useContext } from 'react';
+import type { ReactNode } from 'react';
 import { DeltaPill } from '@/components/DeltaPill';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { PieChart } from '@/components/PieChart';
 import { Breakdown } from '@/components/Breakdown';
-import { WidgetTargetContext } from '@/components/ExpandableChart';
+import { ChartExpandedContext, WidgetTargetContext } from '@/components/ExpandableChart';
+import { MetricExplainPanel, MetricExplainTooltip } from '@/components/MetricExplain';
 import { Skeleton } from '@/components/ui/skeleton';
 import { pluralRu } from '@/lib/resolveWidgetMetric';
 import type { WidgetMeta, WidgetResult } from '@/lib/resolveWidgetMetric';
@@ -59,6 +62,9 @@ export function WidgetRenderer({
       distinguishable to a screen reader, matching KpiGrid's DrillValue). */
   drillLabel?: string;
 }) {
+  // Detail overlay / explorer set this true → show the full explain panel there; the collapsed card
+  // gets the compact ⓘ instead (see the meta row below).
+  const expanded = useContext(ChartExpandedContext);
   if (result.empty) {
     return (
       <div className="flex h-full min-h-[6rem] flex-col items-center justify-center gap-1.5 px-3 text-center">
@@ -127,7 +133,18 @@ export function WidgetRenderer({
           <WidgetChart result={result} eff={eff} onDrill={onDrill} />
         </div>
       </WidgetTargetContext.Provider>
-      <WidgetMetaLine meta={result.meta} className="mt-2" />
+      {expanded ? (
+        // Detail / explorer has room: the full «почему это число такое» panel (formula + source +
+        // live period / sample / freshness / comparison), which subsumes the one-line meta.
+        <MetricExplainPanel metricId={result.metricId} meta={result.meta} className="mt-4 border-t border-border pt-4" />
+      ) : (
+        // Collapsed card: the terse meta line + a compact ⓘ that opens the same explanation.
+        <WidgetMetaLine
+          meta={result.meta}
+          className="mt-2"
+          info={<MetricExplainTooltip metricId={result.metricId} meta={result.meta} />}
+        />
+      )}
       <SeriesStatsFooter result={result} eff={eff} />
     </div>
   );
@@ -139,23 +156,26 @@ export function WidgetRenderer({
  * single line; only the segments the resolver truly knows are rendered, and a stale-data segment
  * takes the warn tone. shrink-0 + truncate so it never squeezes the chart or wraps the tile.
  */
-function WidgetMetaLine({ meta, className = '' }: { meta?: WidgetMeta; className?: string }) {
-  if (!meta) return null;
+function WidgetMetaLine({ meta, className = '', info }: { meta?: WidgetMeta; className?: string; info?: ReactNode }) {
   const segs: Array<{ key: string; text: string; warn?: boolean }> = [];
-  if (meta.network) segs.push({ key: 'net', text: meta.network === 'ig' ? 'Instagram' : 'Telegram' });
-  if (meta.sourceLabel) segs.push({ key: 'src', text: meta.sourceLabel });
-  if (meta.periodLabel) segs.push({ key: 'per', text: meta.periodLabel });
-  if (meta.samplePosts != null && meta.samplePosts > 0)
-    segs.push({ key: 'smp', text: `${meta.samplePosts} ${pluralRu(meta.samplePosts, ['пост', 'поста', 'постов'])}` });
-  if (meta.archiveDays != null && meta.archiveDays > 0)
-    segs.push({ key: 'arc', text: `${meta.archiveDays} дн. в архиве` });
-  if (meta.fresh) segs.push({ key: 'fr', text: `данные: ${meta.fresh.label}`, warn: meta.fresh.stale });
-  if (meta.comparisonNote) segs.push({ key: 'cmp', text: meta.comparisonNote });
-  if (segs.length === 0) return null;
+  if (meta) {
+    if (meta.network) segs.push({ key: 'net', text: meta.network === 'ig' ? 'Instagram' : 'Telegram' });
+    if (meta.sourceLabel) segs.push({ key: 'src', text: meta.sourceLabel });
+    if (meta.periodLabel) segs.push({ key: 'per', text: meta.periodLabel });
+    if (meta.samplePosts != null && meta.samplePosts > 0)
+      segs.push({ key: 'smp', text: `${meta.samplePosts} ${pluralRu(meta.samplePosts, ['пост', 'поста', 'постов'])}` });
+    if (meta.archiveDays != null && meta.archiveDays > 0)
+      segs.push({ key: 'arc', text: `${meta.archiveDays} дн. в архиве` });
+    if (meta.fresh) segs.push({ key: 'fr', text: `данные: ${meta.fresh.label}`, warn: meta.fresh.stale });
+    if (meta.comparisonNote) segs.push({ key: 'cmp', text: meta.comparisonNote });
+  }
+  // No dynamic segments, but the ⓘ may still carry the static formula/source — keep it reachable.
+  if (segs.length === 0) return info ? <span className={`inline-flex shrink-0 ${className}`}>{info}</span> : null;
   // Inline spans inside one truncating <p> — a genuine single line with an ellipsis, never a wrap
-  // that eats chart height (the tile is fixed; this row is shrink-0 like the stats footer).
-  return (
-    <p className={`min-w-0 shrink-0 truncate text-2xs text-muted-foreground ${className}`}>
+  // that eats chart height (the tile is fixed; this row is shrink-0 like the stats footer). With an
+  // ⓘ trailing it, the <p> flexes so the icon keeps its place while the line still truncates.
+  const line = (
+    <p className={info ? 'min-w-0 flex-1 truncate text-2xs text-muted-foreground' : `min-w-0 shrink-0 truncate text-2xs text-muted-foreground ${className}`}>
       {segs.map((s, i) => (
         <span key={s.key}>
           {/* Spaces stay OUTSIDE aria-hidden — hiding them with the dot glues the segments together
@@ -171,6 +191,8 @@ function WidgetMetaLine({ meta, className = '' }: { meta?: WidgetMeta; className
       ))}
     </p>
   );
+  if (!info) return line;
+  return <div className={`flex shrink-0 items-center gap-1.5 ${className}`}>{line}{info}</div>;
 }
 
 /** Compact «Макс · Среднее» footer under a series chart (S12) — the ledger density that lets a line
