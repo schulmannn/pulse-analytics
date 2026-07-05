@@ -8,7 +8,7 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { ErrorState } from '@/components/ErrorState';
 import { NotFound } from '@/components/NotFound';
 import { PeriodUrlSync } from '@/lib/period-url';
-import { TgFeed } from '@/panels/TgFeed';
+import { TgSectionLayout, TgSection } from '@/panels/TgFeed';
 import { Home } from '@/panels/Home';
 import { MetricPage } from '@/panels/MetricPage';
 import { ReportPage } from '@/panels/ReportPage';
@@ -71,12 +71,17 @@ export default function App() {
         <Route path="admin" element={<PanelSuspense><Admin /></PanelSuspense>} />
         <Route path="bugs" element={<PanelSuspense><Bugs /></PanelSuspense>} />
         <Route path="connect" element={<PanelSuspense><Connect /></PanelSuspense>} />
-        {/* The TG feed serves '/', '/analytics', '/posts', '/mentions' as ONE scrolled page —
-            a single optional-param route so the scrollspy's replace-navigation never remounts
-            it. Unknown sections redirect home inside the feed. */}
-        <Route path=":section?" element={<TgFeed />} />
-        {/* Real 404 for multi-segment unknowns (single-segment ones 404 inside the feed's
-            unknown-section guard). Renders in the content area, so the shell/nav stay. */}
+        {/* TG dashboard — FOCUSED pages (Страницы/IA split): Обзор / Аналитика / Посты / Упоминания
+            are their own routes now, not one scroll-feed. A layout route provides the shared channel-
+            recency context; each child renders a single panel in its section shell. Unknown segments
+            fall through to the 404 below. The IG feed keeps the single-scroll model for now. */}
+        <Route element={<TgSectionLayout />}>
+          <Route index element={<TgSection section="" />} />
+          <Route path="analytics" element={<TgSection section="analytics" />} />
+          <Route path="posts" element={<TgSection section="posts" />} />
+          <Route path="mentions" element={<TgSection section="mentions" />} />
+        </Route>
+        {/* Real 404 for any unknown path. Renders in the content area, so the shell/nav stay. */}
         <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>
