@@ -146,6 +146,16 @@ in (`.detail-backdrop-in`, `--motion-press`) while the panel appears. On mobile 
 the last row clears the home indicator (the fixed bottom nav uses the same pad). Gated by
 `e2e/mobile-nav.spec.ts`.
 
+## Loading & layout stability (CLS)
+
+Skeletons and loading rows must reserve the **same footprint** as the content they stand in for, so
+nothing jumps when data resolves. Suspense fallbacks are layout-matching scaffolds, never spinners
+(`App.tsx`); a status/row that only appears after data (e.g. the sidebar freshness line) reserves its
+height while pending instead of `return null`→pop-in; a widget skeleton matches its loaded variant's
+height. Budget: cumulative layout shift per core route stays under **0.1** (Google's "good" CLS
+threshold) — gated by `e2e/layout-shift.spec.ts` across all four breakpoints. Add a new widget
+variant's skeleton at its loaded height, or the route's CLS budget catches the jump.
+
 ## Governance
 
 Run from `frontend/`:
