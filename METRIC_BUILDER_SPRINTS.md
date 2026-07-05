@@ -237,6 +237,25 @@ color-toggle + crossfade иконок + remount текста (`index.css:251`, `
 
 ## Журнал
 
+- 2026-07-05 — **P1 Дизайн/Motion «Design tokens governance» — SHIPPED `75ce077`**
+  (lint:motion + build + 348 vitest + 200 e2e; бандл `index-C5snA6l5.js`). Разбор: палитра/тип-
+  шкала/радиус/поверхности УЖЕ токенизированы (tailwind fontSize-лестница + `--*` в index.css) —
+  реально ад-хок жил только **motion** (`cubic-bezier(0.2,0.7,0.3,1)` ×9 + дюрации 140/200/240/260/
+  300/350ms руками по всему index.css и в 2 inline-строках ChartWidget FLIP). Сделал: (1) **motion-
+  токены** в `:root` (theme-agnostic): `--ease-standard` (house-кривая) + лестница `--motion-{press,
+  fast,base,glide,reveal,entrance}`; значения 1:1 к отгруженному → токенизация, НЕ ре-тайминг (ноль
+  регресса). (2) **Мигрировал** все UI-motion правила + connect-orb + 2 ChartWidget FLIP-глайда;
+  ГРАБЛЯ/находка: CSS custom-props резолвятся в inline `el.style.transition` → JS-глайд стал
+  `var(--motion-glide) var(--ease-standard)` без JS-константы. Ноль литералов house-кривой вне
+  токен-дефа. (3) **DESIGN_TOKENS.md** — единый канон-док (цвет/поверхности/тип/радиус/border-alpha/
+  icon-btn 28px/motion/reduced-motion/governance). (4) **`scripts/design-motion-lint.mjs`** +
+  `npm run lint:motion` — hard-fail на inline house-easing, magic `text-[Npx]`, arbitrary
+  `duration-[]/ease-[]/delay-[]` под src/. **ГРАБЛЯ:** мой pre-греп `text-\[\d` дал «No matches» —
+  ripgrep (Rust regex) НЕ поддерживает lookahead, паттерн молча провалился; lint (Node) поймал 56
+  реальных magic-size (55 Landing.tsx framer-маркетинг + 1 Legal.tsx). Решение: type-scale правило
+  hard-force на продукт-UI, а bespoke-поверхности (Landing/Legal) allowlist'ю (их миграция = отд.
+  задача); motion-правила — везде. Solo (визуал/CSS + dev-tool, e2e-covered; lint верифицирован —
+  ловил 56 до allowlist, чист после). Отложено: Landing/Legal на тип-шкалу; wiring lint в CI-гейт.
 - 2026-07-05 — **P1 Дизайн/Motion «Edit button press choreography v2» — SHIPPED `b866fa5`**
   (348 vitest + 200 e2e; бандл `index-CxfmLjXX.js`). Донор = v1 edit-toggle (`f74b703`): crossfade
   pencil↔check + primary-tint active. Codex-спека v2: press-scale · icon **morph** pencil→check · фон/
