@@ -15,6 +15,7 @@ const { createAuth, hashPassword, verifyPassword, SCRYPT, rateLimitKey, isSessio
 const { captionSnippet } = require('./lib/caption');
 const { fetchWithTimeout } = require('./lib/http');
 const { log, requestContext, hashIp } = require('./lib/observability');
+const { sourceRefreshLimitKey, createFixedWindowQuota } = require('./lib/rateLimitPolicy');
 const { makeResolveChannel, makeServeSnapshot, hasWorkspaceRole } = require('./middleware/tenant');
 const { registerCollectorRoutes } = require('./routes/collector');
 
@@ -120,6 +121,32 @@ const authLimiter = rateLimit({
   max: 20,
   message: { error: 'Слишком много попыток входа. Подожди 15 минут.' }
 });
+
+const SOURCE_REFRESH_LIMIT_PER_MIN = Math.max(1, parseInt(process.env.SOURCE_REFRESH_LIMIT_PER_MIN, 10) || 30);
+const sourceRefreshQuota = createFixedWindowQuota({
+  windowMs: 60 * 1000,
+  max: SOURCE_REFRESH_LIMIT_PER_MIN,
+});
+
+function consumeSourceRefreshQuota(req, res) {
+  const key = sourceRefreshLimitKey({
+    session: req.user || req.session,
+    ip: req.ip,
+    channel: req.channel,
+    ig: req.ig,
+  });
+  const verdict = sourceRefreshQuota.consume(key);
+  res.set('RateLimit-Policy', `${verdict.limit};w=60;name="source-refresh"`);
+  res.set('RateLimit-Remaining', String(verdict.remaining));
+  res.set('RateLimit-Reset', String(Math.ceil(verdict.resetAt / 1000)));
+  if (verdict.allowed) return true;
+  res.set('Retry-After', String(verdict.retryAfterSeconds));
+  res.status(429).json({
+    error: 'Слишком много обновлений источника. Попробуй через минуту.',
+    scope: 'source-refresh',
+  });
+  return false;
+}
 
 // ── Авторизация: stateless HMAC-токены (переживают рестарт/редеплой) ──
 // Token signing secret: a dedicated SESSION_SECRET and nothing else. There is no
@@ -839,6 +866,7 @@ app.get('/api/ig/profile', requireAuth, resolveIg, async (req, res, next) => {
     const cacheKey = `ig:profile:${req.ig.accountId}`;
     const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
+    if (!consumeSourceRefreshQuota(req, res)) return;
 
     const data = await igFetch(`/${req.ig.accountId}`, {
       fields: 'username,name,followers_count,follows_count,media_count,biography,website,profile_picture_url'
@@ -860,6 +888,11 @@ app.get('/api/ig/profile', requireAuth, resolveIg, async (req, res, next) => {
 app.get('/api/ig/tags', requireAuth, resolveIg, async (req, res) => {
   try {
     if (!req.ig) return res.json(igMock.igMockTags());
+    const cacheKey = `ig:tags:${req.ig.accountId}`;
+    const cached = cacheGet(cacheKey);
+    if (cached) return res.json(cached);
+    if (!consumeSourceRefreshQuota(req, res)) return;
+
     let live = [];
     try {
       const r = await igFetch(`/${req.ig.accountId}/tags`, {
@@ -874,7 +907,9 @@ app.get('/api/ig/tags', requireAuth, resolveIg, async (req, res) => {
     const useArchive = db.enabled && req.ig.source === 'env';
     if (useArchive && live.length) await db.upsertIgTags(live).catch(() => {});
     const data = useArchive ? await db.getIgTags(100).catch(() => live) : live;
-    res.json({ data, live_count: live.length });
+    const result = { data, live_count: live.length };
+    cacheSet(cacheKey, result);
+    res.json(result);
   } catch (e) {
     res.status(200).json({ data: [], error: e.message }); // section degrades, page survives
   }
@@ -891,6 +926,7 @@ app.get('/api/ig/insights', requireAuth, resolveIg, async (req, res, next) => {
     const cacheKey = `ig:insights:${req.ig.accountId}:${days}`;
     const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
+    if (!consumeSourceRefreshQuota(req, res)) return;
 
     const SEC = 86400;
     const now = Math.floor(Date.now() / 1000);
@@ -974,6 +1010,7 @@ app.get('/api/ig/posts', requireAuth, resolveIg, async (req, res, next) => {
     const cacheKey = `ig:posts:${req.ig.accountId}:${limit}`;
     const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
+    if (!consumeSourceRefreshQuota(req, res)) return;
 
     const mediaRes = await igFetch(`/${req.ig.accountId}/media`, {
       fields: 'id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count',
@@ -1020,6 +1057,7 @@ app.get('/api/ig/breakdowns', requireAuth, resolveIg, async (req, res) => {
     const cacheKey = `ig:breakdowns:${req.ig.accountId}:${timeframe}`;
     const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
+    if (!consumeSourceRefreshQuota(req, res)) return;
     const calls = [
       { metric: 'follower_demographics', breakdown: 'age', period: 'lifetime', metric_type: 'total_value', timeframe },
       { metric: 'follower_demographics', breakdown: 'gender', period: 'lifetime', metric_type: 'total_value', timeframe },
@@ -1050,6 +1088,7 @@ app.get('/api/ig/online', requireAuth, resolveIg, async (req, res) => {
     const cacheKey = `ig:online:${req.ig.accountId}`;
     const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
+    if (!consumeSourceRefreshQuota(req, res)) return;
     const data = await igFetch(`/${req.ig.accountId}/insights`, { metric: 'online_followers', period: 'lifetime' }, req.ig.token);
     const result = { data: data?.data || [] };
     cacheSet(cacheKey, result);
@@ -1082,6 +1121,7 @@ app.get('/api/ig/stories', requireAuth, resolveIg, async (req, res) => {
     const cacheKey = `ig:stories:${req.ig.accountId}`;
     const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
+    if (!consumeSourceRefreshQuota(req, res)) return;
     const list = await igFetch(`/${req.ig.accountId}/stories`, {
       fields: 'id,media_type,timestamp,permalink,thumbnail_url',
     }, req.ig.token);
@@ -2210,6 +2250,7 @@ app.get('/api/tg/mtproto/channel', requireAuth, resolveChannel, asyncHandler(asy
   try {
     const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
+    if (!consumeSourceRefreshQuota(req, res)) return;
     const data = await mtprotoFetch('/channel');
     cacheSet(cacheKey, data);
     res.json(data);
@@ -2226,6 +2267,7 @@ app.get('/api/tg/mtproto/posts', requireAuth, resolveChannel, asyncHandler(async
   try {
     const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
+    if (!consumeSourceRefreshQuota(req, res)) return;
     const data = await mtprotoFetch('/posts', { limit, offset_id: offsetId });
     cacheSet(cacheKey, data);
     res.json(data);
@@ -2241,6 +2283,7 @@ app.get('/api/tg/mtproto/views_summary', requireAuth, resolveChannel, asyncHandl
   try {
     const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
+    if (!consumeSourceRefreshQuota(req, res)) return;
     const data = await mtprotoFetch('/views_summary', { limit }, MTPROTO_TIMEOUT_STATS_MS);
     cacheSet(cacheKey, data);
     res.json(data);
@@ -2255,6 +2298,7 @@ app.get('/api/tg/mtproto/stats', requireAuth, resolveChannel, asyncHandler(async
   try {
     const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
+    if (!consumeSourceRefreshQuota(req, res)) return;
     const data = await mtprotoFetch('/stats', {}, MTPROTO_TIMEOUT_STATS_MS);
     cacheSet(cacheKey, data);
     res.json(data);
@@ -2272,6 +2316,7 @@ app.get('/api/tg/mtproto/graphs', requireAuth, resolveChannel, asyncHandler(asyn
   try {
     const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
+    if (!consumeSourceRefreshQuota(req, res)) return;
     const data = await mtprotoFetch('/graphs', {}, MTPROTO_TIMEOUT_HEAVY_MS);
     cacheSet(cacheKey, data);
     res.json(data);
@@ -2302,6 +2347,7 @@ app.get('/api/tg/mtproto/velocity', requireAuth, resolveChannel, async (req, res
     // нет снапшота (до первого крона) → live-расчёт ТОЛЬКО для central-канала
     // (у остальных данные приходят коллектором в Postgres).
     if (req.channel.source !== 'central') return res.json({ available: false, source: 'collector', empty: true });
+    if (!consumeSourceRefreshQuota(req, res)) return;
     const data = await mtprotoFetch('/velocity', {}, MTPROTO_TIMEOUT_HEAVY_MS);
     if (data && data.available) {
       data.source = 'live';
@@ -2322,6 +2368,7 @@ app.get('/api/tg/mtproto/mentions', requireAuth, resolveChannel, async (req, res
   try {
     const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
+    if (!consumeSourceRefreshQuota(req, res)) return;
     const data = await mtprotoFetch('/mentions', {}, MTPROTO_TIMEOUT_HEAVY_MS);
     if (data && data.available) {
       // accumulate the full deduped list into the archive (history beyond searchPosts' window)
@@ -2345,6 +2392,7 @@ app.get('/api/tg/mtproto/post_stats/:id', requireAuth, resolveChannel, async (re
   try {
     const cached = cacheGet(cacheKey);
     if (cached) return res.json(cached);
+    if (!consumeSourceRefreshQuota(req, res)) return;
     const data = await mtprotoFetch('/post_stats/' + id, {}, MTPROTO_TIMEOUT_STATS_MS);
     cacheSet(cacheKey, data);
     res.json(data);
@@ -2407,6 +2455,7 @@ app.get('/api/tg/full', requireAuth, resolveChannel, asyncHandler(async (req, re
   }
   const limit = Math.min(100, parseInt(req.query.limit) || 30);
   try {
+    if (!consumeSourceRefreshQuota(req, res)) return;
     const [botChannel, mtChannel, viewsSummary, posts] = await Promise.allSettled([
       (async () => {
         const [chat, count] = await Promise.all([
