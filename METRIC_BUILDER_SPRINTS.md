@@ -237,6 +237,23 @@ color-toggle + crossfade иконок + remount текста (`index.css:251`, `
 
 ## Журнал
 
+- 2026-07-05 — **P1 Дизайн/Motion «Card-to-detail shared-element transition» — SHIPPED `a376761`**
+  (lint + build + 354 vitest + 204 e2e; бандл `index-UfjILPnG.js`). Overlay детали теперь ВЫРАСТАЕТ из
+  кликнутой карточки (steep shared-element), а не появляется модалкой. framer НЕ трогаю (только лендинг) —
+  hand-CSS transform-FLIP. Механика: `DetailShell` получил `originRect?:DOMRect|null` + `useLayoutEffect`
+  FLIP (панель лежит на ФИНАЛЬНОМ размере → charts/text меряются сразу, БЕЗ redraw; инверт transform к rect
+  карточки → play к identity через `var(--motion-glide) var(--ease-standard)`). **Transform-only, БЕЗ
+  opacity-fade** — контент-контраст цел для axe-семпла в полёте; радиус углов скейлится с боксом = морф
+  радиуса бесплатно. **`useLayoutEffect` (НЕ useEffect)** — инверт до paint, иначе кадр полноразмерной панели
+  до сжатия. `ChartWidget` ловит rect в `openExpand` (ДО смены URL) → проброс через ChartExpandOverlay/
+  explorer-render-prop → ExpandableChart/WidgetExplorer/ConfigWidget форвардят. Backdrop fade
+  (`.detail-backdrop-in`, `var(--motion-press)`). Всё под reduced-motion (matchMedia early-return + колпак).
+  **URL-driven open** → shared-link/reload/back-forward без клика = rect null = plain appear.
+  **Ultracode adversarial-review (4 оси → verify-скептик по каждой находке): 1 confirmed MED, 0 refuted,
+  пофикшено.** ГРАБЛЯ (поймана ревью): back/forward браузера меняют URL БЕЗ вызова closeExpand → стирать rect
+  надо на КАЖДОМ переходе в closed (effect на `[expandOpen]`, а не только в closeExpand), иначе Forward-
+  переоткрытие морфит из stale off-screen footprint. Flash-баг (useEffect→useLayoutEffect) поймал сам ДО
+  ревью. Solo-часть: гейт; ревью подтвердил 1 реальную дыру → executor-дисциплина работает.
 - 2026-07-05 — **P1 Дизайн/Motion «Design tokens governance» — SHIPPED `75ce077`**
   (lint:motion + build + 348 vitest + 200 e2e; бандл `index-C5snA6l5.js`). Разбор: палитра/тип-
   шкала/радиус/поверхности УЖЕ токенизированы (tailwind fontSize-лестница + `--*` в index.css) —
