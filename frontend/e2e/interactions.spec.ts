@@ -35,7 +35,10 @@ test('detail overlay is URL-stated and closes on browser Back', async ({ page })
 });
 
 test('chart hover: tooltip readout appears, moves and clears (single-svg hit-test)', async ({ page }) => {
-  await bootDemo(page, '/');
+  // The full breakdown charts (with the hover readout) live on /analytics now — the TG dashboard is
+  // focused pages, so Обзор is a Sparkline-only summary. Previously this hit /' and relied on the
+  // scroll-feed pre-mounting the Аналитика block below the short Overview.
+  await bootDemo(page, '/analytics');
   // A series chart (LineChart exposes a named role=img svg). The svg itself is the hit surface —
   // hover derives the point index from the pointer x, no per-point rects.
   const chart = page.locator('svg[aria-label^="График:"]').first();
