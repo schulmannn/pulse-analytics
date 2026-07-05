@@ -105,7 +105,8 @@ export function Home() {
               <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" />
             </svg>
             <svg className="i-done" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M20 6 9 17l-5-5" />
+              {/* pathLength=1 normalises the stroke length so the CSS draw-on (dasharray/offset) needs no measuring */}
+              <path d="M20 6 9 17l-5-5" pathLength={1} />
             </svg>
           </span>
           <span key={editing ? 'done' : 'edit'} className="edit-toggle-label">

@@ -275,18 +275,33 @@
     color: hsl(var(--foreground));
     background: transparent;
     border: 1px solid transparent;
-    transition: background-color 0.18s ease, color 0.18s ease;
+    /* v2 press choreography: the press-scale is a fast tactile beat (~140ms), while the mode
+       invert (fill + hairline + ink) rides a calmer 240ms curve so entering edit mode reads as
+       the whole chip settling, not just a colour swap. */
+    transition:
+      background-color 0.24s ease,
+      border-color 0.24s ease,
+      color 0.24s ease,
+      transform 0.14s cubic-bezier(0.2, 0.7, 0.3, 1);
   }
   .edit-toggle:hover {
     background: hsl(var(--foreground) / 0.06);
   }
+  /* Press feedback: the chip dips under the finger and springs back on release (120–180ms band). */
+  .edit-toggle:active {
+    transform: scale(0.96);
+  }
   .edit-toggle[data-active='true'] {
     background: hsl(var(--primary) / 0.1);
+    /* Фон И обводка мягко инвертируются: the active surface also gains a matching accent hairline
+       (was transparent) so the mode change is a whole-chip shift, not just a fill underneath the ink. */
+    border-color: hsl(var(--accent-foreground) / 0.22);
     /* Ink-on-tint token, not --primary: on the 10% primary tint the plain accent is only ~4:1 —
        --accent-foreground is calibrated to clear AA 4.5 on exactly this kind of blue tint. */
     color: hsl(var(--accent-foreground));
   }
-  /* Pencil ↔ check crossfade: both glyphs stacked, opacity+scale toggled by data-active. */
+  /* Pencil → check morph: the pencil lifts + spins out while the check DRAWS itself in via
+     stroke-dashoffset (not a plain crossfade) — that draw-on is the signature morph beat. */
   .edit-toggle-icons {
     position: relative;
     display: inline-block;
@@ -304,6 +319,12 @@
     opacity: 0;
     transform: scale(0.6) rotate(-8deg);
   }
+  /* Check hidden = its single (pathLength-normalised) stroke fully retracted; drawn = offset 0. */
+  .edit-toggle-icons .i-done path {
+    stroke-dasharray: 1;
+    stroke-dashoffset: 1;
+    transition: stroke-dashoffset 0.26s cubic-bezier(0.2, 0.7, 0.3, 1);
+  }
   .edit-toggle[data-active='true'] .i-edit {
     opacity: 0;
     transform: scale(0.6) rotate(8deg);
@@ -311,6 +332,9 @@
   .edit-toggle[data-active='true'] .i-done {
     opacity: 1;
     transform: scale(1) rotate(0);
+  }
+  .edit-toggle[data-active='true'] .i-done path {
+    stroke-dashoffset: 0;
   }
 }
 /* Label crossfade (keyed remount replays it on Edit↔Готово) + the edit-mode reveals. */
@@ -341,7 +365,12 @@
   animation: add-widget-in 0.3s cubic-bezier(0.2, 0.7, 0.3, 1) both;
 }
 @media (prefers-reduced-motion: reduce) {
-  .edit-toggle-icons > svg { transition: none; }
+  /* No press-dip, no glyph slide, no stroke draw-on — the check simply shows drawn when active. */
+  .edit-toggle { transition: none; }
+  .edit-toggle:active { transform: none; }
+  .edit-toggle-icons > svg,
+  .edit-toggle-icons .i-done path { transition: none; }
+  .edit-toggle-icons .i-done path { stroke-dashoffset: 0; }
   .edit-toggle-label,
   .home-remove-enter,
   .add-widget-enter { animation: none; }
