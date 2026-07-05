@@ -142,6 +142,23 @@
     --chart-5: 326 55% 70%;   /* reddish purple */
     --chart-6: 202 75% 66%;   /* sky blue */
   }
+
+  /* ── Motion canon (theme-agnostic — durations/easing don't change between light and dark) ──────
+     ONE house easing + a small duration ladder, so UI timings live in one place instead of being
+     re-typed per component/rule. Values map 1:1 to what already shipped — this is tokenisation, not
+     a re-time. Bespoke illustration loops (cartograph / connect / starfield / reorder jiggle) and
+     framer on the landing keep their own timings on purpose. Reduced-motion collapses ALL of these
+     via the global 0.01ms cap below, so token-driven rules never need a per-rule duration guard.
+     Full canon + usage: frontend/DESIGN_TOKENS.md. */
+  :root {
+    --ease-standard: cubic-bezier(0.2, 0.7, 0.3, 1); /* entrance / settle ease-out — the house curve */
+    --motion-press: 140ms;    /* tactile press feedback (button dip)                       */
+    --motion-fast: 200ms;     /* quick opacity / colour fades                              */
+    --motion-base: 240ms;     /* standard control transition (mode swap · icon · hover→active) */
+    --motion-glide: 260ms;    /* FLIP reorder glide · icon stroke draw-on                  */
+    --motion-reveal: 300ms;   /* larger reveals (add-widget rise)                          */
+    --motion-entrance: 350ms; /* card mount rise                                           */
+  }
 }
 
 @layer base {
@@ -259,7 +276,7 @@
   to { opacity: 1; transform: translateY(0); }
 }
 .widget-enter {
-  animation: widget-rise 0.35s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+  animation: widget-rise var(--motion-entrance) var(--ease-standard) both;
   animation-delay: var(--enter-delay, 0ms);
 }
 @media (prefers-reduced-motion: reduce) {
@@ -279,10 +296,10 @@
        invert (fill + hairline + ink) rides a calmer 240ms curve so entering edit mode reads as
        the whole chip settling, not just a colour swap. */
     transition:
-      background-color 0.24s ease,
-      border-color 0.24s ease,
-      color 0.24s ease,
-      transform 0.14s cubic-bezier(0.2, 0.7, 0.3, 1);
+      background-color var(--motion-base) ease,
+      border-color var(--motion-base) ease,
+      color var(--motion-base) ease,
+      transform var(--motion-press) var(--ease-standard);
   }
   .edit-toggle:hover {
     background: hsl(var(--foreground) / 0.06);
@@ -313,7 +330,7 @@
     inset: 0;
     width: 16px;
     height: 16px;
-    transition: opacity 0.2s ease, transform 0.24s cubic-bezier(0.2, 0.7, 0.3, 1);
+    transition: opacity var(--motion-fast) ease, transform var(--motion-base) var(--ease-standard);
   }
   .edit-toggle-icons .i-done {
     opacity: 0;
@@ -323,7 +340,7 @@
   .edit-toggle-icons .i-done path {
     stroke-dasharray: 1;
     stroke-dashoffset: 1;
-    transition: stroke-dashoffset 0.26s cubic-bezier(0.2, 0.7, 0.3, 1);
+    transition: stroke-dashoffset var(--motion-glide) var(--ease-standard);
   }
   .edit-toggle[data-active='true'] .i-edit {
     opacity: 0;
@@ -344,7 +361,7 @@
 }
 .edit-toggle-label {
   display: inline-block;
-  animation: edit-label-in 0.2s ease both;
+  animation: edit-label-in var(--motion-fast) ease both;
 }
 /* A card's «×» remove affordance appears with a soft scale-in, staggered per grid slot via the
    card's --enter-delay (inherited from the inner card). */
@@ -353,7 +370,7 @@
   to { opacity: 1; transform: scale(1) translateY(0); }
 }
 .home-remove-enter {
-  animation: home-remove-in 0.24s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+  animation: home-remove-in var(--motion-base) var(--ease-standard) both;
   animation-delay: var(--enter-delay, 0ms);
 }
 /* «+ Добавить виджет» enters as a fresh grid item (rise + fade) when edit mode opens. */
@@ -362,7 +379,7 @@
   to { opacity: 1; transform: translateY(0); }
 }
 .add-widget-enter {
-  animation: add-widget-in 0.3s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+  animation: add-widget-in var(--motion-reveal) var(--ease-standard) both;
 }
 @media (prefers-reduced-motion: reduce) {
   /* No press-dip, no glyph slide, no stroke draw-on — the check simply shows drawn when active. */
@@ -415,7 +432,7 @@
   from { opacity: 0; transform: translate(-50%, -50%) scale(0.6); }
   to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 }
-.connect-orb { animation: connect-radiate 0.6s cubic-bezier(0.2, 0.7, 0.3, 1) both; animation-delay: calc(var(--i, 0) * 0.06s + 0.12s); }
+.connect-orb { animation: connect-radiate 0.6s var(--ease-standard) both; animation-delay: calc(var(--i, 0) * 0.06s + 0.12s); }
 .connect-hub { animation: connect-hub-pop 0.5s ease-out both; }
 @media (prefers-reduced-motion: reduce) {
   .connect-orb, .connect-hub { animation: none; }

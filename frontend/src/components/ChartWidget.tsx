@@ -709,7 +709,7 @@ export function WidgetGroup({ id, className, children }: WidgetGroupProps) {
       el.style.transition = 'none';
       el.style.transform = `translate(${dx}px, ${dy}px)`;
       void el.offsetHeight; // commit the inverted position before playing
-      el.style.transition = 'transform 260ms cubic-bezier(0.2, 0.7, 0.3, 1)';
+      el.style.transition = 'transform var(--motion-glide) var(--ease-standard)';
       el.style.transform = '';
       el.dataset.gliding = '1';
       const clear = () => {
@@ -902,7 +902,7 @@ export function WidgetGroup({ id, className, children }: WidgetGroupProps) {
     // Glide home from wherever the pointer let go (the live reorder already committed).
     el.dataset.gliding = '1';
     void el.offsetHeight;
-    el.style.transition = 'transform 260ms cubic-bezier(0.2, 0.7, 0.3, 1)';
+    el.style.transition = 'transform var(--motion-glide) var(--ease-standard)';
     el.style.transform = '';
     el.addEventListener('transitionend', done);
     window.setTimeout(done, 400); // transitionend can be swallowed (tab switch) — belt & braces
