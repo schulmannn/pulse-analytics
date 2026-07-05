@@ -237,6 +237,20 @@ color-toggle + crossfade иконок + remount текста (`index.css:251`, `
 
 ## Журнал
 
+- 2026-07-04 — **P1 Единая подпись source+data-quality — SHIPPED `db8dce3`** (332 vitest [+11] + 192 e2e).
+  `WidgetResult.meta` (WidgetMeta: network/@source-если-pinned/период/выборка N постов/N дн. в архиве/
+  freshness warn-при-stale/comparisonNote) собирается ЧИСТО в резолвере (commonMeta + path-поля, merge
+  path-wins; attach на ВСЕ результаты вкл. empty) → `WidgetMetaLine` = одна muted 2xs строка между графиком
+  и стат-футером + под empty-state. **Adversarial verify (2 оси) = 8 находок, ВСЕ применены:** period-agnostic
+  метрики (summary/graphs breakdowns, IG-демография, ig.followers) НЕ клеймят окно (periodLabel: undefined
+  path-override); IG «Всё» = честное «за 90 дн.» (insights cap); запрошенное сравнение никогда не гаснет молча
+  (coverage-suppressed / пустой baseline / «Всё» без окна / netGrowth-unsupported — у каждого своя нота);
+  archiveDays без null-subscriber строк; **ChannelScope перенесён ВНУТРЬ ChartSection на body-only** (explorer-
+  черновик теперь сам управляет скоупом — «Как в свитчере» в сандбоксе превьюит свитчер, не pinned-оригинал);
+  aria: пробелы вне aria-hidden-разделителя; chart-band clipped (svg не красит под подписью). **Граница v1:**
+  legacy own-body композиты получат строку с миграцией U6.3b. Freshness = lib/freshness over ctx.now (pure).
+  Урок: «честная подпись» сама вскрывает старые скоуп-грехи — строка без @handle на pinned-превью сделала
+  видимым pre-existing баг скоупа explorer'а.
 - 2026-07-04 — **P1 Reduced-motion accessibility — SHIPPED `6f4c114`** (321 vitest + **192 e2e**, +16). Ревизия:
   рукописные `animation: none` правила уже покрывали jiggle/entry/cartograph/connect/starfield, Landing гейтится
   через framer `useReducedMotion` (тредится в DashboardMock/hero). Закрыты дыры: (1) **глобальная страховка** в
