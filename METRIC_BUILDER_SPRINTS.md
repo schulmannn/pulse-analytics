@@ -237,6 +237,24 @@ color-toggle + crossfade иконок + remount текста (`index.css:251`, `
 
 ## Журнал
 
+- 2026-07-05 — **P1 Дизайн/Motion «Edit button press choreography v2» — SHIPPED `b866fa5`**
+  (348 vitest + 200 e2e; бандл `index-CxfmLjXX.js`). Донор = v1 edit-toggle (`f74b703`): crossfade
+  pencil↔check + primary-tint active. Codex-спека v2: press-scale · icon **morph** pencil→check · фон/
+  обводка мягко инвертируются · grid входит через stagger; тайминги 120-180ms press / 220-320ms mode;
+  respects reduced-motion. Реализация (чистый CSS в `index.css` + один атрибут в `Home.tsx`):
+  (1) **press-scale** — `.edit-toggle:active { transform: scale(0.96) }`, transform-переход 0.14s
+  (140ms, в полосе) отдельной кривой от mode-перехода; (2) **morph** — не crossfade: карандаш
+  уезжает (scale/rotate/opacity), а галка **рисует сама себя** через `stroke-dashoffset` (добавил
+  `pathLength={1}` на `<path>` галки → dasharray/offset без замера длины), draw-on 0.26s; (3) **фон+
+  обводка инвертируются вместе** — active-состояние получило accent-hairline (была `transparent`) +
+  `border-color` в transition, mode-кривая поднята 0.18s→0.24s (240ms, в полосе 220-320); ink остаётся
+  `--accent-foreground` (уже AA-калибр на primary/10 тинте — контраст-гейт не трогаю). (4) **grid
+  stagger** уже жил (`home-remove-enter` + `--enter-delay`: × маунтятся и стаггерятся при входе в
+  edit). (5) **reduced-motion** — расширил локальный блок: `transition:none` на toggle+svg+галку,
+  `:active { transform:none }`, галка `stroke-dashoffset:0` (показана нарисованной мгновенно); плюс
+  глобальный 0.01ms-колпак. Solo (чистый визуал/CSS, e2e-covered — reduced-motion/a11y/contrast
+  home-edit специ уже кликают toggle и прошли). Authed Home локально не рендерится → живой фил = юзер
+  на проде; demo-Playwright = автоверификация.
 - 2026-07-05 — **P1 Charts: единый hit-test курсора вместо per-point hover-rect — SHIPPED `2a26965`**
   (348 vitest [+6] + 200 e2e [+2]). LineChart/BarChart/DivergingBars рисовали ПРОЗРАЧНЫЙ `<rect>` на
   КАЖДУЮ точку под ховер+drill (365-дн серия × борд карточек = тысячи DOM-нод только под mousemove),
