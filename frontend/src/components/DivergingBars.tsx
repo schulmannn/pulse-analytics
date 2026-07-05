@@ -1,8 +1,9 @@
 import { useContext, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { columnIndex } from '@/lib/chartHover';
+import { axisLabelIndexSet } from '@/lib/chartLabels';
 import { ChartTooltip } from '@/components/ChartTooltip';
-import { ExpandedChartHeightContext } from '@/components/ExpandableChart';
+import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
 
 interface DivergingBarsProps {
   values: number[];
@@ -29,6 +30,7 @@ export function DivergingBars({ values, labels, titles, height }: DivergingBarsP
   const [width, setWidth] = useState(600);
   // The fixed tile / overlay dictates the height; inline renders fall back to `height`.
   const ctxHeight = useContext(ExpandedChartHeightContext);
+  const expanded = useContext(ChartExpandedContext);
 
   useLayoutEffect(() => {
     const el = containerRef.current;
@@ -61,7 +63,7 @@ export function DivergingBars({ values, labels, titles, height }: DivergingBarsP
     const step = W / values.length;
     const barWidth = step * 0.7;
     const gap = step * 0.3;
-    const labelStride = Math.max(1, Math.ceil(values.length / 10));
+    const labelIndexes = axisLabelIndexSet(values.length, W, { minLabelPx: expanded ? 68 : 78, maxLabels: expanded ? 12 : 7 });
 
     // Per-bar boxes — the cached rect layer below and the hover highlight both draw from these.
     const bars = values.map((v, i) => {
@@ -86,7 +88,7 @@ export function DivergingBars({ values, labels, titles, height }: DivergingBarsP
     const labelsLayer = hasLabels ? (
       <>
         {values.map((_, i) => {
-          const show = labels?.[i] && (i === 0 || i === values.length - 1 || i % labelStride === 0);
+          const show = labels?.[i] && labelIndexes.has(i);
           if (!show) return null;
           return (
             <text
@@ -94,6 +96,7 @@ export function DivergingBars({ values, labels, titles, height }: DivergingBarsP
               x={i * step + step / 2}
               y={h + 14}
               textAnchor="middle"
+              data-chart-axis-label="x"
               className="pointer-events-none select-none fill-muted-foreground text-2xs font-medium"
             >
               {labels?.[i]}
@@ -104,7 +107,7 @@ export function DivergingBars({ values, labels, titles, height }: DivergingBarsP
     ) : null;
 
     return { W, h, mid, step, bars, barsLayer, labelsLayer, labelPad };
-  }, [values, labels, width, ctxHeight, height]);
+  }, [values, labels, width, ctxHeight, height, expanded]);
 
   if (!values || values.length === 0 || !plot) {
     return (

@@ -3,6 +3,7 @@ import type { MouseEvent as ReactMouseEvent } from 'react';
 import { fmt } from '@/lib/format';
 import { detectAnomalies } from '@/lib/anomaly';
 import { nearestPointIndex } from '@/lib/chartHover';
+import { axisLabelIndexes } from '@/lib/chartLabels';
 import { ChartTooltip, type TooltipRow, type TooltipState } from '@/components/ChartTooltip';
 import { ChartExpandedContext, ExpandedChartHeightContext, WidgetTargetContext } from '@/components/ExpandableChart';
 
@@ -260,19 +261,10 @@ export function LineChart({
         : '';
 
     // Real x-axis ticks (axes mode): width-aware stride so labels never collide — one label
-    // per ~90px, always including the first and the last point.
+    // by measured width, always including the first and the last point.
     const xTicks = hasXAxis
       ? (() => {
-          const maxTicks = Math.max(2, Math.floor(plotW / 90));
-          const stride = Math.ceil(n / maxTicks);
-          const idxs: number[] = [];
-          for (let i = 0; i < n; i += stride) idxs.push(i);
-          if (idxs[idxs.length - 1] !== n - 1) {
-            // Replace a too-close neighbour instead of stacking a second label on it.
-            if (n - 1 - idxs[idxs.length - 1] < stride * 0.6) idxs.pop();
-            idxs.push(n - 1);
-          }
-          return idxs
+          return axisLabelIndexes(n, plotW, { minLabelPx: expanded ? 76 : 88, maxLabels: expanded ? 12 : 8 })
             .map((i) => {
               const text = labels?.[i] ?? '';
               if (!text) return null;
@@ -375,7 +367,7 @@ export function LineChart({
         {xTicks.map((t) => (
           <g key={`x${t.i}`}>
             <line x1={t.px} y1={h - padB + 3} x2={t.px} y2={h - padB + 7} stroke="hsl(var(--border))" strokeWidth="1" vectorEffect="non-scaling-stroke" />
-            <text x={t.x} y={h - 8} textAnchor="middle" className="pointer-events-none select-none fill-muted-foreground text-2xs font-medium tabular-nums">
+            <text x={t.x} y={h - 8} textAnchor="middle" data-chart-axis-label="x" className="pointer-events-none select-none fill-muted-foreground text-2xs font-medium tabular-nums">
               {t.text}
             </text>
           </g>
@@ -455,6 +447,10 @@ export function LineChart({
   };
 
   const hovered = hover && hover.i < n ? points[hover.i] : null;
+  const compactLabelIndexes =
+    labels && labels.length > 0 && !hasXAxis
+      ? axisLabelIndexes(labels.length, W, { minLabelPx: 92, maxLabels: expanded ? 8 : 5 })
+      : [];
 
   return (
     <div
@@ -496,10 +492,12 @@ export function LineChart({
       {/* Minimal x labels (axis-free cards): first / mid / last under the svg. Axes mode
           draws the real in-svg x-axis above instead. */}
       {labels && labels.length > 0 && !hasXAxis && (
-        <div className="mt-1.5 flex select-none justify-between px-1 text-2xs font-medium text-muted-foreground">
-          <span>{labels[0]}</span>
-          <span>{labels[Math.floor(labels.length / 2)]}</span>
-          <span>{labels[labels.length - 1]}</span>
+        <div className="mt-1.5 flex select-none justify-between gap-2 px-1 text-2xs font-medium text-muted-foreground">
+          {compactLabelIndexes.map((i) => (
+            <span key={i} data-chart-axis-label="x-compact" className="min-w-0 truncate">
+              {labels[i]}
+            </span>
+          ))}
         </div>
       )}
 
