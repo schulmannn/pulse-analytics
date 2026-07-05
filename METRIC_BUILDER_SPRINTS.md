@@ -237,6 +237,23 @@ color-toggle + crossfade иконок + remount текста (`index.css:251`, `
 
 ## Журнал
 
+- 2026-07-05 — **P1 Charts: единый hit-test курсора вместо per-point hover-rect — SHIPPED `2a26965`**
+  (348 vitest [+6] + 200 e2e [+2]). LineChart/BarChart/DivergingBars рисовали ПРОЗРАЧНЫЙ `<rect>` на
+  КАЖДУЮ точку под ховер+drill (365-дн серия × борд карточек = тысячи DOM-нод только под mousemove),
+  и каждый шаг каретки пересобирал масштаб+все path-строки инлайн в теле рендера. Фикс: `lib/chartHover.ts`
+  (pure `nearestPointIndex` round / `columnIndex` floor, клемп [0,n-1] = старые edge-зоны, unit-тест) +
+  геометрия и статичные слои в ОДНОМ useMemo (без hover-deps) + ОДИН onMouseMove на svg, индекс O(1);
+  ховер рисует только оверлей (каретка/маркер), движение внутри зоны точки = тот же state-объект (без
+  ре-рендера); per-point rect'ы удалены. Bar/Diverging per-bar-opacity → group-opacity dim + перерисовка
+  ховер-бара. **Adversarial-review (4 оси → verify-скептики, 3 confirmed / 0 refuted, ВСЕ пофикшены):**
+  [MED] highlight-бар рисовался ПОВЕРХ ghost/target-линий (z-order регрессия) → rect перенесён МЕЖДУ
+  dimmed-баров и overLayer (порядок HEAD); [MED] leave-dip — только что наведённый бар вспыхивал ниже
+  idle на mouse-out → `transition-opacity` только ВО ВРЕМЯ ховера, un-dim снапает; [LOW] svg-onClick
+  срабатывал на press-drag-release scrub (drag-to-read → нежданный drill) → guard бейлит при >5px press→
+  release, AT-клик без записанного press проходит. Верификатор эмпирически (Playwright rAF-семплинг)
+  подтвердил обе MED ДО фикса. ГРАБЛЯ: `Math.round` даёт `-0` слева от origin → клемп через `Math.max`.
+  Drill-навигация в e2e fixture-хрупка (story-card hero-span перекрывает центр svg) → e2e фиксирует
+  no-scrub-drill, drill-happy-path = существующий KPI-hero тест + unit-математика.
 - 2026-07-05 — **P1 widgetStore: селекторные подписки вместо глобального тика — SHIPPED `51f942f`**
   (342 vitest [+10] + 192 e2e). Точечное изменение стора (скрыть/период/акцент одного виджета) теперь
   ре-рендерит ОДНУ карточку вместо всех N. Было ТРИ канала O(N)-каскада: (1) каждый ChartSection на
