@@ -246,6 +246,15 @@ async function migrateOwnerChannel() {
 async function adoptOwnerChannel(adminUid) {
   if (!enabled || adminUid == null) return false;
   await pool.query(`UPDATE channels SET owner_uid=$1 WHERE owner_uid IS NULL AND source='central'`, [adminUid]);
+  // Canonicalise the freshly-adopted central channel too (workspace now; tg source when its
+  // platform id is already known — otherwise setChannelTgId stamps it on discovery).
+  const { rows } = await pool.query(
+    `SELECT id, tg_channel_id, username, title FROM channels WHERE owner_uid=$1 AND source='central'`, [adminUid]);
+  if (rows[0]) {
+    await ensureChannelCanonical(rows[0].id, adminUid, rows[0].tg_channel_id != null
+      ? { network: 'tg', externalId: rows[0].tg_channel_id, username: rows[0].username, title: rows[0].title }
+      : {});
+  }
   return true;
 }
 
@@ -318,6 +327,14 @@ async function getOwnerChannelId() {
 async function setChannelTgId(id, tgId, executor = pool) {
   if (!enabled || !id || tgId == null) return false;
   await executor.query(`UPDATE channels SET tg_channel_id=$2 WHERE id=$1 AND tg_channel_id IS NULL`, [id, tgId]);
+  // The platform identity just became known — canonicalise (find-or-create the tg source and
+  // stamp the link). NULL-fill only, so a re-discovery never re-homes an existing link.
+  const { rows } = await executor.query(`SELECT owner_uid, username, title FROM channels WHERE id=$1`, [id]);
+  if (rows[0]) {
+    await ensureChannelCanonical(id, rows[0].owner_uid, {
+      network: 'tg', externalId: tgId, username: rows[0].username, title: rows[0].title,
+    });
+  }
   return true;
 }
 
@@ -631,6 +648,57 @@ async function useEmailToken(tokenHash, kind) {
   return rows[0] ? { uid: rows[0].uid } : null;
 }
 
+// ── Canonical wiring for NEW rows (ADR-001; the 010 backfill covers pre-existing ones) ─────────
+
+// The creator's personal workspace, created on first need. Backfill 010 seeds one per existing
+// user; this covers users registered after the migration and keeps creation paths one-call simple.
+async function ensurePersonalWorkspace(uid, executor = pool) {
+  if (!enabled || uid == null) return null;
+  const found = await executor.query(`SELECT id FROM workspaces WHERE owner_uid=$1 ORDER BY id LIMIT 1`, [uid]);
+  if (found.rows[0]) return found.rows[0].id;
+  const { rows } = await executor.query(
+    `INSERT INTO workspaces (name, owner_uid)
+     SELECT split_part(u.email,'@',1), u.id FROM users u WHERE u.id=$1
+     RETURNING id`, [uid]);
+  const wsId = rows[0] ? rows[0].id : null;
+  if (wsId) {
+    await executor.query(
+      `INSERT INTO workspace_members (workspace_id, uid, role) VALUES ($1,$2,'owner')
+       ON CONFLICT (workspace_id, uid) DO NOTHING`, [wsId, uid]);
+  }
+  return wsId;
+}
+
+// Find-or-create the deduplicated identity of an external property.
+async function ensureExternalSource(network, externalId, { username, title } = {}, executor = pool) {
+  if (!enabled || !network || externalId == null) return null;
+  const { rows } = await executor.query(
+    `INSERT INTO external_sources (network, external_id, username, title)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (network, external_id) DO UPDATE SET
+       username = COALESCE(EXCLUDED.username, external_sources.username),
+       title    = COALESCE(EXCLUDED.title, external_sources.title)
+     RETURNING id`,
+    [network, String(externalId), username || null, title || null]);
+  return rows[0] ? rows[0].id : null;
+}
+
+// Stamp a channel row with its workspace (creator's personal one) and, when the platform identity
+// is already known, its canonical source. Fills NULLs only — never re-homes an existing link.
+async function ensureChannelCanonical(channelId, ownerUid, { network, externalId, username, title } = {}) {
+  if (!enabled || !channelId) return;
+  const wsId = await ensurePersonalWorkspace(ownerUid);
+  if (wsId) {
+    await pool.query(`UPDATE channels SET workspace_id=$2 WHERE id=$1 AND workspace_id IS NULL`, [channelId, wsId]);
+  }
+  if (network && externalId != null) {
+    const srcId = await ensureExternalSource(network, externalId, { username, title });
+    if (srcId) {
+      await pool.query(`UPDATE channels SET source_id=$2 WHERE id=$1 AND source_id IS NULL`, [channelId, srcId]);
+    }
+  }
+}
+
 // ── Channels (collector onboarding) + API keys + snapshot — Sprint 1C ──
 async function createChannel({ owner_uid, username, title }) {
   if (!enabled || owner_uid == null) return null;
@@ -639,7 +707,11 @@ async function createChannel({ owner_uid, username, title }) {
     `INSERT INTO channels (owner_uid, username, title, status, source)
      VALUES ($1,$2,$3,'active','collector') RETURNING ${CHANNEL_COLS}`,
     [owner_uid, uname || null, title || uname || null]);
-  return rows[0] || null;
+  const row = rows[0] || null;
+  // Workspace now; the canonical source is stamped later, when the platform id becomes known
+  // (setChannelTgId for collector channels).
+  if (row) await ensureChannelCanonical(row.id, owner_uid);
+  return row;
 }
 
 // Standalone Instagram source — a channels row not backed by any Telegram channel
@@ -652,7 +724,10 @@ async function createIgChannel({ owner_uid, username }) {
     `INSERT INTO channels (owner_uid, username, title, status, source)
      VALUES ($1,$2,$3,'active','ig') RETURNING ${CHANNEL_COLS}`,
     [owner_uid, uname || null, uname || 'Instagram']);
-  return rows[0] || null;
+  const row = rows[0] || null;
+  // Workspace now; the IG canonical source lands in saveIgAccount (ig_user_id known there).
+  if (row) await ensureChannelCanonical(row.id, owner_uid);
+  return row;
 }
 
 // The user's channel already holding this Instagram identity (multi-account reconnect dedup).
@@ -680,7 +755,13 @@ async function createTgChannel({ owner_uid, tg_channel_id, username, title }) {
                    status='active'
      RETURNING ${CHANNEL_COLS}`,
     [owner_uid, tg_channel_id, uname || null, title || uname || null]);
-  return rows[0] || null;
+  const row = rows[0] || null;
+  if (row) {
+    await ensureChannelCanonical(row.id, owner_uid, {
+      network: 'tg', externalId: tg_channel_id, username: uname || null, title: title || uname || null,
+    });
+  }
+  return row;
 }
 
 // Delete a channel the user owns (cascades data/keys/snapshot). Never the central one.
@@ -1015,14 +1096,20 @@ async function getAttachment(id) {
 // (callers encrypt via lib/ig_crypto before persisting) — db.js never sees plaintext.
 async function saveIgAccount(channelId, { ig_user_id, username, access_token_enc, token_expires_at, scopes }) {
   if (!enabled || !channelId) return false;
+  // Canonical IG source (ADR-001): find-or-create by ig_user_id and stamp the account row; a
+  // standalone IG channel (source='ig', no TG identity) also carries it as its channel source.
+  const srcId = await ensureExternalSource('ig', ig_user_id, { username });
   await pool.query(
-    `INSERT INTO ig_accounts (channel_id, ig_user_id, username, access_token_enc, token_expires_at, scopes, updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6, now())
+    `INSERT INTO ig_accounts (channel_id, ig_user_id, username, access_token_enc, token_expires_at, scopes, source_id, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7, now())
      ON CONFLICT (channel_id) DO UPDATE SET
        ig_user_id=EXCLUDED.ig_user_id, username=EXCLUDED.username,
        access_token_enc=EXCLUDED.access_token_enc, token_expires_at=EXCLUDED.token_expires_at,
-       scopes=EXCLUDED.scopes, updated_at=now()`,
-    [channelId, ig_user_id, username || null, access_token_enc, token_expires_at || null, scopes || null]);
+       scopes=EXCLUDED.scopes, source_id=COALESCE(EXCLUDED.source_id, ig_accounts.source_id), updated_at=now()`,
+    [channelId, ig_user_id, username || null, access_token_enc, token_expires_at || null, scopes || null, srcId]);
+  await pool.query(
+    `UPDATE channels SET source_id=$2 WHERE id=$1 AND source_id IS NULL AND tg_channel_id IS NULL AND source='ig'`,
+    [channelId, srcId]);
   return true;
 }
 
@@ -1418,4 +1505,5 @@ module.exports = {
   REPORT_SCHEDULES, listReports, getReport, createReport, updateReport, deleteReport,
   listDueReports, markReportSent,
   claimJob, completeJob, failJob, getJob, runJobOnce,
+  ensurePersonalWorkspace, ensureExternalSource, ensureChannelCanonical,
 };

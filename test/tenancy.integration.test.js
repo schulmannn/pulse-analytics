@@ -164,3 +164,27 @@ test('jobs: duplicate enqueue collapses, failures are retryable, success is cach
   const blocked = await db.claimJob('it_test', liveKey, { leaseSeconds: 300 });
   assert.strictEqual(blocked, null, 'live lease blocks a concurrent claim');
 });
+
+test('creation paths canonicalise: createTgChannel gets workspace + shared source', { skip }, async () => {
+  const u1 = await mkUser('creator1');
+  const u2 = await mkUser('creator2');
+  const tgId = 900000000 + (Date.now() % 1000000);
+
+  const chA = await db.createTgChannel({ owner_uid: u1, tg_channel_id: tgId, username: `qr_${nonce}` });
+  const chB = await db.createTgChannel({ owner_uid: u2, tg_channel_id: tgId, username: `qr_${nonce}` });
+  assert.ok(chA && chB && chA.id !== chB.id, 'two links created');
+
+  const { rows: [a] } = await pool.query(`SELECT workspace_id, source_id FROM channels WHERE id=$1`, [chA.id]);
+  const { rows: [b] } = await pool.query(`SELECT workspace_id, source_id FROM channels WHERE id=$1`, [chB.id]);
+  assert.ok(a.workspace_id != null && b.workspace_id != null, 'both links joined a personal workspace');
+  assert.notStrictEqual(a.workspace_id, b.workspace_id, 'different creators → different workspaces');
+  assert.ok(a.source_id != null, 'source stamped');
+  assert.strictEqual(a.source_id, b.source_id, 'SAME external channel → SAME canonical source');
+
+  // …which makes the ingest of one link instantly visible through the other.
+  await db.upsertChannelDaily(chA.id, [{ day: '2026-07-03', subscribers: 777, joins: 7, leaves: 0, views: 70, forwards: 7, reactions: 7 }]);
+  const viaB = await db.getChannelHistory(chB.id, 4000);
+  assert.ok(viaB.some((r) => r.day === '2026-07-03' && r.subscribers === 777), 'shared source shares history');
+
+  await pool.query(`DELETE FROM external_sources WHERE id=$1`, [a.source_id]).catch(() => {});
+});
