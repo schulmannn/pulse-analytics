@@ -1861,10 +1861,28 @@ async function processReportSchedules(base) {
     r.schedule === 'weekly'
       ? isMonday || olderThan(r.last_sent_at, 8)
       : isFirst  || olderThan(r.last_sent_at, 32));
+  // ISO-week key (YYYY-Www) so the weekly job key is stable across the whole week.
+  const isoWeekKey = (d) => {
+    const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+    t.setUTCDate(t.getUTCDate() + 4 - (t.getUTCDay() || 7)); // Thursday of this ISO week
+    const week = Math.ceil((((t - Date.UTC(t.getUTCFullYear(), 0, 1)) / 86400000) + 1) / 7);
+    return `${t.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
+  };
   for (const r of due) {
+    // Idempotency key per (report, period): a double cron tick, the catch-up branch firing next
+    // to the anchored one, or a SECOND SERVER INSTANCE can all re-discover the same candidate —
+    // the jobs row makes exactly one of them send (roadmap P0 «Background job idempotency»).
+    const periodKey = r.schedule === 'weekly' ? isoWeekKey(now) : `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
     try {
-      const ok = await sendEmail(r.email, `Atlavue — отчёт „${r.name}“`, reportEmailHtml(base, r));
-      if (ok) await db.markReportSent(r.id);
+      const outcome = await db.runJobOnce('report_email', `report:${r.id}:${periodKey}`, async () => {
+        const ok = await sendEmail(r.email, `Atlavue — отчёт „${r.name}“`, reportEmailHtml(base, r));
+        if (ok) await db.markReportSent(r.id);
+        if (!ok) throw new Error('email send failed');
+        return { sent: true };
+      });
+      if (outcome.skipped) {
+        log('info', 'report_email_deduped', { report_id: r.id, period: periodKey });
+      }
     } catch (e) {
       log('error', 'report_email_failed', { report_id: r.id, error: e.message });
     }

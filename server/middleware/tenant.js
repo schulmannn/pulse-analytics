@@ -24,6 +24,25 @@ function makeResolveChannel({ db, isReady }) {
   };
 }
 
+/* Role gate for WRITE endpoints on a resolved channel (ADR-001). getChannel already attaches the
+   caller's effective role (`member_role`: creator → 'owner', else their workspace_members.role, or
+   null on legacy rows without a workspace, which only the creator can reach). Rank order:
+   viewer < member < admin < owner. Usage AFTER resolveChannel:
+     app.post('/api/channels/:id/key', requireAuth, resolveChannel, requireWorkspaceRole('admin'), …) */
+const ROLE_RANK = { viewer: 0, member: 1, admin: 2, owner: 3 };
+
+function requireWorkspaceRole(minRole) {
+  const need = ROLE_RANK[minRole];
+  if (need == null) throw new Error(`unknown workspace role: ${minRole}`);
+  return function workspaceRoleGate(req, res, next) {
+    // DB off (dev, in-memory mode) → single-user installation, everything allowed.
+    if (!req.channel || req.channel.id == null) return next();
+    const role = req.channel.member_role || (req.channel.owner_uid === (req.user && req.user.uid) ? 'owner' : null);
+    if (role != null && ROLE_RANK[role] >= need) return next();
+    return res.status(403).json({ error: 'Недостаточно прав в этом воркспейсе' });
+  };
+}
+
 function makeServeSnapshot({ db }) {
   return async function serveSnapshot(req, res, pick) {
     if (req.channel && req.channel.source === 'central') return false;
@@ -36,4 +55,4 @@ function makeServeSnapshot({ db }) {
   };
 }
 
-module.exports = { makeResolveChannel, makeServeSnapshot };
+module.exports = { makeResolveChannel, makeServeSnapshot, requireWorkspaceRole };

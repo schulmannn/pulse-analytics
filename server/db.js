@@ -252,12 +252,23 @@ async function adoptOwnerChannel(adminUid) {
 const CHANNEL_COLS = 'id, username, title, status, source, tg_channel_id, owner_uid';
 
 // Channels visible to a user (every session maps to a users row with a numeric uid).
-// Latest known subscriber count per channel (cheap: newest channel_daily row).
-// Null for channels without daily history (e.g. a fresh collector channel).
+// Latest known subscriber count per channel (cheap: newest daily row). Canonical per ADR-001:
+// any row of the channel's SOURCE counts (two workspaces following one @channel share history),
+// falling back to channel-scoped rows for links without a source yet.
 const MEMBER_COUNT_COL =
   `(SELECT cd.subscribers FROM channel_daily cd
-      WHERE cd.channel_id = channels.id AND cd.subscribers IS NOT NULL
+      WHERE ((channels.source_id IS NOT NULL AND cd.source_id = channels.source_id)
+             OR cd.channel_id = channels.id)
+        AND cd.subscribers IS NOT NULL
       ORDER BY cd.day DESC LIMIT 1) AS "memberCount"`;
+
+// Access boundary (ADR-001): a channel is visible to its creator (legacy owner_uid — also covers
+// pre-workspace rows like the bootstrap central channel) OR to any member of its workspace.
+const CHANNEL_ACCESS_PREDICATE =
+  `(channels.owner_uid = $UID
+    OR (channels.workspace_id IS NOT NULL AND EXISTS (
+          SELECT 1 FROM workspace_members m
+          WHERE m.workspace_id = channels.workspace_id AND m.uid = $UID)))`;
 
 async function listChannels(user) {
   if (!enabled) return [];
@@ -266,18 +277,28 @@ async function listChannels(user) {
   const { rows } = await pool.query(
     `SELECT ${CHANNEL_COLS}, ${MEMBER_COUNT_COL},
             EXISTS(SELECT 1 FROM ig_accounts ia WHERE ia.channel_id = channels.id) AS ig_connected
-     FROM channels WHERE owner_uid=$1 AND status<>'disabled' ORDER BY created_at ASC`, [uid]);
+     FROM channels
+     WHERE ${CHANNEL_ACCESS_PREDICATE.replaceAll('$UID', '$1')} AND status<>'disabled'
+     ORDER BY created_at ASC`, [uid]);
   return rows;
 }
 
-// Ownership-checked fetch: returns the channel row only if it belongs to the user.
-// Routes turn null → 403.
+// Membership-checked fetch: returns the channel row only if the user may access it (creator or
+// workspace member), plus their effective role for write-gates. Routes turn null → 403.
 async function getChannel(id, user) {
   if (!enabled || !id) return null;
   const uid = user && user.uid;
   if (uid == null) return null;   // defensive: never query ownership with a missing uid
   // listChannels hides disabled channels — a direct ?channel=<id> must not bypass that.
-  const { rows } = await pool.query(`SELECT ${CHANNEL_COLS} FROM channels WHERE id=$1 AND owner_uid=$2 AND status<>'disabled'`, [id, uid]);
+  const { rows } = await pool.query(
+    `SELECT ${CHANNEL_COLS},
+            CASE WHEN channels.owner_uid = $2 THEN 'owner'
+                 ELSE (SELECT m.role FROM workspace_members m
+                       WHERE m.workspace_id = channels.workspace_id AND m.uid = $2)
+            END AS member_role
+     FROM channels
+     WHERE id=$1 AND ${CHANNEL_ACCESS_PREDICATE.replaceAll('$UID', '$2')} AND status<>'disabled'`,
+    [id, uid]);
   return rows[0] || null;
 }
 
@@ -337,13 +358,15 @@ function graphsToDailyRows(graphs) {
 async function upsertChannelDaily(channelId, rows, executor = pool) {
   if (!enabled || !channelId || !rows || !rows.length) return 0;
   const sql = `INSERT INTO channel_daily
-      (channel_id, day, subscribers, joins, leaves, views, forwards, reactions, captured_at)
-    SELECT $1, x.day::date, x.subscribers, x.joins, x.leaves, x.views, x.forwards, x.reactions, now()
+      (channel_id, source_id, day, subscribers, joins, leaves, views, forwards, reactions, captured_at)
+    SELECT $1, (SELECT c.source_id FROM channels c WHERE c.id = $1),
+           x.day::date, x.subscribers, x.joins, x.leaves, x.views, x.forwards, x.reactions, now()
       FROM jsonb_to_recordset($2::jsonb) AS x(
         day text, subscribers integer, joins integer, leaves integer,
         views integer, forwards integer, reactions integer
       )
     ON CONFLICT (channel_id, day) DO UPDATE SET
+      source_id=COALESCE(EXCLUDED.source_id, channel_daily.source_id),
       subscribers=COALESCE(EXCLUDED.subscribers, channel_daily.subscribers),
       joins=COALESCE(EXCLUDED.joins, channel_daily.joins),
       leaves=COALESCE(EXCLUDED.leaves, channel_daily.leaves),
@@ -358,9 +381,10 @@ async function upsertChannelDaily(channelId, rows, executor = pool) {
 async function upsertPosts(channelId, rows, executor = pool) {
   if (!enabled || !channelId || !rows || !rows.length) return 0;
   const sql = `INSERT INTO posts
-      (channel_id, post_id, date_published, views, reactions, forwards, replies,
+      (channel_id, source_id, post_id, date_published, views, reactions, forwards, replies,
        erv, virality, media_type, caption, hashtags, updated_at)
-    SELECT $1, x.post_id, x.date_published, x.views, x.reactions, x.forwards, x.replies,
+    SELECT $1, (SELECT c.source_id FROM channels c WHERE c.id = $1),
+           x.post_id, x.date_published, x.views, x.reactions, x.forwards, x.replies,
            x.erv, x.virality, x.media_type, x.caption, x.hashtags, now()
       FROM jsonb_to_recordset($2::jsonb) AS x(
         post_id bigint, date_published timestamptz, views integer, reactions integer,
@@ -368,6 +392,7 @@ async function upsertPosts(channelId, rows, executor = pool) {
         media_type text, caption text, hashtags jsonb
       )
     ON CONFLICT (channel_id, post_id) DO UPDATE SET
+      source_id=COALESCE(EXCLUDED.source_id, posts.source_id),
       date_published=COALESCE(EXCLUDED.date_published, posts.date_published),
       views=EXCLUDED.views, reactions=EXCLUDED.reactions, forwards=EXCLUDED.forwards, replies=EXCLUDED.replies,
       erv=EXCLUDED.erv, virality=EXCLUDED.virality, media_type=EXCLUDED.media_type,
@@ -381,9 +406,10 @@ async function upsertMentions(channelId, list, executor = pool) {
   const clean = list.filter(m => m.channel_id != null && m.msg_id != null);
   if (!clean.length) return 0;
   const sql = `INSERT INTO mentions
-      (owner_channel_id, channel_id, msg_id, post_date, first_seen, last_seen,
+      (owner_channel_id, source_id, channel_id, msg_id, post_date, first_seen, last_seen,
        title, username, link, snippet, views, query)
-    SELECT $1, x.channel_id, x.msg_id, x.date, now(), now(),
+    SELECT $1, (SELECT c.source_id FROM channels c WHERE c.id = $1),
+           x.channel_id, x.msg_id, x.date, now(), now(),
            x.title, x.username, x.link, x.snippet, x.views, x.query
       FROM jsonb_to_recordset($2::jsonb) AS x(
         channel_id bigint, msg_id bigint, date timestamptz, title text, username text,
@@ -398,9 +424,18 @@ async function upsertMentions(channelId, list, executor = pool) {
 
 async function getChannelHistory(channelId, days = 400) {
   if (!enabled || !channelId) return [];
+  // Canonical read (ADR-001 phase B): the history of the channel's SOURCE — two workspaces
+  // following one @channel see ONE row-set. Until phase C flips the write conflict-targets, both
+  // links may still write their own rows, so DISTINCT ON (day) keeps the freshest capture. Links
+  // without a source fall back to their own channel-scoped rows.
   const { rows } = await pool.query(
-    `SELECT to_char(day,'YYYY-MM-DD') AS day, subscribers, joins, leaves, views, forwards, reactions
-     FROM channel_daily WHERE channel_id=$1 AND day >= (CURRENT_DATE - $2::int) ORDER BY day ASC`, [channelId, days]);
+    `SELECT DISTINCT ON (d.day)
+            to_char(d.day,'YYYY-MM-DD') AS day, d.subscribers, d.joins, d.leaves, d.views, d.forwards, d.reactions
+     FROM channel_daily d
+     JOIN channels c ON c.id = $1
+     WHERE ((c.source_id IS NOT NULL AND d.source_id = c.source_id) OR d.channel_id = c.id)
+       AND d.day >= (CURRENT_DATE - $2::int)
+     ORDER BY d.day ASC, d.captured_at DESC NULLS LAST`, [channelId, days]);
   return rows;
 }
 
@@ -867,17 +902,24 @@ async function setPrefs(uid, prefs) {
 async function saveVelocity(channelId, data, executor = pool) {
   if (!enabled || !channelId || !data) return false;
   await executor.query(
-    `INSERT INTO velocity_daily (channel_id, day, data, computed_at) VALUES ($1, CURRENT_DATE, $2, now())
-     ON CONFLICT (channel_id, day) DO UPDATE SET data = EXCLUDED.data, computed_at = now()`,
+    `INSERT INTO velocity_daily (channel_id, source_id, day, data, computed_at)
+     VALUES ($1, (SELECT c.source_id FROM channels c WHERE c.id = $1), CURRENT_DATE, $2, now())
+     ON CONFLICT (channel_id, day) DO UPDATE SET
+       source_id = COALESCE(EXCLUDED.source_id, velocity_daily.source_id),
+       data = EXCLUDED.data, computed_at = now()`,
     [channelId, data]);
   return true;
 }
 
 async function getLatestVelocity(channelId) {
   if (!enabled || !channelId) return null;
+  // Canonical read (ADR-001): freshest snapshot of the channel's source, own rows as fallback.
   const { rows } = await pool.query(
-    `SELECT data, to_char(computed_at,'YYYY-MM-DD"T"HH24:MI:SS') AS computed_at
-       FROM velocity_daily WHERE channel_id=$1 ORDER BY day DESC LIMIT 1`, [channelId]);
+    `SELECT v.data, to_char(v.computed_at,'YYYY-MM-DD"T"HH24:MI:SS') AS computed_at
+       FROM velocity_daily v
+       JOIN channels c ON c.id = $1
+      WHERE ((c.source_id IS NOT NULL AND v.source_id = c.source_id) OR v.channel_id = c.id)
+      ORDER BY v.day DESC, v.computed_at DESC NULLS LAST LIMIT 1`, [channelId]);
   return rows[0] || null;   // { data, computed_at } | null
 }
 
@@ -1074,9 +1116,10 @@ async function listTgSessions() {
 async function upsertIgDaily(channelId, rows, executor = pool) {
   if (!enabled || !channelId || !rows || !rows.length) return 0;
   const sql = `INSERT INTO ig_daily
-      (channel_id, day, followers, reach, views, profile_views, accounts_engaged,
+      (channel_id, source_id, day, followers, reach, views, profile_views, accounts_engaged,
        total_interactions, likes, comments, saves, shares, follows, unfollows, captured_at)
-    SELECT $1, x.day::date, x.followers, x.reach, x.views, x.profile_views, x.accounts_engaged,
+    SELECT $1, (SELECT a.source_id FROM ig_accounts a WHERE a.channel_id = $1),
+           x.day::date, x.followers, x.reach, x.views, x.profile_views, x.accounts_engaged,
            x.total_interactions, x.likes, x.comments, x.saves, x.shares, x.follows, x.unfollows, now()
       FROM jsonb_to_recordset($2::jsonb) AS x(
         day text, followers integer, reach integer, views integer, profile_views integer,
@@ -1084,6 +1127,7 @@ async function upsertIgDaily(channelId, rows, executor = pool) {
         saves integer, shares integer, follows integer, unfollows integer
       )
     ON CONFLICT (channel_id, day) DO UPDATE SET
+      source_id=COALESCE(EXCLUDED.source_id, ig_daily.source_id),
       followers=COALESCE(EXCLUDED.followers, ig_daily.followers),
       reach=COALESCE(EXCLUDED.reach, ig_daily.reach),
       views=COALESCE(EXCLUDED.views, ig_daily.views),
@@ -1108,13 +1152,15 @@ async function upsertIgMediaDaily(channelId, rows, executor = pool) {
   const clean = rows.filter(r => r && r.media_id != null);
   if (!clean.length) return 0;
   const sql = `INSERT INTO ig_media_daily
-      (channel_id, media_id, day, reach, likes, comments, saved, shares, views, captured_at)
-    SELECT $1, x.media_id, x.day::date, x.reach, x.likes, x.comments, x.saved, x.shares, x.views, now()
+      (channel_id, source_id, media_id, day, reach, likes, comments, saved, shares, views, captured_at)
+    SELECT $1, (SELECT a.source_id FROM ig_accounts a WHERE a.channel_id = $1),
+           x.media_id, x.day::date, x.reach, x.likes, x.comments, x.saved, x.shares, x.views, now()
       FROM jsonb_to_recordset($2::jsonb) AS x(
         media_id text, day text, reach integer, likes integer, comments integer,
         saved integer, shares integer, views integer
       )
     ON CONFLICT (channel_id, media_id, day) DO UPDATE SET
+      source_id=COALESCE(EXCLUDED.source_id, ig_media_daily.source_id),
       reach=COALESCE(EXCLUDED.reach, ig_media_daily.reach),
       likes=COALESCE(EXCLUDED.likes, ig_media_daily.likes),
       comments=COALESCE(EXCLUDED.comments, ig_media_daily.comments),
@@ -1267,6 +1313,71 @@ async function deleteReport(uid, id) {
    which reads the returned last_sent_at — here only the anti-double-send window
    (weekly: >6 days, monthly: >27 days), so a cron fired twice the same day emails
    at most once. Disabled accounts are never emailed. */
+/* ── Background job idempotency (012_jobs.sql, roadmap P0) ────────────────────────────────────
+   One row per logical unit of work, keyed (kind, idempotency_key) — e.g.
+   ('report_email', 'report:7:2026-W27'). claimJob is the single atomic gate:
+     • fresh key            → row created as running, returned (caller does the work);
+     • queued / failed      → re-claimed (attempts++), returned (retry);
+     • running, lease dead  → re-claimed (crashed runner), returned;
+     • running, lease alive → null (someone else is on it — skip);
+     • succeeded            → null + cached result via getJob (duplicate enqueue collapses).
+   completeJob/failJob close the claim. Callers that need the cached outcome of a skipped
+   duplicate read getJob(kind, key).result. */
+const JOB_LEASE_SECONDS = 15 * 60;
+
+async function claimJob(kind, idempotencyKey, { leaseSeconds = JOB_LEASE_SECONDS, payload = null } = {}) {
+  if (!enabled || !kind || !idempotencyKey) return null;
+  const { rows } = await pool.query(
+    `INSERT INTO jobs (kind, idempotency_key, status, attempts, locked_until, payload)
+     VALUES ($1, $2, 'running', 1, now() + make_interval(secs => $3), $4)
+     ON CONFLICT (kind, idempotency_key) DO UPDATE SET
+       status = 'running',
+       attempts = jobs.attempts + 1,
+       locked_until = now() + make_interval(secs => $3),
+       updated_at = now()
+     WHERE jobs.status IN ('queued', 'failed')
+        OR (jobs.status = 'running' AND jobs.locked_until < now())
+     RETURNING *`,
+    [kind, idempotencyKey, leaseSeconds, payload ? JSON.stringify(payload) : null]);
+  return rows[0] || null;
+}
+
+async function completeJob(id, result = null) {
+  if (!enabled || !id) return;
+  await pool.query(
+    `UPDATE jobs SET status='succeeded', result=$2, error=NULL, locked_until=NULL, updated_at=now() WHERE id=$1`,
+    [id, result ? JSON.stringify(result) : null]);
+}
+
+async function failJob(id, error) {
+  if (!enabled || !id) return;
+  await pool.query(
+    `UPDATE jobs SET status='failed', error=$2, locked_until=NULL, updated_at=now() WHERE id=$1`,
+    [id, String(error && error.message ? error.message : error).slice(0, 2000)]);
+}
+
+async function getJob(kind, idempotencyKey) {
+  if (!enabled || !kind || !idempotencyKey) return null;
+  const { rows } = await pool.query(
+    `SELECT * FROM jobs WHERE kind=$1 AND idempotency_key=$2`, [kind, idempotencyKey]);
+  return rows[0] || null;
+}
+
+/** Run `fn` exactly once per (kind, key): claims, executes, records success/failure. A concurrent
+ *  or already-succeeded duplicate resolves to { skipped: true, job } without running `fn`. */
+async function runJobOnce(kind, idempotencyKey, fn, opts) {
+  const job = await claimJob(kind, idempotencyKey, opts);
+  if (!job) return { skipped: true, job: await getJob(kind, idempotencyKey) };
+  try {
+    const result = await fn();
+    await completeJob(job.id, result ?? null);
+    return { skipped: false, result };
+  } catch (e) {
+    await failJob(job.id, e);
+    throw e;
+  }
+}
+
 async function listDueReports({ weekly = false, monthly = false } = {}) {
   if (!enabled || (!weekly && !monthly)) return [];
   const { rows } = await pool.query(
@@ -1306,4 +1417,5 @@ module.exports = {
   listAnnotations, createAnnotation, deleteAnnotation,
   REPORT_SCHEDULES, listReports, getReport, createReport, updateReport, deleteReport,
   listDueReports, markReportSent,
+  claimJob, completeJob, failJob, getJob, runJobOnce,
 };
