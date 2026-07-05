@@ -237,6 +237,19 @@ color-toggle + crossfade иконок + remount текста (`index.css:251`, `
 
 ## Журнал
 
+- 2026-07-05 — **P1 Data-quality/Метрик-билдер «Metric explainability» — SHIPPED via PR #34 `merge e294541` (feat `5057396`)**
+  (lint + build + 361 vitest [+7] + 204 e2e; бандл `index-BKRXZqkt.js`). У каждой метрики «почему это число
+  такое». Ноль нового data-plumbing: собрано из УЖЕ существующего — статика `MetricDef.formula/included/
+  sourceNote` (каталог) + динамика `WidgetResult.meta` (period/sample/freshness/comparison, из «Единой
+  подписи» `db8dce3`). `lib/metricExplain.ts` — чистый `explainRows(metricId, meta)` (+sampleText/
+  metricLabel), React-free → 7 unit-тестов (порядок статик→динамик, warn-тон stale/скрытое-сравнение, edge:
+  пустой/неизвестный/статик-only). `components/MetricExplain.tsx` — `MetricExplainPanel` (полная inline-dl
+  для detail/explorer) + `MetricExplainTooltip` (компактная ⓘ через готовый a11y-`InfoTooltip`). Единый шов =
+  `WidgetRenderer` читает `ChartExpandedContext`: свёрнутая карта = meta-строка + ⓘ, развёрнутый detail/
+  explorer = панель. `WidgetMetaLine` получил опц. слот `info` (флексится, ⓘ держит место, строка truncate;
+  путь без info байт-в-байт прежний). Legacy без каталог-метрики → без ⓘ (graceful). Отдан PR-ом (визуал
+  authed, юзер смотрит живьём; смёрджил). Solo (unit+e2e-covered композиция). Отложено: обогатить блок
+  «О метрике» на метрик-странице живой meta (другой data-path).
 - 2026-07-05 — **P1 Страницы/IA «Структура страниц» slice 1 — SHIPPED via PR #33 `merge 63e74c6` (feat `c83ab1b`)**
   (lint + build + 354 vitest + 204 e2e; бандл `index-Dhkuv0mJ.js`). TG-дашборд расцеплён из ЕДИНОЙ
   скролл-ленты `TgFeed` (4 секции в одном DOM + scrollspy) в **фокус-роуты** `/`·`/analytics`·`/posts`·
