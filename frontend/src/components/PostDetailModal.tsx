@@ -56,7 +56,7 @@ export function PostDetailModal({ post, rank, reason, onClose }: PostDetailModal
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center sm:items-center"
+      className="fixed inset-0 z-modal flex items-end justify-center sm:items-center"
       role="dialog"
       aria-modal="true"
       aria-label={rank != null ? `Детали поста №${rank}` : 'Детали поста'}

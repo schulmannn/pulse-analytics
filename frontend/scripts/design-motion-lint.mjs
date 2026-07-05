@@ -48,6 +48,15 @@ const rules = [
     hint: 'use the duration scale / --motion-* tokens',
     test: (line) => /\b(?:duration|ease|delay)-\[/.test(line),
   },
+  {
+    id: 'arbitrary-z-index',
+    hint: 'use the layering scale (z-sticky … z-tooltip) — see DESIGN_TOKENS «Layering»',
+    // Arbitrary z-index (z-[999]) side-steps the ladder and reintroduces the tie-fights the scale
+    // exists to prevent. Named/numeric utilities (z-modal, z-10) are fine; only bracketed values fail.
+    // The bespoke marketing landing owns its own hero stacking (framer system) — exempt like the type rule.
+    test: (line) => /\bz-\[/.test(line),
+    exempt: (rel) => rel === 'src/pages/Landing.tsx',
+  },
 ];
 
 let violations = 0;

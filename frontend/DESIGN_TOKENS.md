@@ -108,6 +108,33 @@ or clips; the extra content lives in «Развернуть». The contract, top
   feed (Обзор / Аналитика / Посты / Упоминания) + Отчёты, at every breakpoint. A widget that stops
   fitting its tile fails there.
 
+## Layering (z-index)
+
+Depth is **hairlines + z-index only** (no shadows / blur / glow), so the stack order must be explicit.
+The floating/overlay layer pulls from **one** named ladder (`zIndex` in `tailwind.config.js`) — never
+hand-pick a raw `z-40`/`z-50` for an overlay. Plain in-flow stacking *inside* a single component (a
+`relative z-10` label over its own fill) stays untokenised; the scale governs cross-surface overlays.
+
+| Token | Value | Layer |
+|---|---|---|
+| `z-sticky` | 20 | in-flow sticky chrome — topbar, page/section headers |
+| `z-nav` | 30 | fixed app navigation — sidebar, mobile bottom nav |
+| `z-popover` | 40 | transient triggers over content — ⋯ menus, dropdowns, reorder pill |
+| `z-modal` | 50 | full overlays + their scrim — detail, dialogs, drawers, command palette |
+| `z-toast` | 60 | notifications above modals (reserved) |
+| `z-tooltip` | 70 | always-on-top hints (`InfoTooltip`) — must show even inside a modal |
+
+Rules:
+- **Portal strategy.** Full overlays (modals, drawers, command palette, tooltips) render into
+  `document.body` via `createPortal`, so no ancestor's `overflow`/`transform` stacking context can clip
+  or trap them; the token only orders them against each other.
+- **Nested overlays** follow the ladder: a menu (`z-popover`) opens above sticky chrome; a dialog
+  (`z-modal`) covers menus; a tooltip (`z-tooltip`) stays legible even over a dialog. A menu must never
+  out-rank a dialog.
+- **Sticky < nav**: a scrolled sticky header slides *under* the fixed rail, never over it.
+- Escape / outside-click dismissal is owned per-overlay (`useFocusTrap` + capture-phase Escape in
+  `DetailShell`); the z-scale governs paint order only, not closing.
+
 ## Motion
 
 The house easing + a small duration ladder, defined once in `src/index.css` `:root` (theme-agnostic).

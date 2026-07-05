@@ -97,7 +97,7 @@ export function Settings() {
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center md:p-6"
+      className="fixed inset-0 z-modal flex items-center justify-center md:p-6"
       role="dialog"
       aria-modal="true"
       aria-label="Настройки"

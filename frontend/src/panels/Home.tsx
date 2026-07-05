@@ -87,7 +87,7 @@ export function Home() {
     <div>
       {/* Sticky page header — the Edit action stays reachable while scrolling the board (steep).
           Solid bg + a hairline (no blur/shadow per governance); bg bleeds to the content padding. */}
-      <div className="sticky top-0 z-20 -mx-4 mb-6 flex items-start justify-between gap-3 border-b border-border bg-background px-4 py-3 sm:-mx-6 sm:px-6">
+      <div className="sticky top-0 z-sticky -mx-4 mb-6 flex items-start justify-between gap-3 border-b border-border bg-background px-4 py-3 sm:-mx-6 sm:px-6">
         <div>
           <h2 className="text-2xl font-medium tracking-tight text-foreground">Главная</h2>
           <p className="mt-0.5 text-sm text-muted-foreground">Ваши закреплённые виджеты.</p>
@@ -246,7 +246,7 @@ function AddWidgetBar({ pinned }: { pinned: string[] }) {
         + Добавить виджет
       </button>
       {open && (
-        <div className="absolute left-0 top-full z-20 mt-1 w-64 rounded-lg border border-border bg-card p-1.5">
+        <div className="absolute left-0 top-full z-popover mt-1 w-64 rounded-lg border border-border bg-card p-1.5">
           {/* Metric-first path: the searchable catalogue → a config-driven widget. */}
           <button
             type="button"
