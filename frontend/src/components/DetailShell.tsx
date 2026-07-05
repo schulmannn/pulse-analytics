@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import type { ReactNode } from 'react';
 import { Card } from '@/components/ui/card';
@@ -11,6 +11,10 @@ interface DetailShellProps {
   /** 'panel' — a centered Card over a dimmed backdrop (the read explorer). 'fullscreen' — an opaque
    *  edge-to-edge surface (the config sandbox). */
   variant: 'panel' | 'fullscreen';
+  /** The clicked card's viewport rect at open time (captured by ChartWidget before the URL changes).
+   *  When present (and motion is allowed) the panel grows out of that footprint — a shared-element
+   *  "card-to-detail" transition. Absent for URL / back-forward / shared-link opens → plain appear. */
+  originRect?: DOMRect | null;
   /** The detail body — header, controls, chart, rail, stats. Rendered inside the shared chrome. */
   children: ReactNode;
 }
@@ -23,9 +27,46 @@ interface DetailShellProps {
  * control / card menu can't double-handle it), and the × close. Everything visual — header, controls,
  * body, rail — is the caller's `children`, so each surface renders exactly as before.
  */
-export function DetailShell({ ariaLabel, onClose, variant, children }: DetailShellProps) {
+export function DetailShell({ ariaLabel, onClose, variant, originRect, children }: DetailShellProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   useFocusTrap(panelRef);
+
+  // Shared-element grow: FLIP the panel from the clicked card's footprint to its natural position.
+  // The panel is laid out at its FINAL size (so charts/text measure correctly from frame one — no
+  // redraw), then transform-inverted to the card rect and played to identity, so the whole box scales
+  // up out of the card. Transform-only (no opacity fade) keeps content contrast intact for any AT /
+  // axe sampling mid-flight; the corner radius scales with the box, so it also reads as a radius morph.
+  // useLayoutEffect (not useEffect): the invert MUST land before the browser paints, else the panel
+  // flashes at full size for one frame before snapping down to the card.
+  useLayoutEffect(() => {
+    const panel = panelRef.current;
+    if (!panel || !originRect) return;
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) return;
+    const final = panel.getBoundingClientRect();
+    if (!final.width || !final.height || !originRect.width || !originRect.height) return;
+    const sx = originRect.width / final.width;
+    const sy = originRect.height / final.height;
+    const dx = originRect.left - final.left;
+    const dy = originRect.top - final.top;
+    panel.style.transformOrigin = 'top left';
+    panel.style.willChange = 'transform';
+    panel.style.transform = `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`;
+    void panel.offsetHeight; // commit the inverted (card-sized) state before playing to identity
+    const clear = () => {
+      panel.style.transition = '';
+      panel.style.transform = '';
+      panel.style.transformOrigin = '';
+      panel.style.willChange = '';
+    };
+    panel.style.transition = 'transform var(--motion-glide) var(--ease-standard)';
+    panel.style.transform = 'none';
+    panel.addEventListener('transitionend', clear, { once: true });
+    const timer = window.setTimeout(clear, 500); // transitionend can be swallowed (tab switch) — belt & braces
+    return () => {
+      window.clearTimeout(timer);
+      panel.removeEventListener('transitionend', clear);
+    };
+  }, [originRect]);
 
   useEffect(() => {
     // Capture phase + stopPropagation: pre-empt any nested handler (a card menu, an inner dialog) so
@@ -78,7 +119,7 @@ export function DetailShell({ ariaLabel, onClose, variant, children }: DetailShe
   // 'panel' — centered Card over a dimmed, click-to-close backdrop.
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label={ariaLabel}>
-      <div className="absolute inset-0 bg-background/70 backdrop-blur-sm" onClick={onClose} aria-hidden="true" />
+      <div className="detail-backdrop-in absolute inset-0 bg-background/70 backdrop-blur-sm" onClick={onClose} aria-hidden="true" />
       <Card ref={panelRef} tabIndex={-1} className="relative z-10 flex h-full w-full flex-col overflow-hidden focus:outline-none">
         {closeButton}
         {children}

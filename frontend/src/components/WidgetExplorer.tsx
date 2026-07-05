@@ -20,10 +20,13 @@ export function WidgetExplorer({
   config,
   onApply,
   onClose,
+  originRect,
 }: {
   config: WidgetConfig;
   onApply?: (config: WidgetConfig) => void;
   onClose: () => void;
+  /** Clicked-card rect for the shared-element grow (forwarded to DetailShell). */
+  originRect?: DOMRect | null;
 }) {
   const [draft, setDraft] = useState<WidgetConfig>(config);
   const spec = editorSpec(draft);
@@ -46,7 +49,7 @@ export function WidgetExplorer({
   );
 
   return (
-    <DetailShell variant="fullscreen" ariaLabel={`Explorer «${draft.title || spec.label}»`} onClose={onClose}>
+    <DetailShell variant="fullscreen" ariaLabel={`Explorer «${draft.title || spec.label}»`} onClose={onClose} originRect={originRect}>
       <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-3 pr-14">
         <div className="min-w-0 truncate text-sm font-medium text-foreground">{draft.title || spec.label}</div>
         <div className="flex shrink-0 items-center gap-3">

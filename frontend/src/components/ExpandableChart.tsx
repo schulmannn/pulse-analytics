@@ -110,6 +110,8 @@ interface ChartExpandOverlayProps extends ChartExpandConfig {
       chart on the host widget's own period. */
   initialDays?: number;
   onClose: () => void;
+  /** Clicked-card rect for the shared-element grow (forwarded to DetailShell). */
+  originRect?: DOMRect | null;
 }
 
 /** Snap an arbitrary day count to the nearest overlay window pill (default 3М). */
@@ -130,7 +132,7 @@ function snapToWindow(days: number | undefined): number {
  * at full explorer axes (Tier-1). Owns its own period + line/bar state, so a fresh open
  * always starts on the line at 3М — like the metric pages.
  */
-export function ChartExpandOverlay({ title, children, renderExpanded, renderExpandedBar, statsFor, statsSum = true, grainable, initialDays, onClose }: ChartExpandOverlayProps) {
+export function ChartExpandOverlay({ title, children, renderExpanded, renderExpandedBar, statsFor, statsSum = true, grainable, initialDays, onClose, originRect }: ChartExpandOverlayProps) {
   const chartRegionRef = useRef<HTMLDivElement>(null);
   const [days, setDays] = useState(() => snapToWindow(initialDays));
   // Overlay-local presentation; reopening always starts on the line, like metric pages.
@@ -153,7 +155,7 @@ export function ChartExpandOverlay({ title, children, renderExpanded, renderExpa
   const chartH = regionH ? Math.max(240, regionH - 8) : EXPANDED_CHART_HEIGHT;
 
   return (
-    <DetailShell variant="panel" ariaLabel={`График: ${title}`} onClose={onClose}>
+    <DetailShell variant="panel" ariaLabel={`График: ${title}`} onClose={onClose} originRect={originRect}>
         <CardHeader className="shrink-0 pr-12">
           <CardTitle className="text-base font-medium text-foreground">{title}</CardTitle>
           {(renderExpanded || renderExpandedBar) && (

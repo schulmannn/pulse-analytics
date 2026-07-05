@@ -363,6 +363,19 @@
   display: inline-block;
   animation: edit-label-in var(--motion-fast) ease both;
 }
+/* ── Detail overlay: the dim backdrop fades in (120–180ms) while the panel grows out of the clicked
+   card (shared-element FLIP is JS-driven in DetailShell). Panel morph carries the rest. ───────── */
+@keyframes detail-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.detail-backdrop-in {
+  animation: detail-backdrop-in var(--motion-press) ease both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .detail-backdrop-in { animation: none; }
+}
+
 /* A card's «×» remove affordance appears with a soft scale-in, staggered per grid slot via the
    card's --enter-delay (inherited from the inner card). */
 @keyframes home-remove-in {

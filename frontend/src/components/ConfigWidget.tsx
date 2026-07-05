@@ -69,11 +69,12 @@ export const ConfigWidget = memo(function ConfigWidget({ config, homeKey }: { co
       // «Развернуть» opens the universal explorer sandbox (mutable draft; «Применить» commits it).
       explorer={
         configurable
-          ? (close) => (
+          ? (close, originRect) => (
               <WidgetExplorer
                 config={config}
                 onApply={(next) => updateWidgetConfig(config.id, next)}
                 onClose={close}
+                originRect={originRect}
               />
             )
           : undefined

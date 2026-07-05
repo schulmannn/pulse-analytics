@@ -1024,7 +1024,7 @@ interface ChartSectionProps {
   };
   /** A custom full-screen explorer for «Развернуть» — when set, it fully replaces the generic
    *  ChartExpandOverlay (config-widgets pass a mutable-config sandbox). Receives a `close` callback. */
-  explorer?: (close: () => void) => ReactNode;
+  explorer?: (close: () => void, originRect?: DOMRect | null) => ReactNode;
   /** A signature of the body's inputs (config-widgets pass their WidgetConfig identity). When it
    *  changes, the per-widget error boundary around the body clears a caught error and re-renders —
    *  so reconfiguring a crashed widget recovers it without a manual «Повторить». */
@@ -1044,7 +1044,11 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
   // Back / forward / a shared link all Just Work: open pushes a history entry, close replaces it away.
   const [searchParams, setSearchParams] = useSearchParams();
   const expandOpen = searchParams.get('detail') === widgetId;
+  // Card footprint at click time — lets the detail overlay grow OUT of this card (shared-element).
+  // Captured before the URL flips; stays null for URL / back-forward / shared-link opens (no morph).
+  const originRectRef = useRef<DOMRect | null>(null);
   const openExpand = useCallback(() => {
+    originRectRef.current = sectionRef.current?.getBoundingClientRect() ?? null;
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev);
@@ -1064,6 +1068,14 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
       { replace: true },
     );
   }, [setSearchParams]);
+  // Detail-open is URL-driven, and the browser BACK button closes the overlay WITHOUT running
+  // closeExpand — so clearing the captured rect there would miss it and a later FORWARD (or any
+  // non-click reopen) would morph from a stale, possibly off-screen footprint. Clear on every
+  // transition to CLOSED instead: capture stays in openExpand (this no-ops while open, so the click
+  // rect survives), and any close path → next non-click open sees originRect=null → plain appear.
+  useEffect(() => {
+    if (!expandOpen) originRectRef.current = null;
+  }, [expandOpen]);
   const menuRef = useRef<HTMLDivElement>(null);
   // The ⋯ trigger — menu items refocus it when the menu closes under keyboard focus (Escape / item
   // click unmounts the focused item, which would otherwise drop focus to <body>).
@@ -1603,7 +1615,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
 
       {/* Config-widgets pass a mutable-config explorer that fully replaces the generic overlay. */}
       {expandOpen && explorer
-        ? explorer(closeExpand)
+        ? explorer(closeExpand, originRectRef.current)
         : expandOpen && (
             <ChartExpandOverlay
               title={prefs.title || title}
@@ -1614,6 +1626,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
               statsSum={expand?.statsSum ?? true}
               grainable={hasRichExpand ? expand?.grainable : undefined}
               onClose={closeExpand}
+              originRect={originRectRef.current}
             >
               <WidgetErrorBoundary variant="inline" widgetId={widgetId} label={prefs.title || title} resetKeys={bodyResetKeys}>
                 {bodyNode}
