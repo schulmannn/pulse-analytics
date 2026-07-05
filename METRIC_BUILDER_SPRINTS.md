@@ -237,6 +237,8 @@ color-toggle + crossfade иконок + remount текста (`index.css:251`, `
 
 ## Журнал
 
+- 2026-07-04 — **BACKEND-МАРАФОН: 5 P0/P1 карточек SHIPPED на прод** (`a1373de` runbook+дрилл · `caf8979`+`2d1d435` tenancy ADR-001 фазы A/B + jobs · `eb9637d` capacity · `cfd1c71` verify-фиксы). Canonical sources + workspaces (миграции 010-012 additive-only, применены на прод-БД поверх реального аккаунта), канонические чтения (2 линка на 1 source = один row-set, acceptance-тест), write-гейты ролей, jobs-idempotency (report_email ключуется по периоду), backup-дрилл пройден целиком, load-test 100 юзеров = 1163 rps / 0 ошибок / p95≤162ms (ops/PERF_BASELINE.md). **Adversarial-ревью ДО пуша поймало критичный self-deadlock** (pool.query внутри чужой транзакции — executor теперь тредится насквозь, регрессионный тест с watchdog) + mis-attribution гибридов в бэкфилле. Стенд: портативный PG в C:pgstand (:54329), интеграционные тесты gated по TEST_DATABASE_URL (5/5). Фаза C (write-унификация + collector-dedupe) = отдельные карточки.
+
 - 2026-07-04 — **P1 Единая подпись source+data-quality — SHIPPED `db8dce3`** (332 vitest [+11] + 192 e2e).
   `WidgetResult.meta` (WidgetMeta: network/@source-если-pinned/период/выборка N постов/N дн. в архиве/
   freshness warn-при-stale/comparisonNote) собирается ЧИСТО в резолвере (commonMeta + path-поля, merge
