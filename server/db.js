@@ -281,6 +281,14 @@ const CHANNEL_ACCESS_PREDICATE =
           SELECT 1 FROM workspace_members m
           WHERE m.workspace_id = channels.workspace_id AND m.uid = $UID)))`;
 
+const CHANNEL_ADMIN_ACCESS_PREDICATE =
+  `(c.owner_uid = $UID
+    OR (c.workspace_id IS NOT NULL AND EXISTS (
+          SELECT 1 FROM workspace_members m
+          WHERE m.workspace_id = c.workspace_id
+            AND m.uid = $UID
+            AND m.role IN ('owner', 'admin'))))`;
+
 async function listChannels(user) {
   if (!enabled) return [];
   const uid = user && user.uid;
@@ -802,7 +810,7 @@ async function getChannelByApiKey(keyHash) {
   return rows[0] ? getChannelById(rows[0].channel_id) : null;
 }
 
-// Keys of a channel the user owns (ownership enforced via the join).
+// Keys of a channel the caller can administer (workspace owner/admin or legacy creator).
 async function listApiKeys(channelId, uid) {
   if (!enabled || !channelId || uid == null) return [];
   const { rows } = await pool.query(
@@ -811,15 +819,20 @@ async function listApiKeys(channelId, uid) {
             to_char(k.last_used_at,'YYYY-MM-DD"T"HH24:MI:SS') AS last_used_at,
             (k.revoked_at IS NOT NULL) AS revoked
        FROM api_keys k JOIN channels c ON c.id=k.channel_id
-      WHERE k.channel_id=$1 AND c.owner_uid=$2 ORDER BY k.created_at DESC`, [channelId, uid]);
+      WHERE k.channel_id=$1 AND ${CHANNEL_ADMIN_ACCESS_PREDICATE.replaceAll('$UID', '$2')}
+      ORDER BY k.created_at DESC`, [channelId, uid]);
   return rows;
 }
 
-async function revokeApiKey(keyId, uid) {
-  if (!enabled || !keyId || uid == null) return false;
+async function revokeApiKey(keyId, channelId, uid) {
+  if (!enabled || !keyId || !channelId || uid == null) return false;
   const { rowCount } = await pool.query(
     `UPDATE api_keys k SET revoked_at=now() FROM channels c
-      WHERE k.id=$1 AND k.channel_id=c.id AND c.owner_uid=$2 AND k.revoked_at IS NULL`, [keyId, uid]);
+      WHERE k.id=$1
+        AND k.channel_id=$2
+        AND k.channel_id=c.id
+        AND ${CHANNEL_ADMIN_ACCESS_PREDICATE.replaceAll('$UID', '$3')}
+        AND k.revoked_at IS NULL`, [keyId, channelId, uid]);
   return rowCount > 0;
 }
 
@@ -955,7 +968,7 @@ async function getCollectorStatus(channelId, user) {
             s.last_error
        FROM collector_status s
        JOIN channels c ON c.id=s.channel_id
-      WHERE s.channel_id=$1 AND c.owner_uid=$2`,
+      WHERE s.channel_id=$1 AND ${CHANNEL_ACCESS_PREDICATE.replaceAll('channels.', 'c.').replaceAll('$UID', '$2')}`,
     [channelId, user.uid]);
   return rows[0] || null;
 }

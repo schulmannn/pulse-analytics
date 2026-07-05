@@ -92,6 +92,53 @@ test('workspace membership grants channel access; outsiders get null', { skip },
   assert.ok(ownerList.includes(ch), 'membership channel appears in listChannels');
 });
 
+test('cross-workspace users cannot read personal prefs or reports', { skip }, async () => {
+  const alice = await mkUser('prefs-alice');
+  const bob = await mkUser('prefs-bob');
+
+  await db.setPrefs(alice, { homeBlocks: ['mine'], widgetConfigs: [{ id: 'w1' }] });
+  assert.deepStrictEqual(await db.getPrefs(alice), { homeBlocks: ['mine'], widgetConfigs: [{ id: 'w1' }] });
+  assert.strictEqual(await db.getPrefs(bob), null, 'prefs stay keyed to the session uid');
+
+  const report = await db.createReport(alice, `tenant-report-${nonce}`, { blocks: ['overview'] });
+  assert.ok(report && report.id, 'owner report created');
+  assert.strictEqual(await db.getReport(bob, report.id), null, 'foreign uid cannot fetch report by id');
+  assert.strictEqual(await db.updateReport(bob, report.id, { name: 'stolen' }), null, 'foreign uid cannot update report');
+  assert.strictEqual(await db.deleteReport(bob, report.id), false, 'foreign uid cannot delete report');
+  assert.ok((await db.listReports(bob)).every((r) => r.id !== report.id), 'foreign list omits report');
+});
+
+test('workspace-scoped operational rows deny outsiders but allow members/admins', { skip }, async () => {
+  const owner = await mkUser('ops-owner');
+  const admin = await mkUser('ops-admin');
+  const viewer = await mkUser('ops-viewer');
+  const outsider = await mkUser('ops-outsider');
+  const ws = await mkWorkspace(owner, `ops-ws-${nonce}`);
+  await pool.query(
+    `INSERT INTO workspace_members (workspace_id, uid, role) VALUES ($1, $2, 'admin'), ($1, $3, 'viewer')`,
+    [ws, admin, viewer]);
+  const src = await mkSource(`${nonce}-ops`);
+  const ch = await mkChannel(owner, ws, src, `chan_${nonce}_ops`);
+
+  const key = await db.createApiKey(ch, `${nonce}-hash`, `${nonce.slice(0, 8)}_k`, 'ops key');
+  assert.ok(key && key.id, 'api key created');
+  assert.ok((await db.listApiKeys(ch, admin)).some((k) => k.id === key.id), 'workspace admin can list keys');
+  assert.deepStrictEqual(await db.listApiKeys(ch, viewer), [], 'workspace viewer cannot list standing write credentials');
+  assert.deepStrictEqual(await db.listApiKeys(ch, outsider), [], 'outsider cannot list keys');
+
+  assert.strictEqual(await db.revokeApiKey(key.id, ch + 9999, admin), false, 'route channel id must match key channel');
+  assert.strictEqual(await db.revokeApiKey(key.id, ch, outsider), false, 'outsider cannot revoke key');
+  assert.strictEqual(await db.revokeApiKey(key.id, ch, admin), true, 'workspace admin can revoke key');
+
+  await pool.query(
+    `INSERT INTO collector_status (channel_id, collector_version, last_ingest_id, last_attempt_at, last_success_at)
+     VALUES ($1, 'it', 'ingest-1', now(), now())
+     ON CONFLICT (channel_id) DO UPDATE SET collector_version='it', last_ingest_id='ingest-1'`,
+    [ch]);
+  assert.ok(await db.getCollectorStatus(ch, { uid: viewer }), 'workspace viewer can read source freshness');
+  assert.strictEqual(await db.getCollectorStatus(ch, { uid: outsider }), null, 'outsider cannot read collector status');
+});
+
 test('two channels linked to ONE source read ONE canonical history row-set', { skip }, async () => {
   const alice = await mkUser('alice');
   const bob = await mkUser('bob');

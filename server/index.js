@@ -1669,16 +1669,25 @@ app.get('/api/channels/:id/keys', requireAuth, async (req, res, next) => {
   if (!db.enabled) return res.json({ keys: [] });
   const id = parseInt(req.params.id, 10);
   if (!id) return res.status(400).json({ error: 'bad id' });
-  try { res.json({ keys: await db.listApiKeys(id, req.user.uid) }); }
+  try {
+    const ch = await db.getChannel(id, req.user);
+    if (!ch) return res.status(403).json({ error: 'Нет доступа к каналу' });
+    if (!hasWorkspaceRole(ch, req.user, 'admin')) return res.status(403).json({ error: 'Недостаточно прав в этом воркспейсе' });
+    res.json({ keys: await db.listApiKeys(id, req.user.uid) });
+  }
   catch (e) { next(e); }
 });
 
 app.delete('/api/channels/:id/key/:keyId', requireAuth, async (req, res, next) => {
   if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
+  const id = parseInt(req.params.id, 10);
   const keyId = parseInt(req.params.keyId, 10);
-  if (!keyId) return res.status(400).json({ error: 'bad id' });
+  if (!id || !keyId) return res.status(400).json({ error: 'bad id' });
   try {
-    const ok = await db.revokeApiKey(keyId, req.user.uid);
+    const ch = await db.getChannel(id, req.user);
+    if (!ch) return res.status(403).json({ error: 'Нет доступа к каналу' });
+    if (!hasWorkspaceRole(ch, req.user, 'admin')) return res.status(403).json({ error: 'Недостаточно прав в этом воркспейсе' });
+    const ok = await db.revokeApiKey(keyId, id, req.user.uid);
     if (ok) audit(req, 'api_key.revoked', { key_id: keyId }).catch(() => {});
     res.json({ ok });
   }
