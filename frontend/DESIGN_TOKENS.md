@@ -53,8 +53,15 @@ arbitrary values: `foreground / 0.06` (hover wash), `ink3 / 0.25` (edit-mode car
 
 ## Icon buttons
 
-Header affordances (expand / menu / remove) share **one** quiet circular shape: `h-7 w-7` (28px hit
-target) + `rounded-full` + hover surface. See the `iconBtn` string in `ChartWidget.tsx`.
+Header affordances (expand / menu / remove) share **one** quiet circular shape: `rounded-full` + hover
+surface, sized `h-8 w-8` (32px touch target) on mobile and the quieter `h-7 w-7` (28px) at ≥sm where a
+cursor is precise. See the `iconBtn` string in `ChartWidget.tsx`.
+
+**Touch targets.** On mobile every primary control clears **32px** — icon buttons and the per-widget
+period filter pills grow their hit area below `sm` (the compact desktop look returns at ≥sm). Gated by
+`e2e/mobile-nav.spec.ts` at 360 / 390 / 430px (also asserts no horizontal page scroll). Inline text
+links / ⓘ keep their text size — their tap area is the text and the same action has a full-size path in
+the detail overlay.
 
 ## Motion
 

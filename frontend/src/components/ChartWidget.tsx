@@ -1272,8 +1272,10 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
     'flex w-full items-center gap-2.5 rounded px-2.5 py-1.5 text-left text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40';
   // Card header affordances (expand / menu / remove) share ONE quiet circular icon-button shape —
   // uniform 28px hit target, hover surface, hover colour set per-button (foreground / destructive).
+  // 32px hit target on touch (mobile), the quieter 28px on ≥sm where a cursor is precise — «no tiny
+  // expand icons» on mobile (Mobile-nav card), same circular shape either way.
   const iconBtn =
-    'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted';
+    'inline-flex h-8 w-8 sm:h-7 sm:w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted';
 
   return (
     <section
@@ -1671,12 +1673,14 @@ function WidgetPeriodPills({
             type="button"
             aria-pressed={active}
             onClick={() => onChange(p.days)}
-            className={`relative px-0.5 pb-1 pt-0.5 text-2xs font-medium tabular-nums transition-colors ${
+            // Touch: ≥32px tap target on mobile (period is a primary filter — Mobile-nav card); the
+            // underline sits at the label baseline via inset-y so the compact ≥sm look is unchanged.
+            className={`relative inline-flex min-h-8 min-w-8 items-center justify-center px-2 text-2xs font-medium tabular-nums transition-colors sm:min-h-0 sm:min-w-0 sm:justify-start sm:px-0.5 sm:pb-1 sm:pt-0.5 ${
               active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
             }`}
           >
             {p.label}
-            {active && <span aria-hidden="true" className="absolute inset-x-0 -bottom-px h-px bg-primary" />}
+            {active && <span aria-hidden="true" className="absolute inset-x-0 bottom-1 h-px bg-primary sm:-bottom-px" />}
           </button>
         );
       })}
