@@ -32,31 +32,46 @@ export function DataHealth({ defaultOpen = false }: { defaultOpen?: boolean } = 
   const { data: channelsData } = useChannels();
   const current = channelsData?.channels.find((c) => c.id === channelId) ?? channelsData?.channels[0];
   const isCentral = current?.source === 'central';
-  const { data: collector } = useCollectorStatus(isCentral || !current ? null : current.id);
+  const isIg = current?.source === 'ig';
+  const isCollector = !!current && !isCentral && !isIg;
+  const { data: collector } = useCollectorStatus(isCollector ? current.id : null);
   const { data: history } = useHistory(730);
   const fresh = freshness(latestHistoryDay(history), Date.now());
 
   const status = collector?.status;
-  const source = isCentral ? 'Telegram · MTProto' : 'Telegram · Collector';
+  const source = isCentral ? 'Telegram · MTProto' : isIg ? 'Instagram · OAuth' : 'Telegram · Collector';
   const lastCollect = status?.last_success_at ? fmt.date(status.last_success_at) : fresh?.label ?? '—';
-  const collectorVer = status?.collector_version ? `v${status.collector_version}` : isCentral ? 'MTProto' : '—';
+  const collectorVer = status?.collector_version ? `v${status.collector_version}` : isCentral ? 'MTProto' : isIg ? 'OAuth' : '—';
 
-  // API/health tone: collector error → error; stale → warn; otherwise ok.
+  // API/health tone: server SLA wins for collector sources; archive freshness remains the fallback
+  // for live/IG sources where there is no collector_status row.
   let apiTone: 'ok' | 'warn' | 'error' = 'ok';
   let apiText = '200 OK';
-  if (!isCentral && status?.last_error) {
+  if (isCollector && status?.sla_status === 'failed') {
     apiTone = 'error';
-    apiText = 'ошибка';
-  } else if (!isCentral && status?.stale) {
+    apiText = status.alert_suppressed ? 'сбой · алерт подавлен' : 'сбой';
+  } else if (isCollector && status?.sla_status === 'stale') {
     apiTone = 'warn';
-    apiText = 'данные устарели';
+    apiText = status.alert_suppressed ? 'устарело · алерт подавлен' : 'данные устарели';
+  } else if (isCollector && status?.sla_status === 'delayed') {
+    apiTone = 'warn';
+    apiText = status.alert_suppressed ? 'задержка · алерт подавлен' : 'сбор задерживается';
+  } else if (isCollector && !status) {
+    apiTone = 'warn';
+    apiText = 'нет статуса';
   } else if (fresh?.stale) {
     apiTone = 'warn';
     apiText = 'данные устарели';
   }
 
   const apiDot = apiTone === 'ok' ? 'bg-verdant' : apiTone === 'warn' ? 'bg-status-warn' : 'bg-ember';
-  const statusLabel = apiTone === 'ok' ? 'Данные актуальны' : apiTone === 'warn' ? 'Данные устарели' : 'Ошибка сбора';
+  const statusLabel = apiTone === 'ok'
+    ? 'Данные актуальны'
+    : apiTone === 'warn' && status?.sla_status === 'delayed'
+      ? 'Сбор задерживается'
+      : apiTone === 'warn'
+        ? 'Данные устарели'
+        : 'Ошибка сбора';
 
   return (
     <div>

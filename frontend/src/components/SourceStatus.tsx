@@ -50,9 +50,9 @@ function StatusRow({
 
 /**
  * Source health line for a channel. 'central' channels are live (Telegram MTProto). Collector
- * channels read the (previously React-unused) /collector-status endpoint and follow the legacy
- * precedence: no data → error → stale → healthy. `compact` drops the CTA for inline use
- * (Hero/cards); the full form links to /connect for setup/troubleshooting.
+ * channels read /collector-status and render the server SLA state: fresh / delayed / stale /
+ * failed. `compact` drops the CTA for inline use (Hero/cards); the full form links to /connect for
+ * setup/troubleshooting.
  */
 export function SourceStatus({
   channelId,
@@ -75,10 +75,17 @@ export function SourceStatus({
 
   const status = data?.status;
   if (!status) return <StatusRow tone="muted" text="Данных ещё нет — запустите сборщик" cta compact={compact} />;
-  if (status.last_error) return <StatusRow tone="error" text={`Ошибка сборщика: ${status.last_error}`} cta compact={compact} />;
-  if (status.stale) {
+  const suppressed = status.alert_suppressed ? ' · алерт подавлен' : '';
+  if (status.sla_status === 'failed' || (!status.sla_status && status.last_error)) {
+    return <StatusRow tone="error" text={`Сбой сборщика: ${status.last_error || 'последняя попытка не удалась'}${suppressed}`} cta compact={compact} />;
+  }
+  if (status.sla_status === 'stale' || (!status.sla_status && status.stale)) {
     const hrs = status.stale_after_hours;
-    return <StatusRow tone="warn" text={`Сборщик молчит дольше ${hrs ?? ''} ч`} cta compact={compact} />;
+    return <StatusRow tone="warn" text={`Нет свежего сбора дольше ${hrs ?? ''} ч${suppressed}`} cta compact={compact} />;
+  }
+  if (status.sla_status === 'delayed') {
+    const hrs = status.delayed_after_hours;
+    return <StatusRow tone="warn" text={`Сбор задерживается: больше ${hrs ?? ''} ч без обновления${suppressed}`} cta compact={compact} />;
   }
   const when = status.last_success_at ? fmt.date(status.last_success_at) : '—';
   const ver = status.collector_version ? ` · v${status.collector_version}` : '';

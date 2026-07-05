@@ -338,14 +338,21 @@ export const CreateKeyResponseSchema = KeySchema.extend({ key: z.string().option
 export type ApiKey = z.infer<typeof KeySchema>;
 export type CreateKeyResponse = z.infer<typeof CreateKeyResponseSchema>;
 
-// Collector health for a channel (GET /api/channels/:id/collector-status). `stale` and
-// `stale_after_hours` are computed by the server; the rest come from the collector_status row.
+// Collector health for a channel (GET /api/channels/:id/collector-status). SLA fields are computed
+// by the server; legacy `stale` stays for older consumers.
 export const CollectorStatusSchema = z
   .object({
     collector_version: z.string().optional().nullable(),
     last_attempt_at: z.string().optional().nullable(),
     last_success_at: z.string().optional().nullable(),
     last_error: z.string().optional().nullable(),
+    provider: z.string().optional().nullable(),
+    sla_status: z.enum(['fresh', 'delayed', 'stale', 'failed']).optional().nullable(),
+    alert_level: z.enum(['none', 'warn', 'error']).optional().nullable(),
+    alert: z.boolean().optional(),
+    alert_suppressed: z.boolean().optional(),
+    age_hours: z.coerce.number().optional().nullable(),
+    delayed_after_hours: z.coerce.number().optional().nullable(),
     stale: z.boolean().optional(),
     stale_after_hours: z.coerce.number().optional().nullable(),
   })

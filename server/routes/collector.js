@@ -2,6 +2,7 @@
 
 const crypto = require('crypto');
 const { log } = require('../lib/observability');
+const { collectorFreshness, collectorFreshnessThresholds } = require('../lib/collectorFreshness');
 const {
   CURRENT_SCHEMA_VERSION,
   SUPPORTED_SCHEMA_VERSIONS,
@@ -116,12 +117,14 @@ function registerCollectorRoutes({
       const channel = await db.getChannel(channelId, req.user);
       if (!channel) return res.status(403).json({ error: 'Нет доступа к каналу' });
       const status = await db.getCollectorStatus(channelId, req.user);
-      const staleAfterHours = Math.max(1, parseInt(process.env.COLLECTOR_STALE_HOURS, 10) || 24);
-      const lastSuccessMs = status && status.last_success_at
-        ? new Date(status.last_success_at).getTime()
-        : 0;
-      const stale = !lastSuccessMs || Date.now() - lastSuccessMs > staleAfterHours * 60 * 60 * 1000;
-      res.json({ status: status ? { ...status, stale, stale_after_hours: staleAfterHours } : null });
+      const provider = channel.source === 'ig' ? 'ig' : 'tg';
+      const freshness = collectorFreshness(status, {
+        provider,
+        thresholds: collectorFreshnessThresholds(process.env, provider),
+        suppressAlerts: process.env.COLLECTOR_ALERTS_SUPPRESSED === '1'
+          || process.env.COLLECTOR_KNOWN_OUTAGE === '1',
+      });
+      res.json({ status: status ? { ...status, ...freshness } : null });
     } catch (error) {
       next(error);
     }
