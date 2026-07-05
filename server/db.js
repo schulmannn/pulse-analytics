@@ -22,7 +22,9 @@ if (enabled) {
   else if (sslMode === 'require') ssl = { rejectUnauthorized: false };
   else ssl = internal ? false : { rejectUnauthorized: false };   // smart default
 
-  pool = new Pool({ connectionString: DATABASE_URL, ssl, max: 4 });
+  // Pool ceiling is the first infrastructure knob under load (ops/PERF_BASELINE.md): 4 keeps a
+  // hobby Railway PG comfortable; raise via env (e.g. 8-10) as concurrent users grow.
+  pool = new Pool({ connectionString: DATABASE_URL, ssl, max: Number(process.env.PGPOOL_MAX) || 4 });
   pool.on('error', (e) => console.error('[db] pool error:', e.message));
 }
 
