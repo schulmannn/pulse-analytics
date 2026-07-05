@@ -16,6 +16,7 @@ import { ChartExpandOverlay, ExpandedChartHeightContext, WidgetTargetContext, ty
 import { WidgetErrorBoundary, ThrowInRender } from '@/components/WidgetErrorBoundary';
 import { DEFAULT_WIDGET_DAYS, WidgetPeriodProvider, widgetPeriodValue, useChannelRecency, resolveEffectivePeriod } from '@/lib/period';
 import { useFocusTrap } from '@/lib/useFocusTrap';
+import { useExitPresence } from '@/lib/useExitPresence';
 import { useChannels } from '@/api/queries';
 import type { PeriodDays, WidgetPeriodValue } from '@/lib/period';
 
@@ -964,6 +965,9 @@ export function WidgetGroup({ id, className, children }: WidgetGroupProps) {
 
 // ── The widget card ───────────────────────────────────────────────────────────────────────
 const SWATCHES = [1, 2, 3, 4, 5, 6] as const;
+// Edit-mode «×» leave beat — MUST match the `home-remove-exit` CSS animation (var(--motion-fast),
+// 200ms). The JS timer only decides WHEN the button unmounts; the CSS owns the visible motion.
+const REMOVE_EXIT_MS = 200;
 
 interface ChartSectionProps {
   /** Stable widget id for the prefs store; defaults to the title. */
@@ -1141,8 +1145,11 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
 
   // Personal-Home pin state (only when this card is registered as pinnable via `homeKey`).
   const pinned = useIsPinnedToHome(homeKey);
-  // On /home in edit mode, a pinnable card shows a × that removes it from Home.
+  // On /home in edit mode, a pinnable card shows a × that removes it from Home. Its mount is kept
+  // for one exit beat after «Готово» so the × fades/scales OUT instead of teleporting (edit-mode
+  // choreography). `exiting` drives the leave class; the expand ↗ stays hidden until it's fully gone.
   const showHomeRemove = homeEditing && !!homeKey;
+  const removePresence = useExitPresence(showHomeRemove, prefersReducedMotion() ? 0 : REMOVE_EXIT_MS);
 
   // Per-widget window: the card's own period (default 30д). Charts inside read it via
   // useWidgetPeriod(); the WidgetPeriodProvider below scopes it to this card's subtree.
@@ -1329,11 +1336,15 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
           {prefs.title || title}
         </h3>
         {action}
-        {showHomeRemove && (
+        {removePresence.mounted && (
           <button
             type="button"
             aria-label={`Убрать виджет «${prefs.title || title}» с главной`}
             title="Убрать с главной"
+            // While exiting the mode the × is on its way out — inert (no clicks, out of the tab order,
+            // hidden from AT) so it can't be actioned mid-leave.
+            aria-hidden={removePresence.exiting || undefined}
+            tabIndex={removePresence.exiting ? -1 : undefined}
             onClick={() => {
               if (!homeKey) return;
               unpinFromHome(homeKey);
@@ -1342,7 +1353,11 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
               document.querySelector<HTMLElement>('.edit-toggle')?.focus();
             }}
             className={`${iconBtn} hover:text-destructive ${
-              reorder ? 'pointer-events-none invisible' : 'home-remove-enter'
+              reorder
+                ? 'pointer-events-none invisible'
+                : removePresence.exiting
+                  ? 'home-remove-exit pointer-events-none'
+                  : 'home-remove-enter'
             }`}
           >
             <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
@@ -1355,8 +1370,10 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
           aria-label={`Развернуть виджет «${prefs.title || title}»`}
           title="Развернуть"
           onClick={() => openExpand()}
+          // Stay hidden until the × has fully left (presence, not the raw flag) so the header never
+          // shows both the leaving × and the returning ↗ at once.
           className={`${iconBtn} hover:text-foreground print:hidden ${
-            showHomeRemove ? 'hidden' : ''
+            removePresence.mounted ? 'hidden' : ''
           } ${reorder ? 'pointer-events-none invisible' : ''}`}
         >
           <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">

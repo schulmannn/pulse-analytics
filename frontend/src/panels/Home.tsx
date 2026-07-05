@@ -97,6 +97,10 @@ export function Home() {
           onClick={() => setEditing((v) => !v)}
           aria-pressed={editing}
           data-active={editing}
+          // Both state labels live in the DOM (aria-hidden — the accessible name is the aria-label),
+          // stacked in one grid cell so the chip reserves the WIDER label's width and never reflows
+          // on «Изменить»↔«Готово»; the swap is opacity/translate, not a width-jumping remount.
+          aria-label={editing ? 'Готово' : 'Изменить'}
           className="edit-toggle btn-pill inline-flex h-9 shrink-0 items-center gap-1.5 px-3.5 text-sm font-medium"
         >
           <span className="edit-toggle-icons" aria-hidden="true">
@@ -109,8 +113,9 @@ export function Home() {
               <path d="M20 6 9 17l-5-5" pathLength={1} />
             </svg>
           </span>
-          <span key={editing ? 'done' : 'edit'} className="edit-toggle-label">
-            {editing ? 'Готово' : 'Изменить'}
+          <span className="edit-toggle-label" aria-hidden="true">
+            <span className="edit-toggle-label-edit">Изменить</span>
+            <span className="edit-toggle-label-done">Готово</span>
           </span>
         </button>
       </div>

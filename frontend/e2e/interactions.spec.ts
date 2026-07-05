@@ -104,3 +104,17 @@ test('edit-mode entry + exit (Home)', async ({ page }) => {
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-pressed', 'false'); // exited
 });
+
+test('edit toggle keeps a stable width across Изменить↔Готово (no reflow)', async ({ page }) => {
+  // The chip holds BOTH labels in one grid cell and reserves the wider label's width, so switching
+  // «Изменить»→«Готово» must NOT reflow the button (steep edit-mode choreography).
+  await bootDemo(page, '/home');
+  const toggle = page.locator('button.edit-toggle');
+  const before = await toggle.boundingBox();
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  const after = await toggle.boundingBox();
+  expect(before && after).toBeTruthy();
+  // Identical width — the label swap is opacity/translate within a fixed cell, not a width jump.
+  expect(Math.abs((after!.width) - (before!.width))).toBeLessThan(0.5);
+});
