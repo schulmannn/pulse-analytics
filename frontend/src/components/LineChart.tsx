@@ -1,6 +1,8 @@
 import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { MouseEvent as ReactMouseEvent } from 'react';
 import { fmt } from '@/lib/format';
 import { detectAnomalies } from '@/lib/anomaly';
+import { nearestPointIndex } from '@/lib/chartHover';
 import { ChartTooltip, type TooltipRow, type TooltipState } from '@/components/ChartTooltip';
 import { ChartExpandedContext, ExpandedChartHeightContext, WidgetTargetContext } from '@/components/ExpandableChart';
 
@@ -26,8 +28,8 @@ interface LineChartProps {
       expanded context. Without it, dashboard cards render axis-free (steep-style). */
   fullAxes?: boolean;
   /** When set, data points become clickable (a drilldown gesture — e.g. open the metric page):
-      the per-point hit area fires this with the point index and shows a pointer cursor. Hover
-      behaviour is unchanged; left unset the chart is hover-only as before. */
+      a click anywhere on the chart fires this with the nearest point index and shows a pointer
+      cursor. Hover behaviour is unchanged; left unset the chart is hover-only as before. */
   onPointClick?: (index: number) => void;
   /** Whether the comparison legend chip is an interactive show/hide toggle (default). Pass false
       where a page-level compare control already owns turning the comparison on/off (the metric
@@ -100,6 +102,8 @@ export function LineChart({
   legendToggle = true,
 }: LineChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  // Press position (client px) for the drag guard — see onSvgClick below.
+  const pressRef = useRef<{ x: number; y: number } | null>(null);
   const [hover, setHover] = useState<Hover | null>(null);
   // The comparison series can be toggled off via its legend chip (steep #9) — a decluttering
   // reading aid. Hidden, it also drops out of the y-domain below so the current series
@@ -127,10 +131,6 @@ export function LineChart({
   const targetCtx = useContext(WidgetTargetContext);
   const target = targetCtx != null && Number.isFinite(targetCtx) ? targetCtx : null;
   const showAxes = fullAxes || expanded;
-  // Axis-free cards draw a minimal x-label row (first/mid/last) as an HTML row BELOW the svg; axes
-  // mode puts the x-axis inside the svg instead. Computed up here so the svg height can reserve the
-  // row's space in a fixed tile (below).
-  const hasXAxis = showAxes && !!labels && labels.length === values.length;
   // Strip colons from useId — valid in ids, but break SVG url(#…) refs in some browsers.
   const gradientId = `lc${useId().replace(/:/g, '')}`;
 
@@ -160,198 +160,151 @@ export function LineChart({
   }, [hasHover]);
 
   // Anomaly detection is O(n·window) statistics — memoized on the series so hover-driven
-  // re-renders (setHover fires per crosshair move) don't re-run it. Before the early return
-  // to keep the hook order stable.
+  // re-renders don't re-run it. Before the early return to keep the hook order stable.
   const anomalyIdx = useMemo(
     () => (markAnomalies && values && values.length >= 2 ? detectAnomalies(values) : []),
     [markAnomalies, values],
   );
 
-  if (!values || values.length < 2) {
-    return (
-      <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
-        Нет данных за период
-      </div>
-    );
-  }
-
-  // In a fixed-height card tile (ctxHeight = the tile's leftover height, and NOT the expanded
-  // overlay), the svg shares the tile with the HTML rows drawn below it — the minimal x-label row
-  // and/or the comparison legend. Reserve their height so svg + rows fit the tile exactly: no inner
-  // scrollbar, no clipped axis. Outside a tile (ctxHeight null → content-height card, or the expanded
-  // overlay where labels live inside the svg) nothing is reserved.
-  const X_LABEL_ROW_H = 22;
-  const LEGEND_ROW_H = 22;
-  const belowRows =
-    ctxHeight != null && !expanded
-      ? (labels && labels.length > 0 && !hasXAxis ? X_LABEL_ROW_H : 0) +
-        (ghost && ghost.length >= 2 ? LEGEND_ROW_H : 0)
-      : 0;
-  const h = Math.max((ctxHeight ?? height ?? 200) - belowRows, 80);
-  const W = Math.max(width, 1);
-  const padR = 10;
-  const padY = 12;
-  // Real x-axis (tick marks + date labels INSIDE the svg) in axes mode — the explorer/metric
-  // reading. Needs a taller bottom band; the axis-free cards keep the symmetric pad and the
-  // minimal first/mid/last HTML row below the svg. Requires PER-POINT labels (one per value);
-  // legacy 3-label arrays can't be positioned on the axis and keep the HTML row instead.
-  const padB = hasXAxis ? 30 : padY;
-
   // Toggled off (or absent), the comparison drops out of every draw/measure below; the legend
-  // chip stays visible so it can be toggled back on.
-  const showGhost = !!ghost && ghost.length >= 2 && !ghostHidden;
+  // chip stays visible so it can be toggled back on. Derived before the plot memo (its inputs).
+  const hasGhostLegend = !!ghost && ghost.length >= 2;
+  const showGhost = hasGhostLegend && !ghostHidden;
   const activeGhost = showGhost ? ghost : undefined;
 
-  // Domain covers the series, the (shown) ghost and the target — a goal above the data must be visible.
-  const scaleVals = [...values, ...(activeGhost ?? []), ...(target != null ? [target] : [])];
-  const computedMin = Math.min(...scaleVals);
-  const computedMax = Math.max(...scaleVals);
-  // The caller's yMin/yMax (e.g. a zero base for volume metrics) defines the domain; the nice
-  // scale then only expands it outward to round tick values, never clips.
-  const scale = niceScale(yMin ?? computedMin, yMax ?? computedMax);
-  const min = scale.lo;
-  const max = scale.hi;
-  const range = max - min || 1;
+  // ── Geometry + the static plot, memoized APART from hover ────────────────────────────────
+  // Hover is a per-mousemove setState: without this memo every crosshair step re-derived the
+  // scale, rebuilt every path string and re-created the whole element tree. Now a hover
+  // re-render reuses this cached subtree (React bails out on the identical element) and draws
+  // only the crosshair overlay below — and the per-point transparent hit-rects are gone
+  // entirely (a 365-point series × a board of cards used to be thousands of hover-only nodes);
+  // the svg carries ONE mouse handler and the index is O(1) math (nearestPointIndex).
+  const plot = useMemo(() => {
+    if (!values || values.length < 2) return null;
 
-  const yFor = (v: number) => h - padB - ((v - min) / range) * (h - padY - padB);
-  // Full-axes mode only: nice ticks deduped belt-and-braces (drop any tick whose formatted
-  // label repeats the previous one). Minimal mode renders no ticks/gridlines at all.
-  const yAxis = showAxes
-    ? scale.ticks
-        .map((v) => ({ v, label: axisLabel(v, scale.step) }))
-        .filter((tick, i, arr) => i === 0 || tick.label !== arr[i - 1].label)
-    : [];
-  const yGridValues = yAxis.map((t) => t.v);
-  const yGridPositions = yGridValues.map(yFor);
-  const yLabels = yAxis.map((t) => t.label);
-  // Left gutter reserved for the y labels (right-aligned inside it) so they never sit
-  // on the line/area and the first label is never clipped by the container edge.
-  // Axis-free mode keeps only a sliver so edge markers (rings) don't clip on the viewBox.
-  const gutterW = showAxes
-    ? Math.max(28, Math.round(Math.max(...yLabels.map((l) => l.length)) * CHAR_W) + 14)
-    : 6;
+    // In a fixed-height card tile (ctxHeight = the tile's leftover height, and NOT the expanded
+    // overlay), the svg shares the tile with the HTML rows drawn below it — the minimal x-label
+    // row and/or the comparison legend. Reserve their height so svg + rows fit the tile exactly:
+    // no inner scrollbar, no clipped axis. Outside a tile (ctxHeight null → content-height card,
+    // or the expanded overlay where labels live inside the svg) nothing is reserved.
+    const X_LABEL_ROW_H = 22;
+    const LEGEND_ROW_H = 22;
+    const hasXAxis = showAxes && !!labels && labels.length === values.length;
+    const belowRows =
+      ctxHeight != null && !expanded
+        ? (labels && labels.length > 0 && !hasXAxis ? X_LABEL_ROW_H : 0) +
+          (hasGhostLegend ? LEGEND_ROW_H : 0)
+        : 0;
+    const h = Math.max((ctxHeight ?? height ?? 200) - belowRows, 80);
+    const W = Math.max(width, 1);
+    const padR = 10;
+    const padY = 12;
+    // Real x-axis (tick marks + date labels INSIDE the svg) in axes mode — the explorer/metric
+    // reading. Needs a taller bottom band; the axis-free cards keep the symmetric pad and the
+    // minimal first/mid/last HTML row below the svg. Requires PER-POINT labels (one per value);
+    // legacy 3-label arrays can't be positioned on the axis and keep the HTML row instead.
+    const padB = hasXAxis ? 30 : padY;
 
-  const n = values.length;
-  const plotW = Math.max(W - gutterW - padR, 10);
-  const step = plotW / Math.max(n - 1, 1);
+    // Domain covers the series, the (shown) ghost and the target — a goal above the data must
+    // be visible.
+    const scaleVals = [...values, ...(activeGhost ?? []), ...(target != null ? [target] : [])];
+    const computedMin = Math.min(...scaleVals);
+    const computedMax = Math.max(...scaleVals);
+    // The caller's yMin/yMax (e.g. a zero base for volume metrics) defines the domain; the nice
+    // scale then only expands it outward to round tick values, never clips.
+    const scale = niceScale(yMin ?? computedMin, yMax ?? computedMax);
+    const min = scale.lo;
+    const max = scale.hi;
+    const range = max - min || 1;
 
-  const points = values.map((v, i) => {
-    const x = gutterW + i * step;
-    return { x, y: yFor(v), v };
-  });
+    const yFor = (v: number) => h - padB - ((v - min) / range) * (h - padY - padB);
+    // Full-axes mode only: nice ticks deduped belt-and-braces (drop any tick whose formatted
+    // label repeats the previous one). Minimal mode renders no ticks/gridlines at all.
+    const yAxis = showAxes
+      ? scale.ticks
+          .map((v) => ({ v, label: axisLabel(v, scale.step) }))
+          .filter((tick, i, arr) => i === 0 || tick.label !== arr[i - 1].label)
+      : [];
+    const yGridPositions = yAxis.map((t) => yFor(t.v));
+    const yLabels = yAxis.map((t) => t.label);
+    // Left gutter reserved for the y labels (right-aligned inside it) so they never sit
+    // on the line/area and the first label is never clipped by the container edge.
+    // Axis-free mode keeps only a sliver so edge markers (rings) don't clip on the viewBox.
+    const gutterW = showAxes
+      ? Math.max(28, Math.round(Math.max(...yLabels.map((l) => l.length)) * CHAR_W) + 14)
+      : 6;
 
-  const firstPt = points[0];
-  const lastPt = points[n - 1];
+    const n = values.length;
+    const plotW = Math.max(W - gutterW - padR, 10);
+    const step = plotW / Math.max(n - 1, 1);
 
-  const anomalySet = new Set(anomalyIdx);
-
-  const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
-  const areaPath = `${linePath} L ${lastPt.x} ${h - padB} L ${firstPt.x} ${h - padB} Z`;
-
-  const ghostPath =
-    activeGhost && activeGhost.length >= 2
-      ? activeGhost
-          .map((v, i) => {
-            const gx = gutterW + i * step;
-            return `${i === 0 ? 'M' : 'L'} ${gx} ${yFor(v)}`;
-          })
-          .join(' ')
-      : '';
-
-  // Real x-axis ticks (axes mode): width-aware stride so labels never collide — one label
-  // per ~90px, always including the first and the last point.
-  const xTicks = hasXAxis
-    ? (() => {
-        const maxTicks = Math.max(2, Math.floor(plotW / 90));
-        const stride = Math.ceil(n / maxTicks);
-        const idxs: number[] = [];
-        for (let i = 0; i < n; i += stride) idxs.push(i);
-        if (idxs[idxs.length - 1] !== n - 1) {
-          // Replace a too-close neighbour instead of stacking a second label on it.
-          if (n - 1 - idxs[idxs.length - 1] < stride * 0.6) idxs.pop();
-          idxs.push(n - 1);
-        }
-        return idxs
-          .map((i) => {
-            const text = labels?.[i] ?? '';
-            if (!text) return null;
-            const halfW = (text.length * CHAR_W) / 2;
-            const x = Math.min(Math.max(points[i].x, gutterW + halfW), Math.max(W - padR - halfW, gutterW + halfW));
-            return { i, px: points[i].x, x, text };
-          })
-          .filter((t): t is { i: number; px: number; x: number; text: string } => t !== null);
-      })()
-    : [];
-
-  // Bare value labels at the max point and the last point (deduped when they coincide),
-  // placed above the point and flipped below when the top edge would clip them, clamped
-  // into the plot area horizontally.
-  const extremes = (() => {
-    if (!markExtremes) return [];
-    let maxI = 0;
-    for (let k = 1; k < n; k++) if (values[k] > values[maxI]) maxI = k;
-    const idxs = maxI === n - 1 ? [n - 1] : [maxI, n - 1];
-    return idxs.map((k) => {
-      const p = points[k];
-      const text = fmt.short(values[k]);
-      const halfW = (text.length * CHAR_W) / 2;
-      const x = Math.min(Math.max(p.x, gutterW + halfW), Math.max(W - padR - halfW, gutterW + halfW));
-      const fitsAbove = p.y - 18 >= 0;
-      const y = fitsAbove ? p.y - 8 : p.y + 16;
-      return { key: k, x, y, text };
+    const points = values.map((v, i) => {
+      const x = gutterW + i * step;
+      return { x, y: yFor(v), v };
     });
-  })();
 
-  const tipText = (i: number) => {
-    let base = titles?.[i] ?? fmt.num(values[i]);
-    // Hovering a compared chart reads both series at once (comparison shown).
-    if (activeGhost && activeGhost[i] != null) base = `${base} · пред. ${fmt.short(activeGhost[i])}`;
-    return anomalySet.has(i) ? `${base} · аномалия` : base;
-  };
-  // The hover readout: a STRUCTURED card (date · Текущий · comparison · Δ) whenever a ghost series
-  // is present — so the tooltip is an instrument, not a caption. Without a comparison, keep the
-  // metric's own rich title text (velocity/history carry extra context there).
-  const buildTip = (i: number): TooltipState => {
-    const p = points[i];
-    if (activeGhost && activeGhost[i] != null) {
-      const cur = values[i];
-      const prev = activeGhost[i];
-      const rows: TooltipRow[] = [
-        { label: 'Текущий', value: fmt.short(cur), color: 'hsl(var(--brand-iris))' },
-        { label: ghostLabel, value: fmt.short(prev), color: 'hsl(var(--chart-2))' },
-      ];
-      const d = prev !== 0 ? ((cur - prev) / Math.abs(prev)) * 100 : null;
-      if (d != null && Number.isFinite(d)) rows.push({ label: 'Δ', value: `${d >= 0 ? '+' : '−'}${Math.abs(d).toFixed(1)}%` });
-      const title = anomalySet.has(i) ? `${labels?.[i] ?? ''} · аномалия` : labels?.[i];
-      return { x: p.x, y: p.y, title, rows };
-    }
-    return { x: p.x, y: p.y, text: tipText(i) };
-  };
-  const onEnter = (i: number) => () => {
-    setHover((prev) => (prev && prev.i === i ? prev : { i }));
-  };
+    const firstPt = points[0];
+    const lastPt = points[n - 1];
 
-  const hovered = hover && hover.i < n ? points[hover.i] : null;
+    const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
+    const areaPath = `${linePath} L ${lastPt.x} ${h - padB} L ${firstPt.x} ${h - padB} Z`;
 
-  return (
-    <div
-      ref={containerRef}
-      className="relative w-full"
-      onMouseLeave={() => setHover(null)}
-      onPointerLeave={() => setHover(null)}
-    >
-      <svg
-        className="block w-full"
-        height={h}
-        viewBox={`0 0 ${W} ${h}`}
-        preserveAspectRatio="none"
-        // A named graphic for AT (PieChart idiom): role="img" stops screen readers from announcing
-        // the raw axis <text> ticks as loose numbers, and the label carries the data a mouse user
-        // reads from hover (per-point keyboard access is a separate roadmap item). Math.max over
-        // the SERIES — the in-scope `max` is the padded nice-scale top, not the data max.
-        role="img"
-        aria-label={`График: ${values.length} точек, макс ${fmt.short(Math.max(...values))}, последнее ${fmt.short(values[values.length - 1])}`}
-      >
+    const ghostPath =
+      activeGhost && activeGhost.length >= 2
+        ? activeGhost
+            .map((v, i) => {
+              const gx = gutterW + i * step;
+              return `${i === 0 ? 'M' : 'L'} ${gx} ${yFor(v)}`;
+            })
+            .join(' ')
+        : '';
+
+    // Real x-axis ticks (axes mode): width-aware stride so labels never collide — one label
+    // per ~90px, always including the first and the last point.
+    const xTicks = hasXAxis
+      ? (() => {
+          const maxTicks = Math.max(2, Math.floor(plotW / 90));
+          const stride = Math.ceil(n / maxTicks);
+          const idxs: number[] = [];
+          for (let i = 0; i < n; i += stride) idxs.push(i);
+          if (idxs[idxs.length - 1] !== n - 1) {
+            // Replace a too-close neighbour instead of stacking a second label on it.
+            if (n - 1 - idxs[idxs.length - 1] < stride * 0.6) idxs.pop();
+            idxs.push(n - 1);
+          }
+          return idxs
+            .map((i) => {
+              const text = labels?.[i] ?? '';
+              if (!text) return null;
+              const halfW = (text.length * CHAR_W) / 2;
+              const x = Math.min(Math.max(points[i].x, gutterW + halfW), Math.max(W - padR - halfW, gutterW + halfW));
+              return { i, px: points[i].x, x, text };
+            })
+            .filter((t): t is { i: number; px: number; x: number; text: string } => t !== null);
+        })()
+      : [];
+
+    // Bare value labels at the max point and the last point (deduped when they coincide),
+    // placed above the point and flipped below when the top edge would clip them, clamped
+    // into the plot area horizontally.
+    const extremes = (() => {
+      if (!markExtremes) return [];
+      let maxI = 0;
+      for (let k = 1; k < n; k++) if (values[k] > values[maxI]) maxI = k;
+      const idxs = maxI === n - 1 ? [n - 1] : [maxI, n - 1];
+      return idxs.map((k) => {
+        const p = points[k];
+        const text = fmt.short(values[k]);
+        const halfW = (text.length * CHAR_W) / 2;
+        const x = Math.min(Math.max(p.x, gutterW + halfW), Math.max(W - padR - halfW, gutterW + halfW));
+        const fitsAbove = p.y - 18 >= 0;
+        const y = fitsAbove ? p.y - 8 : p.y + 16;
+        return { key: k, x, y, text };
+      });
+    })();
+
+    const staticLayer = (
+      <>
         <defs>
           <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="hsl(var(--brand-iris))" stopOpacity="0.25" />
@@ -404,18 +357,6 @@ export function LineChart({
         {/* Last-point marker — flat crisp dot knocked out from the paper surface (no glow halo) */}
         <circle cx={lastPt.x} cy={lastPt.y} r="4" fill="hsl(var(--brand-iris))" stroke="hsl(var(--background))" strokeWidth="2" vectorEffect="non-scaling-stroke" />
 
-        {/* Hovered-point crosshair + marker (+ the comparison point at the same x, so hovering reads
-            BOTH series). */}
-        {hovered && (
-          <>
-            <line x1={hovered.x} y1={0} x2={hovered.x} y2={h} stroke="hsl(var(--brand-iris))" strokeWidth="1" opacity="0.35" vectorEffect="non-scaling-stroke" />
-            {activeGhost && activeGhost[hover!.i] != null && (
-              <circle cx={hovered.x} cy={yFor(activeGhost[hover!.i])} r="3.5" fill="hsl(var(--card))" stroke="hsl(var(--chart-2))" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
-            )}
-            <circle cx={hovered.x} cy={hovered.y} r="4" fill="hsl(var(--brand-iris))" stroke="hsl(var(--background))" strokeWidth="1.5" />
-          </>
-        )}
-
         {/* Max / last value labels (markExtremes) — bare tabular text, no boxes */}
         {extremes.map((e) => (
           <text key={`e${e.key}`} x={e.x} y={e.y} textAnchor="middle" className="pointer-events-none select-none fill-ink2 text-2xs font-medium tabular-nums">
@@ -424,8 +365,8 @@ export function LineChart({
         ))}
 
         {/* Y-axis labels — right-aligned in the reserved gutter */}
-        {yGridValues.map((_, idx) => (
-          <text key={idx} x={gutterW - 8} y={yGridPositions[idx] + 3.5} textAnchor="end" className="pointer-events-none select-none fill-muted-foreground text-2xs font-medium tabular-nums">
+        {yGridPositions.map((yPos, idx) => (
+          <text key={idx} x={gutterW - 8} y={yPos + 3.5} textAnchor="end" className="pointer-events-none select-none fill-muted-foreground text-2xs font-medium tabular-nums">
             {yLabels[idx]}
           </text>
         ))}
@@ -439,26 +380,117 @@ export function LineChart({
             </text>
           </g>
         ))}
+      </>
+    );
 
-        {/* Per-point hover targets (snap to nearest point) — also the drilldown hit area when
-            onPointClick is set (the whole chart width tiles into these, so a click anywhere drills). */}
-        {points.map((p, i) => {
-          const xStart = i === 0 ? 0 : p.x - step / 2;
-          const xEnd = i === n - 1 ? W : p.x + step / 2;
-          return (
-            <rect
-              key={i}
-              x={xStart}
-              y={0}
-              width={Math.max(xEnd - xStart, 1)}
-              height={h}
-              fill="transparent"
-              className={onPointClick ? 'cursor-pointer' : 'cursor-crosshair'}
-              onMouseMove={onEnter(i)}
-              onClick={onPointClick ? () => onPointClick(i) : undefined}
-            />
-          );
-        })}
+    return { W, h, gutterW, step, points, yFor, hasXAxis, staticLayer };
+  }, [values, labels, activeGhost, hasGhostLegend, target, yMin, yMax, width, ctxHeight, height, expanded, showAxes, markExtremes, showPoints, anomalyIdx, gradientId]);
+
+  if (!values || values.length < 2 || !plot) {
+    return (
+      <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
+        Нет данных за период
+      </div>
+    );
+  }
+
+  const { W, h, gutterW, step, points, yFor, hasXAxis } = plot;
+  const n = values.length;
+  const anomalySet = new Set(anomalyIdx);
+
+  const tipText = (i: number) => {
+    let base = titles?.[i] ?? fmt.num(values[i]);
+    // Hovering a compared chart reads both series at once (comparison shown).
+    if (activeGhost && activeGhost[i] != null) base = `${base} · пред. ${fmt.short(activeGhost[i])}`;
+    return anomalySet.has(i) ? `${base} · аномалия` : base;
+  };
+  // The hover readout: a STRUCTURED card (date · Текущий · comparison · Δ) whenever a ghost series
+  // is present — so the tooltip is an instrument, not a caption. Without a comparison, keep the
+  // metric's own rich title text (velocity/history carry extra context there).
+  const buildTip = (i: number): TooltipState => {
+    const p = points[i];
+    if (activeGhost && activeGhost[i] != null) {
+      const cur = values[i];
+      const prev = activeGhost[i];
+      const rows: TooltipRow[] = [
+        { label: 'Текущий', value: fmt.short(cur), color: 'hsl(var(--brand-iris))' },
+        { label: ghostLabel, value: fmt.short(prev), color: 'hsl(var(--chart-2))' },
+      ];
+      const d = prev !== 0 ? ((cur - prev) / Math.abs(prev)) * 100 : null;
+      if (d != null && Number.isFinite(d)) rows.push({ label: 'Δ', value: `${d >= 0 ? '+' : '−'}${Math.abs(d).toFixed(1)}%` });
+      const title = anomalySet.has(i) ? `${labels?.[i] ?? ''} · аномалия` : labels?.[i];
+      return { x: p.x, y: p.y, title, rows };
+    }
+    return { x: p.x, y: p.y, text: tipText(i) };
+  };
+
+  // ONE hit surface: the svg itself. The pointer x maps to the nearest point in O(1); moving
+  // within a point's zone keeps the same state object, so those mousemoves don't re-render.
+  const indexFromEvent = (e: ReactMouseEvent<SVGSVGElement>): number | null => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (rect.width === 0) return null;
+    const xView = ((e.clientX - rect.left) / rect.width) * W;
+    return nearestPointIndex(xView, n, gutterW, step);
+  };
+  const onSvgMove = (e: ReactMouseEvent<SVGSVGElement>) => {
+    const i = indexFromEvent(e);
+    if (i == null) return;
+    setHover((prev) => (prev && prev.i === i ? prev : { i }));
+  };
+  // Drill only on a genuine click, not a press-drag-release scrub (the browser retargets a
+  // cross-point click to the svg — without this guard a drag-to-read gesture would navigate). A
+  // click with no recorded press (keyboard / AT) passes through.
+  const onSvgClick = onPointClick
+    ? (e: ReactMouseEvent<SVGSVGElement>) => {
+        const press = pressRef.current;
+        pressRef.current = null;
+        if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 5) return;
+        const i = indexFromEvent(e);
+        if (i != null) onPointClick(i);
+      }
+    : undefined;
+  const clearHover = () => {
+    pressRef.current = null;
+    setHover(null);
+  };
+
+  const hovered = hover && hover.i < n ? points[hover.i] : null;
+
+  return (
+    <div
+      ref={containerRef}
+      className="relative w-full"
+      onMouseLeave={clearHover}
+      onPointerLeave={clearHover}
+    >
+      <svg
+        className={`block w-full ${onPointClick ? 'cursor-pointer' : 'cursor-crosshair'}`}
+        height={h}
+        viewBox={`0 0 ${W} ${h}`}
+        preserveAspectRatio="none"
+        // A named graphic for AT (PieChart idiom): role="img" stops screen readers from announcing
+        // the raw axis <text> ticks as loose numbers, and the label carries the data a mouse user
+        // reads from hover (per-point keyboard access is a separate roadmap item). Math.max over
+        // the SERIES — the in-scope `max` is the padded nice-scale top, not the data max.
+        role="img"
+        aria-label={`График: ${values.length} точек, макс ${fmt.short(Math.max(...values))}, последнее ${fmt.short(values[values.length - 1])}`}
+        onMouseMove={onSvgMove}
+        onMouseDown={onPointClick ? (e) => (pressRef.current = { x: e.clientX, y: e.clientY }) : undefined}
+        onClick={onSvgClick}
+      >
+        {plot.staticLayer}
+
+        {/* Hovered-point crosshair + marker (+ the comparison point at the same x, so hovering
+            reads BOTH series) — the only elements a hover re-render touches. */}
+        {hovered && (
+          <>
+            <line x1={hovered.x} y1={0} x2={hovered.x} y2={h} stroke="hsl(var(--brand-iris))" strokeWidth="1" opacity="0.35" vectorEffect="non-scaling-stroke" />
+            {activeGhost && activeGhost[hover!.i] != null && (
+              <circle cx={hovered.x} cy={yFor(activeGhost[hover!.i])} r="3.5" fill="hsl(var(--card))" stroke="hsl(var(--chart-2))" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+            )}
+            <circle cx={hovered.x} cy={hovered.y} r="4" fill="hsl(var(--brand-iris))" stroke="hsl(var(--background))" strokeWidth="1.5" />
+          </>
+        )}
       </svg>
 
       {/* Minimal x labels (axis-free cards): first / mid / last under the svg. Axes mode

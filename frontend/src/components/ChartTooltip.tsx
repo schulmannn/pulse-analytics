@@ -45,6 +45,7 @@ export function ChartTooltip({ tip }: { tip: TooltipState }) {
   return (
     <div
       ref={ref}
+      data-chart-tooltip
       className="pointer-events-none absolute z-10 max-w-[240px] rounded border border-border bg-background/95 px-2.5 py-1.5 text-xs font-medium leading-snug text-foreground"
       style={{ left: cx - half, top: Math.max(top, 0), visibility: measured ? 'visible' : 'hidden' }}
     >

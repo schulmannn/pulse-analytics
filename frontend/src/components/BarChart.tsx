@@ -1,5 +1,7 @@
-import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { MouseEvent as ReactMouseEvent } from 'react';
 import { fmt } from '@/lib/format';
+import { columnIndex } from '@/lib/chartHover';
 import { ChartTooltip, type TooltipRow, type TooltipState } from '@/components/ChartTooltip';
 import { axisLabel, niceScale } from '@/components/LineChart';
 import { ChartExpandedContext, ExpandedChartHeightContext, WidgetTargetContext } from '@/components/ExpandableChart';
@@ -14,8 +16,8 @@ interface BarChartProps {
   ghost?: number[];
   /** Legend name for the ghost series (default «Прошлый период»). */
   ghostLabel?: string;
-  /** When set, bars become clickable (a drilldown gesture): the per-column hit area fires this
-      with the column index and shows a pointer cursor. Hover behaviour is unchanged. */
+  /** When set, bars become clickable (a drilldown gesture): a click anywhere on the chart fires
+      this with the hovered column index and shows a pointer cursor. Hover behaviour is unchanged. */
   onPointClick?: (index: number) => void;
   /** Whether the comparison legend chip is an interactive show/hide toggle (default). Pass false
       where a page-level compare control already owns the on/off (the metric page). */
@@ -35,6 +37,10 @@ const CHAR_W = 6.6;
 
 export function BarChart({ values, labels, titles, height = 200, ghost, ghostLabel = 'Прошлый период', onPointClick, legendToggle = true }: BarChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  // Press position (client px) for the drag guard: the svg-level onClick would otherwise drill on
+  // a press-drag-release scrub (the browser retargets a cross-child click to the svg). null = no
+  // press recorded, so a keyboard/AT-synthesized click still passes through.
+  const pressRef = useRef<{ x: number; y: number } | null>(null);
   const [hover, setHover] = useState<Hover | null>(null);
   // The comparison overlay can be toggled off via its legend chip (steep #9) — hidden, it also
   // drops out of the bar y-domain so the bars rescale to the current series.
@@ -86,101 +92,75 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
     };
   }, [hasHover]);
 
-  if (!values || values.length === 0) {
-    return (
-      <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
-        Нет данных
-      </div>
-    );
-  }
-
   const hasGhost = !!ghost && ghost.length === values.length && ghost.length >= 2;
   // Toggled off, the comparison drops out of every draw/measure below; the legend chip stays
-  // visible so it can be toggled back on.
+  // visible so it can be toggled back on. Derived before the plot memo (its inputs).
   const showGhost = hasGhost && !ghostHidden;
-  // Expanded view: bars scale against a NICE domain top (1/2/5×10ⁿ) so the y ticks land on
-  // round values, like LineChart — the old max/mid pair printed «262» next to «2.5k».
-  // The domain also covers the target and the (shown) comparison line — both must stay visible.
-  const rawMax = Math.max(...values, 1, target ?? 0, ...(showGhost ? ghost! : []));
-  const scale = expanded ? niceScale(0, rawMax) : null;
-  const max = scale ? scale.hi : rawMax;
-  const n = values.length;
-  const chartWidth = Math.max(width, 1);
-  // In a fixed-height card tile (ctxHeight set, not the expanded overlay), the comparison legend is
-  // an HTML row BELOW the svg — reserve its height so svg + legend fit the tile with no inner
-  // scrollbar. (X-labels are drawn INSIDE the svg via paddingBottom, so they need no reservation.)
-  const legendRow = ctxHeight != null && !expanded && hasGhost ? 22 : 0;
-  const chartHeight = Math.max((ctxHeight ?? height) - legendRow, 60);
-  const paddingBottom = labels && labels.length > 0 ? 24 : 0;
-  const graphHeight = chartHeight - paddingBottom;
-  // Expanded view: headroom for the value labels above full-height bars.
-  const padTop = expanded ? 18 : 0;
-  const usable = Math.max(graphHeight - padTop, 1);
+  const activeGhost = showGhost ? ghost : undefined;
 
-  // Expanded view: nice-tick labels right-aligned in a reserved left gutter (0 = baseline).
-  const yTicks = scale ? scale.ticks.filter((t) => t > 0) : [];
-  const tickLabels = yTicks.map((v) => axisLabel(v, scale ? scale.step : 1));
-  const gutterW = expanded
-    ? Math.max(28, Math.round(Math.max(...tickLabels.map((l) => l.length)) * CHAR_W) + 14)
-    : 0;
+  // ── Geometry + the static plot, memoized APART from hover ────────────────────────────────
+  // Hover used to swap every bar's opacity and re-create the whole element tree per mousemove
+  // (plus a transparent hit-rect per column). Now the bars render ONCE into a cached layer; the
+  // hover dim is a single group-opacity attribute, the hovered bar is re-drawn at full opacity
+  // in the overlay below, and the svg carries ONE mouse handler with O(1) column math.
+  const plot = useMemo(() => {
+    if (!values || values.length === 0) return null;
 
-  // Cap the column width and center the group when there are few bars.
-  const plotW = Math.max(chartWidth - gutterW, 10);
-  const itemWidth = Math.min(plotW / n, MAX_BAR_W / BAR_RATIO);
-  const barWidth = itemWidth * BAR_RATIO;
-  const offsetX = gutterW + (plotW - itemWidth * n) / 2;
-  // Thin x-labels on narrow widths so dense series (e.g. 14 days) don't overlap.
-  const labelStride = Math.max(1, Math.ceil(n / Math.max(2, Math.floor(chartWidth / 56))));
+    // Expanded view: bars scale against a NICE domain top (1/2/5×10ⁿ) so the y ticks land on
+    // round values, like LineChart — the old max/mid pair printed «262» next to «2.5k».
+    // The domain also covers the target and the (shown) comparison line — both must stay visible.
+    const rawMax = Math.max(...values, 1, target ?? 0, ...(activeGhost ?? []));
+    const scale = expanded ? niceScale(0, rawMax) : null;
+    const max = scale ? scale.hi : rawMax;
+    const n = values.length;
+    const chartWidth = Math.max(width, 1);
+    // In a fixed-height card tile (ctxHeight set, not the expanded overlay), the comparison legend
+    // is an HTML row BELOW the svg — reserve its height so svg + legend fit the tile with no inner
+    // scrollbar. (X-labels are drawn INSIDE the svg via paddingBottom, so they need no reservation.)
+    const legendRow = ctxHeight != null && !expanded && hasGhost ? 22 : 0;
+    const chartHeight = Math.max((ctxHeight ?? height) - legendRow, 60);
+    const paddingBottom = labels && labels.length > 0 ? 24 : 0;
+    const graphHeight = chartHeight - paddingBottom;
+    // Expanded view: headroom for the value labels above full-height bars.
+    const padTop = expanded ? 18 : 0;
+    const usable = Math.max(graphHeight - padTop, 1);
 
-  const barTop = (val: number) => graphHeight - (val / max) * usable;
-  const barCenterX = (i: number) => offsetX + i * itemWidth + itemWidth / 2;
-  // Comparison overlay: a dashed line across the previous-period value at each bar centre.
-  const ghostPath = showGhost
-    ? ghost!.map((v, i) => `${i === 0 ? 'M' : 'L'} ${barCenterX(i)} ${barTop(v)}`).join(' ')
-    : '';
-  const tipText = (i: number) => {
-    const base = titles?.[i] ?? `${labels?.[i] ?? ''}: ${values[i]}`;
-    return showGhost && ghost![i] != null ? `${base} · пред. ${fmt.short(ghost![i])}` : base;
-  };
-  // Structured readout (label · Текущий · comparison · Δ) when a ghost series is present; else the
-  // metric's own title text. Anchored to the hovered bar's top-centre.
-  const buildTip = (i: number): TooltipState => {
-    const x = barCenterX(i);
-    const y = barTop(values[i]);
-    if (showGhost && ghost![i] != null) {
-      const cur = values[i];
-      const prev = ghost![i];
-      const rows: TooltipRow[] = [
-        { label: 'Текущий', value: fmt.short(cur), color: 'hsl(var(--brand-iris))' },
-        { label: ghostLabel, value: fmt.short(prev), color: 'hsl(var(--chart-2))' },
-      ];
-      const d = prev !== 0 ? ((cur - prev) / Math.abs(prev)) * 100 : null;
-      if (d != null && Number.isFinite(d)) rows.push({ label: 'Δ', value: `${d >= 0 ? '+' : '−'}${Math.abs(d).toFixed(1)}%` });
-      return { x, y, title: labels?.[i], rows };
-    }
-    return { x, y, text: tipText(i) };
-  };
-  const onEnter = (i: number) => () => {
-    setHover((prev) => (prev && prev.i === i ? prev : { i }));
-  };
+    // Expanded view: nice-tick labels right-aligned in a reserved left gutter (0 = baseline).
+    const yTicks = scale ? scale.ticks.filter((t) => t > 0) : [];
+    const tickLabels = yTicks.map((v) => axisLabel(v, scale ? scale.step : 1));
+    const gutterW = expanded
+      ? Math.max(28, Math.round(Math.max(...tickLabels.map((l) => l.length)) * CHAR_W) + 14)
+      : 0;
 
-  return (
-    <div
-      ref={containerRef}
-      className="relative w-full"
-      onMouseLeave={() => setHover(null)}
-      onPointerLeave={() => setHover(null)}
-    >
-      <svg
-        className="block w-full"
-        height={chartHeight}
-        viewBox={`0 0 ${chartWidth} ${chartHeight}`}
-        preserveAspectRatio="none"
-        // Named graphic for AT (PieChart idiom) — see LineChart.tsx: series max, not the scale top.
-        role="img"
-        aria-label={`Столбчатая диаграмма: ${values.length} столбцов, макс ${fmt.short(Math.max(...values))}`}
-      >
-        {/* Expanded: y gridlines with tick labels in the gutter */}
+    // Cap the column width and center the group when there are few bars.
+    const plotW = Math.max(chartWidth - gutterW, 10);
+    const itemWidth = Math.min(plotW / n, MAX_BAR_W / BAR_RATIO);
+    const barWidth = itemWidth * BAR_RATIO;
+    const offsetX = gutterW + (plotW - itemWidth * n) / 2;
+    // Thin x-labels on narrow widths so dense series (e.g. 14 days) don't overlap.
+    const labelStride = Math.max(1, Math.ceil(n / Math.max(2, Math.floor(chartWidth / 56))));
+
+    const barTop = (val: number) => graphHeight - (val / max) * usable;
+    const barCenterX = (i: number) => offsetX + i * itemWidth + itemWidth / 2;
+    // Comparison overlay: a dashed line across the previous-period value at each bar centre.
+    const ghostPath = activeGhost
+      ? activeGhost.map((v, i) => `${i === 0 ? 'M' : 'L'} ${barCenterX(i)} ${barTop(v)}`).join(' ')
+      : '';
+
+    // Per-bar boxes — the cached rect layer below and the hover highlight both draw from these.
+    const bars = values.map((val, i) => {
+      const barHeight = (val / max) * usable;
+      return {
+        x: offsetX + i * itemWidth + (itemWidth - barWidth) / 2,
+        y: graphHeight - barHeight,
+        w: barWidth,
+        h: Math.max(barHeight, 2),
+      };
+    });
+
+    // Under the bars: gridlines + tick labels (expanded only).
+    const underLayer = (
+      <>
         {yTicks.map((v, idx) => {
           const y = barTop(v);
           return (
@@ -192,32 +172,34 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
             </g>
           );
         })}
+      </>
+    );
 
+    // The bars themselves — flat single-token fill; the render site wraps this cached layer in a
+    // group whose opacity carries the hover dim (0.85 idle → 0.55 while a column is hovered).
+    const barsLayer = (
+      <>
+        {bars.map((b, i) => (
+          <rect key={i} x={b.x} y={b.y} width={b.w} height={b.h} fill="hsl(var(--brand-iris))" rx={2} />
+        ))}
+      </>
+    );
+
+    // Above the bars: value/x labels (never dimmed — parity with the old per-rect opacity),
+    // then the comparison overlay and the target line.
+    const overLayer = (
+      <>
         {values.map((val, i) => {
-          const barHeight = (val / max) * usable;
-          const x = offsetX + i * itemWidth + (itemWidth - barWidth) / 2;
-          const y = graphHeight - barHeight;
           const strideHit = i === 0 || i === n - 1 || i % labelStride === 0;
           const showLabel = labels?.[i] && strideHit;
           const showValue = expanded && strideHit;
-
+          if (!showLabel && !showValue) return null;
           return (
-            <g key={i}>
-              {/* Flat single-token fill; hovered bar reads slightly stronger */}
-              <rect
-                x={x}
-                y={y}
-                width={barWidth}
-                height={Math.max(barHeight, 2)}
-                fill="hsl(var(--brand-iris))"
-                rx={2}
-                className="pointer-events-none transition-opacity"
-                opacity={hover ? (hover.i === i ? 1 : 0.55) : 0.85}
-              />
+            <g key={`l${i}`}>
               {showValue && (
                 <text
-                  x={x + barWidth / 2}
-                  y={y - 4}
+                  x={bars[i].x + barWidth / 2}
+                  y={bars[i].y - 4}
                   textAnchor="middle"
                   className="pointer-events-none select-none fill-ink2 text-2xs font-medium tabular-nums"
                 >
@@ -226,7 +208,7 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
               )}
               {showLabel && (
                 <text
-                  x={x + barWidth / 2}
+                  x={bars[i].x + barWidth / 2}
                   y={chartHeight - 6}
                   textAnchor="middle"
                   className="pointer-events-none select-none fill-muted-foreground text-2xs font-medium"
@@ -234,28 +216,16 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
                   {labels?.[i]}
                 </text>
               )}
-              {/* Wide transparent hit-area: hover anywhere over the column (also the drill click
-                  target when onPointClick is set). */}
-              <rect
-                x={offsetX + i * itemWidth}
-                y={0}
-                width={itemWidth}
-                height={graphHeight}
-                fill="transparent"
-                className={onPointClick ? 'cursor-pointer' : 'cursor-crosshair'}
-                onMouseMove={onEnter(i)}
-                onClick={onPointClick ? () => onPointClick(i) : undefined}
-              />
             </g>
           );
         })}
 
         {/* Comparison overlay — dashed --chart-2 line across the previous-period values, plus
             hollow dots at each point so the delta reads at a glance (steep). */}
-        {showGhost && (
+        {activeGhost && (
           <g className="pointer-events-none">
             <path d={ghostPath} fill="none" stroke="hsl(var(--chart-2))" strokeWidth="1.8" strokeDasharray="5 4" opacity="0.9" />
-            {ghost!.map((v, i) => (
+            {activeGhost.map((v, i) => (
               <circle key={`g${i}`} cx={barCenterX(i)} cy={barTop(v)} r="2.5" fill="hsl(var(--card))" stroke="hsl(var(--chart-2))" strokeWidth="1.5" />
             ))}
           </g>
@@ -275,13 +245,120 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
             </text>
           </>
         )}
+      </>
+    );
 
-        {/* Hovered-column crosshair + the comparison point on it (parity with LineChart). */}
+    return { chartWidth, chartHeight, graphHeight, offsetX, itemWidth, bars, barTop, barCenterX, underLayer, barsLayer, overLayer };
+  }, [values, labels, activeGhost, hasGhost, target, width, ctxHeight, height, expanded]);
+
+  if (!values || values.length === 0 || !plot) {
+    return (
+      <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
+        Нет данных
+      </div>
+    );
+  }
+
+  const { chartWidth, chartHeight, graphHeight, offsetX, itemWidth, bars, barTop, barCenterX } = plot;
+  const n = values.length;
+
+  const tipText = (i: number) => {
+    const base = titles?.[i] ?? `${labels?.[i] ?? ''}: ${values[i]}`;
+    return activeGhost && activeGhost[i] != null ? `${base} · пред. ${fmt.short(activeGhost[i])}` : base;
+  };
+  // Structured readout (label · Текущий · comparison · Δ) when a ghost series is present; else the
+  // metric's own title text. Anchored to the hovered bar's top-centre.
+  const buildTip = (i: number): TooltipState => {
+    const x = barCenterX(i);
+    const y = barTop(values[i]);
+    if (activeGhost && activeGhost[i] != null) {
+      const cur = values[i];
+      const prev = activeGhost[i];
+      const rows: TooltipRow[] = [
+        { label: 'Текущий', value: fmt.short(cur), color: 'hsl(var(--brand-iris))' },
+        { label: ghostLabel, value: fmt.short(prev), color: 'hsl(var(--chart-2))' },
+      ];
+      const d = prev !== 0 ? ((cur - prev) / Math.abs(prev)) * 100 : null;
+      if (d != null && Number.isFinite(d)) rows.push({ label: 'Δ', value: `${d >= 0 ? '+' : '−'}${Math.abs(d).toFixed(1)}%` });
+      return { x, y, title: labels?.[i], rows };
+    }
+    return { x, y, text: tipText(i) };
+  };
+
+  // ONE hit surface: the svg itself. The pointer x maps to its column in O(1); moving within a
+  // column keeps the same state object, so those mousemoves don't re-render.
+  const indexFromEvent = (e: ReactMouseEvent<SVGSVGElement>): number | null => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (rect.width === 0) return null;
+    const xView = ((e.clientX - rect.left) / rect.width) * chartWidth;
+    return columnIndex(xView, n, offsetX, itemWidth);
+  };
+  const onSvgMove = (e: ReactMouseEvent<SVGSVGElement>) => {
+    const i = indexFromEvent(e);
+    if (i == null) return;
+    setHover((prev) => (prev && prev.i === i ? prev : { i }));
+  };
+  // Drill only on a genuine click, not a scrub: a press that travelled >5px before release is a
+  // drag-to-read gesture, not a tap. A click with no recorded press (keyboard / AT) passes through.
+  const onSvgClick = onPointClick
+    ? (e: ReactMouseEvent<SVGSVGElement>) => {
+        const press = pressRef.current;
+        pressRef.current = null;
+        if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 5) return;
+        const i = indexFromEvent(e);
+        if (i != null) onPointClick(i);
+      }
+    : undefined;
+  const clearHover = () => {
+    pressRef.current = null;
+    setHover(null);
+  };
+
+  return (
+    <div
+      ref={containerRef}
+      className="relative w-full"
+      onMouseLeave={clearHover}
+      onPointerLeave={clearHover}
+    >
+      <svg
+        className={`block w-full ${onPointClick ? 'cursor-pointer' : 'cursor-crosshair'}`}
+        height={chartHeight}
+        viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+        preserveAspectRatio="none"
+        // Named graphic for AT (PieChart idiom) — see LineChart.tsx: series max, not the scale top.
+        role="img"
+        aria-label={`Столбчатая диаграмма: ${values.length} столбцов, макс ${fmt.short(Math.max(...values))}`}
+        onMouseMove={onSvgMove}
+        onMouseDown={onPointClick ? (e) => (pressRef.current = { x: e.clientX, y: e.clientY }) : undefined}
+        onClick={onSvgClick}
+      >
+        {plot.underLayer}
+
+        {/* Cached bar rects; hovering dims the whole group and the highlight below re-draws the
+            hovered bar at full opacity — same reading as the old per-bar opacity swap, without
+            re-rendering a rect per column per mousemove. transition-opacity only WHILE hovered so
+            the un-dim on leave snaps (the full-opacity highlight unmounts in the same commit) — no
+            below-idle dip on the just-hovered bar. */}
+        <g className={hover ? 'transition-opacity' : undefined} opacity={hover ? 0.55 : 0.85}>
+          {plot.barsLayer}
+        </g>
+
+        {/* Full-opacity highlight of the hovered bar — BETWEEN the dimmed bars and the ghost/target
+            overlay, so the comparison + goal lines still paint OVER it (HEAD paint order). */}
+        {hover && hover.i < n && (
+          <rect x={bars[hover.i].x} y={bars[hover.i].y} width={bars[hover.i].w} height={bars[hover.i].h} fill="hsl(var(--brand-iris))" rx={2} className="pointer-events-none" />
+        )}
+
+        {plot.overLayer}
+
+        {/* Hovered-column crosshair + the comparison point on it, painted over everything (parity
+            with LineChart / HEAD). */}
         {hover && hover.i < n && (
           <g className="pointer-events-none">
             <line x1={barCenterX(hover.i)} y1={0} x2={barCenterX(hover.i)} y2={graphHeight} stroke="hsl(var(--brand-iris))" strokeWidth="1" opacity="0.3" vectorEffect="non-scaling-stroke" />
-            {showGhost && ghost![hover.i] != null && (
-              <circle cx={barCenterX(hover.i)} cy={barTop(ghost![hover.i])} r="3.5" fill="hsl(var(--card))" stroke="hsl(var(--chart-2))" strokeWidth="1.5" />
+            {activeGhost && activeGhost[hover.i] != null && (
+              <circle cx={barCenterX(hover.i)} cy={barTop(activeGhost[hover.i])} r="3.5" fill="hsl(var(--card))" stroke="hsl(var(--chart-2))" strokeWidth="1.5" />
             )}
           </g>
         )}

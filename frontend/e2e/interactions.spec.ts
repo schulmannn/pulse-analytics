@@ -34,6 +34,63 @@ test('detail overlay is URL-stated and closes on browser Back', async ({ page })
   await expect(page).not.toHaveURL(/[?&]detail=/);
 });
 
+test('chart hover: tooltip readout appears, moves and clears (single-svg hit-test)', async ({ page }) => {
+  await bootDemo(page, '/');
+  // A series chart (LineChart exposes a named role=img svg). The svg itself is the hit surface —
+  // hover derives the point index from the pointer x, no per-point rects.
+  const chart = page.locator('svg[aria-label^="График:"]').first();
+  await chart.waitFor({ state: 'visible', timeout: 15_000 });
+  // mouse.move targets raw viewport coordinates and never auto-scrolls — bring the chart into
+  // the viewport first, then read its box.
+  await chart.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(300); // settle the hover-clearing scroll listener
+  const box = await chart.boundingBox();
+  if (!box) throw new Error('chart svg has no box');
+  const tooltip = page.locator('[data-chart-tooltip]');
+
+  await page.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.5);
+  await expect(tooltip.first()).toBeVisible();
+  const early = (await tooltip.first().textContent()) ?? '';
+
+  // A different x zone snaps to a different point — the readout follows (content may repeat on
+  // flat series, so assert it stays visible rather than diffing text).
+  await page.mouse.move(box.x + box.width * 0.85, box.y + box.height * 0.5);
+  await expect(tooltip.first()).toBeVisible();
+  expect(early.length).toBeGreaterThan(0);
+
+  // Leaving the chart clears the readout (container mouseleave). The top-left corner is app
+  // chrome on every viewport — guaranteed chart-free.
+  await page.mouse.move(5, 5);
+  await expect(tooltip).toHaveCount(0);
+});
+
+test('chart drill guard: a scrub across the chart does not navigate', async ({ page }) => {
+  // Seed a drillable line widget (tg.views has a metric page) pinned to Home so its chart's
+  // point-click drills to /metrics/views. addInitScript stacks before bootDemo's own seed. A
+  // press-drag-release SCRUB (drag-to-read) must NOT drill — the guard bails when the pointer
+  // travelled >5px between press and release. (The clean-click DRILL path is covered by the KPI
+  // hero test above; asserting it on this chart is fixture-fragile — the story-card hero span
+  // overlaps the svg centre — so this test locks only the no-navigation-on-scrub half.)
+  await page.addInitScript(() => {
+    localStorage.setItem('pulse_home_blocks', JSON.stringify({ keys: ['custom:probe1'] }));
+    localStorage.setItem('pulse_widget_configs', JSON.stringify([{ id: 'probe1', metricId: 'tg.views', viz: 'line' }]));
+  });
+  await bootDemo(page, '/home');
+  const chart = page.locator('svg[aria-label^="График:"]').first();
+  await chart.waitFor({ state: 'visible', timeout: 15_000 });
+  await chart.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(300);
+  const box = await chart.boundingBox();
+  if (!box) throw new Error('chart svg has no box');
+  const y = box.y + box.height * 0.5;
+
+  await page.mouse.move(box.x + box.width * 0.2, y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.8, y, { steps: 8 });
+  await page.mouse.up();
+  await expect(page).not.toHaveURL(/\/metrics\//);
+});
+
 test('edit-mode entry + exit (Home)', async ({ page }) => {
   await bootDemo(page, '/home');
   // The «Изменить»↔«Готово» toggle reflects edit state via aria-pressed — robust whether Home is
