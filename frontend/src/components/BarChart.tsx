@@ -2,6 +2,7 @@ import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } fro
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { fmt } from '@/lib/format';
 import { columnIndex } from '@/lib/chartHover';
+import { axisLabelIndexSet } from '@/lib/chartLabels';
 import { ChartTooltip, type TooltipRow, type TooltipState } from '@/components/ChartTooltip';
 import { axisLabel, niceScale } from '@/components/LineChart';
 import { ChartExpandedContext, ExpandedChartHeightContext, WidgetTargetContext } from '@/components/ExpandableChart';
@@ -137,8 +138,8 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
     const itemWidth = Math.min(plotW / n, MAX_BAR_W / BAR_RATIO);
     const barWidth = itemWidth * BAR_RATIO;
     const offsetX = gutterW + (plotW - itemWidth * n) / 2;
-    // Thin x-labels on narrow widths so dense series (e.g. 14 days) don't overlap.
-    const labelStride = Math.max(1, Math.ceil(n / Math.max(2, Math.floor(chartWidth / 56))));
+    // Thin x-labels by measured width; labels are hidden rather than rotated in tight cards.
+    const labelIndexes = axisLabelIndexSet(n, plotW, { minLabelPx: expanded ? 68 : 78, maxLabels: expanded ? 12 : 7 });
 
     const barTop = (val: number) => graphHeight - (val / max) * usable;
     const barCenterX = (i: number) => offsetX + i * itemWidth + itemWidth / 2;
@@ -190,7 +191,7 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
     const overLayer = (
       <>
         {values.map((val, i) => {
-          const strideHit = i === 0 || i === n - 1 || i % labelStride === 0;
+          const strideHit = labelIndexes.has(i);
           const showLabel = labels?.[i] && strideHit;
           const showValue = expanded && strideHit;
           if (!showLabel && !showValue) return null;
@@ -211,6 +212,7 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
                   x={bars[i].x + barWidth / 2}
                   y={chartHeight - 6}
                   textAnchor="middle"
+                  data-chart-axis-label="x"
                   className="pointer-events-none select-none fill-muted-foreground text-2xs font-medium"
                 >
                   {labels?.[i]}

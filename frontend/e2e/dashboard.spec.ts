@@ -44,3 +44,49 @@ for (const route of ROUTES) {
     await testInfo.attach(`${route.name}-${testInfo.project.name}`, { body: shot, contentType: 'image/png' });
   });
 }
+
+test('chart x-axis labels stay sparse and unrotated on compact charts', async ({ page }) => {
+  await bootDemo(page, '/analytics');
+  const audit = await page.evaluate(() => {
+    const labels = [...document.querySelectorAll<HTMLElement | SVGTextElement>('[data-chart-axis-label]')]
+      .filter((el) => {
+        const text = (el.textContent || '').trim();
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        return text && rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+      });
+
+    const rotated = labels
+      .filter((el) => (el.getAttribute('transform') || '').toLowerCase().includes('rotate'))
+      .map((el) => (el.textContent || '').trim());
+
+    const groups = new Map<Element, Array<{ text: string; rect: DOMRect }>>();
+    for (const el of labels) {
+      const owner = el.closest('svg') ?? el.parentElement;
+      if (!owner) continue;
+      const group = groups.get(owner) ?? [];
+      group.push({ text: (el.textContent || '').trim(), rect: el.getBoundingClientRect() });
+      groups.set(owner, group);
+    }
+
+    const overlaps: Array<{ a: string; b: string }> = [];
+    for (const group of groups.values()) {
+      for (let i = 0; i < group.length; i += 1) {
+        for (let j = i + 1; j < group.length; j += 1) {
+          const a = group[i];
+          const b = group[j];
+          const yOverlap = Math.min(a.rect.bottom, b.rect.bottom) - Math.max(a.rect.top, b.rect.top);
+          const xOverlap = Math.min(a.rect.right, b.rect.right) - Math.max(a.rect.left, b.rect.left);
+          const sameRow = yOverlap > Math.min(a.rect.height, b.rect.height) * 0.5;
+          if (sameRow && xOverlap > 1) overlaps.push({ a: a.text, b: b.text });
+        }
+      }
+    }
+
+    return { count: labels.length, rotated, overlaps };
+  });
+
+  expect(audit.count).toBeGreaterThan(0);
+  expect(audit.rotated, `rotated labels: ${JSON.stringify(audit.rotated)}`).toEqual([]);
+  expect(audit.overlaps, `overlapping x-axis labels: ${JSON.stringify(audit.overlaps)}`).toEqual([]);
+});
