@@ -237,6 +237,30 @@ color-toggle + crossfade иконок + remount текста (`index.css:251`, `
 
 ## Журнал
 
+- 2026-07-05 — **P1 widgetStore: селекторные подписки вместо глобального тика — SHIPPED `51f942f`**
+  (342 vitest [+10] + 192 e2e). Точечное изменение стора (скрыть/период/акцент одного виджета) теперь
+  ре-рендерит ОДНУ карточку вместо всех N. Было ТРИ канала O(N)-каскада: (1) каждый ChartSection на
+  useStoreTick (force на любой notify); (2) WidgetGroup строил НОВЫЙ GroupCtx-объект каждый рендер →
+  все консьюмеры через контекст; (3) Home на useHomeBlocks-тике, а reparse config-массива давал всем
+  айтемам новые identity. Фикс: `lib/storeIdentity.ts` (pure identity-preservation: preserveItem/
+  Entry/Value) + raw-keyed кеши prefs/order/home в ChartWidget + хуки-селекторы `useWidgetPrefs(id)`/
+  `useGroupOrder(groupId)`/`useIsPinnedToHome(key)`/`useHomeBlocks()` (useSyncExternalStore со
+  стабильными снапшотами — урок S6.1 про loop); ChartSection без тика; WidgetGroup мемоизирует
+  sequence+ctx (FLIP-подписка с pre-commit снапшотом rect'ов СОХРАНЕНА — ре-рендер группы дешёвый,
+  дети bail-out по element identity); widgetStore.snapshot переиспользует identity неизменённых
+  конфигов → memo(ConfigWidget) отсекает все карточки кроме отредактированной; Home сужен до
+  pin-list+configs, own-chrome legacy → memo(LegacyHomeCard) со СВОЕЙ prefs-подпиской (иначе
+  source/size stale). localBlob пушит нормализованные снапшоты; dead getWidgetSource удалён.
+  **Adversarial-review (4 оси → verify): 1 confirmed LOW — prototype pollution**: `out[key]=` на
+  объектном литерале при stored-ключе `__proto__` (hostile /api/prefs blob → hydrate пишет verbatim)
+  дёргал унаследованный сеттер и подменял прототип кеша — регрессия против readJson (JSON.parse
+  отдаёт `__proto__` инертным own-свойством). Скептик СУЗИЛ фикс до одной строки `Object.create(null)`
+  в preserveEntryIdentity (orderSnapshot-половина находки опровергнута: swap промежуточного объекта не
+  утекает — Object.keys его не видит). Verification-агент: PASS (все консьюмеры null-proto-совместимы;
+  регрессионный тест валит старую реализацию). Бонус: getPrefs('toString') теперь EMPTY_PREFS, а не
+  унаследованная функция. Цель карточки (O(1) commit на точечное изменение) закрыта механизмом
+  uSES-bailout по Object.is + memo по preserved identity; identity-инварианты (предусловие bailout)
+  заперты юнит-тестами, интеракции (hide/reorder/edit-mode/detail/focus-парковки) — 192 e2e.
 - 2026-07-04 — **BACKEND-МАРАФОН: 5 P0/P1 карточек SHIPPED на прод** (`a1373de` runbook+дрилл · `caf8979`+`2d1d435` tenancy ADR-001 фазы A/B + jobs · `eb9637d` capacity · `cfd1c71` verify-фиксы). Canonical sources + workspaces (миграции 010-012 additive-only, применены на прод-БД поверх реального аккаунта), канонические чтения (2 линка на 1 source = один row-set, acceptance-тест), write-гейты ролей, jobs-idempotency (report_email ключуется по периоду), backup-дрилл пройден целиком, load-test 100 юзеров = 1163 rps / 0 ошибок / p95≤162ms (ops/PERF_BASELINE.md). **Adversarial-ревью ДО пуша поймало критичный self-deadlock** (pool.query внутри чужой транзакции — executor теперь тредится насквозь, регрессионный тест с watchdog) + mis-attribution гибридов в бэкфилле. Стенд: портативный PG в C:pgstand (:54329), интеграционные тесты gated по TEST_DATABASE_URL (5/5). Фаза C (write-унификация + collector-dedupe) = отдельные карточки.
 
 - 2026-07-04 — **P1 Единая подпись source+data-quality — SHIPPED `db8dce3`** (332 vitest [+11] + 192 e2e).
