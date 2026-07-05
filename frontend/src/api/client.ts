@@ -1,6 +1,6 @@
 import type { z } from 'zod';
 import { getSelectedChannel } from '@/lib/channel';
-import { getSessionToken } from '@/lib/session';
+import { getSessionToken, setSessionToken } from '@/lib/session';
 import { isDemoMode } from '@/lib/demo';
 import { demoFixture } from '@/lib/demoFixtures';
 
@@ -54,6 +54,16 @@ function buildHeaders(channelId: number | null): Record<string, string> {
 }
 
 /**
+ * Sliding session: past its half-life the server re-issues a fresh token on the `X-Session-Refresh`
+ * response header (see server requireAuth). Persist it so an active user's idle window keeps sliding
+ * forward and they are never logged out mid-work. Same-origin fetch → the header is readable.
+ */
+function persistSessionRefresh(res: Response): void {
+  const fresh = res.headers.get('X-Session-Refresh');
+  if (fresh) setSessionToken(fresh);
+}
+
+/**
  * Typed GET against the existing Express API. Auth mirrors the legacy dashboard: the
  * HMAC session token lives in localStorage (shared with '/' — same origin) and is sent
  * as the `X-Session-Token` header (NOT a cookie). The JSON is then validated/narrowed
@@ -86,6 +96,7 @@ export async function apiGet<S extends z.ZodTypeAny>(
     }
     throw new ApiError(res.status, message);
   }
+  persistSessionRefresh(res);
   const data: unknown = await res.json();
   return parseResponse('GET', path, schema, data);
 }
@@ -133,6 +144,7 @@ export async function apiSend(
     }
     throw new ApiError(res.status, message);
   }
+  persistSessionRefresh(res);
   if (res.status === 204) return null;
   const data: unknown = await res.json().catch(() => null);
   return schema ? parseResponse(method, path, schema, data) : data;

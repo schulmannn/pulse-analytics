@@ -1,6 +1,8 @@
 const TOKEN_KEY = 'pulse_token';
 const TOKEN_EXP = 'pulse_token_exp';
-const DEFAULT_TTL_MS = 8 * 60 * 60 * 1000;
+// Mirrors the server's SESSION_TTL (index.js). The server slides it forward on activity via the
+// X-Session-Refresh response header (see api/client.ts); this is the idle window, not a hard cap.
+const DEFAULT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
  * Read the legacy session token from localStorage. The new app is served same-origin as

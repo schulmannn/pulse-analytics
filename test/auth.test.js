@@ -1,22 +1,40 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
-const { createAuth, hashPassword, verifyPassword, rateLimitKey } = require('../server/lib/auth');
+const { createAuth, hashPassword, verifyPassword, rateLimitKey, isSessionStale } = require('../server/lib/auth');
 
-test('signed session preserves token version and rejects tampering', () => {
+test('signed session preserves token version + exp and rejects tampering', () => {
   const auth = createAuth({ secret: 'test-secret' });
+  const exp = Date.now() + 60_000;
   const token = auth.signSession({
     uid: 42,
     role: 'user',
-    exp: Date.now() + 60_000,
+    exp,
     tokenVersion: 7,
   });
+  // parseToken exposes exp so requireAuth can slide the session (re-issue past half-life).
   assert.deepStrictEqual(auth.parseToken(token), {
     uid: 42,
     role: 'user',
     tokenVersion: 7,
+    exp,
   });
   assert.strictEqual(auth.parseToken(token.slice(0, -1) + 'x'), null);
+});
+
+test('isSessionStale flips at half-life (sliding-session re-issue trigger)', () => {
+  const ttl = 7 * 24 * 60 * 60 * 1000; // 7d
+  const now = 1_000_000_000_000;
+  // Fresh token (full life ahead) → not stale, no re-issue.
+  assert.strictEqual(isSessionStale(now + ttl, now, ttl), false);
+  // Exactly at half-life → not yet (strict <).
+  assert.strictEqual(isSessionStale(now + ttl / 2, now, ttl), false);
+  // Past half-life → stale → server hands back a fresh token.
+  assert.strictEqual(isSessionStale(now + ttl / 2 - 1, now, ttl), true);
+  // An old 8h token migrating onto the new 7d window is immediately refreshed on the next request.
+  assert.strictEqual(isSessionStale(now + 8 * 60 * 60 * 1000, now, ttl), true);
+  // Missing / non-numeric exp is a no-op (never re-issues).
+  assert.strictEqual(isSessionStale(undefined, now, ttl), false);
 });
 
 test('expired session is rejected', () => {

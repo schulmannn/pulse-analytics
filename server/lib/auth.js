@@ -34,6 +34,7 @@ function createAuth(options = {}) {
         uid: payload.uid,
         role: payload.role || 'user',
         tokenVersion: Number.isInteger(payload.ver) ? payload.ver : 0,
+        exp: payload.exp, // caller uses this to slide the session (re-issue past half-life)
       };
     } catch (_) {
       return null;
@@ -81,4 +82,11 @@ function rateLimitKey(session, ip) {
   return `ip:${ip || 'unknown'}`;
 }
 
-module.exports = { createAuth, hashPassword, verifyPassword, SCRYPT, rateLimitKey };
+// Sliding-session staleness: true once a token is past its half-life, so requireAuth can hand the
+// client a fresh full-TTL token and an active user is never logged out mid-work. Pure + exported so
+// the exact predicate is unit-guarded. A token without a numeric exp is treated as not-stale (no-op).
+function isSessionStale(exp, now, ttl) {
+  return typeof exp === 'number' && exp - now < ttl / 2;
+}
+
+module.exports = { createAuth, hashPassword, verifyPassword, SCRYPT, rateLimitKey, isSessionStale };

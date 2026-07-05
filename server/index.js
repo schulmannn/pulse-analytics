@@ -11,7 +11,7 @@ const path       = require('path');
 const fs         = require('fs');
 const crypto     = require('crypto');
 const db         = require('./db');
-const { createAuth, hashPassword, verifyPassword, SCRYPT, rateLimitKey } = require('./lib/auth');
+const { createAuth, hashPassword, verifyPassword, SCRYPT, rateLimitKey, isSessionStale } = require('./lib/auth');
 const { captionSnippet } = require('./lib/caption');
 const { fetchWithTimeout } = require('./lib/http');
 const { log, requestContext, hashIp } = require('./lib/observability');
@@ -166,7 +166,9 @@ const IG_STATE_KEY = crypto.createHmac('sha256', AUTH_SECRET).update('ig-state')
 const IP_HASH_KEY  = crypto.createHmac('sha256', AUTH_SECRET).update('ip-hash').digest();
 
 const ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || '').toLowerCase().trim();
-const SESSION_TTL = 8 * 60 * 60 * 1000;
+// Idle window: an active user is kept signed in by a sliding re-issue (see requireAuth) so this is
+// the MAX time between requests before a re-login is required, not a hard cap on a live session.
+const SESSION_TTL = 7 * 24 * 60 * 60 * 1000;
 const auth = createAuth({ secret: AUTH_SECRET });
 const signSession = auth.signSession;
 const parseToken = auth.parseToken;
@@ -225,6 +227,17 @@ async function requireAuth(req, res, next) {
       return res.status(401).json({ error: 'Сессия отозвана — войди снова' });
     }
     req.user = { uid: u.id, role: u.role, email: u.email };
+    // Sliding session: once the token is past its half-life, hand back a fresh one on the response so
+    // an ACTIVE user is never logged out mid-work; the client persists it (see api/client.ts). Idle
+    // longer than SESSION_TTL still lets the token die (parseToken rejects an expired exp), so this is
+    // a sliding idle window, not an immortal session. token_version revocation is unaffected — a fresh
+    // token carries the current version, so a bumped version still invalidates it on the next request.
+    const now = Date.now();
+    if (isSessionStale(sess.exp, now, SESSION_TTL)) {
+      const fresh = signSession({ uid: u.id, role: u.role, exp: now + SESSION_TTL, tokenVersion: u.token_version });
+      res.set('X-Session-Refresh', fresh);
+      res.set('Cache-Control', 'no-store'); // a response carrying a token must never be shared-cached
+    }
     next();
   } catch (e) { next(e); }
 }
