@@ -16,6 +16,7 @@ import {
   type WidgetConfig,
 } from '@/lib/widgetConfig';
 import { legacyKeyForMetricId } from '@/lib/legacyWidgets';
+import { preserveItemIdentity } from '@/lib/storeIdentity';
 
 const KEY = 'pulse_widget_configs';
 
@@ -42,7 +43,9 @@ export function setWidgetConfigsSyncHook(fn: (() => void) | null) {
 }
 
 // Stable snapshot cache — useSyncExternalStore MUST get the same reference when nothing changed, or
-// it re-renders forever. Recompute only when the stored raw string actually differs.
+// it re-renders forever. Recompute only when the stored raw string actually differs, and recycle the
+// previous OBJECT for every config that didn't change (preserveItemIdentity) — so a one-widget write
+// busts only that widget's identity and a memo'd card (ConfigWidget) bails out for the rest.
 let cacheRaw: string | null | undefined;
 let cacheVal: WidgetConfig[] = [];
 function snapshot(): WidgetConfig[] {
@@ -54,11 +57,13 @@ function snapshot(): WidgetConfig[] {
   }
   if (raw === cacheRaw) return cacheVal;
   cacheRaw = raw;
+  let next: WidgetConfig[];
   try {
-    cacheVal = normalizeWidgets(JSON.parse(raw ?? 'null'));
+    next = normalizeWidgets(JSON.parse(raw ?? 'null'));
   } catch {
-    cacheVal = [];
+    next = [];
   }
+  cacheVal = preserveItemIdentity(cacheVal, next);
   return cacheVal;
 }
 

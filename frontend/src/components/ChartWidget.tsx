@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
 import type { CSSProperties, ReactNode } from 'react';
@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { apiGet, apiSend } from '@/api/client';
 import { isDemoMode } from '@/lib/demo';
 import { fmt } from '@/lib/format';
+import { preserveEntryIdentity, preserveValueIdentity } from '@/lib/storeIdentity';
 import { hydrateWidgetConfigs, reconcileHydratedConfigs, setWidgetConfigsSyncHook, syncableWidgetConfigs } from '@/lib/widgetStore';
 import { BarChart } from '@/components/BarChart';
 import { Breakdown } from '@/components/Breakdown';
@@ -34,7 +35,7 @@ import type { PeriodDays, WidgetPeriodValue } from '@/lib/period';
 const PREFS_KEY = 'pulse_widget_prefs';
 const ORDER_KEY = 'pulse_widget_order';
 /** Personal Home: the ordered list of pinned widget registry keys (steep «На главную»). Stored
-    as an object `{keys:[]}` so it round-trips through the existing object-only readJson reader. */
+    as an object `{keys:[]}` so it round-trips through the object-only store-row parser. */
 const HOME_KEY = 'pulse_home_blocks';
 
 /** Widget footprint on the 6-column group grid: third (2/6) · half (3/6) · full (6/6). */
@@ -190,13 +191,6 @@ export function breakdownVariants(items: BreakdownLikeItem[]): WidgetVariant[] {
   ];
 }
 
-/** The pinned source (channel id) of a widget, if the user chose one in its edit dialog.
-    Home reads this to wrap each pinned card in a ChannelScope at the RENDER site — the
-    override must sit above the block's own data hooks, not just around the card body. */
-export function getWidgetSource(id: string): number | undefined {
-  return getPrefs(id).source;
-}
-
 /** Read-only snapshot of a widget's stored prefs. Home reads the pre-U6.3a `home-<key>` row to
     migrate a legacy card's saved settings (period/size/title/source/accent/hidden) into its new
     config-driven identity. */
@@ -284,22 +278,64 @@ function subscribeStore(l: () => void): () => void {
   };
 }
 
-function readJson<T>(key: string, fallback: T): T {
+// Cached parses of the three store rows, recomputed only when the stored raw string actually
+// changed (covers both setPrefs-style writes and the account-hydrate's direct setItem+notify).
+// Entry identities are preserved across re-parses (storeIdentity), so the per-widget selector
+// hooks below hand useSyncExternalStore the SAME reference until that widget's own slice changes —
+// one widget's write re-renders one widget, not every card on the surface.
+function parseObjectRow<T>(raw: string | null): Record<string, T> {
   try {
-    const raw: unknown = JSON.parse(localStorage.getItem(key) ?? 'null');
-    return raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as T) : fallback;
+    const parsed: unknown = JSON.parse(raw ?? 'null');
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, T>) : {};
   } catch {
-    return fallback;
+    return {};
   }
+}
+const readRaw = (key: string): string | null => {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+};
+
+const EMPTY_PREFS: WidgetPrefs = Object.freeze({});
+let prefsRaw: string | null | undefined;
+let prefsCache: Record<string, WidgetPrefs> = {};
+function prefsSnapshot(): Record<string, WidgetPrefs> {
+  const raw = readRaw(PREFS_KEY);
+  if (raw === prefsRaw) return prefsCache;
+  prefsRaw = raw;
+  prefsCache = preserveEntryIdentity(prefsCache, parseObjectRow<WidgetPrefs>(raw));
+  return prefsCache;
+}
+
+const EMPTY_ORDER: string[] = [];
+let orderRaw: string | null | undefined;
+let orderCache: Record<string, string[]> = {};
+function orderSnapshot(): Record<string, string[]> {
+  const raw = readRaw(ORDER_KEY);
+  if (raw === orderRaw) return orderCache;
+  orderRaw = raw;
+  // Normalize entries at parse time (arrays of strings only) so per-group reads are pure lookups —
+  // a getSnapshot must NOT build a fresh array per call or useSyncExternalStore loops (S6.1 lesson).
+  const parsed = parseObjectRow<unknown>(raw);
+  const next: Record<string, string[]> = {};
+  for (const key of Object.keys(parsed)) {
+    const list = parsed[key];
+    if (Array.isArray(list)) next[key] = list.filter((x): x is string => typeof x === 'string');
+  }
+  orderCache = preserveEntryIdentity(orderCache, next);
+  return orderCache;
 }
 
 function getPrefs(id: string): WidgetPrefs {
-  return readJson<Record<string, WidgetPrefs>>(PREFS_KEY, {})[id] ?? {};
+  return prefsSnapshot()[id] ?? EMPTY_PREFS;
 }
 
 function setPrefs(id: string, prefs: WidgetPrefs) {
   try {
-    const all = readJson<Record<string, WidgetPrefs>>(PREFS_KEY, {});
+    const all = { ...prefsSnapshot() };
     // `period` can be 0 («Всё») — a falsy but real value, so test for undefined, not truthiness.
     if (
       !prefs.color &&
@@ -325,21 +361,36 @@ function setPrefs(id: string, prefs: WidgetPrefs) {
 }
 
 function getGroupOrder(groupId: string): string[] {
-  const map = readJson<Record<string, string[]>>(ORDER_KEY, {});
-  const list = map[groupId];
-  return Array.isArray(list) ? list.filter((x): x is string => typeof x === 'string') : [];
+  return orderSnapshot()[groupId] ?? EMPTY_ORDER;
 }
 
 function setGroupOrder(groupId: string, ids: string[]) {
   try {
-    const map = readJson<Record<string, string[]>>(ORDER_KEY, {});
-    map[groupId] = ids;
+    const map = { ...orderSnapshot(), [groupId]: ids };
     localStorage.setItem(ORDER_KEY, JSON.stringify(map));
   } catch {
     /* ignore */
   }
   notify();
   schedulePush();
+}
+
+/** Subscribe to ONE widget's prefs: re-renders the caller only when THAT row changes. */
+export function useWidgetPrefs(id: string): WidgetPrefs {
+  return useSyncExternalStore(
+    subscribeStore,
+    () => getPrefs(id),
+    () => getPrefs(id),
+  );
+}
+
+/** Subscribe to ONE group's persisted order (stable reference until that group's order changes). */
+function useGroupOrder(groupId: string): string[] {
+  return useSyncExternalStore(
+    subscribeStore,
+    () => getGroupOrder(groupId),
+    () => getGroupOrder(groupId),
+  );
 }
 
 /** Rename one entry of a group's persisted order in place (fromId → toId), keeping its slot. No-op
@@ -361,9 +412,16 @@ export function remapGroupOrder(groupId: string, fromId: string, toId: string) {
 // localStorage-first + pub-sub + account-sync pattern as prefs/order. The Home surface renders
 // each key under a `home-<key>` ChartSection, so a pinned widget's Home arrangement (size /
 // title / period / hidden) is a distinct prefs identity from its source-screen copy.
+let homeRaw: string | null | undefined;
+let homeCache: string[] = [];
 export function getHomeBlocks(): string[] {
-  const stored = readJson<{ keys?: unknown }>(HOME_KEY, {}).keys;
-  return Array.isArray(stored) ? stored.filter((x): x is string => typeof x === 'string') : [];
+  const raw = readRaw(HOME_KEY);
+  if (raw === homeRaw) return homeCache;
+  homeRaw = raw;
+  const stored = parseObjectRow<unknown>(raw).keys;
+  const next = Array.isArray(stored) ? stored.filter((x): x is string => typeof x === 'string') : [];
+  homeCache = preserveValueIdentity(homeCache, next);
+  return homeCache;
 }
 
 export function setHomeBlocks(keys: string[]) {
@@ -395,22 +453,25 @@ export function isPinnedToHome(key: string): boolean {
   return getHomeBlocks().includes(key);
 }
 
-/** Re-render on any store change; returns the current pinned list (Home reads this). */
+/** Reactive pinned list (stable reference until the pin set changes — Home reads this). */
 export function useHomeBlocks(): string[] {
-  useStoreTick();
-  return getHomeBlocks();
+  return useSyncExternalStore(subscribeStore, getHomeBlocks, getHomeBlocks);
+}
+
+/** Subscribe to ONE key's pin state — a boolean snapshot, so an unrelated pin/prefs write never
+ *  re-renders this card. Unconditional-hook-safe: undefined (non-pinnable card) is always false. */
+function useIsPinnedToHome(key: string | undefined): boolean {
+  return useSyncExternalStore(
+    subscribeStore,
+    () => (key ? getHomeBlocks().includes(key) : false),
+    () => (key ? getHomeBlocks().includes(key) : false),
+  );
 }
 
 /** Home edit-mode flag. When /home wraps its WidgetGroup in this provider (value=true), every
  *  pinnable card (one carrying a `homeKey`) shows a × affordance in its header that unpins it
  *  from Home. Default false → no edit chrome on any other surface (source screens never wrap it). */
 export const HomeEditContext = createContext(false);
-
-/** Re-render on any widget-store change (prefs / order). */
-function useStoreTick() {
-  const [, force] = useState(0);
-  useEffect(() => subscribeStore(() => force((n) => n + 1)), []);
-}
 
 // ── Account sync: mirror the widget store into user_prefs (GET/PUT /api/prefs) ────────────
 // The store stays localStorage-FIRST (instant reads, works offline / without a DB); the
@@ -428,8 +489,8 @@ const PrefsBlobSchema = z.object({ prefs: z.record(z.unknown()).nullable() });
 
 function localBlob() {
   return {
-    widgets: readJson<Record<string, WidgetPrefs>>(PREFS_KEY, {}),
-    widgetOrder: readJson<Record<string, string[]>>(ORDER_KEY, {}),
+    widgets: prefsSnapshot(),
+    widgetOrder: orderSnapshot(),
     // The pinned-Home list rides the SAME account blob under `home` (a plain string[]) — no
     // new endpoint. Destructured OUT of `rest` in the hydrate below so serverExtra never
     // double-carries it.
@@ -683,13 +744,17 @@ export function WidgetGroup({ id, className, children }: WidgetGroupProps) {
   }, [reorderMode]);
 
   // Effective sequence: the persisted order first (registered only), newcomers after, in
-  // their natural mount order.
-  const stored = getGroupOrder(id);
-  const registeredIds = registered.map((r) => r.id);
-  const sequence = [
-    ...stored.filter((x) => registeredIds.includes(x)),
-    ...registeredIds.filter((x) => !stored.includes(x)),
-  ];
+  // their natural mount order. Reads THIS group's order slice and memoizes, so the array identity
+  // only changes on a real reorder / mount — the memoized ctx value below keys on it, and an
+  // unrelated store write (one widget's prefs) no longer re-renders every card via a fresh ctx.
+  const stored = useGroupOrder(id);
+  const sequence = useMemo(() => {
+    const registeredIds = registered.map((r) => r.id);
+    return [
+      ...stored.filter((x) => registeredIds.includes(x)),
+      ...registeredIds.filter((x) => !stored.includes(x)),
+    ];
+  }, [stored, registered]);
   // Drag callbacks live across renders (pointer capture, edge-scroll interval) — read the
   // sequence through a ref so a mid-drag closure never splices a stale order.
   const sequenceRef = useRef(sequence);
@@ -851,10 +916,19 @@ export function WidgetGroup({ id, className, children }: WidgetGroupProps) {
   }, [reorderMode, dragEnd]);
   useEffect(() => stopEdgeScroll, [stopEdgeScroll]);
 
+  // The group shell itself still re-renders on every store notify (the FLIP subscription above) —
+  // that keeps this hidden-chips row live and plays the glides. The re-render stays O(1): children
+  // are prop elements (identity unchanged → React bails out) and the ctx value below is memoized,
+  // so cards re-render only when the sequence / drag state actually changes.
   const hidden = registered.filter((r) => getPrefs(r.id).hidden);
 
+  const ctxValue = useMemo<GroupCtxValue>(
+    () => ({ register, sequence, move, reorderMode, beginReorder, draggingId, dragStart, dragMove, dragEnd }),
+    [register, sequence, move, reorderMode, beginReorder, draggingId, dragStart, dragMove, dragEnd],
+  );
+
   return (
-    <GroupCtx.Provider value={{ register, sequence, move, reorderMode, beginReorder, draggingId, dragStart, dragMove, dragEnd }}>
+    <GroupCtx.Provider value={ctxValue}>
       <div className={className}>{children}</div>
       {reorderMode &&
         createPortal(
@@ -999,7 +1073,6 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
   // height to the charts inside so they fill the tile (steep) — see the effect + fillHeight below.
   const bodyRef = useRef<HTMLDivElement>(null);
   const [bodyH, setBodyH] = useState<number | null>(null);
-  useStoreTick();
 
   // Depend on the STABLE register callback, not the ctx object (recreated every group
   // render) — otherwise the cleanup/register cycle feeds the group's state in a loop.
@@ -1048,12 +1121,14 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
     };
   }, [menuOpen]);
 
-  const prefs = getPrefs(widgetId);
+  // Selector subscriptions (not a whole-store tick): this card re-renders when ITS prefs row or
+  // ITS pin state changes — another widget's hide/reorder/edit no longer re-renders every card
+  // on the surface (with N cards that was O(N) re-renders × variant recompute per click).
+  const prefs = useWidgetPrefs(widgetId);
   const update = (next: WidgetPrefs) => setPrefs(widgetId, next);
 
   // Personal-Home pin state (only when this card is registered as pinnable via `homeKey`).
-  // useStoreTick above already re-renders on any store change, so the read stays live.
-  const pinned = homeKey ? isPinnedToHome(homeKey) : false;
+  const pinned = useIsPinnedToHome(homeKey);
   // On /home in edit mode, a pinnable card shows a × that removes it from Home.
   const showHomeRemove = homeEditing && !!homeKey;
 

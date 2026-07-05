@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useHistory, useTgFull } from '@/api/queries';
 import { latestDataMs } from '@/lib/freshness';
@@ -7,15 +7,15 @@ import {
   HomeEditContext,
   WidgetGroup,
   getWidgetPrefs,
-  getWidgetSource,
   pinToHome,
   remapGroupOrder,
   setHomeBlocks,
   setWidgetHidden,
   useHomeBlocks,
+  useWidgetPrefs,
 } from '@/components/ChartWidget';
 import { ChannelScope } from '@/lib/channel-context';
-import { HOME_REGISTRY, HOME_DEFAULT_KEYS } from '@/lib/homeWidgets';
+import { HOME_REGISTRY, HOME_DEFAULT_KEYS, type HomeWidgetDef } from '@/lib/homeWidgets';
 import { ConfigWidget } from '@/components/ConfigWidget';
 import { WidgetErrorBoundary } from '@/components/WidgetErrorBoundary';
 import { isWiredLegacyKey } from '@/components/legacyAdapters';
@@ -149,24 +149,14 @@ export function Home() {
                 }
                 // Own-chrome legacy widget (history / velocity / heatmap / mentions): render() returns
                 // a complete home-scoped ChartSection (home-<key> id) — still the legacy path until
-                // U6.3b extracts its body. ChannelScope pins it to its «Источник» at the RENDER site.
+                // U6.3b extracts its body. A dedicated component (not inline) because Home itself no
+                // longer re-renders on prefs writes — the card subscribes to its own prefs row for
+                // the source pin / fallback size.
                 const def = HOME_REGISTRY[key];
                 if (!def) return null;
-                // Own-chrome legacy cards draw their own ChartSection, so a crash in their variant
-                // compute (the one seam the in-card body boundary can't reach) is caught here with a
-                // self-chromed «card» fallback — the flagship Home stays whole per-widget.
                 return (
                   <div key={key} className="contents">
-                    <WidgetErrorBoundary
-                      variant="card"
-                      widgetId={`home-${key}`}
-                      label={def.label}
-                      size={getWidgetPrefs(`home-${key}`).size ?? def.defaultSize ?? 'half'}
-                    >
-                      <ChannelScope channelId={getWidgetSource(`home-${key}`) ?? null}>
-                        {def.render()}
-                      </ChannelScope>
-                    </WidgetErrorBoundary>
+                    <LegacyHomeCard homeKey={key} def={def} />
                   </div>
                 );
               })}
@@ -178,6 +168,25 @@ export function Home() {
     </div>
   );
 }
+
+/** An own-chrome legacy pinned card (history / velocity / heatmap / mentions). Subscribes to ITS
+ *  `home-<key>` prefs row (Home only re-renders on pin-list / config changes now), so editing this
+ *  card's source or size re-renders exactly this card. Its own ChartSection means a crash in its
+ *  variant compute escapes the in-card body boundary — the self-chromed «card» fallback here keeps
+ *  the flagship Home whole per-widget. ChannelScope pins it to its «Источник» at the RENDER site. */
+const LegacyHomeCard = memo(function LegacyHomeCard({ homeKey, def }: { homeKey: string; def: HomeWidgetDef }) {
+  const prefs = useWidgetPrefs(`home-${homeKey}`);
+  return (
+    <WidgetErrorBoundary
+      variant="card"
+      widgetId={`home-${homeKey}`}
+      label={def.label}
+      size={prefs.size ?? def.defaultSize ?? 'half'}
+    >
+      <ChannelScope channelId={prefs.source ?? null}>{def.render()}</ChannelScope>
+    </WidgetErrorBoundary>
+  );
+});
 
 /** Edit-mode picker: opens the metric catalogue (adds a config-driven `custom:<id>` widget) or
     pins a legacy registry widget not already on Home. Popover closes on outside click / Escape. */

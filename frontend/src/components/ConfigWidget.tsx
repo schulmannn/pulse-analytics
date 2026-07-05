@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChartSection, PERIOD_WORD } from '@/components/ChartWidget';
 import { WidgetRenderer, WidgetSkeleton } from '@/components/WidgetRenderer';
@@ -29,7 +29,10 @@ import type { WidgetConfig } from '@/lib/widgetConfig';
  * ConfigEditDialog which writes back to the config. Source pinning (config.source) wraps the card in
  * a ChannelScope so the data hooks inside read the pinned channel.
  */
-export function ConfigWidget({ config, homeKey }: { config: WidgetConfig; homeKey?: string }) {
+// memo: the widget store preserves per-config object identity across snapshots (storeIdentity), so
+// when Home re-renders because ONE config changed, every other card's `config` prop is reference-
+// equal and bails out here — the edit re-renders exactly one ConfigWidget.
+export const ConfigWidget = memo(function ConfigWidget({ config, homeKey }: { config: WidgetConfig; homeKey?: string }) {
   const [editOpen, setEditOpen] = useState(false);
   const navigate = useNavigate();
   const metric = getMetric(config.metricId);
@@ -101,7 +104,7 @@ export function ConfigWidget({ config, homeKey }: { config: WidgetConfig; homeKe
       )}
     </>
   );
-}
+});
 
 /** Resolved widget body — exported so the create-widget preview / explorer render the SAME body a
  *  pinned card will. A legacy composite routes to its adapter; otherwise the metric resolver. TG and

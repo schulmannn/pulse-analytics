@@ -115,6 +115,17 @@ describe('widgetStore', () => {
     expect(c).not.toBe(a); // changed after mutation
     expect(c).toHaveLength(2);
   });
+
+  it('a one-widget update keeps every other config identity (memo bailout precondition)', () => {
+    const w1 = addWidgetForMetric('tg.views')!;
+    const w2 = addWidgetForMetric('tg.reactions')!;
+    const before = getWidgetConfigs();
+    updateWidgetConfig(w2.id, { title: 'Реакции' });
+    const after = getWidgetConfigs();
+    expect(after).not.toBe(before); // the list itself changed
+    expect(after.find((c) => c.id === w1.id)).toBe(before.find((c) => c.id === w1.id)); // untouched → recycled
+    expect(after.find((c) => c.id === w2.id)).not.toBe(before.find((c) => c.id === w2.id)); // edited → fresh
+  });
 });
 
 const LEGACY_KPI = { id: 'legacy-kpi', metricId: 'legacy:kpi', viz: 'kpi' as const };
