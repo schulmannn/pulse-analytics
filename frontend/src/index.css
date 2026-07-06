@@ -465,7 +465,7 @@
 .home-board-canvas[data-editing='true'] {
   background: hsl(var(--foreground) / 0.035);
   border-color: hsl(var(--foreground) / 0.12);
-  padding: 22px;
+  padding: 22px 22px 88px;
 }
 @media (max-width: 1023px) {
   .home-board-canvas {
@@ -476,6 +476,43 @@
     padding: 0;
     background: transparent;
   }
+}
+
+.add-widget-dock {
+  position: fixed;
+  left: 50%;
+  bottom: max(22px, env(safe-area-inset-bottom));
+  z-index: 40;
+  transform: translateX(-50%);
+}
+.add-widget-trigger {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid hsl(var(--foreground) / 0.12);
+  background: hsl(var(--foreground) / 0.08);
+  color: hsl(var(--foreground));
+  padding: 0 18px;
+  transition:
+    background-color var(--motion-base) ease,
+    border-color var(--motion-base) ease,
+    color var(--motion-base) ease,
+    transform var(--motion-press) var(--ease-standard);
+}
+.add-widget-trigger:hover,
+.add-widget-trigger:focus-visible,
+.add-widget-trigger[aria-expanded='true'] {
+  background: hsl(var(--foreground) / 0.14);
+  border-color: hsl(var(--foreground) / 0.2);
+  color: hsl(var(--foreground));
+}
+.add-widget-trigger:active {
+  transform: scale(0.98);
+}
+.add-widget-popover {
+  max-height: min(420px, calc(100vh - 140px));
+  overflow-y: auto;
 }
 /* ── Detail overlay: the dim backdrop fades in (120–180ms) while the panel grows out of the clicked
    card (shared-element FLIP is JS-driven in DetailShell). Panel morph carries the rest. ───────── */
@@ -523,10 +560,10 @@
 .home-remove-exit {
   animation: home-remove-out var(--motion-fast) var(--ease-standard) both;
 }
-/* «+ Добавить виджет» enters as a fresh grid item (rise + fade) when edit mode opens. */
+/* The fixed «+ Добавить виджет» dock rises into place while preserving its centered translateX. */
 @keyframes add-widget-in {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translate(-50%, 8px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
 }
 .add-widget-enter {
   animation: add-widget-in var(--motion-reveal) var(--ease-standard) both;

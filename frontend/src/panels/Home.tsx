@@ -246,18 +246,18 @@ function AddWidgetBar({ pinned }: { pinned: string[] }) {
   };
 
   return (
-    <div ref={ref} className="add-widget-enter relative mt-6">
+    <div ref={ref} className="add-widget-dock add-widget-enter">
       <button
         ref={triggerRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="btn-pill border border-dashed border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:border-solid hover:text-foreground"
+        className="add-widget-trigger btn-pill text-sm font-medium"
       >
         + Добавить виджет
       </button>
       {open && (
-        <div className="absolute left-0 top-full z-popover mt-1 w-64 rounded-lg border border-border bg-card p-1.5">
+        <div className="add-widget-popover absolute bottom-full left-1/2 z-popover mb-2 w-72 -translate-x-1/2 rounded-lg border border-border bg-card p-1.5">
           {/* Metric-first path: the searchable catalogue → a config-driven widget. */}
           <button
             type="button"
