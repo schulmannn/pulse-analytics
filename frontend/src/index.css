@@ -319,26 +319,49 @@
 /* ── Home edit mode (steep «Edit» feel): a LIGHT page-level toggle + soft reveal of card
    controls when edit mode opens. No heavy fills / shadows — depth stays hairline-only. ─────── */
 @layer components {
-  /* The Edit ↔ Готово toggle: transparent by default, subtle hover, quiet primary tint when active
-     (never a solid bg-primary slab). Sits on the page title line. */
+  /* The Edit ↔ Готово toggle: a Steep-like compact tool. The header reserves a fixed slot while
+     the chip expands inside it on hover/focus/active, so the page title never reflows. */
+  .edit-toggle-slot {
+    position: relative;
+    width: 108px;
+    height: 36px;
+    flex: 0 0 108px;
+  }
   .edit-toggle {
+    position: absolute;
+    inset-block: 0;
+    right: 0;
+    display: inline-flex;
+    width: 36px;
+    min-width: 36px;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0;
+    overflow: hidden;
+    padding-inline: 9px;
     color: hsl(var(--foreground));
     background: transparent;
     border: 1px solid transparent;
-    /* v2 press choreography: the press-scale is a fast tactile beat (~140ms), while the mode
-       invert (fill + hairline + ink) rides a calmer 240ms curve so entering edit mode reads as
-       the whole chip settling, not just a colour swap. */
     transition:
+      width var(--motion-base) var(--ease-standard),
+      gap var(--motion-base) var(--ease-standard),
+      padding-inline var(--motion-base) var(--ease-standard),
       background-color var(--motion-base) ease,
       border-color var(--motion-base) ease,
       color var(--motion-base) ease,
       transform var(--motion-press) var(--ease-standard);
   }
-  .edit-toggle:hover {
+  .edit-toggle:hover,
+  .edit-toggle:focus-visible,
+  .edit-toggle[data-active='true'] {
+    width: 108px;
+    gap: 7px;
+    padding-inline: 12px;
+  }
+  .edit-toggle:hover,
+  .edit-toggle:focus-visible {
     background: hsl(var(--foreground) / 0.06);
   }
-  /* Press feedback: the chip dips under the finger AND flashes a brighter background, springing back
-     on release (120–180ms band) — the tactile "нажатие" beat before the mode settles. */
   .edit-toggle:active {
     transform: scale(0.98);
     background: hsl(var(--foreground) / 0.1);
@@ -361,6 +384,7 @@
   .edit-toggle-icons {
     position: relative;
     display: inline-block;
+    flex: 0 0 16px;
     width: 16px;
     height: 16px;
   }
@@ -393,17 +417,29 @@
     stroke-dashoffset: 0;
   }
 }
-/* Fixed-width label: both states share ONE grid cell, so the chip reserves the WIDER label's width
-   and never reflows on Edit↔Готово. The swap is opacity + a small vertical slide (the outgoing label
-   lifts away, the incoming settles up from below) — both on motion tokens, no width-jumping remount. */
+/* The label stays mounted for the state crossfade, but the compact idle chip hides the text. Hover,
+   keyboard focus and active edit mode reveal it with a short slide-in inside the fixed header slot. */
 .edit-toggle-label {
   display: inline-grid;
   place-items: center;
+  width: 64px;
+  min-width: 64px;
+  overflow: hidden;
   text-align: center;
+  opacity: 0;
+  transform: translateX(-5px);
+  transition: opacity var(--motion-fast) ease, transform var(--motion-base) var(--ease-standard);
 }
 .edit-toggle-label > span {
   grid-area: 1 / 1;
+  white-space: nowrap;
   transition: opacity var(--motion-fast) ease, transform var(--motion-base) var(--ease-standard);
+}
+.edit-toggle:hover .edit-toggle-label,
+.edit-toggle:focus-visible .edit-toggle-label,
+.edit-toggle[data-active='true'] .edit-toggle-label {
+  opacity: 1;
+  transform: translateX(0);
 }
 .edit-toggle-label-done {
   opacity: 0;

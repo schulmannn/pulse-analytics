@@ -108,18 +108,32 @@ test('edit-mode entry + exit (Home)', async ({ page }) => {
   await expect(toggle).toHaveAttribute('aria-pressed', 'false'); // exited
 });
 
-test('edit toggle keeps a stable width across Изменить↔Готово (no reflow)', async ({ page }) => {
-  // The chip holds BOTH labels in one grid cell and reserves the wider label's width, so switching
-  // «Изменить»→«Готово» must NOT reflow the button (steep edit-mode choreography).
+test('edit toggle expands like a compact Steep action without shifting the header slot', async ({ page }) => {
+  // The visible chip starts as a compact icon control, then expands on hover/focus/active. The
+  // reserved slot stays fixed, so the page title/header never reflows while the action breathes.
   await bootDemo(page, '/home');
+  const slot = page.locator('.edit-toggle-slot');
   const toggle = page.locator('button.edit-toggle');
-  const before = await toggle.boundingBox();
+  const idleSlot = await slot.boundingBox();
+  const idle = await toggle.boundingBox();
+  expect(idleSlot && idle).toBeTruthy();
+  expect(idle!.width).toBeLessThan(idleSlot!.width - 40);
+
+  await toggle.hover();
+  await page.waitForTimeout(260);
+  const hoverSlot = await slot.boundingBox();
+  const hover = await toggle.boundingBox();
+  expect(hoverSlot && hover).toBeTruthy();
+  expect(Math.abs(hoverSlot!.width - idleSlot!.width)).toBeLessThan(0.5);
+  expect(hover!.width).toBeGreaterThan(idle!.width + 40);
+
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-pressed', 'true');
-  const after = await toggle.boundingBox();
-  expect(before && after).toBeTruthy();
-  // Identical width — the label swap is opacity/translate within a fixed cell, not a width jump.
-  expect(Math.abs((after!.width) - (before!.width))).toBeLessThan(0.5);
+  const activeSlot = await slot.boundingBox();
+  const active = await toggle.boundingBox();
+  expect(activeSlot && active).toBeTruthy();
+  expect(Math.abs(activeSlot!.width - idleSlot!.width)).toBeLessThan(0.5);
+  expect(active!.width).toBeGreaterThan(idle!.width + 40);
 });
 
 test.describe('home edit-mode board inset (steep editable-canvas cue)', () => {

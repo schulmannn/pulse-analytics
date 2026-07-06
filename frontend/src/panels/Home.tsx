@@ -92,32 +92,33 @@ export function Home() {
           <h2 className="text-2xl font-medium tracking-tight text-foreground">Главная</h2>
           <p className="mt-0.5 text-sm text-muted-foreground">Ваши закреплённые виджеты.</p>
         </div>
-        <button
-          type="button"
-          onClick={() => setEditing((v) => !v)}
-          aria-pressed={editing}
-          data-active={editing}
-          // Both state labels live in the DOM (aria-hidden — the accessible name is the aria-label),
-          // stacked in one grid cell so the chip reserves the WIDER label's width and never reflows
-          // on «Изменить»↔«Готово»; the swap is opacity/translate, not a width-jumping remount.
-          aria-label={editing ? 'Готово' : 'Изменить'}
-          className="edit-toggle btn-pill inline-flex h-9 shrink-0 items-center gap-1.5 px-3.5 text-sm font-medium"
-        >
-          <span className="edit-toggle-icons" aria-hidden="true">
-            <svg className="i-edit" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 20h9" />
-              <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" />
-            </svg>
-            <svg className="i-done" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              {/* pathLength=1 normalises the stroke length so the CSS draw-on (dasharray/offset) needs no measuring */}
-              <path d="M20 6 9 17l-5-5" pathLength={1} />
-            </svg>
-          </span>
-          <span className="edit-toggle-label" aria-hidden="true">
-            <span className="edit-toggle-label-edit">Изменить</span>
-            <span className="edit-toggle-label-done">Готово</span>
-          </span>
-        </button>
+        <div className="edit-toggle-slot">
+          <button
+            type="button"
+            onClick={() => setEditing((v) => !v)}
+            aria-pressed={editing}
+            data-active={editing}
+            // Both state labels live in the DOM (aria-hidden — the accessible name is the aria-label).
+            // The slot keeps header layout fixed; the chip itself expands over that reserved space.
+            aria-label={editing ? 'Готово' : 'Изменить'}
+            className="edit-toggle btn-pill text-sm font-medium"
+          >
+            <span className="edit-toggle-icons" aria-hidden="true">
+              <svg className="i-edit" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 20h9" />
+                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" />
+              </svg>
+              <svg className="i-done" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                {/* pathLength=1 normalises the stroke length so the CSS draw-on (dasharray/offset) needs no measuring */}
+                <path d="M20 6 9 17l-5-5" pathLength={1} />
+              </svg>
+            </span>
+            <span className="edit-toggle-label" aria-hidden="true">
+              <span className="edit-toggle-label-edit">Изменить</span>
+              <span className="edit-toggle-label-done">Готово</span>
+            </span>
+          </button>
+        </div>
       </div>
 
       {known.length === 0 && !editing ? (
