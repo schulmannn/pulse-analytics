@@ -164,6 +164,13 @@ test.describe('home edit-mode board inset (steep editable-canvas cue)', () => {
     const editingWidth = (await board.boundingBox())!.width;
     // ~112px narrower (7rem inset). Assert a clear step-in, not the exact px.
     expect(editingWidth).toBeLessThan(restingWidth - 80);
+    const editingSurface = await board.evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { background: cs.backgroundColor, border: cs.borderColor, padding: cs.paddingTop };
+    });
+    expect(editingSurface.background).not.toBe('rgba(0, 0, 0, 0)');
+    expect(editingSurface.border).not.toBe('rgba(0, 0, 0, 0)');
+    expect(editingSurface.padding).not.toBe('0px');
 
     await toggle.click();
     await expect(toggle).toHaveAttribute('aria-pressed', 'false');

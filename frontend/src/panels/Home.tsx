@@ -132,7 +132,7 @@ export function Home() {
               prefers-reduced-motion cap flattens it to instant. */}
           <div
             className={`home-board-canvas lg:mx-auto ${editing ? 'lg:max-w-[calc(100%_-_7rem)]' : 'lg:max-w-full'}`}
-            style={{ transition: 'max-width var(--motion-fast) var(--ease-standard)' }}
+            data-editing={editing}
           >
           <ChannelRecencyProvider value={recency}>
             <WidgetGroup id="home" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
