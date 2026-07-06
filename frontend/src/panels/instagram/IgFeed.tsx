@@ -8,6 +8,7 @@ import { useSelectedChannel } from '@/lib/channel-context';
 import { usePeriod } from '@/lib/period';
 import type { PeriodDays } from '@/lib/period';
 import { IgConnectPanel, IgDataHealth } from '@/components/instagram/health';
+import { DateRangePicker } from '@/components/DateRangePicker';
 import { ErrorState } from '@/components/ErrorState';
 import { NotFound } from '@/components/NotFound';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -113,10 +114,14 @@ const IG_PERIOD_PRESETS: { days: PeriodDays; label: string }[] = [
   { days: 0, label: 'Всё' },
 ];
 
+/** Short «дд.мм» for the active custom-range chip label. */
+const fmtRangeChip = (ms: number) => new Date(ms).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+
 function IgPeriodControl() {
   const { days, range, setDays, setRange } = usePeriod();
+  const [pickerOpen, setPickerOpen] = useState(false);
   return (
-    <div role="group" aria-label="Период" className="flex flex-wrap items-center gap-1.5">
+    <div role="group" aria-label="Период" className="relative flex flex-wrap items-center gap-1.5">
       {IG_PERIOD_PRESETS.map((chip) => (
         <button
           key={chip.days}
@@ -133,15 +138,41 @@ function IgPeriodControl() {
           {chip.label}
         </button>
       ))}
-      {range && (
-        <button
-          type="button"
-          onClick={() => setRange(null)}
-          title="Сбросить произвольный период"
-          className="rounded-full border border-border px-2.5 py-0.5 text-xs font-medium text-muted-foreground hover:text-foreground"
-        >
-          Сбросить
-        </button>
+      {/* Custom date range — filters the posts list (Контент) and every windowed metric to an exact
+          period. Picking a preset above clears the range (usePeriod.setDays resets it). */}
+      <button
+        type="button"
+        onClick={() => setPickerOpen((v) => !v)}
+        aria-haspopup="dialog"
+        aria-expanded={pickerOpen}
+        aria-pressed={!!range}
+        className={cn(
+          'rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors',
+          range
+            ? 'border-primary/40 bg-primary/10 text-primary'
+            : 'border-border text-muted-foreground hover:text-foreground',
+        )}
+      >
+        {range ? `${fmtRangeChip(range.from)} – ${fmtRangeChip(range.to)}` : 'Свой период'}
+      </button>
+      {pickerOpen && (
+        <>
+          {/* Scrim closes the popover on an outside click / Esc-less dismissal. */}
+          <div className="fixed inset-0 z-popover" aria-hidden="true" onClick={() => setPickerOpen(false)} />
+          <div className="absolute right-0 top-full z-popover mt-2 rounded-lg border border-border bg-card p-3">
+            <DateRangePicker
+              value={range}
+              onApply={(r) => {
+                setRange(r);
+                setPickerOpen(false);
+              }}
+              onReset={() => {
+                setRange(null);
+                setPickerOpen(false);
+              }}
+            />
+          </div>
+        </>
       )}
     </div>
   );
