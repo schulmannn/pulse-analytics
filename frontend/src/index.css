@@ -304,9 +304,15 @@
   .edit-toggle:hover {
     background: hsl(var(--foreground) / 0.06);
   }
-  /* Press feedback: the chip dips under the finger and springs back on release (120–180ms band). */
+  /* Press feedback: the chip dips under the finger AND flashes a brighter background, springing back
+     on release (120–180ms band) — the tactile "нажатие" beat before the mode settles. */
   .edit-toggle:active {
-    transform: scale(0.96);
+    transform: scale(0.98);
+    background: hsl(var(--foreground) / 0.1);
+  }
+  .edit-toggle[data-active='true']:active {
+    /* Press flash on the active (edit-mode) tint — a touch brighter than the resting 10%. */
+    background: hsl(var(--primary) / 0.16);
   }
   .edit-toggle[data-active='true'] {
     background: hsl(var(--primary) / 0.1);
@@ -354,14 +360,29 @@
     stroke-dashoffset: 0;
   }
 }
-/* Label crossfade (keyed remount replays it on Edit↔Готово) + the edit-mode reveals. */
-@keyframes edit-label-in {
-  from { opacity: 0; transform: translateY(2px); }
-  to { opacity: 1; transform: translateY(0); }
-}
+/* Fixed-width label: both states share ONE grid cell, so the chip reserves the WIDER label's width
+   and never reflows on Edit↔Готово. The swap is opacity + a small vertical slide (the outgoing label
+   lifts away, the incoming settles up from below) — both on motion tokens, no width-jumping remount. */
 .edit-toggle-label {
-  display: inline-block;
-  animation: edit-label-in var(--motion-fast) ease both;
+  display: inline-grid;
+  place-items: center;
+  text-align: center;
+}
+.edit-toggle-label > span {
+  grid-area: 1 / 1;
+  transition: opacity var(--motion-fast) ease, transform var(--motion-base) var(--ease-standard);
+}
+.edit-toggle-label-done {
+  opacity: 0;
+  transform: translateY(4px);
+}
+.edit-toggle[data-active='true'] .edit-toggle-label-edit {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+.edit-toggle[data-active='true'] .edit-toggle-label-done {
+  opacity: 1;
+  transform: translateY(0);
 }
 /* ── Detail overlay: the dim backdrop fades in (120–180ms) while the panel grows out of the clicked
    card (shared-element FLIP is JS-driven in DetailShell). Panel morph carries the rest. ───────── */
@@ -400,6 +421,15 @@
   animation: home-remove-in var(--motion-base) var(--ease-standard) both;
   animation-delay: var(--enter-delay, 0ms);
 }
+/* …and it LEAVES the same way on «Готово» — a quick scale/opacity out (var(--motion-fast), kept in
+   sync with REMOVE_EXIT_MS in ChartWidget) instead of teleporting away the instant edit mode closes. */
+@keyframes home-remove-out {
+  from { opacity: 1; transform: scale(1) translateY(0); }
+  to { opacity: 0; transform: scale(0.9) translateY(-3px); }
+}
+.home-remove-exit {
+  animation: home-remove-out var(--motion-fast) var(--ease-standard) both;
+}
 /* «+ Добавить виджет» enters as a fresh grid item (rise + fade) when edit mode opens. */
 @keyframes add-widget-in {
   from { opacity: 0; transform: translateY(8px); }
@@ -413,10 +443,11 @@
   .edit-toggle { transition: none; }
   .edit-toggle:active { transform: none; }
   .edit-toggle-icons > svg,
-  .edit-toggle-icons .i-done path { transition: none; }
+  .edit-toggle-icons .i-done path,
+  .edit-toggle-label > span { transition: none; }
   .edit-toggle-icons .i-done path { stroke-dashoffset: 0; }
-  .edit-toggle-label,
   .home-remove-enter,
+  .home-remove-exit,
   .add-widget-enter { animation: none; }
 }
 
