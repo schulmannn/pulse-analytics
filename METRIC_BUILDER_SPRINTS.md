@@ -237,6 +237,20 @@ color-toggle + crossfade иконок + remount текста (`index.css:251`, `
 
 ## Журнал
 
+- 2026-07-05 — **P1 Метрик-билдер/Data-quality «Comparison presets» — SHIPPED via PR #39 `merge 5268829` (feat `ddcf6e1`)**
+  (lint + build + 369 vitest [+8] + 240 e2e; бандл `index-D_usVYgT.js`). Сравнение = не один режим: к
+  window-based (пред.период/прошлый месяц/год назад/custom) добавлены 2 **self-referential** пресета из
+  УЖЕ разрешённого ряда (для любой series-метрики TG/IG, без доп. запроса): **same_weekday** («День недели» —
+  точка vs средний свой день недели в окне; нужна дневная гранулярность, ≥2 разных weekday) + **moving_average**
+  («Скольз. среднее» — ghost = 7-точечное трейлинг-среднее ряда). Чистые `movingAverageGhost`/`sameWeekdayGhost`/
+  `weekdayOfKey` в `metricSeries.ts` (8 unit: trailing-mean, non-finite skip, per-weekday группировка,
+  degenerate single-weekday + non-day-key → null). **ОДИН injection в хвосте `resolveWidgetMetric`** (после того
+  как все пути построили series) — считает ghost из ряда, ставит ghost+ghostLabel, чистит note «сравнение
+  недоступно», который window-пути оставляют для этих режимов; same_weekday на non-day → честный note. Editor:
+  2 опции + `CMP_DESCRIPTION` caption на режим (baseline-объяснение). Adversarial-review (2 оси → скептик):
+  **0 confirmed / 2 refuted** (fixed-window MA label + week-grain note — non-defects). ГРАБЛЯ на будущее: MA-окно
+  фиксировано 7 точек (на coarse grain = 7 месяцев — honest, но не grain-aware → возможный follow-up). Отдан PR-ом
+  (визуал редактора authed), юзер смёрджил.
 - 2026-07-05 — **P1 Data-quality/Метрик-билдер «Metric explainability» — SHIPPED via PR #34 `merge e294541` (feat `5057396`)**
   (lint + build + 361 vitest [+7] + 204 e2e; бандл `index-BKRXZqkt.js`). У каждой метрики «почему это число
   такое». Ноль нового data-plumbing: собрано из УЖЕ существующего — статика `MetricDef.formula/included/
