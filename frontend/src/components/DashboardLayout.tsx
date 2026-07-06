@@ -379,15 +379,20 @@ function SidebarNav({ rail }: { rail: boolean }) {
 function SidebarStatus({ rail }: { rail?: boolean }) {
   const { data: history } = useHistory(730);
   const fresh = freshness(latestHistoryDay(history), Date.now());
-  if (!fresh) return null;
+  // Reserve this row's height even before freshness resolves — the same flex row with a muted dot and
+  // an invisible (but same-metrics) label — so the nav below doesn't jump down when it appears. That
+  // pop-in was the shell-wide layout shift measured on every route (see e2e/layout-shift.spec.ts).
+  const rowClass = cn('flex items-center gap-2 pt-1 text-2xs text-muted-foreground', rail ? 'justify-center' : 'px-2');
+  if (!fresh) {
+    return (
+      <div aria-hidden="true" className={rowClass}>
+        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-muted" />
+        {!rail && <span className="truncate font-mono opacity-0">обновлено —</span>}
+      </div>
+    );
+  }
   return (
-    <div
-      title={rail ? `обновлено ${fresh.label}` : undefined}
-      className={cn(
-        'flex items-center gap-2 pt-1 text-2xs text-muted-foreground',
-        rail ? 'justify-center' : 'px-2',
-      )}
-    >
+    <div title={rail ? `обновлено ${fresh.label}` : undefined} className={rowClass}>
       <span
         aria-hidden="true"
         className={cn('h-1.5 w-1.5 shrink-0 rounded-full', fresh.stale ? 'bg-status-warn' : 'bg-verdant')}
