@@ -47,7 +47,19 @@ const CMP_MODES: Array<{ value: ComparisonMode; label: string }> = [
   { value: 'previous_period', label: 'Пред. период' },
   { value: 'same_period_last_month', label: 'Прошлый месяц' },
   { value: 'same_period_last_year', label: 'Год назад' },
+  { value: 'same_weekday', label: 'День недели' },
+  { value: 'moving_average', label: 'Скольз. среднее' },
 ];
+
+// One-line «против чего сравниваем» — surfaced under the mode selector so the baseline (and why the
+// number differs) is explained inline, not guessed from the label.
+const CMP_DESCRIPTION: Partial<Record<ComparisonMode, string>> = {
+  previous_period: 'База — предыдущее окно той же длины.',
+  same_period_last_month: 'База — то же окно месяцем ранее.',
+  same_period_last_year: 'База — то же окно год назад.',
+  same_weekday: 'Каждый день — против типичного значения этого дня недели в окне (нужна дневная гранулярность).',
+  moving_average: 'Призрачная линия — скользящее среднее ряда (тренд / run-rate).',
+};
 
 const CMP_DISPLAY: Array<{ value: ComparisonDisplay; label: string }> = [
   { value: 'delta', label: 'Дельта' },
@@ -237,6 +249,9 @@ export function WidgetConfigControls({
               onChange({ comparison: mode === 'none' ? undefined : { mode, display: cmpDisplay } });
             }}
           />
+          {CMP_DESCRIPTION[cmpMode] && (
+            <p className="mt-1.5 text-2xs leading-relaxed text-muted-foreground">{CMP_DESCRIPTION[cmpMode]}</p>
+          )}
           {cmpMode !== 'none' && (
             <div className="mt-2">
               <Segmented

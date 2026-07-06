@@ -29,6 +29,9 @@ export type ComparisonMode =
   | 'previous_period'
   | 'same_period_last_month'
   | 'same_period_last_year'
+  // Self-referential presets (derived from the series itself, not a shifted window):
+  | 'same_weekday' // each day vs the typical value of that weekday in the window
+  | 'moving_average' // the series' own trailing moving-average trend
   | 'custom';
 /** How the baseline is shown: a delta pill, a ghost line/bar overlay, or both. */
 export type ComparisonDisplay = 'delta' | 'ghost_line' | 'both';
@@ -107,6 +110,8 @@ const CMP_MODES = new Set<ComparisonMode>([
   'previous_period',
   'same_period_last_month',
   'same_period_last_year',
+  'same_weekday',
+  'moving_average',
   'custom',
 ]);
 const CMP_DISPLAY = new Set<ComparisonDisplay>(['delta', 'ghost_line', 'both']);

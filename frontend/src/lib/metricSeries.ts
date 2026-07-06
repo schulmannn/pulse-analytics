@@ -94,3 +94,57 @@ export function baselineCoveredByPosts(postDatesMs: number[], baseFrom: number, 
   for (const t of postDatesMs) if (Number.isFinite(t) && t < oldest) oldest = t;
   return Number.isFinite(oldest) && oldest <= baseFrom;
 }
+
+// ── Self-referential comparison baselines (S8 presets) ───────────────────────────────────────────
+// Unlike the shifted-window baselines above, these are derived from the ALREADY-RESOLVED series, so
+// they apply uniformly to any series metric (TG core / post-derived / IG) with no extra data fetch.
+
+/** Weekday (0=Sun..6=Sat, UTC) of a plain `YYYY-MM-DD` key, or null if it isn't one (month/quarter/
+ *  year buckets, or a malformed key). */
+export function weekdayOfKey(key: string): number | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return null;
+  const t = Date.parse(`${key}T00:00:00Z`);
+  return Number.isFinite(t) ? new Date(t).getUTCDay() : null;
+}
+
+/** Trailing moving-average baseline: `out[i]` = mean of the last `window` values up to i (inclusive) —
+ *  the series' OWN smoothed run-rate, so each point reads against its recent trend. Same length as
+ *  `values`; leading points average a shorter run. Non-finite values are skipped in the mean. */
+export function movingAverageGhost(values: number[], window: number): number[] {
+  const w = Math.max(1, Math.floor(window));
+  return values.map((_, i) => {
+    let sum = 0;
+    let n = 0;
+    for (let j = Math.max(0, i - w + 1); j <= i; j += 1) {
+      if (Number.isFinite(values[j])) {
+        sum += values[j];
+        n += 1;
+      }
+    }
+    return n > 0 ? sum / n : 0;
+  });
+}
+
+/** «Typical weekday» baseline: `out[i]` = mean of all values sharing point i's weekday, so each day
+ *  reads against a typical same-weekday value in the window. Needs day-grain `YYYY-MM-DD` keys with
+ *  ≥2 distinct weekdays; returns null otherwise (week/month/… buckets, where «weekday» is degenerate),
+ *  so the caller can fall back honestly. Non-finite values are skipped in the per-weekday mean. */
+export function sameWeekdayGhost(dates: string[], values: number[]): number[] | null {
+  if (dates.length !== values.length || dates.length === 0) return null;
+  const wd: number[] = [];
+  for (const d of dates) {
+    const w = weekdayOfKey(d);
+    if (w == null) return null;
+    wd.push(w);
+  }
+  if (new Set(wd).size < 2) return null; // a single weekday (weekly buckets) — «same weekday» is moot
+  const sum = new Array(7).fill(0);
+  const cnt = new Array(7).fill(0);
+  values.forEach((v, i) => {
+    if (Number.isFinite(v)) {
+      sum[wd[i]] += v;
+      cnt[wd[i]] += 1;
+    }
+  });
+  return wd.map((w) => (cnt[w] > 0 ? sum[w] / cnt[w] : 0));
+}

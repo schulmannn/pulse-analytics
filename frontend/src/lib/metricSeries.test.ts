@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DAY_MS, alignGhost, baselineCoveredByPosts, bucketKeyOf, bucketKeysInWindow, comparisonWindow } from './metricSeries';
+import { DAY_MS, alignGhost, baselineCoveredByPosts, bucketKeyOf, bucketKeysInWindow, comparisonWindow, movingAverageGhost, sameWeekdayGhost, weekdayOfKey } from './metricSeries';
 
 describe('baselineCoveredByPosts — suppress an undercounted comparison', () => {
   it('true when the oldest loaded post is at/before the baseline start', () => {
@@ -114,5 +114,56 @@ describe('alignGhost', () => {
   });
   it('front-pads with zeros when short', () => {
     expect(alignGhost([5, 6], 4)).toEqual([0, 0, 5, 6]);
+  });
+});
+
+describe('weekdayOfKey', () => {
+  it('returns a UTC weekday for a plain YYYY-MM-DD key', () => {
+    const wd = weekdayOfKey('2026-07-06');
+    expect(wd).not.toBeNull();
+    expect(wd).toBeGreaterThanOrEqual(0);
+    expect(wd).toBeLessThanOrEqual(6);
+    // dates exactly 7 days apart share a weekday (grain-agnostic invariant the ghost relies on)
+    expect(weekdayOfKey('2026-01-01')).toBe(weekdayOfKey('2026-01-08'));
+    // …and adjacent days differ
+    expect(weekdayOfKey('2026-01-01')).not.toBe(weekdayOfKey('2026-01-02'));
+  });
+  it('null for non-day keys (month/quarter/year buckets) and garbage', () => {
+    expect(weekdayOfKey('2026-01')).toBeNull();
+    expect(weekdayOfKey('2026')).toBeNull();
+    expect(weekdayOfKey('2026-Q1')).toBeNull();
+    expect(weekdayOfKey('nope')).toBeNull();
+  });
+});
+
+describe('movingAverageGhost — self-referential trailing mean', () => {
+  it('averages the trailing window up to each point (inclusive)', () => {
+    expect(movingAverageGhost([2, 4, 6, 8], 2)).toEqual([2, 3, 5, 7]);
+  });
+  it('window 1 is the identity; a wide window is the running cumulative mean', () => {
+    expect(movingAverageGhost([3, 5, 7], 1)).toEqual([3, 5, 7]);
+    expect(movingAverageGhost([2, 4, 6], 10)).toEqual([2, 3, 4]);
+  });
+  it('skips non-finite values in the mean and never divides by zero', () => {
+    expect(movingAverageGhost([2, NaN, 4], 3)).toEqual([2, 2, 3]);
+    expect(movingAverageGhost([], 7)).toEqual([]);
+  });
+});
+
+describe('sameWeekdayGhost — per-weekday typical value', () => {
+  it('replaces each point with the mean of its own weekday in the window', () => {
+    // 01-01 & 01-08 share a weekday; 01-02 & 01-09 share the next → two groups
+    const dates = ['2026-01-01', '2026-01-02', '2026-01-08', '2026-01-09'];
+    const values = [10, 20, 30, 40];
+    expect(sameWeekdayGhost(dates, values)).toEqual([20, 30, 20, 30]);
+  });
+  it('null when a single weekday only (weekly buckets — «same weekday» is moot)', () => {
+    // all 7 days apart → one weekday
+    expect(sameWeekdayGhost(['2026-01-01', '2026-01-08', '2026-01-15'], [1, 2, 3])).toBeNull();
+  });
+  it('null for non-day keys (month grain) and length mismatch / empty', () => {
+    expect(sameWeekdayGhost(['2026-01', '2026-02'], [1, 2])).toBeNull();
+    expect(sameWeekdayGhost(['2026-01-01'], [1, 2])).toBeNull();
+    expect(sameWeekdayGhost([], [])).toBeNull();
   });
 });

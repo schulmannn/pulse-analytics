@@ -40,7 +40,7 @@ import type { DrillKey, PostMetricField } from '@/lib/kpiDerive';
 import { normalizeTgPosts } from '@/lib/posts';
 import type { NormalizedPost } from '@/lib/posts';
 import { postMatchesFilters } from '@/lib/dimensions';
-import { DAY_MS, alignGhost, baselineCoveredByPosts, bucketKeyOf, bucketKeysInWindow, comparisonWindow } from '@/lib/metricSeries';
+import { DAY_MS, alignGhost, baselineCoveredByPosts, bucketKeyOf, bucketKeysInWindow, comparisonWindow, movingAverageGhost, sameWeekdayGhost } from '@/lib/metricSeries';
 import type { SeriesGrain } from '@/lib/metricSeries';
 import { fmt } from '@/lib/format';
 import { freshness, latestDataMs } from '@/lib/freshness';
@@ -192,6 +192,8 @@ const COMPARISON_LABEL: Record<ComparisonMode, string> = {
   previous_period: 'прошлый период',
   same_period_last_month: 'прошлый месяц',
   same_period_last_year: 'год назад',
+  same_weekday: 'типичный день недели',
+  moving_average: 'скользящее среднее',
   custom: 'выбранный период',
 };
 
@@ -520,6 +522,33 @@ export function resolveWidgetMetric(config: WidgetConfig, ctx: DataContext): Wid
   const src = getMetric(config.metricId)?.source;
   const network: 'tg' | 'ig' = src === 'ig' ? 'ig' : src === 'tg' ? 'tg' : ctx.ig && !ctx.tg ? 'ig' : 'tg';
   result.meta = { ...commonMeta(config, ctx, network), ...result.meta };
+  // Self-referential comparison presets (S8): the moving-average / typical-weekday baselines are
+  // derived from the resolved series itself, so they layer on here — after every resolve path has
+  // built result.series — rather than in each path. The window-based paths already ran and, finding
+  // no shiftable baseline for these modes, left a «сравнение недоступно» note; clear it on success.
+  const cmp = config.comparison;
+  if (
+    cmp &&
+    (cmp.mode === 'moving_average' || cmp.mode === 'same_weekday') &&
+    wantsGhostLine(cmp) &&
+    !result.empty &&
+    !result.ghost &&
+    result.series &&
+    result.series.length >= 2
+  ) {
+    const ghost =
+      cmp.mode === 'moving_average'
+        ? movingAverageGhost(result.series.map((p) => p.value), 7)
+        : sameWeekdayGhost(result.series.map((p) => p.date), result.series.map((p) => p.value));
+    if (ghost) {
+      result.ghost = ghost;
+      result.ghostLabel = COMPARISON_LABEL[cmp.mode];
+      result.meta = { ...result.meta, comparisonNote: undefined };
+    } else {
+      // same_weekday on non-day buckets (week/month/…) — honest note instead of a dead control.
+      result.meta = { ...result.meta, comparisonNote: 'сравнение по дню недели — только для дневных данных' };
+    }
+  }
   if (!result.empty && config.target) {
     const target = resolveTargetValue(config, ctx);
     if (target != null) {

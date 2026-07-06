@@ -91,7 +91,9 @@ export function DetailShell({ ariaLabel, onClose, variant, originRect, children 
       type="button"
       onClick={onClose}
       aria-label="Закрыть"
-      className="absolute right-4 top-4 z-10 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      // top uses max(1rem, safe-area) so the × clears a notch on the mobile edge-to-edge sheet
+      // (env resolves to 0 on desktop / non-notched viewports → the original 1rem inset).
+      className="absolute right-4 top-[max(1rem,env(safe-area-inset-top))] z-10 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
     >
       <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" aria-hidden="true">
         <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -116,11 +118,18 @@ export function DetailShell({ ariaLabel, onClose, variant, originRect, children 
     );
   }
 
-  // 'panel' — centered Card over a dimmed, click-to-close backdrop.
+  // 'panel' — centered Card over a dimmed, click-to-close backdrop. On mobile (<sm) it drops the
+  // outer inset so the Card is a full-height, edge-to-edge sheet (Mobile-nav card): no 16px paper
+  // gutter to waste on a phone, square top/bottom corners, and a bottom safe-area pad so the stats
+  // strip clears the home indicator. ≥sm restores the floating inset + panel radius.
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label={ariaLabel}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4" role="dialog" aria-modal="true" aria-label={ariaLabel}>
       <div className="detail-backdrop-in absolute inset-0 bg-background/70 backdrop-blur-sm" onClick={onClose} aria-hidden="true" />
-      <Card ref={panelRef} tabIndex={-1} className="relative z-10 flex h-full w-full flex-col overflow-hidden focus:outline-none">
+      <Card
+        ref={panelRef}
+        tabIndex={-1}
+        className="relative z-10 flex h-full w-full flex-col overflow-hidden rounded-none pb-[env(safe-area-inset-bottom)] focus:outline-none sm:rounded sm:pb-0"
+      >
         {closeButton}
         {children}
       </Card>
