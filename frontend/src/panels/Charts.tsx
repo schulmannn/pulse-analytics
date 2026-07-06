@@ -32,7 +32,7 @@ function ddmm(dayStr: string) {
   return ruAxisLabel(`${Number(parts[2])} ${monthLabel}`);
 }
 
-function SubscriberHistoryChart({ rows }: { rows: SubscriberRow[] }) {
+export function SubscriberHistoryChart({ rows }: { rows: SubscriberRow[] }) {
   const sampled = lttbDownsample(rows, 140, (row) => Number(row.subscribers));
   const values = sampled.map((row) => Number(row.subscribers));
   const titles = sampled.map((row) => `${ddmm(row.day)}: ${fmt.num(row.subscribers)} подписчиков`);
@@ -72,7 +72,7 @@ function subscriberDeltas(rows: SubscriberRow[]) {
 }
 
 /** Bar presentation of the same archive (widget «Тип: Столбцы») — diverging day-over-day deltas. */
-function SubscriberHistoryBars({ rows }: { rows: SubscriberRow[] }) {
+export function SubscriberHistoryBars({ rows }: { rows: SubscriberRow[] }) {
   const d = subscriberDeltas(rows);
   // 200 = the standard 1×-tile chart height, matching the line presentation.
   return <DivergingBars values={d.values} labels={d.labels} titles={d.titles} height={200} />;
