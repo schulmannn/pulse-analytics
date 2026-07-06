@@ -937,7 +937,7 @@ export function WidgetGroup({ id, className, children }: WidgetGroupProps) {
             type="button"
             data-reorder-done
             onClick={() => setReorderMode(false)}
-            className="btn-pill fixed bottom-6 left-1/2 z-40 -translate-x-1/2 bg-primary px-6 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+            className="btn-pill fixed bottom-6 left-1/2 z-popover -translate-x-1/2 bg-primary px-6 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
           >
             Готово
           </button>,
@@ -1411,7 +1411,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
             <div
               role="menu"
               aria-label={`Меню виджета «${prefs.title || title}»`}
-              className="absolute right-0 top-full z-20 mt-1 w-48 rounded-lg border border-border bg-card p-1.5"
+              className="absolute right-0 top-full z-popover mt-1 w-48 rounded-lg border border-border bg-card p-1.5"
               // This dropdown renders INSIDE the now-clickable card; stop clicks on its padding /
               // dividers (non-button dead space) from bubbling to the card and opening the detail
               // overlay while the menu is open.
@@ -1999,7 +1999,7 @@ function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, showSerie
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-modal flex items-center justify-center bg-background/70 p-4 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-label={`Настройка виджета «${prefs.title || defaultTitle}»`}

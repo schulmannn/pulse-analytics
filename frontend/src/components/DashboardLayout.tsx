@@ -279,9 +279,9 @@ function Sidebar({ email, role, avatar }: { email?: string; role?: string; avata
       className={cn(
         // Floating panel (Claude-style): inset 0.5rem all round, rounded, a full hairline, on the
         // card surface so it reads a shade apart from the canvas — no shadow (DS restraint; the
-        // surface contrast + inset carry the float). z-30 lets the overhanging popovers (rail
-        // dropdown, user-row menu) paint above the sticky Topbar (z-20), under scrim/modals.
-        'sticky top-2 z-30 m-2 hidden h-[calc(100vh-1rem)] shrink-0 flex-col rounded-xl border border-border bg-card dark:border-white/[0.06] md:flex print:hidden',
+        // surface contrast + inset carry the float). z-nav lets the overhanging popovers (rail
+        // dropdown, user-row menu) paint above the sticky Topbar (z-sticky), under scrim/modals.
+        'sticky top-2 z-nav m-2 hidden h-[calc(100vh-1rem)] shrink-0 flex-col rounded-xl border border-border bg-card dark:border-white/[0.06] md:flex print:hidden',
         'transition-[width] duration-200 motion-reduce:transition-none',
         rail ? 'w-16' : 'w-60',
       )}
@@ -417,7 +417,7 @@ function MobileBottomNav() {
   return (
     <nav
       className={cn(
-        'fixed inset-x-0 bottom-0 z-30 grid border-t bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden print:hidden',
+        'fixed inset-x-0 bottom-0 z-nav grid border-t bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden print:hidden',
         GRID_COLS[nav.length] ?? 'grid-cols-5',
       )}
     >
@@ -745,7 +745,7 @@ function SourceSwitcher({ rail = false, mobile = false }: { rail?: boolean; mobi
       {open && openable && (
         <div
           className={cn(
-            'absolute top-full z-40 mt-1 overflow-hidden rounded border bg-popover p-1',
+            'absolute top-full z-popover mt-1 overflow-hidden rounded border bg-popover p-1',
             // In the rail the popover overhangs the 64px column instead of squeezing into it.
             rail ? 'left-2 w-60' : 'inset-x-3',
           )}
@@ -822,7 +822,7 @@ function Topbar() {
   const title = FEED_ROUTES.includes(pathname) ? null : routeTitle(pathname);
   if (!title) return null;
   return (
-    <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b bg-background/80 px-4 backdrop-blur sm:gap-4 sm:px-6 print:hidden">
+    <header className="sticky top-0 z-sticky flex h-14 items-center gap-3 border-b bg-background/80 px-4 backdrop-blur sm:gap-4 sm:px-6 print:hidden">
       <h1 className="min-w-0 truncate text-lg font-medium">{title}</h1>
     </header>
   );
@@ -1005,7 +1005,7 @@ function AccountMenu({ email, role, avatar }: { email?: string; role?: string; a
         {avatar ? <img src={avatar} alt="" className="h-full w-full object-cover" /> : avatarInitials(email)}
       </button>
       {open && (
-        <div className={cn('absolute right-0 top-full z-40 mt-1 w-64', ACCOUNT_MENU_SHELL)}>
+        <div className={cn('absolute right-0 top-full z-popover mt-1 w-64', ACCOUNT_MENU_SHELL)}>
           <AccountMenuContent email={email} role={role} avatar={avatar} onClose={() => setOpen(false)} />
         </div>
       )}
@@ -1068,7 +1068,7 @@ function SidebarUserRow({
       {open && (
         <div
           className={cn(
-            'absolute bottom-full z-40 mb-1',
+            'absolute bottom-full z-popover mb-1',
             rail ? 'left-2 w-64' : 'inset-x-3',
             ACCOUNT_MENU_SHELL,
           )}

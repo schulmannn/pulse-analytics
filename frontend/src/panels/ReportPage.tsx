@@ -688,7 +688,7 @@ function ReportDocumentBody({
                 @{channelName} ⌄
               </button>
               {channelOpen && (
-                <div className="absolute left-0 top-full z-20 mt-1 w-52 rounded border border-border bg-card p-1">
+                <div className="absolute left-0 top-full z-popover mt-1 w-52 rounded border border-border bg-card p-1">
                   <button
                     type="button"
                     onClick={() => {
@@ -859,7 +859,7 @@ function InlineAdd({ onAdd }: { onAdd: (type: ReportBlockType, presetKey?: Repor
         </svg>
       </button>
       {open && (
-        <div className="absolute left-1/2 top-full z-30 mt-1 w-64 -translate-x-1/2 rounded-lg border border-border bg-card p-1.5 text-left">
+        <div className="absolute left-1/2 top-full z-popover mt-1 w-64 -translate-x-1/2 rounded-lg border border-border bg-card p-1.5 text-left">
           {ADD_TYPES.map((t) => (
             <button
               key={t.type}

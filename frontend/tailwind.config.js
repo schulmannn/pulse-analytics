@@ -82,6 +82,19 @@ export default {
         md: 'calc(var(--radius) - 2px)',
         sm: 'calc(var(--radius) - 4px)',
       },
+      // Canonical layering scale — depth in this system is HAIRLINES + z-index only (no shadows), so
+      // the stack order MUST be deliberate. One ordered ladder for the floating/overlay layer, named
+      // by role so nothing ties (a card ⋯-menu used to share z-20 with the sticky topbar). Numeric
+      // gaps leave room; plain content stacking (relative z-10 inside a component) stays untokenised.
+      // See DESIGN_TOKENS.md «Layering». Order: sticky < nav < popover < modal < toast < tooltip.
+      zIndex: {
+        sticky: '20', // in-flow sticky chrome — topbar, page/section headers
+        nav: '30', // fixed app navigation — sidebar, mobile bottom nav
+        popover: '40', // transient triggers over content — ⋯ menus, dropdowns, reorder pill
+        modal: '50', // full overlays + their scrim — detail, dialogs, drawers, command palette
+        toast: '60', // notifications above modals (reserved)
+        tooltip: '70', // always-on-top hints — must show even inside a modal
+      },
     },
   },
   plugins: [animate],

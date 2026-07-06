@@ -106,7 +106,7 @@ export function DetailShell({ ariaLabel, onClose, variant, originRect, children 
       <div
         ref={panelRef}
         tabIndex={-1}
-        className="fixed inset-0 z-50 flex flex-col bg-background focus:outline-none"
+        className="fixed inset-0 z-modal flex flex-col bg-background focus:outline-none"
         role="dialog"
         aria-modal="true"
         aria-label={ariaLabel}
@@ -123,7 +123,7 @@ export function DetailShell({ ariaLabel, onClose, variant, originRect, children 
   // gutter to waste on a phone, square top/bottom corners, and a bottom safe-area pad so the stats
   // strip clears the home indicator. ≥sm restores the floating inset + panel radius.
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4" role="dialog" aria-modal="true" aria-label={ariaLabel}>
+    <div className="fixed inset-0 z-modal flex items-center justify-center p-0 sm:p-4" role="dialog" aria-modal="true" aria-label={ariaLabel}>
       <div className="detail-backdrop-in absolute inset-0 bg-background/70 backdrop-blur-sm" onClick={onClose} aria-hidden="true" />
       <Card
         ref={panelRef}

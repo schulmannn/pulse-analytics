@@ -11,7 +11,7 @@ export type TooltipState =
 /** Floating readout for the SVG charts — anchored to a point inside a `relative` chart
     container. Placed above the anchor and flipped below when it would clip the container's
     top edge; clamped horizontally to the container bounds. It never escapes the chart
-    upward, and its z-10 keeps it under the sticky app header (z-20+), so it can't cover
+    upward, and its z-10 keeps it under the sticky app header (z-sticky+), so it can't cover
     the page chrome. Shows instantly on hover (vs. the slow native SVG <title>). */
 export function ChartTooltip({ tip }: { tip: TooltipState }) {
   const ref = useRef<HTMLDivElement>(null);
