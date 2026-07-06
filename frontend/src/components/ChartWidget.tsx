@@ -29,7 +29,7 @@ import type { PeriodDays, WidgetPeriodValue } from '@/lib/period';
  * prop plumbing. Prefs + ordering persist in localStorage.
  *
  * The card surface intentionally supersedes the flat hairline section for CHARTS (owner
- * call, steep pattern); KPI ledgers and tables stay open on the paper canvas.
+ * call, steep pattern); KPI ledgers and tables stay open on the cool-white canvas.
  */
 
 const PREFS_KEY = 'pulse_widget_prefs';

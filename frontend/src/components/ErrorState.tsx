@@ -16,7 +16,7 @@ interface ErrorStateProps {
 
 /**
  * The one load-/fetch-failure surface — the «broken route» cartograph + title + reason + an
- * optional retry. A hairline dashed box on the paper canvas (same restraint as EmptyState);
+ * optional retry. A hairline dashed box on the cool-white canvas (same restraint as EmptyState);
  * used wherever a query's isError branch showed ad-hoc «Не удалось загрузить …» text.
  */
 export function ErrorState({ title = 'Не удалось загрузить', reason, onRetry, retrying, className }: ErrorStateProps) {

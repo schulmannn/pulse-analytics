@@ -5,8 +5,8 @@ import { useForgot, useLogin, useRegister, useReset, useVerify } from '@/api/que
 import { AtlavueMark } from '@/components/AtlavueMark';
 import { GoogleSignInButton } from '@/components/GoogleSignInButton';
 
-// "Atlavue Refined Technical" auth — light, quiet, calmer than the dashboard. Warm paper canvas,
-// hairline-bordered fields, pill primary button, one calm blue accent. Semantic/brand tokens only.
+// "Atlavue Refined Technical" auth: light, quiet, calmer than the dashboard. Cool-white canvas,
+// hairline-bordered fields, pill primary button, one royal-blue accent. Semantic/brand tokens only.
 
 const INPUT_CLASS =
   'w-full rounded border border-border bg-card px-3.5 py-2.5 text-sm text-foreground placeholder:text-ink3 focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50';

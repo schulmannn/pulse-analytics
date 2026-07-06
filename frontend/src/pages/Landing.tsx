@@ -13,12 +13,12 @@ import { AtlavueMark } from '@/components/AtlavueMark';
 
 /**
  * Public marketing landing — "Atlavue Refined Technical" (light, product-forward, Steep-style).
- * Light by default (no forced .dark): warm paper canvas, hairline section dividers, one calm blue
- * accent, pill CTAs. The product itself does the selling — a dashboard that *assembles itself*
+ * Light by default (no forced .dark): Concept B cool-white canvas, hairline section dividers,
+ * royal-blue accent, pill CTAs. The product itself does the selling — a dashboard that *assembles itself*
  * (autoplay on load) plus floating UI cards that pop in from the corners, steep.app-style.
  *
  * Motion: on mount the hero dashboard builds itself (count-up, sparkline draw, KPI tiles popping in
- * from different angles, staggered posts, self-typing insight) over a warm aurora background, with
+ * from different angles, staggered posts, self-typing insight) over the cool-white canvas, with
  * peripheral cards bobbing around it; sections below reveal on entry. All collapses to a static,
  * fully-assembled state under `prefers-reduced-motion` and on mobile (mock hidden).
  */

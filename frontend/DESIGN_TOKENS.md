@@ -5,8 +5,8 @@ magic values ("каждый компонент сам по себе"). Definitio
 surface, radius, motion) and **`tailwind.config.js`** (type scale, radius bindings, colour bindings).
 Two scripts guard the canon (see [Governance](#governance)).
 
-> Philosophy: *Refined Technical* — warm paper canvas, warm ink scale, hairlines instead of card
-> chrome, **one** blue accent (`#2d6be0`), only two weights (400/500), no shadows / blur / glow.
+> Philosophy: *Refined Technical* — Concept B cool-white canvas, graphite ink scale, hairlines instead of card
+> chrome, a royal-blue accent with teal/emerald support roles, only two weights (400/500), no shadows / blur / glow.
 > Hierarchy comes from **size + ink shade**, never weight or elevation.
 
 ## Colour & surfaces
@@ -17,13 +17,13 @@ semantic token.
 
 | Role | Token(s) | Notes |
 |---|---|---|
-| Canvas / ink | `--background` `--foreground` | warm paper `#faf9f6` / ink `#1a1a17` |
-| Panel surface | `--card` `--popover` | `#fff` panels used **sparingly** — sections are hairline-delimited |
+| Canvas / ink | `--background` `--foreground` | cool-white canvas / graphite ink; no beige/cream base surfaces |
+| Panel surface | `--card` `--popover` | white panels used **sparingly** — sections are hairline-delimited |
 | Secondary/tertiary ink | `--muted-foreground` `--ink2` `--ink3` | text hierarchy by shade, not weight |
-| Accent (single hue) | `--primary` `--accent` `--accent-foreground` | `--accent-foreground` is AA-calibrated for ink on the blue tints |
+| Accent | `--primary` `--accent` `--accent-foreground` | royal-blue action system; `--accent-foreground` is AA-calibrated for ink on blue tints |
 | Deltas | `--brand-verdant` (up) `--brand-ember` / `-strong` (down) | deepened to clear AA 4.5 as text + on 10% tint |
-| Status | `--status-warn` | risk / demo / stale collector |
-| Hairline | `--border` `--input` | decorative separators (the *only* borders in the system) |
+| Status | `--status-warn` | risk / demo / stale collector; amber appears only as a semantic warning, not page chrome |
+| Hairline | `--border` `--input` | cool decorative separators (the *only* borders in the system) |
 | Categorical series | `--chart-1 … --chart-6` | Okabe-Ito, colour-blind-safe; series always carry a label too |
 | Identity chips | `--chip-{1..6}-{bg,ink}` | deterministic per channel-name hash |
 

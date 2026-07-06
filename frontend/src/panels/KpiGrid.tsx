@@ -183,7 +183,7 @@ interface StatTileProps {
 
 /**
  * One ledger cell (no card — a hairline-delimited column in the StatTile grid). The grid's
- * gap-px over a bg-border container draws the 1px dividers; the cell sits on the paper canvas.
+ * gap-px over a bg-border container draws the 1px dividers; the cell sits on the cool-white canvas.
  */
 function StatTile({ label, value, trend, deltaText, info, onDrill }: StatTileProps) {
   const [num, unit] = splitUnit(value);

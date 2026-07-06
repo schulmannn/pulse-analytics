@@ -3,9 +3,10 @@
 @tailwind utilities;
 
 /* "Atlavue Refined Technical" tokens (Refined UI + Swiss Modern + Technical UI), in HSL channels.
-   Light = default; dark via the `.dark` class. Warm paper canvas + warm ink scale + warm hairlines
-   replace the prior cool/analytical system; one calm blue accent (#2d6be0). Panels (#fff) are used
-   sparingly — sections are delimited by hairlines, not card chrome. Radius 4px (buttons pill via util). */
+   Light = default; dark via the `.dark` class. Light follows the Concept B cool-white direction:
+   editorial white canvas, graphite ink, cool hairlines and a royal-blue accent with teal/emerald
+   support roles. Panels (#fff) are used sparingly — sections are delimited by hairlines, not card
+   chrome. Radius 4px (buttons pill via util). */
 @layer base {
   /* `.force-light` carries the same light palette as :root, so a subtree tagged with it renders
      light even under a `.dark` <html> (custom properties inherit from the nearest ancestor that
@@ -13,57 +14,56 @@
   :root,
   .force-light {
     color-scheme: light;
-    --background: 45 28% 97%;          /* paper  #faf9f6 — warm off-white */
-    --foreground: 60 6% 10%;           /* ink    #1a1a17 */
+    --background: 210 40% 98.5%;       /* cool canvas #f8fafc — no beige/cream base */
+    --foreground: 222 27% 10%;         /* graphite ink #121722 */
     --card: 0 0% 100%;                 /* panel  #ffffff (sparingly) */
-    --card-foreground: 60 6% 10%;
+    --card-foreground: 222 27% 10%;
     --popover: 0 0% 100%;
-    --popover-foreground: 60 6% 10%;
-    --primary: 219 74% 53%;            /* accent #2d6be0 — links / active / brand only */
+    --popover-foreground: 222 27% 10%;
+    --primary: 218 78% 46%;            /* royal blue #1a5bd1 — links / active / brand only */
     --primary-foreground: 0 0% 100%;
-    --secondary: 45 20% 95%;
-    --secondary-foreground: 60 6% 10%;
-    --muted: 45 20% 95%;
-    --muted-foreground: 49 5% 40%;     /* ink3   #6c6a61 */
-    --accent: 220 79% 96%;             /* blue-tint #eef3fd */
-    --accent-foreground: 219 74% 49.5%; /* a notch deeper than --primary: clears AA 4.5 on BOTH blue
-                                            tints (--accent #eef3fd AND primary/0.1 over paper) */
+    --secondary: 214 32% 96.5%;
+    --secondary-foreground: 222 27% 10%;
+    --muted: 214 32% 96.5%;
+    --muted-foreground: 220 11% 38%;   /* secondary graphite #58606d */
+    --accent: 214 88% 96.5%;           /* cool blue tint #eef6ff */
+    --accent-foreground: 218 76% 40%;  /* calibrated ink on accent / primary tints */
     --destructive: 11 64% 45%;         /* down   #bb4429 */
     --destructive-foreground: 0 0% 100%;
-    --border: 48 16% 88%;              /* hairline #e5e3db — warm 1px line */
-    --input: 48 16% 88%;
-    --ring: 219 74% 53%;
+    --border: 217 22% 88%;             /* cool hairline #dce2eb */
+    --input: 217 22% 88%;
+    --ring: 218 78% 46%;
     --radius: 0.25rem;                 /* 4px panels; buttons get a pill radius via utility */
 
-    /* Warm ink scale for secondary / tertiary text (size + shade for hierarchy, not weight). */
-    --ink2: 53 5% 29%;                 /* #4e4d46 */
-    --ink3: 49 5% 40%;                 /* #6c6a61 */
+    /* Graphite ink scale for secondary / tertiary text (size + shade for hierarchy, not weight). */
+    --ink2: 222 14% 28%;               /* #3d4551 */
+    --ink3: 220 10% 39%;               /* #5a626d */
 
-    /* Data accent = the brand blue (single hue; no separate violet). Deltas only for up/down. */
-    --brand-iris: 219 74% 53%;         /* #2d6be0 */
-    --brand-iris-soft: 219 74% 64%;
-    --brand-verdant: 147 52% 30%;      /* up     #257449 — deepened to clear AA 4.5 as text + on a 10% tint */
+    /* Data accent = the brand blue; deltas/statuses introduce teal/emerald/error only by role. */
+    --brand-iris: 218 78% 46%;         /* #1a5bd1 */
+    --brand-iris-soft: 218 78% 58%;
+    --brand-verdant: 162 67% 27%;      /* up     #16735c — teal/emerald support role */
     --brand-ember: 11 64% 45%;         /* down   #bb4429 */
     --brand-ember-strong: 11 64% 40%;  /* deeper, clears AA on a 10% ember tint */
-    --status-warn: 39 84% 28%;         /* amber  #83590b — status (Риск / демо / collector stale); deepened for AA */
+    --status-warn: 38 82% 29%;         /* status amber only; never a base surface */
 
     /* Subtle status tints (badge + section backgrounds). */
-    --amber-tint: 42 53% 92%;          /* #f5eede */
-    --green-tint: 138 26% 93%;         /* #e7f1ea */
-    --blue-tint: 220 79% 96%;          /* #eef3fd */
-    --hover-row: 47 31% 94%;           /* #f5f3ec — table row hover */
-    --avatar: 45 21% 89%;              /* #e9e6dd — fallback avatar field */
+    --amber-tint: 43 76% 95%;          /* semantic warning wash, not page chrome */
+    --green-tint: 160 45% 94%;         /* cool success wash */
+    --blue-tint: 214 88% 96.5%;        /* cool info wash */
+    --hover-row: 214 35% 96%;          /* table/nav hover on cool-white canvas */
+    --avatar: 216 24% 90%;             /* fallback avatar field */
 
     /* Letter-avatar identity tints (channel chip in the sidebar) — 6 muted bg/ink pairs picked
        deterministically by a hash of the channel name (see DashboardLayout chipTint). Low
-       saturation on purpose: identity hints on warm paper, never neon. Consumed via the
+       saturation on purpose: identity hints on cool-white canvas, never neon. Consumed via the
        .chip-tint-N component classes below. */
-    --chip-1-bg: 258 24% 92%; --chip-1-ink: 258 22% 38%;   /* muted violet */
-    --chip-2-bg: 150 22% 90%; --chip-2-ink: 150 32% 26%;   /* muted green */
-    --chip-3-bg: 42 42% 89%;  --chip-3-ink: 40 48% 29%;    /* muted amber */
-    --chip-4-bg: 348 30% 92%; --chip-4-ink: 348 34% 37%;   /* muted rose */
-    --chip-5-bg: 187 28% 89%; --chip-5-ink: 190 46% 25%;   /* muted teal */
-    --chip-6-bg: 225 16% 91%; --chip-6-ink: 225 13% 37%;   /* muted slate */
+    --chip-1-bg: 258 28% 94%; --chip-1-ink: 258 28% 34%;   /* violet */
+    --chip-2-bg: 156 36% 92%; --chip-2-ink: 158 42% 25%;   /* emerald */
+    --chip-3-bg: 45 64% 93%;  --chip-3-ink: 40 62% 29%;    /* gold status */
+    --chip-4-bg: 348 34% 94%; --chip-4-ink: 348 42% 34%;   /* rose */
+    --chip-5-bg: 188 38% 91%; --chip-5-ink: 190 52% 24%;   /* teal */
+    --chip-6-bg: 219 28% 93%; --chip-6-ink: 222 22% 34%;   /* graphite-blue */
 
     /* Breakdown row-fill alphas (see components/Breakdown). Theme-scoped: the same 0.15
        categorical tint that reads as a soft pastel on paper turns muddy olive-brown over the
@@ -75,7 +75,7 @@
        Okabe-Ito-based for colour-blind safety: chart-1 = brand blue, chart-2 orange is its
        high-contrast pair; the two blues (1 and 6) sit farthest apart in the cycle. Series always
        carry a text label/legend too — never colour-alone (see Breakdown dots + labels). */
-    --chart-1: 219 74% 53%;   /* brand blue #2d6be0 (kept) */
+    --chart-1: 218 78% 46%;   /* brand royal blue */
     --chart-2: 41 96% 33%;    /* deep amber — 4.2:1 on white so the DASHED ghost still clears
                                  non-text 3:1 at its 0.8 stroke opacity (scripts/contrast-tokens) */
     --chart-3: 164 90% 30%;   /* bluish green */
