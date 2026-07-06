@@ -72,16 +72,18 @@
     --row-tint-neutral: 0.08;
 
     /* Categorical data-viz palette (multi-series only; single metrics use --brand-iris).
-       Okabe-Ito-based for colour-blind safety: chart-1 = brand blue, chart-2 orange is its
-       high-contrast pair; the two blues (1 and 6) sit farthest apart in the cycle. Series always
-       carry a text label/legend too — never colour-alone (see Breakdown dots + labels). */
-    --chart-1: 219 74% 53%;   /* brand blue #2d6be0 (kept) */
-    --chart-2: 41 96% 33%;    /* deep amber — 4.2:1 on white so the DASHED ghost still clears
-                                 non-text 3:1 at its 0.8 stroke opacity (scripts/contrast-tokens) */
-    --chart-3: 164 90% 30%;   /* bluish green */
-    --chart-4: 24 95% 43%;    /* vermillion */
-    --chart-5: 326 44% 62%;   /* reddish purple */
-    --chart-6: 202 72% 52.5%; /* sky blue (2nd blue — placed last); ≥3:1 on white */
+       MUTED / refined (Steep-noble) — desaturated for a calm, premium feel, but still Okabe-Ito-ordered
+       for colour-blind safety (chart-1 blue vs chart-2 amber = the high-contrast pair; the two blues
+       1 and 6 sit farthest apart). Light theme keeps them deep enough to clear non-text 3.0 on white
+       (muting light colours drops contrast, so we desaturate AND deepen); dark goes softer/pastel.
+       Series always carry a text label/legend too — never colour-alone (see Breakdown dots). */
+    --chart-1: 218 48% 48%;   /* muted brand blue */
+    --chart-2: 38 62% 34%;    /* muted amber — kept deep so the DASHED ghost still clears non-text
+                                 3:1 at its 0.8 stroke opacity (scripts/contrast-tokens) */
+    --chart-3: 166 48% 31%;   /* muted teal-green */
+    --chart-4: 20 58% 44%;    /* muted terracotta */
+    --chart-5: 328 30% 50%;   /* muted dusty rose */
+    --chart-6: 202 46% 47%;   /* muted sky (2nd blue) */
   }
 
   .dark {
@@ -135,12 +137,12 @@
     --row-tint-colored: 0.09;
     --row-tint-neutral: 0.07;
 
-    --chart-1: 219 80% 70%;   /* brand blue (light) */
-    --chart-2: 41 90% 60%;    /* orange */
-    --chart-3: 164 60% 52%;   /* bluish green */
-    --chart-4: 24 88% 62%;    /* vermillion */
-    --chart-5: 326 55% 70%;   /* reddish purple */
-    --chart-6: 202 75% 66%;   /* sky blue */
+    --chart-1: 219 46% 70%;   /* muted brand blue */
+    --chart-2: 40 58% 62%;    /* muted amber */
+    --chart-3: 165 40% 56%;   /* muted teal-green */
+    --chart-4: 22 56% 64%;    /* muted terracotta */
+    --chart-5: 327 38% 72%;   /* muted dusty rose */
+    --chart-6: 202 50% 68%;   /* muted sky */
   }
 
   /* ── Motion canon (theme-agnostic — durations/easing don't change between light and dark) ──────
