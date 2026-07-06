@@ -147,6 +147,28 @@ export function useIgData() {
   const erReach = pairs.reach.cur > 0 ? (pairs.ti.cur / pairs.reach.cur) * 100 : 0;
   const erReachPrev = pairs.reach.prev > 0 ? (pairs.ti.prev / pairs.reach.prev) * 100 : 0;
 
+  // What drove an engagement rise — the component metric (сохранения / лайки / комментарии / репосты)
+  // with the largest positive delta over the window, as a %-lift. Both ends come from the backend's
+  // total_value synthetic points (or the mock daily series); hasCur && hasPrev guards a metric with no
+  // windowed pair. Attribution reuses data already in the bundle — no new API/DB field.
+  const engagementDriver = useMemo(() => {
+    const parts = [
+      { pair: pairs.saves, label: 'сохранения' },
+      { pair: pairs.likes, label: 'лайки' },
+      { pair: pairs.comments, label: 'комментарии' },
+      { pair: pairs.shares, label: 'репосты' },
+    ];
+    let best: { label: string; liftPct: number; delta: number } | null = null;
+    for (const { pair, label } of parts) {
+      if (!pair.hasCur || !pair.hasPrev) continue;
+      const delta = pair.cur - pair.prev;
+      if (delta <= 0) continue;
+      const liftPct = pair.prev > 0 ? (delta / pair.prev) * 100 : 100;
+      if (!best || delta > best.delta) best = { label, liftPct, delta };
+    }
+    return best ? { label: best.label, liftPct: best.liftPct } : null;
+  }, [pairs]);
+
   const posts = useMemo(() => postsQ.data?.data ?? [], [postsQ.data]);
   // Content counts (Reels, top posts, hashtags, compare) and the post-derived insights must
   // reflect the SELECTED period — not the last ~24 fetched posts. Window by publish timestamp so
@@ -179,6 +201,7 @@ export function useIgData() {
     unfollows: pairs.unfollows.hasCur ? pairs.unfollows.cur : null,
     erReach,
     erReachPrev,
+    engagementDriver,
     bestFormat:
       topFormat && formatTotal > 0
         ? {
