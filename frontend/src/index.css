@@ -376,6 +376,20 @@
   .detail-backdrop-in { animation: none; }
 }
 
+/* ── Bottom sheet (mobile source switcher): the panel slides up from the bottom edge while its
+   backdrop fades in (detail-backdrop-in). Explicit `animation: none` under reduced-motion so the
+   large translate never flashes through the 0.01ms global cap. ──────────────────────────────── */
+@keyframes sheet-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+.sheet-in {
+  animation: sheet-up var(--motion-reveal) var(--ease-standard) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sheet-in { animation: none; }
+}
+
 /* A card's «×» remove affordance appears with a soft scale-in, staggered per grid slot via the
    card's --enter-delay (inherited from the inner card). */
 @keyframes home-remove-in {

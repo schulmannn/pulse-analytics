@@ -92,6 +92,15 @@ loops (reorder jiggle, starfield twinkle) and readability-critical reveals addit
 the lint: cartograph (error/404/empty), the `/connect` orbital hub + starfield, and the reorder jiggle.
 Framer on the public landing is its own system (`EASE` constant + per-variant durations).
 
+**Overlays & mobile sheets.** Dialogs are borders-only (no shadow): a `bg-background/70` backdrop fades
+in (`.detail-backdrop-in`, `--motion-press`) while the panel appears. On mobile the card **detail**
+(`DetailShell` `panel`) drops its inset to a full-height, edge-to-edge sheet (`p-0 sm:p-4`,
+`rounded-none sm:rounded`), and the **source switcher** opens as a bottom sheet that slides up
+(`.sheet-in`, `--motion-reveal`) — both portal-rendered above the bottom nav, focus-trapped
+(`useFocusTrap`), Escape/backdrop-dismissable, and bottom-padded with `env(safe-area-inset-bottom)` so
+the last row clears the home indicator (the fixed bottom nav uses the same pad). Gated by
+`e2e/mobile-nav.spec.ts`.
+
 ## Governance
 
 Run from `frontend/`:
