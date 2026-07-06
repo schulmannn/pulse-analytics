@@ -1,13 +1,17 @@
 import { test, expect } from '@playwright/test';
 import { bootDemo, overflowingCards } from './helpers';
 
-// Routes that render the FULL widget set deterministically (independent of per-user pins): the
-// Overview feed, Analytics breakdowns and Posts. /home is per-user pin-dependent, so it is exercised
-// only by the edit-mode interaction test, not the layout invariants here.
+// Routes that render the FULL widget set deterministically (independent of per-user pins): the whole
+// focused TG feed — Overview, Analytics breakdowns, Posts, Mentions — plus the Reports index. This is
+// the CONTENT-DENSITY contract gate (DESIGN_TOKENS «Content density»): every widget body must fit its
+// fixed tile with no inner scroll/clip, so the whole feed reads at one predictable density. /home is
+// per-user pin-dependent, so it is exercised only by the edit-mode interaction test, not here.
 const ROUTES = [
   { path: '/', name: 'overview' },
   { path: '/analytics', name: 'analytics' },
   { path: '/posts', name: 'posts' },
+  { path: '/mentions', name: 'mentions' },
+  { path: '/reports', name: 'reports' },
 ];
 
 for (const route of ROUTES) {

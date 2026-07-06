@@ -89,6 +89,25 @@ period filter pills grow their hit area below `sm` (the compact desktop look ret
 links / ⓘ keep their text size — their tap area is the text and the same action has a full-size path in
 the detail overlay.
 
+## Content density (card ↔ detail)
+
+Every widget reads at **one predictable density** per footprint — a card never grows an inner scrollbar
+or clips; the extra content lives in «Развернуть». The contract, top to bottom:
+
+- **Fixed tiles.** `third`/`half` cards lock to one height (`SIZE_H` in `ChartWidget.tsx`); the body is
+  `overflow-hidden` (never `auto`), so content adapts to the tile instead of scrolling. `full` cards
+  span the row and are content-height.
+- **Fit-to-height lists.** `Breakdown` renders only the rows that FIT the measured body height plus a
+  `+N ещё — полный список в «Развернуть»` line; the detail overlay (`ChartExpandedContext`) shows the
+  full list. Value ledgers (`ValueLedger`) cap at 8 rows with the same «+N ещё».
+- **Summary in card, proof in detail.** The story card leads with hero + delta + one caption; the terse
+  source/quality meta is one truncating line with a ⓘ. The full «почему это число» panel
+  (`MetricExplainPanel` — formula, source, sample, freshness, comparison) renders **only when expanded**
+  (`WidgetRenderer`). Insights show statement + why + action in the card, evidence link inline.
+- **Gate.** `e2e/dashboard.spec.ts` asserts no inner scrollbar / no runaway height across the whole TG
+  feed (Обзор / Аналитика / Посты / Упоминания) + Отчёты, at every breakpoint. A widget that stops
+  fitting its tile fails there.
+
 ## Motion
 
 The house easing + a small duration ladder, defined once in `src/index.css` `:root` (theme-agnostic).
