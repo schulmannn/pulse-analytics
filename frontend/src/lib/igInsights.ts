@@ -20,6 +20,9 @@ export interface IgInsightInput {
   topPost?: { reach: number; type?: string | null } | null;
   /** Number of posts the rates are computed over — drives confidence (small n → lower). */
   postCount?: number;
+  /** What drove an engagement rise — the component metric (сохранения / лайки / …) with the biggest
+      positive lift over the window. Appended to the «Вовлечённость выросла» evidence when present. */
+  engagementDriver?: { label: string; liftPct: number } | null;
 }
 
 export interface IgInsight {
@@ -82,10 +85,15 @@ export function buildIgInsights(i: IgInsightInput): IgInsight[] {
   if (i.erReach != null && i.erReach > 0) {
     if (i.erReachPrev != null && i.erReachPrev > 0 && i.erReach.toFixed(2) !== i.erReachPrev.toFixed(2)) {
       const up = i.erReach > i.erReachPrev;
+      // When we know WHICH component drove a rise, name it — «выросла · за счёт роста: сохранения +34%».
+      const driver =
+        up && i.engagementDriver
+          ? ` · за счёт роста: ${i.engagementDriver.label} +${Math.round(i.engagementDriver.liftPct)}%`
+          : '';
       out.push({
         tone: up ? 'up' : 'down',
         text: `Вовлечённость ${up ? 'выросла' : 'снизилась'}.`,
-        evidence: `ER по охвату ${i.erReach.toFixed(2)}% (было ${i.erReachPrev.toFixed(2)}%)`,
+        evidence: `ER по охвату ${i.erReach.toFixed(2)}% (было ${i.erReachPrev.toFixed(2)}%)${driver}`,
         confidence: n >= 5 ? 'high' : 'medium',
         priority: 80,
       });

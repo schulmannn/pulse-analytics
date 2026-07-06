@@ -31,6 +31,23 @@ describe('buildIgInsights', () => {
     expect(out[0].evidence).toContain('2.40%');
   });
 
+  it('names the component that drove an engagement rise (attribution)', () => {
+    const out = buildIgInsights({
+      erReach: 3.2,
+      erReachPrev: 2.4,
+      engagementDriver: { label: 'сохранения', liftPct: 34 },
+    });
+    expect(out[0].tone).toBe('up');
+    expect(out[0].text).toContain('выросла');
+    expect(out[0].evidence).toContain('за счёт роста: сохранения +34%');
+  });
+
+  it('omits the driver clause on a falling ER even if a driver is passed', () => {
+    const out = buildIgInsights({ erReach: 1.8, erReachPrev: 2.4, engagementDriver: { label: 'лайки', liftPct: 10 } });
+    expect(out[0].tone).toBe('down');
+    expect(out[0].evidence).not.toContain('за счёт роста');
+  });
+
   it('surfaces a dominant format and only a meaningful, repeated hashtag lift', () => {
     const out = buildIgInsights({
       bestFormat: { label: 'Reels', sharePct: 47, interactions: 470, total: 1000 },
