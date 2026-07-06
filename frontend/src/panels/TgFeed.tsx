@@ -2,7 +2,8 @@ import { useMemo, type ReactNode } from 'react';
 import { Navigate, Outlet } from 'react-router-dom';
 import { useChannels, useHistory, useTgFull } from '@/api/queries';
 import { latestDataMs } from '@/lib/freshness';
-import { ChannelRecencyProvider } from '@/lib/period';
+import { ChannelRecencyProvider, PagePeriodProvider, usePagePeriod } from '@/lib/period';
+import { PeriodChips } from '@/components/PeriodChips';
 import { Overview } from '@/panels/Overview';
 import { Analytics } from '@/panels/AnalyticsTabs';
 import { Posts } from '@/panels/Posts';
@@ -42,12 +43,28 @@ export function TgSectionLayout() {
   const noChannels = channelsData !== undefined && (channelsData.channels?.length ?? 0) === 0;
   if (noChannels) return <Overview />; // GetStarted onboarding (Overview self-gates it)
 
+  // PagePeriodProvider persists the header period across TG page navigation (Обзор ↔ Аналитика);
+  // it is the default window for every card without its own per-widget override.
   return (
-    <ChannelRecencyProvider value={recency}>
-      <Outlet />
-    </ChannelRecencyProvider>
+    <PagePeriodProvider>
+      <ChannelRecencyProvider value={recency}>
+        <Outlet />
+      </ChannelRecencyProvider>
+    </PagePeriodProvider>
   );
 }
+
+/** Feed-header period chips wired to the page period — re-windows every card on the page that has
+    no per-card override. Null outside the provider (defensive; TG pages always have one). */
+function TgPagePeriodControl() {
+  const pp = usePagePeriod();
+  if (!pp) return null;
+  return <PeriodChips value={pp.days} onChange={pp.setDays} />;
+}
+
+/** Sections whose cards are period-scoped analytics — they get the header period control. Posts and
+    Упоминания are lists, not windowed metric cards, so they show no period selector. */
+const PERIOD_SECTIONS: TgSection[] = ['', 'analytics'];
 
 /**
  * One focused TG page: the section's panel inside its (static) section shell. `eager` mounts it
@@ -57,7 +74,13 @@ export function TgSection({ section }: { section: TgSection }) {
   const meta = SECTION_META[section];
   if (!meta) return <Navigate to="/" replace />;
   return (
-    <FeedBlock section={section} title={meta.title} eager onMount={() => {}}>
+    <FeedBlock
+      section={section}
+      title={meta.title}
+      eager
+      onMount={() => {}}
+      headerRight={PERIOD_SECTIONS.includes(section) ? <TgPagePeriodControl /> : undefined}
+    >
       {meta.render()}
     </FeedBlock>
   );
