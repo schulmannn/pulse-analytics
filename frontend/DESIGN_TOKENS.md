@@ -24,7 +24,7 @@ semantic token.
 | Deltas | `--brand-verdant` (up) `--brand-ember` / `-strong` (down) | deepened to clear AA 4.5 as text + on 10% tint |
 | Status | `--status-warn` | risk / demo / stale collector |
 | Hairline | `--border` `--input` | decorative separators (the *only* borders in the system) |
-| Categorical series | `--chart-1 … --chart-6` | Okabe-Ito, colour-blind-safe; series always carry a label too |
+| Categorical series | `--chart-1 … --chart-6` | Muted/refined (Steep-noble), Okabe-Ito-ordered for colour-blind safety; light stays deep enough for non-text 3.0 on white, dark goes softer; series always carry a label too |
 | Identity chips | `--chip-{1..6}-{bg,ink}` | deterministic per channel-name hash |
 
 ### Chart series roles

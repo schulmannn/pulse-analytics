@@ -298,23 +298,13 @@ export function LineChart({
     const staticLayer = (
       <>
         <defs>
-          {/* Area fill — deliberately restrained (Steep-style). Cards: a soft 0.2 at the line that
-              falls off FAST (0.05 by mid-height, gone at the base) so the fill hugs the line and
-              dissolves instead of a heavy full-height wash. The expanded explorer goes quieter still
-              (0.06, faded out by ~68% height) so the big chart reads as a line, not a colour slab. */}
-          <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2={expanded ? '0.68' : '1'}>
-            {expanded ? (
-              <>
-                <stop offset="0%" stopColor="hsl(var(--chart-role-primary))" stopOpacity="0.06" />
-                <stop offset="100%" stopColor="hsl(var(--chart-role-primary))" stopOpacity="0" />
-              </>
-            ) : (
-              <>
-                <stop offset="0%" stopColor="hsl(var(--chart-role-primary))" stopOpacity="0.2" />
-                <stop offset="55%" stopColor="hsl(var(--chart-role-primary))" stopOpacity="0.05" />
-                <stop offset="100%" stopColor="hsl(var(--chart-role-primary))" stopOpacity="0" />
-              </>
-            )}
+          {/* Area fill — FLAT, even tint (Steep-noble): NO vertical gradient wash. One low opacity
+              from the line to the baseline reads as a calm solid fill, not a fading glow (both stops
+              share the opacity → deliberately flat). The expanded explorer is quieter still. On a
+              tinted card the fill just deepens the accent evenly, keeping the whole tile monochrome. */}
+          <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="hsl(var(--chart-role-primary))" stopOpacity={expanded ? '0.05' : '0.12'} />
+            <stop offset="100%" stopColor="hsl(var(--chart-role-primary))" stopOpacity={expanded ? '0.05' : '0.12'} />
           </linearGradient>
         </defs>
 
