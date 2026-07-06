@@ -299,8 +299,8 @@ export function LineChart({
       <>
         <defs>
           <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="hsl(var(--brand-iris))" stopOpacity="0.25" />
-            <stop offset="100%" stopColor="hsl(var(--brand-iris))" stopOpacity="0" />
+            <stop offset="0%" stopColor="hsl(var(--chart-role-primary))" stopOpacity="0.25" />
+            <stop offset="100%" stopColor="hsl(var(--chart-role-primary))" stopOpacity="0" />
           </linearGradient>
         </defs>
 
@@ -309,16 +309,16 @@ export function LineChart({
           <line key={idx} x1={gutterW} y1={yPos} x2={W} y2={yPos} stroke="hsl(var(--border))" strokeDasharray="4 6" strokeWidth="1" opacity="0.6" vectorEffect="non-scaling-stroke" />
         ))}
 
-        {/* Comparison series — dashed contrast colour (chart-2, the colorblind-safe pair of the
-            brand blue), same y-scale. The legend row under the chart names both series. */}
+        {/* Comparison series — the comparison role (deep amber, the colour-blind-safe pair of the
+            brand blue), dashed, same y-scale. The legend row under the chart names both series. */}
         {ghostPath && (
-          <path d={ghostPath} fill="none" stroke="hsl(var(--chart-2))" strokeWidth="1.8" strokeDasharray="5 4" opacity="0.8" vectorEffect="non-scaling-stroke" />
+          <path d={ghostPath} fill="none" stroke="hsl(var(--chart-role-comparison))" strokeWidth="1.8" strokeDasharray="5 4" opacity="0.8" vectorEffect="non-scaling-stroke" />
         )}
 
         {/* Target level (widget pref) — a dashed goal line with a small right-aligned label */}
         {target != null && (
           <>
-            <line x1={gutterW} y1={yFor(target)} x2={W} y2={yFor(target)} stroke="hsl(var(--muted-foreground))" strokeDasharray="6 4" strokeWidth="1.2" opacity="0.8" vectorEffect="non-scaling-stroke" />
+            <line x1={gutterW} y1={yFor(target)} x2={W} y2={yFor(target)} stroke="hsl(var(--chart-role-neutral))" strokeDasharray="6 4" strokeWidth="1.2" opacity="0.8" vectorEffect="non-scaling-stroke" />
             <text
               x={W - 4}
               y={yFor(target) - 4 < 10 ? yFor(target) + 12 : yFor(target) - 4}
@@ -332,22 +332,22 @@ export function LineChart({
 
         {/* Gradient area + line */}
         <path d={areaPath} fill={`url(#${gradientId})`} />
-        <path d={linePath} fill="none" stroke="hsl(var(--brand-iris))" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+        <path d={linePath} fill="none" stroke="hsl(var(--chart-role-primary))" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
 
         {/* Per-point hollow rings (steep-style) — knocked out from the paper so the line reads
             as a dotted sequence of measurements, not a continuous estimate */}
         {showPoints &&
           points.map((p, i) => (
-            <circle key={`pt${i}`} cx={p.x} cy={p.y} r="3" fill="hsl(var(--background))" stroke="hsl(var(--brand-iris))" strokeWidth="1.5" vectorEffect="non-scaling-stroke" className="pointer-events-none" />
+            <circle key={`pt${i}`} cx={p.x} cy={p.y} r="3" fill="hsl(var(--background))" stroke="hsl(var(--chart-role-primary))" strokeWidth="1.5" vectorEffect="non-scaling-stroke" className="pointer-events-none" />
           ))}
 
         {/* Anomaly markers — hollow amber rings on statistically unusual points */}
         {anomalyIdx.map((i) => (
-          <circle key={`a${i}`} cx={points[i].x} cy={points[i].y} r="5" fill="none" stroke="hsl(var(--status-warn))" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+          <circle key={`a${i}`} cx={points[i].x} cy={points[i].y} r="5" fill="none" stroke="hsl(var(--chart-role-warning))" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
         ))}
 
         {/* Last-point marker — flat crisp dot knocked out from the paper surface (no glow halo) */}
-        <circle cx={lastPt.x} cy={lastPt.y} r="4" fill="hsl(var(--brand-iris))" stroke="hsl(var(--background))" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+        <circle cx={lastPt.x} cy={lastPt.y} r="4" fill="hsl(var(--chart-role-primary))" stroke="hsl(var(--background))" strokeWidth="2" vectorEffect="non-scaling-stroke" />
 
         {/* Max / last value labels (markExtremes) — bare tabular text, no boxes */}
         {extremes.map((e) => (
@@ -405,8 +405,8 @@ export function LineChart({
       const cur = values[i];
       const prev = activeGhost[i];
       const rows: TooltipRow[] = [
-        { label: 'Текущий', value: fmt.short(cur), color: 'hsl(var(--brand-iris))' },
-        { label: ghostLabel, value: fmt.short(prev), color: 'hsl(var(--chart-2))' },
+        { label: 'Текущий', value: fmt.short(cur), color: 'hsl(var(--chart-role-primary))' },
+        { label: ghostLabel, value: fmt.short(prev), color: 'hsl(var(--chart-role-comparison))' },
       ];
       const d = prev !== 0 ? ((cur - prev) / Math.abs(prev)) * 100 : null;
       if (d != null && Number.isFinite(d)) rows.push({ label: 'Δ', value: `${d >= 0 ? '+' : '−'}${Math.abs(d).toFixed(1)}%` });
@@ -480,11 +480,11 @@ export function LineChart({
             reads BOTH series) — the only elements a hover re-render touches. */}
         {hovered && (
           <>
-            <line x1={hovered.x} y1={0} x2={hovered.x} y2={h} stroke="hsl(var(--brand-iris))" strokeWidth="1" opacity="0.35" vectorEffect="non-scaling-stroke" />
+            <line x1={hovered.x} y1={0} x2={hovered.x} y2={h} stroke="hsl(var(--chart-role-selection))" strokeWidth="1" opacity="0.35" vectorEffect="non-scaling-stroke" />
             {activeGhost && activeGhost[hover!.i] != null && (
-              <circle cx={hovered.x} cy={yFor(activeGhost[hover!.i])} r="3.5" fill="hsl(var(--card))" stroke="hsl(var(--chart-2))" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+              <circle cx={hovered.x} cy={yFor(activeGhost[hover!.i])} r="3.5" fill="hsl(var(--card))" stroke="hsl(var(--chart-role-comparison))" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
             )}
-            <circle cx={hovered.x} cy={hovered.y} r="4" fill="hsl(var(--brand-iris))" stroke="hsl(var(--background))" strokeWidth="1.5" />
+            <circle cx={hovered.x} cy={hovered.y} r="4" fill="hsl(var(--chart-role-selection))" stroke="hsl(var(--background))" strokeWidth="1.5" />
           </>
         )}
       </svg>
@@ -508,7 +508,7 @@ export function LineChart({
       {ghost && ghost.length >= 2 && (
         <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-2xs font-medium text-muted-foreground">
           <span className="flex select-none items-center gap-1.5">
-            <span aria-hidden="true" className="h-0.5 w-4 rounded-full" style={{ backgroundColor: 'hsl(var(--brand-iris))' }} />
+            <span aria-hidden="true" className="h-0.5 w-4 rounded-full" style={{ backgroundColor: 'hsl(var(--chart-role-primary))' }} />
             Текущий период
           </span>
           {legendToggle ? (
@@ -519,12 +519,12 @@ export function LineChart({
               title={ghostHidden ? 'Показать сравнение' : 'Скрыть сравнение'}
               className={`flex select-none items-center gap-1.5 rounded transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${ghostHidden ? 'opacity-40 line-through' : ''}`}
             >
-              <span aria-hidden="true" className="w-4 border-t-2 border-dashed" style={{ borderColor: 'hsl(var(--chart-2))' }} />
+              <span aria-hidden="true" className="w-4 border-t-2 border-dashed" style={{ borderColor: 'hsl(var(--chart-role-comparison))' }} />
               {ghostLabel}
             </button>
           ) : (
             <span className="flex select-none items-center gap-1.5">
-              <span aria-hidden="true" className="w-4 border-t-2 border-dashed" style={{ borderColor: 'hsl(var(--chart-2))' }} />
+              <span aria-hidden="true" className="w-4 border-t-2 border-dashed" style={{ borderColor: 'hsl(var(--chart-role-comparison))' }} />
               {ghostLabel}
             </span>
           )}

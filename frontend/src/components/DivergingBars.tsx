@@ -19,7 +19,7 @@ interface Hover {
   y: number;
 }
 
-/** Bars around a horizontal zero-line (positive up = iris, negative down = ember). Fills the
+/** Bars around a horizontal zero-line (positive up = primary role, negative down = negative role). Fills the
     height an ancestor dictates — the fixed widget tile or the expand overlay — via
     ExpandedChartHeightContext (like BarChart), else the caller's `height`, else 120px. */
 export function DivergingBars({ values, labels, titles, height }: DivergingBarsProps) {
@@ -73,7 +73,7 @@ export function DivergingBars({ values, labels, titles, height }: DivergingBarsP
         y: v >= 0 ? mid - bh : mid,
         w: barWidth,
         h: bh,
-        fill: v >= 0 ? 'hsl(var(--brand-iris))' : 'hsl(var(--brand-ember))',
+        fill: v >= 0 ? 'hsl(var(--chart-role-primary))' : 'hsl(var(--chart-role-negative))',
       };
     });
 

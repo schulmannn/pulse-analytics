@@ -46,7 +46,7 @@ export function Breakdown({ items }: BreakdownProps) {
         // the label stays the category signal in both themes.
         const bgStyle = item.color
           ? { backgroundColor: item.color, opacity: 'var(--row-tint-colored, 0.15)' }
-          : { backgroundColor: 'hsl(var(--brand-iris))', opacity: 'var(--row-tint-neutral, 0.08)' };
+          : { backgroundColor: 'hsl(var(--chart-role-primary))', opacity: 'var(--row-tint-neutral, 0.08)' };
 
         return (
           <div

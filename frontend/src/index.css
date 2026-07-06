@@ -159,6 +159,26 @@
     --motion-reveal: 300ms;   /* larger reveals (add-widget rise)                          */
     --motion-entrance: 350ms; /* card mount rise                                           */
   }
+
+  /* ── Chart series roles (semantic layer over the deep/muted palette) ────────────────────────────
+     Chart components consume THESE role tokens, never a raw brand / chart / muted palette hue — so a
+     widget can't invent an ad-hoc colour and every series colour has one audited, checked source. Each
+     role aliases a palette token that already resolves per-theme (light in :root, dark in .dark), so
+     the role follows the theme automatically — no need to redeclare per theme. The categorical
+     --chart-1..6 (Okabe-Ito) stay for MULTI-series charts (pie slices, multi-line); these roles are
+     the SINGLE-series semantic set. Colour-blind-safe: primary (blue) vs comparison (deep amber) is
+     the Okabe-Ito high-contrast pair; positive/negative never lean on hue alone (diverging bars use
+     position around zero, delta pills use ↑/↓ + sign). Contrast (series↔surface, non-text 3.0) is
+     gated in scripts/contrast-tokens.mjs; full canon in frontend/DESIGN_TOKENS.md. */
+  :root {
+    --chart-role-primary: var(--brand-iris);        /* main series — line · bars · area · default fill */
+    --chart-role-comparison: var(--chart-2);        /* baseline / previous-period ghost (dashed) */
+    --chart-role-positive: var(--brand-verdant);    /* gains / up emphasis (delta text) */
+    --chart-role-negative: var(--brand-ember);      /* losses / down (diverging bars · delta text) */
+    --chart-role-warning: var(--status-warn);       /* anomaly / caution markers */
+    --chart-role-neutral: var(--muted-foreground);  /* neutral fills — target line · «Прочее» slice */
+    --chart-role-selection: var(--brand-iris);      /* hover / selected point + crosshair (= the accent) */
+  }
 }
 
 @layer base {

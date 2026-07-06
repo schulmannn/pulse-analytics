@@ -131,7 +131,7 @@ export function PieChart({ values, labels, titles, colors, height = 200 }: PieCh
   const otherValue = ranked.slice(MAX_COLORS).reduce((sum, s) => sum + s.v, 0);
   const slices: Slice[] =
     otherValue > 0
-      ? [...big, { label: 'Прочее', value: otherValue, color: 'hsl(var(--muted-foreground))', title: `Прочее: ${fmt.num(otherValue)}` }]
+      ? [...big, { label: 'Прочее', value: otherValue, color: 'hsl(var(--chart-role-neutral))', title: `Прочее: ${fmt.num(otherValue)}` }]
       : big;
 
   const chartHeight = ctxHeight ?? height;

@@ -63,6 +63,19 @@ export default {
           5: 'hsl(var(--chart-5))',
           6: 'hsl(var(--chart-6))',
         },
+        // Semantic chart SERIES roles (see index.css --chart-role-*): the single-series colour set,
+        // so components bind a role instead of a raw brand-*/chart-* hue (no ad-hoc per-widget
+        // colours). Categorical --chart-1..6 above stays for multi-series. SVG charts read the CSS
+        // vars inline (classes can't reach SVG paint); these bindings cover class-based consumers.
+        'chart-role': {
+          primary: 'hsl(var(--chart-role-primary))',
+          comparison: 'hsl(var(--chart-role-comparison))',
+          positive: 'hsl(var(--chart-role-positive))',
+          negative: 'hsl(var(--chart-role-negative))',
+          warning: 'hsl(var(--chart-role-warning))',
+          neutral: 'hsl(var(--chart-role-neutral))',
+          selection: 'hsl(var(--chart-role-selection))',
+        },
       },
       borderRadius: {
         lg: 'var(--radius)',

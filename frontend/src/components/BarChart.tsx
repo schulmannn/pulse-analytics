@@ -181,7 +181,7 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
     const barsLayer = (
       <>
         {bars.map((b, i) => (
-          <rect key={i} x={b.x} y={b.y} width={b.w} height={b.h} fill="hsl(var(--brand-iris))" rx={2} />
+          <rect key={i} x={b.x} y={b.y} width={b.w} height={b.h} fill="hsl(var(--chart-role-primary))" rx={2} />
         ))}
       </>
     );
@@ -222,13 +222,13 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
           );
         })}
 
-        {/* Comparison overlay — dashed --chart-2 line across the previous-period values, plus
+        {/* Comparison overlay — dashed comparison-role line across the previous-period values, plus
             hollow dots at each point so the delta reads at a glance (steep). */}
         {activeGhost && (
           <g className="pointer-events-none">
-            <path d={ghostPath} fill="none" stroke="hsl(var(--chart-2))" strokeWidth="1.8" strokeDasharray="5 4" opacity="0.9" />
+            <path d={ghostPath} fill="none" stroke="hsl(var(--chart-role-comparison))" strokeWidth="1.8" strokeDasharray="5 4" opacity="0.9" />
             {activeGhost.map((v, i) => (
-              <circle key={`g${i}`} cx={barCenterX(i)} cy={barTop(v)} r="2.5" fill="hsl(var(--card))" stroke="hsl(var(--chart-2))" strokeWidth="1.5" />
+              <circle key={`g${i}`} cx={barCenterX(i)} cy={barTop(v)} r="2.5" fill="hsl(var(--card))" stroke="hsl(var(--chart-role-comparison))" strokeWidth="1.5" />
             ))}
           </g>
         )}
@@ -236,7 +236,7 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
         {/* Target level (widget pref) — dashed goal line + right-aligned label, above the bars */}
         {target != null && (
           <>
-            <line x1={gutterW} y1={barTop(target)} x2={chartWidth} y2={barTop(target)} stroke="hsl(var(--muted-foreground))" strokeDasharray="6 4" strokeWidth="1.2" opacity="0.8" className="pointer-events-none" />
+            <line x1={gutterW} y1={barTop(target)} x2={chartWidth} y2={barTop(target)} stroke="hsl(var(--chart-role-neutral))" strokeDasharray="6 4" strokeWidth="1.2" opacity="0.8" className="pointer-events-none" />
             <text
               x={chartWidth - 4}
               y={barTop(target) - 4 < 10 ? barTop(target) + 12 : barTop(target) - 4}
@@ -277,8 +277,8 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
       const cur = values[i];
       const prev = activeGhost[i];
       const rows: TooltipRow[] = [
-        { label: 'Текущий', value: fmt.short(cur), color: 'hsl(var(--brand-iris))' },
-        { label: ghostLabel, value: fmt.short(prev), color: 'hsl(var(--chart-2))' },
+        { label: 'Текущий', value: fmt.short(cur), color: 'hsl(var(--chart-role-primary))' },
+        { label: ghostLabel, value: fmt.short(prev), color: 'hsl(var(--chart-role-comparison))' },
       ];
       const d = prev !== 0 ? ((cur - prev) / Math.abs(prev)) * 100 : null;
       if (d != null && Number.isFinite(d)) rows.push({ label: 'Δ', value: `${d >= 0 ? '+' : '−'}${Math.abs(d).toFixed(1)}%` });
@@ -349,7 +349,7 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
         {/* Full-opacity highlight of the hovered bar — BETWEEN the dimmed bars and the ghost/target
             overlay, so the comparison + goal lines still paint OVER it (HEAD paint order). */}
         {hover && hover.i < n && (
-          <rect x={bars[hover.i].x} y={bars[hover.i].y} width={bars[hover.i].w} height={bars[hover.i].h} fill="hsl(var(--brand-iris))" rx={2} className="pointer-events-none" />
+          <rect x={bars[hover.i].x} y={bars[hover.i].y} width={bars[hover.i].w} height={bars[hover.i].h} fill="hsl(var(--chart-role-selection))" rx={2} className="pointer-events-none" />
         )}
 
         {plot.overLayer}
@@ -358,9 +358,9 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
             with LineChart / HEAD). */}
         {hover && hover.i < n && (
           <g className="pointer-events-none">
-            <line x1={barCenterX(hover.i)} y1={0} x2={barCenterX(hover.i)} y2={graphHeight} stroke="hsl(var(--brand-iris))" strokeWidth="1" opacity="0.3" vectorEffect="non-scaling-stroke" />
+            <line x1={barCenterX(hover.i)} y1={0} x2={barCenterX(hover.i)} y2={graphHeight} stroke="hsl(var(--chart-role-selection))" strokeWidth="1" opacity="0.3" vectorEffect="non-scaling-stroke" />
             {activeGhost && activeGhost[hover.i] != null && (
-              <circle cx={barCenterX(hover.i)} cy={barTop(activeGhost[hover.i])} r="3.5" fill="hsl(var(--card))" stroke="hsl(var(--chart-2))" strokeWidth="1.5" />
+              <circle cx={barCenterX(hover.i)} cy={barTop(activeGhost[hover.i])} r="3.5" fill="hsl(var(--card))" stroke="hsl(var(--chart-role-comparison))" strokeWidth="1.5" />
             )}
           </g>
         )}
@@ -371,7 +371,7 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
       {hasGhost && (
         <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-2xs font-medium text-muted-foreground">
           <span className="flex select-none items-center gap-1.5">
-            <span aria-hidden="true" className="h-2 w-3 rounded-sm" style={{ backgroundColor: 'hsl(var(--brand-iris))' }} />
+            <span aria-hidden="true" className="h-2 w-3 rounded-sm" style={{ backgroundColor: 'hsl(var(--chart-role-primary))' }} />
             Текущий период
           </span>
           {legendToggle ? (
@@ -382,12 +382,12 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
               title={ghostHidden ? 'Показать сравнение' : 'Скрыть сравнение'}
               className={`flex select-none items-center gap-1.5 rounded transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${ghostHidden ? 'opacity-40 line-through' : ''}`}
             >
-              <span aria-hidden="true" className="w-4 border-t-2 border-dashed" style={{ borderColor: 'hsl(var(--chart-2))' }} />
+              <span aria-hidden="true" className="w-4 border-t-2 border-dashed" style={{ borderColor: 'hsl(var(--chart-role-comparison))' }} />
               {ghostLabel}
             </button>
           ) : (
             <span className="flex select-none items-center gap-1.5">
-              <span aria-hidden="true" className="w-4 border-t-2 border-dashed" style={{ borderColor: 'hsl(var(--chart-2))' }} />
+              <span aria-hidden="true" className="w-4 border-t-2 border-dashed" style={{ borderColor: 'hsl(var(--chart-role-comparison))' }} />
               {ghostLabel}
             </span>
           )}
