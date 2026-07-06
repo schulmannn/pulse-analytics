@@ -5,7 +5,7 @@ import { columnIndex } from '@/lib/chartHover';
 import { axisLabelIndexSet } from '@/lib/chartLabels';
 import { ChartTooltip, type TooltipRow, type TooltipState } from '@/components/ChartTooltip';
 import { axisLabel, niceScale } from '@/components/LineChart';
-import { ChartExpandedContext, ExpandedChartHeightContext, WidgetTargetContext } from '@/components/ExpandableChart';
+import { ChartExpandedContext, ChartRefLinesContext, ExpandedChartHeightContext, WidgetTargetContext } from '@/components/ExpandableChart';
 
 interface BarChartProps {
   values: number[];
@@ -61,6 +61,7 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
   const [width, setWidth] = useState(600);
   // Expanded (modal) rendering opts into value labels + y ticks.
   const expanded = useContext(ChartExpandedContext);
+  const refLines = useContext(ChartRefLinesContext);
   // The overlay dictates its explorer height; inline renders keep the caller's `height`.
   const ctxHeight = useContext(ExpandedChartHeightContext);
   // Per-widget goal line — same source LineChart reads, so the target survives the
@@ -247,11 +248,31 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
             </text>
           </>
         )}
+
+        {/* Min/Max/Average reference lines (overlay «Линии» toggle) — dashed hairlines at the visible
+            extremes + mean, above the bars. */}
+        {refLines && (
+          <>
+            {([['макс', refLines.max], ['сред.', refLines.avg], ['мин', refLines.min]] as const).map(([lbl, v]) => (
+              <g key={lbl} className="pointer-events-none">
+                <line x1={gutterW} y1={barTop(v)} x2={chartWidth} y2={barTop(v)} stroke="hsl(var(--chart-role-neutral))" strokeDasharray="6 4" strokeWidth="1.2" opacity="0.7" />
+                <text
+                  x={chartWidth - 4}
+                  y={barTop(v) - 4 < 10 ? barTop(v) + 12 : barTop(v) - 4}
+                  textAnchor="end"
+                  className="pointer-events-none select-none fill-muted-foreground text-2xs font-medium tabular-nums"
+                >
+                  {lbl} {fmt.short(v)}
+                </text>
+              </g>
+            ))}
+          </>
+        )}
       </>
     );
 
     return { chartWidth, chartHeight, graphHeight, offsetX, itemWidth, bars, barTop, barCenterX, underLayer, barsLayer, overLayer };
-  }, [values, labels, activeGhost, hasGhost, target, width, ctxHeight, height, expanded]);
+  }, [values, labels, activeGhost, hasGhost, target, refLines, width, ctxHeight, height, expanded]);
 
   if (!values || values.length === 0 || !plot) {
     return (

@@ -18,6 +18,12 @@ export const ExpandedChartHeightContext = createContext<number | null>(null);
     draws a dashed goal line at the value. null = no target — the default everywhere else. */
 export const WidgetTargetContext = createContext<number | null>(null);
 
+/** Min/Max/Average reference lines for the expanded explorer. The overlay computes them from the
+    visible `statsFor` values when the «Линии» toggle is on and provides them here; LineChart /
+    BarChart draw a dashed hairline at each. null = off (the default everywhere else). */
+export type ChartRefLines = { min: number; max: number; avg: number };
+export const ChartRefLinesContext = createContext<ChartRefLines | null>(null);
+
 // steep-style explorer sizing: the overlay chart is markedly taller than any inline card.
 const EXPANDED_CHART_HEIGHT = 400;
 
@@ -154,6 +160,19 @@ export function ChartExpandOverlay({ title, children, renderExpanded, renderExpa
   }, []);
   const chartH = regionH ? Math.max(240, regionH - 8) : EXPANDED_CHART_HEIGHT;
 
+  // «Линии» toggle: overlay Min/Max/Average reference lines over the series, computed from the same
+  // visible values that feed the stats strip. Off by default; only offered with a stats source.
+  const [showRefLines, setShowRefLines] = useState(false);
+  const statsValues = statsFor ? statsFor(days, grain) : null;
+  const refLines =
+    showRefLines && statsValues && statsValues.length > 0
+      ? {
+          min: Math.min(...statsValues),
+          max: Math.max(...statsValues),
+          avg: statsValues.reduce((a, b) => a + b, 0) / statsValues.length,
+        }
+      : null;
+
   return (
     <DetailShell variant="panel" ariaLabel={`График: ${title}`} onClose={onClose} originRect={originRect}>
         <CardHeader className="shrink-0 pr-12">
@@ -193,6 +212,18 @@ export function ChartExpandOverlay({ title, children, renderExpanded, renderExpa
                   ))}
                 </div>
               )}
+              {statsFor && (
+                <button
+                  type="button"
+                  aria-pressed={showRefLines}
+                  onClick={() => setShowRefLines((v) => !v)}
+                  className={`shrink-0 rounded border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                    showRefLines ? 'border-primary/40 text-primary' : 'border-border text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  Линии
+                </button>
+              )}
               {renderExpandedBar && (
                 <div role="group" aria-label="Тип графика" className="ml-auto flex shrink-0 overflow-hidden rounded border border-border">
                   <OverlayKindButton kind="line" active={kind === 'line'} onSelect={setKind} />
@@ -209,16 +240,18 @@ export function ChartExpandOverlay({ title, children, renderExpanded, renderExpa
           <div ref={chartRegionRef} className="min-h-0 w-full flex-1 overflow-y-auto">
             <ChartExpandedContext.Provider value={true}>
               <ExpandedChartHeightContext.Provider value={chartH}>
-                {kind === 'bar' && renderExpandedBar
-                  ? renderExpandedBar(days, grain)
-                  : renderExpanded
-                    ? renderExpanded(days, grain)
-                    : children}
+                <ChartRefLinesContext.Provider value={refLines}>
+                  {kind === 'bar' && renderExpandedBar
+                    ? renderExpandedBar(days, grain)
+                    : renderExpanded
+                      ? renderExpanded(days, grain)
+                      : children}
+                </ChartRefLinesContext.Provider>
               </ExpandedChartHeightContext.Provider>
             </ChartExpandedContext.Provider>
           </div>
           <div className="shrink-0">
-            <OverlayStats values={statsFor ? statsFor(days, grain) : null} statsSum={statsSum} />
+            <OverlayStats values={statsValues} statsSum={statsSum} />
           </div>
         </CardContent>
     </DetailShell>

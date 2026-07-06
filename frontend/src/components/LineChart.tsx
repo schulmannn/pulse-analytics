@@ -5,7 +5,7 @@ import { detectAnomalies } from '@/lib/anomaly';
 import { nearestPointIndex } from '@/lib/chartHover';
 import { axisLabelIndexes } from '@/lib/chartLabels';
 import { ChartTooltip, type TooltipRow, type TooltipState } from '@/components/ChartTooltip';
-import { ChartExpandedContext, ExpandedChartHeightContext, WidgetTargetContext } from '@/components/ExpandableChart';
+import { ChartExpandedContext, ChartRefLinesContext, ExpandedChartHeightContext, WidgetTargetContext } from '@/components/ExpandableChart';
 
 interface LineChartProps {
   values: number[];
@@ -127,6 +127,7 @@ export function LineChart({
   // Dashboard cards are axis-free sparkline-style reads (steep); the expanded overlay and
   // metric pages provide the context (or set fullAxes) for the full nice-tick y-axis.
   const expanded = useContext(ChartExpandedContext);
+  const refLines = useContext(ChartRefLinesContext);
   const ctxHeight = useContext(ExpandedChartHeightContext);
   // Per-widget goal line («Целевой уровень»): provided by ChartSection, null everywhere else.
   const targetCtx = useContext(WidgetTargetContext);
@@ -334,6 +335,26 @@ export function LineChart({
           </>
         )}
 
+        {/* Min/Max/Average reference lines (overlay «Линии» toggle) — dashed hairlines at the visible
+            extremes + mean, read faster than the numeric stats strip. Drawn under the series line. */}
+        {refLines && (
+          <>
+            {([['макс', refLines.max], ['сред.', refLines.avg], ['мин', refLines.min]] as const).map(([lbl, v]) => (
+              <g key={lbl} className="pointer-events-none">
+                <line x1={gutterW} y1={yFor(v)} x2={W} y2={yFor(v)} stroke="hsl(var(--chart-role-neutral))" strokeDasharray="6 4" strokeWidth="1.2" opacity="0.7" vectorEffect="non-scaling-stroke" />
+                <text
+                  x={W - 4}
+                  y={yFor(v) - 4 < 10 ? yFor(v) + 12 : yFor(v) - 4}
+                  textAnchor="end"
+                  className="pointer-events-none select-none fill-muted-foreground text-2xs font-medium tabular-nums"
+                >
+                  {lbl} {fmt.short(v)}
+                </text>
+              </g>
+            ))}
+          </>
+        )}
+
         {/* Gradient area + line */}
         <path d={areaPath} fill={`url(#${gradientId})`} />
         <path d={linePath} fill="none" stroke="hsl(var(--chart-role-primary))" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
@@ -380,7 +401,7 @@ export function LineChart({
     );
 
     return { W, h, gutterW, step, points, yFor, hasXAxis, staticLayer };
-  }, [values, labels, activeGhost, hasGhostLegend, target, yMin, yMax, width, ctxHeight, height, expanded, showAxes, markExtremes, showPoints, anomalyIdx, gradientId]);
+  }, [values, labels, activeGhost, hasGhostLegend, target, refLines, yMin, yMax, width, ctxHeight, height, expanded, showAxes, markExtremes, showPoints, anomalyIdx, gradientId]);
 
   if (!values || values.length < 2 || !plot) {
     return (
