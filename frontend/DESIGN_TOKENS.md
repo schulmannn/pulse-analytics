@@ -27,6 +27,32 @@ semantic token.
 | Categorical series | `--chart-1 … --chart-6` | Okabe-Ito, colour-blind-safe; series always carry a label too |
 | Identity chips | `--chip-{1..6}-{bg,ink}` | deterministic per channel-name hash |
 
+### Chart series roles
+
+Chart components consume **semantic role tokens** (`--chart-role-*` in `index.css`, bound as
+`chart-role.*` in `tailwind.config.js`), never a raw `brand-*/chart-*` hue — so a widget can't invent
+an ad-hoc colour and every series colour has one audited source. Each role aliases a deep/muted
+palette token that already resolves per theme, so roles follow light/dark automatically. Colour-blind
+safe: **primary** (blue) vs **comparison** (deep amber) is the Okabe-Ito high-contrast pair;
+positive/negative never lean on hue alone (diverging bars use position around zero, delta pills use
+↑/↓ + sign). Contrast (series↔surface, non-text 3.0) is gated per role in `scripts/contrast-tokens.mjs`.
+
+| Role | Token | Aliases | Used by |
+|---|---|---|---|
+| Primary | `--chart-role-primary` | `--brand-iris` | line · area · points · bars · Breakdown fill · DivergingBars up |
+| Comparison | `--chart-role-comparison` | `--chart-2` | dashed previous-period / baseline ghost |
+| Positive | `--chart-role-positive` | `--brand-verdant` | gains / up emphasis (delta text) |
+| Negative | `--chart-role-negative` | `--brand-ember` | losses / down (DivergingBars down · delta text) |
+| Warning | `--chart-role-warning` | `--status-warn` | anomaly / caution markers |
+| Neutral | `--chart-role-neutral` | `--muted-foreground` | target line · «Прочее» pie slice |
+| Selection | `--chart-role-selection` | `--brand-iris` | hover point + crosshair (= the accent) |
+
+The categorical **`--chart-1 … --chart-6`** (Okabe-Ito) stay for MULTI-series charts (pie slices,
+multi-line); the roles above are the single-series semantic set. `DeltaPill` / `WidgetRenderer` keep
+the canonical text tokens (`verdant` / `ember` / `status-warn` / `primary`) — those ARE the text side
+of the positive / negative / warning / primary roles (tuned for AA 4.5 as text, with on-tint
+variants), so they read role-consistent without duplicating a stroke token.
+
 ## Type scale
 
 **One** ladder, in `tailwind.config.js` `fontSize`. No magic `text-[Npx]` — the lint hard-fails on it.

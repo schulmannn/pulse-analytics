@@ -46,8 +46,19 @@ const ratio = (fg, bg) => {
 /** Composite fg over bg with alpha (for strokes drawn at opacity < 1). */
 const over = (fg, bg, alpha) => fg.map((c, i) => c * alpha + bg[i] * (1 - alpha));
 
-const light = palette(/:root,\s*\n\s*\.force-light/);
-const dark = palette(/\.dark \{/);
+/** Resolve `--role: var(--target);` aliases (the chart-role tokens) into a parsed palette by copying
+    the target's channels. The role block is theme-agnostic in CSS (var() resolves per theme at
+    runtime), so the SAME alias list applies to both the light and dark palettes. */
+function applyAliases(tokens) {
+  for (const m of css.matchAll(/--([a-z0-9-]+):\s*var\(--([a-z0-9-]+)\)\s*;/g)) {
+    const [, name, target] = m;
+    if (tokens[target]) tokens[name] = tokens[target];
+  }
+  return tokens;
+}
+
+const light = applyAliases(palette(/:root,\s*\n\s*\.force-light/));
+const dark = applyAliases(palette(/\.dark \{/));
 
 // [label, fgToken, bgToken, target, kind, alpha?] — kind: text | stroke | ring | border(warn-only)
 const PAIRS = [
@@ -85,6 +96,18 @@ const PAIRS = [
   ['chart-5 on card', 'chart-5', 'card', 3.0, 'stroke'],
   ['chart-6 on card', 'chart-6', 'card', 3.0, 'stroke'],
   ['ghost line (chart-2 @0.8) on card', 'chart-2', 'card', 3.0, 'stroke', 0.8],
+
+  // Semantic chart SERIES roles (index.css --chart-role-*, resolved from their var() aliases above).
+  // Non-text 3.0 (WCAG 1.4.11) on the surfaces charts paint on; comparison also at its dashed 0.8.
+  ['chart role: primary on card', 'chart-role-primary', 'card', 3.0, 'stroke'],
+  ['chart role: primary on canvas', 'chart-role-primary', 'background', 3.0, 'stroke'],
+  ['chart role: comparison on card', 'chart-role-comparison', 'card', 3.0, 'stroke'],
+  ['chart role: comparison ghost @0.8 on card', 'chart-role-comparison', 'card', 3.0, 'stroke', 0.8],
+  ['chart role: positive on card', 'chart-role-positive', 'card', 3.0, 'stroke'],
+  ['chart role: negative on card', 'chart-role-negative', 'card', 3.0, 'stroke'],
+  ['chart role: warning on card', 'chart-role-warning', 'card', 3.0, 'stroke'],
+  ['chart role: neutral on card', 'chart-role-neutral', 'card', 3.0, 'stroke'],
+  ['chart role: selection on card', 'chart-role-selection', 'card', 3.0, 'stroke'],
 
   ['hairline on card', 'border', 'card', 3.0, 'border'],
   ['hairline on canvas', 'border', 'background', 3.0, 'border'],
