@@ -92,6 +92,9 @@ export function useIgData() {
   const series = useMemo(
     () => ({
       reach: longerSeries(metricSeries(ins, 'reach'), histSeries(histRows, 'reach')),
+      // Deduplicated windowed reach (prev+cur synthetic points from the backend total_value call).
+      // Used ONLY for the headline KPI / ER denominator — the daily `reach` above still feeds charts.
+      reachWindow: metricSeries(ins, 'reach_window'),
       views: metricSeries(ins, 'views'),
       ti: metricSeries(ins, 'total_interactions'),
       engaged: metricSeries(ins, 'accounts_engaged'),
@@ -109,9 +112,14 @@ export function useIgData() {
     }),
     [ins, histRows],
   );
-  const pairs = useMemo(
-    () => ({
-      reach: windowPair(series.reach, since, until),
+  const pairs = useMemo(() => {
+    // Prefer Instagram's deduplicated windowed reach ("Accounts reached"); the daily series sums
+    // per-day unique reach, double-counting repeat viewers (2–4× inflation vs the app). Fall back to
+    // the daily sum only when the windowed aggregate is absent (older payloads / mock without it).
+    const reachWin = windowPair(series.reachWindow, since, until);
+    const reachDaily = windowPair(series.reach, since, until);
+    return {
+      reach: reachWin.hasCur ? reachWin : reachDaily,
       views: windowPair(series.views, since, until),
       ti: windowPair(series.ti, since, until),
       engaged: windowPair(series.engaged, since, until),
@@ -123,9 +131,8 @@ export function useIgData() {
       profileViews: windowPair(series.profileViews, since, until),
       follows: windowPair(series.follows, since, until),
       unfollows: windowPair(series.unfollows, since, until),
-    }),
-    [series, since, until],
-  );
+    };
+  }, [series, since, until]);
 
   // Real subscriber movement for the window: net = gross follows − gross unfollows. This is the
   // honest growth number — the dashboard previously reported gross follows alone as "growth".

@@ -929,12 +929,19 @@ app.get('/api/ig/insights', requireAuth, resolveIg, async (req, res, next) => {
       });
       return { follows, unfollows };
     };
-    const [dailyR, curR, prevR, fauCurR, fauPrevR] = await Promise.all([
+    // Reach as a DEDUPLICATED window aggregate (total_value) for the current + previous window —
+    // Instagram's real "Accounts reached". The daily `reach` series above is a per-day unique count
+    // whose naïve sum double-counts repeat viewers (2–4× inflation vs the app). Surfaced under a
+    // distinct name (`reach_window`) so it never shadows the daily series the reach chart still needs.
+    const fetchReachWin = (s, u) => igFetch(`/${req.ig.accountId}/insights`, { metric: 'reach', metric_type: 'total_value', period: 'day', since: s, until: u }, req.ig.token);
+    const [dailyR, curR, prevR, fauCurR, fauPrevR, reachWinCurR, reachWinPrevR] = await Promise.all([
       dailyCall.catch(() => null),
       fetchTv(curSince, curUntil),
       fetchTv(prevSince, prevUntil),
       fetchFau(curSince, curUntil).catch(() => null),
       fetchFau(prevSince, prevUntil).catch(() => null),
+      fetchReachWin(curSince, curUntil).catch(() => null),
+      fetchReachWin(prevSince, prevUntil).catch(() => null),
     ]);
     const out = dailyR && dailyR.data ? [...dailyR.data] : [];
     const curPoint = new Date(curUntil * 1000).toISOString();
@@ -956,6 +963,7 @@ app.get('/api/ig/insights', requireAuth, resolveIg, async (req, res, next) => {
     const fauCur = fauVal(fauCurR), fauPrev = fauVal(fauPrevR);
     pushAgg('follows', fauCur.follows, fauPrev.follows);
     pushAgg('unfollows', fauCur.unfollows, fauPrev.unfollows);
+    pushAgg('reach_window', tvVal(reachWinCurR), tvVal(reachWinPrevR));
     const data = { data: out };
     cacheSet(cacheKey, data);
     res.json(data);
