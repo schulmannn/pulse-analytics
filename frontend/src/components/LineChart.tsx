@@ -298,9 +298,23 @@ export function LineChart({
     const staticLayer = (
       <>
         <defs>
-          <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="hsl(var(--chart-role-primary))" stopOpacity="0.25" />
-            <stop offset="100%" stopColor="hsl(var(--chart-role-primary))" stopOpacity="0" />
+          {/* Area fill — deliberately restrained (Steep-style). Cards: a soft 0.2 at the line that
+              falls off FAST (0.05 by mid-height, gone at the base) so the fill hugs the line and
+              dissolves instead of a heavy full-height wash. The expanded explorer goes quieter still
+              (0.06, faded out by ~68% height) so the big chart reads as a line, not a colour slab. */}
+          <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2={expanded ? '0.68' : '1'}>
+            {expanded ? (
+              <>
+                <stop offset="0%" stopColor="hsl(var(--chart-role-primary))" stopOpacity="0.06" />
+                <stop offset="100%" stopColor="hsl(var(--chart-role-primary))" stopOpacity="0" />
+              </>
+            ) : (
+              <>
+                <stop offset="0%" stopColor="hsl(var(--chart-role-primary))" stopOpacity="0.2" />
+                <stop offset="55%" stopColor="hsl(var(--chart-role-primary))" stopOpacity="0.05" />
+                <stop offset="100%" stopColor="hsl(var(--chart-role-primary))" stopOpacity="0" />
+              </>
+            )}
           </linearGradient>
         </defs>
 
