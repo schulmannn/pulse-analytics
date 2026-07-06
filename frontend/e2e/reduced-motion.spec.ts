@@ -43,6 +43,54 @@ test('reduced motion: home edit mode works and does not jiggle', async ({ page }
   await expect(toggle).toHaveAttribute('aria-pressed', 'false');
 });
 
+test('reduced motion: widget reorder drag does not jiggle or scale the card', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.addInitScript(() => {
+    localStorage.setItem('pulse_home_blocks', JSON.stringify({ keys: ['custom:probe1'] }));
+    localStorage.setItem(
+      'pulse_widget_configs',
+      JSON.stringify([{ id: 'probe1', metricId: 'tg.views', viz: 'line' }]),
+    );
+  });
+  await bootDemo(page, '/home');
+
+  const card = page.locator('section:has(h3)').first();
+  await card.locator('button[aria-label^="Меню виджета"]').click();
+  await page.getByRole('menuitem', { name: /Переставить/ }).click();
+
+  await expect(page.locator('[data-reorder-done]')).toBeVisible();
+  const jiggleLayer = page.locator('.widget-jiggle').first();
+  await expect(jiggleLayer).toBeVisible();
+
+  await expect
+    .poll(async () =>
+      jiggleLayer.evaluate((el) => {
+        const style = getComputedStyle(el);
+        return { animationName: style.animationName, transform: style.transform };
+      }),
+    )
+    .toEqual({ animationName: 'none', transform: 'none' });
+
+  const box = await card.boundingBox();
+  expect(box, 'reorder card should have a visible bounding box').not.toBeNull();
+  if (!box) return;
+
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 12, box.y + box.height / 2 + 12);
+
+  await expect
+    .poll(async () =>
+      jiggleLayer.evaluate((el) => {
+        const style = getComputedStyle(el);
+        return { animationName: style.animationName, transform: style.transform };
+      }),
+    )
+    .toEqual({ animationName: 'none', transform: 'none' });
+
+  await page.mouse.up();
+});
+
 test('reduced motion: public landing renders static (framer gated)', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   // Logged-out = an explicit 401 from the me endpoint (offline without the stub the proxy 500s and

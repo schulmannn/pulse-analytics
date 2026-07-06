@@ -1248,6 +1248,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
 
   const reorder = !!group?.reorderMode;
   const isDragging = reorder && group?.draggingId === widgetId;
+  const reducedMotion = prefersReducedMotion();
 
   const innerStyle: CSSProperties = {};
   if (activeColor) (innerStyle as Record<string, string>)['--brand-iris'] = `var(--chart-${activeColor})`;
@@ -1261,7 +1262,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
   if (isDragging) {
     // the lifted card stops jiggling and pops slightly (iOS) — the pointer carries it
     innerStyle.animation = 'none';
-    innerStyle.transform = 'scale(1.02)';
+    if (!reducedMotion) innerStyle.transform = 'scale(1.02)';
   } else if (reorder && seqIndex % 2 === 1) {
     // alternate the wobble phase by slot (the old :nth-child(even) died with the 2-layer split)
     innerStyle.animationDuration = '0.37s';
