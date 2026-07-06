@@ -14,7 +14,7 @@ import { PieChart } from '@/components/PieChart';
 import { DivergingBars } from '@/components/DivergingBars';
 import { ChartExpandOverlay, ExpandedChartHeightContext, WidgetTargetContext, type ChartExpandConfig } from '@/components/ExpandableChart';
 import { WidgetErrorBoundary, ThrowInRender } from '@/components/WidgetErrorBoundary';
-import { DEFAULT_WIDGET_DAYS, WidgetPeriodProvider, widgetPeriodValue, useChannelRecency, resolveEffectivePeriod } from '@/lib/period';
+import { DEFAULT_WIDGET_DAYS, WidgetPeriodProvider, widgetPeriodValue, useChannelRecency, resolveEffectivePeriod, usePagePeriod } from '@/lib/period';
 import { useFocusTrap } from '@/lib/useFocusTrap';
 import { useExitPresence } from '@/lib/useExitPresence';
 import { useChannels } from '@/api/queries';
@@ -1155,7 +1155,11 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
   // useWidgetPeriod(); the WidgetPeriodProvider below scopes it to this card's subtree.
   // Memoized on the scalar `widgetDays` so `inRange`'s identity is stable across re-renders —
   // consumers key their derive memos on it (a fresh predicate each render would bust them).
-  const requestedDays: PeriodDays = prefs.period ?? DEFAULT_WIDGET_DAYS;
+  // An explicit per-card override (prefs.period) wins; otherwise the feed-header page period (when a
+  // feed provides one) re-windows this untouched card; else the module default (30д). This is the
+  // one bridge that makes a single header control drive every card that hasn't been individually set.
+  const pagePeriod = usePagePeriod();
+  const requestedDays: PeriodDays = prefs.period ?? pagePeriod?.days ?? DEFAULT_WIDGET_DAYS;
   // Auto-widen an empty window: when the feed reports the channel's newest data (useChannelRecency)
   // and the requested window holds none of it, show the smallest window that does. Kills the «0 /
   // нет данных» that a dormant or just-connected channel (all posts months old) shows under 7д/30д.

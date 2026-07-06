@@ -160,6 +160,32 @@ export function widgetPeriodValue(days: PeriodDays): WidgetPeriodValue {
   return { days, inRange: (dateISO) => inRangeByDays(dateISO, days) };
 }
 
+// ── Page period (feed header) ────────────────────────────────────────────────────────────────
+/**
+ * A feed-level period chosen in the page header (the Telegram Обзор/Аналитика header chips). It is
+ * the DEFAULT window for every card WITHOUT an explicit per-widget override (`prefs.period`), so one
+ * header control re-windows the whole feed at once — while a card the user tuned to 7д/90д/Всё keeps
+ * its own window. `null` outside a feed that provides it (Home board, metric pages, IG): there every
+ * card falls back to {@link DEFAULT_WIDGET_DAYS} exactly as before, so nothing shifts.
+ */
+export interface PagePeriodValue {
+  days: PeriodDays;
+  setDays: (days: PeriodDays) => void;
+}
+
+const PagePeriodContext = createContext<PagePeriodValue | null>(null);
+
+export function PagePeriodProvider({ children }: { children: ReactNode }) {
+  const [days, setDays] = useState<PeriodDays>(DEFAULT_WIDGET_DAYS);
+  const value = useMemo(() => ({ days, setDays }), [days]);
+  return <PagePeriodContext.Provider value={value}>{children}</PagePeriodContext.Provider>;
+}
+
+/** The feed header's page period, or null when no feed provides one (Home / metric pages / IG). */
+export function usePagePeriod(): PagePeriodValue | null {
+  return useContext(PagePeriodContext);
+}
+
 // ── Channel recency → auto-widen an empty window ─────────────────────────────────────────────
 /**
  * The current channel's newest data timestamp (epoch ms), or null when unknown. Provided by the

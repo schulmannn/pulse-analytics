@@ -182,12 +182,15 @@ export function FeedBlock({
   eager,
   onMount,
   children,
+  headerRight,
 }: {
   section: string;
   title: string;
   eager: boolean;
   onMount: () => void;
   children: ReactNode;
+  /** Optional control aligned to the right of the sticky section header (e.g. a period selector). */
+  headerRight?: ReactNode;
 }) {
   return (
     <section
@@ -199,8 +202,9 @@ export function FeedBlock({
           card top, and carries a blurred card bg + hairline so content slides under cleanly. The
           topbar is gone on feed routes, so it anchors just below the viewport top. z-10 keeps it
           under the widget menus/popovers (z-popover). */}
-      <div className="sticky top-2 z-10 -mx-3 -mt-4 mb-6 rounded-t-2xl border-b border-border/70 bg-card/95 px-3 pb-3 pt-4 backdrop-blur dark:bg-card/80 sm:-mx-7 sm:-mt-7 sm:px-7 sm:pt-7">
+      <div className="sticky top-2 z-10 -mx-3 -mt-4 mb-6 flex items-center justify-between gap-3 rounded-t-2xl border-b border-border/70 bg-card/95 px-3 pb-3 pt-4 backdrop-blur dark:bg-card/80 sm:-mx-7 sm:-mt-7 sm:px-7 sm:pt-7">
         <h2 className="text-2xl font-medium tracking-tight text-foreground">{title}</h2>
+        {headerRight}
       </div>
       <LazyBlock eager={eager} onMount={onMount}>
         {children}
