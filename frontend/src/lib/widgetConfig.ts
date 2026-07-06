@@ -168,8 +168,10 @@ export function legacyConfigSeed(prefs: LegacyPrefsSeed): Partial<WidgetConfig> 
   if (prefs.source !== undefined && prefs.source > 0) seed.source = prefs.source;
   const style: WidgetStyle = {};
   if (prefs.color !== undefined) style.color = prefs.color;
-  if (prefs.tinted) style.tinted = true;
-  if (style.color !== undefined || style.tinted) seed.style = style;
+  // Carry the explicit tint choice (incl. `false` — an opt-out now that tint is default-on), so a
+  // legacy card the user un-tinted keeps that off-state through legacy→config migration.
+  if (prefs.tinted !== undefined) style.tinted = prefs.tinted;
+  if (style.color !== undefined || style.tinted !== undefined) seed.style = style;
   return seed;
 }
 
@@ -220,7 +222,7 @@ function normStyle(raw: unknown): WidgetStyle | undefined {
   if (!isObj(raw)) return undefined;
   const style: WidgetStyle = {};
   if (isFiniteNum(raw.color) && raw.color >= 1 && raw.color <= 6) style.color = Math.round(raw.color);
-  if (raw.tinted === true) style.tinted = true;
+  if (typeof raw.tinted === 'boolean') style.tinted = raw.tinted;
   return style.color !== undefined || style.tinted !== undefined ? style : undefined;
 }
 

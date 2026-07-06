@@ -333,20 +333,20 @@ export function WidgetConfigControls({
       <button
         type="button"
         role="switch"
-        aria-checked={!!config.style?.tinted}
-        onClick={() => onChange({ style: { ...config.style, tinted: config.style?.tinted ? undefined : true } })}
+        aria-checked={config.style?.tinted ?? true}
+        onClick={() => onChange({ style: { ...config.style, tinted: (config.style?.tinted ?? true) ? false : true } })}
         className="mt-4 flex w-full items-center justify-between gap-2 text-left text-sm text-muted-foreground transition-colors hover:text-foreground"
       >
         <span>Цветной фон</span>
         <span
           aria-hidden="true"
           className={
-            config.style?.tinted
-              ? 'rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-2xs font-medium text-primary'
+            (config.style?.tinted ?? true)
+              ? 'rounded-full border border-primary/40 px-2 py-0.5 text-2xs font-medium text-primary'
               : 'rounded-full border border-border px-2 py-0.5 text-2xs font-medium text-muted-foreground'
           }
         >
-          {config.style?.tinted ? 'вкл' : 'выкл'}
+          {(config.style?.tinted ?? true) ? 'вкл' : 'выкл'}
         </span>
       </button>
     </>

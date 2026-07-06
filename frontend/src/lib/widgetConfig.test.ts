@@ -139,6 +139,8 @@ describe('legacy widgets (U6) — `legacy:<key>` configs', () => {
     // A 0 / negative source is not a real channel → dropped; a lone accent still yields a style.
     expect(legacyConfigSeed({ source: 0 })).toEqual({});
     expect(legacyConfigSeed({ color: 5 })).toEqual({ style: { color: 5 } });
+    // An explicit un-tint (false) is carried too — tint is default-on, so `false` is the opt-out.
+    expect(legacyConfigSeed({ tinted: false })).toEqual({ style: { tinted: false } });
   });
 
   it('healedLegacyConfig seeds the deterministic legacy config with migrated prefs, re-validated', () => {
@@ -282,9 +284,9 @@ describe('normalizeWidget — style', () => {
   it('keeps color 1..6 and tinted', () => {
     expect(normalizeWidget({ metricId: 'tg.views', style: { color: 3, tinted: true } })!.style).toEqual({ color: 3, tinted: true });
   });
-  it('drops out-of-range color and falsy tinted', () => {
+  it('drops out-of-range color; keeps an explicit tinted:false (opt-out — tint is default-on now)', () => {
     expect(normalizeWidget({ metricId: 'tg.views', style: { color: 9 } })!.style).toBeUndefined();
-    expect(normalizeWidget({ metricId: 'tg.views', style: { tinted: false } })!.style).toBeUndefined();
+    expect(normalizeWidget({ metricId: 'tg.views', style: { tinted: false } })!.style).toEqual({ tinted: false });
   });
 });
 

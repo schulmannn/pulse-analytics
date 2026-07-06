@@ -340,7 +340,7 @@ function setPrefs(id: string, prefs: WidgetPrefs) {
     // `period` can be 0 («Всё») — a falsy but real value, so test for undefined, not truthiness.
     if (
       !prefs.color &&
-      !prefs.tinted &&
+      prefs.tinted === undefined &&
       !prefs.hidden &&
       !prefs.title &&
       !prefs.variant &&
@@ -1214,7 +1214,10 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
   // Config-driven cards source accent / background / size from the WidgetConfig (via configEditor)
   // instead of the prefs store; a normal card reads prefs as before.
   const activeColor = configEditor ? configEditor.color : prefs.color;
-  const activeTinted = configEditor ? configEditor.tinted : prefs.tinted;
+  // Tint is default-ON now (a subtle muted wash — see --card-tint). `undefined` → on; an explicit
+  // `false` (user turned it off) still wins. The storage layer preserves that false (setPrefs prune +
+  // normStyle/legacyConfigSeed), so the opt-out survives reloads and legacy→config migration.
+  const activeTinted = (configEditor ? configEditor.tinted : prefs.tinted) ?? true;
   const activeTarget = configEditor ? (configEditor.target ?? null) : (prefs.target ?? null);
   const chosenSize: WidgetSize = (configEditor ? configEditor.size : prefs.size) ?? defaultSize ?? 'half';
   const effectiveSize = maxSize(chosenSize, activeVariant?.minSize ?? 'third');
@@ -1244,7 +1247,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
   const bodyResetKeys = [bodyResetKey, activeVariant?.key ?? null, widgetDays];
 
   const seqIndex = group ? group.sequence.indexOf(widgetId) : -1;
-  const accentVar = activeColor ? `--chart-${activeColor}` : '--brand-iris';
+  const accentVar = activeColor ? `--chart-${activeColor}` : '--card-tint';
   // Split the styles across two layers: the OUTER section owns grid placement + the FLIP
   // translate (set imperatively by WidgetGroup), the INNER div owns the visible card —
   // its jiggle rotation is a CSS animation on `transform` and would stomp the FLIP glide
@@ -1260,9 +1263,12 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
   if (activeColor) (innerStyle as Record<string, string>)['--brand-iris'] = `var(--chart-${activeColor})`;
   // Tinted background: a TONAL accent surface (steep-like depth) — a soft top-anchored radial of the
   // accent hue over the card, not a flat colour slab. Hairline-only depth stays intact (no shadow):
-  // on the dark canvas it reads as a lit surface, on paper as a quiet accent wash.
+  // on the dark canvas it reads as a lit surface, on paper as a quiet accent wash. An un-coloured card
+  // washes in the muted --card-tint at its own low per-theme alpha (noble surface, not a blue slab);
+  // an explicitly-coloured widget keeps the punchier 0.15 of its accent.
+  const tintAlpha = activeColor ? '0.15' : 'var(--card-tint-alpha)';
   if (activeTinted)
-    innerStyle.background = `radial-gradient(120% 90% at 50% 0%, hsl(var(${accentVar}) / 0.15), transparent 62%), hsl(var(--card))`;
+    innerStyle.background = `radial-gradient(120% 90% at 50% 0%, hsl(var(${accentVar}) / ${tintAlpha}), transparent 62%), hsl(var(--card))`;
   // Entrance stagger: one beat per grid slot, capped so deep feeds don't wait forever.
   (innerStyle as Record<string, string>)['--enter-delay'] = `${Math.min(Math.max(seqIndex, 0), 8) * 35}ms`;
   if (isDragging) {
@@ -1872,8 +1878,8 @@ function VariantCarousel({
               const wide = v.minSize === 'full';
               const previewStyle: CSSProperties = {};
               if (prefs.color) (previewStyle as Record<string, string>)['--brand-iris'] = `var(--chart-${prefs.color})`;
-              if (prefs.tinted)
-                previewStyle.backgroundColor = `hsl(var(${prefs.color ? `--chart-${prefs.color}` : '--brand-iris'}) / 0.07)`;
+              if (prefs.tinted ?? true)
+                previewStyle.backgroundColor = `hsl(var(${prefs.color ? `--chart-${prefs.color}` : '--card-tint'}) / 0.07)`;
               return (
                 <button
                   key={v.key}
@@ -2156,7 +2162,7 @@ function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, showSerie
               aria-hidden="true"
               className={
                 prefs.includeToday !== false
-                  ? 'rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-2xs font-medium text-primary'
+                  ? 'rounded-full border border-primary/40 px-2 py-0.5 text-2xs font-medium text-primary'
                   : 'rounded-full border border-border px-2 py-0.5 text-2xs font-medium text-muted-foreground'
               }
             >
@@ -2193,20 +2199,20 @@ function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, showSerie
         <button
           type="button"
           role="switch"
-          aria-checked={!!prefs.tinted}
-          onClick={() => onChange({ ...prefs, tinted: !prefs.tinted })}
+          aria-checked={prefs.tinted ?? true}
+          onClick={() => onChange({ ...prefs, tinted: !(prefs.tinted ?? true) })}
           className="mt-4 flex w-full items-center justify-between gap-2 text-left text-sm text-muted-foreground transition-colors hover:text-foreground"
         >
           <span>Цветной фон</span>
           <span
             aria-hidden="true"
             className={
-              prefs.tinted
-                ? 'rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-2xs font-medium text-primary'
+              (prefs.tinted ?? true)
+                ? 'rounded-full border border-primary/40 px-2 py-0.5 text-2xs font-medium text-primary'
                 : 'rounded-full border border-border px-2 py-0.5 text-2xs font-medium text-muted-foreground'
             }
           >
-            {prefs.tinted ? 'вкл' : 'выкл'}
+            {(prefs.tinted ?? true) ? 'вкл' : 'выкл'}
           </span>
         </button>
 
