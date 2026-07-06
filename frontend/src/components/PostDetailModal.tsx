@@ -62,7 +62,7 @@ export function PostDetailModal({ post, rank, reason, onClose }: PostDetailModal
       aria-label={rank != null ? `Детали поста №${rank}` : 'Детали поста'}
     >
       <div
-        className="absolute inset-0 bg-background/70 backdrop-blur-sm"
+        className="absolute inset-0 bg-background/70 backdrop-blur-sm backdrop-grayscale"
         onClick={onClose}
         aria-hidden="true"
       />

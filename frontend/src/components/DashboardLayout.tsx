@@ -787,7 +787,7 @@ function SourceSheet({ title, onClose, children }: { title: string; onClose: () 
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex flex-col justify-end" role="dialog" aria-modal="true" aria-label={title}>
-      <div className="detail-backdrop-in absolute inset-0 bg-background/70 backdrop-blur-sm" onClick={onClose} aria-hidden="true" />
+      <div className="detail-backdrop-in absolute inset-0 bg-background/70 backdrop-blur-sm backdrop-grayscale" onClick={onClose} aria-hidden="true" />
       <div
         ref={sheetRef}
         tabIndex={-1}
