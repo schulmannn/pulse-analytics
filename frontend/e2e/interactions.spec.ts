@@ -205,9 +205,10 @@ test.describe('home edit-mode board inset (steep editable-canvas cue)', () => {
   }
 });
 
-test('cards carry the muted default tint as a solid surface (tint is on by default)', async ({ page }) => {
-  // A fresh, un-configured widget should render with the default solid --card-tint-surface. The tint is
-  // on by default, but it should not reintroduce the old decorative gradient wash.
+test('cards carry the muted default tint (tint is on by default)', async ({ page }) => {
+  // A fresh, un-configured widget should render with the default --card-tint wash — the tint is now
+  // on by default (a muted "noble" surface, not the old saturated brand-blue fallback). The tint is an
+  // inline radial-gradient over hsl(--card); a card with tint OFF reports backgroundImage 'none'.
   await page.addInitScript(() => {
     localStorage.setItem('pulse_home_blocks', JSON.stringify({ keys: ['custom:tintprobe'] }));
     localStorage.setItem('pulse_widget_configs', JSON.stringify([{ id: 'tintprobe', metricId: 'tg.views', viz: 'line' }]));
@@ -215,15 +216,6 @@ test('cards carry the muted default tint as a solid surface (tint is on by defau
   await bootDemo(page, '/home');
   const surface = page.locator('section:has(h3)').first().locator('.bg-card').first();
   await surface.waitFor({ state: 'visible', timeout: 15_000 });
-  const styles = await surface.evaluate((el) => {
-    const computed = getComputedStyle(el);
-    return {
-      backgroundColor: computed.backgroundColor,
-      backgroundImage: computed.backgroundImage,
-    };
-  });
-  expect(styles.backgroundImage, 'un-configured card should use a solid tint surface').toBe('none');
-  expect(styles.backgroundColor, 'solid tint surface should resolve to a visible colour').not.toBe(
-    'rgba(0, 0, 0, 0)',
-  );
+  const bg = await surface.evaluate((el) => getComputedStyle(el).backgroundImage);
+  expect(bg, 'un-configured card should carry the default gradient tint').toContain('gradient');
 });
