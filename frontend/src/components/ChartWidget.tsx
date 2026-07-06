@@ -2005,7 +2005,7 @@ function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, showSerie
 
   return createPortal(
     <div
-      className="fixed inset-0 z-modal flex items-center justify-center bg-background/70 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-modal flex items-center justify-center bg-background/70 p-4 backdrop-blur-sm backdrop-grayscale"
       role="dialog"
       aria-modal="true"
       aria-label={`Настройка виджета «${prefs.title || defaultTitle}»`}

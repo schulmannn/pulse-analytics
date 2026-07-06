@@ -268,7 +268,7 @@ function PaletteDialog({ close }: { close: () => void }) {
 
   return (
     <div
-      className="fixed inset-0 z-modal flex items-start justify-center bg-background/70 p-4 pt-[16vh] backdrop-blur-sm"
+      className="fixed inset-0 z-modal flex items-start justify-center bg-background/70 p-4 pt-[16vh] backdrop-blur-sm backdrop-grayscale"
       onClick={close}
     >
       <div

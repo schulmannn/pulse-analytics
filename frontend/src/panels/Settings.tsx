@@ -103,7 +103,7 @@ export function Settings() {
       aria-label="Настройки"
     >
       {/* Dim + blur the dashboard behind (its main area renders empty while the route is /settings). */}
-      <div className="absolute inset-0 bg-background/70 backdrop-blur-sm" onClick={close} aria-hidden="true" />
+      <div className="absolute inset-0 bg-background/70 backdrop-blur-sm backdrop-grayscale" onClick={close} aria-hidden="true" />
 
       <div
         ref={panelRef}

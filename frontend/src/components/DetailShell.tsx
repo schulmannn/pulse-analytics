@@ -124,7 +124,7 @@ export function DetailShell({ ariaLabel, onClose, variant, originRect, children 
   // strip clears the home indicator. ≥sm restores the floating inset + panel radius.
   return createPortal(
     <div className="fixed inset-0 z-modal flex items-center justify-center p-0 sm:p-4" role="dialog" aria-modal="true" aria-label={ariaLabel}>
-      <div className="detail-backdrop-in absolute inset-0 bg-background/70 backdrop-blur-sm" onClick={onClose} aria-hidden="true" />
+      <div className="detail-backdrop-in absolute inset-0 bg-background/70 backdrop-blur-sm backdrop-grayscale" onClick={onClose} aria-hidden="true" />
       <Card
         ref={panelRef}
         tabIndex={-1}
