@@ -69,7 +69,7 @@ export function IgOverview({ ig }: { ig: IgData }) {
             Открыть контент →
           </Link>
         </div>
-        <TopPostsBlock posts={ig.posts} limit={3} showSort={false} />
+        <TopPostsBlock posts={ig.postsInWindow} limit={3} showSort={false} />
       </section>
     </div>
   );

@@ -26,29 +26,29 @@ export function IgContent({ ig }: { ig: IgData }) {
         action={
           <button
             type="button"
-            onClick={() => exportIgPosts(ig.posts)}
+            onClick={() => exportIgPosts(ig.postsInWindow)}
             className="rounded-lg border px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
           >
             Экспорт постов
           </button>
         }
       >
-        <TopPostsBlock posts={ig.posts} />
+        <TopPostsBlock posts={ig.postsInWindow} />
       </Section>
 
       <Section title="Reels: удержание и просмотры">
-        <ReelsBlock posts={ig.posts} />
+        <ReelsBlock posts={ig.postsInWindow} />
       </Section>
 
       {/* Свой ChartSection-виджет (карусель типов, pie, expand) — без двойного заголовка. */}
       <FormatsBlock items={ig.formatItems} />
 
       <Section title="Эффективность хэштегов">
-        <HashtagsBlock posts={ig.posts} />
+        <HashtagsBlock posts={ig.postsInWindow} />
       </Section>
 
       <Section title="Сравнение публикаций">
-        <CompareBlock posts={ig.posts} />
+        <CompareBlock posts={ig.postsInWindow} />
       </Section>
 
       <Section title="Stories за 24 часа">

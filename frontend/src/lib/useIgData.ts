@@ -141,6 +141,16 @@ export function useIgData() {
   const erReachPrev = pairs.reach.prev > 0 ? (pairs.ti.prev / pairs.reach.prev) * 100 : 0;
 
   const posts = useMemo(() => postsQ.data?.data ?? [], [postsQ.data]);
+  // Content counts (Reels, top posts, hashtags, compare) and the post-derived insights must
+  // reflect the SELECTED period — not the last ~24 fetched posts. Window by publish timestamp so
+  // a 7-day view with no Reels shows 0 instead of leaking older Reels (the "2 phantom Reels" bug).
+  // Posts without a timestamp are excluded from the window. Depth caveat: only ~24 posts are
+  // fetched, so a very wide window on a high-volume channel can still under-count — раскрывается
+  // отдельной правкой (limit/`from,to` в /api/ig/posts).
+  const postsInWindow = useMemo(
+    () => posts.filter((p) => p.timestamp != null && inWindow(p.timestamp)),
+    [posts, inWindow],
+  );
   const breakdowns = breakdownsQ.data;
   const onlineData = onlineQ.data;
   // Posts/breakdowns/online aggregation, keyed on the payload refs (sorts + hashtag stats).
@@ -149,12 +159,12 @@ export function useIgData() {
     const formatTotal = formatItems.reduce((acc, it) => acc + it.value, 0);
     const topFormat = [...formatItems].sort((a, b) => b.value - a.value)[0];
     const onlineAgg = aggregateOnline(onlineData);
-    const topTag = [...hashtagStats(posts)].filter((t) => t.count >= 2).sort((a, b) => b.lift - a.lift)[0];
-    const topPost = posts.length
-      ? [...posts].sort((a, b) => Number(b.reach ?? 0) - Number(a.reach ?? 0))[0]
+    const topTag = [...hashtagStats(postsInWindow)].filter((t) => t.count >= 2).sort((a, b) => b.lift - a.lift)[0];
+    const topPost = postsInWindow.length
+      ? [...postsInWindow].sort((a, b) => Number(b.reach ?? 0) - Number(a.reach ?? 0))[0]
       : null;
     return { formatItems, formatTotal, topFormat, onlineAgg, topTag, topPost };
-  }, [breakdowns, onlineData, posts]);
+  }, [breakdowns, onlineData, postsInWindow]);
 
   const insights = buildIgInsights({
     netFollowers: netMovement.hasCur ? netMovement.cur : null,
@@ -177,7 +187,7 @@ export function useIgData() {
       : null,
     topHashtag: topTag ? { tag: topTag.tag, lift: topTag.lift, count: topTag.count } : null,
     topPost: topPost ? { reach: Number(topPost.reach ?? 0), type: topPost.media_type } : null,
-    postCount: posts.length,
+    postCount: postsInWindow.length,
   });
 
   const isMock = !!(profileQ.data?.mock || insightsQ.data?.mock || postsQ.data?.mock || breakdownsQ.data?.mock);
@@ -207,6 +217,7 @@ export function useIgData() {
     breakdowns,
     online: onlineQ.data,
     onlineAgg,
+    postsInWindow,
     stories: storiesQ.data?.data ?? [],
     formatItems,
     formatTotal,

@@ -45,7 +45,7 @@ export function TopPostsBlock({ posts, limit = 9, showSort = true }: { posts: Ig
   const [sort, setSort] = useState<SortKey>('reach');
   if (posts.length === 0) {
     return (
-      <EmptyState title="Публикаций пока нет." />
+      <EmptyState title="За выбранный период публикаций нет." />
     );
   }
   const top = [...posts].sort((a, b) => Number(b[sort] ?? 0) - Number(a[sort] ?? 0)).slice(0, limit);
@@ -130,7 +130,7 @@ export function ReelsBlock({ posts }: { posts: IgPost[] }) {
   const reels = posts.filter((p) => p.media_product_type === 'REELS');
   if (reels.length === 0) {
     return (
-      <EmptyState title="Reels пока нет." />
+      <EmptyState title="За выбранный период Reels нет." />
     );
   }
   const avgSec = (r: IgPost) => Math.round(Number(r.ig_reels_avg_watch_time ?? 0) / 1000);
