@@ -1260,17 +1260,20 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
   const isDragging = reorder && group?.draggingId === widgetId;
 
   const innerStyle: CSSProperties = {};
-  if (activeColor) (innerStyle as Record<string, string>)['--brand-iris'] = `var(--chart-${activeColor})`;
-  // Tinted background: a TONAL accent surface (steep-like depth) — a soft top-anchored radial of the
-  // accent hue over the card, not a flat colour slab. Hairline-only depth stays intact (no shadow):
-  // on the dark canvas it reads as a lit surface, on paper as a quiet accent wash. An un-coloured card
-  // washes in the muted --card-tint at its own low per-theme alpha (noble surface, not a blue slab);
-  // an explicitly-coloured widget keeps the punchier 0.15 of its accent.
-  const tintAlpha = activeColor ? '0.15' : 'var(--card-tint-alpha)';
-  if (activeTinted)
-    innerStyle.background = `radial-gradient(120% 90% at 50% 0%, hsl(var(${accentVar}) / ${tintAlpha}), transparent 62%), hsl(var(--card))`;
+  const innerVars = innerStyle as Record<string, string>;
+  if (activeColor) innerVars['--brand-iris'] = `var(--chart-${activeColor})`;
+  // Tinted background: a Steep-like solid tonal surface, not a decorative gradient wash.
+  // Default cards get a calm sage field; explicitly coloured cards keep the user's hue as a
+  // restrained solid mix over --card. The chart role follows the same hue so the tile reads as one
+  // deliberate surface instead of separate background + graph colours.
+  if (activeTinted) {
+    innerVars['--chart-role-primary'] = `var(${activeColor ? accentVar : '--card-tint-line'})`;
+    innerStyle.background = activeColor
+      ? `color-mix(in hsl, hsl(var(--card)) 86%, hsl(var(${accentVar})) 14%)`
+      : 'hsl(var(--card-tint-surface))';
+  }
   // Entrance stagger: one beat per grid slot, capped so deep feeds don't wait forever.
-  (innerStyle as Record<string, string>)['--enter-delay'] = `${Math.min(Math.max(seqIndex, 0), 8) * 35}ms`;
+  innerVars['--enter-delay'] = `${Math.min(Math.max(seqIndex, 0), 8) * 35}ms`;
   if (isDragging) {
     // the lifted card stops jiggling and pops slightly (iOS) — the pointer carries it
     innerStyle.animation = 'none';
@@ -1877,9 +1880,15 @@ function VariantCarousel({
               // chart+ledger row fits the same w-56 preview card.
               const wide = v.minSize === 'full';
               const previewStyle: CSSProperties = {};
-              if (prefs.color) (previewStyle as Record<string, string>)['--brand-iris'] = `var(--chart-${prefs.color})`;
-              if (prefs.tinted ?? true)
-                previewStyle.backgroundColor = `hsl(var(${prefs.color ? `--chart-${prefs.color}` : '--card-tint'}) / 0.07)`;
+              const previewVars = previewStyle as Record<string, string>;
+              if (prefs.color) previewVars['--brand-iris'] = `var(--chart-${prefs.color})`;
+              if (prefs.tinted ?? true) {
+                const previewAccent = prefs.color ? `--chart-${prefs.color}` : '--card-tint';
+                previewVars['--chart-role-primary'] = `var(${prefs.color ? previewAccent : '--card-tint-line'})`;
+                previewStyle.background = prefs.color
+                  ? `color-mix(in hsl, hsl(var(--card)) 86%, hsl(var(${previewAccent})) 14%)`
+                  : 'hsl(var(--card-tint-surface))';
+              }
               return (
                 <button
                   key={v.key}

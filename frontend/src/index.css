@@ -42,12 +42,10 @@
     /* Data accent = the brand blue (single hue; no separate violet). Deltas only for up/down. */
     --brand-iris: 219 74% 53%;         /* #2d6be0 */
     --brand-iris-soft: 219 74% 64%;
-    /* Default card tint — a desaturated "noble" slate: a whisper of the brand iris, NOT a blue card.
-       Used ONLY as a low-alpha, top-anchored wash behind un-coloured widgets (a coloured widget washes
-       in its own --chart-* accent instead). Decorative — never text/stroke, ≤9% alpha — so it sits
-       outside the contrast gate by design. */
-    --card-tint: 219 22% 46%;
-    --card-tint-alpha: 0.09;           /* low sat keeps it cool-grey (not blue) even at this alpha */
+    /* Default widget tint: a solid tonal sage surface, not a gradient wash. */
+    --card-tint: 146 26% 34%;
+    --card-tint-surface: 144 24% 96%;
+    --card-tint-line: 148 30% 36%;
     --brand-verdant: 147 52% 30%;      /* up     #257449 — deepened to clear AA 4.5 as text + on a 10% tint */
     --brand-ember: 11 64% 45%;         /* down   #bb4429 */
     --brand-ember-strong: 11 64% 40%;  /* deeper, clears AA on a 10% ember tint */
@@ -119,8 +117,9 @@
 
     --brand-iris: 219 80% 70%;
     --brand-iris-soft: 219 80% 76%;
-    --card-tint: 219 26% 62%;          /* default card tint — lifted for the near-black --card */
-    --card-tint-alpha: 0.11;
+    --card-tint: 139 34% 72%;
+    --card-tint-surface: 139 24% 16%;
+    --card-tint-line: 139 48% 78%;
     --brand-verdant: 147 45% 52%;
     --brand-ember: 11 78% 62%;
     --brand-ember-strong: 11 78% 66%;
