@@ -3,8 +3,8 @@ import { ChartSection, type WidgetSize } from '@/components/ChartWidget';
 import { KpiGrid } from '@/panels/KpiGrid';
 import { Digest } from '@/panels/Digest';
 import { TopPosts } from '@/panels/TopPosts';
-import { SubscriberGrowth } from '@/panels/Overview';
 import { HistoryChartBlock, VelocityChartBlock, HeatmapChartBlock } from '@/panels/Charts';
+import { GrowthChartBlock } from '@/panels/Overview';
 import { HomeMentionsByDay } from '@/panels/Mentions';
 
 /**
@@ -66,11 +66,9 @@ export const HOME_REGISTRY: Record<string, HomeWidgetDef> = {
   },
   growth: {
     label: 'Рост подписчиков',
-    render: () => (
-      <ChartSection id="home-growth" homeKey="growth" title="Рост подписчиков" periodControl>
-        <SubscriberGrowth />
-      </ChartSection>
-    ),
+    // Self-wrapping (like History/Velocity/Heatmap): «Развернуть» opens a full subscriber chart, not
+    // the compact sparkline over an empty fullscreen. Pass the home id/key, don't re-wrap.
+    render: () => <GrowthChartBlock id="home-growth" homeKey="growth" />,
   },
   'top-posts': {
     label: 'Топ постов',

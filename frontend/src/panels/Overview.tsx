@@ -10,6 +10,7 @@ import { GetStarted } from '@/pages/GetStarted';
 import { useDemo } from '@/lib/demo-context';
 import { Sparkline } from '@/components/Sparkline';
 import { ChartSection, WidgetGroup } from '@/components/ChartWidget';
+import { SubscriberHistoryChart, SubscriberHistoryBars } from '@/panels/Charts';
 import { Digest } from '@/panels/Digest';
 import { KpiGrid } from '@/panels/KpiGrid';
 import { TopPosts } from '@/panels/TopPosts';
@@ -66,9 +67,7 @@ export function Overview() {
         <ChartSection id="overview-digest" title="Инсайт" periodControl homeKey="digest" defaultSize="full">
           <Digest />
         </ChartSection>
-        <ChartSection id="overview-growth" title="Рост подписчиков" periodControl homeKey="growth">
-          <SubscriberGrowth />
-        </ChartSection>
+        <GrowthChartBlock id="overview-growth" homeKey="growth" />
         <ChartSection
           id="overview-top-posts"
           title="Топ постов"
@@ -105,6 +104,34 @@ function StaleWarning() {
 /** Subscriber base over the period — the second most important channel state (the hero is views).
     Reads its OWN widget window (useWidgetPeriod), not the global period. Exported (bare content,
     no own ChartSection) so the personal-Home registry can reuse it under a home-scoped card. */
+/** «Рост подписчиков» wrapper: the compact SubscriberGrowth card body, but «Развернуть» now opens the
+    SAME full subscriber chart the history widget does (full-height axes + Мин/Макс/Среднее stats strip
+    + period pills + line↔bar + reference lines) instead of a tiny sparkline over an empty fullscreen. */
+export function GrowthChartBlock({ id, homeKey }: { id?: string; homeKey?: string } = {}) {
+  const { data } = useHistory(730);
+  const rows = (data?.rows ?? []).filter((r) => r.subscribers != null);
+  return (
+    <ChartSection
+      id={id}
+      homeKey={homeKey}
+      title="Рост подписчиков"
+      periodControl
+      expand={
+        rows.length >= 2
+          ? {
+              renderExpanded: (days) => <SubscriberHistoryChart rows={days === 0 ? rows : rows.slice(-days)} />,
+              renderExpandedBar: (days) => <SubscriberHistoryBars rows={days === 0 ? rows : rows.slice(-days)} />,
+              statsFor: (days) => (days === 0 ? rows : rows.slice(-days)).map((r) => Number(r.subscribers)),
+              statsSum: false, // сумма УРОВНЕЙ подписчиков по дням не имеет смысла
+            }
+          : undefined
+      }
+    >
+      <SubscriberGrowth />
+    </ChartSection>
+  );
+}
+
 export function SubscriberGrowth() {
   const { days, inRange } = useWidgetPeriod();
   const { data: history } = useHistory(730);
