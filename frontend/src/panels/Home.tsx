@@ -124,6 +124,15 @@ export function Home() {
         <HomeEmptyState onEdit={() => setEditing(true)} />
       ) : (
         <HomeEditContext.Provider value={editing}>
+          {/* Edit-mode board inset — entering «Изменить» steps the whole board canvas (grid +
+              add-bar) back ~7rem/side over --motion-fast, echoing Steep's editable-canvas cue. A
+              pure max-width layout transition (no scale/shadow — canon); mx-auto keeps it centred
+              as it narrows. lg-only so mobile stays full-bleed (and can't overflow), and the global
+              prefers-reduced-motion cap flattens it to instant. */}
+          <div
+            className={`home-board-canvas lg:mx-auto ${editing ? 'lg:max-w-[calc(100%_-_7rem)]' : 'lg:max-w-full'}`}
+            style={{ transition: 'max-width var(--motion-fast) var(--ease-standard)' }}
+          >
           <ChannelRecencyProvider value={recency}>
             <WidgetGroup id="home" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
               {known.map((key) => {
@@ -169,6 +178,7 @@ export function Home() {
             </WidgetGroup>
           </ChannelRecencyProvider>
           {editing && <AddWidgetBar pinned={pinned} />}
+          </div>
         </HomeEditContext.Provider>
       )}
     </div>

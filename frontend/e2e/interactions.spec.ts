@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { bootDemo } from './helpers';
 
 test('detail open + back (metric drilldown)', async ({ page }) => {
@@ -120,4 +120,66 @@ test('edit toggle keeps a stable width across Изменить↔Готово (n
   expect(before && after).toBeTruthy();
   // Identical width — the label swap is opacity/translate within a fixed cell, not a width jump.
   expect(Math.abs((after!.width) - (before!.width))).toBeLessThan(0.5);
+});
+
+test.describe('home edit-mode board inset (steep editable-canvas cue)', () => {
+  // Seed one pinned widget so the board grid (#home) renders at rest AND in edit — otherwise an empty
+  // Home shows HomeEmptyState (no #home) until edit mode. Same seed shape the drill-guard test uses;
+  // addInitScript stacks BEFORE bootDemo's own seed.
+  const seedBoard = (page: Page) =>
+    page.addInitScript(() => {
+      localStorage.setItem('pulse_home_blocks', JSON.stringify({ keys: ['custom:probe1'] }));
+      localStorage.setItem('pulse_widget_configs', JSON.stringify([{ id: 'probe1', metricId: 'tg.views', viz: 'line' }]));
+    });
+
+  test('board steps in on «Изменить» and reverts on «Готово» (desktop)', async ({ page }) => {
+    // The inset is lg-only, so force a desktop viewport regardless of the running project.
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await seedBoard(page);
+    await bootDemo(page, '/home');
+
+    const board = page.locator('.home-board-canvas');
+    const toggle = page.locator('button.edit-toggle');
+    await board.waitFor({ state: 'visible', timeout: 15_000 });
+
+    const restingWidth = (await board.boundingBox())!.width;
+
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    await page.waitForTimeout(320); // 200ms max-width transition + settle
+    const editingWidth = (await board.boundingBox())!.width;
+    // ~112px narrower (7rem inset). Assert a clear step-in, not the exact px.
+    expect(editingWidth).toBeLessThan(restingWidth - 80);
+
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    await page.waitForTimeout(320);
+    const revertedWidth = (await board.boundingBox())!.width;
+    expect(Math.abs(revertedWidth - restingWidth)).toBeLessThanOrEqual(1);
+  });
+
+  for (const w of [360, 390, 430]) {
+    test(`edit mode stays full-bleed with no h-overflow @ ${w}px`, async ({ page }) => {
+      await page.setViewportSize({ width: w, height: 820 });
+      await seedBoard(page);
+      await bootDemo(page, '/home');
+
+      const board = page.locator('.home-board-canvas');
+      const toggle = page.locator('button.edit-toggle');
+      await board.waitFor({ state: 'visible', timeout: 15_000 });
+      const before = (await board.boundingBox())!.width;
+
+      await toggle.click();
+      await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+      await page.waitForTimeout(320);
+      // Below lg the lg:max-w-* inset rule never applies — the board keeps its full width…
+      const after = (await board.boundingBox())!.width;
+      expect(Math.abs(after - before)).toBeLessThanOrEqual(1);
+      // …and edit mode introduces no horizontal page scroll.
+      const hScroll = await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      );
+      expect(hScroll, `h-scroll ${hScroll}px in edit mode @ ${w}`).toBeLessThanOrEqual(1);
+    });
+  }
 });
