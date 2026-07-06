@@ -36,6 +36,10 @@ const BAR_RATIO = 0.7;
 // Approximate glyph width of the 11px tabular numerals used for tick/value labels.
 const CHAR_W = 6.6;
 
+function finiteChartValue(value: number): number {
+  return Number.isFinite(value) ? value : 0;
+}
+
 export function BarChart({ values, labels, titles, height = 200, ghost, ghostLabel = 'Прошлый период', onPointClick, legendToggle = true }: BarChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   // Press position (client px) for the drag guard: the svg-level onClick would otherwise drill on
@@ -46,10 +50,12 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
   // The comparison overlay can be toggled off via its legend chip (steep #9) — hidden, it also
   // drops out of the bar y-domain so the bars rescale to the current series.
   const [ghostHidden, setGhostHidden] = useState(false);
+  const safeValues = useMemo(() => values.map(finiteChartValue), [values]);
+  const safeGhost = useMemo(() => ghost?.map(finiteChartValue), [ghost]);
   // A freshly-enabled or changed comparison always starts SHOWN: reset the manual hide when the
   // ghost's content changes, keyed on a content signature (not identity) so a referentially-
   // unstable-but-equal re-render never resets it (which would make the chip un-clickable).
-  const ghostKey = ghost && ghost.length >= 2 ? ghost.join(',') : '';
+  const ghostKey = safeGhost && safeGhost.length >= 2 ? safeGhost.join(',') : '';
   const prevGhostKey = useRef(ghostKey);
   useEffect(() => {
     if (ghostKey === prevGhostKey.current) return;
@@ -93,11 +99,11 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
     };
   }, [hasHover]);
 
-  const hasGhost = !!ghost && ghost.length === values.length && ghost.length >= 2;
+  const hasGhost = !!safeGhost && safeGhost.length === safeValues.length && safeGhost.length >= 2;
   // Toggled off, the comparison drops out of every draw/measure below; the legend chip stays
   // visible so it can be toggled back on. Derived before the plot memo (its inputs).
   const showGhost = hasGhost && !ghostHidden;
-  const activeGhost = showGhost ? ghost : undefined;
+  const activeGhost = showGhost ? safeGhost : undefined;
 
   // ── Geometry + the static plot, memoized APART from hover ────────────────────────────────
   // Hover used to swap every bar's opacity and re-create the whole element tree per mousemove
@@ -105,15 +111,15 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
   // hover dim is a single group-opacity attribute, the hovered bar is re-drawn at full opacity
   // in the overlay below, and the svg carries ONE mouse handler with O(1) column math.
   const plot = useMemo(() => {
-    if (!values || values.length === 0) return null;
+    if (safeValues.length === 0) return null;
 
     // Expanded view: bars scale against a NICE domain top (1/2/5×10ⁿ) so the y ticks land on
     // round values, like LineChart — the old max/mid pair printed «262» next to «2.5k».
     // The domain also covers the target and the (shown) comparison line — both must stay visible.
-    const rawMax = Math.max(...values, 1, target ?? 0, ...(activeGhost ?? []));
+    const rawMax = Math.max(...safeValues, 1, target ?? 0, ...(activeGhost ?? []));
     const scale = expanded ? niceScale(0, rawMax) : null;
     const max = scale ? scale.hi : rawMax;
-    const n = values.length;
+    const n = safeValues.length;
     const chartWidth = Math.max(width, 1);
     // In a fixed-height card tile (ctxHeight set, not the expanded overlay), the comparison legend
     // is an HTML row BELOW the svg — reserve its height so svg + legend fit the tile with no inner
@@ -149,7 +155,7 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
       : '';
 
     // Per-bar boxes — the cached rect layer below and the hover highlight both draw from these.
-    const bars = values.map((val, i) => {
+    const bars = safeValues.map((val, i) => {
       const barHeight = (val / max) * usable;
       return {
         x: offsetX + i * itemWidth + (itemWidth - barWidth) / 2,
@@ -190,7 +196,7 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
     // then the comparison overlay and the target line.
     const overLayer = (
       <>
-        {values.map((val, i) => {
+        {safeValues.map((val, i) => {
           const strideHit = labelIndexes.has(i);
           const showLabel = labels?.[i] && strideHit;
           const showValue = expanded && strideHit;
@@ -251,9 +257,9 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
     );
 
     return { chartWidth, chartHeight, graphHeight, offsetX, itemWidth, bars, barTop, barCenterX, underLayer, barsLayer, overLayer };
-  }, [values, labels, activeGhost, hasGhost, target, width, ctxHeight, height, expanded]);
+  }, [safeValues, labels, activeGhost, hasGhost, target, width, ctxHeight, height, expanded]);
 
-  if (!values || values.length === 0 || !plot) {
+  if (safeValues.length === 0 || !plot) {
     return (
       <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
         Нет данных
@@ -262,19 +268,19 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
   }
 
   const { chartWidth, chartHeight, graphHeight, offsetX, itemWidth, bars, barTop, barCenterX } = plot;
-  const n = values.length;
+  const n = safeValues.length;
 
   const tipText = (i: number) => {
-    const base = titles?.[i] ?? `${labels?.[i] ?? ''}: ${values[i]}`;
+    const base = titles?.[i] ?? `${labels?.[i] ?? ''}: ${safeValues[i]}`;
     return activeGhost && activeGhost[i] != null ? `${base} · пред. ${fmt.short(activeGhost[i])}` : base;
   };
   // Structured readout (label · Текущий · comparison · Δ) when a ghost series is present; else the
   // metric's own title text. Anchored to the hovered bar's top-centre.
   const buildTip = (i: number): TooltipState => {
     const x = barCenterX(i);
-    const y = barTop(values[i]);
+    const y = barTop(safeValues[i]);
     if (activeGhost && activeGhost[i] != null) {
-      const cur = values[i];
+      const cur = safeValues[i];
       const prev = activeGhost[i];
       const rows: TooltipRow[] = [
         { label: 'Текущий', value: fmt.short(cur), color: 'hsl(var(--brand-iris))' },
@@ -330,7 +336,7 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
         preserveAspectRatio="none"
         // Named graphic for AT (PieChart idiom) — see LineChart.tsx: series max, not the scale top.
         role="img"
-        aria-label={`Столбчатая диаграмма: ${values.length} столбцов, макс ${fmt.short(Math.max(...values))}`}
+        aria-label={`Столбчатая диаграмма: ${safeValues.length} столбцов, макс ${fmt.short(Math.max(...safeValues))}`}
         onMouseMove={onSvgMove}
         onMouseDown={onPointClick ? (e) => (pressRef.current = { x: e.clientX, y: e.clientY }) : undefined}
         onClick={onSvgClick}

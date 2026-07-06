@@ -162,11 +162,16 @@ function BarValuesLayout({ chart, rows }: { chart: ReactNode; rows: LedgerRow[] 
 /** The common «tint-row list ↔ bar chart ↔ pie» set for Breakdown-style category data, plus
     the wide «Столбцы + значения» presentation (bar chart + value ledger, needs the full row). */
 export function breakdownVariants(items: BreakdownLikeItem[]): WidgetVariant[] {
-  const values = items.map((i) => i.value);
-  const labels = items.map((i) => i.label);
-  const titles = items.map((i) => `${i.label}: ${i.display ?? i.value}`);
+  const safeItems = items.map((i) => {
+    const valid = Number.isFinite(i.value);
+    const value = valid ? i.value : 0;
+    return { ...i, value, display: valid ? i.display : fmt.num(value) };
+  });
+  const values = safeItems.map((i) => i.value);
+  const labels = safeItems.map((i) => i.label);
+  const titles = safeItems.map((i) => `${i.label}: ${i.display ?? i.value}`);
   return [
-    { key: 'list', label: 'Список', render: <Breakdown items={items} /> },
+    { key: 'list', label: 'Список', render: <Breakdown items={safeItems} /> },
     {
       key: 'bar',
       label: 'Столбцы',
@@ -175,7 +180,7 @@ export function breakdownVariants(items: BreakdownLikeItem[]): WidgetVariant[] {
     {
       key: 'pie',
       label: 'Круговая',
-      render: <PieChart values={values} labels={labels} titles={titles} colors={items.map((i) => i.color)} />,
+      render: <PieChart values={values} labels={labels} titles={titles} colors={safeItems.map((i) => i.color)} />,
     },
     {
       key: 'bar-values',
@@ -184,7 +189,7 @@ export function breakdownVariants(items: BreakdownLikeItem[]): WidgetVariant[] {
       render: (
         <BarValuesLayout
           chart={<BarChart values={values} labels={labels} titles={titles} />}
-          rows={items.map((i) => ({ label: i.label, value: i.display ?? fmt.num(i.value) }))}
+          rows={safeItems.map((i) => ({ label: i.label, value: i.display ?? fmt.num(i.value) }))}
         />
       ),
     },

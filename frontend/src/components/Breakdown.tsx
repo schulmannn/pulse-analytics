@@ -15,6 +15,10 @@ interface BreakdownProps {
 // One row's vertical pitch: p-2 row (36px) + space-y-2 gap.
 const ROW_PITCH = 44;
 
+function safeBreakdownValue(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, value) : 0;
+}
+
 export function Breakdown({ items }: BreakdownProps) {
   // Inside a fixed-height tile the card feeds its body height here — show only the rows that
   // FIT plus a «+N ещё» line, so a widget never scrolls (steep). The expand overlay
@@ -35,12 +39,13 @@ export function Breakdown({ items }: BreakdownProps) {
   const shown = items.length > fit ? items.slice(0, Math.max(1, fit - 1)) : items;
   const extra = items.length - shown.length;
 
-  const maxValue = Math.max(...items.map((item) => item.value), 1);
+  const maxValue = Math.max(...items.map((item) => safeBreakdownValue(item.value)), 1);
 
   return (
     <div className="space-y-2">
       {shown.map((item, i) => {
-        const percentage = (item.value / maxValue) * 100;
+        const value = safeBreakdownValue(item.value);
+        const percentage = Math.min(100, (value / maxValue) * 100);
         // Fill alpha is a theme token (--row-tint-*): the light-theme 0.15 pastel turns muddy
         // olive-brown on the dark canvas, so dark ships lower alphas; the coloured dot next to
         // the label stays the category signal in both themes.
@@ -68,7 +73,7 @@ export function Breakdown({ items }: BreakdownProps) {
               <span className="truncate">{item.label}</span>
             </span>
             <span className="relative z-10 ml-2 shrink-0 text-sm tabular-nums text-muted-foreground">
-              {item.display ?? item.value}
+              {item.display ?? value}
             </span>
           </div>
         );

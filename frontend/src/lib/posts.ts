@@ -30,6 +30,11 @@ interface ChannelContext {
   subscribers?: number | null;
 }
 
+function finiteNumber(value: unknown, fallback = 0): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 /**
  * Strip raw Telegram markdown from a caption for display. Captions arrive with literal
  * `[текст](https://…)`, `**…**`, `__…__` and `` ` `` markers that leaked verbatim into table
@@ -58,17 +63,17 @@ export function stripTgMarkdown(text: string): string {
  *   ERV = engagement / views,  ER = engagement / followers,  virality = forwards / views.
  */
 export function normalizeTgPosts(rawPosts: TgPost[], channel: ChannelContext): NormalizedPost[] {
-  const followers = Number(
+  const followers = finiteNumber(
     channel.memberCount ?? channel.members ?? channel.member_count ?? channel.subscribers ?? 0,
   );
   const username = channel.username ?? channel.channel_username ?? '';
 
   return rawPosts.map((raw) => {
     const id = raw.id ?? null;
-    const reach = Number(raw.views ?? raw.view_count ?? 0);
-    const likes = Number(raw.reactions ?? raw.reactions_count ?? 0);
-    const comments = Number(raw.replies ?? raw.comments_count ?? 0);
-    const shares = Number(raw.forwards ?? 0);
+    const reach = finiteNumber(raw.views ?? raw.view_count ?? 0);
+    const likes = finiteNumber(raw.reactions ?? raw.reactions_count ?? 0);
+    const comments = finiteNumber(raw.replies ?? raw.comments_count ?? 0);
+    const shares = finiteNumber(raw.forwards ?? 0);
     const eng = likes + shares + comments;
 
     // Display caption: markdown markers stripped once here so every consumer (tables, top
@@ -91,7 +96,7 @@ export function normalizeTgPosts(rawPosts: TgPost[], channel: ChannelContext): N
     const er = followers > 0 ? (eng / followers) * 100 : null;
 
     const reactionsDetail = (raw.reactions_detail ?? [])
-      .map((r) => ({ emoji: r.emoji ?? '', count: Number(r.count ?? 0) }))
+      .map((r) => ({ emoji: r.emoji ?? '', count: finiteNumber(r.count ?? 0) }))
       .filter((r) => r.emoji !== '');
 
     return {
@@ -108,7 +113,7 @@ export function normalizeTgPosts(rawPosts: TgPost[], channel: ChannelContext): N
       eng,
       reactionsDetail,
       hashtags: raw.hashtags ?? [],
-      albumSize: Number(raw.album_size ?? 0),
+      albumSize: finiteNumber(raw.album_size ?? 0),
       pinned: !!raw.pinned,
       erv,
       virality,

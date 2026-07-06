@@ -353,14 +353,14 @@ function deriveFormatPerf(full: TgFull | undefined, inRange: InRange) {
   posts.forEach((p) => {
     const t = p.mediaType || 'text';
     (g[t] ??= { n: 0, ervSum: 0, ervN: 0 }).n++;
-    if (p.erv != null) {
+    if (p.erv != null && Number.isFinite(p.erv)) {
       g[t].ervSum += p.erv;
       g[t].ervN++;
     }
   });
   return Object.entries(g)
     .map(([t, v]) => ({ label: TYPE_NAMES[t] || t, avgErv: v.ervN ? v.ervSum / v.ervN : 0, n: v.n }))
-    .filter((x) => x.n > 0 && x.avgErv > 0)
+    .filter((x) => x.n > 0 && Number.isFinite(x.avgErv) && x.avgErv > 0)
     .sort((a, b) => b.avgErv - a.avgErv);
 }
 
