@@ -58,6 +58,14 @@ describe('reportCrashToServer', () => {
     expect(mockSend.mock.calls[0][2].scope).toBe('app');
   });
 
+  it('reports a global (window-level) crash on its own budget, tagged scope=global', () => {
+    for (let i = 0; i < 20; i++) reportCrashToServer(report({ message: `e${i}` }), 'widget'); // exhaust widget cap
+    mockSend.mockClear();
+    reportCrashToServer(report({ message: 'unhandled' }), 'global');
+    expect(mockSend).toHaveBeenCalledTimes(1);
+    expect(mockSend.mock.calls[0][2].scope).toBe('global');
+  });
+
   it('swallows a synchronous apiSend throw (never escalates a crash)', () => {
     mockSend.mockImplementationOnce(() => {
       throw new Error('sync throw (demo mode)');

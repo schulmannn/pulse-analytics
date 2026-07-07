@@ -10,6 +10,7 @@ import { isDemoMode } from '@/lib/demo';
 import { PeriodProvider } from '@/lib/period';
 import { clearSessionToken, getSessionToken } from '@/lib/session';
 import { ThemeProvider } from '@/lib/theme';
+import { installGlobalErrorReporter } from '@/lib/crashReporting';
 import '@/index.css';
 
 // Client-cache defaults: dedupe in-flight requests, serve stale-then-revalidate, and
@@ -39,6 +40,11 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+// Arm the window-level crash net (uncaught errors + unhandled promise rejections) before the first
+// render, so a throw anywhere — even outside React's render tree — reaches telemetry, not just the
+// console. React error boundaries only catch throws during render; this covers the rest.
+installGlobalErrorReporter();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
