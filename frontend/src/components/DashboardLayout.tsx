@@ -277,11 +277,11 @@ function Sidebar({ email, role, avatar }: { email?: string; role?: string; avata
     <aside
       aria-label="Боковая панель"
       className={cn(
-        // Floating panel (Claude-style): inset 0.5rem all round, rounded, a full hairline, on the
-        // card surface so it reads a shade apart from the canvas — no shadow (DS restraint; the
-        // surface contrast + inset carry the float). z-nav lets the overhanging popovers (rail
-        // dropdown, user-row menu) paint above the sticky Topbar (z-sticky), under scrim/modals.
-        'sticky top-2 z-nav m-2 hidden h-[calc(100vh-1rem)] shrink-0 flex-col rounded-xl border border-border bg-card dark:border-white/[0.06] md:flex print:hidden',
+        // FLAT canvas strip (steep — owner call): no floating card, no hairline, no inset — the
+        // sidebar is just the canvas itself; the content's cards carry all the surface contrast.
+        // z-nav lets the overhanging popovers (rail dropdown, user-row menu) paint above the
+        // sticky Topbar (z-sticky), under scrim/modals.
+        'sticky top-0 z-nav hidden h-screen shrink-0 flex-col bg-background md:flex print:hidden',
         'transition-[width] duration-200 motion-reduce:transition-none',
         rail ? 'w-16' : 'w-60',
       )}
@@ -355,23 +355,54 @@ function GhostIconButton({
 }
 
 /**
- * The single adaptive nav — ONE flat list of the ACTIVE network's routes (no platform label,
- * no group markers). The source switcher above carries the network identity, so the nav itself
- * is just "the current source's views": TG → Обзор/Аналитика/Посты/Упоминания/Отчёты, IG →
- * Обзор/Аналитика/Контент/Аудитория/Отчёты. Switching network (via the switcher) re-derives the
- * set from the URL, so the same list drives desktop and (via useActiveNetworkNav) the mobile bar.
+ * NESTED nav (steep's Teams idiom — owner call): BOTH platforms are always visible as labelled
+ * groups with the SAME section shape, so the mental model doesn't reset when crossing networks
+ * («в ТГ своя логика, в IG всё по-другому» — no more). «Главная» leads, «Отчёты» trails — both
+ * are per-user, not per-network. The RAIL (icons only, no room for group labels) and the mobile
+ * bottom bar keep the flat active-network list (useActiveNetworkNav) — same routes, denser form.
  */
 function SidebarNav({ rail }: { rail: boolean }) {
-  const items = useActiveNetworkNav();
+  const railItems = useActiveNetworkNav();
+  if (rail) {
+    return (
+      <nav className="mt-5 flex-1 overflow-y-auto overflow-x-hidden px-3">
+        <div className="space-y-0.5">
+          {railItems.map((item) => (
+            <NavItem key={item.to} {...item} rail />
+          ))}
+        </div>
+      </nav>
+    );
+  }
   return (
     <nav className="mt-5 flex-1 overflow-y-auto overflow-x-hidden px-3">
       <div className="space-y-0.5">
-        {items.map((item) => (
-          <NavItem key={item.to} {...item} rail={rail} />
+        <NavItem {...HOME_NAV} rail={false} />
+      </div>
+      <NavGroupLabel>Telegram</NavGroupLabel>
+      <div className="space-y-0.5">
+        {TG_FEED_NAV.map((item) => (
+          <NavItem key={item.to} {...item} rail={false} />
+        ))}
+      </div>
+      <NavGroupLabel>Instagram</NavGroupLabel>
+      <div className="space-y-0.5">
+        {IG_FEED_NAV.map((item) => (
+          <NavItem key={item.to} {...item} rail={false} />
+        ))}
+      </div>
+      <div className="mt-4 space-y-0.5">
+        {AGNOSTIC_NAV.map((item) => (
+          <NavItem key={item.to} {...item} rail={false} />
         ))}
       </div>
     </nav>
   );
+}
+
+/** Quiet group caption between nav sections (steep «Teams»). */
+function NavGroupLabel({ children }: { children: ReactNode }) {
+  return <div className="mb-1 mt-4 px-2.5 text-2xs font-medium tracking-wider text-ink3">{children}</div>;
 }
 
 /** Data-freshness line — a status dot + "обновлено <time>" (mono), sitting directly under the
