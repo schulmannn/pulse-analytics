@@ -17,7 +17,7 @@ import { fmt } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { freshness, latestHistoryDay } from '@/lib/freshness';
 import { METRIC_DEFS } from '@/lib/metricDefs';
-import { NETWORKS, NetworkGlyph, networkByKey, networkForPath, type NavLinkDef, type Network } from '@/lib/networks';
+import { NETWORKS, NetworkGlyph, networkByKey, networkForPath, type NavLinkDef, type Network, type NetworkDef } from '@/lib/networks';
 import { Icon } from '@/components/nav-icons';
 import { ChannelAvatar } from '@/components/ChannelAvatar';
 
@@ -298,11 +298,13 @@ function GhostIconButton({
 }
 
 /**
- * NESTED nav (steep's Teams idiom — owner call): the connected networks are always visible as
- * labelled groups with the SAME section shape, so the mental model doesn't reset when crossing
- * networks («в ТГ своя логика, в IG всё по-другому» — no more). «Главная» leads, «Отчёты»
- * trails — both are per-user, not per-network. The RAIL (icons only, no room for group labels)
- * and the mobile bottom bar keep the flat active-network list — same routes, denser form.
+ * NESTED nav (steep's Teams idiom — owner call): the connected networks are visible as labelled
+ * ACCORDION groups with the SAME section shape, so the mental model doesn't reset when crossing
+ * networks («в ТГ своя логика, в IG всё по-другому» — no more). Only the active network expands
+ * by default — every other source is a single header row (see NavGroup), so the list stays flat
+ * as sources grow. «Главная» leads, «Отчёты» trails — both are per-user, not per-network. The
+ * RAIL (icons only, no room for group labels) and the mobile bottom bar keep the flat
+ * active-network list — same routes, denser form.
  *
  * Groups are REGISTRY-driven, never a hardcoded platform pair (owner call: more sources are
  * coming): one group per network this workspace actually has as a source — all of them while the
@@ -311,6 +313,7 @@ function GhostIconButton({
  */
 function SidebarNav({ rail }: { rail: boolean }) {
   const railItems = useActiveNetworkNav();
+  const activeKey = useActiveNetwork();
   const { data } = useChannels();
   const { demo } = useDemo();
   const channels = data?.channels ?? [];
@@ -331,16 +334,17 @@ function SidebarNav({ rail }: { rail: boolean }) {
       <div className="space-y-0.5">
         <NavItem {...HOME_NAV} rail={false} />
       </div>
-      {groups.map((net) => (
-        <div key={net.key}>
-          <NavGroupLabel>{net.name}</NavGroupLabel>
-          <div className="space-y-0.5">
-            {net.nav.map((item) => (
-              <NavItem key={item.to} {...item} rail={false} />
-            ))}
-          </div>
+      {groups.length === 1 ? (
+        // A single connected source needs no accordion chrome — its sections render flat,
+        // exactly the pre-groups sidebar.
+        <div className="mt-4 space-y-0.5">
+          {groups[0].nav.map((item) => (
+            <NavItem key={item.to} {...item} rail={false} />
+          ))}
         </div>
-      ))}
+      ) : (
+        groups.map((net) => <NavGroup key={net.key} net={net} active={net.key === activeKey} />)
+      )}
       <div className="mt-4 space-y-0.5">
         {AGNOSTIC_NAV.map((item) => (
           <NavItem key={item.to} {...item} rail={false} />
@@ -350,9 +354,87 @@ function SidebarNav({ rail }: { rail: boolean }) {
   );
 }
 
-/** Quiet group caption between nav sections (steep «Teams»). */
-function NavGroupLabel({ children }: { children: ReactNode }) {
-  return <div className="mb-1 mt-4 px-2.5 text-2xs font-medium tracking-wider text-ink3">{children}</div>;
+const NAV_GROUPS_KEY = 'pulse_nav_groups';
+
+/** Manually-toggled group states (true = open, false = closed); absent keys fall back to
+    «open only while active». Survives reloads like the sidebar mode itself. */
+function readNavGroups(): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem(NAV_GROUPS_KEY);
+    if (raw) return JSON.parse(raw) as Record<string, boolean>;
+  } catch {
+    /* corrupt/blocked storage → defaults */
+  }
+  return {};
+}
+
+/**
+ * Collapsible network group (steep's Teams accordion — owner call: «около 10 источников, меню не
+ * может расти вниз бесконечно»). Default state: ONLY the active network is expanded, every other
+ * source is one quiet header row — ten sources are ten rows, not ten section lists. A manual
+ * toggle wins over the default and persists (localStorage); crossing into a network force-opens
+ * its group so the active row is never hidden.
+ */
+function NavGroup({ net, active }: { net: NetworkDef; active: boolean }) {
+  const [manual, setManual] = useState<Record<string, boolean>>(readNavGroups);
+  const open = manual[net.key] ?? active;
+
+  // Entering the network re-opens a manually-closed group (the active section must be reachable);
+  // clearing the override (instead of writing `true`) also restores the auto-collapse on leave.
+  useEffect(() => {
+    if (!active) return;
+    setManual((prev) => {
+      if (prev[net.key] !== false) return prev;
+      const next = { ...prev };
+      delete next[net.key];
+      try {
+        localStorage.setItem(NAV_GROUPS_KEY, JSON.stringify(next));
+      } catch {
+        /* storage may be blocked — the session state still works */
+      }
+      return next;
+    });
+  }, [active, net.key]);
+
+  const toggle = () =>
+    setManual((prev) => {
+      const next = { ...prev, [net.key]: !open };
+      try {
+        localStorage.setItem(NAV_GROUPS_KEY, JSON.stringify(next));
+      } catch {
+        /* ditto */
+      }
+      return next;
+    });
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={open}
+        aria-controls={`nav-group-${net.key}`}
+        className="group mt-4 flex w-full items-center justify-between rounded px-2.5 py-1 text-left text-2xs font-medium tracking-wider text-ink3 transition-colors hover:bg-hover-row/60 hover:text-foreground"
+      >
+        <span className="flex items-center gap-1.5 truncate">
+          {net.name}
+          {/* Collapsed group holding the CURRENT page still shows where you are. */}
+          {!open && active && <span aria-hidden="true" className="h-1 w-1 shrink-0 rounded-full bg-foreground" />}
+        </span>
+        <Icon
+          name="chevron"
+          className={cn('h-3.5 w-3.5 shrink-0 transition-transform motion-reduce:transition-none', !open && '-rotate-90')}
+        />
+      </button>
+      {open && (
+        <div id={`nav-group-${net.key}`} className="mt-1 space-y-0.5">
+          {net.nav.map((item) => (
+            <NavItem key={item.to} {...item} rail={false} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /** Data-freshness line — a status dot + "обновлено <time>" (mono), sitting directly under the
