@@ -10,7 +10,8 @@ import { fmt, ruAxisLabel } from '@/lib/format';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useWidgetPeriod } from '@/lib/period';
 
-import { ChartSection, seriesBarValuesVariant } from '@/components/ChartWidget';
+import { ChartCardBody, ChartSection, seriesBarValuesVariant } from '@/components/ChartWidget';
+import { pctDelta } from '@/lib/delta';
 
 interface HeatmapCell {
   n: number;
@@ -122,12 +123,20 @@ export function HistoryChartBlock({ id, homeKey }: HomeBlockProps = {}) {
   }
 
   const isDownsampled = rawRows.length > 140;
-  const caption = `${rawRows.length} дн в архиве${isDownsampled ? ' · сглажено' : ''}`;
+  const archCaption = `${rawRows.length} дн в архиве${isDownsampled ? ' · сглажено' : ''}`;
   const deltas = subscriberDeltas(rows);
+  // LEVEL series (steep rule): the headline is the CURRENT level, and the honest comparison is
+  // vs the start of the plotted range (net change over what the chart shows) — a window-sum
+  // would be meaningless for levels.
+  const last = Number(rows[rows.length - 1]?.subscribers ?? 0);
+  const first = Number(rows[0]?.subscribers ?? 0);
+  const levelDelta = first > 0 ? pctDelta(last, first) : null;
+  const caption = levelDelta ? `к началу архива · ${archCaption}` : archCaption;
 
   return (
     <ChartSection
       title="История подписчиков"
+      defaultSize="half"
       id={id}
       homeKey={homeKey}
       drillTo="/metrics/subscribers"
@@ -148,9 +157,21 @@ export function HistoryChartBlock({ id, homeKey }: HomeBlockProps = {}) {
         {
           key: 'line',
           label: 'Линия',
-          render: <SubscriberHistoryChart rows={rows} />,
+          render: (
+            <ChartCardBody value={fmt.kpi(last)} delta={levelDelta} caption={caption}>
+              <SubscriberHistoryChart rows={rows} />
+            </ChartCardBody>
+          ),
         },
-        { key: 'bar', label: 'Столбцы', render: <SubscriberHistoryBars rows={rows} /> },
+        {
+          key: 'bar',
+          label: 'Столбцы',
+          render: (
+            <ChartCardBody value={fmt.kpi(last)} delta={levelDelta} caption={caption}>
+              <SubscriberHistoryBars rows={rows} />
+            </ChartCardBody>
+          ),
+        },
         seriesBarValuesVariant(deltas.values, deltas.labels, deltas.titles, {
           diverging: true,
           // Леджер = то, чего на дельта-графике не видно: текущий уровень + сводка движения.
@@ -159,9 +180,7 @@ export function HistoryChartBlock({ id, homeKey }: HomeBlockProps = {}) {
           sumLabel: 'Δ за период',
         }),
       ]}
-    >
-      <div className="mt-3 text-xs font-medium text-muted-foreground">{caption}</div>
-    </ChartSection>
+    />
   );
 }
 
@@ -370,8 +389,8 @@ export function VelocityChartBlock({ id, homeKey }: HomeBlockProps = {}) {
   const titles = byDay.map((p) => `${p.day + 1}-е сутки: накоплено ${p.cum}% · доля дня ${p.share}%`);
   const labels = byDay.map((p) => `${p.day + 1}д`);
 
+  const day1 = data?.day1_share ?? cum[0] ?? 0;
   const captions: string[] = [];
-  if (data?.day1_share != null) captions.push(`за 1-е сутки — ${data.day1_share}%`);
   if (data?.t80_days != null) captions.push(`80% за ${data.t80_days} дн`);
   if (data?.posts_used != null) captions.push(`по ${data.posts_used} постам`);
 
@@ -384,16 +403,24 @@ export function VelocityChartBlock({ id, homeKey }: HomeBlockProps = {}) {
         {
           key: 'line',
           label: 'Линия',
-          render: <LineChart values={cum} yMin={0} yMax={Math.max(...cum, 1)} titles={titles} labels={labels} />,
+          render: (
+            <ChartCardBody label="за 1-е сутки" value={`${day1}%`} caption={captions.length > 0 ? captions.join(' · ') : undefined}>
+              <LineChart values={cum} yMin={0} yMax={Math.max(...cum, 1)} titles={titles} labels={labels} />
+            </ChartCardBody>
+          ),
         },
-        { key: 'bar', label: 'Столбцы', render: <BarChart values={cum} labels={labels} titles={titles} /> },
+        {
+          key: 'bar',
+          label: 'Столбцы',
+          render: (
+            <ChartCardBody label="за 1-е сутки" value={`${day1}%`} caption={captions.length > 0 ? captions.join(' · ') : undefined}>
+              <BarChart values={cum} labels={labels} titles={titles} />
+            </ChartCardBody>
+          ),
+        },
         seriesBarValuesVariant(cum, labels, titles, { format: (v) => `${v}%` }),
       ]}
-    >
-      {captions.length > 0 && (
-        <div className="mt-3 text-xs font-medium text-muted-foreground">{captions.join(' · ')}</div>
-      )}
-    </ChartSection>
+    />
   );
 }
 
