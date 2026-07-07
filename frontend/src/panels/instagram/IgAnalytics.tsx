@@ -1,9 +1,8 @@
 import type { IgData } from '@/lib/useIgData';
-import { Section, TrendCard, FollowsByDayCard, SubscriberMovement } from '@/components/instagram/shared';
+import { Section, TrendCard, FollowsByDayCard, SubscriberMovement, igPeriodRows } from '@/components/instagram/shared';
 import { ChartSection, WidgetGroup } from '@/components/ChartWidget';
 import { InsightsBlock, PeriodCompareBlock } from '@/components/instagram/insights';
 import { exportIgDaily } from '@/lib/igExport';
-import { type WindowPair } from '@/lib/igMetrics';
 
 /**
  * IG Аналитика — honest dynamics.
@@ -14,20 +13,9 @@ import { type WindowPair } from '@/lib/igMetrics';
  */
 export function IgAnalytics({ ig }: { ig: IgData }) {
   const hasMovement = ig.pairs.follows.hasCur || ig.pairs.unfollows.hasCur;
-  const followsPair = ig.pairs.follows.hasCur ? ig.pairs.follows : ig.pairs.follower;
 
 
-  const periodRows: { label: string; pair: WindowPair }[] = [
-    { label: 'Подписки', pair: followsPair },
-    { label: 'Охват', pair: ig.pairs.reach },
-    { label: 'Просмотры', pair: ig.pairs.views },
-    { label: 'Взаимодействия', pair: ig.pairs.ti },
-    { label: 'Вовлечено аккаунтов', pair: ig.pairs.engaged },
-    { label: 'Лайки', pair: ig.pairs.likes },
-    { label: 'Комментарии', pair: ig.pairs.comments },
-    { label: 'Сохранения', pair: ig.pairs.saves },
-    { label: 'Репосты', pair: ig.pairs.shares },
-  ];
+  const periodRows = igPeriodRows(ig);
 
   const onExport = () =>
     exportIgDaily({
@@ -75,11 +63,11 @@ export function IgAnalytics({ ig }: { ig: IgData }) {
             <SubscriberMovement follows={ig.pairs.follows} unfollows={ig.pairs.unfollows} net={ig.netMovement} />
           </ChartSection>
         )}
-        <ChartSection id="ig-period-compare" title="Сравнение периодов" defaultSize="full" noExpand>
+        <ChartSection id="ig-period-compare" title="Сравнение периодов" defaultSize="full" homeKey="ig-compare" noExpand>
           <p className="text-xs text-muted-foreground">Просмотры, лайки и сохранения сравниваются по периодам.</p>
           <PeriodCompareBlock rows={periodRows} />
         </ChartSection>
-        <ChartSection id="ig-insights" title="Главное" defaultSize="full" noExpand>
+        <ChartSection id="ig-insights" title="Главное" defaultSize="full" homeKey="ig-insights" noExpand>
           <InsightsBlock insights={ig.insights} limit={4} />
         </ChartSection>
       </WidgetGroup>

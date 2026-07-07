@@ -6,7 +6,9 @@ import { TopPosts } from '@/panels/TopPosts';
 import { HistoryChartBlock, VelocityChartBlock, HeatmapChartBlock } from '@/panels/Charts';
 import { GrowthChartBlock } from '@/panels/Overview';
 import { HomeMentionsByDay } from '@/panels/Mentions';
-import { IgReachHomeCard, IgFollowsHomeCard, IgKpiHomeCard, IgMovementHomeCard } from '@/panels/instagram/igHome';
+import { IgReachHomeCard, IgFollowsHomeCard, IgKpiHomeCard, IgMovementHomeCard, IgCompareHomeCard, IgInsightsHomeCard } from '@/panels/instagram/igHome';
+import { Compare } from '@/panels/Compare';
+import { Insights } from '@/panels/Insights';
 
 /**
  * Personal-Home widget registry — the catalogue of widgets a user can pin to /home via the
@@ -111,6 +113,34 @@ export const HOME_REGISTRY: Record<string, HomeWidgetDef> = {
   'ig-follows': {
     label: 'IG · Подписки по дням',
     render: () => <IgFollowsHomeCard id="home-ig-follows" homeKey="ig-follows" />,
+  },
+  'tg-compare': {
+    label: 'Сравнение периодов',
+    defaultSize: 'full',
+    render: () => (
+      <ChartSection id="home-tg-compare" homeKey="tg-compare" title="Сравнение периодов" defaultSize="full" noExpand>
+        <Compare />
+      </ChartSection>
+    ),
+  },
+  'tg-insights': {
+    label: 'Главное (Аналитика)',
+    defaultSize: 'full',
+    render: () => (
+      <ChartSection id="home-tg-insights" homeKey="tg-insights" title="Главное" defaultSize="full" noExpand>
+        <Insights />
+      </ChartSection>
+    ),
+  },
+  'ig-compare': {
+    label: 'IG · Сравнение периодов',
+    defaultSize: 'full',
+    render: () => <IgCompareHomeCard id="home-ig-compare" homeKey="ig-compare" />,
+  },
+  'ig-insights': {
+    label: 'IG · Главное',
+    defaultSize: 'full',
+    render: () => <IgInsightsHomeCard id="home-ig-insights" homeKey="ig-insights" />,
   },
   'ig-movement': {
     label: 'IG · Движение подписчиков',

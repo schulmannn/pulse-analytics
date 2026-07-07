@@ -378,3 +378,18 @@ export function SubscriberMovement({
     </div>
   );
 }
+
+/** The IG period-comparison rows — ONE builder for the Аналитика card and its Home pin. */
+export function igPeriodRows(ig: IgData): { label: string; pair: WindowPair }[] {
+  return [
+    { label: 'Подписки', pair: ig.pairs.follows.hasCur ? ig.pairs.follows : ig.pairs.follower },
+    { label: 'Охват', pair: ig.pairs.reach },
+    { label: 'Просмотры', pair: ig.pairs.views },
+    { label: 'Взаимодействия', pair: ig.pairs.ti },
+    { label: 'Вовлечено аккаунтов', pair: ig.pairs.engaged },
+    { label: 'Лайки', pair: ig.pairs.likes },
+    { label: 'Комментарии', pair: ig.pairs.comments },
+    { label: 'Сохранения', pair: ig.pairs.saves },
+    { label: 'Репосты', pair: ig.pairs.shares },
+  ];
+}
