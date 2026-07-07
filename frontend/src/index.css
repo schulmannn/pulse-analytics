@@ -102,6 +102,17 @@
     --chart-4-accent: var(--chart-4);
     --chart-5-accent: var(--chart-5);
     --chart-6-accent: var(--chart-6);
+
+    /* CATEGORICAL identity tokens — what donut slices / breakdown dots / multi-entity legends
+       paint with (CHART_CYCLE, PieChart). Light aliases the categorical set 1:1; dark overrides
+       below with a validated pastel family (steep register: identity a step deeper than the
+       card-accent pastels). Series lines in multi-series charts keep --chart-1..6. */
+    --chart-1-cat: var(--chart-1);
+    --chart-2-cat: var(--chart-2);
+    --chart-3-cat: var(--chart-3);
+    --chart-4-cat: var(--chart-4);
+    --chart-5-cat: var(--chart-5);
+    --chart-6-cat: var(--chart-6);
   }
 
   .dark {
@@ -175,6 +186,18 @@
     --chart-4-accent: 18 75% 83%;    /* pastel peach             */
     --chart-5-accent: 260 64% 81%;   /* pastel lavender #c5b1ee */
     --chart-6-accent: 205 60% 84%;   /* pastel sky               */
+
+    /* Categorical pastel family (donut slices / breakdown dots), a step deeper than the accents
+       so adjacent slices separate. Validated (dataviz gate): chroma ≥ 0.1, contrast ≥ 3:1;
+       worst CVD pairs sit in the 8–12 band, which is legal ONLY with secondary encoding — our
+       donuts carry 1.5px card-colour slice strokes and every categorical read has a labelled
+       legend/value list, never colour alone. */
+    --chart-1-cat: 216 82% 74%;      /* pastel blue     #84b1f5 */
+    --chart-2-cat: 45 80% 72%;       /* pastel sand     #f1d47e */
+    --chart-3-cat: 140 50% 68%;      /* pastel mint     #85d6a0 */
+    --chart-4-cat: 12 80% 74%;       /* pastel salmon   #f29d88 */
+    --chart-5-cat: 260 70% 76%;      /* pastel lavender #b497ed */
+    --chart-6-cat: 202 80% 70%;      /* pastel sky      #75c3f0 */
   }
 
   /* ── Motion canon (theme-agnostic — durations/easing don't change between light and dark) ──────

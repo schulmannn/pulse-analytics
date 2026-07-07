@@ -49,7 +49,7 @@ export function IgOverview({ ig }: { ig: IgData }) {
             trend={isLive(ig.pairs.views) ? pairDelta(ig.pairs.views) : null}
             onDrill={() => navigate('/metrics/ig-views')}
           />
-          <KpiCard label="Вовлечённость" value={ig.erReach > 0 ? `${ig.erReach.toFixed(2)}%` : '—'} trend={erTrend} />
+          <KpiCard label="Вовлечённость" value={ig.erReach > 0 ? `${ig.erReach.toFixed(2)}%` : '—'} trend={erTrend} onDrill={() => navigate('/metrics/ig-er')} />
           <KpiCard
             label="Взаимодействия"
             value={isLive(ig.pairs.ti) ? fmt.kpi(ig.pairs.ti.cur) : '—'}

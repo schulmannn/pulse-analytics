@@ -4,9 +4,10 @@ import { fmt } from '@/lib/format';
 import type { MetricDelta } from '@/lib/delta';
 import { DeltaPill } from '@/components/DeltaPill';
 import { LineChart } from '@/components/LineChart';
+import { BarChart } from '@/components/BarChart';
 import { ChartSection as WidgetChartSection } from '@/components/ChartWidget';
-import type { ChartExpandConfig } from '@/components/ExpandableChart';
 import { fmtDay, type Point } from '@/lib/igMetrics';
+import type { WidgetPeriodValue } from '@/lib/period';
 
 /** Window an IG daily-Point series to the last `days` points (0 = «Всё») for the rich-expand
     overlay — feeds renderExpanded / renderExpandedBar / statsFor. Drops any 'total' marker point
@@ -163,6 +164,42 @@ export function KpiHero({
   );
 }
 
+/** Daily gross-follows bars — the second genuine IG daily series. Same per-widget-period card
+    contract as TrendCard (full series in, client-side windowing, own pills). The old «всего за
+    период» caption is gone: the figure lives in «Движение подписчиков» and couldn't follow a
+    per-widget window as static children. */
+export function FollowsByDayCard({ data, drillTo, id, homeKey, title = 'Подписки по дням' }: { data: Point[]; drillTo?: string; id?: string; homeKey?: string; title?: string }) {
+  const pts = data.filter((p) => p.day !== 'total');
+  return (
+    <WidgetChartSection
+      id={id}
+      homeKey={homeKey}
+      title={title}
+      drillTo={drillTo}
+      periodControl
+      variants={(period: WidgetPeriodValue) => {
+        const w = pts.filter((p) => period.inRange(p.day));
+        return [
+          {
+            key: 'bar',
+            label: 'Столбцы',
+            render:
+              w.length > 0 ? (
+                <BarChart
+                  values={w.map((d) => d.value)}
+                  labels={w.map((d) => fmtDay(d.day))}
+                  titles={w.map((d) => `${fmtDay(d.day)}: +${fmt.num(d.value)}`)}
+                />
+              ) : (
+                <EmptyChart />
+              ),
+          },
+        ];
+      }}
+    />
+  );
+}
+
 export function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="pt-2">
@@ -181,37 +218,39 @@ export function pickLabels(series: Point[]): string[] {
 }
 
 /** A daily line chart for a metric that genuinely has a daily series (reach / new followers).
-    Renders as a WIDGET card (chart surfaces are widgets now); the flat ChartSection above
-    stays exported for non-chart hosts (metric-page rail, the report document). The chart rides
-    the widget's fill context as a VARIANT (not bare children) so it fills the fixed tile height
-    instead of sitting at its default 200 and leaving a gap / a stray scrollbar. */
-export function TrendCard({ title, series, expand, drillTo }: { title: string; series: Point[]; expand?: ChartExpandConfig; drillTo?: string }) {
-  if (series.length <= 1) {
-    return (
-      <WidgetChartSection title={title}>
-        <EmptyChart />
-      </WidgetChartSection>
-    );
-  }
+    Renders as a WIDGET card with its OWN period pills (periodControl): the card takes the FULL
+    series and windows it client-side per the widget period — the archive-backed series is
+    already longer than any window, so no per-widget insights fan-out is needed. The chart rides
+    the widget's fill context as a VARIANT so it fills the fixed tile height. */
+export function TrendCard({ title, series, drillTo, id, homeKey }: { title: string; series: Point[]; drillTo?: string; id?: string; homeKey?: string }) {
+  const pts = series.filter((p) => p.day !== 'total');
   return (
     <WidgetChartSection
+      id={id}
+      homeKey={homeKey}
       title={title}
-      expand={expand}
       drillTo={drillTo}
-      variants={[
-        {
-          key: 'line',
-          label: 'Линия',
-          render: (
-            <LineChart
-              values={series.map((p) => p.value)}
-              labels={pickLabels(series)}
-              titles={series.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)}`)}
-              emphasizeLastLabel
-            />
-          ),
-        },
-      ]}
+      periodControl
+      variants={(period: WidgetPeriodValue) => {
+        const w = pts.filter((p) => period.inRange(p.day));
+        return [
+          {
+            key: 'line',
+            label: 'Линия',
+            render:
+              w.length > 1 ? (
+                <LineChart
+                  values={w.map((p) => p.value)}
+                  labels={pickLabels(w)}
+                  titles={w.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)}`)}
+                  emphasizeLastLabel
+                />
+              ) : (
+                <EmptyChart />
+              ),
+          },
+        ];
+      }}
     />
   );
 }

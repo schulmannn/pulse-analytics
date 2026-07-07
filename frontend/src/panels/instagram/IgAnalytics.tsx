@@ -1,11 +1,10 @@
 import { fmt } from '@/lib/format';
 import type { IgData } from '@/lib/useIgData';
-import { Section, TrendCard, EmptyChart, signedNum } from '@/components/instagram/shared';
-import { ChartSection, WidgetGroup } from '@/components/ChartWidget';
-import { BarChart } from '@/components/BarChart';
+import { Section, TrendCard, FollowsByDayCard, signedNum } from '@/components/instagram/shared';
+import { WidgetGroup } from '@/components/ChartWidget';
 import { InsightsBlock, PeriodCompareBlock } from '@/components/instagram/insights';
 import { exportIgDaily } from '@/lib/igExport';
-import { fmtDay, type Point, type WindowPair } from '@/lib/igMetrics';
+import { type WindowPair } from '@/lib/igMetrics';
 
 /**
  * IG Аналитика — honest dynamics.
@@ -15,8 +14,6 @@ import { fmtDay, type Point, type WindowPair } from '@/lib/igMetrics';
  * - Aggregate metrics (views/saves/likes/…) → period comparison, not a fabricated daily graph.
  */
 export function IgAnalytics({ ig }: { ig: IgData }) {
-  const reachWin = ig.series.reach.filter((p) => ig.inWindow(p.day));
-  const followsByDay = ig.series.follower.filter((p) => ig.inWindow(p.day)).slice(-30);
   const hasMovement = ig.pairs.follows.hasCur || ig.pairs.unfollows.hasCur;
   const followsPair = ig.pairs.follows.hasCur ? ig.pairs.follows : ig.pairs.follower;
 
@@ -66,10 +63,11 @@ export function IgAnalytics({ ig }: { ig: IgData }) {
         {/* A real WidgetGroup (TG parity): the cards gain Выше/Ниже/Переставить/Скрыть in the
             ⋯ menu — reorder/hide state persists per user, same as the TG feeds. */}
         <WidgetGroup id="ig-dynamics" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
-          {/* Daily metrics with a real page drill INTO it (the overlay was the stopgap before
-              /metrics/ig-* existed). */}
-          <TrendCard title="Охват по дням" series={reachWin} drillTo="/metrics/ig-reach" />
-          <FollowsByDayCard data={followsByDay} total={followsPair.cur} drillTo="/metrics/ig-follows" />
+          {/* Daily metrics with a real page drill INTO it; each card windows the FULL
+              archive-backed series by its OWN period pills (per-widget период, TG parity).
+              homeKey → the ⋯ menu grows «На главную» (pinned copies render via igHome). */}
+          <TrendCard title="Охват по дням" series={ig.series.reach} drillTo="/metrics/ig-reach" homeKey="ig-reach" />
+          <FollowsByDayCard data={ig.series.follower} drillTo="/metrics/ig-follows" homeKey="ig-follows" />
         </WidgetGroup>
       </Section>
 
@@ -126,35 +124,3 @@ function SubscriberMovement({
   );
 }
 
-function FollowsByDayCard({ data, total, drillTo }: { data: Point[]; total: number; drillTo?: string }) {
-  return (
-    <ChartSection
-      title="Подписки по дням"
-      drillTo={drillTo}
-      // Bars as a VARIANT so they fill the fixed tile height (bare children would sit at the
-      // default 200 and leave a gap); the period total stays as the caption below.
-      variants={
-        data.length > 0
-          ? [
-              {
-                key: 'bar',
-                label: 'Столбцы',
-                render: (
-                  <BarChart
-                    values={data.map((d) => d.value)}
-                    labels={data.map((d) => fmtDay(d.day))}
-                    titles={data.map((d) => `${fmtDay(d.day)}: +${fmt.num(d.value)}`)}
-                  />
-                ),
-              },
-            ]
-          : undefined
-      }
-    >
-      {data.length === 0 && <EmptyChart />}
-      <p className="mt-3 text-xs text-muted-foreground">
-        Всего подписок за период: <span className="font-medium text-verdant">+{fmt.num(total)}</span>
-      </p>
-    </ChartSection>
-  );
-}

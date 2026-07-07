@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useIgData } from '@/lib/useIgData';
 import { pairDelta } from '@/lib/igMetrics';
@@ -13,6 +13,7 @@ import { ChartExpandedContext } from '@/components/ExpandableChart';
 import { DeltaPill } from '@/components/DeltaPill';
 import { ErrorState } from '@/components/ErrorState';
 import { Skeleton } from '@/components/ui/skeleton';
+import { PinnedDayPanel } from '@/components/PinnedDayPanel';
 import { MetricPage, SegSelect, useExplorerChartHeight } from '@/panels/MetricPage';
 
 /**
@@ -89,8 +90,16 @@ const AGG_DEFS: Record<string, IgAggDef> = {
   },
 };
 
+/** ER — the one DERIVED IG metric page: a ratio of two period aggregates, so it gets the
+    aggregate (period-vs-period) template plus its numerator/denominator decomposition. */
+const ER_DEF = {
+  term: 'Вовлечённость (ER)',
+  formula: 'Взаимодействия ÷ охват × 100% за выбранный период.',
+  source: 'Производная от Instagram insights (total_interactions, reach) — агрегаты за период.',
+};
+
 export function isIgMetricKey(raw: string | undefined): boolean {
-  return raw != null && (raw in DAILY_DEFS || raw in AGG_DEFS);
+  return raw != null && (raw in DAILY_DEFS || raw in AGG_DEFS || raw === 'ig-er');
 }
 
 /** /metrics/:key dispatcher: TG keys → the TG explorer, ig-* keys → the IG page. MetricPage
@@ -115,7 +124,12 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
   // aggregates only exist per insights window, so a local window would have nothing to slice).
   const [days, setDays] = useState(30);
   const [kind, setKind] = useState<'line' | 'bar'>('line');
-  const [cmp, setCmp] = useState<'off' | 'prev'>('prev');
+  const [cmp, setCmp] = useState<'off' | 'prev' | 'year'>('prev');
+  // Pinned chart point — see MetricPage: any change of what the chart shows un-pins.
+  const [pinned, setPinned] = useState<number | null>(null);
+  useEffect(() => {
+    setPinned(null);
+  }, [metricKey, days, kind, cmp]);
 
   if (ig.loading) {
     return (
@@ -138,6 +152,18 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
   }
 
   const handle = ig.profile?.username ? `@${ig.profile.username}` : null;
+  if (metricKey === 'ig-er') {
+    return (
+      <IgErPage
+        erReach={ig.erReach}
+        erReachPrev={ig.erReachPrev}
+        interactions={ig.pairs.ti}
+        reach={ig.pairs.reach}
+        windowDays={ig.window.days}
+        handle={handle}
+      />
+    );
+  }
   const daily = DAILY_DEFS[metricKey];
   if (!daily) {
     return <IgAggregatePage def={AGG_DEFS[metricKey]} pair={ig.pairs[AGG_DEFS[metricKey].pairKey]} windowDays={ig.window.days} handle={handle} />;
@@ -147,11 +173,33 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
   const seriesFull = ig.series[daily.seriesKey].filter((p) => p.day !== 'total');
   const win = windowIgSeries(seriesFull, days, daily.genitive);
   const n = win.values.length;
-  // Comparison baseline: the same-length slice right BEFORE the window. Only offered when the
-  // archive actually reaches that far — a partial baseline would understate the previous period.
-  const prevSlice = days > 0 && seriesFull.length >= 2 * n ? seriesFull.slice(-(2 * n), -n) : [];
-  const ghostVals = prevSlice.map((p) => p.value);
-  const ghostOk = cmp === 'prev' && days > 0 && n > 1 && ghostVals.length === n;
+  const winPoints = seriesFull.slice(-n);
+  // Comparison baseline. «Пред. период» — the same-length slice right BEFORE the window;
+  // «Год назад» — the SAME CALENDAR DATES shifted a year back (by date, not index — the archive
+  // may have gaps). Either is offered only when the archive fully covers it: a partial baseline
+  // would understate the past and fake growth.
+  let ghostVals: number[] = [];
+  if (cmp === 'prev' && days > 0 && seriesFull.length >= 2 * n) {
+    ghostVals = seriesFull.slice(-(2 * n), -n).map((p) => p.value);
+  } else if (cmp === 'year' && days > 0) {
+    const byDay = new Map(seriesFull.map((p) => [p.day, p.value]));
+    const shifted = winPoints.map((p) => byDay.get(shiftYearBack(p.day)));
+    if (shifted.every((v): v is number => v != null)) ghostVals = shifted;
+  }
+  const ghostOk = cmp !== 'off' && days > 0 && n > 1 && ghostVals.length === n;
+  const cmpLabel = cmp === 'year' ? 'Год назад' : 'Пред. период';
+
+  // Pinned point: winPoints carries the calendar day per index, so the day (and its posts —
+  // IG posts have timestamps) resolves exactly, at any window.
+  const pinnedValid = pinned != null && pinned >= 0 && pinned < n ? pinned : null;
+  const pinnedDay = pinnedValid != null ? winPoints[pinnedValid]?.day : null;
+  const pinnedPosts = pinnedDay
+    ? ig.posts
+        .filter((p) => p.timestamp && igDayKey(p.timestamp) === pinnedDay)
+        .sort((a, b) => Number(b.reach ?? b.views ?? 0) - Number(a.reach ?? a.views ?? 0))
+        .slice(0, 5)
+    : [];
+  const pinnedDiff = pinnedValid != null && pinnedValid > 0 ? win.values[pinnedValid] - win.values[pinnedValid - 1] : null;
 
   const sumCur = win.values.reduce((s, v) => s + v, 0);
   const sumPrev = ghostOk ? ghostVals.reduce((s, v) => s + v, 0) : null;
@@ -188,11 +236,12 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
       </div>
 
       <div className="grid grid-cols-1 gap-6 xl:gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
-        <div className="min-w-0">
+        <div className="min-w-0 space-y-6">
           <ChartSection
             id={`metric-${metricKey}`}
             title="По дням"
             defaultSize="full"
+            noExpand
             action={
               <div role="group" aria-label="Тип графика" className="flex shrink-0 overflow-hidden rounded border border-border">
                 {(['line', 'bar'] as const).map((k) => (
@@ -223,13 +272,25 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
                     markAnomalies
                     showPoints={n <= 45}
                     ghost={ghostOk ? ghostVals : undefined}
-                    ghostLabel="Пред. период"
+                    ghostLabel={cmpLabel}
                     legendToggle={false}
                     yMin={0}
                     emphasizeLastLabel
+                    onPointClick={(i) => setPinned((p) => (p === i ? null : i))}
+                    pinnedIndex={pinnedValid}
                   />
                 ) : (
-                  <BarChart values={win.values} labels={win.labels} titles={win.titles} height={chartH} ghost={ghostOk ? ghostVals : undefined} ghostLabel="Пред. период" legendToggle={false} />
+                  <BarChart
+                    values={win.values}
+                    labels={win.labels}
+                    titles={win.titles}
+                    height={chartH}
+                    ghost={ghostOk ? ghostVals : undefined}
+                    ghostLabel={cmpLabel}
+                    legendToggle={false}
+                    onPointClick={(i) => setPinned((p) => (p === i ? null : i))}
+                    pinnedIndex={pinnedValid}
+                  />
                 )}
               </ChartExpandedContext.Provider>
             ) : (
@@ -246,6 +307,38 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
               </div>
             )}
           </ChartSection>
+
+          {pinnedValid != null && pinnedDay != null && (
+            <PinnedDayPanel
+              dateLabel={win.labels[pinnedValid] ?? pinnedDay}
+              rows={[
+                { label: 'Значение', value: fmt.num(win.values[pinnedValid]) },
+                ...(pinnedDiff != null
+                  ? [
+                      {
+                        label: 'К пред. дню',
+                        value: (
+                          <span className={pinnedDiff > 0 ? 'text-verdant' : pinnedDiff < 0 ? 'text-ember' : undefined}>
+                            {pinnedDiff > 0 ? '+' : pinnedDiff < 0 ? '−' : ''}
+                            {fmt.num(Math.abs(pinnedDiff))}
+                          </span>
+                        ),
+                      },
+                    ]
+                  : []),
+                ...(ghostOk && ghostVals[pinnedValid] != null ? [{ label: cmpLabel, value: fmt.num(ghostVals[pinnedValid]) }] : []),
+              ]}
+              posts={pinnedPosts.map((post, i) => ({
+                key: post.id ?? i,
+                thumb: post.thumbnail_url ?? (post.media_type === 'VIDEO' ? null : post.media_url) ?? null,
+                text: post.caption ? post.caption.slice(0, 140) : 'Без подписи',
+                value: fmt.short(Number(post.reach ?? post.views ?? 0)),
+                href: post.permalink ?? null,
+              }))}
+              postsEmpty="В этот день публикаций не было (в загруженных постах)."
+              onClose={() => setPinned(null)}
+            />
+          )}
         </div>
 
         {/* Explore rail — flat hairline sections (no widget chrome: these are controls, not cards). */}
@@ -258,12 +351,13 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
               options={[
                 { value: 'off' as const, label: 'Выкл' },
                 { value: 'prev' as const, label: 'Пред. период' },
+                { value: 'year' as const, label: 'Год назад' },
               ]}
             />
             {cmp === 'off' ? (
               <p className="text-xs text-muted-foreground">Включите сравнение — пунктир прошлого окна ляжет на график.</p>
             ) : days === 0 ? (
-              <p className="text-xs text-muted-foreground">Для окна «Всё» прошлого периода не существует.</p>
+              <p className="text-xs text-muted-foreground">Для окна «Всё» базы сравнения не существует.</p>
             ) : ghostOk ? (
               <div className="space-y-2 text-sm">
                 <div className="flex items-baseline justify-between gap-3">
@@ -271,7 +365,7 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
                   <span className="font-medium tabular-nums">{fmt.kpi(sumCur)}</span>
                 </div>
                 <div className="flex items-baseline justify-between gap-3">
-                  <span className="text-xs text-muted-foreground">Пред. период</span>
+                  <span className="text-xs text-muted-foreground">{cmpLabel}</span>
                   <span className="tabular-nums">{sumPrev != null ? fmt.kpi(sumPrev) : '—'}</span>
                 </div>
                 {compareDelta != null && (
@@ -284,6 +378,8 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
                   </div>
                 )}
               </div>
+            ) : cmp === 'year' ? (
+              <p className="text-xs text-muted-foreground">Архив пока не достаёт до прошлого года — дневная история копится в ig_daily, сравнение включится само.</p>
             ) : (
               <p className="text-xs text-muted-foreground">В архиве недостаточно истории за прошлый период — сравнить не с чем.</p>
             )}
@@ -383,6 +479,108 @@ function IgAggregatePage({ def, pair, windowDays, handle }: { def: IgAggDef; pai
             <dl className="space-y-3 text-sm">
               <AboutRow label="Как считается" text={def.formula} />
               <AboutRow label="Источник" text={def.source} />
+            </dl>
+          </RailSection>
+          <Link to="/instagram/analytics" className="inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:text-primary/80">
+            Открыть IG-аналитику <span aria-hidden="true">→</span>
+          </Link>
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+/** Local calendar-day key of an IG post timestamp (viewer-local, matching the series days). */
+function igDayKey(iso: string): string {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return '';
+  const d = new Date(t);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** Same calendar date a year earlier; Feb 29 maps to Feb 28 (no leap counterpart). */
+function shiftYearBack(day: string): string {
+  const [y, m, d] = day.split('-');
+  if (m === '02' && d === '29') return `${Number(y) - 1}-02-28`;
+  return `${Number(y) - 1}-${m}-${d}`;
+}
+
+/** ER (derived): period-vs-period in percentage POINTS + the numerator/denominator decomposition —
+    the honest form for a ratio of two period aggregates. */
+function IgErPage({
+  erReach,
+  erReachPrev,
+  interactions,
+  reach,
+  windowDays,
+  handle,
+}: {
+  erReach: number;
+  erReachPrev: number;
+  interactions: WindowPair;
+  reach: WindowPair;
+  windowDays: number;
+  handle: string | null;
+}) {
+  const hasCur = erReach > 0;
+  const hasPrev = erReachPrev > 0;
+  const deltaPp = hasCur && hasPrev ? erReach - erReachPrev : null;
+  const trend = hasCur && hasPrev ? pctDelta(erReach, erReachPrev) : null;
+  return (
+    <div className="space-y-5">
+      <Link to="/instagram" className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground">
+        <span aria-hidden="true">←</span> Instagram
+      </Link>
+
+      <div>
+        <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
+          <span className="text-3xl font-medium leading-none tabular-nums tracking-tight">{hasCur ? `${erReach.toFixed(2)}%` : '—'}</span>
+          <DeltaPill delta={trend} />
+          <span className="text-xs tracking-wide text-muted-foreground">
+            {ER_DEF.term} · {windowDays} дн.
+            {handle ? <span className="text-ink3"> · Instagram {handle}</span> : null}
+          </span>
+        </div>
+        <div className="mt-1.5 text-xs text-muted-foreground">окно управляется общим периодом Instagram (переключатели сверху)</div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 xl:gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="min-w-0">
+          <ChartSection title="Период против периода" defaultSize="full" noExpand>
+            {hasCur ? (
+              <>
+                <div className="grid grid-cols-1 gap-px border-t border-border bg-border sm:grid-cols-3">
+                  <div className="bg-card p-4">
+                    <div className="text-xs tracking-wide text-muted-foreground">Текущий период</div>
+                    <div className="mt-2 text-3xl font-medium tabular-nums tracking-tight">{erReach.toFixed(2)}%</div>
+                  </div>
+                  <div className="bg-card p-4">
+                    <div className="text-xs tracking-wide text-muted-foreground">Пред. период</div>
+                    <div className="mt-2 text-3xl font-medium tabular-nums tracking-tight text-ink2">{hasPrev ? `${erReachPrev.toFixed(2)}%` : '—'}</div>
+                  </div>
+                  <div className="bg-card p-4">
+                    <div className="text-xs tracking-wide text-muted-foreground">Изменение</div>
+                    <div className={`mt-2 text-3xl font-medium tabular-nums tracking-tight ${deltaPp == null ? 'text-ink3' : deltaPp >= 0 ? 'text-verdant' : 'text-ember'}`}>
+                      {deltaPp == null ? '—' : `${deltaPp >= 0 ? '+' : '−'}${Math.abs(deltaPp).toFixed(2)} п.п.`}
+                    </div>
+                  </div>
+                </div>
+                {/* The reconcile line (TG metric-page idiom): the ratio unfolded into its parts. */}
+                <p className="mt-3 text-xs text-muted-foreground">
+                  ER = {fmt.kpi(interactions.cur)} взаимодействий ÷ {fmt.kpi(reach.cur)} охвата × 100% = {erReach.toFixed(2)}%
+                </p>
+              </>
+            ) : (
+              <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">Instagram не вернул составляющие ER за период.</div>
+            )}
+          </ChartSection>
+        </div>
+
+        <aside className="space-y-6">
+          <RailSection title="О метрике">
+            <dl className="space-y-3 text-sm">
+              <AboutRow label="Как считается" text={ER_DEF.formula} />
+              <AboutRow label="Источник" text={ER_DEF.source} />
             </dl>
           </RailSection>
           <Link to="/instagram/analytics" className="inline-flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:text-primary/80">

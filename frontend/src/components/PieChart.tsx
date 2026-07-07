@@ -125,7 +125,7 @@ export function PieChart({ values, labels, titles, colors, height = 200 }: PieCh
   const big: Slice[] = ranked.slice(0, MAX_COLORS).map((s, pos) => ({
     label: labels?.[s.i] ?? '',
     value: s.v,
-    color: colors?.[s.i] ?? `hsl(var(--chart-${(pos % 6) + 1}))`,
+    color: colors?.[s.i] ?? `hsl(var(--chart-${(pos % 6) + 1}-cat))`,
     title: titles?.[s.i] ?? `${labels?.[s.i] ?? ''}: ${fmt.num(s.v)}`,
   }));
   const otherValue = ranked.slice(MAX_COLORS).reduce((sum, s) => sum + s.v, 0);

@@ -6,6 +6,7 @@ import { TopPosts } from '@/panels/TopPosts';
 import { HistoryChartBlock, VelocityChartBlock, HeatmapChartBlock } from '@/panels/Charts';
 import { GrowthChartBlock } from '@/panels/Overview';
 import { HomeMentionsByDay } from '@/panels/Mentions';
+import { IgReachHomeCard, IgFollowsHomeCard } from '@/panels/instagram/igHome';
 
 /**
  * Personal-Home widget registry — the catalogue of widgets a user can pin to /home via the
@@ -100,6 +101,16 @@ export const HOME_REGISTRY: Record<string, HomeWidgetDef> = {
     label: 'Упоминания по дням',
     // Self-fetching (free mentions archive, no live-search quota) — no wrapper needed.
     render: () => <HomeMentionsByDay id="home-mentions" homeKey="mentions" />,
+  },
+  // Instagram daily cards — self-fetching wrappers (igHome), so pinning them doesn't drag the
+  // ig-prop threading onto Home; an unconnected channel gets an honest connect prompt.
+  'ig-reach': {
+    label: 'IG · Охват по дням',
+    render: () => <IgReachHomeCard id="home-ig-reach" homeKey="ig-reach" />,
+  },
+  'ig-follows': {
+    label: 'IG · Подписки по дням',
+    render: () => <IgFollowsHomeCard id="home-ig-follows" homeKey="ig-follows" />,
   },
 };
 

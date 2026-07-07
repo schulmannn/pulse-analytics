@@ -16,8 +16,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const WD_ORDER = [1, 2, 3, 4, 5, 6, 0];
 const WD_LABELS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 const CHART_CYCLE = [
-  'hsl(var(--chart-1))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))',
-  'hsl(var(--chart-4))', 'hsl(var(--chart-5))', 'hsl(var(--chart-6))',
+  'hsl(var(--chart-1-cat))', 'hsl(var(--chart-2-cat))', 'hsl(var(--chart-3-cat))',
+  'hsl(var(--chart-4-cat))', 'hsl(var(--chart-5-cat))', 'hsl(var(--chart-6-cat))',
 ];
 
 interface Agg {

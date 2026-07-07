@@ -10,6 +10,7 @@ import { METRIC_DEFS } from '@/lib/metricDefs';
 import type { MetricDef } from '@/lib/metricDefs';
 import { fmt } from '@/lib/format';
 import { markdownToPlainText } from '@/lib/markdown';
+import { PinnedDayPanel } from '@/components/PinnedDayPanel';
 import type { NormalizedPost } from '@/lib/posts';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ErrorState } from '@/components/ErrorState';
@@ -117,6 +118,12 @@ export function useExplorerChartHeight(): number {
   return h;
 }
 
+/** Local calendar-day key of an instant (parseDayKey semantics — the viewer's local date). */
+function localDayKey(ms: number): string {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 // ── Grain-aware time buckets (bucketKeyOf / bucketKeysInWindow now live in lib/metricSeries) ─
 function bucketLabelOf(key: string, grain: Grain): string {
   if (grain === 'month') {
@@ -213,6 +220,16 @@ export function MetricPage() {
   const cmpParam = params.get('cmp');
   const cmp: CompareMode = cmpParam === 'off' ? 'off' : cmpParam === 'year' ? 'year' : 'prev';
   const dim: Dim = params.get('dim') === 'weekday' ? 'weekday' : 'format';
+
+  // Pinned chart point (steep's point drill): set by a click on the line/bar, anchors the
+  // «Точка · день» panel under the chart. Any change of what the chart SHOWS un-pins — an index
+  // into the old series would silently point at a different day.
+  const [pinned, setPinned] = useState<number | null>(null);
+  // Primitive deps ONLY (range?.from/to, not the object): an unstable identity would re-fire
+  // this after every render and instantly wipe a fresh pin.
+  useEffect(() => {
+    setPinned(null);
+  }, [rawKey, days, range?.from, range?.to, grain, rawChart, cmp]);
 
   const derived = useMemo(
     () => deriveKpis(data, history, channelsData, channelId, days, range, inRange),
@@ -466,6 +483,22 @@ export function MetricPage() {
 
   const chartTypes: ChartType[] = field ? ['line', 'bar', 'rank', 'pivot'] : ['line', 'bar'];
 
+  // ── Pinned point resolution ────────────────────────────────────────────────────────────
+  // Posts are addressable only on the DAY grain of a bounded window (bucket keys run
+  // winFrom..winTo, so index ↔ calendar day is exact) and only for post-derived metrics;
+  // elsewhere the panel shows the numbers without a post list.
+  const pinnedValid = pinned != null && pinned >= 0 && pinned < series.values.length ? pinned : null;
+  const pinnedIsChart = chartType === 'line' || chartType === 'bar';
+  const canResolveDay = field != null && effGrain === 'day' && winFrom != null;
+  const pinnedDayKey = pinnedValid != null && canResolveDay ? localDayKey(winFrom! + pinnedValid * DAY_MS) : null;
+  const pinnedPosts = pinnedDayKey
+    ? normPosts
+        .filter((p) => p.date && localDayKey(Date.parse(p.date)) === pinnedDayKey)
+        .sort((a, b) => Number(b[field!] ?? 0) - Number(a[field!] ?? 0))
+        .slice(0, 5)
+    : [];
+  const pinnedDiff = pinnedValid != null && pinnedValid > 0 ? series.values[pinnedValid] - series.values[pinnedValid - 1] : null;
+
   return (
     <div className="space-y-5">
       {/* Breadcrumb back to the ledger the metric was opened from. */}
@@ -495,6 +528,7 @@ export function MetricPage() {
             id={`metric-${metricKey}`}
             title={chartTitle}
             defaultSize="full"
+            noExpand
             action={
               <div role="group" aria-label="Тип графика" className="flex shrink-0 overflow-hidden rounded border border-border">
                 {chartTypes.map((kind) => (
@@ -524,13 +558,25 @@ export function MetricPage() {
                   ghostLabel={cmpLabel ?? undefined}
                   legendToggle={false}
                   yMin={ZERO_BASED[metricKey] && series.values.length > 1 ? 0 : undefined}
+                  onPointClick={(i) => setPinned((p) => (p === i ? null : i))}
+                  pinnedIndex={pinnedValid}
                 />
               </ChartExpandedContext.Provider>
             )}
             {chartType === 'bar' && (
               /* Expanded context switches BarChart into its rich mode (y ticks + value labels). */
               <ChartExpandedContext.Provider value={true}>
-                <BarChart values={series.values} labels={series.labels} titles={titles} height={chartH} ghost={ghost} ghostLabel={cmpLabel ?? undefined} legendToggle={false} />
+                <BarChart
+                  values={series.values}
+                  labels={series.labels}
+                  titles={titles}
+                  height={chartH}
+                  ghost={ghost}
+                  ghostLabel={cmpLabel ?? undefined}
+                  legendToggle={false}
+                  onPointClick={(i) => setPinned((p) => (p === i ? null : i))}
+                  pinnedIndex={pinnedValid}
+                />
               </ChartExpandedContext.Provider>
             )}
             {chartType === 'rank' && (
@@ -540,6 +586,40 @@ export function MetricPage() {
               <PivotTable columns={pivot.columns} rows={pivot.rows} valueFmt={fmt.short} />
             )}
           </ChartWidget>
+
+          {pinnedValid != null && pinnedIsChart && (
+            <PinnedDayPanel
+              dateLabel={series.labels[pinnedValid] ?? ''}
+              rows={[
+                { label: 'Значение', value: fmt.num(series.values[pinnedValid]) },
+                ...(pinnedDiff != null
+                  ? [
+                      {
+                        label: 'К пред. точке',
+                        value: (
+                          <span className={pinnedDiff > 0 ? 'text-verdant' : pinnedDiff < 0 ? 'text-ember' : undefined}>
+                            {pinnedDiff > 0 ? '+' : pinnedDiff < 0 ? '−' : ''}
+                            {fmt.num(Math.abs(pinnedDiff))}
+                          </span>
+                        ),
+                      },
+                    ]
+                  : []),
+                ...(ghost && ghost[pinnedValid] != null
+                  ? [{ label: cmpLabel ?? 'База', value: fmt.num(ghost[pinnedValid]) }]
+                  : []),
+              ]}
+              posts={pinnedPosts.map((post) => ({
+                key: post.id ?? post.date ?? '',
+                thumb: post.thumb ? `${post.thumb}?size=sm` : null,
+                text: post.caption ? markdownToPlainText(post.caption) : 'Без подписи',
+                value: fmt.short(Number(post[field!] ?? 0)),
+                onOpen: () => setOpenPost(post),
+              }))}
+              showPosts={canResolveDay}
+              onClose={() => setPinned(null)}
+            />
+          )}
 
           {field && (
             <ChartSection title={`Топ постов по ${CONTRIB_LABEL[metricKey] ?? 'метрике'}`}>
