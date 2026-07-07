@@ -84,10 +84,12 @@ const SIZE_RANK: Record<WidgetSize, number> = { third: 0, half: 1, full: 2 };
 function maxSize(a: WidgetSize, b: WidgetSize): WidgetSize {
   return SIZE_RANK[a] >= SIZE_RANK[b] ? a : b;
 }
-/** col-span on the 6-col grid: third → 2/6, half → 3/6, full → 6/6. */
+/** col-span on the 6-col grid — the steep row model (owner call): 33% · 66% · 100%. A row is
+    three thirds, or a third beside a half (66%); the old 50/50 pair is gone. Stored pref KEYS
+    are unchanged ('half' now MEANS 66%), so existing user layouts migrate by themselves. */
 const SIZE_COL_SPAN: Record<WidgetSize, string> = {
   third: 'lg:col-span-2',
-  half: 'lg:col-span-3',
+  half: 'lg:col-span-4',
   full: 'lg:col-span-6',
 };
 
@@ -1246,7 +1248,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
   // normStyle/legacyConfigSeed), so the opt-out survives reloads and legacy→config migration.
   const activeTinted = (configEditor ? configEditor.tinted : prefs.tinted) ?? true;
   const activeTarget = configEditor ? (configEditor.target ?? null) : (prefs.target ?? null);
-  const chosenSize: WidgetSize = (configEditor ? configEditor.size : prefs.size) ?? defaultSize ?? 'half';
+  const chosenSize: WidgetSize = (configEditor ? configEditor.size : prefs.size) ?? defaultSize ?? 'third';
   const effectiveSize = maxSize(chosenSize, activeVariant?.minSize ?? 'third');
   // Height fed to every chart in the body so it fills the tile. Only for the FIXED sizes
   // (third/half); a `full` card is content-height, so it passes null and charts keep their own
@@ -1297,6 +1299,10 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
   const accentVars: Record<string, string> | null = activeColor
     ? {
         '--brand-iris': `var(--chart-${activeColor}-accent)`,
+        // Deep companion paints the card's tonal SURFACE (see div[data-widget-tinted]): a pale
+        // line colour mixed into near-black can never reach steep's saturation — the fill needs
+        // its own chromatic mid-tone of the same hue.
+        '--brand-iris-deep': `var(--chart-${activeColor}-accent-deep)`,
         '--chart-role-primary': `var(--chart-${activeColor}-accent)`,
         '--chart-role-selection': `var(--chart-${activeColor}-accent)`,
       }
@@ -1398,7 +1404,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
         }
       >
       <div className="flex shrink-0 items-center gap-3">
-        <h3 className="min-w-0 flex-1 truncate text-xs font-medium tracking-wider text-muted-foreground">
+        <h3 className="min-w-0 flex-1 truncate text-sm font-semibold tracking-tight text-foreground">
           {prefs.title || title}
         </h3>
         {action}
@@ -1701,7 +1707,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
           showSeries={!!seriesOptions}
           showSource={widgetId.startsWith('home-')}
           showSize={!!group}
-          defaultSize={defaultSize ?? 'half'}
+          defaultSize={defaultSize ?? 'third'}
           minSize={activeVariant?.minSize ?? 'third'}
           onChange={update}
           onClose={() => setEditOpen(false)}
@@ -1912,9 +1918,9 @@ interface EditWidgetDialogProps {
 }
 
 const SIZE_OPTIONS: Array<{ size: WidgetSize; label: string }> = [
-  { size: 'third', label: 'Треть' },
-  { size: 'half', label: 'Половина' },
-  { size: 'full', label: 'Полный' },
+  { size: 'third', label: '33%' },
+  { size: 'half', label: '66%' },
+  { size: 'full', label: '100%' },
 ];
 
 // Carousel geometry — must match the Tailwind classes on the cards (w-56, gap-3).

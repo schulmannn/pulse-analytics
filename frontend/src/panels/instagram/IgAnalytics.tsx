@@ -62,7 +62,7 @@ export function IgAnalytics({ ig }: { ig: IgData }) {
           {/* Daily metrics with a real page drill INTO it; each card windows the FULL
               archive-backed series by its OWN period pills (per-widget период, TG parity).
               homeKey → the ⋯ menu grows «На главную» (pinned copies render via igHome). */}
-          <TrendCard title="Охват по дням" series={ig.series.reach} drillTo="/metrics/ig-reach" homeKey="ig-reach" />
+          <TrendCard title="Охват по дням" series={ig.series.reach} drillTo="/metrics/ig-reach" homeKey="ig-reach" defaultSize="half" />
           <FollowsByDayCard data={ig.series.follower} drillTo="/metrics/ig-follows" homeKey="ig-follows" />
         </WidgetGroup>
       </Section>

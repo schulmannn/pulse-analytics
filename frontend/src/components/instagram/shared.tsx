@@ -5,7 +5,7 @@ import { pctDelta, type MetricDelta } from '@/lib/delta';
 import { DeltaPill } from '@/components/DeltaPill';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
-import { ChartSection as WidgetChartSection } from '@/components/ChartWidget';
+import { ChartSection as WidgetChartSection, type WidgetSize } from '@/components/ChartWidget';
 import { fmtDay, pairDelta, type Point, type WindowPair } from '@/lib/igMetrics';
 import type { WidgetPeriodValue } from '@/lib/period';
 import type { IgData } from '@/lib/useIgData';
@@ -225,7 +225,7 @@ export function pickLabels(series: Point[]): string[] {
     series and windows it client-side per the widget period — the archive-backed series is
     already longer than any window, so no per-widget insights fan-out is needed. The chart rides
     the widget's fill context as a VARIANT so it fills the fixed tile height. */
-export function TrendCard({ title, series, drillTo, id, homeKey }: { title: string; series: Point[]; drillTo?: string; id?: string; homeKey?: string }) {
+export function TrendCard({ title, series, drillTo, id, homeKey, defaultSize }: { title: string; series: Point[]; drillTo?: string; id?: string; homeKey?: string; defaultSize?: WidgetSize }) {
   const pts = series.filter((p) => p.day !== 'total');
   return (
     <WidgetChartSection
@@ -233,6 +233,7 @@ export function TrendCard({ title, series, drillTo, id, homeKey }: { title: stri
       homeKey={homeKey}
       title={title}
       drillTo={drillTo}
+      defaultSize={defaultSize}
       periodControl
       variants={(period: WidgetPeriodValue) => {
         const w = pts.filter((p) => period.inRange(p.day));

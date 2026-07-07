@@ -386,7 +386,7 @@ export function StoriesBlock({ stories }: { stories: IgStory[] | undefined }) {
             <p className="py-6 text-center text-sm text-muted-foreground">Нет данных о навигации.</p>
           </ChartSection>
         )}
-        <ChartSection title="По историям">
+        <ChartSection title="По историям" defaultSize="half">
           <div className="space-y-2">
             {list.map((s, i) => (
               <div key={s.id ?? i} className="flex items-center justify-between text-sm">

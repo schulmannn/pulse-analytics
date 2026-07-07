@@ -101,7 +101,7 @@ export function HistoryChartBlock({ id, homeKey }: HomeBlockProps = {}) {
   if (isError) return null;
   if (!data || !data.enabled) {
     return (
-      <ChartSection title="История подписчиков" id={id} homeKey={homeKey}>
+      <ChartSection title="История подписчиков" defaultSize="half" id={id} homeKey={homeKey}>
         <p className="py-8 text-center text-sm text-muted-foreground">
           История подписчиков пока недоступна.
         </p>
@@ -113,7 +113,7 @@ export function HistoryChartBlock({ id, homeKey }: HomeBlockProps = {}) {
   const rows = rawRows.filter((r) => r.subscribers != null);
   if (rows.length < 2) {
     return (
-      <ChartSection title="История подписчиков" id={id} homeKey={homeKey}>
+      <ChartSection title="История подписчиков" defaultSize="half" id={id} homeKey={homeKey}>
         <p className="py-8 text-center text-sm text-muted-foreground">
           История подписчиков пока пуста.
         </p>
