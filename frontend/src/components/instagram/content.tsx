@@ -293,11 +293,13 @@ export function CompareBlock({ posts }: { posts: IgPost[] }) {
 // ── Tags (media where we're @-tagged — brand mentions) ──
 export function TagsBlock({ tags, mock }: { tags: IgTag[]; mock?: boolean }) {
   if (tags.length === 0) {
+    // Empty = ONE quiet line, not a tall illustrated placeholder: this niche block also sits LAST
+    // in the section order, so an account with no tags never spends a screen on nothing (ИА rule:
+    // пустые блоки самоуплотняются, а не ведут раздел).
     return (
-      <EmptyState
-        title="Пока вас никто не отметил на фото."
-        reason={`Новые отметки появятся здесь автоматически${mock ? '.' : ' и сохранятся в истории.'}`}
-      />
+      <p className="text-sm text-muted-foreground">
+        Пока вас никто не отметил на фото — новые отметки появятся здесь автоматически{mock ? '.' : ' и сохранятся в истории.'}
+      </p>
     );
   }
   return (
