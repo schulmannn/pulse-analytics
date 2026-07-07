@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { fmt } from '@/lib/format';
 import { ChartTooltip, type TooltipState } from '@/components/ChartTooltip';
 import { EmptyChart } from '@/components/instagram/shared';
-import { ChartSection, breakdownVariants, reorderDefault } from '@/components/ChartWidget';
+import { ChartSection, WidgetGroup, breakdownVariants, reorderDefault } from '@/components/ChartWidget';
 import type { IgBreakdowns, IgOnline } from '@/api/schemas';
 import {
   tvBreakdown,
@@ -41,7 +41,9 @@ export function AudienceBlock({ breakdowns, followers }: { breakdowns: IgBreakdo
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      {/* ONE reorderable WidgetGroup (TG parity): the four demography cards gain
+          Выше/Ниже/Переставить/Скрыть and can be arranged like any TG feed grid. */}
+      <WidgetGroup id="ig-audience" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
         {ageItems.length > 0 ? (
           // Возраст default = столбцы (упорядоченные бакеты читаются гистограммой).
           <ChartSection title="Возраст" variants={reorderDefault(breakdownVariants(ageItems), 'bar')} />
@@ -51,11 +53,9 @@ export function AudienceBlock({ breakdowns, followers }: { breakdowns: IgBreakdo
           </ChartSection>
         )}
         <ChartSection title="Пол" variants={breakdownVariants(genderItems)} />
-      </div>
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <ChartSection title="Топ стран" variants={breakdownVariants(countryItems)} />
         <ChartSection title="Топ городов" variants={breakdownVariants(cityItems)} />
-      </div>
+      </WidgetGroup>
       {coverage < 0.98 && (
         <p className="px-1 text-2xs text-muted-foreground/70">
           Охвачено ≈{Math.round(coverage * 100)}% аудитории — Instagram показывает только топ-сегменты.

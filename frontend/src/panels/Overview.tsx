@@ -178,7 +178,11 @@ export function SubscriberGrowth() {
         </div>
       )}
       {values.length > 1 ? (
-        <div className="absolute inset-x-0 bottom-0 h-28">
+        // Layered hero with a GUARD: the chart takes the leftover height IN FLOW (flex-1) and
+        // overlaps upward only by a fixed bleed (-mt), so on a short tile (periodControl pills
+        // shrink the body) it compresses instead of drowning the KPI — the absolute variant let
+        // the line run straight through the number.
+        <div className="relative -mt-5 min-h-14 flex-1">
           <Sparkline values={values} labels={labels} area strokeWidth={2} interactive caption="по дням" formatValue={fmt.num} className="h-full w-full" />
         </div>
       ) : (

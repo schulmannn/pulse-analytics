@@ -10,7 +10,7 @@ import { NotFound } from '@/components/NotFound';
 import { PeriodUrlSync } from '@/lib/period-url';
 import { TgSectionLayout, TgSection } from '@/panels/TgFeed';
 import { Home } from '@/panels/Home';
-import { MetricPage } from '@/panels/MetricPage';
+import { MetricRoute } from '@/panels/IgMetricPage';
 import { ReportPage } from '@/panels/ReportPage';
 import { ReportsList } from '@/panels/ReportsList';
 import { Settings } from '@/panels/Settings';
@@ -58,7 +58,8 @@ export default function App() {
         {/* Personal Home — a per-user board of pinned widgets. Static import (it's light) and
             declared BEFORE the catch-all `:section?` so /home resolves here, not to the TG feed. */}
         <Route path="home" element={<Home />} />
-        <Route path="metrics/:key" element={<MetricPage />} />
+        {/* One dispatcher for both worlds: TG keys → MetricPage, ig-* keys → IgMetricPage. */}
+        <Route path="metrics/:key" element={<MetricRoute />} />
         <Route path="reports" element={<ReportsList />} />
         <Route path="reports/:id" element={<ReportPage />} />
         {/* Pre-multi-reports bookmarks land on the index. */}

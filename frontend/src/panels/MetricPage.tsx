@@ -107,7 +107,7 @@ function dimLabelOf(post: NormalizedPost, dim: Dim): string | null {
 // chart takes what's left, clamped to sane bounds. Resize-aware; SSR-safe fallback.
 const CHART_CHROME = 430;
 const clampChartH = (viewportH: number) => Math.max(340, Math.min(620, viewportH - CHART_CHROME));
-function useExplorerChartHeight(): number {
+export function useExplorerChartHeight(): number {
   const [h, setH] = useState(() => clampChartH(typeof window !== 'undefined' ? window.innerHeight : 900));
   useEffect(() => {
     const onResize = () => setH(clampChartH(window.innerHeight));
@@ -791,7 +791,7 @@ export function MetricPage() {
 }
 
 /** Bounded segmented control for the rail selects (dimension / comparison baseline). */
-function SegSelect<T extends string>({
+export function SegSelect<T extends string>({
   value,
   onChange,
   options,
