@@ -5,6 +5,7 @@ import { Digest } from '@/panels/Digest';
 import { TopPosts } from '@/panels/TopPosts';
 import { HistoryChartBlock, VelocityChartBlock, HeatmapChartBlock } from '@/panels/Charts';
 import { GrowthChartBlock } from '@/panels/Overview';
+import { NarrativeWeekBlock } from '@/panels/NarrativeWeek';
 import { HomeMentionsByDay } from '@/panels/Mentions';
 import { IgReachHomeCard, IgFollowsHomeCard, IgKpiHomeCard, IgMovementHomeCard, IgCompareHomeCard, IgInsightsHomeCard } from '@/panels/instagram/igHome';
 import { Compare } from '@/panels/Compare';
@@ -72,6 +73,11 @@ export const HOME_REGISTRY: Record<string, HomeWidgetDef> = {
     // Self-wrapping (like History/Velocity/Heatmap): «Развернуть» opens a full subscriber chart, not
     // the compact sparkline over an empty fullscreen. Pass the home id/key, don't re-wrap.
     render: () => <GrowthChartBlock id="home-growth" homeKey="growth" />,
+  },
+  week: {
+    label: 'Неделя канала',
+    // Self-wrapping (NarrativeWeekBlock renders its own ChartSection) — pass the home id/key.
+    render: () => <NarrativeWeekBlock id="home-week" homeKey="week" />,
   },
   'top-posts': {
     label: 'Лучшие публикации',
