@@ -4,7 +4,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { BarChart } from '@/components/BarChart';
 import { RichText } from '@/components/RichText';
 import { KpiCard, Stat } from '@/components/instagram/shared';
-import { ChartSection, breakdownVariants } from '@/components/ChartWidget';
+import { ChartSection, WidgetGroup, breakdownVariants } from '@/components/ChartWidget';
 import type { IgPost, IgStory, IgTag } from '@/api/schemas';
 import {
   hashtagStats,
@@ -34,7 +34,11 @@ export function FormatsBlock({ items }: { items: { label: string; value: number 
       </ChartSection>
     );
   }
-  return <ChartSection title="Вовлечённость по форматам" variants={breakdownVariants(list)} />;
+  return (
+    <WidgetGroup id="ig-formats" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
+      <ChartSection title="Вовлечённость по форматам" defaultSize="full" variants={breakdownVariants(list)} />
+    </WidgetGroup>
+  );
 }
 
 // ── Top posts ──
@@ -144,13 +148,17 @@ export function ReelsBlock({ posts }: { posts: IgPost[] }) {
         <KpiCard label="Ср. время просмотра" value={`${avgWatchAll} сек`} />
         <KpiCard label="Суммарно просмотрено" value={`${fmt.short(Math.round(totalWatchHours))} ч`} />
       </div>
-      <ChartSection title="Ср. время просмотра по Reels">
-        <BarChart
-          values={reels.map(avgSec)}
-          labels={reels.map((_, i) => `R${i + 1}`)}
-          titles={reels.map((r, i) => `R${i + 1}: ${avgSec(r)} сек · ${fmt.short(Number(r.views ?? 0))} просм`)}
-        />
-      </ChartSection>
+      {/* A real WidgetGroup even for the lone card: inside a group the ⋯ dialog grows «Размер»
+          and the menu grows «Скрыть» — the same customization contract as the TG feeds. */}
+      <WidgetGroup id="ig-reels" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
+        <ChartSection title="Ср. время просмотра по Reels" defaultSize="full">
+          <BarChart
+            values={reels.map(avgSec)}
+            labels={reels.map((_, i) => `R${i + 1}`)}
+            titles={reels.map((r, i) => `R${i + 1}: ${avgSec(r)} сек · ${fmt.short(Number(r.views ?? 0))} просм`)}
+          />
+        </ChartSection>
+      </WidgetGroup>
     </div>
   );
 }
@@ -363,7 +371,9 @@ export function StoriesBlock({ stories }: { stories: IgStory[] | undefined }) {
         <KpiCard label="Ответы" value={fmt.num(sum('replies'))} />
         <KpiCard label="Досматриваемость" value={`${Math.round(avgCompletion * 100)}%`} />
       </div>
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      {/* WidgetGroup (TG parity): both story cards gain Размер / Выше / Ниже / Переставить /
+          Скрыть; halves sit two-up on the 6-col grid exactly as the old 2-col grid did. */}
+      <WidgetGroup id="ig-stories" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
         {navItems.length > 0 ? (
           <ChartSection
             title="Навигация по историям"
@@ -386,7 +396,7 @@ export function StoriesBlock({ stories }: { stories: IgStory[] | undefined }) {
             ))}
           </div>
         </ChartSection>
-      </div>
+      </WidgetGroup>
     </div>
   );
 }
