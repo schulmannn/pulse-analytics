@@ -87,7 +87,7 @@ const TITLES: Record<string, string> = {
   '/home': 'Главная',
   '/': 'Обзор',
   '/analytics': 'Аналитика',
-  '/posts': 'Посты',
+  '/posts': 'Контент',
   '/mentions': 'Упоминания',
   '/reports': 'Отчёты',
   '/settings': 'Настройки',

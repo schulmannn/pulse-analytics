@@ -1,13 +1,14 @@
 import type { ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { fmt } from '@/lib/format';
-import type { MetricDelta } from '@/lib/delta';
+import { pctDelta, type MetricDelta } from '@/lib/delta';
 import { DeltaPill } from '@/components/DeltaPill';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { ChartSection as WidgetChartSection } from '@/components/ChartWidget';
-import { fmtDay, type Point } from '@/lib/igMetrics';
+import { fmtDay, pairDelta, type Point, type WindowPair } from '@/lib/igMetrics';
 import type { WidgetPeriodValue } from '@/lib/period';
+import type { IgData } from '@/lib/useIgData';
 
 /** Window an IG daily-Point series to the last `days` points (0 = «Всё») for the rich-expand
     overlay — feeds renderExpanded / renderExpandedBar / statsFor. Drops any 'total' marker point
@@ -252,5 +253,60 @@ export function TrendCard({ title, series, drillTo, id, homeKey }: { title: stri
         ];
       }}
     />
+  );
+}
+
+// A whole window without a single non-zero sample is «нет данных», not a real zero — insights
+// quota burn / missing metrics must read as a dash with no delta, never as a crash (D6.1).
+const isLive = (p: WindowPair) => p.hasCur && p.cur > 0;
+
+/**
+ * The IG «Показатели» body — KPI hero (Охват, a real daily series) + the 4-cell ledger. BARE
+ * content (no own card): the Обзор renders it inside its widget group's «Показатели» ChartSection,
+ * and the Home registry pins it via the self-fetching IgKpiHomeCard — the IG twin of TG's KpiGrid.
+ */
+export function IgKpiBlock({ ig }: { ig: IgData }) {
+  const navigate = useNavigate();
+  const erTrend =
+    ig.erReach > 0 && ig.pairs.reach.hasCur && ig.pairs.reach.hasPrev && ig.erReachPrev > 0
+      ? pctDelta(ig.erReach, ig.erReachPrev)
+      : null;
+  return (
+    <div className="overflow-hidden rounded-md">
+      <KpiHero
+        label={`Охват · ${ig.window.days} дн.`}
+        value={fmt.kpi(ig.pairs.reach.cur)}
+        delta={pairDelta(ig.pairs.reach)}
+        series={ig.series.reach.filter((p) => ig.inWindow(p.day))}
+        drillTo="/metrics/ig-reach"
+      />
+      <div className="grid grid-cols-2 gap-px border-t border-border bg-border lg:grid-cols-4">
+        <KpiCard
+          label="Подписчики"
+          value={fmt.kpi(ig.followers)}
+          deltaText={ig.netMovement.hasCur ? signedNum(ig.netMovement.cur) : undefined}
+          deltaTone={ig.netMovement.cur > 0 ? 'up' : ig.netMovement.cur < 0 ? 'down' : 'flat'}
+          onDrill={() => navigate('/metrics/ig-follows')}
+        />
+        <KpiCard
+          label="Просмотры"
+          value={isLive(ig.pairs.views) ? fmt.kpi(ig.pairs.views.cur) : '—'}
+          trend={isLive(ig.pairs.views) ? pairDelta(ig.pairs.views) : null}
+          onDrill={() => navigate('/metrics/ig-views')}
+        />
+        <KpiCard
+          label="Вовлечённость"
+          value={ig.erReach > 0 ? `${ig.erReach.toFixed(2)}%` : '—'}
+          trend={erTrend}
+          onDrill={() => navigate('/metrics/ig-er')}
+        />
+        <KpiCard
+          label="Взаимодействия"
+          value={isLive(ig.pairs.ti) ? fmt.kpi(ig.pairs.ti.cur) : '—'}
+          trend={isLive(ig.pairs.ti) ? pairDelta(ig.pairs.ti) : null}
+          onDrill={() => navigate('/metrics/ig-interactions')}
+        />
+      </div>
+    </div>
   );
 }

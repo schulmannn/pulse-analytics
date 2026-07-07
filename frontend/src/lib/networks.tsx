@@ -50,7 +50,9 @@ export const NETWORKS = [
     nav: [
       { to: '/', label: 'Обзор', icon: 'overview', end: true },
       { to: '/analytics', label: 'Аналитика', icon: 'analytics' },
-      { to: '/posts', label: 'Посты', icon: 'posts' },
+      // «Контент» — the canonical content-units slot, one label across networks (ИА-унификация);
+      // the route stays /posts so deep links survive.
+      { to: '/posts', label: 'Контент', icon: 'posts' },
       { to: '/mentions', label: 'Упоминания', icon: 'mentions' },
     ],
     // Standalone Instagram sources (source='ig') have no Telegram side.

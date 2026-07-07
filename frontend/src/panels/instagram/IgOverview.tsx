@@ -1,128 +1,45 @@
-import { Link, useNavigate } from 'react-router-dom';
-import { fmt } from '@/lib/format';
-import { pctDelta } from '@/lib/delta';
-import { pairDelta } from '@/lib/igMetrics';
-import type { WindowPair } from '@/lib/igMetrics';
+import { Link } from 'react-router-dom';
 import type { IgData } from '@/lib/useIgData';
-
-// A whole window without a single non-zero sample is «нет данных», not a real zero — the
-// old render showed «0» с «↓100%» рядом с прочерками соседних ячеек (D6.1). Insights quota
-// burn / missing metrics must read as a dash with no delta, never as a crash.
-const isLive = (p: WindowPair) => p.hasCur && p.cur > 0;
-import { KpiHero, KpiCard, signedNum } from '@/components/instagram/shared';
+import { IgKpiBlock } from '@/components/instagram/shared';
 import { InsightsBlock } from '@/components/instagram/insights';
 import { TopPostsBlock } from '@/components/instagram/content';
+import { ChartSection, WidgetGroup } from '@/components/ChartWidget';
 
 /**
- * IG Обзор — the focused summary, mirroring the Telegram Overview: a KPI hero (Охват, a real daily
- * series) + a 4-cell ledger, then the strongest takeaways alongside data-health, then a compact
- * top-posts strip with a link into the Контент view. One screen, no anchor soup.
+ * IG Обзор — the focused summary, mirroring the Telegram Overview: ALL of it widgets in one
+ * reorderable WidgetGroup (the last big IG surface outside the widget system — roadmap card):
+ * «Показатели» (KPI hero + ledger), «Главное» (auto-insights), «Топ публикаций» (a teaser strip
+ * with the link into Контент). Every card gets the full ⋯ contract — Размер in the dialog,
+ * Выше/Ниже/Переставить/Скрыть in the menu, «На главную» where a self-fetching Home twin exists.
+ *
+ * No per-widget periodControl here: these bodies read the GLOBAL IG window (ig.pairs/ig.window),
+ * so the section header's period chips are the honest control — a per-card pill would silently
+ * lie (per-widget IG windows are the noted follow-up).
  */
 export function IgOverview({ ig }: { ig: IgData }) {
-  const navigate = useNavigate();
-  const erTrend =
-    ig.erReach > 0 && ig.pairs.reach.hasCur && ig.pairs.reach.hasPrev && ig.erReachPrev > 0
-      ? pctDelta(ig.erReach, ig.erReachPrev)
-      : null;
-
   return (
-    <div>
-      <div className="overflow-hidden rounded-lg border border-border">
-        <KpiHero
-          label={`Охват · ${ig.window.days} дн.`}
-          value={fmt.kpi(ig.pairs.reach.cur)}
-          delta={pairDelta(ig.pairs.reach)}
-          series={ig.series.reach.filter((p) => ig.inWindow(p.day))}
-          drillTo="/metrics/ig-reach"
-        />
-        <div className="grid grid-cols-2 gap-px border-t border-border bg-border lg:grid-cols-4">
-          <KpiCard
-            label="Подписчики"
-            value={fmt.kpi(ig.followers)}
-            deltaText={ig.netMovement.hasCur ? signedNum(ig.netMovement.cur) : undefined}
-            deltaTone={ig.netMovement.cur > 0 ? 'up' : ig.netMovement.cur < 0 ? 'down' : 'flat'}
-            onDrill={() => navigate('/metrics/ig-follows')}
-          />
-          <KpiCard
-            label="Просмотры"
-            value={isLive(ig.pairs.views) ? fmt.kpi(ig.pairs.views.cur) : '—'}
-            trend={isLive(ig.pairs.views) ? pairDelta(ig.pairs.views) : null}
-            onDrill={() => navigate('/metrics/ig-views')}
-          />
-          <KpiCard label="Вовлечённость" value={ig.erReach > 0 ? `${ig.erReach.toFixed(2)}%` : '—'} trend={erTrend} onDrill={() => navigate('/metrics/ig-er')} />
-          <KpiCard
-            label="Взаимодействия"
-            value={isLive(ig.pairs.ti) ? fmt.kpi(ig.pairs.ti.cur) : '—'}
-            trend={isLive(ig.pairs.ti) ? pairDelta(ig.pairs.ti) : null}
-            onDrill={() => navigate('/metrics/ig-interactions')}
-          />
-        </div>
-      </div>
-
-      <div className="mt-8 grid grid-cols-1 gap-8 border-t border-border pt-8 lg:grid-cols-2 lg:gap-12">
-        <div className="space-y-4">
-          <h2 className="text-sm font-medium tracking-wide text-muted-foreground">Главное</h2>
-          <InsightsBlock insights={ig.insights} limit={2} />
-        </div>
-        <AudienceMovement ig={ig} />
-      </div>
-
-      <section className="mt-8 space-y-4 border-t border-border pt-8">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-sm font-medium tracking-wide text-muted-foreground">Топ публикаций</h2>
-          <Link to="/instagram/content" className="shrink-0 text-sm font-medium text-primary hover:underline">
-            Открыть контент →
+    <WidgetGroup id="ig-overview" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
+      {/* Widget label «Показатели», NOT «Обзор» — the feed block's h2 right above already says
+          «Обзор» (the same stutter rule as the TG Overview hero). */}
+      <ChartSection id="ig-overview-kpi" title="Показатели" defaultSize="full" homeKey="ig-kpi" drillTo="/metrics/ig-reach">
+        <IgKpiBlock ig={ig} />
+      </ChartSection>
+      <ChartSection id="ig-overview-insights" title="Главное" defaultSize="full">
+        <InsightsBlock insights={ig.insights} limit={3} />
+      </ChartSection>
+      <ChartSection
+        id="ig-overview-top-posts"
+        title="Топ публикаций"
+        defaultSize="full"
+        action={
+          <Link to="/instagram/content" className="shrink-0 text-xs font-medium text-primary hover:underline">
+            <span className="md:hidden">Контент →</span>
+            <span className="hidden md:inline">Открыть контент →</span>
           </Link>
-        </div>
+        }
+      >
         <TopPostsBlock posts={ig.postsInWindow} limit={3} showSort={false} />
-      </section>
-    </div>
-  );
-}
-
-/**
- * Real audience movement (follows / unfollows / net) — a stronger second signal than an API status
- * or a second views chart. On @bynotem's data it shows the important truth: follows come, but
- * unfollows outrun them.
- */
-function AudienceMovement({ ig }: { ig: IgData }) {
-  const follows = ig.pairs.follows.cur;
-  const unfollows = ig.pairs.unfollows.cur;
-  const net = ig.netMovement.cur;
-  const max = Math.max(follows, unfollows, 1);
-  const hasData = ig.pairs.follows.hasCur || ig.pairs.unfollows.hasCur;
-
-  const bar = (label: string, value: number, sign: string, positive: boolean) => (
-    <div>
-      <div className="flex items-baseline justify-between text-sm">
-        <span className="text-muted-foreground">{label}</span>
-        <span className={`font-medium tabular-nums ${positive ? 'text-verdant' : 'text-ember'}`}>{sign}{fmt.num(value)}</span>
-      </div>
-      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
-        <div className={`h-full rounded-full ${positive ? 'bg-verdant' : 'bg-ember'}`} style={{ width: `${Math.round((value / max) * 100)}%` }} />
-      </div>
-    </div>
-  );
-
-  return (
-    <div>
-      <h2 className="text-sm font-medium tracking-wide text-muted-foreground">Движение аудитории · {ig.window.days} дн.</h2>
-      {hasData ? (
-        <>
-          <div className="mt-3 space-y-3">
-            {bar('Подписки', follows, '+', true)}
-            {bar('Отписки', unfollows, '−', false)}
-          </div>
-          <div className="mt-3 flex items-baseline justify-between border-t border-border pt-3">
-            <span className="text-sm text-muted-foreground">Чистый прирост</span>
-            <span className={`text-lg font-medium tabular-nums ${net > 0 ? 'text-verdant' : net < 0 ? 'text-ember' : 'text-foreground'}`}>
-              {signedNum(net)}
-            </span>
-          </div>
-        </>
-      ) : (
-        <p className="mt-3 text-xs text-muted-foreground">Нет данных о движении подписчиков за период.</p>
-      )}
-    </div>
+      </ChartSection>
+    </WidgetGroup>
   );
 }

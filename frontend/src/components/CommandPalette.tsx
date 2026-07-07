@@ -48,7 +48,7 @@ export function useCommandPalette() {
 const ROUTES: Array<{ path: string; label: string; icon: IconName; search: string }> = [
   { path: '/', label: 'Обзор', icon: 'overview', search: 'обзор главная overview' },
   { path: '/analytics', label: 'Аналитика', icon: 'analytics', search: 'аналитика графики analytics' },
-  { path: '/posts', label: 'Посты', icon: 'posts', search: 'посты публикации posts' },
+  { path: '/posts', label: 'Контент', icon: 'posts', search: 'контент посты публикации posts content' },
   { path: '/mentions', label: 'Упоминания', icon: 'mentions', search: 'упоминания mentions' },
   { path: '/reports', label: 'Отчёты', icon: 'report', search: 'отчёты отчёт отчет reports report документ' },
   { path: '/instagram', label: 'Instagram · Обзор', icon: 'overview', search: 'instagram инстаграм обзор' },
