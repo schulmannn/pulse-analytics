@@ -214,7 +214,7 @@ export function PieChart({ values, labels, titles, colors, height = 200 }: PieCh
               textAnchor="middle"
               className="pointer-events-none select-none fill-foreground text-sm font-medium tabular-nums"
             >
-              {fmt.short(total)}
+              {fmt.kpi(total)}
             </text>
             <text
               x={cx}

@@ -65,6 +65,15 @@ describe('fmt', () => {
     expect(fmt.short(null)).toBe('—');
   });
 
+  it('formats headline KPIs: full under 10 000, compact from 10 000', () => {
+    expect(fmt.kpi(4_749)).toBe(fmt.num(4_749));
+    expect(fmt.kpi(9_999)).toBe(fmt.num(9_999));
+    expect(fmt.kpi(10_000)).toBe('10k');
+    expect(fmt.kpi(12_634)).toBe('12.6k');
+    expect(fmt.kpi(-10_500)).toBe('-10.5k');
+    expect(fmt.kpi(null)).toBe('—');
+  });
+
   it('formats signed percentages with configurable precision', () => {
     expect(fmt.pct(12.345)).toBe('+12.35%');
     expect(fmt.pct(-2.5, 1)).toBe('-2.5%');

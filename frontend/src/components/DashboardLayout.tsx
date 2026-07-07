@@ -564,7 +564,7 @@ function SourceSwitcher({ rail = false, mobile = false }: { rail?: boolean; mobi
     network === 'ig'
       ? 'Instagram'
       : count != null && count > 0
-        ? `${fmt.short(count)} подписчиков`
+        ? `${fmt.kpi(count)} подписчиков`
         : current?.source === 'collector'
           ? 'Локальный сбор'
           : 'Telegram';
