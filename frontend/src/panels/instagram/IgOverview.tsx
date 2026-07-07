@@ -8,7 +8,7 @@ import { ChartSection, WidgetGroup } from '@/components/ChartWidget';
 /**
  * IG Обзор — the focused summary, mirroring the Telegram Overview: ALL of it widgets in one
  * reorderable WidgetGroup (the last big IG surface outside the widget system — roadmap card):
- * «Показатели» (KPI hero + ledger), «Главное» (auto-insights), «Топ публикаций» (a teaser strip
+ * «Показатели» (KPI hero + ledger), «Главное» (auto-insights), «Лучшие публикации» (a teaser strip
  * with the link into Контент). Every card gets the full ⋯ contract — Размер in the dialog,
  * Выше/Ниже/Переставить/Скрыть in the menu, «На главную» where a self-fetching Home twin exists.
  *
@@ -29,7 +29,7 @@ export function IgOverview({ ig }: { ig: IgData }) {
       </ChartSection>
       <ChartSection
         id="ig-overview-top-posts"
-        title="Топ публикаций"
+        title="Лучшие публикации"
         defaultSize="full"
         action={
           <Link to="/instagram/content" className="shrink-0 text-xs font-medium text-primary hover:underline">

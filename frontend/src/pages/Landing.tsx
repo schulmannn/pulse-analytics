@@ -288,7 +288,7 @@ function DashboardMock({ reduce }: { reduce: boolean }) {
         </div>
 
         <div className="mt-3 border-t border-border pt-2">
-          <div className="pb-1 text-[9px] text-ink3">Топ постов</div>
+          <div className="pb-1 text-[9px] text-ink3">Лучшие публикации</div>
           <motion.div {...fade(1.05)}><PostRow n={1} title="Как мы выбираем темы для канала" views="12 480" er="9.1%" delta="+24%" up /></motion.div>
           <motion.div {...fade(1.15)}><PostRow n={2} title="Большой гайд по продуктивности" views="8 902" er="7.4%" delta="−6%" /></motion.div>
           <motion.div {...fade(1.25)}><PostRow n={3} title="Подкаст: итоги сезона и планы" views="7 415" er="6.2%" delta="+11%" up /></motion.div>

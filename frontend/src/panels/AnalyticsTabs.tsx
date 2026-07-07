@@ -115,7 +115,7 @@ export function Analytics() {
           <AnalyticsSection title="Сравнение периодов">
             <Compare />
           </AnalyticsSection>
-          <AnalyticsSection title="Авто-инсайты">
+          <AnalyticsSection title="Главное">
             <Insights />
           </AnalyticsSection>
         </div>

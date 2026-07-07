@@ -195,10 +195,11 @@ export function IgShell() {
             {ig.isMock ? 'Демо-режим — примерные данные' : 'Аккаунт, аудитория, форматы и публикации'}
           </p>
         </div>
-        {/* Tiny data-status indicator (account-card area). The period chips moved into the
-            section headers (TG parity). */}
+        {/* Tiny data-status indicator (account-card area). No accountName here — the H2 on the
+            left already says «Instagram · @handle»; the same handle twice in one row read as an
+            echo (аудит). The period chips moved into the section headers (TG parity). */}
         <div className="min-w-[180px] shrink-0">
-          <IgDataHealth accountName={ig.profile?.username} lastSync={ig.lastSync} isMock={ig.isMock} />
+          <IgDataHealth lastSync={ig.lastSync} isMock={ig.isMock} />
         </div>
       </header>
       {ig.isMock && <IgConnectPanel />}

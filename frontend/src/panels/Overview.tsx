@@ -50,7 +50,7 @@ export function Overview() {
     <div>
       <StaleWarning />
 
-      {/* Показатели | Инсайт | Рост подписчиков | Топ постов — ONE reorderable widget grid
+      {/* Показатели | Главное | Рост подписчиков | Лучшие публикации — ONE reorderable widget grid
           (owner call: the hero is a widget like everything else; grid-flow-dense backfills
           the holes a CSS-order move of a span-2 card would otherwise leave). */}
       <WidgetGroup id="overview" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
@@ -65,13 +65,13 @@ export function Overview() {
         </ChartSection>
         {/* Narrative insight — a heavy 3-tier read that overflows a fixed half tile; it takes a
             content-height `full` card so nothing is clipped or trapped behind an inner scrollbar. */}
-        <ChartSection id="overview-digest" title="Инсайт" periodControl homeKey="digest" defaultSize="full">
+        <ChartSection id="overview-digest" title="Главное" periodControl homeKey="digest" defaultSize="full">
           <Digest />
         </ChartSection>
         <GrowthChartBlock id="overview-growth" homeKey="growth" />
         <ChartSection
           id="overview-top-posts"
-          title="Топ постов"
+          title="Лучшие публикации"
           defaultSize="full"
           periodControl
           homeKey="top-posts"
@@ -181,8 +181,9 @@ export function SubscriberGrowth() {
         // Layered hero with a GUARD: the chart takes the leftover height IN FLOW (flex-1) and
         // overlaps upward only by a fixed bleed (-mt), so on a short tile (periodControl pills
         // shrink the body) it compresses instead of drowning the KPI — the absolute variant let
-        // the line run straight through the number.
-        <div className="relative -mt-5 min-h-14 flex-1">
+        // the line run straight through the number. Bleed is 8px (was 20): on a short flat
+        // window the line crossed the «±N к пред. периоду» caption (прод-аудит, 7д half tile).
+        <div className="relative -mt-2 min-h-14 flex-1">
           <Sparkline values={values} labels={labels} area strokeWidth={2} interactive caption="по дням" formatValue={fmt.num} className="h-full w-full" />
         </div>
       ) : (
