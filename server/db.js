@@ -1083,6 +1083,42 @@ async function createCrash({ text, context }) {
   return rows[0];
 }
 
+// ── Client-crash dedup ledger (drives the "one Notion card per unique crash" sink) ──
+// Upsert by signature: a first sighting inserts (count=1); a repeat bumps count + last_seen. The
+// `(xmax = 0)` trick distinguishes INSERT (new signature) from UPDATE (repeat) in ONE round-trip, so
+// the caller knows whether to CREATE a Notion card or UPDATE the existing one.
+async function upsertCrashSignature(f) {
+  if (!enabled) return null;
+  const { rows } = await pool.query(
+    `INSERT INTO crash_signatures
+       (signature, scope, name, message, route, widget_id, label, commit_sha, last_trace_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+     ON CONFLICT (signature) DO UPDATE
+       SET count = crash_signatures.count + 1,
+           last_seen = now(),
+           last_trace_id = EXCLUDED.last_trace_id
+     RETURNING (xmax = 0) AS is_new, count, notion_page_id,
+               to_char(last_notified AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"') AS last_notified`,
+    [String(f.signature).slice(0, 64), f.scope || null, f.name || null,
+     f.message ? String(f.message).slice(0, 500) : null, f.route || null,
+     f.widgetId || null, f.label || null, f.commit || null, f.traceId || null]);
+  const r = rows[0];
+  return r ? { isNew: r.is_new, count: Number(r.count), notionPageId: r.notion_page_id, lastNotified: r.last_notified } : null;
+}
+
+/** Record the Notion page id for a signature; also starts the notify-throttle window. */
+async function setCrashNotionPage(signature, pageId) {
+  if (!enabled) return;
+  await pool.query('UPDATE crash_signatures SET notion_page_id=$2, last_notified=now() WHERE signature=$1',
+    [String(signature).slice(0, 64), pageId]);
+}
+
+/** Mark that we just pushed a repeat-update to Notion (throttle window reset). */
+async function touchCrashNotified(signature) {
+  if (!enabled) return;
+  await pool.query('UPDATE crash_signatures SET last_notified=now() WHERE signature=$1', [String(signature).slice(0, 64)]);
+}
+
 async function bugExists(id) {
   if (!enabled) return false;
   const { rows } = await pool.query('SELECT 1 FROM bugs WHERE id=$1', [id]);
@@ -1520,7 +1556,7 @@ module.exports = {
   saveVelocity, getLatestVelocity,
   upsertChannelDaily, upsertPosts, upsertMentions, upsertIgTags, getIgTags,
   getChannelHistory, getMentionsHistory, getMentionsArchive,
-  createBug, createCrash, listBugs, updateBug, deleteBug, BUG_STATUSES, BUG_SEVERITIES, BUG_KINDS,
+  createBug, createCrash, upsertCrashSignature, setCrashNotionPage, touchCrashNotified, listBugs, updateBug, deleteBug, BUG_STATUSES, BUG_SEVERITIES, BUG_KINDS,
   bugExists, getBug, addAttachmentIfRoom, getAttachment,
   saveIgAccount, getIgAccount, updateIgToken, deleteIgAccount, listIgAccounts,
   saveTgSession, getTgSession, deleteTgSession, listTgSessions,
