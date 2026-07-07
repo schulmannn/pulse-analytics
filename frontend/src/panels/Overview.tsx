@@ -11,8 +11,8 @@ import { useDemo } from '@/lib/demo-context';
 import { Sparkline } from '@/components/Sparkline';
 import { ChartCardBody, ChartSection, WidgetGroup } from '@/components/ChartWidget';
 import { SubscriberHistoryChart, SubscriberHistoryBars } from '@/panels/Charts';
-import { Digest } from '@/panels/Digest';
 import { KpiGrid } from '@/panels/KpiGrid';
+import { NarrativeWeekBlock } from '@/panels/NarrativeWeek';
 import { TopPosts } from '@/panels/TopPosts';
 
 /**
@@ -62,11 +62,10 @@ export function Overview() {
           {/* KPI hero (Просмотры · окно виджета) + ledger (Подписчики / Ср.охват / Реакции / ER) */}
           <KpiGrid />
         </ChartSection>
-        {/* Narrative insight — a heavy 3-tier read that overflows a fixed half tile; it takes a
-            content-height `full` card so nothing is clipped or trapped behind an inner scrollbar. */}
-        <ChartSection id="overview-digest" title="Главное" periodControl homeKey="digest" defaultSize="third">
-          <Digest />
-        </ChartSection>
+        {/* НАРРАТИВНЫЙ СЛОЙ (фаза 1): «Неделя канала» замещает старый Digest-виджет на Обзоре —
+            связный рассказ с числами-ссылками вместо трёх строк сводки. Digest остаётся в
+            каталоге Home и в Аналитике («Главное»). Стип-строка: рассказ 66% + Рост 33%. */}
+        <NarrativeWeekBlock id="overview-week" homeKey="week" />
         <GrowthChartBlock id="overview-growth" homeKey="growth" />
         <ChartSection
           id="overview-top-posts"
@@ -116,7 +115,7 @@ export function GrowthChartBlock({ id, homeKey }: { id?: string; homeKey?: strin
       homeKey={homeKey}
       title="Рост подписчиков"
       drillTo="/metrics/subscribers"
-      defaultSize="half"
+      defaultSize="third"
       periodControl
       expand={
         rows.length >= 2
