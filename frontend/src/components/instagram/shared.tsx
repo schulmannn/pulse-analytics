@@ -1,11 +1,10 @@
 import type { ReactNode } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { fmt } from '@/lib/format';
 import type { MetricDelta } from '@/lib/delta';
 import { DeltaPill } from '@/components/DeltaPill';
 import { LineChart } from '@/components/LineChart';
-import { BarChart } from '@/components/BarChart';
 import { ChartSection as WidgetChartSection } from '@/components/ChartWidget';
-import { ExpandableChart } from '@/components/ExpandableChart';
 import type { ChartExpandConfig } from '@/components/ExpandableChart';
 import { fmtDay, type Point } from '@/lib/igMetrics';
 
@@ -22,26 +21,6 @@ export function windowIgSeries(series: Point[], days: number, unit: string) {
     // BarChart needs one label per bar to stride; the 3-label form mislabels the bars.
     labels: w.map((p) => fmtDay(p.day)),
     titles: w.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)} ${unit}`),
-  };
-}
-
-/**
- * Rich «Развернуть» explorer for a GENUINE IG daily series (reach / daily follows): 1М/3М/6М/Всё
- * pills, line↔bar toggle and the stats strip, windowing the FULL series. ONE builder so every
- * surface showing the series (the analytics cards, the Overview hero) expands identically —
- * the unified drill contract. IG has no /metrics pages yet, so the overlay IS the drill target.
- */
-export function igDailyExpand(series: Point[], genitive: string): ChartExpandConfig {
-  return {
-    renderExpanded: (days) => {
-      const w = windowIgSeries(series, days, genitive);
-      return <LineChart values={w.values} labels={w.labels} titles={w.titles} markAnomalies markExtremes emphasizeLastLabel />;
-    },
-    renderExpandedBar: (days) => {
-      const w = windowIgSeries(series, days, genitive);
-      return <BarChart values={w.values} labels={w.labels} titles={w.titles} />;
-    },
-    statsFor: (days) => windowIgSeries(series, days, genitive).values,
   };
 }
 
@@ -87,17 +66,31 @@ export interface KpiCardProps {
   /** A pre-formatted inline delta (e.g. "−23"); shown instead of the percent pill when set. */
   deltaText?: string;
   deltaTone?: 'up' | 'down' | 'flat';
+  /** Drill to the metric's page — the number becomes a real button (TG StatTile parity). */
+  onDrill?: () => void;
 }
 
 /** A single ledger cell — label, big number, optional delta + hint. Sits in a `gap-px` grid. */
-export function KpiCard({ label, value, hint, feature, trend, deltaText, deltaTone }: KpiCardProps) {
+export function KpiCard({ label, value, hint, feature, trend, deltaText, deltaTone, onDrill }: KpiCardProps) {
   const deltaColor =
     deltaTone === 'up' ? 'text-verdant' : deltaTone === 'down' ? 'text-ember' : 'text-muted-foreground';
   return (
     <div className={`bg-background p-4${feature ? ' ring-1 ring-inset ring-primary/40' : ''}`}>
       <div className="text-xs tracking-wide text-muted-foreground">{label}</div>
       <div className="mt-2 flex items-center gap-2">
-        <div className="text-3xl font-medium tabular-nums tracking-tight">{value}</div>
+        {onDrill ? (
+          <button
+            type="button"
+            aria-label={`Разбор: ${label}`}
+            title="Подробный разбор"
+            onClick={onDrill}
+            className="rounded text-left text-3xl font-medium tabular-nums tracking-tight transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+          >
+            {value}
+          </button>
+        ) : (
+          <div className="text-3xl font-medium tabular-nums tracking-tight">{value}</div>
+        )}
         {deltaText ? (
           <span className={`shrink-0 text-xs font-medium tabular-nums ${deltaColor}`}>{deltaText}</span>
         ) : (
@@ -116,16 +109,18 @@ export function KpiHero({
   value,
   delta,
   series,
-  expand,
+  drillTo,
 }: {
   label: string;
   value: string;
   delta?: MetricDelta | null;
   series?: Point[];
-  /** Rich-expand config (igDailyExpand): the hero chart grows the ↗ affordance and opens the
-      same explorer overlay as the analytics cards — no chart is a dead end (drill contract). */
-  expand?: ChartExpandConfig;
+  /** Route of the metric's explorer page (/metrics/ig-*). The ↗ Link is the semantic
+      (keyboard/AT) path; the whole chart block is a mouse convenience — the same drill
+      contract as widget cards, so the hero chart is never a dead end. */
+  drillTo?: string;
 }) {
+  const navigate = useNavigate();
   const daily = (series ?? []).filter((p) => p.day !== 'total');
   const chart = daily.length > 1 && (
     <LineChart
@@ -143,17 +138,27 @@ export function KpiHero({
         <div className="kpi-accent text-[2.75rem] font-medium leading-none tabular-nums tracking-tight">{value}</div>
         <DeltaPill delta={delta} />
       </div>
-      {chart && (
-        <div className="mt-4">
-          {expand ? (
-            <ExpandableChart title={label} {...expand}>
+      {chart &&
+        (drillTo ? (
+          <div className="relative mt-4">
+            <Link
+              to={drillTo}
+              aria-label={`Разбор: ${label}`}
+              title="Подробный разбор"
+              className="absolute right-1 top-1 z-10 rounded border border-transparent p-1 text-muted-foreground transition-colors hover:border-border hover:bg-background hover:text-foreground"
+            >
+              <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                <path d="M7 17 17 7M9 7h8v8" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </Link>
+            {/* Mouse convenience only (no button role — the ↗ Link above is the semantic path). */}
+            <div className="cursor-pointer" onClick={() => navigate(drillTo)}>
               {chart}
-            </ExpandableChart>
-          ) : (
-            chart
-          )}
-        </div>
-      )}
+            </div>
+          </div>
+        ) : (
+          <div className="mt-4">{chart}</div>
+        ))}
     </div>
   );
 }
@@ -180,7 +185,7 @@ export function pickLabels(series: Point[]): string[] {
     stays exported for non-chart hosts (metric-page rail, the report document). The chart rides
     the widget's fill context as a VARIANT (not bare children) so it fills the fixed tile height
     instead of sitting at its default 200 and leaving a gap / a stray scrollbar. */
-export function TrendCard({ title, series, expand }: { title: string; series: Point[]; expand?: ChartExpandConfig }) {
+export function TrendCard({ title, series, expand, drillTo }: { title: string; series: Point[]; expand?: ChartExpandConfig; drillTo?: string }) {
   if (series.length <= 1) {
     return (
       <WidgetChartSection title={title}>
@@ -192,6 +197,7 @@ export function TrendCard({ title, series, expand }: { title: string; series: Po
     <WidgetChartSection
       title={title}
       expand={expand}
+      drillTo={drillTo}
       variants={[
         {
           key: 'line',

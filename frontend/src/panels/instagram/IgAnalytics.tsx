@@ -1,9 +1,8 @@
 import { fmt } from '@/lib/format';
 import type { IgData } from '@/lib/useIgData';
-import { Section, TrendCard, EmptyChart, igDailyExpand, signedNum } from '@/components/instagram/shared';
+import { Section, TrendCard, EmptyChart, signedNum } from '@/components/instagram/shared';
 import { ChartSection } from '@/components/ChartWidget';
 import { BarChart } from '@/components/BarChart';
-import type { ChartExpandConfig } from '@/components/ExpandableChart';
 import { InsightsBlock, PeriodCompareBlock } from '@/components/instagram/insights';
 import { exportIgDaily } from '@/lib/igExport';
 import { fmtDay, type Point, type WindowPair } from '@/lib/igMetrics';
@@ -21,11 +20,6 @@ export function IgAnalytics({ ig }: { ig: IgData }) {
   const hasMovement = ig.pairs.follows.hasCur || ig.pairs.unfollows.hasCur;
   const followsPair = ig.pairs.follows.hasCur ? ig.pairs.follows : ig.pairs.follower;
 
-  // Rich «Развернуть» explorer (1М/3М/6М/Всё + line↔bar + Мин/Макс/Среднее/Сумма) windowing the
-  // FULL daily series (the inline card shows only the current window). ONE shared builder
-  // (igDailyExpand) with the Overview hero — every surface of the series expands identically.
-  const reachExpand = igDailyExpand(ig.series.reach, 'охвата');
-  const followsExpand = igDailyExpand(ig.series.follower, 'подписок');
 
   const periodRows: { label: string; pair: WindowPair }[] = [
     { label: 'Подписки', pair: followsPair },
@@ -70,8 +64,10 @@ export function IgAnalytics({ ig }: { ig: IgData }) {
         }
       >
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <TrendCard title="Охват по дням" series={reachWin} expand={reachExpand} />
-          <FollowsByDayCard data={followsByDay} total={followsPair.cur} expand={followsExpand} />
+          {/* Daily metrics with a real page drill INTO it (the overlay was the stopgap before
+              /metrics/ig-* existed). */}
+          <TrendCard title="Охват по дням" series={reachWin} drillTo="/metrics/ig-reach" />
+          <FollowsByDayCard data={followsByDay} total={followsPair.cur} drillTo="/metrics/ig-follows" />
         </div>
       </Section>
 
@@ -128,11 +124,11 @@ function SubscriberMovement({
   );
 }
 
-function FollowsByDayCard({ data, total, expand }: { data: Point[]; total: number; expand?: ChartExpandConfig }) {
+function FollowsByDayCard({ data, total, drillTo }: { data: Point[]; total: number; drillTo?: string }) {
   return (
     <ChartSection
       title="Подписки по дням"
-      expand={expand}
+      drillTo={drillTo}
       // Bars as a VARIANT so they fill the fixed tile height (bare children would sit at the
       // default 200 and leave a gap); the period total stays as the caption below.
       variants={
