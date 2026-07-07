@@ -1249,7 +1249,6 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
   const bodyResetKeys = [bodyResetKey, activeVariant?.key ?? null, widgetDays];
 
   const seqIndex = group ? group.sequence.indexOf(widgetId) : -1;
-  const accentVar = activeColor ? `--chart-${activeColor}` : '--card-tint';
   // Split the styles across two layers: the OUTER section owns grid placement + the FLIP
   // translate (set imperatively by WidgetGroup), the INNER div owns the visible card —
   // its jiggle rotation is a CSS animation on `transform` and would stomp the FLIP glide
@@ -1262,15 +1261,17 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
   const isDragging = reorder && group?.draggingId === widgetId;
 
   const innerStyle: CSSProperties = {};
-  if (activeColor) (innerStyle as Record<string, string>)['--brand-iris'] = `var(--chart-${activeColor})`;
-  // Tinted background: a TONAL accent surface (steep-like depth) — a soft top-anchored radial of the
-  // accent hue over the card, not a flat colour slab. Hairline-only depth stays intact (no shadow):
-  // on the dark canvas it reads as a lit surface, on paper as a quiet accent wash. An un-coloured card
-  // washes in the muted --card-tint at its own low per-theme alpha (noble surface, not a blue slab);
-  // an explicitly-coloured widget keeps the punchier 0.15 of its accent.
-  const tintAlpha = activeColor ? '0.15' : 'var(--card-tint-alpha)';
-  if (activeTinted)
-    innerStyle.background = `radial-gradient(120% 90% at 50% 0%, hsl(var(${accentVar}) / ${tintAlpha}), transparent 62%), hsl(var(--card))`;
+  // Accent scoping: the widget's --brand-iris becomes the RESOLVED accent token
+  // (--chart-N-accent — the categorical colour in light, a muted steep-pastel in dark). Chart
+  // primitives follow via --chart-role-primary, and the tinted surface + hero number read the
+  // same scoped colour, so an accented card paints number, line, dot and surface from ONE hue.
+  if (activeColor) (innerStyle as Record<string, string>)['--brand-iris'] = `var(--chart-${activeColor}-accent)`;
+  // Tinted background. An ACCENTED card paints via CSS (`div[data-widget-tinted]` in index.css):
+  // light keeps the top-anchored radial wash, dark goes FLAT tonal (color-mix — steep's even
+  // surface). The un-coloured card keeps the neutral --card-tint radial wash inline, both
+  // themes (the "noble surface" default), so the default feed look doesn't change.
+  if (activeTinted && !activeColor)
+    innerStyle.background = `radial-gradient(120% 90% at 50% 0%, hsl(var(--card-tint) / var(--card-tint-alpha)), transparent 62%), hsl(var(--card))`;
   // Entrance stagger: one beat per grid slot, capped so deep feeds don't wait forever.
   (innerStyle as Record<string, string>)['--enter-delay'] = `${Math.min(Math.max(seqIndex, 0), 8) * 35}ms`;
   if (isDragging) {
@@ -1325,6 +1326,8 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
           homeEditing && homeKey ? 'border-ink3/25' : 'border-border dark:border-white/[0.06]'
         } ${reorder ? 'widget-jiggle' : 'widget-enter cursor-pointer'} ${isDragging ? 'shadow-lg' : ''}`}
         style={innerStyle}
+        data-widget-accented={activeColor ? '' : undefined}
+        data-widget-tinted={activeTinted && activeColor ? '' : undefined}
         // Whole-card click opens the detail overlay (steep — the whole card is the target, not just
         // the small ↗ button). Guarded so header controls, the drill hero, the chart (its own
         // hover/drill) and any open dialog keep their behaviour, and a reorder drag never triggers it.
@@ -1876,9 +1879,9 @@ function VariantCarousel({
               // chart+ledger row fits the same w-56 preview card.
               const wide = v.minSize === 'full';
               const previewStyle: CSSProperties = {};
-              if (prefs.color) (previewStyle as Record<string, string>)['--brand-iris'] = `var(--chart-${prefs.color})`;
+              if (prefs.color) (previewStyle as Record<string, string>)['--brand-iris'] = `var(--chart-${prefs.color}-accent)`;
               if (prefs.tinted ?? true)
-                previewStyle.backgroundColor = `hsl(var(${prefs.color ? `--chart-${prefs.color}` : '--card-tint'}) / 0.07)`;
+                previewStyle.backgroundColor = `hsl(var(${prefs.color ? `--chart-${prefs.color}-accent` : '--card-tint'}) / 0.07)`;
               return (
                 <button
                   key={v.key}
@@ -2189,7 +2192,7 @@ function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, showSerie
                 aria-pressed={prefs.color === n}
                 onClick={() => onChange({ ...prefs, color: n })}
                 className={`h-5 w-5 rounded-full transition-shadow ${prefs.color === n ? 'ring-2 ring-foreground/50 ring-offset-2 ring-offset-card' : ''}`}
-                style={{ backgroundColor: `hsl(var(--chart-${n}))` }}
+                style={{ backgroundColor: `hsl(var(--chart-${n}-accent))` }}
               />
             ))}
           </div>

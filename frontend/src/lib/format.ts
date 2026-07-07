@@ -28,6 +28,13 @@ export const fmt = {
     if (abs >= 1e3) return (n / 1e3).toFixed(1).replace('.0', '') + 'k';
     return String(Math.round(n));
   },
+  /** Headline KPI number: full with grouped thousands below 10 000 («4 749»), compact from
+      10 000 up («12.6k»). ONE rule for every card headline so sibling cards never mix
+      registers (steep's threshold); tooltips, tables and axes keep fmt.num. */
+  kpi(n?: number | null): string {
+    if (n == null || isNaN(n)) return '—';
+    return Math.abs(n) >= 1e4 ? fmt.short(n) : fmt.num(n);
+  },
   /** Signed percentage (+12.34%). */
   pct(p?: number | null, digits = 2): string {
     if (p == null || isNaN(p)) return '—';

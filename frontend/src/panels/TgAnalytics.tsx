@@ -441,7 +441,7 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
       <div className="grid grid-cols-2 gap-x-6 gap-y-4 border-t border-border pt-4 sm:grid-cols-3 lg:grid-cols-6">
         <div>
           <div className="text-2xs font-medium tracking-wider text-muted-foreground">Просмотров / пост</div>
-          <div className="mt-1 text-xl font-medium tabular-nums">{fmt.short(cur(cs?.views_per_post) ?? vs?.avg_views ?? 0)}</div>
+          <div className="mt-1 text-xl font-medium tabular-nums">{fmt.kpi(cur(cs?.views_per_post) ?? vs?.avg_views ?? 0)}</div>
           {vs?.posts_analyzed ? <div className="mt-1 truncate text-2xs text-muted-foreground">по {vs.posts_analyzed} постам</div> : null}
         </div>
         <div>
@@ -456,12 +456,12 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
         </div>
         <div>
           <div className="text-2xs font-medium tracking-wider text-muted-foreground">Репостов / пост</div>
-          <div className="mt-1 text-xl font-medium tabular-nums">{cur(cs?.shares_per_post) != null ? fmt.short(cur(cs?.shares_per_post)!) : '—'}</div>
+          <div className="mt-1 text-xl font-medium tabular-nums">{cur(cs?.shares_per_post) != null ? fmt.kpi(cur(cs?.shares_per_post)!) : '—'}</div>
           {vs?.total_forwards ? <div className="mt-1 truncate text-2xs text-muted-foreground">{fmt.short(vs.total_forwards)} всего</div> : null}
         </div>
         <div>
           <div className="text-2xs font-medium tracking-wider text-muted-foreground">Реакций / пост</div>
-          <div className="mt-1 text-xl font-medium tabular-nums">{cur(cs?.reactions_per_post) != null ? fmt.short(cur(cs?.reactions_per_post)!) : '—'}</div>
+          <div className="mt-1 text-xl font-medium tabular-nums">{cur(cs?.reactions_per_post) != null ? fmt.kpi(cur(cs?.reactions_per_post)!) : '—'}</div>
           {vs?.total_reactions ? <div className="mt-1 truncate text-2xs text-muted-foreground">{fmt.short(vs.total_reactions)} всего</div> : null}
         </div>
         <div>

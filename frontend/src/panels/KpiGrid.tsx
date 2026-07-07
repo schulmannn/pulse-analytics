@@ -65,7 +65,7 @@ export function KpiGrid() {
       {/* HERO — primary metric: big number + area sparkline (Figma Overview lead). */}
       <FeaturedKpi
         label={`Просмотры · ${periodLabel}`}
-        value={fmt.short(totalViews)}
+        value={fmt.kpi(totalViews)}
         trend={viewsTrend}
         caption={viewsCaption}
         spark={viewsSpark}
@@ -76,9 +76,9 @@ export function KpiGrid() {
           not a hairline grid: the card border already frames them, so inner dividers just read as
           "lines within lines" (technical). One quiet top hairline splits ledger from the hero. */}
       <div className="grid grid-cols-2 gap-x-6 gap-y-4 border-t border-border pt-4 lg:grid-cols-4">
-        <StatTile label="Подписчики" value={fmt.num(displayMembers)} trend={subscriberTrend} deltaText={subDelta} info={METRIC_DEFS.subscribers} onDrill={() => openMetric('subscribers')} />
-        <StatTile label="Ср. охват" value={fmt.short(avgViews)} trend={avgReachTrend} info={METRIC_DEFS.avgReach} onDrill={() => openMetric('avgReach')} />
-        <StatTile label="Реакции" value={fmt.short(totalReactions)} trend={reactionsTrend} deltaText={reactionsDelta} info={METRIC_DEFS.reactions} onDrill={() => openMetric('reactions')} />
+        <StatTile label="Подписчики" value={fmt.kpi(displayMembers)} trend={subscriberTrend} deltaText={subDelta} info={METRIC_DEFS.subscribers} onDrill={() => openMetric('subscribers')} />
+        <StatTile label="Ср. охват" value={fmt.kpi(avgViews)} trend={avgReachTrend} info={METRIC_DEFS.avgReach} onDrill={() => openMetric('avgReach')} />
+        <StatTile label="Реакции" value={fmt.kpi(totalReactions)} trend={reactionsTrend} deltaText={reactionsDelta} info={METRIC_DEFS.reactions} onDrill={() => openMetric('reactions')} />
         <StatTile
           label="Вовлечённость"
           value={er > 0 ? er.toFixed(2) + '%' : '—'}
@@ -115,7 +115,7 @@ function FeaturedKpi({ label, value, trend, caption, spark, info, onDrill }: Fea
           shape as the Instagram hero. The old side-by-side layout pushed the chart to the far right
           on wide screens (justify-between), leaving it visually unanchored. */}
       <div className="mt-2 flex items-baseline gap-2.5">
-        <DrillValue label={label} onDrill={onDrill} className="text-hero font-medium leading-none tabular-nums tracking-tight">
+        <DrillValue label={label} onDrill={onDrill} className="kpi-accent text-hero font-medium leading-none tabular-nums tracking-tight">
           {num}
           {unit ? <span className="text-2xl font-medium text-muted-foreground">{unit}</span> : null}
         </DrillValue>
@@ -131,7 +131,7 @@ function FeaturedKpi({ label, value, trend, caption, spark, info, onDrill }: Fea
             strokeWidth={2}
             interactive
             caption="по дням"
-            formatValue={fmt.short}
+            formatValue={fmt.num}
             className="h-16 w-full"
           />
         </div>

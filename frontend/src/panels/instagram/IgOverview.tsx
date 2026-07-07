@@ -29,26 +29,26 @@ export function IgOverview({ ig }: { ig: IgData }) {
       <div className="overflow-hidden rounded-lg border border-border">
         <KpiHero
           label={`Охват · ${ig.window.days} дн.`}
-          value={fmt.short(ig.pairs.reach.cur)}
+          value={fmt.kpi(ig.pairs.reach.cur)}
           delta={pairDelta(ig.pairs.reach)}
           series={ig.series.reach.filter((p) => ig.inWindow(p.day))}
         />
         <div className="grid grid-cols-2 gap-px border-t border-border bg-border lg:grid-cols-4">
           <KpiCard
             label="Подписчики"
-            value={fmt.num(ig.followers)}
+            value={fmt.kpi(ig.followers)}
             deltaText={ig.netMovement.hasCur ? signedNum(ig.netMovement.cur) : undefined}
             deltaTone={ig.netMovement.cur > 0 ? 'up' : ig.netMovement.cur < 0 ? 'down' : 'flat'}
           />
           <KpiCard
             label="Просмотры"
-            value={isLive(ig.pairs.views) ? fmt.short(ig.pairs.views.cur) : '—'}
+            value={isLive(ig.pairs.views) ? fmt.kpi(ig.pairs.views.cur) : '—'}
             trend={isLive(ig.pairs.views) ? pairDelta(ig.pairs.views) : null}
           />
           <KpiCard label="Вовлечённость" value={ig.erReach > 0 ? `${ig.erReach.toFixed(2)}%` : '—'} trend={erTrend} />
           <KpiCard
             label="Взаимодействия"
-            value={isLive(ig.pairs.ti) ? fmt.short(ig.pairs.ti.cur) : '—'}
+            value={isLive(ig.pairs.ti) ? fmt.kpi(ig.pairs.ti.cur) : '—'}
             trend={isLive(ig.pairs.ti) ? pairDelta(ig.pairs.ti) : null}
           />
         </div>

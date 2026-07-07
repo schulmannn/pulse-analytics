@@ -299,10 +299,10 @@ function OverlayStats({ values, statsSum = true }: { values: number[] | null; st
   if (!values || values.length === 0) return null;
   const sum = values.reduce((s, v) => s + v, 0);
   const rows = [
-    { label: 'Мин', value: fmt.short(Math.min(...values)) },
-    { label: 'Макс', value: fmt.short(Math.max(...values)) },
-    { label: 'Среднее', value: fmt.short(sum / values.length) },
-    ...(statsSum ? [{ label: 'Сумма', value: fmt.short(sum) }] : []),
+    { label: 'Мин', value: fmt.kpi(Math.min(...values)) },
+    { label: 'Макс', value: fmt.kpi(Math.max(...values)) },
+    { label: 'Среднее', value: fmt.kpi(sum / values.length) },
+    ...(statsSum ? [{ label: 'Сумма', value: fmt.kpi(sum) }] : []),
   ];
   return (
     <div className="mt-4 grid grid-cols-2 gap-x-6 gap-y-2 border-t border-border pt-3 sm:grid-cols-4">

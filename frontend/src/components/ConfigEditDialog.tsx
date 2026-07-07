@@ -324,7 +324,7 @@ export function WidgetConfigControls({
               aria-pressed={config.style?.color === n}
               onClick={() => onChange({ style: { ...config.style, color: n } })}
               className={`h-5 w-5 rounded-full transition-shadow ${config.style?.color === n ? 'ring-2 ring-foreground/50 ring-offset-2 ring-offset-card' : ''}`}
-              style={{ backgroundColor: `hsl(var(--chart-${n}))` }}
+              style={{ backgroundColor: `hsl(var(--chart-${n}-accent))` }}
             />
           ))}
         </div>
