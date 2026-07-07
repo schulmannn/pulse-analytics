@@ -1,11 +1,10 @@
 import { useSearchParams } from 'react-router-dom';
-import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { TgAnalytics } from '@/panels/TgAnalytics';
 import { Insights } from '@/panels/Insights';
 import { Compare } from '@/panels/Compare';
 import { HistoryChartBlock, HeatmapChartBlock, VelocityChartBlock } from '@/panels/Charts';
-import { WidgetGroup } from '@/components/ChartWidget';
+import { ChartSection, WidgetGroup } from '@/components/ChartWidget';
 import { WidgetErrorBoundary } from '@/components/WidgetErrorBoundary';
 import { Hashtags } from '@/panels/Hashtags';
 
@@ -111,24 +110,18 @@ export function Analytics() {
         </div>
       )}
       {tab === 'compare' && (
-        <div className="space-y-10">
-          <AnalyticsSection title="Сравнение периодов">
+        <WidgetGroup id="analytics-compare" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
+          {/* Real widgets (аудит: не-виджетные блоки без ⋯) — hide/reorder like every card. */}
+          <ChartSection id="tg-period-compare" title="Сравнение периодов" defaultSize="full" noExpand>
             <Compare />
-          </AnalyticsSection>
-          <AnalyticsSection title="Главное">
+          </ChartSection>
+          <ChartSection id="tg-insights" title="Главное" defaultSize="full" noExpand>
             <Insights />
-          </AnalyticsSection>
-        </div>
+          </ChartSection>
+        </WidgetGroup>
       )}
     </div>
   );
 }
 
-function AnalyticsSection({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="space-y-4">
-      <h2 className="text-base font-medium tracking-tight text-foreground">{title}</h2>
-      {children}
-    </section>
-  );
-}
+

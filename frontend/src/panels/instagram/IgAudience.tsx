@@ -2,7 +2,8 @@ import { fmt } from '@/lib/format';
 import { pairDelta, tvBreakdown, CONTACT_LABEL } from '@/lib/igMetrics';
 import type { IgData } from '@/lib/useIgData';
 import { Section, KpiCard } from '@/components/instagram/shared';
-import { ChartSection } from '@/components/ChartWidget';
+import { ChartSection, WidgetGroup } from '@/components/ChartWidget';
+import { EmptyState } from '@/components/EmptyState';
 import { AudienceBlock, BestTimeHeatmap } from '@/components/instagram/audience';
 import { Breakdown } from '@/components/Breakdown';
 
@@ -23,13 +24,13 @@ export function IgAudience({ ig }: { ig: IgData }) {
 
       {/* A real widget card (not a flat h2 section): the heatmap joins the drill contract —
           whole-card click / ↗ open the Tier-1 overlay, same as the TG activity heatmap. */}
-      <ChartSection title="Лучшее время для публикации" defaultSize="full">
-        <BestTimeHeatmap online={ig.online} />
-      </ChartSection>
-
-      <Section title="Действия в профиле">
+      <WidgetGroup id="ig-audience-actions" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
+        <ChartSection title="Лучшее время для публикации" defaultSize="full">
+          <BestTimeHeatmap online={ig.online} />
+        </ChartSection>
+        <ChartSection id="ig-profile-actions" title="Действия в профиле" defaultSize="full" noExpand>
         {!hasViews && contacts.length === 0 ? (
-          <p className="py-6 text-center text-sm text-muted-foreground">Нет данных о действиях.</p>
+          <EmptyState compact title="Нет данных о действиях." />
         ) : (
           <div className="space-y-4">
             {hasViews && (
@@ -49,7 +50,8 @@ export function IgAudience({ ig }: { ig: IgData }) {
             )}
           </div>
         )}
-      </Section>
+        </ChartSection>
+      </WidgetGroup>
     </div>
   );
 }
