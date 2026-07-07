@@ -17,7 +17,8 @@ import { fmt } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { freshness, latestHistoryDay } from '@/lib/freshness';
 import { METRIC_DEFS } from '@/lib/metricDefs';
-import { Icon, type IconName } from '@/components/nav-icons';
+import { NETWORKS, NetworkGlyph, networkByKey, networkForPath, type NavLinkDef, type Network } from '@/lib/networks';
+import { Icon } from '@/components/nav-icons';
 import { ChannelAvatar } from '@/components/ChannelAvatar';
 
 /** Close a popover/dropdown on Escape, and (when a ref is given) on outside mousedown.
@@ -56,60 +57,30 @@ function useDismiss(
   }, [active, setOpen, ref, triggerRef]);
 }
 
-interface NavLinkDef {
-  to: string;
-  label: string;
-  icon: IconName;
-  end?: boolean;
-}
-
-// Telegram's dashboard is split into routes… Отчёты is network-agnostic (reports are per-USER,
-// not per-channel) so it rides along with the TG set AND is appended to IG below — it must stay
-// reachable in either network. The four feed views (Обзор/Аналитика/Посты/Упоминания) are the
-// network-specific part.
-const TG_FEED_NAV: NavLinkDef[] = [
-  { to: '/', label: 'Обзор', icon: 'overview', end: true },
-  { to: '/analytics', label: 'Аналитика', icon: 'analytics' },
-  { to: '/posts', label: 'Посты', icon: 'posts' },
-  { to: '/mentions', label: 'Упоминания', icon: 'mentions' },
-];
-// …and Instagram into its own parallel set (Обзор / Аналитика / Контент / Аудитория).
-const IG_FEED_NAV: NavLinkDef[] = [
-  { to: '/instagram', label: 'Обзор', icon: 'overview', end: true },
-  { to: '/instagram/analytics', label: 'Аналитика', icon: 'analytics' },
-  { to: '/instagram/content', label: 'Контент', icon: 'posts' },
-  { to: '/instagram/audience', label: 'Аудитория', icon: 'audience' },
-];
-// Network-agnostic route(s) shown after the active network's feed views in BOTH nets.
+// Per-network feed sections live in the NETWORK REGISTRY (lib/networks) — the shell never
+// hardcodes a platform list. Only the network-AGNOSTIC rows are declared here:
+// «Отчёты» — per-USER (not per-channel), trails the network groups in every net.
 const AGNOSTIC_NAV: NavLinkDef[] = [{ to: '/reports', label: 'Отчёты', icon: 'report' }];
-// «Главная» — the personal pinned-widget board. Per-USER (not per-channel), like Отчёты, so it
-// leads BOTH nets at the very top of the nav.
+// «Главная» — the personal pinned-widget board. Per-USER, like Отчёты, so it leads the nav.
 const HOME_NAV: NavLinkDef = { to: '/home', label: 'Главная', icon: 'home', end: true };
-
-// Full nav sets = Главная + active network's feed views + the agnostic tail. These drive both the
-// desktop sidebar list and the mobile bottom bar. Adding «Главная» makes both nets 6 tabs wide
-// (MobileBottomNav's grid-cols follows nav.length).
-const TG_NAV: NavLinkDef[] = [HOME_NAV, ...TG_FEED_NAV, ...AGNOSTIC_NAV];
-const IG_NAV: NavLinkDef[] = [HOME_NAV, ...IG_FEED_NAV, ...AGNOSTIC_NAV];
 
 const SUPER_NAV: NavLinkDef[] = [
   { to: '/admin', label: 'Админ', icon: 'admin' },
   { to: '/bugs', label: 'Баги', icon: 'bugs' },
 ];
 
-type Network = 'tg' | 'ig';
-
 /** The active network, derived purely from the URL — the single source of truth that survives
-    deep-links and reloads. /instagram* = Instagram, everything else = Telegram. */
+    deep-links and reloads. Prefix-matched against the registry; the default net is the fallback. */
 function useActiveNetwork(): Network {
   const { pathname } = useLocation();
-  return pathname.startsWith('/instagram') ? 'ig' : 'tg';
+  return networkForPath(pathname);
 }
 
-/** The nav set for the active network — feed views + Отчёты. Drives BOTH the desktop sidebar's
-    single adaptive list AND the mobile bottom bar (they read the same active-network route set). */
+/** The nav set for the active network — Главная + its feed views + Отчёты. Drives BOTH the
+    sidebar's icon rail AND the mobile bottom bar (same routes, denser form). Both nets are 6 tabs
+    wide today (MobileBottomNav's grid-cols follows nav.length). */
 function useActiveNetworkNav(): NavLinkDef[] {
-  return useActiveNetwork() === 'ig' ? IG_NAV : TG_NAV;
+  return [HOME_NAV, ...networkByKey(useActiveNetwork()).nav, ...AGNOSTIC_NAV];
 }
 
 const TITLES: Record<string, string> = {
@@ -151,34 +122,6 @@ function routeTitle(pathname: string): string {
   }
   if (pathname.startsWith('/reports/')) return 'Отчёт';
   return pathname.startsWith('/instagram') ? 'Instagram' : 'Atlavue';
-}
-
-// Platform brand colors (platform identity, not the app palette — intentional hex).
-const PLATFORMS = [
-  { key: 'tg', name: 'Telegram', color: '#229ED9', to: '/' },
-  { key: 'ig', name: 'Instagram', color: '#E1306C', to: '/instagram' },
-];
-
-/** Brand glyph for the platform chip — uses currentColor; the call site tints it the platform's
-    brand colour on a neutral chip (no filled square). */
-function PlatformGlyph({ k, className }: { k: string; className?: string }) {
-  if (k === 'tg') {
-    return (
-      <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
-        <path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z" />
-      </svg>
-    );
-  }
-  if (k === 'ig') {
-    return (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className} aria-hidden="true">
-        <rect x="2.5" y="2.5" width="19" height="19" rx="5.5" />
-        <circle cx="12" cy="12" r="4.2" />
-        <circle cx="17.4" cy="6.6" r="1.1" fill="currentColor" stroke="none" />
-      </svg>
-    );
-  }
-  return null;
 }
 
 interface DashboardLayoutProps {
@@ -355,14 +298,23 @@ function GhostIconButton({
 }
 
 /**
- * NESTED nav (steep's Teams idiom — owner call): BOTH platforms are always visible as labelled
- * groups with the SAME section shape, so the mental model doesn't reset when crossing networks
- * («в ТГ своя логика, в IG всё по-другому» — no more). «Главная» leads, «Отчёты» trails — both
- * are per-user, not per-network. The RAIL (icons only, no room for group labels) and the mobile
- * bottom bar keep the flat active-network list (useActiveNetworkNav) — same routes, denser form.
+ * NESTED nav (steep's Teams idiom — owner call): the connected networks are always visible as
+ * labelled groups with the SAME section shape, so the mental model doesn't reset when crossing
+ * networks («в ТГ своя логика, в IG всё по-другому» — no more). «Главная» leads, «Отчёты»
+ * trails — both are per-user, not per-network. The RAIL (icons only, no room for group labels)
+ * and the mobile bottom bar keep the flat active-network list — same routes, denser form.
+ *
+ * Groups are REGISTRY-driven, never a hardcoded platform pair (owner call: more sources are
+ * coming): one group per network this workspace actually has as a source — all of them while the
+ * channel list loads or in the app-wide demo. Unconnected networks aren't advertised as empty
+ * groups; they live behind «Подключить источник» in the source switcher.
  */
 function SidebarNav({ rail }: { rail: boolean }) {
   const railItems = useActiveNetworkNav();
+  const { data } = useChannels();
+  const { demo } = useDemo();
+  const channels = data?.channels ?? [];
+  const groups = NETWORKS.filter((n) => !data || demo || channels.some((c) => n.hasChannel(c)));
   if (rail) {
     return (
       <nav className="mt-5 flex-1 overflow-y-auto overflow-x-hidden px-3">
@@ -379,18 +331,16 @@ function SidebarNav({ rail }: { rail: boolean }) {
       <div className="space-y-0.5">
         <NavItem {...HOME_NAV} rail={false} />
       </div>
-      <NavGroupLabel>Telegram</NavGroupLabel>
-      <div className="space-y-0.5">
-        {TG_FEED_NAV.map((item) => (
-          <NavItem key={item.to} {...item} rail={false} />
-        ))}
-      </div>
-      <NavGroupLabel>Instagram</NavGroupLabel>
-      <div className="space-y-0.5">
-        {IG_FEED_NAV.map((item) => (
-          <NavItem key={item.to} {...item} rail={false} />
-        ))}
-      </div>
+      {groups.map((net) => (
+        <div key={net.key}>
+          <NavGroupLabel>{net.name}</NavGroupLabel>
+          <div className="space-y-0.5">
+            {net.nav.map((item) => (
+              <NavItem key={item.to} {...item} rail={false} />
+            ))}
+          </div>
+        </div>
+      ))}
       <div className="mt-4 space-y-0.5">
         {AGNOSTIC_NAV.map((item) => (
           <NavItem key={item.to} {...item} rail={false} />
@@ -523,7 +473,7 @@ interface SourceRow {
     tinted with the network's brand colour on a tiny paper chip so TG-blue / IG-magenta read as
     identifiers, not UI colour. */
 function NetworkBadge({ network, className }: { network: Network; className?: string }) {
-  const color = PLATFORMS.find((p) => p.key === network)?.color;
+  const color = networkByKey(network).color;
   return (
     <span
       className={cn(
@@ -533,7 +483,7 @@ function NetworkBadge({ network, className }: { network: Network; className?: st
       style={{ color }}
       aria-hidden="true"
     >
-      <PlatformGlyph k={network} className="h-2.5 w-2.5" />
+      <NetworkGlyph k={network} className="h-2.5 w-2.5" />
     </span>
   );
 }
@@ -591,22 +541,23 @@ function SourceSwitcher({ rail = false, mobile = false }: { rail?: boolean; mobi
   const initial = (name || 'T').slice(0, 1).toUpperCase();
   const count = current?.memberCount;
   // Subtitle names the ACTIVE network so the trigger reads as "this source", not just "this channel".
+  // Only the default net (TG) has richer channel facts to show; other networks label themselves.
   const subtitle =
-    network === 'ig'
-      ? 'Instagram'
+    network !== NETWORKS[0].key
+      ? networkByKey(network).name
       : count != null && count > 0
         ? `${fmt.kpi(count)} подписчиков`
         : current?.source === 'collector'
           ? 'Локальный сбор'
-          : 'Telegram';
+          : networkByKey(network).name;
 
   // The dropdown always opens (even with a single channel) — it's how the user crosses NETWORKS,
   // not only how they switch channels.
   const openable = channels.length > 0;
 
-  // Search only when the flat source list gets long (both networks × channels). Mirrors the
+  // Search only when the flat source list gets long (all networks × channels). Mirrors the
   // command palette's simple substring filter.
-  const totalRows = channels.length * PLATFORMS.length;
+  const totalRows = channels.length * NETWORKS.length;
   const showSearch = totalRows > 8;
 
   const pick = (row: SourceRow) => {
@@ -616,19 +567,16 @@ function SourceSwitcher({ rail = false, mobile = false }: { rail?: boolean; mobi
     // The focused row unmounts with the popover — hand focus back to the trigger so a keyboard
     // user switching sources keeps their place instead of restarting from the document top.
     triggerRef.current?.focus();
-    navigate(row.network === 'ig' ? '/instagram' : '/');
+    navigate(networkByKey(row.network).home);
   };
 
   const filtered = (net: Network): SourceRow[] => {
     const q = query.trim().toLowerCase();
     return channels
-      // Instagram is offered ONLY for channels with a linked IG account (ig_connected). An empty
-      // IG group auto-hides below (rows.length === 0 → null), so unconnected workspaces show
-      // Telegram only — no more demo/mock IG for every channel.
-      .filter((c) => net !== 'ig' || !!c.ig_connected)
-      // Standalone Instagram sources (source='ig') have no Telegram side — never list them
-      // under the Telegram group.
-      .filter((c) => net !== 'tg' || c.source !== 'ig')
+      // Which channels expose this network as a source — the registry predicate (lib/networks).
+      // An empty group auto-hides below (rows.length === 0 → null), so unconnected networks get
+      // no demo/mock rows here.
+      .filter((c) => networkByKey(net).hasChannel(c))
       .map((c) => ({ channelId: c.id, network: net, name: channelName(c) }))
       .filter((r) => (q ? r.name.toLowerCase().includes(q) : true));
   };
@@ -640,8 +588,8 @@ function SourceSwitcher({ rail = false, mobile = false }: { rail?: boolean; mobi
     const rowSize = touch ? 'min-h-11 py-2' : 'py-1.5';
     return (
       <>
-        {PLATFORMS.map((p) => {
-          const net = p.key as Network;
+        {NETWORKS.map((p) => {
+          const net = p.key;
           const rows = filtered(net);
           if (rows.length === 0) return null;
           return (
@@ -873,9 +821,7 @@ function MobileHeader({ email, role, avatar }: { email?: string; role?: string; 
         </div>
         <AccountMenu email={email} role={role} avatar={avatar} />
       </div>
-      <div className="border-b px-3 py-2">
-        <PlatformNav />
-      </div>
+      <PlatformNav />
     </div>
   );
 }
@@ -1112,52 +1058,61 @@ function SidebarUserRow({
 }
 
 /**
- * Source/network switcher (Telegram ↔ Instagram) — MOBILE ONLY (<md, MobileHeader context bar).
- * The desktop sidebar now lists both platforms as labeled nav sections instead, but the mobile
- * bottom tab bar still shows one platform's routes at a time, so this segmented control keeps
- * Instagram reachable on phones. Instagram is demo/mock-backed until connected; `mock === true`
- * (not just "no data") avoids a false flag during the initial load.
+ * Network switcher segment — MOBILE ONLY (<md, MobileHeader context bar). The desktop sidebar
+ * lists the networks as labeled nav groups instead, but the mobile bottom tab bar shows one
+ * network's routes at a time, so this segmented control keeps the other nets reachable on phones.
+ * REGISTRY-driven and gated like the sidebar groups: only networks the workspace actually has
+ * (all while loading / in demo); with a single network there is nothing to switch — no bar at
+ * all. Instagram is demo/mock-backed until connected; `mock === true` (not just "no data")
+ * avoids a false flag during the initial load.
  */
 function PlatformNav() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
-  const igActive = pathname.startsWith('/instagram');
+  const activeKey = networkForPath(pathname);
   const igProfile = useIgProfile();
   const igDemo = igProfile.data?.mock === true;
+  const { data } = useChannels();
+  const { demo } = useDemo();
+  const channels = data?.channels ?? [];
+  const nets = NETWORKS.filter((n) => !data || demo || channels.some((c) => n.hasChannel(c)));
+  if (nets.length < 2) return null;
 
-  const items = PLATFORMS.map((p) => ({
-    ...p,
-    active: p.key === 'ig' ? igActive : !igActive,
-    demo: p.key === 'ig' && igDemo,
-  }));
+  // Segment count follows the connected-network count (same trick as MobileBottomNav's columns).
+  const GRID_COLS: Record<number, string> = { 2: 'grid-cols-2', 3: 'grid-cols-3', 4: 'grid-cols-4' };
 
-  // The active half is a calm neutral surface with a thin brand underline; the brand colour lives
-  // ONLY on the icon, so Telegram-blue / Instagram-magenta read as identifiers, not UI colour.
+  // The active segment is a calm neutral surface with a thin brand underline; the brand colour
+  // lives ONLY on the icon, so TG-blue / IG-magenta read as identifiers, not UI colour.
   return (
-    <div className="grid grid-cols-2 gap-px overflow-hidden rounded border border-border bg-border">
-      {items.map((p) => (
-        <button
-          key={p.key}
-          type="button"
-          onClick={() => navigate(p.to)}
-          aria-current={p.active ? 'true' : undefined}
-          className={cn(
-            'relative flex items-center justify-center gap-2 px-2 py-2 text-sm transition-colors',
-            p.active ? 'bg-muted/60 font-medium text-foreground' : 'bg-background text-muted-foreground hover:text-foreground',
-          )}
-        >
-          <span className="shrink-0" style={{ color: p.color, opacity: p.active ? 1 : 0.55 }}>
-            <PlatformGlyph k={p.key} className="h-4 w-4" />
-          </span>
-          <span className="whitespace-nowrap">{p.name}</span>
-          {p.demo && (
-            <span className="rounded-full bg-status-warn/15 px-1.5 py-0.5 text-2xs font-medium text-status-warn">
-              демо
-            </span>
-          )}
-          {p.active && <span aria-hidden="true" className="absolute inset-x-0 bottom-0 h-0.5" style={{ background: p.color }} />}
-        </button>
-      ))}
+    <div className="border-b px-3 py-2">
+      <div className={cn('grid gap-px overflow-hidden rounded border border-border bg-border', GRID_COLS[nets.length] ?? 'grid-cols-2')}>
+        {nets.map((p) => {
+          const active = p.key === activeKey;
+          return (
+            <button
+              key={p.key}
+              type="button"
+              onClick={() => navigate(p.home)}
+              aria-current={active ? 'true' : undefined}
+              className={cn(
+                'relative flex items-center justify-center gap-2 px-2 py-2 text-sm transition-colors',
+                active ? 'bg-muted/60 font-medium text-foreground' : 'bg-background text-muted-foreground hover:text-foreground',
+              )}
+            >
+              <span className="shrink-0" style={{ color: p.color, opacity: active ? 1 : 0.55 }}>
+                <NetworkGlyph k={p.key} className="h-4 w-4" />
+              </span>
+              <span className="whitespace-nowrap">{p.name}</span>
+              {p.key === 'ig' && igDemo && (
+                <span className="rounded-full bg-status-warn/15 px-1.5 py-0.5 text-2xs font-medium text-status-warn">
+                  демо
+                </span>
+              )}
+              {active && <span aria-hidden="true" className="absolute inset-x-0 bottom-0 h-0.5" style={{ background: p.color }} />}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
