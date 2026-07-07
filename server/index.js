@@ -2646,7 +2646,7 @@ app.post('/api/client-errors', requireAuth, crashLimiter, async (req, res) => {
     const traceId = str(b.traceId, 40) || '';
     const name = str(b.name, 120) || 'Error';
     const message = str(b.message, 500) || '';
-    const scope = b.scope === 'app' ? 'app' : 'widget';
+    const scope = b.scope === 'app' || b.scope === 'global' ? b.scope : 'widget';
     const route = str(b.route, 200) || '';
     const widgetId = str(b.widgetId, 120);
     const label = str(b.label, 160);

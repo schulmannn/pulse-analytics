@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { apiSend } from '@/api/client';
-import { setWidgetErrorSink, type WidgetErrorReport } from '@/lib/widgetErrors';
+import { setWidgetErrorSink, buildWidgetErrorReport, nextTraceId, type WidgetErrorReport } from '@/lib/widgetErrors';
 
 /**
  * Crash telemetry — forwards a caught render crash (widget or app-level) to POST /api/client-errors so
@@ -24,14 +24,15 @@ let sentApp = 0;
 
 /** POST a caught crash to the telemetry endpoint. Fire-and-forget: every failure (offline, demo mode,
  *  rate limit, sync throw) is swallowed so reporting can never escalate a crash. Budgeted per scope. */
-export function reportCrashToServer(report: WidgetErrorReport, scope: 'widget' | 'app' = 'widget'): void {
+export function reportCrashToServer(report: WidgetErrorReport, scope: 'widget' | 'app' | 'global' = 'widget'): void {
   if (scope === 'app') {
     if (sentApp >= MAX_APP_REPORTS) return;
     sentApp += 1;
-  } else {
+  } else if (scope === 'widget') {
     if (sentWidget >= MAX_WIDGET_REPORTS) return;
     sentWidget += 1;
   }
+  // 'global' is pre-gated by reportGlobalCrash (per-signature dedupe + its own budget) → no double cap.
   try {
     void apiSend(
       'POST',
@@ -66,8 +67,57 @@ const widgetSink = (report: WidgetErrorReport) => reportCrashToServer(report, 'w
 // and is swallowed), so keeping it armed for the whole session is harmless.
 setWidgetErrorSink(widgetSink);
 
+// ── Global (non-React) error net ────────────────────────────────────────────────────────────
+// React error boundaries only catch throws DURING render. Uncaught errors (event handlers, module
+// eval, async callbacks) and unhandled promise rejections never reach a boundary — without this net
+// they are console-only and invisible to telemetry. A window-level listener funnels them through the
+// same POST /api/client-errors path (scope 'global'), deduped per signature so a hot error loop can't
+// spam the endpoint (the server deduplicates too, by signature).
+const MAX_GLOBAL_REPORTS = 8;
+let sentGlobal = 0;
+const seenGlobal = new Set<string>();
+
+function reportGlobalCrash(error: unknown, kind: 'error' | 'unhandledrejection'): void {
+  if (sentGlobal >= MAX_GLOBAL_REPORTS) return;
+  const report = buildWidgetErrorReport({
+    traceId: nextTraceId(),
+    error,
+    at: new Date().toISOString(),
+    route: typeof location !== 'undefined' ? location.pathname : undefined,
+    // Repurpose componentStack for the JS stack — «where it threw» for a non-React error.
+    componentStack: error instanceof Error && error.stack ? error.stack : undefined,
+    label: kind === 'unhandledrejection' ? 'unhandled promise' : undefined,
+  });
+  const sig = `${report.name}|${report.message}|${report.route ?? ''}`;
+  if (seenGlobal.has(sig)) return; // one report per unique signature per session
+  seenGlobal.add(sig);
+  sentGlobal += 1;
+  console.error(`[global-crash:${kind}]`, report.traceId, report);
+  reportCrashToServer(report, 'global');
+}
+
+let globalInstalled = false;
+/** Arm the window-level catch-all: uncaught errors + unhandled promise rejections. Idempotent; a
+ *  no-op outside a browser (SSR / node test env). Call once at app init (main.tsx). */
+export function installGlobalErrorReporter(): void {
+  if (globalInstalled || typeof window === 'undefined') return;
+  globalInstalled = true;
+  window.addEventListener('error', (event) => {
+    // Skip resource-load errors (img/script/link): ErrorEvents with no `error` and a non-window
+    // target — not real script exceptions.
+    if (event.target && event.target !== window) return;
+    if (event.error == null && !event.message) return;
+    reportGlobalCrash(event.error ?? event.message, 'error');
+  });
+  window.addEventListener('unhandledrejection', (event) => {
+    reportGlobalCrash(event.reason, 'unhandledrejection');
+  });
+}
+
 /** Test seam — reset the per-session report budgets. */
 export function __resetCrashReporting(): void {
   sentWidget = 0;
   sentApp = 0;
+  sentGlobal = 0;
+  seenGlobal.clear();
 }
