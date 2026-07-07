@@ -16,6 +16,7 @@ const { captionSnippet } = require('./lib/caption');
 const { fetchWithTimeout } = require('./lib/http');
 const { log, requestContext, hashIp } = require('./lib/observability');
 const notionCrash = require('./lib/notion_crash');
+const { canDispatchBugKind, sanitizeForPrompt } = require('./lib/bugfix_gate');
 const { legacyCspHeader, setAppHeaders, setHtmlSecurityHeaders } = require('./lib/securityHeaders');
 const { makeResolveChannel, makeServeSnapshot, hasWorkspaceRole } = require('./middleware/tenant');
 const { registerCollectorRoutes } = require('./routes/collector');
@@ -2717,6 +2718,12 @@ app.post('/api/bugs/:id/claude-fix', requireAuth, requireSuper, async (req, res,
   try {
     const bug = await db.getBug(id);
     if (!bug) return res.status(404).json({ error: 'баг не найден' });
+    // Security (S1): the dispatched text/context drive a Claude agent with contents+PR write. Only
+    // superuser-authored kinds may reach it — crash rows carry arbitrary user text (POST
+    // /api/client-errors) and would be a prompt-injection channel into the CI agent.
+    if (!canDispatchBugKind(bug.kind)) {
+      return res.status(400).json({ error: 'Авто-фикс доступен только для баг/фича/правка — краши содержат непроверенный пользовательский текст и не передаются агенту' });
+    }
     const r = await fetchWithTimeout(`https://api.github.com/repos/${GH_REPO}/dispatches`, {
       method: 'POST',
       headers: {
@@ -2730,10 +2737,12 @@ app.post('/api/bugs/:id/claude-fix', requireAuth, requireSuper, async (req, res,
         event_type: 'bug-fix-request',
         client_payload: {
           id: bug.id,
-          text: String(bug.text || '').slice(0, 4000),
+          // Defense-in-depth: neutralize prompt-escape scaffolding before it reaches the workflow
+          // fence (the workflow wraps these in UNTRUSTED-BUG-REPORT markers + a guardrail preamble).
+          text: sanitizeForPrompt(bug.text, 2000),
           severity: bug.severity,
           kind: bug.kind,
-          context: bug.context || '',
+          context: sanitizeForPrompt(bug.context || '', 4000),
           attachments: bug.attachment_count || 0,
         },
       }),
