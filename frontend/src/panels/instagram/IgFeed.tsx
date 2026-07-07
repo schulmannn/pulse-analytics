@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { ReactNode } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Outlet, useOutletContext, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useIgData } from '@/lib/useIgData';
 import type { IgData } from '@/lib/useIgData';
@@ -10,50 +9,26 @@ import type { PeriodDays } from '@/lib/period';
 import { IgConnectPanel, IgDataHealth } from '@/components/instagram/health';
 import { DateRangePicker } from '@/components/DateRangePicker';
 import { ErrorState } from '@/components/ErrorState';
-import { NotFound } from '@/components/NotFound';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
-import { useFeed, FeedBlock, type FeedBlockDef } from '@/panels/feed/useFeed';
 import { IgOverview } from '@/panels/instagram/IgOverview';
 import { IgAnalytics } from '@/panels/instagram/IgAnalytics';
 import { IgContent } from '@/panels/instagram/IgContent';
 import { IgAudience } from '@/panels/instagram/IgAudience';
 
 /**
- * Instagram feed — the same steep-Home reading model as TgFeed, for the IG side: Обзор →
- * Аналитика → Контент → Аудитория as ONE scrollable page. It replaces the old InstagramLayout +
- * four nested routes: the shell chrome that used to live in the layout (connect-notice banner,
- * loading / error gates, the account header, the demo IgConnectPanel) is folded in ABOVE the
- * blocks and rendered once, and the four views become feed blocks.
+ * IG feed SHELL — the IG side now runs the SAME focused-pages model as TG: one layout route with
+ * network-wide chrome (account header, data health, OAuth-callback notices, the demo connect
+ * panel, the loading/error gates) and the addressed section rendered через <Outlet/>. What each
+ * section renders lives in the FEED REGISTRY (panels/feed/feeds.tsx) — this closed the last
+ * structural TG↔IG fork (TG = pages, IG = scroll-feed), and the scroll engine (useFeed) retired
+ * with it.
  *
- * Data delivery is the only real change from the old model: InstagramLayout fetched IG data once
- * and handed it to the active view via `<Outlet context={ig}/>`. A single-component feed has no
- * Outlet, so IgFeed calls {@link useIgData} ONCE at the top and passes `ig` to each block as a
- * prop. The IG data cluster (all the ig-* queries + the igMetrics/igInsights math inside useIgData)
- * is untouched — only the delivery mechanism (Outlet → prop) changed, and useIgData stays a single
- * call so the React Query dedupe is intact.
+ * Data delivery: the shell calls {@link useIgData} ONCE and hands the cluster to the section
+ * pages via Outlet context (the focused-pages twin of the old feed's prop threading) — the ig-*
+ * queries stay deduped by React Query, and the igMetrics math runs once per page, not once per
+ * section body.
  */
-
-const BLOCKS: readonly FeedBlockDef<'' | 'analytics' | 'content' | 'audience'>[] = [
-  { section: '', path: '/instagram', title: 'Обзор' },
-  { section: 'analytics', path: '/instagram/analytics', title: 'Аналитика' },
-  { section: 'content', path: '/instagram/content', title: 'Контент' },
-  { section: 'audience', path: '/instagram/audience', title: 'Аудитория' },
-];
-type FeedSection = (typeof BLOCKS)[number]['section'];
-
-function renderBlock(section: FeedSection, ig: IgData): ReactNode {
-  switch (section) {
-    case '':
-      return <IgOverview ig={ig} />;
-    case 'analytics':
-      return <IgAnalytics ig={ig} />;
-    case 'content':
-      return <IgContent ig={ig} />;
-    case 'audience':
-      return <IgAudience ig={ig} />;
-  }
-}
 
 // Plain-language messages for the ?ig_error= codes the OAuth callback bounces back with.
 const IG_ERROR_MESSAGES: Record<string, string> = {
@@ -104,9 +79,9 @@ function useIgConnectNotice() {
   return { notice, dismiss: () => setNotice(null) };
 }
 
-/** Window presets for the single top-of-feed period control. IG reads the GLOBAL usePeriod (via
-    useIgData), so ONE control here re-windows every IG block — strictly better than the old layout,
-    which exposed no period control at all. Per-widget IG periods are a noted follow-up. */
+/** Window presets for the IG period chips. IG reads the GLOBAL usePeriod (via useIgData), so the
+    control re-windows every IG card; it now sits in each section's sticky header (TG parity) —
+    same value on every page, one placement rule everywhere. */
 const IG_PERIOD_PRESETS: { days: PeriodDays; label: string }[] = [
   { days: 7, label: '7д' },
   { days: 30, label: '30д' },
@@ -117,7 +92,7 @@ const IG_PERIOD_PRESETS: { days: PeriodDays; label: string }[] = [
 /** Short «дд.мм» for the active custom-range chip label. */
 const fmtRangeChip = (ms: number) => new Date(ms).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
 
-function IgPeriodControl() {
+export function IgPeriodControl() {
   const { days, range, setDays, setRange } = usePeriod();
   const [pickerOpen, setPickerOpen] = useState(false);
   return (
@@ -178,13 +153,10 @@ function IgPeriodControl() {
   );
 }
 
-export function IgFeed() {
+export function IgShell() {
   // The whole IG data cluster, fetched ONCE (React Query dedupes the underlying ig-* queries).
   const ig = useIgData();
   const { notice, dismiss } = useIgConnectNotice();
-  // ready = the feed body is actually rendered (not the loading skeleton) — so a cold deep-link to
-  // /instagram/analytics performs its scroll only once the container exists.
-  const feed = useFeed(BLOCKS, !ig.loading);
 
   const banner = notice ? (
     <div
@@ -200,9 +172,6 @@ export function IgFeed() {
     </div>
   ) : null;
 
-  // Unknown section (/instagram/whatever) → back to the IG entry, mirroring TgFeed's home redirect.
-  if (feed.unknownSection) return <NotFound />;
-
   if (ig.loading) return <div className="space-y-6">{banner}<InstagramSkeleton /></div>;
   if (ig.error) {
     return (
@@ -216,7 +185,7 @@ export function IgFeed() {
   return (
     <div className="space-y-6">
       {banner}
-      {/* Shell chrome — rendered once, ABOVE the blocks (was InstagramLayout's header). */}
+      {/* Network-wide chrome — rendered once, above the section card (the account context). */}
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-xl font-medium tracking-tight">
@@ -226,32 +195,35 @@ export function IgFeed() {
             {ig.isMock ? 'Демо-режим — примерные данные' : 'Аккаунт, аудитория, форматы и публикации'}
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <IgPeriodControl />
-          {/* Tiny data-status indicator (account-card area). */}
-          <div className="min-w-[180px] shrink-0">
-            <IgDataHealth accountName={ig.profile?.username} lastSync={ig.lastSync} isMock={ig.isMock} />
-          </div>
+        {/* Tiny data-status indicator (account-card area). The period chips moved into the
+            section headers (TG parity). */}
+        <div className="min-w-[180px] shrink-0">
+          <IgDataHealth accountName={ig.profile?.username} lastSync={ig.lastSync} isMock={ig.isMock} />
         </div>
       </header>
       {ig.isMock && <IgConnectPanel />}
 
-      {/* The four IG views as one scrolling feed — same engine as TgFeed. */}
-      <div ref={feed.containerRef} className="space-y-10">
-        {BLOCKS.map((block, i) => (
-          <FeedBlock
-            key={block.section}
-            section={block.section}
-            title={block.title}
-            eager={i <= Math.max(feed.mountedUpTo, 0)}
-            onMount={() => feed.markMounted(i)}
-          >
-            {renderBlock(block.section, ig)}
-          </FeedBlock>
-        ))}
-      </div>
+      <Outlet context={ig} />
     </div>
   );
+}
+
+/** The section pages read the shell's IG cluster from the Outlet context. */
+function useIg(): IgData {
+  return useOutletContext<IgData>();
+}
+
+export function IgOverviewPage() {
+  return <IgOverview ig={useIg()} />;
+}
+export function IgAnalyticsPage() {
+  return <IgAnalytics ig={useIg()} />;
+}
+export function IgContentPage() {
+  return <IgContent ig={useIg()} />;
+}
+export function IgAudiencePage() {
+  return <IgAudience ig={useIg()} />;
 }
 
 function InstagramSkeleton() {

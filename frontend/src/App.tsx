@@ -8,7 +8,8 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { ErrorState } from '@/components/ErrorState';
 import { NotFound } from '@/components/NotFound';
 import { PeriodUrlSync } from '@/lib/period-url';
-import { TgSectionLayout, TgSection } from '@/panels/TgFeed';
+import { FEEDS, FeedSectionPage } from '@/panels/feed/feeds';
+import { NETWORKS } from '@/lib/networks';
 import { Home } from '@/panels/Home';
 import { MetricRoute } from '@/panels/IgMetricPage';
 import { ReportPage } from '@/panels/ReportPage';
@@ -27,7 +28,6 @@ const LoginPage = lazyFrom(() => import('@/pages/Auth'), 'LoginPage');
 const RegisterPage = lazyFrom(() => import('@/pages/Auth'), 'RegisterPage');
 const VerifyPage = lazyFrom(() => import('@/pages/Auth'), 'VerifyPage');
 const ResetPage = lazyFrom(() => import('@/pages/Auth'), 'ResetPage');
-const IgFeed = lazyFrom(() => import('@/panels/instagram/ig-cluster'), 'IgFeed');
 const Admin = lazyFrom(() => import('@/panels/Admin'), 'Admin');
 const Bugs = lazyFrom(() => import('@/panels/Bugs'), 'Bugs');
 const Connect = lazyFrom(() => import('@/pages/Connect'), 'Connect');
@@ -64,24 +64,33 @@ export default function App() {
         <Route path="reports/:id" element={<ReportPage />} />
         {/* Pre-multi-reports bookmarks land on the index. */}
         <Route path="report" element={<Navigate to="/reports" replace />} />
-        {/* The IG feed serves '/instagram', '/instagram/analytics|content|audience' as ONE scrolled
-            page — a single optional-param route (like the TG feed) so the scrollspy's replace-
-            navigation never remounts it. Unknown sections redirect to /instagram inside the feed. */}
-        <Route path="instagram/:section?" element={<PanelSuspense><IgFeed /></PanelSuspense>} />
         <Route path="settings" element={<Settings />} />
         <Route path="admin" element={<PanelSuspense><Admin /></PanelSuspense>} />
         <Route path="bugs" element={<PanelSuspense><Bugs /></PanelSuspense>} />
         <Route path="connect" element={<PanelSuspense><Connect /></PanelSuspense>} />
-        {/* TG dashboard — FOCUSED pages (Страницы/IA split): Обзор / Аналитика / Посты / Упоминания
-            are their own routes now, not one scroll-feed. A layout route provides the shared channel-
-            recency context; each child renders a single panel in its section shell. Unknown segments
-            fall through to the 404 below. The IG feed keeps the single-scroll model for now. */}
-        <Route element={<TgSectionLayout />}>
-          <Route index element={<TgSection section="" />} />
-          <Route path="analytics" element={<TgSection section="analytics" />} />
-          <Route path="posts" element={<TgSection section="posts" />} />
-          <Route path="mentions" element={<TgSection section="mentions" />} />
-        </Route>
+        {/* Network dashboards — FOCUSED pages for EVERY network, built from the feed registry
+            (panels/feed/feeds.tsx) over the network registry (lib/networks): a layout route per
+            network (its Shell owns providers/chrome/gates), one child route per declared section.
+            TG is the prefixless default (index at the root); a future source appears here by
+            registering itself — no new route family. Unknown segments fall to the 404 below. */}
+        {NETWORKS.map((net) => {
+          const feed = FEEDS[net.key];
+          return (
+            <Route key={net.key} path={'prefix' in net ? net.prefix.slice(1) : undefined} element={<feed.Shell />}>
+              {feed.sections.map((s) =>
+                s.section === '' ? (
+                  <Route key={`${net.key}:index`} index element={<FeedSectionPage net={net.key} section="" />} />
+                ) : (
+                  <Route
+                    key={`${net.key}:${s.section}`}
+                    path={s.section}
+                    element={<FeedSectionPage net={net.key} section={s.section} />}
+                  />
+                ),
+              )}
+            </Route>
+          );
+        })}
         {/* Real 404 for any unknown path. Renders in the content area, so the shell/nav stay. */}
         <Route path="*" element={<NotFound />} />
       </Route>
