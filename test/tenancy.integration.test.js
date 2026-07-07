@@ -139,13 +139,15 @@ test('workspace-scoped operational rows deny outsiders but allow members/admins'
   assert.strictEqual(await db.getCollectorStatus(ch, { uid: outsider }), null, 'outsider cannot read collector status');
 });
 
-test('two channels linked to ONE source read ONE canonical history row-set', { skip }, async () => {
+test('same-workspace co-follow shares ONE canonical row-set; cross-workspace does NOT leak (F1)', { skip }, async () => {
   const alice = await mkUser('alice');
   const bob = await mkUser('bob');
   const wsA = await mkWorkspace(alice, `wsA-${nonce}`);
   const wsB = await mkWorkspace(bob, `wsB-${nonce}`);
   const src = await mkSource(`${nonce}-canon`);
+  // Three links to the SAME external source: Bob's (other workspace) and TWO of Alice's own.
   const chA = await mkChannel(alice, wsA, src, `chan_${nonce}_alice`);
+  const chA2 = await mkChannel(alice, wsA, src, `chan_${nonce}_alice2`);
   const chB = await mkChannel(bob, wsB, src, `chan_${nonce}_bob`);
 
   // Only Bob's link ever ingested data…
@@ -154,19 +156,29 @@ test('two channels linked to ONE source read ONE canonical history row-set', { s
     { day: '2026-07-02', subscribers: 222, joins: 2, leaves: 1, views: 20, forwards: 2, reactions: 4 },
   ]);
 
-  // …but Alice's channel sees the SAME canonical history (the roadmap acceptance).
-  const viaAlice = await db.getChannelHistory(chA, 4000);
-  const days = viaAlice.map((r) => r.day);
-  assert.deepStrictEqual(days, ['2026-07-01', '2026-07-02']);
-  assert.strictEqual(viaAlice[1].subscribers, 222);
+  // …and Alice's other-workspace neighbour must NOT inherit it through the shared source (F1): the
+  // canonical source union is bounded to the reader's own workspace.
+  assert.deepStrictEqual(await db.getChannelHistory(chA, 4000), [],
+    'cross-workspace source claim reads no foreign history');
 
-  // Both links writing the same day stays ONE canonical row on read (freshest capture wins).
-  await db.upsertChannelDaily(chA, [
-    { day: '2026-07-02', subscribers: 333, joins: null, leaves: null, views: null, forwards: null, reactions: null },
+  // Within Alice's OWN workspace the canonical union still works: chA2 ingests, chA reads it.
+  await db.upsertChannelDaily(chA2, [
+    { day: '2026-07-05', subscribers: 500, joins: 5, leaves: 0, views: 50, forwards: 5, reactions: 5 },
   ]);
-  const deduped = await db.getChannelHistory(chB, 4000);
-  assert.strictEqual(deduped.filter((r) => r.day === '2026-07-02').length, 1, 'DISTINCT ON dedupes the shared day');
-  assert.strictEqual(deduped.find((r) => r.day === '2026-07-02').subscribers, 333, 'freshest capture wins');
+  const viaAliceOwn = await db.getChannelHistory(chA, 4000);
+  assert.ok(viaAliceOwn.some((r) => r.day === '2026-07-05' && r.subscribers === 500),
+    'same-workspace co-follow still shares the source row-set');
+
+  // Two same-workspace links writing the same day stays ONE canonical row on read (freshest wins),
+  // and Alice's workspace-only rows never bleed to Bob.
+  await db.upsertChannelDaily(chA, [
+    { day: '2026-07-05', subscribers: 555, joins: null, leaves: null, views: null, forwards: null, reactions: null },
+  ]);
+  const deduped = await db.getChannelHistory(chA2, 4000);
+  assert.strictEqual(deduped.filter((r) => r.day === '2026-07-05').length, 1, 'DISTINCT ON dedupes the shared day within the workspace');
+  assert.strictEqual(deduped.find((r) => r.day === '2026-07-05').subscribers, 555, 'freshest capture wins');
+  const bobRows = await db.getChannelHistory(chB, 4000);
+  assert.ok(!bobRows.some((r) => r.day === '2026-07-05'), 'Alice-workspace-only rows never bleed to Bob');
 });
 
 test('jobs: duplicate enqueue collapses, failures are retryable, success is cached', { skip }, async () => {
@@ -228,12 +240,48 @@ test('creation paths canonicalise: createTgChannel gets workspace + shared sourc
   assert.ok(a.source_id != null, 'source stamped');
   assert.strictEqual(a.source_id, b.source_id, 'SAME external channel → SAME canonical source');
 
-  // …which makes the ingest of one link instantly visible through the other.
+  // The identity dedups to one source (correct), but a DIFFERENT owner's link must NOT read that
+  // identity's history through the shared source (F1) — canonical reads are workspace-bounded.
   await db.upsertChannelDaily(chA.id, [{ day: '2026-07-03', subscribers: 777, joins: 7, leaves: 0, views: 70, forwards: 7, reactions: 7 }]);
   const viaB = await db.getChannelHistory(chB.id, 4000);
-  assert.ok(viaB.some((r) => r.day === '2026-07-03' && r.subscribers === 777), 'shared source shares history');
+  assert.ok(!viaB.some((r) => r.day === '2026-07-03'), 'cross-owner source claim inherits no history');
+  const viaA = await db.getChannelHistory(chA.id, 4000);
+  assert.ok(viaA.some((r) => r.day === '2026-07-03' && r.subscribers === 777), 'the ingesting owner reads its own rows');
 
   await pool.query(`DELETE FROM external_sources WHERE id=$1`, [a.source_id]).catch(() => {});
+});
+
+test('F1: claiming a foreign external source grants NO cross-tenant history/velocity/count read', { skip }, async () => {
+  // Victim owns a channel with admin-only history + velocity under external source S.
+  const victim = await mkUser('f1-victim');
+  const attacker = await mkUser('f1-attacker');
+  const wsV = await mkWorkspace(victim, `f1-wsV-${nonce}`);
+  const wsA = await mkWorkspace(attacker, `f1-wsA-${nonce}`);
+  const src = await mkSource(`${nonce}-f1`);
+  const chVictim = await mkChannel(victim, wsV, src, `f1_victim_${nonce}`);
+  await db.upsertChannelDaily(chVictim, [
+    { day: '2026-07-04', subscribers: 9001, joins: 42, leaves: 3, views: 500, forwards: 12, reactions: 30 },
+  ]);
+  await db.saveVelocity(chVictim, { available: true, secret: 'victim-velocity' });
+
+  // Attacker CLAIMS the same external identity (exactly what POST /api/tg/qr/channels or a lying
+  // collector ingest does): a fresh channel in the attacker's OWN workspace bound to source S.
+  const chAttacker = await mkChannel(attacker, wsA, src, `f1_attacker_${nonce}`);
+
+  assert.deepStrictEqual(await db.getChannelHistory(chAttacker, 4000), [],
+    'no foreign channel_daily rows leak through the shared source');
+  assert.strictEqual(await db.getLatestVelocity(chAttacker), null,
+    'no foreign velocity leaks through the shared source');
+
+  const list = await db.listChannels({ uid: attacker });
+  const claimed = list.find((c) => c.id === chAttacker);
+  assert.ok(claimed, 'attacker sees their own claimed channel');
+  assert.strictEqual(claimed.memberCount, null, 'no foreign subscriber count leaks into the channel switcher');
+
+  // The fix must not break the legit owner: the victim still reads their own data.
+  const victimHistory = await db.getChannelHistory(chVictim, 4000);
+  assert.ok(victimHistory.some((r) => r.day === '2026-07-04' && r.subscribers === 9001), 'victim reads own history');
+  assert.ok(await db.getLatestVelocity(chVictim), 'victim reads own velocity');
 });
 
 test('setChannelTgId INSIDE a transaction does not self-deadlock (verify-round regression)', { skip }, async () => {
