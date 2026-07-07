@@ -128,6 +128,48 @@ describe('Instagram + кросс-сетевой контраст', () => {
     expect(plain).not.toContain('Движение общее');
   });
 
+  it('IG-герой рождается по лифту ≥×1.6 и несёт permalink-чип', () => {
+    const withHero = {
+      ...ig(flat600, Array(7).fill(648)),
+      mediaWeek: [
+        { title: 'Закат над мастерской', erv: 8.1, permalink: 'https://instagram.com/p/abc' },
+        { title: 'Обычный пост', erv: 2.0, permalink: null },
+        { title: 'Ещё один', erv: 1.5, permalink: null },
+      ],
+      avgMediaErv: 3.8,
+    };
+    const nar = buildWeekNarrative({ ...base, ig: withHero });
+    const plain = norm(narrativeToPlain(nar));
+    expect(plain).toContain('Герой там');
+    expect(plain).toContain('8.1%');
+    expect(plain).toContain('в 2.1 раза выше нормы аккаунта');
+    const chip = nar.paragraphs.flat().find((s) => s.kind === 'post' && s.href);
+    expect(chip && chip.kind === 'post' ? chip.href : null).toBe('https://instagram.com/p/abc');
+  });
+
+  it('IG-герой молчит без лифта или без трёх медиа недели', () => {
+    const igBase = ig(flat600, Array(7).fill(648));
+    const weak = {
+      ...igBase,
+      mediaWeek: [
+        { title: 'a', erv: 4.0, permalink: null },
+        { title: 'b', erv: 3.9, permalink: null },
+        { title: 'c', erv: 3.5, permalink: null },
+      ],
+      avgMediaErv: 3.8,
+    };
+    expect(norm(narrativeToPlain(buildWeekNarrative({ ...base, ig: weak })))).not.toContain('Герой там');
+    const few = {
+      ...igBase,
+      mediaWeek: [
+        { title: 'a', erv: 9, permalink: null },
+        { title: 'b', erv: 1, permalink: null },
+      ],
+      avgMediaErv: 3.8,
+    };
+    expect(norm(narrativeToPlain(buildWeekNarrative({ ...base, ig: few })))).not.toContain('Герой там');
+  });
+
   it('без полного окна охвата IG-абзац не рождается', () => {
     const short = { reachDaily: Array(10).fill(0).map((_, i) => ({ day: day(i), v: 500 })), followsDaily: [], followersNow: 1024 };
     const plain = norm(narrativeToPlain(buildWeekNarrative({ ...base, ig: short })));
