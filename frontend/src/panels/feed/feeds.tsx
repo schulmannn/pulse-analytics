@@ -2,6 +2,7 @@ import { Suspense, lazy } from 'react';
 import type { ComponentType } from 'react';
 import { Navigate } from 'react-router-dom';
 import { networkByKey, type Network } from '@/lib/networks';
+import { PagePeriodProvider } from '@/lib/period';
 import { Skeleton } from '@/components/ui/skeleton';
 import { FeedBlock } from '@/panels/feed/useFeed';
 import { TgSectionLayout, TgPagePeriodControl } from '@/panels/TgFeed';
@@ -66,12 +67,17 @@ const IgAudiencePage = lazyFrom(igLoad, 'IgAudiencePage');
 const IgPeriodControl = lazyFrom(igLoad, 'IgPeriodControl');
 
 /** The lazy IG shell still needs a Suspense above it — same content-area scaffold as the other
-    lazy routes, drawn here so the registry stays self-contained. */
+    lazy routes, drawn here so the registry stays self-contained. PagePeriodProvider sits ABOVE
+    the shell (TgSectionLayout parity): IgShell's own useIgData call reads the page period, and
+    the header chips (IgPeriodControl in the section headers) drive the same value — one period
+    system for both networks. */
 function IgShellRoute() {
   return (
-    <Suspense fallback={<SectionSkeleton />}>
-      <IgShell />
-    </Suspense>
+    <PagePeriodProvider>
+      <Suspense fallback={<SectionSkeleton />}>
+        <IgShell />
+      </Suspense>
+    </PagePeriodProvider>
   );
 }
 

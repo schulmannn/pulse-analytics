@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useIgData } from '@/lib/useIgData';
+import { usePeriod, type PeriodDays } from '@/lib/period';
 import { pairDelta } from '@/lib/igMetrics';
 import type { WindowPair } from '@/lib/igMetrics';
 import { pctDelta } from '@/lib/delta';
@@ -116,6 +117,32 @@ const WINDOW_PILLS = [
   { days: 90, label: '90д' },
   { days: 0, label: 'Всё' },
 ];
+
+/** Sticky bottom window bar (steep) — presets only. The daily explorer feeds it a page-local
+    window; the aggregate/ER pages wire it to the GLOBAL period (their windows live in useIgData),
+    so every /metrics/ig-* page carries its own control — the feed header stopped being the only
+    steering wheel when the feeds moved to the page-period system. */
+function WindowBar({ value, onChange }: { value: number; onChange: (days: PeriodDays) => void }) {
+  return (
+    <div className="sticky bottom-3 z-10 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-background/95 px-3 py-2 backdrop-blur print:hidden">
+      <span className="text-xs font-medium text-muted-foreground">Окно</span>
+      <span className="flex-1" />
+      {WINDOW_PILLS.map((chip) => (
+        <button
+          key={chip.days}
+          type="button"
+          aria-pressed={value === chip.days}
+          onClick={() => onChange(chip.days as PeriodDays)}
+          className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors ${
+            value === chip.days ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          {chip.label}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 export function IgMetricPage({ metricKey }: { metricKey: string }) {
   const ig = useIgData();
@@ -400,23 +427,7 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
       </div>
 
       {/* Bottom window bar (steep). Presets only: the archive has no custom-range picker yet. */}
-      <div className="sticky bottom-3 z-10 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-background/95 px-3 py-2 backdrop-blur print:hidden">
-        <span className="text-xs font-medium text-muted-foreground">Окно</span>
-        <span className="flex-1" />
-        {WINDOW_PILLS.map((chip) => (
-          <button
-            key={chip.days}
-            type="button"
-            aria-pressed={days === chip.days}
-            onClick={() => setDays(chip.days)}
-            className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors ${
-              days === chip.days ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            {chip.label}
-          </button>
-        ))}
-      </div>
+      <WindowBar value={days} onChange={setDays} />
     </div>
   );
 }
@@ -425,6 +436,10 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
     totals per insights window, so a daily chart would be fabricated. Window = the GLOBAL IG
     period (the layout's 7д/30д/90д pills). */
 function IgAggregatePage({ def, pair, windowDays, handle }: { def: IgAggDef; pair: WindowPair; windowDays: number; handle: string | null }) {
+  // These pages live OUTSIDE the IG feed (no page period) — their window is the GLOBAL period
+  // useIgData falls back to, and this is now the page's own control (the feed header used to be
+  // the only steering wheel; after the feeds moved to page periods it no longer reaches here).
+  const { days, setDays } = usePeriod();
   const trend = pairDelta(pair);
   const deltaPct = pair.hasPrev && pair.prev > 0 ? ((pair.cur - pair.prev) / pair.prev) * 100 : null;
   return (
@@ -442,7 +457,7 @@ function IgAggregatePage({ def, pair, windowDays, handle }: { def: IgAggDef; pai
             {handle ? <span className="text-ink3"> · Instagram {handle}</span> : null}
           </span>
         </div>
-        <div className="mt-1.5 text-xs text-muted-foreground">окно управляется общим периодом Instagram (переключатели сверху)</div>
+        <div className="mt-1.5 text-xs text-muted-foreground">агрегат за окно — переключатели внизу страницы</div>
       </div>
 
       <div className="grid grid-cols-1 gap-6 xl:gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
@@ -486,6 +501,8 @@ function IgAggregatePage({ def, pair, windowDays, handle }: { def: IgAggDef; pai
           </Link>
         </aside>
       </div>
+
+      <WindowBar value={days} onChange={setDays} />
     </div>
   );
 }
@@ -522,6 +539,8 @@ function IgErPage({
   windowDays: number;
   handle: string | null;
 }) {
+  // GLOBAL window — this page's own control now (see IgAggregatePage).
+  const { days, setDays } = usePeriod();
   const hasCur = erReach > 0;
   const hasPrev = erReachPrev > 0;
   const deltaPp = hasCur && hasPrev ? erReach - erReachPrev : null;
@@ -541,7 +560,7 @@ function IgErPage({
             {handle ? <span className="text-ink3"> · Instagram {handle}</span> : null}
           </span>
         </div>
-        <div className="mt-1.5 text-xs text-muted-foreground">окно управляется общим периодом Instagram (переключатели сверху)</div>
+        <div className="mt-1.5 text-xs text-muted-foreground">агрегат за окно — переключатели внизу страницы</div>
       </div>
 
       <div className="grid grid-cols-1 gap-6 xl:gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
@@ -588,6 +607,8 @@ function IgErPage({
           </Link>
         </aside>
       </div>
+
+      <WindowBar value={days} onChange={setDays} />
     </div>
   );
 }
