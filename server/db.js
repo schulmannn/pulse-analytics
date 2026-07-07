@@ -263,12 +263,31 @@ async function adoptOwnerChannel(adminUid) {
 const CHANNEL_COLS = 'id, username, title, status, source, tg_channel_id, owner_uid';
 
 // Channels visible to a user (every session maps to a users row with a numeric uid).
-// Latest known subscriber count per channel (cheap: newest daily row). Canonical per ADR-001:
-// any row of the channel's SOURCE counts (two workspaces following one @channel share history),
-// falling back to channel-scoped rows for links without a source yet.
+
+// ── Canonical source-read trust boundary (security: tenancy isolation audit, finding F1) ───────
+// Phase-B canonical reads (getChannelHistory / getLatestVelocity / memberCount) union rows by a
+// shared source_id so two links to ONE external property see one row-set (ADR-001). That union MUST
+// stay inside the reader-channel's access boundary: a user can bind a channel to ANY external
+// identity with NO proof of access — a QR link takes a raw browser-supplied tg id
+// (POST /api/tg/qr/channels), a collector self-reports channel.id on ingest — so an UNRESTRICTED
+// source union would hand a claimer another tenant's admin-only history (joins/leaves/reactions and
+// per-post velocity, none of it public). We therefore union only rows written by a channel in the
+// SAME workspace as the reader-channel (or the SAME creator — covers legacy/central rows whose
+// workspace_id is still NULL). Same-workspace co-following still shares; cross-workspace sharing
+// waits for an access-verified follow (roadmap P2.2). `rowAlias` = data-row table, `chanAlias` =
+// the reader channel.
+const sameTenantSource = (rowAlias, chanAlias) =>
+  `EXISTS (SELECT 1 FROM channels src WHERE src.id = ${rowAlias}.channel_id
+             AND (src.owner_uid = ${chanAlias}.owner_uid
+                  OR (${chanAlias}.workspace_id IS NOT NULL AND src.workspace_id = ${chanAlias}.workspace_id)))`;
+
+// Latest known subscriber count per channel (cheap: newest daily row). Canonical per ADR-001: any
+// row of the channel's SOURCE written within the reader's own workspace counts (a same-workspace
+// co-follow shares history); channel-scoped rows are the fallback for links without a source yet.
 const MEMBER_COUNT_COL =
   `(SELECT cd.subscribers FROM channel_daily cd
-      WHERE ((channels.source_id IS NOT NULL AND cd.source_id = channels.source_id)
+      WHERE ((channels.source_id IS NOT NULL AND cd.source_id = channels.source_id
+              AND ${sameTenantSource('cd', 'channels')})
              OR cd.channel_id = channels.id)
         AND cd.subscribers IS NOT NULL
       ORDER BY cd.day DESC, cd.captured_at DESC NULLS LAST LIMIT 1) AS "memberCount"`;
@@ -455,16 +474,19 @@ async function upsertMentions(channelId, list, executor = pool) {
 
 async function getChannelHistory(channelId, days = 400) {
   if (!enabled || !channelId) return [];
-  // Canonical read (ADR-001 phase B): the history of the channel's SOURCE — two workspaces
-  // following one @channel see ONE row-set. Until phase C flips the write conflict-targets, both
-  // links may still write their own rows, so DISTINCT ON (day) keeps the freshest capture. Links
-  // without a source fall back to their own channel-scoped rows.
+  // Canonical read (ADR-001 phase B): the history of the channel's SOURCE — a same-workspace
+  // co-follow of one @channel sees ONE row-set. Until phase C flips the write conflict-targets, both
+  // links may still write their own rows, so DISTINCT ON (day) keeps the freshest capture. The
+  // source union is bounded to the reader's own workspace (sameTenantSource) so an unverified
+  // source claim can't inherit another tenant's history; links without a source fall back to their
+  // own channel-scoped rows.
   const { rows } = await pool.query(
     `SELECT DISTINCT ON (d.day)
             to_char(d.day,'YYYY-MM-DD') AS day, d.subscribers, d.joins, d.leaves, d.views, d.forwards, d.reactions
      FROM channel_daily d
      JOIN channels c ON c.id = $1
-     WHERE ((c.source_id IS NOT NULL AND d.source_id = c.source_id) OR d.channel_id = c.id)
+     WHERE ((c.source_id IS NOT NULL AND d.source_id = c.source_id AND ${sameTenantSource('d', 'c')})
+            OR d.channel_id = c.id)
        AND d.day >= (CURRENT_DATE - $2::int)
      ORDER BY d.day ASC, d.captured_at DESC NULLS LAST`, [channelId, days]);
   return rows;
@@ -1019,12 +1041,15 @@ async function saveVelocity(channelId, data, executor = pool) {
 
 async function getLatestVelocity(channelId) {
   if (!enabled || !channelId) return null;
-  // Canonical read (ADR-001): freshest snapshot of the channel's source, own rows as fallback.
+  // Canonical read (ADR-001): freshest snapshot of the channel's source (bounded to the reader's
+  // own workspace via sameTenantSource so an unverified source claim can't read a foreign tenant's
+  // velocity), own rows as fallback.
   const { rows } = await pool.query(
     `SELECT v.data, to_char(v.computed_at,'YYYY-MM-DD"T"HH24:MI:SS') AS computed_at
        FROM velocity_daily v
        JOIN channels c ON c.id = $1
-      WHERE ((c.source_id IS NOT NULL AND v.source_id = c.source_id) OR v.channel_id = c.id)
+      WHERE ((c.source_id IS NOT NULL AND v.source_id = c.source_id AND ${sameTenantSource('v', 'c')})
+             OR v.channel_id = c.id)
       ORDER BY v.day DESC, v.computed_at DESC NULLS LAST LIMIT 1`, [channelId]);
   return rows[0] || null;   // { data, computed_at } | null
 }

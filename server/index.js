@@ -2160,10 +2160,14 @@ app.delete('/api/tg/qr/session', requireAuth, async (req, res, next) => {
 // Persist the admin channels the user ticked as trackable tenants (source='qr'). The list is supplied
 // by the browser (the just-scanned admin channels). We can't re-verify admin rights here yet — that
 // needs a session-based re-listing (P2.2) — but every row is HARD-scoped to owner_uid=req.user.uid
-// and is only ever fed by THAT user's own captured session, so a crafted/ineligible id just creates
-// an empty self-owned row Telegram refuses to hand stats for (no cross-tenant reach). Deduped against
-// the user's existing channels (central + already-added) by tg id AND @username; idempotent. The
-// daily cron (P2.3) does the actual collection.
+// and is only ever WRITTEN by THAT user's own captured session, so a crafted/ineligible id creates
+// an empty self-owned row Telegram refuses to hand stats for (no cross-tenant WRITE reach).
+// NOTE (tenancy isolation audit, F1): write-scoping alone is NOT enough — a crafted id also binds
+// this row to the claimed external source (ensureChannelCanonical), and Phase-B canonical READS
+// union by source_id. Cross-tenant READ reach is closed in db.js (sameTenantSource bounds the source
+// union to the reader's own workspace), NOT here; do not relax that on the assumption this row is
+// harmless. Deduped against the user's existing channels (central + already-added) by tg id AND
+// @username; idempotent. The daily cron (P2.3) does the actual collection.
 app.post('/api/tg/qr/channels', requireAuth, async (req, res, next) => {
   if (!db.enabled) return res.status(400).json({ error: 'База данных выключена' });
   try {
