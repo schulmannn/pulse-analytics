@@ -55,7 +55,8 @@ The backfills re-run harmlessly (`ON CONFLICT DO NOTHING` / `WHERE … IS NULL`)
 ## Consequences
 
 - The «second colleague follows the same channel» flow becomes: find-or-create the external
-  source, create a channels-link in their workspace → history is instantly shared on read.
+  source, create a channels-link in their workspace → history is shared on read **within the same
+  workspace** (see the security amendment below — cross-workspace sharing waits for a verified follow).
 - Every future endpoint MUST resolve access through workspace membership (checklist: use
   `resolveChannel`/`requireWorkspaceRole`, never raw `owner_uid`). The multi-tenant audit card
   verifies this per-query.
@@ -63,6 +64,26 @@ The backfills re-run harmlessly (`ON CONFLICT DO NOTHING` / `WHERE … IS NULL`)
   `source:<id>` — collection work becomes dedupable per external property, not per follower.
 - Until Phase C, storage for a shared source is still duplicated per following channel — an
   accepted, bounded cost (reads are already canonical; writes converge in C).
+
+### Security amendment (2026-07-07, tenancy isolation audit — finding F1)
+
+The original Phase-B canonical read unioned **all** rows sharing a `source_id`, regardless of which
+workspace wrote them. But a channel can be bound to an external identity with **no proof of access**:
+`POST /api/tg/qr/channels` takes a raw browser-supplied `tg_channel_id`, and a collector self-reports
+`channel.id` on ingest. An authenticated user could therefore create a link claiming any external id
+(e.g. the central `@bynotem` feed) and read that property's **admin-only** history (daily
+joins/leaves/reactions, per-post velocity) and subscriber count — a cross-tenant confidentiality
+breach that the QR handler's own comment wrongly assumed impossible ("no cross-tenant reach").
+
+**Constraint now enforced** (`server/db.js`, `sameTenantSource`): the source union in
+`getChannelHistory`, `getLatestVelocity`, and the `memberCount` sub-select includes only rows written
+by a channel in the **reader-channel's own workspace** (or by its creator — covers legacy/central
+rows whose `workspace_id` is still NULL). Same-workspace co-following still shares one canonical
+row-set; cross-workspace sharing (the "second colleague" flow across *different* workspaces) is
+withheld until an access-verified follow exists — the natural home is the deferred admin re-listing
+(roadmap P2.2) that stamps `source_id` only after Telegram confirms the user administers the channel.
+Regression: `test/tenancy.integration.test.js` («F1: claiming a foreign external source grants NO
+cross-tenant …»). Re-widening cross-workspace read-sharing MUST be gated on that verification.
 
 ## Rejected alternatives
 

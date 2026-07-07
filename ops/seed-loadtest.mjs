@@ -1,13 +1,15 @@
-// Deterministic synthetic dataset for capacity tests and backup drills. Two presets:
-//   drill — 3 users / 5 channels / 90d daily / 500 posts (backup-restore drill scale)
-//   load  — 100 users / 300 channels / 730d daily / ~100k posts + snapshots + prefs + reports
-//           (the «100 concurrent users» capacity baseline from the roadmap)
+// Deterministic synthetic dataset for capacity tests and backup drills. Presets:
+//   drill    — 3 users / 5 channels / 90d daily / 500 posts (backup-restore drill scale)
+//   load     — 100 users / 300 channels / 730d daily / ~100k posts (the «100 users» baseline)
+//   load10x  — 1 000 users / 1 000 channels / 730d daily / ~730k channel_daily (1k-user horizon)
+//   load100x — 10 000 users / 10 000 channels / 730d daily / ~7.3M channel_daily (10k-user horizon)
 //
-//   DATABASE_URL=… node ops/seed-loadtest.mjs --preset load [--wipe]
+//   DATABASE_URL=… node ops/seed-loadtest.mjs --preset load10x [--wipe]
 //
 // --wipe truncates the seeded tables first (users cascade → everything tenant-scoped).
 // Deterministic PRNG (LCG) → identical data on every run; safe to re-run WITHOUT --wipe thanks to
 // ON CONFLICT DO NOTHING on every insert. NEVER run against a database you care about with --wipe.
+// load100x is heavy (7.3M daily + 3.3M posts + 1M mentions) — expect minutes and ~3-4 GB on disk.
 import pg from 'pg';
 
 const args = process.argv.slice(2);
@@ -17,9 +19,11 @@ const wipe = args.includes('--wipe');
 const P = {
   drill: { users: 3, channels: 5, days: 90, postsPerChannel: 100, mentionsPerChannel: 40 },
   load: { users: 100, channels: 300, days: 730, postsPerChannel: 334, mentionsPerChannel: 100 },
+  load10x: { users: 1000, channels: 1000, days: 730, postsPerChannel: 334, mentionsPerChannel: 100 },
+  load100x: { users: 10000, channels: 10000, days: 730, postsPerChannel: 334, mentionsPerChannel: 100 },
 }[preset];
 if (!P) {
-  console.error(`unknown preset «${preset}» (drill | load)`);
+  console.error(`unknown preset «${preset}» (drill | load | load10x | load100x)`);
   process.exit(1);
 }
 

@@ -263,12 +263,31 @@ async function adoptOwnerChannel(adminUid) {
 const CHANNEL_COLS = 'id, username, title, status, source, tg_channel_id, owner_uid';
 
 // Channels visible to a user (every session maps to a users row with a numeric uid).
-// Latest known subscriber count per channel (cheap: newest daily row). Canonical per ADR-001:
-// any row of the channel's SOURCE counts (two workspaces following one @channel share history),
-// falling back to channel-scoped rows for links without a source yet.
+
+// ── Canonical source-read trust boundary (security: tenancy isolation audit, finding F1) ───────
+// Phase-B canonical reads (getChannelHistory / getLatestVelocity / memberCount) union rows by a
+// shared source_id so two links to ONE external property see one row-set (ADR-001). That union MUST
+// stay inside the reader-channel's access boundary: a user can bind a channel to ANY external
+// identity with NO proof of access — a QR link takes a raw browser-supplied tg id
+// (POST /api/tg/qr/channels), a collector self-reports channel.id on ingest — so an UNRESTRICTED
+// source union would hand a claimer another tenant's admin-only history (joins/leaves/reactions and
+// per-post velocity, none of it public). We therefore union only rows written by a channel in the
+// SAME workspace as the reader-channel (or the SAME creator — covers legacy/central rows whose
+// workspace_id is still NULL). Same-workspace co-following still shares; cross-workspace sharing
+// waits for an access-verified follow (roadmap P2.2). `rowAlias` = data-row table, `chanAlias` =
+// the reader channel.
+const sameTenantSource = (rowAlias, chanAlias) =>
+  `EXISTS (SELECT 1 FROM channels src WHERE src.id = ${rowAlias}.channel_id
+             AND (src.owner_uid = ${chanAlias}.owner_uid
+                  OR (${chanAlias}.workspace_id IS NOT NULL AND src.workspace_id = ${chanAlias}.workspace_id)))`;
+
+// Latest known subscriber count per channel (cheap: newest daily row). Canonical per ADR-001: any
+// row of the channel's SOURCE written within the reader's own workspace counts (a same-workspace
+// co-follow shares history); channel-scoped rows are the fallback for links without a source yet.
 const MEMBER_COUNT_COL =
   `(SELECT cd.subscribers FROM channel_daily cd
-      WHERE ((channels.source_id IS NOT NULL AND cd.source_id = channels.source_id)
+      WHERE ((channels.source_id IS NOT NULL AND cd.source_id = channels.source_id
+              AND ${sameTenantSource('cd', 'channels')})
              OR cd.channel_id = channels.id)
         AND cd.subscribers IS NOT NULL
       ORDER BY cd.day DESC, cd.captured_at DESC NULLS LAST LIMIT 1) AS "memberCount"`;
@@ -455,16 +474,19 @@ async function upsertMentions(channelId, list, executor = pool) {
 
 async function getChannelHistory(channelId, days = 400) {
   if (!enabled || !channelId) return [];
-  // Canonical read (ADR-001 phase B): the history of the channel's SOURCE — two workspaces
-  // following one @channel see ONE row-set. Until phase C flips the write conflict-targets, both
-  // links may still write their own rows, so DISTINCT ON (day) keeps the freshest capture. Links
-  // without a source fall back to their own channel-scoped rows.
+  // Canonical read (ADR-001 phase B): the history of the channel's SOURCE — a same-workspace
+  // co-follow of one @channel sees ONE row-set. Until phase C flips the write conflict-targets, both
+  // links may still write their own rows, so DISTINCT ON (day) keeps the freshest capture. The
+  // source union is bounded to the reader's own workspace (sameTenantSource) so an unverified
+  // source claim can't inherit another tenant's history; links without a source fall back to their
+  // own channel-scoped rows.
   const { rows } = await pool.query(
     `SELECT DISTINCT ON (d.day)
             to_char(d.day,'YYYY-MM-DD') AS day, d.subscribers, d.joins, d.leaves, d.views, d.forwards, d.reactions
      FROM channel_daily d
      JOIN channels c ON c.id = $1
-     WHERE ((c.source_id IS NOT NULL AND d.source_id = c.source_id) OR d.channel_id = c.id)
+     WHERE ((c.source_id IS NOT NULL AND d.source_id = c.source_id AND ${sameTenantSource('d', 'c')})
+            OR d.channel_id = c.id)
        AND d.day >= (CURRENT_DATE - $2::int)
      ORDER BY d.day ASC, d.captured_at DESC NULLS LAST`, [channelId, days]);
   return rows;
@@ -1019,12 +1041,15 @@ async function saveVelocity(channelId, data, executor = pool) {
 
 async function getLatestVelocity(channelId) {
   if (!enabled || !channelId) return null;
-  // Canonical read (ADR-001): freshest snapshot of the channel's source, own rows as fallback.
+  // Canonical read (ADR-001): freshest snapshot of the channel's source (bounded to the reader's
+  // own workspace via sameTenantSource so an unverified source claim can't read a foreign tenant's
+  // velocity), own rows as fallback.
   const { rows } = await pool.query(
     `SELECT v.data, to_char(v.computed_at,'YYYY-MM-DD"T"HH24:MI:SS') AS computed_at
        FROM velocity_daily v
        JOIN channels c ON c.id = $1
-      WHERE ((c.source_id IS NOT NULL AND v.source_id = c.source_id) OR v.channel_id = c.id)
+      WHERE ((c.source_id IS NOT NULL AND v.source_id = c.source_id AND ${sameTenantSource('v', 'c')})
+             OR v.channel_id = c.id)
       ORDER BY v.day DESC, v.computed_at DESC NULLS LAST LIMIT 1`, [channelId]);
   return rows[0] || null;   // { data, computed_at } | null
 }
@@ -1356,6 +1381,41 @@ async function pruneIgMediaDaily(maxAgeDays = 730) {
   return rowCount;
 }
 
+// ── Monthly rollup of channel_daily (capacity; 014_capacity_rollups.sql) ──────────────────────────
+// Idempotent upsert that folds the last `months` calendar months of channel_daily into
+// channel_monthly (one row per channel×month), so a long-range history read can serve ~24 monthly
+// points instead of scanning up to 730 daily rows per channel. Bounded to recent months so the
+// nightly recompute stays cheap. INERT until wired: nothing reads channel_monthly yet — the reader
+// (getChannelHistoryMonthly) lands with the frontend range-picker change (see CAPACITY doc §rollups).
+async function rollupChannelMonthly(months = 3) {
+  if (!enabled) return 0;
+  const m = Number.isFinite(+months) ? Math.max(1, Math.round(+months)) : 3;
+  const { rowCount } = await pool.query(
+    `INSERT INTO channel_monthly
+       (channel_id, source_id, month, subscribers_end,
+        joins_sum, leaves_sum, views_sum, forwards_sum, reactions_sum, days_count, computed_at)
+     SELECT d.channel_id, MAX(c.source_id), date_trunc('month', d.day)::date AS month,
+            (array_agg(d.subscribers ORDER BY d.day DESC) FILTER (WHERE d.subscribers IS NOT NULL))[1],
+            COALESCE(SUM(d.joins),0), COALESCE(SUM(d.leaves),0), COALESCE(SUM(d.views),0),
+            COALESCE(SUM(d.forwards),0), COALESCE(SUM(d.reactions),0), COUNT(*), now()
+       FROM channel_daily d
+       JOIN channels c ON c.id = d.channel_id
+      WHERE d.day >= date_trunc('month', CURRENT_DATE) - make_interval(months => $1)
+      GROUP BY d.channel_id, date_trunc('month', d.day)
+     ON CONFLICT (channel_id, month) DO UPDATE SET
+       source_id       = COALESCE(EXCLUDED.source_id, channel_monthly.source_id),
+       subscribers_end = EXCLUDED.subscribers_end,
+       joins_sum       = EXCLUDED.joins_sum,
+       leaves_sum      = EXCLUDED.leaves_sum,
+       views_sum       = EXCLUDED.views_sum,
+       forwards_sum    = EXCLUDED.forwards_sum,
+       reactions_sum   = EXCLUDED.reactions_sum,
+       days_count      = EXCLUDED.days_count,
+       computed_at     = now()`,
+    [m]);
+  return rowCount;
+}
+
 // ── Read helpers (история для будущих графиков) ──
 async function listIgDaily(channelId, days = 400) {
   if (!enabled || !channelId) return [];
@@ -1561,6 +1621,7 @@ module.exports = {
   saveIgAccount, getIgAccount, updateIgToken, deleteIgAccount, listIgAccounts,
   saveTgSession, getTgSession, deleteTgSession, listTgSessions,
   upsertIgDaily, upsertIgMediaDaily, saveRawSnapshot, pruneRawSnapshots, pruneIgMediaDaily,
+  rollupChannelMonthly,
   listIgDaily, listIgMediaDaily,
   listAnnotations, createAnnotation, deleteAnnotation,
   REPORT_SCHEDULES, listReports, getReport, createReport, updateReport, deleteReport,
