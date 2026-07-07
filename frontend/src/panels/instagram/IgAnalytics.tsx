@@ -1,7 +1,7 @@
 import { fmt } from '@/lib/format';
 import type { IgData } from '@/lib/useIgData';
 import { Section, TrendCard, EmptyChart, signedNum } from '@/components/instagram/shared';
-import { ChartSection } from '@/components/ChartWidget';
+import { ChartSection, WidgetGroup } from '@/components/ChartWidget';
 import { BarChart } from '@/components/BarChart';
 import { InsightsBlock, PeriodCompareBlock } from '@/components/instagram/insights';
 import { exportIgDaily } from '@/lib/igExport';
@@ -63,12 +63,14 @@ export function IgAnalytics({ ig }: { ig: IgData }) {
           </button>
         }
       >
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        {/* A real WidgetGroup (TG parity): the cards gain Выше/Ниже/Переставить/Скрыть in the
+            ⋯ menu — reorder/hide state persists per user, same as the TG feeds. */}
+        <WidgetGroup id="ig-dynamics" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
           {/* Daily metrics with a real page drill INTO it (the overlay was the stopgap before
               /metrics/ig-* existed). */}
           <TrendCard title="Охват по дням" series={reachWin} drillTo="/metrics/ig-reach" />
           <FollowsByDayCard data={followsByDay} total={followsPair.cur} drillTo="/metrics/ig-follows" />
-        </div>
+        </WidgetGroup>
       </Section>
 
       <Section title="Период vs предыдущий">
