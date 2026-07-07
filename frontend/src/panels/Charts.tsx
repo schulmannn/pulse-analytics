@@ -427,9 +427,14 @@ export function VelocityChartBlock({ id, homeKey }: HomeBlockProps = {}) {
 function ChartSkeleton({ title, id, homeKey }: { title: string; id?: string; homeKey?: string }) {
   return (
     <ChartSection title={title} id={id} homeKey={homeKey}>
-      <div className="space-y-3">
-        <Skeleton className="h-32 w-full" />
-        <Skeleton className="h-3 w-1/6" />
+      {/* Steep card anatomy: number block bottom-left, chart area right — the live card lands
+          in the same shape, no outline jump. */}
+      <div className="flex items-end gap-4">
+        <div className="shrink-0">
+          <Skeleton className="h-8 w-24" />
+          <Skeleton className="mt-2 h-3 w-16" />
+        </div>
+        <Skeleton className="h-32 min-w-0 flex-1" />
       </div>
     </ChartSection>
   );

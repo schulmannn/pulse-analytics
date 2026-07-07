@@ -218,11 +218,13 @@ function KpiSkeletons() {
   // "card → ledger" when the data lands (the load flash the audit flagged).
   return (
     <div className="space-y-5">
-      {/* HERO */}
-      <div>
-        <Skeleton className="h-3 w-28" />
-        <Skeleton className="mt-2 h-11 w-40" />
-        <Skeleton className="mt-4 h-16 w-full max-w-2xl" />
+      {/* HERO — the steep anatomy: number block bottom-left, chart area right. */}
+      <div className="flex items-end gap-4">
+        <div className="shrink-0">
+          <Skeleton className="h-3 w-28" />
+          <Skeleton className="mt-2 h-11 w-40" />
+        </div>
+        <Skeleton className="h-28 min-w-0 flex-1" />
       </div>
       {/* LEDGER — same scaffold (border-t + spacing) as the live grid, so nothing reflows on load. */}
       <div className="grid grid-cols-2 gap-x-6 gap-y-4 border-t border-border pt-4 lg:grid-cols-4">

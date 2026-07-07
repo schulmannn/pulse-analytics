@@ -84,7 +84,14 @@ function SectionSkeleton() {
         {Array.from({ length: 2 }).map((_, i) => (
           <div key={i} className="rounded-xl border border-border bg-card p-4 sm:p-5">
             <Skeleton className="h-3 w-1/3" />
-            <Skeleton className="mt-4 h-40 w-full" />
+            {/* Steep card anatomy (number bottom-left, chart right) — no outline jump on load. */}
+            <div className="mt-4 flex items-end gap-4">
+              <div className="shrink-0">
+                <Skeleton className="h-8 w-24" />
+                <Skeleton className="mt-2 h-3 w-16" />
+              </div>
+              <Skeleton className="h-36 min-w-0 flex-1" />
+            </div>
           </div>
         ))}
       </div>

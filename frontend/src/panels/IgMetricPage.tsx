@@ -225,7 +225,7 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
       {/* Compact steep headline — the topbar h1 already names the metric. */}
       <div>
         <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-          <span className="text-3xl font-medium leading-none tabular-nums tracking-tight">{fmt.kpi(sumCur)}</span>
+          <span className="text-hero font-medium leading-none tabular-nums tracking-tight">{fmt.kpi(sumCur)}</span>
           <DeltaPill delta={trend} />
           <span className="text-xs tracking-wide text-muted-foreground">
             {daily.term} · {periodLabel}
@@ -435,7 +435,7 @@ function IgAggregatePage({ def, pair, windowDays, handle }: { def: IgAggDef; pai
 
       <div>
         <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-          <span className="text-3xl font-medium leading-none tabular-nums tracking-tight">{pair.hasCur ? fmt.kpi(pair.cur) : '—'}</span>
+          <span className="text-hero font-medium leading-none tabular-nums tracking-tight">{pair.hasCur ? fmt.kpi(pair.cur) : '—'}</span>
           <DeltaPill delta={trend} />
           <span className="text-xs tracking-wide text-muted-foreground">
             {def.term} · {windowDays} дн.

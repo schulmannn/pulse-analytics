@@ -120,4 +120,4 @@ export const HOME_REGISTRY: Record<string, HomeWidgetDef> = {
 };
 
 /** Registry keys that seed a sensible default Home for a first-time user («Собрать по умолчанию»). */
-export const HOME_DEFAULT_KEYS = ['kpi', 'digest', 'growth', 'top-posts'];
+export const HOME_DEFAULT_KEYS = ['kpi', 'growth', 'ig-reach', 'top-posts'];
