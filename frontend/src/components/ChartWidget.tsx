@@ -1647,9 +1647,15 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
           print). Only on wired cards that read useWidgetPeriod(); the global topbar switcher is gone. */}
       {periodControl && (
         <>
+          {/* An explicit number click is ALWAYS an override — the old «30д ⇒ undefined» shortcut
+              made picking 30д silently mean «follow the page» (on a 7д page the card showed 7д
+              right after the user chose 30д). Clearing the override is its own affordance now
+              («Стр.»); off page-period surfaces prefs.period=30 ≡ undefined, so nothing shifts. */}
           <WidgetPeriodPills
             days={widgetDays}
-            onChange={(next) => update({ ...prefs, period: next === DEFAULT_WIDGET_DAYS ? undefined : next })}
+            override={prefs.period}
+            onChange={(next) => update({ ...prefs, period: next })}
+            onFollow={() => update({ ...prefs, period: undefined })}
             hidden={reorder}
           />
           {periodWidened && !reorder && (
@@ -1743,18 +1749,49 @@ export const PERIOD_WORD: Record<PeriodDays, string> = { 7: '7 дней', 30: '3
     in print (period is not a print concern). */
 function WidgetPeriodPills({
   days,
+  override,
   onChange,
+  onFollow,
   hidden,
 }: {
   days: PeriodDays;
+  /** The card's explicit prefs.period; undefined = the card FOLLOWS the page period. */
+  override: PeriodDays | undefined;
   onChange: (days: PeriodDays) => void;
+  /** Clear the override (follow the page). Absent when no page period exists on this surface. */
+  onFollow?: () => void;
   hidden?: boolean;
 }) {
+  const pagePeriod = usePagePeriod();
   if (hidden) return null;
+  const following = override === undefined && pagePeriod != null;
+  const pillClass = (active: boolean) =>
+    `relative inline-flex min-h-8 min-w-8 items-center justify-center px-2 text-2xs font-medium tabular-nums transition-colors sm:min-h-0 sm:min-w-0 sm:justify-start sm:px-0.5 sm:pb-1 sm:pt-0.5 ${
+      active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
+    }`;
   return (
     <div role="group" aria-label="Период виджета" className="mt-2 flex items-center gap-3 print:hidden">
+      {/* The hierarchy made VISIBLE (аудит: два одинаковых ряда пиллов не читались): a card on a
+          page-period feed leads with «Стр.» — active while the card follows the page (the default),
+          so an overridden card is instantly recognizable AND has a way back. Off page-period
+          surfaces (Home, IG bodies) the chip vanishes and the row is exactly the old one. */}
+      {pagePeriod != null && onFollow && (
+        <button
+          type="button"
+          aria-pressed={following}
+          title="Следовать периоду страницы"
+          onClick={onFollow}
+          className={pillClass(following)}
+        >
+          Стр.
+          {following && <span aria-hidden="true" className="absolute inset-x-0 bottom-1 h-px bg-primary sm:-bottom-px" />}
+        </button>
+      )}
       {WIDGET_PERIODS.map((p) => {
-        const active = days === p.days;
+        // While following, the page's value shows WHERE the window comes from without claiming the
+        // active underline — only an explicit override lights a number pill.
+        const active = !following && days === p.days;
+        const echoed = following && days === p.days;
         return (
           <button
             key={p.days}
@@ -1763,12 +1800,57 @@ function WidgetPeriodPills({
             onClick={() => onChange(p.days)}
             // Touch: ≥32px tap target on mobile (period is a primary filter — Mobile-nav card); the
             // underline sits at the label baseline via inset-y so the compact ≥sm look is unchanged.
-            className={`relative inline-flex min-h-8 min-w-8 items-center justify-center px-2 text-2xs font-medium tabular-nums transition-colors sm:min-h-0 sm:min-w-0 sm:justify-start sm:px-0.5 sm:pb-1 sm:pt-0.5 ${
-              active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
-            }`}
+            className={pillClass(active)}
           >
             {p.label}
             {active && <span aria-hidden="true" className="absolute inset-x-0 bottom-1 h-px bg-primary sm:-bottom-px" />}
+            {echoed && <span aria-hidden="true" className="absolute inset-x-0 bottom-1 h-px bg-border sm:-bottom-px" />}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** The edit dialog's «Период» segment — the same follow/override semantics as the card's pill
+    row, in the dialog's bordered-segment form. Split out so it can call usePagePeriod itself. */
+function DialogPeriodSegment({
+  prefs,
+  onChange,
+}: {
+  prefs: WidgetPrefs;
+  onChange: (next: WidgetPrefs) => void;
+}) {
+  const pagePeriod = usePagePeriod();
+  const following = prefs.period === undefined && pagePeriod != null;
+  const cell = (active: boolean) =>
+    `flex-1 border-r border-border px-2 py-1.5 text-xs font-medium tabular-nums transition-colors last:border-r-0 ${
+      active ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+    }`;
+  return (
+    <div className="mt-2 flex overflow-hidden rounded border border-border">
+      {pagePeriod != null && (
+        <button
+          type="button"
+          aria-pressed={following}
+          title="Следовать периоду страницы"
+          onClick={() => onChange({ ...prefs, period: undefined })}
+          className={cell(following)}
+        >
+          Стр.
+        </button>
+      )}
+      {WIDGET_PERIODS.map((p) => {
+        const active = following ? false : (prefs.period ?? DEFAULT_WIDGET_DAYS) === p.days;
+        return (
+          <button
+            key={p.days}
+            type="button"
+            aria-pressed={active}
+            onClick={() => onChange({ ...prefs, period: p.days })}
+            className={cell(active)}
+          >
+            {p.label}
           </button>
         );
       })}
@@ -2152,26 +2234,10 @@ function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, showSerie
         {showPeriod && (
           <div className="mt-4">
             <span className="text-2xs tracking-wide text-muted-foreground">Период</span>
-            {/* Presets only for now (per-widget custom range is a noted follow-up). Selecting the
-                30д default clears the pref so the card falls back to the module default. */}
-            <div className="mt-2 flex overflow-hidden rounded border border-border">
-              {WIDGET_PERIODS.map((p) => {
-                const active = (prefs.period ?? DEFAULT_WIDGET_DAYS) === p.days;
-                return (
-                  <button
-                    key={p.days}
-                    type="button"
-                    aria-pressed={active}
-                    onClick={() => onChange({ ...prefs, period: p.days === DEFAULT_WIDGET_DAYS ? undefined : p.days })}
-                    className={`flex-1 border-r border-border px-2 py-1.5 text-xs font-medium tabular-nums transition-colors last:border-r-0 ${
-                      active ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
-                    }`}
-                  >
-                    {p.label}
-                  </button>
-                );
-              })}
-            </div>
+            {/* Presets only for now (per-widget custom range is a noted follow-up). Same semantics
+                as the card's pill row: a number is ALWAYS an explicit override; «Стр.» (only on
+                page-period feeds) clears it so the card follows the page again. */}
+            <DialogPeriodSegment prefs={prefs} onChange={onChange} />
           </div>
         )}
 
