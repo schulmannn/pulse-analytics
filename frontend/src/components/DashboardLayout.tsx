@@ -238,6 +238,7 @@ function Sidebar({ email, role, avatar }: { email?: string; role?: string; avata
         </div>
       </div>
 
+      <NetworkStrip rail={rail} />
       <SidebarNav rail={rail} />
 
       <SidebarUserRow rail={rail} email={email} role={role} avatar={avatar} />
@@ -298,61 +299,70 @@ function GhostIconButton({
 }
 
 /**
- * NESTED nav (steep's Teams idiom — owner call): the connected networks are always visible as
- * labelled groups with the SAME section shape, so the mental model doesn't reset when crossing
- * networks («в ТГ своя логика, в IG всё по-другому» — no more). «Главная» leads, «Отчёты»
- * trails — both are per-user, not per-network. The RAIL (icons only, no room for group labels)
- * and the mobile bottom bar keep the flat active-network list — same routes, denser form.
- *
- * Groups are REGISTRY-driven, never a hardcoded platform pair (owner call: more sources are
- * coming): one group per network this workspace actually has as a source — all of them while the
- * channel list loads or in the app-wide demo. Unconnected networks aren't advertised as empty
- * groups; they live behind «Подключить источник» in the source switcher.
+ * Sidebar nav = the ACTIVE source's sections only (owner call after trying nested groups AND an
+ * accordion: with 10+ sources on the roadmap, any per-source expansion turns the sidebar into a
+ * wall — «то как было в целом ок»). The cross-network confusion that once motivated nesting is
+ * solved at the STRUCTURE level now — every network exposes the same canonical section shape from
+ * the registry — so a flat list stays legible however many sources exist. Crossing networks is one
+ * click on the NetworkStrip above; crossing sources is the switcher dropdown. «Главная» leads,
+ * «Отчёты» trails — per-user rows, not per-network.
  */
 function SidebarNav({ rail }: { rail: boolean }) {
-  const railItems = useActiveNetworkNav();
-  const { data } = useChannels();
-  const { demo } = useDemo();
-  const channels = data?.channels ?? [];
-  const groups = NETWORKS.filter((n) => !data || demo || channels.some((c) => n.hasChannel(c)));
-  if (rail) {
-    return (
-      <nav className="mt-5 flex-1 overflow-y-auto overflow-x-hidden px-3">
-        <div className="space-y-0.5">
-          {railItems.map((item) => (
-            <NavItem key={item.to} {...item} rail />
-          ))}
-        </div>
-      </nav>
-    );
-  }
+  const items = useActiveNetworkNav();
   return (
     <nav className="mt-5 flex-1 overflow-y-auto overflow-x-hidden px-3">
       <div className="space-y-0.5">
-        <NavItem {...HOME_NAV} rail={false} />
-      </div>
-      {groups.map((net) => (
-        <div key={net.key}>
-          <NavGroupLabel>{net.name}</NavGroupLabel>
-          <div className="space-y-0.5">
-            {net.nav.map((item) => (
-              <NavItem key={item.to} {...item} rail={false} />
-            ))}
-          </div>
-        </div>
-      ))}
-      <div className="mt-4 space-y-0.5">
-        {AGNOSTIC_NAV.map((item) => (
-          <NavItem key={item.to} {...item} rail={false} />
+        {items.map((item) => (
+          <NavItem key={item.to} {...item} rail={rail} />
         ))}
       </div>
     </nav>
   );
 }
 
-/** Quiet group caption between nav sections (steep «Teams»). */
-function NavGroupLabel({ children }: { children: ReactNode }) {
-  return <div className="mb-1 mt-4 px-2.5 text-2xs font-medium tracking-wider text-ink3">{children}</div>;
+/**
+ * One-click network crossing for the current workspace — a quiet strip of brand glyphs, one per
+ * CONNECTED network (registry-gated: all while the channel list loads / in demo; unconnected nets
+ * live behind «Подключить источник» in the switcher). Scales flat: 10 sources are one wrapping row
+ * of 28px chips, not ten nav groups. Hidden with a single network — nothing to cross to. Brand
+ * colour stays an identifier on the glyph (the PlatformNav/NetworkBadge rule), never UI colour.
+ */
+function NetworkStrip({ rail }: { rail: boolean }) {
+  const activeKey = useActiveNetwork();
+  const navigate = useNavigate();
+  const { data } = useChannels();
+  const { demo } = useDemo();
+  const channels = data?.channels ?? [];
+  const nets = NETWORKS.filter((n) => !data || demo || channels.some((c) => n.hasChannel(c)));
+  if (nets.length < 2) return null;
+  return (
+    <div
+      role="group"
+      aria-label="Сети источника"
+      className={cn('flex gap-1 pt-2', rail ? 'flex-col items-center px-2' : 'flex-wrap px-4')}
+    >
+      {nets.map((n) => {
+        const active = n.key === activeKey;
+        return (
+          <button
+            key={n.key}
+            type="button"
+            onClick={() => navigate(n.home)}
+            aria-current={active ? 'true' : undefined}
+            aria-label={n.name}
+            title={n.name}
+            className={cn(
+              'flex h-7 w-7 items-center justify-center rounded transition-colors',
+              active ? 'bg-hover-row' : 'hover:bg-hover-row/60',
+            )}
+            style={{ color: n.color, opacity: active ? 1 : 0.5 }}
+          >
+            <NetworkGlyph k={n.key} className="h-4 w-4" />
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 /** Data-freshness line — a status dot + "обновлено <time>" (mono), sitting directly under the
