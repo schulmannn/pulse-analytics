@@ -267,6 +267,8 @@ function deriveTgAnalytics(
   let net30Values: number[] = [];
   let net30Titles: string[] = [];
   let netSummaryStr = '';
+  let net30Total = 0;
+  let net30Prev: number | null = null;
   let joinedTotal = 0;
   let leftTotal = 0;
 
@@ -289,6 +291,10 @@ function deriveTgAnalytics(
     });
     const netPeriod = joinedTotal - leftTotal;
     netSummaryStr = `${netPeriod >= 0 ? '+' : ''}${fmt.num(netPeriod)} за период`;
+    // Steep headline for the net-growth card: this window's net + the previous 30-day window's
+    // net (honest null when the series is shorter than two windows).
+    net30Total = net30Values.reduce((acc, v) => acc + v, 0);
+    net30Prev = netArr.length >= 60 ? netArr.slice(-60, -30).reduce((acc, v) => acc + v, 0) : null;
   }
 
   // 12) Weekday — filtered by the active window (previously iterated ALL fetched posts, ignoring
@@ -317,7 +323,7 @@ function deriveTgAnalytics(
     interGroup, viewSeries, shareSeries,
     vbsItems, nfsItems, langItems, sentItems,
     thData, hasHours, peakHourStr,
-    net30Values, net30Titles, netSummaryStr, joinedTotal, leftTotal,
+    net30Values, net30Titles, netSummaryStr, net30Total, net30Prev, joinedTotal, leftTotal,
     wdAvgValues, wdCountValues, maxWdAvg, bestWdLabel,
   };
 }
@@ -437,7 +443,7 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
     interGroup, viewSeries, shareSeries,
     vbsItems, nfsItems, langItems, sentItems,
     thData, hasHours, peakHourStr,
-    net30Values, net30Titles, netSummaryStr, joinedTotal, leftTotal,
+    net30Values, net30Titles, net30Total, net30Prev, joinedTotal, leftTotal,
     maxWdAvg,
   } = derived;
   const wdLabels = WD_LABELS;
@@ -705,11 +711,21 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
             title="Чистый прирост подписчиков"
             drillTo="/metrics/subscribers"
             variants={[
-              { key: 'bar', label: 'Столбцы', render: <DivergingBars values={net30Values} titles={net30Titles} /> },
+              {
+                key: 'bar',
+                label: 'Столбцы',
+                render: (
+                  <ChartCardBody
+                    value={`${net30Total >= 0 ? '+' : '−'}${fmt.kpi(Math.abs(net30Total))}`}
+                    delta={net30Prev != null && net30Prev > 0 && net30Total >= 0 ? pctDelta(net30Total, net30Prev) : null}
+                    caption="окно 30 дней"
+                  >
+                    <DivergingBars values={net30Values} titles={net30Titles} />
+                  </ChartCardBody>
+                ),
+              },
             ]}
-          >
-            {netSummaryStr && <div className="mt-3 text-xs font-medium text-muted-foreground">прирост: {netSummaryStr} · окно 30 дней</div>}
-          </ChartSection>
+          />
         )}
 
         {inGroup('dynamics') && (joinedTotal > 0 || leftTotal > 0) && (

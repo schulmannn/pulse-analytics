@@ -1873,23 +1873,45 @@ function DialogPeriodSegment({
  * produce a comparison simply omit `delta` — «кроме тех мест, где не можем предоставить».
  */
 export function ChartCardBody({
+  label,
   value,
   delta,
   caption,
+  onValueClick,
+  hero = false,
   children,
 }: {
+  /** Quiet metric label above the number (e.g. «Просмотры · 30 дн.» + info icon). */
+  label?: ReactNode;
   /** Headline for the visible window (already formatted — fmt.kpi). */
   value: string;
   /** Comparison vs the previous same-length window; null/undefined when honestly unavailable. */
   delta?: MetricDelta | null;
   /** Quiet line under the pill (e.g. «к пред. периоду», «за всё время»). */
   caption?: ReactNode;
+  /** Makes the number a real drill button (metric-page navigation), KpiCard-style. */
+  onValueClick?: () => void;
+  /** Hero cards render the number a size up (the «Показатели» lead metric). */
+  hero?: boolean;
   children: ReactNode;
 }) {
+  const numberClass = `kpi-accent ${hero ? 'text-hero' : 'text-3xl'} font-medium leading-none tabular-nums tracking-tight`;
   return (
     <div className="flex h-full min-h-0 items-end gap-4">
       <div className="flex shrink-0 flex-col items-start gap-1.5 pb-0.5">
-        <div className="kpi-accent text-3xl font-medium leading-none tabular-nums tracking-tight">{value}</div>
+        {label != null && <div className="text-xs tracking-wide text-muted-foreground">{label}</div>}
+        {onValueClick ? (
+          <button
+            type="button"
+            title="Подробный разбор"
+            onClick={onValueClick}
+            className={`${numberClass} rounded text-left transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40`}
+          >
+            {value}
+          </button>
+        ) : (
+          <div className={numberClass}>{value}</div>
+        )}
         <DeltaPill delta={delta} />
         {caption != null && <div className="text-2xs text-muted-foreground">{caption}</div>}
       </div>
