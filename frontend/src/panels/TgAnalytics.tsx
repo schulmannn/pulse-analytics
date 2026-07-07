@@ -666,13 +666,17 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
           // fill context and fill the tile — as bare children they'd sit at the fixed ~120px and
           // leave dead space. The «прирост» total stays as the caption below.
           <ChartSection
-            title="Чистый прирост подписчиков (30д)"
+            // The window lives in the CAPTION, not the title (аудит: «(30д)» в заголовке читался
+            // как хардкод рядом с управляемыми окнами соседей). This card's window IS fixed —
+            // net30Values derives panel-level from the last 30 days; wiring it to a per-widget
+            // period is the unified-feed follow-up.
+            title="Чистый прирост подписчиков"
             drillTo="/metrics/subscribers"
             variants={[
               { key: 'bar', label: 'Столбцы', render: <DivergingBars values={net30Values} titles={net30Titles} /> },
             ]}
           >
-            {netSummaryStr && <div className="mt-3 text-xs font-medium text-muted-foreground">прирост: {netSummaryStr}</div>}
+            {netSummaryStr && <div className="mt-3 text-xs font-medium text-muted-foreground">прирост: {netSummaryStr} · окно 30 дней</div>}
           </ChartSection>
         )}
 

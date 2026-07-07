@@ -42,12 +42,8 @@ export function IgAnalytics({ ig }: { ig: IgData }) {
 
   return (
     <div className="space-y-10">
-      {hasMovement && (
-        <Section title="Движение подписчиков">
-          <SubscriberMovement follows={ig.pairs.follows} unfollows={ig.pairs.unfollows} net={ig.netMovement} />
-        </Section>
-      )}
-
+      {/* «Динамика» leads — the section's hero (real daily charts); the movement summary follows
+          (ИА rule: раздел ведёт его hero-метрика, TG Аналитика тоже открывается динамикой). */}
       <Section
         title="Динамика"
         action={
@@ -71,12 +67,18 @@ export function IgAnalytics({ ig }: { ig: IgData }) {
         </WidgetGroup>
       </Section>
 
-      <Section title="Период vs предыдущий">
+      {hasMovement && (
+        <Section title="Движение подписчиков">
+          <SubscriberMovement follows={ig.pairs.follows} unfollows={ig.pairs.unfollows} net={ig.netMovement} />
+        </Section>
+      )}
+
+      <Section title="Сравнение периодов">
         <p className="text-xs text-muted-foreground">Просмотры, лайки и сохранения сравниваются по периодам.</p>
         <PeriodCompareBlock rows={periodRows} />
       </Section>
 
-      <Section title="Авто-инсайты">
+      <Section title="Главное">
         <InsightsBlock insights={ig.insights} limit={4} />
       </Section>
     </div>

@@ -12,6 +12,7 @@ import { PLAN_LABEL, usePlan } from '@/lib/plan';
 import { useMediaQuery } from '@/lib/useMediaQuery';
 import { useSidebarMode } from '@/lib/sidebar';
 import { useFocusTrap } from '@/lib/useFocusTrap';
+import { useLayerBack } from '@/lib/useLayerBack';
 import { useWidgetPrefsSync } from '@/components/ChartWidget';
 import { fmt } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -757,6 +758,8 @@ function SourceSwitcher({ rail = false, mobile = false }: { rail?: boolean; mobi
 function SourceSheet({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   const sheetRef = useRef<HTMLDivElement>(null);
   useFocusTrap(sheetRef);
+  // The phone's back gesture closes the sheet instead of leaving the page (its whole audience is <md).
+  useLayerBack(onClose);
   useEffect(() => {
     // Capture-phase Escape (mirrors DetailShell): close THIS sheet before any nested handler runs.
     const onKey = (e: KeyboardEvent) => {

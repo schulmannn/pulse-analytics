@@ -17,10 +17,9 @@ export function IgContent({ ig }: { ig: IgData }) {
   const tags = useIgTags();
   return (
     <div className="space-y-10">
-      <Section title="Отметки на фото">
-        <TagsBlock tags={tags.data?.data ?? []} mock={tags.data?.mock} />
-      </Section>
-
+      {/* «Лучшие публикации» LEAD the section — the hero of the content view. The niche
+          «Отметки на фото» moved to the tail (аудит: на реальном аккаунте без отметок первый
+          экран раздела занимала пустая заглушка). */}
       <Section
         title="Лучшие публикации"
         action={
@@ -53,6 +52,10 @@ export function IgContent({ ig }: { ig: IgData }) {
 
       <Section title="Stories за 24 часа">
         <StoriesBlock stories={ig.stories} />
+      </Section>
+
+      <Section title="Отметки на фото">
+        <TagsBlock tags={tags.data?.data ?? []} mock={tags.data?.mock} />
       </Section>
     </div>
   );

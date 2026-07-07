@@ -30,6 +30,9 @@ interface DetailShellProps {
 export function DetailShell({ ariaLabel, onClose, variant, originRect, children }: DetailShellProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   useFocusTrap(panelRef);
+  // NO useLayerBack here (unlike PostDetailModal/SourceSheet): this shell is already URL-driven —
+  // opening pushes ?detail=…, so browser Back closes it natively; a sentinel on top would leave a
+  // dead ?detail entry behind the Esc path and Back would RE-open the overlay (verified live).
 
   // Shared-element grow: FLIP the panel from the clicked card's footprint to its natural position.
   // The panel is laid out at its FINAL size (so charts/text measure correctly from frame one — no

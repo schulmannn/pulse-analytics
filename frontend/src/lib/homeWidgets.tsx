@@ -57,10 +57,10 @@ export const HOME_REGISTRY: Record<string, HomeWidgetDef> = {
     ),
   },
   digest: {
-    label: 'Инсайт',
+    label: 'Главное',
     // Narrative insight takes a content-height `full` card (no fixed tile → no inner scrollbar).
     render: () => (
-      <ChartSection id="home-digest" homeKey="digest" title="Инсайт" periodControl defaultSize="full">
+      <ChartSection id="home-digest" homeKey="digest" title="Главное" periodControl defaultSize="full">
         <Digest />
       </ChartSection>
     ),
@@ -72,10 +72,10 @@ export const HOME_REGISTRY: Record<string, HomeWidgetDef> = {
     render: () => <GrowthChartBlock id="home-growth" homeKey="growth" />,
   },
   'top-posts': {
-    label: 'Топ постов',
+    label: 'Лучшие публикации',
     defaultSize: 'full',
     render: () => (
-      <ChartSection id="home-top-posts" homeKey="top-posts" title="Топ постов" defaultSize="full" periodControl>
+      <ChartSection id="home-top-posts" homeKey="top-posts" title="Лучшие публикации" defaultSize="full" periodControl>
         <TopPosts />
       </ChartSection>
     ),
