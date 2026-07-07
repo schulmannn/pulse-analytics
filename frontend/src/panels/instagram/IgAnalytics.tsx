@@ -28,7 +28,7 @@ export function IgAnalytics({ ig }: { ig: IgData }) {
   const reachExpand: ChartExpandConfig = {
     renderExpanded: (days) => {
       const w = windowIgSeries(ig.series.reach, days, 'охвата');
-      return <LineChart values={w.values} labels={w.labels} titles={w.titles} markAnomalies markExtremes />;
+      return <LineChart values={w.values} labels={w.labels} titles={w.titles} markAnomalies markExtremes emphasizeLastLabel />;
     },
     renderExpandedBar: (days) => {
       const w = windowIgSeries(ig.series.reach, days, 'охвата');
@@ -39,7 +39,7 @@ export function IgAnalytics({ ig }: { ig: IgData }) {
   const followsExpand: ChartExpandConfig = {
     renderExpanded: (days) => {
       const w = windowIgSeries(ig.series.follower, days, 'подписок');
-      return <LineChart values={w.values} labels={w.labels} titles={w.titles} markAnomalies markExtremes />;
+      return <LineChart values={w.values} labels={w.labels} titles={w.titles} markAnomalies markExtremes emphasizeLastLabel />;
     },
     renderExpandedBar: (days) => {
       const w = windowIgSeries(ig.series.follower, days, 'подписок');

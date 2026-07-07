@@ -123,7 +123,9 @@ function FeaturedKpi({ label, value, trend, caption, spark, info, onDrill }: Fea
       </div>
       {caption ? <div className="mt-2 text-xs text-muted-foreground">{caption}</div> : null}
       {spark && spark.values.length > 1 ? (
-        <div className="mt-4 max-w-2xl">
+        // Hero chart, not a strip (steep): double height, full padded width — the area gradient
+        // gives the card its depth, so the chart reads as the surface, not an illustration.
+        <div className="mt-4">
           <Sparkline
             values={spark.values}
             labels={spark.labels}
@@ -132,7 +134,7 @@ function FeaturedKpi({ label, value, trend, caption, spark, info, onDrill }: Fea
             interactive
             caption="по дням"
             formatValue={fmt.num}
-            className="h-16 w-full"
+            className="h-28 w-full"
           />
         </div>
       ) : null}

@@ -2,13 +2,14 @@ import { Link } from 'react-router-dom';
 import { useChannels, useHistory, useTgFull } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { useWidgetPeriod } from '@/lib/period';
-import { subscriberChange } from '@/lib/delta';
+import { pctDelta, subscriberChange } from '@/lib/delta';
 import { fmt } from '@/lib/format';
 import { freshness, latestHistoryDay } from '@/lib/freshness';
 import { CollectorEmptyState } from '@/components/CollectorEmptyState';
 import { GetStarted } from '@/pages/GetStarted';
 import { useDemo } from '@/lib/demo-context';
 import { Sparkline } from '@/components/Sparkline';
+import { DeltaPill } from '@/components/DeltaPill';
 import { ChartSection, WidgetGroup } from '@/components/ChartWidget';
 import { SubscriberHistoryChart, SubscriberHistoryBars } from '@/panels/Charts';
 import { Digest } from '@/panels/Digest';
@@ -150,10 +151,13 @@ export function SubscriberGrowth() {
   const periodLabel = days === 0 ? 'всё время' : `${days} дн.`;
 
   return (
-    <div>
+    // Layered hero (steep): the chart is pinned to the bottom of the tile and the number block
+    // floats above it — the dead band between number and strip becomes the chart itself. h-full
+    // rides the widget body's fixed leftover height (bodyRef is a definite-height box).
+    <div className="relative flex h-full min-h-0 flex-col">
       {/* The widget shell carries the «Рост подписчиков» title; the period label stays as a caption. */}
       <div className="text-2xs tracking-wide text-muted-foreground">за {periodLabel}</div>
-      <div className="mt-2 flex items-baseline gap-2.5">
+      <div className="relative z-10 mt-2 flex items-baseline gap-2.5">
         {/* The number opens the subscriber metric page (same affordance as the KPI ledger). */}
         <Link
           to="/metrics/subscribers"
@@ -162,15 +166,19 @@ export function SubscriberGrowth() {
         >
           {fmt.kpi(currentSubs)}
         </Link>
-        {change != null && change !== 0 && (
-          <span className={`text-sm font-medium tabular-nums ${change > 0 ? 'text-verdant' : 'text-ember'}`}>
-            {change > 0 ? '+' : '−'}{fmt.num(Math.abs(change))}
-          </span>
-        )}
+        {/* ONE delta grammar on card heroes: the ↑/↓ percent chip; the signed absolute moves to
+            the caption below («−115 к пред. периоду») instead of a bare coloured number. */}
+        <DeltaPill delta={change != null ? pctDelta(currentSubs, currentSubs - change) : null} />
       </div>
+      {change != null && change !== 0 && (
+        <div className="relative z-10 mt-2 text-xs text-muted-foreground">
+          {change > 0 ? '+' : '−'}
+          {fmt.num(Math.abs(change))} к пред. периоду
+        </div>
+      )}
       {values.length > 1 ? (
-        <div className="mt-4 max-w-md">
-          <Sparkline values={values} labels={labels} area strokeWidth={2} interactive caption="по дням" formatValue={fmt.num} className="h-16 w-full" />
+        <div className="absolute inset-x-0 bottom-0 h-28">
+          <Sparkline values={values} labels={labels} area strokeWidth={2} interactive caption="по дням" formatValue={fmt.num} className="h-full w-full" />
         </div>
       ) : (
         <p className="mt-4 text-xs text-muted-foreground">Недостаточно истории для графика.</p>

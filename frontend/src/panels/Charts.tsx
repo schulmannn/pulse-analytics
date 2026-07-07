@@ -51,6 +51,7 @@ export function SubscriberHistoryChart({ rows }: { rows: SubscriberRow[] }) {
       labels={labels}
       markAnomalies
       markExtremes
+      emphasizeLastLabel
     />
   );
 }
