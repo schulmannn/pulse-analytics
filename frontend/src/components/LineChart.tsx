@@ -6,6 +6,7 @@ import { nearestPointIndex } from '@/lib/chartHover';
 import { axisLabelIndexes } from '@/lib/chartLabels';
 import { ChartTooltip, type TooltipRow, type TooltipState } from '@/components/ChartTooltip';
 import { ChartExpandedContext, ChartRefLinesContext, ExpandedChartHeightContext, WidgetTargetContext } from '@/components/ExpandableChart';
+import { observeSize } from '@/lib/observeSize';
 
 interface LineChartProps {
   values: number[];
@@ -141,10 +142,7 @@ export function LineChart({
     if (!el) return;
     const measure = () => setWidth(el.clientWidth || 600);
     measure();
-    if (typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
+    return observeSize(el, measure);
   }, []);
 
   // The readout must not linger once the chart scrolls under the sticky header or the

@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { apiGet, apiSend } from '@/api/client';
 import { isDemoMode } from '@/lib/demo';
 import { fmt } from '@/lib/format';
+import { observeSize } from '@/lib/observeSize';
 import { preserveEntryIdentity, preserveValueIdentity } from '@/lib/storeIdentity';
 import { hydrateWidgetConfigs, reconcileHydratedConfigs, setWidgetConfigsSyncHook, syncableWidgetConfigs } from '@/lib/widgetStore';
 import { BarChart } from '@/components/BarChart';
@@ -1111,10 +1112,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
       setBodyH(h > 0 && h < 640 ? h : null);
     };
     measure();
-    if (typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
+    return observeSize(el, measure);
   }, []);
 
   useEffect(() => {
@@ -1799,10 +1797,7 @@ function VariantCarousel({
     if (!node) return;
     const measure = () => setViewportW(node.clientWidth);
     measure();
-    if (typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(measure);
-    ro.observe(node);
-    return () => ro.disconnect();
+    return observeSize(node, measure);
   }, []);
 
   const activeKey = prefs.variant ?? variants[0].key;

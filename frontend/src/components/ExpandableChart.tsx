@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { DetailShell } from '@/components/DetailShell';
 import { fmt } from '@/lib/format';
+import { observeSize } from '@/lib/observeSize';
 
 /** True while rendering inside the expanded (modal) chart view. Charts opt into richer
     annotations there (full y-axis, value labels) without prop plumbing through the panels. */
@@ -153,10 +154,7 @@ export function ChartExpandOverlay({ title, children, renderExpanded, renderExpa
     if (!node) return;
     const measure = () => setRegionH(node.clientHeight || null);
     measure();
-    if (typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(measure);
-    ro.observe(node);
-    return () => ro.disconnect();
+    return observeSize(node, measure);
   }, []);
   const chartH = regionH ? Math.max(240, regionH - 8) : EXPANDED_CHART_HEIGHT;
 
