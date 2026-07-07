@@ -11,10 +11,11 @@ import {
   useIgStories,
   useIgHistory,
 } from '@/api/queries';
-import type { IgHistoryRow } from '@/api/schemas';
 import { usePeriod } from '@/lib/period';
 import {
   metricSeries,
+  histSeries,
+  longerSeries,
   windowPair,
   tvBreakdown,
   aggregateOnline,
@@ -23,24 +24,7 @@ import {
   MEDIA_PRODUCT_LABEL,
   DAY_NAMES,
   DAY_MS,
-  type Point,
 } from '@/lib/igMetrics';
-
-/** Persisted ig_daily rows → {day,value}[] for one column, dropping null/blank days. */
-function histSeries(rows: IgHistoryRow[] | undefined, col: keyof IgHistoryRow): Point[] {
-  return (rows ?? [])
-    .filter((r) => r.day && r[col] != null)
-    .map((r) => ({ day: r.day, value: Number(r[col]) }));
-}
-
-/** Prefer whichever series carries MORE real dated points. The persisted history (accumulated by
- *  the cron) usually outruns the tiny live API window, but on day 1 the DB is empty — then the live
- *  series wins and the chart is never blank. Ties keep live (fresher within the shared window). */
-function longerSeries(live: Point[], persisted: Point[]): Point[] {
-  const datedCount = (s: Point[]) =>
-    s.filter((p) => p.day !== 'total' && Number.isFinite(Date.parse(p.day))).length;
-  return datedCount(persisted) > datedCount(live) ? persisted : live;
-}
 import { buildIgInsights } from '@/lib/igInsights';
 
 export function useIgData() {
