@@ -168,6 +168,24 @@ function PaletteDialog({ close }: { close: () => void }) {
     icon: iconFor('analytics'),
     run: () => navigate(`/metrics/${key}`),
   }));
+  // The IG metric pages too — the list mirrors the MetricRoute dispatcher (IgMetricPage);
+  // a new IG metric registers here as well (аудит: палитра не допрыгивала до IG-метрик).
+  const IG_METRICS: Array<[string, string]> = [
+    ['ig-reach', 'Охват (IG)'],
+    ['ig-follows', 'Подписки (IG)'],
+    ['ig-views', 'Просмотры (IG)'],
+    ['ig-interactions', 'Взаимодействия (IG)'],
+    ['ig-likes', 'Лайки (IG)'],
+    ['ig-saves', 'Сохранения (IG)'],
+    ['ig-er', 'Вовлечённость ER (IG)'],
+  ];
+  const igMetricCommands: PaletteCommand[] = IG_METRICS.map(([key, term]) => ({
+    id: `metric:${key}`,
+    label: term,
+    search: `метрика instagram ${term}`.toLowerCase(),
+    icon: iconFor('analytics'),
+    run: () => navigate(`/metrics/${key}`),
+  }));
 
   // Sources = (channel × network). Each channel yields a Telegram row and an Instagram row; picking
   // one selects the channel AND lands on that network — the Cmd+K twin of the sidebar SourceSwitcher.
@@ -225,7 +243,8 @@ function PaletteDialog({ close }: { close: () => void }) {
     },
   };
 
-  const commands: PaletteCommand[] = [...routeCommands, ...metricCommands, ...sourceCommands, logoutCommand];
+  const commands: PaletteCommand[] = [...routeCommands, ...metricCommands,
+    ...igMetricCommands, ...sourceCommands, logoutCommand];
   const normalizedQuery = query.trim().toLowerCase();
 
   // Empty query = browsable groups with the history on top; a query = one flat hit list.
