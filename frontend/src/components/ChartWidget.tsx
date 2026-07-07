@@ -1298,6 +1298,15 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
       ref={sectionRef}
       className={`min-w-0 ${reorder ? 'cursor-grab touch-none select-none active:cursor-grabbing' : ''} ${
         SIZE_COL_SPAN[effectiveSize]
+      } ${
+        // While the ⋯ menu is open, lift the WHOLE card above its sibling cards. The menu is
+        // `z-popover`, but each card's entrance transform (widget-enter) makes it a stacking context
+        // that traps that z-index inside the card — so the menu's overhang paints UNDER the next grid
+        // card. The card is a direct grid item, which honours z-index without `position` (no
+        // offset-parent change for the absolute menu). `z-10` is intra-content stacking (per the
+        // z-token scale it stays BELOW sticky chrome=20), so the card clears its neighbours while the
+        // menu still can't rise over the topbar if the user scrolls with it open.
+        menuOpen ? 'z-10' : ''
       } ${className ?? ''}`}
       style={outerStyle}
       onPointerDown={
