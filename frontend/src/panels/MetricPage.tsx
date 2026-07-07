@@ -101,6 +101,22 @@ function dimLabelOf(post: NormalizedPost, dim: Dim): string | null {
   return WEEKDAYS[(new Date(t).getUTCDay() + 6) % 7];
 }
 
+// ── Explorer chart height ────────────────────────────────────────────────────────────────────
+// The big chart owns the viewport (steep) instead of a fixed 280px strip: everything around it
+// (topbar + headline + card chrome + sticky toolbar + gaps) is roughly constant chrome, so the
+// chart takes what's left, clamped to sane bounds. Resize-aware; SSR-safe fallback.
+const CHART_CHROME = 430;
+const clampChartH = (viewportH: number) => Math.max(340, Math.min(620, viewportH - CHART_CHROME));
+function useExplorerChartHeight(): number {
+  const [h, setH] = useState(() => clampChartH(typeof window !== 'undefined' ? window.innerHeight : 900));
+  useEffect(() => {
+    const onResize = () => setH(clampChartH(window.innerHeight));
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  return h;
+}
+
 // ── Grain-aware time buckets (bucketKeyOf / bucketKeysInWindow now live in lib/metricSeries) ─
 function bucketLabelOf(key: string, grain: Grain): string {
   if (grain === 'month') {
@@ -202,6 +218,7 @@ export function MetricPage() {
     () => deriveKpis(data, history, channelsData, channelId, days, range, inRange),
     [data, history, channelsData, channelId, days, range, inRange],
   );
+  const chartH = useExplorerChartHeight();
 
   if (!isDrillKey(rawKey)) return <Navigate to="/" replace />;
   const metricKey = rawKey;
@@ -450,28 +467,28 @@ export function MetricPage() {
   const chartTypes: ChartType[] = field ? ['line', 'bar', 'rank', 'pivot'] : ['line', 'bar'];
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-5">
       {/* Breadcrumb back to the ledger the metric was opened from. */}
       <Link to="/" className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground">
         <span aria-hidden="true">←</span> Обзор
       </Link>
 
-      {/* Headline — same value/Δ/caption as the Overview ledger cell (shared derive). */}
+      {/* Headline — COMPACT (steep): the topbar h1 already names the metric, so this is one
+          baseline row (number · Δ · window/source context), not a stacked hero block — the
+          chart below owns the vertical space. Same value/Δ/caption as the Overview ledger. */}
       <div>
-        <div className="text-xs tracking-wide text-muted-foreground">
-          {def.term} · {periodLabel}
-        </div>
-        {channelHandle && (
-          <div className="mt-0.5 text-2xs tracking-wide text-ink3">Telegram · {channelHandle}</div>
-        )}
-        <div className="mt-2 flex items-baseline gap-2.5">
-          <span className="text-hero font-medium leading-none tabular-nums tracking-tight">{meta.total}</span>
+        <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
+          <span className="text-3xl font-medium leading-none tabular-nums tracking-tight">{meta.total}</span>
           <DeltaPill delta={meta.trend} />
+          <span className="text-xs tracking-wide text-muted-foreground">
+            {def.term} · {periodLabel}
+            {channelHandle ? <span className="text-ink3"> · Telegram {channelHandle}</span> : null}
+          </span>
         </div>
-        {meta.caption ? <div className="mt-2 text-xs text-muted-foreground">{meta.caption}</div> : null}
+        {meta.caption ? <div className="mt-1.5 text-xs text-muted-foreground">{meta.caption}</div> : null}
       </div>
 
-      <div className="grid grid-cols-1 gap-10 lg:grid-cols-[minmax(0,1fr)_300px]">
+      <div className="grid grid-cols-1 gap-6 xl:gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
         {/* Main column — the big chart in four projections + contributing posts. */}
         <div className="min-w-0 space-y-8">
           <ChartWidget
@@ -499,7 +516,7 @@ export function MetricPage() {
                   values={series.values}
                   labels={series.labels}
                   titles={titles}
-                  height={280}
+                  height={chartH}
                   markExtremes
                   markAnomalies={effGrain === 'day' && (metricKey === 'views' || metricKey === 'subscribers')}
                   showPoints={series.values.length > 1 && series.values.length <= 45}
@@ -513,7 +530,7 @@ export function MetricPage() {
             {chartType === 'bar' && (
               /* Expanded context switches BarChart into its rich mode (y ticks + value labels). */
               <ChartExpandedContext.Provider value={true}>
-                <BarChart values={series.values} labels={series.labels} titles={titles} height={280} ghost={ghost} ghostLabel={cmpLabel ?? undefined} legendToggle={false} />
+                <BarChart values={series.values} labels={series.labels} titles={titles} height={chartH} ghost={ghost} ghostLabel={cmpLabel ?? undefined} legendToggle={false} />
               </ChartExpandedContext.Provider>
             )}
             {chartType === 'rank' && (
@@ -578,7 +595,7 @@ export function MetricPage() {
         </div>
 
         {/* Explore rail — breakdown dimension, comparison baseline, the About block. */}
-        <aside className="space-y-8">
+        <aside className="space-y-6">
           {field && (
             <ChartSection title="Разбивка">
               <SegSelect
@@ -879,14 +896,13 @@ function AboutRow({ label, text }: { label: string; text: string }) {
 function MetricSkeleton() {
   // Mirrors the real layout (breadcrumb + hero + chart + rail) — no card/ledger swap on load.
   return (
-    <div className="space-y-8">
+    <div className="space-y-5">
       <Skeleton className="h-3 w-16" />
       <div>
-        <Skeleton className="h-3 w-40" />
-        <Skeleton className="mt-2 h-11 w-36" />
+        <Skeleton className="h-8 w-48" />
       </div>
-      <div className="grid grid-cols-1 gap-10 lg:grid-cols-[minmax(0,1fr)_300px]">
-        <Skeleton className="h-[280px] w-full" />
+      <div className="grid grid-cols-1 gap-6 xl:gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
+        <Skeleton className="h-[420px] w-full" />
         <div className="space-y-4">
           <Skeleton className="h-3 w-24" />
           <Skeleton className="h-4 w-full" />

@@ -2,6 +2,7 @@ import { fmt } from '@/lib/format';
 import { pairDelta, tvBreakdown, CONTACT_LABEL } from '@/lib/igMetrics';
 import type { IgData } from '@/lib/useIgData';
 import { Section, KpiCard } from '@/components/instagram/shared';
+import { ChartSection } from '@/components/ChartWidget';
 import { AudienceBlock, BestTimeHeatmap } from '@/components/instagram/audience';
 import { Breakdown } from '@/components/Breakdown';
 
@@ -20,9 +21,11 @@ export function IgAudience({ ig }: { ig: IgData }) {
         <AudienceBlock breakdowns={ig.breakdowns} followers={ig.followers} />
       </Section>
 
-      <Section title="Лучшее время для публикации">
+      {/* A real widget card (not a flat h2 section): the heatmap joins the drill contract —
+          whole-card click / ↗ open the Tier-1 overlay, same as the TG activity heatmap. */}
+      <ChartSection title="Лучшее время для публикации" defaultSize="full">
         <BestTimeHeatmap online={ig.online} />
-      </Section>
+      </ChartSection>
 
       <Section title="Действия в профиле">
         {!hasViews && contacts.length === 0 ? (

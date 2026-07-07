@@ -9,7 +9,7 @@ import type { IgData } from '@/lib/useIgData';
 // old render showed «0» с «↓100%» рядом с прочерками соседних ячеек (D6.1). Insights quota
 // burn / missing metrics must read as a dash with no delta, never as a crash.
 const isLive = (p: WindowPair) => p.hasCur && p.cur > 0;
-import { KpiHero, KpiCard, signedNum } from '@/components/instagram/shared';
+import { KpiHero, KpiCard, igDailyExpand, signedNum } from '@/components/instagram/shared';
 import { InsightsBlock } from '@/components/instagram/insights';
 import { TopPostsBlock } from '@/components/instagram/content';
 
@@ -32,6 +32,7 @@ export function IgOverview({ ig }: { ig: IgData }) {
           value={fmt.kpi(ig.pairs.reach.cur)}
           delta={pairDelta(ig.pairs.reach)}
           series={ig.series.reach.filter((p) => ig.inWindow(p.day))}
+          expand={igDailyExpand(ig.series.reach, 'охвата')}
         />
         <div className="grid grid-cols-2 gap-px border-t border-border bg-border lg:grid-cols-4">
           <KpiCard

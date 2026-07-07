@@ -50,7 +50,7 @@ export const HOME_REGISTRY: Record<string, HomeWidgetDef> = {
     label: 'Показатели',
     defaultSize: 'full',
     render: () => (
-      <ChartSection id="home-kpi" homeKey="kpi" title="Показатели" defaultSize="full" periodControl>
+      <ChartSection id="home-kpi" homeKey="kpi" title="Показатели" defaultSize="full" periodControl drillTo="/metrics/views">
         <KpiGrid />
       </ChartSection>
     ),

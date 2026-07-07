@@ -59,7 +59,7 @@ export function Overview() {
             both vanish). */}
         {/* Widget label «Показатели», NOT «Обзор» — the feed block's h2 right above already
             says «Обзор»; repeating it in the menu row would read as a stutter. */}
-        <ChartSection id="overview-hero" title="Показатели" defaultSize="full" periodControl homeKey="kpi">
+        <ChartSection id="overview-hero" title="Показатели" defaultSize="full" periodControl homeKey="kpi" drillTo="/metrics/views">
           {/* KPI hero (Просмотры · окно виджета) + ledger (Подписчики / Ср.охват / Реакции / ER) */}
           <KpiGrid />
         </ChartSection>
@@ -116,6 +116,7 @@ export function GrowthChartBlock({ id, homeKey }: { id?: string; homeKey?: strin
       id={id}
       homeKey={homeKey}
       title="Рост подписчиков"
+      drillTo="/metrics/subscribers"
       periodControl
       expand={
         rows.length >= 2

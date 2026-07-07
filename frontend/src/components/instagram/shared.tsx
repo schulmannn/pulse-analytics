@@ -3,7 +3,9 @@ import { fmt } from '@/lib/format';
 import type { MetricDelta } from '@/lib/delta';
 import { DeltaPill } from '@/components/DeltaPill';
 import { LineChart } from '@/components/LineChart';
+import { BarChart } from '@/components/BarChart';
 import { ChartSection as WidgetChartSection } from '@/components/ChartWidget';
+import { ExpandableChart } from '@/components/ExpandableChart';
 import type { ChartExpandConfig } from '@/components/ExpandableChart';
 import { fmtDay, type Point } from '@/lib/igMetrics';
 
@@ -20,6 +22,26 @@ export function windowIgSeries(series: Point[], days: number, unit: string) {
     // BarChart needs one label per bar to stride; the 3-label form mislabels the bars.
     labels: w.map((p) => fmtDay(p.day)),
     titles: w.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)} ${unit}`),
+  };
+}
+
+/**
+ * Rich «Развернуть» explorer for a GENUINE IG daily series (reach / daily follows): 1М/3М/6М/Всё
+ * pills, line↔bar toggle and the stats strip, windowing the FULL series. ONE builder so every
+ * surface showing the series (the analytics cards, the Overview hero) expands identically —
+ * the unified drill contract. IG has no /metrics pages yet, so the overlay IS the drill target.
+ */
+export function igDailyExpand(series: Point[], genitive: string): ChartExpandConfig {
+  return {
+    renderExpanded: (days) => {
+      const w = windowIgSeries(series, days, genitive);
+      return <LineChart values={w.values} labels={w.labels} titles={w.titles} markAnomalies markExtremes emphasizeLastLabel />;
+    },
+    renderExpandedBar: (days) => {
+      const w = windowIgSeries(series, days, genitive);
+      return <BarChart values={w.values} labels={w.labels} titles={w.titles} />;
+    },
+    statsFor: (days) => windowIgSeries(series, days, genitive).values,
   };
 }
 
@@ -94,13 +116,26 @@ export function KpiHero({
   value,
   delta,
   series,
+  expand,
 }: {
   label: string;
   value: string;
   delta?: MetricDelta | null;
   series?: Point[];
+  /** Rich-expand config (igDailyExpand): the hero chart grows the ↗ affordance and opens the
+      same explorer overlay as the analytics cards — no chart is a dead end (drill contract). */
+  expand?: ChartExpandConfig;
 }) {
   const daily = (series ?? []).filter((p) => p.day !== 'total');
+  const chart = daily.length > 1 && (
+    <LineChart
+      values={daily.map((p) => p.value)}
+      labels={pickLabels(daily)}
+      titles={daily.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)}`)}
+      height={96}
+      emphasizeLastLabel
+    />
+  );
   return (
     <div className="bg-background p-4">
       <div className="text-xs tracking-wide text-muted-foreground">{label}</div>
@@ -108,15 +143,15 @@ export function KpiHero({
         <div className="kpi-accent text-[2.75rem] font-medium leading-none tabular-nums tracking-tight">{value}</div>
         <DeltaPill delta={delta} />
       </div>
-      {daily.length > 1 && (
+      {chart && (
         <div className="mt-4">
-          <LineChart
-            values={daily.map((p) => p.value)}
-            labels={pickLabels(daily)}
-            titles={daily.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)}`)}
-            height={96}
-            emphasizeLastLabel
-          />
+          {expand ? (
+            <ExpandableChart title={label} {...expand}>
+              {chart}
+            </ExpandableChart>
+          ) : (
+            chart
+          )}
         </div>
       )}
     </div>
