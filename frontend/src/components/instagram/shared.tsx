@@ -63,7 +63,6 @@ export interface KpiCardProps {
   label: string;
   value: string;
   hint?: string;
-  feature?: boolean;
   trend?: MetricDelta | null;
   /** A pre-formatted inline delta (e.g. "−23"); shown instead of the percent pill when set. */
   deltaText?: string;
@@ -72,12 +71,15 @@ export interface KpiCardProps {
   onDrill?: () => void;
 }
 
-/** A single ledger cell — label, big number, optional delta + hint. Sits in a `gap-px` grid. */
-export function KpiCard({ label, value, hint, feature, trend, deltaText, deltaTone, onDrill }: KpiCardProps) {
+/** A single ledger cell — label, big number, optional delta + hint. BARE (no plate): ledgers are
+    separated by SPACING in a plain grid, not a `gap-px` hairline mesh — the surrounding card
+    already frames them, and a bg-background plate inside a card read as a sharp-cornered inset
+    box (owner report on the IG «Показатели» hero; the TG KpiGrid rule). */
+export function KpiCard({ label, value, hint, trend, deltaText, deltaTone, onDrill }: KpiCardProps) {
   const deltaColor =
     deltaTone === 'up' ? 'text-verdant' : deltaTone === 'down' ? 'text-ember' : 'text-muted-foreground';
   return (
-    <div className={`bg-background p-4${feature ? ' ring-1 ring-inset ring-primary/40' : ''}`}>
+    <div className="py-1">
       <div className="text-xs tracking-wide text-muted-foreground">{label}</div>
       <div className="mt-2 flex items-center gap-2">
         {onDrill ? (
@@ -134,7 +136,7 @@ export function KpiHero({
     />
   );
   return (
-    <div className="bg-background p-4">
+    <div>
       <div className="text-xs tracking-wide text-muted-foreground">{label}</div>
       <div className="mt-1.5 flex flex-wrap items-end gap-x-3 gap-y-1">
         <div className="kpi-accent text-[2.75rem] font-medium leading-none tabular-nums tracking-tight">{value}</div>
@@ -272,7 +274,9 @@ export function IgKpiBlock({ ig }: { ig: IgData }) {
       ? pctDelta(ig.erReach, ig.erReachPrev)
       : null;
   return (
-    <div className="overflow-hidden rounded-md">
+    // TG KpiGrid composition: the hero sits straight on the card and the ledger splits off with
+    // ONE quiet top hairline + spacing — no inner plate, no hairline mesh (the card is the frame).
+    <div className="space-y-5">
       <KpiHero
         label={`Охват · ${ig.window.days} дн.`}
         value={fmt.kpi(ig.pairs.reach.cur)}
@@ -280,7 +284,7 @@ export function IgKpiBlock({ ig }: { ig: IgData }) {
         series={ig.series.reach.filter((p) => ig.inWindow(p.day))}
         drillTo="/metrics/ig-reach"
       />
-      <div className="grid grid-cols-2 gap-px border-t border-border bg-border lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-x-6 gap-y-4 border-t border-border pt-4 lg:grid-cols-4">
         <KpiCard
           label="Подписчики"
           value={fmt.kpi(ig.followers)}
