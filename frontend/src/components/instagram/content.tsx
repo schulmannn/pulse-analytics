@@ -143,7 +143,7 @@ export function ReelsBlock({ posts }: { posts: IgPost[] }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-1 gap-px border-t border-border bg-border sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-x-6 gap-y-4 border-t border-border pt-4 sm:grid-cols-3">
         <KpiCard label="Reels" value={fmt.num(reels.length)} />
         <KpiCard label="Ср. время просмотра" value={`${avgWatchAll} сек`} />
         <KpiCard label="Суммарно просмотрено" value={`${fmt.short(Math.round(totalWatchHours))} ч`} />
@@ -365,7 +365,7 @@ export function StoriesBlock({ stories }: { stories: IgStory[] | undefined }) {
       {hoursLeft != null && (
         <p className="px-1 text-xs text-status-warn">Данные историй исчезнут через ~{hoursLeft} ч (24-часовое окно Instagram).</p>
       )}
-      <div className="grid grid-cols-2 gap-px border-t border-border bg-border lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-x-6 gap-y-4 border-t border-border pt-4 lg:grid-cols-4">
         <KpiCard label="Историй" value={fmt.num(list.length)} />
         <KpiCard label="Охват" value={fmt.short(sum('reach'))} />
         <KpiCard label="Ответы" value={fmt.num(sum('replies'))} />
