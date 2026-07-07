@@ -393,9 +393,9 @@ export function MetricPage() {
       if (metricKey === 'avgReach') {
         const curAvg = normPosts.length ? cur / normPosts.length : 0;
         const baseAvg = base / postsInBase.length;
-        return { current: fmt.short(curAvg), previous: fmt.short(baseAvg), cur: curAvg, base: baseAvg };
+        return { current: fmt.kpi(curAvg), previous: fmt.kpi(baseAvg), cur: curAvg, base: baseAvg };
       }
-      return { current: fmt.short(cur), previous: fmt.short(base), cur, base };
+      return { current: fmt.kpi(cur), previous: fmt.kpi(base), cur, base };
     }
     // Subscribers: change within each window, from the daily archive.
     const change = (rows: typeof historyRows) => {

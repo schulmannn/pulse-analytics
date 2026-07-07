@@ -158,9 +158,9 @@ export function SubscriberGrowth() {
         <Link
           to="/metrics/subscribers"
           aria-label="Страница метрики: Подписчики"
-          className="rounded text-hero font-medium leading-none tabular-nums tracking-tight transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+          className="kpi-accent rounded text-hero font-medium leading-none tabular-nums tracking-tight transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
         >
-          {fmt.num(currentSubs)}
+          {fmt.kpi(currentSubs)}
         </Link>
         {change != null && change !== 0 && (
           <span className={`text-sm font-medium tabular-nums ${change > 0 ? 'text-verdant' : 'text-ember'}`}>

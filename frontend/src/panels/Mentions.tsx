@@ -115,7 +115,7 @@ export function Mentions() {
         </div>
         <div className="bg-background p-5">
           <div className="text-xs tracking-wide text-muted-foreground">Суммарный охват</div>
-          <div className="mt-2 text-3xl font-medium tabular-nums tracking-tight text-ink3">{fmt.short(totalViews)}</div>
+          <div className="mt-2 text-3xl font-medium tabular-nums tracking-tight text-ink3">{fmt.kpi(totalViews)}</div>
         </div>
       </div>
 

@@ -105,7 +105,7 @@ export function KpiHero({
     <div className="bg-background p-4">
       <div className="text-xs tracking-wide text-muted-foreground">{label}</div>
       <div className="mt-1.5 flex flex-wrap items-end gap-x-3 gap-y-1">
-        <div className="text-[2.75rem] font-medium leading-none tabular-nums tracking-tight">{value}</div>
+        <div className="kpi-accent text-[2.75rem] font-medium leading-none tabular-nums tracking-tight">{value}</div>
         <DeltaPill delta={delta} />
       </div>
       {daily.length > 1 && (
