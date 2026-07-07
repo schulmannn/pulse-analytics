@@ -450,41 +450,6 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
 
   return (
     <div className="space-y-6">
-      {/* 1) KPI — six headline ratios separated by SPACING (no inner hairline grid), one quiet
-             top hairline splitting the strip from the tabs above. */}
-      <div className="grid grid-cols-2 gap-x-6 gap-y-4 border-t border-border pt-4 sm:grid-cols-3 lg:grid-cols-6">
-        <div>
-          <div className="text-2xs font-medium tracking-wider text-muted-foreground">Просмотров / пост</div>
-          <div className="mt-1 text-xl font-medium tabular-nums">{fmt.kpi(cur(cs?.views_per_post) ?? vs?.avg_views ?? 0)}</div>
-          {vs?.posts_analyzed ? <div className="mt-1 truncate text-2xs text-muted-foreground">по {vs.posts_analyzed} постам</div> : null}
-        </div>
-        <div>
-          <div className="text-2xs font-medium tracking-wider text-muted-foreground">Ср. ERV</div>
-          <div className="mt-1 text-xl font-medium tabular-nums">{avgErv != null ? `${avgErv.toFixed(1)}%` : '—'}</div>
-          <div className="mt-1 truncate text-2xs text-muted-foreground">вовлечённость на просмотр</div>
-        </div>
-        <div>
-          <div className="text-2xs font-medium tracking-wider text-muted-foreground">Виральность</div>
-          <div className="mt-1 text-xl font-medium tabular-nums">{avgVir != null ? `${avgVir.toFixed(1)}%` : '—'}</div>
-          <div className="mt-1 truncate text-2xs text-muted-foreground">репосты / просмотры</div>
-        </div>
-        <div>
-          <div className="text-2xs font-medium tracking-wider text-muted-foreground">Репостов / пост</div>
-          <div className="mt-1 text-xl font-medium tabular-nums">{cur(cs?.shares_per_post) != null ? fmt.kpi(cur(cs?.shares_per_post)!) : '—'}</div>
-          {vs?.total_forwards ? <div className="mt-1 truncate text-2xs text-muted-foreground">{fmt.short(vs.total_forwards)} всего</div> : null}
-        </div>
-        <div>
-          <div className="text-2xs font-medium tracking-wider text-muted-foreground">Реакций / пост</div>
-          <div className="mt-1 text-xl font-medium tabular-nums">{cur(cs?.reactions_per_post) != null ? fmt.kpi(cur(cs?.reactions_per_post)!) : '—'}</div>
-          {vs?.total_reactions ? <div className="mt-1 truncate text-2xs text-muted-foreground">{fmt.short(vs.total_reactions)} всего</div> : null}
-        </div>
-        <div>
-          <div className="text-2xs font-medium tracking-wider text-muted-foreground">Уведомления вкл.</div>
-          <div className="mt-1 text-xl font-medium tabular-nums">{notifPct != null ? `${notifPct.toFixed(1)}%` : '—'}</div>
-          {notif ? <div className="mt-1 truncate text-2xs text-muted-foreground">{fmt.short(notif.part ?? 0)} из {fmt.short(notif.total ?? 0)}</div> : null}
-        </div>
-      </div>
-
       <WidgetGroup
         id={`tg-${group ?? 'all'}`}
         className={cn(
@@ -496,6 +461,43 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
           group === 'audience' && 'lg:[&>section:last-child:nth-child(odd)]:col-span-6',
         )}
       >
+        {/* Сводка показателей — the 'strip' contract (unified-feed step 2, hand-rolled):
+            a real widget (hide/reorder with its siblings) whose chrome is a bare full-width
+            row — a card frame would make a thin ratio strip compete with the charts. */}
+        <ChartSection strip id="tg-derived-kpis" title="Сводка показателей" defaultSize="full" noExpand>
+          <div className="grid grid-cols-2 gap-x-6 gap-y-4 border-t border-border pt-4 sm:grid-cols-3 lg:grid-cols-6">
+            <div>
+              <div className="text-2xs font-medium tracking-wider text-muted-foreground">Просмотров / пост</div>
+              <div className="mt-1 text-xl font-medium tabular-nums">{fmt.kpi(cur(cs?.views_per_post) ?? vs?.avg_views ?? 0)}</div>
+              {vs?.posts_analyzed ? <div className="mt-1 truncate text-2xs text-muted-foreground">по {vs.posts_analyzed} постам</div> : null}
+            </div>
+            <div>
+              <div className="text-2xs font-medium tracking-wider text-muted-foreground">Ср. ERV</div>
+              <div className="mt-1 text-xl font-medium tabular-nums">{avgErv != null ? `${avgErv.toFixed(1)}%` : '—'}</div>
+              <div className="mt-1 truncate text-2xs text-muted-foreground">вовлечённость на просмотр</div>
+            </div>
+            <div>
+              <div className="text-2xs font-medium tracking-wider text-muted-foreground">Виральность</div>
+              <div className="mt-1 text-xl font-medium tabular-nums">{avgVir != null ? `${avgVir.toFixed(1)}%` : '—'}</div>
+              <div className="mt-1 truncate text-2xs text-muted-foreground">репосты / просмотры</div>
+            </div>
+            <div>
+              <div className="text-2xs font-medium tracking-wider text-muted-foreground">Репостов / пост</div>
+              <div className="mt-1 text-xl font-medium tabular-nums">{cur(cs?.shares_per_post) != null ? fmt.kpi(cur(cs?.shares_per_post)!) : '—'}</div>
+              {vs?.total_forwards ? <div className="mt-1 truncate text-2xs text-muted-foreground">{fmt.short(vs.total_forwards)} всего</div> : null}
+            </div>
+            <div>
+              <div className="text-2xs font-medium tracking-wider text-muted-foreground">Реакций / пост</div>
+              <div className="mt-1 text-xl font-medium tabular-nums">{cur(cs?.reactions_per_post) != null ? fmt.kpi(cur(cs?.reactions_per_post)!) : '—'}</div>
+              {vs?.total_reactions ? <div className="mt-1 truncate text-2xs text-muted-foreground">{fmt.short(vs.total_reactions)} всего</div> : null}
+            </div>
+            <div>
+              <div className="text-2xs font-medium tracking-wider text-muted-foreground">Уведомления вкл.</div>
+              <div className="mt-1 text-xl font-medium tabular-nums">{notifPct != null ? `${notifPct.toFixed(1)}%` : '—'}</div>
+              {notif ? <div className="mt-1 truncate text-2xs text-muted-foreground">{fmt.short(notif.part ?? 0)} из {fmt.short(notif.total ?? 0)}</div> : null}
+            </div>
+          </div>
+        </ChartSection>
         {/* Дубль-развязка (аудит 5.1): «Просмотры по дням» (views_summary, фикс-14д + ghost) и
             «Просмотры» (graphs-серия, rich expand/grain) показывали одни и те же дневные просмотры
             на каналах с broadcast-статистикой. Теперь эта карточка — ЧЕСТНЫЙ FALLBACK только для

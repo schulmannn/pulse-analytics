@@ -1018,6 +1018,9 @@ interface ChartSectionProps {
    * Posts / metric-page / report) don't grow a dead control.
    */
   periodControl?: boolean;
+  /** STRIP contract (thin full-width summary rows): no card chrome, forced full span,
+      content height, menu limited to Выше/Ниже/Переставить/Скрыть. */
+  strip?: boolean;
   /**
    * Personal-Home registry key (e.g. 'digest'). When set, the ⋯ menu grows a «На главную» /
    * «Убрать с главной» toggle that pins/unpins this widget on /home. Pass it on the SOURCE-screen
@@ -1057,7 +1060,7 @@ interface ChartSectionProps {
   children?: ReactNode;
 }
 
-export function ChartSection({ id, title, action, variants, className, defaultSize, expand, drillTo, noExpand, periodControl, homeKey, seriesOptions, configEditor, explorer, bodyResetKey, children }: ChartSectionProps) {
+export function ChartSection({ id, title, action, variants, className, defaultSize, expand, drillTo, noExpand, periodControl, strip, homeKey, seriesOptions, configEditor, explorer, bodyResetKey, children }: ChartSectionProps) {
   const widgetId = id ?? title;
   const group = useContext(GroupCtx);
   const homeEditing = useContext(HomeEditContext);
@@ -1251,7 +1254,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
   const activeTinted = (configEditor ? configEditor.tinted : prefs.tinted) ?? true;
   const activeTarget = configEditor ? (configEditor.target ?? null) : (prefs.target ?? null);
   const chosenSize: WidgetSize = (configEditor ? configEditor.size : prefs.size) ?? defaultSize ?? 'third';
-  const effectiveSize = maxSize(chosenSize, activeVariant?.minSize ?? 'third');
+  const effectiveSize = strip ? 'full' : maxSize(chosenSize, activeVariant?.minSize ?? 'third');
   // Height fed to every chart in the body so it fills the tile. Only for the FIXED sizes
   // (third/half); a `full` card is content-height, so it passes null and charts keep their own
   // height (e.g. KpiHero's deliberate 64px mini-sparkline, the metric page's 280px chart).
@@ -1372,7 +1375,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
       onPointerCancel={reorder ? () => group?.dragEnd() : undefined}
     >
       <div
-        className={`flex flex-col ${SIZE_H[effectiveSize]} rounded-xl border bg-card p-4 sm:p-5 transition-colors hover:border-ink3/40 ${
+        className={`${strip ? 'group/strip relative flex flex-col' : `flex flex-col ${SIZE_H[effectiveSize]} rounded-xl border bg-card p-4 sm:p-5 transition-colors hover:border-ink3/40`} ${
           // Softer surface edge in dark (a faint white hairline instead of the hard #2b2b2b box —
           // steep-like "lit surface", less boxed); light mode keeps the full hairline (white cards on
           // paper need it for definition). Edit mode keeps a visible border.
@@ -1405,8 +1408,8 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
               }
         }
       >
-      <div className="flex shrink-0 items-center gap-3">
-        <h3 className="min-w-0 flex-1 truncate text-sm font-semibold tracking-tight text-foreground">
+      <div className={strip ? 'absolute -top-1 right-0 z-10 flex items-center' : 'flex shrink-0 items-center gap-3'}>
+        <h3 className={strip ? 'sr-only' : 'min-w-0 flex-1 truncate text-sm font-semibold tracking-tight text-foreground'}>
           {prefs.title || title}
         </h3>
         {action}
@@ -1606,6 +1609,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
                   <MenuIcon kind="home" /> {pinned ? 'Убрать с главной' : 'На главную'}
                 </button>
               )}
+              {!strip && (
               <button
                 type="button"
                 role="menuitem"
@@ -1622,6 +1626,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
               >
                 <MenuIcon kind="edit" /> Изменить
               </button>
+              )}
               {group && (
                 <button
                   type="button"
@@ -1673,7 +1678,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
           )}
         </>
       )}
-      <div className={`mt-3 flex min-h-0 flex-1 flex-col ${reorder ? 'pointer-events-none' : ''}`}>
+      <div className={`${strip ? 'flex min-h-0 flex-col pr-8' : 'mt-3 flex min-h-0 flex-1 flex-col'} ${reorder ? 'pointer-events-none' : ''}`}>
         <WidgetPeriodProvider value={widgetPeriod}>
           <WidgetTargetContext.Provider value={activeTarget}>
             {/* Chart region — flex-1 eats the tile's leftover height. overflow-hidden (NOT auto): a
