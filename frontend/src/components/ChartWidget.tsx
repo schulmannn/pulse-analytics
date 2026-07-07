@@ -1774,7 +1774,7 @@ function WidgetPeriodPills({
   if (hidden) return null;
   const following = override === undefined && pagePeriod != null;
   const pillClass = (active: boolean) =>
-    `relative inline-flex min-h-8 min-w-8 items-center justify-center px-2 text-2xs font-medium tabular-nums transition-colors sm:min-h-0 sm:min-w-0 sm:justify-start sm:px-0.5 sm:pb-1 sm:pt-0.5 ${
+    `relative inline-flex min-h-8 min-w-8 items-center justify-center rounded px-2 text-2xs font-medium tabular-nums transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 sm:min-h-0 sm:min-w-0 sm:justify-start sm:px-0.5 sm:pb-1 sm:pt-0.5 ${
       active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
     }`;
   return (

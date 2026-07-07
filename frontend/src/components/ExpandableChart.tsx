@@ -3,6 +3,8 @@ import type { CSSProperties, ReactNode } from 'react';
 import { CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { DetailShell } from '@/components/DetailShell';
 import { fmt } from '@/lib/format';
+import { pctDelta } from '@/lib/delta';
+import { DeltaPill } from '@/components/DeltaPill';
 import { observeSize } from '@/lib/observeSize';
 
 /** True while rendering inside the expanded (modal) chart view. Charts opt into richer
@@ -166,6 +168,29 @@ export function ChartExpandOverlay({ title, children, renderExpanded, renderExpa
   // visible values that feed the stats strip. Off by default; only offered with a stats source.
   const [showRefLines, setShowRefLines] = useState(false);
   const statsValues = statsFor ? statsFor(days, grain) : null;
+  // Steep headline for the overlay — the SAME grammar as the card it opened from (number + Δ +
+  // caption). Flow series (statsSum): the window total vs the previous same-length window,
+  // sliced honestly out of statsFor(days*2). Level series: the current value vs the window start.
+  const headline = (() => {
+    if (!statsValues || statsValues.length === 0) return null;
+    if (statsSum) {
+      const total = statsValues.reduce((a, b) => a + b, 0);
+      let delta: ReturnType<typeof pctDelta> | null = null;
+      if (days !== 0 && statsFor) {
+        const wide = statsFor(days * 2, grain);
+        const prev = wide.slice(0, wide.length - statsValues.length);
+        if (prev.length >= statsValues.length) {
+          const prevTotal = prev.reduce((a, b) => a + b, 0);
+          if (prevTotal > 0) delta = pctDelta(total, prevTotal);
+        }
+      }
+      return { value: fmt.kpi(total), delta, caption: delta ? 'к пред. периоду' : days === 0 ? 'за всё время' : null };
+    }
+    const last = statsValues[statsValues.length - 1] ?? 0;
+    const first = statsValues[0] ?? 0;
+    const delta = first > 0 ? pctDelta(last, first) : null;
+    return { value: fmt.kpi(last), delta, caption: delta ? 'к началу окна' : null };
+  })();
   const refLines =
     showRefLines && statsValues && statsValues.length > 0
       ? {
@@ -181,7 +206,14 @@ export function ChartExpandOverlay({ title, children, renderExpanded, renderExpa
           custom properties still compute here, carrying the widget accent into the portal. */}
       <div className="contents" style={accentStyle}>
         <CardHeader className="shrink-0 pr-12">
-          <CardTitle className="text-base font-medium text-foreground">{title}</CardTitle>
+          <CardTitle className="text-base font-semibold text-foreground">{title}</CardTitle>
+          {headline && (
+            <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 pt-1.5">
+              <span className="kpi-accent text-hero font-medium leading-none tabular-nums tracking-tight">{headline.value}</span>
+              <DeltaPill delta={headline.delta} />
+              {headline.caption && <span className="text-2xs text-muted-foreground">{headline.caption}</span>}
+            </div>
+          )}
           {(renderExpanded || renderExpandedBar) && (
             <div className="flex flex-wrap items-center gap-2 pt-2">
               {renderExpanded &&

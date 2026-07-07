@@ -174,10 +174,12 @@ export function PieChart({ values, labels, titles, colors, height = 200 }: PieCh
   const containerCls = expanded
     ? 'flex flex-col items-start gap-6 sm:flex-row sm:items-center'
     : compactSide
-      ? 'flex items-center gap-4'
+      ? // flex-wrap: in a 33% card the side legend WRAPS below the donut instead of choking it
+        // (аудит: «Круговая» на узкой карточке душила легенду).
+        'flex flex-wrap items-center gap-4'
       : '';
   const donutWidth = expanded || compactSide ? size : '100%';
-  const legendCls = expanded || compactSide ? 'min-w-0 flex-1' : 'mt-4';
+  const legendCls = expanded ? 'min-w-0 flex-1' : compactSide ? 'min-w-0 flex-1 basis-44' : 'mt-4';
 
   return (
     <div ref={containerRef} className="relative w-full">

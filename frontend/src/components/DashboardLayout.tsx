@@ -353,7 +353,7 @@ function NetworkStrip({ rail }: { rail: boolean }) {
             aria-label={n.name}
             title={n.name}
             className={cn(
-              'flex h-7 w-7 items-center justify-center rounded transition-colors',
+              'flex h-7 w-7 items-center justify-center rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
               active ? 'bg-hover-row' : 'hover:bg-hover-row/60',
             )}
             style={{ color: n.color, opacity: active ? 1 : 0.5 }}

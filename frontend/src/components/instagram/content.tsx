@@ -30,7 +30,7 @@ export function FormatsBlock({ items }: { items: { label: string; value: number 
   if (list.length === 0) {
     return (
       <ChartSection title="Вовлечённость по форматам">
-        <p className="py-6 text-center text-sm text-muted-foreground">Нет данных о форматах.</p>
+        <EmptyState compact title="Нет данных о форматах." />
       </ChartSection>
     );
   }
@@ -383,7 +383,7 @@ export function StoriesBlock({ stories }: { stories: IgStory[] | undefined }) {
           />
         ) : (
           <ChartSection title="Навигация по историям">
-            <p className="py-6 text-center text-sm text-muted-foreground">Нет данных о навигации.</p>
+            <EmptyState compact title="Нет данных о навигации." />
           </ChartSection>
         )}
         <ChartSection title="По историям" defaultSize="half">
