@@ -1,5 +1,5 @@
 import { createContext, useLayoutEffect, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { DetailShell } from '@/components/DetailShell';
 import { fmt } from '@/lib/format';
@@ -119,6 +119,10 @@ interface ChartExpandOverlayProps extends ChartExpandConfig {
   onClose: () => void;
   /** Clicked-card rect for the shared-element grow (forwarded to DetailShell). */
   originRect?: DOMRect | null;
+  /** The host widget's accent-token overrides (--brand-iris + chart roles). The overlay lives in
+      a portal, OUTSIDE the widget subtree that scopes them — re-declared here (on a
+      display:contents wrapper) so the expanded chart keeps the card's accent. */
+  accentStyle?: CSSProperties;
 }
 
 /** Snap an arbitrary day count to the nearest overlay window pill (default 3М). */
@@ -139,7 +143,7 @@ function snapToWindow(days: number | undefined): number {
  * at full explorer axes (Tier-1). Owns its own period + line/bar state, so a fresh open
  * always starts on the line at 3М — like the metric pages.
  */
-export function ChartExpandOverlay({ title, children, renderExpanded, renderExpandedBar, statsFor, statsSum = true, grainable, initialDays, onClose, originRect }: ChartExpandOverlayProps) {
+export function ChartExpandOverlay({ title, children, renderExpanded, renderExpandedBar, statsFor, statsSum = true, grainable, initialDays, onClose, originRect, accentStyle }: ChartExpandOverlayProps) {
   const chartRegionRef = useRef<HTMLDivElement>(null);
   const [days, setDays] = useState(() => snapToWindow(initialDays));
   // Overlay-local presentation; reopening always starts on the line, like metric pages.
@@ -173,6 +177,9 @@ export function ChartExpandOverlay({ title, children, renderExpanded, renderExpa
 
   return (
     <DetailShell variant="panel" ariaLabel={`График: ${title}`} onClose={onClose} originRect={originRect}>
+      {/* display:contents — no box of its own (the shell's flex layout is untouched), but the
+          custom properties still compute here, carrying the widget accent into the portal. */}
+      <div className="contents" style={accentStyle}>
         <CardHeader className="shrink-0 pr-12">
           <CardTitle className="text-base font-medium text-foreground">{title}</CardTitle>
           {(renderExpanded || renderExpandedBar) && (
@@ -252,6 +259,7 @@ export function ChartExpandOverlay({ title, children, renderExpanded, renderExpa
             <OverlayStats values={statsValues} statsSum={statsSum} />
           </div>
         </CardContent>
+      </div>
     </DetailShell>
   );
 }

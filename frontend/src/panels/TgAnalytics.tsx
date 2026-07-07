@@ -496,7 +496,7 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
                 label: 'Линия',
                 render: (
                   <>
-                    <LineChart values={vbdValues} labels={[last14Dates[0] ?? '', last14Dates[Math.floor(last14Dates.length / 2)] ?? '', last14Dates[last14Dates.length - 1] ?? '']} titles={vbdTitles} markAnomalies markExtremes ghost={vbdPrev} />
+                    <LineChart values={vbdValues} labels={[last14Dates[0] ?? '', last14Dates[Math.floor(last14Dates.length / 2)] ?? '', last14Dates[last14Dates.length - 1] ?? '']} titles={vbdTitles} markAnomalies markExtremes ghost={vbdPrev} emphasizeLastLabel />
                   </>
                 ),
               },
@@ -560,7 +560,7 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
               grainable: true,
               renderExpanded: (days, grain) => {
                 const w = windowGraphSeries(viewSeries.values, interGroup.x, days, 'просмотров', { grain });
-                return <LineChart values={w.values} labels={w.labels} titles={w.titles} markAnomalies markExtremes />;
+                return <LineChart values={w.values} labels={w.labels} titles={w.titles} markAnomalies markExtremes emphasizeLastLabel />;
               },
               renderExpandedBar: (days, grain) => {
                 const w = windowGraphSeries(viewSeries.values, interGroup.x, days, 'просмотров', { grain });
@@ -576,7 +576,7 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
                 {
                   key: 'line',
                   label: 'Линия',
-                  render: <LineChart values={w.values} labels={w.labels} titles={w.titles} markAnomalies />,
+                  render: <LineChart values={w.values} labels={w.labels} titles={w.titles} markAnomalies emphasizeLastLabel />,
                 },
                 {
                   // Дневные ПОТОКИ (не уровни) — столбцы от нуля здесь честные.
@@ -597,7 +597,7 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
               grainable: true,
               renderExpanded: (days, grain) => {
                 const w = windowGraphSeries(shareSeries.values, interGroup.x, days, 'репостов', { grain });
-                return <LineChart values={w.values} labels={w.labels} titles={w.titles} markAnomalies markExtremes />;
+                return <LineChart values={w.values} labels={w.labels} titles={w.titles} markAnomalies markExtremes emphasizeLastLabel />;
               },
               renderExpandedBar: (days, grain) => {
                 const w = windowGraphSeries(shareSeries.values, interGroup.x, days, 'репостов', { grain });
@@ -612,7 +612,7 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
                 {
                   key: 'line',
                   label: 'Линия',
-                  render: <LineChart values={w.values} labels={w.labels} titles={w.titles} />,
+                  render: <LineChart values={w.values} labels={w.labels} titles={w.titles} emphasizeLastLabel />,
                 },
                 {
                   key: 'bar',

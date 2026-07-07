@@ -37,6 +37,10 @@ interface LineChartProps {
       where a page-level compare control already owns turning the comparison on/off (the metric
       page) — there the chip renders as a static label so the two controls can't desync. */
   legendToggle?: boolean;
+  /** Render the LAST compact x-label as a quiet accent pill — the steep «current point» cue.
+      Opt-in: only for series that genuinely end at the current period (daily archives), never
+      for categorical axes (weekday averages / hours), where the last label isn't «сейчас». */
+  emphasizeLastLabel?: boolean;
 }
 
 interface Hover {
@@ -102,6 +106,7 @@ export function LineChart({
   fullAxes = false,
   onPointClick,
   legendToggle = true,
+  emphasizeLastLabel = false,
 }: LineChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   // Press position (client px) for the drag guard — see onSvgClick below.
@@ -515,12 +520,29 @@ export function LineChart({
       {/* Minimal x labels (axis-free cards): first / mid / last under the svg. Axes mode
           draws the real in-svg x-axis above instead. */}
       {labels && labels.length > 0 && !hasXAxis && (
-        <div className="mt-1.5 flex select-none justify-between gap-2 px-1 text-2xs font-medium text-muted-foreground">
-          {compactLabelIndexes.map((i) => (
-            <span key={i} data-chart-axis-label="x-compact" className="min-w-0 truncate">
-              {labels[i]}
-            </span>
-          ))}
+        <div className="mt-1.5 flex select-none items-center justify-between gap-2 px-1 text-2xs font-medium text-muted-foreground">
+          {compactLabelIndexes.map((i) => {
+            // The «current point» pill (steep): the last label rides the series accent so the eye
+            // lands on "today" — colour follows --chart-role-primary, i.e. the widget accent.
+            const pill = emphasizeLastLabel && i === labels.length - 1;
+            return (
+              <span
+                key={i}
+                data-chart-axis-label="x-compact"
+                className={pill ? 'min-w-0 truncate rounded-full px-1.5 py-px' : 'min-w-0 truncate'}
+                style={
+                  pill
+                    ? {
+                        color: 'hsl(var(--chart-role-primary))',
+                        background: 'hsl(var(--chart-role-primary) / 0.14)',
+                      }
+                    : undefined
+                }
+              >
+                {labels[i]}
+              </span>
+            );
+          })}
         </div>
       )}
 

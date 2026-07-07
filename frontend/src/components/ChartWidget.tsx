@@ -1261,11 +1261,22 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
   const isDragging = reorder && group?.draggingId === widgetId;
 
   const innerStyle: CSSProperties = {};
-  // Accent scoping: the widget's --brand-iris becomes the RESOLVED accent token
-  // (--chart-N-accent — the categorical colour in light, a muted steep-pastel in dark). Chart
-  // primitives follow via --chart-role-primary, and the tinted surface + hero number read the
-  // same scoped colour, so an accented card paints number, line, dot and surface from ONE hue.
-  if (activeColor) (innerStyle as Record<string, string>)['--brand-iris'] = `var(--chart-${activeColor}-accent)`;
+  // Accent scoping: the widget subtree re-declares every accent-driven token to the RESOLVED
+  // accent (--chart-N-accent — the categorical colour in light, a muted steep-pastel in dark).
+  // Overriding --brand-iris alone is NOT enough: var() aliases resolve on their DECLARING
+  // element (:root), so role consumers (BarChart/LineChart paint --chart-role-primary) never
+  // see a subtree-scoped --brand-iris — the roles themselves must be re-declared here too.
+  // Declared on the OUTER section so the card, its inline menus and the portal-bound expand
+  // overlay (via accentStyle below) share one source; direct --brand-iris readers (Sparkline,
+  // .kpi-accent, the tinted surface) inherit the same value.
+  const accentVars: Record<string, string> | null = activeColor
+    ? {
+        '--brand-iris': `var(--chart-${activeColor}-accent)`,
+        '--chart-role-primary': `var(--chart-${activeColor}-accent)`,
+        '--chart-role-selection': `var(--chart-${activeColor}-accent)`,
+      }
+    : null;
+  if (accentVars) Object.assign(outerStyle as Record<string, string>, accentVars);
   // Tinted background. An ACCENTED card paints via CSS (`div[data-widget-tinted]` in index.css):
   // light keeps the top-anchored radial wash, dark goes FLAT tonal (color-mix — steep's even
   // surface). The un-coloured card keeps the neutral --card-tint radial wash inline, both
@@ -1658,6 +1669,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
         : expandOpen && (
             <ChartExpandOverlay
               title={prefs.title || title}
+              accentStyle={accentVars ?? undefined}
               initialDays={periodControl ? widgetDays : undefined}
               renderExpanded={hasRichExpand ? expand?.renderExpanded : undefined}
               renderExpandedBar={hasRichExpand ? expand?.renderExpandedBar : undefined}
@@ -1888,7 +1900,16 @@ function VariantCarousel({
               // chart+ledger row fits the same w-56 preview card.
               const wide = v.minSize === 'full';
               const previewStyle: CSSProperties = {};
-              if (prefs.color) (previewStyle as Record<string, string>)['--brand-iris'] = `var(--chart-${prefs.color}-accent)`;
+              if (prefs.color) {
+                // Same three tokens as the live card (see accentVars): role aliases resolve on
+                // their declaring element, so the preview must re-declare them too.
+                const acc = `var(--chart-${prefs.color}-accent)`;
+                Object.assign(previewStyle as Record<string, string>, {
+                  '--brand-iris': acc,
+                  '--chart-role-primary': acc,
+                  '--chart-role-selection': acc,
+                });
+              }
               if (prefs.tinted ?? true)
                 previewStyle.backgroundColor = `hsl(var(${prefs.color ? `--chart-${prefs.color}-accent` : '--card-tint'}) / 0.07)`;
               return (

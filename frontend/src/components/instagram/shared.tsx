@@ -114,7 +114,8 @@ export function KpiHero({
             values={daily.map((p) => p.value)}
             labels={pickLabels(daily)}
             titles={daily.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)}`)}
-            height={64}
+            height={96}
+            emphasizeLastLabel
           />
         </div>
       )}
@@ -165,6 +166,7 @@ export function TrendCard({ title, series, expand }: { title: string; series: Po
               values={series.map((p) => p.value)}
               labels={pickLabels(series)}
               titles={series.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)}`)}
+              emphasizeLastLabel
             />
           ),
         },
