@@ -2,7 +2,8 @@ import { Link } from 'react-router-dom';
 import { useIgData } from '@/lib/useIgData';
 import { useDemo } from '@/lib/demo-context';
 import { ChartSection } from '@/components/ChartWidget';
-import { TrendCard, FollowsByDayCard, IgKpiBlock, SubscriberMovement } from '@/components/instagram/shared';
+import { TrendCard, FollowsByDayCard, IgKpiBlock, SubscriberMovement, igPeriodRows } from '@/components/instagram/shared';
+import { InsightsBlock, PeriodCompareBlock } from '@/components/instagram/insights';
 
 /**
  * Self-fetching Home wrappers for the two genuine IG daily series — the missing piece that kept
@@ -48,6 +49,28 @@ export function IgMovementHomeCard({ id, homeKey }: { id?: string; homeKey?: str
   return (
     <ChartSection id={id} homeKey={homeKey} title="IG · Движение подписчиков" defaultSize="full" noExpand>
       <SubscriberMovement follows={ig.pairs.follows} unfollows={ig.pairs.unfollows} net={ig.netMovement} />
+    </ChartSection>
+  );
+}
+
+export function IgCompareHomeCard({ id, homeKey }: { id?: string; homeKey?: string }) {
+  const ig = useIgData();
+  const { demo } = useDemo();
+  if (ig.error || (ig.isMock && !demo)) return <IgConnectPrompt id={id} homeKey={homeKey} title="IG · Сравнение периодов" />;
+  return (
+    <ChartSection id={id} homeKey={homeKey} title="IG · Сравнение периодов" defaultSize="full" noExpand>
+      <PeriodCompareBlock rows={igPeriodRows(ig)} />
+    </ChartSection>
+  );
+}
+
+export function IgInsightsHomeCard({ id, homeKey }: { id?: string; homeKey?: string }) {
+  const ig = useIgData();
+  const { demo } = useDemo();
+  if (ig.error || (ig.isMock && !demo)) return <IgConnectPrompt id={id} homeKey={homeKey} title="IG · Главное" />;
+  return (
+    <ChartSection id={id} homeKey={homeKey} title="IG · Главное" defaultSize="full" noExpand>
+      <InsightsBlock insights={ig.insights} limit={4} />
     </ChartSection>
   );
 }
