@@ -1002,6 +1002,12 @@ interface ChartSectionProps {
    */
   drillTo?: string;
   /**
+   * Drop EVERY expand affordance (↗, the «Развернуть» menu item, the whole-card click, the
+   * ?detail= overlay). For cards that ARE the expanded view already — the metric-page chart and
+   * its rail — where a Tier-1 overlay would just re-render the same content in a dialog.
+   */
+  noExpand?: boolean;
+  /**
    * Opt into the per-widget period control (header pill row + the «Период» segment in the edit
    * dialog). ONLY for cards whose body actually reads useWidgetPeriod() — the wired Overview /
    * TgAnalytics widgets. Off by default so cards that still read the global period (IG / Compare /
@@ -1047,7 +1053,7 @@ interface ChartSectionProps {
   children?: ReactNode;
 }
 
-export function ChartSection({ id, title, action, variants, className, defaultSize, expand, drillTo, periodControl, homeKey, seriesOptions, configEditor, explorer, bodyResetKey, children }: ChartSectionProps) {
+export function ChartSection({ id, title, action, variants, className, defaultSize, expand, drillTo, noExpand, periodControl, homeKey, seriesOptions, configEditor, explorer, bodyResetKey, children }: ChartSectionProps) {
   const widgetId = id ?? title;
   const group = useContext(GroupCtx);
   const homeEditing = useContext(HomeEditContext);
@@ -1061,6 +1067,9 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
   // Card footprint at click time — lets the detail overlay grow OUT of this card (shared-element).
   // Captured before the URL flips; stays null for URL / back-forward / shared-link opens (no morph).
   const originRectRef = useRef<DOMRect | null>(null);
+  // Whole-card click drag guard: a press that travelled >5px before release is a drag-to-read
+  // scrub over a chart, not a tap — without this, selecting/scrubbing the plot would drill.
+  const cardPressRef = useRef<{ x: number; y: number } | null>(null);
   const navigate = useNavigate();
   const openExpand = useCallback(() => {
     // The drill contract: a card whose metric has a dedicated page expands INTO that page —
@@ -1365,17 +1374,25 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
         data-widget-accented={activeColor ? '' : undefined}
         data-widget-tinted={activeTinted && activeColor ? '' : undefined}
         // Whole-card click opens the detail overlay (steep — the whole card is the target, not just
-        // the small ↗ button). Guarded so header controls, the drill hero, the chart (its own
-        // hover/drill) and any open dialog keep their behaviour, and a reorder drag never triggers it.
-        // Mouse convenience ONLY: the card carries no button role/tabIndex — real controls (↗ ⋯ ×)
-        // nested inside a role="button" are invalid (axe nested-interactive) and make screen readers
-        // announce the whole card as one opaque button. The semantic keyboard/AT path to the same
-        // action is the header's labelled «Развернуть виджет …» button.
+        // the small ↗ button). Guarded so header controls and any open dialog keep their behaviour,
+        // and a reorder drag never triggers it. Chart svg is deliberately NOT in the guard — a click
+        // on the plot must drill like the rest of the card (charts that handle their own point-drill
+        // stopPropagation instead); the press-distance check below keeps a drag-to-read scrub from
+        // registering as a click. Mouse convenience ONLY: the card carries no button role/tabIndex —
+        // real controls (↗ ⋯ ×) nested inside a role="button" are invalid (axe nested-interactive)
+        // and make screen readers announce the whole card as one opaque button. The semantic
+        // keyboard/AT path to the same action is the header's labelled «Развернуть виджет …» button.
+        onPointerDown={
+          reorder || noExpand ? undefined : (e) => (cardPressRef.current = { x: e.clientX, y: e.clientY })
+        }
         onClick={
-          reorder
+          reorder || noExpand
             ? undefined
             : (e) => {
-                if ((e.target as HTMLElement).closest('button, a, input, select, label, svg, [role="dialog"]')) return;
+                if ((e.target as HTMLElement).closest('button, a, input, select, label, [role="dialog"]')) return;
+                const press = cardPressRef.current;
+                cardPressRef.current = null;
+                if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 5) return;
                 openExpand();
               }
         }
@@ -1414,21 +1431,23 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
             </svg>
           </button>
         )}
-        <button
-          type="button"
-          aria-label={`Развернуть виджет «${prefs.title || title}»`}
-          title="Развернуть"
-          onClick={() => openExpand()}
-          // Stay hidden until the × has fully left (presence, not the raw flag) so the header never
-          // shows both the leaving × and the returning ↗ at once.
-          className={`${iconBtn} hover:text-foreground print:hidden ${
-            removePresence.mounted ? 'hidden' : ''
-          } ${reorder ? 'pointer-events-none invisible' : ''}`}
-        >
-          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-            <path d="M7 17 17 7M9 7h8v8" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
+        {!noExpand && (
+          <button
+            type="button"
+            aria-label={`Развернуть виджет «${prefs.title || title}»`}
+            title="Развернуть"
+            onClick={() => openExpand()}
+            // Stay hidden until the × has fully left (presence, not the raw flag) so the header never
+            // shows both the leaving × and the returning ↗ at once.
+            className={`${iconBtn} hover:text-foreground print:hidden ${
+              removePresence.mounted ? 'hidden' : ''
+            } ${reorder ? 'pointer-events-none invisible' : ''}`}
+          >
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+              <path d="M7 17 17 7M9 7h8v8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        )}
         <div className={`relative shrink-0 ${reorder ? 'pointer-events-none invisible' : ''}`} ref={menuRef}>
           <button
             ref={menuBtnRef}
@@ -1483,22 +1502,26 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
                 items[next]?.focus();
               }}
             >
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  // Refocus the trigger BEFORE the state change so the detail overlay's focus trap
-                  // captures it as opener (and restores to it on close) — the menu item itself
-                  // unmounts with the menu.
-                  menuBtnRef.current?.focus();
-                  setMenuOpen(false);
-                  openExpand();
-                }}
-                className={menuItem}
-              >
-                <MenuIcon kind="expand" /> Развернуть
-              </button>
-              <div role="separator" className="mx-1 my-1 h-px bg-border" />
+              {!noExpand && (
+                <>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      // Refocus the trigger BEFORE the state change so the detail overlay's focus trap
+                      // captures it as opener (and restores to it on close) — the menu item itself
+                      // unmounts with the menu.
+                      menuBtnRef.current?.focus();
+                      setMenuOpen(false);
+                      openExpand();
+                    }}
+                    className={menuItem}
+                  >
+                    <MenuIcon kind="expand" /> Развернуть
+                  </button>
+                  <div role="separator" className="mx-1 my-1 h-px bg-border" />
+                </>
+              )}
               {group && (
                 <>
                   <button
@@ -1682,7 +1705,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
       {/* Config-widgets pass a mutable-config explorer that fully replaces the generic overlay. */}
       {expandOpen && explorer
         ? explorer(closeExpand, originRectRef.current)
-        : expandOpen && (
+        : expandOpen && !noExpand && (
             <ChartExpandOverlay
               title={prefs.title || title}
               accentStyle={accentVars ?? undefined}

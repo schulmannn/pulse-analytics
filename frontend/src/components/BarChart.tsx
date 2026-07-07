@@ -20,6 +20,9 @@ interface BarChartProps {
   /** When set, bars become clickable (a drilldown gesture): a click anywhere on the chart fires
       this with the hovered column index and shows a pointer cursor. Hover behaviour is unchanged. */
   onPointClick?: (index: number) => void;
+  /** PINNED column (steep): a persistent highlight + dashed crosshair at this index, set by the
+      host page from onPointClick — the anchor for a «этот день» panel. null/undefined = off. */
+  pinnedIndex?: number | null;
   /** Whether the comparison legend chip is an interactive show/hide toggle (default). Pass false
       where a page-level compare control already owns the on/off (the metric page). */
   legendToggle?: boolean;
@@ -36,7 +39,7 @@ const BAR_RATIO = 0.7;
 // Approximate glyph width of the 11px tabular numerals used for tick/value labels.
 const CHAR_W = 6.6;
 
-export function BarChart({ values, labels, titles, height = 200, ghost, ghostLabel = 'Прошлый период', onPointClick, legendToggle = true }: BarChartProps) {
+export function BarChart({ values, labels, titles, height = 200, ghost, ghostLabel = 'Прошлый период', onPointClick, legendToggle = true, pinnedIndex = null }: BarChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   // Press position (client px) for the drag guard: the svg-level onClick would otherwise drill on
   // a press-drag-release scrub (the browser retargets a cross-child click to the svg). null = no
@@ -329,7 +332,12 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
         pressRef.current = null;
         if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 5) return;
         const i = indexFromEvent(e);
-        if (i != null) onPointClick(i);
+        if (i != null) {
+          // The chart OWNS this click (point drill / pin) — keep it out of the host card's
+          // whole-card expand.
+          e.stopPropagation();
+          onPointClick(i);
+        }
       }
     : undefined;
   const clearHover = () => {
@@ -374,6 +382,24 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
         )}
 
         {plot.overLayer}
+
+        {/* PINNED column — persistent highlight + dashed crosshair (under the live hover). */}
+        {pinnedIndex != null && pinnedIndex < n && bars[pinnedIndex] && (
+          <g className="pointer-events-none">
+            <rect x={bars[pinnedIndex].x} y={bars[pinnedIndex].y} width={bars[pinnedIndex].w} height={bars[pinnedIndex].h} fill="hsl(var(--chart-role-selection))" rx={2} />
+            <line
+              x1={barCenterX(pinnedIndex)}
+              y1={0}
+              x2={barCenterX(pinnedIndex)}
+              y2={graphHeight}
+              stroke="hsl(var(--chart-role-selection))"
+              strokeWidth="1.5"
+              strokeDasharray="2 3"
+              opacity="0.6"
+              vectorEffect="non-scaling-stroke"
+            />
+          </g>
+        )}
 
         {/* Hovered-column crosshair + the comparison point on it, painted over everything (parity
             with LineChart / HEAD). */}

@@ -107,6 +107,15 @@ const PAIRS = [
   ['accent 5 line on card', 'chart-5-accent', 'card', 3.0, 'stroke'],
   ['accent 6 line on card', 'chart-6-accent', 'card', 3.0, 'stroke'],
 
+  // Categorical identity tokens (--chart-N-cat): light aliases the categorical set (checked
+  // above); dark resolves to the pastel family painting donut slices / breakdown dots.
+  ['cat 1 slice on card', 'chart-1-cat', 'card', 3.0, 'stroke'],
+  ['cat 2 slice on card', 'chart-2-cat', 'card', 3.0, 'stroke'],
+  ['cat 3 slice on card', 'chart-3-cat', 'card', 3.0, 'stroke'],
+  ['cat 4 slice on card', 'chart-4-cat', 'card', 3.0, 'stroke'],
+  ['cat 5 slice on card', 'chart-5-cat', 'card', 3.0, 'stroke'],
+  ['cat 6 slice on card', 'chart-6-cat', 'card', 3.0, 'stroke'],
+
   // Semantic chart SERIES roles (index.css --chart-role-*, resolved from their var() aliases above).
   // Non-text 3.0 (WCAG 1.4.11) on the surfaces charts paint on; comparison also at its dashed 0.8.
   ['chart role: primary on card', 'chart-role-primary', 'card', 3.0, 'stroke'],

@@ -16,9 +16,11 @@ export const MEDIA_PRODUCT_CHART: Record<string, string> = {
   REEL: 'hsl(var(--chart-2))', REELS: 'hsl(var(--chart-2))',
   STORY: 'hsl(var(--chart-3))', CAROUSEL_ALBUM: 'hsl(var(--chart-4))',
 };
+// Categorical identity cycle: the -cat tokens resolve to the saturated set in light and the
+// validated pastel family in dark (see index.css) — donut slices and breakdown dots follow theme.
 export const CHART_CYCLE = [
-  'hsl(var(--chart-1))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))',
-  'hsl(var(--chart-4))', 'hsl(var(--chart-5))', 'hsl(var(--chart-6))',
+  'hsl(var(--chart-1-cat))', 'hsl(var(--chart-2-cat))', 'hsl(var(--chart-3-cat))',
+  'hsl(var(--chart-4-cat))', 'hsl(var(--chart-5-cat))', 'hsl(var(--chart-6-cat))',
 ];
 // Post card badge keys off media_type (IMAGE/VIDEO/CAROUSEL_ALBUM/REELS).
 export const MEDIA_TYPE_LABEL: Record<string, string> = {

@@ -41,6 +41,9 @@ interface LineChartProps {
       Opt-in: only for series that genuinely end at the current period (daily archives), never
       for categorical axes (weekday averages / hours), where the last label isn't «сейчас». */
   emphasizeLastLabel?: boolean;
+  /** PINNED point (steep): a persistent dashed crosshair + solid marker at this index, set by
+      the host page from onPointClick — the anchor for a «этот день» panel. null/undefined = off. */
+  pinnedIndex?: number | null;
 }
 
 interface Hover {
@@ -107,6 +110,7 @@ export function LineChart({
   onPointClick,
   legendToggle = true,
   emphasizeLastLabel = false,
+  pinnedIndex = null,
 }: LineChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   // Press position (client px) for the drag guard — see onSvgClick below.
@@ -466,7 +470,12 @@ export function LineChart({
         pressRef.current = null;
         if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 5) return;
         const i = indexFromEvent(e);
-        if (i != null) onPointClick(i);
+        if (i != null) {
+          // The chart OWNS this click (point drill / pin) — don't let it bubble into the host
+          // card's whole-card expand, which would double-act on one tap.
+          e.stopPropagation();
+          onPointClick(i);
+        }
       }
     : undefined;
   const clearHover = () => {
@@ -503,6 +512,24 @@ export function LineChart({
         onClick={onSvgClick}
       >
         {plot.staticLayer}
+
+        {/* PINNED point — persistent dashed crosshair + solid marker (under the live hover). */}
+        {pinnedIndex != null && points[pinnedIndex] && (
+          <g className="pointer-events-none">
+            <line
+              x1={points[pinnedIndex].x}
+              y1={0}
+              x2={points[pinnedIndex].x}
+              y2={h}
+              stroke="hsl(var(--chart-role-selection))"
+              strokeWidth="1.5"
+              strokeDasharray="2 3"
+              opacity="0.6"
+              vectorEffect="non-scaling-stroke"
+            />
+            <circle cx={points[pinnedIndex].x} cy={points[pinnedIndex].y} r="4.5" fill="hsl(var(--chart-role-selection))" stroke="hsl(var(--background))" strokeWidth="2" />
+          </g>
+        )}
 
         {/* Hovered-point crosshair + marker (+ the comparison point at the same x, so hovering
             reads BOTH series) — the only elements a hover re-render touches. */}
