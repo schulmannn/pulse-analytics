@@ -1,9 +1,8 @@
 import { fmt } from '@/lib/format';
 import type { IgData } from '@/lib/useIgData';
-import { Section, TrendCard, EmptyChart, signedNum, windowIgSeries } from '@/components/instagram/shared';
+import { Section, TrendCard, EmptyChart, igDailyExpand, signedNum } from '@/components/instagram/shared';
 import { ChartSection } from '@/components/ChartWidget';
 import { BarChart } from '@/components/BarChart';
-import { LineChart } from '@/components/LineChart';
 import type { ChartExpandConfig } from '@/components/ExpandableChart';
 import { InsightsBlock, PeriodCompareBlock } from '@/components/instagram/insights';
 import { exportIgDaily } from '@/lib/igExport';
@@ -23,30 +22,10 @@ export function IgAnalytics({ ig }: { ig: IgData }) {
   const followsPair = ig.pairs.follows.hasCur ? ig.pairs.follows : ig.pairs.follower;
 
   // Rich «Развернуть» explorer (1М/3М/6М/Всё + line↔bar + Мин/Макс/Среднее/Сумма) windowing the
-  // FULL daily series (the inline card shows only the current window) — parity with the TG flow
-  // charts. Reach and daily-follows are the two metrics IG returns as a genuine daily series.
-  const reachExpand: ChartExpandConfig = {
-    renderExpanded: (days) => {
-      const w = windowIgSeries(ig.series.reach, days, 'охвата');
-      return <LineChart values={w.values} labels={w.labels} titles={w.titles} markAnomalies markExtremes emphasizeLastLabel />;
-    },
-    renderExpandedBar: (days) => {
-      const w = windowIgSeries(ig.series.reach, days, 'охвата');
-      return <BarChart values={w.values} labels={w.labels} titles={w.titles} />;
-    },
-    statsFor: (days) => windowIgSeries(ig.series.reach, days, 'охвата').values,
-  };
-  const followsExpand: ChartExpandConfig = {
-    renderExpanded: (days) => {
-      const w = windowIgSeries(ig.series.follower, days, 'подписок');
-      return <LineChart values={w.values} labels={w.labels} titles={w.titles} markAnomalies markExtremes emphasizeLastLabel />;
-    },
-    renderExpandedBar: (days) => {
-      const w = windowIgSeries(ig.series.follower, days, 'подписок');
-      return <BarChart values={w.values} labels={w.labels} titles={w.titles} />;
-    },
-    statsFor: (days) => windowIgSeries(ig.series.follower, days, 'подписок').values,
-  };
+  // FULL daily series (the inline card shows only the current window). ONE shared builder
+  // (igDailyExpand) with the Overview hero — every surface of the series expands identically.
+  const reachExpand = igDailyExpand(ig.series.reach, 'охвата');
+  const followsExpand = igDailyExpand(ig.series.follower, 'подписок');
 
   const periodRows: { label: string; pair: WindowPair }[] = [
     { label: 'Подписки', pair: followsPair },

@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import type { CSSProperties, ReactNode } from 'react';
 import { z } from 'zod';
 import { apiGet, apiSend } from '@/api/client';
@@ -993,6 +993,15 @@ interface ChartSectionProps {
       (active variant or children) at full explorer axes. */
   expand?: ChartExpandConfig;
   /**
+   * Route of this metric's dedicated explorer page (e.g. '/metrics/views'). ONE drill contract
+   * for every chart card: when set, EVERY expand affordance — the whole-card click, the ↗
+   * button, the «Развернуть» menu item — navigates there instead of opening the generic
+   * overlay. The metric page IS the richer expanded view (breakdown · comparison · about ·
+   * chart types), so a card whose metric has a page must never fork into the poorer fullscreen.
+   * Cards without a metric page keep the ChartExpandOverlay via `expand`.
+   */
+  drillTo?: string;
+  /**
    * Opt into the per-widget period control (header pill row + the «Период» segment in the edit
    * dialog). ONLY for cards whose body actually reads useWidgetPeriod() — the wired Overview /
    * TgAnalytics widgets. Off by default so cards that still read the global period (IG / Compare /
@@ -1038,7 +1047,7 @@ interface ChartSectionProps {
   children?: ReactNode;
 }
 
-export function ChartSection({ id, title, action, variants, className, defaultSize, expand, periodControl, homeKey, seriesOptions, configEditor, explorer, bodyResetKey, children }: ChartSectionProps) {
+export function ChartSection({ id, title, action, variants, className, defaultSize, expand, drillTo, periodControl, homeKey, seriesOptions, configEditor, explorer, bodyResetKey, children }: ChartSectionProps) {
   const widgetId = id ?? title;
   const group = useContext(GroupCtx);
   const homeEditing = useContext(HomeEditContext);
@@ -1052,7 +1061,14 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
   // Card footprint at click time — lets the detail overlay grow OUT of this card (shared-element).
   // Captured before the URL flips; stays null for URL / back-forward / shared-link opens (no morph).
   const originRectRef = useRef<DOMRect | null>(null);
+  const navigate = useNavigate();
   const openExpand = useCallback(() => {
+    // The drill contract: a card whose metric has a dedicated page expands INTO that page —
+    // one destination for every affordance (whole card, ↗, menu). See ChartSectionProps.drillTo.
+    if (drillTo) {
+      navigate(drillTo);
+      return;
+    }
     originRectRef.current = sectionRef.current?.getBoundingClientRect() ?? null;
     setSearchParams(
       (prev) => {
@@ -1062,7 +1078,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
       },
       { replace: false },
     );
-  }, [setSearchParams, widgetId]);
+  }, [setSearchParams, widgetId, drillTo, navigate]);
   const closeExpand = useCallback(() => {
     setSearchParams(
       (prev) => {

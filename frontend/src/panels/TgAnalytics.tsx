@@ -490,6 +490,7 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
         {inGroup('dynamics') && !viewSeries && last14Dates.length >= 2 && (
           <ChartSection
             title="Просмотры по дням"
+            drillTo="/metrics/views"
             variants={[
               {
                 key: 'line',
@@ -554,6 +555,7 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
           <ChartSection
             id="tg-views-graph"
             title={ruSeriesName(viewSeries.name) || 'Просмотры'}
+            drillTo="/metrics/views"
             // Rich explorer (steep): «Развернуть» grows 1М/3М/6М/Всё pills, a line↔bar toggle and a
             // Мин/Макс/Среднее/Сумма strip — windowing the full graphs series the inline card can't.
             expand={{
@@ -593,6 +595,7 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
           <ChartSection
             id="tg-shares-graph"
             title={ruSeriesName(shareSeries.name) || 'Репосты'}
+            drillTo="/metrics/forwards"
             expand={{
               grainable: true,
               renderExpanded: (days, grain) => {
@@ -664,6 +667,7 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
           // leave dead space. The «прирост» total stays as the caption below.
           <ChartSection
             title="Чистый прирост подписчиков (30д)"
+            drillTo="/metrics/subscribers"
             variants={[
               { key: 'bar', label: 'Столбцы', render: <DivergingBars values={net30Values} titles={net30Titles} /> },
             ]}

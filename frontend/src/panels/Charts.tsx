@@ -130,6 +130,7 @@ export function HistoryChartBlock({ id, homeKey }: HomeBlockProps = {}) {
       title="История подписчиков"
       id={id}
       homeKey={homeKey}
+      drillTo="/metrics/subscribers"
       expand={{
         renderExpanded: (days) => {
           const windowRows = days === 0 ? rows : rows.slice(-days);
