@@ -4,6 +4,7 @@ import { usePostStats } from '@/api/queries';
 import type { NormalizedPost } from '@/lib/posts';
 import { fmt, ruAxisLabel } from '@/lib/format';
 import { useFocusTrap } from '@/lib/useFocusTrap';
+import { useLayerBack } from '@/lib/useLayerBack';
 import { LineChart } from '@/components/LineChart';
 import { RichText } from '@/components/RichText';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -39,6 +40,8 @@ function Stat({ label, value, accent }: { label: string; value: string; accent?:
 export function PostDetailModal({ post, rank, reason, onClose }: PostDetailModalProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   useFocusTrap(panelRef);
+  // Browser Back / the phone's back gesture closes the modal instead of leaving the page.
+  useLayerBack(onClose);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
