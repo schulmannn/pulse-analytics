@@ -102,6 +102,14 @@
     --chart-4-accent: var(--chart-4);
     --chart-5-accent: var(--chart-5);
     --chart-6-accent: var(--chart-6);
+    /* Deep companions (used by the DARK tonal surface only) — alias the line colour here so the
+       scoped var always resolves; light's tint stays the radial wash below. */
+    --chart-1-accent-deep: var(--chart-1);
+    --chart-2-accent-deep: var(--chart-2);
+    --chart-3-accent-deep: var(--chart-3);
+    --chart-4-accent-deep: var(--chart-4);
+    --chart-5-accent-deep: var(--chart-5);
+    --chart-6-accent-deep: var(--chart-6);
 
     /* CATEGORICAL identity tokens — what donut slices / breakdown dots / multi-entity legends
        paint with (CHART_CYCLE, PieChart). Light aliases the categorical set 1:1; dark overrides
@@ -181,11 +189,21 @@
        categorical --chart-1..6 stay untouched. 5 goes lavender (#c5b1ee, measured): dusty
        rose lightened to this band reads muddy next to the peach slot. */
     --chart-1-accent: 216 86% 86%;   /* pastel blue     #bdd5fa */
-    --chart-2-accent: 45 70% 82%;    /* pastel sand              */
-    --chart-3-accent: 134 43% 82%;   /* pastel mint     #bee5c7 */
+    --chart-2-accent: 67 72% 64%;    /* lime            #d6e561 — steep's yellow IS lime (owner
+                                        side-by-side), not cream; cream stays the categorical --chart-2-cat */
+    --chart-3-accent: 137 48% 86%;   /* mint            #cbeed6 — nudged cleaner to the steep line */
     --chart-4-accent: 18 75% 83%;    /* pastel peach             */
     --chart-5-accent: 260 64% 81%;   /* pastel lavender #c5b1ee */
     --chart-6-accent: 205 60% 84%;   /* pastel sky               */
+    /* Deep companions — the same hue at chart-fill saturation. They exist because the tonal
+       card surface mixes THIS into the card: a pastel line mixed into near-black can only wash
+       grey (its chroma is the ceiling), while steep's cards are saturated deep tones. */
+    --chart-1-accent-deep: 216 72% 38%;
+    --chart-2-accent-deep: 66 72% 28%;   /* olive */
+    --chart-3-accent-deep: 140 58% 32%;
+    --chart-4-accent-deep: 18 68% 36%;
+    --chart-5-accent-deep: 260 55% 41%;
+    --chart-6-accent-deep: 205 68% 36%;
 
     /* Categorical pastel family (donut slices / breakdown dots), a step deeper than the accents
        so adjacent slices separate. Validated (dataviz gate): chroma ≥ 0.1, contrast ≥ 3:1;
@@ -346,7 +364,12 @@ div[data-widget-tinted] {
     hsl(var(--card));
 }
 .dark div[data-widget-tinted] {
-  background: color-mix(in oklab, hsl(var(--brand-iris)) 16%, hsl(var(--card)));
+  /* The saturated steep surface: 26% of the DEEP companion (not the pale line — see the token
+     block) flat-mixed into the card. Line/number keep riding --brand-iris. Captions on the tint
+     get a LIGHTER muted ink: the standard muted-foreground passes 4.5 only on the bare card —
+     any visible tint sinks it (contrast-tokens.mjs gates this pair with THIS value). */
+  background: color-mix(in oklab, hsl(var(--brand-iris-deep, var(--brand-iris))) 26%, hsl(var(--card)));
+  --muted-foreground: 240 6% 84%;
 }
 .dark [data-widget-accented] .kpi-accent {
   color: hsl(var(--brand-iris));

@@ -6,7 +6,8 @@ import { compareDdMm } from '@/lib/dates';
 import { fmt, ruAxisLabel, ruSeriesName } from '@/lib/format';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
-import { ChartSection, WidgetGroup, breakdownVariants, seriesBarValuesVariant } from '@/components/ChartWidget';
+import { ChartCardBody, ChartSection, WidgetGroup, breakdownVariants, seriesBarValuesVariant } from '@/components/ChartWidget';
+import { pctDelta } from '@/lib/delta';
 import { DivergingBars } from '@/components/DivergingBars';
 import { EmptyState } from '@/components/EmptyState';
 import { useWidgetPeriod } from '@/lib/period';
@@ -114,7 +115,14 @@ function windowGraphSeries(values: number[], xs: number[], days: number, unit: s
   const labels = wValues.map((_, i) => (wxs[i] ? formatMsDate(wxs[i]!) : ''));
   const suffix = grain === 'week' ? ' · неделя' : grain === 'month' ? ' · месяц' : '';
   const titles = wValues.map((v, i) => `${labels[i]}: ${fmt.num(v)} ${unit}${suffix}`);
-  return { values: wValues, labels, titles };
+  // Headline for the steep card anatomy: the window's total + the PREVIOUS same-length window's
+  // total (pre-bucketing daily values — grain only re-shapes the chart). prevTotal is null when
+  // the comparison would be dishonest: «Всё» has no previous window, and a partial previous
+  // window (fewer than n daily points before the visible slice) never fabricates one.
+  const total = wValues.reduce((acc, v) => acc + v, 0);
+  const prevSlice = days === 0 || vals.length < 2 * n ? null : vals.slice(-2 * n, -n);
+  const prevTotal = prevSlice ? prevSlice.reduce((acc, v) => acc + v, 0) : null;
+  return { values: wValues, labels, titles, total, prevTotal };
 }
 
 /**
@@ -571,20 +579,33 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
               statsFor: (days, grain) => windowGraphSeries(viewSeries.values, interGroup.x, days, 'просмотров', { grain }).values,
             }}
             seriesOptions
-            variants={(_period, series) => {
-              // Full server window through the edit-dialog display opts (grain / include-today).
-              const w = windowGraphSeries(viewSeries.values, interGroup.x, 0, 'просмотров', series);
+            periodControl
+            variants={(period, series) => {
+              // Windowed by the WIDGET period (follows the page by default) through the
+              // edit-dialog display opts; the steep body adds the window total + the mandatory
+              // comparison vs the previous window (honest null on «Всё»).
+              const w = windowGraphSeries(viewSeries.values, interGroup.x, period.days, 'просмотров', series);
+              const delta = w.prevTotal != null && w.prevTotal > 0 ? pctDelta(w.total, w.prevTotal) : null;
+              const caption = delta ? 'к пред. периоду' : period.days === 0 ? 'за всё время' : undefined;
               return [
                 {
                   key: 'line',
                   label: 'Линия',
-                  render: <LineChart values={w.values} labels={w.labels} titles={w.titles} markAnomalies emphasizeLastLabel />,
+                  render: (
+                    <ChartCardBody value={fmt.kpi(w.total)} delta={delta} caption={caption}>
+                      <LineChart values={w.values} labels={w.labels} titles={w.titles} markAnomalies emphasizeLastLabel />
+                    </ChartCardBody>
+                  ),
                 },
                 {
                   // Дневные ПОТОКИ (не уровни) — столбцы от нуля здесь честные.
                   key: 'bar',
                   label: 'Столбцы',
-                  render: <BarChart values={w.values} labels={w.labels} titles={w.titles} />,
+                  render: (
+                    <ChartCardBody value={fmt.kpi(w.total)} delta={delta} caption={caption}>
+                      <BarChart values={w.values} labels={w.labels} titles={w.titles} />
+                    </ChartCardBody>
+                  ),
                 },
                 seriesBarValuesVariant(w.values, w.labels, w.titles, { sum: true }),
               ];
@@ -609,18 +630,29 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
               statsFor: (days, grain) => windowGraphSeries(shareSeries.values, interGroup.x, days, 'репостов', { grain }).values,
             }}
             seriesOptions
-            variants={(_period, series) => {
-              const w = windowGraphSeries(shareSeries.values, interGroup.x, 0, 'репостов', series);
+            periodControl
+            variants={(period, series) => {
+              const w = windowGraphSeries(shareSeries.values, interGroup.x, period.days, 'репостов', series);
+              const delta = w.prevTotal != null && w.prevTotal > 0 ? pctDelta(w.total, w.prevTotal) : null;
+              const caption = delta ? 'к пред. периоду' : period.days === 0 ? 'за всё время' : undefined;
               return [
                 {
                   key: 'line',
                   label: 'Линия',
-                  render: <LineChart values={w.values} labels={w.labels} titles={w.titles} emphasizeLastLabel />,
+                  render: (
+                    <ChartCardBody value={fmt.kpi(w.total)} delta={delta} caption={caption}>
+                      <LineChart values={w.values} labels={w.labels} titles={w.titles} emphasizeLastLabel />
+                    </ChartCardBody>
+                  ),
                 },
                 {
                   key: 'bar',
                   label: 'Столбцы',
-                  render: <BarChart values={w.values} labels={w.labels} titles={w.titles} />,
+                  render: (
+                    <ChartCardBody value={fmt.kpi(w.total)} delta={delta} caption={caption}>
+                      <BarChart values={w.values} labels={w.labels} titles={w.titles} />
+                    </ChartCardBody>
+                  ),
                 },
                 seriesBarValuesVariant(w.values, w.labels, w.titles, { sum: true }),
               ];

@@ -43,7 +43,7 @@ function keysChanged(a?: ReadonlyArray<unknown>, b?: ReadonlyArray<unknown>): bo
 // import the heavy ChartWidget module (which imports this one).
 const CARD_SPAN: Record<'third' | 'half' | 'full', string> = {
   third: 'lg:col-span-2',
-  half: 'lg:col-span-3',
+  half: 'lg:col-span-4',
   full: 'lg:col-span-6',
 };
 const CARD_MIN_H: Record<'third' | 'half' | 'full', string> = {

@@ -65,7 +65,7 @@ export function Overview() {
         </ChartSection>
         {/* Narrative insight — a heavy 3-tier read that overflows a fixed half tile; it takes a
             content-height `full` card so nothing is clipped or trapped behind an inner scrollbar. */}
-        <ChartSection id="overview-digest" title="Главное" periodControl homeKey="digest" defaultSize="full">
+        <ChartSection id="overview-digest" title="Главное" periodControl homeKey="digest" defaultSize="third">
           <Digest />
         </ChartSection>
         <GrowthChartBlock id="overview-growth" homeKey="growth" />
@@ -117,6 +117,7 @@ export function GrowthChartBlock({ id, homeKey }: { id?: string; homeKey?: strin
       homeKey={homeKey}
       title="Рост подписчиков"
       drillTo="/metrics/subscribers"
+      defaultSize="half"
       periodControl
       expand={
         rows.length >= 2
