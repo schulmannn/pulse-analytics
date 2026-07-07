@@ -15,11 +15,13 @@ import { Hashtags } from '@/panels/Hashtags';
  * сравнение) live here alongside the TG breakdowns + hashtag lift. Moved out of App.tsx so
  * the TG feed can compose it as a block.
  */
-// Order mirrors the Instagram feed (Обзор → Аналитика → Контент → Аудитория) so both platforms
-// read on ONE schema: dynamics/reach → engagement/content → audience/demographics → comparison.
+// Order mirrors the canonical section schema (dynamics/reach → content aggregates →
+// audience/demographics → comparison). The tab is «Форматы», not «Контент»: the sidebar's
+// «Контент» section (the posts list) owns that name now — two different «Контент» one click
+// apart read as the same thing. This tab is per-TYPE aggregates (formats, эмодзи, hashtags).
 const ANALYTICS_TABS = [
   { key: 'dynamics', label: 'Динамика' },
-  { key: 'content', label: 'Контент' },
+  { key: 'content', label: 'Форматы' },
   { key: 'audience', label: 'Аудитория' },
   { key: 'compare', label: 'Сравнение' },
 ] as const;

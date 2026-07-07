@@ -245,7 +245,7 @@ function DashboardMock({ reduce }: { reduce: boolean }) {
         <div className="space-y-0.5">
           <MiniNav label="Обзор" active />
           <MiniNav label="Аналитика" />
-          <MiniNav label="Посты" />
+          <MiniNav label="Контент" />
           <MiniNav label="Упоминания" />
         </div>
       </motion.div>
