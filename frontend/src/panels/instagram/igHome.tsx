@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import { useIgData } from '@/lib/useIgData';
 import { useDemo } from '@/lib/demo-context';
 import { ChartSection } from '@/components/ChartWidget';
-import { TrendCard, FollowsByDayCard } from '@/components/instagram/shared';
+import { TrendCard, FollowsByDayCard, IgKpiBlock } from '@/components/instagram/shared';
 
 /**
  * Self-fetching Home wrappers for the two genuine IG daily series — the missing piece that kept
@@ -39,4 +39,15 @@ export function IgFollowsHomeCard({ id, homeKey }: { id?: string; homeKey?: stri
   const { demo } = useDemo();
   if (ig.error || (ig.isMock && !demo)) return <IgConnectPrompt id={id} homeKey={homeKey} title="IG · Подписки по дням" />;
   return <FollowsByDayCard id={id} homeKey={homeKey} title="IG · Подписки по дням" data={ig.series.follower} drillTo="/metrics/ig-follows" />;
+}
+
+export function IgKpiHomeCard({ id, homeKey }: { id?: string; homeKey?: string }) {
+  const ig = useIgData();
+  const { demo } = useDemo();
+  if (ig.error || (ig.isMock && !demo)) return <IgConnectPrompt id={id} homeKey={homeKey} title="IG · Показатели" />;
+  return (
+    <ChartSection id={id} homeKey={homeKey} title="IG · Показатели" defaultSize="full" drillTo="/metrics/ig-reach">
+      <IgKpiBlock ig={ig} />
+    </ChartSection>
+  );
 }

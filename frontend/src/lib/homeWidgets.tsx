@@ -6,7 +6,7 @@ import { TopPosts } from '@/panels/TopPosts';
 import { HistoryChartBlock, VelocityChartBlock, HeatmapChartBlock } from '@/panels/Charts';
 import { GrowthChartBlock } from '@/panels/Overview';
 import { HomeMentionsByDay } from '@/panels/Mentions';
-import { IgReachHomeCard, IgFollowsHomeCard } from '@/panels/instagram/igHome';
+import { IgReachHomeCard, IgFollowsHomeCard, IgKpiHomeCard } from '@/panels/instagram/igHome';
 
 /**
  * Personal-Home widget registry — the catalogue of widgets a user can pin to /home via the
@@ -111,6 +111,11 @@ export const HOME_REGISTRY: Record<string, HomeWidgetDef> = {
   'ig-follows': {
     label: 'IG · Подписки по дням',
     render: () => <IgFollowsHomeCard id="home-ig-follows" homeKey="ig-follows" />,
+  },
+  'ig-kpi': {
+    label: 'IG · Показатели',
+    defaultSize: 'full',
+    render: () => <IgKpiHomeCard id="home-ig-kpi" homeKey="ig-kpi" />,
   },
 };
 
