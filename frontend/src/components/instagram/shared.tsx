@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { fmt } from '@/lib/format';
 import { pctDelta, type MetricDelta } from '@/lib/delta';
 import { DeltaPill } from '@/components/DeltaPill';
+import { EmptyState } from '@/components/EmptyState';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { ChartCardBody, ChartSection as WidgetChartSection, type WidgetSize } from '@/components/ChartWidget';
@@ -60,7 +61,7 @@ export function ChartSection({ title, children }: { title: string; children: Rea
 }
 
 export function EmptyChart() {
-  return <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">Нет данных за период</div>;
+  return <EmptyState compact title="Нет данных за период" className="h-40" />;
 }
 
 /** Signed integer with a typographic minus, e.g. +595 / −23 / 0. */
