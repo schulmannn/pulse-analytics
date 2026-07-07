@@ -337,3 +337,44 @@ export function IgKpiBlock({ ig }: { ig: IgData }) {
     </div>
   );
 }
+
+/**
+ * Real subscriber movement for the window: gross follows, gross unfollows, and the net of the two.
+ * The previous "+595 подписчиков" reported gross follows alone — this shows that 595 follows came
+ * with 618 unfollows, so the channel actually moved −23.
+ */
+export function SubscriberMovement({
+  follows,
+  unfollows,
+  net,
+}: {
+  follows: WindowPair;
+  unfollows: WindowPair;
+  net: { cur: number; prev: number; hasCur: boolean; hasPrev: boolean };
+}) {
+  const cells = [
+    { label: 'Подписки', text: `+${fmt.num(follows.cur)}`, color: 'text-verdant' },
+    { label: 'Отписки', text: `−${fmt.num(unfollows.cur)}`, color: 'text-ember' },
+    {
+      label: 'Чистый прирост',
+      text: signedNum(net.cur),
+      color: net.cur > 0 ? 'text-verdant' : net.cur < 0 ? 'text-ember' : 'text-foreground',
+    },
+  ];
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-1 gap-x-6 gap-y-4 border-t border-border pt-4 sm:grid-cols-3">
+        {cells.map((c) => (
+          <div key={c.label} className="py-1">
+            <div className="text-xs tracking-wide text-muted-foreground">{c.label}</div>
+            <div className={`mt-2 text-3xl font-medium tabular-nums tracking-tight ${c.color}`}>{c.text}</div>
+            {c.label === 'Чистый прирост' && net.hasPrev && (
+              <div className="mt-2 text-xs text-muted-foreground">пред. период: {signedNum(net.prev)}</div>
+            )}
+          </div>
+        ))}
+      </div>
+      <p className="px-1 text-xs text-muted-foreground">Чистый прирост = подписки − отписки за период.</p>
+    </div>
+  );
+}

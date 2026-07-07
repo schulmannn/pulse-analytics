@@ -1,7 +1,6 @@
-import { fmt } from '@/lib/format';
 import type { IgData } from '@/lib/useIgData';
-import { Section, TrendCard, FollowsByDayCard, signedNum } from '@/components/instagram/shared';
-import { WidgetGroup } from '@/components/ChartWidget';
+import { Section, TrendCard, FollowsByDayCard, SubscriberMovement } from '@/components/instagram/shared';
+import { ChartSection, WidgetGroup } from '@/components/ChartWidget';
 import { InsightsBlock, PeriodCompareBlock } from '@/components/instagram/insights';
 import { exportIgDaily } from '@/lib/igExport';
 import { type WindowPair } from '@/lib/igMetrics';
@@ -67,62 +66,26 @@ export function IgAnalytics({ ig }: { ig: IgData }) {
         </WidgetGroup>
       </Section>
 
-      {hasMovement && (
-        <Section title="Движение подписчиков">
-          <SubscriberMovement follows={ig.pairs.follows} unfollows={ig.pairs.unfollows} net={ig.netMovement} />
-        </Section>
-      )}
-
-      <Section title="Сравнение периодов">
-        <p className="text-xs text-muted-foreground">Просмотры, лайки и сохранения сравниваются по периодам.</p>
-        <PeriodCompareBlock rows={periodRows} />
-      </Section>
-
-      <Section title="Главное">
-        <InsightsBlock insights={ig.insights} limit={4} />
-      </Section>
+      {/* The summary blocks are REAL widgets now (аудит: не-виджетные блоки без ⋯ читались
+          непредсказуемо): one group → Выше/Ниже/Переставить/Скрыть, content-height full cards.
+          Это и предоплата unified-feed: widget-декларации рендерятся тем же ChartSection. */}
+      <WidgetGroup id="ig-analytics-summary" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
+        {hasMovement && (
+          <ChartSection id="ig-movement" title="Движение подписчиков" defaultSize="full" homeKey="ig-movement" noExpand>
+            <SubscriberMovement follows={ig.pairs.follows} unfollows={ig.pairs.unfollows} net={ig.netMovement} />
+          </ChartSection>
+        )}
+        <ChartSection id="ig-period-compare" title="Сравнение периодов" defaultSize="full" noExpand>
+          <p className="text-xs text-muted-foreground">Просмотры, лайки и сохранения сравниваются по периодам.</p>
+          <PeriodCompareBlock rows={periodRows} />
+        </ChartSection>
+        <ChartSection id="ig-insights" title="Главное" defaultSize="full" noExpand>
+          <InsightsBlock insights={ig.insights} limit={4} />
+        </ChartSection>
+      </WidgetGroup>
     </div>
   );
 }
 
-/**
- * Real subscriber movement for the window: gross follows, gross unfollows, and the net of the two.
- * The previous "+595 подписчиков" reported gross follows alone — this shows that 595 follows came
- * with 618 unfollows, so the channel actually moved −23.
- */
-function SubscriberMovement({
-  follows,
-  unfollows,
-  net,
-}: {
-  follows: WindowPair;
-  unfollows: WindowPair;
-  net: { cur: number; prev: number; hasCur: boolean; hasPrev: boolean };
-}) {
-  const cells = [
-    { label: 'Подписки', text: `+${fmt.num(follows.cur)}`, color: 'text-verdant' },
-    { label: 'Отписки', text: `−${fmt.num(unfollows.cur)}`, color: 'text-ember' },
-    {
-      label: 'Чистый прирост',
-      text: signedNum(net.cur),
-      color: net.cur > 0 ? 'text-verdant' : net.cur < 0 ? 'text-ember' : 'text-foreground',
-    },
-  ];
-  return (
-    <div className="space-y-3">
-      <div className="grid grid-cols-1 gap-x-6 gap-y-4 border-t border-border pt-4 sm:grid-cols-3">
-        {cells.map((c) => (
-          <div key={c.label} className="py-1">
-            <div className="text-xs tracking-wide text-muted-foreground">{c.label}</div>
-            <div className={`mt-2 text-3xl font-medium tabular-nums tracking-tight ${c.color}`}>{c.text}</div>
-            {c.label === 'Чистый прирост' && net.hasPrev && (
-              <div className="mt-2 text-xs text-muted-foreground">пред. период: {signedNum(net.prev)}</div>
-            )}
-          </div>
-        ))}
-      </div>
-      <p className="px-1 text-xs text-muted-foreground">Чистый прирост = подписки − отписки за период.</p>
-    </div>
-  );
-}
+
 
