@@ -158,26 +158,32 @@ for (const [themeName, tokens] of [
 }
 
 // Dark widget-accent surfaces: an accented card's hero number and line share the accent token,
-// painted over the FLAT tonal surface (color-mix in oklab, accent 16%, card — index.css
-// `div[data-widget-tinted]`). sRGB alpha-compositing approximates the oklab mix closely enough
-// for a threshold gate at these ratios. The number is TEXT (4.5); the un-tinted accented card
-// (number straight on the dark card) is held to 4.5 as well. Dark-only: light never paints
-// numbers with the accent (the .kpi-accent rule is scoped to .dark).
+// painted over the FLAT tonal surface — which now mixes the DEEP companion (color-mix in oklab,
+// accent-deep 30%, card — index.css `div[data-widget-tinted]`), the saturated steep fill. sRGB
+// alpha-compositing approximates the oklab mix closely enough for a threshold gate at these
+// ratios. The number is TEXT (4.5) and so are the muted captions that sit on the tint; the
+// un-tinted accented card (number straight on the dark card) is held to 4.5 as well. Dark-only:
+// light never paints numbers with the accent (the .kpi-accent rule is scoped to .dark).
 console.log('\n=== dark · accent tonal surfaces ===');
 for (let n = 1; n <= 6; n++) {
   const acc = dark[`chart-${n}-accent`];
-  if (!acc) {
+  const deep = dark[`chart-${n}-accent-deep`];
+  if (!acc || !deep) {
     console.log(`  ?     accent ${n} — token missing`);
     continue;
   }
   const fg = hslToRgb(acc);
   const card = hslToRgb(dark.card);
-  const tonal = over(fg, card, 0.16);
-  for (const [label, bg] of [
-    [`accent ${n} number on tonal surface`, tonal],
-    [`accent ${n} number on card`, card],
+  const tonal = over(hslToRgb(deep), card, 0.26);
+  // Captions on the tint use the LIGHTER muted ink the tinted card scopes locally
+  // (index.css `.dark div[data-widget-tinted] { --muted-foreground: 240 6% 84% }`).
+  const muted = hslToRgb([240, 6, 84]);
+  for (const [label, ink, bg] of [
+    [`accent ${n} number on tonal surface`, fg, tonal],
+    [`accent ${n} number on card`, fg, card],
+    [`muted caption on accent ${n} tonal`, muted, tonal],
   ]) {
-    const r = ratio(fg, bg);
+    const r = ratio(ink, bg);
     const pass = r >= 4.5;
     if (!pass) failures++;
     console.log(`  ${pass ? 'ok  ' : 'FAIL'}  ${r.toFixed(2).padStart(5)} (need 4.5)  ${label}`);
