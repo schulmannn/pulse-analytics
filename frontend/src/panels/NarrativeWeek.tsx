@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useHistory, useIgHistory, useIgInsights, useIgProfile, useTgFull, useTgGraphs, useChannels } from '@/api/queries';
+import { useHistory, useIgHistory, useIgInsights, useIgPosts, useIgProfile, useTgFull, useTgGraphs, useChannels } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { useDemo } from '@/lib/demo-context';
-import { histSeries, longerSeries, metricSeries, type Point } from '@/lib/igMetrics';
+import { histSeries, longerSeries, metricSeries, postEr, type Point } from '@/lib/igMetrics';
 import { normalizeTgPosts, type NormalizedPost } from '@/lib/posts';
 import { buildWeekNarrative, type NarrativeIgInput, type NarrativeInput, type NarrativeSeg } from '@/lib/narrative';
 import { ChartSection } from '@/components/ChartWidget';
@@ -94,9 +94,11 @@ function useIgWeekInput(): NarrativeIgInput | null {
   const profileQ = useIgProfile();
   const insightsQ = useIgInsights(14);
   const historyQ = useIgHistory();
+  const postsQ = useIgPosts(24);
   const profile = profileQ.data;
   const ins = insightsQ.data;
   const rows = historyQ.data?.rows;
+  const media = postsQ.data?.data;
   const unavailable = profileQ.isError && insightsQ.isError;
   return useMemo(() => {
     if (unavailable) return null;
@@ -105,12 +107,27 @@ function useIgWeekInput(): NarrativeIgInput | null {
     const reach = dated(longerSeries(metricSeries(ins, 'reach'), histSeries(rows, 'reach')));
     if (!reach.length) return null;
     const follows = dated(longerSeries(metricSeries(ins, 'follower_count'), histSeries(rows, 'followers')));
+    // Медиа недели + норма ERV за 4 недели — канонная postEr (те же числа, что контент-таблицы);
+    // герой меряется только по медиа с охватом.
+    const now = Date.now();
+    const withReach = (media ?? []).filter(
+      (p) => p.timestamp && Number(p.reach ?? 0) > 0 && now - Date.parse(p.timestamp) <= 4 * WEEK_MS,
+    );
+    const weekMedia = withReach.filter((p) => now - Date.parse(p.timestamp!) <= WEEK_MS);
+    const avgMediaErv =
+      withReach.length >= 3 ? withReach.reduce((a, p) => a + postEr(p), 0) / withReach.length : null;
     return {
       reachDaily: reach.map((p) => ({ day: p.day, v: p.value })),
       followsDaily: follows.map((p) => ({ day: p.day, v: p.value })),
       followersNow: profile?.followers_count ?? null,
+      mediaWeek: weekMedia.map((p) => ({
+        title: (p.caption || 'Публикация').slice(0, 80),
+        erv: postEr(p),
+        permalink: p.permalink ?? null,
+      })),
+      avgMediaErv,
     };
-  }, [unavailable, profile, ins, rows, demo]);
+  }, [unavailable, profile, ins, rows, media, demo]);
 }
 
 function SegSpan({ seg, onPost }: { seg: NarrativeSeg; onPost: (i: number) => void }) {
@@ -132,16 +149,25 @@ function SegSpan({ seg, onPost }: { seg: NarrativeSeg; onPost: (i: number) => vo
       return <DeltaPill delta={{ dir: seg.pct < 0 ? 'down' : 'up', pct: Math.abs(seg.pct) }} />;
     case 'spark':
       return <InlineSpark values={seg.values} />;
-    case 'post':
+    case 'post': {
+      const chip =
+        'rounded text-left font-semibold text-foreground underline decoration-dotted decoration-1 underline-offset-4 transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40';
+      // IG-медиа живёт по permalink (карточек IG-постов в приложении нет), TG-пост — в модалке.
+      if (seg.href) {
+        return (
+          <a href={seg.href} target="_blank" rel="noreferrer" className={chip}>
+            {seg.text}
+          </a>
+        );
+      }
+      if (seg.postIndex == null) return <span className="font-semibold text-foreground">{seg.text}</span>;
+      const idx = seg.postIndex;
       return (
-        <button
-          type="button"
-          onClick={() => onPost(seg.postIndex)}
-          className="rounded text-left font-semibold text-foreground underline decoration-dotted decoration-1 underline-offset-4 transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-        >
+        <button type="button" onClick={() => onPost(idx)} className={chip}>
           {seg.text}
         </button>
       );
+    }
   }
 }
 

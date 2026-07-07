@@ -24,8 +24,9 @@ export type NarrativeSeg =
   | { kind: 'delta'; pct: number }
   /** Спарклайн-в-строке — ряд как есть (обе недели), рендерер сам масштабирует. */
   | { kind: 'spark'; values: number[] }
-  /** Чип поста — открывает карточку поста; postIndex указывает в input.posts. */
-  | { kind: 'post'; text: string; postIndex: number };
+  /** Чип поста: postIndex открывает карточку TG-поста (input.posts), href — внешняя ссылка
+   *  (IG-permalink); без обоих — просто выделенный текст. */
+  | { kind: 'post'; text: string; postIndex?: number; href?: string | null };
 
 export type NarrativeParagraph = NarrativeSeg[];
 
@@ -49,6 +50,10 @@ export interface NarrativeIgInput {
   followsDaily: { day: string; v: number }[];
   /** Текущая база (profile.followers_count); null = профиль не отдал. */
   followersNow: number | null;
+  /** Медиа недели: ERV по канонной postEr (interactions/reach) — те же числа, что контент-таблицы. */
+  mediaWeek?: { title: string; erv: number; permalink: string | null }[];
+  /** Норма ERV аккаунта — среднее по медиа за 4 недели (гейт нормы: ≥3 медиа с охватом). */
+  avgMediaErv?: number | null;
 }
 
 export interface NarrativeInput {
@@ -136,6 +141,22 @@ function buildIgStory(
       } else {
         para.push(t('. '));
       }
+    }
+  }
+  // Герой IG-недели — тот же чест-гейт, что у TG: ≥3 медиа за неделю, норма существует,
+  // лифт ERV ≥ ×1.6. Чип ведёт на сам пост (permalink) — карточек IG-медиа в приложении нет.
+  const media = ig.mediaWeek ?? [];
+  if (media.length >= 3 && ig.avgMediaErv != null && ig.avgMediaErv > 0) {
+    const best = media.reduce((a, b) => (b.erv > a.erv ? b : a));
+    const ervLift = best.erv / ig.avgMediaErv;
+    if (ervLift >= 1.6) {
+      para.push(
+        t('Герой там — '),
+        { kind: 'post', text: `«${best.title.slice(0, 52)}…»`, href: best.permalink },
+        t(': вовлечённость '),
+        n(`${best.erv.toFixed(1)}%`, '/metrics/ig-er'),
+        t(` на охват — в ${lift(ervLift)} раза выше нормы аккаунта. `),
+      );
     }
   }
   return { para, pct };
