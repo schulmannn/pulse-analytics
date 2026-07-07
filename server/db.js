@@ -1356,6 +1356,41 @@ async function pruneIgMediaDaily(maxAgeDays = 730) {
   return rowCount;
 }
 
+// ── Monthly rollup of channel_daily (capacity; 014_capacity_rollups.sql) ──────────────────────────
+// Idempotent upsert that folds the last `months` calendar months of channel_daily into
+// channel_monthly (one row per channel×month), so a long-range history read can serve ~24 monthly
+// points instead of scanning up to 730 daily rows per channel. Bounded to recent months so the
+// nightly recompute stays cheap. INERT until wired: nothing reads channel_monthly yet — the reader
+// (getChannelHistoryMonthly) lands with the frontend range-picker change (see CAPACITY doc §rollups).
+async function rollupChannelMonthly(months = 3) {
+  if (!enabled) return 0;
+  const m = Number.isFinite(+months) ? Math.max(1, Math.round(+months)) : 3;
+  const { rowCount } = await pool.query(
+    `INSERT INTO channel_monthly
+       (channel_id, source_id, month, subscribers_end,
+        joins_sum, leaves_sum, views_sum, forwards_sum, reactions_sum, days_count, computed_at)
+     SELECT d.channel_id, MAX(c.source_id), date_trunc('month', d.day)::date AS month,
+            (array_agg(d.subscribers ORDER BY d.day DESC) FILTER (WHERE d.subscribers IS NOT NULL))[1],
+            COALESCE(SUM(d.joins),0), COALESCE(SUM(d.leaves),0), COALESCE(SUM(d.views),0),
+            COALESCE(SUM(d.forwards),0), COALESCE(SUM(d.reactions),0), COUNT(*), now()
+       FROM channel_daily d
+       JOIN channels c ON c.id = d.channel_id
+      WHERE d.day >= date_trunc('month', CURRENT_DATE) - make_interval(months => $1)
+      GROUP BY d.channel_id, date_trunc('month', d.day)
+     ON CONFLICT (channel_id, month) DO UPDATE SET
+       source_id       = COALESCE(EXCLUDED.source_id, channel_monthly.source_id),
+       subscribers_end = EXCLUDED.subscribers_end,
+       joins_sum       = EXCLUDED.joins_sum,
+       leaves_sum      = EXCLUDED.leaves_sum,
+       views_sum       = EXCLUDED.views_sum,
+       forwards_sum    = EXCLUDED.forwards_sum,
+       reactions_sum   = EXCLUDED.reactions_sum,
+       days_count      = EXCLUDED.days_count,
+       computed_at     = now()`,
+    [m]);
+  return rowCount;
+}
+
 // ── Read helpers (история для будущих графиков) ──
 async function listIgDaily(channelId, days = 400) {
   if (!enabled || !channelId) return [];
@@ -1561,6 +1596,7 @@ module.exports = {
   saveIgAccount, getIgAccount, updateIgToken, deleteIgAccount, listIgAccounts,
   saveTgSession, getTgSession, deleteTgSession, listTgSessions,
   upsertIgDaily, upsertIgMediaDaily, saveRawSnapshot, pruneRawSnapshots, pruneIgMediaDaily,
+  rollupChannelMonthly,
   listIgDaily, listIgMediaDaily,
   listAnnotations, createAnnotation, deleteAnnotation,
   REPORT_SCHEDULES, listReports, getReport, createReport, updateReport, deleteReport,
