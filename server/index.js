@@ -2520,32 +2520,32 @@ app.post('/api/ingest/daily', asyncHandler(async (req, res) => {
   const channelId = await db.getOwnerChannelId();   // central channel = "collector #0"
   if (!channelId) return res.status(503).json({ ok: false, reason: 'central channel not ready' });
   try {
-    const [graphs, posts] = await Promise.all([
-      mtprotoFetch('/graphs', { points: 400 }, MTPROTO_TIMEOUT_HEAVY_MS).catch(() => null),   // full range for the archive (dashboard uses 45)
-      mtprotoFetch('/posts', { limit: 100 }).catch(() => null),
-    ]);
+    // Idempotency (Ковчег): a double cron tick / a second web instance must NOT run the heavy
+    // MTProto pass (/graphs + /posts + up to ~12 GetMessageStats for velocity) twice for the same
+    // day. runJobOnce keyed on the UTC date makes exactly one caller do the work; a duplicate gets
+    // the first run's cached result and skips both the fetch AND the fire-and-forget tails below.
+    const dateKey = new Date().toISOString().slice(0, 10);
+    let graphs = null;
+    const outcome = await db.runJobOnce('daily_ingest', `central:${dateKey}`, async () => {
+      let posts;
+      [graphs, posts] = await Promise.all([
+        mtprotoFetch('/graphs', { points: 400 }, MTPROTO_TIMEOUT_HEAVY_MS).catch(() => null),   // full range for the archive (dashboard uses 45)
+        mtprotoFetch('/posts', { limit: 100 }).catch(() => null),
+      ]);
+      const velocity = await mtprotoFetch('/velocity', {}, MTPROTO_TIMEOUT_HEAVY_MS).catch(() => null);
+      // All three upserts commit together (persistCentralDaily) — no half-written day.
+      return db.persistCentralDaily(channelId, {
+        dailyRows: db.graphsToDailyRows(graphs),
+        postRows: (posts && Array.isArray(posts.posts)) ? posts.posts.map(tgPostToRow) : [],
+        velocity,
+      });
+    });
 
-    const dailyRows = db.graphsToDailyRows(graphs);
-    const nDaily = await db.upsertChannelDaily(channelId, dailyRows);
+    const result = outcome.skipped ? ((outcome.job && outcome.job.result) || {}) : outcome.result;
+    res.json({ ok: true, skipped: !!outcome.skipped, channel_daily: result.channel_daily || 0, posts: result.posts || 0, velocity: !!result.velocity });
 
-    let nPosts = 0;
-    if (posts && Array.isArray(posts.posts)) {
-      const prows = posts.posts.map(tgPostToRow);
-      nPosts = await db.upsertPosts(channelId, prows);
-    }
-
-    // Velocity ("жизнь поста") — тяжёлый расчёт (до ~12 последовательных
-    // GetMessageStats к Telegram). Делаем его ЗДЕСЬ, в кроне (последовательно
-    // после graphs/posts, чтобы не нагружать единственную Telethon-сессию
-    // параллельно), и кладём снапшот в Postgres. Дашборд читает готовое из БД.
-    let velocityOk = false;
-    const velocity = await mtprotoFetch('/velocity', {}, MTPROTO_TIMEOUT_HEAVY_MS).catch(() => null);
-    if (velocity && velocity.available) {
-      await db.saveVelocity(channelId, velocity).catch(e => console.error('[db] velocity save:', e.message));
-      velocityOk = true;
-    }
-
-    res.json({ ok: true, channel_daily: nDaily, posts: nPosts, velocity: velocityOk });
+    // A duplicate day already ran the tails on the first tick — skip the redundant heavy passes.
+    if (outcome.skipped) return;
 
     // Email-выгрузка отчётов — fire-and-forget ПОСЛЕ ответа крону: расписания
     // не должны ни задерживать, ни ломать ingest.

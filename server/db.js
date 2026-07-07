@@ -981,6 +981,35 @@ async function ingestCollectorPayload(channelId, meta, data) {
   }
 }
 
+/* Atomically persist ONE central daily-ingest bundle (the cron's /graphs + /posts + /velocity).
+   The three upserts commit together so a mid-write crash never leaves channel_daily updated but
+   posts/velocity not (the collector path already gets this via ingestCollectorPayload; the central
+   cron did three separate autocommitted writes). Idempotent by construction — every upsert is
+   ON CONFLICT DO UPDATE — so re-running the same day overwrites, never double-counts. The caller
+   wraps this in runJobOnce('daily_ingest', 'central:<date>') so a double cron / second instance
+   does the heavy MTProto pass at most once per day. */
+async function persistCentralDaily(channelId, { dailyRows = [], postRows = [], velocity = null } = {}) {
+  if (!enabled || !channelId) throw new Error('database unavailable');
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const nDaily = await upsertChannelDaily(channelId, dailyRows, client);
+    const nPosts = await upsertPosts(channelId, postRows, client);
+    let velocityOk = false;
+    if (velocity && velocity.available) {
+      await saveVelocity(channelId, velocity, client);
+      velocityOk = true;
+    }
+    await client.query('COMMIT');
+    return { channel_daily: nDaily, posts: nPosts, velocity: velocityOk };
+  } catch (error) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 async function getCollectorStatus(channelId, user) {
   if (!enabled || !channelId || !user || user.uid == null) return null;
   const { rows } = await pool.query(
@@ -1612,7 +1641,7 @@ module.exports = {
   getPrefs, setPrefs,
   adoptOwnerChannel, listChannels, getChannel, getChannelById, getOwnerChannelId, setChannelTgId,
   createChannel, createTgChannel, createIgChannel, findIgChannelByIgUser, deleteChannel, createApiKey, getChannelByApiKey, listApiKeys, revokeApiKey,
-  saveSnapshot, getSnapshot, ingestCollectorPayload, getCollectorStatus, recordAuditEvent,
+  saveSnapshot, getSnapshot, ingestCollectorPayload, persistCentralDaily, getCollectorStatus, recordAuditEvent,
   saveVelocity, getLatestVelocity,
   upsertChannelDaily, upsertPosts, upsertMentions, upsertIgTags, getIgTags,
   getChannelHistory, getMentionsHistory, getMentionsArchive,

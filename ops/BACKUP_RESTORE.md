@@ -89,3 +89,9 @@ pgsql/bin/pg_restore.exe -d "$DATABASE_URL" --clean --if-exists pulse.dump
 | date | what | result |
 |------|------|--------|
 | 2026-07-04 | Full cycle on a local stand (portable PG 16.4, seeded schema): snapshot → wipe → migrate → restore → verify | see PERF_BASELINE.md / tracker |
+| 2026-07-07 | Verified DR drill (portable PG 16.4, schema 001–014, `drill` preset): migrate → seed → snapshot → **mutate** (insert junk channel 9999 + delete 90 `channel_daily` rows) → `db-restore.mjs --yes` → `db-verify.mjs` | **PASS.** RTO ≈ **1.4 s** at drill scale; `db-verify` all `ok` vs manifest (channels 5, channel_daily 450, posts 500, users 3), freshness preserved. Post-restore: junk channel gone, 90 deleted rows back. **Sequences reset** — fresh app-path inserts got `channels.id=5005` (restored max 5004) / `users.id=1003` (max 1002), NO PK collision (the serial-reset step catches every `nextval`-defaulted column, incl. the `bytea`-carrying `bug_attachments`). RPO = snapshot interval. Details + failure-mode matrix: `ops/FAILURE_MODES.md`. |
+
+**Ковчег note (2026-07-07):** the daily-ingest cron is now idempotent per UTC date
+(`runJobOnce('daily_ingest','central:<date>')` + transactional `persistCentralDaily`), so a double
+cron tick or a second web instance no longer double-runs the heavy MTProto pass. Idempotency +
+data-invariant regressions live in `test/ark.integration.test.js` (stand) and `test/test_invariants.py`.

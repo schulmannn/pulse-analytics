@@ -60,3 +60,18 @@ limiter is the first, intentional ceiling; the DB stayed at 5 active backends, n
 The current architecture clears the 100-concurrent-users bar on commodity hardware with 5×
 headroom on latency budgets (p95 < 250 ms everywhere) and zero errors. First knobs when real
 load arrives: `PGPOOL_MAX`, then materialized aggregates for the history-heavy widgets.
+
+## Concurrency / idempotency (Operation «Ковчег», 2026-07-07)
+
+Under concurrent writes the correctness guarantees (not just latency) hold, verified by
+`test/ark.integration.test.js` on the stand:
+
+- **daily-ingest is single-run per UTC date** — `runJobOnce('daily_ingest','central:<date>')`, so a
+  double cron tick or a second web instance no longer doubles the heavy MTProto pass; a duplicate
+  returns the first run's cached result. The three central upserts commit as one transaction
+  (`persistCentralDaily`) — no half-written day.
+- **No self-deadlock on the small pool** — `setChannelTgId`/`ensureChannelCanonical` ride the
+  caller's transaction executor (a `pool.query` inside an open tx would block on the tx's own row
+  lock forever with `max=4`). Regression: tenancy suite «setChannelTgId INSIDE a transaction».
+- **No double-count under retry** — every ingest upsert is `ON CONFLICT DO UPDATE`, so re-delivering
+  a day overwrites rather than accumulates. See `ops/FAILURE_MODES.md §3` for the full matrix.
