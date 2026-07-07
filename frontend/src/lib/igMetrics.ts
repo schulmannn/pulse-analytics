@@ -1,7 +1,7 @@
 // Pure Instagram metric math + label/geo helpers. No React, no UI — the views and the
 // useIgData hook gather raw API payloads and lean on this to shape them. Kept separate so the
 // "what the numbers mean" logic is testable and the panels stay presentational.
-import type { IgBreakdowns, IgInsights, IgOnline, IgPost } from '@/api/schemas';
+import type { IgBreakdowns, IgHistoryRow, IgInsights, IgOnline, IgPost } from '@/api/schemas';
 import { pctDelta, type MetricDelta } from '@/lib/delta';
 
 export const DAY_MS = 24 * 60 * 60 * 1000;
@@ -55,6 +55,22 @@ export function metricSeries(insights: IgInsights | undefined, name: string): Po
   if (series.length) return series;
   const tv = metric.total_value?.value;
   return tv != null ? [{ day: 'total', value: Number(tv) }] : [];
+}
+
+/** Persisted ig_daily rows → {day,value}[] for one column, dropping null/blank days. */
+export function histSeries(rows: IgHistoryRow[] | undefined, col: keyof IgHistoryRow): Point[] {
+  return (rows ?? [])
+    .filter((r) => r.day && r[col] != null)
+    .map((r) => ({ day: r.day, value: Number(r[col]) }));
+}
+
+/** Prefer whichever series carries MORE real dated points. The persisted history (accumulated by
+ *  the cron) usually outruns the tiny live API window, but on day 1 the DB is empty — then the live
+ *  series wins and the chart is never blank. Ties keep live (fresher within the shared window). */
+export function longerSeries(live: Point[], persisted: Point[]): Point[] {
+  const datedCount = (s: Point[]) =>
+    s.filter((p) => p.day !== 'total' && Number.isFinite(Date.parse(p.day))).length;
+  return datedCount(persisted) > datedCount(live) ? persisted : live;
 }
 
 /** Which metrics arrive as a real daily series (≥2 dated points) vs a windowed aggregate. Only the

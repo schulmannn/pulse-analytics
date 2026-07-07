@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildWeekNarrative, narrativeToPlain, plural, type NarrativeInput } from '@/lib/narrative';
+import { buildWeekNarrative, narrativeToPlain, plural, pluralKpi, type NarrativeInput } from '@/lib/narrative';
 
 /** Intl ставит NBSP/узкий пробел в разрядах — тесты сравнивают по обычным пробелам. */
 const norm = (s: string) => s.replace(/[  ]/g, ' ');
@@ -79,6 +79,77 @@ describe('buildWeekNarrative', () => {
     expect(numbers.length).toBeGreaterThan(3);
     for (const s of numbers) expect(s.kind === 'number' && s.to).toMatch(/^\/metrics\//);
   });
+
+  it('kpi-аббревиатура тянет родительный: «13.2k просмотров», не «просмотра»', () => {
+    const vals = [3000, 3000, 3000, 3000, 3000, 3000, 3000, 2000, 2000, 2000, 2000, 2000, 2000, 1192]; // cur = 13 192
+    const plain = norm(narrativeToPlain(buildWeekNarrative({ ...base, viewsDaily: mkSeries(vals) })));
+    expect(plain).toContain('13.2k просмотров');
+  });
+});
+
+describe('Instagram + кросс-сетевой контраст', () => {
+  /** prev-неделя → cur-неделя охвата + дневные чистые подписки текущей недели. */
+  const ig = (prev: number[], cur: number[], follows: number[] = [], followersNow: number | null = 1024) => ({
+    reachDaily: [...prev, ...cur].map((v, i) => ({ day: day(i), v })),
+    followsDaily: follows.map((v, i) => ({ day: day(7 + i), v })),
+    followersNow,
+  });
+  const flat600 = Array(7).fill(600) as number[];
+
+  it('IG-абзац рождается с полными окнами: охват, движение базы, drill на ig-страницы', () => {
+    const inp = { ...base, ig: ig(flat600, Array(7).fill(648), [2, 3, -1, 4, 0, 1, 2]) };
+    const nar = buildWeekNarrative(inp);
+    const plain = norm(narrativeToPlain(nar));
+    expect(plain).toContain('Instagram за ту же неделю');
+    expect(plain).toContain('4 536'); // 648×7 — сумма по дням, как headline /metrics/ig-reach (7д)
+    expect(plain).toContain('База там набрала 11'); // Σ дневных чистых подписок
+    expect(plain).toContain('1 024');
+    const links = nar.paragraphs.flat().filter((s) => s.kind === 'number').map((s) => (s.kind === 'number' ? s.to : ''));
+    expect(links).toContain('/metrics/ig-reach');
+    expect(links).toContain('/metrics/ig-follows');
+  });
+
+  it('контраст при расхождении: TG вниз, IG вверх → «просадка касается только Telegram»', () => {
+    const plain = norm(narrativeToPlain(buildWeekNarrative({ ...base, ig: ig(flat600, Array(7).fill(680)) })));
+    expect(plain).toContain('Сети разошлись');
+    expect(plain).toContain('касается только Telegram');
+  });
+
+  it('контраст при синхронном минусе: «обе сети ниже»', () => {
+    const plain = norm(narrativeToPlain(buildWeekNarrative({ ...base, ig: ig(flat600, Array(7).fill(500)) })));
+    expect(plain).toContain('обе сети ниже прошлой недели');
+    expect(plain).not.toContain('разошлись');
+  });
+
+  it('слабое движение IG (<±3%) трендом не объявляется — контраста нет', () => {
+    const plain = norm(narrativeToPlain(buildWeekNarrative({ ...base, ig: ig(flat600, Array(7).fill(606)) })));
+    expect(plain).toContain('Instagram за ту же неделю');
+    expect(plain).not.toContain('разошлись');
+    expect(plain).not.toContain('Движение общее');
+  });
+
+  it('без полного окна охвата IG-абзац не рождается', () => {
+    const short = { reachDaily: Array(10).fill(0).map((_, i) => ({ day: day(i), v: 500 })), followsDaily: [], followersNow: 1024 };
+    const plain = norm(narrativeToPlain(buildWeekNarrative({ ...base, ig: short })));
+    expect(plain).not.toContain('Instagram');
+  });
+
+  it('тихая TG-неделя не глушит живой Instagram («за неделю», без контраста)', () => {
+    const nar = buildWeekNarrative({
+      viewsDaily: mkSeries([0, 0, 0, 0, 0, 0, 0]),
+      posts: [],
+      avgErv: null,
+      subsNow: 4749,
+      subsD7: -5,
+      ig: ig(flat600, Array(7).fill(680)),
+    });
+    expect(nar.quiet).toBe(true);
+    const plain = norm(narrativeToPlain(nar));
+    expect(plain).toContain('Тихая неделя');
+    expect(plain).toContain('Instagram за неделю');
+    expect(plain).not.toContain('за ту же');
+    expect(plain).not.toContain('разошлись');
+  });
 });
 
 describe('plural', () => {
@@ -87,5 +158,11 @@ describe('plural', () => {
     expect(plural(34, 'реакция', 'реакции', 'реакций')).toBe('реакции');
     expect(plural(27, 'подписчика', 'подписчиков', 'подписчиков')).toBe('подписчиков');
     expect(plural(11, 'день', 'дня', 'дней')).toBe('дней');
+  });
+
+  it('pluralKpi: до порога аббревиатуры — по последней цифре, после — родительный', () => {
+    expect(pluralKpi(2639, 'просмотр', 'просмотра', 'просмотров')).toBe('просмотров');
+    expect(pluralKpi(9863, 'просмотр', 'просмотра', 'просмотров')).toBe('просмотра'); // ещё полная запись
+    expect(pluralKpi(12683, 'просмотр', 'просмотра', 'просмотров')).toBe('просмотров'); // «12.7k …»
   });
 });

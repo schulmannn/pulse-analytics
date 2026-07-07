@@ -1,9 +1,11 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useHistory, useTgFull, useTgGraphs, useChannels } from '@/api/queries';
+import { useHistory, useIgHistory, useIgInsights, useIgProfile, useTgFull, useTgGraphs, useChannels } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
+import { useDemo } from '@/lib/demo-context';
+import { histSeries, longerSeries, metricSeries, type Point } from '@/lib/igMetrics';
 import { normalizeTgPosts, type NormalizedPost } from '@/lib/posts';
-import { buildWeekNarrative, type NarrativeInput, type NarrativeSeg } from '@/lib/narrative';
+import { buildWeekNarrative, type NarrativeIgInput, type NarrativeInput, type NarrativeSeg } from '@/lib/narrative';
 import { ChartSection } from '@/components/ChartWidget';
 import { DeltaPill } from '@/components/DeltaPill';
 import { InlineSpark } from '@/components/InlineSpark';
@@ -11,12 +13,13 @@ import { PostDetailModal } from '@/components/PostDetailModal';
 import { Skeleton } from '@/components/ui/skeleton';
 
 /**
- * «НЕДЕЛЯ КАНАЛА» — первая поверхность нарративного слоя (roadmap card, фаза 1; тон утверждён
+ * «НЕДЕЛЯ КАНАЛА» — первая поверхность нарративного слоя (roadmap card, фазы 1–2; тон утверждён
  * владельцем на реальных данных @bynotem). Собирает вход движка из тех же источников, что и
  * карточки Обзора (graphs-серия просмотров, посты окна, дневной архив подписчиков), и рендерит
  * «текст-с-данными»: числа-ссылки в drill-контракте, Δ-пилюли, спарклайн-в-строке, чип поста,
  * открывающий его карточку. Каждое число сходится со страницей метрики 1-в-1 — движок и
- * страницы едят одни и те же ряды.
+ * страницы едят одни и те же ряды. Фаза 2: кодой рассказа — Instagram-неделя и кросс-сетевой
+ * контраст (та же честность: только считаемые утверждения).
  */
 
 /** ERV поста, % — как в контент-аналитике: вовлечения на просмотр. */
@@ -80,6 +83,36 @@ function useWeekNarrativeInput(): { input: NarrativeInput | null; posts: Normali
   }, [full, fullPending, graphs, graphsPending, history, channelId, channelsData]);
 }
 
+/** Instagram-вход — лёгкая тройка запросов (профиль + insights 14д + архив ig_daily) вместо
+ * полного useIgData: рассказу нужны только две дневные серии, а полный бандл тянет ещё посты,
+ * брейкдауны, online и stories — лишние вызовы на каждый визит Обзора. Правило слияния
+ * live↔архив то же, что у страниц /metrics/ig-* (histSeries/longerSeries) — числа сходятся
+ * 1-в-1. Гейт честности как в igHome: mock вне демо (Instagram не подключён) → null, и
+ * IG-абзац не рождается. */
+function useIgWeekInput(): NarrativeIgInput | null {
+  const { demo } = useDemo();
+  const profileQ = useIgProfile();
+  const insightsQ = useIgInsights(14);
+  const historyQ = useIgHistory();
+  const profile = profileQ.data;
+  const ins = insightsQ.data;
+  const rows = historyQ.data?.rows;
+  const unavailable = profileQ.isError && insightsQ.isError;
+  return useMemo(() => {
+    if (unavailable) return null;
+    if (!!(profile?.mock || ins?.mock) && !demo) return null;
+    const dated = (s: Point[]) => s.filter((p) => p.day !== 'total' && Number.isFinite(Date.parse(p.day)));
+    const reach = dated(longerSeries(metricSeries(ins, 'reach'), histSeries(rows, 'reach')));
+    if (!reach.length) return null;
+    const follows = dated(longerSeries(metricSeries(ins, 'follower_count'), histSeries(rows, 'followers')));
+    return {
+      reachDaily: reach.map((p) => ({ day: p.day, v: p.value })),
+      followsDaily: follows.map((p) => ({ day: p.day, v: p.value })),
+      followersNow: profile?.followers_count ?? null,
+    };
+  }, [unavailable, profile, ins, rows, demo]);
+}
+
 function SegSpan({ seg, onPost }: { seg: NarrativeSeg; onPost: (i: number) => void }) {
   switch (seg.kind) {
     case 'text':
@@ -115,6 +148,7 @@ function SegSpan({ seg, onPost }: { seg: NarrativeSeg; onPost: (i: number) => vo
 /** Голое тело нарратива (для Home-реестра и самой карточки). */
 export function NarrativeWeekBody() {
   const { input, posts, loading } = useWeekNarrativeInput();
+  const igInput = useIgWeekInput();
   const [openPost, setOpenPost] = useState<number | null>(null);
   if (loading || !input) {
     return (
@@ -125,7 +159,8 @@ export function NarrativeWeekBody() {
       </div>
     );
   }
-  const nar = buildWeekNarrative(input);
+  // TG-часть не ждёт Instagram: IG-абзац — кода текста, его догрузка ничего не сдвигает.
+  const nar = buildWeekNarrative({ ...input, ig: igInput });
   return (
     <div className="max-w-prose space-y-3.5 text-sm leading-relaxed text-ink2">
       {nar.paragraphs.map((p, i) => (
