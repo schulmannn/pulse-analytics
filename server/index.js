@@ -15,6 +15,7 @@ const { createAuth, hashPassword, verifyPassword, SCRYPT, rateLimitKey, isSessio
 const { captionSnippet } = require('./lib/caption');
 const { fetchWithTimeout } = require('./lib/http');
 const { log, requestContext, hashIp } = require('./lib/observability');
+const notionCrash = require('./lib/notion_crash');
 const { makeResolveChannel, makeServeSnapshot, hasWorkspaceRole } = require('./middleware/tenant');
 const { registerCollectorRoutes } = require('./routes/collector');
 
@@ -2639,6 +2640,27 @@ const crashLimiter = rateLimit({
 });
 const SERVER_COMMIT = String(process.env.RAILWAY_GIT_COMMIT_SHA || process.env.COMMIT_SHA || 'dev').slice(0, 7);
 const hashUid = (uid) => crypto.createHash('sha256').update(`${uid}:${AUTH_SECRET}`).digest('hex').slice(0, 12);
+
+// Client-crash → dedup ledger (+ optional Notion card). Always upserts the signature ledger when the
+// DB is on (queryable crash counts); posts/updates a Notion card only when NOTION_TOKEN + NOTION_CRASH_DB
+// are set. One card per unique signature; repeats bump the counter, throttled to ≤1 Notion write /
+// 5 min per signature so a broken deploy can't hammer the Notion API. Fully fire-and-forget.
+const NOTION_CRASH_THROTTLE_MS = 5 * 60 * 1000;
+async function crashSinkToNotion(f) {
+  const sig = await db.upsertCrashSignature(f);
+  if (!sig || !notionCrash.enabled) return;
+  if (sig.isNew) {
+    const pageId = await notionCrash.createCrashCard({ ...f, count: sig.count });
+    if (pageId) await db.setCrashNotionPage(f.signature, pageId);
+  } else if (sig.notionPageId) {
+    const last = sig.lastNotified ? Date.parse(sig.lastNotified) : 0;
+    if (Date.now() - last >= NOTION_CRASH_THROTTLE_MS) {
+      await notionCrash.updateCrashCard(sig.notionPageId, { count: sig.count, at: f.at, traceId: f.traceId });
+      await db.touchCrashNotified(f.signature);
+    }
+  }
+}
+
 app.post('/api/client-errors', requireAuth, crashLimiter, async (req, res) => {
   try {
     const b = req.body || {};
@@ -2663,6 +2685,12 @@ app.post('/api/client-errors', requireAuth, crashLimiter, async (req, res) => {
     });
     if (db.enabled) {
       const row = await db.createCrash({ text, context });
+      // Dedup ledger + Notion card (fire-and-forget — never delays or breaks the crash ack).
+      crashSinkToNotion({
+        signature: crypto.createHash('sha256').update(`${scope}|${name}|${message}|${route}|${SERVER_COMMIT}`).digest('hex').slice(0, 16),
+        scope, name, message, route, widgetId, label, traceId, commit: SERVER_COMMIT,
+        stack: str(b.componentStack, 4000), at: new Date().toISOString(),
+      }).catch(() => {});
       return res.json({ ok: true, id: row ? row.id : null, traceId });
     }
     console.error('[client-crash]', text, context); // no DB — Railway logs still capture it
