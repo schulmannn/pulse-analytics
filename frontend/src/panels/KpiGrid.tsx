@@ -10,6 +10,7 @@ import { Sparkline } from '@/components/Sparkline';
 import { MetricInfo } from '@/components/InfoTooltip';
 import { DeltaPill } from '@/components/DeltaPill';
 import { Skeleton } from '@/components/ui/skeleton';
+import { ChartCardBody } from '@/components/ChartWidget';
 import { useWidgetPeriod } from '@/lib/period';
 import type { MetricDelta } from '@/lib/delta';
 import { METRIC_DEFS } from '@/lib/metricDefs';
@@ -102,43 +103,37 @@ interface FeaturedKpiProps {
   onDrill?: () => void;
 }
 
-/** Hero KPI — the primary metric on the canvas (no card): big number + delta + area sparkline. */
+/** Hero KPI — the steep card anatomy (owner rule): label + big number + comparison pinned
+    bottom-LEFT, the area sparkline filling the width to the RIGHT of the number block. The ledger
+    below is untouched — the hero zone just turned horizontal. */
 function FeaturedKpi({ label, value, trend, caption, spark, info, onDrill }: FeaturedKpiProps) {
-  const [num, unit] = splitUnit(value);
   return (
-    <div>
-      <div className="flex items-center gap-1 text-xs tracking-wide text-muted-foreground">
-        <span>{label}</span>
-        {info && <MetricInfo def={info} />}
-      </div>
-      {/* Number + delta, then the sparkline as a strip BELOW it (capped width, left-aligned) — same
-          shape as the Instagram hero. The old side-by-side layout pushed the chart to the far right
-          on wide screens (justify-between), leaving it visually unanchored. */}
-      <div className="mt-2 flex items-baseline gap-2.5">
-        <DrillValue label={label} onDrill={onDrill} className="kpi-accent text-hero font-medium leading-none tabular-nums tracking-tight">
-          {num}
-          {unit ? <span className="text-2xl font-medium text-muted-foreground">{unit}</span> : null}
-        </DrillValue>
-        <DeltaPill delta={trend} />
-      </div>
-      {caption ? <div className="mt-2 text-xs text-muted-foreground">{caption}</div> : null}
+    <ChartCardBody
+      hero
+      label={
+        <span className="flex items-center gap-1">
+          {label}
+          {info && <MetricInfo def={info} />}
+        </span>
+      }
+      value={value}
+      delta={trend}
+      caption={caption ?? undefined}
+      onValueClick={onDrill}
+    >
       {spark && spark.values.length > 1 ? (
-        // Hero chart, not a strip (steep): double height, full padded width — the area gradient
-        // gives the card its depth, so the chart reads as the surface, not an illustration.
-        <div className="mt-4">
-          <Sparkline
-            values={spark.values}
-            labels={spark.labels}
-            area
-            strokeWidth={2}
-            interactive
-            caption="по дням"
-            formatValue={fmt.num}
-            className="h-28 w-full"
-          />
-        </div>
+        <Sparkline
+          values={spark.values}
+          labels={spark.labels}
+          area
+          strokeWidth={2}
+          interactive
+          caption="по дням"
+          formatValue={fmt.num}
+          className="h-full min-h-28 w-full"
+        />
       ) : null}
-    </div>
+    </ChartCardBody>
   );
 }
 

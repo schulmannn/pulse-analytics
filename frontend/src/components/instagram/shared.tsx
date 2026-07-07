@@ -138,20 +138,16 @@ export function KpiHero({
       values={daily.map((p) => p.value)}
       labels={pickLabels(daily)}
       titles={daily.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)}`)}
-      height={96}
+      height={112}
       emphasizeLastLabel
     />
   );
+  // Steep anatomy (owner rule): label + number + delta bottom-left, the chart inset to the RIGHT.
   return (
-    <div>
-      <div className="text-xs tracking-wide text-muted-foreground">{label}</div>
-      <div className="mt-1.5 flex flex-wrap items-end gap-x-3 gap-y-1">
-        <div className="kpi-accent text-[2.75rem] font-medium leading-none tabular-nums tracking-tight">{value}</div>
-        <DeltaPill delta={delta} />
-      </div>
+    <ChartCardBody hero label={label} value={value} delta={delta} onValueClick={drillTo ? () => navigate(drillTo) : undefined}>
       {chart &&
         (drillTo ? (
-          <div className="relative mt-4">
+          <div className="relative h-full">
             <Link
               to={drillTo}
               aria-label={`Разбор: ${label}`}
@@ -163,14 +159,14 @@ export function KpiHero({
               </svg>
             </Link>
             {/* Mouse convenience only (no button role — the ↗ Link above is the semantic path). */}
-            <div className="cursor-pointer" onClick={() => navigate(drillTo)}>
+            <div className="h-full cursor-pointer" onClick={() => navigate(drillTo)}>
               {chart}
             </div>
           </div>
         ) : (
-          <div className="mt-4">{chart}</div>
+          <div className="h-full">{chart}</div>
         ))}
-    </div>
+    </ChartCardBody>
   );
 }
 
