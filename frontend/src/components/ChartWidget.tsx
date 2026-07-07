@@ -10,6 +10,8 @@ import { observeSize } from '@/lib/observeSize';
 import { preserveEntryIdentity, preserveValueIdentity } from '@/lib/storeIdentity';
 import { hydrateWidgetConfigs, reconcileHydratedConfigs, setWidgetConfigsSyncHook, syncableWidgetConfigs } from '@/lib/widgetStore';
 import { BarChart } from '@/components/BarChart';
+import { DeltaPill } from '@/components/DeltaPill';
+import type { MetricDelta } from '@/lib/delta';
 import { Breakdown } from '@/components/Breakdown';
 import { PieChart } from '@/components/PieChart';
 import { DivergingBars } from '@/components/DivergingBars';
@@ -1860,6 +1862,38 @@ function DialogPeriodSegment({
           </button>
         );
       })}
+    </div>
+  );
+}
+
+/**
+ * The steep chart-card anatomy (owner rule): the headline number + its MANDATORY comparison sit
+ * bottom-LEFT, and the chart fills the remaining width to the RIGHT of the number block (inset —
+ * it starts after the comparison, not at the card edge), bottom-anchored. Cards whose data can't
+ * produce a comparison simply omit `delta` — «кроме тех мест, где не можем предоставить».
+ */
+export function ChartCardBody({
+  value,
+  delta,
+  caption,
+  children,
+}: {
+  /** Headline for the visible window (already formatted — fmt.kpi). */
+  value: string;
+  /** Comparison vs the previous same-length window; null/undefined when honestly unavailable. */
+  delta?: MetricDelta | null;
+  /** Quiet line under the pill (e.g. «к пред. периоду», «за всё время»). */
+  caption?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex h-full min-h-0 items-end gap-4">
+      <div className="flex shrink-0 flex-col items-start gap-1.5 pb-0.5">
+        <div className="kpi-accent text-3xl font-medium leading-none tabular-nums tracking-tight">{value}</div>
+        <DeltaPill delta={delta} />
+        {caption != null && <div className="text-2xs text-muted-foreground">{caption}</div>}
+      </div>
+      <div className="min-h-0 min-w-0 flex-1 self-stretch">{children}</div>
     </div>
   );
 }

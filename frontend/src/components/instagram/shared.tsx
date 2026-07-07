@@ -5,7 +5,7 @@ import { pctDelta, type MetricDelta } from '@/lib/delta';
 import { DeltaPill } from '@/components/DeltaPill';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
-import { ChartSection as WidgetChartSection, type WidgetSize } from '@/components/ChartWidget';
+import { ChartCardBody, ChartSection as WidgetChartSection, type WidgetSize } from '@/components/ChartWidget';
 import { fmtDay, pairDelta, type Point, type WindowPair } from '@/lib/igMetrics';
 import type { WidgetPeriodValue } from '@/lib/period';
 import type { IgData } from '@/lib/useIgData';
@@ -17,12 +17,19 @@ export function windowIgSeries(series: Point[], days: number, unit: string) {
   const pts = series.filter((p) => p.day !== 'total');
   const n = days === 0 ? pts.length : Math.min(days, pts.length);
   const w = pts.slice(-n);
+  // Steep headline: window total + the previous same-length window (null when «Всё» or the
+  // archive is shorter than two windows — an honest comparison or none).
+  const total = w.reduce((acc, p) => acc + p.value, 0);
+  const prevSlice = days === 0 || pts.length < 2 * n ? null : pts.slice(-2 * n, -n);
+  const prevTotal = prevSlice ? prevSlice.reduce((acc, p) => acc + p.value, 0) : null;
   return {
     values: w.map((p) => p.value),
     // FULL per-point labels (not pickLabels' 3) — LineChart picks first/mid/last itself, and
     // BarChart needs one label per bar to stride; the 3-label form mislabels the bars.
     labels: w.map((p) => fmtDay(p.day)),
     titles: w.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)} ${unit}`),
+    total,
+    prevTotal,
   };
 }
 
@@ -182,17 +189,25 @@ export function FollowsByDayCard({ data, drillTo, id, homeKey, title = 'Подп
       periodControl
       variants={(period: WidgetPeriodValue) => {
         const w = pts.filter((p) => period.inRange(p.day));
+        const total = w.reduce((acc, p) => acc + p.value, 0);
+        const prev =
+          period.days !== 0 && w.length > 0 && pts.length >= 2 * w.length
+            ? pts.slice(-2 * w.length, -w.length).reduce((acc, p) => acc + p.value, 0)
+            : null;
+        const delta = prev != null && prev > 0 ? pctDelta(total, prev) : null;
         return [
           {
             key: 'bar',
             label: 'Столбцы',
             render:
               w.length > 0 ? (
-                <BarChart
-                  values={w.map((d) => d.value)}
-                  labels={w.map((d) => fmtDay(d.day))}
-                  titles={w.map((d) => `${fmtDay(d.day)}: +${fmt.num(d.value)}`)}
-                />
+                <ChartCardBody value={`+${fmt.kpi(total)}`} delta={delta} caption={delta ? 'к пред. периоду' : period.days === 0 ? 'за всё время' : undefined}>
+                  <BarChart
+                    values={w.map((d) => d.value)}
+                    labels={w.map((d) => fmtDay(d.day))}
+                    titles={w.map((d) => `${fmtDay(d.day)}: +${fmt.num(d.value)}`)}
+                  />
+                </ChartCardBody>
               ) : (
                 <EmptyChart />
               ),
@@ -237,18 +252,28 @@ export function TrendCard({ title, series, drillTo, id, homeKey, defaultSize }: 
       periodControl
       variants={(period: WidgetPeriodValue) => {
         const w = pts.filter((p) => period.inRange(p.day));
+        // Steep anatomy: the window's total + the MANDATORY comparison vs the previous
+        // same-length window (honest: none on «Всё» or when the archive is too short).
+        const total = w.reduce((acc, p) => acc + p.value, 0);
+        const prev =
+          period.days !== 0 && w.length > 0 && pts.length >= 2 * w.length
+            ? pts.slice(-2 * w.length, -w.length).reduce((acc, p) => acc + p.value, 0)
+            : null;
+        const delta = prev != null && prev > 0 ? pctDelta(total, prev) : null;
         return [
           {
             key: 'line',
             label: 'Линия',
             render:
               w.length > 1 ? (
-                <LineChart
-                  values={w.map((p) => p.value)}
-                  labels={pickLabels(w)}
-                  titles={w.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)}`)}
-                  emphasizeLastLabel
-                />
+                <ChartCardBody value={fmt.kpi(total)} delta={delta} caption={delta ? 'к пред. периоду' : period.days === 0 ? 'за всё время' : undefined}>
+                  <LineChart
+                    values={w.map((p) => p.value)}
+                    labels={pickLabels(w)}
+                    titles={w.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)}`)}
+                    emphasizeLastLabel
+                  />
+                </ChartCardBody>
               ) : (
                 <EmptyChart />
               ),
