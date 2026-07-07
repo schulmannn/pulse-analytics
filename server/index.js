@@ -16,6 +16,7 @@ const { captionSnippet } = require('./lib/caption');
 const { fetchWithTimeout } = require('./lib/http');
 const { log, requestContext, hashIp } = require('./lib/observability');
 const notionCrash = require('./lib/notion_crash');
+const { legacyCspHeader, setAppHeaders, setHtmlSecurityHeaders } = require('./lib/securityHeaders');
 const { makeResolveChannel, makeServeSnapshot, hasWorkspaceRole } = require('./middleware/tenant');
 const { registerCollectorRoutes } = require('./routes/collector');
 
@@ -71,25 +72,12 @@ const APP_HTML_PATH = path.join(__dirname, '../public/index.html');
 let APP_HTML = '';
 try { APP_HTML = fs.readFileSync(APP_HTML_PATH, 'utf8'); }
 catch (e) { console.error('[csp] index.html read failed:', e.message); }
-const cspHeader = (nonce) => [
-  "default-src 'self'",
-  "base-uri 'none'",
-  "object-src 'none'",
-  "frame-ancestors 'none'",
-  `script-src 'self' 'nonce-${nonce}'`,
-  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-  "font-src https://fonts.gstatic.com",
-  "img-src 'self' data: https:",
-  "connect-src 'self'",
-].join('; ');
 function sendApp(req, res) {
   const nonce = crypto.randomBytes(16).toString('base64');
   let src = APP_HTML;
   if (!src) { try { src = fs.readFileSync(APP_HTML_PATH, 'utf8'); } catch { return res.status(500).end(); } }
   const html = src.split('<script>').join(`<script nonce="${nonce}">`);
-  res.set('Content-Security-Policy', cspHeader(nonce))
-     .set('X-Content-Type-Options', 'nosniff')
-     .set('Referrer-Policy', 'no-referrer')
+  setHtmlSecurityHeaders(req, res, legacyCspHeader(nonce))
      .set('Content-Type', 'text/html; charset=utf-8')
      .send(html);
 }
@@ -2810,30 +2798,6 @@ app.get('/api/bug-attachment/:id', requireAuth, requireSuper, async (req, res, n
 // is plain 'self' — no nonce. The legacy nonce-shell stays at /legacy as a reversible
 // escape hatch until the B2 cleanup (then this becomes the only HTML surface).
 const APP_DIST = path.join(__dirname, '../frontend/dist');
-const appCspHeader = [
-  "default-src 'self'",
-  "base-uri 'none'",
-  "object-src 'none'",
-  "frame-ancestors 'none'",
-  // accounts.google.com is needed for "Sign in with Google" (GIS loads its client script, opens an
-  // iframe for the button/One-Tap, and calls its endpoints). All trusted Google origins.
-  "script-src 'self' https://accounts.google.com https://apis.google.com",
-  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-  "font-src https://fonts.gstatic.com",
-  "img-src 'self' data: https:",
-  "connect-src 'self' https://accounts.google.com",
-  "frame-src https://accounts.google.com",
-].join('; ');
-function setAppHeaders(req, res) {
-  res.set('Content-Security-Policy', appCspHeader)
-     .set('X-Content-Type-Options', 'nosniff')
-     .set('Referrer-Policy', 'no-referrer');
-  // HSTS only over TLS (Railway terminates it upstream; trust-proxy makes req.secure
-  // honest). Never on plain-HTTP local dev — the browser would pin localhost to https.
-  if (req.secure || req.get('x-forwarded-proto') === 'https') {
-    res.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-  }
-}
 // Hashed SPA assets at root (/assets/*). Security headers set per response.
 app.use((req, res, next) => { setAppHeaders(req, res); next(); },
   express.static(APP_DIST, { index: false }));
