@@ -16,6 +16,10 @@ import pg from 'pg';
 const args = process.argv.slice(2);
 const USERS = Number(args[args.indexOf('--users') + 1] || 100);
 const SECONDS = Number(args[args.indexOf('--seconds') + 1] || 30);
+// Match the seeded id ranges: the `load` preset seeds 100 users / 300 channels; `load10x` seeds
+// 1000/1000, `load100x` 10000/10000. Override so virtual users spread across the whole seed.
+const SEED_USERS = Number(process.env.SEED_USERS || 100);
+const SEED_CHANNELS = Number(process.env.SEED_CHANNELS || 300);
 const BASE = process.env.BASE || 'http://localhost:3100';
 const SECRET = process.env.SESSION_SECRET;
 if (!SECRET) {
@@ -77,8 +81,8 @@ const deadline = Date.now() + SECONDS * 1000;
 let iterations = 0;
 
 async function virtualUser(i) {
-  const uid = 1000 + (i % 100);          // seed users 1000..1099
-  const channel = 5000 + (i % 300);      // seed channels 5000..5299 (spread across users)
+  const uid = 1000 + (i % SEED_USERS);       // seed users 1000..(1000+SEED_USERS-1)
+  const channel = 5000 + (i % SEED_CHANNELS); // seed channels 5000..(5000+SEED_CHANNELS-1)
   const token = mint(uid);
   while (Date.now() < deadline) {
     record('auth/me', await req('/api/auth/me', { token }));
