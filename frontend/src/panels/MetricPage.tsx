@@ -511,7 +511,7 @@ export function MetricPage() {
           chart below owns the vertical space. Same value/Δ/caption as the Overview ledger. */}
       <div>
         <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-          <span className="text-3xl font-medium leading-none tabular-nums tracking-tight">{meta.total}</span>
+          <span className="text-hero font-medium leading-none tabular-nums tracking-tight">{meta.total}</span>
           <DeltaPill delta={meta.trend} />
           <span className="text-xs tracking-wide text-muted-foreground">
             {def.term} · {periodLabel}
