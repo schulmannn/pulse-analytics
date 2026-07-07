@@ -11,7 +11,7 @@ import {
   useIgStories,
   useIgHistory,
 } from '@/api/queries';
-import { usePeriod } from '@/lib/period';
+import { usePagePeriod, usePeriod } from '@/lib/period';
 import {
   metricSeries,
   histSeries,
@@ -28,7 +28,15 @@ import {
 import { buildIgInsights } from '@/lib/igInsights';
 
 export function useIgData() {
-  const { days, range } = usePeriod();
+  // Period source, page-first: inside a feed (IgShellRoute provides PagePeriodProvider) the
+  // header chips + «Свой период» drive every window here — the same one-control contract as the
+  // TG feed. Outside a feed (Home cards, /metrics/ig-* pages) the GLOBAL period still rules, so
+  // nothing shifts on those surfaces. When a page period exists, the global range is deliberately
+  // NOT read — the page owns its window entirely (no cross-bleed between systems).
+  const pagePeriod = usePagePeriod();
+  const globalPeriod = usePeriod();
+  const days = pagePeriod?.days ?? globalPeriod.days;
+  const range = pagePeriod ? pagePeriod.range : globalPeriod.range;
   const timeframe = days === 7 ? 'last_14_days' : days === 90 || days === 0 ? 'last_90_days' : 'last_30_days';
   const insDays = range
     ? Math.min(90, Math.max(1, Math.ceil((range.to - range.from) / DAY_MS)))

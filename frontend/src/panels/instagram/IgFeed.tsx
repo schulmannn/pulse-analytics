@@ -4,10 +4,9 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useIgData } from '@/lib/useIgData';
 import type { IgData } from '@/lib/useIgData';
 import { useSelectedChannel } from '@/lib/channel-context';
-import { usePeriod } from '@/lib/period';
-import type { PeriodDays } from '@/lib/period';
+import { usePagePeriod } from '@/lib/period';
+import { PeriodChips } from '@/components/PeriodChips';
 import { IgConnectPanel, IgDataHealth } from '@/components/instagram/health';
-import { DateRangePicker } from '@/components/DateRangePicker';
 import { ErrorState } from '@/components/ErrorState';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
@@ -79,78 +78,13 @@ function useIgConnectNotice() {
   return { notice, dismiss: () => setNotice(null) };
 }
 
-/** Window presets for the IG period chips. IG reads the GLOBAL usePeriod (via useIgData), so the
-    control re-windows every IG card; it now sits in each section's sticky header (TG parity) —
-    same value on every page, one placement rule everywhere. */
-const IG_PERIOD_PRESETS: { days: PeriodDays; label: string }[] = [
-  { days: 7, label: '7д' },
-  { days: 30, label: '30д' },
-  { days: 90, label: '90д' },
-  { days: 0, label: 'Всё' },
-];
-
-/** Short «дд.мм» for the active custom-range chip label. */
-const fmtRangeChip = (ms: number) => new Date(ms).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
-
+/** IG period chips — the PAGE period (same follow/«Стр.» contract as the TG feed), plus the
+    «Свой период» calendar the IG bodies honour (useIgData windows by the page range). One shared
+    PeriodChips component for both networks; the control sits in each section's sticky header. */
 export function IgPeriodControl() {
-  const { days, range, setDays, setRange } = usePeriod();
-  const [pickerOpen, setPickerOpen] = useState(false);
-  return (
-    <div role="group" aria-label="Период" className="relative flex flex-wrap items-center gap-1.5">
-      {IG_PERIOD_PRESETS.map((chip) => (
-        <button
-          key={chip.days}
-          type="button"
-          onClick={() => setDays(chip.days)}
-          aria-pressed={!range && days === chip.days}
-          className={cn(
-            'rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors',
-            !range && days === chip.days
-              ? 'border-primary/40 bg-primary/10 text-primary'
-              : 'border-border text-muted-foreground hover:text-foreground',
-          )}
-        >
-          {chip.label}
-        </button>
-      ))}
-      {/* Custom date range — filters the posts list (Контент) and every windowed metric to an exact
-          period. Picking a preset above clears the range (usePeriod.setDays resets it). */}
-      <button
-        type="button"
-        onClick={() => setPickerOpen((v) => !v)}
-        aria-haspopup="dialog"
-        aria-expanded={pickerOpen}
-        aria-pressed={!!range}
-        className={cn(
-          'rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors',
-          range
-            ? 'border-primary/40 bg-primary/10 text-primary'
-            : 'border-border text-muted-foreground hover:text-foreground',
-        )}
-      >
-        {range ? `${fmtRangeChip(range.from)} – ${fmtRangeChip(range.to)}` : 'Свой период'}
-      </button>
-      {pickerOpen && (
-        <>
-          {/* Scrim closes the popover on an outside click / Esc-less dismissal. */}
-          <div className="fixed inset-0 z-popover" aria-hidden="true" onClick={() => setPickerOpen(false)} />
-          <div className="absolute right-0 top-full z-popover mt-2 rounded-lg border border-border bg-card p-3">
-            <DateRangePicker
-              value={range}
-              onApply={(r) => {
-                setRange(r);
-                setPickerOpen(false);
-              }}
-              onReset={() => {
-                setRange(null);
-                setPickerOpen(false);
-              }}
-            />
-          </div>
-        </>
-      )}
-    </div>
-  );
+  const pp = usePagePeriod();
+  if (!pp) return null;
+  return <PeriodChips value={pp.days} onChange={pp.setDays} range={pp.range} onRangeChange={pp.setRange} />;
 }
 
 export function IgShell() {

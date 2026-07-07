@@ -162,26 +162,38 @@ export function widgetPeriodValue(days: PeriodDays): WidgetPeriodValue {
 
 // ── Page period (feed header) ────────────────────────────────────────────────────────────────
 /**
- * A feed-level period chosen in the page header (the Telegram Обзор/Аналитика header chips). It is
- * the DEFAULT window for every card WITHOUT an explicit per-widget override (`prefs.period`), so one
- * header control re-windows the whole feed at once — while a card the user tuned to 7д/90д/Всё keeps
- * its own window. `null` outside a feed that provides it (Home board, metric pages, IG): there every
- * card falls back to {@link DEFAULT_WIDGET_DAYS} exactly as before, so nothing shifts.
+ * A feed-level period chosen in the page header (the Обзор/Аналитика header chips — TG and IG feeds
+ * alike). It is the DEFAULT window for every card WITHOUT an explicit per-widget override
+ * (`prefs.period`), so one header control re-windows the whole feed at once — while a card the user
+ * tuned to 7д/90д/Всё keeps its own window. `null` outside a feed that provides one (Home board,
+ * metric pages): there every card falls back to {@link DEFAULT_WIDGET_DAYS} exactly as before.
+ *
+ * `range` — a custom date window on top of the preset (the IG header exposes it; the TG header is
+ * presets-only until the TG card bodies learn ranges). Picking a preset clears the range, exactly
+ * like the global {@link PeriodProvider}. Per-widget overrides stay preset-only (noted follow-up).
  */
 export interface PagePeriodValue {
   days: PeriodDays;
   setDays: (days: PeriodDays) => void;
+  range: DateRange | null;
+  setRange: (range: DateRange | null) => void;
 }
 
 const PagePeriodContext = createContext<PagePeriodValue | null>(null);
 
 export function PagePeriodProvider({ children }: { children: ReactNode }) {
-  const [days, setDays] = useState<PeriodDays>(DEFAULT_WIDGET_DAYS);
-  const value = useMemo(() => ({ days, setDays }), [days]);
+  const [days, setDaysState] = useState<PeriodDays>(DEFAULT_WIDGET_DAYS);
+  const [range, setRangeState] = useState<DateRange | null>(null);
+  const setDays = useCallback((next: PeriodDays) => {
+    setRangeState(null);
+    setDaysState(next);
+  }, []);
+  const setRange = useCallback((next: DateRange | null) => setRangeState(next), []);
+  const value = useMemo(() => ({ days, setDays, range, setRange }), [days, setDays, range, setRange]);
   return <PagePeriodContext.Provider value={value}>{children}</PagePeriodContext.Provider>;
 }
 
-/** The feed header's page period, or null when no feed provides one (Home / metric pages / IG). */
+/** The feed header's page period, or null when no feed provides one (Home / metric pages). */
 export function usePagePeriod(): PagePeriodValue | null {
   return useContext(PagePeriodContext);
 }
