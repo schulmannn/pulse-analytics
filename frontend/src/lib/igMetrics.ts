@@ -108,7 +108,9 @@ export function tvBreakdown(
 
 export const fmtDay = (iso: string) => {
   const t = Date.parse(iso);
-  return Number.isFinite(t) ? new Date(t).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }) : '';
+  // Short-month form (7 июл.) — the SAME date grammar TG charts use (аудит тултипов: IG
+  // говорил 07.07, TG — 21 янв на соседних карточках).
+  return Number.isFinite(t) ? new Date(t).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }) : '';
 };
 
 export const flag = (iso: string) => {
