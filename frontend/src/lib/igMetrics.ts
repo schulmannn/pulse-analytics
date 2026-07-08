@@ -3,6 +3,7 @@
 // "what the numbers mean" logic is testable and the panels stay presentational.
 import type { IgBreakdowns, IgHistoryRow, IgInsights, IgOnline, IgPost } from '@/api/schemas';
 import { pctDelta, type MetricDelta } from '@/lib/delta';
+import { fmt } from '@/lib/format';
 
 export const DAY_MS = 24 * 60 * 60 * 1000;
 export const DAY_NAMES = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
@@ -134,6 +135,29 @@ export const flag = (iso: string) => {
   if (!/^[A-Z]{2}$/.test(cc)) return '';
   return String.fromCodePoint(...[...cc].map((c) => 127397 + c.charCodeAt(0)));
 };
+
+/** Window an IG daily-Point series to the last `days` points (0 = «Всё»). Steep headline math:
+    the metric page (/metrics/ig-*), the Home cards, and the narrative widget must all derive their
+    IG numbers from THIS one function so they can never silently diverge — the contract test in
+    igMetrics.test.ts pins narrative == this. Drops any 'total' marker; a shorter series returns all
+    it has (never fabricates); prevTotal is null unless two full windows fit (honest comparison). */
+export function windowIgSeries(series: Point[], days: number, unit: string) {
+  const pts = series.filter((p) => p.day !== 'total');
+  const n = days === 0 ? pts.length : Math.min(days, pts.length);
+  const w = pts.slice(-n);
+  const total = w.reduce((acc, p) => acc + p.value, 0);
+  const prevSlice = days === 0 || pts.length < 2 * n ? null : pts.slice(-2 * n, -n);
+  const prevTotal = prevSlice ? prevSlice.reduce((acc, p) => acc + p.value, 0) : null;
+  return {
+    values: w.map((p) => p.value),
+    // FULL per-point labels (not pickLabels' 3) — LineChart picks first/mid/last itself, and
+    // BarChart needs one label per bar to stride; the 3-label form mislabels the bars.
+    labels: w.map((p) => fmtDay(p.day)),
+    titles: w.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)} ${unit}`),
+    total,
+    prevTotal,
+  };
+}
 
 // ── Geo normalization ──
 // Instagram returns cities as "City, Region" (region often redundant or in English:

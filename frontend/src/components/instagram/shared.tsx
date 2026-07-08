@@ -7,32 +7,13 @@ import { EmptyState } from '@/components/EmptyState';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { ChartCardBody, ChartSection as WidgetChartSection, type WidgetSize } from '@/components/ChartWidget';
-import { fmtDay, pairDelta, type Point, type WindowPair } from '@/lib/igMetrics';
+import { fmtDay, pairDelta, windowIgSeries, type Point, type WindowPair } from '@/lib/igMetrics';
 import type { WidgetPeriodValue } from '@/lib/period';
 import type { IgData } from '@/lib/useIgData';
 
-/** Window an IG daily-Point series to the last `days` points (0 = «Всё») for the rich-expand
-    overlay — feeds renderExpanded / renderExpandedBar / statsFor. Drops any 'total' marker point
-    and never fabricates: a shorter series returns all it has. */
-export function windowIgSeries(series: Point[], days: number, unit: string) {
-  const pts = series.filter((p) => p.day !== 'total');
-  const n = days === 0 ? pts.length : Math.min(days, pts.length);
-  const w = pts.slice(-n);
-  // Steep headline: window total + the previous same-length window (null when «Всё» or the
-  // archive is shorter than two windows — an honest comparison or none).
-  const total = w.reduce((acc, p) => acc + p.value, 0);
-  const prevSlice = days === 0 || pts.length < 2 * n ? null : pts.slice(-2 * n, -n);
-  const prevTotal = prevSlice ? prevSlice.reduce((acc, p) => acc + p.value, 0) : null;
-  return {
-    values: w.map((p) => p.value),
-    // FULL per-point labels (not pickLabels' 3) — LineChart picks first/mid/last itself, and
-    // BarChart needs one label per bar to stride; the 3-label form mislabels the bars.
-    labels: w.map((p) => fmtDay(p.day)),
-    titles: w.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)} ${unit}`),
-    total,
-    prevTotal,
-  };
-}
+// windowIgSeries moved to lib/igMetrics (pure home, shared by the metric page + narrative widget;
+// re-exported here so existing `.../instagram/shared` importers keep working).
+export { windowIgSeries };
 
 /** A top-level view section — an h2 heading with an optional right-aligned action. */
 export function Section({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
