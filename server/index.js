@@ -2542,7 +2542,20 @@ app.post('/api/ingest/daily', asyncHandler(async (req, res) => {
     });
 
     const result = outcome.skipped ? ((outcome.job && outcome.job.result) || {}) : outcome.result;
-    res.json({ ok: true, skipped: !!outcome.skipped, channel_daily: result.channel_daily || 0, posts: result.posts || 0, velocity: !!result.velocity });
+    // Наблюдаемость тихой смерти архива: для рабочего центрального канала graphsToDailyRows всегда
+    // отдаёт полный диапазон, поэтому channel_daily=0 означает не «пустой день», а упавший тяжёлый
+    // MTProto-fetch (graphs=null). Раньше это возвращалось как ok:true/HTTP 200 → крон зелёный,
+    // архив молча перестаёт расти. Теперь помечаем degraded: крон роняет джобу по этому флагу
+    // (нативное письмо GitHub = бесплатный проактивный алерт), а лог даёт greppable-сигнал.
+    const degraded = (result.channel_daily || 0) === 0;
+    if (degraded) {
+      log('error', 'ingest_degraded', {
+        request_id: req.requestId,
+        skipped: !!outcome.skipped,
+        reason: 'channel_daily=0 (upstream MTProto /graphs likely failed) — archive did not grow',
+      });
+    }
+    res.json({ ok: true, degraded, skipped: !!outcome.skipped, channel_daily: result.channel_daily || 0, posts: result.posts || 0, velocity: !!result.velocity });
 
     // A duplicate day already ran the tails on the first tick — skip the redundant heavy passes.
     if (outcome.skipped) return;
@@ -2869,6 +2882,19 @@ app.use((err, req, res, next) => {
 });
 
 // ── Запуск ──────────────────────────────────────────────────────
+// Single-replica guardrail (ops/ADR-002-single-replica.md). Response cache, igInflight singleflight
+// and the express-rate-limit stores are all in-process — correct only at ONE web replica. Railway
+// doesn't expose the replica count to the app, so the operator declares it via WEB_REPLICAS; bumping
+// Railway's replica slider WITHOUT the Redis-backed shared state (still unbuilt) silently multiplies
+// rate limits and Graph/MTProto quota burn. Loud boot error = the tripwire for that scale-up.
+const WEB_REPLICAS = Number(process.env.WEB_REPLICAS || '1');
+if (Number.isFinite(WEB_REPLICAS) && WEB_REPLICAS > 1) {
+  log('error', 'multi_replica_unsupported', {
+    web_replicas: WEB_REPLICAS,
+    reason: 'in-process cache + rate-limit + singleflight are per-instance; needs shared (Redis) store first — see ops/ADR-002-single-replica.md',
+  });
+}
+
 app.listen(PORT, () => {
   console.log(`
 ╔══════════════════════════════════════════╗
