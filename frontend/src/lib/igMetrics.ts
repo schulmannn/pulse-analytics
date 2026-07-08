@@ -73,10 +73,13 @@ export function longerSeries(live: Point[], persisted: Point[]): Point[] {
   return datedCount(persisted) > datedCount(live) ? persisted : live;
 }
 
-/** Which metrics arrive as a real daily series (≥2 dated points) vs a windowed aggregate. Only the
-    real series may be drawn as a daily chart — aggregates are shown as period comparisons instead. */
-export function hasDailySeries(series: Point[]): boolean {
-  return series.filter((p) => p.day !== 'total' && Number.isFinite(Date.parse(p.day))).length >= 2;
+/** Which metrics arrive as a real daily series vs a windowed aggregate. Only the real series may be
+    drawn as a daily chart — aggregates are shown as period comparisons instead. `min` defaults to 2
+    (reach/follows have a genuine live daily series); the PROMOTED metrics (views/взаимодействия) pass
+    `min=3` so the live 2-point synthetic aggregate (prev+cur) never counts as a chartable series —
+    only a real multi-day archive (or a real live daily series) does. */
+export function hasDailySeries(series: Point[], min = 2): boolean {
+  return series.filter((p) => p.day !== 'total' && Number.isFinite(Date.parse(p.day))).length >= min;
 }
 
 export interface WindowPair {

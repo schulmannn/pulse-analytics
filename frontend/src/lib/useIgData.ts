@@ -87,17 +87,23 @@ export function useIgData() {
       // Deduplicated windowed reach (prev+cur synthetic points from the backend total_value call).
       // Used ONLY for the headline KPI / ER denominator — the daily `reach` above still feeds charts.
       reachWindow: metricSeries(ins, 'reach_window'),
-      views: metricSeries(ins, 'views'),
-      ti: metricSeries(ins, 'total_interactions'),
-      engaged: metricSeries(ins, 'accounts_engaged'),
+      // АДДИТИВНЫЕ метрики (views/взаимодействия/лайки/комменты/сохранения/репосты) — DB-first,
+      // как reach/follower. Живой insights отдаёт их лишь двумя синтет-точками окна (cur/prev), и
+      // до его ответа KPI показывали «—» (лаг, о котором сообщил владелец). Крон копит их в ig_daily
+      // ежедневно (collectIgDailyForAccount + IG_TV_NAMES), поэтому longerSeries берёт архив, когда
+      // он длиннее, — числа появляются сразу из БД. Суммирование по дням == оконный total (метрики
+      // аддитивные, в отличие от reach: у него дедуп-инфляция, поэтому reach остаётся на reach_window).
+      views: longerSeries(metricSeries(ins, 'views'), histSeries(histRows, 'views')),
+      ti: longerSeries(metricSeries(ins, 'total_interactions'), histSeries(histRows, 'total_interactions')),
+      engaged: metricSeries(ins, 'accounts_engaged'), // уник. аккаунты — дедуп, дневную сумму НЕ берём
       // Оба конца — НЕТТО-прирост: живой follower_count и колонка ig_daily.followers (крон пишет
       // туда именно follower_count). НЕ мешать с follows (gross новые подписки) — иначе смысл
       // линии молча менялся бы на day-1 кроссовере live↔persisted.
       follower: longerSeries(metricSeries(ins, 'follower_count'), histSeries(histRows, 'followers')),
-      saves: metricSeries(ins, 'saves'),
-      likes: metricSeries(ins, 'likes'),
-      comments: metricSeries(ins, 'comments'),
-      shares: metricSeries(ins, 'shares'),
+      saves: longerSeries(metricSeries(ins, 'saves'), histSeries(histRows, 'saves')),
+      likes: longerSeries(metricSeries(ins, 'likes'), histSeries(histRows, 'likes')),
+      comments: longerSeries(metricSeries(ins, 'comments'), histSeries(histRows, 'comments')),
+      shares: longerSeries(metricSeries(ins, 'shares'), histSeries(histRows, 'shares')),
       profileViews: metricSeries(ins, 'profile_views'),
       follows: metricSeries(ins, 'follows'), // gross new follows (FOLLOWER)
       unfollows: metricSeries(ins, 'unfollows'), // gross unfollows (NON_FOLLOWER)
@@ -248,6 +254,13 @@ export function useIgData() {
     insights,
     reachHasDaily: hasDailySeries(series.reach),
     followerHasDaily: hasDailySeries(series.follower),
+    // Есть ли РЕАЛЬНЫЙ дневной ряд для views/взаимодействий — гейт промоушена их метрик-страниц в
+    // дневной график. Считаем по итоговой series.* (архив ИЛИ живой дневной ряд), min=3 отсекает
+    // 2-точечный синтет-агрегат живого API — рисуем график только когда он осмысленный.
+    viewsHasDaily: hasDailySeries(series.views, 3),
+    tiHasDaily: hasDailySeries(series.ti, 3),
+    likesHasDaily: hasDailySeries(series.likes, 3),
+    savesHasDaily: hasDailySeries(series.saves, 3),
     netMovement,
     queries: { profile: profileQ, insights: insightsQ, posts: postsQ, breakdowns: breakdownsQ, online: onlineQ, stories: storiesQ },
   };
