@@ -30,10 +30,14 @@ interface IgDailyDef {
   term: string;
   /** Genitive for tooltips («… охвата»). */
   genitive: string;
-  seriesKey: 'reach' | 'follower';
+  seriesKey: 'reach' | 'follower' | 'views' | 'ti' | 'likes' | 'saves';
   formula: string;
   included: string;
   source: string;
+  /** PROMOTED metric (all the additive engagement series): its daily chart is real ONLY once the
+      ig_daily archive has accumulated the series. Until then the page falls back to the aggregate
+      comparison (via AGG_DEFS) so we never draw a 2-point synthetic line. reach/follows have no gate. */
+  promotedGate?: 'viewsHasDaily' | 'tiHasDaily' | 'likesHasDaily' | 'savesHasDaily';
 }
 
 const DAILY_DEFS: Record<string, IgDailyDef> = {
@@ -54,6 +58,46 @@ const DAILY_DEFS: Record<string, IgDailyDef> = {
     included:
       'Только валовые подписки: отписки Instagram по дням не отдаёт (итог за период — в «Движении аудитории» на Аналитике).',
     source: 'Instagram insights (follows) + дневной архив ig_daily.',
+  },
+  'ig-views': {
+    term: 'Просмотры',
+    genitive: 'просмотров',
+    seriesKey: 'views',
+    formula: 'Просмотры контента по дням; заголовок — сумма за выбранное окно.',
+    included:
+      'Дневной ряд копится в архиве ig_daily (живой API отдаёт только итог за период). Просмотры аддитивны — сумма по дням равна периоду.',
+    source: 'Instagram insights (views) + дневной архив ig_daily.',
+    promotedGate: 'viewsHasDaily',
+  },
+  'ig-interactions': {
+    term: 'Взаимодействия',
+    genitive: 'взаимодействий',
+    seriesKey: 'ti',
+    formula: 'Лайки + комментарии + сохранения + репосты по дням; заголовок — сумма за окно.',
+    included:
+      'Дневной ряд копится в архиве ig_daily (живой API отдаёт только итог за период). Взаимодействия аддитивны — сумма по дням равна периоду.',
+    source: 'Instagram insights (total_interactions) + дневной архив ig_daily.',
+    promotedGate: 'tiHasDaily',
+  },
+  'ig-likes': {
+    term: 'Лайки',
+    genitive: 'лайков',
+    seriesKey: 'likes',
+    formula: 'Лайки на контент по дням; заголовок — сумма за выбранное окно.',
+    included:
+      'Дневной ряд копится в архиве ig_daily (живой API отдаёт только итог за период). Лайки аддитивны — сумма по дням равна периоду.',
+    source: 'Instagram insights (likes) + дневной архив ig_daily.',
+    promotedGate: 'likesHasDaily',
+  },
+  'ig-saves': {
+    term: 'Сохранения',
+    genitive: 'сохранений',
+    seriesKey: 'saves',
+    formula: 'Сохранения контента по дням; заголовок — сумма за выбранное окно.',
+    included:
+      'Дневной ряд копится в архиве ig_daily (живой API отдаёт только итог за период). Сохранения аддитивны — сумма по дням равна периоду.',
+    source: 'Instagram insights (saves) + дневной архив ig_daily.',
+    promotedGate: 'savesHasDaily',
   },
 };
 
@@ -192,11 +236,15 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
     );
   }
   const daily = DAILY_DEFS[metricKey];
-  if (!daily) {
+  // A promoted metric (views / взаимодействия) shows its daily chart ONLY once the ig_daily archive
+  // carries the series; until then it degrades to the period-comparison page (never a synthetic
+  // 2-point line). reach/follows have no gate — their daily series is genuine from day one.
+  const gatedToAgg = daily?.promotedGate && !ig[daily.promotedGate];
+  if (!daily || gatedToAgg) {
     return <IgAggregatePage def={AGG_DEFS[metricKey]} pair={ig.pairs[AGG_DEFS[metricKey].pairKey]} windowDays={ig.window.days} handle={handle} />;
   }
 
-  // ── Daily explorer (reach / follows) ────────────────────────────────────────────────────
+  // ── Daily explorer (reach / follows / promoted views·взаимодействия) ─────────────────────
   const seriesFull = ig.series[daily.seriesKey].filter((p) => p.day !== 'total');
   const win = windowIgSeries(seriesFull, days, daily.genitive);
   const n = win.values.length;
