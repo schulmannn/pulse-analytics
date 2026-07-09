@@ -57,7 +57,7 @@ export function KpiGrid() {
   }
 
   const {
-    displayMembers, totalViews, totalReactions, avgViews, er,
+    displayMembers, channelViews, totalReactions, avgViews, er,
     subscriberTrend, viewsTrend, reactionsTrend, erTrend, avgReachTrend,
     viewsSpark, periodLabel, viewsCaption, subDelta, reactionsDelta, erCaption,
   } = derived;
@@ -66,7 +66,7 @@ export function KpiGrid() {
       {/* HERO — primary metric: big number + area sparkline (Figma Overview lead). */}
       <FeaturedKpi
         label={`Просмотры · ${periodLabel}`}
-        value={fmt.kpi(totalViews)}
+        value={fmt.kpi(channelViews)}
         trend={viewsTrend}
         caption={viewsCaption}
         spark={viewsSpark}

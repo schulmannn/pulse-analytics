@@ -117,6 +117,18 @@ export function deriveKpis(
     : null;
 
   const historyRows = history?.rows ?? [];
+  // «Просмотры» — КАНАЛЬНЫЕ, из дневного архива (channel_daily.views, персист из GetBroadcastStats
+  // views_graph): честные «просмотры канала за период». Пост-сумма (`totalViews`) меряет УЖЕ —
+  // только просмотры постов, ОПУБЛИКОВАННЫХ в окне — и расходится в разы (на проде 10.8k vs 1.8k);
+  // она остаётся базой для avg-reach-на-пост ниже и фолбэком, когда архива нет (без БД / малый
+  // канал без stats / day 1). Тренд уже канальный (dailyWindowDelta по historyRows.views).
+  const viewsArchiveRows = historyRows
+    .filter((r) => r.views != null && inRange(r.day))
+    .sort((a, b) => a.day.localeCompare(b.day));
+  const hasChannelViews = viewsArchiveRows.length > 0;
+  const channelViews = hasChannelViews
+    ? viewsArchiveRows.reduce((sum, r) => sum + Number(r.views), 0)
+    : totalViews;
   const viewsTrend =
     dailyWindowDelta(historyRows, (r) => Number(r.views ?? 0), days)
     ?? (windowTotals ? pctDelta(windowTotals.current.views, windowTotals.previous.views) : null);
@@ -153,7 +165,11 @@ export function deriveKpis(
     const entries = [...byDay.entries()].sort(([a], [b]) => a.localeCompare(b));
     return { labels: entries.map(([k]) => fmt.day(k)), values: entries.map(([, v]) => v) };
   };
-  const viewsSpark = dailySeries((post) => Number(post.views ?? post.view_count ?? 0));
+  // Sparkline matches the (channel-wide) headline: daily channel views from the archive when we
+  // have it, else the post-derived daily series (fallback path).
+  const viewsSpark: DailySeries = hasChannelViews
+    ? { labels: viewsArchiveRows.map((r) => fmt.day(r.day)), values: viewsArchiveRows.map((r) => Number(r.views)) }
+    : dailySeries((post) => Number(post.views ?? post.view_count ?? 0));
   // Subscriber trend from the daily archive (reliable, unlike post-derived views).
   const subsRows = historyRows
     .filter((row) => row.subscribers != null && inRange(row.day))
@@ -178,7 +194,10 @@ export function deriveKpis(
   const signedAbs = (n: number) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${fmt.num(Math.abs(n))}`;
   const vsPrev = (cur: number, prev: number): string | null =>
     range ? null : `${signedAbs(cur - prev)} к пред. периоду`;
-  const viewsAbsCaption = windowTotals ? vsPrev(windowTotals.current.views, windowTotals.previous.views) : null;
+  // Channel-wide views: the «+N к пред.» absolute is post-window math (windowTotals) and would
+  // contradict the channel headline — drop it and lean on the (channel-based) % trend. Only the
+  // post-sum fallback keeps the paired-window absolute.
+  const viewsAbsCaption = !hasChannelViews && windowTotals ? vsPrev(windowTotals.current.views, windowTotals.previous.views) : null;
   const reactionsCaption = windowTotals ? vsPrev(windowTotals.current.reactions, windowTotals.previous.reactions) : null;
   const forwardsCaption = windowTotals ? vsPrev(windowTotals.current.forwards, windowTotals.previous.forwards) : null;
   const erPp =
@@ -193,7 +212,9 @@ export function deriveKpis(
   // только «Всё».
   const fetched = data?.posts?.length ?? 0;
   const atFetchCap = !range && fetched >= 100 && postsAnalyzed >= fetched;
-  const viewsBase = postsAnalyzed
+  // «по N постам» описывает пост-базис — неверно для канальных просмотров (они по всему каналу,
+  // не по постам окна). Оставляем этот caption только на фолбэке в пост-сумму.
+  const viewsBase = !hasChannelViews && postsAnalyzed
     ? atFetchCap
       ? `по последним ${postsAnalyzed} постам`
       : `по ${postsAnalyzed} постам`
@@ -212,7 +233,7 @@ export function deriveKpis(
   const normPostsAll = normalizeTgPosts(data?.posts ?? [], data?.channel ?? {});
   const normPosts = normPostsAll.filter((post) => inRange(post.date));
   const drillMeta: Record<DrillKey, { total: string; trend?: MetricDelta | null; caption?: string | null }> = {
-    views: { total: fmt.short(totalViews), trend: viewsTrend, caption: viewsCaption },
+    views: { total: fmt.short(channelViews), trend: viewsTrend, caption: viewsCaption },
     subscribers: { total: fmt.num(displayMembers), trend: subscriberTrend, caption: subCaption },
     avgReach: { total: fmt.short(avgViews), trend: avgReachTrend, caption: null },
     reactions: { total: fmt.short(totalReactions), trend: reactionsTrend, caption: reactionsCaption },
@@ -221,7 +242,7 @@ export function deriveKpis(
   };
 
   return {
-    members, displayMembers, totalViews, totalReactions, avgViews, er,
+    members, displayMembers, totalViews, channelViews, totalReactions, avgViews, er,
     subscriberTrend, viewsTrend, reactionsTrend, erTrend, avgReachTrend,
     viewsSpark, subsSpark, periodLabel, viewsCaption, subDelta, reactionsDelta, erCaption,
     normPosts, normPostsAll, drillMeta,
