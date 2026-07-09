@@ -14,6 +14,7 @@ const db         = require('./db');
 const { createAuth, hashPassword, verifyPassword, SCRYPT, rateLimitKey, isSessionStale } = require('./lib/auth');
 const { captionSnippet } = require('./lib/caption');
 const { fetchWithTimeout } = require('./lib/http');
+const { createBreaker } = require('./lib/mtprotoBreaker');
 const { log, requestContext, hashIp } = require('./lib/observability');
 const notionCrash = require('./lib/notion_crash');
 const { canDispatchBugKind, sanitizeForPrompt } = require('./lib/bugfix_gate');
@@ -2005,68 +2006,111 @@ const MTPROTO_TOKEN = process.env.MTPROTO_TOKEN || '';
 const MTPROTO_TIMEOUT_MS       = 12000;
 const MTPROTO_TIMEOUT_STATS_MS = 60000;
 const MTPROTO_TIMEOUT_HEAVY_MS = 120000;
+const mtprotoBreaker = createBreaker();
 
 async function mtprotoFetch(path, params = {}, timeoutMs = MTPROTO_TIMEOUT_MS) {
-  const url = new URL(MTPROTO_URL + path);
-  Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
-  let res;
-  try {
-    res = await fetchWithTimeout(url.toString(), {
-      headers: { 'x-internal-token': MTPROTO_TOKEN }
-    }, timeoutMs);
-  } catch (err) {
-    const e = new Error('Сервис Telegram недоступен, попробуйте позже');
+  const gate = mtprotoBreaker.tryAcquire();
+  if (!gate.ok) {
+    const e = new Error(gate.reason === 'open'
+      ? 'Сервис Telegram недоступен, попробуйте позже'
+      : 'Сервис Telegram перегружен, попробуйте позже');
     e.status = 503;
+    e.retryAfter = Math.ceil(gate.retryAfterMs / 1000);
     throw e;
   }
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    if (res.status === 429) {
-      // Telethon FloodWait mapped by the Python side: an expected throttle, not an
-      // outage. Surface as 503-with-message so the dashboard shows "retry later".
-      const e = new Error('Telegram временно ограничил запросы' + (err.retry_after != null ? ` — повтори через ~${err.retry_after} с` : ''));
+
+  let breakerOk = false;
+  try {
+    const url = new URL(MTPROTO_URL + path);
+    Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
+    let res;
+    try {
+      res = await fetchWithTimeout(url.toString(), {
+        headers: { 'x-internal-token': MTPROTO_TOKEN }
+      }, timeoutMs);
+    } catch (err) {
+      const e = new Error('Сервис Telegram недоступен, попробуйте позже');
       e.status = 503;
+      throw e;
+    }
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      if (res.status === 429) {
+        // Telethon FloodWait mapped by the Python side: an expected throttle, not an
+        // outage. Surface as 503-with-message so the dashboard shows "retry later".
+        const e = new Error('Telegram временно ограничил запросы' + (err.retry_after != null ? ` — повтори через ~${err.retry_after} с` : ''));
+        e.status = 503;
+        e.floodWait = true;
+        if (err.retry_after != null) e.retryAfter = err.retry_after;
+        throw e;
+      }
+      const e = new Error(err.detail || `MTProto error ${res.status}`);
+      e.status = res.status >= 500 ? 503 : res.status;
       if (err.retry_after != null) e.retryAfter = err.retry_after;
       throw e;
     }
-    const e = new Error(err.detail || `MTProto error ${res.status}`);
-    e.status = res.status >= 500 ? 503 : res.status;
-    if (err.retry_after != null) e.retryAfter = err.retry_after;
-    throw e;
+    const data = await res.json();
+    breakerOk = true;
+    return data;
+  } catch (err) {
+    breakerOk = !(err && err.status === 503 && !err.floodWait);
+    throw err;
+  } finally {
+    mtprotoBreaker.onSettled(breakerOk);
   }
-  return res.json();
 }
 
 // POST variant for the QR-login handshake (start/poll/password/cancel).
 async function mtprotoPost(path, { params = {}, body = undefined, timeoutMs = MTPROTO_TIMEOUT_MS } = {}) {
-  const url = new URL(MTPROTO_URL + path);
-  Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
-  let res;
-  try {
-    res = await fetchWithTimeout(url.toString(), {
-      method: 'POST',
-      headers: { 'x-internal-token': MTPROTO_TOKEN, ...(body ? { 'content-type': 'application/json' } : {}) },
-      body: body ? JSON.stringify(body) : undefined,
-    }, timeoutMs);
-  } catch (err) {
-    const e = new Error('Сервис Telegram недоступен, попробуйте позже');
+  const gate = mtprotoBreaker.tryAcquire();
+  if (!gate.ok) {
+    const e = new Error(gate.reason === 'open'
+      ? 'Сервис Telegram недоступен, попробуйте позже'
+      : 'Сервис Telegram перегружен, попробуйте позже');
     e.status = 503;
+    e.retryAfter = Math.ceil(gate.retryAfterMs / 1000);
     throw e;
   }
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    if (res.status === 429) {
-      const e = new Error('Telegram временно ограничил запросы' + (err.retry_after != null ? ` — повтори через ~${err.retry_after} с` : ''));
+
+  let breakerOk = false;
+  try {
+    const url = new URL(MTPROTO_URL + path);
+    Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
+    let res;
+    try {
+      res = await fetchWithTimeout(url.toString(), {
+        method: 'POST',
+        headers: { 'x-internal-token': MTPROTO_TOKEN, ...(body ? { 'content-type': 'application/json' } : {}) },
+        body: body ? JSON.stringify(body) : undefined,
+      }, timeoutMs);
+    } catch (err) {
+      const e = new Error('Сервис Telegram недоступен, попробуйте позже');
       e.status = 503;
+      throw e;
+    }
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      if (res.status === 429) {
+        const e = new Error('Telegram временно ограничил запросы' + (err.retry_after != null ? ` — повтори через ~${err.retry_after} с` : ''));
+        e.status = 503;
+        e.floodWait = true;
+        if (err.retry_after != null) e.retryAfter = err.retry_after;
+        throw e;
+      }
+      const e = new Error(err.detail || `MTProto error ${res.status}`);
+      e.status = res.status >= 500 ? 503 : res.status;
       if (err.retry_after != null) e.retryAfter = err.retry_after;
       throw e;
     }
-    const e = new Error(err.detail || `MTProto error ${res.status}`);
-    e.status = res.status >= 500 ? 503 : res.status;
-    if (err.retry_after != null) e.retryAfter = err.retry_after;
-    throw e;
+    const data = await res.json();
+    breakerOk = true;
+    return data;
+  } catch (err) {
+    breakerOk = !(err && err.status === 503 && !err.floodWait);
+    throw err;
+  } finally {
+    mtprotoBreaker.onSettled(breakerOk);
   }
-  return res.json();
 }
 
 function sendMtprotoError(res, err) {
