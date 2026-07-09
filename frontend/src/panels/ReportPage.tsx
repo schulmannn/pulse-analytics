@@ -23,7 +23,7 @@ import { BarChart } from '@/components/BarChart';
 import { ChartExpandedContext } from '@/components/ExpandableChart';
 import { Icon } from '@/components/nav-icons';
 import { ChartSection } from '@/components/instagram/shared';
-import { Digest } from '@/panels/Digest';
+import { NarrativeWeekBody } from '@/panels/NarrativeWeek';
 import { Insights } from '@/panels/Insights';
 import { TopPosts } from '@/panels/TopPosts';
 
@@ -466,10 +466,12 @@ function ReportDocumentBody({
     switch (key) {
       case 'kpi-summary':
         return <ChartSection title="Сводка">{renderKpiLedger()}</ChartSection>;
+      case 'week':
+      // 'digest' is the deprecated alias — the narrative replaces the old Digest «Инсайт» block.
       case 'digest':
         return (
-          <ChartSection title="Инсайт">
-            <Digest />
+          <ChartSection title="Неделя канала">
+            <NarrativeWeekBody />
           </ChartSection>
         );
       case 'metric-views':
