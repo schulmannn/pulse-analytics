@@ -2540,15 +2540,10 @@ app.delete('/api/cache', requireAuth, requireSuper, (req, res) => {
 // Снимок дня: тянет дневные серии из /graphs (+ посты) и upsert'ит в БД.
 // Защищён отдельным токеном (НЕ командный пароль) — дёргается cron'ом.
 app.post('/api/ingest/daily', asyncHandler(async (req, res) => {
-  // Preferred source is the x-ingest-token header; the query param keeps the existing
-  // GitHub Actions cron working but is deprecated (tokens in URLs land in proxy logs).
-  const token = req.headers['x-ingest-token'] || req.query.token;
+  const token = req.headers['x-ingest-token'];
   if (!process.env.INGEST_TOKEN || typeof token !== 'string' || !token
       || !timingSafeEqualStr(token, process.env.INGEST_TOKEN)) {
     return res.status(403).json({ ok: false, error: 'forbidden' });
-  }
-  if (!req.headers['x-ingest-token']) {
-    log('warn', 'ingest_token_in_query_deprecated', { request_id: req.requestId });
   }
   if (!db.enabled) return res.status(200).json({ ok: false, reason: 'DATABASE_URL не задан — БД выключена' });
   const channelId = await db.getOwnerChannelId();   // central channel = "collector #0"
@@ -2902,20 +2897,24 @@ app.get('*', (req, res) => {
 app.use((err, req, res, next) => {
   if (res.headersSent) return next(err);
   const status = Number.isInteger(err && err.status) && err.status >= 400 && err.status < 600 ? err.status : 500;
+  const dbUnavailable = status === 500 && db.isDbUnavailable(err);
+  const responseStatus = dbUnavailable ? 503 : status;
   log('error', 'unhandled_error', {
     request_id: req.requestId,
     method: req.method,
     path: req.path,
-    status,
+    status: responseStatus,
     error: err && err.message,
     stack: err && err.stack,
   });
-  const body = { error: status === 500 ? 'internal_error' : String((err && err.message) || 'error'), request_id: req.requestId };
+  const body = dbUnavailable
+    ? { error: 'Сервис временно недоступен, попробуйте позже', request_id: req.requestId }
+    : { error: responseStatus === 500 ? 'internal_error' : String((err && err.message) || 'error'), request_id: req.requestId };
   if (err && err.retryAfter != null) {
     res.set('Retry-After', String(err.retryAfter));
     body.retry_after = err.retryAfter;
   }
-  res.status(status).json(body);
+  res.status(responseStatus).json(body);
 });
 
 // ── Запуск ──────────────────────────────────────────────────────
