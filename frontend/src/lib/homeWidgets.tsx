@@ -6,6 +6,7 @@ import { TopPosts } from '@/panels/TopPosts';
 import { HistoryChartBlock, VelocityChartBlock, HeatmapChartBlock } from '@/panels/Charts';
 import { GrowthChartBlock } from '@/panels/Overview';
 import { NarrativeWeekBlock } from '@/panels/NarrativeWeek';
+import { IgNarrativeWeekBlock } from '@/panels/IgNarrativeWeek';
 import { HomeMentionsByDay } from '@/panels/Mentions';
 import { IgReachHomeCard, IgFollowsHomeCard, IgKpiHomeCard, IgMovementHomeCard, IgCompareHomeCard, IgInsightsHomeCard } from '@/panels/instagram/igHome';
 import { Compare } from '@/panels/Compare';
@@ -119,6 +120,11 @@ export const HOME_REGISTRY: Record<string, HomeWidgetDef> = {
   'ig-follows': {
     label: 'IG · Подписки по дням',
     render: () => <IgFollowsHomeCard id="home-ig-follows" homeKey="ig-follows" />,
+  },
+  'ig-week': {
+    label: 'IG · Неделя',
+    // Self-wrapping (IgNarrativeWeekBlock renders its own ChartSection) — pass the home id/key.
+    render: () => <IgNarrativeWeekBlock id="home-ig-week" homeKey="ig-week" />,
   },
   'tg-compare': {
     label: 'Сравнение периодов',

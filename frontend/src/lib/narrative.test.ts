@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildWeekNarrative, narrativeToPlain, plural, pluralKpi, type NarrativeInput } from '@/lib/narrative';
+import { buildIgWeekNarrative, buildWeekNarrative, narrativeToPlain, plural, pluralKpi, type NarrativeIgInput, type NarrativeInput } from '@/lib/narrative';
 
 /** Intl ставит NBSP/узкий пробел в разрядах — тесты сравнивают по обычным пробелам. */
 const norm = (s: string) => s.replace(/[  ]/g, ' ');
@@ -191,6 +191,61 @@ describe('Instagram + кросс-сетевой контраст', () => {
     expect(plain).toContain('Instagram за неделю');
     expect(plain).not.toContain('за ту же');
     expect(plain).not.toContain('разошлись');
+  });
+});
+
+describe('buildIgWeekNarrative — IG-фокусный рассказ (виджет «IG · Неделя»)', () => {
+  const igInput = (over: Partial<NarrativeIgInput> = {}): NarrativeIgInput => ({
+    reachDaily: mkSeries(Array(14).fill(0).map((_, i) => (i < 7 ? 600 : 680))), // prev 600 → cur 680 (+13%)
+    followsDaily: mkSeries([0, 0, 0, 0, 0, 0, 0, 2, 3, -1, 4, 0, 1, 2]).slice(-7),
+    followersNow: 12480,
+    mediaWeek: [],
+    avgMediaErv: null,
+    ...over,
+  });
+
+  it('Instagram ведёт: охват-сдвиг + Δ + движение базы, drill на /metrics/ig-*', () => {
+    const plain = norm(narrativeToPlain(buildIgWeekNarrative(igInput())));
+    expect(plain).toContain('Охват за неделю — 4 760'); // 680×7, headline страницы ig-reach 7д
+    expect(plain).toContain('↑13'); // (4760−4200)/4200
+    expect(plain).toContain('База выросла на 11'); // Σ дневных нетто-подписок последней недели
+    expect(plain).toContain('12.5k');
+    const links = buildIgWeekNarrative(igInput()).paragraphs.flat().filter((s) => s.kind === 'number');
+    for (const s of links) expect(s.kind === 'number' && s.to).toMatch(/^\/metrics\/ig-/);
+  });
+
+  it('IG-герой недели рождается при лифте ERV ≥ ×1.6 (тот же гейт, что у TG)', () => {
+    const withHero = igInput({
+      mediaWeek: [
+        { title: 'Процесс саше', erv: 9.2, permalink: 'https://instagram.com/p/x' },
+        { title: 'Обычный', erv: 3.0, permalink: null },
+        { title: 'Ещё', erv: 2.5, permalink: null },
+      ],
+      avgMediaErv: 4.0,
+    });
+    const plain = norm(narrativeToPlain(buildIgWeekNarrative(withHero)));
+    expect(plain).toContain('Герой недели');
+    expect(plain).toContain('9.2%');
+    expect(plain).toContain('в 2.3 раза выше нормы аккаунта');
+
+    const weak = igInput({ mediaWeek: withHero.mediaWeek!.map((m) => ({ ...m, erv: 5 })), avgMediaErv: 4.0 });
+    expect(norm(narrativeToPlain(buildIgWeekNarrative(weak)))).not.toContain('Герой недели');
+  });
+
+  it('без полного окна охвата сдвиг не рождается, но база остаётся', () => {
+    const plain = norm(narrativeToPlain(buildIgWeekNarrative(igInput({ reachDaily: mkSeries([100, 200, 300]) }))));
+    expect(plain).not.toContain('Охват за неделю');
+    expect(plain).toContain('12.5k');
+  });
+
+  it('совсем мало данных → тихий честный текст, не вода', () => {
+    const nar = buildIgWeekNarrative({ reachDaily: [], followsDaily: [], followersNow: null, mediaWeek: [], avgMediaErv: null });
+    expect(nar.quiet).toBe(true);
+    expect(norm(narrativeToPlain(nar))).toContain('мало данных Instagram');
+  });
+
+  it('ig=null (не подключён) → тихо, без падения', () => {
+    expect(buildIgWeekNarrative(null).quiet).toBe(true);
   });
 });
 
