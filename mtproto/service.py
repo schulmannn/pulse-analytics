@@ -66,11 +66,28 @@ app = FastAPI(title='Atlavue MTProto Service', version='1.0.0')
 # FloodWait — Telegram throttled the session. An expected condition, not an outage:
 # answer 429 with retry_after so the web proxy can tell the dashboard to retry later.
 # Endpoint-level `except Exception` blocks re-raise FloodWaitError so it lands here.
+def _flood_wait_payload(exc):
+    seconds = int(getattr(exc, 'seconds', 0) or 0)
+    return {'detail': 'flood_wait', 'retry_after': seconds}
+
+
 @app.exception_handler(FloodWaitError)
 async def flood_wait_handler(request, exc):
-    seconds = int(getattr(exc, 'seconds', 0) or 0)
-    log.warning(f'FloodWait: {seconds}s ({request.url.path})')
-    return JSONResponse(status_code=429, content={'detail': 'flood_wait', 'retry_after': seconds})
+    payload = _flood_wait_payload(exc)
+    log.warning(f"FloodWait: {payload['retry_after']}s ({request.url.path})")
+    return JSONResponse(status_code=429, content=payload)
+
+
+# Per-Telethon-call deadline. Kept UNDER the web caller's tightest MTProto timeout (the stats tier
+# is 60s in server/index.js: /stats, /post_stats, /views_summary) so Python fails first with a clean
+# 503 and releases the stats lock, instead of Node aborting the socket while the await keeps running.
+# 55s is far above any legitimate single Telethon round-trip, so heavy endpoints (graphs/velocity/
+# mentions, 120s Node budget) don't false-abort — each of their calls is wrapped individually.
+TELETHON_CALL_TIMEOUT_S = 55
+# Max wait to acquire the single stats lock before fast-failing 503 — the bulkhead that stops queued
+# callers piling up to their Node deadline when one heavy call is stuck.
+STATS_LOCK_TIMEOUT_S = 45
+CLIENT_CONNECT_TIMEOUT_S = 20
 
 
 # One heavy-stats request at a time: parallel GetBroadcastStats/GetMessageStats
@@ -80,9 +97,14 @@ _STATS_LOCK = asyncio.Semaphore(1)
 
 
 async def _serialize_stats():
-    async with _STATS_LOCK:
+    try:
+        await asyncio.wait_for(_STATS_LOCK.acquire(), timeout=STATS_LOCK_TIMEOUT_S)
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=503, detail='mtproto_timeout')
+    try:
         yield
-
+    finally:
+        _STATS_LOCK.release()
 
 # ── Telethon client ──────────────────────────────────────
 client: Optional[TelegramClient] = None
@@ -100,7 +122,14 @@ async def get_client() -> TelegramClient:
         if not SESSION:
             raise RuntimeError('TG_SESSION не задан — добавь строку сессии в переменные окружения')
         new_client = TelegramClient(StringSession(SESSION), API_ID, API_HASH)
-        await new_client.connect()
+        try:
+            await asyncio.wait_for(new_client.connect(), timeout=CLIENT_CONNECT_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            try:
+                await new_client.disconnect()
+            except Exception:
+                pass
+            raise HTTPException(status_code=503, detail='mtproto_timeout')
         if not await new_client.is_user_authorized():
             raise RuntimeError('TG_SESSION недействителен или истёк — сгенерируй заново')
         client = new_client
@@ -211,7 +240,10 @@ def _build_post(group):
 async def _resolve_graph(tg, g):
     if isinstance(g, StatsGraphAsync):
         try:
-            g = await tg(LoadAsyncGraphRequest(token=g.token))
+            g = await asyncio.wait_for(
+                tg(LoadAsyncGraphRequest(token=g.token)), timeout=TELETHON_CALL_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            raise
         except FloodWaitError:
             raise          # throttled → the whole request must answer 429, not degrade
         except Exception:
@@ -296,6 +328,8 @@ async def get_channel(x_internal_token: str = Header(default='')):
         }
     except FloodWaitError:
         raise
+    except HTTPException:
+        raise
     except Exception as e:
         log.error(f'get_channel error: {e}')
         raise HTTPException(status_code=500, detail=str(e))
@@ -316,6 +350,8 @@ async def get_posts(
 
     except FloodWaitError:
         raise
+    except HTTPException:
+        raise
     except Exception as e:
         log.error(f'get_posts error: {e}')
         raise HTTPException(status_code=500, detail=str(e))
@@ -329,7 +365,9 @@ async def get_views_summary(
     check_auth(x_internal_token)
     try:
         tg = await get_client()
-        msgs = await tg.get_messages(CHANNEL, limit=limit)
+        # Wrapped like the other stats-lock holders: /views_summary runs under _serialize_stats, so a
+        # hung get_messages would hold the lock unbounded and starve every other stats endpoint.
+        msgs = await asyncio.wait_for(tg.get_messages(CHANNEL, limit=limit), timeout=TELETHON_CALL_TIMEOUT_S)
         posts = [_build_post(g) for g in _logical_posts(msgs)]   # album-collapsed
 
         total_views = total_forwards = total_reactions = total_replies = 0
@@ -366,7 +404,11 @@ async def get_views_summary(
             'avg_views_by_type': avg_by_type,
         }
 
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=503, detail='mtproto_timeout')
     except FloodWaitError:
+        raise
+    except HTTPException:
         raise
     except Exception as e:
         log.error(f'views_summary error: {e}')
@@ -378,8 +420,9 @@ async def get_stats(x_internal_token: str = Header(default='')):
     check_auth(x_internal_token)
     try:
         tg = await get_client()
-        entity = await tg.get_entity(CHANNEL)
-        stats = await tg(GetBroadcastStatsRequest(channel=entity, dark=False))
+        entity = await asyncio.wait_for(tg.get_entity(CHANNEL), timeout=TELETHON_CALL_TIMEOUT_S)
+        stats = await asyncio.wait_for(
+            tg(GetBroadcastStatsRequest(channel=entity, dark=False)), timeout=TELETHON_CALL_TIMEOUT_S)
 
         def extract(obj):
             if obj is None:
@@ -399,7 +442,11 @@ async def get_stats(x_internal_token: str = Header(default='')):
             'enabled_notifications': extract(getattr(stats, 'enabled_notifications', None)),
         }
 
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=503, detail='mtproto_timeout')
     except FloodWaitError:
+        raise
+    except HTTPException:
         raise
     except Exception as e:
         return {'available': False, 'error': str(e)}
@@ -412,13 +459,17 @@ async def get_graphs(points: int = Query(default=45, le=400), x_internal_token: 
     check_auth(x_internal_token)
     try:
         tg = await get_client()
-        entity = await tg.get_entity(CHANNEL)
-        stats = await tg(GetBroadcastStatsRequest(channel=entity, dark=False))
+        entity = await asyncio.wait_for(tg.get_entity(CHANNEL), timeout=TELETHON_CALL_TIMEOUT_S)
+        stats = await asyncio.wait_for(
+            tg(GetBroadcastStatsRequest(channel=entity, dark=False)), timeout=TELETHON_CALL_TIMEOUT_S)
 
         async def resolve(g):
             if isinstance(g, StatsGraphAsync):
                 try:
-                    g = await tg(LoadAsyncGraphRequest(token=g.token))
+                    g = await asyncio.wait_for(
+                        tg(LoadAsyncGraphRequest(token=g.token)), timeout=TELETHON_CALL_TIMEOUT_S)
+                except asyncio.TimeoutError:
+                    raise
                 except FloodWaitError:
                     raise
                 except Exception:
@@ -494,7 +545,11 @@ async def get_graphs(points: int = Query(default=45, le=400), x_internal_token: 
             'interactions':             timeseries(await resolve(getattr(stats, 'interactions_graph', None)), points),
             'top_hours':                top_hours,
         }
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=503, detail='mtproto_timeout')
     except FloodWaitError:
+        raise
+    except HTTPException:
         raise
     except Exception as e:
         log.error(f'get_graphs error: {e}')
@@ -508,13 +563,17 @@ async def get_post_stats(msg_id: int, x_internal_token: str = Header(default='')
     check_auth(x_internal_token)
     try:
         tg = await get_client()
-        entity = await tg.get_entity(CHANNEL)
-        st = await tg(GetMessageStatsRequest(channel=entity, msg_id=msg_id, dark=False))
+        entity = await asyncio.wait_for(tg.get_entity(CHANNEL), timeout=TELETHON_CALL_TIMEOUT_S)
+        st = await asyncio.wait_for(
+            tg(GetMessageStatsRequest(channel=entity, msg_id=msg_id, dark=False)), timeout=TELETHON_CALL_TIMEOUT_S)
 
         async def resolve(g):
             if isinstance(g, StatsGraphAsync):
                 try:
-                    g = await tg(LoadAsyncGraphRequest(token=g.token))
+                    g = await asyncio.wait_for(
+                        tg(LoadAsyncGraphRequest(token=g.token)), timeout=TELETHON_CALL_TIMEOUT_S)
+                except asyncio.TimeoutError:
+                    raise
                 except FloodWaitError:
                     raise
                 except Exception:
@@ -553,7 +612,11 @@ async def get_post_stats(msg_id: int, x_internal_token: str = Header(default='')
             reactions = sorted([a for a in agg if a['value'] > 0], key=lambda a: a['value'], reverse=True)
 
         return {'available': True, 'views_graph': views, 'reactions': reactions}
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=503, detail='mtproto_timeout')
     except FloodWaitError:
+        raise
+    except HTTPException:
         raise
     except Exception as e:
         log.error(f'get_post_stats error: {e}')
@@ -573,8 +636,8 @@ async def get_velocity(
     check_auth(x_internal_token)
     try:
         tg = await get_client()
-        entity = await tg.get_entity(CHANNEL)
-        msgs = await tg.get_messages(CHANNEL, limit=limit)
+        entity = await asyncio.wait_for(tg.get_entity(CHANNEL), timeout=TELETHON_CALL_TIMEOUT_S)
+        msgs = await asyncio.wait_for(tg.get_messages(CHANNEL, limit=limit), timeout=TELETHON_CALL_TIMEOUT_S)
         posts = [_build_post(g) for g in _logical_posts(msgs)]
         cand = [p for p in posts if p['views'] >= 80][:top]
 
@@ -586,7 +649,11 @@ async def get_velocity(
 
         for p in cand:
             try:
-                st = await tg(GetMessageStatsRequest(channel=entity, msg_id=p['id'], dark=False))
+                st = await asyncio.wait_for(
+                    tg(GetMessageStatsRequest(channel=entity, msg_id=p['id'], dark=False)),
+                    timeout=TELETHON_CALL_TIMEOUT_S)
+            except asyncio.TimeoutError:
+                raise
             except FloodWaitError:
                 raise
             except Exception:
@@ -650,7 +717,11 @@ async def get_velocity(
             'day1_share': avg(day1),
             't80_days':   (int(t80_med) + 1) if t80_med is not None else None,
         }
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=503, detail='mtproto_timeout')
     except FloodWaitError:
+        raise
+    except HTTPException:
         raise
     except Exception as e:
         # реальный сбой (сеть/сессия/неожиданное) → честный 5xx для мониторинга.
@@ -710,7 +781,8 @@ async def get_mentions(x_internal_token: str = Header(default='')):
         quota = None
         for q in MENTION_QUERIES:
             try:
-                flood = await tg(CheckSearchPostsFloodRequest(query=q))
+                flood = await asyncio.wait_for(
+                    tg(CheckSearchPostsFloodRequest(query=q)), timeout=TELETHON_CALL_TIMEOUT_S)
                 free = getattr(flood, 'query_is_free', False)
                 remains = getattr(flood, 'remains', None)
                 total = getattr(flood, 'total_daily', None)
@@ -718,13 +790,19 @@ async def get_mentions(x_internal_token: str = Header(default='')):
                 if not (free or (remains and remains > 0)):
                     skipped.append(q)
                     continue
+            except asyncio.TimeoutError:
+                raise
             except FloodWaitError:
                 raise
             except Exception:
                 pass   # quota check failed → try the search anyway (won't pay Stars: API errors instead)
             try:
-                res = await tg(SearchPostsRequest(
-                    query=q, offset_rate=0, offset_peer=InputPeerEmpty(), offset_id=0, limit=100))
+                res = await asyncio.wait_for(
+                    tg(SearchPostsRequest(
+                        query=q, offset_rate=0, offset_peer=InputPeerEmpty(), offset_id=0, limit=100)),
+                    timeout=TELETHON_CALL_TIMEOUT_S)
+            except asyncio.TimeoutError:
+                raise
             except FloodWaitError:
                 raise
             except Exception as e:
@@ -786,7 +864,11 @@ async def get_mentions(x_internal_token: str = Header(default='')):
             'queried':         queried,
             'skipped':         skipped,
         }
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=503, detail='mtproto_timeout')
     except FloodWaitError:
+        raise
+    except HTTPException:
         raise
     except Exception as e:
         # внешний сбой (get_client / неожиданное); пер-запросные ошибки searchPosts
@@ -1060,6 +1142,8 @@ async def qr_start(x_internal_token: str = Header(default='')):
         return {'id': qid, 'url': qr.url, 'expires_in': expires_in}
     except FloodWaitError:
         raise
+    except HTTPException:
+        raise
     except Exception as e:
         log.error(f'qr_start: {e}')
         raise HTTPException(status_code=500, detail=str(e))
@@ -1101,6 +1185,8 @@ async def qr_password(id: str = Query(...), password: str = Body(..., embed=True
     except PasswordHashInvalidError:
         return {'status': 'password', 'error': 'bad_password'}      # genuine wrong password
     except FloodWaitError:
+        raise
+    except HTTPException:
         raise
     except Exception as e:
         log.warning(f'qr_password sign_in failed: {e}')
@@ -1269,7 +1355,9 @@ async def qr_collect(session: str = Body(...), channel: str = Body(...),
             'graphs':        (await _graphs_payload(tg, stats_obj, graph_points)) if stats_obj is not None else {'available': False, 'error': stats_err},
         }
     except FloodWaitError as e:
-        raise HTTPException(status_code=429, detail=f'flood_wait:{getattr(e, "seconds", 0)}')
+        return JSONResponse(status_code=429, content=_flood_wait_payload(e))
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=503, detail='mtproto_timeout')
     except HTTPException:
         raise
     except Exception as e:
