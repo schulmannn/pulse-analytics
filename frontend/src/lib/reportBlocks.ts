@@ -6,8 +6,9 @@
 // They survive the move to the generic model as the `preset` block type (config.key), so an
 // existing report renders byte-identical and the curated blocks stay addable.
 export type ReportBlockKey =
+  | 'week'
   | 'kpi-summary'
-  | 'digest'
+  | 'digest' // legacy — deprecated by 'week' (narrative); still a valid saved key, renders the narrative
   | 'metric-views'
   | 'metric-subscribers'
   | 'metric-reactions'
@@ -15,9 +16,11 @@ export type ReportBlockKey =
   | 'insights'
   | 'top-posts';
 
+// Addable presets. «Неделя канала» (narrative) leads and replaces the old «Инсайт» (Digest) block —
+// 'digest' стал legacy: не предлагается заново, но остаётся валидным ключом (рендерит нарратив).
 export const REPORT_BLOCKS: Array<{ key: ReportBlockKey; label: string }> = [
+  { key: 'week', label: 'Неделя канала' },
   { key: 'kpi-summary', label: 'Сводка' },
-  { key: 'digest', label: 'Инсайт' },
   { key: 'metric-views', label: 'Просмотры по дням' },
   { key: 'metric-subscribers', label: 'Подписчики по дням' },
   { key: 'metric-reactions', label: 'Реакции по дням' },
@@ -33,7 +36,8 @@ export const DEFAULT_REPORT_BLOCKS: ReportBlockKey[] = REPORT_BLOCKS
   .filter((key) => key !== 'metric-reactions');
 
 export function isReportBlockKey(raw: string): raw is ReportBlockKey {
-  return REPORT_BLOCKS.some((b) => b.key === raw);
+  // 'digest' is legacy (dropped from the add-list) but still valid so saved reports keep rendering.
+  return raw === 'digest' || REPORT_BLOCKS.some((b) => b.key === raw);
 }
 
 // ── Generic block model (steep / Notion): a block is { id, type, config }. ──────────────────
@@ -71,7 +75,7 @@ export function defaultBlock(type: ReportBlockType, presetKey?: ReportBlockKey):
     case 'divider':
       return { id: genId(), type, config: {} };
     case 'preset':
-      return presetBlock(presetKey && isReportBlockKey(presetKey) ? presetKey : 'digest');
+      return presetBlock(presetKey && isReportBlockKey(presetKey) ? presetKey : 'week');
   }
 }
 

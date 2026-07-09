@@ -86,10 +86,10 @@ describe('defaultBlock — inserted-block defaults', () => {
     expect(hasId(defaultBlock('text'))).toBe(true);
   });
 
-  it('preset default takes a valid key, else falls back to digest', () => {
+  it('preset default takes a valid key, else falls back to week (narrative)', () => {
     expect(defaultBlock('preset', 'insights')).toMatchObject({ type: 'preset', config: { key: 'insights' } });
     // @ts-expect-error — an invalid key is coerced to the fallback at runtime
-    expect(defaultBlock('preset', 'nope')).toMatchObject({ type: 'preset', config: { key: 'digest' } });
-    expect(defaultBlock('preset')).toMatchObject({ type: 'preset', config: { key: 'digest' } });
+    expect(defaultBlock('preset', 'nope')).toMatchObject({ type: 'preset', config: { key: 'week' } });
+    expect(defaultBlock('preset')).toMatchObject({ type: 'preset', config: { key: 'week' } });
   });
 });
