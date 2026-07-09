@@ -29,12 +29,11 @@ export interface WidgetCapabilities {
   filter: boolean;
 }
 
-export const LEGACY_KEYS = ['kpi', 'digest', 'growth', 'top-posts', 'history', 'velocity', 'heatmap', 'mentions'] as const;
+export const LEGACY_KEYS = ['kpi', 'growth', 'top-posts', 'history', 'velocity', 'heatmap', 'mentions'] as const;
 export type LegacyKey = (typeof LEGACY_KEYS)[number];
 
 export const LEGACY_LABEL: Record<LegacyKey, string> = {
   kpi: 'Показатели',
-  digest: 'Инсайт',
   growth: 'Рост подписчиков',
   'top-posts': 'Топ постов',
   history: 'История подписчиков',
@@ -58,7 +57,6 @@ const SHELL_ONLY: WidgetCapabilities = { metric: false, viz: false, grain: false
 
 export const LEGACY_CAPABILITIES: Record<LegacyKey, WidgetCapabilities> = {
   kpi: SHELL_ONLY,
-  digest: SHELL_ONLY,
   growth: SHELL_ONLY,
   'top-posts': SHELL_ONLY,
   history: SHELL_ONLY,

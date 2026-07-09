@@ -93,7 +93,7 @@ export interface WidgetConfig {
 }
 
 // ── «custom:<id>» keys — how a Home/report slot references a stored WidgetConfig alongside the
-// legacy registry keys ('digest', …) and report presets. Shared convention for S4/S6 so the
+// legacy registry keys ('kpi', …) and report presets. Shared convention for S4/S6 so the
 // surfaces agree on how to tell a config-backed widget from a curated one. ─────────────────────
 export const CUSTOM_PREFIX = 'custom:';
 export const customKey = (configId: string): string => `${CUSTOM_PREFIX}${configId}`;
