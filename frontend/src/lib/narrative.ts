@@ -44,8 +44,10 @@ export interface NarrativePost {
 /** Instagram-вход (фаза 2). Серии — ровно те, что едят страницы /metrics/ig-reach и
  *  /metrics/ig-follows (слитые live+архив), поэтому числа рассказа сходятся с ними 1-в-1. */
 export interface NarrativeIgInput {
-  /** Дневной охват, СТАРЫЕ → НОВЫЕ (сумма по дням — семантика страницы ig-reach). */
+  /** Daily reach, old → new. Used for the sparkline; reachWeek carries the dedup headline/WoW. */
   reachDaily: { day: string; v: number }[];
+  /** Deduplicated 7-day Accounts reached window. Number/WoW use this; reachDaily remains the sparkline. */
+  reachWeek?: { cur: number; prev: number; hasCur: boolean; hasPrev: boolean };
   /** Дневное ЧИСТОЕ движение базы = follows − unfollows подневно (см. netFollowerDaily). Σ окна ==
    *  KPI «Подписчики» (netMovement). НЕ follower_count/уровень — те gross, без вычета отписок. */
   followsDaily: { day: string; v: number }[];
@@ -105,6 +107,24 @@ const lift = (x: number) => x.toFixed(1).replace(/\.0$/, '');
  *  не выдаём за «разошлись»/«общее движение». */
 const CONTRAST_MIN_PCT = 3;
 
+function igReachWindow(ig: NarrativeIgInput): { cur: number; prev: number; pct: number } | null {
+  const reachWeek = ig.reachWeek;
+  if (reachWeek?.hasCur && reachWeek.hasPrev && reachWeek.prev > 0) {
+    return {
+      cur: reachWeek.cur,
+      prev: reachWeek.prev,
+      pct: ((reachWeek.cur - reachWeek.prev) / reachWeek.prev) * 100,
+    };
+  }
+
+  const last7 = ig.reachDaily.slice(-7);
+  const prev7 = ig.reachDaily.slice(-14, -7);
+  if (last7.length !== 7 || prev7.length !== 7) return null;
+  const cur = sum(last7.map((p) => p.v));
+  const prev = sum(prev7.map((p) => p.v));
+  return prev > 0 ? { cur, prev, pct: ((cur - prev) / prev) * 100 } : null;
+}
+
 /** IG-неделя: охват по дням + чистое движение базы. Гейт — оба полных окна охвата (7+7 точек,
  *  прошлая неделя ненулевая); Instagram не подключён → входа нет → абзаца нет. */
 function buildIgStory(
@@ -112,16 +132,12 @@ function buildIgStory(
   sameWeek: boolean,
 ): { para: NarrativeParagraph; pct: number } | null {
   if (!ig) return null;
-  const last7 = ig.reachDaily.slice(-7);
-  const prev7 = ig.reachDaily.slice(-14, -7);
-  if (last7.length !== 7 || prev7.length !== 7) return null;
-  const curSum = sum(last7.map((p) => p.v));
-  const prevSum = sum(prev7.map((p) => p.v));
-  if (prevSum <= 0) return null;
-  const pct = ((curSum - prevSum) / prevSum) * 100;
+  const reach = igReachWindow(ig);
+  if (!reach) return null;
+  const pct = reach.pct;
   const para: NarrativeParagraph = [
-    t(sameWeek ? 'Instagram за ту же неделю: охват по дням ' : 'Instagram за неделю: охват по дням '),
-    n(fmt.kpi(curSum), '/metrics/ig-reach'),
+    t(sameWeek ? 'Instagram за ту же неделю: охват ' : 'Instagram за неделю: охват '),
+    n(fmt.kpi(reach.cur), '/metrics/ig-reach'),
     t(' — на '),
     { kind: 'delta', pct },
     t(` ${pct < 0 ? 'ниже' : 'выше'} предыдущей `),
@@ -170,16 +186,13 @@ function buildIgStory(
 export function buildIgWeekNarrative(ig: NarrativeIgInput | null | undefined): WeekNarrative {
   const paragraphs: NarrativeParagraph[] = [];
   if (ig) {
-    const last7 = ig.reachDaily.slice(-7);
-    const prev7 = ig.reachDaily.slice(-14, -7);
-    const curSum = sum(last7.map((p) => p.v));
-    const prevSum = sum(prev7.map((p) => p.v));
     // Охват-сдвиг (гейт: оба полных окна 7+7, прошлая неделя ненулевая).
-    if (last7.length === 7 && prev7.length === 7 && prevSum > 0) {
-      const pct = ((curSum - prevSum) / prevSum) * 100;
+    const reach = igReachWindow(ig);
+    if (reach) {
+      const pct = reach.pct;
       paragraphs.push([
         t('Охват за неделю — '),
-        n(fmt.kpi(curSum), '/metrics/ig-reach'),
+        n(fmt.kpi(reach.cur), '/metrics/ig-reach'),
         t(', на '),
         { kind: 'delta', pct },
         t(` ${pct < 0 ? 'ниже' : 'выше'} предыдущей `),
