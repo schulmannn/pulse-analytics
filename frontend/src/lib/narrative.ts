@@ -46,7 +46,8 @@ export interface NarrativePost {
 export interface NarrativeIgInput {
   /** Дневной охват, СТАРЫЕ → НОВЫЕ (сумма по дням — семантика страницы ig-reach). */
   reachDaily: { day: string; v: number }[];
-  /** Дневной ЧИСТЫЙ прирост подписчиков (follower_count / ig_daily.followers — дельты, не уровень). */
+  /** Дневное ЧИСТОЕ движение базы = follows − unfollows подневно (см. netFollowerDaily). Σ окна ==
+   *  KPI «Подписчики» (netMovement). НЕ follower_count/уровень — те gross, без вычета отписок. */
   followsDaily: { day: string; v: number }[];
   /** Текущая база (profile.followers_count); null = профиль не отдал. */
   followersNow: number | null;
