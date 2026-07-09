@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { useHistory, useIgHistory, useIgInsights, useIgPosts, useIgProfile, useTgFull, useTgGraphs, useChannels } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { useDemo } from '@/lib/demo-context';
-import { histSeries, longerSeries, metricSeries, postEr, type Point } from '@/lib/igMetrics';
+import { histSeries, longerSeries, metricSeries, netFollowerDaily, postEr, type Point } from '@/lib/igMetrics';
 import { normalizeTgPosts, type NormalizedPost } from '@/lib/posts';
 import { buildWeekNarrative, type NarrativeIgInput, type NarrativeInput, type NarrativeParagraph, type NarrativeSeg } from '@/lib/narrative';
 import { ChartSection } from '@/components/ChartWidget';
@@ -111,7 +111,10 @@ export function useIgWeekInput(): { input: NarrativeIgInput | null; loading: boo
     const dated = (s: Point[]) => s.filter((p) => p.day !== 'total' && Number.isFinite(Date.parse(p.day)));
     const reach = dated(longerSeries(metricSeries(ins, 'reach'), histSeries(rows, 'reach')));
     if (!reach.length) return null;
-    const follows = dated(longerSeries(metricSeries(ins, 'follower_count'), histSeries(rows, 'followers')));
+    // Движение базы = НЕТТО из архива (ig_daily.follows − unfollows подневно), тот же смысл, что
+    // KPI-карточка «Подписчики». follower_count / ig_daily.followers — GROSS дневной приход БЕЗ
+    // вычета отписок: суммирование врало «база выросла на N», когда база на деле падала.
+    const follows = dated(netFollowerDaily(rows));
     // Медиа недели + норма ERV за 4 недели — канонная postEr (те же числа, что контент-таблицы);
     // герой меряется только по медиа с охватом.
     const now = Date.now();

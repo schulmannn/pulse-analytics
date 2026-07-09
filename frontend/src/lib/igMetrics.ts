@@ -74,6 +74,17 @@ export function longerSeries(live: Point[], persisted: Point[]): Point[] {
   return datedCount(persisted) > datedCount(live) ? persisted : live;
 }
 
+/** Дневное ЧИСТОЕ движение базы из АРХИВА: ig_daily.follows − ig_daily.unfollows подневно (крон
+ *  пишет обе колонки за каждый календарный день, окно = ровно вчера) — РЕАЛЬНАЯ дневная серия, а не
+ *  оконный агрегат, поэтому проходит гейт рассказа «ровно 7 точек». Тот же смысл, что KPI «Подписчики»
+ *  (net = follows − unfollows), знак/направление сходятся. НЕ follower_count / ig_daily.followers: те
+ *  дают GROSS дневной приход БЕЗ вычета отписок — суммирование врало «база выросла», когда она падала.
+ *  Дни без колонки follows отфильтрованы (histSeries роняет null); отсутствующий парный unfollows = 0. */
+export function netFollowerDaily(rows: IgHistoryRow[] | undefined): Point[] {
+  const unfByDay = new Map(histSeries(rows, 'unfollows').map((p) => [p.day, p.value]));
+  return histSeries(rows, 'follows').map((p) => ({ day: p.day, value: p.value - (unfByDay.get(p.day) ?? 0) }));
+}
+
 /** Which metrics arrive as a real daily series vs a windowed aggregate. Only the real series may be
     drawn as a daily chart — aggregates are shown as period comparisons instead. `min` defaults to 2
     (reach/follows have a genuine live daily series); the PROMOTED metrics (views/взаимодействия) pass
