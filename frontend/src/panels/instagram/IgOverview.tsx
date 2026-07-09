@@ -4,6 +4,7 @@ import { IgKpiBlock } from '@/components/instagram/shared';
 import { InsightsBlock } from '@/components/instagram/insights';
 import { TopPostsBlock } from '@/components/instagram/content';
 import { ChartSection, WidgetGroup } from '@/components/ChartWidget';
+import { IgNarrativeWeekBlock } from '@/panels/IgNarrativeWeek';
 
 /**
  * IG Обзор — the focused summary, mirroring the Telegram Overview: ALL of it widgets in one
@@ -19,6 +20,9 @@ import { ChartSection, WidgetGroup } from '@/components/ChartWidget';
 export function IgOverview({ ig }: { ig: IgData }) {
   return (
     <WidgetGroup id="ig-overview" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
+      {/* IG-нарратив ведёт Обзор (симметрия с TG-«Неделя канала» на TG-Обзоре) — рассказ недели
+          на всю ширину, самофетч, числа сходятся со страницами /metrics/ig-*. */}
+      <IgNarrativeWeekBlock id="ig-overview-week" homeKey="ig-week" defaultSize="full" />
       {/* Widget label «Показатели», NOT «Обзор» — the feed block's h2 right above already says
           «Обзор» (the same stutter rule as the TG Overview hero). */}
       <ChartSection id="ig-overview-kpi" title="Показатели" defaultSize="full" homeKey="ig-kpi" drillTo="/metrics/ig-reach">

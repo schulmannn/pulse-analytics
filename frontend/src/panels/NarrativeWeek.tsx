@@ -5,7 +5,7 @@ import { useSelectedChannel } from '@/lib/channel-context';
 import { useDemo } from '@/lib/demo-context';
 import { histSeries, longerSeries, metricSeries, postEr, type Point } from '@/lib/igMetrics';
 import { normalizeTgPosts, type NormalizedPost } from '@/lib/posts';
-import { buildWeekNarrative, type NarrativeIgInput, type NarrativeInput, type NarrativeSeg } from '@/lib/narrative';
+import { buildWeekNarrative, type NarrativeIgInput, type NarrativeInput, type NarrativeParagraph, type NarrativeSeg } from '@/lib/narrative';
 import { ChartSection } from '@/components/ChartWidget';
 import { DeltaPill } from '@/components/DeltaPill';
 import { InlineSpark } from '@/components/InlineSpark';
@@ -89,7 +89,7 @@ function useWeekNarrativeInput(): { input: NarrativeInput | null; posts: Normali
  * live↔архив то же, что у страниц /metrics/ig-* (histSeries/longerSeries) — числа сходятся
  * 1-в-1. Гейт честности как в igHome: mock вне демо (Instagram не подключён) → null, и
  * IG-абзац не рождается. */
-function useIgWeekInput(): NarrativeIgInput | null {
+export function useIgWeekInput(): { input: NarrativeIgInput | null; loading: boolean; notConnected: boolean } {
   const { demo } = useDemo();
   const profileQ = useIgProfile();
   const insightsQ = useIgInsights(14);
@@ -100,7 +100,12 @@ function useIgWeekInput(): NarrativeIgInput | null {
   const rows = historyQ.data?.rows;
   const media = postsQ.data?.data;
   const unavailable = profileQ.isError && insightsQ.isError;
-  return useMemo(() => {
+  // isPending (не isLoading): пока канал не известен, IG-запросы выключены — это тоже «загрузка».
+  const loading = profileQ.isPending || insightsQ.isPending;
+  // Не подключён (ошибка / mock вне демо) → панель зовёт подключить; отличается от «подключён, но
+  // мало данных» (тогда input=null из-за пустого охвата, но notConnected=false → тихий рассказ).
+  const notConnected = (profileQ.isError && insightsQ.isError) || (!!(profile?.mock || ins?.mock) && !demo);
+  const input = useMemo(() => {
     if (unavailable) return null;
     if (!!(profile?.mock || ins?.mock) && !demo) return null;
     const dated = (s: Point[]) => s.filter((p) => p.day !== 'total' && Number.isFinite(Date.parse(p.day)));
@@ -128,6 +133,7 @@ function useIgWeekInput(): NarrativeIgInput | null {
       avgMediaErv,
     };
   }, [unavailable, profile, ins, rows, media, demo]);
+  return { input, loading, notConnected };
 }
 
 function SegSpan({ seg, onPost }: { seg: NarrativeSeg; onPost: (i: number) => void }) {
@@ -174,7 +180,7 @@ function SegSpan({ seg, onPost }: { seg: NarrativeSeg; onPost: (i: number) => vo
 /** Голое тело нарратива (для Home-реестра и самой карточки). */
 export function NarrativeWeekBody() {
   const { input, posts, loading } = useWeekNarrativeInput();
-  const igInput = useIgWeekInput();
+  const { input: igInput } = useIgWeekInput();
   const [openPost, setOpenPost] = useState<number | null>(null);
   if (loading || !input) {
     return (
@@ -188,17 +194,30 @@ export function NarrativeWeekBody() {
   // TG-часть не ждёт Instagram: IG-абзац — кода текста, его догрузка ничего не сдвигает.
   const nar = buildWeekNarrative({ ...input, ig: igInput });
   return (
+    <>
+      <NarrativeProse paragraphs={nar.paragraphs} onPost={setOpenPost} />
+      {openPost != null && posts[openPost] && (
+        <PostDetailModal post={posts[openPost]!} reason={null} onClose={() => setOpenPost(null)} />
+      )}
+    </>
+  );
+}
+
+/** Общий рендерер «текста-с-данными»: абзацы сегментов + приклейка пунктуации к инлайн-элементам
+ * (спарк/пилюля). Чип-пост: href (IG-медиа → permalink) или postIndex (TG → PostDetailModal через
+ * onPost). Используют и TG-«Неделя канала», и IG-«Неделя». */
+export function NarrativeProse({ paragraphs, onPost }: { paragraphs: NarrativeParagraph[]; onPost?: (i: number) => void }) {
+  const post = onPost ?? (() => {});
+  return (
     <div className="max-w-prose space-y-3.5 text-sm leading-relaxed text-ink2">
-      {nar.paragraphs.map((p, i) => (
+      {paragraphs.map((p, i) => (
         <p key={i}>
           {p.map((seg, j) => {
-            // Пунктуация сразу после инлайн-элемента (спарк/пилюля) не должна отрываться
-            // переносом: пара «элемент + „. “» рендерится единым nowrap-спаном.
             const next = p[j + 1];
             if ((seg.kind === 'spark' || seg.kind === 'delta') && next?.kind === 'text' && /^[.,]/.test(next.text)) {
               return (
                 <span key={j} className="whitespace-nowrap">
-                  <SegSpan seg={seg} onPost={setOpenPost} />
+                  <SegSpan seg={seg} onPost={post} />
                   {next.text.slice(0, 1)}
                 </span>
               );
@@ -206,16 +225,13 @@ export function NarrativeWeekBody() {
             if (seg.kind === 'text' && /^[.,]/.test(seg.text)) {
               const prev = p[j - 1];
               if (prev && (prev.kind === 'spark' || prev.kind === 'delta')) {
-                return <SegSpan key={j} seg={{ kind: 'text', text: seg.text.slice(1) }} onPost={setOpenPost} />;
+                return <SegSpan key={j} seg={{ kind: 'text', text: seg.text.slice(1) }} onPost={post} />;
               }
             }
-            return <SegSpan key={j} seg={seg} onPost={setOpenPost} />;
+            return <SegSpan key={j} seg={seg} onPost={post} />;
           })}
         </p>
       ))}
-      {openPost != null && posts[openPost] && (
-        <PostDetailModal post={posts[openPost]!} reason={null} onClose={() => setOpenPost(null)} />
-      )}
     </div>
   );
 }

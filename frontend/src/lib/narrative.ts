@@ -162,6 +162,71 @@ function buildIgStory(
   return { para, pct };
 }
 
+/** IG-ФОКУСНЫЙ недельный рассказ — для виджета «IG · Неделя» на IG-Обзоре (симметрия с TG). Те же
+ *  честные гейты, но Instagram ведёт: охват-сдвиг → движение базы → IG-герой (лифт ERV ≥ ×1.6) с
+ *  советом. Числа сходятся со страницами /metrics/ig-* 1-в-1 (вход — тот же NarrativeIgInput). Мало
+ *  данных → короткий честный текст, не вода. `ig=null` (не подключён) панель отсекает до вызова. */
+export function buildIgWeekNarrative(ig: NarrativeIgInput | null | undefined): WeekNarrative {
+  const paragraphs: NarrativeParagraph[] = [];
+  if (ig) {
+    const last7 = ig.reachDaily.slice(-7);
+    const prev7 = ig.reachDaily.slice(-14, -7);
+    const curSum = sum(last7.map((p) => p.v));
+    const prevSum = sum(prev7.map((p) => p.v));
+    // Охват-сдвиг (гейт: оба полных окна 7+7, прошлая неделя ненулевая).
+    if (last7.length === 7 && prev7.length === 7 && prevSum > 0) {
+      const pct = ((curSum - prevSum) / prevSum) * 100;
+      paragraphs.push([
+        t('Охват за неделю — '),
+        n(fmt.kpi(curSum), '/metrics/ig-reach'),
+        t(', на '),
+        { kind: 'delta', pct },
+        t(` ${pct < 0 ? 'ниже' : 'выше'} предыдущей `),
+        { kind: 'spark', values: ig.reachDaily.slice(-14).map((x) => x.v) },
+        t('. '),
+      ]);
+    }
+    // База — чистое движение подписчиков (Σ дневных нетто-подписок) + текущий уровень.
+    const f7 = ig.followsDaily.slice(-7);
+    const net = f7.length === 7 ? sum(f7.map((p) => p.v)) : null;
+    const basePara: NarrativeParagraph = [];
+    if (net != null && net !== 0) {
+      basePara.push(
+        t(net < 0 ? 'База просела на ' : 'База выросла на '),
+        n(fmt.num(Math.abs(net)), '/metrics/ig-follows'),
+        t(` ${plural(Math.abs(net), 'подписчика', 'подписчика', 'подписчиков')}`),
+      );
+      if (ig.followersNow != null) basePara.push(t(' — сейчас '), n(fmt.kpi(ig.followersNow), '/metrics/ig-follows'), t('. '));
+      else basePara.push(t('. '));
+    } else if (ig.followersNow != null) {
+      basePara.push(
+        t(net === 0 ? 'База держится на ' : 'В аккаунте '),
+        n(fmt.kpi(ig.followersNow), '/metrics/ig-follows'),
+        t(net === 0 ? ' без движения. ' : ` ${plural(ig.followersNow, 'подписчик', 'подписчика', 'подписчиков')}. `),
+      );
+    }
+    if (basePara.length) paragraphs.push(basePara);
+    // Герой недели — тот же чест-гейт, что у TG: ≥3 медиа, норма существует, лифт ERV ≥ ×1.6.
+    const media = ig.mediaWeek ?? [];
+    if (media.length >= 3 && ig.avgMediaErv != null && ig.avgMediaErv > 0) {
+      const best = media.reduce((a, b) => (b.erv > a.erv ? b : a));
+      const ervLift = best.erv / ig.avgMediaErv;
+      if (ervLift >= 1.6) {
+        paragraphs.push([
+          t('Герой недели — '),
+          { kind: 'post', text: `«${best.title.slice(0, 52)}…»`, href: best.permalink },
+          t(': вовлечённость '),
+          n(`${best.erv.toFixed(1)}%`, '/metrics/ig-er'),
+          t(` на охват — в ${lift(ervLift)} раза выше нормы аккаунта — есть смысл повторить формат в ближайшие дни.`),
+        ]);
+      }
+    }
+  }
+  const quiet = paragraphs.length === 0;
+  if (quiet) paragraphs.push([t('Пока мало данных Instagram за неделю — рассказ появится, когда накопится охват по дням.')]);
+  return { paragraphs, quiet };
+}
+
 export function buildWeekNarrative(inp: NarrativeInput): WeekNarrative {
   const paragraphs: NarrativeParagraph[] = [];
   const series = inp.viewsDaily;
