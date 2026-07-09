@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react';
 import { ChartSection, type WidgetSize } from '@/components/ChartWidget';
 import { KpiGrid } from '@/panels/KpiGrid';
-import { Digest } from '@/panels/Digest';
 import { TopPosts } from '@/panels/TopPosts';
 import { HistoryChartBlock, VelocityChartBlock, HeatmapChartBlock } from '@/panels/Charts';
 import { GrowthChartBlock } from '@/panels/Overview';
@@ -57,15 +56,6 @@ export const HOME_REGISTRY: Record<string, HomeWidgetDef> = {
     render: () => (
       <ChartSection id="home-kpi" homeKey="kpi" title="Показатели" defaultSize="full" periodControl drillTo="/metrics/views">
         <KpiGrid />
-      </ChartSection>
-    ),
-  },
-  digest: {
-    label: 'Главное',
-    // Narrative insight takes a content-height `full` card (no fixed tile → no inner scrollbar).
-    render: () => (
-      <ChartSection id="home-digest" homeKey="digest" title="Главное" periodControl defaultSize="full">
-        <Digest />
       </ChartSection>
     ),
   },

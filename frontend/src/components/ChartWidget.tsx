@@ -410,7 +410,7 @@ export function remapGroupOrder(groupId: string, fromId: string, toId: string) {
 
 // ── Personal Home: the pinned-widget list ────────────────────────────────────────────────
 // A separate store row (`pulse_home_blocks`) from widget prefs/order: it holds registry KEYS
-// (e.g. 'digest', 'history'), not widget ids, in the order they appear on /home. Same
+// (e.g. 'kpi', 'history'), not widget ids, in the order they appear on /home. Same
 // localStorage-first + pub-sub + account-sync pattern as prefs/order. The Home surface renders
 // each key under a `home-<key>` ChartSection, so a pinned widget's Home arrangement (size /
 // title / period / hidden) is a distinct prefs identity from its source-screen copy.
@@ -1018,7 +1018,7 @@ interface ChartSectionProps {
       content height, menu limited to Выше/Ниже/Переставить/Скрыть. */
   strip?: boolean;
   /**
-   * Personal-Home registry key (e.g. 'digest'). When set, the ⋯ menu grows a «На главную» /
+   * Personal-Home registry key (e.g. 'kpi'). When set, the ⋯ menu grows a «На главную» /
    * «Убрать с главной» toggle that pins/unpins this widget on /home. Pass it on the SOURCE-screen
    * ChartSection so the pin originates where the user browses; the Home render passes the same key
    * (under its `home-<key>` id) so its menu reads «Убрать с главной» for an in-place unpin.

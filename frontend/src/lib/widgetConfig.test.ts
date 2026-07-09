@@ -74,10 +74,10 @@ describe('legacy widgets (U6) — `legacy:<key>` configs', () => {
   });
 
   it('normalizeWidget keeps a known legacy config + its shell fields, drops an unknown legacy key', () => {
-    const w = normalizeWidget({ metricId: 'legacy:digest', viz: 'x', title: 'Мой инсайт', period: 90, size: 'half', source: 4, style: { color: 2 } })!;
-    expect(w.metricId).toBe('legacy:digest');
+    const w = normalizeWidget({ metricId: 'legacy:growth', viz: 'x', title: 'Мой рост', period: 90, size: 'half', source: 4, style: { color: 2 } })!;
+    expect(w.metricId).toBe('legacy:growth');
     expect(w.viz).toBe('kpi'); // legacy sentinel (no catalogue viz)
-    expect(w.title).toBe('Мой инсайт');
+    expect(w.title).toBe('Мой рост');
     expect(w.period).toBe(90);
     expect(w.size).toBe('half');
     expect(w.source).toBe(4);
@@ -110,12 +110,12 @@ describe('legacy widgets (U6) — `legacy:<key>` configs', () => {
   });
 
   it('legacyHomeConfig survives store normalisation with its id + shell intact', () => {
-    const a = legacyHomeConfig('digest')!;
-    const stored = normalizeWidget({ ...a, period: 90, title: 'Мой инсайт' })!;
-    expect(stored.id).toBe(legacyConfigId('digest'));
-    expect(stored.metricId).toBe('legacy:digest');
+    const a = legacyHomeConfig('growth')!;
+    const stored = normalizeWidget({ ...a, period: 90, title: 'Мой рост' })!;
+    expect(stored.id).toBe(legacyConfigId('growth'));
+    expect(stored.metricId).toBe('legacy:growth');
     expect(stored.period).toBe(90);
-    expect(stored.title).toBe('Мой инсайт');
+    expect(stored.title).toBe('Мой рост');
   });
 
   it('legacyKeyFromConfigId only accepts a `legacy-<known>` config id', () => {

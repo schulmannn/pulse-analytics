@@ -117,7 +117,7 @@ export function WidgetBody({ config, onDrill, drillLabel }: { config: WidgetConf
   return metric?.source === 'ig' ? <IgWidgetBody config={config} /> : <TgWidgetBody config={config} onDrill={onDrill} drillLabel={drillLabel} />;
 }
 
-/** A legacy composite body (KpiGrid / Digest / …) hosted in the unified card. It reads
+/** A legacy composite body (KpiGrid / TopPosts / …) hosted in the unified card. It reads
  *  useWidgetPeriod(), so we scope that to the instance's config.period — widened to the channel's
  *  data window like the feed does (resolveEffectivePeriod), so a dormant channel isn't blank. Source
  *  is already applied via a ChannelScope on the card. An un-wired legacy key (U6.3b) renders nothing. */
