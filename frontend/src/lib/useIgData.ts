@@ -13,10 +13,6 @@ import {
 } from '@/api/queries';
 import { usePagePeriod, usePeriod } from '@/lib/period';
 import {
-  metricSeries,
-  histSeries,
-  longerSeries,
-  windowPair,
   tvBreakdown,
   aggregateOnline,
   hashtagStats,
@@ -25,6 +21,7 @@ import {
   DAY_NAMES,
   DAY_MS,
 } from '@/lib/igMetrics';
+import { igWindowMetrics } from '@/lib/igWindowMetrics';
 import { buildIgInsights } from '@/lib/igInsights';
 
 export function useIgData() {
@@ -77,73 +74,18 @@ export function useIgData() {
 
   const ins = insightsQ.data;
   const histRows = historyQ.data?.rows;
-  // The 12× daily-series extraction re-ran on every render of every IG view; the payload ref
-  // only changes on refetch, so key the memo on it. reach + follower prefer the PERSISTED series
-  // (ig_daily) whenever it's longer than the live window — that's the whole point of the DB-first
-  // read path (IG retention pain). Empty DB (day 1) → live series → chart never goes blank.
-  const series = useMemo(
-    () => ({
-      reach: longerSeries(metricSeries(ins, 'reach'), histSeries(histRows, 'reach')),
-      // Deduplicated windowed reach (prev+cur synthetic points from the backend total_value call).
-      // Used ONLY for the headline KPI / ER denominator — the daily `reach` above still feeds charts.
-      reachWindow: metricSeries(ins, 'reach_window'),
-      // АДДИТИВНЫЕ метрики (views/взаимодействия/лайки/комменты/сохранения/репосты) — DB-first,
-      // как reach/follower. Живой insights отдаёт их лишь двумя синтет-точками окна (cur/prev), и
-      // до его ответа KPI показывали «—» (лаг, о котором сообщил владелец). Крон копит их в ig_daily
-      // ежедневно (collectIgDailyForAccount + IG_TV_NAMES), поэтому longerSeries берёт архив, когда
-      // он длиннее, — числа появляются сразу из БД. Суммирование по дням == оконный total (метрики
-      // аддитивные, в отличие от reach: у него дедуп-инфляция, поэтому reach остаётся на reach_window).
-      views: longerSeries(metricSeries(ins, 'views'), histSeries(histRows, 'views')),
-      ti: longerSeries(metricSeries(ins, 'total_interactions'), histSeries(histRows, 'total_interactions')),
-      engaged: metricSeries(ins, 'accounts_engaged'), // уник. аккаунты — дедуп, дневную сумму НЕ берём
-      // Оба конца — НЕТТО-прирост: живой follower_count и колонка ig_daily.followers (крон пишет
-      // туда именно follower_count). НЕ мешать с follows (gross новые подписки) — иначе смысл
-      // линии молча менялся бы на day-1 кроссовере live↔persisted.
-      follower: longerSeries(metricSeries(ins, 'follower_count'), histSeries(histRows, 'followers')),
-      saves: longerSeries(metricSeries(ins, 'saves'), histSeries(histRows, 'saves')),
-      likes: longerSeries(metricSeries(ins, 'likes'), histSeries(histRows, 'likes')),
-      comments: longerSeries(metricSeries(ins, 'comments'), histSeries(histRows, 'comments')),
-      shares: longerSeries(metricSeries(ins, 'shares'), histSeries(histRows, 'shares')),
-      profileViews: metricSeries(ins, 'profile_views'),
-      follows: metricSeries(ins, 'follows'), // gross new follows (FOLLOWER)
-      unfollows: metricSeries(ins, 'unfollows'), // gross unfollows (NON_FOLLOWER)
-    }),
-    [ins, histRows],
+  const windowMetrics = useMemo(
+    () => igWindowMetrics({ profile: profileQ.data, insights: ins, historyRows: histRows, since, until }),
+    [profileQ.data, ins, histRows, since, until],
   );
-  const pairs = useMemo(() => {
-    // Prefer Instagram's deduplicated windowed reach ("Accounts reached"); the daily series sums
-    // per-day unique reach, double-counting repeat viewers (2–4× inflation vs the app). Fall back to
-    // the daily sum only when the windowed aggregate is absent (older payloads / mock without it).
-    const reachWin = windowPair(series.reachWindow, since, until);
-    const reachDaily = windowPair(series.reach, since, until);
-    return {
-      reach: reachWin.hasCur ? reachWin : reachDaily,
-      views: windowPair(series.views, since, until),
-      ti: windowPair(series.ti, since, until),
-      engaged: windowPair(series.engaged, since, until),
-      follower: windowPair(series.follower, since, until),
-      saves: windowPair(series.saves, since, until),
-      likes: windowPair(series.likes, since, until),
-      comments: windowPair(series.comments, since, until),
-      shares: windowPair(series.shares, since, until),
-      profileViews: windowPair(series.profileViews, since, until),
-      follows: windowPair(series.follows, since, until),
-      unfollows: windowPair(series.unfollows, since, until),
-    };
-  }, [series, since, until]);
-
-  // Real subscriber movement for the window: net = gross follows − gross unfollows. This is the
-  // honest growth number — the dashboard previously reported gross follows alone as "growth".
-  const netMovement = {
-    cur: pairs.follows.cur - pairs.unfollows.cur,
-    prev: pairs.follows.prev - pairs.unfollows.prev,
-    hasCur: pairs.follows.hasCur || pairs.unfollows.hasCur,
-    hasPrev: pairs.follows.hasPrev || pairs.unfollows.hasPrev,
-  };
-
-  const followers = profileQ.data?.followers_count ?? 0;
-  const erReach = pairs.reach.cur > 0 ? (pairs.ti.cur / pairs.reach.cur) * 100 : 0;
-  const erReachPrev = pairs.reach.prev > 0 ? (pairs.ti.prev / pairs.reach.prev) * 100 : 0;
+  const {
+    series,
+    pairs,
+    followerNet: netMovement,
+    followersLevel: followers,
+    erReach,
+    erReachPrev,
+  } = windowMetrics;
 
   // What drove an engagement rise — the component metric (сохранения / лайки / комментарии / репосты)
   // with the largest positive delta over the window, as a %-lift. Both ends come from the backend's
