@@ -958,6 +958,9 @@ _QR_TTL = 180           # seconds a pending/abandoned login stays in memory befo
 _QR_TOKEN_WAIT = 25     # wait per QR token (< Telegram's ~30s TTL) before recreating it
 _QR_TOTAL = 150         # overall seconds to keep offering fresh QR tokens for one login
 _QR_MAX_PENDING = 40    # cap on concurrent in-flight logins (shared-worker protection)
+_QR_COLLECT_MAX = 6
+_QR_COLLECT_ACQUIRE_TIMEOUT_S = 2
+_QR_COLLECT_SEM = asyncio.Semaphore(_QR_COLLECT_MAX)
 _QR_GC_TASK = None
 
 
@@ -1331,28 +1334,41 @@ async def qr_collect(session: str = Body(...), channel: str = Body(...),
         raise HTTPException(status_code=503, detail='mtproto_not_configured')
     posts_limit = max(1, min(int(posts_limit or 100), 100))
     graph_points = max(1, min(int(graph_points or 400), 400))
-    tg = TelegramClient(StringSession(session), API_ID, API_HASH)
     try:
-        await tg.connect()
-        if not await tg.is_user_authorized():
+        await asyncio.wait_for(_QR_COLLECT_SEM.acquire(), timeout=_QR_COLLECT_ACQUIRE_TIMEOUT_S)
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=503, detail='too_many_collecting')
+    tg = None
+    try:
+        tg = TelegramClient(StringSession(session), API_ID, API_HASH)
+        await asyncio.wait_for(tg.connect(), timeout=TELETHON_CALL_TIMEOUT_S)
+        if not await asyncio.wait_for(tg.is_user_authorized(), timeout=TELETHON_CALL_TIMEOUT_S):
             raise HTTPException(status_code=401, detail='session_unauthorized')
-        entity = await _resolve_channel_entity(tg, _channel_ref(channel))
-        posts = [_build_post(g) for g in _logical_posts(await tg.get_messages(entity, limit=posts_limit))]
+        entity = await asyncio.wait_for(_resolve_channel_entity(tg, _channel_ref(channel)), timeout=TELETHON_CALL_TIMEOUT_S)
+        messages = await asyncio.wait_for(tg.get_messages(entity, limit=posts_limit), timeout=TELETHON_CALL_TIMEOUT_S)
+        posts = [_build_post(g) for g in _logical_posts(messages)]
         # One GetBroadcastStats feeds both the KPI stats and the graphs (small channels 403 here —
         # posts/channel meta still come back, so the bundle degrades gracefully instead of failing).
         try:
-            stats_obj = await tg(GetBroadcastStatsRequest(channel=entity, dark=False))
+            stats_obj = await asyncio.wait_for(
+                tg(GetBroadcastStatsRequest(channel=entity, dark=False)), timeout=TELETHON_CALL_TIMEOUT_S)
             stats_err = None
         except FloodWaitError:
             raise
+        except asyncio.TimeoutError:
+            raise
         except Exception as e:
             stats_obj, stats_err = None, str(e)
+        channel_payload = await asyncio.wait_for(_collect_channel(tg, entity), timeout=TELETHON_CALL_TIMEOUT_S)
+        graphs_payload = (
+            await asyncio.wait_for(_graphs_payload(tg, stats_obj, graph_points), timeout=TELETHON_CALL_TIMEOUT_S)
+        ) if stats_obj is not None else {'available': False, 'error': stats_err}
         return {
-            'channel':       await _collect_channel(tg, entity),
+            'channel':       channel_payload,
             'posts':         posts,
             'views_summary': _views_summary_of(posts),
             'stats':         _stats_payload(stats_obj) if stats_obj is not None else {'available': False, 'error': stats_err},
-            'graphs':        (await _graphs_payload(tg, stats_obj, graph_points)) if stats_obj is not None else {'available': False, 'error': stats_err},
+            'graphs':        graphs_payload,
         }
     except FloodWaitError as e:
         return JSONResponse(status_code=429, content=_flood_wait_payload(e))
@@ -1364,7 +1380,9 @@ async def qr_collect(session: str = Body(...), channel: str = Body(...),
         log.error(f'qr_collect error (channel={channel!r}): {e}')   # NB: the session is never logged
         raise HTTPException(status_code=500, detail='collect_failed')
     finally:
-        await _safe_disconnect(tg)
+        if tg is not None:
+            await _safe_disconnect(tg)
+        _QR_COLLECT_SEM.release()
 
 
 @app.on_event('startup')
