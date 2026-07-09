@@ -7,6 +7,7 @@ import { apiGet, apiSend } from '@/api/client';
 import { isDemoMode } from '@/lib/demo';
 import { fmt } from '@/lib/format';
 import { observeSize } from '@/lib/observeSize';
+import { parsePrefs } from '@/lib/prefsSchema';
 import { preserveEntryIdentity, preserveValueIdentity } from '@/lib/storeIdentity';
 import { hydrateWidgetConfigs, reconcileHydratedConfigs, setWidgetConfigsSyncHook, syncableWidgetConfigs } from '@/lib/widgetStore';
 import { BarChart } from '@/components/BarChart';
@@ -312,7 +313,7 @@ function prefsSnapshot(): Record<string, WidgetPrefs> {
   const raw = readRaw(PREFS_KEY);
   if (raw === prefsRaw) return prefsCache;
   prefsRaw = raw;
-  prefsCache = preserveEntryIdentity(prefsCache, parseObjectRow<WidgetPrefs>(raw));
+  prefsCache = preserveEntryIdentity(prefsCache, parsePrefs({ widgets: parseObjectRow<unknown>(raw) }).widgets ?? {});
   return prefsCache;
 }
 
@@ -325,12 +326,7 @@ function orderSnapshot(): Record<string, string[]> {
   orderRaw = raw;
   // Normalize entries at parse time (arrays of strings only) so per-group reads are pure lookups —
   // a getSnapshot must NOT build a fresh array per call or useSyncExternalStore loops (S6.1 lesson).
-  const parsed = parseObjectRow<unknown>(raw);
-  const next: Record<string, string[]> = {};
-  for (const key of Object.keys(parsed)) {
-    const list = parsed[key];
-    if (Array.isArray(list)) next[key] = list.filter((x): x is string => typeof x === 'string');
-  }
+  const next = parsePrefs({ widgetOrder: parseObjectRow<unknown>(raw) }).widgetOrder ?? {};
   orderCache = preserveEntryIdentity(orderCache, next);
   return orderCache;
 }
@@ -425,7 +421,7 @@ export function getHomeBlocks(): string[] {
   if (raw === homeRaw) return homeCache;
   homeRaw = raw;
   const stored = parseObjectRow<unknown>(raw).keys;
-  const next = Array.isArray(stored) ? stored.filter((x): x is string => typeof x === 'string') : [];
+  const next = parsePrefs({ home: stored }).home ?? [];
   homeCache = preserveValueIdentity(homeCache, next);
   return homeCache;
 }
@@ -491,7 +487,7 @@ let pushTimer: number | null = null;
 // Must match the server's PUT /api/prefs guard (server/index.js) so the client degrades BEFORE a 413.
 const PREFS_MAX = 32000;
 
-const PrefsBlobSchema = z.object({ prefs: z.record(z.unknown()).nullable() });
+const PrefsBlobSchema = z.object({ prefs: z.unknown().optional().nullable() }).passthrough();
 
 function localBlob() {
   return {
@@ -542,7 +538,7 @@ export function useWidgetPrefsSync() {
     void apiGet('/api/prefs', PrefsBlobSchema)
       .then(({ prefs }) => {
         if (cancelled) return;
-        const { widgets, widgetOrder, home, widgetConfigs, ...rest } = (prefs ?? {}) as Record<string, unknown>;
+        const { widgets, widgetOrder, home, widgetConfigs, ...rest } = parsePrefs(prefs);
         serverExtra = rest;
         syncReady = true;
         const local = localBlob();
