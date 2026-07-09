@@ -1986,7 +1986,7 @@ app.get('/api/tg/channel', requireAuth, resolveChannel, asyncHandler(async (req,
     res.json(data);
   } catch (e) {
     // both sources failed (bot errors fall through to MTProto above) → upstream outage
-    res.status(503).json({ error: e.message, hint: 'MTProto сервис недоступен' });
+    sendMtprotoError(res, e);
   }
 }));
 
@@ -2009,20 +2009,30 @@ const MTPROTO_TIMEOUT_HEAVY_MS = 120000;
 async function mtprotoFetch(path, params = {}, timeoutMs = MTPROTO_TIMEOUT_MS) {
   const url = new URL(MTPROTO_URL + path);
   Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
-  const res  = await fetchWithTimeout(url.toString(), {
-    headers: { 'x-internal-token': MTPROTO_TOKEN }
-  }, timeoutMs);
+  let res;
+  try {
+    res = await fetchWithTimeout(url.toString(), {
+      headers: { 'x-internal-token': MTPROTO_TOKEN }
+    }, timeoutMs);
+  } catch (err) {
+    const e = new Error('Сервис Telegram недоступен, попробуйте позже');
+    e.status = 503;
+    throw e;
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     if (res.status === 429) {
       // Telethon FloodWait mapped by the Python side: an expected throttle, not an
       // outage. Surface as 503-with-message so the dashboard shows "retry later".
-      const e = new Error('Telegram временно ограничил запросы' + (err.retry_after ? ` — повтори через ~${err.retry_after} с` : ''));
+      const e = new Error('Telegram временно ограничил запросы' + (err.retry_after != null ? ` — повтори через ~${err.retry_after} с` : ''));
       e.status = 503;
-      if (err.retry_after) e.retryAfter = err.retry_after;
+      if (err.retry_after != null) e.retryAfter = err.retry_after;
       throw e;
     }
-    throw new Error(err.detail || `MTProto error ${res.status}`);
+    const e = new Error(err.detail || `MTProto error ${res.status}`);
+    e.status = res.status >= 500 ? 503 : res.status;
+    if (err.retry_after != null) e.retryAfter = err.retry_after;
+    throw e;
   }
   return res.json();
 }
@@ -2031,24 +2041,42 @@ async function mtprotoFetch(path, params = {}, timeoutMs = MTPROTO_TIMEOUT_MS) {
 async function mtprotoPost(path, { params = {}, body = undefined, timeoutMs = MTPROTO_TIMEOUT_MS } = {}) {
   const url = new URL(MTPROTO_URL + path);
   Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
-  const res = await fetchWithTimeout(url.toString(), {
-    method: 'POST',
-    headers: { 'x-internal-token': MTPROTO_TOKEN, ...(body ? { 'content-type': 'application/json' } : {}) },
-    body: body ? JSON.stringify(body) : undefined,
-  }, timeoutMs);
+  let res;
+  try {
+    res = await fetchWithTimeout(url.toString(), {
+      method: 'POST',
+      headers: { 'x-internal-token': MTPROTO_TOKEN, ...(body ? { 'content-type': 'application/json' } : {}) },
+      body: body ? JSON.stringify(body) : undefined,
+    }, timeoutMs);
+  } catch (err) {
+    const e = new Error('Сервис Telegram недоступен, попробуйте позже');
+    e.status = 503;
+    throw e;
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     if (res.status === 429) {
-      const e = new Error('Telegram временно ограничил запросы' + (err.retry_after ? ` — повтори через ~${err.retry_after} с` : ''));
+      const e = new Error('Telegram временно ограничил запросы' + (err.retry_after != null ? ` — повтори через ~${err.retry_after} с` : ''));
       e.status = 503;
-      if (err.retry_after) e.retryAfter = err.retry_after;
+      if (err.retry_after != null) e.retryAfter = err.retry_after;
       throw e;
     }
-    throw new Error(err.detail || `MTProto error ${res.status}`);
+    const e = new Error(err.detail || `MTProto error ${res.status}`);
+    e.status = res.status >= 500 ? 503 : res.status;
+    if (err.retry_after != null) e.retryAfter = err.retry_after;
+    throw e;
   }
   return res.json();
 }
 
+function sendMtprotoError(res, err) {
+  const status = err && err.status ? err.status : 503;
+  if (err && err.retryAfter != null) res.set('Retry-After', String(err.retryAfter));
+  return res.status(status).json({
+    error: (err && err.message) || 'Источник недоступен',
+    ...(err && err.retryAfter != null ? { retry_after: err.retryAfter } : {})
+  });
+}
 // ── Telegram QR connect (managed sessions) ───────────────────────────────
 // «Scan → done» via MTProto QR login on the Telethon service. The session string it
 // returns is encrypted (TG_SESSION_KEY) and stored server-side; it is NEVER sent to the
@@ -2225,7 +2253,7 @@ app.get('/api/tg/mtproto/channel', requireAuth, resolveChannel, asyncHandler(asy
     cacheSet(cacheKey, data);
     res.json(data);
   } catch (e) {
-    res.status(503).json({ error: e.message, hint: 'MTProto сервис недоступен' });
+    sendMtprotoError(res, e);
   }
 }));
 
@@ -2241,7 +2269,7 @@ app.get('/api/tg/mtproto/posts', requireAuth, resolveChannel, asyncHandler(async
     cacheSet(cacheKey, data);
     res.json(data);
   } catch (e) {
-    res.status(503).json({ error: e.message, hint: 'MTProto сервис недоступен' });
+    sendMtprotoError(res, e);
   }
 }));
 
@@ -2256,7 +2284,7 @@ app.get('/api/tg/mtproto/views_summary', requireAuth, resolveChannel, asyncHandl
     cacheSet(cacheKey, data);
     res.json(data);
   } catch (e) {
-    res.status(503).json({ error: e.message, hint: 'MTProto сервис недоступен' });
+    sendMtprotoError(res, e);
   }
 }));
 
@@ -2273,7 +2301,7 @@ app.get('/api/tg/mtproto/stats', requireAuth, resolveChannel, asyncHandler(async
     // Сюда попадаем только при РЕАЛЬНОМ сбое (MTProto-сервис недоступен): кейс
     // «нет статистики у мелкого канала» Python отдаёт как 200 {available:false}
     // и оно проходит насквозь. Поэтому здесь честный 503 для мониторинга.
-    res.status(503).json({ error: e.message, available: false, hint: 'MTProto сервис недоступен' });
+    sendMtprotoError(res, e);
   }
 }));
 
@@ -2287,7 +2315,7 @@ app.get('/api/tg/mtproto/graphs', requireAuth, resolveChannel, asyncHandler(asyn
     cacheSet(cacheKey, data);
     res.json(data);
   } catch (e) {
-    res.status(503).json({ error: e.message, available: false });
+    sendMtprotoError(res, e);
   }
 }));
 
@@ -2320,7 +2348,7 @@ app.get('/api/tg/mtproto/velocity', requireAuth, resolveChannel, async (req, res
     }
     res.json(data);
   } catch (e) {
-    res.status(503).json({ error: e.message, available: false });
+    sendMtprotoError(res, e);
   }
 });
 
@@ -2344,7 +2372,7 @@ app.get('/api/tg/mtproto/mentions', requireAuth, resolveChannel, async (req, res
     }
     res.json(data);
   } catch (e) {
-    res.status(503).json({ error: e.message, available: false });
+    sendMtprotoError(res, e);
   }
 });
 
@@ -2360,7 +2388,7 @@ app.get('/api/tg/mtproto/post_stats/:id', requireAuth, resolveChannel, async (re
     cacheSet(cacheKey, data);
     res.json(data);
   } catch (e) {
-    res.status(503).json({ available: false, error: e.message });
+    sendMtprotoError(res, e);
   }
 });
 
@@ -2385,13 +2413,16 @@ app.get('/api/tg/mtproto/thumb/:id', mediaLimiter, async (req, res) => {
   const size = req.query.size === 'lg' ? 'lg' : 'sm';
   try {
     const r = await fetchWithTimeout(`${MTPROTO_URL}/thumb/${id}?size=${size}`, { headers: { 'x-internal-token': MTPROTO_TOKEN } });
-    if (!r.ok) return res.status(r.status).end();
+    if (!r.ok) {
+      if (r.status >= 500) return res.status(503).json({ error: 'источник недоступен' });
+      return res.status(r.status).end();
+    }
     const buf = await r.buffer();
     res.set('Content-Type', r.headers.get('content-type') || 'image/jpeg');
     res.set('Cache-Control', 'public, max-age=86400');
     res.send(buf);
   } catch (e) {
-    res.status(502).end();
+    res.status(503).json({ error: 'источник недоступен' });
   }
 });
 
@@ -2400,13 +2431,16 @@ app.get('/api/tg/mtproto/thumb/:id', mediaLimiter, async (req, res) => {
 app.get('/api/tg/mtproto/channel/photo', mediaLimiter, async (req, res) => {
   try {
     const r = await fetchWithTimeout(`${MTPROTO_URL}/channel/photo`, { headers: { 'x-internal-token': MTPROTO_TOKEN } });
-    if (!r.ok) return res.status(r.status).end();
+    if (!r.ok) {
+      if (r.status >= 500) return res.status(503).json({ error: 'источник недоступен' });
+      return res.status(r.status).end();
+    }
     const buf = await r.buffer();
     res.set('Content-Type', r.headers.get('content-type') || 'image/jpeg');
     res.set('Cache-Control', 'public, max-age=86400');
     res.send(buf);
   } catch (e) {
-    res.status(502).end();
+    res.status(503).json({ error: 'источник недоступен' });
   }
 });
 
@@ -2877,7 +2911,10 @@ app.use((err, req, res, next) => {
     stack: err && err.stack,
   });
   const body = { error: status === 500 ? 'internal_error' : String((err && err.message) || 'error'), request_id: req.requestId };
-  if (err && err.retryAfter) body.retry_after = err.retryAfter;
+  if (err && err.retryAfter != null) {
+    res.set('Retry-After', String(err.retryAfter));
+    body.retry_after = err.retryAfter;
+  }
   res.status(status).json(body);
 });
 
