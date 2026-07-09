@@ -185,6 +185,22 @@ const BUG_STATUSES = ['open', 'in_progress', 'done', 'wont_fix'];
 const BUG_SEVERITIES = ['low', 'medium', 'high'];
 const BUG_KINDS = ['bug', 'feature', 'change'];
 
+const DB_UNAVAILABLE_CODES = new Set([
+  '53300', '57P03', '57P01', '57P02',
+  '08000', '08003', '08006', '08001', '08004',
+]);
+const DB_UNAVAILABLE_MESSAGES = [
+  /timeout exceeded when trying to connect/i,
+  /Connection terminated/i,
+];
+
+function isDbUnavailable(err) {
+  if (!err) return false;
+  if (DB_UNAVAILABLE_CODES.has(String(err.code || ''))) return true;
+  const message = typeof err.message === 'string' ? err.message : '';
+  return DB_UNAVAILABLE_MESSAGES.some(re => re.test(message));
+}
+
 async function init() {
   if (!enabled) { console.log('[db] disabled (no DATABASE_URL) — history off'); return; }
   await pool.query('SELECT 1 FROM channels LIMIT 1');
@@ -1634,7 +1650,7 @@ async function markReportSent(id) {
 }
 
 module.exports = {
-  enabled, init, migrate, ping, close, graphsToDailyRows,
+  enabled, init, migrate, ping, close, graphsToDailyRows, isDbUnavailable,
   USER_ROLES, USER_STATUSES,
   countUsers, createUser, getUserByEmail, getUserById, getUserAvatar, setUserAvatar, listUsers, updateUser, setUserPassword,
   revokeUserSessions, setUserStatus, createEmailToken, useEmailToken,
