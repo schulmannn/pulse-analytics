@@ -2007,6 +2007,11 @@ const MTPROTO_TIMEOUT_MS       = 12000;
 const MTPROTO_TIMEOUT_STATS_MS = 60000;
 const MTPROTO_TIMEOUT_HEAVY_MS = 120000;
 const mtprotoBreaker = createBreaker();
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+function isRetryableConnErr(err) {
+  return !!err && err.name === 'FetchError' && err.type !== 'request-timeout';
+}
 
 async function mtprotoFetch(path, params = {}, timeoutMs = MTPROTO_TIMEOUT_MS) {
   const gate = mtprotoBreaker.tryAcquire();
@@ -2024,14 +2029,22 @@ async function mtprotoFetch(path, params = {}, timeoutMs = MTPROTO_TIMEOUT_MS) {
     const url = new URL(MTPROTO_URL + path);
     Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
     let res;
-    try {
-      res = await fetchWithTimeout(url.toString(), {
-        headers: { 'x-internal-token': MTPROTO_TOKEN }
-      }, timeoutMs);
-    } catch (err) {
-      const e = new Error('Сервис Telegram недоступен, попробуйте позже');
-      e.status = 503;
-      throw e;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        res = await fetchWithTimeout(url.toString(), {
+          headers: { 'x-internal-token': MTPROTO_TOKEN }
+        }, timeoutMs);
+        break;
+      } catch (err) {
+        if (isRetryableConnErr(err) && attempt < 3) {
+          const backoffMs = (attempt === 1 ? 150 : 400) + Math.floor(Math.random() * 100);
+          await sleep(backoffMs);
+          continue;
+        }
+        const e = new Error('Сервис Telegram недоступен, попробуйте позже');
+        e.status = 503;
+        throw e;
+      }
     }
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: res.statusText }));
