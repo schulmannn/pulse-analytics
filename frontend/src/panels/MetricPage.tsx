@@ -158,6 +158,26 @@ function bucketedPostSeries(
   };
 }
 
+/** Channel-wide daily-FLOW metric (views) summed per bucket from the archive — matches the Overview
+ *  «Просмотры» headline (deriveKpis channelViews). Sum semantics, unlike the subscriber LEVEL series. */
+function bucketedHistoryFlow(
+  rows: { day: string; views?: number | null }[],
+  fromMs: number | null,
+  toMs: number,
+  grain: Grain,
+): DailySeries {
+  const byBucket = new Map<string, number>();
+  for (const row of rows) {
+    if (row.views == null) continue;
+    const t = Date.parse(row.day);
+    if (!Number.isFinite(t)) continue;
+    const key = bucketKeyOf(t, grain);
+    byBucket.set(key, (byBucket.get(key) ?? 0) + Number(row.views));
+  }
+  const keys = fromMs != null ? bucketKeysInWindow(fromMs, toMs, grain) : [...byBucket.keys()].sort();
+  return { labels: keys.map((k) => bucketLabelOf(k, grain)), values: keys.map((k) => byBucket.get(k) ?? 0) };
+}
+
 /** Subscriber level per bucket (last archive value inside the bucket) — sparse, data-only. */
 function bucketedSubsSeries(
   rows: { day: string; subscribers?: number | null }[],
@@ -297,6 +317,7 @@ export function MetricPage() {
 
   let series: DailySeries;
   let ghost: number[] | undefined;
+  const viewsFromArchive = metricKey === 'views' && historyRows.some((r) => r.views != null && inRange(r.day));
   if (metricKey === 'subscribers') {
     const inWin = historyRows.filter((r) => inRange(r.day));
     series = effGrain === 'day' ? subsSpark : bucketedSubsSeries(inWin, effGrain);
@@ -310,6 +331,21 @@ export function MetricPage() {
           ? bucketedSubsSeries(baseRows, 'day')
           : bucketedSubsSeries(baseRows, effGrain);
       if (base.values.length === series.values.length && base.values.length >= 2) ghost = base.values;
+    }
+  } else if (viewsFromArchive) {
+    // Channel-wide daily views from the archive — the line/bar sums to the (channel) headline, not
+    // the post-view sum. The rank/pivot breakdowns below stay post-based on purpose (a channel daily
+    // series has no per-post dimension; they answer "which posts/hours drove views").
+    const inWin = historyRows.filter((r) => inRange(r.day));
+    series = bucketedHistoryFlow(inWin, winFrom, winTo, effGrain);
+    if (baseWin) {
+      const baseRows = historyRows.filter((r) => {
+        const t = Date.parse(r.day);
+        return Number.isFinite(t) && t >= baseWin.from && t <= baseWin.to;
+      });
+      const base = bucketedHistoryFlow(baseRows, baseWin.from, baseWin.to, effGrain);
+      const gv = alignGhost(base.values, series.values.length);
+      if (gv.some((v) => v > 0)) ghost = gv;
     }
   } else if (field) {
     series =
@@ -407,7 +443,9 @@ export function MetricPage() {
       reconcile = `ER = ${fmt.short(fieldSumAll)} вовлечений ÷ ${fmt.num(members)} подписчиков × 100% = ${meta.total}`;
     } else if (metricKey === 'avgReach' && normPosts.length > 0) {
       reconcile = `Средний охват = ${fmt.short(fieldSumAll)} просмотров ÷ ${normPosts.length} постов = ${meta.total}`;
-    } else if (contributors.length > 0 && contribTotal > 0 && fieldSumAll > 0) {
+    } else if (!viewsFromArchive && contributors.length > 0 && contribTotal > 0 && fieldSumAll > 0) {
+      // Suppressed for channel-wide views: «% от периода» here is a share of the POST-view sum,
+      // which would contradict the channel headline. The top-posts list itself still shows below.
       reconcile = `Эти ${contributors.length} постов дали ${Math.round((contribTotal / fieldSumAll) * 100)}% от периода.`;
     }
   }
@@ -415,6 +453,21 @@ export function MetricPage() {
   // ── «Сравнение» numbers vs the chosen baseline ────────────────────────────────────────
   const compare = (() => {
     if (!baseWin || cmp === 'off') return null;
+    if (viewsFromArchive) {
+      // Channel-wide views: compare window sums from the archive (matches the channel headline),
+      // not the post-view sum.
+      const sumViews = (rows: typeof historyRows) =>
+        rows.reduce((s, r) => (r.views != null ? s + Number(r.views) : s), 0);
+      const cur = sumViews(historyRows.filter((r) => inRange(r.day)));
+      const base = sumViews(
+        historyRows.filter((r) => {
+          const t = Date.parse(r.day);
+          return Number.isFinite(t) && t >= baseWin.from && t <= baseWin.to;
+        }),
+      );
+      if (base === 0) return null;
+      return { current: fmt.kpi(cur), previous: fmt.kpi(base), cur, base };
+    }
     if (field) {
       // No baseline posts, OR the loaded window doesn't reach the baseline start (sum would
       // undercount → a nonsense %) → suppress rather than mislead. Subscribers use the archive below.
