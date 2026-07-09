@@ -94,21 +94,25 @@ export function useIgWeekInput(): { input: NarrativeIgInput | null; loading: boo
   const { demo } = useDemo();
   const profileQ = useIgProfile();
   const insightsQ = useIgInsights(14);
+  const insights7Q = useIgInsights(7);
   const historyQ = useIgHistory();
   const postsQ = useIgPosts(24);
   const profile = profileQ.data;
   const ins = insightsQ.data;
+  const ins7 = insights7Q.data;
   const rows = historyQ.data?.rows;
   const media = postsQ.data?.data;
   const unavailable = profileQ.isError && insightsQ.isError;
   // isPending (не isLoading): пока канал не известен, IG-запросы выключены — это тоже «загрузка».
-  const loading = profileQ.isPending || insightsQ.isPending;
+  const loading = profileQ.isPending || insightsQ.isPending || insights7Q.isPending;
   // Не подключён (ошибка / mock вне демо) → панель зовёт подключить; отличается от «подключён, но
   // мало данных» (тогда input=null из-за пустого охвата, но notConnected=false → тихий рассказ).
   const notConnected = (profileQ.isError && insightsQ.isError) || (!!(profile?.mock || ins?.mock) && !demo);
   const input = useMemo(() => {
     if (unavailable) return null;
     if (!!(profile?.mock || ins?.mock) && !demo) return null;
+    // Пока 7-дн фетч грузится — не строим вход, чтобы не мигнуть daily-fallback охвата перед дедупом.
+    if (!ins7 && insights7Q.isPending) return null;
     const now = Date.now();
     const metrics = igWindowMetrics({
       profile,
@@ -117,6 +121,12 @@ export function useIgWeekInput(): { input: NarrativeIgInput | null; loading: boo
       since: now - 2 * WEEK_MS,
       until: now,
     });
+    // 7-дневный ДЕДУП охват (reach_window из insights(7)) — число охвата + WoW в рассказе сходятся
+    // с KPI-карточкой «Охват · 7 дн.». Дневной spark/WoW-форма берётся из 14-дн входа (metrics.daily).
+    // Ошибка insights(7) → ins7 null → reachWeek undefined → igReachWindow падает на daily-сумму.
+    const reachMetrics = ins7
+      ? igWindowMetrics({ profile, insights: ins7, historyRows: rows, since: now - WEEK_MS, until: now })
+      : null;
     const reach = metrics.daily.reach;
     if (!reach.length) return null;
     // Движение базы = НЕТТО из архива (ig_daily.follows − unfollows подневно), тот же смысл, что
@@ -133,6 +143,7 @@ export function useIgWeekInput(): { input: NarrativeIgInput | null; loading: boo
       withReach.length >= 3 ? withReach.reduce((a, p) => a + postEr(p), 0) / withReach.length : null;
     return {
       reachDaily: reach.map((p) => ({ day: p.day, v: p.value })),
+      reachWeek: reachMetrics?.pairs.reach,
       followsDaily: follows.map((p) => ({ day: p.day, v: p.value })),
       followersNow: metrics.values.followersLevel.hasValue ? metrics.followersLevel : null,
       mediaWeek: weekMedia.map((p) => ({
@@ -142,7 +153,7 @@ export function useIgWeekInput(): { input: NarrativeIgInput | null; loading: boo
       })),
       avgMediaErv,
     };
-  }, [unavailable, profile, ins, rows, media, demo]);
+  }, [unavailable, profile, ins, ins7, insights7Q.isPending, rows, media, demo]);
   return { input, loading, notConnected };
 }
 
