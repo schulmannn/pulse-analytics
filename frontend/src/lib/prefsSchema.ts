@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { WidgetPrefs } from '@/components/ChartWidget';
+import type { WidgetPrefs } from '@/lib/widgetPrefsStore';
 import { normalizeWidgets, type WidgetConfig } from '@/lib/widgetConfig';
 
 const CURRENT_PREFS_VERSION = 1;

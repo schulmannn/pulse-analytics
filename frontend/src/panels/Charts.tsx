@@ -10,7 +10,8 @@ import { fmt, ruAxisLabel, pluralRu } from '@/lib/format';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useWidgetPeriod } from '@/lib/period';
 
-import { ChartCardBody, ChartSection, seriesBarValuesVariant } from '@/components/ChartWidget';
+import { ChartCardBody, ChartSection } from '@/components/ChartWidget';
+import { seriesBarValuesVariant } from '@/components/widgets/variants';
 import { pctDelta } from '@/lib/delta';
 
 interface HeatmapCell {

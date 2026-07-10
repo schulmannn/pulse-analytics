@@ -1,6 +1,7 @@
 import type { IgData } from '@/lib/useIgData';
 import { useIgTags } from '@/api/queries';
-import { ChartSection, WidgetGroup } from '@/components/ChartWidget';
+import { ChartSection } from '@/components/ChartWidget';
+import { WidgetGroup } from '@/components/widgets/WidgetGroup';
 import { Section } from '@/components/instagram/shared';
 import {
   TopPostsBlock,

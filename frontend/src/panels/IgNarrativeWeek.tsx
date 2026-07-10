@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { buildIgWeekNarrative } from '@/lib/narrative';
-import { ChartSection, type WidgetSize } from '@/components/ChartWidget';
+import { ChartSection } from '@/components/ChartWidget';
+import type { WidgetSize } from '@/lib/widgetPrefsStore';
 import { Skeleton } from '@/components/ui/skeleton';
 import { NarrativeProse, useIgWeekInput } from '@/panels/NarrativeWeek';
 

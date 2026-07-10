@@ -16,7 +16,7 @@
 // lands in later sprints; this sprint only establishes the vocabulary.
 
 import type { DrillKey } from '@/lib/kpiDerive';
-import type { WidgetSize } from '@/components/ChartWidget';
+import type { WidgetSize } from '@/lib/widgetPrefsStore';
 
 /** Where the metric's data comes from. `all` = source-agnostic (rare; reserved). */
 export type MetricSource = 'tg' | 'ig' | 'all';

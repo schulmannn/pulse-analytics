@@ -11,7 +11,7 @@ import { VIZ_LABEL } from '@/lib/widgetRender';
 import { getMetric, metricsForSource } from '@/lib/widgetMetrics';
 import { channelsForSource } from '@/lib/channelSource';
 import { editorSpec, type EditorSpec } from '@/lib/widgetCapabilities';
-import type { WidgetSize } from '@/components/ChartWidget';
+import type { WidgetSize } from '@/lib/widgetPrefsStore';
 import type { DimensionDef } from '@/lib/dimensions';
 import type { ComparisonDisplay, ComparisonMode, FilterOp, TargetType, WidgetConfig, WidgetFilter, WidgetGrain } from '@/lib/widgetConfig';
 

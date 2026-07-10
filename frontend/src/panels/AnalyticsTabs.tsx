@@ -4,7 +4,8 @@ import { TgAnalytics } from '@/panels/TgAnalytics';
 import { Insights } from '@/panels/Insights';
 import { Compare } from '@/panels/Compare';
 import { HistoryChartBlock, HeatmapChartBlock, VelocityChartBlock } from '@/panels/Charts';
-import { ChartSection, WidgetGroup } from '@/components/ChartWidget';
+import { ChartSection } from '@/components/ChartWidget';
+import { WidgetGroup } from '@/components/widgets/WidgetGroup';
 import { WidgetErrorBoundary } from '@/components/WidgetErrorBoundary';
 import { Hashtags } from '@/panels/Hashtags';
 

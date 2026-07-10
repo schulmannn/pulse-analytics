@@ -3,9 +3,9 @@ import { Link } from 'react-router-dom';
 import { useHistory, useTgFull } from '@/api/queries';
 import { latestDataMs } from '@/lib/freshness';
 import { ChannelRecencyProvider } from '@/lib/period';
+import { WidgetGroup } from '@/components/widgets/WidgetGroup';
 import {
   HomeEditContext,
-  WidgetGroup,
   getWidgetPrefs,
   pinToHome,
   remapGroupOrder,
@@ -13,7 +13,7 @@ import {
   setWidgetHidden,
   useHomeBlocks,
   useWidgetPrefs,
-} from '@/components/ChartWidget';
+} from '@/lib/widgetPrefsStore';
 import { ChannelScope } from '@/lib/channel-context';
 import { HOME_REGISTRY, HOME_DEFAULT_KEYS, type HomeWidgetDef } from '@/lib/homeWidgets';
 import { ConfigWidget } from '@/components/ConfigWidget';

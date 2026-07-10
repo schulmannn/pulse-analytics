@@ -5,7 +5,9 @@ import { BarChart } from '@/components/BarChart';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { Mentions as MentionsData } from '@/api/schemas';
 
-import { ChartSection, WidgetGroup, breakdownVariants } from '@/components/ChartWidget';
+import { ChartSection } from '@/components/ChartWidget';
+import { WidgetGroup } from '@/components/widgets/WidgetGroup';
+import { breakdownVariants } from '@/components/widgets/variants';
 import { LineChart } from '@/components/LineChart';
 
 export function Mentions() {

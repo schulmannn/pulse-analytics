@@ -1,6 +1,7 @@
 import type { IgData } from '@/lib/useIgData';
 import { Section, TrendCard, FollowsByDayCard, SubscriberMovement, igPeriodRows } from '@/components/instagram/shared';
-import { ChartSection, WidgetGroup } from '@/components/ChartWidget';
+import { ChartSection } from '@/components/ChartWidget';
+import { WidgetGroup } from '@/components/widgets/WidgetGroup';
 import { InsightsBlock, PeriodCompareBlock } from '@/components/instagram/insights';
 import { exportIgDaily } from '@/lib/igExport';
 
