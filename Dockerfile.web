@@ -12,7 +12,9 @@ WORKDIR /fe
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/ ./
-RUN npm run build
+# build:shared собирает narrative-движок в CJS для серверного недельного дайджеста
+# (server/lib/narrative.gen.cjs = /server/lib в этой стадии — outfile ../server от /fe).
+RUN npm run build && npm run build:shared
 
 # ── Stage 2: server runtime ──
 FROM node:20-slim
@@ -26,6 +28,8 @@ RUN npm ci --omit=dev
 
 # Только то, что нужно вебу (mtproto/ — отдельный сервис, сюда не копируем)
 COPY server ./server
+# Shared narrative-движок (недельный дайджест в report-email) — собран стадией frontend.
+COPY --from=frontend /server/lib/narrative.gen.cjs ./server/lib/narrative.gen.cjs
 COPY public ./public
 # New frontend build output (served at /app).
 COPY --from=frontend /fe/dist ./frontend/dist

@@ -11,3 +11,6 @@ __pycache__/
 
 # local db snapshots (ops/BACKUP_RESTORE.md)
 ops/snapshots/
+
+# generated: shared narrative engine bundle (frontend `npm run build:shared`; в Docker — стадия frontend)
+server/lib/narrative.gen.cjs
