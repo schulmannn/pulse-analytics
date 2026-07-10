@@ -137,19 +137,7 @@ function PostsLeaderboard({ allPosts }: { allPosts: NormalizedPost[] }) {
                   className={`group transition-colors hover:bg-hover-row ${isClickable ? 'cursor-pointer' : ''}`}
                 >
                   <td className="py-3 pl-0 pr-3 text-center">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded border border-border/40 bg-muted">
-                      {post.thumb ? (
-                        <img
-                          loading="lazy"
-                          src={post.thumb}
-                          alt=""
-                          referrerPolicy="no-referrer"
-                          className="h-full w-full object-cover"
-                        />
-                      ) : (
-                        <span className="text-2xs font-medium text-muted-foreground">Текст</span>
-                      )}
-                    </div>
+                    <PostThumb thumb={post.thumb} mediaType={post.mediaType} albumSize={post.albumSize} />
                   </td>
                   <td className="px-3 py-3">
                     {isClickable ? (
@@ -216,13 +204,7 @@ function PostsLeaderboard({ allPosts }: { allPosts: NormalizedPost[] }) {
               onClick={isClickable ? () => setOpenId(post.id) : undefined}
               className={cn('flex w-full items-center gap-3 py-3 text-left transition-colors hover:bg-hover-row', isClickable && 'cursor-pointer')}
             >
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded border border-border/40 bg-muted">
-                {post.thumb ? (
-                  <img loading="lazy" src={post.thumb} alt="" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
-                ) : (
-                  <span className="text-2xs font-medium text-muted-foreground">Текст</span>
-                )}
-              </div>
+              <PostThumb thumb={post.thumb} mediaType={post.mediaType} albumSize={post.albumSize} />
               <span className="min-w-0 flex-1">
                 <span className={cn('block truncate text-sm', title ? 'text-foreground' : 'italic text-muted-foreground')}>
                   {title ?? 'Без подписи'}
@@ -241,6 +223,33 @@ function PostsLeaderboard({ allPosts }: { allPosts: NormalizedPost[] }) {
         <PostDetailModal post={selectedPost} reason={null} onClose={() => setOpenId(null)} />
       )}
     </>
+  );
+}
+
+/**
+ * Превью поста с честным фолбэком: битый/недоступный thumb — больше не молчаливый серый квадрат
+ * (дизайн-проход №3: прокси в целом жив, но конкретный пост может отдать 404/просрочиться или
+ * долго греть холодный кэш и упасть) — при ошибке показываем тип медиа словом, как у текстовых.
+ */
+function PostThumb({ thumb, mediaType, albumSize }: { thumb: string | null; mediaType: string | null; albumSize: number }) {
+  const [broken, setBroken] = useState(false);
+  const label =
+    mediaType === 'video' ? 'Видео' : mediaType === 'photo' ? (albumSize > 1 ? `${albumSize} фото` : 'Фото') : 'Текст';
+  return (
+    <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded border border-border/40 bg-muted">
+      {thumb && !broken ? (
+        <img
+          loading="lazy"
+          src={thumb}
+          alt=""
+          referrerPolicy="no-referrer"
+          onError={() => setBroken(true)}
+          className="h-full w-full object-cover"
+        />
+      ) : (
+        <span className="px-0.5 text-center text-2xs font-medium leading-tight text-muted-foreground">{label}</span>
+      )}
+    </div>
   );
 }
 

@@ -81,8 +81,11 @@ export function DataHealth({ defaultOpen = false }: { defaultOpen?: boolean } = 
           <Row label="Последний сбор" value={lastCollect} />
           <Row label="Сборщик" value={collectorVer} />
           <Row label="API" value={apiText} tone={apiTone} />
+          {/* «Подключить источник», не «Настроить сбор»: эта ссылка ведёт на /connect (хаб
+              подключений), а «Настроить сбор» в Настройках → Данные — соседняя строка в раздел
+              «Каналы». Один лейбл на двух разных назначениях в одной панели путал (проход №3). */}
           <Link to="/connect" className="mt-3 inline-block text-sm font-medium text-primary hover:underline">
-            Настроить сбор →
+            Подключить источник →
           </Link>
         </div>
       )}

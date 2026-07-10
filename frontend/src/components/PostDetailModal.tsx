@@ -110,6 +110,7 @@ export function PostDetailModal({ post, rank, reason, onClose }: PostDetailModal
               src={`${post.thumb}?size=lg`}
               alt={rank != null ? `Превью поста №${rank}` : 'Превью поста'}
               referrerPolicy="no-referrer"
+              onError={(e) => { e.currentTarget.style.display = 'none'; }}
               className="max-h-72 w-full rounded-lg object-cover"
             />
           )}
