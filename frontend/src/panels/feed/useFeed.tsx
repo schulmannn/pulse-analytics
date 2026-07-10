@@ -44,9 +44,10 @@ export function FeedBlock({
           card top, and carries a blurred card bg so content slides under cleanly — БЕЗ нижней
           hairline (владелец: пустая «полоска» под заголовком лишняя; blur-фон и так маскирует
           заезжающий контент, как у steep). Отступ до виджетов ужат mb-6→mb-2 + pb-3→pb-1.5
-          (steep-плотность). The topbar is gone on feed routes, so it anchors just below the
-          viewport top. z-10 keeps it under the widget menus/popovers (z-popover). */}
-      <div className="sticky top-2 z-10 -mx-3 -mt-4 mb-2 flex items-center justify-between gap-3 rounded-t-2xl bg-card/95 px-3 pb-1.5 pt-4 backdrop-blur dark:bg-card/80 sm:-mx-7 sm:-mt-7 sm:px-7 sm:pt-7">
+          (steep-плотность). top-0 (не top-2): на фид-роутах топбара нет, а 8px-зазор над
+          заголовком просвечивал заезжающий контент — прижимаем к самому верху, зазора нет
+          (баг «полоса пропускает текст сверху»). z-10 keeps it under widget menus (z-popover). */}
+      <div className="sticky top-0 z-10 -mx-3 -mt-4 mb-2 flex items-center justify-between gap-3 rounded-t-2xl bg-card/95 px-3 pb-1.5 pt-4 backdrop-blur dark:bg-card/80 sm:-mx-7 sm:-mt-7 sm:px-7 sm:pt-7">
         <h2 className="text-2xl font-medium tracking-tight text-foreground">{title}</h2>
         {headerRight}
       </div>
