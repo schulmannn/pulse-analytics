@@ -2980,6 +2980,7 @@ app.use((err, req, res, next) => {
 // doesn't expose the replica count to the app, so the operator declares it via WEB_REPLICAS; bumping
 // Railway's replica slider WITHOUT the Redis-backed shared state (still unbuilt) silently multiplies
 // rate limits and Graph/MTProto quota burn. Loud boot error = the tripwire for that scale-up.
+if (require.main === module) {
 const WEB_REPLICAS = Number(process.env.WEB_REPLICAS || '1');
 if (Number.isFinite(WEB_REPLICAS) && WEB_REPLICAS > 1) {
   log('error', 'multi_replica_unsupported', {
@@ -3001,3 +3002,6 @@ app.listen(PORT, () => {
 ╚══════════════════════════════════════════╝
   `);
 });
+}
+
+module.exports = { app };
