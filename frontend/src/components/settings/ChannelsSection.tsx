@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { ErrorState } from '@/components/ErrorState';
 import { Link } from 'react-router-dom';
 import {
   useChannelKeys,
@@ -24,7 +25,7 @@ import {
 
 /** «Каналы» — add a Telegram channel + the connected list with collector API keys. */
 export function ChannelsSection() {
-  const { data, isLoading, isError, error } = useChannels();
+  const { data, isLoading, isError, error, refetch } = useChannels();
   const me = useMe();
   // UID/Owner are internal identifiers — admin debugging info, not product language.
   const isSuperuser = me.data?.role === 'superuser';
@@ -38,9 +39,11 @@ export function ChannelsSection() {
   if (isLoading) return <ChannelsSkeleton />;
   if (isError) {
     return (
-      <div className="rounded border border-destructive/40 px-4 py-6 text-center text-sm text-muted-foreground">
-        Ошибка загрузки настроек: {error instanceof Error ? error.message : 'ошибка сервера'}
-      </div>
+      <ErrorState
+        title="Не удалось загрузить настройки каналов"
+        reason={error instanceof Error ? error.message : 'ошибка сервера'}
+        onRetry={() => refetch()}
+      />
     );
   }
 
@@ -199,7 +202,7 @@ export function ChannelsSection() {
 }
 
 function ChannelKeysPanel({ channelId }: { channelId: number }) {
-  const { data, isLoading, isError } = useChannelKeys(channelId);
+  const { data, isLoading, isError, refetch } = useChannelKeys(channelId);
   const createKeyMutation = useCreateKey(channelId);
   const [keyError, setKeyError] = useState<string | null>(null);
   const revokeKeyMutation = useRevokeKey(channelId);
@@ -215,7 +218,7 @@ function ChannelKeysPanel({ channelId }: { channelId: number }) {
       </div>
     );
   }
-  if (isError) return <div className="text-xs text-destructive">Не удалось загрузить ключи</div>;
+  if (isError) return <ErrorState className="py-4" title="Не удалось загрузить ключи" onRetry={() => refetch()} />;
 
   const keys = data?.keys ?? [];
 

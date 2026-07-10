@@ -95,6 +95,7 @@ interface HomeBlockProps {
 }
 
 import { ErrorState } from '@/components/ErrorState';
+import { EmptyState } from '@/components/EmptyState';
 
 export function HistoryChartBlock({ id, homeKey }: HomeBlockProps = {}) {
   // isPending (не isLoading): запрос выключен, пока канал не известен, — скелетон и там.
@@ -112,9 +113,7 @@ export function HistoryChartBlock({ id, homeKey }: HomeBlockProps = {}) {
   if (!data || !data.enabled) {
     return (
       <ChartSection title="История подписчиков" defaultSize="half" id={id} homeKey={homeKey}>
-        <p className="py-8 text-center text-sm text-muted-foreground">
-          История подписчиков пока недоступна.
-        </p>
+        <EmptyState compact title="История подписчиков пока недоступна" />
       </ChartSection>
     );
   }
@@ -124,9 +123,7 @@ export function HistoryChartBlock({ id, homeKey }: HomeBlockProps = {}) {
   if (rows.length < 2) {
     return (
       <ChartSection title="История подписчиков" defaultSize="half" id={id} homeKey={homeKey}>
-        <p className="py-8 text-center text-sm text-muted-foreground">
-          История подписчиков пока пуста.
-        </p>
+        <EmptyState compact title="История подписчиков пока пуста" />
       </ChartSection>
     );
   }

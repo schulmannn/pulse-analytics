@@ -3,7 +3,6 @@ import { normalizeTgPosts, type NormalizedPost } from '@/lib/posts';
 import { fmt, pluralRu } from '@/lib/format';
 import { pctDelta } from '@/lib/delta';
 import { useWidgetPeriod } from '@/lib/period';
-import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { DeltaPill } from '@/components/DeltaPill';
 import { BarChart } from '@/components/BarChart';
@@ -96,11 +95,7 @@ export function Compare() {
 
   if (cur.length === 0) {
     return (
-      <Card>
-        <CardContent className="py-8 text-center text-sm text-muted-foreground">
-          Недостаточно данных для сравнения.
-        </CardContent>
-      </Card>
+      <EmptyState title="Недостаточно данных для сравнения" reason="Нужны посты в текущем и прошлом окне." />
     );
   }
 
@@ -173,19 +168,19 @@ export function Compare() {
             <table className="w-full text-left text-sm">
               <thead>
                 <tr className="border-b border-border text-xs font-medium tracking-wider text-muted-foreground">
-                  <th className="p-4">Метрика</th>
-                  <th className="p-4 text-right">Текущий</th>
-                  <th className="p-4 text-right">Предыдущий</th>
-                  <th className="p-4 text-right">Δ</th>
+                  <th className="py-3 pl-0 pr-4">Метрика</th>
+                  <th className="px-4 py-3 text-right">Текущий</th>
+                  <th className="px-4 py-3 text-right">Предыдущий</th>
+                  <th className="py-3 pl-4 pr-0 text-right">Δ</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
                 {rows.map((r) => (
                   <tr key={r.label} className="hover:bg-hover-row">
-                    <td className="p-4 text-muted-foreground">{r.label}</td>
-                    <td className="p-4 text-right font-medium tabular-nums">{r.render(r.cur)}</td>
-                    <td className="p-4 text-right tabular-nums text-muted-foreground">{r.render(r.prev)}</td>
-                    <td className="p-4 text-right">
+                    <td className="py-3 pl-0 pr-4 text-muted-foreground">{r.label}</td>
+                    <td className="px-4 py-3 text-right font-medium tabular-nums">{r.render(r.cur)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">{r.render(r.prev)}</td>
+                    <td className="py-3 pl-4 pr-0 text-right">
                       <span className="inline-flex justify-end">
                         <DeltaPill delta={pctDelta(r.cur, r.prev)} />
                       </span>
@@ -217,6 +212,7 @@ export function Compare() {
       <WidgetGroup id="compare" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
         <ChartSection
           title="Охват по дням недели"
+          defaultSize="half"
           variants={
             hasWeekday
               ? [
@@ -242,7 +238,7 @@ export function Compare() {
         >
           {!hasWeekday && <EmptyHint />}
         </ChartSection>
-        <ChartSection title="По форматам (просмотры)" variants={formatItems.length > 0 ? breakdownVariants(formatItems) : undefined}>
+        <ChartSection title="По форматам (просмотры)" defaultSize="half" variants={formatItems.length > 0 ? breakdownVariants(formatItems) : undefined}>
           {formatItems.length === 0 && <EmptyHint />}
         </ChartSection>
       </WidgetGroup>
@@ -251,26 +247,28 @@ export function Compare() {
 }
 
 function EmptyHint() {
-  return <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">Нет данных за период</div>;
+  // По центру ТЕЛА фикс-тайла (канон WidgetRenderer h-full), не в верхней части (аудит).
+  return <EmptyState compact title="Нет данных за период" className="flex h-full min-h-[6rem] items-center justify-center" />;
 }
 
 function CompareSkeleton() {
+  // Зеркалит ЗАГРУЖЕННЫЙ лейаут (канон Posts «Mirrors the loaded layout exactly»): таблица на
+  // открытом канвасе + две half-карточки в 6-колоночной сетке — раньше Card-плитки и 50/50
+  // давали скачок раскладки после загрузки (аудит).
   return (
     <div className="space-y-6">
-      <Card>
-        <CardContent className="space-y-3 p-5">
-          <Skeleton className="h-4 w-1/3" />
-          <Skeleton className="h-32 w-full" />
-        </CardContent>
-      </Card>
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <div className="space-y-3">
+        <Skeleton className="h-4 w-1/3" />
+        {Array.from({ length: 4 }).map((_, i) => (
+          <Skeleton key={i} className="h-8 w-full" />
+        ))}
+      </div>
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
         {Array.from({ length: 2 }).map((_, i) => (
-          <Card key={i}>
-            <CardContent className="space-y-3 p-5">
-              <Skeleton className="h-4 w-1/4" />
-              <Skeleton className="h-44 w-full" />
-            </CardContent>
-          </Card>
+          <div key={i} className="h-[264px] rounded-xl border border-border bg-card p-5 lg:col-span-3">
+            <Skeleton className="h-4 w-1/4" />
+            <Skeleton className="mt-3 h-40 w-full" />
+          </div>
         ))}
       </div>
     </div>

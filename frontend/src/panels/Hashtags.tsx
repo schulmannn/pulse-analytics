@@ -1,4 +1,5 @@
 import { useTgFull } from '@/api/queries';
+import { EmptyState } from '@/components/EmptyState';
 import type { TgFull } from '@/api/schemas';
 import { normalizeTgPosts } from '@/lib/posts';
 import { ChartSection, breakdownVariants } from '@/components/ChartWidget';
@@ -109,9 +110,7 @@ export function Hashtags() {
   if (!deriveHashtags(full, alwaysInRange).hasItems) {
     return (
       <ChartSection title="Влияние хэштегов на ERV" defaultSize="full">
-        <div className="py-6 text-center text-sm text-muted-foreground">
-          Мало данных: нужно ≥2 поста с одним хэштегом.
-        </div>
+        <EmptyState compact title="Мало данных для хэштегов" reason="Нужно ≥2 поста с одним хэштегом" />
       </ChartSection>
     );
   }

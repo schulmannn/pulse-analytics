@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { DateRangePicker } from '@/components/DateRangePicker';
 import type { DateRange, PeriodDays } from '@/lib/period';
@@ -37,6 +37,20 @@ export function PeriodChips({
   className?: string;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  // Esc закрывает поповер и возвращает фокус на чип — как все остальные дропдауны (аудит:
+  // это был единственный Esc-less дропдаун приложения).
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setPickerOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [pickerOpen]);
   return (
     <div role="group" aria-label="Период" className={cn('relative flex flex-wrap items-center gap-1.5', className)}>
       {PRESETS.map((chip) => (
@@ -58,6 +72,7 @@ export function PeriodChips({
       {onRangeChange && (
         <>
           <button
+            ref={triggerRef}
             type="button"
             onClick={() => setPickerOpen((v) => !v)}
             aria-haspopup="dialog"
@@ -74,7 +89,7 @@ export function PeriodChips({
           </button>
           {pickerOpen && (
             <>
-              {/* Scrim closes the popover on an outside click / Esc-less dismissal. */}
+              {/* Scrim = клик мимо; Esc обрабатывает keydown-эффект выше. */}
               <div className="fixed inset-0 z-popover" aria-hidden="true" onClick={() => setPickerOpen(false)} />
               <div className="absolute right-0 top-full z-popover mt-2 rounded-lg border border-border bg-card p-3">
                 <DateRangePicker

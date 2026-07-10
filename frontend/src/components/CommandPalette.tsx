@@ -63,12 +63,11 @@ const SUPERUSER_ROUTES: Array<{ path: string; label: string; icon: IconName; sea
   { path: '/bugs', label: 'Баги', icon: 'bugs', search: 'баги bugs фидбек' },
 ];
 
-// Networks a source can live on (brand colours are platform identity, intentional hex — same set
-// the sidebar SourceSwitcher uses). Picking a source row navigates to `to` for that network.
-const SOURCE_NETWORKS = [
-  { key: 'tg', name: 'Telegram', color: '#229ED9', to: '/' },
-  { key: 'ig', name: 'Instagram', color: '#E1306C', to: '/instagram' },
-] as const;
+// Сети — из ЕДИНОГО реестра lib/networks (его докстринг: «Everything network-shaped reads THIS
+// list»). Локальный кортеж молча выпадал бы из ⌘K при добавлении новой сети (аудит).
+const SOURCE_NETWORKS = NETWORKS.map((n) => ({ key: n.key as 'tg' | 'ig', name: n.name, color: n.color, to: n.home }));
+
+import { NETWORKS } from '@/lib/networks';
 
 /** Tiny brand glyph for a network badge (currentColor; the call site tints it the brand colour). */
 function NetworkGlyph({ k }: { k: 'tg' | 'ig' }) {

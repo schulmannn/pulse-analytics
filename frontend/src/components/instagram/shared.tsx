@@ -69,20 +69,21 @@ export function KpiCard({ label, value, hint, trend, deltaText, deltaTone, onDri
     deltaTone === 'up' ? 'text-verdant' : deltaTone === 'down' ? 'text-ember' : 'text-muted-foreground';
   return (
     <div className="py-1">
-      <div className="text-xs tracking-wide text-muted-foreground">{label}</div>
-      <div className="mt-2 flex items-center gap-2">
+      {/* Паритет с TG StatTile (аудит: «twin» расходился кеглем и базовой линией дельты). */}
+      <div className="text-2xs tracking-wide text-muted-foreground">{label}</div>
+      <div className="mt-1.5 flex items-baseline gap-2">
         {onDrill ? (
           <button
             type="button"
             aria-label={`Разбор: ${label}`}
             title="Подробный разбор"
             onClick={onDrill}
-            className="rounded text-left text-3xl font-medium tabular-nums tracking-tight transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            className="rounded text-left text-2xl font-medium tabular-nums tracking-tight transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           >
             {value}
           </button>
         ) : (
-          <div className="text-3xl font-medium tabular-nums tracking-tight">{value}</div>
+          <div className="text-2xl font-medium tabular-nums tracking-tight">{value}</div>
         )}
         {deltaText ? (
           <span className={`shrink-0 text-xs font-medium tabular-nums ${deltaColor}`}>{deltaText}</span>

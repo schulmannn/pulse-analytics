@@ -731,9 +731,9 @@ function ReportDocumentBody({
               )}
             </div>
           ) : (
-            <span className={`${chipBase} ${chipIdle} cursor-default`}>@{channelName}</span>
+            <span className={`${chipBase} cursor-default border-border text-muted-foreground`}>@{channelName}</span>
           )}
-          <span className={`${chipBase} ${chipIdle} cursor-default`}>Telegram</span>
+          <span className={`${chipBase} cursor-default border-border text-muted-foreground`}>Telegram</span>
           <span className="flex-1" />
           <button type="button" onClick={() => window.print()} className={`${chipBase} ${chipIdle}`}>
             Печать / PDF
