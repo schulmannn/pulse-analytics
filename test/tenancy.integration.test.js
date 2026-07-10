@@ -311,3 +311,34 @@ test('setChannelTgId INSIDE a transaction does not self-deadlock (verify-round r
   assert.ok(row.workspace_id != null, 'workspace stamped through the tx executor');
   assert.ok(row.source_id != null, 'source stamped through the tx executor');
 });
+
+test('listChannels: видимость по матрице (owner / viewer-член / dedup / disabled / legacy NULL-workspace)', { skip }, async () => {
+  const creator = await mkUser('lc-creator');
+  const member = await mkUser('lc-member');
+  const outsider = await mkUser('lc-outsider');
+  const ws = await mkWorkspace(creator, `lc-ws-${nonce}`);
+  await pool.query(
+    `INSERT INTO workspace_members (workspace_id, uid, role) VALUES ($1, $2, 'viewer')`, [ws, member]);
+
+  const legacy = await mkChannel(creator, null, null, `lc_legacy_${nonce}`);   // NULL workspace → только создатель
+  const shared = await mkChannel(creator, ws, null, `lc_shared_${nonce}`);     // создатель И member (owner тоже член ws)
+  const off = await mkChannel(creator, ws, null, `lc_off_${nonce}`);
+  await pool.query(`UPDATE channels SET status='disabled' WHERE id=$1`, [off]);
+
+  const ids = (list) => list.map((c) => c.id);
+
+  const asCreator = ids(await db.listChannels({ uid: creator }));
+  assert.ok(asCreator.includes(legacy), 'создатель видит legacy (NULL-workspace) канал');
+  assert.ok(asCreator.includes(shared), 'создатель видит workspace-канал');
+  assert.strictEqual(asCreator.filter((id) => id === shared).length, 1,
+    'owner+member одного канала = ровно одна строка (без дублей)');
+  assert.ok(!asCreator.includes(off), 'disabled скрыт даже для владельца');
+
+  const asMember = ids(await db.listChannels({ uid: member }));
+  assert.ok(asMember.includes(shared), 'viewer-член workspace видит канал');
+  assert.ok(!asMember.includes(legacy), 'чужой legacy-канал члену не виден');
+  assert.ok(!asMember.includes(off), 'disabled скрыт и для члена');
+
+  const asOutsider = ids(await db.listChannels({ uid: outsider }));
+  assert.ok(![legacy, shared, off].some((id) => asOutsider.includes(id)), 'постороннему не виден ни один');
+});

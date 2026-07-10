@@ -328,11 +328,24 @@ async function listChannels(user) {
   if (!enabled) return [];
   const uid = user && user.uid;
   if (uid == null) return [];   // defensive: never query ownership with a missing uid
+  // Видимость через индексный id-набор (UNION двух ветвей) вместо `owner OR EXISTS(...)`:
+  // OR поверх owner_uid и коррелированного EXISTS заставляет планировщик seq-scan'ить channels
+  // (capacity-док, hot query), а UNION гонит каждую ветвь своим индексом (channels_owner_idx /
+  // workspace_members_uid_idx → channels_workspace_idx) и полуджойнит результат. Набор ТОТ ЖЕ,
+  // что у CHANNEL_ACCESS_PREDICATE: создатель (legacy owner_uid) ИЛИ член workspace — JOIN по
+  // m.workspace_id = c.workspace_id сам отсекает NULL-workspace строки, как
+  // `workspace_id IS NOT NULL AND EXISTS` в предикате; IN дедупит owner+member пересечение.
   const { rows } = await pool.query(
     `SELECT ${CHANNEL_COLS}, ${MEMBER_COUNT_COL},
             EXISTS(SELECT 1 FROM ig_accounts ia WHERE ia.channel_id = channels.id) AS ig_connected
      FROM channels
-     WHERE ${CHANNEL_ACCESS_PREDICATE.replaceAll('$UID', '$1')} AND status<>'disabled'
+     WHERE channels.id IN (
+             SELECT c.id FROM channels c WHERE c.owner_uid = $1
+             UNION
+             SELECT c.id FROM channels c
+               JOIN workspace_members m ON m.workspace_id = c.workspace_id
+              WHERE m.uid = $1)
+       AND status<>'disabled'
      ORDER BY created_at ASC`, [uid]);
   return rows;
 }
