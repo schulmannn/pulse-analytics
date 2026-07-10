@@ -54,10 +54,11 @@ const DAILY_DEFS: Record<string, IgDailyDef> = {
     term: 'Подписки',
     genitive: 'подписок',
     seriesKey: 'follower',
-    formula: 'Новые подписки по дням; заголовок — сумма за выбранное окно.',
+    formula:
+      'График «Подписчики» — реальный уровень базы по дням (как у Telegram); заголовок — текущее количество и изменение за окно. «Подписки по дням» ниже — новые подписки за каждый день.',
     included:
-      'Только валовые подписки: отписки Instagram по дням не отдаёт (итог за период — в «Движении аудитории» на Аналитике).',
-    source: 'Instagram insights (follows) + дневной архив ig_daily.',
+      'Уровень собирается из ежедневных фиксаций реального количества подписчиков; дни до начала фиксаций достроены назад от живого значения по чистому движению (подписки − отписки). «Подписки по дням» — только валовые подписки: отписки Instagram по дням не отдаёт.',
+    source: 'Профиль Instagram (followers_count, ежедневная фиксация в ig_daily) + insights (follows).',
   },
   'ig-views': {
     term: 'Просмотры',
@@ -285,6 +286,16 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
     : [];
   const pinnedDiff = pinnedValid != null && pinnedValid > 0 ? win.values[pinnedValid] - win.values[pinnedValid - 1] : null;
 
+  // ── «Подписчики» (только ig-follows): абсолютный уровень базы, как ТГ ────────────────────
+  // Реальные дневные якоря followers_total + реконструкция от живого значения (см.
+  // followerLevelSeries). Гейт ≥2 точек: без уровня страница остаётся прежней (сумма подписок).
+  const levelFull = metricKey === 'ig-follows' ? ig.series.followerLevel : [];
+  const lvl = levelFull.length > 1 ? windowIgSeries(levelFull, days, 'подписчиков') : null;
+  const lvlNow = lvl && lvl.values.length > 1 ? lvl.values[lvl.values.length - 1]! : null;
+  const lvlStart = lvl && lvl.values.length > 1 ? lvl.values[0]! : null;
+  const lvlDiff = lvlNow != null && lvlStart != null ? lvlNow - lvlStart : null;
+  const lvlTrend = lvlNow != null && lvlStart != null && lvlStart > 0 ? pctDelta(lvlNow, lvlStart) : null;
+
   const sumCur = win.values.reduce((s, v) => s + v, 0);
   const sumPrev = ghostOk ? ghostVals.reduce((s, v) => s + v, 0) : null;
   const trend = sumPrev != null ? pctDelta(sumCur, sumPrev) : null;
@@ -306,24 +317,69 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
         <span aria-hidden="true">←</span> Instagram
       </Link>
 
-      {/* Compact steep headline — the topbar h1 already names the metric. */}
-      <div>
-        <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-          <span className="text-hero font-medium leading-none tabular-nums tracking-tight">{fmt.kpi(sumCur)}</span>
-          <DeltaPill delta={trend} />
-          <span className="text-xs tracking-wide text-muted-foreground">
-            {daily.term} · {periodLabel}
-            {handle ? <span className="text-ink3"> · Instagram {handle}</span> : null}
-          </span>
+      {/* Compact steep headline — the topbar h1 already names the metric. Для ig-follows при
+          живом уровне headline = текущая база и её изменение за окно (как ТГ «Подписчики»),
+          а не сумма подписок — сумма остаётся в статистике под графиком «Подписки по дням». */}
+      {lvlNow != null ? (
+        <div>
+          <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
+            <span className="text-hero font-medium leading-none tabular-nums tracking-tight">{fmt.kpi(lvlNow)}</span>
+            <DeltaPill delta={lvlTrend} />
+            <span className="text-xs tracking-wide text-muted-foreground">
+              Подписчики · {periodLabel}
+              {handle ? <span className="text-ink3"> · Instagram {handle}</span> : null}
+            </span>
+          </div>
+          <div className="mt-1.5 text-xs text-muted-foreground">
+            {lvlDiff != null && lvlDiff !== 0 ? (
+              <>
+                изменение за окно:{' '}
+                <span className={lvlDiff > 0 ? 'text-verdant' : 'text-ember'}>
+                  {lvlDiff > 0 ? '+' : '−'}
+                  {fmt.num(Math.abs(lvlDiff))}
+                </span>
+              </>
+            ) : (
+              'база без изменений за окно'
+            )}
+          </div>
         </div>
-        <div className="mt-1.5 text-xs text-muted-foreground">сумма по дням за окно</div>
-      </div>
+      ) : (
+        <div>
+          <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
+            <span className="text-hero font-medium leading-none tabular-nums tracking-tight">{fmt.kpi(sumCur)}</span>
+            <DeltaPill delta={trend} />
+            <span className="text-xs tracking-wide text-muted-foreground">
+              {daily.term} · {periodLabel}
+              {handle ? <span className="text-ink3"> · Instagram {handle}</span> : null}
+            </span>
+          </div>
+          <div className="mt-1.5 text-xs text-muted-foreground">сумма по дням за окно</div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-6 xl:gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
         <div className="min-w-0 space-y-6">
+          {lvl != null && (
+            <ChartSection id="metric-ig-followers-level" title="Подписчики" defaultSize="full" noExpand>
+              <ChartExpandedContext.Provider value={true}>
+                <LineChart
+                  values={lvl.values}
+                  labels={lvl.labels}
+                  titles={lvl.titles}
+                  height={chartH}
+                  markExtremes
+                  showPoints={lvl.values.length <= 45}
+                  legendToggle={false}
+                  emphasizeLastLabel
+                />
+              </ChartExpandedContext.Provider>
+            </ChartSection>
+          )}
+
           <ChartSection
             id={`metric-${metricKey}`}
-            title="По дням"
+            title={metricKey === 'ig-follows' ? 'Подписки по дням' : 'По дням'}
             defaultSize="full"
             noExpand
             action={

@@ -85,6 +85,36 @@ export function netFollowerDaily(rows: IgHistoryRow[] | undefined): Point[] {
   return histSeries(rows, 'follows').map((p) => ({ day: p.day, value: p.value - (unfByDay.get(p.day) ?? 0) }));
 }
 
+/** Абсолютный уровень базы по дням (аналог ТГ «Подписчики») из двух честных источников:
+ *  1) реальные якоря ig_daily.followers_total — крон пишет профильный followers_count каждый день
+ *     с миграции 013 (исторических уровней IG API не отдаёт);
+ *  2) реконструкция между/до якорей: уровень_конца(d_prev) = уровень_конца(d) − net(d),
+ *     где net = follows − unfollows (см. netFollowerDaily) — так прошлое до миграции получает
+ *     линию сразу на всю глубину архива.
+ *  Хвостовой якорь — живой profile.followers_count как СЕГОДНЯШНЯЯ точка (передаётся followersNow).
+ *  День без net-строки в архиве трактуется как net=0 (уровень протягивается) — возможный дрейф
+ *  от пропуска крона чинится ближайшим реальным якорем followers_total. Без единого якоря
+ *  (ни followersNow, ни followers_total) уровень не выводим — возвращаем []. */
+export function followerLevelSeries(rows: IgHistoryRow[] | undefined, followersNow: number | null | undefined): Point[] {
+  const netByDay = new Map(netFollowerDaily(rows).map((p) => [p.day, p.value]));
+  const totalByDay = new Map(histSeries(rows, 'followers_total').map((p) => [p.day, p.value]));
+  const days = [...new Set([...netByDay.keys(), ...totalByDay.keys()])].sort();
+  const today = new Date().toISOString().slice(0, 10);
+  if (followersNow != null && (days.length === 0 || days[days.length - 1]! < today)) days.push(today);
+  const out: Point[] = [];
+  let next: number | null = null;   // уровень следующего (более нового) дня
+  let nextNet = 0;                  // его дневное движение (вычитается при шаге назад)
+  for (let i = days.length - 1; i >= 0; i--) {
+    const day = days[i]!;
+    const anchor = day === today && followersNow != null ? followersNow : totalByDay.get(day);
+    const level: number | null = anchor ?? (next != null ? next - nextNet : null);
+    if (level != null) out.push({ day, value: level });
+    next = level;
+    nextNet = netByDay.get(day) ?? 0;
+  }
+  return out.reverse();
+}
+
 /** Which metrics arrive as a real daily series vs a windowed aggregate. Only the real series may be
     drawn as a daily chart — aggregates are shown as period comparisons instead. `min` defaults to 2
     (reach/follows have a genuine live daily series); the PROMOTED metrics (views/взаимодействия) pass

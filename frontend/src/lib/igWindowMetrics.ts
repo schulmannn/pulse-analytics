@@ -1,6 +1,7 @@
 import type { IgHistoryRow, IgInsights, IgProfile } from '@/api/schemas';
 import { pctDelta, type MetricDelta } from '@/lib/delta';
 import {
+  followerLevelSeries,
   histSeries,
   longerSeries,
   metricSeries,
@@ -26,6 +27,8 @@ export interface IgWindowSeries {
   ti: Point[];
   engaged: Point[];
   follower: Point[];
+  /** Абсолютный уровень базы по дням (якоря followers_total + реконструкция от живого значения). */
+  followerLevel: Point[];
   saves: Point[];
   likes: Point[];
   comments: Point[];
@@ -113,6 +116,8 @@ export function igWindowMetrics(raw: IgWindowRaw): IgWindowMetrics {
     engaged: metricSeries(insights, 'accounts_engaged'),
     // Level series, not gross follows. Kept for existing daily follower charts.
     follower: longerSeries(metricSeries(insights, 'follower_count'), histSeries(historyRows, 'followers')),
+    // Настоящий уровень базы (как ТГ «Подписчики»): реальные якоря + реконструкция по net.
+    followerLevel: followerLevelSeries(historyRows, profile?.followers_count ?? null),
     saves: longerSeries(metricSeries(insights, 'saves'), histSeries(historyRows, 'saves')),
     likes: longerSeries(metricSeries(insights, 'likes'), histSeries(historyRows, 'likes')),
     comments: longerSeries(metricSeries(insights, 'comments'), histSeries(historyRows, 'comments')),
