@@ -74,8 +74,8 @@ export function Overview() {
           periodControl
           homeKey="top-posts"
           action={
-            <Link to="/analytics" className="shrink-0 text-xs font-medium text-primary hover:underline">
-              <span className="md:hidden">Аналитика →</span><span className="hidden md:inline">Открыть аналитику →</span>
+            <Link to="/posts" className="shrink-0 text-xs font-medium text-primary hover:underline">
+              <span className="md:hidden">Контент →</span><span className="hidden md:inline">Открыть контент →</span>
             </Link>
           }
         >

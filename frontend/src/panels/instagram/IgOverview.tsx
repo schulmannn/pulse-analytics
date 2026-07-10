@@ -1,7 +1,6 @@
 import { Link } from 'react-router-dom';
 import type { IgData } from '@/lib/useIgData';
 import { IgKpiBlock } from '@/components/instagram/shared';
-import { InsightsBlock } from '@/components/instagram/insights';
 import { TopPostsBlock } from '@/components/instagram/content';
 import { ChartSection } from '@/components/ChartWidget';
 import { WidgetGroup } from '@/components/widgets/WidgetGroup';
@@ -10,7 +9,7 @@ import { IgNarrativeWeekBlock } from '@/panels/IgNarrativeWeek';
 /**
  * IG Обзор — the focused summary, mirroring the Telegram Overview: ALL of it widgets in one
  * reorderable WidgetGroup (the last big IG surface outside the widget system — roadmap card):
- * «Показатели» (KPI hero + ledger), «Главное» (auto-insights), «Лучшие публикации» (a teaser strip
+ * «Показатели» (KPI hero + ledger), «Лучшие публикации» (a teaser strip
  * with the link into Контент). Every card gets the full ⋯ contract — Размер in the dialog,
  * Выше/Ниже/Переставить/Скрыть in the menu, «На главную» where a self-fetching Home twin exists.
  *
@@ -21,18 +20,18 @@ import { IgNarrativeWeekBlock } from '@/panels/IgNarrativeWeek';
 export function IgOverview({ ig }: { ig: IgData }) {
   return (
     <WidgetGroup id="ig-overview" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
-      {/* IG-нарратив ведёт Обзор (симметрия с TG-«Неделя канала» на TG-Обзоре) — рассказ недели
-          на всю ширину ЖЁСТКО: fixedSize игнорирует сохранённый ресайз (треть ширины оставляла
-          2/3 первого ряда пустым холстом — флагман выглядел сломанным). Home-пин ресайзабелен. */}
-      <IgNarrativeWeekBlock id="ig-overview-week" homeKey="ig-week" fixedSize="full" title="Неделя аккаунта" />
       {/* Widget label «Показатели», NOT «Обзор» — the feed block's h2 right above already says
-          «Обзор» (the same stutter rule as the TG Overview hero). */}
+          «Обзор» (the same stutter rule as the TG Overview hero). KPI-герой ведёт Обзор на ОБЕИХ
+          сетях (TG-Обзор тоже открывается «Показателями»): большое число + тренд отвечает «как я
+          иду?» за секунду, рассказ ниже объясняет «почему». */}
       <ChartSection id="ig-overview-kpi" title="Показатели" defaultSize="full" homeKey="ig-kpi" drillTo="/metrics/ig-reach">
         <IgKpiBlock ig={ig} />
       </ChartSection>
-      <ChartSection id="ig-overview-insights" title="Главное" defaultSize="full">
-        <InsightsBlock insights={ig.insights} limit={3} />
-      </ChartSection>
+      {/* IG-нарратив под KPI (симметрия с TG-«Неделя канала») — рассказ недели на всю ширину ЖЁСТКО:
+          fixedSize игнорирует сохранённый ресайз (треть ширины оставляла 2/3 ряда пустым холстом —
+          флагман выглядел сломанным). Home-пин ресайзабелен. Insights-блок «Главное» снят с Обзора
+          (канон на IG-Аналитике; снимок недели несут KPI + рассказ) — заодно симметрия с TG-Обзором. */}
+      <IgNarrativeWeekBlock id="ig-overview-week" homeKey="ig-week" fixedSize="full" title="Неделя аккаунта" />
       <ChartSection
         id="ig-overview-top-posts"
         title="Лучшие публикации"

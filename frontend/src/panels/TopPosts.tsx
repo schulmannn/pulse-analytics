@@ -90,7 +90,7 @@ export function TopPosts() {
       <EmptyState
         title="Недостаточно данных для топа постов."
         reason="Нужно больше постов с вовлечением, чтобы выделить лучшие."
-        action={{ to: '/analytics', label: 'Открыть аналитику' }}
+        action={{ to: '/posts', label: 'Открыть контент' }}
       />
     );
   }
