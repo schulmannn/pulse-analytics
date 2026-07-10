@@ -83,7 +83,7 @@ export function WidgetRenderer({
   const hasSeries = !!result.series?.length;
   const hasBreakdown = !!result.breakdown?.length;
   const hasValue = result.value != null;
-  const eff = effectiveViz(viz, hasSeries, hasBreakdown);
+  const eff = effectiveViz(viz, hasSeries, hasBreakdown, result.unit);
 
   // Lead with a hero headline whenever the resolver provides one — value/series metrics, and now
   // ADDITIVE breakdowns (a total, steep #4.9). A non-additive breakdown carries no value, so it

@@ -316,6 +316,45 @@ export function WidgetGroup({ id, className, children }: WidgetGroupProps) {
       }),
     [],
   );
+  // ── Дырозатыкание: одинокая карточка в ПОСЛЕДНЕМ ряду растягивается на весь ряд ──────────
+  // Хвостовая дыра (half-виджет + пустые колонки до края) читается как сломанная сетка — ряд не
+  // должен уметь так выглядеть, даже если юзер сам ресайзнул (визуальный аудит). Прямой DOM-стиль
+  // вместо state: ни ре-рендеров, ни риска #185; rAF-хоп по паттерну observeSize. Каждый прогон
+  // сначала СНИМАЕТ прошлую растяжку, меряет честный layout и решает заново — идемпотентно.
+  const groupRootRef = useRef<HTMLDivElement>(null);
+  const stretchedRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    let handle = 0;
+    const apply = () => {
+      const root = groupRootRef.current;
+      if (!root) return;
+      if (stretchedRef.current) {
+        stretchedRef.current.style.gridColumn = '';
+        stretchedRef.current = null;
+      }
+      const els = [...nodes.current.values()].filter((el) => el.isConnected && el.offsetWidth > 0);
+      if (els.length < 2) return;
+      const maxTop = Math.max(...els.map((el) => el.offsetTop));
+      const lastRow = els.filter((el) => el.offsetTop === maxTop);
+      if (lastRow.length === 1 && lastRow[0].offsetWidth < root.clientWidth * 0.8) {
+        lastRow[0].style.gridColumn = '1 / -1';
+        stretchedRef.current = lastRow[0];
+      }
+    };
+    const schedule = () => {
+      cancelAnimationFrame(handle);
+      handle = requestAnimationFrame(apply);
+    };
+    schedule();
+    const unsub = subscribeStore(schedule); // ресайз/скрытие виджета → пере-раскладка
+    window.addEventListener('resize', schedule);
+    return () => {
+      cancelAnimationFrame(handle);
+      unsub();
+      window.removeEventListener('resize', schedule);
+    };
+  }, [registered]);
+
   // ── Pointer drag (jiggle mode): the card ITSELF follows the pointer. Native HTML5 DnD
   // is deliberately not used — it floats a translucent browser snapshot while the real
   // card sits still in its slot, the exact «тень едет, плашка стоит» artefact.
@@ -592,7 +631,7 @@ export function WidgetGroup({ id, className, children }: WidgetGroupProps) {
 
   return (
     <GroupCtx.Provider value={ctxValue}>
-      <div className={className}>{children}</div>
+      <div ref={groupRootRef} className={className}>{children}</div>
       {reorderMode &&
         createPortal(
           <button
@@ -649,6 +688,11 @@ interface ChartSectionProps {
       that want the whole row, else 'half' (the default). Still clamped up by the active
       variant's minSize. */
   defaultSize?: WidgetSize;
+  /** Жёсткий размер поверхности: игнорирует сохранённый user-pref и прячет «Размер» в редакторе.
+      Для карточек, чей ряд не должен уметь выглядеть сломанным (нарратив на IG-Обзоре: треть
+      ширины + 2/3 пустого ряда читались как баг). Home-пин той же карточки живёт под другим id
+      и остаётся ресайзабельным. */
+  fixedSize?: WidgetSize;
   /** RICH (Tier-2) explorer config for the «Развернуть» overlay: period pills, line↔bar
       toggle, stats strip. Undefined = Tier-1 — the overlay renders the widget's own body
       (active variant or children) at full explorer axes. */
@@ -717,7 +761,7 @@ interface ChartSectionProps {
   children?: ReactNode;
 }
 
-export function ChartSection({ id, title, action, variants, className, defaultSize, expand, drillTo, noExpand, periodControl, strip, homeKey, seriesOptions, configEditor, explorer, bodyResetKey, children }: ChartSectionProps) {
+export function ChartSection({ id, title, action, variants, className, defaultSize, fixedSize, expand, drillTo, noExpand, periodControl, strip, homeKey, seriesOptions, configEditor, explorer, bodyResetKey, children }: ChartSectionProps) {
   const widgetId = id ?? title;
   const group = useContext(GroupCtx);
   const homeEditing = useContext(HomeEditContext);
@@ -910,7 +954,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
   // normStyle/legacyConfigSeed), so the opt-out survives reloads and legacy→config migration.
   const activeTinted = (configEditor ? configEditor.tinted : prefs.tinted) ?? true;
   const activeTarget = configEditor ? (configEditor.target ?? null) : (prefs.target ?? null);
-  const chosenSize: WidgetSize = (configEditor ? configEditor.size : prefs.size) ?? defaultSize ?? 'third';
+  const chosenSize: WidgetSize = fixedSize ?? (configEditor ? configEditor.size : prefs.size) ?? defaultSize ?? 'third';
   const effectiveSize = strip ? 'full' : maxSize(chosenSize, activeVariant?.minSize ?? 'third');
   // Height fed to every chart in the body so it fills the tile. Only for the FIXED sizes
   // (third/half); a `full` card is content-height, so it passes null and charts keep their own
@@ -1372,7 +1416,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
           showPeriod={!!periodControl}
           showSeries={!!seriesOptions}
           showSource={widgetId.startsWith('home-')}
-          showSize={!!group}
+          showSize={!!group && !fixedSize}
           defaultSize={defaultSize ?? 'third'}
           minSize={activeVariant?.minSize ?? 'third'}
           onChange={update}

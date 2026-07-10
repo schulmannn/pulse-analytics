@@ -106,4 +106,9 @@ describe('effectiveViz — graceful fallback', () => {
     expect(effectiveViz('table', false, false)).toBe('kpi');
     expect(effectiveViz('ledger', true, false)).toBe('line');
   });
+  it('donut для percent-breakdown падает в list (интенсивность — не «части целого»)', () => {
+    expect(effectiveViz('donut', false, true, 'percent')).toBe('list');
+    expect(effectiveViz('donut', false, true, 'views')).toBe('donut'); // аддитивные единицы — donut законен
+    expect(effectiveViz('donut', false, true)).toBe('donut'); // без unit (старые вызовы) — поведение прежнее
+  });
 });

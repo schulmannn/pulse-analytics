@@ -36,9 +36,16 @@ export function editorSpec(config: WidgetConfig): EditorSpec {
 
   const isSeries = metric.kind === 'series';
   const filterDims = dimensionsFor(metric.dimensions);
+  // Donut для percent-breakdown исключён из словаря: интенсивность (ср. ERV по формату) — не
+  // «части целого», donut рисовал бы доли от СУММЫ ERV («Фото 76.3%» — 76.3% чего?). Рендер
+  // сохранённых donut-конфигов страхует effectiveViz (widgetRender) фолбэком в list.
+  const supportedViz =
+    metric.kind === 'breakdown' && metric.unit === 'percent'
+      ? metric.supportedViz.filter((v) => v !== 'donut')
+      : metric.supportedViz;
   const capabilities: WidgetCapabilities = {
     metric: false, // swapping the metric = a different widget (add a new one)
-    viz: metric.supportedViz.length > 1,
+    viz: supportedViz.length > 1,
     // Grain / comparison / target only render on a series chart; filter needs dimensions.
     grain: isSeries,
     comparison: isSeries,
@@ -53,7 +60,7 @@ export function editorSpec(config: WidgetConfig): EditorSpec {
   if (!capabilities.comparison) disabledReasons.comparison = seriesOnly;
   if (!capabilities.target) disabledReasons.target = seriesOnly;
   if (!capabilities.filter) disabledReasons.filter = 'У этой метрики нет измерений для фильтра';
-  return { label: metric.label, supportedViz: metric.supportedViz, filterDims, capabilities, disabledReasons };
+  return { label: metric.label, supportedViz, filterDims, capabilities, disabledReasons };
 }
 
 /** Just the capabilities (for callers that don't need the label/viz/dims). */
