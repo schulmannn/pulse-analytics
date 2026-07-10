@@ -28,7 +28,7 @@ export function Admin() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-medium tracking-tight">Управление пользователями</h2>
+        <h2 className="text-2xl font-medium tracking-tight">Управление пользователями</h2>
         <p className="mt-0.5 text-xs text-muted-foreground">Роли доступа и статусы аккаунтов</p>
       </div>
 

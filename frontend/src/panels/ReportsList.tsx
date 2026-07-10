@@ -35,7 +35,7 @@ export function ReportsList() {
     <div className="mx-auto w-full max-w-4xl space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-medium tracking-tight">Отчёты</h2>
+          <h2 className="text-2xl font-medium tracking-tight">Отчёты</h2>
           <p className="mt-0.5 text-xs text-muted-foreground">
             Сохранённые документы: блоки настраиваются, выгрузка приходит письмом
           </p>

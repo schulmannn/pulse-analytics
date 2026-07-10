@@ -83,7 +83,7 @@ export function Mentions() {
       {/* Заголовок панели с кнопкой живого обновления */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-xl font-medium tracking-tight">Упоминания бренда</h2>
+          <h2 className="text-lg font-medium tracking-tight">Упоминания бренда</h2>
           <p className="mt-0.5 text-xs text-muted-foreground">
             Сохранённый архив · «Обновить» запускает поиск по Telegram (расход квоты)
           </p>

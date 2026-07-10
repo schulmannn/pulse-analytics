@@ -31,7 +31,7 @@ function LegalPage({ title, children }: { title: string; children: ReactNode }) 
         <main className="prose-legal mt-8">
           <h1 className="text-2xl font-medium tracking-tight sm:text-3xl">{title}</h1>
           <p className="mt-1.5 text-sm text-muted-foreground">Last updated: {UPDATED}</p>
-          <div className="mt-6 space-y-6 text-[15px] leading-relaxed text-muted-foreground">{children}</div>
+          <div className="mt-6 space-y-6 text-sm leading-relaxed text-muted-foreground">{children}</div>
         </main>
 
         <footer className="mt-12 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-border pt-5 text-xs text-muted-foreground">
