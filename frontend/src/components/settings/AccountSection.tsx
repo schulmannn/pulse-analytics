@@ -1,6 +1,7 @@
-import { useState, type ChangeEvent, type FormEvent } from 'react';
+import { useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import {
   useChangePassword,
+  useDeleteAccount,
   useMe,
   useRemoveAvatar,
   useUpdateAvatar,
@@ -279,6 +280,104 @@ export function SecuritySection() {
           </form>
         }
       />
+      <DeleteAccountRow />
     </SettingsGroup>
+  );
+}
+
+/**
+ * GDPR F4 (self-serve): немедленное и необратимое стирание аккаунта. Подтверждение — точный
+ * email аккаунта (пароль не фактор: Google-аккаунты живут без него). Суперюзеру строка не
+ * показывается — сервер его всё равно не удалит (иначе одна кнопка оставляет приложение без
+ * владельца). После успеха — полная перезагрузка на лендинг: сессия и кэш уже вычищены хуком.
+ */
+function DeleteAccountRow() {
+  const me = useMe();
+  const deleteAccount = useDeleteAccount();
+  const [open, setOpen] = useState(false);
+  const [confirm, setConfirm] = useState('');
+  const [err, setErr] = useState<string | null>(null);
+  // Открытие/отмена размонтируют сфокусированный элемент — возвращаем фокус явно.
+  const openerRef = useRef<HTMLButtonElement>(null);
+
+  const email = me.data?.email ?? '';
+  if (me.data?.role === 'superuser') return null;
+
+  const match = confirm.trim().toLowerCase() === email.toLowerCase() && email.length > 0;
+
+  const onDelete = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!match || deleteAccount.isPending) return;
+    setErr(null);
+    try {
+      await deleteAccount.mutateAsync(confirm.trim());
+      window.location.assign('/');
+    } catch (error) {
+      setErr(
+        error instanceof ApiError
+          ? error.message
+          : error instanceof Error
+            ? error.message
+            : 'Не удалось удалить аккаунт',
+      );
+    }
+  };
+
+  return (
+    <SettingsRow
+      title="Удалить аккаунт"
+      description="Немедленно и безвозвратно: каналы, архивы, отчёты, подключения. Копии в резервных бэкапах исчезают при их ротации (до 30 дней)."
+      control={
+        !open ? (
+          <button ref={openerRef} type="button" onClick={() => setOpen(true)} className={BTN_DESTRUCTIVE}>
+            Удалить аккаунт
+          </button>
+        ) : null
+      }
+      footer={
+        open ? (
+          <form onSubmit={onDelete} className="mt-4 w-full max-w-[340px] space-y-3">
+            <div>
+              <label htmlFor="del-confirm" className={PW_LABEL}>
+                Введите email аккаунта для подтверждения
+              </label>
+              <input
+                id="del-confirm"
+                type="email"
+                autoComplete="off"
+                autoFocus
+                placeholder={email}
+                className={PW_INPUT}
+                value={confirm}
+                onChange={(e) => {
+                  setConfirm(e.target.value);
+                  setErr(null);
+                }}
+                disabled={deleteAccount.isPending}
+              />
+            </div>
+            <div className="flex items-center gap-3">
+              <button type="submit" className={BTN_DESTRUCTIVE} disabled={!match || deleteAccount.isPending}>
+                {deleteAccount.isPending ? 'Удаление…' : 'Удалить навсегда'}
+              </button>
+              <button
+                type="button"
+                className={BTN_SECONDARY}
+                onClick={() => {
+                  setOpen(false);
+                  setConfirm('');
+                  setErr(null);
+                  requestAnimationFrame(() => openerRef.current?.focus());
+                }}
+                disabled={deleteAccount.isPending}
+              >
+                Отмена
+              </button>
+            </div>
+            {err && <p role="alert" className="text-xs font-medium text-destructive">{err}</p>}
+          </form>
+        ) : null
+      }
+    />
   );
 }

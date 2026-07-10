@@ -674,6 +674,81 @@ app.patch('/api/admin/users/:id', requireAuth, requireSuper, async (req, res) =>
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+// Admin-стирание аккаунта (GDPR F4, второй путь). Суперюзеров панель не удаляет — владелец
+// стирается только вручную с сервера (иначе одна кнопка оставляет приложение без админа).
+app.delete('/api/admin/users/:id', requireAuth, requireSuper, async (req, res, next) => {
+  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ error: 'bad id' });
+  try {
+    const target = await db.getUserById(id);
+    if (!target) return res.status(404).json({ error: 'Пользователь не найден' });
+    if (target.role === 'superuser') return res.status(400).json({ error: 'Суперюзера нельзя удалить из панели' });
+    const ok = await db.deleteUserAccount(id);
+    // Аудит ПОСЛЕ успеха (uid записи = админ, он жив): провал не оставляет ложного «deleted».
+    // target_uid — номер-надгробие без идентифицирующих данных.
+    if (ok) await audit(req, 'admin.user_deleted', { target_uid: id }).catch(() => {});
+    res.json({ ok });
+  } catch (e) { next(e); }
+});
+
+// ── GDPR: собственный аккаунт — экспорт (F5) и стирание (F4) ──
+
+// Обе операции тяжёлые/необратимые и уже за requireAuth — лимитер здесь щит от абьюза
+// украденным токеном (bulk-экспорт, brute «угадай email» на DELETE), не от юзера.
+const accountLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: { error: 'Слишком много запросов к данным аккаунта. Подожди 15 минут.' },
+});
+
+// Все персональные данные одним JSON-файлом (архивы каналов включены; credentials —
+// pass_hash / TG-сессия / IG-токен — не покидают сервер никогда, см. db.exportUserData).
+app.get('/api/account/export', accountLimiter, requireAuth, async (req, res, next) => {
+  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
+  try {
+    const data = await db.exportUserData(req.user.uid);
+    if (!data) return res.status(404).json({ error: 'Пользователь не найден' });
+    audit(req, 'account.exported', {}).catch(() => {});
+    // Самый чувствительный ответ приложения — никакому кэшу его не хранить.
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Content-Disposition',
+      `attachment; filename="atlavue-export-${new Date().toISOString().slice(0, 10)}.json"`);
+    res.json(data);
+  } catch (e) { next(e); }
+});
+
+// Немедленный hard-delete (решение владельца: без grace-периода — восстановление это просто
+// переподключение источников). Подтверждение — точный email аккаунта: пароль здесь не работает
+// как фактор (Google-аккаунты живут с неиспользуемым случайным pass_hash). Каскадную полноту
+// и судьбу общих данных описывает db.deleteUserAccount.
+app.delete('/api/account', accountLimiter, requireAuth, async (req, res, next) => {
+  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
+  if (req.user.role === 'superuser') {
+    return res.status(403).json({ error: 'Аккаунт суперюзера удаляется только вручную с сервера' });
+  }
+  const confirm = String((req.body && req.body.confirm) || '').trim().toLowerCase();
+  if (!confirm || confirm !== String(req.user.email || '').toLowerCase()) {
+    return res.status(400).json({ error: 'Введите email аккаунта для подтверждения' });
+  }
+  try {
+    // Аудит до удаления (после — FK на несуществующий uid). Action-имя честное: это фиксация
+    // ЗАПРОСА; сама строка при успехе тут же анонимизируется внутри deleteUserAccount.
+    // Metadata пустые — email в журнале сделал бы стирание неполным.
+    await audit(req, 'account.delete_requested', {}).catch(() => {});
+    // Прощальное письмо ДО удаления (адрес вот-вот исчезнет). Это и уведомление о
+    // destructive-действии: если аккаунт стёр вор с украденным токеном — владелец узнаёт.
+    await sendEmail(req.user.email, 'Аккаунт удалён — Atlavue', emailShell('Аккаунт удалён',
+      '<p>Ваш аккаунт Atlavue и все связанные данные (каналы, архивы, отчёты, подключения) ' +
+      'только что безвозвратно удалены по запросу из настроек.</p>' +
+      '<p style="color:#64748d;font-size:13px">Если это были не вы — ответьте на это письмо немедленно: ' +
+      'остаточные копии в резервных бэкапах существуют ещё до 30 дней.</p>')).catch(() => {});
+    const ok = await db.deleteUserAccount(req.user.uid);
+    if (!ok) return res.status(404).json({ error: 'Пользователь не найден' });
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
 // ════════════════════════════════════════════════════════════════
 //  INSTAGRAM ROUTES
 // ════════════════════════════════════════════════════════════════
@@ -1930,6 +2005,9 @@ async function processReportSchedules(base) {
     const periodKey = r.schedule === 'weekly' ? isoWeekKey(now) : `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
     try {
       const outcome = await db.runJobOnce('report_email', `report:${r.id}:${periodKey}`, async () => {
+        // GDPR-гонка: юзер мог стереть аккаунт между снапшотом listDueReports (несёт email в
+        // строке) и отправкой — перепроверяем существование, письмо на стёртый адрес не уходит.
+        if (!(await db.getUserById(r.uid))) return { sent: false, erased: true };
         // «Неделя канала» в теле письма — только weekly-отчётам с week/digest-блоком. Любая
         // ошибка сборки секции НЕ роняет отправку: письмо уходит без неё (рассказ — бонус).
         let weekHtml = null;
