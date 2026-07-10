@@ -202,12 +202,14 @@ test('jobs: duplicate enqueue collapses, failures are retryable, success is cach
 
   // A failing run leaves the key retryable…
   const failKey = `${nonce}-job-2`;
+  let failRuns = 0;
   await assert.rejects(
-    db.runJobOnce('it_test', failKey, async () => { throw new Error('boom'); }),
+    db.runJobOnce('it_test', failKey, async () => { failRuns++; throw new Error('boom'); }),
     /boom/);
-  const retried = await db.runJobOnce('it_test', failKey, async () => 'ok');
+  const retried = await db.runJobOnce('it_test', failKey, async () => { failRuns++; return 'ok'; });
   assert.strictEqual(retried.skipped, false, 'failed job is claimable again');
   assert.strictEqual(retried.result, 'ok');
+  assert.strictEqual(failRuns, 2, 'failed key executes the work again on retry');
 
   // …and a crashed runner (expired lease) does not block the key forever.
   const crashKey = `${nonce}-job-3`;
