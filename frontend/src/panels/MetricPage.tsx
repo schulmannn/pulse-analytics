@@ -379,8 +379,10 @@ export function MetricPage() {
   // домашней «Истории подписчиков», режим «Столбцы» рисует ДНЕВНОЕ ИЗМЕНЕНИЕ дивергентными
   // барами вокруг нуля — так спад читается сразу. Поток-метрики (просмотры/реакции/…) — обычные
   // столбцы от нуля (сумма имеет смысл).
+  // NB: обычное вычисление, НЕ useMemo — этот код ниже early-return'ов (Navigate/isError выше),
+  // а условный хук = React #310 «rendered more hooks». Цикл ≤~90 точек, дёшев на каждый рендер.
   const isLevel = !ZERO_BASED[metricKey];
-  const levelDeltas = useMemo(() => {
+  const levelDeltas = (() => {
     const v: number[] = [], l: string[] = [], t: string[] = [];
     if (isLevel) {
       for (let i = 1; i < series.values.length; i++) {
@@ -391,7 +393,7 @@ export function MetricPage() {
       }
     }
     return { values: v, labels: l, titles: t };
-  }, [isLevel, series]);
+  })();
 
   // ── Rank + pivot data (dimension-aggregated) ──────────────────────────────────────────
   const sumByDim = (posts: NormalizedPost[]): Map<string, number> => {
