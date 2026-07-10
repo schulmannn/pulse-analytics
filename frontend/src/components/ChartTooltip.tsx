@@ -42,12 +42,19 @@ export function ChartTooltip({ tip }: { tip: TooltipState }) {
   const fitsAbove = tip.y - gap - box.h >= 0;
   const top = fitsAbove ? tip.y - gap - box.h : tip.y + gap;
 
+  // ⚠️ Позиция ТОЛЬКО через transform + ширина w-max (не left/top): у absolute-элемента
+  // shrink-to-fit ширина зависит от `left` (доступное место до правого края контейнера), а left
+  // здесь сам вычисляется из измеренной ширины (cx − half). Эта взаимозависимость у края при
+  // неудачной длине строк не сходится — текст перескакивает между двумя переносами, layout-effect
+  // ставит box заново, и React падает с #185 «Maximum update depth exceeded» (прод-краши w-1-4jty
+  // donut «Вовлечённость по формату» и home-velocity — общий тултип всех графиков). transform не
+  // участвует в layout, w-max фиксирует ширину от контента → измерение сходится за один проход.
   return (
     <div
       ref={ref}
       data-chart-tooltip
-      className="pointer-events-none absolute z-10 max-w-[240px] rounded border border-border bg-background/95 px-2.5 py-1.5 text-xs font-medium leading-snug text-foreground"
-      style={{ left: cx - half, top: Math.max(top, 0), visibility: measured ? 'visible' : 'hidden' }}
+      className="pointer-events-none absolute left-0 top-0 z-10 w-max max-w-[240px] rounded border border-border bg-background/95 px-2.5 py-1.5 text-xs font-medium leading-snug text-foreground"
+      style={{ transform: `translate(${cx - half}px, ${Math.max(top, 0)}px)`, visibility: measured ? 'visible' : 'hidden' }}
     >
       {tip.rows ? (
         <>
