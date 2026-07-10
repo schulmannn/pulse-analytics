@@ -8,6 +8,7 @@ let Pool = null;
 try { ({ Pool } = require('pg')); } catch (_e) { /* pg не установлен — БД выключена */ }
 const { runMigrations } = require('./migrations');
 const { createJobsRepo } = require('./repos/jobsRepo');
+const { createReportsRepo } = require('./repos/reportsRepo');
 
 const DATABASE_URL = process.env.DATABASE_URL || '';
 const enabled = !!(DATABASE_URL && Pool);
@@ -1523,97 +1524,7 @@ async function deleteAnnotation(id, channelId) {
   return rowCount > 0;
 }
 
-// ── Named reports (per-user composition of dashboard blocks + email schedule) ──
-const REPORT_SCHEDULES = ['none', 'weekly', 'monthly'];
-const REPORT_COLS = `id, name, config, schedule,
-  to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS created_at,
-  to_char(updated_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS updated_at`;
-
-async function listReports(uid) {
-  if (!enabled || uid == null) return [];
-  const { rows } = await pool.query(
-    `SELECT id, name, schedule,
-            to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SS') AS created_at,
-            to_char(updated_at,'YYYY-MM-DD"T"HH24:MI:SS') AS updated_at
-       FROM reports WHERE uid=$1 ORDER BY updated_at DESC, id DESC`, [uid]);
-  return rows;
-}
-
-// Ownership-checked fetch (WHERE uid) — routes turn null → 404.
-async function getReport(uid, id) {
-  if (!enabled || uid == null || !id) return null;
-  const { rows } = await pool.query(
-    `SELECT ${REPORT_COLS} FROM reports WHERE uid=$1 AND id=$2`, [uid, id]);
-  return rows[0] || null;
-}
-
-async function createReport(uid, name, config) {
-  if (!enabled || uid == null) return null;
-  const { rows } = await pool.query(
-    `INSERT INTO reports (uid, name, config) VALUES ($1,$2,$3) RETURNING ${REPORT_COLS}`,
-    [uid, String(name).slice(0, 120), config || {}]);
-  return rows[0] || null;
-}
-
-// Partial update: only the provided fields; updated_at bumps on every write.
-async function updateReport(uid, id, { name, config, schedule } = {}) {
-  if (!enabled || uid == null || !id) return null;
-  const sets = [], vals = [uid, id];
-  let i = 3;
-  if (name != null)     { sets.push(`name=$${i++}`);     vals.push(String(name).slice(0, 120)); }
-  if (config != null)   { sets.push(`config=$${i++}`);   vals.push(config); }
-  if (schedule != null) { if (!REPORT_SCHEDULES.includes(schedule)) throw new Error('bad schedule'); sets.push(`schedule=$${i++}`); vals.push(schedule); }
-  if (!sets.length) return getReport(uid, id);
-  const { rows } = await pool.query(
-    `UPDATE reports SET ${sets.join(', ')}, updated_at=now()
-      WHERE uid=$1 AND id=$2 RETURNING ${REPORT_COLS}`, vals);
-  return rows[0] || null;
-}
-
-async function deleteReport(uid, id) {
-  if (!enabled || uid == null || !id) return false;
-  const { rowCount } = await pool.query('DELETE FROM reports WHERE uid=$1 AND id=$2', [uid, id]);
-  return rowCount > 0;
-}
-
-/* Scheduled email delivery: candidate reports, joined to the owner's email.
-   The day-of-week / day-of-month + catch-up gate lives in the caller (index.js),
-   which reads the returned last_sent_at — here only the anti-double-send window
-   (weekly: >6 days, monthly: >27 days), so a cron fired twice the same day emails
-   at most once. Disabled accounts are never emailed. */
-// Background job idempotency ledger (012_jobs.sql) → repos/jobsRepo.js. Composed below and spread
-// into module.exports so db.claimJob/completeJob/failJob/getJob/runJobOnce stay unchanged.
-
-async function listDueReports({ weekly = false, monthly = false } = {}) {
-  if (!enabled || (!weekly && !monthly)) return [];
-  const { rows } = await pool.query(
-    `SELECT r.id, r.uid, r.name, r.config, r.schedule, r.last_sent_at, u.email
-       FROM reports r JOIN users u ON u.id = r.uid
-      WHERE u.status = 'active'
-        AND ((r.schedule = 'weekly'  AND $1 AND (r.last_sent_at IS NULL OR r.last_sent_at < now() - interval '6 days'))
-          OR (r.schedule = 'monthly' AND $2 AND (r.last_sent_at IS NULL OR r.last_sent_at < now() - interval '27 days')))
-      ORDER BY r.id ASC`, [weekly, monthly]);
-  return rows;
-}
-
-async function markReportSent(id) {
-  if (!enabled || !id) return false;
-  const { rowCount } = await pool.query('UPDATE reports SET last_sent_at=now() WHERE id=$1', [id]);
-  return rowCount > 0;
-}
-
-// Посты канала за окно (архив ingest'а) — вход серверного недельного дайджеста (weekDigest.js).
-// Ридер посты до сих пор читал только фронт через mtproto/снапшоты; здесь — прямое чтение архива.
-// channelId обязан быть уже resolved через ownership (вызывающий берёт его из listChannels(uid)).
-async function listPostsWindow(channelId, days = 28) {
-  if (!enabled || !channelId) return [];
-  const { rows } = await pool.query(
-    `SELECT date_published, caption, views, reactions, forwards, replies, erv
-       FROM posts
-      WHERE channel_id = $1 AND date_published >= now() - ($2::int || ' days')::interval
-      ORDER BY date_published ASC`, [channelId, days]);
-  return rows;
-}
+// Named reports (per-user composition + email schedule) → repos/reportsRepo.js. Composed below.
 
 // ── GDPR: стирание и экспорт аккаунта (F4/F5) ─────────────────────────────────────────────────
 
@@ -1731,6 +1642,7 @@ async function exportUserData(uid) {
 // pool/enabled are settled at module load (above); each repo owns a domain's queries and its
 // methods are spread into the exports below at their original names.
 const jobsRepo = createJobsRepo({ pool, enabled });
+const reportsRepo = createReportsRepo({ pool, enabled });
 
 module.exports = {
   enabled, init, migrate, ping, close, graphsToDailyRows, isDbUnavailable,
@@ -1752,8 +1664,7 @@ module.exports = {
   rollupChannelMonthly,
   listIgDaily, listIgMediaDaily,
   listAnnotations, createAnnotation, deleteAnnotation,
-  REPORT_SCHEDULES, listReports, getReport, createReport, updateReport, deleteReport,
-  listDueReports, markReportSent, listPostsWindow,
+  ...reportsRepo,   // REPORT_SCHEDULES, listReports, getReport, createReport, updateReport, deleteReport, listDueReports, markReportSent, listPostsWindow
   ...jobsRepo,   // claimJob, completeJob, failJob, getJob, runJobOnce
   ensurePersonalWorkspace, ensureExternalSource, ensureChannelCanonical,
   deleteUserAccount, exportUserData,
