@@ -1,19 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
-import { useChannels, useHistory } from '@/api/queries';
-import { useDemo } from '@/lib/demo-context';
+import { NavLink } from 'react-router-dom';
+import { useHistory } from '@/api/queries';
 import { openCommandPalette } from '@/lib/command-palette';
 import { PLAN_LABEL, usePlan } from '@/lib/plan';
 import { useMediaQuery } from '@/lib/useMediaQuery';
 import { useSidebarMode } from '@/lib/sidebar';
 import { freshness, latestHistoryDay } from '@/lib/freshness';
 import { cn } from '@/lib/utils';
-import { NETWORKS, NetworkGlyph } from '@/lib/networks';
 import { Icon } from '@/components/nav-icons';
 import { SourceSwitcher } from './SourceSwitcher';
 import { AccountMenuContent, ACCOUNT_MENU_SHELL, avatarInitials } from './AccountMenu';
-import { useActiveNetwork, useActiveNetworkNav, type NavLinkDef } from './nav';
+import { useActiveNetworkNav, type NavLinkDef } from './nav';
 import { useDismiss } from './useDismiss';
 
 /**
@@ -65,7 +63,6 @@ export function Sidebar({ email, role, avatar }: { email?: string; role?: string
         </div>
       </div>
 
-      <NetworkStrip rail={rail} />
       <SidebarNav rail={rail} />
 
       <SidebarUserRow rail={rail} email={email} role={role} avatar={avatar} />
@@ -152,45 +149,7 @@ function SidebarNav({ rail }: { rail: boolean }) {
  * CONNECTED network (registry-gated: all while the channel list loads / in demo; unconnected nets
  * live behind «Подключить источник» in the switcher). Scales flat: 10 sources are one wrapping row
  * of 28px chips, not ten nav groups. Hidden with a single network — nothing to cross to. Brand
- * colour stays an identifier on the glyph (the PlatformNav/NetworkBadge rule), never UI colour.
- */
-function NetworkStrip({ rail }: { rail: boolean }) {
-  const activeKey = useActiveNetwork();
-  const navigate = useNavigate();
-  const { data } = useChannels();
-  const { demo } = useDemo();
-  const channels = data?.channels ?? [];
-  const nets = NETWORKS.filter((n) => !data || demo || channels.some((c) => n.hasChannel(c)));
-  if (nets.length < 2) return null;
-  return (
-    <div
-      role="group"
-      aria-label="Сети источника"
-      className={cn('flex gap-1 pt-2', rail ? 'flex-col items-center px-2' : 'flex-wrap px-4')}
-    >
-      {nets.map((n) => {
-        const active = n.key === activeKey;
-        return (
-          <button
-            key={n.key}
-            type="button"
-            onClick={() => navigate(n.home)}
-            aria-current={active ? 'true' : undefined}
-            aria-label={n.name}
-            title={n.name}
-            className={cn(
-              'flex h-7 w-7 items-center justify-center rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
-              active ? 'bg-hover-row' : 'hover:bg-hover-row/60',
-            )}
-            style={{ color: n.color, opacity: active ? 1 : 0.5 }}
-          >
-            <NetworkGlyph k={n.key} className="h-4 w-4" />
-          </button>
-        );
-      })}
-    </div>
-  );
-}
+
 
 /** Data-freshness line — a status dot + "обновлено <time>" (mono), sitting directly under the
     channel card. Rail: dot only, the full text moves into the title tooltip. */
