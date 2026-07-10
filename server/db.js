@@ -7,6 +7,7 @@
 let Pool = null;
 try { ({ Pool } = require('pg')); } catch (_e) { /* pg не установлен — БД выключена */ }
 const { runMigrations } = require('./migrations');
+const { createJobsRepo } = require('./repos/jobsRepo');
 
 const DATABASE_URL = process.env.DATABASE_URL || '';
 const enabled = !!(DATABASE_URL && Pool);
@@ -1580,70 +1581,8 @@ async function deleteReport(uid, id) {
    which reads the returned last_sent_at — here only the anti-double-send window
    (weekly: >6 days, monthly: >27 days), so a cron fired twice the same day emails
    at most once. Disabled accounts are never emailed. */
-/* ── Background job idempotency (012_jobs.sql, roadmap P0) ────────────────────────────────────
-   One row per logical unit of work, keyed (kind, idempotency_key) — e.g.
-   ('report_email', 'report:7:2026-W27'). claimJob is the single atomic gate:
-     • fresh key            → row created as running, returned (caller does the work);
-     • queued / failed      → re-claimed (attempts++), returned (retry);
-     • running, lease dead  → re-claimed (crashed runner), returned;
-     • running, lease alive → null (someone else is on it — skip);
-     • succeeded            → null + cached result via getJob (duplicate enqueue collapses).
-   completeJob/failJob close the claim. Callers that need the cached outcome of a skipped
-   duplicate read getJob(kind, key).result. */
-const JOB_LEASE_SECONDS = 15 * 60;
-
-async function claimJob(kind, idempotencyKey, { leaseSeconds = JOB_LEASE_SECONDS, payload = null } = {}) {
-  if (!enabled || !kind || !idempotencyKey) return null;
-  const { rows } = await pool.query(
-    `INSERT INTO jobs (kind, idempotency_key, status, attempts, locked_until, payload)
-     VALUES ($1, $2, 'running', 1, now() + make_interval(secs => $3), $4)
-     ON CONFLICT (kind, idempotency_key) DO UPDATE SET
-       status = 'running',
-       attempts = jobs.attempts + 1,
-       locked_until = now() + make_interval(secs => $3),
-       updated_at = now()
-     WHERE jobs.status IN ('queued', 'failed')
-        OR (jobs.status = 'running' AND jobs.locked_until < now())
-     RETURNING *`,
-    [kind, idempotencyKey, leaseSeconds, payload ? JSON.stringify(payload) : null]);
-  return rows[0] || null;
-}
-
-async function completeJob(id, result = null) {
-  if (!enabled || !id) return;
-  await pool.query(
-    `UPDATE jobs SET status='succeeded', result=$2, error=NULL, locked_until=NULL, updated_at=now() WHERE id=$1`,
-    [id, result ? JSON.stringify(result) : null]);
-}
-
-async function failJob(id, error) {
-  if (!enabled || !id) return;
-  await pool.query(
-    `UPDATE jobs SET status='failed', error=$2, locked_until=NULL, updated_at=now() WHERE id=$1`,
-    [id, String(error && error.message ? error.message : error).slice(0, 2000)]);
-}
-
-async function getJob(kind, idempotencyKey) {
-  if (!enabled || !kind || !idempotencyKey) return null;
-  const { rows } = await pool.query(
-    `SELECT * FROM jobs WHERE kind=$1 AND idempotency_key=$2`, [kind, idempotencyKey]);
-  return rows[0] || null;
-}
-
-/** Run `fn` exactly once per (kind, key): claims, executes, records success/failure. A concurrent
- *  or already-succeeded duplicate resolves to { skipped: true, job } without running `fn`. */
-async function runJobOnce(kind, idempotencyKey, fn, opts) {
-  const job = await claimJob(kind, idempotencyKey, opts);
-  if (!job) return { skipped: true, job: await getJob(kind, idempotencyKey) };
-  try {
-    const result = await fn();
-    await completeJob(job.id, result ?? null);
-    return { skipped: false, result };
-  } catch (e) {
-    await failJob(job.id, e);
-    throw e;
-  }
-}
+// Background job idempotency ledger (012_jobs.sql) → repos/jobsRepo.js. Composed below and spread
+// into module.exports so db.claimJob/completeJob/failJob/getJob/runJobOnce stay unchanged.
 
 async function listDueReports({ weekly = false, monthly = false } = {}) {
   if (!enabled || (!weekly && !monthly)) return [];
@@ -1788,6 +1727,11 @@ async function exportUserData(uid) {
   };
 }
 
+// ── Repo composition (P2 stage 5) — thin re-export so the public `db` API is unchanged ──
+// pool/enabled are settled at module load (above); each repo owns a domain's queries and its
+// methods are spread into the exports below at their original names.
+const jobsRepo = createJobsRepo({ pool, enabled });
+
 module.exports = {
   enabled, init, migrate, ping, close, graphsToDailyRows, isDbUnavailable,
   USER_ROLES, USER_STATUSES,
@@ -1810,7 +1754,7 @@ module.exports = {
   listAnnotations, createAnnotation, deleteAnnotation,
   REPORT_SCHEDULES, listReports, getReport, createReport, updateReport, deleteReport,
   listDueReports, markReportSent, listPostsWindow,
-  claimJob, completeJob, failJob, getJob, runJobOnce,
+  ...jobsRepo,   // claimJob, completeJob, failJob, getJob, runJobOnce
   ensurePersonalWorkspace, ensureExternalSource, ensureChannelCanonical,
   deleteUserAccount, exportUserData,
 };
