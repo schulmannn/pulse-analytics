@@ -122,7 +122,7 @@ const TG_METRICS: MetricDef[] = [
   define({
     id: 'tg.views', label: 'Просмотры', source: 'tg', kind: 'series', unit: 'views',
     category: 'engagement', dimensions: POST_DIMS, drillKey: 'views',
-    formula: 'Сумма просмотров всех постов в выбранном окне.', sourceNote: 'Посты канала (MTProto).',
+    formula: 'Сумма дневных просмотров канала в выбранном окне.', sourceNote: 'Статистика канала (дневной архив); без архива — сумма по постам окна.',
   }),
   define({
     id: 'tg.subscribers', label: 'Подписчики', source: 'tg', kind: 'series', unit: 'number',
@@ -254,9 +254,9 @@ const IG_METRICS: MetricDef[] = [
     formula: 'Дневной чистый прирост подписчиков (follower_count).',
   }),
   define({
-    id: 'ig.erv', label: 'Вовлечённость (ERV)', source: 'ig', kind: 'value', unit: 'percent',
+    id: 'ig.erv', label: 'Вовлечённость (ER)', source: 'ig', kind: 'value', unit: 'percent',
     category: 'engagement',
-    formula: 'ERV = взаимодействия ÷ охват × 100%.',
+    formula: 'ER = взаимодействия ÷ охват × 100%.',
     included: 'Вовлечённость на охват — устойчивее к размеру аудитории.',
   }),
   define({

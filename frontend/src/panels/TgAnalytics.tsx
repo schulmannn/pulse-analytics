@@ -3,7 +3,7 @@ import { useTgFull, useTgStats, useTgGraphs } from '@/api/queries';
 import type { TgFull, TgGraphs, TgStats } from '@/api/schemas';
 import { normalizeTgPosts } from '@/lib/posts';
 import { compareDdMm } from '@/lib/dates';
-import { fmt, ruAxisLabel, ruSeriesName } from '@/lib/format';
+import { fmt, ruAxisLabel, ruSeriesName, ddmmDay, pluralRu } from '@/lib/format';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { ChartCardBody, ChartSection, WidgetGroup, breakdownVariants, seriesBarValuesVariant } from '@/components/ChartWidget';
@@ -157,7 +157,8 @@ function deriveTgAnalytics(
   const sortedDates = Object.keys(viewsByDayRaw).sort((a, b) => compareDdMm(a, b));
   const last14Dates = sortedDates.slice(-14);
   const vbdValues = last14Dates.map((d) => Number(viewsByDayRaw[d] ?? 0));
-  const vbdTitles = last14Dates.map((d) => `${d}: ${fmt.num(viewsByDayRaw[d] ?? 0)} просмотров`);
+  // Канонный вид дат («3 июл.»), не сырые dd.mm-ключи API (аудит).
+  const vbdTitles = last14Dates.map((d) => `${ddmmDay(d)}: ${fmt.num(viewsByDayRaw[d] ?? 0)} просмотров`);
   // Ghost overlay = the previous equal-length window (the "vs прошлый период" comparison on the chart).
   const prev14Dates = sortedDates.slice(-28, -14);
   const vbdPrev = prev14Dates.length >= 2 ? prev14Dates.map((d) => Number(viewsByDayRaw[d] ?? 0)) : undefined;
@@ -556,7 +557,7 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
             periodControl
             variants={(period) =>
               breakdownVariants(
-                deriveFormatPerf(full, period.inRange).map((f) => ({ label: f.label, value: f.avgErv, display: `${f.avgErv.toFixed(1)}% ERV · ${f.n} шт` })),
+                deriveFormatPerf(full, period.inRange).map((f) => ({ label: f.label, value: f.avgErv, display: `${f.avgErv.toFixed(1)}% ERV · ${f.n} ${pluralRu(f.n, ['пост', 'поста', 'постов'])}` })),
               )
             }
           />

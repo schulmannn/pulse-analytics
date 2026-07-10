@@ -246,7 +246,7 @@ describe('resolveWidgetMetric — TG breakdowns (S3b)', () => {
     const r = bd('tg.formatPerf');
     expect(r.breakdown!.length).toBeGreaterThan(0);
     expect(r.breakdown!.every((i) => i.value > 0)).toBe(true);
-    expect(r.breakdown![0].display).toMatch(/% ERV · \d+ шт$/);
+    expect(r.breakdown![0].display).toMatch(/% ERV · \d+ пост(а|ов)?$/);
   });
 
   it('resolves tg.engagementComposition + tg.viewsByType from views_summary', () => {
@@ -530,7 +530,7 @@ describe('resolveWidgetMetric — Instagram (S11)', () => {
 
   it('resolves ig.erv = interactions ÷ reach × 100', () => {
     const r = resolveWidgetMetric(cfg('ig.erv'), igCtx);
-    expect(r.value).toBe('10.0%'); // 300 / 3000 × 100
+    expect(r.value).toBe('10.00%'); // 300 / 3000 × 100 — 2 знака, как IG-KPI и страница ig-er
     expect(r.valueRaw).toBeCloseTo(10, 5);
   });
 

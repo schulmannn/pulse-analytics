@@ -6,7 +6,7 @@ import { BarChart } from '@/components/BarChart';
 import { DivergingBars } from '@/components/DivergingBars';
 import { LineChart } from '@/components/LineChart';
 import { ChartTooltip, type TooltipState } from '@/components/ChartTooltip';
-import { fmt, ruAxisLabel } from '@/lib/format';
+import { fmt, ruAxisLabel, pluralRu } from '@/lib/format';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useWidgetPeriod } from '@/lib/period';
 
@@ -94,12 +94,21 @@ interface HomeBlockProps {
   homeKey?: string;
 }
 
+import { ErrorState } from '@/components/ErrorState';
+
 export function HistoryChartBlock({ id, homeKey }: HomeBlockProps = {}) {
   // isPending (не isLoading): запрос выключен, пока канал не известен, — скелетон и там.
-  const { data, isPending, isError } = useHistory(730);
+  const { data, isPending, isError, refetch } = useHistory(730);
 
   if (isPending) return <ChartSkeleton title="История подписчиков" id={id} homeKey={homeKey} />;
-  if (isError) return null;
+  // Честная ошибка в СВОЕЙ карточке (dense-flow затянул бы дыру соседями — пропажа незаметна).
+  if (isError) {
+    return (
+      <ChartSection title="История подписчиков" defaultSize="half" id={id} homeKey={homeKey}>
+        <ErrorState title="Не удалось загрузить историю" onRetry={() => refetch()} />
+      </ChartSection>
+    );
+  }
   if (!data || !data.enabled) {
     return (
       <ChartSection title="История подписчиков" defaultSize="half" id={id} homeKey={homeKey}>
@@ -373,7 +382,7 @@ function HeatmapSurface({
                   const avgErv = cell.ervSum / cell.n;
                   const opacity = maxErv > 0 ? Math.max(0.18, avgErv / maxErv) : 0;
                   const isBest = bestSlot && bestSlot.weekday === w && bestSlot.hour === hr;
-                  const titleText = `${dayName} ${hr}:00 · ${cell.n} пост(ов) · ERV ${avgErv.toFixed(1)}% · ср.охват ${fmt.short(cell.reachSum / cell.n)}`;
+                  const titleText = `${dayName} ${hr}:00 · ${cell.n} ${pluralRu(cell.n, ['пост', 'поста', 'постов'])} · ERV ${avgErv.toFixed(1)}% · ср.охват ${fmt.short(cell.reachSum / cell.n)}`;
                   return (
                     <div
                       key={hr}

@@ -201,6 +201,7 @@ export function ChannelsSection() {
 function ChannelKeysPanel({ channelId }: { channelId: number }) {
   const { data, isLoading, isError } = useChannelKeys(channelId);
   const createKeyMutation = useCreateKey(channelId);
+  const [keyError, setKeyError] = useState<string | null>(null);
   const revokeKeyMutation = useRevokeKey(channelId);
 
   const [oneTimeKey, setOneTimeKey] = useState<string | null>(null);
@@ -221,11 +222,13 @@ function ChannelKeysPanel({ channelId }: { channelId: number }) {
   const handleCreateKey = async () => {
     setOneTimeKey(null);
     setCopied(false);
+    setKeyError(null);
     try {
       const res = await createKeyMutation.mutateAsync({ label: 'local collector' });
       if (res.key) setOneTimeKey(res.key);
     } catch {
-      alert('Не удалось сгенерировать токен');
+      // Inline вместо browser-alert (аудит) — тот же паттерн, что ошибка загрузки ключей выше.
+      setKeyError('Не удалось сгенерировать токен — попробуйте ещё раз');
     }
   };
 
@@ -259,6 +262,7 @@ function ChannelKeysPanel({ channelId }: { channelId: number }) {
           {createKeyMutation.isPending ? 'Генерация…' : 'Создать ключ'}
         </button>
       </div>
+      {keyError && <p role="alert" className="text-xs text-destructive">{keyError}</p>}
 
       {/* role="status" on the inserted box itself (announced on insertion) — a permanently mounted
           live-region wrapper would eat two space-y-4 gaps in the default no-token state. */}

@@ -1,6 +1,6 @@
 import { useTgFull } from '@/api/queries';
 import { normalizeTgPosts, type NormalizedPost } from '@/lib/posts';
-import { fmt } from '@/lib/format';
+import { fmt, pluralRu } from '@/lib/format';
 import { pctDelta } from '@/lib/delta';
 import { useWidgetPeriod } from '@/lib/period';
 import { Card, CardContent } from '@/components/ui/card';
@@ -65,12 +65,15 @@ function formatLabel(mediaType: string | null, albumSize: number): string {
  * fairly too; all-time has no "previous" → the period table shows a hint instead.
  * (Channel-vs-channel comparison is a separate, heavier feature — it needs multi-channel fetch.)
  */
+import { ErrorState } from '@/components/ErrorState';
+
 export function Compare() {
   const { days } = useWidgetPeriod();
-  const { data, isPending, isError } = useTgFull(0, { windowPair: true });
+  const { data, isPending, isError, refetch } = useTgFull(0, { windowPair: true });
 
   if (isPending) return <CompareSkeleton />;
-  if (isError) return null;
+  // Честная ошибка вместо молчаливого исчезновения панели (дизайн-аудит: null = дыра без retry).
+  if (isError) return <ErrorState title="Не удалось загрузить сравнение" onRetry={() => refetch()} />;
 
   const members = data?.channel?.memberCount ?? data?.channel?.members ?? 0;
   const all = normalizeTgPosts(data?.posts ?? [], data?.channel ?? {});
@@ -154,7 +157,7 @@ export function Compare() {
     .map(([label, v], i) => ({
       label,
       value: v.views,
-      display: `${fmt.short(v.views)} · ${v.count} шт`,
+      display: `${fmt.short(v.views)} · ${v.count} ${pluralRu(v.count, ['пост', 'поста', 'постов'])}`,
       color: CHART_CYCLE[i % CHART_CYCLE.length],
     }));
 

@@ -41,10 +41,12 @@ const COLUMN_TONE: Record<SortKey, string> = {
   er: 'text-ink3',
 };
 
+import { ErrorState } from '@/components/ErrorState';
+
 export function TopPosts() {
   // Per-widget window (useWidgetPeriod). Wide fetch (limit 100), filtered client-side by inRange.
   const { inRange } = useWidgetPeriod();
-  const { data, isPending, isError } = useTgFull(0);
+  const { data, isPending, isError, refetch } = useTgFull(0);
   const [selected, setSelected] = useState<{ post: NormalizedPost; rank: number; reason: string | null } | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>('reach');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -81,7 +83,8 @@ export function TopPosts() {
   }, [data, inRange]);
 
   if (isPending) return <TopPostsSkeleton />;
-  if (isError) return null;
+  // Честная ошибка вместо молчаливого исчезновения (дизайн-аудит).
+  if (isError) return <ErrorState title="Не удалось загрузить публикации" onRetry={() => refetch()} />;
   if (rows.length === 0) {
     return (
       <EmptyState

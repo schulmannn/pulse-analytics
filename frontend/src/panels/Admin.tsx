@@ -14,11 +14,11 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 export function Admin() {
-  const { data, isLoading, isError, error } = useAdminUsers();
+  const { data, isLoading, isError, error, refetch } = useAdminUsers();
 
   if (isLoading) return <AdminSkeleton />;
   if (isError) {
-    return <ErrorState title="Не удалось загрузить админку" reason={error instanceof Error ? error.message : 'ошибка сервера'} />;
+    return <ErrorState title="Не удалось загрузить админку" reason={error instanceof Error ? error.message : 'ошибка сервера'} onRetry={() => refetch()} />;
   }
 
   const users = data?.users ?? [];

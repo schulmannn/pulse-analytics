@@ -287,15 +287,10 @@ function base(metricId: string, kind: MetricKind, unit: MetricUnit): WidgetResul
   return { metricId, kind, unit };
 }
 
-/** Russian plural picker: pluralRu(3, ['пост', 'поста', 'постов']) → 'поста'. */
-export function pluralRu(n: number, forms: [one: string, few: string, many: string]): string {
-  const abs = Math.abs(n) % 100;
-  const last = abs % 10;
-  if (abs > 10 && abs < 20) return forms[2];
-  if (last === 1) return forms[0];
-  if (last >= 2 && last <= 4) return forms[1];
-  return forms[2];
-}
+// pluralRu переехал в @/lib/format (нижний слой): tgAggregations теперь тоже склоняет, а импорт
+// отсюда дал бы цикл (resolveWidgetMetric сам импортирует tgAggregations). Ре-экспорт сохраняет
+// старых импортёров (WidgetRenderer, metricExplain).
+export { pluralRu } from '@/lib/format';
 
 /** Local YYYY-MM-DD of an epoch instant — feeds lib/freshness (which reasons in local days). */
 function localDay(ms: number): string {
@@ -759,7 +754,8 @@ function resolveIg(metricId: string, config: WidgetConfig, ctx: DataContext, out
       if (reach <= 0) return { ...out, empty: true };
       const er = (ti / reach) * 100;
       out.valueRaw = er;
-      out.value = `${er.toFixed(1)}%`;
+      // 2 знака — как IG-KPI и страница ig-er (аудит: 4.6% рядом с 4.62% под разными именами).
+      out.value = `${er.toFixed(2)}%`;
       return out;
     }
     default:

@@ -58,10 +58,12 @@ interface ExpandableChartProps extends ChartExpandConfig {
   children: ReactNode;
 }
 
+// Канон периодов продукта (PR #86): «7д/30д/90д/Всё». Месячные «1М/3М/6М» переименовывали
+// выбранное пользователем окно, а snapToWindow молча терял 7д (дизайн-аудит).
 const WINDOWS = [
-  { days: 30, label: '1М' },
-  { days: 90, label: '3М' },
-  { days: 180, label: '6М' },
+  { days: 7, label: '7д' },
+  { days: 30, label: '30д' },
+  { days: 90, label: '90д' },
   { days: 0, label: 'Всё' },
 ];
 
@@ -206,7 +208,7 @@ export function ChartExpandOverlay({ title, children, renderExpanded, renderExpa
           custom properties still compute here, carrying the widget accent into the portal. */}
       <div className="contents" style={accentStyle}>
         <CardHeader className="shrink-0 pr-12">
-          <CardTitle className="text-base font-semibold text-foreground">{title}</CardTitle>
+          <CardTitle className="text-base text-foreground">{title}</CardTitle>
           {headline && (
             <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 pt-1.5">
               <span className="kpi-accent text-hero font-medium leading-none tabular-nums tracking-tight">{headline.value}</span>

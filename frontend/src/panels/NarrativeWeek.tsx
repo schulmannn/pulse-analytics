@@ -13,6 +13,7 @@ import { ChartSection } from '@/components/ChartWidget';
 import { DeltaPill } from '@/components/DeltaPill';
 import { InlineSpark } from '@/components/InlineSpark';
 import { PostDetailModal } from '@/components/PostDetailModal';
+import { ErrorState } from '@/components/ErrorState';
 import { Skeleton } from '@/components/ui/skeleton';
 
 /**
@@ -28,15 +29,18 @@ import { Skeleton } from '@/components/ui/skeleton';
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
-function useWeekNarrativeInput(): { input: NarrativeInput | null; posts: NormalizedPost[]; loading: boolean } {
-  const { data: full, isPending: fullPending } = useTgFull(0);
+function useWeekNarrativeInput(): { input: NarrativeInput | null; posts: NormalizedPost[]; loading: boolean; error: boolean; retry: () => void } {
+  const { data: full, isPending: fullPending, isError: fullError, refetch: refetchFull } = useTgFull(0);
   const { data: graphs, isPending: graphsPending } = useTgGraphs();
   const { data: history } = useHistory(730);
   const { channelId } = useSelectedChannel();
   const { data: channelsData } = useChannels();
 
   return useMemo(() => {
-    if (fullPending || graphsPending) return { input: null, posts: [], loading: true };
+    if (fullPending || graphsPending) return { input: null, posts: [], loading: true, error: false, retry: refetchFull };
+    // Сбой fetch НЕ маскируем под «тихую неделю» (аудит: пустые ряды читались как «просмотры на
+    // нуле»). Ошибка graphs при живом full — прежний осознанный фолбэк (рассказ без сдвига недели).
+    if (fullError) return { input: null, posts: [], loading: false, error: true, retry: refetchFull };
 
     const now = Date.now();
     const tgMetrics = tgWeekMetrics({ full, history, channelsData, channelId, now });
@@ -61,8 +65,8 @@ function useWeekNarrativeInput(): { input: NarrativeInput | null; posts: Normali
       subsNow: tgMetrics.subscriber.subsNow,
       subsD7: tgMetrics.subscriber.subsD7,
     };
-    return { input, posts: tgMetrics.weekPosts, loading: false };
-  }, [full, fullPending, graphs, graphsPending, history, channelId, channelsData]);
+    return { input, posts: tgMetrics.weekPosts, loading: false, error: false, retry: refetchFull };
+  }, [full, fullPending, fullError, refetchFull, graphs, graphsPending, history, channelId, channelsData]);
 }
 
 /** Instagram-вход — лёгкая тройка запросов (профиль + insights 14д + архив ig_daily) вместо
@@ -157,12 +161,12 @@ function SegSpan({ seg, onPost }: { seg: NarrativeSeg; onPost: (i: number) => vo
           to={seg.to}
           onMouseEnter={() => narrLinkHover(seg.to!, true)}
           onMouseLeave={() => narrLinkHover(seg.to!, false)}
-          className="kpi-accent rounded font-semibold tabular-nums text-foreground underline decoration-dotted decoration-1 underline-offset-4 transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+          className="kpi-accent rounded font-medium tabular-nums text-foreground underline decoration-dotted decoration-1 underline-offset-4 transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
         >
           {seg.text}
         </Link>
       ) : (
-        <span className="font-semibold tabular-nums">{seg.text}</span>
+        <span className="font-medium tabular-nums">{seg.text}</span>
       );
     case 'delta':
       return <DeltaPill delta={{ dir: seg.pct < 0 ? 'down' : 'up', pct: Math.abs(seg.pct) }} />;
@@ -170,7 +174,7 @@ function SegSpan({ seg, onPost }: { seg: NarrativeSeg; onPost: (i: number) => vo
       return <InlineSpark values={seg.values} />;
     case 'post': {
       const chip =
-        'rounded text-left font-semibold text-foreground underline decoration-dotted decoration-1 underline-offset-4 transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40';
+        'rounded text-left font-medium text-foreground underline decoration-dotted decoration-1 underline-offset-4 transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40';
       // IG-медиа живёт по permalink (карточек IG-постов в приложении нет), TG-пост — в модалке.
       if (seg.href) {
         return (
@@ -179,7 +183,7 @@ function SegSpan({ seg, onPost }: { seg: NarrativeSeg; onPost: (i: number) => vo
           </a>
         );
       }
-      if (seg.postIndex == null) return <span className="font-semibold text-foreground">{seg.text}</span>;
+      if (seg.postIndex == null) return <span className="font-medium text-foreground">{seg.text}</span>;
       const idx = seg.postIndex;
       return (
         <button type="button" onClick={() => onPost(idx)} className={chip}>
@@ -192,9 +196,10 @@ function SegSpan({ seg, onPost }: { seg: NarrativeSeg; onPost: (i: number) => vo
 
 /** Голое тело нарратива (для Home-реестра и самой карточки). */
 export function NarrativeWeekBody() {
-  const { input, posts, loading } = useWeekNarrativeInput();
+  const { input, posts, loading, error, retry } = useWeekNarrativeInput();
   const { input: igInput } = useIgWeekInput();
   const [openPost, setOpenPost] = useState<number | null>(null);
+  if (error) return <ErrorState title="Не удалось загрузить неделю" onRetry={retry} />;
   if (loading || !input) {
     return (
       <div className="max-w-prose space-y-3" aria-hidden="true">
