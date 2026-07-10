@@ -107,9 +107,14 @@ test('erasure: deleteUserAccount removes every user-linked row, spares neighbour
   const srcForeign = await mkSource(`${nonce}-era-foreign`);
   const foreignCh = await mkChannel(b.uid, a.ws, srcForeign, `chan_${nonce}_era_foreign`);
 
-  // An audit row pointing at A: erasure must keep the row but anonymize it (SET NULL).
+  // A SHARED source: B's second channel claims A's source too — it must survive the sweep.
+  const sharedCh = await mkChannel(b.uid, b.ws, a.src, `chan_${nonce}_era_shared`);
+
+  // An audit row pointing at A with identifying metadata (the tg.session.connected shape):
+  // erasure must keep the row but anonymize BOTH uid (SET NULL) and metadata (wipe).
   const { rows: [ev] } = await pool.query(
-    `INSERT INTO audit_events (uid, action) VALUES ($1, $2) RETURNING id`, [a.uid, `it.${nonce}.era`]);
+    `INSERT INTO audit_events (uid, action, metadata) VALUES ($1, $2, '{"username":"personal_tg_handle"}'::jsonb) RETURNING id`,
+    [a.uid, `it.${nonce}.era`]);
 
   assert.strictEqual(await db.deleteUserAccount(a.uid), true, 'reports the deletion');
 
@@ -139,12 +144,27 @@ test('erasure: deleteUserAccount removes every user-linked row, spares neighbour
   assert.strictEqual(fc.workspace_id, null, 'foreign channel falls back to the legacy NULL-workspace path');
   assert.strictEqual(fc.owner_uid, b.uid, 'foreign channel keeps its owner');
 
-  // Shared identity survives; audit row survives anonymized.
+  // Source claimed by a SURVIVOR = shared identity → survives. Source referenced by NOBODY
+  // after the cascade (srcForeign belongs to the surviving foreign channel; B's own src too) —
+  // but a truly orphaned one must be swept: give A a second, sole-claim source via seedRichUser?
+  // a.src is shared (sharedCh claims it) → survives; srcForeign/b.src still referenced → survive.
   assert.strictEqual(await count(`SELECT count(*) FROM external_sources WHERE id=$1`, [a.src]), 1,
-    'external_sources are shared identity, not personal data');
-  const { rows: [after] } = await pool.query(`SELECT uid FROM audit_events WHERE id=$1`, [ev.id]);
+    'source still claimed by a survivor is shared identity and survives');
+  assert.strictEqual(await count(`SELECT count(*) FROM channels WHERE id=$1`, [sharedCh]), 1,
+    'survivor channel on the shared source is intact');
+
+  // Audit row: survives, anonymized in BOTH columns.
+  const { rows: [after] } = await pool.query(`SELECT uid, metadata FROM audit_events WHERE id=$1`, [ev.id]);
   assert.ok(after, 'audit row survives erasure');
   assert.strictEqual(after.uid, null, 'audit row is anonymized (SET NULL)');
+  assert.deepStrictEqual(after.metadata, {}, 'identifying metadata is wiped');
+});
+
+test('erasure: a source claimed ONLY by the erased user (private channel) is swept away', { skip }, async () => {
+  const a = await seedRichUser('orph-a');
+  assert.strictEqual(await db.deleteUserAccount(a.uid), true);
+  assert.strictEqual(await count(`SELECT count(*) FROM external_sources WHERE id=$1`, [a.src]), 0,
+    'orphaned source (its username/title can identify a private channel owner) is erased');
 });
 
 test('export: exportUserData carries the archive but never credentials or foreign channels', { skip }, async () => {
@@ -154,9 +174,12 @@ test('export: exportUserData carries the archive but never credentials or foreig
   await pool.query(
     `INSERT INTO workspace_members (workspace_id, uid, role) VALUES ($1, $2, 'member')`, [b.ws, a.uid]);
 
+  await pool.query(`UPDATE users SET avatar_url='data:image/png;base64,AVATAR' WHERE id=$1`, [a.uid]);
+
   const data = await db.exportUserData(a.uid);
   assert.ok(data, 'export exists');
   assert.strictEqual(data.account.id, a.uid);
+  assert.strictEqual(data.account.avatar_url, 'data:image/png;base64,AVATAR', 'avatar (personal photo) exported');
   assert.strictEqual(data.channels.length, 1, 'only owned channels are exported');
   assert.strictEqual(data.channels[0].id, a.ch);
   assert.strictEqual(data.channels[0].archive.daily.length, 1, 'daily archive included');

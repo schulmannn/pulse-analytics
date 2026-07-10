@@ -67,7 +67,8 @@ function ExportRow() {
       document.body.appendChild(a);
       a.click();
       a.remove();
-      URL.revokeObjectURL(url);
+      // Немедленный revoke обрывает скачивание в Safari/старых Firefox — отпускаем позже.
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Не удалось выгрузить данные');
     } finally {
@@ -83,7 +84,7 @@ function ExportRow() {
           Профиль, настройки, отчёты и архивы всех ваших каналов одним JSON-файлом.
           Токены и сессии в выгрузку не попадают.
         </span>
-        {err && <span className="mt-1 block text-xs font-medium text-destructive">{err}</span>}
+        {err && <span role="alert" className="mt-1 block text-xs font-medium text-destructive">{err}</span>}
       </span>
       <button type="button" onClick={onExport} disabled={busy} className={BTN_SECONDARY}>
         {busy ? 'Готовим…' : 'Скачать JSON'}

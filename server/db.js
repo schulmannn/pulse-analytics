@@ -1697,7 +1697,25 @@ async function deleteUserAccount(uid) {
       `UPDATE channels SET workspace_id = NULL
         WHERE workspace_id IN (SELECT id FROM workspaces WHERE owner_uid = $1)
           AND owner_uid IS DISTINCT FROM $1`, [uid]);
+    // SET NULL анонимизирует только uid: исторические metadata несут прямые идентификаторы
+    // (tg.session.connected — личный @username, ig_oauth_connected, channel.created) — без
+    // зачистки «анонимный журнал» ложь (скептик-панель, erasure-completeness).
+    await client.query(`UPDATE audit_events SET metadata = '{}'::jsonb WHERE uid = $1`, [uid]);
     const { rowCount } = await client.query('DELETE FROM users WHERE id = $1', [uid]);
+    // Осиротевшие external_sources: для приватного канала username/title (часто имя человека)
+    // не «shared identity» — если после каскада на источник не ссылается НИКТО, стираем и его.
+    // Разделяемые источники (чужие channels/архивы ссылаются) переживают sweep невредимыми.
+    await client.query(
+      `DELETE FROM external_sources s
+        WHERE NOT EXISTS (SELECT 1 FROM channels        t WHERE t.source_id = s.id)
+          AND NOT EXISTS (SELECT 1 FROM ig_accounts     t WHERE t.source_id = s.id)
+          AND NOT EXISTS (SELECT 1 FROM channel_daily   t WHERE t.source_id = s.id)
+          AND NOT EXISTS (SELECT 1 FROM channel_monthly t WHERE t.source_id = s.id)
+          AND NOT EXISTS (SELECT 1 FROM posts           t WHERE t.source_id = s.id)
+          AND NOT EXISTS (SELECT 1 FROM velocity_daily  t WHERE t.source_id = s.id)
+          AND NOT EXISTS (SELECT 1 FROM mentions        t WHERE t.source_id = s.id)
+          AND NOT EXISTS (SELECT 1 FROM ig_daily        t WHERE t.source_id = s.id)
+          AND NOT EXISTS (SELECT 1 FROM ig_media_daily  t WHERE t.source_id = s.id)`);
     await client.query('COMMIT');
     return rowCount > 0;
   } catch (e) {
@@ -1719,7 +1737,7 @@ async function exportUserData(uid) {
   const many = async (sql, params) => (await pool.query(sql, params)).rows;
 
   const account = await one(
-    `SELECT id, email, role, status, created_at FROM users WHERE id=$1`, [uid]);
+    `SELECT id, email, role, status, avatar_url, created_at FROM users WHERE id=$1`, [uid]);
   if (!account) return null;
 
   const [prefs, reports, workspaces, tgSession, channels] = await Promise.all([

@@ -149,7 +149,11 @@ function DeleteUserButton({ user, isMe }: { user: UserRowCardProps['user']; isMe
         type="button"
         onClick={onClick}
         disabled={deleteUser.isPending}
-        aria-label={`Удалить аккаунт ${user.email || `#${user.id}`}`}
+        aria-label={
+          armed
+            ? `Подтвердить удаление аккаунта ${user.email || `#${user.id}`}`
+            : `Удалить аккаунт ${user.email || `#${user.id}`}`
+        }
         className={
           armed
             ? 'rounded border border-destructive bg-destructive px-2 py-1.5 text-xs font-medium text-destructive-foreground disabled:opacity-60'

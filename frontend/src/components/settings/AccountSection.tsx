@@ -1,4 +1,4 @@
-import { useState, type ChangeEvent, type FormEvent } from 'react';
+import { useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import {
   useChangePassword,
   useDeleteAccount,
@@ -297,6 +297,8 @@ function DeleteAccountRow() {
   const [open, setOpen] = useState(false);
   const [confirm, setConfirm] = useState('');
   const [err, setErr] = useState<string | null>(null);
+  // Открытие/отмена размонтируют сфокусированный элемент — возвращаем фокус явно.
+  const openerRef = useRef<HTMLButtonElement>(null);
 
   const email = me.data?.email ?? '';
   if (me.data?.role === 'superuser') return null;
@@ -327,7 +329,7 @@ function DeleteAccountRow() {
       description="Немедленно и безвозвратно: каналы, архивы, отчёты, подключения. Копии в резервных бэкапах исчезают при их ротации (до 30 дней)."
       control={
         !open ? (
-          <button type="button" onClick={() => setOpen(true)} className={BTN_DESTRUCTIVE}>
+          <button ref={openerRef} type="button" onClick={() => setOpen(true)} className={BTN_DESTRUCTIVE}>
             Удалить аккаунт
           </button>
         ) : null
@@ -343,6 +345,7 @@ function DeleteAccountRow() {
                 id="del-confirm"
                 type="email"
                 autoComplete="off"
+                autoFocus
                 placeholder={email}
                 className={PW_INPUT}
                 value={confirm}
@@ -364,6 +367,7 @@ function DeleteAccountRow() {
                   setOpen(false);
                   setConfirm('');
                   setErr(null);
+                  requestAnimationFrame(() => openerRef.current?.focus());
                 }}
                 disabled={deleteAccount.isPending}
               >
