@@ -1,5 +1,6 @@
 import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
+import { EmptyState } from '@/components/EmptyState';
 import { fmt } from '@/lib/format';
 import { detectAnomalies } from '@/lib/anomaly';
 import { nearestPointIndex } from '@/lib/chartHover';
@@ -413,9 +414,7 @@ export function LineChart({
 
   if (!values || values.length < 2 || !plot) {
     return (
-      <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
-        Нет данных за период
-      </div>
+      <EmptyState compact title="Нет данных за период" className="flex h-40 items-center justify-center" />
     );
   }
 

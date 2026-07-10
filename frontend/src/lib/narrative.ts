@@ -105,6 +105,17 @@ const sum = (a: number[]) => a.reduce((x, y) => x + y, 0);
 
 /** ×N-лифт без хвоста «.0» («в 1.9 раза» / «в 3 раза»). */
 const lift = (x: number) => x.toFixed(1).replace(/\.0$/, '');
+/** Заголовок-чип: «…» только при реальном обрезании (аудит: «Анонс…» выглядел обрезанным). */
+const clip = (s: string) => (s.length > 52 ? `${s.slice(0, 52)}…` : s);
+/** «в N раз/раза»: дробные — «раза»; целые — по-русски (2–4 «раза», 5+ и 11–14 «раз»). */
+const liftWord = (x: number) => {
+  const r = lift(x);
+  if (r.includes('.')) return 'раза';
+  const n = Number(r) % 100;
+  if (n >= 11 && n <= 14) return 'раз';
+  const d = n % 10;
+  return d >= 2 && d <= 4 ? 'раза' : 'раз';
+};
 
 /** Направленный сдвиг считается трендом только с этого порога — слабое движение обеих сетей
  *  не выдаём за «разошлись»/«общее движение». */
@@ -173,10 +184,10 @@ function buildIgStory(
     if (ervLift >= 1.6) {
       para.push(
         t('Герой там — '),
-        { kind: 'post', text: `«${best.title.slice(0, 52)}…»`, href: best.permalink },
+        { kind: 'post', text: `«${clip(best.title)}»`, href: best.permalink },
         t(': вовлечённость '),
         n(`${best.erv.toFixed(1)}%`, '/metrics/ig-er'),
-        t(` на охват — в ${lift(ervLift)} раза выше нормы аккаунта. `),
+        t(` на охват — в ${lift(ervLift)} ${liftWord(ervLift)} выше нормы аккаунта. `),
       );
     }
   }
@@ -233,10 +244,10 @@ export function buildIgWeekNarrative(ig: NarrativeIgInput | null | undefined): W
       if (ervLift >= 1.6) {
         paragraphs.push([
           t('Герой недели — '),
-          { kind: 'post', text: `«${best.title.slice(0, 52)}…»`, href: best.permalink },
+          { kind: 'post', text: `«${clip(best.title)}»`, href: best.permalink },
           t(': вовлечённость '),
           n(`${best.erv.toFixed(1)}%`, '/metrics/ig-er'),
-          t(` на охват — в ${lift(ervLift)} раза выше нормы аккаунта — есть смысл повторить формат в ближайшие дни.`),
+          t(` на охват — в ${lift(ervLift)} ${liftWord(ervLift)} выше нормы аккаунта — есть смысл повторить формат в ближайшие дни.`),
         ]);
       }
     }
@@ -335,10 +346,10 @@ export function buildWeekNarrative(inp: NarrativeInput): WeekNarrative {
       const reShare = reTotal > 0 ? Math.round((post.reactions / reTotal) * 100) : 0;
       paragraphs.push([
         t('Герой недели — '),
-        { kind: 'post', text: `«${post.title.slice(0, 52)}…»`, postIndex: idx },
+        { kind: 'post', text: `«${clip(post.title)}»`, postIndex: idx },
         t(': вовлечённость '),
         n(`${post.erv.toFixed(1)}%`, '/metrics/er'),
-        t(` на просмотр — в ${lift(ervLift)} раза выше нормы канала, `),
+        t(` на просмотр — в ${lift(ervLift)} ${liftWord(ervLift)} выше нормы канала, `),
         n(String(post.reactions), '/metrics/reactions'),
         t(
           ` ${plural(post.reactions, 'реакция', 'реакции', 'реакций')}${reShare > 0 ? ` (${reShare}% недельных)` : ''} и ${post.forwards} ${plural(post.forwards, 'репост', 'репоста', 'репостов')}.`,
@@ -367,7 +378,7 @@ export function buildWeekNarrative(inp: NarrativeInput): WeekNarrative {
     if (hero) {
       p.push(
         t(
-          `Проверенный рычаг недели один: формат героя держит вовлечённость в ${lift(hero.ervLift)} раза выше нормы — есть смысл повторить его в ближайшие дни.`,
+          `Проверенный рычаг недели один: формат героя держит вовлечённость в ${lift(hero.ervLift)} ${liftWord(hero.ervLift)} выше нормы — есть смысл повторить его в ближайшие дни.`,
         ),
       );
     }

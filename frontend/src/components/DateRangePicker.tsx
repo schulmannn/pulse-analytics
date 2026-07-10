@@ -58,6 +58,9 @@ export function DateRangePicker({ value, onApply, onReset }: Props) {
     const base = new Date(value?.from ?? Date.now());
     return new Date(base.getFullYear(), base.getMonth(), 1);
   });
+  // Дальше текущего месяца листать некуда: будущих данных не существует (аудит).
+  const atCurrentMonth =
+    view.getFullYear() === new Date(todayStart).getFullYear() && view.getMonth() === new Date(todayStart).getMonth();
 
   const pickDay = (ts: number) => {
     if (from == null || to != null) {
@@ -143,8 +146,9 @@ export function DateRangePicker({ value, onApply, onReset }: Props) {
         <button
           type="button"
           onClick={() => shiftMonth(1)}
+          disabled={atCurrentMonth}
           aria-label="Следующий месяц"
-          className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
         >
           <Chevron dir="right" />
         </button>
@@ -161,10 +165,14 @@ export function DateRangePicker({ value, onApply, onReset }: Props) {
           if (ts == null) return <div key={i} />;
           const isEdge = ts === from || ts === to;
           const isToday = ts === todayStart;
+          // Будущий день не выбрать: диапазон в будущем давал пустые графики без объяснения (аудит).
+          const isFuture = ts > todayStart;
           return (
             <button
               key={i}
               type="button"
+              disabled={isFuture}
+              aria-label={`${new Date(ts).getDate()} ${MONTHS[view.getMonth()]} ${view.getFullYear()}`}
               onClick={() => pickDay(ts)}
               onMouseEnter={() => setHover(ts)}
               className={cn(
@@ -174,6 +182,7 @@ export function DateRangePicker({ value, onApply, onReset }: Props) {
                   : inRange(ts)
                     ? 'bg-accent text-foreground'
                     : 'text-foreground hover:bg-muted',
+                isFuture && 'cursor-not-allowed opacity-35 hover:bg-transparent',
                 isToday && !isEdge && 'ring-1 ring-inset ring-primary/40',
               )}
             >
