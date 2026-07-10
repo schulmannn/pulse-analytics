@@ -1,5 +1,6 @@
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
+import { EmptyState } from '@/components/EmptyState';
 import { fmt } from '@/lib/format';
 import { columnIndex } from '@/lib/chartHover';
 import { axisLabelIndexSet } from '@/lib/chartLabels';
@@ -170,7 +171,7 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
           const y = barTop(v);
           return (
             <g key={`t${idx}`}>
-              <line x1={gutterW} y1={y} x2={chartWidth} y2={y} stroke="hsl(var(--border))" strokeDasharray="4 6" strokeWidth="1" opacity="0.6" />
+              <line x1={gutterW} y1={y} x2={chartWidth} y2={y} stroke="hsl(var(--border))" strokeDasharray="4 6" strokeWidth="1" opacity="0.6" vectorEffect="non-scaling-stroke" />
               <text x={gutterW - 8} y={y + 3.5} textAnchor="end" className="pointer-events-none select-none fill-muted-foreground text-2xs font-medium tabular-nums">
                 {tickLabels[idx]}
               </text>
@@ -220,7 +221,7 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
                   y={chartHeight - 6}
                   textAnchor={i === values.length - 1 ? 'end' : i === 0 ? 'start' : 'middle'}
                   data-chart-axis-label="x"
-                  className="pointer-events-none select-none fill-muted-foreground text-2xs font-medium"
+                  className="pointer-events-none select-none fill-muted-foreground text-2xs font-medium tabular-nums"
                 >
                   {labels?.[i]}
                 </text>
@@ -233,9 +234,9 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
             hollow dots at each point so the delta reads at a glance (steep). */}
         {activeGhost && (
           <g className="pointer-events-none">
-            <path d={ghostPath} fill="none" stroke="hsl(var(--chart-role-comparison))" strokeWidth="1.8" strokeDasharray="5 4" opacity="0.9" />
+            <path d={ghostPath} fill="none" stroke="hsl(var(--chart-role-comparison))" strokeWidth="1.8" strokeDasharray="5 4" opacity="0.8" vectorEffect="non-scaling-stroke" />
             {activeGhost.map((v, i) => (
-              <circle key={`g${i}`} cx={barCenterX(i)} cy={barTop(v)} r="2.5" fill="hsl(var(--card))" stroke="hsl(var(--chart-role-comparison))" strokeWidth="1.5" />
+              <circle key={`g${i}`} cx={barCenterX(i)} cy={barTop(v)} r="2.5" fill="hsl(var(--card))" stroke="hsl(var(--chart-role-comparison))" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
             ))}
           </g>
         )}
@@ -243,7 +244,7 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
         {/* Target level (widget pref) — dashed goal line + right-aligned label, above the bars */}
         {target != null && (
           <>
-            <line x1={gutterW} y1={barTop(target)} x2={chartWidth} y2={barTop(target)} stroke="hsl(var(--chart-role-neutral))" strokeDasharray="6 4" strokeWidth="1.2" opacity="0.8" className="pointer-events-none" />
+            <line x1={gutterW} y1={barTop(target)} x2={chartWidth} y2={barTop(target)} stroke="hsl(var(--chart-role-neutral))" strokeDasharray="6 4" strokeWidth="1.2" opacity="0.8" vectorEffect="non-scaling-stroke" className="pointer-events-none" />
             <text
               x={chartWidth - 4}
               y={barTop(target) - 4 < 10 ? barTop(target) + 12 : barTop(target) - 4}
@@ -281,11 +282,7 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
   }, [values, labels, activeGhost, hasGhost, target, refLines, width, ctxHeight, height, expanded]);
 
   if (!values || values.length === 0 || !plot) {
-    return (
-      <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
-        Нет данных
-      </div>
-    );
+    return <EmptyState compact title="Нет данных за период" className="flex h-40 items-center justify-center" />;
   }
 
   const { chartWidth, chartHeight, graphHeight, offsetX, itemWidth, bars, barTop, barCenterX } = plot;
@@ -293,7 +290,7 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
 
   const tipText = (i: number) => {
     const base = titles?.[i] ?? `${labels?.[i] ?? ''}: ${values[i]}`;
-    return activeGhost && activeGhost[i] != null ? `${base} · пред. ${fmt.short(activeGhost[i])}` : base;
+    return activeGhost && activeGhost[i] != null ? `${base} · пред. ${fmt.num(activeGhost[i])}` : base;
   };
   // Structured readout (label · Текущий · comparison · Δ) when a ghost series is present; else the
   // metric's own title text. Anchored to the hovered bar's top-centre.
@@ -304,8 +301,8 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
       const cur = values[i];
       const prev = activeGhost[i];
       const rows: TooltipRow[] = [
-        { label: 'Текущий', value: fmt.short(cur), color: 'hsl(var(--chart-role-primary))' },
-        { label: ghostLabel, value: fmt.short(prev), color: 'hsl(var(--chart-role-comparison))' },
+        { label: 'Текущий', value: fmt.num(cur), color: 'hsl(var(--chart-role-primary))' },
+        { label: ghostLabel, value: fmt.num(prev), color: 'hsl(var(--chart-role-comparison))' },
       ];
       const d = prev !== 0 ? ((cur - prev) / Math.abs(prev)) * 100 : null;
       if (d != null && Number.isFinite(d)) rows.push({ label: 'Δ', value: `${d >= 0 ? '+' : '−'}${Math.abs(d).toFixed(1)}%` });

@@ -1,3 +1,5 @@
+import { EmptyState } from '@/components/EmptyState';
+
 export interface RankItem {
   label: string;
   value: number;
@@ -31,11 +33,7 @@ function DeltaText({ current, base }: { current: number; base: number | null | u
  */
 export function RankChart({ items, valueFmt, compareLabel }: RankChartProps) {
   if (items.length === 0) {
-    return (
-      <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
-        Нет данных за период
-      </div>
-    );
+    return <EmptyState compact title="Нет данных за период" className="flex h-40 items-center justify-center" />;
   }
   const showCompare = compareLabel != null && items.some((i) => i.compare != null);
   const max = Math.max(...items.map((i) => Math.max(i.value, i.compare ?? 0)), 1);
@@ -50,13 +48,13 @@ export function RankChart({ items, valueFmt, compareLabel }: RankChartProps) {
             <div className="truncate text-sm text-foreground">{item.label}</div>
             <div className="min-w-0 space-y-1">
               <div
-                className="h-4 rounded-sm bg-primary/85"
-                style={{ width: `${Math.max((item.value / max) * 100, item.value > 0 ? 1.5 : 0)}%` }}
+                className="h-4 rounded-sm"
+                style={{ backgroundColor: 'hsl(var(--chart-role-primary) / 0.85)', width: `${Math.max((item.value / max) * 100, item.value > 0 ? 1.5 : 0)}%` }}
               />
               {showCompare && item.compare != null && (
                 <div
-                  className="h-3 rounded-sm bg-ink3/30"
-                  style={{ width: `${Math.max((item.compare / max) * 100, item.compare > 0 ? 1.5 : 0)}%` }}
+                  className="h-3 rounded-sm"
+                  style={{ backgroundColor: 'hsl(var(--chart-role-comparison) / 0.35)', width: `${Math.max((item.compare / max) * 100, item.compare > 0 ? 1.5 : 0)}%` }}
                 />
               )}
             </div>
@@ -78,9 +76,9 @@ export function RankChart({ items, valueFmt, compareLabel }: RankChartProps) {
 
       {showCompare && (
         <p className="mt-2 text-2xs text-muted-foreground">
-          <span aria-hidden="true" className="mr-1.5 inline-block h-2 w-3 rounded-sm bg-primary/85 align-middle" />
+          <span aria-hidden="true" className="mr-1.5 inline-block h-2 w-3 rounded-sm align-middle" style={{ backgroundColor: 'hsl(var(--chart-role-primary) / 0.85)' }} />
           текущий период
-          <span aria-hidden="true" className="mx-1.5 ml-3 inline-block h-2 w-3 rounded-sm bg-ink3/30 align-middle" />
+          <span aria-hidden="true" className="mx-1.5 ml-3 inline-block h-2 w-3 rounded-sm align-middle" style={{ backgroundColor: 'hsl(var(--chart-role-comparison) / 0.35)' }} />
           {compareLabel}
         </p>
       )}

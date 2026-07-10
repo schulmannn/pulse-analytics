@@ -1,4 +1,5 @@
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { EmptyState } from '@/components/EmptyState';
 import { fmt } from '@/lib/format';
 import { ChartTooltip } from '@/components/ChartTooltip';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
@@ -108,11 +109,7 @@ export function PieChart({ values, labels, titles, colors, height = 200 }: PieCh
   const total = positive.reduce((s, v) => s + v, 0);
 
   if (!values || values.length === 0 || total <= 0) {
-    return (
-      <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
-        Нет данных
-      </div>
-    );
+    return <EmptyState compact title="Нет данных за период" className="flex h-40 items-center justify-center" />;
   }
 
   // Keep the six largest slices (each a distinct hue: the item's own colour, else a --chart token

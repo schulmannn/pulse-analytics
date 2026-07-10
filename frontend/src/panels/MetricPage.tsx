@@ -39,6 +39,12 @@ const CMP_LABEL: Record<Exclude<CompareMode, 'off'>, string> = {
   prev: 'прошлый период',
   year: 'тот же период год назад',
 };
+// Легенда/тултип графика — короткий капитализированный чип (смешанный регистр «Текущий период ·
+// прошлый период» в одной легенде — проход №3); CMP_LABEL выше остаётся строчным для ПРОЗЫ rail.
+const CMP_CHIP: Record<Exclude<CompareMode, 'off'>, string> = {
+  prev: 'Пред. период',
+  year: 'Год назад',
+};
 const DIM_LABEL: Record<Dim, string> = { format: 'Формат', weekday: 'День недели' };
 const WEEKDAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 
@@ -609,7 +615,7 @@ export function MetricPage() {
                   markAnomalies={effGrain === 'day' && (metricKey === 'views' || metricKey === 'subscribers')}
                   showPoints={series.values.length > 1 && series.values.length <= 45}
                   ghost={ghost}
-                  ghostLabel={cmpLabel ?? undefined}
+                  ghostLabel={cmp !== 'off' ? CMP_CHIP[cmp] : undefined}
                   legendToggle={false}
                   yMin={ZERO_BASED[metricKey] && series.values.length > 1 ? 0 : undefined}
                   onPointClick={(i) => setPinned((p) => (p === i ? null : i))}
@@ -626,7 +632,7 @@ export function MetricPage() {
                   titles={titles}
                   height={chartH}
                   ghost={ghost}
-                  ghostLabel={cmpLabel ?? undefined}
+                  ghostLabel={cmp !== 'off' ? CMP_CHIP[cmp] : undefined}
                   legendToggle={false}
                   onPointClick={(i) => setPinned((p) => (p === i ? null : i))}
                   pinnedIndex={pinnedValid}

@@ -1,4 +1,4 @@
-import { useContext, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { columnIndex } from '@/lib/chartHover';
 import { axisLabelIndexSet } from '@/lib/chartLabels';
@@ -15,8 +15,6 @@ interface DivergingBarsProps {
 
 interface Hover {
   i: number;
-  x: number;
-  y: number;
 }
 
 /** Bars around a horizontal zero-line (positive up = primary role, negative down = negative role). Fills the
@@ -42,6 +40,20 @@ export function DivergingBars({ values, labels, titles, height }: DivergingBarsP
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+
+  // The readout must not linger once the chart scrolls away or the window loses focus —
+  // mouseleave alone does not fire during wheel scrolling (канон BarChart/PieChart, проход №3).
+  const hasHover = hover !== null;
+  useEffect(() => {
+    if (!hasHover) return;
+    const clear = () => setHover(null);
+    window.addEventListener('scroll', clear, true);
+    window.addEventListener('blur', clear);
+    return () => {
+      window.removeEventListener('scroll', clear, true);
+      window.removeEventListener('blur', clear);
+    };
+  }, [hasHover]);
 
   // ── Geometry + the static plot, memoized APART from hover ────────────────────────────────
   // The tooltip follows the cursor here (a per-mousemove setState) — the cached layers keep
@@ -97,7 +109,7 @@ export function DivergingBars({ values, labels, titles, height }: DivergingBarsP
               y={h + 14}
               textAnchor="middle"
               data-chart-axis-label="x"
-              className="pointer-events-none select-none fill-muted-foreground text-2xs font-medium"
+              className="pointer-events-none select-none fill-muted-foreground text-2xs font-medium tabular-nums"
             >
               {labels?.[i]}
             </text>
@@ -122,15 +134,15 @@ export function DivergingBars({ values, labels, titles, height }: DivergingBarsP
   const tipText = (i: number) => titles?.[i] ?? `${values[i]}`;
 
   // ONE hit surface: the svg itself (the old per-bar rects carried a misleading pointer cursor —
-  // there is no click action here, so the crosshair matches the other charts). The tooltip keeps
-  // following the cursor, so the container-relative x/y ride along in the hover state.
+  // there is no click action here, so the crosshair matches the other charts). Тултип ЯКОРИТСЯ
+  // к вершине столбца, а не следует за курсором — канон всех остальных графиков (проход №3);
+  // viewBox 1:1 с CSS-пикселями, поэтому координаты бара валидны и как контейнерные.
   const onSvgMove = (e: ReactMouseEvent<SVGSVGElement>) => {
     const svgRect = e.currentTarget.getBoundingClientRect();
-    const box = containerRef.current?.getBoundingClientRect();
-    if (svgRect.width === 0 || !box) return;
+    if (svgRect.width === 0) return;
     const xView = ((e.clientX - svgRect.left) / svgRect.width) * W;
     const i = columnIndex(xView, n, 0, step);
-    setHover({ i, x: e.clientX - box.left, y: e.clientY - box.top });
+    setHover((prev) => (prev && prev.i === i ? prev : { i }));
   };
 
   return (
@@ -166,7 +178,13 @@ export function DivergingBars({ values, labels, titles, height }: DivergingBarsP
           />
         )}
       </svg>
-      <ChartTooltip tip={hover ? { x: hover.x, y: hover.y, text: tipText(hover.i) } : null} />
+      <ChartTooltip
+        tip={
+          hover && hover.i < n
+            ? { x: bars[hover.i].x + bars[hover.i].w / 2, y: bars[hover.i].y, text: tipText(hover.i) }
+            : null
+        }
+      />
     </div>
   );
 }
