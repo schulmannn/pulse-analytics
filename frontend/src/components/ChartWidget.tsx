@@ -1120,7 +1120,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
       {/* While REORDERING a strip shows its title inline — a nameless jiggling number row was
           unidentifiable next to labelled cards (аудит). */}
       <div className={strip && !reorder ? 'absolute -top-1 right-0 z-10 flex items-center' : 'flex shrink-0 items-center gap-3'}>
-        <h3 className={strip && !reorder ? 'sr-only' : 'min-w-0 flex-1 truncate text-sm font-semibold tracking-tight text-foreground'}>
+        <h3 className={strip && !reorder ? 'sr-only' : 'min-w-0 flex-1 truncate text-sm font-medium tracking-tight text-foreground'}>
           {prefs.title || title}
         </h3>
         {action}

@@ -17,7 +17,7 @@ const SORT_COLUMNS: { key: SortKey; label: string; get: (p: NormalizedPost) => n
   { key: 'reach', label: 'Просмотры', get: (p) => p.reach },
   { key: 'likes', label: 'Реакции', get: (p) => p.likes },
   { key: 'shares', label: 'Репосты', get: (p) => p.shares ?? 0 },
-  { key: 'virality', label: 'Вирал.', get: (p) => p.virality ?? 0 },
+  { key: 'virality', label: 'Виральность', get: (p) => p.virality ?? 0 },
   { key: 'erv', label: 'ERV', get: (p) => p.erv ?? 0 },
   { key: 'er', label: 'ER', get: (p) => p.er ?? 0 },
 ];

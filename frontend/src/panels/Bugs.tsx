@@ -16,6 +16,7 @@ export function Bugs() {
   const deleteBugMutation = useDeleteBug();
 
   const [textInput, setTextInput] = useState('');
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [kindInput, setKindInput] = useState('bug');
   const [severityInput, setSeverityInput] = useState('medium');
 
@@ -38,12 +39,14 @@ export function Bugs() {
     const cleanText = textInput.trim();
     if (!cleanText) return;
     try {
+      setSubmitError(null);
       await createBugMutation.mutateAsync({ text: cleanText, kind: kindInput, severity: severityInput, context: 'source=telegram' });
       setTextInput('');
       setKindInput('bug');
       setSeverityInput('medium');
     } catch {
-      alert('Не удалось отправить тикет');
+      // Inline вместо browser-alert (аудит: нативный диалог вне темы и канона).
+      setSubmitError('Не удалось отправить тикет — попробуйте ещё раз');
     }
   };
 
@@ -100,6 +103,7 @@ export function Bugs() {
               >
                 {createBugMutation.isPending ? 'Отправка…' : 'Создать тикет'}
               </button>
+              {submitError && <p role="alert" className="text-xs text-destructive">{submitError}</p>}
             </div>
           </form>
         </CardContent>

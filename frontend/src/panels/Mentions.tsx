@@ -1,6 +1,6 @@
 import { useMentions, useMentionsArchive } from '@/api/queries';
 import { compareDdMm } from '@/lib/dates';
-import { fmt } from '@/lib/format';
+import { fmt, ddmmDay } from '@/lib/format';
 import { BarChart } from '@/components/BarChart';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { Mentions as MentionsData } from '@/api/schemas';
@@ -204,8 +204,9 @@ export function MentionsByDayWidget({ byDay, id, homeKey }: { byDay: Record<stri
   const mentionWindow = (days: number) => {
     const dates = days === 0 ? sortedDates : sortedDates.slice(-days);
     const values = dates.map((date) => byDay[date] ?? 0);
-    const titles = dates.map((date) => `${date}: ${fmt.num(byDay[date] ?? 0)}`);
-    const axisLabels = [dates[0] ?? '', dates[Math.floor(dates.length / 2)] ?? '', dates[dates.length - 1] ?? ''];
+    // Канонный вид дат («3 июл.»), не сырые dd.mm-ключи API (аудит: два формата на экране).
+    const titles = dates.map((date) => `${ddmmDay(date)}: ${fmt.num(byDay[date] ?? 0)}`);
+    const axisLabels = [ddmmDay(dates[0] ?? ''), ddmmDay(dates[Math.floor(dates.length / 2)] ?? ''), ddmmDay(dates[dates.length - 1] ?? '')];
     return { dates, values, titles, axisLabels };
   };
   return (

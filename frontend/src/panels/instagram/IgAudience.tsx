@@ -30,7 +30,7 @@ export function IgAudience({ ig }: { ig: IgData }) {
         </ChartSection>
         <ChartSection id="ig-profile-actions" title="Действия в профиле" defaultSize="full" noExpand>
         {!hasViews && contacts.length === 0 ? (
-          <EmptyState compact title="Нет данных о действиях." />
+          <EmptyState compact title="Нет данных о действиях" />
         ) : (
           <div className="space-y-4">
             {hasViews && (

@@ -111,7 +111,13 @@ export function IgShell() {
     return (
       <div className="space-y-6">
         {banner}
-        <ErrorState title="Не удалось загрузить данные Instagram" />
+        <ErrorState
+          title="Не удалось загрузить данные Instagram"
+          onRetry={() => {
+            void ig.queries.profile.refetch();
+            void ig.queries.insights.refetch();
+          }}
+        />
       </div>
     );
   }

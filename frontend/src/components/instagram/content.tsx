@@ -30,7 +30,7 @@ export function FormatsBlock({ items }: { items: { label: string; value: number 
   if (list.length === 0) {
     return (
       <ChartSection title="Вовлечённость по форматам">
-        <EmptyState compact title="Нет данных о форматах." />
+        <EmptyState compact title="Нет данных о форматах" />
       </ChartSection>
     );
   }
@@ -180,7 +180,7 @@ export function HashtagsBlock({ posts }: { posts: IgPost[] }) {
             <th className="p-4 text-right">Постов</th>
             <th className="p-4 text-right">Ср. охват</th>
             <th className="p-4 text-right">ER</th>
-            <th className="p-4 text-right">Lift к ER</th>
+            <th className="p-4 text-right">Влияние на ER</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
@@ -383,7 +383,7 @@ export function StoriesBlock({ stories }: { stories: IgStory[] | undefined }) {
           />
         ) : (
           <ChartSection title="Навигация по историям">
-            <EmptyState compact title="Нет данных о навигации." />
+            <EmptyState compact title="Нет данных о навигации" />
           </ChartSection>
         )}
         <ChartSection title="По историям" defaultSize="half">

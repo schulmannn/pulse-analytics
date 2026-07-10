@@ -7,6 +7,25 @@
  * UTC (D6.5). A day key names a calendar date, not an instant — it must read the same in
  * every timezone. Full ISO timestamps are NOT day keys and keep instant semantics.
  */
+/** Русская плюрализация: pluralRu(5, ['пост', 'поста', 'постов']) → «постов». Живёт здесь
+ *  (нижний слой без зависимостей), чтобы аггрегаторы не тянули resolveWidgetMetric циклом;
+ *  resolveWidgetMetric ре-экспортирует для старых импортёров. */
+/** Метка дня из API-ключа «dd.mm» → канонный вид fmt.day («3 июл.»). Год фиктивный високосный
+ *  (2000) — рендерится только день+месяц; не-ключи возвращаются как есть. */
+export function ddmmDay(key: string): string {
+  const m = /^(\d{2})\.(\d{2})$/.exec(key);
+  return m ? fmt.day(`2000-${m[2]}-${m[1]}`) : key;
+}
+
+export function pluralRu(n: number, forms: [one: string, few: string, many: string]): string {
+  const abs = Math.abs(n) % 100;
+  const d = abs % 10;
+  if (abs > 10 && abs < 20) return forms[2];
+  if (d === 1) return forms[0];
+  if (d >= 2 && d <= 4) return forms[1];
+  return forms[2];
+}
+
 export function parseDayKey(s: string): Date | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
   if (!m) return null;

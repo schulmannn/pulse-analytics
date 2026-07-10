@@ -88,7 +88,7 @@ const alwaysInRange = () => true;
 
 export function Hashtags() {
   // ONE wide fetch (limit 0 = server cap 100); the widget windows it client-side per its own period.
-  const { data: full, isPending, isError } = useTgFull(0);
+  const { data: full, isPending, isError, refetch } = useTgFull(0);
 
   if (isPending) {
     return (
@@ -101,7 +101,7 @@ export function Hashtags() {
   if (isError || !full) {
     return (
       <ChartSection title="Влияние хэштегов на ERV" defaultSize="full">
-        <ErrorState title="Не удалось загрузить хэштеги" />
+        <ErrorState title="Не удалось загрузить хэштеги" onRetry={() => refetch()} />
       </ChartSection>
     );
   }

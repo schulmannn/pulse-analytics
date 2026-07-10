@@ -10,7 +10,7 @@
 
 import type { NormalizedPost } from '@/lib/posts';
 import type { TgFull, TgGraphs } from '@/api/schemas';
-import { fmt } from '@/lib/format';
+import { fmt, pluralRu } from '@/lib/format';
 
 /** A categorical row (matches WidgetResult.breakdown / Breakdown component items). */
 export interface BreakdownItem {
@@ -81,7 +81,7 @@ export function formatPerfBreakdown(posts: NormalizedPost[]): BreakdownItem[] {
     .map(([t, v]) => ({ label: TYPE_NAMES[t] || t, avgErv: v.ervN ? v.ervSum / v.ervN : 0, n: v.n }))
     .filter((x) => x.n > 0 && x.avgErv > 0)
     .sort((a, b) => b.avgErv - a.avgErv)
-    .map((x) => ({ label: x.label, value: x.avgErv, display: `${x.avgErv.toFixed(1)}% ERV · ${x.n} шт` }));
+    .map((x) => ({ label: x.label, value: x.avgErv, display: `${x.avgErv.toFixed(1)}% ERV · ${x.n} ${pluralRu(x.n, ['пост', 'поста', 'постов'])}` }));
 }
 
 /** Weekday avg-views + post-count (Monday-first) over the given posts. */

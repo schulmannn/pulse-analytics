@@ -219,7 +219,16 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
     );
   }
   if (ig.error) {
-    return <ErrorState title="Не удалось загрузить данные Instagram" reason="Instagram API недоступен" />;
+    return (
+      <ErrorState
+        title="Не удалось загрузить данные Instagram"
+        reason="Instagram API недоступен"
+        onRetry={() => {
+          void ig.queries.profile.refetch();
+          void ig.queries.insights.refetch();
+        }}
+      />
+    );
   }
 
   const handle = ig.profile?.username ? `@${ig.profile.username}` : null;

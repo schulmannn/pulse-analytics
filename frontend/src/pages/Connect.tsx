@@ -152,7 +152,7 @@ export function Connect() {
         </Link>
       </div>
       <div className="flex flex-col gap-1">
-        <p className="font-mono text-2xs uppercase tracking-[0.14em] text-muted-foreground">
+        <p className="text-2xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
           Источников {SERVICES.length} · подключено {connectedCount}
         </p>
         <h1 className="text-2xl font-medium tracking-tight text-foreground">Соберите свой атлас данных</h1>
@@ -180,7 +180,7 @@ export function Connect() {
 
             {/* hub */}
             <div className="connect-hub absolute left-1/2 top-1/2 flex aspect-square w-[38%] -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center rounded-full border border-border bg-card px-4 text-center" aria-live="polite">
-              <span className="font-mono text-2xs uppercase tracking-[0.1em] text-muted-foreground">Источник</span>
+              <span className="text-2xs font-medium uppercase tracking-[0.1em] text-muted-foreground">Источник</span>
               <span className="mt-1 text-base font-medium tracking-tight text-foreground sm:text-lg">{active.name}</span>
               <span className="mt-0.5 text-2xs text-muted-foreground">
                 {activeState === 'connected' ? 'Подключён' : activeState === 'available' ? 'Доступно' : 'Скоро'}
@@ -341,7 +341,7 @@ function PanelHead({ id, name, pill }: { id: ServiceId; name: string; pill: { la
         <Glyph id={id} className="size-5" />
       </span>
       <h2 className="flex-1 text-lg font-medium tracking-tight text-foreground">{name}</h2>
-      <span className={cn('shrink-0 rounded-full border px-2.5 py-0.5 font-mono text-2xs uppercase tracking-wide', tone)}>
+      <span className={cn('shrink-0 rounded-full border px-2.5 py-0.5 text-2xs font-medium uppercase tracking-wide', tone)}>
         {pill.label}
       </span>
     </div>
