@@ -1412,9 +1412,10 @@ async function collectQrChannelsNow(sess, channels) {
 
 // Collect QR-connected channels (source='qr') into Postgres using each user's stored session — the
 // server acts as their collector, so the dashboard renders them like any collector channel. Runs
-// fire-and-forget after the central ingest; sequential + per-channel try/catch so one bad session /
-// channel / FloodWait never blocks the others or the critical central ingest. Sessions are decrypted
-// ONLY here and handed to the isolated mtproto /qr/collect — never logged, never sent to a client.
+// fire-and-forget after the central ingest; durable per (channel, day) so a repeat trigger resumes
+// unfinished channels; sequential + per-channel try/catch so one bad session / channel / FloodWait
+// never blocks the others or the critical central ingest. Sessions are decrypted ONLY here and handed
+// to the isolated mtproto /qr/collect — never logged, never sent to a client.
 const TG_QR_MAX_CHANNELS_PER_RUN = 200;
 
 async function processTgQrCollection() {
@@ -1424,7 +1425,7 @@ async function processTgQrCollection() {
   try { sessions = await db.listTgSessions(); }
   catch (e) { log('error', 'tg_qr_list_sessions_failed', { error: e.message }); return; }
 
-  let done = 0, capped = false;
+  let done = 0, collected = 0, skipped = 0, failed = 0, capped = false;
   for (const s of sessions) {
     if (done >= TG_QR_MAX_CHANNELS_PER_RUN) { capped = true; break; }
     let sessionStr;
@@ -1437,12 +1438,24 @@ async function processTgQrCollection() {
 
     for (const ch of chans) {
       if (done >= TG_QR_MAX_CHANNELS_PER_RUN) { capped = true; break; }
-      done++;
-      try { await collectQrChannel(sessionStr, ch, day); }
-      catch (e) { log('error', 'tg_qr_collect_failed', { channelId: ch.id, error: e.message }); }
+      let started = false;
+      try {
+        const out = await db.runJobOnce('qr_collect', `${ch.id}:${day}`, () => {
+          started = true;
+          return collectQrChannel(sessionStr, ch, day);
+        });
+        if (out.skipped) { skipped++; continue; }
+        done++;
+        collected++;
+      }
+      catch (e) {
+        if (started) done++;
+        failed++;
+        log('error', 'tg_qr_collect_failed', { channelId: ch.id, error: e.message });
+      }
     }
   }
-  if (capped) log('warn', 'tg_qr_collection_capped', { cap: TG_QR_MAX_CHANNELS_PER_RUN, sessions: sessions.length });
+  log(capped ? 'warn' : 'info', 'tg_qr_collection_done', { collected, skipped, failed, capped });
 }
 
 // ── Instagram OAuth (per-channel connect) ─────────────────────────
