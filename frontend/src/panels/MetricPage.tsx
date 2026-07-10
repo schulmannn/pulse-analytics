@@ -566,8 +566,9 @@ export function MetricPage() {
         <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
           <span className="text-hero font-medium leading-none tabular-nums tracking-tight">{meta.total}</span>
           <DeltaPill delta={meta.trend} />
+          {/* Без имени метрики: h1 в топбаре уже называет её — повтор в 60px читался дублем. */}
           <span className="text-xs tracking-wide text-muted-foreground">
-            {def.term} · {periodLabel}
+            {periodLabel}
             {channelHandle ? <span className="text-ink3"> · Telegram {channelHandle}</span> : null}
           </span>
         </div>
@@ -802,7 +803,9 @@ export function MetricPage() {
       </div>
 
       {/* Bottom time bar (steep): grain on the left, window presets + pager on the right. */}
-      <div className="sticky bottom-3 z-10 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-background/95 px-3 py-2 backdrop-blur print:hidden">
+      {/* Тулбар — канон sticky-хедеров (solid bg + hairline, без blur/тени/полупрозрачности):
+          плавающий полупрозрачный пилл читался как баг — строки «Топ постов» просвечивали сквозь. */}
+      <div className="sticky bottom-0 z-10 -mx-4 flex flex-wrap items-center gap-2 border-t border-border bg-background px-4 py-2 sm:-mx-6 sm:px-6 print:hidden">
         <div role="group" aria-label="Гранулярность" className="flex overflow-hidden rounded border border-border">
           {(['day', 'week', 'month'] as Grain[]).map((g) => (
             <button

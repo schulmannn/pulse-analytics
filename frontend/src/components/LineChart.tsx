@@ -296,7 +296,8 @@ export function LineChart({
         const p = points[k];
         const text = fmt.short(values[k]);
         const halfW = (text.length * CHAR_W) / 2;
-        const x = Math.min(Math.max(p.x, gutterW + halfW), Math.max(W - padR - halfW, gutterW + halfW));
+        // +6px воздуха справа: лейбл последней точки не прилипает к краю карточки.
+        const x = Math.min(Math.max(p.x, gutterW + halfW), Math.max(W - padR - halfW - 6, gutterW + halfW));
         const fitsAbove = p.y - 18 >= 0;
         const y = fitsAbove ? p.y - 8 : p.y + 16;
         return { key: k, x, y, text };

@@ -255,13 +255,14 @@ export function HeatmapChartBlock({ id, homeKey }: HomeBlockProps = {}) {
   // isLoading): запрос выключен, пока канал не известен, — скелетон и там.
   const { data: tgData, isPending } = useTgFull(0);
 
-  if (isPending) return <ChartSkeleton title="Тепловая карта активности (день × час)" id={id} homeKey={homeKey} />;
+  // Без «(день × час)» в заголовке — технарская скобка; оси решётки говорят сами.
+  if (isPending) return <ChartSkeleton title="Тепловая карта активности" id={id} homeKey={homeKey} />;
 
   return (
     // The 7×24 grid is genuinely wide content → a full-row tile wherever the section lands in a
     // widget grid. periodControl = its own 7д/30д/90д/Всё pills; the aggregation lives in
     // HeatmapBody (a ChartSection child, inside the period provider) so the pills reach it.
-    <ChartSection title="Тепловая карта активности (день × час)" defaultSize="full" periodControl id={id} homeKey={homeKey}>
+    <ChartSection title="Тепловая карта активности" defaultSize="full" periodControl id={id} homeKey={homeKey}>
       <HeatmapBody posts={tgData?.posts ?? []} />
     </ChartSection>
   );
@@ -273,9 +274,29 @@ export function HeatmapChartBlock({ id, homeKey }: HomeBlockProps = {}) {
 function HeatmapBody({ posts }: { posts: NonNullable<TgFull['posts']> }) {
   const { inRange } = useWidgetPeriod();
   const { grid, maxErv, bestSlot } = useMemo(() => buildHeatmap(posts, inRange), [posts, inRange]);
+  // Пустые края суток не рисуем: 7д-окно на полной 0–23 решётке = 90% мёртвых клеток («у канала
+  // нет жизни»). Диапазон = активные часы ±1 для контекста; шире 16 колонок не сжимаем (экономия
+  // нечитаема); совсем пустая решётка — полные сутки (внизу честное «мало постов»).
+  const hourRange = useMemo(() => {
+    let from = 24;
+    let to = -1;
+    grid.forEach((row) =>
+      row?.forEach((cell, hr) => {
+        if (cell && cell.n > 0) {
+          if (hr < from) from = hr;
+          if (hr > to) to = hr;
+        }
+      }),
+    );
+    if (to < 0) return { from: 0, to: 23 };
+    const f = Math.max(0, from - 1);
+    const t = Math.min(23, to + 1);
+    return t - f + 1 <= 16 ? { from: f, to: t } : { from: 0, to: 23 };
+  }, [grid]);
+  const trimmed = hourRange.from > 0 || hourRange.to < 23;
   return (
     <>
-      <HeatmapSurface grid={grid} maxErv={maxErv} bestSlot={bestSlot} />
+      <HeatmapSurface grid={grid} maxErv={maxErv} bestSlot={bestSlot} hourRange={hourRange} />
       <div className="mt-3 text-xs font-medium text-muted-foreground">
         {bestSlot ? (
           <span>
@@ -284,6 +305,9 @@ function HeatmapBody({ posts }: { posts: NonNullable<TgFull['posts']> }) {
               {DAY_NAMES[bestSlot.weekday] ?? ''} {bestSlot.hour}:00
             </strong>{' '}
             · ERV {bestSlot.avgErv.toFixed(1)}%
+            {trimmed ? (
+              <span className="text-muted-foreground"> · часы {hourRange.from}–{hourRange.to}</span>
+            ) : null}
           </span>
         ) : (
           'Мало постов для тепловой карты.'
@@ -299,23 +323,29 @@ function HeatmapSurface({
   grid,
   maxErv,
   bestSlot,
+  hourRange,
 }: {
   grid: HeatmapCell[][];
   maxErv: number;
   bestSlot: HeatmapBestSlot | null;
+  hourRange: { from: number; to: number };
 }) {
   const [tip, setTip] = useState<TooltipState>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+  // Видимые часы (сжатый диапазон из HeatmapBody); на узком диапазоне подписываем каждый час.
+  const hours = Array.from({ length: hourRange.to - hourRange.from + 1 }, (_, i) => hourRange.from + i);
+  const cols = `30px repeat(${hours.length}, minmax(14px, 1fr))`;
+  const everyHourLabels = hours.length <= 16;
 
   return (
     <div ref={wrapRef} className="relative" onMouseLeave={() => setTip(null)}>
       <div className="overflow-x-auto pb-2">
         <div className="min-w-[420px] space-y-[2px]">
-          <div className="grid gap-[2px]" style={{ gridTemplateColumns: '30px repeat(24, minmax(14px, 1fr))' }}>
+          <div className="grid gap-[2px]" style={{ gridTemplateColumns: cols }}>
             <div />
-            {Array.from({ length: 24 }).map((_, hr) => (
+            {hours.map((hr) => (
               <div key={hr} className="select-none text-center text-2xs font-medium text-muted-foreground">
-                {hr % 3 === 0 ? `${hr}` : ''}
+                {everyHourLabels || hr % 3 === 0 ? `${hr}` : ''}
               </div>
             ))}
           </div>
@@ -326,10 +356,10 @@ function HeatmapSurface({
               <div
                 key={w}
                 className="grid items-center gap-[2px]"
-                style={{ gridTemplateColumns: '30px repeat(24, minmax(14px, 1fr))' }}
+                style={{ gridTemplateColumns: cols }}
               >
                 <div className="select-none text-2xs font-medium text-muted-foreground">{dayName}</div>
-                {Array.from({ length: 24 }).map((_, hr) => {
+                {hours.map((hr) => {
                   const cell = currentRow[hr];
                   if (!cell || cell.n === 0) {
                     return (

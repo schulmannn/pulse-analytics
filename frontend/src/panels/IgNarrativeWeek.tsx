@@ -36,14 +36,16 @@ export function IgNarrativeWeekBody() {
 }
 
 /** Виджет-обёртка (IG-Обзор + Home-пин через id/homeKey — паттерн NarrativeWeekBlock). На IG-Обзоре
- *  ведёт на всю ширину (full), в Home-реестре — half. */
+ *  ведёт на всю ширину ЖЁСТКО (fixedSize — ресайз в треть ломал ряд пустотой), в Home-реестре — half
+ *  и свободный ресайз. */
 export function IgNarrativeWeekBlock({
   id,
   homeKey,
   defaultSize = 'half',
-}: { id?: string; homeKey?: string; defaultSize?: WidgetSize } = {}) {
+  fixedSize,
+}: { id?: string; homeKey?: string; defaultSize?: WidgetSize; fixedSize?: WidgetSize } = {}) {
   return (
-    <ChartSection id={id} homeKey={homeKey} title="IG · Неделя" defaultSize={defaultSize} noExpand>
+    <ChartSection id={id} homeKey={homeKey} title="IG · Неделя" defaultSize={defaultSize} fixedSize={fixedSize} noExpand>
       <IgNarrativeWeekBody />
     </ChartSection>
   );

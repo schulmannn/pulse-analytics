@@ -82,7 +82,11 @@ export function breakdownTitles(result: WidgetResult): string[] {
  * it needs, else gracefully fall back to what the data IS — so a stale/rank/pivot/table choice never
  * renders blank. series → line/bar; breakdown → list/donut; scalar → kpi.
  */
-export function effectiveViz(viz: WidgetViz, hasSeries: boolean, hasBreakdown: boolean): WidgetViz {
+export function effectiveViz(viz: WidgetViz, hasSeries: boolean, hasBreakdown: boolean, unit?: MetricUnit): WidgetViz {
+  // Donut «частей целого» не бывает у интенсивности: percent-breakdown (ср. ERV по формату) в
+  // donut рисует доли от СУММЫ ERV — «Фото 76.3%» ничего не значит. Сохранённые donut-конфиги
+  // тихо падают в list (bars) — редактор такую комбинацию больше не предлагает (widgetCapabilities).
+  if (viz === 'donut' && unit === 'percent') viz = 'list';
   if (viz === 'line' || viz === 'bar') return hasSeries ? viz : hasBreakdown ? 'list' : 'kpi';
   if (viz === 'donut' || viz === 'list') return hasBreakdown ? viz : hasSeries ? 'line' : 'kpi';
   if (viz === 'kpi') return 'kpi';
