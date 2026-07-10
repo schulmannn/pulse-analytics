@@ -1,4 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+// ── Клиентские staleTime-ярусы (арх-аудит: API-fanout) ────────────────────────────────────────
+// Переключение источника/канала и каждый маунт карточек давали burst одинаковых запросов:
+// staleTime по умолчанию 0 → рефетч на всё. Сервер и так кэширует ответы ~10 мин, свежесть
+// виджетам сообщает бейдж «обновлено N мин назад», а канон обновления — ручной (кнопка/retry:
+// refetch() ВСЕГДА идёт в сеть, staleTime глушит только автоматические remount-рефетчи).
+const STALE_LIVE = 5 * 60 * 1000;      // живые агрегаты (tg-full, ig-insights, посты, графы)
+const STALE_ARCHIVE = 30 * 60 * 1000;  // дневные архивы Postgres (history, ig_daily, velocity)
+const STALE_STATUS = 60 * 1000;        // свежесть-статусы (collector-status кормит бейдж)
+
 import { z } from 'zod';
 import { apiGet, apiSend } from '@/api/client';
 import {
@@ -44,6 +53,7 @@ import type { PeriodDays } from '@/lib/period';
 export function useMe() {
   return useQuery({
     queryKey: ['me'],
+    staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet('/api/auth/me', MeSchema, { signal }),
     retry: false,
   });
@@ -197,6 +207,7 @@ export function useTgFull(days: PeriodDays, opts?: { windowPair?: boolean }) {
   return useQuery({
     enabled: channelId != null,
     queryKey: ['tg-full', channelId, days, effRange?.from ?? 0, effRange?.to ?? 0, limit],
+    staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet(`/api/tg/full?limit=${limit}`, TgFullSchema, { signal, channelId }),
   });
 }
@@ -223,6 +234,7 @@ export function useMentionsArchive() {
   return useQuery({
     enabled: channelId != null,
     queryKey: ['mentions-archive', channelId],
+    staleTime: STALE_ARCHIVE,
     queryFn: ({ signal }) => apiGet('/api/history/mentions', MentionsSchema, { signal, channelId }),
   });
 }
@@ -233,6 +245,7 @@ export function useHistory(days = 730) {
   return useQuery({
     enabled: channelId != null,
     queryKey: ['history-channel', channelId, days],
+    staleTime: STALE_ARCHIVE,
     queryFn: ({ signal }) => apiGet(`/api/history/channel?days=${days}`, HistorySchema, { signal, channelId }),
   });
 }
@@ -243,6 +256,7 @@ export function useVelocity() {
   return useQuery({
     enabled: channelId != null,
     queryKey: ['velocity', channelId],
+    staleTime: STALE_ARCHIVE,
     queryFn: ({ signal }) => apiGet('/api/tg/mtproto/velocity', VelocitySchema, { signal, channelId }),
   });
 }
@@ -255,6 +269,7 @@ export function useIgProfile() {
   return useQuery({
     enabled: channelId != null,
     queryKey: ['ig-profile', channelId],
+    staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet('/api/ig/profile', IgProfileSchema, { signal, channelId }),
   });
 }
@@ -267,6 +282,7 @@ export function useIgInsights(days = 90) {
   return useQuery({
     enabled: channelId != null,
     queryKey: ['ig-insights', channelId, days],
+    staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet(`/api/ig/insights?days=${days}`, IgInsightsSchema, { signal, channelId }),
   });
 }
@@ -276,6 +292,7 @@ export function useIgPosts(limit = 20) {
   return useQuery({
     enabled: channelId != null,
     queryKey: ['ig-posts', channelId, limit],
+    staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet(`/api/ig/posts?limit=${limit}`, IgPostsSchema, { signal, channelId }),
   });
 }
@@ -286,6 +303,7 @@ export function useIgBreakdowns(timeframe = 'last_30_days') {
   return useQuery({
     enabled: channelId != null,
     queryKey: ['ig-breakdowns', channelId, timeframe],
+    staleTime: STALE_ARCHIVE,
     queryFn: ({ signal }) => apiGet(`/api/ig/breakdowns?timeframe=${timeframe}`, IgBreakdownsSchema, { signal, channelId }),
   });
 }
@@ -296,6 +314,7 @@ export function useIgOnline() {
   return useQuery({
     enabled: channelId != null,
     queryKey: ['ig-online', channelId],
+    staleTime: STALE_ARCHIVE,
     queryFn: ({ signal }) => apiGet('/api/ig/online', IgOnlineSchema, { signal, channelId }),
   });
 }
@@ -306,6 +325,7 @@ export function useIgStories() {
   return useQuery({
     enabled: channelId != null,
     queryKey: ['ig-stories', channelId],
+    staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet('/api/ig/stories', IgStoriesSchema, { signal, channelId }),
   });
 }
@@ -316,6 +336,7 @@ export function useIgTags() {
   return useQuery({
     enabled: channelId != null,
     queryKey: ['ig-tags', channelId],
+    staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet('/api/ig/tags', IgTagsSchema, { signal, channelId }),
   });
 }
@@ -327,6 +348,7 @@ export function useIgHistory(days = 400) {
   return useQuery({
     enabled: channelId != null && !isDemoMode(),
     queryKey: ['ig-history', channelId, days],
+    staleTime: STALE_ARCHIVE,
     queryFn: ({ signal }) => apiGet(`/api/ig/history?days=${days}`, IgHistorySchema, { signal, channelId }),
   });
 }
@@ -353,6 +375,7 @@ export function useIgOauthStatus() {
   return useQuery({
     enabled: channelId != null,
     queryKey: ['ig-oauth-status', channelId],
+    staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet('/api/ig/oauth/status', IgOauthStatusSchema, { signal, channelId }),
   });
 }
@@ -387,6 +410,7 @@ export function usePostStats(id: number | null) {
   return useQuery({
     enabled: id != null && channelId != null,
     queryKey: ['post-stats', channelId, id],
+    staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet(`/api/tg/mtproto/post_stats/${id}`, PostStatsSchema, { signal, channelId }),
   });
 }
@@ -397,6 +421,7 @@ export function useTgStats() {
   return useQuery({
     enabled: channelId != null,
     queryKey: ['tg-stats', channelId],
+    staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet('/api/tg/mtproto/stats', StatsSchema, { signal, channelId }),
   });
 }
@@ -406,6 +431,7 @@ export function useTgGraphs() {
   return useQuery({
     enabled: channelId != null,
     queryKey: ['tg-graphs', channelId],
+    staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet('/api/tg/mtproto/graphs', GraphsSchema, { signal, channelId }),
   });
 }
@@ -416,6 +442,7 @@ const OkSchema = z.object({ ok: z.boolean() }).passthrough();
 export function useChannels() {
   return useQuery({
     queryKey: ['channels'],
+    staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet('/api/channels', ChannelsResponseSchema, { signal }),
   });
 }
@@ -424,6 +451,7 @@ export function useChannelKeys(id: number | null) {
   return useQuery({
     enabled: id != null,
     queryKey: ['channel-keys', id],
+    staleTime: STALE_LIVE,
     queryFn: ({ signal }) =>
       apiGet(`/api/channels/${id}/keys`, z.object({ keys: z.array(KeySchema) }).passthrough(), { signal }),
   });
@@ -433,6 +461,7 @@ export function useCollectorStatus(id: number | null) {
   return useQuery({
     enabled: id != null,
     queryKey: ['collector-status', id],
+    staleTime: STALE_STATUS,
     queryFn: ({ signal }) => apiGet(`/api/channels/${id}/collector-status`, CollectorStatusResponseSchema, { signal }),
   });
 }
@@ -440,6 +469,7 @@ export function useCollectorStatus(id: number | null) {
 export function useAdminUsers() {
   return useQuery({
     queryKey: ['admin-users'],
+    staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet('/api/admin/users', AdminUsersResponseSchema, { signal }),
   });
 }
@@ -447,6 +477,7 @@ export function useAdminUsers() {
 export function useBugs() {
   return useQuery({
     queryKey: ['bugs'],
+    staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet('/api/bugs', BugsResponseSchema, { signal }),
   });
 }
@@ -526,6 +557,7 @@ export function useReports(enabled = true) {
   return useQuery({
     enabled,
     queryKey: ['reports'],
+    staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet('/api/reports', ReportsResponseSchema, { signal }),
   });
 }
@@ -535,6 +567,7 @@ export function useReport(id: number | null) {
   return useQuery({
     enabled: id != null,
     queryKey: ['report', id],
+    staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet(`/api/reports/${id}`, ReportResponseSchema, { signal }),
   });
 }
