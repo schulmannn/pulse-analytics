@@ -1248,6 +1248,17 @@ const igFauVal = (res) => {
   });
   return { follows, unfollows };
 };
+// Дневной fau ВЫЧИТАНИЕМ двух многодневных окон: вчера = fau[якорь, сегодня) − fau[якорь, вчера).
+// Однодневное окно follows_and_unfollows на проде возвращает ПУСТОЙ breakdown (при том, что все
+// остальные total_value-метрики тем же окном приходят) — из-за этого архив follows/unfollows был
+// NULL с первого дня крона: гейт нарратива f7 молча не проходил, а реконструкции уровня
+// «Подписчиков» не от чего строиться. Многодневные окна демонстрируемо работают (живой KPI);
+// fau аддитивен по дням — разность точна. Отрицательная разность (шум финализации Meta)
+// клампится в 0, вызывающий логирует warn.
+const igFauDiff = (wide, narrow) => {
+  const clamp = (a, b) => (a == null || b == null ? null : Math.max(0, a - b));
+  return { follows: clamp(wide.follows, narrow.follows), unfollows: clamp(wide.unfollows, narrow.unfollows) };
+};
 const IG_TV_NAMES = ['views', 'profile_views', 'accounts_engaged', 'total_interactions', 'likes', 'comments', 'saves', 'shares'];
 const igNum = (v) => (v == null || isNaN(v)) ? null : Math.round(Number(v));
 
@@ -1279,11 +1290,23 @@ async function collectIgDailyForAccount(acc, token) {
   const settled = await Promise.allSettled(
     IG_TV_NAMES.map((metric) => igFetch(`/${id}/insights`, { metric, metric_type: 'total_value', period: 'day', since, until }, token)));
   settled.forEach((r, i) => { if (r.status === 'fulfilled') row[IG_TV_NAMES[i]] = igNum(igTvVal(r.value)); });
-  // follows_and_unfollows → follows / unfollows.
+  // follows_and_unfollows → follows / unfollows за вчера. НЕ однодневным окном (оно возвращает
+  // пустой breakdown — см. igFauDiff выше), а разностью двух окон с общим якорем −8 дней:
+  // wide = [якорь, сегодня) покрывает вчера, narrow = [якорь, вчера) — нет; wide − narrow = вчера.
   try {
-    const fau = await igFetch(`/${id}/insights`, { metric: 'follows_and_unfollows', metric_type: 'total_value', breakdown: 'follow_type', period: 'day', since, until }, token);
-    const { follows, unfollows } = igFauVal(fau);
-    row.follows = igNum(follows); row.unfollows = igNum(unfollows);
+    const anchor = until - 8 * SEC;
+    const fauArgs = { metric: 'follows_and_unfollows', metric_type: 'total_value', breakdown: 'follow_type', period: 'day' };
+    const [wideRes, narrowRes] = await Promise.all([
+      igFetch(`/${id}/insights`, { ...fauArgs, since: anchor, until }, token),
+      igFetch(`/${id}/insights`, { ...fauArgs, since: anchor, until: since }, token),
+    ]);
+    const wide = igFauVal(wideRes), narrow = igFauVal(narrowRes);
+    if ((wide.follows != null && narrow.follows != null && wide.follows < narrow.follows) ||
+        (wide.unfollows != null && narrow.unfollows != null && wide.unfollows < narrow.unfollows)) {
+      log('warn', 'ig_cron_fau_negative_diff', { channelId: acc.channel_id, wide, narrow });
+    }
+    const day = igFauDiff(wide, narrow);
+    row.follows = igNum(day.follows); row.unfollows = igNum(day.unfollows);
   } catch (e) { log('warn', 'ig_cron_fau_failed', { channelId: acc.channel_id, error: e.message }); }
   // Абсолютный уровень базы (профильный followers_count) — исторических уровней IG не отдаёт,
   // поэтому фиксируем «сейчас» при каждом дневном сборе. Ставится на вчерашнюю строку: сбор
