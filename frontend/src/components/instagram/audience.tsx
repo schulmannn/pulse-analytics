@@ -2,7 +2,9 @@ import { useRef, useState } from 'react';
 import { fmt } from '@/lib/format';
 import { ChartTooltip, type TooltipState } from '@/components/ChartTooltip';
 import { EmptyChart } from '@/components/instagram/shared';
-import { ChartSection, WidgetGroup, breakdownVariants, reorderDefault } from '@/components/ChartWidget';
+import { ChartSection } from '@/components/ChartWidget';
+import { WidgetGroup } from '@/components/widgets/WidgetGroup';
+import { breakdownVariants, reorderDefault } from '@/components/widgets/variants';
 import type { IgBreakdowns, IgOnline } from '@/api/schemas';
 import {
   tvBreakdown,

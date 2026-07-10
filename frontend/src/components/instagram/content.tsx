@@ -4,7 +4,9 @@ import { EmptyState } from '@/components/EmptyState';
 import { BarChart } from '@/components/BarChart';
 import { RichText } from '@/components/RichText';
 import { KpiCard, Stat } from '@/components/instagram/shared';
-import { ChartSection, WidgetGroup, breakdownVariants } from '@/components/ChartWidget';
+import { ChartSection } from '@/components/ChartWidget';
+import { WidgetGroup } from '@/components/widgets/WidgetGroup';
+import { breakdownVariants } from '@/components/widgets/variants';
 import type { IgPost, IgStory, IgTag } from '@/api/schemas';
 import {
   hashtagStats,

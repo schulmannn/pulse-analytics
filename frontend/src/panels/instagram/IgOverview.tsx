@@ -3,7 +3,8 @@ import type { IgData } from '@/lib/useIgData';
 import { IgKpiBlock } from '@/components/instagram/shared';
 import { InsightsBlock } from '@/components/instagram/insights';
 import { TopPostsBlock } from '@/components/instagram/content';
-import { ChartSection, WidgetGroup } from '@/components/ChartWidget';
+import { ChartSection } from '@/components/ChartWidget';
+import { WidgetGroup } from '@/components/widgets/WidgetGroup';
 import { IgNarrativeWeekBlock } from '@/panels/IgNarrativeWeek';
 
 /**

@@ -14,7 +14,7 @@
 // to honour it.
 
 import type { PeriodDays } from '@/lib/period';
-import type { WidgetSize } from '@/components/ChartWidget';
+import type { WidgetSize } from '@/lib/widgetPrefsStore';
 import { getMetric, isMetricId, recommendedSize, type WidgetViz } from '@/lib/widgetMetrics';
 import { genId } from '@/lib/reportBlocks';
 import { LEGACY_DEFAULT_SIZE, isLegacyKey, legacyConfigId, legacyKeyForMetricId, legacyMetricId, type LegacyKey } from '@/lib/legacyWidgets';

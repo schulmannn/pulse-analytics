@@ -9,7 +9,7 @@
 // declare which builder controls apply (capabilities); everything they can't drive is hidden, but the
 // shell (period / source / title / size / style) is always editable — one system, one editor.
 
-import type { WidgetSize } from '@/components/ChartWidget';
+import type { WidgetSize } from '@/lib/widgetPrefsStore';
 
 /** Which builder controls a widget can drive. Metric widgets derive these from their MetricDef;
  *  legacy widgets declare them here. Period / source / title / size / style are universal shell and

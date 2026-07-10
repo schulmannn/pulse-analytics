@@ -8,7 +8,9 @@ import { DeltaPill } from '@/components/DeltaPill';
 import { BarChart } from '@/components/BarChart';
 import { EmptyState } from '@/components/EmptyState';
 
-import { ChartSection, WidgetGroup, breakdownVariants } from '@/components/ChartWidget';
+import { ChartSection } from '@/components/ChartWidget';
+import { WidgetGroup } from '@/components/widgets/WidgetGroup';
+import { breakdownVariants } from '@/components/widgets/variants';
 import { LineChart } from '@/components/LineChart';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
