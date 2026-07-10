@@ -348,9 +348,14 @@ export function WidgetGroup({ id, className, children }: WidgetGroupProps) {
     schedule();
     const unsub = subscribeStore(schedule); // ресайз/скрытие виджета → пере-раскладка
     window.addEventListener('resize', schedule);
+    // Данные доезжают ПОСЛЕ маунта и меняют высоты карточек БЕЗ notify стора — одноразовый прогон
+    // на скелетонах примет решение по неверному layout'у (прод-находка). Рост/сжатие корня группы
+    // = единственный надёжный сигнал «раскладка изменилась» → пере-меряем.
+    const unobserve = groupRootRef.current ? observeSize(groupRootRef.current, schedule) : undefined;
     return () => {
       cancelAnimationFrame(handle);
       unsub();
+      unobserve?.();
       window.removeEventListener('resize', schedule);
     };
   }, [registered]);
@@ -1076,7 +1081,7 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
       onPointerCancel={reorder ? () => group?.dragEnd() : undefined}
     >
       <div
-        className={`${strip ? 'group/strip relative flex flex-col' : `flex flex-col ${SIZE_H[effectiveSize]} rounded-xl border bg-card p-4 sm:p-5 transition-colors hover:border-ink3/40`} ${
+        className={`${strip ? 'group/strip relative flex flex-col' : `flex flex-col ${SIZE_H[effectiveSize]} rounded-xl border bg-card p-4 sm:p-5 transition-colors hover:border-ink3/40 hover:[--card-tint-alpha:0.16] dark:hover:border-white/[0.12] dark:hover:[--card-tint-alpha:0.18]`} ${
           // Softer surface edge in dark (a faint white hairline instead of the hard #2b2b2b box —
           // steep-like "lit surface", less boxed); light mode keeps the full hairline (white cards on
           // paper need it for definition). Edit mode keeps a visible border.
