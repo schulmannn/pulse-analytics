@@ -351,7 +351,7 @@ function PaletteDialog({ close }: { close: () => void }) {
                 section.items.length === 0 ? null : (
                   <div key={section.title ?? 'hits'} role="group" aria-label={section.title ?? 'Результаты'}>
                     {section.title && (
-                      <div aria-hidden="true" className="px-3 pb-1 pt-3 text-2xs uppercase tracking-wider text-muted-foreground first:pt-1.5">
+                      <div aria-hidden="true" className="px-3 pb-1 pt-3 text-2xs font-medium uppercase tracking-wide text-ink3 first:pt-1.5">
                         {section.title}
                       </div>
                     )}

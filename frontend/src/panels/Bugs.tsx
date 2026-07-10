@@ -53,13 +53,13 @@ export function Bugs() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-medium tracking-tight">Баг-трекер</h2>
+        <h2 className="text-2xl font-medium tracking-tight">Баг-трекер</h2>
         <p className="mt-0.5 text-xs text-muted-foreground">Дефекты интерфейса, идеи и правки</p>
       </div>
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-medium tracking-wide text-muted-foreground">Сообщить о баге / предложить фичу</CardTitle>
+          <CardTitle className="text-sm font-medium tracking-tight text-muted-foreground">Сообщить о баге / предложить фичу</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmitBug} className="space-y-4">

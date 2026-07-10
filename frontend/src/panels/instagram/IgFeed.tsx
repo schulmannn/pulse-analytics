@@ -6,7 +6,7 @@ import type { IgData } from '@/lib/useIgData';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { usePagePeriod } from '@/lib/period';
 import { PeriodChips } from '@/components/PeriodChips';
-import { IgConnectPanel, IgDataHealth } from '@/components/instagram/health';
+import { IgConnectPanel } from '@/components/instagram/health';
 import { ErrorState } from '@/components/ErrorState';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
@@ -133,23 +133,6 @@ export function IgShell() {
   return (
     <div className="space-y-6">
       {banner}
-      {/* Network-wide chrome — rendered once, above the section card (the account context). */}
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-xl font-medium tracking-tight">
-            Instagram{ig.profile?.username ? ` · @${ig.profile.username}` : ''}
-          </h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            {ig.isMock ? 'Демо-режим — примерные данные' : 'Аккаунт, аудитория, форматы и публикации'}
-          </p>
-        </div>
-        {/* Tiny data-status indicator (account-card area). No accountName here — the H2 on the
-            left already says «Instagram · @handle»; the same handle twice in one row read as an
-            echo (аудит). The period chips moved into the section headers (TG parity). */}
-        <div className="min-w-[180px] shrink-0">
-          <IgDataHealth lastSync={ig.lastSync} isMock={ig.isMock} />
-        </div>
-      </header>
       {ig.isMock && <IgConnectPanel />}
 
       <Outlet context={ig} />

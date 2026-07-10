@@ -815,7 +815,7 @@ function Topbar() {
   if (!title) return null;
   return (
     <header className="sticky top-0 z-sticky flex h-14 items-center gap-3 border-b bg-background/80 px-4 backdrop-blur sm:gap-4 sm:px-6 print:hidden">
-      <h1 className="min-w-0 truncate text-lg font-medium">{title}</h1>
+      <h1 className="min-w-0 truncate text-lg font-medium tracking-tight">{title}</h1>
     </header>
   );
 }

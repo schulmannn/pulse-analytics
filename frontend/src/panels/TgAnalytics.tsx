@@ -470,33 +470,33 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
         <ChartSection strip id="tg-derived-kpis" title="Сводка показателей" defaultSize="full" noExpand>
           <div className="grid grid-cols-2 gap-x-6 gap-y-4 border-t border-border pt-4 sm:grid-cols-3 lg:grid-cols-6">
             <div>
-              <div className="text-2xs font-medium tracking-wider text-muted-foreground">Просмотров / пост</div>
-              <div className="mt-1 text-xl font-medium tabular-nums">{fmt.kpi(cur(cs?.views_per_post) ?? vs?.avg_views ?? 0)}</div>
+              <div className="text-2xs tracking-wide text-muted-foreground">Просмотров / пост</div>
+              <div className="mt-1.5 text-2xl font-medium tabular-nums tracking-tight">{fmt.kpi(cur(cs?.views_per_post) ?? vs?.avg_views ?? 0)}</div>
               {vs?.posts_analyzed ? <div className="mt-1 truncate text-2xs text-muted-foreground">по {vs.posts_analyzed} постам</div> : null}
             </div>
             <div>
-              <div className="text-2xs font-medium tracking-wider text-muted-foreground">Ср. ERV</div>
-              <div className="mt-1 text-xl font-medium tabular-nums">{avgErv != null ? `${avgErv.toFixed(1)}%` : '—'}</div>
+              <div className="text-2xs tracking-wide text-muted-foreground">Ср. ERV</div>
+              <div className="mt-1.5 text-2xl font-medium tabular-nums tracking-tight">{avgErv != null ? `${avgErv.toFixed(1)}%` : '—'}</div>
               <div className="mt-1 truncate text-2xs text-muted-foreground">вовлечённость на просмотр</div>
             </div>
             <div>
-              <div className="text-2xs font-medium tracking-wider text-muted-foreground">Виральность</div>
-              <div className="mt-1 text-xl font-medium tabular-nums">{avgVir != null ? `${avgVir.toFixed(1)}%` : '—'}</div>
+              <div className="text-2xs tracking-wide text-muted-foreground">Виральность</div>
+              <div className="mt-1.5 text-2xl font-medium tabular-nums tracking-tight">{avgVir != null ? `${avgVir.toFixed(1)}%` : '—'}</div>
               <div className="mt-1 truncate text-2xs text-muted-foreground">репосты / просмотры</div>
             </div>
             <div>
-              <div className="text-2xs font-medium tracking-wider text-muted-foreground">Репостов / пост</div>
-              <div className="mt-1 text-xl font-medium tabular-nums">{cur(cs?.shares_per_post) != null ? fmt.kpi(cur(cs?.shares_per_post)!) : '—'}</div>
+              <div className="text-2xs tracking-wide text-muted-foreground">Репостов / пост</div>
+              <div className="mt-1.5 text-2xl font-medium tabular-nums tracking-tight">{cur(cs?.shares_per_post) != null ? fmt.kpi(cur(cs?.shares_per_post)!) : '—'}</div>
               {vs?.total_forwards ? <div className="mt-1 truncate text-2xs text-muted-foreground">{fmt.short(vs.total_forwards)} всего</div> : null}
             </div>
             <div>
-              <div className="text-2xs font-medium tracking-wider text-muted-foreground">Реакций / пост</div>
-              <div className="mt-1 text-xl font-medium tabular-nums">{cur(cs?.reactions_per_post) != null ? fmt.kpi(cur(cs?.reactions_per_post)!) : '—'}</div>
+              <div className="text-2xs tracking-wide text-muted-foreground">Реакций / пост</div>
+              <div className="mt-1.5 text-2xl font-medium tabular-nums tracking-tight">{cur(cs?.reactions_per_post) != null ? fmt.kpi(cur(cs?.reactions_per_post)!) : '—'}</div>
               {vs?.total_reactions ? <div className="mt-1 truncate text-2xs text-muted-foreground">{fmt.short(vs.total_reactions)} всего</div> : null}
             </div>
             <div>
-              <div className="text-2xs font-medium tracking-wider text-muted-foreground">Уведомления вкл.</div>
-              <div className="mt-1 text-xl font-medium tabular-nums">{notifPct != null ? `${notifPct.toFixed(1)}%` : '—'}</div>
+              <div className="text-2xs tracking-wide text-muted-foreground">Уведомления вкл.</div>
+              <div className="mt-1.5 text-2xl font-medium tabular-nums tracking-tight">{notifPct != null ? `${notifPct.toFixed(1)}%` : '—'}</div>
               {notif ? <div className="mt-1 truncate text-2xs text-muted-foreground">{fmt.short(notif.part ?? 0)} из {fmt.short(notif.total ?? 0)}</div> : null}
             </div>
           </div>
@@ -761,7 +761,7 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
                   label: 'Столбцы',
                   render: (
                     <div>
-                      <div className="mb-2 text-2xs font-medium tracking-wider text-muted-foreground">Ср. просмотры</div>
+                      <div className="mb-2 text-2xs tracking-wide text-muted-foreground">Ср. просмотры</div>
                       <BarChart values={wdAvgValues} labels={wdLabels} titles={wdAvgValues.map((v, i) => `${wdLabels[i]}: ${fmt.num(v)} ср. просмотров`)} />
                     </div>
                   ),
