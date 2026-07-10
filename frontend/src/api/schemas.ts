@@ -183,6 +183,7 @@ export const IgHistoryRowSchema = z
   .object({
     day: z.string(),
     followers: z.coerce.number().optional().nullable(),
+    followers_total: z.coerce.number().optional().nullable(),
     reach: z.coerce.number().optional().nullable(),
     views: z.coerce.number().optional().nullable(),
     profile_views: z.coerce.number().optional().nullable(),

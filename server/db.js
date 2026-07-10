@@ -1347,19 +1347,20 @@ async function listTgSessions() {
 async function upsertIgDaily(channelId, rows, executor = pool) {
   if (!enabled || !channelId || !rows || !rows.length) return 0;
   const sql = `INSERT INTO ig_daily
-      (channel_id, source_id, day, followers, reach, views, profile_views, accounts_engaged,
+      (channel_id, source_id, day, followers, followers_total, reach, views, profile_views, accounts_engaged,
        total_interactions, likes, comments, saves, shares, follows, unfollows, captured_at)
     SELECT $1, (SELECT a.source_id FROM ig_accounts a WHERE a.channel_id = $1),
-           x.day::date, x.followers, x.reach, x.views, x.profile_views, x.accounts_engaged,
+           x.day::date, x.followers, x.followers_total, x.reach, x.views, x.profile_views, x.accounts_engaged,
            x.total_interactions, x.likes, x.comments, x.saves, x.shares, x.follows, x.unfollows, now()
       FROM jsonb_to_recordset($2::jsonb) AS x(
-        day text, followers integer, reach integer, views integer, profile_views integer,
+        day text, followers integer, followers_total integer, reach integer, views integer, profile_views integer,
         accounts_engaged integer, total_interactions integer, likes integer, comments integer,
         saves integer, shares integer, follows integer, unfollows integer
       )
     ON CONFLICT (channel_id, day) DO UPDATE SET
       source_id=COALESCE(EXCLUDED.source_id, ig_daily.source_id),
       followers=COALESCE(EXCLUDED.followers, ig_daily.followers),
+      followers_total=COALESCE(EXCLUDED.followers_total, ig_daily.followers_total),
       reach=COALESCE(EXCLUDED.reach, ig_daily.reach),
       views=COALESCE(EXCLUDED.views, ig_daily.views),
       profile_views=COALESCE(EXCLUDED.profile_views, ig_daily.profile_views),
@@ -1478,7 +1479,7 @@ async function rollupChannelMonthly(months = 3) {
 async function listIgDaily(channelId, days = 400) {
   if (!enabled || !channelId) return [];
   const { rows } = await pool.query(
-    `SELECT to_char(day,'YYYY-MM-DD') AS day, followers, reach, views, profile_views,
+    `SELECT to_char(day,'YYYY-MM-DD') AS day, followers, followers_total, reach, views, profile_views,
             accounts_engaged, total_interactions, likes, comments, saves, shares, follows, unfollows
        FROM ig_daily WHERE channel_id=$1 AND day >= (CURRENT_DATE - $2::int) ORDER BY day ASC`,
     [channelId, days]);

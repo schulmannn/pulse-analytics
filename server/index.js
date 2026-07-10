@@ -1285,6 +1285,14 @@ async function collectIgDailyForAccount(acc, token) {
     const { follows, unfollows } = igFauVal(fau);
     row.follows = igNum(follows); row.unfollows = igNum(unfollows);
   } catch (e) { log('warn', 'ig_cron_fau_failed', { channelId: acc.channel_id, error: e.message }); }
+  // Абсолютный уровень базы (профильный followers_count) — исторических уровней IG не отдаёт,
+  // поэтому фиксируем «сейчас» при каждом дневном сборе. Ставится на вчерашнюю строку: сбор
+  // идёт ранним утром, значение ≈ уровень конца вчерашнего дня (честная погрешность в часы,
+  // фронт использует эти точки как якоря графика уровня «Подписчики»).
+  try {
+    const prof = await igFetch(`/${id}`, { fields: 'followers_count' }, token);
+    row.followers_total = igNum(prof && prof.followers_count);
+  } catch (e) { log('warn', 'ig_cron_followers_total_failed', { channelId: acc.channel_id, error: e.message }); }
   await db.upsertIgDaily(acc.channel_id, [row]);
   return row;
 }
