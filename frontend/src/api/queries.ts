@@ -522,6 +522,34 @@ export function useUpdateUser(id: number) {
   });
 }
 
+/** GDPR F4 (admin-путь): стирание чужого аккаунта из панели. Суперюзеров сервер не удаляет. */
+export function useAdminDeleteUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => apiSend('DELETE', `/api/admin/users/${id}`, undefined, OkSchema),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-users'] }),
+  });
+}
+
+/**
+ * GDPR F4 (self-serve): немедленный hard-delete собственного аккаунта. `confirm` — email
+ * аккаунта (подтверждение намерения; пароль не годится — Google-аккаунты живут без него).
+ * После успеха сессия мертва и на сервере (users-строки больше нет) — чистим локально и
+ * сбрасываем весь кэш; редирект — на вызывающей стороне.
+ */
+export function useDeleteAccount() {
+  const qc = useQueryClient();
+  const { setChannelId } = useSelectedChannel();
+  return useMutation({
+    mutationFn: (confirm: string) => apiSend('DELETE', '/api/account', { confirm }, OkSchema),
+    onSuccess: () => {
+      clearSessionToken();
+      setChannelId(null);
+      qc.clear();
+    },
+  });
+}
+
 export function useCreateBug() {
   const qc = useQueryClient();
   return useMutation({

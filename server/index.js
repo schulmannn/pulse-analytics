@@ -674,6 +674,61 @@ app.patch('/api/admin/users/:id', requireAuth, requireSuper, async (req, res) =>
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+// Admin-стирание аккаунта (GDPR F4, второй путь). Суперюзеров панель не удаляет — владелец
+// стирается только вручную с сервера (иначе одна кнопка оставляет приложение без админа).
+app.delete('/api/admin/users/:id', requireAuth, requireSuper, async (req, res, next) => {
+  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ error: 'bad id' });
+  try {
+    const target = await db.getUserById(id);
+    if (!target) return res.status(404).json({ error: 'Пользователь не найден' });
+    if (target.role === 'superuser') return res.status(400).json({ error: 'Суперюзера нельзя удалить из панели' });
+    // Аудит до удаления: после DELETE uid анонимизируется (SET NULL), сама запись остаётся.
+    await audit(req, 'admin.user_deleted', { target_uid: id }).catch(() => {});
+    const ok = await db.deleteUserAccount(id);
+    res.json({ ok });
+  } catch (e) { next(e); }
+});
+
+// ── GDPR: собственный аккаунт — экспорт (F5) и стирание (F4) ──
+
+// Все персональные данные одним JSON-файлом (архивы каналов включены; credentials —
+// pass_hash / TG-сессия / IG-токен — не покидают сервер никогда, см. db.exportUserData).
+app.get('/api/account/export', requireAuth, async (req, res, next) => {
+  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
+  try {
+    const data = await db.exportUserData(req.user.uid);
+    if (!data) return res.status(404).json({ error: 'Пользователь не найден' });
+    audit(req, 'account.exported', {}).catch(() => {});
+    res.setHeader('Content-Disposition',
+      `attachment; filename="atlavue-export-${new Date().toISOString().slice(0, 10)}.json"`);
+    res.json(data);
+  } catch (e) { next(e); }
+});
+
+// Немедленный hard-delete (решение владельца: без grace-периода — восстановление это просто
+// переподключение источников). Подтверждение — точный email аккаунта: пароль здесь не работает
+// как фактор (Google-аккаунты живут с неиспользуемым случайным pass_hash). Каскадную полноту
+// и судьбу общих данных описывает db.deleteUserAccount.
+app.delete('/api/account', requireAuth, async (req, res, next) => {
+  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
+  if (req.user.role === 'superuser') {
+    return res.status(403).json({ error: 'Аккаунт суперюзера удаляется только вручную с сервера' });
+  }
+  const confirm = String((req.body && req.body.confirm) || '').trim().toLowerCase();
+  if (!confirm || confirm !== String(req.user.email || '').toLowerCase()) {
+    return res.status(400).json({ error: 'Введите email аккаунта для подтверждения' });
+  }
+  try {
+    // Аудит до удаления — и без email в metadata, иначе стирание неполное (uid → SET NULL).
+    await audit(req, 'account.deleted', {}).catch(() => {});
+    const ok = await db.deleteUserAccount(req.user.uid);
+    if (!ok) return res.status(404).json({ error: 'Пользователь не найден' });
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
 // ════════════════════════════════════════════════════════════════
 //  INSTAGRAM ROUTES
 // ════════════════════════════════════════════════════════════════

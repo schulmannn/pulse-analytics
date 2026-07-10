@@ -1,5 +1,5 @@
-import type { ChangeEvent } from 'react';
-import { useAdminUsers, useUpdateUser } from '@/api/queries';
+import { useEffect, useState, type ChangeEvent } from 'react';
+import { useAdminDeleteUser, useAdminUsers, useUpdateUser } from '@/api/queries';
 import { Card, CardContent } from '@/components/ui/card';
 import { ErrorState } from '@/components/ErrorState';
 import { fmt } from '@/lib/format';
@@ -103,9 +103,62 @@ function UserRowCard({ user, availableRoles, availableStatuses, isMe }: UserRowC
               <option key={s} value={s}>{STATUS_LABELS[s] || s}</option>
             ))}
           </select>
+          <DeleteUserButton user={user} isMe={isMe} />
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * GDPR F4 (admin-путь): стирание аккаунта со всеми данными. Двухшаговое подтверждение прямо в
+ * кнопке (первый клик взводит, второй удаляет; через 4 с взвод спадает) — без alert-канона.
+ * Себя и суперюзеров не удалить: кнопка скрыта, сервер продублирует запрет.
+ */
+function DeleteUserButton({ user, isMe }: { user: UserRowCardProps['user']; isMe: boolean }) {
+  const deleteUser = useAdminDeleteUser();
+  const [armed, setArmed] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!armed) return;
+    const t = setTimeout(() => setArmed(false), 4000);
+    return () => clearTimeout(t);
+  }, [armed]);
+
+  if (isMe || user.role === 'superuser') return null;
+
+  const onClick = async () => {
+    if (!armed) {
+      setArmed(true);
+      setErr(null);
+      return;
+    }
+    try {
+      await deleteUser.mutateAsync(user.id);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Не удалось удалить');
+      setArmed(false);
+    }
+  };
+
+  return (
+    <span className="flex items-center gap-2">
+      {err && <span className="text-2xs font-medium text-destructive">{err}</span>}
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={deleteUser.isPending}
+        aria-label={`Удалить аккаунт ${user.email || `#${user.id}`}`}
+        className={
+          armed
+            ? 'rounded border border-destructive bg-destructive px-2 py-1.5 text-xs font-medium text-destructive-foreground disabled:opacity-60'
+            : 'rounded border border-border bg-background px-2 py-1.5 text-xs font-medium text-destructive transition-colors hover:border-destructive/40 disabled:opacity-60'
+        }
+      >
+        {deleteUser.isPending ? 'Удаление…' : armed ? 'Точно удалить?' : 'Удалить'}
+      </button>
+    </span>
   );
 }
 

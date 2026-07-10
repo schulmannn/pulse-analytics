@@ -8,7 +8,7 @@ import { Link } from 'react-router-dom';
  * owner should review the contact address, effective date and jurisdiction before submitting.
  */
 
-const UPDATED = '3 July 2026';
+const UPDATED = '10 July 2026';
 const CONTACT = 'schulmannn@gmail.com';
 
 function LegalPage({ title, children }: { title: string; children: ReactNode }) {
@@ -98,11 +98,11 @@ export function Privacy() {
       </Section>
 
       <Section title="6. Data retention">
-        <p>We keep your analytics for as long as your account and the corresponding connection are active, plus daily aggregates used to draw historical charts. Disconnecting a source stops new collection; deleting your account removes your data. See the <Link to="/data-deletion" className="text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary">Data Deletion</Link> page.</p>
+        <p>We keep your analytics for as long as your account and the corresponding connection are active, plus daily aggregates used to draw historical charts. Disconnecting a source stops new collection; deleting your account removes your data immediately, and residual copies in database backups age out on their normal rotation within 30 days. See the <Link to="/data-deletion" className="text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary">Data Deletion</Link> page.</p>
       </Section>
 
       <Section title="7. Your rights">
-        <p>You may request access to, correction of, or deletion of your personal data, obtain a copy of it, and withdraw consent. To exercise any of these, disconnect the source in the app or email us at <a className="text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary" href={`mailto:${CONTACT}`}>{CONTACT}</a>. We respond within 30 days.</p>
+        <p>You may access, correct, or delete your personal data, obtain a copy of it, and withdraw consent — directly in the app: <span className="font-medium text-foreground">Настройки → Данные → Экспорт данных</span> downloads everything we hold about you as one JSON file, and <span className="font-medium text-foreground">Настройки → Безопасность → Удалить аккаунт</span> erases your account immediately. You can also email us at <a className="text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary" href={`mailto:${CONTACT}`}>{CONTACT}</a>; we respond within 30 days.</p>
       </Section>
 
       <Section title="8. Instagram / Meta">
@@ -146,7 +146,7 @@ export function DataDeletion() {
       </Section>
 
       <Section title="3. Delete your account and all data">
-        <p>To erase everything, email us at <a className="text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary" href={`mailto:${CONTACT}?subject=Delete%20my%20account`}>{CONTACT}</a> from your account email address with the subject “Delete my account”. We remove your account, all connected-source data, tokens, and archived aggregates within 30 days; backups are purged on their normal rotation.</p>
+        <p>In Atlavue, open <span className="font-medium text-foreground">Настройки → Безопасность → Удалить аккаунт</span> and confirm with your account email. Deletion is immediate and irreversible: your account, all connected-source data, tokens, sessions, and archived aggregates are erased at once; residual copies in database backups age out on their normal rotation, within 30 days. Prefer email? Write to <a className="text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary" href={`mailto:${CONTACT}?subject=Delete%20my%20account`}>{CONTACT}</a> from your account email address with the subject “Delete my account” and we will do it for you within 30 days. You can first download a copy of everything via <span className="font-medium text-foreground">Настройки → Данные → Экспорт данных</span>.</p>
       </Section>
 
       <Section title="4. What we retain">
