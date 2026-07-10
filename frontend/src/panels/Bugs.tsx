@@ -27,7 +27,7 @@ export function Bugs() {
 
   if (data?.enabled === false) {
     return (
-      <EmptyState title="БД не подключена." reason="Баг-трекер недоступен." />
+      <EmptyState title="БД не подключена" reason="Баг-трекер недоступен." />
     );
   }
 
@@ -112,7 +112,7 @@ export function Bugs() {
       <div className="space-y-3">
         <h3 className="px-1 text-xs font-medium tracking-wider text-muted-foreground">Тикеты</h3>
         {bugs.length === 0 ? (
-          <EmptyState title="Багов пока нет." />
+          <EmptyState title="Багов пока нет" />
         ) : (
           <div className="space-y-3">
             {bugs.map((bug) => (

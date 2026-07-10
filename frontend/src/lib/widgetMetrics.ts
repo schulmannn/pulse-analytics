@@ -139,30 +139,30 @@ const TG_METRICS: MetricDef[] = [
   define({
     id: 'tg.reactions', label: 'Реакции', source: 'tg', kind: 'series', unit: 'number',
     category: 'engagement', dimensions: POST_DIMS, drillKey: 'reactions',
-    formula: 'Сумма всех реакций-эмодзи под постами окна.',
+    formula: 'Сумма всех реакций-эмодзи под постами окна.', sourceNote: 'Посты канала.',
   }),
   define({
     id: 'tg.forwards', label: 'Репосты', source: 'tg', kind: 'series', unit: 'number',
     category: 'engagement', dimensions: POST_DIMS, drillKey: 'forwards',
-    formula: 'Сколько раз посты переслали (forward) за период.',
+    formula: 'Сколько раз посты переслали (forward) за период.', sourceNote: 'Посты канала.',
   }),
   define({
     id: 'tg.er', label: 'Вовлечённость (ER)', source: 'tg', kind: 'value', unit: 'percent',
     category: 'engagement', drillKey: 'er',
     formula: 'ER = (реакции + репосты + комментарии) ÷ подписчики × 100%.',
-    included: 'Доля подписчиков, как-либо отреагировавших на посты периода.',
+    included: 'Доля подписчиков, как-либо отреагировавших на посты периода.', sourceNote: 'Посты канала + текущее число подписчиков.',
   }),
   // Derived post-average KPIs (no clean daily series — shown as headline values).
   define({
     id: 'tg.erv', label: 'ERV', source: 'tg', kind: 'value', unit: 'percent', category: 'engagement',
     formula: 'ERV = (реакции + репосты + комментарии) ÷ просмотры × 100%.',
-    included: 'Вовлечённость на просмотр (а не на подписчика) — устойчивее к охвату.',
+    included: 'Вовлечённость на просмотр (а не на подписчика) — устойчивее к охвату.', sourceNote: 'Посты канала.',
   }),
   define({
     id: 'tg.virality', label: 'Виральность', source: 'tg', kind: 'value', unit: 'percent',
     category: 'engagement',
     formula: 'Виральность = репосты ÷ просмотры × 100%.',
-    included: 'Насколько активно контент разносят дальше.',
+    included: 'Насколько активно контент разносят дальше.', sourceNote: 'Посты канала.',
   }),
   // Growth flows.
   define({

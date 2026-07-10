@@ -7,7 +7,7 @@ import { useChannels } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { useFocusTrap } from '@/lib/useFocusTrap';
 import { useLayerBack } from '@/lib/useLayerBack';
-import { fmt } from '@/lib/format';
+import { fmt, pluralRu } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { NETWORKS, NetworkGlyph, networkByKey, type Network } from '@/lib/networks';
 import { Icon } from '@/components/nav-icons';
@@ -108,7 +108,9 @@ export function SourceSwitcher({ rail = false, mobile = false }: { rail?: boolea
     network !== NETWORKS[0].key
       ? networkByKey(network).name
       : count != null && count > 0
-        ? `${fmt.kpi(count)} подписчиков`
+        ? count >= 1e4
+          ? `${fmt.kpi(count)} подписчиков`
+          : `${fmt.num(count)} ${pluralRu(count, ['подписчик', 'подписчика', 'подписчиков'])}`
         : current?.source === 'collector'
           ? 'Локальный сбор'
           : networkByKey(network).name;

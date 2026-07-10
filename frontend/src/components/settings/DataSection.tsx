@@ -87,7 +87,7 @@ function ExportRow() {
         {err && <span role="alert" className="mt-1 block text-xs font-medium text-destructive">{err}</span>}
       </span>
       <button type="button" onClick={onExport} disabled={busy} className={BTN_SECONDARY}>
-        {busy ? 'Готовим…' : 'Скачать JSON'}
+        {busy ? 'Подготовка…' : 'Скачать JSON'}
       </button>
     </div>
   );

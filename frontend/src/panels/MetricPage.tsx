@@ -8,7 +8,7 @@ import { deriveKpis, isDrillKey } from '@/lib/kpiDerive';
 import type { DailySeries, DrillKey, PostMetricField } from '@/lib/kpiDerive';
 import { METRIC_DEFS } from '@/lib/metricDefs';
 import type { MetricDef } from '@/lib/metricDefs';
-import { fmt } from '@/lib/format';
+import { fmt, pluralRu } from '@/lib/format';
 import { markdownToPlainText } from '@/lib/markdown';
 import { PinnedDayPanel } from '@/components/PinnedDayPanel';
 import type { NormalizedPost } from '@/lib/posts';
@@ -446,13 +446,16 @@ export function MetricPage() {
   let reconcile = '';
   if (field) {
     if (metricKey === 'er' && members > 0) {
-      reconcile = `ER = ${fmt.short(fieldSumAll)} вовлечений ÷ ${fmt.num(members)} подписчиков × 100% = ${meta.total}`;
+      reconcile = `ER = ${fmt.short(fieldSumAll)} вовлечений ÷ ${fmt.num(members)} ${pluralRu(members, ['подписчика', 'подписчиков', 'подписчиков'])} × 100% = ${meta.total}`;
     } else if (metricKey === 'avgReach' && normPosts.length > 0) {
-      reconcile = `Средний охват = ${fmt.short(fieldSumAll)} просмотров ÷ ${normPosts.length} постов = ${meta.total}`;
+      reconcile = `Средний охват = ${fmt.short(fieldSumAll)} просмотров ÷ ${normPosts.length} ${pluralRu(normPosts.length, ['пост', 'поста', 'постов'])} = ${meta.total}`;
     } else if (!viewsFromArchive && contributors.length > 0 && contribTotal > 0 && fieldSumAll > 0) {
       // Suppressed for channel-wide views: «% от периода» here is a share of the POST-view sum,
       // which would contradict the channel headline. The top-posts list itself still shows below.
-      reconcile = `Эти ${contributors.length} постов дали ${Math.round((contribTotal / fieldSumAll) * 100)}% от периода.`;
+      reconcile =
+        contributors.length === 1
+          ? `Этот пост дал ${Math.round((contribTotal / fieldSumAll) * 100)}% от периода.`
+          : `Эти ${contributors.length} ${pluralRu(contributors.length, ['пост', 'поста', 'постов'])} дали ${Math.round((contribTotal / fieldSumAll) * 100)}% от периода.`;
     }
   }
 

@@ -227,7 +227,7 @@ function ChannelKeysPanel({ channelId }: { channelId: number }) {
     setCopied(false);
     setKeyError(null);
     try {
-      const res = await createKeyMutation.mutateAsync({ label: 'local collector' });
+      const res = await createKeyMutation.mutateAsync({ label: 'локальный коллектор' });
       if (res.key) setOneTimeKey(res.key);
     } catch {
       // Inline вместо browser-alert (аудит) — тот же паттерн, что ошибка загрузки ключей выше.
@@ -339,7 +339,7 @@ function ChannelKeysPanel({ channelId }: { channelId: number }) {
                     disabled={revokeKeyMutation.isPending}
                     className="font-sans text-2xs text-destructive hover:underline disabled:opacity-50"
                   >
-                    отозвать
+                    Отозвать
                   </button>
                 )}
               </div>

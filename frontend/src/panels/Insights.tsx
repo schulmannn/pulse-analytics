@@ -7,7 +7,8 @@ import { buildTgInsights, type TgInsight } from '@/lib/tgInsights';
 import { Skeleton } from '@/components/ui/skeleton';
 
 const WD_ORDER = [1, 2, 3, 4, 5, 6, 0];
-const WD_LABELS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+// Проза инсайта говорит полным словом с предлогом; аббревиатуры — только осям графиков.
+const WD_PROSE = ['в понедельник', 'во вторник', 'в среду', 'в четверг', 'в пятницу', 'в субботу', 'в воскресенье'];
 
 /** Highest-lift hashtag (used ≥2×) by per-post ERV vs the channel's average ERV. */
 function topHashtagLift(posts: NormalizedPost[]): { tag: string; lift: number } | null {
@@ -75,7 +76,7 @@ export function Insights() {
   });
   const wdAvg = WD_ORDER.map((i) => (wdCount[i] ? wdViews[i] / wdCount[i] : 0));
   const maxWd = Math.max(...wdAvg);
-  const bestWeekday = maxWd > 0 ? WD_LABELS[wdAvg.indexOf(maxWd)] : null;
+  const bestWeekday = maxWd > 0 ? WD_PROSE[wdAvg.indexOf(maxWd)] : null;
 
   // Peak hour from the MTProto top-hours graph.
   let peakHour: number | null = null;

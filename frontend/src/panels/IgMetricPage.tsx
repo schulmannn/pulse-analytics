@@ -541,9 +541,9 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
               ]}
             />
             {cmp === 'off' ? (
-              <p className="text-xs text-muted-foreground">Включите сравнение — пунктир прошлого окна ляжет на график.</p>
+              <p className="text-xs text-muted-foreground">Выберите базу — пунктир прошлого окна ляжет на график.</p>
             ) : days === 0 ? (
-              <p className="text-xs text-muted-foreground">Для окна «Всё» базы сравнения не существует.</p>
+              <p className="text-xs text-muted-foreground">Для окна «Всё» прошлого периода не существует.</p>
             ) : ghostOk ? (
               <div className="space-y-2 text-sm">
                 <div className="flex items-baseline justify-between gap-3">
