@@ -212,10 +212,13 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
                 </text>
               )}
               {showLabel && (
+                // Крайние подписи прижимаются к краям плота (start/end), а не центрируются под
+                // столбцом — центрированная последняя дата наполовину вылетала за svg и клипалась
+                // («9 ин» вместо «9 июл.», дизайн-проход №3). Зеркало поведения LineChart.
                 <text
-                  x={bars[i].x + barWidth / 2}
+                  x={i === values.length - 1 ? Math.min(bars[i].x + barWidth, width - 1) : i === 0 ? Math.max(bars[i].x, 1) : bars[i].x + barWidth / 2}
                   y={chartHeight - 6}
-                  textAnchor="middle"
+                  textAnchor={i === values.length - 1 ? 'end' : i === 0 ? 'start' : 'middle'}
                   data-chart-axis-label="x"
                   className="pointer-events-none select-none fill-muted-foreground text-2xs font-medium"
                 >

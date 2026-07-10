@@ -313,7 +313,7 @@ function HeatmapBody({ posts }: { posts: NonNullable<TgFull['posts']> }) {
             </strong>{' '}
             · ERV {bestSlot.avgErv.toFixed(1)}%
             {trimmed ? (
-              <span className="text-muted-foreground"> · часы {hourRange.from}–{hourRange.to}</span>
+              <span className="text-muted-foreground"> · часы {hourRange.from}:00–{hourRange.to}:00</span>
             ) : null}
           </span>
         ) : (
@@ -339,10 +339,13 @@ function HeatmapSurface({
 }) {
   const [tip, setTip] = useState<TooltipState>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
-  // Видимые часы (сжатый диапазон из HeatmapBody); на узком диапазоне подписываем каждый час.
+  // Видимые часы (сжатый диапазон из HeatmapBody). Подпись — «6:00», не голое «6»: на сжатом
+  // 7д-окне колонок мало и цифры без «:00» читались как непонятные числа/даты (проход №3).
+  // Плотность подписей — по ширине формата: «6:00» шире голой цифры, каждый час подписываем
+  // только на узких диапазонах.
   const hours = Array.from({ length: hourRange.to - hourRange.from + 1 }, (_, i) => hourRange.from + i);
   const cols = `30px repeat(${hours.length}, minmax(14px, 1fr))`;
-  const everyHourLabels = hours.length <= 16;
+  const labelStride = hours.length <= 8 ? 1 : hours.length <= 16 ? 2 : 3;
 
   return (
     <div ref={wrapRef} className="relative" onMouseLeave={() => setTip(null)}>
@@ -351,8 +354,8 @@ function HeatmapSurface({
           <div className="grid gap-[2px]" style={{ gridTemplateColumns: cols }}>
             <div />
             {hours.map((hr) => (
-              <div key={hr} className="select-none text-center text-2xs font-medium text-muted-foreground">
-                {everyHourLabels || hr % 3 === 0 ? `${hr}` : ''}
+              <div key={hr} className="select-none whitespace-nowrap text-center text-2xs font-medium tabular-nums text-muted-foreground">
+                {hr % labelStride === 0 ? `${hr}:00` : ''}
               </div>
             ))}
           </div>

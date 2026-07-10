@@ -140,9 +140,20 @@ export function PieChart({ values, labels, titles, colors, height = 200 }: PieCh
   // legend has room. Expanded keeps its big responsive layout; a free-height surface stacks
   // the donut over the legend as before.
   const compactSide = !expanded && ctxHeight != null;
-  const size = compactSide
-    ? Math.min(chartHeight, Math.max(width * 0.45, 1))
-    : Math.min(chartHeight, Math.max(width, 1));
+  const sideSize = Math.min(chartHeight, Math.max(width * 0.45, 1));
+  // Узкий тайл: боковой легенде (basis-44 ≈ 176px) не хватает места рядом с донатом — flex-wrap
+  // ронял её ПОД донат, стек превышал фикс-высоту и overflow-hidden клипал строки посреди текста
+  // («Динамика оттока», дизайн-проход №3). В этом случае донат ЯВНО уступает высоту легенде:
+  // стек = уменьшенный донат + до 2 строк легенды (+ «+N ещё») — всё в пределах тайла.
+  const LEGEND_ROW_PX = 34;
+  const stacked = compactSide && width - sideSize - 16 < 176;
+  const stackedRows = stacked ? Math.min(slices.length, 2) : 0;
+  const stackedExtraLine = stacked && slices.length > stackedRows ? 18 : 0;
+  const size = stacked
+    ? Math.max(72, Math.min(sideSize, chartHeight - stackedRows * LEGEND_ROW_PX - stackedExtraLine - 8))
+    : compactSide
+      ? sideSize
+      : Math.min(chartHeight, Math.max(width, 1));
   const cx = size / 2;
   const cy = size / 2;
   const rOuter = size / 2 - 4;
@@ -164,22 +175,22 @@ export function PieChart({ values, labels, titles, colors, height = 200 }: PieCh
   // else the flat 8. Row pitch matches the rendered li (py-1.5 + a text-sm value line ≈ 34px), and
   // when the list is truncated one slot is reserved for the «+N ещё» line so rows + that line still
   // fit — mirrors Breakdown.
-  const LEGEND_ROW_PX = 34;
   const rowsThatFit = Math.max(2, Math.floor(size / LEGEND_ROW_PX));
-  const legendCap = expanded ? arcs.length : compactSide ? rowsThatFit : LEGEND_CAP;
+  const legendCap = expanded ? arcs.length : stacked ? stackedRows : compactSide ? rowsThatFit : LEGEND_CAP;
   const willTruncate = arcs.length > legendCap;
-  const legendRows = arcs.slice(0, willTruncate ? Math.max(1, legendCap - 1) : legendCap);
+  const legendRows = arcs.slice(0, willTruncate ? Math.max(1, stacked ? legendCap : legendCap - 1) : legendCap);
   const legendExtra = arcs.length - legendRows.length;
 
   const containerCls = expanded
     ? 'flex flex-col items-start gap-6 sm:flex-row sm:items-center'
-    : compactSide
-      ? // flex-wrap: in a 33% card the side legend WRAPS below the donut instead of choking it
-        // (аудит: «Круговая» на узкой карточке душила легенду).
-        'flex flex-wrap items-center gap-4'
-      : '';
+    : stacked
+      ? // Узкий тайл: донат уже уступил высоту (см. size выше) — легенда лежит ПОД ним и влезает.
+        'flex flex-col items-center gap-2'
+      : compactSide
+        ? 'flex items-center gap-4'
+        : '';
   const donutWidth = expanded || compactSide ? size : '100%';
-  const legendCls = expanded ? 'min-w-0 flex-1' : compactSide ? 'min-w-0 flex-1 basis-44' : 'mt-4';
+  const legendCls = expanded ? 'min-w-0 flex-1' : stacked ? 'w-full min-w-0' : compactSide ? 'min-w-0 flex-1 basis-44' : 'mt-4';
 
   return (
     <div ref={containerRef} className="relative w-full">

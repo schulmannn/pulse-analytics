@@ -18,7 +18,7 @@ export function NotFound() {
         to="/"
         className="btn-pill mt-6 bg-primary px-5 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
       >
-        На главную
+        К обзору
       </Link>
     </div>
   );
