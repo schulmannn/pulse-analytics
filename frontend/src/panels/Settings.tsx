@@ -177,12 +177,24 @@ export function Settings() {
               {SECTIONS.map((item) => (
                 <button
                   key={item.key}
+                  id={`settings-tab-${item.key}`}
                   type="button"
                   role="tab"
                   aria-selected={section === item.key}
+                  tabIndex={section === item.key ? 0 : -1}
                   onClick={() => setSection(item.key)}
+                  // APG tabs (канон AnalyticsTabs): роли tab обещают стрелки — roving tabindex
+                  // + перенос фокуса на активированный таб (micro-хвост аудита #113).
+                  onKeyDown={(e) => {
+                    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+                    e.preventDefault();
+                    const i = SECTIONS.findIndex((x) => x.key === section);
+                    const next = SECTIONS[(i + (e.key === 'ArrowRight' ? 1 : SECTIONS.length - 1)) % SECTIONS.length]!;
+                    setSection(next.key);
+                    requestAnimationFrame(() => document.getElementById(`settings-tab-${next.key}`)?.focus());
+                  }}
                   className={cn(
-                    'shrink-0 border-b-2 px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none',
+                    'shrink-0 rounded-t border-b-2 px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
                     section === item.key
                       ? 'border-primary text-foreground'
                       : 'border-transparent text-muted-foreground hover:text-foreground',
