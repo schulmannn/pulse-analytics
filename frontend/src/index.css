@@ -740,3 +740,16 @@ div[data-widget-tinted] {
   .starfield .star-tw { animation: none; opacity: 0.4; }
   .starfield .shooting { display: none; }
 }
+
+/* Нарратив→виджет: ховер числа-ссылки в рассказе подсвечивает карточку ТОЙ ЖЕ метрики
+   (section[data-drill-to] помечается data-narr-link из NarrativeProse). Значения зеркалят
+   card-hover: hairline ярче + тинт-лифт через --card-tint-alpha (инлайн-градиент карточки
+   читает переменную при пейнте). */
+section[data-narr-link] {
+  border-color: hsl(var(--ink3) / 0.4);
+  --card-tint-alpha: 0.16;
+}
+.dark section[data-narr-link] {
+  border-color: rgb(255 255 255 / 0.12);
+  --card-tint-alpha: 0.18;
+}

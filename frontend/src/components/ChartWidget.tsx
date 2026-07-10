@@ -1089,6 +1089,9 @@ export function ChartSection({ id, title, action, variants, className, defaultSi
         } ${reorder ? 'widget-jiggle' : 'widget-enter cursor-pointer'} ${isDragging ? 'shadow-lg' : ''}`}
         style={innerStyle}
         data-widget-accented={activeColor ? '' : undefined}
+        // Метрика карточки для нарратив-связки: ховер числа в рассказе подсвечивает секции с тем же
+        // drillTo (data-narr-link из NarrativeProse; CSS-правило в index.css зеркалит card-hover).
+        data-drill-to={drillTo || undefined}
         data-widget-tinted={activeTinted && activeColor ? '' : undefined}
         // Whole-card click opens the detail overlay (steep — the whole card is the target, not just
         // the small ↗ button). Guarded so header controls and any open dialog keep their behaviour,

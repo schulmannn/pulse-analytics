@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { fmt } from '@/lib/format';
 import { useHistory, useIgHistory, useIgInsights, useIgPosts, useIgProfile, useTgFull, useTgGraphs, useChannels } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { useDemo } from '@/lib/demo-context';
@@ -137,6 +138,15 @@ export function useIgWeekInput(): { input: NarrativeIgInput | null; loading: boo
   return { input, loading, notConnected };
 }
 
+/** Ховер числа-ссылки подсвечивает виджет ТОЙ ЖЕ метрики на странице: секции несут data-drill-to
+ *  (ChartSection), CSS-правило в index.css зеркалит card-hover. Прямой DOM-атрибут, без state. */
+const narrLinkHover = (to: string, on: boolean) => {
+  document.querySelectorAll(`section[data-drill-to="${to}"]`).forEach((el) => {
+    if (on) el.setAttribute('data-narr-link', '');
+    else el.removeAttribute('data-narr-link');
+  });
+};
+
 function SegSpan({ seg, onPost }: { seg: NarrativeSeg; onPost: (i: number) => void }) {
   switch (seg.kind) {
     case 'text':
@@ -145,6 +155,8 @@ function SegSpan({ seg, onPost }: { seg: NarrativeSeg; onPost: (i: number) => vo
       return seg.to ? (
         <Link
           to={seg.to}
+          onMouseEnter={() => narrLinkHover(seg.to!, true)}
+          onMouseLeave={() => narrLinkHover(seg.to!, false)}
           className="kpi-accent rounded font-semibold tabular-nums text-foreground underline decoration-dotted decoration-1 underline-offset-4 transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
         >
           {seg.text}
@@ -194,9 +206,36 @@ export function NarrativeWeekBody() {
   }
   // TG-часть не ждёт Instagram: IG-абзац — кода текста, его догрузка ничего не сдвигает.
   const nar = buildWeekNarrative({ ...input, ig: igInput });
+  // Факт-колонка (≥lg): короткий рассказ оставлял полкарточки (66%) пустой — справа мини-леджер
+  // из ТОГО ЖЕ входа (никаких новых запросов): пик недели, постов за неделю, база. Числа сходятся
+  // с рассказом по построению — это те же ряды.
+  const last7 = input.viewsDaily.slice(-7);
+  const peak = last7.length ? last7.reduce((a, b) => (b.v > a.v ? b : a)) : null;
+  const facts: { label: string; value: string }[] = [];
+  if (peak && peak.v > 0) facts.push({ label: 'Пик недели', value: `${fmt.short(peak.v)} · ${fmt.day(peak.day)}` });
+  if (input.posts.length > 0) facts.push({ label: 'Постов за неделю', value: fmt.num(input.posts.length) });
+  if (input.subsNow != null)
+    facts.push({
+      label: 'База',
+      value: `${fmt.kpi(input.subsNow)}${input.subsD7 ? ` · ${input.subsD7 > 0 ? '+' : '−'}${fmt.num(Math.abs(input.subsD7))}` : ''}`,
+    });
   return (
     <>
-      <NarrativeProse paragraphs={nar.paragraphs} onPost={setOpenPost} />
+      <div className="flex gap-6">
+        <div className="min-w-0 flex-1">
+          <NarrativeProse paragraphs={nar.paragraphs} onPost={setOpenPost} />
+        </div>
+        {facts.length > 0 && (
+          <aside className="hidden w-44 shrink-0 space-y-3 border-l border-border pl-5 lg:block">
+            {facts.map((f) => (
+              <div key={f.label}>
+                <div className="text-2xs tracking-wide text-muted-foreground">{f.label}</div>
+                <div className="mt-0.5 text-sm font-medium tabular-nums text-foreground">{f.value}</div>
+              </div>
+            ))}
+          </aside>
+        )}
+      </div>
       {openPost != null && posts[openPost] && (
         <PostDetailModal post={posts[openPost]!} reason={null} onClose={() => setOpenPost(null)} />
       )}
