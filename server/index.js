@@ -16,11 +16,12 @@ const { captionSnippet } = require('./lib/caption');
 const { fetchWithTimeout } = require('./lib/http');
 const { createBreaker } = require('./lib/mtprotoBreaker');
 const { log, requestContext, hashIp } = require('./lib/observability');
-const notionCrash = require('./lib/notion_crash');
-const { canDispatchBugKind, sanitizeForPrompt } = require('./lib/bugfix_gate');
 const { legacyCspHeader, setAppHeaders, setHtmlSecurityHeaders } = require('./lib/securityHeaders');
 const { makeResolveChannel, makeServeSnapshot, hasWorkspaceRole } = require('./middleware/tenant');
 const { registerCollectorRoutes } = require('./routes/collector');
+const { registerAuthRoutes } = require('./routes/auth');
+const { registerReportsRoutes } = require('./routes/reports');
+const { registerBugsRoutes } = require('./routes/bugs');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -360,66 +361,34 @@ const emailShell = (title, body) =>
   `<div style="font-family:system-ui,Segoe UI,sans-serif;max-width:480px;color:#061b31"><h2 style="font-weight:600">${title}</h2>${body}</div>`;
 const emailBtn = (href, label) =>
   `<p><a href="${escHtml(href)}" style="display:inline-block;padding:10px 18px;background:#533afd;color:#fff;border-radius:6px;text-decoration:none">${label}</a></p>`;
-const verifyEmailHtml = (link) => emailShell('Подтверди email',
-  `<p>Активируй аккаунт в Atlavue:</p>${emailBtn(link, 'Подтвердить email')}<p style="color:#64748d;font-size:13px">Ссылка действует 24 часа. Если это были не вы — проигнорируйте письмо.</p>`);
-const resetEmailHtml = (link) => emailShell('Сброс пароля',
-  `<p>Задай новый пароль:</p>${emailBtn(link, 'Сбросить пароль')}<p style="color:#64748d;font-size:13px">Ссылка действует 1 час. Если это были не вы — проигнорируйте, пароль не изменится.</p>`);
-const existsEmailHtml = (base) => emailShell('Аккаунт уже существует',
-  `<p>На этот email уже есть аккаунт Atlavue. Забыли пароль — <a href="${escHtml(base)}/?forgot=1">сбросьте его</a>.</p>`);
 
-// ════════════════════════════════════════════════════════════════
-//  AUTH ROUTES
-// ════════════════════════════════════════════════════════════════
-
-// Registration (self-serve, Sprint 1B): create an 'unverified' account and email
-// a verification link. Anti-enumeration — always the same generic response; an
-// already-registered email gets an "account exists" nudge instead.
-app.post('/api/auth/register', authLimiter, async (req, res) => {
-  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена — регистрация недоступна' });
-  const email = String((req.body && req.body.email) || '').toLowerCase().trim();
-  const password = String((req.body && req.body.password) || '');
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ error: 'Некорректный email' });
-  if (password.length < 8) return res.status(400).json({ error: 'Пароль минимум 8 символов' });
-  const generic = { status: 'check_email', message: 'Проверь почту — если email свободен, мы отправили ссылку для подтверждения.' };
-  res.json(generic);          // respond first → constant-time, no existing-vs-new timing oracle
-  try {
-    const base = appBase(req);
-    const existing = await db.getUserByEmail(email);
-    if (existing) {           // don't reveal it's taken; nudge the real owner, cooldown-gated like real tokens
-      const eid = await db.createEmailToken(existing.id, 'exists', sha256(newToken()), new Date(Date.now() + 60000));
-      if (eid) sendEmail(email, 'Аккаунт Atlavue уже существует', existsEmailHtml(base)).catch(() => {});
-      return;
-    }
-    const u = await db.createUser({ email, pass_hash: hashPassword(password), role: 'user', status: 'unverified' });
-    const raw = newToken();
-    const id = await db.createEmailToken(u.id, 'verify', sha256(raw), new Date(Date.now() + VERIFY_TTL));
-    const link = `${base}/verify?token=${raw}`;
-    if (id) await sendEmail(email, 'Подтверди email — Atlavue', verifyEmailHtml(link), link);
-  } catch (e) {
-    if (e.code !== '23505') console.error('[register]', e.message);   // already responded generically
-  }
-});
-
-// Login: account (email + password) only.
-app.post('/api/auth/login', authLimiter, async (req, res, next) => {
-  const email = String((req.body && req.body.email) || '').toLowerCase().trim();
-  const password = String((req.body && req.body.password) || '');
-  if (!email || !password) return res.status(400).json({ error: 'Укажи email и пароль' });
-  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
-  const expires = Date.now() + SESSION_TTL;
-  try {
-    const u = await db.getUserByEmail(email);
-    const ok = u ? verifyPassword(password, u.pass_hash) : verifyPassword(password, DUMMY_HASH);  // constant-cost
-    if (!u || !ok) return res.status(403).json({ error: 'Неверный email или пароль' });
-    if (u.status === 'unverified') return res.status(403).json({ error: 'Подтверди email — ссылка пришла при регистрации', code: 'unverified' });
-    if (u.status === 'pending')    return res.status(403).json({ error: 'Аккаунт ждёт одобрения администратором' });
-    if (u.status !== 'active')     return res.status(403).json({ error: 'Аккаунт отключён' });
-    const token = signSession({ uid: u.id, role: u.role, exp: expires, tokenVersion: u.token_version });
-    req.user = { uid: u.id, role: u.role, email: u.email };
-    audit(req, 'auth.login', {}).catch(() => {});
-    return res.json({ token,
-      expiresAt: new Date(expires).toISOString(), user: { email: u.email, role: u.role } });
-  } catch (e) { return next(e); }
+// Auth/account entrypoints are isolated in their own route module; session
+// validation middleware stays here because many non-auth domains share it.
+registerAuthRoutes({
+  app,
+  express,
+  db,
+  requireAuth,
+  authLimiter,
+  asyncHandler,
+  hashPassword,
+  verifyPassword,
+  DUMMY_HASH,
+  signSession,
+  SESSION_TTL,
+  GOOGLE_CLIENT_ID,
+  fetchWithTimeout,
+  log,
+  audit,
+  appBase,
+  sha256,
+  newToken,
+  VERIFY_TTL,
+  RESET_TTL,
+  sendEmail,
+  emailShell,
+  emailBtn,
+  escHtml,
 });
 
 // Public runtime config for the SPA (no secrets). Currently just the Google client id so the login
@@ -428,186 +397,8 @@ app.get('/api/config', (req, res) => {
   res.json({ google_client_id: GOOGLE_CLIENT_ID || null });
 });
 
-// "Sign in with Google": the frontend GSI button returns an ID token (JWT); we verify it with Google
-// (validates signature + expiry), check it was minted for THIS app and carries a verified email,
-// then create/find the account and issue our own session. A verified Google email means we can skip
-// our email-verify step (account is active immediately). Existing email/password accounts with the
-// same verified email are linked (logged into).
-app.post('/api/auth/google', authLimiter, async (req, res) => {
-  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
-  if (!GOOGLE_CLIENT_ID) return res.status(400).json({ error: 'Вход через Google не настроен на сервере' });
-  const credential = String((req.body && req.body.credential) || '');
-  if (!credential) return res.status(400).json({ error: 'Нет токена Google' });
-  try {
-    const r = await fetchWithTimeout('https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(credential), {}, 8000);
-    const info = await r.json().catch(() => ({}));
-    // aud = our app; iss = Google; email must be Google-verified. (tokeninfo already rejects a bad
-    // signature or an expired token with a non-200, so a valid `sub` here means the JWT is genuine.)
-    if (!r.ok || !info.sub) {
-      log('warn', 'google_tokeninfo_rejected', { status: r.status });
-      return res.status(401).json({ error: 'Google не подтвердил вход' });
-    }
-    if (info.aud !== GOOGLE_CLIENT_ID) return res.status(401).json({ error: 'Токен не для этого приложения' });
-    if (info.iss !== 'accounts.google.com' && info.iss !== 'https://accounts.google.com') return res.status(401).json({ error: 'Неверный источник токена' });
-    if (String(info.email_verified) !== 'true' || !info.email) return res.status(401).json({ error: 'Email Google не подтверждён' });
-    const email = String(info.email).toLowerCase().trim();
-    let u = await db.getUserByEmail(email);
-    if (u && u.status === 'disabled') return res.status(403).json({ error: 'Аккаунт отключён' });
-    if (!u) {
-      // New account — Google already verified the email, so it's active with an unusable password
-      // (password login stays impossible until the user sets one via "forgot password").
-      const randomPass = hashPassword(crypto.randomBytes(32).toString('hex'));
-      u = await db.createUser({ email, pass_hash: randomPass, role: 'user', status: 'active' });
-    } else if (u.status !== 'active') {
-      // Existing but never-verified account (created via email/password; ownership unproven — it could
-      // be an attacker pre-registration seeded with a known password). Google now proves the CURRENT
-      // user owns the email, so activate it — but first WIPE the pre-seeded password to a random
-      // unusable value, neutralising a pre-hijack. setUserPassword + setUserStatus both bump
-      // token_version, so any pre-existing session is revoked too. Owner uses Google (or "forgot
-      // password" to set their own) going forward.
-      await db.setUserPassword(u.id, hashPassword(crypto.randomBytes(32).toString('hex')));
-      await db.setUserStatus(u.id, 'active');
-      u = await db.getUserById(u.id);
-    }
-    const expires = Date.now() + SESSION_TTL;
-    const token = signSession({ uid: u.id, role: u.role, exp: expires, tokenVersion: u.token_version });
-    req.user = { uid: u.id, role: u.role, email: u.email };
-    audit(req, 'auth.google', {}).catch(() => {});
-    return res.json({ token, expiresAt: new Date(expires).toISOString(), user: { email: u.email, role: u.role } });
-  } catch (e) {
-    log('error', 'google_auth_error', { error: e.message });
-    return res.status(500).json({ error: 'Ошибка входа через Google' });
-  }
-});
-
-app.post('/api/auth/logout', requireAuth, async (req, res, next) => {
-  try {
-    await db.revokeUserSessions(req.user.uid);
-    audit(req, 'auth.logout', {}).catch(() => {});
-    res.json({ ok: true });
-  } catch (e) {
-    next(e);
-  }
-});
-
 app.get('/api/auth/check', requireAuth, (req, res) => {
   res.json({ ok: true, role: req.user.role, email: req.user.email });
-});
-
-app.get('/api/auth/me', requireAuth, asyncHandler(async (req, res) => {
-  let avatar = null;
-  if (db.enabled) {
-    avatar = await db.getUserAvatar(req.user.uid).catch(() => null);
-  }
-  res.json({ uid: req.user.uid, email: req.user.email, role: req.user.role, avatar });
-}));
-
-// Personal avatar — a small base64 data URL on the user row (resized client-side). Own-route JSON
-// limit — the global 100kb parser skips this path (see the jsonSmall skip-list above), so this
-// 1mb parser is the one that runs; the regex + length cap keep a giant payload out of the DB.
-app.post('/api/me/avatar', requireAuth, express.json({ limit: '1mb' }), async (req, res, next) => {
-  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
-  const dataUrl = req.body && req.body.dataUrl;
-  if (typeof dataUrl !== 'string' || !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(dataUrl)) {
-    return res.status(400).json({ error: 'Нужен PNG, JPEG или WebP' });
-  }
-  if (dataUrl.length > 400000) return res.status(413).json({ error: 'Слишком большое изображение (до ~280 КБ)' });
-  try {
-    await db.setUserAvatar(req.user.uid, dataUrl);
-    res.json({ ok: true, avatar: dataUrl });
-  } catch (e) { next(e); }
-});
-app.delete('/api/me/avatar', requireAuth, async (req, res, next) => {
-  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
-  try {
-    await db.setUserAvatar(req.user.uid, null);
-    res.json({ ok: true });
-  } catch (e) { next(e); }
-});
-
-// Email verification. GET serves an interstitial that does NOT consume the token —
-// link-prefetchers (Outlook SafeLinks, AV scanners) issue GETs and a single-use
-// token must survive that. The explicit button POSTs to consume + activate.
-app.get('/api/auth/verify', (req, res) => {
-  const tokenJs = JSON.stringify(String(req.query.token || '')).replace(/</g, '\\u003c');  // safe embed
-  res.set('Content-Type', 'text/html; charset=utf-8').set('Cache-Control', 'no-store').set('Referrer-Policy', 'no-referrer')
-    .send(`<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Подтверждение email</title>
-<style>body{font-family:system-ui,Segoe UI,sans-serif;background:#e5edf5;color:#061b31;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}.c{background:#fff;padding:32px;border-radius:8px;max-width:380px;text-align:center;box-shadow:0 4px 24px rgba(6,27,49,.08)}button{margin-top:18px;padding:11px 22px;background:#533afd;color:#fff;border:0;border-radius:6px;font-size:15px;cursor:pointer}.m{margin-top:14px;font-size:13px;color:#64748d}</style></head>
-<body><div class="c"><h2>Подтверждение email</h2><p>Активируй аккаунт в Atlavue.</p><button id="b">Подтвердить email</button><div class="m" id="m"></div></div>
-<script>var t=${tokenJs};document.getElementById('b').onclick=function(){var b=this;b.disabled=true;b.textContent='…';fetch('/api/auth/verify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:t})}).then(function(r){return r.json().catch(function(){return{}})}).then(function(j){if(j&&j.ok){location.href='/?verified=1';}else{document.getElementById('m').textContent=(j&&j.error)||'Ссылка недействительна или истекла';b.style.display='none';}}).catch(function(){document.getElementById('m').textContent='Ошибка сети';b.disabled=false;b.textContent='Подтвердить email';});};</script></body></html>`);
-});
-
-app.post('/api/auth/verify', authLimiter, async (req, res, next) => {
-  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
-  const raw = String((req.body && req.body.token) || '');
-  if (!raw) return res.status(400).json({ error: 'Ссылка недействительна' });
-  try {
-    const t = await db.useEmailToken(sha256(raw), 'verify');
-    if (!t) return res.status(400).json({ error: 'Ссылка недействительна или истекла' });
-    const u = await db.getUserById(t.uid);
-    if (u && u.status === 'unverified') {
-      await db.setUserStatus(t.uid, 'active');
-      req.user = { uid: t.uid };                    // attribute the audit event (route is unauthenticated)
-      audit(req, 'auth.verified', {}).catch(() => {});
-      return res.json({ ok: true });
-    }
-    if (u && u.status === 'active') return res.json({ ok: true });             // already verified — idempotent
-    return res.status(400).json({ error: 'Аккаунт нельзя активировать' });     // disabled/pending: NOT via verify
-  } catch (e) { next(e); }
-});
-
-// Password reset request — always generic (no account enumeration).
-app.post('/api/auth/forgot', authLimiter, async (req, res) => {
-  const email = String((req.body && req.body.email) || '').toLowerCase().trim();
-  res.json({ ok: true, message: 'Если такой аккаунт есть — мы отправили ссылку для сброса.' });   // respond first
-  if (!db.enabled || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return;
-  try {
-    const base = appBase(req);
-    const u = await db.getUserByEmail(email);
-    if (u && u.status !== 'disabled') {
-      const raw = newToken();
-      const id = await db.createEmailToken(u.id, 'reset', sha256(raw), new Date(Date.now() + RESET_TTL));
-      const link = `${base}/reset?token=${raw}`;
-      if (id) await sendEmail(email, 'Сброс пароля — Atlavue', resetEmailHtml(link), link);
-    }
-  } catch (e) { console.error('[forgot]', e.message); }   // already responded generically
-});
-
-// Password reset — consume token, set new password. Only promotes 'unverified'→'active'
-// (a reset proves email ownership); never re-activates a disabled/pending account.
-app.post('/api/auth/reset', authLimiter, async (req, res, next) => {
-  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
-  const raw = String((req.body && req.body.token) || '');
-  const password = String((req.body && req.body.password) || '');
-  if (password.length < 8) return res.status(400).json({ error: 'Пароль минимум 8 символов' });
-  if (!raw) return res.status(400).json({ error: 'Ссылка недействительна' });
-  try {
-    const t = await db.useEmailToken(sha256(raw), 'reset');
-    if (!t) return res.status(400).json({ error: 'Ссылка недействительна или истекла' });
-    await db.setUserPassword(t.uid, hashPassword(password));
-    const u = await db.getUserById(t.uid);
-    if (u && u.status === 'unverified') await db.setUserStatus(t.uid, 'active');
-    req.user = { uid: t.uid };                      // attribute the audit event (route is unauthenticated)
-    audit(req, 'auth.reset', {}).catch(() => {});
-    res.json({ ok: true, message: 'Пароль обновлён — войди с новым паролем.' });
-  } catch (e) { next(e); }
-});
-
-// Resend verification email (generic; only acts for an 'unverified' account).
-app.post('/api/auth/resend-verification', authLimiter, async (req, res) => {
-  const email = String((req.body && req.body.email) || '').toLowerCase().trim();
-  res.json({ ok: true, message: 'Если аккаунт ждёт подтверждения — письмо отправлено снова.' });   // respond first
-  if (!db.enabled) return;
-  try {
-    const base = appBase(req);
-    const u = await db.getUserByEmail(email);
-    if (u && u.status === 'unverified') {
-      const raw = newToken();
-      const id = await db.createEmailToken(u.id, 'verify', sha256(raw), new Date(Date.now() + VERIFY_TTL));
-      const link = `${base}/verify?token=${raw}`;
-      if (id) await sendEmail(email, 'Подтверди email — Atlavue', verifyEmailHtml(link), link);
-    }
-  } catch (e) { console.error('[resend]', e.message); }
 });
 
 // ── Персональная раскладка дашборда (порядок/скрытие/ширина блоков) ──
@@ -629,20 +420,6 @@ app.put('/api/prefs', requireAuth, async (req, res, next) => {
   }
   try { const stored = await db.setPrefs(req.user.uid, prefs); res.json({ ok: true, stored: !!stored }); }
   catch (e) { next(e); }
-});
-
-app.post('/api/auth/change-password', requireAuth, async (req, res, next) => {
-  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
-  const cur = String((req.body && req.body.current) || '');
-  const nextPass = String((req.body && req.body.next) || '');   // don't shadow next()
-  if (nextPass.length < 8) return res.status(400).json({ error: 'Новый пароль минимум 8 символов' });
-  try {
-    const u = await db.getUserByEmail(req.user.email);
-    if (!u || !verifyPassword(cur, u.pass_hash)) return res.status(403).json({ error: 'Текущий пароль неверен' });
-    await db.setUserPassword(u.id, hashPassword(nextPass));
-    audit(req, 'auth.password_changed', {}).catch(() => {});
-    res.json({ ok: true });
-  } catch (e) { next(e); }
 });
 
 // ── Admin: user management (superuser only) ──
@@ -1856,108 +1633,9 @@ app.delete('/api/channels/:id/annotations/:annId', requireAuth, async (req, res,
   } catch (e) { next(e); }
 });
 
-// ── Именованные отчёты: сохранённые композиции блоков дашборда (+ email-выгрузка) ──
-// config — произвольная композиция блоков, целиком принадлежит фронту; сервер
-// проверяет только форму (plain object) и размер сериализованного JSON.
-const REPORT_CONFIG_MAX_CHARS = 16000;
-const REPORT_MAX_BLOCKS = 100;
-function reportConfigError(config) {
-  if (typeof config !== 'object' || config === null || Array.isArray(config)) return 'config должен быть объектом';
-  // Blocks stay frontend-owned (generic { id, type, config } or legacy string keys); the server
-  // only checks the coarse shape so a broken client can't persist garbage: an array of strings or
-  // plain objects, capped in count. The 16 KB serialized cap below still bounds everything else.
-  if (config.blocks !== undefined) {
-    if (!Array.isArray(config.blocks)) return 'config.blocks должен быть массивом';
-    if (config.blocks.length > REPORT_MAX_BLOCKS) return `config.blocks: слишком много блоков (макс. ${REPORT_MAX_BLOCKS})`;
-    for (const b of config.blocks) {
-      const t = typeof b;
-      if (t !== 'string' && (t !== 'object' || b === null || Array.isArray(b))) {
-        return 'config.blocks: элемент должен быть строкой или объектом';
-      }
-    }
-  }
-  if (JSON.stringify(config).length > REPORT_CONFIG_MAX_CHARS) return `config слишком большой (макс. ${REPORT_CONFIG_MAX_CHARS} символов JSON)`;
-  return null;
-}
-const REPORTS_DB_OFF = { error: 'БД не подключена — отчёты недоступны' };
-
-app.get('/api/reports', requireAuth, async (req, res, next) => {
-  if (!db.enabled) return res.status(503).json(REPORTS_DB_OFF);
-  try { res.json({ reports: await db.listReports(req.user.uid) }); }
-  catch (e) { next(e); }
-});
-
-app.post('/api/reports', requireAuth, async (req, res, next) => {
-  if (!db.enabled) return res.status(503).json(REPORTS_DB_OFF);
-  const name = String((req.body && req.body.name) || '').trim();
-  if (!name || name.length > 120) return res.status(400).json({ error: 'name: от 1 до 120 символов' });
-  const config = (req.body && req.body.config !== undefined) ? req.body.config : {};
-  const bad = reportConfigError(config);
-  if (bad) return res.status(400).json({ error: bad });
-  try {
-    const report = await db.createReport(req.user.uid, name, config);
-    audit(req, 'report.created', { report_id: report && report.id }).catch(() => {});
-    res.json({ report });
-  } catch (e) { next(e); }
-});
-
-app.get('/api/reports/:id', requireAuth, async (req, res, next) => {
-  if (!db.enabled) return res.status(503).json(REPORTS_DB_OFF);
-  // Full-match digits + a length cap: parseInt would accept '123abc', and anything
-  // past 9 digits risks overflowing the int4 id column in Postgres.
-  if (!/^\d{1,9}$/.test(req.params.id)) return res.status(400).json({ error: 'bad id' });
-  const id = Number(req.params.id);
-  try {
-    const report = await db.getReport(req.user.uid, id);
-    if (!report) return res.status(404).json({ error: 'Отчёт не найден' });
-    res.json({ report });
-  } catch (e) { next(e); }
-});
-
-app.put('/api/reports/:id', requireAuth, async (req, res, next) => {
-  if (!db.enabled) return res.status(503).json(REPORTS_DB_OFF);
-  // Full-match digits + a length cap: parseInt would accept '123abc', and anything
-  // past 9 digits risks overflowing the int4 id column in Postgres.
-  if (!/^\d{1,9}$/.test(req.params.id)) return res.status(400).json({ error: 'bad id' });
-  const id = Number(req.params.id);
-  const body = req.body || {};
-  const patch = {};
-  if (body.name !== undefined) {
-    const name = String(body.name).trim();
-    if (!name || name.length > 120) return res.status(400).json({ error: 'name: от 1 до 120 символов' });
-    patch.name = name;
-  }
-  if (body.config !== undefined) {
-    const bad = reportConfigError(body.config);
-    if (bad) return res.status(400).json({ error: bad });
-    patch.config = body.config;
-  }
-  if (body.schedule !== undefined) {
-    if (!db.REPORT_SCHEDULES.includes(body.schedule)) return res.status(400).json({ error: 'schedule: none | weekly | monthly' });
-    patch.schedule = body.schedule;
-  }
-  if (!Object.keys(patch).length) return res.status(400).json({ error: 'Нечего обновлять: нужен name, config или schedule' });
-  try {
-    const report = await db.updateReport(req.user.uid, id, patch);
-    if (!report) return res.status(404).json({ error: 'Отчёт не найден' });
-    audit(req, 'report.updated', { report_id: id, fields: Object.keys(patch) }).catch(() => {});
-    res.json({ report });
-  } catch (e) { next(e); }
-});
-
-app.delete('/api/reports/:id', requireAuth, async (req, res, next) => {
-  if (!db.enabled) return res.status(503).json(REPORTS_DB_OFF);
-  // Full-match digits + a length cap: parseInt would accept '123abc', and anything
-  // past 9 digits risks overflowing the int4 id column in Postgres.
-  if (!/^\d{1,9}$/.test(req.params.id)) return res.status(400).json({ error: 'bad id' });
-  const id = Number(req.params.id);
-  try {
-    const ok = await db.deleteReport(req.user.uid, id);
-    if (!ok) return res.status(404).json({ error: 'Отчёт не найден' });
-    audit(req, 'report.deleted', { report_id: id }).catch(() => {});
-    res.json({ ok: true });
-  } catch (e) { next(e); }
-});
+// Named report CRUD is isolated in its own route module; the email schedule
+// worker below remains here because it is triggered from the daily ingest cron.
+registerReportsRoutes({ app, db, requireAuth, audit });
 
 /* Email-выгрузка отчётов (v1). Дёргается fire-and-forget из дневного ingest-крона
    (единственный ежедневный тик системы — отдельного планировщика нет): weekly уходит
@@ -2809,230 +2487,16 @@ app.get('/api/history/mentions', requireAuth, resolveChannel, async (req, res) =
   }
 });
 
-// ════════════════════════════════════════════════════════════════
-//  БАГ-ТРЕКЕР (Postgres)
-// ════════════════════════════════════════════════════════════════
-app.post('/api/bugs', requireAuth, requireSuper, async (req, res, next) => {
-  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена — баги негде сохранять' });
-  const text = ((req.body && req.body.text) || '').trim();
-  if (!text) return res.status(400).json({ error: 'Опиши баг' });
-  try {
-    const bug = await db.createBug({ text, severity: req.body.severity, context: req.body.context, kind: req.body.kind });
-    res.json(bug);
-  } catch (e) { next(e); }
-});
-
-app.get('/api/bugs', requireAuth, requireSuper, async (req, res) => {
-  try {
-    res.json({ enabled: db.enabled, statuses: db.BUG_STATUSES, kinds: db.BUG_KINDS, bugs: await db.listBugs(req.query.status) });
-  } catch (e) { res.status(200).json({ enabled: db.enabled, bugs: [], error: e.message }); }
-});
-
-app.patch('/api/bugs/:id', requireAuth, requireSuper, async (req, res) => {
-  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
-  const id = parseInt(req.params.id, 10);
-  if (!id) return res.status(400).json({ error: 'bad id' });
-  try {
-    const bug = await db.updateBug(id, (req.body && req.body.status));
-    if (!bug) return res.status(404).json({ error: 'not found' });
-    res.json(bug);
-  } catch (e) { res.status(400).json({ error: e.message }); }
-});
-
-app.delete('/api/bugs/:id', requireAuth, requireSuper, async (req, res, next) => {
-  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
-  const id = parseInt(req.params.id, 10);
-  if (!id) return res.status(400).json({ error: 'bad id' });
-  try { await db.deleteBug(id); res.json({ ok: true }); }
-  catch (e) { next(e); }
-});
-
-// ── Client render-crash telemetry (P0) ──
-// The widget + app error boundaries POST a caught render crash here so it is diagnosable in the
-// admin Bugs surface (kind='crash') by its trace id — not just a lost console line. Any AUTHENTICATED
-// user reports THEIR OWN crashes (no superuser gate — the point is to catch real users' crashes), so
-// it is tightly rate limited, every field is length-capped, the uid is HASHED (not stored raw), and
-// the server stamps its own deployed commit. Reporting must never fail loudly: storage errors are
-// swallowed and acked, so a crash report can't itself become a crash.
-const crashLimiter = rateLimit({
-  windowMs: 5 * 60 * 1000,
-  max: 30,
-  // requireAuth runs BEFORE this limiter, so req.user is always set (no raw-ip fallback needed).
-  keyGenerator: (req) => `crash:u${req.user.uid}`,
-  message: { error: 'Слишком много отчётов об ошибках.' },
-});
-const SERVER_COMMIT = String(process.env.RAILWAY_GIT_COMMIT_SHA || process.env.COMMIT_SHA || 'dev').slice(0, 7);
-const hashUid = (uid) => crypto.createHash('sha256').update(`${uid}:${AUTH_SECRET}`).digest('hex').slice(0, 12);
-
-// Client-crash → dedup ledger (+ optional Notion card). Always upserts the signature ledger when the
-// DB is on (queryable crash counts); posts/updates a Notion card only when NOTION_TOKEN + NOTION_CRASH_DB
-// are set. One card per unique signature; repeats bump the counter, throttled to ≤1 Notion write /
-// 5 min per signature so a broken deploy can't hammer the Notion API. Fully fire-and-forget.
-const NOTION_CRASH_THROTTLE_MS = 5 * 60 * 1000;
-async function crashSinkToNotion(f) {
-  const sig = await db.upsertCrashSignature(f);
-  if (!sig || !notionCrash.enabled) return;
-  if (sig.isNew) {
-    const pageId = await notionCrash.createCrashCard({ ...f, count: sig.count });
-    if (pageId) await db.setCrashNotionPage(f.signature, pageId);
-  } else if (sig.notionPageId) {
-    const last = sig.lastNotified ? Date.parse(sig.lastNotified) : 0;
-    if (Date.now() - last >= NOTION_CRASH_THROTTLE_MS) {
-      await notionCrash.updateCrashCard(sig.notionPageId, { count: sig.count, at: f.at, traceId: f.traceId });
-      await db.touchCrashNotified(f.signature);
-    }
-  }
-}
-
-app.post('/api/client-errors', requireAuth, crashLimiter, async (req, res) => {
-  try {
-    const b = req.body || {};
-    const str = (v, n) => (typeof v === 'string' ? v.slice(0, n) : undefined);
-    const traceId = str(b.traceId, 40) || '';
-    const name = str(b.name, 120) || 'Error';
-    const message = str(b.message, 500) || '';
-    const scope = b.scope === 'app' || b.scope === 'global' ? b.scope : 'widget';
-    const route = str(b.route, 200) || '';
-    const widgetId = str(b.widgetId, 120);
-    const label = str(b.label, 160);
-    // Trace id in the VISIBLE text (not just the context JSON) so an admin finds a crash by the id
-    // the user quotes straight from the Bugs list — no need to expand each row's context.
-    const text = `[crash:${scope}] ${name}: ${message} · ${traceId}`.slice(0, 300);
-    const context = JSON.stringify({
-      traceId, scope, route, widgetId, label,
-      componentStack: str(b.componentStack, 6000),
-      uidHash: hashUid(req.user.uid),
-      commit: SERVER_COMMIT,
-      ua: str(req.headers['user-agent'], 200),
-      at: new Date().toISOString(),
-    });
-    if (db.enabled) {
-      const row = await db.createCrash({ text, context });
-      // Dedup ledger + Notion card (fire-and-forget — never delays or breaks the crash ack).
-      crashSinkToNotion({
-        signature: crypto.createHash('sha256').update(`${scope}|${name}|${message}|${route}|${SERVER_COMMIT}`).digest('hex').slice(0, 16),
-        scope, name, message, route, widgetId, label, traceId, commit: SERVER_COMMIT,
-        stack: str(b.componentStack, 4000), at: new Date().toISOString(),
-      }).catch(() => {});
-      return res.json({ ok: true, id: row ? row.id : null, traceId });
-    }
-    console.error('[client-crash]', text, context); // no DB — Railway logs still capture it
-    return res.json({ ok: false, traceId });
-  } catch (e) {
-    console.error('[client-crash] store failed', e && e.message);
-    return res.json({ ok: false });
-  }
-});
-
-// ── Hand a bug to Claude Code (manual gate) ──
-// Fires a GitHub repository_dispatch → the claude-bugfix workflow attempts a fix and
-// opens a PR (never pushes to main, which auto-deploys). Needs GITHUB_REPO +
-// GITHUB_DISPATCH_TOKEN (PAT with repo/contents write) in the env; soft-off otherwise.
-const GH_REPO  = process.env.GITHUB_REPO || '';            // e.g. "schulmannn/pulse-analytics"
-const GH_TOKEN = process.env.GITHUB_DISPATCH_TOKEN || '';
-
-app.post('/api/bugs/:id/claude-fix', requireAuth, requireSuper, async (req, res, next) => {
-  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
-  if (!GH_REPO || !GH_TOKEN) return res.status(503).json({ error: 'Не настроено: задай GITHUB_REPO и GITHUB_DISPATCH_TOKEN' });
-  const id = parseInt(req.params.id, 10);
-  if (!id) return res.status(400).json({ error: 'bad id' });
-  try {
-    const bug = await db.getBug(id);
-    if (!bug) return res.status(404).json({ error: 'баг не найден' });
-    // Security (S1): the dispatched text/context drive a Claude agent with contents+PR write. Only
-    // superuser-authored kinds may reach it — crash rows carry arbitrary user text (POST
-    // /api/client-errors) and would be a prompt-injection channel into the CI agent.
-    if (!canDispatchBugKind(bug.kind)) {
-      return res.status(400).json({ error: 'Авто-фикс доступен только для баг/фича/правка — краши содержат непроверенный пользовательский текст и не передаются агенту' });
-    }
-    const r = await fetchWithTimeout(`https://api.github.com/repos/${GH_REPO}/dispatches`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${GH_TOKEN}`,
-        'Accept': 'application/vnd.github+json',
-        'X-GitHub-Api-Version': '2022-11-28',
-        'Content-Type': 'application/json',
-        'User-Agent': 'pulse-analytics-bugbot',
-      },
-      body: JSON.stringify({
-        event_type: 'bug-fix-request',
-        client_payload: {
-          id: bug.id,
-          // Defense-in-depth: neutralize prompt-escape scaffolding before it reaches the workflow
-          // fence (the workflow wraps these in UNTRUSTED-BUG-REPORT markers + a guardrail preamble).
-          text: sanitizeForPrompt(bug.text, 2000),
-          severity: bug.severity,
-          kind: bug.kind,
-          context: sanitizeForPrompt(bug.context || '', 4000),
-          attachments: bug.attachment_count || 0,
-        },
-      }),
-    });
-    if (r.status !== 204) {
-      const detail = await r.text().catch(() => '');
-      return res.status(502).json({ error: `GitHub dispatch failed (${r.status})`, detail: detail.slice(0, 300) });
-    }
-    await db.updateBug(id, 'in_progress').catch(() => {});   // reflect that Claude is on it
-    res.json({ ok: true, status: 'in_progress' });
-  } catch (e) { next(e); }
-});
-
-// ── Bug screenshots ──
-// SECURITY INVARIANT: ALLOWED_IMG must stay raster-only. NEVER add image/svg+xml
-// (or any scriptable type) — GET serves stored bytes with this mime, and SVG would
-// enable stored XSS despite nosniff.
-const ALLOWED_IMG = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
-const MAX_IMG_BYTES = 5 * 1024 * 1024;
-const MAX_ATTACH_PER_BUG = 5;
-
-// Verify the decoded bytes really are the claimed image type (magic bytes).
-function sniffImage(mime, buf) {
-  if (buf.length < 12) return false;
-  if (mime === 'image/png')  return buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47;
-  if (mime === 'image/jpeg') return buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF;
-  if (mime === 'image/gif')  return buf.slice(0, 4).toString('latin1') === 'GIF8';
-  if (mime === 'image/webp') return buf.slice(0, 4).toString('latin1') === 'RIFF' && buf.slice(8, 12).toString('latin1') === 'WEBP';
-  return false;
-}
-
-// route-local parser (after requireAuth) so only this authed route accepts big bodies
-app.post('/api/bugs/:id/screenshot', requireAuth, requireSuper, express.json({ limit: '7mb' }), async (req, res, next) => {
-  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
-  const id = parseInt(req.params.id, 10);
-  if (!id) return res.status(400).json({ error: 'bad id' });
-  let { data, mime } = req.body || {};
-  if (typeof data !== 'string' || !data) return res.status(400).json({ error: 'нет данных изображения' });
-  const m = data.match(/^data:([^;,]+)[;,]/);          // data URL → trust its declared type (matches bytes)
-  if (m) mime = m[1];
-  data = data.replace(/^data:[^,]+,/, '');
-  if (!mime) return res.status(400).json({ error: 'не удалось определить тип' });
-  if (!ALLOWED_IMG.has(mime)) return res.status(415).json({ error: 'только изображения (png/jpeg/webp/gif)' });
-  if (data.length > MAX_IMG_BYTES * 4 / 3 + 64) return res.status(413).json({ error: 'изображение больше 5 МБ' });
-  const buf = Buffer.from(data, 'base64');
-  if (!buf.length) return res.status(400).json({ error: 'пустое или битое изображение' });
-  if (buf.length > MAX_IMG_BYTES) return res.status(413).json({ error: 'изображение больше 5 МБ' });
-  if (!sniffImage(mime, buf)) return res.status(415).json({ error: 'это не похоже на изображение' });
-  try {
-    if (!(await db.bugExists(id))) return res.status(404).json({ error: 'баг не найден' });
-    const att = await db.addAttachmentIfRoom(id, mime, buf, MAX_ATTACH_PER_BUG);
-    if (!att) return res.status(409).json({ error: `максимум ${MAX_ATTACH_PER_BUG} вложений на баг` });
-    res.json(att);
-  } catch (e) { next(e); }
-});
-
-// Served under auth (frontend fetches with the session token → blob URL).
-app.get('/api/bug-attachment/:id', requireAuth, requireSuper, async (req, res, next) => {
-  const id = parseInt(req.params.id, 10);
-  if (!id) return res.status(400).end();
-  try {
-    const a = await db.getAttachment(id);
-    if (!a) return res.status(404).end();
-    res.set('Content-Type', ALLOWED_IMG.has(a.mime) ? a.mime : 'application/octet-stream');
-    res.set('X-Content-Type-Options', 'nosniff');
-    res.set('Content-Disposition', 'inline');
-    res.set('Cache-Control', 'private, max-age=3600');
-    res.send(a.data);
-  } catch (e) { next(e); }
+// Bug tracker, crash telemetry and bug attachments are isolated in their own route module.
+registerBugsRoutes({
+  app,
+  express,
+  db,
+  rateLimit,
+  requireAuth,
+  requireSuper,
+  fetchWithTimeout,
+  AUTH_SECRET,
 });
 
 // ── Sprint 3F-3 catover: new Vite/React SPA is the primary dashboard, served at '/' ──
