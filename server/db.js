@@ -1647,7 +1647,7 @@ async function runJobOnce(kind, idempotencyKey, fn, opts) {
 async function listDueReports({ weekly = false, monthly = false } = {}) {
   if (!enabled || (!weekly && !monthly)) return [];
   const { rows } = await pool.query(
-    `SELECT r.id, r.uid, r.name, r.schedule, r.last_sent_at, u.email
+    `SELECT r.id, r.uid, r.name, r.config, r.schedule, r.last_sent_at, u.email
        FROM reports r JOIN users u ON u.id = r.uid
       WHERE u.status = 'active'
         AND ((r.schedule = 'weekly'  AND $1 AND (r.last_sent_at IS NULL OR r.last_sent_at < now() - interval '6 days'))
@@ -1660,6 +1660,19 @@ async function markReportSent(id) {
   if (!enabled || !id) return false;
   const { rowCount } = await pool.query('UPDATE reports SET last_sent_at=now() WHERE id=$1', [id]);
   return rowCount > 0;
+}
+
+// Посты канала за окно (архив ingest'а) — вход серверного недельного дайджеста (weekDigest.js).
+// Ридер посты до сих пор читал только фронт через mtproto/снапшоты; здесь — прямое чтение архива.
+// channelId обязан быть уже resolved через ownership (вызывающий берёт его из listChannels(uid)).
+async function listPostsWindow(channelId, days = 28) {
+  if (!enabled || !channelId) return [];
+  const { rows } = await pool.query(
+    `SELECT date_published, caption, views, reactions, forwards, replies, erv
+       FROM posts
+      WHERE channel_id = $1 AND date_published >= now() - ($2::int || ' days')::interval
+      ORDER BY date_published ASC`, [channelId, days]);
+  return rows;
 }
 
 module.exports = {
@@ -1683,7 +1696,7 @@ module.exports = {
   listIgDaily, listIgMediaDaily,
   listAnnotations, createAnnotation, deleteAnnotation,
   REPORT_SCHEDULES, listReports, getReport, createReport, updateReport, deleteReport,
-  listDueReports, markReportSent,
+  listDueReports, markReportSent, listPostsWindow,
   claimJob, completeJob, failJob, getJob, runJobOnce,
   ensurePersonalWorkspace, ensureExternalSource, ensureChannelCanonical,
 };

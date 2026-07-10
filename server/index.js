@@ -1870,8 +1870,12 @@ app.delete('/api/reports/:id', requireAuth, async (req, res, next) => {
    дней (первая отправка якорится к понедельнику / 1-му). Окно по last_sent_at в
    listDueReports остаётся анти-дублем, если крон сработал дважды за день. Все ошибки
    логируются и никогда не влияют на ответ ingest-а. */
-const reportEmailHtml = (base, report) => emailShell(`Отчёт „${escHtml(report.name)}“`,
-  `<p>Ваш регулярный отчёт Atlavue готов:</p>${emailBtn(`${base}/reports/${report.id}`, 'Открыть отчёт')}` +
+// Серверный «Неделя канала» (фаза 3 нарратива): shared-движок narrative.gen.cjs + сборка входа
+// из архива. Секция опциональна — без артефакта/данных письмо-ссылка уходит как раньше.
+const { assembleWeekInput, reportHasWeekBlock, weekSectionHtml } = require('./lib/weekDigest');
+
+const reportEmailHtml = (base, report, weekHtml) => emailShell(`Отчёт „${escHtml(report.name)}“`,
+  `${weekHtml || ''}<p>Ваш регулярный отчёт Atlavue готов:</p>${emailBtn(`${base}/reports/${report.id}`, 'Открыть отчёт')}` +
   `<p style="color:#64748d;font-size:13px">Отчёт можно сохранить как PDF — кнопка «Печать» на странице отчёта.</p>`);
 
 async function processReportSchedules(base) {
@@ -1913,7 +1917,26 @@ async function processReportSchedules(base) {
     const periodKey = r.schedule === 'weekly' ? isoWeekKey(now) : `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
     try {
       const outcome = await db.runJobOnce('report_email', `report:${r.id}:${periodKey}`, async () => {
-        const ok = await sendEmail(r.email, `Atlavue — отчёт „${r.name}“`, reportEmailHtml(base, r));
+        // «Неделя канала» в теле письма — только weekly-отчётам с week/digest-блоком. Любая
+        // ошибка сборки секции НЕ роняет отправку: письмо уходит без неё (рассказ — бонус).
+        let weekHtml = null;
+        try {
+          if (r.schedule === 'weekly' && reportHasWeekBlock(r.config)) {
+            const chans = await db.listChannels({ uid: r.uid });
+            const chId = chans[0] && chans[0].id;
+            if (chId) {
+              const [daily, posts, igDaily] = await Promise.all([
+                db.getChannelHistory(chId, 35),
+                db.listPostsWindow(chId, 28),
+                db.listIgDaily(chId, 14),
+              ]);
+              weekHtml = weekSectionHtml(assembleWeekInput({ daily, posts, igDaily }));
+            }
+          }
+        } catch (e) {
+          log('warn', 'report_week_section_failed', { report_id: r.id, error: e.message });
+        }
+        const ok = await sendEmail(r.email, `Atlavue — отчёт „${r.name}“`, reportEmailHtml(base, r, weekHtml));
         if (ok) await db.markReportSent(r.id);
         if (!ok) throw new Error('email send failed');
         return { sent: true };
