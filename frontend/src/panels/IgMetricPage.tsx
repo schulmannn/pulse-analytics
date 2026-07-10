@@ -166,13 +166,17 @@ const WINDOW_PILLS = [
 /** Sticky bottom window bar (steep) — presets only. The daily explorer feeds it a page-local
     window; the aggregate/ER pages wire it to the GLOBAL period (their windows live in useIgData),
     so every /metrics/ig-* page carries its own control — the feed header stopped being the only
-    steering wheel when the feeds moved to the page-period system. */
-function WindowBar({ value, onChange }: { value: number; onChange: (days: PeriodDays) => void }) {
+    steering wheel when the feeds moved to the page-period system.
+    Solid, не blur-пилл: плавающая полупрозрачная пилюля на TG-странице уже была признана багом
+    и заменена сплошным баром (#109) — это рецидив того же паттерна (дизайн-проход №3).
+    `allowAll` = false на агрегатных/ER-страницах: живые insights не отдают «всё время», чип «Всё»
+    молча показывал 90д — окно, которое страница не может исполнить, не предлагаем. */
+function WindowBar({ value, onChange, allowAll = true }: { value: number; onChange: (days: PeriodDays) => void; allowAll?: boolean }) {
   return (
-    <div className="sticky bottom-3 z-10 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-background/95 px-3 py-2 backdrop-blur print:hidden">
+    <div className="sticky bottom-0 z-10 flex flex-wrap items-center gap-2 border-t border-border bg-background px-1 py-2 print:hidden">
       <span className="text-xs font-medium text-muted-foreground">Окно</span>
       <span className="flex-1" />
-      {WINDOW_PILLS.map((chip) => (
+      {WINDOW_PILLS.filter((chip) => allowAll || chip.days !== 0).map((chip) => (
         <button
           key={chip.days}
           type="button"
@@ -199,8 +203,13 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
   const [cmp, setCmp] = useState<'off' | 'prev' | 'year'>('prev');
   // Pinned chart point — see MetricPage: any change of what the chart shows un-pins.
   const [pinned, setPinned] = useState<number | null>(null);
+  // Отдельный пин для графика уровня «Подписчики» (ig-follows): у него свои индексы окна,
+  // делить состояние с «Подписками по дням» нельзя (дизайн-проход №3: точки-приглашения
+  // на уровне были нарисованы, но интерактивно мертвы).
+  const [pinnedLvl, setPinnedLvl] = useState<number | null>(null);
   useEffect(() => {
     setPinned(null);
+    setPinnedLvl(null);
   }, [metricKey, days, kind, cmp]);
 
   if (ig.loading) {
@@ -361,20 +370,51 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
       <div className="grid grid-cols-1 gap-6 xl:gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
         <div className="min-w-0 space-y-6">
           {lvl != null && (
-            <ChartSection id="metric-ig-followers-level" title="Подписчики" defaultSize="full" noExpand>
-              <ChartExpandedContext.Provider value={true}>
-                <LineChart
-                  values={lvl.values}
-                  labels={lvl.labels}
-                  titles={lvl.titles}
-                  height={chartH}
-                  markExtremes
-                  showPoints={lvl.values.length <= 45}
-                  legendToggle={false}
-                  emphasizeLastLabel
+            <>
+              <ChartSection id="metric-ig-followers-level" title="Подписчики" defaultSize="full" noExpand>
+                <ChartExpandedContext.Provider value={true}>
+                  <LineChart
+                    values={lvl.values}
+                    labels={lvl.labels}
+                    titles={lvl.titles}
+                    height={chartH}
+                    markExtremes
+                    showPoints={lvl.values.length <= 45}
+                    legendToggle={false}
+                    emphasizeLastLabel
+                    onPointClick={(i) => setPinnedLvl((p) => (p === i ? null : i))}
+                    pinnedIndex={pinnedLvl != null && pinnedLvl < lvl.values.length ? pinnedLvl : null}
+                  />
+                </ChartExpandedContext.Provider>
+              </ChartSection>
+              {pinnedLvl != null && pinnedLvl < lvl.values.length && (
+                <PinnedDayPanel
+                  dateLabel={lvl.labels[pinnedLvl] ?? ''}
+                  rows={[
+                    { label: 'Подписчиков', value: fmt.num(lvl.values[pinnedLvl]!) },
+                    ...(pinnedLvl > 0
+                      ? [
+                          {
+                            label: 'К пред. дню',
+                            value: (() => {
+                              const d = lvl.values[pinnedLvl]! - lvl.values[pinnedLvl - 1]!;
+                              return (
+                                <span className={d > 0 ? 'text-verdant' : d < 0 ? 'text-ember' : undefined}>
+                                  {d > 0 ? '+' : d < 0 ? '−' : ''}
+                                  {fmt.num(Math.abs(d))}
+                                </span>
+                              );
+                            })(),
+                          },
+                        ]
+                      : []),
+                  ]}
+                  // Уровень — не пост-адресуемая серия: день уровня не «даёт» посты.
+                  showPosts={false}
+                  onClose={() => setPinnedLvl(null)}
                 />
-              </ChartExpandedContext.Provider>
-            </ChartSection>
+              )}
+            </>
           )}
 
           <ChartSection
@@ -484,6 +524,12 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
         {/* Explore rail — flat hairline sections (no widget chrome: these are controls, not cards). */}
         <aside className="space-y-6">
           <RailSection title="Сравнение">
+            {/* На ig-follows headline говорит про НЕТТО-изменение базы, а rail сравнивает серию
+                графика «Подписки по дням» (валовые) — одна строка контекста снимает конфликт
+                (дизайн-проход №3: рецидив gross-vs-net без подписи). */}
+            {metricKey === 'ig-follows' && lvlNow != null && (
+              <p className="text-xs text-muted-foreground">По графику «Подписки по дням» (валовые подписки).</p>
+            )}
             <SegSelect
               ariaLabel="База сравнения"
               value={cmp}
@@ -575,7 +621,7 @@ function IgAggregatePage({ def, pair, windowDays, handle }: { def: IgAggDef; pai
 
       <div className="grid grid-cols-1 gap-6 xl:gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
         <div className="min-w-0">
-          <ChartSection title="Период против периода" defaultSize="full">
+          <ChartSection title="Период против периода" defaultSize="full" noExpand>
             {pair.hasCur ? (
               <div className="grid grid-cols-1 gap-px border-t border-border bg-border sm:grid-cols-3">
                 <div className="bg-card p-4">
@@ -615,7 +661,7 @@ function IgAggregatePage({ def, pair, windowDays, handle }: { def: IgAggDef; pai
         </aside>
       </div>
 
-      <WindowBar value={days} onChange={setDays} />
+      <WindowBar value={days} onChange={setDays} allowAll={false} />
     </div>
   );
 }
@@ -666,7 +712,7 @@ function IgErPage({
 
       <div>
         <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-          <span className="text-3xl font-medium leading-none tabular-nums tracking-tight">{hasCur ? `${erReach.toFixed(2)}%` : '—'}</span>
+          <span className="text-hero font-medium leading-none tabular-nums tracking-tight">{hasCur ? `${erReach.toFixed(2)}%` : '—'}</span>
           <DeltaPill delta={trend} />
           <span className="text-xs tracking-wide text-muted-foreground">
             {ER_DEF.term} · {windowDays} дн.
@@ -721,7 +767,7 @@ function IgErPage({
         </aside>
       </div>
 
-      <WindowBar value={days} onChange={setDays} />
+      <WindowBar value={days} onChange={setDays} allowAll={false} />
     </div>
   );
 }

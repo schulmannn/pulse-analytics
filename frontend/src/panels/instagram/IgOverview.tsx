@@ -24,7 +24,7 @@ export function IgOverview({ ig }: { ig: IgData }) {
       {/* IG-нарратив ведёт Обзор (симметрия с TG-«Неделя канала» на TG-Обзоре) — рассказ недели
           на всю ширину ЖЁСТКО: fixedSize игнорирует сохранённый ресайз (треть ширины оставляла
           2/3 первого ряда пустым холстом — флагман выглядел сломанным). Home-пин ресайзабелен. */}
-      <IgNarrativeWeekBlock id="ig-overview-week" homeKey="ig-week" fixedSize="full" />
+      <IgNarrativeWeekBlock id="ig-overview-week" homeKey="ig-week" fixedSize="full" title="Неделя аккаунта" />
       {/* Widget label «Показатели», NOT «Обзор» — the feed block's h2 right above already says
           «Обзор» (the same stutter rule as the TG Overview hero). */}
       <ChartSection id="ig-overview-kpi" title="Показатели" defaultSize="full" homeKey="ig-kpi" drillTo="/metrics/ig-reach">
