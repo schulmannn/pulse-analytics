@@ -239,7 +239,6 @@ function Sidebar({ email, role, avatar }: { email?: string; role?: string; avata
         </div>
       </div>
 
-      <NetworkStrip rail={rail} />
       <SidebarNav rail={rail} />
 
       <SidebarUserRow rail={rail} email={email} role={role} avatar={avatar} />
@@ -328,44 +327,6 @@ function SidebarNav({ rail }: { rail: boolean }) {
  * of 28px chips, not ten nav groups. Hidden with a single network — nothing to cross to. Brand
  * colour stays an identifier on the glyph (the PlatformNav/NetworkBadge rule), never UI colour.
  */
-function NetworkStrip({ rail }: { rail: boolean }) {
-  const activeKey = useActiveNetwork();
-  const navigate = useNavigate();
-  const { data } = useChannels();
-  const { demo } = useDemo();
-  const channels = data?.channels ?? [];
-  const nets = NETWORKS.filter((n) => !data || demo || channels.some((c) => n.hasChannel(c)));
-  if (nets.length < 2) return null;
-  return (
-    <div
-      role="group"
-      aria-label="Сети источника"
-      className={cn('flex gap-1 pt-2', rail ? 'flex-col items-center px-2' : 'flex-wrap px-4')}
-    >
-      {nets.map((n) => {
-        const active = n.key === activeKey;
-        return (
-          <button
-            key={n.key}
-            type="button"
-            onClick={() => navigate(n.home)}
-            aria-current={active ? 'true' : undefined}
-            aria-label={n.name}
-            title={n.name}
-            className={cn(
-              'flex h-7 w-7 items-center justify-center rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
-              active ? 'bg-hover-row' : 'hover:bg-hover-row/60',
-            )}
-            style={{ color: n.color, opacity: active ? 1 : 0.5 }}
-          >
-            <NetworkGlyph k={n.key} className="h-4 w-4" />
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 /** Data-freshness line — a status dot + "обновлено <time>" (mono), sitting directly under the
     channel card. Rail: dot only, the full text moves into the title tooltip. */
 function SidebarStatus({ rail }: { rail?: boolean }) {
