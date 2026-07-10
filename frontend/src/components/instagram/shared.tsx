@@ -281,12 +281,14 @@ export function IgKpiBlock({ ig }: { ig: IgData }) {
     // TG KpiGrid composition: the hero sits straight on the card and the ledger splits off with
     // ONE quiet top hairline + spacing — no inner plate, no hairline mesh (the card is the frame).
     <div className="space-y-5">
+      {/* Без hero-drillTo: оба хоста («Показатели» на IG-Обзоре и IG·Показатели на Home) несут
+          drillTo на СЕКЦИИ — corner-↗ + whole-card клик + хедер-кнопка. Своя стрелка hero рядом
+          с карточной читалась дублем (визуальный аудит №1). */}
       <KpiHero
         label={`Охват · ${ig.window.days} дн.`}
         value={fmt.kpi(ig.pairs.reach.cur)}
         delta={pairDelta(ig.pairs.reach)}
         series={ig.series.reach.filter((p) => ig.inWindow(p.day))}
-        drillTo="/metrics/ig-reach"
       />
       <div className="grid grid-cols-2 gap-x-6 gap-y-4 border-t border-border pt-4 lg:grid-cols-4">
         <KpiCard
