@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useHistory, useVelocity, useTgFull } from '@/api/queries';
 import type { TgFull } from '@/api/schemas';
 import { lttbDownsample } from '@/lib/downsample';
@@ -339,6 +339,19 @@ function HeatmapSurface({
 }) {
   const [tip, setTip] = useState<TooltipState>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+  // Тултип не должен зависать при прокрутке/потере фокуса — mouseleave при колесе не срабатывает
+  // (канон BarChart/PieChart, дизайн-проход №3).
+  const hasTip = tip !== null;
+  useEffect(() => {
+    if (!hasTip) return;
+    const clear = () => setTip(null);
+    window.addEventListener('scroll', clear, true);
+    window.addEventListener('blur', clear);
+    return () => {
+      window.removeEventListener('scroll', clear, true);
+      window.removeEventListener('blur', clear);
+    };
+  }, [hasTip]);
   // Видимые часы (сжатый диапазон из HeatmapBody). Подпись — «6:00», не голое «6»: на сжатом
   // 7д-окне колонок мало и цифры без «:00» читались как непонятные числа/даты (проход №3).
   // Плотность подписей — по ширине формата: «6:00» шире голой цифры, каждый час подписываем
@@ -387,7 +400,7 @@ function HeatmapSurface({
                   return (
                     <div
                       key={hr}
-                      className={`relative h-4 cursor-pointer rounded-sm${isBest ? ' border-2 border-verdant' : ''}`}
+                      className={`relative h-4 cursor-crosshair rounded-sm${isBest ? ' border-2 border-verdant' : ''}`}
                       style={{
                         backgroundColor: 'hsl(var(--brand-iris))',
                         opacity,

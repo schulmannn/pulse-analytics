@@ -425,7 +425,7 @@ export function LineChart({
   const tipText = (i: number) => {
     let base = titles?.[i] ?? fmt.num(values[i]);
     // Hovering a compared chart reads both series at once (comparison shown).
-    if (activeGhost && activeGhost[i] != null) base = `${base} · пред. ${fmt.short(activeGhost[i])}`;
+    if (activeGhost && activeGhost[i] != null) base = `${base} · пред. ${fmt.num(activeGhost[i])}`;
     return anomalySet.has(i) ? `${base} · аномалия` : base;
   };
   // The hover readout: a STRUCTURED card (date · Текущий · comparison · Δ) whenever a ghost series
@@ -437,8 +437,8 @@ export function LineChart({
       const cur = values[i];
       const prev = activeGhost[i];
       const rows: TooltipRow[] = [
-        { label: 'Текущий', value: fmt.short(cur), color: 'hsl(var(--chart-role-primary))' },
-        { label: ghostLabel, value: fmt.short(prev), color: 'hsl(var(--chart-role-comparison))' },
+        { label: 'Текущий', value: fmt.num(cur), color: 'hsl(var(--chart-role-primary))' },
+        { label: ghostLabel, value: fmt.num(prev), color: 'hsl(var(--chart-role-comparison))' },
       ];
       const d = prev !== 0 ? ((cur - prev) / Math.abs(prev)) * 100 : null;
       if (d != null && Number.isFinite(d)) rows.push({ label: 'Δ', value: `${d >= 0 ? '+' : '−'}${Math.abs(d).toFixed(1)}%` });

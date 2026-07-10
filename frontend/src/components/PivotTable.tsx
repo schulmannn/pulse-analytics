@@ -1,3 +1,5 @@
+import { EmptyState } from '@/components/EmptyState';
+
 export interface PivotColumn {
   key: string;
   label: string;
@@ -22,11 +24,7 @@ interface PivotTableProps {
  */
 export function PivotTable({ columns, rows, valueFmt }: PivotTableProps) {
   if (rows.length === 0 || columns.length === 0) {
-    return (
-      <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
-        Нет данных за период
-      </div>
-    );
+    return <EmptyState compact title="Нет данных за период" className="flex h-40 items-center justify-center" />;
   }
   const globalMax = Math.max(...rows.flatMap((r) => r.values.map((v) => v ?? 0)), 0);
   // Inline hsl is data-driven paint (same class as SVG chart fills): the alpha can't be a
