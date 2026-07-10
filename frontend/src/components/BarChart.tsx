@@ -148,21 +148,31 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
 
     const barTop = (val: number) => graphHeight - (val / max) * usable;
     const barCenterX = (i: number) => offsetX + i * itemWidth + itemWidth / 2;
-    // Comparison overlay: a dashed line across the previous-period value at each bar centre.
-    const ghostPath = activeGhost
-      ? activeGhost.map((v, i) => `${i === 0 ? 'M' : 'L'} ${barCenterX(i)} ${barTop(v)}`).join(' ')
-      : '';
+
+    // Сравнение в СТОЛБЦАХ рисуется столбцами же (владелец: пунктирная линия поверх баров
+    // «странно смотрится» — смешение языков форм). Группированные пары: прошлое слева
+    // (приглушённый comparison-тон), текущее справа; 2px-зазор внутри пары (dataviz-канон).
+    const GROUP_GAP = 2;
+    const subW = activeGhost ? Math.max((barWidth - GROUP_GAP) / 2, 1) : barWidth;
+    const bandX = (i: number) => offsetX + i * itemWidth + (itemWidth - barWidth) / 2;
 
     // Per-bar boxes — the cached rect layer below and the hover highlight both draw from these.
+    // With a comparison, the CURRENT bar takes the right half of the band.
     const bars = values.map((val, i) => {
       const barHeight = (val / max) * usable;
       return {
-        x: offsetX + i * itemWidth + (itemWidth - barWidth) / 2,
+        x: bandX(i) + (activeGhost ? subW + GROUP_GAP : 0),
         y: graphHeight - barHeight,
-        w: barWidth,
+        w: subW,
         h: Math.max(barHeight, 2),
       };
     });
+    const ghostBars = activeGhost
+      ? activeGhost.map((v, i) => {
+          const h = (v / max) * usable;
+          return { x: bandX(i), y: graphHeight - h, w: subW, h: Math.max(h, 2) };
+        })
+      : [];
 
     // Under the bars: gridlines + tick labels (expanded only).
     const underLayer = (
@@ -183,8 +193,12 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
 
     // The bars themselves — flat single-token fill; the render site wraps this cached layer in a
     // group whose opacity carries the hover dim (0.85 idle → 0.55 while a column is hovered).
+    // Ghost-пара рисуется в том же слое (контекст тускнеет вместе с остальными колонками).
     const barsLayer = (
       <>
+        {ghostBars.map((b, i) => (
+          <rect key={`gb${i}`} x={b.x} y={b.y} width={b.w} height={b.h} fill="hsl(var(--chart-role-comparison) / 0.35)" rx={2} />
+        ))}
         {bars.map((b, i) => (
           <rect key={i} x={b.x} y={b.y} width={b.w} height={b.h} fill="hsl(var(--chart-role-primary))" rx={2} />
         ))}
@@ -204,7 +218,7 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
             <g key={`l${i}`}>
               {showValue && (
                 <text
-                  x={bars[i].x + barWidth / 2}
+                  x={bars[i].x + bars[i].w / 2}
                   y={bars[i].y - 4}
                   textAnchor="middle"
                   className="pointer-events-none select-none fill-ink2 text-2xs font-medium tabular-nums"
@@ -217,7 +231,7 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
                 // столбцом — центрированная последняя дата наполовину вылетала за svg и клипалась
                 // («9 ин» вместо «9 июл.», дизайн-проход №3). Зеркало поведения LineChart.
                 <text
-                  x={i === values.length - 1 ? Math.min(bars[i].x + barWidth, width - 1) : i === 0 ? Math.max(bars[i].x, 1) : bars[i].x + barWidth / 2}
+                  x={i === values.length - 1 ? Math.min(bars[i].x + bars[i].w, width - 1) : i === 0 ? Math.max(bandX(i), 1) : barCenterX(i)}
                   y={chartHeight - 6}
                   textAnchor={i === values.length - 1 ? 'end' : i === 0 ? 'start' : 'middle'}
                   data-chart-axis-label="x"
@@ -229,17 +243,6 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
             </g>
           );
         })}
-
-        {/* Comparison overlay — dashed comparison-role line across the previous-period values, plus
-            hollow dots at each point so the delta reads at a glance (steep). */}
-        {activeGhost && (
-          <g className="pointer-events-none">
-            <path d={ghostPath} fill="none" stroke="hsl(var(--chart-role-comparison))" strokeWidth="1.8" strokeDasharray="5 4" opacity="0.8" vectorEffect="non-scaling-stroke" />
-            {activeGhost.map((v, i) => (
-              <circle key={`g${i}`} cx={barCenterX(i)} cy={barTop(v)} r="2.5" fill="hsl(var(--card))" stroke="hsl(var(--chart-role-comparison))" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
-            ))}
-          </g>
-        )}
 
         {/* Target level (widget pref) — dashed goal line + right-aligned label, above the bars */}
         {target != null && (
@@ -406,9 +409,6 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
         {hover && hover.i < n && (
           <g className="pointer-events-none">
             <line x1={barCenterX(hover.i)} y1={0} x2={barCenterX(hover.i)} y2={graphHeight} stroke="hsl(var(--chart-role-selection))" strokeWidth="1" opacity="0.3" vectorEffect="non-scaling-stroke" />
-            {activeGhost && activeGhost[hover.i] != null && (
-              <circle cx={barCenterX(hover.i)} cy={barTop(activeGhost[hover.i])} r="3.5" fill="hsl(var(--card))" stroke="hsl(var(--chart-role-comparison))" strokeWidth="1.5" />
-            )}
           </g>
         )}
       </svg>
@@ -429,12 +429,13 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
               title={ghostHidden ? 'Показать сравнение' : 'Скрыть сравнение'}
               className={`flex select-none items-center gap-1.5 rounded transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${ghostHidden ? 'opacity-40 line-through' : ''}`}
             >
-              <span aria-hidden="true" className="w-4 border-t-2 border-dashed" style={{ borderColor: 'hsl(var(--chart-role-comparison))' }} />
+              {/* Свотч-прямоугольник: сравнение теперь рисуется столбцами, не пунктиром. */}
+              <span aria-hidden="true" className="h-2 w-3 rounded-sm" style={{ backgroundColor: 'hsl(var(--chart-role-comparison) / 0.35)' }} />
               {ghostLabel}
             </button>
           ) : (
             <span className="flex select-none items-center gap-1.5">
-              <span aria-hidden="true" className="w-4 border-t-2 border-dashed" style={{ borderColor: 'hsl(var(--chart-role-comparison))' }} />
+              <span aria-hidden="true" className="h-2 w-3 rounded-sm" style={{ backgroundColor: 'hsl(var(--chart-role-comparison) / 0.35)' }} />
               {ghostLabel}
             </span>
           )}
