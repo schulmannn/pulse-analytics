@@ -100,8 +100,16 @@ export function IgShell() {
       )}
     >
       <span className="text-foreground">{notice.msg}</span>
-      <button type="button" onClick={dismiss} aria-label="Закрыть" className="shrink-0 text-muted-foreground hover:text-foreground">
-        ✕
+      <button
+        type="button"
+        onClick={dismiss}
+        aria-label="Закрыть"
+        className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="h-4 w-4" aria-hidden="true">
+          <path d="M18 6 6 18" />
+          <path d="M6 6l12 12" />
+        </svg>
       </button>
     </div>
   ) : null;

@@ -201,7 +201,7 @@ export function DateRangePicker({ value, onApply, onReset }: Props) {
           type="button"
           disabled={!canApply}
           onClick={() => canApply && onApply({ from: startOfDay(from), to: startOfDay(to) + DAY - 1 })}
-          className="btn-pill flex-1 bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
+          className="btn-pill flex-1 bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
         >
           Применить
         </button>

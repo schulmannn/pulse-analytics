@@ -264,7 +264,7 @@ export function CompareBlock({ posts }: { posts: IgPost[] }) {
                 const values = chosen.map((c) => row.get(c.post));
                 const max = Math.max(...values, 0);
                 return (
-                  <tr key={row.label} className="hover:bg-hover-row">
+                  <tr key={row.label} className="transition-colors hover:bg-hover-row">
                     <td className="p-4 text-muted-foreground">{row.label}</td>
                     {chosen.map((c, idx) => {
                       const v = values[idx];

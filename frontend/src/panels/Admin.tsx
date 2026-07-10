@@ -1,6 +1,5 @@
 import { useEffect, useState, type ChangeEvent } from 'react';
 import { useAdminDeleteUser, useAdminUsers, useUpdateUser } from '@/api/queries';
-import { Card, CardContent } from '@/components/ui/card';
 import { ErrorState } from '@/components/ErrorState';
 import { fmt } from '@/lib/format';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -120,11 +119,13 @@ function DeleteUserButton({ user, isMe }: { user: UserRowCardProps['user']; isMe
   const [armed, setArmed] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // Взвод не спадает во время запроса: таймер гейтится на isPending, иначе стиль кнопки
+  // откатывался в спокойный прямо посреди «Удаление…» (дизайн-проход №3).
   useEffect(() => {
-    if (!armed) return;
+    if (!armed || deleteUser.isPending) return;
     const t = setTimeout(() => setArmed(false), 4000);
     return () => clearTimeout(t);
-  }, [armed]);
+  }, [armed, deleteUser.isPending]);
 
   if (isMe || user.role === 'superuser') return null;
 
@@ -154,11 +155,13 @@ function DeleteUserButton({ user, isMe }: { user: UserRowCardProps['user']; isMe
             ? `Подтвердить удаление аккаунта ${user.email || `#${user.id}`}`
             : `Удалить аккаунт ${user.email || `#${user.id}`}`
         }
-        className={
+        // Общая часть классов держит transition-colors в ОБОИХ состояниях — снятие взвода по
+        // таймеру больше не схлопывается рывком (проход №3).
+        className={`rounded border px-2 py-1.5 text-xs font-medium transition-colors disabled:opacity-50 ${
           armed
-            ? 'rounded border border-destructive bg-destructive px-2 py-1.5 text-xs font-medium text-destructive-foreground disabled:opacity-60'
-            : 'rounded border border-border bg-background px-2 py-1.5 text-xs font-medium text-destructive transition-colors hover:border-destructive/40 disabled:opacity-60'
-        }
+            ? 'border-destructive bg-destructive text-destructive-foreground'
+            : 'border-border bg-background text-destructive hover:border-destructive/40'
+        }`}
       >
         {deleteUser.isPending ? 'Удаление…' : armed ? 'Точно удалить?' : 'Удалить'}
       </button>
@@ -167,15 +170,19 @@ function DeleteUserButton({ user, isMe }: { user: UserRowCardProps['user']; isMe
 }
 
 function AdminSkeleton() {
+  // Зеркалит ЗАГРУЖЕННЫЙ лейаут (плоский hairline-леджер), а не старый card-грид —
+  // скелетон обещал другую страницу и вызывал layout-jump (дизайн-проход №3).
   return (
     <div className="space-y-6">
       <div className="space-y-2">
         <Skeleton className="h-6 w-1/4" />
         <Skeleton className="h-3 w-1/3" />
       </div>
-      <div className="space-y-3">
+      <div className="grid grid-cols-1 gap-px border-t border-border bg-border">
         {Array.from({ length: 4 }).map((_, i) => (
-          <Card key={i}><CardContent className="p-4"><Skeleton className="h-8 w-full" /></CardContent></Card>
+          <div key={i} className="bg-background p-4">
+            <Skeleton className="h-8 w-full" />
+          </div>
         ))}
       </div>
     </div>

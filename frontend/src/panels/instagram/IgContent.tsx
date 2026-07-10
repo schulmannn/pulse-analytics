@@ -32,7 +32,7 @@ export function IgContent({ ig }: { ig: IgData }) {
             <button
               type="button"
               onClick={() => exportIgPosts(ig.postsInWindow)}
-              className="rounded-lg border px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+              className="btn-pill border border-border bg-background px-3.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             >
               Экспорт постов
             </button>
