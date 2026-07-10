@@ -17,6 +17,7 @@ import { ErrorState } from '@/components/ErrorState';
 import { DeltaPill } from '@/components/DeltaPill';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
+import { DivergingBars } from '@/components/DivergingBars';
 import { ChartExpandedContext } from '@/components/ExpandableChart';
 import { Breakdown } from '@/components/Breakdown';
 import { RankChart } from '@/components/RankChart';
@@ -373,6 +374,25 @@ export function MetricPage() {
   const valueFmt = metricKey === 'subscribers' ? fmt.num : fmt.short;
   const titles = series.values.map((v, i) => `${series.labels[i]}: ${valueFmt(v)}`);
 
+  // Уровневая метрика (Подписчики): бары УРОВНЯ от нуля почти все во всю высоту — падение
+  // визуально теряется (скриншот владельца: «непонятно, что происходит падение»). Как на
+  // домашней «Истории подписчиков», режим «Столбцы» рисует ДНЕВНОЕ ИЗМЕНЕНИЕ дивергентными
+  // барами вокруг нуля — так спад читается сразу. Поток-метрики (просмотры/реакции/…) — обычные
+  // столбцы от нуля (сумма имеет смысл).
+  const isLevel = !ZERO_BASED[metricKey];
+  const levelDeltas = useMemo(() => {
+    const v: number[] = [], l: string[] = [], t: string[] = [];
+    if (isLevel) {
+      for (let i = 1; i < series.values.length; i++) {
+        const d = series.values[i] - series.values[i - 1];
+        v.push(d);
+        l.push(series.labels[i]);
+        t.push(`${series.labels[i]}: ${d >= 0 ? '+' : '−'}${fmt.num(Math.abs(d))}`);
+      }
+    }
+    return { values: v, labels: l, titles: t };
+  }, [isLevel, series]);
+
   // ── Rank + pivot data (dimension-aggregated) ──────────────────────────────────────────
   const sumByDim = (posts: NormalizedPost[]): Map<string, number> => {
     const acc = new Map<string, number>();
@@ -550,7 +570,9 @@ export function MetricPage() {
   // winFrom..winTo, so index ↔ calendar day is exact) and only for post-derived metrics;
   // elsewhere the panel shows the numbers without a post list.
   const pinnedValid = pinned != null && pinned >= 0 && pinned < series.values.length ? pinned : null;
-  const pinnedIsChart = chartType === 'line' || chartType === 'bar';
+  // Дельта-бары уровневой метрики (DivergingBars) кликов не несут — пин только для line и
+  // обычных столбцов потока.
+  const pinnedIsChart = chartType === 'line' || (chartType === 'bar' && !isLevel);
   const canResolveDay = field != null && effGrain === 'day' && winFrom != null;
   const pinnedDayKey = pinnedValid != null && canResolveDay ? localDayKey(winFrom! + pinnedValid * DAY_MS) : null;
   const pinnedPosts = pinnedDayKey
@@ -629,17 +651,28 @@ export function MetricPage() {
             {chartType === 'bar' && (
               /* Expanded context switches BarChart into its rich mode (y ticks + value labels). */
               <ChartExpandedContext.Provider value={true}>
-                <BarChart
-                  values={series.values}
-                  labels={series.labels}
-                  titles={titles}
-                  height={chartH}
-                  ghost={ghost}
-                  ghostLabel={cmp !== 'off' ? CMP_CHIP[cmp] : undefined}
-                  legendToggle={false}
-                  onPointClick={(i) => setPinned((p) => (p === i ? null : i))}
-                  pinnedIndex={pinnedValid}
-                />
+                {isLevel ? (
+                  // Уровень → дневное изменение (дивергентные бары вокруг нуля). Без ghost/пина —
+                  // DivergingBars их не несёт, паритет с домашней «Историей».
+                  <DivergingBars
+                    values={levelDeltas.values}
+                    labels={levelDeltas.labels}
+                    titles={levelDeltas.titles}
+                    height={chartH}
+                  />
+                ) : (
+                  <BarChart
+                    values={series.values}
+                    labels={series.labels}
+                    titles={titles}
+                    height={chartH}
+                    ghost={ghost}
+                    ghostLabel={cmp !== 'off' ? CMP_CHIP[cmp] : undefined}
+                    legendToggle={false}
+                    onPointClick={(i) => setPinned((p) => (p === i ? null : i))}
+                    pinnedIndex={pinnedValid}
+                  />
+                )}
               </ChartExpandedContext.Provider>
             )}
             {chartType === 'rank' && (
