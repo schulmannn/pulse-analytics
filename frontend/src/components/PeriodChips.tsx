@@ -11,7 +11,8 @@ const PRESETS: { days: PeriodDays; label: string }[] = [
 ];
 
 /** Short «дд.мм» for the active custom-range chip label. */
-const fmtRangeChip = (ms: number) => new Date(ms).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+// Канон дат приложения — «3 июн.», не «03.06» (регресс закрытого канона, проход №3).
+const fmtRangeChip = (ms: number) => new Date(ms).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
 
 /**
  * Compact rounded-pill period selector for a feed header (7д / 30д / 90д / Всё). Presentational —
@@ -91,7 +92,7 @@ export function PeriodChips({
             <>
               {/* Scrim = клик мимо; Esc обрабатывает keydown-эффект выше. */}
               <div className="fixed inset-0 z-popover" aria-hidden="true" onClick={() => setPickerOpen(false)} />
-              <div className="absolute right-0 top-full z-popover mt-2 rounded-lg border border-border bg-card p-3">
+              <div className="absolute right-0 top-full z-popover mt-2 rounded-lg border border-border bg-popover p-3">
                 <DateRangePicker
                   value={range ?? null}
                   onApply={(r) => {

@@ -162,7 +162,7 @@ export function Compare() {
     <div className="space-y-6">
       <div className="space-y-4">
         <h3 className="flex items-center gap-3 text-xs font-medium tracking-wider text-muted-foreground">
-          <span className="whitespace-nowrap">Период vs предыдущий</span>
+          <span className="whitespace-nowrap">Период против предыдущего</span>
           <span aria-hidden="true" className="h-px flex-1 bg-border" />
         </h3>
         {hasPrev ? (
@@ -178,7 +178,7 @@ export function Compare() {
               </thead>
               <tbody className="divide-y divide-border">
                 {rows.map((r) => (
-                  <tr key={r.label} className="hover:bg-hover-row">
+                  <tr key={r.label} className="transition-colors hover:bg-hover-row">
                     <td className="py-3 pl-0 pr-4 text-muted-foreground">{r.label}</td>
                     <td className="px-4 py-3 text-right font-medium tabular-nums">{r.render(r.cur)}</td>
                     <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">{r.render(r.prev)}</td>

@@ -61,7 +61,7 @@ export function InstagramSection() {
               type="button"
               onClick={() => connect.mutate()}
               disabled={connect.isPending || !s?.server_ready}
-              className="btn-pill shrink-0 bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-60"
+              className="btn-pill shrink-0 bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
             >
               {connect.isPending ? 'Открываю Instagram…' : 'Подключить Instagram'}
             </button>

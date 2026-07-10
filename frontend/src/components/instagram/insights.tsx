@@ -61,7 +61,7 @@ export function PeriodCompareBlock({ rows }: { rows: { label: string; pair: Wind
         </thead>
         <tbody className="divide-y divide-border">
           {rows.map((r) => (
-            <tr key={r.label} className="hover:bg-hover-row">
+            <tr key={r.label} className="transition-colors hover:bg-hover-row">
               <td className="p-4 text-muted-foreground">{r.label}</td>
               <td className="p-4 text-right font-medium tabular-nums">{fmt.short(r.pair.cur)}</td>
               <td className="p-4 text-right tabular-nums text-muted-foreground">

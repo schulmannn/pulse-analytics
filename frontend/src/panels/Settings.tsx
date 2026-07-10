@@ -144,7 +144,7 @@ export function Settings() {
               <div className="mx-1 my-3 border-t border-border" aria-hidden="true" />
               <Link
                 to="/admin"
-                className="flex items-center gap-2.5 rounded px-2.5 py-1.5 text-sm text-ink2 transition-colors hover:bg-hover-row hover:text-foreground"
+                className="flex items-center gap-2.5 rounded px-2.5 py-1.5 text-sm text-ink2 transition-colors hover:bg-hover-row/60 hover:text-foreground"
               >
                 <SettingsIcon name="shield" className="h-4 w-4 shrink-0" />
                 <span className="flex-1">Админ</span>

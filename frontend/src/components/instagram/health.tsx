@@ -122,7 +122,7 @@ export function IgConnectPanel() {
               type="button"
               onClick={() => connect.mutate()}
               disabled={connect.isPending || notReady}
-              className="btn-pill bg-primary px-3.5 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-60"
+              className="btn-pill bg-primary px-3.5 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
             >
               {connect.isPending ? 'Открываю Instagram…' : 'Подключить Instagram'}
             </button>
@@ -130,7 +130,7 @@ export function IgConnectPanel() {
               type="button"
               onClick={() => setOpen((o) => !o)}
               aria-expanded={open}
-              className="text-center text-2xs text-muted-foreground underline decoration-muted-foreground/40 underline-offset-2 hover:text-foreground"
+              className="text-center text-2xs text-muted-foreground underline decoration-muted-foreground/40 underline-offset-2 transition-colors hover:text-foreground"
             >
               {open ? 'Скрыть' : 'Что нужно и что даёт'}
             </button>
