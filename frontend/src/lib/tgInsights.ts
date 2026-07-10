@@ -4,6 +4,7 @@
 // Mirrors lib/igInsights.ts but each insight carries why/action/evidence (the IG version is text-only).
 
 import type { MetricDelta } from '@/lib/delta';
+import { pluralRu } from '@/lib/format';
 
 export interface TgInsightEvidence {
   caption?: string;
@@ -68,8 +69,8 @@ export function buildTgInsights(i: TgInsightInput): TgInsight[] {
     out.push({
       tone: up ? 'up' : 'down',
       statement: up
-        ? `Прибавилось ${fmtInt(i.subscriberChange)} подписчиков за период.`
-        : `Отписалось ${fmtInt(Math.abs(i.subscriberChange))} за период.`,
+        ? `База выросла на ${fmtInt(i.subscriberChange)} ${pluralRu(i.subscriberChange, ['подписчика', 'подписчика', 'подписчиков'])} за период.`
+        : `База сократилась на ${fmtInt(Math.abs(i.subscriberChange))} ${pluralRu(Math.abs(i.subscriberChange), ['подписчика', 'подписчика', 'подписчиков'])} за период.`,
       why: up ? undefined : 'Охваты могут расти даже при оттоке — стоит понять причину.',
       action: up ? undefined : 'Посмотрите, после каких постов уходят, в разделе «Рост».',
     });
@@ -89,7 +90,7 @@ export function buildTgInsights(i: TgInsightInput): TgInsight[] {
   // Best publishing window.
   if (i.bestWeekday || i.peakHour != null) {
     const parts = [
-      i.bestWeekday ? `в ${i.bestWeekday}` : null,
+      i.bestWeekday ?? null,
       i.peakHour != null ? `около ${i.peakHour}:00` : null,
     ].filter(Boolean);
     out.push({

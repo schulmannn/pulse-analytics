@@ -1,5 +1,5 @@
 import type { ChannelsResponse, HistoryData, TgFull } from '@/api/schemas';
-import { fmt } from '@/lib/format';
+import { fmt, pluralRu } from '@/lib/format';
 import { normalizeTgPosts } from '@/lib/posts';
 import type { NormalizedPost } from '@/lib/posts';
 import type { DateRange, PeriodDays } from '@/lib/period';
@@ -216,8 +216,8 @@ export function deriveKpis(
   // не по постам окна). Оставляем этот caption только на фолбэке в пост-сумму.
   const viewsBase = !hasChannelViews && postsAnalyzed
     ? atFetchCap
-      ? `по последним ${postsAnalyzed} постам`
-      : `по ${postsAnalyzed} постам`
+      ? `по последним ${postsAnalyzed} ${pluralRu(postsAnalyzed, ['посту', 'постам', 'постам'])}`
+      : `по ${postsAnalyzed} ${pluralRu(postsAnalyzed, ['посту', 'постам', 'постам'])}`
     : null;
   const viewsCaption = [viewsBase, viewsAbsCaption].filter(Boolean).join(' · ') || null;
 

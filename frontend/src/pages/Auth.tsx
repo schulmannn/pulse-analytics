@@ -285,7 +285,7 @@ export function VerifyPage() {
     <AuthShell title="Подтверждение email">
       <form onSubmit={handleSubmit}>
         <p className="text-sm text-ink2">
-          {token ? 'Активируй аккаунт в Atlavue.' : 'В ссылке отсутствует токен подтверждения.'}
+          {token ? 'Подтвердите аккаунт — нажмите кнопку ниже.' : 'Ссылка неполная — откройте её из письма целиком или запросите новое письмо при входе.'}
         </p>
         {token && !verifyMutation.isSuccess && (
           <button type="submit" disabled={verifyMutation.isPending} className={BUTTON_CLASS}>
@@ -327,7 +327,7 @@ export function ResetPage() {
   return (
     <AuthShell title="Новый пароль">
       <form onSubmit={handleSubmit}>
-        {!token && <p className="mb-2 text-sm text-destructive">В ссылке отсутствует токен сброса.</p>}
+        {!token && <p className="mb-2 text-sm text-destructive">Ссылка неполная — откройте её из письма целиком или запросите новую через «Забыли пароль?».</p>}
         <label className={LABEL_CLASS} htmlFor="reset-password">
           Новый пароль
         </label>

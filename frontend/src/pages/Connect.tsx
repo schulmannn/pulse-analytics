@@ -183,7 +183,7 @@ export function Connect() {
               <span className="text-2xs font-medium uppercase tracking-[0.1em] text-muted-foreground">Источник</span>
               <span className="mt-1 text-base font-medium tracking-tight text-foreground sm:text-lg">{active.name}</span>
               <span className="mt-0.5 text-2xs text-muted-foreground">
-                {activeState === 'connected' ? 'Подключён' : activeState === 'available' ? 'Доступно' : 'Скоро'}
+                {activeState === 'connected' ? 'Подключён' : activeState === 'available' ? 'Доступен' : 'Скоро'}
               </span>
             </div>
 
@@ -367,7 +367,7 @@ function InstagramPanel() {
       <PanelHead
         id="instagram"
         name="Instagram"
-        pill={connected ? { label: 'Подключён', tone: 'ok' } : envAccount ? { label: 'Общий аккаунт', tone: 'ok' } : { label: 'Доступно', tone: 'go' }}
+        pill={connected ? { label: 'Подключён', tone: 'ok' } : envAccount ? { label: 'Общий аккаунт', tone: 'ok' } : { label: 'Доступен', tone: 'go' }}
       />
 
       {channelId == null ? (
@@ -386,7 +386,7 @@ function InstagramPanel() {
                 disabled={connect.isPending}
                 className="btn-pill bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
               >
-                {connect.isPending ? 'Открываю Instagram…' : 'Подключить ещё один аккаунт'}
+                {connect.isPending ? 'Открытие Instagram…' : 'Подключить ещё один аккаунт'}
               </button>
             )}
             <button
@@ -395,7 +395,7 @@ function InstagramPanel() {
               disabled={disconnect.isPending}
               className="btn-pill border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-destructive disabled:opacity-50"
             >
-              {disconnect.isPending ? 'Отключаю…' : 'Отключить'}
+              {disconnect.isPending ? 'Отключение…' : 'Отключить'}
             </button>
           </div>
           {serverReady && (
@@ -428,7 +428,7 @@ function InstagramPanel() {
                 disabled={connect.isPending}
                 className="btn-pill bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
               >
-                {connect.isPending ? 'Открываю Instagram…' : 'Подключить свой аккаунт'}
+                {connect.isPending ? 'Открытие Instagram…' : 'Подключить свой аккаунт'}
               </button>
               {connectError && <p role="alert" className="text-xs font-medium text-destructive">{connectError}</p>}
             </>
@@ -446,7 +446,7 @@ function InstagramPanel() {
             disabled={connect.isPending || notReady}
             className="btn-pill bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
           >
-            {connect.isPending ? 'Открываю Instagram…' : 'Войти через Instagram'}
+            {connect.isPending ? 'Открытие Instagram…' : 'Войти через Instagram'}
           </button>
           {connectError && <p role="alert" className="text-xs font-medium text-destructive">{connectError}</p>}
           {notReady && (
@@ -571,7 +571,7 @@ function TelegramPanel({ channelName }: { channelName: string | null }) {
       if (r.status === 'ok') return onConnected(r.username ?? null, (r.channels ?? []) as QrChannel[]);
       if (r.status === 'password') return setPhase('password');
       if (r.status === 'expired') return void start();
-      if (r.status === 'error') { setErr(r.error || 'ошибка'); setPhase('idle'); return; }
+      if (r.status === 'error') { setErr(r.error || 'Не удалось войти — попробуйте ещё раз'); setPhase('idle'); return; }
       if (r.status === 'pending') {
         // The server rotates the QR token as it expires — re-render when the url changes.
         if (r.url && r.url !== urlRef.current) {
@@ -627,11 +627,11 @@ function TelegramPanel({ channelName }: { channelName: string | null }) {
       if (r.error === 'bad_password') return setErr('Неверный пароль');
       if (r.status === 'expired') { setErr('Код устарел — начните заново'); setPhase('idle'); return; }
       if (r.status === 'error') { setErr('Не удалось войти — начните заново'); setPhase('idle'); return; }
-      setErr(r.error || 'ошибка');
+      setErr(r.error || 'Не удалось войти — попробуйте ещё раз');
     } catch (e) {
       if (!alive.current) return;
       setBusy(false);
-      setErr(e instanceof Error ? e.message : 'ошибка');
+      setErr(e instanceof Error ? e.message : 'Не удалось войти — попробуйте ещё раз');
     }
   };
 
@@ -649,7 +649,7 @@ function TelegramPanel({ channelName }: { channelName: string | null }) {
 
   return (
     <div className="rounded-xl border border-border bg-card p-5 sm:p-6">
-      <PanelHead id="telegram" name="Telegram" pill={connected ? { label: 'Подключён', tone: 'ok' } : { label: 'Доступно', tone: 'go' }} />
+      <PanelHead id="telegram" name="Telegram" pill={connected ? { label: 'Подключён', tone: 'ok' } : { label: 'Доступен', tone: 'go' }} />
 
       <div className="mt-4 flex gap-1 border-b border-border">
         <TgTab active={tab === 'qr'} onClick={() => setTab('qr')}>QR-вход</TgTab>
@@ -687,7 +687,7 @@ function TelegramPanel({ channelName }: { channelName: string | null }) {
                 disabled={busy}
                 className="btn-pill mt-4 bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
               >
-                {busy ? 'Готовим код…' : 'Показать QR-код'}
+                {busy ? 'Подготовка кода…' : 'Показать QR-код'}
               </button>
               {err && <p role="alert" className="mt-3 text-xs font-medium text-destructive">{err}</p>}
             </div>
@@ -753,7 +753,7 @@ function TgScanning({
           disabled={busy || !password}
           className="btn-pill mt-3 bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
         >
-          {busy ? 'Проверяю…' : 'Подтвердить'}
+          {busy ? 'Проверка…' : 'Подтвердить'}
         </button>
       </div>
     );
@@ -869,7 +869,7 @@ function TgConnected({ username, channels, onDisconnect, busy }: { username: str
               disabled={adding}
               className="btn-pill mt-3 bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
             >
-              {adding ? 'Добавляю…' : `Добавить выбранные (${selected.length})`}
+              {adding ? 'Добавление…' : `Добавить выбранные (${selected.length})`}
             </button>
           )}
           <div aria-live="polite">
@@ -892,7 +892,7 @@ function TgConnected({ username, channels, onDisconnect, busy }: { username: str
         disabled={busy}
         className="btn-pill mt-4 border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-destructive disabled:opacity-50"
       >
-        {busy ? 'Отключаю…' : 'Отключить'}
+        {busy ? 'Отключение…' : 'Отключить'}
       </button>
     </div>
   );

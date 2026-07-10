@@ -22,7 +22,7 @@ describe('buildTgInsights', () => {
     const out = buildTgInsights({ subscriberChange: -108 });
     expect(out).toHaveLength(1);
     expect(out[0].tone).toBe('down');
-    expect(out[0].statement).toContain('Отписалось 108');
+    expect(out[0].statement).toContain('База сократилась на 108 подписчиков');
   });
 
   it('only surfaces a hashtag above the lift threshold', () => {

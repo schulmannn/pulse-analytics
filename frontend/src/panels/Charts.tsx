@@ -37,7 +37,7 @@ function ddmm(dayStr: string) {
 export function SubscriberHistoryChart({ rows }: { rows: SubscriberRow[] }) {
   const sampled = lttbDownsample(rows, 140, (row) => Number(row.subscribers));
   const values = sampled.map((row) => Number(row.subscribers));
-  const titles = sampled.map((row) => `${ddmm(row.day)}: ${fmt.num(row.subscribers)} подписчиков`);
+  const titles = sampled.map((row) => `${ddmm(row.day)}: ${fmt.num(row.subscribers)} ${pluralRu(Number(row.subscribers), ['подписчик', 'подписчика', 'подписчиков'])}`);
   // Full per-point labels: the axis-free card shows first/mid/last itself, the explorer
   // strides them into a real x-axis (a pre-picked 3-label array would starve the axis).
   const labels = sampled.map((row) => ddmm(row.day));
@@ -130,7 +130,7 @@ export function HistoryChartBlock({ id, homeKey }: HomeBlockProps = {}) {
   }
 
   const isDownsampled = rawRows.length > 140;
-  const archCaption = `${rawRows.length} дн в архиве${isDownsampled ? ' · сглажено' : ''}`;
+  const archCaption = `${rawRows.length} дн. в архиве${isDownsampled ? ' · сглажено' : ''}`;
   const deltas = subscriberDeltas(rows);
   // LEVEL series (steep rule): the headline is the CURRENT level, and the honest comparison is
   // vs the start of the plotted range (net change over what the chart shows) — a window-sum

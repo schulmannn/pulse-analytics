@@ -13,7 +13,7 @@ function ago(ms: number): string {
   if (m < 60) return `${m} мин назад`;
   const h = Math.floor(m / 60);
   if (h < 24) return `${h} ч назад`;
-  return `${Math.floor(h / 24)} дн назад`;
+  return `${Math.floor(h / 24)} дн. назад`;
 }
 
 function Row({ label, value, tone }: { label: string; value: ReactNode; tone?: 'ok' | 'warn' }) {
