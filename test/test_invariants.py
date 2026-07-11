@@ -24,6 +24,15 @@ def _install_stubs():
     fastapi = mod("fastapi")
     for attr in ("Body", "Depends", "FastAPI", "HTTPException", "Header", "Query", "Response"):
         setattr(fastapi, attr, lambda *a, **k: _Passthrough())
+
+    # HTTPException — настоящий Exception: код сервиса его raise'ит (лямбда-заглушка дала бы
+    # TypeError «exceptions must derive from BaseException» на любом error-пути под тестом).
+    class _StubHTTPException(Exception):
+        def __init__(self, status_code=None, detail=None):
+            super().__init__(detail)
+            self.status_code = status_code
+            self.detail = detail
+    fastapi.HTTPException = _StubHTTPException
     responses = mod("fastapi.responses")
     responses.JSONResponse = object
     fastapi.responses = responses
@@ -127,6 +136,43 @@ class AlbumInvariantTests(unittest.TestCase):
         joined.action = object()   # a service message (e.g. pinned/joined) — not a real post
         groups = svc._logical_posts([joined, _Msg(301, 10)])
         self.assertEqual(len(groups), 1, "service/action messages are excluded from post counts")
+
+
+class SemaphoreAcquireTests(unittest.TestCase):
+    """_acquire_or_503 не должен ни терять пермит на таймауте (Semaphore(1) заклинил бы
+    все stats-эндпоинты до рестарта), ни возвращать лишний (двойной release)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.svc = _load_service()
+
+    def test_timeout_does_not_leak_or_duplicate_permit(self):
+        svc = self.svc
+        import asyncio
+
+        async def run():
+            sem = asyncio.Semaphore(1)
+            await sem.acquire()                      # держатель занял единственный пермит
+
+            # Несколько неудачных захватов подряд: каждый обязан отдать 503 и не съесть пермит.
+            for _ in range(3):
+                with self.assertRaises(Exception) as ctx:
+                    await svc._acquire_or_503(sem, 0.01, 'busy')
+                self.assertEqual(getattr(ctx.exception, 'status_code', None), 503)
+
+            sem.release()                            # держатель отпустил
+            await asyncio.sleep(0)                   # тик — отработать done-callback'и отменённых задач
+
+            # Ровно ОДИН пермит доступен: захват мгновенно успешен...
+            await asyncio.wait_for(sem.acquire(), timeout=1)
+            # ...а второй снова упирается в таймаут (нет ни утечки, ни двойного release).
+            with self.assertRaises(Exception) as ctx:
+                await svc._acquire_or_503(sem, 0.01, 'busy')
+            self.assertEqual(getattr(ctx.exception, 'status_code', None), 503)
+            sem.release()
+
+        import asyncio as _a
+        _a.run(run())
 
 
 if __name__ == "__main__":

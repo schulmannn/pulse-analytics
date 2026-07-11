@@ -8,6 +8,7 @@ import os
 import json
 import logging
 import re
+import functools
 import secrets
 import time
 from collections import OrderedDict
@@ -95,12 +96,56 @@ CLIENT_CONNECT_TIMEOUT_S = 20
 # as a route dependency so direct function calls (the collector) stay unserialized.
 _STATS_LOCK = asyncio.Semaphore(1)
 
+# Совокупные дедлайны эндпоинтов, держащих _STATS_LOCK. Пер-вызовный TELETHON_CALL_TIMEOUT_S
+# ограничивает ОДИН round-trip, но /graphs делает ~11 последовательных вызовов и мог держать
+# лок минутами: Node уже оборвал сокет по своему бюджету (60s stats / 120s heavy), а await
+# продолжал крутиться под локом — и все stats-эндпоинты ловили 503 по STATS_LOCK_TIMEOUT_S.
+# Бюджет чуть НИЖЕ Node-яруса, чтобы Python сдался первым и отпустил лок.
+STATS_TOTAL_BUDGET_S = 55
+HEAVY_TOTAL_BUDGET_S = 110
+
+
+def _total_budget(seconds):
+    def deco(fn):
+        @functools.wraps(fn)   # inspect.signature идёт по __wrapped__ — DI FastAPI видит исходную сигнатуру
+        async def wrapper(*args, **kwargs):
+            try:
+                async with asyncio.timeout(seconds):
+                    return await fn(*args, **kwargs)
+            except TimeoutError:
+                raise HTTPException(status_code=503, detail='mtproto_timeout')
+        return wrapper
+    return deco
+
+
+async def _acquire_or_503(sem: asyncio.Semaphore, timeout_s: float, detail: str):
+    """Захват семафора с дедлайном БЕЗ утечки пермита. У наивного wait_for(sem.acquire())
+    есть известная гонка: отмена по таймауту может прийти в тот же тик, когда пермит уже
+    выдан, — acquire завершился, release не случится, и Semaphore(1) заклинил бы все
+    stats-эндпоинты до рестарта. shield оставляет задачу захвата живой, а done-callback
+    возвращает пермит, если захват всё же успел завершиться после таймаута."""
+    task = asyncio.ensure_future(sem.acquire())
+    try:
+        await asyncio.wait_for(asyncio.shield(task), timeout=timeout_s)
+    except asyncio.TimeoutError:
+        task.cancel()
+
+        def _reclaim(t):
+            if not t.cancelled() and t.exception() is None:
+                sem.release()
+        task.add_done_callback(_reclaim)
+        raise HTTPException(status_code=503, detail=detail)
+
+
+async def _require_token(x_internal_token: str = Header(default='')):
+    # Аутентификация ДО захвата stats-лока: dependencies резолвятся раньше тела хендлера,
+    # поэтому раньше неаутентифицированный трафик конкурировал за единственный пермит и
+    # вытеснял легитимные запросы в 503 по таймауту. In-handler check_auth остаётся вторым поясом.
+    check_auth(x_internal_token)
+
 
 async def _serialize_stats():
-    try:
-        await asyncio.wait_for(_STATS_LOCK.acquire(), timeout=STATS_LOCK_TIMEOUT_S)
-    except asyncio.TimeoutError:
-        raise HTTPException(status_code=503, detail='mtproto_timeout')
+    await _acquire_or_503(_STATS_LOCK, STATS_LOCK_TIMEOUT_S, 'mtproto_timeout')
     try:
         yield
     finally:
@@ -357,7 +402,8 @@ async def get_posts(
         raise HTTPException(status_code=500, detail='internal_error')
 
 
-@app.get('/views_summary', dependencies=[Depends(_serialize_stats)])
+@app.get('/views_summary', dependencies=[Depends(_require_token), Depends(_serialize_stats)])
+@_total_budget(STATS_TOTAL_BUDGET_S)
 async def get_views_summary(
     limit: int = Query(default=30, le=100),
     x_internal_token: str = Header(default=''),
@@ -415,7 +461,8 @@ async def get_views_summary(
         raise HTTPException(status_code=500, detail='internal_error')
 
 
-@app.get('/stats', dependencies=[Depends(_serialize_stats)])
+@app.get('/stats', dependencies=[Depends(_require_token), Depends(_serialize_stats)])
+@_total_budget(STATS_TOTAL_BUDGET_S)
 async def get_stats(x_internal_token: str = Header(default='')):
     check_auth(x_internal_token)
     try:
@@ -465,7 +512,8 @@ async def get_stats(x_internal_token: str = Header(default='')):
         return {'available': False, 'error': str(e)}
 
 
-@app.get('/graphs', dependencies=[Depends(_serialize_stats)])
+@app.get('/graphs', dependencies=[Depends(_require_token), Depends(_serialize_stats)])
+@_total_budget(HEAVY_TOTAL_BUDGET_S)
 async def get_graphs(points: int = Query(default=45, le=400), x_internal_token: str = Header(default='')):
     """Rich channel stats graphs: subscriber growth, view/follower sources,
     audience by hour, languages, reaction sentiment."""
@@ -569,7 +617,8 @@ async def get_graphs(points: int = Query(default=45, le=400), x_internal_token: 
         raise HTTPException(status_code=500, detail='internal_error')
 
 
-@app.get('/post_stats/{msg_id}', dependencies=[Depends(_serialize_stats)])
+@app.get('/post_stats/{msg_id}', dependencies=[Depends(_require_token), Depends(_serialize_stats)])
+@_total_budget(STATS_TOTAL_BUDGET_S)
 async def get_post_stats(msg_id: int, x_internal_token: str = Header(default='')):
     """Per-post detailed stats (GetMessageStats): views-over-time + reactions.
     May be unavailable for posts with too few views."""
@@ -643,7 +692,8 @@ async def get_post_stats(msg_id: int, x_internal_token: str = Header(default='')
         return {'available': False, 'error': str(e)}
 
 
-@app.get('/velocity', dependencies=[Depends(_serialize_stats)])
+@app.get('/velocity', dependencies=[Depends(_require_token), Depends(_serialize_stats)])
+@_total_budget(HEAVY_TOTAL_BUDGET_S)
 async def get_velocity(
     limit: int = Query(default=40, le=100),
     top: int = Query(default=12, le=20),
@@ -788,7 +838,8 @@ def _mention_snippet(text, query, n=220):
     return ('…' if start > 0 else '') + text[start:end] + ('…' if end < len(text) else '')
 
 
-@app.get('/mentions', dependencies=[Depends(_serialize_stats)])
+@app.get('/mentions', dependencies=[Depends(_require_token), Depends(_serialize_stats)])
+@_total_budget(HEAVY_TOTAL_BUDGET_S)
 async def get_mentions(x_internal_token: str = Header(default='')):
     """Brand mentions in public channels via channels.searchPosts (Premium).
     On-demand: each query consumes one of ~10 free daily searches, so we check
@@ -1354,10 +1405,7 @@ async def qr_collect(session: str = Body(...), channel: str = Body(...),
         raise HTTPException(status_code=503, detail='mtproto_not_configured')
     posts_limit = max(1, min(int(posts_limit or 100), 100))
     graph_points = max(1, min(int(graph_points or 400), 400))
-    try:
-        await asyncio.wait_for(_QR_COLLECT_SEM.acquire(), timeout=_QR_COLLECT_ACQUIRE_TIMEOUT_S)
-    except asyncio.TimeoutError:
-        raise HTTPException(status_code=503, detail='too_many_collecting')
+    await _acquire_or_503(_QR_COLLECT_SEM, _QR_COLLECT_ACQUIRE_TIMEOUT_S, 'too_many_collecting')
     tg = None
     try:
         tg = TelegramClient(StringSession(session), API_ID, API_HASH)
