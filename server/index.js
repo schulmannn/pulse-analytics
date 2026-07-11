@@ -1177,7 +1177,7 @@ if (Number.isFinite(WEB_REPLICAS) && WEB_REPLICAS > 1) {
   });
 }
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`
 ╔══════════════════════════════════════════╗
 ║        Atlavue Server            ║
@@ -1190,6 +1190,47 @@ app.listen(PORT, () => {
 ╚══════════════════════════════════════════╝
   `);
 });
+
+// ── Process-level safety net ──────────────────────────────────────
+// ~40 fire-and-forget промисов по кодовой базе полагаются на ручную дисциплину .catch;
+// один пропущенный reject на Node ≥15 молча роняет процесс без единой строки в логах.
+// unhandledRejection: логируем и живём дальше (дашборд важнее падения на телеметрии).
+// uncaughtException: состояние процесса не определено — логируем и выходим, Railway
+// перезапустит. Хендлеры ставятся ТОЛЬКО под require.main: тесты импортируют app и
+// не должны наследовать exit-поведение.
+process.on('unhandledRejection', (reason) => {
+  const err = reason instanceof Error ? reason : new Error(String(reason));
+  log('error', 'unhandled_rejection', { error: err.message, stack: err.stack });
+});
+process.on('uncaughtException', (err) => {
+  log('error', 'uncaught_exception', { error: err.message, stack: err.stack });
+  process.exit(1);
+});
+
+// ── Graceful shutdown ─────────────────────────────────────────────
+// Railway шлёт SIGTERM на каждом деплое: без хендлера in-flight запросы обрываются,
+// pg-пул не дренится, а прерванный ingest оставляет jobs-строку running под 15-мин
+// lease. Закрываем listener (перестаём принимать новое), даём in-flight завершиться,
+// закрываем пул; жёсткий таймаут — страховка от зависшего keep-alive.
+const SHUTDOWN_TIMEOUT_MS = 10_000;
+let shuttingDown = false;
+function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  log('info', 'shutdown_started', { signal });
+  const hardStop = setTimeout(() => {
+    log('error', 'shutdown_timeout', { timeout_ms: SHUTDOWN_TIMEOUT_MS });
+    process.exit(1);
+  }, SHUTDOWN_TIMEOUT_MS);
+  hardStop.unref();
+  server.close(() => {
+    db.close()
+      .catch((e) => log('error', 'shutdown_db_close_failed', { error: e.message }))
+      .finally(() => { log('info', 'shutdown_complete', {}); process.exit(0); });
+  });
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
 module.exports = { app };
