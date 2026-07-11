@@ -82,6 +82,11 @@ test('reportHasWeekBlock: preset week/digest = да; чужие блоки/му�
   assert.equal(reportHasWeekBlock({ blocks: [{ id: 'z', type: 'text', config: {} }] }), false);
   assert.equal(reportHasWeekBlock({}), false);
   assert.equal(reportHasWeekBlock(null), false);
+  // Legacy-строковая форма блоков (ReportConfigSchema: blocks может быть string[]) — старые
+  // сохранённые отчёты не должны терять нарратив в письме.
+  assert.equal(reportHasWeekBlock({ blocks: ['week'] }), true);
+  assert.equal(reportHasWeekBlock({ blocks: ['kpi-summary', 'digest'] }), true);
+  assert.equal(reportHasWeekBlock({ blocks: ['kpi-summary'] }), false);
 });
 
 // ── Full pipeline через РЕАЛЬНЫЙ shared-движок (скип без собранного артефакта) ──────────────
