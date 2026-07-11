@@ -402,7 +402,14 @@ async function setChannelTgId(id, tgId, executor = pool) {
   return true;
 }
 
-const num = (v) => (v == null || isNaN(v)) ? null : Math.round(Number(v));
+// INT4-колонки дневных таблиц: одно переполнение счётчика (сверхкрупный канал) раньше валило
+// ВЕСЬ дневной ingest («integer out of range» → ROLLBACK всей транзакции дня). Клампим к границе
+// INT4; полноценная BIGINT-миграция дневных таблиц — отдельным шагом (ALTER на больших таблицах).
+const INT4_MAX = 2147483647;
+const num = (v) => {
+  if (v == null || isNaN(v)) return null;
+  return Math.max(-INT4_MAX - 1, Math.min(INT4_MAX, Math.round(Number(v))));
+};
 
 /* Pure transform: stats graphs → array of daily rows. Exported for testing.
    Builds the union of all days present across the daily series, so re-running
@@ -475,9 +482,14 @@ async function upsertPosts(channelId, rows, executor = pool) {
     ON CONFLICT (channel_id, post_id) DO UPDATE SET
       source_id=COALESCE(EXCLUDED.source_id, posts.source_id),
       date_published=COALESCE(EXCLUDED.date_published, posts.date_published),
-      views=EXCLUDED.views, reactions=EXCLUDED.reactions, forwards=EXCLUDED.forwards, replies=EXCLUDED.replies,
-      erv=EXCLUDED.erv, virality=EXCLUDED.virality, media_type=EXCLUDED.media_type,
-      caption=EXCLUDED.caption, hashtags=EXCLUDED.hashtags, updated_at=now()`;
+      -- NULL в свежем ре-ингесте = «метрика временно недоступна», не «стало ноль»: голый
+      -- EXCLUDED затирал уже сохранённые значения (соседние daily-upsert'ы всегда COALESCE'ят)
+      views=COALESCE(EXCLUDED.views, posts.views), reactions=COALESCE(EXCLUDED.reactions, posts.reactions),
+      forwards=COALESCE(EXCLUDED.forwards, posts.forwards), replies=COALESCE(EXCLUDED.replies, posts.replies),
+      erv=COALESCE(EXCLUDED.erv, posts.erv), virality=COALESCE(EXCLUDED.virality, posts.virality),
+      media_type=COALESCE(EXCLUDED.media_type, posts.media_type),
+      caption=COALESCE(EXCLUDED.caption, posts.caption),
+      hashtags=COALESCE(EXCLUDED.hashtags, posts.hashtags), updated_at=now()`;
   await executor.query(sql, [channelId, JSON.stringify(rows)]);
   return rows.length;
 }
@@ -497,8 +509,10 @@ async function upsertMentions(channelId, list, executor = pool) {
         link text, snippet text, views integer, query text
       )
     ON CONFLICT (owner_channel_id, channel_id, msg_id) DO UPDATE SET
-      last_seen=now(), views=EXCLUDED.views, title=EXCLUDED.title, username=EXCLUDED.username,
-      link=EXCLUDED.link, snippet=EXCLUDED.snippet, query=EXCLUDED.query`;
+      last_seen=now(),
+      views=COALESCE(EXCLUDED.views, mentions.views), title=COALESCE(EXCLUDED.title, mentions.title),
+      username=COALESCE(EXCLUDED.username, mentions.username), link=COALESCE(EXCLUDED.link, mentions.link),
+      snippet=COALESCE(EXCLUDED.snippet, mentions.snippet), query=COALESCE(EXCLUDED.query, mentions.query)`;
   await executor.query(sql, [channelId, JSON.stringify(clean)]);
   return clean.length;
 }
@@ -545,7 +559,7 @@ async function getMentionsArchive(channelId, limit = 30) {
        FROM mentions WHERE owner_channel_id=$1 AND COALESCE(post_date, first_seen) >= (CURRENT_DATE - 60) GROUP BY 1`, [channelId]);
   const channels = await pool.query(
     `SELECT max(title) AS title, max(username) AS username, count(*)::int AS count,
-            COALESCE(sum(views),0)::int AS views
+            COALESCE(sum(views),0)::bigint AS views
        FROM mentions WHERE owner_channel_id=$1 GROUP BY channel_id ORDER BY count(*) DESC, sum(views) DESC NULLS LAST LIMIT 10`, [channelId]);
   const recent = await pool.query(
     `SELECT channel_id, msg_id, title, username, link, snippet, views,
@@ -560,7 +574,9 @@ async function getMentionsArchive(channelId, limit = 30) {
     unique_channels: t.unique_channels || 0,
     total_views: Number(t.total_views || 0),
     by_day,
-    top_channels: channels.rows,
+    // pg отдаёт bigint строкой — приводим к number (сумма просмотров << 2^53, точность не страдает;
+    // строка ломала бы zod-схему фронта и арифметику сортировок). ::int здесь переполнялся.
+    top_channels: channels.rows.map((r) => ({ ...r, views: Number(r.views || 0) })),
     recent: recent.rows,
   };
 }
@@ -694,14 +710,29 @@ async function createEmailToken(uid, kind, tokenHash, expiresAt) {
   if (!enabled) return null;
   // Per-account cooldown (independent of IP rate-limit): at most one email per
   // minute per uid+kind → blocks email-bombing a victim / burning the send quota.
-  const recent = await pool.query(
-    "SELECT 1 FROM email_tokens WHERE uid=$1 AND kind=$2 AND created_at > now() - interval '60 seconds' LIMIT 1", [uid, kind]);
-  if (recent.rows.length) return null;
-  await pool.query('UPDATE email_tokens SET used_at=now() WHERE uid=$1 AND kind=$2 AND used_at IS NULL', [uid, kind]);
-  const { rows } = await pool.query(
-    'INSERT INTO email_tokens (uid, kind, token_hash, expires_at) VALUES ($1,$2,$3,$4) RETURNING id',
-    [uid, kind, tokenHash, expiresAt]);
-  return rows[0] ? rows[0].id : null;
+  // Кулдаун-чек, инвалидация и INSERT — в одной транзакции под advisory-локом (uid+kind):
+  // раньше это были три автокоммита, и два конкурентных запроса оба проходили чек —
+  // две живые ссылки в двух письмах, кулдаун в обход.
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      "SELECT pg_advisory_xact_lock(hashtext('email_token:' || $1::text || ':' || $2))", [uid, kind]);
+    const recent = await client.query(
+      "SELECT 1 FROM email_tokens WHERE uid=$1 AND kind=$2 AND created_at > now() - interval '60 seconds' LIMIT 1", [uid, kind]);
+    if (recent.rows.length) { await client.query('ROLLBACK'); return null; }
+    await client.query('UPDATE email_tokens SET used_at=now() WHERE uid=$1 AND kind=$2 AND used_at IS NULL', [uid, kind]);
+    const { rows } = await client.query(
+      'INSERT INTO email_tokens (uid, kind, token_hash, expires_at) VALUES ($1,$2,$3,$4) RETURNING id',
+      [uid, kind, tokenHash, expiresAt]);
+    await client.query('COMMIT');
+    return rows[0] ? rows[0].id : null;
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 // Atomically consume a token: single-use + expiry enforced in one UPDATE … RETURNING,
@@ -1250,19 +1281,31 @@ async function saveIgAccount(channelId, { ig_user_id, username, access_token_enc
   if (!enabled || !channelId) return false;
   // Canonical IG source (ADR-001): find-or-create by ig_user_id and stamp the account row; a
   // standalone IG channel (source='ig', no TG identity) also carries it as its channel source.
-  const srcId = await ensureExternalSource('ig', ig_user_id, { username });
-  await pool.query(
-    `INSERT INTO ig_accounts (channel_id, ig_user_id, username, access_token_enc, token_expires_at, scopes, source_id, updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7, now())
-     ON CONFLICT (channel_id) DO UPDATE SET
-       ig_user_id=EXCLUDED.ig_user_id, username=EXCLUDED.username,
-       access_token_enc=EXCLUDED.access_token_enc, token_expires_at=EXCLUDED.token_expires_at,
-       scopes=EXCLUDED.scopes, source_id=COALESCE(EXCLUDED.source_id, ig_accounts.source_id), updated_at=now()`,
-    [channelId, ig_user_id, username || null, access_token_enc, token_expires_at || null, scopes || null, srcId]);
-  await pool.query(
-    `UPDATE channels SET source_id=$2 WHERE id=$1 AND source_id IS NULL AND tg_channel_id IS NULL AND source='ig'`,
-    [channelId, srcId]);
-  return true;
+  // Три записи (source find-or-create → аккаунт → штамп канала) — одной транзакцией: раньше
+  // это были автокоммиты, и падение между ними оставляло аккаунт без source-связки.
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const srcId = await ensureExternalSource('ig', ig_user_id, { username }, client);
+    await client.query(
+      `INSERT INTO ig_accounts (channel_id, ig_user_id, username, access_token_enc, token_expires_at, scopes, source_id, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7, now())
+       ON CONFLICT (channel_id) DO UPDATE SET
+         ig_user_id=EXCLUDED.ig_user_id, username=EXCLUDED.username,
+         access_token_enc=EXCLUDED.access_token_enc, token_expires_at=EXCLUDED.token_expires_at,
+         scopes=EXCLUDED.scopes, source_id=COALESCE(EXCLUDED.source_id, ig_accounts.source_id), updated_at=now()`,
+      [channelId, ig_user_id, username || null, access_token_enc, token_expires_at || null, scopes || null, srcId]);
+    await client.query(
+      `UPDATE channels SET source_id=$2 WHERE id=$1 AND source_id IS NULL AND tg_channel_id IS NULL AND source='ig'`,
+      [channelId, srcId]);
+    await client.query('COMMIT');
+    return true;
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 // Full row incl. the encrypted token (callers decrypt). Returns null when not connected.
@@ -1509,7 +1552,7 @@ async function listAnnotations(channelId) {
   const { rows } = await pool.query(
     `SELECT id, to_char(day,'YYYY-MM-DD') AS day, label,
             to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SS') AS created_at
-       FROM chart_annotations WHERE channel_id=$1 ORDER BY day ASC, id ASC`, [channelId]);
+       FROM chart_annotations WHERE channel_id=$1 ORDER BY day ASC, id ASC LIMIT 500`, [channelId]);
   return rows;
 }
 
