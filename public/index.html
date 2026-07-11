@@ -2156,7 +2156,6 @@ const API = {
   resendVerification(email) { return this.req('/api/auth/resend-verification', { method: 'POST', body: JSON.stringify({ email }) }); },
   logout()         { return this.req('/api/auth/logout', { method: 'POST' }); },
   check()          { return this.req('/api/auth/check'); },
-  me()             { return this.req('/api/auth/me'); },
   getPrefs()       { return this.req('/api/prefs'); },
   putPrefs(prefs)  { return this.req('/api/prefs', { method: 'PUT', body: JSON.stringify({ prefs }) }); },
   changePassword(current, next) { return this.req('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ current, next }) }); },
@@ -2194,21 +2193,13 @@ const fmt = {
   short(n) {
     if (n == null || isNaN(n)) return '—';
     const abs = Math.abs(n);
-    if (abs >= 1e6) return (n / 1e6).toFixed(1).replace('.0','') + 'M';
+    if (abs >= 999950) return (n / 1e6).toFixed(1).replace('.0','') + 'M';   // 999 999 давал «1000k»
     if (abs >= 1e3) return (n / 1e3).toFixed(1).replace('.0','') + 'k';
     return String(Math.round(n));
   },
   plural(n, one, few, many) {                 // correct Russian plural forms via Intl.PluralRules
     const r = PLURAL_RU ? PLURAL_RU.select(Math.abs(Math.round(n))) : (Math.abs(n) === 1 ? 'one' : 'other');
     return r === 'one' ? one : (r === 'few' ? few : many);
-  },
-  pct(p, digits = 2) {
-    if (p == null || isNaN(p)) return '—';
-    return (p >= 0 ? '+' : '') + p.toFixed(digits) + '%';
-  },
-  delta(curr, prev, digits = 1) {
-    if (!prev || !curr) return null;
-    return ((curr - prev) / prev) * 100;
   },
   date(iso) {
     if (!iso) return '';
@@ -3142,6 +3133,17 @@ function renderKpiSkeletons() {
   `).join('');
 }
 
+/* 'DD.MM' → timestamp. Ключи *_by_day не несут год: на стыке лет декабрьские бакеты получали
+   НОВЫЙ год и сортировались ПОСЛЕ январских (перемешанный порядок точек, ghost-окно мимо).
+   Дата дальше завтрашней = прошлый год. */
+function dayKeyToTs(day) {
+  const [d, m] = String(day).split('.').map(Number);
+  const now = new Date();
+  let t = new Date(now.getFullYear(), (m || 1) - 1, d || 1);
+  if (t.getTime() > now.getTime() + 86400000) t = new Date(now.getFullYear() - 1, (m || 1) - 1, d || 1);
+  return t.getTime();
+}
+
 /* ── Trend deltas vs previous period (computed from daily series) ── */
 function makeTrend(abs, pct, n) {
   const up = abs >= 0;
@@ -3149,17 +3151,22 @@ function makeTrend(abs, pct, n) {
 }
 function trendFromStock(vals, n) {            // cumulative metric (subscribers): now vs n days ago
   if (!vals || vals.length < 2) return null;
+  // Короткая история: окно клампится к доступному, и ЛЕЙБЛ следует за фактом («за 20 дн»
+  // вместо «за 90 дн» при 20 днях данных — раньше дельта тихо завышала окно).
+  const back = Math.min(n, vals.length - 1);
   const cur = Number(vals[vals.length - 1]);
-  const prev = Number(vals[Math.max(0, vals.length - 1 - n)]);
+  const prev = Number(vals[vals.length - 1 - back]);
   if (isNaN(cur) || isNaN(prev)) return null;
-  return makeTrend(cur - prev, prev ? ((cur - prev) / prev * 100) : 0, n);
+  return makeTrend(cur - prev, prev ? ((cur - prev) / prev * 100) : 0, back);
 }
 function trendFromFlow(vals, n) {             // per-day metric (views/reactions): sum(last n) vs sum(prev n)
   if (!vals || vals.length < 2) return null;
   const arr = vals.map(Number);
   const last = arr.slice(-n).reduce((a, b) => a + (b || 0), 0);
   const prevArr = arr.slice(-2 * n, -n);
-  if (!prevArr.length) return null;
+  // Требуем ПОЛНОЕ предыдущее окно: при истории < 2n хвост короче периода, и сумма 30 дней
+  // делилась на сумму ~15 → фейковые «+100%» на бейджах. Нет полной базы — нет бейджа.
+  if (prevArr.length < n) return null;
   const prev = prevArr.reduce((a, b) => a + (b || 0), 0);
   return makeTrend(last - prev, prev ? ((last - prev) / prev * 100) : 0, n);
 }
@@ -3175,7 +3182,6 @@ function renderKpis() {
   const igImpressions  = sumMetric(state.ig.insights, ['impressions','views']) || 0;
   const igProfileViews = sumMetric(state.ig.insights, ['profile_views']) || 0;
   const igWebClicks    = sumMetric(state.ig.insights, ['website_clicks']) || 0;
-  const igFollowerNew  = sumMetric(state.ig.insights, ['follower_count']) || 0;
 
   // Engagement from posts
   let totalLikes = 0, totalComments = 0, totalShares = 0, totalSaved = 0, postCount = 0;
@@ -3275,10 +3281,9 @@ function renderKpis() {
     const erVal = members > 0 ? ((totalReactions + totalReplies + totalForwards) / members * 100) : 0;
     const notif = cs.enabled_notifications || null;
     const vbd = (vs.views_by_day && typeof vs.views_by_day === 'object') ? vs.views_by_day : null;
-    const spark = vbd ? Object.entries(vbd).map(([day, v]) => {
-      const [d, m] = day.split('.').map(Number);
-      return { ts: new Date(new Date().getFullYear(), (m || 1) - 1, d || 1).getTime(), v: Number(v) || 0 };
-    }).sort((a, b) => a.ts - b.ts).map(e => e.v) : [];
+    const spark = vbd ? Object.entries(vbd).map(([day, v]) => (
+      { ts: dayKeyToTs(day), v: Number(v) || 0 }
+    )).sort((a, b) => a.ts - b.ts).map(e => e.v) : [];
     const cur = (o) => (o && o.current != null) ? o.current : null;
     return [
       { feature: true, label: 'Подписчики', value: fmt.num(members),
@@ -3462,13 +3467,10 @@ function renderTg() {
 
   if (!chartEl) { /* chart removed from profile panel (duplicated the Охват tab) */ }
   else if (mtprotoOk && viewsByDay && Object.keys(viewsByDay).length > 0) {
-    // Sort days chronologically (DD.MM format → year boundary handled simply)
-    const entries = Object.entries(viewsByDay).map(([day, views]) => {
-      const [d, m] = day.split('.').map(Number);
-      const year = new Date().getFullYear();
-      const ts = new Date(year, (m || 1) - 1, d || 1).getTime();
-      return { day, views: Number(views) || 0, ts };
-    }).sort((a, b) => a.ts - b.ts);
+    // Sort days chronologically ('DD.MM' без года — dayKeyToTs чинит стык лет)
+    const entries = Object.entries(viewsByDay).map(([day, views]) => (
+      { day, views: Number(views) || 0, ts: dayKeyToTs(day) }
+    )).sort((a, b) => a.ts - b.ts);
 
     // Show last 14 days max
     const last = entries.slice(-14);
@@ -4130,10 +4132,11 @@ function attachBarClick(el, n, onIndex) {
 function openDayModal(entry) {
   if (!entry || !entry.day) return;
   const [dd, mm] = entry.day.split('.').map(Number);
+  const targetYear = new Date(dayKeyToTs(entry.day)).getFullYear();   // >12 мес постов: без года тянуло прошлогодние DD.MM
   const dayPosts = (state.posts || []).filter(p => {
     if (p.source !== 'TG' || !p.date) return false;
     const d = new Date(p.date);
-    return d.getDate() === dd && (d.getMonth() + 1) === mm;
+    return d.getDate() === dd && (d.getMonth() + 1) === mm && d.getFullYear() === targetYear;
   }).sort((a, b) => (b.reach || 0) - (a.reach || 0));
   const body = document.getElementById('chart-modal-body');
   if (!body) return;
@@ -4203,11 +4206,9 @@ function renderTgAnalytics() {
   const vbd = (vs.views_by_day && typeof vs.views_by_day === 'object') ? vs.views_by_day : null;
   if (chartEl) {
     if (vbd) {
-      const sortedAll = Object.entries(vbd).map(([day, v]) => {
-        const [d, m] = day.split('.').map(Number);
-        const ts = new Date(new Date().getFullYear(), (m || 1) - 1, d || 1).getTime();
-        return { day, v: Number(v) || 0, ts };
-      }).sort((a, b) => a.ts - b.ts);
+      const sortedAll = Object.entries(vbd).map(([day, v]) => (
+        { day, v: Number(v) || 0, ts: dayKeyToTs(day) }
+      )).sort((a, b) => a.ts - b.ts);
       const entries = sortedAll.slice(-14);
       const prevEntries = sortedAll.slice(-28, -14);   // equal-length window just before
       const vd = entries.map(e => e.v);
@@ -4365,7 +4366,12 @@ function renderTgAnalytics() {
       setXAxis('tg-net-labels', (f.x || []).slice(-30).map(ts => { const d = new Date(Number(ts)); return `${d.getDate()} ${MON_EN[d.getMonth()]}`; }));
       setTip(netEl, netTitles, 'bar');
     }
-    if (netSum) { const tot = joinedTotal - leftTotal; netSum.textContent = `${tot >= 0 ? '+' : ''}${fmt.num(tot)} за период`; }
+    if (netSum) {
+      // «за период» — по выбранному окну, не по всему хвосту серии (согласовано с KPI-карточкой)
+      const w = net.slice(-currentPeriod);
+      const tot = w.reduce((a, b) => a + b, 0);
+      netSum.textContent = `${tot >= 0 ? '+' : ''}${fmt.num(tot)} за период`;
+    }
   } else {
     if (netEl) netEl.innerHTML = divergingBarsSvg([]);
     if (netSum) netSum.textContent = '';
@@ -4565,10 +4571,9 @@ function renderMentions(data) {
   body.innerHTML = html;
 
   const bd = (data.by_day && typeof data.by_day === 'object') ? data.by_day : {};
-  const entries = Object.entries(bd).map(([day, c]) => {
-    const [d, m] = day.split('.').map(Number);
-    return { day, c: Number(c) || 0, ts: new Date(new Date().getFullYear(), (m || 1) - 1, d || 1).getTime() };
-  }).sort((a, b) => a.ts - b.ts).slice(-14);
+  const entries = Object.entries(bd).map(([day, c]) => (
+    { day, c: Number(c) || 0, ts: dayKeyToTs(day) }
+  )).sort((a, b) => a.ts - b.ts).slice(-14);
   const vals = entries.map(e => e.c);
   const dayEl = document.getElementById('mentions-day-chart');
   if (dayEl) {
@@ -4662,9 +4667,12 @@ function renderDigest() {
   if (f && f.series && f.series.length >= 2) {
     const j = f.series.find(s => /join|подпис/i.test(s.name)) || f.series[0];
     const l = f.series.find(s => /left|отпис/i.test(s.name)) || f.series[1];
-    const m = Math.min(j.values.length, l.values.length);
+    // Окно = выбранный период (как на KPI-карточке): раньше суммировался ВЕСЬ ~45-дневный
+    // хвост, и «за период» в трёх местах экрана показывал три разных числа.
+    const jv = j.values.slice(-currentPeriod), lv = l.values.slice(-currentPeriod);
+    const m = Math.min(jv.length, lv.length);
     let jt = 0, lt = 0;
-    for (let i = 0; i < m; i++) { jt += Number(j.values[i]) || 0; lt += Number(l.values[i]) || 0; }
+    for (let i = 0; i < m; i++) { jt += Number(jv[i]) || 0; lt += Number(lv[i]) || 0; }
     net = jt - lt;
   }
 
@@ -4783,6 +4791,11 @@ async function boot() {
 
 async function loadAll() {
   if (state.channelsLoaded && !state.channels.length) { renderNoChannels(); return; }
+  // Гард от гонок: переключение канала/периода стартует новый прогон, и медленные ответы
+  // старого НЕ должны перекрашивать выбранный канал (раньше A мог победить B после свитча).
+  const gen = ++loadGen;
+  let failed = 0;
+  const alive = (fn) => (arg) => { if (gen === loadGen) fn(arg); };
   setStatus('Загрузка…', true);
   renderKpiSkeletons();
 
@@ -4794,9 +4807,9 @@ async function loadAll() {
 
   // Run all in parallel; tolerate individual failures
   const tasks = [
-    API.igProfile().then(d => state.ig.profile = d).catch(e => { console.warn('IG profile:', e.message); state.ig.profile = null; }),
-    API.igInsights(currentPeriod).then(d => state.ig.insights = d).catch(e => { console.warn('IG insights:', e.message); state.ig.insights = null; }),
-    API.igPosts(20).then(d => {
+    API.igProfile().then(alive(d => state.ig.profile = d)).catch(alive(e => { failed++; console.warn('IG profile:', e.message); state.ig.profile = null; })),
+    API.igInsights(currentPeriod).then(alive(d => state.ig.insights = d)).catch(alive(e => { failed++; console.warn('IG insights:', e.message); state.ig.insights = null; })),
+    API.igPosts(20).then(alive(d => {
       const arr = Array.isArray(d) ? d : (d && d.data) || [];
       state.ig.posts = arr.map(p => ({
         id: p.id,
@@ -4814,9 +4827,9 @@ async function loadAll() {
         saved: p.saved || 0,
         er: null
       }));
-    }).catch(e => { console.warn('IG posts:', e.message); state.ig.posts = []; }),
-    API.tgChannel().then(d => state.tg.channel = d).catch(e => { console.warn('TG channel:', e.message); state.tg.channel = null; }),
-    API.tgFull(tgLimit).then(d => {
+    })).catch(alive(e => { failed++; console.warn('IG posts:', e.message); state.ig.posts = []; })),
+    API.tgChannel().then(alive(d => state.tg.channel = d)).catch(alive(e => { failed++; console.warn('TG channel:', e.message); state.tg.channel = null; })),
+    API.tgFull(tgLimit).then(alive(d => {
       // /api/tg/full returns: { channel, views_summary, posts, mtproto_available, errors }
       // Channel info from /api/tg/channel is more focused — keep it as primary source
       // but extract views/posts/timeline data from /api/tg/full for charts
@@ -4824,18 +4837,22 @@ async function loadAll() {
       state.tg.fullPosts = (d && Array.isArray(d.posts)) ? d.posts : [];
       state.tg.viewsSummary = (d && d.views_summary) ? d.views_summary : null;
       state.tg.mtprotoAvailable = !!(d && d.mtproto_available);
-    }).catch(e => {
+    })).catch(alive(e => {
+      failed++;
       console.warn('TG full:', e.message);
       state.tg.stats = null;
       state.tg.fullPosts = [];
       state.tg.viewsSummary = null;
       state.tg.mtprotoAvailable = false;
-    }),
-    API.tgStats().then(d => state.tg.channelStats = d).catch(() => { state.tg.channelStats = null; }),
-    API.tgGraphs().then(d => state.tg.graphs = d).catch(() => { state.tg.graphs = null; }),
-    API.tgVelocity().then(d => state.tg.velocity = d).catch(() => { state.tg.velocity = null; })
+    })),
+    API.tgStats().then(alive(d => state.tg.channelStats = d)).catch(alive(() => { failed++; state.tg.channelStats = null; })),
+    API.tgGraphs().then(alive(d => state.tg.graphs = d)).catch(alive(() => { failed++; state.tg.graphs = null; })),
+    API.tgVelocity().then(alive(d => state.tg.velocity = d)).catch(alive(() => { failed++; state.tg.velocity = null; }))
   ];
   await Promise.all(tasks);
+
+  // Устаревший прогон: канал/период сменили во время загрузки — рендер за новым прогоном.
+  if (gen !== loadGen) return;
 
   // Unified posts list — merge IG + TG posts
   const tgUsername = pick(state.tg.channel, ['username','channel_username']) || '';
@@ -4878,6 +4895,9 @@ async function loadAll() {
   if (igOk && tgOk) setStatus('Все источники активны', true);
   else if (igOk || tgOk) setStatus(igOk ? 'Только Instagram' : 'Только Telegram', true);   // single source is normal, not a warning
   else setStatus('Источники недоступны', false);
+  // Ошибка источника ≠ «нет данных»: раньше 429/5xx по отдельной панели рисовали обычный
+  // пустой стейт, и статус оставался зелёным — деградация была невидима.
+  if (failed > 0 && (igOk || tgOk)) setStatus('Часть данных недоступна — ошибка источника', false);
 
   // Render
   renderHero();
@@ -4887,7 +4907,7 @@ async function loadAll() {
   renderTgAnalytics();
   renderPosts();
   applySource(state.source);
-  lastUpdated = Date.now();
+  if (failed < tasks.length) lastUpdated = Date.now();   // «обновлено только что» при тотальном сбое — ложь
   updateFreshness();
 
   // Non-critical, DB-backed panels — load AFTER first paint so they don't block it.
@@ -4912,6 +4932,7 @@ function loadArchives() {
 
 /* ── Freshness + auto-refresh ─────────────────────────────────── */
 let lastUpdated = null;
+let loadGen = 0;   // поколение loadAll: ответы устаревшего прогона не пишут в state и не рендерят
 function updateFreshness() {
   const el = document.getElementById('freshness');
   if (!el || !lastUpdated) return;
