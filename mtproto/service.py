@@ -123,18 +123,28 @@ async def _acquire_or_503(sem: asyncio.Semaphore, timeout_s: float, detail: str)
     есть известная гонка: отмена по таймауту может прийти в тот же тик, когда пермит уже
     выдан, — acquire завершился, release не случится, и Semaphore(1) заклинил бы все
     stats-эндпоинты до рестарта. shield оставляет задачу захвата живой, а done-callback
-    возвращает пермит, если захват всё же успел завершиться после таймаута."""
+    возвращает пермит, если захват всё же успел завершиться.
+
+    ВАЖНО: reclaim обязателен и для ВНЕШНЕЙ отмены (клиент оборвал соединение, сработал
+    _total_budget): CancelledError прилетает в этот await, но shield-задача продолжает
+    жить и ДОВОДИТ захват до конца — без callback'а пермит утёк бы гарантированно
+    (строго хуже наивного wait_for, который захват отменяет)."""
     task = asyncio.ensure_future(sem.acquire())
+
+    def _reclaim(t):
+        if not t.cancelled() and t.exception() is None:
+            sem.release()
+
     try:
         await asyncio.wait_for(asyncio.shield(task), timeout=timeout_s)
     except asyncio.TimeoutError:
         task.cancel()
-
-        def _reclaim(t):
-            if not t.cancelled() and t.exception() is None:
-                sem.release()
         task.add_done_callback(_reclaim)
         raise HTTPException(status_code=503, detail=detail)
+    except asyncio.CancelledError:
+        task.cancel()
+        task.add_done_callback(_reclaim)
+        raise
 
 
 async def _require_token(x_internal_token: str = Header(default='')):
