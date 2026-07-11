@@ -26,13 +26,14 @@ async function runMigrations(pool, logger = console) {
     // мина: порядок держится только на лексикографике, и следующий автор может вклиниться между
     // дублями. Уже применённые файлы переименовывать НЕЛЬЗЯ (учёт по имени файла — переезд
     // перезапустил бы их на проде), поэтому громко предупреждаем, не роняя boot.
-    // Контракт logger'а — только .log (так его зовут тесты); .error берём, если есть (console).
-    const logError = typeof logger.error === 'function' ? logger.error.bind(logger) : logger.log.bind(logger);
+    // Контракт logger'а — только .log (так его зовут тесты); .warn берём, если есть (console).
+    // warn, НЕ error: пре-существующий дубль префикса — перманентное состояние, иначе шум error-уровня каждый boot.
+    const logWarn = typeof logger.warn === 'function' ? logger.warn.bind(logger) : logger.log.bind(logger);
     const byPrefix = new Map();
     for (const file of files) {
       const prefix = file.match(/^(\d+)_/)[1];
       if (byPrefix.has(prefix)) {
-        logError(`[db] MIGRATION NUMBERING CONFLICT: "${byPrefix.get(prefix)}" and "${file}" share prefix ${prefix} — use the next free number for new migrations`);
+        logWarn(`[db] MIGRATION NUMBERING CONFLICT: "${byPrefix.get(prefix)}" and "${file}" share prefix ${prefix} — use the next free number for new migrations`);
       } else {
         byPrefix.set(prefix, file);
       }

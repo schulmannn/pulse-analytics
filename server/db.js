@@ -408,7 +408,11 @@ async function setChannelTgId(id, tgId, executor = pool) {
 const INT4_MAX = 2147483647;
 const num = (v) => {
   if (v == null || isNaN(v)) return null;
-  return Math.max(-INT4_MAX - 1, Math.min(INT4_MAX, Math.round(Number(v))));
+  const n = Math.round(Number(v));
+  const clamped = Math.max(-INT4_MAX - 1, Math.min(INT4_MAX, n));
+  // Лог ТОЛЬКО при реальном клампе (сверхкрупный канал) — сигнал «пора BIGINT-миграция»; в норме молчит.
+  if (clamped !== n) console.warn(`[db] INT4 clamp ${n} → ${clamped}: канал переполняет INT4, нужна BIGINT-миграция дневных таблиц`);
+  return clamped;
 };
 
 /* Pure transform: stats graphs → array of daily rows. Exported for testing.
@@ -1550,9 +1554,12 @@ async function listIgMediaDaily(channelId, days = 400) {
 async function listAnnotations(channelId) {
   if (!enabled || !channelId) return [];
   const { rows } = await pool.query(
+    // Новейшие 500 под кэпом (LIMIT по ASC ронял бы СВЕЖИЕ), отдаём хронологически (ASC).
     `SELECT id, to_char(day,'YYYY-MM-DD') AS day, label,
             to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SS') AS created_at
-       FROM chart_annotations WHERE channel_id=$1 ORDER BY day ASC, id ASC LIMIT 500`, [channelId]);
+       FROM (SELECT id, day, label, created_at FROM chart_annotations
+             WHERE channel_id=$1 ORDER BY day DESC, id DESC LIMIT 500) t
+       ORDER BY day ASC, id ASC`, [channelId]);
   return rows;
 }
 
