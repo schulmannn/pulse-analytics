@@ -918,7 +918,14 @@ async function processReportSchedules(base) {
         try {
           if (r.schedule === 'weekly' && reportHasWeekBlock(r.config)) {
             const chans = await db.listChannels({ uid: r.uid });
-            const chId = chans[0] && chans[0].id;
+            // Канал нарратива = канал САМОГО ОТЧЁТА (config.channelId — то, что рендерит
+            // страница /reports/:id, куда ведёт кнопка письма). Раньше всегда брался chans[0]
+            // (старейший канал юзера): письмо ссылалось на отчёт канала B, а цифры внутри были
+            // канала A. Членство в chans = ownership-check; чужой/удалённый id → прежний фолбэк.
+            const cfgId = Number(r.config && r.config.channelId) || 0;
+            const chId = (cfgId && chans.some((c) => c.id === cfgId))
+              ? cfgId
+              : (chans[0] && chans[0].id);
             if (chId) {
               const [daily, posts, igDaily] = await Promise.all([
                 db.getChannelHistory(chId, 35),
