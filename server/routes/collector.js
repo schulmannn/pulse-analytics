@@ -75,25 +75,31 @@ function registerCollectorRoutes({
     message: { error: 'Слишком много ingest-запросов' },
   });
 
-  async function requireApiKey(req, res, next) {
-    if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
-    if (!isReady()) return res.status(503).json({ error: 'Сервис запускается' });
-    const header = String(req.get('authorization') || '');
-    const raw = header.startsWith('Bearer ') ? header.slice(7).trim() : String(req.get('x-api-key') || '').trim();
-    if (!raw) return res.status(401).json({ error: 'Нет API-ключа' });
-    try {
-      const channel = await db.getChannelByApiKey(sha256(raw));
-      if (!channel || channel.status === 'disabled' || channel.source === 'central') {
-        return res.status(401).json({ error: 'Неверный или отозванный ключ' });
+  function makeRequireApiKey({ touch }) {
+    return async function requireApiKey(req, res, next) {
+      if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
+      if (!isReady()) return res.status(503).json({ error: 'Сервис запускается' });
+      const header = String(req.get('authorization') || '');
+      const raw = header.startsWith('Bearer ') ? header.slice(7).trim() : String(req.get('x-api-key') || '').trim();
+      if (!raw) return res.status(401).json({ error: 'Нет API-ключа' });
+      try {
+        const channel = await db.getChannelByApiKey(sha256(raw), { touch });
+        if (!channel || channel.status === 'disabled' || channel.source === 'central') {
+          return res.status(401).json({ error: 'Неверный или отозванный ключ' });
+        }
+        req.channel = channel;
+        next();
+      } catch (error) {
+        next(error);
       }
-      req.channel = channel;
-      next();
-    } catch (error) {
-      next(error);
-    }
+    };
   }
+  const requireApiKey = makeRequireApiKey({ touch: true });
+  // Read-only проверка совместимости: GET не должен писать (last_used_at двигает
+  // только реальная доставка данных, а не каждый пробник коллектора).
+  const requireApiKeyReadOnly = makeRequireApiKey({ touch: false });
 
-  app.get('/api/collector/compatibility', requireApiKey, (req, res) => {
+  app.get('/api/collector/compatibility', requireApiKeyReadOnly, (req, res) => {
     res.json({
       current_schema_version: CURRENT_SCHEMA_VERSION,
       supported_schema_versions: SUPPORTED_SCHEMA_VERSIONS,

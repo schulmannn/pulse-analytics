@@ -856,10 +856,16 @@ async function createApiKey(channelId, keyHash, keyPrefix, label) {
 
 // Authenticate a collector by API-key hash → the channel row (active key only).
 // Atomically touches last_used_at. Returns the channel or null.
-async function getChannelByApiKey(keyHash) {
+// touch=false — read-only аутентификация (GET /api/collector/compatibility): без UPDATE
+// last_used_at, чтобы GET не генерировал WAL на каждом пробнике коллектора. Доставка
+// данных (ingest) идёт с дефолтным touch=true и двигает отметку как раньше.
+async function getChannelByApiKey(keyHash, { touch = true } = {}) {
   if (!enabled) return null;
-  const { rows } = await pool.query(
-    'UPDATE api_keys SET last_used_at=now() WHERE key_hash=$1 AND revoked_at IS NULL RETURNING channel_id', [keyHash]);
+  const { rows } = touch
+    ? await pool.query(
+        'UPDATE api_keys SET last_used_at=now() WHERE key_hash=$1 AND revoked_at IS NULL RETURNING channel_id', [keyHash])
+    : await pool.query(
+        'SELECT channel_id FROM api_keys WHERE key_hash=$1 AND revoked_at IS NULL', [keyHash]);
   return rows[0] ? getChannelById(rows[0].channel_id) : null;
 }
 

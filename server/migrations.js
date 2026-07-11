@@ -22,6 +22,20 @@ async function runMigrations(pool, logger = console) {
       .filter(name => /^\d+_.+\.sql$/.test(name))
       .sort();
 
+    // Дубль числового префикса (уже случилось: 013_crash_signatures + 013_ig_followers_total) —
+    // мина: порядок держится только на лексикографике, и следующий автор может вклиниться между
+    // дублями. Уже применённые файлы переименовывать НЕЛЬЗЯ (учёт по имени файла — переезд
+    // перезапустил бы их на проде), поэтому громко предупреждаем, не роняя boot.
+    const byPrefix = new Map();
+    for (const file of files) {
+      const prefix = file.match(/^(\d+)_/)[1];
+      if (byPrefix.has(prefix)) {
+        logger.error(`[db] MIGRATION NUMBERING CONFLICT: "${byPrefix.get(prefix)}" and "${file}" share prefix ${prefix} — use the next free number for new migrations`);
+      } else {
+        byPrefix.set(prefix, file);
+      }
+    }
+
     for (const file of files) {
       if (applied.has(file)) continue;
       const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8');

@@ -91,7 +91,11 @@ function registerTgRoutes({
         inviteLink:  null,
         source:      'mtproto',
       };
-      if (req.channel.id && mt.id) db.setChannelTgId(req.channel.id, mt.id).catch(() => {});   // populate tg_channel_id once
+      if (req.channel.id && mt.id) {
+        // populate tg_channel_id once; провал записи — actionable, логируем вместо тихого глотания
+        db.setChannelTgId(req.channel.id, mt.id).catch((e) =>
+          log('warn', 'tg_channel_id_persist_failed', { channelId: req.channel.id, error: e.message }));
+      }
       cacheSet(cacheKey, data);
       res.json(data);
     } catch (e) {
@@ -291,12 +295,15 @@ function registerTgRoutes({
     if (await serveSnapshot(req, res, d => ({ posts: d.posts || [], count: (d.posts || []).length }))) return;
     const limit     = Math.min(100, parseInt(req.query.limit)     || 30);
     const offsetId  = parseInt(req.query.offset_id) || 0;
-    const cacheKey  = `mtproto:posts:${req.channel.id}:${limit}:${offsetId}`;
+    // Кэшируем только первую страницу: offset_id — произвольный message id с неограниченным
+    // ключевым пространством, и один юзер листанием вымывал общий 500-словный кэш (эвикция
+    // по порядку вставки), выселяя горячие записи других арендаторов (noisy-neighbor).
+    const cacheKey  = offsetId === 0 ? `mtproto:posts:${req.channel.id}:${limit}` : null;
     try {
-      const cached = cacheGet(cacheKey);
+      const cached = cacheKey && cacheGet(cacheKey);
       if (cached) return res.json(cached);
       const data = await mtprotoFetch('/posts', { limit, offset_id: offsetId });
-      cacheSet(cacheKey, data);
+      if (cacheKey) cacheSet(cacheKey, data);
       res.json(data);
     } catch (e) {
       sendMtprotoError(res, e);

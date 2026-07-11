@@ -456,7 +456,9 @@ async function refreshIgIfNeeded(channelId, token, expiresAtStr) {
       grant_type: 'ig_refresh_token', access_token: token }).toString());
     const j = await r.json();
     if (j && j.access_token && j.expires_in) {
-      await db.updateIgToken(channelId, igCrypto.encrypt(j.access_token), new Date(now + j.expires_in * 1000)).catch(() => {});
+      // Провал персиста — actionable (рефреш будет повторяться на каждом чтении): логируем, не глотаем.
+      await db.updateIgToken(channelId, igCrypto.encrypt(j.access_token), new Date(now + j.expires_in * 1000))
+        .catch((e) => log('warn', 'ig_token_persist_failed', { channelId, error: e.message }));
       return j.access_token;
     }
   } catch (e) { log('warn', 'ig_token_refresh_failed', { channelId, error: e.message }); }
