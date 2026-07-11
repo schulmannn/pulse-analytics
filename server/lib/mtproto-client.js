@@ -23,6 +23,21 @@ const MTPROTO_TIMEOUT_MS       = 12000;
 const MTPROTO_TIMEOUT_STATS_MS = 60000;
 const MTPROTO_TIMEOUT_HEAVY_MS = 120000;
 const mtprotoBreaker = createBreaker();
+
+// Стабильные коды Python-сервиса → русские сообщения дашборда: сырые snake_case-коды
+// ('mtproto_session_unauthorized') раньше доезжали до UI как есть. Неизвестный detail
+// проходит без изменений; исходный код сохраняется в e.code для программных веток.
+const MTPROTO_ERROR_RU = {
+  mtproto_timeout: 'Telegram отвечает слишком долго, попробуйте позже',
+  mtproto_session_unauthorized: 'Сессия Telegram недействительна — переподключите аккаунт',
+  mtproto_unreachable: 'Сервис Telegram недоступен, попробуйте позже',
+  mtproto_error: 'Ошибка на стороне Telegram, попробуйте позже',
+  internal_error: 'Внутренняя ошибка источника, попробуйте позже',
+  too_many_collecting: 'Слишком много одновременных сборов — повторите позже',
+  token_not_configured: 'Сервис Telegram не настроен',
+  mtproto_not_configured: 'Сервис Telegram не настроен',
+};
+const ruDetail = (detail) => (detail && MTPROTO_ERROR_RU[detail]) || detail;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 function isRetryableConnErr(err) {
@@ -73,7 +88,8 @@ async function mtprotoFetch(path, params = {}, timeoutMs = MTPROTO_TIMEOUT_MS) {
         if (err.retry_after != null) e.retryAfter = err.retry_after;
         throw e;
       }
-      const e = new Error(err.detail || `MTProto error ${res.status}`);
+      const e = new Error(ruDetail(err.detail) || `MTProto error ${res.status}`);
+      e.code = err.detail || undefined;
       e.status = res.status >= 500 ? 503 : res.status;
       if (err.retry_after != null) e.retryAfter = err.retry_after;
       throw e;
@@ -126,7 +142,8 @@ async function mtprotoPost(path, { params = {}, body = undefined, timeoutMs = MT
         if (err.retry_after != null) e.retryAfter = err.retry_after;
         throw e;
       }
-      const e = new Error(err.detail || `MTProto error ${res.status}`);
+      const e = new Error(ruDetail(err.detail) || `MTProto error ${res.status}`);
+      e.code = err.detail || undefined;
       e.status = res.status >= 500 ? 503 : res.status;
       if (err.retry_after != null) e.retryAfter = err.retry_after;
       throw e;
