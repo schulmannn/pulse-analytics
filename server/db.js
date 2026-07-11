@@ -1584,17 +1584,32 @@ async function deleteUserAccount(uid) {
     // Осиротевшие external_sources: для приватного канала username/title (часто имя человека)
     // не «shared identity» — если после каскада на источник не ссылается НИКТО, стираем и его.
     // Разделяемые источники (чужие channels/архивы ссылаются) переживают sweep невредимыми.
-    await client.query(
-      `DELETE FROM external_sources s
-        WHERE NOT EXISTS (SELECT 1 FROM channels        t WHERE t.source_id = s.id)
-          AND NOT EXISTS (SELECT 1 FROM ig_accounts     t WHERE t.source_id = s.id)
-          AND NOT EXISTS (SELECT 1 FROM channel_daily   t WHERE t.source_id = s.id)
-          AND NOT EXISTS (SELECT 1 FROM channel_monthly t WHERE t.source_id = s.id)
-          AND NOT EXISTS (SELECT 1 FROM posts           t WHERE t.source_id = s.id)
-          AND NOT EXISTS (SELECT 1 FROM velocity_daily  t WHERE t.source_id = s.id)
-          AND NOT EXISTS (SELECT 1 FROM mentions        t WHERE t.source_id = s.id)
-          AND NOT EXISTS (SELECT 1 FROM ig_daily        t WHERE t.source_id = s.id)
-          AND NOT EXISTS (SELECT 1 FROM ig_media_daily  t WHERE t.source_id = s.id)`);
+    // ⚠️ Гонка: NOT EXISTS видит снапшот ЭТОЙ транзакции, а RI-триггер channels_source_id_fkey
+    // (NO ACTION, без ON DELETE) перепроверяет ТЕКУЩЕЕ состояние. Конкурентный
+    // ensureExternalSource (find-or-create по (network, external_id)) может перепривязать
+    // выживший канал к тому же источнику между проверкой и коммитом → DELETE падает с 23503.
+    // Это НЕ сбой стирания: источник снова используется и обязан жить. SAVEPOINT откатывает
+    // только свип — само стирание аккаунта коммитится; любая другая ошибка по-прежнему валит tx.
+    await client.query('SAVEPOINT sources_sweep');
+    try {
+      await client.query(
+        `DELETE FROM external_sources s
+          WHERE NOT EXISTS (SELECT 1 FROM channels        t WHERE t.source_id = s.id)
+            AND NOT EXISTS (SELECT 1 FROM ig_accounts     t WHERE t.source_id = s.id)
+            AND NOT EXISTS (SELECT 1 FROM channel_daily   t WHERE t.source_id = s.id)
+            AND NOT EXISTS (SELECT 1 FROM channel_monthly t WHERE t.source_id = s.id)
+            AND NOT EXISTS (SELECT 1 FROM posts           t WHERE t.source_id = s.id)
+            AND NOT EXISTS (SELECT 1 FROM velocity_daily  t WHERE t.source_id = s.id)
+            AND NOT EXISTS (SELECT 1 FROM mentions        t WHERE t.source_id = s.id)
+            AND NOT EXISTS (SELECT 1 FROM ig_daily        t WHERE t.source_id = s.id)
+            AND NOT EXISTS (SELECT 1 FROM ig_media_daily  t WHERE t.source_id = s.id)`);
+    } catch (e) {
+      if (e && e.code === '23503') {
+        await client.query('ROLLBACK TO SAVEPOINT sources_sweep');
+      } else {
+        throw e;
+      }
+    }
     await client.query('COMMIT');
     return rowCount > 0;
   } catch (e) {
