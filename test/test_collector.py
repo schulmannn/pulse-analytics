@@ -102,7 +102,9 @@ class FlushQueueRetryPolicyTests(unittest.TestCase):
             queue.close()
 
     def test_retryable_http_statuses_stay_queued(self):
-        for code in (408, 429, 500):
+        # 401/403 — проблема КЛЮЧА (ротация PULSE_API_KEY, деплой-блип), не payload'а:
+        # dead-letter с первой попытки терял бы все накопленные метрики безвозвратно.
+        for code in (401, 403, 408, 429, 500):
             with tempfile.TemporaryDirectory() as directory:
                 queue = DeliveryQueue(Path(directory))
                 queue.enqueue({"ingest_id": "retry-1", "schema_version": 1})
