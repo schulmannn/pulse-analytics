@@ -1021,13 +1021,30 @@ app.post('/api/ingest/daily', asyncHandler(async (req, res) => {
   if (!db.enabled) return res.status(200).json({ ok: false, reason: 'DATABASE_URL не задан — БД выключена' });
   const channelId = await db.getOwnerChannelId();   // central channel = "collector #0"
   if (!channelId) return res.status(503).json({ ok: false, reason: 'central channel not ready' });
+  // Idempotency (Ковчег): a double cron tick / a second web instance must NOT run the heavy
+  // MTProto pass (/graphs + /posts + up to ~12 GetMessageStats for velocity) twice for the same
+  // day. runJobOnce keyed on the UTC date makes exactly one caller do the work; a duplicate gets
+  // the first run's cached result and skips both the fetch AND the fire-and-forget tails below.
+  const dateKey = new Date().toISOString().slice(0, 10);
+  let graphs = null;
+
+  // Хвосты дня (отчёты / IG-персистенс / QR-сбор) — fire-and-forget ПОСЛЕ ответа крону:
+  // они не должны ни задерживать, ни ломать TG-ingest. Вынесены в функцию, потому что
+  // запускаются и на успехе, и на degraded-тике (см. catch): IG-сбор и отчёты от TG-graphs
+  // не зависят, и их день не должен теряться из-за деградации Telegram-стороны. Их внутренняя
+  // идемпотентность (runJobOnce per report+period, durable per channel+day) делает повторный
+  // запуск на успешном same-day-ретрае безопасным.
+  const runIngestTails = () => {
+    processReportSchedules(appBase(req)).catch(e =>
+      log('error', 'report_schedule_failed', { request_id: req.requestId, error: e.message }));
+    // `graphs` уже в руках (null на degraded-тике — сырой TG-снимок тогда просто пропускается).
+    processPersistence(channelId, graphs).catch(e =>
+      log('error', 'persistence_failed', { request_id: req.requestId, error: e.message }));
+    processTgQrCollection().catch(e =>
+      log('error', 'tg_qr_collection_failed', { request_id: req.requestId, error: e.message }));
+  };
+
   try {
-    // Idempotency (Ковчег): a double cron tick / a second web instance must NOT run the heavy
-    // MTProto pass (/graphs + /posts + up to ~12 GetMessageStats for velocity) twice for the same
-    // day. runJobOnce keyed on the UTC date makes exactly one caller do the work; a duplicate gets
-    // the first run's cached result and skips both the fetch AND the fire-and-forget tails below.
-    const dateKey = new Date().toISOString().slice(0, 10);
-    let graphs = null;
     const outcome = await db.runJobOnce('daily_ingest', `central:${dateKey}`, async () => {
       let posts;
       [graphs, posts] = await Promise.all([
@@ -1036,49 +1053,53 @@ app.post('/api/ingest/daily', asyncHandler(async (req, res) => {
       ]);
       const velocity = await mtprotoFetch('/velocity', {}, MTPROTO_TIMEOUT_HEAVY_MS).catch(() => null);
       // All three upserts commit together (persistCentralDaily) — no half-written day.
-      return db.persistCentralDaily(channelId, {
+      const persisted = await db.persistCentralDaily(channelId, {
         dailyRows: db.graphsToDailyRows(graphs),
         postRows: (posts && Array.isArray(posts.posts)) ? posts.posts.map(tgPostToRow) : [],
         velocity,
       });
+      // Наблюдаемость тихой смерти архива: для рабочего центрального канала graphsToDailyRows
+      // всегда отдаёт полный диапазон, поэтому channel_daily=0 означает не «пустой день», а
+      // упавший тяжёлый MTProto-fetch (graphs=null). Бросаем ПОСЛЕ коммита (частичные
+      // posts/velocity сохранены, upsert'ы идемпотентны) — runJobOnce запишет строку failed,
+      // и повторный тик ТОГО ЖЕ дня переклеймит её и повторит тяжёлый проход. Раньше пустой
+      // день записывался как succeeded, и same-day ретрай был невозможен без ручного
+      // удаления jobs-строки, а velocity-снимок дня терялся навсегда.
+      if ((persisted.channel_daily || 0) === 0) {
+        const err = new Error('channel_daily=0 — upstream MTProto /graphs failed, archive did not grow');
+        err.code = 'INGEST_DEGRADED';
+        throw err;
+      }
+      return persisted;
     });
 
-    const result = outcome.skipped ? ((outcome.job && outcome.job.result) || {}) : outcome.result;
-    // Наблюдаемость тихой смерти архива: для рабочего центрального канала graphsToDailyRows всегда
-    // отдаёт полный диапазон, поэтому channel_daily=0 означает не «пустой день», а упавший тяжёлый
-    // MTProto-fetch (graphs=null). Раньше это возвращалось как ok:true/HTTP 200 → крон зелёный,
-    // архив молча перестаёт расти. Теперь помечаем degraded: крон роняет джобу по этому флагу
-    // (нативное письмо GitHub = бесплатный проактивный алерт), а лог даёт greppable-сигнал.
-    const degraded = (result.channel_daily || 0) === 0;
-    if (degraded) {
+    if (outcome.skipped) {
+      const job = outcome.job;
+      // Дубль-тик, пока первый прогон ещё под lease (status='running'): это НЕ деградация —
+      // отвечаем in_progress без алерта (раньше пустой result давал ложный degraded:true).
+      if (!job || job.status !== 'succeeded') {
+        return res.json({ ok: true, skipped: true, in_progress: true });
+      }
+      // Дубль успешного дня: succeeded теперь гарантированно непустой (пустой день = failed).
+      const cached = job.result || {};
+      return res.json({ ok: true, degraded: false, skipped: true, channel_daily: cached.channel_daily || 0, posts: cached.posts || 0, velocity: !!cached.velocity });
+    }
+
+    const result = outcome.result;
+    res.json({ ok: true, degraded: false, skipped: false, channel_daily: result.channel_daily || 0, posts: result.posts || 0, velocity: !!result.velocity });
+    runIngestTails();
+  } catch (e) {
+    if (e && e.code === 'INGEST_DEGRADED') {
+      // Крон роняет джобу по не-200 (нативное письмо GitHub = бесплатный проактивный алерт),
+      // а лог даёт greppable-сигнал. Строка jobs уже failed → ретрай того же дня возможен.
       log('error', 'ingest_degraded', {
         request_id: req.requestId,
-        skipped: !!outcome.skipped,
         reason: 'channel_daily=0 (upstream MTProto /graphs likely failed) — archive did not grow',
       });
+      res.status(503).json({ ok: false, degraded: true, retryable: true, request_id: req.requestId });
+      runIngestTails();
+      return;
     }
-    res.json({ ok: true, degraded, skipped: !!outcome.skipped, channel_daily: result.channel_daily || 0, posts: result.posts || 0, velocity: !!result.velocity });
-
-    // A duplicate day already ran the tails on the first tick — skip the redundant heavy passes.
-    if (outcome.skipped) return;
-
-    // Email-выгрузка отчётов — fire-and-forget ПОСЛЕ ответа крону: расписания
-    // не должны ни задерживать, ни ломать ingest.
-    processReportSchedules(appBase(req)).catch(e =>
-      log('error', 'report_schedule_failed', { request_id: req.requestId, error: e.message }));
-
-    // Персистенс истории (сырой TG /graphs + IG-сбор по всем подключённым аккаунтам
-    // + прунинг) — тоже fire-and-forget ПОСЛЕ ответа: сбой Graph/квоты/БД тут НИКОГДА
-    // не должен задержать или уронить TG-ingest, от которого зависит вся система.
-    // `graphs` уже в руках — сырой снимок пишется без лишнего mtproto-вызова.
-    processPersistence(channelId, graphs).catch(e =>
-      log('error', 'persistence_failed', { request_id: req.requestId, error: e.message }));
-
-    // QR-connected channels: server-side collection via each user's stored session (own tail so a
-    // slow/broken session never delays the central ingest response above).
-    processTgQrCollection().catch(e =>
-      log('error', 'tg_qr_collection_failed', { request_id: req.requestId, error: e.message }));
-  } catch (e) {
     // keep the { ok:false } shape for the cron, but never leak internals in the message
     log('error', 'ingest_daily_failed', { request_id: req.requestId, error: e.message, stack: e.stack });
     res.status(500).json({ ok: false, error: 'internal_error', request_id: req.requestId });
