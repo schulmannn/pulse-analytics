@@ -33,7 +33,7 @@ def _install_stubs():
     telethon = mod("telethon")
     telethon.TelegramClient = object
     errors = mod("telethon.errors")
-    for e in ("FloodWaitError", "PasswordHashInvalidError", "SessionPasswordNeededError"):
+    for e in ("FloodWaitError", "PasswordHashInvalidError", "SessionPasswordNeededError", "UnauthorizedError"):
         setattr(errors, e, type(e, (Exception,), {}))
     telethon.errors = errors
     sessions = mod("telethon.sessions"); sessions.StringSession = object; telethon.sessions = sessions

@@ -18,7 +18,7 @@ from fastapi import Body, Depends, FastAPI, HTTPException, Header, Query, Respon
 from fastapi.responses import JSONResponse
 import uvicorn
 from telethon import TelegramClient
-from telethon.errors import FloodWaitError, PasswordHashInvalidError, SessionPasswordNeededError
+from telethon.errors import FloodWaitError, PasswordHashInvalidError, SessionPasswordNeededError, UnauthorizedError
 from telethon.sessions import StringSession
 from telethon.tl.functions.stats import GetBroadcastStatsRequest, LoadAsyncGraphRequest, GetMessageStatsRequest
 from telethon.tl.functions.channels import GetFullChannelRequest, SearchPostsRequest, CheckSearchPostsFloodRequest, GetAdminedPublicChannelsRequest
@@ -332,7 +332,7 @@ async def get_channel(x_internal_token: str = Header(default='')):
         raise
     except Exception as e:
         log.error(f'get_channel error: {e}')
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail='internal_error')
 
 
 @app.get('/posts')
@@ -354,7 +354,7 @@ async def get_posts(
         raise
     except Exception as e:
         log.error(f'get_posts error: {e}')
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail='internal_error')
 
 
 @app.get('/views_summary', dependencies=[Depends(_serialize_stats)])
@@ -412,7 +412,7 @@ async def get_views_summary(
         raise
     except Exception as e:
         log.error(f'views_summary error: {e}')
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail='internal_error')
 
 
 @app.get('/stats', dependencies=[Depends(_serialize_stats)])
@@ -448,7 +448,20 @@ async def get_stats(x_internal_token: str = Header(default='')):
         raise
     except HTTPException:
         raise
+    except UnauthorizedError as e:
+        # Мёртвая/отозванная сессия — это НЕ «у канала нет статистики». Раньше уходило как
+        # 200 {available:false} и было неотличимо от легитимного кейса мелкого канала:
+        # мониторинг не видел 5xx, дашборды тихо флетились. Честный 503 = сигнал алертам.
+        log.error(f'get_stats session unauthorized: {e}')
+        raise HTTPException(status_code=503, detail='mtproto_session_unauthorized')
+    except OSError as e:
+        # Транспорт (сеть/DC) — тоже сбой, а не отсутствие статистики.
+        log.error(f'get_stats connection error: {e}')
+        raise HTTPException(status_code=503, detail='mtproto_unreachable')
     except Exception as e:
+        # Остальные RPC-ошибки (CHAT_ADMIN_REQUIRED, BROADCAST_REQUIRED, …) — легитимное
+        # «статистика недоступна этому каналу»: 200, чтобы дашборд деградировал мягко.
+        log.warning(f'get_stats unavailable: {e}')
         return {'available': False, 'error': str(e)}
 
 
@@ -553,7 +566,7 @@ async def get_graphs(points: int = Query(default=45, le=400), x_internal_token: 
         raise
     except Exception as e:
         log.error(f'get_graphs error: {e}')
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail='internal_error')
 
 
 @app.get('/post_stats/{msg_id}', dependencies=[Depends(_serialize_stats)])
@@ -618,8 +631,15 @@ async def get_post_stats(msg_id: int, x_internal_token: str = Header(default='')
         raise
     except HTTPException:
         raise
+    except UnauthorizedError as e:
+        # См. get_stats: деаутентификация сессии — сбой (503), не «нет статистики» (200).
+        log.error(f'get_post_stats session unauthorized: {e}')
+        raise HTTPException(status_code=503, detail='mtproto_session_unauthorized')
+    except OSError as e:
+        log.error(f'get_post_stats connection error: {e}')
+        raise HTTPException(status_code=503, detail='mtproto_unreachable')
     except Exception as e:
-        log.error(f'get_post_stats error: {e}')
+        log.warning(f'get_post_stats unavailable: {e}')
         return {'available': False, 'error': str(e)}
 
 
@@ -727,7 +747,7 @@ async def get_velocity(
         # реальный сбой (сеть/сессия/неожиданное) → честный 5xx для мониторинга.
         # Легитимный «нет подходящих постов» отдаётся выше как 200 {available:False}.
         log.error(f'velocity error: {e}')
-        raise HTTPException(status_code=503, detail=str(e))
+        raise HTTPException(status_code=503, detail='mtproto_error')
 
 
 # ── Mentions helpers (reused from notem-mention-monitor) ──
@@ -874,7 +894,7 @@ async def get_mentions(x_internal_token: str = Header(default='')):
         # внешний сбой (get_client / неожиданное); пер-запросные ошибки searchPosts
         # уже обработаны внутри цикла (skip). → честный 5xx для мониторинга.
         log.error(f'mentions error: {e}')
-        raise HTTPException(status_code=503, detail=str(e))
+        raise HTTPException(status_code=503, detail='mtproto_error')
 
 
 _THUMB_CACHE = OrderedDict()   # LRU: move_to_end on hit, popitem(last=False) drops the least-recently-used
@@ -919,7 +939,7 @@ async def get_thumb(msg_id: int, size: str = Query(default='sm'), x_internal_tok
         raise
     except Exception as e:
         log.error(f'get_thumb error: {e}')
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail='internal_error')
 
 
 _CHANNEL_PHOTO_CACHE: dict = {}   # {'jpeg': bytes} — single configured channel; cleared on restart
@@ -944,7 +964,7 @@ async def get_channel_photo(x_internal_token: str = Header(default='')):
         raise
     except Exception as e:
         log.error(f'get_channel_photo error: {e}')
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail='internal_error')
 
 
 # ── QR login (managed connect): capture a user session by scanning a QR ──────────
@@ -1149,7 +1169,7 @@ async def qr_start(x_internal_token: str = Header(default='')):
         raise
     except Exception as e:
         log.error(f'qr_start: {e}')
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail='internal_error')
 
 
 @app.post('/qr/poll')
