@@ -331,10 +331,14 @@ async def collect_payload(include_mentions: bool = False) -> dict[str, Any]:
 
 
 def _permanent_rejection(error: Exception) -> bool:
-    """4xx (except 408/429) means the server rejected the payload itself — no retry
-    can ever succeed, so keeping the row live would poison the queue forever."""
+    """4xx means the server rejected the payload itself — no retry can ever succeed,
+    so keeping the row live would poison the queue forever. Exceptions: 408/429 are
+    transient by definition, and 401/403 are about CREDENTIALS, not the payload — a
+    rotated PULSE_API_KEY or an auth blip during a deploy must not dead-letter every
+    queued collection on first attempt (silent data loss); once the key is fixed the
+    rows deliver, and a genuinely dead key still dead-letters via the attempts cap."""
     code = getattr(error, "code", None)
-    return isinstance(code, int) and 400 <= code < 500 and code not in (408, 429)
+    return isinstance(code, int) and 400 <= code < 500 and code not in (401, 403, 408, 429)
 
 
 async def flush_queue(queue: DeliveryQueue, config: dict[str, str]) -> bool:
