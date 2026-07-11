@@ -60,7 +60,11 @@ function buildHeaders(channelId: number | null): Record<string, string> {
  */
 function persistSessionRefresh(res: Response): void {
   const fresh = res.headers.get('X-Session-Refresh');
-  if (fresh) setSessionToken(fresh);
+  // Продлеваем ТОЛЬКО живую сессию: после logout / удаления аккаунта (clearSessionToken)
+  // in-flight ответ, долетевший тиком позже, не должен воскрешать токен своим
+  // refresh-заголовком (тихая ре-аутентификация до hard reload). JS в табе однопоточный —
+  // между проверкой и записью clear вклиниться не может.
+  if (fresh && getSessionToken()) setSessionToken(fresh);
 }
 
 /**
