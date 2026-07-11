@@ -1,5 +1,8 @@
+// script: ТОЛЬКО accounts.google.com — GIS-кнопка грузит /gsi/client оттуда. apis.google.com
+// (хост старого gapi) фронт не использует нигде, а исторически он пригоден для обхода CSP
+// через JSONP-эндпоинты (?callback=) — не возвращать без реальной необходимости.
 const APP_ALLOWED_DOMAINS = Object.freeze({
-  script: Object.freeze(['https://accounts.google.com', 'https://apis.google.com']),
+  script: Object.freeze(['https://accounts.google.com']),
   style: Object.freeze(['https://fonts.googleapis.com']),
   font: Object.freeze(['https://fonts.gstatic.com']),
   connect: Object.freeze(['https://accounts.google.com']),
