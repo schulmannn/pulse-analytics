@@ -7,6 +7,8 @@
 let Pool = null;
 try { ({ Pool } = require('pg')); } catch (_e) { /* pg не установлен — БД выключена */ }
 const { runMigrations } = require('./migrations');
+const { createJobsRepo } = require('./repos/jobsRepo');
+const { createReportsRepo } = require('./repos/reportsRepo');
 
 const DATABASE_URL = process.env.DATABASE_URL || '';
 const enabled = !!(DATABASE_URL && Pool);
@@ -1522,159 +1524,7 @@ async function deleteAnnotation(id, channelId) {
   return rowCount > 0;
 }
 
-// ── Named reports (per-user composition of dashboard blocks + email schedule) ──
-const REPORT_SCHEDULES = ['none', 'weekly', 'monthly'];
-const REPORT_COLS = `id, name, config, schedule,
-  to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS created_at,
-  to_char(updated_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS updated_at`;
-
-async function listReports(uid) {
-  if (!enabled || uid == null) return [];
-  const { rows } = await pool.query(
-    `SELECT id, name, schedule,
-            to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SS') AS created_at,
-            to_char(updated_at,'YYYY-MM-DD"T"HH24:MI:SS') AS updated_at
-       FROM reports WHERE uid=$1 ORDER BY updated_at DESC, id DESC`, [uid]);
-  return rows;
-}
-
-// Ownership-checked fetch (WHERE uid) — routes turn null → 404.
-async function getReport(uid, id) {
-  if (!enabled || uid == null || !id) return null;
-  const { rows } = await pool.query(
-    `SELECT ${REPORT_COLS} FROM reports WHERE uid=$1 AND id=$2`, [uid, id]);
-  return rows[0] || null;
-}
-
-async function createReport(uid, name, config) {
-  if (!enabled || uid == null) return null;
-  const { rows } = await pool.query(
-    `INSERT INTO reports (uid, name, config) VALUES ($1,$2,$3) RETURNING ${REPORT_COLS}`,
-    [uid, String(name).slice(0, 120), config || {}]);
-  return rows[0] || null;
-}
-
-// Partial update: only the provided fields; updated_at bumps on every write.
-async function updateReport(uid, id, { name, config, schedule } = {}) {
-  if (!enabled || uid == null || !id) return null;
-  const sets = [], vals = [uid, id];
-  let i = 3;
-  if (name != null)     { sets.push(`name=$${i++}`);     vals.push(String(name).slice(0, 120)); }
-  if (config != null)   { sets.push(`config=$${i++}`);   vals.push(config); }
-  if (schedule != null) { if (!REPORT_SCHEDULES.includes(schedule)) throw new Error('bad schedule'); sets.push(`schedule=$${i++}`); vals.push(schedule); }
-  if (!sets.length) return getReport(uid, id);
-  const { rows } = await pool.query(
-    `UPDATE reports SET ${sets.join(', ')}, updated_at=now()
-      WHERE uid=$1 AND id=$2 RETURNING ${REPORT_COLS}`, vals);
-  return rows[0] || null;
-}
-
-async function deleteReport(uid, id) {
-  if (!enabled || uid == null || !id) return false;
-  const { rowCount } = await pool.query('DELETE FROM reports WHERE uid=$1 AND id=$2', [uid, id]);
-  return rowCount > 0;
-}
-
-/* Scheduled email delivery: candidate reports, joined to the owner's email.
-   The day-of-week / day-of-month + catch-up gate lives in the caller (index.js),
-   which reads the returned last_sent_at — here only the anti-double-send window
-   (weekly: >6 days, monthly: >27 days), so a cron fired twice the same day emails
-   at most once. Disabled accounts are never emailed. */
-/* ── Background job idempotency (012_jobs.sql, roadmap P0) ────────────────────────────────────
-   One row per logical unit of work, keyed (kind, idempotency_key) — e.g.
-   ('report_email', 'report:7:2026-W27'). claimJob is the single atomic gate:
-     • fresh key            → row created as running, returned (caller does the work);
-     • queued / failed      → re-claimed (attempts++), returned (retry);
-     • running, lease dead  → re-claimed (crashed runner), returned;
-     • running, lease alive → null (someone else is on it — skip);
-     • succeeded            → null + cached result via getJob (duplicate enqueue collapses).
-   completeJob/failJob close the claim. Callers that need the cached outcome of a skipped
-   duplicate read getJob(kind, key).result. */
-const JOB_LEASE_SECONDS = 15 * 60;
-
-async function claimJob(kind, idempotencyKey, { leaseSeconds = JOB_LEASE_SECONDS, payload = null } = {}) {
-  if (!enabled || !kind || !idempotencyKey) return null;
-  const { rows } = await pool.query(
-    `INSERT INTO jobs (kind, idempotency_key, status, attempts, locked_until, payload)
-     VALUES ($1, $2, 'running', 1, now() + make_interval(secs => $3), $4)
-     ON CONFLICT (kind, idempotency_key) DO UPDATE SET
-       status = 'running',
-       attempts = jobs.attempts + 1,
-       locked_until = now() + make_interval(secs => $3),
-       updated_at = now()
-     WHERE jobs.status IN ('queued', 'failed')
-        OR (jobs.status = 'running' AND jobs.locked_until < now())
-     RETURNING *`,
-    [kind, idempotencyKey, leaseSeconds, payload ? JSON.stringify(payload) : null]);
-  return rows[0] || null;
-}
-
-async function completeJob(id, result = null) {
-  if (!enabled || !id) return;
-  await pool.query(
-    `UPDATE jobs SET status='succeeded', result=$2, error=NULL, locked_until=NULL, updated_at=now() WHERE id=$1`,
-    [id, result ? JSON.stringify(result) : null]);
-}
-
-async function failJob(id, error) {
-  if (!enabled || !id) return;
-  await pool.query(
-    `UPDATE jobs SET status='failed', error=$2, locked_until=NULL, updated_at=now() WHERE id=$1`,
-    [id, String(error && error.message ? error.message : error).slice(0, 2000)]);
-}
-
-async function getJob(kind, idempotencyKey) {
-  if (!enabled || !kind || !idempotencyKey) return null;
-  const { rows } = await pool.query(
-    `SELECT * FROM jobs WHERE kind=$1 AND idempotency_key=$2`, [kind, idempotencyKey]);
-  return rows[0] || null;
-}
-
-/** Run `fn` exactly once per (kind, key): claims, executes, records success/failure. A concurrent
- *  or already-succeeded duplicate resolves to { skipped: true, job } without running `fn`. */
-async function runJobOnce(kind, idempotencyKey, fn, opts) {
-  const job = await claimJob(kind, idempotencyKey, opts);
-  if (!job) return { skipped: true, job: await getJob(kind, idempotencyKey) };
-  try {
-    const result = await fn();
-    await completeJob(job.id, result ?? null);
-    return { skipped: false, result };
-  } catch (e) {
-    await failJob(job.id, e);
-    throw e;
-  }
-}
-
-async function listDueReports({ weekly = false, monthly = false } = {}) {
-  if (!enabled || (!weekly && !monthly)) return [];
-  const { rows } = await pool.query(
-    `SELECT r.id, r.uid, r.name, r.config, r.schedule, r.last_sent_at, u.email
-       FROM reports r JOIN users u ON u.id = r.uid
-      WHERE u.status = 'active'
-        AND ((r.schedule = 'weekly'  AND $1 AND (r.last_sent_at IS NULL OR r.last_sent_at < now() - interval '6 days'))
-          OR (r.schedule = 'monthly' AND $2 AND (r.last_sent_at IS NULL OR r.last_sent_at < now() - interval '27 days')))
-      ORDER BY r.id ASC`, [weekly, monthly]);
-  return rows;
-}
-
-async function markReportSent(id) {
-  if (!enabled || !id) return false;
-  const { rowCount } = await pool.query('UPDATE reports SET last_sent_at=now() WHERE id=$1', [id]);
-  return rowCount > 0;
-}
-
-// Посты канала за окно (архив ingest'а) — вход серверного недельного дайджеста (weekDigest.js).
-// Ридер посты до сих пор читал только фронт через mtproto/снапшоты; здесь — прямое чтение архива.
-// channelId обязан быть уже resolved через ownership (вызывающий берёт его из listChannels(uid)).
-async function listPostsWindow(channelId, days = 28) {
-  if (!enabled || !channelId) return [];
-  const { rows } = await pool.query(
-    `SELECT date_published, caption, views, reactions, forwards, replies, erv
-       FROM posts
-      WHERE channel_id = $1 AND date_published >= now() - ($2::int || ' days')::interval
-      ORDER BY date_published ASC`, [channelId, days]);
-  return rows;
-}
+// Named reports (per-user composition + email schedule) → repos/reportsRepo.js. Composed below.
 
 // ── GDPR: стирание и экспорт аккаунта (F4/F5) ─────────────────────────────────────────────────
 
@@ -1788,6 +1638,12 @@ async function exportUserData(uid) {
   };
 }
 
+// ── Repo composition (P2 stage 5) — thin re-export so the public `db` API is unchanged ──
+// pool/enabled are settled at module load (above); each repo owns a domain's queries and its
+// methods are spread into the exports below at their original names.
+const jobsRepo = createJobsRepo({ pool, enabled });
+const reportsRepo = createReportsRepo({ pool, enabled });
+
 module.exports = {
   enabled, init, migrate, ping, close, graphsToDailyRows, isDbUnavailable,
   USER_ROLES, USER_STATUSES,
@@ -1808,9 +1664,8 @@ module.exports = {
   rollupChannelMonthly,
   listIgDaily, listIgMediaDaily,
   listAnnotations, createAnnotation, deleteAnnotation,
-  REPORT_SCHEDULES, listReports, getReport, createReport, updateReport, deleteReport,
-  listDueReports, markReportSent, listPostsWindow,
-  claimJob, completeJob, failJob, getJob, runJobOnce,
+  ...reportsRepo,   // REPORT_SCHEDULES, listReports, getReport, createReport, updateReport, deleteReport, listDueReports, markReportSent, listPostsWindow
+  ...jobsRepo,   // claimJob, completeJob, failJob, getJob, runJobOnce
   ensurePersonalWorkspace, ensureExternalSource, ensureChannelCanonical,
   deleteUserAccount, exportUserData,
 };

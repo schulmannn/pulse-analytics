@@ -14,15 +14,20 @@ const db         = require('./db');
 const { createAuth, hashPassword, verifyPassword, SCRYPT, rateLimitKey, isSessionStale } = require('./lib/auth');
 const { captionSnippet } = require('./lib/caption');
 const { fetchWithTimeout } = require('./lib/http');
-const { MTPROTO_URL, MTPROTO_TOKEN, MTPROTO_TIMEOUT_STATS_MS, MTPROTO_TIMEOUT_HEAVY_MS, mtprotoFetch, mtprotoPost, sendMtprotoError } = require('./lib/mtproto-client');
+const { MTPROTO_TOKEN, MTPROTO_TIMEOUT_HEAVY_MS, mtprotoFetch, mtprotoPost } = require('./lib/mtproto-client');
 const { log, requestContext, hashIp } = require('./lib/observability');
 const { legacyCspHeader, setAppHeaders, setHtmlSecurityHeaders } = require('./lib/securityHeaders');
-const { makeResolveChannel, makeServeSnapshot, hasWorkspaceRole } = require('./middleware/tenant');
+const { makeResolveChannel, hasWorkspaceRole } = require('./middleware/tenant');
 const { registerCollectorRoutes } = require('./routes/collector');
 const { registerAuthRoutes } = require('./routes/auth');
 const { registerReportsRoutes } = require('./routes/reports');
 const { registerBugsRoutes } = require('./routes/bugs');
 const { registerChannelsRoutes } = require('./routes/channels');
+const { registerTgRoutes } = require('./routes/tg');
+const { registerIgOauthRoutes } = require('./routes/ig-oauth');
+const { registerIgRoutes } = require('./routes/ig');
+const { registerAccountRoutes } = require('./routes/account');
+const { registerHistoryRoutes } = require('./routes/history');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -155,7 +160,8 @@ if (!process.env.SESSION_SECRET) {
 }
 // Domain-separated subkeys derived from AUTH_SECRET — the raw session-signing
 // secret is never reused directly for other HMAC purposes.
-const IG_STATE_KEY = crypto.createHmac('sha256', AUTH_SECRET).update('ig-state').digest();
+// (The OAuth-state signing subkey ('ig-state') is derived in routes/ig-oauth.js from the injected
+// AUTH_SECRET, alongside the sign/parse helpers that are its only consumers.)
 const IP_HASH_KEY  = crypto.createHmac('sha256', AUTH_SECRET).update('ip-hash').digest();
 
 const ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || '').toLowerCase().trim();
@@ -242,17 +248,6 @@ function requireSuper(req, res, next) {
 
 // ── Channel (tenant) resolution & isolation ──────────────────────
 const resolveChannel = makeResolveChannel({ db, isReady: () => dbReady });
-
-// Live MTProto exists only for the 'central' channel (the owner's session).
-// Other channels are fed by collectors → their data comes from Postgres, so the
-// live-proxy routes answer with a soft "not live" marker for them.
-function notCentral(req, res) {
-  if (req.channel && req.channel.source === 'central') return false;
-  res.json({ available: false, source: 'collector', empty: true });
-  return true;
-}
-
-const serveSnapshot = makeServeSnapshot({ db });
 
 // ── In-memory кэш ───────────────────────────────────────────────
 const cache = new Map();
@@ -392,140 +387,10 @@ registerAuthRoutes({
   escHtml,
 });
 
-// Public runtime config for the SPA (no secrets). Currently just the Google client id so the login
-// UI can decide whether to show the "Sign in with Google" button.
-app.get('/api/config', (req, res) => {
-  res.json({ google_client_id: GOOGLE_CLIENT_ID || null });
-});
+// Account/admin/prefs/config routes are isolated in routes/account.js (accountLimiter travels with
+// them). Shared helpers (requireSuper, sendEmail/emailShell, audit, GOOGLE_CLIENT_ID) are injected.
+registerAccountRoutes({ app, requireAuth, requireSuper, db, audit, sendEmail, emailShell, GOOGLE_CLIENT_ID });
 
-app.get('/api/auth/check', requireAuth, (req, res) => {
-  res.json({ ok: true, role: req.user.role, email: req.user.email });
-});
-
-// ── Персональная раскладка дашборда (порядок/скрытие/ширина блоков) ──
-// Режим без БД → null / stored:false: клиент сам хранит раскладку в localStorage.
-app.get('/api/prefs', requireAuth, async (req, res, next) => {
-  try { res.json({ prefs: await db.getPrefs(req.user.uid) }); }
-  catch (e) { next(e); }
-});
-
-app.put('/api/prefs', requireAuth, async (req, res, next) => {
-  const prefs = req.body && req.body.prefs;
-  if (prefs == null || typeof prefs !== 'object' || Array.isArray(prefs)) {
-    return res.status(400).json({ error: 'prefs должен быть объектом' });
-  }
-  // The blob carries dashboard layout AND the metric-builder widget configs (WidgetConfig[]), so it
-  // needs more room than the original layout-only 8 KB — 32 KB is still a tight bound per user.
-  if (JSON.stringify(prefs).length > 32000) {
-    return res.status(413).json({ error: 'prefs слишком большой' });
-  }
-  try { const stored = await db.setPrefs(req.user.uid, prefs); res.json({ ok: true, stored: !!stored }); }
-  catch (e) { next(e); }
-});
-
-// ── Admin: user management (superuser only) ──
-app.get('/api/admin/users', requireAuth, requireSuper, async (req, res, next) => {
-  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
-  try {
-    res.json({ users: await db.listUsers(), roles: db.USER_ROLES, statuses: db.USER_STATUSES, me: req.user.uid });
-  } catch (e) { next(e); }
-});
-
-app.patch('/api/admin/users/:id', requireAuth, requireSuper, async (req, res) => {
-  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
-  const id = parseInt(req.params.id, 10);
-  if (!id) return res.status(400).json({ error: 'bad id' });
-  // don't let an admin lock themselves out
-  if (req.user.uid === id && (req.body.role === 'user' || req.body.status === 'disabled')) {
-    return res.status(400).json({ error: 'Нельзя понизить или отключить собственный аккаунт' });
-  }
-  try {
-    const before = await db.getUserById(id);
-    const u = await db.updateUser(id, { role: req.body.role, status: req.body.status });
-    if (!u) return res.status(404).json({ error: 'Пользователь не найден' });
-    audit(req, 'admin.user_updated', {
-      target_uid: id,
-      before: before ? { role: before.role, status: before.status } : null,
-      after: { role: u.role, status: u.status },
-    }).catch(() => {});
-    res.json(u);
-  } catch (e) { res.status(400).json({ error: e.message }); }
-});
-
-// Admin-стирание аккаунта (GDPR F4, второй путь). Суперюзеров панель не удаляет — владелец
-// стирается только вручную с сервера (иначе одна кнопка оставляет приложение без админа).
-app.delete('/api/admin/users/:id', requireAuth, requireSuper, async (req, res, next) => {
-  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
-  const id = parseInt(req.params.id, 10);
-  if (!id) return res.status(400).json({ error: 'bad id' });
-  try {
-    const target = await db.getUserById(id);
-    if (!target) return res.status(404).json({ error: 'Пользователь не найден' });
-    if (target.role === 'superuser') return res.status(400).json({ error: 'Суперюзера нельзя удалить из панели' });
-    const ok = await db.deleteUserAccount(id);
-    // Аудит ПОСЛЕ успеха (uid записи = админ, он жив): провал не оставляет ложного «deleted».
-    // target_uid — номер-надгробие без идентифицирующих данных.
-    if (ok) await audit(req, 'admin.user_deleted', { target_uid: id }).catch(() => {});
-    res.json({ ok });
-  } catch (e) { next(e); }
-});
-
-// ── GDPR: собственный аккаунт — экспорт (F5) и стирание (F4) ──
-
-// Обе операции тяжёлые/необратимые и уже за requireAuth — лимитер здесь щит от абьюза
-// украденным токеном (bulk-экспорт, brute «угадай email» на DELETE), не от юзера.
-const accountLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 10,
-  message: { error: 'Слишком много запросов к данным аккаунта. Подожди 15 минут.' },
-});
-
-// Все персональные данные одним JSON-файлом (архивы каналов включены; credentials —
-// pass_hash / TG-сессия / IG-токен — не покидают сервер никогда, см. db.exportUserData).
-app.get('/api/account/export', accountLimiter, requireAuth, async (req, res, next) => {
-  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
-  try {
-    const data = await db.exportUserData(req.user.uid);
-    if (!data) return res.status(404).json({ error: 'Пользователь не найден' });
-    audit(req, 'account.exported', {}).catch(() => {});
-    // Самый чувствительный ответ приложения — никакому кэшу его не хранить.
-    res.setHeader('Cache-Control', 'no-store');
-    res.setHeader('Content-Disposition',
-      `attachment; filename="atlavue-export-${new Date().toISOString().slice(0, 10)}.json"`);
-    res.json(data);
-  } catch (e) { next(e); }
-});
-
-// Немедленный hard-delete (решение владельца: без grace-периода — восстановление это просто
-// переподключение источников). Подтверждение — точный email аккаунта: пароль здесь не работает
-// как фактор (Google-аккаунты живут с неиспользуемым случайным pass_hash). Каскадную полноту
-// и судьбу общих данных описывает db.deleteUserAccount.
-app.delete('/api/account', accountLimiter, requireAuth, async (req, res, next) => {
-  if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
-  if (req.user.role === 'superuser') {
-    return res.status(403).json({ error: 'Аккаунт суперюзера удаляется только вручную с сервера' });
-  }
-  const confirm = String((req.body && req.body.confirm) || '').trim().toLowerCase();
-  if (!confirm || confirm !== String(req.user.email || '').toLowerCase()) {
-    return res.status(400).json({ error: 'Введите email аккаунта для подтверждения' });
-  }
-  try {
-    // Аудит до удаления (после — FK на несуществующий uid). Action-имя честное: это фиксация
-    // ЗАПРОСА; сама строка при успехе тут же анонимизируется внутри deleteUserAccount.
-    // Metadata пустые — email в журнале сделал бы стирание неполным.
-    await audit(req, 'account.delete_requested', {}).catch(() => {});
-    // Прощальное письмо ДО удаления (адрес вот-вот исчезнет). Это и уведомление о
-    // destructive-действии: если аккаунт стёр вор с украденным токеном — владелец узнаёт.
-    await sendEmail(req.user.email, 'Аккаунт удалён — Atlavue', emailShell('Аккаунт удалён',
-      '<p>Ваш аккаунт Atlavue и все связанные данные (каналы, архивы, отчёты, подключения) ' +
-      'только что безвозвратно удалены по запросу из настроек.</p>' +
-      '<p style="color:#64748d;font-size:13px">Если это были не вы — ответьте на это письмо немедленно: ' +
-      'остаточные копии в резервных бэкапах существуют ещё до 30 дней.</p>')).catch(() => {});
-    const ok = await db.deleteUserAccount(req.user.uid);
-    if (!ok) return res.status(404).json({ error: 'Пользователь не найден' });
-    res.json({ ok: true });
-  } catch (e) { next(e); }
-});
 
 // ════════════════════════════════════════════════════════════════
 //  INSTAGRAM ROUTES
@@ -534,26 +399,17 @@ app.delete('/api/account', accountLimiter, requireAuth, async (req, res, next) =
 // "Instagram API with Instagram Login" (no Facebook Page): the IG user access token works
 // against graph.instagram.com, NOT graph.facebook.com. IG_ACCESS_TOKEN/IG_ACCOUNT_ID is the
 // global single-account fallback; per-channel OAuth tokens (ig_accounts) layer on top and take
-// precedence when a channel has connected its own account (see resolveIg below).
+// precedence when a channel has connected its own account (see resolveIg in routes/ig.js).
 const IG_BASE      = 'https://graph.instagram.com/v22.0';   // versioned data edges
 const IG_GRAPH     = 'https://graph.instagram.com';         // token exchange / refresh / me (unversioned)
 const IG_TOKEN     = process.env.IG_ACCESS_TOKEN;
 const IG_ACCOUNT   = process.env.IG_ACCOUNT_ID;
-const IG_CLIENT_ID     = process.env.IG_CLIENT_ID;
-const IG_CLIENT_SECRET = process.env.IG_CLIENT_SECRET;
-// Insights edges (reach / views / follower_count / follows_and_unfollows, media & story insights)
-// require instagram_business_manage_insights — instagram_business_basic alone is NOT enough. Both
-// are requested at connect time (Meta blog 2025-03-24).
-const IG_OAUTH_SCOPES  = 'instagram_business_basic,instagram_business_manage_insights';
 const igCrypto     = require('./lib/ig_crypto');
 const tgCrypto     = require('./lib/tg_crypto');
 const igMock       = require('./ig_mock');
 // Global env single-account is "configured" when both token + account id are present.
+// (The per-channel OAuth connect flow + its app credentials live in routes/ig-oauth.js.)
 const igConfigured = () => !!IG_TOKEN && !!IG_ACCOUNT;
-// The per-channel OAuth connect flow needs app credentials, the token-encryption key, and a DB
-// (tokens are stored encrypted, one per channel). Without all three, connect is unavailable and
-// IG falls back to the global env account (or mock).
-const igOauthConfigured = () => !!IG_CLIENT_ID && !!IG_CLIENT_SECRET && igCrypto.configured() && db.enabled;
 
 // Single choke-point for all Graph data calls. `token` defaults to the global env token so any
 // legacy caller keeps working; the IG routes pass the per-request token (req.ig.token).
@@ -607,399 +463,16 @@ async function refreshIgIfNeeded(channelId, token, expiresAtStr) {
   return token;
 }
 
-// Per-request IG identity: resolve { accountId, token, source } for THIS request's channel.
-// Priority: (1) the channel's own OAuth token from ig_accounts (decrypted + refreshed);
-// (2) the global env single-account token; (3) null → the route serves mock. Unlike
-// resolveChannel it never short-circuits on a missing channel and never 500s on a decrypt
-// failure — the IG UI must always render (real, env-fallback, or mock). Requires requireAuth
-// upstream (uses req.user for the channel ownership check).
-async function resolveIg(req, res, next) {
-  req.ig = null;
-  try {
-    const channelId = parseInt(req.query.channel || req.headers['x-channel-id'], 10) || 0;
-    if (db.enabled && channelId && igCrypto.configured()) {
-      const ch  = await db.getChannel(channelId, req.user).catch(() => null);
-      const acc = ch ? await db.getIgAccount(channelId).catch(() => null) : null;
-      if (acc && acc.access_token_enc) {
-        try {
-          let token = igCrypto.decrypt(acc.access_token_enc);
-          token = await refreshIgIfNeeded(channelId, token, acc.token_expires_at);
-          req.ig = { accountId: acc.ig_user_id, token, source: 'channel', channelId, username: acc.username };
-        } catch (e) {
-          log('warn', 'ig_token_decrypt_failed', { channelId, error: e.message });   // fall through to env/mock
-        }
-      }
-    }
-    // Env single-account fallback = the superuser's own account (@bynotem via IG_ACCESS_TOKEN). Gate
-    // it to the superuser (or local dev with no DB): a regular user requesting a channel they don't
-    // own must NOT be served the env account's real data — they get mock (the connect prompt). This
-    // closes the X-Channel-Id spoof where getChannel() denies but the code fell through to env.
-    if (!req.ig && igConfigured() && (!db.enabled || (req.user && req.user.role === 'superuser'))) {
-      req.ig = { accountId: IG_ACCOUNT, token: IG_TOKEN, source: 'env', channelId: null };
-    }
-  } catch (e) {
-    log('warn', 'resolve_ig_failed', { error: e.message });
-  }
-  next();
-}
-
-// Drop cached IG payloads for one account id (keys look like `ig:<kind>:<accountId>[:...]`),
-// so a connect/disconnect flips the UI immediately instead of waiting out the 10-min TTL.
-function igCachePurge(accountId) {
-  if (!accountId) return;
-  const id = String(accountId);
-  // Delimiter-aware: match the account id as a whole ':'-segment, so purging id 123 never touches
-  // 1234's keys (a substring `includes(':123')` would). Keys look like ig:<kind>:<accountId>[:<param>].
-  for (const k of cache.keys()) if (k.startsWith('ig:') && k.split(':').includes(id)) cache.delete(k);
-}
-
-// OAuth "state": a signed, expiring blob binding the connect flow to (uid, channelId). The
-// callback lands WITHOUT a session header (top-level browser redirect from Instagram), so the
-// signed state is the only trustworthy attribution — HMAC(IG_STATE_KEY, a domain-separated
-// subkey of AUTH_SECRET) + 10-min expiry + nonce.
-const IG_STATE_TTL = 10 * 60 * 1000;
-function signIgState(payload) {
-  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
-  const sig  = crypto.createHmac('sha256', IG_STATE_KEY).update(body).digest('base64url');
-  return `${body}.${sig}`;
-}
-function parseIgState(state) {
-  try {
-    if (!state || typeof state !== 'string' || state.indexOf('.') < 0) return null;
-    const [body, sig] = state.split('.');
-    const expected = crypto.createHmac('sha256', IG_STATE_KEY).update(body).digest('base64url');
-    if (!sig || sig.length !== expected.length) return null;
-    if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
-    const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
-    if (!payload.exp || payload.exp <= Date.now()) return null;
-    return payload;
-  } catch { return null; }
-}
-
-// GET /api/ig/profile — профиль аккаунта (теперь с аватаркой)
-app.get('/api/ig/profile', requireAuth, resolveIg, async (req, res, next) => {
-  try {
-    if (!req.ig) return res.json(igMock.igMockProfile());
-    const cacheKey = `ig:profile:${req.ig.accountId}`;
-    const cached = cacheGet(cacheKey);
-    if (cached) return res.json(cached);
-
-    const data = await igFetch(`/${req.ig.accountId}`, {
-      fields: 'username,name,followers_count,follows_count,media_count,biography,website,profile_picture_url'
-    }, req.ig.token);
-    // Real last-sync time: when we actually fetched from Instagram. Lives in the cached payload (10m
-    // TTL), so the UI shows the true sync moment, not when React Query happened to receive a response.
-    data.synced_at = Date.now();
-    cacheSet(cacheKey, data);
-    res.json(data);
-  } catch (e) {
-    next(e);
-  }
+// Instagram data routes + the per-request resolveIg middleware are isolated in routes/ig.js.
+// The shared IG data-access (singleflight igFetch + opportunistic refreshIgIfNeeded), the env
+// single-account fallback and igCrypto stay here — the daily IG cron below uses them too — and
+// are injected. igMock backs the no-credentials fallback.
+registerIgRoutes({
+  app, requireAuth, db, log,
+  igFetch, refreshIgIfNeeded, igConfigured, igCrypto, igMock, nearestOf,
+  cacheGet, cacheSet, IG_ACCOUNT, IG_TOKEN,
 });
 
-// GET /api/ig/tags — media where the account is @-tagged (the brand-mentions surface; there is no
-// keyword search on Instagram). The live edge only returns recent items, so we archive them in
-// `ig_tags` and serve the accumulated history (DB) — they persist even after the live window drops
-// them. Degrades to mock samples without a token, and to live-only without a DB.
-app.get('/api/ig/tags', requireAuth, resolveIg, async (req, res) => {
-  try {
-    if (!req.ig) return res.json(igMock.igMockTags());
-    let live = [];
-    try {
-      const r = await igFetch(`/${req.ig.accountId}/tags`, {
-        fields: 'id,caption,username,permalink,timestamp,media_type,like_count,comments_count',
-        limit: 50,
-      }, req.ig.token);
-      live = r.data || [];
-    } catch { /* tags edge can be empty / unavailable — fall back to the archive */ }
-    // The ig_tags archive is global (not yet per-channel), so only archive + serve it for the
-    // global env account; per-channel connections serve the live window only until ig_tags is
-    // keyed by channel (avoids cross-channel tag leakage).
-    const useArchive = db.enabled && req.ig.source === 'env';
-    if (useArchive && live.length) await db.upsertIgTags(live).catch(() => {});
-    const data = useArchive ? await db.getIgTags(100).catch(() => live) : live;
-    res.json({ data, live_count: live.length });
-  } catch (e) {
-    res.status(200).json({ data: [], error: e.message }); // section degrades, page survives
-  }
-});
-
-// GET /api/ig/insights?days=30 — метрики аккаунта
-app.get('/api/ig/insights', requireAuth, resolveIg, async (req, res, next) => {
-  // Snap to a small enum before the cache key: an arbitrary user-supplied `days`
-  // would mint per-value cache entries, each costing the full ~19-call Graph burst.
-  const days = nearestOf(parseInt(req.query.days, 10) || 30, [7, 30, 90]);
-
-  try {
-    if (!req.ig) return res.json(igMock.igMockInsights(days));
-    const cacheKey = `ig:insights:${req.ig.accountId}:${days}`;
-    const cached = cacheGet(cacheKey);
-    if (cached) return res.json(cached);
-
-    const SEC = 86400;
-    const now = Math.floor(Date.now() / 1000);
-    const curUntil = now, curSince = now - days * SEC;
-    const prevUntil = curSince, prevSince = curSince - days * SEC;
-
-    // Instagram API with Instagram Login (graph.instagram.com): only `reach` + `follower_count`
-    // return a daily time-series. Fetch the full 90-day series so the panel can window the
-    // selected period (cur vs prev) for these as before.
-    const dailyCall = igFetch(`/${req.ig.accountId}/insights`, { metric: 'reach,follower_count', period: 'day', since: now - 90 * SEC, until: now }, req.ig.token);
-
-    // Engagement/visibility metrics are window AGGREGATES (total_value) with no daily series, so
-    // they can't be windowed client-side. Fetch each for the current and previous selected window
-    // (per-metric allSettled → one unsupported metric, e.g. profile_views, can't blank the rest),
-    // then re-shape each as two synthetic daily points (prev-window + current-window) placed inside
-    // those windows, so the panel's existing windowPair() KPI/delta math reads them unchanged.
-    const tvNames = ['views', 'profile_views', 'accounts_engaged', 'total_interactions', 'likes', 'comments', 'saves', 'shares'];
-    const tvVal = (r) => { const m = r && r.data && r.data[0]; return m && m.total_value && m.total_value.value != null ? m.total_value.value : null; };
-    const fetchTv = (s, u) => Promise.allSettled(
-      tvNames.map((metric) => igFetch(`/${req.ig.accountId}/insights`, { metric, metric_type: 'total_value', period: 'day', since: s, until: u }, req.ig.token)),
-    );
-    // follows_and_unfollows → real gross follows (FOLLOWER) AND unfollows (NON_FOLLOWER) for the
-    // window (period aggregate only — the daily breakdown is empty). Surfaced as `follows`/`unfollows`
-    // so the panel can show the channel's REAL movement (net = follows − unfollows), not just gross
-    // new follows (which the dashboard previously reported as growth, ignoring unfollows).
-    const fetchFau = (s, u) =>
-      igFetch(`/${req.ig.accountId}/insights`, { metric: 'follows_and_unfollows', metric_type: 'total_value', breakdown: 'follow_type', period: 'day', since: s, until: u }, req.ig.token);
-    const fauVal = (res) => {
-      const block = res && res.data && res.data[0] && res.data[0].total_value && res.data[0].total_value.breakdowns;
-      const results = (block && block[0] && block[0].results) || [];
-      let follows = null, unfollows = null;
-      results.forEach((r) => {
-        const k = r.dimension_values && r.dimension_values[0];
-        if (k === 'FOLLOWER') follows = r.value;
-        else if (k === 'NON_FOLLOWER') unfollows = r.value;
-      });
-      return { follows, unfollows };
-    };
-    // Reach as a DEDUPLICATED window aggregate (total_value) for the current + previous window —
-    // Instagram's real "Accounts reached". The daily `reach` series above is a per-day unique count
-    // whose naïve sum double-counts repeat viewers (2–4× inflation vs the app). Surfaced under a
-    // distinct name (`reach_window`) so it never shadows the daily series the reach chart still needs.
-    const fetchReachWin = (s, u) => igFetch(`/${req.ig.accountId}/insights`, { metric: 'reach', metric_type: 'total_value', period: 'day', since: s, until: u }, req.ig.token);
-    const [dailyR, curR, prevR, fauCurR, fauPrevR, reachWinCurR, reachWinPrevR] = await Promise.all([
-      dailyCall.catch(() => null),
-      fetchTv(curSince, curUntil),
-      fetchTv(prevSince, prevUntil),
-      fetchFau(curSince, curUntil).catch(() => null),
-      fetchFau(prevSince, prevUntil).catch(() => null),
-      fetchReachWin(curSince, curUntil).catch(() => null),
-      fetchReachWin(prevSince, prevUntil).catch(() => null),
-    ]);
-    const out = dailyR && dailyR.data ? [...dailyR.data] : [];
-    const curPoint = new Date(curUntil * 1000).toISOString();
-    const prevPoint = new Date((prevSince + Math.floor((days * SEC) / 2)) * 1000).toISOString();
-    const pushAgg = (metric, cur, prev) => {
-      if (cur == null && prev == null) return;
-      const values = [];
-      if (prev != null) values.push({ value: prev, end_time: prevPoint });
-      if (cur != null) values.push({ value: cur, end_time: curPoint });
-      out.push({ name: metric, period: 'day', values, total_value: { value: cur } });
-    };
-    tvNames.forEach((metric, i) => {
-      pushAgg(
-        metric,
-        curR[i].status === 'fulfilled' ? tvVal(curR[i].value) : null,
-        prevR[i].status === 'fulfilled' ? tvVal(prevR[i].value) : null,
-      );
-    });
-    const fauCur = fauVal(fauCurR), fauPrev = fauVal(fauPrevR);
-    pushAgg('follows', fauCur.follows, fauPrev.follows);
-    pushAgg('unfollows', fauCur.unfollows, fauPrev.unfollows);
-    pushAgg('reach_window', tvVal(reachWinCurR), tvVal(reachWinPrevR));
-    const data = { data: out };
-    cacheSet(cacheKey, data);
-    res.json(data);
-  } catch (e) {
-    next(e);
-  }
-});
-
-// GET /api/ig/posts?limit=20 — последние посты с инсайтами и превью
-app.get('/api/ig/posts', requireAuth, resolveIg, async (req, res, next) => {
-  // Snap to a small enum before the cache key (each post costs its own insights call,
-  // so per-value cache entries multiply Graph quota burn).
-  const limit = nearestOf(parseInt(req.query.limit, 10) || 20, [6, 12, 25]);
-  try {
-    if (!req.ig) return res.json(igMock.igMockPosts(limit));
-    const cacheKey = `ig:posts:${req.ig.accountId}:${limit}`;
-    const cached = cacheGet(cacheKey);
-    if (cached) return res.json(cached);
-
-    const mediaRes = await igFetch(`/${req.ig.accountId}/media`, {
-      fields: 'id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count',
-      limit
-    }, req.ig.token);
-
-    const posts = await Promise.all(
-      (mediaRes.data || []).map(async (post) => {
-        // impressions deprecated 2025 → views. Reels carry watch-time (ms), only valid on REELS.
-        const base = 'reach,views,shares,saved,total_interactions';
-        const metric = post.media_product_type === 'REELS'
-          ? `${base},ig_reels_avg_watch_time,ig_reels_video_view_total_time`
-          : base;
-        try {
-          const ins = await igFetch(`/${post.id}/insights`, { metric, metric_type: 'total_value' }, req.ig.token);
-          const metrics = {};
-          (ins.data || []).forEach((m) => {
-            metrics[m.name] = (m.total_value && m.total_value.value != null)
-              ? m.total_value.value
-              : (m.values && m.values[0] ? m.values[0].value : 0);
-          });
-          return { ...post, ...metrics };
-        } catch {
-          return post;
-        }
-      })
-    );
-
-    const result = { data: posts };
-    cacheSet(cacheKey, result);
-    res.json(result);
-  } catch (e) {
-    next(e);
-  }
-});
-
-// GET /api/ig/breakdowns — audience demographics + format/contact breakdowns (modern
-// total_value envelope, Graph v22+). Mock-backed when no creds.
-app.get('/api/ig/breakdowns', requireAuth, resolveIg, async (req, res) => {
-  const allowed = ['last_14_days', 'last_30_days', 'last_90_days'];
-  const timeframe = allowed.includes(req.query.timeframe) ? req.query.timeframe : 'last_30_days';
-  try {
-    if (!req.ig) return res.json(igMock.igMockBreakdowns(timeframe));
-    const cacheKey = `ig:breakdowns:${req.ig.accountId}:${timeframe}`;
-    const cached = cacheGet(cacheKey);
-    if (cached) return res.json(cached);
-    const calls = [
-      { metric: 'follower_demographics', breakdown: 'age', period: 'lifetime', metric_type: 'total_value', timeframe },
-      { metric: 'follower_demographics', breakdown: 'gender', period: 'lifetime', metric_type: 'total_value', timeframe },
-      { metric: 'follower_demographics', breakdown: 'country', period: 'lifetime', metric_type: 'total_value', timeframe },
-      { metric: 'follower_demographics', breakdown: 'city', period: 'lifetime', metric_type: 'total_value', timeframe },
-      { metric: 'total_interactions', breakdown: 'media_product_type', period: 'day', metric_type: 'total_value' },
-      { metric: 'profile_links_taps', breakdown: 'contact_button_type', period: 'day', metric_type: 'total_value' },
-    ];
-    const settled = await Promise.allSettled(
-      calls.map((c) => igFetch(`/${req.ig.accountId}/insights`, c, req.ig.token)),
-    );
-    const data = settled
-      .filter((s) => s.status === 'fulfilled')
-      .flatMap((s) => s.value?.data || []);
-    const result = { data };
-    cacheSet(cacheKey, result);
-    res.json(result);
-  } catch (e) {
-    res.status(200).json({ data: [], error: e.message }); // graceful: section degrades, page survives
-  }
-});
-
-// GET /api/ig/online — online-followers hourly map (best-time heatmap). Flaky metric →
-// always 200, empty data[] on failure so the heatmap degrades instead of crashing.
-app.get('/api/ig/online', requireAuth, resolveIg, async (req, res) => {
-  try {
-    if (!req.ig) return res.json(igMock.igMockOnlineFollowers());
-    const cacheKey = `ig:online:${req.ig.accountId}`;
-    const cached = cacheGet(cacheKey);
-    if (cached) return res.json(cached);
-    const data = await igFetch(`/${req.ig.accountId}/insights`, { metric: 'online_followers', period: 'lifetime' }, req.ig.token);
-    const result = { data: data?.data || [] };
-    cacheSet(cacheKey, result);
-    res.json(result);
-  } catch (e) {
-    res.status(200).json({ data: [], error: e.message });
-  }
-});
-
-// GET /api/ig/stories — active stories (last 24h) + per-story insights/navigation. Cached
-// briefly (3 min): the fan-out costs 1+~8 Graph calls PER STORY, so serving it uncached on
-// every view self-burns the quota; tolerates per-story errors (#10 <5 viewers), returns []
-// gracefully. Per-story metrics fetched INDEPENDENTLY (allSettled): on the Instagram-Login API a single
-// unsupported story metric makes a *combined* /insights call fail wholesale, which previously
-// dropped the entire story to null → the section showed "no stories" even when stories existed.
-const STORY_METRICS = ['reach', 'views', 'replies', 'shares', 'follows', 'profile_visits', 'total_interactions'];
-const igMetricVal = (j) => {
-  const m = j && j.data && j.data[0];
-  if (!m) return null;
-  if (m.total_value && m.total_value.value != null) return m.total_value.value;
-  if (m.values && m.values[0] && m.values[0].value != null) return m.values[0].value;
-  return null;
-};
-
-const IG_STORIES_TTL = 180 * 1000;
-
-app.get('/api/ig/stories', requireAuth, resolveIg, async (req, res) => {
-  try {
-    if (!req.ig) return res.json(igMock.igMockStories());
-    const cacheKey = `ig:stories:${req.ig.accountId}`;
-    const cached = cacheGet(cacheKey);
-    if (cached) return res.json(cached);
-    const list = await igFetch(`/${req.ig.accountId}/stories`, {
-      fields: 'id,media_type,timestamp,permalink,thumbnail_url',
-    }, req.ig.token);
-    const stories = await Promise.all(
-      (list.data || []).map(async (s) => {
-        const out = { ...s };
-        // Each metric independently — one unsupported metric blanks only itself; the story and
-        // its remaining metrics always survive (the story is never dropped).
-        const settled = await Promise.allSettled(
-          STORY_METRICS.map((metric) => igFetch(`/${s.id}/insights`, { metric, metric_type: 'total_value' }, req.ig.token)),
-        );
-        settled.forEach((r, i) => {
-          if (r.status !== 'fulfilled') return;
-          const v = igMetricVal(r.value);
-          if (v != null) out[STORY_METRICS[i]] = v;
-        });
-        // Navigation breakdown (tap_forward/back/exit, swipe_forward) — isolated so a breakdown
-        // failure can't blank the numeric metrics above.
-        try {
-          const navRes = await igFetch(`/${s.id}/insights`, {
-            metric: 'navigation', metric_type: 'total_value', breakdown: 'story_navigation_action_type',
-          }, req.ig.token);
-          const m = (navRes.data || []).find((x) => x.name === 'navigation');
-          if (m && m.total_value) {
-            const block = m.total_value.breakdowns && m.total_value.breakdowns[0];
-            if (block) {
-              const nav = {};
-              (block.results || []).forEach((r) => {
-                const k = r.dimension_values && r.dimension_values[0];
-                if (k) nav[k] = r.value;
-              });
-              out.navigation = nav;
-            }
-            out.navigation_total = m.total_value.value != null ? m.total_value.value : 0;
-          }
-        } catch { /* navigation optional */ }
-        // Derive total_interactions if the metric itself was unsupported for this media type.
-        if (out.total_interactions == null) {
-          out.total_interactions = Number(out.replies || 0) + Number(out.shares || 0);
-        }
-        return out;
-      }),
-    );
-    const result = { data: stories }; // never filter — a story must survive insight failures
-    cacheSet(cacheKey, result, IG_STORIES_TTL);
-    res.json(result);
-  } catch (e) {
-    res.status(200).json({ data: [], error: e.message });
-  }
-});
-
-// GET /api/ig/history?days=400 — persisted daily IG series (Postgres ig_daily), mirroring
-// /api/history/channel for TG. This is the DB-first read path: IG's live window is tiny (~30d for
-// follower_count, nothing for reach beyond the API cap), so the accumulated history lives here.
-// resolveIg gives us req.ig.channelId ONLY after getChannel() passed (ownership enforced) — so we
-// serve history for the requester's own connected channel and no one else's. The env/mock fallback
-// (channelId null) has no per-channel rows → [] → the client transparently keeps its live series.
-app.get('/api/ig/history', requireAuth, resolveIg, async (req, res) => {
-  const days = Math.min(1000, parseInt(req.query.days, 10) || 400);
-  const channelId = req.ig && req.ig.channelId;
-  try {
-    res.json({ enabled: db.enabled, rows: channelId ? await db.listIgDaily(channelId, days) : [] });
-  } catch (e) {
-    res.status(200).json({ enabled: db.enabled, rows: [], error: e.message });
-  }
-});
 
 // ════════════════════════════════════════════════════════════════
 //  IG-СБОР ДЛЯ КРОНА — тот же Graph, но пишем в Postgres (история)
@@ -1013,6 +486,16 @@ app.get('/api/ig/history', requireAuth, resolveIg, async (req, res) => {
 // (весь IG-сбор идёт fire-and-forget ПОСЛЕ res.json, как processReportSchedules).
 
 // Достаём total_value одной total_value-метрики из ответа /insights.
+// Story-insight metric list + single-metric value parser — used by collectIgSnapshotsForAccount below.
+// routes/ig.js keeps its own copies for the live /api/ig/stories route (cf. tvNames vs IG_TV_NAMES).
+const STORY_METRICS = ['reach', 'views', 'replies', 'shares', 'follows', 'profile_visits', 'total_interactions'];
+const igMetricVal = (j) => {
+  const m = j && j.data && j.data[0];
+  if (!m) return null;
+  if (m.total_value && m.total_value.value != null) return m.total_value.value;
+  if (m.values && m.values[0] && m.values[0].value != null) return m.values[0].value;
+  return null;
+};
 const igTvVal = (r) => { const m = r && r.data && r.data[0]; return m && m.total_value && m.total_value.value != null ? m.total_value.value : null; };
 // Разбираем follows_and_unfollows (breakdown=follow_type) → { follows, unfollows }.
 const igFauVal = (res) => {
@@ -1342,187 +825,17 @@ async function processTgQrCollection() {
   log(capped ? 'warn' : 'info', 'tg_qr_collection_done', { collected, skipped, failed, capped });
 }
 
-// ── Instagram OAuth (per-channel connect) ─────────────────────────
-// "Business Login for Instagram" (Instagram API with Instagram Login, no Facebook Page).
-// Flow: start (authed, returns authorize_url) → user authorizes on instagram.com → callback
-// (credential-free, trusts the signed state) → code→short→long-lived token → stored encrypted
-// against the channel. Inert until IG_CLIENT_ID/IG_CLIENT_SECRET/IG_TOKEN_KEY + a DB are set.
-
-// POST /api/ig/oauth/start — begin connecting an Instagram account to the selected channel.
-// Returns { authorize_url } for a top-level browser navigation (a session header can't survive
-// the OAuth redirect, so we can't 302 here). The (uid, channelId) are bound into a signed state.
-app.post('/api/ig/oauth/start', requireAuth, asyncHandler(async (req, res) => {
-  if (!igOauthConfigured()) return res.status(400).json({ error: 'Подключение Instagram не настроено на сервере' });
-  // ?new_source=1 — connect the account as its OWN standalone source (a fresh channels row is
-  // created in the callback once the identity is known) instead of attaching it to a channel.
-  const newSource = String(req.query.new_source || '') === '1';
-  const channelId = newSource ? 0 : parseInt(req.query.channel || req.headers['x-channel-id'], 10) || 0;
-  if (!newSource) {
-    if (!channelId) return res.status(400).json({ error: 'Выбери канал, к которому подключить Instagram' });
-    const ch = await db.getChannel(channelId, req.user).catch(() => null);
-    if (!ch) return res.status(403).json({ error: 'Нет доступа к этому каналу' });
-    // Rebinding the channel's IG account/token — workspace admins only (ADR-001). The callback
-    // trusts the signed state, so gating the state mint here covers the whole flow.
-    if (!hasWorkspaceRole(ch, req.user, 'admin')) return res.status(403).json({ error: 'Недостаточно прав в этом воркспейсе' });
-  }
-  const state = signIgState({ uid: req.user.uid, channelId, ns: newSource ? 1 : 0, nonce: crypto.randomBytes(12).toString('base64url'), exp: Date.now() + IG_STATE_TTL });
-  const authorizeUrl = 'https://www.instagram.com/oauth/authorize?' + new URLSearchParams({
-    client_id: IG_CLIENT_ID,
-    redirect_uri: `${appBase(req)}/api/ig/oauth/callback`,
-    response_type: 'code',
-    scope: IG_OAUTH_SCOPES,
-    state,
-  }).toString();
-  await audit(req, 'ig_oauth_start', { channelId });
-  res.json({ authorize_url: authorizeUrl });
-}));
-
-// GET /api/ig/oauth/callback — Instagram redirects the user's browser here after they authorize.
-// No session header (top-level redirect), so trust comes from the signed state. Exchanges the code
-// for a long-lived token, stores it encrypted against the channel, then bounces the browser back
-// into the SPA with a success/error flag. Never renders tokens; logs stay secret-free.
-app.get('/api/ig/oauth/callback', async (req, res) => {
-  const back = (q) => res.redirect(302, `${appBase(req)}/instagram?${q}`);
-  try {
-    if (req.query.error) return back('ig_error=denied');
-    if (!igOauthConfigured()) return back('ig_error=server');
-    const st = parseIgState(req.query.state);
-    const code = String(req.query.code || '');
-    if (!st || !code) return back('ig_error=state');
-
-    // Re-verify the user still exists/active and still owns the target channel (state can outlive
-    // a permission change).
-    if (st.uid == null) return back('ig_error=auth');
-    const u = await db.getUserById(st.uid).catch(() => null);
-    if (!u || u.status !== 'active') return back('ig_error=auth');
-    const user = { uid: u.id, role: u.role, email: u.email };
-    // Channel-bound connect re-verifies ownership; a new-source connect has no channel yet —
-    // its row is created below, after the Instagram identity is known.
-    if (!st.ns) {
-      const ch = await db.getChannel(st.channelId, user).catch(() => null);
-      if (!ch) return back('ig_error=channel');
-    }
-    const redirectUri = `${appBase(req)}/api/ig/oauth/callback`;
-
-    // 1) authorization code → short-lived token (api.instagram.com, form-encoded POST).
-    const shortRes = await fetchWithTimeout('https://api.instagram.com/oauth/access_token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        client_id: IG_CLIENT_ID,
-        client_secret: IG_CLIENT_SECRET,
-        grant_type: 'authorization_code',
-        redirect_uri: redirectUri,
-        code,
-      }).toString(),
-    });
-    const shortJson = await shortRes.json().catch(() => ({}));
-    if (!shortJson.access_token) {
-      log('warn', 'ig_oauth_short_failed', { channelId: st.channelId, err: shortJson.error_message || shortJson.error_type || 'no_token' });
-      return back('ig_error=exchange');
-    }
-
-    // 2) short-lived → long-lived (~60d) token (graph.instagram.com). If this fails we must NOT
-    // silently persist the 1-hour short token under a 60-day expiry (the connection would die in an
-    // hour with no refresh path) — bail with an error flag and let the user retry.
-    const longRes = await fetchWithTimeout(`${IG_GRAPH}/access_token?` + new URLSearchParams({
-      grant_type: 'ig_exchange_token', client_secret: IG_CLIENT_SECRET, access_token: shortJson.access_token }).toString());
-    const longJson = await longRes.json().catch(() => ({}));
-    if (!longJson.access_token || !longJson.expires_in) {
-      log('warn', 'ig_oauth_long_failed', { channelId: st.channelId, err: longJson.error_message || (longJson.error && longJson.error.message) || longJson.error || 'no_long_token' });
-      return back('ig_error=exchange');
-    }
-    const longToken = longJson.access_token;
-    const expiresIn = Number(longJson.expires_in);
-
-    // 3) identity — the IG user id + username to display and to build data-edge paths.
-    const meRes = await fetchWithTimeout(`${IG_GRAPH}/me?` + new URLSearchParams({ fields: 'id,username,account_type', access_token: longToken }).toString());
-    const me = await meRes.json().catch(() => ({}));
-    const igUserId = me.id || String(shortJson.user_id || '');
-    if (!igUserId) return back('ig_error=identity');
-
-    // New-source connect: reuse the user's channel that already holds this identity (a
-    // reconnect just refreshes its token), else create a standalone source='ig' row.
-    let targetChannelId = st.channelId;
-    if (st.ns) {
-      const existing = await db.findIgChannelByIgUser(user.uid, igUserId).catch(() => null);
-      if (existing) {
-        targetChannelId = existing;
-      } else {
-        const created = await db.createIgChannel({ owner_uid: user.uid, username: me.username || null }).catch(() => null);
-        if (!created) return back('ig_error=channel');
-        targetChannelId = created.id;
-      }
-    }
-
-    await db.saveIgAccount(targetChannelId, {
-      ig_user_id: igUserId,
-      username: me.username || null,
-      access_token_enc: igCrypto.encrypt(longToken),
-      token_expires_at: new Date(Date.now() + expiresIn * 1000),
-      scopes: IG_OAUTH_SCOPES,
-    });
-    igCachePurge(igUserId);   // clear any stale cached payloads for this account id
-    req.user = user; req.channel = { id: targetChannelId };
-    await audit(req, 'ig_oauth_connected', { channelId: targetChannelId, username: me.username || null, newSource: !!st.ns });
-    // ch= lets the SPA switch straight to the (possibly fresh) source after the bounce.
-    return back(`ig=connected&ch=${targetChannelId}`);
-  } catch (e) {
-    log('error', 'ig_oauth_callback_error', { error: e.message });
-    return back('ig_error=exchange');
-  }
+// Instagram OAuth (per-channel connect) routes are isolated in routes/ig-oauth.js — the
+// signed-state helpers, the connect-config gate, IG cache purge and the token exchange live there.
+registerIgOauthRoutes({
+  app, db, requireAuth, audit, log, fetchWithTimeout, asyncHandler,
+  appBase, cache, igConfigured, igCrypto, AUTH_SECRET, IG_GRAPH,
 });
 
-// DELETE /api/ig/oauth — disconnect the Instagram account from the selected channel.
-app.delete('/api/ig/oauth', requireAuth, asyncHandler(async (req, res) => {
-  const channelId = parseInt(req.query.channel || req.headers['x-channel-id'], 10) || 0;
-  if (!channelId) return res.status(400).json({ error: 'Канал не выбран' });
-  const ch = await db.getChannel(channelId, req.user).catch(() => null);
-  if (!ch) return res.status(403).json({ error: 'Нет доступа к этому каналу' });
-  if (!hasWorkspaceRole(ch, req.user, 'admin')) return res.status(403).json({ error: 'Недостаточно прав в этом воркспейсе' });
-  const acc = await db.getIgAccount(channelId).catch(() => null);
-  const removed = await db.deleteIgAccount(channelId);
-  if (acc && acc.ig_user_id) igCachePurge(acc.ig_user_id);
-  await audit(req, 'ig_oauth_disconnected', { channelId });
-  res.json({ ok: true, removed });
-}));
-
-// GET /api/ig/oauth/status — connection state for Settings + the connect panel (no token leaked).
-app.get('/api/ig/oauth/status', requireAuth, asyncHandler(async (req, res) => {
-  const channelId = parseInt(req.query.channel || req.headers['x-channel-id'], 10) || 0;
-  let acc = null;
-  if (db.enabled && channelId) {
-    const ch = await db.getChannel(channelId, req.user).catch(() => null);
-    if (ch) acc = await db.getIgAccount(channelId).catch(() => null);
-  }
-  res.json({
-    server_ready: igOauthConfigured(),   // app credentials + encryption key + DB all present
-    env_fallback: igConfigured(),        // a global env account is serving IG in the meantime
-    connected: !!acc,
-    channel_id: channelId || null,
-    username: acc ? acc.username : null,
-    ig_user_id: acc ? acc.ig_user_id : null,
-    connected_at: acc ? acc.connected_at : null,
-    token_expires_at: acc ? acc.token_expires_at : null,
-  });
-}));
-
-// ════════════════════════════════════════════════════════════════
-//  TELEGRAM — Bot API
-// ════════════════════════════════════════════════════════════════
-
-const TG_BASE    = 'https://api.telegram.org/bot';
+// ── Telegram Bot API env — read here; still surfaced by /api/health + the boot banner, and
+// injected into routes/tg.js (which owns the Bot-API fetch helper and the /api/tg/* handlers). ──
 const TG_TOKEN   = process.env.TG_BOT_TOKEN;
 const TG_CHANNEL = process.env.TG_CHANNEL;
-
-async function tgFetch(method, params = {}) {
-  const url = new URL(`${TG_BASE}${TG_TOKEN}/${method}`);
-  Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
-  const res  = await fetchWithTimeout(url.toString());
-  const json = await res.json();
-  if (!json.ok) throw new Error(`Telegram API: ${json.description}`);
-  return json.result;
-}
 
 registerChannelsRoutes({ app, db, requireAuth, audit, getDbReady: () => dbReady });
 
@@ -1632,479 +945,25 @@ registerCollectorRoutes({
   audit,
 });
 
-app.get('/api/tg/channel', requireAuth, resolveChannel, asyncHandler(async (req, res) => {
-  if (await serveSnapshot(req, res, d => d.channel)) return;
-  const cacheKey = `tg:channel:${req.channel.id}`;
-  try {
-    const cached = cacheGet(cacheKey);
-    if (cached) return res.json(cached);
-
-    // Основной источник — Bot API (только если задан токен бота)
-    if (TG_TOKEN) {
-      try {
-        const [chat, memberCount] = await Promise.all([
-          tgFetch('getChat',            { chat_id: TG_CHANNEL }),
-          tgFetch('getChatMemberCount', { chat_id: TG_CHANNEL })
-        ]);
-        const data = {
-          id:          chat.id,
-          title:       chat.title,
-          username:    chat.username,
-          description: chat.description || '',
-          memberCount,
-          online:      0,
-          inviteLink:  chat.invite_link || null,
-          source:      'bot_api',
-        };
-        cacheSet(cacheKey, data);
-        return res.json(data);
-      } catch (_botErr) {
-        // бот недоступен → падаем в MTProto-фолбэк ниже
-      }
-    }
-
-    // Фолбэк — MTProto через твой личный аккаунт (работает без бота)
-    const mt = await mtprotoFetch('/channel');
-    const data = {
-      id:          mt.id,
-      title:       mt.title,
-      username:    mt.username,
-      description: mt.description || '',
-      memberCount: mt.members || 0,
-      online:      mt.online || 0,
-      inviteLink:  null,
-      source:      'mtproto',
-    };
-    if (req.channel.id && mt.id) db.setChannelTgId(req.channel.id, mt.id).catch(() => {});   // populate tg_channel_id once
-    cacheSet(cacheKey, data);
-    res.json(data);
-  } catch (e) {
-    // both sources failed (bot errors fall through to MTProto above) → upstream outage
-    sendMtprotoError(res, e);
-  }
-}));
-
 // ════════════════════════════════════════════════════════════════
-//  TELEGRAM — MTProto прокси
+//  TELEGRAM — Bot API + QR-connect + MTProto proxy routes → routes/tg.js
 // ════════════════════════════════════════════════════════════════
 
-// MTProto proxy client (mtprotoFetch / mtprotoPost / sendMtprotoError + breaker + timeouts)
-// lives in ./lib/mtproto-client (imported at the top) — shared by the TG routes and the ingest cron.
-
-// ── Telegram QR connect (managed sessions) ───────────────────────────────
-// «Scan → done» via MTProto QR login on the Telethon service. The session string it
-// returns is encrypted (TG_SESSION_KEY) and stored server-side; it is NEVER sent to the
-// browser. Configured only when the mtproto link + encryption key + DB are all present.
-function tgQrConfigured() {
-  return !!MTPROTO_TOKEN && tgCrypto.configured() && db.enabled;
-}
-
-// On a completed login: encrypt + persist the session, then hand the browser only the
-// username + the admin channels found (never the session itself).
-async function tgQrFinish(req, data) {
-  const session_enc = tgCrypto.encrypt(data.session);
-  await db.saveTgSession(req.user.uid, { tg_user_id: data.tg_user_id, username: data.username, session_enc });
-  audit(req, 'tg.session.connected', { username: data.username || null }).catch(() => {});
-  return {
-    status: 'ok',
-    username: data.username ?? null,
-    channels: (Array.isArray(data.channels) ? data.channels : []).map((c) => ({
-      id: c.id, title: c.title || '', username: c.username ?? null,
-      broadcast: c.broadcast ?? undefined, megagroup: c.megagroup ?? undefined,
-      creator: c.creator ?? undefined, participants: c.participants ?? null,
-      eligible: c.eligible ?? undefined,
-    })),
-  };
-}
-
-app.get('/api/tg/qr/status', requireAuth, async (req, res, next) => {
-  try {
-    if (!tgQrConfigured()) return res.json({ server_ready: false, connected: false });
-    const s = await db.getTgSession(req.user.uid);
-    res.json({ server_ready: true, connected: !!s, username: (s && s.username) || null, connected_at: (s && s.connected_at) || null });
-  } catch (e) { next(e); }
-});
-
-// Bind each QR login id to the uid that started it — a leaked/guessed id must never let
-// another account claim the captured session. In-memory (single web instance) with a TTL; a
-// lost binding (server restart) just makes the client's poll read 'expired' and start fresh.
-const _qrStarts = new Map(); // id -> { uid, at }
-const _QR_START_TTL_MS = 5 * 60 * 1000;
-function _qrOwns(id, uid) {
-  const o = _qrStarts.get(id);
-  return !!o && o.uid === uid;
-}
-
-app.post('/api/tg/qr/start', requireAuth, async (req, res, next) => {
-  if (!tgQrConfigured()) return res.status(400).json({ error: 'Подключение Telegram по QR не настроено на сервере' });
-  try {
-    const now = Date.now();
-    for (const [k, v] of _qrStarts) if (now - v.at > _QR_START_TTL_MS) _qrStarts.delete(k);
-    // One live login per user: cancel any prior pending start before opening a new one.
-    for (const [k, v] of _qrStarts) {
-      if (v.uid === req.user.uid) {
-        _qrStarts.delete(k);
-        mtprotoPost('/qr/cancel', { params: { id: k } }).catch(() => {});
-      }
-    }
-    const data = await mtprotoPost('/qr/start');
-    _qrStarts.set(data.id, { uid: req.user.uid, at: now });
-    res.json({ id: data.id, url: data.url, expires_in: data.expires_in });
-  } catch (e) { next(e); }
-});
-
-app.post('/api/tg/qr/poll', requireAuth, async (req, res, next) => {
-  if (!tgQrConfigured()) return res.status(400).json({ error: 'not_configured' });
-  const id = String((req.body && req.body.id) || '');
-  if (!id) return res.status(400).json({ error: 'id required' });
-  if (!_qrOwns(id, req.user.uid)) return res.json({ status: 'expired' });   // not this user's login
-  try {
-    const data = await mtprotoPost('/qr/poll', { params: { id } });
-    if (data.status === 'ok') { _qrStarts.delete(id); return res.json(await tgQrFinish(req, data)); }
-    if (data.status === 'expired' || data.status === 'error') _qrStarts.delete(id);
-    res.json({ status: data.status, error: data.error });   // pending | password | expired | error
-  } catch (e) { next(e); }
-});
-
-app.post('/api/tg/qr/password', requireAuth, async (req, res, next) => {
-  if (!tgQrConfigured()) return res.status(400).json({ error: 'not_configured' });
-  const id = String((req.body && req.body.id) || '');
-  const password = String((req.body && req.body.password) || '');
-  if (!id || !password) return res.status(400).json({ error: 'id and password required' });
-  if (!_qrOwns(id, req.user.uid)) return res.json({ status: 'expired' });
-  try {
-    const data = await mtprotoPost('/qr/password', { params: { id }, body: { password } });
-    if (data.status === 'ok') { _qrStarts.delete(id); return res.json(await tgQrFinish(req, data)); }
-    res.json({ status: data.status, error: data.error });
-  } catch (e) { next(e); }
-});
-
-// Proactively tear down an abandoned pending login (browser navigates away / gives up), so the
-// ephemeral Telethon client is reclaimed immediately instead of waiting for the mtproto GC.
-app.post('/api/tg/qr/cancel', requireAuth, async (req, res, next) => {
-  const id = String((req.body && req.body.id) || '');
-  if (!id || !_qrOwns(id, req.user.uid)) return res.json({ ok: true });
-  _qrStarts.delete(id);
-  try { await mtprotoPost('/qr/cancel', { params: { id } }); } catch { /* best-effort */ }
-  res.json({ ok: true });
-});
-
-app.delete('/api/tg/qr/session', requireAuth, async (req, res, next) => {
-  try {
-    const ok = await db.deleteTgSession(req.user.uid);
-    if (ok) audit(req, 'tg.session.revoked', {}).catch(() => {});
-    res.json({ ok });
-  } catch (e) { next(e); }
-});
-
-// Persist the admin channels the user ticked as trackable tenants (source='qr'). The list is supplied
-// by the browser (the just-scanned admin channels). We can't re-verify admin rights here yet — that
-// needs a session-based re-listing (P2.2) — but every row is HARD-scoped to owner_uid=req.user.uid
-// and is only ever WRITTEN by THAT user's own captured session, so a crafted/ineligible id creates
-// an empty self-owned row Telegram refuses to hand stats for (no cross-tenant WRITE reach).
-// NOTE (tenancy isolation audit, F1): write-scoping alone is NOT enough — a crafted id also binds
-// this row to the claimed external source (ensureChannelCanonical), and Phase-B canonical READS
-// union by source_id. Cross-tenant READ reach is closed in db.js (sameTenantSource bounds the source
-// union to the reader's own workspace), NOT here; do not relax that on the assumption this row is
-// harmless. Deduped against the user's existing channels (central + already-added) by tg id AND
-// @username; idempotent. The daily cron (P2.3) does the actual collection.
-app.post('/api/tg/qr/channels', requireAuth, async (req, res, next) => {
-  if (!db.enabled) return res.status(400).json({ error: 'База данных выключена' });
-  try {
-    const sess = await db.getTgSession(req.user.uid);
-    if (!sess) return res.status(400).json({ error: 'Сначала подключите Telegram по QR' });
-    const raw = req.body && Array.isArray(req.body.channels) ? req.body.channels : null;
-    if (!raw || !raw.length) return res.status(400).json({ error: 'Не выбрано ни одного канала' });
-    if (raw.length > 100) return res.status(400).json({ error: 'Слишком много каналов за раз' });
-
-    // Dedup against ALL of the user's channels (central + any already tracked). listChannels hides
-    // disabled rows, so a re-added disabled channel falls through to createTgChannel and reactivates.
-    const mine = await db.listChannels(req.user);
-    const haveTgIds = new Set(mine.map((c) => (c.tg_channel_id == null ? '' : String(c.tg_channel_id))).filter(Boolean));
-    const haveUnames = new Set(mine.map((c) => (c.username ? String(c.username).replace(/^@/, '').toLowerCase() : '')).filter(Boolean));
-
-    let added = 0, skipped = 0;
-    const created = [];
-    for (const c of raw) {
-      const tgId = Number(c && c.id);
-      if (!Number.isInteger(tgId) || tgId <= 0) { skipped++; continue; }
-      const uname = String((c && c.username) || '').replace(/^@/, '').trim();
-      const title = String((c && c.title) || '').slice(0, 200);
-      if (haveTgIds.has(String(tgId)) || (uname && haveUnames.has(uname.toLowerCase()))) { skipped++; continue; }
-      const row = await db.createTgChannel({
-        owner_uid: req.user.uid, tg_channel_id: tgId, username: uname || null, title: title || null,
-      });
-      if (row) { added++; created.push(row); } else skipped++;
-    }
-    audit(req, 'tg.qr.channels_added', { added, skipped }).catch(() => {});
-    res.json({ ok: true, added, skipped });
-
-    // Fill the just-added channels now, so the dashboard shows data within seconds instead of waiting
-    // for the nightly cron. Fire-and-forget AFTER the response — collection latency never blocks it.
-    if (created.length) {
-      collectQrChannelsNow(sess, created).catch((e) =>
-        log('error', 'tg_qr_collect_now_batch_failed', { error: e.message }));
-    }
-  } catch (e) { next(e); }
-});
-
-app.get('/api/tg/mtproto/health', requireAuth, async (req, res) => {
-  try {
-    const data = await mtprotoFetch('/health');
-    res.json({ available: true, ...data });
-  } catch (e) {
-    res.json({ available: false, error: e.message });
-  }
-});
-
-app.get('/api/tg/mtproto/channel', requireAuth, resolveChannel, asyncHandler(async (req, res) => {
-  if (await serveSnapshot(req, res, d => d.channel)) return;
-  const cacheKey = `mtproto:channel:${req.channel.id}`;
-  try {
-    const cached = cacheGet(cacheKey);
-    if (cached) return res.json(cached);
-    const data = await mtprotoFetch('/channel');
-    cacheSet(cacheKey, data);
-    res.json(data);
-  } catch (e) {
-    sendMtprotoError(res, e);
-  }
-}));
-
-app.get('/api/tg/mtproto/posts', requireAuth, resolveChannel, asyncHandler(async (req, res) => {
-  if (await serveSnapshot(req, res, d => ({ posts: d.posts || [], count: (d.posts || []).length }))) return;
-  const limit     = Math.min(100, parseInt(req.query.limit)     || 30);
-  const offsetId  = parseInt(req.query.offset_id) || 0;
-  const cacheKey  = `mtproto:posts:${req.channel.id}:${limit}:${offsetId}`;
-  try {
-    const cached = cacheGet(cacheKey);
-    if (cached) return res.json(cached);
-    const data = await mtprotoFetch('/posts', { limit, offset_id: offsetId });
-    cacheSet(cacheKey, data);
-    res.json(data);
-  } catch (e) {
-    sendMtprotoError(res, e);
-  }
-}));
-
-app.get('/api/tg/mtproto/views_summary', requireAuth, resolveChannel, asyncHandler(async (req, res) => {
-  if (await serveSnapshot(req, res, d => d.views_summary)) return;
-  const limit    = Math.min(100, parseInt(req.query.limit) || 30);
-  const cacheKey = `mtproto:views:${req.channel.id}:${limit}`;
-  try {
-    const cached = cacheGet(cacheKey);
-    if (cached) return res.json(cached);
-    const data = await mtprotoFetch('/views_summary', { limit }, MTPROTO_TIMEOUT_STATS_MS);
-    cacheSet(cacheKey, data);
-    res.json(data);
-  } catch (e) {
-    sendMtprotoError(res, e);
-  }
-}));
-
-app.get('/api/tg/mtproto/stats', requireAuth, resolveChannel, asyncHandler(async (req, res) => {
-  if (await serveSnapshot(req, res, d => d.stats)) return;
-  const cacheKey = `mtproto:stats:${req.channel.id}`;
-  try {
-    const cached = cacheGet(cacheKey);
-    if (cached) return res.json(cached);
-    const data = await mtprotoFetch('/stats', {}, MTPROTO_TIMEOUT_STATS_MS);
-    cacheSet(cacheKey, data);
-    res.json(data);
-  } catch (e) {
-    // Сюда попадаем только при РЕАЛЬНОМ сбое (MTProto-сервис недоступен): кейс
-    // «нет статистики у мелкого канала» Python отдаёт как 200 {available:false}
-    // и оно проходит насквозь. Поэтому здесь честный 503 для мониторинга.
-    sendMtprotoError(res, e);
-  }
-}));
-
-app.get('/api/tg/mtproto/graphs', requireAuth, resolveChannel, asyncHandler(async (req, res) => {
-  if (await serveSnapshot(req, res, d => d.graphs)) return;
-  const cacheKey = `mtproto:graphs:${req.channel.id}`;
-  try {
-    const cached = cacheGet(cacheKey);
-    if (cached) return res.json(cached);
-    const data = await mtprotoFetch('/graphs', {}, MTPROTO_TIMEOUT_HEAVY_MS);
-    cacheSet(cacheKey, data);
-    res.json(data);
-  } catch (e) {
-    sendMtprotoError(res, e);
-  }
-}));
-
-// Velocity сервится из Postgres-снапшота (его строит ingest-крон), поэтому в
-// пользовательском запросе НЕТ тяжёлых последовательных вызовов Telegram.
-// Live-расчёт остаётся только fallback'ом: первый запуск до первого крона или
-// режим без БД — тогда считаем на лету один раз и кэшируем.
-app.get('/api/tg/mtproto/velocity', requireAuth, resolveChannel, async (req, res) => {
-  const cacheKey = `mtproto:velocity:${req.channel.id}`;
-  try {
-    const cached = cacheGet(cacheKey);
-    if (cached) return res.json(cached);
-
-    if (db.enabled && req.channel.id) {
-      const snap = await db.getLatestVelocity(req.channel.id).catch(() => null);
-      if (snap && snap.data) {
-        const out = { ...snap.data, source: 'db', computed_at: snap.computed_at };
-        cacheSet(cacheKey, out);
-        return res.json(out);
-      }
-    }
-
-    // нет снапшота (до первого крона) → live-расчёт ТОЛЬКО для central-канала
-    // (у остальных данные приходят коллектором в Postgres).
-    if (req.channel.source !== 'central') return res.json({ available: false, source: 'collector', empty: true });
-    const data = await mtprotoFetch('/velocity', {}, MTPROTO_TIMEOUT_HEAVY_MS);
-    if (data && data.available) {
-      data.source = 'live';
-      cacheSet(cacheKey, data);   // не кэшируем неуспех
-    }
-    res.json(data);
-  } catch (e) {
-    sendMtprotoError(res, e);
-  }
-});
-
-// Brand mentions — cached longer (searchPosts has a ~10/day free quota) to avoid
-// burning it on repeated loads. Cache TTL here is the 10-min default; the Python
-// side also checks free quota before each search and never spends Stars.
-app.get('/api/tg/mtproto/mentions', requireAuth, resolveChannel, async (req, res) => {
-  if (notCentral(req, res)) return;   // live brand-search is central-only
-  const cacheKey = `mtproto:mentions:${req.channel.id}`;
-  try {
-    const cached = cacheGet(cacheKey);
-    if (cached) return res.json(cached);
-    const data = await mtprotoFetch('/mentions', {}, MTPROTO_TIMEOUT_HEAVY_MS);
-    if (data && data.available) {
-      // accumulate the full deduped list into the archive (history beyond searchPosts' window)
-      if (Array.isArray(data.all) && req.channel.id) {
-        db.upsertMentions(req.channel.id, data.all).catch(e => console.error('[db] mentions upsert:', e.message));
-      }
-      delete data.all;                 // don't ship the full list to the client
-      cacheSet(cacheKey, data);         // don't cache failures
-    }
-    res.json(data);
-  } catch (e) {
-    sendMtprotoError(res, e);
-  }
-});
-
-app.get('/api/tg/mtproto/post_stats/:id', requireAuth, resolveChannel, async (req, res) => {
-  if (notCentral(req, res)) return;
-  const id = parseInt(req.params.id, 10);
-  if (!id) return res.status(400).json({ error: 'bad id' });
-  const cacheKey = `mtproto:poststats:${req.channel.id}:${id}`;
-  try {
-    const cached = cacheGet(cacheKey);
-    if (cached) return res.json(cached);
-    const data = await mtprotoFetch('/post_stats/' + id, {}, MTPROTO_TIMEOUT_STATS_MS);
-    cacheSet(cacheKey, data);
-    res.json(data);
-  } catch (e) {
-    sendMtprotoError(res, e);
-  }
-});
-
-// ── Public media proxies (thumb / channel photo) ─────────────────────────────
-// Deliberately unauthenticated: they back plain <img src> tags, which can't send
-// the x-session-token header. Tradeoff accepted because the central channel is
-// public anyway (the proxy only reveals what t.me already shows); revisit with
-// signed URLs if private channels ever land. Beyond the global /api limiter
-// (per-IP for anonymous traffic), a dedicated modest per-IP limiter keeps an
-// anonymous scraper from hammering the MTProto service through these routes.
+// Public media proxies (thumb / channel photo) are open <img src> routes, so beyond the global
+// /api limiter they get a dedicated modest per-IP limiter to keep an anonymous scraper from
+// hammering the MTProto service. Defined here with the other rate limiters and injected into the
+// TG routes.
 const mediaLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 120,
   message: { error: 'Слишком много запросов. Попробуй через минуту.' }
 });
 
-// Post thumbnail (binary) — open route so <img src> works without a header.
-// Low sensitivity: only serves thumbnails of the configured (public) channel.
-app.get('/api/tg/mtproto/thumb/:id', mediaLimiter, async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  if (!id) return res.status(400).end();
-  const size = req.query.size === 'lg' ? 'lg' : 'sm';
-  try {
-    const r = await fetchWithTimeout(`${MTPROTO_URL}/thumb/${id}?size=${size}`, { headers: { 'x-internal-token': MTPROTO_TOKEN } });
-    if (!r.ok) {
-      if (r.status >= 500) return res.status(503).json({ error: 'источник недоступен' });
-      return res.status(r.status).end();
-    }
-    const buf = await r.buffer();
-    res.set('Content-Type', r.headers.get('content-type') || 'image/jpeg');
-    res.set('Cache-Control', 'public, max-age=86400');
-    res.send(buf);
-  } catch (e) {
-    res.status(503).json({ error: 'источник недоступен' });
-  }
+registerTgRoutes({
+  app, requireAuth, resolveChannel, db, audit, log,
+  cacheGet, cacheSet, asyncHandler, tgCrypto, mediaLimiter, fetchWithTimeout,
+  collectQrChannelsNow, TG_TOKEN, TG_CHANNEL,
 });
-
-// Channel avatar (binary) — open route so <img src> works without a header.
-// Low sensitivity: only the configured (public, 'central') channel's profile photo.
-app.get('/api/tg/mtproto/channel/photo', mediaLimiter, async (req, res) => {
-  try {
-    const r = await fetchWithTimeout(`${MTPROTO_URL}/channel/photo`, { headers: { 'x-internal-token': MTPROTO_TOKEN } });
-    if (!r.ok) {
-      if (r.status >= 500) return res.status(503).json({ error: 'источник недоступен' });
-      return res.status(r.status).end();
-    }
-    const buf = await r.buffer();
-    res.set('Content-Type', r.headers.get('content-type') || 'image/jpeg');
-    res.set('Cache-Control', 'public, max-age=86400');
-    res.send(buf);
-  } catch (e) {
-    res.status(503).json({ error: 'источник недоступен' });
-  }
-});
-
-app.get('/api/tg/full', requireAuth, resolveChannel, asyncHandler(async (req, res, next) => {
-  if (req.channel && req.channel.source !== 'central') {   // collector channel → from snapshot
-    const snap = req.channel.id ? await db.getSnapshot(req.channel.id).catch(() => null) : null;
-    const d = (snap && snap.data) || {};
-    return res.json({ channel: d.channel || {}, views_summary: d.views_summary || null, posts: d.posts || [], mtproto_available: !!d.channel, source: 'collector' });
-  }
-  const limit = Math.min(100, parseInt(req.query.limit) || 30);
-  try {
-    const [botChannel, mtChannel, viewsSummary, posts] = await Promise.allSettled([
-      (async () => {
-        const [chat, count] = await Promise.all([
-          tgFetch('getChat',            { chat_id: TG_CHANNEL }),
-          tgFetch('getChatMemberCount', { chat_id: TG_CHANNEL }),
-        ]);
-        return { title: chat.title, username: chat.username, description: chat.description || '', memberCount: count };
-      })(),
-      mtprotoFetch('/channel'),
-      mtprotoFetch('/views_summary', { limit }, MTPROTO_TIMEOUT_STATS_MS),
-      mtprotoFetch('/posts', { limit }),
-    ]);
-
-    const bot  = botChannel.status  === 'fulfilled' ? botChannel.value  : null;
-    const mtp  = mtChannel.status   === 'fulfilled' ? mtChannel.value   : null;
-    const vs   = viewsSummary.status=== 'fulfilled' ? viewsSummary.value: null;
-    const ps   = posts.status       === 'fulfilled' ? posts.value       : null;
-
-    res.json({
-      channel: {
-        ...(bot || {}),
-        ...(mtp || {}),
-        memberCount: bot?.memberCount || mtp?.members || 0,
-        source: mtp ? 'mtproto+bot_api' : 'bot_api',
-      },
-      views_summary:   vs,
-      posts:           ps?.posts || [],
-      mtproto_available: !!mtp,
-      errors: {
-        bot:    botChannel.status  === 'rejected' ? botChannel.reason?.message  : null,
-        mtp:    mtChannel.status   === 'rejected' ? mtChannel.reason?.message   : null,
-        views:  viewsSummary.status=== 'rejected' ? viewsSummary.reason?.message: null,
-        posts:  posts.status       === 'rejected' ? posts.reason?.message       : null,
-      }
-    });
-  } catch (e) {
-    next(e);
-  }
-}));
 
 // ════════════════════════════════════════════════════════════════
 //  ОБЩИЕ ROUTES
@@ -2226,23 +1085,9 @@ app.post('/api/ingest/daily', asyncHandler(async (req, res) => {
   }
 }));
 
-app.get('/api/history/channel', requireAuth, resolveChannel, async (req, res) => {
-  const days = Math.min(1000, parseInt(req.query.days) || 365);
-  try {
-    res.json({ enabled: db.enabled, rows: await db.getChannelHistory(req.channel.id, days) });
-  } catch (e) {
-    res.status(200).json({ enabled: db.enabled, rows: [], error: e.message });
-  }
-});
+// Postgres-backed history reads are isolated in routes/history.js.
+registerHistoryRoutes({ app, requireAuth, resolveChannel, db });
 
-app.get('/api/history/mentions', requireAuth, resolveChannel, async (req, res) => {
-  try {
-    const data = await db.getMentionsArchive(req.channel.id, 30);
-    res.json({ enabled: db.enabled, ...(data || { available: false }) });
-  } catch (e) {
-    res.status(200).json({ enabled: db.enabled, available: false, error: e.message });
-  }
-});
 
 // Bug tracker, crash telemetry and bug attachments are isolated in their own route module.
 registerBugsRoutes({
