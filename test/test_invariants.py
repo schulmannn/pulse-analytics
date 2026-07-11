@@ -174,6 +174,35 @@ class SemaphoreAcquireTests(unittest.TestCase):
         import asyncio as _a
         _a.run(run())
 
+    def test_external_cancellation_does_not_leak_permit(self):
+        """Обрыв соединения / _total_budget отменяют ЗАПРОС, а не таймаут захвата: shield
+        доводит acquire до конца, и без reclaim-callback'а пермит утекал бы гарантированно."""
+        svc = self.svc
+        import asyncio
+
+        async def run():
+            sem = asyncio.Semaphore(1)
+            await sem.acquire()                       # держатель
+
+            waiter = asyncio.ensure_future(svc._acquire_or_503(sem, 5, 'busy'))
+            await asyncio.sleep(0)                    # waiter встал в очередь на семафор
+            waiter.cancel()                           # внешняя отмена (клиент оборвал / бюджет)
+            with self.assertRaises(asyncio.CancelledError):
+                await waiter
+
+            sem.release()                             # держатель отпустил
+            await asyncio.sleep(0)                    # тик — done-callback'и/отменённый acquire
+            await asyncio.sleep(0)
+
+            # Ровно один пермит жив: мгновенный захват успешен, второй — таймаут.
+            await asyncio.wait_for(sem.acquire(), timeout=1)
+            with self.assertRaises(Exception) as ctx:
+                await svc._acquire_or_503(sem, 0.01, 'busy')
+            self.assertEqual(getattr(ctx.exception, 'status_code', None), 503)
+            sem.release()
+
+        asyncio.run(run())
+
 
 if __name__ == "__main__":
     unittest.main()

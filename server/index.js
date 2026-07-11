@@ -1041,15 +1041,20 @@ app.post('/api/ingest/daily', asyncHandler(async (req, res) => {
   // Хвосты дня (отчёты / IG-персистенс / QR-сбор) — fire-and-forget ПОСЛЕ ответа крону:
   // они не должны ни задерживать, ни ломать TG-ingest. Вынесены в функцию, потому что
   // запускаются и на успехе, и на degraded-тике (см. catch): IG-сбор и отчёты от TG-graphs
-  // не зависят, и их день не должен теряться из-за деградации Telegram-стороны. Их внутренняя
-  // идемпотентность (runJobOnce per report+period, durable per channel+day) делает повторный
-  // запуск на успешном same-day-ретрае безопасным.
+  // не зависят, и их день не должен теряться из-за деградации Telegram-стороны.
+  // Отчёты (runJobOnce per report+period) и QR-сбор (durable per channel+day) идемпотентны
+  // сами; IG-персистенс — НЕТ (upsert'ы идемпотентны, но каждый прогон заново жжёт Graph-
+  // квоту), поэтому он гейтится своей дневной джобой: degraded-тик + same-day-ретрай не
+  // запускают второй конкурентный IG-фан-аут. Час lease с запасом покрывает последовательный
+  // обход аккаунтов; упавший процесс освобождает день по истечении lease.
   const runIngestTails = () => {
     processReportSchedules(appBase(req)).catch(e =>
       log('error', 'report_schedule_failed', { request_id: req.requestId, error: e.message }));
-    // `graphs` уже в руках (null на degraded-тике — сырой TG-снимок тогда просто пропускается).
-    processPersistence(channelId, graphs).catch(e =>
-      log('error', 'persistence_failed', { request_id: req.requestId, error: e.message }));
+    // `graphs` уже в руках (null на degraded-тике — сырой TG-снимок тогда просто пропускается;
+    // он самолечится назавтра полным диапазоном /graphs).
+    db.runJobOnce('ig_persistence', `central:${dateKey}`,
+      () => processPersistence(channelId, graphs), { leaseSeconds: 60 * 60 })
+      .catch(e => log('error', 'persistence_failed', { request_id: req.requestId, error: e.message }));
     processTgQrCollection().catch(e =>
       log('error', 'tg_qr_collection_failed', { request_id: req.requestId, error: e.message }));
   };
