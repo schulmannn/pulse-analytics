@@ -456,7 +456,9 @@ async function refreshIgIfNeeded(channelId, token, expiresAtStr) {
       grant_type: 'ig_refresh_token', access_token: token }).toString());
     const j = await r.json();
     if (j && j.access_token && j.expires_in) {
-      await db.updateIgToken(channelId, igCrypto.encrypt(j.access_token), new Date(now + j.expires_in * 1000)).catch(() => {});
+      // Провал персиста — actionable (рефреш будет повторяться на каждом чтении): логируем, не глотаем.
+      await db.updateIgToken(channelId, igCrypto.encrypt(j.access_token), new Date(now + j.expires_in * 1000))
+        .catch((e) => log('warn', 'ig_token_persist_failed', { channelId, error: e.message }));
       return j.access_token;
     }
   } catch (e) { log('warn', 'ig_token_refresh_failed', { channelId, error: e.message }); }
@@ -521,7 +523,9 @@ const igFauDiff = (wide, narrow) => {
   return { follows: clamp(wide.follows, narrow.follows), unfollows: clamp(wide.unfollows, narrow.unfollows) };
 };
 const IG_TV_NAMES = ['views', 'profile_views', 'accounts_engaged', 'total_interactions', 'likes', 'comments', 'saves', 'shares'];
-const igNum = (v) => (v == null || isNaN(v)) ? null : Math.round(Number(v));
+// Кламп к INT4 — как num() в db.js: переполнение одного счётчика не должно валить upsert дня.
+const IG_INT4_MAX = 2147483647;
+const igNum = (v) => (v == null || isNaN(v)) ? null : Math.max(-IG_INT4_MAX - 1, Math.min(IG_INT4_MAX, Math.round(Number(v))));
 
 // Собираем дневные метрики аккаунта ровно за ОДИН календарный день — ВЧЕРА (UTC).
 // Окно строго [вчера 00:00, сегодня 00:00): сегодня частичный/нефинализированный, а окно

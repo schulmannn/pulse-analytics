@@ -59,6 +59,10 @@ test('production app CSP is strict and documents the allowed external domains', 
 
   assert.doesNotMatch(appCspHeader, /\*/);
   assert.doesNotMatch(csp.get('script-src'), /'unsafe-inline'|'unsafe-eval'/);
+  // apis.google.com (старый gapi-хост) фронту не нужен, а как JSONP-хост он пригоден для
+  // обхода CSP — регрессия-гард: script-src разрешает Google ТОЛЬКО через accounts.google.com.
+  assert.doesNotMatch(csp.get('script-src'), /apis\.google\.com/);
+  assert.strictEqual(csp.get('script-src'), "'self' https://accounts.google.com");
 });
 
 test('security headers cover CSP, frame denial, referrer policy and permissions policy', () => {
