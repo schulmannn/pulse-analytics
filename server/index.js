@@ -736,19 +736,27 @@ function tgPostToRow(p) {
 async function persistTgBundle(channelId, bundle, day) {
   if (!channelId || !bundle || typeof bundle !== 'object') return;
   const posts = Array.isArray(bundle.posts) ? bundle.posts : [];
-  await db.saveSnapshot(channelId, {
-    channel:       bundle.channel || {},
-    views_summary: bundle.views_summary || null,
-    posts,
-    stats:         bundle.stats || null,
-    graphs:        bundle.graphs || null,
+  const hasGraphs = !!(bundle.graphs && bundle.graphs.available);
+  // Снапшот + daily + посты коммитятся ВМЕСТЕ (db.persistTgBundleTx) — раньше это были
+  // отдельные автокоммитные записи, и сбой посередине оставлял QR-канал со свежим
+  // снапшотом, но устаревшими daily/posts до следующего идемпотентного прогона.
+  await db.persistTgBundleTx(channelId, {
+    snapshot: {
+      channel:       bundle.channel || {},
+      views_summary: bundle.views_summary || null,
+      posts,
+      stats:         bundle.stats || null,
+      graphs:        bundle.graphs || null,
+    },
+    dailyRows: hasGraphs ? db.graphsToDailyRows(bundle.graphs) : [],
+    postRows: posts.map(tgPostToRow),
   });
-  if (bundle.graphs && bundle.graphs.available) {
-    const dailyRows = db.graphsToDailyRows(bundle.graphs);
-    if (dailyRows.length) await db.upsertChannelDaily(channelId, dailyRows);
-    await db.saveRawSnapshot(channelId, 'tg', 'graphs', day, bundle.graphs).catch(() => {});
+  // Сырой graphs-снимок — опциональный архив: best-effort ПОСЛЕ коммита, как раньше,
+  // но с логом (тихий .catch(() => {}) прятал реальные, actionable-ошибки записи).
+  if (hasGraphs) {
+    await db.saveRawSnapshot(channelId, 'tg', 'graphs', day, bundle.graphs).catch((e) =>
+      log('warn', 'tg_qr_raw_snapshot_failed', { channelId, error: e.message }));
   }
-  if (posts.length) await db.upsertPosts(channelId, posts.map(tgPostToRow));
 }
 
 // Fetch one QR channel's bundle via the (already-decrypted) session and persist it. Throws on
