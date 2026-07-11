@@ -1082,6 +1082,28 @@ async function persistCentralDaily(channelId, { dailyRows = [], postRows = [], v
   }
 }
 
+// QR-канал: снапшот + дневные серии + посты — в ОДНОЙ транзакции (зеркало persistCentralDaily).
+// Раньше сервер-сайд QR-сбор писал это четырьмя автокоммитными вызовами (persistTgBundle в
+// index.js): сбой посередине оставлял канал со свежим снапшотом, но устаревшими daily/posts до
+// следующего идемпотентного прогона. Сырой graphs-снимок сюда НЕ входит — это опциональный
+// архив, вызывающий пишет его best-effort ПОСЛЕ коммита.
+async function persistTgBundleTx(channelId, { snapshot, dailyRows = [], postRows = [] } = {}) {
+  if (!enabled || !channelId) throw new Error('database unavailable');
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await saveSnapshot(channelId, snapshot, client);
+    if (dailyRows.length) await upsertChannelDaily(channelId, dailyRows, client);
+    if (postRows.length) await upsertPosts(channelId, postRows, client);
+    await client.query('COMMIT');
+  } catch (error) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 async function getCollectorStatus(channelId, user) {
   if (!enabled || !channelId || !user || user.uid == null) return null;
   const { rows } = await pool.query(
@@ -1708,7 +1730,7 @@ module.exports = {
   getPrefs, setPrefs,
   adoptOwnerChannel, listChannels, getChannel, getChannelById, getOwnerChannelId, setChannelTgId,
   createChannel, createTgChannel, createIgChannel, findIgChannelByIgUser, deleteChannel, createApiKey, getChannelByApiKey, listApiKeys, revokeApiKey,
-  saveSnapshot, getSnapshot, ingestCollectorPayload, persistCentralDaily, getCollectorStatus, recordAuditEvent,
+  saveSnapshot, getSnapshot, ingestCollectorPayload, persistCentralDaily, persistTgBundleTx, getCollectorStatus, recordAuditEvent,
   saveVelocity, getLatestVelocity,
   upsertChannelDaily, upsertPosts, upsertMentions, upsertIgTags, getIgTags,
   getChannelHistory, getMentionsHistory, getMentionsArchive,
