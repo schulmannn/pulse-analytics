@@ -406,7 +406,7 @@ const integrationsRepo = createIntegrationsRepo({ pool, enabled, transaction, en
 // ownership-check channelsRepo.getChannel; repos не импортят друг друга). ПОСЛЕ channelsRepo (TDZ).
 const analyticsRepo = createAnalyticsRepo({ pool, enabled, getAccessibleChannel: channelsRepo.getChannel });
 // setChannelTgId — инъекция (ingestCollectorPayload штампует tg-id в своей транзакции; repos не импортят друг друга).
-const collectorRepo = createCollectorRepo({ pool, enabled, setChannelTgId: channelsRepo.setChannelTgId });
+const collectorRepo = createCollectorRepo({ pool, enabled, transaction, setChannelTgId: channelsRepo.setChannelTgId });
 
 // db.js-локальные экспорты (домены, ещё не вынесенные в repos/*): core + collector-writes +
 // analytics-reads + bugs/crashes + gdpr. По мере распила эти наборы переезжают в свои repo.
