@@ -8,6 +8,7 @@ import os
 import json
 import logging
 import re
+import functools
 import secrets
 import time
 from collections import OrderedDict
@@ -18,7 +19,7 @@ from fastapi import Body, Depends, FastAPI, HTTPException, Header, Query, Respon
 from fastapi.responses import JSONResponse
 import uvicorn
 from telethon import TelegramClient
-from telethon.errors import FloodWaitError, PasswordHashInvalidError, SessionPasswordNeededError
+from telethon.errors import FloodWaitError, PasswordHashInvalidError, SessionPasswordNeededError, UnauthorizedError
 from telethon.sessions import StringSession
 from telethon.tl.functions.stats import GetBroadcastStatsRequest, LoadAsyncGraphRequest, GetMessageStatsRequest
 from telethon.tl.functions.channels import GetFullChannelRequest, SearchPostsRequest, CheckSearchPostsFloodRequest, GetAdminedPublicChannelsRequest
@@ -95,12 +96,66 @@ CLIENT_CONNECT_TIMEOUT_S = 20
 # as a route dependency so direct function calls (the collector) stay unserialized.
 _STATS_LOCK = asyncio.Semaphore(1)
 
+# Совокупные дедлайны эндпоинтов, держащих _STATS_LOCK. Пер-вызовный TELETHON_CALL_TIMEOUT_S
+# ограничивает ОДИН round-trip, но /graphs делает ~11 последовательных вызовов и мог держать
+# лок минутами: Node уже оборвал сокет по своему бюджету (60s stats / 120s heavy), а await
+# продолжал крутиться под локом — и все stats-эндпоинты ловили 503 по STATS_LOCK_TIMEOUT_S.
+# Бюджет чуть НИЖЕ Node-яруса, чтобы Python сдался первым и отпустил лок.
+STATS_TOTAL_BUDGET_S = 55
+HEAVY_TOTAL_BUDGET_S = 110
+
+
+def _total_budget(seconds):
+    def deco(fn):
+        @functools.wraps(fn)   # inspect.signature идёт по __wrapped__ — DI FastAPI видит исходную сигнатуру
+        async def wrapper(*args, **kwargs):
+            try:
+                async with asyncio.timeout(seconds):
+                    return await fn(*args, **kwargs)
+            except TimeoutError:
+                raise HTTPException(status_code=503, detail='mtproto_timeout')
+        return wrapper
+    return deco
+
+
+async def _acquire_or_503(sem: asyncio.Semaphore, timeout_s: float, detail: str):
+    """Захват семафора с дедлайном БЕЗ утечки пермита. У наивного wait_for(sem.acquire())
+    есть известная гонка: отмена по таймауту может прийти в тот же тик, когда пермит уже
+    выдан, — acquire завершился, release не случится, и Semaphore(1) заклинил бы все
+    stats-эндпоинты до рестарта. shield оставляет задачу захвата живой, а done-callback
+    возвращает пермит, если захват всё же успел завершиться.
+
+    ВАЖНО: reclaim обязателен и для ВНЕШНЕЙ отмены (клиент оборвал соединение, сработал
+    _total_budget): CancelledError прилетает в этот await, но shield-задача продолжает
+    жить и ДОВОДИТ захват до конца — без callback'а пермит утёк бы гарантированно
+    (строго хуже наивного wait_for, который захват отменяет)."""
+    task = asyncio.ensure_future(sem.acquire())
+
+    def _reclaim(t):
+        if not t.cancelled() and t.exception() is None:
+            sem.release()
+
+    try:
+        await asyncio.wait_for(asyncio.shield(task), timeout=timeout_s)
+    except asyncio.TimeoutError:
+        task.cancel()
+        task.add_done_callback(_reclaim)
+        raise HTTPException(status_code=503, detail=detail)
+    except asyncio.CancelledError:
+        task.cancel()
+        task.add_done_callback(_reclaim)
+        raise
+
+
+async def _require_token(x_internal_token: str = Header(default='')):
+    # Аутентификация ДО захвата stats-лока: dependencies резолвятся раньше тела хендлера,
+    # поэтому раньше неаутентифицированный трафик конкурировал за единственный пермит и
+    # вытеснял легитимные запросы в 503 по таймауту. In-handler check_auth остаётся вторым поясом.
+    check_auth(x_internal_token)
+
 
 async def _serialize_stats():
-    try:
-        await asyncio.wait_for(_STATS_LOCK.acquire(), timeout=STATS_LOCK_TIMEOUT_S)
-    except asyncio.TimeoutError:
-        raise HTTPException(status_code=503, detail='mtproto_timeout')
+    await _acquire_or_503(_STATS_LOCK, STATS_LOCK_TIMEOUT_S, 'mtproto_timeout')
     try:
         yield
     finally:
@@ -332,7 +387,7 @@ async def get_channel(x_internal_token: str = Header(default='')):
         raise
     except Exception as e:
         log.error(f'get_channel error: {e}')
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail='internal_error')
 
 
 @app.get('/posts')
@@ -354,10 +409,11 @@ async def get_posts(
         raise
     except Exception as e:
         log.error(f'get_posts error: {e}')
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail='internal_error')
 
 
-@app.get('/views_summary', dependencies=[Depends(_serialize_stats)])
+@app.get('/views_summary', dependencies=[Depends(_require_token), Depends(_serialize_stats)])
+@_total_budget(STATS_TOTAL_BUDGET_S)
 async def get_views_summary(
     limit: int = Query(default=30, le=100),
     x_internal_token: str = Header(default=''),
@@ -412,10 +468,11 @@ async def get_views_summary(
         raise
     except Exception as e:
         log.error(f'views_summary error: {e}')
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail='internal_error')
 
 
-@app.get('/stats', dependencies=[Depends(_serialize_stats)])
+@app.get('/stats', dependencies=[Depends(_require_token), Depends(_serialize_stats)])
+@_total_budget(STATS_TOTAL_BUDGET_S)
 async def get_stats(x_internal_token: str = Header(default='')):
     check_auth(x_internal_token)
     try:
@@ -448,11 +505,25 @@ async def get_stats(x_internal_token: str = Header(default='')):
         raise
     except HTTPException:
         raise
+    except UnauthorizedError as e:
+        # Мёртвая/отозванная сессия — это НЕ «у канала нет статистики». Раньше уходило как
+        # 200 {available:false} и было неотличимо от легитимного кейса мелкого канала:
+        # мониторинг не видел 5xx, дашборды тихо флетились. Честный 503 = сигнал алертам.
+        log.error(f'get_stats session unauthorized: {e}')
+        raise HTTPException(status_code=503, detail='mtproto_session_unauthorized')
+    except OSError as e:
+        # Транспорт (сеть/DC) — тоже сбой, а не отсутствие статистики.
+        log.error(f'get_stats connection error: {e}')
+        raise HTTPException(status_code=503, detail='mtproto_unreachable')
     except Exception as e:
+        # Остальные RPC-ошибки (CHAT_ADMIN_REQUIRED, BROADCAST_REQUIRED, …) — легитимное
+        # «статистика недоступна этому каналу»: 200, чтобы дашборд деградировал мягко.
+        log.warning(f'get_stats unavailable: {e}')
         return {'available': False, 'error': str(e)}
 
 
-@app.get('/graphs', dependencies=[Depends(_serialize_stats)])
+@app.get('/graphs', dependencies=[Depends(_require_token), Depends(_serialize_stats)])
+@_total_budget(HEAVY_TOTAL_BUDGET_S)
 async def get_graphs(points: int = Query(default=45, le=400), x_internal_token: str = Header(default='')):
     """Rich channel stats graphs: subscriber growth, view/follower sources,
     audience by hour, languages, reaction sentiment."""
@@ -553,10 +624,11 @@ async def get_graphs(points: int = Query(default=45, le=400), x_internal_token: 
         raise
     except Exception as e:
         log.error(f'get_graphs error: {e}')
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail='internal_error')
 
 
-@app.get('/post_stats/{msg_id}', dependencies=[Depends(_serialize_stats)])
+@app.get('/post_stats/{msg_id}', dependencies=[Depends(_require_token), Depends(_serialize_stats)])
+@_total_budget(STATS_TOTAL_BUDGET_S)
 async def get_post_stats(msg_id: int, x_internal_token: str = Header(default='')):
     """Per-post detailed stats (GetMessageStats): views-over-time + reactions.
     May be unavailable for posts with too few views."""
@@ -618,12 +690,20 @@ async def get_post_stats(msg_id: int, x_internal_token: str = Header(default='')
         raise
     except HTTPException:
         raise
+    except UnauthorizedError as e:
+        # См. get_stats: деаутентификация сессии — сбой (503), не «нет статистики» (200).
+        log.error(f'get_post_stats session unauthorized: {e}')
+        raise HTTPException(status_code=503, detail='mtproto_session_unauthorized')
+    except OSError as e:
+        log.error(f'get_post_stats connection error: {e}')
+        raise HTTPException(status_code=503, detail='mtproto_unreachable')
     except Exception as e:
-        log.error(f'get_post_stats error: {e}')
+        log.warning(f'get_post_stats unavailable: {e}')
         return {'available': False, 'error': str(e)}
 
 
-@app.get('/velocity', dependencies=[Depends(_serialize_stats)])
+@app.get('/velocity', dependencies=[Depends(_require_token), Depends(_serialize_stats)])
+@_total_budget(HEAVY_TOTAL_BUDGET_S)
 async def get_velocity(
     limit: int = Query(default=40, le=100),
     top: int = Query(default=12, le=20),
@@ -727,7 +807,7 @@ async def get_velocity(
         # реальный сбой (сеть/сессия/неожиданное) → честный 5xx для мониторинга.
         # Легитимный «нет подходящих постов» отдаётся выше как 200 {available:False}.
         log.error(f'velocity error: {e}')
-        raise HTTPException(status_code=503, detail=str(e))
+        raise HTTPException(status_code=503, detail='mtproto_error')
 
 
 # ── Mentions helpers (reused from notem-mention-monitor) ──
@@ -768,7 +848,8 @@ def _mention_snippet(text, query, n=220):
     return ('…' if start > 0 else '') + text[start:end] + ('…' if end < len(text) else '')
 
 
-@app.get('/mentions', dependencies=[Depends(_serialize_stats)])
+@app.get('/mentions', dependencies=[Depends(_require_token), Depends(_serialize_stats)])
+@_total_budget(HEAVY_TOTAL_BUDGET_S)
 async def get_mentions(x_internal_token: str = Header(default='')):
     """Brand mentions in public channels via channels.searchPosts (Premium).
     On-demand: each query consumes one of ~10 free daily searches, so we check
@@ -874,7 +955,7 @@ async def get_mentions(x_internal_token: str = Header(default='')):
         # внешний сбой (get_client / неожиданное); пер-запросные ошибки searchPosts
         # уже обработаны внутри цикла (skip). → честный 5xx для мониторинга.
         log.error(f'mentions error: {e}')
-        raise HTTPException(status_code=503, detail=str(e))
+        raise HTTPException(status_code=503, detail='mtproto_error')
 
 
 _THUMB_CACHE = OrderedDict()   # LRU: move_to_end on hit, popitem(last=False) drops the least-recently-used
@@ -919,7 +1000,7 @@ async def get_thumb(msg_id: int, size: str = Query(default='sm'), x_internal_tok
         raise
     except Exception as e:
         log.error(f'get_thumb error: {e}')
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail='internal_error')
 
 
 _CHANNEL_PHOTO_CACHE: dict = {}   # {'jpeg': bytes} — single configured channel; cleared on restart
@@ -944,7 +1025,7 @@ async def get_channel_photo(x_internal_token: str = Header(default='')):
         raise
     except Exception as e:
         log.error(f'get_channel_photo error: {e}')
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail='internal_error')
 
 
 # ── QR login (managed connect): capture a user session by scanning a QR ──────────
@@ -1149,7 +1230,7 @@ async def qr_start(x_internal_token: str = Header(default='')):
         raise
     except Exception as e:
         log.error(f'qr_start: {e}')
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail='internal_error')
 
 
 @app.post('/qr/poll')
@@ -1334,10 +1415,7 @@ async def qr_collect(session: str = Body(...), channel: str = Body(...),
         raise HTTPException(status_code=503, detail='mtproto_not_configured')
     posts_limit = max(1, min(int(posts_limit or 100), 100))
     graph_points = max(1, min(int(graph_points or 400), 400))
-    try:
-        await asyncio.wait_for(_QR_COLLECT_SEM.acquire(), timeout=_QR_COLLECT_ACQUIRE_TIMEOUT_S)
-    except asyncio.TimeoutError:
-        raise HTTPException(status_code=503, detail='too_many_collecting')
+    await _acquire_or_503(_QR_COLLECT_SEM, _QR_COLLECT_ACQUIRE_TIMEOUT_S, 'too_many_collecting')
     tg = None
     try:
         tg = TelegramClient(StringSession(session), API_ID, API_HASH)
