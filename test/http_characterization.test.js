@@ -51,10 +51,14 @@ test('middleware order: неизвестный /api/* → JSON 404 (API-обра
   assert.equal(typeof body.request_id, 'string');
 });
 
-test('middleware order: неизвестный НЕ-API GET → HTML SPA-shell (fallback владеет *)', async () => {
+test('middleware order: неизвестный НЕ-API GET обслуживается SPA-fallback, НЕ API-JSON-404', async () => {
+  // Инвариант независим от наличия frontend/dist: SPA-fallback (app.get('*')) владеет не-API
+  // путями. С собранным dist → 200 text/html; без него (backend-only CI) → 404 БЕЗ JSON-тела.
+  // Ключевое: ответ НЕ должен быть API-контрактом {error:'not_found'} (иначе SPA перехватил бы /api).
   const r = await req('GET', '/some/unknown/spa/route');
-  assert.equal(r.status, 200);
-  assert.match(r.headers.get('content-type') || '', /text\/html/);
+  const ct = r.headers.get('content-type') || '';
+  assert.ok(!ct.includes('application/json'), `не-API GET не должен отдавать JSON (ct=${ct}, status=${r.status})`);
+  if (r.status === 200) assert.match(ct, /text\/html/, 'с собранным dist — HTML-shell');
 });
 
 test('middleware order: security-заголовки на API-ответах (chain-путь, напр. 404)', async () => {
