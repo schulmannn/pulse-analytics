@@ -7,7 +7,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY mtproto/requirements.txt ./mtproto/requirements.txt
-RUN pip install --no-cache-dir -r mtproto/requirements.txt
+COPY collector/requirements.txt ./collector/requirements.txt
+# Оба набора: mtproto (telethon/fastapi) + собственный коллектора (qrcode — команда `login`
+# внутри контейнера падала с ImportError, образ ставил только mtproto-зависимости).
+RUN pip install --no-cache-dir -r mtproto/requirements.txt -r collector/requirements.txt
 
 COPY mtproto ./mtproto
 COPY collector ./collector
