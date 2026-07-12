@@ -6,7 +6,7 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["server/**", "frontend/src/**", "scripts/**", "test/**"]
+    "includes": ["server/**", "frontend/src/**", "frontend/e2e/**", "frontend/playwright.config.ts", "scripts/**", "test/**"]
   },
   "formatter": {
     "enabled": false

@@ -86,3 +86,15 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: node scripts/check-bundle-size.mjs
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run Playwright smoke tests
+        run: npm run test:e2e:smoke
+      - name: Upload Playwright failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: playwright-smoke-${{ github.run_attempt }}
+          path: frontend/test-results/
+          if-no-files-found: ignore
+          retention-days: 7

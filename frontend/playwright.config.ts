@@ -18,6 +18,8 @@ const VIEWPORTS = [
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
+  forbidOnly: !!process.env.CI,
+  workers: process.env.CI ? 1 : undefined,
   reporter: 'line',
   timeout: 45_000,
   expect: { timeout: 10_000 },
