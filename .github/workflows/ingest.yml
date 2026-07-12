@@ -21,10 +21,12 @@ jobs:
           # token via header (avoids URL-encoding issues with +,/,= in the token)
           code=$(curl -sS -o /tmp/out -w "%{http_code}" -X POST -H "x-ingest-token: $TOKEN" "$BASE/api/ingest/daily")
           echo "HTTP $code"; cat /tmp/out; echo
+          # Silent-death guard: a degraded day (archive did not grow — upstream MTProto /graphs
+          # failed, channel_daily=0) now answers 503 with the jobs row marked FAILED, so re-running
+          # this workflow the same day retries the heavy pass. Non-200 fails the job → GitHub's
+          # native workflow-failure email fires.
           test "$code" = "200"
-          # Silent-death guard: a 200 with degraded=true means the request succeeded but the archive
-          # did NOT grow (upstream MTProto /graphs failed → channel_daily=0). Fail the job so GitHub's
-          # native workflow-failure email fires — otherwise the cron stays green while data rots.
+          # Belt-and-braces: any residual 200 body carrying degraded must still fail loudly.
           if grep -q '"degraded":true' /tmp/out; then
             echo "::error::ingest degraded — archive did not grow (upstream MTProto likely down)"; exit 1
           fi
