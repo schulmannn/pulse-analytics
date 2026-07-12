@@ -1662,58 +1662,64 @@ async function deleteUserAccount(uid) {
    Объём при текущем масштабе (кап 100 юзеров, архив ≤730 дн) — единицы МБ, буферизуем целиком. */
 async function exportUserData(uid) {
   if (!enabled || uid == null) return null;
-  const one = async (sql, params) => (await pool.query(sql, params)).rows[0] || null;
-  const many = async (sql, params) => (await pool.query(sql, params)).rows;
+  // GDPR-экспорт редкий, но тяжёлый (5 запросов на аккаунт + 9 на КАЖДЫЙ канал): его
+  // Promise.all-фан-аут через pool.query занимал все PGPOOL_MAX=4 коннекта и душил
+  // остальной API на время экспорта. Один выделенный клиент = ровно один коннект.
+  // Запросы ПОСЛЕДОВАТЕЛЬНО (не Promise.all на одном клиенте): pg и так сериализует их на
+  // соединении, но при отклонении одного Promise.all прыгал бы в finally→release() при ещё
+  // живущих в очереди запросах — вернул бы в пул ЗАНЯТОЕ соединение (interleaving под нагрузкой).
+  const client = await pool.connect();
+  try {
+    const one = async (sql, params) => (await client.query(sql, params)).rows[0] || null;
+    const many = async (sql, params) => (await client.query(sql, params)).rows;
 
-  const account = await one(
-    `SELECT id, email, role, status, avatar_url, created_at FROM users WHERE id=$1`, [uid]);
-  if (!account) return null;
+    const account = await one(
+      `SELECT id, email, role, status, avatar_url, created_at FROM users WHERE id=$1`, [uid]);
+    if (!account) return null;
 
-  const [prefs, reports, workspaces, tgSession, channels] = await Promise.all([
-    one(`SELECT prefs, updated_at FROM user_prefs WHERE uid=$1`, [uid]),
-    many(`SELECT id, name, config, schedule, created_at, updated_at, last_sent_at
-            FROM reports WHERE uid=$1 ORDER BY id`, [uid]),
-    many(`SELECT w.id, w.name, w.created_at,
-                 (SELECT json_agg(json_build_object('uid', m.uid, 'role', m.role) ORDER BY m.uid)
-                    FROM workspace_members m WHERE m.workspace_id = w.id) AS members
-            FROM workspaces w WHERE w.owner_uid=$1 ORDER BY w.id`, [uid]),
-    one(`SELECT tg_user_id, username, connected_at, updated_at FROM tg_sessions WHERE uid=$1`, [uid]),
-    many(`SELECT id, username, title, source, tg_channel_id, created_at
-            FROM channels WHERE owner_uid=$1 ORDER BY id`, [uid]),
-  ]);
+    const prefs = await one(`SELECT prefs, updated_at FROM user_prefs WHERE uid=$1`, [uid]);
+    const reports = await many(`SELECT id, name, config, schedule, created_at, updated_at, last_sent_at
+              FROM reports WHERE uid=$1 ORDER BY id`, [uid]);
+    const workspaces = await many(`SELECT w.id, w.name, w.created_at,
+                   (SELECT json_agg(json_build_object('uid', m.uid, 'role', m.role) ORDER BY m.uid)
+                      FROM workspace_members m WHERE m.workspace_id = w.id) AS members
+              FROM workspaces w WHERE w.owner_uid=$1 ORDER BY w.id`, [uid]);
+    const tgSession = await one(`SELECT tg_user_id, username, connected_at, updated_at FROM tg_sessions WHERE uid=$1`, [uid]);
+    const channels = await many(`SELECT id, username, title, source, tg_channel_id, created_at
+              FROM channels WHERE owner_uid=$1 ORDER BY id`, [uid]);
 
-  for (const ch of channels) {
-    const [daily, monthly, posts, mentionRows, velocity, annotations, ig, igDaily, igMedia] =
-      await Promise.all([
-        many(`SELECT * FROM channel_daily WHERE channel_id=$1 ORDER BY day`, [ch.id]),
-        many(`SELECT month, subscribers_end, joins_sum, leaves_sum, views_sum, forwards_sum,
-                     reactions_sum, days_count
-                FROM channel_monthly WHERE channel_id=$1 ORDER BY month`, [ch.id]),
-        many(`SELECT * FROM posts WHERE channel_id=$1 ORDER BY date_published`, [ch.id]),
-        many(`SELECT * FROM mentions WHERE owner_channel_id=$1 ORDER BY msg_id`, [ch.id]),
-        many(`SELECT * FROM velocity_daily WHERE channel_id=$1 ORDER BY day`, [ch.id]),
-        many(`SELECT day, label, created_at FROM chart_annotations WHERE channel_id=$1 ORDER BY day`, [ch.id]),
-        one(`SELECT ig_user_id, username, scopes, token_expires_at, connected_at, updated_at
-               FROM ig_accounts WHERE channel_id=$1`, [ch.id]),
-        many(`SELECT * FROM ig_daily WHERE channel_id=$1 ORDER BY day`, [ch.id]),
-        many(`SELECT * FROM ig_media_daily WHERE channel_id=$1 ORDER BY day`, [ch.id]),
-      ]);
-    ch.archive = { daily, monthly, posts, mentions: mentionRows, velocity, annotations };
-    ch.instagram = ig ? { ...ig, daily: igDaily, media_daily: igMedia } : null;
+    for (const ch of channels) {
+      const daily = await many(`SELECT * FROM channel_daily WHERE channel_id=$1 ORDER BY day`, [ch.id]);
+      const monthly = await many(`SELECT month, subscribers_end, joins_sum, leaves_sum, views_sum, forwards_sum,
+                       reactions_sum, days_count
+                  FROM channel_monthly WHERE channel_id=$1 ORDER BY month`, [ch.id]);
+      const posts = await many(`SELECT * FROM posts WHERE channel_id=$1 ORDER BY date_published`, [ch.id]);
+      const mentionRows = await many(`SELECT * FROM mentions WHERE owner_channel_id=$1 ORDER BY msg_id`, [ch.id]);
+      const velocity = await many(`SELECT * FROM velocity_daily WHERE channel_id=$1 ORDER BY day`, [ch.id]);
+      const annotations = await many(`SELECT day, label, created_at FROM chart_annotations WHERE channel_id=$1 ORDER BY day`, [ch.id]);
+      const ig = await one(`SELECT ig_user_id, username, scopes, token_expires_at, connected_at, updated_at
+                 FROM ig_accounts WHERE channel_id=$1`, [ch.id]);
+      const igDaily = await many(`SELECT * FROM ig_daily WHERE channel_id=$1 ORDER BY day`, [ch.id]);
+      const igMedia = await many(`SELECT * FROM ig_media_daily WHERE channel_id=$1 ORDER BY day`, [ch.id]);
+      ch.archive = { daily, monthly, posts, mentions: mentionRows, velocity, annotations };
+      ch.instagram = ig ? { ...ig, daily: igDaily, media_daily: igMedia } : null;
+    }
+
+    return {
+      format: 'atlavue-export',
+      version: 1,
+      exported_at: new Date().toISOString(),
+      account,
+      prefs: prefs ? prefs.prefs : null,
+      workspaces,
+      reports,
+      // Присутствие подключения — да; сама сессия — никогда (это credential, не данные).
+      telegram_session: tgSession,
+      channels,
+    };
+  } finally {
+    client.release();
   }
-
-  return {
-    format: 'atlavue-export',
-    version: 1,
-    exported_at: new Date().toISOString(),
-    account,
-    prefs: prefs ? prefs.prefs : null,
-    workspaces,
-    reports,
-    // Присутствие подключения — да; сама сессия — никогда (это credential, не данные).
-    telegram_session: tgSession,
-    channels,
-  };
 }
 
 // ── Repo composition (P2 stage 5) — thin re-export so the public `db` API is unchanged ──
