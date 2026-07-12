@@ -8,10 +8,12 @@ const { runMigrations } = require('./migrations');
 const { createJobsRepo } = require('./repos/jobsRepo');
 const { createReportsRepo } = require('./repos/reportsRepo');
 const { createUsersRepo } = require('./repos/usersRepo');
+const { createChannelsRepo } = require('./repos/channelsRepo');
 // DB core (P2 db/core): пул / Railway-SSL / enabled / ping / close + классификация недоступности
 // живут в server/db/*. db.js их импортирует и ре-экспортит — публичный `db.*` API не меняется.
 const { pool, enabled, ping, close } = require('./db/pool');
 const { isDbUnavailable } = require('./db/errors');
+const { sameTenantSource, CHANNEL_ACCESS_PREDICATE } = require('./db/access');
 
 /* Historical inline schema retained as a comment for one release only.
    Source of truth is server/migrations/*.sql; startup never executes this block.
@@ -230,136 +232,15 @@ async function adoptOwnerChannel(adminUid) {
   const { rows } = await pool.query(
     `SELECT id, tg_channel_id, username, title FROM channels WHERE owner_uid=$1 AND source='central'`, [adminUid]);
   if (rows[0]) {
-    await ensureChannelCanonical(rows[0].id, adminUid, rows[0].tg_channel_id != null
+    await channelsRepo.ensureChannelCanonical(rows[0].id, adminUid, rows[0].tg_channel_id != null
       ? { network: 'tg', externalId: rows[0].tg_channel_id, username: rows[0].username, title: rows[0].title }
       : {});
   }
   return true;
 }
 
-const CHANNEL_COLS = 'id, username, title, status, source, tg_channel_id, owner_uid';
-
-// Channels visible to a user (every session maps to a users row with a numeric uid).
-
-// ── Canonical source-read trust boundary (security: tenancy isolation audit, finding F1) ───────
-// Phase-B canonical reads (getChannelHistory / getLatestVelocity / memberCount) union rows by a
-// shared source_id so two links to ONE external property see one row-set (ADR-001). That union MUST
-// stay inside the reader-channel's access boundary: a user can bind a channel to ANY external
-// identity with NO proof of access — a QR link takes a raw browser-supplied tg id
-// (POST /api/tg/qr/channels), a collector self-reports channel.id on ingest — so an UNRESTRICTED
-// source union would hand a claimer another tenant's admin-only history (joins/leaves/reactions and
-// per-post velocity, none of it public). We therefore union only rows written by a channel in the
-// SAME workspace as the reader-channel (or the SAME creator — covers legacy/central rows whose
-// workspace_id is still NULL). Same-workspace co-following still shares; cross-workspace sharing
-// waits for an access-verified follow (roadmap P2.2). `rowAlias` = data-row table, `chanAlias` =
-// the reader channel.
-const sameTenantSource = (rowAlias, chanAlias) =>
-  `EXISTS (SELECT 1 FROM channels src WHERE src.id = ${rowAlias}.channel_id
-             AND (src.owner_uid = ${chanAlias}.owner_uid
-                  OR (${chanAlias}.workspace_id IS NOT NULL AND src.workspace_id = ${chanAlias}.workspace_id)))`;
-
-// Latest known subscriber count per channel (cheap: newest daily row). Canonical per ADR-001: any
-// row of the channel's SOURCE written within the reader's own workspace counts (a same-workspace
-// co-follow shares history); channel-scoped rows are the fallback for links without a source yet.
-const MEMBER_COUNT_COL =
-  `(SELECT cd.subscribers FROM channel_daily cd
-      WHERE ((channels.source_id IS NOT NULL AND cd.source_id = channels.source_id
-              AND ${sameTenantSource('cd', 'channels')})
-             OR cd.channel_id = channels.id)
-        AND cd.subscribers IS NOT NULL
-      ORDER BY cd.day DESC, cd.captured_at DESC NULLS LAST LIMIT 1) AS "memberCount"`;
-
-// Access boundary (ADR-001): a channel is visible to its creator (legacy owner_uid — also covers
-// pre-workspace rows like the bootstrap central channel) OR to any member of its workspace.
-const CHANNEL_ACCESS_PREDICATE =
-  `(channels.owner_uid = $UID
-    OR (channels.workspace_id IS NOT NULL AND EXISTS (
-          SELECT 1 FROM workspace_members m
-          WHERE m.workspace_id = channels.workspace_id AND m.uid = $UID)))`;
-
-const CHANNEL_ADMIN_ACCESS_PREDICATE =
-  `(c.owner_uid = $UID
-    OR (c.workspace_id IS NOT NULL AND EXISTS (
-          SELECT 1 FROM workspace_members m
-          WHERE m.workspace_id = c.workspace_id
-            AND m.uid = $UID
-            AND m.role IN ('owner', 'admin'))))`;
-
-async function listChannels(user) {
-  if (!enabled) return [];
-  const uid = user && user.uid;
-  if (uid == null) return [];   // defensive: never query ownership with a missing uid
-  // Видимость через индексный id-набор (UNION двух ветвей) вместо `owner OR EXISTS(...)`:
-  // OR поверх owner_uid и коррелированного EXISTS заставляет планировщик seq-scan'ить channels
-  // (capacity-док, hot query), а UNION гонит каждую ветвь своим индексом (channels_owner_idx /
-  // workspace_members_uid_idx → channels_workspace_idx) и полуджойнит результат. Набор ТОТ ЖЕ,
-  // что у CHANNEL_ACCESS_PREDICATE: создатель (legacy owner_uid) ИЛИ член workspace — JOIN по
-  // m.workspace_id = c.workspace_id сам отсекает NULL-workspace строки, как
-  // `workspace_id IS NOT NULL AND EXISTS` в предикате; IN дедупит owner+member пересечение.
-  const { rows } = await pool.query(
-    `SELECT ${CHANNEL_COLS}, ${MEMBER_COUNT_COL},
-            EXISTS(SELECT 1 FROM ig_accounts ia WHERE ia.channel_id = channels.id) AS ig_connected
-     FROM channels
-     WHERE channels.id IN (
-             SELECT c.id FROM channels c WHERE c.owner_uid = $1
-             UNION
-             SELECT c.id FROM channels c
-               JOIN workspace_members m ON m.workspace_id = c.workspace_id
-              WHERE m.uid = $1)
-       AND status<>'disabled'
-     ORDER BY created_at ASC`, [uid]);
-  return rows;
-}
-
-// Membership-checked fetch: returns the channel row only if the user may access it (creator or
-// workspace member), plus their effective role for write-gates. Routes turn null → 403.
-async function getChannel(id, user) {
-  if (!enabled || !id) return null;
-  const uid = user && user.uid;
-  if (uid == null) return null;   // defensive: never query ownership with a missing uid
-  // listChannels hides disabled channels — a direct ?channel=<id> must not bypass that.
-  const { rows } = await pool.query(
-    `SELECT ${CHANNEL_COLS},
-            CASE WHEN channels.owner_uid = $2 THEN 'owner'
-                 ELSE (SELECT m.role FROM workspace_members m
-                       WHERE m.workspace_id = channels.workspace_id AND m.uid = $2)
-            END AS member_role
-     FROM channels
-     WHERE id=$1 AND ${CHANNEL_ACCESS_PREDICATE.replaceAll('$UID', '$2')} AND status<>'disabled'`,
-    [id, uid]);
-  return rows[0] || null;
-}
-
-// Unscoped lookup (internal use: cron, etc.)
-async function getChannelById(id) {
-  if (!enabled || !id) return null;
-  const { rows } = await pool.query(`SELECT ${CHANNEL_COLS} FROM channels WHERE id=$1`, [id]);
-  return rows[0] || null;
-}
-
-async function getOwnerChannelId() {
-  if (!enabled) return null;
-  const { rows } = await pool.query(`SELECT id FROM channels WHERE source='central' LIMIT 1`);
-  return rows[0] ? rows[0].id : null;
-}
-
-async function setChannelTgId(id, tgId, executor = pool) {
-  if (!enabled || !id || tgId == null) return false;
-  const upd = await executor.query(`UPDATE channels SET tg_channel_id=$2 WHERE id=$1 AND tg_channel_id IS NULL`, [id, tgId]);
-  // Canonicalise when the platform identity just became known — and short-circuit on the hot
-  // path: this runs on EVERY collector ingest, so an already-stamped channel must cost one SELECT,
-  // not a shared external_sources write (which would briefly serialize tenants of one source).
-  const { rows } = await executor.query(
-    `SELECT owner_uid, username, title, workspace_id, source_id FROM channels WHERE id=$1`, [id]);
-  const row = rows[0];
-  if (row && (upd.rowCount > 0 || row.workspace_id == null || row.source_id == null)) {
-    // Same executor all the way down — see ensureChannelCanonical's executor-discipline note.
-    await ensureChannelCanonical(id, row.owner_uid, {
-      network: 'tg', externalId: tgId, username: row.username, title: row.title,
-    }, executor);
-  }
-  return true;
-}
+// ── Channels (tenants): видимость/доступ/tg-id → server/repos/channelsRepo (createChannelsRepo, spread в exports).
+// Tenancy-предикаты (sameTenantSource / CHANNEL_ACCESS_PREDICATE / ADMIN) → server/db/access (импорт выше).
 
 // INT4-колонки дневных таблиц: одно переполнение счётчика (сверхкрупный канал) раньше валило
 // ВЕСЬ дневной ingest («integer out of range» → ROLLBACK всей транзакции дня). Клампим к границе
@@ -583,181 +464,7 @@ async function getIgTags(limit = 100) {
 
 // The creator's personal workspace, created on first need. Backfill 010 seeds one per existing
 // user; this covers users registered after the migration and keeps creation paths one-call simple.
-async function ensurePersonalWorkspace(uid, executor = pool) {
-  if (!enabled || uid == null) return null;
-  const found = await executor.query(`SELECT id FROM workspaces WHERE owner_uid=$1 ORDER BY id LIMIT 1`, [uid]);
-  if (found.rows[0]) return found.rows[0].id;
-  const { rows } = await executor.query(
-    `INSERT INTO workspaces (name, owner_uid)
-     SELECT split_part(u.email,'@',1), u.id FROM users u WHERE u.id=$1
-     RETURNING id`, [uid]);
-  const wsId = rows[0] ? rows[0].id : null;
-  if (wsId) {
-    await executor.query(
-      `INSERT INTO workspace_members (workspace_id, uid, role) VALUES ($1,$2,'owner')
-       ON CONFLICT (workspace_id, uid) DO NOTHING`, [wsId, uid]);
-  }
-  return wsId;
-}
-
-// Find-or-create the deduplicated identity of an external property.
-async function ensureExternalSource(network, externalId, { username, title } = {}, executor = pool) {
-  if (!enabled || !network || externalId == null) return null;
-  // Existing metadata WINS (fill NULLs only): the source row is shared across workspaces, so the
-  // last-ingesting link must not keep overwriting the canonical username/title (metadata bleed).
-  const { rows } = await executor.query(
-    `INSERT INTO external_sources (network, external_id, username, title)
-     VALUES ($1, $2, $3, $4)
-     ON CONFLICT (network, external_id) DO UPDATE SET
-       username = COALESCE(external_sources.username, EXCLUDED.username),
-       title    = COALESCE(external_sources.title, EXCLUDED.title)
-     RETURNING id`,
-    [network, String(externalId), username || null, title || null]);
-  return rows[0] ? rows[0].id : null;
-}
-
-// Stamp a channel row with its workspace (creator's personal one) and, when the platform identity
-// is already known, its canonical source. Fills NULLs only — never re-homes an existing link.
-// EXECUTOR DISCIPLINE: every query runs on the caller's executor. A pool.query here while the
-// caller holds the row inside an open transaction (collector ingest → setChannelTgId) would block
-// on the caller's own row lock forever — a self-deadlock Postgres cannot detect (the tx connection
-// is idle-in-transaction, not lock-waiting), and with a small pool it starves the whole API.
-async function ensureChannelCanonical(channelId, ownerUid, { network, externalId, username, title } = {}, executor = pool) {
-  if (!enabled || !channelId) return;
-  const wsId = await ensurePersonalWorkspace(ownerUid, executor);
-  if (wsId) {
-    await executor.query(`UPDATE channels SET workspace_id=$2 WHERE id=$1 AND workspace_id IS NULL`, [channelId, wsId]);
-  }
-  if (network && externalId != null) {
-    const srcId = await ensureExternalSource(network, externalId, { username, title }, executor);
-    if (srcId) {
-      await executor.query(`UPDATE channels SET source_id=$2 WHERE id=$1 AND source_id IS NULL`, [channelId, srcId]);
-    }
-  }
-}
-
-// ── Channels (collector onboarding) + API keys + snapshot — Sprint 1C ──
-async function createChannel({ owner_uid, username, title }) {
-  if (!enabled || owner_uid == null) return null;
-  const uname = String(username || '').replace(/^@/, '').trim();
-  const { rows } = await pool.query(
-    `INSERT INTO channels (owner_uid, username, title, status, source)
-     VALUES ($1,$2,$3,'active','collector') RETURNING ${CHANNEL_COLS}`,
-    [owner_uid, uname || null, title || uname || null]);
-  const row = rows[0] || null;
-  // Workspace now; the canonical source is stamped later, when the platform id becomes known
-  // (setChannelTgId for collector channels).
-  if (row) await ensureChannelCanonical(row.id, owner_uid);
-  return row;
-}
-
-// Standalone Instagram source — a channels row not backed by any Telegram channel
-// (source='ig', no tg_channel_id). Callers dedup by identity FIRST (findIgChannelByIgUser)
-// so reconnecting the same IG account refreshes its token instead of duplicating the source.
-async function createIgChannel({ owner_uid, username }) {
-  if (!enabled || owner_uid == null) return null;
-  const uname = String(username || '').replace(/^@/, '').trim();
-  const { rows } = await pool.query(
-    `INSERT INTO channels (owner_uid, username, title, status, source)
-     VALUES ($1,$2,$3,'active','ig') RETURNING ${CHANNEL_COLS}`,
-    [owner_uid, uname || null, uname || 'Instagram']);
-  const row = rows[0] || null;
-  // Workspace now; the IG canonical source lands in saveIgAccount (ig_user_id known there).
-  if (row) await ensureChannelCanonical(row.id, owner_uid);
-  return row;
-}
-
-// The user's channel already holding this Instagram identity (multi-account reconnect dedup).
-async function findIgChannelByIgUser(uid, igUserId) {
-  if (!enabled || uid == null || !igUserId) return null;
-  const { rows } = await pool.query(
-    `SELECT c.id FROM channels c JOIN ig_accounts ia ON ia.channel_id = c.id
-     WHERE c.owner_uid=$1 AND ia.ig_user_id=$2 AND c.status<>'disabled' LIMIT 1`,
-    [uid, String(igUserId)]);
-  return rows[0] ? rows[0].id : null;
-}
-
-// Create/adopt a QR-connected channel (source='qr'). Idempotent per (owner_uid, tg_channel_id)
-// via the partial unique index — re-adding after a re-scan just refreshes title/username and
-// re-activates it, never duplicates. The captured tg_sessions row (same owner_uid) feeds it.
-async function createTgChannel({ owner_uid, tg_channel_id, username, title }) {
-  if (!enabled || owner_uid == null || tg_channel_id == null) return null;
-  const uname = String(username || '').replace(/^@/, '').trim();
-  const { rows } = await pool.query(
-    `INSERT INTO channels (owner_uid, tg_channel_id, username, title, status, source)
-     VALUES ($1,$2,$3,$4,'active','qr')
-     ON CONFLICT (owner_uid, tg_channel_id) WHERE tg_channel_id IS NOT NULL
-     DO UPDATE SET username=COALESCE(EXCLUDED.username, channels.username),
-                   title=COALESCE(EXCLUDED.title, channels.title),
-                   status='active'
-     RETURNING ${CHANNEL_COLS}`,
-    [owner_uid, tg_channel_id, uname || null, title || uname || null]);
-  const row = rows[0] || null;
-  if (row) {
-    await ensureChannelCanonical(row.id, owner_uid, {
-      network: 'tg', externalId: tg_channel_id, username: uname || null, title: title || uname || null,
-    });
-  }
-  return row;
-}
-
-// Delete a channel the user owns (cascades data/keys/snapshot). Never the central one.
-async function deleteChannel(id, uid) {
-  if (!enabled || !id || uid == null) return false;
-  const { rowCount } = await pool.query(
-    "DELETE FROM channels WHERE id=$1 AND owner_uid=$2 AND source<>'central'", [id, uid]);
-  return rowCount > 0;
-}
-
-async function createApiKey(channelId, keyHash, keyPrefix, label) {
-  if (!enabled || !channelId) return null;
-  const { rows } = await pool.query(
-    `INSERT INTO api_keys (channel_id, key_hash, key_prefix, label) VALUES ($1,$2,$3,$4)
-     RETURNING id, key_prefix, label, to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SS') AS created_at`,
-    [channelId, keyHash, keyPrefix, label || null]);
-  return rows[0] || null;
-}
-
-// Authenticate a collector by API-key hash → the channel row (active key only).
-// Atomically touches last_used_at. Returns the channel or null.
-// touch=false — read-only аутентификация (GET /api/collector/compatibility): без UPDATE
-// last_used_at, чтобы GET не генерировал WAL на каждом пробнике коллектора. Доставка
-// данных (ingest) идёт с дефолтным touch=true и двигает отметку как раньше.
-async function getChannelByApiKey(keyHash, { touch = true } = {}) {
-  if (!enabled) return null;
-  const { rows } = touch
-    ? await pool.query(
-        'UPDATE api_keys SET last_used_at=now() WHERE key_hash=$1 AND revoked_at IS NULL RETURNING channel_id', [keyHash])
-    : await pool.query(
-        'SELECT channel_id FROM api_keys WHERE key_hash=$1 AND revoked_at IS NULL', [keyHash]);
-  return rows[0] ? getChannelById(rows[0].channel_id) : null;
-}
-
-// Keys of a channel the caller can administer (workspace owner/admin or legacy creator).
-async function listApiKeys(channelId, uid) {
-  if (!enabled || !channelId || uid == null) return [];
-  const { rows } = await pool.query(
-    `SELECT k.id, k.key_prefix, k.label,
-            to_char(k.created_at,'YYYY-MM-DD"T"HH24:MI:SS') AS created_at,
-            to_char(k.last_used_at,'YYYY-MM-DD"T"HH24:MI:SS') AS last_used_at,
-            (k.revoked_at IS NOT NULL) AS revoked
-       FROM api_keys k JOIN channels c ON c.id=k.channel_id
-      WHERE k.channel_id=$1 AND ${CHANNEL_ADMIN_ACCESS_PREDICATE.replaceAll('$UID', '$2')}
-      ORDER BY k.created_at DESC`, [channelId, uid]);
-  return rows;
-}
-
-async function revokeApiKey(keyId, channelId, uid) {
-  if (!enabled || !keyId || !channelId || uid == null) return false;
-  const { rowCount } = await pool.query(
-    `UPDATE api_keys k SET revoked_at=now() FROM channels c
-      WHERE k.id=$1
-        AND k.channel_id=$2
-        AND k.channel_id=c.id
-        AND ${CHANNEL_ADMIN_ACCESS_PREDICATE.replaceAll('$UID', '$3')}
-        AND k.revoked_at IS NULL`, [keyId, channelId, uid]);
-  return rowCount > 0;
-}
+// Workspaces / canonical external_sources / channel creates / delete / api-keys → server/repos/channelsRepo.
 
 async function saveSnapshot(channelId, data, executor = pool) {
   if (!enabled || !channelId || !data) return false;
@@ -823,7 +530,7 @@ async function ingestCollectorPayload(channelId, meta, data) {
       await saveVelocity(channelId, data.velocity, client);
       velocityOk = true;
     }
-    if (data.tgChannelId != null) await setChannelTgId(channelId, data.tgChannelId, client);
+    if (data.tgChannelId != null) await channelsRepo.setChannelTgId(channelId, data.tgChannelId, client);
 
     const result = {
       ok: true,
@@ -1127,7 +834,7 @@ async function saveIgAccount(channelId, { ig_user_id, username, access_token_enc
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const srcId = await ensureExternalSource('ig', ig_user_id, { username }, client);
+    const srcId = await channelsRepo.ensureExternalSource('ig', ig_user_id, { username }, client);
     await client.query(
       `INSERT INTO ig_accounts (channel_id, ig_user_id, username, access_token_enc, token_expires_at, scopes, source_id, updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7, now())
@@ -1387,35 +1094,7 @@ async function listIgMediaDaily(channelId, days = 400) {
   return rows;
 }
 
-// ── Timeline annotations (per-channel event markers on the trend charts) ──
-async function listAnnotations(channelId) {
-  if (!enabled || !channelId) return [];
-  const { rows } = await pool.query(
-    // Новейшие 500 под кэпом (LIMIT по ASC ронял бы СВЕЖИЕ), отдаём хронологически (ASC).
-    `SELECT id, to_char(day,'YYYY-MM-DD') AS day, label,
-            to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SS') AS created_at
-       FROM (SELECT id, day, label, created_at FROM chart_annotations
-             WHERE channel_id=$1 ORDER BY day DESC, id DESC LIMIT 500) t
-       ORDER BY day ASC, id ASC`, [channelId]);
-  return rows;
-}
-
-async function createAnnotation(channelId, { day, label, createdBy }) {
-  if (!enabled || !channelId) return null;
-  const { rows } = await pool.query(
-    `INSERT INTO chart_annotations (channel_id, day, label, created_by) VALUES ($1,$2,$3,$4)
-     RETURNING id, to_char(day,'YYYY-MM-DD') AS day, label,
-       to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SS') AS created_at`,
-    [channelId, day, String(label).slice(0, 120), createdBy ?? null]);
-  return rows[0] || null;
-}
-
-async function deleteAnnotation(id, channelId) {
-  if (!enabled || !id || !channelId) return false;
-  const { rowCount } = await pool.query(
-    'DELETE FROM chart_annotations WHERE id=$1 AND channel_id=$2', [id, channelId]);
-  return rowCount > 0;
-}
+// Timeline annotations (listAnnotations/createAnnotation/deleteAnnotation) → server/repos/channelsRepo.
 
 // Named reports (per-user composition + email schedule) → repos/reportsRepo.js. Composed below.
 
@@ -1543,12 +1222,13 @@ async function exportUserData(uid) {
 const jobsRepo = createJobsRepo({ pool, enabled });
 const reportsRepo = createReportsRepo({ pool, enabled });
 const usersRepo = createUsersRepo({ pool, enabled });
+const channelsRepo = createChannelsRepo({ pool, enabled });
 
 module.exports = {
   enabled, init, migrate, ping, close, graphsToDailyRows, isDbUnavailable,
   ...usersRepo,
-  adoptOwnerChannel, listChannels, getChannel, getChannelById, getOwnerChannelId, setChannelTgId,
-  createChannel, createTgChannel, createIgChannel, findIgChannelByIgUser, deleteChannel, createApiKey, getChannelByApiKey, listApiKeys, revokeApiKey,
+  ...channelsRepo,
+  adoptOwnerChannel,
   saveSnapshot, getSnapshot, ingestCollectorPayload, persistCentralDaily, persistTgBundleTx, getCollectorStatus, recordAuditEvent,
   saveVelocity, getLatestVelocity,
   upsertChannelDaily, upsertPosts, upsertMentions, upsertIgTags, getIgTags,
@@ -1560,9 +1240,7 @@ module.exports = {
   upsertIgDaily, upsertIgMediaDaily, saveRawSnapshot, pruneRawSnapshots, pruneIgMediaDaily,
   rollupChannelMonthly,
   listIgDaily, listIgMediaDaily,
-  listAnnotations, createAnnotation, deleteAnnotation,
   ...reportsRepo,   // REPORT_SCHEDULES, listReports, getReport, createReport, updateReport, deleteReport, listDueReports, markReportSent, listPostsWindow
   ...jobsRepo,   // claimJob, completeJob, failJob, getJob, runJobOnce
-  ensurePersonalWorkspace, ensureExternalSource, ensureChannelCanonical,
   deleteUserAccount, exportUserData,
 };
