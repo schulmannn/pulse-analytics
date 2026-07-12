@@ -21,7 +21,7 @@ const num = (v) => {
   return clamped;
 };
 
-function createCollectorRepo({ pool, enabled, setChannelTgId }) {
+function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
   /* Pure transform: stats graphs → array of daily rows. Exported for testing.
      Builds the union of all days present across the daily series, so re-running
      refreshes the last ~3 months while older days already in the DB are kept. */
@@ -141,80 +141,81 @@ function createCollectorRepo({ pool, enabled, setChannelTgId }) {
      snapshot with only half of its history written. */
   async function ingestCollectorPayload(channelId, meta, data) {
     if (!enabled || !channelId) throw new Error('database unavailable');
-    const client = await pool.connect();
+    // Happy-path — в едином transaction-helper (BEGIN/COMMIT/ROLLBACK/release внутри). Failure-path
+    // (ingest_receipts 'failed' + collector_status через pool — НОВОЕ соединение, ПОСЛЕ rollback) —
+    // во внешнем catch, как было. Эквивалентно inline-BEGIN: duplicate-возврат внутри tx → COMMIT
+    // (записей нет); INGEST_ID_CONFLICT → helper rollback+rethrow → внешний catch пропускает failure-writes.
     try {
-      await client.query('BEGIN');
-      const inserted = await client.query(
-        `INSERT INTO ingest_receipts
-          (channel_id, ingest_id, schema_version, collector_version, collected_at, payload_hash)
-         VALUES ($1,$2,$3,$4,$5,$6)
-         ON CONFLICT (channel_id, ingest_id) DO NOTHING
-         RETURNING status, result, payload_hash`,
-        [channelId, meta.ingest_id, meta.schema_version, meta.collector_version,
-          meta.collected_at, meta.payload_hash]);
+      return await transaction(async (client) => {
+        const inserted = await client.query(
+          `INSERT INTO ingest_receipts
+            (channel_id, ingest_id, schema_version, collector_version, collected_at, payload_hash)
+           VALUES ($1,$2,$3,$4,$5,$6)
+           ON CONFLICT (channel_id, ingest_id) DO NOTHING
+           RETURNING status, result, payload_hash`,
+          [channelId, meta.ingest_id, meta.schema_version, meta.collector_version,
+            meta.collected_at, meta.payload_hash]);
 
-      if (!inserted.rows.length) {
-        const prior = await client.query(
-          `SELECT status, result, payload_hash FROM ingest_receipts
-            WHERE channel_id=$1 AND ingest_id=$2 FOR UPDATE`,
-          [channelId, meta.ingest_id]);
-        const receipt = prior.rows[0];
-        if (!receipt || receipt.payload_hash !== meta.payload_hash) {
-          const error = new Error('ingest_id already used with a different payload');
-          error.code = 'INGEST_ID_CONFLICT';
-          throw error;
+        if (!inserted.rows.length) {
+          const prior = await client.query(
+            `SELECT status, result, payload_hash FROM ingest_receipts
+              WHERE channel_id=$1 AND ingest_id=$2 FOR UPDATE`,
+            [channelId, meta.ingest_id]);
+          const receipt = prior.rows[0];
+          if (!receipt || receipt.payload_hash !== meta.payload_hash) {
+            const error = new Error('ingest_id already used with a different payload');
+            error.code = 'INGEST_ID_CONFLICT';
+            throw error;
+          }
+          if (receipt.status === 'completed') {
+            return { ...(receipt.result || {}), duplicate: true };
+          }
+          await client.query(
+            `UPDATE ingest_receipts
+                SET status='processing', error=NULL, received_at=now()
+              WHERE channel_id=$1 AND ingest_id=$2`,
+            [channelId, meta.ingest_id]);
         }
-        if (receipt.status === 'completed') {
-          await client.query('COMMIT');
-          return { ...(receipt.result || {}), duplicate: true };
+
+        await saveSnapshot(channelId, data.snapshot, client);
+        const nDaily = await upsertChannelDaily(channelId, data.dailyRows, client);
+        const nPosts = await upsertPosts(channelId, data.postRows, client);
+        const nMentions = await upsertMentions(channelId, data.mentions, client);
+        let velocityOk = false;
+        if (data.velocity && data.velocity.available) {
+          await saveVelocity(channelId, data.velocity, client);
+          velocityOk = true;
         }
+        if (data.tgChannelId != null) await setChannelTgId(channelId, data.tgChannelId, client);
+
+        const result = {
+          ok: true,
+          channel_id: channelId,
+          ingest_id: meta.ingest_id,
+          schema_version: meta.schema_version,
+          snapshot: true,
+          channel_daily: nDaily,
+          posts: nPosts,
+          velocity: velocityOk,
+          mentions: nMentions,
+        };
         await client.query(
           `UPDATE ingest_receipts
-              SET status='processing', error=NULL, received_at=now()
+              SET status='completed', completed_at=now(), result=$3, error=NULL
             WHERE channel_id=$1 AND ingest_id=$2`,
-          [channelId, meta.ingest_id]);
-      }
-
-      await saveSnapshot(channelId, data.snapshot, client);
-      const nDaily = await upsertChannelDaily(channelId, data.dailyRows, client);
-      const nPosts = await upsertPosts(channelId, data.postRows, client);
-      const nMentions = await upsertMentions(channelId, data.mentions, client);
-      let velocityOk = false;
-      if (data.velocity && data.velocity.available) {
-        await saveVelocity(channelId, data.velocity, client);
-        velocityOk = true;
-      }
-      if (data.tgChannelId != null) await setChannelTgId(channelId, data.tgChannelId, client);
-
-      const result = {
-        ok: true,
-        channel_id: channelId,
-        ingest_id: meta.ingest_id,
-        schema_version: meta.schema_version,
-        snapshot: true,
-        channel_daily: nDaily,
-        posts: nPosts,
-        velocity: velocityOk,
-        mentions: nMentions,
-      };
-      await client.query(
-        `UPDATE ingest_receipts
-            SET status='completed', completed_at=now(), result=$3, error=NULL
-          WHERE channel_id=$1 AND ingest_id=$2`,
-        [channelId, meta.ingest_id, result]);
-      await client.query(
-        `INSERT INTO collector_status
-          (channel_id, collector_version, last_ingest_id, last_attempt_at, last_success_at, last_error)
-         VALUES ($1,$2,$3,now(),now(),NULL)
-         ON CONFLICT (channel_id) DO UPDATE SET
-           collector_version=EXCLUDED.collector_version,
-           last_ingest_id=EXCLUDED.last_ingest_id,
-           last_attempt_at=now(), last_success_at=now(), last_error=NULL, updated_at=now()`,
-        [channelId, meta.collector_version, meta.ingest_id]);
-      await client.query('COMMIT');
-      return result;
+          [channelId, meta.ingest_id, result]);
+        await client.query(
+          `INSERT INTO collector_status
+            (channel_id, collector_version, last_ingest_id, last_attempt_at, last_success_at, last_error)
+           VALUES ($1,$2,$3,now(),now(),NULL)
+           ON CONFLICT (channel_id) DO UPDATE SET
+             collector_version=EXCLUDED.collector_version,
+             last_ingest_id=EXCLUDED.last_ingest_id,
+             last_attempt_at=now(), last_success_at=now(), last_error=NULL, updated_at=now()`,
+          [channelId, meta.collector_version, meta.ingest_id]);
+        return result;
+      });
     } catch (error) {
-      try { await client.query('ROLLBACK'); } catch (_) {}
       if (error.code !== 'INGEST_ID_CONFLICT') {
         const message = String(error.message || error).slice(0, 1000);
         await pool.query(
@@ -238,8 +239,6 @@ function createCollectorRepo({ pool, enabled, setChannelTgId }) {
           [channelId, meta.collector_version, meta.ingest_id, message]).catch(() => {});
       }
       throw error;
-    } finally {
-      client.release();
     }
   }
 
@@ -252,9 +251,7 @@ function createCollectorRepo({ pool, enabled, setChannelTgId }) {
      does the heavy MTProto pass at most once per day. */
   async function persistCentralDaily(channelId, { dailyRows = [], postRows = [], velocity = null } = {}) {
     if (!enabled || !channelId) throw new Error('database unavailable');
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
+    return transaction(async (client) => {
       const nDaily = await upsertChannelDaily(channelId, dailyRows, client);
       const nPosts = await upsertPosts(channelId, postRows, client);
       let velocityOk = false;
@@ -262,14 +259,8 @@ function createCollectorRepo({ pool, enabled, setChannelTgId }) {
         await saveVelocity(channelId, velocity, client);
         velocityOk = true;
       }
-      await client.query('COMMIT');
       return { channel_daily: nDaily, posts: nPosts, velocity: velocityOk };
-    } catch (error) {
-      try { await client.query('ROLLBACK'); } catch (_) {}
-      throw error;
-    } finally {
-      client.release();
-    }
+    });
   }
 
   // QR-канал: снапшот + дневные серии + посты — в ОДНОЙ транзакции (зеркало persistCentralDaily).
@@ -279,19 +270,11 @@ function createCollectorRepo({ pool, enabled, setChannelTgId }) {
   // архив, вызывающий пишет его best-effort ПОСЛЕ коммита.
   async function persistTgBundleTx(channelId, { snapshot, dailyRows = [], postRows = [] } = {}) {
     if (!enabled || !channelId) throw new Error('database unavailable');
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
+    return transaction(async (client) => {
       await saveSnapshot(channelId, snapshot, client);
       if (dailyRows.length) await upsertChannelDaily(channelId, dailyRows, client);
       if (postRows.length) await upsertPosts(channelId, postRows, client);
-      await client.query('COMMIT');
-    } catch (error) {
-      try { await client.query('ROLLBACK'); } catch (_) {}
-      throw error;
-    } finally {
-      client.release();
-    }
+    });
   }
 
   async function saveVelocity(channelId, data, executor = pool) {
