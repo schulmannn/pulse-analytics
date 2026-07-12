@@ -1,0 +1,103 @@
+'use strict';
+
+// Юнит-тесты server/config.js (PR B1 декомпозиции index.js). Чистый модуль, без сети/PG.
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { loadConfig, validateConfig, ConfigError, isProductionEnv } = require('../server/config');
+
+test('loadConfig: дефолты из пустого env', () => {
+  const c = loadConfig({});
+  assert.equal(c.env, 'development');
+  assert.equal(c.isProduction, false);
+  assert.equal(c.http.port, 3000);
+  assert.equal(c.http.trustProxy, 2);
+  assert.deepEqual(c.http.corsOrigins, []);
+  assert.equal(c.http.publicUrl, 'https://atlavue.app');
+  assert.equal(c.database.sslMode, 'auto');
+  assert.equal(c.database.poolMax, 4);
+  assert.equal(c.database.allowDbLess, false);
+  assert.equal(c.auth.sessionTtlMs, 7 * 24 * 60 * 60 * 1000);
+  assert.equal(c.email.from, 'Atlavue <onboarding@resend.dev>');
+  assert.equal(c.runtime.webReplicas, 1);
+});
+
+test('loadConfig: значения из env + нормализация', () => {
+  const c = loadConfig({
+    NODE_ENV: 'production', PORT: '8080', TRUST_PROXY_HOPS: '3', CORS_ORIGINS: 'a.com, b.com ,',
+    APP_URL: 'https://x.app/', DATABASE_URL: 'postgres://x', PGPOOL_MAX: '8', ALLOW_DBLESS: 'true',
+    SESSION_SECRET: 's3cret', ADMIN_EMAIL: '  Foo@BAR.com ', WEB_REPLICAS: '2', INGEST_TOKEN: 'tok',
+  });
+  assert.equal(c.http.port, 8080);
+  assert.equal(c.http.trustProxy, 3);
+  assert.deepEqual(c.http.corsOrigins, ['a.com', 'b.com']);
+  assert.equal(c.http.publicUrl, 'https://x.app', 'trailing slash срезан');
+  assert.equal(c.database.poolMax, 8);
+  assert.equal(c.database.allowDbLess, true);
+  assert.equal(c.auth.adminEmail, 'foo@bar.com', 'email нормализован (lower+trim)');
+  assert.equal(c.runtime.webReplicas, 2);
+  assert.equal(c.runtime.ingestToken, 'tok');
+});
+
+test('isProductionEnv: NODE_ENV=production ИЛИ Railway-маркер', () => {
+  assert.equal(isProductionEnv({ NODE_ENV: 'production' }), true);
+  assert.equal(isProductionEnv({ RAILWAY_ENVIRONMENT: 'prod' }), true);
+  assert.equal(isProductionEnv({ RAILWAY_PROJECT_ID: 'p1' }), true);
+  assert.equal(isProductionEnv({ NODE_ENV: 'development' }), false);
+  assert.equal(isProductionEnv({}), false);
+});
+
+test('loadConfig: результат заморожен (Object.freeze)', () => {
+  const c = loadConfig({});
+  assert.equal(Object.isFrozen(c), true);
+  assert.equal(Object.isFrozen(c.http), true);
+  assert.throws(() => { c.http.port = 9999; }, TypeError);
+});
+
+test('validateConfig: валидный dev-конфиг → нет ошибок', () => {
+  assert.deepEqual(validateConfig(loadConfig({})), []);
+});
+
+test('validateConfig: валидный prod-конфиг → нет ошибок', () => {
+  const errs = validateConfig(loadConfig({
+    NODE_ENV: 'production', SESSION_SECRET: 's', DATABASE_URL: 'postgres://x', APP_URL: 'https://atlavue.app',
+  }));
+  assert.deepEqual(errs, []);
+});
+
+test('validateConfig: prod без SESSION_SECRET → ошибка auth.sessionSecret', () => {
+  const errs = validateConfig(loadConfig({ NODE_ENV: 'production', DATABASE_URL: 'postgres://x', APP_URL: 'https://a.app' }));
+  assert.ok(errs.some((e) => e.field === 'auth.sessionSecret'));
+});
+
+test('validateConfig: prod без DATABASE_URL (и без ALLOW_DBLESS) → ошибка database.url', () => {
+  const errs = validateConfig(loadConfig({ NODE_ENV: 'production', SESSION_SECRET: 's', APP_URL: 'https://a.app' }));
+  assert.ok(errs.some((e) => e.field === 'database.url'));
+  const ok = validateConfig(loadConfig({ NODE_ENV: 'production', SESSION_SECRET: 's', APP_URL: 'https://a.app', ALLOW_DBLESS: 'true' }));
+  assert.ok(!ok.some((e) => e.field === 'database.url'), 'ALLOW_DBLESS снимает требование');
+});
+
+test('validateConfig: MTPROTO_URL без MTPROTO_TOKEN → ошибка (в любом env)', () => {
+  const errs = validateConfig(loadConfig({ MTPROTO_URL: 'http://mtproto:8001' }));
+  assert.ok(errs.some((e) => e.field === 'telegram.mtprotoToken'));
+});
+
+test('validateConfig: webReplicas > 1 → запрет; port<=0 → ошибка', () => {
+  const errs = validateConfig(loadConfig({ WEB_REPLICAS: '2', PORT: '0' }));
+  assert.ok(errs.some((e) => e.field === 'runtime.webReplicas'));
+  assert.ok(errs.some((e) => e.field === 'http.port'));
+});
+
+test('validateConfig: prod с не-https APP_URL → ошибка http.publicUrl', () => {
+  const errs = validateConfig(loadConfig({ NODE_ENV: 'production', SESSION_SECRET: 's', DATABASE_URL: 'x', APP_URL: 'http://insecure.app' }));
+  assert.ok(errs.some((e) => e.field === 'http.publicUrl'));
+});
+
+test('validateConfig: сообщения НЕ содержат значений секретов', () => {
+  const secret = 'SUPER-SECRET-VALUE-123';
+  const errs = validateConfig(loadConfig({
+    NODE_ENV: 'production', SESSION_SECRET: secret, MTPROTO_URL: 'http://m', WEB_REPLICAS: '5', APP_URL: 'http://x',
+  }));
+  const joined = JSON.stringify(errs) + new ConfigError(errs).message;
+  assert.ok(!joined.includes(secret), 'значение секрета не утекает в сообщения ошибок');
+});
