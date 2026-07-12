@@ -15,6 +15,8 @@ const { createIntegrationsRepo } = require('./repos/integrationsRepo');
 const { pool, enabled, ping, close } = require('./db/pool');
 const { isDbUnavailable } = require('./db/errors');
 const { sameTenantSource } = require('./db/access');
+const { createTransaction } = require('./db/transaction');
+const { mergeExports } = require('./db/mergeExports');
 
 /* Historical inline schema retained as a comment for one release only.
    Source of truth is server/migrations/*.sql; startup never executes this block.
@@ -1068,18 +1070,20 @@ async function exportUserData(uid) {
 // ── Repo composition (P2 stage 5) — thin re-export so the public `db` API is unchanged ──
 // pool/enabled are settled at module load (above); each repo owns a domain's queries and its
 // methods are spread into the exports below at their original names.
+// Один transaction-хелпер над пулом, инжектится в репо с составными транзакциями (finding 4:
+// единый способ достать DB-зависимость, без inline-BEGIN'ов в репозиториях).
+const transaction = createTransaction(pool);
 const jobsRepo = createJobsRepo({ pool, enabled });
 const reportsRepo = createReportsRepo({ pool, enabled });
-const usersRepo = createUsersRepo({ pool, enabled });
-const channelsRepo = createChannelsRepo({ pool, enabled });
-// ensureExternalSource — инъекция (repos не импортят друг друга; связывание только тут, в фасаде).
-const integrationsRepo = createIntegrationsRepo({ pool, enabled, ensureExternalSource: channelsRepo.ensureExternalSource });
+const usersRepo = createUsersRepo({ pool, enabled, transaction });
+const channelsRepo = createChannelsRepo({ pool, enabled, transaction });
+// ensureExternalSource / transaction — инъекция (repos не импортят друг друга; связывание только тут).
+const integrationsRepo = createIntegrationsRepo({ pool, enabled, transaction, ensureExternalSource: channelsRepo.ensureExternalSource });
 
-module.exports = {
+// db.js-локальные экспорты (домены, ещё не вынесенные в repos/*): core + collector-writes +
+// analytics-reads + bugs/crashes + gdpr. По мере распила эти наборы переезжают в свои repo.
+const localExports = {
   enabled, init, migrate, ping, close, graphsToDailyRows, isDbUnavailable,
-  ...usersRepo,
-  ...channelsRepo,
-  ...integrationsRepo,
   adoptOwnerChannel,
   saveSnapshot, getSnapshot, ingestCollectorPayload, persistCentralDaily, persistTgBundleTx, recordAuditEvent,
   saveVelocity, getLatestVelocity,
@@ -1090,7 +1094,17 @@ module.exports = {
   upsertIgDaily, upsertIgMediaDaily, saveRawSnapshot, pruneRawSnapshots, pruneIgMediaDaily,
   rollupChannelMonthly,
   listIgDaily, listIgMediaDaily,
-  ...reportsRepo,   // REPORT_SCHEDULES, listReports, getReport, createReport, updateReport, deleteReport, listDueReports, markReportSent, listPostsWindow
-  ...jobsRepo,   // claimJob, completeJob, failJob, getJob, runJobOnce
   deleteUserAccount, exportUserData,
 };
+
+// Публичный фасад db.* — сборка из доменных частей с ГАРДОМ на коллизии имён (finding 3):
+// mergeExports падает на загрузке, если два repo (или локальный набор) экспортируют одно имя —
+// раньше spread `{...a, ...b}` молча оставлял последнее, тихо затирая реализацию.
+module.exports = mergeExports({
+  local: localExports,
+  users: usersRepo,
+  channels: channelsRepo,
+  integrations: integrationsRepo,
+  reports: reportsRepo,   // REPORT_SCHEDULES, listReports, getReport, createReport, updateReport, deleteReport, listDueReports, markReportSent, listPostsWindow
+  jobs: jobsRepo,   // claimJob, completeJob, failJob, getJob, runJobOnce
+});

@@ -16,7 +16,7 @@
 
 const { CHANNEL_ACCESS_PREDICATE } = require('../db/access');
 
-function createIntegrationsRepo({ pool, enabled, ensureExternalSource }) {
+function createIntegrationsRepo({ pool, enabled, ensureExternalSource, transaction }) {
   // ── Instagram tags (media where we're @-tagged) — archive so they persist past the live edge's window.
   async function upsertIgTags(rows) {
     if (!enabled || !rows || !rows.length) return 0;
@@ -57,9 +57,7 @@ function createIntegrationsRepo({ pool, enabled, ensureExternalSource }) {
     // standalone IG channel (source='ig', no TG identity) also carries it as its channel source.
     // Три записи (source find-or-create → аккаунт → штамп канала) — одной транзакцией: раньше
     // это были автокоммиты, и падение между ними оставляло аккаунт без source-связки.
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
+    return transaction(async (client) => {
       const srcId = await ensureExternalSource('ig', ig_user_id, { username }, client);
       await client.query(
         `INSERT INTO ig_accounts (channel_id, ig_user_id, username, access_token_enc, token_expires_at, scopes, source_id, updated_at)
@@ -72,14 +70,8 @@ function createIntegrationsRepo({ pool, enabled, ensureExternalSource }) {
       await client.query(
         `UPDATE channels SET source_id=$2 WHERE id=$1 AND source_id IS NULL AND tg_channel_id IS NULL AND source='ig'`,
         [channelId, srcId]);
-      await client.query('COMMIT');
       return true;
-    } catch (e) {
-      try { await client.query('ROLLBACK'); } catch (_) {}
-      throw e;
-    } finally {
-      client.release();
-    }
+    });
   }
 
   // Full row incl. the encrypted token (callers decrypt). Returns null when not connected.

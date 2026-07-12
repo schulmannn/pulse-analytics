@@ -13,7 +13,7 @@
 const USER_ROLES = ['user', 'superuser'];
 const USER_STATUSES = ['unverified', 'pending', 'active', 'disabled'];
 
-function createUsersRepo({ pool, enabled }) {
+function createUsersRepo({ pool, enabled, transaction }) {
   async function countUsers() {
     if (!enabled) return 0;
     const { rows } = await pool.query('SELECT count(*)::int AS n FROM users');
@@ -113,27 +113,20 @@ function createUsersRepo({ pool, enabled }) {
     // minute per uid+kind → blocks email-bombing a victim / burning the send quota.
     // Кулдаун-чек, инвалидация и INSERT — в одной транзакции под advisory-локом (uid+kind):
     // раньше это были три автокоммита, и два конкурентных запроса оба проходили чек —
-    // две живые ссылки в двух письмах, кулдаун в обход.
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
+    // две живые ссылки в двух письмах, кулдаун в обход. transaction() коммитит и на кулдаун-
+    // возврате null (записей нет — коммит безвреден), advisory_xact_lock отпускается в конце tx.
+    return transaction(async (client) => {
       await client.query(
         "SELECT pg_advisory_xact_lock(hashtext('email_token:' || $1::text || ':' || $2))", [uid, kind]);
       const recent = await client.query(
         "SELECT 1 FROM email_tokens WHERE uid=$1 AND kind=$2 AND created_at > now() - interval '60 seconds' LIMIT 1", [uid, kind]);
-      if (recent.rows.length) { await client.query('ROLLBACK'); return null; }
+      if (recent.rows.length) return null;
       await client.query('UPDATE email_tokens SET used_at=now() WHERE uid=$1 AND kind=$2 AND used_at IS NULL', [uid, kind]);
       const { rows } = await client.query(
         'INSERT INTO email_tokens (uid, kind, token_hash, expires_at) VALUES ($1,$2,$3,$4) RETURNING id',
         [uid, kind, tokenHash, expiresAt]);
-      await client.query('COMMIT');
       return rows[0] ? rows[0].id : null;
-    } catch (e) {
-      try { await client.query('ROLLBACK'); } catch (_) {}
-      throw e;
-    } finally {
-      client.release();
-    }
+    });
   }
 
   // Atomically consume a token: single-use + expiry enforced in one UPDATE … RETURNING,
