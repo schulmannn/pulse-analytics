@@ -1,0 +1,122 @@
+'use strict';
+
+// Integration-тесты analyticsRepo (P2 db-split PR 6) — на РЕАЛЬНОМ Postgres. Read-модели графиков.
+// Ключевое: canonical source-union getChannelHistory/getLatestVelocity ДОЛЖНЫ оставаться в границе
+// воркспейса читателя (sameTenantSource, ADR-001 F1) — тест это подтверждает после переноса. Seed
+// через db-write-пути (upsertChannelDaily/saveSnapshot/saveVelocity/upsertIgDaily), чтение — через
+// analytics-репо. Без TEST_DATABASE_URL всё SKIP.
+//   TEST_DATABASE_URL=postgresql://postgres@localhost:5432/pulse PGSSL=disable npm test
+
+const test = require('node:test');
+const assert = require('node:assert');
+
+const TEST_DB = process.env.TEST_DATABASE_URL;
+const skip = TEST_DB ? false : 'TEST_DATABASE_URL not set (integration suite runs on the local stand)';
+
+let db = null;
+let pool = null;
+const nonce = `anl${Date.now().toString(36)}${process.pid}`;
+let seq = 0;
+const mail = (tag) => `${tag}.${seq++}.${nonce}@it.local`;
+let extSeq = 0;
+const usedExt = [];
+const extId = () => { const v = `991${(process.pid % 100000)}${extSeq++}`; usedExt.push(v); return v; };
+const today = new Date().toISOString().slice(0, 10);
+
+const mkUser = (tag) => db.createUser({ email: mail(tag), pass_hash: 'x', role: 'user', status: 'active' });
+
+// Канал владельца + застолблённый source_id (общий external identity для union-сценария).
+async function chWithSource(tag, ext) {
+  const u = await mkUser(tag);
+  const ch = await db.createChannel({ owner_uid: u.id, username: `c.${tag}.${nonce}` });
+  const srcId = await db.ensureExternalSource('tg', ext, { username: `src.${nonce}` });
+  await pool.query(`UPDATE channels SET source_id=$1 WHERE id=$2`, [srcId, ch.id]);
+  return { u, ch, srcId };
+}
+
+test.before(() => {
+  if (!TEST_DB) return;
+  process.env.DATABASE_URL = TEST_DB;
+  process.env.PGSSL = process.env.PGSSL || 'disable';
+  db = require('../server/db.js');
+  const pg = require('pg');
+  pool = new pg.Pool({ connectionString: TEST_DB, max: 2, ssl: false });
+});
+
+test.after(async () => {
+  if (!pool) return;
+  await pool.query(`DELETE FROM mentions WHERE owner_channel_id IN (SELECT id FROM channels WHERE owner_uid IN (SELECT id FROM users WHERE email LIKE $1))`, [`%${nonce}%`]);
+  await pool.query(`DELETE FROM users WHERE email LIKE $1`, [`%${nonce}%`]);
+  await pool.query(`DELETE FROM external_sources WHERE username LIKE $1 OR external_id = ANY($2)`, [`%${nonce}%`, usedExt]);
+  await pool.end();
+});
+
+test('getChannelHistory: канал видит свои дневные строки (day/subscribers/views)', { skip }, async () => {
+  const { ch } = await chWithSource('h', extId());
+  await db.upsertChannelDaily(ch.id, [{ day: today, subscribers: 100, joins: 5, leaves: 1, views: 200, forwards: 3, reactions: 7 }]);
+  const hist = await db.getChannelHistory(ch.id, 30);
+  const row = hist.find((r) => r.day === today);
+  assert.ok(row, 'сегодняшняя строка вернулась');
+  assert.strictEqual(row.subscribers, 100);
+  assert.strictEqual(row.views, 200);
+});
+
+test('canonical union: со-фоллоу того же source В ТОМ ЖЕ воркспейсе видит строки соседа', { skip }, async () => {
+  const ext = extId();
+  const { u, ch: chA1 } = await chWithSource('u1', ext);
+  // второй канал ТОГО ЖЕ владельца (тот же личный воркспейс), тот же source
+  const chA2 = await db.createChannel({ owner_uid: u.id, username: `u1b.${nonce}` });
+  await pool.query(`UPDATE channels SET source_id=(SELECT source_id FROM channels WHERE id=$1) WHERE id=$2`, [chA1.id, chA2.id]);
+  await db.upsertChannelDaily(chA1.id, [{ day: today, subscribers: 500, joins: 0, leaves: 0, views: 0, forwards: 0, reactions: 0 }]);
+  const hist = await db.getChannelHistory(chA2.id, 30);
+  assert.ok(hist.some((r) => r.day === today && r.subscribers === 500), 'source-union отдал строку соседа в том же воркспейсе');
+});
+
+test('tenant isolation: тот же source в ДРУГОМ воркспейсе НЕ видит чужие строки (sameTenantSource)', { skip }, async () => {
+  const ext = extId();
+  const { ch: chA } = await chWithSource('iso-a', ext);            // владелец A, воркспейс A
+  const { ch: chB } = await chWithSource('iso-b', ext);            // владелец B, воркспейс B, ТОТ ЖЕ source
+  await db.upsertChannelDaily(chA.id, [{ day: today, subscribers: 777, joins: 0, leaves: 0, views: 0, forwards: 0, reactions: 0 }]);
+  const histB = await db.getChannelHistory(chB.id, 30);
+  assert.ok(!histB.some((r) => r.subscribers === 777), 'чужой воркспейс НЕ получает строки другого тенанта через source-union');
+});
+
+test('getSnapshot: roundtrip после saveSnapshot', { skip }, async () => {
+  const { ch } = await chWithSource('snap', extId());
+  await db.saveSnapshot(ch.id, { hello: 'world', n: 42 });
+  const snap = await db.getSnapshot(ch.id);
+  assert.deepStrictEqual(snap.data, { hello: 'world', n: 42 });
+  assert.ok(snap.updated_at, 'updated_at проставлен');
+});
+
+test('getLatestVelocity: roundtrip после saveVelocity', { skip }, async () => {
+  const { ch } = await chWithSource('vel', extId());
+  await db.saveVelocity(ch.id, { p50: 1.5, p90: 3.2 });
+  const v = await db.getLatestVelocity(ch.id);
+  assert.deepStrictEqual(v.data, { p50: 1.5, p90: 3.2 });
+});
+
+test('listIgDaily: roundtrip после upsertIgDaily', { skip }, async () => {
+  const { ch } = await chWithSource('ig', extId());
+  await db.upsertIgDaily(ch.id, [{ day: today, followers: 1000, reach: 5000, views: 8000, likes: 300 }]);
+  const rows = await db.listIgDaily(ch.id, 30);
+  const r = rows.find((x) => x.day === today);
+  assert.ok(r, 'ig_daily строка вернулась');
+  assert.strictEqual(Number(r.followers), 1000);
+  assert.strictEqual(Number(r.reach), 5000);
+});
+
+test('getMentionsArchive/History: сводка и панель из архива (скоуп по owner_channel_id)', { skip }, async () => {
+  const { ch } = await chWithSource('men', extId());
+  await pool.query(
+    `INSERT INTO mentions (owner_channel_id, channel_id, msg_id, title, username, link, snippet, views, post_date)
+     VALUES ($1, 555, 1, 'Chan', 'chan', 'http://x', 'hi', 250, now()),
+            ($1, 555, 2, 'Chan', 'chan', 'http://y', 'yo', 100, now())`, [ch.id]);
+  const arch = await db.getMentionsArchive(ch.id, 30);
+  assert.strictEqual(arch.available, true);
+  assert.strictEqual(arch.total, 2, 'две упоминания в архиве');
+  assert.strictEqual(arch.total_views, 350, 'сумма просмотров (number, не строка)');
+  assert.ok(arch.recent.length === 2 && arch.recent[0].views != null);
+  const hist = await db.getMentionsHistory(ch.id);
+  assert.strictEqual(hist.total.total, 2);
+});

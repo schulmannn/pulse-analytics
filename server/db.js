@@ -7,6 +7,7 @@
 const { runMigrations } = require('./migrations');
 const { createJobsRepo } = require('./repos/jobsRepo');
 const { createBugsRepo } = require('./repos/bugsRepo');
+const { createAnalyticsRepo } = require('./repos/analyticsRepo');
 const { createReportsRepo } = require('./repos/reportsRepo');
 const { createUsersRepo } = require('./repos/usersRepo');
 const { createChannelsRepo } = require('./repos/channelsRepo');
@@ -15,7 +16,6 @@ const { createIntegrationsRepo } = require('./repos/integrationsRepo');
 // живут в server/db/*. db.js их импортирует и ре-экспортит — публичный `db.*` API не меняется.
 const { pool, enabled, ping, close } = require('./db/pool');
 const { isDbUnavailable } = require('./db/errors');
-const { sameTenantSource } = require('./db/access');
 const { createTransaction } = require('./db/transaction');
 const { mergeExports } = require('./db/mergeExports');
 
@@ -363,69 +363,7 @@ async function upsertMentions(channelId, list, executor = pool) {
   return clean.length;
 }
 
-async function getChannelHistory(channelId, days = 400) {
-  if (!enabled || !channelId) return [];
-  // Canonical read (ADR-001 phase B): the history of the channel's SOURCE — a same-workspace
-  // co-follow of one @channel sees ONE row-set. Until phase C flips the write conflict-targets, both
-  // links may still write their own rows, so DISTINCT ON (day) keeps the freshest capture. The
-  // source union is bounded to the reader's own workspace (sameTenantSource) so an unverified
-  // source claim can't inherit another tenant's history; links without a source fall back to their
-  // own channel-scoped rows.
-  const { rows } = await pool.query(
-    `SELECT DISTINCT ON (d.day)
-            to_char(d.day,'YYYY-MM-DD') AS day, d.subscribers, d.joins, d.leaves, d.views, d.forwards, d.reactions
-     FROM channel_daily d
-     JOIN channels c ON c.id = $1
-     WHERE ((c.source_id IS NOT NULL AND d.source_id = c.source_id AND ${sameTenantSource('d', 'c')})
-            OR d.channel_id = c.id)
-       AND d.day >= (CURRENT_DATE - $2::int)
-     ORDER BY d.day ASC, d.captured_at DESC NULLS LAST`, [channelId, days]);
-  return rows;
-}
-
-async function getMentionsHistory(channelId) {
-  if (!enabled || !channelId) return null;
-  const total = await pool.query(
-    'SELECT count(*)::int AS total, count(distinct channel_id)::int AS channels, COALESCE(sum(views),0)::bigint AS views FROM mentions WHERE owner_channel_id=$1', [channelId]);
-  const byMonth = await pool.query(
-    `SELECT to_char(date_trunc('month', COALESCE(post_date, first_seen)),'YYYY-MM') AS month, count(*)::int AS c
-     FROM mentions WHERE owner_channel_id=$1 GROUP BY 1 ORDER BY 1`, [channelId]);
-  return { total: total.rows[0], by_month: byMonth.rows };
-}
-
-// Full mentions panel from the archive — same shape renderMentions() expects from
-// the live search, so the dashboard can show stored mentions without spending quota.
-async function getMentionsArchive(channelId, limit = 30) {
-  if (!enabled || !channelId) return null;
-  const totals = await pool.query(
-    `SELECT count(*)::int AS total, count(distinct channel_id)::int AS unique_channels,
-            COALESCE(sum(views),0)::bigint AS total_views FROM mentions WHERE owner_channel_id=$1`, [channelId]);
-  const byDay = await pool.query(
-    `SELECT to_char(COALESCE(post_date, first_seen),'DD.MM') AS d, count(*)::int AS c
-       FROM mentions WHERE owner_channel_id=$1 AND COALESCE(post_date, first_seen) >= (CURRENT_DATE - 60) GROUP BY 1`, [channelId]);
-  const channels = await pool.query(
-    `SELECT max(title) AS title, max(username) AS username, count(*)::int AS count,
-            COALESCE(sum(views),0)::bigint AS views
-       FROM mentions WHERE owner_channel_id=$1 GROUP BY channel_id ORDER BY count(*) DESC, sum(views) DESC NULLS LAST LIMIT 10`, [channelId]);
-  const recent = await pool.query(
-    `SELECT channel_id, msg_id, title, username, link, snippet, views,
-            to_char(COALESCE(post_date, first_seen),'YYYY-MM-DD"T"HH24:MI:SS') AS date
-       FROM mentions WHERE owner_channel_id=$1 ORDER BY COALESCE(post_date, first_seen) DESC LIMIT $2`, [channelId, limit]);
-  const t = totals.rows[0] || {};
-  const by_day = {};
-  for (const r of byDay.rows) by_day[r.d] = r.c;
-  return {
-    available: true,
-    total: t.total || 0,
-    unique_channels: t.unique_channels || 0,
-    total_views: Number(t.total_views || 0),
-    by_day,
-    // pg отдаёт bigint строкой — приводим к number (сумма просмотров << 2^53, точность не страдает;
-    // строка ломала бы zod-схему фронта и арифметику сортировок). ::int здесь переполнялся.
-    top_channels: channels.rows.map((r) => ({ ...r, views: Number(r.views || 0) })),
-    recent: recent.rows,
-  };
-}
+// Analytics reads (getChannelHistory / mentions history+archive) → server/repos/analyticsRepo.
 
 // Users / accounts / email-tokens / prefs -> server/repos/usersRepo (createUsersRepo, spread in exports).
 
@@ -447,13 +385,7 @@ async function saveSnapshot(channelId, data, executor = pool) {
   return true;
 }
 
-async function getSnapshot(channelId) {
-  if (!enabled || !channelId) return null;
-  const { rows } = await pool.query(
-    `SELECT data, to_char(updated_at,'YYYY-MM-DD"T"HH24:MI:SS') AS updated_at
-       FROM channel_snapshots WHERE channel_id=$1`, [channelId]);
-  return rows[0] || null;   // { data, updated_at } | null
-}
+// getSnapshot (read) → server/repos/analyticsRepo (saveSnapshot-write остаётся здесь → collectorRepo).
 
 /* Atomically accept a collector delivery. The receipt, current snapshot and all
    normalized archives commit together, so the dashboard never observes a new
@@ -645,20 +577,7 @@ async function saveVelocity(channelId, data, executor = pool) {
   return true;
 }
 
-async function getLatestVelocity(channelId) {
-  if (!enabled || !channelId) return null;
-  // Canonical read (ADR-001): freshest snapshot of the channel's source (bounded to the reader's
-  // own workspace via sameTenantSource so an unverified source claim can't read a foreign tenant's
-  // velocity), own rows as fallback.
-  const { rows } = await pool.query(
-    `SELECT v.data, to_char(v.computed_at,'YYYY-MM-DD"T"HH24:MI:SS') AS computed_at
-       FROM velocity_daily v
-       JOIN channels c ON c.id = $1
-      WHERE ((c.source_id IS NOT NULL AND v.source_id = c.source_id AND ${sameTenantSource('v', 'c')})
-             OR v.channel_id = c.id)
-      ORDER BY v.day DESC, v.computed_at DESC NULLS LAST LIMIT 1`, [channelId]);
-  return rows[0] || null;   // { data, computed_at } | null
-}
+// getLatestVelocity (read) → server/repos/analyticsRepo (saveVelocity-write остаётся → collectorRepo).
 
 // Bugs / crash-telemetry / attachments (createBug/listBugs/…/getAttachment) → server/repos/bugsRepo.
 
@@ -803,25 +722,7 @@ async function rollupChannelMonthly(months = 3) {
   return rowCount;
 }
 
-// ── Read helpers (история для будущих графиков) ──
-async function listIgDaily(channelId, days = 400) {
-  if (!enabled || !channelId) return [];
-  const { rows } = await pool.query(
-    `SELECT to_char(day,'YYYY-MM-DD') AS day, followers, followers_total, reach, views, profile_views,
-            accounts_engaged, total_interactions, likes, comments, saves, shares, follows, unfollows
-       FROM ig_daily WHERE channel_id=$1 AND day >= (CURRENT_DATE - $2::int) ORDER BY day ASC`,
-    [channelId, days]);
-  return rows;
-}
-
-async function listIgMediaDaily(channelId, days = 400) {
-  if (!enabled || !channelId) return [];
-  const { rows } = await pool.query(
-    `SELECT media_id, to_char(day,'YYYY-MM-DD') AS day, reach, likes, comments, saved, shares, views
-       FROM ig_media_daily WHERE channel_id=$1 AND day >= (CURRENT_DATE - $2::int)
-       ORDER BY media_id ASC, day ASC`, [channelId, days]);
-  return rows;
-}
+// IG daily/media history reads (listIgDaily/listIgMediaDaily) → server/repos/analyticsRepo.
 
 // Timeline annotations (listAnnotations/createAnnotation/deleteAnnotation) → server/repos/channelsRepo.
 
@@ -953,6 +854,7 @@ async function exportUserData(uid) {
 const transaction = createTransaction(pool);
 const jobsRepo = createJobsRepo({ pool, enabled });
 const bugsRepo = createBugsRepo({ pool, enabled });
+const analyticsRepo = createAnalyticsRepo({ pool, enabled });
 const reportsRepo = createReportsRepo({ pool, enabled });
 const usersRepo = createUsersRepo({ pool, enabled, transaction });
 const channelsRepo = createChannelsRepo({ pool, enabled, transaction });
@@ -964,13 +866,11 @@ const integrationsRepo = createIntegrationsRepo({ pool, enabled, transaction, en
 const localExports = {
   enabled, init, migrate, ping, close, graphsToDailyRows, isDbUnavailable,
   adoptOwnerChannel,
-  saveSnapshot, getSnapshot, ingestCollectorPayload, persistCentralDaily, persistTgBundleTx, recordAuditEvent,
-  saveVelocity, getLatestVelocity,
+  saveSnapshot, ingestCollectorPayload, persistCentralDaily, persistTgBundleTx, recordAuditEvent,
+  saveVelocity,
   upsertChannelDaily, upsertPosts, upsertMentions,
-  getChannelHistory, getMentionsHistory, getMentionsArchive,
   upsertIgDaily, upsertIgMediaDaily, saveRawSnapshot, pruneRawSnapshots, pruneIgMediaDaily,
   rollupChannelMonthly,
-  listIgDaily, listIgMediaDaily,
   deleteUserAccount, exportUserData,
 };
 
@@ -983,6 +883,7 @@ module.exports = mergeExports({
   channels: channelsRepo,
   integrations: integrationsRepo,
   bugs: bugsRepo,
+  analytics: analyticsRepo,
   reports: reportsRepo,   // REPORT_SCHEDULES, listReports, getReport, createReport, updateReport, deleteReport, listDueReports, markReportSent, listPostsWindow
   jobs: jobsRepo,   // claimJob, completeJob, failJob, getJob, runJobOnce
 });
