@@ -1,25 +1,28 @@
 'use strict';
 
-/* ── Analytics reads repo (P2 db-split, PR 6) ────────────────────────────────────────────────────
+/* ── Analytics reads repo (P2 db-split, PR 6 + finding 5 контракт доступа) ────────────────────────
    Read-модели для графиков/панелей: история дневных метрик канала (canonical source-union),
-   упоминания (сводка + архив-панель), снапшот, свежая velocity, IG daily/media история. Извлечено
-   ДОСЛОВНО из db.js — SQL не менялся. Публичный `db.*` API не меняется: db.js спредит методы репо.
+   упоминания (сводка + архив-панель), снапшот, свежая velocity, IG daily/media история. SQL не
+   менялся с момента выноса (PR 6) — здесь добавлен только явный контракт доступа (finding 5).
 
-   Зависит от pool + enabled (инъекция) + sameTenantSource из ../db/access (leaf): canonical-ридеры
-   (getChannelHistory/getLatestVelocity) union'ят строки по source_id, ограничивая объединение
-   воркспейсом читателя (ADR-001 F1). Без импортов db.js/других repo.
+   КОНТРАКТ ДОСТУПА (finding 5): у каждого канал-скоупного ридера ДВА варианта, чтобы намерение
+   вызывающего было в самом имени, а не «route должен помнить»:
+     • `<name>ForActor(channelId, actor, …)` — сначала проверяет доступ актора к каналу
+       (getAccessibleChannel — инъекция channelsRepo.getChannel, вернёт null без доступа), иначе
+       отдаёт ПУСТО ([]/null). Это путь для роут-хендлеров: даже забыв про resolve-middleware,
+       эндпоинт не утечёт чужие данные.
+     • `<name>Internal(channelId, …)` — БЕЗ проверки, только для cron/service-кода, который сам
+       установил доступ (напр. processReportSchedules сверил членство через listChannels).
+   Голого un-gated ридера в публичном API больше НЕТ — выбор Internal/ForActor всегда осознанный.
 
-   ⚠️ КОНТРАКТ ДОСТУПА (finding 5, СЛЕДУЮЩИЙ PR 6.5): сейчас ридеры принимают голый channelId и
-   доверяют route-авторизации (routes зовут их с уже resolved `req.channel.id` — makeResolveChannel
-   сделал ownership-check и вернул 403 иначе). Репо это НЕ форсит: новый эндпоинт, забывший
-   resolveChannel, прочитал бы чужое. План 6.5 — развести `getXForActor(channelId, actor)` (встраивает
-   access-предикат в query) и `getXInternal(channelId)` (только cron/service), отдельным diff'ом с
-   route-флипами и access-denial тестами (дисциплина «не менять SQL и структуру одновременно»). */
+   Зависит от pool + enabled + sameTenantSource из ../db/access (canonical union ограничен
+   воркспейсом читателя, ADR-001 F1) + getAccessibleChannel (инъекция; repos не импортят друг друга). */
 
 const { sameTenantSource } = require('../db/access');
 
-function createAnalyticsRepo({ pool, enabled }) {
-  async function getChannelHistory(channelId, days = 400) {
+function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
+  // ── Internal reads (БЕЗ access-check — ТОЛЬКО cron/service) ─────────────────────────────────────
+  async function getChannelHistoryInternal(channelId, days = 400) {
     if (!enabled || !channelId) return [];
     // Canonical read (ADR-001 phase B): the history of the channel's SOURCE — a same-workspace
     // co-follow of one @channel sees ONE row-set. Until phase C flips the write conflict-targets, both
@@ -39,7 +42,7 @@ function createAnalyticsRepo({ pool, enabled }) {
     return rows;
   }
 
-  async function getMentionsHistory(channelId) {
+  async function getMentionsHistoryInternal(channelId) {
     if (!enabled || !channelId) return null;
     const total = await pool.query(
       'SELECT count(*)::int AS total, count(distinct channel_id)::int AS channels, COALESCE(sum(views),0)::bigint AS views FROM mentions WHERE owner_channel_id=$1', [channelId]);
@@ -51,7 +54,7 @@ function createAnalyticsRepo({ pool, enabled }) {
 
   // Full mentions panel from the archive — same shape renderMentions() expects from
   // the live search, so the dashboard can show stored mentions without spending quota.
-  async function getMentionsArchive(channelId, limit = 30) {
+  async function getMentionsArchiveInternal(channelId, limit = 30) {
     if (!enabled || !channelId) return null;
     const totals = await pool.query(
       `SELECT count(*)::int AS total, count(distinct channel_id)::int AS unique_channels,
@@ -83,7 +86,7 @@ function createAnalyticsRepo({ pool, enabled }) {
     };
   }
 
-  async function getSnapshot(channelId) {
+  async function getSnapshotInternal(channelId) {
     if (!enabled || !channelId) return null;
     const { rows } = await pool.query(
       `SELECT data, to_char(updated_at,'YYYY-MM-DD"T"HH24:MI:SS') AS updated_at
@@ -91,7 +94,7 @@ function createAnalyticsRepo({ pool, enabled }) {
     return rows[0] || null;   // { data, updated_at } | null
   }
 
-  async function getLatestVelocity(channelId) {
+  async function getLatestVelocityInternal(channelId) {
     if (!enabled || !channelId) return null;
     // Canonical read (ADR-001): freshest snapshot of the channel's source (bounded to the reader's
     // own workspace via sameTenantSource so an unverified source claim can't read a foreign tenant's
@@ -107,7 +110,7 @@ function createAnalyticsRepo({ pool, enabled }) {
   }
 
   // ── Read helpers (история для будущих графиков) ──
-  async function listIgDaily(channelId, days = 400) {
+  async function listIgDailyInternal(channelId, days = 400) {
     if (!enabled || !channelId) return [];
     const { rows } = await pool.query(
       `SELECT to_char(day,'YYYY-MM-DD') AS day, followers, followers_total, reach, views, profile_views,
@@ -117,7 +120,7 @@ function createAnalyticsRepo({ pool, enabled }) {
     return rows;
   }
 
-  async function listIgMediaDaily(channelId, days = 400) {
+  async function listIgMediaDailyInternal(channelId, days = 400) {
     if (!enabled || !channelId) return [];
     const { rows } = await pool.query(
       `SELECT media_id, to_char(day,'YYYY-MM-DD') AS day, reach, likes, comments, saved, shares, views
@@ -126,10 +129,37 @@ function createAnalyticsRepo({ pool, enabled }) {
     return rows;
   }
 
+  // ── Actor-gated reads: сначала проверяем доступ, иначе пусто (ПУТЬ ДЛЯ РОУТОВ) ──────────────────
+  // null-доступ → пустой результат того же типа, что у Internal (список → [], одиночка → null).
+  const allowed = (channelId, actor) => getAccessibleChannel(channelId, actor);
+
+  async function getChannelHistoryForActor(channelId, actor, days = 400) {
+    return (await allowed(channelId, actor)) ? getChannelHistoryInternal(channelId, days) : [];
+  }
+  async function getMentionsHistoryForActor(channelId, actor) {
+    return (await allowed(channelId, actor)) ? getMentionsHistoryInternal(channelId) : null;
+  }
+  async function getMentionsArchiveForActor(channelId, actor, limit = 30) {
+    return (await allowed(channelId, actor)) ? getMentionsArchiveInternal(channelId, limit) : null;
+  }
+  async function getSnapshotForActor(channelId, actor) {
+    return (await allowed(channelId, actor)) ? getSnapshotInternal(channelId) : null;
+  }
+  async function getLatestVelocityForActor(channelId, actor) {
+    return (await allowed(channelId, actor)) ? getLatestVelocityInternal(channelId) : null;
+  }
+  async function listIgDailyForActor(channelId, actor, days = 400) {
+    return (await allowed(channelId, actor)) ? listIgDailyInternal(channelId, days) : [];
+  }
+  async function listIgMediaDailyForActor(channelId, actor, days = 400) {
+    return (await allowed(channelId, actor)) ? listIgMediaDailyInternal(channelId, days) : [];
+  }
+
   return {
-    getChannelHistory, getMentionsHistory, getMentionsArchive,
-    getSnapshot, getLatestVelocity,
-    listIgDaily, listIgMediaDaily,
+    getChannelHistoryInternal, getMentionsHistoryInternal, getMentionsArchiveInternal,
+    getSnapshotInternal, getLatestVelocityInternal, listIgDailyInternal, listIgMediaDailyInternal,
+    getChannelHistoryForActor, getMentionsHistoryForActor, getMentionsArchiveForActor,
+    getSnapshotForActor, getLatestVelocityForActor, listIgDailyForActor, listIgMediaDailyForActor,
   };
 }
 

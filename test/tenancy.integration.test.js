@@ -158,14 +158,14 @@ test('same-workspace co-follow shares ONE canonical row-set; cross-workspace doe
 
   // …and Alice's other-workspace neighbour must NOT inherit it through the shared source (F1): the
   // canonical source union is bounded to the reader's own workspace.
-  assert.deepStrictEqual(await db.getChannelHistory(chA, 4000), [],
+  assert.deepStrictEqual(await db.getChannelHistoryInternal(chA, 4000), [],
     'cross-workspace source claim reads no foreign history');
 
   // Within Alice's OWN workspace the canonical union still works: chA2 ingests, chA reads it.
   await db.upsertChannelDaily(chA2, [
     { day: '2026-07-05', subscribers: 500, joins: 5, leaves: 0, views: 50, forwards: 5, reactions: 5 },
   ]);
-  const viaAliceOwn = await db.getChannelHistory(chA, 4000);
+  const viaAliceOwn = await db.getChannelHistoryInternal(chA, 4000);
   assert.ok(viaAliceOwn.some((r) => r.day === '2026-07-05' && r.subscribers === 500),
     'same-workspace co-follow still shares the source row-set');
 
@@ -174,10 +174,10 @@ test('same-workspace co-follow shares ONE canonical row-set; cross-workspace doe
   await db.upsertChannelDaily(chA, [
     { day: '2026-07-05', subscribers: 555, joins: null, leaves: null, views: null, forwards: null, reactions: null },
   ]);
-  const deduped = await db.getChannelHistory(chA2, 4000);
+  const deduped = await db.getChannelHistoryInternal(chA2, 4000);
   assert.strictEqual(deduped.filter((r) => r.day === '2026-07-05').length, 1, 'DISTINCT ON dedupes the shared day within the workspace');
   assert.strictEqual(deduped.find((r) => r.day === '2026-07-05').subscribers, 555, 'freshest capture wins');
-  const bobRows = await db.getChannelHistory(chB, 4000);
+  const bobRows = await db.getChannelHistoryInternal(chB, 4000);
   assert.ok(!bobRows.some((r) => r.day === '2026-07-05'), 'Alice-workspace-only rows never bleed to Bob');
 });
 
@@ -245,9 +245,9 @@ test('creation paths canonicalise: createTgChannel gets workspace + shared sourc
   // The identity dedups to one source (correct), but a DIFFERENT owner's link must NOT read that
   // identity's history through the shared source (F1) — canonical reads are workspace-bounded.
   await db.upsertChannelDaily(chA.id, [{ day: '2026-07-03', subscribers: 777, joins: 7, leaves: 0, views: 70, forwards: 7, reactions: 7 }]);
-  const viaB = await db.getChannelHistory(chB.id, 4000);
+  const viaB = await db.getChannelHistoryInternal(chB.id, 4000);
   assert.ok(!viaB.some((r) => r.day === '2026-07-03'), 'cross-owner source claim inherits no history');
-  const viaA = await db.getChannelHistory(chA.id, 4000);
+  const viaA = await db.getChannelHistoryInternal(chA.id, 4000);
   assert.ok(viaA.some((r) => r.day === '2026-07-03' && r.subscribers === 777), 'the ingesting owner reads its own rows');
 
   await pool.query(`DELETE FROM external_sources WHERE id=$1`, [a.source_id]).catch(() => {});
@@ -270,9 +270,9 @@ test('F1: claiming a foreign external source grants NO cross-tenant history/velo
   // collector ingest does): a fresh channel in the attacker's OWN workspace bound to source S.
   const chAttacker = await mkChannel(attacker, wsA, src, `f1_attacker_${nonce}`);
 
-  assert.deepStrictEqual(await db.getChannelHistory(chAttacker, 4000), [],
+  assert.deepStrictEqual(await db.getChannelHistoryInternal(chAttacker, 4000), [],
     'no foreign channel_daily rows leak through the shared source');
-  assert.strictEqual(await db.getLatestVelocity(chAttacker), null,
+  assert.strictEqual(await db.getLatestVelocityInternal(chAttacker), null,
     'no foreign velocity leaks through the shared source');
 
   const list = await db.listChannels({ uid: attacker });
@@ -281,9 +281,9 @@ test('F1: claiming a foreign external source grants NO cross-tenant history/velo
   assert.strictEqual(claimed.memberCount, null, 'no foreign subscriber count leaks into the channel switcher');
 
   // The fix must not break the legit owner: the victim still reads their own data.
-  const victimHistory = await db.getChannelHistory(chVictim, 4000);
+  const victimHistory = await db.getChannelHistoryInternal(chVictim, 4000);
   assert.ok(victimHistory.some((r) => r.day === '2026-07-04' && r.subscribers === 9001), 'victim reads own history');
-  assert.ok(await db.getLatestVelocity(chVictim), 'victim reads own velocity');
+  assert.ok(await db.getLatestVelocityInternal(chVictim), 'victim reads own velocity');
 });
 
 test('setChannelTgId INSIDE a transaction does not self-deadlock (verify-round regression)', { skip }, async () => {

@@ -367,7 +367,7 @@ function registerTgRoutes({
       if (cached) return res.json(cached);
 
       if (db.enabled && req.channel.id) {
-        const snap = await db.getLatestVelocity(req.channel.id).catch(() => null);
+        const snap = await db.getLatestVelocityForActor(req.channel.id, req.user).catch(() => null);
         if (snap && snap.data) {
           const out = { ...snap.data, source: 'db', computed_at: snap.computed_at };
           cacheSet(cacheKey, out);
@@ -478,7 +478,7 @@ function registerTgRoutes({
 
   app.get('/api/tg/full', requireAuth, resolveChannel, asyncHandler(async (req, res, next) => {
     if (req.channel && req.channel.source !== 'central') {   // collector channel → from snapshot
-      const snap = req.channel.id ? await db.getSnapshot(req.channel.id).catch(() => null) : null;
+      const snap = req.channel.id ? await db.getSnapshotForActor(req.channel.id, req.user).catch(() => null) : null;
       const d = (snap && snap.data) || {};
       return res.json({ channel: d.channel || {}, views_summary: d.views_summary || null, posts: d.posts || [], mtproto_available: !!d.channel, source: 'collector' });
     }

@@ -26,14 +26,17 @@ const EXPECTED_FUNCTIONS = [
   'ensurePersonalWorkspace', 'ensureExternalSource', 'ensureChannelCanonical',
   'listAnnotations', 'createAnnotation', 'deleteAnnotation',
   // collector writes
-  'saveSnapshot', 'getSnapshot', 'ingestCollectorPayload', 'persistCentralDaily', 'persistTgBundleTx',
-  'getCollectorStatus', 'recordAuditEvent', 'saveVelocity', 'getLatestVelocity',
+  'saveSnapshot', 'ingestCollectorPayload', 'persistCentralDaily', 'persistTgBundleTx',
+  'getCollectorStatus', 'recordAuditEvent', 'saveVelocity',
   'upsertChannelDaily', 'upsertPosts', 'upsertMentions', 'upsertIgTags', 'getIgTags',
   'saveRawSnapshot', 'pruneRawSnapshots', 'pruneIgMediaDaily', 'rollupChannelMonthly',
   'upsertIgDaily', 'upsertIgMediaDaily',
-  // analytics reads (getLatestVelocity уже указан в collector-writes выше — не дублировать)
-  'getChannelHistory', 'getMentionsHistory', 'getMentionsArchive',
-  'listIgDaily', 'listIgMediaDaily',
+  // analytics reads (finding 5: контракт доступа — Internal для cron/service, ForActor для роутов;
+  // голого un-gated db.getChannelHistory/getSnapshot/… в публичном API больше НЕТ)
+  'getChannelHistoryInternal', 'getMentionsHistoryInternal', 'getMentionsArchiveInternal',
+  'getSnapshotInternal', 'getLatestVelocityInternal', 'listIgDailyInternal', 'listIgMediaDailyInternal',
+  'getChannelHistoryForActor', 'getMentionsHistoryForActor', 'getMentionsArchiveForActor',
+  'getSnapshotForActor', 'getLatestVelocityForActor', 'listIgDailyForActor', 'listIgMediaDailyForActor',
   // bugs / crashes
   'createBug', 'createCrash', 'upsertCrashSignature', 'setCrashNotionPage', 'touchCrashNotified',
   'listBugs', 'updateBug', 'deleteBug', 'bugExists', 'getBug', 'addAttachmentIfRoom', 'getAttachment',

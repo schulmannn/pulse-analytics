@@ -854,12 +854,14 @@ async function exportUserData(uid) {
 const transaction = createTransaction(pool);
 const jobsRepo = createJobsRepo({ pool, enabled });
 const bugsRepo = createBugsRepo({ pool, enabled });
-const analyticsRepo = createAnalyticsRepo({ pool, enabled });
 const reportsRepo = createReportsRepo({ pool, enabled });
 const usersRepo = createUsersRepo({ pool, enabled, transaction });
 const channelsRepo = createChannelsRepo({ pool, enabled, transaction });
 // ensureExternalSource / transaction — инъекция (repos не импортят друг друга; связывание только тут).
 const integrationsRepo = createIntegrationsRepo({ pool, enabled, transaction, ensureExternalSource: channelsRepo.ensureExternalSource });
+// getAccessibleChannel — инъекция (finding 5: ForActor-ридеры гейтят доступ через канонический
+// ownership-check channelsRepo.getChannel; repos не импортят друг друга). ПОСЛЕ channelsRepo (TDZ).
+const analyticsRepo = createAnalyticsRepo({ pool, enabled, getAccessibleChannel: channelsRepo.getChannel });
 
 // db.js-локальные экспорты (домены, ещё не вынесенные в repos/*): core + collector-writes +
 // analytics-reads + bugs/crashes + gdpr. По мере распила эти наборы переезжают в свои repo.
