@@ -6,10 +6,10 @@
    ДОСЛОВНО из db.js — SQL не менялся. Публичный `db.*` API не меняется: db.js спредит методы
    этого репо в module.exports.
 
-   Зависит от общего пула + флага enabled (инъекция) + tenancy-предикатов из ../db/access
-   (workspace-изоляцию делят и analytics-ридеры → предикат живёт в общем db-слое, не тут).
-   Внутренних импортов db.js/других repo НЕТ; ensureExternalSource/ensureChannelCanonical/
-   setChannelTgId возвращаются наружу, т.к. их зовёт boot/ingest/ig-код, оставшийся в db.js. */
+   Зависит от общего пула + флага enabled + tenancy-предикатов из ../db/access (workspace-изоляцию
+   делят и analytics-ридеры → предикат живёт в общем db-слое) + ensureExternalSource (ИНЪЕКЦИЯ из
+   sourcesRepo — external identity отдельный домен, finding 8). Внутренних импортов db.js/других repo
+   НЕТ; ensureChannelCanonical/setChannelTgId возвращаются наружу — их зовёт boot/ingest-код в db.js. */
 
 const { sameTenantSource, CHANNEL_ACCESS_PREDICATE, CHANNEL_ADMIN_ACCESS_PREDICATE } = require('../db/access');
 
@@ -26,7 +26,7 @@ const MEMBER_COUNT_COL =
         AND cd.subscribers IS NOT NULL
       ORDER BY cd.day DESC, cd.captured_at DESC NULLS LAST LIMIT 1) AS "memberCount"`;
 
-function createChannelsRepo({ pool, enabled, transaction }) {
+function createChannelsRepo({ pool, enabled, transaction, ensureExternalSource }) {
   // ── Channels (tenants): видимость / доступ ───────────────────────
   async function listChannels(user) {
     if (!enabled) return [];
@@ -130,21 +130,8 @@ function createChannelsRepo({ pool, enabled, transaction }) {
     return wsId;
   }
 
-  // Find-or-create the deduplicated identity of an external property.
-  async function ensureExternalSource(network, externalId, { username, title } = {}, executor = pool) {
-    if (!enabled || !network || externalId == null) return null;
-    // Existing metadata WINS (fill NULLs only): the source row is shared across workspaces, so the
-    // last-ingesting link must not keep overwriting the canonical username/title (metadata bleed).
-    const { rows } = await executor.query(
-      `INSERT INTO external_sources (network, external_id, username, title)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (network, external_id) DO UPDATE SET
-         username = COALESCE(external_sources.username, EXCLUDED.username),
-         title    = COALESCE(external_sources.title, EXCLUDED.title)
-       RETURNING id`,
-      [network, String(externalId), username || null, title || null]);
-    return rows[0] ? rows[0].id : null;
-  }
+  // ensureExternalSource (find-or-create external identity) → server/repos/sourcesRepo (инъекция; см.
+  // factory-параметр). ensureChannelCanonical ниже зовёт инъектированный.
 
   // Stamp a channel row with its workspace (creator's personal one) and, when the platform identity
   // is already known, its canonical source. Fills NULLs only — never re-homes an existing link.
@@ -331,7 +318,7 @@ function createChannelsRepo({ pool, enabled, transaction }) {
 
   return {
     listChannels, getChannel, getChannelById, getOwnerChannelId, setChannelTgId,
-    ensurePersonalWorkspace, ensureExternalSource, ensureChannelCanonical,
+    ensurePersonalWorkspace, ensureChannelCanonical,
     createChannel, createIgChannel, findIgChannelByIgUser, createTgChannel, deleteChannel,
     createApiKey, getChannelByApiKey, listApiKeys, revokeApiKey,
     listAnnotations, createAnnotation, deleteAnnotation,

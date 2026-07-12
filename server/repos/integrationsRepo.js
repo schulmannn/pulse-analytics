@@ -11,8 +11,8 @@
    plaintext и НИКОГДА не должен его логировать.
 
    Зависимости: pool + enabled (инъекция), CHANNEL_ACCESS_PREDICATE из ../db/access (leaf),
-   ensureExternalSource — ИНЪЕКЦИЯ из composition-root (db.js передаёт channelsRepo.ensure-
-   ExternalSource): репозитории не импортят друг друга, связывание — только в фасаде. */
+   ensureExternalSource — ИНЪЕКЦИЯ из composition-root (db.js передаёт sourcesRepo.ensureExternalSource;
+   finding 8 — external identity отдельный домен): репозитории не импортят друг друга, связывание — в фасаде. */
 
 const { CHANNEL_ACCESS_PREDICATE } = require('../db/access');
 

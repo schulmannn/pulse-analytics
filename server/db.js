@@ -12,6 +12,7 @@ const { createAnalyticsRepo } = require('./repos/analyticsRepo');
 const { createReportsRepo } = require('./repos/reportsRepo');
 const { createUsersRepo } = require('./repos/usersRepo');
 const { createChannelsRepo } = require('./repos/channelsRepo');
+const { createSourcesRepo } = require('./repos/sourcesRepo');
 const { createIntegrationsRepo } = require('./repos/integrationsRepo');
 // DB core (P2 db/core): пул / Railway-SSL / enabled / ping / close + классификация недоступности
 // живут в server/db/*. db.js их импортирует и ре-экспортит — публичный `db.*` API не меняется.
@@ -399,9 +400,12 @@ const jobsRepo = createJobsRepo({ pool, enabled });
 const bugsRepo = createBugsRepo({ pool, enabled });
 const reportsRepo = createReportsRepo({ pool, enabled });
 const usersRepo = createUsersRepo({ pool, enabled, transaction });
-const channelsRepo = createChannelsRepo({ pool, enabled, transaction });
+// sourcesRepo — external identity отдельный домен (finding 8); channels/integrations зависят ОТ него,
+// не друг от друга. Инстанцируется ДО channelsRepo (тот инъектит ensureExternalSource).
+const sourcesRepo = createSourcesRepo({ pool, enabled });
+const channelsRepo = createChannelsRepo({ pool, enabled, transaction, ensureExternalSource: sourcesRepo.ensureExternalSource });
 // ensureExternalSource / transaction — инъекция (repos не импортят друг друга; связывание только тут).
-const integrationsRepo = createIntegrationsRepo({ pool, enabled, transaction, ensureExternalSource: channelsRepo.ensureExternalSource });
+const integrationsRepo = createIntegrationsRepo({ pool, enabled, transaction, ensureExternalSource: sourcesRepo.ensureExternalSource });
 // getAccessibleChannel — инъекция (finding 5: ForActor-ридеры гейтят доступ через канонический
 // ownership-check channelsRepo.getChannel; repos не импортят друг друга). ПОСЛЕ channelsRepo (TDZ).
 const analyticsRepo = createAnalyticsRepo({ pool, enabled, getAccessibleChannel: channelsRepo.getChannel });
@@ -424,6 +428,7 @@ module.exports = mergeExports({
   local: localExports,
   users: usersRepo,
   channels: channelsRepo,
+  sources: sourcesRepo,
   integrations: integrationsRepo,
   bugs: bugsRepo,
   analytics: analyticsRepo,
