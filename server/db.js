@@ -4,31 +4,13 @@
 //  всё деградирует мягко — дашборд работает как раньше.
 // ═══════════════════════════════════════════════════════════════
 
-let Pool = null;
-try { ({ Pool } = require('pg')); } catch (_e) { /* pg не установлен — БД выключена */ }
 const { runMigrations } = require('./migrations');
 const { createJobsRepo } = require('./repos/jobsRepo');
 const { createReportsRepo } = require('./repos/reportsRepo');
-
-const DATABASE_URL = process.env.DATABASE_URL || '';
-const enabled = !!(DATABASE_URL && Pool);
-
-let pool = null;
-if (enabled) {
-  // SSL: Railway's PRIVATE url (*.railway.internal) needs NO ssl; external/public
-  // managed Postgres usually does. Override with PGSSL=disable|require if needed.
-  const internal = /\.railway\.internal/i.test(DATABASE_URL);
-  const sslMode = (process.env.PGSSL || '').toLowerCase();
-  let ssl;
-  if (sslMode === 'disable') ssl = false;
-  else if (sslMode === 'require') ssl = { rejectUnauthorized: false };
-  else ssl = internal ? false : { rejectUnauthorized: false };   // smart default
-
-  // Pool ceiling is the first infrastructure knob under load (ops/PERF_BASELINE.md): 4 keeps a
-  // hobby Railway PG comfortable; raise via env (e.g. 8-10) as concurrent users grow.
-  pool = new Pool({ connectionString: DATABASE_URL, ssl, max: Number(process.env.PGPOOL_MAX) || 4 });
-  pool.on('error', (e) => console.error('[db] pool error:', e.message));
-}
+// DB core (P2 db/core): пул / Railway-SSL / enabled / ping / close + классификация недоступности
+// живут в server/db/*. db.js их импортирует и ре-экспортит — публичный `db.*` API не меняется.
+const { pool, enabled, ping, close } = require('./db/pool');
+const { isDbUnavailable } = require('./db/errors');
 
 /* Historical inline schema retained as a comment for one release only.
    Source of truth is server/migrations/*.sql; startup never executes this block.
@@ -187,21 +169,7 @@ const BUG_STATUSES = ['open', 'in_progress', 'done', 'wont_fix'];
 const BUG_SEVERITIES = ['low', 'medium', 'high'];
 const BUG_KINDS = ['bug', 'feature', 'change'];
 
-const DB_UNAVAILABLE_CODES = new Set([
-  '53300', '57P03', '57P01', '57P02',
-  '08000', '08003', '08006', '08001', '08004',
-]);
-const DB_UNAVAILABLE_MESSAGES = [
-  /timeout exceeded when trying to connect/i,
-  /Connection terminated/i,
-];
-
-function isDbUnavailable(err) {
-  if (!err) return false;
-  if (DB_UNAVAILABLE_CODES.has(String(err.code || ''))) return true;
-  const message = typeof err.message === 'string' ? err.message : '';
-  return DB_UNAVAILABLE_MESSAGES.some(re => re.test(message));
-}
+// isDbUnavailable + DB_UNAVAILABLE_* → server/db/errors (импортировано выше).
 
 async function init() {
   if (!enabled) { console.log('[db] disabled (no DATABASE_URL) — history off'); return; }
@@ -215,16 +183,7 @@ async function migrate() {
   return runMigrations(pool);
 }
 
-async function ping() {
-  if (!enabled) return { enabled: false, ok: true };
-  const started = Date.now();
-  await pool.query('SELECT 1');
-  return { enabled: true, ok: true, latency_ms: Date.now() - started };
-}
-
-async function close() {
-  if (pool) await pool.end();
-}
+// ping / close → server/db/pool (импортировано выше).
 
 // ── Channels (tenants) ───────────────────────────────────────────
 const OWNER_CHANNEL = process.env.OWNER_CHANNEL || process.env.TG_CHANNEL || '@bynotem';
