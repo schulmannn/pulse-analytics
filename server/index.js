@@ -933,10 +933,11 @@ async function processReportSchedules(base) {
               ? cfgId
               : (chans[0] && chans[0].id);
             if (chId) {
+              // Internal-ридеры (cron): доступ уже установлен членством chans выше (listChannels).
               const [daily, posts, igDaily] = await Promise.all([
-                db.getChannelHistory(chId, 35),
+                db.getChannelHistoryInternal(chId, 35),
                 db.listPostsWindow(chId, 28),
-                db.listIgDaily(chId, 14),
+                db.listIgDailyInternal(chId, 14),
               ]);
               weekHtml = weekSectionHtml(assembleWeekInput({ daily, posts, igDaily }));
             }

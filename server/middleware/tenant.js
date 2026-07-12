@@ -53,8 +53,9 @@ function requireWorkspaceRole(minRole) {
 function makeServeSnapshot({ db }) {
   return async function serveSnapshot(req, res, pick) {
     if (req.channel && req.channel.source === 'central') return false;
+    // Internal: req.channel уже resolved вызывающим роутом (resolveChannel сделал ownership-check).
     const snapshot = req.channel && req.channel.id
-      ? await db.getSnapshot(req.channel.id).catch(() => null)
+      ? await db.getSnapshotInternal(req.channel.id).catch(() => null)
       : null;
     const value = snapshot && snapshot.data ? pick(snapshot.data, snapshot) : null;
     res.json(value != null ? value : { available: false, source: 'collector', empty: true });

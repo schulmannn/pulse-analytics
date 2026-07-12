@@ -372,7 +372,7 @@ function registerIgRoutes({
     const days = Math.min(1000, parseInt(req.query.days, 10) || 400);
     const channelId = req.ig && req.ig.channelId;
     try {
-      res.json({ enabled: db.enabled, rows: channelId ? await db.listIgDaily(channelId, days) : [] });
+      res.json({ enabled: db.enabled, rows: channelId ? await db.listIgDailyForActor(channelId, req.user, days) : [] });
     } catch (e) {
       res.status(200).json({ enabled: db.enabled, rows: [], error: e.message });
     }
