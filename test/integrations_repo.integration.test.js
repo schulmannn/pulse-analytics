@@ -1,0 +1,144 @@
+'use strict';
+
+// Integration-тесты integrationsRepo (P2 db-split PR 4) — на РЕАЛЬНОМ Postgres. Домен секретов:
+// IG OAuth-аккаунты (access_token_enc), TG QR-сессии (session_enc), ig-теги, connection-status
+// коллектора. Токены тут — уже-шифрованные СТРОКИ-заглушки (repo не видит plaintext по контракту).
+// Без TEST_DATABASE_URL всё SKIP. CI (postgres) и локальный стенд:
+//   TEST_DATABASE_URL=postgresql://postgres@localhost:5432/pulse PGSSL=disable npm test
+
+const test = require('node:test');
+const assert = require('node:assert');
+
+const TEST_DB = process.env.TEST_DATABASE_URL;
+const skip = TEST_DB ? false : 'TEST_DATABASE_URL not set (integration suite runs on the local stand)';
+
+let db = null;
+let pool = null;
+const nonce = `irepo${Date.now().toString(36)}${process.pid}`;
+let seq = 0;
+const mail = (tag) => `${tag}.${seq++}.${nonce}@it.local`;
+let igSeq = 0;
+const usedIg = [];
+const igId = () => { const v = `ig${nonce}_${igSeq++}`; usedIg.push(v); return v; };
+
+const mkUser = (tag) => db.createUser({ email: mail(tag), pass_hash: 'x', role: 'user', status: 'active' });
+
+test.before(() => {
+  if (!TEST_DB) return;
+  process.env.DATABASE_URL = TEST_DB;
+  process.env.PGSSL = process.env.PGSSL || 'disable';
+  db = require('../server/db.js');
+  const pg = require('pg');
+  pool = new pg.Pool({ connectionString: TEST_DB, max: 2, ssl: false });
+});
+
+test.after(async () => {
+  if (!pool) return;
+  // users каскадят channels → ig_accounts/collector_status; tg_sessions по uid. Общие таблицы без
+  // каскада чистим руками: external_sources (по нашим ig-id) и глобальный ig_tags (по media_id-нонсу).
+  await pool.query(`DELETE FROM users WHERE email LIKE $1`, [`%${nonce}%`]);
+  await pool.query(`DELETE FROM external_sources WHERE external_id = ANY($1)`, [usedIg]);
+  await pool.query(`DELETE FROM ig_tags WHERE media_id LIKE $1`, [`tag${nonce}%`]);
+  await pool.end();
+});
+
+test('saveIgAccount: транзакция целиком — аккаунт + external_source(ig) + штамп source_id standalone-IG-канала', { skip }, async () => {
+  const O = await mkUser('sa');
+  const ch = await db.createIgChannel({ owner_uid: O.id, username: `insta_${nonce}` });
+  const ig = igId();
+  const ok = await db.saveIgAccount(ch.id, {
+    ig_user_id: ig, username: `insta_${nonce}`, access_token_enc: 'enc:tok1', token_expires_at: null, scopes: 'basic',
+  });
+  assert.strictEqual(ok, true);
+
+  const acc = await db.getIgAccount(ch.id);
+  assert.strictEqual(acc.ig_user_id, ig);
+  assert.strictEqual(acc.access_token_enc, 'enc:tok1', 'репо отдаёт шифрованный токен как есть');
+
+  const src = await pool.query(`SELECT id FROM external_sources WHERE network='ig' AND external_id=$1`, [ig]);
+  assert.strictEqual(src.rows.length, 1, 'canonical ig-source создан');
+  const chRow = await pool.query(`SELECT source_id FROM channels WHERE id=$1`, [ch.id]);
+  assert.strictEqual(chRow.rows[0].source_id, src.rows[0].id, 'standalone IG-канал проштампован source_id');
+});
+
+test('saveIgAccount reconnect (тот же канал): upsert по channel_id — токен ротируется, дубля нет', { skip }, async () => {
+  const O = await mkUser('rc');
+  const ch = await db.createIgChannel({ owner_uid: O.id, username: `rec_${nonce}` });
+  const ig = igId();
+  await db.saveIgAccount(ch.id, { ig_user_id: ig, username: `rec_${nonce}`, access_token_enc: 'enc:old', scopes: 'basic' });
+  await db.saveIgAccount(ch.id, { ig_user_id: ig, username: `rec_${nonce}`, access_token_enc: 'enc:new', scopes: 'basic,insights' });
+  const acc = await db.getIgAccount(ch.id);
+  assert.strictEqual(acc.access_token_enc, 'enc:new', 'reconnect ротирует токен');
+  assert.strictEqual(acc.scopes, 'basic,insights');
+  const n = (await pool.query(`SELECT count(*)::int n FROM ig_accounts WHERE channel_id=$1`, [ch.id])).rows[0].n;
+  assert.strictEqual(n, 1, 'один аккаунт на канал (без дублей)');
+});
+
+test('updateIgToken: ротация токена/expiry БЕЗ смены identity; deleteIgAccount → getIgAccount null', { skip }, async () => {
+  const O = await mkUser('ut');
+  const ch = await db.createIgChannel({ owner_uid: O.id, username: `upd_${nonce}` });
+  const ig = igId();
+  await db.saveIgAccount(ch.id, { ig_user_id: ig, username: `upd_${nonce}`, access_token_enc: 'enc:a', scopes: 's' });
+  await db.updateIgToken(ch.id, 'enc:b', '2027-01-01T00:00:00Z');
+  const acc = await db.getIgAccount(ch.id);
+  assert.strictEqual(acc.access_token_enc, 'enc:b', 'токен ротирован');
+  assert.strictEqual(acc.ig_user_id, ig, 'identity не тронута');
+  // Сравниваем МОМЕНТ, не строку: to_char(...OF) рендерит в TZ сервера (CI=UTC, стенд=-03),
+  // а голый часовой оффсет ("-03") JS-Date не парсит → нормализуем до "-03:00".
+  const expiryIso = new Date(acc.token_expires_at.replace(/([+-]\d{2})$/, '$1:00')).toISOString();
+  assert.strictEqual(expiryIso, '2027-01-01T00:00:00.000Z', 'expiry обновлён');
+
+  assert.strictEqual(await db.deleteIgAccount(ch.id), true);
+  assert.strictEqual(await db.getIgAccount(ch.id), null, 'после отключения — null');
+  assert.strictEqual(await db.deleteIgAccount(ch.id), false, 'повторное удаление — чистый false');
+});
+
+test('listIgAccounts (cron-путь): все подключённые аккаунты с шифрованным токеном', { skip }, async () => {
+  const O = await mkUser('li');
+  const ch1 = await db.createIgChannel({ owner_uid: O.id, username: `l1_${nonce}` });
+  const ch2 = await db.createIgChannel({ owner_uid: O.id, username: `l2_${nonce}` });
+  await db.saveIgAccount(ch1.id, { ig_user_id: igId(), username: `l1_${nonce}`, access_token_enc: 'enc:1' });
+  await db.saveIgAccount(ch2.id, { ig_user_id: igId(), username: `l2_${nonce}`, access_token_enc: 'enc:2' });
+  const all = await db.listIgAccounts();
+  const mine = all.filter((a) => [ch1.id, ch2.id].includes(a.channel_id));
+  assert.strictEqual(mine.length, 2, 'оба аккаунта в cron-списке');
+  assert.ok(mine.every((a) => a.access_token_enc.startsWith('enc:')), 'токены на месте (callers decrypt)');
+});
+
+test('tg_sessions: upsert per-uid (reconnect ротирует session_enc), get/list/delete', { skip }, async () => {
+  const U = await mkUser('tg');
+  await db.saveTgSession(U.id, { tg_user_id: 111, username: `tgu_${nonce}`, session_enc: 'enc:s1' });
+  await db.saveTgSession(U.id, { tg_user_id: 111, username: `tgu_${nonce}`, session_enc: 'enc:s2' });
+  const sess = await db.getTgSession(U.id);
+  assert.strictEqual(sess.session_enc, 'enc:s2', 'reconnect ротирует session_enc (upsert, не дубль)');
+  const n = (await pool.query(`SELECT count(*)::int n FROM tg_sessions WHERE uid=$1`, [U.id])).rows[0].n;
+  assert.strictEqual(n, 1, 'одна сессия на uid');
+  assert.ok((await db.listTgSessions()).some((s2) => s2.uid === U.id), 'cron-список видит сессию');
+  assert.strictEqual(await db.deleteTgSession(U.id), true);
+  assert.strictEqual(await db.getTgSession(U.id), null, 'после отключения — null');
+});
+
+test('getCollectorStatus: владелец видит статус, чужой — null (access-предикат)', { skip }, async () => {
+  const O = await mkUser('cs');
+  const S = await mkUser('cx');
+  const ch = await db.createChannel({ owner_uid: O.id, username: `col_${nonce}`, title: 'C' });
+  await pool.query(
+    `INSERT INTO collector_status (channel_id, collector_version, last_ingest_id, last_attempt_at, last_success_at, last_error)
+     VALUES ($1,'1.2.3','ing-1',now(),now(),NULL)`, [ch.id]);
+  const st = await db.getCollectorStatus(ch.id, { uid: O.id });
+  assert.strictEqual(st.collector_version, '1.2.3');
+  assert.strictEqual(st.last_ingest_id, 'ing-1');
+  assert.strictEqual(await db.getCollectorStatus(ch.id, { uid: S.id }), null, 'чужой не видит connection-status');
+  assert.strictEqual(await db.getCollectorStatus(ch.id, {}), null, 'без uid — null');
+});
+
+test('ig_tags: upsert идемпотентен по media_id (свежие счётчики), getIgTags отдаёт архив', { skip }, async () => {
+  const m1 = `tag${nonce}_1`;
+  await db.upsertIgTags([{ id: m1, username: 'fan', caption: 'hi', like_count: 5, comments_count: 1, timestamp: '2026-01-10T10:00:00Z' }]);
+  const n = await db.upsertIgTags([{ id: m1, username: 'fan', caption: 'hi2', like_count: 9, comments_count: 2, timestamp: '2026-01-10T10:00:00Z' }]);
+  assert.strictEqual(n, 1);
+  const rows = (await db.getIgTags(500)).filter((t) => t.id === m1);
+  assert.strictEqual(rows.length, 1, 'один архивный row на media_id (upsert, не дубль)');
+  assert.strictEqual(rows[0].caption, 'hi2', 'повторный прогон освежил поля');
+  assert.strictEqual(rows[0].like_count, 9);
+});
