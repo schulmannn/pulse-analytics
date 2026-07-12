@@ -140,3 +140,24 @@ test('annotations скоуплены по channel_id (список и удале
   assert.strictEqual(await db.deleteAnnotation(a.id, ch2.id), false, 'удаление скоуплено: чужой channel_id не трогает');
   assert.strictEqual(await db.deleteAnnotation(a.id, ch.id), true, 'свой channel_id — удаляет');
 });
+
+test('finding 1: два конкурентных ensurePersonalWorkspace для нового юзера → ОДИН воркспейс', { skip }, async () => {
+  const U = await mkUser('race');
+  // Гонка: без partial-unique (kind=personal, миграция 015) два коннекта создали бы два воркспейса.
+  const [w1, w2] = await Promise.all([db.ensurePersonalWorkspace(U.id), db.ensurePersonalWorkspace(U.id)]);
+  assert.ok(w1 && w2, 'оба вызова вернули id');
+  assert.strictEqual(w1, w2, 'оба сошлись на одном workspace id (гонка закрыта)');
+  const n = (await pool.query(`SELECT count(*)::int n FROM workspaces WHERE owner_uid=$1 AND kind='personal'`, [U.id])).rows[0].n;
+  assert.strictEqual(n, 1, 'ровно один personal-воркспейс, дубля нет');
+  const m = (await pool.query(`SELECT count(*)::int n FROM workspace_members WHERE workspace_id=$1 AND uid=$2`, [w1, U.id])).rows[0].n;
+  assert.strictEqual(m, 1, 'owner-membership не задвоился');
+});
+
+test('finding 2: createTgChannel атомарно ставит и workspace_id, и source_id (полный canonical-путь)', { skip }, async () => {
+  const O = await mkUser('atom');
+  const tg = tgId();
+  const ch = await db.createTgChannel({ owner_uid: O.id, tg_channel_id: tg, username: `atom_${nonce}`, title: 'Atom' });
+  const row = (await pool.query(`SELECT workspace_id, source_id FROM channels WHERE id=$1`, [ch.id])).rows[0];
+  assert.ok(row.workspace_id != null, 'workspace_id проставлен в той же транзакции');
+  assert.ok(row.source_id != null, 'source_id (canonical) проставлен в той же транзакции');
+});

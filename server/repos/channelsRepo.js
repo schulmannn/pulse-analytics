@@ -26,7 +26,7 @@ const MEMBER_COUNT_COL =
         AND cd.subscribers IS NOT NULL
       ORDER BY cd.day DESC, cd.captured_at DESC NULLS LAST LIMIT 1) AS "memberCount"`;
 
-function createChannelsRepo({ pool, enabled }) {
+function createChannelsRepo({ pool, enabled, transaction }) {
   // ── Channels (tenants): видимость / доступ ───────────────────────
   async function listChannels(user) {
     if (!enabled) return [];
@@ -107,14 +107,22 @@ function createChannelsRepo({ pool, enabled }) {
   // ── Workspaces + canonical external identity ─────────────────────
   async function ensurePersonalWorkspace(uid, executor = pool) {
     if (!enabled || uid == null) return null;
-    const found = await executor.query(`SELECT id FROM workspaces WHERE owner_uid=$1 ORDER BY id LIMIT 1`, [uid]);
-    if (found.rows[0]) return found.rows[0].id;
-    const { rows } = await executor.query(
-      `INSERT INTO workspaces (name, owner_uid)
-       SELECT split_part(u.email,'@',1), u.id FROM users u WHERE u.id=$1
+    // Insert-or-get АТОМАРНО (finding 1): partial-unique (kind='personal', миграция 015) сводит
+    // конкурентные коннекты нового юзера к ОДНОЙ строке вместо гонки SELECT→INSERT в два дубля.
+    // ON CONFLICT DO NOTHING → при уже существующем воркспейсе достаём его фолбэк-SELECT'ом ниже.
+    const ins = await executor.query(
+      `INSERT INTO workspaces (name, owner_uid, kind)
+       SELECT split_part(u.email,'@',1), u.id, 'personal' FROM users u WHERE u.id=$1
+       ON CONFLICT (owner_uid) WHERE kind = 'personal' DO NOTHING
        RETURNING id`, [uid]);
-    const wsId = rows[0] ? rows[0].id : null;
-    if (wsId) {
+    let wsId = ins.rows[0] ? ins.rows[0].id : null;
+    if (wsId == null) {
+      // Конфликт (воркспейс уже есть) ИЛИ юзера нет — берём существующий.
+      const found = await executor.query(
+        `SELECT id FROM workspaces WHERE owner_uid=$1 AND kind='personal' ORDER BY id LIMIT 1`, [uid]);
+      wsId = found.rows[0] ? found.rows[0].id : null;
+    }
+    if (wsId != null) {
       await executor.query(
         `INSERT INTO workspace_members (workspace_id, uid, role) VALUES ($1,$2,'owner')
          ON CONFLICT (workspace_id, uid) DO NOTHING`, [wsId, uid]);
@@ -162,15 +170,19 @@ function createChannelsRepo({ pool, enabled }) {
   async function createChannel({ owner_uid, username, title }) {
     if (!enabled || owner_uid == null) return null;
     const uname = String(username || '').replace(/^@/, '').trim();
-    const { rows } = await pool.query(
-      `INSERT INTO channels (owner_uid, username, title, status, source)
-       VALUES ($1,$2,$3,'active','collector') RETURNING ${CHANNEL_COLS}`,
-      [owner_uid, uname || null, title || uname || null]);
-    const row = rows[0] || null;
-    // Workspace now; the canonical source is stamped later, when the platform id becomes known
-    // (setChannelTgId for collector channels).
-    if (row) await ensureChannelCanonical(row.id, owner_uid);
-    return row;
+    // Finding 2: канал + его tenant-привязка — ОДНОЙ транзакцией. Иначе падение ensureChannelCanonical
+    // оставляло бы активный канал с workspace_id=NULL (legacy owner_uid-fallback скрыл бы порчу).
+    return transaction(async (client) => {
+      const { rows } = await client.query(
+        `INSERT INTO channels (owner_uid, username, title, status, source)
+         VALUES ($1,$2,$3,'active','collector') RETURNING ${CHANNEL_COLS}`,
+        [owner_uid, uname || null, title || uname || null]);
+      const row = rows[0] || null;
+      // Workspace now; the canonical source is stamped later, when the platform id becomes known
+      // (setChannelTgId for collector channels).
+      if (row) await ensureChannelCanonical(row.id, owner_uid, {}, client);
+      return row;
+    });
   }
 
   // Standalone Instagram source — a channels row not backed by any Telegram channel
@@ -179,14 +191,17 @@ function createChannelsRepo({ pool, enabled }) {
   async function createIgChannel({ owner_uid, username }) {
     if (!enabled || owner_uid == null) return null;
     const uname = String(username || '').replace(/^@/, '').trim();
-    const { rows } = await pool.query(
-      `INSERT INTO channels (owner_uid, username, title, status, source)
-       VALUES ($1,$2,$3,'active','ig') RETURNING ${CHANNEL_COLS}`,
-      [owner_uid, uname || null, uname || 'Instagram']);
-    const row = rows[0] || null;
-    // Workspace now; the IG canonical source lands in saveIgAccount (ig_user_id known there).
-    if (row) await ensureChannelCanonical(row.id, owner_uid);
-    return row;
+    // Finding 2: канал + workspace-привязка одной транзакцией (см. createChannel).
+    return transaction(async (client) => {
+      const { rows } = await client.query(
+        `INSERT INTO channels (owner_uid, username, title, status, source)
+         VALUES ($1,$2,$3,'active','ig') RETURNING ${CHANNEL_COLS}`,
+        [owner_uid, uname || null, uname || 'Instagram']);
+      const row = rows[0] || null;
+      // Workspace now; the IG canonical source lands in saveIgAccount (ig_user_id known there).
+      if (row) await ensureChannelCanonical(row.id, owner_uid, {}, client);
+      return row;
+    });
   }
 
   // The user's channel already holding this Instagram identity (multi-account reconnect dedup).
@@ -205,22 +220,25 @@ function createChannelsRepo({ pool, enabled }) {
   async function createTgChannel({ owner_uid, tg_channel_id, username, title }) {
     if (!enabled || owner_uid == null || tg_channel_id == null) return null;
     const uname = String(username || '').replace(/^@/, '').trim();
-    const { rows } = await pool.query(
-      `INSERT INTO channels (owner_uid, tg_channel_id, username, title, status, source)
-       VALUES ($1,$2,$3,$4,'active','qr')
-       ON CONFLICT (owner_uid, tg_channel_id) WHERE tg_channel_id IS NOT NULL
-       DO UPDATE SET username=COALESCE(EXCLUDED.username, channels.username),
-                     title=COALESCE(EXCLUDED.title, channels.title),
-                     status='active'
-       RETURNING ${CHANNEL_COLS}`,
-      [owner_uid, tg_channel_id, uname || null, title || uname || null]);
-    const row = rows[0] || null;
-    if (row) {
-      await ensureChannelCanonical(row.id, owner_uid, {
-        network: 'tg', externalId: tg_channel_id, username: uname || null, title: title || uname || null,
-      });
-    }
-    return row;
+    // Finding 2: канал + tenant/canonical-привязка одной транзакцией (см. createChannel).
+    return transaction(async (client) => {
+      const { rows } = await client.query(
+        `INSERT INTO channels (owner_uid, tg_channel_id, username, title, status, source)
+         VALUES ($1,$2,$3,$4,'active','qr')
+         ON CONFLICT (owner_uid, tg_channel_id) WHERE tg_channel_id IS NOT NULL
+         DO UPDATE SET username=COALESCE(EXCLUDED.username, channels.username),
+                       title=COALESCE(EXCLUDED.title, channels.title),
+                       status='active'
+         RETURNING ${CHANNEL_COLS}`,
+        [owner_uid, tg_channel_id, uname || null, title || uname || null]);
+      const row = rows[0] || null;
+      if (row) {
+        await ensureChannelCanonical(row.id, owner_uid, {
+          network: 'tg', externalId: tg_channel_id, username: uname || null, title: title || uname || null,
+        }, client);
+      }
+      return row;
+    });
   }
 
   // Delete a channel the user owns (cascades data/keys/snapshot). Never the central one.
