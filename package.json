@@ -8,7 +8,9 @@
     "start": "node server/migrate.js && node server/index.js",
     "dev": "node server/migrate.js && node --watch server/index.js",
     "test": "node --test test/*.test.js",
-    "check": "node --check server/index.js && node --check server/db.js && node --test test/*.test.js"
+    "check:syntax": "node scripts/check-server-syntax.mjs",
+    "check:migrations": "node scripts/check-migrations.mjs",
+    "check": "npm run check:syntax && npm run check:migrations && node --test test/*.test.js"
   },
   "dependencies": {
     "express": "^4.19.2",

@@ -40,11 +40,17 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - run: npm ci
+      - name: Build shared narrative engine
+        run: |
+          npm ci --prefix frontend
+          npm run build:shared --prefix frontend
       # Apply migrations BEFORE the suite: the integration tests expect the schema present
       # (they INSERT into users/workspaces/channels/jobs — they do not self-migrate).
       - name: Migrate CI database
