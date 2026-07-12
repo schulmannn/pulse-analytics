@@ -88,12 +88,16 @@ function assembleWeekInput({ daily = [], posts = [], igDaily = [] }, nowMs = Dat
   };
 }
 
-/** Гейт: отчёт содержит preset-блок 'week' (или legacy 'digest' — рендерит тот же рассказ). */
+/** Гейт: отчёт содержит preset-блок 'week' (или legacy 'digest' — рендерит тот же рассказ).
+ *  Блоки бывают двух форм (ReportConfigSchema): современная {type:'preset', config:{key}} и
+ *  legacy-строки ['week', ...] — старые сохранённые отчёты раньше тут не матчились и слали
+ *  письма без нарратива. */
 function reportHasWeekBlock(config) {
   const blocks = config && Array.isArray(config.blocks) ? config.blocks : [];
-  return blocks.some(
-    (b) => b && b.type === 'preset' && b.config && (b.config.key === 'week' || b.config.key === 'digest'),
-  );
+  return blocks.some((b) => {
+    if (typeof b === 'string') return b === 'week' || b === 'digest';
+    return b && b.type === 'preset' && b.config && (b.config.key === 'week' || b.config.key === 'digest');
+  });
 }
 
 const escHtml = (s) =>
