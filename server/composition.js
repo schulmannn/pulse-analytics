@@ -46,7 +46,7 @@ function createComposition(config, overrides = {}) {
     overrides.tgCrypto || createTgCrypto(config.telegram.sessionKey);
   const notionCrash =
     overrides.notionCrash || createNotionCrashClient(config.notion);
-  const { MTPROTO_TOKEN, MTPROTO_TIMEOUT_HEAVY_MS, mtprotoFetch, mtprotoPost } =
+  const { MTPROTO_TOKEN, MTPROTO_TIMEOUT_STATS_MS, MTPROTO_TIMEOUT_HEAVY_MS, mtprotoFetch, mtprotoPost } =
     mtprotoClient;
 
   // История (Postgres): dbReady гейтит data-роуты, пока идёт миграция. Сама boot-цепочка
@@ -268,6 +268,7 @@ function createComposition(config, overrides = {}) {
     db,
     log,
     mtprotoFetch,
+    MTPROTO_TIMEOUT_STATS_MS,
     MTPROTO_TIMEOUT_HEAVY_MS,
     tgPostToRow,
     processReportSchedules,

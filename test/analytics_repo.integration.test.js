@@ -95,6 +95,37 @@ test('getLatestVelocity: roundtrip после saveVelocity', { skip }, async () 
   assert.deepStrictEqual(v.data, { p50: 1.5, p90: 3.2 });
 });
 
+test('listPostsForActor: archive has the live-post shape and remains actor-gated', { skip }, async () => {
+  const { u: owner, ch } = await chWithSource('posts', extId());
+  const stranger = await mkUser('posts-x');
+  const postId = Number(`8${Date.now().toString().slice(-10)}`);
+  await db.upsertPosts(ch.id, [{
+    post_id: postId,
+    date_published: '2026-07-12T10:00:00Z',
+    views: 900,
+    reactions: 40,
+    forwards: 7,
+    replies: 3,
+    erv: 5.5,
+    virality: 0.7,
+    media_type: 'photo',
+    caption: 'Archived caption',
+    hashtags: ['archive'],
+  }]);
+
+  const rows = await db.listPostsForActor(ch.id, { uid: owner.id }, 10);
+  const row = rows.find((item) => Number(item.id) === postId);
+  assert.ok(row, 'owner receives the archived post');
+  assert.equal(row.text, 'Archived caption');
+  assert.equal(row.views, 900);
+  assert.deepStrictEqual(row.hashtags, ['archive']);
+  assert.deepStrictEqual(
+    await db.listPostsForActor(ch.id, { uid: stranger.id }, 10),
+    [],
+    'an actor without channel access receives no posts',
+  );
+});
+
 test('listIgDaily: roundtrip после upsertIgDaily', { skip }, async () => {
   const { ch } = await chWithSource('ig', extId());
   await db.upsertIgDaily(ch.id, [{ day: today, followers: 1000, reach: 5000, views: 8000, likes: 300 }]);

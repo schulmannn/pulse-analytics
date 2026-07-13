@@ -484,6 +484,24 @@ function registerTgRoutes({
     }
     const limit = Math.min(100, parseInt(req.query.limit) || 30);
     try {
+      // Posts are persisted by the daily ingest. Prefer that fast, tenant-gated archive in the
+      // request path; only a brand-new/empty channel needs a live Telethon read. Previously the
+      // live /posts call used the 12s default timeout and Promise.allSettled silently turned its
+      // rejection into `posts: []`, so a transient timeout looked like a genuinely empty channel.
+      let archivedPosts = [];
+      if (db.enabled && req.channel?.id) {
+        archivedPosts = await db.listPostsForActor(req.channel.id, req.user, limit).catch((error) => {
+          log('warn', 'tg_posts_archive_read_failed', {
+            channel_id: req.channel.id,
+            error: error.message,
+          });
+          return [];
+        });
+      }
+      const postsPromise = archivedPosts.length > 0
+        ? Promise.resolve({ posts: archivedPosts, source: 'db' })
+        : mtprotoFetch('/posts', { limit }, MTPROTO_TIMEOUT_STATS_MS);
+
       const [botChannel, mtChannel, viewsSummary, posts] = await Promise.allSettled([
         (async () => {
           const [chat, count] = await Promise.all([
@@ -494,7 +512,7 @@ function registerTgRoutes({
         })(),
         mtprotoFetch('/channel'),
         mtprotoFetch('/views_summary', { limit }, MTPROTO_TIMEOUT_STATS_MS),
-        mtprotoFetch('/posts', { limit }),
+        postsPromise,
       ]);
 
       const bot  = botChannel.status  === 'fulfilled' ? botChannel.value  : null;
@@ -511,6 +529,7 @@ function registerTgRoutes({
         },
         views_summary:   vs,
         posts:           ps?.posts || [],
+        posts_source:    ps?.source || (posts.status === 'fulfilled' ? 'live' : null),
         mtproto_available: !!mtp,
         errors: {
           bot:    botChannel.status  === 'rejected' ? botChannel.reason?.message  : null,

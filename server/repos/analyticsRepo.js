@@ -109,6 +109,29 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
     return rows[0] || null;   // { data, computed_at } | null
   }
 
+  async function listPostsInternal(channelId, limit = 100) {
+    if (!enabled || !channelId) return [];
+    const safeLimit = Math.min(100, Math.max(1, Number.parseInt(limit, 10) || 30));
+    // The request path reads the normalized archive instead of waiting on Telethon. As with
+    // history/velocity, co-followed links may share rows only inside the reader's tenant.
+    const { rows } = await pool.query(
+      `SELECT id, date, text, views, reactions, forwards, replies, media_type, hashtags
+         FROM (
+           SELECT DISTINCT ON (p.post_id)
+                  p.post_id AS id, p.date_published AS date, p.caption AS text,
+                  p.views, p.reactions, p.forwards, p.replies, p.media_type, p.hashtags,
+                  p.updated_at
+             FROM posts p
+             JOIN channels c ON c.id = $1
+            WHERE ((c.source_id IS NOT NULL AND p.source_id = c.source_id AND ${sameTenantSource('p', 'c')})
+                   OR p.channel_id = c.id)
+            ORDER BY p.post_id, p.updated_at DESC NULLS LAST
+         ) latest
+        ORDER BY date DESC NULLS LAST, id DESC
+        LIMIT $2`, [channelId, safeLimit]);
+    return rows;
+  }
+
   // ── Read helpers (история для будущих графиков) ──
   async function listIgDailyInternal(channelId, days = 400) {
     if (!enabled || !channelId) return [];
@@ -148,6 +171,9 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
   async function getLatestVelocityForActor(channelId, actor) {
     return (await allowed(channelId, actor)) ? getLatestVelocityInternal(channelId) : null;
   }
+  async function listPostsForActor(channelId, actor, limit = 100) {
+    return (await allowed(channelId, actor)) ? listPostsInternal(channelId, limit) : [];
+  }
   async function listIgDailyForActor(channelId, actor, days = 400) {
     return (await allowed(channelId, actor)) ? listIgDailyInternal(channelId, days) : [];
   }
@@ -184,9 +210,9 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
   return {
     getIgTags, getCollectorStatus,
     getChannelHistoryInternal, getMentionsHistoryInternal, getMentionsArchiveInternal,
-    getSnapshotInternal, getLatestVelocityInternal, listIgDailyInternal, listIgMediaDailyInternal,
+    getSnapshotInternal, getLatestVelocityInternal, listPostsInternal, listIgDailyInternal, listIgMediaDailyInternal,
     getChannelHistoryForActor, getMentionsHistoryForActor, getMentionsArchiveForActor,
-    getSnapshotForActor, getLatestVelocityForActor, listIgDailyForActor, listIgMediaDailyForActor,
+    getSnapshotForActor, getLatestVelocityForActor, listPostsForActor, listIgDailyForActor, listIgMediaDailyForActor,
   };
 }
 
