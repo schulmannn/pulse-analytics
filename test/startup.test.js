@@ -18,13 +18,18 @@ let runtime = null;
 
 test.before(async () => {
   if (!TEST_DB) return;
-  // db/pool.js и config читают env при require → ставим ДО require(main).
-  process.env.DATABASE_URL = TEST_DB;
-  process.env.PGSSL = process.env.PGSSL || 'disable';
   const { main } = require('../server/main.js');
   // port:0 — эфемерный порт (тестовый override; прод слушает config.http.port).
   // ADMIN_* не заданы ⇒ bootstrapAdmin/claimOwnerChannel — безвредные no-op.
-  runtime = await main({ port: 0, installSignalHandlers: false });
+  runtime = await main({
+    env: {
+      ...process.env,
+      DATABASE_URL: TEST_DB,
+      PGSSL: process.env.PGSSL || 'disable',
+    },
+    port: 0,
+    installSignalHandlers: false,
+  });
 });
 
 test.after(async () => {

@@ -9,6 +9,7 @@
 // up after itself, so re-runs and parallel suites don't collide.
 const test = require('node:test');
 const assert = require('node:assert');
+const { createTestDatabase } = require('./testDatabase');
 
 const TEST_DB = process.env.TEST_DATABASE_URL;
 const skip = TEST_DB ? false : 'TEST_DATABASE_URL not set (integration suite runs on the local stand)';
@@ -19,9 +20,7 @@ const nonce = `t${Date.now().toString(36)}${process.pid}`;
 
 test.before(() => {
   if (!TEST_DB) return;
-  process.env.DATABASE_URL = TEST_DB;
-  process.env.PGSSL = process.env.PGSSL || 'disable';
-  db = require('../server/db.js');
+  db = createTestDatabase(TEST_DB);
   const pg = require('pg');
   pool = new pg.Pool({ connectionString: TEST_DB, max: 2, ssl: false });
 });

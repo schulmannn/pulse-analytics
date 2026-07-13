@@ -47,7 +47,7 @@ function createApp(deps) {
     igFetch, refreshIgIfNeeded, igConfigured, igCrypto, igMock, nearestOf,
     cacheGet, cacheSet, cache, IG_ACCOUNT, IG_TOKEN, IG_GRAPH, AUTH_SECRET,
     tgCrypto, collectQrChannelsNow, TG_TOKEN, TG_CHANNEL,
-    timingSafeEqualStr, dailyIngestJob, jobTracker,
+    timingSafeEqualStr, dailyIngestJob, jobTracker, mtprotoClient, notionCrash,
   } = deps;
 
   const app = express();
@@ -184,7 +184,7 @@ function createApp(deps) {
   registerTgRoutes({
     app, requireAuth, resolveChannel, db, audit, log,
     cacheGet, cacheSet, asyncHandler, tgCrypto, mediaLimiter, fetchWithTimeout,
-    collectQrChannelsNow, TG_TOKEN, TG_CHANNEL,
+    collectQrChannelsNow, TG_TOKEN, TG_CHANNEL, mtprotoClient,
   });
 
   // ════════════════════════════════════════════════════════════════
@@ -272,6 +272,7 @@ function createApp(deps) {
     commitSha: config.runtime.commitSha,
     githubRepo: config.github.repo,
     githubDispatchToken: config.github.dispatchToken,
+    notionCrash,
   });
 
   // ── Sprint 3F-3 catover: new Vite/React SPA is the primary dashboard, served at '/' ──

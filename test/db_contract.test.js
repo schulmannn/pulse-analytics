@@ -9,7 +9,8 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const db = require('../server/db');
+const { createTestDatabase } = require('./testDatabase');
+const db = createTestDatabase();
 const { mergeExports } = require('../server/db/mergeExports');
 
 const EXPECTED_FUNCTIONS = [

@@ -6,16 +6,14 @@
 'use strict';
 const rateLimit = require('express-rate-limit');
 const crypto = require('crypto');
-const defaultDb = require('./db');
+const { createDatabase } = require('./db');
 const { hashPassword, verifyPassword, rateLimitKey } = require('./lib/auth');
 const { captionSnippet } = require('./lib/caption');
 const { fetchWithTimeout } = require('./lib/http');
-const {
-  MTPROTO_TOKEN,
-  MTPROTO_TIMEOUT_HEAVY_MS,
-  mtprotoFetch,
-  mtprotoPost,
-} = require('./lib/mtproto-client');
+const { createMtprotoClient } = require('./lib/mtproto-client');
+const { createIgCrypto } = require('./lib/ig_crypto');
+const { createTgCrypto } = require('./lib/tg_crypto');
+const { createNotionCrashClient } = require('./lib/notion_crash');
 const { log: defaultLog } = require('./lib/observability');
 const { makeResolveChannel, hasWorkspaceRole } = require('./middleware/tenant');
 const { createApp } = require('./app');
@@ -34,8 +32,22 @@ const { createDailyIngestJob } = require('./jobs/dailyIngestJob');
 const { createJobTracker } = require('./infrastructure/jobTracker');
 
 function createComposition(config, overrides = {}) {
-  const db = overrides.db || defaultDb;
   const log = overrides.log || defaultLog;
+  const db = overrides.db || createDatabase(config, overrides.databaseOptions);
+  const mtprotoClient =
+    overrides.mtprotoClient ||
+    createMtprotoClient({
+      url: config.telegram.mtprotoUrl,
+      token: config.telegram.mtprotoToken,
+    });
+  const igCrypto =
+    overrides.igCrypto || createIgCrypto(config.instagram.tokenKey);
+  const tgCrypto =
+    overrides.tgCrypto || createTgCrypto(config.telegram.sessionKey);
+  const notionCrash =
+    overrides.notionCrash || createNotionCrashClient(config.notion);
+  const { MTPROTO_TOKEN, MTPROTO_TIMEOUT_HEAVY_MS, mtprotoFetch, mtprotoPost } =
+    mtprotoClient;
 
   // История (Postgres): dbReady гейтит data-роуты, пока идёт миграция. Сама boot-цепочка
   // (bootPromise) стартует ниже — после создания authService, чьи bootstrapAdmin/
@@ -137,7 +149,7 @@ function createComposition(config, overrides = {}) {
   // ── Email (verification / password reset / reports) — services/emailService ──
   // Resend-отправка, HTML-шаблоны и appBase (публичный origin для ссылок в письмах,
   // anti Host-poisoning c TRUSTED_HOSTS/CANONICAL_ORIGIN) — services/emailService.js.
-  // APP_URL-warn для prod печатает сервис при создании (тот же module-load момент).
+  // APP_URL warning for production is emitted when the service is composed.
   const emailService = createEmailService({ config });
   const { sendEmail, emailShell, emailBtn, appBase, escHtml } = emailService;
   const emailConfigured = emailService.configured;
@@ -163,8 +175,6 @@ function createComposition(config, overrides = {}) {
   // default-параметр и все falsy-проверки ведут себя байт-в-байт как при чтении env напрямую.
   const IG_TOKEN = config.instagram.accessToken || undefined;
   const IG_ACCOUNT = config.instagram.accountId || undefined;
-  const igCrypto = require('./lib/ig_crypto');
-  const tgCrypto = require('./lib/tg_crypto');
   const igMock = require('./ig_mock');
   // Global env single-account is "configured" when both token + account id are present.
   // (The per-channel OAuth connect flow + its app credentials live in routes/ig-oauth.js.)
@@ -334,6 +344,8 @@ function createComposition(config, overrides = {}) {
       timingSafeEqualStr,
       dailyIngestJob,
       jobTracker,
+      mtprotoClient,
+      notionCrash,
     });
   }
 
@@ -346,6 +358,7 @@ function createComposition(config, overrides = {}) {
     memoryCache: cache,
     jobTracker,
     drainState,
+    adapters: Object.freeze({ mtprotoClient, igCrypto, tgCrypto, notionCrash }),
   };
 }
 

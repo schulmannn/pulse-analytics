@@ -1,10 +1,6 @@
 'use strict';
 
 const { makeServeSnapshot } = require('../middleware/tenant');
-const {
-  MTPROTO_URL, MTPROTO_TOKEN, MTPROTO_TIMEOUT_STATS_MS, MTPROTO_TIMEOUT_HEAVY_MS,
-  mtprotoFetch, mtprotoPost, sendMtprotoError,
-} = require('../lib/mtproto-client');
 
 const TG_BASE = 'https://api.telegram.org/bot';
 
@@ -12,7 +8,7 @@ const TG_BASE = 'https://api.telegram.org/bot';
  * Telegram routes (Bot API `/api/tg/channel`, QR-connect `/api/tg/qr/*`, MTProto proxy
  * `/api/tg/mtproto/*`, the combined `/api/tg/full`, and the public thumb/photo media proxies).
  * Extracted verbatim from index.js — the MTProto proxy client lives in ./lib/mtproto-client and is
- * imported here; every non-media route still passes requireAuth (+ resolveChannel ownership) as before.
+ * injected here; every non-media route still passes requireAuth (+ resolveChannel ownership) as before.
  *
  * TG-exclusive helpers travel with the routes: `tgFetch` (Bot API), `notCentral`/`serveSnapshot`
  * (live-vs-snapshot dispatch), and the `tgQr*` QR-login machinery incl. the in-memory `_qrStarts`
@@ -22,8 +18,12 @@ const TG_BASE = 'https://api.telegram.org/bot';
 function registerTgRoutes({
   app, requireAuth, resolveChannel, db, audit, log,
   cacheGet, cacheSet, asyncHandler, tgCrypto, mediaLimiter, fetchWithTimeout,
-  collectQrChannelsNow, TG_TOKEN, TG_CHANNEL,
+  collectQrChannelsNow, TG_TOKEN, TG_CHANNEL, mtprotoClient,
 }) {
+  const {
+    MTPROTO_URL, MTPROTO_TOKEN, MTPROTO_TIMEOUT_STATS_MS, MTPROTO_TIMEOUT_HEAVY_MS,
+    mtprotoFetch, mtprotoPost, sendMtprotoError,
+  } = mtprotoClient;
   const serveSnapshot = makeServeSnapshot({ db });
 
   // Live MTProto exists only for the 'central' channel (the owner's session).
@@ -109,7 +109,7 @@ function registerTgRoutes({
   // ════════════════════════════════════════════════════════════════
 
   // MTProto proxy client (mtprotoFetch / mtprotoPost / sendMtprotoError + breaker + timeouts)
-  // lives in ./lib/mtproto-client (imported at the top) — shared by the TG routes and the ingest cron.
+  // lives in ./lib/mtproto-client and is injected into both the TG routes and the ingest cron.
 
   // ── Telegram QR connect (managed sessions) ───────────────────────────────
   // «Scan → done» via MTProto QR login on the Telethon service. The session string it

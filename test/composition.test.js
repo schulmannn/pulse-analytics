@@ -68,3 +68,35 @@ test('composition creates isolated apps and applies configured trust proxy', () 
   assert.notEqual(first.memoryCache, second.memoryCache);
   assert.notEqual(first.jobTracker, second.jobTracker);
 });
+
+test('composition adapters are derived from each instance config', () => {
+  const first = createComposition(
+    loadConfig({
+      MTPROTO_URL: 'http://first:8001',
+      MTPROTO_TOKEN: 'first-token',
+      IG_TOKEN_KEY: 'first-ig-key',
+      TG_SESSION_KEY: 'first-tg-key',
+    }),
+    { db: createFakeDb(), log: () => {} },
+  );
+  const second = createComposition(
+    loadConfig({
+      MTPROTO_URL: 'http://second:8001',
+      MTPROTO_TOKEN: 'second-token',
+      IG_TOKEN_KEY: 'second-ig-key',
+      TG_SESSION_KEY: 'second-tg-key',
+    }),
+    { db: createFakeDb(), log: () => {} },
+  );
+
+  assert.equal(first.adapters.mtprotoClient.MTPROTO_URL, 'http://first:8001');
+  assert.equal(second.adapters.mtprotoClient.MTPROTO_URL, 'http://second:8001');
+  assert.throws(() =>
+    second.adapters.igCrypto.decrypt(first.adapters.igCrypto.encrypt('token')),
+  );
+  assert.throws(() =>
+    second.adapters.tgCrypto.decrypt(
+      first.adapters.tgCrypto.encrypt('session'),
+    ),
+  );
+});

@@ -1,41 +1,56 @@
 'use strict';
 
-// DB core (P2 db/core): единственный источник PG-соединения — пул, Railway-SSL, флаг `enabled`,
-// ping/close. Без DATABASE_URL или без модуля pg всё мягко деградирует (enabled=false, pool=null),
-// дашборд работает как раньше. Извлечено дословно из db.js.
-
-let Pool = null;
-try { ({ Pool } = require('pg')); } catch (_e) { /* pg не установлен — БД выключена */ }
-
-const DATABASE_URL = process.env.DATABASE_URL || '';
-const enabled = !!(DATABASE_URL && Pool);
-
-let pool = null;
-if (enabled) {
-  // SSL: Railway's PRIVATE url (*.railway.internal) needs NO ssl; external/public
-  // managed Postgres usually does. Override with PGSSL=disable|require if needed.
-  const internal = /\.railway\.internal/i.test(DATABASE_URL);
-  const sslMode = (process.env.PGSSL || '').toLowerCase();
-  let ssl;
-  if (sslMode === 'disable') ssl = false;
-  else if (sslMode === 'require') ssl = { rejectUnauthorized: false };
-  else ssl = internal ? false : { rejectUnauthorized: false };   // smart default
-
-  // Pool ceiling is the first infrastructure knob under load (ops/PERF_BASELINE.md): 4 keeps a
-  // hobby Railway PG comfortable; raise via env (e.g. 8-10) as concurrent users grow.
-  pool = new Pool({ connectionString: DATABASE_URL, ssl, max: Number(process.env.PGPOOL_MAX) || 4 });
-  pool.on('error', (e) => console.error('[db] pool error:', e.message));
+let DefaultPool = null;
+try {
+  ({ Pool: DefaultPool } = require('pg'));
+} catch (_error) {
+  // Postgres is optional in DB-less development and tests.
 }
 
-async function ping() {
-  if (!enabled) return { enabled: false, ok: true };
-  const started = Date.now();
-  await pool.query('SELECT 1');
-  return { enabled: true, ok: true, latency_ms: Date.now() - started };
+function resolveSsl(connectionString, sslMode = 'auto') {
+  const mode = String(sslMode || 'auto').toLowerCase();
+  if (mode === 'disable') return false;
+  if (mode === 'require') return { rejectUnauthorized: false };
+  return /\.railway\.internal/i.test(connectionString)
+    ? false
+    : { rejectUnauthorized: false };
 }
 
-async function close() {
-  if (pool) await pool.end();
+function createPool(
+  { url = '', sslMode = 'auto', poolMax = 4 } = {},
+  { PoolClass = DefaultPool, onError = console.error } = {},
+) {
+  const enabled = !!(url && PoolClass);
+  const pool = enabled
+    ? new PoolClass({
+        connectionString: url,
+        ssl: resolveSsl(url, sslMode),
+        max: poolMax,
+      })
+    : null;
+
+  if (pool) {
+    pool.on('error', (error) =>
+      onError('[db] pool error:', error && error.message),
+    );
+  }
+
+  async function ping() {
+    if (!enabled) return { enabled: false, ok: true };
+    const started = Date.now();
+    await pool.query('SELECT 1');
+    return {
+      enabled: true,
+      ok: true,
+      latency_ms: Date.now() - started,
+    };
+  }
+
+  async function close() {
+    if (pool) await pool.end();
+  }
+
+  return Object.freeze({ pool, enabled, ping, close });
 }
 
-module.exports = { pool, enabled, DATABASE_URL, ping, close };
+module.exports = { createPool, resolveSsl };

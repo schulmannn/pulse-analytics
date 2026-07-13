@@ -19,6 +19,10 @@ test('loadConfig: дефолты из пустого env', () => {
   assert.equal(c.database.allowDbLess, false);
   assert.equal(c.auth.sessionTtlMs, 7 * 24 * 60 * 60 * 1000);
   assert.equal(c.email.from, 'Atlavue <onboarding@resend.dev>');
+  assert.equal(c.telegram.ownerChannel, '@bynotem');
+  assert.equal(c.telegram.sessionKey, '');
+  assert.equal(c.notion.token, '');
+  assert.equal(c.notion.crashDatabaseId, '');
   assert.equal(c.runtime.webReplicas, 1);
 });
 
@@ -27,6 +31,7 @@ test('loadConfig: значения из env + нормализация', () => {
     NODE_ENV: 'production', PORT: '8080', TRUST_PROXY_HOPS: '3', CORS_ORIGINS: 'a.com, b.com ,',
     APP_URL: 'https://x.app/', DATABASE_URL: 'postgres://x', PGPOOL_MAX: '8', ALLOW_DBLESS: 'true',
     SESSION_SECRET: 's3cret', ADMIN_EMAIL: '  Foo@BAR.com ', WEB_REPLICAS: '2', INGEST_TOKEN: 'tok',
+    OWNER_CHANNEL: '@owner', TG_SESSION_KEY: 'tg-key', NOTION_TOKEN: 'notion', NOTION_CRASH_DB: 'db-id',
   });
   assert.equal(c.http.port, 8080);
   assert.equal(c.http.trustProxy, 3);
@@ -37,6 +42,10 @@ test('loadConfig: значения из env + нормализация', () => {
   assert.equal(c.auth.adminEmail, 'foo@bar.com', 'email нормализован (lower+trim)');
   assert.equal(c.runtime.webReplicas, 2);
   assert.equal(c.runtime.ingestToken, 'tok');
+  assert.equal(c.telegram.ownerChannel, '@owner');
+  assert.equal(c.telegram.sessionKey, 'tg-key');
+  assert.equal(c.notion.token, 'notion');
+  assert.equal(c.notion.crashDatabaseId, 'db-id');
 });
 
 test('loadConfig: appUrl — RAW без дефолта (пусто = не задан), с тримом хвостового «/»', () => {
@@ -118,6 +127,17 @@ test('validateConfig: prod без DATABASE_URL (и без ALLOW_DBLESS) → ош
 test('validateConfig: MTPROTO_URL без MTPROTO_TOKEN → ошибка (в любом env)', () => {
   const errs = validateConfig(loadConfig({ MTPROTO_URL: 'http://mtproto:8001' }));
   assert.ok(errs.some((e) => e.field === 'telegram.mtprotoToken'));
+});
+
+test('validateConfig: Notion crash sink требует пару token + database id', () => {
+  const tokenOnly = validateConfig(loadConfig({ NOTION_TOKEN: 'token' }));
+  assert.ok(tokenOnly.some((error) => error.field === 'notion'));
+
+  const databaseOnly = validateConfig(loadConfig({ NOTION_CRASH_DB: 'db-id' }));
+  assert.ok(databaseOnly.some((error) => error.field === 'notion'));
+
+  const complete = validateConfig(loadConfig({ NOTION_TOKEN: 'token', NOTION_CRASH_DB: 'db-id' }));
+  assert.ok(!complete.some((error) => error.field === 'notion'));
 });
 
 test('validateConfig: webReplicas > 1 → запрет; port<=0 → ошибка', () => {
