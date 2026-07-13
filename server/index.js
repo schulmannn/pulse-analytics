@@ -7,25 +7,25 @@ require('dotenv').config();
 const rateLimit  = require('express-rate-limit');
 const crypto     = require('crypto');
 const db         = require('./db');
-const { createAuth, hashPassword, verifyPassword, SCRYPT, rateLimitKey, isSessionStale } = require('./lib/auth');
+const { hashPassword, verifyPassword, rateLimitKey } = require('./lib/auth');
 const { captionSnippet } = require('./lib/caption');
 const { fetchWithTimeout } = require('./lib/http');
 const { MTPROTO_TOKEN, MTPROTO_TIMEOUT_HEAVY_MS, mtprotoFetch, mtprotoPost } = require('./lib/mtproto-client');
-const { log, hashIp } = require('./lib/observability');
+const { log } = require('./lib/observability');
 const { makeResolveChannel, hasWorkspaceRole } = require('./middleware/tenant');
 const { loadConfig } = require('./config');
 const { createApp } = require('./app');
+const { createAuthService } = require('./services/authService');
+const { createEmailService } = require('./services/emailService');
+const { createAuditService } = require('./services/auditService');
 // Единственная точка чтения process.env — config.js (все env-чтения проведены на config.*).
 const config = loadConfig(process.env);
 
-// История (Postgres) — поднимаем схему, если БД подключена; иначе тихо выключено.
-// После схемы — бутстрап админ-аккаунта, затем привязка central-канала к админу.
-// dbReady гейтит data-роуты, пока идёт миграция; main.js ждёт bootPromise ДО listen.
-// Цепочка НИКОГДА не reject'ится: сбой БД логируется (db_init_failed), dbReady=false,
-// сервер всё равно поднимается (health 200 / ready 503) — прежнее DB-стойкое поведение.
+// История (Postgres): dbReady гейтит data-роуты, пока идёт миграция. Сама boot-цепочка
+// (bootPromise) стартует ниже — после создания authService, чьи bootstrapAdmin/
+// claimOwnerChannel она зовёт (destructured const не хойстится, в отличие от прежних
+// function-деклараций).
 let dbReady = false;
-const bootPromise = db.init().then(bootstrapAdmin).then(claimOwnerChannel).then(() => { dbReady = true; })
-  .catch(e => { log('error', 'db_init_failed', { error: e.message }); dbReady = false; });
 
 
 // General read limiter for the authed dashboard (~9 reads per refresh). Keyed PER
@@ -51,105 +51,28 @@ const authLimiter = rateLimit({
 });
 
 // ── Авторизация: stateless HMAC-токены (переживают рестарт/редеплой) ──
-// Token signing secret: a dedicated SESSION_SECRET and nothing else. There is no
-// fallback — a shared login password must never double as the session-forgery key.
-// Production refuses to boot without the required secrets (an ephemeral secret
-// would silently log everyone out on each deploy); dev gets a random per-process
-// secret with a warning.
-const IS_PRODUCTION = config.isProduction;
-// Boot-fatal проверка обязательных секретов (SESSION_SECRET, MTPROTO_URL⇒MTPROTO_TOKEN в prod)
-// переехала в main.js: validateConfig(config) → ConfigError (те же условия + инварианты портов/реплик).
-const AUTH_SECRET = config.auth.sessionSecret || crypto.randomBytes(32).toString('hex');
-if (!config.auth.sessionSecret) {
-  console.warn('[auth] SESSION_SECRET not set (dev) — using an ephemeral random secret; sessions will not survive a restart');
-}
-// Domain-separated subkeys derived from AUTH_SECRET — the raw session-signing
-// secret is never reused directly for other HMAC purposes.
-// (The OAuth-state signing subkey ('ig-state') is derived in routes/ig-oauth.js from the injected
-// AUTH_SECRET, alongside the sign/parse helpers that are its only consumers.)
-const IP_HASH_KEY  = crypto.createHmac('sha256', AUTH_SECRET).update('ip-hash').digest();
+// Весь auth-домен — services/authService.js (PR C): секрет + подписанты сессий,
+// requireAuth/requireSuper, бутстрап админа, утилиты auth-флоу (email-токены,
+// DUMMY_HASH). Boot-fatal чек секретов — validateConfig в main.js. index раздаёт
+// поля сервиса в createApp deps — сам deps-контракт app.js не менялся.
+const authService = createAuthService({ config, db });
+const {
+  AUTH_SECRET, SESSION_TTL, GOOGLE_CLIENT_ID,
+  signSession, parseToken,
+  VERIFY_TTL, RESET_TTL, sha256, newToken, DUMMY_HASH,
+  bootstrapAdmin, claimOwnerChannel,
+  requireAuth, requireSuper,
+} = authService;
 
-const ADMIN_EMAIL = config.auth.adminEmail;
-// Idle window: an active user is kept signed in by a sliding re-issue (see requireAuth) so this is
-// the MAX time between requests before a re-login is required, not a hard cap on a live session.
-const SESSION_TTL = 7 * 24 * 60 * 60 * 1000;
-const auth = createAuth({ secret: AUTH_SECRET });
-const signSession = auth.signSession;
-const parseToken = auth.parseToken;
-// "Sign in with Google" (Google Identity Services). The client id is public — it's both the GSI
-// button's client_id AND the audience we verify the returned ID token against. No client secret is
-// needed for the ID-token flow. Unset → the feature is inert (frontend hides the button).
-const GOOGLE_CLIENT_ID = config.auth.googleClientId;
+// Журнал действий — services/auditService.js (IP_HASH_KEY выводится внутри из AUTH_SECRET).
+const { audit } = createAuditService({ db, authSecret: AUTH_SECRET });
 
-async function audit(req, action, metadata = {}) {
-  if (!db.enabled) return false;
-  return db.recordAuditEvent({
-    uid: req.user && req.user.uid != null ? req.user.uid : null,
-    channel_id: req.channel && req.channel.id != null ? req.channel.id : null,
-    action,
-    request_id: req.requestId,
-    ip_hash: hashIp(req.ip, IP_HASH_KEY),
-    metadata,
-  });
-}
-
-// Optional bootstrap: create the ADMIN_EMAIL account as an active superuser at startup
-// (needs ADMIN_PASSWORD). Removes the register-time race for the admin email.
-async function bootstrapAdmin() {
-  if (!db.enabled || !ADMIN_EMAIL || !config.auth.adminPassword) return;
-  try {
-    if (!(await db.getUserByEmail(ADMIN_EMAIL))) {
-      await db.createUser({ email: ADMIN_EMAIL, pass_hash: hashPassword(config.auth.adminPassword), role: 'superuser', status: 'active' });
-      console.log('[auth] bootstrapped admin account:', ADMIN_EMAIL);
-    }
-  } catch (e) { console.error('[auth] admin bootstrap failed:', e.message); }
-}
-
-// Claim the orphan central channel for the admin once its account exists (the
-// owner channel may be created with owner_uid NULL at first boot if the admin
-// row isn't there yet). Idempotent — no-op once owned.
-async function claimOwnerChannel() {
-  if (!db.enabled || !ADMIN_EMAIL) return;
-  try {
-    const u = await db.getUserByEmail(ADMIN_EMAIL);
-    if (u) await db.adoptOwnerChannel(u.id);
-  } catch (e) { console.error('[db] adopt owner channel failed:', e.message); }
-}
-
-// Auth: validates the token, then re-checks the user is still active (so role
-// changes / disable take effect immediately, not only on next login). Every valid
-// session carries a numeric uid (parseToken rejects anything else), so req.user
-// always maps to a real users row.
-async function requireAuth(req, res, next) {
-  const sess = parseToken(req.headers['x-session-token']);
-  if (!sess) return res.status(401).json({ error: 'Сессия истекла, войди снова' });
-  req.session = sess;
-  try {
-    const u = await db.getUserById(sess.uid);
-    if (!u || u.status !== 'active') return res.status(401).json({ error: 'Аккаунт неактивен — войди снова' });
-    if (sess.tokenVersion !== u.token_version) {
-      return res.status(401).json({ error: 'Сессия отозвана — войди снова' });
-    }
-    req.user = { uid: u.id, role: u.role, email: u.email };
-    // Sliding session: once the token is past its half-life, hand back a fresh one on the response so
-    // an ACTIVE user is never logged out mid-work; the client persists it (see api/client.ts). Idle
-    // longer than SESSION_TTL still lets the token die (parseToken rejects an expired exp), so this is
-    // a sliding idle window, not an immortal session. token_version revocation is unaffected — a fresh
-    // token carries the current version, so a bumped version still invalidates it on the next request.
-    const now = Date.now();
-    if (isSessionStale(sess.exp, now, SESSION_TTL)) {
-      const fresh = signSession({ uid: u.id, role: u.role, exp: now + SESSION_TTL, tokenVersion: u.token_version });
-      res.set('X-Session-Refresh', fresh);
-      res.set('Cache-Control', 'no-store'); // a response carrying a token must never be shared-cached
-    }
-    next();
-  } catch (e) { next(e); }
-}
-
-function requireSuper(req, res, next) {
-  if (!req.user || req.user.role !== 'superuser') return res.status(403).json({ error: 'Доступ только для администратора' });
-  next();
-}
+// Поднимаем схему, если БД подключена; после схемы — бутстрап админ-аккаунта, затем
+// привязка central-канала к админу. main.js ждёт bootPromise ДО listen. Цепочка НИКОГДА
+// не reject'ится: сбой БД логируется (db_init_failed), dbReady=false, сервер всё равно
+// поднимается (health 200 / ready 503) — прежнее DB-стойкое поведение.
+const bootPromise = db.init().then(bootstrapAdmin).then(claimOwnerChannel).then(() => { dbReady = true; })
+  .catch(e => { log('error', 'db_init_failed', { error: e.message }); dbReady = false; });
 
 // ── Channel (tenant) resolution & isolation ──────────────────────
 const resolveChannel = makeResolveChannel({ db, isReady: () => dbReady });
@@ -185,83 +108,20 @@ setInterval(() => {
 const nearestOf = (value, allowed) =>
   allowed.reduce((best, v) => (Math.abs(v - value) < Math.abs(best - value) ? v : best));
 
-// ── Email (verification / password reset) via Resend — no new dependency ──
-const RESEND_API_KEY = config.email.apiKey;
-const EMAIL_FROM = config.email.from;
-const APP_URL = config.http.appUrl;
-// Canonical public origin (Atlavue rebrand) — last-resort fallback for emailed
-// links / OAuth callbacks when APP_URL is unset and the request Host isn't
-// allow-listed. Constant, not the old Railway host: a stale fallback silently
-// mints links to a domain we no longer present to users.
-const CANONICAL_ORIGIN = 'https://atlavue.app';
-// Hosts honoured from the request when APP_URL isn't set — defends emailed links
-// against Host-header poisoning (reset link → account takeover). Best practice:
-// set APP_URL in production. Override the allowlist with TRUSTED_HOSTS (comma-sep).
-const TRUSTED_HOSTS = new Set(
-  (config.http.trustedHosts || new URL(CANONICAL_ORIGIN).host)
-    .split(',').map(s => s.trim().toLowerCase()).filter(Boolean));
-// In production an unset APP_URL silently falls back to CANONICAL_ORIGIN —
-// emailed verify/reset links and the IG OAuth callback then point at the
-// hardcoded default rather than the configured domain. Loud boot error,
-// deliberately NON-FATAL: a missing env var must not crash-loop prod — the
-// dashboard itself still works without it.
-if (!APP_URL && IS_PRODUCTION) {
-  console.error([
-    '════════════════════════════════════════════════════════════════════',
-    '[boot] APP_URL is not set in a production environment!',
-    '[boot] Emailed verification/reset links and the Instagram OAuth callback',
-    `[boot] will fall back to "${CANONICAL_ORIGIN}".`,
-    `[boot] Set APP_URL to the canonical public origin, e.g. ${CANONICAL_ORIGIN}`,
-    '════════════════════════════════════════════════════════════════════',
-  ].join('\n'));
-}
-const VERIFY_TTL = 24 * 60 * 60 * 1000;
-const RESET_TTL  = 60 * 60 * 1000;
-const sha256   = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
+// ── Email (verification / password reset / reports) — services/emailService ──
+// Resend-отправка, HTML-шаблоны и appBase (публичный origin для ссылок в письмах,
+// anti Host-poisoning c TRUSTED_HOSTS/CANONICAL_ORIGIN) — services/emailService.js.
+// APP_URL-warn для prod печатает сервис при создании (тот же module-load момент).
+const emailService = createEmailService({ config });
+const { sendEmail, emailShell, emailBtn, appBase, escHtml } = emailService;
+const emailConfigured = emailService.configured;
+
 // Constant-time secret compare. Raw `!==` leaks length/prefix timing; timingSafeEqual
-// throws on length mismatch — comparing fixed-length digests avoids both.
+// throws on length mismatch — comparing fixed-length digests avoids both. (Остаётся в
+// index: единственный потребитель — ingest-гейт; уедет в dailyIngestJob в PR E.)
 const timingSafeEqualStr = (a, b) => crypto.timingSafeEqual(
   crypto.createHash('sha256').update(String(a)).digest(),
   crypto.createHash('sha256').update(String(b)).digest());
-const newToken = () => crypto.randomBytes(32).toString('base64url');
-const escHtml  = (s) => String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
-// Public origin for emailed links. NEVER trust a raw Host header (poisonable):
-// use APP_URL, else only an allow-listed / localhost host, else the canonical default.
-function appBase(req) {
-  if (APP_URL) return APP_URL;
-  const host = String((req && req.get && req.get('host')) || '').toLowerCase();
-  if (TRUSTED_HOSTS.has(host)) return 'https://' + host;                        // prod → https (never reflect X-Forwarded-Proto)
-  if (/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(host)) return 'http://' + host;  // local dev
-  return CANONICAL_ORIGIN;                                                      // untrusted host → canonical default
-}
-// Fixed-cost hash so login spends scrypt time even when the email doesn't exist
-// (kills the "skip the hash on missing user" enumeration timing oracle).
-const DUMMY_HASH = `scrypt$${SCRYPT.N}$${SCRYPT.r}$${SCRYPT.p}$${'0'.repeat(32)}$${'0'.repeat(128)}`;
-
-// Send via Resend (plain fetch). No key → log only non-secret metadata; in DEV
-// additionally log the action link (`devLink`) so registration/reset flows are
-// completable locally without an email provider — production never prints it.
-// Never throws (auth flows stay generic on email failure).
-async function sendEmail(to, subject, html, devLink) {
-  if (!RESEND_API_KEY) {
-    console.log(`[email:dev] to=${to} · "${subject}" (RESEND_API_KEY unset — not sent)`);
-    if (!IS_PRODUCTION && devLink) console.log(`[email:dev] action link: ${devLink}`);
-    return true;
-  }
-  try {
-    const r = await fetchWithTimeout('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: EMAIL_FROM, to, subject, html }),
-    });
-    if (!r.ok) { console.error('[email] resend', r.status, (await r.text().catch(() => '')).slice(0, 200)); return false; }
-    return true;
-  } catch (e) { console.error('[email] send error:', e.message); return false; }
-}
-const emailShell = (title, body) =>
-  `<div style="font-family:system-ui,Segoe UI,sans-serif;max-width:480px;color:#061b31"><h2 style="font-weight:600">${title}</h2>${body}</div>`;
-const emailBtn = (href, label) =>
-  `<p><a href="${escHtml(href)}" style="display:inline-block;padding:10px 18px;background:#533afd;color:#fff;border-radius:6px;text-decoration:none">${label}</a></p>`;
 
 
 
@@ -736,7 +596,7 @@ async function processReportSchedules(base) {
   if (!db.enabled) return;
   // Без почтового провайдера рассылка невозможна: dev-заглушка sendEmail вернула бы true,
   // и last_sent_at проставился бы без единого отправленного письма.
-  if (!RESEND_API_KEY) {
+  if (!emailConfigured()) {
     console.log('[reports] schedule skipped: email not configured');
     return;
   }
