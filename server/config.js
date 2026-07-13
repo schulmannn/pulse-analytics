@@ -31,6 +31,11 @@ function loadConfig(env = process.env) {
       trustProxy: Number(env.TRUST_PROXY_HOPS || 2),
       corsOrigins: parseCsv(env.CORS_ORIGINS),
       publicUrl: (env.APP_URL || 'https://atlavue.app').replace(/\/$/, ''),
+      // appUrl — RAW (БЕЗ дефолта, только трим хвостового «/»): appBase() в index сам
+      // решает фолбэк (TRUSTED_HOSTS → CANONICAL_ORIGIN), пустая строка = «не задан».
+      // publicUrl выше — другое поле (с дефолтом) для validateConfig; НЕ путать.
+      appUrl: (env.APP_URL || '').replace(/\/$/, ''),
+      trustedHosts: env.TRUSTED_HOSTS || '',
     }),
     database: Object.freeze({
       url: env.DATABASE_URL || '',
@@ -63,6 +68,7 @@ function loadConfig(env = process.env) {
     runtime: Object.freeze({
       webReplicas: Number(env.WEB_REPLICAS || 1),
       ingestToken: env.INGEST_TOKEN || '',
+      capacityRollups: env.CAPACITY_ROLLUPS === '1',
     }),
   });
 }
