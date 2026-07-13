@@ -28,9 +28,13 @@ const { registerIgOauthRoutes } = require('./routes/ig-oauth');
 const { registerIgRoutes } = require('./routes/ig');
 const { registerAccountRoutes } = require('./routes/account');
 const { registerHistoryRoutes } = require('./routes/history');
+const { loadConfig } = require('./config');
+// PR B2a: единственная точка чтения process.env для index.js (config.js). Оставшиеся env-чтения
+// (APP_URL/TRUSTED_HOSTS/IG/TG/CAPACITY) вирятся в B2b/B2c, когда config отдаст raw-поля.
+const config = loadConfig(process.env);
 
 const app  = express();
-const PORT = process.env.PORT || 3000;
+const PORT = config.http.port;
 // Railway forwarding chain (confirmed via the proxy diagnostic): the app's socket
 // peer is Railway's internal LB (100.64.0.0/10) and X-Forwarded-For = "client, edge".
 // So the address list (socket → outward) is [LB, edge, client] and we must trust 2
@@ -51,7 +55,7 @@ db.init().then(bootstrapAdmin).then(claimOwnerChannel).then(() => { dbReady = tr
 // поэтому кросс-доменный доступ по умолчанию не нужен → не отдаём wildcard ACAO.
 // Для будущих внешних API-клиентов origin'ы можно явно разрешить через
 // CORS_ORIGINS (список через запятую).
-const CORS_ORIGINS = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
+const CORS_ORIGINS = config.http.corsOrigins;
 app.use(cors({ origin: CORS_ORIGINS.length ? CORS_ORIGINS : false, credentials: false }));
 app.use(requestContext);
 // A rejected promise in an async route otherwise escapes Express 4 entirely and
@@ -125,17 +129,16 @@ const authLimiter = rateLimit({
 // Production refuses to boot without the required secrets (an ephemeral secret
 // would silently log everyone out on each deploy); dev gets a random per-process
 // secret with a warning.
-const IS_PRODUCTION = process.env.NODE_ENV === 'production'
-  || !!process.env.RAILWAY_ENVIRONMENT || !!process.env.RAILWAY_PROJECT_ID;
+const IS_PRODUCTION = config.isProduction;
 {
   const missing = [];
-  if (!process.env.SESSION_SECRET) {
+  if (!config.auth.sessionSecret) {
     missing.push(
       'SESSION_SECRET is not set. It signs dashboard session tokens.',
       '    → Set SESSION_SECRET to a long random value (e.g. `openssl rand -hex 32`).',
       '      Rotating it invalidates every active session.');
   }
-  if (process.env.MTPROTO_URL && !process.env.MTPROTO_TOKEN) {
+  if (config.telegram.mtprotoUrl && !config.telegram.mtprotoToken) {
     missing.push(
       'MTPROTO_TOKEN is not set, but MTPROTO_URL is configured.',
       '    → Set MTPROTO_TOKEN to a long random value (e.g. `openssl rand -hex 32`)',
@@ -154,8 +157,8 @@ const IS_PRODUCTION = process.env.NODE_ENV === 'production'
     process.exit(1);
   }
 }
-const AUTH_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
-if (!process.env.SESSION_SECRET) {
+const AUTH_SECRET = config.auth.sessionSecret || crypto.randomBytes(32).toString('hex');
+if (!config.auth.sessionSecret) {
   console.warn('[auth] SESSION_SECRET not set (dev) — using an ephemeral random secret; sessions will not survive a restart');
 }
 // Domain-separated subkeys derived from AUTH_SECRET — the raw session-signing
@@ -164,7 +167,7 @@ if (!process.env.SESSION_SECRET) {
 // AUTH_SECRET, alongside the sign/parse helpers that are its only consumers.)
 const IP_HASH_KEY  = crypto.createHmac('sha256', AUTH_SECRET).update('ip-hash').digest();
 
-const ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || '').toLowerCase().trim();
+const ADMIN_EMAIL = config.auth.adminEmail;
 // Idle window: an active user is kept signed in by a sliding re-issue (see requireAuth) so this is
 // the MAX time between requests before a re-login is required, not a hard cap on a live session.
 const SESSION_TTL = 7 * 24 * 60 * 60 * 1000;
@@ -174,7 +177,7 @@ const parseToken = auth.parseToken;
 // "Sign in with Google" (Google Identity Services). The client id is public — it's both the GSI
 // button's client_id AND the audience we verify the returned ID token against. No client secret is
 // needed for the ID-token flow. Unset → the feature is inert (frontend hides the button).
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
+const GOOGLE_CLIENT_ID = config.auth.googleClientId;
 
 async function audit(req, action, metadata = {}) {
   if (!db.enabled) return false;
@@ -191,10 +194,10 @@ async function audit(req, action, metadata = {}) {
 // Optional bootstrap: create the ADMIN_EMAIL account as an active superuser at startup
 // (needs ADMIN_PASSWORD). Removes the register-time race for the admin email.
 async function bootstrapAdmin() {
-  if (!db.enabled || !ADMIN_EMAIL || !process.env.ADMIN_PASSWORD) return;
+  if (!db.enabled || !ADMIN_EMAIL || !config.auth.adminPassword) return;
   try {
     if (!(await db.getUserByEmail(ADMIN_EMAIL))) {
-      await db.createUser({ email: ADMIN_EMAIL, pass_hash: hashPassword(process.env.ADMIN_PASSWORD), role: 'superuser', status: 'active' });
+      await db.createUser({ email: ADMIN_EMAIL, pass_hash: hashPassword(config.auth.adminPassword), role: 'superuser', status: 'active' });
       console.log('[auth] bootstrapped admin account:', ADMIN_EMAIL);
     }
   } catch (e) { console.error('[auth] admin bootstrap failed:', e.message); }
@@ -281,8 +284,8 @@ const nearestOf = (value, allowed) =>
   allowed.reduce((best, v) => (Math.abs(v - value) < Math.abs(best - value) ? v : best));
 
 // ── Email (verification / password reset) via Resend — no new dependency ──
-const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
-const EMAIL_FROM = process.env.EMAIL_FROM || 'Atlavue <onboarding@resend.dev>';
+const RESEND_API_KEY = config.email.apiKey;
+const EMAIL_FROM = config.email.from;
 const APP_URL = (process.env.APP_URL || '').replace(/\/$/, '');
 // Canonical public origin (Atlavue rebrand) — last-resort fallback for emailed
 // links / OAuth callbacks when APP_URL is unset and the request Host isn't
@@ -1007,7 +1010,7 @@ app.get('/api/health', (req, res) => {
     env: {
       ig:  !!IG_TOKEN && !!IG_ACCOUNT,
       tg:  !!TG_TOKEN && !!TG_CHANNEL,
-      auth: !!process.env.SESSION_SECRET
+      auth: !!config.auth.sessionSecret
     }
   });
 });
@@ -1040,8 +1043,8 @@ app.delete('/api/cache', requireAuth, requireSuper, (req, res) => {
 // Защищён отдельным токеном (НЕ командный пароль) — дёргается cron'ом.
 app.post('/api/ingest/daily', asyncHandler(async (req, res) => {
   const token = req.headers['x-ingest-token'];
-  if (!process.env.INGEST_TOKEN || typeof token !== 'string' || !token
-      || !timingSafeEqualStr(token, process.env.INGEST_TOKEN)) {
+  if (!config.runtime.ingestToken || typeof token !== 'string' || !token
+      || !timingSafeEqualStr(token, config.runtime.ingestToken)) {
     return res.status(403).json({ ok: false, error: 'forbidden' });
   }
   if (!db.enabled) return res.status(200).json({ ok: false, reason: 'DATABASE_URL не задан — БД выключена' });
@@ -1216,7 +1219,7 @@ app.use((err, req, res, next) => {
 // Railway's replica slider WITHOUT the Redis-backed shared state (still unbuilt) silently multiplies
 // rate limits and Graph/MTProto quota burn. Loud boot error = the tripwire for that scale-up.
 if (require.main === module) {
-const WEB_REPLICAS = Number(process.env.WEB_REPLICAS || '1');
+const WEB_REPLICAS = config.runtime.webReplicas;
 if (Number.isFinite(WEB_REPLICAS) && WEB_REPLICAS > 1) {
   log('error', 'multi_replica_unsupported', {
     web_replicas: WEB_REPLICAS,
@@ -1232,8 +1235,8 @@ app.listen(PORT, () => {
 ║  URL:      http://localhost:${PORT}          ║
 ║  IG API:   ${IG_TOKEN ? '✅ настроен' : '❌ не задан (IG_ACCESS_TOKEN)'}           ║
 ║  TG API:   ${TG_TOKEN ? '✅ настроен' : '❌ не задан (TG_BOT_TOKEN)'}             ║
-║  Sessions: ${process.env.SESSION_SECRET ? '✅ SESSION_SECRET задан' : '⚠️ ephemeral (dev) — задай SESSION_SECRET'}  ║
-║  MTProto:  ${process.env.MTPROTO_TOKEN ? '✅ MTPROTO_TOKEN задан' : '❌ MTPROTO_TOKEN не задан'}       ║
+║  Sessions: ${config.auth.sessionSecret ? '✅ SESSION_SECRET задан' : '⚠️ ephemeral (dev) — задай SESSION_SECRET'}  ║
+║  MTProto:  ${config.telegram.mtprotoToken ? '✅ MTPROTO_TOKEN задан' : '❌ MTPROTO_TOKEN не задан'}       ║
 ╚══════════════════════════════════════════╝
   `);
 });
