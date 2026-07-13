@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { bootDemo } from './helpers';
+import { bootDemo, detailOverlayOpener } from './helpers';
 
 /**
  * Layering scale (DESIGN_TOKENS «Layering»). Overlays pull from one named z-index ladder so nothing
@@ -20,7 +20,7 @@ test('overlays follow the layering scale (modal above nav, covers content)', asy
   expect(navZ, 'z-nav utility should resolve to a real stacking value').toBeGreaterThan(0);
 
   // Open a widget detail overlay — a body-portaled surface at z-modal.
-  await page.getByRole('button', { name: /^Развернуть виджет/ }).first().click();
+  await detailOverlayOpener(page).click();
   const dialog = page.locator('[role="dialog"]').first();
   await expect(dialog).toBeVisible();
   const dialogZ = await dialog.evaluate((el) => Number(getComputedStyle(el).zIndex) || 0);
@@ -49,7 +49,7 @@ test('overlays follow the layering scale (modal above nav, covers content)', asy
  */
 test('detail overlay dismisses on outside-click (scrim) and Escape', async ({ page }) => {
   await bootDemo(page, '/');
-  const opener = page.getByRole('button', { name: /^Развернуть виджет/ }).first();
+  const opener = detailOverlayOpener(page);
 
   // Outside-click: open, then click a top-corner pixel — that hits the z-modal scrim (proof it's
   // above the app chrome) whose onClick closes the overlay.

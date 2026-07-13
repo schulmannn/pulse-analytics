@@ -1,0 +1,253 @@
+import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { WidgetTargetContext } from '@/components/ExpandableChart';
+import { ThrowInRender } from '@/components/WidgetErrorBoundary';
+import { GroupCtx, prefersReducedMotion } from '@/components/widgets/WidgetGroup';
+import { maxSize } from '@/components/widgets/variants';
+import { observeSize } from '@/lib/observeSize';
+import {
+  DEFAULT_WIDGET_DAYS,
+  WidgetPeriodProvider,
+  resolveEffectivePeriod,
+  useChannelRecency,
+  usePagePeriod,
+  widgetPeriodValue,
+} from '@/lib/period';
+import type { PeriodDays } from '@/lib/period';
+import { useExitPresence } from '@/lib/useExitPresence';
+import {
+  HomeEditContext,
+  setPrefs,
+  unpinFromHome,
+  useIsPinnedToHome,
+  useWidgetPrefs,
+} from '@/lib/widgetPrefsStore';
+import type { SeriesGrain, WidgetPrefs, WidgetSeriesOpts, WidgetSize } from '@/lib/widgetPrefsStore';
+import { REMOVE_EXIT_MS } from './constants';
+import type { ChartSectionProps } from './types';
+
+export function useChartSectionModel(props: ChartSectionProps) {
+  const {
+    id,
+    title,
+    variants,
+    defaultSize,
+    fixedSize,
+    expand,
+    drillTo,
+    periodControl,
+    strip,
+    homeKey,
+    configEditor,
+    bodyResetKey,
+    children,
+  } = props;
+  const widgetId = id ?? title;
+  const group = useContext(GroupCtx);
+  const homeEditing = useContext(HomeEditContext);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const sectionRef = useRef<HTMLElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const originRectRef = useRef<DOMRect | null>(null);
+  const cardPressRef = useRef<{ x: number; y: number } | null>(null);
+  const [bodyHeight, setBodyHeight] = useState<number | null>(null);
+
+  const expandOpen = searchParams.get('detail') === widgetId;
+  const openExpand = useCallback(() => {
+    if (drillTo) {
+      navigate(drillTo);
+      return;
+    }
+    originRectRef.current = sectionRef.current?.getBoundingClientRect() ?? null;
+    setSearchParams(
+      (previous) => {
+        const next = new URLSearchParams(previous);
+        next.set('detail', widgetId);
+        return next;
+      },
+      { replace: false },
+    );
+  }, [drillTo, navigate, setSearchParams, widgetId]);
+  const closeExpand = useCallback(() => {
+    setSearchParams(
+      (previous) => {
+        const next = new URLSearchParams(previous);
+        next.delete('detail');
+        return next;
+      },
+      { replace: true },
+    );
+  }, [setSearchParams]);
+
+  useEffect(() => {
+    if (!expandOpen) originRectRef.current = null;
+  }, [expandOpen]);
+
+  const register = group?.register;
+  useEffect(() => register?.(widgetId, title, sectionRef.current), [register, widgetId, title]);
+
+  useLayoutEffect(() => {
+    const element = bodyRef.current;
+    if (!element) return;
+    const measure = () => {
+      const height = element.clientHeight;
+      setBodyHeight(height > 0 && height < 640 ? height : null);
+    };
+    measure();
+    return observeSize(element, measure);
+  }, []);
+
+  const prefs = useWidgetPrefs(widgetId);
+  const updatePrefs = useCallback((next: WidgetPrefs) => setPrefs(widgetId, next), [widgetId]);
+  const pinned = useIsPinnedToHome(homeKey);
+  const showHomeRemove = homeEditing && !!homeKey;
+  const removePresence = useExitPresence(
+    showHomeRemove,
+    prefersReducedMotion() ? 0 : REMOVE_EXIT_MS,
+  );
+  const removeFromHome = useCallback(() => {
+    if (!homeKey) return;
+    unpinFromHome(homeKey);
+    document.querySelector<HTMLElement>('.edit-toggle')?.focus();
+  }, [homeKey]);
+  const openEdit = useCallback(() => {
+    if (configEditor) configEditor.open();
+    else setEditOpen(true);
+  }, [configEditor]);
+
+  const pagePeriod = usePagePeriod();
+  const requestedDays: PeriodDays = prefs.period ?? pagePeriod?.days ?? DEFAULT_WIDGET_DAYS;
+  const channelRecency = useChannelRecency();
+  const widgetDays = useMemo(
+    () => resolveEffectivePeriod(requestedDays, channelRecency),
+    [requestedDays, channelRecency],
+  );
+  const widgetPeriod = useMemo(() => widgetPeriodValue(widgetDays), [widgetDays]);
+  const periodWidened = periodControl === true && widgetDays !== requestedDays;
+
+  const seriesGrain: SeriesGrain = prefs.grain ?? 'day';
+  const seriesIncludeToday = prefs.includeToday !== false;
+  const seriesOptions = useMemo<WidgetSeriesOpts>(
+    () => ({ grain: seriesGrain, includeToday: seriesIncludeToday }),
+    [seriesGrain, seriesIncludeToday],
+  );
+  const variantResult = useMemo(() => {
+    if (typeof variants !== 'function') return { ok: true as const, variants };
+    try {
+      return { ok: true as const, variants: variants(widgetPeriod, seriesOptions) };
+    } catch (error) {
+      return { ok: false as const, error };
+    }
+  }, [variants, widgetPeriod, seriesOptions]);
+  const resolvedVariants = variantResult.ok ? variantResult.variants : undefined;
+  const activeVariant =
+    resolvedVariants && resolvedVariants.length > 0
+      ? (resolvedVariants.find((variant) => variant.key === prefs.variant) ?? resolvedVariants[0])
+      : null;
+  const primaryBody = variantResult.ok
+    ? activeVariant
+      ? activeVariant.render
+      : children
+    : <ThrowInRender error={variantResult.error} />;
+
+  const activeColor = configEditor ? configEditor.color : prefs.color;
+  const activeTinted = (configEditor ? configEditor.tinted : prefs.tinted) ?? true;
+  const activeTarget = configEditor ? (configEditor.target ?? null) : (prefs.target ?? null);
+  const chosenSize: WidgetSize =
+    fixedSize ?? (configEditor ? configEditor.size : prefs.size) ?? defaultSize ?? 'third';
+  const effectiveSize = strip ? 'full' : maxSize(chosenSize, activeVariant?.minSize ?? 'third');
+  const fillHeight = effectiveSize === 'full' ? null : bodyHeight;
+  const label = prefs.title || title;
+  const bodyResetKeys = [bodyResetKey, activeVariant?.key ?? null, widgetDays];
+  const richExpand = !!(
+    expand &&
+    (expand.renderExpanded || expand.renderExpandedBar || expand.statsFor)
+  );
+  const overlayBody = (
+    <WidgetPeriodProvider value={widgetPeriod}>
+      <WidgetTargetContext.Provider value={activeTarget}>
+        {variantResult.ok
+          ? activeVariant
+            ? activeVariant.render
+            : children
+          : <ThrowInRender error={variantResult.error} />}
+        {activeVariant ? children : null}
+      </WidgetTargetContext.Provider>
+    </WidgetPeriodProvider>
+  );
+
+  const sequenceIndex = group ? group.sequence.indexOf(widgetId) : -1;
+  const reorder = !!group?.reorderMode;
+  const dragging = reorder && group?.draggingId === widgetId;
+  const outerStyle: CSSProperties = {};
+  if (sequenceIndex >= 0) outerStyle.order = sequenceIndex;
+  if (prefs.hidden) outerStyle.display = 'none';
+
+  const accentVars: Record<string, string> | null = activeColor
+    ? {
+        '--brand-iris': `var(--chart-${activeColor}-accent)`,
+        '--brand-iris-deep': `var(--chart-${activeColor}-accent-deep)`,
+        '--chart-role-primary': `var(--chart-${activeColor}-accent)`,
+        '--chart-role-selection': `var(--chart-${activeColor}-accent)`,
+      }
+    : null;
+  if (accentVars) Object.assign(outerStyle as Record<string, string>, accentVars);
+
+  const innerStyle: CSSProperties = {};
+  if (activeTinted && !activeColor) {
+    innerStyle.background =
+      'radial-gradient(120% 90% at 50% 0%, hsl(var(--card-tint) / var(--card-tint-alpha)), transparent 62%), hsl(var(--card))';
+  }
+  (innerStyle as Record<string, string>)['--enter-delay'] = `${Math.min(Math.max(sequenceIndex, 0), 8) * 35}ms`;
+  if (dragging) {
+    innerStyle.animation = 'none';
+    innerStyle.transform = 'scale(1.02)';
+  } else if (reorder && sequenceIndex % 2 === 1) {
+    innerStyle.animationDuration = '0.37s';
+    innerStyle.animationDelay = '0.06s';
+  }
+
+  return {
+    identity: { widgetId, label },
+    refs: { sectionRef, bodyRef, originRectRef, cardPressRef },
+    preferences: { prefs, updatePrefs, pinned },
+    period: { requestedDays, widgetDays, widgetPeriod, periodWidened },
+    variants: { resolvedVariants, activeVariant, primaryBody },
+    layout: {
+      group,
+      sequenceIndex,
+      reorder,
+      dragging,
+      effectiveSize,
+      fillHeight,
+      outerStyle,
+      innerStyle,
+      activeColor,
+      activeTinted,
+      activeTarget,
+    },
+    controls: {
+      homeEditing,
+      menuOpen,
+      setMenuOpen,
+      editOpen,
+      setEditOpen,
+      removePresence,
+      removeFromHome,
+      openEdit,
+    },
+    expansion: {
+      open: expandOpen,
+      openExpand,
+      closeExpand,
+      richExpand,
+      accentStyle: accentVars as CSSProperties | null,
+      overlayBody,
+    },
+    bodyResetKeys,
+  };
+}
