@@ -18,7 +18,7 @@ const { log } = require('./lib/observability');
 async function main({ port } = {}) {
   // index.js на require строит config+deps+app и СТАРТУЕТ boot-цепочку БД (fire-and-
   // forget, как раньше); main её дожидается перед listen.
-  const { app, config, bootPromise } = require('./index');
+  const { app, config, bootPromise, memoryCache, drainState } = require('./index');
 
   // Boot-fatal конфиг-чек (бывший inline-блок index.js §133-159, теперь validateConfig:
   // те же условия SESSION_SECRET/MTPROTO + инварианты порта/реплик/https). Prod: громкий
@@ -76,13 +76,26 @@ async function main({ port } = {}) {
 ╚══════════════════════════════════════════╝
   `);
 
+  // Кэш-свип — таймер рантайма (PR E): стартует ПОСЛЕ listen, гасится в stop().
+  // createApp/require-only консюмеры (тесты) его не запускают — ленивая эвикция на чтении.
+  memoryCache.start();
+
   let stopped = false;
   async function stop() {
     if (stopped) return;
     stopped = true;
+    // Дренаж: /api/ready начинает отдавать 503 draining — балансировщик снимает инстанс,
+    // server.close дорабатывает in-flight запросы, затем гасим свип и пул БД.
+    drainState.draining = true;
     await new Promise((resolve) => server.close(resolve));
+    memoryCache.stop();
     await db.close().catch(() => {});
   }
+
+  // Graceful shutdown (PR E): Railway шлёт SIGTERM перед остановкой контейнера. once —
+  // повторный сигнал во время дренажа не дёргает stop() заново (он и так идемпотентен).
+  process.once('SIGTERM', () => { stop().then(() => process.exit(0)); });
+  process.once('SIGINT',  () => { stop().then(() => process.exit(0)); });
 
   return { app, server, config, stop };
 }
