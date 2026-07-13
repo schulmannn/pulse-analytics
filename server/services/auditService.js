@@ -2,7 +2,7 @@
 //  Atlavue — audit service (журнал действий с хэшом IP)
 // ═══════════════════════════════════════════════════════════════
 // Фабрика audit-домена (декомпозиция index.js, PR C): audit(req, action, metadata) —
-// единственный писатель audit_events. Без process.env/Express; тело перенесено из
+// единственный писатель audit_events. Без чтения окружения/Express; тело перенесено из
 // index.js literal (поведение-preserving).
 
 'use strict';
