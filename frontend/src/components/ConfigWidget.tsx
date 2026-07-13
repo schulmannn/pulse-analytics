@@ -120,14 +120,13 @@ export function WidgetBody({ config, onDrill, drillLabel }: { config: WidgetConf
 /** A legacy composite body (KpiGrid / TopPosts / …) hosted in the unified card. It reads
  *  useWidgetPeriod(), so we scope that to the instance's config.period — widened to the channel's
  *  data window like the feed does (resolveEffectivePeriod), so a dormant channel isn't blank. Source
- *  is already applied via a ChannelScope on the card. An un-wired legacy key (U6.3b) renders nothing. */
+ *  is already applied via a ChannelScope on the card. */
 function LegacyWidgetBody({ legacyKey, config }: { legacyKey: LegacyKey; config: WidgetConfig }) {
   const render = LEGACY_RENDER[legacyKey];
   const recency = useChannelRecency();
   const requested = config.period ?? DEFAULT_WIDGET_DAYS;
   const days = resolveEffectivePeriod(requested, recency);
   const period = useMemo(() => widgetPeriodValue(days), [days]);
-  if (!render) return null;
   return (
     <WidgetPeriodProvider value={period}>
       {/* Config cards carry no period pills, so surface the auto-widen the same way the old
@@ -137,7 +136,7 @@ function LegacyWidgetBody({ legacyKey, config }: { legacyKey: LegacyKey; config:
           За {PERIOD_WORD[requested]} данных нет — показано за {PERIOD_WORD[days]}.
         </p>
       )}
-      {render()}
+      {render(config)}
     </WidgetPeriodProvider>
   );
 }

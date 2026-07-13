@@ -7,7 +7,13 @@
 import type { WidgetConfig } from '@/lib/widgetConfig';
 import { getMetric, type WidgetViz } from '@/lib/widgetMetrics';
 import { dimensionsFor, type DimensionDef } from '@/lib/dimensions';
-import { LEGACY_CAPABILITIES, LEGACY_LABEL, legacyKeyForMetricId, type WidgetCapabilities } from '@/lib/legacyWidgets';
+import {
+  LEGACY_CAPABILITIES,
+  LEGACY_LABEL,
+  LEGACY_SUPPORTED_VIZ,
+  legacyKeyForMetricId,
+  type WidgetCapabilities,
+} from '@/lib/legacyWidgets';
 
 const NO_CAPABILITIES: WidgetCapabilities = { metric: false, viz: false, grain: false, comparison: false, target: false, filter: false };
 
@@ -29,7 +35,12 @@ export interface EditorSpec {
 export function editorSpec(config: WidgetConfig): EditorSpec {
   const legacyKey = legacyKeyForMetricId(config.metricId);
   if (legacyKey) {
-    return { label: LEGACY_LABEL[legacyKey], supportedViz: [], filterDims: [], capabilities: LEGACY_CAPABILITIES[legacyKey] };
+    return {
+      label: LEGACY_LABEL[legacyKey],
+      supportedViz: LEGACY_SUPPORTED_VIZ[legacyKey],
+      filterDims: [],
+      capabilities: LEGACY_CAPABILITIES[legacyKey],
+    };
   }
   const metric = getMetric(config.metricId);
   if (!metric) return { label: 'Метрика', supportedViz: [], filterDims: [], capabilities: NO_CAPABILITIES };

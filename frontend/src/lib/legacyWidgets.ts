@@ -10,6 +10,7 @@
 // shell (period / source / title / size / style) is always editable — one system, one editor.
 
 import type { WidgetSize } from '@/lib/widgetPrefsStore';
+import type { WidgetViz } from '@/lib/widgetMetrics';
 
 /** Which builder controls a widget can drive. Metric widgets derive these from their MetricDef;
  *  legacy widgets declare them here. Period / source / title / size / style are universal shell and
@@ -43,26 +44,51 @@ export const LEGACY_LABEL: Record<LegacyKey, string> = {
 };
 
 /** The footprint a legacy widget wants when the user hasn't chosen one (mirrors the old registry). */
-export const LEGACY_DEFAULT_SIZE: Partial<Record<LegacyKey, WidgetSize>> = {
+export const LEGACY_DEFAULT_SIZE: Record<LegacyKey, WidgetSize> = {
   kpi: 'full',
+  growth: 'third',
   'top-posts': 'full',
+  history: 'half',
+  velocity: 'third',
   heatmap: 'full',
+  mentions: 'third',
+};
+
+/** Visualisations supported by each composite adapter. */
+export const LEGACY_SUPPORTED_VIZ: Record<LegacyKey, WidgetViz[]> = {
+  kpi: ['kpi'],
+  growth: ['kpi'],
+  'top-posts': ['kpi'],
+  history: ['line', 'bar'],
+  velocity: ['line', 'bar'],
+  heatmap: ['kpi'],
+  mentions: ['bar', 'line'],
+};
+
+export const LEGACY_DEFAULT_VIZ: Record<LegacyKey, WidgetViz> = {
+  kpi: 'kpi',
+  growth: 'kpi',
+  'top-posts': 'kpi',
+  history: 'line',
+  velocity: 'line',
+  heatmap: 'kpi',
+  mentions: 'bar',
 };
 
 // Composite blocks are fixed compositions, not single metrics — none of the metric-level controls
 // apply, so they edit shell-only (period / source / title / size / style). Richer per-legacy
-// capabilities (e.g. a comparison toggle on «Показатели») can be turned on here later as the blocks
-// learn to consume them.
+// capabilities can be enabled per adapter as the body learns to consume them; the three chart
+// composites already expose their line/bar presentation switch.
 const SHELL_ONLY: WidgetCapabilities = { metric: false, viz: false, grain: false, comparison: false, target: false, filter: false };
 
 export const LEGACY_CAPABILITIES: Record<LegacyKey, WidgetCapabilities> = {
   kpi: SHELL_ONLY,
   growth: SHELL_ONLY,
   'top-posts': SHELL_ONLY,
-  history: SHELL_ONLY,
-  velocity: SHELL_ONLY,
+  history: { ...SHELL_ONLY, viz: true },
+  velocity: { ...SHELL_ONLY, viz: true },
   heatmap: SHELL_ONLY,
-  mentions: SHELL_ONLY,
+  mentions: { ...SHELL_ONLY, viz: true },
 };
 
 // ── `legacy:<key>` metricId namespace ─────────────────────────────────────────────────────────

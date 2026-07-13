@@ -9,6 +9,9 @@ import { ChartSection } from '@/components/ChartWidget';
 import { WidgetGroup } from '@/components/widgets/WidgetGroup';
 import { breakdownVariants } from '@/components/widgets/variants';
 import { LineChart } from '@/components/LineChart';
+import { useWidgetPeriod } from '@/lib/period';
+import type { WidgetViz } from '@/lib/widgetMetrics';
+import { ErrorState } from '@/components/ErrorState';
 
 export function Mentions() {
   // Archive (Postgres) loads on mount — free. The live MTProto search only runs on the
@@ -194,23 +197,22 @@ export function Mentions() {
   );
 }
 
-/**
- * «Упоминаний по дням» — reusable so both the Mentions panel and the personal Home render it.
- * `byDay` is the full archive (dd.mm → count); the widget windows it by its OWN period (the header
- * pills) and the «Развернуть» overlay windows it further. Slices by day count, since the archive is
- * keyed by dd.mm (one entry per day), not an ISO date. Pass id/homeKey on Home for a distinct prefs
- * identity + the «Убрать с главной» menu item.
- */
-export function MentionsByDayWidget({ byDay, id, homeKey }: { byDay: Record<string, number>; id?: string; homeKey?: string }) {
+/** Slice the dd.mm-keyed archive by day count and build both chart presentations. */
+function mentionsWindow(byDay: Record<string, number>, days: number) {
   const sortedDates = Object.keys(byDay).sort((a, b) => compareDdMm(a, b));
-  const mentionWindow = (days: number) => {
-    const dates = days === 0 ? sortedDates : sortedDates.slice(-days);
-    const values = dates.map((date) => byDay[date] ?? 0);
-    // Канонный вид дат («3 июл.»), не сырые dd.mm-ключи API (аудит: два формата на экране).
-    const titles = dates.map((date) => `${ddmmDay(date)}: ${fmt.num(byDay[date] ?? 0)}`);
-    const axisLabels = [ddmmDay(dates[0] ?? ''), ddmmDay(dates[Math.floor(dates.length / 2)] ?? ''), ddmmDay(dates[dates.length - 1] ?? '')];
-    return { dates, values, titles, axisLabels };
-  };
+  const dates = days === 0 ? sortedDates : sortedDates.slice(-days);
+  const values = dates.map((date) => byDay[date] ?? 0);
+  const titles = dates.map((date) => `${ddmmDay(date)}: ${fmt.num(byDay[date] ?? 0)}`);
+  const axisLabels = [
+    ddmmDay(dates[0] ?? ''),
+    ddmmDay(dates[Math.floor(dates.length / 2)] ?? ''),
+    ddmmDay(dates[dates.length - 1] ?? ''),
+  ];
+  return { dates, values, titles, axisLabels };
+}
+
+/** «Упоминаний по дням» on the Mentions surface. It keeps its source-screen ChartSection. */
+export function MentionsByDayWidget({ byDay, id, homeKey }: { byDay: Record<string, number>; id?: string; homeKey?: string }) {
   return (
     <ChartSection
       id={id}
@@ -218,7 +220,7 @@ export function MentionsByDayWidget({ byDay, id, homeKey }: { byDay: Record<stri
       title="Упоминаний по дням"
       periodControl
       variants={(period) => {
-        const w = mentionWindow(period.days);
+        const w = mentionsWindow(byDay, period.days);
         return [
           {
             key: 'bar',
@@ -236,31 +238,33 @@ export function MentionsByDayWidget({ byDay, id, homeKey }: { byDay: Record<stri
       }}
       expand={{
         renderExpanded: (days) => {
-          const w = mentionWindow(days);
+          const w = mentionsWindow(byDay, days);
           return <LineChart values={w.values} labels={w.axisLabels} titles={w.titles} yMin={0} markAnomalies markExtremes />;
         },
         renderExpandedBar: (days) => {
-          const w = mentionWindow(days);
+          const w = mentionsWindow(byDay, days);
           return <BarChart values={w.values} labels={w.dates} titles={w.titles} />;
         },
-        statsFor: (days) => mentionWindow(days).values,
+        statsFor: (days) => mentionsWindow(byDay, days).values,
       }}
     />
   );
 }
 
-/** Self-fetching «Упоминаний по дням» for the personal Home — pulls the FREE mentions archive
-    (no live search, no quota) and renders the widget standalone. */
-export function HomeMentionsByDay({ id, homeKey }: { id?: string; homeKey?: string }) {
+/** Bare, config-driven body for Home. ConfigWidget owns the card, period and presentation switch. */
+export function MentionsWidgetBody({ viz }: { viz: WidgetViz }) {
   const archive = useMentionsArchive();
-  if (archive.isPending) {
-    return (
-      <ChartSection id={id} homeKey={homeKey} title="Упоминаний по дням">
-        <Skeleton className="h-40 w-full" />
-      </ChartSection>
-    );
+  const { days } = useWidgetPeriod();
+
+  if (archive.isPending) return <Skeleton className="h-40 w-full" />;
+  if (archive.isError) {
+    return <ErrorState title="Не удалось загрузить упоминания" onRetry={() => archive.refetch()} />;
   }
-  return <MentionsByDayWidget byDay={archive.data?.by_day ?? {}} id={id} homeKey={homeKey} />;
+
+  const w = mentionsWindow(archive.data?.by_day ?? {}, days);
+  return viz === 'line'
+    ? <LineChart values={w.values} labels={w.axisLabels} titles={w.titles} yMin={0} />
+    : <BarChart values={w.values} labels={w.dates} titles={w.titles} />;
 }
 
 function MentionsSkeletons() {

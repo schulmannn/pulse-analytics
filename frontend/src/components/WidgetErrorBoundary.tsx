@@ -12,7 +12,7 @@ interface WidgetErrorBoundaryProps {
    * 'inline' (default) — the boundary sits INSIDE a card's body (ChartSection already draws the card
    * chrome + ⋯ menu), so the fallback just fills the body region and the card stays usable (the user
    * can still Скрыть / Изменить the broken widget). 'card' — the boundary wraps a whole self-chromed
-   * widget (own-chrome legacy), so the fallback draws its own hairline card that fills the grid slot.
+   * widget (a curated own-chrome card), so the fallback draws its own hairline card that fills the grid slot.
    */
   variant?: 'inline' | 'card';
   /** For variant='card': the crashed widget's footprint, so the fallback fills the same grid slot the

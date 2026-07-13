@@ -1,6 +1,11 @@
 import { test, expect, type Page } from '@playwright/test';
 import { bootDemo } from './helpers';
 
+const overviewOverlayCard = (page: Page) =>
+  page.locator('section').filter({
+    has: page.getByRole('heading', { name: 'Лучшие публикации', exact: true }),
+  });
+
 test('detail open + back (metric drilldown)', async ({ page }) => {
   await bootDemo(page, '/');
   // A drillable KPI hero exposes an aria-label «Разбор: …»; clicking it opens the metric detail page.
@@ -16,8 +21,9 @@ test('detail open + back (metric drilldown)', async ({ page }) => {
 
 test('whole-card click opens the detail overlay', async ({ page }) => {
   await bootDemo(page, '/');
-  // Click the card's own chrome (its title text — not a button/chart), which opens the detail overlay.
-  await page.locator('section:has(h3)').first().locator('h3').first().click();
+  // Pick an overlay-owned card explicitly. The first Overview card drills to /metrics/views and is
+  // intentionally a different interaction contract.
+  await overviewOverlayCard(page).getByRole('heading', { name: 'Лучшие публикации' }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
   // …and it closes on Escape, leaving the card intact.
   await page.keyboard.press('Escape');
@@ -26,7 +32,7 @@ test('whole-card click opens the detail overlay', async ({ page }) => {
 
 test('detail overlay is URL-stated and closes on browser Back', async ({ page }) => {
   await bootDemo(page, '/');
-  await page.locator('section:has(h3)').first().locator('h3').first().click();
+  await overviewOverlayCard(page).getByRole('heading', { name: 'Лучшие публикации' }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
   await expect(page).toHaveURL(/[?&]detail=/); // open pushed a shareable URL state
   await page.goBack();
@@ -106,6 +112,79 @@ test('edit-mode entry + exit (Home)', async ({ page }) => {
   await expect(page.getByRole('button', { name: /Добавить виджет/ })).toBeVisible();
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-pressed', 'false'); // exited
+});
+
+test('legacy Home cards use one config path and preserve old prefs during migration', async ({ page }) => {
+  const legacyKeys = ['kpi', 'growth', 'top-posts', 'history', 'velocity', 'heatmap', 'mentions'];
+  await page.addInitScript((keys) => {
+    localStorage.setItem('pulse_home_blocks', JSON.stringify({ keys }));
+    localStorage.setItem('pulse_widget_configs', '[]');
+    localStorage.setItem('pulse_widget_prefs', JSON.stringify({
+      'home-history': {
+        period: 90,
+        size: 'full',
+        title: 'Моя история',
+        source: 17,
+        color: 2,
+        tinted: false,
+        variant: 'bar-values',
+      },
+      'home-mentions': { hidden: true },
+    }));
+    localStorage.setItem('pulse_widget_order', JSON.stringify({
+      home: ['home-velocity', 'home-history', 'home-kpi', 'home-growth', 'home-top-posts', 'home-heatmap', 'home-mentions'],
+    }));
+  }, legacyKeys);
+
+  await bootDemo(page, '/home');
+
+  const cardHeadings = page.locator('.home-board-canvas h3');
+  await expect(cardHeadings).toHaveCount(legacyKeys.length);
+  await expect(cardHeadings.filter({ hasText: 'Моя история' })).toHaveCount(1);
+
+  await expect.poll(() => page.evaluate(() => {
+    const configs = JSON.parse(localStorage.getItem('pulse_widget_configs') ?? '[]') as Array<{
+      id: string;
+      metricId: string;
+      viz: string;
+      period?: number;
+      size?: string;
+      title?: string;
+      source?: number;
+      style?: { color?: number; tinted?: boolean };
+    }>;
+    const history = configs.find((config) => config.id === 'legacy-history');
+    return {
+      legacyIds: configs.filter((config) => config.metricId.startsWith('legacy:')).map((config) => config.id).sort(),
+      history,
+      prefs: JSON.parse(localStorage.getItem('pulse_widget_prefs') ?? '{}'),
+      order: JSON.parse(localStorage.getItem('pulse_widget_order') ?? '{}').home,
+    };
+  })).toEqual({
+    legacyIds: legacyKeys.map((key) => `legacy-${key}`).sort(),
+    history: {
+      id: 'legacy-history',
+      metricId: 'legacy:history',
+      viz: 'bar',
+      period: 90,
+      size: 'full',
+      title: 'Моя история',
+      source: 17,
+      style: { color: 2, tinted: false },
+    },
+    prefs: expect.objectContaining({
+      'custom-legacy-mentions': expect.objectContaining({ hidden: true }),
+    }),
+    order: [
+      'custom-legacy-velocity',
+      'custom-legacy-history',
+      'custom-legacy-kpi',
+      'custom-legacy-growth',
+      'custom-legacy-top-posts',
+      'custom-legacy-heatmap',
+      'custom-legacy-mentions',
+    ],
+  });
 });
 
 test('edit toggle expands like a compact Steep action without shifting the header slot', async ({ page }) => {
