@@ -6,6 +6,7 @@ const { canDispatchBugKind, sanitizeForPrompt } = require('../lib/bugfix_gate');
 
 function registerBugsRoutes({
   app, express, db, rateLimit, requireAuth, requireSuper, fetchWithTimeout, AUTH_SECRET,
+  commitSha, githubRepo, githubDispatchToken,
 }) {
   // ════════════════════════════════════════════════════════════════
   //  БАГ-ТРЕКЕР (Postgres)
@@ -59,7 +60,7 @@ function registerBugsRoutes({
     keyGenerator: (req) => `crash:u${req.user.uid}`,
     message: { error: 'Слишком много отчётов об ошибках.' },
   });
-  const SERVER_COMMIT = String(process.env.RAILWAY_GIT_COMMIT_SHA || process.env.COMMIT_SHA || 'dev').slice(0, 7);
+  const SERVER_COMMIT = String(commitSha || 'dev').slice(0, 7);   // config.runtime.commitSha ('' локально → 'dev')
   const hashUid = (uid) => crypto.createHash('sha256').update(`${uid}:${AUTH_SECRET}`).digest('hex').slice(0, 12);
 
   // Client-crash → dedup ledger (+ optional Notion card). Always upserts the signature ledger when the
@@ -126,8 +127,8 @@ function registerBugsRoutes({
   // Fires a GitHub repository_dispatch → the claude-bugfix workflow attempts a fix and
   // opens a PR (never pushes to main, which auto-deploys). Needs GITHUB_REPO +
   // GITHUB_DISPATCH_TOKEN (PAT with repo/contents write) in the env; soft-off otherwise.
-  const GH_REPO  = process.env.GITHUB_REPO || '';            // e.g. "schulmannn/pulse-analytics"
-  const GH_TOKEN = process.env.GITHUB_DISPATCH_TOKEN || '';
+  const GH_REPO  = githubRepo || '';            // config.github.repo, e.g. "schulmannn/pulse-analytics"
+  const GH_TOKEN = githubDispatchToken || '';   // config.github.dispatchToken
 
   app.post('/api/bugs/:id/claude-fix', requireAuth, requireSuper, async (req, res, next) => {
     if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });

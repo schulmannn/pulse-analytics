@@ -54,12 +54,21 @@ function loadConfig(env = process.env) {
       accountId: env.IG_ACCOUNT_ID || '',
       accessToken: env.IG_ACCESS_TOKEN || '',
       tokenKey: env.IG_TOKEN_KEY || '',
+      // Per-channel OAuth app credentials (IG-Login flow, routes/ig-oauth): без пары
+      // клиент/секрет connect-флоу inert — фолбэк на глобальный env-аккаунт или мок.
+      clientId: env.IG_CLIENT_ID || '',
+      clientSecret: env.IG_CLIENT_SECRET || '',
     }),
     telegram: Object.freeze({
       botToken: env.TG_BOT_TOKEN || '',
       channel: env.TG_CHANNEL || '',
       mtprotoUrl: env.MTPROTO_URL || '',
       mtprotoToken: env.MTPROTO_TOKEN || '',
+    }),
+    github: Object.freeze({
+      // repository_dispatch для claude-bugfix (кнопка в баг-трекере); soft-off без пары.
+      repo: env.GITHUB_REPO || '',
+      dispatchToken: env.GITHUB_DISPATCH_TOKEN || '',
     }),
     email: Object.freeze({
       apiKey: env.RESEND_API_KEY || '',
@@ -69,6 +78,10 @@ function loadConfig(env = process.env) {
       webReplicas: Number(env.WEB_REPLICAS || 1),
       ingestToken: env.INGEST_TOKEN || '',
       capacityRollups: env.CAPACITY_ROLLUPS === '1',
+      // Деплой-метка для crash-телеметрии (Railway её штампует; локально пусто → 'dev' в bugs).
+      commitSha: env.RAILWAY_GIT_COMMIT_SHA || env.COMMIT_SHA || '',
+      // Порог «коллектор молчит» для /collector-status; деривация как была в роуте.
+      collectorStaleHours: Math.max(1, parseInt(env.COLLECTOR_STALE_HOURS, 10) || 24),
     }),
   });
 }

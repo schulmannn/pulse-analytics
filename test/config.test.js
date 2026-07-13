@@ -47,6 +47,28 @@ test('loadConfig: appUrl — RAW без дефолта (пусто = не зад
   assert.equal(loadConfig({}).http.publicUrl, 'https://atlavue.app', 'publicUrl дефолтит — это ДРУГОЕ поле');
 });
 
+test('loadConfig: бывшие route-env (commitSha/staleHours/IG-oauth/GH-dispatch) — деривации как в роутах', () => {
+  const d = loadConfig({});
+  assert.equal(d.runtime.commitSha, '', 'пусто локально → роут дефолтит dev сам');
+  assert.equal(d.runtime.collectorStaleHours, 24, 'дефолт 24ч');
+  assert.equal(d.instagram.clientId, '');
+  assert.equal(d.github.repo, '');
+  const c = loadConfig({
+    RAILWAY_GIT_COMMIT_SHA: 'abc1234def', COLLECTOR_STALE_HOURS: '0',
+    IG_CLIENT_ID: 'cid', IG_CLIENT_SECRET: 'sec', GITHUB_REPO: 'o/r', GITHUB_DISPATCH_TOKEN: 't',
+  });
+  assert.equal(c.runtime.commitSha, 'abc1234def');
+  // '0' → parseInt 0 (falsy) → ||24 → 24: ТОЧНО как старая формула роута (кламп max(1,…)
+  // страхует только отрицательные/дробные <1, не ноль — фиксируем как есть).
+  assert.equal(c.runtime.collectorStaleHours, 24);
+  assert.equal(loadConfig({ COLLECTOR_STALE_HOURS: '48' }).runtime.collectorStaleHours, 48);
+  assert.equal(loadConfig({ COLLECTOR_STALE_HOURS: '-5' }).runtime.collectorStaleHours, 1, 'Math.max(1,…) клампит отрицательные');
+  assert.equal(c.instagram.clientId, 'cid');
+  assert.equal(c.instagram.clientSecret, 'sec');
+  assert.equal(c.github.repo, 'o/r');
+  assert.equal(c.github.dispatchToken, 't');
+});
+
 test('loadConfig: trustedHosts raw + capacityRollups строго ===\'1\'', () => {
   assert.equal(loadConfig({}).http.trustedHosts, '');
   assert.equal(loadConfig({ TRUSTED_HOSTS: 'a.app, b.app' }).http.trustedHosts, 'a.app, b.app', 'сырая строка — Set строит index');

@@ -159,6 +159,7 @@ function createApp(deps) {
   registerIgOauthRoutes({
     app, db, requireAuth, audit, log, fetchWithTimeout, asyncHandler,
     appBase, cache, igConfigured, igCrypto, AUTH_SECRET, IG_GRAPH,
+    IG_CLIENT_ID: config.instagram.clientId, IG_CLIENT_SECRET: config.instagram.clientSecret,
   });
 
   registerChannelsRoutes({ app, db, requireAuth, audit, getDbReady });
@@ -177,6 +178,7 @@ function createApp(deps) {
     isReady: getDbReady,
     requireAuth,
     audit,
+    collectorStaleHours: config.runtime.collectorStaleHours,
   });
 
   registerTgRoutes({
@@ -262,6 +264,9 @@ function createApp(deps) {
     requireSuper,
     fetchWithTimeout,
     AUTH_SECRET,
+    commitSha: config.runtime.commitSha,
+    githubRepo: config.github.repo,
+    githubDispatchToken: config.github.dispatchToken,
   });
 
   // ── Sprint 3F-3 catover: new Vite/React SPA is the primary dashboard, served at '/' ──
