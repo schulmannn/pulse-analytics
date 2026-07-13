@@ -39,6 +39,22 @@ test('loadConfig: значения из env + нормализация', () => {
   assert.equal(c.runtime.ingestToken, 'tok');
 });
 
+test('loadConfig: appUrl — RAW без дефолта (пусто = не задан), с тримом хвостового «/»', () => {
+  // Контракт B2c: appBase() в index решает фолбэк сам — config НЕ подставляет atlavue
+  // (в отличие от publicUrl, который дефолтит для validateConfig).
+  assert.equal(loadConfig({}).http.appUrl, '');
+  assert.equal(loadConfig({ APP_URL: 'https://x.app/' }).http.appUrl, 'https://x.app');
+  assert.equal(loadConfig({}).http.publicUrl, 'https://atlavue.app', 'publicUrl дефолтит — это ДРУГОЕ поле');
+});
+
+test('loadConfig: trustedHosts raw + capacityRollups строго ===\'1\'', () => {
+  assert.equal(loadConfig({}).http.trustedHosts, '');
+  assert.equal(loadConfig({ TRUSTED_HOSTS: 'a.app, b.app' }).http.trustedHosts, 'a.app, b.app', 'сырая строка — Set строит index');
+  assert.equal(loadConfig({}).runtime.capacityRollups, false);
+  assert.equal(loadConfig({ CAPACITY_ROLLUPS: '1' }).runtime.capacityRollups, true);
+  assert.equal(loadConfig({ CAPACITY_ROLLUPS: 'true' }).runtime.capacityRollups, false, 'только "1" — как старый ===-чек');
+});
+
 test('isProductionEnv: NODE_ENV=production ИЛИ Railway-маркер', () => {
   assert.equal(isProductionEnv({ NODE_ENV: 'production' }), true);
   assert.equal(isProductionEnv({ RAILWAY_ENVIRONMENT: 'prod' }), true);

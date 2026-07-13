@@ -15,17 +15,16 @@ const { log, hashIp } = require('./lib/observability');
 const { makeResolveChannel, hasWorkspaceRole } = require('./middleware/tenant');
 const { loadConfig } = require('./config');
 const { createApp } = require('./app');
-// PR B2a: единственная точка чтения process.env для index.js (config.js). Оставшиеся env-чтения
-// (APP_URL/TRUSTED_HOSTS/IG/TG/CAPACITY) вирятся в B2b/B2c, когда config отдаст raw-поля.
+// Единственная точка чтения process.env — config.js (все env-чтения проведены на config.*).
 const config = loadConfig(process.env);
-
-const PORT = config.http.port;
 
 // История (Postgres) — поднимаем схему, если БД подключена; иначе тихо выключено.
 // После схемы — бутстрап админ-аккаунта, затем привязка central-канала к админу.
-// dbReady гейтит data-роуты, пока идёт миграция (app.listen стартует синхронно).
+// dbReady гейтит data-роуты, пока идёт миграция; main.js ждёт bootPromise ДО listen.
+// Цепочка НИКОГДА не reject'ится: сбой БД логируется (db_init_failed), dbReady=false,
+// сервер всё равно поднимается (health 200 / ready 503) — прежнее DB-стойкое поведение.
 let dbReady = false;
-db.init().then(bootstrapAdmin).then(claimOwnerChannel).then(() => { dbReady = true; })
+const bootPromise = db.init().then(bootstrapAdmin).then(claimOwnerChannel).then(() => { dbReady = true; })
   .catch(e => { log('error', 'db_init_failed', { error: e.message }); dbReady = false; });
 
 
@@ -58,33 +57,8 @@ const authLimiter = rateLimit({
 // would silently log everyone out on each deploy); dev gets a random per-process
 // secret with a warning.
 const IS_PRODUCTION = config.isProduction;
-{
-  const missing = [];
-  if (!config.auth.sessionSecret) {
-    missing.push(
-      'SESSION_SECRET is not set. It signs dashboard session tokens.',
-      '    → Set SESSION_SECRET to a long random value (e.g. `openssl rand -hex 32`).',
-      '      Rotating it invalidates every active session.');
-  }
-  if (config.telegram.mtprotoUrl && !config.telegram.mtprotoToken) {
-    missing.push(
-      'MTPROTO_TOKEN is not set, but MTPROTO_URL is configured.',
-      '    → Set MTPROTO_TOKEN to a long random value (e.g. `openssl rand -hex 32`)',
-      '      and set the SAME value on the mtproto service — it authenticates the',
-      '      internal web → mtproto calls (x-internal-token header).');
-  }
-  if (missing.length && IS_PRODUCTION) {
-    console.error([
-      '════════════════════════════════════════════════════════════════════',
-      '[boot] FATAL: required secrets are missing in a production environment.',
-      ...missing.map(l => '[boot] ' + l),
-      '[boot] (The legacy shared team-password env is no longer read — delete it',
-      '[boot]  from both services once SESSION_SECRET/MTPROTO_TOKEN are set.)',
-      '════════════════════════════════════════════════════════════════════',
-    ].join('\n'));
-    process.exit(1);
-  }
-}
+// Boot-fatal проверка обязательных секретов (SESSION_SECRET, MTPROTO_URL⇒MTPROTO_TOKEN в prod)
+// переехала в main.js: validateConfig(config) → ConfigError (те же условия + инварианты портов/реплик).
 const AUTH_SECRET = config.auth.sessionSecret || crypto.randomBytes(32).toString('hex');
 if (!config.auth.sessionSecret) {
   console.warn('[auth] SESSION_SECRET not set (dev) — using an ephemeral random secret; sessions will not survive a restart');
@@ -214,7 +188,7 @@ const nearestOf = (value, allowed) =>
 // ── Email (verification / password reset) via Resend — no new dependency ──
 const RESEND_API_KEY = config.email.apiKey;
 const EMAIL_FROM = config.email.from;
-const APP_URL = (process.env.APP_URL || '').replace(/\/$/, '');
+const APP_URL = config.http.appUrl;
 // Canonical public origin (Atlavue rebrand) — last-resort fallback for emailed
 // links / OAuth callbacks when APP_URL is unset and the request Host isn't
 // allow-listed. Constant, not the old Railway host: a stale fallback silently
@@ -224,7 +198,7 @@ const CANONICAL_ORIGIN = 'https://atlavue.app';
 // against Host-header poisoning (reset link → account takeover). Best practice:
 // set APP_URL in production. Override the allowlist with TRUSTED_HOSTS (comma-sep).
 const TRUSTED_HOSTS = new Set(
-  (process.env.TRUSTED_HOSTS || new URL(CANONICAL_ORIGIN).host)
+  (config.http.trustedHosts || new URL(CANONICAL_ORIGIN).host)
     .split(',').map(s => s.trim().toLowerCase()).filter(Boolean));
 // In production an unset APP_URL silently falls back to CANONICAL_ORIGIN —
 // emailed verify/reset links and the IG OAuth callback then point at the
@@ -302,8 +276,10 @@ const emailBtn = (href, label) =>
 // precedence when a channel has connected its own account (see resolveIg in routes/ig.js).
 const IG_BASE      = 'https://graph.instagram.com/v22.0';   // versioned data edges
 const IG_GRAPH     = 'https://graph.instagram.com';         // token exchange / refresh / me (unversioned)
-const IG_TOKEN     = process.env.IG_ACCESS_TOKEN;
-const IG_ACCOUNT   = process.env.IG_ACCOUNT_ID;
+// `|| undefined` сохраняет прежнюю undefined-семантику (config дефолтит ''): igFetch
+// default-параметр и все falsy-проверки ведут себя байт-в-байт как при чтении env напрямую.
+const IG_TOKEN     = config.instagram.accessToken || undefined;
+const IG_ACCOUNT   = config.instagram.accountId || undefined;
 const igCrypto     = require('./lib/ig_crypto');
 const tgCrypto     = require('./lib/tg_crypto');
 const igMock       = require('./ig_mock');
@@ -609,7 +585,7 @@ async function processPersistence(centralChannelId, graphs) {
   // default — only runs when CAPACITY_ROLLUPS=1, and the jobs row makes exactly one web instance
   // recompute it per day (idempotent, cheap: bounded to recent months). Nothing reads channel_monthly
   // yet, so this is groundwork; enable it before wiring the long-range history reader.
-  if (process.env.CAPACITY_ROLLUPS === '1') {
+  if (config.runtime.capacityRollups) {
     const rollupKey = `channel_monthly:${day}`;
     try { await db.runJobOnce('rollup_channel_monthly', rollupKey, () => db.rollupChannelMonthly(3)); }
     catch (e) { log('error', 'channel_monthly_rollup_failed', { error: e.message }); }
@@ -737,8 +713,8 @@ async function processTgQrCollection() {
 
 // ── Telegram Bot API env — read here; still surfaced by /api/health + the boot banner, and
 // injected into routes/tg.js (which owns the Bot-API fetch helper and the /api/tg/* handlers). ──
-const TG_TOKEN   = process.env.TG_BOT_TOKEN;
-const TG_CHANNEL = process.env.TG_CHANNEL;
+const TG_TOKEN   = config.telegram.botToken || undefined;   // || undefined — как IG выше
+const TG_CHANNEL = config.telegram.channel || undefined;
 
 
 /* Email-выгрузка отчётов (v1). Дёргается fire-and-forget из дневного ingest-крона
@@ -873,33 +849,16 @@ const app = createApp({
 });
 
 // ── Запуск ──────────────────────────────────────────────────────
-// Single-replica guardrail (ops/ADR-002-single-replica.md). Response cache, igInflight singleflight
-// and the express-rate-limit stores are all in-process — correct only at ONE web replica. Railway
-// doesn't expose the replica count to the app, so the operator declares it via WEB_REPLICAS; bumping
-// Railway's replica slider WITHOUT the Redis-backed shared state (still unbuilt) silently multiplies
-// rate limits and Graph/MTProto quota burn. Loud boot error = the tripwire for that scale-up.
+// Lifecycle (validateConfig → await bootPromise → listen + баннер + single-replica
+// guardrail) живёт в main.js; index остаётся compat-entry (`npm start` = node server/
+// index.js) и точкой сборки deps до их переезда в services/jobs (PR C-E).
+module.exports = { app, config, bootPromise };
+
 if (require.main === module) {
-const WEB_REPLICAS = config.runtime.webReplicas;
-if (Number.isFinite(WEB_REPLICAS) && WEB_REPLICAS > 1) {
-  log('error', 'multi_replica_unsupported', {
-    web_replicas: WEB_REPLICAS,
-    reason: 'in-process cache + rate-limit + singleflight are per-instance; needs shared (Redis) store first — see ops/ADR-002-single-replica.md',
+  // Жёсткий exit(1), как раньше делал inline-чек секретов: ConfigError в prod не должен
+  // оставлять процесс висеть на открытых хендлах (pg pool), Railway рестартует по коду.
+  require('./main').main().catch((e) => {
+    console.error('[boot] fatal:', e && e.message);
+    process.exit(1);
   });
 }
-
-app.listen(PORT, () => {
-  console.log(`
-╔══════════════════════════════════════════╗
-║        Atlavue Server            ║
-╠══════════════════════════════════════════╣
-║  URL:      http://localhost:${PORT}          ║
-║  IG API:   ${IG_TOKEN ? '✅ настроен' : '❌ не задан (IG_ACCESS_TOKEN)'}           ║
-║  TG API:   ${TG_TOKEN ? '✅ настроен' : '❌ не задан (TG_BOT_TOKEN)'}             ║
-║  Sessions: ${config.auth.sessionSecret ? '✅ SESSION_SECRET задан' : '⚠️ ephemeral (dev) — задай SESSION_SECRET'}  ║
-║  MTProto:  ${config.telegram.mtprotoToken ? '✅ MTPROTO_TOKEN задан' : '❌ MTPROTO_TOKEN не задан'}       ║
-╚══════════════════════════════════════════╝
-  `);
-});
-}
-
-module.exports = { app };
