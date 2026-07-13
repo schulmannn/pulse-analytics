@@ -1,103 +1,119 @@
-// ═══════════════════════════════════════════════════════════════
-//  Atlavue — lifecycle (main)
-// ═══════════════════════════════════════════════════════════════
-// Оркестрация запуска: validateConfig → await bootPromise (миграции/бутстрап ДО
-// открытия порта) → listen → return runtime{stop()}. index.js строит config/deps/app
-// на module-load (как раньше) и остаётся entry (`node server/index.js` → main()).
-// process.on-сигналы здесь НЕ вешаются — graceful shutdown приходит отдельным PR (E).
-
 'use strict';
 
-const { validateConfig, ConfigError } = require('./config');
-const db = require('./db');
-const { log } = require('./lib/observability');
+const { loadConfig, validateConfig, ConfigError } = require('./config');
 
-// main({ port }) — port-override только для тестов (main({port:0}) = эфемерный порт);
-// прод зовёт без аргументов и слушает config.http.port. Возвращает runtime {app,
-// server, config, stop}; stop() идемпотентен (закрыть сервер + пул БД).
-async function main({ port } = {}) {
-  // index.js на require строит config+deps+app и СТАРТУЕТ boot-цепочку БД (fire-and-
-  // forget, как раньше); main её дожидается перед listen.
-  const { app, config, bootPromise, memoryCache, drainState } = require('./index');
+function waitForListening(server) {
+  return new Promise((resolve, reject) => {
+    server.once('listening', resolve);
+    server.once('error', reject);
+  });
+}
 
-  // Boot-fatal конфиг-чек (бывший inline-блок index.js §133-159, теперь validateConfig:
-  // те же условия SESSION_SECRET/MTPROTO + инварианты порта/реплик/https). Prod: громкий
-  // баннер + ConfigError (сообщения без значений секретов). Dev: мягкие warn'ы, boot
-  // продолжается — как раньше (старый блок в dev молчал).
-  const errors = validateConfig(config);
-  if (errors.length) {
-    if (config.isProduction) {
-      console.error([
-        '════════════════════════════════════════════════════════════════════',
-        '[boot] FATAL: невалидная конфигурация в production.',
-        ...errors.map((e) => `[boot] ${e.field}: ${e.message}`),
-        '════════════════════════════════════════════════════════════════════',
-      ].join('\n'));
-      throw new ConfigError(errors);
-    }
-    for (const e of errors) console.warn(`[boot:dev] config: ${e.field}: ${e.message}`);
+function closeServer(server) {
+  return new Promise((resolve, reject) => {
+    server.close((error) => (error ? reject(error) : resolve()));
+  });
+}
+
+function reportConfigErrors(config, errors) {
+  if (!errors.length) return;
+
+  if (config.isProduction) {
+    console.error(
+      [
+        '[boot] FATAL: invalid production configuration.',
+        ...errors.map((error) => `[boot] ${error.field}: ${error.message}`),
+      ].join('\n'),
+    );
+    throw new ConfigError(errors);
   }
 
-  // Миграции/бутстрап/claim ДО открытия порта. `npm start` уже прогнал migrate.js
-  // отдельным процессом — здесь идемпотентный no-op + bootstrapAdmin/claimOwnerChannel.
-  // Цепочка не reject'ится (сбой БД → db_init_failed внутри, dbReady=false) — сервер
-  // поднимается и в деградированном виде: health 200, ready 503.
-  await bootPromise;
-
-  // Single-replica guardrail (ops/ADR-002-single-replica.md). Response cache, igInflight
-  // singleflight and the express-rate-limit stores are all in-process — correct only at
-  // ONE web replica. Railway doesn't expose the replica count to the app, so the operator
-  // declares it via WEB_REPLICAS; bumping Railway's replica slider WITHOUT the Redis-backed
-  // shared state (still unbuilt) silently multiplies rate limits and Graph/MTProto quota
-  // burn. Loud boot error = the tripwire for that scale-up.
-  const WEB_REPLICAS = config.runtime.webReplicas;
-  if (Number.isFinite(WEB_REPLICAS) && WEB_REPLICAS > 1) {
-    log('error', 'multi_replica_unsupported', {
-      web_replicas: WEB_REPLICAS,
-      reason: 'in-process cache + rate-limit + singleflight are per-instance; needs shared (Redis) store first — see ops/ADR-002-single-replica.md',
-    });
+  for (const error of errors) {
+    console.warn(`[boot:dev] config: ${error.field}: ${error.message}`);
   }
+}
 
+async function main({
+  env = process.env,
+  port,
+  compositionFactory,
+  installSignalHandlers = true,
+  shutdownTimeoutMs = 25_000,
+} = {}) {
+  // Configuration must be known-good before application modules are loaded. Some of
+  // those modules create DB/network clients at module scope for their default adapters.
+  const config = loadConfig(env);
+  reportConfigErrors(config, validateConfig(config));
+
+  const createComposition =
+    compositionFactory || require('./composition').createComposition;
+  const composition = await createComposition(config);
+
+  await composition.boot();
+  const app = composition.createHttpApp();
   const listenPort = port != null ? port : config.http.port;
   const server = app.listen(listenPort);
-  await new Promise((resolve, reject) => {
-    server.once('listening', resolve);
-    server.once('error', reject);   // EADDRINUSE и т.п. → main отклоняется → exit(1) в entry
-  });
-  console.log(`
-╔══════════════════════════════════════════╗
-║        Atlavue Server            ║
-╠══════════════════════════════════════════╣
-║  URL:      http://localhost:${listenPort}          ║
-║  IG API:   ${config.instagram.accessToken ? '✅ настроен' : '❌ не задан (IG_ACCESS_TOKEN)'}           ║
-║  TG API:   ${config.telegram.botToken ? '✅ настроен' : '❌ не задан (TG_BOT_TOKEN)'}             ║
-║  Sessions: ${config.auth.sessionSecret ? '✅ SESSION_SECRET задан' : '⚠️ ephemeral (dev) — задай SESSION_SECRET'}  ║
-║  MTProto:  ${config.telegram.mtprotoToken ? '✅ MTPROTO_TOKEN задан' : '❌ MTPROTO_TOKEN не задан'}       ║
-╚══════════════════════════════════════════╝
-  `);
 
-  // Кэш-свип — таймер рантайма (PR E): стартует ПОСЛЕ listen, гасится в stop().
-  // createApp/require-only консюмеры (тесты) его не запускают — ленивая эвикция на чтении.
-  memoryCache.start();
-
-  let stopped = false;
-  async function stop() {
-    if (stopped) return;
-    stopped = true;
-    // Дренаж: /api/ready начинает отдавать 503 draining — балансировщик снимает инстанс,
-    // server.close дорабатывает in-flight запросы, затем гасим свип и пул БД.
-    drainState.draining = true;
-    await new Promise((resolve) => server.close(resolve));
-    memoryCache.stop();
-    await db.close().catch(() => {});
+  try {
+    await waitForListening(server);
+  } catch (error) {
+    await composition.db.close().catch(() => {});
+    throw error;
   }
 
-  // Graceful shutdown (PR E): Railway шлёт SIGTERM перед остановкой контейнера. once —
-  // повторный сигнал во время дренажа не дёргает stop() заново (он и так идемпотентен).
-  process.once('SIGTERM', () => { stop().then(() => process.exit(0)); });
-  process.once('SIGINT',  () => { stop().then(() => process.exit(0)); });
+  composition.memoryCache.start();
+  const boundAddress = server.address();
+  const boundPort =
+    boundAddress && typeof boundAddress === 'object'
+      ? boundAddress.port
+      : listenPort;
+  console.log(`[boot] Atlavue listening on http://localhost:${boundPort}`);
 
-  return { app, server, config, stop };
+  let stoppedPromise = null;
+
+  const onSignal = (signal) => {
+    console.log(`[shutdown] received ${signal}`);
+    stop().catch((error) => {
+      console.error('[shutdown] failed:', error && error.message);
+      process.exitCode = 1;
+    });
+  };
+  const onSigterm = () => onSignal('SIGTERM');
+  const onSigint = () => onSignal('SIGINT');
+
+  function removeSignalHandlers() {
+    process.removeListener('SIGTERM', onSigterm);
+    process.removeListener('SIGINT', onSigint);
+  }
+
+  async function stop() {
+    if (stoppedPromise) return stoppedPromise;
+
+    stoppedPromise = (async () => {
+      composition.drainState.draining = true;
+      removeSignalHandlers();
+
+      // Existing requests may schedule post-response tails, so stop accepting traffic
+      // and let all request handlers finish before freezing the tracker.
+      await closeServer(server);
+      composition.jobTracker.beginDrain();
+      await composition.jobTracker.waitForIdle({
+        timeoutMs: shutdownTimeoutMs,
+      });
+
+      composition.memoryCache.stop();
+      await composition.db.close().catch(() => {});
+    })();
+
+    return stoppedPromise;
+  }
+
+  if (installSignalHandlers) {
+    process.once('SIGTERM', onSigterm);
+    process.once('SIGINT', onSigint);
+  }
+
+  return { app, server, config, composition, stop };
 }
 
 module.exports = { main };

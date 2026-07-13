@@ -126,6 +126,17 @@ test('validateConfig: webReplicas > 1 → запрет; port<=0 → ошибка
   assert.ok(errs.some((e) => e.field === 'http.port'));
 });
 
+test('validateConfig: trust proxy должен быть целым и неотрицательным', () => {
+  const invalid = validateConfig(loadConfig({ TRUST_PROXY_HOPS: 'abc' }));
+  assert.ok(invalid.some((error) => error.field === 'http.trustProxy'));
+
+  const negative = validateConfig(loadConfig({ TRUST_PROXY_HOPS: '-1' }));
+  assert.ok(negative.some((error) => error.field === 'http.trustProxy'));
+
+  const disabled = validateConfig(loadConfig({ TRUST_PROXY_HOPS: '0' }));
+  assert.ok(!disabled.some((error) => error.field === 'http.trustProxy'));
+});
+
 test('validateConfig: prod с не-https APP_URL → ошибка http.publicUrl', () => {
   const errs = validateConfig(loadConfig({ NODE_ENV: 'production', SESSION_SECRET: 's', DATABASE_URL: 'x', APP_URL: 'http://insecure.app' }));
   assert.ok(errs.some((e) => e.field === 'http.publicUrl'));

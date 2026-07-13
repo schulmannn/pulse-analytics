@@ -4,7 +4,7 @@
 // Синхронная фабрика HTTP-приложения. Собирает Express-app из ИНЪЕКТИРОВАННЫХ
 // зависимостей (deps) — НЕ читает переменных окружения, НЕ трогает db.init/listen/таймеры/
 // process.on и не создаёт реальных клиентов/таймеров. Всё окружение-, БД- и таймер-
-// зависимое строится в index.js (скоро main.js) и прокидывается сюда. Благодаря этому
+// зависимое строится в composition.js и прокидывается сюда. Благодаря этому
 // app можно собрать в тесте без сети/PG/таймеров и вызвать createApp несколько раз.
 //
 // Порядок middleware и роутов ТОЧНО повторяет прежний module-load порядок index.js —
@@ -31,10 +31,10 @@ const { registerIgRoutes } = require('./routes/ig');
 const { registerAccountRoutes } = require('./routes/account');
 const { registerHistoryRoutes } = require('./routes/history');
 
-// createApp(deps) — собирает и возвращает Express-app. deps несёт всё, что index.js
+// createApp(deps) — собирает и возвращает Express-app. deps несёт всё, что composition.js
 // строит из окружения/БД/таймеров: config, db, готовые middleware (requireAuth/…),
 // лимитеры, email/IG/TG-хелперы и оркестраторы дневного ingest'а. getDbReady() читает
-// живой флаг миграции (index владеет мутабельным dbReady). Ничего из deps здесь не
+// живой флаг миграции (composition владеет мутабельным dbReady). Ничего из deps здесь не
 // создаётся заново — только применяется к app.
 function createApp(deps) {
   const {
@@ -47,7 +47,7 @@ function createApp(deps) {
     igFetch, refreshIgIfNeeded, igConfigured, igCrypto, igMock, nearestOf,
     cacheGet, cacheSet, cache, IG_ACCOUNT, IG_TOKEN, IG_GRAPH, AUTH_SECRET,
     tgCrypto, collectQrChannelsNow, TG_TOKEN, TG_CHANNEL,
-    timingSafeEqualStr, dailyIngestJob,
+    timingSafeEqualStr, dailyIngestJob, jobTracker,
   } = deps;
 
   const app = express();
@@ -57,7 +57,7 @@ function createApp(deps) {
   // hops to land on the real client IP. `trust proxy: 1` returned the shared edge IP
   // (152.x) for everyone → a global rate-limit bucket. NOT `true` (that trusts client-
   // supplied XFF and is spoofable); the fixed count 2 ignores any prefixed fake hops.
-  app.set('trust proxy', 2);
+  app.set('trust proxy', config.http.trustProxy);
 
   // ── Middleware ───────────────────────────────────────────────────
   // CORS: дашборд обслуживается тем же origin (Express отдаёт и статику, и API),
@@ -112,7 +112,7 @@ function createApp(deps) {
   app.use('/api/', limiter);
 
   // Auth/account entrypoints are isolated in their own route module; session
-  // validation middleware stays in index; here it is injected.
+  // Validation middleware is assembled in composition; here it is injected.
   registerAuthRoutes({
     app,
     express,
@@ -146,7 +146,7 @@ function createApp(deps) {
 
   // Instagram data routes + the per-request resolveIg middleware are isolated in routes/ig.js.
   // The shared IG data-access (singleflight igFetch + opportunistic refreshIgIfNeeded), the env
-  // single-account fallback and igCrypto are built in index and injected — the daily IG cron uses
+  // single-account fallback and igCrypto are built in composition and injected — the daily IG cron uses
   // them too. igMock backs the no-credentials fallback.
   registerIgRoutes({
     app, requireAuth, db, log,
@@ -165,7 +165,7 @@ function createApp(deps) {
   registerChannelsRoutes({ app, db, requireAuth, audit, getDbReady });
 
   // Named report CRUD is isolated in its own route module; the email schedule
-  // worker (processReportSchedules) lives in index because it is triggered from the daily ingest cron.
+  // worker (processReportSchedules) is wired by composition because the daily ingest cron triggers it.
   registerReportsRoutes({ app, db, requireAuth, audit });
 
   // Collector protocol is isolated in its own route module. The handler validates
@@ -244,11 +244,16 @@ function createApp(deps) {
       return res.status(403).json({ ok: false, error: 'forbidden' });
     }
     // Вся работа дня — jobs/dailyIngestJob (идемпотентный тяжёлый MTProto-проход + прежние
-    // формы ответов 200/503/500). tails() — fire-and-forget хвосты (отчёты/IG-персистенс/QR),
-    // зовутся ПОСЛЕ res.json, чтобы не задерживать ответ крону — прежний порядок.
+    // формы ответов 200/503/500). tails() запускаются ПОСЛЕ res.json, чтобы не задерживать
+    // ответ крону, но регистрируются в jobTracker для graceful shutdown.
     const out = await dailyIngestJob.run({ requestId: req.requestId, base: appBase(req) });
     res.status(out.status).json(out.body);
-    if (out.tails) out.tails();
+    if (out.tails) {
+      jobTracker.run(out.tails, {
+        job: 'daily_ingest_tails',
+        request_id: req.requestId,
+      });
+    }
   }));
 
   // Postgres-backed history reads are isolated in routes/history.js.

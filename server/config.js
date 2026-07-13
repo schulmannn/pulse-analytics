@@ -109,6 +109,9 @@ function validateConfig(config) {
   ]) {
     if (!Number.isFinite(value) || value <= 0) add(field, `${field} должен быть положительным числом.`);
   }
+  if (!Number.isInteger(config.http.trustProxy) || config.http.trustProxy < 0) {
+    add('http.trustProxy', 'TRUST_PROXY_HOPS должен быть целым неотрицательным числом.');
+  }
   if (config.runtime.webReplicas > 1) {
     add('runtime.webReplicas', 'WEB_REPLICAS > 1 запрещён до появления shared state (ADR-002: одна реплика).');
   }

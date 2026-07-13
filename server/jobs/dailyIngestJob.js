@@ -2,7 +2,7 @@
 //  Atlavue — дневной TG-ingest центрального канала (job)
 // ═══════════════════════════════════════════════════════════════
 // Бывшее тело POST /api/ingest/daily из app.js (PR E): тяжёлый MTProto-проход
-// (graphs+posts+velocity) под runJobOnce-идемпотентностью + fire-and-forget хвосты дня.
+// (graphs+posts+velocity) под runJobOnce-идемпотентностью + post-response хвосты дня.
 // run({requestId, base}) возвращает {status, body, tails?} — роут в app.js оставляет
 // себе ТОЛЬКО токен-гейт и отправку ответа; tails() он зовёт ПОСЛЕ res.json (как раньше:
 // хвосты не задерживают и не ломают ответ крону). Без Express/env/таймеров.
@@ -20,25 +20,25 @@ function createDailyIngestJob({
     // Idempotency (Ковчег): a double cron tick / a second web instance must NOT run the heavy
     // MTProto pass (/graphs + /posts + up to ~12 GetMessageStats for velocity) twice for the same
     // day. runJobOnce keyed on the UTC date makes exactly one caller do the work; a duplicate gets
-    // the first run's cached result and skips both the fetch AND the fire-and-forget tails below.
+    // the first run's cached result and skips both the fetch AND the post-response tails below.
     const dateKey = new Date().toISOString().slice(0, 10);
     let graphs = null;
 
-    // Хвосты дня (отчёты / IG-персистенс / QR-сбор) — fire-and-forget ПОСЛЕ ответа крону:
+    // Хвосты дня (отчёты / IG-персистенс / QR-сбор) запускаются ПОСЛЕ ответа крону:
     // они не должны ни задерживать, ни ломать TG-ingest. Возвращаются вызывающему функцией,
     // потому что запускаются и на успехе, и на degraded-тике: IG-сбор и отчёты от TG-graphs
     // не зависят, и их день не должен теряться из-за деградации Telegram-стороны. Их внутренняя
     // идемпотентность (runJobOnce per report+period, durable per channel+day) делает повторный
     // запуск на успешном same-day-ретрае безопасным.
-    const tails = () => {
+    const tails = () => Promise.all([
       processReportSchedules(base).catch(e =>
-        log('error', 'report_schedule_failed', { request_id: requestId, error: e.message }));
+        log('error', 'report_schedule_failed', { request_id: requestId, error: e.message })),
       // `graphs` уже в руках (null на degraded-тике — сырой TG-снимок тогда просто пропускается).
       processPersistence(channelId, graphs).catch(e =>
-        log('error', 'persistence_failed', { request_id: requestId, error: e.message }));
+        log('error', 'persistence_failed', { request_id: requestId, error: e.message })),
       processTgQrCollection().catch(e =>
-        log('error', 'tg_qr_collection_failed', { request_id: requestId, error: e.message }));
-    };
+        log('error', 'tg_qr_collection_failed', { request_id: requestId, error: e.message })),
+    ]);
 
     try {
       const outcome = await db.runJobOnce('daily_ingest', `central:${dateKey}`, async () => {
