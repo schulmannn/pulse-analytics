@@ -5,14 +5,14 @@
 //
 // Контракты слоёв:
 //  - app.js (HTTP-фабрика): БЕЗ process.env / .listen( / setInterval / process.on —
-//    всё приходит в deps из композиционного корня (index.js).
+//    всё приходит в deps из composition.js.
 //  - routes/**: БЕЗ прямого require db (инъекция) и БЕЗ вызовов *Internal( —
 //    internal-ридеры (cron-доступ без ownership-чека) разрешены только jobs/сервисам.
 //  - services/**, jobs/**: БЕЗ process.env, require('express'), setInterval — чистые
 //    фабрики от deps; таймеры владение main.js/infrastructure (start/stop).
 //  - infrastructure/**: БЕЗ process.env и express (таймеры МОЖНО — за start/stop).
-//  - index.js: композиционный корень ≤ 300 строк (полный распил довёл до ~250 —
-//    рост выше лимита значит, что в корень снова потекла логика, а не сборка).
+//  - composition.js: собирает зависимости без env/listen/timers/signals.
+//  - index.js: только dotenv + вызов main, не более 20 строк.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -54,6 +54,17 @@ forbid(path.join(ROOT, 'main.js'), [
 
 // routes/** — HTTP-слой на инъекции: без прямого db, без internal-ридеров, без env
 // (бывший LEGACY_ENV_ALLOW закрыт: bugs/collector/ig-oauth получают значения из config через deps).
+forbid(path.join(ROOT, 'main.js'), [
+  [/require\(\s*['"]\.\/index(?:\.js)?['"]\s*\)/, 'main.js must not import the entrypoint'],
+]);
+
+forbid(path.join(ROOT, 'composition.js'), [
+  [/process\.env\b/, 'composition.js receives validated config'],
+  [/\.listen\s*\(/, 'composition.js does not open a port'],
+  [/\bsetInterval\s*\(/, 'composition.js does not start timers'],
+  [/process\.on\s*\(/, 'composition.js does not own process signals'],
+]);
+
 for (const f of listJs(path.join(ROOT, 'routes'))) {
   forbid(f, [
     [/require\(\s*['"]\.\.?\/(db)(\.js)?['"]\s*\)/, 'routes не импортят db напрямую — db инъектится'],
@@ -82,12 +93,12 @@ for (const f of listJs(path.join(ROOT, 'infrastructure'))) {
   ]);
 }
 
-// index.js — композиционный корень: сборка, не логика.
+// index.js — минимальный process entrypoint, без сборки приложения.
 {
   const p = path.join(ROOT, 'index.js');
   const n = read(p).split('\n').length;
-  const CAP = 300;
-  if (n > CAP) errors.push(`server/index.js — ${n} строк > ${CAP}: в композиционный корень снова течёт логика, выноси в services/jobs/infrastructure`);
+  const CAP = 20;
+  if (n > CAP) errors.push(`server/index.js — ${n} строк > ${CAP}: entrypoint должен только загружать env и вызывать main()`);
 }
 
 if (errors.length) {

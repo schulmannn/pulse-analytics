@@ -20,12 +20,16 @@ process.env.RAILWAY_ENVIRONMENT = '';
 process.env.RAILWAY_PROJECT_ID = '';
 process.env.SESSION_SECRET = process.env.SESSION_SECRET || 'test-session-secret-for-characterization';
 
-const { app } = require('../server/index.js');
+const { loadConfig } = require('../server/config');
+const { createComposition } = require('../server/composition');
+const composition = createComposition(loadConfig(process.env));
+const app = composition.createHttpApp();
 
 let server;
 let baseUrl;
 
 test.before(async () => {
+  await composition.boot();
   server = app.listen(0);
   await new Promise((resolve, reject) => {
     server.once('listening', resolve);

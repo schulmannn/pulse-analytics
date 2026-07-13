@@ -24,7 +24,7 @@ test.before(async () => {
   const { main } = require('../server/main.js');
   // port:0 — эфемерный порт (тестовый override; прод слушает config.http.port).
   // ADMIN_* не заданы ⇒ bootstrapAdmin/claimOwnerChannel — безвредные no-op.
-  runtime = await main({ port: 0 });
+  runtime = await main({ port: 0, installSignalHandlers: false });
 });
 
 test.after(async () => {
