@@ -1,0 +1,408 @@
+// ═══════════════════════════════════════════════════════════════
+//  Atlavue — Express app factory (createApp)
+// ═══════════════════════════════════════════════════════════════
+// Синхронная фабрика HTTP-приложения. Собирает Express-app из ИНЪЕКТИРОВАННЫХ
+// зависимостей (deps) — НЕ читает process.env, НЕ трогает db.init/listen/setInterval/
+// process.on и не создаёт реальных клиентов/таймеров. Всё окружение-, БД- и таймер-
+// зависимое строится в index.js (скоро main.js) и прокидывается сюда. Благодаря этому
+// app можно собрать в тесте без сети/PG/таймеров и вызвать createApp несколько раз.
+//
+// Порядок middleware и роутов ТОЧНО повторяет прежний module-load порядок index.js —
+// это поведение-preserving рефактор (characterization + smoke тесты фиксируют контракт).
+
+'use strict';
+
+const express = require('express');
+const cors = require('cors');
+const rateLimit = require('express-rate-limit');
+const path = require('path');
+const fs = require('fs');
+const crypto = require('crypto');
+const { requestContext } = require('./lib/observability');
+const { legacyCspHeader, setAppHeaders, setHtmlSecurityHeaders } = require('./lib/securityHeaders');
+const { registerCollectorRoutes } = require('./routes/collector');
+const { registerAuthRoutes } = require('./routes/auth');
+const { registerReportsRoutes } = require('./routes/reports');
+const { registerBugsRoutes } = require('./routes/bugs');
+const { registerChannelsRoutes } = require('./routes/channels');
+const { registerTgRoutes } = require('./routes/tg');
+const { registerIgOauthRoutes } = require('./routes/ig-oauth');
+const { registerIgRoutes } = require('./routes/ig');
+const { registerAccountRoutes } = require('./routes/account');
+const { registerHistoryRoutes } = require('./routes/history');
+
+// createApp(deps) — собирает и возвращает Express-app. deps несёт всё, что index.js
+// строит из окружения/БД/таймеров: config, db, готовые middleware (requireAuth/…),
+// лимитеры, email/IG/TG-хелперы и оркестраторы дневного ingest'а. getDbReady() читает
+// живой флаг миграции (index владеет мутабельным dbReady). Ничего из deps здесь не
+// создаётся заново — только применяется к app.
+function createApp(deps) {
+  const {
+    config, db, log,
+    fetchWithTimeout, mtprotoFetch, MTPROTO_TIMEOUT_HEAVY_MS,
+    requireAuth, requireSuper, resolveChannel, audit, getDbReady,
+    limiter, authLimiter, mediaLimiter,
+    hashPassword, verifyPassword, DUMMY_HASH, signSession, SESSION_TTL, GOOGLE_CLIENT_ID,
+    appBase, sha256, newToken, VERIFY_TTL, RESET_TTL, sendEmail, emailShell, emailBtn, escHtml,
+    igFetch, refreshIgIfNeeded, igConfigured, igCrypto, igMock, nearestOf,
+    cacheGet, cacheSet, cache, IG_ACCOUNT, IG_TOKEN, IG_GRAPH, AUTH_SECRET,
+    tgCrypto, collectQrChannelsNow, TG_TOKEN, TG_CHANNEL,
+    timingSafeEqualStr, tgPostToRow, processReportSchedules, processPersistence, processTgQrCollection,
+  } = deps;
+
+  const app = express();
+  // Railway forwarding chain (confirmed via the proxy diagnostic): the app's socket
+  // peer is Railway's internal LB (100.64.0.0/10) and X-Forwarded-For = "client, edge".
+  // So the address list (socket → outward) is [LB, edge, client] and we must trust 2
+  // hops to land on the real client IP. `trust proxy: 1` returned the shared edge IP
+  // (152.x) for everyone → a global rate-limit bucket. NOT `true` (that trusts client-
+  // supplied XFF and is spoofable); the fixed count 2 ignores any prefixed fake hops.
+  app.set('trust proxy', 2);
+
+  // ── Middleware ───────────────────────────────────────────────────
+  // CORS: дашборд обслуживается тем же origin (Express отдаёт и статику, и API),
+  // поэтому кросс-доменный доступ по умолчанию не нужен → не отдаём wildcard ACAO.
+  // Для будущих внешних API-клиентов origin'ы можно явно разрешить через
+  // CORS_ORIGINS (список через запятую).
+  const CORS_ORIGINS = config.http.corsOrigins;
+  app.use(cors({ origin: CORS_ORIGINS.length ? CORS_ORIGINS : false, credentials: false }));
+  app.use(requestContext);
+  // A rejected promise in an async route otherwise escapes Express 4 entirely and
+  // kills the process (unhandled rejection). Wrap handlers whose awaits are not fully
+  // inside try/catch; the terminal error middleware (registered last) does the rest.
+  const asyncHandler = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+  // JSON body parser — default 100kb. Big-body routes (collector ingest, bug
+  // screenshots, avatar upload) carry their own higher-limit parser, so skip them
+  // here; otherwise this 100kb parser would reject their large payloads before the
+  // route is reached (body-parser no-ops on an already-parsed body, so the
+  // route-local limit would never apply).
+  const jsonSmall = express.json();
+  app.use((req, res, next) => {
+    if (req.path === '/api/collector/ingest'
+      || req.path === '/api/me/avatar'   // own 1mb parser — a 100KB-400KB data URL is a valid avatar
+      || /\/screenshot$/.test(req.path)) return next();
+    jsonSmall(req, res, next);
+  });
+  // ── App shell + strict nonce-CSP ──────────────────────────────────
+  // index.html is the only HTML surface that renders collector-snapshot data.
+  // A per-request nonce on its inline <script> tags + `script-src 'nonce-…'`
+  // (no 'unsafe-inline') means an injected <script> or inline event handler can't
+  // execute — closes the snapshot self-XSS class (defence-in-depth on top of the
+  // server-side escape/Number coercion). Inline styles stay allowed (style
+  // injection isn't code execution); only Google Fonts is external.
+  const APP_HTML_PATH = path.join(__dirname, '../public/index.html');
+  let APP_HTML = '';
+  try { APP_HTML = fs.readFileSync(APP_HTML_PATH, 'utf8'); }
+  catch (e) { console.error('[csp] index.html read failed:', e.message); }
+  function sendApp(req, res) {
+    const nonce = crypto.randomBytes(16).toString('base64');
+    let src = APP_HTML;
+    if (!src) { try { src = fs.readFileSync(APP_HTML_PATH, 'utf8'); } catch { return res.status(500).end(); } }
+    const html = src.split('<script>').join(`<script nonce="${nonce}">`);
+    setHtmlSecurityHeaders(req, res, legacyCspHeader(nonce))
+       .set('Content-Type', 'text/html; charset=utf-8')
+       .send(html);
+  }
+  // 3F-3 catover: '/' now serves the new Vite/React SPA (wired in the tail below). The
+  // legacy nonce-shell is reachable at /legacy as a reversible escape hatch until B2
+  // cleanup. Only its /js asset is still served from public/ (public/index.html is no
+  // longer routed — the SPA fallback owns '/').
+  app.use('/js', express.static(path.join(__dirname, '../public/js')));
+
+  app.use('/api/', limiter);
+
+  // Auth/account entrypoints are isolated in their own route module; session
+  // validation middleware stays in index; here it is injected.
+  registerAuthRoutes({
+    app,
+    express,
+    db,
+    requireAuth,
+    authLimiter,
+    asyncHandler,
+    hashPassword,
+    verifyPassword,
+    DUMMY_HASH,
+    signSession,
+    SESSION_TTL,
+    GOOGLE_CLIENT_ID,
+    fetchWithTimeout,
+    log,
+    audit,
+    appBase,
+    sha256,
+    newToken,
+    VERIFY_TTL,
+    RESET_TTL,
+    sendEmail,
+    emailShell,
+    emailBtn,
+    escHtml,
+  });
+
+  // Account/admin/prefs/config routes are isolated in routes/account.js (accountLimiter travels with
+  // them). Shared helpers (requireSuper, sendEmail/emailShell, audit, GOOGLE_CLIENT_ID) are injected.
+  registerAccountRoutes({ app, requireAuth, requireSuper, db, audit, sendEmail, emailShell, GOOGLE_CLIENT_ID });
+
+  // Instagram data routes + the per-request resolveIg middleware are isolated in routes/ig.js.
+  // The shared IG data-access (singleflight igFetch + opportunistic refreshIgIfNeeded), the env
+  // single-account fallback and igCrypto are built in index and injected — the daily IG cron uses
+  // them too. igMock backs the no-credentials fallback.
+  registerIgRoutes({
+    app, requireAuth, db, log,
+    igFetch, refreshIgIfNeeded, igConfigured, igCrypto, igMock, nearestOf,
+    cacheGet, cacheSet, IG_ACCOUNT, IG_TOKEN,
+  });
+
+  // Instagram OAuth (per-channel connect) routes are isolated in routes/ig-oauth.js — the
+  // signed-state helpers, the connect-config gate, IG cache purge and the token exchange live there.
+  registerIgOauthRoutes({
+    app, db, requireAuth, audit, log, fetchWithTimeout, asyncHandler,
+    appBase, cache, igConfigured, igCrypto, AUTH_SECRET, IG_GRAPH,
+  });
+
+  registerChannelsRoutes({ app, db, requireAuth, audit, getDbReady });
+
+  // Named report CRUD is isolated in its own route module; the email schedule
+  // worker (processReportSchedules) lives in index because it is triggered from the daily ingest cron.
+  registerReportsRoutes({ app, db, requireAuth, audit });
+
+  // Collector protocol is isolated in its own route module. The handler validates
+  // and normalizes the envelope before a single transactional DB call.
+  registerCollectorRoutes({
+    app,
+    db,
+    express,
+    rateLimit,
+    isReady: getDbReady,
+    requireAuth,
+    audit,
+  });
+
+  registerTgRoutes({
+    app, requireAuth, resolveChannel, db, audit, log,
+    cacheGet, cacheSet, asyncHandler, tgCrypto, mediaLimiter, fetchWithTimeout,
+    collectQrChannelsNow, TG_TOKEN, TG_CHANNEL,
+  });
+
+  // ════════════════════════════════════════════════════════════════
+  //  ОБЩИЕ ROUTES
+  // ════════════════════════════════════════════════════════════════
+
+  app.get('/api/health', (req, res) => {
+    res.json({
+      status: 'ok',
+      service: 'pulse-analytics-web',
+      uptime: Math.round(process.uptime()),
+      cache:  cache.size,
+      sessions: 'signed+versioned',
+      database_ready: getDbReady(),
+      request_id: req.requestId,
+      env: {
+        ig:  !!IG_TOKEN && !!IG_ACCOUNT,
+        tg:  !!TG_TOKEN && !!TG_CHANNEL,
+        auth: !!config.auth.sessionSecret
+      }
+    });
+  });
+
+  app.get('/api/ready', async (req, res) => {
+    if (!getDbReady()) return res.status(503).json({ status: 'starting', request_id: req.requestId });
+    try {
+      const database = await db.ping();
+      res.json({ status: 'ready', database, request_id: req.requestId });
+    } catch (error) {
+      log('error', 'readiness_failed', { request_id: req.requestId, error: error.message });
+      res.status(503).json({
+        status: 'not_ready',
+        database: { enabled: db.enabled, ok: false },
+        request_id: req.requestId,
+      });
+    }
+  });
+
+  app.delete('/api/cache', requireAuth, requireSuper, (req, res) => {
+    cache.clear();
+    res.json({ ok: true, message: 'Кэш сброшен' });
+  });
+
+  // ════════════════════════════════════════════════════════════════
+  //  ИСТОРИЯ (Postgres) — снэпшоты сверх 3-месячного окна Telegram
+  // ════════════════════════════════════════════════════════════════
+
+  // Снимок дня: тянет дневные серии из /graphs (+ посты) и upsert'ит в БД.
+  // Защищён отдельным токеном (НЕ командный пароль) — дёргается cron'ом.
+  app.post('/api/ingest/daily', asyncHandler(async (req, res) => {
+    const token = req.headers['x-ingest-token'];
+    if (!config.runtime.ingestToken || typeof token !== 'string' || !token
+        || !timingSafeEqualStr(token, config.runtime.ingestToken)) {
+      return res.status(403).json({ ok: false, error: 'forbidden' });
+    }
+    if (!db.enabled) return res.status(200).json({ ok: false, reason: 'DATABASE_URL не задан — БД выключена' });
+    const channelId = await db.getOwnerChannelId();   // central channel = "collector #0"
+    if (!channelId) return res.status(503).json({ ok: false, reason: 'central channel not ready' });
+    // Idempotency (Ковчег): a double cron tick / a second web instance must NOT run the heavy
+    // MTProto pass (/graphs + /posts + up to ~12 GetMessageStats for velocity) twice for the same
+    // day. runJobOnce keyed on the UTC date makes exactly one caller do the work; a duplicate gets
+    // the first run's cached result and skips both the fetch AND the fire-and-forget tails below.
+    const dateKey = new Date().toISOString().slice(0, 10);
+    let graphs = null;
+
+    // Хвосты дня (отчёты / IG-персистенс / QR-сбор) — fire-and-forget ПОСЛЕ ответа крону:
+    // они не должны ни задерживать, ни ломать TG-ingest. Вынесены в функцию, потому что
+    // запускаются и на успехе, и на degraded-тике (см. catch): IG-сбор и отчёты от TG-graphs
+    // не зависят, и их день не должен теряться из-за деградации Telegram-стороны. Их внутренняя
+    // идемпотентность (runJobOnce per report+period, durable per channel+day) делает повторный
+    // запуск на успешном same-day-ретрае безопасным.
+    const runIngestTails = () => {
+      processReportSchedules(appBase(req)).catch(e =>
+        log('error', 'report_schedule_failed', { request_id: req.requestId, error: e.message }));
+      // `graphs` уже в руках (null на degraded-тике — сырой TG-снимок тогда просто пропускается).
+      processPersistence(channelId, graphs).catch(e =>
+        log('error', 'persistence_failed', { request_id: req.requestId, error: e.message }));
+      processTgQrCollection().catch(e =>
+        log('error', 'tg_qr_collection_failed', { request_id: req.requestId, error: e.message }));
+    };
+
+    try {
+      const outcome = await db.runJobOnce('daily_ingest', `central:${dateKey}`, async () => {
+        let posts;
+        [graphs, posts] = await Promise.all([
+          mtprotoFetch('/graphs', { points: 400 }, MTPROTO_TIMEOUT_HEAVY_MS).catch(() => null),   // full range for the archive (dashboard uses 45)
+          mtprotoFetch('/posts', { limit: 100 }).catch(() => null),
+        ]);
+        const velocity = await mtprotoFetch('/velocity', {}, MTPROTO_TIMEOUT_HEAVY_MS).catch(() => null);
+        // All three upserts commit together (persistCentralDaily) — no half-written day.
+        const persisted = await db.persistCentralDaily(channelId, {
+          dailyRows: db.graphsToDailyRows(graphs),
+          postRows: (posts && Array.isArray(posts.posts)) ? posts.posts.map(tgPostToRow) : [],
+          velocity,
+        });
+        // Наблюдаемость тихой смерти архива: для рабочего центрального канала graphsToDailyRows
+        // всегда отдаёт полный диапазон, поэтому channel_daily=0 означает не «пустой день», а
+        // упавший тяжёлый MTProto-fetch (graphs=null). Бросаем ПОСЛЕ коммита (частичные
+        // posts/velocity сохранены, upsert'ы идемпотентны) — runJobOnce запишет строку failed,
+        // и повторный тик ТОГО ЖЕ дня переклеймит её и повторит тяжёлый проход. Раньше пустой
+        // день записывался как succeeded, и same-day ретрай был невозможен без ручного
+        // удаления jobs-строки, а velocity-снимок дня терялся навсегда.
+        if ((persisted.channel_daily || 0) === 0) {
+          const err = new Error('channel_daily=0 — upstream MTProto /graphs failed, archive did not grow');
+          err.code = 'INGEST_DEGRADED';
+          throw err;
+        }
+        return persisted;
+      });
+
+      if (outcome.skipped) {
+        const job = outcome.job;
+        // Дубль-тик, пока первый прогон ещё под lease (status='running'): это НЕ деградация —
+        // отвечаем in_progress без алерта (раньше пустой result давал ложный degraded:true).
+        if (!job || job.status !== 'succeeded') {
+          return res.json({ ok: true, skipped: true, in_progress: true });
+        }
+        // Дубль успешного дня: succeeded теперь гарантированно непустой (пустой день = failed).
+        const cached = job.result || {};
+        return res.json({ ok: true, degraded: false, skipped: true, channel_daily: cached.channel_daily || 0, posts: cached.posts || 0, velocity: !!cached.velocity });
+      }
+
+      const result = outcome.result;
+      res.json({ ok: true, degraded: false, skipped: false, channel_daily: result.channel_daily || 0, posts: result.posts || 0, velocity: !!result.velocity });
+      runIngestTails();
+    } catch (e) {
+      if (e && e.code === 'INGEST_DEGRADED') {
+        // Крон роняет джобу по не-200 (нативное письмо GitHub = бесплатный проактивный алерт),
+        // а лог даёт greppable-сигнал. Строка jobs уже failed → ретрай того же дня возможен.
+        log('error', 'ingest_degraded', {
+          request_id: req.requestId,
+          reason: 'channel_daily=0 (upstream MTProto /graphs likely failed) — archive did not grow',
+        });
+        res.status(503).json({ ok: false, degraded: true, retryable: true, request_id: req.requestId });
+        runIngestTails();
+        return;
+      }
+      // keep the { ok:false } shape for the cron, but never leak internals in the message
+      log('error', 'ingest_daily_failed', { request_id: req.requestId, error: e.message, stack: e.stack });
+      res.status(500).json({ ok: false, error: 'internal_error', request_id: req.requestId });
+    }
+  }));
+
+  // Postgres-backed history reads are isolated in routes/history.js.
+  registerHistoryRoutes({ app, requireAuth, resolveChannel, db });
+
+  // Bug tracker, crash telemetry and bug attachments are isolated in their own route module.
+  registerBugsRoutes({
+    app,
+    express,
+    db,
+    rateLimit,
+    requireAuth,
+    requireSuper,
+    fetchWithTimeout,
+    AUTH_SECRET,
+  });
+
+  // ── Sprint 3F-3 catover: new Vite/React SPA is the primary dashboard, served at '/' ──
+  // The dist/ bundle is produced by the Dockerfile.web build stage. CSP is stricter than
+  // the legacy shell: the new app has NO inline scripts (JSX auto-escapes), so script-src
+  // is plain 'self' — no nonce. The legacy nonce-shell stays at /legacy as a reversible
+  // escape hatch until the B2 cleanup (then this becomes the only HTML surface).
+  const APP_DIST = path.join(__dirname, '../frontend/dist');
+  // Hashed SPA assets at root (/assets/*). Security headers set per response.
+  app.use((req, res, next) => { setAppHeaders(req, res); next(); },
+    express.static(APP_DIST, { index: false }));
+
+  // Pre-catover bookmarks under /app → root equivalent (302; temporary during catover).
+  app.get(['/app', '/app/*'], (req, res) => {
+    const target = req.originalUrl.replace(/^\/app(?=[/?]|$)/, '') || '/';
+    const local = target.startsWith('/') ? target : '/' + target;
+    // Same-origin only: '//host' (and '/\host') is protocol-relative → open redirect.
+    res.redirect(302, /^\/(?!\/|\\)/.test(local) ? local : '/');
+  });
+
+  // Legacy nonce-shell — reversible escape hatch, removed in 3F-3 B2 cleanup.
+  app.get('/legacy', sendApp);
+
+  // Unknown /api/* → JSON 404. Without this the SPA fallback served index.html with a
+  // 200 for any mistyped API path — clients parsed HTML, monitoring saw success.
+  app.all('/api/*', (req, res) => {
+    res.status(404).json({ error: 'not_found', request_id: req.requestId });
+  });
+
+  // SPA fallback: every other (non-/api, non-asset) GET serves the new app shell.
+  app.get('*', (req, res) => {
+    setAppHeaders(req, res);
+    res.sendFile(path.join(APP_DIST, 'index.html'), (err) => { if (err) res.status(404).end(); });
+  });
+
+  // Terminal error handler — asyncHandler rejections and next(e) land here. Known
+  // upstream failures carry err.status (igFetch → 502, mtprotoFetch flood → 503) and
+  // their message is safe to show; anything else is a plain 500 and must NOT leak
+  // internals (pg/driver messages) — the client gets a generic shape, the log gets
+  // the full error keyed by request id.
+  app.use((err, req, res, next) => {
+    if (res.headersSent) return next(err);
+    const status = Number.isInteger(err && err.status) && err.status >= 400 && err.status < 600 ? err.status : 500;
+    const dbUnavailable = status === 500 && db.isDbUnavailable(err);
+    const responseStatus = dbUnavailable ? 503 : status;
+    log('error', 'unhandled_error', {
+      request_id: req.requestId,
+      method: req.method,
+      path: req.path,
+      status: responseStatus,
+      error: err && err.message,
+      stack: err && err.stack,
+    });
+    const body = dbUnavailable
+      ? { error: 'Сервис временно недоступен, попробуйте позже', request_id: req.requestId }
+      : { error: responseStatus === 500 ? 'internal_error' : String((err && err.message) || 'error'), request_id: req.requestId };
+    if (err && err.retryAfter != null) {
+      res.set('Retry-After', String(err.retryAfter));
+      body.retry_after = err.retryAfter;
+    }
+    res.status(responseStatus).json(body);
+  });
+
+  return app;
+}
+
+module.exports = { createApp };
