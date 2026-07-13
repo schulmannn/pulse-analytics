@@ -65,8 +65,11 @@ test('runtime.stop(): чистая остановка, повторный выз
   const port = runtime.server.address().port;   // снять ДО close: после address() → null
   await runtime.stop();
   await runtime.stop();   // идемпотентность: второй вызов — no-op, не бросает
-  // Порт закрыт: новое соединение отклоняется.
+  // Порт закрыт: запрос НЕ получает HTTP-ответа (resolve был бы провалом). Конкретный
+  // код ошибки платформозависим (ECONNREFUSED локально; в CI keep-alive-агент Node≥19
+  // переиспользует убитый сокет → 'socket hang up'/ECONNRESET) — agent:false берёт
+  // свежий сокет, а матч по коду не делаем: важен сам reject.
   await assert.rejects(new Promise((resolve, reject) => {
-    http.get({ host: '127.0.0.1', port, path: '/api/health' }, resolve).on('error', reject);
-  }), /ECONNREFUSED|ECONNRESET/);
+    http.get({ host: '127.0.0.1', port, path: '/api/health', agent: false }, resolve).on('error', reject);
+  }));
 });
