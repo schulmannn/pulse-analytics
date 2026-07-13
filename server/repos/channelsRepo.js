@@ -11,7 +11,7 @@
    sourcesRepo — external identity отдельный домен, finding 8). Внутренних импортов db.js/других repo
    НЕТ; ensureChannelCanonical/setChannelTgId возвращаются наружу — их зовёт boot/ingest-код в db.js. */
 
-const { sameTenantSource, CHANNEL_ACCESS_PREDICATE, CHANNEL_ADMIN_ACCESS_PREDICATE } = require('../db/access');
+const { sameTenantSource, channelAccessSql, channelAdminAccessSql } = require('../db/access');
 
 const CHANNEL_COLS = 'id, username, title, status, source, tg_channel_id, owner_uid';
 
@@ -36,7 +36,7 @@ function createChannelsRepo({ pool, enabled, transaction, ensureExternalSource }
     // OR поверх owner_uid и коррелированного EXISTS заставляет планировщик seq-scan'ить channels
     // (capacity-док, hot query), а UNION гонит каждую ветвь своим индексом (channels_owner_idx /
     // workspace_members_uid_idx → channels_workspace_idx) и полуджойнит результат. Набор ТОТ ЖЕ,
-    // что у CHANNEL_ACCESS_PREDICATE: создатель (legacy owner_uid) ИЛИ член workspace — JOIN по
+    // что у channelAccessSql: создатель (legacy owner_uid) ИЛИ член workspace — JOIN по
     // m.workspace_id = c.workspace_id сам отсекает NULL-workspace строки, как
     // `workspace_id IS NOT NULL AND EXISTS` в предикате; IN дедупит owner+member пересечение.
     const { rows } = await pool.query(
@@ -68,7 +68,7 @@ function createChannelsRepo({ pool, enabled, transaction, ensureExternalSource }
                          WHERE m.workspace_id = channels.workspace_id AND m.uid = $2)
               END AS member_role
        FROM channels
-       WHERE id=$1 AND ${CHANNEL_ACCESS_PREDICATE.replaceAll('$UID', '$2')} AND status<>'disabled'`,
+       WHERE id=$1 AND ${channelAccessSql({ uidParam: '$2' })} AND status<>'disabled'`,
       [id, uid]);
     return rows[0] || null;
   }
@@ -269,7 +269,7 @@ function createChannelsRepo({ pool, enabled, transaction, ensureExternalSource }
               to_char(k.last_used_at,'YYYY-MM-DD"T"HH24:MI:SS') AS last_used_at,
               (k.revoked_at IS NOT NULL) AS revoked
          FROM api_keys k JOIN channels c ON c.id=k.channel_id
-        WHERE k.channel_id=$1 AND ${CHANNEL_ADMIN_ACCESS_PREDICATE.replaceAll('$UID', '$2')}
+        WHERE k.channel_id=$1 AND ${channelAdminAccessSql({ uidParam: '$2' })}
         ORDER BY k.created_at DESC`, [channelId, uid]);
     return rows;
   }
@@ -281,7 +281,7 @@ function createChannelsRepo({ pool, enabled, transaction, ensureExternalSource }
         WHERE k.id=$1
           AND k.channel_id=$2
           AND k.channel_id=c.id
-          AND ${CHANNEL_ADMIN_ACCESS_PREDICATE.replaceAll('$UID', '$3')}
+          AND ${channelAdminAccessSql({ uidParam: '$3' })}
           AND k.revoked_at IS NULL`, [keyId, channelId, uid]);
     return rowCount > 0;
   }
