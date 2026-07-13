@@ -1,6 +1,6 @@
 import { useLocation } from 'react-router-dom';
 import type { IconName } from '@/components/nav-icons';
-import { METRIC_DEFS } from '@/lib/metricDefs';
+import { getMetric } from '@/lib/widgetMetrics';
 import { networkByKey, networkForPath, type Network } from '@/lib/networks';
 
 export interface NavLinkDef {
@@ -70,8 +70,8 @@ export function routeTitle(pathname: string): string {
   const exact = TITLES[pathname];
   if (exact) return exact;
   if (pathname.startsWith('/metrics/')) {
-    const key = pathname.split('/')[2] as keyof typeof METRIC_DEFS;
-    return METRIC_DEFS[key]?.term ?? 'Метрика';
+    const key = pathname.split('/')[2];
+    return getMetric(`tg.${key}`)?.label ?? 'Метрика';
   }
   if (pathname.startsWith('/reports/')) return 'Отчёт';
   return pathname.startsWith('/instagram') ? 'Instagram' : 'Atlavue';

@@ -4,7 +4,7 @@ import { usePostStats } from '@/api/queries';
 import type { NormalizedPost } from '@/lib/posts';
 import { fmt, ruAxisLabel } from '@/lib/format';
 import { MetricInfo } from '@/components/InfoTooltip';
-import { METRIC_DEFS } from '@/lib/metricDefs';
+import { getDrillMetric, getMetric, type MetricDef } from '@/lib/widgetMetrics';
 import { useFocusTrap } from '@/lib/useFocusTrap';
 import { useLayerBack } from '@/lib/useLayerBack';
 import { LineChart } from '@/components/LineChart';
@@ -20,7 +20,7 @@ interface PostDetailModalProps {
 }
 
 /** A labelled metric cell (tabular-aligned). */
-function Stat({ label, value, accent, info }: { label: string; value: string; accent?: boolean; info?: (typeof METRIC_DEFS)[keyof typeof METRIC_DEFS] }) {
+function Stat({ label, value, accent, info }: { label: string; value: string; accent?: boolean; info?: MetricDef }) {
   return (
     <div className="rounded border border-border bg-background p-3">
       <div className="flex items-center gap-1 text-2xs tracking-wide text-muted-foreground">
@@ -140,9 +140,9 @@ export function PostDetailModal({ post, rank, reason, onClose }: PostDetailModal
           {(post.er != null || post.erv != null || post.virality != null) && (
             <div className="grid grid-cols-3 gap-2">
               {/* ⓘ с формулами: модалка — первая встреча новичка с терминами (аудит). */}
-              <Stat label="ER" value={pct(post.er, 2)} accent info={METRIC_DEFS.er} />
-              <Stat label="ERV" value={pct(post.erv, 1)} info={METRIC_DEFS.erv} />
-              <Stat label="Виральность" value={pct(post.virality, 1)} info={METRIC_DEFS.virality} />
+              <Stat label="ER" value={pct(post.er, 2)} accent info={getDrillMetric('er')} />
+              <Stat label="ERV" value={pct(post.erv, 1)} info={getMetric('tg.erv')} />
+              <Stat label="Виральность" value={pct(post.virality, 1)} info={getMetric('tg.virality')} />
             </div>
           )}
 

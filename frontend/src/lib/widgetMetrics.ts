@@ -2,7 +2,7 @@
 // (its label, source, shape, unit, default + allowed visualisations, breakdown dimensions and
 // category). It unifies knowledge that until now lived scattered across three places:
 //
-//   - metricDefs.ts  → the plain-language «что значит» texts (formula / included / source note);
+//   - the former glossary map → plain-language «что значит» texts (formula / included / source note);
 //   - kpiDerive.ts   → the six KPI DrillKeys (views / subscribers / avgReach / reactions /
 //                      forwards / er) and their per-post attribution fields;
 //   - TgAnalytics.tsx / igMetrics.ts → the derived + breakdown metrics (ERV, virality, net-growth,
@@ -44,15 +44,29 @@ export type MetricCategory = 'growth' | 'engagement' | 'content' | 'audience';
  *  quarter would be nonsense. Default `flow`. */
 export type SeriesAggregation = 'flow' | 'level';
 
+/** Runtime strategy used by the widget resolver. Keeping the strategy on the metric definition
+ * makes catalogue coverage explicit: a new metric is either wired to a resolver family or marked
+ * unavailable on widget surfaces on purpose. */
+export type MetricResolver =
+  | 'tg.core'
+  | 'tg.ratio'
+  | 'tg.netGrowth'
+  | 'tg.breakdown'
+  | 'ig'
+  | 'unavailable';
+
 export interface MetricDef {
   /** Stable, source-namespaced id (e.g. `tg.views`, `ig.reach`). The WidgetConfig references this. */
   id: string;
   /** Display title (matches the card label users already know). */
   label: string;
+  /** Optional longer explanatory title used inside metric tooltips. */
+  glossaryLabel?: string;
   source: MetricSource;
   kind: MetricKind;
   unit: MetricUnit;
   category: MetricCategory;
+  resolver: MetricResolver;
   /** The presentation a fresh widget of this metric opens with. Always ∈ `supportedViz`. */
   defaultViz: WidgetViz;
   /** Every presentation this metric may be shown as (drives the editor's type carousel). */
@@ -71,13 +85,12 @@ export interface MetricDef {
    *  straight into the chart (steep #4.9). Omit for averages / percentages / top-N partials, where a
    *  sum is nonsense. */
   additive?: boolean;
-  // ── Plain-language definition (ported from metricDefs.ts; surfaced in the «О метрике» block) ──
+  // ── Plain-language definition (surfaced in the «О метрике» block) ──
   /** How it's calculated, in words. */
   formula?: string;
   /** What's included / a clarifying note. */
   included?: string;
-  /** Where the number comes from (renamed from metricDefs' `source` to avoid clashing with the
-   *  `source` tg/ig/all field above). */
+  /** Where the number comes from (separate from the `source` tg/ig/all field above). */
   sourceNote?: string;
 }
 
@@ -101,14 +114,23 @@ function vizForKind(kind: MetricKind): { defaultViz: WidgetViz; supportedViz: Wi
 
 /** Catalogue-entry spec: everything except the viz set, which `vizForKind` fills unless the entry
  *  overrides `defaultViz` / `supportedViz`. */
-type MetricSpec = Omit<MetricDef, 'defaultViz' | 'supportedViz'> &
-  Partial<Pick<MetricDef, 'defaultViz' | 'supportedViz'>>;
+type MetricSpec = Omit<MetricDef, 'defaultViz' | 'supportedViz' | 'resolver'> &
+  Partial<Pick<MetricDef, 'defaultViz' | 'supportedViz' | 'resolver'>>;
+
+function resolverFor(spec: MetricSpec): MetricResolver {
+  if (spec.source === 'ig') return 'ig';
+  if (spec.drillKey) return 'tg.core';
+  if (spec.id === 'tg.erv' || spec.id === 'tg.virality') return 'tg.ratio';
+  if (spec.id === 'tg.netGrowth') return 'tg.netGrowth';
+  if (spec.source === 'tg' && spec.kind === 'breakdown') return 'tg.breakdown';
+  return 'unavailable';
+}
 
 function define(spec: MetricSpec): MetricDef {
   const auto = vizForKind(spec.kind);
   const supportedViz = spec.supportedViz ?? auto.supportedViz;
   const defaultViz = spec.defaultViz ?? auto.defaultViz;
-  return { ...spec, defaultViz, supportedViz };
+  return { ...spec, resolver: spec.resolver ?? resolverFor(spec), defaultViz, supportedViz };
 }
 
 // Dimensions shared by the post-attributed TG series metrics (format / weekday) — the metric page
@@ -118,9 +140,9 @@ const POST_DIMS = ['tg.format', 'tg.weekday'];
 // ── Telegram ────────────────────────────────────────────────────────────────────────────────
 const TG_METRICS: MetricDef[] = [
   // Core KPI / DrillKey metrics — series with a reconciled headline (deriveKpis). Texts ported
-  // from metricDefs.ts so the «О метрике» block reads the same.
+  // so the «О метрике» block and metric surfaces read from the same definition.
   define({
-    id: 'tg.views', label: 'Просмотры', source: 'tg', kind: 'series', unit: 'views',
+    id: 'tg.views', label: 'Просмотры', glossaryLabel: 'Просмотры за период', source: 'tg', kind: 'series', unit: 'views',
     category: 'engagement', dimensions: POST_DIMS, drillKey: 'views',
     formula: 'Сумма дневных просмотров канала в выбранном окне.', sourceNote: 'Статистика канала (дневной архив); без архива — сумма по постам окна.',
   }),
@@ -147,7 +169,7 @@ const TG_METRICS: MetricDef[] = [
     formula: 'Сколько раз посты переслали (forward) за период.', sourceNote: 'Посты канала.',
   }),
   define({
-    id: 'tg.er', label: 'Вовлечённость (ER)', source: 'tg', kind: 'value', unit: 'percent',
+    id: 'tg.er', label: 'Вовлечённость (ER)', glossaryLabel: 'Вовлечённость', source: 'tg', kind: 'value', unit: 'percent',
     category: 'engagement', drillKey: 'er',
     formula: 'ER = (реакции + репосты + комментарии) ÷ подписчики × 100%.',
     included: 'Доля подписчиков, как-либо отреагировавших на посты периода.', sourceNote: 'Посты канала + текущее число подписчиков.',
@@ -301,8 +323,20 @@ export const METRIC_BY_ID: Record<string, MetricDef> = Object.fromEntries(
   WIDGET_METRICS.map((m) => [m.id, m]),
 );
 
+export const METRIC_BY_DRILL_KEY: Partial<Record<DrillKey, MetricDef>> = Object.fromEntries(
+  WIDGET_METRICS.filter((metric) => metric.drillKey).map((metric) => [metric.drillKey, metric]),
+);
+
 export function getMetric(id: string): MetricDef | undefined {
   return METRIC_BY_ID[id];
+}
+
+/** Canonical definition for one of kpiDerive's six TG drill metrics. The catalogue invariant is
+ * covered by tests, so consumers no longer need a parallel, un-namespaced glossary map. */
+export function getDrillMetric(key: DrillKey): MetricDef {
+  const metric = METRIC_BY_DRILL_KEY[key];
+  if (!metric) throw new Error(`Missing metric definition for drill key: ${key}`);
+  return metric;
 }
 
 export function isMetricId(raw: string | undefined | null): raw is string {

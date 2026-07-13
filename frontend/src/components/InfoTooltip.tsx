@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Icon } from '@/components/nav-icons';
 import { cn } from '@/lib/utils';
-import type { MetricDef } from '@/lib/metricDefs';
+import type { MetricDef } from '@/lib/widgetMetrics';
 
 interface InfoTooltipProps {
   /** Accessible heading for the term. */
@@ -117,11 +117,11 @@ export function InfoTooltip({ title, children, className }: InfoTooltipProps) {
 /** Renders a metric's glossary entry (formula / included / source) inside an InfoTooltip. */
 export function MetricInfo({ def }: { def: MetricDef }) {
   return (
-    <InfoTooltip title={def.term}>
+    <InfoTooltip title={def.glossaryLabel ?? def.label}>
       <span className="block space-y-1 text-muted-foreground">
         {def.formula && <span className="block">{def.formula}</span>}
         {def.included && <span className="block">{def.included}</span>}
-        {def.source && <span className="block text-2xs opacity-80">Источник: {def.source}</span>}
+        {def.sourceNote && <span className="block text-2xs opacity-80">Источник: {def.sourceNote}</span>}
       </span>
     </InfoTooltip>
   );

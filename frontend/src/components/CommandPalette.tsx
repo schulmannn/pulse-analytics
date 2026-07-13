@@ -6,7 +6,7 @@ import { useChannels, useLogout, useMe } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { setCommandPaletteOpen, toggleCommandPalette, useCommandPaletteOpen } from '@/lib/command-palette';
 import { DRILL_KEYS } from '@/lib/kpiDerive';
-import { METRIC_DEFS } from '@/lib/metricDefs';
+import { getDrillMetric } from '@/lib/widgetMetrics';
 import { Icon } from '@/components/nav-icons';
 import type { IconName } from '@/components/nav-icons';
 
@@ -160,13 +160,16 @@ function PaletteDialog({ close }: { close: () => void }) {
     }));
 
   // Metric pages — first-class search targets (steep's «Jump to» reaches metrics too).
-  const metricCommands: PaletteCommand[] = DRILL_KEYS.map((key) => ({
-    id: `metric:${key}`,
-    label: METRIC_DEFS[key].term,
-    search: `метрика ${METRIC_DEFS[key].term}`.toLowerCase(),
-    icon: iconFor('analytics'),
-    run: () => navigate(`/metrics/${key}`),
-  }));
+  const metricCommands: PaletteCommand[] = DRILL_KEYS.map((key) => {
+    const metric = getDrillMetric(key);
+    return {
+      id: `metric:${key}`,
+      label: metric.label,
+      search: `метрика ${metric.label}`.toLowerCase(),
+      icon: iconFor('analytics'),
+      run: () => navigate(`/metrics/${key}`),
+    };
+  });
   // The IG metric pages too — the list mirrors the MetricRoute dispatcher (IgMetricPage);
   // a new IG metric registers here as well (аудит: палитра не допрыгивала до IG-метрик).
   const IG_METRICS: Array<[string, string]> = [

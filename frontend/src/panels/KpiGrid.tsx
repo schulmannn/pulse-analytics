@@ -13,8 +13,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { ChartCardBody } from '@/components/ChartWidget';
 import { useWidgetPeriod } from '@/lib/period';
 import type { MetricDelta } from '@/lib/delta';
-import { METRIC_DEFS } from '@/lib/metricDefs';
-import type { MetricDef } from '@/lib/metricDefs';
+import { getDrillMetric, type MetricDef } from '@/lib/widgetMetrics';
 import { deriveKpis } from '@/lib/kpiDerive';
 import type { DailySeries, DrillKey } from '@/lib/kpiDerive';
 
@@ -70,22 +69,22 @@ export function KpiGrid() {
         trend={viewsTrend}
         caption={viewsCaption}
         spark={viewsSpark}
-        info={METRIC_DEFS.views}
+        info={getDrillMetric('views')}
         onDrill={() => openMetric('views')}
       />
       {/* LEDGER — secondary metrics (Подписчики / Ср.охват / Реакции / ER). Separated by SPACING,
           not a hairline grid: the card border already frames them, so inner dividers just read as
           "lines within lines" (technical). One quiet top hairline splits ledger from the hero. */}
       <div className="grid grid-cols-2 gap-x-6 gap-y-4 border-t border-border pt-4 lg:grid-cols-4">
-        <StatTile label="Подписчики" value={fmt.kpi(displayMembers)} trend={subscriberTrend} deltaText={subDelta} info={METRIC_DEFS.subscribers} onDrill={() => openMetric('subscribers')} />
-        <StatTile label="Ср. охват" value={fmt.kpi(avgViews)} trend={avgReachTrend} info={METRIC_DEFS.avgReach} onDrill={() => openMetric('avgReach')} />
-        <StatTile label="Реакции" value={fmt.kpi(totalReactions)} trend={reactionsTrend} deltaText={reactionsDelta} info={METRIC_DEFS.reactions} onDrill={() => openMetric('reactions')} />
+        <StatTile label="Подписчики" value={fmt.kpi(displayMembers)} trend={subscriberTrend} deltaText={subDelta} info={getDrillMetric('subscribers')} onDrill={() => openMetric('subscribers')} />
+        <StatTile label="Ср. охват" value={fmt.kpi(avgViews)} trend={avgReachTrend} info={getDrillMetric('avgReach')} onDrill={() => openMetric('avgReach')} />
+        <StatTile label="Реакции" value={fmt.kpi(totalReactions)} trend={reactionsTrend} deltaText={reactionsDelta} info={getDrillMetric('reactions')} onDrill={() => openMetric('reactions')} />
         <StatTile
           label="Вовлечённость"
           value={er > 0 ? er.toFixed(2) + '%' : '—'}
           trend={erTrend}
           deltaText={erCaption}
-          info={METRIC_DEFS.er}
+          info={getDrillMetric('er')}
           onDrill={() => openMetric('er')}
         />
       </div>
