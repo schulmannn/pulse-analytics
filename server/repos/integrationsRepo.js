@@ -10,43 +10,13 @@
    шифруют/дешифруют через lib/ig_crypto / lib/tg_crypto; repo (как раньше db.js) не видит
    plaintext и НИКОГДА не должен его логировать.
 
-   Зависимости: pool + enabled (инъекция), CHANNEL_ACCESS_PREDICATE из ../db/access (leaf),
+   Зависимости: pool + enabled (инъекция), transaction (инъекция),
    ensureExternalSource — ИНЪЕКЦИЯ из composition-root (db.js передаёт sourcesRepo.ensureExternalSource;
    finding 8 — external identity отдельный домен): репозитории не импортят друг друга, связывание — в фасаде. */
 
-const { CHANNEL_ACCESS_PREDICATE } = require('../db/access');
-
 function createIntegrationsRepo({ pool, enabled, ensureExternalSource, transaction }) {
-  // ── Instagram tags (media where we're @-tagged) — archive so they persist past the live edge's window.
-  async function upsertIgTags(rows) {
-    if (!enabled || !rows || !rows.length) return 0;
-    let n = 0;
-    for (const r of rows) {
-      if (!r || !r.id) continue;
-      await pool.query(
-        `INSERT INTO ig_tags (media_id, username, caption, permalink, media_type, like_count, comments_count, posted_at, last_seen)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now())
-         ON CONFLICT (media_id) DO UPDATE SET
-           username=EXCLUDED.username, caption=EXCLUDED.caption, permalink=EXCLUDED.permalink,
-           media_type=EXCLUDED.media_type, like_count=EXCLUDED.like_count,
-           comments_count=EXCLUDED.comments_count, posted_at=EXCLUDED.posted_at, last_seen=now()`,
-        [String(r.id), r.username || null, r.caption || null, r.permalink || null, r.media_type || null,
-         r.like_count != null ? Number(r.like_count) : null, r.comments_count != null ? Number(r.comments_count) : null,
-         r.timestamp || null],
-      );
-      n++;
-    }
-    return n;
-  }
-  async function getIgTags(limit = 100) {
-    if (!enabled) return [];
-    const { rows } = await pool.query(
-      `SELECT media_id AS id, username, caption, permalink, media_type, like_count, comments_count,
-              to_char(posted_at,'YYYY-MM-DD"T"HH24:MI:SS') AS timestamp,
-              to_char(first_seen,'YYYY-MM-DD"T"HH24:MI:SS') AS first_seen
-       FROM ig_tags ORDER BY posted_at DESC NULLS LAST, first_seen DESC LIMIT $1`, [limit]);
-    return rows;
-  }
+  // ig-tags: upsert (write) → collectorRepo, чтение → analyticsRepo (finding 7, PR 9) —
+  // integrationsRepo остаётся домен секретов/OAuth-lifecycle.
 
   // ── Instagram accounts (per-channel OAuth connection) ─────────────
   // One IG professional account per channel. The access token is stored already-encrypted
@@ -153,26 +123,11 @@ function createIntegrationsRepo({ pool, enabled, ensureExternalSource, transacti
     return rows;
   }
 
-  // ── Connection-status коллектора (read; writes живут в ingest) ───────
-  async function getCollectorStatus(channelId, user) {
-    if (!enabled || !channelId || !user || user.uid == null) return null;
-    const { rows } = await pool.query(
-      `SELECT s.collector_version, s.last_ingest_id,
-              to_char(s.last_attempt_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS last_attempt_at,
-              to_char(s.last_success_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS last_success_at,
-              s.last_error
-         FROM collector_status s
-         JOIN channels c ON c.id=s.channel_id
-        WHERE s.channel_id=$1 AND ${CHANNEL_ACCESS_PREDICATE.replaceAll('channels.', 'c.').replaceAll('$UID', '$2')}`,
-      [channelId, user.uid]);
-    return rows[0] || null;
-  }
+  // getCollectorStatus (read) → analyticsRepo (finding 7, PR 9).
 
   return {
-    upsertIgTags, getIgTags,
     saveIgAccount, getIgAccount, updateIgToken, deleteIgAccount, listIgAccounts,
     saveTgSession, getTgSession, deleteTgSession, listTgSessions,
-    getCollectorStatus,
   };
 }
 

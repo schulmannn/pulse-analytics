@@ -18,7 +18,7 @@
    Зависит от pool + enabled + sameTenantSource из ../db/access (canonical union ограничен
    воркспейсом читателя, ADR-001 F1) + getAccessibleChannel (инъекция; repos не импортят друг друга). */
 
-const { sameTenantSource } = require('../db/access');
+const { sameTenantSource, channelAccessSql } = require('../db/access');
 
 function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
   // ── Internal reads (БЕЗ access-check — ТОЛЬКО cron/service) ─────────────────────────────────────
@@ -49,7 +49,7 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
     const byMonth = await pool.query(
       `SELECT to_char(date_trunc('month', COALESCE(post_date, first_seen)),'YYYY-MM') AS month, count(*)::int AS c
        FROM mentions WHERE owner_channel_id=$1 GROUP BY 1 ORDER BY 1`, [channelId]);
-    return { total: total.rows[0], by_month: byMonth.rows };
+  return { total: total.rows[0], by_month: byMonth.rows };
   }
 
   // Full mentions panel from the archive — same shape renderMentions() expects from
@@ -155,7 +155,34 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
     return (await allowed(channelId, actor)) ? listIgMediaDailyInternal(channelId, days) : [];
   }
 
+    // ── ig-tags read (finding 7: чтение — analytics, write — collectorRepo) ──
+  async function getIgTags(limit = 100) {
+    if (!enabled) return [];
+    const { rows } = await pool.query(
+      `SELECT media_id AS id, username, caption, permalink, media_type, like_count, comments_count,
+              to_char(posted_at,'YYYY-MM-DD"T"HH24:MI:SS') AS timestamp,
+              to_char(first_seen,'YYYY-MM-DD"T"HH24:MI:SS') AS first_seen
+       FROM ig_tags ORDER BY posted_at DESC NULLS LAST, first_seen DESC LIMIT $1`, [limit]);
+    return rows;
+  }
+
+  // ── Connection-status коллектора (read; writes живут в ingest/collectorRepo) ───────
+  async function getCollectorStatus(channelId, user) {
+    if (!enabled || !channelId || !user || user.uid == null) return null;
+    const { rows } = await pool.query(
+      `SELECT s.collector_version, s.last_ingest_id,
+              to_char(s.last_attempt_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS last_attempt_at,
+              to_char(s.last_success_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS last_success_at,
+              s.last_error
+         FROM collector_status s
+         JOIN channels c ON c.id=s.channel_id
+        WHERE s.channel_id=$1 AND ${channelAccessSql({ channelAlias: 'c', uidParam: '$2' })}`,
+      [channelId, user.uid]);
+    return rows[0] || null;
+  }
+
   return {
+    getIgTags, getCollectorStatus,
     getChannelHistoryInternal, getMentionsHistoryInternal, getMentionsArchiveInternal,
     getSnapshotInternal, getLatestVelocityInternal, listIgDailyInternal, listIgMediaDailyInternal,
     getChannelHistoryForActor, getMentionsHistoryForActor, getMentionsArchiveForActor,

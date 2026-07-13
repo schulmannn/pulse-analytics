@@ -168,7 +168,7 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
             throw error;
           }
           if (receipt.status === 'completed') {
-            return { ...(receipt.result || {}), duplicate: true };
+  return { ...(receipt.result || {}), duplicate: true };
           }
           await client.query(
             `UPDATE ingest_receipts
@@ -422,7 +422,31 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
     return rowCount;
   }
 
+            // ── Instagram tags (media where we're @-tagged) — archive so they persist past the live edge's window.
+  //    Write (finding 7: upsert — collector-домен, чтение — analyticsRepo.getIgTags).
+  async function upsertIgTags(rows) {
+    if (!enabled || !rows || !rows.length) return 0;
+    let n = 0;
+    for (const r of rows) {
+      if (!r || !r.id) continue;
+      await pool.query(
+        `INSERT INTO ig_tags (media_id, username, caption, permalink, media_type, like_count, comments_count, posted_at, last_seen)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now())
+         ON CONFLICT (media_id) DO UPDATE SET
+           username=EXCLUDED.username, caption=EXCLUDED.caption, permalink=EXCLUDED.permalink,
+           media_type=EXCLUDED.media_type, like_count=EXCLUDED.like_count,
+           comments_count=EXCLUDED.comments_count, posted_at=EXCLUDED.posted_at, last_seen=now()`,
+        [String(r.id), r.username || null, r.caption || null, r.permalink || null, r.media_type || null,
+         r.like_count != null ? Number(r.like_count) : null, r.comments_count != null ? Number(r.comments_count) : null,
+         r.timestamp || null],
+      );
+      n++;
+    }
+    return n;
+  }
+
   return {
+    upsertIgTags,
     graphsToDailyRows,
     upsertChannelDaily, upsertPosts, upsertMentions,
     saveSnapshot, saveVelocity,
