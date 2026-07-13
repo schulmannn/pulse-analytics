@@ -10,7 +10,7 @@
 'use strict';
 
 function createDailyIngestJob({
-  db, log, mtprotoFetch, MTPROTO_TIMEOUT_HEAVY_MS, tgPostToRow,
+  db, log, mtprotoFetch, MTPROTO_TIMEOUT_STATS_MS, MTPROTO_TIMEOUT_HEAVY_MS, tgPostToRow,
   processReportSchedules, processPersistence, processTgQrCollection,
 }) {
   async function run({ requestId, base }) {
@@ -45,7 +45,7 @@ function createDailyIngestJob({
         let posts;
         [graphs, posts] = await Promise.all([
           mtprotoFetch('/graphs', { points: 400 }, MTPROTO_TIMEOUT_HEAVY_MS).catch(() => null),   // full range for the archive (dashboard uses 45)
-          mtprotoFetch('/posts', { limit: 100 }).catch(() => null),
+          mtprotoFetch('/posts', { limit: 100 }, MTPROTO_TIMEOUT_STATS_MS).catch(() => null),
         ]);
         const velocity = await mtprotoFetch('/velocity', {}, MTPROTO_TIMEOUT_HEAVY_MS).catch(() => null);
         // All three upserts commit together (persistCentralDaily) — no half-written day.

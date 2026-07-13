@@ -35,9 +35,9 @@ const EXPECTED_FUNCTIONS = [
   // analytics reads (finding 5: контракт доступа — Internal для cron/service, ForActor для роутов;
   // голого un-gated db.getChannelHistory/getSnapshot/… в публичном API больше НЕТ)
   'getChannelHistoryInternal', 'getMentionsHistoryInternal', 'getMentionsArchiveInternal',
-  'getSnapshotInternal', 'getLatestVelocityInternal', 'listIgDailyInternal', 'listIgMediaDailyInternal',
+  'getSnapshotInternal', 'getLatestVelocityInternal', 'listPostsInternal', 'listIgDailyInternal', 'listIgMediaDailyInternal',
   'getChannelHistoryForActor', 'getMentionsHistoryForActor', 'getMentionsArchiveForActor',
-  'getSnapshotForActor', 'getLatestVelocityForActor', 'listIgDailyForActor', 'listIgMediaDailyForActor',
+  'getSnapshotForActor', 'getLatestVelocityForActor', 'listPostsForActor', 'listIgDailyForActor', 'listIgMediaDailyForActor',
   // bugs / crashes
   'createBug', 'createCrash', 'upsertCrashSignature', 'setCrashNotionPage', 'touchCrashNotified',
   'listBugs', 'updateBug', 'deleteBug', 'bugExists', 'getBug', 'addAttachmentIfRoom', 'getAttachment',
