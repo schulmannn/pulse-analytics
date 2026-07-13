@@ -1,0 +1,165 @@
+import { PERIOD_WORD, SIZE_COL_SPAN, SIZE_HEIGHT } from './constants';
+import { useChartSectionModel } from './useChartSectionModel';
+import { WidgetBody } from './WidgetBody';
+import { WidgetHeader } from './WidgetHeader';
+import { WidgetEditOverlay, WidgetExpandOverlay } from './WidgetOverlays';
+import { WidgetPeriodPills } from './WidgetPeriodPills';
+import type { ChartSectionProps } from './types';
+
+/** Configurable dashboard card. Public consumers import this through components/ChartWidget. */
+export function ChartSection(props: ChartSectionProps) {
+  const model = useChartSectionModel(props);
+  const { widgetId, label } = model.identity;
+  const { group, sequenceIndex, reorder, dragging, effectiveSize } = model.layout;
+  const { prefs, updatePrefs, pinned } = model.preferences;
+  const allowExpand = !props.noExpand;
+
+  return (
+    <section
+      ref={model.refs.sectionRef}
+      className={`min-w-0 ${reorder ? 'cursor-grab touch-none select-none active:cursor-grabbing' : ''} ${
+        SIZE_COL_SPAN[effectiveSize]
+      } ${model.controls.menuOpen ? 'z-10' : ''} ${props.className ?? ''}`}
+      style={model.layout.outerStyle}
+      onPointerDown={
+        reorder
+          ? (event) => {
+              if (!event.isPrimary || (event.pointerType === 'mouse' && event.button !== 0)) return;
+              event.preventDefault();
+              try {
+                event.currentTarget.setPointerCapture(event.pointerId);
+              } catch {
+                // The pointer can disappear before capture on touch cancellation.
+              }
+              group?.dragStart(widgetId, event);
+            }
+          : undefined
+      }
+      onPointerMove={reorder ? (event) => group?.dragMove(event) : undefined}
+      onPointerUp={reorder ? () => group?.dragEnd() : undefined}
+      onPointerCancel={reorder ? () => group?.dragEnd() : undefined}
+    >
+      <div
+        className={`${
+          props.strip
+            ? 'group/strip relative flex flex-col'
+            : `flex flex-col ${SIZE_HEIGHT[effectiveSize]} rounded-xl border bg-card p-4 sm:p-5 transition-colors hover:border-ink3/40 hover:[--card-tint-alpha:0.16] dark:hover:border-white/[0.12] dark:hover:[--card-tint-alpha:0.18]`
+        } ${
+          model.controls.homeEditing && props.homeKey
+            ? 'border-ink3/25'
+            : 'border-border dark:border-white/[0.06]'
+        } ${reorder ? 'widget-jiggle' : 'widget-enter cursor-pointer'} ${dragging ? 'shadow-lg' : ''}`}
+        style={model.layout.innerStyle}
+        data-widget-accented={model.layout.activeColor ? '' : undefined}
+        data-drill-to={props.drillTo || undefined}
+        data-widget-tinted={model.layout.activeTinted && model.layout.activeColor ? '' : undefined}
+        onPointerDown={
+          reorder || props.noExpand
+            ? undefined
+            : (event) => (model.refs.cardPressRef.current = { x: event.clientX, y: event.clientY })
+        }
+        onClick={
+          reorder || props.noExpand
+            ? undefined
+            : (event) => {
+                if ((event.target as HTMLElement).closest('button, a, input, select, label, [role="dialog"]')) return;
+                const press = model.refs.cardPressRef.current;
+                model.refs.cardPressRef.current = null;
+                if (press && Math.hypot(event.clientX - press.x, event.clientY - press.y) > 5) return;
+                model.expansion.openExpand();
+              }
+        }
+      >
+        <WidgetHeader
+          label={label}
+          action={props.action}
+          strip={!!props.strip}
+          reorder={reorder}
+          allowExpand={allowExpand}
+          homeKey={props.homeKey}
+          removePresence={model.controls.removePresence}
+          onRemove={model.controls.removeFromHome}
+          onExpand={model.expansion.openExpand}
+          menu={{
+            open: model.controls.menuOpen,
+            onOpenChange: model.controls.setMenuOpen,
+            label,
+            widgetId,
+            group,
+            sequenceIndex,
+            pinned,
+            prefs,
+            onPrefsChange: updatePrefs,
+            onExpand: model.expansion.openExpand,
+            onEdit: model.controls.openEdit,
+            allowExpand,
+            allowEdit: !props.strip,
+            reorder,
+          }}
+        />
+        {props.periodControl && (
+          <>
+            <WidgetPeriodPills
+              days={model.period.widgetDays}
+              override={prefs.period}
+              onChange={(next) => updatePrefs({ ...prefs, period: next })}
+              onFollow={() => updatePrefs({ ...prefs, period: undefined })}
+              hidden={reorder}
+            />
+            {model.period.periodWidened && !reorder && (
+              <p className="mt-1 text-2xs text-muted-foreground print:hidden">
+                За {PERIOD_WORD[model.period.requestedDays]} данных нет — показано за{' '}
+                {PERIOD_WORD[model.period.widgetDays]}.
+              </p>
+            )}
+          </>
+        )}
+        <WidgetBody
+          strip={!!props.strip}
+          reorder={reorder}
+          bodyRef={model.refs.bodyRef}
+          widgetId={widgetId}
+          label={label}
+          period={model.period.widgetPeriod}
+          target={model.layout.activeTarget}
+          fillHeight={model.layout.fillHeight}
+          primary={model.variants.primaryBody}
+          footer={model.variants.activeVariant ? props.children : undefined}
+          resetKeys={model.bodyResetKeys}
+        />
+      </div>
+
+      <WidgetEditOverlay
+        open={model.controls.editOpen}
+        configDriven={!!props.configEditor}
+        title={props.title}
+        prefs={prefs}
+        variants={model.variants.resolvedVariants}
+        periodControl={!!props.periodControl}
+        seriesOptions={!!props.seriesOptions}
+        showSource={widgetId.startsWith('home-')}
+        showSize={!!group && !props.fixedSize}
+        defaultSize={props.defaultSize ?? 'third'}
+        minSize={model.variants.activeVariant?.minSize ?? 'third'}
+        onChange={updatePrefs}
+        onClose={() => model.controls.setEditOpen(false)}
+      />
+      <WidgetExpandOverlay
+        open={model.expansion.open}
+        noExpand={!!props.noExpand}
+        customExplorer={props.explorer}
+        onClose={model.expansion.closeExpand}
+        originRect={model.refs.originRectRef.current}
+        widgetId={widgetId}
+        label={label}
+        accentStyle={model.expansion.accentStyle}
+        periodControl={!!props.periodControl}
+        days={model.period.widgetDays}
+        expand={props.expand}
+        richExpand={model.expansion.richExpand}
+        resetKeys={model.bodyResetKeys}
+        body={model.expansion.overlayBody}
+      />
+    </section>
+  );
+}

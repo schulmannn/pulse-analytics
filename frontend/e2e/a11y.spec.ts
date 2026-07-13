@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import type { Page, TestInfo } from '@playwright/test';
 import { AxeBuilder } from '@axe-core/playwright';
-import { bootDemo } from './helpers';
+import { bootDemo, detailOverlayOpener } from './helpers';
 
 /**
  * Accessibility gate. Two layers:
@@ -49,7 +49,7 @@ for (const route of ROUTES) {
 
 test('axe: no serious violations — detail overlay open', async ({ page }, testInfo) => {
   await bootDemo(page, '/');
-  await page.getByRole('button', { name: /^Развернуть виджет/ }).first().click();
+  await detailOverlayOpener(page).click();
   await expect(page.getByRole('dialog')).toBeVisible();
   await expectNoSeriousViolations(page, testInfo, 'detail-overlay');
 });
@@ -66,7 +66,7 @@ test('keyboard: Enter opens widget detail, Escape closes, focus returns to the o
   await bootDemo(page, '/');
   // The semantic keyboard path to the detail overlay is the header's labelled expand button
   // (the whole-card click is a mouse-only convenience — no nested-interactive card button).
-  const opener = page.getByRole('button', { name: /^Развернуть виджет/ }).first();
+  const opener = detailOverlayOpener(page);
   await opener.focus();
   await expect(opener).toBeFocused();
   await page.keyboard.press('Enter');
@@ -80,7 +80,7 @@ test('keyboard: Enter opens widget detail, Escape closes, focus returns to the o
 
 test('keyboard: Tab stays inside the open detail dialog (focus trap)', async ({ page }) => {
   await bootDemo(page, '/');
-  const opener = page.getByRole('button', { name: /^Развернуть виджет/ }).first();
+  const opener = detailOverlayOpener(page);
   await opener.focus();
   await page.keyboard.press('Enter');
   const dialog = page.getByRole('dialog');

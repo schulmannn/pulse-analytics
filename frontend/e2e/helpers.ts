@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 
 // The only authenticated endpoint demo fixtures do NOT cover — stub it so the authed shell renders
 // offline. Shape matches MeSchema (all fields optional + passthrough), so this parses fine.
@@ -37,6 +37,11 @@ export async function bootDemo(page: Page, route = '/', opts: { theme?: 'light' 
   // ResizeObserver-driven chart heights are final before any measurement.
   await page.locator('main').waitFor({ state: 'visible', timeout: 25_000 });
   await page.waitForTimeout(1200);
+}
+
+/** A card that owns the generic ?detail= overlay rather than drilling to a dedicated metric page. */
+export function detailOverlayOpener(page: Page): Locator {
+  return page.getByRole('button', { name: 'Развернуть виджет «Лучшие публикации»' });
 }
 
 /**
