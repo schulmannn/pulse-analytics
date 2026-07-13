@@ -20,6 +20,11 @@ const { createEmailService } = require('./services/emailService');
 const { createAuditService } = require('./services/auditService');
 const { createInstagramClient } = require('./infrastructure/instagramClient');
 const { createInstagramCollectionJob } = require('./jobs/instagramCollectionJob');
+const { createMemoryCache } = require('./infrastructure/memoryCache');
+const { createPersistenceJob } = require('./jobs/persistenceJob');
+const { createTgQrCollectionJob } = require('./jobs/tgQrCollectionJob');
+const { createReportScheduleJob } = require('./jobs/reportScheduleJob');
+const { createDailyIngestJob } = require('./jobs/dailyIngestJob');
 // Единственная точка чтения process.env — config.js (все env-чтения проведены на config.*).
 const config = loadConfig(process.env);
 
@@ -79,30 +84,14 @@ const bootPromise = db.init().then(bootstrapAdmin).then(claimOwnerChannel).then(
 // ── Channel (tenant) resolution & isolation ──────────────────────
 const resolveChannel = makeResolveChannel({ db, isReady: () => dbReady });
 
-// ── In-memory кэш ───────────────────────────────────────────────
-const cache = new Map();
-const CACHE_TTL = 10 * 60 * 1000;
-const CACHE_MAX_ENTRIES = 500;
-
-function cacheGet(key) {
-  const entry = cache.get(key);
-  if (!entry || entry.expires < Date.now()) { cache.delete(key); return null; }
-  return entry.data;
-}
-function cacheSet(key, data, ttl = CACHE_TTL) {
-  // Bounded: the key space (per-channel × per-param) is otherwise unbounded and
-  // grows into a slow memory leak. Evict the oldest entry (insertion order ≈ age).
-  if (!cache.has(key) && cache.size >= CACHE_MAX_ENTRIES) {
-    cache.delete(cache.keys().next().value);
-  }
-  cache.set(key, { data, expires: Date.now() + ttl });
-}
-// Expired entries used to be reaped only on re-read, so one-off keys lingered for
-// the process lifetime. unref(): the sweep must not hold the process open (tests).
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, entry] of cache) if (entry.expires < now) cache.delete(key);
-}, 60 * 1000).unref();
+// ── In-memory кэш — infrastructure/memoryCache (PR E) ────────────
+// Map-подобный интерфейс (size-геттер, clear) — health/DELETE /api/cache как раньше.
+// Свип стартует в main.js ПОСЛЕ listen (cache.start()) и гасится в runtime.stop();
+// createApp и require-only консюмеры (тесты) таймеров не создают, ленивая эвикция
+// на чтении та же. Дефолты фабрики = прежние TTL 10мин / 500 записей / свип 60с.
+const cache = createMemoryCache();
+const cacheGet = cache.get;
+const cacheSet = cache.set;
 
 // Clamp a user-supplied numeric option to the nearest allowed value BEFORE it becomes
 // a cache key — otherwise every distinct value is its own cache miss and a fresh
@@ -158,51 +147,12 @@ const igCollectionJob = createInstagramCollectionJob({ db, log, igCrypto, igFetc
 const collectIgForAccount = igCollectionJob.collectIgForAccount;
 
 
-// Оркестратор персистенса (вызывается fire-and-forget ПОСЛЕ ответа крона):
-//   (a) сырой снимок TG /graphs для центрального канала (catch-all для серий, которые
-//       не ложатся в channel_daily: views_by_source, languages, top_hours и т.п.);
-//   (b) IG-сбор по КАЖДОМУ аккаунту из ig_accounts (не только центральный — IG цепляется
-//       к любому каналу), ПОСЛЕДОВАТЕЛЬНО, чтобы не устраивать thundering herd;
-//   (c) прунинг raw_snapshots. Ничего не бросает наружу.
-async function processPersistence(centralChannelId, graphs) {
-  if (!db.enabled) return;
-  const day = new Date().toISOString().slice(0, 10);
-  // (a) сырой TG /graphs — payload уже в руках (лишнего mtproto-вызова нет).
-  if (centralChannelId && graphs && graphs.available) {
-    try { await db.saveRawSnapshot(centralChannelId, 'tg', 'graphs', day, graphs); }
-    catch (e) { log('error', 'tg_graphs_snapshot_failed', { channelId: centralChannelId, error: e.message }); }
-  }
-  // (b) IG по каждому подключённому аккаунту. Без IG_TOKEN_KEY токенов нет — пропускаем.
-  //     Гейтим ДНЕВНОЙ джобой (runJobOnce per день, lease 1ч): 504ca50 ввёл same-day-ретрай
-  //     degraded-дня, а IG-фан-аут НЕ идемпотентен по квоте (upsert'ы идемпотентны, но каждый
-  //     прогон заново жжёт Graph-квоту). Под гейтом ТОЛЬКО IG — (a) сырой TG-снимок идёт каждый
-  //     раз, чтобы recovered-ретрай не потерял /graphs (узкая часть a2cbcc4-гейта).
-  if (igCrypto.configured()) {
-    await db.runJobOnce('ig_persistence', `central:${day}`, async () => {
-      let accounts = [];
-      try { accounts = await db.listIgAccounts(); }
-      catch (e) { log('error', 'ig_list_accounts_failed', { error: e.message }); }
-      for (const acc of accounts) {
-        try { await collectIgForAccount(acc, day); }   // sequential: по-доброму к квоте
-        catch (e) { log('error', 'ig_collect_account_failed', { channelId: acc && acc.channel_id, error: e.message }); }
-      }
-    }, { leaseSeconds: 60 * 60 }).catch(e => log('warn', 'ig_persistence_gate_failed', { error: e.message }));
-  }
-  // (c) ретеншн — не даём append-only таблицам расти безгранично.
-  try { await db.pruneRawSnapshots(); }
-  catch (e) { log('error', 'raw_snapshots_prune_failed', { error: e.message }); }
-  try { await db.pruneIgMediaDaily(); }
-  catch (e) { log('error', 'ig_media_daily_prune_failed', { error: e.message }); }
-  // (d) capacity: nightly monthly rollup of channel_daily (ops/CAPACITY_SCALE_1K_10K.md). INERT by
-  // default — only runs when CAPACITY_ROLLUPS=1, and the jobs row makes exactly one web instance
-  // recompute it per day (idempotent, cheap: bounded to recent months). Nothing reads channel_monthly
-  // yet, so this is groundwork; enable it before wiring the long-range history reader.
-  if (config.runtime.capacityRollups) {
-    const rollupKey = `channel_monthly:${day}`;
-    try { await db.runJobOnce('rollup_channel_monthly', rollupKey, () => db.rollupChannelMonthly(3)); }
-    catch (e) { log('error', 'channel_monthly_rollup_failed', { error: e.message }); }
-  }
-}
+// Оркестратор дневного персистенса (сырой TG-снимок, IG-сбор per-account под runJobOnce,
+// прунинг, capacity-rollup) — jobs/persistenceJob. Зовётся fire-and-forget из ingest-хвостов.
+const { processPersistence } = createPersistenceJob({
+  db, log, igCrypto, collectIgForAccount,
+  capacityRollups: config.runtime.capacityRollups,
+});
 
 // One mtproto post ({id,date,views,reactions,forwards,replies,media_type,text,hashtags}) → a
 // posts-table row. Shared by the central ingest and the QR-channel collection so both compute ERV/
@@ -219,108 +169,11 @@ function tgPostToRow(p) {
   };
 }
 
-// Write one channel's collected bundle to Postgres exactly like a collector push: the snapshot
-// (what /api/tg/full + the /api/tg/mtproto/* routes serve for non-central channels) plus the
-// time-series (channel_daily from graphs, posts). Best-effort per part.
-async function persistTgBundle(channelId, bundle, day) {
-  if (!channelId || !bundle || typeof bundle !== 'object') return;
-  const posts = Array.isArray(bundle.posts) ? bundle.posts : [];
-  const hasGraphs = !!(bundle.graphs && bundle.graphs.available);
-  // Снапшот + daily + посты коммитятся ВМЕСТЕ (db.persistTgBundleTx) — раньше это были
-  // отдельные автокоммитные записи, и сбой посередине оставлял QR-канал со свежим
-  // снапшотом, но устаревшими daily/posts до следующего идемпотентного прогона.
-  await db.persistTgBundleTx(channelId, {
-    snapshot: {
-      channel:       bundle.channel || {},
-      views_summary: bundle.views_summary || null,
-      posts,
-      stats:         bundle.stats || null,
-      graphs:        bundle.graphs || null,
-    },
-    dailyRows: hasGraphs ? db.graphsToDailyRows(bundle.graphs) : [],
-    postRows: posts.map(tgPostToRow),
-  });
-  // Сырой graphs-снимок — опциональный архив: best-effort ПОСЛЕ коммита, как раньше,
-  // но с логом (тихий .catch(() => {}) прятал реальные, actionable-ошибки записи).
-  if (hasGraphs) {
-    await db.saveRawSnapshot(channelId, 'tg', 'graphs', day, bundle.graphs).catch((e) =>
-      log('warn', 'tg_qr_raw_snapshot_failed', { channelId, error: e.message }));
-  }
-}
-
-// Fetch one QR channel's bundle via the (already-decrypted) session and persist it. Throws on
-// mtproto/collect failure — callers decide how to handle (log + continue).
-async function collectQrChannel(sessionStr, ch, day) {
-  const ref = ch.username || String(ch.tg_channel_id);
-  const bundle = await mtprotoPost('/qr/collect', {
-    body: { session: sessionStr, channel: ref, posts_limit: 100, graph_points: 400 },
-    timeoutMs: MTPROTO_TIMEOUT_HEAVY_MS,
-  });
-  await persistTgBundle(ch.id, bundle, day);
-}
-
-// Immediate best-effort collection for freshly-added channels so the dashboard fills within seconds
-// instead of waiting for the nightly cron. Fire-and-forget; sequential (kind to the user's session's
-// flood limits); never throws to the caller.
-async function collectQrChannelsNow(sess, channels) {
-  if (!sess || !tgCrypto.configured() || !MTPROTO_TOKEN) return;
-  let sessionStr;
-  try { sessionStr = tgCrypto.decrypt(sess.session_enc); } catch { return; }
-  const day = new Date().toISOString().slice(0, 10);
-  for (const ch of channels) {
-    if (!ch || ch.tg_channel_id == null) continue;
-    try { await collectQrChannel(sessionStr, ch, day); }
-    catch (e) { log('error', 'tg_qr_collect_now_failed', { channelId: ch.id, error: e.message }); }
-  }
-}
-
-// Collect QR-connected channels (source='qr') into Postgres using each user's stored session — the
-// server acts as their collector, so the dashboard renders them like any collector channel. Runs
-// fire-and-forget after the central ingest; durable per (channel, day) so a repeat trigger resumes
-// unfinished channels; sequential + per-channel try/catch so one bad session / channel / FloodWait
-// never blocks the others or the critical central ingest. Sessions are decrypted ONLY here and handed
-// to the isolated mtproto /qr/collect — never logged, never sent to a client.
-const TG_QR_MAX_CHANNELS_PER_RUN = 200;
-
-async function processTgQrCollection() {
-  if (!db.enabled || !tgCrypto.configured() || !MTPROTO_TOKEN) return;
-  const day = new Date().toISOString().slice(0, 10);
-  let sessions = [];
-  try { sessions = await db.listTgSessions(); }
-  catch (e) { log('error', 'tg_qr_list_sessions_failed', { error: e.message }); return; }
-
-  let done = 0, collected = 0, skipped = 0, failed = 0, capped = false;
-  for (const s of sessions) {
-    if (done >= TG_QR_MAX_CHANNELS_PER_RUN) { capped = true; break; }
-    let sessionStr;
-    try { sessionStr = tgCrypto.decrypt(s.session_enc); }
-    catch { log('error', 'tg_qr_decrypt_failed', { uid: s.uid }); continue; }
-
-    let chans = [];
-    try { chans = (await db.listChannels({ uid: s.uid })).filter((c) => c.source === 'qr' && c.tg_channel_id != null); }
-    catch (e) { log('error', 'tg_qr_list_channels_failed', { uid: s.uid, error: e.message }); continue; }
-
-    for (const ch of chans) {
-      if (done >= TG_QR_MAX_CHANNELS_PER_RUN) { capped = true; break; }
-      let started = false;
-      try {
-        const out = await db.runJobOnce('qr_collect', `${ch.id}:${day}`, () => {
-          started = true;
-          return collectQrChannel(sessionStr, ch, day);
-        });
-        if (out.skipped) { skipped++; continue; }
-        done++;
-        collected++;
-      }
-      catch (e) {
-        if (started) done++;
-        failed++;
-        log('error', 'tg_qr_collect_failed', { channelId: ch.id, error: e.message });
-      }
-    }
-  }
-  log(capped ? 'warn' : 'info', 'tg_qr_collection_done', { collected, skipped, failed, capped });
-}
+// Сбор QR-каналов (persistTgBundle/collectQrChannel[sNow]/processTgQrCollection) —
+// jobs/tgQrCollectionJob: сессии дешифруются только внутри, tgPostToRow общий с ingest.
+const { collectQrChannelsNow, processTgQrCollection } = createTgQrCollectionJob({
+  db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN, MTPROTO_TIMEOUT_HEAVY_MS, tgPostToRow,
+});
 
 
 // ── Telegram Bot API env — read here; still surfaced by /api/health + the boot banner, and
@@ -329,103 +182,21 @@ const TG_TOKEN   = config.telegram.botToken || undefined;   // || undefined — 
 const TG_CHANNEL = config.telegram.channel || undefined;
 
 
-/* Email-выгрузка отчётов (v1). Дёргается fire-and-forget из дневного ingest-крона
-   (единственный ежедневный тик системы — отдельного планировщика нет): weekly уходит
-   в понедельник UTC, monthly — 1-го числа UTC. Если крон в «свой» день не сработал,
-   действует catch-up: weekly шлётся, когда last_sent_at старше 8 дней, monthly — 32
-   дней (первая отправка якорится к понедельнику / 1-му). Окно по last_sent_at в
-   listDueReports остаётся анти-дублем, если крон сработал дважды за день. Все ошибки
-   логируются и никогда не влияют на ответ ingest-а. */
-// Серверный «Неделя канала» (фаза 3 нарратива): shared-движок narrative.gen.cjs + сборка входа
-// из архива. Секция опциональна — без артефакта/данных письмо-ссылка уходит как раньше.
-const { assembleWeekInput, reportHasWeekBlock, weekSectionHtml } = require('./lib/weekDigest');
+// Email-выгрузка отчётов (weekly/monthly + «Неделя канала» в теле) — jobs/reportScheduleJob;
+// дёргается из ingest-хвостов. weekDigest-движок job требует сам (lib).
+const { processReportSchedules } = createReportScheduleJob({
+  db, log, sendEmail, emailShell, emailBtn, escHtml, emailConfigured,
+});
 
-const reportEmailHtml = (base, report, weekHtml) => emailShell(`Отчёт „${escHtml(report.name)}“`,
-  `${weekHtml || ''}<p>Ваш регулярный отчёт Atlavue готов:</p>${emailBtn(`${base}/reports/${report.id}`, 'Открыть отчёт')}` +
-  `<p style="color:#64748d;font-size:13px">Отчёт можно сохранить как PDF — кнопка «Печать» на странице отчёта.</p>`);
+// Дневной TG-ingest центрального канала — jobs/dailyIngestJob; роут в app.js оставляет
+// себе токен-гейт и res.json, вся работа дня + формы ответов здесь.
+const dailyIngestJob = createDailyIngestJob({
+  db, log, mtprotoFetch, MTPROTO_TIMEOUT_HEAVY_MS, tgPostToRow,
+  processReportSchedules, processPersistence, processTgQrCollection,
+});
 
-async function processReportSchedules(base) {
-  if (!db.enabled) return;
-  // Без почтового провайдера рассылка невозможна: dev-заглушка sendEmail вернула бы true,
-  // и last_sent_at проставился бы без единого отправленного письма.
-  if (!emailConfigured()) {
-    console.log('[reports] schedule skipped: email not configured');
-    return;
-  }
-  const now = new Date();
-  const isMonday = now.getUTCDay() === 1;    // понедельник UTC
-  const isFirst  = now.getUTCDate() === 1;   // 1-е число UTC
-  let candidates = [];
-  try { candidates = await db.listDueReports({ weekly: true, monthly: true }); }
-  catch (e) { log('error', 'report_schedule_query_failed', { error: e.message }); return; }
-  // Пер-строчный гейт с catch-up вместо строгого «только в понедельник / 1-го»: если крон
-  // в тот день не сработал, письмо уходит, как только last_sent_at старше 8 дней (weekly)
-  // или 32 дней (monthly). Первая отправка (last_sent_at IS NULL) якорится к понедельнику /
-  // 1-му. Анти-дубль в течение дня остаётся SQL-окном в listDueReports.
-  const DAY_MS = 24 * 60 * 60 * 1000;
-  const olderThan = (sentAt, limitDays) =>
-    sentAt != null && now.getTime() - new Date(sentAt).getTime() > limitDays * DAY_MS;
-  const due = candidates.filter((r) =>
-    r.schedule === 'weekly'
-      ? isMonday || olderThan(r.last_sent_at, 8)
-      : isFirst  || olderThan(r.last_sent_at, 32));
-  // ISO-week key (YYYY-Www) so the weekly job key is stable across the whole week.
-  const isoWeekKey = (d) => {
-    const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-    t.setUTCDate(t.getUTCDate() + 4 - (t.getUTCDay() || 7)); // Thursday of this ISO week
-    const week = Math.ceil((((t - Date.UTC(t.getUTCFullYear(), 0, 1)) / 86400000) + 1) / 7);
-    return `${t.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
-  };
-  for (const r of due) {
-    // Idempotency key per (report, period): a double cron tick, the catch-up branch firing next
-    // to the anchored one, or a SECOND SERVER INSTANCE can all re-discover the same candidate —
-    // the jobs row makes exactly one of them send (roadmap P0 «Background job idempotency»).
-    const periodKey = r.schedule === 'weekly' ? isoWeekKey(now) : `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
-    try {
-      const outcome = await db.runJobOnce('report_email', `report:${r.id}:${periodKey}`, async () => {
-        // GDPR-гонка: юзер мог стереть аккаунт между снапшотом listDueReports (несёт email в
-        // строке) и отправкой — перепроверяем существование, письмо на стёртый адрес не уходит.
-        if (!(await db.getUserById(r.uid))) return { sent: false, erased: true };
-        // «Неделя канала» в теле письма — только weekly-отчётам с week/digest-блоком. Любая
-        // ошибка сборки секции НЕ роняет отправку: письмо уходит без неё (рассказ — бонус).
-        let weekHtml = null;
-        try {
-          if (r.schedule === 'weekly' && reportHasWeekBlock(r.config)) {
-            const chans = await db.listChannels({ uid: r.uid });
-            // Канал нарратива = канал САМОГО ОТЧЁТА (config.channelId — то, что рендерит
-            // страница /reports/:id, куда ведёт кнопка письма). Раньше всегда брался chans[0]
-            // (старейший канал юзера): письмо ссылалось на отчёт канала B, а цифры внутри были
-            // канала A. Членство в chans = ownership-check; чужой/удалённый id → прежний фолбэк.
-            const cfgId = Number(r.config && r.config.channelId) || 0;
-            const chId = (cfgId && chans.some((c) => c.id === cfgId))
-              ? cfgId
-              : (chans[0] && chans[0].id);
-            if (chId) {
-              // Internal-ридеры (cron): доступ уже установлен членством chans выше (listChannels).
-              const [daily, posts, igDaily] = await Promise.all([
-                db.getChannelHistoryInternal(chId, 35),
-                db.listPostsWindow(chId, 28),
-                db.listIgDailyInternal(chId, 14),
-              ]);
-              weekHtml = weekSectionHtml(assembleWeekInput({ daily, posts, igDaily }));
-            }
-          }
-        } catch (e) {
-          log('warn', 'report_week_section_failed', { report_id: r.id, error: e.message });
-        }
-        const ok = await sendEmail(r.email, `Atlavue — отчёт „${r.name}“`, reportEmailHtml(base, r, weekHtml));
-        if (ok) await db.markReportSent(r.id);
-        if (!ok) throw new Error('email send failed');
-        return { sent: true };
-      });
-      if (outcome.skipped) {
-        log('info', 'report_email_deduped', { report_id: r.id, period: periodKey });
-      }
-    } catch (e) {
-      log('error', 'report_email_failed', { report_id: r.id, error: e.message });
-    }
-  }
-}
+// Флаг дренажа (graceful shutdown): main.js ставит true в stop() → /api/ready 503.
+const drainState = { draining: false };
 
 
 // ════════════════════════════════════════════════════════════════
@@ -448,23 +219,24 @@ const mediaLimiter = rateLimit({
 // инъектируются в createApp (server/app.js). getDbReady читает живой флаг миграции dbReady.
 const app = createApp({
   config, db, log,
-  fetchWithTimeout, mtprotoFetch, MTPROTO_TIMEOUT_HEAVY_MS,
+  fetchWithTimeout,
   requireAuth, requireSuper, resolveChannel, audit,
   getDbReady: () => dbReady,
+  getDraining: () => drainState.draining,
   limiter, authLimiter, mediaLimiter,
   hashPassword, verifyPassword, DUMMY_HASH, signSession, SESSION_TTL, GOOGLE_CLIENT_ID,
   appBase, sha256, newToken, VERIFY_TTL, RESET_TTL, sendEmail, emailShell, emailBtn, escHtml,
   igFetch, refreshIgIfNeeded, igConfigured, igCrypto, igMock, nearestOf,
   cacheGet, cacheSet, cache, IG_ACCOUNT, IG_TOKEN, IG_GRAPH, AUTH_SECRET,
   tgCrypto, collectQrChannelsNow, TG_TOKEN, TG_CHANNEL,
-  timingSafeEqualStr, tgPostToRow, processReportSchedules, processPersistence, processTgQrCollection,
+  timingSafeEqualStr, dailyIngestJob,
 });
 
 // ── Запуск ──────────────────────────────────────────────────────
 // Lifecycle (validateConfig → await bootPromise → listen + баннер + single-replica
 // guardrail) живёт в main.js; index остаётся compat-entry (`npm start` = node server/
 // index.js) и точкой сборки deps до их переезда в services/jobs (PR C-E).
-module.exports = { app, config, bootPromise };
+module.exports = { app, config, bootPromise, memoryCache: cache, drainState };
 
 if (require.main === module) {
   // Жёсткий exit(1), как раньше делал inline-чек секретов: ConfigError в prod не должен
