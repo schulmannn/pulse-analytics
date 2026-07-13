@@ -17,163 +17,249 @@ const { createIntegrationsRepo } = require('./repos/integrationsRepo');
 const { createGdprService } = require('./services/gdprService');
 // DB core (P2 db/core): пул / Railway-SSL / enabled / ping / close + классификация недоступности
 // живут в server/db/*. db.js их импортирует и ре-экспортит — публичный `db.*` API не меняется.
-const { pool, enabled, ping, close } = require('./db/pool');
+const { createPool } = require('./db/pool');
 const { isDbUnavailable } = require('./db/errors');
 const { createTransaction } = require('./db/transaction');
 const { mergeExports } = require('./db/mergeExports');
 
-// Схема — ТОЛЬКО server/migrations/*.sql (исторический inline-дамп снесён в PR 9;
-// git-история хранит его на случай археологии).
+function createDatabase(config, overrides = {}) {
+  const core =
+    overrides.core || createPool(config.database, overrides.poolOptions);
+  const { pool, enabled, ping, close } = core;
+  const OWNER_CHANNEL = config.telegram.ownerChannel;
+  const ADMIN_EMAIL = config.auth.adminEmail;
 
-// USER_ROLES / USER_STATUSES -> server/repos/usersRepo (spread in exports).
-// BUG_STATUSES / BUG_SEVERITIES / BUG_KINDS → server/repos/bugsRepo (spread в exports).
+  // Схема — ТОЛЬКО server/migrations/*.sql (исторический inline-дамп снесён в PR 9;
+  // git-история хранит его на случай археологии).
 
-// isDbUnavailable + DB_UNAVAILABLE_* → server/db/errors (импортировано выше).
+  // USER_ROLES / USER_STATUSES -> server/repos/usersRepo (spread in exports).
+  // BUG_STATUSES / BUG_SEVERITIES / BUG_KINDS → server/repos/bugsRepo (spread в exports).
 
-async function init() {
-  if (!enabled) { console.log('[db] disabled (no DATABASE_URL) — history off'); return; }
-  await pool.query('SELECT 1 FROM channels LIMIT 1');
-  await migrateOwnerChannel();
-  console.log('[db] connection ready');
-}
+  // isDbUnavailable + DB_UNAVAILABLE_* → server/db/errors (импортировано выше).
 
-async function migrate() {
-  if (!enabled) return [];
-  return runMigrations(pool);
-}
+  async function init() {
+    if (!enabled) {
+      console.log('[db] disabled (no DATABASE_URL) — history off');
+      return;
+    }
+    await pool.query('SELECT 1 FROM channels LIMIT 1');
+    await migrateOwnerChannel();
+    console.log('[db] connection ready');
+  }
 
-// ping / close → server/db/pool (импортировано выше).
+  async function migrate() {
+    if (!enabled) return [];
+    return runMigrations(pool);
+  }
 
-// ── Channels (tenants) ───────────────────────────────────────────
-const OWNER_CHANNEL = process.env.OWNER_CHANNEL || process.env.TG_CHANNEL || '@bynotem';
+  // ping / close → server/db/pool (импортировано выше).
 
-/* Find-or-create the singleton 'central' channel (the owner's @bynotem feed) and
+  // ── Channels (tenants) ───────────────────────────────────────────
+  /* Find-or-create the singleton 'central' channel (the owner's @bynotem feed) and
    stamp every pre-existing global data row onto it. Idempotent + double-boot-safe:
    the partial unique index makes the INSERT race-safe, and the backfill UPDATEs
    match nothing once the rows are stamped. The admin user may not exist yet at
    first boot (bootstrapAdmin runs after init) → create with owner_uid NULL and
    let adoptOwnerChannel() claim it once the admin row exists. */
-async function migrateOwnerChannel() {
-  if (!enabled) return;
-  let { rows } = await pool.query(`SELECT id FROM channels WHERE source='central' LIMIT 1`);
-  let ownerId = rows[0] && rows[0].id;
-  if (!ownerId) {
-    const adminEmail = String(process.env.ADMIN_EMAIL || '').toLowerCase().trim();
-    let adminId = null;
-    if (adminEmail) {
-      const u = await pool.query('SELECT id FROM users WHERE email=$1', [adminEmail]);
-      adminId = u.rows[0] ? u.rows[0].id : null;
-    }
-    const uname = String(OWNER_CHANNEL).replace(/^@/, '');
-    const ins = await pool.query(
-      `INSERT INTO channels (owner_uid, username, title, status, source)
+  async function migrateOwnerChannel() {
+    if (!enabled) return;
+    let { rows } = await pool.query(
+      `SELECT id FROM channels WHERE source='central' LIMIT 1`,
+    );
+    let ownerId = rows[0] && rows[0].id;
+    if (!ownerId) {
+      const adminEmail = ADMIN_EMAIL;
+      let adminId = null;
+      if (adminEmail) {
+        const u = await pool.query('SELECT id FROM users WHERE email=$1', [
+          adminEmail,
+        ]);
+        adminId = u.rows[0] ? u.rows[0].id : null;
+      }
+      const uname = String(OWNER_CHANNEL).replace(/^@/, '');
+      const ins = await pool.query(
+        `INSERT INTO channels (owner_uid, username, title, status, source)
        VALUES ($1,$2,$2,'active','central') ON CONFLICT DO NOTHING RETURNING id`,
-      [adminId, uname]);
-    ownerId = ins.rows[0] ? ins.rows[0].id
-      : (await pool.query(`SELECT id FROM channels WHERE source='central' LIMIT 1`)).rows[0]?.id;
+        [adminId, uname],
+      );
+      ownerId = ins.rows[0]
+        ? ins.rows[0].id
+        : (
+            await pool.query(
+              `SELECT id FROM channels WHERE source='central' LIMIT 1`,
+            )
+          ).rows[0]?.id;
+    }
+    if (!ownerId) return;
+    await pool.query(
+      `UPDATE channel_daily  SET channel_id=$1 WHERE channel_id IS NULL`,
+      [ownerId],
+    );
+    await pool.query(
+      `UPDATE posts          SET channel_id=$1 WHERE channel_id IS NULL`,
+      [ownerId],
+    );
+    await pool.query(
+      `UPDATE velocity_daily SET channel_id=$1 WHERE channel_id IS NULL`,
+      [ownerId],
+    );
+    await pool.query(
+      `UPDATE mentions       SET owner_channel_id=$1 WHERE owner_channel_id IS NULL`,
+      [ownerId],
+    );
   }
-  if (!ownerId) return;
-  await pool.query(`UPDATE channel_daily  SET channel_id=$1 WHERE channel_id IS NULL`, [ownerId]);
-  await pool.query(`UPDATE posts          SET channel_id=$1 WHERE channel_id IS NULL`, [ownerId]);
-  await pool.query(`UPDATE velocity_daily SET channel_id=$1 WHERE channel_id IS NULL`, [ownerId]);
-  await pool.query(`UPDATE mentions       SET owner_channel_id=$1 WHERE owner_channel_id IS NULL`, [ownerId]);
-}
 
-// Claim the orphan central channel for the admin once its account exists
-// (chained after bootstrapAdmin in index.js). No-op once owned → idempotent.
-async function adoptOwnerChannel(adminUid) {
-  if (!enabled || adminUid == null) return false;
-  await pool.query(`UPDATE channels SET owner_uid=$1 WHERE owner_uid IS NULL AND source='central'`, [adminUid]);
-  // Canonicalise the freshly-adopted central channel too (workspace now; tg source when its
-  // platform id is already known — otherwise setChannelTgId stamps it on discovery).
-  const { rows } = await pool.query(
-    `SELECT id, tg_channel_id, username, title FROM channels WHERE owner_uid=$1 AND source='central'`, [adminUid]);
-  if (rows[0]) {
-    await channelsRepo.ensureChannelCanonical(rows[0].id, adminUid, rows[0].tg_channel_id != null
-      ? { network: 'tg', externalId: rows[0].tg_channel_id, username: rows[0].username, title: rows[0].title }
-      : {});
+  // Claim the orphan central channel for the admin once its account exists
+  // (chained after bootstrapAdmin in index.js). No-op once owned → idempotent.
+  async function adoptOwnerChannel(adminUid) {
+    if (!enabled || adminUid == null) return false;
+    await pool.query(
+      `UPDATE channels SET owner_uid=$1 WHERE owner_uid IS NULL AND source='central'`,
+      [adminUid],
+    );
+    // Canonicalise the freshly-adopted central channel too (workspace now; tg source when its
+    // platform id is already known — otherwise setChannelTgId stamps it on discovery).
+    const { rows } = await pool.query(
+      `SELECT id, tg_channel_id, username, title FROM channels WHERE owner_uid=$1 AND source='central'`,
+      [adminUid],
+    );
+    if (rows[0]) {
+      await channelsRepo.ensureChannelCanonical(
+        rows[0].id,
+        adminUid,
+        rows[0].tg_channel_id != null
+          ? {
+              network: 'tg',
+              externalId: rows[0].tg_channel_id,
+              username: rows[0].username,
+              title: rows[0].title,
+            }
+          : {},
+      );
+    }
+    return true;
   }
-  return true;
-}
 
-// ── Channels (tenants): видимость/доступ/tg-id → server/repos/channelsRepo (createChannelsRepo, spread в exports).
-// Tenancy-предикаты (sameTenantSource / channelAccessSql / channelAdminAccessSql) → server/db/access.
+  // ── Channels (tenants): видимость/доступ/tg-id → server/repos/channelsRepo (createChannelsRepo, spread в exports).
+  // Tenancy-предикаты (sameTenantSource / channelAccessSql / channelAdminAccessSql) → server/db/access.
 
-// Collector writes (num/INT4-clamp, graphsToDailyRows, upsert daily/posts/mentions, saveSnapshot,
-// ingestCollectorPayload, persistCentralDaily/persistTgBundleTx) → server/repos/collectorRepo.
+  // Collector writes (num/INT4-clamp, graphsToDailyRows, upsert daily/posts/mentions, saveSnapshot,
+  // ingestCollectorPayload, persistCentralDaily/persistTgBundleTx) → server/repos/collectorRepo.
 
-// getCollectorStatus (connection-status; writes живут в ingest выше) → server/repos/integrationsRepo.
+  // getCollectorStatus (connection-status; writes живут в ingest выше) → server/repos/integrationsRepo.
 
-async function recordAuditEvent({ uid = null, channel_id = null, action, request_id = null, ip_hash = null, metadata = {} }) {
-  if (!enabled || !action) return false;
-  await pool.query(
-    `INSERT INTO audit_events (uid, channel_id, action, request_id, ip_hash, metadata)
+  async function recordAuditEvent({
+    uid = null,
+    channel_id = null,
+    action,
+    request_id = null,
+    ip_hash = null,
+    metadata = {},
+  }) {
+    if (!enabled || !action) return false;
+    await pool.query(
+      `INSERT INTO audit_events (uid, channel_id, action, request_id, ip_hash, metadata)
      VALUES ($1,$2,$3,$4,$5,$6)`,
-    [uid, channel_id, String(action).slice(0, 100), request_id, ip_hash, metadata]);
-  return true;
-}
+      [
+        uid,
+        channel_id,
+        String(action).slice(0, 100),
+        request_id,
+        ip_hash,
+        metadata,
+      ],
+    );
+    return true;
+  }
 
-/* ── Персональная раскладка дашборда ─────────────────────────────
+  /* ── Персональная раскладка дашборда ─────────────────────────────
    Возвращает сохранённый объект prefs (или null, если ничего нет /
    нет БД). Запись — upsert по uid. */
-// (getPrefs/setPrefs -> usersRepo)
+  // (getPrefs/setPrefs -> usersRepo)
 
-/* ── Velocity snapshot (жизнь поста) ─────────────────────────────
+  /* ── Velocity snapshot (жизнь поста) ─────────────────────────────
    Сохраняем готовый объект /velocity целиком (форма не меняется), upsert по
    текущему дню. Чтение — самый свежий день. Пустые/недоступные снимки не
    пишем (guard в вызывающем коде), чтобы не затирать хороший снапшот. */
-// Collector writes (saveVelocity, upsertIg{Daily,MediaDaily}, saveRawSnapshot, prune{RawSnapshots,
-// IgMediaDaily}, rollupChannelMonthly) → server/repos/collectorRepo.
+  // Collector writes (saveVelocity, upsertIg{Daily,MediaDaily}, saveRawSnapshot, prune{RawSnapshots,
+  // IgMediaDaily}, rollupChannelMonthly) → server/repos/collectorRepo.
 
-// ── GDPR (erasure/export, F4/F5) → services/gdprService (PR 8) ──────────────────────────────
-// Сервис, не repo: пересекает все домены. Композиция ниже, фасад тот же (db.deleteUserAccount/
-// db.exportUserData) — routes/account.js не менялся.
+  // ── GDPR (erasure/export, F4/F5) → services/gdprService (PR 8) ──────────────────────────────
+  // Сервис, не repo: пересекает все домены. Композиция ниже, фасад тот же (db.deleteUserAccount/
+  // db.exportUserData) — routes/account.js не менялся.
 
-// ── Repo composition (P2 stage 5) — thin re-export so the public `db` API is unchanged ──
-// pool/enabled are settled at module load (above); each repo owns a domain's queries and its
-// methods are spread into the exports below at their original names.
-// Один transaction-хелпер над пулом, инжектится в репо с составными транзакциями (finding 4:
-// единый способ достать DB-зависимость, без inline-BEGIN'ов в репозиториях).
-const transaction = createTransaction(pool);
-const jobsRepo = createJobsRepo({ pool, enabled });
-const bugsRepo = createBugsRepo({ pool, enabled });
-const reportsRepo = createReportsRepo({ pool, enabled });
-const usersRepo = createUsersRepo({ pool, enabled, transaction });
-// sourcesRepo — external identity отдельный домен (finding 8); channels/integrations зависят ОТ него,
-// не друг от друга. Инстанцируется ДО channelsRepo (тот инъектит ensureExternalSource).
-const sourcesRepo = createSourcesRepo({ pool, enabled });
-const channelsRepo = createChannelsRepo({ pool, enabled, transaction, ensureExternalSource: sourcesRepo.ensureExternalSource });
-// ensureExternalSource / transaction — инъекция (repos не импортят друг друга; связывание только тут).
-const integrationsRepo = createIntegrationsRepo({ pool, enabled, transaction, ensureExternalSource: sourcesRepo.ensureExternalSource });
-// getAccessibleChannel — инъекция (finding 5: ForActor-ридеры гейтят доступ через канонический
-// ownership-check channelsRepo.getChannel; repos не импортят друг друга). ПОСЛЕ channelsRepo (TDZ).
-const analyticsRepo = createAnalyticsRepo({ pool, enabled, getAccessibleChannel: channelsRepo.getChannel });
-// setChannelTgId — инъекция (ingestCollectorPayload штампует tg-id в своей транзакции; repos не импортят друг друга).
-const collectorRepo = createCollectorRepo({ pool, enabled, transaction, setChannelTgId: channelsRepo.setChannelTgId });
-// GDPR — сервис над пулом+transaction (кросс-доменные erasure/export; спека: GDPR=service).
-const gdprService = createGdprService({ pool, enabled, transaction });
+  // ── Repo composition (P2 stage 5) — thin re-export so the public `db` API is unchanged ──
+  // pool/enabled are scoped to this database instance; each repo owns a domain's queries and its
+  // methods are spread into the exports below at their original names.
+  // Один transaction-хелпер над пулом, инжектится в репо с составными транзакциями (finding 4:
+  // единый способ достать DB-зависимость, без inline-BEGIN'ов в репозиториях).
+  const transaction = createTransaction(pool);
+  const jobsRepo = createJobsRepo({ pool, enabled });
+  const bugsRepo = createBugsRepo({ pool, enabled });
+  const reportsRepo = createReportsRepo({ pool, enabled });
+  const usersRepo = createUsersRepo({ pool, enabled, transaction });
+  // sourcesRepo — external identity отдельный домен (finding 8); channels/integrations зависят ОТ него,
+  // не друг от друга. Инстанцируется ДО channelsRepo (тот инъектит ensureExternalSource).
+  const sourcesRepo = createSourcesRepo({ pool, enabled });
+  const channelsRepo = createChannelsRepo({
+    pool,
+    enabled,
+    transaction,
+    ensureExternalSource: sourcesRepo.ensureExternalSource,
+  });
+  // ensureExternalSource / transaction — инъекция (repos не импортят друг друга; связывание только тут).
+  const integrationsRepo = createIntegrationsRepo({
+    pool,
+    enabled,
+    transaction,
+    ensureExternalSource: sourcesRepo.ensureExternalSource,
+  });
+  // getAccessibleChannel — инъекция (finding 5: ForActor-ридеры гейтят доступ через канонический
+  // ownership-check channelsRepo.getChannel; repos не импортят друг друга). ПОСЛЕ channelsRepo (TDZ).
+  const analyticsRepo = createAnalyticsRepo({
+    pool,
+    enabled,
+    getAccessibleChannel: channelsRepo.getChannel,
+  });
+  // setChannelTgId — инъекция (ingestCollectorPayload штампует tg-id в своей транзакции; repos не импортят друг друга).
+  const collectorRepo = createCollectorRepo({
+    pool,
+    enabled,
+    transaction,
+    setChannelTgId: channelsRepo.setChannelTgId,
+  });
+  // GDPR — сервис над пулом+transaction (кросс-доменные erasure/export; спека: GDPR=service).
+  const gdprService = createGdprService({ pool, enabled, transaction });
 
-// db.js-локальные экспорты (домены, ещё не вынесенные в repos/*): core + collector-writes +
-// analytics-reads + bugs/crashes. По мере распила эти наборы переезжают в свои repo.
-const localExports = {
-  enabled, init, migrate, ping, close, isDbUnavailable,
-  adoptOwnerChannel,
-  recordAuditEvent,
-};
+  // db.js-локальные экспорты (домены, ещё не вынесенные в repos/*): core + collector-writes +
+  // analytics-reads + bugs/crashes. По мере распила эти наборы переезжают в свои repo.
+  const localExports = {
+    enabled,
+    init,
+    migrate,
+    ping,
+    close,
+    isDbUnavailable,
+    adoptOwnerChannel,
+    recordAuditEvent,
+  };
 
-// Публичный фасад db.* — сборка из доменных частей с ГАРДОМ на коллизии имён (finding 3):
-// mergeExports падает на загрузке, если два repo (или локальный набор) экспортируют одно имя —
-// раньше spread `{...a, ...b}` молча оставлял последнее, тихо затирая реализацию.
-module.exports = mergeExports({
-  local: localExports,
-  users: usersRepo,
-  channels: channelsRepo,
-  sources: sourcesRepo,
-  integrations: integrationsRepo,
-  bugs: bugsRepo,
-  analytics: analyticsRepo,
-  collector: collectorRepo,
-  reports: reportsRepo,   // REPORT_SCHEDULES, listReports, getReport, createReport, updateReport, deleteReport, listDueReports, markReportSent, listPostsWindow
-  jobs: jobsRepo,   // claimJob, completeJob, failJob, getJob, runJobOnce
-  gdpr: gdprService,   // deleteUserAccount, exportUserData (сервис, не repo)
-});
+  // Публичный фасад db.* — сборка из доменных частей с ГАРДОМ на коллизии имён (finding 3):
+  // mergeExports падает на загрузке, если два repo (или локальный набор) экспортируют одно имя —
+  // раньше spread `{...a, ...b}` молча оставлял последнее, тихо затирая реализацию.
+  return mergeExports({
+    local: localExports,
+    users: usersRepo,
+    channels: channelsRepo,
+    sources: sourcesRepo,
+    integrations: integrationsRepo,
+    bugs: bugsRepo,
+    analytics: analyticsRepo,
+    collector: collectorRepo,
+    reports: reportsRepo, // REPORT_SCHEDULES, listReports, getReport, createReport, updateReport, deleteReport, listDueReports, markReportSent, listPostsWindow
+    jobs: jobsRepo, // claimJob, completeJob, failJob, getJob, runJobOnce
+    gdpr: gdprService, // deleteUserAccount, exportUserData (сервис, не repo)
+  });
+}
+
+module.exports = { createDatabase, isDbUnavailable };

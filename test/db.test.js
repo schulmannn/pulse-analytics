@@ -4,7 +4,8 @@
 // Запуск: `npm test` (или `node --test`).
 const test = require('node:test');
 const assert = require('node:assert');
-const db = require('../server/db');
+const { createTestDatabase } = require('./testDatabase');
+const db = createTestDatabase();
 
 // 2026-06-01 / 02 в UTC-миллисекундах (graphs.x приходит в ms-эпохе).
 const T1 = Date.UTC(2026, 5, 1);

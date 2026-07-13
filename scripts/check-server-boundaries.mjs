@@ -23,6 +23,14 @@ const errors = [];
 const read = (p) => fs.readFileSync(p, 'utf8');
 const listJs = (dir) =>
   fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith('.js')).map((f) => path.join(dir, f)) : [];
+const listJsRecursive = (dir) =>
+  fs.existsSync(dir)
+    ? fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+        const target = path.join(dir, entry.name);
+        if (entry.isDirectory()) return listJsRecursive(target);
+        return entry.isFile() && entry.name.endsWith('.js') ? [target] : [];
+      })
+    : [];
 
 // Правило = [regex, пояснение]. Комментарии из проверки не вычищаем сознательно:
 // упоминание запретного API в комменте — дешёвая цена за простой и честный гвард,
@@ -37,6 +45,16 @@ function forbid(file, rules) {
       errors.push(`${rel}:${line} — ${why} (найдено: ${JSON.stringify(m[0].slice(0, 40))})`);
     }
   }
+}
+
+// Environment ownership is global, not merely a convention for selected layers.
+// main.js may expose process.env as its default argument; config.js is the only parser.
+for (const file of listJsRecursive(ROOT)) {
+  const relative = path.relative(ROOT, file).replaceAll('\\', '/');
+  if (relative === 'config.js' || relative === 'main.js') continue;
+  forbid(file, [
+    [/process\.env\b/, 'environment variables are parsed only by config.js'],
+  ]);
 }
 
 // app.js — синхронная HTTP-фабрика без окружения/таймеров/сигналов/listen.

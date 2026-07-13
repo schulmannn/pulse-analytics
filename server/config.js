@@ -1,11 +1,7 @@
 'use strict';
 
-/* ── Типизированная конфигурация (декомпозиция index.js, PR B1) ───────────────────────────────────
-   ЕДИНСТВЕННОЕ место, где прикладной код преобразует process.env в конфиг. Пока НЕ подключён к boot
-   (index.js читает env по-старому) — подключение (index → main.js) в PR B2; здесь модуль + юнит-тесты,
-   ноль рантайм-изменений. Деривации ТОЧНО повторяют текущие в index.js (isProduction, дефолты) —
-   чтобы swap в B2 был поведение-preserving. validateConfig повторяет существующий boot-fatal-чек
-   index.js (SESSION_SECRET/MTPROTO_TOKEN в prod), поэтому в проде проходит (иначе прод уже бы не грузился). */
+/* Единственное место, где backend преобразует environment variables в runtime config.
+   Остальные модули получают замороженный config или узкие значения через DI. */
 
 class ConfigError extends Error {
   constructor(errors) {
@@ -62,8 +58,10 @@ function loadConfig(env = process.env) {
     telegram: Object.freeze({
       botToken: env.TG_BOT_TOKEN || '',
       channel: env.TG_CHANNEL || '',
+      ownerChannel: env.OWNER_CHANNEL || env.TG_CHANNEL || '@bynotem',
       mtprotoUrl: env.MTPROTO_URL || '',
       mtprotoToken: env.MTPROTO_TOKEN || '',
+      sessionKey: env.TG_SESSION_KEY || '',
     }),
     github: Object.freeze({
       // repository_dispatch для claude-bugfix (кнопка в баг-трекере); soft-off без пары.
@@ -73,6 +71,10 @@ function loadConfig(env = process.env) {
     email: Object.freeze({
       apiKey: env.RESEND_API_KEY || '',
       from: env.EMAIL_FROM || 'Atlavue <onboarding@resend.dev>',
+    }),
+    notion: Object.freeze({
+      token: env.NOTION_TOKEN || '',
+      crashDatabaseId: env.NOTION_CRASH_DB || '',
     }),
     runtime: Object.freeze({
       webReplicas: Number(env.WEB_REPLICAS || 1),
@@ -101,6 +103,9 @@ function validateConfig(config) {
   }
   if (config.telegram.mtprotoUrl && !config.telegram.mtprotoToken) {
     add('telegram.mtprotoToken', 'MTPROTO_TOKEN обязателен, когда задан MTPROTO_URL (аутентифицирует web→mtproto).');
+  }
+  if (!!config.notion.token !== !!config.notion.crashDatabaseId) {
+    add('notion', 'NOTION_TOKEN и NOTION_CRASH_DB должны быть заданы вместе.');
   }
   for (const [field, value] of [
     ['http.port', config.http.port],

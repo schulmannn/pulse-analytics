@@ -1,12 +1,12 @@
 'use strict';
 
 const crypto = require('crypto');
-const notionCrash = require('../lib/notion_crash');
 const { canDispatchBugKind, sanitizeForPrompt } = require('../lib/bugfix_gate');
 
 function registerBugsRoutes({
   app, express, db, rateLimit, requireAuth, requireSuper, fetchWithTimeout, AUTH_SECRET,
   commitSha, githubRepo, githubDispatchToken,
+  notionCrash,
 }) {
   // ════════════════════════════════════════════════════════════════
   //  БАГ-ТРЕКЕР (Postgres)
