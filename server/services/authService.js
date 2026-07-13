@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════════════════════════
 // Фабрика auth-домена (декомпозиция index.js, PR C): подписанты сессий, requireAuth/
 // requireSuper, бутстрап админ-аккаунта и утилиты auth-флоу (одноразовые email-токены,
-// анти-enumeration DUMMY_HASH). Без process.env/Express-app/listen/таймеров — всё из
+// анти-enumeration DUMMY_HASH). Без чтения окружения/Express-app/listen/таймеров — всё из
 // deps; тела перенесены из index.js literal (поведение-preserving).
 
 'use strict';

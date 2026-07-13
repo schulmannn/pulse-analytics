@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════════════════════════
 // Фабрика email-домена (декомпозиция index.js, PR C): отправка через Resend (plain
 // fetch, без новой зависимости), HTML-shell/кнопка для писем и appBase() — публичный
-// origin для ссылок в письмах (anti Host-header poisoning). Без process.env/Express —
+// origin для ссылок в письмах (anti Host-header poisoning). Без чтения окружения/Express —
 // всё из config; тела перенесены из index.js literal (поведение-preserving).
 
 'use strict';

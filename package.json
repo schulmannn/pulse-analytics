@@ -11,7 +11,8 @@
     "lint": "biome lint --diagnostic-level=error",
     "check:syntax": "node scripts/check-server-syntax.mjs",
     "check:migrations": "node scripts/check-migrations.mjs",
-    "check": "npm run check:syntax && npm run check:migrations && npm run lint && node --test test/*.test.js"
+    "check:boundaries": "node scripts/check-server-boundaries.mjs",
+    "check": "npm run check:syntax && npm run check:migrations && npm run check:boundaries && npm run lint && node --test test/*.test.js"
   },
   "dependencies": {
     "express": "^4.19.2",
