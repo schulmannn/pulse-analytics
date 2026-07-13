@@ -5,8 +5,8 @@ const { hasWorkspaceRole } = require('../middleware/tenant');
 
 // "Business Login for Instagram" (Instagram API with Instagram Login, no Facebook Page). These app
 // credentials + scopes are read once at load, exactly as index.js did.
-const IG_CLIENT_ID     = process.env.IG_CLIENT_ID;
-const IG_CLIENT_SECRET = process.env.IG_CLIENT_SECRET;
+// IG_CLIENT_ID/IG_CLIENT_SECRET приходят из deps (config.instagram.clientId/clientSecret) —
+// роуты env не читают (boundary-гвард).
 // Insights edges (reach / views / follower_count / follows_and_unfollows, media & story insights)
 // require instagram_business_manage_insights — instagram_business_basic alone is NOT enough. Both
 // are requested at connect time (Meta blog 2025-03-24).
@@ -26,6 +26,7 @@ const IG_STATE_TTL = 10 * 60 * 1000;
 function registerIgOauthRoutes({
   app, db, requireAuth, audit, log, fetchWithTimeout, asyncHandler,
   appBase, cache, igConfigured, igCrypto, AUTH_SECRET, IG_GRAPH,
+  IG_CLIENT_ID, IG_CLIENT_SECRET,
 }) {
   // The per-channel OAuth connect flow needs app credentials, the token-encryption key, and a DB
   // (tokens are stored encrypted, one per channel). Without all three, connect is unavailable and

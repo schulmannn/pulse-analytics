@@ -63,6 +63,7 @@ function createCollectorHandler({ db, audit }) {
 
 function registerCollectorRoutes({
   app, db, express, rateLimit, isReady, requireAuth, audit,
+  collectorStaleHours,
 }) {
   const limiter = rateLimit({
     windowMs: 15 * 60 * 1000,
@@ -122,7 +123,7 @@ function registerCollectorRoutes({
       const channel = await db.getChannel(channelId, req.user);
       if (!channel) return res.status(403).json({ error: 'Нет доступа к каналу' });
       const status = await db.getCollectorStatus(channelId, req.user);
-      const staleAfterHours = Math.max(1, parseInt(process.env.COLLECTOR_STALE_HOURS, 10) || 24);
+      const staleAfterHours = collectorStaleHours;   // config.runtime.collectorStaleHours (та же деривация)
       const lastSuccessMs = status && status.last_success_at
         ? new Date(status.last_success_at).getTime()
         : 0;

@@ -52,21 +52,14 @@ forbid(path.join(ROOT, 'main.js'), [
   [/require\(\s*['"]express['"]\s*\)/, 'main.js не собирает Express — это app.js'],
 ]);
 
-// routes/** — HTTP-слой на инъекции: без прямого db и без internal-ридеров.
-// LEGACY_ENV_ALLOW: унаследованные env-чтения, жившие в этих роутах ДО декомпозиции
-// (bugs: deploy-sha; collector: COLLECTOR_STALE_HOURS; ig-oauth: IG_CLIENT_ID/SECRET).
-// Задокументированный долг — вынести в config при следующем содержательном касании
-// файла; НОВЫЕ env-чтения в остальных роутах гвард ловит сразу.
-const LEGACY_ENV_ALLOW = new Set(['bugs.js', 'collector.js', 'ig-oauth.js']);
+// routes/** — HTTP-слой на инъекции: без прямого db, без internal-ридеров, без env
+// (бывший LEGACY_ENV_ALLOW закрыт: bugs/collector/ig-oauth получают значения из config через deps).
 for (const f of listJs(path.join(ROOT, 'routes'))) {
-  const rules = [
+  forbid(f, [
     [/require\(\s*['"]\.\.?\/(db)(\.js)?['"]\s*\)/, 'routes не импортят db напрямую — db инъектится'],
     [/\b\w+Internal\s*\(/, 'routes не зовут *Internal-ридеры (обход ownership-чека) — это привилегия jobs'],
-  ];
-  if (!LEGACY_ENV_ALLOW.has(path.basename(f))) {
-    rules.push([/process\.env\b/, 'routes не читают process.env — конфиг приходит через deps']);
-  }
-  forbid(f, rules);
+    [/process\.env\b/, 'routes не читают process.env — конфиг приходит через deps'],
+  ]);
 }
 
 // services/** и jobs/** — чистые фабрики.
