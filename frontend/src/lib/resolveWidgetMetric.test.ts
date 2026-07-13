@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { pluralRu, resolveWidgetMetric, type DataContext } from '@/lib/resolveWidgetMetric';
 import type { WidgetConfig } from '@/lib/widgetConfig';
+import { WIDGET_METRICS } from '@/lib/widgetMetrics';
 import type {
   ChannelsResponse,
   HistoryData,
@@ -398,6 +399,17 @@ describe('resolveWidgetMetric — tg.netGrowth (S3c series-from-graphs)', () => 
 });
 
 describe('resolveWidgetMetric — stubs + guards (never throws)', () => {
+  it('dispatches every catalogue metric through an explicit resolver strategy', () => {
+    const emptyContext: DataContext = { now: NOW, days: 30, range: null, inRange };
+    for (const metric of WIDGET_METRICS) {
+      const result = resolveWidgetMetric(cfg(metric.id, { viz: metric.defaultViz }), emptyContext);
+      expect(result.metricId, metric.id).toBe(metric.id);
+      expect(result.kind, metric.id).toBe(metric.kind);
+      expect(result.unit, metric.id).toBe(metric.unit);
+      expect(result.empty, metric.id).toBe(true);
+    }
+  });
+
   it('returns empty for an unknown metric', () => {
     expect(resolveWidgetMetric(cfg('nope.metric'), ctx).empty).toBe(true);
   });

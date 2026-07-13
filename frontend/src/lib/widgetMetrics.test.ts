@@ -2,13 +2,16 @@ import { describe, expect, it } from 'vitest';
 import {
   CATEGORY_LABEL,
   CATEGORY_ORDER,
+  METRIC_BY_DRILL_KEY,
   METRIC_BY_ID,
   WIDGET_METRICS,
+  getDrillMetric,
   getMetric,
   isMetricId,
   metricsForSource,
   recommendedSize,
   type MetricCategory,
+  type MetricResolver,
   type WidgetViz,
 } from '@/lib/widgetMetrics';
 import { DRILL_KEYS } from '@/lib/kpiDerive';
@@ -17,6 +20,14 @@ const SOURCES = new Set(['tg', 'ig', 'all']);
 const KINDS = new Set(['value', 'series', 'breakdown', 'table']);
 const UNITS = new Set(['number', 'percent', 'posts', 'views']);
 const VIZ = new Set<WidgetViz>(['kpi', 'line', 'bar', 'donut', 'list', 'rank', 'pivot', 'table', 'ledger']);
+const RESOLVERS = new Set<MetricResolver>([
+  'tg.core',
+  'tg.ratio',
+  'tg.netGrowth',
+  'tg.breakdown',
+  'ig',
+  'unavailable',
+]);
 
 describe('widgetMetrics catalogue', () => {
   it('is non-empty and covers both TG and IG', () => {
@@ -33,6 +44,7 @@ describe('widgetMetrics catalogue', () => {
       expect(KINDS.has(m.kind), `kind of ${m.id}`).toBe(true);
       expect(UNITS.has(m.unit), `unit of ${m.id}`).toBe(true);
       expect(CATEGORY_ORDER.includes(m.category), `category of ${m.id}`).toBe(true);
+      expect(RESOLVERS.has(m.resolver), `resolver of ${m.id}`).toBe(true);
     }
   });
 
@@ -82,6 +94,17 @@ describe('widgetMetrics catalogue', () => {
     }
     // No metric claims a drillKey outside the known set.
     for (const k of mapped) expect(DRILL_KEYS).toContain(k);
+    for (const key of DRILL_KEYS) {
+      expect(METRIC_BY_DRILL_KEY[key]).toBe(getDrillMetric(key));
+      expect(getDrillMetric(key).id).toBe(`tg.${key}`);
+    }
+  });
+
+  it('marks only intentionally non-widget tables as unavailable', () => {
+    expect(WIDGET_METRICS.filter((metric) => metric.resolver === 'unavailable').map((metric) => metric.id).sort()).toEqual([
+      'tg.topPosts',
+      'tg.weeklyTable',
+    ]);
   });
 
   it('level series metrics are the subscriber/follower counts', () => {

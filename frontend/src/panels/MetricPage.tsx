@@ -6,8 +6,7 @@ import { usePeriod } from '@/lib/period';
 import type { PeriodDays } from '@/lib/period';
 import { deriveKpis, isDrillKey } from '@/lib/kpiDerive';
 import type { DailySeries, DrillKey, PostMetricField } from '@/lib/kpiDerive';
-import { METRIC_DEFS } from '@/lib/metricDefs';
-import type { MetricDef } from '@/lib/metricDefs';
+import { getDrillMetric } from '@/lib/widgetMetrics';
 import { fmt, pluralRu } from '@/lib/format';
 import { markdownToPlainText } from '@/lib/markdown';
 import { PinnedDayPanel } from '@/components/PinnedDayPanel';
@@ -275,8 +274,7 @@ export function MetricPage() {
     return <ErrorState title="Не удалось загрузить метрику" reason={error instanceof Error ? error.message : 'ошибка'} />;
   }
 
-  // Widened to MetricDef: the `satisfies` map narrows each entry, hiding optional fields.
-  const def: MetricDef = METRIC_DEFS[metricKey];
+  const def = getDrillMetric(metricKey);
   const meta = derived.drillMeta[metricKey];
   const { normPosts, normPostsAll, subsSpark, historyRows, members, periodLabel } = derived;
 
