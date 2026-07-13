@@ -31,9 +31,17 @@ describe('editorSpec — capability model (U6)', () => {
   it('a legacy widget edits shell-only (all metric-level capabilities off)', () => {
     const s = editorSpec(cfg('legacy:kpi'));
     expect(s.label).toBe('Показатели');
-    expect(s.supportedViz).toEqual([]);
+    expect(s.supportedViz).toEqual(['kpi']);
+    expect(s.capabilities.viz).toBe(false);
     expect(s.filterDims).toEqual([]);
     expect(capabilitiesFor(cfg('legacy:kpi'))).toEqual({ metric: false, viz: false, grain: false, comparison: false, target: false, filter: false });
+  });
+
+  it('a chart legacy widget exposes only its supported presentation switch', () => {
+    const s = editorSpec(cfg('legacy:history'));
+    expect(s.supportedViz).toEqual(['line', 'bar']);
+    expect(s.capabilities).toEqual({ metric: false, viz: true, grain: false, comparison: false, target: false, filter: false });
+    expect(s.filterDims).toEqual([]);
   });
 
   it('an unknown metric degrades to no capabilities (no crash)', () => {

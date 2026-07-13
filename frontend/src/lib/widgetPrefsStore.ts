@@ -52,7 +52,7 @@ export interface WidgetPrefs {
 }
 
 
-/** Read-only snapshot of a widget's stored prefs. Home reads the pre-U6.3a `home-<key>` row to
+/** Read-only snapshot of a widget's stored prefs. Home reads the pre-unification `home-<key>` row to
     migrate a legacy card's saved settings (period/size/title/source/accent/hidden) into its new
     config-driven identity. */
 export function getWidgetPrefs(id: string): WidgetPrefs {
@@ -60,7 +60,7 @@ export function getWidgetPrefs(id: string): WidgetPrefs {
 }
 
 /** Set/clear a widget's hidden flag by id (Home carries a hidden legacy card's flag onto its new
-    config-driven ChartSection id during the U6.3a migration). `hidden` lives only in the prefs
+    config-driven ChartSection id during the legacy migration). `hidden` lives only in the prefs
     store, not in the WidgetConfig, so it can't ride the config seed. */
 export function setWidgetHidden(id: string, hidden: boolean) {
   setPrefs(id, { ...getPrefs(id), hidden: hidden || undefined });
@@ -188,7 +188,7 @@ export function useGroupOrder(groupId: string): string[] {
 
 /** Rename one entry of a group's persisted order in place (fromId → toId), keeping its slot. No-op
     when `fromId` isn't stored or `toId` already is — idempotent, so a one-time migration can call it
-    safely (U6.3a: a legacy card's section id changes home-<key> → custom-<configId> and its reorder
+    safely (legacy unification changes a card id from home-<key> → custom-<configId> and its reorder
     slot must follow instead of resetting to the tail). */
 export function remapGroupOrder(groupId: string, fromId: string, toId: string) {
   const cur = getGroupOrder(groupId);

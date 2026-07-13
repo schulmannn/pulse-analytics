@@ -18,11 +18,10 @@ import { ChannelScope } from '@/lib/channel-context';
 import { HOME_REGISTRY, HOME_DEFAULT_KEYS, type HomeWidgetDef } from '@/lib/homeWidgets';
 import { ConfigWidget } from '@/components/ConfigWidget';
 import { WidgetErrorBoundary } from '@/components/WidgetErrorBoundary';
-import { isWiredLegacyKey } from '@/components/legacyAdapters';
 import { WidgetCatalogModal } from '@/components/WidgetCatalogModal';
 import { CreateWidgetDialog } from '@/components/CreateWidgetDialog';
 import { addWidgetConfig, getWidgetConfig, useWidgetConfigs } from '@/lib/widgetStore';
-import { legacyConfigId } from '@/lib/legacyWidgets';
+import { isLegacyKey, legacyConfigId } from '@/lib/legacyWidgets';
 import { configIdFromKey, customKey, healedLegacyConfig, isCustomKey, type WidgetConfig } from '@/lib/widgetConfig';
 
 /**
@@ -54,13 +53,13 @@ export function Home() {
   const { data: history } = useHistory(730);
   const recency = useMemo(() => latestDataMs(tgFull?.posts, history), [tgFull, history]);
 
-  // Persist a deterministic-id WidgetConfig for each pinned WIRED legacy widget (kpi / digest /
-  // growth / top-posts) so its per-instance settings (period / source / title / size / style) stick
-  // when edited. Runs ONCE per device (guarded by !getWidgetConfig) — which is also the one-time
+  // Persist a deterministic-id WidgetConfig for every pinned legacy widget so its per-instance
+  // settings (period / source / title / size / visualisation / style) stick when edited. Runs ONCE
+  // per device (guarded by !getWidgetConfig) — which is also the one-time
   // MIGRATION seam: the card's identity moves from the old `home-<key>` prefs row to the config
   // (`custom-legacy-<key>`), so we carry the user's saved settings across instead of resetting them
-  // (adversarial review found period/size/title/accent AND the pinned source — wrong-channel data —
-  // would otherwise be orphaned). `hidden` isn't a config field → set it on the NEW ChartSection id;
+  // (period/size/title/accent/source and the old line/bar variant would otherwise be orphaned).
+  // `hidden` isn't a config field → set it on the NEW ChartSection id;
   // the reorder slot follows via remapGroupOrder. Keyed on the membership string so it only re-runs
   // when the pinned set changes (getHomeBlocks returns a fresh array each render). The render below
   // heals from the same old prefs, so there's no first-paint reset before this lands. The bare
@@ -69,7 +68,7 @@ export function Home() {
   const pinnedSig = pinned.join('|');
   useEffect(() => {
     for (const key of pinned) {
-      if (!isWiredLegacyKey(key) || getWidgetConfig(legacyConfigId(key))) continue;
+      if (!isLegacyKey(key) || getWidgetConfig(legacyConfigId(key))) continue;
       const oldId = `home-${key}`;
       const prefs = getWidgetPrefs(oldId);
       const cfg = healedLegacyConfig(key, prefs);
@@ -148,12 +147,12 @@ export function Home() {
                     </div>
                   );
                 }
-                // Wired legacy widget (U6.3a): render through ConfigWidget too, backed by a
+                // Legacy composite (U6.3): render through ConfigWidget, backed by a
                 // deterministic-id config (persisted by the effect above; the fallback heals from the
                 // same old `home-<key>` prefs so the first paint already carries the migrated period /
                 // source / accent — no reset flash, right channel from frame one). homeKey stays the
                 // bare registry key so the ⋯«Убрать с главной» / edit-mode × unpin work unchanged.
-                if (isWiredLegacyKey(key)) {
+                if (isLegacyKey(key)) {
                   const config =
                     getWidgetConfig(legacyConfigId(key)) ?? healedLegacyConfig(key, getWidgetPrefs(`home-${key}`));
                   if (!config) return null;
@@ -163,16 +162,13 @@ export function Home() {
                     </div>
                   );
                 }
-                // Own-chrome legacy widget (history / velocity / heatmap / mentions): render() returns
-                // a complete home-scoped ChartSection (home-<key> id) — still the legacy path until
-                // U6.3b extracts its body. A dedicated component (not inline) because Home itself no
-                // longer re-renders on prefs writes — the card subscribes to its own prefs row for
-                // the source pin / fallback size.
+                // Curated non-legacy entry: it still owns a complete home-scoped ChartSection. A
+                // dedicated component subscribes to its old prefs row for source and fallback size.
                 const def = HOME_REGISTRY[key];
-                if (!def) return null;
+                if (!def?.render) return null;
                 return (
                   <div key={key} className="contents">
-                    <LegacyHomeCard homeKey={key} def={def} />
+                    <CuratedHomeCard homeKey={key} def={def} />
                   </div>
                 );
               })}
@@ -186,13 +182,14 @@ export function Home() {
   );
 }
 
-/** An own-chrome legacy pinned card (history / velocity / heatmap / mentions). Subscribes to ITS
+/** A curated own-chrome pinned card (week / Instagram / compare / insights). Subscribes to ITS
  *  `home-<key>` prefs row (Home only re-renders on pin-list / config changes now), so editing this
  *  card's source or size re-renders exactly this card. Its own ChartSection means a crash in its
  *  variant compute escapes the in-card body boundary — the self-chromed «card» fallback here keeps
  *  the flagship Home whole per-widget. ChannelScope pins it to its «Источник» at the RENDER site. */
-const LegacyHomeCard = memo(function LegacyHomeCard({ homeKey, def }: { homeKey: string; def: HomeWidgetDef }) {
+const CuratedHomeCard = memo(function CuratedHomeCard({ homeKey, def }: { homeKey: string; def: HomeWidgetDef }) {
   const prefs = useWidgetPrefs(`home-${homeKey}`);
+  if (!def.render) return null;
   return (
     <WidgetErrorBoundary
       variant="card"

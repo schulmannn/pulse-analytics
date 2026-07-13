@@ -8,9 +8,10 @@ import { ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import { DEFAULT_WIDGET_DAYS } from '@/lib/period';
 import type { PeriodDays } from '@/lib/period';
 import { VIZ_LABEL } from '@/lib/widgetRender';
-import { getMetric, metricsForSource } from '@/lib/widgetMetrics';
+import { getMetric, metricsForSource, recommendedSize } from '@/lib/widgetMetrics';
 import { channelsForSource } from '@/lib/channelSource';
 import { editorSpec, type EditorSpec } from '@/lib/widgetCapabilities';
+import { LEGACY_DEFAULT_SIZE, LEGACY_DEFAULT_VIZ, legacyKeyForMetricId } from '@/lib/legacyWidgets';
 import type { WidgetSize } from '@/lib/widgetPrefsStore';
 import type { DimensionDef } from '@/lib/dimensions';
 import type { ComparisonDisplay, ComparisonMode, FilterOp, TargetType, WidgetConfig, WidgetFilter, WidgetGrain } from '@/lib/widgetConfig';
@@ -85,6 +86,8 @@ export function ConfigEditDialog({
   onClose: () => void;
 }) {
   const spec = editorSpec(config);
+  const metric = getMetric(config.metricId);
+  const legacyKey = legacyKeyForMetricId(config.metricId);
   // Modal focus contract (like PostDetailModal/DetailShell): move focus in, trap Tab, restore the
   // opener on close — without it aria-modal hides content the keyboard is actually walking.
   const panelRef = useRef<HTMLDivElement>(null);
@@ -107,13 +110,13 @@ export function ConfigEditDialog({
 
   const reset = () =>
     onChange({
-      viz: getMetric(config.metricId)?.defaultViz ?? 'kpi',
+      viz: metric?.defaultViz ?? (legacyKey ? LEGACY_DEFAULT_VIZ[legacyKey] : 'kpi'),
       title: undefined,
       period: undefined,
       grain: undefined,
       includeToday: undefined,
       source: undefined,
-      size: undefined,
+      size: metric ? recommendedSize(metric) : legacyKey ? LEGACY_DEFAULT_SIZE[legacyKey] : undefined,
       filters: undefined,
       comparison: undefined,
       target: undefined,
@@ -299,7 +302,8 @@ export function WidgetConfigControls({
       <Field label="Размер">
         <Segmented
           options={SIZES.map((s) => ({ value: s.value, label: s.label }))}
-          value={config.size ?? 'half'}
+          // ChartSection's canonical unspecified footprint is third; reflect the rendered truth.
+          value={config.size ?? 'third'}
           onChange={(v) => onChange({ size: v as WidgetSize })}
         />
       </Field>

@@ -70,6 +70,9 @@ describe('legacy widgets (U6) — `legacy:<key>` configs', () => {
     expect(w!.metricId).toBe('legacy:kpi');
     expect(w!.viz).toBe('kpi');
     expect(w!.size).toBe('full'); // kpi default size
+    expect(legacyWidgetConfig('growth')!.size).toBe('third');
+    expect(legacyWidgetConfig('history')!.size).toBe('half');
+    expect(legacyWidgetConfig('mentions')!.size).toBe('third');
     expect(legacyWidgetConfig('nope')).toBeNull();
   });
 
@@ -83,6 +86,13 @@ describe('legacy widgets (U6) — `legacy:<key>` configs', () => {
     expect(w.source).toBe(4);
     expect(w.style).toEqual({ color: 2 });
     expect(normalizeWidget({ metricId: 'legacy:ghost' })).toBeNull(); // unknown legacy key
+  });
+
+  it('keeps supported legacy chart presentations and falls back to the legacy default', () => {
+    expect(normalizeWidget({ metricId: 'legacy:history', viz: 'bar' })!.viz).toBe('bar');
+    expect(normalizeWidget({ metricId: 'legacy:history', viz: 'donut' })!.viz).toBe('line');
+    expect(normalizeWidget({ metricId: 'legacy:mentions', viz: 'line' })!.viz).toBe('line');
+    expect(normalizeWidget({ metricId: 'legacy:mentions', viz: 'kpi' })!.viz).toBe('bar');
   });
 
   it('normalizeWidgets mixes metric + legacy configs in one list', () => {
@@ -127,7 +137,7 @@ describe('legacy widgets (U6) — `legacy:<key>` configs', () => {
   });
 
   it('legacyConfigSeed maps old home-<key> prefs into a config patch (period/size/title/source/style)', () => {
-    expect(legacyConfigSeed({ period: 90, size: 'third', title: 'Мой KPI', source: 4, color: 2, tinted: true })).toEqual({
+    expect(legacyConfigSeed('kpi', { period: 90, size: 'third', title: 'Мой KPI', source: 4, color: 2, tinted: true })).toEqual({
       period: 90,
       size: 'third',
       title: 'Мой KPI',
@@ -135,12 +145,19 @@ describe('legacy widgets (U6) — `legacy:<key>` configs', () => {
       style: { color: 2, tinted: true },
     });
     // Empty / default prefs → empty patch (nothing to carry). `hidden` is NOT a config field.
-    expect(legacyConfigSeed({})).toEqual({});
+    expect(legacyConfigSeed('kpi', {})).toEqual({});
     // A 0 / negative source is not a real channel → dropped; a lone accent still yields a style.
-    expect(legacyConfigSeed({ source: 0 })).toEqual({});
-    expect(legacyConfigSeed({ color: 5 })).toEqual({ style: { color: 5 } });
+    expect(legacyConfigSeed('kpi', { source: 0 })).toEqual({});
+    expect(legacyConfigSeed('kpi', { color: 5 })).toEqual({ style: { color: 5 } });
     // An explicit un-tint (false) is carried too — tint is default-on, so `false` is the opt-out.
-    expect(legacyConfigSeed({ tinted: false })).toEqual({ style: { tinted: false } });
+    expect(legacyConfigSeed('kpi', { tinted: false })).toEqual({ style: { tinted: false } });
+  });
+
+  it('legacyConfigSeed migrates the old line/bar preference into config viz', () => {
+    expect(legacyConfigSeed('history', { variant: 'bar' })).toEqual({ viz: 'bar' });
+    expect(legacyConfigSeed('history', { variant: 'bar-values' })).toEqual({ viz: 'bar' });
+    expect(legacyConfigSeed('mentions', { variant: 'line' })).toEqual({ viz: 'line' });
+    expect(legacyConfigSeed('heatmap', { variant: 'line' })).toEqual({});
   });
 
   it('healedLegacyConfig seeds the deterministic legacy config with migrated prefs, re-validated', () => {
@@ -152,8 +169,10 @@ describe('legacy widgets (U6) — `legacy:<key>` configs', () => {
     expect(w.source).toBe(4);
     expect(w.style).toEqual({ color: 3 });
     expect(w.size).toBe('full'); // legacy default kept when prefs carry no size
+    expect(healedLegacyConfig('history', { variant: 'bar' })!.viz).toBe('bar');
+    expect(healedLegacyConfig('history', { variant: 'bar-values' })!.viz).toBe('bar');
     // No prefs → the plain deterministic config (equivalent to legacyHomeConfig).
-    expect(healedLegacyConfig('digest', {})).toEqual(legacyHomeConfig('digest'));
+    expect(healedLegacyConfig('history', {})).toEqual(legacyHomeConfig('history'));
     // A garbage prefs period can't produce an invalid config (normalizeWidget drops it).
     expect(healedLegacyConfig('kpi', { period: 999 as unknown as 7 })!.period).toBeUndefined();
     expect(healedLegacyConfig('nope', { period: 7 })).toBeNull();

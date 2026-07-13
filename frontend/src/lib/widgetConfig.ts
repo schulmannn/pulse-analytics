@@ -17,7 +17,16 @@ import type { PeriodDays } from '@/lib/period';
 import type { WidgetSize } from '@/lib/widgetPrefsStore';
 import { getMetric, isMetricId, recommendedSize, type WidgetViz } from '@/lib/widgetMetrics';
 import { genId } from '@/lib/reportBlocks';
-import { LEGACY_DEFAULT_SIZE, isLegacyKey, legacyConfigId, legacyKeyForMetricId, legacyMetricId, type LegacyKey } from '@/lib/legacyWidgets';
+import {
+  LEGACY_DEFAULT_SIZE,
+  LEGACY_DEFAULT_VIZ,
+  LEGACY_SUPPORTED_VIZ,
+  isLegacyKey,
+  legacyConfigId,
+  legacyKeyForMetricId,
+  legacyMetricId,
+  type LegacyKey,
+} from '@/lib/legacyWidgets';
 
 /** Series bucketing — richer than the current day/week/month (S10 teaches metricSeries the rest;
  *  until then quarter/year simply round-trip, and the resolver clamps to what it can bucket). */
@@ -134,7 +143,12 @@ export function defaultWidget(metricId: string): WidgetConfig | null {
 export function legacyWidgetConfig(key: string): WidgetConfig | null {
   if (!isLegacyKey(key)) return null;
   const size = LEGACY_DEFAULT_SIZE[key];
-  return { id: genId(), metricId: legacyMetricId(key), viz: 'kpi', ...(size ? { size } : {}) };
+  return {
+    id: genId(),
+    metricId: legacyMetricId(key),
+    viz: LEGACY_DEFAULT_VIZ[key],
+    size,
+  };
 }
 
 /** A legacy widget config with a DETERMINISTIC id derived from its key (see {@link legacyConfigId}) —
@@ -146,7 +160,7 @@ export function legacyHomeConfig(key: string): WidgetConfig | null {
   return { ...base, id: legacyConfigId(key as LegacyKey) };
 }
 
-/** Prefs a pre-U6.3a legacy Home card saved under its old `home-<key>` identity — a structural
+/** Prefs a pre-unification legacy Home card saved under its old `home-<key>` identity — a structural
  *  subset of WidgetPrefs (ChartWidget), so a raw prefs snapshot is assignable here. */
 export interface LegacyPrefsSeed {
   period?: PeriodDays;
@@ -155,12 +169,14 @@ export interface LegacyPrefsSeed {
   source?: number;
   color?: number;
   tinted?: boolean;
+  /** Presentation key from the pre-unification ChartSection prefs. */
+  variant?: string;
 }
 
 /** Map a legacy card's old per-widget prefs into a WidgetConfig patch (period / size / title /
  *  source / accent). Pure — the impure prefs read happens at the Home call site. `hidden` is NOT a
  *  config field (it stays in the prefs store) and is migrated separately. */
-export function legacyConfigSeed(prefs: LegacyPrefsSeed): Partial<WidgetConfig> {
+export function legacyConfigSeed(key: LegacyKey, prefs: LegacyPrefsSeed): Partial<WidgetConfig> {
   const seed: Partial<WidgetConfig> = {};
   if (prefs.period !== undefined) seed.period = prefs.period;
   if (prefs.size !== undefined) seed.size = prefs.size;
@@ -172,17 +188,23 @@ export function legacyConfigSeed(prefs: LegacyPrefsSeed): Partial<WidgetConfig> 
   // legacy card the user un-tinted keeps that off-state through legacy→config migration.
   if (prefs.tinted !== undefined) style.tinted = prefs.tinted;
   if (style.color !== undefined || style.tinted !== undefined) seed.style = style;
+  // Old ChartSection variants used `bar-values`; the unified composite editor exposes the two
+  // portable chart forms, so preserve its bar intent instead of resetting it to line.
+  const legacyViz = prefs.variant === 'bar-values' ? 'bar' : prefs.variant;
+  if (legacyViz && LEGACY_SUPPORTED_VIZ[key].includes(legacyViz as WidgetViz)) {
+    seed.viz = legacyViz as WidgetViz;
+  }
   return seed;
 }
 
 /** A legacy Home config (deterministic id) seeded with the user's old `home-<key>` prefs — the form
- *  Home stores/heals so a pre-U6.3a card keeps its period / size / title / source / accent instead of
+ *  Home stores/heals so a pre-unification card keeps its settings instead of
  *  silently resetting when it moves onto the config-driven card identity. Re-validated through
  *  normalizeWidget so a stale prefs value can't produce an invalid config. Null for an unknown key. */
 export function healedLegacyConfig(key: string, prefs: LegacyPrefsSeed): WidgetConfig | null {
   const base = legacyHomeConfig(key);
   if (!base) return null;
-  return normalizeWidget({ ...base, ...legacyConfigSeed(prefs) }) ?? base;
+  return normalizeWidget({ ...base, ...legacyConfigSeed(key as LegacyKey, prefs) }) ?? base;
 }
 
 function normComparison(raw: unknown): ComparisonConfig | undefined {
@@ -248,7 +270,9 @@ export function normalizeWidget(raw: unknown): WidgetConfig | null {
     ? typeof raw.viz === 'string' && metric.supportedViz.includes(raw.viz as WidgetViz)
       ? (raw.viz as WidgetViz)
       : metric.defaultViz
-    : 'kpi';
+    : typeof raw.viz === 'string' && LEGACY_SUPPORTED_VIZ[legacyKey as LegacyKey].includes(raw.viz as WidgetViz)
+      ? (raw.viz as WidgetViz)
+      : LEGACY_DEFAULT_VIZ[legacyKey as LegacyKey];
 
   const cfg: WidgetConfig = {
     id: typeof raw.id === 'string' && raw.id ? raw.id : genId(),

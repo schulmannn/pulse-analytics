@@ -13,6 +13,7 @@ import { useWidgetPeriod } from '@/lib/period';
 import { ChartCardBody, ChartSection } from '@/components/ChartWidget';
 import { seriesBarValuesVariant } from '@/components/widgets/variants';
 import { pctDelta } from '@/lib/delta';
+import type { WidgetViz } from '@/lib/widgetMetrics';
 
 interface HeatmapCell {
   n: number;
@@ -191,6 +192,31 @@ export function HistoryChartBlock({ id, homeKey }: HomeBlockProps = {}) {
   );
 }
 
+/** Bare, config-driven history body for Home. The surrounding ConfigWidget owns all card chrome. */
+export function HistoryWidgetBody({ viz }: { viz: WidgetViz }) {
+  const { data, isPending, isError, refetch } = useHistory(730);
+  const { inRange } = useWidgetPeriod();
+
+  if (isPending) return <ChartSkeletonBody />;
+  if (isError) return <ErrorState title="Не удалось загрузить историю" onRetry={() => refetch()} />;
+  if (!data || !data.enabled) return <EmptyState compact title="История подписчиков пока недоступна" />;
+
+  const rows = (data.rows ?? []).filter((row) => row.subscribers != null && inRange(row.day));
+  if (rows.length < 2) return <EmptyState compact title="История подписчиков пока пуста" />;
+
+  const last = Number(rows[rows.length - 1]?.subscribers ?? 0);
+  const first = Number(rows[0]?.subscribers ?? 0);
+  const delta = first > 0 ? pctDelta(last, first) : null;
+  const archiveCaption = `${rows.length} дн. в периоде${rows.length > 140 ? ' · сглажено' : ''}`;
+  const caption = delta ? `к началу периода · ${archiveCaption}` : archiveCaption;
+
+  return (
+    <ChartCardBody value={fmt.kpi(last)} delta={delta} caption={caption}>
+      {viz === 'bar' ? <SubscriberHistoryBars rows={rows} /> : <SubscriberHistoryChart rows={rows} />}
+    </ChartCardBody>
+  );
+}
+
 const DAY_NAMES = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 
 interface HeatmapBestSlot {
@@ -257,22 +283,21 @@ function buildHeatmap(
 }
 
 export function HeatmapChartBlock({ id, homeKey }: HomeBlockProps = {}) {
-  // ONE wide fetch (all posts); HeatmapBody windows the in-window subset per the card's OWN period,
-  // so the header pills re-window the grid client-side (no per-period refetch). isPending (не
-  // isLoading): запрос выключен, пока канал не известен, — скелетон и там.
-  const { data: tgData, isPending } = useTgFull(0);
-
-  // Без «(день × час)» в заголовке — технарская скобка; оси решётки говорят сами.
-  if (isPending) return <ChartSkeleton title="Тепловая карта активности" id={id} homeKey={homeKey} />;
-
   return (
     // The 7×24 grid is genuinely wide content → a full-row tile wherever the section lands in a
     // widget grid. periodControl = its own 7д/30д/90д/Всё pills; the aggregation lives in
     // HeatmapBody (a ChartSection child, inside the period provider) so the pills reach it.
     <ChartSection title="Тепловая карта активности" defaultSize="full" periodControl id={id} homeKey={homeKey}>
-      <HeatmapBody posts={tgData?.posts ?? []} />
+      <HeatmapWidgetBody />
     </ChartSection>
   );
+}
+
+/** Bare, self-fetching heatmap body shared by the source card and ConfigWidget. */
+export function HeatmapWidgetBody() {
+  const { data, isPending } = useTgFull(0);
+  if (isPending) return <ChartSkeletonBody />;
+  return <HeatmapBody posts={data?.posts ?? []} />;
 }
 
 /** Aggregates + renders the 7×24 ERV grid for the card's OWN window (useWidgetPeriod, read INSIDE
@@ -477,18 +502,55 @@ export function VelocityChartBlock({ id, homeKey }: HomeBlockProps = {}) {
   );
 }
 
+/** Bare, config-driven velocity body for Home. */
+export function VelocityWidgetBody({ viz }: { viz: WidgetViz }) {
+  const { data, isPending } = useVelocity();
+  if (isPending) return <ChartSkeletonBody />;
+
+  const byDay = data?.by_day ?? [];
+  if (!(data?.available ?? false) || byDay.length < 2) return <LineChart values={[]} />;
+
+  const values = byDay.map((point) => point.cum);
+  const titles = byDay.map(
+    (point) => `${point.day + 1}-е сутки: накоплено ${point.cum}% · доля дня ${point.share}%`,
+  );
+  const labels = byDay.map((point) => `${point.day + 1}д`);
+  const day1 = data?.day1_share ?? values[0] ?? 0;
+  const captions: string[] = [];
+  if (data?.t80_days != null) captions.push(`80% за ${data.t80_days} дн`);
+  if (data?.posts_used != null) captions.push(`по ${data.posts_used} постам`);
+
+  return (
+    <ChartCardBody
+      label="за 1-е сутки"
+      value={`${day1}%`}
+      caption={captions.length > 0 ? captions.join(' · ') : undefined}
+    >
+      {viz === 'bar' ? (
+        <BarChart values={values} labels={labels} titles={titles} />
+      ) : (
+        <LineChart values={values} yMin={0} yMax={Math.max(...values, 1)} titles={titles} labels={labels} />
+      )}
+    </ChartCardBody>
+  );
+}
+
 function ChartSkeleton({ title, id, homeKey }: { title: string; id?: string; homeKey?: string }) {
   return (
     <ChartSection title={title} id={id} homeKey={homeKey}>
-      {/* Steep card anatomy: number block bottom-left, chart area right — the live card lands
-          in the same shape, no outline jump. */}
-      <div className="flex items-end gap-4">
-        <div className="shrink-0">
-          <Skeleton className="h-8 w-24" />
-          <Skeleton className="mt-2 h-3 w-16" />
-        </div>
-        <Skeleton className="h-32 min-w-0 flex-1" />
-      </div>
+      <ChartSkeletonBody />
     </ChartSection>
+  );
+}
+
+function ChartSkeletonBody() {
+  return (
+    <div className="flex items-end gap-4">
+      <div className="shrink-0">
+        <Skeleton className="h-8 w-24" />
+        <Skeleton className="mt-2 h-3 w-16" />
+      </div>
+      <Skeleton className="h-32 min-w-0 flex-1" />
+    </div>
   );
 }
