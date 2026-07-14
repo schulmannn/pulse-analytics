@@ -20,6 +20,15 @@
 
 const { sameTenantSource, channelAccessSql } = require('../db/access');
 
+/** Positive-bigint mentioning-channel id (as a string for pg bigint params), or null on garbage. */
+function normalizeSourceId(v) {
+  if (v == null) return null;
+  const s = String(v).trim();
+  if (!/^\d+$/.test(s)) return null;
+  const n = s.replace(/^0+(?=\d)/, '');
+  return n === '0' ? null : n;
+}
+
 function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
   // ── Internal reads (БЕЗ access-check — ТОЛЬКО cron/service) ─────────────────────────────────────
   async function getChannelHistoryInternal(channelId, days = 400) {
@@ -52,25 +61,114 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
   return { total: total.rows[0], by_month: byMonth.rows };
   }
 
-  // Full mentions panel from the archive — same shape renderMentions() expects from
-  // the live search, so the dashboard can show stored mentions without spending quota.
-  async function getMentionsArchiveInternal(channelId, limit = 30) {
+  // Full mentions panel from the archive — same shape renderMentions() expects from the live
+  // search, so the dashboard can show stored mentions without spending quota. Extended (desktop
+  // Упоминания redesign) with honest period scope: opts = { days, source, limit }.
+  //   • days ∈ {0,7,30,90}. 0 = legacy/mobile/Home (весь архив, by_day за 60 дн). 7/30/90 = current
+  //     календарное окно, включая сегодня (>= CURRENT_DATE-(days-1) и < завтра), плюс previous —
+  //     непосредственно предшествующее равное окно для сравнения.
+  //   • source — необязательный positive-bigint channel_id упомянувшего внешнего канала; фильтрует
+  //     ТОЛЬКО строки внутри owner_channel_id. source_options считается ДО применения фильтра.
+  //   • limit — clamp 1..100 (default 30) для recent.
+  // Backwards-compat: числовой второй аргумент трактуется как legacy `limit` (days=0).
+  async function getMentionsArchiveInternal(channelId, opts = {}) {
     if (!enabled || !channelId) return null;
+    if (typeof opts === 'number') opts = { limit: opts };
+    const limit = Math.min(100, Math.max(1, Number.parseInt(opts.limit, 10) || 30));
+    const daysRaw = Number(opts.days);
+    const days = daysRaw === 7 || daysRaw === 30 || daysRaw === 90 ? daysRaw : 0;
+    const source = normalizeSourceId(opts.source);
+
+    const dayExpr = 'COALESCE(post_date, first_seen)';
+    // Календарные окна относительно CURRENT_DATE сервера. Литеральные смещения безопасны: days из
+    // белого списка {7,30,90}.
+    const curBounds = days === 0
+      ? null
+      : `${dayExpr} >= CURRENT_DATE - ${days - 1} AND ${dayExpr} < CURRENT_DATE + 1`;
+    const prevBounds = days === 0
+      ? null
+      : `${dayExpr} >= CURRENT_DATE - ${2 * days - 1} AND ${dayExpr} < CURRENT_DATE - ${days - 1}`;
+
+    // scope: owner (+ optional source) (+ optional date bounds). Возвращает clause + params с $1=channelId.
+    const scope = (bounds) => {
+      const params = [channelId];
+      let clause = 'owner_channel_id = $1';
+      if (source != null) { params.push(source); clause += ` AND channel_id = $${params.length}`; }
+      if (bounds) clause += ` AND ${bounds}`;
+      return { clause, params };
+    };
+
+    const cur = scope(curBounds);
     const totals = await pool.query(
       `SELECT count(*)::int AS total, count(distinct channel_id)::int AS unique_channels,
-              COALESCE(sum(views),0)::bigint AS total_views FROM mentions WHERE owner_channel_id=$1`, [channelId]);
+              COALESCE(sum(views),0)::bigint AS total_views FROM mentions WHERE ${cur.clause}`, cur.params);
+    // by_day (legacy DD.MM): для days=0 — прежние 60 дней; для окна — окно (десктоп его не читает).
+    const byDayScope = scope(days === 0 ? `${dayExpr} >= CURRENT_DATE - 60` : curBounds);
     const byDay = await pool.query(
-      `SELECT to_char(COALESCE(post_date, first_seen),'DD.MM') AS d, count(*)::int AS c
-         FROM mentions WHERE owner_channel_id=$1 AND COALESCE(post_date, first_seen) >= (CURRENT_DATE - 60) GROUP BY 1`, [channelId]);
+      `SELECT to_char(${dayExpr},'DD.MM') AS d, count(*)::int AS c
+         FROM mentions WHERE ${byDayScope.clause} GROUP BY 1`, byDayScope.params);
     const channels = await pool.query(
       `SELECT max(title) AS title, max(username) AS username, count(*)::int AS count,
               COALESCE(sum(views),0)::bigint AS views
-         FROM mentions WHERE owner_channel_id=$1 GROUP BY channel_id ORDER BY count(*) DESC, sum(views) DESC NULLS LAST LIMIT 10`, [channelId]);
+         FROM mentions WHERE ${cur.clause} GROUP BY channel_id ORDER BY count(*) DESC, sum(views) DESC NULLS LAST LIMIT 10`,
+      cur.params);
+    const recentParams = [...cur.params, limit];
     const recent = await pool.query(
       `SELECT channel_id, msg_id, title, username, link, snippet, views,
               to_char(COALESCE(post_date, first_seen),'YYYY-MM-DD"T"HH24:MI:SS') AS date
-         FROM mentions WHERE owner_channel_id=$1 ORDER BY COALESCE(post_date, first_seen) DESC LIMIT $2`, [channelId, limit]);
+         FROM mentions WHERE ${cur.clause} ORDER BY COALESCE(post_date, first_seen) DESC LIMIT $${recentParams.length}`,
+      recentParams);
+    // ISO daily для текущего scope. Для окна — сервер отдаёт присутствующие дни; нулевые
+    // календарные дни дозаполняет фронт. Для all-time ограничиваем последними 365 дн (честная
+    // граница вместо гигантской искусственной серии).
+    const dailyScope = scope(days === 0 ? `${dayExpr} >= CURRENT_DATE - 364` : curBounds);
+    const daily = await pool.query(
+      `SELECT to_char(${dayExpr}::date,'YYYY-MM-DD') AS day, count(*)::int AS mentions,
+              COALESCE(sum(views),0)::bigint AS views, count(distinct channel_id)::int AS channels
+         FROM mentions WHERE ${dailyScope.clause} GROUP BY 1 ORDER BY 1`, dailyScope.params);
+    // source_options за текущий период ДО source-фильтра — лидерборд/фильтр не исчезает при выборе.
+    const soParams = [channelId];
+    const soClause = 'owner_channel_id = $1' + (curBounds ? ` AND ${curBounds}` : '');
+    const sourceOpts = await pool.query(
+      `SELECT channel_id, max(title) AS title, max(username) AS username, count(*)::int AS count,
+              COALESCE(sum(views),0)::bigint AS views,
+              sum(count(*)) OVER ()::int AS period_total,
+              COALESCE(sum(sum(views)) OVER (),0)::bigint AS period_views,
+              count(*) OVER ()::int AS period_channels
+         FROM mentions WHERE ${soClause} GROUP BY channel_id ORDER BY count(*) DESC, sum(views) DESC NULLS LAST LIMIT 25`,
+      soParams);
+    // Свежесть + all-time count (без scope и source).
+    const meta = await pool.query(
+      `SELECT count(*)::int AS archive_total,
+              to_char(max(last_seen),'YYYY-MM-DD"T"HH24:MI:SS') AS updated_at,
+              to_char(max(${dayExpr}),'YYYY-MM-DD"T"HH24:MI:SS') AS latest_seen,
+              to_char(CURRENT_DATE,'YYYY-MM-DD') AS current_to,
+              ${days === 0 ? 'NULL::text' : `to_char(CURRENT_DATE - ${days - 1},'YYYY-MM-DD')`} AS current_from,
+              ${days === 0 ? 'NULL::text' : `to_char(CURRENT_DATE - ${2 * days - 1},'YYYY-MM-DD')`} AS previous_from,
+              ${days === 0 ? 'NULL::text' : `to_char(CURRENT_DATE - ${days},'YYYY-MM-DD')`} AS previous_to
+         FROM mentions WHERE owner_channel_id=$1`, [channelId]);
+
+    let previous = null;
+    let previous_daily = [];
+    if (days !== 0) {
+      const prev = scope(prevBounds);
+      const pt = (await pool.query(
+        `SELECT count(*)::int AS total, count(distinct channel_id)::int AS unique_channels,
+                COALESCE(sum(views),0)::bigint AS total_views FROM mentions WHERE ${prev.clause}`, prev.params)).rows[0] || {};
+      previous = {
+        total: pt.total || 0,
+        unique_channels: pt.unique_channels || 0,
+        total_views: Number(pt.total_views || 0),
+      };
+      previous_daily = (await pool.query(
+        `SELECT to_char(${dayExpr}::date,'YYYY-MM-DD') AS day, count(*)::int AS mentions,
+                COALESCE(sum(views),0)::bigint AS views, count(distinct channel_id)::int AS channels
+           FROM mentions WHERE ${prev.clause} GROUP BY 1 ORDER BY 1`, prev.params)).rows
+        .map((r) => ({ day: r.day, mentions: r.mentions, views: Number(r.views || 0), channels: r.channels }));
+    }
+
     const t = totals.rows[0] || {};
+    const m = meta.rows[0] || {};
     const by_day = {};
     for (const r of byDay.rows) by_day[r.d] = r.c;
     return {
@@ -82,7 +180,36 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
       // pg отдаёт bigint строкой — приводим к number (сумма просмотров << 2^53, точность не страдает;
       // строка ломала бы zod-схему фронта и арифметику сортировок). ::int здесь переполнялся.
       top_channels: channels.rows.map((r) => ({ ...r, views: Number(r.views || 0) })),
-      recent: recent.rows,
+      // channel_id (TG peer id) — идентификатор для клик-фильтра источника: держим строкой (bigint).
+      recent: recent.rows.map((r) => ({ ...r, channel_id: r.channel_id != null ? String(r.channel_id) : null })),
+      daily: daily.rows.map((r) => ({ day: r.day, mentions: r.mentions, views: Number(r.views || 0), channels: r.channels })),
+      previous,
+      previous_daily,
+      source_options: sourceOpts.rows.map((r) => ({
+        channel_id: r.channel_id != null ? String(r.channel_id) : null,
+        title: r.title,
+        username: r.username,
+        count: r.count,
+        views: Number(r.views || 0),
+      })),
+      source_summary: {
+        total: sourceOpts.rows[0]?.period_total || 0,
+        unique_channels: sourceOpts.rows[0]?.period_channels || 0,
+        total_views: Number(sourceOpts.rows[0]?.period_views || 0),
+      },
+      scope: {
+        days,
+        source: source != null ? String(source) : null,
+        limit,
+        current_from: m.current_from || null,
+        current_to: m.current_to || null,
+        previous_from: m.previous_from || null,
+        previous_to: m.previous_to || null,
+        daily_days: days === 0 ? 365 : days,
+      },
+      archive_total: m.archive_total || 0,
+      latest_seen: m.latest_seen || null,
+      updated_at: m.updated_at || null,
     };
   }
 
@@ -162,8 +289,8 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
   async function getMentionsHistoryForActor(channelId, actor) {
     return (await allowed(channelId, actor)) ? getMentionsHistoryInternal(channelId) : null;
   }
-  async function getMentionsArchiveForActor(channelId, actor, limit = 30) {
-    return (await allowed(channelId, actor)) ? getMentionsArchiveInternal(channelId, limit) : null;
+  async function getMentionsArchiveForActor(channelId, actor, opts = 30) {
+    return (await allowed(channelId, actor)) ? getMentionsArchiveInternal(channelId, opts) : null;
   }
   async function getSnapshotForActor(channelId, actor) {
     return (await allowed(channelId, actor)) ? getSnapshotInternal(channelId) : null;

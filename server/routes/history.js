@@ -18,7 +18,16 @@ function registerHistoryRoutes({ app, requireAuth, resolveChannel, db }) {
 
   app.get('/api/history/mentions', requireAuth, resolveChannel, async (req, res) => {
     try {
-      const data = await db.getMentionsArchiveForActor(req.channel.id, req.user, 30);
+      // Legacy/mobile/Home передают только limit → days=0 (весь архив). Desktop передаёт выбранный
+      // период (7/30/90) + optional source (упомянувший channel_id) + limit (clamp 1..100 в репо).
+      const daysText = String(req.query.days ?? '');
+      const days = daysText === '7' || daysText === '30' || daysText === '90' ? Number(daysText) : 0;
+      const limitText = String(req.query.limit ?? '');
+      const limitRaw = /^\d+$/.test(limitText) ? Number(limitText) : Number.NaN;
+      const limit = Number.isFinite(limitRaw) ? Math.min(100, Math.max(1, limitRaw)) : 30;
+      const data = await db.getMentionsArchiveForActor(req.channel.id, req.user, {
+        days, limit, source: req.query.source,
+      });
       res.json({ enabled: db.enabled, ...(data || { available: false }) });
     } catch (e) {
       res.status(200).json({ enabled: db.enabled, available: false, error: e.message });

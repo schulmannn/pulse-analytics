@@ -164,13 +164,16 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
         x: bandX(i) + (activeGhost ? subW + GROUP_GAP : 0),
         y: graphHeight - barHeight,
         w: subW,
-        h: Math.max(barHeight, 2),
+        // Zero is a real absence, not a tiny bar. Keeping the old 2px minimum for positive values
+        // preserves visibility of small counts without drawing a false dotted baseline on sparse
+        // daily series such as mentions.
+        h: val === 0 ? 0 : Math.max(barHeight, 2),
       };
     });
     const ghostBars = activeGhost
       ? activeGhost.map((v, i) => {
           const h = (v / max) * usable;
-          return { x: bandX(i), y: graphHeight - h, w: subW, h: Math.max(h, 2) };
+          return { x: bandX(i), y: graphHeight - h, w: subW, h: v === 0 ? 0 : Math.max(h, 2) };
         })
       : [];
 

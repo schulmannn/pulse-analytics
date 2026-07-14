@@ -33,7 +33,7 @@ export function TgSectionLayout() {
   // PagePeriodProvider persists the authoritative header period across TG page navigation
   // (Обзор ↔ Аналитика); every feed card resolves to this same window.
   const initialDays =
-    location.pathname === '/posts'
+    location.pathname === '/posts' || location.pathname === '/mentions'
       ? parseContentPeriod(new URLSearchParams(location.search).get('period'))
       : undefined;
 

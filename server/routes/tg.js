@@ -400,9 +400,23 @@ function registerTgRoutes({
       if (cached) return res.json(cached);
       const data = await mtprotoFetch('/mentions', {}, MTPROTO_TIMEOUT_HEAVY_MS);
       if (data && data.available) {
-        // accumulate the full deduped list into the archive (history beyond searchPosts' window)
+        // Accumulate the full deduped list into the archive (history beyond searchPosts' window).
+        // Персистенция — часть контракта «Обновить»: клиент после успеха перечитывает архив, поэтому
+        // ждём запись ДО ответа. Ошибка записи — явный 5xx (не тихий console.error), иначе фронт
+        // подтвердит «обновлено», а архив останется без новых упоминаний.
         if (Array.isArray(data.all) && req.channel.id) {
-          db.upsertMentions(req.channel.id, data.all).catch(e => console.error('[db] mentions upsert:', e.message));
+          try {
+            await db.upsertMentions(req.channel.id, data.all);
+          } catch (e) {
+            log('error', 'mentions_archive_write_failed', {
+              channel_id: req.channel.id,
+              error: e instanceof Error ? e.message : String(e),
+            });
+            return res.status(503).json({
+              available: false,
+              error: 'Не удалось обновить архив упоминаний. Повторите позже.',
+            });
+          }
         }
         delete data.all;                 // don't ship the full list to the client
         cacheSet(cacheKey, data);         // don't cache failures

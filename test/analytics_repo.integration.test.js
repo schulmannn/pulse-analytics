@@ -151,6 +151,79 @@ test('getMentionsArchive/History: сводка и панель из архива
   assert.strictEqual(hist.total.total, 2);
 });
 
+test('getMentionsArchive: period scope + previous equal window + source isolation + ISO daily/source_options', { skip }, async () => {
+  const { ch } = await chWithSource('menp', extId());
+  // channel 555 (SMM) — 2 в текущем окне (250 + 50), 1 в предыдущем (400); channel 777 (Blog) — 1
+  // в текущем (100); 1 очень старое (вне обоих окон, только в архиве).
+  await pool.query(
+    `INSERT INTO mentions (owner_channel_id, channel_id, msg_id, title, username, link, snippet, views, post_date) VALUES
+      ($1, 555, 1, 'SMM', 'smm', 'http://a', 'сегодня', 250, now()),
+      ($1, 555, 2, 'SMM', 'smm', 'http://b', 'на днях', 50,  now() - interval '5 days'),
+      ($1, 777, 3, 'Blog','blog','http://c', 'блог',    100, now() - interval '2 days'),
+      ($1, 555, 4, 'SMM', 'smm', 'http://d', 'прошлое', 400, now() - interval '40 days'),
+      ($1, 555, 5, 'SMM', 'smm', 'http://e', 'давно',   999, now() - interval '200 days')`,
+    [ch.id]);
+
+  const cur = await db.getMentionsArchiveInternal(ch.id, { days: 30 });
+  assert.strictEqual(cur.total, 3, 'текущее 30-дн окно: 3 упоминания');
+  assert.strictEqual(cur.total_views, 400, 'сумма просмотров текущего окна (250+50+100)');
+  assert.strictEqual(cur.unique_channels, 2, 'два канала в текущем окне');
+  assert.ok(cur.previous, 'previous summary присутствует для 30');
+  assert.strictEqual(cur.previous.total, 1, 'предыдущее равное окно: 1 упоминание');
+  assert.strictEqual(cur.previous.total_views, 400, 'просмотры предыдущего окна');
+  assert.ok(Array.isArray(cur.daily) && cur.daily.length >= 1, 'ISO daily массив непустой');
+  assert.ok(/^\d{4}-\d{2}-\d{2}$/.test(cur.daily[0].day), 'daily.day в формате YYYY-MM-DD');
+  assert.strictEqual(cur.source_options.length, 2, 'source_options за период (до фильтра) — 2 канала');
+  assert.ok(cur.source_options.every((o) => typeof o.channel_id === 'string'), 'channel_id строкой');
+  assert.deepStrictEqual(cur.source_summary, {
+    total: 3,
+    unique_channels: 2,
+    total_views: 400,
+  }, 'source_summary — точный unfiltered denominator до LIMIT/source filter');
+  assert.match(cur.scope.current_from, /^\d{4}-\d{2}-\d{2}$/);
+  assert.match(cur.scope.current_to, /^\d{4}-\d{2}-\d{2}$/);
+  assert.match(cur.scope.previous_from, /^\d{4}-\d{2}-\d{2}$/);
+  assert.match(cur.scope.previous_to, /^\d{4}-\d{2}-\d{2}$/);
+  assert.strictEqual(cur.scope.daily_days, 30);
+  assert.ok(cur.archive_total >= 5, 'archive_total — весь архив, включая вне окна');
+
+  // source-фильтр сужает агрегаты, но НЕ трогает source_options (лидерборд не исчезает).
+  const scoped = await db.getMentionsArchiveInternal(ch.id, { days: 30, source: '555' });
+  assert.strictEqual(scoped.total, 2, 'source=555: 2 упоминания в текущем окне');
+  assert.strictEqual(scoped.total_views, 300, 'source=555: просмотры 250+50');
+  assert.strictEqual(scoped.unique_channels, 1, 'source=555: один канал');
+  assert.strictEqual(scoped.source_options.length, 2, 'source_options остаются полными при выбранном source');
+  assert.deepStrictEqual(scoped.source_summary, cur.source_summary, 'unfiltered denominator не меняется от source filter');
+
+  // all-time (days=0): без previous, весь архив.
+  const all = await db.getMentionsArchiveInternal(ch.id, { days: 0 });
+  assert.strictEqual(all.total, 5, 'all-time: все 5 упоминаний');
+  assert.strictEqual(all.previous, null, 'all-time: сравнения нет');
+
+  // Backwards-compat: числовой второй аргумент = legacy limit (days=0).
+  const legacy = await db.getMentionsArchiveInternal(ch.id, 2);
+  assert.strictEqual(legacy.total, 5, 'legacy числовой limit → days=0');
+  assert.strictEqual(legacy.recent.length, 2, 'legacy limit ограничивает recent');
+});
+
+test('getMentionsArchive: 30-day calendar boundaries do not overlap or drop an edge day', { skip }, async () => {
+  const { ch } = await chWithSource('menb', extId());
+  await pool.query(
+    `INSERT INTO mentions (owner_channel_id, channel_id, msg_id, views, post_date) VALUES
+      ($1, 901, 1, 10, CURRENT_DATE - 29),
+      ($1, 901, 2, 20, CURRENT_DATE - 30),
+      ($1, 901, 3, 30, CURRENT_DATE - 59),
+      ($1, 901, 4, 40, CURRENT_DATE - 60)`,
+    [ch.id]);
+
+  const data = await db.getMentionsArchiveInternal(ch.id, { days: 30 });
+  assert.strictEqual(data.total, 1, 'current includes day -29 only');
+  assert.strictEqual(data.total_views, 10);
+  assert.strictEqual(data.previous.total, 2, 'previous includes both -30 and -59');
+  assert.strictEqual(data.previous.total_views, 50);
+  assert.strictEqual(data.archive_total, 4, 'day -60 remains archive-only');
+});
+
 test('finding 5 — ForActor gate: владелец видит данные, чужой actor → пусто (репо форсит доступ сам)', { skip }, async () => {
   const { u: owner, ch } = await chWithSource('fa', extId());
   const stranger = await mkUser('fa-x');
