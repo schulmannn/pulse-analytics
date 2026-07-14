@@ -31,6 +31,10 @@ const PATHS = {
   card: ['M4 5h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z', 'M2 10h20'],
   logout: ['M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4', 'm16 17 5-5-5-5', 'M21 12H9'],
   info: ['M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z', 'M12 8h.01', 'M12 11v5'],
+  close: ['M18 6 6 18', 'M6 6l12 12'],
+  external: ['M7 17 17 7', 'M9 7h8v8'],
+  image: ['M4 5h16v14H4z', 'M8.5 10h.01', 'm5 17 4-4 3 3 2.5-2.5L19 18'],
+  playCircle: ['M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z', 'm10 8.5 5 3.5-5 3.5z'],
 } as const;
 
 export type IconName = keyof typeof PATHS;
