@@ -10,7 +10,8 @@ import type { PeriodDays } from '@/lib/period';
 import { REPORT_BLOCKS } from '@/lib/reportBlocks';
 import type { ReportBlockKey, ReportBlockType } from '@/lib/reportBlocks';
 
-// Inline «+» type menu (steep / Notion): the six generic types, then the curated presets.
+// Inline «+» type menu. Desktop Telegram reports suppress «Карта» because the source exposes no
+// geography; the frozen mobile builder keeps its historical catalog until the mobile redesign.
 const ADD_TYPES: Array<{ type: ReportBlockType; label: string; hint: string }> = [
   { type: 'text', label: 'Текст', hint: 'Заголовок или абзац' },
   { type: 'bignumber', label: 'Большое число', hint: 'Метрика с дельтой' },
@@ -50,7 +51,13 @@ export const LEDGER: Array<{ key: DrillKey; label: string }> = [
 ];
 
 // ── Inline «+» add-menu — the Notion/steep gap affordance ──────────────────────────────────
-export function InlineAdd({ onAdd }: { onAdd: (type: ReportBlockType, presetKey?: ReportBlockKey) => void }) {
+export function InlineAdd({
+  onAdd,
+  allowMap = true,
+}: {
+  onAdd: (type: ReportBlockType, presetKey?: ReportBlockKey) => void;
+  allowMap?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -90,7 +97,7 @@ export function InlineAdd({ onAdd }: { onAdd: (type: ReportBlockType, presetKey?
       </button>
       {open && (
         <div className="absolute left-1/2 top-full z-popover mt-1 w-64 -translate-x-1/2 rounded-lg border border-border bg-card p-1.5 text-left">
-          {ADD_TYPES.map((t) => (
+          {ADD_TYPES.filter((t) => allowMap || t.type !== 'map').map((t) => (
             <button
               key={t.type}
               type="button"
@@ -222,16 +229,21 @@ interface ReportMetricCardProps {
   valueFmt: (n: number) => string;
   zeroBase?: boolean;
   to: string;
+  onOpen?: () => void;
 }
 
 /** Compact metric card for a preset metric-* block: headline + chart + a link to the metric page. */
-export function ReportMetricCard({ title, total, trend, series, valueFmt, zeroBase, to }: ReportMetricCardProps) {
+export function ReportMetricCard({ title, total, trend, series, valueFmt, zeroBase, to, onOpen }: ReportMetricCardProps) {
   return (
     <section className="min-w-0 space-y-3">
       <div className="flex items-center gap-3">
         <h3 className="whitespace-nowrap text-xs font-medium tracking-wider text-muted-foreground">{title}</h3>
         <span aria-hidden="true" className="h-px flex-1 bg-border" />
-        <Link to={to} className="whitespace-nowrap text-2xs font-medium text-primary transition-colors hover:text-primary/80 print:hidden">
+        <Link
+          to={to}
+          onClick={onOpen}
+          className="whitespace-nowrap text-2xs font-medium text-primary transition-colors hover:text-primary/80 print:hidden"
+        >
           Открыть →
         </Link>
       </div>

@@ -1,8 +1,20 @@
+import { useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useCreateReport, useReports } from '@/api/queries';
+import { useChannels, useCreateReport, useReports } from '@/api/queries';
+import type { ReportListItem } from '@/api/schemas';
 import { useDemo } from '@/lib/demo-context';
 import { fmt } from '@/lib/format';
+import { useMediaQuery } from '@/lib/useMediaQuery';
+import {
+  filterReports,
+  reportBlockCountLabel,
+  reportDeliveryLabel,
+  reportPeriodLabel,
+  type ReportListFilter,
+} from '@/lib/reportListModel';
 import { Skeleton } from '@/components/ui/skeleton';
+import { CreateReportDialog } from '@/components/reports/CreateReportDialog';
 import { ReportsErrorState } from '@/panels/ReportPage';
 import { DEFAULT_REPORT_BLOCKS, type ReportBlockKey } from '@/lib/reportBlocks';
 
@@ -35,11 +47,170 @@ const REPORT_TEMPLATES: Array<{
 ];
 
 /**
- * /reports — the saved-reports index (steep Reports, our warm-paper language): a hairline
- * TABLE of documents (Название / Выгрузка / Обновлён), row click opens the report, and a
- * pill CTA that creates a report with the full default block set and navigates into it.
+ * /reports — the saved-reports index. Desktop (md+) gets the redesigned working surface: a
+ * compact header with one create command, a create DIALOG (name / template / Telegram source /
+ * period / delivery), and a dense summary table. Mobile keeps its verbatim template-showcase
+ * surface. JS branch (not CSS): only one mounts, so create flows never double-register.
  */
 export function ReportsList() {
+  const isDesktop = useMediaQuery('(min-width: 768px)');
+  return isDesktop ? <ReportsListDesktop /> : <ReportsListMobile />;
+}
+
+// ── Desktop: header + create dialog + dense summary table ───────────────────────────────────
+function ReportsListDesktop() {
+  const { demo } = useDemo();
+  const reportsQuery = useReports(!demo);
+  const { data: channelsData } = useChannels();
+  const navigate = useNavigate();
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState<ReportListFilter>('all');
+
+  const reports = reportsQuery.data?.reports ?? [];
+  const channelName = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const c of channelsData?.channels ?? []) {
+      map.set(c.id, c.username ? `@${c.username}` : c.title || `Источник #${c.id}`);
+    }
+    return (id: number | null | undefined) => (id != null ? map.get(id) ?? `Источник #${id}` : null);
+  }, [channelsData]);
+
+  const sourceLabelOf = (item: ReportListItem) => channelName(item.channel_id) ?? '';
+  const visible = filterReports(reports, { query, filter, sourceLabelOf });
+
+  return (
+    <div className="mx-auto w-full max-w-6xl space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-2xl font-medium tracking-tight">Отчёты</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Сохранённые документы на данных Telegram: собираются из блоков, доставка приходит письмом
+          </p>
+        </div>
+        {!demo && (
+          <button
+            type="button"
+            onClick={() => setDialogOpen(true)}
+            className="btn-pill bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+          >
+            Создать отчёт
+          </button>
+        )}
+      </div>
+
+      {demo ? (
+        <ReportsErrorState demo />
+      ) : reportsQuery.isPending ? (
+        <ReportsListSkeleton />
+      ) : reportsQuery.isError ? (
+        <ReportsErrorState error={reportsQuery.error} />
+      ) : reports.length === 0 ? (
+        <div className="rounded border border-dashed border-border bg-background px-4 py-10 text-center">
+          <p className="text-sm font-medium text-foreground">Отчётов пока нет</p>
+          <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
+            Соберите документ из блоков аналитики — его можно распечатать в PDF и получать письмом
+            раз в неделю или месяц.
+          </p>
+          <button
+            type="button"
+            onClick={() => setDialogOpen(true)}
+            className="btn-pill mt-4 bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+          >
+            Создать отчёт
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center gap-3">
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Поиск по названию или источнику"
+              aria-label="Поиск отчётов"
+              className="h-9 w-64 max-w-full rounded border border-border bg-background px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
+            />
+            <div className="flex overflow-hidden rounded border border-border" role="group" aria-label="Фильтр отчётов">
+              {(
+                [
+                  ['all', 'Все'],
+                  ['delivery', 'С доставкой'],
+                ] as Array<[ReportListFilter, string]>
+              ).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={filter === value}
+                  onClick={() => setFilter(value)}
+                  className={`border-r border-border px-3 py-1.5 text-xs font-medium transition-colors last:border-r-0 ${
+                    filter === value ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {visible.length === 0 ? (
+            <p className="py-10 text-center text-sm text-muted-foreground">Ничего не найдено.</p>
+          ) : (
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] border-collapse text-sm">
+              <thead>
+                <tr>
+                  <Th className="text-left">Название</Th>
+                  <Th className="text-left">Источник</Th>
+                  <Th className="text-left">Период</Th>
+                  <Th className="text-left">Блоки</Th>
+                  <Th className="text-left">Доставка</Th>
+                  <Th className="text-right">Обновлён</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {visible.map((report) => {
+                  const src = channelName(report.channel_id);
+                  return (
+                    <tr
+                      key={report.id}
+                      onClick={() => navigate(`/reports/${report.id}`)}
+                      className="cursor-pointer border-t border-border transition-colors hover:bg-hover-row/60"
+                    >
+                      {/* Name is a real link (keyboard/focus); the row shares the same destination. */}
+                      <td className="py-2.5 pr-3">
+                        <Link to={`/reports/${report.id}`} className="font-medium text-foreground hover:underline">
+                          {report.name}
+                        </Link>
+                      </td>
+                      <td className="py-2.5 pr-3 text-muted-foreground">
+                        {src ?? 'По переключателю'}
+                      </td>
+                      <td className="py-2.5 pr-3 text-muted-foreground">{reportPeriodLabel(report.period_days)}</td>
+                      <td className="py-2.5 pr-3 text-muted-foreground">{reportBlockCountLabel(report.block_count)}</td>
+                      <td className="py-2.5 pr-3 text-muted-foreground">{reportDeliveryLabel(report.schedule)}</td>
+                      <td className="py-2.5 text-right font-mono text-xs text-muted-foreground">{fmt.date(report.updated_at)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            </div>
+          )}
+        </>
+      )}
+
+      {dialogOpen && <CreateReportDialog onClose={() => setDialogOpen(false)} />}
+    </div>
+  );
+}
+
+function Th({ children, className = '' }: { children: ReactNode; className?: string }) {
+  return <th className={`py-2 pr-3 text-2xs font-medium tracking-wide text-muted-foreground ${className}`}>{children}</th>;
+}
+
+// ── Mobile: verbatim historical surface (template showcase + instant create + simple table) ──
+function ReportsListMobile() {
   const { demo } = useDemo();
   const reportsQuery = useReports(!demo); // demo has no reports fixture — skip the fetch
   const createReport = useCreateReport();

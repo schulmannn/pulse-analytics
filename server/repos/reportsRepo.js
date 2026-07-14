@@ -15,10 +15,33 @@ function createReportsRepo({ pool, enabled }) {
     to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS created_at,
     to_char(updated_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS updated_at`;
 
+  // Compact index rows: the list never needs the full config, only a few summary facts pulled
+  // safely out of the JSONB (jsonb_typeof guards so a legacy/garbage config never breaks the
+  // query — a non-number channelId/periodDays or non-array blocks just yields NULL). Ownership
+  // stays WHERE uid=$1; nothing here widens the tenant boundary.
   async function listReports(uid) {
     if (!enabled || uid == null) return [];
     const { rows } = await pool.query(
       `SELECT id, name, schedule,
+              CASE
+                WHEN jsonb_typeof(config->'channelId') = 'number'
+                THEN CASE
+                  WHEN (config->>'channelId') ~ '^[0-9]{1,10}$'
+                  THEN CASE
+                    WHEN (config->>'channelId')::numeric BETWEEN 1 AND 2147483647
+                    THEN (config->>'channelId')::int
+                  END
+                END
+              END AS channel_id,
+              CASE
+                WHEN jsonb_typeof(config->'periodDays') = 'number'
+                THEN CASE
+                  WHEN config->>'periodDays' IN ('0','7','30','90')
+                  THEN (config->>'periodDays')::int
+                END
+              END AS period_days,
+              CASE WHEN jsonb_typeof(config->'blocks')     = 'array'  THEN jsonb_array_length(config->'blocks')         END AS block_count,
+              to_char(last_sent_at,'YYYY-MM-DD"T"HH24:MI:SS') AS last_sent_at,
               to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SS') AS created_at,
               to_char(updated_at,'YYYY-MM-DD"T"HH24:MI:SS') AS updated_at
          FROM reports WHERE uid=$1 ORDER BY updated_at DESC, id DESC`, [uid]);
@@ -33,11 +56,19 @@ function createReportsRepo({ pool, enabled }) {
     return rows[0] || null;
   }
 
-  async function createReport(uid, name, config) {
+  // schedule is optional and backward-compatible: old callers pass nothing → the column default
+  // ('none') stands. Invalid direct callers fail explicitly; routes validate first for a clean 400.
+  async function createReport(uid, name, config, schedule) {
     if (!enabled || uid == null) return null;
+    if (schedule != null && !REPORT_SCHEDULES.includes(schedule)) throw new Error('bad schedule');
+    const sched = schedule ?? null;
     const { rows } = await pool.query(
-      `INSERT INTO reports (uid, name, config) VALUES ($1,$2,$3) RETURNING ${REPORT_COLS}`,
-      [uid, String(name).slice(0, 120), config || {}]);
+      sched
+        ? `INSERT INTO reports (uid, name, config, schedule) VALUES ($1,$2,$3,$4) RETURNING ${REPORT_COLS}`
+        : `INSERT INTO reports (uid, name, config) VALUES ($1,$2,$3) RETURNING ${REPORT_COLS}`,
+      sched
+        ? [uid, String(name).slice(0, 120), config || {}, sched]
+        : [uid, String(name).slice(0, 120), config || {}]);
     return rows[0] || null;
   }
 

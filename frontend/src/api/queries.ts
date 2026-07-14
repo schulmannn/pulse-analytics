@@ -624,7 +624,7 @@ export function useReport(id: number | null) {
 export function useCreateReport() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { name: string; config?: ReportConfig }) =>
+    mutationFn: (body: { name: string; config?: ReportConfig; schedule?: ReportSchedule }) =>
       apiSend('POST', '/api/reports', body, ReportResponseSchema),
     onSuccess: (data) => {
       // Seed the detail cache so the follow-up navigate renders without a refetch.
