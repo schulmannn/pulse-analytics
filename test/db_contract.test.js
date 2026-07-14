@@ -47,6 +47,9 @@ const EXPECTED_FUNCTIONS = [
   // reportsRepo
   'listReports', 'getReport', 'createReport', 'updateReport', 'deleteReport', 'listDueReports',
   'markReportSent', 'listPostsWindow',
+  // campaignsRepo
+  'listCampaigns', 'getCampaign', 'createCampaign', 'updateCampaign', 'deleteCampaign',
+  'addCampaignPosts', 'removeCampaignPosts', 'listCampaignPosts', 'getCampaignSummary',
   // jobsRepo
   'claimJob', 'completeJob', 'failJob', 'getJob', 'runJobOnce',
   // gdpr
@@ -55,6 +58,7 @@ const EXPECTED_FUNCTIONS = [
 
 const EXPECTED_VALUES = [
   'USER_ROLES', 'USER_STATUSES', 'BUG_STATUSES', 'BUG_SEVERITIES', 'BUG_KINDS', 'REPORT_SCHEDULES',
+  'CAMPAIGN_STATUSES', 'CAMPAIGN_NETWORKS', 'CAMPAIGN_POSTS_LIMIT', 'CAMPAIGN_BATCH_LIMIT',
 ];
 
 test('db контракт: все ожидаемые методы — функции (гард против потери export при распиле)', () => {

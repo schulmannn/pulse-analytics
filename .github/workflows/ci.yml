@@ -88,7 +88,7 @@ jobs:
       - run: node scripts/check-bundle-size.mjs
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
-      - name: Run Playwright smoke tests
+      - name: Run Playwright smoke and campaign journey
         run: npm run test:e2e:smoke
       - name: Upload Playwright failure artifacts
         if: failure()

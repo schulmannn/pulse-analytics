@@ -15,6 +15,10 @@ const VIEWPORTS = [
   { name: 'desktop-1440', width: 1440, height: 900 },
 ];
 
+// Порт параметризован: с reuseExistingServer чужой vite на дефолтном 5173 (другой worktree
+// этого же репо) молча подсовывает e2e СТАРЫЙ код. E2E_PORT=5174 изолирует прогон.
+const PORT = process.env.E2E_PORT || '5173';
+
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
@@ -24,7 +28,7 @@ export default defineConfig({
   timeout: 45_000,
   expect: { timeout: 10_000 },
   use: {
-    baseURL: 'http://localhost:5173',
+    baseURL: `http://localhost:${PORT}`,
     screenshot: 'only-on-failure',
     trace: 'retain-on-failure',
   },
@@ -33,8 +37,8 @@ export default defineConfig({
     use: { ...devices['Desktop Chrome'], viewport: { width: v.width, height: v.height } },
   })),
   webServer: {
-    command: 'npm run dev',
-    url: 'http://localhost:5173',
+    command: `npm run dev -- --port ${PORT}`,
+    url: `http://localhost:${PORT}`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },

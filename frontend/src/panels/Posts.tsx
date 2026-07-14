@@ -1,5 +1,7 @@
-import { useState } from 'react';
-import { useTgFull } from '@/api/queries';
+import { Suspense, lazy, useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { useCampaignPosts, useTgFull } from '@/api/queries';
+import type { CampaignPostInput } from '@/api/schemas';
 import { normalizeTgPosts, type NormalizedPost } from '@/lib/posts';
 import { fmt } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -12,6 +14,16 @@ import { RichText } from '@/components/RichText';
 import { ChartSection } from '@/components/ChartWidget';
 import { PostDetailModal } from '@/components/PostDetailModal';
 import { compareToMedian, medianDeltaLabel, periodMedian } from '@/lib/postMedian';
+import { useSelectedChannel } from '@/lib/channel-context';
+import { membershipKey, useCampaignFilter, useMembershipSet } from '@/lib/campaignFilter';
+import { AddToCampaignDialog } from '@/components/campaigns/AddToCampaignDialog';
+import { CampaignFilterControl } from '@/components/campaigns/CampaignFilterControl';
+
+// Список кампаний (таблица + create-диалог) грузится лениво: вкладка «Кампании» — не первый
+// экран «Контента», а entry-чанк упирается в bundle-size гейт.
+const CampaignsView = lazy(() =>
+  import('@/components/campaigns/CampaignsView').then((m) => ({ default: m.CampaignsView })),
+);
 
 type SortKey = 'reach' | 'likes' | 'shares' | 'virality' | 'erv' | 'er';
 const SORT_COLUMNS: { key: SortKey; label: string; get: (p: NormalizedPost) => number }[] = [
@@ -24,6 +36,52 @@ const SORT_COLUMNS: { key: SortKey; label: string; get: (p: NormalizedPost) => n
 ];
 
 export function Posts() {
+  // ?view=campaigns — вторая вкладка раздела «Контент» (идиома ?tab= из AnalyticsTabs:
+  // дефолт держит URL чистым). Вкладки видны всегда, независимо от загрузки постов.
+  const [params, setParams] = useSearchParams();
+  const view = params.get('view') === 'campaigns' ? 'campaigns' : 'posts';
+  const setView = (next: 'posts' | 'campaigns') =>
+    setParams(
+      (prev) => {
+        const merged = new URLSearchParams(prev);
+        if (next === 'posts') merged.delete('view');
+        else merged.set('view', next);
+        return merged;
+      },
+      { replace: true },
+    );
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap gap-1" role="tablist" aria-label="Раздел контента">
+        {([['posts', 'Публикации'], ['campaigns', 'Кампании']] as const).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={view === key}
+            onClick={() => setView(key)}
+            className={cn(
+              'btn-pill px-3 py-1 text-xs font-medium transition-colors',
+              view === key ? 'bg-primary/15 text-foreground' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {view === 'campaigns' ? (
+        <Suspense fallback={<div className="py-8"><Skeleton className="h-40 w-full" /></div>}>
+          <CampaignsView />
+        </Suspense>
+      ) : (
+        <PostsContent />
+      )}
+    </div>
+  );
+}
+
+function PostsContent() {
   // ONE wide fetch (limit 0 = server cap 100); the leaderboard below windows it to its own
   // widget period. The fetch/skeleton/error stay here; the period-driven view is the child.
   const { data, isPending, isError, error } = useTgFull(0);
@@ -67,9 +125,25 @@ export function Posts() {
  */
 function PostsLeaderboard({ allPosts }: { allPosts: NormalizedPost[] }) {
   const { inRange } = useWidgetPeriod();
+  const { channelId } = useSelectedChannel();
   const [openId, setOpenId] = useState<number | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>('reach');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  // Bulk-выбор для «Добавить в кампанию» (desktop-таблица). Идентичность строки = msg id;
+  // посты без id не выбираются (тот же гейт, что и клик в модалку).
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  // Снимок выбора на момент открытия диалога: onDone чистит selection, а диалог обязан
+  // дожить до экрана результата (added/skipped) — иначе он размонтируется под пользователем.
+  const [addItems, setAddItems] = useState<CampaignPostInput[] | null>(null);
+  // Канонический фильтр кампании (?campaign=): membership читается ТОЛЬКО из
+  // /api/campaigns/:id/posts — серверной фильтрации контента по campaign_id.
+  const { campaignId } = useCampaignFilter();
+  const campaignPostsQ = useCampaignPosts(campaignId);
+  const memberSet = useMembershipSet(campaignPostsQ.data?.posts);
+  useEffect(() => {
+    setSelected(new Set());
+    setAddItems(null);
+  }, [channelId, campaignId, inRange]);
   const toggleSort = (key: SortKey) => {
     if (key === sortKey) setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
     else {
@@ -77,11 +151,98 @@ function PostsLeaderboard({ allPosts }: { allPosts: NormalizedPost[] }) {
       setSortDir('desc');
     }
   };
+  const toggleSelect = (id: number) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
-  const posts = allPosts.filter((post) => inRange(post.date));
+  const inPeriod = allPosts.filter((post) => inRange(post.date));
+  const posts =
+    campaignId != null && channelId != null
+      ? inPeriod.filter((p) => p.id != null && memberSet.has(membershipKey('tg', channelId, String(p.id))))
+      : inPeriod;
 
+  const selectedItems: CampaignPostInput[] =
+    channelId == null
+      ? []
+      : posts
+          .filter((post) => post.id != null && selected.has(post.id))
+          .map((post) => ({ network: 'tg', channel_id: channelId, post_ref: String(post.id) }));
+
+  const toolbar = (
+    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <CampaignFilterControl />
+        {campaignId != null && campaignPostsQ.data && (
+          <span className="text-2xs text-muted-foreground">
+            {fmt.num(posts.length)} из {fmt.num(campaignPostsQ.data.posts.length)} публ. кампании — из этого источника
+          </span>
+        )}
+      </div>
+      <div className="hidden items-center gap-2 md:flex">
+        {selectedItems.length > 0 ? (
+          <>
+            <span className="text-xs tabular-nums text-muted-foreground">Выбрано: {fmt.num(selectedItems.length)}</span>
+            <button
+              type="button"
+              onClick={() => setAddItems(selectedItems)}
+              className="btn-pill bg-primary px-3.5 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+              data-testid="add-to-campaign"
+            >
+              Добавить в кампанию
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelected(new Set())}
+              className="btn-pill px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              Снять выбор
+            </button>
+          </>
+        ) : (
+          <span className="text-2xs text-muted-foreground">Отметьте публикации, чтобы добавить их в кампанию</span>
+        )}
+      </div>
+    </div>
+  );
+
+  if (campaignId != null && campaignPostsQ.isPending) {
+    return (
+      <div className="space-y-3">
+        {toolbar}
+        <div className="space-y-2 py-4">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Skeleton key={i} className="h-8 w-full" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+  if (campaignId != null && campaignPostsQ.isError) {
+    return (
+      <div className="space-y-3">
+        {toolbar}
+        <p className="py-6 text-center text-sm text-muted-foreground">Не удалось загрузить публикации кампании.</p>
+      </div>
+    );
+  }
   if (posts.length === 0) {
-    return <div className="py-8 text-center text-sm text-muted-foreground">За выбранный период публикаций нет.</div>;
+    return (
+      <div className="space-y-3">
+        {toolbar}
+        <div className="py-8 text-center text-sm text-muted-foreground">
+          {campaignId != null && inPeriod.length > 0
+            ? 'В этой кампании нет публикаций из текущего источника за выбранный период.'
+            : 'За выбранный период публикаций нет.'}
+        </div>
+        {addItems && addItems.length > 0 && (
+          <AddToCampaignDialog items={addItems} onClose={() => setAddItems(null)} onDone={() => setSelected(new Set())} />
+        )}
+      </div>
+    );
   }
 
   // Таблица — сортируемый лидерборд (по любому столбцу), топ 25
@@ -98,12 +259,34 @@ function PostsLeaderboard({ allPosts }: { allPosts: NormalizedPost[] }) {
 
   const selectedPost = posts.find((p) => p.id === openId);
 
+  // «Выбрать все» относится к ВИДИМЫМ строкам (топ-25 текущей сортировки/окна) — честная
+  // семантика для усечённого списка.
+  const visibleIds = tablePosts.map((p) => p.id).filter((id): id is number => id != null);
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.has(id));
+  const toggleAllVisible = () =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) for (const id of visibleIds) next.delete(id);
+      else for (const id of visibleIds) next.add(id);
+      return next;
+    });
+
   return (
-    <>
+    <div className="space-y-3">
+      {toolbar}
       <div className="hidden overflow-x-auto md:block">
         <table className="w-full border-collapse text-left text-sm">
           <thead>
             <tr className="border-b border-border text-xs font-medium tracking-wider text-muted-foreground">
+              <th className="w-10 py-3 pl-0 pr-2">
+                <input
+                  type="checkbox"
+                  aria-label="Выбрать все видимые публикации"
+                  checked={allVisibleSelected}
+                  onChange={toggleAllVisible}
+                  className="size-4 accent-primary"
+                />
+              </th>
               <th className="w-12 py-3 pl-0 pr-3 text-center"></th>
               <th className="min-w-[240px] px-3 py-3">Пост</th>
               {SORT_COLUMNS.map((c) => {
@@ -139,6 +322,19 @@ function PostsLeaderboard({ allPosts }: { allPosts: NormalizedPost[] }) {
                   onClick={isClickable ? () => setOpenId(post.id) : undefined}
                   className={`group transition-colors hover:bg-hover-row ${isClickable ? 'cursor-pointer' : ''}`}
                 >
+                  {/* Чекбокс не должен открывать модалку — гасим всплытие на ячейке. */}
+                  <td className="py-3 pl-0 pr-2" onClick={(e) => e.stopPropagation()}>
+                    {post.id != null && (
+                      <input
+                        type="checkbox"
+                        aria-label="Выбрать публикацию"
+                        checked={selected.has(post.id)}
+                        onChange={() => toggleSelect(post.id!)}
+                        className="size-4 accent-primary"
+                        data-testid="post-select"
+                      />
+                    )}
+                  </td>
                   <td className="py-3 pl-0 pr-3 text-center">
                     <PostThumb thumb={post.thumb} mediaType={post.mediaType} albumSize={post.albumSize} />
                   </td>
@@ -240,7 +436,15 @@ function PostsLeaderboard({ allPosts }: { allPosts: NormalizedPost[] }) {
           onClose={() => setOpenId(null)}
         />
       )}
-    </>
+
+      {addItems && addItems.length > 0 && (
+        <AddToCampaignDialog
+          items={addItems}
+          onClose={() => setAddItems(null)}
+          onDone={() => setSelected(new Set())}
+        />
+      )}
+    </div>
   );
 }
 

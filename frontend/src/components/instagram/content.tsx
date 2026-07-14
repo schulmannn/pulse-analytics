@@ -47,7 +47,24 @@ export function FormatsBlock({ items }: { items: { label: string; value: number 
 type SortKey = 'reach' | 'views' | 'saved' | 'shares';
 const SORT_LABEL: Record<SortKey, string> = { reach: 'Охват', views: 'Просмотры', saved: 'Сохранения', shares: 'Репосты' };
 
-export function TopPostsBlock({ posts, limit = 9, showSort = true }: { posts: IgPost[]; limit?: number; showSort?: boolean }) {
+/** Опциональный bulk-выбор для кампаний: карточки с id получают чекбокс (посты без id —
+    не выбираются, как null-id строки TG-таблицы). Стейт живёт у вызывающего (IgContent). */
+export interface IgPostSelection {
+  selected: Set<string>;
+  onToggle: (id: string) => void;
+}
+
+export function TopPostsBlock({
+  posts,
+  limit = 9,
+  showSort = true,
+  selection,
+}: {
+  posts: IgPost[];
+  limit?: number;
+  showSort?: boolean;
+  selection?: IgPostSelection;
+}) {
   const [sort, setSort] = useState<SortKey>('reach');
   if (posts.length === 0) {
     return (
@@ -74,7 +91,18 @@ export function TopPostsBlock({ posts, limit = 9, showSort = true }: { posts: Ig
         </div>
       )}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {top.map((post, idx) => <IgPostCard key={post.id ?? idx} post={post} rank={idx + 1} />)}
+        {top.map((post, idx) => (
+          <IgPostCard
+            key={post.id ?? idx}
+            post={post}
+            rank={idx + 1}
+            selection={
+              selection && post.id
+                ? { checked: selection.selected.has(post.id), onToggle: () => selection.onToggle(post.id!) }
+                : undefined
+            }
+          />
+        ))}
       </div>
     </div>
   );
@@ -96,7 +124,15 @@ function MediaPlaceholderGlyph({ video }: { video: boolean }) {
   );
 }
 
-export function IgPostCard({ post, rank }: { post: IgPost; rank: number }) {
+export function IgPostCard({
+  post,
+  rank,
+  selection,
+}: {
+  post: IgPost;
+  rank: number;
+  selection?: { checked: boolean; onToggle: () => void };
+}) {
   const typeLabel = MEDIA_TYPE_LABEL[post.media_type ?? ''] ?? 'Пост';
   const isVideo = post.media_type === 'VIDEO' || post.media_product_type === 'REELS';
   // For video posts media_url points at the video file — useless in <img> (renders a blank
@@ -106,7 +142,19 @@ export function IgPostCard({ post, rank }: { post: IgPost; rank: number }) {
     <div className="flex flex-col border-t border-border pt-3">
       {/* header row — rank + type as a hairline label (no positioned overlays on the image) */}
       <div className="mb-2 flex items-center justify-between text-2xs font-medium tracking-wide">
-        <span className="tabular-nums text-ink3">#{rank}</span>
+        <span className="flex items-center gap-2">
+          {selection && (
+            <input
+              type="checkbox"
+              aria-label="Выбрать публикацию"
+              checked={selection.checked}
+              onChange={selection.onToggle}
+              className="size-4 accent-primary"
+              data-testid="ig-post-select"
+            />
+          )}
+          <span className="tabular-nums text-ink3">#{rank}</span>
+        </span>
         <span className="text-muted-foreground">{typeLabel}</span>
       </div>
       {/* Uniform 4:5 cover (Instagram portrait) keeps the grid rows aligned; missing previews

@@ -17,6 +17,12 @@ import {
   AuthOkSchema,
   BugSchema,
   BugsResponseSchema,
+  CampaignAddResultSchema,
+  CampaignPostsResponseSchema,
+  CampaignRemoveResultSchema,
+  CampaignResponseSchema,
+  CampaignSummaryResponseSchema,
+  CampaignsResponseSchema,
   ChannelSchema,
   ChannelsResponseSchema,
   CollectorStatusResponseSchema,
@@ -42,7 +48,7 @@ import {
   TgFullSchema,
   VelocitySchema,
 } from '@/api/schemas';
-import type { ReportConfig } from '@/api/schemas';
+import type { CampaignPostInput, CampaignStatus, ReportConfig } from '@/api/schemas';
 import { clearSessionToken, setSessionToken } from '@/lib/session';
 import { isDemoMode } from '@/lib/demo';
 import { useSelectedChannel } from '@/lib/channel-context';
@@ -632,5 +638,123 @@ export function useDeleteReport() {
   return useMutation({
     mutationFn: (id: number) => apiSend('DELETE', `/api/reports/${id}`, undefined, OkSchema),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['reports'] }),
+  });
+}
+
+// ── Campaigns («Кампании и группы контента») ──
+// Доступ остаётся workspace-scoped, а выбранный channelId определяет workspace списка. Поэтому
+// один и тот же пользователь не смешивает кампании разных команд в одном селекторе.
+
+export function useCampaigns(channelId: number | null = null) {
+  return useQuery({
+    enabled: !isDemoMode() && channelId != null,
+    queryKey: ['campaigns', channelId],
+    staleTime: STALE_LIVE,
+    queryFn: ({ signal }) => apiGet(`/api/campaigns?channel_id=${channelId}`, CampaignsResponseSchema, { signal }),
+  });
+}
+
+export function useCampaign(id: number | null) {
+  return useQuery({
+    enabled: id != null && !isDemoMode(),
+    queryKey: ['campaign', id],
+    staleTime: STALE_LIVE,
+    queryFn: ({ signal }) => apiGet(`/api/campaigns/${id}`, CampaignResponseSchema, { signal }),
+  });
+}
+
+/** Публикации кампании, обогащённые метриками на сервере, — единственный источник membership
+    для фильтра «Контента» (никаких параллельных чтений по компонентам). */
+export function useCampaignPosts(id: number | null) {
+  return useQuery({
+    enabled: id != null && !isDemoMode(),
+    queryKey: ['campaign-posts', id],
+    staleTime: STALE_LIVE,
+    queryFn: ({ signal }) => apiGet(`/api/campaigns/${id}/posts`, CampaignPostsResponseSchema, { signal }),
+  });
+}
+
+export function useCampaignSummary(id: number | null) {
+  return useQuery({
+    enabled: id != null && !isDemoMode(),
+    queryKey: ['campaign-summary', id],
+    staleTime: STALE_LIVE,
+    queryFn: ({ signal }) => apiGet(`/api/campaigns/${id}/summary`, CampaignSummaryResponseSchema, { signal }),
+  });
+}
+
+export interface CampaignBody {
+  name?: string;
+  description?: string;
+  color?: string | null;
+  status?: CampaignStatus;
+  start_date?: string | null;
+  end_date?: string | null;
+}
+
+export function useCreateCampaign() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CampaignBody & { name: string; channel_id: number }) =>
+      apiSend('POST', '/api/campaigns', body, CampaignResponseSchema),
+    onSuccess: (data) => {
+      qc.setQueryData(['campaign', data.campaign.id], data);
+      return qc.invalidateQueries({ queryKey: ['campaigns'] });
+    },
+  });
+}
+
+export function useUpdateCampaign(id: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CampaignBody) => apiSend('PATCH', `/api/campaigns/${id}`, body, CampaignResponseSchema),
+    onSuccess: (data) => {
+      qc.setQueryData(['campaign', id], data);
+      // Сводка несёт копию campaign-строки в заголовке — обновляем и её.
+      qc.invalidateQueries({ queryKey: ['campaign-summary', id] });
+      return qc.invalidateQueries({ queryKey: ['campaigns'] });
+    },
+  });
+}
+
+export function useDeleteCampaign() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => apiSend('DELETE', `/api/campaigns/${id}`, undefined, OkSchema),
+    onSuccess: (_data, id) => {
+      qc.removeQueries({ queryKey: ['campaign', id] });
+      qc.removeQueries({ queryKey: ['campaign-posts', id] });
+      qc.removeQueries({ queryKey: ['campaign-summary', id] });
+      return qc.invalidateQueries({ queryKey: ['campaigns'] });
+    },
+  });
+}
+
+/** campaignId — в variables (не в замыкании хука): диалог «Добавить в кампанию» выбирает цель динамически. */
+export function useAddCampaignPosts() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ campaignId, items }: { campaignId: number; items: CampaignPostInput[] }) =>
+      apiSend('POST', `/api/campaigns/${campaignId}/posts`, { items }, CampaignAddResultSchema),
+    onSuccess: (_data, { campaignId }) => {
+      qc.invalidateQueries({ queryKey: ['campaign', campaignId] });
+      qc.invalidateQueries({ queryKey: ['campaign-posts', campaignId] });
+      qc.invalidateQueries({ queryKey: ['campaign-summary', campaignId] });
+      return qc.invalidateQueries({ queryKey: ['campaigns'] });
+    },
+  });
+}
+
+export function useRemoveCampaignPosts() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ campaignId, items }: { campaignId: number; items: CampaignPostInput[] }) =>
+      apiSend('DELETE', `/api/campaigns/${campaignId}/posts`, { items }, CampaignRemoveResultSchema),
+    onSuccess: (_data, { campaignId }) => {
+      qc.invalidateQueries({ queryKey: ['campaign', campaignId] });
+      qc.invalidateQueries({ queryKey: ['campaign-posts', campaignId] });
+      qc.invalidateQueries({ queryKey: ['campaign-summary', campaignId] });
+      return qc.invalidateQueries({ queryKey: ['campaigns'] });
+    },
   });
 }

@@ -23,6 +23,7 @@ const { legacyCspHeader, setAppHeaders, setHtmlSecurityHeaders } = require('./li
 const { registerCollectorRoutes } = require('./routes/collector');
 const { registerAuthRoutes } = require('./routes/auth');
 const { registerReportsRoutes } = require('./routes/reports');
+const { registerCampaignsRoutes } = require('./routes/campaigns');
 const { registerBugsRoutes } = require('./routes/bugs');
 const { registerChannelsRoutes } = require('./routes/channels');
 const { registerTgRoutes } = require('./routes/tg');
@@ -167,6 +168,7 @@ function createApp(deps) {
   // Named report CRUD is isolated in its own route module; the email schedule
   // worker (processReportSchedules) is wired by composition because the daily ingest cron triggers it.
   registerReportsRoutes({ app, db, requireAuth, audit });
+  registerCampaignsRoutes({ app, db, requireAuth, audit });
 
   // Collector protocol is isolated in its own route module. The handler validates
   // and normalizes the envelope before a single transactional DB call.
