@@ -10,6 +10,7 @@ import { Overview } from '@/panels/Overview';
 import { Analytics } from '@/panels/AnalyticsTabs';
 import { Posts } from '@/panels/Posts';
 import { Mentions } from '@/panels/Mentions';
+import { SourceIdentity } from '@/components/SourceIdentity';
 
 /**
  * FEED REGISTRY — the second layer over the network registry (lib/networks): where lib/networks
@@ -155,11 +156,14 @@ export function FeedSectionPage({ net, section }: { net: Network; section: strin
       eager
       onMount={() => {}}
       headerRight={
-        HeaderRight ? (
-          <Suspense fallback={null}>
-            <HeaderRight />
-          </Suspense>
-        ) : undefined
+        <div className="flex min-w-0 items-center gap-3">
+          <SourceIdentity network={net} />
+          {HeaderRight ? (
+            <Suspense fallback={null}>
+              <HeaderRight />
+            </Suspense>
+          ) : null}
+        </div>
       }
     >
       <Suspense fallback={<SectionSkeleton />}>

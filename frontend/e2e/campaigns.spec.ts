@@ -100,6 +100,7 @@ async function bootCampaigns(page: Page) {
         source: 'db',
       });
     }
+    if (path === '/api/tg/mtproto/graphs') return json(200, {});
     if (path === '/api/prefs') return json(200, method === 'GET' ? {} : { ok: true });
 
     // ── Кампании: stateful CRUD ──
@@ -294,7 +295,23 @@ test.describe('Кампании (desktop)', () => {
     await page.getByTestId('campaign-filter').selectOption({ label: 'Все' });
     await expect(tableRows).toHaveCount(3);
 
+    // Та же каноническая scope в «Аналитика → Форматы»: виджеты считаются только
+    // по membership текущего TG-источника. Два выбранных поста дают 80 реакций, 28 репостов и 12 комментариев.
+    await page.getByRole('link', { name: 'Аналитика' }).first().click();
+    await page.getByRole('tab', { name: 'Форматы' }).click();
+    await page.getByTestId('campaign-filter').selectOption({ label: 'Запуск продукта' });
+    await expect(page).toHaveURL(/tab=content.*campaign=\d+|campaign=\d+.*tab=content/);
+    await expect(page.getByTestId('analytics-campaign-scope')).toContainText('публикации кампании из этого источника');
+    const composition = page.getByRole('heading', { name: 'Состав вовлечённости' }).locator('xpath=ancestor::section[1]');
+    await expect(composition).toContainText('Реакции');
+    await expect(composition).toContainText('80');
+    await expect(composition).toContainText('Репосты');
+    await expect(composition).toContainText('28');
+    await expect(composition).toContainText('Комментарии');
+    await expect(composition).toContainText('12');
+
     // ── Удаление membership со страницы кампании (публикации не удаляются) ──
+    await page.getByRole('link', { name: 'Контент' }).first().click();
     await page.getByRole('tab', { name: 'Кампании' }).click();
     await page.getByTestId('campaigns-table').getByRole('row').filter({ hasText: 'Запуск продукта' }).click();
     await page.getByRole('button', { name: 'Убрать' }).first().click();

@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import { getSelectedChannel, setSelectedChannel } from '@/lib/channel';
+import { getRememberedChannel, setRememberedChannel, setSelectedChannel } from '@/lib/channel';
+import { getActiveNetwork } from '@/lib/networkStore';
 
 interface ChannelContextValue {
   channelId: number | null;
@@ -10,10 +11,20 @@ interface ChannelContextValue {
 const ChannelContext = createContext<ChannelContextValue | null>(null);
 
 export function ChannelProvider({ children }: { children: ReactNode }) {
-  const [channelId, setChannelIdState] = useState<number | null>(() => getSelectedChannel());
+  const [channelId, setChannelIdState] = useState<number | null>(() => {
+    // Start from the channel remembered for the CURRENTLY active network (falls back to the legacy
+    // single value). Sync the module-level active var so the API client's X-Channel-Id header
+    // matches the context from the very first fetch, before the switcher's reconcile effect runs.
+    const initial = getRememberedChannel(getActiveNetwork());
+    setSelectedChannel(initial);
+    return initial;
+  });
 
   const setChannelId = useCallback((id: number | null) => {
     setSelectedChannel(id);
+    // Persist the pick as the active network's remembered source. Call sites that switch network
+    // (SourceSwitcher.pick) set the active network FIRST, so this records the destination network.
+    setRememberedChannel(getActiveNetwork(), id);
     setChannelIdState(id);
   }, []);
 

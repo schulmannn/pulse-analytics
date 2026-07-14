@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
-import { useTgFull, useTgStats, useTgGraphs } from '@/api/queries';
-import type { TgFull, TgGraphs, TgStats } from '@/api/schemas';
+import { useTgFull, useTgGraphs } from '@/api/queries';
+import type { TgFull, TgGraphs } from '@/api/schemas';
 import { normalizeTgPosts } from '@/lib/posts';
 import { compareDdMm } from '@/lib/dates';
 import { fmt, ruAxisLabel, ruSeriesName, ddmmDay, pluralRu } from '@/lib/format';
@@ -134,7 +134,6 @@ function windowGraphSeries(values: number[], xs: number[], days: number, unit: s
  */
 function deriveTgAnalytics(
   full: TgFull | undefined,
-  cs: TgStats | undefined,
   graphs: TgGraphs | undefined,
   inRange: (dateISO: string | null | undefined) => boolean,
 ) {
@@ -142,17 +141,6 @@ function deriveTgAnalytics(
   const posts = normalizeTgPosts(full?.posts ?? [], full?.channel ?? {}).filter((post) =>
     inRange(post.date),
   );
-
-  const cur = (o: { current?: number | null } | null | undefined) =>
-    o && o.current != null ? o.current : null;
-
-  // 1) KPI
-  const activeErvs = posts.map((p) => p.erv).filter((v): v is number => v !== null);
-  const avgErv = activeErvs.length ? activeErvs.reduce((a, b) => a + b, 0) / activeErvs.length : null;
-  const activeVirs = posts.map((p) => p.virality).filter((v): v is number => v !== null);
-  const avgVir = activeVirs.length ? activeVirs.reduce((a, b) => a + b, 0) / activeVirs.length : null;
-  const notif = cs?.enabled_notifications;
-  const notifPct = notif?.total ? (Number(notif.part ?? 0) / Number(notif.total)) * 100 : null;
 
   // 2) Views by day — «dd.mm» keys sorted with year-rollover inference (Dec < Jan across NY).
   const viewsByDayRaw: Record<string, number> = vs?.views_by_day ?? {};
@@ -320,7 +308,6 @@ function deriveTgAnalytics(
   const bestWdLabel = maxWdAvg > 0 ? WD_LABELS[wdAvgValues.indexOf(maxWdAvg)] ?? '' : '';
 
   return {
-    vs, cur, avgErv, avgVir, notif, notifPct,
     last14Dates, vbdValues, vbdTitles, vbdPrev,
     topEmojis, engagementComposition, viewsByType, formatPerf,
     interGroup, viewSeries, shareSeries,
@@ -347,10 +334,20 @@ const TYPE_NAMES: Record<string, string> = {
 };
 
 type InRange = (dateISO: string | null | undefined) => boolean;
+type Keep = (postId: number | null | undefined) => boolean;
+const keepAll: Keep = () => true;
+
+/** Normalised in-window posts, optionally scoped to the selected campaign's members (`keep`). One
+    place so every content derive filters on the same (date-in-window AND campaign) predicate. */
+function contentPosts(full: TgFull | undefined, inRange: InRange, keep: Keep) {
+  return normalizeTgPosts(full?.posts ?? [], full?.channel ?? {}).filter(
+    (p) => inRange(p.date) && keep(p.id),
+  );
+}
 
 /** «Реакции по эмодзи» — top-8 emoji reactions over the in-window posts. */
-function deriveEmojis(full: TgFull | undefined, inRange: InRange) {
-  const posts = normalizeTgPosts(full?.posts ?? [], full?.channel ?? {}).filter((p) => inRange(p.date));
+function deriveEmojis(full: TgFull | undefined, inRange: InRange, keep: Keep = keepAll) {
+  const posts = contentPosts(full, inRange, keep);
   const emojiMap: Record<string, number> = {};
   posts.forEach((p) => {
     p.reactionsDetail.forEach((rd) => {
@@ -364,8 +361,8 @@ function deriveEmojis(full: TgFull | undefined, inRange: InRange) {
 }
 
 /** «Вовлечённость по формату» — avg ERV per media type over the in-window posts. */
-function deriveFormatPerf(full: TgFull | undefined, inRange: InRange) {
-  const posts = normalizeTgPosts(full?.posts ?? [], full?.channel ?? {}).filter((p) => inRange(p.date));
+function deriveFormatPerf(full: TgFull | undefined, inRange: InRange, keep: Keep = keepAll) {
+  const posts = contentPosts(full, inRange, keep);
   const g: Record<string, { n: number; ervSum: number; ervN: number }> = {};
   posts.forEach((p) => {
     const t = p.mediaType || 'text';
@@ -379,6 +376,38 @@ function deriveFormatPerf(full: TgFull | undefined, inRange: InRange) {
     .map(([t, v]) => ({ label: TYPE_NAMES[t] || t, avgErv: v.ervN ? v.ervSum / v.ervN : 0, n: v.n }))
     .filter((x) => x.n > 0 && x.avgErv > 0)
     .sort((a, b) => b.avgErv - a.avgErv);
+}
+
+/** «Состав вовлечённости» from raw posts (reactions/forwards/replies sums) — used when a campaign is
+    selected, so the split reflects the campaign's own posts for the source, NOT the channel-wide
+    views_summary totals (which can't be scoped to a campaign). */
+function deriveCompositionFromPosts(full: TgFull | undefined, inRange: InRange, keep: Keep) {
+  const posts = contentPosts(full, inRange, keep);
+  const reactions = posts.reduce((s, p) => s + p.likes, 0);
+  const forwards = posts.reduce((s, p) => s + p.shares, 0);
+  const replies = posts.reduce((s, p) => s + p.comments, 0);
+  return [
+    { label: 'Реакции', value: reactions, color: 'hsl(var(--chart-1))' },
+    { label: 'Репосты', value: forwards, color: 'hsl(var(--chart-2))' },
+    { label: 'Комментарии', value: replies, color: 'hsl(var(--chart-3))' },
+  ].filter((item) => item.value > 0);
+}
+
+/** «Ср. охват по типу» from raw posts (avg views per media type) — the campaign-scoped counterpart
+    to views_summary.avg_views_by_type, computed only over the campaign's posts for the source. */
+function deriveViewsByTypeFromPosts(full: TgFull | undefined, inRange: InRange, keep: Keep) {
+  const posts = contentPosts(full, inRange, keep);
+  const g: Record<string, { sum: number; n: number }> = {};
+  posts.forEach((p) => {
+    const t = p.mediaType || 'text';
+    (g[t] ??= { sum: 0, n: 0 });
+    g[t].sum += p.reach;
+    g[t].n++;
+  });
+  return Object.entries(g)
+    .map(([t, v]) => ({ label: TYPE_NAMES[t] || t, value: v.n ? Math.round(v.sum / v.n) : 0 }))
+    .filter((item) => item.value > 0)
+    .sort((a, b) => b.value - a.value);
 }
 
 /** Weekday avg-views + post-count over the in-window posts (fixes the old all-posts bug). */
@@ -416,31 +445,92 @@ function WeekdayBestDay({ full }: { full: TgFull | undefined }) {
   );
 }
 
+function average(values: number[]): number | null {
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+}
+
+function formatAverage(value: number | null): string {
+  if (value == null) return '—';
+  const formatted = Math.abs(value) < 10 ? value.toFixed(1) : fmt.kpi(value);
+  return formatted;
+}
+
+function formatRate(value: number | null): string {
+  return value == null ? '—' : `${value.toFixed(1)}%`;
+}
+
+/**
+ * Dynamics summary derived from the same raw posts and page period as the cards below. The former
+ * server snapshot ignored the header period and produced rows of zeroes/dashes; this ledger stays
+ * internally comparable and updates with the page-wide period control.
+ */
+function TgAnalyticsSummary({ full }: { full: TgFull | undefined }) {
+  const { inRange } = useWidgetPeriod();
+  const posts = normalizeTgPosts(full?.posts ?? [], full?.channel ?? {}).filter((post) => inRange(post.date));
+
+  if (posts.length === 0) {
+    return <p className="border-t border-border py-5 text-sm text-muted-foreground">В выбранном периоде нет публикаций для сводки.</p>;
+  }
+
+  const erv = average(posts.map((post) => post.erv).filter((value): value is number => value != null));
+  const virality = average(posts.map((post) => post.virality).filter((value): value is number => value != null));
+  const cappedSample = posts.length >= 100;
+  const items = [
+    { label: 'Ср. просмотры', value: formatAverage(average(posts.map((post) => post.reach))), caption: cappedSample ? 'по последним 100 публ.' : `по ${fmt.num(posts.length)} публ.` },
+    { label: 'Публикации', value: fmt.num(posts.length), caption: cappedSample ? 'выборка периода, до 100' : 'в выбранном периоде' },
+    { label: 'Ср. ERV', value: formatRate(erv), caption: 'вовлечённость на просмотр' },
+    { label: 'Виральность', value: formatRate(virality), caption: 'репосты / просмотры' },
+    { label: 'Реакций / пост', value: formatAverage(average(posts.map((post) => post.likes))), caption: 'среднее по публикациям' },
+    { label: 'Репостов / пост', value: formatAverage(average(posts.map((post) => post.shares))), caption: 'среднее по публикациям' },
+  ];
+
+  return (
+    <div className="grid grid-cols-2 gap-x-6 gap-y-4 border-t border-border pt-4 sm:grid-cols-3 lg:grid-cols-6">
+      {items.map((item) => (
+        <div key={item.label} className="min-w-0">
+          <div className="truncate text-2xs tracking-wide text-muted-foreground">{item.label}</div>
+          <div className="mt-1.5 text-2xl font-medium tabular-nums tracking-tight text-foreground">{item.value}</div>
+          <div className="mt-1 truncate text-2xs text-muted-foreground">{item.caption}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Campaign scope for the content group only (Analytics «Форматы»). When `active`, the post-derived
+    content sections filter to the campaign's members for the source and composition/views-by-type are
+    computed FROM those posts instead of the channel-wide views_summary. Undefined ⇒ no filtering. */
+export interface TgAnalyticsCampaign {
+  active: boolean;
+  inCampaign: (postId: number | null | undefined) => boolean;
+}
+
 /** `group` renders only that section family (the Analytics tabs); undefined = all sections. The KPI
     ledger always shows as the group header. */
-export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
+export function TgAnalytics({
+  group,
+  campaign,
+}: { group?: TgAnalyticsGroup; campaign?: TgAnalyticsCampaign } = {}) {
   const inGroup = (g: TgAnalyticsGroup) => !group || group === g;
   // ONE wide fetch (limit 100 = server cap): every widget below filters this shared payload to its
   // own window. No global period any more — each ChartSection carries its own 7д/30д/90д/Всё pill.
   const { data: full, isPending: isFullPending } = useTgFull(0);
-  const { data: cs, isPending: isStatsPending } = useTgStats();
   const { data: graphs, isPending: isGraphsPending } = useTgGraphs();
 
   // Panel-level derive over the WHOLE fetched payload (alwaysInRange): section-existence gates +
   // the KPI ledger snapshot + graphs-driven series. Post-derived CHART VALUES are re-derived
   // per-card inside TgWidgetBody from each card's own window.
-  const derived = useMemo(() => deriveTgAnalytics(full, cs, graphs, alwaysInRange), [full, cs, graphs]);
+  const derived = useMemo(() => deriveTgAnalytics(full, graphs, alwaysInRange), [full, graphs]);
 
-  if (isFullPending || isStatsPending || isGraphsPending) {
-    return <TgAnalyticsSkeletons />;
+  if (isFullPending || (group !== 'content' && isGraphsPending)) {
+    return <TgAnalyticsSkeletons showSummary={inGroup('dynamics')} />;
   }
 
-  if (!full && !cs && !graphs) {
+  if (!full && !graphs) {
     return <EmptyState title="Данных аналитики пока нет." reason="Как только collector-агент пришлёт первый снимок, здесь появятся графики." />;
   }
 
   const {
-    vs, cur, avgErv, avgVir, notif, notifPct,
     last14Dates, vbdValues, vbdTitles, vbdPrev,
     topEmojis, engagementComposition, viewsByType, formatPerf,
     interGroup, viewSeries, shareSeries,
@@ -450,6 +540,23 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
     maxWdAvg,
   } = derived;
   const wdLabels = WD_LABELS;
+
+  // Content group, campaign-scoped: a source is (tg, channelId); when a campaign is selected the
+  // post-derived sections keep only its members, and composition/views-by-type switch from the
+  // channel-wide views_summary to the campaign's own posts (the summary can't be campaign-scoped).
+  // `keep` is a pass-through when no campaign is active, so the non-campaign path is byte-identical.
+  const campaignActive = !!campaign?.active;
+  const keep: Keep = campaign?.active ? campaign.inCampaign : keepAll;
+  // Whole-payload (alwaysInRange) versions gate section EXISTENCE — same policy as elsewhere, so a
+  // narrow card window that happens to be empty doesn't make the section vanish (its own empty shows).
+  const emojiItems = campaignActive ? deriveEmojis(full, alwaysInRange, keep) : topEmojis;
+  const formatPerfItems = campaignActive ? deriveFormatPerf(full, alwaysInRange, keep) : formatPerf;
+  const compositionItems = campaignActive
+    ? deriveCompositionFromPosts(full, alwaysInRange, keep)
+    : engagementComposition;
+  const viewsByTypeItems = campaignActive
+    ? deriveViewsByTypeFromPosts(full, alwaysInRange, keep)
+    : viewsByType;
 
   return (
     <div className="space-y-6">
@@ -467,40 +574,11 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
         {/* Сводка показателей — the 'strip' contract (unified-feed step 2, hand-rolled):
             a real widget (hide/reorder with its siblings) whose chrome is a bare full-width
             row — a card frame would make a thin ratio strip compete with the charts. */}
-        <ChartSection strip id="tg-derived-kpis" title="Сводка показателей" defaultSize="full" noExpand>
-          <div className="grid grid-cols-2 gap-x-6 gap-y-4 border-t border-border pt-4 sm:grid-cols-3 lg:grid-cols-6">
-            <div>
-              <div className="text-2xs tracking-wide text-muted-foreground">Просмотров / пост</div>
-              <div className="mt-1.5 text-2xl font-medium tabular-nums tracking-tight">{fmt.kpi(cur(cs?.views_per_post) ?? vs?.avg_views ?? 0)}</div>
-              {vs?.posts_analyzed ? <div className="mt-1 truncate text-2xs text-muted-foreground">по {vs.posts_analyzed} постам</div> : null}
-            </div>
-            <div>
-              <div className="text-2xs tracking-wide text-muted-foreground">Ср. ERV</div>
-              <div className="mt-1.5 text-2xl font-medium tabular-nums tracking-tight">{avgErv != null ? `${avgErv.toFixed(1)}%` : '—'}</div>
-              <div className="mt-1 truncate text-2xs text-muted-foreground">вовлечённость на просмотр</div>
-            </div>
-            <div>
-              <div className="text-2xs tracking-wide text-muted-foreground">Виральность</div>
-              <div className="mt-1.5 text-2xl font-medium tabular-nums tracking-tight">{avgVir != null ? `${avgVir.toFixed(1)}%` : '—'}</div>
-              <div className="mt-1 truncate text-2xs text-muted-foreground">репосты / просмотры</div>
-            </div>
-            <div>
-              <div className="text-2xs tracking-wide text-muted-foreground">Репостов / пост</div>
-              <div className="mt-1.5 text-2xl font-medium tabular-nums tracking-tight">{cur(cs?.shares_per_post) != null ? fmt.kpi(cur(cs?.shares_per_post)!) : '—'}</div>
-              {vs?.total_forwards ? <div className="mt-1 truncate text-2xs text-muted-foreground">{fmt.short(vs.total_forwards)} всего</div> : null}
-            </div>
-            <div>
-              <div className="text-2xs tracking-wide text-muted-foreground">Реакций / пост</div>
-              <div className="mt-1.5 text-2xl font-medium tabular-nums tracking-tight">{cur(cs?.reactions_per_post) != null ? fmt.kpi(cur(cs?.reactions_per_post)!) : '—'}</div>
-              {vs?.total_reactions ? <div className="mt-1 truncate text-2xs text-muted-foreground">{fmt.short(vs.total_reactions)} всего</div> : null}
-            </div>
-            <div>
-              <div className="text-2xs tracking-wide text-muted-foreground">Уведомления вкл.</div>
-              <div className="mt-1.5 text-2xl font-medium tabular-nums tracking-tight">{notifPct != null ? `${notifPct.toFixed(1)}%` : '—'}</div>
-              {notif ? <div className="mt-1 truncate text-2xs text-muted-foreground">{fmt.short(notif.part ?? 0)} из {fmt.short(notif.total ?? 0)}</div> : null}
-            </div>
-          </div>
-        </ChartSection>
+        {inGroup('dynamics') && (
+          <ChartSection strip id="tg-derived-kpis" title="Сводка показателей" defaultSize="full" noExpand>
+            <TgAnalyticsSummary full={full} />
+          </ChartSection>
+        )}
         {/* Дубль-развязка (аудит 5.1): «Просмотры по дням» (views_summary, фикс-14д + ghost) и
             «Просмотры» (graphs-серия, rich expand/grain) показывали одни и те же дневные просмотры
             на каналах с broadcast-статистикой. Теперь эта карточка — ЧЕСТНЫЙ FALLBACK только для
@@ -530,37 +608,39 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
           />
         )}
 
-        {/* Пост-производный: топ эмодзи считаются по постам ОКНА виджета (variants-fn form). */}
-        {inGroup('content') && topEmojis.length > 0 && (
+        {/* Пост-производный: топ эмодзи считаются по постам ОКНА виджета (variants-fn form).
+            Под фильтром кампании — только по её публикациям из текущего источника. */}
+        {inGroup('content') && emojiItems.length > 0 && (
           <ChartSection
             title="Реакции по эмодзи"
             periodControl
             variants={(period) =>
               breakdownVariants(
-                deriveEmojis(full, period.inRange).map((e) => ({ label: e.label, value: e.value, display: fmt.num(e.value) })),
+                deriveEmojis(full, period.inRange, keep).map((e) => ({ label: e.label, value: e.value, display: fmt.num(e.value) })),
               )
             }
           />
         )}
 
-        {/* Серверная сводка (vs.total_*): период-агностично — та же цифра в любом окне. */}
-        {inGroup('content') && engagementComposition.length > 0 && (
-          <ChartSection title="Состав вовлечённости" variants={breakdownVariants(engagementComposition.map((c) => ({ label: c.label, value: c.value, display: fmt.num(c.value), color: c.color })))} />
+        {/* Без кампании — серверная сводка (vs.total_*, период-агностично). С кампанией — по её
+            публикациям источника (сводку нельзя ограничить кампанией). */}
+        {inGroup('content') && compositionItems.length > 0 && (
+          <ChartSection title="Состав вовлечённости" variants={breakdownVariants(compositionItems.map((c) => ({ label: c.label, value: c.value, display: fmt.num(c.value), color: c.color })))} />
         )}
 
-        {/* Серверная сводка (vs.avg_views_by_type): период-агностично. */}
-        {inGroup('content') && viewsByType.length > 0 && (
-          <ChartSection title="Ср. охват по типу" variants={breakdownVariants(viewsByType.map((t) => ({ label: t.label, value: t.value, display: fmt.num(t.value) })))} />
+        {/* Без кампании — серверная сводка (vs.avg_views_by_type). С кампанией — по её публикациям. */}
+        {inGroup('content') && viewsByTypeItems.length > 0 && (
+          <ChartSection title="Ср. охват по типу" variants={breakdownVariants(viewsByTypeItems.map((t) => ({ label: t.label, value: t.value, display: fmt.num(t.value) })))} />
         )}
 
-        {/* Пост-производный: средний ERV по формату — по постам окна виджета. */}
-        {inGroup('content') && formatPerf.length > 0 && (
+        {/* Пост-производный: средний ERV по формату — по постам окна виджета (и кампании, если выбрана). */}
+        {inGroup('content') && formatPerfItems.length > 0 && (
           <ChartSection
             title="Вовлечённость по формату"
             periodControl
             variants={(period) =>
               breakdownVariants(
-                deriveFormatPerf(full, period.inRange).map((f) => ({ label: f.label, value: f.avgErv, display: `${f.avgErv.toFixed(1)}% ERV · ${f.n} ${pluralRu(f.n, ['пост', 'поста', 'постов'])}` })),
+                deriveFormatPerf(full, period.inRange, keep).map((f) => ({ label: f.label, value: f.avgErv, display: `${f.avgErv.toFixed(1)}% ERV · ${f.n} ${pluralRu(f.n, ['пост', 'поста', 'постов'])}` })),
               )
             }
           />
@@ -818,18 +898,20 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
   );
 }
 
-function TgAnalyticsSkeletons() {
+function TgAnalyticsSkeletons({ showSummary }: { showSummary: boolean }) {
   // Mirror the real render — open KPI ledger + hairline chart sections — so nothing swaps on load.
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-x-6 gap-y-4 border-t border-border pt-4 sm:grid-cols-3 lg:grid-cols-6">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i}>
-            <Skeleton className="h-2.5 w-2/3" />
-            <Skeleton className="mt-2 h-5 w-1/2" />
-          </div>
-        ))}
-      </div>
+      {showSummary && (
+        <div className="grid grid-cols-2 gap-x-6 gap-y-4 border-t border-border pt-4 sm:grid-cols-3 lg:grid-cols-6">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i}>
+              <Skeleton className="h-2.5 w-2/3" />
+              <Skeleton className="mt-2 h-5 w-1/2" />
+            </div>
+          ))}
+        </div>
+      )}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {Array.from({ length: 4 }).map((_, i) => (
           <div key={i} className="space-y-3">

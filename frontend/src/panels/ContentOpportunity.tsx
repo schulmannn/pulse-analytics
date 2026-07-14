@@ -10,10 +10,16 @@ import { useWidgetPeriod } from '@/lib/period';
 import { fmt, pluralRu } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
-export function ContentOpportunity() {
+/** `inCampaign` (default pass-through) narrows the posts to the selected campaign's members for the
+    active source on the Analytics «Форматы» surface — derived from raw posts, never all-channel. */
+export function ContentOpportunity({
+  inCampaign = () => true,
+}: { inCampaign?: (postId: number | null | undefined) => boolean } = {}) {
   const { data } = useTgFull(0);
   const { inRange } = useWidgetPeriod();
-  const posts = normalizeTgPosts(data?.posts ?? [], data?.channel ?? {}).filter((post) => inRange(post.date));
+  const posts = normalizeTgPosts(data?.posts ?? [], data?.channel ?? {}).filter(
+    (post) => inRange(post.date) && inCampaign(post.id),
+  );
   const items = deriveContentOpportunities(posts);
 
   if (items.length < 2) {

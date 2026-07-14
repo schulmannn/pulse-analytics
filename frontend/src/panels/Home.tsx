@@ -23,6 +23,7 @@ import { CreateWidgetDialog } from '@/components/CreateWidgetDialog';
 import { addWidgetConfig, getWidgetConfig, useWidgetConfigs } from '@/lib/widgetStore';
 import { isLegacyKey, legacyConfigId } from '@/lib/legacyWidgets';
 import { configIdFromKey, customKey, healedLegacyConfig, isCustomKey, type WidgetConfig } from '@/lib/widgetConfig';
+import { HomeSourceProvider } from '@/lib/homeSourceContext';
 
 /**
  * Personal Home — a per-user board of the widgets the reader pinned via the ⋯ «На главную» item
@@ -87,10 +88,7 @@ export function Home() {
       {/* Sticky page header — the Edit action stays reachable while scrolling the board (steep).
           Solid bg + a hairline (no blur/shadow per governance); bg bleeds to the content padding. */}
       <div className="sticky top-0 z-sticky -mx-4 mb-6 flex items-start justify-between gap-3 border-b border-border bg-background px-4 py-3 sm:-mx-6 sm:px-6">
-        <div>
-          <h2 className="text-2xl font-medium tracking-tight text-foreground">Главная</h2>
-          <p className="mt-0.5 text-sm text-muted-foreground">Ваши закреплённые виджеты.</p>
-        </div>
+        <h2 className="text-2xl font-medium tracking-tight text-foreground">Главная</h2>
         <div className="edit-toggle-slot">
           <button
             type="button"
@@ -197,7 +195,9 @@ const CuratedHomeCard = memo(function CuratedHomeCard({ homeKey, def }: { homeKe
       label={def.label}
       size={prefs.size ?? def.defaultSize ?? 'half'}
     >
-      <ChannelScope channelId={prefs.source ?? null}>{def.render()}</ChannelScope>
+      <HomeSourceProvider value={{ network: def.network, channelId: prefs.source }}>
+        <ChannelScope channelId={prefs.source ?? null}>{def.render()}</ChannelScope>
+      </HomeSourceProvider>
     </WidgetErrorBoundary>
   );
 });

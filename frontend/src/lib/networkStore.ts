@@ -30,7 +30,18 @@ function readStored(): Network {
   }
 }
 
-let current: Network = readStored();
+/** Route ownership must win before React mounts: ChannelProvider reads this store while it is still
+    above BrowserRouter, and uses the result to choose the first X-Channel-Id. Deferring the owner to
+    useNetworkSelection's effect can otherwise bootstrap a TG route with the remembered IG channel. */
+function readInitial(): Network {
+  try {
+    return routeNetworkOwner(window.location.pathname) ?? readStored();
+  } catch {
+    return readStored();
+  }
+}
+
+let current: Network = readInitial();
 const listeners = new Set<() => void>();
 
 /** The persisted active network (last explicit choice). Non-reactive read, for event handlers. */

@@ -14,15 +14,18 @@ interface TagStats {
 }
 
 type InRange = (dateISO: string | null | undefined) => boolean;
+type Keep = (postId: number | null | undefined) => boolean;
+const keepAll: Keep = () => true;
 
 /**
  * Hashtag ERV-lift over the IN-WINDOW posts: for each tag carried by ≥2 posts, its average ERV and
  * the lift vs the no-tag baseline. Top-10 by lift (else avg ERV). Pure, so the widget re-derives it
- * per its own period (variants-fn form) — the bars follow the card's 7д/30д/90д/Всё pill.
+ * per its own period (variants-fn form) — the bars follow the card's 7д/30д/90д/Всё pill. `keep`
+ * (default pass-through) additionally scopes to the selected campaign's members for the source.
  */
-function deriveHashtags(full: TgFull | undefined, inRange: InRange) {
+function deriveHashtags(full: TgFull | undefined, inRange: InRange, keep: Keep = keepAll) {
   const posts = normalizeTgPosts(full?.posts ?? [], full?.channel ?? {}).filter(
-    (post) => post.erv !== null && inRange(post.date),
+    (post) => post.erv !== null && inRange(post.date) && keep(post.id),
   );
 
   let baseSum = 0;
@@ -73,9 +76,9 @@ function deriveHashtags(full: TgFull | undefined, inRange: InRange) {
 }
 
 /** «база без тегов» caption — reads the card's OWN window (useWidgetPeriod) so it matches the bars. */
-function HashtagsBase({ full }: { full: TgFull | undefined }) {
+function HashtagsBase({ full, keep }: { full: TgFull | undefined; keep: Keep }) {
   const { inRange } = useWidgetPeriod();
-  const { baseAvg } = deriveHashtags(full, inRange);
+  const { baseAvg } = deriveHashtags(full, inRange, keep);
   if (baseAvg === null) return null;
   return (
     <div className="mt-3 text-xs font-medium text-muted-foreground">
@@ -88,7 +91,11 @@ function HashtagsBase({ full }: { full: TgFull | undefined }) {
     happens to be empty doesn't make the whole card vanish (the per-window empty shows in-card). */
 const alwaysInRange = () => true;
 
-export function Hashtags() {
+/** `inCampaign` (default pass-through) scopes the lift to the selected campaign's members for the
+    active source on the Analytics «Форматы» surface — derived from raw posts, never all-channel. */
+export function Hashtags({
+  inCampaign = keepAll,
+}: { inCampaign?: Keep } = {}) {
   // ONE wide fetch (limit 0 = server cap 100); the widget windows it client-side per its own period.
   const { data: full, isPending, isError, refetch } = useTgFull(0);
 
@@ -108,7 +115,7 @@ export function Hashtags() {
     );
   }
 
-  if (!deriveHashtags(full, alwaysInRange).hasItems) {
+  if (!deriveHashtags(full, alwaysInRange, inCampaign).hasItems) {
     return (
       <ChartSection title="Влияние хэштегов на ERV" defaultSize="full">
         <EmptyState compact title="Мало данных для хэштегов" reason="Нужно ≥2 поста с одним хэштегом" />
@@ -121,9 +128,9 @@ export function Hashtags() {
       title="Влияние хэштегов на ERV"
       defaultSize="full"
       periodControl
-      variants={(period) => breakdownVariants(deriveHashtags(full, period.inRange).breakdownItems)}
+      variants={(period) => breakdownVariants(deriveHashtags(full, period.inRange, inCampaign).breakdownItems)}
     >
-      <HashtagsBase full={full} />
+      <HashtagsBase full={full} keep={inCampaign} />
     </ChartSection>
   );
 }
