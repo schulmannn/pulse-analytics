@@ -133,14 +133,28 @@ function GhostIconButton({
  */
 function SidebarNav({ rail }: { rail: boolean }) {
   const items = useActiveNetworkNav();
+  const home = items.filter((item) => item.to === '/home');
+  const reports = items.filter((item) => item.to === '/reports');
+  const workspace = items.filter((item) => item.to !== '/home' && item.to !== '/reports');
   return (
     <nav className="mt-5 flex-1 overflow-y-auto overflow-x-hidden px-3">
-      <div className="space-y-0.5">
-        {items.map((item) => (
-          <NavItem key={item.to} {...item} rail={rail} />
-        ))}
-      </div>
+      <SidebarNavGroup items={home} rail={rail} />
+      <SidebarNavGroup label="Анализ источника" items={workspace} rail={rail} />
+      <SidebarNavGroup label="Рабочие документы" items={reports} rail={rail} />
     </nav>
+  );
+}
+
+/** Visual sections only: routes remain one flat list and sources still live exclusively in the switcher. */
+function SidebarNavGroup({ label, items, rail }: { label?: string; items: NavLinkDef[]; rail: boolean }) {
+  if (items.length === 0) return null;
+  return (
+    <div className={cn('space-y-0.5', label && (rail ? 'mt-3 border-t border-border pt-3' : 'mt-4'))}>
+      {label && !rail && (
+        <div className="px-2 pb-1 text-2xs font-medium text-ink3">{label}</div>
+      )}
+      {items.map((item) => <NavItem key={item.to} {...item} rail={rail} />)}
+    </div>
   );
 }
 

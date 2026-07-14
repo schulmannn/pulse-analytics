@@ -11,6 +11,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { RichText } from '@/components/RichText';
 import { ChartSection } from '@/components/ChartWidget';
 import { PostDetailModal } from '@/components/PostDetailModal';
+import { compareToMedian, medianDeltaLabel, periodMedian } from '@/lib/postMedian';
 
 type SortKey = 'reach' | 'likes' | 'shares' | 'virality' | 'erv' | 'er';
 const SORT_COLUMNS: { key: SortKey; label: string; get: (p: NormalizedPost) => number }[] = [
@@ -93,6 +94,7 @@ function PostsLeaderboard({ allPosts }: { allPosts: NormalizedPost[] }) {
   // медианы колонки) — иначе почти каждая ячейка получала цвет и колонки читались «радугой».
   const ervMedian = median(tablePosts.map((p) => p.erv).filter((v): v is number => v != null));
   const erMedian = median(tablePosts.map((p) => p.er).filter((v): v is number => v != null));
+  const reachMedian = periodMedian(posts.map((p) => p.reach));
 
   const selectedPost = posts.find((p) => p.id === openId);
 
@@ -130,6 +132,7 @@ function PostsLeaderboard({ allPosts }: { allPosts: NormalizedPost[] }) {
           <tbody className="divide-y divide-border">
             {tablePosts.map((post, idx) => {
               const isClickable = post.id != null;
+              const reachVsMedian = compareToMedian(post.reach, reachMedian);
               return (
                 <tr
                   key={post.id ?? idx}
@@ -172,7 +175,14 @@ function PostsLeaderboard({ allPosts }: { allPosts: NormalizedPost[] }) {
                       </div>
                     )}
                   </td>
-                  <td className="px-3 py-3 text-right font-medium tabular-nums last:pr-0">{fmt.num(post.reach)}</td>
+                  <td className="px-3 py-3 text-right tabular-nums last:pr-0">
+                    <span className="block font-medium text-foreground">{fmt.num(post.reach)}</span>
+                    {reachVsMedian && (
+                      <span className={cn('block text-2xs', reachVsMedian.dir === 'above' ? 'text-verdant' : reachVsMedian.dir === 'below' ? 'text-ember' : 'text-muted-foreground')}>
+                        {medianDeltaLabel(reachVsMedian)}
+                      </span>
+                    )}
+                  </td>
                   <td className="px-3 py-3 text-right font-medium tabular-nums last:pr-0 text-muted-foreground">{fmt.num(post.likes)}</td>
                   <td className="px-3 py-3 text-right font-medium tabular-nums last:pr-0 text-muted-foreground">
                     {post.shares ? fmt.num(post.shares) : <span className="text-muted-foreground/40">—</span>}
@@ -197,6 +207,7 @@ function PostsLeaderboard({ allPosts }: { allPosts: NormalizedPost[] }) {
         {tablePosts.map((post, idx) => {
           const isClickable = post.id != null;
           const title = post.caption ? markdownToPlainText(post.caption) : null;
+          const reachVsMedian = compareToMedian(post.reach, reachMedian);
           return (
             <button
               key={post.id ?? idx}
@@ -210,7 +221,7 @@ function PostsLeaderboard({ allPosts }: { allPosts: NormalizedPost[] }) {
                   {title ?? 'Без подписи'}
                 </span>
                 <span className="mt-0.5 block truncate text-2xs text-ink2">
-                  {fmt.num(post.reach)} просмотров · {fmt.num(post.likes)} · ER {post.er != null ? `${post.er.toFixed(1)}%` : '—'}
+                  {fmt.num(post.reach)} просмотров{reachVsMedian ? ` · ${medianDeltaLabel(reachVsMedian)}` : ''} · {fmt.num(post.likes)} · ER {post.er != null ? `${post.er.toFixed(1)}%` : '—'}
                 </span>
               </span>
             </button>
@@ -220,7 +231,14 @@ function PostsLeaderboard({ allPosts }: { allPosts: NormalizedPost[] }) {
 
       {/* Общая модалка поста (D6.2): без №-бейджа — порядок таблицы зависит от текущей сортировки. */}
       {openId !== null && selectedPost && (
-        <PostDetailModal post={selectedPost} reason={null} onClose={() => setOpenId(null)} />
+        <PostDetailModal
+          post={selectedPost}
+          reason={(() => {
+            const comparison = compareToMedian(selectedPost.reach, reachMedian);
+            return comparison ? medianDeltaLabel(comparison) : null;
+          })()}
+          onClose={() => setOpenId(null)}
+        />
       )}
     </>
   );

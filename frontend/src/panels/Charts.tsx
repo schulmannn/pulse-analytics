@@ -14,6 +14,7 @@ import { ChartCardBody, ChartSection } from '@/components/ChartWidget';
 import { seriesBarValuesVariant } from '@/components/widgets/variants';
 import { pctDelta } from '@/lib/delta';
 import type { WidgetViz } from '@/lib/widgetMetrics';
+import type { WidgetSize } from '@/lib/widgetPrefsStore';
 
 interface HeatmapCell {
   n: number;
@@ -103,7 +104,7 @@ export function HistoryChartBlock({ id, homeKey }: HomeBlockProps = {}) {
   // isPending (не isLoading): запрос выключен, пока канал не известен, — скелетон и там.
   const { data, isPending, isError, refetch } = useHistory(730);
 
-  if (isPending) return <ChartSkeleton title="История подписчиков" id={id} homeKey={homeKey} />;
+  if (isPending) return <ChartSkeleton title="История подписчиков" id={id} homeKey={homeKey} defaultSize="half" />;
   // Честная ошибка в СВОЕЙ карточке (dense-flow затянул бы дыру соседями — пропажа незаметна).
   if (isError) {
     return (
@@ -450,14 +451,14 @@ function HeatmapSurface({
 export function VelocityChartBlock({ id, homeKey }: HomeBlockProps = {}) {
   const { data, isPending } = useVelocity();
 
-  if (isPending) return <ChartSkeleton title="Скорость набора просмотров" id={id} homeKey={homeKey} />;
+  if (isPending) return <ChartSkeleton title="Скорость набора просмотров" id={id} homeKey={homeKey} defaultSize="half" />;
 
   const available = data?.available ?? false;
   const byDay = data?.by_day ?? [];
 
   if (!available || byDay.length < 2) {
     return (
-      <ChartSection title="Скорость набора просмотров" id={id} homeKey={homeKey}>
+      <ChartSection title="Скорость набора просмотров" id={id} homeKey={homeKey} defaultSize="half">
         <LineChart values={[]} />
       </ChartSection>
     );
@@ -477,6 +478,7 @@ export function VelocityChartBlock({ id, homeKey }: HomeBlockProps = {}) {
       title="Скорость набора просмотров"
       id={id}
       homeKey={homeKey}
+      defaultSize="half"
       variants={[
         {
           key: 'line',
@@ -535,9 +537,9 @@ export function VelocityWidgetBody({ viz }: { viz: WidgetViz }) {
   );
 }
 
-function ChartSkeleton({ title, id, homeKey }: { title: string; id?: string; homeKey?: string }) {
+function ChartSkeleton({ title, id, homeKey, defaultSize }: { title: string; id?: string; homeKey?: string; defaultSize?: WidgetSize }) {
   return (
-    <ChartSection title={title} id={id} homeKey={homeKey}>
+    <ChartSection title={title} id={id} homeKey={homeKey} defaultSize={defaultSize}>
       <ChartSkeletonBody />
     </ChartSection>
   );

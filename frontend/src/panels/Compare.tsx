@@ -2,6 +2,7 @@ import { useTgFull } from '@/api/queries';
 import { normalizeTgPosts, type NormalizedPost } from '@/lib/posts';
 import { fmt, pluralRu } from '@/lib/format';
 import { pctDelta } from '@/lib/delta';
+import { describeChange, explainChange } from '@/lib/whyChanged';
 import { useWidgetPeriod } from '@/lib/period';
 import { Skeleton } from '@/components/ui/skeleton';
 import { DeltaPill } from '@/components/DeltaPill';
@@ -158,6 +159,27 @@ export function Compare() {
       color: CHART_CYCLE[i % CHART_CYCLE.length],
     }));
 
+  // «Почему изменилось»: тот же сдвиг Просмотров, что и в таблице, разложенный на наблюдения по
+  // дням архива (детерминированно, без выдуманных причин). Серия — суммарный охват постов за день;
+  // окно и границы совпадают с таблицей, поэтому число сходится. Блок появляется только при
+  // реальной находке (не flat / не «мало данных»), иначе таблица и так всё показывает.
+  const dailyReach = (() => {
+    const map = new Map<string, number>();
+    for (const p of all) {
+      if (!p.date) continue;
+      const t = Date.parse(p.date);
+      if (!Number.isFinite(t)) continue;
+      const key = new Date(t).toISOString().slice(0, 10);
+      map.set(key, (map.get(key) ?? 0) + p.reach);
+    }
+    return [...map.entries()].map(([day, v]) => ({ day, v }));
+  })();
+  const why = hasPrev && days > 0 ? explainChange(dailyReach, days, now) : null;
+  const whyStory =
+    why && !why.insufficient && why.direction !== 'flat' && why.drivers.length > 0
+      ? describeChange(why, 'Просмотры')
+      : null;
+
   return (
     <div className="space-y-6">
       <div className="space-y-4">
@@ -210,6 +232,27 @@ export function Compare() {
           />
         )}
       </div>
+
+      {whyStory && (
+        <section className="space-y-3" aria-label="Почему изменилось">
+          <h3 className="flex items-center gap-3 text-xs font-medium tracking-wider text-muted-foreground">
+            <span className="whitespace-nowrap">Почему изменилось</span>
+            <span aria-hidden="true" className="h-px flex-1 bg-border" />
+          </h3>
+          <p className="text-sm text-foreground">{whyStory.headline}.</p>
+          {whyStory.evidence.length > 0 && (
+            <ul className="space-y-1.5 text-sm text-muted-foreground">
+              {whyStory.evidence.map((line, i) => (
+                <li key={i} className="flex gap-2">
+                  <span aria-hidden="true" className="text-ink3">·</span>
+                  <span>{line}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {whyStory.caveat && <p className="text-2xs text-ink3">{whyStory.caveat}</p>}
+        </section>
+      )}
 
       <WidgetGroup id="compare" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
         <ChartSection

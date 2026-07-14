@@ -9,6 +9,7 @@ import { ChannelScope } from '@/lib/channel-context';
 import { useWidgetData } from '@/lib/useWidgetData';
 import { useIgWidgetData } from '@/lib/useIgWidgetData';
 import { getMetric } from '@/lib/widgetMetrics';
+import { coerceSizeForViz, effectiveTinted } from '@/lib/widgetSurface';
 import { updateWidgetConfig } from '@/lib/widgetStore';
 import { LEGACY_LABEL, legacyKeyForMetricId, type LegacyKey } from '@/lib/legacyWidgets';
 import {
@@ -49,20 +50,25 @@ export const ConfigWidget = memo(function ConfigWidget({ config, homeKey }: { co
   const drillKey = metric?.drillKey;
   const onDrill = drillKey && config.source == null ? () => navigate(`/metrics/${drillKey}`) : undefined;
 
+  // Central surface + width policy (widgetSurface): a multi-series / tabular viz never carries a tonal
+  // wash whatever the saved accent, and a temporal line can't sit at a third width where its x-axis
+  // collapses — both enforced here, in the one place a config becomes a card, not per-panel.
+  const size = coerceSizeForViz(config.viz, config.size ?? 'third');
+
   const card = (
     <ChartSection
       id={`custom-${config.id}`}
       title={label}
       homeKey={homeKey}
-      defaultSize={config.size}
+      defaultSize={size}
       // Config signature → when the user reconfigures a crashed widget, the body error boundary
       // (inside ChartSection) clears the caught error and re-renders the new config automatically.
       bodyResetKey={JSON.stringify(config)}
       configEditor={{
         open: () => setEditOpen(true),
         color: config.style?.color,
-        tinted: config.style?.tinted,
-        size: config.size,
+        tinted: effectiveTinted(config.viz, config.style?.tinted),
+        size,
         // The goal line is now resolver-computed (result.target) and provided by WidgetRenderer, so
         // the card-level target override is no longer needed (it also covers dynamic targets, S9).
       }}

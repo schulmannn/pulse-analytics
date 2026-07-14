@@ -3,7 +3,7 @@ import type { WidgetSize } from '@/lib/widgetPrefsStore';
 
 export const SIZE_COL_SPAN: Record<WidgetSize, string> = {
   third: 'lg:col-span-2',
-  half: 'lg:col-span-4',
+  half: 'lg:col-span-3',
   full: 'lg:col-span-6',
 };
 

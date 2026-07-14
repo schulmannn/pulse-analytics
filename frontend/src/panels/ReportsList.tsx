@@ -4,13 +4,35 @@ import { useDemo } from '@/lib/demo-context';
 import { fmt } from '@/lib/format';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ReportsErrorState } from '@/panels/ReportPage';
-import { DEFAULT_REPORT_BLOCKS } from '@/lib/reportBlocks';
+import { DEFAULT_REPORT_BLOCKS, type ReportBlockKey } from '@/lib/reportBlocks';
 
 const SCHEDULE_LABELS: Record<string, string> = {
   none: 'Выкл',
   weekly: 'Раз в неделю',
   monthly: 'Раз в месяц',
 };
+
+const REPORT_TEMPLATES: Array<{
+  name: string;
+  description: string;
+  blocks: ReportBlockKey[];
+}> = [
+  {
+    name: 'Еженедельный обзор',
+    description: 'Изменения, ключевые метрики и лучшие публикации.',
+    blocks: ['week', 'kpi-summary', 'metric-views', 'top-posts'],
+  },
+  {
+    name: 'Рост аудитории',
+    description: 'Подписчики, недельная динамика и наблюдения.',
+    blocks: ['kpi-summary', 'metric-subscribers', 'weekly-table', 'insights'],
+  },
+  {
+    name: 'Эффективность контента',
+    description: 'Охват, реакции и публикации, которые дали результат.',
+    blocks: ['kpi-summary', 'metric-views', 'metric-reactions', 'top-posts', 'insights'],
+  },
+];
 
 /**
  * /reports — the saved-reports index (steep Reports, our warm-paper language): a hairline
@@ -23,16 +45,19 @@ export function ReportsList() {
   const createReport = useCreateReport();
   const navigate = useNavigate();
 
-  const handleCreate = () =>
+  const handleCreate = (template?: (typeof REPORT_TEMPLATES)[number]) =>
     createReport.mutate(
-      { name: 'Новый отчёт', config: { blocks: [...DEFAULT_REPORT_BLOCKS] } },
+      {
+        name: template?.name ?? 'Новый отчёт',
+        config: { blocks: [...(template?.blocks ?? DEFAULT_REPORT_BLOCKS)] },
+      },
       { onSuccess: (data) => navigate(`/reports/${data.report.id}`) },
     );
 
   const reports = reportsQuery.data?.reports ?? [];
 
   return (
-    <div className="mx-auto w-full max-w-4xl space-y-6">
+    <div className="mx-auto w-full max-w-6xl space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-2xl font-medium tracking-tight">Отчёты</h2>
@@ -43,7 +68,7 @@ export function ReportsList() {
         {!demo && (
           <button
             type="button"
-            onClick={handleCreate}
+            onClick={() => handleCreate()}
             disabled={createReport.isPending}
             className="btn-pill bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
           >
@@ -56,6 +81,30 @@ export function ReportsList() {
         <p className="text-xs text-ember">
           Не удалось создать отчёт: {createReport.error instanceof Error ? createReport.error.message : 'ошибка'}
         </p>
+      )}
+
+      {!demo && (
+        <section aria-labelledby="report-templates-title" className="border-y border-border py-4">
+          <div className="mb-3 flex items-baseline justify-between gap-3">
+            <h3 id="report-templates-title" className="text-sm font-medium text-foreground">Начать с шаблона</h3>
+            <span className="text-2xs text-muted-foreground">Блоки можно изменить после создания</span>
+          </div>
+          <div className="grid gap-px overflow-hidden rounded border border-border bg-border md:grid-cols-3">
+            {REPORT_TEMPLATES.map((template) => (
+              <button
+                key={template.name}
+                type="button"
+                onClick={() => handleCreate(template)}
+                disabled={createReport.isPending}
+                className="min-h-24 bg-background p-3 text-left transition-colors hover:bg-hover-row disabled:opacity-50"
+              >
+                <span className="block text-sm font-medium text-foreground">{template.name}</span>
+                <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">{template.description}</span>
+                <span className="mt-3 block text-2xs text-primary">Создать →</span>
+              </button>
+            ))}
+          </div>
+        </section>
       )}
 
       {demo ? (
@@ -71,14 +120,7 @@ export function ReportsList() {
             Соберите документ из блоков аналитики — его можно распечатать в PDF и получать письмом
             раз в неделю или месяц.
           </p>
-          <button
-            type="button"
-            onClick={handleCreate}
-            disabled={createReport.isPending}
-            className="btn-pill mt-4 bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-          >
-            {createReport.isPending ? 'Создание…' : 'Создать отчёт'}
-          </button>
+          <p className="mt-4 text-xs text-muted-foreground">Выберите шаблон выше или создайте пустой отчёт.</p>
         </div>
       ) : (
         <table className="w-full border-collapse text-sm">
