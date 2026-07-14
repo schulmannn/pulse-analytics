@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useTgFull } from '@/api/queries';
 import { normalizeTgPosts, type NormalizedPost } from '@/lib/posts';
+import { compareToMedian, medianDeltaLabel, periodMedian } from '@/lib/postMedian';
 import { fmt } from '@/lib/format';
 import { markdownToPlainText } from '@/lib/markdown';
 import { cn } from '@/lib/utils';
@@ -51,9 +52,13 @@ export function TopPosts() {
   const [sortKey, setSortKey] = useState<SortKey>('reach');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
-  const { rows, reasonFor } = useMemo(() => {
+  const { rows, reasonFor, reachMedian } = useMemo(() => {
     const posts = normalizeTgPosts(data?.posts ?? [], data?.channel ?? {}).filter((post) => inRange(post.date));
     const withEng = posts.filter((post) => post.eng > 0);
+    // Period median of the primary metric (reach) across EVERY post in the window — the honest
+    // "typical post" baseline each top row is measured against. Median (not mean) so a single viral
+    // post can't inflate the bar every other post is judged by. Withheld below MEDIAN_MIN_SAMPLE.
+    const reachMedian = periodMedian(posts.map((post) => post.reach));
     const avg = (pick: (p: NormalizedPost) => number) =>
       withEng.length ? withEng.reduce((sum, p) => sum + pick(p), 0) / withEng.length : 0;
     const avgEng = avg((p) => p.eng);
@@ -79,8 +84,16 @@ export function TopPosts() {
       return pct >= 100 ? `+${pct}% к среднему по ${best.label}` : null;
     };
 
-    return { rows: top, reasonFor };
+    return { rows: top, reasonFor, reachMedian };
   }, [data, inRange]);
+
+  // Explicit "+42% к медиане" label on the primary metric (Task 6): colour is never the only
+  // explanation. Falls back to the outlier reason when the period is too small for a median.
+  const medianLabelFor = (post: NormalizedPost): string | null => {
+    const cmp = compareToMedian(post.reach, reachMedian);
+    if (cmp && cmp.dir === 'above') return medianDeltaLabel(cmp);
+    return reasonFor(post);
+  };
 
   if (isPending) return <TopPostsSkeleton />;
   // Честная ошибка вместо молчаливого исчезновения (дизайн-аудит).
@@ -141,7 +154,7 @@ export function TopPosts() {
 
           {/* rows */}
           {sorted.map((post, idx) => {
-            const reason = reasonFor(post);
+            const reason = medianLabelFor(post);
             const title = post.caption ? markdownToPlainText(post.caption) : 'Без подписи';
             return (
               <button

@@ -509,6 +509,7 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
         {inGroup('dynamics') && !viewSeries && last14Dates.length >= 2 && (
           <ChartSection
             title="Просмотры по дням"
+            defaultSize="half"
             drillTo="/metrics/views"
             variants={[
               {
@@ -574,6 +575,7 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
           <ChartSection
             id="tg-views-graph"
             title={ruSeriesName(viewSeries.name) || 'Просмотры'}
+            defaultSize="half"
             drillTo="/metrics/views"
             // Rich explorer (steep): «Развернуть» grows 1М/3М/6М/Всё pills, a line↔bar toggle and a
             // Мин/Макс/Среднее/Сумма strip — windowing the full graphs series the inline card can't.
@@ -627,6 +629,7 @@ export function TgAnalytics({ group }: { group?: TgAnalyticsGroup } = {}) {
           <ChartSection
             id="tg-shares-graph"
             title={ruSeriesName(shareSeries.name) || 'Репосты'}
+            defaultSize="half"
             drillTo="/metrics/forwards"
             expand={{
               grainable: true,

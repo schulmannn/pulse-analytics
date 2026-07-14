@@ -15,6 +15,7 @@ import { SubscriberHistoryChart, SubscriberHistoryBars } from '@/panels/Charts';
 import { KpiGrid } from '@/panels/KpiGrid';
 import { NarrativeWeekBlock } from '@/panels/NarrativeWeek';
 import { TopPosts } from '@/panels/TopPosts';
+import { ChangeSummary } from '@/panels/ChangeSummary';
 
 /**
  * Overview — a focused summary, all of it widgets: KPI hero + ledger («Показатели»), then
@@ -62,6 +63,14 @@ export function Overview() {
         <ChartSection id="overview-hero" title="Показатели" defaultSize="full" periodControl homeKey="kpi" drillTo="/metrics/views">
           {/* KPI hero (Просмотры · окно виджета) + ledger (Подписчики / Ср.охват / Реакции / ER) */}
           <KpiGrid />
+        </ChartSection>
+        <ChartSection
+          id="overview-change-summary"
+          title="Контекст периода"
+          defaultSize="full"
+          noExpand
+        >
+          <ChangeSummary />
         </ChartSection>
         {/* НАРРАТИВНЫЙ СЛОЙ (фаза 1): «Неделя канала» — связный рассказ недели с числами-ссылками.
             Заменил старый Digest-виджет (удалён из приложения). Стип-строка: рассказ 66% + Рост 33%. */}
@@ -115,7 +124,7 @@ export function GrowthChartBlock({ id, homeKey }: { id?: string; homeKey?: strin
       homeKey={homeKey}
       title="Рост подписчиков"
       drillTo="/metrics/subscribers"
-      defaultSize="third"
+      defaultSize="half"
       periodControl
       expand={
         rows.length >= 2

@@ -8,6 +8,7 @@ import { ChartSection } from '@/components/ChartWidget';
 import { WidgetGroup } from '@/components/widgets/WidgetGroup';
 import { WidgetErrorBoundary } from '@/components/WidgetErrorBoundary';
 import { Hashtags } from '@/panels/Hashtags';
+import { ContentOpportunity } from '@/panels/ContentOpportunity';
 
 /**
  * Analytics — the deep breakdowns. The Overview is a focused summary (Figma), so the detailed
@@ -106,6 +107,17 @@ export function Analytics() {
       )}
       {tab === 'content' && (
         <div className="space-y-10">
+          <WidgetGroup id="analytics-content-opportunity" className="grid grid-cols-1 gap-6 lg:grid-cols-6">
+            <ChartSection
+              id="content-opportunity"
+              title="Карта возможностей контента"
+              defaultSize="full"
+              periodControl
+              noExpand
+            >
+              <ContentOpportunity />
+            </ChartSection>
+          </WidgetGroup>
           <WidgetErrorBoundary variant="inline" widgetId="analytics-tg-content" label="Аналитика">
             <TgAnalytics group="content" />
           </WidgetErrorBoundary>

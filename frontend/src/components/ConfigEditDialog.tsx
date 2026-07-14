@@ -13,6 +13,7 @@ import { channelsForSource } from '@/lib/channelSource';
 import { editorSpec, type EditorSpec } from '@/lib/widgetCapabilities';
 import { LEGACY_DEFAULT_SIZE, LEGACY_DEFAULT_VIZ, legacyKeyForMetricId } from '@/lib/legacyWidgets';
 import type { WidgetSize } from '@/lib/widgetPrefsStore';
+import { coerceSizeForViz, vizAllowsThirdWidth, vizAllowsTonalSurface } from '@/lib/widgetSurface';
 import type { DimensionDef } from '@/lib/dimensions';
 import type { ComparisonDisplay, ComparisonMode, FilterOp, TargetType, WidgetConfig, WidgetFilter, WidgetGrain } from '@/lib/widgetConfig';
 
@@ -301,11 +302,13 @@ export function WidgetConfigControls({
 
       <Field label="Размер">
         <Segmented
-          options={SIZES.map((s) => ({ value: s.value, label: s.label }))}
-          // ChartSection's canonical unspecified footprint is third; reflect the rendered truth.
-          value={config.size ?? 'third'}
+          options={SIZES.filter((s) => s.value !== 'third' || vizAllowsThirdWidth(config.viz)).map((s) => ({ value: s.value, label: s.label }))}
+          value={coerceSizeForViz(config.viz, config.size ?? 'third')}
           onChange={(v) => onChange({ size: v as WidgetSize })}
         />
+        {!vizAllowsThirdWidth(config.viz) && (
+          <p className="mt-1.5 text-2xs text-muted-foreground">Линейному графику нужна минимум половина строки.</p>
+        )}
       </Field>
 
       {/* Accent + tinted background → config.style. */}
@@ -334,25 +337,29 @@ export function WidgetConfigControls({
         </div>
       </div>
 
-      <button
-        type="button"
-        role="switch"
-        aria-checked={config.style?.tinted ?? true}
-        onClick={() => onChange({ style: { ...config.style, tinted: (config.style?.tinted ?? true) ? false : true } })}
-        className="mt-4 flex w-full items-center justify-between gap-2 text-left text-sm text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <span>Цветной фон</span>
-        <span
-          aria-hidden="true"
-          className={
-            (config.style?.tinted ?? true)
-              ? 'rounded-full border border-primary/40 px-2 py-0.5 text-2xs font-medium text-primary'
-              : 'rounded-full border border-border px-2 py-0.5 text-2xs font-medium text-muted-foreground'
-          }
+      {vizAllowsTonalSurface(config.viz) ? (
+        <button
+          type="button"
+          role="switch"
+          aria-checked={config.style?.tinted ?? true}
+          onClick={() => onChange({ style: { ...config.style, tinted: (config.style?.tinted ?? true) ? false : true } })}
+          className="mt-4 flex w-full items-center justify-between gap-2 text-left text-sm text-muted-foreground transition-colors hover:text-foreground"
         >
-          {(config.style?.tinted ?? true) ? 'вкл' : 'выкл'}
-        </span>
-      </button>
+          <span>Цветной фон</span>
+          <span
+            aria-hidden="true"
+            className={
+              (config.style?.tinted ?? true)
+                ? 'rounded-full border border-primary/40 px-2 py-0.5 text-2xs font-medium text-primary'
+                : 'rounded-full border border-border px-2 py-0.5 text-2xs font-medium text-muted-foreground'
+            }
+          >
+            {(config.style?.tinted ?? true) ? 'вкл' : 'выкл'}
+          </span>
+        </button>
+      ) : (
+        <DisabledField label="Цветной фон" reason="для сравнений и категорий фон остаётся нейтральным" />
+      )}
     </>
   );
 }

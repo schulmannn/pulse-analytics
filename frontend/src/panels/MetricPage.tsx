@@ -573,7 +573,7 @@ export function MetricPage() {
   const pinnedDiff = pinnedValid != null && pinnedValid > 0 ? series.values[pinnedValid] - series.values[pinnedValid - 1] : null;
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       {/* Breadcrumb back to the ledger the metric was opened from. */}
       <Link to="/" className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground">
         <span aria-hidden="true">←</span> Обзор
@@ -593,9 +593,9 @@ export function MetricPage() {
         {meta.caption ? <div className="mt-1.5 text-xs text-muted-foreground">{meta.caption}</div> : null}
       </div>
 
-      <div className="grid grid-cols-1 gap-6 xl:gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
+      <div className="grid grid-cols-1 gap-6 xl:gap-7 lg:grid-cols-[minmax(0,1fr)_280px]">
         {/* Main column — the big chart in four projections + contributing posts. */}
-        <div className="min-w-0 space-y-8">
+        <div className="min-w-0 space-y-6">
           <ChartWidget
             id={`metric-${metricKey}`}
             title={chartTitle}
@@ -758,7 +758,7 @@ export function MetricPage() {
         </div>
 
         {/* Explore rail — breakdown dimension, comparison baseline, the About block. */}
-        <aside className="space-y-6">
+        <aside className="space-y-5 border-l border-border pl-5">
           {field && (
             <ChartSection title="Разбивка">
               <SegSelect

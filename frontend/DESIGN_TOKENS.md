@@ -53,6 +53,29 @@ the canonical text tokens (`verdant` / `ember` / `status-warn` / `primary`) — 
 of the positive / negative / warning / primary roles (tuned for AA 4.5 as text, with on-tint
 variants), so they read role-consistent without duplicating a stroke token.
 
+### Surface & width policy
+
+Two enforceable rules govern a widget card's **background** and its **minimum footprint**, keyed on the
+widget's visualisation. Both live in **`src/lib/widgetSurface.ts`** (pure, unit-tested in
+`widgetSurface.test.ts`) and are applied **centrally** where a `WidgetConfig` becomes a card
+(`ConfigWidget.tsx`) — never as a per-page class exception.
+
+- **Surface (colour).** Only a single-metric **story** card — a hero number (`kpi`) or its single-series
+  `line` — may carry a tonal (accent-tinted) background. Every multi-series / categorical / tabular viz
+  (`bar`, `donut`, `list`, `rank`, `pivot`, `table`, `ledger` — Breakdown & the Mentions ranking
+  included) stays on a **neutral** surface *regardless of the saved accent*: a coloured wash behind many
+  series or rows reads as status, not story. The accent still lives on the **series stroke** and the
+  **hero number** (`--chart-role-primary`); only the card BACKGROUND is neutralised. Positive/negative
+  colour stays reserved for *evaluated deltas* (DeltaPill), never categorical series. Previous-period
+  comparison stays dashed/no-fill (`--chart-role-comparison`).
+  → `vizAllowsTonalSurface(viz)` / `effectiveTinted(viz, savedTinted)`.
+- **Width.** A temporal `line`/area cannot render at a **third** width — the x-axis collapses into
+  sub-pixel mush (cf. the downsample note in `CLAUDE.md`). Such a viz is coerced UP to `half` rather
+  than silently dropping points; compact vizzes (kpi hero, bar, donut) read fine at third.
+- **Literal footprints.** The desktop grid has six columns: `third` is 2 columns (33%), `half` is
+  3 columns (50%), and `full` is 6 columns (100%). Editor labels and rendered widths must match.
+  → `vizAllowsThirdWidth(viz)` / `coerceSizeForViz(viz, size)`.
+
 ## Type scale
 
 **One** ladder, in `tailwind.config.js` `fontSize`. No magic `text-[Npx]` — the lint hard-fails on it.

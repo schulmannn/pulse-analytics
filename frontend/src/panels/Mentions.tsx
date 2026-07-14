@@ -83,18 +83,15 @@ export function Mentions() {
 
   return (
     <div className="space-y-6">
-      {/* Заголовок панели с кнопкой живого обновления */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-lg font-medium tracking-tight">Упоминания бренда</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Сохранённый архив · «Обновить» запускает поиск по Telegram (расход квоты)
-          </p>
-        </div>
+      {/* Route header already says «Упоминания»; this row explains freshness and owns the action. */}
+      <div className="flex flex-col gap-3 border-b border-border pb-4 sm:flex-row sm:items-center sm:justify-between">
+        <p className="max-w-2xl text-xs leading-relaxed text-muted-foreground">
+          Сохранённый архив Telegram. Ручное обновление запускает живой поиск и расходует дневную квоту.
+        </p>
         <button
           onClick={refresh}
           disabled={refreshing}
-          className="btn-pill shrink-0 bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+          className="btn-pill shrink-0 border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-hover-row disabled:opacity-50"
         >
           {refreshing ? 'Обновление…' : 'Обновить'}
         </button>
