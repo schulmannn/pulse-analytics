@@ -28,8 +28,8 @@ export function TgSectionLayout() {
   const noChannels = channelsData !== undefined && (channelsData.channels?.length ?? 0) === 0;
   if (noChannels) return <Overview />; // GetStarted onboarding (Overview self-gates it)
 
-  // PagePeriodProvider persists the header period across TG page navigation (Обзор ↔ Аналитика);
-  // it is the default window for every card without its own per-widget override.
+  // PagePeriodProvider persists the authoritative header period across TG page navigation
+  // (Обзор ↔ Аналитика); every feed card resolves to this same window.
   return (
     <PagePeriodProvider>
       <ChannelRecencyProvider value={recency}>
@@ -39,9 +39,9 @@ export function TgSectionLayout() {
   );
 }
 
-/** Feed-header period chips wired to the page period — re-windows every card on the page that has
-    no per-card override. Null outside the provider (defensive; TG pages always have one). Exported
-    as the TG sections' HeaderRight in the feed registry. */
+/** Feed-header period chips wired to the page period — re-windows every card on the page. Null
+    outside the provider (defensive; TG pages always have one). Exported as the TG sections'
+    HeaderRight in the feed registry. */
 export function TgPagePeriodControl() {
   const pp = usePagePeriod();
   if (!pp) return null;

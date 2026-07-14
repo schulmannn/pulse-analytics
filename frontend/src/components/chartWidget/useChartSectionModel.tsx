@@ -7,9 +7,9 @@ import { GroupCtx, prefersReducedMotion } from '@/components/widgets/WidgetGroup
 import { maxSize } from '@/components/widgets/variants';
 import { observeSize } from '@/lib/observeSize';
 import {
-  DEFAULT_WIDGET_DAYS,
   WidgetPeriodProvider,
   resolveEffectivePeriod,
+  resolveRequestedWidgetDays,
   useChannelRecency,
   usePagePeriod,
   widgetPeriodValue,
@@ -120,14 +120,15 @@ export function useChartSectionModel(props: ChartSectionProps) {
   }, [configEditor]);
 
   const pagePeriod = usePagePeriod();
-  const requestedDays: PeriodDays = prefs.period ?? pagePeriod?.days ?? DEFAULT_WIDGET_DAYS;
+  const pageRange = pagePeriod?.range ?? null;
+  const requestedDays: PeriodDays = resolveRequestedWidgetDays(pagePeriod?.days, prefs.period);
   const channelRecency = useChannelRecency();
   const widgetDays = useMemo(
-    () => resolveEffectivePeriod(requestedDays, channelRecency),
-    [requestedDays, channelRecency],
+    () => (pageRange ? requestedDays : resolveEffectivePeriod(requestedDays, channelRecency)),
+    [requestedDays, channelRecency, pageRange],
   );
-  const widgetPeriod = useMemo(() => widgetPeriodValue(widgetDays), [widgetDays]);
-  const periodWidened = periodControl === true && widgetDays !== requestedDays;
+  const widgetPeriod = useMemo(() => widgetPeriodValue(widgetDays, pageRange), [widgetDays, pageRange]);
+  const periodWidened = periodControl === true && !pageRange && widgetDays !== requestedDays;
 
   const seriesGrain: SeriesGrain = prefs.grain ?? 'day';
   const seriesIncludeToday = prefs.includeToday !== false;
@@ -215,7 +216,13 @@ export function useChartSectionModel(props: ChartSectionProps) {
     identity: { widgetId, label },
     refs: { sectionRef, bodyRef, originRectRef, cardPressRef },
     preferences: { prefs, updatePrefs, pinned },
-    period: { requestedDays, widgetDays, widgetPeriod, periodWidened },
+    period: {
+      requestedDays,
+      widgetDays,
+      widgetPeriod,
+      periodWidened,
+      pageControlled: pagePeriod != null,
+    },
     variants: { resolvedVariants, activeVariant, primaryBody },
     layout: {
       group,

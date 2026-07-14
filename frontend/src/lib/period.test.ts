@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { hasDataWithin, inRangeByDays, recommendPeriod, resolveEffectivePeriod, tgLimit } from '@/lib/period';
+import {
+  hasDataWithin,
+  inRangeByDays,
+  recommendPeriod,
+  resolveEffectivePeriod,
+  resolveRequestedWidgetDays,
+  tgLimit,
+  widgetPeriodValue,
+} from '@/lib/period';
 
 const DAY = 86_400_000;
 const NOW = Date.parse('2026-07-03T12:00:00.000Z');
@@ -36,6 +44,32 @@ describe('inRangeByDays', () => {
     expect(inRangeByDays('2026-05-26T12:00:00.000Z', 30)).toBe(true);
     expect(inRangeByDays('2026-05-26T11:59:59.999Z', 30)).toBe(false);
     expect(inRangeByDays('2026-06-25T12:00:00.000Z', 30)).toBe(true);
+  });
+});
+
+describe('feed widget period precedence', () => {
+  it('uses the page period even when the widget has an older saved override', () => {
+    expect(resolveRequestedWidgetDays(30, 7)).toBe(30);
+    expect(resolveRequestedWidgetDays(90, 0)).toBe(90);
+  });
+
+  it('keeps per-widget periods outside a feed and otherwise uses the default', () => {
+    expect(resolveRequestedWidgetDays(null, 7)).toBe(7);
+    expect(resolveRequestedWidgetDays(undefined, 0)).toBe(0);
+    expect(resolveRequestedWidgetDays(null, undefined)).toBe(30);
+  });
+
+  it('applies a page custom range to the widget date predicate', () => {
+    const range = {
+      from: Date.parse('2026-06-10T00:00:00.000Z'),
+      to: Date.parse('2026-06-20T23:59:59.999Z'),
+    };
+    const period = widgetPeriodValue(30, range);
+
+    expect(period.inRange('2026-06-10T00:00:00.000Z')).toBe(true);
+    expect(period.inRange('2026-06-20T23:59:59.999Z')).toBe(true);
+    expect(period.inRange('2026-06-09T23:59:59.999Z')).toBe(false);
+    expect(period.inRange(null)).toBe(false);
   });
 });
 

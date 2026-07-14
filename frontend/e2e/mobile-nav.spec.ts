@@ -30,7 +30,7 @@ for (const w of WIDTHS) {
         }
       };
       check('button[aria-label^="Развернуть виджет"], button[aria-label^="Меню виджета"]', (e) => (e.getAttribute('aria-label') || '').slice(0, 24));
-      check('[role="group"][aria-label="Период виджета"] button', (e) => `период ${(e.textContent || '').trim()}`);
+      check('[role="group"][aria-label^="Период"] button', (e) => `период ${(e.textContent || '').trim()}`);
       return { hScroll, tooSmall };
     }, MIN);
     expect(res.hScroll, `horizontal scroll ${res.hScroll}px at ${w}px`).toBeLessThanOrEqual(1);
@@ -100,12 +100,12 @@ test('mobile 390: detail deep-links, Back closes it, reload reopens, source surv
   expect(await page.getByRole('button', { name: /^Источник/ }).getAttribute('aria-label')).toBe(sourceLabelBefore);
 });
 
-// ── A widget's period pill survives opening + closing a detail overlay ─────────────────────────
-test('mobile 390: widget period survives a detail open/close round-trip', async ({ page }) => {
+// ── The shared page period survives opening + closing a detail overlay ─────────────────────────
+test('mobile 390: page period survives a detail open/close round-trip', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 820 });
   await bootDemo(page, '/');
 
-  const group = page.locator('[role="group"][aria-label="Период виджета"]').first();
+  const group = page.locator('[role="group"][aria-label="Период страницы"]').first();
   await expect(group).toBeVisible();
   const allPill = group.getByRole('button', { name: 'Всё' });
   await allPill.click();
@@ -116,7 +116,7 @@ test('mobile 390: widget period survives a detail open/close round-trip', async 
   await page.goBack();
   await expect(page.getByRole('dialog', { name: /^График/ })).toHaveCount(0);
 
-  // The section never unmounted → its period pill stays exactly where the user left it.
+  // The section never unmounted → the shared period stays exactly where the user left it.
   await expect(allPill).toHaveAttribute('aria-pressed', 'true');
 });
 
