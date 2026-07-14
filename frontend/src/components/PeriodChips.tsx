@@ -16,8 +16,8 @@ const fmtRangeChip = (ms: number) => new Date(ms).toLocaleDateString('ru-RU', { 
 
 /**
  * Compact rounded-pill period selector for a feed header (7д / 30д / 90д / Всё). Presentational —
- * the caller owns the value + setter (a page-level period that re-windows every card without its
- * own override). One component for both networks, so TG ↔ IG match by construction.
+ * the caller owns the value + setter (the page-level period that re-windows every feed card).
+ * One component for both networks, so TG ↔ IG match by construction.
  *
  * Pass `onRangeChange` to grow the «Свой период» chip + calendar popover (the IG header does;
  * the TG header stays presets-only until its card bodies learn ranges). A picked range makes the

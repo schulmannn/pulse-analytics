@@ -101,9 +101,7 @@ export function ChartSection(props: ChartSectionProps) {
           <>
             <WidgetPeriodPills
               days={model.period.widgetDays}
-              override={prefs.period}
               onChange={(next) => updatePrefs({ ...prefs, period: next })}
-              onFollow={() => updatePrefs({ ...prefs, period: undefined })}
               hidden={reorder}
             />
             {model.period.periodWidened && !reorder && (
@@ -135,7 +133,7 @@ export function ChartSection(props: ChartSectionProps) {
         title={props.title}
         prefs={prefs}
         variants={model.variants.resolvedVariants}
-        periodControl={!!props.periodControl}
+        periodControl={!!props.periodControl && !model.period.pageControlled}
         seriesOptions={!!props.seriesOptions}
         showSource={widgetId.startsWith('home-')}
         showSize={!!group && !props.fixedSize}

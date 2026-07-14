@@ -116,16 +116,16 @@ export function inRangeByDays(dateISO: string | null | undefined, days: PeriodDa
 // ── Per-widget period ──────────────────────────────────────────────────────────────────────
 /**
  * The window a single widget card is showing. Distinct from the global {@link usePeriod}
- * (which now serves only the metric-page / report explorers): every chart on a feed reads
- * its OWN period from the nearest {@link WidgetPeriodContext}, seeded from the card's prefs.
+ * (which now serves only the metric-page / report explorers): every chart reads the resolved
+ * window from the nearest {@link WidgetPeriodContext}. Feed cards resolve to the page period;
+ * standalone/Home cards resolve to their own prefs.
  *
  * The default per-widget window is 30д — parity with the old global default, so nothing shifts
  * for a card the user has never touched.
  */
 export interface WidgetPeriodValue {
   days: PeriodDays;
-  /** True if a date is inside this widget's window (preset only — per-widget custom ranges
-      are a noted follow-up). */
+  /** True if a date is inside this widget's active preset or page-level custom range. */
   inRange: (dateISO: string | null | undefined) => boolean;
 }
 
@@ -155,22 +155,37 @@ export function useWidgetPeriod(): WidgetPeriodValue {
   return useContext(WidgetPeriodContext) ?? WIDGET_PERIOD_FALLBACK;
 }
 
-/** Build a {@link WidgetPeriodValue} from a bare preset (memo-friendly at the call site). */
-export function widgetPeriodValue(days: PeriodDays): WidgetPeriodValue {
-  return { days, inRange: (dateISO) => inRangeByDays(dateISO, days) };
+/** Build a {@link WidgetPeriodValue} from a preset and optional page-level custom range. */
+export function widgetPeriodValue(days: PeriodDays, range: DateRange | null = null): WidgetPeriodValue {
+  return {
+    days,
+    inRange: (dateISO) => {
+      if (!range) return inRangeByDays(dateISO, days);
+      if (!dateISO) return false;
+      const timestamp = Date.parse(dateISO);
+      return Number.isFinite(timestamp) && timestamp >= range.from && timestamp <= range.to;
+    },
+  };
+}
+
+/** Feed pages own one authoritative period; standalone/Home cards keep their saved period. */
+export function resolveRequestedWidgetDays(
+  pageDays: PeriodDays | null | undefined,
+  widgetDays: PeriodDays | undefined,
+): PeriodDays {
+  return pageDays ?? widgetDays ?? DEFAULT_WIDGET_DAYS;
 }
 
 // ── Page period (feed header) ────────────────────────────────────────────────────────────────
 /**
  * A feed-level period chosen in the page header (the Обзор/Аналитика header chips — TG and IG feeds
- * alike). It is the DEFAULT window for every card WITHOUT an explicit per-widget override
- * (`prefs.period`), so one header control re-windows the whole feed at once — while a card the user
- * tuned to 7д/90д/Всё keeps its own window. `null` outside a feed that provides one (Home board,
- * metric pages): there every card falls back to {@link DEFAULT_WIDGET_DAYS} exactly as before.
+ * alike). It is the authoritative window for every card in that feed, so one header change always
+ * re-windows the whole page. `null` outside a feed that provides one (Home board, metric pages):
+ * there every card keeps its saved period or falls back to {@link DEFAULT_WIDGET_DAYS}.
  *
  * `range` — a custom date window on top of the preset (the IG header exposes it; the TG header is
  * presets-only until the TG card bodies learn ranges). Picking a preset clears the range, exactly
- * like the global {@link PeriodProvider}. Per-widget overrides stay preset-only (noted follow-up).
+ * like the global {@link PeriodProvider}.
  */
 export interface PagePeriodValue {
   days: PeriodDays;
