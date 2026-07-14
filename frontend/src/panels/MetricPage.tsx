@@ -27,6 +27,7 @@ import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { DateRangePicker } from '@/components/DateRangePicker';
 import { DAY_MS, alignGhost, baselineCoveredByPosts, bucketKeyOf, bucketKeysInWindow, comparisonWindow } from '@/lib/metricSeries';
 import type { Grain } from '@/lib/metricSeries';
+import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 
 // ── View state (all in the URL so links restore the exact view, like steep) ──────────────
 type ChartType = 'line' | 'bar' | 'rank' | 'pivot';
@@ -112,18 +113,6 @@ function dimLabelOf(post: NormalizedPost, dim: Dim): string | null {
 // The big chart owns the viewport (steep) instead of a fixed 280px strip: everything around it
 // (topbar + headline + card chrome + sticky toolbar + gaps) is roughly constant chrome, so the
 // chart takes what's left, clamped to sane bounds. Resize-aware; SSR-safe fallback.
-const CHART_CHROME = 430;
-const clampChartH = (viewportH: number) => Math.max(340, Math.min(620, viewportH - CHART_CHROME));
-export function useExplorerChartHeight(): number {
-  const [h, setH] = useState(() => clampChartH(typeof window !== 'undefined' ? window.innerHeight : 900));
-  useEffect(() => {
-    const onResize = () => setH(clampChartH(window.innerHeight));
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
-  return h;
-}
-
 /** Local calendar-day key of an instant (parseDayKey semantics — the viewer's local date). */
 function localDayKey(ms: number): string {
   const d = new Date(ms);

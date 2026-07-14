@@ -73,6 +73,34 @@ test('chart hover: tooltip readout appears, moves and clears (single-svg hit-tes
   await expect(tooltip).toHaveCount(0);
 });
 
+test('metric explorer gives the plot desktop space and exposes a hover inspector', async ({ page }, testInfo) => {
+  await bootDemo(page, '/metrics/views', { theme: 'dark' });
+  const chart = page.locator('svg[data-chart-kind="line"][data-chart-expanded]').first();
+  await chart.waitFor({ state: 'visible', timeout: 15_000 });
+  await chart.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(300);
+
+  const box = await chart.boundingBox();
+  if (!box) throw new Error('metric explorer chart has no box');
+  expect(box.height).toBeGreaterThanOrEqual(540);
+
+  await page.mouse.move(box.x + box.width * 0.58, box.y + box.height * 0.5);
+  await expect(page.locator('[data-chart-tooltip]')).toBeVisible();
+  await expect(page.locator('[data-chart-crosshair]')).toHaveCount(1);
+  await testInfo.attach('metric-explorer-dark-hover', {
+    body: await page.screenshot({ fullPage: false }),
+    contentType: 'image/png',
+  });
+
+  await page.getByRole('button', { name: 'Тип графика: Столбцы' }).click();
+  const bars = page.locator('svg[data-chart-kind="bar"][data-chart-expanded]').first();
+  const barBox = await bars.boundingBox();
+  if (!barBox) throw new Error('metric explorer bar chart has no box');
+  await page.mouse.move(barBox.x + barBox.width * 0.42, barBox.y + barBox.height * 0.5);
+  await expect(page.locator('[data-chart-tooltip]')).toBeVisible();
+  await expect(page.locator('[data-chart-crosshair]')).toHaveCount(1);
+});
+
 test('chart drill guard: a scrub across the chart does not navigate', async ({ page }) => {
   // Seed a drillable line widget (tg.views has a metric page) pinned to Home so its chart's
   // point-click drills to /metrics/views. addInitScript stacks before bootDemo's own seed. A

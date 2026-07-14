@@ -7,6 +7,7 @@ import { DetailShell } from '@/components/DetailShell';
 import { ChannelScope } from '@/lib/channel-context';
 import { editorSpec } from '@/lib/widgetCapabilities';
 import { normalizeWidget, type WidgetConfig } from '@/lib/widgetConfig';
+import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 
 /**
  * The universal fullscreen explorer — one place, every config widget. «Развернуть» opens a SANDBOX:
@@ -30,6 +31,7 @@ export function WidgetExplorer({
 }) {
   const [draft, setDraft] = useState<WidgetConfig>(config);
   const spec = editorSpec(draft);
+  const chartHeight = useExplorerChartHeight();
 
   const patch = (p: Partial<WidgetConfig>) => setDraft((d) => normalizeWidget({ ...d, ...p }) ?? d);
   const changed = JSON.stringify(draft) !== JSON.stringify(config);
@@ -41,7 +43,7 @@ export function WidgetExplorer({
   const chart = (
     <WidgetErrorBoundary variant="inline" widgetId={`explorer-${draft.id}`} label={draft.title || spec.label} resetKeys={[JSON.stringify(draft)]}>
       <ChartExpandedContext.Provider value={true}>
-        <ExpandedChartHeightContext.Provider value={420}>
+        <ExpandedChartHeightContext.Provider value={chartHeight}>
           <WidgetBody config={draft} />
         </ExpandedChartHeightContext.Provider>
       </ChartExpandedContext.Provider>

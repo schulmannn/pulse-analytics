@@ -323,6 +323,23 @@ export function LineChart({
           <line key={idx} x1={gutterW} y1={yPos} x2={W} y2={yPos} stroke="hsl(var(--border))" strokeDasharray="4 6" strokeWidth="1" opacity="0.6" vectorEffect="non-scaling-stroke" />
         ))}
 
+        {/* Large explorer plots need a vertical rhythm as well: it makes the grid a clear hover
+            target and keeps dates aligned with their values across a wide canvas. */}
+        {xTicks.map((tick) => (
+          <line
+            key={`grid-x${tick.i}`}
+            x1={tick.px}
+            y1={padY}
+            x2={tick.px}
+            y2={h - padB}
+            stroke="hsl(var(--border))"
+            strokeDasharray="4 6"
+            strokeWidth="1"
+            opacity="0.38"
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
+
         {/* Comparison series — the comparison role (deep amber, the colour-blind-safe pair of the
             brand blue), dashed, same y-scale. The legend row under the chart names both series. */}
         {ghostPath && (
@@ -409,7 +426,7 @@ export function LineChart({
       </>
     );
 
-    return { W, h, gutterW, step, points, yFor, hasXAxis, staticLayer };
+    return { W, h, gutterW, step, points, yFor, hasXAxis, plotTop: padY, plotBottom: h - padB, staticLayer };
   }, [values, labels, activeGhost, hasGhostLegend, target, refLines, yMin, yMax, width, ctxHeight, height, expanded, showAxes, markExtremes, showPoints, anomalyIdx, gradientId]);
 
   if (!values || values.length < 2 || !plot) {
@@ -418,7 +435,7 @@ export function LineChart({
     );
   }
 
-  const { W, h, gutterW, step, points, yFor, hasXAxis } = plot;
+  const { W, h, gutterW, step, points, yFor, hasXAxis, plotTop, plotBottom } = plot;
   const n = values.length;
   const anomalySet = new Set(anomalyIdx);
 
@@ -442,6 +459,17 @@ export function LineChart({
       ];
       const d = prev !== 0 ? ((cur - prev) / Math.abs(prev)) * 100 : null;
       if (d != null && Number.isFinite(d)) rows.push({ label: 'Δ', value: `${d >= 0 ? '+' : '−'}${Math.abs(d).toFixed(1)}%` });
+      const title = anomalySet.has(i) ? `${labels?.[i] ?? ''} · аномалия` : labels?.[i];
+      return { x: p.x, y: p.y, title, rows };
+    }
+    if (expanded) {
+      const rows: TooltipRow[] = [
+        {
+          label: 'Текущий период',
+          value: fmt.num(values[i]),
+          color: 'hsl(var(--chart-role-primary))',
+        },
+      ];
       const title = anomalySet.has(i) ? `${labels?.[i] ?? ''} · аномалия` : labels?.[i];
       return { x: p.x, y: p.y, title, rows };
     }
@@ -497,6 +525,8 @@ export function LineChart({
       onPointerLeave={clearHover}
     >
       <svg
+        data-chart-kind="line"
+        data-chart-expanded={expanded ? '' : undefined}
         className={`block w-full ${onPointClick ? 'cursor-pointer' : 'cursor-crosshair'}`}
         height={h}
         viewBox={`0 0 ${W} ${h}`}
@@ -518,9 +548,9 @@ export function LineChart({
           <g className="pointer-events-none">
             <line
               x1={points[pinnedIndex].x}
-              y1={0}
+              y1={plotTop}
               x2={points[pinnedIndex].x}
-              y2={h}
+              y2={plotBottom}
               stroke="hsl(var(--chart-role-selection))"
               strokeWidth="1.5"
               strokeDasharray="2 3"
@@ -535,7 +565,18 @@ export function LineChart({
             reads BOTH series) — the only elements a hover re-render touches. */}
         {hovered && (
           <>
-            <line x1={hovered.x} y1={0} x2={hovered.x} y2={h} stroke="hsl(var(--chart-role-selection))" strokeWidth="1" opacity="0.35" vectorEffect="non-scaling-stroke" />
+            <line
+              data-chart-crosshair
+              x1={hovered.x}
+              y1={plotTop}
+              x2={hovered.x}
+              y2={plotBottom}
+              stroke="hsl(var(--chart-role-selection))"
+              strokeWidth="1.25"
+              strokeDasharray="3 4"
+              opacity="0.72"
+              vectorEffect="non-scaling-stroke"
+            />
             {activeGhost && activeGhost[hover!.i] != null && (
               <circle cx={hovered.x} cy={yFor(activeGhost[hover!.i])} r="3.5" fill="hsl(var(--card))" stroke="hsl(var(--chart-role-comparison))" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
             )}

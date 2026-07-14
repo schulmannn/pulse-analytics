@@ -53,13 +53,13 @@ export function ChartTooltip({ tip }: { tip: TooltipState }) {
     <div
       ref={ref}
       data-chart-tooltip
-      className="pointer-events-none absolute left-0 top-0 z-10 w-max max-w-[240px] rounded border border-border bg-background/95 px-2.5 py-1.5 text-xs font-medium leading-snug text-foreground"
+      className="pointer-events-none absolute left-0 top-0 z-10 w-max min-w-[176px] max-w-[240px] rounded-md border border-border bg-popover/98 px-3 py-2.5 text-xs font-medium leading-snug text-popover-foreground shadow-[0_12px_32px_rgba(0,0,0,0.22)] backdrop-blur-sm dark:border-white/10 dark:shadow-[0_14px_36px_rgba(0,0,0,0.48)]"
       style={{ transform: `translate(${cx - half}px, ${Math.max(top, 0)}px)`, visibility: measured ? 'visible' : 'hidden' }}
     >
       {tip.rows ? (
         <>
-          {tip.title && <div className="mb-1 whitespace-nowrap text-2xs tracking-wide text-muted-foreground">{tip.title}</div>}
-          <div className="space-y-0.5">
+          {tip.title && <div className="mb-2 whitespace-nowrap text-xs font-semibold text-foreground">{tip.title}</div>}
+          <div className="space-y-1">
             {tip.rows.map((r, i) => (
               <div key={i} className="flex items-center justify-between gap-4 whitespace-nowrap">
                 <span className="flex items-center gap-1.5 text-muted-foreground">
