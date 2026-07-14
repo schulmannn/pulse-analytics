@@ -311,6 +311,20 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
       if (d != null && Number.isFinite(d)) rows.push({ label: 'Δ', value: `${d >= 0 ? '+' : '−'}${Math.abs(d).toFixed(1)}%` });
       return { x, y, title: labels?.[i], rows };
     }
+    if (expanded) {
+      return {
+        x,
+        y,
+        title: labels?.[i],
+        rows: [
+          {
+            label: 'Текущий период',
+            value: fmt.num(values[i]),
+            color: 'hsl(var(--chart-role-primary))',
+          },
+        ],
+      };
+    }
     return { x, y, text: tipText(i) };
   };
 
@@ -356,6 +370,8 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
       onPointerLeave={clearHover}
     >
       <svg
+        data-chart-kind="bar"
+        data-chart-expanded={expanded ? '' : undefined}
         className={`block w-full ${onPointClick ? 'cursor-pointer' : 'cursor-crosshair'}`}
         height={chartHeight}
         viewBox={`0 0 ${chartWidth} ${chartHeight}`}
@@ -408,7 +424,18 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
             with LineChart / HEAD). */}
         {hover && hover.i < n && (
           <g className="pointer-events-none">
-            <line x1={barCenterX(hover.i)} y1={0} x2={barCenterX(hover.i)} y2={graphHeight} stroke="hsl(var(--chart-role-selection))" strokeWidth="1" opacity="0.3" vectorEffect="non-scaling-stroke" />
+            <line
+              data-chart-crosshair
+              x1={barCenterX(hover.i)}
+              y1={0}
+              x2={barCenterX(hover.i)}
+              y2={graphHeight}
+              stroke="hsl(var(--chart-role-selection))"
+              strokeWidth="1.25"
+              strokeDasharray="3 4"
+              opacity="0.72"
+              vectorEffect="non-scaling-stroke"
+            />
           </g>
         )}
       </svg>

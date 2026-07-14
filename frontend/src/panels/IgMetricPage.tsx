@@ -15,7 +15,8 @@ import { DeltaPill } from '@/components/DeltaPill';
 import { ErrorState } from '@/components/ErrorState';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PinnedDayPanel } from '@/components/PinnedDayPanel';
-import { MetricPage, SegSelect, useExplorerChartHeight } from '@/panels/MetricPage';
+import { MetricPage, SegSelect } from '@/panels/MetricPage';
+import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 
 /**
  * Instagram metric pages — the drill target the unified chart contract points IG cards at
