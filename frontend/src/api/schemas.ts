@@ -622,3 +622,213 @@ export const ReportsResponseSchema = z
   .passthrough();
 export const ReportResponseSchema = z.object({ report: ReportSchema }).passthrough();
 export type ReportResponse = z.infer<typeof ReportResponseSchema>;
+
+// ── Campaigns («Кампании и группы контента») ──
+// Workspace-scoped на сервере (viewer читает, member+ пишет — my_role приходит в строке);
+// membership ссылается на публикации (network + внутренний channel_id + устойчивый post_ref:
+// tg → posts.post_id, ig → media id) и НЕ копирует метрики — они джойнятся на лету, поэтому
+// tg_*/ig_* поля в CampaignPost присутствуют только для «своей» платформы (иначе null).
+export const CAMPAIGN_STATUSES = ['active', 'completed', 'archived'] as const;
+export type CampaignStatus = (typeof CAMPAIGN_STATUSES)[number];
+export const CAMPAIGN_STATUS_LABEL: Record<CampaignStatus, string> = {
+  active: 'Активна',
+  completed: 'Завершена',
+  archived: 'В архиве',
+};
+
+export const CampaignSchema = z
+  .object({
+    id: z.coerce.number(),
+    workspace_id: z.coerce.number().int().positive(),
+    name: z.string(),
+    description: z.string().optional().nullable(),
+    color: z.string().optional().nullable(),
+    status: z.enum(CAMPAIGN_STATUSES).optional().default('active'),
+    start_date: z.string().optional().nullable(),
+    end_date: z.string().optional().nullable(),
+    created_by: z.coerce.number().optional().nullable(),
+    created_at: z.string().optional().nullable(),
+    updated_at: z.string().optional().nullable(),
+    my_role: z.enum(['viewer', 'member', 'admin', 'owner']).optional().nullable(),
+    post_count: z.coerce.number().optional().nullable(),
+  })
+  .passthrough();
+export type Campaign = z.infer<typeof CampaignSchema>;
+
+export const CampaignPostSchema = z
+  .object({
+    network: z.enum(['tg', 'ig']),
+    channel_id: z.coerce.number().int().positive(),
+    post_ref: z.string(),
+    published_at: z.string().optional().nullable(),
+    media_type: z.string().optional().nullable(),
+    caption: z.string().optional().nullable(),
+    added_at: z.string().optional().nullable(),
+    channel_title: z.string().optional().nullable(),
+    channel_username: z.string().optional().nullable(),
+    // false = источник недоступен ТЕКУЩЕМУ читателю (team-кампания): метрики/подпись скрыты.
+    accessible: z.boolean().optional().default(true),
+    tg_views: z.coerce.number().optional().nullable(),
+    tg_reactions: z.coerce.number().optional().nullable(),
+    tg_forwards: z.coerce.number().optional().nullable(),
+    tg_replies: z.coerce.number().optional().nullable(),
+    ig_reach: z.coerce.number().optional().nullable(),
+    ig_views: z.coerce.number().optional().nullable(),
+    ig_likes: z.coerce.number().optional().nullable(),
+    ig_comments: z.coerce.number().optional().nullable(),
+    ig_saved: z.coerce.number().optional().nullable(),
+    ig_shares: z.coerce.number().optional().nullable(),
+  })
+  .passthrough();
+export type CampaignPost = z.infer<typeof CampaignPostSchema>;
+
+/** Что фронт отправляет в POST /api/campaigns/:id/posts. Метаданные значимы только для ig
+    (live Graph-листинг — единственный источник даты/формата); tg обогащается архивом на сервере. */
+export interface CampaignPostInput {
+  network: 'tg' | 'ig';
+  channel_id: number;
+  post_ref: string;
+  published_at?: string;
+  media_type?: string;
+  caption?: string;
+}
+
+const CampaignBestWorstSchema = z
+  .object({
+    network: z.enum(['tg', 'ig']).optional().nullable(),
+    channel_id: z.coerce.number().optional().nullable(),
+    post_ref: z.string().optional().nullable(),
+    caption: z.string().optional().nullable(),
+    published_at: z.string().optional().nullable(),
+    value: z.coerce.number().optional().nullable(),
+    ratio: z.coerce.number().optional().nullable(),
+  })
+  .passthrough();
+export type CampaignBestWorst = z.infer<typeof CampaignBestWorstSchema>;
+
+const CampaignPlatformSchema = z
+  .object({
+    posts: z.coerce.number().optional().default(0),
+    avg: z.coerce.number().optional().nullable(),
+    median: z.coerce.number().optional().nullable(),
+    best: CampaignBestWorstSchema.optional().nullable(),
+    worst: CampaignBestWorstSchema.optional().nullable(),
+    views: z.coerce.number().optional().nullable(),
+    reactions: z.coerce.number().optional().nullable(),
+    forwards: z.coerce.number().optional().nullable(),
+    replies: z.coerce.number().optional().nullable(),
+    reach: z.coerce.number().optional().nullable(),
+    likes: z.coerce.number().optional().nullable(),
+    comments: z.coerce.number().optional().nullable(),
+    saved: z.coerce.number().optional().nullable(),
+    shares: z.coerce.number().optional().nullable(),
+  })
+  .passthrough();
+export type CampaignPlatformStats = z.infer<typeof CampaignPlatformSchema>;
+
+export const CampaignTimelinePointSchema = z
+  .object({
+    day: z.string(),
+    posts: z.coerce.number().optional().default(0),
+    tg_views: z.coerce.number().optional().nullable(),
+    ig_reach: z.coerce.number().optional().nullable(),
+  })
+  .passthrough();
+export type CampaignTimelinePoint = z.infer<typeof CampaignTimelinePointSchema>;
+
+export const CampaignSummarySchema = z
+  .object({
+    campaign: CampaignSchema.optional(),
+    posts_total: z.coerce.number().optional().default(0),
+    inaccessible_posts: z.coerce.number().optional().default(0),
+    undated_posts: z.coerce.number().optional().default(0),
+    period: z
+      .object({ from: z.string().optional().nullable(), to: z.string().optional().nullable() })
+      .passthrough()
+      .optional(),
+    tg: CampaignPlatformSchema.optional().default({}),
+    ig: CampaignPlatformSchema.optional().default({}),
+    by_source: z
+      .array(
+        z
+          .object({
+            network: z.enum(['tg', 'ig']),
+            channel_id: z.coerce.number(),
+            title: z.string().optional().nullable(),
+            username: z.string().optional().nullable(),
+            posts: z.coerce.number().optional().default(0),
+            tg_views: z.coerce.number().optional().nullable(),
+            ig_reach: z.coerce.number().optional().nullable(),
+          })
+          .passthrough(),
+      )
+      .optional()
+      .default([]),
+    by_format: z
+      .array(
+        z
+          .object({
+            network: z.enum(['tg', 'ig']),
+            media_type: z.string().optional().nullable(),
+            posts: z.coerce.number().optional().default(0),
+            tg_views: z.coerce.number().optional().nullable(),
+            ig_reach: z.coerce.number().optional().nullable(),
+          })
+          .passthrough(),
+      )
+      .optional()
+      .default([]),
+    timeline: z.array(CampaignTimelinePointSchema).optional().default([]),
+    comparison: z
+      .object({
+        available: z.boolean().optional().default(false),
+        reason: z.string().optional().nullable(),
+        network: z.enum(['tg', 'ig']).optional().nullable(),
+        prev_from: z.string().optional().nullable(),
+        prev_to: z.string().optional().nullable(),
+        prev_posts: z.coerce.number().optional().nullable(),
+        prev_views_avg: z.coerce.number().optional().nullable(),
+        prev_views_median: z.coerce.number().optional().nullable(),
+        views_avg_delta_pct: z.coerce.number().optional().nullable(),
+      })
+      .passthrough()
+      .optional()
+      .default({}),
+  })
+  .passthrough();
+export type CampaignSummary = z.infer<typeof CampaignSummarySchema>;
+
+export const CampaignsResponseSchema = z
+  .object({ campaigns: z.array(CampaignSchema).optional().default([]) })
+  .passthrough();
+export const CampaignResponseSchema = z.object({ campaign: CampaignSchema }).passthrough();
+export const CampaignPostsResponseSchema = z
+  .object({
+    posts: z.array(CampaignPostSchema).optional().default([]),
+    inaccessible_count: z.coerce.number().int().nonnegative().optional().default(0),
+  })
+  .passthrough();
+export const CampaignSummaryResponseSchema = z.object({ summary: CampaignSummarySchema }).passthrough();
+export const CampaignAddResultSchema = z
+  .object({
+    added: z.coerce.number().optional().default(0),
+    skipped: z.coerce.number().optional().default(0),
+    invalid: z
+      .array(
+        z
+          .object({
+            network: z.enum(['tg', 'ig']).optional().nullable(),
+            channel_id: z.coerce.number().optional().nullable(),
+            post_ref: z.string().optional().nullable(),
+            reason: z.string().optional().nullable(),
+          })
+          .passthrough(),
+      )
+      .optional()
+      .default([]),
+  })
+  .passthrough();
+export type CampaignAddResult = z.infer<typeof CampaignAddResultSchema>;
+export const CampaignRemoveResultSchema = z
+  .object({ removed: z.coerce.number().optional().default(0) })
+  .passthrough();

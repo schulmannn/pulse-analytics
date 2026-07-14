@@ -31,6 +31,8 @@ const ResetPage = lazyFrom(() => import('@/pages/Auth'), 'ResetPage');
 const Admin = lazyFrom(() => import('@/panels/Admin'), 'Admin');
 const Bugs = lazyFrom(() => import('@/panels/Bugs'), 'Bugs');
 const Connect = lazyFrom(() => import('@/pages/Connect'), 'Connect');
+// Страница кампании — редкий standalone-роут, живёт вне entry-чанка (bundle-size гейт).
+const CampaignPage = lazyFrom(() => import('@/panels/CampaignPage'), 'CampaignPage');
 // Public legal pages (Instagram / Meta App Review requires reachable Privacy + Data Deletion URLs).
 const Privacy = lazyFrom(() => import('@/pages/Legal'), 'Privacy');
 const DataDeletion = lazyFrom(() => import('@/pages/Legal'), 'DataDeletion');
@@ -62,6 +64,9 @@ export default function App() {
         <Route path="metrics/:key" element={<MetricRoute />} />
         <Route path="reports" element={<ReportsList />} />
         <Route path="reports/:id" element={<ReportPage />} />
+        {/* Страница кампании — standalone, как reports/:id. Списка-маршрута нет намеренно:
+            список кампаний живёт вкладкой в «Контенте» (и не появляется в sidebar). */}
+        <Route path="campaigns/:id" element={<PanelSuspense><CampaignPage /></PanelSuspense>} />
         {/* Pre-multi-reports bookmarks land on the index. */}
         <Route path="report" element={<Navigate to="/reports" replace />} />
         <Route path="settings" element={<Settings />} />

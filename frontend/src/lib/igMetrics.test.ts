@@ -1,6 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { cityName, countryName, followerLevelSeries, netFollowerDaily } from '@/lib/igMetrics';
-import type { IgHistoryRow } from '@/api/schemas';
+import { cityName, countryName, followerLevelSeries, netFollowerDaily, postInteractionsByFormat } from '@/lib/igMetrics';
+import type { IgHistoryRow, IgPost } from '@/api/schemas';
+
+describe('postInteractionsByFormat — campaign-scoped форматы', () => {
+  it('агрегирует только переданные посты и использует сумму действий как fallback', () => {
+    const posts = [
+      { media_product_type: 'REELS', total_interactions: 25 },
+      { media_product_type: 'REELS', total_interactions: 0, like_count: 4, comments_count: 2, saved: 3, shares: 1 },
+      { media_type: 'IMAGE', like_count: 5 },
+    ] as IgPost[];
+    expect(postInteractionsByFormat(posts)).toEqual([
+      { label: 'REELS', value: 35 },
+      { label: 'IMAGE', value: 5 },
+    ]);
+  });
+});
 
 const rowsOf = (
   days: Array<{ day: string; follows?: number | null; unfollows?: number | null; followers_total?: number | null }>,

@@ -10,6 +10,7 @@ const { createBugsRepo } = require('./repos/bugsRepo');
 const { createCollectorRepo } = require('./repos/collectorRepo');
 const { createAnalyticsRepo } = require('./repos/analyticsRepo');
 const { createReportsRepo } = require('./repos/reportsRepo');
+const { createCampaignsRepo } = require('./repos/campaignsRepo');
 const { createUsersRepo } = require('./repos/usersRepo');
 const { createChannelsRepo } = require('./repos/channelsRepo');
 const { createSourcesRepo } = require('./repos/sourcesRepo');
@@ -230,6 +231,12 @@ function createDatabase(config, overrides = {}) {
   });
   // GDPR — сервис над пулом+transaction (кросс-доменные erasure/export; спека: GDPR=service).
   const gdprService = createGdprService({ pool, enabled, transaction });
+  // Campaign membership performs an atomic lock/count/insert through the shared transaction helper.
+  const campaignsRepo = createCampaignsRepo({
+    pool,
+    enabled,
+    transaction,
+  });
 
   // db.js-локальные экспорты (домены, ещё не вынесенные в repos/*): core + collector-writes +
   // analytics-reads + bugs/crashes. По мере распила эти наборы переезжают в свои repo.
@@ -257,6 +264,7 @@ function createDatabase(config, overrides = {}) {
     analytics: analyticsRepo,
     collector: collectorRepo,
     reports: reportsRepo, // REPORT_SCHEDULES, listReports, getReport, createReport, updateReport, deleteReport, listDueReports, markReportSent, listPostsWindow
+    campaigns: campaignsRepo, // CAMPAIGN_*, listCampaigns, getCampaign, create/update/deleteCampaign, add/remove/listCampaignPosts, getCampaignSummary
     jobs: jobsRepo, // claimJob, completeJob, failJob, getJob, runJobOnce
     gdpr: gdprService, // deleteUserAccount, exportUserData (сервис, не repo)
   });

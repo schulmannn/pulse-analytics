@@ -74,5 +74,6 @@ export function routeTitle(pathname: string): string {
     return getMetric(`tg.${key}`)?.label ?? 'Метрика';
   }
   if (pathname.startsWith('/reports/')) return 'Отчёт';
+  if (pathname.startsWith('/campaigns/')) return 'Кампания';
   return pathname.startsWith('/instagram') ? 'Instagram' : 'Atlavue';
 }

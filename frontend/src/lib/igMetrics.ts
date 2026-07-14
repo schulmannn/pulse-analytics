@@ -315,6 +315,20 @@ export const postEr = (p: IgPost): number => {
   return (ti / reach) * 100;
 };
 
+/** Sum publication interactions by format for a concrete post set (for example a campaign).
+ * Unlike the account-level Graph breakdown, this stays aligned with the visible filter. */
+export function postInteractionsByFormat(posts: IgPost[]): { label: string; value: number }[] {
+  const totals = new Map<string, number>();
+  for (const post of posts) {
+    const format = post.media_product_type || post.media_type || 'UNKNOWN';
+    const interactions =
+      Number(post.total_interactions ?? 0) ||
+      Number(post.like_count ?? 0) + Number(post.comments_count ?? 0) + Number(post.saved ?? 0) + Number(post.shares ?? 0);
+    totals.set(format, (totals.get(format) ?? 0) + interactions);
+  }
+  return [...totals.entries()].map(([label, value]) => ({ label, value }));
+}
+
 export function hashtagStats(posts: IgPost[]): HashtagStat[] {
   const map = new Map<string, { count: number; reach: number; er: number }>();
   let erSum = 0;
