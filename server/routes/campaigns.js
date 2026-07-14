@@ -43,6 +43,19 @@ function isValidTgRef(value) {
 
 const isValidId = (value) => ID_RE.test(String(value)) && Number(value) > 0;
 
+// Optional exact-source slice for the summary body: identity = (network, channel_id). Both params
+// are present together or both absent; anything partial or malformed is a 400 (never a silent
+// fallthrough that would render the wrong scope). Absent → unscoped {} (repo behaves as before).
+function summaryScopeError(query) {
+  const hasNet = query.network !== undefined;
+  const hasChannel = query.channel_id !== undefined;
+  if (!hasNet && !hasChannel) return { value: {} };
+  if (hasNet !== hasChannel) return { error: 'network и channel_id задаются вместе' };
+  if (query.network !== 'tg' && query.network !== 'ig') return { error: 'network: tg|ig' };
+  if (!isValidId(query.channel_id)) return { error: 'channel_id: bad id' };
+  return { value: { network: query.network, channelId: Number(query.channel_id) } };
+}
+
 function registerCampaignsRoutes({ app, db, requireAuth, audit }) {
   const STATUSES = db.CAMPAIGN_STATUSES || ['active', 'completed', 'archived'];
   const BATCH_LIMIT = db.CAMPAIGN_BATCH_LIMIT || 100;
@@ -312,8 +325,10 @@ function registerCampaignsRoutes({ app, db, requireAuth, audit }) {
   app.get('/api/campaigns/:id/summary', requireAuth, async (req, res, next) => {
     if (!db.enabled) return res.status(503).json(CAMPAIGNS_DB_OFF);
     if (!isValidId(req.params.id)) return res.status(400).json({ error: 'bad id' });
+    const scope = summaryScopeError(req.query);
+    if (scope.error) return res.status(400).json({ error: scope.error });
     try {
-      const summary = await db.getCampaignSummary(req.user.uid, Number(req.params.id));
+      const summary = await db.getCampaignSummary(req.user.uid, Number(req.params.id), scope.value);
       if (!summary) return res.status(404).json({ error: 'Кампания не найдена' });
       res.json({ summary });
     } catch (e) { next(e); }

@@ -1,7 +1,8 @@
 import { useLocation } from 'react-router-dom';
 import type { IconName } from '@/components/nav-icons';
 import { getMetric } from '@/lib/widgetMetrics';
-import { networkByKey, networkForPath, type Network } from '@/lib/networks';
+import { networkByKey, type Network } from '@/lib/networks';
+import { useNetworkSelection } from '@/lib/networkStore';
 
 export interface NavLinkDef {
   to: string;
@@ -22,11 +23,12 @@ export const SUPER_NAV: NavLinkDef[] = [
   { to: '/bugs', label: 'Баги', icon: 'bugs' },
 ];
 
-/** The active network, derived purely from the URL — the single source of truth that survives
-    deep-links and reloads. Prefix-matched against the registry; the default net is the fallback. */
+/** The active network: a route that owns a network wins immediately (and is persisted); a
+    network-agnostic route (/home, /reports, /campaigns/:id, …) keeps the last chosen network
+    instead of snapping back to Telegram. Backed by the reactive selection store. */
 export function useActiveNetwork(): Network {
   const { pathname } = useLocation();
-  return networkForPath(pathname);
+  return useNetworkSelection(pathname);
 }
 
 /** The nav set for the active network — Главная + its feed views + Отчёты. Drives BOTH the

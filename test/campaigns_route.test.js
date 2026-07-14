@@ -254,6 +254,37 @@ test('GET /api/campaigns: невалидный ?status → 400, валидный
   assert.equal(got.channelId, 7);
 });
 
+test('GET /:id/summary: точный срез по источнику — валидация и проброс в repo', async () => {
+  let got = 'UNSET';
+  const routes = buildRoutes(baseDb({
+    getCampaignSummary: async (_uid, _id, scope) => { got = scope; return { posts_total: 0 }; },
+  }));
+  const key = 'GET /api/campaigns/:id/summary';
+
+  // Без параметров — прежнее поведение: repo получает {} (unscoped).
+  await invoke(routes, key, { params: { id: '5' } });
+  assert.deepEqual(got, {});
+
+  // Оба параметра заданы вместе — прокидываются как {network, channelId:Number}.
+  const ok = await invoke(routes, key, { params: { id: '5' }, query: { network: 'ig', channel_id: '7' } });
+  assert.equal(ok.statusCode, 200);
+  assert.deepEqual(got, { network: 'ig', channelId: 7 });
+
+  // Частичный/битый скоуп → 400, до repo не доходит.
+  for (const query of [
+    { network: 'tg' },
+    { channel_id: '7' },
+    { network: 'vk', channel_id: '7' },
+    { network: 'tg', channel_id: '0' },
+    { network: 'tg', channel_id: 'abc' },
+  ]) {
+    got = 'UNSET';
+    const res = await invoke(routes, key, { params: { id: '5' }, query });
+    assert.equal(res.statusCode, 400, JSON.stringify(query));
+    assert.equal(got, 'UNSET', `невалидный скоуп не доходит до repo: ${JSON.stringify(query)}`);
+  }
+});
+
 test('bad id: не-числовой :id → 400 на всех /:id-роутах', async () => {
   const routes = buildRoutes(baseDb());
   for (const key of [...routes.keys()].filter((k) => k.includes(':id'))) {

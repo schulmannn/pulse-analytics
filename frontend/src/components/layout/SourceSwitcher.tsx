@@ -2,14 +2,15 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useChannels } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { useFocusTrap } from '@/lib/useFocusTrap';
 import { useLayerBack } from '@/lib/useLayerBack';
 import { fmt, pluralRu } from '@/lib/format';
 import { cn } from '@/lib/utils';
-import { NETWORKS, NetworkGlyph, networkByKey, type Network } from '@/lib/networks';
+import { NETWORKS, NetworkGlyph, networkByKey, routeNetworkOwner, type Network } from '@/lib/networks';
+import { setActiveNetwork } from '@/lib/networkStore';
 import { Icon } from '@/components/nav-icons';
 import { ChannelAvatar } from '@/components/ChannelAvatar';
 import { useActiveNetwork } from './nav';
@@ -68,6 +69,7 @@ export function SourceSwitcher({ rail = false, mobile = false }: { rail?: boolea
   const { channelId, setChannelId } = useSelectedChannel();
   const network = useActiveNetwork();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -75,15 +77,25 @@ export function SourceSwitcher({ rail = false, mobile = false }: { rail?: boolea
   const triggerRef = useRef<HTMLButtonElement>(null);
   const channels = data?.channels ?? [];
 
-  // Initialise / validate the selected channel once the list loads (drives X-Channel-Id). A
-  // stale/foreign persisted id falls back to the server's `selected`, then the first channel —
-  // otherwise every query would 404 forever. (Moved here from the old ChannelCard.)
+  // Initialise / validate the selected channel once the list loads (drives X-Channel-Id). The pair
+  // that matters is (channel, ACTIVE NETWORK): the selected channel must expose the active network
+  // as a source (registry `hasChannel`), else a TG-only channel left active while the shell is on
+  // Instagram would 404 every IG query. A valid pair is preserved; a stale one recovers to the
+  // server's `selected`, then the first eligible channel. If no channel exposes the active network
+  // (shouldn't happen — the net wouldn't be reachable), fall back to the full list so selection
+  // never wedges empty. (Bootstrap moved here from the old ChannelCard.)
   useEffect(() => {
     if (!data || channels.length === 0) return;
-    if (channelId != null && channels.some((c) => c.id === channelId)) return;
-    const serverSelected = channels.find((c) => c.id === data.selected)?.id;
-    setChannelId(serverSelected ?? channels[0].id);
-  }, [channelId, channels, data, setChannelId]);
+    const eligible = channels.filter((c) => networkByKey(network).hasChannel(c));
+    if (eligible.length === 0 && network !== NETWORKS[0].key && routeNetworkOwner(pathname) == null) {
+      setActiveNetwork(NETWORKS[0].key);
+      return;
+    }
+    const pool = eligible.length ? eligible : channels;
+    if (channelId != null && pool.some((c) => c.id === channelId)) return;
+    const serverSelected = pool.find((c) => c.id === data.selected)?.id;
+    setChannelId(serverSelected ?? pool[0].id);
+  }, [channelId, channels, data, network, pathname, setChannelId]);
 
   // Desktop dropdown dismisses on Escape + outside-mousedown (cardRef wraps trigger + popover). The
   // mobile bottom sheet is portaled with its own backdrop + focus trap (SourceSheet), so it opts out
@@ -126,6 +138,9 @@ export function SourceSwitcher({ rail = false, mobile = false }: { rail?: boolea
 
   const pick = (row: SourceRow) => {
     setChannelId(row.channelId);
+    // Persist the picked network up front — the destination home route owns it too, but setting it
+    // here keeps the shell from flashing the previous network before navigation resolves.
+    setActiveNetwork(row.network);
     void queryClient.cancelQueries();
     setOpen(false);
     // The focused row unmounts with the popover — hand focus back to the trigger so a keyboard

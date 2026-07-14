@@ -271,6 +271,15 @@ test.describe('Кампании (desktop)', () => {
     // Честный insufficient-state сравнения, а не пустое место.
     await expect(page.getByTestId('campaign-comparison')).toContainText('недоступно');
 
+    // Точный source slice живёт в URL и использует пару network+channel_id.
+    const sourceFilter = page.getByTestId('campaign-source-filter');
+    await expect(sourceFilter).toBeVisible();
+    await sourceFilter.selectOption('tg:1');
+    await expect(page).toHaveURL(/source=tg%3A1/);
+    await expect(page.getByTestId('campaign-posts-table').locator('tbody tr')).toHaveCount(2);
+    await sourceFilter.selectOption('');
+    await expect(page).not.toHaveURL(/source=/);
+
     // ── Фильтр «Контента» по кампании (канонический ?campaign= в URL) ──
     await page.getByRole('link', { name: 'Контент' }).first().click();
     await page.getByTestId('campaign-filter').selectOption({ label: 'Запуск продукта' });

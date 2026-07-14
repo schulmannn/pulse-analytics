@@ -186,16 +186,21 @@ function createCampaignsRepo({ pool, enabled, transaction }) {
     return rowCount > 0;
   }
 
-  // Accessible channels with the workspace and canonical platform needed to validate membership.
+  // Accessible channels with the workspace and the platform(s) they host, needed to validate
+  // membership. A channel is NOT single-network: a Telegram channel can carry a linked Instagram
+  // account (hybrid = two sources; its `source_id` stays the TG source while the IG side lives on
+  // `ig_accounts.source_id` — see migration 010). Deriving one canonical network would reject
+  // adding IG posts from such a channel, so we expose has_tg/has_ig and accept either.
   async function accessibleChannelRows(uid, channelIds, executor = pool) {
     if (!channelIds.length) return new Map();
     const { rows } = await executor.query(
       `SELECT channels.id, channels.workspace_id,
-              COALESCE(es.network,
-                CASE WHEN channels.source = 'ig'
-                           OR EXISTS (SELECT 1 FROM ig_accounts ia WHERE ia.channel_id = channels.id) THEN 'ig'
-                     WHEN channels.tg_channel_id IS NOT NULL THEN 'tg'
-                END) AS network
+              (channels.source IS DISTINCT FROM 'ig'
+                 OR channels.tg_channel_id IS NOT NULL
+                 OR es.network = 'tg') AS has_tg,
+              (channels.source = 'ig'
+                 OR es.network = 'ig'
+                 OR EXISTS (SELECT 1 FROM ig_accounts ia WHERE ia.channel_id = channels.id)) AS has_ig
          FROM channels
          LEFT JOIN external_sources es ON es.id = channels.source_id
         WHERE channels.id = ANY($2::int[]) AND channels.status <> 'disabled'
@@ -247,7 +252,10 @@ function createCampaignsRepo({ pool, enabled, transaction }) {
         err.code = 'campaign_workspace_mismatch';
         throw err;
       }
-      const wrongNetwork = items.filter((it) => channels.get(it.channel_id).network !== it.network);
+      const wrongNetwork = items.filter((it) => {
+        const ch = channels.get(it.channel_id);
+        return it.network === 'ig' ? !ch.has_ig : !ch.has_tg;
+      });
       if (wrongNetwork.length) {
         const err = new Error('Платформа публикации не совпадает с источником');
         err.code = 'campaign_network_mismatch';
@@ -402,13 +410,24 @@ function createCampaignsRepo({ pool, enabled, transaction }) {
      Сравнение с предыдущим равным периодом: только TG (дата публикации любого архивного
      поста известна БД) и только при prev_posts >= 3; для IG дат вне membership в БД нет →
      всегда insufficient. Недоступные читателю источники в метрики не входят и отражаются
-     в inaccessible_posts. */
-  async function getCampaignSummary(uid, campaignId) {
+     в inaccessible_posts.
+
+     Опциональный точный срез по ИСТОЧНИКУ (identity = (network, channel_id)): оба параметра
+     задаются вместе (роут это гарантирует). Срез отбирает строки, которые ОДНОВРЕМЕННО доступны
+     читателю И точно совпадают по network+channel_id, ДО любых агрегаций — поэтому угаданный/
+     недоступный источник даёт честную ПУСТУЮ сводку (0 публикаций, пустые разбивки), не раскрывая
+     ни метрик, ни существования других источников. Без параметров поведение прежнее. */
+  async function getCampaignSummary(uid, campaignId, { network, channelId } = {}) {
     if (!enabled || uid == null || !campaignId) return null;
     const campaign = await getCampaign(uid, campaignId);
     if (!campaign) return null;
-    const rows = await listCampaignPosts(uid, campaignId);
-    if (rows == null) return null;
+    const allRows = await listCampaignPosts(uid, campaignId);
+    if (allRows == null) return null;
+
+    const scoped = network != null && channelId != null;
+    const rows = scoped
+      ? allRows.filter((r) => r.accessible && r.network === network && r.channel_id === channelId)
+      : allRows;
 
     const acc = rows.filter((r) => r.accessible);
     const tgRows = acc.filter((r) => r.network === 'tg');

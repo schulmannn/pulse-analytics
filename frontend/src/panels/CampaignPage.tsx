@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ApiError } from '@/api/client';
 import {
   useCampaignPosts,
@@ -34,6 +34,12 @@ import {
   ratioLabel,
   timelineSeries,
 } from '@/lib/campaignSummary';
+import {
+  campaignSourceKey,
+  campaignSourceOptions,
+  filterCampaignPosts,
+  parseCampaignSourceKey,
+} from '@/lib/campaignSources';
 import { fmt } from '@/lib/format';
 import { markdownToPlainText } from '@/lib/markdown';
 import { cn } from '@/lib/utils';
@@ -49,6 +55,7 @@ export function CampaignPage() {
   const params = useParams();
   const id = /^\d+$/.test(params.id ?? '') ? Number(params.id) : null;
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const summaryQ = useCampaignSummary(id);
   const postsQ = useCampaignPosts(id);
@@ -57,10 +64,40 @@ export function CampaignPage() {
   const removePosts = useRemoveCampaignPosts();
   const [editOpen, setEditOpen] = useState(false);
 
-  const summary = summaryQ.data?.summary;
-  const campaign = summary?.campaign ?? null;
-  const posts = useMemo(() => postsQ.data?.posts ?? [], [postsQ.data]);
+  const baseSummary = summaryQ.data?.summary;
+  const sourceOptions = useMemo(
+    () => campaignSourceOptions(baseSummary?.by_source ?? []),
+    [baseSummary?.by_source],
+  );
+  const rawSource = searchParams.get('source');
+  const requestedSource = useMemo(() => parseCampaignSourceKey(rawSource), [rawSource]);
+  const selectedSource = requestedSource && sourceOptions.some(
+    (option) => option.key === campaignSourceKey(requestedSource),
+  )
+    ? requestedSource
+    : null;
+  const scopedSummaryQ = useCampaignSummary(id, selectedSource, baseSummary != null && selectedSource != null);
+  const summary = selectedSource ? scopedSummaryQ.data?.summary : baseSummary;
+  const campaign = baseSummary?.campaign ?? summary?.campaign ?? null;
+  const posts = useMemo(
+    () => filterCampaignPosts(postsQ.data?.posts ?? [], selectedSource),
+    [postsQ.data, selectedSource],
+  );
   const canEdit = canEditCampaign(campaign);
+
+  useEffect(() => {
+    if (!baseSummary || !rawSource || selectedSource) return;
+    const next = new URLSearchParams(searchParams);
+    next.delete('source');
+    setSearchParams(next, { replace: true });
+  }, [baseSummary, rawSource, searchParams, selectedSource, setSearchParams]);
+
+  const selectSource = (value: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (value) next.set('source', value);
+    else next.delete('source');
+    setSearchParams(next);
+  };
 
   if (id == null) return <EmptyState title="Кампания не найдена" action={{ to: '/posts?view=campaigns', label: 'К списку кампаний' }} />;
   if (summaryQ.isPending) return <CampaignPageSkeleton />;
@@ -81,6 +118,17 @@ export function CampaignPage() {
         reason={summaryQ.error instanceof Error ? summaryQ.error.message : 'ошибка сервера'}
         onRetry={() => summaryQ.refetch()}
         retrying={summaryQ.isRefetching}
+      />
+    );
+  }
+  if (selectedSource && scopedSummaryQ.isPending) return <CampaignPageSkeleton />;
+  if (selectedSource && scopedSummaryQ.isError) {
+    return (
+      <ErrorState
+        title="Не удалось загрузить данные источника"
+        reason={scopedSummaryQ.error instanceof Error ? scopedSummaryQ.error.message : 'ошибка сервера'}
+        onRetry={() => scopedSummaryQ.refetch()}
+        retrying={scopedSummaryQ.isRefetching}
       />
     );
   }
@@ -152,8 +200,28 @@ export function CampaignPage() {
           )}
         </div>
         {campaign.description ? <p className="max-w-2xl text-sm text-muted-foreground">{campaign.description}</p> : null}
+        {sourceOptions.length > 0 && (
+          <label className="inline-flex w-fit items-center gap-2 text-xs text-muted-foreground">
+            <span>Источник</span>
+            <select
+              value={selectedSource ? campaignSourceKey(selectedSource) : ''}
+              onChange={(event) => selectSource(event.target.value)}
+              className="h-8 min-w-56 rounded border border-border bg-background px-2.5 text-xs font-medium text-foreground outline-none transition-colors hover:bg-muted focus:border-primary"
+              data-testid="campaign-source-filter"
+            >
+              <option value="">Все источники</option>
+              {sourceOptions.map((option) => (
+                <option key={option.key} value={option.key}>
+                  {option.label} · {fmt.num(option.posts)} публ.
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <p className="text-xs text-muted-foreground">
-          {fmt.num(summary.posts_total)} публ.
+          {selectedSource
+            ? `${fmt.num(summary.posts_total)} из ${fmt.num(baseSummary?.posts_total ?? summary.posts_total)} публ.`
+            : `${fmt.num(summary.posts_total)} публ.`}
           {summary.undated_posts > 0 ? ` · без даты: ${fmt.num(summary.undated_posts)}` : ''}
           {summary.period?.from ? ` · период данных: ${summary.period.from} — ${summary.period.to}` : ''}
         </p>
@@ -166,9 +234,14 @@ export function CampaignPage() {
 
       {summary.posts_total === 0 ? (
         <EmptyState
-          title="В кампании пока нет публикаций"
-          reason="Откройте «Контент», выберите публикации галочками и добавьте их в эту кампанию."
-          action={{ to: '/posts', label: 'К списку публикаций' }}
+          title={selectedSource ? 'У этого источника нет публикаций в кампании' : 'В кампании пока нет публикаций'}
+          reason={selectedSource
+            ? 'Выберите другой источник или вернитесь к сводке по всем источникам.'
+            : 'Откройте «Контент», выберите публикации галочками и добавьте их в эту кампанию.'}
+          action={{
+            to: selectedSource?.network === 'ig' ? '/instagram/content' : '/posts',
+            label: 'К списку публикаций',
+          }}
         />
       ) : (
         <>
