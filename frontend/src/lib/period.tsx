@@ -196,8 +196,14 @@ export interface PagePeriodValue {
 
 const PagePeriodContext = createContext<PagePeriodValue | null>(null);
 
-export function PagePeriodProvider({ children }: { children: ReactNode }) {
-  const [days, setDaysState] = useState<PeriodDays>(DEFAULT_WIDGET_DAYS);
+export function PagePeriodProvider({
+  children,
+  initialDays = DEFAULT_WIDGET_DAYS,
+}: {
+  children: ReactNode;
+  initialDays?: PeriodDays;
+}) {
+  const [days, setDaysState] = useState<PeriodDays>(initialDays);
   const [range, setRangeState] = useState<DateRange | null>(null);
   const setDays = useCallback((next: PeriodDays) => {
     setRangeState(null);

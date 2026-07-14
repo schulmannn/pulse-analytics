@@ -1,6 +1,6 @@
-import { Suspense, lazy, useEffect, useState } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useCampaignPosts, useTgFull } from '@/api/queries';
+import { useCampaignPosts, useRemoveCampaignPosts, useTgFull } from '@/api/queries';
 import type { CampaignPostInput } from '@/api/schemas';
 import { normalizeTgPosts, type NormalizedPost } from '@/lib/posts';
 import { fmt } from '@/lib/format';
@@ -8,16 +8,25 @@ import { cn } from '@/lib/utils';
 import { markdownToPlainText } from '@/lib/markdown';
 import { Card, CardContent } from '@/components/ui/card';
 import { ErrorState } from '@/components/ErrorState';
-import { useWidgetPeriod } from '@/lib/period';
+import { usePagePeriod, widgetPeriodValue } from '@/lib/period';
 import { Skeleton } from '@/components/ui/skeleton';
 import { RichText } from '@/components/RichText';
-import { ChartSection } from '@/components/ChartWidget';
 import { PostDetailModal } from '@/components/PostDetailModal';
-import { compareToMedian, medianDeltaLabel, periodMedian } from '@/lib/postMedian';
+import { MEDIAN_MIN_SAMPLE, compareToMedian, medianDeltaLabel, periodMedian } from '@/lib/postMedian';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { membershipKey, useCampaignFilter, useMembershipSet } from '@/lib/campaignFilter';
 import { AddToCampaignDialog } from '@/components/campaigns/AddToCampaignDialog';
 import { CampaignFilterControl } from '@/components/campaigns/CampaignFilterControl';
+import {
+  CONTENT_SORT_COLUMNS,
+  applyContentFilters,
+  filterPosts,
+  parseContentFilters,
+  serializeContentPeriod,
+  sortPosts,
+  type ContentFilters,
+  type ContentFormat,
+} from '@/lib/contentFilters';
 
 // Список кампаний (таблица + create-диалог) грузится лениво: вкладка «Кампании» — не первый
 // экран «Контента», а entry-чанк упирается в bundle-size гейт.
@@ -25,14 +34,12 @@ const CampaignsView = lazy(() =>
   import('@/components/campaigns/CampaignsView').then((m) => ({ default: m.CampaignsView })),
 );
 
-type SortKey = 'reach' | 'likes' | 'shares' | 'virality' | 'erv' | 'er';
-const SORT_COLUMNS: { key: SortKey; label: string; get: (p: NormalizedPost) => number }[] = [
-  { key: 'reach', label: 'Просмотры', get: (p) => p.reach },
-  { key: 'likes', label: 'Реакции', get: (p) => p.likes },
-  { key: 'shares', label: 'Репосты', get: (p) => p.shares ?? 0 },
-  { key: 'virality', label: 'Виральность', get: (p) => p.virality ?? 0 },
-  { key: 'erv', label: 'ERV', get: (p) => p.erv ?? 0 },
-  { key: 'er', label: 'ER', get: (p) => p.er ?? 0 },
+const FORMAT_OPTIONS: { value: ContentFormat; label: string }[] = [
+  { value: 'all', label: 'Все форматы' },
+  { value: 'text', label: 'Текст' },
+  { value: 'photo', label: 'Фото' },
+  { value: 'video', label: 'Видео' },
+  { value: 'album', label: 'Альбом' },
 ];
 
 export function Posts() {
@@ -82,8 +89,8 @@ export function Posts() {
 }
 
 function PostsContent() {
-  // ONE wide fetch (limit 0 = server cap 100); the leaderboard below windows it to its own
-  // widget period. The fetch/skeleton/error stay here; the period-driven view is the child.
+  // ONE wide fetch (limit 0 = server cap 100); the table below windows/filters it. The
+  // fetch/skeleton/error stay here; the filtered view is the child.
   const { data, isPending, isError, error } = useTgFull(0);
 
   if (isPending) return <PostsSkeletons />;
@@ -102,55 +109,94 @@ function PostsContent() {
     );
   }
 
-  return (
-    <div className="space-y-8">
-      {/* «Топ постов за период» убран: он дублировал Обзор, а сортируемый лидерборд ниже
-          покрывает топ (D6.4). Таблица — виджет. full = content-height: 25 строк должны РАСТИ,
-          не скроллиться в фикс-тайле. periodControl = свои пилюли периода; окно применяется к
-          лидерборду внутри (PostsLeaderboard читает useWidgetPeriod ЭТОЙ карточки). */}
-      <ChartSection title="Публикации · топ-25" defaultSize="full" periodControl>
-        <PostsLeaderboard allPosts={allPosts} />
-      </ChartSection>
-    </div>
-  );
+  return <PostsTable allPosts={allPosts} loadedCount={data?.posts?.length ?? allPosts.length} />;
 }
 
 /**
- * The sortable top-25 leaderboard, windowed by the card's OWN period. Rendered as ChartSection
- * children → inside its WidgetPeriodProvider, so `useWidgetPeriod` here reads THIS card's window
- * and the header pills genuinely filter the table (the hook used to sit at the panel top, above
- * the card, so the pills couldn't reach it). Owns the sort + open-post state; the empty-state now
- * sits INSIDE the card, so a narrow window with no posts reads as «nothing in this window», not a
- * wiped panel.
+ * The dense, reproducible Content work surface (Steep-flavoured): a compact toolbar + a full-width
+ * table rendered directly on the section's FeedBlock — no nested decorative card. The window is the
+ * authoritative page period (the header's TgPagePeriodControl), and text search / media format /
+ * sort column+direction all live in the URL (lib/contentFilters), so the whole view is a shareable,
+ * reload-stable link that composes with the pre-existing `?campaign=`/`?view=` params.
  */
-function PostsLeaderboard({ allPosts }: { allPosts: NormalizedPost[] }) {
-  const { inRange } = useWidgetPeriod();
+function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loadedCount: number }) {
+  const [params, setParams] = useSearchParams();
+  const pp = usePagePeriod();
   const { channelId } = useSelectedChannel();
+
+  // The four non-period Content filters read straight from the URL (single source of truth); the
+  // period is owned by the page-period context (header chips) and mirrored below.
+  const filters = useMemo(() => parseContentFilters(params), [params]);
+  const pageDays = pp?.days ?? filters.period;
+  const pageRange = pp?.range ?? null;
+  const period = useMemo(() => widgetPeriodValue(pageDays, pageRange), [pageDays, pageRange]);
+  const rawUrlPeriod = params.get('period');
+  const periodSyncReady = useRef(false);
+  const lastUrlPeriod = useRef<string | null>(rawUrlPeriod);
+
+  // Two-way period sync. An explicit URL value wins on mount/navigation; otherwise the page
+  // provider wins so Обзор → Контент keeps the selected window. The raw-param ref distinguishes a
+  // Back/Forward URL change from a header-chip change and prevents either side from overwriting it.
+  useEffect(() => {
+    const writePeriod = (days: ContentFilters['period']) => {
+      const next = new URLSearchParams(params);
+      const serialized = serializeContentPeriod(days);
+      if (serialized == null) next.delete('period');
+      else next.set('period', serialized);
+      lastUrlPeriod.current = serialized;
+      if (next.toString() !== params.toString()) setParams(next, { replace: true });
+    };
+
+    if (!periodSyncReady.current) {
+      periodSyncReady.current = true;
+      lastUrlPeriod.current = rawUrlPeriod;
+      if (rawUrlPeriod != null) {
+        if (pp && pp.days !== filters.period) pp.setDays(filters.period);
+        if (rawUrlPeriod !== serializeContentPeriod(filters.period)) writePeriod(filters.period);
+      } else if (pageDays !== filters.period) {
+        writePeriod(pageDays);
+      }
+      return;
+    }
+
+    if (rawUrlPeriod !== lastUrlPeriod.current) {
+      lastUrlPeriod.current = rawUrlPeriod;
+      if (pp && pp.days !== filters.period) pp.setDays(filters.period);
+      if (rawUrlPeriod !== serializeContentPeriod(filters.period)) writePeriod(filters.period);
+      return;
+    }
+
+    if (pageDays !== filters.period) writePeriod(pageDays);
+  }, [filters.period, pageDays, params, pp, rawUrlPeriod, setParams]);
+
+  const update = (patch: Partial<ContentFilters>) =>
+    setParams(applyContentFilters(params, { ...filters, period: pageDays, ...patch }), { replace: true });
+  const toggleSort = (key: ContentFilters['sort']) =>
+    update(
+      key === filters.sort
+        ? { order: filters.order === 'desc' ? 'asc' : 'desc' }
+        : { sort: key, order: 'desc' },
+    );
+
   const [openId, setOpenId] = useState<number | null>(null);
-  const [sortKey, setSortKey] = useState<SortKey>('reach');
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
-  // Bulk-выбор для «Добавить в кампанию» (desktop-таблица). Идентичность строки = msg id;
-  // посты без id не выбираются (тот же гейт, что и клик в модалку).
   const [selected, setSelected] = useState<Set<number>>(new Set());
-  // Снимок выбора на момент открытия диалога: onDone чистит selection, а диалог обязан
-  // дожить до экрана результата (added/skipped) — иначе он размонтируется под пользователем.
+  // Снимок выбора на момент открытия диалога: onDone чистит selection, а диалог обязан дожить до
+  // экрана результата (added/skipped) — иначе он размонтируется под пользователем.
   const [addItems, setAddItems] = useState<CampaignPostInput[] | null>(null);
-  // Канонический фильтр кампании (?campaign=): membership читается ТОЛЬКО из
-  // /api/campaigns/:id/posts — серверной фильтрации контента по campaign_id.
+
+  // Канонический фильтр кампании (?campaign=): membership читается ТОЛЬКО из /api/campaigns/:id/posts.
   const { campaignId } = useCampaignFilter();
   const campaignPostsQ = useCampaignPosts(campaignId);
   const memberSet = useMembershipSet(campaignPostsQ.data?.posts);
+  const removeMut = useRemoveCampaignPosts();
+
+  // Reset selection when the source/campaign/window changes (primitive deps — `period` is a fresh
+  // object each render, so depending on it would wipe the selection on every keystroke).
   useEffect(() => {
     setSelected(new Set());
     setAddItems(null);
-  }, [channelId, campaignId, inRange]);
-  const toggleSort = (key: SortKey) => {
-    if (key === sortKey) setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
-    else {
-      setSortKey(key);
-      setSortDir('desc');
-    }
-  };
+  }, [channelId, campaignId, pageDays, pageRange, filters.q, filters.format]);
+
   const toggleSelect = (id: number) =>
     setSelected((prev) => {
       const next = new Set(prev);
@@ -159,29 +205,113 @@ function PostsLeaderboard({ allPosts }: { allPosts: NormalizedPost[] }) {
       return next;
     });
 
-  const inPeriod = allPosts.filter((post) => inRange(post.date));
-  const posts =
+  const inPeriod = allPosts.filter((post) => period.inRange(post.date));
+  // Comparable-period scope: the source's posts in this window (campaign-scoped when a campaign is
+  // selected). Medians + the campaign count are measured over THIS set, not the search subset.
+  const scope =
     campaignId != null && channelId != null
       ? inPeriod.filter((p) => p.id != null && memberSet.has(membershipKey('tg', channelId, String(p.id))))
       : inPeriod;
+  const visible = filterPosts(scope, { q: filters.q, format: filters.format });
+  const rows = sortPosts(visible, filters.sort, filters.order);
+  // Preserve the pre-redesign mobile list contract: reach-desc, top 25, unaffected by desktop-only
+  // search/format/sort controls. Mobile layout and controls remain outside this task.
+  const mobileRows = sortPosts(scope, 'reach', 'desc').slice(0, 25);
 
   const selectedItems: CampaignPostInput[] =
     channelId == null
       ? []
-      : posts
+      : rows
           .filter((post) => post.id != null && selected.has(post.id))
           .map((post) => ({ network: 'tg', channel_id: channelId, post_ref: String(post.id) }));
 
+  // Comparable-period medians (honesty-gated by MEDIAN_MIN_SAMPLE — below it periodMedian returns
+  // null and the per-row context is withheld rather than faked).
+  const reachMedian = periodMedian(scope.map((p) => p.reach));
+  const likesMedian = periodMedian(scope.map((p) => p.likes));
+  const sharesMedian = periodMedian(scope.map((p) => p.shares ?? 0));
+  const ervMedian = periodMedian(scope.map((p) => p.erv).filter((v): v is number => v != null));
+
+  const selectedPost = scope.find((p) => p.id === openId);
+  const selectedReachComparison = selectedPost
+    ? compareToMedian(selectedPost.reach, reachMedian)
+    : null;
+  const hasContentFilters = filters.q.trim() !== '' || filters.format !== 'all';
+
+  // «Выбрать все» относится к ВИДИМЫМ строкам (текущий фильтр/сортировка) — честная семантика.
+  const visibleIds = rows.map((p) => p.id).filter((id): id is number => id != null);
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.has(id));
+  const toggleAllVisible = () =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) for (const id of visibleIds) next.delete(id);
+      else for (const id of visibleIds) next.add(id);
+      return next;
+    });
+
+  const onRemoveFromCampaign = () => {
+    if (campaignId == null || selectedItems.length === 0) return;
+    removeMut.mutate(
+      { campaignId, items: selectedItems },
+      { onSuccess: () => setSelected(new Set()) },
+    );
+  };
+
   const toolbar = (
-    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3">
-      <div className="flex flex-wrap items-center gap-3">
-        <CampaignFilterControl />
-        {campaignId != null && campaignPostsQ.data && (
-          <span className="text-2xs text-muted-foreground">
-            {fmt.num(posts.length)} из {fmt.num(campaignPostsQ.data.posts.length)} публ. кампании — из этого источника
-          </span>
-        )}
+    <div className="space-y-3 border-b border-border pb-3">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <div className="flex flex-wrap items-center gap-3">
+          <CampaignFilterControl />
+          {/* Desktop-only filters: text search + media format (mobile keeps the untouched list). */}
+          <label className="hidden items-center gap-2 text-xs text-muted-foreground md:flex">
+            <span className="sr-only">Поиск по публикациям</span>
+            <input
+              type="search"
+              value={filters.q}
+              onChange={(e) => update({ q: e.target.value })}
+              placeholder="Поиск по тексту и хэштегам"
+              aria-label="Поиск по публикациям"
+              className="w-56 rounded border border-border bg-background px-2.5 py-1 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
+            />
+          </label>
+          <label className="hidden items-center gap-2 text-xs text-muted-foreground md:flex">
+            <span className="shrink-0">Формат</span>
+            <select
+              value={filters.format}
+              onChange={(e) => update({ format: e.target.value as ContentFormat })}
+              aria-label="Формат публикаций"
+              className="rounded border border-border bg-background px-2 py-1 text-xs text-foreground outline-none focus:ring-1 focus:ring-primary"
+              data-testid="format-filter"
+            >
+              {FORMAT_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs text-muted-foreground">
+          <span className="tabular-nums" data-testid="content-result-count">{fmt.num(rows.length)} публ.</span>
+          {hasContentFilters && (
+            <button
+              type="button"
+              onClick={() => update({ q: '', format: 'all' })}
+              className="text-2xs font-medium text-primary hover:underline"
+            >
+              Сбросить фильтры
+            </button>
+          )}
+          {campaignId != null && campaignPostsQ.data && (
+            <span className="tabular-nums">
+              {fmt.num(scope.length)} из {fmt.num(campaignPostsQ.data.posts.length)} публ. кампании — из этого источника
+            </span>
+          )}
+          {loadedCount >= 100 && <span>загружены последние 100</span>}
+          {scope.length > 0 && reachMedian == null && (
+            <span>сравнение появится от {MEDIAN_MIN_SAMPLE} публикаций</span>
+          )}
+        </div>
       </div>
+      {/* Bulk actions (desktop table only). */}
       <div className="hidden items-center gap-2 md:flex">
         {selectedItems.length > 0 ? (
           <>
@@ -194,6 +324,17 @@ function PostsLeaderboard({ allPosts }: { allPosts: NormalizedPost[] }) {
             >
               Добавить в кампанию
             </button>
+            {campaignId != null && (
+              <button
+                type="button"
+                onClick={onRemoveFromCampaign}
+                disabled={removeMut.isPending}
+                className="btn-pill border border-border px-3.5 py-1.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50"
+                data-testid="remove-from-campaign"
+              >
+                {removeMut.isPending ? 'Убираю…' : 'Убрать из кампании'}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setSelected(new Set())}
@@ -203,7 +344,14 @@ function PostsLeaderboard({ allPosts }: { allPosts: NormalizedPost[] }) {
             </button>
           </>
         ) : (
-          <span className="text-2xs text-muted-foreground">Отметьте публикации, чтобы добавить их в кампанию</span>
+          <span className="text-2xs text-muted-foreground">
+            {campaignId != null
+              ? 'Отметьте публикации, чтобы добавить или убрать их из кампании'
+              : 'Отметьте публикации, чтобы добавить их в кампанию'}
+          </span>
+        )}
+        {removeMut.isError && (
+          <span role="alert" className="text-2xs text-destructive">Не удалось убрать из кампании.</span>
         )}
       </div>
     </div>
@@ -229,15 +377,18 @@ function PostsLeaderboard({ allPosts }: { allPosts: NormalizedPost[] }) {
       </div>
     );
   }
-  if (posts.length === 0) {
+  const noDesktopFilterMatches = scope.length > 0 && rows.length === 0;
+  if (rows.length === 0 && !noDesktopFilterMatches) {
+    const message =
+      campaignId != null && scope.length === 0
+        ? 'В этой кампании нет публикаций из текущего источника за выбранный период.'
+        : scope.length > 0
+          ? 'Ничего не найдено по выбранным фильтрам.'
+          : 'За выбранный период публикаций нет.';
     return (
       <div className="space-y-3">
         {toolbar}
-        <div className="py-8 text-center text-sm text-muted-foreground">
-          {campaignId != null && inPeriod.length > 0
-            ? 'В этой кампании нет публикаций из текущего источника за выбранный период.'
-            : 'За выбранный период публикаций нет.'}
-        </div>
+        <div className="py-8 text-center text-sm text-muted-foreground">{message}</div>
         {addItems && addItems.length > 0 && (
           <AddToCampaignDialog items={addItems} onClose={() => setAddItems(null)} onDone={() => setSelected(new Set())} />
         )}
@@ -245,40 +396,19 @@ function PostsLeaderboard({ allPosts }: { allPosts: NormalizedPost[] }) {
     );
   }
 
-  // Таблица — сортируемый лидерборд (по любому столбцу), топ 25
-  const sortGet = SORT_COLUMNS.find((c) => c.key === sortKey)!.get;
-  const tablePosts = [...posts]
-    .sort((a, b) => (sortDir === 'desc' ? sortGet(b) - sortGet(a) : sortGet(a) - sortGet(b)))
-    .slice(0, 25);
-
-  // ERV/ER колонки красим ТОЛЬКО у относительных выбросов среди видимых строк (≥1.5× / ≤0.5×
-  // медианы колонки) — иначе почти каждая ячейка получала цвет и колонки читались «радугой».
-  const ervMedian = median(tablePosts.map((p) => p.erv).filter((v): v is number => v != null));
-  const erMedian = median(tablePosts.map((p) => p.er).filter((v): v is number => v != null));
-  const reachMedian = periodMedian(posts.map((p) => p.reach));
-
-  const selectedPost = posts.find((p) => p.id === openId);
-
-  // «Выбрать все» относится к ВИДИМЫМ строкам (топ-25 текущей сортировки/окна) — честная
-  // семантика для усечённого списка.
-  const visibleIds = tablePosts.map((p) => p.id).filter((id): id is number => id != null);
-  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.has(id));
-  const toggleAllVisible = () =>
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (allVisibleSelected) for (const id of visibleIds) next.delete(id);
-      else for (const id of visibleIds) next.add(id);
-      return next;
-    });
-
   return (
     <div className="space-y-3">
       {toolbar}
-      <div className="hidden overflow-x-auto md:block">
+      {noDesktopFilterMatches && (
+        <div className="hidden py-8 text-center text-sm text-muted-foreground md:block">
+          Ничего не найдено по выбранным фильтрам.
+        </div>
+      )}
+      <div className={cn('hidden overflow-x-auto md:block', noDesktopFilterMatches && 'md:hidden')}>
         <table className="w-full border-collapse text-left text-sm">
           <thead>
             <tr className="border-b border-border text-xs font-medium tracking-wider text-muted-foreground">
-              <th className="w-10 py-3 pl-0 pr-2">
+              <th className="w-10 py-2.5 pl-0 pr-2">
                 <input
                   type="checkbox"
                   aria-label="Выбрать все видимые публикации"
@@ -287,35 +417,41 @@ function PostsLeaderboard({ allPosts }: { allPosts: NormalizedPost[] }) {
                   className="size-4 accent-primary"
                 />
               </th>
-              <th className="w-12 py-3 pl-0 pr-3 text-center"></th>
-              <th className="min-w-[240px] px-3 py-3">Пост</th>
-              {SORT_COLUMNS.map((c) => {
-                const active = c.key === sortKey;
+              <th className="w-12 py-2.5 pl-0 pr-3 text-center"></th>
+              <th className="min-w-[240px] px-3 py-2.5">Пост</th>
+              {CONTENT_SORT_COLUMNS.filter((c) => c.key !== 'date').map((c) => {
+                const active = c.key === filters.sort;
                 return (
                   <th
                     key={c.key}
-                    aria-sort={active ? (sortDir === 'desc' ? 'descending' : 'ascending') : undefined}
-                    className="px-3 py-3 text-right last:pr-0"
+                    aria-sort={active ? (filters.order === 'desc' ? 'descending' : 'ascending') : undefined}
+                    className="w-[104px] px-3 py-2.5 text-right last:pr-0"
                   >
-                    <button
-                      type="button"
+                    <SortButton
+                      label={c.label}
+                      active={active}
+                      order={filters.order}
                       onClick={() => toggleSort(c.key)}
-                      className={cn('ml-auto inline-flex items-center gap-1 tabular-nums transition-colors', active ? 'text-primary' : 'hover:text-foreground')}
-                    >
-                      {c.label}
-                      <span aria-hidden="true" className={cn('text-2xs', !active && 'text-ink3/60')}>
-                        {active ? (sortDir === 'desc' ? '↓' : '↑') : '↕'}
-                      </span>
-                    </button>
+                    />
                   </th>
                 );
               })}
+              <th
+                aria-sort={filters.sort === 'date' ? (filters.order === 'desc' ? 'descending' : 'ascending') : undefined}
+                className="w-[96px] px-3 py-2.5 pr-0 text-right"
+              >
+                <SortButton
+                  label="Дата"
+                  active={filters.sort === 'date'}
+                  order={filters.order}
+                  onClick={() => toggleSort('date')}
+                />
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {tablePosts.map((post, idx) => {
+            {rows.map((post, idx) => {
               const isClickable = post.id != null;
-              const reachVsMedian = compareToMedian(post.reach, reachMedian);
               return (
                 <tr
                   key={post.id ?? idx}
@@ -323,7 +459,7 @@ function PostsLeaderboard({ allPosts }: { allPosts: NormalizedPost[] }) {
                   className={`group transition-colors hover:bg-hover-row ${isClickable ? 'cursor-pointer' : ''}`}
                 >
                   {/* Чекбокс не должен открывать модалку — гасим всплытие на ячейке. */}
-                  <td className="py-3 pl-0 pr-2" onClick={(e) => e.stopPropagation()}>
+                  <td className="py-2.5 pl-0 pr-2" onClick={(e) => e.stopPropagation()}>
                     {post.id != null && (
                       <input
                         type="checkbox"
@@ -335,28 +471,24 @@ function PostsLeaderboard({ allPosts }: { allPosts: NormalizedPost[] }) {
                       />
                     )}
                   </td>
-                  <td className="py-3 pl-0 pr-3 text-center">
+                  <td className="py-2.5 pl-0 pr-3 text-center">
                     <PostThumb thumb={post.thumb} mediaType={post.mediaType} albumSize={post.albumSize} />
                   </td>
-                  <td className="px-3 py-3">
+                  <td className="px-3 py-2.5">
                     {isClickable ? (
                       // A real, focusable control in the row — the tr onClick alone is mouse-only,
-                      // leaving keyboard users no desktop path to the post details. Plain-text
-                      // caption (like the mobile row): RichText renders <a> links, which must not
-                      // nest inside a button. Same destination as the row click, so bubbling is a
-                      // harmless duplicate.
+                      // leaving keyboard users no desktop path to the post details.
                       <button
                         type="button"
                         onClick={() => setOpenId(post.id)}
                         className="block w-full max-w-sm space-y-1 text-left md:max-w-md lg:max-w-lg"
                       >
-                        {/* no `block` here: it would override line-clamp's display:-webkit-box and kill the clamp */}
                         <span className={cn('line-clamp-1 font-medium', post.caption ? 'text-foreground' : 'italic text-muted-foreground')}>
                           {post.caption ? markdownToPlainText(post.caption) : 'Без подписи'}
                         </span>
                         <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <span>{fmt.date(post.date)}</span>
-                          {post.albumSize > 1 && <span>· {post.albumSize} фото</span>}
+                          <FormatTag post={post} />
+                          {post.albumSize > 1 && <span>{post.albumSize} фото</span>}
                         </span>
                       </button>
                     ) : (
@@ -365,32 +497,32 @@ function PostsLeaderboard({ allPosts }: { allPosts: NormalizedPost[] }) {
                           {post.caption ? <RichText text={post.caption} /> : <span className="italic text-muted-foreground">Без подписи</span>}
                         </div>
                         <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <span>{fmt.date(post.date)}</span>
-                          {post.albumSize > 1 && <span>· {post.albumSize} фото</span>}
+                          <FormatTag post={post} />
+                          {post.albumSize > 1 && <span>{post.albumSize} фото</span>}
                         </div>
                       </div>
                     )}
                   </td>
-                  <td className="px-3 py-3 text-right tabular-nums last:pr-0">
-                    <span className="block font-medium text-foreground">{fmt.num(post.reach)}</span>
-                    {reachVsMedian && (
-                      <span className={cn('block text-2xs', reachVsMedian.dir === 'above' ? 'text-verdant' : reachVsMedian.dir === 'below' ? 'text-ember' : 'text-muted-foreground')}>
-                        {medianDeltaLabel(reachVsMedian)}
-                      </span>
-                    )}
+                  <td className="px-3 py-2.5 text-right last:pr-0">
+                    <MedianCell value={post.reach} median={reachMedian} tone="signal" format={fmt.num} />
                   </td>
-                  <td className="px-3 py-3 text-right font-medium tabular-nums last:pr-0 text-muted-foreground">{fmt.num(post.likes)}</td>
-                  <td className="px-3 py-3 text-right font-medium tabular-nums last:pr-0 text-muted-foreground">
-                    {post.shares ? fmt.num(post.shares) : <span className="text-muted-foreground/40">—</span>}
+                  <td className="px-3 py-2.5 text-right last:pr-0">
+                    <MedianCell value={post.likes} median={likesMedian} tone="muted" format={fmt.num} />
                   </td>
-                  <td className="px-3 py-3 text-right font-medium tabular-nums last:pr-0 text-muted-foreground">
+                  <td className="px-3 py-2.5 text-right last:pr-0">
+                    <MedianCell value={post.shares} median={sharesMedian} tone="muted" format={fmt.num} />
+                  </td>
+                  <td className="px-3 py-2.5 text-right font-medium tabular-nums text-muted-foreground last:pr-0">
                     {post.virality != null ? `${post.virality.toFixed(1)}%` : <span className="text-muted-foreground/40">—</span>}
                   </td>
-                  <td className="px-3 py-3 text-right font-medium tabular-nums last:pr-0">
-                    <PctTag value={post.erv} median={ervMedian} />
+                  <td className="px-3 py-2.5 text-right last:pr-0">
+                    <MedianCell value={post.erv} median={ervMedian} tone="muted" format={(v) => `${v.toFixed(1)}%`} />
                   </td>
-                  <td className="px-3 py-3 text-right font-medium tabular-nums last:pr-0">
-                    <PctTag value={post.er} median={erMedian} />
+                  <td className="px-3 py-2.5 pr-0 text-right font-medium tabular-nums text-muted-foreground">
+                    {post.er != null ? `${post.er.toFixed(1)}%` : <span className="text-muted-foreground/40">—</span>}
+                  </td>
+                  <td className="px-3 py-2.5 pr-0 text-right text-xs tabular-nums text-muted-foreground">
+                    {post.date ? fmt.date(post.date) : '—'}
                   </td>
                 </tr>
               );
@@ -398,9 +530,9 @@ function PostsLeaderboard({ allPosts }: { allPosts: NormalizedPost[] }) {
           </tbody>
         </table>
       </div>
-      {/* mobile: card list (no horizontal scroll) — reuses the TopPosts row shape */}
+      {/* mobile: card list (no horizontal scroll) — unchanged reach-desc top-25 behavior */}
       <div className="divide-y divide-border md:hidden">
-        {tablePosts.map((post, idx) => {
+        {mobileRows.map((post, idx) => {
           const isClickable = post.id != null;
           const title = post.caption ? markdownToPlainText(post.caption) : null;
           const reachVsMedian = compareToMedian(post.reach, reachMedian);
@@ -429,10 +561,24 @@ function PostsLeaderboard({ allPosts }: { allPosts: NormalizedPost[] }) {
       {openId !== null && selectedPost && (
         <PostDetailModal
           post={selectedPost}
-          reason={(() => {
-            const comparison = compareToMedian(selectedPost.reach, reachMedian);
-            return comparison ? medianDeltaLabel(comparison) : null;
-          })()}
+          reason={selectedReachComparison ? medianDeltaLabel(selectedReachComparison) : null}
+          reasonTone={
+            selectedReachComparison?.dir === 'above'
+              ? 'positive'
+              : selectedReachComparison?.dir === 'below'
+                ? 'negative'
+                : 'neutral'
+          }
+          benchmarkUnavailable={reachMedian == null}
+          onAddToCampaign={
+            selectedPost.id != null && channelId != null
+              ? () => {
+                  const item: CampaignPostInput = { network: 'tg', channel_id: channelId, post_ref: String(selectedPost.id) };
+                  setOpenId(null);
+                  setAddItems([item]);
+                }
+              : undefined
+          }
           onClose={() => setOpenId(null)}
         />
       )}
@@ -448,10 +594,80 @@ function PostsLeaderboard({ allPosts }: { allPosts: NormalizedPost[] }) {
   );
 }
 
+/** Sortable column header button (aria-sort lives on the <th>). */
+function SortButton({
+  label,
+  active,
+  order,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  order: 'asc' | 'desc';
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn('ml-auto inline-flex items-center gap-1 tabular-nums transition-colors', active ? 'text-primary' : 'hover:text-foreground')}
+    >
+      {label}
+      <span aria-hidden="true" className={cn('text-2xs', !active && 'text-ink3/60')}>
+        {active ? (order === 'desc' ? '↓' : '↑') : '↕'}
+      </span>
+    </button>
+  );
+}
+
+/** Media-format word for the post-caption subline — replaces the ad-hoc date there (date is now its
+    own sortable column), so the format bucket the search/filter uses is also legible in the row. */
+function FormatTag({ post }: { post: NormalizedPost }) {
+  const label =
+    post.albumSize > 1 ? 'Альбом' : post.mediaType === 'video' ? 'Видео' : post.mediaType === 'photo' ? 'Фото' : 'Текст';
+  return <span>{label}</span>;
+}
+
+/**
+ * A metric cell with explicit comparable-period median context. The value is always shown; the
+ * «±N% к медиане» delta appears only when periodMedian cleared the min-sample gate (never a faked
+ * benchmark). Colour is reserved for the primary signal column (`tone="signal"`, reach) so the
+ * table doesn't read as a rainbow — secondary columns keep the label but stay muted.
+ */
+function MedianCell({
+  value,
+  median,
+  tone,
+  format,
+}: {
+  value: number | null;
+  median: number | null;
+  tone: 'signal' | 'muted';
+  format: (v: number) => string;
+}) {
+  if (value == null) return <span className="text-muted-foreground/40">—</span>;
+  const cmp = compareToMedian(value, median);
+  const deltaColor =
+    tone === 'signal' && cmp
+      ? cmp.dir === 'above'
+        ? 'text-verdant'
+        : cmp.dir === 'below'
+          ? 'text-ember'
+          : 'text-muted-foreground'
+      : 'text-muted-foreground';
+  return (
+    <>
+      <span className={cn('block font-medium tabular-nums', tone === 'signal' ? 'text-foreground' : 'text-muted-foreground')}>
+        {format(value)}
+      </span>
+      {cmp && <span className={cn('block text-2xs', deltaColor)}>{medianDeltaLabel(cmp)}</span>}
+    </>
+  );
+}
+
 /**
  * Превью поста с честным фолбэком: битый/недоступный thumb — больше не молчаливый серый квадрат
- * (дизайн-проход №3: прокси в целом жив, но конкретный пост может отдать 404/просрочиться или
- * долго греть холодный кэш и упасть) — при ошибке показываем тип медиа словом, как у текстовых.
+ * (дизайн-проход №3) — при ошибке показываем тип медиа словом, как у текстовых.
  */
 function PostThumb({ thumb, mediaType, albumSize }: { thumb: string | null; mediaType: string | null; albumSize: number }) {
   const [broken, setBroken] = useState(false);
@@ -475,48 +691,26 @@ function PostThumb({ thumb, mediaType, albumSize }: { thumb: string | null; medi
   );
 }
 
-/** Median of a numeric list; null for an empty list. */
-function median(values: number[]): number | null {
-  if (values.length === 0) return null;
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
-}
-
-/**
- * ERV/ER cell — neutral by default; colour marks only relative outliers within the visible
- * rows: verdant at ≥1.5× the column median, ember at ≤0.5×. (Absolute thresholds painted
- * nearly every row before.) DeltaPill semantics elsewhere are untouched.
- */
-function PctTag({ value, median }: { value: number | null; median: number | null }) {
-  if (value == null) return <span className="text-muted-foreground/40">—</span>;
-  let colorClass = 'text-ink2';
-  if (median != null && median > 0) {
-    if (value >= median * 1.5) colorClass = 'font-medium text-verdant';
-    else if (value <= median * 0.5) colorClass = 'font-medium text-ember';
-  }
-  return <span className={colorClass}>{value.toFixed(1)}%</span>;
-}
-
 function PostsSkeletons() {
-  // Mirrors the loaded layout exactly — ONE «Публикации» widget card with title + table rows
-  // (the old top-posts grid ghost promised a section that no longer exists → layout jump).
+  // Mirrors the loaded layout: a toolbar strip + table rows on the bare section surface (no nested
+  // card — the ChartSection wrapper is gone).
   return (
-    <div className="space-y-8">
-      <div className="rounded-xl border border-border bg-card p-4 sm:p-5">
-        <Skeleton className="h-3 w-40" />
-        <div className="mt-5 space-y-4">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="flex items-center gap-4">
-              <Skeleton className="h-10 w-10" />
-              <div className="flex-1 space-y-2">
-                <Skeleton className="h-4 w-1/3" />
-                <Skeleton className="h-3 w-1/4" />
-              </div>
-              <Skeleton className="h-4 w-14" />
+    <div className="space-y-3">
+      <div className="flex items-center justify-between border-b border-border pb-3">
+        <Skeleton className="h-6 w-40" />
+        <Skeleton className="h-4 w-16" />
+      </div>
+      <div className="mt-2 space-y-4">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="flex items-center gap-4">
+            <Skeleton className="h-10 w-10" />
+            <div className="flex-1 space-y-2">
+              <Skeleton className="h-4 w-1/3" />
+              <Skeleton className="h-3 w-1/4" />
             </div>
-          ))}
-        </div>
+            <Skeleton className="h-4 w-14" />
+          </div>
+        ))}
       </div>
     </div>
   );
