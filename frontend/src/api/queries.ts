@@ -10,6 +10,7 @@ const STALE_STATUS = 60 * 1000;        // свежесть-статусы (colle
 
 import { z } from 'zod';
 import { apiGet, apiSend } from '@/api/client';
+import type { CampaignSourceScope } from '@/lib/campaignSources';
 import {
   AdminUserSchema,
   AdminUsersResponseSchema,
@@ -674,12 +675,20 @@ export function useCampaignPosts(id: number | null) {
   });
 }
 
-export function useCampaignSummary(id: number | null) {
+export function useCampaignSummary(
+  id: number | null,
+  source: CampaignSourceScope | null = null,
+  enabled = true,
+) {
+  const scopeKey = source ? `${source.network}:${source.channelId}` : 'all';
+  const query = source
+    ? `?network=${encodeURIComponent(source.network)}&channel_id=${source.channelId}`
+    : '';
   return useQuery({
-    enabled: id != null && !isDemoMode(),
-    queryKey: ['campaign-summary', id],
+    enabled: enabled && id != null && !isDemoMode(),
+    queryKey: ['campaign-summary', id, scopeKey],
     staleTime: STALE_LIVE,
-    queryFn: ({ signal }) => apiGet(`/api/campaigns/${id}/summary`, CampaignSummaryResponseSchema, { signal }),
+    queryFn: ({ signal }) => apiGet(`/api/campaigns/${id}/summary${query}`, CampaignSummaryResponseSchema, { signal }),
   });
 }
 

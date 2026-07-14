@@ -88,6 +88,28 @@ export function networkForPath(pathname: string): Network {
   return (NETWORKS.find((n) => 'prefix' in n && pathname.startsWith(n.prefix)) ?? NETWORKS[0]).key;
 }
 
+/**
+ * Which network a route EXPLICITLY owns — or `null` when the route is network-agnostic. Unlike
+ * networkForPath (which defaults every unowned path to TG), this reports «no opinion» for shared
+ * surfaces (/home, /reports, /campaigns/:id, /settings, …) so the network-selection store can keep
+ * the last chosen network there instead of snapping back to Telegram. Matching is EXACT, not
+ * prefix-based, apart from the /instagram and /metrics families:
+ *   /instagram, /instagram/*         → ig
+ *   exact /, /analytics, /posts, /mentions → tg
+ *   /metrics/ig-*                    → ig; other /metrics/*  → tg
+ *   everything else                  → null (agnostic — the store decides)
+ */
+export function routeNetworkOwner(pathname: string): Network | null {
+  if (pathname === '/instagram' || pathname.startsWith('/instagram/')) return 'ig';
+  if (pathname === '/' || pathname === '/analytics' || pathname === '/posts' || pathname === '/mentions') {
+    return 'tg';
+  }
+  if (pathname.startsWith('/metrics/')) {
+    return pathname.slice('/metrics/'.length).startsWith('ig-') ? 'ig' : 'tg';
+  }
+  return null;
+}
+
 /** Brand glyph for network chips/badges — draws in currentColor; the call site tints it the
     network's brand colour on a neutral chip (no filled square). A new network adds its glyph here. */
 export function NetworkGlyph({ k, className }: { k: string; className?: string }) {

@@ -6,6 +6,8 @@ import { useChannels, useLogout, useMe } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { setCommandPaletteOpen, toggleCommandPalette, useCommandPaletteOpen } from '@/lib/command-palette';
 import { DRILL_KEYS } from '@/lib/kpiDerive';
+import { NETWORKS } from '@/lib/networks';
+import { setActiveNetwork } from '@/lib/networkStore';
 import { getDrillMetric } from '@/lib/widgetMetrics';
 import { Icon } from '@/components/nav-icons';
 import type { IconName } from '@/components/nav-icons';
@@ -66,8 +68,6 @@ const SUPERUSER_ROUTES: Array<{ path: string; label: string; icon: IconName; sea
 // Сети — из ЕДИНОГО реестра lib/networks (его докстринг: «Everything network-shaped reads THIS
 // list»). Локальный кортеж молча выпадал бы из ⌘K при добавлении новой сети (аудит).
 const SOURCE_NETWORKS = NETWORKS.map((n) => ({ key: n.key as 'tg' | 'ig', name: n.name, color: n.color, to: n.home }));
-
-import { NETWORKS } from '@/lib/networks';
 
 /** Tiny brand glyph for a network badge (currentColor; the call site tints it the brand colour). */
 function NetworkGlyph({ k }: { k: 'tg' | 'ig' }) {
@@ -221,6 +221,9 @@ function PaletteDialog({ close }: { close: () => void }) {
           ),
           run: () => {
             setChannelId(channel.id);
+            // Persist the network too — the destination owns it, but this avoids a one-frame flash
+            // of the previous network in the shell before navigation resolves.
+            setActiveNetwork(net.key);
             navigate(net.to);
           },
         }));

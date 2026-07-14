@@ -4,10 +4,10 @@ import { useDemo } from '@/lib/demo-context';
 import { useMediaQuery } from '@/lib/useMediaQuery';
 import { useWidgetPrefsSync } from '@/lib/widgetPrefsStore';
 import { cn } from '@/lib/utils';
-import { NETWORKS, NetworkGlyph, networkForPath } from '@/lib/networks';
+import { NETWORKS, NetworkGlyph } from '@/lib/networks';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { MobileBottomNav, MobileHeader } from '@/components/layout/MobileNav';
-import { FEED_ROUTES, routeTitle } from '@/components/layout/nav';
+import { FEED_ROUTES, routeTitle, useActiveNetwork } from '@/components/layout/nav';
 
 interface DashboardLayoutProps {
   email?: string;
@@ -96,9 +96,8 @@ function Topbar() {
  * avoids a false flag during the initial load.
  */
 function PlatformNav() {
-  const { pathname } = useLocation();
   const navigate = useNavigate();
-  const activeKey = networkForPath(pathname);
+  const activeKey = useActiveNetwork();
   const igProfile = useIgProfile();
   const igDemo = igProfile.data?.mock === true;
   const { data } = useChannels();
