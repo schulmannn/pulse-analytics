@@ -7,9 +7,6 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { FeedBlock } from '@/panels/feed/useFeed';
 import { TgSectionLayout, TgPagePeriodControl } from '@/panels/TgFeed';
 import { Overview } from '@/panels/Overview';
-import { Analytics } from '@/panels/AnalyticsTabs';
-import { Posts } from '@/panels/Posts';
-import { Mentions } from '@/panels/Mentions';
 import { SourceIdentity } from '@/components/SourceIdentity';
 
 /**
@@ -67,6 +64,14 @@ const IgContentPage = lazyFrom(igLoad, 'IgContentPage');
 const IgAudiencePage = lazyFrom(igLoad, 'IgAudiencePage');
 const IgPeriodControl = lazyFrom(igLoad, 'IgPeriodControl');
 
+// TG bodies split into their own chunks (bundle-size gate): Обзор stays eager (the entry route),
+// but Аналитика/Контент/Упоминания are heavier and off the first paint — each lazies into its own
+// chunk, so the entry bundle no longer carries the tabs/table/mentions code. FeedSectionPage
+// already wraps every Body in <Suspense>, so no extra scaffolding is needed here.
+const Analytics = lazyFrom(() => import('@/panels/AnalyticsTabs'), 'Analytics');
+const Posts = lazyFrom(() => import('@/panels/Posts'), 'Posts');
+const Mentions = lazyFrom(() => import('@/panels/Mentions'), 'Mentions');
+
 /** The lazy IG shell still needs a Suspense above it — same content-area scaffold as the other
     lazy routes, drawn here so the registry stays self-contained. PagePeriodProvider sits ABOVE
     the shell (TgSectionLayout parity): IgShell's own useIgData call reads the page period, and
@@ -113,7 +118,9 @@ function SectionSkeleton() {
 const TG_PARTS: Record<string, SectionParts> = {
   '': { Body: Overview, HeaderRight: TgPagePeriodControl },
   analytics: { Body: Analytics, HeaderRight: TgPagePeriodControl },
-  posts: { Body: Posts },
+  // Контент теперь windowed по авторитетному периоду страницы (URL-воспроизводимый `?period=`) —
+  // те же chips, что у Обзора/Аналитики, единый период для всего раздела.
+  posts: { Body: Posts, HeaderRight: TgPagePeriodControl },
   mentions: { Body: Mentions },
 };
 

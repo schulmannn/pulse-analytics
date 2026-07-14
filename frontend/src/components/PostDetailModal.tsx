@@ -1,8 +1,9 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { usePostStats } from '@/api/queries';
 import type { NormalizedPost } from '@/lib/posts';
 import { fmt, ruAxisLabel } from '@/lib/format';
+import { cn } from '@/lib/utils';
 import { MetricInfo } from '@/components/InfoTooltip';
 import { getDrillMetric, getMetric, type MetricDef } from '@/lib/widgetMetrics';
 import { useFocusTrap } from '@/lib/useFocusTrap';
@@ -10,12 +11,20 @@ import { useLayerBack } from '@/lib/useLayerBack';
 import { LineChart } from '@/components/LineChart';
 import { RichText } from '@/components/RichText';
 import { Skeleton } from '@/components/ui/skeleton';
+import { SourceIdentity } from '@/components/SourceIdentity';
 
 interface PostDetailModalProps {
   post: NormalizedPost;
   /** Leaderboard position badge; omit where the list order is a transient sort. */
   rank?: number;
   reason: string | null;
+  /** Semantic tone for a benchmark label. Existing callers default to their legacy positive tone. */
+  reasonTone?: 'positive' | 'negative' | 'neutral';
+  /** Explain why no benchmark is shown instead of leaving an unexplained blank. */
+  benchmarkUnavailable?: boolean;
+  /** Optional «Добавить в кампанию» footer action (Content page). Omitted by other callers, so the
+      modal stays backward-compatible with TopPosts / metric pages / narrative. */
+  onAddToCampaign?: () => void;
   onClose: () => void;
 }
 
@@ -42,8 +51,18 @@ function Stat({ label, value, accent, info }: { label: string; value: string; ac
  * so the card's `overflow-hidden` never clips it. Closes on Escape, backdrop click, or the ×
  * button; locks body scroll while open.
  */
-export function PostDetailModal({ post, rank, reason, onClose }: PostDetailModalProps) {
+export function PostDetailModal({
+  post,
+  rank,
+  reason,
+  reasonTone = 'positive',
+  benchmarkUnavailable = false,
+  onAddToCampaign,
+  onClose,
+}: PostDetailModalProps) {
   const panelRef = useRef<HTMLDivElement>(null);
+  const [previewFailed, setPreviewFailed] = useState(false);
+  const hasPreview = !!post.thumb && !previewFailed;
   useFocusTrap(panelRef);
   // Browser Back / the phone's back gesture closes the modal instead of leaving the page.
   useLayerBack(onClose);
@@ -77,7 +96,7 @@ export function PostDetailModal({ post, rank, reason, onClose }: PostDetailModal
       <div
         ref={panelRef}
         tabIndex={-1}
-        className="relative z-10 flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl border bg-card focus:outline-none sm:rounded-2xl"
+        className="relative z-10 flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl border bg-card focus:outline-none sm:rounded-2xl lg:max-w-5xl"
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b px-5 py-3">
@@ -87,6 +106,9 @@ export function PostDetailModal({ post, rank, reason, onClose }: PostDetailModal
                 №{rank}
               </span>
             )}
+            <span className="hidden lg:inline-flex">
+              <SourceIdentity network="tg" className="inline-flex" />
+            </span>
             {post.date && (
               <span className="text-sm text-muted-foreground">{fmt.date(post.date)}</span>
             )}
@@ -103,93 +125,145 @@ export function PostDetailModal({ post, rank, reason, onClose }: PostDetailModal
           </button>
         </div>
 
-        {/* Scrollable body */}
-        <div className="space-y-4 overflow-y-auto p-5">
-          {post.thumb && (
-            <img
-              src={`${post.thumb}?size=lg`}
-              alt={rank != null ? `Превью поста №${rank}` : 'Превью поста'}
-              referrerPolicy="no-referrer"
-              onError={(e) => { e.currentTarget.style.display = 'none'; }}
-              className="max-h-72 w-full rounded-lg object-cover"
-            />
+        {/* Scrollable body. Mobile-first single column (base); on desktop (lg) it splits into two
+            grouped columns to use the wider panel — preview/caption/hashtags left, the metric &
+            benchmark data right — a denser, less-scrolly reading surface. */}
+        <div
+          className={cn(
+            'flex flex-col gap-4 overflow-y-auto p-5 lg:p-6',
+            hasPreview && 'lg:grid lg:grid-cols-[minmax(0,1.05fr)_minmax(420px,0.95fr)] lg:items-start lg:gap-x-6',
           )}
-
-          {reason && (
-            <p className="flex items-center gap-1.5 text-xs font-medium text-verdant">
-              <span aria-hidden="true">▲</span>
-              {reason}
-            </p>
-          )}
-
-          <p className="whitespace-pre-line text-sm leading-relaxed text-foreground">
-            {post.caption ? (
-              <RichText text={post.caption} />
-            ) : (
-              <span className="italic text-muted-foreground">Без подписи</span>
+        >
+          {/* MEDIA column: preview + full caption + hashtags */}
+          <div className="contents lg:flex lg:flex-col lg:gap-4">
+            {hasPreview && (
+              <img
+                src={`${post.thumb}?size=lg`}
+                alt={rank != null ? `Превью поста №${rank}` : 'Превью поста'}
+                referrerPolicy="no-referrer"
+                onError={() => setPreviewFailed(true)}
+                className="order-1 max-h-72 w-full rounded-lg object-cover lg:max-h-[26rem]"
+              />
             )}
-          </p>
 
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            <Stat label="Просмотры" value={fmt.num(post.reach)} />
-            <Stat label="Реакции" value={fmt.num(post.likes)} />
-            <Stat label="Репосты" value={fmt.num(post.shares)} />
-            <Stat label="Комментарии" value={fmt.num(post.comments)} />
-          </div>
+            <p className="order-3 whitespace-pre-line text-sm leading-relaxed text-foreground">
+              {post.caption ? (
+                <RichText text={post.caption} />
+              ) : (
+                <span className="italic text-muted-foreground">Без подписи</span>
+              )}
+            </p>
 
-          {(post.er != null || post.erv != null || post.virality != null) && (
-            <div className="grid grid-cols-3 gap-2">
-              {/* ⓘ с формулами: модалка — первая встреча новичка с терминами (аудит). */}
-              <Stat label="ER" value={pct(post.er, 2)} accent info={getDrillMetric('er')} />
-              <Stat label="ERV" value={pct(post.erv, 1)} info={getMetric('tg.erv')} />
-              <Stat label="Виральность" value={pct(post.virality, 1)} info={getMetric('tg.virality')} />
-            </div>
-          )}
-
-          <PostVelocity postId={post.id} />
-
-          {post.reactionsDetail.length > 0 && (
-            <div>
-              <div className="mb-1.5 text-2xs tracking-wide text-muted-foreground">Реакции</div>
-              <div className="flex flex-wrap gap-1.5">
-                {post.reactionsDetail.map((r, i) => (
-                  <span
-                    key={i}
-                    className="inline-flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-sm font-medium tabular-nums text-secondary-foreground"
-                  >
-                    <span>{r.emoji}</span>
-                    <span>{fmt.num(r.count)}</span>
+            {post.hashtags.length > 0 && (
+              <div className="order-8 flex flex-wrap gap-1.5">
+                {post.hashtags.map((tag, i) => (
+                  <span key={i} className="text-xs font-medium text-primary">
+                    #{tag.replace(/^#/, '')}
                   </span>
                 ))}
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
-          {post.hashtags.length > 0 && (
-            <div className="flex flex-wrap gap-1.5">
-              {post.hashtags.map((tag, i) => (
-                <span key={i} className="text-xs font-medium text-primary">
-                  #{tag.replace(/^#/, '')}
+          {/* DATA column: benchmark context + primary metrics + ratios + velocity + reactions */}
+          <div className="contents lg:flex lg:flex-col lg:gap-4">
+            {reason && (
+              <p
+                className={cn(
+                  'order-2 flex items-center gap-1.5 text-xs font-medium',
+                  reasonTone === 'positive'
+                    ? 'text-verdant'
+                    : reasonTone === 'negative'
+                      ? 'text-ember'
+                      : 'text-muted-foreground',
+                )}
+              >
+                <span aria-hidden="true">
+                  {reasonTone === 'positive' ? '▲' : reasonTone === 'negative' ? '▼' : '•'}
                 </span>
-              ))}
+                {reason}
+              </p>
+            )}
+            {!reason && benchmarkUnavailable && (
+              <p className="order-2 hidden text-xs text-muted-foreground lg:block">
+                Недостаточно публикаций для сравнения с медианой периода
+              </p>
+            )}
+
+            <div className={cn('order-4 grid grid-cols-2 gap-2 sm:grid-cols-4', hasPreview && 'lg:grid-cols-2')}>
+              <Stat label="Просмотры" value={fmt.num(post.reach)} />
+              <Stat label="Реакции" value={fmt.num(post.likes)} />
+              <Stat label="Репосты" value={fmt.num(post.shares)} />
+              <Stat label="Комментарии" value={fmt.num(post.comments)} />
             </div>
-          )}
+
+            {(post.er != null || post.erv != null || post.virality != null) && (
+              <div className="order-5 grid grid-cols-3 gap-2">
+                {/* ⓘ с формулами: модалка — первая встреча новичка с терминами (аудит). */}
+                <Stat label="ER" value={pct(post.er, 2)} accent info={getDrillMetric('er')} />
+                <Stat label="ERV" value={pct(post.erv, 1)} info={getMetric('tg.erv')} />
+                <Stat label="Виральность" value={pct(post.virality, 1)} info={getMetric('tg.virality')} />
+              </div>
+            )}
+
+            {post.reactionsDetail.length > 0 && (
+              <div className="order-7">
+                <div className="mb-1.5 text-2xs tracking-wide text-muted-foreground">Реакции</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {post.reactionsDetail.map((r, i) => (
+                    <span
+                      key={i}
+                      className="inline-flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-sm font-medium tabular-nums text-secondary-foreground"
+                    >
+                      <span>{r.emoji}</span>
+                      <span>{fmt.num(r.count)}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* The velocity chart gets the full desktop modal width; this is the main analytical
+              surface, not a thumbnail squeezed into the metrics column. */}
+          <PostVelocity
+            postId={post.id}
+            className={cn('order-6', hasPreview && 'lg:col-span-2 lg:mt-2')}
+          />
         </div>
 
-        {/* Footer */}
-        {!!post.permalink && (
-          <div className="border-t px-5 py-3">
-            <a
-              href={post.permalink}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
-            >
-              Открыть в Telegram
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5">
-                <path d="M7 17 17 7M9 7h8v8" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </a>
+        {/* Footer: link out to Telegram (left) + optional campaign action (right) */}
+        {(!!post.permalink || !!onAddToCampaign) && (
+          <div
+            className={cn(
+              'border-t px-5 py-3 lg:items-center lg:justify-between lg:gap-3',
+              post.permalink ? 'lg:flex' : 'hidden lg:flex',
+            )}
+          >
+            {post.permalink ? (
+              <a
+                href={post.permalink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
+              >
+                Открыть в Telegram
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5">
+                  <path d="M7 17 17 7M9 7h8v8" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </a>
+            ) : (
+              <span />
+            )}
+            {onAddToCampaign && (
+              <button
+                type="button"
+                onClick={onAddToCampaign}
+                className="btn-pill hidden bg-primary px-3.5 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 lg:inline-flex"
+              >
+                Добавить в кампанию
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -203,13 +277,13 @@ export function PostDetailModal({ post, rank, reason, onClose }: PostDetailModal
  * (absorbed from the Posts table's former own modal, D6.2). Quietly renders nothing when
  * Telegram has no stats for the post — the modal has plenty of content without it.
  */
-function PostVelocity({ postId }: { postId: number | null }) {
+function PostVelocity({ postId, className }: { postId: number | null; className?: string }) {
   const stats = usePostStats(postId);
 
   if (postId == null) return null;
   if (stats.isPending) {
     return (
-      <div className="space-y-3 border-t border-border pt-4">
+      <div className={cn('space-y-3 border-t border-border pt-4', className)}>
         <Skeleton className="h-3 w-1/3" />
         <Skeleton className="h-32 w-full" />
       </div>
@@ -236,7 +310,7 @@ function PostVelocity({ postId }: { postId: number | null }) {
   const labels = [first ? formatLabel(first) : '', mid ? formatLabel(mid) : '', last ? formatLabel(last) : ''];
 
   return (
-    <div className="border-t border-border pt-4">
+    <div className={cn('border-t border-border pt-4', className)}>
       <h4 className="mb-3 text-xs font-medium tracking-wider text-muted-foreground">
         Динамика набора просмотров
       </h4>

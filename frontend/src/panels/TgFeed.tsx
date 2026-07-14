@@ -1,10 +1,11 @@
 import { useMemo } from 'react';
-import { Outlet } from 'react-router-dom';
+import { Outlet, useLocation } from 'react-router-dom';
 import { useChannels, useHistory, useTgFull } from '@/api/queries';
 import { latestDataMs } from '@/lib/freshness';
 import { ChannelRecencyProvider, PagePeriodProvider, usePagePeriod } from '@/lib/period';
 import { PeriodChips } from '@/components/PeriodChips';
 import { Overview } from '@/panels/Overview';
+import { parseContentPeriod } from '@/lib/contentFilters';
 
 /**
  * TG feed SHELL — the network-wide chrome for the four focused TG pages (Обзор · Аналитика ·
@@ -20,6 +21,7 @@ import { Overview } from '@/panels/Overview';
  * onboarding (GetStarted), exactly as before — no empty analytics/posts noise.
  */
 export function TgSectionLayout() {
+  const location = useLocation();
   const { data: channelsData } = useChannels();
   const { data: tgFull } = useTgFull(0);
   const { data: history } = useHistory(730);
@@ -30,8 +32,13 @@ export function TgSectionLayout() {
 
   // PagePeriodProvider persists the authoritative header period across TG page navigation
   // (Обзор ↔ Аналитика); every feed card resolves to this same window.
+  const initialDays =
+    location.pathname === '/posts'
+      ? parseContentPeriod(new URLSearchParams(location.search).get('period'))
+      : undefined;
+
   return (
-    <PagePeriodProvider>
+    <PagePeriodProvider initialDays={initialDays}>
       <ChannelRecencyProvider value={recency}>
         <Outlet />
       </ChannelRecencyProvider>
