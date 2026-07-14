@@ -23,6 +23,8 @@ export interface TimelineSeries {
   posts: number[];
   tgViews: number[];
   igReach: number[];
+  tgPresent: boolean[];
+  igPresent: boolean[];
   hasTg: boolean;
   hasIg: boolean;
 }
@@ -42,6 +44,8 @@ export function timelineSeries(timeline: CampaignTimelinePoint[]): TimelineSerie
     posts: sorted.map((t) => t.posts),
     tgViews: sorted.map((t) => Number(t.tg_views ?? 0)),
     igReach: sorted.map((t) => Number(t.ig_reach ?? 0)),
+    tgPresent: sorted.map((t) => t.tg_views != null),
+    igPresent: sorted.map((t) => t.ig_reach != null),
     hasTg: sorted.some((t) => t.tg_views != null),
     hasIg: sorted.some((t) => t.ig_reach != null),
   };

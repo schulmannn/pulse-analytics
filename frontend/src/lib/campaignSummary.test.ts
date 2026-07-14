@@ -41,6 +41,8 @@ describe('timelineSeries', () => {
     expect(s.posts).toEqual([1, 3, 1]);
     expect(s.tgViews).toEqual([1000, 6000, 6000]);
     expect(s.igReach).toEqual([0, 800, 0]);
+    expect(s.tgPresent).toEqual([true, true, true]);
+    expect(s.igPresent).toEqual([false, true, false]);
     expect(s.hasTg).toBe(true);
     expect(s.hasIg).toBe(true);
   });
