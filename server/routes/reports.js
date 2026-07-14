@@ -39,8 +39,13 @@ function registerReportsRoutes({ app, db, requireAuth, audit }) {
     const config = (req.body && req.body.config !== undefined) ? req.body.config : {};
     const bad = reportConfigError(config);
     if (bad) return res.status(400).json({ error: bad });
+    let schedule;
+    if (req.body && req.body.schedule !== undefined) {
+      if (!db.REPORT_SCHEDULES.includes(req.body.schedule)) return res.status(400).json({ error: 'schedule: none | weekly | monthly' });
+      schedule = req.body.schedule;
+    }
     try {
-      const report = await db.createReport(req.user.uid, name, config);
+      const report = await db.createReport(req.user.uid, name, config, schedule);
       audit(req, 'report.created', { report_id: report && report.id }).catch(() => {});
       res.json({ report });
     } catch (e) { next(e); }

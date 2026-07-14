@@ -688,6 +688,12 @@ export const ReportListItemSchema = z
     schedule: z.string().optional().default('none'),
     created_at: z.string().optional().nullable(),
     updated_at: z.string().optional().nullable(),
+    // Compact summary fields the index reads (server extracts them from JSONB; all null-tolerant
+    // so legacy rows without them, or a garbage config, parse fine).
+    channel_id: z.coerce.number().optional().nullable(),
+    period_days: z.coerce.number().optional().nullable(),
+    block_count: z.coerce.number().optional().nullable(),
+    last_sent_at: z.string().optional().nullable(),
   })
   .passthrough();
 export type ReportListItem = z.infer<typeof ReportListItemSchema>;

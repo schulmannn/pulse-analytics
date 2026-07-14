@@ -15,6 +15,8 @@ import { DAY_MS, buildWeeklyTable, cellTint } from '@/lib/reportTables';
 import { defaultBlock, isReportBlockKey, normalizeBlocks } from '@/lib/reportBlocks';
 import type { ReportBlock, ReportBlockKey, ReportBlockType } from '@/lib/reportBlocks';
 import { fmt } from '@/lib/format';
+import { useMediaQuery } from '@/lib/useMediaQuery';
+import { ReportDocumentDesktop } from '@/panels/report/ReportDocumentDesktop';
 import { Skeleton } from '@/components/ui/skeleton';
 import { DeltaPill } from '@/components/DeltaPill';
 import { EmptyState } from '@/components/EmptyState';
@@ -85,14 +87,21 @@ export function ReportPage() {
 function ReportDocument({ report }: { report: Report }) {
   // Persistent report source (config.channelId): the whole document — including the top-level
   // data fetches inside the body — runs under a ChannelScope pinned to it. Local state echoes
-  // the config instantly on pick; the debounced config PUT (inside the body) makes it durable.
-  // null = follow the switcher, like before the field existed.
+  // the config instantly on pick; persistence differs per surface (desktop: single Save PUT;
+  // mobile: the historical debounced config PUT). null = follow the switcher.
   const [source, setSource] = useState<number | null>(
     typeof report.config.channelId === 'number' ? report.config.channelId : null,
   );
+  // Desktop (md+) gets the read/edit document; mobile keeps its verbatim always-inline surface.
+  // JS branch (not CSS): only one mounts, so the report-scoped hooks run once for the active one.
+  const isDesktop = useMediaQuery('(min-width: 768px)');
   return (
     <ChannelScope channelId={source}>
-      <ReportDocumentBody report={report} source={source} onPickSource={setSource} />
+      {isDesktop ? (
+        <ReportDocumentDesktop report={report} onPickSource={setSource} />
+      ) : (
+        <ReportDocumentBody report={report} source={source} onPickSource={setSource} />
+      )}
     </ChannelScope>
   );
 }
