@@ -74,7 +74,12 @@ test('chart hover: tooltip readout appears, moves and clears (single-svg hit-tes
 });
 
 test('metric explorer gives the plot desktop space and exposes a hover inspector', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-1440', 'Desktop-only metric explorer contract');
   await bootDemo(page, '/metrics/views', { theme: 'dark' });
+  await expect(page.locator('[data-dashboard-topbar]')).toHaveCount(0);
+  const mainBox = await page.locator('main').boundingBox();
+  if (!mainBox) throw new Error('metric explorer main has no box');
+  expect(mainBox.y).toBe(0);
   const chart = page.locator('svg[data-chart-kind="line"][data-chart-expanded]').first();
   await chart.waitFor({ state: 'visible', timeout: 15_000 });
   await chart.scrollIntoViewIfNeeded();

@@ -327,7 +327,7 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
         <span aria-hidden="true">←</span> Instagram
       </Link>
 
-      {/* Compact steep headline — the topbar h1 already names the metric. Для ig-follows при
+      {/* Compact steep headline — the route has no global topbar; the metric name stays in this row. Для ig-follows при
           живом уровне headline = текущая база и её изменение за окно (как ТГ «Подписчики»),
           а не сумма подписок — сумма остаётся в статистике под графиком «Подписки по дням». */}
       {lvlNow != null ? (
