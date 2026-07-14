@@ -42,7 +42,7 @@ function createPersistenceJob({ db, log, igCrypto, collectIgForAccount, capacity
     catch (e) { log('error', 'raw_snapshots_prune_failed', { error: e.message }); }
     try { await db.pruneIgMediaDaily(); }
     catch (e) { log('error', 'ig_media_daily_prune_failed', { error: e.message }); }
-    // (d) capacity: nightly monthly rollup of channel_daily (ops/CAPACITY_SCALE_1K_10K.md). INERT by
+    // (d) capacity: nightly monthly rollup of channel_daily (long-range read scaling). INERT by
     // default — only runs when CAPACITY_ROLLUPS=1, and the jobs row makes exactly one web instance
     // recompute it per day (idempotent, cheap: bounded to recent months). Nothing reads channel_monthly
     // yet, so this is groundwork; enable it before wiring the long-range history reader.

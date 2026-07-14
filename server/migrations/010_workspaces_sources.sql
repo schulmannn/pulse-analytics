@@ -1,4 +1,4 @@
--- Tenancy phase A (ops/ADR-001-tenancy.md): workspaces as the access boundary, external_sources as
+-- Tenancy phase A (workspace-isolation invariant): workspaces as the access boundary, external_sources as
 -- the deduplicated identity of a TG/IG property, channels demoted to a workspace→source link.
 -- ADDITIVE-ONLY + idempotent backfills — rollback is a git revert (ops/BACKUP_RESTORE.md §4).
 

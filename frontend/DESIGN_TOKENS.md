@@ -5,9 +5,11 @@ magic values ("каждый компонент сам по себе"). Definitio
 surface, radius, motion) and **`tailwind.config.js`** (type scale, radius bindings, colour bindings).
 Two scripts guard the canon (see [Governance](#governance)).
 
-> Philosophy: *Refined Technical* — warm paper canvas, warm ink scale, hairlines instead of card
-> chrome, **one** blue accent (`#2d6be0`), only two weights (400/500), no shadows / blur / glow.
-> Hierarchy comes from **size + ink shade**, never weight or elevation.
+> Philosophy: *Refined Technical* — near-black desktop dark theme is the primary product surface;
+> the maintained light theme uses warm paper and ink. Hierarchy comes from size, ink shade,
+> hairlines and restrained surface contrast. One calm blue is the action accent; data series use the
+> canonical categorical palette. A single subtle card shadow and the chart tooltip shadow are
+> allowed for separation; decorative glow, blur-heavy chrome and arbitrary elevation are not.
 
 ## Colour & surfaces
 
@@ -133,7 +135,9 @@ or clips; the extra content lives in «Развернуть». The contract, top
 
 ## Layering (z-index)
 
-Depth is **hairlines + z-index only** (no shadows / blur / glow), so the stack order must be explicit.
+Depth is primarily **hairlines + z-index**, so the stack order must be explicit. The small,
+centrally-defined card/tooltip shadows do not determine stacking and must not be copied into new
+one-off elevation values.
 The floating/overlay layer pulls from **one** named ladder (`zIndex` in `tailwind.config.js`) — never
 hand-pick a raw `z-40`/`z-50` for an overlay. Plain in-flow stacking *inside* a single component (a
 `relative z-10` label over its own fill) stays untokenised; the scale governs cross-surface overlays.

@@ -1,6 +1,6 @@
--- Capacity scaling (ops/CAPACITY_SCALE_1K_10K.md): a per-month rollup of channel_daily so the
+-- Capacity scaling (long-range read path): a per-month rollup of channel_daily so the
 -- history-heavy read path can serve long ranges from ~24 monthly rows instead of scanning up to 730
--- daily rows per channel (and re-probing channels once per row for the ADR-001 source trust check).
+-- daily rows per channel (and re-probing channels once per row for the workspace source trust check).
 -- ADDITIVE-ONLY + idempotent: new table + indexes, no data migration, rollback = git revert. The
 -- table stays EMPTY until the nightly rollup is enabled (CAPACITY_ROLLUPS=1) — inert by default, so
 -- shipping this changes nothing at runtime until an operator opts in and a reader is wired.

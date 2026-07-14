@@ -1,4 +1,4 @@
--- Tenancy phase B (ops/ADR-001-tenancy.md): source_id on the data tables so reads canonicalise per
+-- Tenancy phase B (canonical-source-identity invariant): source_id on the data tables so reads canonicalise per
 -- external property. Columns stay nullable, indexes NON-unique (two linked channels may still each
 -- write their own rows until phase C flips the write conflict-targets); readers de-duplicate with
 -- DISTINCT ON. ADDITIVE-ONLY + idempotent — rollback is a git revert.
