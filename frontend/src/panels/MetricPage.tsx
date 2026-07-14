@@ -579,16 +579,14 @@ export function MetricPage() {
         <span aria-hidden="true">←</span> Обзор
       </Link>
 
-      {/* Headline — COMPACT (steep): the topbar h1 already names the metric, so this is one
-          baseline row (number · Δ · window/source context), not a stacked hero block — the
-          chart below owns the vertical space. Same value/Δ/caption as the Overview ledger. */}
+      {/* Headline — COMPACT (steep): one baseline row (number · Δ · metric/window/source context),
+          not a stacked hero block. The metric route deliberately has no global topbar. */}
       <div>
         <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
           <span className="text-hero font-medium leading-none tabular-nums tracking-tight">{meta.total}</span>
           <DeltaPill delta={meta.trend} />
-          {/* Без имени метрики: h1 в топбаре уже называет её — повтор в 60px читался дублем. */}
           <span className="text-xs tracking-wide text-muted-foreground">
-            {periodLabel}
+            {def.label} · {periodLabel}
             {channelHandle ? <span className="text-ink3"> · Telegram {channelHandle}</span> : null}
           </span>
         </div>

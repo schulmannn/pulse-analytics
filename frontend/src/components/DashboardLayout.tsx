@@ -22,6 +22,8 @@ export function DashboardLayout({ email, role, avatar }: DashboardLayoutProps) {
   // simultaneously — every control (period switcher, account menu, channel card) ran its
   // hooks/effects twice. Conditional render keeps a single instance per breakpoint.
   const isMd = useMediaQuery('(min-width: 768px)');
+  const { pathname } = useLocation();
+  const isDesktopMetricRoute = isMd && pathname.startsWith('/metrics/');
   // Widget customisation follows the account (user_prefs), not the browser.
   useWidgetPrefsSync();
   return (
@@ -29,12 +31,17 @@ export function DashboardLayout({ email, role, avatar }: DashboardLayoutProps) {
       <Sidebar email={email} role={role} avatar={avatar} />
       <div className="flex min-w-0 flex-1 flex-col">
         {isMd ? (
-          <Topbar />
+          isDesktopMetricRoute ? null : <Topbar />
         ) : (
           <MobileHeader email={email} role={role} avatar={avatar} platformNav={<PlatformNav />} />
         )}
         {/* Extra bottom padding on mobile clears the fixed bottom nav; md+ navigates via the sidebar. */}
-        <main className="flex-1 px-4 pb-24 pt-5 sm:px-6 md:pb-5">
+        <main
+          className={cn(
+            'flex-1 px-4 pb-24 sm:px-6 md:pb-5',
+            isDesktopMetricRoute ? 'pt-3' : 'pt-5',
+          )}
+        >
           <div className="mx-auto w-full max-w-screen-2xl">
             <DemoBanner />
             <Outlet />
@@ -66,15 +73,14 @@ function DemoBanner() {
 }
 
 /** Desktop top bar (md+; mobile uses MobileHeader — conditionally, never both mounted).
-    Feed routes carry their own block header + sticky section titles, so the bar is suppressed
-    there entirely (no empty strip eating vertical space — steep). It renders ONLY on the
-    routes that have a real h1 (metric pages, admin, bugs, reports). */
+    Feed and metric routes own their page chrome, so the layout does not mount this bar there.
+    It remains for utility pages such as admin, bugs and reports. */
 function Topbar() {
   const { pathname } = useLocation();
   const title = FEED_ROUTES.includes(pathname) ? null : routeTitle(pathname);
   if (!title) return null;
   return (
-    <header className="sticky top-0 z-sticky flex h-14 items-center gap-3 border-b bg-background/80 px-4 backdrop-blur sm:gap-4 sm:px-6 print:hidden">
+    <header data-dashboard-topbar className="sticky top-0 z-sticky flex h-14 items-center gap-3 border-b bg-background/80 px-4 backdrop-blur sm:gap-4 sm:px-6 print:hidden">
       <h1 className="min-w-0 truncate text-lg font-medium tracking-tight">{title}</h1>
     </header>
   );
