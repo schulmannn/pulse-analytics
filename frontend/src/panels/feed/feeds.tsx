@@ -121,8 +121,19 @@ const TG_PARTS: Record<string, SectionParts> = {
   // Контент теперь windowed по авторитетному периоду страницы (URL-воспроизводимый `?period=`) —
   // те же chips, что у Обзора/Аналитики, единый период для всего раздела.
   posts: { Body: Posts, HeaderRight: TgPagePeriodControl },
-  mentions: { Body: Mentions },
+  // Упоминания: период авторитетен ТОЛЬКО на desktop-поверхности (плотная таблица/сравнение). На
+  // мобильной ветке карточка остаётся прежней и chips в шапке не появляются (hidden < md).
+  mentions: { Body: Mentions, HeaderRight: MentionsHeaderControl },
 };
+
+/** Desktop-only period chips for Упоминания — hidden on mobile so the old header stays unchanged. */
+function MentionsHeaderControl() {
+  return (
+    <div className="hidden md:block">
+      <TgPagePeriodControl />
+    </div>
+  );
+}
 
 const IG_PARTS: Record<string, SectionParts> = {
   '': { Body: IgOverviewPage, HeaderRight: IgPeriodControl },

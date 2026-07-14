@@ -141,6 +141,10 @@ export const MentionsSchema = z
       .array(
         z
           .object({
+            // channel_id (mentioning TG peer id) is an identifier for the source click-filter —
+            // kept as a string (bigint), coerced from whatever pg returns.
+            channel_id: z.coerce.string().optional().nullable(),
+            msg_id: z.coerce.string().optional().nullable(),
             date: z.string().optional().nullable(),
             username: z.string().optional().nullable(),
             title: z.string().optional().nullable(),
@@ -152,6 +156,82 @@ export const MentionsSchema = z
       )
       .optional()
       .nullable(),
+    // ── Desktop «Упоминания» period-aware extensions (backwards-compatible; all optional) ──
+    daily: z
+      .array(
+        z
+          .object({
+            day: z.string(),
+            mentions: z.coerce.number(),
+            views: z.coerce.number(),
+            channels: z.coerce.number(),
+          })
+          .passthrough(),
+      )
+      .optional()
+      .nullable(),
+    previous: z
+      .object({
+        total: z.coerce.number(),
+        unique_channels: z.coerce.number(),
+        total_views: z.coerce.number(),
+      })
+      .passthrough()
+      .optional()
+      .nullable(),
+    previous_daily: z
+      .array(
+        z
+          .object({
+            day: z.string(),
+            mentions: z.coerce.number(),
+            views: z.coerce.number(),
+            channels: z.coerce.number(),
+          })
+          .passthrough(),
+      )
+      .optional()
+      .nullable(),
+    source_options: z
+      .array(
+        z
+          .object({
+            channel_id: z.coerce.string().optional().nullable(),
+            title: z.string().optional().nullable(),
+            username: z.string().optional().nullable(),
+            count: z.coerce.number(),
+            views: z.coerce.number(),
+          })
+          .passthrough(),
+      )
+      .optional()
+      .nullable(),
+    source_summary: z
+      .object({
+        total: z.coerce.number(),
+        unique_channels: z.coerce.number(),
+        total_views: z.coerce.number(),
+      })
+      .passthrough()
+      .optional()
+      .nullable(),
+    scope: z
+      .object({
+        days: z.coerce.number().optional().nullable(),
+        source: z.string().optional().nullable(),
+        limit: z.coerce.number().optional().nullable(),
+        current_from: z.string().optional().nullable(),
+        current_to: z.string().optional().nullable(),
+        previous_from: z.string().optional().nullable(),
+        previous_to: z.string().optional().nullable(),
+        daily_days: z.coerce.number().optional().nullable(),
+      })
+      .passthrough()
+      .optional()
+      .nullable(),
+    archive_total: z.coerce.number().optional().nullable(),
+    latest_seen: z.string().optional().nullable(),
+    updated_at: z.string().optional().nullable(),
   })
   .passthrough();
 export type Mentions = z.infer<typeof MentionsSchema>;

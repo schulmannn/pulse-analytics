@@ -168,22 +168,67 @@ const TG_GRAPHS = {
 };
 
 const MENTION_CHANNELS = [
-  { username: 'smm_daily', title: 'SMM Daily', count: 9, views: 21400 },
-  { username: 'marketing_ru', title: 'Маркетинг на русском', count: 6, views: 15800 },
-  { username: 'startup_notes', title: 'Startup Notes', count: 4, views: 9200 },
-  { username: 'content_lab', title: 'Content Lab', count: 3, views: 6100 },
+  { channel_id: '1101010101', username: 'smm_daily', title: 'SMM Daily', count: 12, views: 9800 },
+  { channel_id: '1202020202', username: 'marketing_ru', title: 'Маркетинг на русском', count: 8, views: 7600 },
+  { channel_id: '1303030303', username: 'startup_notes', title: 'Startup Notes', count: 6, views: 6100 },
+  { channel_id: '1404040404', username: 'content_lab', title: 'Content Lab', count: 4, views: 4800 },
 ];
+
+// Deterministic daily mention buckets: current 30-day window + the previous equal window (30..59),
+// so the desktop chart's period comparison and the KPI deltas have real, aligned data.
+function buildMentionDaily(from: number, to: number, base: number) {
+  const rows: Array<{ day: string; mentions: number; views: number; channels: number }> = [];
+  for (let d = from; d >= to; d--) {
+    const age = from - d;
+    const mentions = age % 4 === 0 ? 2 + (age % 3) : age % 3 === 0 ? 1 : 0;
+    if (mentions <= 0) continue;
+    rows.push({ day: day(d), mentions, views: mentions * base + Math.abs(wobble(age, 300)), channels: Math.min(mentions, 3) });
+  }
+  return rows;
+}
+const MENTION_DAILY = buildMentionDaily(29, 0, 900);
+const MENTION_PREV_DAILY = buildMentionDaily(59, 30, 720);
+const sumBy = (rows: Array<{ mentions: number; views: number }>, k: 'mentions' | 'views') =>
+  rows.reduce((s, r) => s + r[k], 0);
+const MENTION_CUR_TOTAL = sumBy(MENTION_DAILY, 'mentions');
+const MENTION_CUR_VIEWS = sumBy(MENTION_DAILY, 'views');
+const MENTION_PREV_TOTAL = sumBy(MENTION_PREV_DAILY, 'mentions');
+const MENTION_PREV_VIEWS = sumBy(MENTION_PREV_DAILY, 'views');
+
 const MENTIONS = {
   available: true,
-  total: MENTION_CHANNELS.reduce((s, c) => s + c.count, 0),
+  total: MENTION_CUR_TOTAL,
   unique_channels: MENTION_CHANNELS.length,
-  total_views: MENTION_CHANNELS.reduce((s, c) => s + c.views, 0),
+  total_views: MENTION_CUR_VIEWS,
   by_day: Object.fromEntries(HISTORY_ROWS.slice(-14).map((r, i) => [String(r.day), 1 + (i % 4)])),
   top_channels: MENTION_CHANNELS,
+  daily: MENTION_DAILY,
+  previous: { total: MENTION_PREV_TOTAL, unique_channels: 3, total_views: MENTION_PREV_VIEWS },
+  previous_daily: MENTION_PREV_DAILY,
+  source_options: MENTION_CHANNELS,
+  source_summary: { total: MENTION_CUR_TOTAL, unique_channels: MENTION_CHANNELS.length, total_views: MENTION_CUR_VIEWS },
+  scope: {
+    days: 30,
+    source: null,
+    limit: 100,
+    current_from: day(29),
+    current_to: day(0),
+    previous_from: day(59),
+    previous_to: day(30),
+    daily_days: 30,
+  },
+  archive_total: MENTION_CUR_TOTAL + MENTION_PREV_TOTAL + 18,
+  latest_seen: iso(1),
+  updated_at: iso(0),
   recent: [
-    { date: iso(1), username: 'smm_daily', title: 'SMM Daily', link: 'https://t.me/smm_daily/1200', views: 3400, snippet: 'Отличный разбор аналитики от @demo_channel — рекомендуем.' },
-    { date: iso(2), username: 'marketing_ru', title: 'Маркетинг на русском', link: 'https://t.me/marketing_ru/845', views: 2900, snippet: 'Коллеги из @demo_channel показали, как считать ER правильно.' },
-    { date: iso(4), username: 'startup_notes', title: 'Startup Notes', link: 'https://t.me/startup_notes/331', views: 2100, snippet: 'Кейс роста без бюджета — ссылка на @demo_channel.' },
+    { channel_id: '1101010101', date: iso(1), username: 'smm_daily', title: 'SMM Daily', link: 'https://t.me/smm_daily/1200', views: 3400, snippet: 'Отличный разбор аналитики от @demo_channel — рекомендуем.' },
+    { channel_id: '1202020202', date: iso(2), username: 'marketing_ru', title: 'Маркетинг на русском', link: 'https://t.me/marketing_ru/845', views: 2900, snippet: 'Коллеги из @demo_channel показали, как считать ER правильно.' },
+    { channel_id: '1303030303', date: iso(4), username: 'startup_notes', title: 'Startup Notes', link: 'https://t.me/startup_notes/331', views: 2100, snippet: 'Кейс роста без бюджета — ссылка на @demo_channel.' },
+    { channel_id: '1101010101', date: iso(6), username: 'smm_daily', title: 'SMM Daily', link: 'https://t.me/smm_daily/1188', views: 1800, snippet: 'Ещё раз про @demo_channel: подача метрик — эталон.' },
+    { channel_id: '1404040404', date: iso(9), username: 'content_lab', title: 'Content Lab', link: 'https://t.me/content_lab/540', views: 1500, snippet: 'Разобрали контент-план @demo_channel по неделям.' },
+    { channel_id: '1202020202', date: iso(13), username: 'marketing_ru', title: 'Маркетинг на русском', link: 'https://t.me/marketing_ru/860', views: 2400, snippet: '@demo_channel снова в подборке лучших каналов месяца.' },
+    { channel_id: '1303030303', date: iso(19), username: 'startup_notes', title: 'Startup Notes', link: 'https://t.me/startup_notes/349', views: 1100, snippet: 'Ссылались на кейс @demo_channel в разборе воронки.' },
+    { channel_id: '1404040404', date: iso(24), username: 'content_lab', title: 'Content Lab', link: 'https://t.me/content_lab/551', views: 1700, snippet: 'Форматы сторителлинга у @demo_channel — коротко и по делу.' },
   ],
 };
 

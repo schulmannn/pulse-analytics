@@ -4,7 +4,14 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { registerTgRoutes } = require('../server/routes/tg');
 
-function fullHandler({ db, mtprotoFetch, statsTimeout = 60000 }) {
+function tgHandlers({
+  db,
+  mtprotoFetch,
+  statsTimeout = 60000,
+  cacheGet = () => null,
+  cacheSet = () => {},
+  log = () => {},
+}) {
   const routes = new Map();
   const app = {
     get(path, ...handlers) { routes.set(`GET ${path}`, handlers); },
@@ -18,9 +25,9 @@ function fullHandler({ db, mtprotoFetch, statsTimeout = 60000 }) {
     resolveChannel: pass,
     db,
     audit: async () => {},
-    log: () => {},
-    cacheGet: () => null,
-    cacheSet: () => {},
+    log,
+    cacheGet,
+    cacheSet,
     asyncHandler: (handler) => handler,
     tgCrypto: { configured: () => false },
     mediaLimiter: pass,
@@ -38,7 +45,15 @@ function fullHandler({ db, mtprotoFetch, statsTimeout = 60000 }) {
       sendMtprotoError: () => {},
     },
   });
-  return routes.get('GET /api/tg/full').at(-1);
+  return routes;
+}
+
+function fullHandler(options) {
+  return tgHandlers(options).get('GET /api/tg/full').at(-1);
+}
+
+function mentionsHandler(options) {
+  return tgHandlers(options).get('GET /api/tg/mtproto/mentions').at(-1);
 }
 
 async function invoke(handler, query = { limit: '100' }) {
@@ -107,4 +122,63 @@ test('/api/tg/full uses the stats timeout for live posts when the archive is emp
   assert.deepEqual(res.body.posts, live);
   assert.equal(res.body.posts_source, 'live');
   assert.equal(calls.find((call) => call.path === '/posts').timeout, statsTimeout);
+});
+
+test('/api/tg/mtproto/mentions waits for archive persistence before returning and caching', async () => {
+  const events = [];
+  const handler = mentionsHandler({
+    db: {
+      enabled: true,
+      upsertMentions: async (channelId, rows) => {
+        assert.equal(channelId, 7);
+        assert.equal(rows.length, 1);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        events.push('persisted');
+      },
+    },
+    mtprotoFetch: async (path) => {
+      assert.equal(path, '/mentions');
+      return {
+        available: true,
+        total: 1,
+        all: [{ channel_id: 55, msg_id: 99, views: 100 }],
+      };
+    },
+    cacheSet: (_key, body) => {
+      assert.equal(body.all, undefined, 'full list must be stripped before cache');
+      events.push('cached');
+    },
+  });
+
+  const res = await invoke(handler, {});
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.available, true);
+  assert.equal(res.body.all, undefined);
+  assert.deepEqual(events, ['persisted', 'cached']);
+});
+
+test('/api/tg/mtproto/mentions fails closed without exposing archive-write details', async () => {
+  const logs = [];
+  let cached = false;
+  const handler = mentionsHandler({
+    db: {
+      enabled: true,
+      upsertMentions: async () => { throw new Error('password=do-not-leak'); },
+    },
+    mtprotoFetch: async () => ({
+      available: true,
+      all: [{ channel_id: 55, msg_id: 99 }],
+    }),
+    cacheSet: () => { cached = true; },
+    log: (level, event, meta) => logs.push({ level, event, meta }),
+  });
+
+  const res = await invoke(handler, {});
+
+  assert.equal(res.statusCode, 503);
+  assert.equal(res.body.available, false);
+  assert.doesNotMatch(res.body.error, /password|do-not-leak/i);
+  assert.equal(cached, false);
+  assert.equal(logs[0]?.event, 'mentions_archive_write_failed');
 });

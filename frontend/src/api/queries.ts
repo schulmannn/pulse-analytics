@@ -233,16 +233,30 @@ export function useMentions() {
 }
 
 /**
- * Archived brand mentions (Postgres). Free — no MTProto quota — so it loads on mount;
- * the live search above only refreshes/extends it on demand. Same response shape.
+ * Archived brand mentions (Postgres). Free — no MTProto quota — so it loads on mount; the live
+ * search above only refreshes/extends it on demand. Same response shape.
+ *
+ * `days` (0|7|30|90) is the authoritative desktop period — the server scopes totals/chart/ranking/
+ * table to that calendar window and adds `previous`/`daily`/`source_options`. `source` narrows every
+ * aggregate to one mentioning channel (server-authoritative). No args (Home / mobile) = the legacy
+ * all-time archive, byte-identical to before.
  */
-export function useMentionsArchive() {
+export function useMentionsArchive(days: PeriodDays = 0, source?: string | null, limit?: number) {
   const { channelId } = useSelectedChannel();
+  const d = days === 7 || days === 30 || days === 90 ? days : 0;
+  const src = source && /^\d+$/.test(source) ? source : null;
+  const lim = limit != null && Number.isFinite(limit) ? Math.min(100, Math.max(1, limit)) : null;
+  const search = new URLSearchParams();
+  if (d) search.set('days', String(d));
+  if (src) search.set('source', src);
+  if (lim) search.set('limit', String(lim));
+  const qs = search.toString();
   return useQuery({
     enabled: channelId != null,
-    queryKey: ['mentions-archive', channelId],
+    queryKey: ['mentions-archive', channelId, d, src, lim],
     staleTime: STALE_ARCHIVE,
-    queryFn: ({ signal }) => apiGet('/api/history/mentions', MentionsSchema, { signal, channelId }),
+    queryFn: ({ signal }) =>
+      apiGet(`/api/history/mentions${qs ? `?${qs}` : ''}`, MentionsSchema, { signal, channelId }),
   });
 }
 
