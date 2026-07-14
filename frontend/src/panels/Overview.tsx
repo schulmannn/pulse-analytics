@@ -68,6 +68,8 @@ export function Overview() {
           id="overview-change-summary"
           title="Контекст периода"
           defaultSize="full"
+          strip
+          className="border-y border-border py-4"
           noExpand
         >
           <ChangeSummary />

@@ -5,6 +5,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useChannels } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
+import { getRememberedChannel, setRememberedChannel } from '@/lib/channel';
 import { useFocusTrap } from '@/lib/useFocusTrap';
 import { useLayerBack } from '@/lib/useLayerBack';
 import { fmt, pluralRu } from '@/lib/format';
@@ -75,15 +76,22 @@ export function SourceSwitcher({ rail = false, mobile = false }: { rail?: boolea
   const [query, setQuery] = useState('');
   const cardRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  // Previous active network, so the reconcile effect can tell a genuine NETWORK SWITCH (restore the
+  // destination network's remembered source) from an in-place channel/list change (keep the current
+  // channel while it stays eligible).
+  const prevNetworkRef = useRef(network);
   const channels = data?.channels ?? [];
 
-  // Initialise / validate the selected channel once the list loads (drives X-Channel-Id). The pair
-  // that matters is (channel, ACTIVE NETWORK): the selected channel must expose the active network
-  // as a source (registry `hasChannel`), else a TG-only channel left active while the shell is on
-  // Instagram would 404 every IG query. A valid pair is preserved; a stale one recovers to the
-  // server's `selected`, then the first eligible channel. If no channel exposes the active network
-  // (shouldn't happen — the net wouldn't be reachable), fall back to the full list so selection
-  // never wedges empty. (Bootstrap moved here from the old ChannelCard.)
+  // Initialise / validate + reconcile the selected channel once the list loads (drives X-Channel-Id).
+  // The pair that matters is (channel, ACTIVE NETWORK): the selected channel must expose the active
+  // network as a source (registry `hasChannel`), else a TG-only channel left active while the shell is
+  // on Instagram would 404 every IG query. If no channel exposes the active network (shouldn't
+  // happen — the net wouldn't be reachable), fall back to the full list so selection never wedges
+  // empty. A source is (network, channel_id): each network remembers its own last valid channel, so
+  // switching TG ↔ IG restores that side's source instead of dragging the other network's channel
+  // across. On a network switch we restore the destination's remembered channel; otherwise a valid
+  // active channel is kept (and re-remembered), and a stale/empty one recovers via
+  // remembered → server `selected` → first eligible, persisting the recovered pair.
   useEffect(() => {
     if (!data || channels.length === 0) return;
     const eligible = channels.filter((c) => networkByKey(network).hasChannel(c));
@@ -92,9 +100,25 @@ export function SourceSwitcher({ rail = false, mobile = false }: { rail?: boolea
       return;
     }
     const pool = eligible.length ? eligible : channels;
-    if (channelId != null && pool.some((c) => c.id === channelId)) return;
-    const serverSelected = pool.find((c) => c.id === data.selected)?.id;
-    setChannelId(serverSelected ?? pool[0].id);
+    const networkChanged = prevNetworkRef.current !== network;
+    prevNetworkRef.current = network;
+
+    // Same network, active channel still eligible → keep it, and make sure it's this network's
+    // remembered source (seeds/repairs the per-network memory on first load).
+    if (!networkChanged && channelId != null && pool.some((c) => c.id === channelId)) {
+      setRememberedChannel(network, channelId);
+      return;
+    }
+
+    // Network just switched, or the active channel is stale/missing: restore this network's
+    // remembered source, then fall back to the server's `selected`, then the first eligible channel.
+    const remembered = getRememberedChannel(network);
+    const recovered =
+      (remembered != null ? pool.find((c) => c.id === remembered)?.id : undefined) ??
+      pool.find((c) => c.id === data.selected)?.id ??
+      pool[0].id;
+    setRememberedChannel(network, recovered);
+    if (recovered !== channelId) setChannelId(recovered);
   }, [channelId, channels, data, network, pathname, setChannelId]);
 
   // Desktop dropdown dismisses on Escape + outside-mousedown (cardRef wraps trigger + popover). The
@@ -137,10 +161,14 @@ export function SourceSwitcher({ rail = false, mobile = false }: { rail?: boolea
   const showSearch = totalRows > 8;
 
   const pick = (row: SourceRow) => {
-    setChannelId(row.channelId);
-    // Persist the picked network up front — the destination home route owns it too, but setting it
-    // here keeps the shell from flashing the previous network before navigation resolves.
+    // Persist BOTH halves of the source (network, channel) BEFORE navigating. Set the network first
+    // so `setChannelId` records the channel under the DESTINATION network's memory (setChannelId
+    // reads the active network); also remember it explicitly so the reconcile effect on the new
+    // route restores exactly this pair instead of a fallback. Setting the network up front keeps the
+    // shell from flashing the previous network before navigation resolves.
     setActiveNetwork(row.network);
+    setRememberedChannel(row.network, row.channelId);
+    setChannelId(row.channelId);
     void queryClient.cancelQueries();
     setOpen(false);
     // The focused row unmounts with the popover — hand focus back to the trigger so a keyboard

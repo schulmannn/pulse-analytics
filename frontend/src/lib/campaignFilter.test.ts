@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { CampaignPostsResponseSchema, CampaignSchema, CampaignsResponseSchema } from '@/api/schemas';
-import { buildMembershipSet, membershipKey, parseCampaignParam } from '@/lib/campaignFilter';
+import { buildMembershipSet, isSourceMember, membershipKey, parseCampaignParam } from '@/lib/campaignFilter';
 
 describe('parseCampaignParam', () => {
   it('валидный числовой id парсится', () => {
@@ -32,6 +32,37 @@ describe('membership set', () => {
     expect(set.size).toBe(3);
     expect(set.has(membershipKey('tg', 7, '101'))).toBe(true);
     expect(set.has(membershipKey('tg', 9, '101'))).toBe(false);
+  });
+});
+
+describe('isSourceMember — source-exact membership (tg analytics «Форматы»)', () => {
+  const set = buildMembershipSet([
+    { network: 'tg', channel_id: 7, post_ref: '101' },
+    { network: 'tg', channel_id: 7, post_ref: '102' },
+    { network: 'ig', channel_id: 7, post_ref: '101' },
+    { network: 'tg', channel_id: 8, post_ref: '101' },
+  ]);
+
+  it('matches a post from the exact (tg, channel) source (number or string ref)', () => {
+    expect(isSourceMember(set, 'tg', 7, 101)).toBe(true);
+    expect(isSourceMember(set, 'tg', 7, '102')).toBe(true);
+    expect(isSourceMember(set, 'tg', 8, 101)).toBe(true);
+  });
+
+  it('never mixes another channel or Instagram membership into a TG source', () => {
+    // Same post_ref on a different channel — not a member of channel 7's source.
+    expect(isSourceMember(set, 'tg', 9, 101)).toBe(false);
+    // A ref only present as an IG membership must not satisfy a TG query.
+    const igOnly = buildMembershipSet([{ network: 'ig', channel_id: 7, post_ref: '101' }]);
+    expect(isSourceMember(igOnly, 'tg', 7, 101)).toBe(false);
+    // A post not in the campaign at all.
+    expect(isSourceMember(set, 'tg', 7, 999)).toBe(false);
+  });
+
+  it('a null channel or post id never matches (unresolved source)', () => {
+    expect(isSourceMember(set, 'tg', null, 101)).toBe(false);
+    expect(isSourceMember(set, 'tg', 7, null)).toBe(false);
+    expect(isSourceMember(set, 'tg', 7, undefined)).toBe(false);
   });
 });
 

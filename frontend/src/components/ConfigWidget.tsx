@@ -20,6 +20,7 @@ import {
   widgetPeriodValue,
 } from '@/lib/period';
 import type { WidgetConfig } from '@/lib/widgetConfig';
+import { HomeSourceProvider } from '@/lib/homeSourceContext';
 
 /**
  * A config-driven widget card — the metric builder's output rendered on a surface. It reuses the
@@ -38,6 +39,7 @@ export const ConfigWidget = memo(function ConfigWidget({ config, homeKey }: { co
   const navigate = useNavigate();
   const metric = getMetric(config.metricId);
   const legacyKey = legacyKeyForMetricId(config.metricId);
+  const sourceNetwork = metric?.source === 'ig' ? 'ig' : 'tg';
   // Metric widgets and legacy composites both drive the universal editor / explorer.
   const configurable = !!metric || !!legacyKey;
   const label = config.title || metric?.label || (legacyKey ? LEGACY_LABEL[legacyKey] : undefined) || 'Метрика';
@@ -101,7 +103,9 @@ export const ConfigWidget = memo(function ConfigWidget({ config, homeKey }: { co
 
   return (
     <>
-      {card}
+      <HomeSourceProvider value={{ network: sourceNetwork, channelId: config.source }}>
+        {card}
+      </HomeSourceProvider>
       {editOpen && configurable && (
         <ConfigEditDialog
           config={config}

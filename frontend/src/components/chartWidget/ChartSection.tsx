@@ -5,10 +5,13 @@ import { WidgetHeader } from './WidgetHeader';
 import { WidgetEditOverlay, WidgetExpandOverlay } from './WidgetOverlays';
 import { WidgetPeriodPills } from './WidgetPeriodPills';
 import type { ChartSectionProps } from './types';
+import { SourceIdentity } from '@/components/SourceIdentity';
+import { useHomeSource } from '@/lib/homeSourceContext';
 
 /** Configurable dashboard card. Public consumers import this through components/ChartWidget. */
 export function ChartSection(props: ChartSectionProps) {
   const model = useChartSectionModel(props);
+  const homeSource = useHomeSource();
   const { widgetId, label } = model.identity;
   const { group, sequenceIndex, reorder, dragging, effectiveSize } = model.layout;
   const { prefs, updatePrefs, pinned } = model.preferences;
@@ -72,7 +75,14 @@ export function ChartSection(props: ChartSectionProps) {
       >
         <WidgetHeader
           label={label}
-          action={props.action}
+          action={
+            props.homeKey && homeSource ? (
+              <>
+                <SourceIdentity network={homeSource.network} channelId={homeSource.channelId} />
+                {props.action}
+              </>
+            ) : props.action
+          }
           strip={!!props.strip}
           reorder={reorder}
           allowExpand={allowExpand}
