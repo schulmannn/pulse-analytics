@@ -197,7 +197,7 @@ function createDatabase(config, overrides = {}) {
   // единый способ достать DB-зависимость, без inline-BEGIN'ов в репозиториях).
   const transaction = createTransaction(pool);
   const jobsRepo = createJobsRepo({ pool, enabled });
-  const bugsRepo = createBugsRepo({ pool, enabled });
+  const bugsRepo = createBugsRepo({ pool, enabled, transaction });
   const reportsRepo = createReportsRepo({ pool, enabled });
   const usersRepo = createUsersRepo({ pool, enabled, transaction });
   // sourcesRepo — external identity отдельный домен (finding 8); channels/integrations зависят ОТ него,

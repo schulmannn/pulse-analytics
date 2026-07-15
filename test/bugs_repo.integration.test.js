@@ -77,6 +77,70 @@ test('upsertCrashSignature: первый → isNew+count1, повтор → !isN
   assert.strictEqual(row.last_trace_id, 't2', 'last_trace_id — последний');
 });
 
+test('recordCrashOccurrence: последовательные повторы — один bugs.id, точный count, свежий trace/context, human-статус сохраняется', { skip }, async () => {
+  const signature = sig();
+  const first = await db.recordCrashOccurrence({
+    text: `crash ${nonce} v1`, context: `ctx-1 ${nonce}`, signature,
+    scope: 'widget', name: 'TypeError', message: 'boom', route: '/home', traceId: 't1',
+  });
+  assert.strictEqual(first.signature.isNew, true, 'первое появление — новая сигнатура');
+  assert.strictEqual(first.signature.count, 1);
+  assert.strictEqual(first.bug.kind, 'crash');
+  assert.strictEqual(first.bug.status, 'open', 'новый crash-тикет — open');
+
+  // Человек закрыл тикет — повтор НЕ должен его переоткрывать.
+  await db.updateBug(first.bug.id, 'done');
+
+  const second = await db.recordCrashOccurrence({
+    text: `crash ${nonce} v2`, context: `ctx-2 ${nonce}`, signature,
+    scope: 'widget', name: 'TypeError', message: 'boom', route: '/home', traceId: 't2',
+  });
+  assert.strictEqual(second.signature.isNew, false, 'повтор — не новая сигнатура');
+  assert.strictEqual(second.signature.count, 2, 'count инкрементнулся');
+  assert.strictEqual(second.bug.id, first.bug.id, 'тот же видимый bugs.id (агрегация)');
+  assert.strictEqual(second.bug.text, `crash ${nonce} v2`, 'текст обновлён на последний trace');
+  assert.strictEqual(second.bug.context, `ctx-2 ${nonce}`, 'context обновлён на последний');
+  assert.strictEqual(second.bug.status, 'done', 'human-статус сохранён (не auto-reopen)');
+
+  // Ровно один видимый bugs-row на сигнатуру; ledger — count 2, last_trace ротирован.
+  const { rows } = await pool.query(`SELECT count(*)::int AS n FROM bugs WHERE crash_signature=$1`, [signature]);
+  assert.strictEqual(rows[0].n, 1, 'один bugs-row на сигнатуру');
+  const led = (await pool.query(`SELECT count, last_trace_id FROM crash_signatures WHERE signature=$1`, [signature])).rows[0];
+  assert.strictEqual(Number(led.count), 2);
+  assert.strictEqual(led.last_trace_id, 't2');
+
+  // listBugs отдаёт occurrence_count + last_seen для агрегированного crash-row.
+  const listed = (await db.listBugs()).find((x) => x.id === first.bug.id);
+  assert.ok(listed, 'crash-тикет виден в listBugs');
+  assert.strictEqual(Number(listed.occurrence_count), 2, 'occurrence_count = count леджера');
+  assert.ok(listed.last_seen, 'last_seen проставлен для crash-row');
+});
+
+test('recordCrashOccurrence: конкурентные повторы одной сигнатуры — один row, точный count', { skip }, async () => {
+  const signature = sig();
+  const N = 8;
+  const results = await Promise.all(
+    Array.from({ length: N }, (_, i) => db.recordCrashOccurrence({
+      text: `race ${nonce} #${i}`, context: `c${i}`, signature,
+      scope: 'app', name: 'RaceError', message: 'concurrent', route: '/x', traceId: `r${i}`,
+    })),
+  );
+  const ids = new Set(results.map((r) => r.bug.id));
+  assert.strictEqual(ids.size, 1, 'все конкурентные записи — один bugs.id');
+  const rows = (await pool.query(`SELECT count(*)::int AS n FROM bugs WHERE crash_signature=$1`, [signature])).rows[0];
+  assert.strictEqual(rows.n, 1, 'один видимый bugs-row');
+  const led = (await pool.query(`SELECT count FROM crash_signatures WHERE signature=$1`, [signature])).rows[0];
+  assert.strictEqual(Number(led.count), N, `count == число обращений (${N})`);
+});
+
+test('recordCrashOccurrence не затрагивает обычные тикеты: occurrence_count/last_seen — null', { skip }, async () => {
+  const b = await db.createBug({ text: `normal ${nonce}`, severity: 'low', kind: 'bug' });
+  const listed = (await db.listBugs()).find((x) => x.id === b.id);
+  assert.ok(listed, 'обычный тикет виден');
+  assert.strictEqual(listed.occurrence_count, null, 'occurrence_count null для обычного тикета');
+  assert.strictEqual(listed.last_seen, null, 'last_seen null для обычного тикета');
+});
+
 test('setCrashNotionPage / touchCrashNotified проставляют notion_page_id + last_notified', { skip }, async () => {
   const signature = sig();
   await db.upsertCrashSignature({ signature, name: 'E', message: 'm', traceId: 't' });

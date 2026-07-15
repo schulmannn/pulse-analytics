@@ -141,6 +141,8 @@ interface BugRowCardProps {
     kind?: string | null;
     text?: string | null;
     context?: string | null;
+    occurrence_count?: number | null;
+    last_seen?: string | null;
   };
   availableStatuses: string[];
   onDelete: (id: number) => void;
@@ -162,6 +164,9 @@ function BugRowCard({ bug, availableStatuses, onDelete }: BugRowCardProps) {
   const severityColors: Record<string, string> = { high: 'text-ember', low: 'text-verdant', medium: 'text-primary' };
   const currentKindClass = kindColors[bug.kind ?? ''] || 'text-muted-foreground bg-muted';
   const currentSeverityClass = severityColors[bug.severity ?? ''] || 'text-muted-foreground';
+  // Aggregated crashes collapse to one ticket; show an honest repeat count (≥2) so an admin sees a
+  // recurring crash isn't a one-off. Historical/pre-signature crashes have no count → nothing shown.
+  const crashCount = bug.kind === 'crash' && typeof bug.occurrence_count === 'number' ? bug.occurrence_count : null;
 
   const handleStatusChange = (e: ChangeEvent<HTMLSelectElement>) => updateStatusMutation.mutate({ status: e.target.value });
 
@@ -201,6 +206,14 @@ function BugRowCard({ bug, availableStatuses, onDelete }: BugRowCardProps) {
             <span className={`rounded px-1.5 py-0.5 font-sans text-2xs font-medium tracking-wide ${currentKindClass}`}>
               {kindLabel}
             </span>
+            {crashCount != null && crashCount > 1 && (
+              <span
+                className="rounded bg-ember/10 px-1.5 py-0.5 font-sans text-2xs font-medium tracking-wide text-ember"
+                title={bug.last_seen ? `Последний раз: ${fmt.date(bug.last_seen)}` : undefined}
+              >
+                ×{fmt.short(crashCount)}
+              </span>
+            )}
             <span className={`font-sans font-medium ${currentSeverityClass}`}>
               Важность: {SEVERITY_LABELS[bug.severity ?? ''] || bug.severity}
             </span>
