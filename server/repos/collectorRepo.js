@@ -272,8 +272,12 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
     if (!enabled || !channelId) throw new Error('database unavailable');
     return transaction(async (client) => {
       await saveSnapshot(channelId, snapshot, client);
-      if (dailyRows.length) await upsertChannelDaily(channelId, dailyRows, client);
-      if (postRows.length) await upsertPosts(channelId, postRows, client);
+      // Return the persisted row counts (mirror of persistCentralDaily) so the managed-central
+      // caller can apply the same channel_daily=0 degraded guard without a follow-up read. Previous
+      // callers ignored the (undefined) return value, so adding one is backwards-compatible.
+      const channel_daily = dailyRows.length ? await upsertChannelDaily(channelId, dailyRows, client) : 0;
+      const posts = postRows.length ? await upsertPosts(channelId, postRows, client) : 0;
+      return { channel_daily, posts };
     });
   }
 

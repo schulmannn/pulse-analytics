@@ -9,14 +9,35 @@
 
 'use strict';
 
+const MANAGED_FALLBACK_CODES = new Set([
+  'managed_prereq', 'managed_not_configured', 'session_decrypt_failed',
+  'session_unauthorized', 'mtproto_session_unauthorized',
+  'mtproto_timeout', 'mtproto_unreachable', 'mtproto_error', 'internal_error',
+  'flood_wait', 'collect_failed',
+]);
+
+function safeManagedFallbackCode(error) {
+  return error && MANAGED_FALLBACK_CODES.has(error.code) ? error.code : 'collect_failed';
+}
+
 function createDailyIngestJob({
   db, log, mtprotoFetch, MTPROTO_TIMEOUT_STATS_MS, MTPROTO_TIMEOUT_HEAVY_MS, tgPostToRow,
-  processReportSchedules, processPersistence, processTgQrCollection,
+  collectManagedChannelNow, processReportSchedules, processPersistence, processTgQrCollection,
 }) {
   async function run({ requestId, base }) {
     if (!db.enabled) return { status: 200, body: { ok: false, reason: 'DATABASE_URL не задан — БД выключена' } };
     const channelId = await db.getOwnerChannelId();   // central channel = "collector #0"
     if (!channelId) return { status: 503, body: { ok: false, reason: 'central channel not ready' } };
+    // Managed central collection: the central channel is a real DB channel owned by a user whose
+    // stored (QR) session can collect it — preferred over the fixed env TG_SESSION the global live
+    // path uses (that env session is immutable and, once revoked, silently stops the central channel).
+    // Resolve the owner + their session up front; a missing/decrypt-failing session or a
+    // reauth_required state means we simply keep the old global path.
+    const central = await db.getChannelById(channelId).catch(() => null);
+    const ownerUid = central && central.owner_uid;
+    const ownerSession = ownerUid ? await db.getTgSession(ownerUid).catch(() => null) : null;
+    const canManaged = !!(collectManagedChannelNow && central && central.tg_channel_id != null
+      && ownerSession && ownerSession.session_enc && ownerSession.connection_state !== 'reauth_required');
     // Idempotency (Ковчег): a double cron tick / a second web instance must NOT run the heavy
     // MTProto pass (/graphs + /posts + up to ~12 GetMessageStats for velocity) twice for the same
     // day. runJobOnce keyed on the UTC date makes exactly one caller do the work; a duplicate gets
@@ -42,18 +63,39 @@ function createDailyIngestJob({
 
     try {
       const outcome = await db.runJobOnce('daily_ingest', `central:${dateKey}`, async () => {
-        let posts;
-        [graphs, posts] = await Promise.all([
-          mtprotoFetch('/graphs', { points: 400 }, MTPROTO_TIMEOUT_HEAVY_MS).catch(() => null),   // full range for the archive (dashboard uses 45)
-          mtprotoFetch('/posts', { limit: 100 }, MTPROTO_TIMEOUT_STATS_MS).catch(() => null),
-        ]);
-        const velocity = await mtprotoFetch('/velocity', {}, MTPROTO_TIMEOUT_HEAVY_MS).catch(() => null);
-        // All three upserts commit together (persistCentralDaily) — no half-written day.
-        const persisted = await db.persistCentralDaily(channelId, {
-          dailyRows: db.graphsToDailyRows(graphs),
-          postRows: (posts && Array.isArray(posts.posts)) ? posts.posts.map(tgPostToRow) : [],
-          velocity,
-        });
+        let persisted = null;
+        // Preferred path: collect the central channel through the owner's managed session. On success
+        // we take its persisted counts and expose its graphs to the persistence tail; velocity stays
+        // false for this phase (the velocity route keeps serving the last DB snapshot). Any
+        // decrypt/upstream/auth failure logs only safe context and falls through to the global path.
+        if (canManaged) {
+          try {
+            const managed = await collectManagedChannelNow(ownerSession, central, dateKey);
+            graphs = (managed && managed.bundle && managed.bundle.graphs) || null;
+            persisted = { channel_daily: managed.channel_daily || 0, posts: managed.posts || 0, velocity: false };
+          } catch (e) {
+            // No session material or upstream body — only uid/channel/safe code.
+            log('warn', 'daily_ingest_managed_fallback', {
+              request_id: requestId, uid: ownerUid, channel_id: channelId, code: safeManagedFallbackCode(e),
+            });
+            persisted = null;
+            graphs = null;
+          }
+        }
+        if (!persisted) {
+          let posts;
+          [graphs, posts] = await Promise.all([
+            mtprotoFetch('/graphs', { points: 400 }, MTPROTO_TIMEOUT_HEAVY_MS).catch(() => null),   // full range for the archive (dashboard uses 45)
+            mtprotoFetch('/posts', { limit: 100 }, MTPROTO_TIMEOUT_STATS_MS).catch(() => null),
+          ]);
+          const velocity = await mtprotoFetch('/velocity', {}, MTPROTO_TIMEOUT_HEAVY_MS).catch(() => null);
+          // All three upserts commit together (persistCentralDaily) — no half-written day.
+          persisted = await db.persistCentralDaily(channelId, {
+            dailyRows: db.graphsToDailyRows(graphs),
+            postRows: (posts && Array.isArray(posts.posts)) ? posts.posts.map(tgPostToRow) : [],
+            velocity,
+          });
+        }
         // Наблюдаемость тихой смерти архива: для рабочего центрального канала graphsToDailyRows
         // всегда отдаёт полный диапазон, поэтому channel_daily=0 означает не «пустой день», а
         // упавший тяжёлый MTProto-fetch (graphs=null). Бросаем ПОСЛЕ коммита (частичные

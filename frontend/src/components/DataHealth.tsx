@@ -34,19 +34,23 @@ export function DataHealth({ defaultOpen = false }: { defaultOpen?: boolean } = 
   const isQr = current?.source === 'qr';
   const isCollector = current?.source === 'collector' || current?.source == null;
   const { data: collector } = useCollectorStatus(isCollector && current ? current.id : null);
-  const { data: qr } = useTgQrStatus(isQr);
+  // Fetch managed status for QR OR central — central ownership is discovered from `central_owner`, and
+  // only an owner's central channel exposes a repairable session (its session IS the collector now).
+  const { data: qr } = useTgQrStatus(isQr || isCentral);
+  const centralOwner = isCentral ? !!qr?.central_owner : false;
+  const managed = isQr || (isCentral && centralOwner);
   const { data: history } = useHistory(730);
   const fresh = freshness(latestHistoryDay(history), Date.now());
 
   const status = collector?.status;
   const qrState = qr?.connection_state;
-  const source = isCentral ? 'Telegram · MTProto' : isQr ? 'Telegram · QR' : 'Telegram · Collector';
-  const lastSuccess = isQr ? qr?.last_success_at : status?.last_success_at;
+  const source = managed ? 'Telegram · QR' : isCentral ? 'Telegram · MTProto' : 'Telegram · Collector';
+  const lastSuccess = managed ? qr?.last_success_at : status?.last_success_at;
   const lastCollect = lastSuccess ? fmt.date(lastSuccess) : fresh?.label ?? '—';
-  const collectionMode = isCentral
-    ? 'MTProto'
-    : isQr
-      ? 'Atlavue'
+  const collectionMode = managed
+    ? 'Atlavue'
+    : isCentral
+      ? 'MTProto'
       : status?.collector_version
         ? `Collector v${status.collector_version}`
         : 'Collector';
@@ -55,10 +59,10 @@ export function DataHealth({ defaultOpen = false }: { defaultOpen?: boolean } = 
   // of their own instead of being flattened into a generic stale-data message.
   let apiTone: 'ok' | 'warn' | 'error' = 'ok';
   let apiText = '200 OK';
-  if (isQr && qrState === 'reauth_required') {
+  if (managed && qrState === 'reauth_required') {
     apiTone = 'error';
     apiText = 'нужен вход';
-  } else if (isQr && qrState === 'degraded') {
+  } else if (managed && qrState === 'degraded') {
     apiTone = 'warn';
     apiText = 'временный сбой';
   } else if (isCollector && status?.last_error) {
@@ -74,25 +78,25 @@ export function DataHealth({ defaultOpen = false }: { defaultOpen?: boolean } = 
 
   const apiDot = apiTone === 'ok' ? 'bg-verdant' : apiTone === 'warn' ? 'bg-status-warn' : 'bg-ember';
   const statusLabel =
-    isQr && qrState === 'reauth_required'
+    managed && qrState === 'reauth_required'
       ? 'Нужно переподключить Telegram'
-      : isQr && qrState === 'degraded'
+      : managed && qrState === 'degraded'
         ? 'Сбор временно недоступен'
         : apiTone === 'ok'
           ? 'Данные актуальны'
           : apiTone === 'warn'
             ? 'Данные устарели'
             : 'Ошибка сбора';
-  const connectionLink = isQr
+  const connectionLink = managed
     ? qrState === 'reauth_required'
       ? '/connect?source=telegram&tab=qr&action=reconnect'
       : '/connect?source=telegram&tab=qr'
     : isCollector
       ? '/connect?source=telegram&tab=agent'
       : null;
-  const connectionLabel = isQr && qrState === 'reauth_required'
+  const connectionLabel = managed && qrState === 'reauth_required'
     ? 'Переподключить Telegram →'
-    : isQr
+    : managed
       ? 'Открыть подключение →'
       : 'Настроить collector →';
 

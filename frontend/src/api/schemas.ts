@@ -454,6 +454,9 @@ export const TgQrStatusSchema = z
     last_success_at: z.string().nullish(),
     last_error_code: z.string().nullish(),
     last_error_at: z.string().nullish(),
+    // Server-derived: is the caller the owner of the managed central channel? Gates the honest
+    // owner-only central repair signal (a non-owner sees only the generic global behavior).
+    central_owner: z.boolean().nullish(),
   })
   .passthrough();
 export type TgQrStatus = z.infer<typeof TgQrStatusSchema>;

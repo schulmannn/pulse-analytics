@@ -234,7 +234,7 @@ function createComposition(config, overrides = {}) {
 
   // Сбор QR-каналов (persistTgBundle/collectQrChannel[sNow]/processTgQrCollection) —
   // jobs/tgQrCollectionJob: сессии дешифруются только внутри, tgPostToRow общий с ingest.
-  const { collectQrChannelsNow, processTgQrCollection } =
+  const { collectQrChannelsNow, collectManagedChannelNow, processTgQrCollection } =
     createTgQrCollectionJob({
       db,
       log,
@@ -271,6 +271,7 @@ function createComposition(config, overrides = {}) {
     MTPROTO_TIMEOUT_STATS_MS,
     MTPROTO_TIMEOUT_HEAVY_MS,
     tgPostToRow,
+    collectManagedChannelNow,
     processReportSchedules,
     processPersistence,
     processTgQrCollection,

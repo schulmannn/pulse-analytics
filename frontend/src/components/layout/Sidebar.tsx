@@ -174,13 +174,17 @@ function SidebarStatus({ rail }: { rail?: boolean }) {
   const { data: channelsData } = useChannels();
   const current = channelsData?.channels.find((channel) => channel.id === channelId) ?? channelsData?.channels[0];
   const isQr = current?.source === 'qr';
-  const { data: qrStatus } = useTgQrStatus(isQr);
+  const isCentral = current?.source === 'central';
+  const { data: qrStatus } = useTgQrStatus(isQr || isCentral);
+  const centralOwner = isCentral ? !!qrStatus?.central_owner : false;
+  const managed = isQr || (isCentral && centralOwner);
   const { data: history } = useHistory(730);
   const fresh = freshness(latestHistoryDay(history), Date.now());
   const health = sidebarHealth({
     source: current?.source,
-    connectionState: isQr ? qrStatus?.connection_state ?? null : null,
+    connectionState: managed ? qrStatus?.connection_state ?? null : null,
     fresh,
+    centralOwner,
   });
   // Reserve this row's height even before freshness resolves — the same flex row with a muted dot and
   // an invisible (but same-metrics) label — so the nav below doesn't jump down when it appears. That

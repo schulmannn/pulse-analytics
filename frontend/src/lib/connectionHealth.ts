@@ -26,10 +26,14 @@ export interface HealthBanner {
 export interface HealthInput {
   /** Selected channel source: 'qr' | 'collector' | 'central' | 'ig' | … (undefined while loading). */
   source?: string | null;
-  /** Public `connection_state` from GET /api/tg/qr/status — pass null unless source === 'qr'. */
+  /** Public `connection_state` from GET /api/tg/qr/status — pass null unless the source is managed
+   *  (source === 'qr', or source === 'central' when the caller owns the central channel). */
   connectionState?: string | null;
   /** History freshness (from freshness()) — null when the channel has no archive yet. */
   fresh: Freshness | null;
+  /** `central_owner` from GET /api/tg/qr/status — true only when source === 'central' AND the caller
+   *  owns it (its managed session is now the collector). Non-owners fall back to generic behavior. */
+  centralOwner?: boolean | null;
 }
 
 export interface SidebarHealth {
@@ -44,41 +48,52 @@ const QR_STATUS_LINK = { label: 'Проверить подключение →',
 const QR_REFRESH_LINK = { label: 'Обновить подключение →', to: '/connect?source=telegram&tab=qr&action=reconnect' };
 const AGENT_LINK = { label: 'Проверить агента →', to: '/connect?source=telegram&tab=agent' };
 
-export function overviewHealthBanner({ source, connectionState, fresh }: HealthInput): HealthBanner | null {
+/** Managed-session repair banner, shared by source='qr' and an owner's source='central' — both are
+ *  now collected through a stored, repairable Telegram session with identical semantics. */
+function managedRepairBanner(connectionState: string | null | undefined, stale: boolean, lastLabel: string | null): HealthBanner | null {
+  // Explicit revocation wins over everything, including a still-fresh archive — the session is dead
+  // NOW, so waiting for the history to age would leave the user staring at silently frozen numbers.
+  if (connectionState === 'reauth_required') {
+    return {
+      tone: 'error',
+      message: 'Сессия Telegram недействительна — новые данные не поступают.',
+      cta: RECONNECT_LINK,
+    };
+  }
+  // Transient outage: honest, reassuring, and explicitly NOT a reconnect ask.
+  if (connectionState === 'degraded') {
+    return {
+      tone: 'warn',
+      message: 'Telegram временно недоступен — сбор возобновится автоматически, переподключение не требуется.',
+      cta: QR_STATUS_LINK,
+    };
+  }
+  // Live (or unknown/disconnected) session but the archive has aged — an honest freshness nudge with a
+  // direct update/reconnect link, never a claim that the session is revoked.
+  if (stale) {
+    return {
+      tone: 'warn',
+      message: `Данные устарели — последний сбор ${lastLabel}. Проверьте подключение Telegram.`,
+      cta: QR_REFRESH_LINK,
+    };
+  }
+  return null;
+}
+
+/** Is this a source collected through a repairable, owner-held session? Managed QR always is; the
+ *  central channel is only when the caller owns it (then its session IS the collector). */
+function isManagedSource(source?: string | null, centralOwner?: boolean | null): boolean {
+  return source === 'qr' || (source === 'central' && !!centralOwner);
+}
+
+export function overviewHealthBanner({ source, connectionState, fresh, centralOwner }: HealthInput): HealthBanner | null {
   const stale = fresh?.stale ?? false;
   const lastLabel = fresh?.label ?? null;
 
-  if (source === 'qr') {
-    // Explicit revocation wins over everything, including a still-fresh archive — the session is dead
-    // NOW, so waiting for the history to age would leave the user staring at silently frozen numbers.
-    if (connectionState === 'reauth_required') {
-      return {
-        tone: 'error',
-        message: 'Сессия Telegram недействительна — новые данные не поступают.',
-        cta: RECONNECT_LINK,
-      };
-    }
-    // Transient outage: honest, reassuring, and explicitly NOT a reconnect ask.
-    if (connectionState === 'degraded') {
-      return {
-        tone: 'warn',
-        message: 'Telegram временно недоступен — сбор возобновится автоматически, переподключение не требуется.',
-        cta: QR_STATUS_LINK,
-      };
-    }
-    // Live (or unknown) session but the archive has aged — an honest freshness nudge, never a claim
-    // that the session is revoked.
-    if (stale) {
-      return {
-        tone: 'warn',
-        message: `Данные устарели — последний сбор ${lastLabel}. Проверьте подключение Telegram.`,
-        cta: QR_REFRESH_LINK,
-      };
-    }
-    return null;
-  }
+  if (isManagedSource(source, centralOwner)) return managedRepairBanner(connectionState, stale, lastLabel);
 
-  // Non-QR sources have no managed session to repair — only stale history warrants a banner.
+  // Non-managed sources have no repairable session — only stale history warrants a banner. (A central
+  // channel the caller does NOT own also lands here: generic stale notice, no repair CTA.)
   if (!stale) return null;
 
   if (source === 'collector') {
@@ -99,11 +114,12 @@ export function overviewHealthBanner({ source, connectionState, fresh }: HealthI
 }
 
 /** Compact source health for the persistent desktop sidebar. */
-export function sidebarHealth({ source, connectionState, fresh }: HealthInput): SidebarHealth | null {
-  if (source === 'qr' && connectionState === 'reauth_required') {
+export function sidebarHealth({ source, connectionState, fresh, centralOwner }: HealthInput): SidebarHealth | null {
+  const managed = isManagedSource(source, centralOwner);
+  if (managed && connectionState === 'reauth_required') {
     return { tone: 'error', label: 'нужно переподключить' };
   }
-  if (source === 'qr' && connectionState === 'degraded') {
+  if (managed && connectionState === 'degraded') {
     return { tone: 'warn', label: 'сбор временно недоступен' };
   }
   if (!fresh) return null;

@@ -98,16 +98,21 @@ test('successful QR reconnect immediately refreshes existing tracked QR channels
   let releaseRefresh;
   const refreshed = new Promise((resolve) => { releaseRefresh = resolve; });
   const session = { uid: 11, session_enc: 'encrypted:fresh', session_version: '2' };
-  const tracked = { id: 7, source: 'qr', tg_channel_id: 777, username: 'tracked' };
+  const tracked = { id: 7, owner_uid: 11, source: 'qr', tg_channel_id: 777, username: 'tracked' };
+  const centralCh = { id: 5, owner_uid: 11, source: 'central', tg_channel_id: 555, username: 'central' };
   const routes = tgHandlers({
     db: {
       enabled: true,
       saveTgSession: async (uid, data) => events.push(['saved', uid, data]),
       getTgSession: async () => session,
       listChannels: async () => [
+        centralCh,
         tracked,
         { id: 8, source: 'collector', tg_channel_id: 888 },
         { id: 9, source: 'qr', tg_channel_id: null },
+        { id: 10, source: 'central', tg_channel_id: null },
+        { id: 11, owner_uid: 99, source: 'qr', tg_channel_id: 111, username: 'shared-qr' },
+        { id: 12, owner_uid: 99, source: 'central', tg_channel_id: 222, username: 'shared-central' },
       ],
     },
     mtprotoFetch: async () => ({}),
@@ -147,7 +152,79 @@ test('successful QR reconnect immediately refreshes existing tracked QR channels
     11,
     { tg_user_id: 42, username: 'owner', session_enc: 'encrypted:fresh' },
   ]);
-  assert.deepEqual(events[1], ['refreshed', session, [tracked]]);
+  // The refresh includes the central channel + the tracked QR channel (both with a tg id), but NOT
+  // the collector channel, rows without a tg id, or visible workspace channels owned by somebody
+  // else — reconnect may only write channels owned by the session owner.
+  assert.deepEqual(events[1], ['refreshed', session, [centralCh, tracked]]);
+});
+
+test('central /api/tg/full prefers the managed snapshot and marks it source="managed"', async () => {
+  const snap = { data: { channel: { title: 'Central', username: 'central', memberCount: 1234 }, views_summary: { total_views: 9 }, posts: [{ id: 3 }] } };
+  const calls = [];
+  const handler = tgHandlers({
+    db: { enabled: true, getSnapshotForActor: async (id, actor) => { calls.push([id, actor.uid]); return snap; } },
+    mtprotoFetch: async (path) => { calls.push(path); return {}; },
+  }).get('GET /api/tg/full').at(-1);
+
+  const res = await invoke(handler);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.source, 'managed');
+  assert.deepEqual(res.body.channel, snap.data.channel);
+  assert.deepEqual(res.body.posts, [{ id: 3 }]);
+  assert.equal(res.body.mtproto_available, true);
+  assert.deepEqual(calls, [[7, 11]]);   // read the snapshot; NO live mtproto fetch
+});
+
+test('central /api/tg/full falls back to the live global branch when no managed snapshot exists', async () => {
+  const calls = [];
+  const handler = tgHandlers({
+    db: { enabled: true, getSnapshotForActor: async () => null, listPostsForActor: async () => [] },
+    mtprotoFetch: async (path) => {
+      calls.push(path);
+      if (path === '/channel') return { members: 1000 };
+      if (path === '/views_summary') return { posts_analyzed: 1 };
+      if (path === '/posts') return { posts: [{ id: 9 }] };
+      throw new Error(`unexpected ${path}`);
+    },
+  }).get('GET /api/tg/full').at(-1);
+
+  const res = await invoke(handler);
+
+  assert.equal(res.statusCode, 200);
+  assert.notEqual(res.body.source, 'managed');       // live global branch, not the managed snapshot
+  assert.ok(calls.includes('/channel'), 'live mtproto branch ran');
+  assert.deepEqual(res.body.posts, [{ id: 9 }]);
+});
+
+test('/api/tg/qr/status derives central_owner server-side (never from client)', async () => {
+  const handlerOwner = tgHandlers({
+    db: {
+      enabled: true,
+      getTgSession: async () => null,
+      getOwnerChannelId: async () => 5,
+      getChannelById: async (id) => (id === 5 ? { id: 5, source: 'central', owner_uid: 11 } : null),
+    },
+    tgCrypto: { configured: () => true },
+    mtprotoPost: async () => ({}),
+  }).get('GET /api/tg/qr/status').at(-1);
+
+  const owner = await invokeRoute(handlerOwner, { user: { uid: 11 } });
+  assert.equal(owner.body.central_owner, true);
+
+  const handlerStranger = tgHandlers({
+    db: {
+      enabled: true,
+      getTgSession: async () => null,
+      getOwnerChannelId: async () => 5,
+      getChannelById: async () => ({ id: 5, source: 'central', owner_uid: 999 }),
+    },
+    tgCrypto: { configured: () => true },
+    mtprotoPost: async () => ({}),
+  }).get('GET /api/tg/qr/status').at(-1);
+
+  const stranger = await invokeRoute(handlerStranger, { user: { uid: 11 } });
+  assert.equal(stranger.body.central_owner, false);
 });
 
 test('/api/tg/full serves archived posts without a live /posts request', async () => {
@@ -156,6 +233,7 @@ test('/api/tg/full serves archived posts without a live /posts request', async (
   const handler = fullHandler({
     db: {
       enabled: true,
+      getSnapshotForActor: async () => null,   // no managed snapshot → live global branch
       listPostsForActor: async (channelId, actor, limit) => {
         assert.deepEqual([channelId, actor.uid, limit], [7, 11, 100]);
         return archived;
@@ -183,7 +261,7 @@ test('/api/tg/full uses the stats timeout for live posts when the archive is emp
   const statsTimeout = 61000;
   const live = [{ id: 99, date: '2026-07-13T10:00:00Z', text: 'live', views: 1200 }];
   const handler = fullHandler({
-    db: { enabled: true, listPostsForActor: async () => [] },
+    db: { enabled: true, getSnapshotForActor: async () => null, listPostsForActor: async () => [] },
     statsTimeout,
     mtprotoFetch: async (path, params, timeout) => {
       calls.push({ path, params, timeout });

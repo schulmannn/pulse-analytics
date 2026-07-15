@@ -19,9 +19,13 @@ function publicConnectionState(state) {
 // Build the full public status payload from a raw tg_sessions row (or null when disconnected).
 // Backwards-compatible top-level fields (server_ready/connected/username/connected_at) are preserved
 // verbatim so existing clients keep working; the health fields are additive.
-function toPublicQrStatus(session, { serverReady } = {}) {
-  if (!serverReady) return { server_ready: false, connected: false };
-  if (!session) return { server_ready: true, connected: false };
+// `central_owner` is a safe, server-derived boolean: is the caller the owner of the managed central
+// channel? It gates the honest owner-only central repair signal on the client and is present in EVERY
+// branch (incl. server-not-ready / disconnected) so the UI can rely on it without a null dance.
+function toPublicQrStatus(session, { serverReady, centralOwner } = {}) {
+  const central_owner = !!centralOwner;
+  if (!serverReady) return { server_ready: false, connected: false, central_owner };
+  if (!session) return { server_ready: true, connected: false, central_owner };
   return {
     server_ready: true,
     connected: true,
@@ -32,6 +36,7 @@ function toPublicQrStatus(session, { serverReady } = {}) {
     last_success_at: session.last_success_at || null,
     last_error_code: session.last_error_code || null,
     last_error_at: session.last_error_at || null,
+    central_owner,
   };
 }
 

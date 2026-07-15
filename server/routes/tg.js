@@ -129,7 +129,13 @@ function registerTgRoutes({
       db.getTgSession(user.uid),
       db.listChannels(user),
     ]);
-    const tracked = channels.filter((channel) => channel.source === 'qr' && channel.tg_channel_id != null);
+    // Refresh the managed central channel too (source='central'), not just source='qr' — a reconnect
+    // must actually restore central collection through the fresh session, not merely change the copy.
+    // Collector channels are fed by their own agent, and rows without a known tg id can't be collected.
+    const tracked = channels.filter(
+      (channel) => channel.owner_uid === user.uid
+        && (channel.source === 'qr' || channel.source === 'central')
+        && channel.tg_channel_id != null);
     if (session && tracked.length) await collectQrChannelsNow(session, tracked);
   }
 
@@ -155,11 +161,27 @@ function registerTgRoutes({
 
   // Status incl. non-secret connection-health (connection_state + last_attempt/success/error). The
   // shape is built by the pure toPublicQrStatus mapper (unit-tested) — session_enc NEVER leaves here.
+  // Is the caller the owner of the managed central channel? Derived ENTIRELY server-side from the
+  // central channel's owner_uid (never client input) so the honest owner-only repair signal can't be
+  // spoofed. Safe/false whenever the DB is off or the central channel isn't resolvable yet.
+  async function isCentralOwner(uid) {
+    if (!db.enabled || uid == null) return false;
+    try {
+      const centralId = await db.getOwnerChannelId();
+      if (!centralId) return false;
+      const central = await db.getChannelById(centralId);
+      return !!(central && central.owner_uid === uid);
+    } catch { return false; }
+  }
+
   app.get('/api/tg/qr/status', requireAuth, async (req, res, next) => {
     try {
       const serverReady = tgQrConfigured();
-      const s = serverReady ? await db.getTgSession(req.user.uid) : null;
-      res.json(toPublicQrStatus(s, { serverReady }));
+      const [s, centralOwner] = await Promise.all([
+        serverReady ? db.getTgSession(req.user.uid) : Promise.resolve(null),
+        isCentralOwner(req.user.uid),
+      ]);
+      res.json(toPublicQrStatus(s, { serverReady, centralOwner }));
     } catch (e) { next(e); }
   });
 
@@ -513,6 +535,16 @@ function registerTgRoutes({
       const snap = req.channel.id ? await db.getSnapshotForActor(req.channel.id, req.user).catch(() => null) : null;
       const d = (snap && snap.data) || {};
       return res.json({ channel: d.channel || {}, views_summary: d.views_summary || null, posts: d.posts || [], mtproto_available: !!d.channel, source: 'collector' });
+    }
+    // Central: prefer the managed snapshot the daily ingest now persists through the owner's session
+    // (actor-gated). It carries `source: 'managed'` to distinguish it from a collector snapshot. Only
+    // when no managed snapshot exists do we fall back to the old live global MTProto branch below.
+    if (db.enabled && req.channel?.id) {
+      const snap = await db.getSnapshotForActor(req.channel.id, req.user).catch(() => null);
+      const d = snap && snap.data;
+      if (d && d.channel && Object.keys(d.channel).length > 0) {
+        return res.json({ channel: d.channel, views_summary: d.views_summary || null, posts: d.posts || [], mtproto_available: true, source: 'managed' });
+      }
     }
     const limit = Math.min(100, parseInt(req.query.limit) || 30);
     try {
