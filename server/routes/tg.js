@@ -207,7 +207,10 @@ function registerTgRoutes({
           mtprotoPost('/qr/cancel', { params: { id: k } }).catch(() => {});
         }
       }
-      const data = await mtprotoPost('/qr/start');
+      const data = await mtprotoPost('/qr/start', {
+        timeoutMs: MTPROTO_TIMEOUT_STATS_MS,
+        retryConnectionErrors: true,
+      });
       _qrStarts.set(data.id, { uid: req.user.uid, at: now });
       res.json({ id: data.id, url: data.url, expires_in: data.expires_in });
     } catch (e) { next(e); }

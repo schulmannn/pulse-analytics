@@ -158,6 +158,29 @@ test('successful QR reconnect immediately refreshes existing tracked QR channels
   assert.deepEqual(events[1], ['refreshed', session, [centralCh, tracked]]);
 });
 
+test('/api/tg/qr/start allows a cold Telegram service to start without changing other POSTs', async () => {
+  const calls = [];
+  const statsTimeout = 61000;
+  const routes = tgHandlers({
+    db: { enabled: true },
+    mtprotoFetch: async () => ({}),
+    mtprotoPost: async (path, options) => {
+      calls.push({ path, options });
+      return { id: 'login-1', url: 'tg://login', expires_in: 60 };
+    },
+    tgCrypto: { configured: () => true },
+    statsTimeout,
+  });
+
+  const response = await invokeRoute(routes.get('POST /api/tg/qr/start').at(-1));
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(calls, [{
+    path: '/qr/start',
+    options: { timeoutMs: statsTimeout, retryConnectionErrors: true },
+  }]);
+});
+
 test('central /api/tg/full prefers the managed snapshot and marks it source="managed"', async () => {
   const snap = { data: { channel: { title: 'Central', username: 'central', memberCount: 1234 }, views_summary: { total_views: 9 }, posts: [{ id: 3 }] } };
   const calls = [];

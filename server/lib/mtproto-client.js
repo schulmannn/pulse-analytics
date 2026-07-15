@@ -38,6 +38,18 @@ function isRetryableConnErr(err) {
   return !!err && err.name === 'FetchError' && err.type !== 'request-timeout';
 }
 
+const RETRYABLE_POST_CONNECT_CODES = new Set([
+  'ECONNREFUSED',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+]);
+
+function isRetryablePostConnectErr(err) {
+  return isRetryableConnErr(err) && RETRYABLE_POST_CONNECT_CODES.has(err.code);
+}
+
 function createMtprotoClient(
   { url = DEFAULT_MTPROTO_URL, token = '' } = {},
   { breaker = createBreaker(), fetchImpl = fetchWithTimeout } = {},
@@ -130,7 +142,12 @@ function createMtprotoClient(
   // POST variant for the QR-login handshake (start/poll/password/cancel).
   async function mtprotoPost(
     path,
-    { params = {}, body = undefined, timeoutMs = MTPROTO_TIMEOUT_MS } = {},
+    {
+      params = {},
+      body = undefined,
+      timeoutMs = MTPROTO_TIMEOUT_MS,
+      retryConnectionErrors = false,
+    } = {},
   ) {
     const gate = mtprotoBreaker.tryAcquire();
     if (!gate.ok) {
@@ -151,23 +168,35 @@ function createMtprotoClient(
         url.searchParams.set(k, String(v)),
       );
       let res;
-      try {
-        res = await fetchImpl(
-          url.toString(),
-          {
-            method: 'POST',
-            headers: {
-              'x-internal-token': MTPROTO_TOKEN,
-              ...(body ? { 'content-type': 'application/json' } : {}),
+      const maxAttempts = retryConnectionErrors ? 3 : 1;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          res = await fetchImpl(
+            url.toString(),
+            {
+              method: 'POST',
+              headers: {
+                'x-internal-token': MTPROTO_TOKEN,
+                ...(body ? { 'content-type': 'application/json' } : {}),
+              },
+              body: body ? JSON.stringify(body) : undefined,
             },
-            body: body ? JSON.stringify(body) : undefined,
-          },
-          timeoutMs,
-        );
-      } catch (err) {
-        const e = new Error('Сервис Telegram недоступен, попробуйте позже');
-        e.status = 503;
-        throw e;
+            timeoutMs,
+          );
+          break;
+        } catch (err) {
+          // Opt-in and connection-establishment failures only. Timeouts and resets are ambiguous:
+          // the service may already have completed the POST, so they must never be repeated here.
+          if (isRetryablePostConnectErr(err) && attempt < maxAttempts) {
+            const backoffMs =
+              (attempt === 1 ? 150 : 400) + Math.floor(Math.random() * 100);
+            await sleep(backoffMs);
+            continue;
+          }
+          const e = new Error('Сервис Telegram недоступен, попробуйте позже');
+          e.status = 503;
+          throw e;
+        }
       }
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }));

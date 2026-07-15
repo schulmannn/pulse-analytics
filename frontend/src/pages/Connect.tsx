@@ -4,7 +4,7 @@ import { z } from 'zod';
 import QRCode from 'qrcode';
 import { useQueryClient } from '@tanstack/react-query';
 import { useChannels, useConnectIg, useDisconnectIg, useIgOauthStatus, useTgQrStatus } from '@/api/queries';
-import { apiSend } from '@/api/client';
+import { ApiError, apiSend } from '@/api/client';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { cn } from '@/lib/utils';
 
@@ -567,6 +567,7 @@ function TelegramPanel({
   const [password, setPassword] = useState('');
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [startRetrying, setStartRetrying] = useState(false);
   // A successful replacement login clears the focused reconnect callout locally (before the shared
   // status refetch lands), so the user immediately sees the fresh connected/channels view.
   const [reconnectDone, setReconnectDone] = useState(false);
@@ -641,9 +642,19 @@ function TelegramPanel({
   const start = async () => {
     setErr(null);
     setBusy(true);
+    setStartRetrying(false);
     setChannels([]);
     try {
-      const r = await apiSend('POST', '/api/tg/qr/start', undefined, QrStartSchema);
+      let r: z.infer<typeof QrStartSchema>;
+      try {
+        r = await apiSend('POST', '/api/tg/qr/start', undefined, QrStartSchema);
+      } catch (e) {
+        if (!(e instanceof ApiError) || e.status !== 503 || !alive.current) throw e;
+        setStartRetrying(true);
+        await new Promise((resolve) => window.setTimeout(resolve, 800));
+        if (!alive.current) return;
+        r = await apiSend('POST', '/api/tg/qr/start', undefined, QrStartSchema);
+      }
       const img = await QRCode.toDataURL(r.url, { margin: 1, width: 208 });
       if (!alive.current) return;
       idRef.current = r.id;
@@ -652,12 +663,16 @@ function TelegramPanel({
       setQrImg(img);
       setPhase('scanning');
       setBusy(false);
+      setStartRetrying(false);
       stopPoll();
       pollRef.current = window.setTimeout(poll, 2500);
     } catch (e) {
       if (!alive.current) return;
       setBusy(false);
-      setErr(e instanceof Error ? e.message : 'Не удалось начать вход');
+      setStartRetrying(false);
+      setErr(e instanceof ApiError && e.status === 503
+        ? 'Не удалось подготовить QR-код. Telegram пока недоступен — попробуйте ещё раз.'
+        : e instanceof Error ? e.message : 'Не удалось начать вход');
     }
   };
 
@@ -743,6 +758,7 @@ function TelegramPanel({
               username={status?.username ?? null}
               onReconnect={start}
               busy={busy}
+              startRetrying={startRetrying}
               err={err}
             />
           ) : connected ? (
@@ -758,7 +774,7 @@ function TelegramPanel({
                 disabled={busy}
                 className="btn-pill mt-4 bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
               >
-                {busy ? 'Подготовка кода…' : 'Показать QR-код'}
+                {busy ? (startRetrying ? 'Telegram запускается…' : 'Подготовка кода…') : 'Показать QR-код'}
               </button>
               {err && <p role="alert" className="mt-3 text-xs font-medium text-destructive">{err}</p>}
             </div>
@@ -851,12 +867,14 @@ function TgReconnect({
   username,
   onReconnect,
   busy,
+  startRetrying,
   err,
 }: {
   reauth: boolean;
   username: string | null;
   onReconnect: () => void;
   busy: boolean;
+  startRetrying: boolean;
   err: string | null;
 }) {
   return (
@@ -882,7 +900,7 @@ function TgReconnect({
         disabled={busy}
         className="btn-pill mt-4 bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
       >
-        {busy ? 'Подготовка кода…' : 'Переподключить'}
+        {busy ? (startRetrying ? 'Telegram запускается…' : 'Подготовка кода…') : 'Переподключить'}
       </button>
       {err && <p role="alert" className="mt-3 text-xs font-medium text-destructive">{err}</p>}
     </div>
