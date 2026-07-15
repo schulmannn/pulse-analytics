@@ -56,6 +56,8 @@ Telegram поддерживает две модели подключения:
 | `TG_API_ID`, `TG_API_HASH` | mtproto/collector | Telegram application credentials |
 | `TG_SESSION`, `TG_CHANNEL` | mtproto | служебная управляемая Telegram-сессия и канал, если используются |
 | `IG_CLIENT_ID`, `IG_CLIENT_SECRET`, `IG_TOKEN_KEY` | web | Instagram Login и шифрование account token |
+| `IG_OAUTH_MAX_INFLIGHT` | web | предел одновременных Instagram OAuth callback-обменов, по умолчанию `8`, диапазон `1..64`; очередь ожидания ограничена тем же числом |
+| `IG_OAUTH_ACQUIRE_TIMEOUT_MS` | web | сколько callback ждёт свободный OAuth-слот перед честным `busy`, мс, по умолчанию `2000`, диапазон `100..10000` |
 | `INGEST_TOKEN` | web/cron | авторизация daily ingest через `x-ingest-token` |
 | `COLLECTOR_STALE_HOURS` | web | порог устаревания collector, по умолчанию 24 часа |
 | `CACHE_MAX_ENTRIES` | web | верхняя граница числа записей in-memory LRU-кэша ответов, по умолчанию `2000`, диапазон `100..10000` |

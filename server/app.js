@@ -168,6 +168,8 @@ function createApp(deps) {
     app, db, requireAuth, audit, log, fetchWithTimeout, asyncHandler,
     appBase, cache, igConfigured, igCrypto, AUTH_SECRET, IG_GRAPH,
     IG_CLIENT_ID: config.instagram.clientId, IG_CLIENT_SECRET: config.instagram.clientSecret,
+    oauthMaxInFlight: config.instagram.oauthMaxInFlight,
+    oauthAcquireTimeoutMs: config.instagram.oauthAcquireTimeoutMs,
   });
 
   registerChannelsRoutes({ app, db, requireAuth, audit, getDbReady });

@@ -238,3 +238,33 @@ test('MTProto client applies the local default URL only when config is empty', (
   assert.equal(client.MTPROTO_URL, 'http://localhost:8001');
   assert.equal(client.MTPROTO_TOKEN, '');
 });
+
+test('QR pending-cap overload maps to a truthful busy signal, not an outage, and spares the breaker', async () => {
+  const breaker = recordingBreaker();
+  const fetchImpl = async () => ({
+    ok: false,
+    status: 503,
+    statusText: 'Service Unavailable',
+    json: async () => ({ detail: 'too_many_pending' }),
+  });
+  const client = createMtprotoClient({ url: 'http://mt:8001', token: 't' }, { breaker, fetchImpl });
+
+  await assert.rejects(
+    () => client.mtprotoPost('/qr/start'),
+    (err) => {
+      assert.equal(err.status, 503, 'protective backpressure/503 preserved');
+      assert.equal(err.code, 'too_many_pending', 'stable machine code preserved for callers');
+      assert.equal(err.busy, true, 'flagged as busy backpressure, distinct from an outage');
+      assert.equal(err.retryAfter, 60, 'client can expose a truthful retry horizon');
+      assert.ok(!err.floodWait, 'not a FloodWait/auth path');
+      assert.ok(/\s/.test(err.message), 'human retry-later copy, not a bare code');
+      assert.notEqual(err.message, 'too_many_pending', 'raw snake_case code never reaches the UI');
+      assert.ok(!/reauth|unauthorized|переподключите/i.test(err.message), 'never implies re-auth');
+      return true;
+    },
+  );
+
+  // Admission backpressure must NOT be counted as an upstream failure — otherwise an onboarding peak
+  // that trips the 40-login cap would open the shared circuit and mislead every later QR start.
+  assert.deepEqual(breaker.settled, [{ ok: true, lane: 'live' }]);
+});

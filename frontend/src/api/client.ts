@@ -4,14 +4,36 @@ import { getSessionToken, setSessionToken } from '@/lib/session';
 import { isDemoMode } from '@/lib/demo';
 import { demoFixture } from '@/lib/demoFixtures';
 
-/** Thrown on non-2xx responses; `status` lets callers special-case 401 etc. */
+/** Thrown on non-2xx responses; metadata lets callers distinguish retryable backpressure. */
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  retryAfter?: number;
+  constructor(status: number, message: string, retryAfter?: number) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.retryAfter = retryAfter;
   }
+}
+
+async function readApiError(res: Response): Promise<ApiError> {
+  let message = `${res.status} ${res.statusText}`;
+  let retryAfter: number | undefined;
+  try {
+    const body = await res.json();
+    if (body && typeof body.error === 'string') message = body.error;
+    const rawRetry = body && body.retry_after;
+    const parsedRetry = rawRetry === '' || rawRetry == null ? NaN : Number(rawRetry);
+    if (Number.isFinite(parsedRetry) && parsedRetry >= 0) retryAfter = parsedRetry;
+  } catch {
+    /* error body was not JSON — keep the status line */
+  }
+  if (retryAfter == null) {
+    const rawHeader = res.headers.get('Retry-After');
+    const header = rawHeader == null ? NaN : Number(rawHeader);
+    if (Number.isFinite(header) && header >= 0) retryAfter = header;
+  }
+  return new ApiError(res.status, message, retryAfter);
 }
 
 /**
@@ -91,14 +113,7 @@ export async function apiGet<S extends z.ZodTypeAny>(
     signal: opts.signal,
   });
   if (!res.ok) {
-    let message = `${res.status} ${res.statusText}`;
-    try {
-      const body = await res.json();
-      if (body && typeof body.error === 'string') message = body.error;
-    } catch {
-      /* error body was not JSON — keep the status line */
-    }
-    throw new ApiError(res.status, message);
+    throw await readApiError(res);
   }
   persistSessionRefresh(res);
   const data: unknown = await res.json();
@@ -139,14 +154,7 @@ export async function apiSend(
   }
   const res = await fetch(path, init);
   if (!res.ok) {
-    let message = `${res.status} ${res.statusText}`;
-    try {
-      const errBody = await res.json();
-      if (errBody && typeof errBody.error === 'string') message = errBody.error;
-    } catch {
-      /* error body was not JSON */
-    }
-    throw new ApiError(res.status, message);
+    throw await readApiError(res);
   }
   persistSessionRefresh(res);
   if (res.status === 204) return null;

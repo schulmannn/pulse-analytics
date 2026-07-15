@@ -38,6 +38,7 @@ const IG_ERROR_MESSAGES: Record<string, string> = {
   channel: 'Нет доступа к выбранному каналу.',
   exchange: 'Instagram не выдал токен — попробуйте ещё раз.',
   identity: 'Не удалось получить данные аккаунта Instagram.',
+  busy: 'Сейчас слишком много подключений Instagram — повторите через минуту.',
 };
 
 /** Reads the OAuth callback flag (?ig=connected / ?ig_error=…) once, refetches IG data on success,

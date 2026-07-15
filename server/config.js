@@ -67,6 +67,12 @@ function loadConfig(env = process.env) {
       // клиент/секрет connect-флоу inert — фолбэк на глобальный env-аккаунт или мок.
       clientId: env.IG_CLIENT_ID || '',
       clientSecret: env.IG_CLIENT_SECRET || '',
+      // Admission-контроль OAuth-callback: сколько connect-флоу могут ОДНОВРЕМЕННО делать три
+      // зависимых внешних обмена (code→short→long→/me) и как коротко ждём слот перед честным
+      // fast-fail. Одна web-реплика (ADR-002) → in-memory счётчик авторитетен. Дефолты
+      // консервативны: пик онбординга не должен пинать сотни медленных upstream-запросов.
+      oauthMaxInFlight: Number(env.IG_OAUTH_MAX_INFLIGHT || 8),
+      oauthAcquireTimeoutMs: Number(env.IG_OAUTH_ACQUIRE_TIMEOUT_MS || 2000),
     }),
     telegram: Object.freeze({
       botToken: env.TG_BOT_TOKEN || '',
@@ -236,6 +242,23 @@ function validateConfig(config) {
     config.cache.ttlMs > 3600000
   ) {
     add('cache.ttlMs', 'CACHE_TTL_MS должен быть целым числом (мс) в диапазоне 1000..3600000.');
+  }
+  // Instagram OAuth admission-контроль. cap вне [1..64] бессмыслен (0 = connect всегда 503, гигантский
+  // = нет защиты от пикового fan-out); acquire-таймаут держим в [100мс..10с]: слишком мало = ложные
+  // busy под нормальной нагрузкой, слишком много = запрос висит на переполненном контроллере.
+  if (
+    !Number.isInteger(config.instagram.oauthMaxInFlight) ||
+    config.instagram.oauthMaxInFlight < 1 ||
+    config.instagram.oauthMaxInFlight > 64
+  ) {
+    add('instagram.oauthMaxInFlight', 'IG_OAUTH_MAX_INFLIGHT должен быть целым числом в диапазоне 1..64.');
+  }
+  if (
+    !Number.isInteger(config.instagram.oauthAcquireTimeoutMs) ||
+    config.instagram.oauthAcquireTimeoutMs < 100 ||
+    config.instagram.oauthAcquireTimeoutMs > 10000
+  ) {
+    add('instagram.oauthAcquireTimeoutMs', 'IG_OAUTH_ACQUIRE_TIMEOUT_MS должен быть целым числом (мс) в диапазоне 100..10000.');
   }
   if (config.runtime.webReplicas > 1) {
     add('runtime.webReplicas', 'WEB_REPLICAS > 1 запрещён до появления shared state (ADR-002: одна реплика).');

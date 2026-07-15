@@ -649,7 +649,9 @@ function TelegramPanel({
       try {
         r = await apiSend('POST', '/api/tg/qr/start', undefined, QrStartSchema);
       } catch (e) {
-        if (!(e instanceof ApiError) || e.status !== 503 || !alive.current) throw e;
+        // Retry a cold service once, but respect explicit server backpressure. Retrying a capacity
+        // response would amplify the onboarding spike that the admission limit is protecting from.
+        if (!(e instanceof ApiError) || e.status !== 503 || e.retryAfter != null || !alive.current) throw e;
         setStartRetrying(true);
         await new Promise((resolve) => window.setTimeout(resolve, 800));
         if (!alive.current) return;
@@ -670,9 +672,15 @@ function TelegramPanel({
       if (!alive.current) return;
       setBusy(false);
       setStartRetrying(false);
-      setErr(e instanceof ApiError && e.status === 503
-        ? 'Не удалось подготовить QR-код. Telegram пока недоступен — попробуйте ещё раз.'
-        : e instanceof Error ? e.message : 'Не удалось начать вход');
+      // Prefer the server's translated message (backpressure like the 40-login cap comes back as a
+      // truthful "too busy, retry in a minute" — distinct from a real outage). Raw snake_case codes
+      // have no spaces, so fall back to generic copy for those rather than leaking a code to the UI.
+      const serverMsg = e instanceof ApiError ? e.message : '';
+      setErr(/\s/.test(serverMsg)
+        ? serverMsg
+        : e instanceof ApiError && e.status === 503
+          ? 'Не удалось подготовить QR-код. Telegram пока недоступен — попробуйте ещё раз.'
+          : e instanceof Error ? e.message : 'Не удалось начать вход');
     }
   };
 

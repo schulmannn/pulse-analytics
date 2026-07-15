@@ -213,7 +213,13 @@ function registerTgRoutes({
       });
       _qrStarts.set(data.id, { uid: req.user.uid, at: now });
       res.json({ id: data.id, url: data.url, expires_in: data.expires_in });
-    } catch (e) { next(e); }
+    } catch (e) {
+      if (e && e.busy) {
+        log('warn', 'tg_qr_start_busy', { code: e.code || 'busy' });
+        return sendMtprotoError(res, e);
+      }
+      next(e);
+    }
   });
 
   app.post('/api/tg/qr/poll', requireAuth, async (req, res, next) => {
