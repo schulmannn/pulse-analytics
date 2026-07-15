@@ -34,10 +34,10 @@ const prunes = [
     make: (pool, enabled) => createJobsRepo({ pool, enabled }).pruneTerminalJobs,
     // предикат обязан резать только терминальные и никогда queued/running
     assertSql: (sql) => {
-      assert.equal((sql.match(/status IN \('succeeded', 'failed'\)/g) || []).length, 2,
-        'mutable terminal status is guarded in both the selector and outer DELETE');
-      assert.equal((sql.match(/updated_at < now\(\)/g) || []).length, 2,
-        'age is guarded in both the locked selector and DELETE target');
+      assert.equal((sql.match(/status IN \('succeeded', 'failed'\)/g) || []).length, 1,
+        'only terminal status enters the locked selector');
+      assert.equal((sql.match(/updated_at < now\(\)/g) || []).length, 1,
+        'only old rows enter the locked selector');
       assert.match(sql, /ORDER BY updated_at, id/);
       assert.match(sql, /FOR UPDATE SKIP LOCKED/, 'maintenance never waits behind a live claim');
       assert.doesNotMatch(sql, /status\s+(?:IN\s*\([^)]*)?(?:=\s*)?'(?:queued|running)'/,

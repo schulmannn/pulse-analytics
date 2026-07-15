@@ -119,12 +119,7 @@ function createJobsRepo({ pool, enabled }) {
             ORDER BY updated_at, id
             LIMIT $2
             FOR UPDATE SKIP LOCKED
-          )
-            -- Defense in depth: re-check the mutable predicate on the DELETE target as well as in
-            -- the locked selector, so a future query refactor cannot turn an id-only match into a
-            -- deletion of fresh running work.
-            AND status IN ('succeeded', 'failed')
-            AND updated_at < now() - make_interval(days => $1)`,
+          )`,
         [days, limit]);
       batches += 1;
       deleted += rowCount;

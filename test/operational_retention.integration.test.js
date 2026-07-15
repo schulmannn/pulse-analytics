@@ -123,8 +123,8 @@ test('pruneTerminalJobs: границы времени, защита queued/runn
   const keys = [];
   for (let i = 0; i < 5; i++) keys.push(await mkJob(h, `js-cap-${i}`, 'succeeded', 20));
   const capped = await h.db.pruneTerminalJobs({ maxAgeDays: 10, batchSize: 2, maxBatches: 2 });
-  assert.strictEqual(capped.capped, true, 'упёрлись в cap');
-  assert.strictEqual(capped.deleted, 4, 'ровно batchSize*maxBatches удалено за прогон');
+  assert.deepStrictEqual(capped, { deleted: 4, batches: 2, capped: true },
+    'ровно batchSize*maxBatches удалено и прогон помечен capped');
   const survivorsAfterCap = [];
   for (const k of keys) if (await jobExists(h, k)) survivorsAfterCap.push(k);
   assert.strictEqual(survivorsAfterCap.length, 1, 'один остаток пережил capped-прогон');
@@ -209,8 +209,7 @@ test('pruneEmailTokens: consumed/expired режутся, валидный неи
   const ids = [];
   for (let i = 0; i < 5; i++) ids.push(await mkToken(h, uid, `tk-cap-${i}`, { createdDaysAgo: 20, usedDaysAgo: 10, expiresInDays: 30 }));
   const capped = await h.db.pruneEmailTokens({ maxAgeDays: 10, batchSize: 2, maxBatches: 2 });
-  assert.strictEqual(capped.capped, true);
-  assert.strictEqual(capped.deleted, 4);
+  assert.deepStrictEqual(capped, { deleted: 4, batches: 2, capped: true });
   let survivors = 0;
   for (const id of ids) if (await tokenExists(h, id)) survivors++;
   assert.strictEqual(survivors, 1, 'один остаток пережил capped-прогон');
