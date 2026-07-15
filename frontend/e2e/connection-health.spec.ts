@@ -4,7 +4,7 @@ import { expect, test, type Page } from '@playwright/test';
 // central channel (the production root cause: central collected through the owner's now-revoked
 // session) or a managed QR channel. For central, central_owner=true is what gates the owner-only
 // repair signal — a non-owner would see only the generic global behavior.
-async function bootRevokedSession(page: Page, source: 'central' | 'qr') {
+async function bootRevokedSession(page: Page, source: 'central' | 'qr', failFirstQrStart = false) {
   let qrStarts = 0;
   await page.route(/^https?:\/\/[^/]+\/api\//, async (route) => {
     const request = route.request();
@@ -51,6 +51,7 @@ async function bootRevokedSession(page: Page, source: 'central' | 'qr') {
     }
     if (path === '/api/tg/qr/start') {
       qrStarts += 1;
+      if (failFirstQrStart && qrStarts === 1) return json(503, { error: 'Сервис Telegram недоступен, попробуйте позже' });
       return json(200, { id: 'flow-1', url: 'tg://login?token=ZmFrZQ', expires_in: 60 });
     }
     if (path === '/api/tg/qr/poll') return json(200, { status: 'pending', url: 'tg://login?token=ZmFrZQ' });
@@ -83,7 +84,7 @@ async function bootRevokedSession(page: Page, source: 'central' | 'qr') {
 // and focused Connect flow QR channels already get, with NO auto-start.
 test('revoked central session (owner) opens the focused reconnect flow without auto-starting it', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop-1440', 'desktop connection-health contract');
-  const state = await bootRevokedSession(page, 'central');
+  const state = await bootRevokedSession(page, 'central', true);
 
   const reconnectLink = page.getByRole('link', { name: 'Переподключить Telegram →', exact: true });
   await expect(reconnectLink).toBeVisible();
@@ -106,7 +107,8 @@ test('revoked central session (owner) opens the focused reconnect flow without a
   await testInfo.attach('telegram-central-reconnect-dark', { path: reconnectShot, contentType: 'image/png' });
 
   await page.getByRole('button', { name: 'Переподключить', exact: true }).click();
-  await expect.poll(state.qrStarts).toBe(1);
+  await expect(page.getByRole('button', { name: 'Telegram запускается…', exact: true })).toBeVisible();
+  await expect.poll(state.qrStarts).toBe(2);
   await expect(page.getByAltText('QR-код для входа в Telegram')).toBeVisible();
 });
 
