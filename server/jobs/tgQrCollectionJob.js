@@ -9,6 +9,8 @@
 
 'use strict';
 
+const { createTgSessionDecryptor } = require('../lib/tgSessionDecrypt');
+
 // Auth-ошибка сессии = сама StringSession недействительна (юзер снёс сессию/сменил пароль/2FA-ревок).
 // Python-сервис отдаёт её ровно двумя стабильными кодами (mtproto-client кладёт их в e.code):
 // 401 'session_unauthorized' (QR-путь) и 503 'mtproto_session_unauthorized' (stats-путь). Матчим
@@ -29,6 +31,10 @@ function safeTgErrorCode(e) {
 }
 
 function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN, MTPROTO_TIMEOUT_HEAVY_MS, tgPostToRow, tgQrChannelsPerPass = 200 }) {
+  // Shared decrypt: transparently falls back to a rotated-out key and lazily re-encrypts the row under
+  // the active key (generation-guarded, best-effort — a rewrite failure never blocks the collect).
+  const { decryptTgSession } = createTgSessionDecryptor({ tgCrypto, db, log });
+
   // Persist the health outcome for ONE session after its channels were processed. Priority:
   // auth-fail > success > degraded. Success wins over any non-auth error (an earlier channel that
   // collected proves the session is live); auth-fail wins over everything (session is now invalid).
@@ -115,7 +121,7 @@ function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN
       const e = new Error('managed_channel_not_configured'); e.code = 'managed_not_configured'; throw e;
     }
     let sessionStr;
-    try { sessionStr = tgCrypto.decrypt(sess.session_enc); }
+    try { sessionStr = await decryptTgSession(sess); }
     catch { const e = new Error('managed_channel_decrypt_failed'); e.code = 'session_decrypt_failed'; throw e; }
     const theDay = day || new Date().toISOString().slice(0, 10);
     try {
@@ -138,7 +144,7 @@ function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN
   async function collectQrChannelsNow(sess, channels) {
     if (!sess || !tgCrypto.configured() || !MTPROTO_TOKEN) return;
     let sessionStr;
-    try { sessionStr = tgCrypto.decrypt(sess.session_enc); } catch { return; }
+    try { sessionStr = await decryptTgSession(sess); } catch { return; }
     const day = new Date().toISOString().slice(0, 10);
     // Same health semantics as the nightly job: auth-fail short-circuits the remaining channels for
     // this session; a single successful collect wins over any non-auth failure. Каждый вызов
@@ -175,7 +181,7 @@ function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN
     for (const s of sessions) {
       if (done >= cap) { stats.capped = true; break; }
       let sessionStr;
-      try { sessionStr = tgCrypto.decrypt(s.session_enc); }
+      try { sessionStr = await decryptTgSession(s); }
       catch { log('error', 'tg_qr_decrypt_failed', { uid: s.uid }); continue; }
 
       let chans = [];

@@ -36,6 +36,7 @@ function createRoutes(overrides = {}) {
     upsertMentions: async () => 1,
     recordTgSessionSuccess: async () => true,
     recordTgSessionFailure: async () => true,
+    rotateTgSessionCiphertext: async () => true,
     ...overrides.db,
   };
   const calls = { audit: [], logs: [], cache: [] };
@@ -48,7 +49,12 @@ function createRoutes(overrides = {}) {
     log: (level, event, metadata) => calls.logs.push({ level, event, metadata }),
     cacheGet: overrides.cacheGet || (() => null),
     cacheSet: overrides.cacheSet || ((key, value) => calls.cache.push({ key, value })),
-    tgCrypto: overrides.tgCrypto || { configured: () => true, decrypt: () => 'plaintext-session' },
+    tgCrypto: overrides.tgCrypto || {
+      configured: () => true,
+      encrypt: (plain) => `enc:${plain}`,
+      decrypt: () => 'plaintext-session',
+      decryptDetailed: () => ({ plaintext: 'plaintext-session', usedPreviousKey: false }),
+    },
     mtprotoClient: {
       MTPROTO_TOKEN: 'internal-token',
       MTPROTO_TIMEOUT_HEAVY_MS: 120000,
@@ -258,4 +264,45 @@ test('managed session auth failure marks only its generation reauth_required', a
   assert.deepEqual(health, [[11, '7', {
     state: 'reauth_required', errorCode: 'session_unauthorized',
   }]]);
+});
+
+test('live search: a previous-key session searches (no reauth) and is rewritten once under its generation', async () => {
+  const rotate = [];
+  const health = [];
+  const { routes } = createRoutes({
+    tgCrypto: {
+      configured: () => true,
+      encrypt: (plain) => `enc:${plain}`,
+      // Rotated-out key authenticated the stored session.
+      decryptDetailed: () => ({ plaintext: 'plaintext-session', usedPreviousKey: true }),
+    },
+    db: {
+      rotateTgSessionCiphertext: async (uid, version, enc) => { rotate.push({ uid, version, enc }); return true; },
+      recordTgSessionFailure: async (...args) => { health.push(args); return true; },
+    },
+  });
+  const res = await invoke(routes.get('GET /api/tg/mtproto/mentions'));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(res.statusCode, 200, 'previous-key decrypt still serves the search');
+  assert.deepEqual(rotate, [{ uid: 11, version: '7', enc: 'enc:plaintext-session' }]);
+  assert.deepEqual(health, [], 'a working previous key must NOT mark reauth_required');
+});
+
+test('live search: previous-key rewrite failure never blocks the search', async () => {
+  const { routes, calls } = createRoutes({
+    tgCrypto: {
+      configured: () => true,
+      encrypt: (plain) => `enc:${plain}`,
+      decryptDetailed: () => ({ plaintext: 'plaintext-session', usedPreviousKey: true }),
+    },
+    db: {
+      rotateTgSessionCiphertext: async () => { throw new Error('db down'); },
+    },
+  });
+  const res = await invoke(routes.get('GET /api/tg/mtproto/mentions'));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(res.statusCode, 200, 'rewrite failure is best-effort and does not fail the search');
+  assert.ok(calls.logs.some((l) => l.event === 'tg_session_key_reencrypt_failed'));
 });

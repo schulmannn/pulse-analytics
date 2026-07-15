@@ -186,6 +186,47 @@ test('tg_sessions health: reconnect (saveTgSession) сбрасывает health 
   assert.strictEqual((await db.getTgSession(U.id)).connection_state, 'healthy');
 });
 
+test('rotateTgSessionCiphertext: переписывает ТОЛЬКО session_enc под тем же поколением, без version/health/identity', { skip }, async () => {
+  const U = await mkUser('rot');
+  await db.saveTgSession(U.id, { tg_user_id: 666, username: `rot_${nonce}`, session_enc: 'enc:v1' });
+  // Пометим сессию как degraded с последней ошибкой/попыткой — rewrite не должен это трогать.
+  const before = await db.getTgSession(U.id);
+  const version = before.session_version;
+  await db.recordTgSessionFailure(U.id, version, { state: 'degraded', errorCode: 'mtproto_timeout' });
+  const beforeRewrite = await db.getTgSession(U.id);
+
+  const matched = await db.rotateTgSessionCiphertext(U.id, version, 'enc:reencrypted');
+  assert.strictEqual(matched, true, 'совпадающее поколение → true');
+
+  const after = await db.getTgSession(U.id);
+  assert.strictEqual(after.session_enc, 'enc:reencrypted', 'ciphertext переписан');
+  assert.strictEqual(after.session_version, version, 'session_version НЕ инкрементируется');
+  assert.strictEqual(after.tg_user_id, beforeRewrite.tg_user_id, 'tg_user_id не тронут');
+  assert.strictEqual(after.username, beforeRewrite.username, 'username не тронут');
+  assert.strictEqual(after.connection_state, 'degraded', 'connection_state не тронут');
+  assert.strictEqual(after.last_error_code, 'mtproto_timeout', 'health-ошибка не тронута');
+  assert.strictEqual(after.last_error_at, beforeRewrite.last_error_at, 'last_error_at не тронут');
+});
+
+test('rotateTgSessionCiphertext: устаревшее/чужое поколение → no-op false, ciphertext не меняется', { skip }, async () => {
+  const U = await mkUser('rotstale');
+  await db.saveTgSession(U.id, { tg_user_id: 777, username: `rs_${nonce}`, session_enc: 'enc:a' });
+  const oldVersion = (await db.getTgSession(U.id)).session_version;
+  // Reconnect инкрементирует поколение (симулируем гонку переподключения).
+  await db.saveTgSession(U.id, { tg_user_id: 777, username: `rs_${nonce}`, session_enc: 'enc:b' });
+  const newVersion = (await db.getTgSession(U.id)).session_version;
+  assert.notStrictEqual(newVersion, oldVersion);
+
+  // Ленивое переписывание из прежнего поколения не должно затирать свежую сессию.
+  const matched = await db.rotateTgSessionCiphertext(U.id, oldVersion, 'enc:stale');
+  assert.strictEqual(matched, false, 'устаревшее поколение → no-op');
+  assert.strictEqual((await db.getTgSession(U.id)).session_enc, 'enc:b', 'свежий ciphertext сохранён');
+
+  // Невалидное поколение / отсутствующий uid → чистый false без записи.
+  assert.strictEqual(await db.rotateTgSessionCiphertext(U.id, '0', 'enc:x'), false, 'невалидная version → false');
+  assert.strictEqual(await db.rotateTgSessionCiphertext(999999999, newVersion, 'enc:x'), false, 'нет строки → false');
+});
+
 test('tg_sessions health: listTgSessions отдаёт health-поля (cron-путь)', { skip }, async () => {
   const U = await mkUser('tgl');
   await db.saveTgSession(U.id, { tg_user_id: 555, username: `l_${nonce}`, session_enc: 'enc:l0' });
