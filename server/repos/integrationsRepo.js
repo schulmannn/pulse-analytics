@@ -154,7 +154,7 @@ function createIntegrationsRepo({ pool, enabled, ensureExternalSource, transacti
               to_char(last_success_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS last_success_at,
               last_error_code,
               to_char(last_error_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS last_error_at
-         FROM tg_sessions`);
+         FROM tg_sessions ORDER BY uid ASC`);
     return rows;
   }
 

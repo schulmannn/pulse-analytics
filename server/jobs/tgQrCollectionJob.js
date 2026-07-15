@@ -28,7 +28,7 @@ function safeTgErrorCode(e) {
   return 'collect_failed';
 }
 
-function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN, MTPROTO_TIMEOUT_HEAVY_MS, tgPostToRow }) {
+function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN, MTPROTO_TIMEOUT_HEAVY_MS, tgPostToRow, tgQrChannelsPerPass = 200 }) {
   // Persist the health outcome for ONE session after its channels were processed. Priority:
   // auth-fail > success > degraded. Success wins over any non-auth error (an earlier channel that
   // collected proves the session is live); auth-fail wins over everything (session is now invalid).
@@ -155,19 +155,21 @@ function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN
 
   // Runs fire-and-forget after the central ingest; durable per (channel, day) so a repeat trigger
   // resumes unfinished channels; sequential + per-channel try/catch so one bad session / channel /
-  // FloodWait never blocks the others or the critical central ingest.
-  const TG_QR_MAX_CHANNELS_PER_RUN = 200;
-
-  async function processTgQrCollection() {
-    if (!db.enabled || !tgCrypto.configured() || !MTPROTO_TOKEN) return;
+  // FloodWait never blocks the others or the critical central ingest. cap = сколько НОВОСТАРТОВАННЫХ
+  // каналов трогаем за проход (инъектируется/конфигурируется, а не файловая константа): skipped за
+  // день каналы лимит не тратят, поэтому следующий проход бегунка добирает остаток. Возвращает
+  // { collected, skipped, failed, capped } — статистику прохода.
+  async function processTgQrCollection({ cap = tgQrChannelsPerPass } = {}) {
+    const stats = { collected: 0, skipped: 0, failed: 0, capped: false };
+    if (!db.enabled || !tgCrypto.configured() || !MTPROTO_TOKEN) return stats;
     const day = new Date().toISOString().slice(0, 10);
     let sessions = [];
     try { sessions = await db.listTgSessions(); }
-    catch (e) { log('error', 'tg_qr_list_sessions_failed', { error: e.message }); return; }
+    catch (e) { log('error', 'tg_qr_list_sessions_failed', { error: e.message }); return stats; }
 
-    let done = 0, collected = 0, skipped = 0, failed = 0, capped = false;
+    let done = 0;
     for (const s of sessions) {
-      if (done >= TG_QR_MAX_CHANNELS_PER_RUN) { capped = true; break; }
+      if (done >= cap) { stats.capped = true; break; }
       let sessionStr;
       try { sessionStr = tgCrypto.decrypt(s.session_enc); }
       catch { log('error', 'tg_qr_decrypt_failed', { uid: s.uid }); continue; }
@@ -181,22 +183,22 @@ function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN
       // auth-fail short-circuits this user's remaining channels (session-wide invalidation).
       let attempted = false, succeeded = false, authFailed = false, lastErrCode = null;
       for (const ch of chans) {
-        if (done >= TG_QR_MAX_CHANNELS_PER_RUN) { capped = true; break; }
+        if (done >= cap) { stats.capped = true; break; }
         let started = false;
         try {
           const out = await db.runJobOnce('qr_collect', `${ch.id}:${day}`, () => {
             started = true;
             return collectQrChannel(sessionStr, ch, day);
           });
-          if (out.skipped) { skipped++; continue; }
+          if (out.skipped) { stats.skipped++; continue; }
           done++;
-          collected++;
+          stats.collected++;
           attempted = true;
           succeeded = true;
         }
         catch (e) {
           if (started) { done++; attempted = true; }
-          failed++;
+          stats.failed++;
           log('error', 'tg_qr_collect_failed', { channelId: ch.id, error: e.message });
           if (isTgAuthError(e)) { authFailed = true; lastErrCode = e.code; break; }
           lastErrCode = safeTgErrorCode(e);
@@ -205,7 +207,8 @@ function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN
 
       await finalizeSessionHealth(s.uid, s.session_version, { attempted, succeeded, authFailed, errorCode: lastErrCode });
     }
-    log(capped ? 'warn' : 'info', 'tg_qr_collection_done', { collected, skipped, failed, capped });
+    log(stats.capped ? 'warn' : 'info', 'tg_qr_collection_done', { ...stats });
+    return stats;
   }
 
   return { collectQrChannelsNow, collectManagedChannelNow, processTgQrCollection };

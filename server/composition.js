@@ -30,10 +30,28 @@ const { createTgQrCollectionJob } = require('./jobs/tgQrCollectionJob');
 const { createReportScheduleJob } = require('./jobs/reportScheduleJob');
 const { createDailyIngestJob } = require('./jobs/dailyIngestJob');
 const { createJobTracker } = require('./infrastructure/jobTracker');
+const {
+  createCollectionRecoveryRunner,
+} = require('./infrastructure/collectionRecoveryRunner');
 
 function createComposition(config, overrides = {}) {
   const log = overrides.log || defaultLog;
   const db = overrides.db || createDatabase(config, overrides.databaseOptions);
+  // Отдельный МАЛЫЙ пул для фонового сбора/отчётов/maintenance — тяжёлый хвост не должен занимать
+  // коннекты у live HTTP/auth/tenant-путей (они держат основной `db`). Те же конечные DB-deadlines,
+  // только `max` меньше (config.database.backgroundPoolMax, дефолт 2).
+  //   • явно инъектированный backgroundDb (тесты капасити/shutdown) — берём его;
+  //   • инъектирован основной db, но НЕ backgroundDb → переиспользуем его же (не плодим второй
+  //     фейковый/реальный пул в тестах с overrides.db);
+  //   • иначе (боевой путь) — создаём реальный второй фасад с background-пулом.
+  const backgroundDb =
+    overrides.backgroundDb ||
+    (overrides.db || (overrides.databaseOptions?.core && !overrides.backgroundDatabaseOptions)
+      ? db
+      : createDatabase(
+          { ...config, database: { ...config.database, poolMax: config.database.backgroundPoolMax } },
+          overrides.backgroundDatabaseOptions || overrides.databaseOptions,
+        ));
   const mtprotoClient =
     overrides.mtprotoClient ||
     createMtprotoClient({
@@ -183,32 +201,48 @@ function createComposition(config, overrides = {}) {
   // Graph-клиент (singleflight igFetch + opportunistic refreshIgIfNeeded) — infrastructure/
   // instagramClient. defaultToken = глобальный env-токен: legacy-вызовы без 3-го аргумента
   // работают как раньше; live-роуты и дневной cron-сбор делят ОДИН клиент.
+  const sharedIgInflight = new Map();
   const igClient = createInstagramClient({
     db,
     log,
     igCrypto,
     defaultToken: IG_TOKEN,
+    inflight: sharedIgInflight,
   });
   const { igFetch, refreshIgIfNeeded, IG_GRAPH } = igClient;
   // Дневной IG-сбор для крона — jobs/instagramCollectionJob (processPersistence ниже зовёт его
   // per-account; каждый сбой изолирован внутри job и не касается ответа крона).
+  // Фоновый сбор пишет через backgroundDb (малый пул), чтобы дневной фан-аут не занимал коннекты
+  // live-путей. Отдельный клиент направляет туда и редкий token-refresh, но делит с live-клиентом
+  // один Graph singleflight Map — одинаковые одновременные upstream-запросы всё ещё схлопываются.
+  const collectionIgClient = backgroundDb === db
+    ? igClient
+    : createInstagramClient({
+        db: backgroundDb,
+        log,
+        igCrypto,
+        defaultToken: IG_TOKEN,
+        inflight: sharedIgInflight,
+      });
   const igCollectionJob = createInstagramCollectionJob({
-    db,
+    db: backgroundDb,
     log,
     igCrypto,
-    igFetch,
-    refreshIgIfNeeded,
+    igFetch: collectionIgClient.igFetch,
+    refreshIgIfNeeded: collectionIgClient.refreshIgIfNeeded,
   });
   const collectIgForAccount = igCollectionJob.collectIgForAccount;
 
-  // Оркестратор дневного персистенса (сырой TG-снимок, IG-сбор per-account под runJobOnce,
-  // прунинг, capacity-rollup) — jobs/persistenceJob. Зовётся как отслеживаемый post-response tail.
-  const { processPersistence } = createPersistenceJob({
-    db,
+  // Оркестратор дневного персистенса (сырой TG-снимок, IG-сбор per-account/day под runJobOnce,
+  // прунинг, capacity-rollup) — jobs/persistenceJob. Зовётся как отслеживаемый post-response tail;
+  // его runIgCollectionPass переиспользует и recovery-бегунок. Всё на backgroundDb.
+  const { processPersistence, runIgCollectionPass } = createPersistenceJob({
+    db: backgroundDb,
     log,
     igCrypto,
     collectIgForAccount,
     capacityRollups: config.runtime.capacityRollups,
+    igAccountsPerPass: config.runtime.igAccountsPerPass,
   });
 
   // One mtproto post ({id,date,views,reactions,forwards,replies,media_type,text,hashtags}) → a
@@ -236,13 +270,14 @@ function createComposition(config, overrides = {}) {
   // jobs/tgQrCollectionJob: сессии дешифруются только внутри, tgPostToRow общий с ingest.
   const { collectQrChannelsNow, collectManagedChannelNow, processTgQrCollection } =
     createTgQrCollectionJob({
-      db,
+      db: backgroundDb,
       log,
       tgCrypto,
       mtprotoPost,
       MTPROTO_TOKEN,
       MTPROTO_TIMEOUT_HEAVY_MS,
       tgPostToRow,
+      tgQrChannelsPerPass: config.runtime.tgQrChannelsPerPass,
     });
 
   // ── Telegram Bot API env — read here; still surfaced by /api/health + the boot banner, and
@@ -253,7 +288,7 @@ function createComposition(config, overrides = {}) {
   // Email-выгрузка отчётов (weekly/monthly + «Неделя канала» в теле) — jobs/reportScheduleJob;
   // дёргается из ingest-хвостов. weekDigest-движок job требует сам (lib).
   const { processReportSchedules } = createReportScheduleJob({
-    db,
+    db: backgroundDb,
     log,
     sendEmail,
     emailShell,
@@ -351,14 +386,39 @@ function createComposition(config, overrides = {}) {
     });
   }
 
+  // Внутрипроцессный recovery-бегунок: заводится здесь (инертен до start()), main.js стартует его
+  // ПОСЛЕ listen и гасит в stop() до закрытия пулов. Не работает при выключенной БД. Каждый проход
+  // — IG-проход + один TG QR-батч через backgroundDb; item-level runJobOnce делает проходы
+  // идемпотентными и добирающими остаток дня. Дорогая maintenance сюда не входит.
+  const collectionRunner =
+    overrides.collectionRunner ||
+    createCollectionRecoveryRunner({
+      log,
+      jobTracker,
+      runIgCollectionPass,
+      processTgQrCollection,
+      igCap: config.runtime.igAccountsPerPass,
+      tgCap: config.runtime.tgQrChannelsPerPass,
+      initialDelayMs: config.runtime.collectionRecoveryInitialDelayMs,
+      intervalMs: config.runtime.collectionRecoveryIntervalMs,
+      enabled: !!backgroundDb.enabled,
+    });
+
+  // Реальные пулы, которые обязан закрыть main.js РОВНО по одному разу. Set дедуплицирует случай
+  // backgroundDb === db (инъектированный тестовый db переиспользуется как фоновый).
+  const databases = Array.from(new Set([db, backgroundDb]));
+
   // main.js owns process lifecycle; this factory only builds the dependency graph.
   return {
     config,
     db,
+    backgroundDb,
+    databases,
     boot,
     createHttpApp,
     memoryCache: cache,
     jobTracker,
+    collectionRunner,
     drainState,
     adapters: Object.freeze({ mtprotoClient, igCrypto, tgCrypto, notionCrash }),
   };

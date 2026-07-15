@@ -90,6 +90,58 @@ test('loadConfig: trustedHosts raw + capacityRollups строго ===\'1\'', () 
   assert.equal(loadConfig({ CAPACITY_ROLLUPS: 'true' }).runtime.capacityRollups, false, 'только "1" — как старый ===-чек');
 });
 
+test('loadConfig: фоновый сбор — дефолты и env-переопределения', () => {
+  const d = loadConfig({});
+  assert.equal(d.database.backgroundPoolMax, 2, 'малый фоновый пул по умолчанию 2');
+  assert.equal(d.runtime.igAccountsPerPass, 25);
+  assert.equal(d.runtime.tgQrChannelsPerPass, 200);
+  assert.equal(d.runtime.collectionRecoveryInitialDelayMs, 30000);
+  assert.equal(d.runtime.collectionRecoveryIntervalMs, 900000);
+  const c = loadConfig({
+    PGPOOL_BACKGROUND_MAX: '3', IG_ACCOUNTS_PER_PASS: '10', TG_QR_CHANNELS_PER_PASS: '50',
+    COLLECTION_RECOVERY_INITIAL_DELAY_MS: '5000', COLLECTION_RECOVERY_INTERVAL_MS: '600000',
+  });
+  assert.equal(c.database.backgroundPoolMax, 3);
+  assert.equal(c.runtime.igAccountsPerPass, 10);
+  assert.equal(c.runtime.tgQrChannelsPerPass, 50);
+  assert.equal(c.runtime.collectionRecoveryInitialDelayMs, 5000);
+  assert.equal(c.runtime.collectionRecoveryIntervalMs, 600000);
+});
+
+test('validateConfig: валидные фоновые лимиты → нет ошибок', () => {
+  assert.deepEqual(validateConfig(loadConfig({})), []);
+  assert.deepEqual(
+    validateConfig(loadConfig({
+      PGPOOL_BACKGROUND_MAX: '4', IG_ACCOUNTS_PER_PASS: '1', TG_QR_CHANNELS_PER_PASS: '500',
+      COLLECTION_RECOVERY_INITIAL_DELAY_MS: '1000', COLLECTION_RECOVERY_INTERVAL_MS: '60000',
+    })),
+    [],
+  );
+});
+
+test('validateConfig: патологические 0/отрицательные фоновые лимиты → ошибки', () => {
+  const bad = validateConfig(loadConfig({
+    PGPOOL_BACKGROUND_MAX: '0', IG_ACCOUNTS_PER_PASS: '0', TG_QR_CHANNELS_PER_PASS: '-1',
+    COLLECTION_RECOVERY_INITIAL_DELAY_MS: '0', COLLECTION_RECOVERY_INTERVAL_MS: '-5',
+  }));
+  assert.ok(bad.some((e) => e.field === 'database.backgroundPoolMax'), 'фоновый пул 0 отклонён');
+  assert.ok(bad.some((e) => e.field === 'runtime.igAccountsPerPass'), 'IG cap 0 отклонён');
+  assert.ok(bad.some((e) => e.field === 'runtime.tgQrChannelsPerPass'), 'TG cap отрицательный отклонён');
+  assert.ok(bad.some((e) => e.field === 'runtime.collectionRecoveryInitialDelayMs'), 'delay 0 отклонён');
+  assert.ok(bad.some((e) => e.field === 'runtime.collectionRecoveryIntervalMs'), 'interval отрицательный отклонён');
+  // Дробные тоже не целые → отклоняются.
+  const frac = validateConfig(loadConfig({ IG_ACCOUNTS_PER_PASS: '2.5' }));
+  assert.ok(frac.some((e) => e.field === 'runtime.igAccountsPerPass'), 'дробный cap отклонён');
+  const fractionalPool = validateConfig(loadConfig({ PGPOOL_BACKGROUND_MAX: '1.5' }));
+  assert.ok(fractionalPool.some((e) => e.field === 'database.backgroundPoolMax'), 'дробный pool max отклонён');
+  const tooFast = validateConfig(loadConfig({
+    COLLECTION_RECOVERY_INITIAL_DELAY_MS: '999',
+    COLLECTION_RECOVERY_INTERVAL_MS: '59999',
+  }));
+  assert.ok(tooFast.some((e) => e.field === 'runtime.collectionRecoveryInitialDelayMs'), 'sub-second startup storm отклонён');
+  assert.ok(tooFast.some((e) => e.field === 'runtime.collectionRecoveryIntervalMs'), 'sub-minute recovery storm отклонён');
+});
+
 test('isProductionEnv: NODE_ENV=production ИЛИ Railway-маркер', () => {
   assert.equal(isProductionEnv({ NODE_ENV: 'production' }), true);
   assert.equal(isProductionEnv({ RAILWAY_ENVIRONMENT: 'prod' }), true);
