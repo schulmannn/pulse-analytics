@@ -6,7 +6,10 @@
 
 'use strict';
 
-function createPersistenceJob({ db, log, igCrypto, collectIgForAccount, capacityRollups, igAccountsPerPass = 25 }) {
+function createPersistenceJob({
+  db, log, igCrypto, collectIgForAccount, capacityRollups,
+  igAccountsPerPass = 25, jobsRetentionDays = 30, emailTokensRetentionDays = 30,
+}) {
   // Один проход IG-сбора: durable per (account, day) гейты вместо прежней монолитной дневной
   // джобы ig_persistence. Прежний гейт держал ВСЕ аккаунты под одним lease — деплой/креш посреди
   // фан-аута оставлял весь остаток непокрытым до следующего внешнего крона. Теперь каждый аккаунт
@@ -56,6 +59,21 @@ function createPersistenceJob({ db, log, igCrypto, collectIgForAccount, capacity
     catch (e) { log('error', 'raw_snapshots_prune_failed', { error: e.message }); }
     try { await db.pruneIgMediaDaily(); }
     catch (e) { log('error', 'ig_media_daily_prune_failed', { error: e.message }); }
+    // Операционный ретеншн: терминальные jobs и мёртвые email-токены (bounded batch, детерминир.
+    // порядок, идемпотентно — capped-остаток добирает следующая ночь). Никогда не трогают
+    // queued/running job и валидный неиспользованный токен (предикат в репо). Счётчики — в лог.
+    if (typeof db.pruneTerminalJobs === 'function') {
+      try {
+        const r = await db.pruneTerminalJobs({ maxAgeDays: jobsRetentionDays });
+        log('info', 'jobs_pruned', { deleted: r.deleted, batches: r.batches, capped: r.capped });
+      } catch (e) { log('error', 'jobs_prune_failed', { error: e.message }); }
+    }
+    if (typeof db.pruneEmailTokens === 'function') {
+      try {
+        const r = await db.pruneEmailTokens({ maxAgeDays: emailTokensRetentionDays });
+        log('info', 'email_tokens_pruned', { deleted: r.deleted, batches: r.batches, capped: r.capped });
+      } catch (e) { log('error', 'email_tokens_prune_failed', { error: e.message }); }
+    }
     // capacity: nightly monthly rollup of channel_daily (long-range read scaling). INERT by
     // default — only runs when CAPACITY_ROLLUPS=1, and the jobs row makes exactly one web instance
     // recompute it per day (idempotent, cheap: bounded to recent months). Nothing reads channel_monthly

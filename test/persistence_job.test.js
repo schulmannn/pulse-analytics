@@ -148,7 +148,8 @@ test('runIgCollectionPass: БД выключена или IG не сконфиг
 });
 
 test('processPersistence: пишет сырой TG-снимок и прогоняет IG-проход + maintenance', async () => {
-  const calls = { snapshot: [], pruned: 0, collected: [] };
+  const calls = { snapshot: [], pruned: 0, collected: [], jobsPruneArgs: null, tokensPruneArgs: null };
+  const logs = [];
   const done = new Set();
   const db = {
     enabled: true,
@@ -163,17 +164,26 @@ test('processPersistence: пишет сырой TG-снимок и прогон�
     },
     pruneRawSnapshots: async () => { calls.pruned++; },
     pruneIgMediaDaily: async () => { calls.pruned++; },
+    pruneTerminalJobs: async (opts) => { calls.jobsPruneArgs = opts; return { deleted: 3, batches: 1, capped: false }; },
+    pruneEmailTokens: async (opts) => { calls.tokensPruneArgs = opts; return { deleted: 2, batches: 1, capped: false }; },
   };
   const job = createPersistenceJob({
     db,
-    log: () => {},
+    log: (level, event, meta) => logs.push({ level, event, meta }),
     igCrypto: { configured: () => true },
     collectIgForAccount: async (acc) => { calls.collected.push(acc.channel_id); },
     capacityRollups: false,
     igAccountsPerPass: 25,
+    jobsRetentionDays: 30,
+    emailTokensRetentionDays: 30,
   });
   await job.processPersistence(50, { available: true });
   assert.deepEqual(calls.snapshot, [[50, 'tg', 'graphs']]);
   assert.deepEqual(calls.collected.sort(), [1, 2]);
   assert.equal(calls.pruned, 2);   // raw_snapshots + ig_media_daily pruned once each
+  // Операционный ретеншн получил сконфигурированные горизонты и залогировал структурные счётчики.
+  assert.deepEqual(calls.jobsPruneArgs, { maxAgeDays: 30 });
+  assert.deepEqual(calls.tokensPruneArgs, { maxAgeDays: 30 });
+  assert.ok(logs.some((l) => l.event === 'jobs_pruned' && l.meta.deleted === 3));
+  assert.ok(logs.some((l) => l.event === 'email_tokens_pruned' && l.meta.deleted === 2));
 });

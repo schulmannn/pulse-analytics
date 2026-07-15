@@ -19,7 +19,7 @@ const EXPECTED_FUNCTIONS = [
   // users
   'countUsers', 'createUser', 'getUserByEmail', 'getUserById', 'getUserAvatar', 'setUserAvatar',
   'listUsers', 'updateUser', 'setUserPassword', 'revokeUserSessions', 'setUserStatus',
-  'createEmailToken', 'useEmailToken', 'getPrefs', 'setPrefs',
+  'createEmailToken', 'useEmailToken', 'pruneEmailTokens', 'getPrefs', 'setPrefs',
   // channels / workspaces / sources
   'adoptOwnerChannel', 'listChannels', 'getChannel', 'getChannelById', 'getOwnerChannelId',
   'setChannelTgId', 'createChannel', 'createTgChannel', 'createIgChannel', 'findIgChannelByIgUser',
@@ -54,7 +54,7 @@ const EXPECTED_FUNCTIONS = [
   // mentionSettingsRepo
   'getMentionSettingsInternal', 'getMentionSettingsForActor', 'upsertMentionSettingsForActor',
   // jobsRepo
-  'claimJob', 'completeJob', 'failJob', 'getJob', 'runJobOnce',
+  'claimJob', 'completeJob', 'failJob', 'getJob', 'runJobOnce', 'pruneTerminalJobs',
   // gdpr
   'deleteUserAccount', 'exportUserData',
 ];

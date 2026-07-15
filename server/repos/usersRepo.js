@@ -13,6 +13,14 @@
 const USER_ROLES = ['user', 'superuser'];
 const USER_STATUSES = ['unverified', 'pending', 'active', 'disabled'];
 
+// Ретеншн мёртвых email-токенов (см. pruneEmailTokens). Консервативные дефолты: возраст строки
+// (created_at) после которого мёртвый токен можно снести, размер батча и число батчей за прогон.
+const EMAIL_TOKENS_RETENTION_DAYS_DEFAULT = 30;
+const EMAIL_TOKENS_PRUNE_BATCH_DEFAULT = 500;
+const EMAIL_TOKENS_PRUNE_MAX_BATCHES_DEFAULT = 40;
+const clampInt = (v, def, min, max) =>
+  Number.isFinite(+v) ? Math.min(max, Math.max(min, Math.round(+v))) : def;
+
 function createUsersRepo({ pool, enabled, transaction }) {
   async function countUsers() {
     if (!enabled) return 0;
@@ -140,6 +148,48 @@ function createUsersRepo({ pool, enabled, transaction }) {
     return rows[0] ? { uid: rows[0].uid } : null;
   }
 
+  /* ── Retention: мёртвые email-токены (verify/reset) ───────────────────────────────────────────
+     Токен становится НЕДОСТИЖИМЫМ, как только он consumed (used_at IS NOT NULL) ЛИБО expired
+     (expires_at <= now()): useEmailToken матчит лишь `used_at IS NULL AND expires_at > now()`, а
+     createEmailToken трогает (инвалидирует) только `used_at IS NULL` и читает свежесть окном
+     `created_at > now() - 60s`. Значит мёртвую строку никто уже не прочтёт и не изменит. Режем
+     только (used_at IS NOT NULL OR expires_at <= now()) И created_at старше горизонта — валидный
+     неиспользованный токен (used_at IS NULL AND expires_at > now()) НИКОГДА не попадает под предикат.
+     created_at — стабильный монотонный якорь возраста (дополнительный буфер поверх самой смертности).
+     Маленькие упорядоченные (created_at, id) батчи; `SKIP LOCKED` не ждёт за concurrent auth-flow,
+     повторяемо/идемпотентно, capped/занятый остаток добирает следующий прогон. Возвращает
+     { deleted, batches, capped }. */
+  async function pruneEmailTokens({
+    maxAgeDays = EMAIL_TOKENS_RETENTION_DAYS_DEFAULT,
+    batchSize = EMAIL_TOKENS_PRUNE_BATCH_DEFAULT,
+    maxBatches = EMAIL_TOKENS_PRUNE_MAX_BATCHES_DEFAULT,
+  } = {}) {
+    if (!enabled) return { deleted: 0, batches: 0, capped: false };
+    const days = clampInt(maxAgeDays, EMAIL_TOKENS_RETENTION_DAYS_DEFAULT, 1, 3650);
+    const limit = clampInt(batchSize, EMAIL_TOKENS_PRUNE_BATCH_DEFAULT, 1, 10000);
+    const caps = clampInt(maxBatches, EMAIL_TOKENS_PRUNE_MAX_BATCHES_DEFAULT, 1, 1000);
+    let deleted = 0;
+    let batches = 0;
+    let capped = false;
+    for (;;) {
+      if (batches >= caps) { capped = true; break; }
+      const { rowCount } = await pool.query(
+        `DELETE FROM email_tokens WHERE id IN (
+           SELECT id FROM email_tokens
+            WHERE (used_at IS NOT NULL OR expires_at <= now())
+              AND created_at < now() - make_interval(days => $1)
+            ORDER BY created_at, id
+            LIMIT $2
+            FOR UPDATE SKIP LOCKED
+         )`,
+        [days, limit]);
+      batches += 1;
+      deleted += rowCount;
+      if (rowCount < limit) break;
+    }
+    return { deleted, batches, capped };
+  }
+
   // ── Пользовательские prefs (per-uid JSONB, upsert) ────────────────
   async function getPrefs(uid) {
     if (!enabled || uid == null) return null;
@@ -161,7 +211,7 @@ function createUsersRepo({ pool, enabled, transaction }) {
     USER_ROLES, USER_STATUSES,
     countUsers, createUser, getUserByEmail, getUserById, getUserAvatar, setUserAvatar,
     listUsers, updateUser, setUserPassword, revokeUserSessions, setUserStatus,
-    createEmailToken, useEmailToken, getPrefs, setPrefs,
+    createEmailToken, useEmailToken, pruneEmailTokens, getPrefs, setPrefs,
   };
 }
 

@@ -111,6 +111,12 @@ function loadConfig(env = process.env) {
       // upstream fan-out.
       igAccountsPerPass: Number(env.IG_ACCOUNTS_PER_PASS || 25),
       tgQrChannelsPerPass: Number(env.TG_QR_CHANNELS_PER_PASS || 200),
+      // Ретеншн операционных строк (ночная maintenance): сколько дней держим ТЕРМИНАЛЬНЫЕ jobs
+      // (succeeded/failed, по updated_at) и МЁРТВЫЕ email-токены (consumed/expired, по created_at)
+      // перед bounded-прунингом. Консервативно ~месяц; queued/running и валидные неиспользованные
+      // токены не трогаются в принципе (предикат, не горизонт).
+      jobsRetentionDays: Number(env.JOBS_RETENTION_DAYS || 30),
+      emailTokensRetentionDays: Number(env.EMAIL_TOKENS_RETENTION_DAYS || 30),
       // Внутрипроцессный recovery-бегунок: задержка первого прохода после listen и период повторов.
       collectionRecoveryInitialDelayMs: Number(env.COLLECTION_RECOVERY_INITIAL_DELAY_MS || 30000),
       collectionRecoveryIntervalMs: Number(env.COLLECTION_RECOVERY_INTERVAL_MS || 900000),
@@ -165,6 +171,12 @@ function validateConfig(config) {
   ]) {
     if (!Number.isInteger(value) || value <= 0) add(field, `${field} должен быть положительным целым числом.`);
   }
+  for (const [field, value] of [
+    ['runtime.jobsRetentionDays', config.runtime.jobsRetentionDays],
+    ['runtime.emailTokensRetentionDays', config.runtime.emailTokensRetentionDays],
+  ]) {
+    if (Number.isFinite(value) && value > 3650) add(field, `${field} не должен превышать 3650 дней.`);
+  }
   // Возобновляемый сбор: лимиты проходов и тайминги бегунка. Патологические 0/отрицательные
   // значения остановили бы прогресс (cap=0 → ничего не стартует) или зациклили таймер (interval<=0).
   for (const [field, value] of [
@@ -172,6 +184,9 @@ function validateConfig(config) {
     ['runtime.tgQrChannelsPerPass', config.runtime.tgQrChannelsPerPass],
     ['runtime.collectionRecoveryInitialDelayMs', config.runtime.collectionRecoveryInitialDelayMs],
     ['runtime.collectionRecoveryIntervalMs', config.runtime.collectionRecoveryIntervalMs],
+    // Горизонты ретеншна: 0/отрицательные снесли бы свежие строки → положительные целые.
+    ['runtime.jobsRetentionDays', config.runtime.jobsRetentionDays],
+    ['runtime.emailTokensRetentionDays', config.runtime.emailTokensRetentionDays],
   ]) {
     if (!Number.isInteger(value) || value <= 0) add(field, `${field} должен быть положительным целым числом.`);
   }
