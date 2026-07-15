@@ -39,6 +39,10 @@ Telegram поддерживает две модели подключения:
 | `APP_URL` | web | публичный HTTPS-origin, в production — `https://atlavue.app` |
 | `SESSION_SECRET` | web | подпись пользовательских сессий; обязательна в production |
 | `DATABASE_URL` | web | Postgres; в production обязательна, кроме явного `ALLOW_DBLESS=true` |
+| `PGPOOL_MAX` | web | размер пула Postgres, по умолчанию `10` (одна web-реплика, ADR-002) |
+| `PG_CONNECTION_TIMEOUT_MS` | web | fail-fast на выдачу коннекта из пула, мс, по умолчанию `3000` |
+| `PG_STATEMENT_TIMEOUT_MS` | web | серверный `statement_timeout`, мс, по умолчанию `30000` |
+| `PG_QUERY_TIMEOUT_MS` | web | клиентский `query_timeout` (чуть выше statement), мс, по умолчанию `35000` |
 | `MTPROTO_URL` | web | внутренний URL Python-сервиса, обычно `http://<service>.railway.internal:8001` |
 | `MTPROTO_TOKEN` | web + mtproto | общий межсервисный секрет; без него доступ fail-closed |
 | `TG_SESSION_KEY` | web | ключ AES-256-GCM для управляемых QR-сессий |

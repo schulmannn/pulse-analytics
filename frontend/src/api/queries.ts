@@ -342,10 +342,10 @@ export function useVelocity() {
 // ── Instagram (per-channel OAuth token, or the global env account, or mock) ──
 // Every IG query is keyed by the selected channel: IG is now per-channel, so switching the
 // active channel must refetch (a bare ['ig-*'] key would show the previous channel's cached data).
-export function useIgProfile() {
+export function useIgProfile(enabled = true) {
   const { channelId } = useSelectedChannel();
   return useQuery({
-    enabled: channelId != null,
+    enabled: enabled && channelId != null,
     queryKey: ['ig-profile', channelId],
     staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet('/api/ig/profile', IgProfileSchema, { signal, channelId }),
@@ -355,20 +355,20 @@ export function useIgProfile() {
 /** Fetch insights for the selected window. reach/follower come as a 90-day daily series (windowed
  *  client-side); the aggregate metrics (views/saves/…) are computed by the server for this exact
  *  window + the previous one (for deltas), since they have no daily series to slice. */
-export function useIgInsights(days = 90) {
+export function useIgInsights(days = 90, enabled = true) {
   const { channelId } = useSelectedChannel();
   return useQuery({
-    enabled: channelId != null,
+    enabled: enabled && channelId != null,
     queryKey: ['ig-insights', channelId, days],
     staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet(`/api/ig/insights?days=${days}`, IgInsightsSchema, { signal, channelId }),
   });
 }
 
-export function useIgPosts(limit = 20) {
+export function useIgPosts(limit = 20, enabled = true) {
   const { channelId } = useSelectedChannel();
   return useQuery({
-    enabled: channelId != null,
+    enabled: enabled && channelId != null,
     queryKey: ['ig-posts', channelId, limit],
     staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet(`/api/ig/posts?limit=${limit}`, IgPostsSchema, { signal, channelId }),
@@ -421,10 +421,10 @@ export function useIgTags() {
 
 /** Persisted IG daily series (Postgres ig_daily) — the DB-first history the cron accumulates past
  *  the tiny live window. Disabled in demo mode (no DB, no fixture) so panels keep their live series. */
-export function useIgHistory(days = 400) {
+export function useIgHistory(days = 400, enabled = true) {
   const { channelId } = useSelectedChannel();
   return useQuery({
-    enabled: channelId != null && !isDemoMode(),
+    enabled: enabled && channelId != null && !isDemoMode(),
     queryKey: ['ig-history', channelId, days],
     staleTime: STALE_ARCHIVE,
     queryFn: ({ signal }) => apiGet(`/api/ig/history?days=${days}`, IgHistorySchema, { signal, channelId }),

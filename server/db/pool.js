@@ -17,7 +17,14 @@ function resolveSsl(connectionString, sslMode = 'auto') {
 }
 
 function createPool(
-  { url = '', sslMode = 'auto', poolMax = 4 } = {},
+  {
+    url = '',
+    sslMode = 'auto',
+    poolMax = 10,
+    connectionTimeoutMs = 3000,
+    statementTimeoutMs = 30000,
+    queryTimeoutMs = 35000,
+  } = {},
   { PoolClass = DefaultPool, onError = console.error } = {},
 ) {
   const enabled = !!(url && PoolClass);
@@ -26,6 +33,12 @@ function createPool(
         connectionString: url,
         ssl: resolveSsl(url, sslMode),
         max: poolMax,
+        // Fail-fast under load: cap connection acquisition and per-statement/query time so a
+        // saturated pool or a runaway query surfaces as an error instead of hanging a request.
+        // db/errors maps the pool acquisition timeout to a 503 (не дублируем здесь).
+        connectionTimeoutMillis: connectionTimeoutMs,
+        statement_timeout: statementTimeoutMs,
+        query_timeout: queryTimeoutMs,
       })
     : null;
 

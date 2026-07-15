@@ -15,7 +15,10 @@ test('loadConfig: дефолты из пустого env', () => {
   assert.deepEqual(c.http.corsOrigins, []);
   assert.equal(c.http.publicUrl, 'https://atlavue.app');
   assert.equal(c.database.sslMode, 'auto');
-  assert.equal(c.database.poolMax, 4);
+  assert.equal(c.database.poolMax, 10);
+  assert.equal(c.database.connectionTimeoutMs, 3000);
+  assert.equal(c.database.statementTimeoutMs, 30000);
+  assert.equal(c.database.queryTimeoutMs, 35000);
   assert.equal(c.database.allowDbLess, false);
   assert.equal(c.auth.sessionTtlMs, 7 * 24 * 60 * 60 * 1000);
   assert.equal(c.email.from, 'Atlavue <onboarding@resend.dev>');
@@ -39,6 +42,7 @@ test('loadConfig: значения из env + нормализация', () => {
   assert.equal(c.http.publicUrl, 'https://x.app', 'trailing slash срезан');
   assert.equal(c.database.poolMax, 8);
   assert.equal(c.database.allowDbLess, true);
+  assert.equal(loadConfig({ PG_CONNECTION_TIMEOUT_MS: '1500', PG_STATEMENT_TIMEOUT_MS: '20000', PG_QUERY_TIMEOUT_MS: '25000' }).database.connectionTimeoutMs, 1500);
   assert.equal(c.auth.adminEmail, 'foo@bar.com', 'email нормализован (lower+trim)');
   assert.equal(c.runtime.webReplicas, 2);
   assert.equal(c.runtime.ingestToken, 'tok');
@@ -144,6 +148,19 @@ test('validateConfig: webReplicas > 1 → запрет; port<=0 → ошибка
   const errs = validateConfig(loadConfig({ WEB_REPLICAS: '2', PORT: '0' }));
   assert.ok(errs.some((e) => e.field === 'runtime.webReplicas'));
   assert.ok(errs.some((e) => e.field === 'http.port'));
+});
+
+test('validateConfig: pool-таймауты должны быть положительными целыми (мс)', () => {
+  assert.deepEqual(
+    validateConfig(loadConfig({ PG_CONNECTION_TIMEOUT_MS: '3000', PG_STATEMENT_TIMEOUT_MS: '30000', PG_QUERY_TIMEOUT_MS: '35000' })),
+    [],
+  );
+  const bad = validateConfig(loadConfig({ PG_CONNECTION_TIMEOUT_MS: '0', PG_STATEMENT_TIMEOUT_MS: 'abc', PG_QUERY_TIMEOUT_MS: '-5' }));
+  assert.ok(bad.some((e) => e.field === 'database.connectionTimeoutMs'), '0 не положительный');
+  assert.ok(bad.some((e) => e.field === 'database.statementTimeoutMs'), 'NaN отклоняется');
+  assert.ok(bad.some((e) => e.field === 'database.queryTimeoutMs'), 'отрицательный отклоняется');
+  const reversed = validateConfig(loadConfig({ PG_STATEMENT_TIMEOUT_MS: '30000', PG_QUERY_TIMEOUT_MS: '20000' }));
+  assert.ok(reversed.some((e) => e.field === 'database.queryTimeoutMs'), 'клиентский timeout должен быть позже серверного');
 });
 
 test('validateConfig: trust proxy должен быть целым и неотрицательным', () => {

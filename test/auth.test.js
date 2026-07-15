@@ -1,7 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
+const { promisify } = require('node:util');
 const { createAuth, hashPassword, verifyPassword, rateLimitKey, isSessionStale } = require('../server/lib/auth');
+
+const scryptAsync = promisify(crypto.scrypt);
 
 test('signed session preserves token version + exp and rejects tampering', () => {
   const auth = createAuth({ secret: 'test-secret' });
@@ -65,12 +68,32 @@ test('legacy uid=null and plain-number tokens are rejected despite a valid signa
   assert.strictEqual(auth.parseToken(noUidTok), null);
 });
 
-test('scrypt password hashes verify without exposing the password', () => {
-  const stored = hashPassword('correct horse battery staple');
+test('scrypt password hashes verify without exposing the password (async)', async () => {
+  const stored = await hashPassword('correct horse battery staple');
   assert.match(stored, /^scrypt\$/);
   assert.strictEqual(stored.includes('correct horse'), false);
-  assert.strictEqual(verifyPassword('correct horse battery staple', stored), true);
-  assert.strictEqual(verifyPassword('wrong', stored), false);
+  // New 6-part format: scrypt$N$r$p$salt$hash.
+  assert.strictEqual(stored.split('$').length, 6);
+  assert.strictEqual(await verifyPassword('correct horse battery staple', stored), true);
+  assert.strictEqual(await verifyPassword('wrong', stored), false);
+});
+
+test('verifyPassword accepts the legacy 3-part hash format (scrypt$salt$hash)', async () => {
+  // Pre-parameterised rows stored `scrypt$<salt>$<hash>` with the default N/r/p; the async
+  // verifier must still accept them byte-for-byte (no forced re-hash / lockout on migration).
+  const salt = crypto.randomBytes(16);
+  const hash = await scryptAsync('legacy secret', salt, 64, { N: 16384, r: 8, p: 1 });
+  const legacy = `scrypt$${salt.toString('hex')}$${hash.toString('hex')}`;
+  assert.strictEqual(legacy.split('$').length, 3);
+  assert.strictEqual(await verifyPassword('legacy secret', legacy), true);
+  assert.strictEqual(await verifyPassword('nope', legacy), false);
+});
+
+test('verifyPassword is constant-cost / falsey against the anti-enumeration DUMMY_HASH', async () => {
+  const { SCRYPT } = require('../server/lib/auth');
+  const DUMMY_HASH = `scrypt$${SCRYPT.N}$${SCRYPT.r}$${SCRYPT.p}$${'0'.repeat(32)}$${'0'.repeat(128)}`;
+  // Missing-user path verifies against DUMMY_HASH: must resolve false, never throw.
+  assert.strictEqual(await verifyPassword('anything', DUMMY_HASH), false);
 });
 
 test('rate-limit key is per-user for sessions and per-IP otherwise', () => {

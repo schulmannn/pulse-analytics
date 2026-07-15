@@ -14,12 +14,14 @@
 
 const express = require('express');
 const cors = require('cors');
+const compression = require('compression');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const { requestContext } = require('./lib/observability');
 const { legacyCspHeader, setAppHeaders, setHtmlSecurityHeaders } = require('./lib/securityHeaders');
+const { assetCacheControl } = require('./lib/staticAssets');
 const { registerCollectorRoutes } = require('./routes/collector');
 const { registerAuthRoutes } = require('./routes/auth');
 const { registerReportsRoutes } = require('./routes/reports');
@@ -68,6 +70,10 @@ function createApp(deps) {
   // CORS_ORIGINS (список через запятую).
   const CORS_ORIGINS = config.http.corsOrigins;
   app.use(cors({ origin: CORS_ORIGINS.length ? CORS_ORIGINS : false, credentials: false }));
+  // gzip eligible responses (JSON API payloads + the JS/CSS bundle). compression skips responses
+  // below its ~1KB threshold and honours a per-response `Cache-Control: no-transform`; it reads
+  // Accept-Encoding, so an unsupported client just gets the identity response.
+  app.use(compression());
   app.use(requestContext);
   // A rejected promise in an async route otherwise escapes Express 4 entirely and
   // kills the process (unhandled rejection). Wrap handlers whose awaits are not fully
@@ -291,9 +297,14 @@ function createApp(deps) {
   // is plain 'self' — no nonce. The legacy nonce-shell stays at /legacy as a reversible
   // escape hatch until the B2 cleanup (then this becomes the only HTML surface).
   const APP_DIST = path.join(__dirname, '../frontend/dist');
-  // Hashed SPA assets at root (/assets/*). Security headers set per response.
+  // Hashed SPA assets at root (/assets/*). Security headers set per response; content-hashed
+  // /assets/** get a 1-year immutable cache, unhashed files (index.html, favicon) stay
+  // revalidatable — see lib/staticAssets.assetCacheControl.
   app.use((req, res, next) => { setAppHeaders(req, res); next(); },
-    express.static(APP_DIST, { index: false }));
+    express.static(APP_DIST, {
+      index: false,
+      setHeaders: (res, filePath) => { res.setHeader('Cache-Control', assetCacheControl(filePath)); },
+    }));
 
   // Pre-catover bookmarks under /app → root equivalent (302; temporary during catover).
   app.get(['/app', '/app/*'], (req, res) => {

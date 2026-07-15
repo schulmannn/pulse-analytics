@@ -44,20 +44,50 @@ test('createPool uses only injected database config', async () => {
   );
 
   assert.equal(FakePool.instances.length, 2);
+  // Default fail-fast timeouts flow through when not injected (acquisition + statement + query).
   assert.deepEqual(FakePool.instances[0].options, {
     connectionString: 'postgres://first',
     ssl: false,
     max: 3,
+    connectionTimeoutMillis: 3000,
+    statement_timeout: 30000,
+    query_timeout: 35000,
   });
   assert.deepEqual(FakePool.instances[1].options, {
     connectionString: 'postgres://second',
     ssl: { rejectUnauthorized: false },
     max: 9,
+    connectionTimeoutMillis: 3000,
+    statement_timeout: 30000,
+    query_timeout: 35000,
   });
   assert.equal((await first.ping()).enabled, true);
   await first.close();
   assert.equal(FakePool.instances[0].ended, true);
   await second.close();
+});
+
+test('createPool forwards injected fail-fast timeouts to the pg.Pool', async () => {
+  FakePool.instances.length = 0;
+  createPool(
+    {
+      url: 'postgres://timeouts',
+      sslMode: 'disable',
+      poolMax: 5,
+      connectionTimeoutMs: 1500,
+      statementTimeoutMs: 20000,
+      queryTimeoutMs: 25000,
+    },
+    { PoolClass: FakePool },
+  );
+  assert.deepEqual(FakePool.instances[0].options, {
+    connectionString: 'postgres://timeouts',
+    ssl: false,
+    max: 5,
+    connectionTimeoutMillis: 1500,
+    statement_timeout: 20000,
+    query_timeout: 25000,
+  });
 });
 
 test('DB-less pool is inert and Railway private URLs disable SSL by default', async () => {

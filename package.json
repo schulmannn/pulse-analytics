@@ -15,11 +15,12 @@
     "check": "npm run check:syntax && npm run check:migrations && npm run check:boundaries && npm run lint && node --test test/*.test.js"
   },
   "dependencies": {
-    "express": "^4.19.2",
+    "compression": "^1.8.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
-    "node-fetch": "^2.7.0",
+    "express": "^4.19.2",
     "express-rate-limit": "^7.3.1",
+    "node-fetch": "^2.7.0",
     "pg": "^8.12.0"
   },
   "devDependencies": {
