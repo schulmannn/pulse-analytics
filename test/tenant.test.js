@@ -36,7 +36,10 @@ test('tenant middleware attaches an owned channel and continues', async () => {
   const owned = { id: 10, owner_uid: 1, source: 'collector' };
   const db = {
     enabled: true,
-    listChannels: async () => [owned],
+    // Hot path: the default-channel branch uses the lightweight id pick, NOT listChannels. Throwing
+    // from listChannels guards that resolveChannel never falls back to the heavy analytics query.
+    listChannels: async () => { throw new Error('listChannels must not run on the auth/tenant hot path'); },
+    getDefaultChannelId: async (user) => user.uid === 1 ? 10 : null,
     getChannel: async (id, user) => id === 10 && user.uid === 1 ? owned : null,
   };
   const resolve = makeResolveChannel({ db, isReady: () => true });
@@ -46,6 +49,23 @@ test('tenant middleware attaches an owned channel and continues', async () => {
   await resolve(req, res, () => { nextCalled = true; });
   assert.strictEqual(nextCalled, true);
   assert.deepStrictEqual(req.channel, owned);
+});
+
+test('tenant middleware returns the empty payload when the user has no default channel', async () => {
+  const db = {
+    enabled: true,
+    listChannels: async () => { throw new Error('listChannels must not run on the auth/tenant hot path'); },
+    getDefaultChannelId: async () => null,
+    getChannel: async () => { throw new Error('getChannel must not run without a channel id'); },
+  };
+  const resolve = makeResolveChannel({ db, isReady: () => true });
+  const req = { query: {}, headers: {}, user: { uid: 1, role: 'user' } };
+  const res = responseRecorder();
+  let nextCalled = false;
+  await resolve(req, res, () => { nextCalled = true; });
+  assert.strictEqual(nextCalled, false);
+  assert.strictEqual(res.statusCode, 200);
+  assert.deepStrictEqual(res.body, { enabled: true, empty: true, channels: [] });
 });
 
 test('central snapshot is served only when the requested payload exists', async () => {

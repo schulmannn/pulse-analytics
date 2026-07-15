@@ -78,6 +78,53 @@ test('listChannels: скоуп по владельцу; disabled скрыт да
   assert.ok(!(await db.listChannels({ uid: A.id })).some((c) => c.id === ch.id), 'disabled скрыт в списке');
 });
 
+test('getDefaultChannelId: доступ owner/member/viewer, посторонний→null, без uid→null', { skip }, async () => {
+  const A = await mkUser('dfo');
+  const ch = await db.createChannel({ owner_uid: A.id, username: `dfo_${nonce}`, title: 'DFO' });
+  assert.strictEqual(await db.getDefaultChannelId({ uid: A.id }), ch.id, 'владелец получает свой канал по умолчанию');
+
+  const ws = await wsOf(ch.id);
+  const M = await mkUser('dfm');
+  await addMember(ws, M.id, 'member');
+  assert.strictEqual(await db.getDefaultChannelId({ uid: M.id }), ch.id, 'член воркспейса видит канал по умолчанию');
+
+  const V = await mkUser('dfv');
+  await addMember(ws, V.id, 'viewer');
+  assert.strictEqual(await db.getDefaultChannelId({ uid: V.id }), ch.id, 'viewer тоже видит (видимость роль-агностична)');
+
+  const X = await mkUser('dfx');
+  assert.strictEqual(await db.getDefaultChannelId({ uid: X.id }), null, 'посторонний → null');
+  assert.strictEqual(await db.getDefaultChannelId({}), null, 'без uid → null (не запрашиваем ownership вслепую)');
+});
+
+test('getDefaultChannelId: disabled скрыт; legacy owner_uid без воркспейса виден создателю', { skip }, async () => {
+  const A = await mkUser('dfd');
+  const ch = await db.createChannel({ owner_uid: A.id, username: `dfd_${nonce}`, title: 'DFD' });
+  await pool.query(`UPDATE channels SET status='disabled' WHERE id=$1`, [ch.id]);
+  assert.strictEqual(await db.getDefaultChannelId({ uid: A.id }), null, 'disabled-канал не выбирается по умолчанию');
+
+  const L = await mkUser('dfl');
+  const legacy = await db.createChannel({ owner_uid: L.id, username: `dfl_${nonce}`, title: 'DFL' });
+  // Legacy/central строки могут иметь workspace_id=NULL — создатель обязан видеть их через owner_uid-ветку.
+  await pool.query(`UPDATE channels SET workspace_id=NULL WHERE id=$1`, [legacy.id]);
+  assert.strictEqual(await db.getDefaultChannelId({ uid: L.id }), legacy.id, 'legacy owner_uid fallback (workspace_id NULL)');
+  const O = await mkUser('dflo');
+  assert.strictEqual(await db.getDefaultChannelId({ uid: O.id }), null, 'чужой не видит legacy-канал');
+});
+
+test('getDefaultChannelId: created_at ASC и паритет с listChannels()[0].id', { skip }, async () => {
+  const A = await mkUser('dfp');
+  const first = await db.createChannel({ owner_uid: A.id, username: `dfp1_${nonce}`, title: 'P1' });
+  const second = await db.createChannel({ owner_uid: A.id, username: `dfp2_${nonce}`, title: 'P2' });
+  // Детерминируем порядок: first строго раньше second (иначе now()-тай мог бы флапать).
+  await pool.query(`UPDATE channels SET created_at=now() - interval '2 hours' WHERE id=$1`, [first.id]);
+  await pool.query(`UPDATE channels SET created_at=now() - interval '1 hour'  WHERE id=$1`, [second.id]);
+  const def = await db.getDefaultChannelId({ uid: A.id });
+  assert.strictEqual(def, first.id, 'самый ранний по created_at выбран по умолчанию');
+  const list = await db.listChannels({ uid: A.id });
+  assert.strictEqual(def, list[0].id, 'паритет: тот же канал, что listChannels()[0] (та же видимость/порядок)');
+});
+
 test('api-keys под admin-гейтом; getChannelByApiKey active→канал, revoked→null', { skip }, async () => {
   const O = await mkUser('ko');
   const ch = await db.createChannel({ owner_uid: O.id, username: `chk_${nonce}`, title: 'K' });

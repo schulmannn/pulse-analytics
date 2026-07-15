@@ -10,9 +10,13 @@ function makeResolveChannel({ db, isReady }) {
     let channelId = parseInt(req.query.channel || req.headers['x-channel-id'], 10) || 0;
     try {
       if (!channelId) {
-        const channels = await db.listChannels(req.user);
-        if (!channels.length) return res.json({ enabled: true, empty: true, channels: [] });
-        channelId = channels[0].id;
+        // Auth/tenant hot path: only the default channel's id is needed here. Use the lightweight
+        // pick (same visibility + created_at order as listChannels) instead of listChannels itself,
+        // whose per-channel memberCount (correlated channel_daily subquery) + ig_connected EXISTS
+        // would be computed for every visible channel and then discarded. The subsequent getChannel
+        // still enforces ownership and attaches member_role. Empty response is byte-identical.
+        channelId = await db.getDefaultChannelId(req.user);
+        if (!channelId) return res.json({ enabled: true, empty: true, channels: [] });
       }
       const channel = await db.getChannel(channelId, req.user);
       if (!channel) return res.status(403).json({ error: 'Нет доступа к этому каналу' });
