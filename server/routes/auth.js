@@ -38,7 +38,7 @@ function registerAuthRoutes({
         if (eid) sendEmail(email, 'Аккаунт Atlavue уже существует', existsEmailHtml(base)).catch(() => {});
         return;
       }
-      const u = await db.createUser({ email, pass_hash: hashPassword(password), role: 'user', status: 'unverified' });
+      const u = await db.createUser({ email, pass_hash: await hashPassword(password), role: 'user', status: 'unverified' });
       const raw = newToken();
       const id = await db.createEmailToken(u.id, 'verify', sha256(raw), new Date(Date.now() + VERIFY_TTL));
       const link = `${base}/verify?token=${raw}`;
@@ -57,7 +57,7 @@ function registerAuthRoutes({
     const expires = Date.now() + SESSION_TTL;
     try {
       const u = await db.getUserByEmail(email);
-      const ok = u ? verifyPassword(password, u.pass_hash) : verifyPassword(password, DUMMY_HASH);  // constant-cost
+      const ok = u ? await verifyPassword(password, u.pass_hash) : await verifyPassword(password, DUMMY_HASH);  // constant-cost
       if (!u || !ok) return res.status(403).json({ error: 'Неверный email или пароль' });
       if (u.status === 'unverified') return res.status(403).json({ error: 'Подтверди email — ссылка пришла при регистрации', code: 'unverified' });
       if (u.status === 'pending')    return res.status(403).json({ error: 'Аккаунт ждёт одобрения администратором' });
@@ -98,7 +98,7 @@ function registerAuthRoutes({
       if (!u) {
         // New account — Google already verified the email, so it's active with an unusable password
         // (password login stays impossible until the user sets one via "forgot password").
-        const randomPass = hashPassword(crypto.randomBytes(32).toString('hex'));
+        const randomPass = await hashPassword(crypto.randomBytes(32).toString('hex'));
         u = await db.createUser({ email, pass_hash: randomPass, role: 'user', status: 'active' });
       } else if (u.status !== 'active') {
         // Existing but never-verified account (created via email/password; ownership unproven — it could
@@ -107,7 +107,7 @@ function registerAuthRoutes({
         // unusable value, neutralising a pre-hijack. setUserPassword + setUserStatus both bump
         // token_version, so any pre-existing session is revoked too. Owner uses Google (or "forgot
         // password" to set their own) going forward.
-        await db.setUserPassword(u.id, hashPassword(crypto.randomBytes(32).toString('hex')));
+        await db.setUserPassword(u.id, await hashPassword(crypto.randomBytes(32).toString('hex')));
         await db.setUserStatus(u.id, 'active');
         u = await db.getUserById(u.id);
       }
@@ -222,7 +222,7 @@ function registerAuthRoutes({
     try {
       const t = await db.useEmailToken(sha256(raw), 'reset');
       if (!t) return res.status(400).json({ error: 'Ссылка недействительна или истекла' });
-      await db.setUserPassword(t.uid, hashPassword(password));
+      await db.setUserPassword(t.uid, await hashPassword(password));
       const u = await db.getUserById(t.uid);
       if (u && u.status === 'unverified') await db.setUserStatus(t.uid, 'active');
       req.user = { uid: t.uid };                      // attribute the audit event (route is unauthenticated)
@@ -255,8 +255,8 @@ function registerAuthRoutes({
     if (nextPass.length < 8) return res.status(400).json({ error: 'Новый пароль минимум 8 символов' });
     try {
       const u = await db.getUserByEmail(req.user.email);
-      if (!u || !verifyPassword(cur, u.pass_hash)) return res.status(403).json({ error: 'Текущий пароль неверен' });
-      await db.setUserPassword(u.id, hashPassword(nextPass));
+      if (!u || !(await verifyPassword(cur, u.pass_hash))) return res.status(403).json({ error: 'Текущий пароль неверен' });
+      await db.setUserPassword(u.id, await hashPassword(nextPass));
       audit(req, 'auth.password_changed', {}).catch(() => {});
       res.json({ ok: true });
     } catch (e) { next(e); }

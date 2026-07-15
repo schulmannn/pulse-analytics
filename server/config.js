@@ -36,7 +36,16 @@ function loadConfig(env = process.env) {
     database: Object.freeze({
       url: env.DATABASE_URL || '',
       sslMode: env.PGSSL || 'auto',
-      poolMax: Number(env.PGPOOL_MAX || 4),
+      // Conservative production-safe default: 10 keeps headroom under Postgres/Railway
+      // connection caps for one web replica (ADR-002) without over-provisioning idle conns.
+      poolMax: Number(env.PGPOOL_MAX || 10),
+      // Fail-fast timeouts (мс). Без них пул мог висеть на выдаче коннекта, а зависший
+      // запрос — держать соединение бесконечно; db-unavailable→503 маппинг уже есть в db/errors.
+      connectionTimeoutMs: Number(env.PG_CONNECTION_TIMEOUT_MS || 3000),
+      statementTimeoutMs: Number(env.PG_STATEMENT_TIMEOUT_MS || 30000),
+      // queryTimeoutMs держим чуть выше statement_timeout, чтобы серверная отмена сработала
+      // первой (внятная ошибка вместо клиентского обрыва).
+      queryTimeoutMs: Number(env.PG_QUERY_TIMEOUT_MS || 35000),
       allowDbLess: env.ALLOW_DBLESS === 'true',
     }),
     auth: Object.freeze({
@@ -113,6 +122,20 @@ function validateConfig(config) {
     ['runtime.webReplicas', config.runtime.webReplicas],
   ]) {
     if (!Number.isFinite(value) || value <= 0) add(field, `${field} должен быть положительным числом.`);
+  }
+  for (const [field, value] of [
+    ['database.connectionTimeoutMs', config.database.connectionTimeoutMs],
+    ['database.statementTimeoutMs', config.database.statementTimeoutMs],
+    ['database.queryTimeoutMs', config.database.queryTimeoutMs],
+  ]) {
+    if (!Number.isInteger(value) || value <= 0) add(field, `${field} должен быть положительным целым числом (мс).`);
+  }
+  if (
+    Number.isInteger(config.database.statementTimeoutMs) &&
+    Number.isInteger(config.database.queryTimeoutMs) &&
+    config.database.queryTimeoutMs <= config.database.statementTimeoutMs
+  ) {
+    add('database.queryTimeoutMs', 'database.queryTimeoutMs должен быть больше database.statementTimeoutMs.');
   }
   if (!Number.isInteger(config.http.trustProxy) || config.http.trustProxy < 0) {
     add('http.trustProxy', 'TRUST_PROXY_HOPS должен быть целым неотрицательным числом.');

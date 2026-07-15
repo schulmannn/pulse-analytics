@@ -47,7 +47,7 @@ function createAuthService({ config, db }) {
     if (!db.enabled || !ADMIN_EMAIL || !config.auth.adminPassword) return;
     try {
       if (!(await db.getUserByEmail(ADMIN_EMAIL))) {
-        await db.createUser({ email: ADMIN_EMAIL, pass_hash: hashPassword(config.auth.adminPassword), role: 'superuser', status: 'active' });
+        await db.createUser({ email: ADMIN_EMAIL, pass_hash: await hashPassword(config.auth.adminPassword), role: 'superuser', status: 'active' });
         console.log('[auth] bootstrapped admin account:', ADMIN_EMAIL);
       }
     } catch (e) { console.error('[auth] admin bootstrap failed:', e.message); }

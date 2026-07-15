@@ -5,6 +5,7 @@ import { useHistory, useIgHistory, useIgInsights, useIgPosts, useIgProfile, useT
 import { useSelectedChannel } from '@/lib/channel-context';
 import { useDemo } from '@/lib/demo-context';
 import { postEr } from '@/lib/igMetrics';
+import { igWeekGate } from '@/lib/igWeekGate';
 import { igWindowMetrics } from '@/lib/igWindowMetrics';
 import type { NormalizedPost } from '@/lib/posts';
 import { tgWeekMetrics } from '@/lib/tgWeekMetrics';
@@ -78,23 +79,38 @@ function useWeekNarrativeInput(): { input: NarrativeInput | null; posts: Normali
  * IG-абзац не рождается. */
 export function useIgWeekInput(): { input: NarrativeIgInput | null; loading: boolean; notConnected: boolean } {
   const { demo } = useDemo();
-  const profileQ = useIgProfile();
-  const insightsQ = useIgInsights(14);
-  const insights7Q = useIgInsights(7);
-  const historyQ = useIgHistory();
-  const postsQ = useIgPosts(24);
+  const { channelId } = useSelectedChannel();
+  // Capability gate from the already-cached useChannels response: an unconnected selected channel
+  // must NOT fan out the five IG endpoints below (they'd only return a discarded mock). While
+  // channels are unresolved we probe nothing and report honest loading.
+  const { data: channelsData, isError: channelsError } = useChannels();
+  const selected = channelsData?.channels.find((c) => c.id === channelId);
+  const gate = igWeekGate({
+    demo,
+    channelsResolved: channelsData != null,
+    channelsError,
+    channelKnown: channelId != null,
+    igConnected: !!selected?.ig_connected,
+  });
+  const profileQ = useIgProfile(gate.igEnabled);
+  const insightsQ = useIgInsights(14, gate.igEnabled);
+  const insights7Q = useIgInsights(7, gate.igEnabled);
+  const historyQ = useIgHistory(400, gate.igEnabled);
+  const postsQ = useIgPosts(24, gate.igEnabled);
   const profile = profileQ.data;
   const ins = insightsQ.data;
   const ins7 = insights7Q.data;
   const rows = historyQ.data?.rows;
   const media = postsQ.data?.data;
   const unavailable = profileQ.isError && insightsQ.isError;
-  // isPending (не isLoading): пока канал не известен, IG-запросы выключены — это тоже «загрузка».
-  const loading = profileQ.isPending || insightsQ.isPending || insights7Q.isPending;
-  // Не подключён (ошибка / mock вне демо) → панель зовёт подключить; отличается от «подключён, но
-  // мало данных» (тогда input=null из-за пустого охвата, но notConnected=false → тихий рассказ).
-  const notConnected = (profileQ.isError && insightsQ.isError) || (!!(profile?.mock || ins?.mock) && !demo);
+  // Загрузка: пока капабилити ещё не известна (gate) ИЛИ включённые IG-пробы в полёте.
+  const loading = gate.gateLoading || (gate.igEnabled && (profileQ.isPending || insightsQ.isPending || insights7Q.isPending));
+  // Не подключён: капабилити разрешилась в неподключённый канал, ЛИБО runtime-сигналы (ошибка /
+  // mock вне демо) когда мы уже пробовали. Отличается от «подключён, но мало данных» (input=null,
+  // notConnected=false → тихий рассказ).
+  const notConnected = gate.notConnected || (profileQ.isError && insightsQ.isError) || (!!(profile?.mock || ins?.mock) && !demo);
   const input = useMemo(() => {
+    if (!gate.igEnabled) return null;
     if (unavailable) return null;
     if (!!(profile?.mock || ins?.mock) && !demo) return null;
     // Пока 7-дн фетч грузится — не строим вход, чтобы не мигнуть daily-fallback охвата перед дедупом.
@@ -139,7 +155,7 @@ export function useIgWeekInput(): { input: NarrativeIgInput | null; loading: boo
       })),
       avgMediaErv,
     };
-  }, [unavailable, profile, ins, ins7, insights7Q.isPending, rows, media, demo]);
+  }, [gate.igEnabled, unavailable, profile, ins, ins7, insights7Q.isPending, rows, media, demo]);
   return { input, loading, notConnected };
 }
 
