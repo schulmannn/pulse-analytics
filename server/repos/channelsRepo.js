@@ -54,6 +54,32 @@ function createChannelsRepo({ pool, enabled, transaction, ensureExternalSource }
     return rows;
   }
 
+  // Lightweight default-channel pick for the auth/tenant hot path (resolveChannel). Returns just the
+  // id of the caller's first accessible, non-disabled channel — the SAME visibility UNION and
+  // `created_at ASC` order as listChannels, so the chosen id is byte-identical to listChannels()[0].id.
+  // Middleware only needs this id to then getChannel(id) for the effective role; it must NOT pay for
+  // listChannels' per-row `memberCount` (correlated channel_daily analytics subquery) and
+  // `ig_connected` EXISTS, which listChannels computes for EVERY visible channel and resolveChannel
+  // then throws away. One indexed query (channels_owner_idx / workspace_members_uid_idx →
+  // channels_workspace_idx), explicit uid, LIMIT 1. No memberCount, no analytics, no ig_accounts.
+  async function getDefaultChannelId(user) {
+    if (!enabled) return null;
+    const uid = user && user.uid;
+    if (uid == null) return null;   // defensive: never query ownership with a missing uid
+    const { rows } = await pool.query(
+      `SELECT channels.id FROM channels
+        WHERE channels.id IN (
+                SELECT c.id FROM channels c WHERE c.owner_uid = $1
+                UNION
+                SELECT c.id FROM channels c
+                  JOIN workspace_members m ON m.workspace_id = c.workspace_id
+                 WHERE m.uid = $1)
+          AND status<>'disabled'
+        ORDER BY created_at ASC
+        LIMIT 1`, [uid]);
+    return rows[0] ? rows[0].id : null;
+  }
+
   // Membership-checked fetch: returns the channel row only if the user may access it (creator or
   // workspace member), plus their effective role for write-gates. Routes turn null → 403.
   async function getChannel(id, user) {
@@ -317,7 +343,7 @@ function createChannelsRepo({ pool, enabled, transaction, ensureExternalSource }
   }
 
   return {
-    listChannels, getChannel, getChannelById, getOwnerChannelId, setChannelTgId,
+    listChannels, getDefaultChannelId, getChannel, getChannelById, getOwnerChannelId, setChannelTgId,
     ensurePersonalWorkspace, ensureChannelCanonical,
     createChannel, createIgChannel, findIgChannelByIgUser, createTgChannel, deleteChannel,
     createApiKey, getChannelByApiKey, listApiKeys, revokeApiKey,
