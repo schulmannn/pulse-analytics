@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { useChannels, useMentions, useMentionsArchive } from '@/api/queries';
-import { useSelectedChannel } from '@/lib/channel-context';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { useMentionSettings, useMentions, useMentionsArchive } from '@/api/queries';
 import { usePagePeriod } from '@/lib/period';
 import { serializeContentPeriod } from '@/lib/contentFilters';
 import {
@@ -29,6 +28,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { Icon } from '@/components/nav-icons';
 import { Skeleton } from '@/components/ui/skeleton';
+import { MentionRulesDialog } from '@/components/mentions/MentionRulesDialog';
 
 /**
  * DESKTOP «Упоминания» (md+): a Steep-flavoured PR-monitoring surface rendered directly inside the
@@ -41,7 +41,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 export function MentionsDesktop() {
   const [params, setParams] = useSearchParams();
   const pp = usePagePeriod();
-  const { channelId } = useSelectedChannel();
+  const [rulesOpen, setRulesOpen] = useState(false);
 
   const filters = useMemo(() => parseMentionsFilters(params), [params]);
   const pageDays = pp?.days ?? filters.period;
@@ -93,9 +93,16 @@ export function MentionsDesktop() {
   // Archive is the AUTHORITY — scoped to the page window + selected source, up to 100 rows.
   const archive = useMentionsArchive(pageDays, filters.source, 100);
   const live = useMentions();
+  const mentionSettings = useMentionSettings();
+  const settings = mentionSettings.data;
 
   // Live search only refreshes the archive; the desktop view is never rendered from live.data.
   const onRefresh = async () => {
+    if (!settings?.configured) {
+      if (settings) setRulesOpen(true);
+      return;
+    }
+    if (!settings.can_edit) return;
     const res = await live.refetch();
     if (res.data && res.data.available !== false) await archive.refetch();
   };
@@ -109,11 +116,13 @@ export function MentionsDesktop() {
     if (live.isError) return live.error instanceof Error ? live.error.message : 'Ошибка запроса';
     return null;
   })();
-
-  // Live brand-search is central-only (the owner's session). Collector-fed channels have no live
-  // path — don't promise a search there.
-  const channels = useChannels();
-  const isCentral = channels.data?.channels?.find((c) => c.id === channelId)?.source === 'central';
+  const needsReconnect = liveError != null && /подключ|сесси/i.test(liveError);
+  const settingsError = mentionSettings.isError
+    ? mentionSettings.error instanceof Error ? mentionSettings.error.message : 'Ошибка запроса'
+    : null;
+  const rulesDialog = rulesOpen && settings ? (
+    <MentionRulesDialog settings={settings} onClose={() => setRulesOpen(false)} />
+  ) : null;
 
   const data = archive.data;
   const sourceOptions: MentionSourceOption[] = data?.source_options ?? [];
@@ -178,26 +187,70 @@ export function MentionsDesktop() {
   const hasArchive = (data?.archive_total ?? 0) > 0 || (data?.total ?? 0) > 0;
   if (!hasArchive) {
     return (
-      <div className="flex flex-col items-center justify-center rounded border border-border bg-background px-4 py-12 text-center">
-        <h3 className="mb-1 text-base font-medium text-foreground">Аналитика упоминаний бренда</h3>
-        <p className="mb-5 max-w-md text-sm text-muted-foreground">
-          В архиве пока нет упоминаний. Поиск задействует Telegram searchPosts и расходует дневную квоту.
-        </p>
-        {liveError && <p className="mb-4 text-sm text-destructive">{liveError}</p>}
-        {isCentral ? (
-          <button
-            onClick={onRefresh}
-            disabled={refreshing}
-            className="btn-pill bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-          >
-            {refreshing ? 'Поиск…' : 'Найти упоминания'}
-          </button>
-        ) : (
-          <p className="text-xs text-muted-foreground">
-            Живой поиск доступен только для основного канала аккаунта.
+      <>
+        <div className="flex flex-col items-center justify-center rounded border border-border bg-background px-4 py-12 text-center">
+          <h3 className="mb-1 text-base font-medium text-foreground">Аналитика упоминаний бренда</h3>
+          <p className="mb-5 max-w-md text-sm text-muted-foreground">
+            {settings?.configured
+              ? 'В архиве пока нет упоминаний. Запустите поиск вручную, чтобы проверить новые публикации.'
+              : settings
+                ? 'Укажите варианты названия бренда и лишние совпадения, которые нужно отсеивать для этого канала.'
+                : 'Загружаем правила поиска для выбранного канала.'}
           </p>
-        )}
-      </div>
+          {settingsError && (
+            <p role="alert" className="mb-4 text-sm text-destructive">
+              Не удалось загрузить правила: {settingsError}
+            </p>
+          )}
+          {liveError && (
+            <div className="mb-4 space-y-2 text-sm text-destructive">
+              <p>{liveError}</p>
+              {needsReconnect && (
+                <Link className="inline-block text-primary underline underline-offset-4" to="/connect?source=telegram&tab=qr&action=reconnect">
+                  Переподключить Telegram
+                </Link>
+              )}
+            </div>
+          )}
+          {settings?.configured && settings.can_edit ? (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setRulesOpen(true)}
+                className="btn-pill border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-hover-row"
+              >
+                Правила поиска
+              </button>
+              <button
+                type="button"
+                onClick={() => void onRefresh()}
+                disabled={refreshing}
+                className="btn-pill bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+              >
+                {refreshing ? 'Поиск…' : 'Найти упоминания'}
+              </button>
+            </div>
+          ) : settings ? (
+            <button
+              type="button"
+              onClick={() => setRulesOpen(true)}
+              className="btn-pill bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            >
+              {settings.can_edit ? 'Настроить поиск' : 'Посмотреть правила'}
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled={mentionSettings.isPending}
+              onClick={() => void mentionSettings.refetch()}
+              className="btn-pill border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-hover-row disabled:opacity-50"
+            >
+              {mentionSettings.isPending ? 'Загрузка правил…' : 'Повторить'}
+            </button>
+          )}
+        </div>
+        {rulesDialog}
+      </>
     );
   }
 
@@ -215,29 +268,64 @@ export function MentionsDesktop() {
           <p className="text-sm font-medium text-foreground">Архив Telegram</p>
           <p className="text-xs text-muted-foreground">
             {fmt.num(data?.archive_total ?? 0)} упоминаний в архиве
-            {data?.updated_at ? ` · обновлён ${fmt.date(data.updated_at)}` : ''}. «Найти новые» тратит
-            дневную квоту searchPosts.
+            {data?.updated_at ? ` · обновлён ${fmt.date(data.updated_at)}` : ''}.
+            {settings?.configured
+              ? ` Ищем по ${fmt.num(settings.rules.include_terms.length)} ${settings.rules.include_terms.length === 1 ? 'термину' : 'терминам'}.`
+              : settings
+                ? ' Правила поиска ещё не настроены.'
+                : ' Загружаем правила поиска.'}
           </p>
         </div>
-        <div className="flex shrink-0 flex-col items-end gap-1">
-          {isCentral ? (
-            <button
-              onClick={onRefresh}
-              disabled={refreshing}
-              className="btn-pill border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-hover-row disabled:opacity-50"
-            >
-              {refreshing ? 'Обновление…' : 'Найти новые'}
-            </button>
-          ) : (
-            <span className="text-xs text-muted-foreground">Живой поиск — только основной канал</span>
+        <div className="flex shrink-0 flex-col items-end gap-1.5">
+          <div className="flex items-center gap-2">
+            {settings && (
+              <button
+                type="button"
+                onClick={() => setRulesOpen(true)}
+                className="btn-pill inline-flex items-center gap-2 border border-border bg-background px-3.5 py-2 text-sm font-medium text-foreground transition-colors hover:bg-hover-row"
+              >
+                <Icon name="gear" className="size-4 text-muted-foreground" />
+                {settings.configured ? 'Правила поиска' : 'Настроить поиск'}
+              </button>
+            )}
+            {settings?.configured && settings.can_edit && (
+              <button
+                type="button"
+                onClick={() => void onRefresh()}
+                disabled={refreshing}
+                className="btn-pill border border-border bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-hover-row disabled:opacity-50"
+              >
+                {refreshing ? 'Обновление…' : 'Найти новые'}
+              </button>
+            )}
+          </div>
+          {settings?.configured && settings.can_edit && (
+            <span className="text-2xs text-muted-foreground">Поиск запускается вручную и расходует ограниченную квоту Telegram.</span>
+          )}
+          {settings && !settings.can_edit && (
+            <span className="text-2xs text-muted-foreground">Поиск может запускать владелец или администратор.</span>
           )}
           <span role="status" className="sr-only">{refreshing ? 'Обновление…' : ''}</span>
         </div>
       </div>
 
+      {settingsError && (
+        <div role="alert" className="flex items-center justify-between gap-4 rounded border border-destructive/40 bg-destructive/5 px-4 py-2.5 text-sm text-muted-foreground">
+          <span>Не удалось загрузить правила поиска: {settingsError}</span>
+          <button type="button" onClick={() => void mentionSettings.refetch()} className="shrink-0 text-foreground underline underline-offset-4">
+            Повторить
+          </button>
+        </div>
+      )}
+
       {liveError && (
-        <div role="alert" className="rounded border border-destructive/40 bg-destructive/5 px-4 py-2.5 text-sm text-muted-foreground">
-          Не удалось обновить: {liveError} Показан сохранённый архив.
+        <div role="alert" className="flex items-center justify-between gap-4 rounded border border-destructive/40 bg-destructive/5 px-4 py-2.5 text-sm text-muted-foreground">
+          <span>Не удалось обновить: {liveError} Показан сохранённый архив.</span>
+          {needsReconnect && (
+            <Link className="shrink-0 text-primary underline underline-offset-4" to="/connect?source=telegram&tab=qr&action=reconnect">
+              Переподключить Telegram
+            </Link>
+          )}
         </div>
       )}
 
@@ -318,6 +406,7 @@ export function MentionsDesktop() {
         hasArchive={hasArchive}
         hasPeriodRows={total > 0}
       />
+      {rulesDialog}
     </div>
   );
 }

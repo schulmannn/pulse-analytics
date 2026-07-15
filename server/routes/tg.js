@@ -432,43 +432,10 @@ function registerTgRoutes({
     }
   });
 
-  // Brand mentions — cached longer (searchPosts has a ~10/day free quota) to avoid
-  // burning it on repeated loads. Cache TTL here is the 10-min default; the Python
-  // side also checks free quota before each search and never spends Stars.
-  app.get('/api/tg/mtproto/mentions', requireAuth, resolveChannel, async (req, res) => {
-    if (notCentral(req, res)) return;   // live brand-search is central-only
-    const cacheKey = `mtproto:mentions:${req.channel.id}`;
-    try {
-      const cached = cacheGet(cacheKey);
-      if (cached) return res.json(cached);
-      const data = await mtprotoFetch('/mentions', {}, MTPROTO_TIMEOUT_HEAVY_MS);
-      if (data && data.available) {
-        // Accumulate the full deduped list into the archive (history beyond searchPosts' window).
-        // Персистенция — часть контракта «Обновить»: клиент после успеха перечитывает архив, поэтому
-        // ждём запись ДО ответа. Ошибка записи — явный 5xx (не тихий console.error), иначе фронт
-        // подтвердит «обновлено», а архив останется без новых упоминаний.
-        if (Array.isArray(data.all) && req.channel.id) {
-          try {
-            await db.upsertMentions(req.channel.id, data.all);
-          } catch (e) {
-            log('error', 'mentions_archive_write_failed', {
-              channel_id: req.channel.id,
-              error: e instanceof Error ? e.message : String(e),
-            });
-            return res.status(503).json({
-              available: false,
-              error: 'Не удалось обновить архив упоминаний. Повторите позже.',
-            });
-          }
-        }
-        delete data.all;                 // don't ship the full list to the client
-        cacheSet(cacheKey, data);         // don't cache failures
-      }
-      res.json(data);
-    } catch (e) {
-      sendMtprotoError(res, e);
-    }
-  });
+  // Brand mentions live-search + per-channel mention rules moved to routes/mentions.js
+  // (GET/PUT /api/tg/mention-settings + GET /api/tg/mtproto/mentions). The old central-only global
+  // legacy-session route is gone: search now runs through the caller's managed QR session with
+  // per-channel rules, so it can serve any administered channel without mixing quota/archive identity.
 
   app.get('/api/tg/mtproto/post_stats/:id', requireAuth, resolveChannel, async (req, res) => {
     if (notCentral(req, res)) return;

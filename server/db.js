@@ -15,6 +15,7 @@ const { createUsersRepo } = require('./repos/usersRepo');
 const { createChannelsRepo } = require('./repos/channelsRepo');
 const { createSourcesRepo } = require('./repos/sourcesRepo');
 const { createIntegrationsRepo } = require('./repos/integrationsRepo');
+const { createMentionSettingsRepo } = require('./repos/mentionSettingsRepo');
 const { createGdprService } = require('./services/gdprService');
 // DB core (P2 db/core): пул / Railway-SSL / enabled / ping / close + классификация недоступности
 // живут в server/db/*. db.js их импортирует и ре-экспортит — публичный `db.*` API не меняется.
@@ -237,6 +238,13 @@ function createDatabase(config, overrides = {}) {
     enabled,
     transaction,
   });
+  // Per-channel mention rules. Читатель гейтится через channelsRepo.getChannel (ForActor), запись
+  // (owner/admin) вшивает channelAdminAccessSql в SQL. После channelsRepo (TDZ, как analyticsRepo).
+  const mentionSettingsRepo = createMentionSettingsRepo({
+    pool,
+    enabled,
+    getAccessibleChannel: channelsRepo.getChannel,
+  });
 
   // db.js-локальные экспорты (домены, ещё не вынесенные в repos/*): core + collector-writes +
   // analytics-reads + bugs/crashes. По мере распила эти наборы переезжают в свои repo.
@@ -265,6 +273,7 @@ function createDatabase(config, overrides = {}) {
     collector: collectorRepo,
     reports: reportsRepo, // REPORT_SCHEDULES, listReports, getReport, createReport, updateReport, deleteReport, listDueReports, markReportSent, listPostsWindow
     campaigns: campaignsRepo, // CAMPAIGN_*, listCampaigns, getCampaign, create/update/deleteCampaign, add/remove/listCampaignPosts, getCampaignSummary
+    mentionSettings: mentionSettingsRepo, // getMentionSettingsInternal/ForActor, upsertMentionSettingsForActor
     jobs: jobsRepo, // claimJob, completeJob, failJob, getJob, runJobOnce
     gdpr: gdprService, // deleteUserAccount, exportUserData (сервис, не repo)
   });

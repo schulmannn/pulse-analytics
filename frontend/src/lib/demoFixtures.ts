@@ -232,6 +232,20 @@ const MENTIONS = {
   ],
 };
 
+const MENTION_SETTINGS = {
+  configured: true,
+  rules: {
+    include_terms: ['demo_channel'],
+    exclude_terms: [],
+    exclude_sources: [],
+    match_mode: 'contains',
+  },
+  revision: 1,
+  updated_at: iso(0),
+  can_edit: false,
+  own_source: { username: 'demo_channel', tg_channel_id: null },
+};
+
 function postStats() {
   const x = Array.from({ length: 48 }, (_, i) => now / 1000 - (47 - i) * 3600);
   let cum = 0;
@@ -261,6 +275,7 @@ export function demoFixture(path: string): unknown | undefined {
   if (p === '/api/tg/full') return TG_FULL;
   if (p === '/api/history/channel') return HISTORY_RESP;
   if (p === '/api/history/mentions' || p === '/api/tg/mtproto/mentions') return MENTIONS;
+  if (p === '/api/tg/mention-settings') return MENTION_SETTINGS;
   if (p === '/api/tg/mtproto/stats') return TG_STATS;
   if (p === '/api/tg/mtproto/graphs') return TG_GRAPHS;
   if (p === '/api/tg/mtproto/velocity') return TG_VELOCITY;

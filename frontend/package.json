@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "test:e2e:smoke": "playwright test e2e/smoke.spec.ts e2e/campaigns.spec.ts --project=desktop-1440",
+    "test:e2e:smoke": "playwright test e2e/smoke.spec.ts e2e/campaigns.spec.ts e2e/mentions.spec.ts --project=desktop-1440",
     "typecheck": "tsc --noEmit",
     "build:shared": "esbuild src/lib/narrative.ts --bundle --format=cjs --platform=node --outfile=../server/lib/narrative.gen.cjs",
     "lint:motion": "node scripts/design-motion-lint.mjs",

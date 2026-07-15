@@ -40,6 +40,7 @@ import {
   IgTagsSchema,
   KeySchema,
   LoginResponseSchema,
+  MentionSettingsSchema,
   MentionsSchema,
   MeSchema,
   PostStatsSchema,
@@ -50,7 +51,7 @@ import {
   TgQrStatusSchema,
   VelocitySchema,
 } from '@/api/schemas';
-import type { CampaignPostInput, CampaignStatus, ReportConfig } from '@/api/schemas';
+import type { CampaignPostInput, CampaignStatus, MentionRules, ReportConfig } from '@/api/schemas';
 import { clearSessionToken, setSessionToken } from '@/lib/session';
 import { isDemoMode } from '@/lib/demo';
 import { useSelectedChannel } from '@/lib/channel-context';
@@ -230,6 +231,35 @@ export function useMentions() {
     enabled: false,
     queryKey: ['mentions', channelId],
     queryFn: ({ signal }) => apiGet('/api/tg/mtproto/mentions', MentionsSchema, { signal, channelId }),
+  });
+}
+
+/** Per-selected-channel Telegram mention rules. Reading is viewer-safe; writes are owner/admin. */
+export function useMentionSettings() {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    enabled: channelId != null,
+    queryKey: ['mention-settings', channelId],
+    staleTime: STALE_STATUS,
+    retry: false,
+    queryFn: ({ signal }) =>
+      apiGet('/api/tg/mention-settings', MentionSettingsSchema, { signal, channelId }),
+  });
+}
+
+/** Save rules under the channel captured by this render, then retire its cached live result. */
+export function useSaveMentionSettings() {
+  const { channelId } = useSelectedChannel();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: MentionRules) => {
+      if (channelId == null) return Promise.reject(new Error('Сначала выберите канал'));
+      return apiSend('PUT', '/api/tg/mention-settings', body, MentionSettingsSchema, { channelId });
+    },
+    onSuccess: (data) => {
+      qc.setQueryData(['mention-settings', channelId], data);
+      return qc.invalidateQueries({ queryKey: ['mentions', channelId] });
+    },
   });
 }
 

@@ -86,6 +86,11 @@ async function seedRichUser(tag) {
   await pool.query(
     `INSERT INTO chart_annotations (channel_id, day, label, created_by) VALUES ($1, CURRENT_DATE, 'launch', $2)`,
     [ch, uid]);
+  await pool.query(
+    `INSERT INTO channel_mention_settings
+       (channel_id, include_terms, exclude_terms, exclude_sources, match_mode, updated_by)
+     VALUES ($1, ARRAY['brand'], ARRAY['spam'], ARRAY['noise'], 'word', $2)`,
+    [ch, uid]);
   return { uid, ws, src, ch };
 }
 
@@ -128,6 +133,7 @@ test('erasure: deleteUserAccount removes every user-linked row, spares neighbour
     ['channels', `SELECT count(*) FROM channels WHERE id=$1`, [a.ch]],
     ['channel_daily', `SELECT count(*) FROM channel_daily WHERE channel_id=$1`, [a.ch]],
     ['posts', `SELECT count(*) FROM posts WHERE channel_id=$1`, [a.ch]],
+    ['channel_mention_settings', `SELECT count(*) FROM channel_mention_settings WHERE channel_id=$1`, [a.ch]],
     ['ig_accounts', `SELECT count(*) FROM ig_accounts WHERE channel_id=$1`, [a.ch]],
     ['ig_daily', `SELECT count(*) FROM ig_daily WHERE channel_id=$1`, [a.ch]],
     ['chart_annotations', `SELECT count(*) FROM chart_annotations WHERE channel_id=$1`, [a.ch]],
@@ -183,6 +189,8 @@ test('export: exportUserData carries the archive but never credentials or foreig
   assert.strictEqual(data.channels[0].id, a.ch);
   assert.strictEqual(data.channels[0].archive.daily.length, 1, 'daily archive included');
   assert.strictEqual(data.channels[0].archive.posts.length, 1, 'posts archive included');
+  assert.deepStrictEqual(data.channels[0].mention_settings.include_terms, ['brand'], 'mention rules included');
+  assert.strictEqual(data.channels[0].mention_settings.match_mode, 'word');
   assert.ok(data.channels[0].instagram, 'ig profile included');
   assert.strictEqual(data.channels[0].instagram.daily.length, 1, 'ig daily included');
   assert.ok(data.telegram_session, 'tg connection presence included');

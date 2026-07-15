@@ -51,6 +51,8 @@ const EXPECTED_FUNCTIONS = [
   // campaignsRepo
   'listCampaigns', 'getCampaign', 'createCampaign', 'updateCampaign', 'deleteCampaign',
   'addCampaignPosts', 'removeCampaignPosts', 'listCampaignPosts', 'getCampaignSummary',
+  // mentionSettingsRepo
+  'getMentionSettingsInternal', 'getMentionSettingsForActor', 'upsertMentionSettingsForActor',
   // jobsRepo
   'claimJob', 'completeJob', 'failJob', 'getJob', 'runJobOnce',
   // gdpr
