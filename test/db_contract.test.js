@@ -22,6 +22,7 @@ const EXPECTED_FUNCTIONS = [
   'createEmailToken', 'useEmailToken', 'pruneEmailTokens', 'getPrefs', 'setPrefs',
   // channels / workspaces / sources
   'adoptOwnerChannel', 'listChannels', 'getDefaultChannelId', 'getChannel', 'getChannelById', 'getOwnerChannelId',
+  'getTgChannelIdentity', 'saveTgChannelAccessHash',
   'setChannelTgId', 'createChannel', 'createTgChannel', 'createIgChannel', 'findIgChannelByIgUser',
   'deleteChannel', 'createApiKey', 'getChannelByApiKey', 'listApiKeys', 'revokeApiKey',
   'ensurePersonalWorkspace', 'ensureExternalSource', 'ensureChannelCanonical',

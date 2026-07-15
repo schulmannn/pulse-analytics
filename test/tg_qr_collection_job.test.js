@@ -81,7 +81,9 @@ function makeJob({ responses = {}, runJobOnce, health = {}, tgCrypto, tgQrChanne
   return { job, db, calls };
 }
 
-const ch = (id, username) => ({ id, username, tg_channel_id: 1000 + id, source: 'qr' });
+const ch = (id, username, ownerUid = 1) => ({
+  id, username, tg_channel_id: 1000 + id, source: 'qr', owner_uid: ownerUid,
+});
 
 // ── processTgQrCollection (nightly) ────────────────────────────────────────────
 
@@ -90,7 +92,7 @@ test('auth failure → reauth_required, остальные каналы юзер
   db.listTgSessions = async () => [{ uid: 1, session_enc: 's1', session_version: '1' }, { uid: 2, session_enc: 's2', session_version: '1' }];
   db.listChannels = async ({ uid }) => (uid === 1
     ? [ch(1, 'a1'), ch(2, 'a2')]
-    : [ch(3, 'b1')]);
+    : [ch(3, 'b1', 2)]);
 
   await job.processTgQrCollection();
 
@@ -108,7 +110,7 @@ test('auth failure → reauth_required, остальные каналы юзер
 test('503 mtproto_session_unauthorized тоже трактуется как auth (reauth_required)', async () => {
   const { job, db, calls } = makeJob({ responses: { a1: authErr503() } });
   db.listTgSessions = async () => [{ uid: 7, session_enc: 's', session_version: '1' }];
-  db.listChannels = async () => [ch(1, 'a1'), ch(2, 'a2')];
+  db.listChannels = async () => [ch(1, 'a1', 7), ch(2, 'a2', 7)];
 
   await job.processTgQrCollection();
 
@@ -120,7 +122,7 @@ test('503 mtproto_session_unauthorized тоже трактуется как auth
 test('auth failure wins even after an earlier channel succeeded', async () => {
   const { job, db, calls } = makeJob({ responses: { a2: authErr() } });
   db.listTgSessions = async () => [{ uid: 12, session_enc: 's', session_version: '3' }];
-  db.listChannels = async () => [ch(1, 'a1'), ch(2, 'a2'), ch(3, 'a3')];
+  db.listChannels = async () => [ch(1, 'a1', 12), ch(2, 'a2', 12), ch(3, 'a3', 12)];
 
   await job.processTgQrCollection();
 
@@ -133,7 +135,7 @@ test('auth failure wins even after an earlier channel succeeded', async () => {
 test('все runJobOnce skipped → не считается попыткой, health не трогается', async () => {
   const { job, db, calls } = makeJob({ runJobOnce: async () => ({ skipped: true }) });
   db.listTgSessions = async () => [{ uid: 5, session_enc: 's', session_version: '1' }];
-  db.listChannels = async () => [ch(1, 'a1'), ch(2, 'a2')];
+  db.listChannels = async () => [ch(1, 'a1', 5), ch(2, 'a2', 5)];
 
   await job.processTgQrCollection();
 
@@ -145,7 +147,7 @@ test('успех выигрывает у не-auth сбоя → healthy', async 
   // a1 succeeds, a2 times out (non-auth). Final state must be healthy.
   const { job, db, calls } = makeJob({ responses: { a2: timeoutErr() } });
   db.listTgSessions = async () => [{ uid: 9, session_enc: 's', session_version: '1' }];
-  db.listChannels = async () => [ch(1, 'a1'), ch(2, 'a2')];
+  db.listChannels = async () => [ch(1, 'a1', 9), ch(2, 'a2', 9)];
 
   await job.processTgQrCollection();
 
@@ -158,7 +160,7 @@ test('успех выигрывает у не-auth сбоя → healthy', async 
 test('успех выигрывает даже если сбой был ПЕРВЫМ', async () => {
   const { job, db, calls } = makeJob({ responses: { a1: timeoutErr() } });
   db.listTgSessions = async () => [{ uid: 4, session_enc: 's', session_version: '1' }];
-  db.listChannels = async () => [ch(1, 'a1'), ch(2, 'a2')];
+  db.listChannels = async () => [ch(1, 'a1', 4), ch(2, 'a2', 4)];
 
   await job.processTgQrCollection();
 
@@ -169,7 +171,7 @@ test('успех выигрывает даже если сбой был ПЕРВ
 test('только не-auth сбои → degraded с безопасным кодом', async () => {
   const { job, db, calls } = makeJob({ responses: { a1: timeoutErr(), a2: floodErr() } });
   db.listTgSessions = async () => [{ uid: 3, session_enc: 's', session_version: '1' }];
-  db.listChannels = async () => [ch(1, 'a1'), ch(2, 'a2')];
+  db.listChannels = async () => [ch(1, 'a1', 3), ch(2, 'a2', 3)];
 
   await job.processTgQrCollection();
 
@@ -183,7 +185,7 @@ test('только не-auth сбои → degraded с безопасным ко�
 test('не-auth сбой без .code → collect_failed', async () => {
   const { job, db, calls } = makeJob({ responses: { a1: oddErr() } });
   db.listTgSessions = async () => [{ uid: 8, session_enc: 's', session_version: '1' }];
-  db.listChannels = async () => [ch(1, 'a1')];
+  db.listChannels = async () => [ch(1, 'a1', 8)];
 
   await job.processTgQrCollection();
 
@@ -265,7 +267,8 @@ test('processTgQrCollection: БД выключена → пустая стати
 
 test('collectQrChannelsNow: auth-сбой короткозамыкает и пишет reauth_required', async () => {
   const { job, calls } = makeJob({ responses: { a1: authErr() } });
-  await job.collectQrChannelsNow({ uid: 2, session_enc: 's', session_version: '1' }, [ch(1, 'a1'), ch(2, 'a2')]);
+  await job.collectQrChannelsNow(
+    { uid: 2, session_enc: 's', session_version: '1' }, [ch(1, 'a1', 2), ch(2, 'a2', 2)]);
 
   assert.deepEqual(calls.post, ['a1']); // a2 short-circuited
   const fail = calls.health.find((c) => c[0] === 'failure');
@@ -274,7 +277,8 @@ test('collectQrChannelsNow: auth-сбой короткозамыкает и пи
 
 test('collectQrChannelsNow: успех выигрывает у не-auth сбоя → healthy', async () => {
   const { job, calls } = makeJob({ responses: { a2: timeoutErr() } });
-  await job.collectQrChannelsNow({ uid: 6, session_enc: 's', session_version: '1' }, [ch(1, 'a1'), ch(2, 'a2')]);
+  await job.collectQrChannelsNow(
+    { uid: 6, session_enc: 's', session_version: '1' }, [ch(1, 'a1', 6), ch(2, 'a2', 6)]);
 
   assert.deepEqual(calls.post, ['a1', 'a2']);
   assert.deepEqual(calls.health[1], ['success', 6]);
@@ -430,8 +434,223 @@ test('collectManagedChannelNow: previous-key session is collected AND rewritten 
 test('collectQrChannelsNow: previous-key session is rewritten once, rewrite failure never throws', async () => {
   const { job, calls } = makeJob({ tgCrypto: previousKeyCrypto(), rotate: new Error('db down') });
   await assert.doesNotReject(
-    job.collectQrChannelsNow({ uid: 6, session_enc: 'old', session_version: '1' }, [ch(1, 'a1')]));
+    job.collectQrChannelsNow({ uid: 6, session_enc: 'old', session_version: '1' }, [ch(1, 'a1', 6)]));
 
   assert.deepEqual(calls.post, ['a1']);
   assert.deepEqual(calls.rotate, [{ uid: 6, version: '1', enc: 'enc:old' }]);
+});
+
+// ── Access-hash warm path: persist entity identity, reuse it, self-heal, 64-bit safe, no leak ────
+// A private QR channel (no username) is addressed by its numeric tg_channel_id. On a fresh managed
+// StringSession that id has no cached access_hash, so mtproto would scan iter_dialogs(limit=1000)
+// each collect just to recover it. These tests cover the fix on the Node side: the persisted hash is
+// sent so the scan is skipped, the resolved hash is written back generation-guarded, a refreshed hash
+// self-heals, unsafe int64 values survive byte-exact, and the hash never blocks a collect or leaks.
+
+// Build a job whose fake db implements getTgChannelIdentity/saveTgChannelAccessHash (feature-present).
+// `stored` maps channel id -> stored identity row; mtproto returns `entityByRef` for the collected ref
+// so a test can drive "resolved a fresh/refreshed hash". Records every access_hash sent + persisted.
+function makeWarmJob({ stored = {}, entityByRef = {}, saveThrows = false } = {}) {
+  const calls = { post: [], accessHashSent: [], hashWrites: [], persisted: [], logs: [] };
+  const db = {
+    enabled: true,
+    graphsToDailyRows: () => [],
+    saveRawSnapshot: async () => {},
+    persistTgBundleTx: async (channelId) => { calls.persisted.push(channelId); return { channel_daily: 1, posts: 1 }; },
+    runJobOnce: async (_kind, _key, fn) => ({ skipped: false, result: await fn() }),
+    recordTgSessionAttempt: async () => true,
+    recordTgSessionSuccess: async () => true,
+    recordTgSessionFailure: async () => true,
+    rotateTgSessionCiphertext: async () => true,
+    listTgSessions: async () => [],
+    listChannels: async () => [],
+    getTgChannelIdentity: async (channelId, ownerUid) => {
+      const row = channelId in stored ? stored[channelId] : null;
+      return row && String(ownerUid) === '1' ? row : null;
+    },
+    saveTgChannelAccessHash: async (channelId, ownerUid, hash, gen) => {
+      calls.hashWrites.push({ channelId, ownerUid, hash, gen });
+      if (saveThrows) throw new Error('db down carrying SECRET-HASH-9998887776665554443');
+      return true;
+    },
+  };
+  const mtprotoPost = async (_path, { body }) => {
+    calls.post.push(body.channel);
+    calls.accessHashSent.push(body.access_hash);   // undefined when nothing was stored
+    const entity = entityByRef[body.channel];
+    return { channel: {}, views_summary: null, posts: [], stats: null, graphs: null,
+             ...(entity !== undefined ? { entity } : {}) };
+  };
+  const job = createTgQrCollectionJob({
+    db,
+    log: (level, event, meta) => { calls.logs.push({ level, event, meta }); },
+    tgCrypto: activeCrypto(),
+    mtprotoPost,
+    MTPROTO_TOKEN: 'tok',
+    MTPROTO_TIMEOUT_HEAVY_MS: 1000,
+    tgPostToRow: (p) => p,
+  });
+  return { job, db, calls };
+}
+
+// A private channel row: numeric id ref, NO username → addressed by tg_channel_id.
+const priv = (id, tgId) => ({ id, username: null, tg_channel_id: tgId, source: 'qr', owner_uid: 1 });
+
+test('warm path: a stored access_hash is sent to /qr/collect (so mtproto skips the dialog scan)', async () => {
+  const HASH = '7345987012345678901';   // > 2**53 → must survive as an exact string
+  const { job, calls } = makeWarmJob({
+    stored: { 1: { tg_channel_id: '-1001234567890', tg_access_hash: HASH, tg_access_hash_version: '3' } },
+    entityByRef: { '-1001234567890': { id: '-1001234567890', access_hash: HASH } },
+  });
+
+  await job.collectQrChannelsNow({ uid: 1, session_enc: 's', session_version: '3' }, [priv(1, '-1001234567890')]);
+
+  assert.deepEqual(calls.post, ['-1001234567890']);          // addressed by numeric id (private channel)
+  assert.deepEqual(calls.accessHashSent, [HASH]);            // stored hash forwarded, byte-exact
+  assert.deepEqual(calls.hashWrites, [], 'an unchanged warm hash does not pay for a no-op UPDATE');
+});
+
+test('cold legacy row (no stored hash) sends none, then persists the resolved hash generation-guarded', async () => {
+  const RESOLVED = '-8674665223082153551';   // negative int64 from the dialog resync
+  const { job, calls } = makeWarmJob({
+    stored: { 1: { tg_channel_id: '-1009876543210', tg_access_hash: null, tg_access_hash_version: null } },
+    entityByRef: { '-1009876543210': { id: '-1009876543210', access_hash: RESOLVED } },
+  });
+
+  await job.collectQrChannelsNow({ uid: 1, session_enc: 's', session_version: '5' }, [priv(1, '-1009876543210')]);
+
+  assert.deepEqual(calls.accessHashSent, [undefined]);                          // cold → nothing sent
+  assert.deepEqual(calls.hashWrites, [{ channelId: 1, ownerUid: 1, hash: RESOLVED, gen: '5' }]); // resolved hash cached
+});
+
+test('stale hash self-heals: a refreshed hash from mtproto is persisted, replacing the old one', async () => {
+  const STALE = '1111111111111111111';
+  const FRESH = '2222222222222222222';
+  const { job, calls } = makeWarmJob({
+    stored: { 1: { tg_channel_id: '-1001111111111', tg_access_hash: STALE, tg_access_hash_version: '2' } },
+    // mtproto retried via the cold path and returns the REAL (refreshed) hash.
+    entityByRef: { '-1001111111111': { id: '-1001111111111', access_hash: FRESH } },
+  });
+
+  await job.collectQrChannelsNow({ uid: 1, session_enc: 's', session_version: '2' }, [priv(1, '-1001111111111')]);
+
+  assert.deepEqual(calls.accessHashSent, [STALE]);                              // stale hash was tried first
+  assert.deepEqual(calls.hashWrites, [{ channelId: 1, ownerUid: 1, hash: FRESH, gen: '2' }]); // refreshed, same generation
+});
+
+test('64-bit access_hash is preserved byte-exact in the JSON body (never via Number)', async () => {
+  const HASH = '9223372036854775807';   // 2**63 - 1: rounds if coerced through a JS double
+  assert.notEqual(String(Number(HASH)), HASH, 'sanity: this value is unsafe as a JS Number');
+  const { job, calls } = makeWarmJob({
+    stored: { 1: { tg_channel_id: '-1002222222222', tg_access_hash: HASH, tg_access_hash_version: '1' } },
+    entityByRef: { '-1002222222222': { id: '-1002222222222', access_hash: HASH } },
+  });
+
+  await job.collectQrChannelsNow({ uid: 1, session_enc: 's', session_version: '1' }, [priv(1, '-1002222222222')]);
+
+  assert.equal(calls.accessHashSent[0], HASH);       // exact string out
+  assert.deepEqual(calls.hashWrites, [], 'unchanged warm value is already persisted');
+});
+
+test('public username channel never reads, sends or stores an access_hash', async () => {
+  const { job, db, calls } = makeWarmJob({
+    stored: { 1: { tg_channel_id: '1001', tg_access_hash: '777', tg_access_hash_version: '1' } },
+    entityByRef: { public_channel: { id: '1001', access_hash: '777' } },
+  });
+  db.getTgChannelIdentity = async () => { throw new Error('public channel must not read identity'); };
+
+  await job.collectQrChannelsNow(
+    { uid: 1, session_enc: 's', session_version: '1' }, [ch(1, 'public_channel')]);
+
+  assert.deepEqual(calls.accessHashSent, [undefined]);
+  assert.deepEqual(calls.hashWrites, []);
+});
+
+test('warm path generation guard: the collecting session_version is threaded as the write generation', async () => {
+  // processTgQrCollection carries s.session_version; the repo requires THAT generation to still be
+  // current for the owner and refuses any older-generation clobber.
+  const { job, db, calls } = makeWarmJob({
+    stored: { 1: { tg_channel_id: '-100333', tg_access_hash: null, tg_access_hash_version: null } },
+    entityByRef: { '-100333': { id: '-100333', access_hash: '4242' } },
+  });
+  db.listTgSessions = async () => [{ uid: 1, session_enc: 's', session_version: '9' }];
+  db.listChannels = async () => [priv(1, '-100333')];
+
+  await job.processTgQrCollection();
+
+  assert.deepEqual(calls.hashWrites, [{ channelId: 1, ownerUid: 1, hash: '4242', gen: '9' }]); // generation from the session
+});
+
+test('reconnect generation never reuses an access_hash from the previous session', async () => {
+  const OLD = '1111111111111111111';
+  const FRESH = '2222222222222222222';
+  const { job, calls } = makeWarmJob({
+    stored: { 1: { tg_channel_id: '-100777', tg_access_hash: OLD, tg_access_hash_version: '4' } },
+    entityByRef: { '-100777': { id: '-100777', access_hash: FRESH } },
+  });
+
+  await job.collectQrChannelsNow(
+    { uid: 1, session_enc: 's', session_version: '5' }, [priv(1, '-100777')]);
+
+  assert.deepEqual(calls.accessHashSent, [undefined], 'new credential takes one cold resolution');
+  assert.deepEqual(calls.hashWrites, [{ channelId: 1, ownerUid: 1, hash: FRESH, gen: '5' }]);
+});
+
+test('foreign workspace channel is never collected or stamped with the caller session identity', async () => {
+  const { job, calls } = makeWarmJob({
+    stored: { 2: { tg_channel_id: '-100888', tg_access_hash: '888', tg_access_hash_version: '1' } },
+    entityByRef: { '-100888': { id: '-100888', access_hash: '888' } },
+  });
+  const foreign = { ...priv(2, '-100888'), owner_uid: 2 };
+
+  await job.collectQrChannelsNow({ uid: 1, session_enc: 's', session_version: '1' }, [foreign]);
+
+  assert.deepEqual(calls.post, []);
+  assert.deepEqual(calls.hashWrites, []);
+});
+
+test('entity identity mismatch fails closed before product persistence and logs only a fixed safe code', async () => {
+  const HASH = '999999999999999999';
+  const { job, calls } = makeWarmJob({
+    stored: { 1: { tg_channel_id: '-100999', tg_access_hash: null, tg_access_hash_version: null } },
+    entityByRef: { '-100999': { id: '123456', access_hash: HASH } },
+  });
+
+  await job.collectQrChannelsNow(
+    { uid: 1, session_enc: 's', session_version: '1' }, [priv(1, '-100999')]);
+
+  assert.deepEqual(calls.hashWrites, []);
+  assert.deepEqual(calls.persisted, [], 'wrong-channel bundle never reaches the product archive');
+  const warn = calls.logs.find((l) => l.event === 'tg_access_hash_identity_mismatch');
+  assert.deepEqual(warn.meta, { channelId: 1, error: 'identity_mismatch' });
+  assert.equal(JSON.stringify(calls.logs).includes(HASH), false);
+});
+
+test('persist failure never blocks the collect and never logs the hash', async () => {
+  const HASH = '5555555555555555555';
+  const { job, calls } = makeWarmJob({
+    stored: { 1: { tg_channel_id: '-100444', tg_access_hash: null, tg_access_hash_version: null } },
+    entityByRef: { '-100444': { id: '-100444', access_hash: HASH } },
+    saveThrows: true,
+  });
+
+  await assert.doesNotReject(
+    job.collectQrChannelsNow({ uid: 1, session_enc: 's', session_version: '1' }, [priv(1, '-100444')]));
+
+  assert.deepEqual(calls.persisted, [1]);   // the bundle was still persisted despite the hash-write throw
+  const warn = calls.logs.find((l) => l.event === 'tg_access_hash_persist_failed');
+  assert.equal(warn.level, 'warn');
+  assert.equal(warn.meta.error, 'write_failed');
+  const blob = JSON.stringify(calls.logs);
+  assert.equal(blob.includes(HASH), false, 'the resolved access_hash must never appear in a log');
+  assert.equal(blob.includes('SECRET-HASH'), false, 'arbitrary DB error text must never be logged');
+});
+
+test('feature-detect: a db without the identity methods sends no access_hash and never throws (old-schema safe)', async () => {
+  // The shared makeJob fake db has NO getTgChannelIdentity/saveTgChannelAccessHash — the job must
+  // gracefully fall back to the cold path (current behaviour) rather than crash on the missing method.
+  const { job, calls } = makeJob();
+  await assert.doesNotReject(
+    job.collectQrChannelsNow({ uid: 1, session_enc: 's', session_version: '1' }, [priv(1, '-100555')]));
+  assert.deepEqual(calls.post, ['-100555']);   // still collected, addressed by id, no access_hash attached
 });

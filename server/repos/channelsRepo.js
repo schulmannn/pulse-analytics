@@ -130,6 +130,47 @@ function createChannelsRepo({ pool, enabled, transaction, ensureExternalSource }
     return true;
   }
 
+  // ── Managed-collection entity identity (Telegram access_hash) ────────────────────────────────
+  // Read the stored Telegram entity identity for the managed-collection warm path. Deliberately NOT
+  // part of the shared CHANNEL_COLS / listChannels: access_hash is sensitive-ish (an account-scoped
+  // handle to the channel) and must never reach a browser/API response, so only the collection job
+  // reads it, by channel id (PK) plus the credential owner's uid. Returns the raw pg values:
+  // tg_channel_id / tg_access_hash are
+  // BIGINT and come back as decimal STRINGS (no Number coercion → no 64-bit precision loss).
+  async function getTgChannelIdentity(channelId, ownerUid) {
+    if (!enabled || !channelId || ownerUid == null) return null;
+    const { rows } = await pool.query(
+      `SELECT tg_channel_id, tg_access_hash, tg_access_hash_version
+         FROM channels WHERE id=$1 AND owner_uid=$2`,
+      [channelId, ownerUid]);
+    return rows[0] || null;
+  }
+
+  // Persist the resolved access_hash after a successful managed collection, generation-guarded by the
+  // collecting session generation (session_version). A write only wins when that generation is still
+  // current for the channel owner and is >= the stored one, so a late result from an OLDER session
+  // (reconnect race) can never clobber a fresh hash. Key re-encryption keeps the same generation.
+  // `accessHash` and `gen`
+  // are decimal STRINGS bound straight to BIGINT params — never parsed through Number. Best-effort:
+  // callers swallow failures (a missing hash only costs the next collect a one-time dialog resync).
+  // Returns true when a row was actually updated.
+  async function saveTgChannelAccessHash(channelId, ownerUid, accessHash, gen) {
+    if (!enabled || !channelId || ownerUid == null || accessHash == null || gen == null) return false;
+    const { rowCount } = await pool.query(
+      `UPDATE channels AS c
+          SET tg_access_hash = $3, tg_access_hash_version = $4
+        WHERE c.id = $1 AND c.owner_uid = $2
+          AND c.tg_channel_id IS NOT NULL
+          AND EXISTS (
+                SELECT 1 FROM tg_sessions s
+                 WHERE s.uid = c.owner_uid AND s.session_version = $4::bigint)
+          AND (c.tg_access_hash_version IS NULL OR c.tg_access_hash_version <= $4::bigint)
+          AND (c.tg_access_hash IS DISTINCT FROM $3::bigint
+               OR c.tg_access_hash_version IS DISTINCT FROM $4::bigint)`,
+      [channelId, ownerUid, String(accessHash), String(gen)]);
+    return rowCount > 0;
+  }
+
   // ── Workspaces + canonical external identity ─────────────────────
   async function ensurePersonalWorkspace(uid, executor = pool) {
     if (!enabled || uid == null) return null;
@@ -344,6 +385,7 @@ function createChannelsRepo({ pool, enabled, transaction, ensureExternalSource }
 
   return {
     listChannels, getDefaultChannelId, getChannel, getChannelById, getOwnerChannelId, setChannelTgId,
+    getTgChannelIdentity, saveTgChannelAccessHash,
     ensurePersonalWorkspace, ensureChannelCanonical,
     createChannel, createIgChannel, findIgChannelByIgUser, createTgChannel, deleteChannel,
     createApiKey, getChannelByApiKey, listApiKeys, revokeApiKey,

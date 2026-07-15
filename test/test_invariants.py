@@ -42,7 +42,7 @@ def _install_stubs():
     telethon = mod("telethon")
     telethon.TelegramClient = object
     errors = mod("telethon.errors")
-    for e in ("FloodWaitError", "PasswordHashInvalidError", "SessionPasswordNeededError", "UnauthorizedError"):
+    for e in ("ChannelInvalidError", "FloodWaitError", "PasswordHashInvalidError", "SessionPasswordNeededError", "UnauthorizedError"):
         setattr(errors, e, type(e, (Exception,), {}))
     telethon.errors = errors
     sessions = mod("telethon.sessions"); sessions.StringSession = object; telethon.sessions = sessions
@@ -57,7 +57,7 @@ def _install_stubs():
         setattr(channels, r, object)
     functions.channels = channels
     tltypes = mod("telethon.tl.types")
-    for t in ("StatsGraph", "StatsGraphAsync", "InputPeerEmpty", "PeerChannel"):
+    for t in ("StatsGraph", "StatsGraphAsync", "InputPeerEmpty", "InputPeerChannel", "PeerChannel"):
         setattr(tltypes, t, type(t, (), {}))
     tl.types = tltypes
 
