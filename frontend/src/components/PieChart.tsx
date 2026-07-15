@@ -267,6 +267,7 @@ export function PieChart({ values, labels, titles, colors, height = 200 }: PieCh
               </span>
               <span className="shrink-0 text-sm font-medium tabular-nums text-foreground">
                 {fmt.num(a.value)}
+                {' '}
                 <span className="ml-1.5 text-2xs font-normal text-muted-foreground">{pct(a.value)}</span>
               </span>
             </li>
