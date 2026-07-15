@@ -47,18 +47,19 @@ export function buildTgInsights(i: TgInsightInput): TgInsight[] {
     ? { caption: i.topPost.caption, permalink: i.topPost.permalink, reach: i.topPost.reach, erv: i.topPost.erv }
     : undefined;
 
-  // Views trend — the headline movement, anchored to the best post as a concrete reference.
+  // Channel-wide views trend from channel_daily. A top post is supporting context, not the source
+  // of this total: publication views and the channel-wide daily flow answer different questions.
   if (i.viewsDelta && i.viewsDelta.dir !== 'flat') {
     const up = i.viewsDelta.dir === 'up';
     out.push({
       tone: up ? 'up' : 'down',
-      statement: `Просмотры ${up ? 'выросли' : 'снизились'} на ${pctStr(i.viewsDelta)}% к прошлому периоду.`,
+      statement: `Просмотры канала ${up ? 'выросли' : 'снизились'} на ${pctStr(i.viewsDelta)}% к прошлому периоду.`,
       why: up
-        ? 'Контент набирает охват лучше, чем в прошлом окне.'
-        : 'Часть постов недобрала охват против прошлого окна.',
+        ? 'Суммарный дневной поток просмотров выше, чем в прошлом окне.'
+        : 'Суммарный дневной поток просмотров ниже, чем в прошлом окне.',
       action: up
-        ? 'Закрепите формат: что сработало — видно в разборе «Просмотры» и в топ-постах.'
-        : 'Сравните темы и время постинга — откройте карточку «Просмотры» для разбора по дням.',
+        ? 'Проверьте дни роста в разборе метрики «Просмотры», затем сопоставьте их с публикациями.'
+        : 'Откройте разбор метрики «Просмотры» и сопоставьте дни снижения с темами и частотой публикаций.',
       evidence,
     });
   }

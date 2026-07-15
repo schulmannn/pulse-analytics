@@ -28,6 +28,8 @@ import { DateRangePicker } from '@/components/DateRangePicker';
 import { DAY_MS, alignGhost, baselineCoveredByPosts, bucketKeyOf, bucketKeysInWindow, comparisonWindow } from '@/lib/metricSeries';
 import type { Grain } from '@/lib/metricSeries';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
+import { splitDailyWindows } from '@/lib/delta';
+import { MediaThumb } from '@/components/MediaThumb';
 
 // ── View state (all in the URL so links restore the exact view, like steep) ──────────────
 type ChartType = 'line' | 'bar' | 'rank' | 'pivot';
@@ -98,6 +100,18 @@ function formatLabel(mediaType: string | null, albumSize: number): string {
   if (mediaType === 'video') return 'Видео';
   if (mediaType === 'document') return 'Файл';
   return 'Текст';
+}
+
+function postThumbLabel(post: NormalizedPost): string {
+  if (post.mediaType === 'video') return 'Видео';
+  if (post.mediaType === 'photo') return post.albumSize > 1 ? 'Альбом' : 'Фото';
+  if (post.mediaType === 'document') return 'Файл';
+  return 'Текст';
+}
+
+function smallThumbUrl(src: string | null): string | null {
+  if (!src) return null;
+  return `${src}${src.includes('?') ? '&' : '?'}size=sm`;
 }
 
 /** Dimension bucket of a post (format / weekday) for rank, pivot and the breakdown list. */
@@ -281,6 +295,19 @@ export function MetricPage() {
   const baseWin =
     cmp === 'off' || winFrom == null || spanMs == null ? null : comparisonWindow(winFrom, winTo, cmp);
   const cmpLabel = cmp === 'off' ? null : CMP_LABEL[cmp];
+  const archiveWindowPair =
+    !range && days > 0
+      ? splitDailyWindows(historyRows, (row) => Number(row.views ?? Number.NaN), days, winTo)
+      : null;
+  const activeViewsRows = archiveWindowPair?.current.rows ?? historyRows.filter((row) => inRange(row.day));
+  const baselineViewsRows = !baseWin
+    ? []
+    : cmp === 'prev' && !range && days > 0
+      ? archiveWindowPair?.previous.rows ?? []
+      : historyRows.filter((row) => {
+          const timestamp = Date.parse(row.day);
+          return Number.isFinite(timestamp) && timestamp >= baseWin.from && timestamp <= baseWin.to;
+        });
 
   // Grain availability follows the window size (a 7-day window has no meaningful months).
   const winDays = spanMs != null ? Math.round(spanMs / DAY_MS) + 1 : Infinity;
@@ -311,7 +338,7 @@ export function MetricPage() {
 
   let series: DailySeries;
   let ghost: number[] | undefined;
-  const viewsFromArchive = metricKey === 'views' && historyRows.some((r) => r.views != null && inRange(r.day));
+  const viewsFromArchive = metricKey === 'views' && activeViewsRows.some((row) => row.views != null);
   if (metricKey === 'subscribers') {
     const inWin = historyRows.filter((r) => inRange(r.day));
     series = effGrain === 'day' ? subsSpark : bucketedSubsSeries(inWin, effGrain);
@@ -330,14 +357,9 @@ export function MetricPage() {
     // Channel-wide daily views from the archive — the line/bar sums to the (channel) headline, not
     // the post-view sum. The rank/pivot breakdowns below stay post-based on purpose (a channel daily
     // series has no per-post dimension; they answer "which posts/hours drove views").
-    const inWin = historyRows.filter((r) => inRange(r.day));
-    series = bucketedHistoryFlow(inWin, winFrom, winTo, effGrain);
-    if (baseWin) {
-      const baseRows = historyRows.filter((r) => {
-        const t = Date.parse(r.day);
-        return Number.isFinite(t) && t >= baseWin.from && t <= baseWin.to;
-      });
-      const base = bucketedHistoryFlow(baseRows, baseWin.from, baseWin.to, effGrain);
+    series = bucketedHistoryFlow(activeViewsRows, winFrom, winTo, effGrain);
+    if (baseWin && baselineViewsRows.length > 0) {
+      const base = bucketedHistoryFlow(baselineViewsRows, baseWin.from, baseWin.to, effGrain);
       const gv = alignGhost(base.values, series.values.length);
       if (gv.some((v) => v > 0)) ghost = gv;
     }
@@ -474,15 +496,16 @@ export function MetricPage() {
     if (viewsFromArchive) {
       // Channel-wide views: compare window sums from the archive (matches the channel headline),
       // not the post-view sum.
-      const sumViews = (rows: typeof historyRows) =>
-        rows.reduce((s, r) => (r.views != null ? s + Number(r.views) : s), 0);
-      const cur = sumViews(historyRows.filter((r) => inRange(r.day)));
-      const base = sumViews(
-        historyRows.filter((r) => {
-          const t = Date.parse(r.day);
-          return Number.isFinite(t) && t >= baseWin.from && t <= baseWin.to;
-        }),
+      const sumViews = (rows: typeof historyRows) => rows.reduce(
+        (sum, row) => (row.views != null && Number.isFinite(Number(row.views)) ? sum + Number(row.views) : sum),
+        0,
       );
+      const cur = archiveWindowPair && cmp === 'prev' && !range
+        ? archiveWindowPair.current.total
+        : sumViews(activeViewsRows);
+      const base = archiveWindowPair && cmp === 'prev' && !range
+        ? archiveWindowPair.previous.total
+        : sumViews(baselineViewsRows);
       if (base === 0) return null;
       return { current: fmt.kpi(cur), previous: fmt.kpi(base), cur, base };
     }
@@ -694,7 +717,8 @@ export function MetricPage() {
               ]}
               posts={pinnedPosts.map((post) => ({
                 key: post.id ?? post.date ?? '',
-                thumb: post.thumb ? `${post.thumb}?size=sm` : null,
+                thumb: smallThumbUrl(post.thumb),
+                thumbLabel: postThumbLabel(post),
                 text: post.caption ? markdownToPlainText(post.caption) : 'Без подписи',
                 value: fmt.short(Number(post[field!] ?? 0)),
                 onOpen: () => setOpenPost(post),
@@ -722,18 +746,11 @@ export function MetricPage() {
                           <span className="w-5 shrink-0 text-center text-xs font-medium tabular-nums text-muted-foreground">
                             {i + 1}
                           </span>
-                          {post.thumb ? (
-                            <img
-                              src={`${post.thumb}?size=sm`}
-                              alt=""
-                              referrerPolicy="no-referrer"
-                              className="h-9 w-9 shrink-0 rounded object-cover"
-                            />
-                          ) : (
-                            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded bg-muted text-2xs text-muted-foreground">
-                              текст
-                            </span>
-                          )}
+                          <MediaThumb
+                            src={smallThumbUrl(post.thumb)}
+                            label={postThumbLabel(post)}
+                            className="h-9 w-9"
+                          />
                           <span className="min-w-0 flex-1 truncate text-sm text-foreground">{text}</span>
                           <span className="shrink-0 text-right">
                             <span className="block text-sm font-medium tabular-nums">{fmt.short(value)}</span>

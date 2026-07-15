@@ -13,7 +13,9 @@ describe('buildTgInsights', () => {
     });
     expect(out).toHaveLength(1);
     expect(out[0].tone).toBe('down');
+    expect(out[0].statement).toContain('Просмотры канала');
     expect(out[0].statement).toContain('снизились на 12.0%');
+    expect(out[0].why).toContain('дневной поток просмотров');
     expect(out[0].action).toBeTruthy();
     expect(out[0].evidence?.permalink).toBe('https://t.me/x/1');
   });

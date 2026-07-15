@@ -88,4 +88,21 @@ describe('network selection store — persistence & reactivity', () => {
     const active = routeNetworkOwner('/posts') ?? getActiveNetwork();
     expect(active).toBe('tg');
   });
+
+  // Regression: directly loading an owned route (e.g. /instagram) bootstraps `current` from the
+  // route while localStorage may still hold a stale value ('tg'). The owned route's effect then
+  // calls setActiveNetwork with the SAME network — which used to early-return and leave the stale
+  // value in storage, so a later direct load of /home or /reports snapped back to the old network.
+  it('repairs stale storage even when the active network is unchanged', () => {
+    setActiveNetwork('ig');
+    expect(localStorage.getItem('pulse_network')).toBe('ig');
+
+    // Simulate the boot state: `current` is already 'ig' (route owner) but storage was never healed.
+    localStorage.setItem('pulse_network', 'tg');
+
+    // The no-op effect call must still write the current network back through to storage.
+    setActiveNetwork('ig');
+    expect(getActiveNetwork()).toBe('ig');
+    expect(localStorage.getItem('pulse_network')).toBe('ig');
+  });
 });

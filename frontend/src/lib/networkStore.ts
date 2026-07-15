@@ -41,24 +41,39 @@ function readInitial(): Network {
   }
 }
 
+/** Write the active network to storage. Kept separate from the reactive `current` so we can REPAIR
+    stale persistence (see setActiveNetwork) without notifying subscribers. */
+function persist(next: Network): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, next);
+  } catch {
+    /* storage unavailable — selection just won't survive a reload */
+  }
+}
+
 let current: Network = readInitial();
 const listeners = new Set<() => void>();
+// Repair storage on boot: a route that OWNS a network bootstraps `current` (readInitial) ahead of
+// persistence, so a stale pulse_network (e.g. 'tg' while directly loading /instagram) would otherwise
+// survive until the next explicit change — snapping /home and /reports back to the old network on a
+// later direct load. Writing `current` through now keeps the persisted value in lock-step.
+persist(current);
 
 /** The persisted active network (last explicit choice). Non-reactive read, for event handlers. */
 export function getActiveNetwork(): Network {
   return current;
 }
 
-/** Set + persist the active network, notifying subscribers. No-op when unchanged. */
+/**
+ * Set + persist the active network. Always repairs persistence (so an owned route's effect can heal
+ * a stale localStorage value even when `current` already matches), but only notifies subscribers
+ * when the reactive value actually changes — a no-op setActiveNetwork must not churn the shell.
+ */
 export function setActiveNetwork(next: Network): void {
-  if (current === next) return;
+  const changed = current !== next;
   current = next;
-  try {
-    localStorage.setItem(STORAGE_KEY, next);
-  } catch {
-    /* storage unavailable — selection just won't survive a reload */
-  }
-  listeners.forEach((listener) => listener());
+  persist(next);
+  if (changed) listeners.forEach((listener) => listener());
 }
 
 function subscribe(listener: () => void): () => void {

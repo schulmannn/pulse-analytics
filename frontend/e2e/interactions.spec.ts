@@ -104,6 +104,15 @@ test('metric explorer gives the plot desktop space and exposes a hover inspector
   await page.mouse.move(barBox.x + barBox.width * 0.42, barBox.y + barBox.height * 0.5);
   await expect(page.locator('[data-chart-tooltip]')).toBeVisible();
   await expect(page.locator('[data-chart-crosshair]')).toHaveCount(1);
+
+  // Demo media endpoints intentionally return 404. Failed previews must resolve to a readable
+  // media label instead of leaving browser-broken images in the contributor list.
+  const contributors = page.locator('section').filter({
+    has: page.getByRole('heading', { name: /Топ постов по/ }),
+  }).first();
+  await contributors.scrollIntoViewIfNeeded();
+  await expect(contributors.locator('img[src*="/api/tg/mtproto/thumb/"]')).toHaveCount(0);
+  await expect(contributors.getByText(/Фото|Видео/).first()).toBeVisible();
 });
 
 test('chart drill guard: a scrub across the chart does not navigate', async ({ page }) => {

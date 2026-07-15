@@ -59,6 +59,26 @@ describe('explainChange', () => {
     expect(r.previous).toBe(110);
   });
 
+  it('classifies full post timestamps before grouping a non-midnight boundary day', () => {
+    const noon = Date.parse('2026-06-15T12:00:00.000Z');
+    const previous = [2, 3, 4, 5, 6, 7, 8].map((day) => ({
+      day: `2026-06-${String(day).padStart(2, '0')}T00:00:00.000Z`,
+      v: 10,
+    }));
+    const current = [9, 10, 11, 12, 13, 14, 15].map((day) => ({
+      day: `2026-06-${String(day).padStart(2, '0')}T00:00:00.000Z`,
+      v: 20,
+    }));
+    // The rolling boundary is Jun 8 12:00. This publication belongs to current even though an
+    // earlier publication on the same UTC date belongs to previous.
+    current.push({ day: '2026-06-08T13:00:00.000Z', v: 20 });
+
+    const r = explainChange([...previous, ...current], 7, noon);
+    expect(r.insufficient).toBe(false);
+    expect(r.current).toBe(160);
+    expect(r.previous).toBe(70);
+  });
+
   it('reports flat with no drivers below the meaningful threshold', () => {
     const r = explainChange(series([10, 10, 10, 10, 10, 10, 10], [10, 10, 10, 10, 10, 10, 10]), 7, now);
     expect(r.insufficient).toBe(false);

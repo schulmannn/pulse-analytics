@@ -119,7 +119,7 @@ export function Compare() {
   const collectedDays = oldestTs != null ? Math.max(1, Math.ceil((now - oldestTs) / DAY_MS)) : null;
 
   const rows: { label: string; cur: number; prev: number; render: (n: number) => string }[] = [
-    { label: 'Просмотры', cur: a.views, prev: b.views, render: fmt.short },
+    { label: 'Просмотры публикаций', cur: a.views, prev: b.views, render: fmt.short },
     { label: 'Ср. охват', cur: a.avgReach, prev: b.avgReach, render: fmt.short },
     { label: 'Реакции', cur: a.reactions, prev: b.reactions, render: fmt.short },
     { label: 'Репосты', cur: a.forwards, prev: b.forwards, render: fmt.short },
@@ -159,25 +159,17 @@ export function Compare() {
       color: CHART_CYCLE[i % CHART_CYCLE.length],
     }));
 
-  // «Почему изменилось»: тот же сдвиг Просмотров, что и в таблице, разложенный на наблюдения по
-  // дням архива (детерминированно, без выдуманных причин). Серия — суммарный охват постов за день;
-  // окно и границы совпадают с таблицей, поэтому число сходится. Блок появляется только при
-  // реальной находке (не flat / не «мало данных»), иначе таблица и так всё показывает.
-  const dailyReach = (() => {
-    const map = new Map<string, number>();
-    for (const p of all) {
-      if (!p.date) continue;
-      const t = Date.parse(p.date);
-      if (!Number.isFinite(t)) continue;
-      const key = new Date(t).toISOString().slice(0, 10);
-      map.set(key, (map.get(key) ?? 0) + p.reach);
-    }
-    return [...map.entries()].map(([day, v]) => ({ day, v }));
-  })();
-  const why = hasPrev && days > 0 ? explainChange(dailyReach, days, now) : null;
+  // Keep the original timestamps until explainChange has assigned each publication to a rolling
+  // window. Collapsing to YYYY-MM-DD first moves boundary-day posts to midnight and can make the
+  // explanation disagree with the table even though both are built from the same publications.
+  const reachSeries = all.flatMap((post) =>
+    post.date && Number.isFinite(Date.parse(post.date)) ? [{ day: post.date, v: post.reach }] : [],
+  );
+  const why = hasPrev && days > 0 ? explainChange(reachSeries, days, now) : null;
+  const whyMatchesTable = why?.current === a.views && why.previous === b.views;
   const whyStory =
-    why && !why.insufficient && why.direction !== 'flat' && why.drivers.length > 0
-      ? describeChange(why, 'Просмотры')
+    why && whyMatchesTable && !why.insufficient && why.direction !== 'flat' && why.drivers.length > 0
+      ? describeChange(why, 'Просмотры публикаций')
       : null;
 
   return (

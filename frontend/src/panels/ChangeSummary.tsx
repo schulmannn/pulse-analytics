@@ -18,14 +18,8 @@ export function ChangeSummary() {
     .filter((post) => post.date && Number.isFinite(Date.parse(post.date)))
     .sort((a, b) => Date.parse(a.date!) - Date.parse(b.date!));
   const now = Date.now();
-  const daily = new Map<string, number>();
-  for (const post of dated) {
-    const day = new Date(Date.parse(post.date!)).toISOString().slice(0, 10);
-    daily.set(day, (daily.get(day) ?? 0) + post.reach);
-  }
-
-  const change = explainChange([...daily].map(([day, v]) => ({ day, v })), days, now);
-  const story = describeChange(change, 'Просмотры');
+  const change = explainChange(dated.map((post) => ({ day: post.date!, v: post.reach })), days, now);
+  const story = describeChange(change, 'Просмотры публикаций');
   const directionClass = change.direction === 'up' ? 'text-verdant' : change.direction === 'down' ? 'text-ember' : 'text-foreground';
 
   if (change.insufficient) {
