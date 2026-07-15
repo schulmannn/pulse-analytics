@@ -80,7 +80,27 @@ function scoped(days: number, source: string) {
   };
 }
 
-async function boot(page: Page) {
+async function boot(
+  page: Page,
+  options: { configured?: boolean; canEdit?: boolean; liveError?: string | null } = {},
+) {
+  let settings = {
+    configured: options.configured ?? true,
+    rules: {
+      include_terms: options.configured === false ? [] : ['demo'],
+      exclude_terms: [] as string[],
+      exclude_sources: [] as string[],
+      match_mode: 'contains' as 'contains' | 'word',
+    },
+    revision: options.configured === false ? 0 : 1,
+    updated_at: options.configured === false ? null : new Date().toISOString(),
+    can_edit: options.canEdit ?? true,
+    own_source: { username: 'demo', tg_channel_id: '1001' },
+  };
+  let liveRequests = 0;
+  let savedBody: unknown = null;
+  const scopedChannelHeaders: string[] = [];
+
   await page.route(/^https?:\/\/[^/]+\/api\//, async (route) => {
     const req = route.request();
     const url = new URL(req.url());
@@ -102,8 +122,27 @@ async function boot(page: Page) {
       const source = url.searchParams.get('source') || '';
       return json(200, scoped(days, source));
     }
-    // Live search returns nothing new (quota) — must NOT wipe the archive.
-    if (path === '/api/tg/mtproto/mentions') return json(200, { available: false, error: 'quota' });
+    if (path === '/api/tg/mention-settings') {
+      scopedChannelHeaders.push(req.headers()['x-channel-id'] || '');
+      if (req.method() === 'PUT') {
+        savedBody = req.postDataJSON();
+        const rules = savedBody as typeof settings.rules;
+        settings = {
+          ...settings,
+          configured: true,
+          rules,
+          revision: settings.revision + 1,
+          updated_at: new Date().toISOString(),
+        };
+      }
+      return json(200, settings);
+    }
+    if (path === '/api/tg/mtproto/mentions') {
+      scopedChannelHeaders.push(req.headers()['x-channel-id'] || '');
+      liveRequests += 1;
+      if (options.liveError) return json(409, { available: false, error: options.liveError });
+      return json(200, { available: true, total: M.length, recent: [] });
+    }
     if (path === '/api/prefs') return json(200, req.method() === 'GET' ? {} : { ok: true });
     return json(404, { error: 'not_mocked' });
   });
@@ -114,6 +153,12 @@ async function boot(page: Page) {
     localStorage.setItem('pulse_channel', '1');
     localStorage.setItem('pulse_theme', 'dark');
   });
+
+  return {
+    liveRequests: () => liveRequests,
+    savedBody: () => savedBody,
+    scopedChannelHeaders,
+  };
 }
 
 test.describe('Упоминания — desktop периодная поверхность', () => {
@@ -163,9 +208,53 @@ test.describe('Упоминания — desktop периодная поверх�
     await expect(page.getByText('@blog · 33% упоминаний', { exact: true })).toBeVisible();
     await expect(page.getByText('50% у выбранного канала', { exact: true })).toBeVisible();
 
-    // Живой поиск не стирает архив: кнопка есть (central), таблица остаётся.
+    // Живой поиск не стирает архив: кнопка есть для настроенного канала, таблица остаётся.
     await page.getByRole('button', { name: 'Найти новые' }).click();
     await expect(rows).toHaveCount(1);
+  });
+
+  test('правила настраиваются для выбранного канала, а поиск не стартует сам', async ({ page }) => {
+    const state = await boot(page, { configured: false });
+    await page.goto('/mentions');
+
+    await expect(page.getByRole('button', { name: 'Найти новые' })).toHaveCount(0);
+    expect(state.liveRequests()).toBe(0);
+
+    await page.getByRole('button', { name: 'Настроить поиск' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Правила упоминаний' });
+    await expect(dialog).toBeVisible();
+    await dialog.getByLabel('Что искать').fill('notem\nнотем\nnōtem');
+    await dialog.getByLabel('Исключить по тексту').fill('вакансия\nпромокод');
+    await dialog.getByLabel('Исключить каналы').fill('@noise_channel\n123456789');
+    await dialog.getByRole('button', { name: 'Целое слово' }).click();
+    await dialog.getByRole('button', { name: 'Сохранить правила' }).click();
+    await expect(dialog).toBeHidden();
+
+    expect(state.savedBody()).toEqual({
+      include_terms: ['notem', 'нотем', 'nōtem'],
+      exclude_terms: ['вакансия', 'промокод'],
+      exclude_sources: ['@noise_channel', '123456789'],
+      match_mode: 'word',
+    });
+    expect(state.liveRequests()).toBe(0);
+    await expect(page.getByRole('button', { name: 'Найти новые' })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Найти новые' }).click();
+    await expect.poll(() => state.liveRequests()).toBe(1);
+    expect(state.scopedChannelHeaders.every((value) => value === '1')).toBe(true);
+  });
+
+  test('viewer видит правила, но не может менять их или запускать поиск', async ({ page }) => {
+    const state = await boot(page, { configured: true, canEdit: false });
+    await page.goto('/mentions');
+
+    await expect(page.getByRole('button', { name: 'Найти новые' })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Правила поиска' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Правила упоминаний' });
+    await expect(dialog.getByText(/доступ к просмотру/)).toBeVisible();
+    await expect(dialog.getByLabel('Что искать')).toHaveAttribute('readonly', '');
+    await expect(dialog.getByRole('button', { name: 'Сохранить правила' })).toHaveCount(0);
+    expect(state.liveRequests()).toBe(0);
   });
 });
 

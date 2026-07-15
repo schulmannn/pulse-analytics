@@ -27,6 +27,7 @@ const { registerCampaignsRoutes } = require('./routes/campaigns');
 const { registerBugsRoutes } = require('./routes/bugs');
 const { registerChannelsRoutes } = require('./routes/channels');
 const { registerTgRoutes } = require('./routes/tg');
+const { registerMentionsRoutes } = require('./routes/mentions');
 const { registerIgOauthRoutes } = require('./routes/ig-oauth');
 const { registerIgRoutes } = require('./routes/ig');
 const { registerAccountRoutes } = require('./routes/account');
@@ -187,6 +188,13 @@ function createApp(deps) {
     app, requireAuth, resolveChannel, db, audit, log,
     cacheGet, cacheSet, asyncHandler, tgCrypto, mediaLimiter, fetchWithTimeout,
     collectQrChannelsNow, TG_TOKEN, TG_CHANNEL, mtprotoClient,
+  });
+
+  // Per-channel Telegram mention rules + live brand-search (moved out of routes/tg.js). Narrow deps:
+  // it owns GET/PUT /api/tg/mention-settings and the quota-spending GET /api/tg/mtproto/mentions.
+  registerMentionsRoutes({
+    app, requireAuth, resolveChannel, db, audit, log,
+    cacheGet, cacheSet, tgCrypto, mtprotoClient,
   });
 
   // ════════════════════════════════════════════════════════════════

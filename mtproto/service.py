@@ -26,6 +26,25 @@ from telethon.tl.functions.channels import GetFullChannelRequest, SearchPostsReq
 from telethon.tl.types import StatsGraph, StatsGraphAsync, InputPeerEmpty, PeerChannel
 from dotenv import load_dotenv
 
+try:
+    from mtproto.mention_rules import (
+        MAX_EXCLUDE_TERMS,
+        MAX_INCLUDE_TERMS,
+        clean_sources,
+        clean_terms,
+        first_matching_term,
+        source_is_excluded,
+    )
+except ModuleNotFoundError:  # `python mtproto/service.py` puts mtproto/ itself on sys.path
+    from mention_rules import (
+        MAX_EXCLUDE_TERMS,
+        MAX_INCLUDE_TERMS,
+        clean_sources,
+        clean_terms,
+        first_matching_term,
+        source_is_excluded,
+    )
+
 load_dotenv()
 
 # ── Сессия твоего ЛИЧНОГО аккаунта (StringSession) ────────
@@ -49,14 +68,12 @@ CHANNEL      = os.getenv('TG_CHANNEL', '')
 MTPROTO_TOKEN = os.getenv('MTPROTO_TOKEN', '')
 MTPROTO_PORT = int(os.getenv('MTPROTO_PORT', '8001'))
 
-# ── Mentions (channels.searchPosts — requires Premium; ~10 free searches/day) ──
-_DEFAULT_MENTION_QUERIES = ['nōtem', 'notem', '@bynotem']
-MENTION_QUERIES = [q.strip() for q in os.getenv('MENTION_QUERIES', '').split(',') if q.strip()] or _DEFAULT_MENTION_QUERIES
-# channels NOT counted as mentions (own brand channel); default = configured channel
+# ── Legacy collector mentions (explicit env only; browser search is per-channel) ──
+MENTION_QUERIES = [q.strip() for q in os.getenv('MENTION_QUERIES', '').split(',') if q.strip()]
+# Channels not counted as mentions. There is deliberately no client-specific fallback.
 _own = (CHANNEL or '').lstrip('@').lower()
 MENTION_EXCLUDE = set(u.strip().lstrip('@').lower()
-                      for u in (os.getenv('MENTION_EXCLUDE') or _own or 'bynotem').split(',') if u.strip())
-MENTION_SMART_FILTER = os.getenv('MENTION_SMART_FILTER', '1') != '0'
+                      for u in (os.getenv('MENTION_EXCLUDE') or _own).split(',') if u.strip())
 
 # ── FastAPI ──────────────────────────────────────────────
 # Server-to-server only (the web service calls it over the private network with an
@@ -95,6 +112,9 @@ CLIENT_CONNECT_TIMEOUT_S = 20
 # fan-out on the single Telethon session is exactly what trips FloodWait. Attached
 # as a route dependency so direct function calls (the collector) stay unserialized.
 _STATS_LOCK = asyncio.Semaphore(1)
+# Managed mention searches use isolated user sessions, so they do not take the global stats lock.
+# A small bulkhead still prevents a burst of ephemeral Telethon clients from exhausting the service.
+_MENTION_SEARCH_SEM = asyncio.Semaphore(2)
 
 # Совокупные дедлайны эндпоинтов, держащих _STATS_LOCK. Пер-вызовный TELETHON_CALL_TIMEOUT_S
 # ограничивает ОДИН round-trip, но /graphs делает ~11 последовательных вызовов и мог держать
@@ -810,8 +830,7 @@ async def get_velocity(
         raise HTTPException(status_code=503, detail='mtproto_error')
 
 
-# ── Mentions helpers (reused from notem-mention-monitor) ──
-_CYRILLIC_RE = re.compile('[а-яё]')
+# ── Mentions helpers ───────────────────────────────────────────────
 
 
 def _mention_channel_username(chat):
@@ -821,17 +840,6 @@ def _mention_channel_username(chat):
         if getattr(u, 'active', False):
             return u.username
     return None
-
-
-def _mention_relevant(text):
-    """Smart noise filter: keep posts with Cyrillic OR an explicit latin brand
-    token (nōtem with macron / bynotem); drop foreign-language noise."""
-    low = (text or '').lower()
-    if not MENTION_SMART_FILTER:
-        return True
-    if _CYRILLIC_RE.search(low):
-        return True
-    return ('nōtem' in low) or ('bynotem' in low)
 
 
 def _mention_snippet(text, query, n=220):
@@ -848,103 +856,144 @@ def _mention_snippet(text, query, n=220):
     return ('…' if start > 0 else '') + text[start:end] + ('…' if end < len(text) else '')
 
 
+def _mentions_unconfigured():
+    return {
+        'available': False,
+        'error': 'mention_queries_not_configured',
+        'total': 0,
+        'unique_channels': 0,
+        'total_views': 0,
+        'by_day': {},
+        'top_channels': [],
+        'recent': [],
+        'all': [],
+        'quota': None,
+        'queried': [],
+        'skipped': [],
+    }
+
+
+async def _search_mentions_payload(tg, include_terms, exclude_terms=None, exclude_sources=None,
+                                   exclude_channel_ids=None, match_mode='contains'):
+    """Run quota-safe searchPosts and apply the server-authoritative per-channel rules."""
+    queries = clean_terms(include_terms, MAX_INCLUDE_TERMS)
+    if not queries:
+        return _mentions_unconfigured()
+    excluded_terms = clean_terms(exclude_terms, MAX_EXCLUDE_TERMS)
+    excluded_sources = clean_sources(exclude_sources)
+
+    found = {}
+    queried, skipped = [], []
+    quota = None
+    for query in queries:
+        try:
+            flood = await asyncio.wait_for(
+                tg(CheckSearchPostsFloodRequest(query=query)), timeout=TELETHON_CALL_TIMEOUT_S)
+            free = getattr(flood, 'query_is_free', False)
+            remains = getattr(flood, 'remains', None)
+            total = getattr(flood, 'total_daily', None)
+            quota = {'remains': remains, 'total': total}
+            if not (free or (remains and remains > 0)):
+                skipped.append(query)
+                continue
+        except asyncio.TimeoutError:
+            raise
+        except FloodWaitError:
+            raise
+        except Exception:
+            pass  # A failed quota probe may still use a free search; the request never spends Stars.
+
+        try:
+            result = await asyncio.wait_for(
+                tg(SearchPostsRequest(
+                    query=query, offset_rate=0, offset_peer=InputPeerEmpty(), offset_id=0, limit=100)),
+                timeout=TELETHON_CALL_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            raise
+        except FloodWaitError:
+            raise
+        except Exception as exc:
+            # Rule text is deliberately absent from logs.
+            log.error('searchPosts failed (%s)', type(exc).__name__)
+            skipped.append(query)
+            continue
+
+        queried.append(query)
+        chats = {chat.id: chat for chat in getattr(result, 'chats', [])}
+        for msg in getattr(result, 'messages', []):
+            peer = getattr(msg, 'peer_id', None)
+            if not isinstance(peer, PeerChannel):
+                continue
+            chat = chats.get(peer.channel_id)
+            username = _mention_channel_username(chat) if chat else None
+            if source_is_excluded(
+                username, peer.channel_id, excluded_sources, exclude_channel_ids,
+            ):
+                continue
+            text = getattr(msg, 'message', None)
+            matched = first_matching_term(text, queries, excluded_terms, match_mode)
+            if not matched:
+                continue
+            key = f'{peer.channel_id}:{msg.id}'
+            if key in found:
+                continue
+            date_raw = getattr(msg, 'date', None)
+            found[key] = {
+                'channel_id': peer.channel_id,
+                'msg_id': msg.id,
+                'title': getattr(chat, 'title', 'канал') if chat else 'канал',
+                'username': username,
+                'link': f'https://t.me/{username}/{msg.id}' if username else None,
+                'snippet': _mention_snippet(text, matched),
+                'date': date_raw.isoformat() if date_raw else None,
+                'views': getattr(msg, 'views', 0) or 0,
+                'query': matched,
+            }
+
+    mentions = list(found.values())
+    by_day, channels, total_views = {}, {}, 0
+    for mention in mentions:
+        total_views += mention['views']
+        if mention['date']:
+            day = mention['date'][8:10] + '.' + mention['date'][5:7]
+            by_day[day] = by_day.get(day, 0) + 1
+        channel = channels.setdefault(
+            mention['channel_id'],
+            {'title': mention['title'], 'username': mention['username'], 'count': 0, 'views': 0},
+        )
+        channel['count'] += 1
+        channel['views'] += mention['views']
+    top_channels = sorted(
+        channels.values(), key=lambda item: (item['count'], item['views']), reverse=True,
+    )[:10]
+    recent = sorted(mentions, key=lambda mention: mention['date'] or '', reverse=True)[:30]
+    return {
+        'available': True,
+        'total': len(mentions),
+        'unique_channels': len(channels),
+        'total_views': total_views,
+        'by_day': by_day,
+        'top_channels': top_channels,
+        'recent': recent,
+        'all': mentions,
+        'quota': quota,
+        'queried': queried,
+        'skipped': skipped,
+    }
+
+
 @app.get('/mentions', dependencies=[Depends(_require_token), Depends(_serialize_stats)])
 @_total_budget(HEAVY_TOTAL_BUDGET_S)
 async def get_mentions(x_internal_token: str = Header(default='')):
-    """Brand mentions in public channels via channels.searchPosts (Premium).
-    On-demand: each query consumes one of ~10 free daily searches, so we check
-    the free quota first and never spend Stars."""
+    """Legacy collector endpoint. It runs only explicit env rules, never client defaults."""
     check_auth(x_internal_token)
+    if not MENTION_QUERIES:
+        return _mentions_unconfigured()
     try:
         tg = await get_client()
-        found = {}
-        queried, skipped = [], []
-        quota = None
-        for q in MENTION_QUERIES:
-            try:
-                flood = await asyncio.wait_for(
-                    tg(CheckSearchPostsFloodRequest(query=q)), timeout=TELETHON_CALL_TIMEOUT_S)
-                free = getattr(flood, 'query_is_free', False)
-                remains = getattr(flood, 'remains', None)
-                total = getattr(flood, 'total_daily', None)
-                quota = {'remains': remains, 'total': total}
-                if not (free or (remains and remains > 0)):
-                    skipped.append(q)
-                    continue
-            except asyncio.TimeoutError:
-                raise
-            except FloodWaitError:
-                raise
-            except Exception:
-                pass   # quota check failed → try the search anyway (won't pay Stars: API errors instead)
-            try:
-                res = await asyncio.wait_for(
-                    tg(SearchPostsRequest(
-                        query=q, offset_rate=0, offset_peer=InputPeerEmpty(), offset_id=0, limit=100)),
-                    timeout=TELETHON_CALL_TIMEOUT_S)
-            except asyncio.TimeoutError:
-                raise
-            except FloodWaitError:
-                raise
-            except Exception as e:
-                log.error(f'searchPosts «{q}»: {e}')
-                skipped.append(q)
-                continue
-            queried.append(q)
-            chats = {c.id: c for c in getattr(res, 'chats', [])}
-            for msg in getattr(res, 'messages', []):
-                peer = getattr(msg, 'peer_id', None)
-                if not isinstance(peer, PeerChannel):
-                    continue
-                if not _mention_relevant(getattr(msg, 'message', None)):
-                    continue
-                ch = chats.get(peer.channel_id)
-                uname = _mention_channel_username(ch) if ch else None
-                if uname and uname.lower() in MENTION_EXCLUDE:
-                    continue
-                key = f'{peer.channel_id}:{msg.id}'
-                if key in found:
-                    continue
-                date_raw = getattr(msg, 'date', None)
-                found[key] = {
-                    'channel_id': peer.channel_id,
-                    'msg_id':     msg.id,
-                    'title':      getattr(ch, 'title', 'канал') if ch else 'канал',
-                    'username':   uname,
-                    'link':       f'https://t.me/{uname}/{msg.id}' if uname else None,
-                    'snippet':    _mention_snippet(getattr(msg, 'message', None), q),
-                    'date':       date_raw.isoformat() if date_raw else None,
-                    'views':      getattr(msg, 'views', 0) or 0,
-                    'query':      q,
-                }
-
-        mentions = list(found.values())
-        by_day, chan, total_views = {}, {}, 0
-        for m in mentions:
-            total_views += m['views']
-            if m['date']:
-                d = m['date'][8:10] + '.' + m['date'][5:7]
-                by_day[d] = by_day.get(d, 0) + 1
-            c = chan.setdefault(m['channel_id'],
-                                {'title': m['title'], 'username': m['username'], 'count': 0, 'views': 0})
-            c['count'] += 1
-            c['views'] += m['views']
-        top_channels = sorted(chan.values(), key=lambda c: (c['count'], c['views']), reverse=True)[:10]
-        recent = sorted(mentions, key=lambda m: (m['date'] or ''), reverse=True)[:30]
-
-        return {
-            'available':       True,
-            'total':           len(mentions),
-            'unique_channels': len(chan),
-            'total_views':     total_views,
-            'by_day':          by_day,
-            'top_channels':    top_channels,
-            'recent':          recent,
-            'all':             mentions,   # full deduped list — server persists to archive, then strips
-            'quota':           quota,
-            'queried':         queried,
-            'skipped':         skipped,
-        }
+        return await _search_mentions_payload(
+            tg, MENTION_QUERIES, exclude_sources=MENTION_EXCLUDE,
+        )
     except asyncio.TimeoutError:
         raise HTTPException(status_code=503, detail='mtproto_timeout')
     except FloodWaitError:
@@ -956,6 +1005,64 @@ async def get_mentions(x_internal_token: str = Header(default='')):
         # уже обработаны внутри цикла (skip). → честный 5xx для мониторинга.
         log.error(f'mentions error: {e}')
         raise HTTPException(status_code=503, detail='mtproto_error')
+
+
+@app.post('/mentions/search', dependencies=[Depends(_require_token)])
+@_total_budget(HEAVY_TOTAL_BUDGET_S)
+async def search_mentions_managed(
+    session: str = Body(...),
+    include_terms: Optional[list[str]] = Body(default=None),
+    exclude_terms: Optional[list[str]] = Body(default=None),
+    exclude_sources: Optional[list[str]] = Body(default=None),
+    exclude_channel_ids: Optional[list[int]] = Body(default=None),
+    match_mode: str = Body(default='contains'),
+    x_internal_token: str = Header(default=''),
+):
+    """Per-channel search through an isolated managed user session."""
+    check_auth(x_internal_token)
+    if not API_ID or not API_HASH:
+        raise HTTPException(status_code=503, detail='mtproto_not_configured')
+    if not isinstance(session, str) or not session.strip():
+        raise HTTPException(status_code=400, detail='session_required')
+    queries = clean_terms(include_terms, MAX_INCLUDE_TERMS)
+    if not queries:
+        raise HTTPException(status_code=400, detail='mention_queries_required')
+
+    await _acquire_or_503(
+        _MENTION_SEARCH_SEM, STATS_LOCK_TIMEOUT_S, 'too_many_collecting',
+    )
+    tg = None
+    try:
+        tg = TelegramClient(StringSession(session), API_ID, API_HASH)
+        await asyncio.wait_for(tg.connect(), timeout=CLIENT_CONNECT_TIMEOUT_S)
+        authorized = await asyncio.wait_for(
+            tg.is_user_authorized(), timeout=TELETHON_CALL_TIMEOUT_S,
+        )
+        if not authorized:
+            raise HTTPException(status_code=401, detail='session_unauthorized')
+        return await _search_mentions_payload(
+            tg,
+            queries,
+            exclude_terms=exclude_terms,
+            exclude_sources=exclude_sources,
+            exclude_channel_ids=exclude_channel_ids,
+            match_mode=match_mode,
+        )
+    except FloodWaitError:
+        raise
+    except UnauthorizedError:
+        raise HTTPException(status_code=401, detail='session_unauthorized')
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=503, detail='mtproto_timeout')
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.error('managed mentions search failed (%s)', type(exc).__name__)
+        raise HTTPException(status_code=503, detail='mtproto_error')
+    finally:
+        if tg is not None:
+            await _safe_disconnect(tg)
+        _MENTION_SEARCH_SEM.release()
 
 
 _THUMB_CACHE = OrderedDict()   # LRU: move_to_end on hit, popitem(last=False) drops the least-recently-used
@@ -1468,8 +1575,13 @@ async def startup():
     # Reap abandoned QR logins on a timer (independent of the central session below).
     global _QR_GC_TASK
     _QR_GC_TASK = asyncio.create_task(_qr_gc_loop())
-    if not API_ID or not API_HASH or not SESSION:
-        log.warning('TG_API_ID / TG_API_HASH / TG_SESSION не заданы — MTProto выключен')
+    if not API_ID or not API_HASH:
+        log.warning('TG_API_ID / TG_API_HASH не заданы — MTProto выключен')
+        return
+    if not SESSION:
+        # Managed QR sessions power per-user routes (including /mentions/search) without the
+        # legacy global TG_SESSION, so this is not a service outage.
+        log.info('TG_SESSION не задан — legacy-коллектор выключен; управляемые QR-сессии доступны')
         return
     try:
         await get_client()

@@ -13,7 +13,7 @@ function createGdprService({ pool, enabled, transaction }) {
   /* Полное стирание аккаунта (GDPR erasure) — один DELETE FROM users: реляционную полноту даёт
      схема. Каскадом умирают user_prefs / tg_sessions / email_tokens / reports / workspaces
      (+members) / channels(owner_uid), а от channels — все архивы (channel_daily / monthly /
-     posts / mentions / velocity / ig_accounts / ig_daily / ig_media_daily / api_keys /
+     posts / mentions / channel_mention_settings / velocity / ig_accounts / ig_daily / ig_media_daily / api_keys /
      annotations / snapshots). audit_events.uid и chart_annotations.created_by → SET NULL
      (журнал остаётся, но анонимный). Разделяемые external_sources НЕ трогаются — это identity
      публичного канала, не персональные данные.
@@ -58,7 +58,7 @@ function createGdprService({ pool, enabled, transaction }) {
      Объём при текущем масштабе (кап 100 юзеров, архив ≤730 дн) — единицы МБ, буферизуем целиком. */
   async function exportUserData(uid) {
     if (!enabled || uid == null) return null;
-    // GDPR-экспорт редкий, но тяжёлый (5 запросов на аккаунт + 9 на КАЖДЫЙ канал): его
+    // GDPR-экспорт редкий, но тяжёлый (5 запросов на аккаунт + 10 на КАЖДЫЙ канал): его
     // Promise.all-фан-аут через pool.query занимал все PGPOOL_MAX=4 коннекта и душил
     // остальной API на время экспорта. Один выделенный клиент = ровно один коннект.
     // Запросы ПОСЛЕДОВАТЕЛЬНО (не Promise.all на одном клиенте): pg и так сериализует их на
@@ -91,6 +91,9 @@ function createGdprService({ pool, enabled, transaction }) {
                     FROM channel_monthly WHERE channel_id=$1 ORDER BY month`, [ch.id]);
         const posts = await many(`SELECT * FROM posts WHERE channel_id=$1 ORDER BY date_published`, [ch.id]);
         const mentionRows = await many(`SELECT * FROM mentions WHERE owner_channel_id=$1 ORDER BY msg_id`, [ch.id]);
+        const mentionSettings = await one(
+          `SELECT include_terms, exclude_terms, exclude_sources, match_mode, updated_at
+             FROM channel_mention_settings WHERE channel_id=$1`, [ch.id]);
         const velocity = await many(`SELECT * FROM velocity_daily WHERE channel_id=$1 ORDER BY day`, [ch.id]);
         const annotations = await many(`SELECT day, label, created_at FROM chart_annotations WHERE channel_id=$1 ORDER BY day`, [ch.id]);
         const ig = await one(`SELECT ig_user_id, username, scopes, token_expires_at, connected_at, updated_at
@@ -98,6 +101,7 @@ function createGdprService({ pool, enabled, transaction }) {
         const igDaily = await many(`SELECT * FROM ig_daily WHERE channel_id=$1 ORDER BY day`, [ch.id]);
         const igMedia = await many(`SELECT * FROM ig_media_daily WHERE channel_id=$1 ORDER BY day`, [ch.id]);
         ch.archive = { daily, monthly, posts, mentions: mentionRows, velocity, annotations };
+        ch.mention_settings = mentionSettings;
         ch.instagram = ig ? { ...ig, daily: igDaily, media_daily: igMedia } : null;
       }
 

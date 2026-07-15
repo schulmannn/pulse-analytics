@@ -79,7 +79,15 @@ test('middleware order: security-заголовки на API-ответах (cha
 // ── Route contract snapshot: текущие status/shape ключевых эндпоинтов (DB-less) ─────────────────
 // Auth-гейт: защищённые роуты без сессии → 401 (единый external-shape).
 test('route contract: auth-gated роуты без сессии → 401 {error}', async () => {
-  for (const path of ['/api/auth/me', '/api/channels', '/api/reports', '/api/campaigns', '/api/history/channel']) {
+  for (const path of [
+    '/api/auth/me',
+    '/api/channels',
+    '/api/reports',
+    '/api/campaigns',
+    '/api/history/channel',
+    '/api/tg/mention-settings',
+    '/api/tg/mtproto/mentions',
+  ]) {
     const r = await req('GET', path);
     assert.equal(r.status, 401, `${path} → 401`);
     const body = await r.json();

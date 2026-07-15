@@ -236,6 +236,33 @@ export const MentionsSchema = z
   .passthrough();
 export type Mentions = z.infer<typeof MentionsSchema>;
 
+export const MentionRulesSchema = z
+  .object({
+    include_terms: z.array(z.string()),
+    exclude_terms: z.array(z.string()),
+    exclude_sources: z.array(z.string()),
+    match_mode: z.enum(['contains', 'word']),
+  })
+  .passthrough();
+export type MentionRules = z.infer<typeof MentionRulesSchema>;
+
+export const MentionSettingsSchema = z
+  .object({
+    configured: z.boolean(),
+    rules: MentionRulesSchema,
+    revision: z.coerce.number(),
+    updated_at: z.string().optional().nullable(),
+    can_edit: z.boolean(),
+    own_source: z
+      .object({
+        username: z.string().optional().nullable(),
+        tg_channel_id: z.coerce.string().optional().nullable(),
+      })
+      .passthrough(),
+  })
+  .passthrough();
+export type MentionSettings = z.infer<typeof MentionSettingsSchema>;
+
 export const HistoryRowSchema = z
   .object({
     day: z.string(),
