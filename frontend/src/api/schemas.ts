@@ -519,6 +519,10 @@ export const BugSchema = z
     kind: z.string().optional().nullable(),
     text: z.string().optional().nullable(),
     context: z.string().optional().nullable(),
+    // Aggregated crash telemetry: occurrence_count / last_seen come from the crash_signatures ledger
+    // and are non-null only for kind='crash' rows that carry a signature; normal tickets omit them.
+    occurrence_count: z.coerce.number().optional().nullable(),
+    last_seen: z.string().optional().nullable(),
     attachments: z
       .array(z.object({ id: z.coerce.number(), mime: z.string() }).passthrough())
       .optional()

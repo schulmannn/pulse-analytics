@@ -51,6 +51,11 @@ async function main({
   compositionFactory,
   installSignalHandlers = true,
   shutdownTimeoutMs = 25_000,
+  // Fatal-runtime policy knobs (DI so lifecycle tests never terminate the test runner):
+  // `exit` records the code instead of killing Node, and a short `fatalExitTimeoutMs`
+  // exercises the forced-exit timer without a real hang.
+  exit = (code) => process.exit(code),
+  fatalExitTimeoutMs = 10_000,
 } = {}) {
   // Configuration must be known-good before application modules are loaded. Some of
   // those modules create DB/network clients at module scope for their default adapters.
@@ -96,9 +101,47 @@ async function main({
   const onSigterm = () => onSignal('SIGTERM');
   const onSigint = () => onSignal('SIGINT');
 
+  // Explicit fatal-runtime policy: an uncaughtException / unhandledRejection leaves the process in an
+  // unknown state, so it is NOT swallowed — we drain once and exit non-zero. Single-flight (a second
+  // fault while draining is ignored), and a bounded forced-exit timer guarantees a hung close/drain
+  // can never leave a corrupted process alive. Installed only alongside production-style signal
+  // handlers; normal SIGTERM/SIGINT keep their graceful, natural-exit behavior above.
+  let fatalHandling = null;
+  let fatalExitStarted = false;
+  function exitFatal() {
+    if (fatalExitStarted) return;
+    fatalExitStarted = true;
+    exit(1);
+  }
+  function handleFatal(kind, reason) {
+    if (fatalHandling) return fatalHandling;
+    process.exitCode = 1;
+    const detail = reason && (reason.stack || reason.message) ? reason.stack || reason.message : reason;
+    console.error(`[fatal] ${kind} — draining then exit(1):`, detail);
+
+    const forced = setTimeout(() => {
+      console.error(`[fatal] ${kind}: forced exit after ${fatalExitTimeoutMs}ms (drain did not finish)`);
+      exitFatal();
+    }, fatalExitTimeoutMs);
+
+    fatalHandling = stop()
+      .catch((error) => {
+        console.error('[fatal] shutdown failed:', error && error.message);
+      })
+      .finally(() => {
+        clearTimeout(forced);
+        exitFatal();
+      });
+    return fatalHandling;
+  }
+  const onUncaughtException = (error) => handleFatal('uncaughtException', error);
+  const onUnhandledRejection = (reason) => handleFatal('unhandledRejection', reason);
+
   function removeSignalHandlers() {
     process.removeListener('SIGTERM', onSigterm);
     process.removeListener('SIGINT', onSigint);
+    process.removeListener('uncaughtException', onUncaughtException);
+    process.removeListener('unhandledRejection', onUnhandledRejection);
   }
 
   async function stop() {
@@ -130,9 +173,12 @@ async function main({
   if (installSignalHandlers) {
     process.once('SIGTERM', onSigterm);
     process.once('SIGINT', onSigint);
+    // Fatal runtime faults are owned here too (server/index.js keeps only the boot-time catch).
+    process.on('uncaughtException', onUncaughtException);
+    process.on('unhandledRejection', onUnhandledRejection);
   }
 
-  return { app, server, config, composition, stop };
+  return { app, server, config, composition, stop, handleFatal };
 }
 
 module.exports = { main };

@@ -57,6 +57,8 @@ test('runtime removes signal listeners and drains tracked tails before DB close'
 
   const termBefore = process.listenerCount('SIGTERM');
   const intBefore = process.listenerCount('SIGINT');
+  const uncaughtBefore = process.listenerCount('uncaughtException');
+  const unhandledBefore = process.listenerCount('unhandledRejection');
   const runtime = await main({
     env: { NODE_ENV: 'test' },
     port: 0,
@@ -71,6 +73,9 @@ test('runtime removes signal listeners and drains tracked tails before DB close'
   ]);
   assert.equal(process.listenerCount('SIGTERM'), termBefore + 1);
   assert.equal(process.listenerCount('SIGINT'), intBefore + 1);
+  // Fatal-runtime handlers are installed alongside the production-style signal handlers.
+  assert.equal(process.listenerCount('uncaughtException'), uncaughtBefore + 1);
+  assert.equal(process.listenerCount('unhandledRejection'), unhandledBefore + 1);
 
   let finishTail;
   tracker.run(
@@ -91,7 +96,90 @@ test('runtime removes signal listeners and drains tracked tails before DB close'
   assert.deepEqual(events.slice(-2), ['cache.stop', 'db.close']);
   assert.equal(process.listenerCount('SIGTERM'), termBefore);
   assert.equal(process.listenerCount('SIGINT'), intBefore);
+  // Fatal handlers are removed symmetrically during stop().
+  assert.equal(process.listenerCount('uncaughtException'), uncaughtBefore);
+  assert.equal(process.listenerCount('unhandledRejection'), unhandledBefore);
 
   await runtime.stop();
   assert.equal(events.filter((event) => event === 'db.close').length, 1);
+});
+
+// Minimal lifecycle composition: real HTTP server (port 0) + injectable db.close so a test can make
+// the drain path hang. No signal handlers (installSignalHandlers:false) — the fatal handler is driven
+// directly via runtime.handleFatal with an injected `exit`, so nothing can terminate the test runner.
+function fatalComposition({ dbClose } = {}) {
+  const events = [];
+  const app = express();
+  app.get('/health', (_req, res) => res.json({ ok: true }));
+  const composition = {
+    db: {
+      close: dbClose || (async () => { events.push('db.close'); }),
+    },
+    memoryCache: { start() { events.push('cache.start'); }, stop() { events.push('cache.stop'); } },
+    jobTracker: createJobTracker(),
+    drainState: { draining: false },
+    async boot() { events.push('boot'); },
+    createHttpApp() { return app; },
+  };
+  return { composition, events };
+}
+
+test('fatal fault drains once and exits 1 (single-flight)', async () => {
+  const { composition, events } = fatalComposition();
+  const exits = [];
+  const runtime = await main({
+    env: { NODE_ENV: 'test' },
+    port: 0,
+    compositionFactory: () => composition,
+    installSignalHandlers: false,
+    shutdownTimeoutMs: 1_000,
+    exit: (code) => exits.push(code),
+  });
+
+  const firstFatal = runtime.handleFatal('uncaughtException', new Error('boom'));
+  const simultaneousFatal = runtime.handleFatal('unhandledRejection', new Error('second'));
+  assert.strictEqual(simultaneousFatal, firstFatal, 'concurrent fatal faults share one drain');
+  await firstFatal;
+  assert.equal(process.exitCode, 1, 'non-zero outcome set');
+  assert.equal(composition.drainState.draining, true, 'stopped accepting traffic / drained');
+  assert.ok(events.includes('db.close'), 'graceful stop() ran to db close');
+  assert.deepEqual(exits, [1], 'exit(1) exactly once after graceful drain');
+
+  // Single-flight: a second fault while/after handling does not drain or exit again.
+  await runtime.handleFatal('unhandledRejection', new Error('second'));
+  assert.deepEqual(exits, [1], 'second fault is a no-op (single-flight)');
+  assert.equal(events.filter((e) => e === 'db.close').length, 1, 'drain ran once');
+
+  process.exitCode = 0; // don't leak a failing exit code to the runner
+});
+
+test('fatal forced-exit timer fires once when a slow drain outlives it — without killing Node', async () => {
+  let finishDbClose;
+  const slowClose = new Promise((resolve) => { finishDbClose = resolve; });
+  const { composition } = fatalComposition({ dbClose: () => slowClose });
+  const exits = [];
+  const runtime = await main({
+    env: { NODE_ENV: 'test' },
+    port: 0,
+    compositionFactory: () => composition,
+    installSignalHandlers: false,
+    shutdownTimeoutMs: 1_000,
+    fatalExitTimeoutMs: 40,
+    exit: (code) => exits.push(code),
+  });
+
+  const fatal = runtime.handleFatal('uncaughtException', new Error('stuck'));
+  // Wait past the bounded forced-exit timer; the process is still alive (exit is injected).
+  await new Promise((resolve) => setTimeout(resolve, 120));
+
+  assert.deepEqual(exits, [1], 'bounded timer forced exit(1) despite the hung drain');
+  assert.equal(process.exitCode, 1);
+
+  // If the slow drain eventually completes after the forced-exit callback, the finally path must not
+  // call exit a second time (the injected exit returns, unlike the real process.exit).
+  finishDbClose();
+  await fatal;
+  assert.deepEqual(exits, [1], 'forced exit and late drain completion share one exit(1)');
+
+  process.exitCode = 0;
 });

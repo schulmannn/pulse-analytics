@@ -39,7 +39,7 @@ const EXPECTED_FUNCTIONS = [
   'getChannelHistoryForActor', 'getMentionsHistoryForActor', 'getMentionsArchiveForActor',
   'getSnapshotForActor', 'getLatestVelocityForActor', 'listPostsForActor', 'listIgDailyForActor', 'listIgMediaDailyForActor',
   // bugs / crashes
-  'createBug', 'createCrash', 'upsertCrashSignature', 'setCrashNotionPage', 'touchCrashNotified',
+  'createBug', 'createCrash', 'upsertCrashSignature', 'recordCrashOccurrence', 'setCrashNotionPage', 'touchCrashNotified',
   'listBugs', 'updateBug', 'deleteBug', 'bugExists', 'getBug', 'addAttachmentIfRoom', 'getAttachment',
   // integrations (ig accounts / tg sessions)
   'saveIgAccount', 'getIgAccount', 'updateIgToken', 'deleteIgAccount', 'listIgAccounts',
