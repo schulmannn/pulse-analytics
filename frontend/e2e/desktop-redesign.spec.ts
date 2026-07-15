@@ -25,6 +25,12 @@ test('desktop analytics keeps source and summary hierarchy explicit', async ({ p
 });
 
 test('desktop Overview keeps period context compact', async ({ page }, testInfo) => {
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      'pulse_widget_order',
+      JSON.stringify({ overview: ['overview-hero', 'overview-growth', 'overview-week', 'overview-top-posts'] }),
+    );
+  });
   await bootDemo(page, '/', { theme: 'dark' });
 
   await expect(page.locator('[data-source-identity]')).toContainText('Telegram · @demo_channel');
@@ -38,6 +44,9 @@ test('desktop Overview keeps period context compact', async ({ page }, testInfo)
   await expect(editor.getByRole('button', { name: 'L', exact: true })).toBeVisible();
   await page.keyboard.press('Escape');
   expect(await overflowingCards(page)).toEqual([]);
+  const compactTop = await page.getByRole('heading', { name: 'Ср. охват', exact: true }).evaluate((el) => el.closest('section')!.getBoundingClientRect().top);
+  const narrativeTop = await page.getByRole('heading', { name: 'Неделя канала', exact: true }).evaluate((el) => el.closest('section')!.getBoundingClientRect().top);
+  expect(compactTop).toBeLessThan(narrativeTop);
 
   const overviewShot = testInfo.outputPath('overview-dark.png');
   await page.screenshot({ path: overviewShot, fullPage: true });
@@ -45,6 +54,12 @@ test('desktop Overview keeps period context compact', async ({ page }, testInfo)
 });
 
 test('desktop Instagram Overview keeps the split KPI hierarchy intact', async ({ page }, testInfo) => {
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      'pulse_widget_order',
+      JSON.stringify({ 'ig-overview': ['ig-overview-kpi', 'ig-overview-week', 'ig-overview-top-posts'] }),
+    );
+  });
   await bootDemo(page, '/instagram', { theme: 'dark' });
 
   await expect(page.locator('[data-source-identity]')).toContainText('Instagram · @demo_channel');
@@ -54,6 +69,9 @@ test('desktop Instagram Overview keeps the split KPI hierarchy intact', async ({
   await expect(page.getByRole('heading', { name: 'Неделя аккаунта' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Главное изменение' })).toBeVisible();
   expect(await overflowingCards(page)).toEqual([]);
+  const compactTop = await page.getByRole('heading', { name: 'Просмотры', exact: true }).evaluate((el) => el.closest('section')!.getBoundingClientRect().top);
+  const narrativeTop = await page.getByRole('heading', { name: 'Неделя аккаунта', exact: true }).evaluate((el) => el.closest('section')!.getBoundingClientRect().top);
+  expect(compactTop).toBeLessThan(narrativeTop);
 
   const overviewShot = testInfo.outputPath('instagram-overview-dark.png');
   await page.screenshot({ path: overviewShot, fullPage: true });

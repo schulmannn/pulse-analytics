@@ -60,7 +60,7 @@ export function Overview() {
           each), then the week narrative, the period-context strip and top posts. Every card reads
           the page period (feed-controlled), so one header change re-windows the whole board.
           grid-flow-dense backfills the holes a CSS-order move of a span-2 card would leave. */}
-      <WidgetGroup id="overview" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
+      <WidgetGroup id="overview-v2" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
         {/* Explicit ids: the Аналитика block renders widgets with the same display titles on
             the SAME feed page — default title-ids would make them share prefs (hide one →
             both vanish). id kept as `overview-hero` (this IS the lead card now) so deep-links and

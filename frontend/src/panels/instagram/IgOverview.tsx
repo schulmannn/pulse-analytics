@@ -26,7 +26,7 @@ import { InsightsBlock } from '@/components/instagram/insights';
  */
 export function IgOverview({ ig }: { ig: IgData }) {
   return (
-    <WidgetGroup id="ig-overview" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
+    <WidgetGroup id="ig-overview-v2" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
       {/* Row 1 — the two primary cards. Reach reuses the curated `ig-reach` Home key, so «На
           главную» pins the card it already knew; audience drills to /metrics/ig-follows. */}
       <ChartSection id="ig-overview-reach" title="Охват" defaultSize="half" defaultColor={1} homeKey="ig-reach" drillTo="/metrics/ig-reach">
