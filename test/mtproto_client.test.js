@@ -164,6 +164,71 @@ test('mtprotoPost does not retry an HTTP error response', async () => {
   assert.equal(attempts, 1);
 });
 
+function recordingBreaker() {
+  const acquired = [];
+  const settled = [];
+  return {
+    acquired,
+    settled,
+    tryAcquire: (lane) => { acquired.push(lane); return { ok: true }; },
+    onSettled: (ok, lane) => { settled.push({ ok, lane }); },
+  };
+}
+
+test('mtprotoFetch threads the lane to the breaker (defaulting to live)', async () => {
+  const breaker = recordingBreaker();
+  const fetchImpl = async () => ({ ok: true, json: async () => ({ ok: true }) });
+  const client = createMtprotoClient({ url: 'http://mt:8001', token: 't' }, { breaker, fetchImpl });
+
+  await client.mtprotoFetch('/health');
+  await client.mtprotoFetch('/graphs', {}, 60000, 'background');
+
+  assert.deepEqual(breaker.acquired, ['live', 'background']);
+  assert.deepEqual(breaker.settled, [
+    { ok: true, lane: 'live' },
+    { ok: true, lane: 'background' },
+  ]);
+});
+
+test('mtprotoPost threads the lane to the breaker (defaulting to live)', async () => {
+  const breaker = recordingBreaker();
+  const fetchImpl = async () => ({ ok: true, json: async () => ({ ok: true }) });
+  const client = createMtprotoClient({ url: 'http://mt:8001', token: 't' }, { breaker, fetchImpl });
+
+  await client.mtprotoPost('/qr/start');
+  await client.mtprotoPost('/qr/collect', { lane: 'background' });
+
+  assert.deepEqual(breaker.acquired, ['live', 'background']);
+  assert.deepEqual(breaker.settled, [
+    { ok: true, lane: 'live' },
+    { ok: true, lane: 'background' },
+  ]);
+});
+
+test('a background FloodWait (429) is NOT counted as a breaker failure and keeps its lane', async () => {
+  const breaker = recordingBreaker();
+  const fetchImpl = async () => ({
+    ok: false,
+    status: 429,
+    statusText: 'Too Many Requests',
+    json: async () => ({ detail: 'flood_wait', retry_after: 7 }),
+  });
+  const client = createMtprotoClient({ url: 'http://mt:8001', token: 't' }, { breaker, fetchImpl });
+
+  await assert.rejects(
+    client.mtprotoFetch('/graphs', {}, 60000, 'background'),
+    (err) => {
+      assert.equal(err.status, 503);
+      assert.equal(err.floodWait, true);
+      assert.equal(err.retryAfter, 7);
+      return true;
+    },
+  );
+  // FloodWait settles the breaker as OK (not a failure) on the background lane.
+  assert.deepEqual(breaker.acquired, ['background']);
+  assert.deepEqual(breaker.settled, [{ ok: true, lane: 'background' }]);
+});
+
 test('MTProto client applies the local default URL only when config is empty', () => {
   const client = createMtprotoClient(
     {},

@@ -14,13 +14,23 @@ function createMemoryCache({ ttlMs = 10 * 60 * 1000, maxEntries = 500, sweepMs =
 
   function get(key) {
     const entry = cache.get(key);
-    if (!entry || entry.expires < Date.now()) { cache.delete(key); return null; }
+    if (!entry) return null;
+    if (entry.expires < Date.now()) { cache.delete(key); return null; }
+    // True LRU: a valid read promotes the entry to most-recent (delete + re-insert moves it
+    // to the tail of Map insertion order) WITHOUT touching `expires` — the absolute TTL still
+    // decides staleness, a hot key just isn't the next eviction victim.
+    cache.delete(key);
+    cache.set(key, entry);
     return entry.data;
   }
   function set(key, data, ttl = ttlMs) {
-    // Bounded: the key space (per-channel × per-param) is otherwise unbounded and
-    // grows into a slow memory leak. Evict the oldest entry (insertion order ≈ age).
-    if (!cache.has(key) && cache.size >= maxEntries) {
+    // Bounded LRU: the key space (per-channel × per-param) is unbounded, while retained response
+    // memory stays capped. An existing key is promoted (delete → re-insert at the tail),
+    // so re-writing a hot entry doesn't leave it stale at the eviction front; only when adding
+    // a NEW key at capacity do we evict the least-recently-used entry (Map head).
+    if (cache.has(key)) {
+      cache.delete(key);
+    } else if (cache.size >= maxEntries) {
       cache.delete(cache.keys().next().value);
     }
     cache.set(key, { data, expires: Date.now() + ttl });

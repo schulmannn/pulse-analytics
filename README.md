@@ -52,6 +52,8 @@ Telegram поддерживает две модели подключения:
 | `IG_CLIENT_ID`, `IG_CLIENT_SECRET`, `IG_TOKEN_KEY` | web | Instagram Login и шифрование account token |
 | `INGEST_TOKEN` | web/cron | авторизация daily ingest через `x-ingest-token` |
 | `COLLECTOR_STALE_HOURS` | web | порог устаревания collector, по умолчанию 24 часа |
+| `CACHE_MAX_ENTRIES` | web | верхняя граница числа записей in-memory LRU-кэша ответов, по умолчанию `2000`, диапазон `100..10000` |
+| `CACHE_TTL_MS` | web | абсолютный TTL записи кэша (не продлевается на чтении), мс, по умолчанию `600000` (10 мин), диапазон `1000..3600000` |
 | `IG_ACCOUNTS_PER_PASS` | web | сколько НОВОСТАРТОВАННЫХ IG-аккаунтов сбор трогает за один проход (durable per-account/day), по умолчанию `25`; завершённые за день пропускаются и лимит не тратят |
 | `TG_QR_CHANNELS_PER_PASS` | web | сколько НОВОСТАРТОВАННЫХ QR-каналов TG-сбор трогает за один проход, по умолчанию `200` |
 | `COLLECTION_RECOVERY_INITIAL_DELAY_MS` | web | задержка первого прохода recovery-бегунка после старта, мс, по умолчанию `30000`, минимум `1000` |

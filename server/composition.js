@@ -150,8 +150,11 @@ function createComposition(config, overrides = {}) {
   // Map-подобный интерфейс (size-геттер, clear) — health/DELETE /api/cache как раньше.
   // Свип стартует в main.js ПОСЛЕ listen (cache.start()) и гасится в runtime.stop();
   // createApp и require-only консюмеры (тесты) таймеров не создают, ленивая эвикция
-  // на чтении та же. Дефолты фабрики = прежние TTL 10мин / 500 записей / свип 60с.
-  const cache = overrides.memoryCache || createMemoryCache();
+  // на чтении та же. Границы (LRU cap / TTL) — из валидированного config.cache; свип 60с
+  // (дефолт фабрики). Инъектированный overrides.memoryCache (тесты) берётся как есть.
+  const cache =
+    overrides.memoryCache ||
+    createMemoryCache({ maxEntries: config.cache.maxEntries, ttlMs: config.cache.ttlMs });
   const jobTracker = overrides.jobTracker || createJobTracker({ log });
   const cacheGet = cache.get;
   const cacheSet = cache.set;

@@ -89,6 +89,14 @@ function loadConfig(env = process.env) {
       token: env.NOTION_TOKEN || '',
       crashDatabaseId: env.NOTION_CRASH_DB || '',
     }),
+    cache: Object.freeze({
+      // In-memory response cache (infrastructure/memoryCache) — bounded LRU. maxEntries caps retained
+      // responses from the unbounded key space (per-channel × per-param); ttlMs is
+      // the ABSOLUTE per-entry deadline (a hot key is promoted, never refreshed). Conservative
+      // default cap 2000 (4× прежнего хардкода 500 — не раздуваем память), TTL 10 мин как раньше.
+      maxEntries: Number(env.CACHE_MAX_ENTRIES || 2000),
+      ttlMs: Number(env.CACHE_TTL_MS || 600000),
+    }),
     runtime: Object.freeze({
       webReplicas: Number(env.WEB_REPLICAS || 1),
       ingestToken: env.INGEST_TOKEN || '',
@@ -177,6 +185,22 @@ function validateConfig(config) {
   }
   if (!Number.isInteger(config.http.trustProxy) || config.http.trustProxy < 0) {
     add('http.trustProxy', 'TRUST_PROXY_HOPS должен быть целым неотрицательным числом.');
+  }
+  // Кэш-ответов: жёсткие границы. Слишком малый cap бесполезен, слишком большой — риск RSS;
+  // TTL вне [1с..1ч] означает либо бесполезный кэш, либо застойные данные.
+  if (
+    !Number.isInteger(config.cache.maxEntries) ||
+    config.cache.maxEntries < 100 ||
+    config.cache.maxEntries > 10000
+  ) {
+    add('cache.maxEntries', 'CACHE_MAX_ENTRIES должен быть целым числом в диапазоне 100..10000.');
+  }
+  if (
+    !Number.isInteger(config.cache.ttlMs) ||
+    config.cache.ttlMs < 1000 ||
+    config.cache.ttlMs > 3600000
+  ) {
+    add('cache.ttlMs', 'CACHE_TTL_MS должен быть целым числом (мс) в диапазоне 1000..3600000.');
   }
   if (config.runtime.webReplicas > 1) {
     add('runtime.webReplicas', 'WEB_REPLICAS > 1 запрещён до появления shared state (ADR-002: одна реплика).');
