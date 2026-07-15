@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
 import QRCode from 'qrcode';
 import { useQueryClient } from '@tanstack/react-query';
-import { useChannels, useConnectIg, useDisconnectIg, useIgOauthStatus } from '@/api/queries';
-import { apiGet, apiSend } from '@/api/client';
+import { useChannels, useConnectIg, useDisconnectIg, useIgOauthStatus, useTgQrStatus } from '@/api/queries';
+import { apiSend } from '@/api/client';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { cn } from '@/lib/utils';
 
@@ -63,8 +63,23 @@ function Glyph({ id, className }: { id: ServiceId; className?: string }) {
 
 const RADIUS = 42; // % of the ring container
 
+const isServiceId = (v: string | null): v is ServiceId => SERVICES.some((s) => s.id === v);
+
 export function Connect() {
-  const [selected, setSelected] = useState<ServiceId>('telegram');
+  // Deep links preselect a source (?source=telegram) and, for Telegram, the tab (?tab=qr|agent) and a
+  // reconnect intent (?action=reconnect). Recognised source ids drive selection; anything else is
+  // ignored (Telegram stays the default). Params are read live so an in-app link change re-selects.
+  const [searchParams] = useSearchParams();
+  const sourceParam = searchParams.get('source');
+  const tabParam = searchParams.get('tab');
+  const actionParam = searchParams.get('action');
+  const tgTab = tabParam === 'agent' ? 'agent' : tabParam === 'qr' ? 'qr' : null;
+
+  const [selected, setSelected] = useState<ServiceId>(() => (isServiceId(sourceParam) ? sourceParam : 'telegram'));
+  useEffect(() => {
+    if (isServiceId(sourceParam)) setSelected(sourceParam);
+  }, [sourceParam]);
+
   const { data: channelsData } = useChannels();
   const igStatus = useIgOauthStatus();
 
@@ -233,7 +248,9 @@ export function Connect() {
 
         {/* Panel */}
         <div className="min-w-0">
-          {active.kind === 'telegram' && <TelegramPanel channelName={channelName(channelsData)} />}
+          {active.kind === 'telegram' && (
+            <TelegramPanel channelName={channelName(channelsData)} queryTab={tgTab} reconnectRequested={actionParam === 'reconnect'} />
+          )}
           {active.kind === 'instagram' && <InstagramPanel />}
           {active.kind === 'soon' && <SoonPanel name={active.name} glyph={active.id} note={active.soon ?? ''} />}
         </div>
@@ -328,12 +345,14 @@ function Starfield() {
 }
 
 // ── Panel header shared by every source ──
-function PanelHead({ id, name, pill }: { id: ServiceId; name: string; pill: { label: string; tone: 'ok' | 'go' | 'mut' } }) {
+function PanelHead({ id, name, pill }: { id: ServiceId; name: string; pill: { label: string; tone: 'ok' | 'go' | 'warn' | 'mut' } }) {
   const tone =
     pill.tone === 'ok'
       ? 'border-verdant/45 text-verdant'
       : pill.tone === 'go'
         ? 'border-primary/45 text-primary'
+        : pill.tone === 'warn'
+          ? 'border-status-warn/45 text-status-warn'
         : 'border-border text-muted-foreground';
   return (
     <div className="flex items-center gap-3">
@@ -473,9 +492,8 @@ function InstagramPanel() {
 }
 
 // ── Telegram: hybrid connect — QR by default, collector agent for pro ──
-const QrStatusSchema = z
-  .object({ server_ready: z.boolean(), connected: z.boolean(), username: z.string().nullish(), connected_at: z.string().nullish() })
-  .passthrough();
+// The public status shape (incl. connection_state health) lives in api/schemas as TgQrStatusSchema and
+// is read through the shared useTgQrStatus() query — no private duplicate here.
 const QrStartSchema = z.object({ id: z.string(), url: z.string(), expires_in: z.coerce.number().optional() }).passthrough();
 const QrChannelSchema = z
   .object({
@@ -511,7 +529,6 @@ interface QrChannel {
 // A channel is collectable when it's a broadcast channel. `eligible === undefined` (a channel from
 // an older mtproto build that didn't send the flag) is treated as eligible so nothing is hidden.
 const isEligible = (c: QrChannel) => c.eligible !== false;
-type QrStatus = { server_ready: boolean; connected: boolean; username?: string | null };
 
 /**
  * Telegram connect: «QR-вход» (managed — scan and done) by default, «Через агента» (collector,
@@ -519,15 +536,42 @@ type QrStatus = { server_ready: boolean; connected: boolean; username?: string |
  * on the server, renders the QR, and polls until the scan completes (with a 2FA-password step);
  * the session is captured + stored server-side (never touches the browser).
  */
-function TelegramPanel({ channelName }: { channelName: string | null }) {
-  const [tab, setTab] = useState<'qr' | 'agent'>('qr');
-  const [status, setStatus] = useState<QrStatus | null>(null);
+function TelegramPanel({
+  channelName,
+  queryTab,
+  reconnectRequested,
+}: {
+  channelName: string | null;
+  queryTab?: 'qr' | 'agent' | null;
+  reconnectRequested?: boolean;
+}) {
+  const qc = useQueryClient();
+  // Shared status (same ['tg-qr-status'] cache the Overview banner reads). The live login flow below
+  // keeps LOCAL state (phase/qrImg/captured channels) — a scan-in-progress overrides the shared
+  // snapshot — but the baseline connected/server_ready/connection_state comes from the query, and on
+  // success/disconnect we invalidate it so every reader (incl. the Overview) drops the old state.
+  const qrQuery = useTgQrStatus();
+  const status = qrQuery.data;
+  const serverReady = status?.server_ready ?? false;
+  const connected = status?.connected ?? false;
+  const reauthRequired = status?.connection_state === 'reauth_required';
+
+  const [tab, setTab] = useState<'qr' | 'agent'>(queryTab === 'agent' ? 'agent' : 'qr');
+  useEffect(() => {
+    if (queryTab === 'qr' || queryTab === 'agent') setTab(queryTab);
+  }, [queryTab]);
+
   const [phase, setPhase] = useState<'idle' | 'scanning' | 'password' | 'done'>('idle');
   const [qrImg, setQrImg] = useState<string | null>(null);
   const [channels, setChannels] = useState<QrChannel[]>([]);
   const [password, setPassword] = useState('');
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // A successful replacement login clears the focused reconnect callout locally (before the shared
+  // status refetch lands), so the user immediately sees the fresh connected/channels view.
+  const [reconnectDone, setReconnectDone] = useState(false);
+  // Username captured by the just-completed scan — the shared status refetch may not have landed yet.
+  const [doneUser, setDoneUser] = useState<string | null>(null);
   const idRef = useRef<string | null>(null);
   const pollRef = useRef<number | null>(null);
   const urlRef = useRef<string | null>(null);
@@ -536,9 +580,6 @@ function TelegramPanel({ channelName }: { channelName: string | null }) {
 
   useEffect(() => {
     alive.current = true;
-    apiGet('/api/tg/qr/status', QrStatusSchema)
-      .then((s) => { if (alive.current) setStatus(s); })
-      .catch(() => { if (alive.current) setStatus({ server_ready: false, connected: false }); });
     return () => {
       alive.current = false;
       if (pollRef.current) window.clearTimeout(pollRef.current);
@@ -551,14 +592,20 @@ function TelegramPanel({ channelName }: { channelName: string | null }) {
     if (pollRef.current) { window.clearTimeout(pollRef.current); pollRef.current = null; }
   };
 
+  const refreshStatus = () => qc.invalidateQueries({ queryKey: ['tg-qr-status'] });
+
   const onConnected = (username: string | null, chans: QrChannel[]) => {
     stopPoll();
     idRef.current = null;
     setQrImg(null);
     setPassword('');
     setChannels(chans);
+    setDoneUser(username);
     setPhase('done');
-    setStatus({ server_ready: true, connected: true, username });
+    setReconnectDone(true);
+    // saveTgSession upserted the fresh session server-side (channels/history preserved) — pull the
+    // new health so 'reauth_required' can't linger anywhere it's read.
+    void refreshStatus();
   };
 
   const poll = async () => {
@@ -642,14 +689,28 @@ function TelegramPanel({ channelName }: { channelName: string | null }) {
     setBusy(false);
     setPhase('idle');
     setChannels([]);
-    setStatus({ server_ready: true, connected: false, username: null });
+    setDoneUser(null);
+    setReconnectDone(true);
+    void refreshStatus();
   };
 
-  const connected = !!status?.connected || phase === 'done';
+  // A login in progress (scan/password) overrides EVERYTHING — during a replacement login the old
+  // session may still read as connected, but the QR/password UI must be what's on screen. Reconnect
+  // focus fires on an explicit ?action=reconnect OR a server-reported reauth_required, until a
+  // successful scan/disconnect clears it locally.
+  const loginActive = phase === 'scanning' || phase === 'password';
+  const wantReconnect = (reauthRequired || !!reconnectRequested) && !reconnectDone;
+  // Never show a green «Подключён» pill as the primary signal while a re-login is required.
+  const pillConnected = phase === 'done' || (connected && !reauthRequired);
+  const pill = pillConnected
+    ? { label: 'Подключён', tone: 'ok' as const }
+    : reauthRequired
+      ? { label: 'Требуется вход', tone: 'warn' as const }
+      : { label: 'Доступен', tone: 'go' as const };
 
   return (
     <div className="rounded-xl border border-border bg-card p-5 sm:p-6">
-      <PanelHead id="telegram" name="Telegram" pill={connected ? { label: 'Подключён', tone: 'ok' } : { label: 'Доступен', tone: 'go' }} />
+      <PanelHead id="telegram" name="Telegram" pill={pill} />
 
       <div className="mt-4 flex gap-1 border-b border-border">
         <TgTab active={tab === 'qr'} onClick={() => setTab('qr')}>QR-вход</TgTab>
@@ -658,15 +719,13 @@ function TelegramPanel({ channelName }: { channelName: string | null }) {
 
       {tab === 'qr' ? (
         <div className="mt-5">
-          {!status ? (
+          {qrQuery.isPending ? (
             <p className="text-sm text-muted-foreground">Загрузка…</p>
-          ) : !status.server_ready ? (
+          ) : !serverReady ? (
             <p className="text-sm leading-relaxed text-muted-foreground">
               Вход по QR ещё не настроен на сервере. Пока можно подключиться на вкладке «Через агента».
             </p>
-          ) : connected ? (
-            <TgConnected username={status.username ?? null} channels={channels} onDisconnect={disconnect} busy={busy} />
-          ) : phase === 'scanning' || phase === 'password' ? (
+          ) : loginActive ? (
             <TgScanning
               img={qrImg}
               phase={phase === 'password' ? 'password' : 'scanning'}
@@ -676,6 +735,18 @@ function TelegramPanel({ channelName }: { channelName: string | null }) {
               err={err}
               busy={busy}
             />
+          ) : phase === 'done' ? (
+            <TgConnected username={doneUser} channels={channels} onDisconnect={disconnect} busy={busy} />
+          ) : wantReconnect ? (
+            <TgReconnect
+              reauth={reauthRequired}
+              username={status?.username ?? null}
+              onReconnect={start}
+              busy={busy}
+              err={err}
+            />
+          ) : connected ? (
+            <TgConnected username={status?.username ?? null} channels={channels} onDisconnect={disconnect} busy={busy} />
           ) : (
             <div>
               <p className="text-sm leading-relaxed text-muted-foreground">
@@ -767,6 +838,53 @@ function TgScanning({
         В Telegram: <b className="text-foreground">Настройки → Устройства → Подключить устройство</b> — наведите камеру на код. Он обновляется автоматически.
       </p>
       {err && <p role="alert" className="mt-2 text-xs font-medium text-destructive">{err}</p>}
+    </div>
+  );
+}
+
+// Focused reconnect callout — shown when the stored session died (reauth_required) or the user
+// intentionally asked to replace it (?action=reconnect). It NEVER auto-starts the QR login (that would
+// be surprising on a mere visit); the «Переподключить» button calls the same start() as a first
+// login. For a revoked session it leads with the honest problem statement, not a green «Подключён».
+function TgReconnect({
+  reauth,
+  username,
+  onReconnect,
+  busy,
+  err,
+}: {
+  reauth: boolean;
+  username: string | null;
+  onReconnect: () => void;
+  busy: boolean;
+  err: string | null;
+}) {
+  return (
+    <div>
+      <div role="status" className="flex items-center gap-2 text-sm">
+        <span aria-hidden="true" className={cn('size-2 shrink-0 rounded-full', reauth ? 'bg-status-warn' : 'bg-verdant')} />
+        <span className="text-foreground">
+          {reauth ? (
+            'Сессия Telegram недействительна'
+          ) : (
+            <>Подключён{username ? <> · <span className="font-mono">@{username}</span></> : null}</>
+          )}
+        </span>
+      </div>
+      <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+        {reauth
+          ? 'Telegram завершил прежнюю сессию, поэтому новые данные не поступают. Каналы и вся история сохранены — после повторного входа сбор продолжится с того же места.'
+          : 'Можно войти заново, чтобы заменить текущую сессию Telegram. Каналы и история сохранятся.'}
+      </p>
+      <button
+        type="button"
+        onClick={onReconnect}
+        disabled={busy}
+        className="btn-pill mt-4 bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+      >
+        {busy ? 'Подготовка кода…' : 'Переподключить'}
+      </button>
+      {err && <p role="alert" className="mt-3 text-xs font-medium text-destructive">{err}</p>}
     </div>
   );
 }

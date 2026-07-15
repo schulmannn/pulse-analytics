@@ -1,6 +1,7 @@
 'use strict';
 
 const { makeServeSnapshot } = require('../middleware/tenant');
+const { toPublicQrStatus } = require('../lib/tgSessionStatus');
 
 const TG_BASE = 'https://api.telegram.org/bot';
 
@@ -119,12 +120,27 @@ function registerTgRoutes({
     return !!MTPROTO_TOKEN && tgCrypto.configured() && db.enabled;
   }
 
+  // A replacement login fixes the credential immediately, so refresh already tracked QR channels
+  // immediately as well. Otherwise the connection warning disappears but the dashboard can remain
+  // stale until the next daily ingest. This is best-effort and runs after the login response path;
+  // existing channels/history are reused, never recreated.
+  async function refreshTrackedQrChannels(user) {
+    const [session, channels] = await Promise.all([
+      db.getTgSession(user.uid),
+      db.listChannels(user),
+    ]);
+    const tracked = channels.filter((channel) => channel.source === 'qr' && channel.tg_channel_id != null);
+    if (session && tracked.length) await collectQrChannelsNow(session, tracked);
+  }
+
   // On a completed login: encrypt + persist the session, then hand the browser only the
   // username + the admin channels found (never the session itself).
   async function tgQrFinish(req, data) {
     const session_enc = tgCrypto.encrypt(data.session);
     await db.saveTgSession(req.user.uid, { tg_user_id: data.tg_user_id, username: data.username, session_enc });
     audit(req, 'tg.session.connected', { username: data.username || null }).catch(() => {});
+    refreshTrackedQrChannels(req.user).catch((e) =>
+      log('error', 'tg_qr_reconnect_refresh_failed', { uid: req.user.uid, error: e.message }));
     return {
       status: 'ok',
       username: data.username ?? null,
@@ -137,11 +153,13 @@ function registerTgRoutes({
     };
   }
 
+  // Status incl. non-secret connection-health (connection_state + last_attempt/success/error). The
+  // shape is built by the pure toPublicQrStatus mapper (unit-tested) — session_enc NEVER leaves here.
   app.get('/api/tg/qr/status', requireAuth, async (req, res, next) => {
     try {
-      if (!tgQrConfigured()) return res.json({ server_ready: false, connected: false });
-      const s = await db.getTgSession(req.user.uid);
-      res.json({ server_ready: true, connected: !!s, username: (s && s.username) || null, connected_at: (s && s.connected_at) || null });
+      const serverReady = tgQrConfigured();
+      const s = serverReady ? await db.getTgSession(req.user.uid) : null;
+      res.json(toPublicQrStatus(s, { serverReady }));
     } catch (e) { next(e); }
   });
 

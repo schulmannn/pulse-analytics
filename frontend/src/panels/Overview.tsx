@@ -1,10 +1,12 @@
 import { Link, useNavigate } from 'react-router-dom';
-import { useChannels, useHistory, useTgFull } from '@/api/queries';
+import { useChannels, useHistory, useTgFull, useTgQrStatus } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { useWidgetPeriod } from '@/lib/period';
 import { pctDelta, subscriberChange } from '@/lib/delta';
 import { fmt } from '@/lib/format';
 import { freshness, latestHistoryDay } from '@/lib/freshness';
+import { overviewHealthBanner } from '@/lib/connectionHealth';
+import { cn } from '@/lib/utils';
 import { CollectorEmptyState } from '@/components/CollectorEmptyState';
 import { GetStarted } from '@/pages/GetStarted';
 import { useDemo } from '@/lib/demo-context';
@@ -52,7 +54,7 @@ export function Overview() {
 
   return (
     <div>
-      <StaleWarning />
+      <HealthBanner source={channel?.source} />
 
       {/* Independent, source-honest widgets on the 6-col grid (the old aggregate «Показатели» hero
           split into five): row 1 = the two primary cards (Просмотры half + Подписчики half), row 2 =
@@ -114,16 +116,37 @@ export function Overview() {
   );
 }
 
-/** Data health on the Overview appears ONLY as a warning — a healthy "200 OK" doesn't earn a slot. */
-function StaleWarning() {
+/** Data health on the Overview appears ONLY as a warning — a healthy "200 OK" doesn't earn a slot.
+    Exact state drives copy/tone/CTA (see lib/connectionHealth): a managed-QR channel (source='qr')
+    reads the shared GET /api/tg/qr/status — connection_state='reauth_required' means the stored
+    Telegram session actually died, so we warn immediately (error tone) with a reconnect CTA even
+    BEFORE the archive goes stale; 'degraded' is a transient outage (no reconnect ask); otherwise only
+    genuinely stale history earns an honest freshness nudge. Collector/central sources warn on stale
+    history alone with source-appropriate copy — freshness NEVER implies revocation. The QR status
+    query stays disabled unless the source is 'qr' (the hook call itself is unconditional). */
+function HealthBanner({ source }: { source?: string | null }) {
+  const isQr = source === 'qr';
   const { data: history } = useHistory(730);
+  const { data: qrStatus } = useTgQrStatus(isQr);
   const fresh = freshness(latestHistoryDay(history), Date.now());
-  if (!fresh || !fresh.stale) return null;
+  const banner = overviewHealthBanner({
+    source,
+    connectionState: isQr ? qrStatus?.connection_state ?? null : null,
+    fresh,
+  });
+  if (!banner) return null;
+  const toneClasses =
+    banner.tone === 'error' ? 'border-ember/30 text-ember' : 'border-status-warn/30 text-status-warn';
+  const dotClass = banner.tone === 'error' ? 'bg-ember' : 'bg-status-warn';
   return (
-    <div className="mb-6 flex flex-wrap items-center gap-2 rounded border border-status-warn/30 px-3 py-2 text-sm text-status-warn">
-      <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-status-warn" />
-      Данные устарели — последний сбор {fresh.label}.
-      <Link to="/settings" className="ml-auto text-xs font-medium underline underline-offset-2">Настроить сбор →</Link>
+    <div className={cn('mb-6 flex flex-wrap items-center gap-2 rounded border px-3 py-2 text-sm', toneClasses)}>
+      <span aria-hidden="true" className={cn('h-1.5 w-1.5 shrink-0 rounded-full', dotClass)} />
+      <span>{banner.message}</span>
+      {banner.cta && (
+        <Link to={banner.cta.to} className="ml-auto shrink-0 text-xs font-medium underline underline-offset-2">
+          {banner.cta.label}
+        </Link>
+      )}
     </div>
   );
 }

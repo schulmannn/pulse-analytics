@@ -9,7 +9,52 @@
 
 'use strict';
 
+// Auth-ошибка сессии = сама StringSession недействительна (юзер снёс сессию/сменил пароль/2FA-ревок).
+// Python-сервис отдаёт её ровно двумя стабильными кодами (mtproto-client кладёт их в e.code):
+// 401 'session_unauthorized' (QR-путь) и 503 'mtproto_session_unauthorized' (stats-путь). Матчим
+// ТОЧНО по коду — не по тексту, который русифицируется/меняется.
+function isTgAuthError(e) {
+  return !!e && (e.code === 'session_unauthorized' || e.code === 'mtproto_session_unauthorized');
+}
+
+// Не-auth сбой (upstream/flood/сеть) → безопасный код для degraded-состояния. Никогда не пишем
+// сырой e.message (может нести секрет/PII) — только стабильный код; repo дополнительно фильтрует.
+const TG_KNOWN_ERROR_CODES = new Set([
+  'mtproto_timeout', 'mtproto_unreachable', 'mtproto_error', 'internal_error',
+]);
+function safeTgErrorCode(e) {
+  if (e && e.floodWait) return 'flood_wait';
+  if (e && TG_KNOWN_ERROR_CODES.has(e.code)) return e.code;
+  return 'collect_failed';
+}
+
 function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN, MTPROTO_TIMEOUT_HEAVY_MS, tgPostToRow }) {
+  // Persist the health outcome for ONE session after its channels were processed. Priority:
+  // auth-fail > success > degraded. Success wins over any non-auth error (an earlier channel that
+  // collected proves the session is live); auth-fail wins over everything (session is now invalid).
+  // Health-bookkeeping НИКОГДА не роняет сбор: любая ошибка записи логируется и глотается.
+  async function finalizeSessionHealth(uid, sessionVersion, { attempted, succeeded, authFailed, errorCode }) {
+    if (!uid || !sessionVersion || !attempted) return;   // every run skipped / nothing started → health untouched
+    try {
+      await db.recordTgSessionAttempt(uid, sessionVersion);
+    } catch (e) {
+      log('error', 'tg_qr_health_update_failed', { uid, phase: 'attempt', error: e.message });
+    }
+    // Keep the outcome write independent from the attempt write. The outcome methods also stamp
+    // last_attempt_at, so a brief failure of the first UPDATE cannot hide an actionable auth result.
+    try {
+      if (authFailed) {
+        await db.recordTgSessionFailure(uid, sessionVersion, { state: 'reauth_required', errorCode: errorCode || 'session_unauthorized' });
+      } else if (succeeded) {
+        await db.recordTgSessionSuccess(uid, sessionVersion);
+      } else {
+        await db.recordTgSessionFailure(uid, sessionVersion, { state: 'degraded', errorCode: errorCode || 'collect_failed' });
+      }
+    } catch (e) {
+      log('error', 'tg_qr_health_update_failed', { uid, phase: 'outcome', error: e.message });
+    }
+  }
+
   // Write one channel's collected bundle to Postgres exactly like a collector push: the snapshot
   // (what /api/tg/full + the /api/tg/mtproto/* routes serve for non-central channels) plus the
   // time-series (channel_daily from graphs, posts). Best-effort per part.
@@ -58,11 +103,21 @@ function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN
     let sessionStr;
     try { sessionStr = tgCrypto.decrypt(sess.session_enc); } catch { return; }
     const day = new Date().toISOString().slice(0, 10);
+    // Same health semantics as the nightly job: auth-fail short-circuits the remaining channels for
+    // this session; a single successful collect wins over any non-auth failure. Каждый вызов
+    // collectQrChannel — реальная (стартовавшая) попытка, поэтому здесь нет runJobOnce-skip-ветки.
+    let attempted = false, succeeded = false, authFailed = false, lastErrCode = null;
     for (const ch of channels) {
       if (!ch || ch.tg_channel_id == null) continue;
-      try { await collectQrChannel(sessionStr, ch, day); }
-      catch (e) { log('error', 'tg_qr_collect_now_failed', { channelId: ch.id, error: e.message }); }
+      attempted = true;
+      try { await collectQrChannel(sessionStr, ch, day); succeeded = true; }
+      catch (e) {
+        log('error', 'tg_qr_collect_now_failed', { channelId: ch.id, error: e.message });
+        if (isTgAuthError(e)) { authFailed = true; lastErrCode = e.code; break; }
+        lastErrCode = safeTgErrorCode(e);
+      }
     }
+    await finalizeSessionHealth(sess.uid, sess.session_version, { attempted, succeeded, authFailed, errorCode: lastErrCode });
   }
 
   // Runs fire-and-forget after the central ingest; durable per (channel, day) so a repeat trigger
@@ -88,6 +143,10 @@ function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN
       try { chans = (await db.listChannels({ uid: s.uid })).filter((c) => c.source === 'qr' && c.tg_channel_id != null); }
       catch (e) { log('error', 'tg_qr_list_channels_failed', { uid: s.uid, error: e.message }); continue; }
 
+      // Per-session health accounting. A `skipped` idempotent result is NOT an attempt (nothing
+      // started); only a collection whose fn actually ran counts. Success wins over non-auth errors,
+      // auth-fail short-circuits this user's remaining channels (session-wide invalidation).
+      let attempted = false, succeeded = false, authFailed = false, lastErrCode = null;
       for (const ch of chans) {
         if (done >= TG_QR_MAX_CHANNELS_PER_RUN) { capped = true; break; }
         let started = false;
@@ -99,13 +158,19 @@ function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN
           if (out.skipped) { skipped++; continue; }
           done++;
           collected++;
+          attempted = true;
+          succeeded = true;
         }
         catch (e) {
-          if (started) done++;
+          if (started) { done++; attempted = true; }
           failed++;
           log('error', 'tg_qr_collect_failed', { channelId: ch.id, error: e.message });
+          if (isTgAuthError(e)) { authFailed = true; lastErrCode = e.code; break; }
+          lastErrCode = safeTgErrorCode(e);
         }
       }
+
+      await finalizeSessionHealth(s.uid, s.session_version, { attempted, succeeded, authFailed, errorCode: lastErrCode });
     }
     log(capped ? 'warn' : 'info', 'tg_qr_collection_done', { collected, skipped, failed, capped });
   }

@@ -47,6 +47,7 @@ import {
   ReportsResponseSchema,
   StatsSchema,
   TgFullSchema,
+  TgQrStatusSchema,
   VelocitySchema,
 } from '@/api/schemas';
 import type { CampaignPostInput, CampaignStatus, ReportConfig } from '@/api/schemas';
@@ -454,6 +455,23 @@ export function useTgGraphs() {
     queryKey: ['tg-graphs', channelId],
     staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet('/api/tg/mtproto/graphs', GraphsSchema, { signal, channelId }),
+  });
+}
+
+/**
+ * Managed Telegram QR session health (GET /api/tg/qr/status). Per-USER, not per-channel (the server
+ * scopes it to req.user.uid), so the key is bare ['tg-qr-status'] and it is SHARED: /connect owns the
+ * live view, the Overview banner reads the same cache. On reconnect/disconnect /connect invalidates
+ * this key so the Overview cannot keep showing a stale `reauth_required`. `enabled` lets the Overview
+ * skip the fetch entirely for non-QR sources while its hook call stays unconditional. STALE_STATUS
+ * (the freshness-status tier) matches the other health polls (collector-status).
+ */
+export function useTgQrStatus(enabled = true) {
+  return useQuery({
+    enabled,
+    queryKey: ['tg-qr-status'],
+    staleTime: STALE_STATUS,
+    queryFn: ({ signal }) => apiGet('/api/tg/qr/status', TgQrStatusSchema, { signal }),
   });
 }
 

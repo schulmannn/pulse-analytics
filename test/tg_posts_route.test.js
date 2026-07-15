@@ -7,6 +7,9 @@ const { registerTgRoutes } = require('../server/routes/tg');
 function tgHandlers({
   db,
   mtprotoFetch,
+  mtprotoPost = async () => ({}),
+  tgCrypto = { configured: () => false },
+  collectQrChannelsNow = async () => [],
   statsTimeout = 60000,
   cacheGet = () => null,
   cacheSet = () => {},
@@ -15,8 +18,8 @@ function tgHandlers({
   const routes = new Map();
   const app = {
     get(path, ...handlers) { routes.set(`GET ${path}`, handlers); },
-    post() {},
-    delete() {},
+    post(path, ...handlers) { routes.set(`POST ${path}`, handlers); },
+    delete(path, ...handlers) { routes.set(`DELETE ${path}`, handlers); },
   };
   const pass = (_req, _res, next) => next();
   registerTgRoutes({
@@ -29,10 +32,10 @@ function tgHandlers({
     cacheGet,
     cacheSet,
     asyncHandler: (handler) => handler,
-    tgCrypto: { configured: () => false },
+    tgCrypto,
     mediaLimiter: pass,
     fetchWithTimeout: async () => { throw new Error('bot disabled in test'); },
-    collectQrChannelsNow: async () => [],
+    collectQrChannelsNow,
     TG_TOKEN: '',
     TG_CHANNEL: '@test',
     mtprotoClient: {
@@ -41,11 +44,28 @@ function tgHandlers({
       MTPROTO_TIMEOUT_STATS_MS: statsTimeout,
       MTPROTO_TIMEOUT_HEAVY_MS: 120000,
       mtprotoFetch,
-      mtprotoPost: async () => ({}),
+      mtprotoPost,
       sendMtprotoError: () => {},
     },
   });
   return routes;
+}
+
+async function invokeRoute(handler, req = {}) {
+  const res = {
+    statusCode: 200,
+    status(code) { this.statusCode = code; return this; },
+    set() { return this; },
+    json(body) { this.body = body; return this; },
+  };
+  let nextError = null;
+  await handler(
+    { query: {}, body: {}, user: { uid: 11 }, ...req },
+    res,
+    (error) => { nextError = error; },
+  );
+  if (nextError) throw nextError;
+  return res;
 }
 
 function fullHandler(options) {
@@ -72,6 +92,63 @@ async function invoke(handler, query = { limit: '100' }) {
   if (nextError) throw nextError;
   return res;
 }
+
+test('successful QR reconnect immediately refreshes existing tracked QR channels', async () => {
+  const events = [];
+  let releaseRefresh;
+  const refreshed = new Promise((resolve) => { releaseRefresh = resolve; });
+  const session = { uid: 11, session_enc: 'encrypted:fresh', session_version: '2' };
+  const tracked = { id: 7, source: 'qr', tg_channel_id: 777, username: 'tracked' };
+  const routes = tgHandlers({
+    db: {
+      enabled: true,
+      saveTgSession: async (uid, data) => events.push(['saved', uid, data]),
+      getTgSession: async () => session,
+      listChannels: async () => [
+        tracked,
+        { id: 8, source: 'collector', tg_channel_id: 888 },
+        { id: 9, source: 'qr', tg_channel_id: null },
+      ],
+    },
+    mtprotoFetch: async () => ({}),
+    mtprotoPost: async (path) => {
+      if (path === '/qr/start') return { id: 'login-1', url: 'tg://login', expires_in: 60 };
+      if (path === '/qr/poll') {
+        return {
+          status: 'ok',
+          session: 'plaintext:fresh',
+          tg_user_id: 42,
+          username: 'owner',
+          channels: [],
+        };
+      }
+      throw new Error(`unexpected ${path}`);
+    },
+    tgCrypto: {
+      configured: () => true,
+      encrypt: (value) => `encrypted:${value.split(':').at(-1)}`,
+    },
+    collectQrChannelsNow: async (savedSession, channels) => {
+      events.push(['refreshed', savedSession, channels]);
+      releaseRefresh();
+    },
+  });
+
+  await invokeRoute(routes.get('POST /api/tg/qr/start').at(-1));
+  const response = await invokeRoute(routes.get('POST /api/tg/qr/poll').at(-1), {
+    body: { id: 'login-1' },
+  });
+  await refreshed;
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.status, 'ok');
+  assert.deepEqual(events[0], [
+    'saved',
+    11,
+    { tg_user_id: 42, username: 'owner', session_enc: 'encrypted:fresh' },
+  ]);
+  assert.deepEqual(events[1], ['refreshed', session, [tracked]]);
+});
 
 test('/api/tg/full serves archived posts without a live /posts request', async () => {
   const calls = [];

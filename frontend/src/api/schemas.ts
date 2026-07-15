@@ -436,6 +436,28 @@ export const CollectorStatusResponseSchema = z
   .passthrough();
 export type CollectorStatus = z.infer<typeof CollectorStatusSchema>;
 
+// Public status of the managed Telegram QR session (GET /api/tg/qr/status). Built server-side by the
+// pure toPublicQrStatus mapper — it NEVER carries session material, only non-secret connection-health.
+// `connection_state` (present only when connected) is the authoritative signal for the Overview
+// banner and the /connect reconnect callout: only `reauth_required` means the stored session died and
+// a re-login is needed; `degraded` is transient (collection retries on its own). `connection_state`
+// stays a tolerant string (not a strict enum) so an unrecognised future value never throws and blocks
+// the panel — the pure model treats unknown states as a live «connected» session.
+export const TgQrStatusSchema = z
+  .object({
+    server_ready: z.boolean(),
+    connected: z.boolean(),
+    username: z.string().nullish(),
+    connected_at: z.string().nullish(),
+    connection_state: z.string().nullish(),
+    last_attempt_at: z.string().nullish(),
+    last_success_at: z.string().nullish(),
+    last_error_code: z.string().nullish(),
+    last_error_at: z.string().nullish(),
+  })
+  .passthrough();
+export type TgQrStatus = z.infer<typeof TgQrStatusSchema>;
+
 export const AdminUserSchema = z
   .object({
     id: z.coerce.number(),

@@ -117,6 +117,93 @@ test('tg_sessions: upsert per-uid (reconnect ротирует session_enc), get/
   assert.strictEqual(await db.getTgSession(U.id), null, 'после отключения — null');
 });
 
+test('tg_sessions health: свежая сессия → healthy; attempt/success/failure переходы', { skip }, async () => {
+  const U = await mkUser('tgh');
+  // Fresh connect: connection_state defaults to healthy, no error fields.
+  await db.saveTgSession(U.id, { tg_user_id: 222, username: `h_${nonce}`, session_enc: 'enc:h0' });
+  let s = await db.getTgSession(U.id);
+  assert.strictEqual(s.connection_state, 'healthy', 'свежая сессия — healthy');
+  assert.strictEqual(s.last_error_code, null);
+  assert.strictEqual(s.last_success_at, null);
+
+  // Real attempt stamps last_attempt_at (state unchanged).
+  const version = s.session_version;
+  assert.strictEqual(await db.recordTgSessionAttempt(U.id, version), true);
+  s = await db.getTgSession(U.id);
+  assert.ok(s.last_attempt_at, 'last_attempt_at проставлен');
+  assert.strictEqual(s.connection_state, 'healthy');
+
+  // Auth failure → reauth_required + allow-listed error code.
+  assert.strictEqual(await db.recordTgSessionFailure(U.id, version, { state: 'reauth_required', errorCode: 'session_unauthorized' }), true);
+  s = await db.getTgSession(U.id);
+  assert.strictEqual(s.connection_state, 'reauth_required');
+  assert.strictEqual(s.last_error_code, 'session_unauthorized');
+  assert.ok(s.last_error_at, 'last_error_at проставлен');
+
+  // Success clears the error and flips back to healthy.
+  assert.strictEqual(await db.recordTgSessionSuccess(U.id, version), true);
+  s = await db.getTgSession(U.id);
+  assert.strictEqual(s.connection_state, 'healthy');
+  assert.strictEqual(s.last_error_code, null, 'success снимает ошибку');
+  assert.strictEqual(s.last_error_at, null);
+  assert.ok(s.last_success_at, 'last_success_at проставлен');
+});
+
+test('tg_sessions health: failure санитайзит state/errorCode (без caller-controlled state)', { skip }, async () => {
+  const U = await mkUser('tgs');
+  await db.saveTgSession(U.id, { tg_user_id: 333, username: `s_${nonce}`, session_enc: 'enc:s0' });
+  const version = (await db.getTgSession(U.id)).session_version;
+  // Bogus state → coerced to 'degraded'; bogus/injection-y code → coerced to 'unknown'. If either
+  // reached the DB raw, the CHECK constraint (or worse) would break — the repo guarantees it can't.
+  assert.strictEqual(await db.recordTgSessionFailure(U.id, version, { state: "healthy'; DROP TABLE tg_sessions;--", errorCode: 'nonsense' }), true);
+  const s = await db.getTgSession(U.id);
+  assert.strictEqual(s.connection_state, 'degraded', 'нелегальный state → degraded');
+  assert.strictEqual(s.last_error_code, 'unknown', 'нелегальный код → unknown');
+});
+
+test('tg_sessions health: reconnect (saveTgSession) сбрасывает health в healthy и чистит ошибку', { skip }, async () => {
+  const U = await mkUser('tgr');
+  await db.saveTgSession(U.id, { tg_user_id: 444, username: `r_${nonce}`, session_enc: 'enc:r0' });
+  let s = await db.getTgSession(U.id);
+  const oldVersion = s.session_version;
+  await db.recordTgSessionFailure(U.id, oldVersion, { state: 'reauth_required', errorCode: 'session_unauthorized' });
+  s = await db.getTgSession(U.id);
+  assert.strictEqual(s.connection_state, 'reauth_required', 'предусловие: сессия в reauth_required');
+
+  // Reconnect (пере-скан QR) ротирует session_enc И сбрасывает health.
+  await db.saveTgSession(U.id, { tg_user_id: 444, username: `r_${nonce}`, session_enc: 'enc:r1' });
+  s = await db.getTgSession(U.id);
+  assert.strictEqual(s.session_enc, 'enc:r1', 'reconnect ротирует сессию');
+  assert.strictEqual(s.connection_state, 'healthy', 'reconnect → healthy');
+  assert.notStrictEqual(s.session_version, oldVersion, 'reconnect increments the optimistic generation');
+  assert.strictEqual(s.last_error_code, null, 'reconnect чистит error-код');
+  assert.strictEqual(s.last_error_at, null);
+  // A late collector result from the old encrypted session must not poison the fresh connection.
+  assert.strictEqual(
+    await db.recordTgSessionFailure(U.id, oldVersion, { state: 'reauth_required', errorCode: 'session_unauthorized' }),
+    false,
+  );
+  assert.strictEqual((await db.getTgSession(U.id)).connection_state, 'healthy');
+});
+
+test('tg_sessions health: listTgSessions отдаёт health-поля (cron-путь)', { skip }, async () => {
+  const U = await mkUser('tgl');
+  await db.saveTgSession(U.id, { tg_user_id: 555, username: `l_${nonce}`, session_enc: 'enc:l0' });
+  const version = (await db.getTgSession(U.id)).session_version;
+  await db.recordTgSessionFailure(U.id, version, { state: 'degraded', errorCode: 'mtproto_timeout' });
+  const row = (await db.listTgSessions()).find((r) => r.uid === U.id);
+  assert.ok(row, 'сессия в cron-списке');
+  assert.strictEqual(row.connection_state, 'degraded');
+  assert.strictEqual(row.last_error_code, 'mtproto_timeout');
+  assert.ok('session_enc' in row, 'cron-путь всё ещё несёт session_enc (только для сервера)');
+});
+
+test('tg_sessions health: record-методы на отсутствующем uid → false', { skip }, async () => {
+  assert.strictEqual(await db.recordTgSessionAttempt(999999999, '1'), false);
+  assert.strictEqual(await db.recordTgSessionSuccess(999999999, '1'), false);
+  assert.strictEqual(await db.recordTgSessionFailure(999999999, '1', { state: 'degraded', errorCode: 'unknown' }), false);
+});
+
 test('getCollectorStatus: владелец видит статус, чужой — null (access-предикат)', { skip }, async () => {
   const O = await mkUser('cs');
   const S = await mkUser('cx');
