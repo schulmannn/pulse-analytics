@@ -7,8 +7,9 @@ import { EmptyState } from '@/components/EmptyState';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { ChartCardBody, ChartSection as WidgetChartSection } from '@/components/ChartWidget';
+import { CompareStat, CompositionStat } from '@/components/CompareStat';
 import type { WidgetSize } from '@/lib/widgetPrefsStore';
-import { fmtDay, pairDelta, windowIgSeries, type Point, type WindowPair } from '@/lib/igMetrics';
+import { CHART_CYCLE, fmtDay, pairDelta, windowIgSeries, type Point, type WindowPair } from '@/lib/igMetrics';
 import type { WidgetPeriodValue } from '@/lib/period';
 import type { IgData } from '@/lib/useIgData';
 
@@ -128,7 +129,7 @@ export function KpiHero({
   );
   // Steep anatomy (owner rule): label + number + delta bottom-left, the chart inset to the RIGHT.
   return (
-    <ChartCardBody hero label={label} value={value} delta={delta} onValueClick={drillTo ? () => navigate(drillTo) : undefined}>
+    <ChartCardBody hero label={label} value={value} delta={delta} onValueClick={drillTo ? () => navigate(drillTo) : undefined} drillLabel={label}>
       {chart &&
         (drillTo ? (
           <div className="relative h-full">
@@ -332,35 +333,144 @@ export function SubscriberMovement({
   follows,
   unfollows,
   net,
+  compact = false,
 }: {
   follows: WindowPair;
   unfollows: WindowPair;
   net: { cur: number; prev: number; hasCur: boolean; hasPrev: boolean };
+  compact?: boolean;
 }) {
   const cells = [
-    { label: 'Подписки', text: `+${fmt.num(follows.cur)}`, color: 'text-verdant' },
-    { label: 'Отписки', text: `−${fmt.num(unfollows.cur)}`, color: 'text-ember' },
+    { label: 'Подписки', text: follows.hasCur ? `+${fmt.num(follows.cur)}` : '—', color: follows.hasCur ? 'text-verdant' : 'text-muted-foreground' },
+    { label: 'Отписки', text: unfollows.hasCur ? `−${fmt.num(unfollows.cur)}` : '—', color: unfollows.hasCur ? 'text-ember' : 'text-muted-foreground' },
     {
       label: 'Чистый прирост',
-      text: signedNum(net.cur),
-      color: net.cur > 0 ? 'text-verdant' : net.cur < 0 ? 'text-ember' : 'text-foreground',
+      text: net.hasCur ? signedNum(net.cur) : '—',
+      color: !net.hasCur ? 'text-muted-foreground' : net.cur > 0 ? 'text-verdant' : net.cur < 0 ? 'text-ember' : 'text-foreground',
     },
   ];
   return (
-    <div className="space-y-3">
-      <div className="grid grid-cols-1 gap-x-6 gap-y-4 border-t border-border pt-4 sm:grid-cols-3">
+    <div className={compact ? 'space-y-2' : 'space-y-3'}>
+      <div className={`grid grid-cols-1 border-t border-border sm:grid-cols-3 ${compact ? 'gap-x-4 gap-y-2 pt-3' : 'gap-x-6 gap-y-4 pt-4'}`}>
         {cells.map((c) => (
-          <div key={c.label} className="py-1">
-            <div className="text-xs tracking-wide text-muted-foreground">{c.label}</div>
-            <div className={`mt-2 text-3xl font-medium tabular-nums tracking-tight ${c.color}`}>{c.text}</div>
+          <div key={c.label} className={compact ? '' : 'py-1'}>
+            <div className={`${compact ? 'text-2xs' : 'text-xs'} tracking-wide text-muted-foreground`}>{c.label}</div>
+            <div className={`${compact ? 'mt-1 text-2xl' : 'mt-2 text-3xl'} font-medium tabular-nums tracking-tight ${c.color}`}>{c.text}</div>
             {c.label === 'Чистый прирост' && net.hasPrev && (
-              <div className="mt-2 text-xs text-muted-foreground">пред. период: {signedNum(net.prev)}</div>
+              <div className={`${compact ? 'mt-1 text-2xs' : 'mt-2 text-xs'} text-muted-foreground`}>пред. период: {signedNum(net.prev)}</div>
             )}
           </div>
         ))}
       </div>
-      <p className="px-1 text-xs text-muted-foreground">Чистый прирост = подписки − отписки за период.</p>
+      {!compact && <p className="px-1 text-xs text-muted-foreground">Чистый прирост = подписки − отписки за период.</p>}
     </div>
+  );
+}
+
+// ── Redesigned IG Overview cards ──────────────────────────────────────────────────────────────
+// The old aggregate «Показатели» hero (IgKpiBlock, still used by the legacy `ig-kpi` Home key)
+// is split into independent, source-honest widgets. Each is a BARE body (no own ChartSection) so the
+// Обзор hosts it inside the widget grid, drilling to its own /metrics/ig-* page. Reach is the one
+// honest daily series (line); Просмотры / Взаимодействия / Вовлечённость are aggregates → compact
+// non-temporal comparisons (never a tiny timeline at third width).
+
+/** «Охват» — the primary IG daily series (half width): area line + paired-window Δ. Section carries
+    the drill, so KpiHero has no own ↗ (a lone arrow next to the card's read as a dup — visual audit). */
+export function IgReachBody({ ig }: { ig: IgData }) {
+  return (
+    <KpiHero
+      label={`Охват · ${ig.window.days} дн.`}
+      value={fmt.kpi(ig.pairs.reach.cur)}
+      delta={pairDelta(ig.pairs.reach)}
+      series={ig.series.reach.filter((p) => ig.inWindow(p.day))}
+    />
+  );
+}
+
+/** «Динамика аудитории» (half): current follower base + net movement, then the honest
+    follows/unfollows/net breakdown (SubscriberMovement). One card answers «сколько нас и куда
+    движется». Drill lives on the section (/metrics/ig-follows). */
+export function IgAudienceBody({ ig }: { ig: IgData }) {
+  const net = ig.netMovement;
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-4">
+      <div>
+        <div className="text-xs tracking-wide text-muted-foreground">База · {ig.window.days} дн.</div>
+        <div className="mt-1.5 flex items-baseline gap-2">
+          <div className="kpi-accent text-hero font-medium leading-none tabular-nums tracking-tight">{fmt.kpi(ig.followers)}</div>
+          {net.hasCur && net.cur !== 0 && (
+            <span className={`text-sm font-medium tabular-nums ${net.cur > 0 ? 'text-verdant' : 'text-ember'}`}>
+              {signedNum(net.cur)}
+            </span>
+          )}
+        </div>
+      </div>
+      <SubscriberMovement follows={ig.pairs.follows} unfollows={ig.pairs.unfollows} net={net} compact />
+    </div>
+  );
+}
+
+/** «Просмотры» (third): value + previous-period two-bar comparison. */
+export function IgViewsBody({ ig }: { ig: IgData }) {
+  const navigate = useNavigate();
+  const live = isLive(ig.pairs.views);
+  return (
+    <CompareStat
+      value={live ? ig.pairs.views.cur : null}
+      prev={ig.pairs.views.hasPrev ? ig.pairs.views.prev : null}
+      delta={live ? pairDelta(ig.pairs.views) : null}
+      format={(n) => fmt.short(Math.round(n))}
+      hasValue={live}
+      onDrill={() => navigate('/metrics/ig-views')}
+      drillLabel="Просмотры"
+    />
+  );
+}
+
+/** «Взаимодействия» (third): total + composition (лайки/комментарии/сохранения/репосты) as a
+    compact stacked bar + legend — never a tiny timeline. Falls back to a bare total when the
+    breakdown pairs are empty this window. */
+export function IgInteractionsBody({ ig }: { ig: IgData }) {
+  const navigate = useNavigate();
+  const live = isLive(ig.pairs.ti);
+  const parts = [
+    { label: 'Лайки', pair: ig.pairs.likes, color: CHART_CYCLE[0] },
+    { label: 'Комментарии', pair: ig.pairs.comments, color: CHART_CYCLE[1] },
+    { label: 'Сохранения', pair: ig.pairs.saves, color: CHART_CYCLE[2] },
+    { label: 'Репосты', pair: ig.pairs.shares, color: CHART_CYCLE[3] },
+  ]
+    .filter((p) => p.pair.hasCur && p.pair.cur > 0)
+    .map((p) => ({ label: p.label, value: p.pair.cur, color: p.color }));
+  return (
+    <CompositionStat
+      total={live ? ig.pairs.ti.cur : null}
+      delta={live ? pairDelta(ig.pairs.ti) : null}
+      parts={parts}
+      format={(n) => fmt.short(Math.round(n))}
+      hasValue={live}
+      onDrill={() => navigate('/metrics/ig-interactions')}
+      drillLabel="Взаимодействия"
+    />
+  );
+}
+
+/** «Вовлечённость» (third): ER now vs the previous window (compact two-bar, percent). */
+export function IgEngagementBody({ ig }: { ig: IgData }) {
+  const navigate = useNavigate();
+  const erTrend =
+    ig.erReach > 0 && ig.pairs.reach.hasCur && ig.pairs.reach.hasPrev && ig.erReachPrev > 0
+      ? pctDelta(ig.erReach, ig.erReachPrev)
+      : null;
+  return (
+    <CompareStat
+      value={ig.erReach > 0 ? ig.erReach : null}
+      prev={ig.erReachPrev > 0 ? ig.erReachPrev : null}
+      delta={erTrend}
+      format={(n) => `${n.toFixed(2)}%`}
+      hasValue={ig.erReach > 0}
+      onDrill={() => navigate('/metrics/ig-er')}
+      drillLabel="Вовлечённость"
+    />
   );
 }
 

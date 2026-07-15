@@ -70,9 +70,9 @@ const CMP_DISPLAY: Array<{ value: ComparisonDisplay; label: string }> = [
 ];
 
 const SIZES: Array<{ value: WidgetSize; label: string }> = [
-  { value: 'third', label: 'Треть' },
-  { value: 'half', label: 'Половина' },
-  { value: 'full', label: 'Полный' },
+  { value: 'third', label: 'S' },
+  { value: 'half', label: 'M' },
+  { value: 'full', label: 'L' },
 ];
 
 const SWATCHES = [1, 2, 3, 4, 5, 6] as const;

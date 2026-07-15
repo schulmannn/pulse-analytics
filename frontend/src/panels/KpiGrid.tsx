@@ -11,11 +11,52 @@ import { MetricInfo } from '@/components/InfoTooltip';
 import { DeltaPill } from '@/components/DeltaPill';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ChartCardBody } from '@/components/ChartWidget';
-import { useWidgetPeriod } from '@/lib/period';
+import { CompareStat } from '@/components/CompareStat';
+import { usePagePeriod, useWidgetPeriod, widgetPeriodValue } from '@/lib/period';
 import type { MetricDelta } from '@/lib/delta';
 import { getDrillMetric, type MetricDef } from '@/lib/widgetMetrics';
 import { deriveKpis } from '@/lib/kpiDerive';
 import type { DailySeries, DrillKey } from '@/lib/kpiDerive';
+
+/**
+ * Shared TG KPI derivation. A feed-level page period wins when this hook sits above individual
+ * ChartSections (the split Overview); otherwise the nearest widget period keeps legacy Home cards
+ * independent. Runs the ONE canonical deriveKpis pass used by the metric pages.
+ */
+export function useTgKpis() {
+  const pagePeriod = usePagePeriod();
+  const widgetPeriod = useWidgetPeriod();
+  const period = useMemo(
+    () => pagePeriod ? widgetPeriodValue(pagePeriod.days, pagePeriod.range) : widgetPeriod,
+    [pagePeriod, widgetPeriod],
+  );
+  const { days, inRange } = period;
+  const range = pagePeriod?.range ?? null;
+  const { data, isPending, isError, error } = useTgFull(0);
+  const { data: history } = useHistory(730);
+  const { channelId } = useSelectedChannel();
+  const { data: channelsData } = useChannels();
+  const derived = useMemo(
+    () => deriveKpis(data, history, channelsData, channelId, days, range, inRange),
+    [data, history, channelsData, channelId, days, range, inRange],
+  );
+  return { derived, isPending, isError, error };
+}
+
+export type TgKpiState = ReturnType<typeof useTgKpis>;
+
+/** Small stand-in while the shared fetch is pending — mirrors the compact card's number + rows. */
+function CompactSkeleton() {
+  return (
+    <div className="flex h-full flex-col justify-between gap-4">
+      <Skeleton className="h-9 w-24" />
+      <div className="space-y-2.5">
+        <Skeleton className="h-2 w-full" />
+        <Skeleton className="h-2 w-4/5" />
+      </div>
+    </div>
+  );
+}
 
 /** Split a formatted value ("7.9k" / "8.20%") into [number, unit] so the unit reads quieter. */
 function splitUnit(value: string): [string, string] {
@@ -30,25 +71,12 @@ function splitUnit(value: string): [string, string] {
  * the post-window sum; sparse data → null → no pill, never a made-up number.
  */
 export function KpiGrid() {
-  // Per-widget window (useWidgetPeriod), not the global period. No custom range at the widget
-  // level (presets only), so `range` is always null here.
-  const { days, inRange } = useWidgetPeriod();
-  // isPending: канал-скоупный запрос выключен, пока канал не известен, — скелетон и там.
-  // Wide fetch (limit 100 = server cap): one entry shared with the sibling widgets; the window
-  // is applied client-side via inRange, so a narrower widget period never spawns its own request.
-  const { data, isPending, isError, error } = useTgFull(0);
-  const { data: history } = useHistory(730);
-  const { channelId } = useSelectedChannel();
-  const { data: channelsData } = useChannels();
+  // Legacy aggregate («Показатели»): the Overview no longer renders this — the redesigned Overview
+  // splits it into independent cards — but personal Home layouts pinned under the legacy `kpi` key
+  // still render it verbatim (components/legacyAdapters → LEGACY_RENDER.kpi). Keep it working.
+  const { derived, isPending, isError, error } = useTgKpis();
   const navigate = useNavigate();
   const openMetric = (key: DrillKey) => navigate(`/metrics/${key}`);
-
-  // Все пять reduce-проходов + оконная математика мемоизированы (shared deriveKpis —
-  // те же числа, что на страницах метрик, поэтому заголовок и страница сходятся).
-  const derived = useMemo(
-    () => deriveKpis(data, history, channelsData, channelId, days, null, inRange),
-    [data, history, channelsData, channelId, days, inRange],
-  );
 
   if (isPending) return <KpiSkeletons />;
   if (isError) {
@@ -92,6 +120,106 @@ export function KpiGrid() {
   );
 }
 
+/**
+ * «Просмотры» — the redesigned Overview's primary TG time series (half width). Channel views over
+ * the period as an area sparkline + the paired-window Δ. This is the honest daily series (the other
+ * three TG aggregates below are compact non-temporal comparisons). Keeps the exact «Просмотры · N
+ * дн.» headline the old hero carried, so the shared period reads the same everywhere.
+ */
+export function TgViewsBody({ state }: { state: TgKpiState }) {
+  const { derived, isPending, isError, error } = state;
+  const navigate = useNavigate();
+  if (isPending) return <ViewsSkeleton />;
+  if (isError) {
+    return <ErrorState title="Не удалось загрузить метрики" reason={error instanceof Error ? error.message : 'ошибка'} />;
+  }
+  const { channelViews, viewsTrend, viewsCaption, viewsSpark, periodLabel } = derived;
+  return (
+    <FeaturedKpi
+      label={`Просмотры · ${periodLabel}`}
+      value={fmt.kpi(channelViews)}
+      trend={viewsTrend}
+      caption={viewsCaption}
+      spark={viewsSpark}
+      info={getDrillMetric('views')}
+      onDrill={() => navigate('/metrics/views')}
+    />
+  );
+}
+
+/** «Ср. охват» — average views per post, this window vs the previous (compact two-bar). */
+export function TgAvgReachBody({ state }: { state: TgKpiState }) {
+  const { derived, isPending, isError } = state;
+  const navigate = useNavigate();
+  if (isPending) return <CompactSkeleton />;
+  if (isError) return <ErrorState title="Не удалось загрузить" reason="ошибка" />;
+  const { avgViews, avgViewsPrev, avgReachTrend } = derived;
+  return (
+    <CompareStat
+      value={avgViews}
+      prev={avgViewsPrev}
+      delta={avgReachTrend}
+      format={(n) => fmt.short(Math.round(n))}
+      hasValue={avgViews > 0}
+      onDrill={() => navigate('/metrics/avgReach')}
+      drillLabel="Ср. охват"
+    />
+  );
+}
+
+/** «Реакции» — total reactions, this window vs the previous (compact two-bar). */
+export function TgReactionsBody({ state }: { state: TgKpiState }) {
+  const { derived, isPending, isError } = state;
+  const navigate = useNavigate();
+  if (isPending) return <CompactSkeleton />;
+  if (isError) return <ErrorState title="Не удалось загрузить" reason="ошибка" />;
+  const { totalReactions, reactionsPrev, reactionsTrend, normPosts } = derived;
+  return (
+    <CompareStat
+      value={totalReactions}
+      prev={reactionsPrev}
+      delta={reactionsTrend}
+      format={(n) => fmt.short(Math.round(n))}
+      hasValue={normPosts.length > 0}
+      onDrill={() => navigate('/metrics/reactions')}
+      drillLabel="Реакции"
+    />
+  );
+}
+
+/** «Вовлечённость» — ER now vs the previous window (compact two-bar, percent). */
+export function TgErBody({ state }: { state: TgKpiState }) {
+  const { derived, isPending, isError } = state;
+  const navigate = useNavigate();
+  if (isPending) return <CompactSkeleton />;
+  if (isError) return <ErrorState title="Не удалось загрузить" reason="ошибка" />;
+  const { er, erPrev, erTrend } = derived;
+  return (
+    <CompareStat
+      value={er > 0 ? er : null}
+      prev={erPrev}
+      delta={erTrend}
+      format={(n) => `${n.toFixed(2)}%`}
+      hasValue={er > 0}
+      onDrill={() => navigate('/metrics/er')}
+      drillLabel="Вовлечённость"
+    />
+  );
+}
+
+/** Hero-shaped skeleton for the views card (number block left, chart area right). */
+function ViewsSkeleton() {
+  return (
+    <div className="flex h-full items-end gap-4">
+      <div className="shrink-0">
+        <Skeleton className="h-3 w-28" />
+        <Skeleton className="mt-2 h-11 w-40" />
+      </div>
+      <Skeleton className="h-full min-h-28 min-w-0 flex-1" />
+    </div>
+  );
+}
+
 interface FeaturedKpiProps {
   label: string;
   value: string;
@@ -119,6 +247,7 @@ function FeaturedKpi({ label, value, trend, caption, spark, info, onDrill }: Fea
       delta={trend}
       caption={caption ?? undefined}
       onValueClick={onDrill}
+      drillLabel={label}
     >
       {spark && spark.values.length > 1 ? (
         <Sparkline
