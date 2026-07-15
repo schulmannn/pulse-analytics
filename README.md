@@ -39,7 +39,8 @@ Telegram поддерживает две модели подключения:
 | `APP_URL` | web | публичный HTTPS-origin, в production — `https://atlavue.app` |
 | `SESSION_SECRET` | web | подпись пользовательских сессий; обязательна в production |
 | `DATABASE_URL` | web | Postgres; в production обязательна, кроме явного `ALLOW_DBLESS=true` |
-| `PGPOOL_MAX` | web | размер пула Postgres, по умолчанию `10` (одна web-реплика, ADR-002) |
+| `PGPOOL_MAX` | web | размер основного пула Postgres (live HTTP/auth/tenant), по умолчанию `10` (одна web-реплика, ADR-002) |
+| `PGPOOL_BACKGROUND_MAX` | web | размер отдельного малого пула для фонового сбора/отчётов/maintenance, по умолчанию `2` (те же fail-fast deadlines) |
 | `PG_CONNECTION_TIMEOUT_MS` | web | fail-fast на выдачу коннекта из пула, мс, по умолчанию `3000` |
 | `PG_STATEMENT_TIMEOUT_MS` | web | серверный `statement_timeout`, мс, по умолчанию `30000` |
 | `PG_QUERY_TIMEOUT_MS` | web | клиентский `query_timeout` (чуть выше statement), мс, по умолчанию `35000` |
@@ -51,6 +52,10 @@ Telegram поддерживает две модели подключения:
 | `IG_CLIENT_ID`, `IG_CLIENT_SECRET`, `IG_TOKEN_KEY` | web | Instagram Login и шифрование account token |
 | `INGEST_TOKEN` | web/cron | авторизация daily ingest через `x-ingest-token` |
 | `COLLECTOR_STALE_HOURS` | web | порог устаревания collector, по умолчанию 24 часа |
+| `IG_ACCOUNTS_PER_PASS` | web | сколько НОВОСТАРТОВАННЫХ IG-аккаунтов сбор трогает за один проход (durable per-account/day), по умолчанию `25`; завершённые за день пропускаются и лимит не тратят |
+| `TG_QR_CHANNELS_PER_PASS` | web | сколько НОВОСТАРТОВАННЫХ QR-каналов TG-сбор трогает за один проход, по умолчанию `200` |
+| `COLLECTION_RECOVERY_INITIAL_DELAY_MS` | web | задержка первого прохода recovery-бегунка после старта, мс, по умолчанию `30000`, минимум `1000` |
+| `COLLECTION_RECOVERY_INTERVAL_MS` | web | период повторных проходов recovery-бегунка, мс, по умолчанию `900000` (15 мин), минимум `60000` |
 
 Секреты не добавляются в `.env`-файлы репозитория, логи, issue или PR.
 

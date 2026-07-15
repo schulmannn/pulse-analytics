@@ -4,7 +4,8 @@
 // Единственная точка Graph-вызовов (декомпозиция index.js, PR D): singleflight igFetch
 // + opportunistic refresh 60-дневного токена. Ноль знания о юзерах/каналах/req —
 // db.updateIgToken и igCrypto инъектируются (персист свежего токена). Live-роуты и
-// дневной cron-сбор делят ОДИН клиент. Тела перенесены из index.js literal.
+// дневной cron-сбор могут иметь разные DB budgets, сохраняя общий singleflight Map.
+// Тела перенесены из index.js literal.
 
 'use strict';
 
@@ -17,13 +18,15 @@ const IG_GRAPH = 'https://graph.instagram.com';         // token exchange / refr
 
 // defaultToken = глобальный env-токен (IG_ACCESS_TOKEN): legacy-вызовы igFetch без
 // 3-го аргумента продолжают работать как раньше; IG-роуты передают per-request токен.
-function createInstagramClient({ db, log, igCrypto, defaultToken }) {
+function createInstagramClient({ db, log, igCrypto, defaultToken, inflight }) {
   // Single choke-point for all Graph data calls. `token` defaults to the global env token so any
   // legacy caller keeps working; the IG routes pass the per-request token (req.ig.token).
   // Singleflight: concurrent identical calls (two tabs, a dashboard fan-out racing the cache)
   // share ONE Graph request instead of multiplying quota burn. Keyed by the full URL — the
   // access token is part of it, so different accounts never share a flight.
-  const igInflight = new Map();
+  // Live и background-клиенты могут разделять один Map: Graph singleflight остаётся общим,
+  // хотя персист refresh-токена у каждого клиента идёт через свой DB budget.
+  const igInflight = inflight || new Map();
   function igFetch(path, params = {}, token = defaultToken) {
     params.access_token = token;
     const qs  = new URLSearchParams(params).toString();

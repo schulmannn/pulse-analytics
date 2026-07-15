@@ -19,7 +19,7 @@ const oddErr = () => new Error('boom without code');
 
 // Build a job whose collectQrChannel outcome is driven per-channel-ref via `responses`
 // (ref -> Error to throw, or undefined -> succeed). Records every health call for assertions.
-function makeJob({ responses = {}, runJobOnce, health = {}, tgCrypto } = {}) {
+function makeJob({ responses = {}, runJobOnce, health = {}, tgCrypto, tgQrChannelsPerPass } = {}) {
   const calls = { post: [], health: [], persisted: [], logs: [], sessions: [] };
   const db = {
     enabled: true,
@@ -48,6 +48,7 @@ function makeJob({ responses = {}, runJobOnce, health = {}, tgCrypto } = {}) {
     MTPROTO_TOKEN: 'tok',
     MTPROTO_TIMEOUT_HEAVY_MS: 1000,
     tgPostToRow: (p) => p,
+    ...(tgQrChannelsPerPass != null ? { tgQrChannelsPerPass } : {}),
   });
   return { job, db, calls };
 }
@@ -169,6 +170,66 @@ test('сбой health-bookkeeping логируется и НЕ роняет сб
 
   await assert.doesNotReject(job.processTgQrCollection());
   assert.deepEqual(calls.persisted, [1]); // collection itself still happened
+});
+
+// ── processTgQrCollection: возвращаемая статистика прохода + инъекция cap ──────────
+
+test('processTgQrCollection: возвращает { collected, skipped, failed, capped }', async () => {
+  // a1 succeeds, a2 skipped (idempotent), a3 fails (non-auth).
+  const { job, db } = makeJob({
+    responses: { a3: timeoutErr() },
+    runJobOnce: async (_kind, key, fn) => (key.startsWith('2:')
+      ? { skipped: true }                     // channel id 2 already done today
+      : { skipped: false, result: await fn() }),
+  });
+  db.listTgSessions = async () => [{ uid: 1, session_enc: 's', session_version: '1' }];
+  db.listChannels = async () => [ch(1, 'a1'), ch(2, 'a2'), ch(3, 'a3')];
+
+  const stats = await job.processTgQrCollection();
+
+  assert.deepEqual(stats, { collected: 1, skipped: 1, failed: 1, capped: false });
+});
+
+test('processTgQrCollection: инъектированный per-pass cap ограничивает НОВОСТАРТОВАННЫЕ каналы, skipped не тратят cap', async () => {
+  // cap=1: первый реально стартовавший канал занимает cap, дальше capped. Но канал, skipped
+  // идемпотентно, cap НЕ тратит — следующий проход добирает остаток.
+  const { job, db, calls } = makeJob({
+    tgQrChannelsPerPass: 1,
+    // channel id 1 already done today → skipped (не тратит cap); 2 и 3 стартуют.
+    runJobOnce: async (_kind, key, fn) => (key.startsWith('1:')
+      ? { skipped: true }
+      : { skipped: false, result: await fn() }),
+  });
+  db.listTgSessions = async () => [{ uid: 1, session_enc: 's', session_version: '1' }];
+  db.listChannels = async () => [ch(1, 'a1'), ch(2, 'a2'), ch(3, 'a3')];
+
+  const stats = await job.processTgQrCollection();
+
+  // a1 skipped (cap не тронут), a2 collected (cap исчерпан), a3 не тронут → capped.
+  assert.deepEqual(calls.post, ['a2']); // только реально стартовавший a2 дошёл до upstream
+  assert.equal(stats.skipped, 1);
+  assert.equal(stats.collected, 1);
+  assert.equal(stats.capped, true);
+});
+
+test('processTgQrCollection: cap-параметр вызова переопределяет инъектированный дефолт', async () => {
+  const { job, db, calls } = makeJob({ tgQrChannelsPerPass: 5 });
+  db.listTgSessions = async () => [{ uid: 1, session_enc: 's', session_version: '1' }];
+  db.listChannels = async () => [ch(1, 'a1'), ch(2, 'a2'), ch(3, 'a3')];
+
+  const stats = await job.processTgQrCollection({ cap: 2 });
+
+  assert.deepEqual(calls.post, ['a1', 'a2']); // третий не тронут
+  assert.equal(stats.collected, 2);
+  assert.equal(stats.capped, true);
+});
+
+test('processTgQrCollection: БД выключена → пустая статистика, без обхода', async () => {
+  const { job, db, calls } = makeJob();
+  db.enabled = false;
+  const stats = await job.processTgQrCollection();
+  assert.deepEqual(stats, { collected: 0, skipped: 0, failed: 0, capped: false });
+  assert.deepEqual(calls.post, []);
 });
 
 // ── collectQrChannelsNow (immediate post-add) ─────────────────────────────────

@@ -15,6 +15,18 @@ function closeServer(server) {
   });
 }
 
+// Закрываем ВСЕ реальные пулы РОВНО по одному разу. composition.databases дедуплицирует случай
+// backgroundDb === db (инъектированный тестовый db); фолбэк на [db] сохраняет прежнее поведение
+// для composition-объектов без поля databases (напр. в тестах жизненного цикла).
+function closeDatabases(composition) {
+  const pools = composition.databases || [composition.db];
+  return Promise.all(
+    Array.from(new Set(pools.filter(Boolean))).map((pool) =>
+      pool.close().catch(() => {}),
+    ),
+  );
+}
+
 function reportConfigErrors(config, errors) {
   if (!errors.length) return;
 
@@ -57,11 +69,14 @@ async function main({
   try {
     await waitForListening(server);
   } catch (error) {
-    await composition.db.close().catch(() => {});
+    await closeDatabases(composition);
     throw error;
   }
 
   composition.memoryCache.start();
+  // Recovery-бегунок фонового сбора: стартует ПОСЛЕ listen (не задерживает readiness); инертен при
+  // выключенной БД и в composition без этого поля (тесты жизненного цикла).
+  composition.collectionRunner?.start?.();
   const boundAddress = server.address();
   const boundPort =
     boundAddress && typeof boundAddress === 'object'
@@ -92,6 +107,9 @@ async function main({
     stoppedPromise = (async () => {
       composition.drainState.draining = true;
       removeSignalHandlers();
+      // Останавливаем планирование новых recovery-проходов ДО дренажа: уже сабмиченный проход
+      // отслеживается jobTracker и дожидается в waitForIdle ниже; новые не заводятся.
+      composition.collectionRunner?.stop?.();
 
       // Existing requests may schedule post-response tails, so stop accepting traffic
       // and let all request handlers finish before freezing the tracker.
@@ -102,7 +120,8 @@ async function main({
       });
 
       composition.memoryCache.stop();
-      await composition.db.close().catch(() => {});
+      // Оба реальных пула (main + background) закрываются здесь РОВНО по одному разу.
+      await closeDatabases(composition);
     })();
 
     return stoppedPromise;

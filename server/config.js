@@ -39,6 +39,10 @@ function loadConfig(env = process.env) {
       // Conservative production-safe default: 10 keeps headroom under Postgres/Railway
       // connection caps for one web replica (ADR-002) without over-provisioning idle conns.
       poolMax: Number(env.PGPOOL_MAX || 10),
+      // Separate small pool for background collection/report/maintenance jobs so a heavy tail
+      // can't starve live HTTP/auth/tenant requests of connections. Default 2: enough for the
+      // sequential collection passes without eating into the main pool's headroom.
+      backgroundPoolMax: Number(env.PGPOOL_BACKGROUND_MAX || 2),
       // Fail-fast timeouts (мс). Без них пул мог висеть на выдаче коннекта, а зависший
       // запрос — держать соединение бесконечно; db-unavailable→503 маппинг уже есть в db/errors.
       connectionTimeoutMs: Number(env.PG_CONNECTION_TIMEOUT_MS || 3000),
@@ -89,6 +93,15 @@ function loadConfig(env = process.env) {
       webReplicas: Number(env.WEB_REPLICAS || 1),
       ingestToken: env.INGEST_TOKEN || '',
       capacityRollups: env.CAPACITY_ROLLUPS === '1',
+      // Возобновляемый фоновый сбор: сколько НОВОСТАРТОВАННЫХ элементов один проход бегунка
+      // трогает за раз (уже завершённые за день пропускаются идемпотентно и лимит не тратят,
+      // поэтому следующий проход добирает остаток). Консервативные дефолты — не раздуваем
+      // upstream fan-out.
+      igAccountsPerPass: Number(env.IG_ACCOUNTS_PER_PASS || 25),
+      tgQrChannelsPerPass: Number(env.TG_QR_CHANNELS_PER_PASS || 200),
+      // Внутрипроцессный recovery-бегунок: задержка первого прохода после listen и период повторов.
+      collectionRecoveryInitialDelayMs: Number(env.COLLECTION_RECOVERY_INITIAL_DELAY_MS || 30000),
+      collectionRecoveryIntervalMs: Number(env.COLLECTION_RECOVERY_INTERVAL_MS || 900000),
       // Деплой-метка для crash-телеметрии (Railway её штампует; локально пусто → 'dev' в bugs).
       commitSha: env.RAILWAY_GIT_COMMIT_SHA || env.COMMIT_SHA || '',
       // Порог «коллектор молчит» для /collector-status; деривация как была в роуте.
@@ -119,9 +132,34 @@ function validateConfig(config) {
   for (const [field, value] of [
     ['http.port', config.http.port],
     ['database.poolMax', config.database.poolMax],
+    ['database.backgroundPoolMax', config.database.backgroundPoolMax],
     ['runtime.webReplicas', config.runtime.webReplicas],
   ]) {
-    if (!Number.isFinite(value) || value <= 0) add(field, `${field} должен быть положительным числом.`);
+    if (!Number.isInteger(value) || value <= 0) add(field, `${field} должен быть положительным целым числом.`);
+  }
+  // Возобновляемый сбор: лимиты проходов и тайминги бегунка. Патологические 0/отрицательные
+  // значения остановили бы прогресс (cap=0 → ничего не стартует) или зациклили таймер (interval<=0).
+  for (const [field, value] of [
+    ['runtime.igAccountsPerPass', config.runtime.igAccountsPerPass],
+    ['runtime.tgQrChannelsPerPass', config.runtime.tgQrChannelsPerPass],
+    ['runtime.collectionRecoveryInitialDelayMs', config.runtime.collectionRecoveryInitialDelayMs],
+    ['runtime.collectionRecoveryIntervalMs', config.runtime.collectionRecoveryIntervalMs],
+  ]) {
+    if (!Number.isInteger(value) || value <= 0) add(field, `${field} должен быть положительным целым числом.`);
+  }
+  if (
+    Number.isInteger(config.runtime.collectionRecoveryInitialDelayMs) &&
+    config.runtime.collectionRecoveryInitialDelayMs > 0 &&
+    config.runtime.collectionRecoveryInitialDelayMs < 1000
+  ) {
+    add('runtime.collectionRecoveryInitialDelayMs', 'COLLECTION_RECOVERY_INITIAL_DELAY_MS должен быть не меньше 1000 мс.');
+  }
+  if (
+    Number.isInteger(config.runtime.collectionRecoveryIntervalMs) &&
+    config.runtime.collectionRecoveryIntervalMs > 0 &&
+    config.runtime.collectionRecoveryIntervalMs < 60_000
+  ) {
+    add('runtime.collectionRecoveryIntervalMs', 'COLLECTION_RECOVERY_INTERVAL_MS должен быть не меньше 60000 мс.');
   }
   for (const [field, value] of [
     ['database.connectionTimeoutMs', config.database.connectionTimeoutMs],
