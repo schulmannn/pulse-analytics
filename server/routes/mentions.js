@@ -2,6 +2,7 @@
 
 const { hasWorkspaceRole } = require('../middleware/tenant');
 const { validateRules } = require('../lib/mentionRules');
+const { createTgSessionDecryptor } = require('../lib/tgSessionDecrypt');
 
 /**
  * Telegram mention rules + live brand-search — `/api/tg/mention-settings` (GET/PUT) and the moved
@@ -24,6 +25,9 @@ function registerMentionsRoutes({
   cacheGet, cacheSet, tgCrypto, mtprotoClient,
 }) {
   const { mtprotoPost, sendMtprotoError, MTPROTO_TOKEN, MTPROTO_TIMEOUT_HEAVY_MS } = mtprotoClient;
+  // Shared decrypt: rotated-out key falls back transparently and the row is lazily re-encrypted under
+  // the active key (best-effort, generation-guarded). A previous-key success does NOT mark reauth.
+  const { decryptTgSession } = createTgSessionDecryptor({ tgCrypto, db, log });
 
   const DB_OFF = { error: 'База данных выключена — упоминания недоступны' };
 
@@ -146,9 +150,10 @@ function registerMentionsRoutes({
 
       let sessionStr;
       try {
-        sessionStr = tgCrypto.decrypt(sess.session_enc);
+        sessionStr = await decryptTgSession(sess);
       } catch {
-        // Битый блоб/ротация ключа — безопасно, без утечки: генерация-гардом помечаем reauth.
+        // Битый блоб / ни один ключ (активный+прежние) не подошёл — безопасно, без утечки:
+        // генерация-гардом помечаем reauth. Успешная расшифровка прежним ключом сюда НЕ попадает.
         recordReauth(req.user.uid, sess.session_version, 'session_decrypt_failed');
         return res.status(409).json({ available: false, error: 'Сессия Telegram недоступна — переподключите аккаунт', reason: 'reauth_required' });
       }

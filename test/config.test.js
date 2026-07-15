@@ -167,6 +167,51 @@ test('validateConfig: патологические 0/отрицательные 
   assert.ok(tooFast.some((e) => e.field === 'runtime.collectionRecoveryIntervalMs'), 'sub-minute recovery storm отклонён');
 });
 
+test('loadConfig: previousSessionKeys — пусто = [], CSV в порядке, trim/filter, заморожен', () => {
+  assert.deepEqual(loadConfig({}).telegram.previousSessionKeys, [], 'нет env → []');
+  const c = loadConfig({ TG_SESSION_KEY: 'active', TG_SESSION_KEY_PREVIOUS: ' k1 , k2 ,, k3 ' });
+  assert.deepEqual(c.telegram.previousSessionKeys, ['k1', 'k2', 'k3'], 'trim + drop empties, порядок сохранён');
+  assert.equal(Object.isFrozen(c.telegram.previousSessionKeys), true, 'список заморожен');
+  assert.throws(() => { c.telegram.previousSessionKeys.push('x'); }, TypeError);
+});
+
+test('validateConfig: previousSessionKeys — безопасная валидация без активного ключа/дублей/лимита', () => {
+  // Валидно: активный ключ + до 3 уникальных прежних (не включая активный).
+  assert.deepEqual(
+    validateConfig(loadConfig({ TG_SESSION_KEY: 'active', TG_SESSION_KEY_PREVIOUS: 'p1,p2,p3' }))
+      .filter((e) => e.field === 'telegram.previousSessionKeys'),
+    [],
+  );
+  // Нет env → нет требований.
+  assert.deepEqual(validateConfig(loadConfig({})).filter((e) => e.field === 'telegram.previousSessionKeys'), []);
+
+  const noActive = validateConfig(loadConfig({ TG_SESSION_KEY_PREVIOUS: 'p1' }));
+  assert.ok(noActive.some((e) => e.field === 'telegram.previousSessionKeys'), 'прежние без активного → ошибка');
+
+  const activeInPrev = validateConfig(loadConfig({ TG_SESSION_KEY: 'active', TG_SESSION_KEY_PREVIOUS: 'p1,active' }));
+  assert.ok(activeInPrev.some((e) => e.field === 'telegram.previousSessionKeys'), 'активный ключ в списке прежних → ошибка');
+
+  const dup = validateConfig(loadConfig({ TG_SESSION_KEY: 'active', TG_SESSION_KEY_PREVIOUS: 'p1,p1' }));
+  assert.ok(dup.some((e) => e.field === 'telegram.previousSessionKeys'), 'дубли прежних → ошибка');
+
+  const tooMany = validateConfig(loadConfig({ TG_SESSION_KEY: 'active', TG_SESSION_KEY_PREVIOUS: 'p1,p2,p3,p4' }));
+  assert.ok(tooMany.some((e) => e.field === 'telegram.previousSessionKeys'), 'больше 3 прежних → ошибка');
+});
+
+test('validateConfig: сообщения ротации ключей НЕ содержат значений ключей', () => {
+  const active = 'ACTIVE-SESSION-KEY-SECRET';
+  const prev = 'PREVIOUS-SESSION-KEY-SECRET';
+  // Заведомо невалидная конфигурация (активный в списке прежних + дубли) — чтобы собрать ошибки.
+  const errs = validateConfig(loadConfig({
+    TG_SESSION_KEY: active,
+    TG_SESSION_KEY_PREVIOUS: `${prev},${prev},${active}`,
+  }));
+  assert.ok(errs.some((e) => e.field === 'telegram.previousSessionKeys'), 'валидатор нашёл проблему');
+  const joined = JSON.stringify(errs) + new ConfigError(errs).message;
+  assert.equal(joined.includes(active), false, 'значение активного ключа не утекает');
+  assert.equal(joined.includes(prev), false, 'значение прежнего ключа не утекает');
+});
+
 test('isProductionEnv: NODE_ENV=production ИЛИ Railway-маркер', () => {
   assert.equal(isProductionEnv({ NODE_ENV: 'production' }), true);
   assert.equal(isProductionEnv({ RAILWAY_ENVIRONMENT: 'prod' }), true);

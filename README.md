@@ -28,6 +28,11 @@ Telegram поддерживает две модели подключения:
 - **локальная** — `collector/pulse_collector.py` хранит сессию на машине пользователя и отправляет
   только производные метрики через `/api/collector/ingest`.
 
+Ротация managed-сессий выполняется одним deploy: новый ключ задаётся в `TG_SESSION_KEY`, а прежние
+(не более трёх) временно перечисляются в `TG_SESSION_KEY_PREVIOUS`. Старые записи читаются через fallback
+и при первом использовании generation-safe перешифровываются активным ключом; предыдущие ключи нельзя
+удалять, пока все нужные сессии не были успешно использованы после ротации.
+
 Подробнее о состоянии системы и её инвариантах — в [`PROJECT_MEMORY.md`](PROJECT_MEMORY.md).
 
 ## Основные переменные окружения
@@ -47,6 +52,7 @@ Telegram поддерживает две модели подключения:
 | `MTPROTO_URL` | web | внутренний URL Python-сервиса, обычно `http://<service>.railway.internal:8001` |
 | `MTPROTO_TOKEN` | web + mtproto | общий межсервисный секрет; без него доступ fail-closed |
 | `TG_SESSION_KEY` | web | ключ AES-256-GCM для управляемых QR-сессий |
+| `TG_SESSION_KEY_PREVIOUS` | web | до трёх прежних TG-ключей через запятую: только fallback-чтение и lazy re-encryption; активный write-key всегда `TG_SESSION_KEY` |
 | `TG_API_ID`, `TG_API_HASH` | mtproto/collector | Telegram application credentials |
 | `TG_SESSION`, `TG_CHANNEL` | mtproto | служебная управляемая Telegram-сессия и канал, если используются |
 | `IG_CLIENT_ID`, `IG_CLIENT_SECRET`, `IG_TOKEN_KEY` | web | Instagram Login и шифрование account token |

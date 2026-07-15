@@ -75,6 +75,10 @@ function loadConfig(env = process.env) {
       mtprotoUrl: env.MTPROTO_URL || '',
       mtprotoToken: env.MTPROTO_TOKEN || '',
       sessionKey: env.TG_SESSION_KEY || '',
+      // Optional key-rotation support: ordered, read-only PREVIOUS session keys tried only when the
+      // active TG_SESSION_KEY can't decrypt a stored session. Пусто = [] и прежнее поведение
+      // байт-в-байт. Заморожено — потребители получают неизменяемый список.
+      previousSessionKeys: Object.freeze(parseCsv(env.TG_SESSION_KEY_PREVIOUS)),
     }),
     github: Object.freeze({
       // repository_dispatch для claude-bugfix (кнопка в баг-трекере); soft-off без пары.
@@ -136,6 +140,22 @@ function validateConfig(config) {
   }
   if (!!config.notion.token !== !!config.notion.crashDatabaseId) {
     add('notion', 'NOTION_TOKEN и NOTION_CRASH_DB должны быть заданы вместе.');
+  }
+  // Rotation ключей managed-сессии Telegram. Сообщения НИКОГДА не печатают значения ключей — только
+  // структурные факты (счётчики/наличие), иначе секрет утечёт в лог валидации.
+  const prevSessionKeys = config.telegram.previousSessionKeys;
+  if (prevSessionKeys.length > 0) {
+    if (!config.telegram.sessionKey) {
+      add('telegram.previousSessionKeys', 'TG_SESSION_KEY_PREVIOUS требует активного TG_SESSION_KEY (прежние ключи сами по себе не включают QR).');
+    } else if (prevSessionKeys.includes(config.telegram.sessionKey)) {
+      add('telegram.previousSessionKeys', 'Активный TG_SESSION_KEY не должен присутствовать в TG_SESSION_KEY_PREVIOUS.');
+    }
+    if (new Set(prevSessionKeys).size !== prevSessionKeys.length) {
+      add('telegram.previousSessionKeys', 'TG_SESSION_KEY_PREVIOUS не должен содержать повторяющиеся ключи.');
+    }
+    if (prevSessionKeys.length > 3) {
+      add('telegram.previousSessionKeys', 'TG_SESSION_KEY_PREVIOUS ограничен 3 прежними ключами.');
+    }
   }
   for (const [field, value] of [
     ['http.port', config.http.port],

@@ -43,7 +43,7 @@ const EXPECTED_FUNCTIONS = [
   'listBugs', 'updateBug', 'deleteBug', 'bugExists', 'getBug', 'addAttachmentIfRoom', 'getAttachment',
   // integrations (ig accounts / tg sessions)
   'saveIgAccount', 'getIgAccount', 'updateIgToken', 'deleteIgAccount', 'listIgAccounts',
-  'saveTgSession', 'getTgSession', 'deleteTgSession', 'listTgSessions',
+  'saveTgSession', 'getTgSession', 'deleteTgSession', 'listTgSessions', 'rotateTgSessionCiphertext',
   'recordTgSessionAttempt', 'recordTgSessionSuccess', 'recordTgSessionFailure',
   // reportsRepo
   'listReports', 'getReport', 'createReport', 'updateReport', 'deleteReport', 'listDueReports',

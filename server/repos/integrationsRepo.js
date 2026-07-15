@@ -122,6 +122,21 @@ function createIntegrationsRepo({ pool, enabled, ensureExternalSource, transacti
     return true;
   }
 
+  // Lazy re-encryption after a TG_SESSION_KEY rotation: rewrite ONLY the ciphertext (+ updated_at) for
+  // ONE specific session generation. Deliberately narrow — it NEVER bumps session_version, touches
+  // identity (tg_user_id/username) or connection health, so a concurrent reconnect (which increments
+  // session_version) makes this a safe no-op instead of clobbering the fresh session. sessionEnc comes
+  // in already-encrypted (caller re-encrypts via lib/tg_crypto); the repo never sees plaintext. Returns
+  // whether a row matched the (uid, version) generation guard (rowCount=0 = race, normal).
+  async function rotateTgSessionCiphertext(uid, sessionVersion, sessionEnc) {
+    const version = safeTgSessionVersion(sessionVersion);
+    if (!enabled || !uid || !version || !sessionEnc) return false;
+    const { rowCount } = await pool.query(
+      'UPDATE tg_sessions SET session_enc=$3, updated_at=now() WHERE uid=$1 AND session_version=$2',
+      [uid, version, sessionEnc]);
+    return rowCount > 0;
+  }
+
   // Full row incl. the encrypted session (callers decrypt) + public health fields. Returns null
   // when not connected. connection_state/last_* — НЕ-секретные, /api/tg/qr/status их отдаёт клиенту.
   async function getTgSession(uid) {
@@ -204,7 +219,7 @@ function createIntegrationsRepo({ pool, enabled, ensureExternalSource, transacti
 
   return {
     saveIgAccount, getIgAccount, updateIgToken, deleteIgAccount, listIgAccounts,
-    saveTgSession, getTgSession, deleteTgSession, listTgSessions,
+    saveTgSession, getTgSession, deleteTgSession, listTgSessions, rotateTgSessionCiphertext,
     recordTgSessionAttempt, recordTgSessionSuccess, recordTgSessionFailure,
   };
 }

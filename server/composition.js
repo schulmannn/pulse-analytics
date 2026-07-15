@@ -61,7 +61,8 @@ function createComposition(config, overrides = {}) {
   const igCrypto =
     overrides.igCrypto || createIgCrypto(config.instagram.tokenKey);
   const tgCrypto =
-    overrides.tgCrypto || createTgCrypto(config.telegram.sessionKey);
+    overrides.tgCrypto ||
+    createTgCrypto(config.telegram.sessionKey, config.telegram.previousSessionKeys);
   const notionCrash =
     overrides.notionCrash || createNotionCrashClient(config.notion);
   const { MTPROTO_TOKEN, MTPROTO_TIMEOUT_STATS_MS, MTPROTO_TIMEOUT_HEAVY_MS, mtprotoFetch, mtprotoPost } =

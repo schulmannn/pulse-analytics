@@ -17,10 +17,30 @@ const timeoutErr = () => Object.assign(new Error('too slow'), { code: 'mtproto_t
 const floodErr = () => Object.assign(new Error('flood'), { floodWait: true });
 const oddErr = () => new Error('boom without code');
 
+// Fake tgCrypto whose decryptDetailed reports the ACTIVE key authenticated (no rewrite needed). The
+// stored blob passes straight through as plaintext, matching how the real crypto round-trips.
+const activeCrypto = () => ({
+  configured: () => true,
+  encrypt: (plain) => `enc:${plain}`,
+  decrypt: (s) => s,
+  decryptDetailed: (blob) => ({ plaintext: blob, usedPreviousKey: false }),
+});
+
+// Fake tgCrypto whose decryptDetailed reports a PREVIOUS (rotated-out) key authenticated → the shared
+// helper must re-encrypt under the active key and rewrite the row once.
+const previousKeyCrypto = () => ({
+  configured: () => true,
+  encrypt: (plain) => `enc:${plain}`,
+  decrypt: (s) => s,
+  decryptDetailed: (blob) => ({ plaintext: blob, usedPreviousKey: true }),
+});
+
 // Build a job whose collectQrChannel outcome is driven per-channel-ref via `responses`
 // (ref -> Error to throw, or undefined -> succeed). Records every health call for assertions.
-function makeJob({ responses = {}, runJobOnce, health = {}, tgCrypto, tgQrChannelsPerPass } = {}) {
-  const calls = { post: [], postLanes: [], health: [], persisted: [], logs: [], sessions: [] };
+// `rotate` drives the fake db.rotateTgSessionCiphertext: false → no row matched (reconnect race),
+// a thrown value → DB error, otherwise → matched. Every call is recorded in calls.rotate.
+function makeJob({ responses = {}, runJobOnce, health = {}, tgCrypto, tgQrChannelsPerPass, rotate } = {}) {
+  const calls = { post: [], postLanes: [], health: [], persisted: [], logs: [], sessions: [], rotate: [] };
   const db = {
     enabled: true,
     graphsToDailyRows: () => [],
@@ -30,6 +50,13 @@ function makeJob({ responses = {}, runJobOnce, health = {}, tgCrypto, tgQrChanne
     recordTgSessionAttempt: async (uid, _version) => { calls.health.push(['attempt', uid]); return health.attempt !== false; },
     recordTgSessionSuccess: async (uid, _version) => { calls.health.push(['success', uid]); return health.success !== false; },
     recordTgSessionFailure: async (uid, _version, arg) => { calls.health.push(['failure', uid, arg]); return health.failure !== false; },
+    rotateTgSessionCiphertext: async (uid, version, enc) => {
+      calls.rotate.push({ uid, version, enc });
+      if (rotate === undefined) return true;
+      if (typeof rotate === 'function') return rotate(uid, version, enc);
+      if (rotate instanceof Error) throw rotate;
+      return rotate;
+    },
     listTgSessions: async () => [],
     listChannels: async () => [],
   };
@@ -44,7 +71,7 @@ function makeJob({ responses = {}, runJobOnce, health = {}, tgCrypto, tgQrChanne
   const job = createTgQrCollectionJob({
     db,
     log: (level, event, meta) => { calls.logs.push({ level, event, meta }); },
-    tgCrypto: tgCrypto || { configured: () => true, decrypt: (s) => s },
+    tgCrypto: tgCrypto || activeCrypto(),
     mtprotoPost,
     MTPROTO_TOKEN: 'tok',
     MTPROTO_TIMEOUT_HEAVY_MS: 1000,
@@ -297,7 +324,7 @@ test('collectManagedChannelNow: non-auth failure → degraded health then RETHRO
 });
 
 test('collectManagedChannelNow: decrypt failure rethrows a safe code and does NOT record an attempt', async () => {
-  const { job, calls } = makeJob({ tgCrypto: { configured: () => true, decrypt: () => { throw new Error('bad key'); } } });
+  const { job, calls } = makeJob({ tgCrypto: { configured: () => true, encrypt: (p) => `enc:${p}`, decryptDetailed: () => { throw new Error('bad key'); } } });
   await assert.rejects(
     job.collectManagedChannelNow({ uid: 2, session_enc: 's', session_version: '4' }, central()),
     (e) => e.code === 'session_decrypt_failed',
@@ -320,11 +347,91 @@ test('collectManagedChannelNow: plaintext session goes ONLY in the collect body,
   const { job, calls } = makeJob({
     responses: { central: timeoutErr() },
     // decrypt returns the plaintext secret from the encrypted blob
-    tgCrypto: { configured: () => true, decrypt: () => SECRET },
+    tgCrypto: { configured: () => true, encrypt: (p) => `enc:${p}`, decryptDetailed: () => ({ plaintext: SECRET, usedPreviousKey: false }) },
   });
   await assert.rejects(job.collectManagedChannelNow({ uid: 2, session_enc: 'enc', session_version: '4' }, central()));
 
   assert.deepEqual(calls.sessions, [SECRET]);   // the collect body carried the plaintext session
   const logBlob = JSON.stringify(calls.logs);
   assert.equal(logBlob.includes(SECRET), false, 'plaintext session must never appear in any log');
+});
+
+// ── Key rotation: previous-key sessions are lazily re-encrypted under the active key ────────────
+
+test('processTgQrCollection: previous-key session is collected AND rewritten once under the same version', async () => {
+  const { job, db, calls } = makeJob({ tgCrypto: previousKeyCrypto() });
+  db.listTgSessions = async () => [{ uid: 1, session_enc: 'old-blob', session_version: '2' }];
+  db.listChannels = async () => [ch(1, 'a1'), ch(2, 'a2')];
+
+  await job.processTgQrCollection();
+
+  // Collection still happens for every channel of the session.
+  assert.deepEqual(calls.post, ['a1', 'a2']);
+  // The row was rewritten exactly once (not per-channel), re-encrypted under the active key and
+  // generation-guarded on the SAME session_version. No version bump is possible via this path.
+  assert.deepEqual(calls.rotate, [{ uid: 1, version: '2', enc: 'enc:old-blob' }]);
+});
+
+test('processTgQrCollection: current-key session causes NO rewrite', async () => {
+  const { job, db, calls } = makeJob();   // default activeCrypto → usedPreviousKey:false
+  db.listTgSessions = async () => [{ uid: 1, session_enc: 'cur', session_version: '5' }];
+  db.listChannels = async () => [ch(1, 'a1')];
+
+  await job.processTgQrCollection();
+
+  assert.deepEqual(calls.post, ['a1']);
+  assert.deepEqual(calls.rotate, [], 'active-key session must never trigger a ciphertext rewrite');
+});
+
+test('processTgQrCollection: a rewrite DB throw does NOT block collection', async () => {
+  const SECRET_ERROR = 'db error carrying OLD-SESSION-CIPHERTEXT';
+  const { job, db, calls } = makeJob({
+    tgCrypto: previousKeyCrypto(),
+    rotate: new Error(SECRET_ERROR),
+  });
+  db.listTgSessions = async () => [{ uid: 1, session_enc: 'old', session_version: '2' }];
+  db.listChannels = async () => [ch(1, 'a1')];
+
+  await assert.doesNotReject(job.processTgQrCollection());
+  assert.deepEqual(calls.post, ['a1']);       // collection completed
+  assert.deepEqual(calls.persisted, [1]);     // bundle persisted despite the failed rewrite
+  assert.equal(calls.rotate.length, 1);       // rewrite was attempted once
+  assert.ok(calls.logs.some((l) => l.event === 'tg_session_key_reencrypt_failed' && l.level === 'warn'));
+  assert.equal(JSON.stringify(calls.logs).includes(SECRET_ERROR), false, 'arbitrary rewrite error text is never logged');
+});
+
+test('processTgQrCollection: a rewrite rowCount=0 (reconnect race) is normal, not an error, and does not block', async () => {
+  const { job, db, calls } = makeJob({
+    tgCrypto: previousKeyCrypto(),
+    rotate: false,   // no row matched the generation guard
+  });
+  db.listTgSessions = async () => [{ uid: 1, session_enc: 'old', session_version: '2' }];
+  db.listChannels = async () => [ch(1, 'a1')];
+
+  await job.processTgQrCollection();
+
+  assert.deepEqual(calls.post, ['a1']);
+  assert.equal(calls.rotate.length, 1);
+  // rowCount=0 is a benign reconnect race: no error/warn is logged for it.
+  assert.ok(!calls.logs.some((l) => l.event === 'tg_session_key_reencrypt_failed'));
+  assert.ok(!calls.logs.some((l) => l.level === 'warn' || l.level === 'error'));
+});
+
+test('collectManagedChannelNow: previous-key session is collected AND rewritten once under the same version', async () => {
+  const { job, calls } = makeJob({ tgCrypto: previousKeyCrypto() });
+  const out = await job.collectManagedChannelNow(
+    { uid: 2, session_enc: 'old-central', session_version: '4' }, central(), '2026-07-15');
+
+  assert.equal(out.channel_daily, 3);
+  assert.deepEqual(calls.rotate, [{ uid: 2, version: '4', enc: 'enc:old-central' }]);
+  assert.deepEqual(calls.health[1], ['success', 2]);   // health flow unchanged
+});
+
+test('collectQrChannelsNow: previous-key session is rewritten once, rewrite failure never throws', async () => {
+  const { job, calls } = makeJob({ tgCrypto: previousKeyCrypto(), rotate: new Error('db down') });
+  await assert.doesNotReject(
+    job.collectQrChannelsNow({ uid: 6, session_enc: 'old', session_version: '1' }, [ch(1, 'a1')]));
+
+  assert.deepEqual(calls.post, ['a1']);
+  assert.deepEqual(calls.rotate, [{ uid: 6, version: '1', enc: 'enc:old' }]);
 });
