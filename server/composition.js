@@ -172,7 +172,7 @@ function createComposition(config, overrides = {}) {
   // anti Host-poisoning c TRUSTED_HOSTS/CANONICAL_ORIGIN) — services/emailService.js.
   // APP_URL warning for production is emitted when the service is composed.
   const emailService = createEmailService({ config });
-  const { sendEmail, emailShell, emailBtn, appBase, escHtml } = emailService;
+  const { sendEmail, sendEmailDetailed, emailShell, emailBtn, appBase, escHtml } = emailService;
   const emailConfigured = emailService.configured;
 
   // Constant-time secret compare. Raw `!==` leaks length/prefix timing; timingSafeEqual
@@ -293,7 +293,7 @@ function createComposition(config, overrides = {}) {
   const { processReportSchedules } = createReportScheduleJob({
     db: backgroundDb,
     log,
-    sendEmail,
+    sendEmailDetailed,
     emailShell,
     emailBtn,
     escHtml,
