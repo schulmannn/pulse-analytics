@@ -80,7 +80,6 @@ function createAdmissionController(options = {}) {
         e.code = 'busy';
         reject(e);
       }, acquireTimeoutMs);
-      if (timer && typeof timer.unref === 'function') timer.unref();
       const waiter = {
         grant() {
           // pump() has already counted this slot in inFlight.
