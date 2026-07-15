@@ -9,8 +9,10 @@ interface WidgetPeriodPillsProps {
 }
 
 /**
- * Compact period control. Inside a feed it mirrors and updates the authoritative page period;
- * outside a feed (Home/standalone cards) it updates only the current widget.
+ * Compact per-card period control. Rendered ONLY outside a feed (Home / standalone cards), where it
+ * updates the current widget's saved period — a feed page hides it entirely because the top-bar page
+ * period is authoritative (ChartSection passes `hidden` when pageControlled). It still reads
+ * usePagePeriod defensively so a stray in-feed render mirrors the page period rather than diverging.
  */
 export function WidgetPeriodPills({ days, onChange, hidden }: WidgetPeriodPillsProps) {
   const pagePeriod = usePagePeriod();

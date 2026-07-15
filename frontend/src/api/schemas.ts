@@ -219,6 +219,8 @@ export const MentionsSchema = z
       .object({
         days: z.coerce.number().optional().nullable(),
         source: z.string().optional().nullable(),
+        from: z.string().optional().nullable(),
+        to: z.string().optional().nullable(),
         limit: z.coerce.number().optional().nullable(),
         current_from: z.string().optional().nullable(),
         current_to: z.string().optional().nullable(),

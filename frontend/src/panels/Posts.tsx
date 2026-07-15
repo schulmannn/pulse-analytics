@@ -1,6 +1,6 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useCampaignPosts, useRemoveCampaignPosts, useTgFull } from '@/api/queries';
+import { useCampaignPosts, useChannels, useRemoveCampaignPosts, useTgFull } from '@/api/queries';
 import type { CampaignPostInput } from '@/api/schemas';
 import { normalizeTgPosts, type NormalizedPost } from '@/lib/posts';
 import { fmt } from '@/lib/format';
@@ -92,13 +92,16 @@ function PostsContent() {
   // ONE wide fetch (limit 0 = server cap 100); the table below windows/filters it. The
   // fetch/skeleton/error stay here; the filtered view is the child.
   const { data, isPending, isError, error } = useTgFull(0);
+  const { channelId } = useSelectedChannel();
+  const { data: channelsData } = useChannels();
 
   if (isPending) return <PostsSkeletons />;
   if (isError) {
     return <ErrorState title="Не удалось загрузить публикации" reason={error instanceof Error ? error.message : 'ошибка сервера'} />;
   }
 
-  const allPosts = normalizeTgPosts(data?.posts ?? [], data?.channel ?? {});
+  const proxyThumbs = channelsData?.channels.find((channel) => channel.id === channelId)?.source === 'central';
+  const allPosts = normalizeTgPosts(data?.posts ?? [], data?.channel ?? {}, { proxyThumbs });
   if (allPosts.length === 0) {
     return (
       <Card>

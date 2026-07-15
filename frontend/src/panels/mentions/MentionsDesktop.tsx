@@ -90,8 +90,10 @@ export function MentionsDesktop() {
     if (canonical.toString() !== params.toString()) setParams(canonical, { replace: true });
   }, [filters, params, setParams]);
 
-  // Archive is the AUTHORITY — scoped to the page window + selected source, up to 100 rows.
-  const archive = useMentionsArchive(pageDays, filters.source, 100);
+  // Archive is the AUTHORITY — scoped to the page window (preset OR the top-bar custom range) +
+  // selected source, up to 100 rows. The custom range is server-filtered (never client-truncated).
+  const hasRange = !!pp?.range;
+  const archive = useMentionsArchive(pageDays, filters.source, 100, pp?.range ?? null);
   const live = useMentions();
   const mentionSettings = useMentionSettings();
   const settings = mentionSettings.data;
@@ -146,9 +148,20 @@ export function MentionsDesktop() {
   const prevAvg = previous && previous.total > 0 ? previous.total_views / previous.total : null;
   const daily: MentionDailyPoint[] = data?.daily ?? [];
   const previousDaily: MentionDailyPoint[] = data?.previous_daily ?? [];
+  // Server scope from/to (authoritative window that was actually queried) drives the range timeline —
+  // avoids any client/server timezone split between the epoch-ms range and the ISO days the DB filtered.
+  const scopeFrom = data?.scope?.from ?? null;
+  const scopeTo = data?.scope?.to ?? null;
   const timeline = useMemo(
-    () => buildMentionsTimeline(daily, previousDaily, pageDays, data?.scope?.current_to ?? Date.now()),
-    [daily, previousDaily, pageDays, data?.scope?.current_to],
+    () =>
+      buildMentionsTimeline(
+        daily,
+        previousDaily,
+        pageDays,
+        data?.scope?.current_to ?? Date.now(),
+        scopeFrom && scopeTo ? { from: scopeFrom, to: scopeTo } : null,
+      ),
+    [daily, previousDaily, pageDays, data?.scope?.current_to, scopeFrom, scopeTo],
   );
   const sourceSummary = data?.source_summary;
   const contextSources = selectedSource ? [selectedSource] : sourceOptions;
@@ -259,7 +272,9 @@ export function MentionsDesktop() {
   const visible = filterMentionRows(recent, filters.q);
   const rows = sortMentionRows(visible, filters.sort, filters.order);
 
-  const periodComparable = pageDays !== 0;
+  // A custom range is always comparable (server returns the previous equal-length window); only the
+  // preset «Всё время» (no range) has no comparison base.
+  const periodComparable = hasRange || pageDays !== 0;
   return (
     <div className="space-y-8">
       {/* 1. Operational row: archive freshness (left) + the quota-costing command (right). */}
@@ -356,7 +371,7 @@ export function MentionsDesktop() {
         <WidgetGroup id="mentions-timeline-desktop" className="grid grid-cols-1 gap-6">
           <ChartSection
             id="mentions-timeline"
-            title={pageDays === 0 ? 'Упоминания по дням · последние 365 дней' : 'Упоминания по дням'}
+            title={!hasRange && pageDays === 0 ? 'Упоминания по дням · последние 365 дней' : 'Упоминания по дням'}
             fixedSize="full"
             expand={{
               renderExpandedBar: () => (
@@ -372,7 +387,7 @@ export function MentionsDesktop() {
             )}
           </ChartSection>
         </WidgetGroup>
-        {pageDays === 0 && (
+        {!hasRange && pageDays === 0 && (
           <p className="text-2xs text-muted-foreground">
             KPI охватывают весь архив; дневной график ограничен последними {fmt.num(data?.scope?.daily_days ?? 365)} днями.
           </p>

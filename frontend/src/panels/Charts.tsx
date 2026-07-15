@@ -286,8 +286,8 @@ function buildHeatmap(
 export function HeatmapChartBlock({ id, homeKey }: HomeBlockProps = {}) {
   return (
     // The 7×24 grid is genuinely wide content → a full-row tile wherever the section lands in a
-    // widget grid. periodControl = its own 7д/30д/90д/Всё pills; the aggregation lives in
-    // HeatmapBody (a ChartSection child, inside the period provider) so the pills reach it.
+    // widget grid. periodControl opts into the resolved period: the feed top bar owns it on work
+    // pages, while a Home widget keeps an independent saved value.
     <ChartSection title="Тепловая карта активности" defaultSize="full" periodControl id={id} homeKey={homeKey}>
       <HeatmapWidgetBody />
     </ChartSection>

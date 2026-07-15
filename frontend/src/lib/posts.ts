@@ -52,12 +52,31 @@ export function stripTgMarkdown(text: string): string {
   );
 }
 
+/** Options for {@link normalizeTgPosts}. Backward-compatible — all fields optional. */
+export interface NormalizeTgOptions {
+  /**
+   * Whether to synthesize a `/api/tg/mtproto/thumb/:id` proxy cover for photo/video posts that
+   * carry no explicit `thumb`. That endpoint resolves a message id through the ONE configured
+   * central MTProto channel, so it is only trustworthy when the currently-viewed source IS that
+   * central channel — for any other source the same id points at a DIFFERENT post, i.e. wrong
+   * media. Callers that render the cover (top-post cards) must pass `false` unless the source is
+   * known-central. Defaults to `false`: showing no cover is safer than showing another channel's
+   * post. Cover-rendering callers explicitly opt in after checking the selected channel source.
+   */
+  proxyThumbs?: boolean;
+}
+
 /**
  * Normalize raw TG posts into the unified shape the panel renders. Ported verbatim from
  * legacy tgPostsNormalized — keeps the same field-fallback chains and metric formulas:
  *   ERV = engagement / views,  ER = engagement / followers,  virality = forwards / views.
  */
-export function normalizeTgPosts(rawPosts: TgPost[], channel: ChannelContext): NormalizedPost[] {
+export function normalizeTgPosts(
+  rawPosts: TgPost[],
+  channel: ChannelContext,
+  options: NormalizeTgOptions = {},
+): NormalizedPost[] {
+  const proxyThumbs = options.proxyThumbs === true;
   const followers = Number(
     channel.memberCount ?? channel.members ?? channel.member_count ?? channel.subscribers ?? 0,
   );
@@ -77,11 +96,16 @@ export function normalizeTgPosts(rawPosts: TgPost[], channel: ChannelContext): N
     const caption = stripTgMarkdown(raw.text ?? raw.caption ?? '');
     const mediaType = raw.media_type ?? null;
 
+    // Prefer an explicit thumb always. Only fall back to the central-only proxy when the caller
+    // has vouched the source is safe — otherwise a non-central source would show another channel's
+    // media for the same message id (see NormalizeTgOptions.proxyThumbs).
     let thumb: string | null;
-    if ((mediaType === 'photo' || mediaType === 'video') && id != null) {
+    if (raw.thumb) {
+      thumb = raw.thumb;
+    } else if (proxyThumbs && (mediaType === 'photo' || mediaType === 'video') && id != null) {
       thumb = `/api/tg/mtproto/thumb/${id}`;
     } else {
-      thumb = raw.thumb ?? null;
+      thumb = null;
     }
 
     const permalink = username && id ? `https://t.me/${username}/${id}` : null;

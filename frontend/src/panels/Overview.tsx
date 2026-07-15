@@ -109,7 +109,7 @@ export function Overview() {
             </Link>
           }
         >
-          <TopPosts />
+          <TopPosts variant="cards" />
         </ChartSection>
       </WidgetGroup>
     </div>

@@ -121,15 +121,18 @@ export function useChartSectionModel(props: ChartSectionProps) {
   }, [configEditor]);
 
   const pagePeriod = usePagePeriod();
+  const pageControlled = pagePeriod != null;
   const pageRange = pagePeriod?.range ?? null;
   const requestedDays: PeriodDays = resolveRequestedWidgetDays(pagePeriod?.days, prefs.period);
   const channelRecency = useChannelRecency();
   const widgetDays = useMemo(
-    () => (pageRange ? requestedDays : resolveEffectivePeriod(requestedDays, channelRecency)),
-    [requestedDays, channelRecency, pageRange],
+    // A feed top bar is authoritative: never silently widen its 7/30/90-day selection per card.
+    // Auto-widen remains useful on Home, where every widget owns its period and can explain it.
+    () => (pageControlled ? requestedDays : resolveEffectivePeriod(requestedDays, channelRecency)),
+    [requestedDays, channelRecency, pageControlled],
   );
   const widgetPeriod = useMemo(() => widgetPeriodValue(widgetDays, pageRange), [widgetDays, pageRange]);
-  const periodWidened = periodControl === true && !pageRange && widgetDays !== requestedDays;
+  const periodWidened = periodControl === true && !pageControlled && widgetDays !== requestedDays;
 
   const seriesGrain: SeriesGrain = prefs.grain ?? 'day';
   const seriesIncludeToday = prefs.includeToday !== false;
@@ -222,7 +225,7 @@ export function useChartSectionModel(props: ChartSectionProps) {
       widgetDays,
       widgetPeriod,
       periodWidened,
-      pageControlled: pagePeriod != null,
+      pageControlled,
     },
     variants: { resolvedVariants, activeVariant, primaryBody },
     layout: {

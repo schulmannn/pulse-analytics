@@ -512,14 +512,15 @@ export function TgAnalytics({
   campaign,
 }: { group?: TgAnalyticsGroup; campaign?: TgAnalyticsCampaign } = {}) {
   const inGroup = (g: TgAnalyticsGroup) => !group || group === g;
-  // ONE wide fetch (limit 100 = server cap): every widget below filters this shared payload to its
-  // own window. No global period any more — each ChartSection carries its own 7д/30д/90д/Всё pill.
+  // ONE wide fetch (limit 100 = server cap): every widget below filters this shared payload to the
+  // resolved window. Source feeds take it from the shared top bar; Home widgets keep their own
+  // saved period. ChartSection owns this distinction through PagePeriodProvider.
   const { data: full, isPending: isFullPending } = useTgFull(0);
   const { data: graphs, isPending: isGraphsPending } = useTgGraphs();
 
   // Panel-level derive over the WHOLE fetched payload (alwaysInRange): section-existence gates +
   // the KPI ledger snapshot + graphs-driven series. Post-derived CHART VALUES are re-derived
-  // per-card inside TgWidgetBody from each card's own window.
+  // inside TgWidgetBody from the resolved page/Home-widget window.
   const derived = useMemo(() => deriveTgAnalytics(full, graphs, alwaysInRange), [full, graphs]);
 
   if (isFullPending || (group !== 'content' && isGraphsPending)) {
