@@ -19,11 +19,11 @@ from fastapi import Body, Depends, FastAPI, HTTPException, Header, Query, Respon
 from fastapi.responses import JSONResponse
 import uvicorn
 from telethon import TelegramClient
-from telethon.errors import FloodWaitError, PasswordHashInvalidError, SessionPasswordNeededError, UnauthorizedError
+from telethon.errors import ChannelInvalidError, FloodWaitError, PasswordHashInvalidError, SessionPasswordNeededError, UnauthorizedError
 from telethon.sessions import StringSession
 from telethon.tl.functions.stats import GetBroadcastStatsRequest, LoadAsyncGraphRequest, GetMessageStatsRequest
 from telethon.tl.functions.channels import GetFullChannelRequest, SearchPostsRequest, CheckSearchPostsFloodRequest, GetAdminedPublicChannelsRequest
-from telethon.tl.types import StatsGraph, StatsGraphAsync, InputPeerEmpty, PeerChannel
+from telethon.tl.types import StatsGraph, StatsGraphAsync, InputPeerEmpty, InputPeerChannel, PeerChannel
 from dotenv import load_dotenv
 
 try:
@@ -1418,19 +1418,60 @@ def _channel_ref(channel):
     return s.lstrip('@')
 
 
-async def _resolve_channel_entity(tg, ref):
-    """Resolve a channel on a freshly-connected StringSession client. A username resolves directly
-    (API lookup). A bare-id PeerChannel has NO cached access_hash on a fresh StringSession, so if the
-    direct lookup fails we sync dialogs once (that carries the channel's access_hash into the session
-    cache) and retry — the only way to reach a PRIVATE channel by id."""
+def _parse_access_hash(access_hash):
+    """A persisted access_hash arrives as a decimal STRING (int64, may exceed 2**53) — parse it with
+    Python's arbitrary-precision int, never a float. Returns None for absent/blank/garbage so the
+    caller falls back to the cold dialog resync instead of raising."""
+    if access_hash is None:
+        return None
+    try:
+        parsed = int(str(access_hash).strip())
+        return parsed if -(2 ** 63) <= parsed <= (2 ** 63 - 1) else None
+    except (ValueError, TypeError):
+        return None
+
+
+async def _resolve_channel_entity(tg, ref, access_hash=None):
+    """Resolve a channel on a freshly-connected StringSession client, cheaply when possible.
+
+    - A username resolves directly (recency-independent API lookup).
+    - A bare-id PeerChannel has NO cached access_hash on a fresh StringSession. WARM PATH: when a
+      previously-persisted access_hash is supplied we address the channel directly via
+      InputPeerChannel(id, hash) — no dialog scan at all. COLD/self-heal PATH: with no hash (legacy
+      row) or a stale/invalid one, we sync dialogs ONCE (that carries the real access_hash into the
+      session cache) and retry by id — the only way to reach a PRIVATE channel otherwise.
+
+    A genuine auth failure (UnauthorizedError) and FloodWait are never swallowed by the warm attempt:
+    they propagate so the caller maps them to the honest 401/429, not a silent fallback."""
+    if not isinstance(ref, PeerChannel):
+        return await tg.get_entity(ref)
+
+    parsed_hash = _parse_access_hash(access_hash)
+    if parsed_hash is not None:
+        try:
+            return await tg.get_entity(InputPeerChannel(ref.channel_id, parsed_hash))
+        except (FloodWaitError, UnauthorizedError):
+            raise
+        except (ChannelInvalidError, ValueError, TypeError):
+            pass   # stale/invalid hash → fall through to a one-time dialog resync (self-heal)
+
     try:
         return await tg.get_entity(ref)
     except (ValueError, TypeError):
-        if isinstance(ref, PeerChannel):
-            async for _ in tg.iter_dialogs(limit=1000, archived=None):
-                pass
-            return await tg.get_entity(ref)
-        raise
+        async for _ in tg.iter_dialogs(limit=1000, archived=None):
+            pass
+        return await tg.get_entity(ref)
+
+
+def _entity_identity(entity):
+    """The resolved channel's identity for the web side to persist. id and access_hash are int64 →
+    emitted as decimal STRINGS so JSON/JS never rounds them through a float. access_hash is None for
+    entities that expose none (it is only meaningful for channels reached by id)."""
+    ah = getattr(entity, 'access_hash', None)
+    return {
+        'id':          str(entity.id),
+        'access_hash': str(ah) if ah is not None else None,
+    }
 
 
 def _stats_payload(stats):
@@ -1516,6 +1557,7 @@ def _views_summary_of(posts):
 @app.post('/qr/collect')
 async def qr_collect(session: str = Body(...), channel: str = Body(...),
                      posts_limit: int = Body(default=100), graph_points: int = Body(default=400),
+                     access_hash: Optional[str] = Body(default=None),
                      x_internal_token: str = Header(default='')):
     check_auth(x_internal_token)
     if not API_ID or not API_HASH:
@@ -1529,7 +1571,10 @@ async def qr_collect(session: str = Body(...), channel: str = Body(...),
         await asyncio.wait_for(tg.connect(), timeout=TELETHON_CALL_TIMEOUT_S)
         if not await asyncio.wait_for(tg.is_user_authorized(), timeout=TELETHON_CALL_TIMEOUT_S):
             raise HTTPException(status_code=401, detail='session_unauthorized')
-        entity = await asyncio.wait_for(_resolve_channel_entity(tg, _channel_ref(channel)), timeout=TELETHON_CALL_TIMEOUT_S)
+        # access_hash (when the web side has one stored) lets a PRIVATE channel resolve without the
+        # iter_dialogs scan; a stale one self-heals once via the cold path inside _resolve_channel_entity.
+        entity = await asyncio.wait_for(
+            _resolve_channel_entity(tg, _channel_ref(channel), access_hash), timeout=TELETHON_CALL_TIMEOUT_S)
         messages = await asyncio.wait_for(tg.get_messages(entity, limit=posts_limit), timeout=TELETHON_CALL_TIMEOUT_S)
         posts = [_build_post(g) for g in _logical_posts(messages)]
         # One GetBroadcastStats feeds both the KPI stats and the graphs (small channels 403 here —
@@ -1554,6 +1599,11 @@ async def qr_collect(session: str = Body(...), channel: str = Body(...),
             'views_summary': _views_summary_of(posts),
             'stats':         _stats_payload(stats_obj) if stats_obj is not None else {'available': False, 'error': stats_err},
             'graphs':        graphs_payload,
+            # Resolved entity identity for the web side to persist and reuse on the next collect (warm
+            # path). access_hash is an int64 → serialized as a STRING (no JS Number precision loss).
+            # This is a private web↔mtproto field: it is NOT part of `channel`, so it never lands in a
+            # channel_snapshot or any browser response, and the web side never logs it.
+            'entity':        _entity_identity(entity),
         }
     except FloodWaitError as e:
         return JSONResponse(status_code=429, content=_flood_wait_payload(e))

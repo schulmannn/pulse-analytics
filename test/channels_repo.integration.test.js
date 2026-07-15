@@ -125,6 +125,34 @@ test('getDefaultChannelId: created_at ASC и паритет с listChannels()[0]
   assert.strictEqual(def, list[0].id, 'паритет: тот же канал, что listChannels()[0] (та же видимость/порядок)');
 });
 
+test('TG access_hash: owner + current session generation gate rejects foreign and reconnect races', { skip }, async () => {
+  const A = await mkUser('tgha');
+  const B = await mkUser('tghb');
+  const tg = tgId();
+  const ch = await db.createTgChannel({ owner_uid: A.id, tg_channel_id: tg, username: null, title: 'Private' });
+  await db.saveTgSession(A.id, { tg_user_id: tgId(), username: 'owner', session_enc: 'enc-v1' });
+
+  assert.strictEqual(await db.getTgChannelIdentity(ch.id, B.id), null, 'foreign owner cannot read identity');
+  assert.strictEqual(
+    await db.saveTgChannelAccessHash(ch.id, B.id, '1111111111111111111', '1'), false,
+    'foreign session cannot stamp the channel');
+  assert.strictEqual(
+    await db.saveTgChannelAccessHash(ch.id, A.id, '2222222222222222222', '1'), true,
+    'current owner generation writes');
+
+  await db.saveTgSession(A.id, { tg_user_id: tgId(), username: 'owner2', session_enc: 'enc-v2' });
+  assert.strictEqual(
+    await db.saveTgChannelAccessHash(ch.id, A.id, '3333333333333333333', '1'), false,
+    'late pre-reconnect generation is rejected even before v2 has written a hash');
+  assert.strictEqual(
+    await db.saveTgChannelAccessHash(ch.id, A.id, '4444444444444444444', '2'), true,
+    'current reconnect generation replaces the identity');
+
+  const ident = await db.getTgChannelIdentity(ch.id, A.id);
+  assert.strictEqual(ident.tg_access_hash, '4444444444444444444');
+  assert.strictEqual(ident.tg_access_hash_version, '2');
+});
+
 test('api-keys под admin-гейтом; getChannelByApiKey active→канал, revoked→null', { skip }, async () => {
   const O = await mkUser('ko');
   const ch = await db.createChannel({ owner_uid: O.id, username: `chk_${nonce}`, title: 'K' });

@@ -30,6 +30,23 @@ function safeTgErrorCode(e) {
   return 'collect_failed';
 }
 
+function sameUid(left, right) {
+  return left != null && right != null && String(left) === String(right);
+}
+
+// Telegram/Telethon can represent a channel either as its raw positive id or as the marked
+// -100… peer id. Normalize with BigInt so the private entity response can be bound to the exact DB
+// channel without losing precision. Returns null for malformed input.
+function rawTgChannelId(value) {
+  try {
+    const id = BigInt(String(value));
+    if (id <= -1000000000000n) return String(-id - 1000000000000n);
+    return String(id < 0n ? -id : id);
+  } catch {
+    return null;
+  }
+}
+
 function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN, MTPROTO_TIMEOUT_HEAVY_MS, tgPostToRow, tgQrChannelsPerPass = 200 }) {
   // Shared decrypt: transparently falls back to a rotated-out key and lazily re-encrypts the row under
   // the active key (generation-guarded, best-effort — a rewrite failure never blocks the collect).
@@ -91,18 +108,65 @@ function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN
     return counts || { channel_daily: 0, posts: 0 };
   }
 
+  // Read the persisted Telegram entity identity for the warm collection path. Feature-detected so a
+  // db without the method (or a channel with no stored hash yet) simply falls back to the cold path —
+  // the access_hash is a decimal STRING (pg BIGINT), passed to mtproto untouched (never via Number).
+  async function loadStoredAccessHash(ch, uid, gen) {
+    if (typeof db.getTgChannelIdentity !== 'function') return null;
+    const ident = await db.getTgChannelIdentity(ch.id, uid).catch(() => null);
+    if (!ident || ident.tg_access_hash == null || ident.tg_access_hash_version == null) return null;
+    if (rawTgChannelId(ident.tg_channel_id) !== rawTgChannelId(ch.tg_channel_id)) return null;
+    // access_hash is account/session-scoped. A reconnect increments session_version, so the first
+    // collection with the new credential deliberately takes the cold path and replaces the hash.
+    return String(ident.tg_access_hash_version) === String(gen)
+      ? String(ident.tg_access_hash)
+      : null;
+  }
+
+  // Persist the access_hash mtproto resolved for THIS channel, generation-guarded by the collecting
+  // session generation so a late older-generation write can't clobber a newer one. Best-effort: a
+  // failure only costs the next collect a one-time dialog resync, so it never blocks the collect. The
+  // hash itself is NEVER logged (only a fixed safe code + channel id).
+  async function persistResolvedIdentity(ch, bundle, uid, gen, storedAccessHash) {
+    if (typeof db.saveTgChannelAccessHash !== 'function') return;
+    const entity = bundle && bundle.entity;
+    const hash = entity && entity.access_hash != null ? String(entity.access_hash) : null;
+    if (!hash || entity.id == null || ch.tg_channel_id == null || gen == null || !sameUid(ch.owner_uid, uid)) return;
+    if (rawTgChannelId(entity.id) !== rawTgChannelId(ch.tg_channel_id)) {
+      log('warn', 'tg_access_hash_identity_mismatch', { channelId: ch.id, error: 'identity_mismatch' });
+      const error = new Error('tg_entity_identity_mismatch');
+      error.code = 'collect_failed';
+      throw error;
+    }
+    if (hash === storedAccessHash) return; // warm hit: do not pay for a no-op UPDATE every day
+    try {
+      await db.saveTgChannelAccessHash(ch.id, uid, hash, gen);
+    } catch {
+      log('warn', 'tg_access_hash_persist_failed', { channelId: ch.id, error: 'write_failed' });
+    }
+  }
+
   // Fetch one QR channel's bundle via the (already-decrypted) session and persist it. Throws on
-  // mtproto/collect failure — callers decide how to handle (log + continue).
-  async function collectQrChannel(sessionStr, ch, day) {
+  // mtproto/collect failure — callers decide how to handle (log + continue). `gen` is the collecting
+  // session generation (session_version); it guards the resolved-identity write.
+  async function collectQrChannel(sessionStr, ch, day, uid, gen) {
     const ref = ch.username || String(ch.tg_channel_id);
+    // Warm path: a persisted access_hash lets mtproto address a PRIVATE channel directly instead of
+    // scanning up to 1000 dialogs on the fresh StringSession just to recover it. Sent in the POST body
+    // (never a URL/query) as a decimal string; absent for cold legacy rows → the cold resync still runs.
+    const accessHash = ch.username ? null : await loadStoredAccessHash(ch, uid, gen);
+    const body = { session: sessionStr, channel: ref, posts_limit: 100, graph_points: 400 };
+    if (accessHash != null) body.access_hash = accessHash;
     // Background lane on the breaker: every /qr/collect (managed central, recovery sweep, and the
     // fire-and-forget immediate post-add) is collection work, isolated from live dashboard reads and
     // sharing only the global in-flight bulkhead.
     const bundle = await mtprotoPost('/qr/collect', {
-      body: { session: sessionStr, channel: ref, posts_limit: 100, graph_points: 400 },
+      body,
       timeoutMs: MTPROTO_TIMEOUT_HEAVY_MS,
       lane: 'background',
     });
+    // Cache the (possibly refreshed) identity for the next collect before persisting the bundle.
+    if (!ch.username) await persistResolvedIdentity(ch, bundle, uid, gen, accessHash);
     const counts = await persistTgBundle(ch.id, bundle, day);
     return { bundle, channel_daily: counts.channel_daily || 0, posts: counts.posts || 0 };
   }
@@ -114,7 +178,7 @@ function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN
   // fails here as a throw. The plaintext session is decrypted only server-side and is sent solely
   // inside the mtprotoPost('/qr/collect') JSON body — never returned, logged, or put on a URL.
   async function collectManagedChannelNow(sess, channel, day) {
-    if (!sess || !channel || channel.tg_channel_id == null) {
+    if (!sess || !channel || channel.tg_channel_id == null || !sameUid(channel.owner_uid, sess.uid)) {
       const e = new Error('managed_channel_missing_prereq'); e.code = 'managed_prereq'; throw e;
     }
     if (!tgCrypto.configured() || !MTPROTO_TOKEN) {
@@ -125,7 +189,7 @@ function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN
     catch { const e = new Error('managed_channel_decrypt_failed'); e.code = 'session_decrypt_failed'; throw e; }
     const theDay = day || new Date().toISOString().slice(0, 10);
     try {
-      const out = await collectQrChannel(sessionStr, channel, theDay);
+      const out = await collectQrChannel(sessionStr, channel, theDay, sess.uid, sess.session_version);
       // A real, completed attempt for THIS session generation → healthy (generation-guarded).
       await finalizeSessionHealth(sess.uid, sess.session_version, { attempted: true, succeeded: true, authFailed: false, errorCode: null });
       return { bundle: out.bundle, channel_daily: out.channel_daily, posts: out.posts };
@@ -151,9 +215,9 @@ function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN
     // collectQrChannel — реальная (стартовавшая) попытка, поэтому здесь нет runJobOnce-skip-ветки.
     let attempted = false, succeeded = false, authFailed = false, lastErrCode = null;
     for (const ch of channels) {
-      if (!ch || ch.tg_channel_id == null) continue;
+      if (!ch || ch.tg_channel_id == null || !sameUid(ch.owner_uid, sess.uid)) continue;
       attempted = true;
-      try { await collectQrChannel(sessionStr, ch, day); succeeded = true; }
+      try { await collectQrChannel(sessionStr, ch, day, sess.uid, sess.session_version); succeeded = true; }
       catch (e) {
         log('error', 'tg_qr_collect_now_failed', { channelId: ch.id, error: e.message });
         if (isTgAuthError(e)) { authFailed = true; lastErrCode = e.code; break; }
@@ -185,7 +249,10 @@ function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN
       catch { log('error', 'tg_qr_decrypt_failed', { uid: s.uid }); continue; }
 
       let chans = [];
-      try { chans = (await db.listChannels({ uid: s.uid })).filter((c) => c.source === 'qr' && c.tg_channel_id != null); }
+      try {
+        chans = (await db.listChannels({ uid: s.uid })).filter(
+          (c) => c.source === 'qr' && c.tg_channel_id != null && sameUid(c.owner_uid, s.uid));
+      }
       catch (e) { log('error', 'tg_qr_list_channels_failed', { uid: s.uid, error: e.message }); continue; }
 
       // Per-session health accounting. A `skipped` idempotent result is NOT an attempt (nothing
@@ -198,7 +265,7 @@ function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN
         try {
           const out = await db.runJobOnce('qr_collect', `${ch.id}:${day}`, () => {
             started = true;
-            return collectQrChannel(sessionStr, ch, day);
+            return collectQrChannel(sessionStr, ch, day, s.uid, s.session_version);
           });
           if (out.skipped) { stats.skipped++; continue; }
           done++;
