@@ -7,10 +7,10 @@ import { periodMedian } from '@/lib/postMedian';
 
 export function ChangeSummary({ compact = false }: { compact?: boolean } = {}) {
   const { data } = useTgFull(0);
-  const { days, inRange } = useWidgetPeriod();
+  const { days, inRange, range } = useWidgetPeriod();
   const posts = normalizeTgPosts(data?.posts ?? [], data?.channel ?? {});
 
-  if (days === 0 || posts.length === 0) {
+  if ((!range && days === 0) || posts.length === 0) {
     return <p className={compact ? 'text-sm text-muted-foreground' : 'py-5 text-sm text-muted-foreground'}>Выберите конечный период, чтобы сравнить его с предыдущим окном.</p>;
   }
 
@@ -18,7 +18,16 @@ export function ChangeSummary({ compact = false }: { compact?: boolean } = {}) {
     .filter((post) => post.date && Number.isFinite(Date.parse(post.date)))
     .sort((a, b) => Date.parse(a.date!) - Date.parse(b.date!));
   const now = Date.now();
-  const change = explainChange(dated.map((post) => ({ day: post.date!, v: post.reach })), days, now);
+  const change = range
+    ? {
+        direction: 'flat' as const,
+        pct: null,
+        current: 0,
+        previous: 0,
+        drivers: [],
+        insufficient: true,
+      }
+    : explainChange(dated.map((post) => ({ day: post.date!, v: post.reach })), days, now);
   const story = describeChange(change, 'Просмотры публикаций');
   const directionClass = change.direction === 'up' ? 'text-verdant' : change.direction === 'down' ? 'text-ember' : 'text-foreground';
 
@@ -66,7 +75,11 @@ export function ChangeSummary({ compact = false }: { compact?: boolean } = {}) {
           ) : (
             <p className="text-sm text-muted-foreground">В выбранном окне нет публикаций.</p>
           )}
-          <p className="mt-2 text-2xs text-ink3">Сравнение появится, когда будет полное предыдущее окно.</p>
+          <p className="mt-2 text-2xs text-ink3">
+            {range
+              ? 'Для произвольного диапазона здесь показана сводка без причинного сравнения.'
+              : 'Сравнение появится, когда будет полное предыдущее окно.'}
+          </p>
         </div>
       </div>
     );

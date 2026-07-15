@@ -32,7 +32,7 @@ export interface ChartSectionProps {
   drillTo?: string;
   /** Removes every expand affordance for views that are already expanded. */
   noExpand?: boolean;
-  /** Enables the per-widget period control for bodies that consume useWidgetPeriod(). */
+  /** Marks a period-aware body. Feed pages use their top bar; Home exposes the widget's own value. */
   periodControl?: boolean;
   /** Thin full-width summary row without card chrome. */
   strip?: boolean;

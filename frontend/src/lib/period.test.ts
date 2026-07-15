@@ -2,9 +2,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   hasDataWithin,
   inRangeByDays,
+  calendarWindowForDays,
+  calendarWindowForPeriod,
+  endOfLocalDay,
+  periodDateTimestamp,
   recommendPeriod,
   resolveEffectivePeriod,
   resolveRequestedWidgetDays,
+  splitCalendarRows,
   tgLimit,
   widgetPeriodValue,
 } from '@/lib/period';
@@ -66,10 +71,81 @@ describe('feed widget period precedence', () => {
     };
     const period = widgetPeriodValue(30, range);
 
+    expect(period.range).toEqual(range);
     expect(period.inRange('2026-06-10T00:00:00.000Z')).toBe(true);
     expect(period.inRange('2026-06-20T23:59:59.999Z')).toBe(true);
     expect(period.inRange('2026-06-09T23:59:59.999Z')).toBe(false);
     expect(period.inRange(null)).toBe(false);
+  });
+
+  it('treats archive day keys as local calendar days instead of UTC instants', () => {
+    const from = new Date(2026, 4, 5).getTime();
+    const range = { from, to: endOfLocalDay(new Date(2026, 4, 15).getTime()) };
+    const period = widgetPeriodValue(30, range);
+
+    expect(periodDateTimestamp('2026-05-05')).toBe(from);
+    expect(period.inRange('2026-05-05')).toBe(true);
+    expect(period.inRange('2026-05-15')).toBe(true);
+    expect(period.inRange('2026-05-04')).toBe(false);
+    expect(period.inRange('2026-05-16')).toBe(false);
+  });
+});
+
+describe('calendar windows', () => {
+  const custom = {
+    from: Date.parse('2026-06-10T00:00:00.000Z'),
+    to: Date.parse('2026-06-12T23:59:59.999Z'),
+  };
+  const rows = [
+    '2026-06-07T00:00:00.000Z',
+    '2026-06-08T00:00:00.000Z',
+    '2026-06-09T00:00:00.000Z',
+    '2026-06-10T00:00:00.000Z',
+    '2026-06-11T00:00:00.000Z',
+    '2026-06-12T00:00:00.000Z',
+  ];
+
+  it('prefers the exact custom range over the days fallback', () => {
+    expect(calendarWindowForPeriod(widgetPeriodValue(30, custom), NOW)).toEqual(custom);
+    expect(calendarWindowForDays(7, NOW)).toEqual({ from: NOW - 7 * DAY, to: NOW });
+    expect(calendarWindowForDays(0, NOW)).toBeNull();
+  });
+
+  it('selects an inclusive range and the immediately preceding equal calendar window', () => {
+    const selected = splitCalendarRows(rows, custom, (row) => Date.parse(row));
+    expect(selected.current).toEqual(rows.slice(3));
+    expect(selected.previous).toEqual(rows.slice(0, 3));
+  });
+
+  it('keeps equal local calendar-day windows for bare archive keys', () => {
+    const range = {
+      from: new Date(2026, 4, 5).getTime(),
+      to: endOfLocalDay(new Date(2026, 4, 15).getTime()),
+    };
+    const archiveDays = Array.from({ length: 22 }, (_, index) => {
+      const date = new Date(2026, 3, 24 + index);
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${date.getFullYear()}-${month}-${day}`;
+    });
+    const selected = splitCalendarRows(archiveDays, range, periodDateTimestamp);
+
+    expect(selected.previous).toEqual(archiveDays.slice(0, 11));
+    expect(selected.current).toEqual(archiveDays.slice(11));
+  });
+
+  it('withholds the comparison when history does not cover the full previous window', () => {
+    const selected = splitCalendarRows(rows.slice(1), custom, (row) => Date.parse(row));
+    expect(selected.current).toEqual(rows.slice(3));
+    expect(selected.previous).toBeNull();
+  });
+
+  it('keeps undated rows but marks a bounded series as not windowable', () => {
+    expect(splitCalendarRows([1, 2, 3], custom, () => Number.NaN)).toEqual({
+      current: [1, 2, 3],
+      previous: null,
+      windowable: false,
+    });
   });
 });
 

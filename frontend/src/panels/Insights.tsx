@@ -42,7 +42,7 @@ function topHashtagLift(posts: NormalizedPost[]): { tag: string; lift: number } 
  * all-time they're skipped (no defined previous window), mirroring the KPI range-guards.
  */
 export function Insights() {
-  const { days, inRange } = useWidgetPeriod();
+  const { days, inRange, range } = useWidgetPeriod();
   const { data, isPending } = useTgFull(days);
   const { data: graphs } = useTgGraphs();
   const { data: history } = useHistory(730);
@@ -53,7 +53,9 @@ export function Insights() {
   const members = data?.channel?.memberCount ?? data?.channel?.members ?? 0;
   const posts = normalizeTgPosts(data?.posts ?? [], data?.channel ?? {}).filter((p) => inRange(p.date));
   const historyRows = history?.rows ?? [];
-  const comparable = days > 0;
+  // The insight engine accepts rolling presets only. Custom-range post insights still use the
+  // selected rows, but comparative claims are withheld rather than calculated for fallback 30д.
+  const comparable = !range && days > 0;
 
   const viewsDelta = comparable ? dailyWindowDelta(historyRows, (r) => Number(r.views ?? 0), days) : null;
   const erDelta = comparable

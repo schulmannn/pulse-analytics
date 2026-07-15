@@ -52,7 +52,7 @@ const COLUMN_TONE: Record<SortKey, string> = {
 import { ErrorState } from '@/components/ErrorState';
 
 export function TopPosts({ variant = 'table' }: { variant?: 'table' | 'cards' } = {}) {
-  // Per-widget window (useWidgetPeriod). Wide fetch (limit 100), filtered client-side by inRange.
+  // Resolved feed/Home window. Wide fetch (limit 100), filtered client-side by inRange.
   const { inRange } = useWidgetPeriod();
   const { data, isPending, isError, refetch } = useTgFull(0);
   // Thumbnail safety: the /api/tg/mtproto/thumb proxy is only trustworthy for the ONE central

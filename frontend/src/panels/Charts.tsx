@@ -122,25 +122,16 @@ export function HistoryChartBlock({ id, homeKey }: HomeBlockProps = {}) {
   }
 
   const rawRows = data.rows ?? [];
-  const rows = rawRows.filter((r) => r.subscribers != null);
-  if (rows.length < 2) {
+  const archiveRows = rawRows
+    .filter((row) => row.subscribers != null)
+    .sort((a, b) => a.day.localeCompare(b.day));
+  if (archiveRows.length < 2) {
     return (
       <ChartSection title="История подписчиков" defaultSize="half" id={id} homeKey={homeKey}>
         <EmptyState compact title="История подписчиков пока пуста" />
       </ChartSection>
     );
   }
-
-  const isDownsampled = rawRows.length > 140;
-  const archCaption = `${rawRows.length} дн. в архиве${isDownsampled ? ' · сглажено' : ''}`;
-  const deltas = subscriberDeltas(rows);
-  // LEVEL series (steep rule): the headline is the CURRENT level, and the honest comparison is
-  // vs the start of the plotted range (net change over what the chart shows) — a window-sum
-  // would be meaningless for levels.
-  const last = Number(rows[rows.length - 1]?.subscribers ?? 0);
-  const first = Number(rows[0]?.subscribers ?? 0);
-  const levelDelta = first > 0 ? pctDelta(last, first) : null;
-  const caption = levelDelta ? `к началу архива · ${archCaption}` : archCaption;
 
   return (
     <ChartSection
@@ -149,46 +140,65 @@ export function HistoryChartBlock({ id, homeKey }: HomeBlockProps = {}) {
       id={id}
       homeKey={homeKey}
       drillTo="/metrics/subscribers"
+      periodControl
       expand={{
         renderExpanded: (days) => {
-          const windowRows = days === 0 ? rows : rows.slice(-days);
+          const windowRows = days === 0 ? archiveRows : archiveRows.slice(-days);
           return <SubscriberHistoryChart rows={windowRows} />;
         },
         renderExpandedBar: (days) => {
-          const windowRows = days === 0 ? rows : rows.slice(-days);
+          const windowRows = days === 0 ? archiveRows : archiveRows.slice(-days);
           return <SubscriberHistoryBars rows={windowRows} />;
         },
         statsFor: (days) =>
-          (days === 0 ? rows : rows.slice(-days)).map((row) => Number(row.subscribers)),
+          (days === 0 ? archiveRows : archiveRows.slice(-days)).map((row) => Number(row.subscribers)),
         statsSum: false, // сумма УРОВНЕЙ подписчиков по дням не имеет смысла
       }}
-      variants={[
-        {
-          key: 'line',
-          label: 'Линия',
-          render: (
-            <ChartCardBody value={fmt.kpi(last)} delta={levelDelta} caption={caption}>
-              <SubscriberHistoryChart rows={rows} />
-            </ChartCardBody>
-          ),
-        },
-        {
-          key: 'bar',
-          label: 'Столбцы',
-          render: (
-            <ChartCardBody value={fmt.kpi(last)} delta={levelDelta} caption={caption}>
-              <SubscriberHistoryBars rows={rows} />
-            </ChartCardBody>
-          ),
-        },
-        seriesBarValuesVariant(deltas.values, deltas.labels, deltas.titles, {
-          diverging: true,
-          // Леджер = то, чего на дельта-графике не видно: текущий уровень + сводка движения.
-          extraRows: [{ label: 'Сейчас', value: fmt.num(rows[rows.length - 1]?.subscribers ?? 0) }],
-          sum: true,
-          sumLabel: 'Δ за период',
-        }),
-      ]}
+      variants={(period) => {
+        const rows = archiveRows.filter((row) => period.inRange(row.day));
+        if (rows.length < 2) {
+          return [
+            {
+              key: 'line',
+              label: 'Линия',
+              render: <EmptyState compact title="Нет истории за выбранный период" />,
+            },
+          ];
+        }
+        const isDownsampled = rows.length > 140;
+        const periodCaption = `${rows.length} дн. в периоде${isDownsampled ? ' · сглажено' : ''}`;
+        const deltas = subscriberDeltas(rows);
+        const last = Number(rows[rows.length - 1]?.subscribers ?? 0);
+        const first = Number(rows[0]?.subscribers ?? 0);
+        const levelDelta = first > 0 ? pctDelta(last, first) : null;
+        const caption = levelDelta ? `к началу периода · ${periodCaption}` : periodCaption;
+        return [
+          {
+            key: 'line',
+            label: 'Линия',
+            render: (
+              <ChartCardBody value={fmt.kpi(last)} delta={levelDelta} caption={caption}>
+                <SubscriberHistoryChart rows={rows} />
+              </ChartCardBody>
+            ),
+          },
+          {
+            key: 'bar',
+            label: 'Столбцы',
+            render: (
+              <ChartCardBody value={fmt.kpi(last)} delta={levelDelta} caption={caption}>
+                <SubscriberHistoryBars rows={rows} />
+              </ChartCardBody>
+            ),
+          },
+          seriesBarValuesVariant(deltas.values, deltas.labels, deltas.titles, {
+            diverging: true,
+            extraRows: [{ label: 'Сейчас', value: fmt.num(last) }],
+            sum: true,
+            sumLabel: 'Δ за период',
+          }),
+        ];
+      }}
     />
   );
 }
@@ -301,8 +311,7 @@ export function HeatmapWidgetBody() {
   return <HeatmapBody posts={data?.posts ?? []} />;
 }
 
-/** Aggregates + renders the 7×24 ERV grid for the card's OWN window (useWidgetPeriod, read INSIDE
-    the ChartSection provider), so the header pills genuinely re-window it. Hover/tooltip state
+/** Aggregates + renders the 7×24 ERV grid for the resolved feed/Home window. Hover/tooltip state
     lives further down in HeatmapSurface, so a mousemove never re-runs this aggregation. */
 function HeatmapBody({ posts }: { posts: NonNullable<TgFull['posts']> }) {
   const { inRange } = useWidgetPeriod();

@@ -78,6 +78,18 @@ test('desktop Instagram Overview keeps the split KPI hierarchy intact', async ({
   await testInfo.attach('instagram-overview-dark', { path: overviewShot, contentType: 'image/png' });
 });
 
+test('desktop Instagram feed has one authoritative period and no card-local selectors', async ({ page }) => {
+  await bootDemo(page, '/instagram', { theme: 'dark' });
+
+  for (const route of ['/instagram', '/instagram/analytics']) {
+    if (page.url().endsWith(route) === false) await page.goto(route);
+    await expect(page.getByRole('group', { name: 'Период', exact: true })).toHaveCount(1);
+    await expect(page.getByRole('group', { name: 'Период виджета' })).toHaveCount(0);
+    await expect(page.getByRole('group', { name: 'Период страницы' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Свой период' })).toBeVisible();
+  }
+});
+
 test('desktop Home labels every mixed-source widget', async ({ page }, testInfo) => {
   await page.addInitScript(() => {
     localStorage.setItem('pulse_home_blocks', JSON.stringify({ keys: ['kpi', 'ig-kpi'] }));

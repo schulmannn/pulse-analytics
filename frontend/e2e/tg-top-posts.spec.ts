@@ -74,6 +74,20 @@ test.describe('TG Обзор — карточки топ-постов + пери
     await expect(page).toHaveURL(/\/analytics/);
     const analyticsPeriod = page.getByRole('group', { name: 'Период' });
     await expect(analyticsPeriod.getByRole('button', { name: rangeLabel! })).toHaveAttribute('aria-pressed', 'true');
+    // This is a historical window outside the demo graph data. A date-resolvable chart must not
+    // fall back to the last archived points: the card stays mounted with an honest empty body.
+    const viewsCard = page
+      .getByRole('heading', { name: 'Просмотры', exact: true })
+      .locator('xpath=ancestor::section[1]');
+    await expect(viewsCard.getByText('Нет данных за период')).toBeVisible();
+    const historyCard = page
+      .getByRole('heading', { name: 'История подписчиков' })
+      .locator('xpath=ancestor::section[1]');
+    // Subscriber archive is deeper than the post/graph fixture, so it still has rows here. The
+    // calendar-day key must not shift in UTC-3: the selected 5–15 May window ends on 15, never 16.
+    await expect(historyCard.getByText('11 дн. в периоде', { exact: false })).toBeVisible();
+    await expect(historyCard.getByText(/15 мая/)).toBeVisible();
+    await expect(historyCard.getByText(/16 мая/)).toHaveCount(0);
   });
 
   test('один датапикер на каждой рабочей вкладке: внутри карточек нет собственных период-пилюль', async ({ page }) => {

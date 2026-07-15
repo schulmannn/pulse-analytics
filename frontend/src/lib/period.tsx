@@ -23,11 +23,48 @@ const PeriodContext = createContext<PeriodContextValue | null>(null);
 const DAY_MS = 24 * 60 * 60 * 1000;
 const P_TO_DAYS: Record<string, PeriodDays> = { '7d': 7, '30d': 30, '90d': 90, all: 0 };
 
+/** Start/end helpers use calendar operations, so a picked day stays exact across DST changes. */
+export function startOfLocalDay(timestamp: number): number {
+  const date = new Date(timestamp);
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}
+
+export function endOfLocalDay(timestamp: number): number {
+  const date = new Date(timestamp);
+  date.setHours(23, 59, 59, 999);
+  return date.getTime();
+}
+
+export function shiftLocalDays(timestamp: number, days: number): number {
+  const date = new Date(timestamp);
+  date.setDate(date.getDate() + days);
+  return date.getTime();
+}
+
+/**
+ * API archive rows use bare YYYY-MM-DD calendar keys, while posts/graphs use real instants.
+ * Date.parse treats a bare key as UTC midnight and shifts the selected day for viewers west/east
+ * of UTC. Preserve day keys as local calendar midnights; retain instant semantics for full ISO.
+ */
+export function periodDateTimestamp(value: string | null | undefined): number {
+  if (!value) return Number.NaN;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return Date.parse(value);
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(year, month - 1, day);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
+    return Number.NaN;
+  }
+  return date.getTime();
+}
+
 /** Parse a YYYY-MM-DD query param into local-midnight epoch ms (null if malformed). */
 function parseDayParam(raw: string | null): number | null {
   if (!raw || !/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
-  const [y, m, d] = raw.split('-').map(Number);
-  const ts = new Date(y!, m! - 1, d!).getTime();
+  const ts = periodDateTimestamp(raw);
   return Number.isFinite(ts) ? ts : null;
 }
 
@@ -45,7 +82,7 @@ function initialPeriodFromUrl(): { days: PeriodDays; range: DateRange | null } {
     const to = parseDayParam(params.get('to'));
     if (from != null && to != null && from <= to) {
       // `to` is inclusive — extend to the end of that day (matches the DateRangePicker).
-      return { days: 30, range: { from, to: to + DAY_MS - 1 } };
+      return { days: 30, range: { from, to: endOfLocalDay(to) } };
     }
     const preset = P_TO_DAYS[params.get('p') ?? ''];
     if (preset !== undefined) return { days: preset, range: null };
@@ -73,7 +110,7 @@ export function PeriodProvider({ children }: { children: ReactNode }) {
     (dateISO: string | null | undefined): boolean => {
       if (range) {
         if (!dateISO) return false;
-        const t = Date.parse(dateISO);
+        const t = periodDateTimestamp(dateISO);
         return Number.isFinite(t) && t >= range.from && t <= range.to;
       }
       return inRangeByDays(dateISO, days);
@@ -109,7 +146,7 @@ export function effectiveLimit(days: PeriodDays, range: DateRange | null): numbe
 export function inRangeByDays(dateISO: string | null | undefined, days: PeriodDays): boolean {
   if (days === 0) return true;
   if (!dateISO) return false;
-  const timestamp = Date.parse(dateISO);
+  const timestamp = periodDateTimestamp(dateISO);
   return Number.isFinite(timestamp) && timestamp >= Date.now() - days * 24 * 60 * 60 * 1000;
 }
 
@@ -125,6 +162,10 @@ export function inRangeByDays(dateISO: string | null | undefined, days: PeriodDa
  */
 export interface WidgetPeriodValue {
   days: PeriodDays;
+  /** Page-level custom date window when one is active; `null` means the `days` preset applies.
+      Series that window by calendar date (graphs) read this to honour a custom range the `days`
+      fallback can't express. */
+  range: DateRange | null;
   /** True if a date is inside this widget's active preset or page-level custom range. */
   inRange: (dateISO: string | null | undefined) => boolean;
 }
@@ -135,6 +176,7 @@ export const DEFAULT_WIDGET_DAYS: PeriodDays = 30;
     pages, reports, standalone previews) — a sane 30д so those callers never crash. */
 export const WIDGET_PERIOD_FALLBACK: WidgetPeriodValue = {
   days: DEFAULT_WIDGET_DAYS,
+  range: null,
   inRange: (dateISO) => inRangeByDays(dateISO, DEFAULT_WIDGET_DAYS),
 };
 
@@ -159,13 +201,90 @@ export function useWidgetPeriod(): WidgetPeriodValue {
 export function widgetPeriodValue(days: PeriodDays, range: DateRange | null = null): WidgetPeriodValue {
   return {
     days,
+    range,
     inRange: (dateISO) => {
       if (!range) return inRangeByDays(dateISO, days);
       if (!dateISO) return false;
-      const timestamp = Date.parse(dateISO);
+      const timestamp = periodDateTimestamp(dateISO);
       return Number.isFinite(timestamp) && timestamp >= range.from && timestamp <= range.to;
     },
   };
+}
+
+/** Inclusive epoch-ms window. `null` is the unbounded «Всё» period. */
+export interface CalendarWindow {
+  from: number;
+  to: number;
+}
+
+/** Calendar window for a preset. The boundary matches {@link inRangeByDays}. */
+export function calendarWindowForDays(days: number, now: number = Date.now()): CalendarWindow | null {
+  return days === 0 ? null : { from: now - days * DAY_MS, to: now };
+}
+
+/** Exact custom range when present, otherwise the widget's preset window. */
+export function calendarWindowForPeriod(
+  period: Pick<WidgetPeriodValue, 'days' | 'range'>,
+  now: number = Date.now(),
+): CalendarWindow | null {
+  return period.range
+    ? { from: period.range.from, to: period.range.to }
+    : calendarWindowForDays(period.days, now);
+}
+
+export interface CalendarRows<T> {
+  current: T[];
+  /** Immediately preceding equal calendar window; null when the archive cannot cover it. */
+  previous: T[] | null;
+  /** False means the input has no usable dates, so bounded filtering cannot be applied honestly. */
+  windowable: boolean;
+}
+
+/**
+ * Select current and immediately preceding equal windows from dated rows. Full local-day picker
+ * ranges shift by a calendar-day count (DST-safe); rolling windows use equal inclusive millisecond
+ * spans. With no usable dates a bounded caller gets the original rows and `windowable=false` rather
+ * than a fabricated empty series.
+ */
+export function splitCalendarRows<T>(
+  rows: T[],
+  window: CalendarWindow | null,
+  timestampOf: (row: T, index: number) => number,
+): CalendarRows<T> {
+  if (window == null) return { current: rows, previous: null, windowable: true };
+
+  const dated = rows.flatMap((row, index) => {
+    const timestamp = Number(timestampOf(row, index));
+    return Number.isFinite(timestamp) ? [{ row, timestamp }] : [];
+  });
+  if (dated.length === 0) return { current: rows, previous: null, windowable: false };
+  if (!Number.isFinite(window.from) || !Number.isFinite(window.to) || window.to < window.from) {
+    return { current: [], previous: null, windowable: true };
+  }
+
+  const current = dated
+    .filter(({ timestamp }) => timestamp >= window.from && timestamp <= window.to)
+    .map(({ row }) => row);
+  const isCalendarRange = startOfLocalDay(window.from) === window.from && endOfLocalDay(window.to) === window.to;
+  const fromDay = new Date(window.from);
+  const toDay = new Date(window.to);
+  const calendarDays = Math.round(
+    (Date.UTC(toDay.getFullYear(), toDay.getMonth(), toDay.getDate())
+      - Date.UTC(fromDay.getFullYear(), fromDay.getMonth(), fromDay.getDate())) / DAY_MS,
+  ) + 1;
+  const span = window.to - window.from + 1;
+  const previousFrom = isCalendarRange
+    ? shiftLocalDays(window.from, -calendarDays)
+    : window.from - span;
+  const earliest = Math.min(...dated.map(({ timestamp }) => timestamp));
+  const previous =
+    earliest <= previousFrom
+      ? dated
+          .filter(({ timestamp }) => timestamp >= previousFrom && timestamp < window.from)
+          .map(({ row }) => row)
+      : null;
+
+  return { current, previous, windowable: true };
 }
 
 /** Feed pages own one authoritative period; standalone/Home cards keep their saved period. */
@@ -183,9 +302,8 @@ export function resolveRequestedWidgetDays(
  * re-windows the whole page. `null` outside a feed that provides one (Home board, metric pages):
  * there every card keeps its saved period or falls back to {@link DEFAULT_WIDGET_DAYS}.
  *
- * `range` — a custom date window on top of the preset (the IG header exposes it; the TG header is
- * presets-only until the TG card bodies learn ranges). Picking a preset clears the range, exactly
- * like the global {@link PeriodProvider}.
+ * `range` is a custom date window on top of the preset. Both TG and IG headers expose it; picking a
+ * preset clears the range, exactly like the global {@link PeriodProvider}.
  */
 export interface PagePeriodValue {
   days: PeriodDays;
