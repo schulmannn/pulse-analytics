@@ -142,7 +142,9 @@ test('edit-mode entry + exit (Home)', async ({ page }) => {
   await expect(toggle).toHaveAttribute('aria-pressed', 'false');
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-pressed', 'true'); // entered edit mode
-  await expect(page.getByRole('button', { name: /Добавить виджет/ })).toBeVisible();
+  // Entering edit mode reveals the bottom «+ Добавить виджет» dock (targeted by class so the desktop
+  // header's always-on Add button doesn't make the name ambiguous).
+  await expect(page.locator('.add-widget-trigger')).toBeVisible();
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-pressed', 'false'); // exited
 });
@@ -220,35 +222,46 @@ test('legacy Home cards use one config path and preserve old prefs during migrat
   });
 });
 
-test('edit toggle expands like a compact Steep action without shifting the header slot', async ({ page }) => {
-  // The visible chip starts as a compact icon control, then expands on hover/focus/active. The
-  // reserved slot stays fixed, so the page title/header never reflows while the action breathes.
+test('edit toggle: compact expand chip on mobile, stable labelled tool on desktop', async ({ page }) => {
   await bootDemo(page, '/home');
   const slot = page.locator('.edit-toggle-slot');
   const toggle = page.locator('button.edit-toggle');
-  const idleSlot = await slot.boundingBox();
-  const idle = await toggle.boundingBox();
-  expect(idleSlot && idle).toBeTruthy();
-  expect(idle!.width).toBeLessThan(idleSlot!.width - 40);
+  const vw = page.viewportSize()!.width;
 
+  if (vw < 768) {
+    // Mobile (<md): the chip starts as a compact icon control, then expands on hover/focus/active
+    // over a fixed reserved slot, so the header never reflows while the action breathes.
+    const idleSlot = await slot.boundingBox();
+    const idle = await toggle.boundingBox();
+    expect(idleSlot && idle).toBeTruthy();
+    expect(idle!.width).toBeLessThan(idleSlot!.width - 40);
+
+    await toggle.hover();
+    await page.waitForTimeout(260);
+    const hoverSlot = await slot.boundingBox();
+    const hover = await toggle.boundingBox();
+    expect(hoverSlot && hover).toBeTruthy();
+    expect(Math.abs(hoverSlot!.width - idleSlot!.width)).toBeLessThan(0.5);
+    expect(hover!.width).toBeGreaterThan(idle!.width + 40);
+    return;
+  }
+
+  // Desktop (md+): a stable, always-labelled tool — its width must NOT change on hover or when
+  // toggled active, so the header layout never jumps.
+  const idle = await toggle.boundingBox();
+  expect(idle).toBeTruthy();
   await toggle.hover();
   await page.waitForTimeout(260);
-  const hoverSlot = await slot.boundingBox();
   const hover = await toggle.boundingBox();
-  expect(hoverSlot && hover).toBeTruthy();
-  expect(Math.abs(hoverSlot!.width - idleSlot!.width)).toBeLessThan(0.5);
-  expect(hover!.width).toBeGreaterThan(idle!.width + 40);
+  expect(Math.abs(hover!.width - idle!.width)).toBeLessThan(0.5);
 
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-pressed', 'true');
-  const activeSlot = await slot.boundingBox();
   const active = await toggle.boundingBox();
-  expect(activeSlot && active).toBeTruthy();
-  expect(Math.abs(activeSlot!.width - idleSlot!.width)).toBeLessThan(0.5);
-  expect(active!.width).toBeGreaterThan(idle!.width + 40);
+  expect(Math.abs(active!.width - idle!.width)).toBeLessThan(0.5);
 });
 
-test.describe('home edit-mode board inset (steep editable-canvas cue)', () => {
+test.describe('home edit-mode board (no decorative narrowing / nested page-card)', () => {
   // Seed one pinned widget so the board grid (#home) renders at rest AND in edit — otherwise an empty
   // Home shows HomeEmptyState (no #home) until edit mode. Same seed shape the drill-guard test uses;
   // addInitScript stacks BEFORE bootDemo's own seed.
@@ -258,8 +271,7 @@ test.describe('home edit-mode board inset (steep editable-canvas cue)', () => {
       localStorage.setItem('pulse_widget_configs', JSON.stringify([{ id: 'probe1', metricId: 'tg.views', viz: 'line' }]));
     });
 
-  test('board steps in on «Изменить» and reverts on «Готово» (desktop)', async ({ page }) => {
-    // The inset is lg-only, so force a desktop viewport regardless of the running project.
+  test('board keeps its full width in edit mode and shows a reorder/remove hint (desktop)', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await seedBoard(page);
     await bootDemo(page, '/home');
@@ -272,21 +284,23 @@ test.describe('home edit-mode board inset (steep editable-canvas cue)', () => {
 
     await toggle.click();
     await expect(toggle).toHaveAttribute('aria-pressed', 'true');
-    await page.waitForTimeout(320); // 200ms max-width transition + settle
+    await page.waitForTimeout(120);
+    // The board stays at its full width — no decorative narrowing, no boxed-in «page card».
     const editingWidth = (await board.boundingBox())!.width;
-    // ~112px narrower (7rem inset). Assert a clear step-in, not the exact px.
-    expect(editingWidth).toBeLessThan(restingWidth - 80);
-    const editingSurface = await board.evaluate((el) => {
+    expect(Math.abs(editingWidth - restingWidth)).toBeLessThanOrEqual(1);
+    // No grey surface / hairline frame wrapping the whole board.
+    const surface = await board.evaluate((el) => {
       const cs = getComputedStyle(el);
-      return { background: cs.backgroundColor, border: cs.borderColor, padding: cs.paddingTop };
+      return { background: cs.backgroundColor, border: cs.borderTopColor, borderWidth: cs.borderTopWidth };
     });
-    expect(editingSurface.background).not.toBe('rgba(0, 0, 0, 0)');
-    expect(editingSurface.border).not.toBe('rgba(0, 0, 0, 0)');
-    expect(editingSurface.padding).not.toBe('0px');
+    expect(surface.background).toBe('rgba(0, 0, 0, 0)');
+    expect(surface.borderWidth === '0px' || surface.border === 'rgba(0, 0, 0, 0)').toBeTruthy();
+    // The mode is signalled by a quiet state row instead.
+    await expect(page.getByText('Редактирование', { exact: true })).toBeVisible();
 
     await toggle.click();
     await expect(toggle).toHaveAttribute('aria-pressed', 'false');
-    await page.waitForTimeout(320);
+    await page.waitForTimeout(120);
     const revertedWidth = (await board.boundingBox())!.width;
     expect(Math.abs(revertedWidth - restingWidth)).toBeLessThanOrEqual(1);
   });
@@ -304,8 +318,8 @@ test.describe('home edit-mode board inset (steep editable-canvas cue)', () => {
 
       await toggle.click();
       await expect(toggle).toHaveAttribute('aria-pressed', 'true');
-      await page.waitForTimeout(320);
-      // Below lg the lg:max-w-* inset rule never applies — the board keeps its full width…
+      await page.waitForTimeout(120);
+      // The board keeps its full width…
       const after = (await board.boundingBox())!.width;
       expect(Math.abs(after - before)).toBeLessThanOrEqual(1);
       // …and edit mode introduces no horizontal page scroll.

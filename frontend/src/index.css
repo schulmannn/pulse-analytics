@@ -540,31 +540,43 @@ div[data-widget-tinted] {
   transform: translateY(0);
 }
 
-/* Steep's edit mode also marks the editable canvas itself: the board steps inward AND receives a
-   quiet grey surface + hairline frame. The transparent resting border/padding prevents layout jumps. */
-.home-board-canvas {
-  border: 1px solid transparent;
-  border-radius: 18px;
-  padding: 0;
-  transition:
-    max-width var(--motion-fast) var(--ease-standard),
-    background-color var(--motion-base) ease,
-    border-color var(--motion-base) ease,
-    padding var(--motion-base) var(--ease-standard);
-}
-.home-board-canvas[data-editing='true'] {
-  background: hsl(var(--foreground) / 0.035);
-  border-color: hsl(var(--foreground) / 0.12);
-  padding: 22px 22px 88px;
-}
-@media (max-width: 1023px) {
-  .home-board-canvas {
-    border-radius: 0;
+/* Desktop (md+): the compact expand-on-hover chip is a mobile affordance. On desktop the toggle is
+   a stable, always-labelled tool that never changes width/position on hover, so the header cannot
+   reflow. Only colour/press transitions
+   remain; the slot flows inline instead of reserving 108px for an absolute chip. The mobile rules
+   above are left byte-for-byte intact below this breakpoint. */
+@media (min-width: 768px) {
+  .edit-toggle-slot {
+    position: static;
+    width: auto;
+    height: auto;
+    flex: 0 0 auto;
   }
+  .edit-toggle,
+  .edit-toggle:hover,
+  .edit-toggle:focus-visible {
+    position: static;
+    width: auto;
+    min-width: 0;
+    height: 36px;
+    gap: 7px;
+    padding-inline: 12px;
+  }
+  .edit-toggle-label {
+    width: auto;
+    min-width: 0;
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Edit mode keeps the board at its full width and single 6-col footprint without a nested page
+   frame. The reorder/remove affordances are signalled by the per-card controls and a quiet desktop
+   state row. Desktop-only bottom room in edit mode keeps the fixed «+ Добавить виджет» dock from
+   overlapping the last row — mobile edit-mode spacing is left exactly as it was. */
+@media (min-width: 768px) {
   .home-board-canvas[data-editing='true'] {
-    border-color: transparent;
-    padding: 0;
-    background: transparent;
+    padding-bottom: 72px;
   }
 }
 

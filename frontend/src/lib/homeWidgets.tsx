@@ -126,6 +126,3 @@ export const HOME_REGISTRY: Record<string, HomeWidgetDef> = {
     render: () => <IgKpiHomeCard id="home-ig-kpi" homeKey="ig-kpi" />,
   },
 };
-
-/** Registry keys that seed a sensible default Home for a first-time user («Собрать по умолчанию»). */
-export const HOME_DEFAULT_KEYS = ['week', 'kpi', 'growth', 'ig-reach', 'top-posts'];
