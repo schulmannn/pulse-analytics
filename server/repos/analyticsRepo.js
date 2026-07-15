@@ -19,6 +19,7 @@
    воркспейсом читателя, ADR-001 F1) + getAccessibleChannel (инъекция; repos не импортят друг друга). */
 
 const { sameTenantSource, channelAccessSql } = require('../db/access');
+const { parseMentionsRange, rangeDayCount } = require('../lib/mentionsRange');
 
 /** Positive-bigint mentioning-channel id (as a string for pg bigint params), or null on garbage. */
 function normalizeSourceId(v) {
@@ -78,16 +79,31 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
     const daysRaw = Number(opts.days);
     const days = daysRaw === 7 || daysRaw === 30 || daysRaw === 90 ? daysRaw : 0;
     const source = normalizeSourceId(opts.source);
+    // Свой диапазон (from/to, включительно) приоритетнее days-пресета. Ре-валидируем даже то, что
+    // передал роут (репо не доверяет вызывающему): в SQL уходят ТОЛЬКО строки строгого YYYY-MM-DD,
+    // поэтому date-литералы безопасны — та же дисциплина, что у whitelisted-смещений {7,30,90}.
+    const range = parseMentionsRange(opts.range);
+    // «Оконный» режим = есть диапазон ЛИБО days-пресет. Диапазон всегда сравним (есть предыдущее окно).
+    const windowed = range != null || days !== 0;
 
     const dayExpr = 'COALESCE(post_date, first_seen)';
-    // Календарные окна относительно CURRENT_DATE сервера. Литеральные смещения безопасны: days из
-    // белого списка {7,30,90}.
-    const curBounds = days === 0
-      ? null
-      : `${dayExpr} >= CURRENT_DATE - ${days - 1} AND ${dayExpr} < CURRENT_DATE + 1`;
-    const prevBounds = days === 0
-      ? null
-      : `${dayExpr} >= CURRENT_DATE - ${2 * days - 1} AND ${dayExpr} < CURRENT_DATE - ${days - 1}`;
+    // Календарные окна. Литеральные смещения безопасны: days из белого списка {7,30,90}, а границы
+    // диапазона — строгий YYYY-MM-DD. Для диапазона предыдущее окно — равной длины, сразу перед from.
+    let curBounds;
+    let prevBounds;
+    if (range) {
+      const f = `'${range.from}'::date`;
+      const t = `'${range.to}'::date`;
+      const len = `((${t} - ${f}) + 1)`;
+      curBounds = `${dayExpr} >= ${f} AND ${dayExpr} < ${t} + 1`;
+      prevBounds = `${dayExpr} >= ${f} - ${len} AND ${dayExpr} < ${f}`;
+    } else if (days !== 0) {
+      curBounds = `${dayExpr} >= CURRENT_DATE - ${days - 1} AND ${dayExpr} < CURRENT_DATE + 1`;
+      prevBounds = `${dayExpr} >= CURRENT_DATE - ${2 * days - 1} AND ${dayExpr} < CURRENT_DATE - ${days - 1}`;
+    } else {
+      curBounds = null;
+      prevBounds = null;
+    }
 
     // scope: owner (+ optional source) (+ optional date bounds). Возвращает clause + params с $1=channelId.
     const scope = (bounds) => {
@@ -103,7 +119,7 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
       `SELECT count(*)::int AS total, count(distinct channel_id)::int AS unique_channels,
               COALESCE(sum(views),0)::bigint AS total_views FROM mentions WHERE ${cur.clause}`, cur.params);
     // by_day (legacy DD.MM): для days=0 — прежние 60 дней; для окна — окно (десктоп его не читает).
-    const byDayScope = scope(days === 0 ? `${dayExpr} >= CURRENT_DATE - 60` : curBounds);
+    const byDayScope = scope(curBounds ?? `${dayExpr} >= CURRENT_DATE - 60`);
     const byDay = await pool.query(
       `SELECT to_char(${dayExpr},'DD.MM') AS d, count(*)::int AS c
          FROM mentions WHERE ${byDayScope.clause} GROUP BY 1`, byDayScope.params);
@@ -121,7 +137,7 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
     // ISO daily для текущего scope. Для окна — сервер отдаёт присутствующие дни; нулевые
     // календарные дни дозаполняет фронт. Для all-time ограничиваем последними 365 дн (честная
     // граница вместо гигантской искусственной серии).
-    const dailyScope = scope(days === 0 ? `${dayExpr} >= CURRENT_DATE - 364` : curBounds);
+    const dailyScope = scope(curBounds ?? `${dayExpr} >= CURRENT_DATE - 364`);
     const daily = await pool.query(
       `SELECT to_char(${dayExpr}::date,'YYYY-MM-DD') AS day, count(*)::int AS mentions,
               COALESCE(sum(views),0)::bigint AS views, count(distinct channel_id)::int AS channels
@@ -137,20 +153,45 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
               count(*) OVER ()::int AS period_channels
          FROM mentions WHERE ${soClause} GROUP BY channel_id ORDER BY count(*) DESC, sum(views) DESC NULLS LAST LIMIT 25`,
       soParams);
+    // Границы текущего/предыдущего окна (текстом YYYY-MM-DD). Для диапазона current_* = сами from/to,
+    // а current_to (якорь дневного графика на фронте) — именно `to`, а не CURRENT_DATE.
+    let currentFromExpr;
+    let currentToExpr;
+    let previousFromExpr;
+    let previousToExpr;
+    if (range) {
+      const f = `'${range.from}'::date`;
+      const t = `'${range.to}'::date`;
+      const len = `((${t} - ${f}) + 1)`;
+      currentFromExpr = `'${range.from}'::text`;
+      currentToExpr = `'${range.to}'::text`;
+      previousFromExpr = `to_char(${f} - ${len},'YYYY-MM-DD')`;
+      previousToExpr = `to_char(${f} - 1,'YYYY-MM-DD')`;
+    } else if (days !== 0) {
+      currentFromExpr = `to_char(CURRENT_DATE - ${days - 1},'YYYY-MM-DD')`;
+      currentToExpr = `to_char(CURRENT_DATE,'YYYY-MM-DD')`;
+      previousFromExpr = `to_char(CURRENT_DATE - ${2 * days - 1},'YYYY-MM-DD')`;
+      previousToExpr = `to_char(CURRENT_DATE - ${days},'YYYY-MM-DD')`;
+    } else {
+      currentFromExpr = 'NULL::text';
+      currentToExpr = `to_char(CURRENT_DATE,'YYYY-MM-DD')`;
+      previousFromExpr = 'NULL::text';
+      previousToExpr = 'NULL::text';
+    }
     // Свежесть + all-time count (без scope и source).
     const meta = await pool.query(
       `SELECT count(*)::int AS archive_total,
               to_char(max(last_seen),'YYYY-MM-DD"T"HH24:MI:SS') AS updated_at,
               to_char(max(${dayExpr}),'YYYY-MM-DD"T"HH24:MI:SS') AS latest_seen,
-              to_char(CURRENT_DATE,'YYYY-MM-DD') AS current_to,
-              ${days === 0 ? 'NULL::text' : `to_char(CURRENT_DATE - ${days - 1},'YYYY-MM-DD')`} AS current_from,
-              ${days === 0 ? 'NULL::text' : `to_char(CURRENT_DATE - ${2 * days - 1},'YYYY-MM-DD')`} AS previous_from,
-              ${days === 0 ? 'NULL::text' : `to_char(CURRENT_DATE - ${days},'YYYY-MM-DD')`} AS previous_to
+              ${currentToExpr} AS current_to,
+              ${currentFromExpr} AS current_from,
+              ${previousFromExpr} AS previous_from,
+              ${previousToExpr} AS previous_to
          FROM mentions WHERE owner_channel_id=$1`, [channelId]);
 
     let previous = null;
     let previous_daily = [];
-    if (days !== 0) {
+    if (windowed) {
       const prev = scope(prevBounds);
       const pt = (await pool.query(
         `SELECT count(*)::int AS total, count(distinct channel_id)::int AS unique_channels,
@@ -198,14 +239,17 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
         total_views: Number(sourceOpts.rows[0]?.period_views || 0),
       },
       scope: {
-        days,
+        // days=0 при своём диапазоне: фронт различает окно по from/to, а не по days-пресету.
+        days: range ? 0 : days,
         source: source != null ? String(source) : null,
+        from: range ? range.from : null,
+        to: range ? range.to : null,
         limit,
         current_from: m.current_from || null,
         current_to: m.current_to || null,
         previous_from: m.previous_from || null,
         previous_to: m.previous_to || null,
-        daily_days: days === 0 ? 365 : days,
+        daily_days: range ? rangeDayCount(range) : days === 0 ? 365 : days,
       },
       archive_total: m.archive_total || 0,
       latest_seen: m.latest_seen || null,

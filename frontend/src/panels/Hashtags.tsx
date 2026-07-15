@@ -20,8 +20,7 @@ const keepAll: Keep = () => true;
 /**
  * Hashtag ERV-lift over the IN-WINDOW posts: for each tag carried by ≥2 posts, its average ERV and
  * the lift vs the no-tag baseline. Top-10 by lift (else avg ERV). Pure, so the widget re-derives it
- * per its own period (variants-fn form) — the bars follow the card's 7д/30д/90д/Всё pill. `keep`
- * (default pass-through) additionally scopes to the selected campaign's members for the source.
+ * for the resolved feed/Home window. `keep` additionally scopes to a selected campaign.
  */
 function deriveHashtags(full: TgFull | undefined, inRange: InRange, keep: Keep = keepAll) {
   const posts = normalizeTgPosts(full?.posts ?? [], full?.channel ?? {}).filter(
@@ -75,7 +74,7 @@ function deriveHashtags(full: TgFull | undefined, inRange: InRange, keep: Keep =
   return { breakdownItems, baseAvg, hasItems: items.length > 0 };
 }
 
-/** «база без тегов» caption — reads the card's OWN window (useWidgetPeriod) so it matches the bars. */
+/** «База без тегов» reads the same resolved window as the bars. */
 function HashtagsBase({ full, keep }: { full: TgFull | undefined; keep: Keep }) {
   const { inRange } = useWidgetPeriod();
   const { baseAvg } = deriveHashtags(full, inRange, keep);
@@ -96,7 +95,7 @@ const alwaysInRange = () => true;
 export function Hashtags({
   inCampaign = keepAll,
 }: { inCampaign?: Keep } = {}) {
-  // ONE wide fetch (limit 0 = server cap 100); the widget windows it client-side per its own period.
+  // ONE wide fetch (limit 0 = server cap 100); the resolved feed/Home period windows it client-side.
   const { data: full, isPending, isError, refetch } = useTgFull(0);
 
   if (isPending) {

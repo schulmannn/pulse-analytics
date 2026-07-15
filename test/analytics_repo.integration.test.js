@@ -224,6 +224,53 @@ test('getMentionsArchive: 30-day calendar boundaries do not overlap or drop an e
   assert.strictEqual(data.archive_total, 4, 'day -60 remains archive-only');
 });
 
+test('getMentionsArchive: custom range is inclusive, wins over days and compares the previous equal window', { skip }, async () => {
+  const { ch } = await chWithSource('menr', extId());
+  await pool.query(
+    `INSERT INTO mentions (owner_channel_id, channel_id, msg_id, views, post_date) VALUES
+      ($1, 601, 1, 10, '2026-06-10T08:00:00Z'),
+      ($1, 601, 2, 20, '2026-06-12T23:59:00Z'),
+      ($1, 601, 3, 30, '2026-06-09T12:00:00Z'),
+      ($1, 601, 4, 40, '2026-06-07T00:00:00Z'),
+      ($1, 601, 5, 50, '2026-06-06T23:59:00Z'),
+      ($1, 601, 6, 60, '2026-06-13T00:00:00Z')`,
+    [ch.id]);
+
+  const data = await db.getMentionsArchiveInternal(ch.id, {
+    days: 90,
+    range: { from: '2026-06-10', to: '2026-06-12' },
+  });
+
+  assert.strictEqual(data.total, 2, 'from/to edge days are both included');
+  assert.strictEqual(data.total_views, 30);
+  assert.strictEqual(data.previous.total, 2, 'previous equal window is June 7 through June 9');
+  assert.strictEqual(data.previous.total_views, 70);
+  assert.deepStrictEqual(
+    {
+      days: data.scope.days,
+      from: data.scope.from,
+      to: data.scope.to,
+      current_from: data.scope.current_from,
+      current_to: data.scope.current_to,
+      previous_from: data.scope.previous_from,
+      previous_to: data.scope.previous_to,
+      daily_days: data.scope.daily_days,
+    },
+    {
+      days: 0,
+      from: '2026-06-10',
+      to: '2026-06-12',
+      current_from: '2026-06-10',
+      current_to: '2026-06-12',
+      previous_from: '2026-06-07',
+      previous_to: '2026-06-09',
+      daily_days: 3,
+    },
+  );
+  assert.deepStrictEqual(data.daily.map((row) => row.day), ['2026-06-10', '2026-06-12']);
+  assert.deepStrictEqual(data.previous_daily.map((row) => row.day), ['2026-06-07', '2026-06-09']);
+});
+
 test('finding 5 — ForActor gate: владелец видит данные, чужой actor → пусто (репо форсит доступ сам)', { skip }, async () => {
   const { u: owner, ch } = await chWithSource('fa', extId());
   const stranger = await mkUser('fa-x');

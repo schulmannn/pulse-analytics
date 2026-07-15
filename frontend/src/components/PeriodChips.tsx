@@ -19,10 +19,9 @@ const fmtRangeChip = (ms: number) => new Date(ms).toLocaleDateString('ru-RU', { 
  * the caller owns the value + setter (the page-level period that re-windows every feed card).
  * One component for both networks, so TG ↔ IG match by construction.
  *
- * Pass `onRangeChange` to grow the «Свой период» chip + calendar popover (the IG header does;
- * the TG header stays presets-only until its card bodies learn ranges). A picked range makes the
- * presets read inactive — the range owns the window until a preset click clears it (caller's
- * setDays is expected to reset the range, as both period providers do).
+ * Pass `onRangeChange` to add the «Свой период» chip + calendar popover. Both source feeds do this,
+ * so Telegram and Instagram share one range contract. A picked range makes the presets inactive
+ * until a preset click clears it (both period providers reset the range in `setDays`).
  */
 export function PeriodChips({
   value,

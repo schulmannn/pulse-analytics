@@ -31,7 +31,7 @@ export function Overview() {
   const { channelId } = useSelectedChannel();
   const { data: channelsData } = useChannels();
   // ONE wide fetch (limit 100 = server cap) for the whole panel — every widget below filters
-  // this payload to its OWN window. The panel-level fetch only gates the empty-state, so it must
+  // this payload to the shared page window. The panel-level fetch only gates the empty-state, so it must
   // NOT depend on any widget's period (a narrow window could wrongly read as "empty").
   const { data, isPending, isError } = useTgFull(0);
   // One canonical derive for all five Overview KPI cards. React Query already shares the fetches;
@@ -109,7 +109,7 @@ export function Overview() {
             </Link>
           }
         >
-          <TopPosts />
+          <TopPosts variant="cards" />
         </ChartSection>
       </WidgetGroup>
     </div>
@@ -158,9 +158,8 @@ function HealthBanner({ source }: { source?: string | null }) {
   );
 }
 
-/** Subscriber base over the period — the second most important channel state (the hero is views).
-    Reads its OWN widget window (useWidgetPeriod), not the global period. Exported (bare content,
-    no own ChartSection) so the personal-Home registry can reuse it under a home-scoped card. */
+/** Subscriber base over the resolved period — page-controlled in the feed, independently saved on
+    Home. Exported bare so both hosts use the same calculation. */
 /** «Рост подписчиков» wrapper: the compact SubscriberGrowth card body, but «Развернуть» now opens the
     SAME full subscriber chart the history widget does (full-height axes + Мин/Макс/Среднее stats strip
     + period pills + line↔bar + reference lines) instead of a tiny sparkline over an empty fullscreen. */
@@ -193,7 +192,7 @@ export function GrowthChartBlock({ id, homeKey, defaultColor }: { id?: string; h
 }
 
 export function SubscriberGrowth() {
-  const { days, inRange } = useWidgetPeriod();
+  const { days, inRange, range } = useWidgetPeriod();
   const { data: history } = useHistory(730);
   const { channelId } = useSelectedChannel();
   const { data: channelsData } = useChannels();
@@ -204,10 +203,14 @@ export function SubscriberGrowth() {
     .sort((a, b) => a.day.localeCompare(b.day));
   const values = rows.map((r) => Number(r.subscribers));
   const labels = rows.map((r) => fmt.day(r.day));
-  const currentSubs = current?.memberCount ?? (values.length ? values[values.length - 1] : 0);
-  // Per-widget windows are presets only (no custom range), so the paired-window Δ always applies.
-  const change = subscriberChange(history?.rows ?? [], days);
-  const periodLabel = days === 0 ? 'всё время' : `${days} дн.`;
+  // A historical custom range must end at its own last archive level, not today's channel snapshot.
+  const currentSubs = range
+    ? values.at(-1) ?? 0
+    : current?.memberCount ?? values.at(-1) ?? 0;
+  const change = range && values.length >= 2
+    ? (values.at(-1) ?? 0) - (values[0] ?? 0)
+    : subscriberChange(history?.rows ?? [], days);
+  const periodLabel = range ? 'выбранный период' : days === 0 ? 'всё время' : `${days} дн.`;
 
   const navigate = useNavigate();
   // Steep anatomy (owner rule): label + number + delta + signed caption bottom-left, the
@@ -221,7 +224,7 @@ export function SubscriberGrowth() {
       delta={change != null ? pctDelta(currentSubs, currentSubs - change) : null}
       caption={
         change != null && change !== 0
-          ? `${change > 0 ? '+' : '−'}${fmt.num(Math.abs(change))} к пред. периоду`
+          ? `${change > 0 ? '+' : '−'}${fmt.num(Math.abs(change))} к началу периода`
           : undefined
       }
       onValueClick={() => navigate('/metrics/subscribers')}

@@ -109,10 +109,13 @@ export function ChartSection(props: ChartSectionProps) {
         />
         {props.periodControl && (
           <>
+            {/* One date control per work page: inside a feed the top-bar page period is authoritative,
+                so a page-controlled card never renders its own period selector. Home / standalone
+                cards (no PagePeriodProvider) keep their independent saved period + pills. */}
             <WidgetPeriodPills
               days={model.period.widgetDays}
               onChange={(next) => updatePrefs({ ...prefs, period: next })}
-              hidden={reorder}
+              hidden={reorder || model.period.pageControlled}
             />
             {model.period.periodWidened && !reorder && (
               <p className="mt-1 text-2xs text-muted-foreground print:hidden">

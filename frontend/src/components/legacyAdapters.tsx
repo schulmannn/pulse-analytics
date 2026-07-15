@@ -26,7 +26,7 @@ const MentionsWidgetBody = lazy(() =>
 export const LEGACY_RENDER: Record<LegacyKey, (config: WidgetConfig) => ReactNode> = {
   kpi: () => <KpiGrid />,
   growth: () => <SubscriberGrowth />,
-  'top-posts': () => <TopPosts />,
+  'top-posts': () => <TopPosts variant="cards" />,
   history: (config) => <HistoryWidgetBody viz={config.viz} />,
   velocity: (config) => <VelocityWidgetBody viz={config.viz} />,
   heatmap: () => <HeatmapWidgetBody />,

@@ -56,7 +56,7 @@ import { clearSessionToken, setSessionToken } from '@/lib/session';
 import { isDemoMode } from '@/lib/demo';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { effectiveLimit, usePeriod } from '@/lib/period';
-import type { PeriodDays } from '@/lib/period';
+import type { DateRange, PeriodDays } from '@/lib/period';
 
 /** Current session. retry:false so a 401 surfaces immediately (→ login gate). */
 export function useMe() {
@@ -268,23 +268,49 @@ export function useSaveMentionSettings() {
  * search above only refreshes/extends it on demand. Same response shape.
  *
  * `days` (0|7|30|90) is the authoritative desktop period — the server scopes totals/chart/ranking/
- * table to that calendar window and adds `previous`/`daily`/`source_options`. `source` narrows every
- * aggregate to one mentioning channel (server-authoritative). No args (Home / mobile) = the legacy
- * all-time archive, byte-identical to before.
+ * table to that calendar window and adds `previous`/`daily`/`source_options`. `range` (inclusive
+ * from/to) is the custom window; when set it takes precedence over `days` and the SERVER filters by
+ * it (no client-side filtering of a truncated response). `source` narrows every aggregate to one
+ * mentioning channel (server-authoritative). No args (Home / mobile) = the legacy all-time archive,
+ * byte-identical to before.
  */
-export function useMentionsArchive(days: PeriodDays = 0, source?: string | null, limit?: number) {
+/** Epoch-ms → local YYYY-MM-DD (matches the DateRangePicker's calendar-day semantics). */
+function localIsoDay(ms: number): string {
+  const dt = new Date(ms);
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth() + 1).padStart(2, '0');
+  const d = String(dt.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+export function useMentionsArchive(
+  days: PeriodDays = 0,
+  source?: string | null,
+  limit?: number,
+  range?: DateRange | null,
+) {
   const { channelId } = useSelectedChannel();
   const d = days === 7 || days === 30 || days === 90 ? days : 0;
   const src = source && /^\d+$/.test(source) ? source : null;
   const lim = limit != null && Number.isFinite(limit) ? Math.min(100, Math.max(1, limit)) : null;
+  const rng =
+    range && Number.isFinite(range.from) && Number.isFinite(range.to) && range.from <= range.to
+      ? { from: localIsoDay(range.from), to: localIsoDay(range.to) }
+      : null;
   const search = new URLSearchParams();
-  if (d) search.set('days', String(d));
+  if (rng) {
+    // Свой диапазон побеждает пресет — days не шлём, чтобы сервер выбрал оконный путь по from/to.
+    search.set('from', rng.from);
+    search.set('to', rng.to);
+  } else if (d) {
+    search.set('days', String(d));
+  }
   if (src) search.set('source', src);
   if (lim) search.set('limit', String(lim));
   const qs = search.toString();
   return useQuery({
     enabled: channelId != null,
-    queryKey: ['mentions-archive', channelId, d, src, lim],
+    queryKey: ['mentions-archive', channelId, d, src, lim, rng?.from ?? null, rng?.to ?? null],
     staleTime: STALE_ARCHIVE,
     queryFn: ({ signal }) =>
       apiGet(`/api/history/mentions${qs ? `?${qs}` : ''}`, MentionsSchema, { signal, channelId }),

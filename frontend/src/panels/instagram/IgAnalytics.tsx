@@ -47,9 +47,8 @@ export function IgAnalytics({ ig }: { ig: IgData }) {
         {/* A real WidgetGroup (TG parity): the cards gain Выше/Ниже/Переставить/Скрыть in the
             ⋯ menu — reorder/hide state persists per user, same as the TG feeds. */}
         <WidgetGroup id="ig-dynamics" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
-          {/* Daily metrics with a real page drill INTO it; each card windows the FULL
-              archive-backed series by its OWN period pills (per-widget период, TG parity).
-              homeKey → the ⋯ menu grows «На главную» (pinned copies render via igHome). */}
+          {/* Daily metrics with a real page drill. The feed top bar windows the full archive-backed
+              series; a pinned Home copy keeps its own saved period. */}
           <TrendCard title="Охват по дням" series={ig.series.reach} drillTo="/metrics/ig-reach" homeKey="ig-reach" defaultSize="half" />
           <FollowsByDayCard data={ig.series.follower} drillTo="/metrics/ig-follows" homeKey="ig-follows" />
         </WidgetGroup>

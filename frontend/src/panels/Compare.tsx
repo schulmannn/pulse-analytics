@@ -3,7 +3,7 @@ import { normalizeTgPosts, type NormalizedPost } from '@/lib/posts';
 import { fmt, pluralRu } from '@/lib/format';
 import { pctDelta } from '@/lib/delta';
 import { describeChange, explainChange } from '@/lib/whyChanged';
-import { useWidgetPeriod } from '@/lib/period';
+import { calendarWindowForPeriod, periodDateTimestamp, splitCalendarRows, useWidgetPeriod } from '@/lib/period';
 import { Skeleton } from '@/components/ui/skeleton';
 import { DeltaPill } from '@/components/DeltaPill';
 import { BarChart } from '@/components/BarChart';
@@ -70,7 +70,7 @@ function formatLabel(mediaType: string | null, albumSize: number): string {
 import { ErrorState } from '@/components/ErrorState';
 
 export function Compare() {
-  const { days } = useWidgetPeriod();
+  const { days, range } = useWidgetPeriod();
   const { data, isPending, isError, refetch } = useTgFull(0, { windowPair: true });
 
   if (isPending) return <CompareSkeleton />;
@@ -81,20 +81,13 @@ export function Compare() {
   const all = normalizeTgPosts(data?.posts ?? [], data?.channel ?? {});
 
   const now = Date.now();
-  const to = now;
-  const from = days > 0 ? now - days * DAY_MS : Number.NEGATIVE_INFINITY;
-  const span = to - from;
-  const prevFrom = from - span;
-
-  const cur: NormalizedPost[] = [];
-  const prev: NormalizedPost[] = [];
-  for (const post of all) {
-    if (!post.date) continue;
-    const t = Date.parse(post.date);
-    if (!Number.isFinite(t)) continue;
-    if (t >= from && t <= to) cur.push(post);
-    else if (t >= prevFrom && t < from) prev.push(post);
-  }
+  const selected = splitCalendarRows(
+    all,
+    calendarWindowForPeriod({ days, range }, now),
+    (post) => periodDateTimestamp(post.date),
+  );
+  const cur = selected.current;
+  const prev = selected.previous ?? [];
 
   if (cur.length === 0) {
     return (
@@ -104,12 +97,14 @@ export function Compare() {
 
   const a = aggregate(cur, members);
   const b = aggregate(prev, members);
-  const hasPrev = prev.length > 0;
+  const hasPrev = selected.previous != null && prev.length > 0;
 
   // For the "not enough history" explainer: the comparison needs data covering BOTH windows
   // (2×N days), while the archive of loaded posts may cover less — that's also why the Обзор
   // insight (graphs deltas from Telegram) can report a change this tab can't reproduce.
-  const periodDays = days;
+  const periodDays = range
+    ? Math.max(1, Math.ceil((range.to - range.from + 1) / DAY_MS))
+    : days;
   const oldestTs = all.reduce<number | null>((min, p) => {
     if (!p.date) return min;
     const t = Date.parse(p.date);
@@ -165,7 +160,10 @@ export function Compare() {
   const reachSeries = all.flatMap((post) =>
     post.date && Number.isFinite(Date.parse(post.date)) ? [{ day: post.date, v: post.reach }] : [],
   );
-  const why = hasPrev && days > 0 ? explainChange(reachSeries, days, now) : null;
+  // The structured driver engine currently accepts a rolling preset, not arbitrary boundaries.
+  // The comparison table above is exact for custom ranges; suppress only this prose instead of
+  // quietly explaining the fallback 30-day window.
+  const why = hasPrev && !range && days > 0 ? explainChange(reachSeries, days, now) : null;
   const whyMatchesTable = why?.current === a.views && why.previous === b.views;
   const whyStory =
     why && whyMatchesTable && !why.insufficient && why.direction !== 'flat' && why.drivers.length > 0
@@ -206,7 +204,7 @@ export function Compare() {
               </tbody>
             </table>
           </div>
-        ) : days === 0 ? (
+        ) : !range && days === 0 ? (
           <EmptyState
             title="Для режима «Всё время» нет предыдущего периода"
             reason="Выберите 7д / 30д / 90д, чтобы сравнить период с таким же окном до него."

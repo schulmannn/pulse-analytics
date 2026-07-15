@@ -24,6 +24,7 @@ describe('normalizeTgPosts', () => {
         },
       ],
       { username: 'pulse', memberCount: 1_000 },
+      { proxyThumbs: true },
     );
 
     expect(post).toMatchObject({
@@ -89,6 +90,38 @@ describe('normalizeTgPosts', () => {
     expect(post?.erv).toBeNull();
     expect(post?.virality).toBeNull();
     expect(post?.er).toBeCloseTo(4);
+  });
+
+  it('synthesizes the central proxy thumb only by explicit opt-in, but never overrides a raw thumb', () => {
+    const [photo] = normalizeTgPosts(
+      [{ id: 42, media_type: 'photo' }],
+      {},
+      { proxyThumbs: true },
+    );
+    expect(photo?.thumb).toBe('/api/tg/mtproto/thumb/42');
+    // An explicit thumb always wins over the proxy — «prefer an explicit post thumb».
+    const [withThumb] = normalizeTgPosts([{ id: 42, media_type: 'photo', thumb: '/real.jpg' }], {});
+    expect(withThumb?.thumb).toBe('/real.jpg');
+  });
+
+  it('withholds the central-only proxy thumb when proxyThumbs=false (non-central source)', () => {
+    // Non-central sources must NEVER get a possibly-wrong proxy cover — placeholder (null) instead.
+    const [photo] = normalizeTgPosts([{ id: 42, media_type: 'photo' }], {}, { proxyThumbs: false });
+    expect(photo?.thumb).toBeNull();
+    const [video] = normalizeTgPosts([{ id: 7, media_type: 'video' }], {}, { proxyThumbs: false });
+    expect(video?.thumb).toBeNull();
+    // An explicit thumb still shows even with proxies off.
+    const [explicit] = normalizeTgPosts(
+      [{ id: 9, media_type: 'photo', thumb: '/real.jpg' }],
+      {},
+      { proxyThumbs: false },
+    );
+    expect(explicit?.thumb).toBe('/real.jpg');
+  });
+
+  it('defaults to no synthesized thumb when the caller has not established a central source', () => {
+    const [photo] = normalizeTgPosts([{ id: 42, media_type: 'photo' }], {});
+    expect(photo?.thumb).toBeNull();
   });
 
   it('strips raw Telegram markdown from the display caption', () => {

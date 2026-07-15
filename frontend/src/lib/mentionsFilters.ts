@@ -152,8 +152,34 @@ export function buildMentionsTimeline(
   previousDaily: MentionDailyPoint[],
   days: PeriodDays,
   anchor: string | number = Date.now(),
+  range?: { from: string; to: string } | null,
 ): MentionsTimeline {
   const curMap = new Map(daily.map((p) => [p.day, p]));
+
+  // Custom range: zero-fill exactly the inclusive [from, to] calendar; the ghost is the immediately
+  // preceding equal-length window aligned by ordinal day (server returns it as `previous_daily`).
+  if (range && /^\d{4}-\d{2}-\d{2}$/.test(range.from) && /^\d{4}-\d{2}-\d{2}$/.test(range.to)) {
+    const len =
+      Math.round(
+        (Date.parse(`${range.to}T00:00:00Z`) - Date.parse(`${range.from}T00:00:00Z`)) / 86400000,
+      ) + 1;
+    const curDays: string[] = [];
+    const prevDays: string[] = [];
+    for (let i = 0; i < len; i++) {
+      curDays.push(shiftIsoDay(range.from, i));
+      prevDays.push(shiftIsoDay(range.from, i - len));
+    }
+    const prevMap = new Map(previousDaily.map((p) => [p.day, p]));
+    return {
+      values: curDays.map((d) => curMap.get(d)?.mentions ?? 0),
+      ghost: prevDays.map((d) => prevMap.get(d)?.mentions ?? 0),
+      labels: curDays.map(ddmmFromIso),
+      titles: curDays.map((d) => {
+        const c = curMap.get(d);
+        return `${ddmmFromIso(d)}: ${fmt.num(c?.mentions ?? 0)} упом · ${fmt.short(c?.views ?? 0)} просм`;
+      }),
+    };
+  }
 
   if (days === 0) {
     const sorted = [...daily].sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0));

@@ -10,6 +10,7 @@ import { ChartCardBody, ChartSection as WidgetChartSection } from '@/components/
 import { CompareStat, CompositionStat } from '@/components/CompareStat';
 import type { WidgetSize } from '@/lib/widgetPrefsStore';
 import { CHART_CYCLE, fmtDay, pairDelta, windowIgSeries, type Point, type WindowPair } from '@/lib/igMetrics';
+import { calendarWindowForPeriod, periodDateTimestamp, splitCalendarRows } from '@/lib/period';
 import type { WidgetPeriodValue } from '@/lib/period';
 import type { IgData } from '@/lib/useIgData';
 
@@ -155,10 +156,7 @@ export function KpiHero({
   );
 }
 
-/** Daily gross-follows bars — the second genuine IG daily series. Same per-widget-period card
-    contract as TrendCard (full series in, client-side windowing, own pills). The old «всего за
-    период» caption is gone: the figure lives in «Движение подписчиков» and couldn't follow a
-    per-widget window as static children. */
+/** Daily gross-follows bars — full series in, resolved feed/Home calendar window out. */
 export function FollowsByDayCard({ data, drillTo, id, homeKey, title = 'Подписки по дням' }: { data: Point[]; drillTo?: string; id?: string; homeKey?: string; title?: string }) {
   const pts = data.filter((p) => p.day !== 'total');
   return (
@@ -169,12 +167,16 @@ export function FollowsByDayCard({ data, drillTo, id, homeKey, title = 'Подп
       drillTo={drillTo}
       periodControl
       variants={(period: WidgetPeriodValue) => {
-        const w = pts.filter((p) => period.inRange(p.day));
+        const selected = splitCalendarRows(
+          pts,
+          calendarWindowForPeriod(period),
+          (point) => periodDateTimestamp(point.day),
+        );
+        const w = selected.current;
         const total = w.reduce((acc, p) => acc + p.value, 0);
-        const prev =
-          period.days !== 0 && w.length > 0 && pts.length >= 2 * w.length
-            ? pts.slice(-2 * w.length, -w.length).reduce((acc, p) => acc + p.value, 0)
-            : null;
+        const prev = selected.previous
+          ? selected.previous.reduce((acc, p) => acc + p.value, 0)
+          : null;
         const delta = prev != null && prev > 0 ? pctDelta(total, prev) : null;
         return [
           {
@@ -216,11 +218,8 @@ export function pickLabels(series: Point[]): string[] {
   return [first?.day ?? '', mid?.day ?? '', last?.day ?? ''].map(fmtDay);
 }
 
-/** A daily line chart for a metric that genuinely has a daily series (reach / new followers).
-    Renders as a WIDGET card with its OWN period pills (periodControl): the card takes the FULL
-    series and windows it client-side per the widget period — the archive-backed series is
-    already longer than any window, so no per-widget insights fan-out is needed. The chart rides
-    the widget's fill context as a VARIANT so it fills the fixed tile height. */
+/** A daily line chart for reach/new followers. Feed top bar owns its calendar window; a Home copy
+    uses the same code with its independently saved period. */
 export function TrendCard({ title, series, drillTo, id, homeKey, defaultSize }: { title: string; series: Point[]; drillTo?: string; id?: string; homeKey?: string; defaultSize?: WidgetSize }) {
   const pts = series.filter((p) => p.day !== 'total');
   return (
@@ -232,14 +231,18 @@ export function TrendCard({ title, series, drillTo, id, homeKey, defaultSize }: 
       defaultSize={defaultSize}
       periodControl
       variants={(period: WidgetPeriodValue) => {
-        const w = pts.filter((p) => period.inRange(p.day));
+        const selected = splitCalendarRows(
+          pts,
+          calendarWindowForPeriod(period),
+          (point) => periodDateTimestamp(point.day),
+        );
+        const w = selected.current;
         // Steep anatomy: the window's total + the MANDATORY comparison vs the previous
         // same-length window (honest: none on «Всё» or when the archive is too short).
         const total = w.reduce((acc, p) => acc + p.value, 0);
-        const prev =
-          period.days !== 0 && w.length > 0 && pts.length >= 2 * w.length
-            ? pts.slice(-2 * w.length, -w.length).reduce((acc, p) => acc + p.value, 0)
-            : null;
+        const prev = selected.previous
+          ? selected.previous.reduce((acc, p) => acc + p.value, 0)
+          : null;
         const delta = prev != null && prev > 0 ? pctDelta(total, prev) : null;
         return [
           {

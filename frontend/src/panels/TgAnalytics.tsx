@@ -12,7 +12,13 @@ import { breakdownVariants, seriesBarValuesVariant } from '@/components/widgets/
 import { pctDelta } from '@/lib/delta';
 import { DivergingBars } from '@/components/DivergingBars';
 import { EmptyState } from '@/components/EmptyState';
-import { useWidgetPeriod } from '@/lib/period';
+import {
+  calendarWindowForDays,
+  calendarWindowForPeriod,
+  splitCalendarRows,
+  useWidgetPeriod,
+} from '@/lib/period';
+import type { CalendarWindow } from '@/lib/period';
 import { cn } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
 
@@ -65,12 +71,15 @@ interface GraphSeriesOpts {
   includeToday?: boolean;
 }
 
-/** Rich-expand windowing for a graphs (daily-flow) series: the last `days` points (0 = «Всё»),
-    with ms-timestamp labels + RU tooltips. A graphs point ≈ one day, so slicing by count windows
-    by day; a shorter server series just returns all it has (honest — never fabricates points).
-    Optional opts: drop today's partial point («Включая сегодня» off) and bucket the window by
-    ISO week (Monday anchor) or calendar month — sums, since these are flow metrics. */
-function windowGraphSeries(values: number[], xs: number[], days: number, unit: string, opts?: GraphSeriesOpts) {
+/** Rich-expand windowing for a graphs (daily-flow) series over a CALENDAR window (`win`, epoch ms;
+    `null` = «Всё»), with ms-timestamp labels + RU tooltips. Windowing by date — not by slicing the
+    last N points — is what makes the series honour the page top bar (including a custom «Свой»
+    range) and show the true current window even when the archive is stale or gappy. Points whose
+    timestamp falls in [win.from, win.to] are kept; a series without usable timestamps returns all it
+    has (honest — never fabricates points). Optional opts: drop today's partial point («Включая
+    сегодня» off) and bucket the window by ISO week (Monday anchor) or calendar month — sums, since
+    these are flow metrics. */
+export function windowGraphSeries(values: number[], xs: number[], win: CalendarWindow | null, unit: string, opts?: GraphSeriesOpts) {
   let vals = values;
   let xss = xs;
   if (opts?.includeToday === false && xss.length) {
@@ -85,9 +94,13 @@ function windowGraphSeries(values: number[], xs: number[], days: number, unit: s
       xss = xss.slice(0, -1);
     }
   }
-  const n = days === 0 ? vals.length : Math.min(days, vals.length);
-  let wValues = vals.slice(-n);
-  let wxs = xss.slice(-n);
+  const selected = splitCalendarRows(
+    vals.map((value, index) => ({ value, timestamp: Number(xss[index] ?? Number.NaN) })),
+    win,
+    (row) => row.timestamp,
+  );
+  let wValues = selected.current.map((row) => row.value);
+  let wxs = selected.current.map((row) => row.timestamp);
   const grain = opts?.grain ?? 'day';
   if (grain !== 'day') {
     const buckets = new Map<string, { sum: number; anchor: number }>();
@@ -119,11 +132,13 @@ function windowGraphSeries(values: number[], xs: number[], days: number, unit: s
   const titles = wValues.map((v, i) => `${labels[i]}: ${fmt.num(v)} ${unit}${suffix}`);
   // Headline for the steep card anatomy: the window's total + the PREVIOUS same-length window's
   // total (pre-bucketing daily values — grain only re-shapes the chart). prevTotal is null when
-  // the comparison would be dishonest: «Всё» has no previous window, and a partial previous
-  // window (fewer than n daily points before the visible slice) never fabricates one.
+  // the comparison would be dishonest: «Всё» has no previous window, there are no timestamps to
+  // place the previous window on, or the archive doesn't reach back far enough to cover it (a
+  // partial comparison we never fabricate).
   const total = wValues.reduce((acc, v) => acc + v, 0);
-  const prevSlice = days === 0 || vals.length < 2 * n ? null : vals.slice(-2 * n, -n);
-  const prevTotal = prevSlice ? prevSlice.reduce((acc, v) => acc + v, 0) : null;
+  const prevTotal = selected.previous
+    ? selected.previous.reduce((sum, row) => sum + row.value, 0)
+    : null;
   return { values: wValues, labels, titles, total, prevTotal };
 }
 
@@ -138,9 +153,6 @@ function deriveTgAnalytics(
   inRange: (dateISO: string | null | undefined) => boolean,
 ) {
   const vs = full?.views_summary;
-  const posts = normalizeTgPosts(full?.posts ?? [], full?.channel ?? {}).filter((post) =>
-    inRange(post.date),
-  );
 
   // 2) Views by day — «dd.mm» keys sorted with year-rollover inference (Dec < Jan across NY).
   const viewsByDayRaw: Record<string, number> = vs?.views_by_day ?? {};
@@ -152,56 +164,6 @@ function deriveTgAnalytics(
   // Ghost overlay = the previous equal-length window (the "vs прошлый период" comparison on the chart).
   const prev14Dates = sortedDates.slice(-28, -14);
   const vbdPrev = prev14Dates.length >= 2 ? prev14Dates.map((d) => Number(viewsByDayRaw[d] ?? 0)) : undefined;
-
-  // 3) Reactions by emoji
-  const emojiMap: Record<string, number> = {};
-  posts.forEach((p) => {
-    p.reactionsDetail.forEach((rd) => {
-      if (rd.emoji) emojiMap[rd.emoji] = (emojiMap[rd.emoji] ?? 0) + rd.count;
-    });
-  });
-  const topEmojis = Object.entries(emojiMap)
-    .map(([label, value]) => ({ label, value }))
-    .sort((a, b) => b.value - a.value)
-    .slice(0, 8);
-
-  // 4) Engagement composition
-  const engagementComposition = [
-    { label: 'Реакции', value: Number(vs?.total_reactions ?? 0), color: 'hsl(var(--chart-1))' },
-    { label: 'Репосты', value: Number(vs?.total_forwards ?? 0), color: 'hsl(var(--chart-2))' },
-    { label: 'Комментарии', value: Number(vs?.total_replies ?? 0), color: 'hsl(var(--chart-3))' },
-  ].filter((item) => item.value > 0);
-
-  // 5) Avg views by type
-  const typeNames: Record<string, string> = {
-    photo: 'Фото', video: 'Видео', poll: 'Опросы', document: 'Файлы',
-    text: 'Текст', audio: 'Аудио', voice: 'Голос', link: 'Ссылки',
-  };
-  const rawViewsByType = vs?.avg_views_by_type;
-  const viewsByType = rawViewsByType
-    ? Object.entries(rawViewsByType)
-        .map(([key, value]) => ({ label: typeNames[key] || key, value: Number(value) }))
-        .filter((item) => item.value > 0)
-        .sort((a, b) => b.value - a.value)
-    : [];
-
-  // 5b) Engagement quality by format — avg ERV per media type (which formats actually engage,
-  // not just which get views). Computed from the in-range posts.
-  const formatPerf = (() => {
-    const g: Record<string, { n: number; ervSum: number; ervN: number }> = {};
-    posts.forEach((p) => {
-      const t = p.mediaType || 'text';
-      (g[t] ??= { n: 0, ervSum: 0, ervN: 0 }).n++;
-      if (p.erv != null) {
-        g[t].ervSum += p.erv;
-        g[t].ervN++;
-      }
-    });
-    return Object.entries(g)
-      .map(([t, v]) => ({ label: typeNames[t] || t, avgErv: v.ervN ? v.ervSum / v.ervN : 0, n: v.n }))
-      .filter((x) => x.n > 0 && x.avgErv > 0)
-      .sort((a, b) => b.avgErv - a.avgErv);
-  })();
 
   // 6) Views & reposts — two separate widgets (daily FLOWS, so zero-based bars are honest).
   // (The subscriber-LEVEL «Рост подписчиков» card lived here; removed as a duplicate — the level
@@ -255,41 +217,13 @@ function deriveTgAnalytics(
   const joinedSeries = fSeries.find((s) => /join|подпис/i.test(s.name ?? '')) || fSeries[0];
   const leftSeries = fSeries.find((s) => /left|отпис/i.test(s.name ?? '')) || fSeries[1];
 
-  let net30Values: number[] = [];
-  let net30Titles: string[] = [];
-  let netSummaryStr = '';
-  let net30Total = 0;
-  let net30Prev: number | null = null;
-  let joinedTotal = 0;
-  let leftTotal = 0;
+  // Whole-payload existence probe only. Both follower-flow card bodies re-derive from the resolved
+  // page/Home window, so no all-time totals are allowed to leak into a bounded feed period.
+  const netGrowthPresent = Boolean(
+    joinedSeries && leftSeries && Math.min(joinedSeries.values.length, leftSeries.values.length) > 0,
+  );
 
-  if (joinedSeries && leftSeries) {
-    const mLen = Math.min(joinedSeries.values.length, leftSeries.values.length);
-    const netArr: number[] = [];
-    const fx = fGroup?.x ?? [];
-    for (let i = 0; i < mLen; i++) {
-      const jV = Number(joinedSeries.values[i] ?? 0);
-      const lV = Number(leftSeries.values[i] ?? 0);
-      joinedTotal += jV;
-      leftTotal += lV;
-      netArr.push(jV - lV);
-    }
-    net30Values = netArr.slice(-30);
-    const fx30 = fx.slice(-30);
-    net30Titles = net30Values.map((v, idx) => {
-      const ts = fx30[idx];
-      return `${ts ? formatMsDate(ts) : ''}: ${v >= 0 ? '+' : ''}${fmt.num(v)} за день`;
-    });
-    const netPeriod = joinedTotal - leftTotal;
-    netSummaryStr = `${netPeriod >= 0 ? '+' : ''}${fmt.num(netPeriod)} за период`;
-    // Steep headline for the net-growth card: this window's net + the previous 30-day window's
-    // net (honest null when the series is shorter than two windows).
-    net30Total = net30Values.reduce((acc, v) => acc + v, 0);
-    net30Prev = netArr.length >= 60 ? netArr.slice(-60, -30).reduce((acc, v) => acc + v, 0) : null;
-  }
-
-  // 12) Weekday — filtered by the active window (previously iterated ALL fetched posts, ignoring
-  // the period: a latent bug the per-widget model fixes — each weekday card honours its own window).
+  // 12) Weekday — filtered by the resolved feed/Home window (previously iterated all fetched posts).
   const wdViews: number[] = Array(7).fill(0);
   const wdCount: number[] = Array(7).fill(0);
   full?.posts?.forEach((p) => {
@@ -309,11 +243,10 @@ function deriveTgAnalytics(
 
   return {
     last14Dates, vbdValues, vbdTitles, vbdPrev,
-    topEmojis, engagementComposition, viewsByType, formatPerf,
     interGroup, viewSeries, shareSeries,
     vbsItems, nfsItems, langItems, sentItems,
     thData, hasHours, peakHourStr,
-    net30Values, net30Titles, netSummaryStr, net30Total, net30Prev, joinedTotal, leftTotal,
+    netGrowthPresent,
     wdAvgValues, wdCountValues, maxWdAvg, bestWdLabel,
   };
 }
@@ -323,9 +256,9 @@ function deriveTgAnalytics(
     and (b) graphs-driven series (period-agnostic anyway) render their full server window. */
 const alwaysInRange = () => true;
 
-// ── Focused per-widget derives ──────────────────────────────────────────────────────────────
-// The four post-derived charts recompute their OWN series from the card's window (variants-fn form
-// of ChartSection passes the widget's inRange). Focused helpers instead of re-running the whole
+// ── Focused period derives ──────────────────────────────────────────────────────────────────
+// Post-derived charts recompute from the resolved feed/Home window (variants-fn form passes
+// inRange). Focused helpers avoid re-running the whole
 // deriveTgAnalytics pass — each touches only the ≤100 fetched posts it needs.
 
 const TYPE_NAMES: Record<string, string> = {
@@ -431,9 +364,59 @@ function deriveWeekday(full: TgFull | undefined, inRange: InRange) {
   return { wdAvgValues, wdCountValues, maxWdAvg, bestWdLabel };
 }
 
-/** «лучший день» caption under «По дням недели» — reads the card's OWN window (useWidgetPeriod),
-    so the best-day claim matches the bars shown, not the panel default. Rendered inside the
-    ChartSection body → inside its WidgetPeriodProvider. */
+/** Joined, left and signed net follower flows over one resolved calendar window. */
+export function deriveFollowerFlows(graphs: TgGraphs | undefined, win: CalendarWindow | null) {
+  const empty = {
+    values: [] as number[],
+    titles: [] as string[],
+    total: 0,
+    prevTotal: null as number | null,
+    joinedTotal: 0,
+    leftTotal: 0,
+  };
+  const fGroup = graphs?.followers;
+  const fSeries = fGroup?.series ?? [];
+  const joined = fSeries.find((s) => /join|подпис/i.test(s.name ?? '')) || fSeries[0];
+  const left = fSeries.find((s) => /left|отпис/i.test(s.name ?? '')) || fSeries[1];
+  if (!joined || !left) return empty;
+  const fx = fGroup?.x ?? [];
+  const mLen = Math.min(joined.values.length, left.values.length);
+  const rows: Array<{ timestamp: number; joined: number; left: number; net: number }> = [];
+  for (let i = 0; i < mLen; i++) {
+    const joinedValue = Number(joined.values[i] ?? 0);
+    const leftValue = Number(left.values[i] ?? 0);
+    rows.push({
+      timestamp: Number(fx[i] ?? Number.NaN),
+      joined: joinedValue,
+      left: leftValue,
+      net: joinedValue - leftValue,
+    });
+  }
+  const selected = splitCalendarRows(rows, win, (row) => row.timestamp);
+  const values = selected.current.map((row) => row.net);
+  const titles = selected.current.map((row) => {
+    const label = Number.isFinite(row.timestamp) ? formatMsDate(row.timestamp) : '';
+    return `${label}: ${row.net >= 0 ? '+' : ''}${fmt.num(row.net)} за день`;
+  });
+  return {
+    values,
+    titles,
+    total: values.reduce((sum, value) => sum + value, 0),
+    prevTotal: selected.previous
+      ? selected.previous.reduce((sum, row) => sum + row.net, 0)
+      : null,
+    joinedTotal: selected.current.reduce((sum, row) => sum + row.joined, 0),
+    leftTotal: selected.current.reduce((sum, row) => sum + row.left, 0),
+  };
+}
+
+/** Backward-compatible focused shape used by the net-growth card and its tests. */
+export function deriveNetGrowth(graphs: TgGraphs | undefined, win: CalendarWindow | null) {
+  const { values, titles, total, prevTotal } = deriveFollowerFlows(graphs, win);
+  return { values, titles, total, prevTotal };
+}
+
+/** «Лучший день» reads the same resolved window as its chart. */
 function WeekdayBestDay({ full }: { full: TgFull | undefined }) {
   const { inRange } = useWidgetPeriod();
   const { bestWdLabel } = deriveWeekday(full, inRange);
@@ -512,14 +495,15 @@ export function TgAnalytics({
   campaign,
 }: { group?: TgAnalyticsGroup; campaign?: TgAnalyticsCampaign } = {}) {
   const inGroup = (g: TgAnalyticsGroup) => !group || group === g;
-  // ONE wide fetch (limit 100 = server cap): every widget below filters this shared payload to its
-  // own window. No global period any more — each ChartSection carries its own 7д/30д/90д/Всё pill.
+  // ONE wide fetch (limit 100 = server cap): every widget below filters this shared payload to the
+  // resolved window. Source feeds take it from the shared top bar; Home widgets keep their own
+  // saved period. ChartSection owns this distinction through PagePeriodProvider.
   const { data: full, isPending: isFullPending } = useTgFull(0);
   const { data: graphs, isPending: isGraphsPending } = useTgGraphs();
 
   // Panel-level derive over the WHOLE fetched payload (alwaysInRange): section-existence gates +
   // the KPI ledger snapshot + graphs-driven series. Post-derived CHART VALUES are re-derived
-  // per-card inside TgWidgetBody from each card's own window.
+  // inside TgWidgetBody from the resolved page/Home-widget window.
   const derived = useMemo(() => deriveTgAnalytics(full, graphs, alwaysInRange), [full, graphs]);
 
   if (isFullPending || (group !== 'content' && isGraphsPending)) {
@@ -532,11 +516,10 @@ export function TgAnalytics({
 
   const {
     last14Dates, vbdValues, vbdTitles, vbdPrev,
-    topEmojis, engagementComposition, viewsByType, formatPerf,
     interGroup, viewSeries, shareSeries,
     vbsItems, nfsItems, langItems, sentItems,
     thData, hasHours, peakHourStr,
-    net30Values, net30Titles, net30Total, net30Prev, joinedTotal, leftTotal,
+    netGrowthPresent,
     maxWdAvg,
   } = derived;
   const wdLabels = WD_LABELS;
@@ -545,18 +528,13 @@ export function TgAnalytics({
   // post-derived sections keep only its members, and composition/views-by-type switch from the
   // channel-wide views_summary to the campaign's own posts (the summary can't be campaign-scoped).
   // `keep` is a pass-through when no campaign is active, so the non-campaign path is byte-identical.
-  const campaignActive = !!campaign?.active;
   const keep: Keep = campaign?.active ? campaign.inCampaign : keepAll;
   // Whole-payload (alwaysInRange) versions gate section EXISTENCE — same policy as elsewhere, so a
   // narrow card window that happens to be empty doesn't make the section vanish (its own empty shows).
-  const emojiItems = campaignActive ? deriveEmojis(full, alwaysInRange, keep) : topEmojis;
-  const formatPerfItems = campaignActive ? deriveFormatPerf(full, alwaysInRange, keep) : formatPerf;
-  const compositionItems = campaignActive
-    ? deriveCompositionFromPosts(full, alwaysInRange, keep)
-    : engagementComposition;
-  const viewsByTypeItems = campaignActive
-    ? deriveViewsByTypeFromPosts(full, alwaysInRange, keep)
-    : viewsByType;
+  const emojiItems = deriveEmojis(full, alwaysInRange, keep);
+  const formatPerfItems = deriveFormatPerf(full, alwaysInRange, keep);
+  const compositionItems = deriveCompositionFromPosts(full, alwaysInRange, keep);
+  const viewsByTypeItems = deriveViewsByTypeFromPosts(full, alwaysInRange, keep);
 
   return (
     <div className="space-y-6">
@@ -608,7 +586,7 @@ export function TgAnalytics({
           />
         )}
 
-        {/* Пост-производный: топ эмодзи считаются по постам ОКНА виджета (variants-fn form).
+        {/* Пост-производный: топ эмодзи считаются по постам выбранного окна (variants-fn form).
             Под фильтром кампании — только по её публикациям из текущего источника. */}
         {inGroup('content') && emojiItems.length > 0 && (
           <ChartSection
@@ -622,18 +600,42 @@ export function TgAnalytics({
           />
         )}
 
-        {/* Без кампании — серверная сводка (vs.total_*, период-агностично). С кампанией — по её
-            публикациям источника (сводку нельзя ограничить кампанией). */}
+        {/* Всегда из публикаций выбранного окна; keep дополнительно ограничивает кампанией. */}
         {inGroup('content') && compositionItems.length > 0 && (
-          <ChartSection title="Состав вовлечённости" variants={breakdownVariants(compositionItems.map((c) => ({ label: c.label, value: c.value, display: fmt.num(c.value), color: c.color })))} />
+          <ChartSection
+            title="Состав вовлечённости"
+            periodControl
+            variants={(period) =>
+              breakdownVariants(
+                deriveCompositionFromPosts(full, period.inRange, keep).map((c) => ({
+                  label: c.label,
+                  value: c.value,
+                  display: fmt.num(c.value),
+                  color: c.color,
+                })),
+              )
+            }
+          />
         )}
 
-        {/* Без кампании — серверная сводка (vs.avg_views_by_type). С кампанией — по её публикациям. */}
+        {/* Средний охват формата — по публикациям выбранного окна и выбранной кампании. */}
         {inGroup('content') && viewsByTypeItems.length > 0 && (
-          <ChartSection title="Ср. охват по типу" variants={breakdownVariants(viewsByTypeItems.map((t) => ({ label: t.label, value: t.value, display: fmt.num(t.value) })))} />
+          <ChartSection
+            title="Ср. охват по типу"
+            periodControl
+            variants={(period) =>
+              breakdownVariants(
+                deriveViewsByTypeFromPosts(full, period.inRange, keep).map((t) => ({
+                  label: t.label,
+                  value: t.value,
+                  display: fmt.num(t.value),
+                })),
+              )
+            }
+          />
         )}
 
-        {/* Пост-производный: средний ERV по формату — по постам окна виджета (и кампании, если выбрана). */}
+        {/* Пост-производный: средний ERV по формату — по постам выбранного окна и кампании. */}
         {inGroup('content') && formatPerfItems.length > 0 && (
           <ChartSection
             title="Вовлечённость по формату"
@@ -662,22 +664,22 @@ export function TgAnalytics({
             expand={{
               grainable: true,
               renderExpanded: (days, grain) => {
-                const w = windowGraphSeries(viewSeries.values, interGroup.x, days, 'просмотров', { grain });
+                const w = windowGraphSeries(viewSeries.values, interGroup.x, calendarWindowForDays(days), 'просмотров', { grain });
                 return <LineChart values={w.values} labels={w.labels} titles={w.titles} markAnomalies markExtremes emphasizeLastLabel />;
               },
               renderExpandedBar: (days, grain) => {
-                const w = windowGraphSeries(viewSeries.values, interGroup.x, days, 'просмотров', { grain });
+                const w = windowGraphSeries(viewSeries.values, interGroup.x, calendarWindowForDays(days), 'просмотров', { grain });
                 return <BarChart values={w.values} labels={w.labels} titles={w.titles} />;
               },
-              statsFor: (days, grain) => windowGraphSeries(viewSeries.values, interGroup.x, days, 'просмотров', { grain }).values,
+              statsFor: (days, grain) => windowGraphSeries(viewSeries.values, interGroup.x, calendarWindowForDays(days), 'просмотров', { grain }).values,
             }}
             seriesOptions
             periodControl
             variants={(period, series) => {
-              // Windowed by the WIDGET period (follows the page by default) through the
-              // edit-dialog display opts; the steep body adds the window total + the mandatory
-              // comparison vs the previous window (honest null on «Всё»).
-              const w = windowGraphSeries(viewSeries.values, interGroup.x, period.days, 'просмотров', series);
+              // Windowed by the WIDGET period (follows the page top bar — preset AND custom «Свой»
+              // range — by default) through the edit-dialog display opts; the steep body adds the
+              // window total + the mandatory comparison vs the previous window (honest null on «Всё»).
+              const w = windowGraphSeries(viewSeries.values, interGroup.x, calendarWindowForPeriod(period), 'просмотров', series);
               const delta = w.prevTotal != null && w.prevTotal > 0 ? pctDelta(w.total, w.prevTotal) : null;
               const caption = delta ? 'к пред. периоду' : period.days === 0 ? 'за всё время' : undefined;
               return [
@@ -714,19 +716,19 @@ export function TgAnalytics({
             expand={{
               grainable: true,
               renderExpanded: (days, grain) => {
-                const w = windowGraphSeries(shareSeries.values, interGroup.x, days, 'репостов', { grain });
+                const w = windowGraphSeries(shareSeries.values, interGroup.x, calendarWindowForDays(days), 'репостов', { grain });
                 return <LineChart values={w.values} labels={w.labels} titles={w.titles} markAnomalies markExtremes emphasizeLastLabel />;
               },
               renderExpandedBar: (days, grain) => {
-                const w = windowGraphSeries(shareSeries.values, interGroup.x, days, 'репостов', { grain });
+                const w = windowGraphSeries(shareSeries.values, interGroup.x, calendarWindowForDays(days), 'репостов', { grain });
                 return <BarChart values={w.values} labels={w.labels} titles={w.titles} />;
               },
-              statsFor: (days, grain) => windowGraphSeries(shareSeries.values, interGroup.x, days, 'репостов', { grain }).values,
+              statsFor: (days, grain) => windowGraphSeries(shareSeries.values, interGroup.x, calendarWindowForDays(days), 'репостов', { grain }).values,
             }}
             seriesOptions
             periodControl
             variants={(period, series) => {
-              const w = windowGraphSeries(shareSeries.values, interGroup.x, period.days, 'репостов', series);
+              const w = windowGraphSeries(shareSeries.values, interGroup.x, calendarWindowForPeriod(period), 'репостов', series);
               const delta = w.prevTotal != null && w.prevTotal > 0 ? pctDelta(w.total, w.prevTotal) : null;
               const caption = delta ? 'к пред. периоду' : period.days === 0 ? 'за всё время' : undefined;
               return [
@@ -787,51 +789,66 @@ export function TgAnalytics({
           </ChartSection>
         )}
 
-        {inGroup('dynamics') && net30Values.length > 0 && (
+        {inGroup('dynamics') && netGrowthPresent && (
           // Single-variant (no type switcher) so the diverging bars render THROUGH the widget's
           // fill context and fill the tile — as bare children they'd sit at the fixed ~120px and
           // leave dead space. The «прирост» total stays as the caption below.
           <ChartSection
             // The window lives in the CAPTION, not the title (аудит: «(30д)» в заголовке читался
-            // как хардкод рядом с управляемыми окнами соседей). This card's window IS fixed —
-            // net30Values derives panel-level from the last 30 days; wiring it to a per-widget
-            // period is the unified-feed follow-up.
+            // как хардкод рядом с управляемыми окнами соседей). The body now follows the page top
+            // bar (preset AND custom «Свой» range) via deriveNetGrowth — no longer a fixed 30-day
+            // slice; existence is still gated by the whole payload so a narrow empty window
+            // doesn't make the section vanish.
             title="Чистый прирост подписчиков"
             drillTo="/metrics/subscribers"
-            variants={[
-              {
-                key: 'bar',
-                label: 'Столбцы',
-                render: (
-                  <ChartCardBody
-                    value={`${net30Total >= 0 ? '+' : '−'}${fmt.kpi(Math.abs(net30Total))}`}
-                    delta={net30Prev != null && net30Prev > 0 && net30Total >= 0 ? pctDelta(net30Total, net30Prev) : null}
-                    caption="окно 30 дней"
-                  >
-                    <DivergingBars values={net30Values} titles={net30Titles} />
-                  </ChartCardBody>
-                ),
-              },
-            ]}
+            periodControl
+            variants={(period) => {
+              const w = deriveNetGrowth(graphs, calendarWindowForPeriod(period));
+              const delta = w.prevTotal != null && w.prevTotal > 0 && w.total >= 0 ? pctDelta(w.total, w.prevTotal) : null;
+              const caption = delta ? 'к пред. периоду' : period.days === 0 && !period.range ? 'за всё время' : 'за период';
+              return [
+                {
+                  key: 'bar',
+                  label: 'Столбцы',
+                  render:
+                    w.values.length > 0 ? (
+                      <ChartCardBody
+                        value={`${w.total >= 0 ? '+' : '−'}${fmt.kpi(Math.abs(w.total))}`}
+                        delta={delta}
+                        caption={caption}
+                      >
+                        <DivergingBars values={w.values} titles={w.titles} />
+                      </ChartCardBody>
+                    ) : (
+                      <EmptyState title="Нет данных за выбранный период." />
+                    ),
+                },
+              ];
+            }}
           />
         )}
 
-        {inGroup('dynamics') && (joinedTotal > 0 || leftTotal > 0) && (
+        {inGroup('dynamics') && netGrowthPresent && (
           <ChartSection
             title="Динамика оттока"
-            variants={breakdownVariants(
-              [
-                { label: 'Подписалось', value: joinedTotal, display: fmt.num(joinedTotal), color: 'hsl(var(--brand-verdant))' },
-                { label: 'Отписалось', value: leftTotal, display: fmt.num(leftTotal), color: 'hsl(var(--brand-ember))' },
-              ].filter((i) => i.value > 0),
-            )}
+            periodControl
+            variants={(period) => {
+              const flow = deriveFollowerFlows(graphs, calendarWindowForPeriod(period));
+              if (flow.values.length === 0) {
+                return [{ key: 'list', label: 'Список', render: <EmptyState title="Нет данных за выбранный период." /> }];
+              }
+              return breakdownVariants([
+                { label: 'Подписалось', value: flow.joinedTotal, display: fmt.num(flow.joinedTotal), color: 'hsl(var(--brand-verdant))' },
+                { label: 'Отписалось', value: flow.leftTotal, display: fmt.num(flow.leftTotal), color: 'hsl(var(--brand-ember))' },
+              ]);
+            }}
           />
         )}
 
         {/* Раньше оба графика жили в одной двойной секции — её ячейка была вдвое выше соседних и
             оставляла в сетке огромную пустую область. Теперь каждая секция — своя ячейка. Обе —
-            пост-производные: считаются по постам ОКНА виджета (variants-fn + per-widget caption).
-            Раньше они игнорировали период вовсе (шли по ВСЕМ постам) — per-widget модель это чинит. */}
+            пост-производные: считаются по постам выбранного окна. Раньше они игнорировали период
+            вовсе и шли по всем постам. */}
         {inGroup('audience') && maxWdAvg > 0 && (
           <ChartSection
             title="По дням недели"

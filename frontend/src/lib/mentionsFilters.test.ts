@@ -120,6 +120,30 @@ describe('buildMentionsTimeline', () => {
     expect(t.values).toEqual([4, 2]);
     expect(t.labels).toEqual(['01.05', '15.06']);
   });
+
+  it('zero-fills a custom range to exactly its inclusive day count', () => {
+    // 5-day inclusive window [10..14 июня]; range wins over the days arg (passed 0 here).
+    const daily = [point('2026-06-10', 3), point('2026-06-14', 5)];
+    const t = buildMentionsTimeline(daily, [], 0, '2026-06-14', { from: '2026-06-10', to: '2026-06-14' });
+    expect(t.values).toEqual([3, 0, 0, 0, 5]);
+    expect(t.labels).toEqual(['10.06', '11.06', '12.06', '13.06', '14.06']);
+  });
+
+  it('aligns a custom-range ghost to the preceding equal-length window', () => {
+    // Window [10..12] (3 days); previous window is [07..09]. Ordinal-first of previous → 07.06.
+    const daily = [point('2026-06-10', 4)];
+    const previous = [point('2026-06-07', 9)];
+    const t = buildMentionsTimeline(daily, previous, 0, '2026-06-12', { from: '2026-06-10', to: '2026-06-12' });
+    expect(t.values).toEqual([4, 0, 0]);
+    expect(t.ghost).toEqual([9, 0, 0]);
+  });
+
+  it('treats a single-day custom range as one bar', () => {
+    const daily = [point('2026-06-10', 7)];
+    const t = buildMentionsTimeline(daily, [], 0, '2026-06-10', { from: '2026-06-10', to: '2026-06-10' });
+    expect(t.values).toEqual([7]);
+    expect(t.labels).toEqual(['10.06']);
+  });
 });
 
 describe('mentionsDelta', () => {

@@ -31,7 +31,7 @@ test('metric drill opens and browser Back returns to the dashboard', async ({ pa
   await expect(page.locator('main')).toBeVisible();
 });
 
-test('overview period is shared by every widget and either control updates the page', async ({ page }) => {
+test('overview has one authoritative top-bar period and no card-local controls', async ({ page }) => {
   // Reproduce the production bug: old per-card settings disagreed with the 30д page header.
   await page.addInitScript(() => {
     localStorage.setItem(
@@ -47,23 +47,19 @@ test('overview period is shared by every widget and either control updates the p
 
   const pagePeriod = page.getByRole('group', { name: 'Период', exact: true });
   const widgetPeriods = page.getByRole('group', { name: 'Период страницы' });
-  await expect(widgetPeriods).toHaveCount(3);
+  await expect(pagePeriod).toHaveCount(1);
+  await expect(widgetPeriods).toHaveCount(0);
+  await expect(page.getByRole('group', { name: 'Период виджета' })).toHaveCount(0);
 
-  // The page default wins over every stale saved widget override.
+  // The page default wins over every stale saved widget override without rendering duplicate UI.
   await expect(pagePeriod.getByRole('button', { name: '30д' })).toHaveAttribute('aria-pressed', 'true');
-  for (const group of await widgetPeriods.all()) {
-    await expect(group.getByRole('button', { name: '30д' })).toHaveAttribute('aria-pressed', 'true');
-  }
   await expect(page.getByText('Просмотры · 30 дн.')).toBeVisible();
   const contextCard = page.getByRole('heading', { name: 'Главное изменение', exact: true }).locator('..').locator('..');
   const contextBefore = await contextCard.innerText();
 
-  // A card-level pill is now another handle for the same page period, not a private override.
-  await widgetPeriods.first().getByRole('button', { name: '7д' }).click();
+  // The sole top-bar control re-windows every card on the page.
+  await pagePeriod.getByRole('button', { name: '7д' }).click();
   await expect(pagePeriod.getByRole('button', { name: '7д' })).toHaveAttribute('aria-pressed', 'true');
-  for (const group of await widgetPeriods.all()) {
-    await expect(group.getByRole('button', { name: '7д' })).toHaveAttribute('aria-pressed', 'true');
-  }
   await expect(page.getByText('Просмотры · 7 дн.')).toBeVisible();
   await expect.poll(() => contextCard.innerText()).not.toBe(contextBefore);
 });

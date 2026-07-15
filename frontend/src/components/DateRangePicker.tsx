@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
+import { endOfLocalDay, shiftLocalDays, startOfLocalDay } from '@/lib/period';
 
 /**
  * Custom date-range picker (replaces the raw native <input type=date>). Refined Technical styling:
@@ -13,13 +14,6 @@ const MONTHS = [
   'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
   'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь',
 ];
-const DAY = 24 * 60 * 60 * 1000;
-
-function startOfDay(ms: number): number {
-  const d = new Date(ms);
-  d.setHours(0, 0, 0, 0);
-  return d.getTime();
-}
 function fmtDate(ms: number): string {
   return new Date(ms).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
@@ -50,9 +44,9 @@ interface Props {
 }
 
 export function DateRangePicker({ value, onApply, onReset }: Props) {
-  const todayStart = startOfDay(Date.now());
-  const [from, setFrom] = useState<number | null>(value ? startOfDay(value.from) : null);
-  const [to, setTo] = useState<number | null>(value ? startOfDay(value.to) : null);
+  const todayStart = startOfLocalDay(Date.now());
+  const [from, setFrom] = useState<number | null>(value ? startOfLocalDay(value.from) : null);
+  const [to, setTo] = useState<number | null>(value ? startOfLocalDay(value.to) : null);
   const [hover, setHover] = useState<number | null>(null);
   const [view, setView] = useState(() => {
     const base = new Date(value?.from ?? Date.now());
@@ -83,7 +77,7 @@ export function DateRangePicker({ value, onApply, onReset }: Props) {
     setView(new Date(d.getFullYear(), d.getMonth(), 1));
   };
   const presets: { label: string; run: () => void }[] = [
-    { label: 'Последние 14 дней', run: () => preset(todayStart - 13 * DAY, todayStart) },
+    { label: 'Последние 14 дней', run: () => preset(shiftLocalDays(todayStart, -13), todayStart) },
     {
       label: 'Этот месяц',
       run: () => {
@@ -97,7 +91,7 @@ export function DateRangePicker({ value, onApply, onReset }: Props) {
         const d = new Date();
         const f = new Date(d.getFullYear(), d.getMonth() - 1, 1);
         const t = new Date(d.getFullYear(), d.getMonth(), 0);
-        preset(f.getTime(), startOfDay(t.getTime()));
+        preset(f.getTime(), startOfLocalDay(t.getTime()));
       },
     },
     {
@@ -200,7 +194,7 @@ export function DateRangePicker({ value, onApply, onReset }: Props) {
         <button
           type="button"
           disabled={!canApply}
-          onClick={() => canApply && onApply({ from: startOfDay(from), to: startOfDay(to) + DAY - 1 })}
+          onClick={() => canApply && onApply({ from: startOfLocalDay(from), to: endOfLocalDay(to) })}
           className="btn-pill flex-1 bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
         >
           Применить
