@@ -16,7 +16,8 @@
 // из архива. Секция опциональна — без артефакта/данных письмо-ссылка уходит как раньше.
 const { assembleWeekInput, reportHasWeekBlock, weekSectionHtml } = require('../lib/weekDigest');
 
-function createReportScheduleJob({ db, log, sendEmail, emailShell, emailBtn, escHtml, emailConfigured }) {
+function createReportScheduleJob({ db, log, sendEmailDetailed, emailShell, emailBtn, escHtml, emailConfigured, now }) {
+  const clock = now || (() => new Date());
   const reportEmailHtml = (base, report, weekHtml) => emailShell(`Отчёт „${escHtml(report.name)}“`,
     `${weekHtml || ''}<p>Ваш регулярный отчёт Atlavue готов:</p>${emailBtn(`${base}/reports/${report.id}`, 'Открыть отчёт')}` +
     `<p style="color:#64748d;font-size:13px">Отчёт можно сохранить как PDF — кнопка «Печать» на странице отчёта.</p>`);
@@ -29,7 +30,7 @@ function createReportScheduleJob({ db, log, sendEmail, emailShell, emailBtn, esc
       console.log('[reports] schedule skipped: email not configured');
       return;
     }
-    const now = new Date();
+    const now = clock();
     const isMonday = now.getUTCDay() === 1;    // понедельник UTC
     const isFirst  = now.getUTCDate() === 1;   // 1-е число UTC
     let candidates = [];
@@ -90,10 +91,65 @@ function createReportScheduleJob({ db, log, sendEmail, emailShell, emailBtn, esc
           } catch (e) {
             log('warn', 'report_week_section_failed', { report_id: r.id, error: e.message });
           }
-          const ok = await sendEmail(r.email, `Atlavue — отчёт „${r.name}“`, reportEmailHtml(base, r, weekHtml));
-          if (ok) await db.markReportSent(r.id);
-          if (!ok) throw new Error('email send failed');
-          return { sent: true };
+          // Build the body FIRST, then take the durable reservation immediately before the provider.
+          // The jobs row already makes exactly one discovery send within its 24h-ish life, but Resend's
+          // Idempotency-Key only dedupes for 24h and the NEXT daily tick can fall outside that window —
+          // this own-side reservation is the durable at-most-once gate beyond provider retention. A
+          // crash AFTER reserving and before/while sending is intentionally fail-closed for the period:
+          // the re-claim rebuilds, reserve() returns false, and the period is skipped (one missed report
+          // is preferred over a duplicate).
+          const html = reportEmailHtml(base, r, weekHtml);
+          const reserved = await db.reserveReportDelivery(r.id, periodKey);
+          if (!reserved) {
+            log('info', 'report_email_period_reserved', { report_id: r.id, period: periodKey });
+            return { sent: false, alreadyReserved: true };
+          }
+          // Stable provider key from internal ids ONLY (never user text), ≤256 chars (validated in the
+          // email service too). Identical across the immediate retries so Resend collapses duplicates.
+          const providerKey = `report-email/${r.id}/${periodKey}`;
+          const result = await sendEmailDetailed(r.email, `Atlavue — отчёт „${r.name}“`, html, { idempotencyKey: providerKey });
+          switch (result.outcome) {
+            case 'sent': {
+              // Confirmed delivered: keep the reservation and stamp last_sent_at. A markReportSent
+              // failure AFTER confirmed delivery must NOT make the job retry/resend — the reservation
+              // is durable, so log safely and return terminal success anyway.
+              try {
+                await db.markReportSent(r.id);
+              } catch {
+                log('error', 'report_email_mark_failed', { report_id: r.id, period: periodKey });
+              }
+              return { sent: true, period: periodKey };
+            }
+            case 'ambiguous': {
+              // May or may not have sent: keep the reservation, DO NOT mark, and return terminal
+              // success. Intentionally favors one missed report over a duplicate.
+              log('warn', 'report_email_ambiguous', { report_id: r.id, period: periodKey, reason: result.reason });
+              return { sent: false, ambiguous: true };
+            }
+            case 'retryable': {
+              // HTTP 429 = provider explicitly rejected BEFORE sending (known-not-sent). Clear the
+              // EXACT reservation so the next daily tick can retry cleanly; only if the clear succeeds
+              // do we throw (jobs row → failed, re-claimable). If the clear fails, fail closed: return
+              // terminal so we never resend against a reservation we could not release.
+              let cleared = false;
+              try {
+                cleared = await db.clearReportDelivery(r.id, periodKey);
+              } catch {
+                log('error', 'report_email_reserve_clear_failed', { report_id: r.id, period: periodKey });
+                return { sent: false, retryableLocked: true };
+              }
+              if (cleared) throw new Error('report email rate-limited (known not sent)');
+              log('error', 'report_email_reserve_clear_failed', { report_id: r.id, period: periodKey });
+              return { sent: false, retryableLocked: true };
+            }
+            case 'rejected':
+            default: {
+              // Permanent rejection (invalid key/payload/auth): keep the reservation and go terminal
+              // for this period so we do not hammer the provider every daily tick. Actionable + safe.
+              log('error', 'report_email_rejected', { report_id: r.id, period: periodKey, status: result.status, name: result.name });
+              return { sent: false, rejected: true };
+            }
+          }
         });
         if (outcome.skipped) {
           log('info', 'report_email_deduped', { report_id: r.id, period: periodKey });

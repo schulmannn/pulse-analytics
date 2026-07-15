@@ -47,7 +47,7 @@ const EXPECTED_FUNCTIONS = [
   'recordTgSessionAttempt', 'recordTgSessionSuccess', 'recordTgSessionFailure',
   // reportsRepo
   'listReports', 'getReport', 'createReport', 'updateReport', 'deleteReport', 'listDueReports',
-  'markReportSent', 'listPostsWindow',
+  'markReportSent', 'reserveReportDelivery', 'clearReportDelivery', 'listPostsWindow',
   // campaignsRepo
   'listCampaigns', 'getCampaign', 'createCampaign', 'updateCampaign', 'deleteCampaign',
   'addCampaignPosts', 'removeCampaignPosts', 'listCampaignPosts', 'getCampaignSummary',

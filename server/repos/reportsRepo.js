@@ -116,6 +116,42 @@ function createReportsRepo({ pool, enabled }) {
     return rowCount > 0;
   }
 
+  /* Durable at-most-once reservation for a scheduled email send (019_report_delivery_attempts).
+     Resend's Idempotency-Key only dedupes for 24h; the next daily tick can fall outside that
+     window, so the job takes its OWN reservation right before calling the provider. Atomic and
+     actor-internal — no ownership arg because the scheduler already selected the row by id, and no
+     shape reaches routes.
+
+     reserveReportDelivery: claim `period` for `id` ONLY if that exact period is not already the
+     reserved one — an older/absent period is overwritten, an identical one is refused. The
+     `IS DISTINCT FROM` predicate is the whole gate: it matches (and updates) when the stored period
+     is NULL or a different value, and matches nothing when it already equals `period`. Returns true
+     only when THIS call took the reservation, so a duplicate discovery in the same period (double
+     cron tick, catch-up next to the anchored branch, second instance) gets false and does not send. */
+  async function reserveReportDelivery(id, period) {
+    if (!enabled || !id || !period) return false;
+    const { rowCount } = await pool.query(
+      `UPDATE reports
+          SET last_delivery_period = $2, last_delivery_attempt_at = now()
+        WHERE id = $1 AND last_delivery_period IS DISTINCT FROM $2`,
+      [id, period]);
+    return rowCount > 0;
+  }
+
+  /* clearReportDelivery: release the reservation ONLY when report id + the exact reserved period
+     still match — used after a known-not-sent (429) rejection so the next daily tick may retry the
+     same period cleanly. The exact-period WHERE guards against clearing a reservation that a newer
+     period has already overwritten. Returns true only when this exact reservation was cleared. */
+  async function clearReportDelivery(id, period) {
+    if (!enabled || !id || !period) return false;
+    const { rowCount } = await pool.query(
+      `UPDATE reports
+          SET last_delivery_period = NULL, last_delivery_attempt_at = NULL
+        WHERE id = $1 AND last_delivery_period = $2`,
+      [id, period]);
+    return rowCount > 0;
+  }
+
   // Посты канала за окно (архив ingest'а) — вход серверного недельного дайджеста (weekDigest.js).
   // Ридер посты до сих пор читал только фронт через mtproto/снапшоты; здесь — прямое чтение архива.
   // channelId обязан быть уже resolved через ownership (вызывающий берёт его из listChannels(uid)).
@@ -128,7 +164,7 @@ function createReportsRepo({ pool, enabled }) {
         ORDER BY date_published ASC`, [channelId, days]);
     return rows;
   }
-  return { REPORT_SCHEDULES, listReports, getReport, createReport, updateReport, deleteReport, listDueReports, markReportSent, listPostsWindow };
+  return { REPORT_SCHEDULES, listReports, getReport, createReport, updateReport, deleteReport, listDueReports, markReportSent, reserveReportDelivery, clearReportDelivery, listPostsWindow };
 }
 
 module.exports = { createReportsRepo };
