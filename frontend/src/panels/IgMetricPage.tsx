@@ -512,6 +512,7 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
               posts={pinnedPosts.map((post, i) => ({
                 key: post.id ?? i,
                 thumb: post.thumbnail_url ?? (post.media_type === 'VIDEO' ? null : post.media_url) ?? null,
+                thumbLabel: post.media_type === 'VIDEO' ? 'Видео' : 'Фото',
                 text: post.caption ? post.caption.slice(0, 140) : 'Без подписи',
                 value: fmt.short(Number(post.reach ?? post.views ?? 0)),
                 href: post.permalink ?? null,

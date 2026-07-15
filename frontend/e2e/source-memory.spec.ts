@@ -77,3 +77,22 @@ test('desktop restores the remembered channel for each network before the first 
   await expect(page).toHaveURL(/\/home$/);
   await expectSource(page, 'telegram_only');
 });
+
+test('shared routes keep Instagram after a direct Instagram load', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-1440', 'desktop source-switcher contract');
+  await bootSourceMemory(page);
+
+  // This is deliberately document navigation, not a client-side link. The production regression
+  // only appeared after a reload: /instagram selected IG in memory, but left pulse_network='tg'.
+  await page.goto('/instagram');
+  await expectSource(page, 'shared_source');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('pulse_network'))).toBe('ig');
+
+  await page.goto('/home');
+  await expectSource(page, 'shared_source');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('pulse_network'))).toBe('ig');
+
+  await page.goto('/reports');
+  await expectSource(page, 'shared_source');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('pulse_network'))).toBe('ig');
+});

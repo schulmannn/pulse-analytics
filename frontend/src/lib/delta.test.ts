@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { avgReachWindowDelta, dailyWindowDelta, pctDelta, subscriberChange, subscriberDelta, sumPostWindows } from '@/lib/delta';
+import {
+  avgReachWindowDelta,
+  dailyWindowDelta,
+  pctDelta,
+  splitDailyWindows,
+  subscriberChange,
+  subscriberDelta,
+  sumPostWindows,
+} from '@/lib/delta';
 
 describe('subscriberChange', () => {
   const now = Date.parse('2026-06-25T12:00:00.000Z');
@@ -99,6 +107,30 @@ describe('dailyWindowDelta', () => {
   it('returns null when a window has no data', () => {
     expect(dailyWindowDelta([{ day: '2026-06-24', views: 100 }], (r) => Number(r.views), 7, now)).toBeNull();
     expect(dailyWindowDelta(rows, (r) => Number(r.views), 0, now)).toBeNull(); // all-time
+  });
+
+  it('returns the exact rows behind the totals at a non-midnight boundary', () => {
+    const pair = splitDailyWindows(
+      [
+        { day: '2026-06-25', views: 25 },
+        { day: '2026-06-19', views: 75 },
+        // Midnight is before the rolling 7-day boundary (Jun 18 12:00), so this belongs to
+        // the previous window. Keeping that row in the returned slice prevents chart/rail drift.
+        { day: '2026-06-18', views: 40 },
+        { day: '2026-06-12', views: 60 },
+      ],
+      (row) => row.views,
+      7,
+      now,
+    );
+
+    expect(pair).not.toBeNull();
+    expect(pair?.current.rows.map((row) => row.day)).toEqual(['2026-06-25', '2026-06-19']);
+    expect(pair?.previous.rows.map((row) => row.day)).toEqual(['2026-06-18', '2026-06-12']);
+    expect(pair?.current.total).toBe(100);
+    expect(pair?.previous.total).toBe(100);
+    expect(dailyWindowDelta(pair ? [...pair.current.rows, ...pair.previous.rows] : [], (row) => row.views, 7, now))
+      .toEqual({ pct: 0, dir: 'flat' });
   });
 });
 

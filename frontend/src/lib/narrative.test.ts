@@ -32,6 +32,17 @@ describe('buildWeekNarrative', () => {
     expect(plain).not.toContain('тишина'); // по одному нулевому дню в обеих неделях — гейт молчит
   });
 
+  it('не оставляет скрытый пробел перед точкой вокруг inline-спарка', () => {
+    const nar = buildWeekNarrative(base);
+    const segments = nar.paragraphs.flat();
+    for (let i = 1; i < segments.length; i += 1) {
+      if (segments[i]?.kind !== 'spark') continue;
+      const before = segments[i - 1];
+      expect(before?.kind).toBe('text');
+      if (before?.kind === 'text') expect(before.text).not.toMatch(/\s$/u);
+    }
+  });
+
   it('атрибутирует тишине, когда пустых дней стало на 2+ больше', () => {
     const vals = [500, 500, 500, 500, 500, 500, 500, 700, 0, 0, 0, 700, 0, 500];
     const plain = norm(narrativeToPlain(buildWeekNarrative({ ...base, viewsDaily: mkSeries(vals) })));

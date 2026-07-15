@@ -21,6 +21,16 @@ export interface SubscriberHistoryRow {
   subscribers?: number | null;
 }
 
+export interface DailyWindowSlice<T> {
+  rows: T[];
+  total: number;
+}
+
+export interface DailyWindowPair<T> {
+  current: DailyWindowSlice<T>;
+  previous: DailyWindowSlice<T>;
+}
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export function pctDelta(
@@ -143,6 +153,47 @@ export function subscriberChange(
 }
 
 /**
+ * Split a daily FLOW archive into the current and previous rolling windows and calculate both
+ * totals in one pass. Callers use the returned rows for charts and the totals for labels, so the
+ * visual series, headline delta and comparison rail cannot silently choose different boundary
+ * days. Returns null unless both windows contain at least one valid point.
+ */
+export function splitDailyWindows<T extends { day: string }>(
+  rows: T[],
+  pick: (row: T) => number,
+  days: number,
+  now = Date.now(),
+): DailyWindowPair<T> | null {
+  if (!Number.isFinite(days) || days <= 0) return null;
+
+  const currentStart = now - days * DAY_MS;
+  const previousStart = now - days * 2 * DAY_MS;
+  const pair: DailyWindowPair<T> = {
+    current: { rows: [], total: 0 },
+    previous: { rows: [], total: 0 },
+  };
+
+  for (const row of rows) {
+    const timestamp = Date.parse(row.day);
+    if (!Number.isFinite(timestamp) || timestamp > now) continue;
+    const value = pick(row);
+    if (!Number.isFinite(value)) continue;
+
+    const target = timestamp >= currentStart
+      ? pair.current
+      : timestamp >= previousStart
+        ? pair.previous
+        : null;
+    if (!target) continue;
+    target.rows.push(row);
+    target.total += value;
+  }
+
+  if (pair.current.rows.length === 0 || pair.previous.rows.length === 0) return null;
+  return pair;
+}
+
+/**
  * Period-over-period delta for a daily FLOW metric (views / forwards / reactions) read
  * from the channel_daily archive — the same reliable source the subscriber delta uses.
  * Sums `pick(row)` over the current window [now-days, now] vs the previous window
@@ -155,32 +206,8 @@ export function dailyWindowDelta<T extends { day: string }>(
   days: number,
   now = Date.now(),
 ): MetricDelta | null {
-  if (!Number.isFinite(days) || days <= 0) return null;
-
-  const currentStart = now - days * DAY_MS;
-  const previousStart = now - days * 2 * DAY_MS;
-
-  let current = 0;
-  let previous = 0;
-  let hasCurrent = false;
-  let hasPrevious = false;
-
-  for (const row of rows) {
-    const timestamp = Date.parse(row.day);
-    if (!Number.isFinite(timestamp) || timestamp > now) continue;
-    const value = pick(row);
-    if (!Number.isFinite(value)) continue;
-    if (timestamp >= currentStart) {
-      current += value;
-      hasCurrent = true;
-    } else if (timestamp >= previousStart) {
-      previous += value;
-      hasPrevious = true;
-    }
-  }
-
-  if (!hasCurrent || !hasPrevious) return null;
-  return pctDelta(current, previous);
+  const pair = splitDailyWindows(rows, pick, days, now);
+  return pair ? pctDelta(pair.current.total, pair.previous.total) : null;
 }
 
 /**

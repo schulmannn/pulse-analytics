@@ -154,8 +154,9 @@ function buildIgStory(
     n(fmt.kpi(reach.cur), '/metrics/ig-reach'),
     t(' — на '),
     { kind: 'delta', pct },
-    // NBSP перед спарком: перенос не оставляет «⌇.» сиротой в начале строки (спарк клеится к слову).
-    t(` ${pct < 0 ? 'ниже' : 'выше'} предыдущей `),
+    // InlineSpark carries its own horizontal margin; trailing whitespace would remain in DOM text
+    // before the following full stop because the spark itself is aria-hidden.
+    t(` ${pct < 0 ? 'ниже' : 'выше'} предыдущей`),
     { kind: 'spark', values: ig.reachDaily.slice(-14).map((x) => x.v) },
     t('. '),
   ];
@@ -210,8 +211,7 @@ export function buildIgWeekNarrative(ig: NarrativeIgInput | null | undefined): W
         n(fmt.kpi(reach.cur), '/metrics/ig-reach'),
         t(', на '),
         { kind: 'delta', pct },
-        // NBSP перед спарком: перенос не оставляет «⌇.» сиротой в начале строки (спарк клеится к слову).
-    t(` ${pct < 0 ? 'ниже' : 'выше'} предыдущей `),
+        t(` ${pct < 0 ? 'ниже' : 'выше'} предыдущей`),
         { kind: 'spark', values: ig.reachDaily.slice(-14).map((x) => x.v) },
         t('. '),
       ]);
@@ -293,8 +293,7 @@ export function buildWeekNarrative(inp: NarrativeInput): WeekNarrative {
       n(fmt.kpi(curSum), '/metrics/views'),
       t(` ${pluralKpi(curSum, 'просмотр', 'просмотра', 'просмотров')} — на `),
       { kind: 'delta', pct },
-      // NBSP перед спарком: перенос не оставляет «⌇.» сиротой в начале строки (спарк клеится к слову).
-    t(` ${pct < 0 ? 'ниже' : 'выше'} предыдущей `),
+      t(` ${pct < 0 ? 'ниже' : 'выше'} предыдущей`),
       { kind: 'spark', values: series.slice(-14).map((x) => x.v) },
       t('. '),
     ];

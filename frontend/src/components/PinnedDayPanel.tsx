@@ -1,8 +1,10 @@
 import type { ReactNode } from 'react';
+import { MediaThumb } from '@/components/MediaThumb';
 
 export interface PinnedPostRow {
   key: string | number;
   thumb?: string | null;
+  thumbLabel?: string;
   text: string;
   value: string;
   /** In-app open (TG → PostDetailModal). */
@@ -71,13 +73,7 @@ export function PinnedDayPanel({
               {posts.map((p) => {
                 const inner = (
                   <>
-                    {p.thumb ? (
-                      <img src={p.thumb} alt="" referrerPolicy="no-referrer" className="h-8 w-8 shrink-0 rounded object-cover" />
-                    ) : (
-                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-muted text-2xs text-muted-foreground">
-                        текст
-                      </span>
-                    )}
+                    <MediaThumb src={p.thumb} label={p.thumbLabel} className="h-8 w-8" />
                     <span className="min-w-0 flex-1 truncate text-sm text-foreground">{p.text}</span>
                     <span className="shrink-0 text-sm font-medium tabular-nums">{p.value}</span>
                   </>
