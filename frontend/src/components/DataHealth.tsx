@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { useChannels, useCollectorStatus, useHistory } from '@/api/queries';
+import { useChannels, useCollectorStatus, useHistory, useTgQrStatus } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { freshness, latestHistoryDay } from '@/lib/freshness';
 import { fmt } from '@/lib/format';
@@ -8,10 +8,9 @@ import { cn } from '@/lib/utils';
 import { Icon } from '@/components/nav-icons';
 
 /**
- * "Состояние данных" — the data-health block (Figma Overview, right column). A small label + a
- * hairline-delimited row set (Источник / Последний сбор / Сборщик / API) with technical readouts in
- * scoped Roboto Mono, and a "Настроить сбор →" link. Central channels are live MTProto; collector
- * channels read /collector-status (version, last success, errors).
+ * "Состояние данных" keeps the selected channel's collection mode honest: managed MTProto,
+ * managed QR, or the external collector. The compact summary expands into source-specific health
+ * and sends repairable connections straight to the matching setup tab.
  */
 function Row({ label, value, tone }: { label: string; value: ReactNode; tone?: 'ok' | 'warn' | 'error' }) {
   const dot = tone === 'ok' ? 'bg-verdant' : tone === 'warn' ? 'bg-status-warn' : tone === 'error' ? 'bg-ember' : null;
@@ -32,22 +31,40 @@ export function DataHealth({ defaultOpen = false }: { defaultOpen?: boolean } = 
   const { data: channelsData } = useChannels();
   const current = channelsData?.channels.find((c) => c.id === channelId) ?? channelsData?.channels[0];
   const isCentral = current?.source === 'central';
-  const { data: collector } = useCollectorStatus(isCentral || !current ? null : current.id);
+  const isQr = current?.source === 'qr';
+  const isCollector = current?.source === 'collector' || current?.source == null;
+  const { data: collector } = useCollectorStatus(isCollector && current ? current.id : null);
+  const { data: qr } = useTgQrStatus(isQr);
   const { data: history } = useHistory(730);
   const fresh = freshness(latestHistoryDay(history), Date.now());
 
   const status = collector?.status;
-  const source = isCentral ? 'Telegram · MTProto' : 'Telegram · Collector';
-  const lastCollect = status?.last_success_at ? fmt.date(status.last_success_at) : fresh?.label ?? '—';
-  const collectorVer = status?.collector_version ? `v${status.collector_version}` : isCentral ? 'MTProto' : '—';
+  const qrState = qr?.connection_state;
+  const source = isCentral ? 'Telegram · MTProto' : isQr ? 'Telegram · QR' : 'Telegram · Collector';
+  const lastSuccess = isQr ? qr?.last_success_at : status?.last_success_at;
+  const lastCollect = lastSuccess ? fmt.date(lastSuccess) : fresh?.label ?? '—';
+  const collectionMode = isCentral
+    ? 'MTProto'
+    : isQr
+      ? 'Atlavue'
+      : status?.collector_version
+        ? `Collector v${status.collector_version}`
+        : 'Collector';
 
-  // API/health tone: collector error → error; stale → warn; otherwise ok.
+  // Exact QR auth state wins over freshness; transient and collector failures stay warnings/errors
+  // of their own instead of being flattened into a generic stale-data message.
   let apiTone: 'ok' | 'warn' | 'error' = 'ok';
   let apiText = '200 OK';
-  if (!isCentral && status?.last_error) {
+  if (isQr && qrState === 'reauth_required') {
+    apiTone = 'error';
+    apiText = 'нужен вход';
+  } else if (isQr && qrState === 'degraded') {
+    apiTone = 'warn';
+    apiText = 'временный сбой';
+  } else if (isCollector && status?.last_error) {
     apiTone = 'error';
     apiText = 'ошибка';
-  } else if (!isCentral && status?.stale) {
+  } else if (isCollector && status?.stale) {
     apiTone = 'warn';
     apiText = 'данные устарели';
   } else if (fresh?.stale) {
@@ -56,7 +73,28 @@ export function DataHealth({ defaultOpen = false }: { defaultOpen?: boolean } = 
   }
 
   const apiDot = apiTone === 'ok' ? 'bg-verdant' : apiTone === 'warn' ? 'bg-status-warn' : 'bg-ember';
-  const statusLabel = apiTone === 'ok' ? 'Данные актуальны' : apiTone === 'warn' ? 'Данные устарели' : 'Ошибка сбора';
+  const statusLabel =
+    isQr && qrState === 'reauth_required'
+      ? 'Нужно переподключить Telegram'
+      : isQr && qrState === 'degraded'
+        ? 'Сбор временно недоступен'
+        : apiTone === 'ok'
+          ? 'Данные актуальны'
+          : apiTone === 'warn'
+            ? 'Данные устарели'
+            : 'Ошибка сбора';
+  const connectionLink = isQr
+    ? qrState === 'reauth_required'
+      ? '/connect?source=telegram&tab=qr&action=reconnect'
+      : '/connect?source=telegram&tab=qr'
+    : isCollector
+      ? '/connect?source=telegram&tab=agent'
+      : null;
+  const connectionLabel = isQr && qrState === 'reauth_required'
+    ? 'Переподключить Telegram →'
+    : isQr
+      ? 'Открыть подключение →'
+      : 'Настроить collector →';
 
   return (
     <div>
@@ -79,14 +117,13 @@ export function DataHealth({ defaultOpen = false }: { defaultOpen?: boolean } = 
         <div className="mt-3 max-w-sm">
           <Row label="Источник" value={source} />
           <Row label="Последний сбор" value={lastCollect} />
-          <Row label="Сборщик" value={collectorVer} />
+          <Row label="Режим сбора" value={collectionMode} />
           <Row label="API" value={apiText} tone={apiTone} />
-          {/* «Подключить источник», не «Настроить сбор»: эта ссылка ведёт на /connect (хаб
-              подключений), а «Настроить сбор» в Настройках → Данные — соседняя строка в раздел
-              «Каналы». Один лейбл на двух разных назначениях в одной панели путал (проход №3). */}
-          <Link to="/connect" className="mt-3 inline-block text-sm font-medium text-primary hover:underline">
-            Подключить источник →
-          </Link>
+          {connectionLink && (
+            <Link to={connectionLink} className="mt-3 inline-block text-sm font-medium text-primary hover:underline">
+              {connectionLabel}
+            </Link>
+          )}
         </div>
       )}
     </div>

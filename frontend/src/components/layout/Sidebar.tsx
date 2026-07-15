@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
-import { useHistory } from '@/api/queries';
+import { useChannels, useHistory, useTgQrStatus } from '@/api/queries';
+import { useSelectedChannel } from '@/lib/channel-context';
 import { openCommandPalette } from '@/lib/command-palette';
+import { sidebarHealth } from '@/lib/connectionHealth';
 import { PLAN_LABEL, usePlan } from '@/lib/plan';
 import { useMediaQuery } from '@/lib/useMediaQuery';
 import { useSidebarMode } from '@/lib/sidebar';
@@ -168,13 +170,23 @@ function SidebarNavGroup({ label, items, rail }: { label?: string; items: NavLin
 /** Data-freshness line — a status dot + "обновлено <time>" (mono), sitting directly under the
     channel card. Rail: dot only, the full text moves into the title tooltip. */
 function SidebarStatus({ rail }: { rail?: boolean }) {
+  const { channelId } = useSelectedChannel();
+  const { data: channelsData } = useChannels();
+  const current = channelsData?.channels.find((channel) => channel.id === channelId) ?? channelsData?.channels[0];
+  const isQr = current?.source === 'qr';
+  const { data: qrStatus } = useTgQrStatus(isQr);
   const { data: history } = useHistory(730);
   const fresh = freshness(latestHistoryDay(history), Date.now());
+  const health = sidebarHealth({
+    source: current?.source,
+    connectionState: isQr ? qrStatus?.connection_state ?? null : null,
+    fresh,
+  });
   // Reserve this row's height even before freshness resolves — the same flex row with a muted dot and
   // an invisible (but same-metrics) label — so the nav below doesn't jump down when it appears. That
   // pop-in was the shell-wide layout shift measured on every route (see e2e/layout-shift.spec.ts).
   const rowClass = cn('flex items-center gap-2 pt-1 text-2xs text-muted-foreground', rail ? 'justify-center' : 'px-2');
-  if (!fresh) {
+  if (!health) {
     return (
       <div aria-hidden="true" className={rowClass}>
         <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-muted" />
@@ -182,13 +194,14 @@ function SidebarStatus({ rail }: { rail?: boolean }) {
       </div>
     );
   }
+  const dotClass = health.tone === 'error' ? 'bg-ember' : health.tone === 'warn' ? 'bg-status-warn' : 'bg-verdant';
   return (
-    <div title={rail ? `обновлено ${fresh.label}` : undefined} className={rowClass}>
+    <div title={rail ? health.label : undefined} className={rowClass}>
       <span
         aria-hidden="true"
-        className={cn('h-1.5 w-1.5 shrink-0 rounded-full', fresh.stale ? 'bg-status-warn' : 'bg-verdant')}
+        className={cn('h-1.5 w-1.5 shrink-0 rounded-full', dotClass)}
       />
-      {!rail && <span className="truncate font-mono">обновлено {fresh.label}</span>}
+      {!rail && <span className="truncate font-mono">{health.label}</span>}
     </div>
   );
 }
