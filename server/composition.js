@@ -247,6 +247,8 @@ function createComposition(config, overrides = {}) {
     collectIgForAccount,
     capacityRollups: config.runtime.capacityRollups,
     igAccountsPerPass: config.runtime.igAccountsPerPass,
+    jobsRetentionDays: config.runtime.jobsRetentionDays,
+    emailTokensRetentionDays: config.runtime.emailTokensRetentionDays,
   });
 
   // One mtproto post ({id,date,views,reactions,forwards,replies,media_type,text,hashtags}) → a
