@@ -126,13 +126,20 @@ export function Overview() {
     query stays disabled unless the source is 'qr' (the hook call itself is unconditional). */
 function HealthBanner({ source }: { source?: string | null }) {
   const isQr = source === 'qr';
+  const isCentral = source === 'central';
+  // Fetch the shared session status for QR OR central (the central owner is discovered FROM the
+  // response's `central_owner`, so the fetch must run before we know ownership). Non-owner central and
+  // other sources ignore connection_state and fall back to freshness-only banners.
   const { data: history } = useHistory(730);
-  const { data: qrStatus } = useTgQrStatus(isQr);
+  const { data: qrStatus } = useTgQrStatus(isQr || isCentral);
+  const centralOwner = isCentral ? !!qrStatus?.central_owner : false;
+  const managed = isQr || (isCentral && centralOwner);
   const fresh = freshness(latestHistoryDay(history), Date.now());
   const banner = overviewHealthBanner({
     source,
-    connectionState: isQr ? qrStatus?.connection_state ?? null : null,
+    connectionState: managed ? qrStatus?.connection_state ?? null : null,
     fresh,
+    centralOwner,
   });
   if (!banner) return null;
   const toneClasses =

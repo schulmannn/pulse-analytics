@@ -1,6 +1,10 @@
 import { expect, test, type Page } from '@playwright/test';
 
-async function bootRevokedQrSession(page: Page) {
+// Boot a revoked-session dashboard. `source` selects whether the tracked channel is the managed
+// central channel (the production root cause: central collected through the owner's now-revoked
+// session) or a managed QR channel. For central, central_owner=true is what gates the owner-only
+// repair signal — a non-owner would see only the generic global behavior.
+async function bootRevokedSession(page: Page, source: 'central' | 'qr') {
   let qrStarts = 0;
   await page.route(/^https?:\/\/[^/]+\/api\//, async (route) => {
     const request = route.request();
@@ -13,7 +17,7 @@ async function bootRevokedQrSession(page: Page) {
     if (path === '/api/channels') {
       return json(200, {
         enabled: true,
-        channels: [{ id: 1, username: 'revoked', title: 'Revoked QR', status: 'active', source: 'qr', memberCount: 4730 }],
+        channels: [{ id: 1, username: 'revoked', title: 'Revoked', status: 'active', source, memberCount: 4730 }],
         selected: 1,
       });
     }
@@ -27,10 +31,10 @@ async function bootRevokedQrSession(page: Page) {
     }
     if (path === '/api/tg/full') {
       return json(200, {
-        channel: { title: 'Revoked QR', username: 'revoked', memberCount: 4730 },
+        channel: { title: 'Revoked', username: 'revoked', memberCount: 4730 },
         views_summary: { total_views: 1000, total_reactions: 50, posts_analyzed: 1, avg_views: 1000 },
         posts: [],
-        source: 'db',
+        source: source === 'central' ? 'managed' : 'db',
       });
     }
     if (path === '/api/tg/mtproto/graphs') return json(200, {});
@@ -41,6 +45,8 @@ async function bootRevokedQrSession(page: Page) {
         username: 'revoked_user',
         connection_state: 'reauth_required',
         last_error_code: 'session_unauthorized',
+        // The owner-only signal that turns the central channel's health actionable.
+        central_owner: source === 'central',
       });
     }
     if (path === '/api/tg/qr/start') {
@@ -72,17 +78,20 @@ async function bootRevokedQrSession(page: Page) {
   return { qrStarts: () => qrStarts };
 }
 
-test('revoked QR session opens the focused reconnect flow without auto-starting it', async ({ page }, testInfo) => {
+// The production case: the selected source is the managed CENTRAL channel, the caller owns it
+// (central_owner=true), and its collecting session was revoked → the same actionable reconnect signal
+// and focused Connect flow QR channels already get, with NO auto-start.
+test('revoked central session (owner) opens the focused reconnect flow without auto-starting it', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop-1440', 'desktop connection-health contract');
-  const state = await bootRevokedQrSession(page);
+  const state = await bootRevokedSession(page, 'central');
 
   const reconnectLink = page.getByRole('link', { name: 'Переподключить Telegram →', exact: true });
   await expect(reconnectLink).toBeVisible();
   await expect(reconnectLink).toHaveAttribute('href', '/connect?source=telegram&tab=qr&action=reconnect');
   await expect(page.getByText('нужно переподключить', { exact: true })).toBeVisible();
-  const overviewShot = testInfo.outputPath('telegram-reauth-banner-dark.png');
+  const overviewShot = testInfo.outputPath('telegram-central-reauth-banner-dark.png');
   await page.screenshot({ path: overviewShot, fullPage: true });
-  await testInfo.attach('telegram-reauth-banner-dark', { path: overviewShot, contentType: 'image/png' });
+  await testInfo.attach('telegram-central-reauth-banner-dark', { path: overviewShot, contentType: 'image/png' });
   await reconnectLink.click();
 
   await expect(page).toHaveURL(/\/connect\?source=telegram&tab=qr&action=reconnect$/);
@@ -92,11 +101,23 @@ test('revoked QR session opens the focused reconnect flow without auto-starting 
   expect(state.qrStarts()).toBe(0);
   await expect(page.getByAltText('QR-код для входа в Telegram')).toHaveCount(0);
 
-  const reconnectShot = testInfo.outputPath('telegram-reconnect-dark.png');
+  const reconnectShot = testInfo.outputPath('telegram-central-reconnect-dark.png');
   await page.screenshot({ path: reconnectShot, fullPage: true });
-  await testInfo.attach('telegram-reconnect-dark', { path: reconnectShot, contentType: 'image/png' });
+  await testInfo.attach('telegram-central-reconnect-dark', { path: reconnectShot, contentType: 'image/png' });
 
   await page.getByRole('button', { name: 'Переподключить', exact: true }).click();
   await expect.poll(state.qrStarts).toBe(1);
   await expect(page.getByAltText('QR-код для входа в Telegram')).toBeVisible();
+});
+
+// Retained QR-source branch: a managed QR channel keeps the exact same actionable reconnect signal.
+test('revoked QR session shows the same actionable reconnect CTA', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-1440', 'desktop connection-health contract');
+  const state = await bootRevokedSession(page, 'qr');
+
+  const reconnectLink = page.getByRole('link', { name: 'Переподключить Telegram →', exact: true });
+  await expect(reconnectLink).toBeVisible();
+  await expect(reconnectLink).toHaveAttribute('href', '/connect?source=telegram&tab=qr&action=reconnect');
+  await expect(page.getByText('нужно переподключить', { exact: true })).toBeVisible();
+  expect(state.qrStarts()).toBe(0);
 });

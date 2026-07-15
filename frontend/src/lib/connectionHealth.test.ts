@@ -75,12 +75,20 @@ describe('overviewHealthBanner — source=collector', () => {
   });
 });
 
-describe('overviewHealthBanner — source=central / other', () => {
+describe('overviewHealthBanner — source=central, NON-owner (or ownership unknown)', () => {
   it('stale → generic notice only, no CTA and no QR-repair claim', () => {
     const banner = overviewHealthBanner({ source: 'central', connectionState: null, fresh: stale });
     expect(banner?.tone).toBe('warn');
     expect(banner?.cta).toBeNull();
     expect(banner?.message).not.toMatch(/QR|переподключ|агент/i);
+  });
+
+  it('non-owner ignores connection_state (no repair CTA even on reauth_required)', () => {
+    // A non-owner cannot repair the central session; a stray reauth state must not surface a CTA.
+    const banner = overviewHealthBanner({ source: 'central', connectionState: 'reauth_required', fresh, centralOwner: false });
+    expect(banner).toBeNull();
+    const staleBanner = overviewHealthBanner({ source: 'central', connectionState: 'reauth_required', fresh: stale, centralOwner: false });
+    expect(staleBanner?.cta).toBeNull();
   });
 
   it('unknown source behaves like central (generic stale, no CTA)', () => {
@@ -91,6 +99,35 @@ describe('overviewHealthBanner — source=central / other', () => {
 
   it('fresh → no banner', () => {
     expect(overviewHealthBanner({ source: 'central', connectionState: null, fresh })).toBeNull();
+  });
+});
+
+describe('overviewHealthBanner — source=central, OWNER (managed session is the collector)', () => {
+  it('reauth_required → error tone + exact reconnect CTA, even when history is still fresh', () => {
+    const banner = overviewHealthBanner({ source: 'central', connectionState: 'reauth_required', fresh, centralOwner: true });
+    expect(banner?.tone).toBe('error');
+    expect(banner?.cta).toEqual({ label: 'Переподключить Telegram →', to: RECONNECT_TO });
+    expect(banner?.message).toContain('недействительна');
+  });
+
+  it('degraded → warn, no reconnect demand (status link only)', () => {
+    const banner = overviewHealthBanner({ source: 'central', connectionState: 'degraded', fresh, centralOwner: true });
+    expect(banner?.tone).toBe('warn');
+    expect(banner?.message).not.toMatch(/недействительн|переподключит/i);
+    expect(banner?.cta?.to).toBe(QR_STATUS_TO);
+    expect(banner?.cta?.to).not.toContain('action=reconnect');
+  });
+
+  it('stale live/unknown session → honest stale nudge + update link, without claiming revocation', () => {
+    const banner = overviewHealthBanner({ source: 'central', connectionState: 'connected', fresh: stale, centralOwner: true });
+    expect(banner?.tone).toBe('warn');
+    expect(banner?.message).toContain('4 дн. назад');
+    expect(banner?.message).not.toMatch(/недействительн/i);
+    expect(banner?.cta).toEqual({ label: 'Обновить подключение →', to: QR_REFRESH_TO });
+  });
+
+  it('connected + fresh → no banner', () => {
+    expect(overviewHealthBanner({ source: 'central', connectionState: 'connected', fresh, centralOwner: true })).toBeNull();
   });
 });
 
@@ -122,5 +159,21 @@ describe('sidebarHealth', () => {
 
   it('reserves the loading state when neither health nor freshness is known', () => {
     expect(sidebarHealth({ source: 'qr', connectionState: null, fresh: null })).toBeNull();
+  });
+
+  it('owner central surfaces the managed repair labels; non-owner falls back to freshness', () => {
+    expect(sidebarHealth({ source: 'central', connectionState: 'reauth_required', fresh, centralOwner: true })).toEqual({
+      tone: 'error',
+      label: 'нужно переподключить',
+    });
+    expect(sidebarHealth({ source: 'central', connectionState: 'degraded', fresh, centralOwner: true })).toEqual({
+      tone: 'warn',
+      label: 'сбор временно недоступен',
+    });
+    // Non-owner central: no managed repair label — just the familiar freshness readout.
+    expect(sidebarHealth({ source: 'central', connectionState: 'reauth_required', fresh, centralOwner: false })).toEqual({
+      tone: 'ok',
+      label: 'обновлено сегодня',
+    });
   });
 });

@@ -52,12 +52,20 @@ function requireWorkspaceRole(minRole) {
 
 function makeServeSnapshot({ db }) {
   return async function serveSnapshot(req, res, pick) {
-    if (req.channel && req.channel.source === 'central') return false;
+    const isCentral = req.channel && req.channel.source === 'central';
     // Internal: req.channel уже resolved вызывающим роутом (resolveChannel сделал ownership-check).
     const snapshot = req.channel && req.channel.id
       ? await db.getSnapshotInternal(req.channel.id).catch(() => null)
       : null;
     const value = snapshot && snapshot.data ? pick(snapshot.data, snapshot) : null;
+    // Managed central: the daily ingest now persists a snapshot for the central channel through the
+    // owner's session, so serve it exactly like a managed-QR channel WHEN present. When absent (no
+    // managed collection yet), return false so the caller keeps its old live global MTProto behavior.
+    if (isCentral) {
+      if (value == null) return false;
+      res.json(value);
+      return true;
+    }
     res.json(value != null ? value : { available: false, source: 'collector', empty: true });
     return true;
   };

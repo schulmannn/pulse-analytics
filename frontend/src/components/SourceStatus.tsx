@@ -66,15 +66,33 @@ export function SourceStatus({
   const isIg = source === 'ig';
   const isQr = source === 'qr';
   const isCollector = source === 'collector' || source == null;
-  // QR health belongs to the user's managed session; external collectors keep their per-channel row.
+  // Managed health (QR always, central when the caller owns it) belongs to the user's session; the
+  // fetch covers central too since ownership is discovered from the response. External collectors keep
+  // their per-channel row.
   const { data, isLoading, isError } = useCollectorStatus(isCollector ? channelId : null);
-  const qr = useTgQrStatus(isQr);
+  const qr = useTgQrStatus(isQr || isCentral);
+  const passiveCentral = <StatusRow tone="muted" text="Центральный источник Telegram" compact={compact} />;
 
-  if (isCentral) return <StatusRow tone="ok" text="Живой источник — Telegram (MTProto)" compact={compact} />;
   if (isIg) return <StatusRow tone="ok" text="Instagram-источник — данные идут по OAuth" compact={compact} />;
-  if (isQr) {
+  if (isQr || isCentral) {
     if (qr.isLoading) return <StatusRow tone="muted" text="Проверяем Telegram-подключение…" compact={compact} />;
-    if (qr.isError) return <StatusRow tone="muted" text="Статус Telegram-подключения недоступен" compact={compact} />;
+    // A non-owner cannot inspect or repair the central credential. Keep the label passive: the
+    // global MTProto fallback may itself be unavailable, so calling it "live" would be misleading.
+    if (qr.isError) return isCentral ? passiveCentral : <StatusRow tone="muted" text="Статус Telegram-подключения недоступен" compact={compact} />;
+    if (isCentral && !qr.data?.central_owner) return passiveCentral;
+    if (!qr.data?.server_ready) {
+      return <StatusRow tone="muted" text="Подключение Telegram недоступно на сервере" compact={compact} />;
+    }
+    if (!qr.data?.connected) {
+      return (
+        <StatusRow
+          tone="warn"
+          text="Telegram не подключён"
+          cta={{ to: '/connect?source=telegram&tab=qr', label: 'Подключить →' }}
+          compact={compact}
+        />
+      );
+    }
     if (qr.data?.connection_state === 'reauth_required') {
       return (
         <StatusRow

@@ -17,13 +17,26 @@ test('publicConnectionState: healthy/unknown/legacy → connected; reauth_requir
 });
 
 test('toPublicQrStatus: server not ready', () => {
-  assert.deepEqual(toPublicQrStatus(null, { serverReady: false }), { server_ready: false, connected: false });
+  assert.deepEqual(toPublicQrStatus(null, { serverReady: false }), { server_ready: false, connected: false, central_owner: false });
   // a stray session object must not leak when the server is not configured
-  assert.deepEqual(toPublicQrStatus({ session_enc: 'SECRET' }, { serverReady: false }), { server_ready: false, connected: false });
+  assert.deepEqual(toPublicQrStatus({ session_enc: 'SECRET' }, { serverReady: false }), { server_ready: false, connected: false, central_owner: false });
 });
 
 test('toPublicQrStatus: ready but no session', () => {
-  assert.deepEqual(toPublicQrStatus(null, { serverReady: true }), { server_ready: true, connected: false });
+  assert.deepEqual(toPublicQrStatus(null, { serverReady: true }), { server_ready: true, connected: false, central_owner: false });
+});
+
+test('toPublicQrStatus: central_owner is a safe server-derived boolean, present in every branch', () => {
+  // Present + true only when explicitly owner; coerced from any input; never depends on client data.
+  assert.equal(toPublicQrStatus(null, { serverReady: false, centralOwner: true }).central_owner, true);
+  assert.equal(toPublicQrStatus(null, { serverReady: true, centralOwner: true }).central_owner, true);
+  assert.equal(
+    toPublicQrStatus({ username: 'u', connection_state: 'reauth_required' }, { serverReady: true, centralOwner: true }).central_owner,
+    true,
+  );
+  // Absent/omitted → false (never undefined) so the UI can rely on it without a null dance.
+  assert.equal(toPublicQrStatus(null, { serverReady: true }).central_owner, false);
+  assert.equal(toPublicQrStatus({ username: 'u' }, { serverReady: true }).central_owner, false);
 });
 
 test('toPublicQrStatus: default/unknown row maps to connected', () => {

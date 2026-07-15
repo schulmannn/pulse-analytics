@@ -19,13 +19,13 @@ const oddErr = () => new Error('boom without code');
 
 // Build a job whose collectQrChannel outcome is driven per-channel-ref via `responses`
 // (ref -> Error to throw, or undefined -> succeed). Records every health call for assertions.
-function makeJob({ responses = {}, runJobOnce, health = {} } = {}) {
-  const calls = { post: [], health: [], persisted: [] };
+function makeJob({ responses = {}, runJobOnce, health = {}, tgCrypto } = {}) {
+  const calls = { post: [], health: [], persisted: [], logs: [], sessions: [] };
   const db = {
     enabled: true,
     graphsToDailyRows: () => [],
     saveRawSnapshot: async () => {},
-    persistTgBundleTx: async (channelId) => { calls.persisted.push(channelId); },
+    persistTgBundleTx: async (channelId) => { calls.persisted.push(channelId); return { channel_daily: 3, posts: 5 }; },
     runJobOnce: runJobOnce || (async (_kind, _key, fn) => ({ skipped: false, result: await fn() })),
     recordTgSessionAttempt: async (uid, _version) => { calls.health.push(['attempt', uid]); return health.attempt !== false; },
     recordTgSessionSuccess: async (uid, _version) => { calls.health.push(['success', uid]); return health.success !== false; },
@@ -35,14 +35,15 @@ function makeJob({ responses = {}, runJobOnce, health = {} } = {}) {
   };
   const mtprotoPost = async (_path, { body }) => {
     calls.post.push(body.channel);
+    calls.sessions.push(body.session);   // record the plaintext session the collect actually sent
     const err = responses[body.channel];
     if (err) throw err;
     return OK_BUNDLE;
   };
   const job = createTgQrCollectionJob({
     db,
-    log: () => {},
-    tgCrypto: { configured: () => true, decrypt: (s) => s },
+    log: (level, event, meta) => { calls.logs.push({ level, event, meta }); },
+    tgCrypto: tgCrypto || { configured: () => true, decrypt: (s) => s },
     mtprotoPost,
     MTPROTO_TOKEN: 'tok',
     MTPROTO_TIMEOUT_HEAVY_MS: 1000,
@@ -193,4 +194,74 @@ test('collectQrChannelsNow: пустой список → без попытки/
   const { job, calls } = makeJob();
   await job.collectQrChannelsNow({ uid: 6, session_enc: 's', session_version: '1' }, []);
   assert.deepEqual(calls.health, []);
+});
+
+// ── collectManagedChannelNow (managed central, ONE channel, rethrows for fallback) ─────────────
+
+const central = (over = {}) => ({ id: 50, username: 'central', tg_channel_id: 999, source: 'central', owner_uid: 2, ...over });
+
+test('collectManagedChannelNow: success → healthy, returns bundle + persisted counts', async () => {
+  const { job, calls } = makeJob();
+  const out = await job.collectManagedChannelNow({ uid: 2, session_enc: 'plain-secret', session_version: '4' }, central(), '2026-07-15');
+
+  assert.deepEqual(calls.post, ['central']);          // collected the central ref via /qr/collect
+  assert.deepEqual(calls.persisted, [50]);            // persisted the bundle for the central channel id
+  assert.equal(out.channel_daily, 3);                 // returned counts flow from persistTgBundleTx
+  assert.equal(out.posts, 5);
+  assert.equal(out.bundle, OK_BUNDLE);
+  assert.deepEqual(calls.health[0], ['attempt', 2]);
+  assert.deepEqual(calls.health[1], ['success', 2]);  // generation-guarded via session_version
+});
+
+test('collectManagedChannelNow: auth failure → reauth_required health then RETHROWS for fallback', async () => {
+  const { job, calls } = makeJob({ responses: { central: authErr() } });
+  await assert.rejects(
+    job.collectManagedChannelNow({ uid: 2, session_enc: 's', session_version: '4' }, central()),
+    (e) => e.code === 'session_unauthorized',
+  );
+  const fail = calls.health.find((c) => c[0] === 'failure');
+  assert.deepEqual(fail[2], { state: 'reauth_required', errorCode: 'session_unauthorized' });
+});
+
+test('collectManagedChannelNow: non-auth failure → degraded health then RETHROWS for fallback', async () => {
+  const { job, calls } = makeJob({ responses: { central: timeoutErr() } });
+  await assert.rejects(
+    job.collectManagedChannelNow({ uid: 2, session_enc: 's', session_version: '4' }, central()),
+    (e) => e.code === 'mtproto_timeout',
+  );
+  const fail = calls.health.find((c) => c[0] === 'failure');
+  assert.deepEqual(fail[2], { state: 'degraded', errorCode: 'mtproto_timeout' });
+});
+
+test('collectManagedChannelNow: decrypt failure rethrows a safe code and does NOT record an attempt', async () => {
+  const { job, calls } = makeJob({ tgCrypto: { configured: () => true, decrypt: () => { throw new Error('bad key'); } } });
+  await assert.rejects(
+    job.collectManagedChannelNow({ uid: 2, session_enc: 's', session_version: '4' }, central()),
+    (e) => e.code === 'session_decrypt_failed',
+  );
+  assert.deepEqual(calls.post, []);     // never reached upstream
+  assert.deepEqual(calls.health, []);   // no attempt recorded for a crypto-config failure
+});
+
+test('collectManagedChannelNow: missing tg id → throws prereq, no upstream call', async () => {
+  const { job, calls } = makeJob();
+  await assert.rejects(
+    job.collectManagedChannelNow({ uid: 2, session_enc: 's', session_version: '4' }, central({ tg_channel_id: null })),
+    (e) => e.code === 'managed_prereq',
+  );
+  assert.deepEqual(calls.post, []);
+});
+
+test('collectManagedChannelNow: plaintext session goes ONLY in the collect body, never into logs', async () => {
+  const SECRET = 'STRING-SESSION-SECRET';
+  const { job, calls } = makeJob({
+    responses: { central: timeoutErr() },
+    // decrypt returns the plaintext secret from the encrypted blob
+    tgCrypto: { configured: () => true, decrypt: () => SECRET },
+  });
+  await assert.rejects(job.collectManagedChannelNow({ uid: 2, session_enc: 'enc', session_version: '4' }, central()));
+
+  assert.deepEqual(calls.sessions, [SECRET]);   // the collect body carried the plaintext session
+  const logBlob = JSON.stringify(calls.logs);
+  assert.equal(logBlob.includes(SECRET), false, 'plaintext session must never appear in any log');
 });

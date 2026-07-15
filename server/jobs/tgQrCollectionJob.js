@@ -65,7 +65,7 @@ function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN
     // Снапшот + daily + посты коммитятся ВМЕСТЕ (db.persistTgBundleTx) — раньше это были
     // отдельные автокоммитные записи, и сбой посередине оставлял QR-канал со свежим
     // снапшотом, но устаревшими daily/posts до следующего идемпотентного прогона.
-    await db.persistTgBundleTx(channelId, {
+    const counts = await db.persistTgBundleTx(channelId, {
       snapshot: {
         channel:       bundle.channel || {},
         views_summary: bundle.views_summary || null,
@@ -82,6 +82,7 @@ function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN
       await db.saveRawSnapshot(channelId, 'tg', 'graphs', day, bundle.graphs).catch((e) =>
         log('warn', 'tg_qr_raw_snapshot_failed', { channelId, error: e.message }));
     }
+    return counts || { channel_daily: 0, posts: 0 };
   }
 
   // Fetch one QR channel's bundle via the (already-decrypted) session and persist it. Throws on
@@ -92,7 +93,39 @@ function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN
       body: { session: sessionStr, channel: ref, posts_limit: 100, graph_points: 400 },
       timeoutMs: MTPROTO_TIMEOUT_HEAVY_MS,
     });
-    await persistTgBundle(ch.id, bundle, day);
+    const counts = await persistTgBundle(ch.id, bundle, day);
+    return { bundle, channel_daily: counts.channel_daily || 0, posts: counts.posts || 0 };
+  }
+
+  // Managed collection of ONE channel (the central channel) through the owner's stored session — the
+  // repair path the daily ingest prefers over the (now-revoked) global env TG_SESSION. Unlike
+  // collectQrChannelsNow (best-effort, swallows), this one RETHROWS so the caller can fall back to the
+  // global live path; every validated prerequisite (crypto, token, decryptable session, known tg id)
+  // fails here as a throw. The plaintext session is decrypted only server-side and is sent solely
+  // inside the mtprotoPost('/qr/collect') JSON body — never returned, logged, or put on a URL.
+  async function collectManagedChannelNow(sess, channel, day) {
+    if (!sess || !channel || channel.tg_channel_id == null) {
+      const e = new Error('managed_channel_missing_prereq'); e.code = 'managed_prereq'; throw e;
+    }
+    if (!tgCrypto.configured() || !MTPROTO_TOKEN) {
+      const e = new Error('managed_channel_not_configured'); e.code = 'managed_not_configured'; throw e;
+    }
+    let sessionStr;
+    try { sessionStr = tgCrypto.decrypt(sess.session_enc); }
+    catch { const e = new Error('managed_channel_decrypt_failed'); e.code = 'session_decrypt_failed'; throw e; }
+    const theDay = day || new Date().toISOString().slice(0, 10);
+    try {
+      const out = await collectQrChannel(sessionStr, channel, theDay);
+      // A real, completed attempt for THIS session generation → healthy (generation-guarded).
+      await finalizeSessionHealth(sess.uid, sess.session_version, { attempted: true, succeeded: true, authFailed: false, errorCode: null });
+      return { bundle: out.bundle, channel_daily: out.channel_daily, posts: out.posts };
+    } catch (e) {
+      const authFailed = isTgAuthError(e);
+      await finalizeSessionHealth(sess.uid, sess.session_version, {
+        attempted: true, succeeded: false, authFailed, errorCode: authFailed ? e.code : safeTgErrorCode(e),
+      });
+      throw e;   // caller falls back to the global live path
+    }
   }
 
   // Immediate best-effort collection for freshly-added channels so the dashboard fills within seconds
@@ -175,7 +208,7 @@ function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN
     log(capped ? 'warn' : 'info', 'tg_qr_collection_done', { collected, skipped, failed, capped });
   }
 
-  return { collectQrChannelsNow, processTgQrCollection };
+  return { collectQrChannelsNow, collectManagedChannelNow, processTgQrCollection };
 }
 
 module.exports = { createTgQrCollectionJob };

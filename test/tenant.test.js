@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { makeResolveChannel } = require('../server/middleware/tenant');
+const { makeResolveChannel, makeServeSnapshot } = require('../server/middleware/tenant');
 
 function responseRecorder() {
   return {
@@ -46,6 +46,22 @@ test('tenant middleware attaches an owned channel and continues', async () => {
   await resolve(req, res, () => { nextCalled = true; });
   assert.strictEqual(nextCalled, true);
   assert.deepStrictEqual(req.channel, owned);
+});
+
+test('central snapshot is served only when the requested payload exists', async () => {
+  let snapshot = { data: { graphs: { available: true, growth: { x: [1], series: [] } } } };
+  const db = { getSnapshotInternal: async (channelId) => channelId === 10 ? snapshot : null };
+  const serveSnapshot = makeServeSnapshot({ db });
+  const req = { channel: { id: 10, source: 'central' } };
+
+  const hit = responseRecorder();
+  assert.equal(await serveSnapshot(req, hit, (data) => data.graphs), true);
+  assert.deepEqual(hit.body, snapshot.data.graphs);
+
+  snapshot = { data: { channel: { title: 'Central' } } };
+  const miss = responseRecorder();
+  assert.equal(await serveSnapshot(req, miss, (data) => data.graphs), false);
+  assert.equal(miss.body, null, 'the route keeps control and may use the legacy live fallback');
 });
 
 // ── hasWorkspaceRole (pure, ADR-001 write-gates) ──
