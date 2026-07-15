@@ -26,6 +26,8 @@ test('loadConfig: дефолты из пустого env', () => {
   assert.equal(c.telegram.sessionKey, '');
   assert.equal(c.notion.token, '');
   assert.equal(c.notion.crashDatabaseId, '');
+  assert.equal(c.cache.maxEntries, 2000);
+  assert.equal(c.cache.ttlMs, 600000);
   assert.equal(c.runtime.webReplicas, 1);
 });
 
@@ -35,6 +37,7 @@ test('loadConfig: значения из env + нормализация', () => {
     APP_URL: 'https://x.app/', DATABASE_URL: 'postgres://x', PGPOOL_MAX: '8', ALLOW_DBLESS: 'true',
     SESSION_SECRET: 's3cret', ADMIN_EMAIL: '  Foo@BAR.com ', WEB_REPLICAS: '2', INGEST_TOKEN: 'tok',
     OWNER_CHANNEL: '@owner', TG_SESSION_KEY: 'tg-key', NOTION_TOKEN: 'notion', NOTION_CRASH_DB: 'db-id',
+    CACHE_MAX_ENTRIES: '5000', CACHE_TTL_MS: '300000',
   });
   assert.equal(c.http.port, 8080);
   assert.equal(c.http.trustProxy, 3);
@@ -50,6 +53,28 @@ test('loadConfig: значения из env + нормализация', () => {
   assert.equal(c.telegram.sessionKey, 'tg-key');
   assert.equal(c.notion.token, 'notion');
   assert.equal(c.notion.crashDatabaseId, 'db-id');
+  assert.equal(c.cache.maxEntries, 5000);
+  assert.equal(c.cache.ttlMs, 300000);
+});
+
+test('validateConfig: cache cap и TTL должны оставаться в безопасных границах', () => {
+  assert.deepEqual(
+    validateConfig(loadConfig({ CACHE_MAX_ENTRIES: '10000', CACHE_TTL_MS: '3600000' })),
+    [],
+  );
+
+  for (const env of [
+    { CACHE_MAX_ENTRIES: '99' },
+    { CACHE_MAX_ENTRIES: '10001' },
+    { CACHE_MAX_ENTRIES: '2.5' },
+    { CACHE_TTL_MS: '999' },
+    { CACHE_TTL_MS: '3600001' },
+    { CACHE_TTL_MS: 'NaN' },
+  ]) {
+    const errors = validateConfig(loadConfig(env));
+    const field = Object.hasOwn(env, 'CACHE_MAX_ENTRIES') ? 'cache.maxEntries' : 'cache.ttlMs';
+    assert.ok(errors.some((error) => error.field === field), `${JSON.stringify(env)} отклонён`);
+  }
 });
 
 test('loadConfig: appUrl — RAW без дефолта (пусто = не задан), с тримом хвостового «/»', () => {
@@ -154,6 +179,7 @@ test('loadConfig: результат заморожен (Object.freeze)', () => 
   const c = loadConfig({});
   assert.equal(Object.isFrozen(c), true);
   assert.equal(Object.isFrozen(c.http), true);
+  assert.equal(Object.isFrozen(c.cache), true);
   assert.throws(() => { c.http.port = 9999; }, TypeError);
 });
 

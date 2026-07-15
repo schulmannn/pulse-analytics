@@ -62,8 +62,9 @@ function createMtprotoClient(
     path,
     params = {},
     timeoutMs = MTPROTO_TIMEOUT_MS,
+    lane = 'live',
   ) {
-    const gate = mtprotoBreaker.tryAcquire();
+    const gate = mtprotoBreaker.tryAcquire(lane);
     if (!gate.ok) {
       const e = new Error(
         gate.reason === 'open'
@@ -135,11 +136,12 @@ function createMtprotoClient(
       breakerOk = !(err && err.status === 503 && !err.floodWait);
       throw err;
     } finally {
-      mtprotoBreaker.onSettled(breakerOk);
+      mtprotoBreaker.onSettled(breakerOk, lane, gate);
     }
   }
 
-  // POST variant for the QR-login handshake (start/poll/password/cancel).
+  // POST variant for the QR-login handshake (start/poll/password/cancel) and background
+  // /qr/collect. `lane` defaults to 'live' so callers that omit it stay backward-compatible.
   async function mtprotoPost(
     path,
     {
@@ -147,9 +149,10 @@ function createMtprotoClient(
       body = undefined,
       timeoutMs = MTPROTO_TIMEOUT_MS,
       retryConnectionErrors = false,
+      lane = 'live',
     } = {},
   ) {
-    const gate = mtprotoBreaker.tryAcquire();
+    const gate = mtprotoBreaker.tryAcquire(lane);
     if (!gate.ok) {
       const e = new Error(
         gate.reason === 'open'
@@ -227,7 +230,7 @@ function createMtprotoClient(
       breakerOk = !(err && err.status === 503 && !err.floodWait);
       throw err;
     } finally {
-      mtprotoBreaker.onSettled(breakerOk);
+      mtprotoBreaker.onSettled(breakerOk, lane, gate);
     }
   }
 

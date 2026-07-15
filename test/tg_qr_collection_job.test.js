@@ -20,7 +20,7 @@ const oddErr = () => new Error('boom without code');
 // Build a job whose collectQrChannel outcome is driven per-channel-ref via `responses`
 // (ref -> Error to throw, or undefined -> succeed). Records every health call for assertions.
 function makeJob({ responses = {}, runJobOnce, health = {}, tgCrypto, tgQrChannelsPerPass } = {}) {
-  const calls = { post: [], health: [], persisted: [], logs: [], sessions: [] };
+  const calls = { post: [], postLanes: [], health: [], persisted: [], logs: [], sessions: [] };
   const db = {
     enabled: true,
     graphsToDailyRows: () => [],
@@ -33,8 +33,9 @@ function makeJob({ responses = {}, runJobOnce, health = {}, tgCrypto, tgQrChanne
     listTgSessions: async () => [],
     listChannels: async () => [],
   };
-  const mtprotoPost = async (_path, { body }) => {
+  const mtprotoPost = async (_path, { body, lane }) => {
     calls.post.push(body.channel);
+    calls.postLanes.push(lane);
     calls.sessions.push(body.session);   // record the plaintext session the collect actually sent
     const err = responses[body.channel];
     if (err) throw err;
@@ -68,6 +69,7 @@ test('auth failure → reauth_required, остальные каналы юзер
 
   // user 1: only a1 attempted (a2 short-circuited); user 2: b1 collected.
   assert.deepEqual(calls.post, ['a1', 'b1']);
+  assert.deepEqual(calls.postLanes, ['background', 'background']);
   const u1 = calls.health.filter((c) => c[1] === 1);
   assert.deepEqual(u1[0], ['attempt', 1]);
   assert.equal(u1[1][0], 'failure');

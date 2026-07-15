@@ -84,11 +84,13 @@ function createDailyIngestJob({
         }
         if (!persisted) {
           let posts;
+          // Background lane: the daily cron pass is isolated from live dashboard reads — its
+          // failures may open only the background circuit, and it shares the global bulkhead.
           [graphs, posts] = await Promise.all([
-            mtprotoFetch('/graphs', { points: 400 }, MTPROTO_TIMEOUT_HEAVY_MS).catch(() => null),   // full range for the archive (dashboard uses 45)
-            mtprotoFetch('/posts', { limit: 100 }, MTPROTO_TIMEOUT_STATS_MS).catch(() => null),
+            mtprotoFetch('/graphs', { points: 400 }, MTPROTO_TIMEOUT_HEAVY_MS, 'background').catch(() => null),   // full range for the archive (dashboard uses 45)
+            mtprotoFetch('/posts', { limit: 100 }, MTPROTO_TIMEOUT_STATS_MS, 'background').catch(() => null),
           ]);
-          const velocity = await mtprotoFetch('/velocity', {}, MTPROTO_TIMEOUT_HEAVY_MS).catch(() => null);
+          const velocity = await mtprotoFetch('/velocity', {}, MTPROTO_TIMEOUT_HEAVY_MS, 'background').catch(() => null);
           // All three upserts commit together (persistCentralDaily) — no half-written day.
           persisted = await db.persistCentralDaily(channelId, {
             dailyRows: db.graphsToDailyRows(graphs),

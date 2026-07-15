@@ -89,9 +89,13 @@ function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN
   // mtproto/collect failure — callers decide how to handle (log + continue).
   async function collectQrChannel(sessionStr, ch, day) {
     const ref = ch.username || String(ch.tg_channel_id);
+    // Background lane on the breaker: every /qr/collect (managed central, recovery sweep, and the
+    // fire-and-forget immediate post-add) is collection work, isolated from live dashboard reads and
+    // sharing only the global in-flight bulkhead.
     const bundle = await mtprotoPost('/qr/collect', {
       body: { session: sessionStr, channel: ref, posts_limit: 100, graph_points: 400 },
       timeoutMs: MTPROTO_TIMEOUT_HEAVY_MS,
+      lane: 'background',
     });
     const counts = await persistTgBundle(ch.id, bundle, day);
     return { bundle, channel_daily: counts.channel_daily || 0, posts: counts.posts || 0 };

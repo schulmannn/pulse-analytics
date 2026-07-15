@@ -17,7 +17,7 @@ function makeJob({
   central = CENTRAL,
   managed,               // (session, channel, day) => result | throws
 } = {}) {
-  const calls = { fetch: [], persistCentral: [], managed: [], logs: [] };
+  const calls = { fetch: [], fetchLanes: [], persistCentral: [], managed: [], logs: [] };
   const db = {
     enabled: true,
     getOwnerChannelId: async () => (central ? central.id : null),
@@ -30,8 +30,9 @@ function makeJob({
     },
     runJobOnce: async (_kind, _key, fn) => ({ skipped: false, result: await fn() }),
   };
-  const mtprotoFetch = async (path) => {
+  const mtprotoFetch = async (path, _params, _timeoutMs, lane) => {
     calls.fetch.push(path);
+    calls.fetchLanes.push(lane);
     if (path === '/graphs') return { available: true };
     if (path === '/posts') return { posts: [{ id: 1 }] };
     if (path === '/velocity') return { available: true };
@@ -82,6 +83,7 @@ test('managed-central failure falls back to the unchanged global path (and logs 
   assert.equal(out.status, 200);
   assert.equal(calls.managed.length, 1);
   assert.ok(calls.fetch.includes('/graphs') && calls.fetch.includes('/posts'), 'global live pass ran');
+  assert.ok(calls.fetchLanes.every((lane) => lane === 'background'), 'global fallback stays on background lane');
   assert.equal(calls.persistCentral.length, 1, 'global persistCentralDaily ran');
   const fb = calls.logs.find((l) => l.event === 'daily_ingest_managed_fallback');
   assert.ok(fb, 'fallback was logged');
