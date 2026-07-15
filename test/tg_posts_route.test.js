@@ -14,6 +14,10 @@ function tgHandlers({
   cacheGet = () => null,
   cacheSet = () => {},
   log = () => {},
+  sendMtprotoError = (res, err) => res.status(err.status || 503).json({
+    error: err.message,
+    ...(err.retryAfter != null ? { retry_after: err.retryAfter } : {}),
+  }),
 }) {
   const routes = new Map();
   const app = {
@@ -45,7 +49,7 @@ function tgHandlers({
       MTPROTO_TIMEOUT_HEAVY_MS: 120000,
       mtprotoFetch,
       mtprotoPost,
-      sendMtprotoError: () => {},
+      sendMtprotoError,
     },
   });
   return routes;
@@ -174,6 +178,29 @@ test('/api/tg/qr/start allows a cold Telegram service to start without changing 
     path: '/qr/start',
     options: { timeoutMs: statsTimeout, retryConnectionErrors: true },
   }]);
+});
+
+test('/api/tg/qr/start returns protective busy backpressure without escalating it as an outage', async () => {
+  const logs = [];
+  const busy = Object.assign(new Error('Сейчас входит слишком много пользователей — попробуйте снова через минуту'), {
+    status: 503,
+    code: 'too_many_pending',
+    busy: true,
+    retryAfter: 60,
+  });
+  const routes = tgHandlers({
+    db: { enabled: true },
+    mtprotoFetch: async () => ({}),
+    mtprotoPost: async () => { throw busy; },
+    tgCrypto: { configured: () => true },
+    log: (level, event, meta) => logs.push({ level, event, meta }),
+  });
+
+  const response = await invokeRoute(routes.get('POST /api/tg/qr/start').at(-1));
+  assert.equal(response.statusCode, 503);
+  assert.equal(response.body.retry_after, 60);
+  assert.match(response.body.error, /минуту/);
+  assert.deepEqual(logs, [{ level: 'warn', event: 'tg_qr_start_busy', meta: { code: 'too_many_pending' } }]);
 });
 
 test('central /api/tg/full prefers the managed snapshot and marks it source="managed"', async () => {

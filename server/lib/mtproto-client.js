@@ -28,10 +28,18 @@ const MTPROTO_ERROR_RU = {
   mtproto_error: 'Ошибка на стороне Telegram, попробуйте позже',
   internal_error: 'Внутренняя ошибка источника, попробуйте позже',
   too_many_collecting: 'Слишком много одновременных сборов — повторите позже',
+  too_many_pending: 'Сейчас входит слишком много пользователей — попробуйте снова через минуту',
   token_not_configured: 'Сервис Telegram не настроен',
   mtproto_not_configured: 'Сервис Telegram не настроен',
 };
 const ruDetail = (detail) => (detail && MTPROTO_ERROR_RU[detail]) || detail;
+
+// Python-side admission backpressure (a full pending-QR cap or collect semaphore), NOT an upstream
+// fault: it means "too busy right now, retry shortly". Marked distinctly so the UI shows truthful
+// retry-later copy AND so the shared MTProto circuit breaker is NOT penalised — otherwise an
+// onboarding peak that trips the 40-login cap would open the circuit and turn every subsequent
+// legitimate QR start into a misleading "Telegram unavailable" (same rationale as FloodWait/429).
+const MTPROTO_BUSY_DETAILS = new Set(['too_many_pending', 'too_many_collecting']);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function isRetryableConnErr(err) {
@@ -126,6 +134,10 @@ function createMtprotoClient(
         );
         e.code = err.detail || undefined;
         e.status = res.status >= 500 ? 503 : res.status;
+        if (err.detail && MTPROTO_BUSY_DETAILS.has(err.detail)) {
+          e.busy = true;
+          if (e.retryAfter == null) e.retryAfter = err.detail === 'too_many_pending' ? 60 : 5;
+        }
         if (err.retry_after != null) e.retryAfter = err.retry_after;
         throw e;
       }
@@ -133,7 +145,7 @@ function createMtprotoClient(
       breakerOk = true;
       return data;
     } catch (err) {
-      breakerOk = !(err && err.status === 503 && !err.floodWait);
+      breakerOk = !(err && err.status === 503 && !err.floodWait && !err.busy);
       throw err;
     } finally {
       mtprotoBreaker.onSettled(breakerOk, lane, gate);
@@ -220,6 +232,10 @@ function createMtprotoClient(
         );
         e.code = err.detail || undefined;
         e.status = res.status >= 500 ? 503 : res.status;
+        if (err.detail && MTPROTO_BUSY_DETAILS.has(err.detail)) {
+          e.busy = true;
+          if (e.retryAfter == null) e.retryAfter = err.detail === 'too_many_pending' ? 60 : 5;
+        }
         if (err.retry_after != null) e.retryAfter = err.retry_after;
         throw e;
       }
@@ -227,7 +243,7 @@ function createMtprotoClient(
       breakerOk = true;
       return data;
     } catch (err) {
-      breakerOk = !(err && err.status === 503 && !err.floodWait);
+      breakerOk = !(err && err.status === 503 && !err.floodWait && !err.busy);
       throw err;
     } finally {
       mtprotoBreaker.onSettled(breakerOk, lane, gate);

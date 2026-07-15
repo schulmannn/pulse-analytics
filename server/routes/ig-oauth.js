@@ -2,6 +2,7 @@
 
 const crypto = require('crypto');
 const { hasWorkspaceRole } = require('../middleware/tenant');
+const { createAdmissionController } = require('../lib/admissionController');
 
 // "Business Login for Instagram" (Instagram API with Instagram Login, no Facebook Page). These app
 // credentials + scopes are read once at load, exactly as index.js did.
@@ -26,8 +27,18 @@ const IG_STATE_TTL = 10 * 60 * 1000;
 function registerIgOauthRoutes({
   app, db, requireAuth, audit, log, fetchWithTimeout, asyncHandler,
   appBase, cache, igConfigured, igCrypto, AUTH_SECRET, IG_GRAPH,
-  IG_CLIENT_ID, IG_CLIENT_SECRET,
+  IG_CLIENT_ID, IG_CLIENT_SECRET, oauthMaxInFlight, oauthAcquireTimeoutMs,
 }) {
+  // Bounded admission for the OAuth callback: it fans out three DEPENDENT external exchanges
+  // (code→short→long→/me), each with a multi-second timeout, so an onboarding peak could otherwise
+  // pin unbounded request slots against Instagram at once. One web replica (ADR-002) → a process-local
+  // counter is authoritative. Config is validated in config.js; fall back to the same safe defaults
+  // here so a bare test harness that omits them still gets a real bound.
+  const igOauthAdmission = createAdmissionController({
+    maxInFlight: oauthMaxInFlight,
+    maxWaiting: oauthMaxInFlight,
+    acquireTimeoutMs: oauthAcquireTimeoutMs,
+  });
   // The per-channel OAuth connect flow needs app credentials, the token-encryption key, and a DB
   // (tokens are stored encrypted, one per channel). Without all three, connect is unavailable and
   // IG falls back to the global env account (or mock).
@@ -124,73 +135,92 @@ function registerIgOauthRoutes({
       // its row is created below, after the Instagram identity is known.
       if (!st.ns) {
         const ch = await db.getChannel(st.channelId, user).catch(() => null);
-        if (!ch) return back('ig_error=channel');
+        // The signed state can live for ten minutes. Re-check the write role as well as visibility so
+        // a user downgraded after /start cannot still replace the workspace's Instagram credential.
+        if (!ch || !hasWorkspaceRole(ch, user, 'admin')) return back('ig_error=channel');
       }
       const redirectUri = `${appBase(req)}/api/ig/oauth/callback`;
 
-      // 1) authorization code → short-lived token (api.instagram.com, form-encoded POST).
-      const shortRes = await fetchWithTimeout('https://api.instagram.com/oauth/access_token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          client_id: IG_CLIENT_ID,
-          client_secret: IG_CLIENT_SECRET,
-          grant_type: 'authorization_code',
-          redirect_uri: redirectUri,
-          code,
-        }).toString(),
-      });
-      const shortJson = await shortRes.json().catch(() => ({}));
-      if (!shortJson.access_token) {
-        log('warn', 'ig_oauth_short_failed', { channelId: st.channelId, err: shortJson.error_message || shortJson.error_type || 'no_token' });
-        return back('ig_error=exchange');
+      // Admission gate: bound how many callbacks run the three dependent external exchanges at once.
+      // State/user/channel are already validated above (cheap, no external calls), so a rejected
+      // attempt here has made NO provider call and touched no code/token. Overload fast-fails with a
+      // stable, safe code + retry UX — it is NOT an auth/state failure. Held across the exchange and
+      // its short persistence tail, then released in `finally` so redirects, throws and early returns
+      // all free the slot; no DB connection is held while waiting on Instagram.
+      let releaseSlot;
+      try {
+        releaseSlot = await igOauthAdmission.acquire();
+      } catch {
+        log('warn', 'ig_oauth_busy', { channelId: st.channelId });
+        return back('ig_error=busy');
       }
-
-      // 2) short-lived → long-lived (~60d) token (graph.instagram.com). If this fails we must NOT
-      // silently persist the 1-hour short token under a 60-day expiry (the connection would die in an
-      // hour with no refresh path) — bail with an error flag and let the user retry.
-      const longRes = await fetchWithTimeout(`${IG_GRAPH}/access_token?` + new URLSearchParams({
-        grant_type: 'ig_exchange_token', client_secret: IG_CLIENT_SECRET, access_token: shortJson.access_token }).toString());
-      const longJson = await longRes.json().catch(() => ({}));
-      if (!longJson.access_token || !longJson.expires_in) {
-        log('warn', 'ig_oauth_long_failed', { channelId: st.channelId, err: longJson.error_message || (longJson.error && longJson.error.message) || longJson.error || 'no_long_token' });
-        return back('ig_error=exchange');
-      }
-      const longToken = longJson.access_token;
-      const expiresIn = Number(longJson.expires_in);
-
-      // 3) identity — the IG user id + username to display and to build data-edge paths.
-      const meRes = await fetchWithTimeout(`${IG_GRAPH}/me?` + new URLSearchParams({ fields: 'id,username,account_type', access_token: longToken }).toString());
-      const me = await meRes.json().catch(() => ({}));
-      const igUserId = me.id || String(shortJson.user_id || '');
-      if (!igUserId) return back('ig_error=identity');
-
-      // New-source connect: reuse the user's channel that already holds this identity (a
-      // reconnect just refreshes its token), else create a standalone source='ig' row.
-      let targetChannelId = st.channelId;
-      if (st.ns) {
-        const existing = await db.findIgChannelByIgUser(user.uid, igUserId).catch(() => null);
-        if (existing) {
-          targetChannelId = existing;
-        } else {
-          const created = await db.createIgChannel({ owner_uid: user.uid, username: me.username || null }).catch(() => null);
-          if (!created) return back('ig_error=channel');
-          targetChannelId = created.id;
+      try {
+        // 1) authorization code → short-lived token (api.instagram.com, form-encoded POST).
+        const shortRes = await fetchWithTimeout('https://api.instagram.com/oauth/access_token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            client_id: IG_CLIENT_ID,
+            client_secret: IG_CLIENT_SECRET,
+            grant_type: 'authorization_code',
+            redirect_uri: redirectUri,
+            code,
+          }).toString(),
+        });
+        const shortJson = await shortRes.json().catch(() => ({}));
+        if (!shortJson.access_token) {
+          log('warn', 'ig_oauth_short_failed', { channelId: st.channelId, err: shortJson.error_message || shortJson.error_type || 'no_token' });
+          return back('ig_error=exchange');
         }
-      }
 
-      await db.saveIgAccount(targetChannelId, {
-        ig_user_id: igUserId,
-        username: me.username || null,
-        access_token_enc: igCrypto.encrypt(longToken),
-        token_expires_at: new Date(Date.now() + expiresIn * 1000),
-        scopes: IG_OAUTH_SCOPES,
-      });
-      igCachePurge(igUserId);   // clear any stale cached payloads for this account id
-      req.user = user; req.channel = { id: targetChannelId };
-      await audit(req, 'ig_oauth_connected', { channelId: targetChannelId, username: me.username || null, newSource: !!st.ns });
-      // ch= lets the SPA switch straight to the (possibly fresh) source after the bounce.
-      return back(`ig=connected&ch=${targetChannelId}`);
+        // 2) short-lived → long-lived (~60d) token (graph.instagram.com). If this fails we must NOT
+        // silently persist the 1-hour short token under a 60-day expiry (the connection would die in an
+        // hour with no refresh path) — bail with an error flag and let the user retry.
+        const longRes = await fetchWithTimeout(`${IG_GRAPH}/access_token?` + new URLSearchParams({
+          grant_type: 'ig_exchange_token', client_secret: IG_CLIENT_SECRET, access_token: shortJson.access_token }).toString());
+        const longJson = await longRes.json().catch(() => ({}));
+        if (!longJson.access_token || !longJson.expires_in) {
+          log('warn', 'ig_oauth_long_failed', { channelId: st.channelId, err: longJson.error_message || (longJson.error && longJson.error.message) || longJson.error || 'no_long_token' });
+          return back('ig_error=exchange');
+        }
+        const longToken = longJson.access_token;
+        const expiresIn = Number(longJson.expires_in);
+
+        // 3) identity — the IG user id + username to display and to build data-edge paths.
+        const meRes = await fetchWithTimeout(`${IG_GRAPH}/me?` + new URLSearchParams({ fields: 'id,username,account_type', access_token: longToken }).toString());
+        const me = await meRes.json().catch(() => ({}));
+        const igUserId = me.id || String(shortJson.user_id || '');
+        if (!igUserId) return back('ig_error=identity');
+
+        // New-source connect: reuse the user's channel that already holds this identity (a
+        // reconnect just refreshes its token), else create a standalone source='ig' row.
+        let targetChannelId = st.channelId;
+        if (st.ns) {
+          const existing = await db.findIgChannelByIgUser(user.uid, igUserId).catch(() => null);
+          if (existing) {
+            targetChannelId = existing;
+          } else {
+            const created = await db.createIgChannel({ owner_uid: user.uid, username: me.username || null }).catch(() => null);
+            if (!created) return back('ig_error=channel');
+            targetChannelId = created.id;
+          }
+        }
+
+        await db.saveIgAccount(targetChannelId, {
+          ig_user_id: igUserId,
+          username: me.username || null,
+          access_token_enc: igCrypto.encrypt(longToken),
+          token_expires_at: new Date(Date.now() + expiresIn * 1000),
+          scopes: IG_OAUTH_SCOPES,
+        });
+        igCachePurge(igUserId);   // clear any stale cached payloads for this account id
+        req.user = user; req.channel = { id: targetChannelId };
+        await audit(req, 'ig_oauth_connected', { channelId: targetChannelId, username: me.username || null, newSource: !!st.ns });
+        // ch= lets the SPA switch straight to the (possibly fresh) source after the bounce.
+        return back(`ig=connected&ch=${targetChannelId}`);
+      } finally {
+        releaseSlot();
+      }
     } catch (e) {
       log('error', 'ig_oauth_callback_error', { error: e.message });
       return back('ig_error=exchange');

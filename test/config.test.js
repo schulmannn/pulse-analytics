@@ -29,6 +29,20 @@ test('loadConfig: дефолты из пустого env', () => {
   assert.equal(c.cache.maxEntries, 2000);
   assert.equal(c.cache.ttlMs, 600000);
   assert.equal(c.runtime.webReplicas, 1);
+  assert.equal(c.instagram.oauthMaxInFlight, 8);
+  assert.equal(c.instagram.oauthAcquireTimeoutMs, 2000);
+});
+
+test('validateConfig: границы IG OAuth admission-контроля', () => {
+  assert.deepEqual(validateConfig(loadConfig({})).filter((e) => e.field.startsWith('instagram.oauth')), []);
+  const tooHigh = validateConfig(loadConfig({ IG_OAUTH_MAX_INFLIGHT: '65' }));
+  assert.ok(tooHigh.some((e) => e.field === 'instagram.oauthMaxInFlight'));
+  const zero = validateConfig(loadConfig({ IG_OAUTH_MAX_INFLIGHT: '0' }));
+  assert.ok(zero.some((e) => e.field === 'instagram.oauthMaxInFlight'));
+  const tinyTimeout = validateConfig(loadConfig({ IG_OAUTH_ACQUIRE_TIMEOUT_MS: '50' }));
+  assert.ok(tinyTimeout.some((e) => e.field === 'instagram.oauthAcquireTimeoutMs'));
+  const hugeTimeout = validateConfig(loadConfig({ IG_OAUTH_ACQUIRE_TIMEOUT_MS: '20000' }));
+  assert.ok(hugeTimeout.some((e) => e.field === 'instagram.oauthAcquireTimeoutMs'));
 });
 
 test('loadConfig: значения из env + нормализация', () => {
