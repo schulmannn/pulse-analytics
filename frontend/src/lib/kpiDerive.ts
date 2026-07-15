@@ -3,7 +3,7 @@ import { fmt, pluralRu } from '@/lib/format';
 import { normalizeTgPosts } from '@/lib/posts';
 import type { NormalizedPost } from '@/lib/posts';
 import type { DateRange, PeriodDays } from '@/lib/period';
-import { avgReachWindowDelta, dailyWindowDelta, pctDelta, subscriberChange, subscriberDelta, sumPostWindows } from '@/lib/delta';
+import { avgReachWindows, dailyWindowDelta, pctDelta, subscriberChange, subscriberDelta, sumPostWindows } from '@/lib/delta';
 import type { MetricDelta } from '@/lib/delta';
 
 /** A daily metric series: aligned day labels + values (sparklines, drills, metric pages). */
@@ -143,13 +143,15 @@ export function deriveKpis(
     ?? (members > 0 && currentEngagement != null && previousEngagement != null
       ? pctDelta(currentEngagement / members, previousEngagement / members)
       : null);
-  const avgReachTrend = avgReachWindowDelta(
-    (data?.posts ?? []).map((post) => ({
-      date: post.date,
-      views: Number(post.views ?? post.view_count ?? 0),
-    })),
-    days,
-  );
+  const avgReachPosts = (data?.posts ?? []).map((post) => ({
+    date: post.date,
+    views: Number(post.views ?? post.view_count ?? 0),
+  }));
+  // Paired-window average reach (same windows as the trend) — feeds the compact Overview
+  // avg-reach card's current/previous bars. Preset windows only (a custom range has no paired
+  // previous), so `range` suppresses it exactly like the ledger deltas below.
+  const avgReachPair = range ? null : avgReachWindows(avgReachPosts, days);
+  const avgReachTrend = avgReachPair ? pctDelta(avgReachPair.current, avgReachPair.previous) : null;
 
   // Per-metric daily series for the inline sparklines (within the active window). Carries the
   // day labels alongside the values so the interactive read-out can name the hovered point.
@@ -241,10 +243,19 @@ export function deriveKpis(
     er: { total: er > 0 ? er.toFixed(2) + '%' : '—', trend: erTrend, caption: erCaption },
   };
 
+  // Previous-window absolutes for the compact Overview comparison cards (avg reach / reactions /
+  // ER). Honest by construction: null whenever the paired previous window is unavailable
+  // (custom range, sparse channel) so the card draws no comparison bars and quotes no fake prev.
+  const avgViewsPrev = avgReachPair ? avgReachPair.previous : null;
+  const reactionsPrev = !range && windowTotals ? windowTotals.previous.reactions : null;
+  const erPrev =
+    !range && members > 0 && previousEngagement != null ? (previousEngagement / members) * 100 : null;
+
   return {
     members, displayMembers, totalViews, channelViews, totalReactions, avgViews, er,
     subscriberTrend, viewsTrend, reactionsTrend, erTrend, avgReachTrend,
     viewsSpark, subsSpark, periodLabel, viewsCaption, subDelta, reactionsDelta, erCaption,
+    avgViewsPrev, reactionsPrev, erPrev,
     normPosts, normPostsAll, drillMeta,
     // Extras the metric pages need beyond the grid: paired-window totals for the
     // «Сравнение» ledger and the raw archive rows for subscriber window math.

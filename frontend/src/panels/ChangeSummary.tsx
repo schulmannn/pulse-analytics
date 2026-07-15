@@ -5,13 +5,13 @@ import { describeChange, explainChange } from '@/lib/whyChanged';
 import { fmt } from '@/lib/format';
 import { periodMedian } from '@/lib/postMedian';
 
-export function ChangeSummary() {
+export function ChangeSummary({ compact = false }: { compact?: boolean } = {}) {
   const { data } = useTgFull(0);
   const { days, inRange } = useWidgetPeriod();
   const posts = normalizeTgPosts(data?.posts ?? [], data?.channel ?? {});
 
   if (days === 0 || posts.length === 0) {
-    return <p className="py-5 text-sm text-muted-foreground">Выберите конечный период, чтобы сравнить его с предыдущим окном.</p>;
+    return <p className={compact ? 'text-sm text-muted-foreground' : 'py-5 text-sm text-muted-foreground'}>Выберите конечный период, чтобы сравнить его с предыдущим окном.</p>;
   }
 
   const dated = posts
@@ -26,6 +26,26 @@ export function ChangeSummary() {
     const current = posts.filter((post) => inRange(post.date));
     const typical = periodMedian(current.map((post) => post.reach));
     const best = [...current].sort((a, b) => b.reach - a.reach)[0];
+    if (compact) {
+      return (
+        <div className="flex h-full min-h-0 flex-col justify-between gap-4">
+          <div>
+            <p className="text-lg font-medium leading-snug text-foreground">
+              {current.length} публикаций · {fmt.short(current.reduce((sum, post) => sum + post.reach, 0))} просмотров
+            </p>
+            <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+              {typical != null ? `Медианный охват — ${fmt.short(typical)}.` : 'Для устойчивой медианы нужно не меньше пяти публикаций.'}
+            </p>
+          </div>
+          <div className="border-t border-border pt-3">
+            <div className="text-2xs tracking-wide text-muted-foreground">Лучшая публикация</div>
+            <div className="mt-1 text-sm font-medium tabular-nums text-foreground">
+              {best ? `${fmt.short(best.reach)} просмотров` : 'Нет публикаций в окне'}
+            </div>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="grid gap-5 py-1 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.65fr)]">
         <div>
@@ -47,6 +67,25 @@ export function ChangeSummary() {
             <p className="text-sm text-muted-foreground">В выбранном окне нет публикаций.</p>
           )}
           <p className="mt-2 text-2xs text-ink3">Сравнение появится, когда будет полное предыдущее окно.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (compact) {
+    return (
+      <div className="flex h-full min-h-0 flex-col justify-between gap-4">
+        <div>
+          <p className={`text-lg font-medium leading-snug ${directionClass}`}>{story.headline}</p>
+          {story.evidence[0] ? (
+            <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{story.evidence[0]}</p>
+          ) : (
+            <p className="mt-2 text-xs text-muted-foreground">Сдвиг не выходит за порог значимого изменения.</p>
+          )}
+        </div>
+        <div className="grid grid-cols-2 gap-4 border-t border-border pt-3 text-xs text-muted-foreground">
+          <span>Период <strong className="mt-1 block font-medium tabular-nums text-foreground">{fmt.short(change.current)}</strong></span>
+          <span>Предыдущий <strong className="mt-1 block font-medium tabular-nums text-foreground">{fmt.short(change.previous)}</strong></span>
         </div>
       </div>
     );

@@ -148,6 +148,7 @@ export function ChartSection(props: ChartSectionProps) {
         showSource={widgetId.startsWith('home-')}
         showSize={!!group && !props.fixedSize}
         defaultSize={props.defaultSize ?? 'third'}
+        defaultColor={props.defaultColor}
         minSize={model.variants.activeVariant?.minSize ?? 'third'}
         onChange={updatePrefs}
         onClose={() => model.controls.setEditOpen(false)}

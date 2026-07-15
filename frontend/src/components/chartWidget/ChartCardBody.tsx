@@ -8,6 +8,8 @@ export interface ChartCardBodyProps {
   delta?: MetricDelta | null;
   caption?: ReactNode;
   onValueClick?: () => void;
+  /** Accessible metric name for the clickable headline value. */
+  drillLabel?: string;
   hero?: boolean;
   children: ReactNode;
 }
@@ -19,6 +21,7 @@ export function ChartCardBody({
   delta,
   caption,
   onValueClick,
+  drillLabel,
   hero = false,
   children,
 }: ChartCardBodyProps) {
@@ -30,6 +33,7 @@ export function ChartCardBody({
         {onValueClick ? (
           <button
             type="button"
+            aria-label={drillLabel ? `Разбор: ${drillLabel}` : undefined}
             title="Подробный разбор"
             onClick={onValueClick}
             className={`${numberClass} rounded text-left transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40`}

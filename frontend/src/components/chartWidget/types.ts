@@ -22,6 +22,8 @@ export interface ChartSectionProps {
   variants?: WidgetVariant[] | ((period: WidgetPeriodValue, series: WidgetSeriesOpts) => WidgetVariant[]);
   className?: string;
   defaultSize?: WidgetSize;
+  /** Metric-identity accent used until the user chooses a colour explicitly. */
+  defaultColor?: number;
   /** Locks the surface size and hides the size control in the editor. */
   fixedSize?: WidgetSize;
   /** Rich fullscreen explorer configuration. */

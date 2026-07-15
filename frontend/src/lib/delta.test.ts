@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   avgReachWindowDelta,
+  avgReachWindows,
   dailyWindowDelta,
   pctDelta,
   splitDailyWindows,
@@ -155,5 +156,29 @@ describe('avgReachWindowDelta', () => {
     expect(
       avgReachWindowDelta([{ date: '2026-06-24T00:00:00.000Z', views: 100 }], 7, now),
     ).toBeNull();
+  });
+});
+
+describe('avgReachWindows', () => {
+  const now = Date.parse('2026-06-25T12:00:00.000Z');
+  const posts = [
+    { date: '2026-06-24T00:00:00.000Z', views: 100 },
+    { date: '2026-06-20T00:00:00.000Z', views: 200 },
+    { date: '2026-06-15T00:00:00.000Z', views: 100 },
+  ];
+
+  it('returns the current and previous average views/post for the paired windows', () => {
+    // current avg = (100+200)/2 = 150, previous avg = 100/1 = 100 (feeds the compact two-bar)
+    expect(avgReachWindows(posts, 7, now)).toEqual({ current: 150, previous: 100 });
+  });
+
+  it('agrees with avgReachWindowDelta (single source for the delta and the bars)', () => {
+    const windows = avgReachWindows(posts, 7, now)!;
+    expect(avgReachWindowDelta(posts, 7, now)).toEqual(pctDelta(windows.current, windows.previous));
+  });
+
+  it('returns null for all-time or when a window is empty', () => {
+    expect(avgReachWindows(posts, 0, now)).toBeNull();
+    expect(avgReachWindows([{ date: '2026-06-24T00:00:00.000Z', views: 100 }], 7, now)).toBeNull();
   });
 });

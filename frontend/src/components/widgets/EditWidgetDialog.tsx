@@ -83,6 +83,8 @@ export interface EditWidgetDialogProps {
   showSize?: boolean;
   /** The card's size when the user hasn't chosen one (defaultSize prop, else 'half'). */
   defaultSize?: WidgetSize;
+  /** Metric-identity accent shown by the standard swatch when no override is stored. */
+  defaultColor?: number;
   /** Active variant's floor — sizes below it are disabled (the variant needs the width). */
   minSize?: WidgetSize;
   onChange: (next: WidgetPrefs) => void;
@@ -90,9 +92,9 @@ export interface EditWidgetDialogProps {
 }
 
 const SIZE_OPTIONS: Array<{ size: WidgetSize; label: string }> = [
-  { size: 'third', label: '33%' },
-  { size: 'half', label: '66%' },
-  { size: 'full', label: '100%' },
+  { size: 'third', label: 'S' },
+  { size: 'half', label: 'M' },
+  { size: 'full', label: 'L' },
 ];
 
 // Carousel geometry — must match the Tailwind classes on the cards (w-56, gap-3).
@@ -308,7 +310,7 @@ function SourceSelect({ prefs, onChange }: { prefs: WidgetPrefs; onChange: (next
   );
 }
 
-export function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, showSeries, showSource, showSize, defaultSize = 'half', minSize = 'third', onChange, onClose }: EditWidgetDialogProps) {
+export function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, showSeries, showSource, showSize, defaultSize = 'half', defaultColor, minSize = 'third', onChange, onClose }: EditWidgetDialogProps) {
   // Modal focus contract. The trap's effect must run BEFORE the title-focus effect (declaration
   // order) so it snapshots the real opener; an `autoFocus` attribute would fire during commit —
   // before the trap — corrupting the opener snapshot and then losing focus to panel.focus().
@@ -364,7 +366,7 @@ export function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, sh
         {showSize && (
           <div className="mt-4">
             <span className="text-2xs tracking-wide text-muted-foreground">Размер</span>
-            {/* Треть / Половина / Полный on the 6-col grid. Selecting the card's defaultSize
+            {/* S / M / L on the 6-col grid. Selecting the card's defaultSize
                 clears the pref (fall back to the default). Sizes below the active variant's
                 floor are disabled — that presentation needs the width. */}
             <div className="mt-2 flex overflow-hidden rounded border border-border">
@@ -495,7 +497,7 @@ export function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, sh
               aria-pressed={!prefs.color}
               onClick={() => onChange({ ...prefs, color: undefined })}
               className={`h-5 w-5 rounded-full transition-shadow ${!prefs.color ? 'ring-2 ring-foreground/50 ring-offset-2 ring-offset-card' : ''}`}
-              style={{ backgroundColor: 'hsl(var(--primary))' }}
+              style={{ backgroundColor: defaultColor ? `hsl(var(--chart-${defaultColor}-accent))` : 'hsl(var(--primary))' }}
             />
             {SWATCHES.map((n) => (
               <button

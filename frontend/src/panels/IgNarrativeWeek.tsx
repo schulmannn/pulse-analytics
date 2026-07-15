@@ -54,7 +54,7 @@ export function IgNarrativeWeekBody() {
         <NarrativeProse paragraphs={buildIgWeekNarrative(input).paragraphs} />
       </div>
       {facts.length > 0 && (
-        <aside className="hidden w-44 shrink-0 space-y-3 border-l border-border pl-5 lg:block">
+        <aside className="hidden w-44 shrink-0 space-y-3 border-l border-border pl-5 2xl:block">
           {facts.map((f) => (
             <div key={f.label}>
               <div className="text-2xs tracking-wide text-muted-foreground">{f.label}</div>

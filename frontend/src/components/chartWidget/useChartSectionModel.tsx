@@ -33,6 +33,7 @@ export function useChartSectionModel(props: ChartSectionProps) {
     title,
     variants,
     defaultSize,
+    defaultColor,
     fixedSize,
     expand,
     drillTo,
@@ -155,7 +156,7 @@ export function useChartSectionModel(props: ChartSectionProps) {
       : children
     : <ThrowInRender error={variantResult.error} />;
 
-  const activeColor = configEditor ? configEditor.color : prefs.color;
+  const activeColor = (configEditor ? configEditor.color : prefs.color) ?? defaultColor;
   const activeTinted = (configEditor ? configEditor.tinted : prefs.tinted) ?? true;
   const activeTarget = configEditor ? (configEditor.target ?? null) : (prefs.target ?? null);
   const chosenSize: WidgetSize =

@@ -18,6 +18,7 @@ interface WidgetEditOverlayProps {
   showSource: boolean;
   showSize: boolean;
   defaultSize: WidgetSize;
+  defaultColor?: number;
   minSize: WidgetSize;
   onChange: (next: WidgetPrefs) => void;
   onClose: () => void;
@@ -35,6 +36,7 @@ export function WidgetEditOverlay({ open, configDriven, ...props }: WidgetEditOv
       showSource={props.showSource}
       showSize={props.showSize}
       defaultSize={props.defaultSize}
+      defaultColor={props.defaultColor}
       minSize={props.minSize}
       onChange={props.onChange}
       onClose={props.onClose}

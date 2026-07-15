@@ -55,7 +55,7 @@ test('overview period is shared by every widget and either control updates the p
     await expect(group.getByRole('button', { name: '30д' })).toHaveAttribute('aria-pressed', 'true');
   }
   await expect(page.getByText('Просмотры · 30 дн.')).toBeVisible();
-  const contextCard = page.getByRole('heading', { name: 'Контекст периода', exact: true }).locator('..').locator('..');
+  const contextCard = page.getByRole('heading', { name: 'Главное изменение', exact: true }).locator('..').locator('..');
   const contextBefore = await contextCard.innerText();
 
   // A card-level pill is now another handle for the same page period, not a private override.

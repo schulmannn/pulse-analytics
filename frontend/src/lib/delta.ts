@@ -211,15 +211,17 @@ export function dailyWindowDelta<T extends { day: string }>(
 }
 
 /**
- * Δ of average reach (views per post) between the current and previous windows. Per-post
- * averages have no daily archive, so this is post-derived: null unless BOTH windows hold
- * at least one post (a sparse channel shows no pill rather than a misleading one).
+ * Average reach (views per post) for the current and previous equal-length windows. Per-post
+ * averages have no daily archive, so this is post-derived: null unless BOTH windows hold at
+ * least one post (a sparse channel gets no comparison rather than a misleading one). Shared by
+ * {@link avgReachWindowDelta} and the compact Overview avg-reach card so the delta and the
+ * current/previous bars can never quote different windows.
  */
-export function avgReachWindowDelta(
+export function avgReachWindows(
   posts: { date?: string | null; views: number }[],
   days: number,
   now = Date.now(),
-): MetricDelta | null {
+): { current: number; previous: number } | null {
   if (!Number.isFinite(days) || days <= 0) return null;
 
   const currentStart = now - days * DAY_MS;
@@ -245,5 +247,18 @@ export function avgReachWindowDelta(
   }
 
   if (currentCount === 0 || previousCount === 0) return null;
-  return pctDelta(currentViews / currentCount, previousViews / previousCount);
+  return { current: currentViews / currentCount, previous: previousViews / previousCount };
+}
+
+/**
+ * Δ of average reach (views per post) between the current and previous windows. Post-derived
+ * (no daily archive), so null unless BOTH windows hold at least one post.
+ */
+export function avgReachWindowDelta(
+  posts: { date?: string | null; views: number }[],
+  days: number,
+  now = Date.now(),
+): MetricDelta | null {
+  const windows = avgReachWindows(posts, days, now);
+  return windows ? pctDelta(windows.current, windows.previous) : null;
 }

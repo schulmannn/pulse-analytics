@@ -10,6 +10,7 @@ import type { NormalizedPost } from '@/lib/posts';
 import { tgWeekMetrics } from '@/lib/tgWeekMetrics';
 import { buildWeekNarrative, type NarrativeIgInput, type NarrativeInput, type NarrativeParagraph, type NarrativeSeg } from '@/lib/narrative';
 import { ChartSection } from '@/components/ChartWidget';
+import type { WidgetSize } from '@/lib/widgetPrefsStore';
 import { DeltaPill } from '@/components/DeltaPill';
 import { InlineSpark } from '@/components/InlineSpark';
 import { PostDetailModal } from '@/components/PostDetailModal';
@@ -211,7 +212,7 @@ export function NarrativeWeekBody() {
   }
   // TG-часть не ждёт Instagram: IG-абзац — кода текста, его догрузка ничего не сдвигает.
   const nar = buildWeekNarrative({ ...input, ig: igInput });
-  // Факт-колонка (≥lg): короткий рассказ оставлял полкарточки (66%) пустой — справа мини-леджер
+  // Факт-колонка на очень широком desktop: короткий рассказ оставлял крупную карточку пустой — справа мини-леджер
   // из ТОГО ЖЕ входа (никаких новых запросов): пик недели, постов за неделю, база. Числа сходятся
   // с рассказом по построению — это те же ряды.
   const last7 = input.viewsDaily.slice(-7);
@@ -231,7 +232,7 @@ export function NarrativeWeekBody() {
           <NarrativeProse paragraphs={nar.paragraphs} onPost={setOpenPost} />
         </div>
         {facts.length > 0 && (
-          <aside className="hidden w-44 shrink-0 space-y-3 border-l border-border pl-5 lg:block">
+          <aside className="hidden w-44 shrink-0 space-y-3 border-l border-border pl-5 2xl:block">
             {facts.map((f) => (
               <div key={f.label}>
                 <div className="text-2xs tracking-wide text-muted-foreground">{f.label}</div>
@@ -281,10 +282,17 @@ export function NarrativeProse({ paragraphs, onPost }: { paragraphs: NarrativePa
   );
 }
 
-/** Виджет-обёртка (Обзор + Home-пин через id/homeKey — паттерн GrowthChartBlock). */
-export function NarrativeWeekBlock({ id, homeKey }: { id?: string; homeKey?: string } = {}) {
+/** Виджет-обёртка (Обзор + Home-пин через id/homeKey — паттерн GrowthChartBlock). Обзор может
+ *  зафиксировать геометрию, а Home сохраняет пользовательский размер. */
+export function NarrativeWeekBlock({
+  id,
+  homeKey,
+  defaultSize = 'half',
+  fixedSize,
+  title = 'Неделя канала',
+}: { id?: string; homeKey?: string; defaultSize?: WidgetSize; fixedSize?: WidgetSize; title?: string } = {}) {
   return (
-    <ChartSection id={id} homeKey={homeKey} title="Неделя канала" defaultSize="half" noExpand>
+    <ChartSection id={id} homeKey={homeKey} title={title} defaultSize={defaultSize} fixedSize={fixedSize} noExpand>
       <NarrativeWeekBody />
     </ChartSection>
   );
