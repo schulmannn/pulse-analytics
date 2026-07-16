@@ -261,6 +261,86 @@ test('runDailyMaintenance: сбой одного прунинга изолиро
   assert.ok(logs.some((l) => l.event === 'audit_events_pruned' && l.meta.deleted === 5));
 });
 
+// ── App-level usage-gate тормозит проход ДО claim'а (pacedStop) ────────────────────────────────────
+// Gate инъектируется в createPersistenceJob; runJobOnce фиксирует claim'нутые ключи, чтобы доказать,
+// что остановленные аккаунты вообще не берутся в работу.
+function makeGatedPass({ accounts, gate, collectImpl, cap = 25 }) {
+  const claimed = [];
+  const collected = [];
+  const done = new Set();
+  const collect = collectImpl || (async (acc) => { collected.push(acc.channel_id); });
+  const db = {
+    enabled: true,
+    listIgAccounts: async () => accounts,
+    runJobOnce: async (_kind, key, fn) => {
+      const id = key.split(':')[0];
+      claimed.push(id);
+      if (done.has(id)) return { skipped: true };
+      const result = await fn();
+      done.add(id);
+      return { skipped: false, result };
+    },
+  };
+  const job = createPersistenceJob({
+    db,
+    log: () => {},
+    igCrypto: { configured: () => true },
+    collectIgForAccount: collect,
+    capacityRollups: false,
+    igAccountsPerPass: cap,
+    usageGate: gate,
+  });
+  return { job, claimed, collected };
+}
+
+test('gate: открытый app-gate останавливает проход ДО первого claim (pacedStop)', async () => {
+  const gate = { open: true, shouldStopPass() { return this.open; } };
+  const { job, claimed, collected } = makeGatedPass({ accounts: accs(1, 2, 3), gate });
+  const stats = await job.runIgCollectionPass();
+  assert.deepEqual(claimed, [], 'ни один аккаунт не claim\'нут при открытом gate');
+  assert.deepEqual(collected, []);
+  assert.equal(stats.started, 0);
+  assert.equal(stats.capped, true);
+  assert.equal(stats.pacedStop, true);
+});
+
+test('gate: pacedStop ставится ТОЛЬКО на остановленный результат — при закрытом gate его нет', async () => {
+  const gate = { open: false, shouldStopPass() { return this.open; } };
+  const { job } = makeGatedPass({ accounts: accs(1, 2), gate });
+  const stats = await job.runIgCollectionPass();
+  assert.equal(stats.pacedStop, undefined, 'нормальный проход не несёт pacedStop');
+  assert.deepEqual(stats, { started: 2, skipped: 0, failed: 0, capped: false });
+});
+
+test('gate: in-account app-throttle роняет аккаунт и следующий проход-виток не claim\'ит остальные', async () => {
+  const gate = { open: false, shouldStopPass() { return this.open; } };
+  const collect = async (acc) => {
+    if (acc.channel_id === 1) { gate.open = true; const e = new Error('app throttled'); e.status = 429; throw e; }
+  };
+  const { job, claimed } = makeGatedPass({ accounts: accs(1, 2, 3), gate, collectImpl: collect });
+  const stats = await job.runIgCollectionPass();
+  assert.deepEqual(claimed, ['1'], 'аккаунты 2 и 3 не claim\'нуты — gate открылся после падения 1');
+  assert.equal(stats.started, 1);
+  assert.equal(stats.failed, 1);
+  assert.equal(stats.pacedStop, true);
+});
+
+test('gate: account-scoped 429 роняет свой аккаунт, но при закрытом gate проход продолжается', async () => {
+  const gate = { open: false, shouldStopPass() { return this.open; } };
+  const collected = [];
+  const collect = async (acc) => {
+    if (acc.channel_id === 1) { const e = new Error('user rate limit'); e.status = 429; throw e; }   // user/page → gate НЕ открыт
+    collected.push(acc.channel_id);
+  };
+  const { job, claimed } = makeGatedPass({ accounts: accs(1, 2, 3), gate, collectImpl: collect });
+  const stats = await job.runIgCollectionPass();
+  assert.deepEqual(claimed, ['1', '2', '3'], 'gate закрыт → все аккаунты обработаны');
+  assert.deepEqual(collected, [2, 3], 'unrelated-аккаунты собраны после падения одного');
+  assert.equal(stats.started, 3);
+  assert.equal(stats.failed, 1);
+  assert.equal(stats.pacedStop, undefined);
+});
+
 test('runDailyMaintenance: DB выключена → maintenance no-op, прунинг не вызывается даже при флагах ON', async () => {
   const calls = { ingest: 0, audit: 0 };
   const job = createPersistenceJob({

@@ -62,11 +62,19 @@ function parseUsageHeader(headerValue) {
 // 3-го аргумента продолжают работать как раньше; IG-роуты передают per-request токен.
 // fetchImpl/sleep/now инъектируются только для детерминированных unit-тестов; дефолты —
 // прод-поведение (реальный fetchWithTimeout, реальный setTimeout, системные часы).
-function createInstagramClient({ db, log, igCrypto, defaultToken, inflight, fetchImpl, sleep, now }) {
+// usageGate — общий app-level numeric-only тормоз (infrastructure/igUsageGate): клиент
+// СКАРМЛИВАЕТ ему разобранные usage-заголовки и с успешных, и с ошибочных data GET'ов.
+// paceOnUsage (default false): только фоновый collection-клиент = true — при открытом gate
+// он реджектит НОВЫЙ полёт синтетической throttle-ошибкой ДО обращения к Graph (preflight),
+// не тратя квоту. Живой клиент (false) gate только ОБНОВЛЯЕТ и никогда не блокируется/спит.
+function createInstagramClient({ db, log, igCrypto, defaultToken, inflight, fetchImpl, sleep, now, usageGate, paceOnUsage }) {
   const doFetch = fetchImpl || fetchWithTimeout;
   const logFn = log || (() => {});
   const clock = now || Date.now;
   const doSleep = sleep || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  // gate по умолчанию — no-op, чтобы legacy-вызовы и unit-тесты без gate работали как раньше.
+  const gate = usageGate || { observe: () => {}, shouldStopPass: () => false, remainingSeconds: () => 0 };
+  const pace = paceOnUsage === true;
   // Single choke-point for all Graph data calls. `token` defaults to the global env token so any
   // legacy caller keeps working; the IG routes pass the per-request token (req.ig.token).
   // Singleflight: concurrent identical calls (two tabs, a dashboard fan-out racing the cache)
@@ -102,7 +110,18 @@ function createInstagramClient({ db, log, igCrypto, defaultToken, inflight, fetc
     const graphError = json && typeof json === 'object' && json.error && typeof json.error === 'object'
       ? json.error : null;
 
-    if (!graphError && !parseFailed && status >= 200 && status < 300) return json;
+    if (!graphError && !parseFailed && status >= 200 && status < 300) {
+      // Успешный 2xx тоже несёт квоту: app usage=100 в заголовке успешного ответа обязано
+      // взвести gate для СЛЕДУЮЩЕГО фонового вызова. Наблюдаем ДО возврата тела.
+      gate.observe({
+        appUsage: parseUsageHeader(res.headers && res.headers.get('x-app-usage')),
+        businessUseCaseUsage: parseUsageHeader(res.headers && res.headers.get('x-business-use-case-usage')),
+        graphCode: null,
+        retryAfterSeconds: null,
+        status,
+      });
+      return json;
+    }
 
     // ── Classification ──────────────────────────────────────────────────────────────────────────
     const code = graphError && Number.isFinite(Number(graphError.code)) ? Number(graphError.code) : null;
@@ -144,7 +163,27 @@ function createInstagramClient({ db, log, igCrypto, defaultToken, inflight, fetc
     if (appUsage) err.appUsage = appUsage;
     const bucUsage = parseUsageHeader(res.headers && res.headers.get('x-business-use-case-usage'));
     if (bucUsage) err.businessUseCaseUsage = bucUsage;
+    // Ошибочный data GET тоже наблюдается: app usage>=100 / Graph код 4 / app-scoped 429 c
+    // Retry-After открывают общий gate; user/page код 17/32 без app-usage=100 — нет.
+    gate.observe({
+      appUsage, businessUseCaseUsage: bucUsage, graphCode: code,
+      retryAfterSeconds: retryAfter, status,
+    });
     throw err;
+  }
+
+  // Синтетическая throttle-ошибка preflight-тормоза: безопасная, без токена/пути/сырых заголовков.
+  // Стабильные code/flag, чтобы isIgThrottleError в collection-job её распознал; retryAfter
+  // ограничен остатком паузы gate.
+  function gateStopError() {
+    const err = new Error('Instagram API: paused by app usage gate');
+    err.status = 429;
+    err.transient = true;
+    err.igGateStopped = true;
+    err.igCode = 'ig_usage_gate';
+    const remaining = gate.remainingSeconds();
+    if (Number.isFinite(remaining) && remaining > 0) err.retryAfter = remaining;
+    return err;
   }
 
   function igFetch(path, params = {}, token = defaultToken) {
@@ -153,6 +192,10 @@ function createInstagramClient({ db, log, igCrypto, defaultToken, inflight, fetc
     const url = `${IG_BASE}${path}?${qs}`;
     let flight = igInflight.get(url);
     if (!flight) {
+      // Preflight-тормоз ТОЛЬКО когда полёта ещё нет: существующий общий singleflight-промис
+      // всегда возвращается как есть (без нового quota-вызова). paceOnUsage + открытый gate →
+      // реджект сразу, не обращаясь к Graph и не создавая полёт (карта не засоряется).
+      if (pace && gate.shouldStopPass()) return Promise.reject(gateStopError());
       // The ENTIRE retry sequence lives inside the singleflight promise: concurrent identical
       // callers share one attempt-chain, so retries never multiply quota burn.
       flight = (async () => {
@@ -161,6 +204,10 @@ function createInstagramClient({ db, log, igCrypto, defaultToken, inflight, fetc
           try {
             return await igAttempt(url, path);
           } catch (err) {
+            // Once this background attempt has opened the shared app-level gate, continuing the
+            // same retry chain would knowingly spend more of the exhausted app quota. Live reads
+            // keep their existing bounded retry policy; only the paced collection client stops.
+            if (pace && Number(err.status) === 429 && gate.shouldStopPass()) throw err;
             if (!err.transient || attempt > IG_MAX_RETRIES) throw err;   // exhausted or non-transient
             // Backoff = max(exponential floor, provider Retry-After). Never sleep an unbounded
             // provider delay: if honoring it would blow the small backoff budget, fail fast now and

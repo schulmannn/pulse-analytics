@@ -245,3 +245,145 @@ test('refreshIgIfNeeded успешно обновляет и персистит 
   assert.equal(persisted[0][0], 'chan-1');
   assert.equal(persisted[0][1], 'enc(NEW_TOKEN)');
 });
+
+// ── 9. Общий app-level usage-gate: наблюдение заголовков + preflight-тормоз (paceOnUsage) ──────────
+// Записывающий/переключаемый фейк gate: observe копит наблюдения, shouldStopPass управляется флагом.
+function recordingGate({ open = false } = {}) {
+  const observed = [];
+  return {
+    observed,
+    open,
+    observe: (obs) => observed.push(obs),
+    shouldStopPass() { return this.open; },
+    remainingSeconds: () => 42,
+  };
+}
+
+// makeClient с gate + paceOnUsage и общим inflight Map (для теста разделяемого singleflight).
+function makeGateClient(responders, { gate, paceOnUsage = false, inflight, now } = {}) {
+  const calls = [];
+  let i = 0;
+  const fetchImpl = async (url) => {
+    calls.push(url);
+    const r = responders[i] !== undefined ? responders[i] : responders[responders.length - 1];
+    i += 1;
+    return r(url);
+  };
+  const client = createInstagramClient({
+    db: { updateIgToken: async () => {} },
+    log: () => {},
+    igCrypto: { encrypt: (t) => `enc(${t})` },
+    defaultToken: 'DEFAULT_TOKEN',
+    fetchImpl,
+    sleep: async () => {},
+    now: now || (() => 1_000_000_000),
+    usageGate: gate,
+    paceOnUsage,
+    inflight,
+  });
+  return { client, calls };
+}
+
+test('2xx наблюдает usage-заголовки через gate.observe', async () => {
+  const gate = recordingGate();
+  const { client } = makeGateClient([
+    () => res({ status: 200, body: { data: [1] }, headers: {
+      'x-app-usage': '{"call_count":90,"total_time":33}',
+      'x-business-use-case-usage': '{"biz":[{"call_count":12}]}',
+    } }),
+  ], { gate });
+  await client.igFetch('/1/insights', { metric: 'reach' });
+  assert.equal(gate.observed.length, 1);
+  assert.deepEqual(gate.observed[0].appUsage, { call_count: 90, total_time: 33 });
+  assert.deepEqual(gate.observed[0].businessUseCaseUsage, { biz: [{ call_count: 12 }] });
+  assert.equal(gate.observed[0].status, 200);
+  assert.equal(gate.observed[0].graphCode, null);
+});
+
+test('ошибочный ответ тоже наблюдается: app usage, Graph код и Retry-After', async () => {
+  const gate = recordingGate();
+  const { client } = makeGateClient([
+    () => res({ status: 429, body: { error: { message: 'rl', code: 4 } }, headers: {
+      'x-app-usage': '{"call_count":100}', 'retry-after': '2',
+    } }),
+  ], { gate });
+  try { await client.igFetch('/1'); } catch { /* ожидаемо */ }
+  assert.equal(gate.observed.length, 1);
+  assert.deepEqual(gate.observed[0].appUsage, { call_count: 100 });
+  assert.equal(gate.observed[0].graphCode, 4);
+  assert.equal(gate.observed[0].retryAfterSeconds, 2);
+  assert.equal(gate.observed[0].status, 429);
+});
+
+test('фоновый app-level throttle открывает gate и не прожигает внутренние ретраи', async () => {
+  const gate = recordingGate();
+  gate.observe = (obs) => {
+    gate.observed.push(obs);
+    if (obs.graphCode === 4) gate.open = true;
+  };
+  const { client, calls } = makeGateClient([
+    () => res({ status: 429, body: { error: { message: 'app limited', code: 4 } } }),
+    () => res({ status: 200, body: { data: ['unexpected retry'] } }),
+  ], { gate, paceOnUsage: true });
+  const err = await rejects(client.igFetch('/1/insights', { metric: 'reach' }));
+  assert.equal(err.status, 429);
+  assert.equal(calls.length, 1, 'после app-level stop фоновый полёт не делает второй Graph-вызов');
+});
+
+test('фоновый preflight (paceOnUsage) при открытом gate НЕ делает ни одного fetch', async () => {
+  const gate = recordingGate({ open: true });
+  const { client, calls } = makeGateClient([
+    () => res({ status: 200, body: { data: [1] } }),
+  ], { gate, paceOnUsage: true });
+  const err = await rejects(client.igFetch('/1/insights', { metric: 'reach' }));
+  assert.equal(calls.length, 0, 'preflight реджект — Graph не вызван, квота не сожжена');
+  assert.equal(err.status, 429);
+  assert.equal(err.transient, true);
+  assert.equal(err.igGateStopped, true);
+  assert.equal(err.igCode, 'ig_usage_gate');
+  assert.equal(err.retryAfter, 42);
+});
+
+test('живой клиент (paceOnUsage=false) при открытом gate всё равно ходит в сеть', async () => {
+  const gate = recordingGate({ open: true });
+  const { client, calls } = makeGateClient([
+    () => res({ status: 200, body: { data: 'live' } }),
+  ], { gate, paceOnUsage: false });
+  const out = await client.igFetch('/1/insights', { metric: 'reach' });
+  assert.deepEqual(out, { data: 'live' });
+  assert.equal(calls.length, 1, 'live-клиент никогда не preflight-блокируется');
+});
+
+test('существующий singleflight делится даже при открытом gate (без нового quota-вызова)', async () => {
+  const gate = recordingGate({ open: true });
+  const inflight = new Map();
+  // Первый вызов создаёт полёт, пока gate ЗАКРЫТ; затем gate открывается — второй идентичный
+  // вызов обязан получить тот же полёт, а не preflight-реджект.
+  let release;
+  const barrier = new Promise((r) => { release = r; });
+  const { client, calls } = makeGateClient([
+    async () => { await barrier; return res({ status: 200, body: { data: 'shared' } }); },
+  ], { gate: recordingGate({ open: false }), paceOnUsage: true, inflight });
+  const first = client.igFetch('/1/media', { fields: 'id' });
+  // Второй клиент делит тот же inflight Map и gate уже открыт — но полёт уже есть в карте.
+  const gate2 = recordingGate({ open: true });
+  const second = makeGateClient([() => res({ status: 500, body: {} })], { gate: gate2, paceOnUsage: true, inflight });
+  const p2 = second.client.igFetch('/1/media', { fields: 'id' });
+  release();
+  const [a, b] = await Promise.all([first, p2]);
+  assert.deepEqual(a, { data: 'shared' });
+  assert.deepEqual(b, { data: 'shared' });
+  assert.equal(calls.length, 1, 'общий полёт — один upstream-вызов на двоих');
+  assert.equal(second.calls.length, 0, 'второй клиент НЕ делал своего fetch (взял общий полёт)');
+});
+
+test('синтетическая throttle-ошибка gate не несёт токена/пути/сырых заголовков', async () => {
+  const gate = recordingGate({ open: true });
+  const { client } = makeGateClient([() => res({ status: 200, body: {} })], { gate, paceOnUsage: true });
+  const err = await rejects(client.igFetch('/12345/insights', { metric: 'reach' }, 'SUPER_SECRET_TOKEN'));
+  const serialized = JSON.stringify({ message: err.message, ...err });
+  assert.doesNotMatch(err.message, /SUPER_SECRET_TOKEN|12345|access_token|graph\.instagram/);
+  assert.doesNotMatch(serialized, /SUPER_SECRET_TOKEN|access_token/);
+  assert.equal(err.appUsage, undefined, 'без сырых usage-объектов в ошибке preflight');
+  assert.equal(err.path, undefined);
+});

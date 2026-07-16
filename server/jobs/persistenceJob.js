@@ -7,13 +7,15 @@
 'use strict';
 
 function createPersistenceJob({
-  db, log, igCrypto, collectIgForAccount, capacityRollups,
+  db, log, igCrypto, collectIgForAccount, capacityRollups, usageGate,
   igAccountsPerPass = 25, jobsRetentionDays = 30, emailTokensRetentionDays = 30,
   // Продуктовый ретеншн (dark deployment): каждый прунинг независимо ВЫКЛЮЧЕН по умолчанию —
   // maintenance зовёт его только под явным флагом. Горизонты дефолтят 90/365.
   ingestReceiptsRetentionEnabled = false, ingestReceiptsRetentionDays = 90,
   auditEventsRetentionEnabled = false, auditEventsRetentionDays = 365,
 }) {
+  // Общий app-level usage-gate: default no-op, чтобы юниты без gate вели себя как раньше.
+  const gate = usageGate || { shouldStopPass: () => false };
   // Один проход IG-сбора: durable per (account, day) гейты вместо прежней монолитной дневной
   // джобы ig_persistence. Прежний гейт держал ВСЕ аккаунты под одним lease — деплой/креш посреди
   // фан-аута оставлял весь остаток непокрытым до следующего внешнего крона. Теперь каждый аккаунт
@@ -34,6 +36,11 @@ function createPersistenceJob({
     accounts = [...accounts].sort((a, b) => Number(a && a.channel_id) - Number(b && b.channel_id));
     for (const acc of accounts) {
       if (stats.started >= cap) { stats.capped = true; break; }
+      // App-level тормоз: если общий gate открыт (usage>=100 / Graph код 4 / app-scoped 429),
+      // останавливаемся ДО claim'а следующего аккаунта — не жжём квоту частичным фан-аутом и не
+      // помечаем незапущенных как succeeded. pacedStop ставится ТОЛЬКО на этот остановленный
+      // результат; форма stats иначе неизменна. Остаток доберёт следующий recovery-проход.
+      if (gate.shouldStopPass()) { stats.capped = true; stats.pacedStop = true; break; }
       let started = false;
       try {
         // Include both the Atlavue channel and current IG identity: reconnecting a different
