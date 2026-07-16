@@ -4,6 +4,7 @@ import type { IgData } from '@/lib/useIgData';
 import type { IgPost, CampaignPostInput } from '@/api/schemas';
 import { useIgTags, useRemoveCampaignPosts } from '@/api/queries';
 import { ChartSection } from '@/components/ChartWidget';
+import { PillSelect } from '@/components/PillSelect';
 import { WidgetGroup } from '@/components/widgets/WidgetGroup';
 import { Section } from '@/components/instagram/shared';
 import {
@@ -169,20 +170,16 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
               className="w-56 rounded border border-border bg-background px-2.5 py-1 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
             />
           </label>
-          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <span className="shrink-0">Формат</span>
-            <select
+            <PillSelect<IgContentFormat>
               value={filters.format}
-              onChange={(e) => update({ format: e.target.value as IgContentFormat })}
-              aria-label="Формат публикаций"
-              className="rounded border border-border bg-background px-2 py-1 text-xs text-foreground outline-none focus:ring-1 focus:ring-primary"
-              data-testid="ig-format-filter"
-            >
-              {FORMAT_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
-          </label>
+              onValueChange={(v) => update({ format: v })}
+              ariaLabel="Формат публикаций"
+              testId="ig-format-filter"
+              options={FORMAT_OPTIONS}
+            />
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs text-muted-foreground">
           <span className="tabular-nums" data-testid="ig-content-result-count">{fmt.num(rows.length)} публ.</span>

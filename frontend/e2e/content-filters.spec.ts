@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
+import { selectPill } from './helpers';
 
 /**
  * Контент (desktop) — URL-воспроизводимые фильтры + bulk-remove из кампании.
@@ -143,17 +144,17 @@ test.describe('Контент — URL-фильтры (desktop)', () => {
     await page.getByLabel('Поиск по публикациям').fill('launch');
 
     // Формат композируется с поиском (оба параметра в URL).
-    await page.getByTestId('format-filter').selectOption('video');
+    await selectPill(page.getByTestId('format-filter'), { value: 'video' });
     await expect(page).toHaveURL(/q=launch/);
     await expect(page).toHaveURL(/format=video/);
     await expect(rows).toHaveCount(1);
 
     // Сброс формата, проверка альбома (album_size>1 — свой формат, не «фото»).
     await page.getByLabel('Поиск по публикациям').fill('');
-    await page.getByTestId('format-filter').selectOption('album');
+    await selectPill(page.getByTestId('format-filter'), { value: 'album' });
     await expect(page).toHaveURL(/format=album/);
     await expect(rows).toHaveCount(1);
-    await page.getByTestId('format-filter').selectOption('all');
+    await selectPill(page.getByTestId('format-filter'), { value: 'all' });
     await expect(page).not.toHaveURL(/format=/);
 
     // Сортировка по дате: первый клик — sort=date (order=desc это дефолт → в URL НЕ пишется),
@@ -167,7 +168,7 @@ test.describe('Контент — URL-фильтры (desktop)', () => {
     // Полный deep-link воспроизводит состояние после reload.
     await page.goto('/posts?period=7&q=launch&format=video&sort=erv&order=asc');
     await expect(page.getByLabel('Поиск по публикациям')).toHaveValue('launch');
-    await expect(page.getByTestId('format-filter')).toHaveValue('video');
+    await expect(page.getByTestId('format-filter')).toHaveAttribute('data-value', 'video');
     await expect(page.getByRole('group', { name: 'Период' }).getByRole('button', { name: '7д' })).toHaveAttribute('aria-pressed', 'true');
     await expect(rows).toHaveCount(1);
 
@@ -198,7 +199,7 @@ test.describe('Контент — URL-фильтры (desktop)', () => {
 
     // Membership'ы ушли → пустое честное состояние, но публикации целы (снятие ?campaign= вернёт все).
     await expect(page.getByText('В этой кампании нет публикаций из текущего источника')).toBeVisible();
-    await page.getByTestId('campaign-filter').selectOption({ label: 'Все' });
+    await selectPill(page.getByTestId('campaign-filter'), { label: 'Все' });
     await expect(page).not.toHaveURL(/campaign=/);
     await expect(rows).toHaveCount(4);
   });

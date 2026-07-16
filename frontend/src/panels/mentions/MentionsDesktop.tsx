@@ -22,6 +22,7 @@ import {
 import { fmt } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { BarChart } from '@/components/BarChart';
+import { PillSelect } from '@/components/PillSelect';
 import { ChartSection } from '@/components/ChartWidget';
 import { WidgetGroup } from '@/components/widgets/WidgetGroup';
 import { EmptyState } from '@/components/EmptyState';
@@ -598,23 +599,23 @@ function MentionsTable({
             className="w-56 rounded border border-border bg-background px-2.5 py-1 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
           />
         </label>
-        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span className="shrink-0">Кто упомянул</span>
-          <select
+          <PillSelect
             value={filters.source}
-            onChange={(e) => onUpdate({ source: e.target.value })}
-            aria-label="Фильтр по упомянувшему каналу"
-            className="max-w-56 rounded border border-border bg-background px-2 py-1 text-xs text-foreground outline-none focus:ring-1 focus:ring-primary"
-            data-testid="mentions-source-filter"
-          >
-            <option value="">Все каналы</option>
-            {sourceOptions.map((o) => (
-              <option key={o.channel_id ?? ''} value={o.channel_id ?? ''}>
-                {(o.username ? `@${o.username}` : o.title || 'Без названия')} · {o.count}
-              </option>
-            ))}
-          </select>
-        </label>
+            onValueChange={(v) => onUpdate({ source: v })}
+            ariaLabel="Фильтр по упомянувшему каналу"
+            testId="mentions-source-filter"
+            className="max-w-56"
+            options={[
+              { value: '', label: 'Все каналы' },
+              ...sourceOptions.map((o) => ({
+                value: o.channel_id ?? '',
+                label: `${o.username ? `@${o.username}` : o.title || 'Без названия'} · ${o.count}`,
+              })),
+            ]}
+          />
+        </div>
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs text-muted-foreground">
         <span className="tabular-nums" data-testid="mentions-result-count">{fmt.num(rows.length)} упом.</span>

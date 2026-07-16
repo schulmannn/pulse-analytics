@@ -11,6 +11,7 @@ import {
   type TeamRole,
 } from '@/lib/team';
 import { cn } from '@/lib/utils';
+import { PillSelect } from '@/components/PillSelect';
 import {
   BTN_DESTRUCTIVE,
   SettingsGroup,
@@ -55,9 +56,6 @@ const initialsOf = (email: string) =>
 
 const ROLE_OPTIONS: TeamRole[] = ['editor', 'viewer'];
 
-const SELECT_CLS =
-  'rounded border border-border bg-card px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50';
-
 function TeamRoster({ plan }: { plan: 'pro' | 'max' }) {
   const me = useMe();
   const team = useTeam();
@@ -98,19 +96,13 @@ function TeamRoster({ plan }: { plan: 'pro' | 'max' }) {
               className="w-full flex-1 rounded border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-ink3 focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
             />
             <div className="flex shrink-0 items-center gap-2">
-              <select
+              <PillSelect<TeamRole>
                 value={role}
-                onChange={(e) => setRole(e.target.value as TeamRole)}
+                options={ROLE_OPTIONS.map((r) => ({ value: r, label: ROLE_LABEL[r] }))}
+                onValueChange={(v) => setRole(v)}
                 disabled={full}
-                aria-label="Роль"
-                className={SELECT_CLS}
-              >
-                {ROLE_OPTIONS.map((r) => (
-                  <option key={r} value={r}>
-                    {ROLE_LABEL[r]}
-                  </option>
-                ))}
-              </select>
+                ariaLabel="Роль"
+              />
               <button
                 type="submit"
                 disabled={full || email.trim().length === 0}
@@ -138,18 +130,12 @@ function TeamRoster({ plan }: { plan: 'pro' | 'max' }) {
           badgeMuted
           control={
             <>
-              <select
+              <PillSelect<TeamRole>
                 value={m.role}
-                onChange={(e) => setMemberRole(m.email, e.target.value as TeamRole)}
-                aria-label={`Роль ${m.email}`}
-                className={SELECT_CLS}
-              >
-                {ROLE_OPTIONS.map((r) => (
-                  <option key={r} value={r}>
-                    {ROLE_LABEL[r]}
-                  </option>
-                ))}
-              </select>
+                options={ROLE_OPTIONS.map((r) => ({ value: r, label: ROLE_LABEL[r] }))}
+                onValueChange={(v) => setMemberRole(m.email, v)}
+                ariaLabel={`Роль ${m.email}`}
+              />
               <button
                 type="button"
                 onClick={() => removeMember(m.email)}

@@ -103,6 +103,26 @@ export async function bootDemo(page: Page, route = '/', opts: { theme?: 'light' 
   await page.waitForTimeout(1200);
 }
 
+/**
+ * Operate a custom PillSelect (the accessible listbox that replaced native `<select>`). Opens the
+ * trigger, then clicks the option — by exact `value` (matched via the option's `data-value`, the
+ * closest analogue to the old `selectOption('value')`) or by visible `label`. Use this everywhere a
+ * spec used to call `locator.selectOption(...)`.
+ */
+export async function selectPill(
+  trigger: Locator,
+  target: { value: string } | { label: string },
+): Promise<void> {
+  await trigger.click();
+  const listbox = trigger.page().getByRole('listbox');
+  await listbox.waitFor({ state: 'visible' });
+  const option =
+    'value' in target
+      ? listbox.locator(`[role="option"][data-value="${target.value}"]`)
+      : listbox.getByRole('option', { name: target.label, exact: true });
+  await option.click();
+}
+
 /** A card that owns the generic ?detail= overlay rather than drilling to a dedicated metric page. */
 export function detailOverlayOpener(page: Page): Locator {
   return page.getByRole('button', { name: 'Развернуть виджет «Лучшие публикации»' });

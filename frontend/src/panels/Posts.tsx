@@ -20,6 +20,7 @@ import { useSelectedChannel } from '@/lib/channel-context';
 import { membershipKey, useCampaignFilter, useMembershipSet } from '@/lib/campaignFilter';
 import { AddToCampaignDialog } from '@/components/campaigns/AddToCampaignDialog';
 import { CampaignFilterControl } from '@/components/campaigns/CampaignFilterControl';
+import { PillSelect } from '@/components/PillSelect';
 import {
   CONTENT_SORT_COLUMNS,
   applyContentFilters,
@@ -296,20 +297,16 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
               className="w-56 rounded border border-border bg-background px-2.5 py-1 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
             />
           </label>
-          <label className="hidden items-center gap-2 text-xs text-muted-foreground md:flex">
+          <div className="hidden items-center gap-2 text-xs text-muted-foreground md:flex">
             <span className="shrink-0">Формат</span>
-            <select
+            <PillSelect<ContentFormat>
               value={filters.format}
-              onChange={(e) => update({ format: e.target.value as ContentFormat })}
-              aria-label="Формат публикаций"
-              className="rounded border border-border bg-background px-2 py-1 text-xs text-foreground outline-none focus:ring-1 focus:ring-primary"
-              data-testid="format-filter"
-            >
-              {FORMAT_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
-          </label>
+              onValueChange={(v) => update({ format: v })}
+              ariaLabel="Формат публикаций"
+              testId="format-filter"
+              options={FORMAT_OPTIONS}
+            />
+          </div>
           {/* Desktop-only content export — exactly the rows shown below. */}
           <button
             type="button"

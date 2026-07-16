@@ -31,6 +31,7 @@ import {
   timelineModes,
 } from '@/lib/campaignPageModel';
 import { campaignSourceKey } from '@/lib/campaignSources';
+import { PillSelect } from '@/components/PillSelect';
 import { fmt } from '@/lib/format';
 import { markdownToPlainText } from '@/lib/markdown';
 import { cn } from '@/lib/utils';
@@ -286,22 +287,23 @@ function CampaignHeader({
       {campaign.description ? <p className="max-w-2xl text-sm text-muted-foreground">{campaign.description}</p> : null}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         {sourceOptions.length > 0 && (
-          <label className="inline-flex w-fit items-center gap-2 text-xs text-muted-foreground">
+          <div className="inline-flex w-fit items-center gap-2 text-xs text-muted-foreground">
             <span>Источник</span>
-            <select
+            <PillSelect
               value={selectedSource ? campaignSourceKey(selectedSource) : ''}
-              onChange={(event) => onSelectSource(event.target.value)}
-              className="h-8 min-w-56 rounded border border-border bg-background px-2.5 text-xs font-medium text-foreground outline-none transition-colors hover:bg-muted focus:border-primary"
-              data-testid="campaign-source-filter"
-            >
-              <option value="">Все источники</option>
-              {sourceOptions.map((option) => (
-                <option key={option.key} value={option.key}>
-                  {option.label} · {fmt.num(option.posts)} публ.
-                </option>
-              ))}
-            </select>
-          </label>
+              onValueChange={(v) => onSelectSource(v)}
+              ariaLabel="Фильтр по источнику кампании"
+              testId="campaign-source-filter"
+              className="min-w-56"
+              options={[
+                { value: '', label: 'Все источники' },
+                ...sourceOptions.map((option) => ({
+                  value: option.key,
+                  label: `${option.label} · ${fmt.num(option.posts)} публ.`,
+                })),
+              ]}
+            />
+          </div>
         )}
         <p className="text-xs text-muted-foreground">{note}</p>
       </div>

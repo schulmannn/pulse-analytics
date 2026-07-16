@@ -7,6 +7,7 @@ import { DEFAULT_WIDGET_DAYS, usePagePeriod } from '@/lib/period';
 import type { PeriodDays } from '@/lib/period';
 import { useFocusTrap } from '@/lib/useFocusTrap';
 import { useChannels } from '@/api/queries';
+import { PillSelect } from '@/components/PillSelect';
 import type { SeriesGrain, WidgetPrefs, WidgetSize } from '@/lib/widgetPrefsStore';
 import { SIZE_RANK, type WidgetVariant } from '@/components/widgets/variants';
 
@@ -291,21 +292,21 @@ function SourceSelect({ prefs, onChange }: { prefs: WidgetPrefs; onChange: (next
   return (
     <label className="mt-4 block">
       <span className="text-2xs tracking-wide text-muted-foreground">Источник</span>
-      <select
-        value={prefs.source ?? ''}
-        onChange={(e) => {
-          const v = e.target.value;
-          onChange({ ...prefs, source: v === '' ? undefined : Number(v) });
-        }}
-        className="mt-1 w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-1 focus:ring-primary"
-      >
-        <option value="">Как в свитчере</option>
-        {list.map((c) => (
-          <option key={c.id} value={c.id}>
-            {c.title || (c.username ? `@${c.username}` : `Канал ${c.id}`)}
-          </option>
-        ))}
-      </select>
+      <div className="mt-1">
+        <PillSelect
+          ariaLabel="Источник"
+          className="w-full"
+          value={String(prefs.source ?? '')}
+          options={[
+            { value: '', label: 'Как в свитчере' },
+            ...list.map((c) => ({
+              value: String(c.id),
+              label: c.title || (c.username ? `@${c.username}` : `Канал ${c.id}`),
+            })),
+          ]}
+          onValueChange={(v) => onChange({ ...prefs, source: v === '' ? undefined : Number(v) })}
+        />
+      </div>
     </label>
   );
 }

@@ -107,6 +107,8 @@ test('desktop Instagram Overview keeps the split KPI hierarchy intact', async ({
   for (const heading of ['Охват', 'Динамика аудитории', 'Просмотры', 'Взаимодействия', 'Вовлечённость']) {
     await expect(page.getByRole('heading', { name: heading, exact: true })).toBeVisible();
   }
+  const audienceSection = page.getByRole('heading', { name: 'Динамика аудитории', exact: true }).locator('xpath=ancestor::section[1]');
+  await expect(audienceSection.getByText('по дням')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Неделя аккаунта' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Главное изменение' })).toBeVisible();
   expect(await overflowingCards(page)).toEqual([]);

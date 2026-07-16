@@ -11,10 +11,6 @@ import { PeriodUrlSync } from '@/lib/period-url';
 import { FEEDS, FeedSectionPage } from '@/panels/feed/feeds';
 import { NETWORKS } from '@/lib/networks';
 import { Home } from '@/panels/Home';
-import { MetricRoute } from '@/panels/IgMetricPage';
-import { ReportPage } from '@/panels/ReportPage';
-import { ReportsList } from '@/panels/ReportsList';
-import { Settings } from '@/panels/Settings';
 import { Skeleton } from '@/components/ui/skeleton';
 import { CommandPalette } from '@/components/CommandPalette';
 
@@ -22,8 +18,20 @@ import { CommandPalette } from '@/components/CommandPalette';
 // The heavy/rare route groups load on demand instead of riding in the entry chunk:
 // Landing carries framer-motion (~100 kB) that a logged-in user never needs; the IG
 // cluster, Admin/Bugs (superuser-only), Connect and the auth pages are visited rarely.
-// The IG five all import the same barrel, so they land in ONE async chunk.
+// The IG five all import the same barrel, so they land in ONE async chunk. The metric
+// explorers (metrics/:key), the reports index + report document, and Settings are also
+// lazy: none is the default landing surface (TG Overview is), each is entered by an
+// explicit click/deep-link, and together they keep the entry chunk under its size gate.
+// TG Overview (the feed index) and Home stay EAGER — the authenticated default must not
+// flash a suspense scaffold on first paint.
 const Landing = lazy(() => import('@/pages/Landing').then((m) => ({ default: m.Landing })));
+// Metric explorer cluster (IgMetricPage barrels in MetricPage) — one async chunk.
+const MetricRoute = lazyFrom(() => import('@/panels/IgMetricPage'), 'MetricRoute');
+// Reports index + the report document. ReportsList re-uses ReportPage's error state, so
+// both live lazy together (else ReportPage would be pulled back into the entry chunk).
+const ReportsList = lazyFrom(() => import('@/panels/ReportsList'), 'ReportsList');
+const ReportPage = lazyFrom(() => import('@/panels/ReportPage'), 'ReportPage');
+const Settings = lazyFrom(() => import('@/panels/Settings'), 'Settings');
 const LoginPage = lazyFrom(() => import('@/pages/Auth'), 'LoginPage');
 const RegisterPage = lazyFrom(() => import('@/pages/Auth'), 'RegisterPage');
 const VerifyPage = lazyFrom(() => import('@/pages/Auth'), 'VerifyPage');
@@ -61,15 +69,15 @@ export default function App() {
             declared BEFORE the catch-all `:section?` so /home resolves here, not to the TG feed. */}
         <Route path="home" element={<Home />} />
         {/* One dispatcher for both worlds: TG keys → MetricPage, ig-* keys → IgMetricPage. */}
-        <Route path="metrics/:key" element={<MetricRoute />} />
-        <Route path="reports" element={<ReportsList />} />
-        <Route path="reports/:id" element={<ReportPage />} />
+        <Route path="metrics/:key" element={<PanelSuspense><MetricRoute /></PanelSuspense>} />
+        <Route path="reports" element={<PanelSuspense><ReportsList /></PanelSuspense>} />
+        <Route path="reports/:id" element={<PanelSuspense><ReportPage /></PanelSuspense>} />
         {/* Страница кампании — standalone, как reports/:id. Списка-маршрута нет намеренно:
             список кампаний живёт вкладкой в «Контенте» (и не появляется в sidebar). */}
         <Route path="campaigns/:id" element={<PanelSuspense><CampaignPage /></PanelSuspense>} />
         {/* Pre-multi-reports bookmarks land on the index. */}
         <Route path="report" element={<Navigate to="/reports" replace />} />
-        <Route path="settings" element={<Settings />} />
+        <Route path="settings" element={<PanelSuspense><Settings /></PanelSuspense>} />
         <Route path="admin" element={<PanelSuspense><Admin /></PanelSuspense>} />
         <Route path="bugs" element={<PanelSuspense><Bugs /></PanelSuspense>} />
         <Route path="connect" element={<PanelSuspense><Connect /></PanelSuspense>} />

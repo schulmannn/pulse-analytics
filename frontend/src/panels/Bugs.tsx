@@ -1,5 +1,6 @@
-import { useState, type FormEvent, type ChangeEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import { useBugs, useCreateBug, useUpdateBugStatus, useDeleteBug } from '@/api/queries';
+import { PillSelect } from '@/components/PillSelect';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
@@ -73,28 +74,20 @@ export function Bugs() {
             />
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div className="flex items-center gap-3">
-                <select
+                <PillSelect
                   value={kindInput}
-                  onChange={(e) => setKindInput(e.target.value)}
+                  options={Object.entries(KIND_LABELS).map(([value, label]) => ({ value, label }))}
+                  onValueChange={(v) => setKindInput(v)}
                   disabled={createBugMutation.isPending}
-                  aria-label="Тип обращения"
-                  className="rounded border border-border bg-background px-2 py-1.5 text-xs font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                >
-                  {Object.entries(KIND_LABELS).map(([k, label]) => (
-                    <option key={k} value={k}>{label}</option>
-                  ))}
-                </select>
-                <select
+                  ariaLabel="Тип обращения"
+                />
+                <PillSelect
                   value={severityInput}
-                  onChange={(e) => setSeverityInput(e.target.value)}
+                  options={Object.entries(SEVERITY_LABELS).map(([value, label]) => ({ value, label }))}
+                  onValueChange={(v) => setSeverityInput(v)}
                   disabled={createBugMutation.isPending}
-                  aria-label="Важность"
-                  className="rounded border border-border bg-background px-2 py-1.5 text-xs font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                >
-                  {Object.entries(SEVERITY_LABELS).map(([s, label]) => (
-                    <option key={s} value={s}>{label}</option>
-                  ))}
-                </select>
+                  ariaLabel="Важность"
+                />
               </div>
               <button
                 type="submit"
@@ -168,7 +161,7 @@ function BugRowCard({ bug, availableStatuses, onDelete }: BugRowCardProps) {
   // recurring crash isn't a one-off. Historical/pre-signature crashes have no count → nothing shown.
   const crashCount = bug.kind === 'crash' && typeof bug.occurrence_count === 'number' ? bug.occurrence_count : null;
 
-  const handleStatusChange = (e: ChangeEvent<HTMLSelectElement>) => updateStatusMutation.mutate({ status: e.target.value });
+  const handleStatusChange = (status: string) => updateStatusMutation.mutate({ status });
 
   return (
     <Card className={`transition-opacity ${isCompleted ? 'opacity-60' : ''}`}>
@@ -220,17 +213,13 @@ function BugRowCard({ bug, availableStatuses, onDelete }: BugRowCardProps) {
             {bug.created_at && <span className="font-sans font-medium">{fmt.date(bug.created_at)}</span>}
           </div>
           <div className="shrink-0">
-            <select
+            <PillSelect
               value={bug.status ?? 'open'}
-              onChange={handleStatusChange}
+              options={availableStatuses.map((st) => ({ value: st, label: STATUS_LABELS[st] || st }))}
+              onValueChange={handleStatusChange}
               disabled={updateStatusMutation.isPending}
-              aria-label={`Статус тикета #${bug.id}`}
-              className="rounded border border-border bg-background px-2 py-1 text-xs font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
-            >
-              {availableStatuses.map((st) => (
-                <option key={st} value={st}>{STATUS_LABELS[st] || st}</option>
-              ))}
-            </select>
+              ariaLabel={`Статус тикета #${bug.id}`}
+            />
           </div>
         </div>
       </CardContent>

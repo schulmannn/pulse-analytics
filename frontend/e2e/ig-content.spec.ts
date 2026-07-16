@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
+import { selectPill } from './helpers';
 
 /**
  * Instagram Контент 2.0 (desktop) — URL-воспроизводимая таблица публикаций + вторичные разборы за
@@ -113,12 +114,12 @@ test.describe('Instagram Контент 2.0 (desktop)', () => {
     await page.getByLabel('Поиск по публикациям').fill('');
 
     // Формат: Reels — только медиа-продукт REELS (не любое видео).
-    await page.getByTestId('ig-format-filter').selectOption('reels');
+    await selectPill(page.getByTestId('ig-format-filter'), { value: 'reels' });
     await expect(page).toHaveURL(/format=reels/);
     await expect(rows).toHaveCount(1);
-    await page.getByTestId('ig-format-filter').selectOption('video');
+    await selectPill(page.getByTestId('ig-format-filter'), { value: 'video' });
     await expect(rows).toHaveCount(1); // p2 (FEED video), не reel
-    await page.getByTestId('ig-format-filter').selectOption('all');
+    await selectPill(page.getByTestId('ig-format-filter'), { value: 'all' });
     await expect(page).not.toHaveURL(/format=/);
 
     // Сортировка по сохранениям: первый клик sort=saved (desc — дефолт, в URL нет), второй → asc.
@@ -136,7 +137,7 @@ test.describe('Instagram Контент 2.0 (desktop)', () => {
     // Полный deep-link воспроизводит состояние после reload.
     await page.goto('/instagram/content?q=launch&format=video&sort=views&order=asc&more=reels');
     await expect(page.getByLabel('Поиск по публикациям')).toHaveValue('launch');
-    await expect(page.getByTestId('ig-format-filter')).toHaveValue('video');
+    await expect(page.getByTestId('ig-format-filter')).toHaveAttribute('data-value', 'video');
     await expect(rows).toHaveCount(1);
     await expect(page.getByRole('tab', { name: 'Reels' })).toHaveAttribute('aria-selected', 'true');
 
@@ -178,7 +179,7 @@ test.describe('Instagram Контент 2.0 (desktop)', () => {
 
     // Membership'ы ушли → пустое честное состояние; публикации целы (снятие ?campaign= вернёт все).
     await expect(page.getByTestId('ig-content-empty')).toBeVisible();
-    await page.getByTestId('campaign-filter').selectOption({ label: 'Все' });
+    await selectPill(page.getByTestId('campaign-filter'), { label: 'Все' });
     await expect(page).not.toHaveURL(/campaign=/);
     await expect(rows).toHaveCount(6);
   });

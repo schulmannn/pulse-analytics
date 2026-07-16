@@ -148,6 +148,7 @@ hand-pick a raw `z-40`/`z-50` for an overlay. Plain in-flow stacking *inside* a 
 | `z-nav` | 30 | fixed app navigation — sidebar, mobile bottom nav |
 | `z-popover` | 40 | transient triggers over content — ⋯ menus, dropdowns, reorder pill |
 | `z-modal` | 50 | full overlays + their scrim — detail, dialogs, drawers, command palette |
+| `z-modal-popover` | 55 | portalled dropdown opened by a control inside the active modal |
 | `z-toast` | 60 | notifications above modals (reserved) |
 | `z-tooltip` | 70 | always-on-top hints (`InfoTooltip`) — must show even inside a modal |
 
@@ -155,8 +156,9 @@ Rules:
 - **Portal strategy.** Full overlays (modals, drawers, command palette, tooltips) render into
   `document.body` via `createPortal`, so no ancestor's `overflow`/`transform` stacking context can clip
   or trap them; the token only orders them against each other.
-- **Nested overlays** follow the ladder: a menu (`z-popover`) opens above sticky chrome; a dialog
-  (`z-modal`) covers menus; a tooltip (`z-tooltip`) stays legible even over a dialog. A menu must never
+- **Nested overlays** follow the ladder: a page menu (`z-popover`) opens above sticky chrome; a dialog
+  (`z-modal`) covers page menus; only a dropdown owned by that active dialog may use
+  `z-modal-popover`; a tooltip (`z-tooltip`) stays legible even over a dialog. A page menu must never
   out-rank a dialog.
 - **Sticky < nav**: a scrolled sticky header slides *under* the fixed rail, never over it.
 - Escape / outside-click dismissal is owned per-overlay (`useFocusTrap` + capture-phase Escape in
