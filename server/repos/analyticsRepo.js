@@ -390,15 +390,23 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
     return (await allowed(channelId, actor)) ? listIgMediaDailyInternal(channelId, days) : [];
   }
 
-    // ── ig-tags read (finding 7: чтение — analytics, write — collectorRepo) ──
-  async function getIgTags(limit = 100) {
-    if (!enabled) return [];
+  // ── ig-tags read (finding 7: чтение — analytics, write — collectorRepo) ──
+  // Per-channel archive (migration 026): scoped strictly by channel_id like listIgDailyInternal —
+  // legacy NULL-channel rows are quarantined and NEVER returned. Internal = cron/service (no
+  // access-check); ForActor gates the caller's access first (route path).
+  async function listIgTagsInternal(channelId, limit = 100) {
+    if (!enabled || !channelId) return [];
+    const safeLimit = Math.min(500, Math.max(1, Number.parseInt(limit, 10) || 100));
     const { rows } = await pool.query(
       `SELECT media_id AS id, username, caption, permalink, media_type, like_count, comments_count,
               to_char(posted_at,'YYYY-MM-DD"T"HH24:MI:SS') AS timestamp,
               to_char(first_seen,'YYYY-MM-DD"T"HH24:MI:SS') AS first_seen
-       FROM ig_tags ORDER BY posted_at DESC NULLS LAST, first_seen DESC LIMIT $1`, [limit]);
+       FROM ig_tags WHERE channel_id=$1
+       ORDER BY posted_at DESC NULLS LAST, first_seen DESC LIMIT $2`, [channelId, safeLimit]);
     return rows.map((r) => numifyMetrics(r, IG_TAG_METRICS));
+  }
+  async function listIgTagsForActor(channelId, actor, limit = 100) {
+    return (await allowed(channelId, actor)) ? listIgTagsInternal(channelId, limit) : [];
   }
 
   // ── Connection-status коллектора (read; writes живут в ingest/collectorRepo) ───────
@@ -417,7 +425,7 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
   }
 
   return {
-    getIgTags, getCollectorStatus,
+    listIgTagsInternal, listIgTagsForActor, getCollectorStatus,
     getChannelHistoryInternal, getMentionsHistoryInternal, getMentionsArchiveInternal,
     getSnapshotInternal, getPublicTgChannelPhoto,
     getLatestVelocityInternal, listPostsInternal, listIgDailyInternal, listIgMediaDailyInternal,

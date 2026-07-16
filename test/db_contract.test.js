@@ -30,7 +30,7 @@ const EXPECTED_FUNCTIONS = [
   // collector writes
   'saveSnapshot', 'ingestCollectorPayload', 'persistCentralDaily', 'persistTgBundleTx',
   'getCollectorStatus', 'recordAuditEvent', 'saveVelocity',
-  'upsertChannelDaily', 'upsertPosts', 'upsertMentions', 'upsertIgTags', 'getIgTags',
+  'upsertChannelDaily', 'upsertPosts', 'upsertMentions', 'upsertIgTags',
   'listCentralPostsMissingMedia',
   'saveRawSnapshot', 'pruneRawSnapshots', 'pruneIgMediaDaily', 'pruneIngestReceipts', 'rollupChannelMonthly',
   'upsertIgDaily', 'upsertIgMediaDaily',
@@ -39,8 +39,10 @@ const EXPECTED_FUNCTIONS = [
   'getChannelHistoryInternal', 'getMentionsHistoryInternal', 'getMentionsArchiveInternal',
   'getSnapshotInternal', 'getLatestVelocityInternal', 'listPostsInternal', 'listIgDailyInternal', 'listIgMediaDailyInternal',
   'getPublicTgChannelPhoto',
+  'listIgTagsInternal',
   'getChannelHistoryForActor', 'getMentionsHistoryForActor', 'getMentionsArchiveForActor',
   'getSnapshotForActor', 'getLatestVelocityForActor', 'listPostsForActor', 'listIgDailyForActor', 'listIgMediaDailyForActor',
+  'listIgTagsForActor',
   // bugs / crashes
   'createBug', 'createCrash', 'upsertCrashSignature', 'recordCrashOccurrence', 'setCrashNotionPage', 'touchCrashNotified',
   'listBugs', 'updateBug', 'deleteBug', 'bugExists', 'getBug', 'addAttachmentIfRoom', 'getAttachment',

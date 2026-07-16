@@ -25,12 +25,19 @@ function registerIgRoutes({
   // upstream (uses req.user for the channel ownership check).
   async function resolveIg(req, res, next) {
     req.ig = null;
+    // An env fallback can use a channel-scoped archive only after BOTH actor access and Instagram
+    // identity match are proven. Actor access alone is not enough: otherwise selecting any owned
+    // channel could mix the global env account's tags into a different account's future archive.
+    let envArchiveChannelId = null;
     try {
       const channelId = parseInt(req.query.channel || req.headers['x-channel-id'], 10) || 0;
-      if (db.enabled && channelId && igCrypto.configured()) {
+      if (db.enabled && channelId) {
         const ch  = await db.getChannel(channelId, req.user).catch(() => null);
         const acc = ch ? await db.getIgAccount(channelId).catch(() => null) : null;
-        if (acc && acc.access_token_enc) {
+        if (acc?.ig_user_id && IG_ACCOUNT && String(acc.ig_user_id) === String(IG_ACCOUNT)) {
+          envArchiveChannelId = channelId;
+        }
+        if (acc && acc.access_token_enc && igCrypto.configured()) {
           try {
             let token = igCrypto.decrypt(acc.access_token_enc);
             token = await refreshIgIfNeeded(channelId, token, acc.token_expires_at);
@@ -44,8 +51,10 @@ function registerIgRoutes({
       // it to the superuser (or local dev with no DB): a regular user requesting a channel they don't
       // own must NOT be served the env account's real data — they get mock (the connect prompt). This
       // closes the X-Channel-Id spoof where getChannel() denies but the code fell through to env.
+      // channelId = envArchiveChannelId only when the actor can access the channel AND its persisted
+      // IG identity matches IG_ACCOUNT. With no verified source mapping the env path stays live-only.
       if (!req.ig && igConfigured() && (!db.enabled || (req.user && req.user.role === 'superuser'))) {
-        req.ig = { accountId: IG_ACCOUNT, token: IG_TOKEN, source: 'env', channelId: null };
+        req.ig = { accountId: IG_ACCOUNT, token: IG_TOKEN, source: 'env', channelId: envArchiveChannelId };
       }
     } catch (e) {
       log('warn', 'resolve_ig_failed', { error: e.message });
@@ -89,12 +98,17 @@ function registerIgRoutes({
         }, req.ig.token);
         live = r.data || [];
       } catch { /* tags edge can be empty / unavailable — fall back to the archive */ }
-      // The ig_tags archive is global (not yet per-channel), so only archive + serve it for the
-      // global env account; per-channel connections serve the live window only until ig_tags is
-      // keyed by channel (avoids cross-channel tag leakage).
-      const useArchive = db.enabled && req.ig.source === 'env';
-      if (useArchive && live.length) await db.upsertIgTags(live).catch(() => {});
-      const data = useArchive ? await db.getIgTags(100).catch(() => live) : live;
+      // The ig_tags archive is per-channel now (migration 026): archive + serve it ONLY under an
+      // ownership-checked channel scope (req.ig.channelId — set for a per-channel OAuth connection,
+      // or for the superuser env fallback when actor access AND the persisted IG identity match were
+      // proven). With no safe channel scope (channelId null) we stay live-only — never global.
+      // The read goes through listIgTagsForActor (re-gates the actor's access) as defence in depth.
+      const channelId = req.ig.channelId;
+      const useArchive = db.enabled && channelId;
+      if (useArchive && live.length) await db.upsertIgTags(channelId, live).catch(() => {});
+      const data = useArchive
+        ? await db.listIgTagsForActor(channelId, req.user, 100).catch(() => live)
+        : live;
       res.json({ data, live_count: live.length });
     } catch (e) {
       res.status(200).json({ data: [], error: e.message }); // section degrades, page survives

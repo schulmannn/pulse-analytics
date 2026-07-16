@@ -579,21 +579,26 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
     return rowCount;
   }
 
-            // ── Instagram tags (media where we're @-tagged) — archive so they persist past the live edge's window.
-  //    Write (finding 7: upsert — collector-домен, чтение — analyticsRepo.getIgTags).
-  async function upsertIgTags(rows) {
-    if (!enabled || !rows || !rows.length) return 0;
+  // ── Instagram tags (media where we're @-tagged) — per-channel archive so they persist past the
+  //    live edge's window. Write (finding 7: upsert — collector-домен; чтение — analyticsRepo).
+  //    Scoped by channel_id (migration 026): the SAME media id may be archived under DISTINCT
+  //    channels, and a NULL channel is never written here — a tenantless upsert is a no-op, so the
+  //    old global archive can never grow again. source_id стамп из ig_accounts (parity с ig_daily).
+  async function upsertIgTags(channelId, rows, executor = pool) {
+    if (!enabled || !channelId || !rows || !rows.length) return 0;
     let n = 0;
     for (const r of rows) {
       if (!r || !r.id) continue;
-      await pool.query(
-        `INSERT INTO ig_tags (media_id, username, caption, permalink, media_type, like_count, comments_count, posted_at, last_seen)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now())
-         ON CONFLICT (media_id) DO UPDATE SET
+      await executor.query(
+        `INSERT INTO ig_tags (channel_id, source_id, media_id, username, caption, permalink, media_type, like_count, comments_count, posted_at, last_seen)
+         VALUES ($1, (SELECT a.source_id FROM ig_accounts a WHERE a.channel_id = $1),
+                 $2,$3,$4,$5,$6,$7,$8,$9, now())
+         ON CONFLICT (channel_id, media_id) DO UPDATE SET
+           source_id=COALESCE(EXCLUDED.source_id, ig_tags.source_id),
            username=EXCLUDED.username, caption=EXCLUDED.caption, permalink=EXCLUDED.permalink,
            media_type=EXCLUDED.media_type, like_count=EXCLUDED.like_count,
            comments_count=EXCLUDED.comments_count, posted_at=EXCLUDED.posted_at, last_seen=now()`,
-        [String(r.id), r.username || null, r.caption || null, r.permalink || null, r.media_type || null,
+        [channelId, String(r.id), r.username || null, r.caption || null, r.permalink || null, r.media_type || null,
          num(r.like_count), num(r.comments_count),
          r.timestamp || null],
       );
