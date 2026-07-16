@@ -48,7 +48,7 @@ function rawTgChannelId(value) {
   }
 }
 
-function createTgQrCollectionJob({ db, liveDb = db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN, MTPROTO_TIMEOUT_STATS_MS, MTPROTO_TIMEOUT_HEAVY_MS, tgPostToRow, tgQrChannelsPerPass = 200 }) {
+function createTgQrCollectionJob({ db, liveDb = db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN, MTPROTO_TIMEOUT_STATS_MS, MTPROTO_TIMEOUT_HEAVY_MS, tgPostToRow, tgQrChannelsPerPass = 200, tgMediaRepairPerPass = 16, tgMediaRepairWindowDays = 365 }) {
   // Shared decrypt: transparently falls back to a rotated-out key and lazily re-encrypts the row under
   // the active key (generation-guarded, best-effort — a rewrite failure never blocks the collect).
   const { decryptTgSession } = createTgSessionDecryptor({ tgCrypto, db, log });
@@ -247,12 +247,12 @@ function createTgQrCollectionJob({ db, liveDb = db, log, tgCrypto, mtprotoPost, 
   // The resolved entity mtproto returns must be the channel we asked for. Reuse the same identity
   // guard the collect path uses (rawTgChannelId, precision-safe): missing, malformed or mismatched
   // identity is fail-closed — a managed response is never trusted without binding it to the channel.
-  function assertManagedEntity(channel, data) {
+  function assertManagedEntity(channel, data, logEvent = 'tg_managed_post_stats_identity_mismatch') {
     const entity = data && data.entity;
     const actual = entity && entity.id != null ? rawTgChannelId(entity.id) : null;
     const expected = rawTgChannelId(channel.tg_channel_id);
     if (!actual || !expected || actual !== expected) {
-      log('warn', 'tg_managed_post_stats_identity_mismatch', { channelId: channel.id, error: 'identity_mismatch' });
+      log('warn', logEvent, { channelId: channel.id, error: 'identity_mismatch' });
       const e = new Error('tg_entity_identity_mismatch'); e.code = 'collect_failed'; throw e;
     }
   }
@@ -392,7 +392,119 @@ function createTgQrCollectionJob({ db, liveDb = db, log, tgCrypto, mtprotoPost, 
     return stats;
   }
 
-  return { collectQrChannelsNow, collectManagedChannelNow, collectManagedPostStatsNow, processTgQrCollection };
+  // Bounded, best-effort cover repair for the central channel through the owner's managed session. The
+  // 15-min recovery lane fills tg_post_media for recent archived photo/video posts whose small cover is
+  // still missing (a transient/missed daily include_media pass), so the open DB-first thumb proxy serves
+  // JPEG instead of 503. Identity is derived ENTIRELY server-side (the central channel, its owner, and
+  // that owner's stored session) — nothing here is client-controlled. Unlike the managed collect/post_stats
+  // paths this NEVER rethrows: it is a background repair with no live fallback, so a failure only logs a
+  // fixed safe code and updates session health. Per-item cover misses are best-effort (the endpoint 200s
+  // with fewer covers → success); only a genuine endpoint AUTH failure flips THAT session generation to
+  // reauth_required, a transient one to degraded, via the shared finalizeSessionHealth priority. The
+  // plaintext session is decrypted only here and sent solely inside the mtprotoPost('/qr/media') body —
+  // never returned, logged, or put on a URL. Runs on the BACKGROUND breaker lane (collection work).
+  async function repairCentralMedia({ cap = tgMediaRepairPerPass, windowDays = tgMediaRepairWindowDays } = {}) {
+    const emptyStats = { attempted: false, requested: 0, filled: 0 };
+    if (!db.enabled || !tgCrypto.configured() || !MTPROTO_TOKEN) return emptyStats;
+    // Feature-detect the repair-specific DB methods so an older schema/facade simply no-ops.
+    if (typeof db.listCentralPostsMissingMedia !== 'function' || typeof db.upsertPostMedia !== 'function'
+        || typeof db.runJobOnce !== 'function') return emptyStats;
+
+    const centralId = await db.getOwnerChannelId().catch(() => null);
+    if (!centralId) return emptyStats;
+    const central = await db.getChannelById(centralId).catch(() => null);
+    if (!central || central.tg_channel_id == null || central.owner_uid == null) return emptyStats;
+    // Owner-scoped session, derived from the central channel's owner_uid (never client input). A missing/
+    // reauth_required/foreign session means we simply skip — repair never touches a global or foreign session.
+    const sess = await db.getTgSession(central.owner_uid).catch(() => null);
+    if (!sess || !sess.session_enc || sess.connection_state === 'reauth_required' || !sameUid(central.owner_uid, sess.uid)) {
+      return emptyStats;
+    }
+
+    try {
+      // One durable claim per six-hour bucket prevents a genuinely thumbless post from being retried
+      // every 15 minutes and collapses overlap during inline→worker topology transitions. A new bucket
+      // retries partial misses, so success never suppresses them permanently. The seed rotates the
+      // bounded selection between buckets, avoiding head-of-line blocking by the same thumbless ids.
+      const bucket = Math.floor(Date.now() / (6 * 60 * 60 * 1000));
+      const outcome = await db.runJobOnce('tg_media_repair', `${centralId}:${bucket}`, async () => {
+        const stats = { attempted: false, requested: 0, filled: 0 };
+        let missing = [];
+        try {
+          missing = await db.listCentralPostsMissingMedia(
+            centralId,
+            { limit: cap, windowDays, seed: String(bucket) },
+          );
+        } catch {
+          log('error', 'tg_media_repair_query_failed', { channelId: centralId, error: 'query_failed' });
+          return stats;
+        }
+        const msgIds = missing
+          .map((row) => String(row?.post_id || ''))
+          .filter((id, index, all) => /^[1-9]\d{0,18}$/.test(id) && all.indexOf(id) === index)
+          .slice(0, 16);
+        if (!msgIds.length) return stats;
+        stats.requested = msgIds.length;
+
+        let sessionStr;
+        try { sessionStr = await decryptTgSession(sess); }
+        catch {
+          log('warn', 'tg_media_repair_decrypt_failed', { channelId: centralId, error: 'session_decrypt_failed' });
+          return stats;
+        }
+
+        const ref = central.username || String(central.tg_channel_id);
+        const accessHash = central.username
+          ? null
+          : await loadStoredAccessHash(central, sess.uid, sess.session_version);
+        const body = { session: sessionStr, channel: ref, msg_ids: msgIds };
+        if (accessHash != null) body.access_hash = accessHash;
+
+        stats.attempted = true;
+        try {
+          const data = await mtprotoPost('/qr/media', {
+            body, timeoutMs: MTPROTO_TIMEOUT_STATS_MS, lane: 'background',
+          });
+          assertManagedEntity(central, data, 'tg_media_repair_identity_mismatch');
+          if (!central.username) {
+            await persistResolvedIdentity(central, data, sess.uid, sess.session_version, accessHash);
+          }
+          // Trust only covers for the exact ids requested in this batch. Entity binding alone is not
+          // enough: a buggy internal response must not attach another archived post's bytes here.
+          const requested = new Set(msgIds);
+          const covers = Array.isArray(data?.covers)
+            ? data.covers.filter((cover) => cover?.size === 'sm' && requested.has(String(cover.post_id)))
+            : [];
+          if (covers.length) {
+            stats.filled = await db.upsertPostMedia(centralId, covers).catch(() => {
+              log('warn', 'tg_post_media_persist_failed', { channelId: centralId, error: 'write_failed' });
+              return 0;
+            }) || 0;
+          }
+          await finalizeSessionHealth(sess.uid, sess.session_version, {
+            attempted: true, succeeded: true, authFailed: false, errorCode: null,
+          });
+        } catch (e) {
+          const authFailed = isTgAuthError(e);
+          await finalizeSessionHealth(sess.uid, sess.session_version, {
+            attempted: true, succeeded: false, authFailed,
+            errorCode: authFailed ? e.code : safeTgErrorCode(e),
+          });
+          log('warn', 'tg_media_repair_failed', {
+            channelId: centralId, code: authFailed ? e.code : safeTgErrorCode(e),
+          });
+        }
+        log('info', 'tg_media_repair_done', { ...stats });
+        return stats;
+      });
+      return outcome.skipped ? emptyStats : (outcome.result || emptyStats);
+    } catch {
+      log('error', 'tg_media_repair_job_failed', { channelId: centralId, error: 'job_failed' });
+      return emptyStats;
+    }
+  }
+
+  return { collectQrChannelsNow, collectManagedChannelNow, collectManagedPostStatsNow, processTgQrCollection, repairCentralMedia };
 }
 
 module.exports = { createTgQrCollectionJob };

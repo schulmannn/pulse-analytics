@@ -31,6 +31,7 @@ const EXPECTED_FUNCTIONS = [
   'saveSnapshot', 'ingestCollectorPayload', 'persistCentralDaily', 'persistTgBundleTx',
   'getCollectorStatus', 'recordAuditEvent', 'saveVelocity',
   'upsertChannelDaily', 'upsertPosts', 'upsertMentions', 'upsertIgTags', 'getIgTags',
+  'listCentralPostsMissingMedia',
   'saveRawSnapshot', 'pruneRawSnapshots', 'pruneIgMediaDaily', 'pruneIngestReceipts', 'rollupChannelMonthly',
   'upsertIgDaily', 'upsertIgMediaDaily',
   // analytics reads (finding 5: контракт доступа — Internal для cron/service, ForActor для роутов;

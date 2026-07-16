@@ -1078,6 +1078,13 @@ _THUMBS_TOTAL_BYTES_MAX = 4 * 1024 * 1024  # keeps the private JSON response bou
 _CHANNEL_PHOTO_MAX_BYTES = 512 * 1024   # reject an oversized/surprising profile photo before it inflates JSON
 _CHANNEL_PHOTO_BUDGET_S = 8             # max wall-clock for the single avatar download
 
+# Bounds for the narrow cover-repair endpoint (POST /qr/media): the 15-min recovery lane asks for the
+# exact post ids whose small cover is still missing (a transient/missed daily include_media pass), so a
+# genuinely thumbless post is never re-scanned via the full collect. Same byte/timeout bounds as the
+# collect fanout; a tight id cap keeps the request/response and the per-request download work bounded.
+_MEDIA_REPAIR_IDS_MAX = 16          # max post ids one repair request may carry
+_MEDIA_REPAIR_BUDGET_S = 20         # max wall-clock spent downloading covers for one repair request
+
 
 async def _download_thumb_bytes(tg, msg, size):
     """One message's cover thumbnail bytes (JPEG) or None. Shared by GET /thumb (global session) and
@@ -1789,6 +1796,127 @@ async def qr_post_stats(session: str = Body(...), channel: str = Body(...), msg_
     except Exception as e:
         # Fixed metadata only: an arbitrary Telethon message may contain account/channel details.
         log.error('qr_post_stats failed (%s)', type(e).__name__)
+        raise HTTPException(status_code=500, detail='collect_failed')
+    finally:
+        if tg is not None:
+            await _safe_disconnect(tg)
+        _QR_COLLECT_SEM.release()
+
+
+def _clean_media_ids(raw):
+    """Validate the exact post ids a cover-repair request carries. Telegram message ids are int64 →
+    parsed with Python's arbitrary-precision int (never a float) and kept as ints for Telethon. Rejects
+    non-numeric / non-positive / out-of-range values and duplicates, and hard-caps the count so an
+    oversized list can never blow up the per-request download work. Returns [] when nothing is usable."""
+    if not isinstance(raw, list):
+        return []
+    out, seen = [], set()
+    for value in raw[: _MEDIA_REPAIR_IDS_MAX * 4]:   # bound the scan even before the count cap
+        text = str(value).strip()
+        if not re.fullmatch(r'[1-9]\d{0,18}', text):
+            continue
+        n = int(text)
+        if n <= 0 or n > 2 ** 63 - 1 or n in seen:
+            continue
+        seen.add(n)
+        out.append(n)
+        if len(out) >= _MEDIA_REPAIR_IDS_MAX:
+            break
+    return out
+
+
+async def _collect_media_by_id(tg, messages, budget_s):
+    """Best-effort small covers for a bounded set of EXACT messages (fetched by id). Mirrors
+    _collect_post_thumbs' bounds — per-download timeout, JPEG magic + byte limits, total-byte ceiling —
+    but skips nothing else: a per-message miss (no media / no thumb / download error) is swallowed so the
+    other requested ids still succeed. FloodWait / budget exhaustion stop the phase early. Returns
+    [{post_id, size, jpeg_b64}] (post_id a decimal STRING) for the web side to persist into tg_post_media."""
+    out = []
+    if budget_s <= 0:
+        return out
+    loop = asyncio.get_event_loop()
+    start = loop.time()
+    total_bytes = 0
+    for msg in messages:
+        remaining = budget_s - (loop.time() - start)
+        if remaining <= 0:
+            break
+        if not msg or not (msg.photo or msg.video):   # covers are photo/video only (matches the frontend)
+            continue
+        try:
+            data = await asyncio.wait_for(
+                _download_thumb_bytes(tg, msg, 'sm'),
+                timeout=min(_THUMB_DOWNLOAD_TIMEOUT_S, remaining),
+            )
+        except FloodWaitError:
+            break                    # rate-limited → stop the whole phase, return what we have
+        except asyncio.TimeoutError:
+            continue                 # one slow id must not prevent other requested covers succeeding
+        except Exception:
+            continue                 # this id has no usable thumb → skip it, try the next
+        if not data or len(data) < 4 or len(data) > _THUMB_MAX_BYTES or data[:2] != b'\xff\xd8':
+            continue
+        if total_bytes + len(data) > _THUMBS_TOTAL_BYTES_MAX:
+            break
+        total_bytes += len(data)
+        out.append({'post_id': str(msg.id), 'size': 'sm', 'jpeg_b64': base64.b64encode(data).decode('ascii')})
+    return out
+
+
+@app.post('/qr/media')
+@_total_budget(STATS_TOTAL_BUDGET_S)
+async def qr_media(session: str = Body(...), channel: str = Body(...),
+                   msg_ids: list[str] = Body(...),
+                   access_hash: Optional[str] = Body(default=None),
+                   x_internal_token: str = Header(default='')):
+    """Repair missing cover thumbnails for the central channel's EXACT posts via a stored USER (managed
+    QR) session, on an ephemeral client fully isolated from the global central `client`. Unlike
+    /qr/collect this does NOT run graphs/posts/velocity — it fetches only the requested ids and their
+    small covers — so the 15-min recovery lane can boundedly backfill tg_post_media without the heavy
+    pipeline. Bounded by the same ephemeral-collect bulkhead (_QR_COLLECT_SEM) as /qr/collect and the
+    STATS_TOTAL_BUDGET_S ceiling; the session is read from the body and is NEVER logged. Uses the same
+    entity-identity safeguard (_resolve_channel_entity + returned identity) so the web side can verify
+    the resolved channel matches the requested one before trusting/persisting any bytes."""
+    check_auth(x_internal_token)
+    if not API_ID or not API_HASH:
+        raise HTTPException(status_code=503, detail='mtproto_not_configured')
+    if not isinstance(session, str) or not session.strip():
+        raise HTTPException(status_code=400, detail='session_required')
+    ids = _clean_media_ids(msg_ids)
+    if not ids:
+        raise HTTPException(status_code=400, detail='msg_ids_required')
+    await _acquire_or_503(_QR_COLLECT_SEM, _QR_COLLECT_ACQUIRE_TIMEOUT_S, 'too_many_collecting')
+    tg = None
+    loop = asyncio.get_event_loop()
+    t0 = loop.time()               # monotonic start → the bounded download phase reads remaining budget
+    try:
+        tg = TelegramClient(StringSession(session), API_ID, API_HASH)
+        await asyncio.wait_for(tg.connect(), timeout=CLIENT_CONNECT_TIMEOUT_S)
+        if not await asyncio.wait_for(tg.is_user_authorized(), timeout=TELETHON_CALL_TIMEOUT_S):
+            raise HTTPException(status_code=401, detail='session_unauthorized')
+        # A stored access_hash resolves a PRIVATE channel directly; a stale one self-heals once via the
+        # cold dialog resync inside _resolve_channel_entity (auth/flood errors propagate, never a scan).
+        entity = await asyncio.wait_for(
+            _resolve_channel_entity(tg, _channel_ref(channel), access_hash), timeout=TELETHON_CALL_TIMEOUT_S)
+        messages = await asyncio.wait_for(tg.get_messages(entity, ids=ids), timeout=TELETHON_CALL_TIMEOUT_S)
+        # Time-box the download phase against BOTH its own sub-budget and the remaining total budget, so
+        # a slow media file can never push the request over the STATS_TOTAL_BUDGET_S ceiling.
+        remaining = min(_MEDIA_REPAIR_BUDGET_S, STATS_TOTAL_BUDGET_S - (loop.time() - t0))
+        covers = await _collect_media_by_id(tg, messages, remaining)
+        # Resolved identity (int64 as STRINGS) for the web side to verify against the requested channel
+        # — the same guard /qr/collect uses. Private web↔mtproto field, never part of a browser response.
+        return {'covers': covers, 'entity': _entity_identity(entity)}
+    except FloodWaitError as e:
+        return JSONResponse(status_code=429, content=_flood_wait_payload(e))
+    except UnauthorizedError:
+        raise HTTPException(status_code=401, detail='session_unauthorized')
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=503, detail='mtproto_timeout')
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Fixed metadata only: an arbitrary Telethon message may contain account/channel details.
+        log.error('qr_media failed (%s)', type(e).__name__)
         raise HTTPException(status_code=500, detail='collect_failed')
     finally:
         if tg is not None:

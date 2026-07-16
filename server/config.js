@@ -117,6 +117,12 @@ function loadConfig(env = process.env) {
       // upstream fan-out.
       igAccountsPerPass: Number(env.IG_ACCOUNTS_PER_PASS || 25),
       tgQrChannelsPerPass: Number(env.TG_QR_CHANNELS_PER_PASS || 200),
+      // Узкий central-media repair (тот же recovery-проход): сколько недостающих обложок central-канала
+      // добираем за проход и в каком окне свежести ищем. Малый батч, вращаемая выборка и durable
+      // шестичасовой bucket ограничивают ретраи на существующей схеме: заполненная обложка выпадает
+      // навсегда, а безнадёжно-безобложечный пост со временем выходит из окна.
+      tgMediaRepairPerPass: Number(env.TG_MEDIA_REPAIR_PER_PASS || 16),
+      tgMediaRepairWindowDays: Number(env.TG_MEDIA_REPAIR_WINDOW_DAYS || 365),
       // Ретеншн операционных строк (ночная maintenance): сколько дней держим ТЕРМИНАЛЬНЫЕ jobs
       // (succeeded/failed, по updated_at) и МЁРТВЫЕ email-токены (consumed/expired, по created_at)
       // перед bounded-прунингом. Консервативно ~месяц; queued/running и валидные неиспользованные
@@ -206,6 +212,8 @@ function validateConfig(config) {
   for (const [field, value] of [
     ['runtime.igAccountsPerPass', config.runtime.igAccountsPerPass],
     ['runtime.tgQrChannelsPerPass', config.runtime.tgQrChannelsPerPass],
+    ['runtime.tgMediaRepairPerPass', config.runtime.tgMediaRepairPerPass],
+    ['runtime.tgMediaRepairWindowDays', config.runtime.tgMediaRepairWindowDays],
     ['runtime.collectionRecoveryInitialDelayMs', config.runtime.collectionRecoveryInitialDelayMs],
     ['runtime.collectionRecoveryIntervalMs', config.runtime.collectionRecoveryIntervalMs],
     // Горизонты ретеншна: 0/отрицательные снесли бы свежие строки → положительные целые.
@@ -215,6 +223,12 @@ function validateConfig(config) {
     ['runtime.auditEventsRetentionDays', config.runtime.auditEventsRetentionDays],
   ]) {
     if (!Number.isInteger(value) || value <= 0) add(field, `${field} должен быть положительным целым числом.`);
+  }
+  if (Number.isInteger(config.runtime.tgMediaRepairPerPass) && config.runtime.tgMediaRepairPerPass > 16) {
+    add('runtime.tgMediaRepairPerPass', 'TG_MEDIA_REPAIR_PER_PASS не должен превышать 16 постов за проход.');
+  }
+  if (Number.isInteger(config.runtime.tgMediaRepairWindowDays) && config.runtime.tgMediaRepairWindowDays > 3650) {
+    add('runtime.tgMediaRepairWindowDays', 'TG_MEDIA_REPAIR_WINDOW_DAYS не должен превышать 3650 дней.');
   }
   if (
     Number.isInteger(config.runtime.collectionRecoveryInitialDelayMs) &&

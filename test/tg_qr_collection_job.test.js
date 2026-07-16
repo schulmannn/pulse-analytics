@@ -958,3 +958,228 @@ test('feature-detect: a db without the identity methods sends no access_hash and
     job.collectQrChannelsNow({ uid: 1, session_enc: 's', session_version: '1' }, [priv(1, '-100555')]));
   assert.deepEqual(calls.post, ['-100555']);   // still collected, addressed by id, no access_hash attached
 });
+
+// ── repairCentralMedia (bounded central cover backfill, background lane, NEVER rethrows) ─────────
+// Server-side identity only: the central channel + its owner + that owner's session. A bounded batch
+// of recent photo/video posts missing an 'sm' cover is fetched by exact id through /qr/media; the
+// resolved entity must match the central channel before any bytes are persisted; health follows the
+// same auth→reauth / transient→degraded priority; per-item misses and persist failures are best-effort.
+function makeMediaJob({
+  missing = [{ post_id: '1306' }, { post_id: '1312' }], covers = [{ post_id: '1306', size: 'sm', jpeg_b64: '/9j/2Q==' }],
+  entity, responses = {}, central: centralOver = {}, session, upsertResult, upsertThrows = false,
+  tgCrypto, stored = null, ownerHasSession = true, runJobOnce,
+} = {}) {
+  const calls = { post: [], postLanes: [], sessions: [], bodies: [], persistedMedia: [], health: [], logs: [], savedHashes: [], missingQuery: null, jobKeys: [] };
+  const centralCh = { id: 50, username: 'central', tg_channel_id: 999, source: 'central', owner_uid: 2, ...centralOver };
+  const sess = session === undefined
+    ? { uid: 2, session_enc: 'enc', session_version: '4', connection_state: 'healthy' }
+    : session;
+  const db = {
+    enabled: true,
+    graphsToDailyRows: () => [],
+    saveRawSnapshot: async () => {},
+    getOwnerChannelId: async () => 50,
+    getChannelById: async (id) => (id === 50 ? centralCh : null),
+    getTgSession: async (uid) => (ownerHasSession && sess && String(uid) === String(centralCh.owner_uid) ? sess : null),
+    listCentralPostsMissingMedia: async (channelId, opts) => { calls.missingQuery = { channelId, opts }; return missing; },
+    runJobOnce: runJobOnce || (async (kind, key, fn) => {
+      calls.jobKeys.push({ kind, key });
+      return { skipped: false, result: await fn() };
+    }),
+    upsertPostMedia: async (channelId, rows) => {
+      calls.persistedMedia.push({ channelId, rows });
+      if (upsertThrows) throw new Error('db down');
+      return upsertResult != null ? upsertResult : rows.length;
+    },
+    recordTgSessionAttempt: async (uid) => { calls.health.push(['attempt', uid]); return true; },
+    recordTgSessionSuccess: async (uid) => { calls.health.push(['success', uid]); return true; },
+    recordTgSessionFailure: async (uid, _v, arg) => { calls.health.push(['failure', uid, arg]); return true; },
+    rotateTgSessionCiphertext: async () => true,
+    getTgChannelIdentity: async (channelId, ownerUid) => (stored && channelId === 50 && String(ownerUid) === '2' ? stored : null),
+    saveTgChannelAccessHash: async (channelId, ownerUid, hash, gen) => { calls.savedHashes.push({ channelId, ownerUid, hash, gen }); return true; },
+    listTgSessions: async () => [],
+    listChannels: async () => [],
+  };
+  const mtprotoPost = async (path, { body, lane }) => {
+    calls.post.push(path);
+    calls.postLanes.push(lane);
+    calls.sessions.push(body.session);
+    calls.bodies.push(body);
+    const err = responses['/qr/media'];
+    if (err) throw err;
+    const ent = entity !== undefined ? entity : { id: '999', access_hash: null };
+    return { covers, entity: ent };
+  };
+  const job = createTgQrCollectionJob({
+    db,
+    log: (level, event, meta) => { calls.logs.push({ level, event, meta }); },
+    tgCrypto: tgCrypto || activeCrypto(),
+    mtprotoPost,
+    MTPROTO_TOKEN: 'tok',
+    MTPROTO_TIMEOUT_STATS_MS: 500,
+    MTPROTO_TIMEOUT_HEAVY_MS: 1000,
+    tgPostToRow: (p) => p,
+  });
+  return { job, db, calls };
+}
+
+test('repairCentralMedia: bounded missing batch → exact string ids to /qr/media (background), persists covers, healthy', async () => {
+  const { job, calls } = makeMediaJob();
+  const stats = await job.repairCentralMedia();
+
+  assert.deepEqual(calls.post, ['/qr/media']);
+  assert.deepEqual(calls.postLanes, ['background'], 'cover repair is background collection work');
+  assert.equal(calls.missingQuery.opts.windowDays, 365, 'direct job construction keeps the documented archive window');
+  assert.deepEqual(calls.bodies[0].msg_ids, ['1306', '1312'], 'exact decimal-string post ids, no Number coercion');
+  assert.equal(calls.bodies[0].session, 'enc', 'decrypted plaintext session travels only in the body');
+  assert.deepEqual(calls.persistedMedia, [{ channelId: 50, rows: [{ post_id: '1306', size: 'sm', jpeg_b64: '/9j/2Q==' }] }]);
+  assert.deepEqual(calls.health[0], ['attempt', 2]);
+  assert.deepEqual(calls.health[1], ['success', 2]);
+  assert.deepEqual(stats, { attempted: true, requested: 2, filled: 1 });
+});
+
+test('repairCentralMedia: forwards the injected cap + window to the missing-cover query', async () => {
+  const { job, calls } = makeMediaJob();
+  await job.repairCentralMedia({ cap: 5, windowDays: 30 });
+  assert.equal(calls.missingQuery.channelId, 50);
+  assert.equal(calls.missingQuery.opts.limit, 5);
+  assert.equal(calls.missingQuery.opts.windowDays, 30);
+  assert.match(calls.missingQuery.opts.seed, /^\d+$/);
+});
+
+test('repairCentralMedia: nothing missing → no upstream call, no health touch', async () => {
+  const { job, calls } = makeMediaJob({ missing: [] });
+  const stats = await job.repairCentralMedia();
+  assert.deepEqual(calls.post, []);
+  assert.deepEqual(calls.health, []);
+  assert.deepEqual(stats, { attempted: false, requested: 0, filled: 0 });
+});
+
+test('repairCentralMedia: a preserved-preexisting BIGINT post id survives byte-exact as a string', async () => {
+  const BIG = '9007199254740997';   // > 2**53 → corrupted if ever coerced through a JS Number
+  assert.notEqual(String(Number(BIG)), BIG);
+  const { job, calls } = makeMediaJob({ missing: [{ post_id: BIG }], covers: [] });
+  await job.repairCentralMedia();
+  assert.deepEqual(calls.bodies[0].msg_ids, [BIG]);
+});
+
+test('repairCentralMedia: entity mismatch fails closed — no persist, degraded, never rethrows', async () => {
+  const { job, calls } = makeMediaJob({ entity: { id: '888', access_hash: null } });   // != central tg id 999
+  await assert.doesNotReject(job.repairCentralMedia());
+  assert.deepEqual(calls.persistedMedia, [], 'wrong-channel bytes never reach tg_post_media');
+  assert.ok(calls.logs.some((l) => l.event === 'tg_media_repair_identity_mismatch'));
+  const fail = calls.health.find((c) => c[0] === 'failure');
+  assert.equal(fail[2].state, 'degraded');
+});
+
+test('repairCentralMedia: auth failure → reauth_required (that generation), never rethrows', async () => {
+  const { job, calls } = makeMediaJob({ responses: { '/qr/media': authErr() } });
+  await assert.doesNotReject(job.repairCentralMedia());
+  const fail = calls.health.find((c) => c[0] === 'failure');
+  assert.deepEqual(fail[2], { state: 'reauth_required', errorCode: 'session_unauthorized' });
+  assert.ok(calls.logs.some((l) => l.event === 'tg_media_repair_failed' && l.meta.code === 'session_unauthorized'));
+});
+
+test('repairCentralMedia: transient failure → degraded, never rethrows', async () => {
+  const { job, calls } = makeMediaJob({ responses: { '/qr/media': timeoutErr() } });
+  await assert.doesNotReject(job.repairCentralMedia());
+  const fail = calls.health.find((c) => c[0] === 'failure');
+  assert.deepEqual(fail[2], { state: 'degraded', errorCode: 'mtproto_timeout' });
+});
+
+test('repairCentralMedia: a flood-limited endpoint is transient (degraded), not reauth', async () => {
+  const { job, calls } = makeMediaJob({ responses: { '/qr/media': floodErr() } });
+  await job.repairCentralMedia();
+  const fail = calls.health.find((c) => c[0] === 'failure');
+  assert.deepEqual(fail[2], { state: 'degraded', errorCode: 'flood_wait' });
+});
+
+test('repairCentralMedia: reauth_required session is skipped (no upstream, no health)', async () => {
+  const { job, calls } = makeMediaJob({ session: { uid: 2, session_enc: 'enc', session_version: '4', connection_state: 'reauth_required' } });
+  const stats = await job.repairCentralMedia();
+  assert.deepEqual(calls.post, []);
+  assert.deepEqual(calls.health, []);
+  assert.equal(stats.attempted, false);
+});
+
+test('repairCentralMedia: a missing owner session is skipped', async () => {
+  const { job, calls } = makeMediaJob({ ownerHasSession: false });
+  const stats = await job.repairCentralMedia();
+  assert.deepEqual(calls.post, []);
+  assert.equal(stats.attempted, false);
+});
+
+test('repairCentralMedia: decrypt failure records NO attempt and never calls upstream', async () => {
+  const { job, calls } = makeMediaJob({
+    tgCrypto: { configured: () => true, encrypt: (p) => `enc:${p}`, decryptDetailed: () => { throw new Error('bad key'); } },
+  });
+  const stats = await job.repairCentralMedia();
+  assert.deepEqual(calls.post, []);
+  assert.deepEqual(calls.health, []);
+  assert.equal(stats.attempted, false);
+  assert.ok(calls.logs.some((l) => l.event === 'tg_media_repair_decrypt_failed'));
+});
+
+test('repairCentralMedia: persist failure is best-effort — logs safe code, stays healthy, never rethrows', async () => {
+  const { job, calls } = makeMediaJob({ upsertThrows: true });
+  let stats;
+  await assert.doesNotReject(async () => { stats = await job.repairCentralMedia(); });
+  assert.ok(calls.logs.some((l) => l.event === 'tg_post_media_persist_failed' && l.meta.error === 'write_failed'));
+  assert.ok(calls.health.some((c) => c[0] === 'success'), 'a per-item persist failure does not degrade the session');
+  assert.equal(JSON.stringify(calls.logs).includes('db down'), false, 'raw DB error text is never logged');
+  assert.equal(stats.filled, 0);
+});
+
+test('repairCentralMedia: private central channel forwards the stored access_hash (warm) and self-heals a refresh', async () => {
+  const HASH = '7345987012345678901';    // > 2**53 → must survive byte-exact
+  const FRESH = '7345987012345678999';
+  const { job, calls } = makeMediaJob({
+    central: { username: null, tg_channel_id: '-1001234567890' },
+    stored: { tg_channel_id: '-1001234567890', tg_access_hash: HASH, tg_access_hash_version: '4' },
+    entity: { id: '1234567890', access_hash: FRESH },
+  });
+  await job.repairCentralMedia();
+  assert.equal(calls.bodies[0].access_hash, HASH, 'stored hash forwarded byte-exact, no dialog scan');
+  assert.deepEqual(calls.savedHashes, [{ channelId: 50, ownerUid: 2, hash: FRESH, gen: '4' }], 'refreshed hash cached generation-guarded');
+});
+
+test('repairCentralMedia: plaintext session goes ONLY in the body, never into logs', async () => {
+  const SECRET = 'STRING-SESSION-SECRET';
+  const { job, calls } = makeMediaJob({
+    responses: { '/qr/media': timeoutErr() },
+    tgCrypto: { configured: () => true, encrypt: (p) => `enc:${p}`, decryptDetailed: () => ({ plaintext: SECRET, usedPreviousKey: false }) },
+  });
+  await job.repairCentralMedia();
+  assert.equal(calls.sessions[0], SECRET, 'sent in the private body');
+  assert.equal(JSON.stringify(calls.logs).includes(SECRET), false, 'never logged');
+});
+
+test('repairCentralMedia: unexpected post ids from internal response are never persisted', async () => {
+  const { job, calls } = makeMediaJob({
+    covers: [
+      { post_id: '1306', size: 'sm', jpeg_b64: '/9j/2Q==' },
+      { post_id: '9999', size: 'sm', jpeg_b64: '/9j/2Q==' },
+      { post_id: '1312', size: 'lg', jpeg_b64: '/9j/2Q==' },
+    ],
+  });
+  await job.repairCentralMedia();
+  assert.deepEqual(calls.persistedMedia[0].rows, [
+    { post_id: '1306', size: 'sm', jpeg_b64: '/9j/2Q==' },
+  ]);
+});
+
+test('repairCentralMedia: durable six-hour claim collapses an overlapping pass', async () => {
+  const { job, calls } = makeMediaJob({ runJobOnce: async () => ({ skipped: true, job: { status: 'running' } }) });
+  const stats = await job.repairCentralMedia();
+  assert.deepEqual(stats, { attempted: false, requested: 0, filled: 0 });
+  assert.deepEqual(calls.post, []);
+  assert.deepEqual(calls.health, []);
+});
+
+test('repairCentralMedia: feature-detect — a db without listCentralPostsMissingMedia no-ops safely', async () => {
+  const bare = makeMediaJob();
+  delete bare.db.listCentralPostsMissingMedia;
+  const stats = await bare.job.repairCentralMedia();
+  assert.deepEqual(bare.calls.post, []);
+  assert.deepEqual(stats, { attempted: false, requested: 0, filled: 0 });
+});

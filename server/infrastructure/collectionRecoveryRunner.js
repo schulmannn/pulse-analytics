@@ -20,8 +20,13 @@ function createCollectionRecoveryRunner({
   jobTracker,
   runIgCollectionPass,
   processTgQrCollection,
+  // Bounded, best-effort central-channel cover repair (fills tg_post_media so the open thumb proxy stops
+  // 503-ing). Optional so pure-scheduler tests need not inject it; defaults to an inert no-op.
+  repairCentralMedia = async () => ({ skipped: true }),
   igCap,
   tgCap,
+  mediaCap,
+  mediaWindowDays,
   initialDelayMs,
   intervalMs,
   enabled = true,
@@ -46,16 +51,23 @@ function createCollectionRecoveryRunner({
       // ({ accepted:false }) — тогда проход просто не выполняется. Дожидаемся, чтобы single-flight
       // держался до конца реальной работы прохода.
       const result = await jobTracker.run(async () => {
-        // Источники независимы и каждый внутри остаётся последовательным. Запускаем ровно две
-        // bounded pipeline параллельно, чтобы долгий IG-проход не лишал TG собственного прогресса
-        // (и наоборот); background pool=2 задаёт верхнюю границу DB-нагрузки.
-        const [ig, tg] = await Promise.all([
+        // IG и Telegram независимы и идут параллельно (background pool=2). Внутри Telegram lane
+        // обычный QR-сбор и узкий central-media repair идут ПОСЛЕДОВАТЕЛЬНО: один пользовательский
+        // session не получает два одновременных MTProto fan-out, а repair не превращается в третью
+        // конкурентную pipeline. Оба шага изолируют свой сбой и наследуют общий lifecycle/gating.
+        const [ig, tgLane] = await Promise.all([
           runIgCollectionPass({ cap: igCap })
             .catch((e) => { log('error', 'recovery_ig_pass_failed', { error: e.message }); return null; }),
-          processTgQrCollection({ cap: tgCap })
-            .catch((e) => { log('error', 'recovery_tg_pass_failed', { error: e.message }); return null; }),
+          (async () => {
+            const tg = await processTgQrCollection({ cap: tgCap })
+              .catch((e) => { log('error', 'recovery_tg_pass_failed', { error: e.message }); return null; });
+            const media = await repairCentralMedia({ cap: mediaCap, windowDays: mediaWindowDays })
+              .catch((e) => { log('error', 'recovery_media_pass_failed', { error: e.message }); return null; });
+            return { tg, media };
+          })(),
         ]);
-        log('info', 'collection_recovery_pass_done', { ig, tg });
+        const { tg, media } = tgLane;
+        log('info', 'collection_recovery_pass_done', { ig, tg, media });
       }, { job: 'collection_recovery_pass' });
       if (result && result.accepted === false) return { skipped: true };
       return { skipped: false };
