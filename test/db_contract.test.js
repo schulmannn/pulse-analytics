@@ -47,6 +47,7 @@ const EXPECTED_FUNCTIONS = [
   // integrations (ig accounts / tg sessions)
   'saveIgAccount', 'getIgAccount', 'updateIgToken', 'deleteIgAccount', 'listIgAccounts',
   'saveTgSession', 'getTgSession', 'deleteTgSession', 'listTgSessions', 'rotateTgSessionCiphertext',
+  'listTgQrCollectCandidates',
   'recordTgSessionAttempt', 'recordTgSessionSuccess', 'recordTgSessionFailure',
   // reportsRepo
   'listReports', 'getReport', 'createReport', 'updateReport', 'deleteReport', 'listDueReports',

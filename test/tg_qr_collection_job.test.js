@@ -43,7 +43,7 @@ function makeJob({ responses = {}, runJobOnce, health = {}, tgCrypto, tgQrChanne
   const calls = {
     post: [], postLanes: [], health: [], persisted: [], logs: [], sessions: [], rotate: [],
     includeVelocity: [], includeMedia: [], persistedVelocity: [], persistedMedia: [],
-    postStatsBodies: [], persistedSnapshots: [], savedHashes: [],
+    postStatsBodies: [], persistedSnapshots: [], savedHashes: [], candidateQueries: [],
   };
   const db = {
     enabled: true,
@@ -80,6 +80,30 @@ function makeJob({ responses = {}, runJobOnce, health = {}, tgCrypto, tgQrChanne
     },
     listTgSessions: async () => [],
     listChannels: async () => [],
+    // Fake of the single indexed candidate query. Derives (session, channel) rows from the same
+    // listTgSessions/listChannels a test configures, applying the SAME filters the real SQL does
+    // (active qr channel with tg id owned by the uid, session not reauth_required), ordered by uid
+    // then channel id, capped to `limit`. Job-state exclusion (succeeded/live-running) is covered by
+    // the Postgres integration test; here runJobOnce drives the claim/skip races.
+    listTgQrCollectCandidates: async (day, limit) => {
+      calls.candidateQueries.push({ day, limit });
+      const sessions = await db.listTgSessions();
+      const out = [];
+      for (const s of sessions) {
+        if (s.connection_state === 'reauth_required') continue;
+        let chans = [];
+        try { chans = await db.listChannels({ uid: s.uid }); } catch { chans = []; }
+        for (const c of chans) {
+          if (c.source !== 'qr' || c.tg_channel_id == null || String(c.owner_uid) !== String(s.uid)) continue;
+          out.push({
+            uid: s.uid, session_enc: s.session_enc, session_version: s.session_version,
+            id: c.id, username: c.username, tg_channel_id: c.tg_channel_id, owner_uid: c.owner_uid, source: c.source,
+          });
+        }
+      }
+      out.sort((a, b) => (Number(a.uid) - Number(b.uid)) || (a.id - b.id));
+      return out.slice(0, Math.max(1, limit));
+    },
   };
   const mtprotoPost = async (path, { body, lane }) => {
     // Managed per-post stats travels the SAME breaker client but a distinct path + body (msg_id, no
@@ -143,8 +167,9 @@ test('auth failure → reauth_required, остальные каналы юзер
 
   await job.processTgQrCollection();
 
-  // user 1: only a1 attempted (a2 short-circuited); user 2: b1 collected.
-  assert.deepEqual(calls.post, ['a1', 'b1']);
+  // user 1: only a1 attempted (a2 short-circuited); user 2: b1 collected. Different uids now run
+  // concurrently, so cross-uid post ORDER is not asserted — only the exact set + that a2 never ran.
+  assert.deepEqual([...calls.post].sort(), ['a1', 'b1']);
   assert.deepEqual(calls.postLanes, ['background', 'background']);
   const u1 = calls.health.filter((c) => c[1] === 1);
   assert.deepEqual(u1[0], ['attempt', 1]);
@@ -268,14 +293,29 @@ test('processTgQrCollection: возвращает { collected, skipped, failed, 
   assert.deepEqual(stats, { collected: 1, skipped: 1, failed: 1, capped: false });
 });
 
-test('processTgQrCollection: инъектированный per-pass cap ограничивает НОВОСТАРТОВАННЫЕ каналы, skipped не тратят cap', async () => {
-  // cap=1: первый реально стартовавший канал занимает cap, дальше capped. Но канал, skipped
-  // идемпотентно, cap НЕ тратит — следующий проход добирает остаток.
+test('processTgQrCollection: cap отбирает cap+1 кандидатов, обрабатывает ровно cap; capped честен', async () => {
+  // cap=1: candidate-запрос берёт cap+1=2 кандидата (a1,a2). Обрабатывается ровно cap=1 (a1); наличие
+  // второго кандидата честно поднимает capped. a2/a3 добирает следующий проход.
+  const { job, db, calls } = makeJob({ tgQrChannelsPerPass: 1 });
+  db.listTgSessions = async () => [{ uid: 1, session_enc: 's', session_version: '1' }];
+  db.listChannels = async () => [ch(1, 'a1'), ch(2, 'a2'), ch(3, 'a3')];
+
+  const stats = await job.processTgQrCollection();
+
+  assert.deepEqual(calls.candidateQueries, [{ day: calls.candidateQueries[0].day, limit: 2 }], 'fetches cap+1');
+  assert.deepEqual(calls.post, ['a1']); // ровно cap=1 канал обработан
+  assert.equal(stats.collected, 1);
+  assert.equal(stats.skipped, 0);
+  assert.equal(stats.capped, true);
+});
+
+test('processTgQrCollection: a skipped race consumes a cap slot and leaves it unused until the next pass', async () => {
+  // cap=1, кандидат a1 выбран, но runJobOnce проигрывает гонку claim → skipped. По контракту это НЕ
+  // добирается безлимитным сканом: слот cap потрачен, a2 остаётся на следующий 15-минутный проход.
   const { job, db, calls } = makeJob({
     tgQrChannelsPerPass: 1,
-    // channel id 1 already done today → skipped (не тратит cap); 2 и 3 стартуют.
     runJobOnce: async (_kind, key, fn) => (key.startsWith('1:')
-      ? { skipped: true }
+      ? { skipped: true }                          // lost the atomic claim to a concurrent pass
       : { skipped: false, result: await fn() }),
   });
   db.listTgSessions = async () => [{ uid: 1, session_enc: 's', session_version: '1' }];
@@ -283,10 +323,9 @@ test('processTgQrCollection: инъектированный per-pass cap огр�
 
   const stats = await job.processTgQrCollection();
 
-  // a1 skipped (cap не тронут), a2 collected (cap исчерпан), a3 не тронут → capped.
-  assert.deepEqual(calls.post, ['a2']); // только реально стартовавший a2 дошёл до upstream
+  assert.deepEqual(calls.post, [], 'the skipped channel never reached upstream; no unbounded refill scan');
   assert.equal(stats.skipped, 1);
-  assert.equal(stats.collected, 1);
+  assert.equal(stats.collected, 0);
   assert.equal(stats.capped, true);
 });
 
@@ -308,6 +347,148 @@ test('processTgQrCollection: БД выключена → пустая стати
   const stats = await job.processTgQrCollection();
   assert.deepEqual(stats, { collected: 0, skipped: 0, failed: 0, capped: false });
   assert.deepEqual(calls.post, []);
+});
+
+test('processTgQrCollection: resolves candidates via the single indexed query, never the legacy scan', async () => {
+  const { job, db, calls } = makeJob();
+  let candidateCalls = 0;
+  // The O(N) legacy fan-out must be gone: touching either method is a hard failure.
+  db.listTgSessions = async () => { throw new Error('legacy listTgSessions scan must not run'); };
+  db.listChannels = async () => { throw new Error('legacy listChannels scan must not run'); };
+  db.listTgQrCollectCandidates = async (_day, _limit) => {
+    candidateCalls += 1;
+    return [{ uid: 1, session_enc: 's', session_version: '1', id: 1, username: 'a1', tg_channel_id: 1001, owner_uid: 1, source: 'qr' }];
+  };
+
+  const stats = await job.processTgQrCollection();
+
+  assert.equal(candidateCalls, 1, 'exactly one candidate query per pass');
+  assert.deepEqual(calls.post, ['a1']);
+  assert.equal(stats.collected, 1);
+});
+
+test('processTgQrCollection: candidate query DB failure → empty stats, nothing collected', async () => {
+  const { job, db, calls } = makeJob();
+  db.listTgQrCollectCandidates = async () => { throw new Error('db down'); };
+  const stats = await job.processTgQrCollection();
+  assert.deepEqual(stats, { collected: 0, skipped: 0, failed: 0, capped: false });
+  assert.deepEqual(calls.post, []);
+  assert.ok(calls.logs.some((l) => l.event === 'tg_qr_list_candidates_failed'));
+});
+
+test('processTgQrCollection: different uids overlap, channels within one uid never overlap', async () => {
+  // Two sessions × two channels each. Bounded concurrency runs the two uids in parallel (session
+  // decrypt → plaintext = session_enc, so body.session identifies the uid), but a uid's own channels
+  // stay strictly serialized inside its group.
+  const activeSessions = new Set();
+  let maxConcurrentUids = 0;
+  const inflightBySession = new Map();
+  let maxPerUid = 0;
+  const mtprotoPost = async (_path, { body }) => {
+    const sk = body.session;
+    activeSessions.add(sk);
+    maxConcurrentUids = Math.max(maxConcurrentUids, activeSessions.size);
+    const n = (inflightBySession.get(sk) || 0) + 1;
+    inflightBySession.set(sk, n);
+    maxPerUid = Math.max(maxPerUid, n);
+    // Yield a couple of turns so genuinely-concurrent requests observe each other in-flight.
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+    const left = inflightBySession.get(sk) - 1;
+    inflightBySession.set(sk, left);
+    if (left === 0) activeSessions.delete(sk);
+    return OK_BUNDLE;
+  };
+  const db = {
+    enabled: true,
+    graphsToDailyRows: () => [],
+    saveRawSnapshot: async () => {},
+    persistTgBundleTx: async () => ({ channel_daily: 1, posts: 1 }),
+    runJobOnce: async (_kind, _key, fn) => ({ skipped: false, result: await fn() }),
+    recordTgSessionAttempt: async () => true,
+    recordTgSessionSuccess: async () => true,
+    recordTgSessionFailure: async () => true,
+    rotateTgSessionCiphertext: async () => true,
+    listTgQrCollectCandidates: async () => ([
+      { uid: 1, session_enc: 's1', session_version: '1', id: 1, username: 'u1a', tg_channel_id: 1001, owner_uid: 1, source: 'qr' },
+      { uid: 1, session_enc: 's1', session_version: '1', id: 2, username: 'u1b', tg_channel_id: 1002, owner_uid: 1, source: 'qr' },
+      { uid: 2, session_enc: 's2', session_version: '1', id: 3, username: 'u2a', tg_channel_id: 1003, owner_uid: 2, source: 'qr' },
+      { uid: 2, session_enc: 's2', session_version: '1', id: 4, username: 'u2b', tg_channel_id: 1004, owner_uid: 2, source: 'qr' },
+    ]),
+  };
+  const job = createTgQrCollectionJob({
+    db,
+    log: () => {},
+    tgCrypto: activeCrypto(),
+    mtprotoPost,
+    MTPROTO_TOKEN: 'tok',
+    MTPROTO_TIMEOUT_HEAVY_MS: 1000,
+    tgPostToRow: (p) => p,
+    tgQrSessionConcurrency: 4,
+  });
+
+  const stats = await job.processTgQrCollection();
+
+  assert.equal(stats.collected, 4);
+  assert.equal(maxConcurrentUids, 2, 'the two different sessions ran concurrently');
+  assert.equal(maxPerUid, 1, 'a single session never runs two channels at once');
+});
+
+test('processTgQrCollection: session concurrency of 1 serializes all sessions', async () => {
+  const activeSessions = new Set();
+  let maxConcurrentUids = 0;
+  const mtprotoPost = async (_path, { body }) => {
+    activeSessions.add(body.session);
+    maxConcurrentUids = Math.max(maxConcurrentUids, activeSessions.size);
+    await new Promise((r) => setImmediate(r));
+    activeSessions.delete(body.session);
+    return OK_BUNDLE;
+  };
+  const db = {
+    enabled: true,
+    graphsToDailyRows: () => [],
+    saveRawSnapshot: async () => {},
+    persistTgBundleTx: async () => ({ channel_daily: 1, posts: 1 }),
+    runJobOnce: async (_kind, _key, fn) => ({ skipped: false, result: await fn() }),
+    recordTgSessionAttempt: async () => true,
+    recordTgSessionSuccess: async () => true,
+    recordTgSessionFailure: async () => true,
+    rotateTgSessionCiphertext: async () => true,
+    listTgQrCollectCandidates: async () => ([
+      { uid: 1, session_enc: 's1', session_version: '1', id: 1, username: 'u1a', tg_channel_id: 1001, owner_uid: 1, source: 'qr' },
+      { uid: 2, session_enc: 's2', session_version: '1', id: 2, username: 'u2a', tg_channel_id: 1002, owner_uid: 2, source: 'qr' },
+    ]),
+  };
+  const job = createTgQrCollectionJob({
+    db, log: () => {}, tgCrypto: activeCrypto(), mtprotoPost,
+    MTPROTO_TOKEN: 'tok', MTPROTO_TIMEOUT_HEAVY_MS: 1000, tgPostToRow: (p) => p,
+    tgQrSessionConcurrency: 1,
+  });
+
+  await job.processTgQrCollection();
+  assert.equal(maxConcurrentUids, 1, 'concurrency=1 keeps sessions strictly serial');
+});
+
+test('processTgQrCollection: auth failure stops ONLY its uid, the other uid still collects', async () => {
+  // uid 1 hits an auth failure on its first channel (short-circuits its second); uid 2 is unaffected.
+  const { job, db, calls } = makeJob({ responses: { u1a: authErr() } });
+  db.listTgSessions = async () => [
+    { uid: 1, session_enc: 's1', session_version: '1' },
+    { uid: 2, session_enc: 's2', session_version: '1' },
+  ];
+  db.listChannels = async ({ uid }) => (uid === 1
+    ? [ch(1, 'u1a', 1), ch(2, 'u1b', 1)]
+    : [ch(3, 'u2a', 2), ch(4, 'u2b', 2)]);
+
+  await job.processTgQrCollection();
+
+  // uid 1: only u1a attempted (u1b short-circuited); uid 2: both channels collected.
+  assert.deepEqual([...calls.post].sort(), ['u1a', 'u2a', 'u2b']);
+  const u1fail = calls.health.filter((c) => c[1] === 1).find((c) => c[0] === 'failure');
+  assert.deepEqual(u1fail[2], { state: 'reauth_required', errorCode: 'session_unauthorized' });
+  const u2 = calls.health.filter((c) => c[1] === 2);
+  assert.ok(u2.some((c) => c[0] === 'success'), 'uid 2 stayed healthy');
+  assert.ok(!u2.some((c) => c[0] === 'failure'), 'uid 2 never failed');
 });
 
 // ── collectQrChannelsNow (immediate post-add) ─────────────────────────────────
@@ -776,6 +957,25 @@ function makeWarmJob({ stored = {}, entityByRef = {}, saveThrows = false } = {})
       calls.hashWrites.push({ channelId, ownerUid, hash, gen });
       if (saveThrows) throw new Error('db down carrying SECRET-HASH-9998887776665554443');
       return true;
+    },
+    // Candidate query fake for the warm-path generation-guard test: derive rows from listTgSessions/
+    // listChannels with the same filters + (uid, id) order the real SQL uses.
+    listTgQrCollectCandidates: async (_day, limit) => {
+      const sessions = await db.listTgSessions();
+      const out = [];
+      for (const s of sessions) {
+        if (s.connection_state === 'reauth_required') continue;
+        const chans = await db.listChannels({ uid: s.uid });
+        for (const c of chans) {
+          if (c.source !== 'qr' || c.tg_channel_id == null || String(c.owner_uid) !== String(s.uid)) continue;
+          out.push({
+            uid: s.uid, session_enc: s.session_enc, session_version: s.session_version,
+            id: c.id, username: c.username, tg_channel_id: c.tg_channel_id, owner_uid: c.owner_uid, source: c.source,
+          });
+        }
+      }
+      out.sort((a, b) => (Number(a.uid) - Number(b.uid)) || (a.id - b.id));
+      return out.slice(0, Math.max(1, limit));
     },
   };
   const mtprotoPost = async (_path, { body }) => {

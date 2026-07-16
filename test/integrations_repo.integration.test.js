@@ -245,6 +245,84 @@ test('tg_sessions health: record-методы на отсутствующем ui
   assert.strictEqual(await db.recordTgSessionFailure(999999999, '1', { state: 'degraded', errorCode: 'unknown' }), false);
 });
 
+test('listTgQrCollectCandidates: qr/active/owned, session≠reauth, job-state exclusion, deterministic limit', { skip }, async () => {
+  const day = '2026-07-16';
+  const O = await mkUser('cand');
+  await db.saveTgSession(O.id, { tg_user_id: 900, username: `cand_${nonce}`, session_enc: 'enc:cand' });
+
+  let tg = 7770000 + (process.pid % 1000) * 1000;
+  const mkCh = async () => {
+    tg += 1;
+    return db.createTgChannel({ owner_uid: O.id, tg_channel_id: tg, username: `c${tg}_${nonce}` });
+  };
+  const absent = await mkCh();
+  const succeeded = await mkCh();
+  const runningLive = await mkCh();
+  const runningExpired = await mkCh();
+  const failed = await mkCh();
+  const queued = await mkCh();
+  const disabled = await mkCh();
+  const createdKeys = [];
+  const claim = async (chId) => {
+    createdKeys.push(`${chId}:${day}`);
+    return db.claimJob('qr_collect', `${chId}:${day}`);
+  };
+
+  const jSucc = await claim(succeeded.id); await db.completeJob(jSucc.id, { ok: true });
+  await claim(runningLive.id);                                   // running, lease still alive → excluded
+  const jExp = await claim(runningExpired.id);
+  await pool.query(`UPDATE jobs SET locked_until = now() - interval '1 hour' WHERE id=$1`, [jExp.id]);
+  const jFail = await claim(failed.id); await db.failJob(jFail.id, new Error('boom'));
+  createdKeys.push(`${queued.id}:${day}`);
+  await pool.query(`INSERT INTO jobs (kind, idempotency_key, status) VALUES ('qr_collect', $1, 'queued')`, [`${queued.id}:${day}`]);
+  await pool.query(`UPDATE channels SET status='disabled' WHERE id=$1`, [disabled.id]);
+
+  // A non-qr (ig) channel of the same owner must never appear.
+  const igCh = await db.createIgChannel({ owner_uid: O.id, username: `igc_${nonce}` });
+
+  // A reauth_required session's qr channel is excluded entirely.
+  const R = await mkUser('candr');
+  await db.saveTgSession(R.id, { tg_user_id: 901, username: `r_${nonce}`, session_enc: 'enc:r' });
+  const rv = (await db.getTgSession(R.id)).session_version;
+  await db.recordTgSessionFailure(R.id, rv, { state: 'reauth_required', errorCode: 'session_unauthorized' });
+  tg += 1;
+  const rCh = await db.createTgChannel({ owner_uid: R.id, tg_channel_id: tg, username: `rc_${nonce}` });
+  createdKeys.push(`${rCh.id}:${day}`);
+
+  try {
+    const rows = await db.listTgQrCollectCandidates(day, 100);
+    const mine = rows.filter((x) => x.owner_uid === O.id || x.owner_uid === R.id);
+    const ids = mine.map((x) => x.id);
+
+    assert.ok(ids.includes(absent.id), 'no job row → included');
+    assert.ok(ids.includes(runningExpired.id), 'expired-running lease → re-claimable → included');
+    assert.ok(ids.includes(failed.id), 'failed → included');
+    assert.ok(ids.includes(queued.id), 'queued → included');
+    assert.ok(!ids.includes(succeeded.id), 'succeeded → excluded');
+    assert.ok(!ids.includes(runningLive.id), 'live-leased running → excluded');
+    assert.ok(!ids.includes(disabled.id), 'disabled channel → excluded');
+    assert.ok(!ids.includes(igCh.id), 'non-qr channel → excluded');
+    assert.ok(!ids.includes(rCh.id), 'reauth_required session channel → excluded');
+
+    // Deterministic order: uid asc, then channel id asc (all `mine` are the same owner → id asc).
+    assert.deepStrictEqual(ids, [...ids].sort((a, b) => a - b), 'rows are ordered by (uid, channel id)');
+
+    // Secret boundary: exactly the fields collection needs; NEVER the session tg_user_id/username.
+    const sample = mine.find((x) => x.id === absent.id);
+    assert.ok(['uid', 'session_enc', 'session_version', 'id', 'username', 'tg_channel_id', 'owner_uid', 'source']
+      .every((k) => k in sample), 'returns the collection fields');
+    assert.strictEqual(sample.session_enc, 'enc:cand', 'encrypted session forwarded (caller decrypts)');
+    assert.strictEqual(sample.source, 'qr');
+    assert.ok(!('tg_user_id' in sample), 'session tg_user_id is never exposed');
+    assert.ok(!('connection_state' in sample), 'session health columns are not exposed');
+
+    // LIMIT is honoured (bound parameter).
+    assert.ok((await db.listTgQrCollectCandidates(day, 2)).length <= 2, 'limit caps the page');
+  } finally {
+    await pool.query(`DELETE FROM jobs WHERE idempotency_key = ANY($1)`, [createdKeys]);
+  }
+});
+
 test('getCollectorStatus: владелец видит статус, чужой — null (access-предикат)', { skip }, async () => {
   const O = await mkUser('cs');
   const S = await mkUser('cx');

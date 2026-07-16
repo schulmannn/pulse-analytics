@@ -230,6 +230,88 @@ test('the global in-flight bulkhead is SHARED: it rejects across lanes', () => {
   assert.deepStrictEqual(breaker.tryAcquire('background'), { ok: true });
 });
 
+// ── Background sub-cap over the shared global bulkhead ───────────────────────
+
+test('background sub-cap reserves live slots: background rejected at its cap, live uses the rest', () => {
+  let clock = 1000;
+  const breaker = createBreaker({ maxInFlight: 8, backgroundMaxInFlight: 4, now: () => clock });
+
+  for (let i = 0; i < 4; i += 1) {
+    assert.strictEqual(breaker.tryAcquire('background').ok, true);
+  }
+  // The 5th background acquisition is rejected even though the global pool still has 4 free slots —
+  // those are reserved for live.
+  assert.deepStrictEqual(breaker.tryAcquire('background'), {
+    ok: false,
+    reason: 'overloaded',
+    retryAfterMs: 0,
+  });
+  assert.strictEqual(breaker.snapshot().inFlight, 4, 'only the 4 background slots are in flight');
+
+  // Live may still use the remaining global slots (5..8).
+  for (let i = 0; i < 4; i += 1) {
+    assert.strictEqual(breaker.tryAcquire('live').ok, true);
+  }
+  assert.strictEqual(breaker.snapshot().inFlight, 8, 'global bulkhead now full across both lanes');
+  // With the global pool full, even live is rejected by the SHARED bulkhead.
+  assert.strictEqual(breaker.tryAcquire('live').reason, 'overloaded');
+});
+
+test('releasing a background lease frees the sub-cap without leaking', () => {
+  let clock = 1000;
+  const breaker = createBreaker({ maxInFlight: 8, backgroundMaxInFlight: 2, now: () => clock });
+
+  const g1 = breaker.tryAcquire('background');
+  const g2 = breaker.tryAcquire('background');
+  assert.strictEqual(breaker.tryAcquire('background').ok, false, 'sub-cap of 2 reached');
+
+  breaker.onSettled(true, 'background', g1);
+  assert.strictEqual(breaker.snapshot().inFlight, 1);
+  // A freed background slot is immediately reusable.
+  const g3 = breaker.tryAcquire('background');
+  assert.strictEqual(g3.ok, true);
+
+  breaker.onSettled(true, 'background', g2);
+  breaker.onSettled(true, 'background', g3);
+  assert.strictEqual(breaker.snapshot().inFlight, 0, 'all reservations released — no leak');
+  // The sub-cap is fully available again.
+  assert.strictEqual(breaker.tryAcquire('background').ok, true);
+  assert.strictEqual(breaker.tryAcquire('background').ok, true);
+});
+
+test('legacy no-lease settlement releases a background reservation by lane', () => {
+  let clock = 1000;
+  const breaker = createBreaker({ maxInFlight: 8, backgroundMaxInFlight: 1, now: () => clock });
+
+  assert.strictEqual(breaker.tryAcquire('background').ok, true);
+  assert.strictEqual(breaker.tryAcquire('background').ok, false, 'sub-cap of 1 reached');
+  breaker.onSettled(true, 'background');   // legacy path: no gate/lease, falls back to the lane arg
+  assert.strictEqual(breaker.snapshot().inFlight, 0);
+  assert.strictEqual(breaker.tryAcquire('background').ok, true, 'reservation released, slot reusable');
+});
+
+test('the default background sub-cap (5) leaves three live slots under the 8-slot bulkhead', () => {
+  let clock = 1000;
+  const breaker = createBreaker({ now: () => clock });   // defaults: maxInFlight 8, backgroundMaxInFlight 5
+
+  for (let i = 0; i < 5; i += 1) assert.strictEqual(breaker.tryAcquire('background').ok, true);
+  assert.strictEqual(breaker.tryAcquire('background').ok, false, 'background capped at its default 5');
+  for (let i = 0; i < 3; i += 1) assert.strictEqual(breaker.tryAcquire('live').ok, true);
+  assert.strictEqual(breaker.snapshot().inFlight, 8);
+});
+
+test('a background failure that opens the lane still releases its sub-cap reservation', () => {
+  let clock = 1000;
+  const breaker = createBreaker({ maxInFlight: 8, backgroundMaxInFlight: 2, failureThreshold: 1, cooldownMs: 10000, now: () => clock });
+
+  const g = breaker.tryAcquire('background');
+  breaker.onSettled(false, 'background', g);   // trips background open AND must free the reservation
+  assert.strictEqual(breaker.snapshot('background').state, 'OPEN');
+  assert.strictEqual(breaker.snapshot().inFlight, 0, 'the failed background request released its slot');
+  // Live is unaffected and the background reservation did not leak.
+  assert.strictEqual(breaker.tryAcquire('live').ok, true);
+});
+
 test('half-open trials are per-lane and recover that lane independently', () => {
   let clock = 1000;
   const breaker = createBreaker({ failureThreshold: 2, cooldownMs: 10000, halfOpenMax: 1, now: () => clock });

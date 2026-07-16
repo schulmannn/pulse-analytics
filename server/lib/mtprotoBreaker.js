@@ -12,6 +12,11 @@ function normalizeLane(lane) {
 function createBreaker(opts = {}) {
   const {
     maxInFlight = 8,
+    // Background sub-cap over the SAME global bulkhead. Background collection may never claim more
+    // than this many of the global slots at once, so live dashboard reads always keep at least
+    // (maxInFlight - backgroundMaxInFlight) slots to themselves even during a heavy sweep. Live is
+    // NOT sub-capped — it may use the whole global pool when background is idle.
+    backgroundMaxInFlight = 5,
     failureThreshold = 5,
     cooldownMs = 10000,
     halfOpenMax = 1,
@@ -20,6 +25,10 @@ function createBreaker(opts = {}) {
 
   // Shared across ALL lanes — the global bulkhead over the single mtproto process.
   let inFlight = 0;
+  // Subset of inFlight currently held by the background lane — the reservation counter behind the
+  // background sub-cap. Tracked with the acquisition lease so every settlement path releases exactly
+  // what it reserved (a legacy no-lease settle falls back to the queried lane).
+  let backgroundInFlight = 0;
 
   // Per-lane circuit state / failure counters / cooldown / half-open trial accounting.
   const newLane = () => ({
@@ -73,6 +82,14 @@ function createBreaker(opts = {}) {
         return { ok: false, reason: 'overloaded', retryAfterMs: 0 };
       }
 
+      // Background sub-cap: reserve live headroom in the shared pool. A background acquisition is
+      // rejected once the background lane already holds backgroundMaxInFlight slots, EVEN when the
+      // global pool still has room — those remaining slots are the reservation for live reads.
+      const background = normalizeLane(lane) === 'background';
+      if (background && backgroundInFlight >= backgroundMaxInFlight) {
+        return { ok: false, reason: 'overloaded', retryAfterMs: 0 };
+      }
+
       if (l.state === 'HALF_OPEN' && l.halfOpenInFlight >= halfOpenMax) {
         return { ok: false, reason: 'overloaded', retryAfterMs: 0 };
       }
@@ -80,6 +97,7 @@ function createBreaker(opts = {}) {
       const halfOpenTrial = l.state === 'HALF_OPEN';
       inFlight += 1;
       if (halfOpenTrial) l.halfOpenInFlight += 1;
+      if (background) backgroundInFlight += 1;
 
       // Keep the public gate shape backward-compatible ({ ok: true }), while attaching an
       // acquisition lease for race-safe settlement. A request admitted in an older circuit
@@ -91,6 +109,7 @@ function createBreaker(opts = {}) {
           lane: normalizeLane(lane),
           generation: l.generation,
           halfOpenTrial,
+          background,
         }),
       });
       return gate;
@@ -107,6 +126,12 @@ function createBreaker(opts = {}) {
         : l.state === 'HALF_OPEN' && l.halfOpenInFlight > 0;
       if (inFlight > 0) inFlight -= 1;
       if (halfOpenTrial && l.halfOpenInFlight > 0) l.halfOpenInFlight -= 1;
+      // Release the background reservation the matching acquisition took. With a lease, release
+      // exactly what THIS request reserved (generation/state-independent — a background slot is held
+      // for the whole request regardless of circuit transitions); a legacy no-lease settle falls
+      // back to the queried lane.
+      const wasBackground = lease ? lease.background : normalizeLane(lane) === 'background';
+      if (wasBackground && backgroundInFlight > 0) backgroundInFlight -= 1;
 
       const belongsToCurrentGeneration =
         !lease ||

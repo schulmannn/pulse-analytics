@@ -48,7 +48,7 @@ function rawTgChannelId(value) {
   }
 }
 
-function createTgQrCollectionJob({ db, liveDb = db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN, MTPROTO_TIMEOUT_STATS_MS, MTPROTO_TIMEOUT_HEAVY_MS, tgPostToRow, tgQrChannelsPerPass = 200, tgMediaRepairPerPass = 16, tgMediaRepairWindowDays = 365 }) {
+function createTgQrCollectionJob({ db, liveDb = db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN, MTPROTO_TIMEOUT_STATS_MS, MTPROTO_TIMEOUT_HEAVY_MS, tgPostToRow, tgQrChannelsPerPass = 200, tgQrSessionConcurrency = 4, tgMediaRepairPerPass = 16, tgMediaRepairWindowDays = 365 }) {
   // Shared decrypt: transparently falls back to a rotated-out key and lazily re-encrypts the row under
   // the active key (generation-guarded, best-effort — a rewrite failure never blocks the collect).
   const { decryptTgSession } = createTgSessionDecryptor({ tgCrypto, db, log });
@@ -331,63 +331,97 @@ function createTgQrCollectionJob({ db, liveDb = db, log, tgCrypto, mtprotoPost, 
     await finalizeSessionHealth(sess.uid, sess.session_version, { attempted, succeeded, authFailed, errorCode: lastErrCode });
   }
 
+  // Process ONE session's channels strictly sequentially (flood-friendly to a single Telegram
+  // account) after a single per-uid decrypt. Same health state machine as before: a `skipped`
+  // idempotent claim is NOT an attempt (nothing started); success wins over non-auth errors; an auth
+  // failure short-circuits THIS user's remaining channels (session-wide invalidation) but no other
+  // uid; per-channel failures stay isolated. runJobOnce is the authoritative atomic claim, so a
+  // select/claim race just returns skipped. Mutates the shared `stats`. Never throws.
+  async function processSessionGroup(group, day, stats) {
+    const sess = { uid: group.uid, session_enc: group.session_enc, session_version: group.session_version };
+    let sessionStr;
+    // One decrypt per uid group (lazy previous-key re-encryption happens once here, generation-guarded).
+    try { sessionStr = await decryptTgSession(sess); }
+    catch { log('error', 'tg_qr_decrypt_failed', { uid: sess.uid }); return; }
+
+    let attempted = false, succeeded = false, authFailed = false, lastErrCode = null;
+    for (const ch of group.channels) {
+      let started = false;
+      try {
+        const out = await db.runJobOnce('qr_collect', `${ch.id}:${day}`, () => {
+          started = true;
+          return collectQrChannel(sessionStr, ch, day, sess.uid, sess.session_version);
+        });
+        if (out.skipped) { stats.skipped++; continue; }
+        stats.collected++;
+        attempted = true;
+        succeeded = true;
+      }
+      catch (e) {
+        if (started) attempted = true;
+        stats.failed++;
+        log('error', 'tg_qr_collect_failed', { channelId: ch.id, error: e.message });
+        if (isTgAuthError(e)) { authFailed = true; lastErrCode = e.code; break; }
+        lastErrCode = safeTgErrorCode(e);
+      }
+    }
+
+    await finalizeSessionHealth(sess.uid, sess.session_version, { attempted, succeeded, authFailed, errorCode: lastErrCode });
+  }
+
   // Runs fire-and-forget after the central ingest; durable per (channel, day) so a repeat trigger
-  // resumes unfinished channels; sequential + per-channel try/catch so one bad session / channel /
-  // FloodWait never blocks the others or the critical central ingest. cap = сколько НОВОСТАРТОВАННЫХ
-  // каналов трогаем за проход (инъектируется/конфигурируется, а не файловая константа): skipped за
-  // день каналы лимит не тратят, поэтому следующий проход бегунка добирает остаток. Возвращает
-  // { collected, skipped, failed, capped } — статистику прохода.
+  // resumes unfinished channels. Eligible (session, channel) pairs are resolved in ONE indexed
+  // query (db.listTgQrCollectCandidates) instead of the old O(sessions) listTgSessions + per-session
+  // listChannels fan-out. cap = сколько каналов трогаем за проход; мы берём cap+1 кандидатов, чтобы
+  // честно выставить `capped`, и обрабатываем ровно cap. Кандидаты сгруппированы по session uid и
+  // выполняются с ограниченным параллелизмом РАЗНЫХ сессий (bounded worker loop); каналы одной
+  // сессии — строго последовательно. runJobOnce остаётся атомарным claim'ом: гонка select/claim
+  // возвращает skipped и может оставить неиспользованную ёмкость до следующего 15-минутного прохода
+  // (без безлимитного дозаборного скана). Возвращает { collected, skipped, failed, capped }.
   async function processTgQrCollection({ cap = tgQrChannelsPerPass } = {}) {
     const stats = { collected: 0, skipped: 0, failed: 0, capped: false };
     if (!db.enabled || !tgCrypto.configured() || !MTPROTO_TOKEN) return stats;
     const day = new Date().toISOString().slice(0, 10);
-    let sessions = [];
-    try { sessions = await db.listTgSessions(); }
-    catch (e) { log('error', 'tg_qr_list_sessions_failed', { error: e.message }); return stats; }
 
-    let done = 0;
-    for (const s of sessions) {
-      if (done >= cap) { stats.capped = true; break; }
-      let sessionStr;
-      try { sessionStr = await decryptTgSession(s); }
-      catch { log('error', 'tg_qr_decrypt_failed', { uid: s.uid }); continue; }
+    let candidates = [];
+    // cap+1 so a full page honestly reports `capped` without a second count query.
+    try { candidates = await db.listTgQrCollectCandidates(day, cap + 1); }
+    catch (e) { log('error', 'tg_qr_list_candidates_failed', { error: e.message }); return stats; }
 
-      let chans = [];
-      try {
-        chans = (await db.listChannels({ uid: s.uid })).filter(
-          (c) => c.source === 'qr' && c.tg_channel_id != null && sameUid(c.owner_uid, s.uid));
+    if (candidates.length > cap) stats.capped = true;
+    const selected = candidates.slice(0, cap);
+
+    // Group by session uid, preserving the query's (uid, channel id) order so grouping is stable and
+    // each uid's channels stay ordered. The candidate query already carries session_enc/session_version.
+    const groups = new Map();
+    for (const row of selected) {
+      const key = String(row.uid);
+      let g = groups.get(key);
+      if (!g) {
+        g = { uid: row.uid, session_enc: row.session_enc, session_version: row.session_version, channels: [] };
+        groups.set(key, g);
       }
-      catch (e) { log('error', 'tg_qr_list_channels_failed', { uid: s.uid, error: e.message }); continue; }
-
-      // Per-session health accounting. A `skipped` idempotent result is NOT an attempt (nothing
-      // started); only a collection whose fn actually ran counts. Success wins over non-auth errors,
-      // auth-fail short-circuits this user's remaining channels (session-wide invalidation).
-      let attempted = false, succeeded = false, authFailed = false, lastErrCode = null;
-      for (const ch of chans) {
-        if (done >= cap) { stats.capped = true; break; }
-        let started = false;
-        try {
-          const out = await db.runJobOnce('qr_collect', `${ch.id}:${day}`, () => {
-            started = true;
-            return collectQrChannel(sessionStr, ch, day, s.uid, s.session_version);
-          });
-          if (out.skipped) { stats.skipped++; continue; }
-          done++;
-          stats.collected++;
-          attempted = true;
-          succeeded = true;
-        }
-        catch (e) {
-          if (started) { done++; attempted = true; }
-          stats.failed++;
-          log('error', 'tg_qr_collect_failed', { channelId: ch.id, error: e.message });
-          if (isTgAuthError(e)) { authFailed = true; lastErrCode = e.code; break; }
-          lastErrCode = safeTgErrorCode(e);
-        }
-      }
-
-      await finalizeSessionHealth(s.uid, s.session_version, { attempted, succeeded, authFailed, errorCode: lastErrCode });
+      g.channels.push({
+        id: row.id, username: row.username, tg_channel_id: row.tg_channel_id,
+        owner_uid: row.owner_uid, source: row.source,
+      });
     }
+
+    // Bounded worker loop: at most N different sessions in flight at once (N ≤ background sub-cap, so
+    // the concurrent /qr/collect fan-out fits the reserved background slots of the global bulkhead).
+    // Within a uid group channels run sequentially inside processSessionGroup.
+    const groupList = Array.from(groups.values());
+    const workers = Math.max(1, Math.min(tgQrSessionConcurrency, groupList.length));
+    let next = 0;
+    async function worker() {
+      for (;;) {
+        const idx = next++;
+        if (idx >= groupList.length) return;
+        await processSessionGroup(groupList[idx], day, stats);
+      }
+    }
+    await Promise.all(Array.from({ length: workers }, () => worker()));
+
     log(stats.capped ? 'warn' : 'info', 'tg_qr_collection_done', { ...stats });
     return stats;
   }

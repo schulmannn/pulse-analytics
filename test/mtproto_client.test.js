@@ -35,6 +35,19 @@ test('MTProto clients use independent injected URL and token values', async () =
   assert.equal(calls[1].options.headers['x-internal-token'], 'second-token');
 });
 
+test('MTProto client threads the configured background sub-cap into its default breaker', () => {
+  const client = createMtprotoClient({ backgroundMaxInFlight: 1 });
+  const background = client.mtprotoBreaker.tryAcquire('background');
+
+  assert.equal(background.ok, true);
+  assert.equal(client.mtprotoBreaker.tryAcquire('background').ok, false, 'second background slot is reserved for live');
+  const live = client.mtprotoBreaker.tryAcquire('live');
+  assert.equal(live.ok, true, 'live still has headroom in the shared global bulkhead');
+
+  client.mtprotoBreaker.onSettled(true, 'background', background);
+  client.mtprotoBreaker.onSettled(true, 'live', live);
+});
+
 function connErr(code = 'ECONNREFUSED') {
   // Shape of a node-fetch v2 connection-establishment failure.
   const e = new Error('socket hang up');

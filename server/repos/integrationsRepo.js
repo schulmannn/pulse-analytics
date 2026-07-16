@@ -173,6 +173,47 @@ function createIntegrationsRepo({ pool, enabled, ensureExternalSource, transacti
     return rows;
   }
 
+  // Candidate channels for ONE QR-collection pass, resolved in a SINGLE indexed query instead of the
+  // old O(sessions × listChannels) fan-out (one round trip per stored session). This lives in the
+  // integrations repo — not channelsRepo — because it reads the encrypted tg_sessions secret (session_
+  // enc/session_version) that only this domain owns; it returns just the fields the collector needs
+  // (never the session username or tg_user_id).
+  //
+  // A row is a (session, channel) pair eligible for collection today:
+  //   • non-disabled source='qr' channel with a tg_channel_id, owned by the session's uid;
+  //   • the session is not reauth_required (a broken credential is skipped entirely);
+  //   • today has NOT already been done for that channel — excluded ONLY when the durable
+  //     jobs(kind='qr_collect', key='<channelId>:<day>') row is 'succeeded' OR a still-leased
+  //     'running' claim. Absent/queued/failed/expired-running rows are INCLUDED (re-collectable).
+  // The exclusion is a NOT EXISTS equality probe on the existing UNIQUE(kind, idempotency_key) index
+  // (day + limit are bound parameters, never interpolated). Deterministic order (session uid, channel
+  // id) keeps grouping stable; the caller fetches limit=cap+1 to report `capped` honestly. runJobOnce
+  // remains the authoritative atomic claim per channel, so a select/claim race still returns skipped.
+  async function listTgQrCollectCandidates(day, limit) {
+    if (!enabled || !day) return [];
+    const cap = Number.isFinite(+limit) ? Math.max(1, Math.round(+limit)) : 1;
+    const { rows } = await pool.query(
+      `SELECT s.uid, s.session_enc, s.session_version,
+              c.id, c.username, c.tg_channel_id, c.owner_uid, c.source
+         FROM tg_sessions s
+         JOIN channels c
+           ON c.owner_uid = s.uid
+          AND c.source = 'qr'
+          AND c.tg_channel_id IS NOT NULL
+          AND c.status <> 'disabled'
+        WHERE s.connection_state IS DISTINCT FROM 'reauth_required'
+          AND NOT EXISTS (
+                SELECT 1 FROM jobs j
+                 WHERE j.kind = 'qr_collect'
+                   AND j.idempotency_key = c.id::text || ':' || $1::text
+                   AND (j.status = 'succeeded'
+                        OR (j.status = 'running' AND j.locked_until >= now())))
+        ORDER BY s.uid ASC, c.id ASC
+        LIMIT $2`,
+      [day, cap]);
+    return rows;
+  }
+
   // ── TG session health bookkeeping (set by the QR-collection job) ─────────────
   // Три узких, single-purpose метода. Состояние и код НЕ приходят от клиента как свободный текст —
   // это фиксированные значения из джобы, а recordTgSessionFailure дополнительно прогоняет их через
@@ -220,6 +261,7 @@ function createIntegrationsRepo({ pool, enabled, ensureExternalSource, transacti
   return {
     saveIgAccount, getIgAccount, updateIgToken, deleteIgAccount, listIgAccounts,
     saveTgSession, getTgSession, deleteTgSession, listTgSessions, rotateTgSessionCiphertext,
+    listTgQrCollectCandidates,
     recordTgSessionAttempt, recordTgSessionSuccess, recordTgSessionFailure,
   };
 }
