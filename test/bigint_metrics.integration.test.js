@@ -144,11 +144,11 @@ test('Instagram writers round-trip >INT4; ig reads return JS numbers, zero prese
   assert.strictEqual(typeof mm.media_id, 'string', 'media_id stays a TEXT identifier');
 
   const taggedId = `tag.${nonce}`;
-  await db.upsertIgTags([{
+  await db.upsertIgTags(ch.id, [{
     id: taggedId, username: 'fan', caption: 'tagged', like_count: BIG, comments_count: BIG + 1,
     timestamp: new Date().toISOString(),
   }]);
-  const tag = (await db.getIgTags(500)).find((x) => x.id === taggedId);
+  const tag = (await db.listIgTagsInternal(ch.id, 500)).find((x) => x.id === taggedId);
   assert.ok(tag, 'ig_tags row present');
   assert.strictEqual(tag.like_count, BIG);
   assert.strictEqual(tag.comments_count, BIG + 1);
