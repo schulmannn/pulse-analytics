@@ -146,6 +146,21 @@ class _ThumbClient:
         return self.payloads.get(msg.id)
 
 
+class _IndexedThumbClient:
+    """Telethon-like thumb candidates keyed by (message id, thumb index)."""
+
+    def __init__(self, payloads):
+        self.payloads = payloads
+        self.calls = []
+
+    async def download_media(self, msg, thumb=None, file=None):
+        self.calls.append((msg.id, thumb))
+        value = self.payloads.get((msg.id, thumb))
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+
 class _Entity:
     def __init__(self, id, access_hash=None):
         self.id = id
@@ -185,6 +200,46 @@ class CleanMediaIdsTests(unittest.TestCase):
         self.assertEqual(svc._clean_media_ids({"1": 1}), [])
 
 
+class DownloadThumbFallbackTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.svc = _load_service()
+
+    def test_non_jpeg_first_candidate_falls_through_to_next_jpeg(self):
+        jpeg = b'\xff\xd8\x01\x02'
+        client = _IndexedThumbClient({(7, 1): b'RIFF-webp', (7, 0): jpeg})
+        out = run(self.svc._download_thumb_bytes(
+            client, _MediaMessage(7, photo=True), 'sm', accept=self.svc._is_persistable_jpeg_cover))
+        self.assertEqual(out, jpeg)
+        self.assertEqual(client.calls, [(7, 1), (7, 0)])
+
+    def test_oversized_first_candidate_falls_through_to_bounded_jpeg(self):
+        svc = self.svc
+        jpeg = b'\xff\xd8\x03\x04'
+        oversized = b'\xff\xd8' + b'x' * svc._THUMB_MAX_BYTES
+        client = _IndexedThumbClient({(8, 1): oversized, (8, 0): jpeg})
+        out = run(svc._download_thumb_bytes(
+            client, _MediaMessage(8, video=True), 'sm', accept=svc._is_persistable_jpeg_cover))
+        self.assertEqual(out, jpeg)
+        self.assertEqual(client.calls, [(8, 1), (8, 0)])
+
+    def test_all_invalid_candidates_return_none(self):
+        svc = self.svc
+        client = _IndexedThumbClient({(9, 1): b'not-jpeg', (9, 0): b'also-bad'})
+        out = run(svc._download_thumb_bytes(
+            client, _MediaMessage(9, photo=True), 'sm', accept=svc._is_persistable_jpeg_cover))
+        self.assertIsNone(out)
+        self.assertEqual(client.calls, [(9, 1), (9, 0)])
+
+    def test_floodwait_still_propagates_without_trying_another_index(self):
+        svc = self.svc
+        client = _IndexedThumbClient({(10, 1): FloodWaitError(seconds=30), (10, 0): b'\xff\xd8\x01\x02'})
+        with self.assertRaises(FloodWaitError):
+            run(svc._download_thumb_bytes(
+                client, _MediaMessage(10, video=True), 'sm', accept=svc._is_persistable_jpeg_cover))
+        self.assertEqual(client.calls, [(10, 1)])
+
+
 class CollectMediaByIdTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -208,6 +263,16 @@ class CollectMediaByIdTests(unittest.TestCase):
             {'post_id': '20', 'size': 'sm', 'jpeg_b64': base64.b64encode(jpeg_v).decode('ascii')},
         ])
         self.assertNotIn(40, [c[0] for c in client.calls], 'non-media id is never downloaded')
+
+    def test_album_candidate_fallback_produces_a_persistable_cover(self):
+        svc = self.svc
+        jpeg = b'\xff\xd8\xaa\xbb'
+        client = _IndexedThumbClient({(1312, 1): b'RIFF-webp', (1312, 0): jpeg})
+        out = run(svc._collect_media_by_id(client, [_MediaMessage(1312, video=True)], budget_s=5))
+        self.assertEqual(out, [{
+            'post_id': '1312', 'size': 'sm', 'jpeg_b64': base64.b64encode(jpeg).decode('ascii'),
+        }])
+        self.assertEqual(client.calls, [(1312, 1), (1312, 0)])
 
     def test_post_id_is_a_decimal_string_for_bigint_safety(self):
         svc = self.svc

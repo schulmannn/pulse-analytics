@@ -1220,13 +1220,13 @@ test('repairCentralMedia: deployment-skew transient failure fails the bucket, th
     assert.deepEqual(first, { attempted: false, requested: 0, filled: 0 }, 'never rejects; outer catch returns empty stats');
     assert.deepEqual(calls.persistedMedia, [], 'a transient failure persists nothing');
     assert.equal(jobs.size, 2, 'the generation-aware key bypasses the poisoned legacy bucket');
-    assert.equal(jobs.get(`50:4:recent-v1:${bucket}`), 'failed', 'the new six-hour bucket is left FAILED → retryable, not completed');
+    assert.equal(jobs.get(`50:4:recent-v2:${bucket}`), 'failed', 'the new six-hour bucket is left FAILED → retryable, not completed');
 
     // Next 15-min recovery tick, SAME six-hour bucket: the NEW mtproto now answers 200.
     delete responses['/qr/media'];
     const second = await job.repairCentralMedia();
     assert.equal(jobs.size, 2, 'the retry reclaims the SAME generation-aware key, it does not open a new one');
-    assert.equal(jobs.get(`50:4:recent-v1:${bucket}`), 'succeeded', 'the retry completes the SAME bucket');
+    assert.equal(jobs.get(`50:4:recent-v2:${bucket}`), 'succeeded', 'the retry completes the SAME bucket');
     assert.deepEqual(calls.persistedMedia, [{ channelId: 50, rows: [{ post_id: '1306', size: 'sm', jpeg_b64: '/9j/2Q==' }] }],
       'the covers missed by the skewed pass are filled on the retry');
     assert.deepEqual(second, { attempted: true, requested: 2, filled: 1 });
