@@ -16,6 +16,7 @@ const { createChannelsRepo } = require('./repos/channelsRepo');
 const { createSourcesRepo } = require('./repos/sourcesRepo');
 const { createIntegrationsRepo } = require('./repos/integrationsRepo');
 const { createMentionSettingsRepo } = require('./repos/mentionSettingsRepo');
+const { createAuditRepo } = require('./repos/auditRepo');
 const { createGdprService } = require('./services/gdprService');
 // DB core (P2 db/core): пул / Railway-SSL / enabled / ping / close + классификация недоступности
 // живут в server/db/*. db.js их импортирует и ре-экспортит — публичный `db.*` API не меняется.
@@ -150,29 +151,7 @@ function createDatabase(config, overrides = {}) {
 
   // getCollectorStatus (connection-status; writes живут в ingest выше) → server/repos/integrationsRepo.
 
-  async function recordAuditEvent({
-    uid = null,
-    channel_id = null,
-    action,
-    request_id = null,
-    ip_hash = null,
-    metadata = {},
-  }) {
-    if (!enabled || !action) return false;
-    await pool.query(
-      `INSERT INTO audit_events (uid, channel_id, action, request_id, ip_hash, metadata)
-     VALUES ($1,$2,$3,$4,$5,$6)`,
-      [
-        uid,
-        channel_id,
-        String(action).slice(0, 100),
-        request_id,
-        ip_hash,
-        metadata,
-      ],
-    );
-    return true;
-  }
+  // recordAuditEvent + ретеншн audit_events → server/repos/auditRepo (createAuditRepo, spread в exports).
 
   /* ── Персональная раскладка дашборда ─────────────────────────────
    Возвращает сохранённый объект prefs (или null, если ничего нет /
@@ -230,6 +209,8 @@ function createDatabase(config, overrides = {}) {
     transaction,
     setChannelTgId: channelsRepo.setChannelTgId,
   });
+  // Audit trail — запись + возрастной ретеншн (auditRepo). Зависит только от pool+enabled.
+  const auditRepo = createAuditRepo({ pool, enabled });
   // GDPR — сервис над пулом+transaction (кросс-доменные erasure/export; спека: GDPR=service).
   const gdprService = createGdprService({ pool, enabled, transaction });
   // Campaign membership performs an atomic lock/count/insert through the shared transaction helper.
@@ -256,7 +237,6 @@ function createDatabase(config, overrides = {}) {
     close,
     isDbUnavailable,
     adoptOwnerChannel,
-    recordAuditEvent,
   };
 
   // Публичный фасад db.* — сборка из доменных частей с ГАРДОМ на коллизии имён (finding 3):
@@ -274,7 +254,8 @@ function createDatabase(config, overrides = {}) {
     reports: reportsRepo, // REPORT_SCHEDULES, listReports, getReport, createReport, updateReport, deleteReport, listDueReports, markReportSent, reserveReportDelivery, clearReportDelivery, listPostsWindow
     campaigns: campaignsRepo, // CAMPAIGN_*, listCampaigns, getCampaign, create/update/deleteCampaign, add/remove/listCampaignPosts, getCampaignSummary
     mentionSettings: mentionSettingsRepo, // getMentionSettingsInternal/ForActor, upsertMentionSettingsForActor
-    jobs: jobsRepo, // claimJob, completeJob, failJob, getJob, runJobOnce
+    jobs: jobsRepo, // claimJob, completeJob, failJob, getJob, runJobOnce, pruneTerminalJobs
+    audit: auditRepo, // recordAuditEvent, pruneAuditEvents
     gdpr: gdprService, // deleteUserAccount, exportUserData (сервис, не repo)
   });
 }

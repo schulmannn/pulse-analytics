@@ -12,6 +12,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createJobsRepo } = require('../server/repos/jobsRepo');
 const { createUsersRepo } = require('../server/repos/usersRepo');
+const { createCollectorRepo } = require('../server/repos/collectorRepo');
+const { createAuditRepo } = require('../server/repos/auditRepo');
 
 // Пул, отдающий rowCount по очереди (потом 0). Запоминает каждый (sql, params) вызов.
 function makePool(rowCounts = []) {
@@ -31,6 +33,7 @@ function makePool(rowCounts = []) {
 const prunes = [
   {
     name: 'pruneTerminalJobs',
+    defaultDays: 30,
     make: (pool, enabled) => createJobsRepo({ pool, enabled }).pruneTerminalJobs,
     // предикат обязан резать только терминальные и никогда queued/running
     assertSql: (sql) => {
@@ -46,12 +49,38 @@ const prunes = [
   },
   {
     name: 'pruneEmailTokens',
+    defaultDays: 30,
     make: (pool, enabled) => createUsersRepo({ pool, enabled, transaction: async (fn) => fn() }).pruneEmailTokens,
     assertSql: (sql) => {
       assert.match(sql, /used_at IS NOT NULL OR expires_at <= now\(\)/);
       assert.match(sql, /created_at < now\(\)/);
       assert.match(sql, /ORDER BY created_at, id/);
       assert.match(sql, /FOR UPDATE SKIP LOCKED/, 'maintenance skips tokens used by an auth flow');
+    },
+  },
+  {
+    name: 'pruneIngestReceipts',
+    defaultDays: 90,
+    make: (pool, enabled) =>
+      createCollectorRepo({ pool, enabled, transaction: async (fn) => fn(), setChannelTgId: async () => {} }).pruneIngestReceipts,
+    assertSql: (sql) => {
+      // Возрастной предикат по received_at; удаление по составному PK (channel_id, ingest_id).
+      assert.match(sql, /received_at < now\(\)/);
+      assert.match(sql, /\(channel_id, ingest_id\) IN/);
+      assert.match(sql, /SELECT channel_id, ingest_id FROM ingest_receipts/);
+      assert.match(sql, /ORDER BY received_at, channel_id, ingest_id/);
+      assert.match(sql, /FOR UPDATE SKIP LOCKED/, 'ретеншн никогда не ждёт за активным ingest FOR UPDATE');
+      assert.doesNotMatch(sql, /channel_daily|posts|velocity/, 'канонические tenant-таблицы не трогаются');
+    },
+  },
+  {
+    name: 'pruneAuditEvents',
+    defaultDays: 365,
+    make: (pool, enabled) => createAuditRepo({ pool, enabled }).pruneAuditEvents,
+    assertSql: (sql) => {
+      assert.match(sql, /created_at < now\(\)/);
+      assert.match(sql, /ORDER BY created_at, id/);
+      assert.match(sql, /FOR UPDATE SKIP LOCKED/, 'ретеншн сосуществует с конкурентными INSERT');
     },
   },
 ];
@@ -93,9 +122,9 @@ for (const p of prunes) {
   test(`${p.name}: аргументы клэмпятся к безопасным границам`, async () => {
     const pool = makePool([]);   // 0 удалённых → один батч и стоп
     await p.make(pool, true)({ maxAgeDays: 'nonsense', batchSize: 0, maxBatches: -5 });
-    // maxAgeDays невалиден → дефолт 30; batchSize 0 → минимум 1; maxBatches -5 → минимум 1 (один вызов)
+    // maxAgeDays невалиден → дефолт репо; batchSize 0 → минимум 1; maxBatches -5 → минимум 1 (один вызов)
     assert.equal(pool.calls.length, 1);
-    assert.equal(pool.calls[0].params[0], 30);
+    assert.equal(pool.calls[0].params[0], p.defaultDays);
     assert.equal(pool.calls[0].params[1], 1);
   });
 

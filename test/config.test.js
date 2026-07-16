@@ -137,10 +137,17 @@ test('loadConfig: фоновый сбор — дефолты и env-переоп
   assert.equal(d.runtime.jobsRetentionDays, 30);
   assert.equal(d.runtime.emailTokensRetentionDays, 30);
   assert.equal(d.runtime.collectionRecoveryInitialDelayMs, 30000);
+  // Продуктовый ретеншн: флаги OFF по умолчанию (dark deployment), горизонты 90/365.
+  assert.equal(d.runtime.ingestReceiptsRetentionEnabled, false);
+  assert.equal(d.runtime.ingestReceiptsRetentionDays, 90);
+  assert.equal(d.runtime.auditEventsRetentionEnabled, false);
+  assert.equal(d.runtime.auditEventsRetentionDays, 365);
   assert.equal(d.runtime.collectionRecoveryIntervalMs, 900000);
   const c = loadConfig({
     PGPOOL_BACKGROUND_MAX: '3', IG_ACCOUNTS_PER_PASS: '10', TG_QR_CHANNELS_PER_PASS: '50',
     JOBS_RETENTION_DAYS: '45', EMAIL_TOKENS_RETENTION_DAYS: '60',
+    INGEST_RECEIPTS_RETENTION_ENABLED: '1', INGEST_RECEIPTS_RETENTION_DAYS: '120',
+    AUDIT_EVENTS_RETENTION_ENABLED: '1', AUDIT_EVENTS_RETENTION_DAYS: '400',
     COLLECTION_RECOVERY_INITIAL_DELAY_MS: '5000', COLLECTION_RECOVERY_INTERVAL_MS: '600000',
   });
   assert.equal(c.database.backgroundPoolMax, 3);
@@ -148,6 +155,13 @@ test('loadConfig: фоновый сбор — дефолты и env-переоп
   assert.equal(c.runtime.tgQrChannelsPerPass, 50);
   assert.equal(c.runtime.jobsRetentionDays, 45);
   assert.equal(c.runtime.emailTokensRetentionDays, 60);
+  assert.equal(c.runtime.ingestReceiptsRetentionEnabled, true);
+  assert.equal(c.runtime.ingestReceiptsRetentionDays, 120);
+  assert.equal(c.runtime.auditEventsRetentionEnabled, true);
+  assert.equal(c.runtime.auditEventsRetentionDays, 400);
+  // Флаг строго '1' (как capacityRollups): любое другое значение остаётся OFF.
+  assert.equal(loadConfig({ INGEST_RECEIPTS_RETENTION_ENABLED: 'true' }).runtime.ingestReceiptsRetentionEnabled, false);
+  assert.equal(loadConfig({ AUDIT_EVENTS_RETENTION_ENABLED: 'yes' }).runtime.auditEventsRetentionEnabled, false);
   assert.equal(c.runtime.collectionRecoveryInitialDelayMs, 5000);
   assert.equal(c.runtime.collectionRecoveryIntervalMs, 600000);
 });
@@ -185,6 +199,21 @@ test('validateConfig: патологические 0/отрицательные 
   assert.ok(fractionalRetention.some((e) => e.field === 'runtime.jobsRetentionDays'), 'дробный retention отклонён');
   const excessiveRetention = validateConfig(loadConfig({ EMAIL_TOKENS_RETENTION_DAYS: '3651' }));
   assert.ok(excessiveRetention.some((e) => e.field === 'runtime.emailTokensRetentionDays'), 'retention выше 10 лет отклонён');
+  // Новые продуктовые горизонты валидируются как прочие retention-поля (положительное целое, ≤ 3650).
+  const badIngest = validateConfig(loadConfig({ INGEST_RECEIPTS_RETENTION_DAYS: '0' }));
+  assert.ok(badIngest.some((e) => e.field === 'runtime.ingestReceiptsRetentionDays'), 'нулевой ingest retention отклонён');
+  const negAudit = validateConfig(loadConfig({ AUDIT_EVENTS_RETENTION_DAYS: '-1' }));
+  assert.ok(negAudit.some((e) => e.field === 'runtime.auditEventsRetentionDays'), 'отрицательный audit retention отклонён');
+  const fracIngest = validateConfig(loadConfig({ INGEST_RECEIPTS_RETENTION_DAYS: '90.5' }));
+  assert.ok(fracIngest.some((e) => e.field === 'runtime.ingestReceiptsRetentionDays'), 'дробный ingest retention отклонён');
+  const hugeAudit = validateConfig(loadConfig({ AUDIT_EVENTS_RETENTION_DAYS: '3651' }));
+  assert.ok(hugeAudit.some((e) => e.field === 'runtime.auditEventsRetentionDays'), 'audit retention выше 10 лет отклонён');
+  // Дефолты (90/365) и включённые флаги без переопределения горизонта — валидны.
+  assert.deepEqual(
+    validateConfig(loadConfig({ INGEST_RECEIPTS_RETENTION_ENABLED: '1', AUDIT_EVENTS_RETENTION_ENABLED: '1' }))
+      .filter((e) => e.field.endsWith('RetentionDays') && /ingest|audit/i.test(e.field)),
+    [],
+  );
   const tooFast = validateConfig(loadConfig({
     COLLECTION_RECOVERY_INITIAL_DELAY_MS: '999',
     COLLECTION_RECOVERY_INTERVAL_MS: '59999',

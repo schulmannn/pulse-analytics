@@ -15,6 +15,15 @@
 
 const { toMetricInt: num } = require('../lib/metricNumber');
 
+// Ретеншн ingest_receipts (см. pruneIngestReceipts). Продуктовый горизонт — 90 дней по received_at;
+// размер батча и число батчей за прогон консервативны (≤ 20k строк/прогон — остаток добирают
+// следующие прогоны). Прунинг ВЫКЛЮЧЕН по умолчанию: его зовёт maintenance только под явным флагом.
+const INGEST_RECEIPTS_RETENTION_DAYS_DEFAULT = 90;
+const INGEST_RECEIPTS_PRUNE_BATCH_DEFAULT = 500;
+const INGEST_RECEIPTS_PRUNE_MAX_BATCHES_DEFAULT = 40;
+const clampInt = (v, def, min, max) =>
+  Number.isFinite(+v) ? Math.min(max, Math.max(min, Math.round(+v))) : def;
+
 function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
   /* Pure transform: stats graphs → array of daily rows. Exported for testing.
      Builds the union of all days present across the daily series, so re-running
@@ -445,6 +454,49 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
     return rowCount;
   }
 
+  /* ── Ретеншн: ingest_receipts старше горизонта (по received_at) ────────────────────────────────
+     Модель — pruneTerminalJobs/pruneEmailTokens. ingest_receipts append-only (одна строка на
+     channel_id+ingest_id, идемпотентный приём collector'а): без прунинга растёт безгранично, а
+     продуктовая политика хранит квитанции 90 дней. Режем строго по возрасту (received_at, момент
+     последнего приёма/пере-приёма) — status-предиката нет, любая достаточно старая квитанция
+     кандидат. Маленькие упорядоченные (received_at, channel_id, ingest_id) батчи опираются на
+     ingest_receipts_prune_idx (025) → forward index range scan, стабильный план по мере роста.
+     `FOR UPDATE SKIP LOCKED` КРИТИЧЕН: активный ingest берёт `FOR UPDATE` на свою квитанцию внутри
+     транзакции — прунинг НИКОГДА не ждёт за ним (занятую строку доберёт следующий прогон), поэтому
+     ночной ретеншн не тормозит живой приём. Удаление по составному PK (channel_id, ingest_id).
+     Повторяемо/идемпотентно: capped-остаток добирает следующий прогон. Структурные счётчики
+     { deleted, batches, capped }. DB-off → no-op. Клэмпы 1..3650 / 1..10000 / 1..1000. */
+  async function pruneIngestReceipts({
+    maxAgeDays = INGEST_RECEIPTS_RETENTION_DAYS_DEFAULT,
+    batchSize = INGEST_RECEIPTS_PRUNE_BATCH_DEFAULT,
+    maxBatches = INGEST_RECEIPTS_PRUNE_MAX_BATCHES_DEFAULT,
+  } = {}) {
+    if (!enabled) return { deleted: 0, batches: 0, capped: false };
+    const days = clampInt(maxAgeDays, INGEST_RECEIPTS_RETENTION_DAYS_DEFAULT, 1, 3650);
+    const limit = clampInt(batchSize, INGEST_RECEIPTS_PRUNE_BATCH_DEFAULT, 1, 10000);
+    const caps = clampInt(maxBatches, INGEST_RECEIPTS_PRUNE_MAX_BATCHES_DEFAULT, 1, 1000);
+    let deleted = 0;
+    let batches = 0;
+    let capped = false;
+    for (;;) {
+      if (batches >= caps) { capped = true; break; }
+      const { rowCount } = await pool.query(
+        `DELETE FROM ingest_receipts
+          WHERE (channel_id, ingest_id) IN (
+           SELECT channel_id, ingest_id FROM ingest_receipts
+            WHERE received_at < now() - make_interval(days => $1)
+            ORDER BY received_at, channel_id, ingest_id
+            LIMIT $2
+            FOR UPDATE SKIP LOCKED
+          )`,
+        [days, limit]);
+      batches += 1;
+      deleted += rowCount;
+      if (rowCount < limit) break;   // хвост исчерпан
+    }
+    return { deleted, batches, capped };
+  }
+
   // ── Monthly rollup of channel_daily (capacity; 014_capacity_rollups.sql) ──────────────────────────
   // Idempotent upsert that folds the last `months` calendar months of channel_daily into
   // channel_monthly (one row per channel×month), so a long-range history read can serve ~24 monthly
@@ -511,7 +563,7 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
     saveSnapshot, saveVelocity,
     ingestCollectorPayload, persistCentralDaily, persistTgBundleTx,
     upsertIgDaily, upsertIgMediaDaily,
-    saveRawSnapshot, pruneRawSnapshots, pruneIgMediaDaily, rollupChannelMonthly,
+    saveRawSnapshot, pruneRawSnapshots, pruneIgMediaDaily, pruneIngestReceipts, rollupChannelMonthly,
   };
 }
 

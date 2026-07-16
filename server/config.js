@@ -123,6 +123,15 @@ function loadConfig(env = process.env) {
       // токены не трогаются в принципе (предикат, не горизонт).
       jobsRetentionDays: Number(env.JOBS_RETENTION_DAYS || 30),
       emailTokensRetentionDays: Number(env.EMAIL_TOKENS_RETENTION_DAYS || 30),
+      // Продуктовый ретеншн (ночная maintenance): ingest_receipts по received_at и audit_events по
+      // created_at. Каждый — независимый boolean-флаг (строго '1', как capacityRollups), ВЫКЛЮЧЕН
+      // по умолчанию (dark deployment: включит Codex после проверки на проде). Горизонты дефолтят
+      // 90/365 и валидируются как прочие retention-поля (положительное целое, ≤ 3650). Флаг OFF =
+      // ноль вызовов прунинга (не поддельно высокий TTL); канонические tenant-данные age-TTL не имеют.
+      ingestReceiptsRetentionEnabled: env.INGEST_RECEIPTS_RETENTION_ENABLED === '1',
+      ingestReceiptsRetentionDays: Number(env.INGEST_RECEIPTS_RETENTION_DAYS || 90),
+      auditEventsRetentionEnabled: env.AUDIT_EVENTS_RETENTION_ENABLED === '1',
+      auditEventsRetentionDays: Number(env.AUDIT_EVENTS_RETENTION_DAYS || 365),
       // Внутрипроцессный recovery-бегунок: задержка первого прохода после listen и период повторов.
       collectionRecoveryInitialDelayMs: Number(env.COLLECTION_RECOVERY_INITIAL_DELAY_MS || 30000),
       collectionRecoveryIntervalMs: Number(env.COLLECTION_RECOVERY_INTERVAL_MS || 900000),
@@ -180,6 +189,8 @@ function validateConfig(config) {
   for (const [field, value] of [
     ['runtime.jobsRetentionDays', config.runtime.jobsRetentionDays],
     ['runtime.emailTokensRetentionDays', config.runtime.emailTokensRetentionDays],
+    ['runtime.ingestReceiptsRetentionDays', config.runtime.ingestReceiptsRetentionDays],
+    ['runtime.auditEventsRetentionDays', config.runtime.auditEventsRetentionDays],
   ]) {
     if (Number.isFinite(value) && value > 3650) add(field, `${field} не должен превышать 3650 дней.`);
   }
@@ -193,6 +204,8 @@ function validateConfig(config) {
     // Горизонты ретеншна: 0/отрицательные снесли бы свежие строки → положительные целые.
     ['runtime.jobsRetentionDays', config.runtime.jobsRetentionDays],
     ['runtime.emailTokensRetentionDays', config.runtime.emailTokensRetentionDays],
+    ['runtime.ingestReceiptsRetentionDays', config.runtime.ingestReceiptsRetentionDays],
+    ['runtime.auditEventsRetentionDays', config.runtime.auditEventsRetentionDays],
   ]) {
     if (!Number.isInteger(value) || value <= 0) add(field, `${field} должен быть положительным целым числом.`);
   }
