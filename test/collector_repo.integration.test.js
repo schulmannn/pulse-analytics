@@ -231,12 +231,16 @@ test('listCentralPostsMissingMedia: bounded recent photo/video posts missing an 
   assert.strictEqual(typeof ids[0], 'string', 'post_id returned as a decimal STRING (BIGINT-safe), never a JS Number');
 });
 
-test('listCentralPostsMissingMedia: batch prioritizes fresh gaps and deterministically rotates the archive half', { skip }, async () => {
+test('listCentralPostsMissingMedia: batch prioritizes product-visible top gaps and rotates the archive half', { skip }, async () => {
   const ch = await mkChannel('missmedialim');
   const posts = Array.from({ length: 10 }, (_, index) => ({
     post_id: (index + 1) * 10,
     date_published: new Date(Date.now() - (10 - index) * 864e5).toISOString(),
     media_type: 'photo',
+    views: (index + 1) * 100,
+    reactions: index < 3 ? 1000 - index * 100 : index,
+    forwards: index < 3 ? 100 - index * 10 : 0,
+    replies: index < 3 ? 10 - index : 0,
     hashtags: [],
   }));
   await db.upsertPosts(ch.id, posts);
@@ -245,10 +249,10 @@ test('listCentralPostsMissingMedia: batch prioritizes fresh gaps and determinist
   const repeat = await db.listCentralPostsMissingMedia(ch.id, opts);
   assert.equal(rows.length, 6, 'bounded by LIMIT');
   assert.deepStrictEqual(repeat, rows, 'same durable bucket seed produces the same batch');
-  assert.deepStrictEqual(rows.slice(0, 3).map((row) => row.post_id), ['100', '90', '80'],
-    'newest half is stable and repairs current top-post gaps first');
-  assert.ok(rows.slice(3).every((row) => !['100', '90', '80'].includes(row.post_id)),
-    'archive half is drawn from the remaining gaps instead of duplicating the fresh lane');
+  assert.deepStrictEqual(rows.slice(0, 3).map((row) => row.post_id), ['10', '20', '30'],
+    'product half follows engagement first even when those posts are older and have fewer views');
+  assert.ok(rows.slice(3).every((row) => !['10', '20', '30'].includes(row.post_id)),
+    'archive half is drawn from the remaining gaps instead of duplicating the product-priority lane');
 });
 
 test('upsertIgDaily roundtrip + saveRawSnapshot/pruneRawSnapshots', { skip }, async () => {
