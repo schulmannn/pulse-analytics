@@ -67,10 +67,32 @@ test('managed-central success uses returned counts and skips the global live pas
   assert.equal(out.body.ok, true);
   assert.equal(out.body.channel_daily, 4);
   assert.equal(out.body.posts, 2);
-  assert.equal(out.body.velocity, false);           // managed phase: velocity stays false
+  assert.equal(out.body.velocity, false);           // this managed result carried no velocity → false
   assert.equal(calls.managed.length, 1);
   assert.deepEqual(calls.fetch, []);                // NO global mtprotoFetch
   assert.deepEqual(calls.persistCentral, []);       // NO persistCentralDaily — managed already persisted
+});
+
+test('managed-central success with a persisted velocity reports velocity:true and still skips the global pass', async () => {
+  const { job, calls } = makeJob({
+    managed: () => ({ bundle: { graphs: { available: true } }, channel_daily: 4, posts: 2, velocity: true }),
+  });
+
+  const out = await job.run({ requestId: 'rv', base: 'https://x' });
+
+  assert.equal(out.status, 200);
+  assert.equal(out.body.velocity, true, 'velocity flows through from the managed collect');
+  assert.deepEqual(calls.fetch, [], 'managed success runs NO global /graphs /posts /velocity');
+  assert.deepEqual(calls.persistCentral, []);
+});
+
+test('managed-central success without velocity reports velocity:false (never fabricated)', async () => {
+  const { job } = makeJob({
+    managed: () => ({ bundle: { graphs: { available: true } }, channel_daily: 4, posts: 2, velocity: false }),
+  });
+
+  const out = await job.run({ requestId: 'rv0', base: 'https://x' });
+  assert.equal(out.body.velocity, false);
 });
 
 test('managed-central failure falls back to the unchanged global path (and logs only safe context)', async () => {

@@ -65,14 +65,17 @@ function createDailyIngestJob({
       const outcome = await db.runJobOnce('daily_ingest', `central:${dateKey}`, async () => {
         let persisted = null;
         // Preferred path: collect the central channel through the owner's managed session. On success
-        // we take its persisted counts and expose its graphs to the persistence tail; velocity stays
-        // false for this phase (the velocity route keeps serving the last DB snapshot). Any
-        // decrypt/upstream/auth failure logs only safe context and falls through to the global path.
+        // we take its persisted counts and expose its graphs to the persistence tail. velocity now
+        // reflects reality: collectManagedChannelNow opts into the velocity fanout and persists it in
+        // the same transaction, so managed.velocity is true ONLY when a real available payload was
+        // written (never fabricated). A managed success skips ALL global /graphs /posts /velocity
+        // calls; any decrypt/upstream/auth failure logs only safe context and falls through to the
+        // global path (which recomputes velocity live).
         if (canManaged) {
           try {
             const managed = await collectManagedChannelNow(ownerSession, central, dateKey);
             graphs = (managed && managed.bundle && managed.bundle.graphs) || null;
-            persisted = { channel_daily: managed.channel_daily || 0, posts: managed.posts || 0, velocity: false };
+            persisted = { channel_daily: managed.channel_daily || 0, posts: managed.posts || 0, velocity: !!managed.velocity };
           } catch (e) {
             // No session material or upstream body — only uid/channel/safe code.
             log('warn', 'daily_ingest_managed_fallback', {

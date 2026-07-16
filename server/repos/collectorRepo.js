@@ -268,7 +268,7 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
   // index.js): сбой посередине оставлял канал со свежим снапшотом, но устаревшими daily/posts до
   // следующего идемпотентного прогона. Сырой graphs-снимок сюда НЕ входит — это опциональный
   // архив, вызывающий пишет его best-effort ПОСЛЕ коммита.
-  async function persistTgBundleTx(channelId, { snapshot, dailyRows = [], postRows = [] } = {}) {
+  async function persistTgBundleTx(channelId, { snapshot, dailyRows = [], postRows = [], velocity = null } = {}) {
     if (!enabled || !channelId) throw new Error('database unavailable');
     return transaction(async (client) => {
       await saveSnapshot(channelId, snapshot, client);
@@ -277,7 +277,16 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
       // callers ignored the (undefined) return value, so adding one is backwards-compatible.
       const channel_daily = dailyRows.length ? await upsertChannelDaily(channelId, dailyRows, client) : 0;
       const posts = postRows.length ? await upsertPosts(channelId, postRows, client) : 0;
-      return { channel_daily, posts };
+      // Velocity is threaded ONLY by the managed central collect (include_velocity=true в /qr/collect)
+      // и коммитится в ТОЙ ЖЕ транзакции, что снапшот/daily/posts — как persistCentralDaily. Обычные
+      // QR-каналы velocity не присылают (velocity=null) → ветка пропускается, поведение прежнее.
+      // available:false (нет подходящих постов) НЕ пишется — velocity=true только на реальном payload.
+      let velocityOk = false;
+      if (velocity && velocity.available) {
+        await saveVelocity(channelId, velocity, client);
+        velocityOk = true;
+      }
+      return { channel_daily, posts, velocity: velocityOk };
     });
   }
 
