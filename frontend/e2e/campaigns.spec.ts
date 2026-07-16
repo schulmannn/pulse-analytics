@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { selectPill } from './helpers';
 
 /**
  * Кампании — desktop-сценарий целиком:
@@ -275,15 +276,29 @@ test.describe('Кампании (desktop)', () => {
     // Точный source slice живёт в URL и использует пару network+channel_id.
     const sourceFilter = page.getByTestId('campaign-source-filter');
     await expect(sourceFilter).toBeVisible();
-    await sourceFilter.selectOption('tg:1');
+    await sourceFilter.focus();
+    await page.keyboard.press('Enter');
+    await expect(sourceFilter).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.getByRole('listbox', { name: 'Фильтр по источнику кампании' })).toBeVisible();
+    const selectShot = testInfo.outputPath('campaign-pill-select-dark.png');
+    await page.screenshot({ path: selectShot, fullPage: true });
+    await testInfo.attach('campaign-pill-select-dark', { path: selectShot, contentType: 'image/png' });
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('Enter');
+    await expect(sourceFilter).toHaveAttribute('data-value', 'tg:1');
     await expect(page).toHaveURL(/source=tg%3A1/);
     await expect(page.getByTestId('campaign-posts-table').locator('tbody tr')).toHaveCount(2);
-    await sourceFilter.selectOption('');
+    await selectPill(sourceFilter, { value: '' });
     await expect(page).not.toHaveURL(/source=/);
+    await sourceFilter.focus();
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Escape');
+    await expect(sourceFilter).toHaveAttribute('aria-expanded', 'false');
+    await expect(sourceFilter).toBeFocused();
 
     // ── Фильтр «Контента» по кампании (канонический ?campaign= в URL) ──
     await page.getByRole('link', { name: 'Контент' }).first().click();
-    await page.getByTestId('campaign-filter').selectOption({ label: 'Запуск продукта' });
+    await selectPill(page.getByTestId('campaign-filter'), { label: 'Запуск продукта' });
     await expect(page).toHaveURL(/campaign=\d+/);
     await expect(page.getByText(/2 из 2 публ\. кампании/)).toBeVisible();
     const tableRows = page.locator('table tbody tr');
@@ -292,14 +307,14 @@ test.describe('Кампании (desktop)', () => {
     // за бортом кампании остался 101 — его и не должно быть в отфильтрованном списке.
     await expect(page.getByText('Запуск: пост 1', { exact: true })).toHaveCount(0);
     // Сброс фильтра возвращает полный список.
-    await page.getByTestId('campaign-filter').selectOption({ label: 'Все' });
+    await selectPill(page.getByTestId('campaign-filter'), { label: 'Все' });
     await expect(tableRows).toHaveCount(3);
 
     // Та же каноническая scope в «Аналитика → Форматы»: виджеты считаются только
     // по membership текущего TG-источника. Два выбранных поста дают 80 реакций, 28 репостов и 12 комментариев.
     await page.getByRole('link', { name: 'Аналитика' }).first().click();
     await page.getByRole('tab', { name: 'Форматы' }).click();
-    await page.getByTestId('campaign-filter').selectOption({ label: 'Запуск продукта' });
+    await selectPill(page.getByTestId('campaign-filter'), { label: 'Запуск продукта' });
     await expect(page).toHaveURL(/tab=content.*campaign=\d+|campaign=\d+.*tab=content/);
     await expect(page.getByTestId('analytics-campaign-scope')).toContainText('публикации кампании из этого источника');
     const composition = page.getByRole('heading', { name: 'Состав вовлечённости' }).locator('xpath=ancestor::section[1]');

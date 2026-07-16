@@ -118,6 +118,25 @@ describe('igWindowMetrics', () => {
       tiVals.slice(7).map((ti, i) => (ti / reachVals.slice(7)[i]) * 100),
     );
   });
+
+  it('uses the explicit mock follower level series when demo mode has no DB history', () => {
+    const raw = fixedRaw();
+    const metrics = igWindowMetrics({
+      ...raw,
+      profile: { ...raw.profile, mock: true },
+      insights: { ...raw.insights, mock: true },
+      historyRows: [],
+    });
+
+    expect(metrics.series.followerLevel.map((point) => point.value)).toEqual(followerLevels);
+  });
+
+  it('does not treat live follower_count as canonical history for real accounts', () => {
+    const raw = fixedRaw();
+    const metrics = igWindowMetrics({ ...raw, historyRows: [] });
+
+    expect(metrics.series.followerLevel).toEqual([]);
+  });
 });
 
 /**

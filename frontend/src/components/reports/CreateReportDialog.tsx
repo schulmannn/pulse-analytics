@@ -8,6 +8,7 @@ import type { ReportBlockKey } from '@/lib/reportBlocks';
 import { useFocusTrap } from '@/lib/useFocusTrap';
 import { PERIOD_CHIPS } from '@/panels/report/blocks';
 import type { PeriodDays } from '@/lib/period';
+import { PillSelect } from '@/components/PillSelect';
 import { cn } from '@/lib/utils';
 
 // Create-time templates: a compact set of curated starting points (selectable rows, not cards).
@@ -203,21 +204,23 @@ export function CreateReportDialog({ onClose }: { onClose: () => void }) {
 
           <label className="block text-xs font-medium text-muted-foreground">
             Источник · Telegram
-            <select
-              value={source ?? ''}
-              onChange={(e) => {
+            <PillSelect
+              ariaLabel="Источник · Telegram"
+              className="mt-1 w-full"
+              value={String(source ?? '')}
+              options={
+                channels.length === 0
+                  ? [{ value: '', label: 'Нет доступных каналов', disabled: true }]
+                  : channels.map((c) => ({
+                      value: String(c.id),
+                      label: c.username ? `@${c.username}` : c.title || `Источник #${c.id}`,
+                    }))
+              }
+              onValueChange={(v) => {
                 touchedSource.current = true;
-                setSource(e.target.value ? Number(e.target.value) : null);
+                setSource(v ? Number(v) : null);
               }}
-              className={INPUT_CLASS}
-            >
-              {channels.length === 0 && <option value="">Нет доступных каналов</option>}
-              {channels.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.username ? `@${c.username}` : c.title || `Источник #${c.id}`}
-                </option>
-              ))}
-            </select>
+            />
           </label>
 
           <div>
@@ -242,15 +245,17 @@ export function CreateReportDialog({ onClose }: { onClose: () => void }) {
 
           <label className="block text-xs font-medium text-muted-foreground">
             Доставка на почту
-            <select
+            <PillSelect<ReportSchedule>
+              ariaLabel="Доставка на почту"
+              className="mt-1 w-full"
               value={schedule}
-              onChange={(e) => setSchedule(e.target.value as ReportSchedule)}
-              className={INPUT_CLASS}
-            >
-              <option value="none">Выкл</option>
-              <option value="weekly">Раз в неделю — письмо со ссылкой</option>
-              <option value="monthly">Раз в месяц — письмо со ссылкой</option>
-            </select>
+              options={[
+                { value: 'none', label: 'Выкл' },
+                { value: 'weekly', label: 'Раз в неделю — письмо со ссылкой' },
+                { value: 'monthly', label: 'Раз в месяц — письмо со ссылкой' },
+              ]}
+              onValueChange={(v) => setSchedule(v)}
+            />
           </label>
 
           {error && (

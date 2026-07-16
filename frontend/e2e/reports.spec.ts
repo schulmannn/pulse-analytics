@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { selectPill } from './helpers';
 
 /**
  * Отчёты — desktop-редизайн + mobile-инвариант. Демо-режим блокирует записи, поэтому поднимаем
@@ -200,7 +201,7 @@ test.describe('Отчёты — desktop', () => {
     await dialog.getByLabel('Название').fill('Новый тест');
     await dialog.getByRole('radio', { name: /Пустой/ }).click();
     await dialog.getByRole('button', { name: '90д' }).click();
-    await dialog.getByLabel('Доставка на почту').selectOption('weekly');
+    await selectPill(dialog.getByLabel('Доставка на почту'), { value: 'weekly' });
     await dialog.getByRole('button', { name: 'Создать отчёт' }).click();
 
     // Переход в новый отчёт.
@@ -285,7 +286,7 @@ test.describe('Отчёты — desktop', () => {
     await expect(page.getByRole('button', { name: 'Редактировать' })).toBeVisible();
 
     await page.getByRole('button', { name: 'Редактировать' }).click();
-    await expect(page.getByLabel('Источник · Telegram')).toHaveValue('1');
+    await expect(page.getByLabel('Источник · Telegram')).toHaveAttribute('data-value', '1');
     await page.getByRole('button', { name: 'Сохранить' }).click();
 
     await expect(page.getByRole('button', { name: 'Редактировать' })).toBeVisible();

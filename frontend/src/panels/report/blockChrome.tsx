@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { Icon } from '@/components/nav-icons';
+import { PillSelect } from '@/components/PillSelect';
 
 /** Lucide-style pencil (inline — the nav icon set stays lean). */
 export function PencilGlyph({ className }: { className?: string }) {
@@ -84,7 +85,7 @@ export function BlockControls({ children }: { children: ReactNode }) {
   return <div className="flex flex-wrap items-center gap-2 print:hidden">{children}</div>;
 }
 
-/** Native select styled as a hairline control — accessible + cheap. */
+/** Hairline control backed by PillSelect — accessible + cheap, same external API. */
 export function MiniSelect({
   value,
   options,
@@ -96,20 +97,7 @@ export function MiniSelect({
   onChange: (v: string) => void;
   ariaLabel: string;
 }) {
-  return (
-    <select
-      aria-label={ariaLabel}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="rounded border border-border bg-background px-2 py-1 text-xs font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-    >
-      {options.map((o) => (
-        <option key={o.value} value={o.value}>
-          {o.label}
-        </option>
-      ))}
-    </select>
-  );
+  return <PillSelect value={value} options={options} onValueChange={onChange} ariaLabel={ariaLabel} />;
 }
 
 /** Two/three-way segmented toggle (line ↔ bar). */

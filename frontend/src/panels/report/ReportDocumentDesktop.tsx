@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useDeleteReport, useUpdateReport } from '@/api/queries';
 import type { Report } from '@/api/schemas';
 import { ErrorState } from '@/components/ErrorState';
+import { PillSelect } from '@/components/PillSelect';
 import { Skeleton } from '@/components/ui/skeleton';
 import { fmt } from '@/lib/format';
 import type { PeriodDays } from '@/lib/period';
@@ -167,37 +168,39 @@ export function ReportDocumentDesktop({
               </div>
             </label>
 
-            <label className="text-xs font-medium text-muted-foreground">
+            <div className="text-xs font-medium text-muted-foreground">
               <span className="mb-1 block">Источник · Telegram</span>
-              <select
-                value={draft.source ?? ''}
-                onChange={(e) => pickSource(e.target.value ? Number(e.target.value) : null)}
-                className="h-8 min-w-52 rounded border border-border bg-background px-2.5 text-xs font-medium text-foreground outline-none focus:ring-1 focus:ring-primary"
-              >
-                <option value="" disabled>Выберите источник</option>
-                {draft.source != null && !sourceValid && (
-                  <option value={draft.source} disabled>Недоступный Telegram-источник #{draft.source}</option>
-                )}
-                {telegramChannels.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.username ? `@${c.username}` : c.title || `Источник #${c.id}`}
-                  </option>
-                ))}
-              </select>
-            </label>
+              <PillSelect
+                value={draft.source != null ? String(draft.source) : ''}
+                onValueChange={(v) => pickSource(v ? Number(v) : null)}
+                ariaLabel="Источник · Telegram"
+                className="min-w-52"
+                options={[
+                  { value: '', label: 'Выберите источник', disabled: true },
+                  ...(draft.source != null && !sourceValid
+                    ? [{ value: String(draft.source), label: `Недоступный Telegram-источник #${draft.source}`, disabled: true }]
+                    : []),
+                  ...telegramChannels.map((c) => ({
+                    value: String(c.id),
+                    label: c.username ? `@${c.username}` : c.title || `Источник #${c.id}`,
+                  })),
+                ]}
+              />
+            </div>
 
-            <label className="text-xs font-medium text-muted-foreground">
+            <div className="text-xs font-medium text-muted-foreground">
               <span className="mb-1 block">Доставка на почту</span>
-              <select
+              <PillSelect<ReportSchedule>
                 value={draft.schedule}
-                onChange={(e) => setDraft((x) => ({ ...x, schedule: e.target.value as ReportSchedule }))}
-                className="h-8 rounded border border-border bg-background px-2.5 text-xs font-medium text-foreground outline-none focus:ring-1 focus:ring-primary"
-              >
-                <option value="none">Выкл</option>
-                <option value="weekly">Раз в неделю</option>
-                <option value="monthly">Раз в месяц</option>
-              </select>
-            </label>
+                onValueChange={(v) => setDraft((x) => ({ ...x, schedule: v }))}
+                ariaLabel="Доставка на почту"
+                options={[
+                  { value: 'none', label: 'Выкл' },
+                  { value: 'weekly', label: 'Раз в неделю' },
+                  { value: 'monthly', label: 'Раз в месяц' },
+                ]}
+              />
+            </div>
           </div>
 
           {draft.schedule !== 'none' && (

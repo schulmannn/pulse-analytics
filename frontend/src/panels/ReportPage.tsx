@@ -21,6 +21,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { DeltaPill } from '@/components/DeltaPill';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
+import { PillSelect } from '@/components/PillSelect';
 import { ChartSection } from '@/components/instagram/shared';
 import { NarrativeWeekBody } from '@/panels/NarrativeWeek';
 import { Insights } from '@/panels/Insights';
@@ -162,14 +163,14 @@ function ReportDocumentBody({
   // Schedule select — optimistic: local state mirrors report.schedule so the control never
   // snaps back mid-flight; the server echo reconciles it on success, an error reverts it
   // (the «Не сохранилось» hint below covers the failure).
-  const [schedule, setSchedule] = useState(report.schedule);
+  const [schedule, setSchedule] = useState<ReportSchedule>(report.schedule as ReportSchedule);
   const pickSchedule = (next: ReportSchedule) => {
     const prev = schedule;
     setSchedule(next);
     updateReport.mutate(
       { schedule: next },
       {
-        onSuccess: (data) => setSchedule(data.report.schedule),
+        onSuccess: (data) => setSchedule(data.report.schedule as ReportSchedule),
         onError: () => setSchedule(prev),
       },
     );
@@ -638,16 +639,17 @@ function ReportDocumentBody({
           <label htmlFor="report-schedule" className="text-xs text-muted-foreground">
             Выгрузка на почту
           </label>
-          <select
+          <PillSelect<ReportSchedule>
             id="report-schedule"
             value={schedule}
-            onChange={(e) => pickSchedule(e.target.value as ReportSchedule)}
-            className="rounded border border-border bg-background px-2 py-1 text-xs font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-          >
-            <option value="none">Выкл</option>
-            <option value="weekly">Раз в неделю</option>
-            <option value="monthly">Раз в месяц</option>
-          </select>
+            onValueChange={pickSchedule}
+            ariaLabel="Выгрузка на почту"
+            options={[
+              { value: 'none', label: 'Выкл' },
+              { value: 'weekly', label: 'Раз в неделю' },
+              { value: 'monthly', label: 'Раз в месяц' },
+            ]}
+          />
           <span className="text-2xs text-muted-foreground">письмо со ссылкой на отчёт</span>
           {updateReport.isError && (
             <span className="text-2xs text-ember">

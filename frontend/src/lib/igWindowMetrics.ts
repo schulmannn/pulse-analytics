@@ -199,6 +199,11 @@ const scalarFromPair = (pair: WindowPair): IgWindowScalar => ({
 
 export function igWindowMetrics(raw: IgWindowRaw): IgWindowMetrics {
   const { profile, insights, historyRows, since, until } = raw;
+  const canonicalFollowerLevel = followerLevelSeries(historyRows, profile?.followers_count ?? null);
+  // Demo mode intentionally disables DB history queries. Its fixture exposes an explicit mock
+  // follower_count level series so the sample UI can still demonstrate the audience chart; real
+  // accounts never take this fallback and remain anchored/reconstructed from ig_daily.
+  const mockFollowerLevel = profile?.mock || insights?.mock ? metricSeries(insights, 'follower_count') : [];
   const series: IgWindowSeries = {
     reach: longerSeries(metricSeries(insights, 'reach'), histSeries(historyRows, 'reach')),
     // Deduplicated windowed reach (prev+cur synthetic points from the backend total_value call).
@@ -211,7 +216,7 @@ export function igWindowMetrics(raw: IgWindowRaw): IgWindowMetrics {
     // Level series, not gross follows. Kept for existing daily follower charts.
     follower: longerSeries(metricSeries(insights, 'follower_count'), histSeries(historyRows, 'followers')),
     // Настоящий уровень базы (как ТГ «Подписчики»): реальные якоря + реконструкция по net.
-    followerLevel: followerLevelSeries(historyRows, profile?.followers_count ?? null),
+    followerLevel: canonicalFollowerLevel.length >= 2 ? canonicalFollowerLevel : mockFollowerLevel,
     saves: longerSeries(metricSeries(insights, 'saves'), histSeries(historyRows, 'saves')),
     likes: longerSeries(metricSeries(insights, 'likes'), histSeries(historyRows, 'likes')),
     comments: longerSeries(metricSeries(insights, 'comments'), histSeries(historyRows, 'comments')),

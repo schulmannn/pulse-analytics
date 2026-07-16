@@ -2,6 +2,7 @@ import { useCampaigns } from '@/api/queries';
 import { useCampaignFilter, useResetMissingCampaign } from '@/lib/campaignFilter';
 import { isDemoMode } from '@/lib/demo';
 import { useSelectedChannel } from '@/lib/channel-context';
+import { PillSelect } from '@/components/PillSelect';
 
 /**
  * Компактный фильтр кампании для списков контента. Канонический стейт — URL `?campaign=`
@@ -20,22 +21,20 @@ export function CampaignFilterControl() {
   if (!isPending && (campaigns?.length ?? 0) === 0 && campaignId == null) return null;
 
   return (
-    <label className="flex items-center gap-2 text-xs text-muted-foreground">
+    <div className="flex items-center gap-2 text-xs text-muted-foreground">
       <span className="shrink-0">Кампания</span>
-      <select
-        value={campaignId ?? ''}
+      <PillSelect
+        value={campaignId != null ? String(campaignId) : ''}
         disabled={isPending}
-        onChange={(e) => setCampaignId(e.target.value ? Number(e.target.value) : null)}
-        className="max-w-[180px] rounded border border-border bg-background px-2 py-1 text-xs text-foreground outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
-        data-testid="campaign-filter"
-      >
-        <option value="">Все</option>
-        {(campaigns ?? []).map((c) => (
-          <option key={c.id} value={c.id}>
-            {c.name}
-          </option>
-        ))}
-      </select>
-    </label>
+        onValueChange={(v) => setCampaignId(v ? Number(v) : null)}
+        ariaLabel="Фильтр по кампании"
+        testId="campaign-filter"
+        className="max-w-[180px]"
+        options={[
+          { value: '', label: 'Все' },
+          ...(campaigns ?? []).map((c) => ({ value: String(c.id), label: c.name })),
+        ]}
+      />
+    </div>
   );
 }

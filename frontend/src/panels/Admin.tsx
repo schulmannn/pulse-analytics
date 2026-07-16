@@ -1,6 +1,7 @@
-import { useEffect, useState, type ChangeEvent } from 'react';
+import { useEffect, useState } from 'react';
 import { useAdminDeleteUser, useAdminUsers, useUpdateUser } from '@/api/queries';
 import { ErrorState } from '@/components/ErrorState';
+import { PillSelect } from '@/components/PillSelect';
 import { fmt } from '@/lib/format';
 import { Skeleton } from '@/components/ui/skeleton';
 
@@ -56,8 +57,8 @@ function UserRowCard({ user, availableRoles, availableStatuses, isMe }: UserRowC
   const updateUserMutation = useUpdateUser(user.id);
   const isDisabled = isMe || updateUserMutation.isPending;
 
-  const handleRoleChange = (e: ChangeEvent<HTMLSelectElement>) => updateUserMutation.mutate({ role: e.target.value });
-  const handleStatusChange = (e: ChangeEvent<HTMLSelectElement>) => updateUserMutation.mutate({ status: e.target.value });
+  const handleRoleChange = (role: string) => updateUserMutation.mutate({ role });
+  const handleStatusChange = (status: string) => updateUserMutation.mutate({ status });
 
   return (
     <div className={isMe ? 'bg-muted/30' : 'bg-background'}>
@@ -78,30 +79,26 @@ function UserRowCard({ user, availableRoles, availableStatuses, isMe }: UserRowC
         </div>
 
         <div className="flex shrink-0 items-center gap-3 self-end md:self-auto">
-          <select
+          <PillSelect
             value={user.role ?? ''}
-            onChange={handleRoleChange}
+            options={[
+              { value: '', label: 'Роль', disabled: true },
+              ...availableRoles.map((r) => ({ value: r, label: ROLE_LABELS[r] || r })),
+            ]}
+            onValueChange={handleRoleChange}
             disabled={isDisabled}
-            aria-label={`Роль ${user.email || `#${user.id}`}`}
-            className="rounded border border-border bg-background px-2 py-1.5 text-xs font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <option value="" disabled>Роль</option>
-            {availableRoles.map((r) => (
-              <option key={r} value={r}>{ROLE_LABELS[r] || r}</option>
-            ))}
-          </select>
-          <select
+            ariaLabel={`Роль ${user.email || `#${user.id}`}`}
+          />
+          <PillSelect
             value={user.status ?? ''}
-            onChange={handleStatusChange}
+            options={[
+              { value: '', label: 'Статус', disabled: true },
+              ...availableStatuses.map((s) => ({ value: s, label: STATUS_LABELS[s] || s })),
+            ]}
+            onValueChange={handleStatusChange}
             disabled={isDisabled}
-            aria-label={`Статус ${user.email || `#${user.id}`}`}
-            className="rounded border border-border bg-background px-2 py-1.5 text-xs font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <option value="" disabled>Статус</option>
-            {availableStatuses.map((s) => (
-              <option key={s} value={s}>{STATUS_LABELS[s] || s}</option>
-            ))}
-          </select>
+            ariaLabel={`Статус ${user.email || `#${user.id}`}`}
+          />
           <DeleteUserButton user={user} isMe={isMe} />
         </div>
       </div>

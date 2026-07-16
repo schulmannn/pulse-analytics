@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useFocusTrap } from '@/lib/useFocusTrap';
 import { useChannels } from '@/api/queries';
 import { WidgetBody } from '@/components/ConfigWidget';
+import { PillSelect } from '@/components/PillSelect';
 import { ChannelScope } from '@/lib/channel-context';
 import { ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import { DEFAULT_WIDGET_DAYS } from '@/lib/period';
@@ -460,17 +461,15 @@ function TargetField({ config, onChange }: { config: WidgetConfig; onChange: (pa
         />
       )}
       {type === 'dynamic' && (
-        <select
-          value={config.target?.metricId ?? ''}
-          onChange={(e) => onChange({ target: { type: 'dynamic', metricId: e.target.value || undefined } })}
-          className="mt-2 w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-1 focus:ring-primary"
-        >
-          {candidates.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.label}
-            </option>
-          ))}
-        </select>
+        <div className="mt-2">
+          <PillSelect
+            ariaLabel="Метрика цели"
+            className="w-full"
+            value={config.target?.metricId ?? ''}
+            options={candidates.map((m) => ({ value: m.id, label: m.label }))}
+            onValueChange={(v) => onChange({ target: { type: 'dynamic', metricId: v || undefined } })}
+          />
+        </div>
       )}
     </Field>
   );
@@ -563,32 +562,28 @@ function SourceField({ config, onChange }: { config: WidgetConfig; onChange: (pa
   const igEmpty = source === 'ig' && list.length === 0;
   // A pin left from before source-aware filtering (e.g. a Telegram channel on an IG widget) is no
   // longer eligible; surface it as a disabled option so the value still round-trips and the mismatch
-  // is visible, instead of the <select> silently showing a blank/wrong row.
+  // is visible, instead of the selection control silently showing a blank/wrong row.
   const pinned = config.source ?? null;
   const stalePin = pinned != null && !list.some((c) => c.id === pinned);
   return (
     <label className="mt-4 block">
       <span className="text-2xs tracking-wide text-muted-foreground">Источник</span>
-      <select
-        value={config.source ?? ''}
-        onChange={(e) => {
-          const v = e.target.value;
-          onChange({ source: v === '' ? undefined : Number(v) });
-        }}
-        className="mt-1 w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-1 focus:ring-primary"
-      >
-        <option value="">Как в свитчере</option>
-        {list.map((c) => (
-          <option key={c.id} value={c.id}>
-            {c.title || (c.username ? `@${c.username}` : `Канал ${c.id}`)}
-          </option>
-        ))}
-        {stalePin && (
-          <option value={pinned} disabled>
-            Недоступный источник — сменить
-          </option>
-        )}
-      </select>
+      <div className="mt-1">
+        <PillSelect
+          ariaLabel="Источник"
+          className="w-full"
+          value={String(config.source ?? '')}
+          options={[
+            { value: '', label: 'Как в свитчере' },
+            ...list.map((c) => ({
+              value: String(c.id),
+              label: c.title || (c.username ? `@${c.username}` : `Канал ${c.id}`),
+            })),
+            ...(stalePin ? [{ value: String(pinned), label: 'Недоступный источник — сменить', disabled: true }] : []),
+          ]}
+          onValueChange={(v) => onChange({ source: v === '' ? undefined : Number(v) })}
+        />
+      </div>
       {igEmpty && (
         <p className="mt-1 text-2xs text-muted-foreground">
           Нет подключённых аккаунтов Instagram — источник берётся из свитчера. Подключите в разделе «Источники».

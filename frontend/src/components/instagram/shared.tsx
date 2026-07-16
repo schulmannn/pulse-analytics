@@ -396,23 +396,52 @@ export function IgReachBody({ ig }: { ig: IgData }) {
   );
 }
 
-/** «Динамика аудитории» (half): current follower base + net movement, then the honest
-    follows/unfollows/net breakdown (SubscriberMovement). One card answers «сколько нас и куда
-    движется». Drill lives on the section (/metrics/ig-follows). */
+/** «Динамика аудитории» (half): the base follower level + net movement on the LEFT with a compact
+    active-window follower-level area line on the RIGHT (the established horizontal hero anatomy),
+    then the honest follows/unfollows/net breakdown (SubscriberMovement) below. The chart is the
+    CANONICAL absolute base level (ig.series.followerLevel) filtered to the exact active window and
+    sorted ascending — an honest daily line (label «по дням»), drawn ONLY with ≥2 real dated values;
+    below that the card keeps its base + net headline and the ledger, never a zero-filled line. One
+    card answers «сколько нас и куда движется». Drill lives on the section (/metrics/ig-follows). */
 export function IgAudienceBody({ ig }: { ig: IgData }) {
   const net = ig.netMovement;
+  // Exact active window (top-bar preset OR custom range) + ascending — the same window contract as
+  // the reach hero; no invention or zero-fill, just the real dated level points inside the window.
+  const level = ig.series.followerLevel
+    .filter((p) => {
+      const timestamp = periodDateTimestamp(p.day);
+      return p.day !== 'total' && Number.isFinite(timestamp) && timestamp >= ig.window.since && timestamp <= ig.window.until;
+    })
+    .sort((a, b) => a.day.localeCompare(b.day));
+  const hasChart = level.length >= 2;
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
-      <div>
-        <div className="text-xs tracking-wide text-muted-foreground">База · {ig.window.days} дн.</div>
-        <div className="mt-1.5 flex items-baseline gap-2">
-          <div className="kpi-accent text-hero font-medium leading-none tabular-nums tracking-tight">{fmt.kpi(ig.followers)}</div>
-          {net.hasCur && net.cur !== 0 && (
-            <span className={`text-sm font-medium tabular-nums ${net.cur > 0 ? 'text-verdant' : 'text-ember'}`}>
-              {signedNum(net.cur)}
-            </span>
-          )}
+      <div className="flex min-h-0 items-end gap-4">
+        <div className="flex shrink-0 flex-col items-start gap-1.5 pb-0.5">
+          <div className="text-xs tracking-wide text-muted-foreground">База · {ig.window.days} дн.</div>
+          <div className="flex items-baseline gap-2">
+            <div className="kpi-accent text-hero font-medium leading-none tabular-nums tracking-tight">{fmt.kpi(ig.followers)}</div>
+            {net.hasCur && net.cur !== 0 && (
+              <span className={`text-sm font-medium tabular-nums ${net.cur > 0 ? 'text-verdant' : 'text-ember'}`}>
+                {signedNum(net.cur)}
+              </span>
+            )}
+          </div>
         </div>
+        {hasChart && (
+          <div className="min-h-0 min-w-0 flex-1 self-stretch">
+            <Sparkline
+              values={level.map((p) => p.value)}
+              labels={level.map((p) => fmtDay(p.day))}
+              area
+              strokeWidth={2}
+              interactive
+              caption="по дням"
+              formatValue={(n) => fmt.num(Math.round(n))}
+              className="h-full min-h-14 w-full"
+            />
+          </div>
+        )}
       </div>
       <SubscriberMovement follows={ig.pairs.follows} unfollows={ig.pairs.unfollows} net={net} compact />
     </div>

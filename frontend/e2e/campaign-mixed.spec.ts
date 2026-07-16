@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { selectPill } from './helpers';
 
 /**
  * Смешанная кампания TG+IG на desktop-поверхности `/campaigns/:id` — доказывает НОВОЕ поведение,
@@ -255,12 +256,12 @@ test.describe('Смешанная кампания TG+IG', () => {
     await expect(page.getByTestId('campaign-posts-count')).toContainText('1 из 4');
 
     // Источник дополняет тот же URL, не стирая режим графика и поиск.
-    await page.getByTestId('campaign-source-filter').selectOption('ig:2');
+    await selectPill(page.getByTestId('campaign-source-filter'), { value: 'ig:2' });
     await expect.poll(() => new URL(page.url()).searchParams.get('source')).toBe('ig:2');
     await expect.poll(() => new URL(page.url()).searchParams.get('metric')).toBe('ig_reach');
     await expect.poll(() => new URL(page.url()).searchParams.get('q')).toBe('reels');
     await expect(tableRows).toHaveCount(1);
-    await page.getByTestId('campaign-source-filter').selectOption('');
+    await selectPill(page.getByTestId('campaign-source-filter'), { value: '' });
     await page.getByTestId('campaign-posts-search').fill('');
 
     // Сортировка пишет канонический sort и сохраняет выбранный режим графика.
