@@ -134,6 +134,8 @@ test('loadConfig: фоновый сбор — дефолты и env-переоп
   assert.equal(d.database.backgroundPoolMax, 2, 'малый фоновый пул по умолчанию 2');
   assert.equal(d.runtime.igAccountsPerPass, 25);
   assert.equal(d.runtime.tgQrChannelsPerPass, 200);
+  assert.equal(d.runtime.tgMediaRepairPerPass, 16);
+  assert.equal(d.runtime.tgMediaRepairWindowDays, 365);
   assert.equal(d.runtime.jobsRetentionDays, 30);
   assert.equal(d.runtime.emailTokensRetentionDays, 30);
   assert.equal(d.runtime.collectionRecoveryInitialDelayMs, 30000);
@@ -145,6 +147,7 @@ test('loadConfig: фоновый сбор — дефолты и env-переоп
   assert.equal(d.runtime.collectionRecoveryIntervalMs, 900000);
   const c = loadConfig({
     PGPOOL_BACKGROUND_MAX: '3', IG_ACCOUNTS_PER_PASS: '10', TG_QR_CHANNELS_PER_PASS: '50',
+    TG_MEDIA_REPAIR_PER_PASS: '8', TG_MEDIA_REPAIR_WINDOW_DAYS: '730',
     JOBS_RETENTION_DAYS: '45', EMAIL_TOKENS_RETENTION_DAYS: '60',
     INGEST_RECEIPTS_RETENTION_ENABLED: '1', INGEST_RECEIPTS_RETENTION_DAYS: '120',
     AUDIT_EVENTS_RETENTION_ENABLED: '1', AUDIT_EVENTS_RETENTION_DAYS: '400',
@@ -153,6 +156,8 @@ test('loadConfig: фоновый сбор — дефолты и env-переоп
   assert.equal(c.database.backgroundPoolMax, 3);
   assert.equal(c.runtime.igAccountsPerPass, 10);
   assert.equal(c.runtime.tgQrChannelsPerPass, 50);
+  assert.equal(c.runtime.tgMediaRepairPerPass, 8);
+  assert.equal(c.runtime.tgMediaRepairWindowDays, 730);
   assert.equal(c.runtime.jobsRetentionDays, 45);
   assert.equal(c.runtime.emailTokensRetentionDays, 60);
   assert.equal(c.runtime.ingestReceiptsRetentionEnabled, true);
@@ -193,6 +198,7 @@ test('validateConfig: валидные фоновые лимиты → нет о
   assert.deepEqual(
     validateConfig(loadConfig({
       PGPOOL_BACKGROUND_MAX: '4', IG_ACCOUNTS_PER_PASS: '1', TG_QR_CHANNELS_PER_PASS: '500',
+      TG_MEDIA_REPAIR_PER_PASS: '16', TG_MEDIA_REPAIR_WINDOW_DAYS: '3650',
       COLLECTION_RECOVERY_INITIAL_DELAY_MS: '1000', COLLECTION_RECOVERY_INTERVAL_MS: '60000',
     })),
     [],
@@ -202,12 +208,15 @@ test('validateConfig: валидные фоновые лимиты → нет о
 test('validateConfig: патологические 0/отрицательные фоновые лимиты → ошибки', () => {
   const bad = validateConfig(loadConfig({
     PGPOOL_BACKGROUND_MAX: '0', IG_ACCOUNTS_PER_PASS: '0', TG_QR_CHANNELS_PER_PASS: '-1',
+    TG_MEDIA_REPAIR_PER_PASS: '0', TG_MEDIA_REPAIR_WINDOW_DAYS: '-1',
     JOBS_RETENTION_DAYS: '0', EMAIL_TOKENS_RETENTION_DAYS: '-1',
     COLLECTION_RECOVERY_INITIAL_DELAY_MS: '0', COLLECTION_RECOVERY_INTERVAL_MS: '-5',
   }));
   assert.ok(bad.some((e) => e.field === 'database.backgroundPoolMax'), 'фоновый пул 0 отклонён');
   assert.ok(bad.some((e) => e.field === 'runtime.igAccountsPerPass'), 'IG cap 0 отклонён');
   assert.ok(bad.some((e) => e.field === 'runtime.tgQrChannelsPerPass'), 'TG cap отрицательный отклонён');
+  assert.ok(bad.some((e) => e.field === 'runtime.tgMediaRepairPerPass'), 'media cap 0 отклонён');
+  assert.ok(bad.some((e) => e.field === 'runtime.tgMediaRepairWindowDays'), 'media window отрицательный отклонён');
   assert.ok(bad.some((e) => e.field === 'runtime.jobsRetentionDays'), 'нулевой job retention отклонён');
   assert.ok(bad.some((e) => e.field === 'runtime.emailTokensRetentionDays'), 'отрицательный token retention отклонён');
   assert.ok(bad.some((e) => e.field === 'runtime.collectionRecoveryInitialDelayMs'), 'delay 0 отклонён');
@@ -217,6 +226,10 @@ test('validateConfig: патологические 0/отрицательные 
   assert.ok(frac.some((e) => e.field === 'runtime.igAccountsPerPass'), 'дробный cap отклонён');
   const fractionalPool = validateConfig(loadConfig({ PGPOOL_BACKGROUND_MAX: '1.5' }));
   assert.ok(fractionalPool.some((e) => e.field === 'database.backgroundPoolMax'), 'дробный pool max отклонён');
+  const excessiveMediaCap = validateConfig(loadConfig({ TG_MEDIA_REPAIR_PER_PASS: '17' }));
+  assert.ok(excessiveMediaCap.some((e) => e.field === 'runtime.tgMediaRepairPerPass'), 'media cap выше endpoint bound отклонён');
+  const excessiveMediaWindow = validateConfig(loadConfig({ TG_MEDIA_REPAIR_WINDOW_DAYS: '3651' }));
+  assert.ok(excessiveMediaWindow.some((e) => e.field === 'runtime.tgMediaRepairWindowDays'), 'media window выше 10 лет отклонён');
   const fractionalRetention = validateConfig(loadConfig({ JOBS_RETENTION_DAYS: '30.5' }));
   assert.ok(fractionalRetention.some((e) => e.field === 'runtime.jobsRetentionDays'), 'дробный retention отклонён');
   const excessiveRetention = validateConfig(loadConfig({ EMAIL_TOKENS_RETENTION_DAYS: '3651' }));

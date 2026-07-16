@@ -279,7 +279,7 @@ function createComposition(config, overrides = {}) {
 
   // Сбор QR-каналов (persistTgBundle/collectQrChannel[sNow]/processTgQrCollection) —
   // jobs/tgQrCollectionJob: сессии дешифруются только внутри, tgPostToRow общий с ingest.
-  const { collectQrChannelsNow, collectManagedChannelNow, collectManagedPostStatsNow, processTgQrCollection } =
+  const { collectQrChannelsNow, collectManagedChannelNow, collectManagedPostStatsNow, processTgQrCollection, repairCentralMedia } =
     createTgQrCollectionJob({
       db: backgroundDb,
       liveDb: db,
@@ -291,6 +291,8 @@ function createComposition(config, overrides = {}) {
       MTPROTO_TIMEOUT_HEAVY_MS,
       tgPostToRow,
       tgQrChannelsPerPass: config.runtime.tgQrChannelsPerPass,
+      tgMediaRepairPerPass: config.runtime.tgMediaRepairPerPass,
+      tgMediaRepairWindowDays: config.runtime.tgMediaRepairWindowDays,
     });
 
   // ── Telegram Bot API env — read here; still surfaced by /api/health + the boot banner, and
@@ -416,8 +418,11 @@ function createComposition(config, overrides = {}) {
       jobTracker,
       runIgCollectionPass,
       processTgQrCollection,
+      repairCentralMedia,
       igCap: config.runtime.igAccountsPerPass,
       tgCap: config.runtime.tgQrChannelsPerPass,
+      mediaCap: config.runtime.tgMediaRepairPerPass,
+      mediaWindowDays: config.runtime.tgMediaRepairWindowDays,
       initialDelayMs: config.runtime.collectionRecoveryInitialDelayMs,
       intervalMs: config.runtime.collectionRecoveryIntervalMs,
       enabled: !!backgroundDb.enabled && recoveryMode !== 'external',

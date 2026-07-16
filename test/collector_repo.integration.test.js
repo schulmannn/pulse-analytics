@@ -208,6 +208,44 @@ test('post media (covers): upsert хранит JPEG как bytea; getPostMedia �
   assert.strictEqual(await db.getPostMedia(ch.id, 1241, 'sm'), null, 'post delete cascades to its cover');
 });
 
+test('listCentralPostsMissingMedia: bounded recent photo/video posts missing an sm cover; decimal-string ids', { skip }, async () => {
+  const ch = await mkChannel('missmedia');
+  const recent = new Date().toISOString();
+  const aged = new Date(Date.now() - 400 * 864e5).toISOString();   // far older than the window
+  await db.upsertPosts(ch.id, [
+    { post_id: 1306, date_published: recent, media_type: 'photo', caption: 'a', hashtags: [] },
+    { post_id: 1312, date_published: recent, media_type: 'video', caption: 'b', hashtags: [] },
+    { post_id: 1400, date_published: recent, media_type: 'text',  caption: 'c', hashtags: [] },  // not a cover type
+    { post_id: 1307, date_published: recent, media_type: 'photo', caption: 'd', hashtags: [] },  // will get a cover
+    { post_id: 999,  date_published: aged,   media_type: 'photo', caption: 'e', hashtags: [] },  // aged out
+  ]);
+  // 1307 already has a stored small cover → it must NOT appear in the missing set.
+  await db.upsertPostMedia(ch.id, [{ post_id: 1307, size: 'sm', jpeg_b64: Buffer.from([0xff, 0xd8, 0x1, 0x2]).toString('base64') }]);
+
+  const rows = await db.listCentralPostsMissingMedia(ch.id, { limit: 10, windowDays: 21 });
+  const ids = rows.map((r) => r.post_id);
+  assert.ok(ids.includes('1306') && ids.includes('1312'), 'recent photo+video without a cover are eligible');
+  assert.ok(!ids.includes('1307'), 'a post whose sm cover exists is excluded (drops out permanently once filled)');
+  assert.ok(!ids.includes('1400'), 'non photo/video posts are never asked for a cover');
+  assert.ok(!ids.includes('999'), 'a post older than the window ages out instead of being retried forever');
+  assert.strictEqual(typeof ids[0], 'string', 'post_id returned as a decimal STRING (BIGINT-safe), never a JS Number');
+});
+
+test('listCentralPostsMissingMedia: LIMIT bounds a deterministic rotating batch', { skip }, async () => {
+  const ch = await mkChannel('missmedialim');
+  await db.upsertPosts(ch.id, [
+    { post_id: 10, date_published: new Date(Date.now() - 3 * 864e5).toISOString(), media_type: 'photo', hashtags: [] },
+    { post_id: 20, date_published: new Date(Date.now() - 2 * 864e5).toISOString(), media_type: 'photo', hashtags: [] },
+    { post_id: 30, date_published: new Date(Date.now() - 1 * 864e5).toISOString(), media_type: 'photo', hashtags: [] },
+  ]);
+  const opts = { limit: 2, windowDays: 21, seed: 'bucket-42' };
+  const rows = await db.listCentralPostsMissingMedia(ch.id, opts);
+  const repeat = await db.listCentralPostsMissingMedia(ch.id, opts);
+  assert.equal(rows.length, 2, 'bounded by LIMIT');
+  assert.deepStrictEqual(repeat, rows, 'same durable bucket seed produces the same batch');
+  assert.ok(rows.every((row) => ['10', '20', '30'].includes(row.post_id)));
+});
+
 test('upsertIgDaily roundtrip + saveRawSnapshot/pruneRawSnapshots', { skip }, async () => {
   const ch = await mkChannel('igraw');
   await db.upsertIgDaily(ch.id, [{ day: today, followers: 1000, reach: 5000, views: 8000 }]);

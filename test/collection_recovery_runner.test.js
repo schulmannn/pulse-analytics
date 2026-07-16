@@ -43,20 +43,29 @@ function makeRunner(over = {}) {
   const jobTracker = over.jobTracker || createJobTracker();
   const igCalls = [];
   const tgCalls = [];
+  const mediaCalls = [];
   const runner = createCollectionRecoveryRunner({
     log: () => {},
     jobTracker,
     runIgCollectionPass: over.runIgCollectionPass || (async ({ cap }) => { igCalls.push(cap); return { started: 0 }; }),
     processTgQrCollection: over.processTgQrCollection || (async ({ cap }) => { tgCalls.push(cap); return { collected: 0 }; }),
+    // null → omit the key entirely (exercise the factory's inert default); a function → use it;
+    // undefined (the common case) → a recording default so tests can assert cap/window forwarding.
+    ...(over.repairCentralMedia === null
+      ? {}
+      : { repairCentralMedia: over.repairCentralMedia
+          || (async ({ cap, windowDays }) => { mediaCalls.push({ cap, windowDays }); return { attempted: false }; }) }),
     igCap: 25,
     tgCap: 200,
+    mediaCap: 16,
+    mediaWindowDays: 21,
     initialDelayMs: 1000,
     intervalMs: 5000,
     enabled: over.enabled !== false,
     setTimeoutFn: clock.setTimeoutFn,
     clearTimeoutFn: clock.clearTimeoutFn,
   });
-  return { runner, clock, jobTracker, igCalls, tgCalls };
+  return { runner, clock, jobTracker, igCalls, tgCalls, mediaCalls };
 }
 
 test('start(): планирует первый проход через initialDelay, unref-таймер', () => {
@@ -75,6 +84,49 @@ test('проход зовёт IG + TG с инъектированными cap и
   assert.deepEqual(tgCalls, [200]);
   assert.equal(clock.pending, 1, 'после прохода запланирован следующий');
   assert.equal(clock.lastDelay, 5000, 'повтор через interval');
+});
+
+test('проход также зовёт узкий central-media repair с инъектированными cap/window', async () => {
+  const { runner, clock, mediaCalls } = makeRunner();
+  runner.start();
+  await clock.fireNext();
+  assert.deepEqual(mediaCalls, [{ cap: 16, windowDays: 21 }], 'bounded cover repair rides the same pass');
+});
+
+test('сбой media-прохода изолирован: IG и TG всё равно отрабатывают', async () => {
+  const { runner, clock, igCalls, tgCalls } = makeRunner({
+    repairCentralMedia: async () => { throw new Error('media boom'); },
+  });
+  runner.start();
+  await assert.doesNotReject(clock.fireNext());
+  assert.deepEqual(igCalls, [25], 'IG-проход не задет падением media-прохода');
+  assert.deepEqual(tgCalls, [200], 'TG-проход не задет падением media-прохода');
+  assert.equal(clock.pending, 1, 'следующий проход всё равно запланирован');
+});
+
+test('media repair идёт после QR-сбора в одной последовательной Telegram lane', async () => {
+  let releaseTg;
+  const gate = new Promise((resolve) => { releaseTg = resolve; });
+  const order = [];
+  const { runner } = makeRunner({
+    processTgQrCollection: async () => { order.push('tg:start'); await gate; order.push('tg:end'); return {}; },
+    repairCentralMedia: async () => { order.push('media'); return {}; },
+  });
+  const pass = runner.runOnce();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(order, ['tg:start'], 'media не конкурирует с активным TG collect');
+  releaseTg();
+  await pass;
+  assert.deepEqual(order, ['tg:start', 'tg:end', 'media']);
+});
+
+test('media repair не инъектирован → дефолтный no-op, проход не падает', async () => {
+  const { runner, clock, igCalls } = makeRunner({ repairCentralMedia: null });
+  // A composition that never wires repairCentralMedia (or the pure-scheduler tests) must still pass.
+  runner.start();
+  await assert.doesNotReject(clock.fireNext());
+  assert.deepEqual(igCalls, [25]);
 });
 
 test('single-flight: перекрывающийся вызов прохода пропускается, пока предыдущий ещё бежит', async () => {

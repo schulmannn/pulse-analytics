@@ -159,6 +159,33 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
     return rows.length ? rows[0].jpeg : null;
   }
 
+  // A small bounded batch of RECENT archived photo/video posts whose small ('sm') cover is still
+  // missing from tg_post_media — the exact ids the 15-min recovery lane asks the managed session to
+  // backfill so the open DB-first thumb proxy stops 503-ing. The recency window + LIMIT are the whole
+  // retry/backoff policy expressed with EXISTING schema only (no migration, no "tried" marker): a
+  // filled cover drops out of this set permanently, while a genuinely thumbless post simply ages out of
+  // the window instead of being retried forever. Returns post_id as a decimal STRING (BIGINT), never a
+  // JS Number, so a >2**53 id survives byte-exact through the repair round-trip.
+  async function listCentralPostsMissingMedia(channelId, { limit = 16, windowDays = 365, size = 'sm', seed = '0' } = {}) {
+    if (!enabled || !channelId) return [];
+    const lim = clampInt(limit, 16, 1, 100);
+    const days = clampInt(windowDays, 365, 1, 3650);
+    const wantSize = size === 'lg' ? 'lg' : 'sm';
+    const { rows } = await pool.query(
+      `SELECT p.post_id::text AS post_id
+         FROM posts p
+         LEFT JOIN tg_post_media m
+           ON m.channel_id = p.channel_id AND m.post_id = p.post_id AND m.size = $4
+        WHERE p.channel_id = $1
+          AND p.media_type IN ('photo', 'video')
+          AND p.date_published >= now() - make_interval(days => $3)
+          AND m.post_id IS NULL
+        ORDER BY md5(p.post_id::text || ':' || $5), p.post_id DESC
+        LIMIT $2`,
+      [channelId, lim, days, wantSize, String(seed).slice(0, 64)]);
+    return rows;
+  }
+
   async function upsertMentions(channelId, list, executor = pool) {
     if (!enabled || !channelId || !list || !list.length) return 0;
     const clean = list.filter(m => m.channel_id != null && m.msg_id != null);
@@ -559,7 +586,7 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
     upsertIgTags,
     graphsToDailyRows,
     upsertChannelDaily, upsertPosts, upsertMentions,
-    upsertPostMedia, getPostMedia,
+    upsertPostMedia, getPostMedia, listCentralPostsMissingMedia,
     saveSnapshot, saveVelocity,
     ingestCollectorPayload, persistCentralDaily, persistTgBundleTx,
     upsertIgDaily, upsertIgMediaDaily,
