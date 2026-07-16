@@ -7,6 +7,8 @@ import { useMediaQuery } from '@/lib/useMediaQuery';
 import { WidgetGroup } from '@/components/widgets/WidgetGroup';
 import {
   HomeEditContext,
+  getGroupOrder,
+  getHomeBlocks,
   getWidgetPrefs,
   pinToHome,
   remapGroupOrder,
@@ -24,9 +26,21 @@ import { ConfigWidget } from '@/components/ConfigWidget';
 import { WidgetErrorBoundary } from '@/components/WidgetErrorBoundary';
 import { WidgetCatalogModal } from '@/components/WidgetCatalogModal';
 import { CreateWidgetDialog } from '@/components/CreateWidgetDialog';
-import { addWidgetConfig, getWidgetConfig, useWidgetConfigs } from '@/lib/widgetStore';
+import { addWidgetConfig, getWidgetConfig, removeWidgetConfig, useWidgetConfigs } from '@/lib/widgetStore';
 import { isLegacyKey, legacyConfigId } from '@/lib/legacyWidgets';
 import { configIdFromKey, customKey, healedLegacyConfig, isCustomKey, type WidgetConfig } from '@/lib/widgetConfig';
+import {
+  LEGACY_KPI_KEY,
+  homeKpiInheritedShell,
+  homeKpiSplitConfig,
+  homeKpiSplitConfigId,
+  homeKpiSplitOrderToken,
+  homeKpiSplitTargets,
+  isHomeKpiSplitConfigId,
+  isLegacyKpiHomeKey,
+  splitKpiInGroupOrder,
+  splitKpiInHomeKeys,
+} from '@/lib/homeKpiSplit';
 import { HomeSourceProvider } from '@/lib/homeSourceContext';
 import { useActiveNetwork } from '@/components/layout/nav';
 import { networkByKey } from '@/lib/networks';
@@ -49,6 +63,89 @@ import { networkByKey } from '@/lib/networks';
  * mobile branch (<md) is preserved verbatim (the compact expand-on-touch edit chip + framed empty
  * card). The board grid, widget engine, pin store and data fetches are shared across both.
  */
+/** Metric ids already represented on Home by a NON-split custom card — the set the KPI split must
+ *  not duplicate (a target metric the user pinned separately is skipped). */
+function homePinnedNonSplitMetricIds(keys: readonly string[]): Set<string> {
+  const ids = new Set<string>();
+  for (const key of keys) {
+    if (!isCustomKey(key)) continue;
+    const cfg = getWidgetConfig(configIdFromKey(key) ?? '');
+    if (cfg && cfg.id !== legacyConfigId('kpi') && !isHomeKpiSplitConfigId(cfg.id)) ids.add(cfg.metricId);
+  }
+  return ids;
+}
+
+/** The composite KPI card's inherited shell (source / period / includeToday), from its stored
+ *  `legacy-kpi` config or a config healed from the pre-unification `home-kpi` prefs. */
+function oldKpiInheritedShell() {
+  const oldPrefs = getWidgetPrefs('home-kpi');
+  const oldKpi = getWidgetConfig(legacyConfigId('kpi')) ?? healedLegacyConfig('kpi', oldPrefs);
+  // includeToday lived in the old prefs row but was not part of the generic legacy config seed.
+  // Read it explicitly so a user who excluded today's partial bucket keeps that choice after split.
+  return homeKpiInheritedShell({
+    ...oldKpi,
+    includeToday: oldKpi?.includeToday ?? oldPrefs.includeToday,
+  });
+}
+
+/**
+ * DESKTOP migration: replace a saved Home board's legacy Telegram «Показатели» composite with the
+ * five independent split cards, in place, once. Idempotent + repeat-safe: it short-circuits the
+ * moment the board carries no `kpi` token (so it never loops on re-hydration), materialises the split
+ * configs under deterministic ids (never duplicating), skips any target metric the user already
+ * pinned separately, keeps the composite's slot in both the pin list and the reorder order, and drops
+ * the orphaned `legacy-kpi` config so it can't render or resurrect. Mobile is intentionally NOT
+ * migrated — the composite stays until the separate mobile stage.
+ */
+function migrateHomeKpiSplit(): void {
+  const keys = getHomeBlocks();
+  if (!keys.some(isLegacyKpiHomeKey)) return; // already split (or never had the composite) → no-op
+  const shell = oldKpiInheritedShell();
+  const oldHidden = getWidgetPrefs('custom-legacy-kpi').hidden || getWidgetPrefs('home-kpi').hidden;
+  const alreadyPinned = homePinnedNonSplitMetricIds(keys);
+  const targets = homeKpiSplitTargets(alreadyPinned);
+  for (const spec of targets) {
+    const cfg = homeKpiSplitConfig(spec, shell);
+    if (!getWidgetConfig(cfg.id)) addWidgetConfig(cfg);
+    if (oldHidden) setWidgetHidden(`custom-${cfg.id}`, true);
+  }
+  const nextOrder = splitKpiInGroupOrder(
+    getGroupOrder('home'),
+    targets.map((spec) => homeKpiSplitOrderToken(spec.metricId)),
+  );
+  if (nextOrder) setGroupOrder('home', nextOrder);
+  const nextKeys = splitKpiInHomeKeys(keys, alreadyPinned);
+  if (nextKeys) setHomeBlocks(nextKeys);
+  removeWidgetConfig(legacyConfigId('kpi'));
+  // Hidden is the only presentation setting that does not live in WidgetConfig. It has been copied
+  // to each new card above; clear both historical rows so a stale account snapshot cannot revive it.
+  setPrefs('custom-legacy-kpi', {});
+  setPrefs('home-kpi', {});
+}
+
+/** The five split cards rendered in place of a still-pinned `kpi` key on desktop — so the first paint
+ *  already shows the split (no composite flash) and matches exactly what {@link migrateHomeKpiSplit}
+ *  persists. Each card uses its stored config if present, else one freshly built from the composite's
+ *  inherited shell. */
+function SplitKpiCards({ pinnedKeys }: { pinnedKeys: readonly string[] }) {
+  const shell = oldKpiInheritedShell();
+  const alreadyPinned = homePinnedNonSplitMetricIds(pinnedKeys);
+  return (
+    <>
+      {homeKpiSplitTargets(alreadyPinned).map((spec) => {
+        const id = homeKpiSplitConfigId(spec.metricId);
+        const config = getWidgetConfig(id) ?? homeKpiSplitConfig(spec, shell);
+        const key = customKey(id);
+        return (
+          <div key={key} className="contents">
+            <ConfigWidget config={config} homeKey={key} />
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
 export function Home() {
   const pinned = useHomeBlocks();
   // Subscribe to the config store so a custom widget's edit / removal re-renders Home.
@@ -99,6 +196,10 @@ export function Home() {
       keys.map((key) => (isLegacyKey(key) ? `custom-${legacyConfigId(key)}` : `home-${key}`)),
     );
     setHomeBlocks(keys);
+    // A fresh desktop board seeds the SPLIT KPI cards, not the legacy composite: seed with the `kpi`
+    // key (so the order rhythm above is preserved) then immediately reconcile it into the five cards
+    // in the same commit — the board never persists or paints `legacy:kpi`.
+    migrateHomeKpiSplit();
   };
 
   // Persist a deterministic-id WidgetConfig for every pinned legacy widget so its per-instance
@@ -115,7 +216,11 @@ export function Home() {
   // config is device-local (widgetStore) and re-heals per device from that device's prefs.
   const pinnedSig = pinned.join('|');
   useEffect(() => {
+    // Desktop-only: split the legacy Telegram «Показатели» composite into five independent cards
+    // before the generic legacy heal (which then skips `kpi`). Idempotent — a no-op once split.
+    if (isDesktop) migrateHomeKpiSplit();
     for (const key of pinned) {
+      if (isDesktop && isLegacyKpiHomeKey(key)) continue; // handled by the split above
       if (!isLegacyKey(key) || getWidgetConfig(legacyConfigId(key))) continue;
       const oldId = `home-${key}`;
       const prefs = getWidgetPrefs(oldId);
@@ -128,7 +233,7 @@ export function Home() {
     }
     // pinned is captured via pinnedSig (its content signature); a fresh array each render is expected.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pinnedSig]);
+  }, [pinnedSig, isDesktop]);
 
   return (
     <div>
@@ -225,6 +330,13 @@ export function Home() {
             <ChannelRecencyProvider value={recency}>
               <WidgetGroup id="home" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
                 {known.map((key) => {
+                  // Desktop: a still-pinned legacy `kpi` composite renders as the five split cards
+                  // in place (the effect above then persists the split — this keeps the first paint
+                  // flash-free and identical to the migrated board). Mobile falls through to the
+                  // legacy composite branch below, unchanged.
+                  if (isDesktop && isLegacyKpiHomeKey(key)) {
+                    return <SplitKpiCards key={key} pinnedKeys={known} />;
+                  }
                   // Custom (metric-builder) widget: a `custom:<id>` key → its stored WidgetConfig,
                   // rendered via ConfigWidget (which wraps its own ChannelScope from config.source).
                   if (isCustomKey(key)) {
@@ -335,7 +447,10 @@ function AddWidgetBar({ pinned, onOpenCatalog }: { pinned: string[]; onOpenCatal
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const available = Object.keys(HOME_REGISTRY).filter((key) => !pinned.includes(key));
+  // The legacy Telegram «Показатели» composite is retired from the add surfaces — its renderer stays
+  // only as a defensive fallback, but users build the five split metric cards from the catalogue now,
+  // so it must not be re-creatable here.
+  const available = Object.keys(HOME_REGISTRY).filter((key) => key !== LEGACY_KPI_KEY && !pinned.includes(key));
 
   useEffect(() => {
     if (!open) return;

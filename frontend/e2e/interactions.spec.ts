@@ -159,7 +159,9 @@ test('edit-mode entry + exit (Home)', async ({ page }) => {
 });
 
 test('legacy Home cards use one config path and preserve old prefs during migration', async ({ page }) => {
-  const legacyKeys = ['kpi', 'growth', 'top-posts', 'history', 'velocity', 'heatmap', 'mentions'];
+  // The retired TG «Показатели» composite (`kpi`) is covered by its own desktop split test; this
+  // asserts the remaining legacy composites still heal onto one config path (viewport-agnostic).
+  const legacyKeys = ['growth', 'top-posts', 'history', 'velocity', 'heatmap', 'mentions'];
   await page.addInitScript((keys) => {
     localStorage.setItem('pulse_home_blocks', JSON.stringify({ keys }));
     localStorage.setItem('pulse_widget_configs', '[]');
@@ -176,7 +178,7 @@ test('legacy Home cards use one config path and preserve old prefs during migrat
       'home-mentions': { hidden: true },
     }));
     localStorage.setItem('pulse_widget_order', JSON.stringify({
-      home: ['home-velocity', 'home-history', 'home-kpi', 'home-growth', 'home-top-posts', 'home-heatmap', 'home-mentions'],
+      home: ['home-velocity', 'home-history', 'home-growth', 'home-top-posts', 'home-heatmap', 'home-mentions'],
     }));
   }, legacyKeys);
 
@@ -222,13 +224,111 @@ test('legacy Home cards use one config path and preserve old prefs during migrat
     order: [
       'custom-legacy-velocity',
       'custom-legacy-history',
-      'custom-legacy-kpi',
       'custom-legacy-growth',
       'custom-legacy-top-posts',
       'custom-legacy-heatmap',
       'custom-legacy-mentions',
     ],
   });
+});
+
+test('desktop Home splits the legacy Telegram «Показатели» composite into five independent cards', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-1440', 'desktop-only Home KPI split');
+  // A saved board with the composite between two other widgets, plus the composite's old per-card
+  // prefs (period + source) that each split card must inherit.
+  await page.addInitScript(() => {
+    localStorage.setItem('pulse_home_blocks', JSON.stringify({ keys: ['week', 'kpi', 'growth'] }));
+    localStorage.setItem('pulse_widget_configs', '[]');
+    localStorage.setItem('pulse_widget_prefs', JSON.stringify({ 'home-kpi': { period: 90, source: 3, includeToday: false } }));
+  });
+
+  await bootDemo(page, '/home', { theme: 'dark' });
+
+  // No full-width composite «Показатели» survives; the five metric cards render instead.
+  await expect(page.getByRole('heading', { name: 'Показатели', exact: true })).toHaveCount(0);
+  for (const title of ['Просмотры', 'Подписчики', 'Средний охват поста', 'Реакции', 'Вовлечённость (ER)']) {
+    await expect(page.locator('.home-board-canvas').getByRole('heading', { name: title, exact: true })).toHaveCount(1);
+  }
+
+  const state = await page.evaluate(() => {
+    const configs = JSON.parse(localStorage.getItem('pulse_widget_configs') ?? '[]') as Array<{
+      id: string; metricId: string; viz: string; size?: string; period?: number; source?: number; includeToday?: boolean;
+    }>;
+    const byId = (id: string) => configs.find((c) => c.id === id);
+    return {
+      keys: JSON.parse(localStorage.getItem('pulse_home_blocks') ?? '{}').keys as string[],
+      order: JSON.parse(localStorage.getItem('pulse_widget_order') ?? '{}').home as string[] | undefined,
+      splitCount: configs.filter((c) => c.id.startsWith('home-kpi-')).length,
+      hasLegacyKpi: !!byId('legacy-kpi'),
+      views: byId('home-kpi-tg-views'),
+      avgReach: byId('home-kpi-tg-avgReach'),
+      er: byId('home-kpi-tg-er'),
+    };
+  });
+
+  // The composite key is replaced IN PLACE by the five split keys — other widgets keep their slots.
+  expect(state.keys).toEqual([
+    'week',
+    'custom:home-kpi-tg-views',
+    'custom:home-kpi-tg-subscribers',
+    'custom:home-kpi-tg-avgReach',
+    'custom:home-kpi-tg-reactions',
+    'custom:home-kpi-tg-er',
+    'growth',
+  ]);
+  expect(state.splitCount).toBe(5);
+  expect(state.hasLegacyKpi).toBe(false); // orphaned composite config removed
+  // Inherited period + source from the old composite prefs.
+  expect(state.views).toMatchObject({ metricId: 'tg.views', viz: 'line', size: 'half', period: 90, source: 3, includeToday: false });
+  // S/M footprints preserved; the S series card is a bar (not a coerced-up line).
+  expect(state.avgReach).toMatchObject({ metricId: 'tg.avgReach', viz: 'bar', size: 'third', period: 90, source: 3 });
+  expect(state.er).toMatchObject({ metricId: 'tg.er', viz: 'kpi', size: 'third', period: 90, source: 3 });
+
+  // Idempotent: a reload does not duplicate the cards or resurrect the composite.
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Показатели', exact: true })).toHaveCount(0);
+  const after = await page.evaluate(() => {
+    const configs = JSON.parse(localStorage.getItem('pulse_widget_configs') ?? '[]') as Array<{ id: string }>;
+    return {
+      splitCount: configs.filter((c) => c.id.startsWith('home-kpi-')).length,
+      keys: JSON.parse(localStorage.getItem('pulse_home_blocks') ?? '{}').keys as string[],
+    };
+  });
+  expect(after.splitCount).toBe(5);
+  expect(after.keys.filter((k) => k === 'kpi')).toHaveLength(0);
+
+  // Each split card owns its own menu (independent per-widget controls).
+  await expect(page.getByRole('button', { name: 'Меню виджета «Просмотры»' })).toHaveCount(1);
+  await expect(page.getByRole('button', { name: 'Меню виджета «Реакции»' })).toHaveCount(1);
+});
+
+test('desktop Home KPI split avoids duplicating a metric already pinned', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-1440', 'desktop-only Home KPI split');
+  // tg.views is already pinned as a separate custom card → the split must not add a second views card.
+  await page.addInitScript(() => {
+    localStorage.setItem('pulse_home_blocks', JSON.stringify({ keys: ['custom:mine', 'kpi'] }));
+    localStorage.setItem('pulse_widget_configs', JSON.stringify([{ id: 'mine', metricId: 'tg.views', viz: 'line' }]));
+  });
+
+  await bootDemo(page, '/home', { theme: 'dark' });
+
+  const state = await page.evaluate(() => {
+    const configs = JSON.parse(localStorage.getItem('pulse_widget_configs') ?? '[]') as Array<{ id: string; metricId: string }>;
+    return {
+      keys: JSON.parse(localStorage.getItem('pulse_home_blocks') ?? '{}').keys as string[],
+      viewsConfigs: configs.filter((c) => c.metricId === 'tg.views').map((c) => c.id).sort(),
+    };
+  });
+  // Only the pre-existing views card remains for tg.views — no `home-kpi-tg-views` duplicate.
+  expect(state.viewsConfigs).toEqual(['mine']);
+  // The other four split cards are inserted at the composite's slot; the user's card is untouched.
+  expect(state.keys).toEqual([
+    'custom:mine',
+    'custom:home-kpi-tg-subscribers',
+    'custom:home-kpi-tg-avgReach',
+    'custom:home-kpi-tg-reactions',
+    'custom:home-kpi-tg-er',
+  ]);
 });
 
 test('edit toggle: compact expand chip on mobile, stable labelled tool on desktop', async ({ page }) => {
