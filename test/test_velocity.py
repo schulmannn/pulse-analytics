@@ -17,6 +17,7 @@ path (the pattern CLAUDE.md prescribes). The plaintext session string is never a
 output here.
 """
 import asyncio
+import base64
 import importlib.util
 import json
 import sys
@@ -300,9 +301,11 @@ class _Full:
 class QrClient:
     """Ephemeral-collect client stub. Dispatches TL requests by class name; records get_messages and
     GetMessageStats counts + whether disconnect ran (for the semaphore/client cleanup assertion)."""
-    def __init__(self, messages, msgstats):
+    def __init__(self, messages, msgstats, *, authorized=True, photo=None):
         self.messages = messages
         self.msgstats = msgstats           # _MsgStats, an Exception, or None
+        self.authorized = authorized
+        self.photo = photo
         self.get_messages_calls = 0
         self.msgstats_calls = 0
         self.disconnected = False
@@ -315,7 +318,7 @@ class QrClient:
         return True
 
     async def is_user_authorized(self):
-        return True
+        return self.authorized
 
     async def get_entity(self, ref):
         return _Entity()
@@ -323,6 +326,11 @@ class QrClient:
     async def get_messages(self, entity, limit=0):
         self.get_messages_calls += 1
         return self.messages
+
+    async def download_profile_photo(self, entity, file=bytes):
+        if isinstance(self.photo, BaseException):
+            raise self.photo
+        return self.photo
 
     async def disconnect(self):
         self.disconnected = True
@@ -362,6 +370,7 @@ class QrCollectVelocityTests(unittest.TestCase):
         # yields a passthrough sentinel, so int(posts_limit or 100) would choke on the default.
         params = dict(session="SECRET-SESSION", channel="chan", posts_limit=100,
                       graph_points=400, access_hash=None, include_velocity=False,
+                      include_media=False,
                       x_internal_token="tok")
         params.update(kw)
         return run(svc.qr_collect(**params))
@@ -405,6 +414,72 @@ class QrCollectVelocityTests(unittest.TestCase):
         self.assertEqual(ctx.exception.detail, "mtproto_timeout")
         self.assertEqual(svc._QR_COLLECT_SEM._value, svc._QR_COLLECT_MAX, "permit released on the error path")
         self.assertTrue(client.disconnected, "client disconnected on the error path")
+
+    def test_include_media_captures_bounded_channel_photo_as_top_level_base64(self):
+        photo = b"\xff\xd8\x01\x02"
+        client = QrClient([FakeMsg(1, 10)], None, photo=photo)
+        out = self._call(client, include_media=True)
+        self.assertEqual(out["channel_photo"], base64.b64encode(photo).decode("ascii"))
+        self.assertNotIn("channel_photo", out["channel"], "blob must not ride the public channel object")
+        self.assertTrue(client.disconnected)
+        self.assertEqual(self.svc._QR_COLLECT_SEM._value, self.svc._QR_COLLECT_MAX)
+
+    def test_channel_photo_failure_or_non_jpeg_never_fails_core_bundle(self):
+        for photo in (RuntimeError("download failed"), b"not-a-jpeg"):
+            client = QrClient([FakeMsg(1, 10)], None, photo=photo)
+            out = self._call(client, include_media=True)
+            self.assertIsNone(out["channel_photo"])
+            self.assertIn("channel", out)
+            self.assertTrue(client.disconnected)
+
+
+class QrPostStatsTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.svc = _load_service()
+
+    def _call(self, client, **overrides):
+        svc = self.svc
+        _configure(svc, client)
+        params = dict(session="SECRET-SESSION", channel="chan", msg_id=77,
+                      access_hash=None, x_internal_token="tok")
+        params.update(overrides)
+        return run(svc.qr_post_stats(**params))
+
+    def test_managed_post_stats_reuses_canonical_parser_and_returns_entity_binding(self):
+        client = QrClient([], _MsgStats(_views_graph([5, 7, 9])))
+        out = self._call(client)
+        self.assertTrue(out["available"])
+        self.assertEqual(out["views_graph"]["x"], [T0, T0 + D, T0 + 2 * D])
+        self.assertEqual(out["entity"]["id"], str(_Entity.id))
+        self.assertNotIn("session", out)
+        self.assertTrue(client.disconnected)
+        self.assertEqual(self.svc._QR_COLLECT_SEM._value, self.svc._QR_COLLECT_MAX)
+
+    def test_unavailable_post_is_honest_200_with_entity_and_cleanup(self):
+        client = QrClient([], RuntimeError("not enough stats"))
+        out = self._call(client)
+        self.assertFalse(out["available"])
+        self.assertEqual(out["entity"]["id"], str(_Entity.id))
+        self.assertTrue(client.disconnected)
+
+    def test_unauthorized_managed_session_is_401_and_releases_bulkhead(self):
+        client = QrClient([], None, authorized=False)
+        with self.assertRaises(self.svc.HTTPException) as ctx:
+            self._call(client)
+        self.assertEqual(ctx.exception.status_code, 401)
+        self.assertEqual(ctx.exception.detail, "session_unauthorized")
+        self.assertTrue(client.disconnected)
+        self.assertEqual(self.svc._QR_COLLECT_SEM._value, self.svc._QR_COLLECT_MAX)
+
+    def test_stats_timeout_is_503_and_releases_bulkhead(self):
+        client = QrClient([], asyncio.TimeoutError())
+        with self.assertRaises(self.svc.HTTPException) as ctx:
+            self._call(client)
+        self.assertEqual(ctx.exception.status_code, 503)
+        self.assertEqual(ctx.exception.detail, "mtproto_timeout")
+        self.assertTrue(client.disconnected)
+        self.assertEqual(self.svc._QR_COLLECT_SEM._value, self.svc._QR_COLLECT_MAX)
 
 
 if __name__ == "__main__":

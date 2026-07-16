@@ -65,8 +65,9 @@ function createComposition(config, overrides = {}) {
     createTgCrypto(config.telegram.sessionKey, config.telegram.previousSessionKeys);
   const notionCrash =
     overrides.notionCrash || createNotionCrashClient(config.notion);
-  const { MTPROTO_TOKEN, MTPROTO_TIMEOUT_STATS_MS, MTPROTO_TIMEOUT_HEAVY_MS, mtprotoFetch, mtprotoPost } =
-    mtprotoClient;
+  const {
+    MTPROTO_TOKEN, MTPROTO_TIMEOUT_STATS_MS, MTPROTO_TIMEOUT_HEAVY_MS, mtprotoFetch, mtprotoPost,
+  } = mtprotoClient;
 
   // История (Postgres): dbReady гейтит data-роуты, пока идёт миграция. Сама boot-цепочка
   // (bootPromise) стартует ниже — после создания authService, чьи bootstrapAdmin/
@@ -278,13 +279,15 @@ function createComposition(config, overrides = {}) {
 
   // Сбор QR-каналов (persistTgBundle/collectQrChannel[sNow]/processTgQrCollection) —
   // jobs/tgQrCollectionJob: сессии дешифруются только внутри, tgPostToRow общий с ingest.
-  const { collectQrChannelsNow, collectManagedChannelNow, processTgQrCollection } =
+  const { collectQrChannelsNow, collectManagedChannelNow, collectManagedPostStatsNow, processTgQrCollection } =
     createTgQrCollectionJob({
       db: backgroundDb,
+      liveDb: db,
       log,
       tgCrypto,
       mtprotoPost,
       MTPROTO_TOKEN,
+      MTPROTO_TIMEOUT_STATS_MS,
       MTPROTO_TIMEOUT_HEAVY_MS,
       tgPostToRow,
       tgQrChannelsPerPass: config.runtime.tgQrChannelsPerPass,
@@ -386,6 +389,7 @@ function createComposition(config, overrides = {}) {
       AUTH_SECRET,
       tgCrypto,
       collectQrChannelsNow,
+      collectManagedPostStatsNow,
       TG_TOKEN,
       TG_CHANNEL,
       timingSafeEqualStr,

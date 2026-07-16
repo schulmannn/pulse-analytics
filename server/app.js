@@ -50,7 +50,7 @@ function createApp(deps) {
     appBase, sha256, newToken, VERIFY_TTL, RESET_TTL, sendEmail, emailShell, emailBtn, escHtml,
     igFetch, refreshIgIfNeeded, igConfigured, igCrypto, igMock, nearestOf,
     cacheGet, cacheSet, cache, IG_ACCOUNT, IG_TOKEN, IG_GRAPH, AUTH_SECRET,
-    tgCrypto, collectQrChannelsNow, TG_TOKEN, TG_CHANNEL,
+    tgCrypto, collectQrChannelsNow, collectManagedPostStatsNow, TG_TOKEN, TG_CHANNEL,
     timingSafeEqualStr, dailyIngestJob, jobTracker, mtprotoClient, notionCrash,
   } = deps;
 
@@ -195,7 +195,7 @@ function createApp(deps) {
   registerTgRoutes({
     app, requireAuth, resolveChannel, db, audit, log,
     cacheGet, cacheSet, asyncHandler, tgCrypto, mediaLimiter, fetchWithTimeout,
-    collectQrChannelsNow, TG_TOKEN, TG_CHANNEL, mtprotoClient,
+    collectQrChannelsNow, collectManagedPostStatsNow, TG_TOKEN, TG_CHANNEL, mtprotoClient,
   });
 
   // Per-channel Telegram mention rules + live brand-search (moved out of routes/tg.js). Narrow deps:

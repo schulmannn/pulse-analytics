@@ -470,6 +470,32 @@ async def _velocity_from_posts(tg, entity, posts, top=12):
     }
 
 
+async def _post_stats_payload(tg, entity, msg_id):
+    """Parse GetMessageStats for ONE post into the public {available, views_graph, reactions} shape.
+
+    This is the SINGLE definition of the per-post stats parse: both GET /post_stats (global session)
+    and the managed POST /qr/post_stats (owner session) call it, so the shape can never drift between
+    paths. TimeoutError / FloodWaitError propagate so the caller answers an honest 503/429; a per-post
+    "too few views for stats" surfaces via the caller's own broad handler as available=False (a 200)."""
+    st = await asyncio.wait_for(
+        tg(GetMessageStatsRequest(channel=entity, msg_id=msg_id, dark=False)), timeout=TELETHON_CALL_TIMEOUT_S)
+
+    views = None
+    vg = await _resolve_graph(tg, getattr(st, 'views_graph', None))
+    if vg:
+        x, series = _cols_of(vg)
+        views = {'x': x, 'series': series}
+
+    reactions = None
+    rg = await _resolve_graph(tg, getattr(st, 'reactions_by_emotion_graph', None))
+    if rg:
+        _, rseries = _cols_of(rg)
+        agg = [{'label': s['name'], 'value': sum(v or 0 for v in s['values'])} for s in rseries]
+        reactions = sorted([a for a in agg if a['value'] > 0], key=lambda a: a['value'], reverse=True)
+
+    return {'available': True, 'views_graph': views, 'reactions': reactions}
+
+
 @app.get('/health')
 async def health():
     # Liveness only. Unauthenticated (container healthcheck hits it), so it must
@@ -750,54 +776,7 @@ async def get_post_stats(msg_id: int, x_internal_token: str = Header(default='')
     try:
         tg = await get_client()
         entity = await asyncio.wait_for(tg.get_entity(CHANNEL), timeout=TELETHON_CALL_TIMEOUT_S)
-        st = await asyncio.wait_for(
-            tg(GetMessageStatsRequest(channel=entity, msg_id=msg_id, dark=False)), timeout=TELETHON_CALL_TIMEOUT_S)
-
-        async def resolve(g):
-            if isinstance(g, StatsGraphAsync):
-                try:
-                    g = await asyncio.wait_for(
-                        tg(LoadAsyncGraphRequest(token=g.token)), timeout=TELETHON_CALL_TIMEOUT_S)
-                except asyncio.TimeoutError:
-                    raise
-                except FloodWaitError:
-                    raise
-                except Exception:
-                    return None
-            if isinstance(g, StatsGraph):
-                try:
-                    return json.loads(g.json.data)
-                except Exception:
-                    return None
-            return None
-
-        def cols_of(data):
-            cols = data.get('columns', [])
-            names = data.get('names', {})
-            types = data.get('types', {})
-            x, series = [], []
-            for c in cols:
-                cid, vals = c[0], c[1:]
-                if cid == 'x':
-                    x = vals
-                else:
-                    series.append({'name': names.get(cid, cid), 'type': types.get(cid, 'line'), 'values': vals})
-            return x, series
-
-        views = None
-        vg = await resolve(getattr(st, 'views_graph', None))
-        if vg:
-            x, series = cols_of(vg)
-            views = {'x': x, 'series': series}
-
-        reactions = None
-        rg = await resolve(getattr(st, 'reactions_by_emotion_graph', None))
-        if rg:
-            _, rseries = cols_of(rg)
-            agg = [{'label': s['name'], 'value': sum(v or 0 for v in s['values'])} for s in rseries]
-            reactions = sorted([a for a in agg if a['value'] > 0], key=lambda a: a['value'], reverse=True)
-
-        return {'available': True, 'views_graph': views, 'reactions': reactions}
+        return await _post_stats_payload(tg, entity, msg_id)
     except asyncio.TimeoutError:
         raise HTTPException(status_code=503, detail='mtproto_timeout')
     except FloodWaitError:
@@ -1094,6 +1073,11 @@ _THUMB_DOWNLOAD_TIMEOUT_S = 8       # per-thumbnail download deadline
 _THUMB_MAX_BYTES = 512 * 1024       # matches the Postgres CHECK; reject an anomalous "thumbnail"
 _THUMBS_TOTAL_BYTES_MAX = 4 * 1024 * 1024  # keeps the private JSON response bounded too
 
+# The managed collect (include_media) also grabs the central channel's avatar so the open /channel/photo
+# proxy can serve it DB-first and survive a revoked global TG_SESSION. One quick, byte-bounded download.
+_CHANNEL_PHOTO_MAX_BYTES = 512 * 1024   # reject an oversized/surprising profile photo before it inflates JSON
+_CHANNEL_PHOTO_BUDGET_S = 8             # max wall-clock for the single avatar download
+
 
 async def _download_thumb_bytes(tg, msg, size):
     """One message's cover thumbnail bytes (JPEG) or None. Shared by GET /thumb (global session) and
@@ -1154,6 +1138,26 @@ async def _collect_post_thumbs(tg, groups, budget_s):
         total_bytes += len(data)
         out.append({'post_id': rep.id, 'size': 'sm', 'jpeg_b64': base64.b64encode(data).decode('ascii')})
     return out
+
+
+async def _collect_channel_photo(tg, entity, budget_s):
+    """Best-effort central avatar (base64 JPEG) for the managed collect, time-boxed and byte-bounded so
+    a slow / absent / oversized profile photo yields None but NEVER fails the bundle (posts, velocity,
+    graphs and covers are already computed). Returned as a base64 string for the web side to persist as
+    a TOP-LEVEL snapshot field; download_profile_photo returns JPEG, so a surprising payload is rejected."""
+    if budget_s <= 0:
+        return None
+    try:
+        data = await asyncio.wait_for(
+            tg.download_profile_photo(entity, file=bytes),
+            timeout=min(_THUMB_DOWNLOAD_TIMEOUT_S, budget_s))
+    except (FloodWaitError, asyncio.TimeoutError):
+        return None                  # rate-limited or slow → skip the avatar, keep the bundle intact
+    except Exception:
+        return None                  # no photo / download error → skip
+    if not data or len(data) < 4 or len(data) > _CHANNEL_PHOTO_MAX_BYTES or data[:2] != b'\xff\xd8':
+        return None
+    return base64.b64encode(data).decode('ascii')
 
 
 @app.get('/thumb/{msg_id}')
@@ -1691,7 +1695,13 @@ async def qr_collect(session: str = Body(...), channel: str = Body(...),
         # 110s ceiling and 503 the whole bundle. Only the central collect sets include_media=True; the
         # bytes are persisted to tg_post_media so the open <img> proxy serves covers DB-first.
         thumbs = []
+        channel_photo = None
         if include_media:
+            # Avatar FIRST (a single quick download) so the high-value central photo is captured even
+            # when the cover fanout later exhausts the media budget; both are best-effort and time-boxed
+            # against the REMAINING total budget, so neither can push the core collect over the ceiling.
+            media_deadline = HEAVY_TOTAL_BUDGET_S - (loop.time() - t0) - _COLLECT_THUMBS_SAFETY_S
+            channel_photo = await _collect_channel_photo(tg, entity, min(_CHANNEL_PHOTO_BUDGET_S, media_deadline))
             remaining = HEAVY_TOTAL_BUDGET_S - (loop.time() - t0) - _COLLECT_THUMBS_SAFETY_S
             thumbs = await _collect_post_thumbs(tg, _logical_posts(messages), min(_COLLECT_THUMBS_BUDGET_S, remaining))
         return {
@@ -1709,6 +1719,10 @@ async def qr_collect(session: str = Body(...), channel: str = Body(...),
             # Cover thumbnails for the web side to persist (tg_post_media). Also private web↔mtproto:
             # [] unless include_media, and the JPEG bytes only back the open <img> proxy of PUBLIC media.
             'thumbs':        thumbs,
+            # Central avatar (base64 JPEG) for the web side to persist as a TOP-LEVEL snapshot field so
+            # the open /channel/photo proxy serves it DB-first. None unless include_media captured one;
+            # like `thumbs` it only backs the open <img> proxy of the PUBLIC central channel.
+            'channel_photo': channel_photo,
         }
     except FloodWaitError as e:
         return JSONResponse(status_code=429, content=_flood_wait_payload(e))
@@ -1718,6 +1732,63 @@ async def qr_collect(session: str = Body(...), channel: str = Body(...),
         raise
     except Exception as e:
         log.error(f'qr_collect error (channel={channel!r}): {e}')   # NB: the session is never logged
+        raise HTTPException(status_code=500, detail='collect_failed')
+    finally:
+        if tg is not None:
+            await _safe_disconnect(tg)
+        _QR_COLLECT_SEM.release()
+
+
+@app.post('/qr/post_stats')
+@_total_budget(STATS_TOTAL_BUDGET_S)
+async def qr_post_stats(session: str = Body(...), channel: str = Body(...), msg_id: int = Body(...),
+                        access_hash: Optional[str] = Body(default=None),
+                        x_internal_token: str = Header(default='')):
+    """Per-post stats for the central channel via a stored USER (managed QR) session, on an ephemeral
+    client fully isolated from the global central `client`. Mirrors GET /post_stats' parse (shared
+    _post_stats_payload) but reads through the owner's session, so it survives a revoked/stale global
+    TG_SESSION. Bounded by the same ephemeral-collect bulkhead (_QR_COLLECT_SEM) as /qr/collect and the
+    STATS_TOTAL_BUDGET_S ceiling; the session is read from the body and is NEVER logged. Uses the same
+    entity-identity safeguard (_resolve_channel_entity) and returns the resolved identity so the web
+    side can verify it matches the requested channel before trusting the stats."""
+    check_auth(x_internal_token)
+    if not API_ID or not API_HASH:
+        raise HTTPException(status_code=503, detail='mtproto_not_configured')
+    if not isinstance(session, str) or not session.strip():
+        raise HTTPException(status_code=400, detail='session_required')
+    await _acquire_or_503(_QR_COLLECT_SEM, _QR_COLLECT_ACQUIRE_TIMEOUT_S, 'too_many_collecting')
+    tg = None
+    try:
+        tg = TelegramClient(StringSession(session), API_ID, API_HASH)
+        await asyncio.wait_for(tg.connect(), timeout=CLIENT_CONNECT_TIMEOUT_S)
+        if not await asyncio.wait_for(tg.is_user_authorized(), timeout=TELETHON_CALL_TIMEOUT_S):
+            raise HTTPException(status_code=401, detail='session_unauthorized')
+        # A stored access_hash resolves a PRIVATE channel directly; a stale one self-heals once via the
+        # cold dialog resync inside _resolve_channel_entity (auth/flood errors propagate, never a scan).
+        entity = await asyncio.wait_for(
+            _resolve_channel_entity(tg, _channel_ref(channel), access_hash), timeout=TELETHON_CALL_TIMEOUT_S)
+        try:
+            payload = await _post_stats_payload(tg, entity, msg_id)
+        except (FloodWaitError, asyncio.TimeoutError, UnauthorizedError):
+            raise
+        except Exception as e:
+            # A legitimate "this post has too few views for stats" — a 200, exactly like GET /post_stats.
+            payload = {'available': False, 'error': str(e)}
+        # Resolved identity (int64 as STRINGS) for the web side to verify against the requested channel
+        # — the same guard /qr/collect uses. Private web↔mtproto field, never part of a browser response.
+        payload['entity'] = _entity_identity(entity)
+        return payload
+    except FloodWaitError as e:
+        return JSONResponse(status_code=429, content=_flood_wait_payload(e))
+    except UnauthorizedError:
+        raise HTTPException(status_code=401, detail='session_unauthorized')
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=503, detail='mtproto_timeout')
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Fixed metadata only: an arbitrary Telethon message may contain account/channel details.
+        log.error('qr_post_stats failed (%s)', type(e).__name__)
         raise HTTPException(status_code=500, detail='collect_failed')
     finally:
         if tg is not None:

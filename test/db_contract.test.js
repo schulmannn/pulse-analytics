@@ -37,6 +37,7 @@ const EXPECTED_FUNCTIONS = [
   // голого un-gated db.getChannelHistory/getSnapshot/… в публичном API больше НЕТ)
   'getChannelHistoryInternal', 'getMentionsHistoryInternal', 'getMentionsArchiveInternal',
   'getSnapshotInternal', 'getLatestVelocityInternal', 'listPostsInternal', 'listIgDailyInternal', 'listIgMediaDailyInternal',
+  'getPublicTgChannelPhoto',
   'getChannelHistoryForActor', 'getMentionsHistoryForActor', 'getMentionsArchiveForActor',
   'getSnapshotForActor', 'getLatestVelocityForActor', 'listPostsForActor', 'listIgDailyForActor', 'listIgMediaDailyForActor',
   // bugs / crashes

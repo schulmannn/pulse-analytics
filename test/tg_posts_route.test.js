@@ -10,10 +10,12 @@ function tgHandlers({
   mtprotoPost = async () => ({}),
   tgCrypto = { configured: () => false },
   collectQrChannelsNow = async () => [],
+  collectManagedPostStatsNow,
   statsTimeout = 60000,
   cacheGet = () => null,
   cacheSet = () => {},
   log = () => {},
+  fetchWithTimeout = async () => { throw new Error('bot disabled in test'); },
   sendMtprotoError = (res, err) => res.status(err.status || 503).json({
     error: err.message,
     ...(err.retryAfter != null ? { retry_after: err.retryAfter } : {}),
@@ -38,8 +40,9 @@ function tgHandlers({
     asyncHandler: (handler) => handler,
     tgCrypto,
     mediaLimiter: pass,
-    fetchWithTimeout: async () => { throw new Error('bot disabled in test'); },
+    fetchWithTimeout,
     collectQrChannelsNow,
+    collectManagedPostStatsNow,
     TG_TOKEN: '',
     TG_CHANNEL: '@test',
     mtprotoClient: {
@@ -113,6 +116,111 @@ test('thumbnail DB miss preserves the legacy live fallback and honest 503 placeh
   const res = await invokeRoute(handler, { params: { id: '1241' }, query: {} });
   assert.equal(res.statusCode, 503);
   assert.deepEqual(res.body, { error: 'источник недоступен' });
+});
+
+test('public central avatar proxy serves the bounded managed snapshot JPEG DB-first', async () => {
+  const jpeg = Buffer.from([0xff, 0xd8, 0x01, 0x02]);
+  let liveCalls = 0;
+  const handler = tgHandlers({
+    db: {
+      enabled: true,
+      getOwnerChannelId: async () => 5,
+      getPublicTgChannelPhoto: async () => jpeg.toString('base64'),
+    },
+    mtprotoFetch: async () => ({}),
+    fetchWithTimeout: async () => { liveCalls++; throw new Error('must not run'); },
+  }).get('GET /api/tg/mtproto/channel/photo').at(-1);
+
+  const res = await invokeRoute(handler);
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, jpeg);
+  assert.equal(res.headers['Content-Type'], 'image/jpeg');
+  assert.equal(res.headers['Cache-Control'], 'public, max-age=86400');
+  assert.equal(liveCalls, 0);
+});
+
+test('invalid managed avatar falls through to the unchanged global photo proxy', async () => {
+  const live = Buffer.from([0xff, 0xd8, 0x09, 0x08]);
+  const handler = tgHandlers({
+    db: {
+      enabled: true,
+      getOwnerChannelId: async () => 5,
+      getPublicTgChannelPhoto: async () => Buffer.from('not-jpeg').toString('base64'),
+    },
+    mtprotoFetch: async () => ({}),
+    fetchWithTimeout: async () => ({
+      ok: true,
+      buffer: async () => live,
+      headers: { get: () => 'image/jpeg' },
+    }),
+  }).get('GET /api/tg/mtproto/channel/photo').at(-1);
+
+  const res = await invokeRoute(handler);
+  assert.deepEqual(res.body, live);
+  assert.equal(res.headers['Content-Type'], 'image/jpeg');
+});
+
+test('central owner post stats prefer managed session and cache only the returned public payload', async () => {
+  const managed = { available: true, views_graph: { x: [1], series: [] }, reactions: [] };
+  const calls = [];
+  const cached = [];
+  const handler = tgHandlers({
+    db: { enabled: true, getTgSession: async (uid) => ({ uid, session_enc: 'enc', session_version: '4' }) },
+    collectManagedPostStatsNow: async (session, channel, id) => {
+      calls.push({ session, channel, id });
+      return managed;
+    },
+    mtprotoFetch: async () => { throw new Error('global path must not run'); },
+    cacheSet: (key, value) => cached.push({ key, value }),
+  }).get('GET /api/tg/mtproto/post_stats/:id').at(-1);
+
+  const channel = { id: 7, source: 'central', owner_uid: 11, tg_channel_id: 999 };
+  const res = await invokeRoute(handler, { params: { id: '42' }, channel, user: { uid: 11 } });
+  assert.deepEqual(res.body, managed);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].id, 42);
+  assert.deepEqual(cached, [{ key: 'mtproto:poststats:7:42', value: managed }]);
+});
+
+test('central non-owner never receives another user managed session and keeps global stats path', async () => {
+  let sessionReads = 0;
+  let managedCalls = 0;
+  const global = { available: true, views_graph: null, reactions: null };
+  const handler = tgHandlers({
+    db: { enabled: true, getTgSession: async () => { sessionReads++; return { session_enc: 'secret' }; } },
+    collectManagedPostStatsNow: async () => { managedCalls++; return {}; },
+    mtprotoFetch: async (path) => {
+      assert.equal(path, '/post_stats/42');
+      return global;
+    },
+  }).get('GET /api/tg/mtproto/post_stats/:id').at(-1);
+
+  const channel = { id: 7, source: 'central', owner_uid: 99, tg_channel_id: 999 };
+  const res = await invokeRoute(handler, { params: { id: '42' }, channel, user: { uid: 11 } });
+  assert.deepEqual(res.body, global);
+  assert.equal(sessionReads, 0);
+  assert.equal(managedCalls, 0);
+});
+
+test('managed post-stats failure falls back globally and logs only an allow-listed code', async () => {
+  const logs = [];
+  const global = { available: false, error: 'not enough data' };
+  const handler = tgHandlers({
+    db: { enabled: true, getTgSession: async (uid) => ({ uid, session_enc: 'enc', session_version: '4' }) },
+    collectManagedPostStatsNow: async () => {
+      throw Object.assign(new Error('private upstream detail'), { code: 'raw_account_identifier' });
+    },
+    mtprotoFetch: async () => global,
+    log: (level, event, meta) => logs.push({ level, event, meta }),
+  }).get('GET /api/tg/mtproto/post_stats/:id').at(-1);
+
+  const channel = { id: 7, source: 'central', owner_uid: 11, tg_channel_id: 999 };
+  const res = await invokeRoute(handler, { params: { id: '42' }, channel, user: { uid: 11 } });
+  assert.deepEqual(res.body, global);
+  assert.deepEqual(logs, [{
+    level: 'warn', event: 'tg_post_stats_managed_fallback',
+    meta: { uid: 11, channel_id: 7, code: 'collect_failed' },
+  }]);
 });
 
 function fullHandler(options) {
@@ -247,7 +355,7 @@ test('/api/tg/qr/start returns protective busy backpressure without escalating i
 });
 
 test('central /api/tg/full prefers the managed snapshot and marks it source="managed"', async () => {
-  const snap = { data: { channel: { title: 'Central', username: 'central', memberCount: 1234 }, views_summary: { total_views: 9 }, posts: [{ id: 3 }] } };
+  const snap = { data: { channel: { title: 'Central', username: 'central', memberCount: 1234 }, views_summary: { total_views: 9 }, posts: [{ id: 3 }], channel_photo: 'large-private-transport-field' } };
   const calls = [];
   const handler = tgHandlers({
     db: { enabled: true, getSnapshotForActor: async (id, actor) => { calls.push([id, actor.uid]); return snap; } },
@@ -261,6 +369,7 @@ test('central /api/tg/full prefers the managed snapshot and marks it source="man
   assert.deepEqual(res.body.channel, snap.data.channel);
   assert.deepEqual(res.body.posts, [{ id: 3 }]);
   assert.equal(res.body.mtproto_available, true);
+  assert.equal(res.body.channel_photo, undefined, 'top-level avatar blob never rides normal dashboard JSON');
   assert.deepEqual(calls, [[7, 11]]);   // read the snapshot; NO live mtproto fetch
 });
 

@@ -10,6 +10,7 @@
 'use strict';
 
 const { createTgSessionDecryptor } = require('../lib/tgSessionDecrypt');
+const { decodeBoundedJpegBase64 } = require('../lib/tgChannelPhoto');
 
 // Auth-ошибка сессии = сама StringSession недействительна (юзер снёс сессию/сменил пароль/2FA-ревок).
 // Python-сервис отдаёт её ровно двумя стабильными кодами (mtproto-client кладёт их в e.code):
@@ -47,19 +48,22 @@ function rawTgChannelId(value) {
   }
 }
 
-function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN, MTPROTO_TIMEOUT_HEAVY_MS, tgPostToRow, tgQrChannelsPerPass = 200 }) {
+function createTgQrCollectionJob({ db, liveDb = db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN, MTPROTO_TIMEOUT_STATS_MS, MTPROTO_TIMEOUT_HEAVY_MS, tgPostToRow, tgQrChannelsPerPass = 200 }) {
   // Shared decrypt: transparently falls back to a rotated-out key and lazily re-encrypts the row under
   // the active key (generation-guarded, best-effort — a rewrite failure never blocks the collect).
   const { decryptTgSession } = createTgSessionDecryptor({ tgCrypto, db, log });
+  const { decryptTgSession: decryptLiveTgSession } = liveDb === db
+    ? { decryptTgSession }
+    : createTgSessionDecryptor({ tgCrypto, db: liveDb, log });
 
   // Persist the health outcome for ONE session after its channels were processed. Priority:
   // auth-fail > success > degraded. Success wins over any non-auth error (an earlier channel that
   // collected proves the session is live); auth-fail wins over everything (session is now invalid).
   // Health-bookkeeping НИКОГДА не роняет сбор: любая ошибка записи логируется и глотается.
-  async function finalizeSessionHealth(uid, sessionVersion, { attempted, succeeded, authFailed, errorCode }) {
+  async function finalizeSessionHealth(uid, sessionVersion, { attempted, succeeded, authFailed, errorCode }, database = db) {
     if (!uid || !sessionVersion || !attempted) return;   // every run skipped / nothing started → health untouched
     try {
-      await db.recordTgSessionAttempt(uid, sessionVersion);
+      await database.recordTgSessionAttempt(uid, sessionVersion);
     } catch (e) {
       log('error', 'tg_qr_health_update_failed', { uid, phase: 'attempt', error: e.message });
     }
@@ -67,11 +71,11 @@ function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN
     // last_attempt_at, so a brief failure of the first UPDATE cannot hide an actionable auth result.
     try {
       if (authFailed) {
-        await db.recordTgSessionFailure(uid, sessionVersion, { state: 'reauth_required', errorCode: errorCode || 'session_unauthorized' });
+        await database.recordTgSessionFailure(uid, sessionVersion, { state: 'reauth_required', errorCode: errorCode || 'session_unauthorized' });
       } else if (succeeded) {
-        await db.recordTgSessionSuccess(uid, sessionVersion);
+        await database.recordTgSessionSuccess(uid, sessionVersion);
       } else {
-        await db.recordTgSessionFailure(uid, sessionVersion, { state: 'degraded', errorCode: errorCode || 'collect_failed' });
+        await database.recordTgSessionFailure(uid, sessionVersion, { state: 'degraded', errorCode: errorCode || 'collect_failed' });
       }
     } catch (e) {
       log('error', 'tg_qr_health_update_failed', { uid, phase: 'outcome', error: e.message });
@@ -88,6 +92,20 @@ function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN
     // Снапшот + daily + посты коммитятся ВМЕСТЕ (db.persistTgBundleTx) — раньше это были
     // отдельные автокоммитные записи, и сбой посередине оставлял QR-канал со свежим
     // снапшотом, но устаревшими daily/posts до следующего идемпотентного прогона.
+    // Central avatar: the managed collect (include_media) may carry a bounded base64 JPEG channel
+    // photo. Validate + re-encode canonically ONCE here (a malformed/oversized blob decodes to null and
+    // is simply dropped — best-effort, never fails the write) and store it as a TOP-LEVEL snapshot
+    // field (sibling of `channel`), so /api/tg/full keeps returning only d.channel and never ships the
+    // blob, while the open /channel/photo proxy can read it DB-first and survive a stale global session.
+    let photoBuf = decodeBoundedJpegBase64(bundle.channel_photo);
+    // A single transient photo download must not erase a previously captured avatar when the whole
+    // snapshot is replaced. Preserve the last validated public JPEG; a later successful collect
+    // replaces it. (Telegram exposes no reliable distinction between "no photo" and download error.)
+    if (!photoBuf && typeof db.getSnapshotInternal === 'function') {
+      const previous = await db.getSnapshotInternal(channelId).catch(() => null);
+      photoBuf = decodeBoundedJpegBase64(previous?.data?.channel_photo);
+    }
+    const channelPhoto = photoBuf ? photoBuf.toString('base64') : null;
     const counts = await db.persistTgBundleTx(channelId, {
       snapshot: {
         channel:       bundle.channel || {},
@@ -95,6 +113,7 @@ function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN
         posts,
         stats:         bundle.stats || null,
         graphs:        bundle.graphs || null,
+        ...(channelPhoto ? { channel_photo: channelPhoto } : {}),
       },
       dailyRows: hasGraphs ? db.graphsToDailyRows(bundle.graphs) : [],
       postRows: posts.map(tgPostToRow),
@@ -122,9 +141,9 @@ function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN
   // Read the persisted Telegram entity identity for the warm collection path. Feature-detected so a
   // db without the method (or a channel with no stored hash yet) simply falls back to the cold path —
   // the access_hash is a decimal STRING (pg BIGINT), passed to mtproto untouched (never via Number).
-  async function loadStoredAccessHash(ch, uid, gen) {
-    if (typeof db.getTgChannelIdentity !== 'function') return null;
-    const ident = await db.getTgChannelIdentity(ch.id, uid).catch(() => null);
+  async function loadStoredAccessHash(ch, uid, gen, database = db) {
+    if (typeof database.getTgChannelIdentity !== 'function') return null;
+    const ident = await database.getTgChannelIdentity(ch.id, uid).catch(() => null);
     if (!ident || ident.tg_access_hash == null || ident.tg_access_hash_version == null) return null;
     if (rawTgChannelId(ident.tg_channel_id) !== rawTgChannelId(ch.tg_channel_id)) return null;
     // access_hash is account/session-scoped. A reconnect increments session_version, so the first
@@ -138,8 +157,8 @@ function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN
   // session generation so a late older-generation write can't clobber a newer one. Best-effort: a
   // failure only costs the next collect a one-time dialog resync, so it never blocks the collect. The
   // hash itself is NEVER logged (only a fixed safe code + channel id).
-  async function persistResolvedIdentity(ch, bundle, uid, gen, storedAccessHash) {
-    if (typeof db.saveTgChannelAccessHash !== 'function') return;
+  async function persistResolvedIdentity(ch, bundle, uid, gen, storedAccessHash, database = db) {
+    if (typeof database.saveTgChannelAccessHash !== 'function') return;
     const entity = bundle && bundle.entity;
     const hash = entity && entity.access_hash != null ? String(entity.access_hash) : null;
     if (!hash || entity.id == null || ch.tg_channel_id == null || gen == null || !sameUid(ch.owner_uid, uid)) return;
@@ -151,7 +170,7 @@ function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN
     }
     if (hash === storedAccessHash) return; // warm hit: do not pay for a no-op UPDATE every day
     try {
-      await db.saveTgChannelAccessHash(ch.id, uid, hash, gen);
+      await database.saveTgChannelAccessHash(ch.id, uid, hash, gen);
     } catch {
       log('warn', 'tg_access_hash_persist_failed', { channelId: ch.id, error: 'write_failed' });
     }
@@ -221,6 +240,68 @@ function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN
       await finalizeSessionHealth(sess.uid, sess.session_version, {
         attempted: true, succeeded: false, authFailed, errorCode: authFailed ? e.code : safeTgErrorCode(e),
       });
+      throw e;   // caller falls back to the global live path
+    }
+  }
+
+  // The resolved entity mtproto returns must be the channel we asked for. Reuse the same identity
+  // guard the collect path uses (rawTgChannelId, precision-safe): missing, malformed or mismatched
+  // identity is fail-closed — a managed response is never trusted without binding it to the channel.
+  function assertManagedEntity(channel, data) {
+    const entity = data && data.entity;
+    const actual = entity && entity.id != null ? rawTgChannelId(entity.id) : null;
+    const expected = rawTgChannelId(channel.tg_channel_id);
+    if (!actual || !expected || actual !== expected) {
+      log('warn', 'tg_managed_post_stats_identity_mismatch', { channelId: channel.id, error: 'identity_mismatch' });
+      const e = new Error('tg_entity_identity_mismatch'); e.code = 'collect_failed'; throw e;
+    }
+  }
+
+  // Managed per-post stats for the central channel through the owner's stored session — the live-lane
+  // repair path routes/tg.js prefers over the (possibly revoked) global env TG_SESSION. Like
+  // collectManagedChannelNow it RETHROWS so the route can fall back to the global live path; every
+  // validated prerequisite (crypto, token, decryptable session, known tg id, valid msg id) fails here
+  // as a throw. The plaintext session is decrypted only server-side and is sent solely inside the
+  // mtprotoPost('/qr/post_stats') JSON body — never returned, logged, or put on a URL. Runs on the
+  // LIVE breaker lane (a dashboard read, not background collection) and updates managed session health
+  // honestly: success → healthy, a genuine auth failure → reauth_required (that generation only),
+  // any other upstream failure → degraded — all via the shared finalizeSessionHealth priority logic.
+  async function collectManagedPostStatsNow(sess, channel, msgId) {
+    const id = Number(msgId);
+    if (!sess || !channel || channel.tg_channel_id == null || !sameUid(channel.owner_uid, sess.uid)
+      || !Number.isInteger(id) || id <= 0) {
+      const e = new Error('managed_post_stats_missing_prereq'); e.code = 'managed_prereq'; throw e;
+    }
+    if (!tgCrypto.configured() || !MTPROTO_TOKEN) {
+      const e = new Error('managed_post_stats_not_configured'); e.code = 'managed_not_configured'; throw e;
+    }
+    let sessionStr;
+    try { sessionStr = await decryptLiveTgSession(sess); }
+    catch { const e = new Error('managed_post_stats_decrypt_failed'); e.code = 'session_decrypt_failed'; throw e; }
+    const ref = channel.username || String(channel.tg_channel_id);
+    // Warm path: a persisted access_hash (generation-guarded) lets a PRIVATE central channel resolve
+    // without a dialog scan; a public/username channel resolves directly. Decimal string, POST body only.
+    const accessHash = channel.username ? null : await loadStoredAccessHash(channel, sess.uid, sess.session_version, liveDb);
+    const body = { session: sessionStr, channel: ref, msg_id: id };
+    if (accessHash != null) body.access_hash = accessHash;
+    try {
+      // Live lane: a per-post dashboard read must fail into the LIVE circuit, not the background
+      // collection lane, and is bounded by the stats-tier timeout (mirrors global /post_stats).
+      const data = await mtprotoPost('/qr/post_stats', { body, timeoutMs: MTPROTO_TIMEOUT_STATS_MS, lane: 'live' });
+      assertManagedEntity(channel, data);
+      if (!channel.username) {
+        await persistResolvedIdentity(channel, data, sess.uid, sess.session_version, accessHash, liveDb);
+      }
+      await finalizeSessionHealth(sess.uid, sess.session_version, { attempted: true, succeeded: true, authFailed: false, errorCode: null }, liveDb);
+      // Strip the private entity identity before handing the payload to the route/cache — it is a
+      // web↔mtproto detail and must never reach a browser response.
+      const { entity, ...payload } = data || {};
+      return payload;
+    } catch (e) {
+      const authFailed = isTgAuthError(e);
+      await finalizeSessionHealth(sess.uid, sess.session_version, {
+        attempted: true, succeeded: false, authFailed, errorCode: authFailed ? e.code : safeTgErrorCode(e),
+      }, liveDb);
       throw e;   // caller falls back to the global live path
     }
   }
@@ -311,7 +392,7 @@ function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN
     return stats;
   }
 
-  return { collectQrChannelsNow, collectManagedChannelNow, processTgQrCollection };
+  return { collectQrChannelsNow, collectManagedChannelNow, collectManagedPostStatsNow, processTgQrCollection };
 }
 
 module.exports = { createTgQrCollectionJob };

@@ -290,6 +290,17 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
     return rows[0] || null;   // { data, updated_at } | null
   }
 
+  // Narrow public-media reader for the open Telegram avatar route. It deliberately exposes only the
+  // bounded base64 transport field, never the rest of the internal dashboard snapshot. The route
+  // resolves the canonical central channel id and re-validates the JPEG bytes before serving them.
+  async function getPublicTgChannelPhoto(channelId) {
+    if (!enabled || !channelId) return null;
+    const { rows } = await pool.query(
+      `SELECT data->>'channel_photo' AS channel_photo
+         FROM channel_snapshots WHERE channel_id=$1`, [channelId]);
+    return rows[0]?.channel_photo || null;
+  }
+
   async function getLatestVelocityInternal(channelId) {
     if (!enabled || !channelId) return null;
     // Canonical read (ADR-001): freshest snapshot of the channel's source (bounded to the reader's
@@ -408,7 +419,8 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
   return {
     getIgTags, getCollectorStatus,
     getChannelHistoryInternal, getMentionsHistoryInternal, getMentionsArchiveInternal,
-    getSnapshotInternal, getLatestVelocityInternal, listPostsInternal, listIgDailyInternal, listIgMediaDailyInternal,
+    getSnapshotInternal, getPublicTgChannelPhoto,
+    getLatestVelocityInternal, listPostsInternal, listIgDailyInternal, listIgMediaDailyInternal,
     getChannelHistoryForActor, getMentionsHistoryForActor, getMentionsArchiveForActor,
     getSnapshotForActor, getLatestVelocityForActor, listPostsForActor, listIgDailyForActor, listIgMediaDailyForActor,
   };

@@ -2,8 +2,18 @@
 
 const { makeServeSnapshot } = require('../middleware/tenant');
 const { toPublicQrStatus } = require('../lib/tgSessionStatus');
+const { decodeBoundedJpegBase64 } = require('../lib/tgChannelPhoto');
 
 const TG_BASE = 'https://api.telegram.org/bot';
+const MANAGED_POST_STATS_LOG_CODES = new Set([
+  'managed_prereq', 'managed_not_configured', 'session_decrypt_failed',
+  'session_unauthorized', 'mtproto_session_unauthorized',
+  'mtproto_timeout', 'mtproto_unreachable', 'mtproto_error', 'internal_error',
+]);
+function managedPostStatsLogCode(error) {
+  if (error?.floodWait) return 'flood_wait';
+  return MANAGED_POST_STATS_LOG_CODES.has(error?.code) ? error.code : 'collect_failed';
+}
 
 /**
  * Telegram routes (Bot API `/api/tg/channel`, QR-connect `/api/tg/qr/*`, MTProto proxy
@@ -19,7 +29,7 @@ const TG_BASE = 'https://api.telegram.org/bot';
 function registerTgRoutes({
   app, requireAuth, resolveChannel, db, audit, log,
   cacheGet, cacheSet, asyncHandler, tgCrypto, mediaLimiter, fetchWithTimeout,
-  collectQrChannelsNow, TG_TOKEN, TG_CHANNEL, mtprotoClient,
+  collectQrChannelsNow, collectManagedPostStatsNow, TG_TOKEN, TG_CHANNEL, mtprotoClient,
 }) {
   const {
     MTPROTO_URL, MTPROTO_TOKEN, MTPROTO_TIMEOUT_STATS_MS, MTPROTO_TIMEOUT_HEAVY_MS,
@@ -451,6 +461,33 @@ function registerTgRoutes({
     try {
       const cached = cacheGet(cacheKey);
       if (cached) return res.json(cached);
+
+      // Managed-first: ONLY the actual central owner may read through the stored managed session
+      // (derived from the resolved central channel's owner_uid, never client input). A viewer/non-owner
+      // keeps the global env-session path below unchanged. The managed path survives a revoked/stale
+      // global TG_SESSION; on a genuine auth failure it marks ONLY that session generation
+      // reauth_required (inside the helper) and we fall through to the global path — which never touches
+      // managed health, so that honest owner-only repair signal is preserved, not hidden by the fallback.
+      if (collectManagedPostStatsNow && db.enabled
+          && req.channel.owner_uid != null && req.channel.owner_uid === req.user.uid
+          && req.channel.tg_channel_id != null) {
+        const sess = await db.getTgSession(req.user.uid).catch(() => null);
+        if (sess && sess.session_enc && sess.connection_state !== 'reauth_required') {
+          try {
+            const data = await collectManagedPostStatsNow(sess, req.channel, id);
+            cacheSet(cacheKey, data);   // cache only the real successful payload (never fabricated)
+            return res.json(data);
+          } catch (e) {
+            // Safe context only — never the session or an upstream body. e.code is a stable code
+            // (managed_prereq / session_decrypt_failed / mtproto_* / collect_failed).
+            log('warn', 'tg_post_stats_managed_fallback', {
+              uid: req.user.uid, channel_id: req.channel.id, code: managedPostStatsLogCode(e),
+            });
+            // fall through to the global live path
+          }
+        }
+      }
+
       const data = await mtprotoFetch('/post_stats/' + id, {}, MTPROTO_TIMEOUT_STATS_MS);
       cacheSet(cacheKey, data);
       res.json(data);
@@ -512,6 +549,28 @@ function registerTgRoutes({
   // Channel avatar (binary) — open route so <img src> works without a header.
   // Low sensitivity: only the configured (public, 'central') channel's profile photo.
   app.get('/api/tg/mtproto/channel/photo', mediaLimiter, async (req, res) => {
+    // DB-first: the managed daily collect persists the central avatar as a bounded base64 JPEG in a
+    // TOP-LEVEL snapshot field (downloaded through the owner's session INSIDE the trusted job — never
+    // driven by this open route). Serving it here means the avatar survives a revoked global TG_SESSION,
+    // which used to 503 this proxy and blank the header. The managed session is never touched on the
+    // request path; anonymous <img> traffic reads only these PUBLIC bytes. We re-validate the trusted
+    // JPEG (magic + size bound) before serving, rejecting malformed/oversized data (fall through then).
+    if (db.enabled) {
+      try {
+        const centralId = await db.getOwnerChannelId();
+        if (centralId) {
+          const storedPhoto = await db.getPublicTgChannelPhoto(centralId);
+          const jpeg = decodeBoundedJpegBase64(storedPhoto);
+          if (jpeg) {
+            res.set('Content-Type', 'image/jpeg');
+            res.set('Cache-Control', 'public, max-age=86400');
+            return res.send(jpeg);
+          }
+        }
+      } catch (_e) { /* fall through to the live proxy below */ }
+    }
+    // Fallback: the live global-session proxy (valid only while env TG_SESSION is). Unchanged behaviour
+    // — a 5xx/unreachable upstream answers 503, a 4xx passes through so the header falls back to initials.
     try {
       const r = await fetchWithTimeout(`${MTPROTO_URL}/channel/photo`, { headers: { 'x-internal-token': MTPROTO_TOKEN } });
       if (!r.ok) {
