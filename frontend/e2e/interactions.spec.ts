@@ -234,6 +234,16 @@ test('legacy Home cards use one config path and preserve old prefs during migrat
 
 test('desktop Home splits the legacy Telegram «Показатели» composite into five independent cards', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop-1440', 'desktop-only Home KPI split');
+  // Make FLIP deliberately much longer than its 400ms safety bound. The migration runs while the
+  // old cards are mounted; even if transitionend is swallowed (for example in a background tab),
+  // no displaced card may remain translated over the new KPI rows.
+  await page.addInitScript(() => {
+    window.addEventListener('DOMContentLoaded', () => {
+      const style = document.createElement('style');
+      style.textContent = ':root { --motion-glide: 10s !important; }';
+      document.head.append(style);
+    });
+  });
   // A saved board with the composite between two other widgets, plus the composite's old per-card
   // prefs (period + source) that each split card must inherit.
   await page.addInitScript(() => {
@@ -283,6 +293,18 @@ test('desktop Home splits the legacy Telegram «Показатели» composite
   // S/M footprints preserved; the S series card is a bar (not a coerced-up line).
   expect(state.avgReach).toMatchObject({ metricId: 'tg.avgReach', viz: 'bar', size: 'third', period: 90, source: 3 });
   expect(state.er).toMatchObject({ metricId: 'tg.er', viz: 'kpi', size: 'third', period: 90, source: 3 });
+
+  await page.waitForTimeout(500);
+  const stranded = await page.locator('.home-board-canvas section').evaluateAll((sections) =>
+    sections
+      .map((section) => ({
+        title: section.querySelector('h3')?.textContent?.trim() ?? '',
+        transform: getComputedStyle(section).transform,
+        gliding: section.getAttribute('data-gliding'),
+      }))
+      .filter((section) => section.transform !== 'none' || section.gliding !== null),
+  );
+  expect(stranded).toEqual([]);
 
   // Idempotent: a reload does not duplicate the cards or resurrect the composite.
   await page.reload();
