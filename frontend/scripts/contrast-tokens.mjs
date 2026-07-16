@@ -162,8 +162,10 @@ for (const [themeName, tokens] of [
 // accent-deep 30%, card — index.css `div[data-widget-tinted]`), the saturated steep fill. sRGB
 // alpha-compositing approximates the oklab mix closely enough for a threshold gate at these
 // ratios. The number is TEXT (4.5) and so are the muted captions that sit on the tint; the
-// un-tinted accented card (number straight on the dark card) is held to 4.5 as well. Dark-only:
-// light never paints numbers with the accent (the .kpi-accent rule is scoped to .dark).
+// un-tinted accented card (number straight on the dark card) is held to 4.5 as well. The tinted
+// card's TITLE (`.widget-title`, same accent ink on the same tonal surface) rides the identical
+// «number on tonal surface» pair — no extra pair needed. Dark-only: light never paints numbers
+// or titles with the accent (the .kpi-accent / .widget-title rules are scoped to .dark).
 console.log('\n=== dark · accent tonal surfaces ===');
 for (let n = 1; n <= 6; n++) {
   const acc = dark[`chart-${n}-accent`];
@@ -178,15 +180,17 @@ for (let n = 1; n <= 6; n++) {
   // Captions on the tint use the LIGHTER muted ink the tinted card scopes locally
   // (index.css `.dark div[data-widget-tinted] { --muted-foreground: 240 6% 84% }`).
   const muted = hslToRgb([240, 6, 84]);
-  for (const [label, ink, bg] of [
-    [`accent ${n} number on tonal surface`, fg, tonal],
-    [`accent ${n} number on card`, fg, card],
-    [`muted caption on accent ${n} tonal`, muted, tonal],
+  for (const [label, ink, bg, target] of [
+    [`accent ${n} number on tonal surface`, fg, tonal, 4.5],
+    [`accent ${n} number on card`, fg, card, 4.5],
+    [`muted caption on accent ${n} tonal`, muted, tonal, 4.5],
+    // Header icon affordances on the tint (`.widget-icon`, accent @0.8) — non-text UI, 3.0.
+    [`accent ${n} icon @0.8 on tonal surface`, over(fg, tonal, 0.8), tonal, 3.0],
   ]) {
     const r = ratio(ink, bg);
-    const pass = r >= 4.5;
+    const pass = r >= target;
     if (!pass) failures++;
-    console.log(`  ${pass ? 'ok  ' : 'FAIL'}  ${r.toFixed(2).padStart(5)} (need 4.5)  ${label}`);
+    console.log(`  ${pass ? 'ok  ' : 'FAIL'}  ${r.toFixed(2).padStart(5)} (need ${target})  ${label}`);
   }
 }
 

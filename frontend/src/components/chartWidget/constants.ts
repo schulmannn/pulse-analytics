@@ -16,7 +16,7 @@ export const SIZE_HEIGHT: Record<WidgetSize, string> = {
 export const REMOVE_EXIT_MS = 200;
 
 export const ICON_BUTTON_CLASS =
-  'inline-flex h-8 w-8 sm:h-7 sm:w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted';
+  'widget-icon inline-flex h-8 w-8 sm:h-7 sm:w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted';
 
 export const MENU_ITEM_CLASS =
   'flex w-full items-center gap-2.5 rounded px-2.5 py-1.5 text-left text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40';

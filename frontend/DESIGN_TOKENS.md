@@ -71,6 +71,11 @@ widget's visualisation. Both live in **`src/lib/widgetSurface.ts`** (pure, unit-
   colour stays reserved for *evaluated deltas* (DeltaPill), never categorical series. Previous-period
   comparison stays dashed/no-fill (`--chart-role-comparison`).
   → `vizAllowsTonalSurface(viz)` / `effectiveTinted(viz, savedTinted)`.
+  On the dark TINTED card the widget **title** also rides the accent (`.widget-title` rule in
+  `index.css`) — title, number, line and surface share one hue (steep); a neutral or un-tinted card
+  keeps the default ink title, and light keeps ink titles everywhere. The header icon affordances
+  (⋯ / ↗ / ×) follow one quiet step lower — accent at 0.8 (`.widget-icon`, non-text 3.0-gated);
+  their hover pops (`hover:text-foreground` / `hover:text-destructive`) stay untinted.
 - **Width.** A temporal `line`/area cannot render at a **third** width — the x-axis collapses into
   sub-pixel mush (cf. the downsample note in `CLAUDE.md`). Such a viz is coerced UP to `half` rather
   than silently dropping points; compact vizzes (kpi hero, bar, donut) read fine at third.
@@ -92,9 +97,12 @@ version / API status only).
 
 ## Radius
 
-`--radius: 0.25rem` (4px) — panels. Tailwind binds `rounded-lg/md/sm` to it (`var(--radius)` and −2/−4px).
-Cards use `rounded-xl` (12px) and pill controls use `rounded-full` — both intentional, above the panel
-radius. Icon buttons are `rounded-full`.
+`--radius: 0.25rem` (4px) — inputs and small controls. Tailwind binds `rounded-lg/md/sm` to it
+(`var(--radius)` and −2/−4px). **Card-scale surfaces are `rounded-2xl` (16px)** — one radius family
+for the widget card (`ChartSection`), its skeleton/error placeholders (they must match the loaded
+card, CLS), the feed section shell + its sticky header, the detail overlay (`DetailShell`) and the
+post-detail modals. Pill controls and icon buttons are `rounded-full`. Transient floaters (⋯ menus,
+popovers, dialogs) stay a step tighter (`rounded-lg`/`rounded-xl`) so they read as chrome, not cards.
 
 ## Border / hairline opacity
 
