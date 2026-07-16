@@ -1086,7 +1086,17 @@ _MEDIA_REPAIR_IDS_MAX = 16          # max post ids one repair request may carry
 _MEDIA_REPAIR_BUDGET_S = 20         # max wall-clock spent downloading covers for one repair request
 
 
-async def _download_thumb_bytes(tg, msg, size):
+def _is_persistable_jpeg_cover(data):
+    """A bounded JPEG that is safe to embed in the private response and persist in tg_post_media."""
+    return bool(data) and 4 <= len(data) <= _THUMB_MAX_BYTES and data[:2] == b'\xff\xd8'
+
+
+def _is_jpeg_thumb(data):
+    """JPEG response guard for the legacy live proxy; large `lg` thumbs are allowed here."""
+    return bool(data) and len(data) >= 4 and data[:2] == b'\xff\xd8'
+
+
+async def _download_thumb_bytes(tg, msg, size, *, accept=None):
     """One message's cover thumbnail bytes (JPEG) or None. Shared by GET /thumb (global session) and
     the managed collect fanout. size='lg' tries the largest available thumb first, 'sm' the small real
     thumb. FloodWait propagates; any other per-attempt failure falls through to the next thumb index
@@ -1097,8 +1107,14 @@ async def _download_thumb_bytes(tg, msg, size):
     for idx in indices:
         try:
             data = await tg.download_media(msg, thumb=idx, file=bytes)
-            if data:
-                return data
+            if not data:
+                continue
+            # Some album/photo/video size lists return a truthy stripped/non-JPEG/oversized payload
+            # at the first index. Let the caller's acceptance contract reject that candidate INSIDE
+            # the index loop so the next real JPEG size is still attempted.
+            if accept is not None and not accept(data):
+                continue
+            return data
         except FloodWaitError:
             raise
         except Exception:
@@ -1129,7 +1145,7 @@ async def _collect_post_thumbs(tg, groups, budget_s):
         count += 1
         try:
             data = await asyncio.wait_for(
-                _download_thumb_bytes(tg, rep, 'sm'),
+                _download_thumb_bytes(tg, rep, 'sm', accept=_is_persistable_jpeg_cover),
                 timeout=min(_THUMB_DOWNLOAD_TIMEOUT_S, remaining),
             )
         except (FloodWaitError, asyncio.TimeoutError):
@@ -1182,7 +1198,7 @@ async def get_thumb(msg_id: int, size: str = Query(default='sm'), x_internal_tok
         msg = await tg.get_messages(CHANNEL, ids=msg_id)
         if not msg or not (msg.photo or msg.video or msg.document):
             raise HTTPException(status_code=404, detail='no media')
-        data = await _download_thumb_bytes(tg, msg, size)
+        data = await _download_thumb_bytes(tg, msg, size, accept=_is_jpeg_thumb)
         if not data:
             raise HTTPException(status_code=404, detail='no thumbnail')
         _THUMB_CACHE[key] = data
@@ -1845,7 +1861,7 @@ async def _collect_media_by_id(tg, messages, budget_s):
             continue
         try:
             data = await asyncio.wait_for(
-                _download_thumb_bytes(tg, msg, 'sm'),
+                _download_thumb_bytes(tg, msg, 'sm', accept=_is_persistable_jpeg_cover),
                 timeout=min(_THUMB_DOWNLOAD_TIMEOUT_S, remaining),
             )
         except FloodWaitError:
