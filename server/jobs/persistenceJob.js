@@ -9,6 +9,10 @@
 function createPersistenceJob({
   db, log, igCrypto, collectIgForAccount, capacityRollups,
   igAccountsPerPass = 25, jobsRetentionDays = 30, emailTokensRetentionDays = 30,
+  // Продуктовый ретеншн (dark deployment): каждый прунинг независимо ВЫКЛЮЧЕН по умолчанию —
+  // maintenance зовёт его только под явным флагом. Горизонты дефолтят 90/365.
+  ingestReceiptsRetentionEnabled = false, ingestReceiptsRetentionDays = 90,
+  auditEventsRetentionEnabled = false, auditEventsRetentionDays = 365,
 }) {
   // Один проход IG-сбора: durable per (account, day) гейты вместо прежней монолитной дневной
   // джобы ig_persistence. Прежний гейт держал ВСЕ аккаунты под одним lease — деплой/креш посреди
@@ -73,6 +77,23 @@ function createPersistenceJob({
         const r = await db.pruneEmailTokens({ maxAgeDays: emailTokensRetentionDays });
         log('info', 'email_tokens_pruned', { deleted: r.deleted, batches: r.batches, capped: r.capped });
       } catch (e) { log('error', 'email_tokens_prune_failed', { error: e.message }); }
+    }
+    // Продуктовый ретеншн ingest_receipts (90д по received_at) и audit_events (365д по created_at).
+    // Каждый под НЕЗАВИСИМЫМ флагом (dark deployment, default OFF): выключенный флаг = ноль вызовов
+    // прунинга, не поддельно высокий TTL. Изолированный try/catch — сбой одного не роняет остальную
+    // maintenance. Канонические tenant-данные (channel_daily/posts/…) этот контур НЕ трогает —
+    // они живут до cascade-удаления канала/аккаунта, без age-TTL. Счётчики — в лог.
+    if (ingestReceiptsRetentionEnabled && typeof db.pruneIngestReceipts === 'function') {
+      try {
+        const r = await db.pruneIngestReceipts({ maxAgeDays: ingestReceiptsRetentionDays });
+        log('info', 'ingest_receipts_pruned', { deleted: r.deleted, batches: r.batches, capped: r.capped });
+      } catch (e) { log('error', 'ingest_receipts_prune_failed', { error: e.message }); }
+    }
+    if (auditEventsRetentionEnabled && typeof db.pruneAuditEvents === 'function') {
+      try {
+        const r = await db.pruneAuditEvents({ maxAgeDays: auditEventsRetentionDays });
+        log('info', 'audit_events_pruned', { deleted: r.deleted, batches: r.batches, capped: r.capped });
+      } catch (e) { log('error', 'audit_events_prune_failed', { error: e.message }); }
     }
     // capacity: nightly monthly rollup of channel_daily (long-range read scaling). INERT by
     // default — only runs when CAPACITY_ROLLUPS=1, and the jobs row makes exactly one web instance

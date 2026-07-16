@@ -31,7 +31,7 @@ const EXPECTED_FUNCTIONS = [
   'saveSnapshot', 'ingestCollectorPayload', 'persistCentralDaily', 'persistTgBundleTx',
   'getCollectorStatus', 'recordAuditEvent', 'saveVelocity',
   'upsertChannelDaily', 'upsertPosts', 'upsertMentions', 'upsertIgTags', 'getIgTags',
-  'saveRawSnapshot', 'pruneRawSnapshots', 'pruneIgMediaDaily', 'rollupChannelMonthly',
+  'saveRawSnapshot', 'pruneRawSnapshots', 'pruneIgMediaDaily', 'pruneIngestReceipts', 'rollupChannelMonthly',
   'upsertIgDaily', 'upsertIgMediaDaily',
   // analytics reads (finding 5: контракт доступа — Internal для cron/service, ForActor для роутов;
   // голого un-gated db.getChannelHistory/getSnapshot/… в публичном API больше НЕТ)
@@ -56,6 +56,8 @@ const EXPECTED_FUNCTIONS = [
   'getMentionSettingsInternal', 'getMentionSettingsForActor', 'upsertMentionSettingsForActor',
   // jobsRepo
   'claimJob', 'completeJob', 'failJob', 'getJob', 'runJobOnce', 'pruneTerminalJobs',
+  // auditRepo
+  'pruneAuditEvents',
   // gdpr
   'deleteUserAccount', 'exportUserData',
 ];

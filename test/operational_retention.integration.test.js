@@ -16,6 +16,8 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { createJobsRepo } = require('../server/repos/jobsRepo');
 const { createUsersRepo } = require('../server/repos/usersRepo');
+const { createCollectorRepo } = require('../server/repos/collectorRepo');
+const { createAuditRepo } = require('../server/repos/auditRepo');
 
 const TEST_DB = process.env.TEST_DATABASE_URL;
 const skip = TEST_DB ? false : 'TEST_DATABASE_URL not set (integration suite runs on the local stand)';
@@ -24,17 +26,23 @@ const nonce = `ret${Date.now().toString(36)}${process.pid}`;
 let jobsHarness = null;
 let raceHarness = null;
 let tokensHarness = null;
+let ingestHarness = null;
+let ingestRaceHarness = null;
+let auditHarness = null;
+let auditRaceHarness = null;
 
-async function createHarness(label) {
+// tables — какие production-таблицы (LIKE INCLUDING ALL) поднять в приватной схеме; buildDb —
+// как собрать repo-методы над пулом этой схемы. LIKE копирует колонки/чеки/индексы, но НЕ FK,
+// поэтому приватные таблицы — disposable-фикстуры без tenant-данных и без внешних ссылок.
+async function createHarness(label, { tables = ['jobs', 'email_tokens'], buildDb } = {}) {
   const pg = require('pg');
   const schema = `${nonce}_${label}`;
   const admin = new pg.Pool({ connectionString: TEST_DB, max: 1, ssl: false });
   try {
     await admin.query(`CREATE SCHEMA ${schema}`);
-    // LIKE INCLUDING ALL preserves the production column/check/index shape without copying FKs;
-    // the private tables are disposable test fixtures, never tenant/product data.
-    await admin.query(`CREATE TABLE ${schema}.jobs (LIKE public.jobs INCLUDING ALL)`);
-    await admin.query(`CREATE TABLE ${schema}.email_tokens (LIKE public.email_tokens INCLUDING ALL)`);
+    for (const t of tables) {
+      await admin.query(`CREATE TABLE ${schema}.${t} (LIKE public.${t} INCLUDING ALL)`);
+    }
   } finally {
     await admin.end();
   }
@@ -44,24 +52,34 @@ async function createHarness(label) {
     ssl: false,
     options: `-c search_path=${schema},public`,
   });
-  const db = {
-    ...createJobsRepo({ pool, enabled: true }),
-    ...createUsersRepo({ pool, enabled: true, transaction: async (fn) => fn(pool) }),
-  };
+  const defaultBuildDb = (p) => ({
+    ...createJobsRepo({ pool: p, enabled: true }),
+    ...createUsersRepo({ pool: p, enabled: true, transaction: async (fn) => fn(p) }),
+  });
+  const db = (buildDb || defaultBuildDb)(pool);
   return { schema, pool, db };
 }
 
+const buildCollectorDb = (p) =>
+  createCollectorRepo({ pool: p, enabled: true, transaction: async (fn) => fn(p), setChannelTgId: async () => {} });
+const buildAuditDb = (p) => createAuditRepo({ pool: p, enabled: true });
+
 test.before(async () => {
   if (!TEST_DB) return;
-  [jobsHarness, raceHarness, tokensHarness] = await Promise.all([
-    createHarness('jobs'),
-    createHarness('race'),
-    createHarness('tokens'),
-  ]);
+  [jobsHarness, raceHarness, tokensHarness, ingestHarness, ingestRaceHarness, auditHarness, auditRaceHarness] =
+    await Promise.all([
+      createHarness('jobs'),
+      createHarness('race'),
+      createHarness('tokens'),
+      createHarness('ingest', { tables: ['ingest_receipts', 'channel_daily', 'posts'], buildDb: buildCollectorDb }),
+      createHarness('ingestrace', { tables: ['ingest_receipts'], buildDb: buildCollectorDb }),
+      createHarness('audit', { tables: ['audit_events'], buildDb: buildAuditDb }),
+      createHarness('auditrace', { tables: ['audit_events'], buildDb: buildAuditDb }),
+    ]);
 });
 
 test.after(async () => {
-  for (const h of [jobsHarness, raceHarness, tokensHarness]) {
+  for (const h of [jobsHarness, raceHarness, tokensHarness, ingestHarness, ingestRaceHarness, auditHarness, auditRaceHarness]) {
     if (!h) continue;
     await h.pool.query(`DROP SCHEMA ${h.schema} CASCADE`);
     await h.pool.end();
@@ -219,4 +237,186 @@ test('pruneEmailTokens: consumed/expired режутся, валидный неи
   let left = 0;
   for (const id of ids) if (await tokenExists(h, id)) left++;
   assert.strictEqual(left, 0, 'остаток добран повторным прогоном');
+});
+
+// ── ingest_receipts (90-дневная политика по received_at) ──────────────────────────────────────────
+let ingestSeq = 0;
+async function mkReceipt(h, channelId, receivedDaysAgo, { status = 'completed' } = {}) {
+  const ingestId = `${h.schema}:ing-${ingestSeq++}`;
+  await h.pool.query(
+    `INSERT INTO ingest_receipts
+       (channel_id, ingest_id, schema_version, collector_version, collected_at, received_at, payload_hash, status)
+     VALUES ($1, $2, 1, 't', now() - make_interval(days => $3), now() - make_interval(days => $3), 'ph', $4)`,
+    [channelId, ingestId, receivedDaysAgo, status]);
+  return { channelId, ingestId };
+}
+async function receiptExists(h, r) {
+  const { rows } = await h.pool.query(
+    `SELECT 1 FROM ingest_receipts WHERE channel_id=$1 AND ingest_id=$2`, [r.channelId, r.ingestId]);
+  return rows.length > 0;
+}
+
+test('pruneIngestReceipts: граница received_at, cap+drain, канонические channel_daily/posts нетронуты', { skip }, async () => {
+  const h = ingestHarness;
+  // Канонические tenant-строки (без age-TTL): очень старые, но ретеншн ingest их НЕ трогает.
+  await h.pool.query(
+    `INSERT INTO channel_daily (channel_id, day, subscribers, captured_at)
+     VALUES (1, CURRENT_DATE - 700, 100, now() - make_interval(days => 700))`);
+  await h.pool.query(
+    `INSERT INTO posts (post_id, date_published, views, updated_at)
+     VALUES (12345, now() - make_interval(days => 700), 50, now() - make_interval(days => 700))`);
+
+  // Горизонт = 90 дней. received_at 91 дн → под удаление; 89 дн → выживает.
+  const old1 = await mkReceipt(h, 1, 91);
+  const old2 = await mkReceipt(h, 2, 120);
+  const fresh = await mkReceipt(h, 1, 89);
+  // Разный статус не важен: политика чисто возрастная (в отличие от jobs с status-предикатом).
+  const oldFailed = await mkReceipt(h, 3, 200, { status: 'failed' });
+
+  const r = await h.db.pruneIngestReceipts({ maxAgeDays: 90, batchSize: 500, maxBatches: 40 });
+  assert.ok(r.deleted >= 3, 'удалены все квитанции старше 90 дней');
+
+  assert.strictEqual(await receiptExists(h, old1), false, 'старая квитанция удалена');
+  assert.strictEqual(await receiptExists(h, old2), false, 'старая квитанция другого канала удалена');
+  assert.strictEqual(await receiptExists(h, oldFailed), false, 'статус не защищает — режем по возрасту');
+  assert.strictEqual(await receiptExists(h, fresh), true, 'свежая квитанция выжила (граница received_at)');
+
+  // Канонические аналитические строки НЕ имеют age-TTL и остаются нетронутыми.
+  const cd = await h.pool.query(`SELECT count(*)::int AS n FROM channel_daily`);
+  const ps = await h.pool.query(`SELECT count(*)::int AS n FROM posts`);
+  assert.strictEqual(cd.rows[0].n, 1, 'channel_daily (канон) не тронут ретеншном квитанций');
+  assert.strictEqual(ps.rows[0].n, 1, 'posts (канон) не тронут ретеншном квитанций');
+
+  // Cap + повтор: 5 старых квитанций, batchSize=2, maxBatches=2 → 4 удалены, capped; остаток — потом.
+  const capKeys = [];
+  for (let i = 0; i < 5; i++) capKeys.push(await mkReceipt(h, 10 + i, 150));
+  const capped = await h.db.pruneIngestReceipts({ maxAgeDays: 90, batchSize: 2, maxBatches: 2 });
+  assert.deepStrictEqual(capped, { deleted: 4, batches: 2, capped: true });
+  let survivors = 0;
+  for (const k of capKeys) if (await receiptExists(h, k)) survivors++;
+  assert.strictEqual(survivors, 1, 'один остаток пережил capped-прогон');
+
+  const drain = await h.db.pruneIngestReceipts({ maxAgeDays: 90, batchSize: 2, maxBatches: 2 });
+  assert.strictEqual(drain.capped, false, 'повторный прогон дочистил без cap');
+  survivors = 0;
+  for (const k of capKeys) if (await receiptExists(h, k)) survivors++;
+  assert.strictEqual(survivors, 0, 'остаток добран следующим прогоном');
+});
+
+test('pruneIngestReceipts: активная ingest-транзакция (FOR UPDATE) пропускается, не блокирует cleanup', { skip }, async () => {
+  const h = ingestRaceHarness;
+  const locked = await mkReceipt(h, 1, 200);
+  const other = await mkReceipt(h, 2, 200);
+  const locker = await h.pool.connect();
+  const pg = require('pg');
+  const prunePool = new pg.Pool({
+    connectionString: TEST_DB, max: 1, ssl: false, options: `-c search_path=${h.schema},public`,
+  });
+  const raceRepo = createCollectorRepo({ pool: prunePool, enabled: true, transaction: async (fn) => fn(prunePool), setChannelTgId: async () => {} });
+  let inTransaction = false;
+  try {
+    await locker.query('BEGIN');
+    inTransaction = true;
+    // Модель активного приёма: ingest держит FOR UPDATE на своей квитанции.
+    await locker.query(
+      'SELECT 1 FROM ingest_receipts WHERE channel_id=$1 AND ingest_id=$2 FOR UPDATE', [locked.channelId, locked.ingestId]);
+
+    let timeoutId;
+    const timeout = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error('retention waited on active ingest lock')), 1000);
+    });
+    // batchSize=1: если бы SKIP LOCKED не работал, запрос завис бы на залоченной строке до таймаута.
+    const result = await Promise.race([
+      raceRepo.pruneIngestReceipts({ maxAgeDays: 90, batchSize: 1, maxBatches: 5 }),
+      timeout,
+    ]).finally(() => clearTimeout(timeoutId));
+    assert.ok(result.deleted >= 1, 'незалоченная старая квитанция удалена, залоченная пропущена');
+    await locker.query('COMMIT');
+    inTransaction = false;
+
+    assert.strictEqual(await receiptExists(h, locked), true, 'залоченная квитанция пережила прогон (доберёт следующий)');
+    assert.strictEqual(await receiptExists(h, other), false, 'незалоченная старая квитанция удалена');
+  } finally {
+    if (inTransaction) await locker.query('ROLLBACK').catch(() => {});
+    locker.release();
+    await prunePool.end();
+  }
+});
+
+// ── audit_events (365-дневная политика по created_at) ─────────────────────────────────────────────
+async function mkAudit(h, action, createdDaysAgo) {
+  const { rows: [row] } = await h.pool.query(
+    `INSERT INTO audit_events (action, created_at)
+     VALUES ($1, now() - make_interval(days => $2)) RETURNING id`,
+    [action, createdDaysAgo]);
+  return row.id;
+}
+async function auditExists(h, id) {
+  const { rows } = await h.pool.query(`SELECT 1 FROM audit_events WHERE id=$1`, [id]);
+  return rows.length > 0;
+}
+
+test('pruneAuditEvents: граница created_at, cap+drain', { skip }, async () => {
+  const h = auditHarness;
+  // Горизонт = 365 дней. created_at 366 дн → под удаление; 364 дн → выживает.
+  const old1 = await mkAudit(h, 'a.old1', 366);
+  const old2 = await mkAudit(h, 'a.old2', 500);
+  const fresh = await mkAudit(h, 'a.fresh', 364);
+
+  const r = await h.db.pruneAuditEvents({ maxAgeDays: 365, batchSize: 500, maxBatches: 40 });
+  assert.ok(r.deleted >= 2, 'удалены события старше года');
+  assert.strictEqual(await auditExists(h, old1), false, 'старое событие удалено');
+  assert.strictEqual(await auditExists(h, old2), false, 'очень старое событие удалено');
+  assert.strictEqual(await auditExists(h, fresh), true, 'свежее событие выжило (граница created_at)');
+
+  const capIds = [];
+  for (let i = 0; i < 5; i++) capIds.push(await mkAudit(h, `a.cap${i}`, 400));
+  const capped = await h.db.pruneAuditEvents({ maxAgeDays: 365, batchSize: 2, maxBatches: 2 });
+  assert.deepStrictEqual(capped, { deleted: 4, batches: 2, capped: true });
+  let survivors = 0;
+  for (const id of capIds) if (await auditExists(h, id)) survivors++;
+  assert.strictEqual(survivors, 1, 'один остаток пережил capped-прогон');
+
+  const drain = await h.db.pruneAuditEvents({ maxAgeDays: 365, batchSize: 2, maxBatches: 2 });
+  assert.strictEqual(drain.capped, false);
+  survivors = 0;
+  for (const id of capIds) if (await auditExists(h, id)) survivors++;
+  assert.strictEqual(survivors, 0, 'остаток добран повторным прогоном');
+});
+
+test('pruneAuditEvents: залоченная строка пропускается (SKIP LOCKED), cleanup не ждёт', { skip }, async () => {
+  const h = auditRaceHarness;
+  const locked = await mkAudit(h, 'a.locked', 500);
+  const other = await mkAudit(h, 'a.other', 500);
+  const locker = await h.pool.connect();
+  const pg = require('pg');
+  const prunePool = new pg.Pool({
+    connectionString: TEST_DB, max: 1, ssl: false, options: `-c search_path=${h.schema},public`,
+  });
+  const raceRepo = createAuditRepo({ pool: prunePool, enabled: true });
+  let inTransaction = false;
+  try {
+    await locker.query('BEGIN');
+    inTransaction = true;
+    await locker.query('SELECT 1 FROM audit_events WHERE id=$1 FOR UPDATE', [locked]);
+
+    let timeoutId;
+    const timeout = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error('audit retention waited on row lock')), 1000);
+    });
+    const result = await Promise.race([
+      raceRepo.pruneAuditEvents({ maxAgeDays: 365, batchSize: 1, maxBatches: 5 }),
+      timeout,
+    ]).finally(() => clearTimeout(timeoutId));
+    assert.ok(result.deleted >= 1, 'незалоченное старое событие удалено, залоченное пропущено');
+    await locker.query('COMMIT');
+    inTransaction = false;
+
+    assert.strictEqual(await auditExists(h, locked), true, 'залоченное событие пережило прогон');
+    assert.strictEqual(await auditExists(h, other), false, 'незалоченное старое событие удалено');
+  } finally {
+    if (inTransaction) await locker.query('ROLLBACK').catch(() => {});
+    locker.release();
+    await prunePool.end();
+  }
 });
