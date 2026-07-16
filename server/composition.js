@@ -21,6 +21,7 @@ const { createAuthService } = require('./services/authService');
 const { createEmailService } = require('./services/emailService');
 const { createAuditService } = require('./services/auditService');
 const { createInstagramClient } = require('./infrastructure/instagramClient');
+const { createIgUsageGate } = require('./infrastructure/igUsageGate');
 const {
   createInstagramCollectionJob,
 } = require('./jobs/instagramCollectionJob');
@@ -208,28 +209,36 @@ function createComposition(config, overrides = {}) {
   // instagramClient. defaultToken = глобальный env-токен: legacy-вызовы без 3-го аргумента
   // работают как раньше; live-роуты и дневной cron-сбор делят ОДИН клиент.
   const sharedIgInflight = new Map();
+  // Общий app-level usage-gate (numeric-only): оба клиента ОБНОВЛЯЮТ его usage-заголовками, но
+  // preflight-тормозит по нему только фоновый collection-клиент (paceOnUsage). probeIntervalMs
+  // переиспользует валидированный COLLECTION_RECOVERY_INTERVAL_MS — окно «пробного» вызова следующего
+  // recovery-прохода совпадает с его периодом.
+  const igUsageGate = createIgUsageGate({ probeIntervalMs: config.runtime.collectionRecoveryIntervalMs });
   const igClient = createInstagramClient({
     db,
     log,
     igCrypto,
     defaultToken: IG_TOKEN,
     inflight: sharedIgInflight,
+    usageGate: igUsageGate,
+    paceOnUsage: false,   // live: только наблюдает gate, никогда не блокируется/спит
   });
   const { igFetch, refreshIgIfNeeded, IG_GRAPH } = igClient;
   // Дневной IG-сбор для крона — jobs/instagramCollectionJob (processPersistence ниже зовёт его
   // per-account; каждый сбой изолирован внутри job и не касается ответа крона).
   // Фоновый сбор пишет через backgroundDb (малый пул), чтобы дневной фан-аут не занимал коннекты
-  // live-путей. Отдельный клиент направляет туда и редкий token-refresh, но делит с live-клиентом
-  // один Graph singleflight Map — одинаковые одновременные upstream-запросы всё ещё схлопываются.
-  const collectionIgClient = backgroundDb === db
-    ? igClient
-    : createInstagramClient({
-        db: backgroundDb,
-        log,
-        igCrypto,
-        defaultToken: IG_TOKEN,
-        inflight: sharedIgInflight,
-      });
+  // live-путей. Отдельный клиент нужен ВСЕГДА (даже при backgroundDb === db): только он paceOnUsage,
+  // чтобы preflight-тормоз по gate никогда не касался live-роутов. Делит с live-клиентом один Graph
+  // singleflight Map и один usage-gate — одинаковые одновременные upstream-запросы всё ещё схлопываются.
+  const collectionIgClient = createInstagramClient({
+    db: backgroundDb,
+    log,
+    igCrypto,
+    defaultToken: IG_TOKEN,
+    inflight: sharedIgInflight,
+    usageGate: igUsageGate,
+    paceOnUsage: true,   // фон: при открытом app-gate реджектит новый полёт до Graph-вызова
+  });
   const igCollectionJob = createInstagramCollectionJob({
     db: backgroundDb,
     log,
@@ -247,6 +256,7 @@ function createComposition(config, overrides = {}) {
     log,
     igCrypto,
     collectIgForAccount,
+    usageGate: igUsageGate,
     capacityRollups: config.runtime.capacityRollups,
     igAccountsPerPass: config.runtime.igAccountsPerPass,
     jobsRetentionDays: config.runtime.jobsRetentionDays,

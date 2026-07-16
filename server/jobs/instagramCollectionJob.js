@@ -13,6 +13,17 @@
 'use strict';
 
 const { toMetricInt } = require('../lib/metricNumber');
+const { boundedAllSettled } = require('../lib/boundedSettled');
+
+// Throttle-ошибка обязана ПРОБИТЬСЯ до durable job (runJobOnce), чтобы день пометился
+// failed/retryable, а не succeeded частичным фан-аутом. Узкий предикат: HTTP 429 (rate limit,
+// в т.ч. Graph код 4/17/32 → status 429) ИЛИ синтетический флаг preflight-тормоза gate.
+// Перманентные ошибки (unsupported metric / auth / битые данные) им НЕ являются и сохраняют
+// сегодняшнюю best-effort семантику по секциям.
+function isIgThrottleError(e) {
+  if (!e) return false;
+  return e.igGateStopped === true || Number(e.status) === 429;
+}
 
 function createInstagramCollectionJob({ db, log, igCrypto, igFetch, refreshIgIfNeeded }) {
   // Достаём total_value одной total_value-метрики из ответа /insights.
@@ -79,10 +90,14 @@ function createInstagramCollectionJob({ db, log, igCrypto, igFetch, refreshIgIfN
         if (m.name === 'reach') row.reach = igNum(last);
         else if (m.name === 'follower_count') row.followers = igNum(last);
       });
-    } catch (e) { log('warn', 'ig_cron_daily_series_failed', { channelId: acc.channel_id, error: e.message }); }
+    } catch (e) { if (isIgThrottleError(e)) throw e; log('warn', 'ig_cron_daily_series_failed', { channelId: acc.channel_id, error: e.message }); }
     // Window-агрегаты total_value (каждая метрика независимо — одна неподдерживаемая не рушит остальные).
-    const settled = await Promise.allSettled(
-      IG_TV_NAMES.map((metric) => igFetch(`/${id}/insights`, { metric, metric_type: 'total_value', period: 'day', since, until }, token)));
+    // Bounded фан-аут (concurrency=2) сохраняет порядок → индексная привязка к IG_TV_NAMES цела.
+    const settled = await boundedAllSettled(
+      IG_TV_NAMES,
+      (metric) => igFetch(`/${id}/insights`, { metric, metric_type: 'total_value', period: 'day', since, until }, token),
+      2);
+    for (const r of settled) { if (r.status === 'rejected' && isIgThrottleError(r.reason)) throw r.reason; }
     settled.forEach((r, i) => { if (r.status === 'fulfilled') row[IG_TV_NAMES[i]] = igNum(igTvVal(r.value)); });
     // follows_and_unfollows → follows / unfollows за вчера. НЕ однодневным окном (оно возвращает
     // пустой breakdown — см. igFauDiff выше), а разностью двух окон с общим якорем −8 дней:
@@ -101,7 +116,7 @@ function createInstagramCollectionJob({ db, log, igCrypto, igFetch, refreshIgIfN
       }
       const day = igFauDiff(wide, narrow);
       row.follows = igNum(day.follows); row.unfollows = igNum(day.unfollows);
-    } catch (e) { log('warn', 'ig_cron_fau_failed', { channelId: acc.channel_id, error: e.message }); }
+    } catch (e) { if (isIgThrottleError(e)) throw e; log('warn', 'ig_cron_fau_failed', { channelId: acc.channel_id, error: e.message }); }
     // Абсолютный уровень базы (профильный followers_count) — исторических уровней IG не отдаёт,
     // поэтому фиксируем «сейчас» при каждом дневном сборе. Ставится на вчерашнюю строку: сбор
     // идёт ранним утром, значение ≈ уровень конца вчерашнего дня (честная погрешность в часы,
@@ -109,7 +124,7 @@ function createInstagramCollectionJob({ db, log, igCrypto, igFetch, refreshIgIfN
     try {
       const prof = await igFetch(`/${id}`, { fields: 'followers_count' }, token);
       row.followers_total = igNum(prof && prof.followers_count);
-    } catch (e) { log('warn', 'ig_cron_followers_total_failed', { channelId: acc.channel_id, error: e.message }); }
+    } catch (e) { if (isIgThrottleError(e)) throw e; log('warn', 'ig_cron_followers_total_failed', { channelId: acc.channel_id, error: e.message }); }
     await db.upsertIgDaily(acc.channel_id, [row]);
     return row;
   }
@@ -140,7 +155,7 @@ function createInstagramCollectionJob({ db, log, igCrypto, igFetch, refreshIgIfN
           saved: m.saved ?? null, total_interactions: m.total_interactions ?? null,
           likes: igNum(post.like_count), comments: igNum(post.comments_count),
         });
-      } catch (e) { log('warn', 'ig_cron_media_insight_failed', { channelId: acc.channel_id, media: post.id, error: e.message }); }
+      } catch (e) { if (isIgThrottleError(e)) throw e; log('warn', 'ig_cron_media_insight_failed', { channelId: acc.channel_id, media: post.id, error: e.message }); }
     }
     if (rows.length) await db.upsertIgMediaDaily(acc.channel_id, rows);
     return rows.length;
@@ -161,19 +176,22 @@ function createInstagramCollectionJob({ db, log, igCrypto, igFetch, refreshIgIfN
         { metric: 'total_interactions', breakdown: 'media_product_type', period: 'day', metric_type: 'total_value' },
         { metric: 'profile_links_taps', breakdown: 'contact_button_type', period: 'day', metric_type: 'total_value' },
       ];
-      const settled = await Promise.allSettled(calls.map((c) => igFetch(`/${id}/insights`, c, token)));
+      // Bounded фан-аут (concurrency=2), порядок и per-метрик изоляция сохранены.
+      const settled = await boundedAllSettled(calls, (c) => igFetch(`/${id}/insights`, c, token), 2);
+      for (const r of settled) { if (r.status === 'rejected' && isIgThrottleError(r.reason)) throw r.reason; }
       const data = settled.filter((s) => s.status === 'fulfilled').flatMap((s) => s.value?.data || []);
       if (data.length) await db.saveRawSnapshot(acc.channel_id, 'ig', 'demographics', day, { data });
-    } catch (e) { log('warn', 'ig_cron_demographics_failed', { channelId: acc.channel_id, error: e.message }); }
+    } catch (e) { if (isIgThrottleError(e)) throw e; log('warn', 'ig_cron_demographics_failed', { channelId: acc.channel_id, error: e.message }); }
     // Online followers — почасовая карта (часто пустая → пишем только непустое).
     try {
       const online = await igFetch(`/${id}/insights`, { metric: 'online_followers', period: 'lifetime' }, token);
       const data = online?.data || [];
       if (data.length) await db.saveRawSnapshot(acc.channel_id, 'ig', 'online', day, { data });
-    } catch (e) { log('warn', 'ig_cron_online_failed', { channelId: acc.channel_id, error: e.message }); }
-    // Stories — живут ~24ч, снимаем список + per-story insights (allSettled), иначе теряются навсегда.
-    // Кэп фан-аута: каждая сторис = 7 вызовов insights; ограничиваем число обрабатываемых сторис,
-    // чтобы всплеск активных сторис не сжёг квоту токена за один прогон (типично их единицы).
+    } catch (e) { if (isIgThrottleError(e)) throw e; log('warn', 'ig_cron_online_failed', { channelId: acc.channel_id, error: e.message }); }
+    // Stories — живут ~24ч, снимаем список + per-story insights, иначе теряются навсегда.
+    // Кэп фан-аута: каждая сторис = 7 вызовов insights. Обрабатываем не более 2 сторис
+    // параллельно, а 7 метрик КАЖДОЙ сторис — строго последовательно ⇒ в полёте максимум 2
+    // story-insight вызова. Все 30 сторис, поля, per-метрик best-effort и форма payload сохранены.
     const IG_STORY_MAX = 30;
     try {
       const listRes = await igFetch(`/${id}/stories`, { fields: 'id,media_type,timestamp,permalink,thumbnail_url' }, token);
@@ -181,14 +199,22 @@ function createInstagramCollectionJob({ db, log, igCrypto, igFetch, refreshIgIfN
       if ((listRes.data || []).length > IG_STORY_MAX) {
         log('warn', 'ig_cron_stories_truncated', { channelId: acc.channel_id, total: listRes.data.length, cap: IG_STORY_MAX });
       }
-      const stories = await Promise.all(storyList.map(async (s) => {
+      const settledStories = await boundedAllSettled(storyList, async (s) => {
         const out = { ...s };
-        const st = await Promise.allSettled(STORY_METRICS.map((metric) => igFetch(`/${s.id}/insights`, { metric, metric_type: 'total_value' }, token)));
-        st.forEach((r, i) => { if (r.status === 'fulfilled') { const v = igMetricVal(r.value); if (v != null) out[STORY_METRICS[i]] = v; } });
+        for (let i = 0; i < STORY_METRICS.length; i++) {   // 7 метрик — последовательно, per-метрик best-effort
+          const metric = STORY_METRICS[i];
+          try {
+            const r = await igFetch(`/${s.id}/insights`, { metric, metric_type: 'total_value' }, token);
+            const v = igMetricVal(r);
+            if (v != null) out[metric] = v;
+          } catch (e) { if (isIgThrottleError(e)) throw e; /* перманентная per-метрик ошибка — метрика просто отсутствует */ }
+        }
         return out;
-      }));
+      }, 2);
+      for (const r of settledStories) { if (r.status === 'rejected' && isIgThrottleError(r.reason)) throw r.reason; }
+      const stories = settledStories.filter((r) => r.status === 'fulfilled').map((r) => r.value);
       if (stories.length) await db.saveRawSnapshot(acc.channel_id, 'ig', 'stories', day, { data: stories });
-    } catch (e) { log('warn', 'ig_cron_stories_failed', { channelId: acc.channel_id, error: e.message }); }
+    } catch (e) { if (isIgThrottleError(e)) throw e; log('warn', 'ig_cron_stories_failed', { channelId: acc.channel_id, error: e.message }); }
   }
 
   // Полный дневной сбор для одного IG-аккаунта: дешифровка токена (+ opportunistic refresh,
@@ -203,12 +229,15 @@ function createInstagramCollectionJob({ db, log, igCrypto, igFetch, refreshIgIfN
       return;   // один недешифруемый аккаунт не рушит весь прогон
     }
     token = await refreshIgIfNeeded(acc.channel_id, token, acc.token_expires_at);   // крон = heartbeat рефреша токена
-    try { await collectIgDailyForAccount(acc, token); }        catch (e) { log('error', 'ig_cron_daily_failed', { channelId: acc.channel_id, error: e.message }); }
-    try { await collectIgMediaForAccount(acc, token, day); }   catch (e) { log('error', 'ig_cron_media_failed', { channelId: acc.channel_id, error: e.message }); }
-    try { await collectIgSnapshotsForAccount(acc, token, day); } catch (e) { log('error', 'ig_cron_snapshots_failed', { channelId: acc.channel_id, error: e.message }); }
+    // Throttle из любой секции НЕМЕДЛЕННО пробрасывается наверх (runJobOnce пометит день
+    // failed/retryable, а следующая итерация прохода увидит открытый gate и остановится ДО
+    // claim'а остальных аккаунтов). Перманентные ошибки секции остаются best-effort, изолированы.
+    try { await collectIgDailyForAccount(acc, token); }        catch (e) { if (isIgThrottleError(e)) throw e; log('error', 'ig_cron_daily_failed', { channelId: acc.channel_id, error: e.message }); }
+    try { await collectIgMediaForAccount(acc, token, day); }   catch (e) { if (isIgThrottleError(e)) throw e; log('error', 'ig_cron_media_failed', { channelId: acc.channel_id, error: e.message }); }
+    try { await collectIgSnapshotsForAccount(acc, token, day); } catch (e) { if (isIgThrottleError(e)) throw e; log('error', 'ig_cron_snapshots_failed', { channelId: acc.channel_id, error: e.message }); }
   }
 
   return { collectIgForAccount };
 }
 
-module.exports = { createInstagramCollectionJob };
+module.exports = { createInstagramCollectionJob, isIgThrottleError };
