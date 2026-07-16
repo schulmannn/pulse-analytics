@@ -1085,6 +1085,15 @@ _CHANNEL_PHOTO_BUDGET_S = 8             # max wall-clock for the single avatar d
 _MEDIA_REPAIR_IDS_MAX = 16          # max post ids one repair request may carry
 _MEDIA_REPAIR_BUDGET_S = 20         # max wall-clock spent downloading covers for one repair request
 
+# Same-group album-member cover fallback (POST /qr/media): when the EXACT requested representative of an
+# album yields no cover, a neighbouring member sharing its grouped_id may. Telegram albums are bounded
+# (<=10 contiguous-id members), so a small explicit ± window around the representative reaches every
+# member regardless of its position, and the total neighbour-metadata ids are hard-capped so a batch of
+# misses can never fan out unbounded id probes. A neighbour is trusted ONLY when its grouped_id exactly
+# equals the representative's non-null grouped_id; adjacency alone is never enough.
+_ALBUM_NEIGHBOR_RADIUS = 9          # ± ids around a representative (covers a full 10-member album)
+_ALBUM_MEMBER_LOOKUPS_MAX = 96      # hard cap on neighbour-metadata ids fetched per repair request
+
 
 def _is_persistable_jpeg_cover(data):
     """A bounded JPEG that is safe to embed in the private response and persist in tg_post_media."""
@@ -1844,41 +1853,158 @@ def _clean_media_ids(raw):
     return out
 
 
-async def _collect_media_by_id(tg, messages, budget_s):
+async def _download_cover_bytes(tg, msg, remaining):
+    """One message's small persistable-JPEG cover bytes, or None. Per-download time-boxed against the
+    remaining budget. FloodWait propagates (the caller stops the phase); a per-download timeout or any
+    other failure is swallowed as None so one slow / thumbless id never blocks the others. Never fetches
+    full media — _download_thumb_bytes keeps `thumb` explicit and the acceptor rejects oversized bytes."""
+    try:
+        data = await asyncio.wait_for(
+            _download_thumb_bytes(tg, msg, 'sm', accept=_is_persistable_jpeg_cover),
+            timeout=min(_THUMB_DOWNLOAD_TIMEOUT_S, remaining),
+        )
+    except FloodWaitError:
+        raise                        # rate-limited → the caller stops the whole phase
+    except asyncio.TimeoutError:
+        return None                  # one slow id must not prevent other requested covers succeeding
+    except Exception:
+        return None                  # this id has no usable thumb → skip it
+    return data if _is_persistable_jpeg_cover(data) else None
+
+
+def _append_cover(out, state, post_id, data):
+    """Append one accepted cover under `post_id`, honouring the request-wide total-byte ceiling. Returns
+    False when the ceiling would be exceeded (the caller stops), True when the cover was appended."""
+    if state['total_bytes'] + len(data) > _THUMBS_TOTAL_BYTES_MAX:
+        return False
+    state['total_bytes'] += len(data)
+    out.append({'post_id': post_id, 'size': 'sm', 'jpeg_b64': base64.b64encode(data).decode('ascii')})
+    return True
+
+
+async def _collect_album_neighbor_covers(tg, entity, misses, requested_ids, out, state, downloaded, budget_s):
+    """Bounded same-group fallback: for requested album representatives that produced no cover, pull the
+    metadata of neighbouring ids within a small ± window from the SAME already-resolved `entity`, keep
+    only members whose grouped_id EXACTLY equals the representative's, and append the first persistable
+    photo/video cover UNDER THE ORIGINAL requested id. Never a channel search / dialog scan / new session;
+    the metadata fanout is hard-capped and the whole phase honours the remaining budget and FloodWait.
+    Mutates `out`/`state`/`downloaded` in place; a neighbour id is never emitted as its own result."""
+    if budget_s <= 0 or not misses:
+        return
+    loop = asyncio.get_event_loop()
+    start = loop.time()
+
+    # Nearest-first neighbour ids per miss, requested ids excluded (their reps were already tried, and an
+    # exact requested id must never be re-fetched as a neighbour), the whole set deduped and hard-capped
+    # so a large batch of misses can never fan out unbounded id probes.
+    candidate_ids, seen = [], set()
+    for miss in misses:
+        for delta in range(1, _ALBUM_NEIGHBOR_RADIUS + 1):
+            for nid in (miss.id - delta, miss.id + delta):
+                if nid <= 0 or nid in requested_ids or nid in seen:
+                    continue
+                seen.add(nid)
+                candidate_ids.append(nid)
+        if len(candidate_ids) >= _ALBUM_MEMBER_LOOKUPS_MAX:
+            break
+    candidate_ids = candidate_ids[:_ALBUM_MEMBER_LOOKUPS_MAX]
+    if not candidate_ids:
+        return
+
+    # ONE metadata round-trip against the SAME resolved entity (never a search / dialog scan). Telethon
+    # returns None for ids that don't exist; a FloodWait stops the whole fallback, any other failure just
+    # means no members could be resolved. No media is downloaded here — this is metadata only.
+    try:
+        neighbors = await asyncio.wait_for(
+            tg.get_messages(entity, ids=candidate_ids),
+            timeout=min(_THUMB_DOWNLOAD_TIMEOUT_S, budget_s - (loop.time() - start)))
+    except Exception:
+        return
+
+    by_group = {}
+    for nb in (neighbors or []):
+        if not nb or not (nb.photo or nb.video):   # covers are photo/video only
+            continue
+        gid = getattr(nb, 'grouped_id', None)
+        if gid is None:
+            continue
+        by_group.setdefault(gid, []).append(nb)
+    if not by_group:
+        return
+
+    for miss in misses:
+        remaining = budget_s - (loop.time() - start)
+        if remaining <= 0:
+            break
+        gid = getattr(miss, 'grouped_id', None)
+        members = by_group.get(gid) if gid is not None else None
+        if not members:
+            continue
+        for member in sorted(members, key=lambda m: abs(m.id - miss.id)):   # nearest member first
+            remaining = budget_s - (loop.time() - start)
+            if remaining <= 0:
+                break
+            if member.id in downloaded:            # never download the same media twice
+                continue
+            downloaded.add(member.id)
+            try:
+                data = await _download_cover_bytes(tg, member, remaining)
+            except FloodWaitError:
+                return                             # rate-limited → stop the whole fallback
+            if data is None:
+                continue
+            if not _append_cover(out, state, str(miss.id), data):
+                return                             # total-byte ceiling reached
+            break                                  # this requested id is now satisfied
+
+
+async def _collect_media_by_id(tg, messages, budget_s, entity=None):
     """Best-effort small covers for a bounded set of EXACT messages (fetched by id). Mirrors
     _collect_post_thumbs' bounds — per-download timeout, JPEG magic + byte limits, total-byte ceiling —
     but skips nothing else: a per-message miss (no media / no thumb / download error) is swallowed so the
     other requested ids still succeed. FloodWait / budget exhaustion stop the phase early. Returns
-    [{post_id, size, jpeg_b64}] (post_id a decimal STRING) for the web side to persist into tg_post_media."""
+    [{post_id, size, jpeg_b64}] (post_id a decimal STRING) for the web side to persist into tg_post_media.
+
+    When `entity` is supplied, a requested representative that yields no cover BUT belongs to an album
+    (non-null grouped_id) gets a bounded same-group fallback (_collect_album_neighbor_covers): a
+    neighbouring member sharing its grouped_id is tried and its cover returned UNDER THE ORIGINAL
+    requested id. Exact ids stay canonical; non-album misses (no grouped_id) never expand."""
     out = []
     if budget_s <= 0:
         return out
     loop = asyncio.get_event_loop()
     start = loop.time()
-    total_bytes = 0
+    state = {'total_bytes': 0}
+    requested_ids = {m.id for m in messages if m}
+    downloaded = set()   # message ids already downloaded → never re-downloaded (exact pass + fallback)
+    misses = []          # album representatives (grouped_id set) that produced no cover
+    flooded = False
     for msg in messages:
         remaining = budget_s - (loop.time() - start)
         if remaining <= 0:
             break
         if not msg or not (msg.photo or msg.video):   # covers are photo/video only (matches the frontend)
+            if msg and getattr(msg, 'grouped_id', None) is not None:
+                misses.append(msg)   # a non-photo/video album rep can still be repaired from a member
             continue
+        downloaded.add(msg.id)
         try:
-            data = await asyncio.wait_for(
-                _download_thumb_bytes(tg, msg, 'sm', accept=_is_persistable_jpeg_cover),
-                timeout=min(_THUMB_DOWNLOAD_TIMEOUT_S, remaining),
-            )
+            data = await _download_cover_bytes(tg, msg, remaining)
         except FloodWaitError:
+            flooded = True
             break                    # rate-limited → stop the whole phase, return what we have
-        except asyncio.TimeoutError:
-            continue                 # one slow id must not prevent other requested covers succeeding
-        except Exception:
-            continue                 # this id has no usable thumb → skip it, try the next
-        if not data or len(data) < 4 or len(data) > _THUMB_MAX_BYTES or data[:2] != b'\xff\xd8':
+        if data is None:
+            if getattr(msg, 'grouped_id', None) is not None:
+                misses.append(msg)
             continue
-        if total_bytes + len(data) > _THUMBS_TOTAL_BYTES_MAX:
-            break
-        total_bytes += len(data)
-        out.append({'post_id': str(msg.id), 'size': 'sm', 'jpeg_b64': base64.b64encode(data).decode('ascii')})
+        if not _append_cover(out, state, str(msg.id), data):
+            break                    # total-byte ceiling reached
+    # Same-group album-member fallback for the misses, unless we were flood-limited (stop paying) or the
+    # entity is absent (the exact-only path keeps its original non-expanding behaviour).
+    if entity is not None and misses and not flooded:
+        await _collect_album_neighbor_covers(
+            tg, entity, misses, requested_ids, out, state, downloaded,
+            budget_s - (loop.time() - start))
     return out
 
 
@@ -1895,7 +2021,11 @@ async def qr_media(session: str = Body(...), channel: str = Body(...),
     pipeline. Bounded by the same ephemeral-collect bulkhead (_QR_COLLECT_SEM) as /qr/collect and the
     STATS_TOTAL_BUDGET_S ceiling; the session is read from the body and is NEVER logged. Uses the same
     entity-identity safeguard (_resolve_channel_entity + returned identity) so the web side can verify
-    the resolved channel matches the requested one before trusting/persisting any bytes."""
+    the resolved channel matches the requested one before trusting/persisting any bytes.
+
+    When a requested id is an album representative with no cover of its own, a bounded same-group
+    fallback tries neighbouring members (same grouped_id, same resolved entity, small ± id window) and
+    returns their cover UNDER THE ORIGINAL requested id — exact ids stay canonical."""
     check_auth(x_internal_token)
     if not API_ID or not API_HASH:
         raise HTTPException(status_code=503, detail='mtproto_not_configured')
@@ -1921,7 +2051,9 @@ async def qr_media(session: str = Body(...), channel: str = Body(...),
         # Time-box the download phase against BOTH its own sub-budget and the remaining total budget, so
         # a slow media file can never push the request over the STATS_TOTAL_BUDGET_S ceiling.
         remaining = min(_MEDIA_REPAIR_BUDGET_S, STATS_TOTAL_BUDGET_S - (loop.time() - t0))
-        covers = await _collect_media_by_id(tg, messages, remaining)
+        # `entity` enables the bounded same-group album-member cover fallback for requested album
+        # representatives that yield no cover of their own; neighbours resolve through THIS same entity.
+        covers = await _collect_media_by_id(tg, messages, remaining, entity=entity)
         # Resolved identity (int64 as STRINGS) for the web side to verify against the requested channel
         # — the same guard /qr/collect uses. Private web↔mtproto field, never part of a browser response.
         return {'covers': covers, 'entity': _entity_identity(entity)}
