@@ -433,7 +433,7 @@ function createTgQrCollectionJob({ db, liveDb = db, log, tgCrypto, mtprotoPost, 
       // This versioned shape also bypasses the legacy rows PR #231 could incorrectly complete on a
       // transient web↔mtproto deployment skew.
       const sessionGeneration = sess.session_version == null ? 'legacy' : String(sess.session_version);
-      const outcome = await db.runJobOnce('tg_media_repair', `${centralId}:${sessionGeneration}:recent-v2:${bucket}`, async () => {
+      const outcome = await db.runJobOnce('tg_media_repair', `${centralId}:${sessionGeneration}:recent-v3:${bucket}`, async () => {
         const stats = { attempted: false, requested: 0, filled: 0 };
         let missing = [];
         try {
