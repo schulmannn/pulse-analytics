@@ -145,7 +145,7 @@ function createDatabase(config, overrides = {}) {
   // ── Channels (tenants): видимость/доступ/tg-id → server/repos/channelsRepo (createChannelsRepo, spread в exports).
   // Tenancy-предикаты (sameTenantSource / channelAccessSql / channelAdminAccessSql) → server/db/access.
 
-  // Collector writes (num/INT4-clamp, graphsToDailyRows, upsert daily/posts/mentions, saveSnapshot,
+  // Collector writes (num→BIGINT metric normalization, graphsToDailyRows, upsert daily/posts/mentions, saveSnapshot,
   // ingestCollectorPayload, persistCentralDaily/persistTgBundleTx) → server/repos/collectorRepo.
 
   // getCollectorStatus (connection-status; writes живут в ingest выше) → server/repos/integrationsRepo.

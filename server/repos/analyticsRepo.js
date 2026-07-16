@@ -20,6 +20,23 @@
 
 const { sameTenantSource, channelAccessSql } = require('../db/access');
 const { parseMentionsRange, rangeDayCount } = require('../lib/mentionsRange');
+const { toMetricNumber } = require('../lib/metricNumber');
+
+// Metric counter columns are BIGINT (migration 023); node-postgres returns BIGINT as a decimal
+// STRING. Convert exactly the widened counters back to JS numbers (safe within MAX_SAFE_METRIC) so
+// the API contract keeps emitting numbers; identifiers (post_id, mention channel_id/msg_id) stay
+// strings and are handled separately.
+const CHANNEL_DAILY_METRICS = ['subscribers', 'joins', 'leaves', 'views', 'forwards', 'reactions'];
+const POST_METRICS = ['views', 'reactions', 'forwards', 'replies'];
+const IG_DAILY_METRICS = ['followers', 'followers_total', 'reach', 'views', 'profile_views',
+  'accounts_engaged', 'total_interactions', 'likes', 'comments', 'saves', 'shares', 'follows', 'unfollows'];
+const IG_MEDIA_METRICS = ['reach', 'likes', 'comments', 'saved', 'shares', 'views'];
+const IG_TAG_METRICS = ['like_count', 'comments_count'];
+const numifyMetrics = (row, keys) => {
+  const out = { ...row };
+  for (const k of keys) out[k] = toMetricNumber(out[k]);
+  return out;
+};
 
 /** Positive-bigint mentioning-channel id (as a string for pg bigint params), or null on garbage. */
 function normalizeSourceId(v) {
@@ -49,7 +66,7 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
               OR d.channel_id = c.id)
          AND d.day >= (CURRENT_DATE - $2::int)
        ORDER BY d.day ASC, d.captured_at DESC NULLS LAST`, [channelId, days]);
-    return rows;
+    return rows.map((r) => numifyMetrics(r, CHANNEL_DAILY_METRICS));
   }
 
   async function getMentionsHistoryInternal(channelId) {
@@ -59,7 +76,10 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
     const byMonth = await pool.query(
       `SELECT to_char(date_trunc('month', COALESCE(post_date, first_seen)),'YYYY-MM') AS month, count(*)::int AS c
        FROM mentions WHERE owner_channel_id=$1 GROUP BY 1 ORDER BY 1`, [channelId]);
-  return { total: total.rows[0], by_month: byMonth.rows };
+    return {
+      total: total.rows[0] ? { ...total.rows[0], views: toMetricNumber(total.rows[0].views) } : null,
+      by_month: byMonth.rows,
+    };
   }
 
   // Full mentions panel from the archive — same shape renderMentions() expects from the live
@@ -199,13 +219,13 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
       previous = {
         total: pt.total || 0,
         unique_channels: pt.unique_channels || 0,
-        total_views: Number(pt.total_views || 0),
+        total_views: toMetricNumber(pt.total_views || 0),
       };
       previous_daily = (await pool.query(
         `SELECT to_char(${dayExpr}::date,'YYYY-MM-DD') AS day, count(*)::int AS mentions,
                 COALESCE(sum(views),0)::bigint AS views, count(distinct channel_id)::int AS channels
            FROM mentions WHERE ${prev.clause} GROUP BY 1 ORDER BY 1`, prev.params)).rows
-        .map((r) => ({ day: r.day, mentions: r.mentions, views: Number(r.views || 0), channels: r.channels }));
+        .map((r) => ({ day: r.day, mentions: r.mentions, views: toMetricNumber(r.views || 0), channels: r.channels }));
     }
 
     const t = totals.rows[0] || {};
@@ -216,14 +236,19 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
       available: true,
       total: t.total || 0,
       unique_channels: t.unique_channels || 0,
-      total_views: Number(t.total_views || 0),
+      total_views: toMetricNumber(t.total_views || 0),
       by_day,
       // pg отдаёт bigint строкой — приводим к number (сумма просмотров << 2^53, точность не страдает;
       // строка ломала бы zod-схему фронта и арифметику сортировок). ::int здесь переполнялся.
-      top_channels: channels.rows.map((r) => ({ ...r, views: Number(r.views || 0) })),
+      top_channels: channels.rows.map((r) => ({ ...r, views: toMetricNumber(r.views || 0) })),
       // channel_id (TG peer id) — идентификатор для клик-фильтра источника: держим строкой (bigint).
-      recent: recent.rows.map((r) => ({ ...r, channel_id: r.channel_id != null ? String(r.channel_id) : null })),
-      daily: daily.rows.map((r) => ({ day: r.day, mentions: r.mentions, views: Number(r.views || 0), channels: r.channels })),
+      // views — BIGINT-счётчик (023): pg отдаёт строкой, приводим к числу в границах MAX_SAFE_METRIC.
+      recent: recent.rows.map((r) => ({
+        ...r,
+        channel_id: r.channel_id != null ? String(r.channel_id) : null,
+        views: toMetricNumber(r.views),
+      })),
+      daily: daily.rows.map((r) => ({ day: r.day, mentions: r.mentions, views: toMetricNumber(r.views || 0), channels: r.channels })),
       previous,
       previous_daily,
       source_options: sourceOpts.rows.map((r) => ({
@@ -231,12 +256,12 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
         title: r.title,
         username: r.username,
         count: r.count,
-        views: Number(r.views || 0),
+        views: toMetricNumber(r.views || 0),
       })),
       source_summary: {
         total: sourceOpts.rows[0]?.period_total || 0,
         unique_channels: sourceOpts.rows[0]?.period_channels || 0,
-        total_views: Number(sourceOpts.rows[0]?.period_views || 0),
+        total_views: toMetricNumber(sourceOpts.rows[0]?.period_views || 0),
       },
       scope: {
         // days=0 при своём диапазоне: фронт различает окно по from/to, а не по days-пресету.
@@ -300,7 +325,8 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
          ) latest
         ORDER BY date DESC NULLS LAST, id DESC
         LIMIT $2`, [channelId, safeLimit]);
-    return rows;
+    // id (post_id) is a BIGINT identifier — leave it as pg returned it; only the counters are numified.
+    return rows.map((r) => numifyMetrics(r, POST_METRICS));
   }
 
   // ── Read helpers (история для будущих графиков) ──
@@ -311,7 +337,7 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
               accounts_engaged, total_interactions, likes, comments, saves, shares, follows, unfollows
          FROM ig_daily WHERE channel_id=$1 AND day >= (CURRENT_DATE - $2::int) ORDER BY day ASC`,
       [channelId, days]);
-    return rows;
+    return rows.map((r) => numifyMetrics(r, IG_DAILY_METRICS));
   }
 
   async function listIgMediaDailyInternal(channelId, days = 400) {
@@ -320,7 +346,8 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
       `SELECT media_id, to_char(day,'YYYY-MM-DD') AS day, reach, likes, comments, saved, shares, views
          FROM ig_media_daily WHERE channel_id=$1 AND day >= (CURRENT_DATE - $2::int)
          ORDER BY media_id ASC, day ASC`, [channelId, days]);
-    return rows;
+    // media_id stays a TEXT identifier; only the BIGINT counters are numified.
+    return rows.map((r) => numifyMetrics(r, IG_MEDIA_METRICS));
   }
 
   // ── Actor-gated reads: сначала проверяем доступ, иначе пусто (ПУТЬ ДЛЯ РОУТОВ) ──────────────────
@@ -360,7 +387,7 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
               to_char(posted_at,'YYYY-MM-DD"T"HH24:MI:SS') AS timestamp,
               to_char(first_seen,'YYYY-MM-DD"T"HH24:MI:SS') AS first_seen
        FROM ig_tags ORDER BY posted_at DESC NULLS LAST, first_seen DESC LIMIT $1`, [limit]);
-    return rows;
+    return rows.map((r) => numifyMetrics(r, IG_TAG_METRICS));
   }
 
   // ── Connection-status коллектора (read; writes живут в ingest/collectorRepo) ───────

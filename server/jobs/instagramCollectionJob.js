@@ -12,6 +12,8 @@
 
 'use strict';
 
+const { toMetricInt } = require('../lib/metricNumber');
+
 function createInstagramCollectionJob({ db, log, igCrypto, igFetch, refreshIgIfNeeded }) {
   // Достаём total_value одной total_value-метрики из ответа /insights.
   // Story-insight metric list + single-metric value parser — used by collectIgSnapshotsForAccount below.
@@ -49,9 +51,10 @@ function createInstagramCollectionJob({ db, log, igCrypto, igFetch, refreshIgIfN
     return { follows: clamp(wide.follows, narrow.follows), unfollows: clamp(wide.unfollows, narrow.unfollows) };
   };
   const IG_TV_NAMES = ['views', 'profile_views', 'accounts_engaged', 'total_interactions', 'likes', 'comments', 'saves', 'shares'];
-  // Кламп к INT4 — как num() в db.js: переполнение одного счётчика не должно валить upsert дня.
-  const IG_INT4_MAX = 2147483647;
-  const igNum = (v) => (v == null || isNaN(v)) ? null : Math.max(-IG_INT4_MAX - 1, Math.min(IG_INT4_MAX, Math.round(Number(v))));
+  // Нормализация счётчика — та же, что num() в collectorRepo: колонки ig_daily/ig_media_daily теперь
+  // BIGINT (миграция 023), поэтому принимаем точные целые до MAX_SAFE_METRIC, а всё за границей честно
+  // даёт null вместо выдуманного насыщенного значения. null и ноль сохраняются как есть.
+  const igNum = toMetricInt;
 
   // Собираем дневные метрики аккаунта ровно за ОДИН календарный день — ВЧЕРА (UTC).
   // Окно строго [вчера 00:00, сегодня 00:00): сегодня частичный/нефинализированный, а окно

@@ -41,6 +41,34 @@ test('collector contract coerces metrics and prepares normalized storage rows', 
   assert.strictEqual(storage.dailyRows.length, 1);
 });
 
+test('contract accepts safe >INT4 metrics (BIGINT columns) without clamping', () => {
+  const payload = validPayload();
+  const BIG = 3_000_000_000; // > INT4_MAX (2_147_483_647)
+  payload.channel.members = String(BIG);
+  payload.posts[0].views = String(BIG);
+  payload.posts[0].reactions = String(BIG + 1);
+  payload.graphs.growth.series[0].values = [String(BIG)];
+  payload.mentions = [{ channel_id: '777', msg_id: '42', views: String(BIG), date: '2026-06-25T10:00:00Z' }];
+
+  const normalized = normalizeEnvelope(payload);
+  assert.strictEqual(normalized.channel.members, BIG);
+  assert.strictEqual(normalized.posts[0].views, BIG);
+  assert.strictEqual(normalized.posts[0].reactions, BIG + 1);
+  assert.strictEqual(normalized.graphs.growth.series[0].values[0], BIG);
+  assert.strictEqual(normalized.mentions[0].views, BIG);
+});
+
+test('contract rejects a metric beyond MAX_SAFE_METRIC (honest error, never saturated)', () => {
+  const OVER = '9000000000000001'; // > 9e15 = MAX_SAFE_METRIC
+  const postPayload = validPayload();
+  postPayload.posts[0].views = OVER;
+  assert.throws(() => normalizeEnvelope(postPayload), ContractError);
+
+  const graphPayload = validPayload();
+  graphPayload.graphs.growth.series[0].values = [OVER];
+  assert.throws(() => normalizeEnvelope(graphPayload), ContractError);
+});
+
 test('unsupported collector schema is rejected with a contract error', () => {
   const payload = validPayload();
   payload.schema_version = 99;

@@ -2,13 +2,12 @@
 
 const crypto = require('crypto');
 const { captionSnippet } = require('../lib/caption');
+const { MAX_SAFE_METRIC } = require('../lib/metricNumber');
 
 const CURRENT_SCHEMA_VERSION = 1;
 const SUPPORTED_SCHEMA_VERSIONS = [1];
 const MAX_ROWS = 500;
 const MAX_SNAPSHOT_BYTES = 2_000_000;
-const MAX_SAFE_METRIC = 9_000_000_000_000_000;
-const MAX_DB_INTEGER = 2_147_483_647;
 
 class ContractError extends Error {
   constructor(message, details = []) {
@@ -71,17 +70,19 @@ function sanitizeJson(value, depth = 0) {
 function normalizeNumericTree(value, key = '') {
   if (Array.isArray(value)) {
     if (/^(x|values|hours)$/.test(key)) {
-      const max = key === 'x' || key === 'hours' ? MAX_SAFE_METRIC : MAX_DB_INTEGER;
+      // `values` feed BIGINT metric columns (channel_daily/stats), so a >INT4 but safe daily count is
+      // accepted, not rejected; only >MAX_SAFE_METRIC throws. `x`/`hours` are timestamps/hour indices.
       return value.map(v => v == null && key !== 'x'
         ? null
-        : number(v, { min: 0, max, nullable: false }));
+        : number(v, { min: 0, max: MAX_SAFE_METRIC, nullable: false }));
     }
     return value.map(v => normalizeNumericTree(v));
   }
   if (!value || typeof value !== 'object') {
     if (key === 'id') return number(value, { integer: true, min: 1, max: MAX_SAFE_METRIC });
     if (/^(members|admins|online|current|previous|value|views|forwards|reactions|replies|count|total|channels|avg_views|avg_forwards|posts_analyzed|posts_used|unique_channels|total_views|day|share|cum|day1_share|t80_days)$/.test(key)) {
-      return number(value, { min: 0, max: MAX_DB_INTEGER });
+      // Metric-bearing scalars now back BIGINT columns/snapshots — safe >INT4 values pass, >9e15 throws.
+      return number(value, { min: 0, max: MAX_SAFE_METRIC });
     }
     return value;
   }
@@ -99,10 +100,10 @@ function normalizePost(post) {
     id,
     date: post.date ? isoDate(post.date) : null,
     text: text(post.text, 1000) || '',
-    views: number(post.views, { integer: true, min: 0, max: MAX_DB_INTEGER }) || 0,
-    forwards: number(post.forwards, { integer: true, min: 0, max: MAX_DB_INTEGER }) || 0,
-    replies: number(post.replies, { integer: true, min: 0, max: MAX_DB_INTEGER }) || 0,
-    reactions: number(post.reactions, { integer: true, min: 0, max: MAX_DB_INTEGER }) || 0,
+    views: number(post.views, { integer: true, min: 0, max: MAX_SAFE_METRIC }) || 0,
+    forwards: number(post.forwards, { integer: true, min: 0, max: MAX_SAFE_METRIC }) || 0,
+    replies: number(post.replies, { integer: true, min: 0, max: MAX_SAFE_METRIC }) || 0,
+    reactions: number(post.reactions, { integer: true, min: 0, max: MAX_SAFE_METRIC }) || 0,
     reactions_detail: sanitizeJson(post.reactions_detail || []),
     media_type: text(post.media_type, 40) || 'text',
     hashtags: Array.isArray(post.hashtags)
@@ -123,7 +124,7 @@ function normalizeMention(mention) {
     username: text(mention.username, 100),
     link: text(mention.link, 500),
     snippet: text(mention.snippet, 1000),
-    views: number(mention.views, { integer: true, min: 0, max: MAX_DB_INTEGER }) || 0,
+    views: number(mention.views, { integer: true, min: 0, max: MAX_SAFE_METRIC }) || 0,
     query: text(mention.query, 200),
   };
 }
