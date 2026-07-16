@@ -35,6 +35,11 @@ function makeWorkerComposition({ enabled = true, pools } = {}) {
       start() { events.push('runner.start'); },
       stop() { events.push('runner.stop'); },
     },
+    // Operational runner is web-only: the worker builds it but must NEVER start or stop it.
+    operationalRunner: {
+      start() { events.push('operational.start'); },
+      stop() { events.push('operational.stop'); },
+    },
     jobTracker: {
       run: tracker.run,
       get activeCount() { return tracker.activeCount; },
@@ -115,6 +120,23 @@ test('worker boots, starts the runner behind a ref keepalive, no HTTP', async ()
   assert.equal(created[0].unrefed, false, 'keepalive НЕ unref — держит event loop живым');
 
   await runtime.stop();
+});
+
+test('worker never starts or stops the operational runner (web-only)', async () => {
+  const { composition, events } = makeWorkerComposition();
+  const { setIntervalFn, clearIntervalFn } = makeIntervals(events);
+  const runtime = await runWorker({
+    env: WORKER_ENV,
+    compositionFactory: () => composition,
+    installSignalHandlers: false,
+    shutdownTimeoutMs: 1_000,
+    setIntervalFn,
+    clearIntervalFn,
+  });
+  assert.ok(events.includes('runner.start'), 'collection runner стартует в worker');
+  assert.equal(events.includes('operational.start'), false, 'operational runner НЕ стартует в worker');
+  await runtime.stop();
+  assert.equal(events.includes('operational.stop'), false, 'operational runner НЕ гасится в worker (никогда не запускался)');
 });
 
 test('worker shutdown order: stop scheduling → clear keepalive → drain → cache → close pools (idempotent)', async () => {

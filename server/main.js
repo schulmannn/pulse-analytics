@@ -92,6 +92,10 @@ async function main({
   // Recovery-бегунок фонового сбора: стартует ПОСЛЕ listen (не задерживает readiness); инертен при
   // выключенной БД и в composition без этого поля (тесты жизненного цикла).
   composition.collectionRunner?.start?.();
+  // Operational-бегунок (scheduled-отчёты + дневная maintenance): стартует web-only ПОСЛЕ listen рядом
+  // с collection runner; инертен при выключенной БД и в composition без этого поля (тесты жизненного
+  // цикла). Standalone worker его НЕ стартует.
+  composition.operationalRunner?.start?.();
   const boundAddress = server.address();
   const boundPort =
     boundAddress && typeof boundAddress === 'object'
@@ -163,6 +167,9 @@ async function main({
       // Останавливаем планирование новых recovery-проходов ДО дренажа: уже сабмиченный проход
       // отслеживается jobTracker и дожидается в waitForIdle ниже; новые не заводятся.
       composition.collectionRunner?.stop?.();
+      // Operational-бегунок гасится симметрично — ДО дренажа: уже сабмиченный проход дожидается
+      // jobTracker в waitForIdle ниже; новые проходы не заводятся.
+      composition.operationalRunner?.stop?.();
 
       // Existing requests may schedule post-response tails, so stop accepting traffic
       // and let all request handlers finish before freezing the tracker.

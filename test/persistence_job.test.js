@@ -341,6 +341,131 @@ test('gate: account-scoped 429 роняет свой аккаунт, но при
   assert.equal(stats.pacedStop, undefined);
 });
 
+// ── runDailyMaintenance return shape + durable once-per-UTC-day gate (runDailyMaintenanceOnce) ──────
+test('runDailyMaintenance: возвращает { failed: [] } при полном успехе и НЕ бросает', async () => {
+  const { job } = makeMaintenanceJob();   // флаги OFF → только базовые prune, все успешны
+  const r = await job.runDailyMaintenance();
+  assert.deepEqual(r, { failed: [] });
+});
+
+test('runDailyMaintenance: упавший сабстеп попадает в failed[], но все сабстепы всё равно пытаются', async () => {
+  const { job, calls } = makeMaintenanceJob({
+    flags: {
+      ingestReceiptsRetentionEnabled: true, ingestReceiptsRetentionDays: 90,
+      auditEventsRetentionEnabled: true, auditEventsRetentionDays: 365,
+    },
+    throwOn: 'ingest',
+  });
+  const r = await job.runDailyMaintenance();   // не бросает
+  assert.deepEqual(r.failed, ['ingest_receipts']);
+  assert.deepEqual(calls.audit, { maxAgeDays: 365 }, 'audit-сабстеп всё равно выполнен после падения ingest');
+});
+
+// Durable per-UTC-day gate: fake runJobOnce keyed on the daily_maintenance:<day> key. Succeeded →
+// skip; failed → re-claimable (fn runs again next same-day call).
+function makeOnceJob({ flags = {}, throwOn = null } = {}) {
+  const jobs = new Map();
+  const calls = { runs: 0, ingest: 0 };
+  const db = {
+    enabled: true,
+    pruneRawSnapshots: async () => {},
+    pruneIgMediaDaily: async () => {},
+    pruneTerminalJobs: async () => ({ deleted: 0, batches: 0, capped: false }),
+    pruneEmailTokens: async () => ({ deleted: 0, batches: 0, capped: false }),
+    pruneIngestReceipts: async () => {
+      calls.ingest += 1;
+      if (throwOn === 'ingest') throw new Error('ingest prune boom');
+      return { deleted: 0, batches: 0, capped: false };
+    },
+    runJobOnce: async (_kind, key, fn) => {
+      const existing = jobs.get(key);
+      if (existing && existing.status === 'succeeded') return { skipped: true, job: existing };
+      calls.runs += 1;
+      try { const result = await fn(); jobs.set(key, { status: 'succeeded', result }); return { skipped: false, result }; }
+      catch (e) { jobs.set(key, { status: 'failed' }); throw e; }
+    },
+  };
+  const job = createPersistenceJob({
+    db,
+    log: () => {},
+    igCrypto: { configured: () => true },
+    collectIgForAccount: async () => {},
+    capacityRollups: false,
+    igAccountsPerPass: 25,
+    ...flags,
+  });
+  return { job, calls, jobs };
+}
+
+test('runDailyMaintenanceOnce: первый вызов дня выполняет сабстепы, второй same-day пропускается', async () => {
+  const { job, calls } = makeOnceJob();
+  const first = await job.runDailyMaintenanceOnce();
+  assert.equal(first.skipped, false);
+  assert.deepEqual(first.result, { ok: true });
+  const second = await job.runDailyMaintenanceOnce();
+  assert.equal(second.skipped, true, 'второй вызов того же дня пропущен (durable gate)');
+  assert.equal(calls.runs, 1, 'fn под claim выполнен ровно один раз');
+});
+
+test('runDailyMaintenanceOnce: сбой сабстепа → все сабстепы всё равно выполнены, gate бросает (row failed), next same-day ретраит', async () => {
+  const { job, calls } = makeOnceJob({
+    flags: { ingestReceiptsRetentionEnabled: true, ingestReceiptsRetentionDays: 90 },
+    throwOn: 'ingest',
+  });
+  await assert.rejects(job.runDailyMaintenanceOnce(), /daily_maintenance substeps failed/);
+  assert.equal(calls.ingest, 1, 'упавший сабстеп был вызван');
+  // Row failed → re-claimable: следующий same-day вызов снова запускает fn (не пропущен).
+  await assert.rejects(job.runDailyMaintenanceOnce(), /daily_maintenance substeps failed/);
+  assert.equal(calls.runs, 2, 'failed-строка переклеймлена и fn выполнен снова');
+  assert.equal(calls.ingest, 2);
+});
+
+test('runDailyMaintenanceOnce: DB выключена → инертный skip без обращения к runJobOnce', async () => {
+  let called = false;
+  const job = createPersistenceJob({
+    db: { enabled: false, runJobOnce: async () => { called = true; return {}; } },
+    log: () => {},
+    igCrypto: { configured: () => true },
+    collectIgForAccount: async () => {},
+    capacityRollups: false,
+  });
+  assert.deepEqual(await job.runDailyMaintenanceOnce(), { skipped: true });
+  assert.equal(called, false);
+});
+
+test('processPersistence: maintenance идёт через durable once-gate (второй same-day проход пропущен)', async () => {
+  const jobs = new Map();
+  const calls = { maintenanceRuns: 0, pruned: 0 };
+  const done = new Set();
+  const db = {
+    enabled: true,
+    saveRawSnapshot: async () => {},
+    listIgAccounts: async () => [],
+    pruneRawSnapshots: async () => { calls.pruned += 1; },
+    pruneIgMediaDaily: async () => {},
+    runJobOnce: async (kind, key, fn) => {
+      if (kind === 'daily_maintenance') {
+        const existing = jobs.get(key);
+        if (existing && existing.status === 'succeeded') return { skipped: true, job: existing };
+        calls.maintenanceRuns += 1;
+        try { const result = await fn(); jobs.set(key, { status: 'succeeded', result }); return { skipped: false, result }; }
+        catch (e) { jobs.set(key, { status: 'failed' }); throw e; }
+      }
+      // ig_account_collect path (no accounts here) — generic passthrough
+      const id = key.split(':')[0];
+      if (done.has(id)) return { skipped: true };
+      const r = await fn(); done.add(id); return { skipped: false, result: r };
+    },
+  };
+  const job = createPersistenceJob({
+    db, log: () => {}, igCrypto: { configured: () => true },
+    collectIgForAccount: async () => {}, capacityRollups: false, igAccountsPerPass: 25,
+  });
+  await job.processPersistence(50, { available: true });
+  await job.processPersistence(50, { available: true });   // тот же UTC-день
+  assert.equal(calls.maintenanceRuns, 1, 'maintenance выполнена один раз за день, несмотря на два прохода');
+});
+
 test('runDailyMaintenance: DB выключена → maintenance no-op, прунинг не вызывается даже при флагах ON', async () => {
   const calls = { ingest: 0, audit: 0 };
   const job = createPersistenceJob({

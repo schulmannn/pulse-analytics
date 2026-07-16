@@ -34,6 +34,9 @@ const { createJobTracker } = require('./infrastructure/jobTracker');
 const {
   createCollectionRecoveryRunner,
 } = require('./infrastructure/collectionRecoveryRunner');
+const {
+  createOperationalRunner,
+} = require('./infrastructure/operationalRunner');
 
 function createComposition(config, overrides = {}) {
   const log = overrides.log || defaultLog;
@@ -251,7 +254,7 @@ function createComposition(config, overrides = {}) {
   // Оркестратор дневного персистенса (сырой TG-снимок, IG-сбор per-account/day под runJobOnce,
   // прунинг, capacity-rollup) — jobs/persistenceJob. Зовётся как отслеживаемый post-response tail;
   // его runIgCollectionPass переиспользует и recovery-бегунок. Всё на backgroundDb.
-  const { processPersistence, runIgCollectionPass } = createPersistenceJob({
+  const { processPersistence, runIgCollectionPass, runDailyMaintenanceOnce } = createPersistenceJob({
     db: backgroundDb,
     log,
     igCrypto,
@@ -322,6 +325,7 @@ function createComposition(config, overrides = {}) {
     emailBtn,
     escHtml,
     emailConfigured,
+    dispatchConcurrency: config.runtime.reportDispatchConcurrency,
   });
 
   // Дневной TG-ingest центрального канала — jobs/dailyIngestJob; роут в app.js оставляет
@@ -440,6 +444,24 @@ function createComposition(config, overrides = {}) {
       enabled: !!backgroundDb.enabled && recoveryMode !== 'external',
     });
 
+  // Operational-бегунок (scheduled-отчёты + дневная maintenance): устраняет единственную внешнюю
+  // зависимость от POST /api/ingest/daily. Web-only и НЕ mode-gated (в отличие от collection runner
+  // выше): собирается всегда, включён при поднятой БД, стартует только web main.js ПОСЛЕ listen и
+  // гасится в stop() до закрытия пулов. Standalone worker строит его инертным, но никогда не стартует.
+  // База ссылок — канонический config.http.publicUrl (request-объекта здесь нет).
+  const operationalRunner =
+    overrides.operationalRunner ||
+    createOperationalRunner({
+      log,
+      jobTracker,
+      processReportSchedules,
+      runDailyMaintenanceOnce,
+      publicUrl: config.http.publicUrl,
+      initialDelayMs: config.runtime.operationalRunnerInitialDelayMs,
+      intervalMs: config.runtime.operationalRunnerIntervalMs,
+      enabled: !!backgroundDb.enabled,
+    });
+
   // Реальные пулы, которые обязан закрыть main.js РОВНО по одному разу. Set дедуплицирует случай
   // backgroundDb === db (инъектированный тестовый db переиспользуется как фоновый).
   const databases = Array.from(new Set([db, backgroundDb]));
@@ -455,6 +477,7 @@ function createComposition(config, overrides = {}) {
     memoryCache: cache,
     jobTracker,
     collectionRunner,
+    operationalRunner,
     collectionRecoveryMode: recoveryMode,
     drainState,
     adapters: Object.freeze({ mtprotoClient, igCrypto, tgCrypto, notionCrash }),
