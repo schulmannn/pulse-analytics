@@ -5,6 +5,7 @@
 // demo looks identical on every render and never trips React's strict-mode double-invoke.
 
 import { DEMO_CHANNEL_ID } from '@/lib/demo';
+import { periodDateTimestamp } from '@/lib/period';
 
 const DAY_MS = 86_400_000;
 const now = Date.now();
@@ -136,7 +137,9 @@ const TG_VELOCITY = {
 const growthValues = HISTORY_ROWS.slice(-30).map((r) => Number(r.subscribers));
 const viewsValues = HISTORY_ROWS.slice(-30).map((r) => Number(r.views));
 const reactValues = HISTORY_ROWS.slice(-30).map((r) => Number(r.reactions));
-const xAxis = HISTORY_ROWS.slice(-30).map((r) => Math.floor(new Date(String(r.day)).getTime() / 1000));
+// Telegram StatsGraph x values are epoch milliseconds. Keeping the demo in the same unit is
+// essential: page-period windowing otherwise interprets every point as a date in January 1970.
+const xAxis = HISTORY_ROWS.slice(-30).map((r) => periodDateTimestamp(String(r.day)));
 const TG_GRAPHS = {
   growth: { x: xAxis, series: [{ name: 'Подписчики', values: growthValues }] },
   followers: { x: xAxis, series: [{ name: 'Подписчики', values: growthValues }] },

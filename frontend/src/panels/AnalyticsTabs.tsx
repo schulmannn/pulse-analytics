@@ -1,7 +1,13 @@
+import { useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { fmt, pluralRu } from '@/lib/format';
 import { TgAnalytics } from '@/panels/TgAnalytics';
+import { useChannels, useTgFull, useTgGraphs } from '@/api/queries';
+import { useSelectedChannel } from '@/lib/channel-context';
+import { calendarWindowForPeriod, DEFAULT_WIDGET_DAYS, usePagePeriod } from '@/lib/period';
+import { buildTgAnalyticsRows, tgDailySeriesFromGraphs } from '@/lib/tgAnalyticsExport';
+import { downloadAnalyticsCsv, exportFilename } from '@/lib/analyticsExport';
 import { Insights } from '@/panels/Insights';
 import { Compare } from '@/panels/Compare';
 import { HistoryChartBlock, HeatmapChartBlock, VelocityChartBlock } from '@/panels/Charts';
@@ -57,8 +63,10 @@ export function Analytics() {
   return (
     <div className="space-y-8">
       {/* Grouped tabs break the 20-chart wall into Динамика / Аудитория / Контент / Сравнение —
-          each tab renders only its section family (progressive disclosure). */}
-      <div role="tablist" aria-label="Разделы аналитики" className="flex gap-1 overflow-x-auto border-b border-border">
+          each tab renders only its section family (progressive disclosure). The desktop-only export
+          control sits alongside the tabs and covers the whole analytics window regardless of tab. */}
+      <div className="flex items-end justify-between gap-3 border-b border-border">
+      <div role="tablist" aria-label="Разделы аналитики" className="flex gap-1 overflow-x-auto">
         {ANALYTICS_TABS.map((t) => (
           <button
             key={t.key}
@@ -86,6 +94,8 @@ export function Analytics() {
             {t.label}
           </button>
         ))}
+      </div>
+        <TgAnalyticsExportButton />
       </div>
 
       {tab === 'dynamics' && (
@@ -134,6 +144,46 @@ export function Analytics() {
         </WidgetGroup>
       )}
     </div>
+  );
+}
+
+/**
+ * Desktop-only Telegram Analytics export. Reflects the exact top-bar window (preset or custom «Свой»)
+ * and its equal previous window where the archive covers it; only genuinely daily flows (channel
+ * views, reposts, net follower growth) are exported — no fabricated daily values, no history leak.
+ */
+function TgAnalyticsExportButton() {
+  const { data: full } = useTgFull(0);
+  const { data: graphs } = useTgGraphs();
+  const pp = usePagePeriod();
+  const { channelId } = useSelectedChannel();
+  const { data: channelsData } = useChannels();
+
+  const win = calendarWindowForPeriod(pp ? { days: pp.days, range: pp.range } : { days: DEFAULT_WIDGET_DAYS, range: null });
+  const channel = channelsData?.channels.find((c) => c.id === channelId);
+  const source = channel?.title ?? channel?.username ?? full?.channel?.title ?? full?.channel?.username ?? '';
+
+  const rows = useMemo(
+    () => buildTgAnalyticsRows({ source, window: win, series: tgDailySeriesFromGraphs(graphs) }),
+    [source, win?.from, win?.to, graphs],
+  );
+
+  return (
+    <button
+      type="button"
+      onClick={() =>
+        downloadAnalyticsCsv(
+          exportFilename({ network: 'telegram', section: 'analytics', source, from: win?.from, to: win?.to }),
+          rows,
+        )
+      }
+      disabled={rows.length === 0}
+      aria-label="Экспорт метрик аналитики за выбранный период в CSV"
+      title={rows.length === 0 ? 'Нет метрик за выбранный период' : undefined}
+      className="mb-1 hidden shrink-0 btn-pill border border-border bg-background px-3.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 md:inline-flex"
+    >
+      Экспорт метрик
+    </button>
   );
 }
 

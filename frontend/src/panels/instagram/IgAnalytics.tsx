@@ -1,9 +1,11 @@
+import { useMemo } from 'react';
 import type { IgData } from '@/lib/useIgData';
 import { Section, TrendCard, FollowsByDayCard, SubscriberMovement, igPeriodRows } from '@/components/instagram/shared';
 import { ChartSection } from '@/components/ChartWidget';
 import { WidgetGroup } from '@/components/widgets/WidgetGroup';
 import { InsightsBlock, PeriodCompareBlock } from '@/components/instagram/insights';
-import { exportIgDaily } from '@/lib/igExport';
+import { buildIgAnalyticsRows } from '@/lib/igAnalyticsExport';
+import { downloadAnalyticsCsv, exportFilename } from '@/lib/analyticsExport';
 
 /**
  * IG Аналитика — honest dynamics.
@@ -18,15 +20,34 @@ export function IgAnalytics({ ig }: { ig: IgData }) {
 
   const periodRows = igPeriodRows(ig);
 
+  const source = ig.profile?.username ?? '';
+  // Aggregate, window-scoped export (current + equal previous where present) — never the full
+  // ig.series history, never a fabricated daily value for an aggregate-only metric.
+  const exportRows = useMemo(
+    () =>
+      buildIgAnalyticsRows({
+        source,
+        window: { since: ig.window.since, until: ig.window.until },
+        pairs: {
+          reach: ig.pairs.reach,
+          views: ig.pairs.views,
+          ti: ig.pairs.ti,
+          likes: ig.pairs.likes,
+          saves: ig.pairs.saves,
+          comments: ig.pairs.comments,
+          shares: ig.pairs.shares,
+        },
+        netMovement: ig.netMovement,
+        erReach: ig.erReach,
+        erReachPrev: ig.erReachPrev,
+      }),
+    [source, ig.window.since, ig.window.until, ig.pairs, ig.netMovement, ig.erReach, ig.erReachPrev],
+  );
   const onExport = () =>
-    exportIgDaily({
-      reach: ig.series.reach,
-      views: ig.series.views,
-      total_interactions: ig.series.ti,
-      accounts_engaged: ig.series.engaged,
-      follows: ig.series.follower,
-      saves: ig.series.saves,
-    });
+    downloadAnalyticsCsv(
+      exportFilename({ network: 'instagram', section: 'analytics', source, from: ig.window.since, to: ig.window.until }),
+      exportRows,
+    );
 
   return (
     <div className="space-y-10">
@@ -38,7 +59,10 @@ export function IgAnalytics({ ig }: { ig: IgData }) {
           <button
             type="button"
             onClick={onExport}
-            className="btn-pill border border-border bg-background px-3.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            disabled={exportRows.length === 0}
+            aria-label="Экспорт метрик аналитики за выбранный период в CSV"
+            title={exportRows.length === 0 ? 'Нет метрик за выбранный период' : undefined}
+            className="btn-pill border border-border bg-background px-3.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
           >
             Экспорт метрик
           </button>

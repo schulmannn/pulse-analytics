@@ -8,7 +8,10 @@ import { cn } from '@/lib/utils';
 import { markdownToPlainText } from '@/lib/markdown';
 import { Card, CardContent } from '@/components/ui/card';
 import { ErrorState } from '@/components/ErrorState';
-import { usePagePeriod, widgetPeriodValue } from '@/lib/period';
+import { calendarWindowForPeriod, usePagePeriod, widgetPeriodValue } from '@/lib/period';
+import { downloadCsv } from '@/lib/csv';
+import { tgContentRows } from '@/lib/contentExport';
+import { exportFilename } from '@/lib/analyticsExport';
 import { Skeleton } from '@/components/ui/skeleton';
 import { RichText } from '@/components/RichText';
 import { PostDetailModal } from '@/components/PostDetailModal';
@@ -126,6 +129,7 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
   const [params, setParams] = useSearchParams();
   const pp = usePagePeriod();
   const { channelId } = useSelectedChannel();
+  const { data: channelsData } = useChannels();
 
   // The four non-period Content filters read straight from the URL (single source of truth); the
   // period is owned by the page-period context (header chips) and mirrored below.
@@ -217,6 +221,21 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
       : inPeriod;
   const visible = filterPosts(scope, { q: filters.q, format: filters.format });
   const rows = sortPosts(visible, filters.sort, filters.order);
+  // Content export = exactly the displayed rows (this source, window, campaign, search, format, sort);
+  // only the currently loaded rows, never a full historical archive. Window bounds name the file.
+  const channel = channelsData?.channels.find((c) => c.id === channelId);
+  const exportWindow = calendarWindowForPeriod({ days: pageDays, range: pageRange });
+  const onExport = () =>
+    downloadCsv(
+      exportFilename({
+        network: 'telegram',
+        section: 'content',
+        source: channel?.title ?? channel?.username ?? '',
+        from: exportWindow?.from,
+        to: exportWindow?.to,
+      }),
+      tgContentRows(rows),
+    );
   // Preserve the pre-redesign mobile list contract: reach-desc, top 25, unaffected by desktop-only
   // search/format/sort controls. Mobile layout and controls remain outside this task.
   const mobileRows = sortPosts(scope, 'reach', 'desc').slice(0, 25);
@@ -291,6 +310,17 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
               ))}
             </select>
           </label>
+          {/* Desktop-only content export — exactly the rows shown below. */}
+          <button
+            type="button"
+            onClick={onExport}
+            disabled={rows.length === 0}
+            aria-label="Экспорт показанных публикаций в CSV"
+            title={rows.length === 0 ? 'Нет публикаций для экспорта' : `CSV: ${rows.length} показанных публикаций`}
+            className="hidden btn-pill border border-border bg-background px-3.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 md:inline-flex"
+          >
+            Экспорт таблицы
+          </button>
         </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs text-muted-foreground">
           <span className="tabular-nums" data-testid="content-result-count">{fmt.num(rows.length)} публ.</span>

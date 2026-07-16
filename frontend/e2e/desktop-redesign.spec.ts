@@ -1,5 +1,37 @@
 import { test, expect } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
 import { bootDemo, overflowingCards } from './helpers';
+
+test('desktop analytics exports current and equal-previous windows for both networks', async ({ page }) => {
+  await bootDemo(page, '/analytics', { theme: 'dark' });
+  await page.getByRole('group', { name: 'Период', exact: true }).getByRole('button', { name: '7д' }).click();
+
+  let downloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Экспорт метрик аналитики за выбранный период в CSV' }).click();
+  const tgDownload = await downloadPromise;
+  expect(tgDownload.suggestedFilename()).toMatch(/^telegram-analytics-демо-канал-\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}\.csv$/u);
+  const tgPath = await tgDownload.path();
+  if (!tgPath) throw new Error('Telegram analytics CSV has no local download path');
+  const tgCsv = await readFile(tgPath, 'utf8');
+  expect(tgCsv).toContain('network,source,section,scope,from,to,date,metric,value,unit');
+  expect(tgCsv).toContain(',current,');
+  expect(tgCsv).toContain(',previous,');
+  expect(tgCsv).toContain('Просмотры канала');
+  expect(tgCsv).not.toContain('Реакции');
+
+  await page.goto('/instagram/analytics');
+  await expect(page.getByRole('button', { name: 'Экспорт метрик аналитики за выбранный период в CSV' })).toBeEnabled();
+  downloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Экспорт метрик аналитики за выбранный период в CSV' }).click();
+  const igDownload = await downloadPromise;
+  expect(igDownload.suggestedFilename()).toMatch(/^instagram-analytics-demo-channel-\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}\.csv$/u);
+  const igPath = await igDownload.path();
+  if (!igPath) throw new Error('Instagram analytics CSV has no local download path');
+  const igCsv = await readFile(igPath, 'utf8');
+  expect(igCsv).toContain(',current,');
+  expect(igCsv).toContain(',previous,');
+  expect(igCsv).toContain('Охват');
+});
 
 test('desktop analytics keeps source and summary hierarchy explicit', async ({ page }, testInfo) => {
   await bootDemo(page, '/analytics', { theme: 'dark' });

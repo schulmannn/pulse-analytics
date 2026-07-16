@@ -19,6 +19,7 @@ import { CampaignFilterControl } from '@/components/campaigns/CampaignFilterCont
 import { Skeleton } from '@/components/ui/skeleton';
 import { RichText } from '@/components/RichText';
 import { exportIgPosts } from '@/lib/igExport';
+import { exportFilename } from '@/lib/analyticsExport';
 import { fmt } from '@/lib/format';
 import { MEDIA_TYPE_LABEL } from '@/lib/igMetrics';
 import { compareToMedian, medianDeltaLabel, periodMedian, MEDIAN_MIN_SAMPLE } from '@/lib/postMedian';
@@ -134,10 +135,24 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
         {tabs}
         <button
           type="button"
-          onClick={() => exportIgPosts(scope)}
-          className="btn-pill border border-border bg-background px-3.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          onClick={() =>
+            exportIgPosts(
+              rows,
+              exportFilename({
+                network: 'instagram',
+                section: 'content',
+                source: ig.profile?.username ?? '',
+                from: ig.window.since,
+                to: ig.window.until,
+              }),
+            )
+          }
+          disabled={rows.length === 0}
+          aria-label="Экспорт показанных публикаций в CSV"
+          title={rows.length === 0 ? 'Нет публикаций для экспорта' : `CSV: ${rows.length} показанных публикаций`}
+          className="btn-pill border border-border bg-background px-3.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
         >
-          Экспорт постов
+          Экспорт таблицы
         </button>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">

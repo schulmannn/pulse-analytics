@@ -171,8 +171,8 @@ function deriveTgAnalytics(
   // прирост подписчиков» below, so a third level+delta card only repeated both.)
   const interGroup = graphs?.interactions;
   const interSeries = interGroup?.series ?? [];
-  const viewSeries = interSeries.find((s) => /view|просмотр/i.test(s.name ?? '')) || interSeries[0];
-  const shareSeries = interSeries.find((s) => /share|репост/i.test(s.name ?? '')) || interSeries[1];
+  const viewSeries = interSeries.find((s) => /view|просмотр/i.test(s.name ?? ''));
+  const shareSeries = interSeries.find((s) => /share|forward|репост|пересыл/i.test(s.name ?? ''));
 
   // 8) Sources / languages / sentiment
   const mapSourceItems = (
@@ -214,8 +214,8 @@ function deriveTgAnalytics(
   // 10) Net subscribers
   const fGroup = graphs?.followers;
   const fSeries = fGroup?.series ?? [];
-  const joinedSeries = fSeries.find((s) => /join|подпис/i.test(s.name ?? '')) || fSeries[0];
-  const leftSeries = fSeries.find((s) => /left|отпис/i.test(s.name ?? '')) || fSeries[1];
+  const joinedSeries = fSeries.find((s) => /join|подпис/i.test(s.name ?? ''));
+  const leftSeries = fSeries.find((s) => /left|отпис/i.test(s.name ?? ''));
 
   // Whole-payload existence probe only. Both follower-flow card bodies re-derive from the resolved
   // page/Home window, so no all-time totals are allowed to leak into a bounded feed period.
