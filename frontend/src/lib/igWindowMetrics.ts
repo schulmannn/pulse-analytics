@@ -125,14 +125,24 @@ const dated = (series: Point[]): Point[] =>
 const CHART_CANON_MIN = 3;
 const EMPTY_CHART: IgOverviewChart = { labels: [], values: [] };
 
+/** Normalize a dated Graph point and a bare DB archive day to the same UTC calendar key. The live
+    reach series uses full ISO `end_time` values, while persisted additive metrics use YYYY-MM-DD;
+    comparing the raw strings leaves an otherwise valid daily ER series with no matching dates. */
+function canonicalDayKey(value: string): string | null {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString().slice(0, 10) : null;
+}
+
 /** Windowed, ascending daily points: drop the synthetic `total`/non-finite dates, keep only days
-    inside [since, until], sort oldest→newest by ISO day. */
+    inside [since, until], normalize to a shared calendar key, then sort oldest→newest. */
 function windowedDaily(series: Point[], since: number, until: number): Point[] {
   return series
-    .filter((p) => p.day !== 'total' && Number.isFinite(Date.parse(p.day)))
-    .filter((p) => {
+    .flatMap((p) => {
+      if (p.day === 'total') return [];
       const t = Date.parse(p.day);
-      return t >= since && t <= until;
+      const day = canonicalDayKey(p.day);
+      return Number.isFinite(t) && t >= since && t <= until && day ? [{ day, value: p.value }] : [];
     })
     .sort((a, b) => a.day.localeCompare(b.day));
 }

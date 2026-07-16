@@ -157,6 +157,22 @@ describe('igOverviewCharts', () => {
     expect(c.engagement.values[2]).toBeCloseTo(50, 10);
   });
 
+  it('aligns full ISO live-reach dates with bare archive interaction days', () => {
+    const series = makeSeries({
+      ti: pts([[d(8), 10], [d(9), 30], [d(10), 25]]),
+      reach: pts([
+        [`${d(8)}T07:00:00.000Z`, 100],
+        [`${d(9)}T07:00:00.000Z`, 200],
+        [`${d(10)}T07:00:00.000Z`, 50],
+      ]),
+    });
+    const c = igOverviewCharts(series, SINCE, UNTIL);
+    expect(c.engagement.labels).toEqual([fmtDay(d(8)), fmtDay(d(9)), fmtDay(d(10))]);
+    expect(c.engagement.values[0]).toBeCloseTo(10, 10);
+    expect(c.engagement.values[1]).toBeCloseTo(15, 10);
+    expect(c.engagement.values[2]).toBeCloseTo(50, 10);
+  });
+
   it('sorts oldest→newest and never zero-fills sparse days', () => {
     const series = makeSeries({
       views: pts([[d(12), 300], [d(8), 100], [d(10), 200]]), // out of order, gaps at 09 & 11
