@@ -8,18 +8,12 @@
    транзакций НЕ менялись (перевод inline-BEGIN на общий transaction-helper — отдельным PR 7.1).
 
    Зависит от pool + enabled (инъекция) + setChannelTgId (инъекция channelsRepo.setChannelTgId —
-   ingestCollectorPayload штампует tg-id в той же транзакции; repos не импортят друг друга). num/INT4_MAX —
-   локальный clamp дневных INT4-счётчиков (переполнение одного канала не должно ронять весь дневной ingest). */
+   ingestCollectorPayload штампует tg-id в той же транзакции; repos не импортят друг друга). num —
+   нормализация дневных счётчиков: колонки теперь BIGINT (миграция 023), поэтому вместо прежнего
+   INT4-клампа принимаем точные целые до MAX_SAFE_METRIC, а всё за границей честно даёт null (не
+   выдуманное насыщенное значение). Ноль и null сохраняются как есть. */
 
-const INT4_MAX = 2147483647;
-const num = (v) => {
-  if (v == null || isNaN(v)) return null;
-  const n = Math.round(Number(v));
-  const clamped = Math.max(-INT4_MAX - 1, Math.min(INT4_MAX, n));
-  // Лог ТОЛЬКО при реальном клампе (сверхкрупный канал) — сигнал «пора BIGINT-миграция»; в норме молчит.
-  if (clamped !== n) console.warn(`[db] INT4 clamp ${n} → ${clamped}: канал переполняет INT4, нужна BIGINT-миграция дневных таблиц`);
-  return clamped;
-};
+const { toMetricInt: num } = require('../lib/metricNumber');
 
 function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
   /* Pure transform: stats graphs → array of daily rows. Exported for testing.
@@ -61,8 +55,8 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
       SELECT $1, (SELECT c.source_id FROM channels c WHERE c.id = $1),
              x.day::date, x.subscribers, x.joins, x.leaves, x.views, x.forwards, x.reactions, now()
         FROM jsonb_to_recordset($2::jsonb) AS x(
-          day text, subscribers integer, joins integer, leaves integer,
-          views integer, forwards integer, reactions integer
+          day text, subscribers bigint, joins bigint, leaves bigint,
+          views bigint, forwards bigint, reactions bigint
         )
       ON CONFLICT (channel_id, day) DO UPDATE SET
         source_id=COALESCE(EXCLUDED.source_id, channel_daily.source_id),
@@ -86,8 +80,8 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
              x.post_id, x.date_published, x.views, x.reactions, x.forwards, x.replies,
              x.erv, x.virality, x.media_type, x.caption, x.hashtags, now()
         FROM jsonb_to_recordset($2::jsonb) AS x(
-          post_id bigint, date_published timestamptz, views integer, reactions integer,
-          forwards integer, replies integer, erv numeric, virality numeric,
+          post_id bigint, date_published timestamptz, views bigint, reactions bigint,
+          forwards bigint, replies bigint, erv numeric, virality numeric,
           media_type text, caption text, hashtags jsonb
         )
       ON CONFLICT (channel_id, post_id) DO UPDATE SET
@@ -117,7 +111,7 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
              x.title, x.username, x.link, x.snippet, x.views, x.query
         FROM jsonb_to_recordset($2::jsonb) AS x(
           channel_id bigint, msg_id bigint, date timestamptz, title text, username text,
-          link text, snippet text, views integer, query text
+          link text, snippet text, views bigint, query text
         )
       ON CONFLICT (owner_channel_id, channel_id, msg_id) DO UPDATE SET
         last_seen=now(),
@@ -313,9 +307,9 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
              x.day::date, x.followers, x.followers_total, x.reach, x.views, x.profile_views, x.accounts_engaged,
              x.total_interactions, x.likes, x.comments, x.saves, x.shares, x.follows, x.unfollows, now()
         FROM jsonb_to_recordset($2::jsonb) AS x(
-          day text, followers integer, followers_total integer, reach integer, views integer, profile_views integer,
-          accounts_engaged integer, total_interactions integer, likes integer, comments integer,
-          saves integer, shares integer, follows integer, unfollows integer
+          day text, followers bigint, followers_total bigint, reach bigint, views bigint, profile_views bigint,
+          accounts_engaged bigint, total_interactions bigint, likes bigint, comments bigint,
+          saves bigint, shares bigint, follows bigint, unfollows bigint
         )
       ON CONFLICT (channel_id, day) DO UPDATE SET
         source_id=COALESCE(EXCLUDED.source_id, ig_daily.source_id),
@@ -348,8 +342,8 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
       SELECT $1, (SELECT a.source_id FROM ig_accounts a WHERE a.channel_id = $1),
              x.media_id, x.day::date, x.reach, x.likes, x.comments, x.saved, x.shares, x.views, now()
         FROM jsonb_to_recordset($2::jsonb) AS x(
-          media_id text, day text, reach integer, likes integer, comments integer,
-          saved integer, shares integer, views integer
+          media_id text, day text, reach bigint, likes bigint, comments bigint,
+          saved bigint, shares bigint, views bigint
         )
       ON CONFLICT (channel_id, media_id, day) DO UPDATE SET
         source_id=COALESCE(EXCLUDED.source_id, ig_media_daily.source_id),
@@ -450,7 +444,7 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
            media_type=EXCLUDED.media_type, like_count=EXCLUDED.like_count,
            comments_count=EXCLUDED.comments_count, posted_at=EXCLUDED.posted_at, last_seen=now()`,
         [String(r.id), r.username || null, r.caption || null, r.permalink || null, r.media_type || null,
-         r.like_count != null ? Number(r.like_count) : null, r.comments_count != null ? Number(r.comments_count) : null,
+         num(r.like_count), num(r.comments_count),
          r.timestamp || null],
       );
       n++;

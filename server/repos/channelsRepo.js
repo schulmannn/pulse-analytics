@@ -12,6 +12,7 @@
    НЕТ; ensureChannelCanonical/setChannelTgId возвращаются наружу — их зовёт boot/ingest-код в db.js. */
 
 const { sameTenantSource, channelAccessSql, channelAdminAccessSql } = require('../db/access');
+const { toMetricNumber } = require('../lib/metricNumber');
 
 const CHANNEL_COLS = 'id, username, title, status, source, tg_channel_id, owner_uid';
 
@@ -51,7 +52,10 @@ function createChannelsRepo({ pool, enabled, transaction, ensureExternalSource }
                 WHERE m.uid = $1)
          AND status<>'disabled'
        ORDER BY created_at ASC`, [uid]);
-    return rows;
+    // memberCount is channel_daily.subscribers — a BIGINT counter (023) that pg returns as a string;
+    // convert to a JS number (safe within MAX_SAFE_METRIC) so the channels API keeps emitting numbers.
+    // The channel id / owner_uid FKs stay INTEGER and are already numbers.
+    return rows.map((r) => ({ ...r, memberCount: toMetricNumber(r.memberCount) }));
   }
 
   // Lightweight default-channel pick for the auth/tenant hot path (resolveChannel). Returns just the

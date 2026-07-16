@@ -23,6 +23,13 @@
    (инъекция channelsRepo — repos не импортят друг друга). */
 
 const { channelAccessSql, sameTenantSource } = require('../db/access');
+const { toMetricNumber } = require('../lib/metricNumber');
+
+// tg_*/ig_* below are joined from posts / ig_media_daily BIGINT counters (023); pg returns BIGINT as
+// a string, so numify them for the /posts response and for getCampaignSummary's arithmetic. channel_id
+// here is the internal INTEGER channels.id, not a metric — left untouched.
+const CAMPAIGN_POST_METRICS = ['tg_views', 'tg_reactions', 'tg_forwards', 'tg_replies',
+  'ig_reach', 'ig_views', 'ig_likes', 'ig_comments', 'ig_saved', 'ig_shares'];
 
 const CAMPAIGN_STATUSES = ['active', 'completed', 'archived'];
 const CAMPAIGN_NETWORKS = ['tg', 'ig'];
@@ -388,7 +395,11 @@ function createCampaignsRepo({ pool, enabled, transaction }) {
         WHERE cp.campaign_id = $1
         ORDER BY cp.published_at DESC NULLS LAST, cp.network ASC, cp.post_ref DESC`,
       [campaignId, uid]);
-    return rows;
+    return rows.map((r) => {
+      const out = { ...r };
+      for (const k of CAMPAIGN_POST_METRICS) out[k] = toMetricNumber(out[k]);
+      return out;
+    });
   }
 
   const median = (nums) => {
