@@ -52,6 +52,7 @@ export function WidgetGroup({ id, className, children }: WidgetGroupProps) {
   // Jitter dampener for live drag-over swaps: a cooldown, plus displaced widgets are
   // untargetable while their glide plays (data-gliding) so a swap can't ping-pong.
   const lastSwapAt = useRef(0);
+  const glideSequence = useRef(0);
 
   // ── FLIP: displaced widgets GLIDE to their new slots instead of teleporting. ────────────
   // The store notifies synchronously BEFORE React re-renders, so that's the moment to
@@ -172,13 +173,23 @@ export function WidgetGroup({ id, className, children }: WidgetGroupProps) {
       void el.offsetHeight; // commit the inverted position before playing
       el.style.transition = 'transform var(--motion-glide) var(--ease-standard)';
       el.style.transform = '';
-      el.dataset.gliding = '1';
+      const glideToken = String(++glideSequence.current);
+      el.dataset.gliding = glideToken;
+      let fallback = 0;
       const clear = () => {
-        el.style.transition = '';
-        delete el.dataset.gliding;
+        window.clearTimeout(fallback);
         el.removeEventListener('transitionend', clear);
+        // A newer FLIP may have started on this element before this callback ran. Only that newer
+        // animation may settle its own styles.
+        if (el.dataset.gliding !== glideToken) return;
+        el.style.transition = '';
+        el.style.transform = '';
+        delete el.dataset.gliding;
       };
       el.addEventListener('transitionend', clear);
+      // transitionend is not guaranteed when a migration happens in a background/hidden tab.
+      // Bound the inverted state so a swallowed event can never leave cards permanently overlapped.
+      fallback = window.setTimeout(clear, 400);
     }
     prevRects.current.clear();
     // a committed reorder may have moved the dragged card's layout slot — re-glue it
