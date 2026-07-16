@@ -169,6 +169,157 @@ test('стёртый юзер (getUserById=null) → без reserve, без send
   assert.equal(bundle.state.reservations.size, 0);
 });
 
+// ── bounded per-report concurrency + pass-scoped 429 pause ──────────────────────────────────────────
+// A multi-report due list dispatched under bounded concurrency (default/cap 2). Asserts: max in-flight
+// never exceeds the configured concurrency; with no throttle every report is handled; a CONFIRMED
+// (cleared) 429 pauses the pass so no NEW report starts — only the already-in-flight peer finishes.
+
+const monthlyReports = (...ids) =>
+  ids.map((id) => ({ id, uid: id, name: `R${id}`, email: `u${id}@x.io`, schedule: 'monthly', config: {}, last_sent_at: null }));
+
+// Build a job whose fake db supports many reports and a per-report send impl; dispatchConcurrency is
+// injected so the bounded loop is exercised directly.
+function makeConcurrentJob({ due, sendImpl, dispatchConcurrency = 2 }) {
+  const state = { reservations: new Map(), marked: [], sends: [] };
+  const db = {
+    enabled: true,
+    listDueReports: async () => due,
+    getUserById: async (uid) => ({ id: uid }),
+    listChannels: async () => [],
+    reserveReportDelivery: async (id, period) => {
+      if (state.reservations.get(id) === period) return false;
+      state.reservations.set(id, period);
+      return true;
+    },
+    clearReportDelivery: async (id, period) => {
+      if (state.reservations.get(id) === period) { state.reservations.delete(id); return true; }
+      return false;
+    },
+    markReportSent: async (id) => { state.marked.push(id); return true; },
+    runJobOnce: async (_kind, _key, fn) => {
+      try { const result = await fn(); return { skipped: false, result }; }
+      catch (e) { throw e; }
+    },
+  };
+  const job = createReportScheduleJob({
+    db,
+    log: () => {},
+    sendEmailDetailed: async (to, subject, html, opts) => {
+      const id = Number(opts.idempotencyKey.split('/')[1]);
+      state.sends.push(id);
+      return sendImpl(id);
+    },
+    emailShell: (t, b) => `<shell>${t}${b}</shell>`,
+    emailBtn: (h, l) => `<a href="${h}">${l}</a>`,
+    escHtml: (s) => String(s),
+    emailConfigured: () => true,
+    now: FIXED,
+    dispatchConcurrency,
+  });
+  return { job, state };
+}
+
+test('bounded concurrency: max in-flight ≤ 2, все отчёты разосланы без throttle', async () => {
+  let inFlight = 0;
+  let maxInFlight = 0;
+  const { job, state } = makeConcurrentJob({
+    due: monthlyReports(1, 2, 3, 4, 5, 6),
+    sendImpl: async () => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await Promise.resolve();
+      await Promise.resolve();
+      inFlight -= 1;
+      return { outcome: 'sent', providerId: 'ok' };
+    },
+  });
+  const stats = await job.processReportSchedules('https://atlavue.app');
+  assert.ok(maxInFlight <= 2, `не более 2 одновременных отправок (было ${maxInFlight})`);
+  assert.ok(maxInFlight >= 2, 'параллелизм реально задействован (не сериализовано в 1)');
+  assert.equal(state.sends.length, 6, 'все 6 отчётов отправлены');
+  assert.deepEqual(state.marked.sort((a, b) => a - b), [1, 2, 3, 4, 5, 6]);
+  assert.equal(stats.sent, 6);
+  assert.equal(stats.paused, false, 'без 429 пауза не ставится');
+  assert.equal(stats.skippedPaused, 0);
+});
+
+test('confirmed 429 (clear успешен) ставит pass-scoped паузу: новые отчёты не стартуют, только in-flight peer завершается', async () => {
+  // Отчёт 1 (индекс 0) получает 429; отчёты 2..6 гейтятся барьером, чтобы peer-раннер оставался
+  // in-flight, пока отчёт 1 ставит паузу. concurrency=2 ⇒ стартуют ровно отчёты 1 и 2.
+  let releaseBarrier;
+  const barrier = new Promise((r) => { releaseBarrier = r; });
+  const { job, state } = makeConcurrentJob({
+    due: monthlyReports(1, 2, 3, 4, 5, 6),
+    sendImpl: async (id) => {
+      if (id === 1) return { outcome: 'retryable', status: 429 };   // known-not-sent → clear → пауза
+      await barrier;   // peer (отчёт 2) остаётся in-flight, пока не отпустим
+      return { outcome: 'sent', providerId: 'ok' };
+    },
+  });
+  const pass = job.processReportSchedules('https://atlavue.app');
+  // Даём отчёту 1 разрешиться и поставить паузу; раннер-A успевает пройтись по 3..6 как skipped.
+  for (let i = 0; i < 20; i += 1) await Promise.resolve();
+  releaseBarrier();
+  const stats = await pass;
+
+  assert.ok(state.sends.includes(1), 'отчёт 1 дошёл до провайдера (получил 429)');
+  assert.ok(state.sends.includes(2), 'in-flight peer (отчёт 2) завершил отправку');
+  for (const id of [3, 4, 5, 6]) {
+    assert.equal(state.sends.includes(id), false, `отчёт ${id} НЕ стартовал после паузы`);
+  }
+  assert.deepEqual(state.marked, [2], 'помечен отправленным только завершившийся peer');
+  assert.equal(stats.paused, true, 'пауза зафиксирована в stats');
+  assert.equal(stats.skippedPaused, 4, 'четыре очередных отчёта пропущены паузой');
+  assert.equal(state.reservations.has(1), false, 'резервация отчёта 1 снята для чистого ретрая');
+});
+
+test('изолированный per-report сбой (не 429) НЕ ставит паузу — остальные отчёты продолжают', async () => {
+  const { job, state } = makeConcurrentJob({
+    due: monthlyReports(1, 2, 3, 4),
+    sendImpl: async (id) => {
+      if (id === 1) return { outcome: 'rejected', status: 422, name: 'validation_error' };   // permanent, не пауза
+      return { outcome: 'sent', providerId: 'ok' };
+    },
+  });
+  const stats = await job.processReportSchedules('https://atlavue.app');
+  assert.deepEqual(state.sends.sort((a, b) => a - b), [1, 2, 3, 4], 'все отчёты обработаны');
+  assert.deepEqual(state.marked.sort((a, b) => a - b), [2, 3, 4], 'отправлены все, кроме перманентно отклонённого');
+  assert.equal(stats.paused, false, 'permanent-rejection не ставит паузу');
+  assert.equal(stats.skippedPaused, 0);
+});
+
+test('429 с проваленным clear — fail closed, паузы НЕТ (не стопорим остальные)', async () => {
+  // clearReportDelivery всегда проваливается → терминал без throw и без паузы (fail closed): отчёт 1
+  // остаётся зарезервированным, остальные отчёты продолжают рассылаться.
+  const state2 = { reservations: new Map(), marked: [], sends: [] };
+  const db2 = {
+    enabled: true,
+    listDueReports: async () => monthlyReports(1, 2, 3),
+    getUserById: async (uid) => ({ id: uid }),
+    listChannels: async () => [],
+    reserveReportDelivery: async (id, period) => { state2.reservations.set(id, period); return true; },
+    clearReportDelivery: async () => false,   // clear всегда проваливается → fail closed
+    markReportSent: async (id) => { state2.marked.push(id); return true; },
+    runJobOnce: async (_k, _key, fn) => { const result = await fn(); return { skipped: false, result }; },
+  };
+  const job2 = createReportScheduleJob({
+    db: db2, log: () => {},
+    sendEmailDetailed: async (to, subject, html, opts) => {
+      const id = Number(opts.idempotencyKey.split('/')[1]);
+      state2.sends.push(id);
+      return id === 1 ? { outcome: 'retryable', status: 429 } : { outcome: 'sent' };
+    },
+    emailShell: (t, b) => `${t}${b}`, emailBtn: (h, l) => `${h}${l}`, escHtml: (s) => String(s),
+    emailConfigured: () => true, now: FIXED, dispatchConcurrency: 2,
+  });
+  const stats = await job2.processReportSchedules('https://atlavue.app');
+  assert.deepEqual(state2.sends.sort((a, b) => a - b), [1, 2, 3], 'все отчёты обработаны — паузы нет');
+  assert.equal(stats.paused, false, 'проваленный clear = fail closed, но НЕ пауза');
+  // отчёт 1 остаётся зарезервированным (не отдали) и НЕ помечен отправленным.
+  assert.equal(state2.reservations.has(1), true);
+  assert.equal(state2.marked.includes(1), false);
+});
+
 // ── email не сконфигурирован → ранний выход, без запросов ──────────────────────────────────────────
 test('emailConfigured=false → schedule пропущен, listDueReports не зовётся', async () => {
   const bundle = makeDb();

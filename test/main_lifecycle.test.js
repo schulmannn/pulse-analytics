@@ -124,6 +124,43 @@ test('runtime removes signal listeners and drains tracked tails before DB close'
   assert.equal(events.filter((event) => event === 'db.close').length, 1);
 });
 
+test('operational runner starts after listen and stops before DB close (alongside collection runner)', async () => {
+  const events = [];
+  const app = express();
+  app.get('/health', (_req, res) => res.json({ ok: true }));
+  const composition = {
+    db: { async close() { events.push('db.close'); } },
+    memoryCache: { start() { events.push('cache.start'); }, stop() { events.push('cache.stop'); } },
+    jobTracker: createJobTracker(),
+    drainState: { draining: false },
+    collectionRunner: { start() { events.push('collection.start'); }, stop() { events.push('collection.stop'); } },
+    operationalRunner: { start() { events.push('operational.start'); }, stop() { events.push('operational.stop'); } },
+    async boot() { events.push('boot'); },
+    createHttpApp() { return app; },
+  };
+
+  const runtime = await main({
+    env: { NODE_ENV: 'test' },
+    port: 0,
+    compositionFactory: () => composition,
+    shutdownTimeoutMs: 1_000,
+  });
+
+  // Both runners start after listen (cache.start precedes them in main.js).
+  assert.ok(events.indexOf('cache.start') < events.indexOf('operational.start'), 'operational стартует после listen/cache.start');
+  assert.ok(events.includes('collection.start'));
+  assert.ok(events.includes('operational.start'));
+
+  await runtime.stop();
+
+  // Both runners stop before DB close.
+  assert.ok(events.indexOf('operational.stop') < events.indexOf('db.close'), 'operational гасится до закрытия пулов');
+  assert.ok(events.indexOf('collection.stop') < events.indexOf('db.close'));
+  assert.deepEqual(events.slice(-2), ['cache.stop', 'db.close']);
+
+  process.exitCode = 0;
+});
+
 // Minimal lifecycle composition: real HTTP server (port 0) + injectable db.close so a test can make
 // the drain path hang. No signal handlers (installSignalHandlers:false) — the fatal handler is driven
 // directly via runtime.handleFatal with an injected `exit`, so nothing can terminate the test runner.

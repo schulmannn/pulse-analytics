@@ -71,6 +71,9 @@ Telegram поддерживает две модели подключения:
 | `COLLECTION_RECOVERY_INITIAL_DELAY_MS` | web/worker | задержка первого прохода recovery-бегунка после старта, мс, по умолчанию `30000`, минимум `1000` |
 | `COLLECTION_RECOVERY_INTERVAL_MS` | web/worker | период повторных проходов recovery-бегунка, мс, по умолчанию `900000` (15 мин), минимум `60000` |
 | `COLLECTION_RECOVERY_MODE` | web/worker | где исполняется recovery-бегунок: `inline` (дефолт — web в себе, как раньше), `external` (web не планирует бегунок), `worker` (отдельный процесс `server/worker.js` без HTTP). Web отвергает `worker`, worker требует `worker` |
+| `OPERATIONAL_RUNNER_INITIAL_DELAY_MS` | web | задержка первого прохода operational-бегунка (scheduled-отчёты + дневная maintenance) после старта, мс, по умолчанию `60000`, минимум `1000` |
+| `OPERATIONAL_RUNNER_INTERVAL_MS` | web | период повторных проходов operational-бегунка, мс, по умолчанию `3600000` (1 час), минимум `60000`; maintenance при этом идёт раз в UTC-сутки (durable per-day gate), отчёты — раз в период (durable reservation) |
+| `REPORT_DISPATCH_CONCURRENCY` | web | сколько due-отчётов рассылается параллельно за один проход, по умолчанию `2`, диапазон `1..8`; подтверждённый провайдерский 429 ставит pass-scoped паузу, и новые отчёты после неё не стартуют |
 
 Секреты не добавляются в `.env`-файлы репозитория, логи, issue или PR.
 

@@ -176,6 +176,43 @@ test('loadConfig: фоновый сбор — дефолты и env-переоп
   assert.equal(c.runtime.collectionRecoveryIntervalMs, 600000);
 });
 
+test('loadConfig/validateConfig: operational runner + report dispatch concurrency — дефолты, env, границы', () => {
+  const d = loadConfig({});
+  assert.equal(d.runtime.operationalRunnerInitialDelayMs, 60000, 'operational initial delay дефолт 60с');
+  assert.equal(d.runtime.operationalRunnerIntervalMs, 3600000, 'operational interval дефолт 1ч');
+  assert.equal(d.runtime.reportDispatchConcurrency, 2, 'report dispatch concurrency дефолт 2');
+  assert.deepEqual(
+    validateConfig(d).filter((e) => e.field.startsWith('runtime.operationalRunner') || e.field === 'runtime.reportDispatchConcurrency'),
+    [],
+    'дефолты валидны',
+  );
+
+  const c = loadConfig({
+    OPERATIONAL_RUNNER_INITIAL_DELAY_MS: '5000',
+    OPERATIONAL_RUNNER_INTERVAL_MS: '600000',
+    REPORT_DISPATCH_CONCURRENCY: '4',
+  });
+  assert.equal(c.runtime.operationalRunnerInitialDelayMs, 5000);
+  assert.equal(c.runtime.operationalRunnerIntervalMs, 600000);
+  assert.equal(c.runtime.reportDispatchConcurrency, 4);
+  assert.deepEqual(validateConfig(c).filter((e) => e.field.startsWith('runtime.operational') || e.field === 'runtime.reportDispatchConcurrency'), []);
+
+  // Границы: initial < 1000, interval < 60000, concurrency вне 1..8, дробные — все отклоняются.
+  const bad = validateConfig(loadConfig({
+    OPERATIONAL_RUNNER_INITIAL_DELAY_MS: '999',
+    OPERATIONAL_RUNNER_INTERVAL_MS: '59999',
+    REPORT_DISPATCH_CONCURRENCY: '9',
+  }));
+  assert.ok(bad.some((e) => e.field === 'runtime.operationalRunnerInitialDelayMs'), 'sub-1000 initial отклонён');
+  assert.ok(bad.some((e) => e.field === 'runtime.operationalRunnerIntervalMs'), 'sub-minute interval отклонён');
+  assert.ok(bad.some((e) => e.field === 'runtime.reportDispatchConcurrency'), 'concurrency 9 (>8) отклонён');
+
+  assert.ok(validateConfig(loadConfig({ REPORT_DISPATCH_CONCURRENCY: '0' })).some((e) => e.field === 'runtime.reportDispatchConcurrency'), 'concurrency 0 отклонён');
+  assert.ok(validateConfig(loadConfig({ REPORT_DISPATCH_CONCURRENCY: '2.5' })).some((e) => e.field === 'runtime.reportDispatchConcurrency'), 'дробный concurrency отклонён');
+  assert.ok(validateConfig(loadConfig({ OPERATIONAL_RUNNER_INITIAL_DELAY_MS: '0' })).some((e) => e.field === 'runtime.operationalRunnerInitialDelayMs'), 'initial 0 отклонён');
+  assert.ok(validateConfig(loadConfig({ OPERATIONAL_RUNNER_INTERVAL_MS: '-5' })).some((e) => e.field === 'runtime.operationalRunnerIntervalMs'), 'отрицательный interval отклонён');
+});
+
 test('loadConfig: collectionRecoveryMode — дефолт inline, trim/lowercase', () => {
   assert.equal(loadConfig({}).runtime.collectionRecoveryMode, 'inline', 'дефолт inline (обратная совместимость)');
   assert.equal(loadConfig({ COLLECTION_RECOVERY_MODE: 'external' }).runtime.collectionRecoveryMode, 'external');

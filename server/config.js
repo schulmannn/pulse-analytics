@@ -151,6 +151,15 @@ function loadConfig(env = process.env) {
       // Внутрипроцессный recovery-бегунок: задержка первого прохода после listen и период повторов.
       collectionRecoveryInitialDelayMs: Number(env.COLLECTION_RECOVERY_INITIAL_DELAY_MS || 30000),
       collectionRecoveryIntervalMs: Number(env.COLLECTION_RECOVERY_INTERVAL_MS || 900000),
+      // Внутрипроцессный operational-бегунок (scheduled-отчёты + дневная maintenance, web-only):
+      // задержка первого прохода после listen и период повторов. Дефолт часовой — пропущенный внешний
+      // daily ingest подхватывается в течение часа; maintenance при этом идёт раз в UTC-сутки через
+      // durable per-day gate, отчёты — раз в период через durable reservation.
+      operationalRunnerInitialDelayMs: Number(env.OPERATIONAL_RUNNER_INITIAL_DELAY_MS || 60000),
+      operationalRunnerIntervalMs: Number(env.OPERATIONAL_RUNNER_INTERVAL_MS || 3600000),
+      // Сколько due-отчётов рассылается параллельно за один проход. Консервативный дефолт 2;
+      // валидируется целым в диапазоне 1..8.
+      reportDispatchConcurrency: Number(env.REPORT_DISPATCH_CONCURRENCY || 2),
       // Где исполняется recovery-бегунок фонового сбора. Единый контракт двух Railway-сервисов:
       //   • inline (дефолт, обратно совместимо) — web-процесс планирует бегунок в себе, как раньше;
       //   • external — web НЕ планирует бегунок (recovery вынесен наружу отдельным процессом);
@@ -272,6 +281,28 @@ function validateConfig(config) {
     config.runtime.collectionRecoveryIntervalMs < 60_000
   ) {
     add('runtime.collectionRecoveryIntervalMs', 'COLLECTION_RECOVERY_INTERVAL_MS должен быть не меньше 60000 мс.');
+  }
+  // Operational-бегунок (web-only): целые с разумными полами. Слишком короткие интервалы устроили бы
+  // storm проходов; 0/отрицательные остановили бы прогресс.
+  if (
+    !Number.isInteger(config.runtime.operationalRunnerInitialDelayMs) ||
+    config.runtime.operationalRunnerInitialDelayMs < 1000
+  ) {
+    add('runtime.operationalRunnerInitialDelayMs', 'OPERATIONAL_RUNNER_INITIAL_DELAY_MS должен быть целым числом не меньше 1000 мс.');
+  }
+  if (
+    !Number.isInteger(config.runtime.operationalRunnerIntervalMs) ||
+    config.runtime.operationalRunnerIntervalMs < 60_000
+  ) {
+    add('runtime.operationalRunnerIntervalMs', 'OPERATIONAL_RUNNER_INTERVAL_MS должен быть целым числом не меньше 60000 мс.');
+  }
+  // Параллелизм рассылки отчётов: целое 1..8; дефолт 2 бережёт малый фоновый pool и провайдера.
+  if (
+    !Number.isInteger(config.runtime.reportDispatchConcurrency) ||
+    config.runtime.reportDispatchConcurrency < 1 ||
+    config.runtime.reportDispatchConcurrency > 8
+  ) {
+    add('runtime.reportDispatchConcurrency', 'REPORT_DISPATCH_CONCURRENCY должен быть целым числом в диапазоне 1..8.');
   }
   for (const [field, value] of [
     ['database.connectionTimeoutMs', config.database.connectionTimeoutMs],

@@ -64,12 +64,17 @@ function createPersistenceJob({
   // Ежедневная maintenance (ретеншн + capacity-rollup). Отделена от сбора, чтобы recovery-бегунок
   // не гонял дорогой прунинг/rollup каждый короткий интервал — её зовёт только дневной хвост.
   async function runDailyMaintenance() {
-    if (!db.enabled) return;
+    if (!db.enabled) return { failed: [] };
     const day = new Date().toISOString().slice(0, 10);
+    // Каждый включённый сабстеп ПЫТАЕТСЯ выполниться независимо (изолированный try/catch как раньше),
+    // а короткий id упавшего кладётся в failed[] — функция сама по-прежнему НИКОГДА не бросает
+    // (back-compat для прямых вызовов). runDailyMaintenanceOnce ниже превращает непустой failed[] в
+    // throw ПОСЛЕ того, как все сабстепы отработали, чтобы durable jobs-строка стала retryable.
+    const failed = [];
     try { await db.pruneRawSnapshots(); }
-    catch (e) { log('error', 'raw_snapshots_prune_failed', { error: e.message }); }
+    catch (e) { failed.push('raw_snapshots'); log('error', 'raw_snapshots_prune_failed', { error: e.message }); }
     try { await db.pruneIgMediaDaily(); }
-    catch (e) { log('error', 'ig_media_daily_prune_failed', { error: e.message }); }
+    catch (e) { failed.push('ig_media_daily'); log('error', 'ig_media_daily_prune_failed', { error: e.message }); }
     // Операционный ретеншн: терминальные jobs и мёртвые email-токены (bounded batch, детерминир.
     // порядок, идемпотентно — capped-остаток добирает следующая ночь). Никогда не трогают
     // queued/running job и валидный неиспользованный токен (предикат в репо). Счётчики — в лог.
@@ -77,13 +82,13 @@ function createPersistenceJob({
       try {
         const r = await db.pruneTerminalJobs({ maxAgeDays: jobsRetentionDays });
         log('info', 'jobs_pruned', { deleted: r.deleted, batches: r.batches, capped: r.capped });
-      } catch (e) { log('error', 'jobs_prune_failed', { error: e.message }); }
+      } catch (e) { failed.push('jobs'); log('error', 'jobs_prune_failed', { error: e.message }); }
     }
     if (typeof db.pruneEmailTokens === 'function') {
       try {
         const r = await db.pruneEmailTokens({ maxAgeDays: emailTokensRetentionDays });
         log('info', 'email_tokens_pruned', { deleted: r.deleted, batches: r.batches, capped: r.capped });
-      } catch (e) { log('error', 'email_tokens_prune_failed', { error: e.message }); }
+      } catch (e) { failed.push('email_tokens'); log('error', 'email_tokens_prune_failed', { error: e.message }); }
     }
     // Продуктовый ретеншн ingest_receipts (90д по received_at) и audit_events (365д по created_at).
     // Каждый под НЕЗАВИСИМЫМ флагом (dark deployment, default OFF): выключенный флаг = ноль вызовов
@@ -94,13 +99,13 @@ function createPersistenceJob({
       try {
         const r = await db.pruneIngestReceipts({ maxAgeDays: ingestReceiptsRetentionDays });
         log('info', 'ingest_receipts_pruned', { deleted: r.deleted, batches: r.batches, capped: r.capped });
-      } catch (e) { log('error', 'ingest_receipts_prune_failed', { error: e.message }); }
+      } catch (e) { failed.push('ingest_receipts'); log('error', 'ingest_receipts_prune_failed', { error: e.message }); }
     }
     if (auditEventsRetentionEnabled && typeof db.pruneAuditEvents === 'function') {
       try {
         const r = await db.pruneAuditEvents({ maxAgeDays: auditEventsRetentionDays });
         log('info', 'audit_events_pruned', { deleted: r.deleted, batches: r.batches, capped: r.capped });
-      } catch (e) { log('error', 'audit_events_prune_failed', { error: e.message }); }
+      } catch (e) { failed.push('audit_events'); log('error', 'audit_events_prune_failed', { error: e.message }); }
     }
     // capacity: nightly monthly rollup of channel_daily (long-range read scaling). INERT by
     // default — only runs when CAPACITY_ROLLUPS=1, and the jobs row makes exactly one web instance
@@ -109,8 +114,26 @@ function createPersistenceJob({
     if (capacityRollups) {
       const rollupKey = `channel_monthly:${day}`;
       try { await db.runJobOnce('rollup_channel_monthly', rollupKey, () => db.rollupChannelMonthly(3)); }
-      catch (e) { log('error', 'channel_monthly_rollup_failed', { error: e.message }); }
+      catch (e) { failed.push('channel_monthly'); log('error', 'channel_monthly_rollup_failed', { error: e.message }); }
     }
+    return { failed };
+  }
+
+  // Durable per-UTC-day gate over runDailyMaintenance, shared by the ingest tail and the operational
+  // runner. First caller of the day claims and runs ALL substeps; all-success → succeeded (rest of the
+  // day skips); any substep failure → all substeps still attempted, then throw AFTER them so the jobs
+  // row is failed/re-claimable and the next same-day caller (tail or runner) retries. runJobOnce
+  // re-throws, so public callers must stay best-effort (`.catch`). DB-less → inert skip.
+  async function runDailyMaintenanceOnce() {
+    if (!db.enabled) return { skipped: true };
+    const day = new Date().toISOString().slice(0, 10);
+    return db.runJobOnce('daily_maintenance', `daily_maintenance:${day}`, async () => {
+      const r = await runDailyMaintenance();
+      if (r && r.failed && r.failed.length) {
+        throw new Error(`daily_maintenance substeps failed: ${r.failed.join(',')}`);
+      }
+      return { ok: true };
+    });
   }
 
   // Оркестратор дневного персистенса (вызывается fire-and-forget ПОСЛЕ ответа крона):
@@ -128,11 +151,13 @@ function createPersistenceJob({
     }
     // (b) IG по каждому подключённому аккаунту — тот же проход, что и у recovery-бегунка.
     await runIgCollectionPass().catch(e => log('warn', 'ig_persistence_pass_failed', { error: e.message }));
-    // (c) ретеншн + rollup — не даём append-only таблицам расти безгранично.
-    await runDailyMaintenance();
+    // (c) ретеншн + rollup — не даём append-only таблицам расти безгранично. Через durable
+    // per-UTC-day gate (shared с operational runner): второй same-day вызов пропускается. Гейт МОЖЕТ
+    // бросить (runJobOnce ре-throw при сбое сабстепа) — глотаем, чтобы хвост оставался best-effort.
+    await runDailyMaintenanceOnce().catch(e => log('warn', 'daily_maintenance_pass_failed', { error: e.message }));
   }
 
-  return { processPersistence, runIgCollectionPass, runDailyMaintenance };
+  return { processPersistence, runIgCollectionPass, runDailyMaintenance, runDailyMaintenanceOnce };
 }
 
 module.exports = { createPersistenceJob };

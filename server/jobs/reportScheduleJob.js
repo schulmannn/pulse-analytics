@@ -15,9 +15,13 @@
 // Серверный «Неделя канала» (фаза 3 нарратива): shared-движок narrative.gen.cjs + сборка входа
 // из архива. Секция опциональна — без артефакта/данных письмо-ссылка уходит как раньше.
 const { assembleWeekInput, reportHasWeekBlock, weekSectionHtml } = require('../lib/weekDigest');
+const { boundedAllSettled } = require('../lib/boundedSettled');
 
-function createReportScheduleJob({ db, log, sendEmailDetailed, emailShell, emailBtn, escHtml, emailConfigured, now }) {
+function createReportScheduleJob({ db, log, sendEmailDetailed, emailShell, emailBtn, escHtml, emailConfigured, now, dispatchConcurrency = 2 }) {
   const clock = now || (() => new Date());
+  // Сколько due-отчётов рассылается параллельно за один проход. Прод-конфиг валидирует 1..8,
+  // дефолт = 2; защитный clamp сохраняет тот же предел и для прямых/injected вызовов фабрики.
+  const concurrency = Math.min(8, Math.max(1, Math.floor(Number(dispatchConcurrency)) || 1));
   const reportEmailHtml = (base, report, weekHtml) => emailShell(`Отчёт „${escHtml(report.name)}“`,
     `${weekHtml || ''}<p>Ваш регулярный отчёт Atlavue готов:</p>${emailBtn(`${base}/reports/${report.id}`, 'Открыть отчёт')}` +
     `<p style="color:#64748d;font-size:13px">Отчёт можно сохранить как PDF — кнопка «Печать» на странице отчёта.</p>`);
@@ -54,7 +58,19 @@ function createReportScheduleJob({ db, log, sendEmailDetailed, emailShell, email
       const week = Math.ceil((((t - Date.UTC(t.getUTCFullYear(), 0, 1)) / 86400000) + 1) / 7);
       return `${t.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
     };
-    for (const r of due) {
+    // Bounded per-report concurrency (default/cap 2) instead of the old strictly-serial loop: several
+    // due reports dispatch in parallel, but a CONFIRMED provider 429 (retryable, whose reservation was
+    // successfully cleared) sets a pass-scoped pause BEFORE throwing, so no NEW report starts after it —
+    // only the already-in-flight peers (≤ concurrency) finish. Other per-report failures stay isolated
+    // via the per-report try/catch and never pause the pass. Order-preserving boundedAllSettled keeps
+    // each result associated with its input; the returned stats are safe (counts only, no email/name).
+    let paused = false;
+    const stats = { due: due.length, sent: 0, deduped: 0, failed: 0, skippedPaused: 0, paused: false };
+    const runReport = async (r) => {
+      // Pause is checked before starting each report. boundedAllSettled pulls the next item only after
+      // the previous one settled, and the 429 branch sets `paused` synchronously before throwing, so a
+      // worker that sees `paused` here returns without starting new work.
+      if (paused) { stats.skippedPaused += 1; return; }
       // Idempotency key per (report, period): a double cron tick, the catch-up branch firing next
       // to the anchored one, or a SECOND SERVER INSTANCE can all re-discover the same candidate —
       // the jobs row makes exactly one of them send (roadmap P0 «Background job idempotency»).
@@ -138,7 +154,15 @@ function createReportScheduleJob({ db, log, sendEmailDetailed, emailShell, email
                 log('error', 'report_email_reserve_clear_failed', { report_id: r.id, period: periodKey });
                 return { sent: false, retryableLocked: true };
               }
-              if (cleared) throw new Error('report email rate-limited (known not sent)');
+              if (cleared) {
+                // Reservation released cleanly → this is a confirmed retryable 429. Pause the pass
+                // SYNCHRONOUSLY before throwing so no new report starts (only in-flight peers finish);
+                // the throw makes the jobs row failed/re-claimable for the next daily retry.
+                paused = true;
+                throw new Error('report email rate-limited (known not sent)');
+              }
+              // Clear failed → fail closed: keep the reservation, go terminal, and do NOT pause the pass
+              // (a report we could not release must not stall the others).
               log('error', 'report_email_reserve_clear_failed', { report_id: r.id, period: periodKey });
               return { sent: false, retryableLocked: true };
             }
@@ -152,12 +176,19 @@ function createReportScheduleJob({ db, log, sendEmailDetailed, emailShell, email
           }
         });
         if (outcome.skipped) {
+          stats.deduped += 1;
           log('info', 'report_email_deduped', { report_id: r.id, period: periodKey });
+        } else if (outcome.result && outcome.result.sent) {
+          stats.sent += 1;
         }
       } catch (e) {
+        stats.failed += 1;
         log('error', 'report_email_failed', { report_id: r.id, error: e.message });
       }
-    }
+    };
+    await boundedAllSettled(due, runReport, concurrency);
+    stats.paused = paused;
+    return stats;
   }
 
   return { processReportSchedules };
