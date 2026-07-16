@@ -1,7 +1,9 @@
 import type { IgHistoryRow, IgInsights, IgProfile } from '@/api/schemas';
 import { pctDelta, type MetricDelta } from '@/lib/delta';
 import {
+  fmtDay,
   followerLevelSeries,
+  hasDailySeries,
   histSeries,
   longerSeries,
   metricSeries,
@@ -70,10 +72,31 @@ export interface IgWindowDaily {
   saves: Point[];
 }
 
+/** One compact Overview sparkline: ascending day labels (fmtDay) aligned with values. An empty
+    chart (`values.length < 2`) means «no canonical daily series» — the card keeps its headline and
+    says «Недостаточно дневных данных для графика» instead of drawing. */
+export interface IgOverviewChart {
+  labels: string[];
+  values: number[];
+}
+
+export interface IgOverviewCharts {
+  /** Daily account views over the exact window. */
+  views: IgOverviewChart;
+  /** Daily total interactions over the exact window. */
+  interactions: IgOverviewChart;
+  /** Daily ER = 100·interactions ÷ reach, aligned by calendar day (skips days without a positive
+      reach denominator or without a real interaction point). */
+  engagement: IgOverviewChart;
+}
+
 export interface IgWindowMetrics {
   series: IgWindowSeries;
   pairs: IgWindowPairs;
   daily: IgWindowDaily;
+  /** Compact Overview sparklines (views / interactions / engagement), all from the canonical
+      account daily series filtered to the active window. */
+  overviewCharts: IgOverviewCharts;
   values: {
     reach: IgWindowScalar;
     views: IgWindowScalar;
@@ -94,6 +117,67 @@ export interface IgWindowMetrics {
 
 const dated = (series: Point[]): Point[] =>
   series.filter((p) => p.day !== 'total' && Number.isFinite(Date.parse(p.day)));
+
+// Minimum real dated samples for a metric to count as a canonical daily series rather than the live
+// 1–2 point total_value aggregate (`day:'total'` synthetic + the prev/current pair). Matches the
+// viewsHasDaily/tiHasDaily gate (min=3) in useIgData — the compact Overview charts draw ONLY a real
+// multi-day series, never the aggregate masquerading as two daily points.
+const CHART_CANON_MIN = 3;
+const EMPTY_CHART: IgOverviewChart = { labels: [], values: [] };
+
+/** Windowed, ascending daily points: drop the synthetic `total`/non-finite dates, keep only days
+    inside [since, until], sort oldest→newest by ISO day. */
+function windowedDaily(series: Point[], since: number, until: number): Point[] {
+  return series
+    .filter((p) => p.day !== 'total' && Number.isFinite(Date.parse(p.day)))
+    .filter((p) => {
+      const t = Date.parse(p.day);
+      return t >= since && t <= until;
+    })
+    .sort((a, b) => a.day.localeCompare(b.day));
+}
+
+// A sparkline needs ≥2 points; fewer → empty (the card says «Недостаточно дневных данных…»).
+const toChart = (points: Point[]): IgOverviewChart =>
+  points.length >= 2
+    ? { labels: points.map((p) => fmtDay(p.day)), values: points.map((p) => p.value) }
+    : EMPTY_CHART;
+
+/**
+ * The three compact IG Overview sparklines, all from the canonical account daily series already in
+ * the window bundle — never from post-publication metrics that don't reconcile with the account
+ * headline. Honest by construction: each needs a real multi-day series (≥3 dated points, so the live
+ * total_value aggregate can't pass) AND ≥2 points inside the exact active window, else it returns an
+ * empty chart. The graph depends only on the active window, never on previous-window coverage. Not
+ * shared with Telegram (its cards carry a separate publication-date series).
+ */
+export function igOverviewCharts(series: IgWindowSeries, since: number, until: number): IgOverviewCharts {
+  const viewsCanon = hasDailySeries(series.views, CHART_CANON_MIN);
+  const tiCanon = hasDailySeries(series.ti, CHART_CANON_MIN);
+  const tiDaily = tiCanon ? windowedDaily(series.ti, since, until) : [];
+
+  // ER needs BOTH a real daily interactions series and a real daily reach series. Align by calendar
+  // day and keep only days with a positive reach denominator — a day with reach 0 or a missing reach
+  // point is skipped (never a divide-by-zero or a fabricated value), matching the canonical erReach
+  // «real zero vs missing» decision.
+  let engagement = EMPTY_CHART;
+  if (tiCanon && hasDailySeries(series.reach, 2)) {
+    const reachByDay = new Map<string, number>();
+    for (const p of windowedDaily(series.reach, since, until)) reachByDay.set(p.day, p.value);
+    const erPoints: Point[] = [];
+    for (const p of tiDaily) {
+      const reach = reachByDay.get(p.day);
+      if (reach != null && reach > 0) erPoints.push({ day: p.day, value: (p.value / reach) * 100 });
+    }
+    engagement = toChart(erPoints);
+  }
+
+  return {
+    views: viewsCanon ? toChart(windowedDaily(series.views, since, until)) : EMPTY_CHART,
+    interactions: toChart(tiDaily),
+    engagement,
+  };
+}
 
 const scalarFromPair = (pair: WindowPair): IgWindowScalar => ({
   value: pair.cur,
@@ -158,6 +242,7 @@ export function igWindowMetrics(raw: IgWindowRaw): IgWindowMetrics {
   return {
     series,
     pairs,
+    overviewCharts: igOverviewCharts(series, since, until),
     daily: {
       reach: dated(series.reach),
       followerNet: dated(netFollowerDaily(historyRows)),

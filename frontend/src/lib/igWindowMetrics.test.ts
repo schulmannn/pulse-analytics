@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { IgHistoryRow, IgInsights, IgProfile } from '@/api/schemas';
-import { windowIgSeries } from '@/lib/igMetrics';
-import { igWindowMetrics } from '@/lib/igWindowMetrics';
+import { fmtDay, windowIgSeries, type Point } from '@/lib/igMetrics';
+import { igOverviewCharts, igWindowMetrics, type IgWindowSeries } from '@/lib/igWindowMetrics';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const baseMs = Date.parse('2026-07-01T00:00:00.000Z');
@@ -107,5 +107,105 @@ describe('igWindowMetrics', () => {
     expect(metrics.values.followerNet.value).toBe(narrativeFollowerNet);
     expect(metrics.values.views.value).toBe(narrativeViews);
     expect(metrics.values.totalInteractions.value).toBe(narrativeTi);
+  });
+
+  it('exposes overviewCharts from the canonical daily series over the active window', () => {
+    const metrics = igWindowMetrics(fixedRaw());
+    // fixedRaw window = day(7)..day(14): the last 7 daily points (indices 7..13).
+    expect(metrics.overviewCharts.views.values).toEqual(viewVals.slice(7));
+    expect(metrics.overviewCharts.interactions.values).toEqual(tiVals.slice(7));
+    expect(metrics.overviewCharts.engagement.values).toEqual(
+      tiVals.slice(7).map((ti, i) => (ti / reachVals.slice(7)[i]) * 100),
+    );
+  });
+});
+
+/**
+ * The three compact IG Overview sparklines (Просмотры / Взаимодействия / Вовлечённость) build ONLY
+ * on the canonical account daily series filtered to the exact active window. Pin: daily ER
+ * alignment, sorting/sparse dates, zero/missing reach, exact window filtering and the synthetic-
+ * aggregate gate (a 1–2 point total_value aggregate must never pass as a chartable series).
+ */
+describe('igOverviewCharts', () => {
+  const pts = (rows: Array<[string, number]>): Point[] => rows.map(([day, value]) => ({ day, value }));
+  const makeSeries = (o: Partial<Record<'views' | 'ti' | 'reach', Point[]>>): IgWindowSeries => {
+    const e: Point[] = [];
+    return {
+      reach: o.reach ?? e, reachWindow: e, views: o.views ?? e, ti: o.ti ?? e, engaged: e,
+      follower: e, followerLevel: e, saves: e, likes: e, comments: e, shares: e,
+      profileViews: e, follows: e, unfollows: e,
+    };
+  };
+  // Inclusive window [08 .. 14] July 2026 (bounds at UTC midnight, like the daily archive days).
+  const SINCE = Date.parse('2026-07-08');
+  const UNTIL = Date.parse('2026-07-14');
+  const d = (n: number) => `2026-07-${String(n).padStart(2, '0')}`;
+
+  it('daily ER = 100·interactions ÷ reach aligned by calendar day; views/interactions pass through', () => {
+    const series = makeSeries({
+      views: pts([[d(8), 100], [d(9), 200], [d(10), 300]]),
+      ti: pts([[d(8), 10], [d(9), 30], [d(10), 25]]),
+      reach: pts([[d(8), 100], [d(9), 200], [d(10), 50]]),
+    });
+    const c = igOverviewCharts(series, SINCE, UNTIL);
+    expect(c.views.values).toEqual([100, 200, 300]);
+    expect(c.interactions.values).toEqual([10, 30, 25]);
+    // 100·10/100=10, 100·30/200=15, 100·25/50=50
+    expect(c.engagement.labels).toEqual([fmtDay(d(8)), fmtDay(d(9)), fmtDay(d(10))]);
+    expect(c.engagement.values[0]).toBeCloseTo(10, 10);
+    expect(c.engagement.values[1]).toBeCloseTo(15, 10);
+    expect(c.engagement.values[2]).toBeCloseTo(50, 10);
+  });
+
+  it('sorts oldest→newest and never zero-fills sparse days', () => {
+    const series = makeSeries({
+      views: pts([[d(12), 300], [d(8), 100], [d(10), 200]]), // out of order, gaps at 09 & 11
+      ti: pts([[d(12), 3], [d(8), 1], [d(10), 2]]),
+      reach: pts([[d(12), 100], [d(8), 100], [d(10), 100]]),
+    });
+    const c = igOverviewCharts(series, SINCE, UNTIL);
+    expect(c.views.labels).toEqual([fmtDay(d(8)), fmtDay(d(10)), fmtDay(d(12))]);
+    expect(c.views.values).toEqual([100, 200, 300]); // exactly three buckets, no filled zeros
+    expect(c.engagement.values).toHaveLength(3);
+    [1, 2, 3].forEach((expected, i) => {
+      expect(c.engagement.values[i]).toBeCloseTo(expected, 10);
+    });
+  });
+
+  it('engagement skips days without a positive reach or without a real interaction point', () => {
+    const series = makeSeries({
+      ti: pts([[d(8), 10], [d(9), 20], [d(10), 30], [d(11), 40]]),
+      // 09 reach 0 → skip; 11 reach missing → skip; only 08 & 10 survive.
+      reach: pts([[d(8), 100], [d(9), 0], [d(10), 50]]),
+    });
+    const c = igOverviewCharts(series, SINCE, UNTIL);
+    expect(c.interactions.values).toEqual([10, 20, 30, 40]); // interactions unaffected by reach
+    expect(c.engagement.labels).toEqual([fmtDay(d(8)), fmtDay(d(10))]);
+    expect(c.engagement.values[0]).toBeCloseTo(10, 10); // 100·10/100
+    expect(c.engagement.values[1]).toBeCloseTo(60, 10); // 100·30/50
+  });
+
+  it('filters to the exact active window, dropping points before/after', () => {
+    const all = pts([[d(5), 1], [d(6), 2], [d(8), 3], [d(9), 4], [d(14), 5], [d(15), 6]]);
+    const series = makeSeries({ views: all, ti: all, reach: all });
+    const c = igOverviewCharts(series, SINCE, UNTIL); // keep 08, 09, 14 (14 is the inclusive bound)
+    expect(c.views.labels).toEqual([fmtDay(d(8)), fmtDay(d(9)), fmtDay(d(14))]);
+    expect(c.views.values).toEqual([3, 4, 5]);
+  });
+
+  it('rejects the synthetic total_value aggregate (1 total point or a 2-point prev/cur pair)', () => {
+    const single = igOverviewCharts(makeSeries({ views: pts([['total', 5000]]), ti: pts([['total', 800]]) }), SINCE, UNTIL);
+    expect(single.views.values).toEqual([]);
+    expect(single.interactions.values).toEqual([]);
+    // Two real dated points (the shape of the prev/cur aggregate) still fall short of the ≥3
+    // canonical minimum → no chart, so the aggregate can't masquerade as a daily series.
+    const pair = igOverviewCharts(makeSeries({ views: pts([[d(8), 100], [d(14), 200]]) }), SINCE, UNTIL);
+    expect(pair.views.values).toEqual([]);
+  });
+
+  it('returns an empty chart when fewer than two canonical points fall inside the window', () => {
+    // Canonical series (3 dated points overall), but only one lands in the active window.
+    const series = makeSeries({ views: pts([[d(1), 1], [d(2), 2], [d(8), 3]]) });
+    expect(igOverviewCharts(series, SINCE, UNTIL).views.values).toEqual([]);
   });
 });

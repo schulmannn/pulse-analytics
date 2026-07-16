@@ -7,9 +7,11 @@ import { EmptyState } from '@/components/EmptyState';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { ChartCardBody, ChartSection as WidgetChartSection } from '@/components/ChartWidget';
-import { CompareStat, CompositionStat } from '@/components/CompareStat';
+import { CompactStatHeadline } from '@/components/CompareStat';
+import { Sparkline } from '@/components/Sparkline';
 import type { WidgetSize } from '@/lib/widgetPrefsStore';
-import { CHART_CYCLE, fmtDay, pairDelta, windowIgSeries, type Point, type WindowPair } from '@/lib/igMetrics';
+import { fmtDay, pairDelta, windowIgSeries, type Point, type WindowPair } from '@/lib/igMetrics';
+import type { IgOverviewChart } from '@/lib/igWindowMetrics';
 import { calendarWindowForPeriod, periodDateTimestamp, splitCalendarRows } from '@/lib/period';
 import type { WidgetPeriodValue } from '@/lib/period';
 import type { IgData } from '@/lib/useIgData';
@@ -373,9 +375,13 @@ export function SubscriberMovement({
 // ── Redesigned IG Overview cards ──────────────────────────────────────────────────────────────
 // The old aggregate «Показатели» hero (IgKpiBlock, still used by the legacy `ig-kpi` Home key)
 // is split into independent, source-honest widgets. Each is a BARE body (no own ChartSection) so the
-// Обзор hosts it inside the widget grid, drilling to its own /metrics/ig-* page. Reach is the one
-// honest daily series (line); Просмотры / Взаимодействия / Вовлечённость are aggregates → compact
-// non-temporal comparisons (never a tiny timeline at third width).
+// Обзор hosts it inside the widget grid, drilling to its own /metrics/ig-* page. Reach is a full
+// daily series (line hero); Просмотры / Взаимодействия / Вовлечённость carry compact active-window
+// sparklines (parity with the redesigned TG third-width cards — see KpiGrid TgTrendStat), each built
+// from the CANONICAL account daily series (igOverviewCharts): daily views, daily total interactions,
+// and daily ER = 100·interactions ÷ reach aligned by calendar day. The chart depends ONLY on the
+// active window, never on previous-window coverage. Delta stays honest (absent when no previous
+// window). Below the required real daily samples the card keeps its headline and says so.
 
 /** «Охват» — the primary IG daily series (half width): area line + paired-window Δ. Section carries
     the drill, so KpiHero has no own ↗ (a lone arrow next to the card's read as a dup — visual audit). */
@@ -413,15 +419,63 @@ export function IgAudienceBody({ ig }: { ig: IgData }) {
   );
 }
 
-/** «Просмотры» (third): value + previous-period two-bar comparison. */
+/**
+ * Compact IG comparison body (Просмотры / Взаимодействия / Вовлечённость): the headline (number +
+ * honest delta) over an active-window sparkline built from the canonical account daily series
+ * (igOverviewCharts). Parity with the redesigned TG third-width cards (KpiGrid TgTrendStat): the
+ * chart depends ONLY on the active window, never on previous-window coverage. ≥2 canonical daily
+ * points draw it (caption «по дням»); below the required real daily samples the card keeps its
+ * headline and says «Недостаточно дневных данных для графика».
+ */
+function IgTrendStat({
+  value,
+  delta,
+  chart,
+  format,
+  onDrill,
+  drillLabel,
+  hasValue = true,
+}: {
+  value: number | null;
+  delta?: MetricDelta | null;
+  chart: IgOverviewChart;
+  format: (n: number) => string;
+  onDrill?: () => void;
+  drillLabel?: string;
+  hasValue?: boolean;
+}) {
+  const live = hasValue && value != null && Number.isFinite(value);
+  const hasChart = live && chart.values.length >= 2;
+  return (
+    <div className="flex h-full min-h-0 flex-col justify-between gap-4">
+      <CompactStatHeadline text={live ? format(value as number) : '—'} delta={delta} onDrill={onDrill} drillLabel={drillLabel} live={live} />
+      {hasChart ? (
+        <Sparkline
+          values={chart.values}
+          labels={chart.labels}
+          area
+          strokeWidth={2}
+          interactive
+          caption="по дням"
+          formatValue={format}
+          className="h-full min-h-14 w-full"
+        />
+      ) : (
+        <p className="text-2xs text-muted-foreground">Недостаточно дневных данных для графика.</p>
+      )}
+    </div>
+  );
+}
+
+/** «Просмотры» (third): daily account views over the active window. */
 export function IgViewsBody({ ig }: { ig: IgData }) {
   const navigate = useNavigate();
   const live = isLive(ig.pairs.views);
   return (
-    <CompareStat
+    <IgTrendStat
       value={live ? ig.pairs.views.cur : null}
-      prev={ig.pairs.views.hasPrev ? ig.pairs.views.prev : null}
       delta={live ? pairDelta(ig.pairs.views) : null}
+      chart={ig.overviewCharts.views}
       format={(n) => fmt.short(Math.round(n))}
       hasValue={live}
       onDrill={() => navigate('/metrics/ig-views')}
@@ -430,25 +484,15 @@ export function IgViewsBody({ ig }: { ig: IgData }) {
   );
 }
 
-/** «Взаимодействия» (third): total + composition (лайки/комментарии/сохранения/репосты) as a
-    compact stacked bar + legend — never a tiny timeline. Falls back to a bare total when the
-    breakdown pairs are empty this window. */
+/** «Взаимодействия» (third): daily total interactions over the active window. */
 export function IgInteractionsBody({ ig }: { ig: IgData }) {
   const navigate = useNavigate();
   const live = isLive(ig.pairs.ti);
-  const parts = [
-    { label: 'Лайки', pair: ig.pairs.likes, color: CHART_CYCLE[0] },
-    { label: 'Комментарии', pair: ig.pairs.comments, color: CHART_CYCLE[1] },
-    { label: 'Сохранения', pair: ig.pairs.saves, color: CHART_CYCLE[2] },
-    { label: 'Репосты', pair: ig.pairs.shares, color: CHART_CYCLE[3] },
-  ]
-    .filter((p) => p.pair.hasCur && p.pair.cur > 0)
-    .map((p) => ({ label: p.label, value: p.pair.cur, color: p.color }));
   return (
-    <CompositionStat
-      total={live ? ig.pairs.ti.cur : null}
+    <IgTrendStat
+      value={live ? ig.pairs.ti.cur : null}
       delta={live ? pairDelta(ig.pairs.ti) : null}
-      parts={parts}
+      chart={ig.overviewCharts.interactions}
       format={(n) => fmt.short(Math.round(n))}
       hasValue={live}
       onDrill={() => navigate('/metrics/ig-interactions')}
@@ -457,7 +501,7 @@ export function IgInteractionsBody({ ig }: { ig: IgData }) {
   );
 }
 
-/** «Вовлечённость» (third): ER now vs the previous window (compact two-bar, percent). */
+/** «Вовлечённость» (third): daily ER = 100·interactions ÷ reach, aligned by calendar day. */
 export function IgEngagementBody({ ig }: { ig: IgData }) {
   const navigate = useNavigate();
   const erTrend =
@@ -465,10 +509,10 @@ export function IgEngagementBody({ ig }: { ig: IgData }) {
       ? pctDelta(ig.erReach, ig.erReachPrev)
       : null;
   return (
-    <CompareStat
+    <IgTrendStat
       value={ig.erReach > 0 ? ig.erReach : null}
-      prev={ig.erReachPrev > 0 ? ig.erReachPrev : null}
       delta={erTrend}
+      chart={ig.overviewCharts.engagement}
       format={(n) => `${n.toFixed(2)}%`}
       hasValue={ig.erReach > 0}
       onDrill={() => navigate('/metrics/ig-er')}
