@@ -3,8 +3,8 @@ import { DeltaPill } from '@/components/DeltaPill';
 import type { MetricDelta } from '@/lib/delta';
 
 /**
- * Compact, non-temporal metric bodies for the third-width Instagram Overview cards (the Telegram
- * third-width cards moved to an active-window publication-date sparkline — see KpiGrid TgTrendStat).
+ * Compact, non-temporal metric bodies retained for aggregate surfaces. The Telegram and Instagram
+ * third-width Overview cards now use active-window sparklines instead.
  * An aggregate metric leads with its number + delta and then a period-over-period read: two bars
  * (this window vs the previous equal-length one) for a single value, or a stacked composition bar
  * for an additive metric. Honest by construction: no previous → no bars and no fake delta; missing

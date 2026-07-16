@@ -110,6 +110,17 @@ test('desktop Instagram Overview keeps the split KPI hierarchy intact', async ({
   await expect(page.getByRole('heading', { name: 'Неделя аккаунта' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Главное изменение' })).toBeVisible();
   expect(await overflowingCards(page)).toEqual([]);
+
+  // The three third-width IG cards (Просмотры / Взаимодействия / Вовлечённость) now carry an
+  // active-window sparkline over the CANONICAL account daily series — its «по дням» caption renders
+  // and the old previous-period empty copy is gone (the chart never depends on prior-window coverage).
+  for (const card of ['Просмотры', 'Взаимодействия', 'Вовлечённость']) {
+    const section = page.getByRole('heading', { name: card, exact: true }).locator('xpath=ancestor::section[1]');
+    await expect(section.getByText('по дням')).toBeVisible();
+    await expect(section.getByText('Нет данных за предыдущий период для сравнения.')).toHaveCount(0);
+    await expect(section.getByText('Недостаточно дневных данных для графика.')).toHaveCount(0);
+  }
+
   const compactTop = await page.getByRole('heading', { name: 'Просмотры', exact: true }).evaluate((el) => el.closest('section')!.getBoundingClientRect().top);
   const narrativeTop = await page.getByRole('heading', { name: 'Неделя аккаунта', exact: true }).evaluate((el) => el.closest('section')!.getBoundingClientRect().top);
   expect(compactTop).toBeLessThan(narrativeTop);

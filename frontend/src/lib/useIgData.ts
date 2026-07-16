@@ -81,6 +81,7 @@ export function useIgData() {
   const {
     series,
     pairs,
+    overviewCharts,
     followerNet: netMovement,
     followersLevel: followers,
     erReach,
@@ -180,6 +181,7 @@ export function useIgData() {
     inWindow,
     series,
     pairs,
+    overviewCharts,
     followers,
     erReach,
     erReachPrev,
