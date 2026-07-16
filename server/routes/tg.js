@@ -473,6 +473,27 @@ function registerTgRoutes({
     const id = parseInt(req.params.id, 10);
     if (!id) return res.status(400).end();
     const size = req.query.size === 'lg' ? 'lg' : 'sm';
+    // DB-first: the managed daily collect persists each central post's small cover into tg_post_media
+    // (downloaded through the owner's session INSIDE the trusted job — never driven by this open route).
+    // Serving those bytes here means covers survive a revoked global TG_SESSION, which used to 503 this
+    // proxy and blank every top-post card even though posts already came DB-first (#217). The managed
+    // session is never touched on the request path; anonymous <img> traffic reads only PUBLIC bytes.
+    if (db.enabled) {
+      try {
+        const centralId = await db.getOwnerChannelId();
+        if (centralId) {
+          const jpeg = await db.getPostMedia(centralId, id, size);
+          if (jpeg) {
+            res.set('Content-Type', 'image/jpeg');
+            res.set('Cache-Control', 'public, max-age=86400');
+            return res.send(jpeg);
+          }
+        }
+      } catch (_e) { /* fall through to the live proxy below */ }
+    }
+    // Fallback: the live global-session proxy (valid only while env TG_SESSION is). Unchanged behaviour
+    // — a 5xx/unreachable upstream answers 503, a 4xx passes through so the card's onError swaps in the
+    // neutral placeholder (offline demo → 404 → placeholder, as the e2e spec asserts).
     try {
       const r = await fetchWithTimeout(`${MTPROTO_URL}/thumb/${id}?size=${size}`, { headers: { 'x-internal-token': MTPROTO_TOKEN } });
       if (!r.ok) {

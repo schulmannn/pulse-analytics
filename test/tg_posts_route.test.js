@@ -58,9 +58,12 @@ function tgHandlers({
 async function invokeRoute(handler, req = {}) {
   const res = {
     statusCode: 200,
+    headers: {},
     status(code) { this.statusCode = code; return this; },
-    set() { return this; },
+    set(name, value) { this.headers[name] = value; return this; },
     json(body) { this.body = body; return this; },
+    send(body) { this.body = body; return this; },
+    end() { this.ended = true; return this; },
   };
   let nextError = null;
   await handler(
@@ -71,6 +74,46 @@ async function invokeRoute(handler, req = {}) {
   if (nextError) throw nextError;
   return res;
 }
+
+test('public central thumbnail proxy serves persisted DB media before the revoked legacy session', async () => {
+  const jpeg = Buffer.from([0xff, 0xd8, 0xaa, 0xbb]);
+  const calls = [];
+  const handler = tgHandlers({
+    db: {
+      enabled: true,
+      getOwnerChannelId: async () => 5,
+      getPostMedia: async (channelId, postId, size) => {
+        calls.push([channelId, postId, size]);
+        return jpeg;
+      },
+    },
+    mtprotoFetch: async () => ({}),
+  }).get('GET /api/tg/mtproto/thumb/:id').at(-1);
+
+  const res = await invokeRoute(handler, { params: { id: '1241' }, query: { size: 'lg' } });
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, jpeg);
+  assert.equal(res.headers['Content-Type'], 'image/jpeg');
+  assert.equal(res.headers['Cache-Control'], 'public, max-age=86400');
+  assert.deepEqual(calls, [[5, 1241, 'lg']], 'lookup is scoped to the one configured public central channel');
+});
+
+test('thumbnail DB miss preserves the legacy live fallback and honest 503 placeholder path', async () => {
+  const handler = tgHandlers({
+    db: {
+      enabled: true,
+      getOwnerChannelId: async () => 5,
+      getPostMedia: async () => null,
+    },
+    mtprotoFetch: async () => ({}),
+  }).get('GET /api/tg/mtproto/thumb/:id').at(-1);
+
+  // The harness' raw fetchWithTimeout throws, modelling the currently revoked legacy TG_SESSION.
+  const res = await invokeRoute(handler, { params: { id: '1241' }, query: {} });
+  assert.equal(res.statusCode, 503);
+  assert.deepEqual(res.body, { error: 'источник недоступен' });
+});
 
 function fullHandler(options) {
   return tgHandlers(options).get('GET /api/tg/full').at(-1);

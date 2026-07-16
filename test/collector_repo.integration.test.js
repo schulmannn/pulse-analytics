@@ -173,6 +173,41 @@ test('persistTgBundleTx: сбой внутри бандла откатывает
   assert.strictEqual((await db.getChannelHistoryInternal(ch.id, 30)).length, 0, 'откат: daily не записан');
 });
 
+test('post media (covers): upsert хранит JPEG как bytea; getPostMedia читает с sm-fallback и идемпотентен', { skip }, async () => {
+  const ch = await mkChannel('media');
+  await db.upsertPosts(ch.id, [{
+    post_id: 1241, date_published: today, views: 10, reactions: 1, forwards: 0, replies: 0,
+    erv: null, virality: null, media_type: 'photo', caption: 'x', hashtags: [],
+  }]);
+  const jpegSm = Buffer.from([0xff, 0xd8, 0xaa, 0xbb]);
+  const n = await db.upsertPostMedia(ch.id, [{ post_id: 1241, size: 'sm', jpeg_b64: jpegSm.toString('base64') }]);
+  assert.strictEqual(n, 1);
+
+  const got = await db.getPostMedia(ch.id, 1241, 'sm');
+  assert.ok(Buffer.isBuffer(got), 'bytea читается как Buffer');
+  assert.deepStrictEqual(Buffer.from(got), jpegSm, 'байты round-trip через base64/bytea');
+
+  // ?size=lg при сохранённом только sm → отдаём sm (видимая обложка, не промах)
+  assert.deepStrictEqual(Buffer.from(await db.getPostMedia(ch.id, 1241, 'lg')), jpegSm);
+
+  // повторный collect перезаписывает те же байты, а не дублирует строку
+  const jpeg2 = Buffer.from([0xff, 0xd8, 0xcc, 0xdd]);
+  await db.upsertPostMedia(ch.id, [{ post_id: 1241, size: 'sm', jpeg_b64: jpeg2.toString('base64') }]);
+  assert.deepStrictEqual(Buffer.from(await db.getPostMedia(ch.id, 1241, 'sm')), jpeg2);
+  const cnt = (await pool.query(`SELECT count(*)::int n FROM tg_post_media WHERE channel_id=$1 AND post_id=$2`, [ch.id, 1241])).rows[0].n;
+  assert.strictEqual(cnt, 1, 'upsert по (channel,post,size) не задваивает');
+
+  // неизвестный пост → null (прокси уходит в live-fallback); строки без jpeg_b64 игнорируются
+  assert.strictEqual(await db.getPostMedia(ch.id, 9999, 'sm'), null);
+  assert.strictEqual(await db.upsertPostMedia(ch.id, [{ post_id: 7, size: 'sm' }]), 0);
+  assert.strictEqual(await db.upsertPostMedia(ch.id, [{ post_id: 1241, size: 'bad', jpeg_b64: jpegSm.toString('base64') }]), 0);
+  assert.strictEqual(await db.upsertPostMedia(ch.id, [{ post_id: 1241, size: 'sm', jpeg_b64: Buffer.from('not-jpeg').toString('base64') }]), 0);
+
+  // Media lifecycle follows the posts archive, so future post retention cannot orphan blobs.
+  await pool.query(`DELETE FROM posts WHERE channel_id=$1 AND post_id=$2`, [ch.id, 1241]);
+  assert.strictEqual(await db.getPostMedia(ch.id, 1241, 'sm'), null, 'post delete cascades to its cover');
+});
+
 test('upsertIgDaily roundtrip + saveRawSnapshot/pruneRawSnapshots', { skip }, async () => {
   const ch = await mkChannel('igraw');
   await db.upsertIgDaily(ch.id, [{ day: today, followers: 1000, reach: 5000, views: 8000 }]);

@@ -4,6 +4,7 @@ Python + Telethon + FastAPI
 """
 
 import asyncio
+import base64
 import os
 import json
 import logging
@@ -1083,6 +1084,78 @@ async def search_mentions_managed(
 _THUMB_CACHE = OrderedDict()   # LRU: move_to_end on hit, popitem(last=False) drops the least-recently-used
 _THUMB_CACHE_MAX = 500
 
+# Bounds for the best-effort cover fanout the managed collect (POST /qr/collect, include_media) runs so
+# the open <img> proxy can serve covers DB-first. Kept well under HEAVY_TOTAL_BUDGET_S with a short
+# per-download deadline, so a slow media file can never push the core collect over its total budget.
+_COLLECT_THUMBS_MAX = 48            # cap on how many post covers one collect downloads
+_COLLECT_THUMBS_BUDGET_S = 20       # max wall-clock spent on the whole thumbnail phase
+_COLLECT_THUMBS_SAFETY_S = 15       # headroom left under the total budget before thumbs may start
+_THUMB_DOWNLOAD_TIMEOUT_S = 8       # per-thumbnail download deadline
+_THUMB_MAX_BYTES = 512 * 1024       # matches the Postgres CHECK; reject an anomalous "thumbnail"
+_THUMBS_TOTAL_BYTES_MAX = 4 * 1024 * 1024  # keeps the private JSON response bounded too
+
+
+async def _download_thumb_bytes(tg, msg, size):
+    """One message's cover thumbnail bytes (JPEG) or None. Shared by GET /thumb (global session) and
+    the managed collect fanout. size='lg' tries the largest available thumb first, 'sm' the small real
+    thumb. FloodWait propagates; any other per-attempt failure falls through to the next thumb index
+    (older Telegram media exposes different size sets)."""
+    if not msg or not (msg.photo or msg.video or msg.document):
+        return None
+    indices = (-1, 2, 1, 0) if size == 'lg' else (1, 0)
+    for idx in indices:
+        try:
+            data = await tg.download_media(msg, thumb=idx, file=bytes)
+            if data:
+                return data
+        except FloodWaitError:
+            raise
+        except Exception:
+            continue
+    return None
+
+
+async def _collect_post_thumbs(tg, groups, budget_s):
+    """Best-effort small covers for the media posts of a managed collect. Bounded by count AND a
+    wall-clock sub-budget, each download separately time-boxed, and every failure swallowed — so a
+    slow / absent / flood-limited thumb yields fewer covers but NEVER fails the bundle (posts, velocity
+    and graphs are already computed). Returns [{post_id, size, jpeg_b64}] for the web side to persist
+    into tg_post_media; the frontend keeps rendering the same /thumb/:id proxy URL."""
+    out = []
+    if budget_s <= 0:
+        return out
+    loop = asyncio.get_event_loop()
+    start = loop.time()
+    count = 0
+    total_bytes = 0
+    for group in groups:
+        remaining = budget_s - (loop.time() - start)
+        if count >= _COLLECT_THUMBS_MAX or remaining <= 0:
+            break
+        rep = max(group, key=lambda m: (m.views or 0))   # same representative GET /thumb serves for this id
+        if not (rep.photo or rep.video):                 # covers are photo/video only (matches the frontend)
+            continue
+        count += 1
+        try:
+            data = await asyncio.wait_for(
+                _download_thumb_bytes(tg, rep, 'sm'),
+                timeout=min(_THUMB_DOWNLOAD_TIMEOUT_S, remaining),
+            )
+        except (FloodWaitError, asyncio.TimeoutError):
+            break                    # rate-limited or slow → stop paying, keep the bundle intact
+        except Exception:
+            continue                 # this post has no usable thumb → skip it, try the next
+        # Telethon thumbnails for photo/video are JPEG. Reject a surprising payload (or a full media
+        # file returned by an upstream regression) before it can inflate the private JSON / Postgres.
+        if not data or len(data) < 4 or len(data) > _THUMB_MAX_BYTES or data[:2] != b'\xff\xd8':
+            continue
+        if total_bytes + len(data) > _THUMBS_TOTAL_BYTES_MAX:
+            break
+        total_bytes += len(data)
+        out.append({'post_id': rep.id, 'size': 'sm', 'jpeg_b64': base64.b64encode(data).decode('ascii')})
+    return out
+
+
 @app.get('/thumb/{msg_id}')
 async def get_thumb(msg_id: int, size: str = Query(default='sm'), x_internal_token: str = Header(default='')):
     """JPEG thumbnail of a post's media (cached). For <img> tags.
@@ -1098,18 +1171,7 @@ async def get_thumb(msg_id: int, size: str = Query(default='sm'), x_internal_tok
         msg = await tg.get_messages(CHANNEL, ids=msg_id)
         if not msg or not (msg.photo or msg.video or msg.document):
             raise HTTPException(status_code=404, detail='no media')
-        # lg: try largest available thumb first; sm: small real thumb
-        indices = (-1, 2, 1, 0) if size == 'lg' else (1, 0)
-        data = None
-        for idx in indices:
-            try:
-                data = await tg.download_media(msg, thumb=idx, file=bytes)
-                if data:
-                    break
-            except FloodWaitError:
-                raise
-            except Exception:
-                continue
+        data = await _download_thumb_bytes(tg, msg, size)
         if not data:
             raise HTTPException(status_code=404, detail='no thumbnail')
         _THUMB_CACHE[key] = data
@@ -1575,6 +1637,7 @@ async def qr_collect(session: str = Body(...), channel: str = Body(...),
                      posts_limit: int = Body(default=100), graph_points: int = Body(default=400),
                      access_hash: Optional[str] = Body(default=None),
                      include_velocity: bool = Body(default=False),
+                     include_media: bool = Body(default=False),
                      x_internal_token: str = Header(default='')):
     # A HEAVY_TOTAL_BUDGET_S ceiling (below Node's 120s heavy timeout) bounds the WHOLE request — the
     # opt-in velocity fanout adds up to `top` GetMessageStats round-trips — and the finally-block below
@@ -1587,6 +1650,8 @@ async def qr_collect(session: str = Body(...), channel: str = Body(...),
     graph_points = max(1, min(int(graph_points or 400), 400))
     await _acquire_or_503(_QR_COLLECT_SEM, _QR_COLLECT_ACQUIRE_TIMEOUT_S, 'too_many_collecting')
     tg = None
+    loop = asyncio.get_event_loop()
+    t0 = loop.time()               # monotonic start → the best-effort thumb phase reads remaining budget
     try:
         tg = TelegramClient(StringSession(session), API_ID, API_HASH)
         await asyncio.wait_for(tg.connect(), timeout=TELETHON_CALL_TIMEOUT_S)
@@ -1621,6 +1686,14 @@ async def qr_collect(session: str = Body(...), channel: str = Body(...),
         # below (an honest 503/429 for the whole bundle); a legitimate "no eligible posts" is a 200
         # {available:False}. None when not requested → the web side simply persists no velocity row.
         velocity = await _velocity_from_posts(tg, entity, posts) if include_velocity else None
+        # Best-effort cover thumbnails LAST and time-boxed against the REMAINING total budget, so a slow
+        # media download can never push the core collect (posts/velocity/graphs already in hand) over the
+        # 110s ceiling and 503 the whole bundle. Only the central collect sets include_media=True; the
+        # bytes are persisted to tg_post_media so the open <img> proxy serves covers DB-first.
+        thumbs = []
+        if include_media:
+            remaining = HEAVY_TOTAL_BUDGET_S - (loop.time() - t0) - _COLLECT_THUMBS_SAFETY_S
+            thumbs = await _collect_post_thumbs(tg, _logical_posts(messages), min(_COLLECT_THUMBS_BUDGET_S, remaining))
         return {
             'channel':       channel_payload,
             'posts':         posts,
@@ -1633,6 +1706,9 @@ async def qr_collect(session: str = Body(...), channel: str = Body(...),
             # This is a private web↔mtproto field: it is NOT part of `channel`, so it never lands in a
             # channel_snapshot or any browser response, and the web side never logs it.
             'entity':        _entity_identity(entity),
+            # Cover thumbnails for the web side to persist (tg_post_media). Also private web↔mtproto:
+            # [] unless include_media, and the JPEG bytes only back the open <img> proxy of PUBLIC media.
+            'thumbs':        thumbs,
         }
     except FloodWaitError as e:
         return JSONResponse(status_code=429, content=_flood_wait_payload(e))
