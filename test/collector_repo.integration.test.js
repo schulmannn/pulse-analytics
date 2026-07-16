@@ -231,19 +231,24 @@ test('listCentralPostsMissingMedia: bounded recent photo/video posts missing an 
   assert.strictEqual(typeof ids[0], 'string', 'post_id returned as a decimal STRING (BIGINT-safe), never a JS Number');
 });
 
-test('listCentralPostsMissingMedia: LIMIT bounds a deterministic rotating batch', { skip }, async () => {
+test('listCentralPostsMissingMedia: batch prioritizes fresh gaps and deterministically rotates the archive half', { skip }, async () => {
   const ch = await mkChannel('missmedialim');
-  await db.upsertPosts(ch.id, [
-    { post_id: 10, date_published: new Date(Date.now() - 3 * 864e5).toISOString(), media_type: 'photo', hashtags: [] },
-    { post_id: 20, date_published: new Date(Date.now() - 2 * 864e5).toISOString(), media_type: 'photo', hashtags: [] },
-    { post_id: 30, date_published: new Date(Date.now() - 1 * 864e5).toISOString(), media_type: 'photo', hashtags: [] },
-  ]);
-  const opts = { limit: 2, windowDays: 21, seed: 'bucket-42' };
+  const posts = Array.from({ length: 10 }, (_, index) => ({
+    post_id: (index + 1) * 10,
+    date_published: new Date(Date.now() - (10 - index) * 864e5).toISOString(),
+    media_type: 'photo',
+    hashtags: [],
+  }));
+  await db.upsertPosts(ch.id, posts);
+  const opts = { limit: 6, windowDays: 21, seed: 'bucket-42' };
   const rows = await db.listCentralPostsMissingMedia(ch.id, opts);
   const repeat = await db.listCentralPostsMissingMedia(ch.id, opts);
-  assert.equal(rows.length, 2, 'bounded by LIMIT');
+  assert.equal(rows.length, 6, 'bounded by LIMIT');
   assert.deepStrictEqual(repeat, rows, 'same durable bucket seed produces the same batch');
-  assert.ok(rows.every((row) => ['10', '20', '30'].includes(row.post_id)));
+  assert.deepStrictEqual(rows.slice(0, 3).map((row) => row.post_id), ['100', '90', '80'],
+    'newest half is stable and repairs current top-post gaps first');
+  assert.ok(rows.slice(3).every((row) => !['100', '90', '80'].includes(row.post_id)),
+    'archive half is drawn from the remaining gaps instead of duplicating the fresh lane');
 });
 
 test('upsertIgDaily roundtrip + saveRawSnapshot/pruneRawSnapshots', { skip }, async () => {

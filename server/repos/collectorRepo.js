@@ -164,23 +164,36 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
   // backfill so the open DB-first thumb proxy stops 503-ing. The recency window + LIMIT are the whole
   // retry/backoff policy expressed with EXISTING schema only (no migration, no "tried" marker): a
   // filled cover drops out of this set permanently, while a genuinely thumbless post simply ages out of
-  // the window instead of being retried forever. Returns post_id as a decimal STRING (BIGINT), never a
-  // JS Number, so a >2**53 id survives byte-exact through the repair round-trip.
+  // the window instead of being retried forever. Half of every batch is newest-first so visible top-post
+  // gaps heal promptly; the other half rotates by bucket seed so older archive misses still progress and
+  // recent thumbless posts cannot block the whole batch. Returns post_id as a decimal STRING (BIGINT),
+  // never a JS Number, so a >2**53 id survives byte-exact through the repair round-trip.
   async function listCentralPostsMissingMedia(channelId, { limit = 16, windowDays = 365, size = 'sm', seed = '0' } = {}) {
     if (!enabled || !channelId) return [];
     const lim = clampInt(limit, 16, 1, 100);
     const days = clampInt(windowDays, 365, 1, 3650);
     const wantSize = size === 'lg' ? 'lg' : 'sm';
     const { rows } = await pool.query(
-      `SELECT p.post_id::text AS post_id
-         FROM posts p
-         LEFT JOIN tg_post_media m
-           ON m.channel_id = p.channel_id AND m.post_id = p.post_id AND m.size = $4
-        WHERE p.channel_id = $1
-          AND p.media_type IN ('photo', 'video')
-          AND p.date_published >= now() - make_interval(days => $3)
-          AND m.post_id IS NULL
-        ORDER BY md5(p.post_id::text || ':' || $5), p.post_id DESC
+      `WITH missing AS (
+         SELECT p.post_id, p.date_published
+           FROM posts p
+           LEFT JOIN tg_post_media m
+             ON m.channel_id = p.channel_id AND m.post_id = p.post_id AND m.size = $4
+          WHERE p.channel_id = $1
+            AND p.media_type IN ('photo', 'video')
+            AND p.date_published >= now() - make_interval(days => $3)
+            AND m.post_id IS NULL
+       ), ranked AS (
+         SELECT post_id,
+                row_number() OVER (ORDER BY date_published DESC NULLS LAST, post_id DESC) AS recent_rank
+           FROM missing
+       )
+       SELECT post_id::text AS post_id
+         FROM ranked
+        ORDER BY (recent_rank <= (($2 + 1) / 2)) DESC,
+                 CASE WHEN recent_rank <= (($2 + 1) / 2) THEN recent_rank END,
+                 CASE WHEN recent_rank > (($2 + 1) / 2) THEN md5(post_id::text || ':' || $5) END,
+                 post_id DESC
         LIMIT $2`,
       [channelId, lim, days, wantSize, String(seed).slice(0, 64)]);
     return rows;
