@@ -217,6 +217,26 @@ export interface CalendarWindow {
   to: number;
 }
 
+/** Immediately preceding equal window. Full local-day ranges move by calendar days so DST does
+    not change the selected dates; rolling windows keep their exact inclusive millisecond span. */
+export function previousCalendarWindow(window: CalendarWindow): CalendarWindow | null {
+  if (!Number.isFinite(window.from) || !Number.isFinite(window.to) || window.to < window.from) {
+    return null;
+  }
+  const isCalendarRange = startOfLocalDay(window.from) === window.from && endOfLocalDay(window.to) === window.to;
+  const fromDay = new Date(window.from);
+  const toDay = new Date(window.to);
+  const calendarDays = Math.round(
+    (Date.UTC(toDay.getFullYear(), toDay.getMonth(), toDay.getDate())
+      - Date.UTC(fromDay.getFullYear(), fromDay.getMonth(), fromDay.getDate())) / DAY_MS,
+  ) + 1;
+  const span = window.to - window.from + 1;
+  return {
+    from: isCalendarRange ? shiftLocalDays(window.from, -calendarDays) : window.from - span,
+    to: window.from - 1,
+  };
+}
+
 /** Calendar window for a preset. The boundary matches {@link inRangeByDays}. */
 export function calendarWindowForDays(days: number, now: number = Date.now()): CalendarWindow | null {
   return days === 0 ? null : { from: now - days * DAY_MS, to: now };
@@ -265,22 +285,13 @@ export function splitCalendarRows<T>(
   const current = dated
     .filter(({ timestamp }) => timestamp >= window.from && timestamp <= window.to)
     .map(({ row }) => row);
-  const isCalendarRange = startOfLocalDay(window.from) === window.from && endOfLocalDay(window.to) === window.to;
-  const fromDay = new Date(window.from);
-  const toDay = new Date(window.to);
-  const calendarDays = Math.round(
-    (Date.UTC(toDay.getFullYear(), toDay.getMonth(), toDay.getDate())
-      - Date.UTC(fromDay.getFullYear(), fromDay.getMonth(), fromDay.getDate())) / DAY_MS,
-  ) + 1;
-  const span = window.to - window.from + 1;
-  const previousFrom = isCalendarRange
-    ? shiftLocalDays(window.from, -calendarDays)
-    : window.from - span;
+  const previousWindow = previousCalendarWindow(window);
+  if (!previousWindow) return { current, previous: null, windowable: true };
   const earliest = Math.min(...dated.map(({ timestamp }) => timestamp));
   const previous =
-    earliest <= previousFrom
+    earliest <= previousWindow.from
       ? dated
-          .filter(({ timestamp }) => timestamp >= previousFrom && timestamp < window.from)
+          .filter(({ timestamp }) => timestamp >= previousWindow.from && timestamp <= previousWindow.to)
           .map(({ row }) => row)
       : null;
 

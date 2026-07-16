@@ -5,7 +5,10 @@ export type CsvRow = Record<string, string | number | null | undefined>;
 
 function escapeCell(value: string | number | null | undefined): string {
   if (value == null) return '';
-  const s = String(value);
+  // Spreadsheet apps can execute strings beginning with formula operators. Numeric negatives stay
+  // numeric; only user-controlled strings are neutralised with the conventional leading apostrophe.
+  const raw = String(value);
+  const s = typeof value === 'string' && /^[=+\-@]/.test(raw) ? `'${raw}` : raw;
   return /["\n\r,;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 

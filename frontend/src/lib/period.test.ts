@@ -6,6 +6,7 @@ import {
   calendarWindowForPeriod,
   endOfLocalDay,
   periodDateTimestamp,
+  previousCalendarWindow,
   recommendPeriod,
   resolveEffectivePeriod,
   resolveRequestedWidgetDays,
@@ -115,6 +116,17 @@ describe('calendar windows', () => {
     const selected = splitCalendarRows(rows, custom, (row) => Date.parse(row));
     expect(selected.current).toEqual(rows.slice(3));
     expect(selected.previous).toEqual(rows.slice(0, 3));
+  });
+
+  it('exposes the exact preceding bounds used by calendar window comparisons', () => {
+    const range = {
+      from: new Date(2026, 5, 15).setHours(0, 0, 0, 0),
+      to: new Date(2026, 5, 21).setHours(23, 59, 59, 999),
+    };
+    expect(previousCalendarWindow(range)).toEqual({
+      from: new Date(2026, 5, 8).setHours(0, 0, 0, 0),
+      to: new Date(2026, 5, 14).setHours(23, 59, 59, 999),
+    });
   });
 
   it('keeps equal local calendar-day windows for bare archive keys', () => {

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
 
 /**
  * Контент (desktop) — URL-воспроизводимые фильтры + bulk-remove из кампании.
@@ -169,6 +170,18 @@ test.describe('Контент — URL-фильтры (desktop)', () => {
     await expect(page.getByTestId('format-filter')).toHaveValue('video');
     await expect(page.getByRole('group', { name: 'Период' }).getByRole('button', { name: '7д' })).toHaveAttribute('aria-pressed', 'true');
     await expect(rows).toHaveCount(1);
+
+    // CSV is the exact current table result, not the broader pre-filter period scope.
+    const downloadPromise = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Экспорт показанных публикаций в CSV' }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toMatch(/^telegram-content-тестовый-канал-\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}\.csv$/u);
+    const downloadPath = await download.path();
+    if (!downloadPath) throw new Error('Telegram content CSV has no local download path');
+    const csv = await readFile(downloadPath, 'utf8');
+    expect(csv).toContain('launch beta');
+    expect(csv).not.toContain('launch alpha');
+    expect(csv).not.toContain('old post');
   });
 
   test('активный фильтр кампании позволяет убрать membership из таблицы (пост не удаляется)', async ({ page }) => {

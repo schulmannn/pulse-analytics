@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
 
 /**
  * Instagram Контент 2.0 (desktop) — URL-воспроизводимая таблица публикаций + вторичные разборы за
@@ -138,6 +139,18 @@ test.describe('Instagram Контент 2.0 (desktop)', () => {
     await expect(page.getByTestId('ig-format-filter')).toHaveValue('video');
     await expect(rows).toHaveCount(1);
     await expect(page.getByRole('tab', { name: 'Reels' })).toHaveAttribute('aria-selected', 'true');
+
+    // CSV follows the same search/format/sort row set and does not dump every loaded post.
+    const downloadPromise = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Экспорт показанных публикаций в CSV' }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toMatch(/^instagram-content-igacct-\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}\.csv$/u);
+    const downloadPath = await download.path();
+    if (!downloadPath) throw new Error('Instagram content CSV has no local download path');
+    const csv = await readFile(downloadPath, 'utf8');
+    expect(csv).toContain('launch beta clip');
+    expect(csv).not.toContain('launch alpha');
+    expect(csv).not.toContain('reel drop');
   });
 
   test('строка таблицы открывает детальную модалку публикации', async ({ page }, testInfo) => {

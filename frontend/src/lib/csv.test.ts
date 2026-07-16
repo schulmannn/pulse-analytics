@@ -30,4 +30,10 @@ describe('toCsv', () => {
     ]);
     expect(csv).toBe('day,reach,saves\r\n2026-06-01,100,\r\n2026-06-02,120,9');
   });
+
+  it('neutralises spreadsheet formulas in strings without changing negative numbers', () => {
+    expect(toCsv([{ caption: '=HYPERLINK("https://evil")', username: '@handle', delta: -12 }])).toBe(
+      'caption,username,delta\r\n"\'=HYPERLINK(""https://evil"")",\'@handle,-12',
+    );
+  });
 });
