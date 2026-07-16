@@ -56,7 +56,10 @@ test('persistCentralDaily: atomic + idempotent, no double-count on re-run', { sk
   const { rows: [agg] } = await pool.query(
     `SELECT count(*)::int n, max(subscribers) subs FROM channel_daily WHERE channel_id=$1 AND day=$2`, [ch, day]);
   assert.strictEqual(agg.n, 1, 'ON CONFLICT overwrites — exactly one row per (channel, day)');
-  assert.strictEqual(agg.subs, 2000, 'latest capture wins');
+  // Direct node-postgres reads intentionally keep PostgreSQL BIGINT as a decimal string. Product
+  // repositories convert only metric counters at their API boundary; this low-level storage check
+  // verifies the native PG contract instead.
+  assert.strictEqual(agg.subs, '2000', 'latest capture wins');
 });
 
 test('daily_ingest is idempotent per UTC date (double cron / second instance runs once)', { skip }, async () => {
