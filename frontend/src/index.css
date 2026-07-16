@@ -374,6 +374,33 @@ div[data-widget-tinted] {
 .dark [data-widget-accented] .kpi-accent {
   color: hsl(var(--brand-iris));
 }
+/* Steep-parity: on the TINTED card the section TITLE rides the same accent as number/line/surface —
+   the whole card tells its story in one hue. Neutral / un-tinted cards keep the default ink title
+   (WidgetHeader's text-foreground), light keeps ink titles (same scoping rationale as .kpi-accent).
+   Contrast: the identical fg/bg pair the hero number is gated on in contrast-tokens.mjs
+   («accent N number on tonal surface», text 4.5) — the title adds no new pair. */
+.dark div[data-widget-tinted] .widget-title {
+  color: hsl(var(--brand-iris));
+}
+/* Icon affordances (⋯ / ↗ / ×, ICON_BUTTON_CLASS) follow at a QUIETER step of the same hue —
+   chrome under the title, above the captions. :not(:hover) hands hover back to the layered
+   utilities (hover:text-foreground / hover:text-destructive), which an unlayered rule would
+   otherwise always out-rank. Gated non-text 3.0 («accent N icon @0.8 on tonal surface»). */
+.dark div[data-widget-tinted] .widget-icon:not(:hover) {
+  color: hsl(var(--brand-iris) / 0.8);
+}
+
+/* ── Feed sticky header surface (FeedBlock, panels/feed/useFeed) ───────────────────────────
+   EXACTLY the surface of the section body it caps, opaque. Dark's section body is bg-card/50
+   composited over the page --background; color-mix in srgb reproduces that composite as one
+   opaque colour, so the sticky strip is indistinguishable from the section at rest and simply
+   clips scrolling widgets — no lighter band, no seam line, no backdrop-blur needed. */
+.feed-head-surface {
+  background: hsl(var(--card));
+}
+.dark .feed-head-surface {
+  background: color-mix(in srgb, hsl(var(--card)) 50%, hsl(var(--background)));
+}
 
 /* ── Widget reorder (iOS jiggle): tiny alternating wobble while drag-and-drop mode is on.
    Deliberate exception to the "no motion" restraint — it IS the mode indicator. ─────────── */

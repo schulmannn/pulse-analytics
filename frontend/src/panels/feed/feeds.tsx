@@ -94,7 +94,7 @@ function SectionSkeleton() {
       <Skeleton className="h-6 w-48" />
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {Array.from({ length: 2 }).map((_, i) => (
-          <div key={i} className="rounded-xl border border-border bg-card p-4 sm:p-5">
+          <div key={i} className="rounded-2xl border border-border bg-card p-4 sm:p-5">
             <Skeleton className="h-3 w-1/3" />
             {/* Steep card anatomy (number bottom-left, chart right) — no outline jump on load. */}
             <div className="mt-4 flex items-end gap-4">

@@ -137,7 +137,7 @@ export class WidgetErrorBoundary extends Component<WidgetErrorBoundaryProps, Wid
     const size = this.props.size ?? 'half';
     return (
       <section className={`min-w-0 ${CARD_SPAN[size]}`}>
-        <div className={`flex ${CARD_MIN_H[size]} flex-col rounded-xl border border-border bg-card p-4 dark:border-white/[0.06] sm:p-5`}>
+        <div className={`flex ${CARD_MIN_H[size]} flex-col rounded-2xl border border-border bg-card p-4 dark:border-white/[0.06] sm:p-5`}>
           <h3 className="shrink-0 truncate text-xs font-medium tracking-wider text-muted-foreground">
             {this.props.label || 'Виджет'}
           </h3>

@@ -131,7 +131,7 @@ export function DetailShell({ ariaLabel, onClose, variant, originRect, children 
       <Card
         ref={panelRef}
         tabIndex={-1}
-        className="relative z-10 flex h-full w-full flex-col overflow-hidden rounded-none pb-[env(safe-area-inset-bottom)] focus:outline-none sm:rounded sm:pb-0"
+        className="relative z-10 flex h-full w-full flex-col overflow-hidden rounded-none pb-[env(safe-area-inset-bottom)] focus:outline-none sm:rounded-2xl sm:pb-0"
       >
         {closeButton}
         {children}

@@ -40,14 +40,15 @@ export function FeedBlock({
       className="scroll-mt-4 rounded-2xl border border-border bg-card dark:bg-card/50 px-3 py-4 sm:p-7"
     >
       {/* Sticky section title (steep): «Обзор» stays put while the widgets scroll under it. It
-          spans the card width (negative margins cancel the section padding), rounds to match the
-          card top, and carries a blurred card bg so content slides under cleanly — БЕЗ нижней
-          hairline (владелец: пустая «полоска» под заголовком лишняя; blur-фон и так маскирует
-          заезжающий контент, как у steep). Отступ до виджетов ужат mb-6→mb-2 + pb-3→pb-1.5
-          (steep-плотность). top-0 (не top-2): на фид-роутах топбара нет, а 8px-зазор над
-          заголовком просвечивал заезжающий контент — прижимаем к самому верху, зазора нет
+          spans the card width (negative margins cancel the section padding) and rounds to match the
+          card top. Фон — .feed-head-surface (index.css): РОВНО тот же цвет, что тело секции,
+          непрозрачный. Полупрозрачный blur-фон прошлой итерации читался как более светлая полоса
+          с «серой линией» на стыке (владелец) — теперь шапка неотличима от секции, пока контент
+          не подъедет под неё, и просто срезает его без видимого шва. Отступ до виджетов ужат
+          mb-6→mb-2 + pb-3→pb-1.5 (steep-плотность). top-0 (не top-2): на фид-роутах топбара нет,
+          а 8px-зазор над заголовком просвечивал заезжающий контент — прижимаем к самому верху
           (баг «полоса пропускает текст сверху»). z-10 keeps it under widget menus (z-popover). */}
-      <div className="sticky top-0 z-10 -mx-3 -mt-4 mb-2 flex items-center justify-between gap-3 rounded-t-2xl bg-card/95 px-3 pb-1.5 pt-4 backdrop-blur dark:bg-card/80 sm:-mx-7 sm:-mt-7 sm:px-7 sm:pt-7">
+      <div className="feed-head-surface sticky top-0 z-10 -mx-3 -mt-4 mb-2 flex items-center justify-between gap-3 rounded-t-2xl px-3 pb-1.5 pt-4 sm:-mx-7 sm:-mt-7 sm:px-7 sm:pt-7">
         <h2 className="text-2xl font-medium tracking-tight text-foreground">{title}</h2>
         {headerRight}
       </div>
@@ -120,7 +121,7 @@ export function LazyBlock({ eager, onMount, children }: { eager: boolean; onMoun
     <div ref={holderRef} className="space-y-6" style={{ minHeight: 560 }}>
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {Array.from({ length: 2 }).map((_, i) => (
-          <div key={i} className="rounded-xl border border-border bg-card p-4 sm:p-5">
+          <div key={i} className="rounded-2xl border border-border bg-card p-4 sm:p-5">
             <Skeleton className="h-3 w-1/3" />
             <Skeleton className="mt-4 h-40 w-full" />
           </div>

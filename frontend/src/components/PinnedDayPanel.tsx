@@ -38,7 +38,7 @@ export function PinnedDayPanel({
   onClose: () => void;
 }) {
   return (
-    <section className="rounded-xl border border-border bg-card p-4 dark:border-white/[0.06] sm:p-5">
+    <section className="rounded-2xl border border-border bg-card p-4 dark:border-white/[0.06] sm:p-5">
       <div className="flex items-center gap-3">
         <h3 className="min-w-0 flex-1 truncate text-xs font-medium tracking-wider text-muted-foreground">
           Точка · {dateLabel}
