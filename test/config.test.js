@@ -134,6 +134,8 @@ test('loadConfig: фоновый сбор — дефолты и env-переоп
   assert.equal(d.database.backgroundPoolMax, 2, 'малый фоновый пул по умолчанию 2');
   assert.equal(d.runtime.igAccountsPerPass, 25);
   assert.equal(d.runtime.tgQrChannelsPerPass, 200);
+  assert.equal(d.telegram.mtprotoBackgroundMaxInFlight, 5, 'фоновый sub-cap MTProto по умолчанию 5');
+  assert.equal(d.runtime.tgQrSessionConcurrency, 4, 'параллелизм сессий сбора по умолчанию 4');
   assert.equal(d.runtime.tgMediaRepairPerPass, 16);
   assert.equal(d.runtime.tgMediaRepairWindowDays, 365);
   assert.equal(d.runtime.jobsRetentionDays, 30);
@@ -147,6 +149,7 @@ test('loadConfig: фоновый сбор — дефолты и env-переоп
   assert.equal(d.runtime.collectionRecoveryIntervalMs, 900000);
   const c = loadConfig({
     PGPOOL_BACKGROUND_MAX: '3', IG_ACCOUNTS_PER_PASS: '10', TG_QR_CHANNELS_PER_PASS: '50',
+    MTPROTO_BACKGROUND_MAX_INFLIGHT: '6', TG_QR_SESSION_CONCURRENCY: '5',
     TG_MEDIA_REPAIR_PER_PASS: '8', TG_MEDIA_REPAIR_WINDOW_DAYS: '730',
     JOBS_RETENTION_DAYS: '45', EMAIL_TOKENS_RETENTION_DAYS: '60',
     INGEST_RECEIPTS_RETENTION_ENABLED: '1', INGEST_RECEIPTS_RETENTION_DAYS: '120',
@@ -156,6 +159,8 @@ test('loadConfig: фоновый сбор — дефолты и env-переоп
   assert.equal(c.database.backgroundPoolMax, 3);
   assert.equal(c.runtime.igAccountsPerPass, 10);
   assert.equal(c.runtime.tgQrChannelsPerPass, 50);
+  assert.equal(c.telegram.mtprotoBackgroundMaxInFlight, 6);
+  assert.equal(c.runtime.tgQrSessionConcurrency, 5);
   assert.equal(c.runtime.tgMediaRepairPerPass, 8);
   assert.equal(c.runtime.tgMediaRepairWindowDays, 730);
   assert.equal(c.runtime.jobsRetentionDays, 45);
@@ -198,11 +203,39 @@ test('validateConfig: валидные фоновые лимиты → нет о
   assert.deepEqual(
     validateConfig(loadConfig({
       PGPOOL_BACKGROUND_MAX: '4', IG_ACCOUNTS_PER_PASS: '1', TG_QR_CHANNELS_PER_PASS: '500',
+      MTPROTO_BACKGROUND_MAX_INFLIGHT: '7', TG_QR_SESSION_CONCURRENCY: '7',
       TG_MEDIA_REPAIR_PER_PASS: '16', TG_MEDIA_REPAIR_WINDOW_DAYS: '3650',
       COLLECTION_RECOVERY_INITIAL_DELAY_MS: '1000', COLLECTION_RECOVERY_INTERVAL_MS: '60000',
     })),
     [],
   );
+});
+
+test('validateConfig: MTProto background sub-cap и session concurrency — границы и взаимосвязь', () => {
+  // Дефолты валидны.
+  assert.deepEqual(
+    validateConfig(loadConfig({})).filter((e) =>
+      e.field === 'telegram.mtprotoBackgroundMaxInFlight' || e.field === 'runtime.tgQrSessionConcurrency'),
+    [],
+  );
+  // Sub-cap вне 1..7.
+  assert.ok(validateConfig(loadConfig({ MTPROTO_BACKGROUND_MAX_INFLIGHT: '0' }))
+    .some((e) => e.field === 'telegram.mtprotoBackgroundMaxInFlight'), 'sub-cap 0 отклонён');
+  assert.ok(validateConfig(loadConfig({ MTPROTO_BACKGROUND_MAX_INFLIGHT: '8' }))
+    .some((e) => e.field === 'telegram.mtprotoBackgroundMaxInFlight'), 'sub-cap 8 (= глобальный bulkhead) отклонён');
+  assert.ok(validateConfig(loadConfig({ MTPROTO_BACKGROUND_MAX_INFLIGHT: '2.5' }))
+    .some((e) => e.field === 'telegram.mtprotoBackgroundMaxInFlight'), 'дробный sub-cap отклонён');
+  // Session concurrency ≤ sub-cap: 6 при дефолтном sub-cap 5 недопустим.
+  assert.ok(validateConfig(loadConfig({ TG_QR_SESSION_CONCURRENCY: '6' }))
+    .some((e) => e.field === 'runtime.tgQrSessionConcurrency'), 'concurrency выше sub-cap отклонён');
+  // Но валиден, если поднять sub-cap.
+  assert.deepEqual(
+    validateConfig(loadConfig({ TG_QR_SESSION_CONCURRENCY: '5', MTPROTO_BACKGROUND_MAX_INFLIGHT: '5' }))
+      .filter((e) => e.field === 'runtime.tgQrSessionConcurrency'),
+    [],
+  );
+  assert.ok(validateConfig(loadConfig({ TG_QR_SESSION_CONCURRENCY: '0' }))
+    .some((e) => e.field === 'runtime.tgQrSessionConcurrency'), 'concurrency 0 отклонён');
 });
 
 test('validateConfig: патологические 0/отрицательные фоновые лимиты → ошибки', () => {

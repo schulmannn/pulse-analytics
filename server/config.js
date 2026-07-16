@@ -80,6 +80,11 @@ function loadConfig(env = process.env) {
       ownerChannel: env.OWNER_CHANNEL || env.TG_CHANNEL || '@bynotem',
       mtprotoUrl: env.MTPROTO_URL || '',
       mtprotoToken: env.MTPROTO_TOKEN || '',
+      // Background sub-cap over the single global MTProto in-flight bulkhead (breaker maxInFlight=8).
+      // Background collection may hold at most this many of the 8 slots at once, reserving the rest
+      // for live dashboard reads even during a heavy sweep. Дефолт 5 оставляет три live-слота и один
+      // background-слот сверх QR concurrency=4 для central/служебного сбора; валидируется 1..7.
+      mtprotoBackgroundMaxInFlight: Number(env.MTPROTO_BACKGROUND_MAX_INFLIGHT || 5),
       sessionKey: env.TG_SESSION_KEY || '',
       // Optional key-rotation support: ordered, read-only PREVIOUS session keys tried only when the
       // active TG_SESSION_KEY can't decrypt a stored session. Пусто = [] и прежнее поведение
@@ -117,6 +122,11 @@ function loadConfig(env = process.env) {
       // upstream fan-out.
       igAccountsPerPass: Number(env.IG_ACCOUNTS_PER_PASS || 25),
       tgQrChannelsPerPass: Number(env.TG_QR_CHANNELS_PER_PASS || 200),
+      // Сколько РАЗНЫХ пользовательских QR-сессий один проход сбора обрабатывает параллельно. Внутри
+      // одной сессии каналы всегда строго последовательны (flood-friendly к одному аккаунту); распа-
+      // раллеливаются только разные сессии. Дефолт 4; валидируется 1..MTPROTO_BACKGROUND_MAX_INFLIGHT,
+      // чтобы фоновый веер уложился в зарезервированную под background часть общего MTProto-бакхеда.
+      tgQrSessionConcurrency: Number(env.TG_QR_SESSION_CONCURRENCY || 4),
       // Узкий central-media repair (тот же recovery-проход): сколько недостающих обложок central-канала
       // добираем за проход и в каком окне свежести ищем. Малый батч, вращаемая выборка и durable
       // шестичасовой bucket ограничивают ретраи на существующей схеме: заполненная обложка выпадает
@@ -229,6 +239,25 @@ function validateConfig(config) {
   }
   if (Number.isInteger(config.runtime.tgMediaRepairWindowDays) && config.runtime.tgMediaRepairWindowDays > 3650) {
     add('runtime.tgMediaRepairWindowDays', 'TG_MEDIA_REPAIR_WINDOW_DAYS не должен превышать 3650 дней.');
+  }
+  // Background sub-cap MTProto: минимум 1 фоновая заявка, но строго меньше глобального bulkhead=8,
+  // иначе фоновый веер может занять все слоты и вытеснить живой дашборд.
+  if (
+    !Number.isInteger(config.telegram.mtprotoBackgroundMaxInFlight) ||
+    config.telegram.mtprotoBackgroundMaxInFlight < 1 ||
+    config.telegram.mtprotoBackgroundMaxInFlight > 7
+  ) {
+    add('telegram.mtprotoBackgroundMaxInFlight', 'MTPROTO_BACKGROUND_MAX_INFLIGHT должен быть целым числом в диапазоне 1..7.');
+  }
+  // Параллелизм сессий сбора: положительное целое, не больше фонового sub-cap (иначе одновременные
+  // фоновые заявки не поместились бы в зарезервированную под background часть общего bulkhead).
+  if (
+    !Number.isInteger(config.runtime.tgQrSessionConcurrency) ||
+    config.runtime.tgQrSessionConcurrency < 1 ||
+    !Number.isInteger(config.telegram.mtprotoBackgroundMaxInFlight) ||
+    config.runtime.tgQrSessionConcurrency > config.telegram.mtprotoBackgroundMaxInFlight
+  ) {
+    add('runtime.tgQrSessionConcurrency', 'TG_QR_SESSION_CONCURRENCY должен быть целым числом в диапазоне 1..MTPROTO_BACKGROUND_MAX_INFLIGHT.');
   }
   if (
     Number.isInteger(config.runtime.collectionRecoveryInitialDelayMs) &&

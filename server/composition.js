@@ -57,6 +57,7 @@ function createComposition(config, overrides = {}) {
     createMtprotoClient({
       url: config.telegram.mtprotoUrl,
       token: config.telegram.mtprotoToken,
+      backgroundMaxInFlight: config.telegram.mtprotoBackgroundMaxInFlight,
     });
   const igCrypto =
     overrides.igCrypto || createIgCrypto(config.instagram.tokenKey);
@@ -291,6 +292,7 @@ function createComposition(config, overrides = {}) {
       MTPROTO_TIMEOUT_HEAVY_MS,
       tgPostToRow,
       tgQrChannelsPerPass: config.runtime.tgQrChannelsPerPass,
+      tgQrSessionConcurrency: config.runtime.tgQrSessionConcurrency,
       tgMediaRepairPerPass: config.runtime.tgMediaRepairPerPass,
       tgMediaRepairWindowDays: config.runtime.tgMediaRepairWindowDays,
     });

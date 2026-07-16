@@ -59,12 +59,17 @@ function isRetryablePostConnectErr(err) {
 }
 
 function createMtprotoClient(
-  { url = DEFAULT_MTPROTO_URL, token = '' } = {},
-  { breaker = createBreaker(), fetchImpl = fetchWithTimeout } = {},
+  { url = DEFAULT_MTPROTO_URL, token = '', backgroundMaxInFlight } = {},
+  { breaker, fetchImpl = fetchWithTimeout } = {},
 ) {
   const MTPROTO_URL = url || DEFAULT_MTPROTO_URL;
   const MTPROTO_TOKEN = token || '';
-  const mtprotoBreaker = breaker;
+  // An injected breaker (tests) is used verbatim; otherwise build the default breaker, threading the
+  // configured background sub-cap through so background collection can't starve live reads of the
+  // shared global bulkhead. Omitting backgroundMaxInFlight keeps the breaker's own default.
+  const mtprotoBreaker =
+    breaker ||
+    createBreaker(backgroundMaxInFlight != null ? { backgroundMaxInFlight } : {});
 
   async function mtprotoFetch(
     path,
