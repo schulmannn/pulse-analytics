@@ -343,3 +343,45 @@ test('listChannels: видимость по матрице (owner / viewer-чл�
   const asOutsider = ids(await db.listChannels({ uid: outsider }));
   assert.ok(![legacy, shared, off].some((id) => asOutsider.includes(id)), 'постороннему не виден ни один');
 });
+
+test('getChannelOrDefault: default parity with listChannels()[0]; explicit matches getChannel; roles/disabled/legacy/foreign', { skip }, async () => {
+  const creator = await mkUser('gcd-creator');
+  const member = await mkUser('gcd-member');
+  const viewerU = await mkUser('gcd-viewer');
+  const outsider = await mkUser('gcd-outsider');
+  const ws = await mkWorkspace(creator, `gcd-ws-${nonce}`);
+  await pool.query(
+    `INSERT INTO workspace_members (workspace_id, uid, role) VALUES ($1, $2, 'member'), ($1, $3, 'viewer')`,
+    [ws, member, viewerU]);
+  const src = await mkSource(`${nonce}-gcd`);
+  // First-created (created_at ASC) accessible channel drives the default pick.
+  const first = await mkChannel(creator, ws, src, `gcd_first_${nonce}`);
+  await mkChannel(creator, ws, src, `gcd_second_${nonce}`);
+  const off = await mkChannel(creator, ws, src, `gcd_off_${nonce}`);
+  await pool.query(`UPDATE channels SET status='disabled' WHERE id=$1`, [off]);
+  const legacy = await mkChannel(outsider, null, null, `gcd_legacy_${nonce}`); // NULL-workspace, creator-only
+
+  // Default pick equals listChannels()[0] and carries the effective member_role, per caller.
+  for (const [uid, role] of [[creator, 'owner'], [member, 'member'], [viewerU, 'viewer']]) {
+    const list = await db.listChannels({ uid });
+    const def = await db.getChannelOrDefault(0, { uid });
+    assert.ok(def, `default resolves for uid ${uid}`);
+    assert.strictEqual(def.id, list[0].id, 'default pick == listChannels()[0].id (same visibility + order)');
+    assert.strictEqual(def.id, first, 'first-created accessible channel wins');
+    assert.strictEqual(def.member_role, role, 'default pick attaches the effective role');
+    assert.notStrictEqual(def.id, off, 'disabled channel never chosen as default');
+    // Explicit path is byte-identical to getChannel.
+    assert.deepStrictEqual(await db.getChannelOrDefault(first, { uid }), await db.getChannel(first, { uid }),
+      'explicit path == getChannel');
+  }
+
+  // Legacy NULL-workspace row: only its creator resolves it (owner role).
+  const legacyDef = await db.getChannelOrDefault(0, { uid: outsider });
+  assert.strictEqual(legacyDef.id, legacy, 'legacy creator gets their NULL-workspace channel');
+  assert.strictEqual(legacyDef.member_role, 'owner', 'legacy creator is owner');
+
+  // Foreign / disabled explicit ids are denied (null → middleware 403).
+  assert.strictEqual(await db.getChannelOrDefault(first, { uid: outsider }), null, 'foreign explicit id → null');
+  assert.strictEqual(await db.getChannelOrDefault(legacy, { uid: creator }), null, 'foreign legacy explicit id → null');
+  assert.strictEqual(await db.getChannelOrDefault(off, { uid: creator }), null, 'disabled explicit id → null');
+});

@@ -7,19 +7,20 @@ function makeResolveChannel({ db, isReady }) {
       return next();
     }
     if (!isReady()) return res.status(503).json({ error: 'Сервис запускается, попробуй через секунду' });
-    let channelId = parseInt(req.query.channel || req.headers['x-channel-id'], 10) || 0;
+    const channelId = parseInt(req.query.channel || req.headers['x-channel-id'], 10) || 0;
     try {
-      if (!channelId) {
-        // Auth/tenant hot path: only the default channel's id is needed here. Use the lightweight
-        // pick (same visibility + created_at order as listChannels) instead of listChannels itself,
-        // whose per-channel memberCount (correlated channel_daily subquery) + ig_connected EXISTS
-        // would be computed for every visible channel and then discarded. The subsequent getChannel
-        // still enforces ownership and attaches member_role. Empty response is byte-identical.
-        channelId = await db.getDefaultChannelId(req.user);
-        if (!channelId) return res.json({ enabled: true, empty: true, channels: [] });
+      // Auth/tenant hot path: resolve the request's channel in ONE query. getChannelOrDefault picks
+      // the caller's default channel (same visibility + created_at order as listChannels, with the
+      // effective member_role) when no id is given, or enforces getChannel's ownership/disabled/role
+      // semantics for an explicit id — folding the old getDefaultChannelId + getChannel pair into a
+      // single round-trip on the default path. The explicit-vs-default response split stays here: the
+      // repo returns null in both no-row cases, and only the middleware knows the id was explicit.
+      const explicit = channelId !== 0;
+      const channel = await db.getChannelOrDefault(channelId, req.user);
+      if (!channel) {
+        if (explicit) return res.status(403).json({ error: 'Нет доступа к этому каналу' });
+        return res.json({ enabled: true, empty: true, channels: [] });
       }
-      const channel = await db.getChannel(channelId, req.user);
-      if (!channel) return res.status(403).json({ error: 'Нет доступа к этому каналу' });
       req.channel = channel;
       next();
     } catch (error) {

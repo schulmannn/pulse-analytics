@@ -58,13 +58,13 @@ function createChannelsRepo({ pool, enabled, transaction, ensureExternalSource }
     return rows.map((r) => ({ ...r, memberCount: toMetricNumber(r.memberCount) }));
   }
 
-  // Lightweight default-channel pick for the auth/tenant hot path (resolveChannel). Returns just the
-  // id of the caller's first accessible, non-disabled channel — the SAME visibility UNION and
-  // `created_at ASC` order as listChannels, so the chosen id is byte-identical to listChannels()[0].id.
-  // Middleware only needs this id to then getChannel(id) for the effective role; it must NOT pay for
-  // listChannels' per-row `memberCount` (correlated channel_daily analytics subquery) and
-  // `ig_connected` EXISTS, which listChannels computes for EVERY visible channel and resolveChannel
-  // then throws away. One indexed query (channels_owner_idx / workspace_members_uid_idx →
+  // Lightweight default-channel pick — the caller's first accessible, non-disabled channel id, using
+  // the SAME visibility UNION and `created_at ASC` order as listChannels, so the chosen id is
+  // byte-identical to listChannels()[0].id. resolveChannel's hot path now folds this id-pick and the
+  // follow-up getChannel into a single `getChannelOrDefault` query, but this stays public: other
+  // callers and the characterization/integration coverage exercise the bare id-pick directly. It never
+  // pays for listChannels' per-row `memberCount` (correlated channel_daily analytics subquery) or
+  // `ig_connected` EXISTS. One indexed query (channels_owner_idx / workspace_members_uid_idx →
   // channels_workspace_idx), explicit uid, LIMIT 1. No memberCount, no analytics, no ig_accounts.
   async function getDefaultChannelId(user) {
     if (!enabled) return null;
@@ -100,6 +100,42 @@ function createChannelsRepo({ pool, enabled, transaction, ensureExternalSource }
        FROM channels
        WHERE id=$1 AND ${channelAccessSql({ uidParam: '$2' })} AND status<>'disabled'`,
       [id, uid]);
+    return rows[0] || null;
+  }
+
+  // Auth/tenant hot path: resolve the request's channel in ONE query instead of the old
+  // getDefaultChannelId → getChannel pair. On the default (no explicit id) request this merges the
+  // two back-to-back round-trips the middleware used to make into a single channels lookup; the
+  // explicit-id request already cost one query and keeps getChannel's exact semantics. The middleware
+  // still owns the 200-empty vs 403 decision — this returns null in both no-row cases.
+  //   - explicit id (truthy) → delegate to getChannel verbatim (same access predicate, disabled
+  //     hiding, CHANNEL_COLS + member_role, same bindings). No behaviour drift by construction.
+  //   - default (falsy id) → the caller's first accessible, non-disabled channel with member_role,
+  //     using the SAME index-friendly visibility UNION + `created_at ASC` + LIMIT 1 as
+  //     getDefaultChannelId/listChannels, so the picked row is identical to listChannels()[0] plus the
+  //     member_role CASE getChannel would attach. No memberCount / channel_daily / ig_accounts /
+  //     access_hash, single uid param, no request-controlled SQL.
+  async function getChannelOrDefault(channelId, user) {
+    if (!enabled) return null;
+    const uid = user && user.uid;
+    if (uid == null) return null;   // defensive: never query ownership with a missing uid
+    if (channelId) return getChannel(channelId, user);
+    const { rows } = await pool.query(
+      `SELECT ${CHANNEL_COLS},
+              CASE WHEN channels.owner_uid = $1 THEN 'owner'
+                   ELSE (SELECT m.role FROM workspace_members m
+                         WHERE m.workspace_id = channels.workspace_id AND m.uid = $1)
+              END AS member_role
+       FROM channels
+       WHERE channels.id IN (
+               SELECT c.id FROM channels c WHERE c.owner_uid = $1
+               UNION
+               SELECT c.id FROM channels c
+                 JOIN workspace_members m ON m.workspace_id = c.workspace_id
+                WHERE m.uid = $1)
+         AND status<>'disabled'
+       ORDER BY created_at ASC
+       LIMIT 1`, [uid]);
     return rows[0] || null;
   }
 
@@ -388,7 +424,7 @@ function createChannelsRepo({ pool, enabled, transaction, ensureExternalSource }
   }
 
   return {
-    listChannels, getDefaultChannelId, getChannel, getChannelById, getOwnerChannelId, setChannelTgId,
+    listChannels, getDefaultChannelId, getChannelOrDefault, getChannel, getChannelById, getOwnerChannelId, setChannelTgId,
     getTgChannelIdentity, saveTgChannelAccessHash,
     ensurePersonalWorkspace, ensureChannelCanonical,
     createChannel, createIgChannel, findIgChannelByIgUser, createTgChannel, deleteChannel,

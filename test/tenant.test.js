@@ -11,37 +11,45 @@ function responseRecorder() {
   };
 }
 
-test('tenant middleware rejects a channel owned by another user', async () => {
-  const db = {
+// The hot path resolves the channel with ONE repo call — getChannelOrDefault. The old
+// getDefaultChannelId + getChannel pair (and the even heavier listChannels) must NOT run here;
+// throwing from them guards that resolveChannel never falls back to an extra round-trip.
+function hotPathDb(overrides) {
+  return {
     enabled: true,
-    listChannels: async () => [],
-    getChannel: async (id, user) => id === 10 && user.uid === 1
-      ? { id: 10, owner_uid: 1, source: 'collector' }
-      : null,
+    calls: [],
+    listChannels: async () => { throw new Error('listChannels must not run on the auth/tenant hot path'); },
+    getDefaultChannelId: async () => { throw new Error('getDefaultChannelId must not run on the auth/tenant hot path'); },
+    getChannel: async () => { throw new Error('getChannel must not run on the auth/tenant hot path'); },
+    ...overrides,
   };
+}
+
+test('tenant middleware rejects an explicit channel owned by another user (403)', async () => {
+  const db = hotPathDb({
+    getChannelOrDefault: async function (id, user) {
+      this.calls.push({ id, uid: user.uid });
+      return id === 10 && user.uid === 1 ? { id: 10, owner_uid: 1, source: 'collector' } : null;
+    },
+  });
   const resolve = makeResolveChannel({ db, isReady: () => true });
-  const req = {
-    query: { channel: '20' },
-    headers: {},
-    user: { uid: 1, role: 'user' },
-  };
+  const req = { query: { channel: '20' }, headers: {}, user: { uid: 1, role: 'user' } };
   const res = responseRecorder();
   let nextCalled = false;
   await resolve(req, res, () => { nextCalled = true; });
   assert.strictEqual(nextCalled, false);
   assert.strictEqual(res.statusCode, 403);
+  assert.deepStrictEqual(db.calls, [{ id: 20, uid: 1 }], 'exactly one resolver call, with the explicit id');
 });
 
-test('tenant middleware attaches an owned channel and continues', async () => {
-  const owned = { id: 10, owner_uid: 1, source: 'collector' };
-  const db = {
-    enabled: true,
-    // Hot path: the default-channel branch uses the lightweight id pick, NOT listChannels. Throwing
-    // from listChannels guards that resolveChannel never falls back to the heavy analytics query.
-    listChannels: async () => { throw new Error('listChannels must not run on the auth/tenant hot path'); },
-    getDefaultChannelId: async (user) => user.uid === 1 ? 10 : null,
-    getChannel: async (id, user) => id === 10 && user.uid === 1 ? owned : null,
-  };
+test('tenant middleware attaches an owned channel and continues (one resolver call)', async () => {
+  const owned = { id: 10, owner_uid: 1, source: 'collector', member_role: 'owner' };
+  const db = hotPathDb({
+    getChannelOrDefault: async function (id, user) {
+      this.calls.push({ id, uid: user.uid });
+      return id === 0 && user.uid === 1 ? owned : null;
+    },
+  });
   const resolve = makeResolveChannel({ db, isReady: () => true });
   const req = { query: {}, headers: {}, user: { uid: 1, role: 'user' } };
   const res = responseRecorder();
@@ -49,15 +57,11 @@ test('tenant middleware attaches an owned channel and continues', async () => {
   await resolve(req, res, () => { nextCalled = true; });
   assert.strictEqual(nextCalled, true);
   assert.deepStrictEqual(req.channel, owned);
+  assert.deepStrictEqual(db.calls, [{ id: 0, uid: 1 }], 'default path makes one resolver call with id 0');
 });
 
-test('tenant middleware returns the empty payload when the user has no default channel', async () => {
-  const db = {
-    enabled: true,
-    listChannels: async () => { throw new Error('listChannels must not run on the auth/tenant hot path'); },
-    getDefaultChannelId: async () => null,
-    getChannel: async () => { throw new Error('getChannel must not run without a channel id'); },
-  };
+test('tenant middleware returns the empty payload when the user has no default channel (200)', async () => {
+  const db = hotPathDb({ getChannelOrDefault: async () => null });
   const resolve = makeResolveChannel({ db, isReady: () => true });
   const req = { query: {}, headers: {}, user: { uid: 1, role: 'user' } };
   const res = responseRecorder();
