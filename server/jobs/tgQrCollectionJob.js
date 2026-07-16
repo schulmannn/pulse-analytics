@@ -427,12 +427,13 @@ function createTgQrCollectionJob({ db, liveDb = db, log, tgCrypto, mtprotoPost, 
       // retries partial misses, so success never suppresses them permanently. The seed rotates the
       // bounded selection between buckets, avoiding head-of-line blocking by the same thumbless ids.
       const bucket = Math.floor(Date.now() / (6 * 60 * 60 * 1000));
-      // Include the credential generation in the key. A reconnect may repair immediately instead of
-      // inheriting an auth-failed bucket from the revoked session; the versioned shape also bypasses
-      // the legacy `${centralId}:${bucket}` rows that PR #231 could incorrectly complete on a transient
-      // web↔mtproto deployment skew.
+      // Include the credential generation and selection-policy version in the key. A reconnect may
+      // repair immediately instead of inheriting an auth-failed bucket from the revoked session; a
+      // policy rollout likewise does not inherit a bucket already completed under older ordering.
+      // This versioned shape also bypasses the legacy rows PR #231 could incorrectly complete on a
+      // transient web↔mtproto deployment skew.
       const sessionGeneration = sess.session_version == null ? 'legacy' : String(sess.session_version);
-      const outcome = await db.runJobOnce('tg_media_repair', `${centralId}:${sessionGeneration}:${bucket}`, async () => {
+      const outcome = await db.runJobOnce('tg_media_repair', `${centralId}:${sessionGeneration}:recent-v1:${bucket}`, async () => {
         const stats = { attempted: false, requested: 0, filled: 0 };
         let missing = [];
         try {
