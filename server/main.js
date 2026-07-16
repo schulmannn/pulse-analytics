@@ -62,6 +62,16 @@ async function main({
   const config = loadConfig(env);
   reportConfigErrors(config, validateConfig(config));
 
+  // `worker` — режим standalone recovery-процесса (server/worker.js), а не web. Web-entrypoint отвергает
+  // его до создания composition, чтобы web не мог случайно стартовать как worker (и не поднял HTTP+сбор
+  // там, где ожидается только worker). `inline`/`external` — валидные web-режимы (см. composition:
+  // external не планирует бегунок).
+  if (config.runtime.collectionRecoveryMode === 'worker') {
+    throw new Error(
+      "[boot] COLLECTION_RECOVERY_MODE=worker недопустим для web-процесса; запусти server/worker.js (npm run worker).",
+    );
+  }
+
   const createComposition =
     compositionFactory || require('./composition').createComposition;
   const composition = await createComposition(config);
@@ -181,4 +191,6 @@ async function main({
   return { app, server, config, composition, stop, handleFatal };
 }
 
-module.exports = { main };
+// closeDatabases/reportConfigErrors переиспользует standalone worker (server/worker.js), чтобы
+// bounded-shutdown и репорт конфиг-ошибок были байт-в-байт согласованы между web и worker.
+module.exports = { main, closeDatabases, reportConfigErrors };

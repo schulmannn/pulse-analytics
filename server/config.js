@@ -135,6 +135,13 @@ function loadConfig(env = process.env) {
       // Внутрипроцессный recovery-бегунок: задержка первого прохода после listen и период повторов.
       collectionRecoveryInitialDelayMs: Number(env.COLLECTION_RECOVERY_INITIAL_DELAY_MS || 30000),
       collectionRecoveryIntervalMs: Number(env.COLLECTION_RECOVERY_INTERVAL_MS || 900000),
+      // Где исполняется recovery-бегунок фонового сбора. Единый контракт двух Railway-сервисов:
+      //   • inline (дефолт, обратно совместимо) — web-процесс планирует бегунок в себе, как раньше;
+      //   • external — web НЕ планирует бегунок (recovery вынесен наружу отдельным процессом);
+      //   • worker — отдельный standalone-процесс (server/worker.js) владеет бегунком и не поднимает HTTP.
+      // Каждый entrypoint дополнительно сужает набор допустимых режимов (web ≠ worker, worker = worker),
+      // поэтому web не может случайно стартовать как worker, а worker — молча работать в inline/external.
+      collectionRecoveryMode: String(env.COLLECTION_RECOVERY_MODE || 'inline').trim().toLowerCase(),
       // Деплой-метка для crash-телеметрии (Railway её штампует; локально пусто → 'dev' в bugs).
       commitSha: env.RAILWAY_GIT_COMMIT_SHA || env.COMMIT_SHA || '',
       // Порог «коллектор молчит» для /collector-status; деривация как была в роуте.
@@ -275,6 +282,13 @@ function validateConfig(config) {
   }
   if (config.runtime.webReplicas > 1) {
     add('runtime.webReplicas', 'WEB_REPLICAS > 1 запрещён до появления shared state (ADR-002: одна реплика).');
+  }
+  // Режим recovery-бегунка — общий enum для web и worker. Конкретный процесс дополнительно проверяет
+  // допустимость режима у своего entrypoint (main.js отвергает worker, worker.js требует worker),
+  // но неизвестное значение фатально сразу: тихий типо в COLLECTION_RECOVERY_MODE не должен молча
+  // включить дефолтное поведение и оставить сбор в неопределённом состоянии.
+  if (!['inline', 'external', 'worker'].includes(config.runtime.collectionRecoveryMode)) {
+    add('runtime.collectionRecoveryMode', 'COLLECTION_RECOVERY_MODE должен быть одним из: inline, external, worker.');
   }
   if (prod && !/^https:\/\/.+/.test(config.http.publicUrl)) {
     add('http.publicUrl', 'APP_URL должен быть абсолютным https:// URL в production.');

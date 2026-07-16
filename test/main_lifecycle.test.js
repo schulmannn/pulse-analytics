@@ -24,6 +24,26 @@ test('invalid production config fails before composition is imported', async () 
   }
 });
 
+test('web entrypoint refuses COLLECTION_RECOVERY_MODE=worker (cannot accidentally start as worker)', async () => {
+  // Web-процесс в worker-режиме отвергается ДО построения composition: composition не импортируется,
+  // HTTP не поднимается. Это парная защита к worker.js, требующему mode=worker.
+  const compositionPath = require.resolve('../server/composition');
+  delete require.cache[compositionPath];
+  let compositionBuilt = false;
+  await assert.rejects(
+    main({
+      env: { NODE_ENV: 'test', COLLECTION_RECOVERY_MODE: 'worker' },
+      port: 0,
+      compositionFactory: () => {
+        compositionBuilt = true;
+        return {};
+      },
+    }),
+    /worker/i,
+  );
+  assert.equal(compositionBuilt, false, 'composition-фабрика не вызвана для worker-режима на web');
+});
+
 test('runtime removes signal listeners and drains tracked tails before DB close', async () => {
   const tracker = createJobTracker();
   const events = [];

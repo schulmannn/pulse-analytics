@@ -66,8 +66,9 @@ Telegram поддерживает две модели подключения:
 | `TG_QR_CHANNELS_PER_PASS` | web | сколько НОВОСТАРТОВАННЫХ QR-каналов TG-сбор трогает за один проход, по умолчанию `200` |
 | `JOBS_RETENTION_DAYS` | web | сколько дней ночная maintenance держит ТЕРМИНАЛЬНЫЕ строки `jobs` (succeeded/failed, по `updated_at`) перед bounded-прунингом, по умолчанию `30`, диапазон `1..3650`; `queued`/`running` не трогаются никогда |
 | `EMAIL_TOKENS_RETENTION_DAYS` | web | сколько дней держатся МЁРТВЫЕ `email_tokens` (использованные или истёкшие, по `created_at`) перед bounded-прунингом, по умолчанию `30`, диапазон `1..3650`; валидный неиспользованный токен не удаляется |
-| `COLLECTION_RECOVERY_INITIAL_DELAY_MS` | web | задержка первого прохода recovery-бегунка после старта, мс, по умолчанию `30000`, минимум `1000` |
-| `COLLECTION_RECOVERY_INTERVAL_MS` | web | период повторных проходов recovery-бегунка, мс, по умолчанию `900000` (15 мин), минимум `60000` |
+| `COLLECTION_RECOVERY_INITIAL_DELAY_MS` | web/worker | задержка первого прохода recovery-бегунка после старта, мс, по умолчанию `30000`, минимум `1000` |
+| `COLLECTION_RECOVERY_INTERVAL_MS` | web/worker | период повторных проходов recovery-бегунка, мс, по умолчанию `900000` (15 мин), минимум `60000` |
+| `COLLECTION_RECOVERY_MODE` | web/worker | где исполняется recovery-бегунок: `inline` (дефолт — web в себе, как раньше), `external` (web не планирует бегунок), `worker` (отдельный процесс `server/worker.js` без HTTP). Web отвергает `worker`, worker требует `worker` |
 
 Секреты не добавляются в `.env`-файлы репозитория, логи, issue или PR.
 
@@ -128,6 +129,23 @@ Worker-агент оставляет проверенный diff без commit/p
 - `Dockerfile.mtproto` запускает приватный Python/Telethon-сервис.
 - После релиза проверяются `GET /api/health`, `GET /api/ready`, новый frontend asset и изменённый
   пользовательский сценарий на `https://atlavue.app`.
+
+### Recovery-бегунок: один или два сервиса
+
+По умолчанию recovery-бегунок фонового сбора живёт внутри web-процесса (`COLLECTION_RECOVERY_MODE=inline`
+или переменная не задана) — поведение прежних деплоев не меняется. Чтобы вынести сбор в отдельный
+Railway-сервис (при росте CPU/network нагрузки), настраиваются два сервиса на общей `DATABASE_URL`:
+
+- **web** — `COLLECTION_RECOVERY_MODE=external`, start `npm start` (`node server/migrate.js && node server/index.js`).
+  Web перестаёт планировать бегунок, но продолжает отдавать SPA/API.
+- **worker** — `COLLECTION_RECOVERY_MODE=worker`, start `npm run worker`
+  (`node server/migrate.js && node server/worker.js`). Процесс не поднимает HTTP-listener, владеет только
+  бегунком и завершается по SIGTERM с bounded-дренажем.
+
+Оба процесса делят durable item-level leases сбора, поэтому пересекающиеся проходы остаются
+идемпотентными. Ограничение одной web-реплики (`WEB_REPLICAS=1`) не ослабляется. Web отказывается
+стартовать в режиме `worker`, а worker — в режимах `inline`/`external` и при выключенной БД, поэтому
+неверная конфигурация падает явно, а не собирает данные вхолостую или дважды.
 
 Перед миграцией или массовой операцией использовать
 [`ops/BACKUP_RESTORE.md`](ops/BACKUP_RESTORE.md).
