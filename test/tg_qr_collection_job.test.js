@@ -39,10 +39,10 @@ const previousKeyCrypto = () => ({
 // (ref -> Error to throw, or undefined -> succeed). Records every health call for assertions.
 // `rotate` drives the fake db.rotateTgSessionCiphertext: false → no row matched (reconnect race),
 // a thrown value → DB error, otherwise → matched. Every call is recorded in calls.rotate.
-function makeJob({ responses = {}, runJobOnce, health = {}, tgCrypto, tgQrChannelsPerPass, rotate, velocity = {} } = {}) {
+function makeJob({ responses = {}, runJobOnce, health = {}, tgCrypto, tgQrChannelsPerPass, rotate, velocity = {}, thumbs = {}, mediaError = null } = {}) {
   const calls = {
     post: [], postLanes: [], health: [], persisted: [], logs: [], sessions: [], rotate: [],
-    includeVelocity: [], persistedVelocity: [],
+    includeVelocity: [], includeMedia: [], persistedVelocity: [], persistedMedia: [],
   };
   const db = {
     enabled: true,
@@ -54,6 +54,11 @@ function makeJob({ responses = {}, runJobOnce, health = {}, tgCrypto, tgQrChanne
       // Mirror the real repo: velocity is saved (and counted true) ONLY on a real available payload.
       const v = !!(payload && payload.velocity && payload.velocity.available);
       return { channel_daily: 3, posts: 5, velocity: v };
+    },
+    upsertPostMedia: async (channelId, rows) => {
+      calls.persistedMedia.push({ channelId, rows });
+      if (mediaError) throw mediaError;
+      return rows.length;
     },
     runJobOnce: runJobOnce || (async (_kind, _key, fn) => ({ skipped: false, result: await fn() })),
     recordTgSessionAttempt: async (uid, _version) => { calls.health.push(['attempt', uid]); return health.attempt !== false; },
@@ -74,12 +79,14 @@ function makeJob({ responses = {}, runJobOnce, health = {}, tgCrypto, tgQrChanne
     calls.postLanes.push(lane);
     calls.sessions.push(body.session);   // record the plaintext session the collect actually sent
     calls.includeVelocity.push(body.include_velocity);   // undefined for ordinary QR, true for central
+    calls.includeMedia.push(body.include_media);         // undefined for ordinary QR, true for central
     const err = responses[body.channel];
     if (err) throw err;
     // Central collect opts into velocity → the mtproto bundle carries a velocity payload; ordinary QR
     // never requests it, so the bundle stays exactly OK_BUNDLE (identity preserved for those tests).
     const vel = velocity[body.channel];
-    return vel ? { ...OK_BUNDLE, velocity: vel } : OK_BUNDLE;
+    const covers = thumbs[body.channel];
+    return vel || covers ? { ...OK_BUNDLE, ...(vel ? { velocity: vel } : {}), ...(covers ? { thumbs: covers } : {}) } : OK_BUNDLE;
   };
   const job = createTgQrCollectionJob({
     db,
@@ -330,6 +337,29 @@ test('collectManagedChannelNow: sends include_velocity=true and persists+returns
   assert.equal(out.velocity, true, 'velocity=true reflects a real persisted available payload');
 });
 
+test('collectManagedChannelNow: opts into media and persists returned covers best-effort', async () => {
+  const covers = [{ post_id: 1241, size: 'sm', jpeg_b64: '/9j/2Q==' }];
+  const { job, calls } = makeJob({ thumbs: { central: covers } });
+  await job.collectManagedChannelNow({ uid: 2, session_enc: 's', session_version: '4' }, central(), '2026-07-15');
+
+  assert.deepEqual(calls.includeMedia, [true], 'central collect explicitly opts into cover download');
+  assert.deepEqual(calls.persistedMedia, [{ channelId: 50, rows: covers }]);
+});
+
+test('thumbnail persistence failure never rolls back or fails fresh product metrics', async () => {
+  const covers = [{ post_id: 1241, size: 'sm', jpeg_b64: '/9j/2Q==' }];
+  const { job, calls } = makeJob({ thumbs: { central: covers }, mediaError: new Error('db details') });
+  const out = await job.collectManagedChannelNow(
+    { uid: 2, session_enc: 's', session_version: '4' }, central(), '2026-07-15');
+
+  assert.equal(out.channel_daily, 3);
+  assert.equal(out.posts, 5);
+  assert.deepEqual(calls.persisted, [50], 'core transaction still committed');
+  const log = calls.logs.find((row) => row.event === 'tg_post_media_persist_failed');
+  assert.deepEqual(log?.meta, { channelId: 50, error: 'write_failed' });
+  assert.equal(JSON.stringify(calls.logs).includes('db details'), false, 'raw DB error is never logged');
+});
+
 test('collectManagedChannelNow: an available:false velocity is NOT reported as success', async () => {
   const { job, calls } = makeJob({ velocity: { central: { available: false, posts_used: 0 } } });
   const out = await job.collectManagedChannelNow({ uid: 2, session_enc: 's', session_version: '4' }, central(), '2026-07-15');
@@ -345,16 +375,18 @@ test('collectManagedChannelNow: a bundle with no velocity key returns velocity=f
   assert.equal(out.velocity, false);
 });
 
-test('ordinary QR (nightly + immediate) NEVER sets include_velocity', async () => {
+test('ordinary QR (nightly + immediate) NEVER sets central velocity/media fanout flags', async () => {
   const nightly = makeJob();
   nightly.db.listTgSessions = async () => [{ uid: 1, session_enc: 's', session_version: '1' }];
   nightly.db.listChannels = async () => [ch(1, 'a1'), ch(2, 'a2')];
   await nightly.job.processTgQrCollection();
   assert.deepEqual(nightly.calls.includeVelocity, [undefined, undefined], 'nightly QR omits velocity opt-in');
+  assert.deepEqual(nightly.calls.includeMedia, [undefined, undefined], 'nightly QR omits media opt-in');
 
   const now = makeJob();
   await now.job.collectQrChannelsNow({ uid: 6, session_enc: 's', session_version: '1' }, [ch(1, 'a1', 6)]);
   assert.deepEqual(now.calls.includeVelocity, [undefined], 'immediate post-add QR omits velocity opt-in');
+  assert.deepEqual(now.calls.includeMedia, [undefined], 'immediate post-add QR omits media opt-in');
 });
 
 test('collectManagedChannelNow: auth failure → reauth_required health then RETHROWS for fallback', async () => {

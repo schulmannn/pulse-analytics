@@ -16,6 +16,7 @@ path (the pattern CLAUDE.md prescribes), with FUNCTIONAL PeerChannel/InputPeerCh
 and the id/access_hash attributes behave like the real TL types.
 """
 import asyncio
+import base64
 import importlib.util
 import sys
 import types
@@ -273,6 +274,88 @@ class ParseAndSerializeTests(unittest.TestCase):
         svc = self.svc
         out = svc._entity_identity(_Chan(555, None))
         self.assertEqual(out, {"id": "555", "access_hash": None})
+
+
+class _MediaMessage:
+    def __init__(self, msg_id, views=0, *, media=True):
+        self.id = msg_id
+        self.views = views
+        self.photo = object() if media else None
+        self.video = None
+        self.document = None
+
+
+class _ThumbClient:
+    def __init__(self, payloads, delay=0):
+        self.payloads = payloads
+        self.delay = delay
+        self.calls = []
+
+    async def download_media(self, msg, thumb=None, file=None):
+        self.calls.append((msg.id, thumb, file))
+        if self.delay:
+            await asyncio.sleep(self.delay)
+        return self.payloads.get(msg.id)
+
+
+class ManagedThumbnailTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.svc = _load_service()
+
+    def test_collects_album_representative_as_bounded_base64_jpeg(self):
+        jpeg = b'\xff\xd8\xaa\xbb'
+        client = _ThumbClient({20: jpeg})
+        groups = [[_MediaMessage(10, views=5), _MediaMessage(20, views=50)]]
+
+        out = run(self.svc._collect_post_thumbs(client, groups, budget_s=1))
+
+        self.assertEqual(out, [{
+            'post_id': 20,
+            'size': 'sm',
+            'jpeg_b64': base64.b64encode(jpeg).decode('ascii'),
+        }])
+        self.assertEqual(client.calls[0][0], 20, 'same representative id as _build_post')
+
+    def test_rejects_non_jpeg_and_oversized_payloads(self):
+        svc = self.svc
+        client = _ThumbClient({
+            1: b'not-jpeg',
+            2: b'\xff\xd8' + b'x' * svc._THUMB_MAX_BYTES,
+        })
+        out = run(svc._collect_post_thumbs(
+            client,
+            [[_MediaMessage(1)], [_MediaMessage(2)]],
+            budget_s=1,
+        ))
+        self.assertEqual(out, [])
+
+    def test_total_byte_cap_stops_before_unbounded_json_growth(self):
+        svc = self.svc
+        old = svc._THUMBS_TOTAL_BYTES_MAX
+        svc._THUMBS_TOTAL_BYTES_MAX = 6
+        try:
+            client = _ThumbClient({1: b'\xff\xd8\x01\x02', 2: b'\xff\xd8\x03\x04'})
+            out = run(svc._collect_post_thumbs(
+                client,
+                [[_MediaMessage(1)], [_MediaMessage(2)]],
+                budget_s=1,
+            ))
+            self.assertEqual([row['post_id'] for row in out], [1])
+        finally:
+            svc._THUMBS_TOTAL_BYTES_MAX = old
+
+    def test_per_download_timeout_stops_media_only_without_raising(self):
+        svc = self.svc
+        old = svc._THUMB_DOWNLOAD_TIMEOUT_S
+        svc._THUMB_DOWNLOAD_TIMEOUT_S = 0.01
+        try:
+            client = _ThumbClient({1: b'\xff\xd8\x01\x02'}, delay=0.05)
+            out = run(svc._collect_post_thumbs(client, [[_MediaMessage(1)]], budget_s=1))
+            self.assertEqual(out, [])
+            self.assertEqual(len(client.calls), 1)
+        finally:
+            svc._THUMB_DOWNLOAD_TIMEOUT_S = old
 
 
 if __name__ == "__main__":

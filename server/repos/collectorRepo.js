@@ -99,6 +99,57 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
     return rows.length;
   }
 
+  // Persisted cover thumbnails for TG posts (central channel). rows: [{ post_id, size, jpeg_b64 }].
+  // The trusted managed collect downloads a small JPEG per media post and hands the bytes here as
+  // base64; JS decodes once to enforce JPEG/byte limits, then Postgres decode(...,'base64') stores
+  // bytea. The upsert is idempotent per (channel, post, size): a post's media is immutable, so a
+  // re-collect just refreshes the
+  // same bytes. Served by getPostMedia in the open <img> proxy — which is why anonymous traffic reads
+  // persisted PUBLIC bytes and never touches a decrypted session.
+  async function upsertPostMedia(channelId, rows, executor = pool) {
+    if (!enabled || !channelId || !rows || !rows.length) return 0;
+    const MAX_THUMB_BYTES = 512 * 1024;
+    const MAX_TOTAL_BYTES = 4 * 1024 * 1024;
+    const MAX_PG_BIGINT = 9_223_372_036_854_775_807n;
+    let totalBytes = 0;
+    const clean = [];
+    const seen = new Set();
+    for (const row of rows) {
+      if (!row || row.post_id == null || !['sm', 'lg'].includes(row.size)) continue;
+      const postId = String(row.post_id);
+      const b64 = typeof row.jpeg_b64 === 'string' ? row.jpeg_b64 : '';
+      if (!/^[1-9]\d{0,18}$/.test(postId) || !b64 || b64.length > 700_000 || !/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) continue;
+      if (BigInt(postId) > MAX_PG_BIGINT || seen.has(`${postId}:${row.size}`)) continue;
+      const jpeg = Buffer.from(b64, 'base64');
+      if (jpeg.length < 4 || jpeg.length > MAX_THUMB_BYTES || jpeg[0] !== 0xff || jpeg[1] !== 0xd8) continue;
+      if (totalBytes + jpeg.length > MAX_TOTAL_BYTES) break;
+      totalBytes += jpeg.length;
+      seen.add(`${postId}:${row.size}`);
+      // Re-encode the validated bytes so non-canonical base64 can never reach PostgreSQL decode().
+      clean.push({ post_id: postId, size: row.size, jpeg_b64: jpeg.toString('base64') });
+    }
+    if (!clean.length) return 0;
+    const sql = `INSERT INTO tg_post_media (channel_id, post_id, size, jpeg, updated_at)
+      SELECT $1, x.post_id, COALESCE(x.size, 'sm'), decode(x.jpeg_b64, 'base64'), now()
+        FROM jsonb_to_recordset($2::jsonb) AS x(post_id bigint, size text, jpeg_b64 text)
+      ON CONFLICT (channel_id, post_id, size) DO UPDATE SET jpeg=EXCLUDED.jpeg, updated_at=now()`;
+    await executor.query(sql, [channelId, JSON.stringify(clean)]);
+    return clean.length;
+  }
+
+  // Read one persisted cover thumbnail (bytea → Buffer) for the open <img> proxy. Prefers the exact
+  // requested size but falls back to 'sm' (the only size captured today), so a ?size=lg request still
+  // yields a visible cover from Postgres instead of the revoked-session live path.
+  async function getPostMedia(channelId, postId, size = 'sm') {
+    if (!enabled || !channelId || postId == null) return null;
+    const { rows } = await pool.query(
+      `SELECT jpeg FROM tg_post_media
+        WHERE channel_id=$1 AND post_id=$2 AND size IN ($3, 'sm')
+        ORDER BY (size = $3) DESC LIMIT 1`,
+      [channelId, postId, size]);
+    return rows.length ? rows[0].jpeg : null;
+  }
+
   async function upsertMentions(channelId, list, executor = pool) {
     if (!enabled || !channelId || !list || !list.length) return 0;
     const clean = list.filter(m => m.channel_id != null && m.msg_id != null);
@@ -456,6 +507,7 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
     upsertIgTags,
     graphsToDailyRows,
     upsertChannelDaily, upsertPosts, upsertMentions,
+    upsertPostMedia, getPostMedia,
     saveSnapshot, saveVelocity,
     ingestCollectorPayload, persistCentralDaily, persistTgBundleTx,
     upsertIgDaily, upsertIgMediaDaily,

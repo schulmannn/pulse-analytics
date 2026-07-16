@@ -102,6 +102,14 @@ function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN
       // той же транзакции. У обычных QR-каналов bundle.velocity нет → null → ничего не пишется.
       velocity: bundle.velocity || null,
     });
+    // Media is deliberately best-effort AFTER the product transaction. A malformed/oversized cover
+    // or a storage failure must never roll back fresh snapshot/daily/posts/velocity; the next managed
+    // collect can fill the immutable thumbnail again. Only central collection opts into thumbs.
+    const thumbs = Array.isArray(bundle.thumbs) ? bundle.thumbs : [];
+    if (thumbs.length && typeof db.upsertPostMedia === 'function') {
+      await db.upsertPostMedia(channelId, thumbs).catch(() =>
+        log('warn', 'tg_post_media_persist_failed', { channelId, error: 'write_failed' }));
+    }
     // Сырой graphs-снимок — опциональный архив: best-effort ПОСЛЕ коммита, как раньше,
     // но с логом (тихий .catch(() => {}) прятал реальные, actionable-ошибки записи).
     if (hasGraphs) {
@@ -152,7 +160,7 @@ function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN
   // Fetch one QR channel's bundle via the (already-decrypted) session and persist it. Throws on
   // mtproto/collect failure — callers decide how to handle (log + continue). `gen` is the collecting
   // session generation (session_version); it guards the resolved-identity write.
-  async function collectQrChannel(sessionStr, ch, day, uid, gen, { includeVelocity = false } = {}) {
+  async function collectQrChannel(sessionStr, ch, day, uid, gen, { includeVelocity = false, includeMedia = false } = {}) {
     const ref = ch.username || String(ch.tg_channel_id);
     // Warm path: a persisted access_hash lets mtproto address a PRIVATE channel directly instead of
     // scanning up to 1000 dialogs on the fresh StringSession just to recover it. Sent in the POST body
@@ -163,6 +171,10 @@ function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN
     // include_velocity is an explicit opt-in: ONLY the managed central collect sets it, so ordinary QR
     // channels never pay the up-to-12 GetMessageStats fanout. Sent as a boolean in the private body.
     if (includeVelocity) body.include_velocity = true;
+    // include_media is the same shape of opt-in: ONLY the central collect asks mtproto to also download
+    // each post's small cover thumbnail (bounded, time-boxed, best-effort) so the open <img> proxy can
+    // serve covers DB-first. Ordinary QR channels never pay the extra downloads.
+    if (includeMedia) body.include_media = true;
     // Background lane on the breaker: every /qr/collect (managed central, recovery sweep, and the
     // fire-and-forget immediate post-add) is collection work, isolated from live dashboard reads and
     // sharing only the global in-flight bulkhead.
@@ -195,9 +207,10 @@ function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN
     catch { const e = new Error('managed_channel_decrypt_failed'); e.code = 'session_decrypt_failed'; throw e; }
     const theDay = day || new Date().toISOString().slice(0, 10);
     try {
-      // Central channel is the ONLY caller that opts into velocity — the up-to-12 GetMessageStats
-      // fanout runs on the owner's session inside the same /qr/collect and is persisted atomically.
-      const out = await collectQrChannel(sessionStr, channel, theDay, sess.uid, sess.session_version, { includeVelocity: true });
+      // Central channel is the ONLY caller that opts into velocity AND cover media — both the up-to-12
+      // GetMessageStats velocity fanout and the bounded thumbnail downloads run on the owner's session
+      // inside the same /qr/collect. Core metrics stay atomic; media is persisted best-effort after it.
+      const out = await collectQrChannel(sessionStr, channel, theDay, sess.uid, sess.session_version, { includeVelocity: true, includeMedia: true });
       // A real, completed attempt for THIS session generation → healthy (generation-guarded).
       await finalizeSessionHealth(sess.uid, sess.session_version, { attempted: true, succeeded: true, authFailed: false, errorCode: null });
       // velocity=true ТОЛЬКО когда реальный available-payload реально записан (persistTgBundleTx),
