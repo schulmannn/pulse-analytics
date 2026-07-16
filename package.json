@@ -6,6 +6,7 @@
   "scripts": {
     "migrate": "node server/migrate.js",
     "start": "node server/migrate.js && node server/index.js",
+    "worker": "node server/migrate.js && node server/worker.js",
     "dev": "node server/migrate.js && node --watch server/index.js",
     "test": "node --test test/*.test.js",
     "lint": "biome lint --diagnostic-level=error",

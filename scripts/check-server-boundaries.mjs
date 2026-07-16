@@ -48,10 +48,11 @@ function forbid(file, rules) {
 }
 
 // Environment ownership is global, not merely a convention for selected layers.
-// main.js may expose process.env as its default argument; config.js is the only parser.
+// main.js/worker.js (process entrypoints) may expose process.env as a default argument and own
+// process signals; config.js is the only parser.
 for (const file of listJsRecursive(ROOT)) {
   const relative = path.relative(ROOT, file).replaceAll('\\', '/');
-  if (relative === 'config.js' || relative === 'main.js') continue;
+  if (relative === 'config.js' || relative === 'main.js' || relative === 'worker.js') continue;
   forbid(file, [
     [/process\.env\b/, 'environment variables are parsed only by config.js'],
   ]);

@@ -12,10 +12,10 @@ process.env.SESSION_SECRET = 'test-session-secret-for-composition';
 const { loadConfig } = require('../server/config');
 const { createComposition } = require('../server/composition');
 
-function createFakeDb() {
+function createFakeDb(enabled = false) {
   let initCalls = 0;
   return {
-    enabled: false,
+    enabled,
     get initCalls() {
       return initCalls;
     },
@@ -24,7 +24,7 @@ function createFakeDb() {
     },
     async close() {},
     async ping() {
-      return { enabled: false, ok: true };
+      return { enabled, ok: true };
     },
     isDbUnavailable() {
       return false;
@@ -67,6 +67,54 @@ test('composition creates isolated apps and applies configured trust proxy', () 
   assert.notEqual(firstApp, secondApp);
   assert.notEqual(first.memoryCache, second.memoryCache);
   assert.notEqual(first.jobTracker, second.jobTracker);
+});
+
+test('composition: recovery mode gates the runner (external inert, inline/worker active)', async () => {
+  // Фейковый jobTracker перехватывает сабмит прохода, поэтому реальные IG/TG passes не выполняются:
+  // единственный наблюдаемый эффект — вызван ли jobTracker.run, т.е. включён ли бегунок в этом режиме.
+  const base = { NODE_ENV: 'test', SESSION_SECRET: 'secret' };
+  const makeTracker = () => {
+    const runs = [];
+    return { runs, run: (_task, fields) => { runs.push(fields); return Promise.resolve({ accepted: true }); } };
+  };
+
+  const externalTracker = makeTracker();
+  const external = createComposition(
+    loadConfig({ ...base, COLLECTION_RECOVERY_MODE: 'external' }),
+    { db: createFakeDb(true), log: () => {}, jobTracker: externalTracker },
+  );
+  assert.equal(external.collectionRecoveryMode, 'external');
+  assert.deepEqual(
+    await external.collectionRunner.runOnce(),
+    { skipped: true },
+    'external: бегунок инертен даже при включённой БД',
+  );
+  assert.equal(externalTracker.runs.length, 0, 'external: проход не сабмичен');
+
+  for (const mode of ['inline', 'worker']) {
+    const tracker = makeTracker();
+    const composition = createComposition(
+      loadConfig({ ...base, COLLECTION_RECOVERY_MODE: mode }),
+      { db: createFakeDb(true), log: () => {}, jobTracker: tracker },
+    );
+    assert.equal(composition.collectionRecoveryMode, mode);
+    assert.deepEqual(
+      await composition.collectionRunner.runOnce(),
+      { skipped: false },
+      `${mode}: бегунок запускает проход`,
+    );
+    assert.equal(tracker.runs.length, 1, `${mode}: проход сабмичен через jobTracker`);
+  }
+});
+
+test('composition: recovery runner stays disabled when the DB is off, regardless of mode', async () => {
+  const tracker = { runs: [], run(_t, f) { this.runs.push(f); return Promise.resolve({ accepted: true }); } };
+  const composition = createComposition(
+    loadConfig({ NODE_ENV: 'test', SESSION_SECRET: 'secret', COLLECTION_RECOVERY_MODE: 'inline' }),
+    { db: createFakeDb(false), log: () => {}, jobTracker: tracker },
+  );
+  assert.deepEqual(await composition.collectionRunner.runOnce(), { skipped: true }, 'DB-less: бегунок инертен');
+  assert.equal(tracker.runs.length, 0);
 });
 
 test('composition adapters are derived from each instance config', () => {

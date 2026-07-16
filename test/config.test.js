@@ -166,6 +166,28 @@ test('loadConfig: фоновый сбор — дефолты и env-переоп
   assert.equal(c.runtime.collectionRecoveryIntervalMs, 600000);
 });
 
+test('loadConfig: collectionRecoveryMode — дефолт inline, trim/lowercase', () => {
+  assert.equal(loadConfig({}).runtime.collectionRecoveryMode, 'inline', 'дефолт inline (обратная совместимость)');
+  assert.equal(loadConfig({ COLLECTION_RECOVERY_MODE: 'external' }).runtime.collectionRecoveryMode, 'external');
+  assert.equal(loadConfig({ COLLECTION_RECOVERY_MODE: 'worker' }).runtime.collectionRecoveryMode, 'worker');
+  assert.equal(loadConfig({ COLLECTION_RECOVERY_MODE: '  Worker  ' }).runtime.collectionRecoveryMode, 'worker', 'trim + lowercase');
+});
+
+test('validateConfig: collectionRecoveryMode — только inline|external|worker', () => {
+  for (const mode of ['inline', 'external', 'worker']) {
+    assert.deepEqual(
+      validateConfig(loadConfig({ COLLECTION_RECOVERY_MODE: mode })).filter((e) => e.field === 'runtime.collectionRecoveryMode'),
+      [],
+      `${mode} валиден`,
+    );
+  }
+  // Пустой env → дефолт inline → валиден.
+  assert.deepEqual(validateConfig(loadConfig({})).filter((e) => e.field === 'runtime.collectionRecoveryMode'), []);
+  // Неизвестное значение фатально (не молчаливый фолбэк на дефолт).
+  const bad = validateConfig(loadConfig({ COLLECTION_RECOVERY_MODE: 'standalone' }));
+  assert.ok(bad.some((e) => e.field === 'runtime.collectionRecoveryMode'), 'опечатка режима отклонена');
+});
+
 test('validateConfig: валидные фоновые лимиты → нет ошибок', () => {
   assert.deepEqual(validateConfig(loadConfig({})), []);
   assert.deepEqual(

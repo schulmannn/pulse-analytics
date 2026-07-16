@@ -400,10 +400,15 @@ function createComposition(config, overrides = {}) {
     });
   }
 
-  // Внутрипроцессный recovery-бегунок: заводится здесь (инертен до start()), main.js стартует его
-  // ПОСЛЕ listen и гасит в stop() до закрытия пулов. Не работает при выключенной БД. Каждый проход
-  // — IG-проход + один TG QR-батч через backgroundDb; item-level runJobOnce делает проходы
-  // идемпотентными и добирающими остаток дня. Дорогая maintenance сюда не входит.
+  // Recovery-бегунок фонового сбора: заводится здесь (инертен до start()); entrypoint стартует его
+  // ПОСЛЕ listen (web) или сразу (worker) и гасит в stop() до закрытия пулов. Каждый проход — IG-проход
+  // + один TG QR-батч через backgroundDb; item-level runJobOnce делает проходы идемпотентными и
+  // добирающими остаток дня. Дорогая maintenance сюда не входит.
+  //   enabled завязан и на БД, и на режим: без БД сбор невозможен; в режиме `external` web намеренно НЕ
+  //   планирует бегунок (recovery вынесен в отдельный процесс). `inline` (web-в-себе) и `worker`
+  //   (standalone) держат бегунок включённым — оба режима исполняются в разных процессах и не
+  //   пересекаются (web-entrypoint отвергает worker, worker-entrypoint требует worker).
+  const recoveryMode = config.runtime.collectionRecoveryMode;
   const collectionRunner =
     overrides.collectionRunner ||
     createCollectionRecoveryRunner({
@@ -415,7 +420,7 @@ function createComposition(config, overrides = {}) {
       tgCap: config.runtime.tgQrChannelsPerPass,
       initialDelayMs: config.runtime.collectionRecoveryInitialDelayMs,
       intervalMs: config.runtime.collectionRecoveryIntervalMs,
-      enabled: !!backgroundDb.enabled,
+      enabled: !!backgroundDb.enabled && recoveryMode !== 'external',
     });
 
   // Реальные пулы, которые обязан закрыть main.js РОВНО по одному разу. Set дедуплицирует случай
@@ -433,6 +438,7 @@ function createComposition(config, overrides = {}) {
     memoryCache: cache,
     jobTracker,
     collectionRunner,
+    collectionRecoveryMode: recoveryMode,
     drainState,
     adapters: Object.freeze({ mtprotoClient, igCrypto, tgCrypto, notionCrash }),
   };
