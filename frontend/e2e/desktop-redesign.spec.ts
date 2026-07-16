@@ -76,6 +76,15 @@ test('desktop Overview keeps period context compact', async ({ page }, testInfo)
   await expect(editor.getByRole('button', { name: 'L', exact: true })).toBeVisible();
   await page.keyboard.press('Escape');
   expect(await overflowingCards(page)).toEqual([]);
+
+  // Owner override: the three third-width TG cards (Ср. охват / Реакции / Вовлечённость) each carry
+  // an honest active-window publication-date sparkline — its caption renders even though these
+  // cards have no previous-window comparison available.
+  for (const card of ['Ср. охват', 'Реакции', 'Вовлечённость']) {
+    const section = page.getByRole('heading', { name: card, exact: true }).locator('xpath=ancestor::section[1]');
+    await expect(section.getByText('по датам публикаций')).toBeVisible();
+  }
+
   const compactTop = await page.getByRole('heading', { name: 'Ср. охват', exact: true }).evaluate((el) => el.closest('section')!.getBoundingClientRect().top);
   const narrativeTop = await page.getByRole('heading', { name: 'Неделя канала', exact: true }).evaluate((el) => el.closest('section')!.getBoundingClientRect().top);
   expect(compactTop).toBeLessThan(narrativeTop);

@@ -3,11 +3,12 @@ import { DeltaPill } from '@/components/DeltaPill';
 import type { MetricDelta } from '@/lib/delta';
 
 /**
- * Compact, NON-temporal metric bodies for the third-width Overview cards. The design contract bans
- * a tiny timeline at third width, so an aggregate metric leads with its number + delta and then a
- * period-over-period read: two bars (this window vs the previous equal-length one) for a single
- * value, or a stacked composition bar for an additive metric. Honest by construction: no previous
- * → no bars and no fake delta; missing value → «—».
+ * Compact, non-temporal metric bodies for the third-width Instagram Overview cards (the Telegram
+ * third-width cards moved to an active-window publication-date sparkline — see KpiGrid TgTrendStat).
+ * An aggregate metric leads with its number + delta and then a period-over-period read: two bars
+ * (this window vs the previous equal-length one) for a single value, or a stacked composition bar
+ * for an additive metric. Honest by construction: no previous → no bars and no fake delta; missing
+ * value → «—».
  *
  * Colours are neutral by rule — the current bar is a quiet foreground fill, the previous a muted
  * one; identity hues drive only the composition segments. Green/red stay reserved for the DeltaPill.
@@ -15,7 +16,7 @@ import type { MetricDelta } from '@/lib/delta';
 
 /** Big headline number, optionally a drill button (with the app-wide «Разбор: …» a11y label), with
     the delta pill inline. */
-function Headline({
+export function CompactStatHeadline({
   text,
   delta,
   onDrill,
@@ -103,7 +104,7 @@ export function CompareStat({ value, prev, delta, format, onDrill, drillLabel, h
   const max = bars ? Math.max(value as number, prev as number) : 0;
   return (
     <div className="flex h-full min-h-0 flex-col justify-between gap-4">
-      <Headline text={live ? format(value as number) : '—'} delta={bars ? delta : null} onDrill={onDrill} drillLabel={drillLabel} live={live} />
+      <CompactStatHeadline text={live ? format(value as number) : '—'} delta={bars ? delta : null} onDrill={onDrill} drillLabel={drillLabel} live={live} />
       {bars ? (
         <div className="space-y-2.5">
           <CompareBar label={currentLabel} value={value as number} max={max} format={format} tone="current" />
@@ -147,7 +148,7 @@ export function CompositionStat({ total, delta, parts, format, onDrill, drillLab
   const showBar = live && parts.length > 0 && sum > 0;
   return (
     <div className="flex h-full min-h-0 flex-col justify-between gap-4">
-      <Headline text={live ? format(total as number) : '—'} delta={delta} onDrill={onDrill} drillLabel={drillLabel} live={live} />
+      <CompactStatHeadline text={live ? format(total as number) : '—'} delta={delta} onDrill={onDrill} drillLabel={drillLabel} live={live} />
       {showBar ? (
         <div className="space-y-3">
           <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-muted/50">

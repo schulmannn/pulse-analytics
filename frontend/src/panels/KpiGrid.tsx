@@ -11,7 +11,7 @@ import { MetricInfo } from '@/components/InfoTooltip';
 import { DeltaPill } from '@/components/DeltaPill';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ChartCardBody } from '@/components/ChartWidget';
-import { CompareStat } from '@/components/CompareStat';
+import { CompactStatHeadline } from '@/components/CompareStat';
 import { usePagePeriod, useWidgetPeriod, widgetPeriodValue } from '@/lib/period';
 import type { MetricDelta } from '@/lib/delta';
 import { getDrillMetric, type MetricDef } from '@/lib/widgetMetrics';
@@ -122,9 +122,10 @@ export function KpiGrid() {
 
 /**
  * «Просмотры» — the redesigned Overview's primary TG time series (half width). Channel views over
- * the period as an area sparkline + the paired-window Δ. This is the honest daily series (the other
- * three TG aggregates below are compact non-temporal comparisons). Keeps the exact «Просмотры · N
- * дн.» headline the old hero carried, so the shared period reads the same everywhere.
+ * the period as an area sparkline + the paired-window Δ. Keeps the exact «Просмотры · N дн.»
+ * headline the old hero carried, so the shared period reads the same everywhere. (The three
+ * compact TG cards below carry their own active-window publication-date sparklines — see
+ * TgTrendStat.)
  */
 export function TgViewsBody({ state }: { state: TgKpiState }) {
   const { derived, isPending, isError, error } = state;
@@ -147,38 +148,38 @@ export function TgViewsBody({ state }: { state: TgKpiState }) {
   );
 }
 
-/** «Ср. охват» — average views per post, this window vs the previous (compact two-bar). */
+/** «Ср. охват» — average views per post; the active-window publication-date sparkline below. */
 export function TgAvgReachBody({ state }: { state: TgKpiState }) {
   const { derived, isPending, isError } = state;
   const navigate = useNavigate();
   if (isPending) return <CompactSkeleton />;
   if (isError) return <ErrorState title="Не удалось загрузить" reason="ошибка" />;
-  const { avgViews, avgViewsPrev, avgReachTrend } = derived;
+  const { avgViews, avgReachTrend, avgReachSpark, normPosts } = derived;
   return (
-    <CompareStat
+    <TgTrendStat
       value={avgViews}
-      prev={avgViewsPrev}
       delta={avgReachTrend}
+      spark={avgReachSpark}
       format={(n) => fmt.short(Math.round(n))}
-      hasValue={avgViews > 0}
+      hasValue={normPosts.length > 0}
       onDrill={() => navigate('/metrics/avgReach')}
       drillLabel="Ср. охват"
     />
   );
 }
 
-/** «Реакции» — total reactions, this window vs the previous (compact two-bar). */
+/** «Реакции» — total reactions; the active-window publication-date sparkline below. */
 export function TgReactionsBody({ state }: { state: TgKpiState }) {
   const { derived, isPending, isError } = state;
   const navigate = useNavigate();
   if (isPending) return <CompactSkeleton />;
   if (isError) return <ErrorState title="Не удалось загрузить" reason="ошибка" />;
-  const { totalReactions, reactionsPrev, reactionsTrend, normPosts } = derived;
+  const { totalReactions, reactionsTrend, reactionsSpark, normPosts } = derived;
   return (
-    <CompareStat
+    <TgTrendStat
       value={totalReactions}
-      prev={reactionsPrev}
       delta={reactionsTrend}
+      spark={reactionsSpark}
       format={(n) => fmt.short(Math.round(n))}
       hasValue={normPosts.length > 0}
       onDrill={() => navigate('/metrics/reactions')}
@@ -187,23 +188,77 @@ export function TgReactionsBody({ state }: { state: TgKpiState }) {
   );
 }
 
-/** «Вовлечённость» — ER now vs the previous window (compact two-bar, percent). */
+/** «Вовлечённость» — ER headline; the active-window publication-date sparkline below (percent). */
 export function TgErBody({ state }: { state: TgKpiState }) {
   const { derived, isPending, isError } = state;
   const navigate = useNavigate();
   if (isPending) return <CompactSkeleton />;
   if (isError) return <ErrorState title="Не удалось загрузить" reason="ошибка" />;
-  const { er, erPrev, erTrend } = derived;
+  const { er, erTrend, erSpark, members, normPosts } = derived;
   return (
-    <CompareStat
-      value={er > 0 ? er : null}
-      prev={erPrev}
+    <TgTrendStat
+      value={er}
       delta={erTrend}
+      spark={erSpark}
       format={(n) => `${n.toFixed(2)}%`}
-      hasValue={er > 0}
+      hasValue={members > 0 && normPosts.length > 0}
       onDrill={() => navigate('/metrics/er')}
       drillLabel="Вовлечённость"
     />
+  );
+}
+
+/**
+ * Compact TG comparison body (Ср. охват / Реакции / Вовлечённость): the headline (number + honest
+ * delta) over an HONEST active-window sparkline keyed by UTC publication day. Owner override
+ * (2026-07): these third-width TG cards now carry a publication-date timeline instead of the old
+ * current/previous bars — the chart depends ONLY on the active window, never on previous-window
+ * coverage. ≥2 publication-day buckets draw it (caption «по датам публикаций»); fewer keep the
+ * headline and say so. NOT shared with Instagram — its CompareStat cards are untouched.
+ */
+function TgTrendStat({
+  value,
+  delta,
+  spark,
+  format,
+  onDrill,
+  drillLabel,
+  hasValue = true,
+}: {
+  value: number | null;
+  delta?: MetricDelta | null;
+  spark: DailySeries;
+  format: (n: number) => string;
+  onDrill?: () => void;
+  drillLabel?: string;
+  hasValue?: boolean;
+}) {
+  const live = hasValue && value != null && Number.isFinite(value);
+  const hasChart = live && spark.values.length >= 2;
+  return (
+    <div className="flex h-full min-h-0 flex-col justify-between gap-4">
+      <CompactStatHeadline
+        text={live ? format(value as number) : '—'}
+        delta={delta}
+        onDrill={onDrill}
+        drillLabel={drillLabel}
+        live={live}
+      />
+      {hasChart ? (
+        <Sparkline
+          values={spark.values}
+          labels={spark.labels}
+          area
+          strokeWidth={2}
+          interactive
+          caption="по датам публикаций"
+          formatValue={format}
+          className="h-full min-h-14 w-full"
+        />
+      ) : (
+        <p className="text-2xs text-muted-foreground">Недостаточно дат публикаций для графика.</p>
+      )}
+    </div>
   );
 }
 

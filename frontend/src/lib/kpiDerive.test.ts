@@ -60,3 +60,83 @@ describe('deriveKpis — «Просмотры» канальные (вариан
     expect(d.channelViews).toBe(500); // фолбэк в пост-сумму, не 0
   });
 });
+
+/**
+ * Owner override (2026-07): три компактные TG-карточки (Ср. охват / Реакции / Вовлечённость) несут
+ * честный спарклайн по UTC-дням ПУБЛИКАЦИИ активного окна (не зависит от предыдущего окна). Пиним
+ * дневную математику, агрегацию нескольких постов в один день и сортировку по возрастанию дня.
+ */
+describe('deriveKpis — спарклайны TG по датам публикаций', () => {
+  const MEMBERS = 5000;
+  const post = (date: string, views: number, reactions: number, forwards: number, replies: number) =>
+    ({ date, views, reactions, forwards, replies });
+  const deriveSpark = (posts: unknown[], inWindow: (date: string | null | undefined) => boolean = () => true) =>
+    deriveKpis(
+      { channel: { memberCount: MEMBERS }, posts } as never,
+      { rows: [] } as never,
+      undefined,
+      null,
+      30,
+      null,
+      inWindow,
+    );
+
+  it('несколько постов за один UTC-день: Ср. охват = среднее просмотров, Реакции = Σ', () => {
+    const d = deriveSpark([
+      post('2026-06-08T09:00:00.000Z', 100, 10, 2, 1),
+      post('2026-06-08T21:00:00.000Z', 300, 20, 4, 3),
+      post('2026-06-09T12:00:00.000Z', 200, 5, 1, 0),
+    ]);
+    expect(d.avgReachSpark.values).toEqual([200, 200]); // (100+300)/2, 200/1
+    expect(d.reactionsSpark.values).toEqual([30, 5]); // 10+20, 5
+  });
+
+  it('Вовлечённость за день = 100·(reactions + replies + forwards) ÷ member count', () => {
+    const d = deriveSpark([
+      post('2026-06-08T09:00:00.000Z', 100, 10, 2, 1),
+      post('2026-06-08T21:00:00.000Z', 300, 20, 4, 3),
+      post('2026-06-09T12:00:00.000Z', 200, 5, 1, 0),
+    ]);
+    // день A: 100·(30 + 4 + 6)/5000 = 0.8; день B: 100·(5 + 0 + 1)/5000 = 0.12
+    expect(d.erSpark.values[0]).toBeCloseTo(0.8, 10);
+    expect(d.erSpark.values[1]).toBeCloseTo(0.12, 10);
+  });
+
+  it('сортирует бакеты по возрастанию UTC-дня независимо от порядка входных постов', () => {
+    const d = deriveSpark([
+      post('2026-06-10T12:00:00.000Z', 900, 9, 0, 0),
+      post('2026-06-08T12:00:00.000Z', 100, 1, 0, 0),
+      post('2026-06-09T12:00:00.000Z', 500, 5, 0, 0),
+    ]);
+    expect(d.reactionsSpark.values).toEqual([1, 5, 9]); // 08, 09, 10
+    expect(d.avgReachSpark.values).toEqual([100, 500, 900]);
+  });
+
+  it('строит серии только по постам точного активного окна top bar', () => {
+    const d = deriveSpark(
+      [
+        post('2026-06-08T12:00:00.000Z', 100, 1, 0, 0),
+        post('2026-06-09T12:00:00.000Z', 200, 2, 0, 0),
+        post('2026-06-10T12:00:00.000Z', 900, 9, 0, 0),
+      ],
+      (date) => !!date && date < '2026-06-10',
+    );
+    expect(d.avgReachSpark.values).toEqual([100, 200]);
+    expect(d.reactionsSpark.values).toEqual([1, 2]);
+  });
+
+  it('один день публикаций → один бакет (карточка покажет «Недостаточно дат…»)', () => {
+    const d = deriveSpark([post('2026-06-08T12:00:00.000Z', 100, 1, 0, 0)]);
+    expect(d.avgReachSpark.values).toHaveLength(1);
+    expect(d.reactionsSpark.values).toHaveLength(1);
+    expect(d.erSpark.values).toHaveLength(1);
+  });
+
+  it('разреженные дни публикаций не добиваются нулями', () => {
+    const d = deriveSpark([
+      post('2026-06-08T12:00:00.000Z', 100, 2, 0, 0),
+      post('2026-06-12T12:00:00.000Z', 200, 4, 0, 0), // пропуск 09–11
+    ]);
+    expect(d.reactionsSpark.values).toEqual([2, 4]); // ровно два бакета, без нулевых дней между
+  });
+});
