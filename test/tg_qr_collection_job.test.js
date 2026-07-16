@@ -1183,3 +1183,105 @@ test('repairCentralMedia: feature-detect — a db without listCentralPostsMissin
   assert.deepEqual(bare.calls.post, []);
   assert.deepEqual(stats, { attempted: false, requested: 0, filled: 0 });
 });
+
+// ── Retry semantics: which failures fail the durable six-hour bucket (retryable next pass) and which
+// complete it (throttled) — the deployment-skew follow-up to PR #231. A runJobOnce that mirrors the
+// real repo (fn throw → row 'failed'/retryable → rethrow; fn return → row 'succeeded'/throttled) makes
+// the bucket outcome observable, and repairCentralMedia must never reject to the caller either way.
+function statusTrackingRunJobOnce() {
+  const ref = { status: null };
+  const runJobOnce = async (_kind, _key, fn) => {
+    try { const result = await fn(); ref.status = 'succeeded'; return { skipped: false, result }; }
+    catch (e) { ref.status = 'failed'; throw e; }   // mirror jobsRepo: failJob then rethrow
+  };
+  return { runJobOnce, ref };
+}
+
+test('repairCentralMedia: deployment-skew transient failure fails the bucket, the next pass retries the SAME bucket', async () => {
+  const realNow = Date.now;
+  const bucket = 314159;
+  Date.now = () => bucket * 6 * 60 * 60 * 1000 + 1000;
+  try {
+    // Model the durable jobs ledger: a 'succeeded' bucket is skipped, a 'failed' one is re-claimable.
+    const jobs = new Map();
+    jobs.set(`50:${bucket}`, 'succeeded'); // poisoned legacy PR #231 key already present in production
+    const runJobOnce = async (_kind, key, fn) => {
+      const st = jobs.get(key);
+      if (st === 'succeeded' || st === 'running') return { skipped: true, job: { status: st } };
+      jobs.set(key, 'running');
+      try { const result = await fn(); jobs.set(key, 'succeeded'); return { skipped: false, result }; }
+      catch (e) { jobs.set(key, 'failed'); throw e; }
+    };
+    // The first pass hits the OLD mtproto (just-restarted web, un-migrated service) → transient failure.
+    const responses = { '/qr/media': timeoutErr() };
+    const { job, calls } = makeMediaJob({ runJobOnce, responses });
+
+    const first = await job.repairCentralMedia();
+    assert.deepEqual(first, { attempted: false, requested: 0, filled: 0 }, 'never rejects; outer catch returns empty stats');
+    assert.deepEqual(calls.persistedMedia, [], 'a transient failure persists nothing');
+    assert.equal(jobs.size, 2, 'the generation-aware key bypasses the poisoned legacy bucket');
+    assert.equal(jobs.get(`50:4:${bucket}`), 'failed', 'the new six-hour bucket is left FAILED → retryable, not completed');
+
+    // Next 15-min recovery tick, SAME six-hour bucket: the NEW mtproto now answers 200.
+    delete responses['/qr/media'];
+    const second = await job.repairCentralMedia();
+    assert.equal(jobs.size, 2, 'the retry reclaims the SAME generation-aware key, it does not open a new one');
+    assert.equal(jobs.get(`50:4:${bucket}`), 'succeeded', 'the retry completes the SAME bucket');
+    assert.deepEqual(calls.persistedMedia, [{ channelId: 50, rows: [{ post_id: '1306', size: 'sm', jpeg_b64: '/9j/2Q==' }] }],
+      'the covers missed by the skewed pass are filled on the retry');
+    assert.deepEqual(second, { attempted: true, requested: 2, filled: 1 });
+  } finally {
+    Date.now = realNow;
+  }
+});
+
+test('repairCentralMedia: a zero-cover success completes the bucket (throttled), not retried every 15 min', async () => {
+  const { runJobOnce, ref } = statusTrackingRunJobOnce();
+  // Genuinely thumbless posts: the endpoint 200s but returns no covers for the requested ids.
+  const { job, calls } = makeMediaJob({ runJobOnce, covers: [] });
+  const stats = await job.repairCentralMedia();
+
+  assert.equal(ref.status, 'succeeded', 'a 200 with zero covers still COMPLETES the durable bucket');
+  assert.deepEqual(calls.persistedMedia, [], 'nothing to persist for thumbless posts');
+  assert.deepEqual(calls.health[1], ['success', 2], 'a 200 with zero covers proves the session works');
+  assert.deepEqual(stats, { attempted: true, requested: 2, filled: 0 });
+});
+
+test('repairCentralMedia: a DB query failure fails the bucket (retryable) and never degrades session health', async () => {
+  const { runJobOnce, ref } = statusTrackingRunJobOnce();
+  const { job, db, calls } = makeMediaJob({ runJobOnce });
+  db.listCentralPostsMissingMedia = async () => { throw new Error('db read carrying SECRET-DETAIL'); };
+
+  const stats = await job.repairCentralMedia();
+
+  assert.deepEqual(stats, { attempted: false, requested: 0, filled: 0 }, 'never rejects to the caller');
+  assert.equal(ref.status, 'failed', 'a DB read fault leaves the bucket retryable for the next pass');
+  assert.deepEqual(calls.post, [], 'the session was never contacted');
+  assert.deepEqual(calls.health, [], 'a DB-only failure must NOT touch Telegram session health');
+  assert.ok(calls.logs.some((l) => l.event === 'tg_media_repair_query_failed'));
+  assert.equal(JSON.stringify(calls.logs).includes('SECRET-DETAIL'), false, 'raw DB error text is never logged');
+});
+
+test('repairCentralMedia: a DB persist failure fails the bucket (retryable) and keeps the session healthy', async () => {
+  const { runJobOnce, ref } = statusTrackingRunJobOnce();
+  const { job, calls } = makeMediaJob({ runJobOnce, upsertThrows: true });
+
+  const stats = await job.repairCentralMedia();
+
+  assert.deepEqual(stats, { attempted: false, requested: 0, filled: 0 }, 'never rejects to the caller');
+  assert.equal(ref.status, 'failed', 'a DB write fault leaves the bucket retryable for the next pass');
+  assert.ok(calls.health.some((c) => c[0] === 'success'), 'the upstream 200 proved the session works');
+  assert.ok(!calls.health.some((c) => c[0] === 'failure'), 'a DB-only failure must NOT degrade session health');
+  assert.ok(calls.logs.some((l) => l.event === 'tg_post_media_persist_failed' && l.meta.error === 'write_failed'));
+  assert.equal(JSON.stringify(calls.logs).includes('db down'), false, 'raw DB error text is never logged');
+});
+
+test('repairCentralMedia: an auth failure completes the bucket (no hot retry) and records reauth_required', async () => {
+  const { runJobOnce, ref } = statusTrackingRunJobOnce();
+  const { job, calls } = makeMediaJob({ runJobOnce, responses: { '/qr/media': authErr() } });
+
+  await assert.doesNotReject(job.repairCentralMedia());
+  assert.equal(ref.status, 'succeeded', 'an unusable session is not reclaimed every 15 min — the bucket completes');
+  const fail = calls.health.find((c) => c[0] === 'failure');
+  assert.deepEqual(fail[2], { state: 'reauth_required', errorCode: 'session_unauthorized' });
+});

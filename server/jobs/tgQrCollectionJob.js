@@ -427,7 +427,12 @@ function createTgQrCollectionJob({ db, liveDb = db, log, tgCrypto, mtprotoPost, 
       // retries partial misses, so success never suppresses them permanently. The seed rotates the
       // bounded selection between buckets, avoiding head-of-line blocking by the same thumbless ids.
       const bucket = Math.floor(Date.now() / (6 * 60 * 60 * 1000));
-      const outcome = await db.runJobOnce('tg_media_repair', `${centralId}:${bucket}`, async () => {
+      // Include the credential generation in the key. A reconnect may repair immediately instead of
+      // inheriting an auth-failed bucket from the revoked session; the versioned shape also bypasses
+      // the legacy `${centralId}:${bucket}` rows that PR #231 could incorrectly complete on a transient
+      // web↔mtproto deployment skew.
+      const sessionGeneration = sess.session_version == null ? 'legacy' : String(sess.session_version);
+      const outcome = await db.runJobOnce('tg_media_repair', `${centralId}:${sessionGeneration}:${bucket}`, async () => {
         const stats = { attempted: false, requested: 0, filled: 0 };
         let missing = [];
         try {
@@ -437,7 +442,11 @@ function createTgQrCollectionJob({ db, liveDb = db, log, tgCrypto, mtprotoPost, 
           );
         } catch {
           log('error', 'tg_media_repair_query_failed', { channelId: centralId, error: 'query_failed' });
-          return stats;
+          // DB-only failure: throw a safe-coded error so runJobOnce marks THIS bucket failed and the
+          // next recovery pass reclaims it. No Telegram session health is touched — the session was
+          // never contacted, so a DB read fault must not falsely degrade it. The message is static
+          // (never the raw DB error) so nothing sensitive lands in the job row / logs.
+          const e = new Error('tg_media_repair_query_retry'); e.code = 'media_query_failed'; throw e;
         }
         const msgIds = missing
           .map((row) => String(row?.post_id || ''))
@@ -461,28 +470,13 @@ function createTgQrCollectionJob({ db, liveDb = db, log, tgCrypto, mtprotoPost, 
         if (accessHash != null) body.access_hash = accessHash;
 
         stats.attempted = true;
+        // The upstream request is the ONLY signal about the Telegram session's health, so isolate it.
+        // A failure here is either auth (session unusable) or transient/upstream — and the two demand
+        // opposite bucket outcomes, so they cannot be flattened into "return stats" like before.
+        let data;
         try {
-          const data = await mtprotoPost('/qr/media', {
+          data = await mtprotoPost('/qr/media', {
             body, timeoutMs: MTPROTO_TIMEOUT_STATS_MS, lane: 'background',
-          });
-          assertManagedEntity(central, data, 'tg_media_repair_identity_mismatch');
-          if (!central.username) {
-            await persistResolvedIdentity(central, data, sess.uid, sess.session_version, accessHash);
-          }
-          // Trust only covers for the exact ids requested in this batch. Entity binding alone is not
-          // enough: a buggy internal response must not attach another archived post's bytes here.
-          const requested = new Set(msgIds);
-          const covers = Array.isArray(data?.covers)
-            ? data.covers.filter((cover) => cover?.size === 'sm' && requested.has(String(cover.post_id)))
-            : [];
-          if (covers.length) {
-            stats.filled = await db.upsertPostMedia(centralId, covers).catch(() => {
-              log('warn', 'tg_post_media_persist_failed', { channelId: centralId, error: 'write_failed' });
-              return 0;
-            }) || 0;
-          }
-          await finalizeSessionHealth(sess.uid, sess.session_version, {
-            attempted: true, succeeded: true, authFailed: false, errorCode: null,
           });
         } catch (e) {
           const authFailed = isTgAuthError(e);
@@ -493,6 +487,54 @@ function createTgQrCollectionJob({ db, liveDb = db, log, tgCrypto, mtprotoPost, 
           log('warn', 'tg_media_repair_failed', {
             channelId: centralId, code: authFailed ? e.code : safeTgErrorCode(e),
           });
+          // Auth failure: the session itself is invalid — reauth_required is already recorded and
+          // reclaiming this bucket every 15 minutes is pointless, so COMPLETE it (return). A transient
+          // failure (timeout / unreachable / flood, or the deployment-skew case where a just-restarted
+          // web hit the OLD mtproto and got a 404/503) is genuinely retryable → rethrow a SAFE-CODED
+          // error so runJobOnce marks the row failed and the next pass retries the SAME six-hour bucket.
+          // The raw upstream message is discarded so nothing sensitive lands in the job row. Either way
+          // repairCentralMedia's outer catch keeps this from rejecting to the caller.
+          if (authFailed) return stats;
+          const retry = new Error('tg_media_repair_upstream_retry'); retry.code = safeTgErrorCode(e); throw retry;
+        }
+        // Upstream answered → the session is proven live before we even inspect the payload. The
+        // remaining steps are local: bind the entity (fail-closed, degraded on mismatch), then persist.
+        try {
+          assertManagedEntity(central, data, 'tg_media_repair_identity_mismatch');
+        } catch (e) {
+          await finalizeSessionHealth(sess.uid, sess.session_version, {
+            attempted: true, succeeded: false, authFailed: false, errorCode: safeTgErrorCode(e),
+          });
+          throw e;   // fail-closed guard, retryable; message is static, still swallowed by outer catch
+        }
+        if (!central.username) {
+          await persistResolvedIdentity(central, data, sess.uid, sess.session_version, accessHash);
+        }
+        // Trust only covers for the exact ids requested in this batch. Entity binding alone is not
+        // enough: a buggy internal response must not attach another archived post's bytes here.
+        const requested = new Set(msgIds);
+        const covers = Array.isArray(data?.covers)
+          ? data.covers.filter((cover) => cover?.size === 'sm' && requested.has(String(cover.post_id)))
+          : [];
+        // A DB write failure is retryable but must NOT degrade the (healthy) session: record success —
+        // the 200 is honest — but flag the miss so the pass FAILS the bucket for the next tick instead
+        // of completing it. Only the fixed safe code is logged, never the raw DB error.
+        let persistFailed = false;
+        if (covers.length) {
+          try {
+            stats.filled = (await db.upsertPostMedia(centralId, covers)) || 0;
+          } catch {
+            log('warn', 'tg_post_media_persist_failed', { channelId: centralId, error: 'write_failed' });
+            persistFailed = true;
+          }
+        }
+        // A 200 — even with zero/fewer covers for genuinely thumbless posts — proves the session works
+        // and completes the six-hour bucket, so a thumbless post is not re-fetched every 15 minutes.
+        await finalizeSessionHealth(sess.uid, sess.session_version, {
+          attempted: true, succeeded: true, authFailed: false, errorCode: null,
+        });
+        if (persistFailed) {
+          const e = new Error('tg_media_repair_persist_retry'); e.code = 'media_persist_failed'; throw e;
         }
         log('info', 'tg_media_repair_done', { ...stats });
         return stats;
