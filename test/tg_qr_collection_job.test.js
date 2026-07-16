@@ -39,17 +39,20 @@ const previousKeyCrypto = () => ({
 // (ref -> Error to throw, or undefined -> succeed). Records every health call for assertions.
 // `rotate` drives the fake db.rotateTgSessionCiphertext: false → no row matched (reconnect race),
 // a thrown value → DB error, otherwise → matched. Every call is recorded in calls.rotate.
-function makeJob({ responses = {}, runJobOnce, health = {}, tgCrypto, tgQrChannelsPerPass, rotate, velocity = {}, thumbs = {}, mediaError = null } = {}) {
+function makeJob({ responses = {}, runJobOnce, health = {}, tgCrypto, tgQrChannelsPerPass, rotate, velocity = {}, thumbs = {}, mediaError = null, postStats = {}, postStatsEntity = {}, channelPhotos = {}, previousPhoto = null } = {}) {
   const calls = {
     post: [], postLanes: [], health: [], persisted: [], logs: [], sessions: [], rotate: [],
     includeVelocity: [], includeMedia: [], persistedVelocity: [], persistedMedia: [],
+    postStatsBodies: [], persistedSnapshots: [], savedHashes: [],
   };
   const db = {
     enabled: true,
     graphsToDailyRows: () => [],
     saveRawSnapshot: async () => {},
+    getSnapshotInternal: async () => previousPhoto ? { data: { channel_photo: previousPhoto } } : null,
     persistTgBundleTx: async (channelId, payload) => {
       calls.persisted.push(channelId);
+      calls.persistedSnapshots.push(payload && payload.snapshot);
       calls.persistedVelocity.push(payload && payload.velocity ? payload.velocity : null);
       // Mirror the real repo: velocity is saved (and counted true) ONLY on a real available payload.
       const v = !!(payload && payload.velocity && payload.velocity.available);
@@ -71,10 +74,30 @@ function makeJob({ responses = {}, runJobOnce, health = {}, tgCrypto, tgQrChanne
       if (rotate instanceof Error) throw rotate;
       return rotate;
     },
+    saveTgChannelAccessHash: async (channelId, ownerUid, hash, gen) => {
+      calls.savedHashes.push({ channelId, ownerUid, hash, gen });
+      return true;
+    },
     listTgSessions: async () => [],
     listChannels: async () => [],
   };
-  const mtprotoPost = async (_path, { body, lane }) => {
+  const mtprotoPost = async (path, { body, lane }) => {
+    // Managed per-post stats travels the SAME breaker client but a distinct path + body (msg_id, no
+    // include_*). Driven by `postStats` (ref → payload) and `postStatsEntity` (ref → identity); errors
+    // reuse `responses` keyed by ref, exactly like the collect path.
+    if (path === '/qr/post_stats') {
+      calls.post.push(body.channel);
+      calls.postLanes.push(lane);
+      calls.sessions.push(body.session);
+      calls.postStatsBodies.push(body);
+      const err = responses[body.channel];
+      if (err) throw err;
+      const payload = postStats[body.channel] || { available: true, views_graph: null, reactions: null };
+      const defaultEntity = { id: '999', access_hash: null };
+      return (body.channel in postStatsEntity)
+        ? { ...payload, entity: postStatsEntity[body.channel] }
+        : { ...payload, entity: defaultEntity };
+    }
     calls.post.push(body.channel);
     calls.postLanes.push(lane);
     calls.sessions.push(body.session);   // record the plaintext session the collect actually sent
@@ -86,7 +109,10 @@ function makeJob({ responses = {}, runJobOnce, health = {}, tgCrypto, tgQrChanne
     // never requests it, so the bundle stays exactly OK_BUNDLE (identity preserved for those tests).
     const vel = velocity[body.channel];
     const covers = thumbs[body.channel];
-    return vel || covers ? { ...OK_BUNDLE, ...(vel ? { velocity: vel } : {}), ...(covers ? { thumbs: covers } : {}) } : OK_BUNDLE;
+    const photo = channelPhotos[body.channel];
+    return vel || covers || photo
+      ? { ...OK_BUNDLE, ...(vel ? { velocity: vel } : {}), ...(covers ? { thumbs: covers } : {}), ...(photo ? { channel_photo: photo } : {}) }
+      : OK_BUNDLE;
   };
   const job = createTgQrCollectionJob({
     db,
@@ -94,6 +120,7 @@ function makeJob({ responses = {}, runJobOnce, health = {}, tgCrypto, tgQrChanne
     tgCrypto: tgCrypto || activeCrypto(),
     mtprotoPost,
     MTPROTO_TOKEN: 'tok',
+    MTPROTO_TIMEOUT_STATS_MS: 500,
     MTPROTO_TIMEOUT_HEAVY_MS: 1000,
     tgPostToRow: (p) => p,
     ...(tgQrChannelsPerPass != null ? { tgQrChannelsPerPass } : {}),
@@ -520,6 +547,201 @@ test('collectQrChannelsNow: previous-key session is rewritten once, rewrite fail
 
   assert.deepEqual(calls.post, ['a1']);
   assert.deepEqual(calls.rotate, [{ uid: 6, version: '1', enc: 'enc:old' }]);
+});
+
+// ── Managed avatar (channel photo) persistence — best-effort, bounded, top-level snapshot field ──
+
+test('collectManagedChannelNow: persists a valid bounded channel photo as a TOP-LEVEL snapshot field', async () => {
+  const jpeg = Buffer.from([0xff, 0xd8, 0xaa, 0xbb]).toString('base64');
+  const { job, calls } = makeJob({ channelPhotos: { central: jpeg } });
+  await job.collectManagedChannelNow({ uid: 2, session_enc: 's', session_version: '4' }, central(), '2026-07-15');
+
+  // Sibling of `channel`, never inside it, so /api/tg/full keeps shipping only d.channel.
+  assert.equal(calls.persistedSnapshots[0].channel_photo, jpeg);
+  assert.equal('channel_photo' in calls.persistedSnapshots[0].channel, false);
+});
+
+test('collectManagedChannelNow: a malformed/oversized photo is dropped, snapshot + metrics survive', async () => {
+  const notJpeg = Buffer.from('not-a-jpeg-payload').toString('base64');
+  const { job, calls } = makeJob({ channelPhotos: { central: notJpeg } });
+  const out = await job.collectManagedChannelNow({ uid: 2, session_enc: 's', session_version: '4' }, central(), '2026-07-15');
+
+  assert.equal('channel_photo' in calls.persistedSnapshots[0], false, 'a non-JPEG avatar is not stored');
+  assert.equal(out.channel_daily, 3, 'core metrics are never affected by the best-effort avatar');
+  assert.equal(out.posts, 5);
+});
+
+test('collectManagedChannelNow: no channel photo in the bundle → snapshot has no channel_photo key', async () => {
+  const { job, calls } = makeJob();   // OK_BUNDLE carries no channel_photo
+  await job.collectManagedChannelNow({ uid: 2, session_enc: 's', session_version: '4' }, central(), '2026-07-15');
+  assert.equal('channel_photo' in calls.persistedSnapshots[0], false);
+});
+
+test('collectManagedChannelNow: transient photo miss preserves the last valid snapshot avatar', async () => {
+  const jpeg = Buffer.from([0xff, 0xd8, 0x10, 0x20]).toString('base64');
+  const { job, calls } = makeJob({ previousPhoto: jpeg });
+  await job.collectManagedChannelNow({ uid: 2, session_enc: 's', session_version: '4' }, central(), '2026-07-15');
+  assert.equal(calls.persistedSnapshots[0].channel_photo, jpeg);
+});
+
+// ── collectManagedPostStatsNow (managed central per-post stats, LIVE lane, rethrows for fallback) ──
+
+test('collectManagedPostStatsNow: success → live lane, healthy, returns the payload with entity stripped', async () => {
+  const { job, calls } = makeJob({
+    postStats: { central: { available: true, views_graph: { x: [1], series: [] }, reactions: [] } },
+    postStatsEntity: { central: { id: '999', access_hash: '5' } },   // matches central().tg_channel_id
+  });
+  const out = await job.collectManagedPostStatsNow({ uid: 2, session_enc: 'plain-secret', session_version: '4' }, central(), 777);
+
+  assert.deepEqual(out, { available: true, views_graph: { x: [1], series: [] }, reactions: [] });
+  assert.equal(out.entity, undefined, 'the private entity identity never reaches the route/cache');
+  assert.deepEqual(calls.post, ['central']);
+  assert.deepEqual(calls.postLanes, ['live'], 'a per-post dashboard read uses the LIVE breaker lane');
+  const body = calls.postStatsBodies[0];
+  assert.equal(body.msg_id, 777);
+  assert.equal(body.session, 'plain-secret');    // decrypted plaintext, only in the body
+  assert.equal(body.access_hash, undefined, 'a username channel needs no access_hash');
+  assert.deepEqual(calls.health[0], ['attempt', 2]);
+  assert.deepEqual(calls.health[1], ['success', 2]);   // generation-guarded via session_version
+});
+
+test('collectManagedPostStatsNow: an available:false (too-few-views) 200 is returned and counts as healthy', async () => {
+  const { job, calls } = makeJob({ postStats: { central: { available: false, error: 'not enough data' } } });
+  const out = await job.collectManagedPostStatsNow({ uid: 2, session_enc: 's', session_version: '4' }, central(), 5);
+
+  assert.equal(out.available, false, 'available=false is passed through, never fabricated to true');
+  assert.deepEqual(calls.health[1], ['success', 2], 'a 200 proves the session works, even with no post stats');
+});
+
+test('collectManagedPostStatsNow: private central channel forwards the stored access_hash (warm path)', async () => {
+  const HASH = '7345987012345678901';   // > 2**53 → must survive as an exact string
+  const { job, db, calls } = makeJob({
+    postStats: { '-1001234567890': { available: true } },
+    postStatsEntity: { '-1001234567890': { id: '1234567890', access_hash: HASH } },
+  });
+  db.getTgChannelIdentity = async (channelId, ownerUid) => (channelId === 50 && String(ownerUid) === '2'
+    ? { tg_channel_id: '-1001234567890', tg_access_hash: HASH, tg_access_hash_version: '4' } : null);
+  const ch = central({ username: null, tg_channel_id: '-1001234567890' });
+
+  await job.collectManagedPostStatsNow({ uid: 2, session_enc: 's', session_version: '4' }, ch, 9);
+
+  assert.equal(calls.postStatsBodies[0].access_hash, HASH, 'stored hash forwarded byte-exact, no dialog scan');
+  assert.deepEqual(calls.savedHashes, [], 'unchanged warm hash does not write');
+});
+
+test('collectManagedPostStatsNow: refreshed private access_hash self-heals generation-guarded', async () => {
+  const OLD = '7345987012345678901';
+  const FRESH = '7345987012345678999';
+  const ref = '-1001234567890';
+  const { job, db, calls } = makeJob({
+    postStats: { [ref]: { available: true } },
+    postStatsEntity: { [ref]: { id: '1234567890', access_hash: FRESH } },
+  });
+  db.getTgChannelIdentity = async () => ({
+    tg_channel_id: ref, tg_access_hash: OLD, tg_access_hash_version: '4',
+  });
+  const channel = central({ username: null, tg_channel_id: ref });
+  await job.collectManagedPostStatsNow({ uid: 2, session_enc: 's', session_version: '4' }, channel, 9);
+  assert.equal(calls.postStatsBodies[0].access_hash, OLD);
+  assert.deepEqual(calls.savedHashes, [{ channelId: 50, ownerUid: 2, hash: FRESH, gen: '4' }]);
+});
+
+test('collectManagedPostStatsNow: auth failure → reauth_required health then RETHROWS for fallback', async () => {
+  const { job, calls } = makeJob({ responses: { central: authErr() } });
+  await assert.rejects(
+    job.collectManagedPostStatsNow({ uid: 2, session_enc: 's', session_version: '4' }, central(), 9),
+    (e) => e.code === 'session_unauthorized',
+  );
+  const fail = calls.health.find((c) => c[0] === 'failure');
+  assert.deepEqual(fail[2], { state: 'reauth_required', errorCode: 'session_unauthorized' });
+});
+
+test('collectManagedPostStatsNow: 503 mtproto_session_unauthorized is also auth → reauth_required', async () => {
+  const { job, calls } = makeJob({ responses: { central: authErr503() } });
+  await assert.rejects(
+    job.collectManagedPostStatsNow({ uid: 2, session_enc: 's', session_version: '4' }, central(), 9),
+    (e) => e.code === 'mtproto_session_unauthorized',
+  );
+  const fail = calls.health.find((c) => c[0] === 'failure');
+  assert.deepEqual(fail[2], { state: 'reauth_required', errorCode: 'mtproto_session_unauthorized' });
+});
+
+test('collectManagedPostStatsNow: non-auth failure (timeout) → degraded then RETHROWS for fallback', async () => {
+  const { job, calls } = makeJob({ responses: { central: timeoutErr() } });
+  await assert.rejects(
+    job.collectManagedPostStatsNow({ uid: 2, session_enc: 's', session_version: '4' }, central(), 9),
+    (e) => e.code === 'mtproto_timeout',
+  );
+  const fail = calls.health.find((c) => c[0] === 'failure');
+  assert.deepEqual(fail[2], { state: 'degraded', errorCode: 'mtproto_timeout' });
+});
+
+test('collectManagedPostStatsNow: entity mismatch fails closed (degraded) and never serves foreign stats', async () => {
+  const { job, calls } = makeJob({
+    postStats: { central: { available: true } },
+    postStatsEntity: { central: { id: '888', access_hash: '5' } },   // != central().tg_channel_id (999)
+  });
+  await assert.rejects(
+    job.collectManagedPostStatsNow({ uid: 2, session_enc: 's', session_version: '4' }, central(), 9),
+    (e) => e.code === 'collect_failed',
+  );
+  assert.ok(calls.logs.some((l) => l.event === 'tg_managed_post_stats_identity_mismatch'));
+  const fail = calls.health.find((c) => c[0] === 'failure');
+  assert.equal(fail[2].state, 'degraded');
+});
+
+test('collectManagedPostStatsNow: missing or malformed entity identity also fails closed', async () => {
+  for (const entity of [null, { id: 'not-an-id' }]) {
+    const { job, calls } = makeJob({ postStatsEntity: { central: entity } });
+    await assert.rejects(
+      job.collectManagedPostStatsNow({ uid: 2, session_enc: 's', session_version: '4' }, central(), 9),
+      (e) => e.code === 'collect_failed',
+    );
+    assert.equal(calls.health.find((c) => c[0] === 'failure')[2].state, 'degraded');
+  }
+});
+
+test('collectManagedPostStatsNow: decrypt failure rethrows a safe code and records NO attempt', async () => {
+  const { job, calls } = makeJob({ tgCrypto: { configured: () => true, encrypt: (p) => `enc:${p}`, decryptDetailed: () => { throw new Error('bad key'); } } });
+  await assert.rejects(
+    job.collectManagedPostStatsNow({ uid: 2, session_enc: 's', session_version: '4' }, central(), 9),
+    (e) => e.code === 'session_decrypt_failed',
+  );
+  assert.deepEqual(calls.post, []);     // never reached upstream
+  assert.deepEqual(calls.health, []);   // no attempt recorded for a crypto/config failure
+});
+
+test('collectManagedPostStatsNow: missing tg id / bad msg id / non-owner → prereq throw, no upstream call', async () => {
+  for (const [ch, msg] of [
+    [central({ tg_channel_id: null }), 9],
+    [central(), 0],
+    [central(), -3],
+  ]) {
+    const { job, calls } = makeJob();
+    await assert.rejects(
+      job.collectManagedPostStatsNow({ uid: 2, session_enc: 's', session_version: '4' }, ch, msg),
+      (e) => e.code === 'managed_prereq',
+    );
+    assert.deepEqual(calls.post, []);
+  }
+  // A session whose uid is NOT the channel owner may never use it.
+  const { job, calls } = makeJob();
+  await assert.rejects(
+    job.collectManagedPostStatsNow({ uid: 3, session_enc: 's', session_version: '4' }, central(), 9),
+    (e) => e.code === 'managed_prereq',
+  );
+  assert.deepEqual(calls.post, []);
+});
+
+test('collectManagedPostStatsNow: plaintext session goes ONLY in the body, never into logs', async () => {
+  const SECRET = 'STRING-SESSION-SECRET';
+  const { job, calls } = makeJob({
+    responses: { central: timeoutErr() },
+    tgCrypto: { configured: () => true, encrypt: (p) => `enc:${p}`, decryptDetailed: () => ({ plaintext: SECRET, usedPreviousKey: false }) },
+  });
+  await assert.rejects(job.collectManagedPostStatsNow({ uid: 2, session_enc: 'enc', session_version: '4' }, central(), 9));
+  assert.equal(calls.sessions[0], SECRET, 'sent in the private body');
+  assert.equal(JSON.stringify(calls.logs).includes(SECRET), false, 'never logged');
 });
 
 // ── Access-hash warm path: persist entity identity, reuse it, self-heal, 64-bit safe, no leak ────
