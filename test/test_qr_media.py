@@ -124,11 +124,12 @@ def run(coro):
 
 
 class _MediaMessage:
-    def __init__(self, msg_id, *, photo=False, video=False):
+    def __init__(self, msg_id, *, photo=False, video=False, grouped_id=None):
         self.id = msg_id
         self.photo = object() if photo else None
         self.video = object() if video else None
         self.document = None
+        self.grouped_id = grouped_id
 
 
 class _ThumbClient:
@@ -354,6 +355,151 @@ class CollectMediaByIdTests(unittest.TestCase):
         out = run(svc._collect_media_by_id(client, [_MediaMessage(1, photo=True)], budget_s=0))
         self.assertEqual(out, [])
         self.assertEqual(client.calls, [])
+
+
+class _AlbumClient:
+    """Duck type for the same-group album-member fallback: `download_media` serves per-id thumb bytes
+    (an Exception value is raised to model FloodWait), `get_messages(entity, ids=...)` returns the album
+    members from a catalog (None for ids that don't exist), recording the exact ids probed."""
+
+    def __init__(self, thumb_payloads, catalog):
+        self.thumb_payloads = thumb_payloads
+        self.catalog = catalog
+        self.calls = []
+        self.get_messages_calls = []
+
+    async def download_media(self, msg, thumb=None, file=None):
+        self.calls.append((msg.id, thumb))
+        value = self.thumb_payloads.get(msg.id)
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+    async def get_messages(self, entity, ids=None):
+        self.get_messages_calls.append(list(ids))
+        return [self.catalog.get(i) for i in ids]
+
+
+class AlbumNeighborFallbackTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.svc = _load_service()
+
+    def _downloaded_ids(self, client):
+        return [c[0] for c in client.calls]
+
+    def test_representative_miss_uses_same_group_neighbor_under_original_id(self):
+        svc = self.svc
+        jpeg = b'\xff\xd8\xaa\xbb'
+        rep = _MediaMessage(1312, photo=True, grouped_id=7)          # requested album rep, no cover of its own
+        member = _MediaMessage(1313, photo=True, grouped_id=7)       # same album, has a cover
+        client = _AlbumClient({1312: None, 1313: jpeg}, {1313: member})
+        out = run(svc._collect_media_by_id(client, [rep], budget_s=5, entity=object()))
+        self.assertEqual(out, [{
+            'post_id': '1312', 'size': 'sm', 'jpeg_b64': base64.b64encode(jpeg).decode('ascii'),
+        }], 'the neighbour cover is returned UNDER THE ORIGINAL requested id')
+        self.assertEqual(len(client.get_messages_calls), 1, 'exactly one bounded metadata round-trip')
+        self.assertNotIn(1312, client.get_messages_calls[0], 'the requested id is never fetched as a neighbour')
+        self.assertEqual(self._downloaded_ids(client).count(1313), 1, 'the member cover is downloaded once')
+
+    def test_non_photo_video_representative_still_repaired_from_member(self):
+        svc = self.svc
+        jpeg = b'\xff\xd8\x01\x02'
+        rep = _MediaMessage(1319, grouped_id=9)                      # album rep that is not photo/video itself
+        member = _MediaMessage(1320, video=True, grouped_id=9)
+        client = _AlbumClient({1320: jpeg}, {1320: member})
+        out = run(svc._collect_media_by_id(client, [rep], budget_s=5, entity=object()))
+        self.assertEqual(out, [{
+            'post_id': '1319', 'size': 'sm', 'jpeg_b64': base64.b64encode(jpeg).decode('ascii'),
+        }])
+        self.assertNotIn(1319, self._downloaded_ids(client), 'a non-media rep is never downloaded')
+
+    def test_adjacent_foreign_grouped_id_is_rejected(self):
+        svc = self.svc
+        rep = _MediaMessage(1312, photo=True, grouped_id=7)
+        foreign = _MediaMessage(1313, photo=True, grouped_id=8)      # adjacent, but a DIFFERENT album
+        client = _AlbumClient({1312: None, 1313: b'\xff\xd8\xaa\xbb'}, {1313: foreign})
+        out = run(svc._collect_media_by_id(client, [rep], budget_s=5, entity=object()))
+        self.assertEqual(out, [], 'adjacency alone is never trusted; grouped_id must match exactly')
+        self.assertNotIn(1313, self._downloaded_ids(client), 'a foreign-group neighbour is never downloaded')
+
+    def test_null_grouped_id_representative_never_expands(self):
+        svc = self.svc
+        rep = _MediaMessage(1312, photo=True, grouped_id=None)       # non-album post with no cover
+        member = _MediaMessage(1313, photo=True, grouped_id=7)
+        client = _AlbumClient({1312: None, 1313: b'\xff\xd8\xaa\xbb'}, {1313: member})
+        out = run(svc._collect_media_by_id(client, [rep], budget_s=5, entity=object()))
+        self.assertEqual(out, [], 'a null-grouped_id miss returns fewer covers honestly')
+        self.assertEqual(client.get_messages_calls, [], 'no metadata is fetched for a non-album miss')
+
+    def test_neighbor_window_is_bounded_by_radius(self):
+        svc = self.svc
+        jpeg = b'\xff\xd8\x01\x02'
+        rep = _MediaMessage(1000, photo=True, grouped_id=7)
+        at_edge = _MediaMessage(1000 + svc._ALBUM_NEIGHBOR_RADIUS, video=True, grouped_id=7)
+        beyond = _MediaMessage(1000 + svc._ALBUM_NEIGHBOR_RADIUS + 1, video=True, grouped_id=7)
+        client = _AlbumClient(
+            {1000: None, at_edge.id: jpeg, beyond.id: jpeg},
+            {at_edge.id: at_edge, beyond.id: beyond},
+        )
+        out = run(svc._collect_media_by_id(client, [rep], budget_s=5, entity=object()))
+        self.assertEqual([r['post_id'] for r in out], ['1000'], 'the edge-of-window member repairs the rep')
+        self.assertIn(at_edge.id, client.get_messages_calls[0])
+        self.assertNotIn(beyond.id, client.get_messages_calls[0], 'a member beyond the ± window is never probed')
+
+    def test_metadata_fanout_is_hard_capped(self):
+        svc = self.svc
+        # Many far-apart album misses (non-overlapping windows) must never fan out unbounded id probes.
+        misses = [_MediaMessage(1000 * (i + 1), photo=True, grouped_id=i) for i in range(svc._MEDIA_REPAIR_IDS_MAX)]
+        client = _AlbumClient({m.id: None for m in misses}, {})   # no members resolve → no covers
+        out = run(svc._collect_media_by_id(client, misses, budget_s=5, entity=object()))
+        self.assertEqual(out, [])
+        self.assertEqual(len(client.get_messages_calls), 1)
+        self.assertEqual(len(client.get_messages_calls[0]), svc._ALBUM_MEMBER_LOOKUPS_MAX,
+                         'neighbour metadata ids are hard-capped')
+
+    def test_floodwait_in_fallback_stops_the_phase_without_raising(self):
+        svc = self.svc
+        rep_a = _MediaMessage(1312, photo=True, grouped_id=7)
+        rep_b = _MediaMessage(1400, photo=True, grouped_id=8)
+        member_a = _MediaMessage(1313, photo=True, grouped_id=7)
+        member_b = _MediaMessage(1401, photo=True, grouped_id=8)
+        client = _AlbumClient(
+            {1312: None, 1400: None, 1313: FloodWaitError(seconds=30), 1401: b'\xff\xd8\xaa\xbb'},
+            {1313: member_a, 1401: member_b},
+        )
+        out = run(svc._collect_media_by_id(client, [rep_a, rep_b], budget_s=5, entity=object()))
+        self.assertEqual(out, [], 'FloodWait stops the fallback, never raises')
+        self.assertNotIn(1401, self._downloaded_ids(client), 'no further member is hammered after a FloodWait')
+
+    def test_zero_fallback_budget_fetches_no_metadata(self):
+        svc = self.svc
+        rep = _MediaMessage(1312, photo=True, grouped_id=7)
+        member = _MediaMessage(1313, photo=True, grouped_id=7)
+        client = _AlbumClient({1312: None, 1313: b'\xff\xd8\xaa\xbb'}, {1313: member})
+        out, state, downloaded = [], {'total_bytes': 0}, set()
+        run(svc._collect_album_neighbor_covers(
+            client, object(), [rep], {1312}, out, state, downloaded, 0))
+        self.assertEqual(out, [])
+        self.assertEqual(client.get_messages_calls, [], 'an exhausted budget probes no neighbours')
+
+    def test_satisfied_rep_is_not_expanded_and_output_ids_stay_unique(self):
+        svc = self.svc
+        own = b'\xff\xd8\x0a\x0b'
+        nbr = b'\xff\xd8\x0c\x0d'
+        rep_ok = _MediaMessage(1312, photo=True, grouped_id=7)       # covered by its OWN thumb
+        rep_miss = _MediaMessage(1319, photo=True, grouped_id=9)     # repaired from a member
+        member = _MediaMessage(1320, photo=True, grouped_id=9)
+        client = _AlbumClient({1312: own, 1319: None, 1320: nbr}, {1320: member})
+        out = run(svc._collect_media_by_id(client, [rep_ok, rep_miss], budget_s=5, entity=object()))
+        self.assertEqual(out, [
+            {'post_id': '1312', 'size': 'sm', 'jpeg_b64': base64.b64encode(own).decode('ascii')},
+            {'post_id': '1319', 'size': 'sm', 'jpeg_b64': base64.b64encode(nbr).decode('ascii')},
+        ])
+        ids = [r['post_id'] for r in out]
+        self.assertEqual(len(ids), len(set(ids)), 'no duplicate output ids')
+        # A rep covered by its own thumb is never part of the neighbour fanout (only 1319's window is).
+        self.assertTrue(all(1312 not in probe for probe in client.get_messages_calls))
 
 
 class _EndpointClient:
