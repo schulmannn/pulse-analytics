@@ -167,6 +167,43 @@ export function deriveKpis(
     const entries = [...byDay.entries()].sort(([a], [b]) => a.localeCompare(b));
     return { labels: entries.map(([k]) => fmt.day(k)), values: entries.map(([, v]) => v) };
   };
+  // Active-window sparklines for the three compact TG comparison cards (Ср. охват / Реакции /
+  // Вовлечённость). Owner override (2026-07): these third-width cards now carry an HONEST
+  // publication-date timeline, keyed by UTC publication day over the posts already filtered by the
+  // top-bar period/range — the chart depends ONLY on the active window, never on previous-window
+  // coverage. Sparse by construction (no fabricated zero days) and sorted ascending by UTC day:
+  //   • Ср. охват — mean views per post published that day
+  //   • Реакции — Σ reactions for posts published that day
+  //   • Вовлечённость — 100·(reactions + replies/comments + forwards) ÷ member count, that day
+  // Divisor is the live `members` (parity with the ER headline). Not shared with Instagram.
+  const pubDayBuckets = new Map<string, { views: number; reactions: number; replies: number; forwards: number; count: number }>();
+  posts.forEach((post) => {
+    if (!post.date) return;
+    const timestamp = Date.parse(post.date);
+    if (!Number.isFinite(timestamp)) return;
+    const key = new Date(timestamp).toISOString().slice(0, 10);
+    const bucket = pubDayBuckets.get(key) ?? { views: 0, reactions: 0, replies: 0, forwards: 0, count: 0 };
+    bucket.views += Number(post.views ?? post.view_count ?? 0);
+    bucket.reactions += Number(post.reactions ?? post.reactions_count ?? 0);
+    bucket.replies += Number(post.replies ?? post.comments_count ?? 0);
+    bucket.forwards += Number(post.forwards ?? 0);
+    bucket.count += 1;
+    pubDayBuckets.set(key, bucket);
+  });
+  const pubDays = [...pubDayBuckets.entries()].sort(([a], [b]) => a.localeCompare(b));
+  const pubDayLabels = pubDays.map(([k]) => fmt.day(k));
+  const avgReachSpark: DailySeries = {
+    labels: pubDayLabels,
+    values: pubDays.map(([, b]) => (b.count > 0 ? b.views / b.count : 0)),
+  };
+  const reactionsSpark: DailySeries = {
+    labels: pubDayLabels,
+    values: pubDays.map(([, b]) => b.reactions),
+  };
+  const erSpark: DailySeries = {
+    labels: pubDayLabels,
+    values: pubDays.map(([, b]) => (members > 0 ? ((b.reactions + b.replies + b.forwards) / members) * 100 : 0)),
+  };
   // Sparkline matches the (channel-wide) headline: daily channel views from the archive when we
   // have it, else the post-derived daily series (fallback path).
   const viewsSpark: DailySeries = hasChannelViews
@@ -255,6 +292,7 @@ export function deriveKpis(
     members, displayMembers, totalViews, channelViews, totalReactions, avgViews, er,
     subscriberTrend, viewsTrend, reactionsTrend, erTrend, avgReachTrend,
     viewsSpark, subsSpark, periodLabel, viewsCaption, subDelta, reactionsDelta, erCaption,
+    avgReachSpark, reactionsSpark, erSpark,
     avgViewsPrev, reactionsPrev, erPrev,
     normPosts, normPostsAll, drillMeta,
     // Extras the metric pages need beyond the grid: paired-window totals for the

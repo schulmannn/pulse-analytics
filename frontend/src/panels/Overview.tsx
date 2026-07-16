@@ -58,8 +58,9 @@ export function Overview() {
 
       {/* Independent, source-honest widgets on the 6-col grid (the old aggregate «Показатели» hero
           split into five): row 1 = the two primary cards (Просмотры half + Подписчики half), row 2 =
-          the three compact non-temporal comparisons (Ср. охват / Реакции / Вовлечённость, third
-          each), then the week narrative, the period-context strip and top posts. Every card reads
+          the three compact comparison cards (Ср. охват / Реакции / Вовлечённость, third each), each
+          carrying an honest active-window publication-date sparkline, then the week narrative, the
+          period-context strip and top posts. Every card reads
           the page period (feed-controlled), so one header change re-windows the whole board.
           grid-flow-dense backfills the holes a CSS-order move of a span-2 card would leave. */}
       <WidgetGroup id="overview-v2" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
@@ -74,8 +75,9 @@ export function Overview() {
         {/* Subscriber base + movement — the second primary channel signal (reuses the `growth`
             curated Home key, so «На главную» pins the same card it already knew). */}
         <GrowthChartBlock id="overview-growth" homeKey="growth" defaultColor={5} />
-        {/* Row 2 — compact comparisons at third width (NEVER a tiny timeline here): value + Δ + a
-            two-bar current/previous read, each with its own title, menu and drill route. */}
+        {/* Row 2 — compact comparison cards at third width: headline value + honest Δ over an
+            active-window publication-date sparkline (owner override 2026-07 — the previous non-temporal
+            two-bar read is retired), each with its own title, menu and drill route. */}
         <ChartSection id="overview-avg-reach" title="Ср. охват" defaultSize="third" defaultColor={2} drillTo="/metrics/avgReach">
           <TgAvgReachBody state={kpis} />
         </ChartSection>
