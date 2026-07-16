@@ -1103,7 +1103,10 @@ async def _download_thumb_bytes(tg, msg, size, *, accept=None):
     (older Telegram media exposes different size sets)."""
     if not msg or not (msg.photo or msg.video or msg.document):
         return None
-    indices = (-1, 2, 1, 0) if size == 'lg' else (1, 0)
+    # Small covers prefer the compact candidates but may fall back to a larger THUMBNAIL for albums
+    # whose low indices are stripped/non-JPEG. Callers that persist bytes supply a strict JPEG+512 KB
+    # acceptor, so indices 2/-1 cannot smuggle an oversized payload or the full media.
+    indices = (-1, 2, 1, 0) if size == 'lg' else (1, 0, 2, -1)
     for idx in indices:
         try:
             data = await tg.download_media(msg, thumb=idx, file=bytes)

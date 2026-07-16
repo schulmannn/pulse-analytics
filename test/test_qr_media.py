@@ -223,13 +223,24 @@ class DownloadThumbFallbackTests(unittest.TestCase):
         self.assertEqual(out, jpeg)
         self.assertEqual(client.calls, [(8, 1), (8, 0)])
 
+    def test_invalid_small_candidates_fall_through_to_larger_bounded_thumbnail(self):
+        svc = self.svc
+        jpeg = b'\xff\xd8\x05\x06'
+        client = _IndexedThumbClient({(81, 1): b'RIFF-webp', (81, 0): None, (81, 2): jpeg})
+        out = run(svc._download_thumb_bytes(
+            client, _MediaMessage(81, video=True), 'sm', accept=svc._is_persistable_jpeg_cover))
+        self.assertEqual(out, jpeg)
+        self.assertEqual(client.calls, [(81, 1), (81, 0), (81, 2)])
+
     def test_all_invalid_candidates_return_none(self):
         svc = self.svc
-        client = _IndexedThumbClient({(9, 1): b'not-jpeg', (9, 0): b'also-bad'})
+        client = _IndexedThumbClient({
+            (9, 1): b'not-jpeg', (9, 0): b'also-bad', (9, 2): None, (9, -1): b'bad-largest',
+        })
         out = run(svc._download_thumb_bytes(
             client, _MediaMessage(9, photo=True), 'sm', accept=svc._is_persistable_jpeg_cover))
         self.assertIsNone(out)
-        self.assertEqual(client.calls, [(9, 1), (9, 0)])
+        self.assertEqual(client.calls, [(9, 1), (9, 0), (9, 2), (9, -1)])
 
     def test_floodwait_still_propagates_without_trying_another_index(self):
         svc = self.svc
