@@ -98,6 +98,9 @@ function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN
       },
       dailyRows: hasGraphs ? db.graphsToDailyRows(bundle.graphs) : [],
       postRows: posts.map(tgPostToRow),
+      // velocity присутствует ТОЛЬКО в бандле central-канала (include_velocity=true) — коммитится в
+      // той же транзакции. У обычных QR-каналов bundle.velocity нет → null → ничего не пишется.
+      velocity: bundle.velocity || null,
     });
     // Сырой graphs-снимок — опциональный архив: best-effort ПОСЛЕ коммита, как раньше,
     // но с логом (тихий .catch(() => {}) прятал реальные, actionable-ошибки записи).
@@ -105,7 +108,7 @@ function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN
       await db.saveRawSnapshot(channelId, 'tg', 'graphs', day, bundle.graphs).catch((e) =>
         log('warn', 'tg_qr_raw_snapshot_failed', { channelId, error: e.message }));
     }
-    return counts || { channel_daily: 0, posts: 0 };
+    return counts || { channel_daily: 0, posts: 0, velocity: false };
   }
 
   // Read the persisted Telegram entity identity for the warm collection path. Feature-detected so a
@@ -149,7 +152,7 @@ function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN
   // Fetch one QR channel's bundle via the (already-decrypted) session and persist it. Throws on
   // mtproto/collect failure — callers decide how to handle (log + continue). `gen` is the collecting
   // session generation (session_version); it guards the resolved-identity write.
-  async function collectQrChannel(sessionStr, ch, day, uid, gen) {
+  async function collectQrChannel(sessionStr, ch, day, uid, gen, { includeVelocity = false } = {}) {
     const ref = ch.username || String(ch.tg_channel_id);
     // Warm path: a persisted access_hash lets mtproto address a PRIVATE channel directly instead of
     // scanning up to 1000 dialogs on the fresh StringSession just to recover it. Sent in the POST body
@@ -157,6 +160,9 @@ function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN
     const accessHash = ch.username ? null : await loadStoredAccessHash(ch, uid, gen);
     const body = { session: sessionStr, channel: ref, posts_limit: 100, graph_points: 400 };
     if (accessHash != null) body.access_hash = accessHash;
+    // include_velocity is an explicit opt-in: ONLY the managed central collect sets it, so ordinary QR
+    // channels never pay the up-to-12 GetMessageStats fanout. Sent as a boolean in the private body.
+    if (includeVelocity) body.include_velocity = true;
     // Background lane on the breaker: every /qr/collect (managed central, recovery sweep, and the
     // fire-and-forget immediate post-add) is collection work, isolated from live dashboard reads and
     // sharing only the global in-flight bulkhead.
@@ -168,7 +174,7 @@ function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN
     // Cache the (possibly refreshed) identity for the next collect before persisting the bundle.
     if (!ch.username) await persistResolvedIdentity(ch, bundle, uid, gen, accessHash);
     const counts = await persistTgBundle(ch.id, bundle, day);
-    return { bundle, channel_daily: counts.channel_daily || 0, posts: counts.posts || 0 };
+    return { bundle, channel_daily: counts.channel_daily || 0, posts: counts.posts || 0, velocity: !!counts.velocity };
   }
 
   // Managed collection of ONE channel (the central channel) through the owner's stored session — the
@@ -189,10 +195,14 @@ function createTgQrCollectionJob({ db, log, tgCrypto, mtprotoPost, MTPROTO_TOKEN
     catch { const e = new Error('managed_channel_decrypt_failed'); e.code = 'session_decrypt_failed'; throw e; }
     const theDay = day || new Date().toISOString().slice(0, 10);
     try {
-      const out = await collectQrChannel(sessionStr, channel, theDay, sess.uid, sess.session_version);
+      // Central channel is the ONLY caller that opts into velocity — the up-to-12 GetMessageStats
+      // fanout runs on the owner's session inside the same /qr/collect and is persisted atomically.
+      const out = await collectQrChannel(sessionStr, channel, theDay, sess.uid, sess.session_version, { includeVelocity: true });
       // A real, completed attempt for THIS session generation → healthy (generation-guarded).
       await finalizeSessionHealth(sess.uid, sess.session_version, { attempted: true, succeeded: true, authFailed: false, errorCode: null });
-      return { bundle: out.bundle, channel_daily: out.channel_daily, posts: out.posts };
+      // velocity=true ТОЛЬКО когда реальный available-payload реально записан (persistTgBundleTx),
+      // никогда не фабрикуется — daily ingest доверяет этому флагу как факту записи.
+      return { bundle: out.bundle, channel_daily: out.channel_daily, posts: out.posts, velocity: !!out.velocity };
     } catch (e) {
       const authFailed = isTgAuthError(e);
       await finalizeSessionHealth(sess.uid, sess.session_version, {

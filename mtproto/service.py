@@ -376,6 +376,99 @@ def _g_sum_daily(data):
     return {'x': x, 'values': [sum((s['values'][i] or 0) for s in series) for i in range(n)]}
 
 
+async def _velocity_from_posts(tg, entity, posts, top=12):
+    """Channel-level "post lifecycle": how a post's views accrue over the days after publishing.
+    `posts` are album-collapsed dicts (newest-first); `entity` is the already-resolved channel. For up
+    to `top` eligible posts (views >= 80) we pull GetMessageStats, treat the per-message views_graph as
+    INCREMENTAL (new views per bucket, usually DAILY), aggregate the increments into day-since-publish
+    buckets and average the share of total reach per day.
+
+    This is the SINGLE definition of the velocity metric: both GET /velocity (global session) and the
+    managed POST /qr/collect (owner session) call it, so the semantics can never drift between paths.
+
+    Contract: returns {available, posts_used, by_day, day1_share, t80_days}. A legitimate "no eligible
+    post has settled yet" is available=False (a 200 to the caller). TimeoutError / FloodWaitError are
+    re-raised so the caller answers an honest 503/429; only a per-post RPC failure is skipped."""
+    cand = [p for p in posts if p['views'] >= 80][:top]
+
+    MAXD = 7
+    share_by_day = [[] for _ in range(MAXD)]   # per day: list of per-post % shares
+    cum_by_day   = [[] for _ in range(MAXD)]
+    day1, t80d = [], []
+    used = 0
+
+    for p in cand:
+        try:
+            st = await asyncio.wait_for(
+                tg(GetMessageStatsRequest(channel=entity, msg_id=p['id'], dark=False)),
+                timeout=TELETHON_CALL_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            raise
+        except FloodWaitError:
+            raise
+        except Exception:
+            continue
+        data = await _resolve_graph(tg, getattr(st, 'views_graph', None))
+        if not data:
+            continue
+        x, series = _cols_of(data)
+        if not series or not x or len(x) < 2:
+            continue
+        raw = [float(v or 0) for v in series[0]['values']]   # incremental new views per bucket
+        if len(raw) != len(x):
+            continue
+        total = sum(raw)
+        if total <= 0:
+            continue
+        t0 = float(x[0])
+        last_d = int((float(x[-1]) - t0) // 86400000)
+        if last_d < 2:
+            continue   # too young: lifecycle not settled → would bias the curve
+        day = [0.0] * MAXD
+        for i, v in enumerate(raw):
+            d = int((float(x[i]) - t0) // 86400000)   # full days since first bucket
+            if 0 <= d < MAXD:
+                day[d] += v
+        days_present = min(MAXD, last_d + 1)           # only count days the post has actually lived
+        cum = 0.0
+        cumpct = []
+        for d in range(days_present):
+            cum += day[d]
+            cp = cum / total * 100.0
+            cumpct.append(cp)
+            share_by_day[d].append(day[d] / total * 100.0)
+            cum_by_day[d].append(cp)
+        day1.append(day[0] / total * 100.0)
+        for d in range(days_present):
+            if cumpct[d] >= 80:
+                t80d.append(d)
+                break
+        used += 1
+
+    if used < 1:
+        return {'available': False, 'posts_used': 0}
+
+    def avg(a):
+        return round(sum(a) / len(a), 1) if a else None
+
+    def med(a):
+        if not a:
+            return None
+        a = sorted(a); n = len(a)
+        return a[n // 2] if n % 2 else (a[n // 2 - 1] + a[n // 2]) / 2
+
+    by_day = [{'day': d, 'share': avg(share_by_day[d]), 'cum': avg(cum_by_day[d])}
+              for d in range(MAXD) if share_by_day[d]]
+    t80_med = med(t80d)
+    return {
+        'available':  True,
+        'posts_used': used,
+        'by_day':     by_day,
+        'day1_share': avg(day1),
+        't80_days':   (int(t80_med) + 1) if t80_med is not None else None,
+    }
+
+
 @app.get('/health')
 async def health():
     # Liveness only. Unauthenticated (container healthcheck hits it), so it must
@@ -729,94 +822,16 @@ async def get_velocity(
     top: int = Query(default=12, le=20),
     x_internal_token: str = Header(default=''),
 ):
-    """Channel-level "post lifecycle": how a post's views accrue over the days
-    after publishing. Telegram's per-message views_graph is INCREMENTAL (new
-    views per bucket) and usually DAILY, so we aggregate increments into
-    day-since-publish buckets and average the share of total reach per day."""
+    """Channel-level "post lifecycle" for the configured central channel. The metric itself lives in
+    _velocity_from_posts (shared with the managed /qr/collect); this route only fetches the global
+    session's entity + recent messages and delegates, so both paths compute velocity identically."""
     check_auth(x_internal_token)
     try:
         tg = await get_client()
         entity = await asyncio.wait_for(tg.get_entity(CHANNEL), timeout=TELETHON_CALL_TIMEOUT_S)
         msgs = await asyncio.wait_for(tg.get_messages(CHANNEL, limit=limit), timeout=TELETHON_CALL_TIMEOUT_S)
         posts = [_build_post(g) for g in _logical_posts(msgs)]
-        cand = [p for p in posts if p['views'] >= 80][:top]
-
-        MAXD = 7
-        share_by_day = [[] for _ in range(MAXD)]   # per day: list of per-post % shares
-        cum_by_day   = [[] for _ in range(MAXD)]
-        day1, t80d = [], []
-        used = 0
-
-        for p in cand:
-            try:
-                st = await asyncio.wait_for(
-                    tg(GetMessageStatsRequest(channel=entity, msg_id=p['id'], dark=False)),
-                    timeout=TELETHON_CALL_TIMEOUT_S)
-            except asyncio.TimeoutError:
-                raise
-            except FloodWaitError:
-                raise
-            except Exception:
-                continue
-            data = await _resolve_graph(tg, getattr(st, 'views_graph', None))
-            if not data:
-                continue
-            x, series = _cols_of(data)
-            if not series or not x or len(x) < 2:
-                continue
-            raw = [float(v or 0) for v in series[0]['values']]   # incremental new views per bucket
-            if len(raw) != len(x):
-                continue
-            total = sum(raw)
-            if total <= 0:
-                continue
-            t0 = float(x[0])
-            last_d = int((float(x[-1]) - t0) // 86400000)
-            if last_d < 2:
-                continue   # too young: lifecycle not settled → would bias the curve
-            day = [0.0] * MAXD
-            for i, v in enumerate(raw):
-                d = int((float(x[i]) - t0) // 86400000)   # full days since first bucket
-                if 0 <= d < MAXD:
-                    day[d] += v
-            days_present = min(MAXD, last_d + 1)           # only count days the post has actually lived
-            cum = 0.0
-            cumpct = []
-            for d in range(days_present):
-                cum += day[d]
-                cp = cum / total * 100.0
-                cumpct.append(cp)
-                share_by_day[d].append(day[d] / total * 100.0)
-                cum_by_day[d].append(cp)
-            day1.append(day[0] / total * 100.0)
-            for d in range(days_present):
-                if cumpct[d] >= 80:
-                    t80d.append(d)
-                    break
-            used += 1
-
-        if used < 1:
-            return {'available': False, 'posts_used': 0}
-
-        def avg(a):
-            return round(sum(a) / len(a), 1) if a else None
-
-        def med(a):
-            if not a:
-                return None
-            a = sorted(a); n = len(a)
-            return a[n // 2] if n % 2 else (a[n // 2 - 1] + a[n // 2]) / 2
-
-        by_day = [{'day': d, 'share': avg(share_by_day[d]), 'cum': avg(cum_by_day[d])}
-                  for d in range(MAXD) if share_by_day[d]]
-        t80_med = med(t80d)
-        return {
-            'available':  True,
-            'posts_used': used,
-            'by_day':     by_day,
-            'day1_share': avg(day1),
-            't80_days':   (int(t80_med) + 1) if t80_med is not None else None,
-        }
+        return await _velocity_from_posts(tg, entity, posts, top=top)
     except asyncio.TimeoutError:
         raise HTTPException(status_code=503, detail='mtproto_timeout')
     except FloodWaitError:
@@ -1555,10 +1570,16 @@ def _views_summary_of(posts):
 
 
 @app.post('/qr/collect')
+@_total_budget(HEAVY_TOTAL_BUDGET_S)
 async def qr_collect(session: str = Body(...), channel: str = Body(...),
                      posts_limit: int = Body(default=100), graph_points: int = Body(default=400),
                      access_hash: Optional[str] = Body(default=None),
+                     include_velocity: bool = Body(default=False),
                      x_internal_token: str = Header(default='')):
+    # A HEAVY_TOTAL_BUDGET_S ceiling (below Node's 120s heavy timeout) bounds the WHOLE request — the
+    # opt-in velocity fanout adds up to `top` GetMessageStats round-trips — and the finally-block below
+    # releases the _QR_COLLECT_SEM permit and disconnects the ephemeral client before we answer, so
+    # Python fails first with a clean 503 instead of Node aborting the socket mid-collect.
     check_auth(x_internal_token)
     if not API_ID or not API_HASH:
         raise HTTPException(status_code=503, detail='mtproto_not_configured')
@@ -1593,12 +1614,20 @@ async def qr_collect(session: str = Body(...), channel: str = Body(...),
         graphs_payload = (
             await asyncio.wait_for(_graphs_payload(tg, stats_obj, graph_points), timeout=TELETHON_CALL_TIMEOUT_S)
         ) if stats_obj is not None else {'available': False, 'error': stats_err}
+        # Velocity is an OPT-IN extra: only the central-channel collect sets include_velocity=True, so
+        # ordinary QR channels never pay the up-to-`top` GetMessageStats fanout. It reuses the entity +
+        # album-collapsed posts already fetched above (no second get_messages) and runs the SAME shared
+        # _velocity_from_posts as GET /velocity. TimeoutError/FloodWaitError bubble to the handlers
+        # below (an honest 503/429 for the whole bundle); a legitimate "no eligible posts" is a 200
+        # {available:False}. None when not requested → the web side simply persists no velocity row.
+        velocity = await _velocity_from_posts(tg, entity, posts) if include_velocity else None
         return {
             'channel':       channel_payload,
             'posts':         posts,
             'views_summary': _views_summary_of(posts),
             'stats':         _stats_payload(stats_obj) if stats_obj is not None else {'available': False, 'error': stats_err},
             'graphs':        graphs_payload,
+            'velocity':      velocity,
             # Resolved entity identity for the web side to persist and reuse on the next collect (warm
             # path). access_hash is an int64 → serialized as a STRING (no JS Number precision loss).
             # This is a private web↔mtproto field: it is NOT part of `channel`, so it never lands in a

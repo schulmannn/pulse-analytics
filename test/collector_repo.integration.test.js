@@ -116,6 +116,63 @@ test('persistCentralDaily: атомарный бандл daily+posts+velocity', 
   assert.ok(await db.getLatestVelocityInternal(ch.id), 'velocity записана');
 });
 
+test('persistTgBundleTx: velocity сохраняется АТОМАРНО со снапшотом/daily + идемпотентно за день', { skip }, async () => {
+  const ch = await mkChannel('ptbvel');
+  const out = await db.persistTgBundleTx(ch.id, {
+    snapshot: { s: 1 },
+    dailyRows: [{ day: today, subscribers: 300, joins: 0, leaves: 0, views: 0, forwards: 0, reactions: 0 }],
+    postRows: [],
+    velocity: { available: true, day1_share: 40, posts_used: 5 },
+  });
+  assert.strictEqual(out.channel_daily, 1);
+  assert.strictEqual(out.velocity, true, 'available velocity → сохранена и посчитана');
+  assert.ok(await db.getLatestVelocityInternal(ch.id), 'velocity записана в той же транзакции');
+  assert.ok((await db.getChannelHistoryInternal(ch.id, 30)).some((r) => r.subscribers === 300), 'daily записан');
+
+  // Повтор того же дня перезаписывает строку (ON CONFLICT channel_id, day), не дублирует.
+  const out2 = await db.persistTgBundleTx(ch.id, {
+    snapshot: { s: 2 }, dailyRows: [], postRows: [], velocity: { available: true, day1_share: 55, posts_used: 6 },
+  });
+  assert.strictEqual(out2.velocity, true);
+  const cnt = (await pool.query(`SELECT count(*)::int n FROM velocity_daily WHERE channel_id=$1 AND day=CURRENT_DATE`, [ch.id])).rows[0].n;
+  assert.strictEqual(cnt, 1, 'velocity_daily за день не задвоилась');
+});
+
+test('persistTgBundleTx: недоступная velocity (available:false) НЕ пишется, velocity=false', { skip }, async () => {
+  const ch = await mkChannel('ptbnovel');
+  const out = await db.persistTgBundleTx(ch.id, {
+    snapshot: { s: 1 }, dailyRows: [], postRows: [], velocity: { available: false, posts_used: 0 },
+  });
+  assert.strictEqual(out.velocity, false, 'available:false никогда не отмечается как успех');
+  assert.strictEqual(!!(await db.getLatestVelocityInternal(ch.id)), false, 'строка velocity_daily не появилась');
+});
+
+test('persistTgBundleTx: velocity=null (обычный QR) → бандл пишется, velocity не трогается', { skip }, async () => {
+  const ch = await mkChannel('ptbnull');
+  const out = await db.persistTgBundleTx(ch.id, {
+    snapshot: { s: 1 },
+    dailyRows: [{ day: today, subscribers: 111, joins: 0, leaves: 0, views: 0, forwards: 0, reactions: 0 }],
+    postRows: [],
+    // velocity опущена (default null) — обратная совместимость: обычный QR-канал velocity не шлёт.
+  });
+  assert.strictEqual(out.channel_daily, 1);
+  assert.strictEqual(out.velocity, false);
+  assert.strictEqual(!!(await db.getLatestVelocityInternal(ch.id)), false);
+});
+
+test('persistTgBundleTx: сбой внутри бандла откатывает ВСЁ — velocity не «протекает» (атомарность)', { skip }, async () => {
+  const ch = await mkChannel('ptbrb');
+  await assert.rejects(() => db.persistTgBundleTx(ch.id, {
+    snapshot: { s: 1 },
+    dailyRows: [{ day: today, subscribers: 100, joins: 0, leaves: 0, views: 0, forwards: 0, reactions: 0 }],
+    // Невалидный post_id (bigint-каст падает) роняет upsertPosts ПОСЛЕ снапшота/daily → ROLLBACK всего.
+    postRows: [{ post_id: 'not-a-bigint', date_published: today, views: 1 }],
+    velocity: { available: true, day1_share: 40 },
+  }));
+  assert.strictEqual(!!(await db.getLatestVelocityInternal(ch.id)), false, 'откат: velocity не записана');
+  assert.strictEqual((await db.getChannelHistoryInternal(ch.id, 30)).length, 0, 'откат: daily не записан');
+});
+
 test('upsertIgDaily roundtrip + saveRawSnapshot/pruneRawSnapshots', { skip }, async () => {
   const ch = await mkChannel('igraw');
   await db.upsertIgDaily(ch.id, [{ day: today, followers: 1000, reach: 5000, views: 8000 }]);
