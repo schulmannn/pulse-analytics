@@ -128,12 +128,22 @@ test('desktop Home labels every mixed-source widget', async ({ page }, testInfo)
   });
   await bootDemo(page, '/home', { theme: 'dark' });
 
+  const isDesktop = (page.viewportSize()?.width ?? 0) >= 768;
   const identities = page.locator('[data-source-identity]');
-  await expect(identities).toHaveCount(2);
-  await expect(identities.filter({ hasText: 'Telegram · @demo_channel' })).toHaveCount(1);
-  await expect(identities.filter({ hasText: 'Instagram · @demo_channel' })).toHaveCount(1);
-  // Existing personal layouts keep their legacy aggregate instead of being silently migrated.
-  await expect(page.getByRole('heading', { name: 'Показатели', exact: true })).toHaveCount(1);
+  if (isDesktop) {
+    // Desktop splits the Telegram «Показатели» composite into five independent source-honest cards;
+    // Instagram keeps its own «IG · Показатели» aggregate → five Telegram badges + one Instagram.
+    await expect(identities).toHaveCount(6);
+    await expect(identities.filter({ hasText: 'Telegram · @demo_channel' })).toHaveCount(5);
+    await expect(identities.filter({ hasText: 'Instagram · @demo_channel' })).toHaveCount(1);
+    await expect(page.getByRole('heading', { name: 'Показатели', exact: true })).toHaveCount(0);
+  } else {
+    // Mobile keeps the legacy Telegram composite verbatim (the split is desktop-only).
+    await expect(identities).toHaveCount(2);
+    await expect(identities.filter({ hasText: 'Telegram · @demo_channel' })).toHaveCount(1);
+    await expect(identities.filter({ hasText: 'Instagram · @demo_channel' })).toHaveCount(1);
+    await expect(page.getByRole('heading', { name: 'Показатели', exact: true })).toHaveCount(1);
+  }
   await expect(page.getByRole('heading', { name: 'IG · Показатели', exact: true })).toHaveCount(1);
 
   const homeShot = testInfo.outputPath('home-sources-dark.png');

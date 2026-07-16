@@ -30,11 +30,13 @@ test.describe('desktop /home workspace (dark, 1440)', () => {
     await expect(edit).toHaveAttribute('aria-pressed', 'false');
     await expect(page.getByRole('button', { name: 'Добавить виджет', exact: true })).toHaveCount(1);
 
-    // Every widget keeps its own platform/channel identity (TG + IG).
+    // The Telegram «Показатели» composite splits into five source-honest cards (desktop); ig-reach
+    // stays one IG card. Every widget still keeps its own platform/channel identity.
     const identities = page.locator('[data-source-identity]');
-    await expect(identities).toHaveCount(2);
-    await expect(identities.filter({ hasText: 'Telegram · @demo_channel' })).toHaveCount(1);
+    await expect(identities).toHaveCount(6);
+    await expect(identities.filter({ hasText: 'Telegram · @demo_channel' })).toHaveCount(5);
     await expect(identities.filter({ hasText: 'Instagram · @demo_channel' })).toHaveCount(1);
+    await expect(page.getByRole('heading', { name: 'Показатели', exact: true })).toHaveCount(0);
 
     const hScroll = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -85,7 +87,7 @@ test.describe('desktop /home workspace (dark, 1440)', () => {
     const editWidth = (await board.boundingBox())!.width;
     expect(Math.abs(editWidth - restWidth)).toBeLessThanOrEqual(1);
     expect(Math.abs((await sidebar.boundingBox())!.width - sidebarWidth)).toBeLessThanOrEqual(1);
-    await expect(page.locator('[data-source-identity]')).toHaveCount(2);
+    await expect(page.locator('[data-source-identity]')).toHaveCount(6);
     const hScroll = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     );
@@ -124,8 +126,12 @@ test.describe('desktop /home workspace (dark, 1440)', () => {
     const keys = await page.evaluate(
       () => JSON.parse(localStorage.getItem('pulse_home_blocks') || '{}').keys as string[],
     );
-    expect(keys[0]).toBe('kpi');
+    // A fresh desktop board seeds the split KPI cards, not the legacy composite: the five split keys
+    // lead the board (no `kpi` token), and the availability-aware IG widget is still included.
+    expect(keys[0]).toBe('custom:home-kpi-tg-views');
+    expect(keys.filter((k) => k === 'kpi')).toHaveLength(0);
     expect(keys.some((k) => k.startsWith('ig-'))).toBe(true);
+    await expect(page.getByRole('heading', { name: 'Показатели', exact: true })).toHaveCount(0);
 
     const layout = await page.locator('.home-board-canvas section').evaluateAll((sections) =>
       sections.map((section) => {

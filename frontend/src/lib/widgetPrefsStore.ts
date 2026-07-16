@@ -153,7 +153,8 @@ export function setPrefs(id: string, prefs: WidgetPrefs) {
   schedulePush();
 }
 
-function getGroupOrder(groupId: string): string[] {
+/** One group's persisted reorder token list (empty when the group was never reordered/seeded). */
+export function getGroupOrder(groupId: string): string[] {
   return orderSnapshot()[groupId] ?? EMPTY_ORDER;
 }
 
