@@ -542,6 +542,43 @@ export function useChannels() {
   });
 }
 
+// ── «МойСклад» (source='ms'): сервер-агрегированные отчёты, все суммы уже в РУБЛЯХ ──────────
+const MsRevenuePointSchema = z.object({ day: z.string(), value: z.number() }).passthrough();
+const MsOrdersPointSchema = z.object({ day: z.string(), sum: z.number(), count: z.number() }).passthrough();
+const MsSummarySchema = z
+  .object({
+    revenue: z.object({ total: z.number(), series: z.array(MsRevenuePointSchema) }).passthrough(),
+    orders: z.object({ totalSum: z.number(), totalCount: z.number(), series: z.array(MsOrdersPointSchema) }).passthrough(),
+  })
+  .passthrough();
+const MsTopProductsSchema = z
+  .object({
+    rows: z.array(z.object({ name: z.string(), quantity: z.number(), revenue: z.number(), profit: z.number() }).passthrough()),
+  })
+  .passthrough();
+
+export function useMsSummary(days: number) {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    enabled: channelId != null,
+    queryKey: ['ms-summary', channelId, days],
+    staleTime: STALE_LIVE,
+    retry: false,
+    queryFn: ({ signal }) => apiGet(`/api/ms/summary?days=${days}`, MsSummarySchema, { signal, channelId }),
+  });
+}
+
+export function useMsTopProducts(days: number, limit = 10) {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    enabled: channelId != null,
+    queryKey: ['ms-top-products', channelId, days, limit],
+    staleTime: STALE_LIVE,
+    retry: false,
+    queryFn: ({ signal }) => apiGet(`/api/ms/top-products?days=${days}&limit=${limit}`, MsTopProductsSchema, { signal, channelId }),
+  });
+}
+
 // ── Аннотации-события трендов (chart_annotations): флажки «реклама / пост-хит» на графике ────
 const AnnotationSchema = z.object({ id: z.number(), day: z.string(), label: z.string() }).passthrough();
 const AnnotationsResponseSchema = z.object({ annotations: z.array(AnnotationSchema).default([]) }).passthrough();

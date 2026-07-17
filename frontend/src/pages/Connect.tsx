@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
 import QRCode from 'qrcode';
@@ -18,8 +18,8 @@ import { cn } from '@/lib/utils';
 
 const INGEST_URL = `${window.location.origin}/api/collector/ingest`;
 
-type ServiceId = 'telegram' | 'instagram' | 'threads' | 'youtube' | 'tiktok' | 'x' | 'vk' | 'facebook';
-type ServiceKind = 'telegram' | 'instagram' | 'soon';
+type ServiceId = 'telegram' | 'instagram' | 'moysklad' | 'threads' | 'youtube' | 'tiktok' | 'x' | 'vk' | 'facebook';
+type ServiceKind = 'telegram' | 'instagram' | 'moysklad' | 'soon';
 
 interface Service {
   id: ServiceId;
@@ -33,6 +33,8 @@ interface Service {
 const SERVICES: Service[] = [
   { id: 'telegram', name: 'Telegram', kind: 'telegram' },
   { id: 'instagram', name: 'Instagram', kind: 'instagram' },
+  // «МойСклад» — первый не-социальный источник: продажи/заказы по токену API.
+  { id: 'moysklad', name: 'МойСклад', kind: 'moysklad' },
   { id: 'threads', name: 'Threads', kind: 'soon', soon: 'Threads-метрики отдаёт тот же токен Instagram — ближайший кандидат после IG.' },
   { id: 'youtube', name: 'YouTube', kind: 'soon', soon: 'Аналитика каналов и видео через YouTube Data API + вход Google.' },
   { id: 'tiktok', name: 'TikTok', kind: 'soon', soon: 'Статистика аккаунта через TikTok for Developers (нужна проверка приложения).' },
@@ -45,6 +47,7 @@ const SERVICES: Service[] = [
 const GLYPHS: Record<ServiceId, ReactNode> = {
   telegram: (<><path d="M22 4 2 11l6 2.5L11 20l3-4 5 3z" /><path d="m8 13.5 8-6" /></>),
   instagram: (<><rect x="3.5" y="3.5" width="17" height="17" rx="5" /><circle cx="12" cy="12" r="4" /><circle cx="17.3" cy="6.7" r="1" className="fill-current" stroke="none" /></>),
+  moysklad: (<><path d="M12 3 3.5 7.5v9L12 21l8.5-4.5v-9L12 3Z" /><path d="M3.5 7.5 12 12l8.5-4.5M12 12v9" /></>),
   threads: (<path d="M16 8c-1.5-2-6-2.5-8 0-2.5 3-1 9 3 9 3 0 4-2 4-4s-1.5-3-3.5-3-3 2-1.5 3" />),
   youtube: (<><rect x="2.5" y="6" width="19" height="12" rx="4" /><path d="m10 9.5 5 2.5-5 2.5z" /></>),
   tiktok: (<><path d="M10 8v6.5a3 3 0 1 1-3-3" /><path d="M10 8c.5 2 2 3.5 5 3.5" /></>),
@@ -252,6 +255,7 @@ export function Connect() {
             <TelegramPanel channelName={channelName(channelsData)} queryTab={tgTab} reconnectRequested={actionParam === 'reconnect'} />
           )}
           {active.kind === 'instagram' && <InstagramPanel />}
+          {active.kind === 'moysklad' && <MoySkladPanel />}
           {active.kind === 'soon' && <SoonPanel name={active.name} glyph={active.id} note={active.soon ?? ''} />}
         </div>
       </div>
@@ -363,6 +367,87 @@ function PanelHead({ id, name, pill }: { id: ServiceId; name: string; pill: { la
       <span className={cn('shrink-0 rounded-full border px-2.5 py-0.5 text-2xs font-medium uppercase tracking-wide', tone)}>
         {pill.label}
       </span>
+    </div>
+  );
+}
+
+// ── МойСклад: подключение по токену API ──
+function MoySkladPanel() {
+  const qc = useQueryClient();
+  const [token, setToken] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [orgName, setOrgName] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    const value = token.trim();
+    if (!value || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      // Токен уходит только на НАШ бэкенд (шифруется AES-256-GCM до записи) — в браузере,
+      // логах и git он не живёт; в МойСклад ходит сервер.
+      const res = (await apiSend('POST', '/api/ms/connect', { token: value })) as { org_name?: string };
+      setOrgName(res?.org_name || 'организация');
+      setToken('');
+      await qc.invalidateQueries({ queryKey: ['channels'] });
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Не удалось подключить МойСклад.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-5 sm:p-6">
+      <PanelHead
+        id="moysklad"
+        name="МойСклад"
+        pill={orgName ? { label: 'Подключён', tone: 'ok' } : { label: 'Доступен', tone: 'go' }}
+      />
+      {orgName ? (
+        <div className="mt-4 space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Подключена организация <b className="font-medium text-foreground">{orgName}</b>. Выручка, заказы и топ
+            товаров уже считаются.
+          </p>
+          <Link
+            to="/sklad"
+            className="btn-pill inline-flex bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+          >
+            Открыть Обзор склада →
+          </Link>
+        </div>
+      ) : (
+        <div className="mt-4 space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Продажи, заказы и прибыль из МойСклада — рядом с аналитикой каналов. Понадобится токен API: в МойСкладе
+            откройте <b className="font-medium text-foreground">Настройки → Обмен данными → Токены API</b> и создайте токен.
+          </p>
+          <form onSubmit={submit} className="flex items-center gap-2">
+            <input
+              type="password"
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              placeholder="Токен API МойСклада"
+              autoComplete="off"
+              className="h-9 min-w-0 flex-1 rounded border border-border bg-background px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
+            />
+            <button
+              type="submit"
+              disabled={!token.trim() || busy}
+              className="btn-pill shrink-0 bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {busy ? 'Проверяем…' : 'Подключить'}
+            </button>
+          </form>
+          {error && <p className="text-xs text-ember">{error}</p>}
+          <p className="text-2xs text-muted-foreground">
+            Токен хранится только на сервере в зашифрованном виде (AES-256-GCM) и не попадает в логи.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { Suspense, lazy } from 'react';
 import type { ComponentType } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, Outlet } from 'react-router-dom';
 import { networkByKey, type Network } from '@/lib/networks';
 import { PagePeriodProvider } from '@/lib/period';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -142,6 +142,23 @@ const IG_PARTS: Record<string, SectionParts> = {
   audience: { Body: IgAudiencePage, HeaderRight: IgPeriodControl },
 };
 
+// «МойСклад» — свой lazy-чанк (bundle-гейт: TG/IG-пользователь его не платит). Период —
+// те же page-period чипсы: TgPagePeriodControl сете-агностичен (usePagePeriod + PeriodChips).
+const MsOverview = lazyFrom(() => import('@/panels/sklad/MsOverview'), 'MsOverview');
+
+/** Минимальный shell «МойСклада»: page-period провайдер + секционный Outlet (у сети одна секция). */
+function MsShellRoute() {
+  return (
+    <PagePeriodProvider>
+      <Outlet />
+    </PagePeriodProvider>
+  );
+}
+
+const MS_PARTS: Record<string, SectionParts> = {
+  '': { Body: MsOverview, HeaderRight: TgPagePeriodControl },
+};
+
 /** Zip the network's nav (paths + labels — the single source of truth) with the body map. A nav
     row without a body is skipped defensively rather than crashing the whole feed. */
 function buildSections(net: Network, parts: Record<string, SectionParts>): FeedSectionDef[] {
@@ -156,6 +173,7 @@ function buildSections(net: Network, parts: Record<string, SectionParts>): FeedS
 export const FEEDS: Record<Network, NetworkFeedDef> = {
   tg: { Shell: TgSectionLayout, sections: buildSections('tg', TG_PARTS) },
   ig: { Shell: IgShellRoute, sections: buildSections('ig', IG_PARTS) },
+  ms: { Shell: MsShellRoute, sections: buildSections('ms', MS_PARTS) },
 };
 
 /**

@@ -100,6 +100,43 @@ function createIntegrationsRepo({ pool, enabled, ensureExternalSource, transacti
     return rows;
   }
 
+  // ── МойСклад accounts (per-channel token connection) ─────────────
+  // Одна учётка МойСклада на канал, зеркально ig_accounts. Токен приходит и отдаётся УЖЕ
+  // шифрованным (callers шифруют/дешифруют через lib/ms_crypto) — repo никогда не видит
+  // plaintext и не логирует его.
+  async function saveMsAccount(channelId, { ms_account_id, org_name, access_token_enc }) {
+    if (!enabled || !channelId) return false;
+    // Зеркало saveIgAccount: canonical ms-source → строка аккаунта → штамп source_id канала —
+    // одной транзакцией, чтобы падение между записями не оставило аккаунт без source-связки.
+    // org_name идёт в external_sources как title (контракт ensureExternalSource — username/title;
+    // имя организации — витринный заголовок, а не handle).
+    return transaction(async (client) => {
+      const srcId = await ensureExternalSource('ms', ms_account_id, { title: org_name }, client);
+      await client.query(
+        `INSERT INTO ms_accounts (channel_id, ms_account_id, org_name, access_token_enc, source_id, updated_at)
+         VALUES ($1,$2,$3,$4,$5, now())
+         ON CONFLICT (channel_id) DO UPDATE SET
+           ms_account_id=EXCLUDED.ms_account_id, org_name=EXCLUDED.org_name,
+           access_token_enc=EXCLUDED.access_token_enc,
+           source_id=COALESCE(EXCLUDED.source_id, ms_accounts.source_id), updated_at=now()`,
+        [channelId, ms_account_id, org_name || null, access_token_enc, srcId]);
+      await client.query(
+        `UPDATE channels SET source_id=$2 WHERE id=$1 AND source_id IS NULL AND tg_channel_id IS NULL AND source='ms'`,
+        [channelId, srcId]);
+      return true;
+    });
+  }
+
+  // Полная строка вместе с шифрованным токеном (callers дешифруют). null = не подключён.
+  async function getMsAccount(channelId) {
+    if (!enabled || !channelId) return null;
+    const { rows } = await pool.query(
+      `SELECT channel_id, ms_account_id, org_name, access_token_enc,
+              to_char(connected_at,'YYYY-MM-DD"T"HH24:MI:SS') AS connected_at
+         FROM ms_accounts WHERE channel_id=$1`, [channelId]);
+    return rows[0] || null;
+  }
+
   // ── Telegram QR sessions (managed connect) ───────────────────────────
   // One encrypted user session per account (callers encrypt via lib/tg_crypto — the repo never sees
   // plaintext). Covers every channel where that user is an admin; QR-connected channels reach it
@@ -260,6 +297,7 @@ function createIntegrationsRepo({ pool, enabled, ensureExternalSource, transacti
 
   return {
     saveIgAccount, getIgAccount, updateIgToken, deleteIgAccount, listIgAccounts,
+    saveMsAccount, getMsAccount,
     saveTgSession, getTgSession, deleteTgSession, listTgSessions, rotateTgSessionCiphertext,
     listTgQrCollectCandidates,
     recordTgSessionAttempt, recordTgSessionSuccess, recordTgSessionFailure,

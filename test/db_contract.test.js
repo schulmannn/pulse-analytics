@@ -24,6 +24,7 @@ const EXPECTED_FUNCTIONS = [
   'adoptOwnerChannel', 'listChannels', 'getDefaultChannelId', 'getChannel', 'getChannelById', 'getOwnerChannelId',
   'getTgChannelIdentity', 'saveTgChannelAccessHash',
   'setChannelTgId', 'createChannel', 'createTgChannel', 'createIgChannel', 'findIgChannelByIgUser',
+  'createMsChannel', 'findMsChannelByAccount',
   'deleteChannel', 'createApiKey', 'getChannelByApiKey', 'listApiKeys', 'revokeApiKey',
   'ensurePersonalWorkspace', 'ensureExternalSource', 'ensureChannelCanonical',
   'listAnnotations', 'createAnnotation', 'deleteAnnotation',
@@ -44,8 +45,9 @@ const EXPECTED_FUNCTIONS = [
   // bugs / crashes
   'createBug', 'createCrash', 'upsertCrashSignature', 'recordCrashOccurrence', 'setCrashNotionPage', 'touchCrashNotified',
   'listBugs', 'updateBug', 'deleteBug', 'bugExists', 'getBug', 'addAttachmentIfRoom', 'getAttachment',
-  // integrations (ig accounts / tg sessions)
+  // integrations (ig accounts / ms accounts / tg sessions)
   'saveIgAccount', 'getIgAccount', 'updateIgToken', 'deleteIgAccount', 'listIgAccounts',
+  'saveMsAccount', 'getMsAccount',
   'saveTgSession', 'getTgSession', 'deleteTgSession', 'listTgSessions', 'rotateTgSessionCiphertext',
   'listTgQrCollectCandidates',
   'recordTgSessionAttempt', 'recordTgSessionSuccess', 'recordTgSessionFailure',

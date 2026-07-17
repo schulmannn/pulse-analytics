@@ -12,6 +12,8 @@ const { captionSnippet } = require('./lib/caption');
 const { fetchWithTimeout } = require('./lib/http');
 const { createMtprotoClient } = require('./lib/mtproto-client');
 const { createIgCrypto } = require('./lib/ig_crypto');
+const { createMsCrypto } = require('./lib/ms_crypto');
+const { createMsClient } = require('./lib/msClient');
 const { createTgCrypto } = require('./lib/tg_crypto');
 const { createNotionCrashClient } = require('./lib/notion_crash');
 const { log: defaultLog } = require('./lib/observability');
@@ -65,6 +67,14 @@ function createComposition(config, overrides = {}) {
     });
   const igCrypto =
     overrides.igCrypto || createIgCrypto(config.instagram.tokenKey);
+  // МойСклад: свой ключ шифрования токенов (MS_TOKEN_KEY) + единый исходящий GET-клиент
+  // (lib/msClient — gzip-заголовок обязателен, один ретрай на 429). Тот же fetchWithTimeout,
+  // что у IG/OAuth-путей; токены живут только в заголовке запроса, в логи не попадают.
+  const msCrypto =
+    overrides.msCrypto || createMsCrypto(config.moysklad.tokenKey);
+  const msClient =
+    overrides.msClient || createMsClient({ fetchImpl: fetchWithTimeout, log });
+  const msFetch = msClient.msFetch;
   const tgCrypto =
     overrides.tgCrypto ||
     createTgCrypto(config.telegram.sessionKey, config.telegram.previousSessionKeys);
@@ -397,6 +407,8 @@ function createComposition(config, overrides = {}) {
       igConfigured,
       igCrypto,
       igMock,
+      msCrypto,
+      msFetch,
       nearestOf,
       cacheGet,
       cacheSet,

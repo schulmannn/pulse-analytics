@@ -32,6 +32,7 @@ const { registerTgRoutes } = require('./routes/tg');
 const { registerMentionsRoutes } = require('./routes/mentions');
 const { registerIgOauthRoutes } = require('./routes/ig-oauth');
 const { registerIgRoutes } = require('./routes/ig');
+const { registerMsRoutes } = require('./routes/moysklad');
 const { registerAccountRoutes } = require('./routes/account');
 const { registerHistoryRoutes } = require('./routes/history');
 
@@ -48,7 +49,7 @@ function createApp(deps) {
     limiter, authLimiter, mediaLimiter,
     hashPassword, verifyPassword, DUMMY_HASH, signSession, SESSION_TTL, GOOGLE_CLIENT_ID,
     appBase, sha256, newToken, VERIFY_TTL, RESET_TTL, sendEmail, emailShell, emailBtn, escHtml,
-    igFetch, refreshIgIfNeeded, igConfigured, igCrypto, igMock, nearestOf,
+    igFetch, refreshIgIfNeeded, igConfigured, igCrypto, igMock, msCrypto, msFetch, nearestOf,
     cacheGet, cacheSet, cache, IG_ACCOUNT, IG_TOKEN, IG_GRAPH, AUTH_SECRET,
     tgCrypto, collectQrChannelsNow, collectManagedPostStatsNow, TG_TOKEN, TG_CHANNEL,
     timingSafeEqualStr, dailyIngestJob, jobTracker, mtprotoClient, notionCrash,
@@ -171,6 +172,11 @@ function createApp(deps) {
     oauthMaxInFlight: config.instagram.oauthMaxInFlight,
     oauthAcquireTimeoutMs: config.instagram.oauthAcquireTimeoutMs,
   });
+
+  // Роуты МойСклада (connect по API-токену + summary/top-products) — routes/moysklad.js.
+  // msCrypto/msFetch построены в composition (зеркально igCrypto/igFetch); канал data-роуты
+  // резолвят тем же заголовком x-channel-id, что IG (см. resolveMs внутри).
+  registerMsRoutes({ app, requireAuth, db, msCrypto, msFetch, cacheGet, cacheSet, log });
 
   registerChannelsRoutes({ app, db, requireAuth, audit, getDbReady });
 
