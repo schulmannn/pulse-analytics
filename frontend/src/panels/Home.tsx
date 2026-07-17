@@ -20,6 +20,8 @@ import {
   useWidgetPrefs,
 } from '@/lib/widgetPrefsStore';
 import { ChannelScope } from '@/lib/channel-context';
+import { getRememberedChannel } from '@/lib/channel';
+import { resolveHomeSourceChannel } from '@/lib/channelSource';
 import { HOME_REGISTRY, type HomeWidgetDef } from '@/lib/homeWidgets';
 import { defaultHomeKeys, HOME_LEGACY_DEFAULT_KEYS } from '@/lib/homeDefaults';
 import { ConfigWidget } from '@/components/ConfigWidget';
@@ -429,9 +431,17 @@ function useHomeAdd(): { openCatalog: () => void; node: ReactNode } {
  *  `home-<key>` prefs row (Home only re-renders on pin-list / config changes now), so editing this
  *  card's source or size re-renders exactly this card. Its own ChartSection means a crash in its
  *  variant compute escapes the in-card body boundary — the self-chromed «card» fallback here keeps
- *  the flagship Home whole per-widget. ChannelScope pins it to its «Источник» at the RENDER site. */
+ *  the flagship Home whole per-widget. ChannelScope pins it to its «Источник» at the RENDER site;
+ *  БЕЗ явного источника карточка пинится к каналу СВОЕЙ сети (resolveHomeSourceChannel) — канон
+ *  Главной: глобальный свитчер (который может стоять на МойСкладе) identity карточки не переписывает. */
 const CuratedHomeCard = memo(function CuratedHomeCard({ homeKey, def }: { homeKey: string; def: HomeWidgetDef }) {
   const prefs = useWidgetPrefs(`home-${homeKey}`);
+  const channels = useChannels().data?.channels;
+  // 'multi' (дайджест TG+IG) — TG-центричный композит: пинится по TG-правилам, IG-часть
+  // включится, если у резолвнутого канала подключён Instagram.
+  const pinNetwork = def.network === 'ig' ? 'ig' : 'tg';
+  const source =
+    prefs.source ?? resolveHomeSourceChannel(channels ?? [], pinNetwork, getRememberedChannel(pinNetwork));
   if (!def.render) return null;
   return (
     <WidgetErrorBoundary
@@ -440,8 +450,8 @@ const CuratedHomeCard = memo(function CuratedHomeCard({ homeKey, def }: { homeKe
       label={def.label}
       size={prefs.size ?? def.defaultSize ?? 'half'}
     >
-      <HomeSourceProvider value={{ network: def.network, channelId: prefs.source }}>
-        <ChannelScope channelId={prefs.source ?? null}>{def.render()}</ChannelScope>
+      <HomeSourceProvider value={{ network: def.network, channelId: source }}>
+        <ChannelScope channelId={source ?? null}>{def.render()}</ChannelScope>
       </HomeSourceProvider>
     </WidgetErrorBoundary>
   );

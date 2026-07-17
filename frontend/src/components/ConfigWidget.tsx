@@ -1,11 +1,14 @@
 import { memo, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useChannels } from '@/api/queries';
 import { ChartSection, PERIOD_WORD } from '@/components/ChartWidget';
 import { WidgetRenderer, WidgetSkeleton } from '@/components/WidgetRenderer';
 import { ConfigEditDialog } from '@/components/ConfigEditDialog';
 import { WidgetExplorer } from '@/components/WidgetExplorer';
 import { LEGACY_RENDER } from '@/components/legacyAdapters';
-import { ChannelScope } from '@/lib/channel-context';
+import { ChannelScope, useSelectedChannel } from '@/lib/channel-context';
+import { getRememberedChannel } from '@/lib/channel';
+import { resolveHomeSourceChannel } from '@/lib/channelSource';
 import { useWidgetData } from '@/lib/useWidgetData';
 import { useIgWidgetData } from '@/lib/useIgWidgetData';
 import { getMetric } from '@/lib/widgetMetrics';
@@ -43,14 +46,29 @@ export const ConfigWidget = memo(function ConfigWidget({ config, homeKey }: { co
   // Metric widgets and legacy composites both drive the universal editor / explorer.
   const configurable = !!metric || !!legacyKey;
   const label = config.title || metric?.label || (legacyKey ? LEGACY_LABEL[legacyKey] : undefined) || 'Метрика';
+  const { channelId: globalChannelId } = useSelectedChannel();
+  const channels = useChannels().data?.channels;
+  // Канон Главной: карточка НЕ следует глобальному свитчеру. Без явного «Источника» карточка
+  // на доске (homeKey) пинится к каналу СВОЕЙ сети — запомненному per-network либо первому
+  // подходящему: глобальный выбор может быть каналом другой сети (например, МойСклад), и тогда
+  // TG/IG-виджет читал бы пустоту под чужой подписью. Вне Главной (превью/эксплорер/страницы)
+  // поведение прежнее — следовать активному каналу.
+  const effectiveSource = useMemo(() => {
+    if (config.source != null) return config.source;
+    if (!homeKey) return null;
+    return resolveHomeSourceChannel(channels ?? [], sourceNetwork, getRememberedChannel(sourceNetwork));
+  }, [config.source, homeKey, channels, sourceNetwork]);
   // Drilldown (steep #9): only the six core TG metrics have a metric page (/metrics/:drillKey), so
   // only those cards' hero value + chart points navigate. Everything else (IG, breakdowns, legacy)
-  // has no page → no drill. A SOURCE-PINNED card is also not drilled: the metric page reads the
-  // global switcher channel, so drilling a card pinned to a different channel would silently show
-  // the wrong channel's data. (Re-enabling pinned drill needs a channel-scoped metric page — backlog.)
+  // has no page → no drill. A card pinned to ДРУГОЙ канал (в т.ч. авто-пин Главной) is not
+  // drilled: the metric page reads the global switcher channel, so drilling would silently show
+  // the wrong channel's data; пин, совпадающий с активным каналом, дриллится как раньше.
   // Previews and the explorer sandbox never pass onDrill, so they stay static regardless.
   const drillKey = metric?.drillKey;
-  const onDrill = drillKey && config.source == null ? () => navigate(`/metrics/${drillKey}`) : undefined;
+  const onDrill =
+    drillKey && (effectiveSource == null || effectiveSource === globalChannelId)
+      ? () => navigate(`/metrics/${drillKey}`)
+      : undefined;
 
   // Central surface + width policy (widgetSurface): a multi-series / tabular viz never carries a tonal
   // wash whatever the saved accent, and a temporal line can't sit at a third width where its x-axis
@@ -91,8 +109,8 @@ export const ConfigWidget = memo(function ConfigWidget({ config, homeKey }: { co
       {/* The pin scopes ONLY the card body — not the whole ChartSection: the explorer render-prop
           must stay OUTSIDE the pin so its draft fully controls its own scope («Как в свитчере» in
           the sandbox previews switcher data, not the still-pinned original channel). */}
-      {config.source != null ? (
-        <ChannelScope channelId={config.source}>
+      {effectiveSource != null ? (
+        <ChannelScope channelId={effectiveSource}>
           <WidgetBody config={config} onDrill={onDrill} drillLabel={label} />
         </ChannelScope>
       ) : (
@@ -103,7 +121,7 @@ export const ConfigWidget = memo(function ConfigWidget({ config, homeKey }: { co
 
   return (
     <>
-      <HomeSourceProvider value={{ network: sourceNetwork, channelId: config.source }}>
+      <HomeSourceProvider value={{ network: sourceNetwork, channelId: effectiveSource }}>
         {card}
       </HomeSourceProvider>
       {editOpen && configurable && (
