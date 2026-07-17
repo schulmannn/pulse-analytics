@@ -6,6 +6,7 @@ import type {
   ChannelsResponse,
   HistoryData,
   IgBreakdowns,
+  IgHistoryData,
   IgInsights,
   IgOnline,
   IgProfile,
@@ -504,6 +505,30 @@ describe('resolveWidgetMetric — Instagram (S11)', () => {
     const r = resolveWidgetMetric(cfg('ig.followers'), igCtx);
     expect(r.valueRaw).toBe(44000);
     expect(r.value).toBeTruthy();
+  });
+
+  it('строит level-серию ig.followers из архива followers_total («как ТГ Подписчики»)', () => {
+    const history = {
+      enabled: true,
+      rows: [
+        { day: iso(20).slice(0, 10), followers_total: 43000, follows: 10, unfollows: 5 },
+        { day: iso(10).slice(0, 10), followers_total: 43500, follows: 8, unfollows: 2 },
+        { day: iso(2).slice(0, 10), followers_total: 44000, follows: 1, unfollows: 1 },
+      ],
+    } as unknown as IgHistoryData;
+    const r = resolveWidgetMetric(cfg('ig.followers'), { ...igCtx, ig: { ...igCtx.ig, history } });
+    expect(r.empty).toBeFalsy();
+    expect(r.valueRaw).toBe(44000); // герой — живое число профиля
+    expect(r.series && r.series.length).toBeGreaterThanOrEqual(2);
+    const values = r.series!.map((p) => p.value);
+    expect(values[0]).toBe(43000); // уровни (последний в бакете), не суммы потока
+    expect(Math.max(...values)).toBeLessThanOrEqual(44000);
+  });
+
+  it('ig.followers без архива остаётся числом без серии (прежнее поведение)', () => {
+    const r = resolveWidgetMetric(cfg('ig.followers'), igCtx);
+    expect(r.series).toBeUndefined();
+    expect(r.meta?.periodLabel).toBeUndefined();
   });
 
   it('resolves ig.netFollowers = follows − unfollows', () => {

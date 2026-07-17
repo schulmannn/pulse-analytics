@@ -11,9 +11,11 @@ import {
   igSeriesPoints,
   igWindowValue,
 } from '@/lib/igAggregations';
+import { followerLevelSeries } from '@/lib/igMetrics';
 import { DAY_MS, alignGhost } from '@/lib/metricSeries';
 import {
   COMPARISON_LABEL,
+  bucketSubscriberLevels,
   comparisonBaseline,
   effectiveGrain,
   wantsGhostLine,
@@ -95,10 +97,45 @@ export const resolveIgMetric: WidgetMetricResolver = (metric, config, ctx, out) 
 
   if (metric.id === 'ig.followers') {
     const count = Number(ig.profile?.followers_count ?? 0);
-    if (!count) return { ...out, empty: true };
-    out.valueRaw = count;
-    out.value = fmt.num(count);
-    out.meta = { ...out.meta, periodLabel: undefined };
+    // Level-серия базы «как у ТГ Подписчиков»: якоря ig_daily.followers_total + реконструкция по
+    // net (follows − unfollows) + живое число профиля сегодняшней точкой (followerLevelSeries —
+    // тот же движок, что на странице метрики). Bucket — ПОСЛЕДНИЙ уровень бакета, не сумма потока.
+    // Раньше карточка отдавала только число без серии — на Главной это выглядело «графика нет».
+    const levelPoints = followerLevelSeries(ig.history?.rows, count || null);
+    const inWindow = levelPoints
+      .filter((p) => {
+        const timestamp = Date.parse(p.day);
+        return Number.isFinite(timestamp) && timestamp >= since && timestamp <= until;
+      })
+      .map((p) => ({ day: p.day, subscribers: p.value }));
+    if (!count && !inWindow.length) return { ...out, empty: true };
+    if (inWindow.length >= 2) {
+      out.series = bucketSubscriberLevels(inWindow, grain);
+      out.meta = { ...out.meta, archiveDays: inWindow.length };
+      const baseline = wantsGhostLine(config.comparison)
+        ? comparisonBaseline(config.comparison, since, until, grain)
+        : null;
+      if (baseline) {
+        const baseRows = levelPoints
+          .filter((p) => {
+            const timestamp = Date.parse(p.day);
+            return Number.isFinite(timestamp) && timestamp >= baseline.from && timestamp <= baseline.to;
+          })
+          .map((p) => ({ day: p.day, subscribers: p.value }));
+        const ghostSeries = bucketSubscriberLevels(baseRows, grain);
+        if (ghostSeries.length >= 2 && ghostSeries.length === out.series.length) {
+          out.ghost = ghostSeries.map((point) => point.value);
+          out.ghostLabel = config.comparison ? COMPARISON_LABEL[config.comparison.mode] : undefined;
+        } else {
+          out.meta = { ...out.meta, comparisonNote: 'сравнение скрыто — не хватает архива' };
+        }
+      }
+    } else {
+      // Без архива уровень строить не из чего — прежняя карточка-число без подписи периода.
+      out.meta = { ...out.meta, periodLabel: undefined };
+    }
+    out.valueRaw = count || inWindow[inWindow.length - 1]!.subscribers;
+    out.value = fmt.num(out.valueRaw);
     return out;
   }
 
