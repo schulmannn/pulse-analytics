@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useMe } from '@/api/queries';
+import { useChannels, useMe } from '@/api/queries';
 import { useAiChats, useCreateAiChat } from '@/api/aiChat';
+import { AiAskControls } from '@/panels/ai/AiAskControls';
+import { composeAiQuestion, emptyAiAskContext, type AiAskContext } from '@/lib/aiAsk';
 
 /**
  * AI-hero Главной (STEEP-паттерн): приветствие + «Спросить что угодно…» + недавние чаты.
@@ -16,16 +18,18 @@ export function HomeAiHero() {
   const me = useMe();
   const aiEnabled = !!me.data?.ai?.enabled;
   const chatsQuery = useAiChats(aiEnabled);
+  const channels = useChannels().data?.channels ?? [];
   const create = useCreateAiChat();
   const navigate = useNavigate();
   const [text, setText] = useState('');
+  const [ctx, setCtx] = useState<AiAskContext>(emptyAiAskContext);
   const [error, setError] = useState<string | null>(null);
 
   if (!aiEnabled) return null;
 
   const ask = () => {
-    const q = text.trim();
-    if (!q || create.isPending) return;
+    if (!text.trim() || create.isPending) return;
+    const q = composeAiQuestion(text, ctx, channels);
     setError(null);
     create.mutate(undefined, {
       onSuccess: ({ chat }) => navigate(`/ai/${chat.id}`, { state: { q } }),
@@ -61,10 +65,9 @@ export function HomeAiHero() {
             aria-label="Вопрос AI-ассистенту"
             className="w-full resize-none bg-transparent text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground"
           />
-          <div className="mt-2 flex items-center justify-between gap-3">
-            <span className="text-2xs font-medium tracking-wide text-muted-foreground">
-              AI-аналитик Atlavue · отвечает по данным ваших источников
-            </span>
+          <div className="mt-2 flex items-end justify-between gap-3">
+            {/* STEEP-пикеры: @ = источник-контекст, часы = период. Выбор уходит в текст вопроса. */}
+            <AiAskControls ctx={ctx} onCtx={setCtx} disabled={create.isPending} />
             <button
               type="submit"
               disabled={!text.trim() || create.isPending}
