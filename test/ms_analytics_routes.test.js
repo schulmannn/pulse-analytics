@@ -11,6 +11,10 @@
 //     '2020-01-01' на пустом архиве, кэш-ключ различает 0 и 30);
 //   • /api/ms/top-customers — DB-агрегат + имена ОДНИМ OR-вызовом словаря контрагентов
 //     (деградация → name:null без кэша, 401/403 → ms_token_revoked, кэш-хит);
+//   • /api/ms/sales-by-channel — DB-агрегат + словарь saleschannel (name/type, NULL-канал →
+//     no_channel_orders, мягкая деградация без кэша, 401/403 → ms_token_revoked, кэш-хит словаря);
+//   • /api/ms/geography — чистый DB-агрегат (нормализация города — в SQL, здесь только проброс
+//     total/no_city и копейки→рубли, без словаря и кэша);
 //   • connect/disconnect — audit-события ms_connect/ms_disconnect без токена в metadata.
 
 const test = require('node:test');
@@ -366,6 +370,167 @@ test('top-customers: сбой словаря → name:null без кэша; days
   const r2 = await invoke(revoked.routes, 'GET /api/ms/top-customers', { query: { days: '7' } });
   assert.equal(r2.statusCode, 401, 'отозванный токен не маскируется под name:null');
   assert.equal(r2.body.code, 'ms_token_revoked');
+});
+
+test('sales-by-channel: словарь saleschannel мапит name/type, NULL-канал → no_channel_orders, словарь кэшируется', async () => {
+  const dictPaths = [];
+  const { routes } = buildMs({
+    msFetch: async (token, path) => {
+      assert.equal(token, 'TOKEN:enc');
+      dictPaths.push(path);
+      assert.equal(path, '/entity/saleschannel?limit=100', 'одна страница словаря каналов');
+      return { rows: [
+        { id: 'ch-site', name: 'Сайт - Notem tilda', type: 'ECOMMERCE' },
+        { id: 'ch-direct', name: 'Instagram Direct', type: 'SOCIAL_NETWORK' },
+      ] };
+    },
+    db: {
+      getMsSalesByChannelForActor: async (channelId, actor, opts) => {
+        assert.equal(channelId, 5);
+        assert.equal(actor.uid, 7);
+        assert.match(opts.sinceDay, /^\d{4}-\d{2}-\d{2}$/, 'days>0 → нижняя граница окна');
+        return [
+          { sales_channel_id: 'ch-site', orders: 10, sum_kopecks: 500000 },
+          { sales_channel_id: 'ch-direct', orders: 4, sum_kopecks: 120000 },
+          { sales_channel_id: 'ch-gone', orders: 2, sum_kopecks: 3000 },   // снят — в словаре нет
+          { sales_channel_id: null, orders: 3, sum_kopecks: 750 },
+        ];
+      },
+    },
+  });
+  const res = await invoke(routes, 'GET /api/ms/sales-by-channel', { query: { days: '30' } });
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, {
+    window_days: 30,
+    total_orders: 19,          // 10+4+2+3 (NULL-канал тоже в total)
+    no_channel_orders: 3,      // строка sales_channel_id=NULL — счётчиком, не в rows
+    rows: [
+      { sales_channel_id: 'ch-site', name: 'Сайт - Notem tilda', type: 'ECOMMERCE', orders: 10, sum: 5000 },
+      { sales_channel_id: 'ch-direct', name: 'Instagram Direct', type: 'SOCIAL_NETWORK', orders: 4, sum: 1200 },
+      { sales_channel_id: 'ch-gone', name: null, type: null, orders: 2, sum: 30 },  // снятый канал → null
+    ],
+  });
+  await invoke(routes, 'GET /api/ms/sales-by-channel', { query: { days: '30' } });
+  assert.equal(dictPaths.length, 1, 'второй запрос берёт словарь каналов из кэша (1 час)');
+});
+
+test('sales-by-channel: словарь деградирует мягко (name/type null) и НЕ кэшируется; days=0 → вся история; 401/403 → ms_token_revoked', async () => {
+  let dictCalls = 0;
+  let seenSince = 'UNSET';
+  const { routes } = buildMs({
+    msFetch: async () => {
+      dictCalls += 1;
+      const e = new Error('МойСклад: HTTP 500');
+      e.status = 500;
+      throw e;
+    },
+    db: {
+      getMsSalesByChannelForActor: async (_channelId, _actor, opts) => {
+        seenSince = opts.sinceDay;
+        return [{ sales_channel_id: 'ch-site', orders: 1, sum_kopecks: 100 }];
+      },
+    },
+  });
+  const res = await invoke(routes, 'GET /api/ms/sales-by-channel', { query: { days: '0' } });
+  assert.equal(res.statusCode, 200, 'DB-агрегат не заложник живого МС');
+  assert.deepEqual(res.body.rows, [{ sales_channel_id: 'ch-site', name: null, type: null, orders: 1, sum: 1 }]);
+  assert.equal(seenSince, null, 'days=0 = вся история (sinceDay null)');
+  await invoke(routes, 'GET /api/ms/sales-by-channel', { query: { days: '0' } });
+  assert.equal(dictCalls, 2, 'неуспех словаря не кэшируется — следующий запрос пробует снова');
+
+  // 401/403 = отозванный токен, не молчаливый name:null (как top-customers).
+  const revoked = buildMs({
+    msFetch: async () => {
+      const e = new Error('МойСклад: HTTP 403');
+      e.status = 403;
+      throw e;
+    },
+    db: { getMsSalesByChannelForActor: async () => [{ sales_channel_id: 'ch-site', orders: 1, sum_kopecks: 100 }] },
+  });
+  const r2 = await invoke(revoked.routes, 'GET /api/ms/sales-by-channel', { query: { days: '7' } });
+  assert.equal(r2.statusCode, 401, 'отозванный токен не маскируется под name:null');
+  assert.equal(r2.body.code, 'ms_token_revoked');
+});
+
+test('geography: sinceDay-окно в repo, копейки → рубли, total/no_city проброшены, БЕЗ словаря и БЕЗ кэша', async () => {
+  const repoCalls = [];
+  const { routes } = buildMs({
+    msFetch: async () => { throw new Error('geography не ходит в МС'); },
+    db: {
+      getMsGeographyForActor: async (channelId, actor, opts) => {
+        repoCalls.push(opts);
+        assert.equal(channelId, 5);
+        assert.equal(actor.uid, 7);
+        assert.match(opts.sinceDay, /^\d{4}-\d{2}-\d{2}$/, 'days>0 → нижняя граница окна');
+        return {
+          total_orders: 20,
+          no_city_orders: 5,
+          rows: [
+            { city: 'Москва', orders: 9, sum_kopecks: 900000 },
+            { city: 'Каспийск', orders: 6, sum_kopecks: 250050 },
+          ],
+        };
+      },
+    },
+  });
+  const res = await invoke(routes, 'GET /api/ms/geography', { query: { days: '30' } });
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, {
+    window_days: 30,
+    total_orders: 20,
+    no_city_orders: 5,
+    rows: [
+      { city: 'Москва', orders: 9, sum: 9000 },
+      { city: 'Каспийск', orders: 6, sum: 2500.5 },   // копейки → рубли на границе
+    ],
+  });
+  await invoke(routes, 'GET /api/ms/geography', { query: { days: '30' } });
+  assert.equal(repoCalls.length, 2, 'geography без кэша — каждый запрос читает архив заново');
+});
+
+test('geography: days=0 → вся история (sinceDay null)', async () => {
+  let seenSince = 'UNSET';
+  const { routes } = buildMs({
+    msFetch: async () => { throw new Error('geography не ходит в МС'); },
+    db: {
+      getMsGeographyForActor: async (_channelId, _actor, opts) => {
+        seenSince = opts.sinceDay;
+        return { total_orders: 0, no_city_orders: 0, rows: [] };
+      },
+    },
+  });
+  const res = await invoke(routes, 'GET /api/ms/geography', { query: { days: '0' } });
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, { window_days: 0, total_orders: 0, no_city_orders: 0, rows: [] });
+  assert.equal(seenSince, null);
+});
+
+test('channel-series: channel-параметр валидируется (all/junk→null, UUID→фильтр), копейки→рубли, БЕЗ кэша', async () => {
+  const seen = [];
+  const { routes } = buildMs({
+    msFetch: async () => { throw new Error('channel-series не ходит в МС'); },
+    db: {
+      getMsChannelSeriesForActor: async (channelId, actor, opts) => {
+        seen.push(opts.salesChannelId);
+        assert.equal(channelId, 5);
+        assert.equal(actor.uid, 7);
+        return [{ day: '2026-07-15', orders: 2, sum_kopecks: 150000 }];
+      },
+    },
+  });
+  // 'all' → null (все каналы)
+  const rAll = await invoke(routes, 'GET /api/ms/channel-series', { query: { days: '30', channel: 'all' } });
+  assert.equal(rAll.statusCode, 200);
+  assert.deepEqual(rAll.body, { window_days: 30, channel: null, series: [{ day: '2026-07-15', orders: 2, sum: 1500 }] });
+  // отсутствует → null
+  await invoke(routes, 'GET /api/ms/channel-series', { query: { days: '30' } });
+  // мусорный channel → null (не пускаем в фильтр)
+  await invoke(routes, 'GET /api/ms/channel-series', { query: { days: '30', channel: 'DROP TABLE' } });
+  // валидный UUID-подобный id → фильтр
+  const id = '16f07379-8039-11ec-0a80-03970021e97d';
+  const rId = await invoke(routes, 'GET /api/ms/channel-series', { query: { days: '30', channel: id } });
+  assert.equal(rId.body.channel, id);
+  assert.deepEqual(seen, [null, null, null, id], 'all/пусто/мусор → null; только UUID проходит в repo');
 });
 
 test('connect/disconnect: audit-события ms_connect/ms_disconnect с identity-полями и БЕЗ токена', async () => {

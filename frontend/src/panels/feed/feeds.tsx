@@ -146,6 +146,7 @@ const IG_PARTS: Record<string, SectionParts> = {
 // те же page-period чипсы: TgPagePeriodControl сете-агностичен (usePagePeriod + PeriodChips).
 const MsOverview = lazyFrom(() => import('@/panels/sklad/MsOverview'), 'MsOverview');
 const MsClients = lazyFrom(() => import('@/panels/sklad/MsClients'), 'MsClients');
+const MsChannels = lazyFrom(() => import('@/panels/sklad/MsChannels'), 'MsChannels');
 
 /** Минимальный shell «МойСклада»: page-period провайдер + секционный Outlet (у сети одна секция). */
 function MsShellRoute() {
@@ -159,6 +160,7 @@ function MsShellRoute() {
 const MS_PARTS: Record<string, SectionParts> = {
   '': { Body: MsOverview, HeaderRight: TgPagePeriodControl },
   clients: { Body: MsClients, HeaderRight: TgPagePeriodControl },
+  channels: { Body: MsChannels, HeaderRight: TgPagePeriodControl },
 };
 
 /** Zip the network's nav (paths + labels — the single source of truth) with the body map. A nav

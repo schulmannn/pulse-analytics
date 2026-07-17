@@ -42,11 +42,13 @@ const EXPECTED_FUNCTIONS = [
   'getSnapshotInternal', 'getLatestVelocityInternal', 'listPostsInternal', 'listIgDailyInternal', 'listIgMediaDailyInternal',
   'getMsDailyAllInternal', 'getMsFunnelInternal', 'getMsCustomersInternal', 'getMsCohortsInternal',
   'getMsTopCustomersInternal', 'getMsOldestOrderDayInternal',
+  'getMsSalesByChannelInternal', 'getMsGeographyInternal', 'getMsChannelSeriesInternal',
   'getPublicTgChannelPhoto',
   'getChannelHistoryForActor', 'getMentionsHistoryForActor', 'getMentionsArchiveForActor',
   'getSnapshotForActor', 'getLatestVelocityForActor', 'listPostsForActor', 'listIgDailyForActor', 'listIgMediaDailyForActor',
   'getMsDailyAllForActor', 'getMsFunnelForActor', 'getMsCustomersForActor', 'getMsCohortsForActor',
   'getMsTopCustomersForActor', 'getMsOldestOrderDayForActor',
+  'getMsSalesByChannelForActor', 'getMsGeographyForActor', 'getMsChannelSeriesForActor',
   // bugs / crashes
   'createBug', 'createCrash', 'upsertCrashSignature', 'recordCrashOccurrence', 'setCrashNotionPage', 'touchCrashNotified',
   'listBugs', 'updateBug', 'deleteBug', 'bugExists', 'getBug', 'addAttachmentIfRoom', 'getAttachment',

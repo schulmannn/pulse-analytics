@@ -85,6 +85,8 @@ export const NETWORKS = [
       { to: '/sklad', label: 'Обзор', icon: 'overview', end: true },
       // «Клиенты» — покупательская аналитика архива заказов (новые/повторные, когорты).
       { to: '/sklad/clients', label: 'Клиенты', icon: 'audience' },
+      // «Каналы» — источники продаж (сайт/директ/маркетплейс/самовывоз) + география заказов.
+      { to: '/sklad/channels', label: 'Каналы', icon: 'charts' },
     ],
     // Отдельный канал source='ms', создаётся при подключении токена.
     hasChannel: (c) => c.source === 'ms',

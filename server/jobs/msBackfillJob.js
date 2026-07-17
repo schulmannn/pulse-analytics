@@ -84,6 +84,15 @@ function createMsBackfillEngine({ db, msFetch, msCrypto, log = () => {}, sleepFn
       // Имя статуса без expand пусто (см. выше) — храним устойчивый id (миграция 030), имя/цвет
       // добавляет словарь metadata/states на границе API (/api/ms/funnel).
       state_id: metaHrefId(o.state),
+      // Канал продаж без expand — тоже meta-only ссылка …/entity/saleschannel/<uuid>; храним
+      // устойчивый id (миграция 031), имя/тип добавляет словарь saleschannel на границе API
+      // (/api/ms/sales-by-channel).
+      sales_channel_id: metaHrefId(o.salesChannel),
+      // Город доставки — ВЛОЖЕННЫЙ объект shipmentAddressFull (не ссылка), берём .city как есть
+      // (trim, пусто→null); нормализацию префикса «г »→«Москва» делает SQL-агрегат geography, не
+      // движок. ~50% заказов без адреса (самовывоз) → null.
+      city: o.shipmentAddressFull && typeof o.shipmentAddressFull.city === 'string'
+        ? (o.shipmentAddressFull.city.trim() || null) : null,
       agent_id: metaHrefId(o.agent),
       agent_name: o.agent && typeof o.agent.name === 'string' ? o.agent.name : null,
     };
