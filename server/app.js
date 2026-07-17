@@ -182,8 +182,9 @@ function createApp(deps) {
   // routes/moysklad.js. msCrypto/msFetch построены в composition (зеркально igCrypto/igFetch);
   // канал data-роуты резолвят тем же заголовком x-channel-id, что IG (см. resolveMs внутри).
   // cache (полный контракт keys/delete) — для точечной инвалидации ms:*-ключей канала на
-  // connect/disconnect, как igCachePurge в ig-oauth.
-  registerMsRoutes({ app, requireAuth, db, msCrypto, msFetch, msBackfill, cacheGet, cacheSet, cache, log });
+  // connect/disconnect, как igCachePurge в ig-oauth. audit — connect/disconnect пишут
+  // ms_connect/ms_disconnect в общий trail, как соседние register* (ig-oauth, channels).
+  registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBackfill, cacheGet, cacheSet, cache, log });
 
   registerChannelsRoutes({ app, db, requireAuth, audit, getDbReady });
 

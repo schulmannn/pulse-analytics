@@ -529,6 +529,37 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
     });
   }
 
+  // Топ клиентов окна по сумме заказов: GROUP BY agent_id, безагентные строки не участвуют
+  // (их честно считает no_agent_orders в customers). Сортировка sum DESC с детерминированным
+  // tie-break (orders DESC, agent_id) — порядок стабилен между прогонами, как у top-products.
+  // Имена контрагентов репо сознательно НЕ отдаёт: архивный agent_name протухает после
+  // переименования в МС — актуальные имена резолвит граница API одним живым вызовом словаря.
+  async function getMsTopCustomersInternal(channelId, { sinceDay = null, limit = 10 } = {}) {
+    if (!enabled || !channelId) return [];
+    // Кэп 1..50 — repo не доверяет вызывающему (та же дисциплина, что listPosts).
+    const safeLimit = Math.min(50, Math.max(1, Number.parseInt(limit, 10) || 10));
+    const { rows } = await pool.query(
+      `SELECT agent_id, COUNT(*)::int AS orders, COALESCE(SUM(sum_kopecks),0)::bigint AS sum_kopecks
+         FROM ms_orders
+        WHERE channel_id=$1 AND agent_id IS NOT NULL AND ($2::date IS NULL OR moment >= $2::date)
+        GROUP BY agent_id
+        ORDER BY SUM(sum_kopecks) DESC, COUNT(*) DESC, agent_id
+        LIMIT $3`,
+      [channelId, msSinceDay(sinceDay), safeLimit]);
+    return rows.map((r) => numifyMetrics(r, ['orders', 'sum_kopecks']));
+  }
+
+  // День старейшего заказа архива канала ('YYYY-MM-DD' | null на пустом архиве) — нижний якорь
+  // честного окна «Всё» у живых оконных отчётов МС (top-products). Репо отдаёт только факт из
+  // БД; округление до первого дня месяца — решение границы API, не репо.
+  async function getMsOldestOrderDayInternal(channelId) {
+    if (!enabled || !channelId) return null;
+    const { rows } = await pool.query(
+      `SELECT to_char(MIN(moment),'YYYY-MM-DD') AS day FROM ms_orders WHERE channel_id=$1`,
+      [channelId]);
+    return (rows[0] && rows[0].day) || null;
+  }
+
   // ── Actor-gated reads: сначала проверяем доступ, иначе пусто (ПУТЬ ДЛЯ РОУТОВ) ──────────────────
   // null-доступ → пустой результат того же типа, что у Internal (список → [], одиночка → null).
   const allowed = (channelId, actor) => getAccessibleChannel(channelId, actor);
@@ -569,6 +600,12 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
   async function getMsCohortsForActor(channelId, actor) {
     return (await allowed(channelId, actor)) ? getMsCohortsInternal(channelId) : [];
   }
+  async function getMsTopCustomersForActor(channelId, actor, opts = {}) {
+    return (await allowed(channelId, actor)) ? getMsTopCustomersInternal(channelId, opts) : [];
+  }
+  async function getMsOldestOrderDayForActor(channelId, actor) {
+    return (await allowed(channelId, actor)) ? getMsOldestOrderDayInternal(channelId) : null;
+  }
 
     // ── ig-tags read (finding 7: чтение — analytics, write — collectorRepo) ──
   async function getIgTags(limit = 100) {
@@ -602,9 +639,11 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
     getSnapshotInternal, getPublicTgChannelPhoto,
     getLatestVelocityInternal, listPostsInternal, listIgDailyInternal, listIgMediaDailyInternal,
     getMsDailyAllInternal, getMsFunnelInternal, getMsCustomersInternal, getMsCohortsInternal,
+    getMsTopCustomersInternal, getMsOldestOrderDayInternal,
     getChannelHistoryForActor, getMentionsHistoryForActor, getMentionsArchiveForActor,
     getSnapshotForActor, getLatestVelocityForActor, listPostsForActor, listIgDailyForActor, listIgMediaDailyForActor,
     getMsDailyAllForActor, getMsFunnelForActor, getMsCustomersForActor, getMsCohortsForActor,
+    getMsTopCustomersForActor, getMsOldestOrderDayForActor,
   };
 }
 

@@ -19,7 +19,7 @@ import type { DrillKey } from '@/lib/kpiDerive';
 import type { WidgetSize } from '@/lib/widgetPrefsStore';
 
 /** Where the metric's data comes from. `all` = source-agnostic (rare; reserved). */
-export type MetricSource = 'tg' | 'ig' | 'all';
+export type MetricSource = 'tg' | 'ig' | 'ms' | 'all';
 
 /** The metric's natural data shape — drives which visualisations make sense.
  *   - value      → a scalar (+ optional delta): a KPI headline (ER now, ERV, virality);
@@ -28,8 +28,9 @@ export type MetricSource = 'tg' | 'ig' | 'all';
  *   - table      → tabular rows: the weekly table, top posts. */
 export type MetricKind = 'value' | 'series' | 'breakdown' | 'table';
 
-/** Formatting family for a metric's numbers (the plan's number/percent/posts/views set). */
-export type MetricUnit = 'number' | 'percent' | 'posts' | 'views';
+/** Formatting family for a metric's numbers (the plan's number/percent/posts/views set;
+ *  `currency` = рубли МойСклада — единственный денежный источник, ₽ на всех подписях). */
+export type MetricUnit = 'number' | 'percent' | 'posts' | 'views' | 'currency';
 
 /** The unified visualisation vocabulary. `donut` = PieChart, `list` = Breakdown rows,
  *  `rank`/`pivot` = the metric-page dimension projections, `ledger` = the wide bar+values row. */
@@ -53,6 +54,7 @@ export type MetricResolver =
   | 'tg.netGrowth'
   | 'tg.breakdown'
   | 'ig'
+  | 'ms'
   | 'unavailable';
 
 export interface MetricDef {
@@ -79,6 +81,9 @@ export interface MetricDef {
   /** Ties a core TG metric to its kpiDerive DrillKey so the resolver (S3) reuses deriveKpis for the
    *  value/delta/headline without re-deriving. Only the six KPI metrics carry this. */
   drillKey?: DrillKey;
+  /** Absolute drill path for metrics БЕЗ страницы /metrics/:drillKey (МС-виджеты ведут на /sklad).
+   *  Взаимоисключим с drillKey; та же охрана «пин ≠ активный канал» действует в ConfigWidget. */
+  drillTo?: string;
   /** For a BREAKDOWN metric: does summing all its categories yield a meaningful TOTAL (a complete,
    *  additive count — e.g. total engagement / total views by source)? If so the resolver sets that
    *  total as the card's hero value, so a distribution card leads with a headline number instead of
@@ -119,6 +124,7 @@ type MetricSpec = Omit<MetricDef, 'defaultViz' | 'supportedViz' | 'resolver'> &
 
 function resolverFor(spec: MetricSpec): MetricResolver {
   if (spec.source === 'ig') return 'ig';
+  if (spec.source === 'ms') return 'ms';
   if (spec.drillKey) return 'tg.core';
   if (spec.id === 'tg.erv' || spec.id === 'tg.virality') return 'tg.ratio';
   if (spec.id === 'tg.netGrowth') return 'tg.netGrowth';
@@ -315,8 +321,31 @@ const IG_METRICS: MetricDef[] = [
   }),
 ];
 
-/** The full catalogue — TG first, then IG, in a sensible reading order per source. */
-export const WIDGET_METRICS: MetricDef[] = [...TG_METRICS, ...IG_METRICS];
+// ── МойСклад ────────────────────────────────────────────────────────────────────────────────
+// Величины склада (рубли/заказы) — СВОИ и никогда не смешиваются с просмотрами/охватом соцсетей
+// (канон TG-views ≠ IG-reach ≠ MS-revenue). Данные — серверные агрегаты /api/ms/summary (окно
+// виджета), поэтому серии приходят уже нарезанными по дням.
+const MS_METRICS: MetricDef[] = [
+  define({
+    id: 'ms.revenue', label: 'Выручка', source: 'ms', kind: 'series', unit: 'currency',
+    category: 'growth', drillTo: '/sklad',
+    formula: 'Сумма продаж по дням за окно.', sourceNote: 'МойСклад (серверный отчёт; «Всё» — дневной архив).',
+  }),
+  define({
+    id: 'ms.orders', label: 'Заказы', source: 'ms', kind: 'series', unit: 'number',
+    category: 'growth', drillTo: '/sklad',
+    formula: 'Число заказов покупателей по дням за окно.', sourceNote: 'МойСклад.',
+  }),
+  define({
+    id: 'ms.avgCheck', label: 'Средний чек', source: 'ms', kind: 'series', unit: 'currency',
+    category: 'growth', drillTo: '/sklad',
+    formula: 'Сумма заказов дня ÷ число заказов дня; хедлайн — среднее за всё окно.',
+    included: 'Дни без заказов в серию не входят (нет чека — нечего усреднять).', sourceNote: 'МойСклад.',
+  }),
+];
+
+/** The full catalogue — TG first, then IG, then МС, in a sensible reading order per source. */
+export const WIDGET_METRICS: MetricDef[] = [...TG_METRICS, ...IG_METRICS, ...MS_METRICS];
 
 /** id → MetricDef for O(1) lookup (the WidgetConfig resolves its metric through this). */
 export const METRIC_BY_ID: Record<string, MetricDef> = Object.fromEntries(
@@ -343,8 +372,8 @@ export function isMetricId(raw: string | undefined | null): raw is string {
   return typeof raw === 'string' && raw in METRIC_BY_ID;
 }
 
-/** Metrics available for a source: `tg` / `ig` themselves plus any `all` (source-agnostic) ones. */
-export function metricsForSource(source: 'tg' | 'ig'): MetricDef[] {
+/** Metrics available for a source: `tg` / `ig` / `ms` themselves plus any `all` (source-agnostic) ones. */
+export function metricsForSource(source: 'tg' | 'ig' | 'ms'): MetricDef[] {
   return WIDGET_METRICS.filter((m) => m.source === source || m.source === 'all');
 }
 

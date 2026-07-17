@@ -430,7 +430,7 @@ function TargetField({ config, onChange }: { config: WidgetConfig; onChange: (pa
   const type: 'none' | TargetType = config.target?.type ?? 'none';
   // Dynamic target candidates: same-source scalar metrics (value/series carry a valueRaw), not self.
   const candidates = metric
-    ? metricsForSource(metric.source === 'ig' ? 'ig' : 'tg').filter(
+    ? metricsForSource(metric.source === 'ig' ? 'ig' : metric.source === 'ms' ? 'ms' : 'tg').filter(
         (m) => (m.kind === 'value' || m.kind === 'series') && m.id !== metric.id,
       )
     : [];
@@ -557,9 +557,18 @@ function SourceField({ config, onChange }: { config: WidgetConfig; onChange: (pa
   // channels (and vice-versa) — the same rule as the source switcher. Legacy composites carry no
   // MetricDef and are Telegram, so anything that isn't an IG metric is treated as 'tg' (mirrors the
   // metric-picker narrowing above).
-  const source = getMetric(config.metricId)?.source === 'ig' ? 'ig' : 'tg';
+  const metricSource = getMetric(config.metricId)?.source;
+  const source = metricSource === 'ig' ? 'ig' : metricSource === 'ms' ? 'ms' : 'tg';
   const list = channelsForSource(channels.data?.channels ?? [], source);
-  const igEmpty = source === 'ig' && list.length === 0;
+  // Пустой список каналов сети метрики — честная подсказка вместо пустого селекта (per-source копия).
+  const emptyNote =
+    list.length === 0
+      ? source === 'ig'
+        ? 'Нет подключённых аккаунтов Instagram — источник берётся из свитчера. Подключите в разделе «Источники».'
+        : source === 'ms'
+          ? 'МойСклад не подключён — источник берётся из свитчера. Подключите в разделе «Источники».'
+          : null
+      : null;
   // A pin left from before source-aware filtering (e.g. a Telegram channel on an IG widget) is no
   // longer eligible; surface it as a disabled option so the value still round-trips and the mismatch
   // is visible, instead of the selection control silently showing a blank/wrong row.
@@ -584,11 +593,7 @@ function SourceField({ config, onChange }: { config: WidgetConfig; onChange: (pa
           onValueChange={(v) => onChange({ source: v === '' ? undefined : Number(v) })}
         />
       </div>
-      {igEmpty && (
-        <p className="mt-1 text-2xs text-muted-foreground">
-          Нет подключённых аккаунтов Instagram — источник берётся из свитчера. Подключите в разделе «Источники».
-        </p>
-      )}
+      {emptyNote && <p className="mt-1 text-2xs text-muted-foreground">{emptyNote}</p>}
     </label>
   );
 }

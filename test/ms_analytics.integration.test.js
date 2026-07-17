@@ -1,6 +1,7 @@
 'use strict';
 
-// Integration-тесты агрегатов архива заказов МойСклада (слайс 3: funnel/customers/cohorts) — на
+// Integration-тесты агрегатов архива заказов МойСклада (слайс 3: funnel/customers/cohorts;
+// слайс 4: top-customers/oldest-order-day) — на
 // РЕАЛЬНОМ Postgres, образец analytics_repo.integration.test.js. Seed — через write-путь
 // db.upsertMsOrders (заодно прогоняет НОВУЮ колонку state_id, миграция 030), чтение — через
 // getMs*Internal/ForActor. Все числа в ассертах посчитаны руками от фиксированного сида:
@@ -24,6 +25,7 @@ let pool = null;
 let owner = null;
 let stranger = null;
 let ch = null;
+let other = null;
 const nonce = `msa${Date.now().toString(36)}${process.pid}`;
 
 // id статусов — как в проде: устойчивые uuid-подобные строки (последний сегмент state.meta.href).
@@ -38,7 +40,7 @@ test.before(async () => {
   owner = await db.createUser({ email: `own.${nonce}@it.local`, pass_hash: 'x', role: 'user', status: 'active' });
   stranger = await db.createUser({ email: `str.${nonce}@it.local`, pass_hash: 'x', role: 'user', status: 'active' });
   ch = await db.createChannel({ owner_uid: owner.id, username: `ms.${nonce}` });
-  const other = await db.createChannel({ owner_uid: owner.id, username: `ms2.${nonce}` });
+  other = await db.createChannel({ owner_uid: owner.id, username: `ms2.${nonce}` });
 
   const o = (order_id, moment, sum_kopecks, state_id, agent_id) => ({
     order_id, moment, sum_kopecks, state: null, state_id, agent_id,
@@ -138,12 +140,45 @@ test('cohorts: когорта = месяц первого заказа, offset 0
   ]);
 });
 
+test('top-customers: сумма DESC, только строки с agent_id, sinceDay-окно и limit', { skip }, async () => {
+  // Вся история: A = 1000+2000+3000, B = 1500+500, C = 700; n1/n2 (без агента) не участвуют.
+  // agent-z соседнего канала (999900 коп) не просачивается — иначе он возглавил бы топ.
+  assert.deepEqual(await db.getMsTopCustomersInternal(ch.id, {}), [
+    { agent_id: 'agent-a', orders: 3, sum_kopecks: 6000 },
+    { agent_id: 'agent-b', orders: 2, sum_kopecks: 2000 },
+    { agent_id: 'agent-c', orders: 1, sum_kopecks: 700 },
+  ]);
+  // Окно с 2026-03-01: у A остаётся только a3, у C — c1; B выпадает целиком.
+  assert.deepEqual(await db.getMsTopCustomersInternal(ch.id, { sinceDay: '2026-03-01' }), [
+    { agent_id: 'agent-a', orders: 1, sum_kopecks: 3000 },
+    { agent_id: 'agent-c', orders: 1, sum_kopecks: 700 },
+  ]);
+  // limit режет хвост ПОСЛЕ сортировки; кривой sinceDay не долетает до SQL — вся история.
+  assert.deepEqual(
+    (await db.getMsTopCustomersInternal(ch.id, { limit: 1 })).map((r) => r.agent_id),
+    ['agent-a'],
+  );
+  assert.equal((await db.getMsTopCustomersInternal(ch.id, { sinceDay: 'DROP TABLE' })).length, 3);
+});
+
+test('oldest-order-day: MIN(moment) канала как YYYY-MM-DD, каналы изолированы', { skip }, async () => {
+  assert.equal(await db.getMsOldestOrderDayInternal(ch.id), '2026-01-02');      // n2 — старейший
+  // Сосед видит СВОЙ минимум (не 2026-01-02 канала ch) — изоляция в обе стороны.
+  assert.equal(await db.getMsOldestOrderDayInternal(other.id), '2026-03-05');
+  // Канал без заказов — честный null (граница API подставит консервативный фолбэк).
+  assert.equal(await db.getMsOldestOrderDayInternal(2147480000), null);
+});
+
 test('ForActor: владелец видит агрегаты, чужой actor — пусто (репо гейтит доступ сам)', { skip }, async () => {
   assert.equal((await db.getMsFunnelForActor(ch.id, { uid: owner.id }, {})).length, 3, 'владелец видит воронку');
   assert.equal((await db.getMsCustomersForActor(ch.id, { uid: owner.id }, {})).summary.customers, 3, 'владелец видит клиентов');
   assert.equal((await db.getMsCohortsForActor(ch.id, { uid: owner.id })).length, 3, 'владелец видит когорты');
+  assert.equal((await db.getMsTopCustomersForActor(ch.id, { uid: owner.id }, {})).length, 3, 'владелец видит топ клиентов');
+  assert.equal(await db.getMsOldestOrderDayForActor(ch.id, { uid: owner.id }), '2026-01-02', 'владелец видит старейший день');
 
   assert.deepEqual(await db.getMsFunnelForActor(ch.id, { uid: stranger.id }, {}), [], 'чужой → [] (воронка)');
   assert.equal(await db.getMsCustomersForActor(ch.id, { uid: stranger.id }, {}), null, 'чужой → null (клиенты)');
   assert.deepEqual(await db.getMsCohortsForActor(ch.id, { uid: stranger.id }), [], 'чужой → [] (когорты)');
+  assert.deepEqual(await db.getMsTopCustomersForActor(ch.id, { uid: stranger.id }, {}), [], 'чужой → [] (топ клиентов)');
+  assert.equal(await db.getMsOldestOrderDayForActor(ch.id, { uid: stranger.id }), null, 'чужой → null (старейший день)');
 });

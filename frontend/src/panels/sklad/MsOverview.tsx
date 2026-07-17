@@ -22,9 +22,9 @@ export function MsOverview() {
   const days = pp ? pp.days : 30;
   const windowLabel = days === 0 ? 'за всё время' : `за ${days} дн.`;
   const summary = useMsSummary(days);
-  // По-товарного АРХИВА пока нет (фаза 2б): на «Всё» топ честно считается живым отчётом за 30 дн.
-  const topDays = days === 0 ? 30 : days;
-  const top = useMsTopProducts(topDays);
+  // «Всё» (0) бэк со слайса 4 считает честно: полный диапазон от старейшего заказа архива
+  // (страничная добивка отчёта + кэш 1 час) — подмена 0→30 больше не нужна.
+  const top = useMsTopProducts(days);
   const funnel = useMsFunnel(days);
   const returns = useMsReturns(days);
 
@@ -163,7 +163,7 @@ export function MsOverview() {
         )}
       </ChartWidget>
 
-      <ChartWidget id="ms-top-products" title={days === 0 ? 'Топ товаров по выручке · 30 дн.' : 'Топ товаров по выручке'} fixedSize="half" noExpand>
+      <ChartWidget id="ms-top-products" title="Топ товаров по выручке" fixedSize="half" noExpand>
         {top.isPending ? (
           <div className="space-y-2 py-2">
             {Array.from({ length: 4 }).map((_, i) => (
