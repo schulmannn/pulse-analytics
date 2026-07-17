@@ -10,7 +10,9 @@ import { ChartExpandedContext, ChartRefLinesContext, ExpandedChartHeightContext,
 import { observeSize } from '@/lib/observeSize';
 
 interface LineChartProps {
-  values: number[];
+  /** Значения серии; null = день без данных (сбор пропущен) — рисуется РАЗРЫВОМ линии, а не
+      нулём: ноль-которого-не-было — ложь дашборда (выдуманный обвал). */
+  values: Array<number | null>;
   labels?: string[];
   titles?: string[];
   yMin?: number;
@@ -19,8 +21,10 @@ interface LineChartProps {
   /** Overlay hollow amber rings on statistically unusual points (local-outlier detection). */
   markAnomalies?: boolean;
   /** Comparison series (previous period / baseline), drawn dashed in the contrast colour
-      (--chart-2) on the same y-scale, with a built-in legend row under the chart. */
-  ghost?: number[];
+      (--chart-2) on the same y-scale, with a built-in legend row under the chart.
+      null здесь — тот же «день без сбора»: в пунктире разрыв, строка сравнения в ховере
+      не показывается (гарды `!= null` сохранены). */
+  ghost?: Array<number | null>;
   /** Legend name for the ghost series (default «Прошлый период»). */
   ghostLabel?: string;
   /** Bare value labels at the max point and the last point (no pills — Refined Technical). */
@@ -183,10 +187,12 @@ export function LineChart({
 
   // Anomaly detection is O(n·window) statistics — memoized on the series so hover-driven
   // re-renders don't re-run it. Before the early return to keep the hook order stable.
-  const anomalyIdx = useMemo(
-    () => (markAnomalies && values && values.length >= 2 ? detectAnomalies(values) : []),
-    [markAnomalies, values],
-  );
+  // Детектор принимает только number[]: null подставляем нулём для расчёта, но флаги на
+  // null-индексах отбрасываем — «аномалия» в дыре была бы артефактом подстановки, не данными.
+  const anomalyIdx = useMemo(() => {
+    if (!markAnomalies || !values || values.length < 2) return [];
+    return detectAnomalies(values.map((v) => v ?? 0)).filter((i) => values[i] != null);
+  }, [markAnomalies, values]);
 
   // Toggled off (or absent), the comparison drops out of every draw/measure below; the legend
   // chip stays visible so it can be toggled back on. Derived before the plot memo (its inputs).
@@ -202,7 +208,16 @@ export function LineChart({
   // entirely (a 365-point series × a board of cards used to be thousands of hover-only nodes);
   // the svg carries ONE mouse handler and the index is O(1) math (nearestPointIndex).
   const plot = useMemo(() => {
-    if (!values || values.length < 2) return null;
+    if (!values) return null;
+    // Реальные (non-null) точки: null-день = «сбор пропущен», он не участвует ни в домене,
+    // ни в путях — нарисовать его нулём значит выдумать обвал, которого не было.
+    const real: Array<{ i: number; v: number }> = [];
+    for (let i = 0; i < values.length; i++) {
+      const v = values[i];
+      if (v != null) real.push({ i, v });
+    }
+    // Меньше двух реальных точек — графика нет: дыры данными не считаются.
+    if (real.length < 2) return null;
 
     // In a fixed-height card tile (ctxHeight = the tile's leftover height, and NOT the expanded
     // overlay), the svg shares the tile with the HTML rows drawn below it — the minimal x-label
@@ -228,8 +243,12 @@ export function LineChart({
     const padB = hasXAxis ? 30 : padY;
 
     // Domain covers the series, the (shown) ghost and the target — a goal above the data must
-    // be visible.
-    const scaleVals = [...values, ...(activeGhost ?? []), ...(target != null ? [target] : [])];
+    // be visible. Только non-null: null в Math.min/max превратился бы в 0 — ложный «пол» домена.
+    const scaleVals = [
+      ...real.map((r) => r.v),
+      ...(activeGhost ?? []).filter((v): v is number => v != null),
+      ...(target != null ? [target] : []),
+    ];
     const computedMin = Math.min(...scaleVals);
     const computedMax = Math.max(...scaleVals);
     // The caller's yMin/yMax (e.g. a zero base for volume metrics) defines the domain; the nice
@@ -260,25 +279,65 @@ export function LineChart({
     const plotW = Math.max(W - gutterW - padR, 10);
     const step = plotW / Math.max(n - 1, 1);
 
+    // y = null у дыры: x сохраняем — он нужен ховеру, пину и флажкам, а рисовать нечего.
     const points = values.map((v, i) => {
       const x = gutterW + i * step;
-      return { x, y: yFor(v), v };
+      return { x, y: v != null ? yFor(v) : null, v };
     });
 
-    const firstPt = points[0];
-    const lastPt = points[n - 1];
+    // Маркер «сейчас» — последняя РЕАЛЬНАЯ точка: хвостовая дыра не должна вешать его в пустоту.
+    const lastReal = real[real.length - 1];
+    const lastPt = { x: points[lastReal.i].x, y: yFor(lastReal.v) };
+    // Начало серии — ПОЛАЯ точка (steep): полюса линии размечены парой «прокол → сплошная»,
+    // взгляд сразу считывает направление чтения. Тоже первая РЕАЛЬНАЯ точка.
+    const firstReal = real[0];
+    const firstPt = { x: points[firstReal.i].x, y: yFor(firstReal.v) };
 
-    const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
-    const areaPath = `${linePath} L ${lastPt.x} ${h - padB} L ${firstPt.x} ${h - padB} Z`;
+    // Линия и заливка — СЕГМЕНТАМИ по непрерывным run'ам реальных точек: дыра = честный разрыв,
+    // интерполяция «через пропуск» нарисовала бы данные, которых не было.
+    const segs: Array<Array<{ x: number; y: number }>> = [];
+    let run: Array<{ x: number; y: number }> = [];
+    for (const p of points) {
+      if (p.y == null) {
+        if (run.length > 0) {
+          segs.push(run);
+          run = [];
+        }
+      } else {
+        run.push({ x: p.x, y: p.y });
+      }
+    }
+    if (run.length > 0) segs.push(run);
+    const lineSegs = segs.filter((s) => s.length >= 2);
+    // Один path с подпутями M…L… — stroke остаётся одним элементом, разрывы честные.
+    const linePath = lineSegs.map((s) => s.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')).join(' ');
+    // Каждый сегмент заливки замыкается на СВОЮ базовую линию — дыра остаётся незакрашенной.
+    const baseY = h - padB;
+    const areaPath = lineSegs
+      .map((s) => `${s.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')} L ${s[s.length - 1].x} ${baseY} L ${s[0].x} ${baseY} Z`)
+      .join(' ');
+    // Сегмент из одной точки: точка-кружок — единственное измерение между дырами всё равно факт,
+    // а линия нулевой длины была бы невидима.
+    const lonePts = segs.filter((s) => s.length === 1).map((s) => s[0]);
 
+    // Ghost-дыры тоже не выдумываем: null = pen-up, следующий реальный отсчёт открывает новый
+    // подпуть — тот же честный разрыв, что у основной серии (раньше null коэрсился бы в 0).
     const ghostPath =
       activeGhost && activeGhost.length >= 2
-        ? activeGhost
-            .map((v, i) => {
-              const gx = gutterW + i * step;
-              return `${i === 0 ? 'M' : 'L'} ${gx} ${yFor(v)}`;
-            })
-            .join(' ')
+        ? (() => {
+            let d = '';
+            let pen = false;
+            for (let i = 0; i < activeGhost.length; i++) {
+              const v = activeGhost[i];
+              if (v == null) {
+                pen = false;
+                continue;
+              }
+              d += `${d ? ' ' : ''}${pen ? 'L' : 'M'} ${gutterW + i * step} ${yFor(v)}`;
+              pen = true;
+            }
+            return d;
+          })()
         : '';
 
     // Real x-axis ticks (axes mode): width-aware stride so labels never collide — one label
@@ -302,18 +361,20 @@ export function LineChart({
     // into the plot area horizontally.
     const extremes = (() => {
       if (!markExtremes) return [];
-      let maxI = 0;
-      for (let k = 1; k < n; k++) if (values[k] > values[maxI]) maxI = k;
-      const idxs = maxI === n - 1 ? [n - 1] : [maxI, n - 1];
-      return idxs.map((k) => {
-        const p = points[k];
-        const text = fmt.short(values[k]);
+      // Max и «последнее» — только по реальным точкам: подписывать дыру нечем.
+      let maxE = real[0];
+      for (const r of real) if (r.v > maxE.v) maxE = r;
+      const idxs = maxE.i === lastReal.i ? [lastReal] : [maxE, lastReal];
+      return idxs.map((e) => {
+        const px = points[e.i].x;
+        const py = yFor(e.v);
+        const text = fmt.short(e.v);
         const halfW = (text.length * CHAR_W) / 2;
         // +6px воздуха справа: лейбл последней точки не прилипает к краю карточки.
-        const x = Math.min(Math.max(p.x, gutterW + halfW), Math.max(W - padR - halfW - 6, gutterW + halfW));
-        const fitsAbove = p.y - 18 >= 0;
-        const y = fitsAbove ? p.y - 8 : p.y + 16;
-        return { key: k, x, y, text };
+        const x = Math.min(Math.max(px, gutterW + halfW), Math.max(W - padR - halfW - 6, gutterW + halfW));
+        const fitsAbove = py - 18 >= 0;
+        const y = fitsAbove ? py - 8 : py + 16;
+        return { key: e.i, x, y, text };
       });
     })();
 
@@ -393,23 +454,39 @@ export function LineChart({
           </>
         )}
 
-        {/* Gradient area + line */}
-        <path d={areaPath} fill={`url(#${gradientId})`} />
-        <path d={linePath} fill="none" stroke="hsl(var(--chart-role-primary))" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+        {/* Gradient area + line — сегментами (пустой d не рендерим: серия может быть
+            россыпью одиночных измерений без единого сплошного отрезка) */}
+        {areaPath && <path d={areaPath} fill={`url(#${gradientId})`} />}
+        {linePath && (
+          <path d={linePath} fill="none" stroke="hsl(var(--chart-role-primary))" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+        )}
 
-        {/* Per-point hollow rings (steep-style) — knocked out from the paper so the line reads
-            as a dotted sequence of measurements, not a continuous estimate */}
-        {showPoints &&
-          points.map((p, i) => (
-            <circle key={`pt${i}`} cx={p.x} cy={p.y} r="3" fill="hsl(var(--background))" stroke="hsl(var(--chart-role-primary))" strokeWidth="1.5" vectorEffect="non-scaling-stroke" className="pointer-events-none" />
-          ))}
-
-        {/* Anomaly markers — hollow amber rings on statistically unusual points */}
-        {anomalyIdx.map((i) => (
-          <circle key={`a${i}`} cx={points[i].x} cy={points[i].y} r="5" fill="none" stroke="hsl(var(--chart-role-warning))" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+        {/* Одиночное измерение между дырами — точка вместо невидимой линии нулевой длины */}
+        {lonePts.map((p) => (
+          <circle key={`lone${p.x}`} cx={p.x} cy={p.y} r="2.5" fill="hsl(var(--chart-role-primary))" className="pointer-events-none" />
         ))}
 
-        {/* Last-point marker — flat crisp dot knocked out from the paper surface (no glow halo) */}
+        {/* Per-point hollow rings (steep-style) — knocked out from the paper so the line reads
+            as a dotted sequence of measurements, not a continuous estimate. Дыры пропускаем. */}
+        {showPoints &&
+          points.map((p, i) =>
+            p.y != null ? (
+              <circle key={`pt${i}`} cx={p.x} cy={p.y} r="3" fill="hsl(var(--background))" stroke="hsl(var(--chart-role-primary))" strokeWidth="1.5" vectorEffect="non-scaling-stroke" className="pointer-events-none" />
+            ) : null,
+          )}
+
+        {/* Anomaly markers — hollow amber rings on statistically unusual points */}
+        {anomalyIdx.map((i) => {
+          const p = points[i];
+          // Гард на дыру: кольцу аномалии без значения некуда встать.
+          return p && p.y != null ? (
+            <circle key={`a${i}`} cx={p.x} cy={p.y} r="5" fill="none" stroke="hsl(var(--chart-role-warning))" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+          ) : null;
+        })}
+
+        {/* Полюса линии (steep): начало — полая точка, конец — сплошной маркер «сейчас».
+            Оба стоят на РЕАЛЬНЫХ точках: краевые дыры маркеров не получают. */}
+        <circle cx={firstPt.x} cy={firstPt.y} r="3.5" fill="hsl(var(--background))" stroke="hsl(var(--chart-role-primary))" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
         <circle cx={lastPt.x} cy={lastPt.y} r="4" fill="hsl(var(--chart-role-primary))" stroke="hsl(var(--background))" strokeWidth="2" vectorEffect="non-scaling-stroke" />
 
         {/* Max / last value labels (markExtremes) — bare tabular text, no boxes */}
@@ -441,7 +518,9 @@ export function LineChart({
     return { W, h, gutterW, step, points, yFor, hasXAxis, plotTop: padY, plotBottom: h - padB, staticLayer };
   }, [values, labels, activeGhost, hasGhostLegend, target, refLines, yMin, yMax, width, ctxHeight, height, expanded, showAxes, markExtremes, showPoints, anomalyIdx, gradientId]);
 
-  if (!values || values.length < 2 || !plot) {
+  // Пустое состояние считается по РЕАЛЬНЫМ точкам (plot = null при < 2 non-null): серия из
+  // одних null-дней — честное «нет данных», а не нулевая линия.
+  if (!plot) {
     return (
       <EmptyState compact title="Нет данных за период" className="flex h-40 items-center justify-center" />
     );
@@ -449,13 +528,17 @@ export function LineChart({
 
   const { W, h, gutterW, step, points, yFor, hasXAxis, plotTop, plotBottom } = plot;
   const n = values.length;
+  // Для ARIA-подписи: max и «последнее» — только по реальным значениям (дыра не значение).
+  const realValues = values.filter((v): v is number => v != null);
   const anomalySet = new Set(anomalyIdx);
 
   const flagMap = new Map((flags ?? []).map((f) => [f.i, f.label] as const));
-  const tipText = (i: number) => {
-    let base = titles?.[i] ?? fmt.num(values[i]);
+  const tipText = (i: number, v: number) => {
+    let base = titles?.[i] ?? fmt.num(v);
     // Hovering a compared chart reads both series at once (comparison shown).
-    if (activeGhost && activeGhost[i] != null) base = `${base} · пред. ${fmt.num(activeGhost[i])}`;
+    // Локал вместо activeGhost[i]: сужение element-access по индексу TS не гарантирует.
+    const gv = activeGhost?.[i];
+    if (gv != null) base = `${base} · пред. ${fmt.num(gv)}`;
     if (anomalySet.has(i)) base = `${base} · аномалия`;
     const fl = flagMap.get(i);
     return fl ? `${base} · ⚑ ${fl}` : base;
@@ -473,9 +556,17 @@ export function LineChart({
   // metric's own rich title text (velocity/history carry extra context there).
   const buildTip = (i: number): TooltipState => {
     const p = points[i];
-    if (activeGhost && activeGhost[i] != null) {
-      const cur = values[i];
-      const prev = activeGhost[i];
+    const v = values[i];
+    // День-дыра: ВСЕГДА plain-text «данных нет» — rows/ghost/titles нарисовали бы значение,
+    // которого не существует. Якорь — середина плота (своего y у дыры нет).
+    if (v == null) {
+      return { x: p.x, y: (plotTop + plotBottom) / 2, text: `${labels?.[i] ?? ''}: данных нет — сбор пропущен` };
+    }
+    const py = yFor(v);
+    // Тот же приём с локалом: prev != null сужает до number, дальше арифметика безопасна.
+    const prev = activeGhost?.[i];
+    if (prev != null) {
+      const cur = v;
       const rows: TooltipRow[] = [
         { label: 'Текущий', value: fmt.num(cur), color: 'hsl(var(--chart-role-primary))' },
         {
@@ -487,19 +578,19 @@ export function LineChart({
       ];
       const d = prev !== 0 ? ((cur - prev) / Math.abs(prev)) * 100 : null;
       if (d != null && Number.isFinite(d)) rows.push({ label: 'Δ', value: `${d >= 0 ? '+' : '−'}${Math.abs(d).toFixed(1)}%` });
-      return { x: p.x, y: p.y, title: cardTitle(i), rows };
+      return { x: p.x, y: py, title: cardTitle(i), rows };
     }
     if (expanded) {
       const rows: TooltipRow[] = [
         {
           label: 'Текущий период',
-          value: fmt.num(values[i]),
+          value: fmt.num(v),
           color: 'hsl(var(--chart-role-primary))',
         },
       ];
-      return { x: p.x, y: p.y, title: cardTitle(i), rows };
+      return { x: p.x, y: py, title: cardTitle(i), rows };
     }
-    return { x: p.x, y: p.y, text: tipText(i) };
+    return { x: p.x, y: py, text: tipText(i, v) };
   };
 
   // ONE hit surface: the svg itself. The pointer x maps to the nearest point in O(1); moving
@@ -538,6 +629,11 @@ export function LineChart({
   };
 
   const hovered = hover && hover.i < n ? points[hover.i] : null;
+  // Ghost-точка под курсором: считаем локалом заранее — element-access в JSX TS не сужает.
+  const hoverGhostVal = hover && activeGhost ? activeGhost[hover.i] : null;
+  const hoverGhostY = hoverGhostVal != null ? yFor(hoverGhostVal) : null;
+  // Пин на дыре: вертикаль остаётся (день-то выбран), solid-маркер — только у реальной точки.
+  const pinnedPt = pinnedIndex != null && pinnedIndex >= 0 && pinnedIndex < n ? points[pinnedIndex] : null;
   const compactLabelIndexes =
     labels && labels.length > 0 && !hasXAxis
       ? axisLabelIndexes(labels.length, W, { minLabelPx: 92, maxLabels: expanded ? 8 : 5 })
@@ -561,8 +657,9 @@ export function LineChart({
         // the raw axis <text> ticks as loose numbers, and the label carries the data a mouse user
         // reads from hover (per-point keyboard access is a separate roadmap item). Math.max over
         // the SERIES — the in-scope `max` is the padded nice-scale top, not the data max.
+        // Только реальные значения: null-дыра не участвует ни в max, ни в «последнем».
         role="img"
-        aria-label={`График: ${values.length} точек, макс ${fmt.short(Math.max(...values))}, последнее ${fmt.short(values[values.length - 1])}`}
+        aria-label={`График: ${values.length} точек, макс ${fmt.short(Math.max(...realValues))}, последнее ${fmt.short(realValues[realValues.length - 1])}`}
         onMouseMove={onSvgMove}
         onMouseDown={onPointClick ? (e) => (pressRef.current = { x: e.clientX, y: e.clientY }) : undefined}
         onClick={onSvgClick}
@@ -575,34 +672,40 @@ export function LineChart({
           <g className="pointer-events-none">
             {[...flagMap.keys()]
               .filter((i) => i >= 0 && i < n)
-              .map((i) => (
-                <g key={`fl${i}`}>
-                  <line
-                    x1={points[i].x}
-                    y1={points[i].y + 6}
-                    x2={points[i].x}
-                    y2={plotBottom - 15}
-                    stroke="hsl(var(--border))"
-                    strokeWidth="1"
-                    strokeDasharray="1 3"
-                    vectorEffect="non-scaling-stroke"
-                  />
-                  <circle cx={points[i].x} cy={plotBottom - 8} r="7" fill="hsl(var(--popover))" stroke="hsl(var(--border))" strokeWidth="1" vectorEffect="non-scaling-stroke" />
-                  <text x={points[i].x} y={plotBottom - 4.5} textAnchor="middle" className="select-none fill-muted-foreground text-2xs">
-                    ⚑
-                  </text>
-                </g>
-              ))}
+              .map((i) => {
+                const p = points[i];
+                return (
+                  <g key={`fl${i}`}>
+                    {/* Пунктир-коннектор — только к реальной точке: в дыру его тянуть некуда. */}
+                    {p.y != null && (
+                      <line
+                        x1={p.x}
+                        y1={p.y + 6}
+                        x2={p.x}
+                        y2={plotBottom - 15}
+                        stroke="hsl(var(--border))"
+                        strokeWidth="1"
+                        strokeDasharray="1 3"
+                        vectorEffect="non-scaling-stroke"
+                      />
+                    )}
+                    <circle cx={p.x} cy={plotBottom - 8} r="7" fill="hsl(var(--popover))" stroke="hsl(var(--border))" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+                    <text x={p.x} y={plotBottom - 4.5} textAnchor="middle" className="select-none fill-muted-foreground text-2xs">
+                      ⚑
+                    </text>
+                  </g>
+                );
+              })}
           </g>
         )}
 
         {/* PINNED point — persistent dashed crosshair + solid marker (under the live hover). */}
-        {pinnedIndex != null && points[pinnedIndex] && (
+        {pinnedPt && (
           <g className="pointer-events-none">
             <line
-              x1={points[pinnedIndex].x}
+              x1={pinnedPt.x}
               y1={plotTop}
-              x2={points[pinnedIndex].x}
+              x2={pinnedPt.x}
               y2={plotBottom}
               stroke="hsl(var(--chart-role-selection))"
               strokeWidth="1.5"
@@ -610,7 +713,10 @@ export function LineChart({
               opacity="0.6"
               vectorEffect="non-scaling-stroke"
             />
-            <circle cx={points[pinnedIndex].x} cy={points[pinnedIndex].y} r="4.5" fill="hsl(var(--chart-role-selection))" stroke="hsl(var(--background))" strokeWidth="2" />
+            {/* Solid-маркер — только у реальной точки: у дыры нет значения, куда его ставить. */}
+            {pinnedPt.y != null && (
+              <circle cx={pinnedPt.x} cy={pinnedPt.y} r="4.5" fill="hsl(var(--chart-role-selection))" stroke="hsl(var(--background))" strokeWidth="2" />
+            )}
           </g>
         )}
 
@@ -630,10 +736,14 @@ export function LineChart({
               opacity="0.72"
               vectorEffect="non-scaling-stroke"
             />
-            {activeGhost && activeGhost[hover!.i] != null && (
-              <circle cx={hovered.x} cy={yFor(activeGhost[hover!.i])} r="3.5" fill="hsl(var(--card))" stroke="hsl(var(--chart-role-comparison))" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+            {/* На null-дне маркеров нет (ни текущего, ни ghost): точка-призрак у несуществующего
+                значения — та же ложь, что и ноль; остаётся только вертикаль + «данных нет». */}
+            {hovered.y != null && hoverGhostY != null && (
+              <circle cx={hovered.x} cy={hoverGhostY} r="3.5" fill="hsl(var(--card))" stroke="hsl(var(--chart-role-comparison))" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
             )}
-            <circle cx={hovered.x} cy={hovered.y} r="4" fill="hsl(var(--chart-role-selection))" stroke="hsl(var(--background))" strokeWidth="1.5" />
+            {hovered.y != null && (
+              <circle cx={hovered.x} cy={hovered.y} r="4" fill="hsl(var(--chart-role-selection))" stroke="hsl(var(--background))" strokeWidth="1.5" />
+            )}
           </>
         )}
       </svg>

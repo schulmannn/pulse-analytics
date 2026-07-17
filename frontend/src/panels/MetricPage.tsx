@@ -9,6 +9,9 @@ import type { PeriodDays } from '@/lib/period';
 import { deriveKpis, isDrillKey } from '@/lib/kpiDerive';
 import type { DailySeries, DrillKey, PostMetricField } from '@/lib/kpiDerive';
 import { getDrillMetric } from '@/lib/widgetMetrics';
+import { addWidgetForMetric } from '@/lib/widgetStore';
+import { pinToHome } from '@/lib/widgetPrefsStore';
+import { customKey } from '@/lib/widgetConfig';
 import { fmt, pluralRu } from '@/lib/format';
 import { markdownToPlainText } from '@/lib/markdown';
 import { PinnedDayPanel } from '@/components/PinnedDayPanel';
@@ -239,6 +242,8 @@ export function MetricPage() {
   const [annLabel, setAnnLabel] = useState('');
   const [annBusy, setAnnBusy] = useState(false);
   const [annError, setAnnError] = useState<string | null>(null);
+  // Состояние «Закрепить на Главной» — ЗДЕСЬ, выше early-return'ов (условный хук = React #310).
+  const [pinnedToHome, setPinnedToHome] = useState(false);
   const { data: channelsData } = useChannels();
   const [openPost, setOpenPost] = useState<NormalizedPost | null>(null);
 
@@ -609,6 +614,35 @@ export function MetricPage() {
     }
   };
 
+  // «Закрепить на Главной» (артефакт v2, страничные действия): метрика в один клик становится
+  // виджетом персональной доски — дефолтный конфиг + пин, тем же путём, что каталог Главной.
+  const pinMetricToHome = () => {
+    if (pinnedToHome) return;
+    const w = addWidgetForMetric(getDrillMetric(metricKey).id);
+    if (w) {
+      pinToHome(customKey(w.id));
+      setPinnedToHome(true);
+    }
+  };
+
+  // Разрыв-вместо-нуля (артефакт v2 п.9): канальные «Просмотры» идут из дневного архива —
+  // пропущенный день там означает пропуск СБОРА, а не ноль («ноль-которого-не-было» — ложь
+  // дашборда). Дыру несёт только ЛИНИЯ на дневной грануле; bar/рейтинг остаются плотностными
+  // видами, а post-derived метрики не трогаем — их ноль честный (в тот день не публиковали).
+  const archiveDays = viewsFromArchive
+    ? new Set(
+        historyRows
+          .filter((r) => r.views != null)
+          .map((r) => localDayKey(Date.parse(r.day)))
+      )
+    : null;
+  const gapAware = (vals: number[], fromMs: number | null): Array<number | null> => {
+    if (!archiveDays || effGrain !== 'day' || fromMs == null) return vals;
+    return vals.map((v, i) => (archiveDays.has(localDayKey(fromMs + i * DAY_MS)) ? v : null));
+  };
+  const lineValues = gapAware(series.values, winFrom);
+  const lineGhost = ghost ? gapAware(ghost, baseWin?.from ?? null) : ghost;
+
   // ── События дня (chart_annotations): создание/удаление из панели пина ────────────────────
   const addAnnotation = async (dayKey: string) => {
     const label = annLabel.trim();
@@ -669,10 +703,20 @@ export function MetricPage() {
 
   return (
     <div className="space-y-4">
-      {/* Breadcrumb back to the ledger the metric was opened from. */}
-      <Link to="/" className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground">
-        <span aria-hidden="true">←</span> Обзор
-      </Link>
+      {/* Breadcrumb + страничные действия (артефакт v2): «Закрепить» кладёт метрику на Главную. */}
+      <div className="flex items-center justify-between gap-3">
+        <Link to="/" className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground">
+          <span aria-hidden="true">←</span> Обзор
+        </Link>
+        <button
+          type="button"
+          onClick={pinMetricToHome}
+          disabled={pinnedToHome}
+          className="btn-pill inline-flex items-center gap-1.5 border border-border px-3 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-default disabled:opacity-70 print:hidden"
+        >
+          {pinnedToHome ? '✓ На Главной' : 'Закрепить на Главной'}
+        </button>
+      </div>
 
       {/* Headline v2 (артефакт владельца): страница ведёт ИМЕНЕМ метрики — тихая шапка, только
           идентичность. Итог окна живёт в «Сравнении» справа (сумма окна из графика не читается,
@@ -719,7 +763,7 @@ export function MetricPage() {
                  (dashboards are axis-free; the explorer is where the scale lives). */
               <ChartExpandedContext.Provider value={true}>
                 <LineChart
-                  values={series.values}
+                  values={lineValues}
                   labels={series.labels}
                   titles={titles}
                   hoverTitles={hoverTitles}
@@ -729,11 +773,15 @@ export function MetricPage() {
                   markExtremes
                   markAnomalies={effGrain === 'day' && (metricKey === 'views' || metricKey === 'subscribers')}
                   showPoints={series.values.length > 1 && series.values.length <= 45}
-                  ghost={ghost}
+                  ghost={lineGhost}
                   ghostLabel={cmp !== 'off' ? CMP_CHIP[cmp] : undefined}
                   legendToggle={false}
                   yMin={ZERO_BASED[metricKey] && series.values.length > 1 ? 0 : undefined}
-                  onPointClick={(i) => setPinned((p) => (p === i ? null : i))}
+                  onPointClick={(i) => {
+                    // Дыру не пинить: у пропущенного дня нет ни значения, ни постов.
+                    if (lineValues[i] == null) return;
+                    setPinned((p) => (p === i ? null : i));
+                  }}
                   pinnedIndex={pinnedValid}
                 />
               </ChartExpandedContext.Provider>
