@@ -231,7 +231,7 @@ test('resume(): stale-running продолжает с cursor_from, наращи�
   assert.equal(freshDb.patches.length, 0);
 });
 
-test('mapping: null-safe agent/state, agent_id из последнего сегмента href, кривой moment отброшен', async () => {
+test('mapping: null-safe agent/state, agent_id/state_id из последнего сегмента href, кривой moment отброшен', async () => {
   const cur = monthStartAt(0);
   const day = `${fmtDay(cur)} 10:00:00.000`;
   const db = makeDb();
@@ -243,7 +243,12 @@ test('mapping: null-safe agent/state, agent_id из последнего сег�
       byWindow: () => [
         order('full', day, {
           sum: 100.4,
-          state: { name: 'Новый' },
+          // Прод-форма без expand: state — meta-only ссылка …/metadata/states/<uuid> (имени нет);
+          // name добавлен, чтобы одним заказом проверить и state, и state_id.
+          state: {
+            name: 'Новый',
+            meta: { href: 'https://api.moysklad.ru/api/remap/1.2/entity/customerorder/metadata/states/state-uuid-9?x=y' },
+          },
           agent: { meta: { href: 'https://api.moysklad.ru/api/remap/1.2/entity/counterparty/uuid-1?expand=x' }, name: 'ИП Пион' },
         }),
         order('bare', day, { state: { meta: {} }, agent: { meta: {} } }),
@@ -254,8 +259,14 @@ test('mapping: null-safe agent/state, agent_id из последнего сег�
   await engine.start(7);
   assert.equal(db.upserts.length, 1);
   assert.deepEqual(db.upserts[0].rows, [
-    { order_id: 'full', moment: day, sum_kopecks: 100, state: 'Новый', agent_id: 'uuid-1', agent_name: 'ИП Пион' },
-    { order_id: 'bare', moment: day, sum_kopecks: 12550, state: null, agent_id: null, agent_name: null },
+    {
+      order_id: 'full', moment: day, sum_kopecks: 100,
+      state: 'Новый', state_id: 'state-uuid-9', agent_id: 'uuid-1', agent_name: 'ИП Пион',
+    },
+    {
+      order_id: 'bare', moment: day, sum_kopecks: 12550,
+      state: null, state_id: null, agent_id: null, agent_name: null,
+    },
   ]);
 });
 

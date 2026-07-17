@@ -466,27 +466,29 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
   }
 
   // Заказы покупателей МойСклада (архив ms_orders, слайс 2б). rows: [{ order_id, moment,
-  // sum_kopecks, state, agent_id, agent_name }] — суммы в КОПЕЙКАХ. Идемпотентный батч-upsert по
-  // (channel_id, order_id); как у ms_daily — СОЗНАТЕЛЬНО полная ЗАМЕНА строки, не COALESCE:
-  // заказы в МС правят задним числом (сумма/статус/контрагент меняются, в т.ч. вниз), и
-  // повторный проход обязан донести правку, а не «дополнить». Формат moment валидирует движок
-  // (jobs/msBackfillJob) — та же дисциплина, что dayOf в msCollectionJob: repo лишь отбрасывает
-  // строки без ключа/даты, чтобы дырявая строка не уронила jsonb-каст всего батча.
+  // sum_kopecks, state, state_id, agent_id, agent_name }] — суммы в КОПЕЙКАХ. Идемпотентный
+  // батч-upsert по (channel_id, order_id); как у ms_daily — СОЗНАТЕЛЬНО полная ЗАМЕНА строки, не
+  // COALESCE: заказы в МС правят задним числом (сумма/статус/контрагент меняются, в т.ч. вниз), и
+  // повторный проход обязан донести правку, а не «дополнить» (state_id это тоже касается: снятый
+  // статус честно занулится). Формат moment валидирует движок (jobs/msBackfillJob) — та же
+  // дисциплина, что dayOf в msCollectionJob: repo лишь отбрасывает строки без ключа/даты, чтобы
+  // дырявая строка не уронила jsonb-каст всего батча.
   async function upsertMsOrders(channelId, rows, executor = pool) {
     if (!enabled || !channelId || !rows || !rows.length) return 0;
     const clean = rows.filter((r) => r && r.order_id != null && r.moment != null);
     if (!clean.length) return 0;
     const sql = `INSERT INTO ms_orders
-        (channel_id, order_id, moment, sum_kopecks, state, agent_id, agent_name, updated_at)
-      SELECT $1, x.order_id, x.moment, COALESCE(x.sum_kopecks, 0), x.state, x.agent_id, x.agent_name, now()
+        (channel_id, order_id, moment, sum_kopecks, state, state_id, agent_id, agent_name, updated_at)
+      SELECT $1, x.order_id, x.moment, COALESCE(x.sum_kopecks, 0), x.state, x.state_id, x.agent_id, x.agent_name, now()
         FROM jsonb_to_recordset($2::jsonb) AS x(
           order_id text, moment timestamptz, sum_kopecks bigint,
-          state text, agent_id text, agent_name text
+          state text, state_id text, agent_id text, agent_name text
         )
       ON CONFLICT (channel_id, order_id) DO UPDATE SET
         moment=EXCLUDED.moment,
         sum_kopecks=EXCLUDED.sum_kopecks,
         state=EXCLUDED.state,
+        state_id=EXCLUDED.state_id,
         agent_id=EXCLUDED.agent_id,
         agent_name=EXCLUDED.agent_name,
         updated_at=now()`;
