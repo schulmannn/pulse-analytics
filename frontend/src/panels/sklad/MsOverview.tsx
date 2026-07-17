@@ -6,6 +6,7 @@ import { LineChart } from '@/components/LineChart';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { Skeleton } from '@/components/ui/skeleton';
+import { lttbDownsample } from '@/lib/downsample';
 import { fmt } from '@/lib/format';
 import { usePagePeriod } from '@/lib/period';
 
@@ -66,13 +67,18 @@ export function MsOverview() {
   }
 
   const { revenue, orders } = summary.data;
-  const revLabels = revenue.series.map((p) => fmt.day(p.day));
-  const revValues = revenue.series.map((p) => p.value);
-  const ordLabels = orders.series.map((p) => fmt.day(p.day));
-  const ordValues = orders.series.map((p) => p.count);
+  // Канон графиков: длинные серии (окно «Всё» после лет архива ms_daily) даунсэмплятся до ~140
+  // точек ПЕРЕД рендером — как в Charts/MsClients; labels/titles строятся из той же выборки,
+  // чтобы тултипы совпадали с точками. Оконные 7/30/90 короче порога и проходят как есть.
+  const revSeries = lttbDownsample(revenue.series, 140, (p) => p.value);
+  const ordSeries = lttbDownsample(orders.series, 140, (p) => p.count);
+  const revLabels = revSeries.map((p) => fmt.day(p.day));
+  const revValues = revSeries.map((p) => p.value);
+  const ordLabels = ordSeries.map((p) => fmt.day(p.day));
+  const ordValues = ordSeries.map((p) => p.count);
   // Средний чек по дням = сумма/число заказов дня; день без заказов — ЧЕСТНЫЙ null-разрыв
   // (деление на ноль дало бы «ноль-которого-не-было» — канон разрывов).
-  const avgValues = orders.series.map((p) => (p.count > 0 ? p.sum / p.count : null));
+  const avgValues = ordSeries.map((p) => (p.count > 0 ? p.sum / p.count : null));
   const avgTotal = orders.totalCount > 0 ? orders.totalSum / orders.totalCount : null;
 
   return (
@@ -83,7 +89,7 @@ export function MsOverview() {
             <LineChart
               values={revValues}
               labels={revLabels}
-              titles={revenue.series.map((p) => `${fmt.day(p.day)}: ${fmt.num(p.value)} ₽`)}
+              titles={revSeries.map((p) => `${fmt.day(p.day)}: ${fmt.num(p.value)} ₽`)}
               yMin={0}
             />
           ) : (
@@ -101,7 +107,7 @@ export function MsOverview() {
             <LineChart
               values={ordValues}
               labels={ordLabels}
-              titles={orders.series.map((p) => `${fmt.day(p.day)}: ${fmt.num(p.count)} · ${fmt.num(p.sum)} ₽`)}
+              titles={ordSeries.map((p) => `${fmt.day(p.day)}: ${fmt.num(p.count)} · ${fmt.num(p.sum)} ₽`)}
               yMin={0}
             />
           ) : (
@@ -116,7 +122,7 @@ export function MsOverview() {
             <LineChart
               values={avgValues}
               labels={ordLabels}
-              titles={orders.series.map((p) => (p.count > 0 ? `${fmt.day(p.day)}: ${fmt.num(Math.round(p.sum / p.count))} ₽` : `${fmt.day(p.day)}: заказов не было`))}
+              titles={ordSeries.map((p) => (p.count > 0 ? `${fmt.day(p.day)}: ${fmt.num(Math.round(p.sum / p.count))} ₽` : `${fmt.day(p.day)}: заказов не было`))}
               yMin={0}
             />
           ) : (
