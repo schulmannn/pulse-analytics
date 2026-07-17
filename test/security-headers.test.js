@@ -56,6 +56,11 @@ test('production app CSP is strict and documents the allowed external domains', 
   assert.match(csp.get('style-src'), /'self'/);
   assert.match(csp.get('style-src'), /'unsafe-inline'/);
   assert.match(csp.get('style-src'), /https:\/\/fonts\.googleapis\.com/);
+  assert.match(csp.get('style-src'), /https:\/\/accounts\.google\.com/);
+  assert.strictEqual(
+    csp.get('style-src'),
+    `'self' 'unsafe-inline' ${APP_ALLOWED_DOMAINS.style.join(' ')}`,
+  );
 
   assert.doesNotMatch(appCspHeader, /\*/);
   assert.doesNotMatch(csp.get('script-src'), /'unsafe-inline'|'unsafe-eval'/);

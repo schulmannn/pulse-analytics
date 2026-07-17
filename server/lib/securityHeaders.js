@@ -3,7 +3,7 @@
 // через JSONP-эндпоинты (?callback=) — не возвращать без реальной необходимости.
 const APP_ALLOWED_DOMAINS = Object.freeze({
   script: Object.freeze(['https://accounts.google.com']),
-  style: Object.freeze(['https://fonts.googleapis.com']),
+  style: Object.freeze(['https://fonts.googleapis.com', 'https://accounts.google.com']),
   font: Object.freeze(['https://fonts.gstatic.com']),
   connect: Object.freeze(['https://accounts.google.com']),
   frame: Object.freeze(['https://accounts.google.com']),
