@@ -16,10 +16,13 @@ import { usePagePeriod } from '@/lib/period';
  */
 export function MsOverview() {
   const pp = usePagePeriod();
-  // «Всё» (0) для живых отчётов МС не предлагаем окном — площадка считает по moment-диапазону.
-  const days = pp && pp.days > 0 ? pp.days : 30;
+  // «Всё» (0) обслуживается из нашего дневного архива ms_daily (слайс 2а), живые окна — 7/30/90.
+  const days = pp ? pp.days : 30;
+  const windowLabel = days === 0 ? 'за всё время' : `за ${days} дн.`;
   const summary = useMsSummary(days);
-  const top = useMsTopProducts(days);
+  // По-товарного АРХИВА пока нет (фаза 2б): на «Всё» топ честно считается живым отчётом за 30 дн.
+  const topDays = days === 0 ? 30 : days;
+  const top = useMsTopProducts(topDays);
 
   if (summary.isPending) {
     return (
@@ -36,6 +39,16 @@ export function MsOverview() {
 
   if (summary.isError) {
     const status = (summary.error as { status?: number } | null)?.status;
+    if (status === 401) {
+      // Токен отозван на стороне МойСклада — честный reconnect-CTA вместо «недоступен».
+      return (
+        <EmptyState
+          title="Токен МойСклада отозван"
+          reason="Источник перестал принимать наш токен — создайте новый в МойСкладе и переподключите."
+          action={{ to: '/connect', label: 'Переподключить МойСклад' }}
+        />
+      );
+    }
     if (status === 404) {
       // Канал есть, а токена МойСклада на нём нет — честный onboarding вместо пустых карточек.
       return (
@@ -58,7 +71,7 @@ export function MsOverview() {
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
       <ChartWidget id="ms-revenue" title="Выручка" fixedSize="half" noExpand>
-        <ChartCardBody value={`${fmt.short(revenue.total)} ₽`} caption={`за ${days} дн.`}>
+        <ChartCardBody value={`${fmt.short(revenue.total)} ₽`} caption={windowLabel}>
           {revValues.length > 1 ? (
             <LineChart
               values={revValues}
@@ -75,7 +88,7 @@ export function MsOverview() {
       <ChartWidget id="ms-orders" title="Заказы" fixedSize="half" noExpand>
         <ChartCardBody
           value={fmt.num(orders.totalCount)}
-          caption={`на ${fmt.short(orders.totalSum)} ₽ за ${days} дн.`}
+          caption={`на ${fmt.short(orders.totalSum)} ₽ ${windowLabel}`}
         >
           {ordValues.length > 1 ? (
             <LineChart
@@ -90,7 +103,7 @@ export function MsOverview() {
         </ChartCardBody>
       </ChartWidget>
 
-      <ChartWidget id="ms-top-products" title="Топ товаров по выручке" defaultSize="full" noExpand>
+      <ChartWidget id="ms-top-products" title={days === 0 ? 'Топ товаров по выручке · 30 дн.' : 'Топ товаров по выручке'} defaultSize="full" noExpand>
         {top.isPending ? (
           <div className="space-y-2 py-2">
             {Array.from({ length: 4 }).map((_, i) => (

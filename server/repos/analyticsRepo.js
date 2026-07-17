@@ -31,6 +31,9 @@ const POST_METRICS = ['views', 'reactions', 'forwards', 'replies'];
 const IG_DAILY_METRICS = ['followers', 'followers_total', 'reach', 'views', 'profile_views',
   'accounts_engaged', 'total_interactions', 'likes', 'comments', 'saves', 'shares', 'follows', 'unfollows'];
 const IG_MEDIA_METRICS = ['reach', 'likes', 'comments', 'saved', 'shares', 'views'];
+// Копеечные суммы ms_daily — BIGINT (pg отдаёт строкой); orders_count — INTEGER (уже number,
+// numify — no-op-страховка). Бюджет toMetricNumber (9e15) = 90 трлн ₽ — за глаза.
+const MS_DAILY_METRICS = ['revenue_kopecks', 'orders_count', 'orders_sum_kopecks'];
 const IG_TAG_METRICS = ['like_count', 'comments_count'];
 const numifyMetrics = (row, keys) => {
   const out = { ...row };
@@ -361,6 +364,17 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
     return rows.map((r) => numifyMetrics(r, IG_MEDIA_METRICS));
   }
 
+  // Весь дневной архив МойСклада канала («Всё» в summary), day ASC. Без окна — глубина архива
+  // ограничена самим кроном (растёт день за днём), а не читателем; суммы отдаются в КОПЕЙКАХ
+  // (как лежат в БД) — в рубли конвертирует граница API (kopecksToRub), не repo.
+  async function getMsDailyAllInternal(channelId) {
+    if (!enabled || !channelId) return [];
+    const { rows } = await pool.query(
+      `SELECT to_char(day,'YYYY-MM-DD') AS day, revenue_kopecks, orders_count, orders_sum_kopecks
+         FROM ms_daily WHERE channel_id=$1 ORDER BY day ASC`, [channelId]);
+    return rows.map((r) => numifyMetrics(r, MS_DAILY_METRICS));
+  }
+
   // ── Actor-gated reads: сначала проверяем доступ, иначе пусто (ПУТЬ ДЛЯ РОУТОВ) ──────────────────
   // null-доступ → пустой результат того же типа, что у Internal (список → [], одиночка → null).
   const allowed = (channelId, actor) => getAccessibleChannel(channelId, actor);
@@ -388,6 +402,9 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
   }
   async function listIgMediaDailyForActor(channelId, actor, days = 400) {
     return (await allowed(channelId, actor)) ? listIgMediaDailyInternal(channelId, days) : [];
+  }
+  async function getMsDailyAllForActor(channelId, actor) {
+    return (await allowed(channelId, actor)) ? getMsDailyAllInternal(channelId) : [];
   }
 
     // ── ig-tags read (finding 7: чтение — analytics, write — collectorRepo) ──
@@ -421,8 +438,10 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
     getChannelHistoryInternal, getMentionsHistoryInternal, getMentionsArchiveInternal,
     getSnapshotInternal, getPublicTgChannelPhoto,
     getLatestVelocityInternal, listPostsInternal, listIgDailyInternal, listIgMediaDailyInternal,
+    getMsDailyAllInternal,
     getChannelHistoryForActor, getMentionsHistoryForActor, getMentionsArchiveForActor,
     getSnapshotForActor, getLatestVelocityForActor, listPostsForActor, listIgDailyForActor, listIgMediaDailyForActor,
+    getMsDailyAllForActor,
   };
 }
 

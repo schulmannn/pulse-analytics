@@ -1,21 +1,24 @@
 'use strict';
 
 const { kopecksToRub } = require('../lib/msClient');
+const { hasWorkspaceRole } = require('../middleware/tenant');
 
 /**
- * Роуты МойСклада (/api/ms/{connect,summary,top-products}) — серверная половина источника
- * «склад», зеркально Instagram-вертикали: connect валидирует токен живыми identity-вызовами
- * и сохраняет его ТОЛЬКО шифрованным (lib/ms_crypto), data-роуты резолвят канал тем же
- * механизмом, что resolveIg (?channel= / заголовок x-channel-id, дефолт через
+ * Роуты МойСклада (/api/ms/{connect,summary,top-products,status,account}) — серверная половина
+ * источника «склад», зеркально Instagram-вертикали: connect валидирует токен живыми
+ * identity-вызовами и сохраняет его ТОЛЬКО шифрованным (lib/ms_crypto), data-роуты резолвят
+ * канал тем же механизмом, что resolveIg (?channel= / заголовок x-channel-id, дефолт через
  * db.getChannelOrDefault — тот же ownership/disabled-предикат), и кэшируются как IG-роуты
- * (дефолтный TTL memoryCache). Все суммы наружу — в РУБЛЯХ (kopecksToRub), внутри МС — копейки.
- * Токен нигде не логируется и не попадает в ответы/сообщения ошибок (msClient держит его
- * только в заголовке запроса).
+ * (дефолтный TTL memoryCache). Все суммы наружу — в РУБЛЯХ (kopecksToRub), внутри МС/БД —
+ * копейки. Токен нигде не логируется и не попадает в ответы/сообщения ошибок (msClient держит
+ * его только в заголовке запроса). days=0 («Всё») обслуживается ИЗ АРХИВА ms_daily (его копит
+ * jobs/msCollectionJob) — живых вызовов МС не делает и токена не требует.
  */
-function registerMsRoutes({ app, requireAuth, db, msCrypto, msFetch, cacheGet, cacheSet, log }) {
+function registerMsRoutes({ app, requireAuth, db, msCrypto, msFetch, cacheGet, cacheSet, cache, log }) {
   // Узкий enum периодов ДО кэш-ключа (как nearestOf у IG): произвольный days плодил бы
-  // per-value кэш-записи, каждая ценой пары upstream-запросов. Не-enum → дефолт 30.
-  const MS_DAYS_ALLOWED = [7, 30, 90];
+  // per-value кэш-записи, каждая ценой пары upstream-запросов. 0 = «Всё» (архив ms_daily,
+  // upstream-вызовов нет). Не-enum → дефолт 30.
+  const MS_DAYS_ALLOWED = [0, 7, 30, 90];
   const daysOf = (req) => {
     const n = parseInt(req.query.days, 10);
     return MS_DAYS_ALLOWED.includes(n) ? n : 30;
@@ -39,8 +42,11 @@ function registerMsRoutes({ app, requireAuth, db, msCrypto, msFetch, cacheGet, c
 
   // Единый маппинг ошибок msFetch для data-роутов. 429 (уже ПОСЛЕ одной внутренней повторной
   // попытки клиента) → честный 503 с retry-хинтом: у МС жёсткий лимит 45 запросов/3с, «зайди
-  // через пару секунд» точнее, чем маскировать под 502. Всё остальное (сеть/5xx/протухший
-  // токен) → 502 «МойСклад недоступен». В лог — только path-контекст/статус, никогда токен.
+  // через пару секунд» точнее, чем маскировать под 502. 401/403 от МС = токен отозван/права
+  // сняты УЖЕ ПОСЛЕ connect'а — это не «сервис упал», а действие пользователя в МойСкладе:
+  // отвечаем 401 + машинный code, чтобы UI показал reconnect-CTA вместо «попробуйте позже».
+  // Всё остальное (сеть/5xx) → 502 «МойСклад недоступен». В лог — только path-контекст/статус,
+  // никогда токен.
   function sendMsError(res, e, ctx) {
     const status = Number(e && e.status) || 0;
     log('warn', 'ms_fetch_failed', { ...ctx, status, error: e && e.message });
@@ -51,14 +57,73 @@ function registerMsRoutes({ app, requireAuth, db, msCrypto, msFetch, cacheGet, c
         retry_after: e.retryAfter != null ? e.retryAfter : null,
       });
     }
+    if (status === 401 || status === 403) {
+      return res.status(401).json({
+        error: 'Токен отозван МойСкладом — переподключите источник',
+        code: 'ms_token_revoked',
+      });
+    }
     return res.status(502).json({ error: 'МойСклад недоступен' });
   }
 
-  // Пер-запросная идентичность МойСклада для канала запроса. Канал приходит тем же путём,
-  // что у resolveIg: ?channel= / заголовок x-channel-id, при их отсутствии — дефолтный канал
-  // пользователя (db.getChannelOrDefault — тот же ownership/disabled-предикат, что getChannel).
-  // Мок-фолбэка, в отличие от IG, нет: без подключённого склада роут честно отвечает 404 и
-  // UI показывает connect-CTA. Возвращает { channel, token } или null (ответ уже отправлен).
+  // Точечная инвалидация кэша одного канала (ключи `ms:<kind>:<channelId>[:…]`) — connect и
+  // отключение переворачивают UI сразу, не пересиживая 10-минутный TTL. Зеркало igCachePurge:
+  // delimiter-aware сравнение слота канала (purge 12 не трогает 123), сбой инвалидации никогда
+  // не превращает уже-долговечную мутацию интеграции в ложную ошибку (TTL доберёт).
+  function msCachePurge(channelId) {
+    if (!channelId) return;
+    try {
+      if (!cache || typeof cache.keys !== 'function' || typeof cache.delete !== 'function') {
+        throw new Error('cache contract has no targeted invalidation');
+      }
+      const id = String(channelId);
+      for (const k of cache.keys()) {
+        const parts = k.split(':');
+        if (parts[0] === 'ms' && parts[2] === id) cache.delete(k);
+      }
+    } catch (error) {
+      log('warn', 'ms_cache_purge_failed', {
+        error: error && error.message ? error.message : 'unknown',
+      });
+    }
+  }
+
+  // Резолв канала запроса + строки ms_accounts БЕЗ расшифровки токена. Канал приходит тем же
+  // путём, что у resolveIg: ?channel= / заголовок x-channel-id, при их отсутствии — дефолтный
+  // канал пользователя (db.getChannelOrDefault — тот же ownership/disabled-предикат, что
+  // getChannel). Явный id без доступа → 403 ВСЕГДА (не раскрываем существование канала, даже
+  // для status). optional=true (status) смягчает только «не подключён»-исходы: нет каналов или
+  // нет учётки → { channel?, acc:null } вместо 404, чтобы status честно ответил connected:false.
+  // Возвращает { channel, acc } или null (ответ уже отправлен).
+  async function resolveMsChannel(req, res, { optional = false } = {}) {
+    if (!db.enabled) {
+      res.status(503).json({ error: 'База данных недоступна' });
+      return null;
+    }
+    const channelId = parseInt(req.query.channel || req.headers['x-channel-id'], 10) || 0;
+    const channel = await db.getChannelOrDefault(channelId, req.user).catch(() => null);
+    if (!channel) {
+      if (channelId) {
+        res.status(403).json({ error: 'Нет доступа к этому каналу' });
+        return null;
+      }
+      if (optional) return { channel: null, acc: null };
+      res.status(404).json({ error: 'МойСклад не подключён к этому каналу' });
+      return null;
+    }
+    const acc = await db.getMsAccount(channel.id).catch(() => null);
+    if (!acc || !acc.access_token_enc) {
+      if (optional) return { channel, acc: null };
+      res.status(404).json({ error: 'МойСклад не подключён к этому каналу' });
+      return null;
+    }
+    return { channel, acc };
+  }
+
+  // Пер-запросная идентичность МойСклада для live-вызовов (расшифрованный токен). Мок-фолбэка,
+  // в отличие от IG, нет: без подключённого склада роут честно отвечает 404 и UI показывает
+  // connect-CTA. Возвращает { channel, token } или null (ответ уже отправлен). Порядок проверок
+  // сохранён прежним: БД → ключ шифрования → канал/учётка → decrypt.
   async function resolveMs(req, res) {
     if (!db.enabled) {
       res.status(503).json({ error: 'База данных недоступна' });
@@ -68,30 +133,19 @@ function registerMsRoutes({ app, requireAuth, db, msCrypto, msFetch, cacheGet, c
       res.status(503).json({ error: 'MS_TOKEN_KEY не задан' });
       return null;
     }
-    const channelId = parseInt(req.query.channel || req.headers['x-channel-id'], 10) || 0;
-    const channel = await db.getChannelOrDefault(channelId, req.user).catch(() => null);
-    if (!channel) {
-      // Явный id без доступа → 403 (не раскрываем существование канала); дефолт без каналов → 404.
-      if (channelId) res.status(403).json({ error: 'Нет доступа к этому каналу' });
-      else res.status(404).json({ error: 'МойСклад не подключён к этому каналу' });
-      return null;
-    }
-    const acc = await db.getMsAccount(channel.id).catch(() => null);
-    if (!acc || !acc.access_token_enc) {
-      res.status(404).json({ error: 'МойСклад не подключён к этому каналу' });
-      return null;
-    }
+    const resolved = await resolveMsChannel(req, res);
+    if (!resolved) return null;
     let token;
     try {
-      token = msCrypto.decrypt(acc.access_token_enc);
+      token = msCrypto.decrypt(resolved.acc.access_token_enc);
     } catch (e) {
       // Ключ сменили / блоб побит: это серверная деградация, а не «не подключён» — честный 503.
       // Ни ciphertext, ни plaintext в лог не попадают (ошибка decrypt — статичная строка node).
-      log('warn', 'ms_token_decrypt_failed', { channelId: channel.id, error: e.message });
+      log('warn', 'ms_token_decrypt_failed', { channelId: resolved.channel.id, error: e.message });
       res.status(503).json({ error: 'Не удалось прочитать сохранённый токен МойСклада' });
       return null;
     }
-    return { channel, token };
+    return { channel: resolved.channel, token };
   }
 
   // POST /api/ms/connect — подключить аккаунт МойСклада по API-токену. Валидация — живыми
@@ -116,6 +170,8 @@ function registerMsRoutes({ app, requireAuth, db, msCrypto, msFetch, cacheGet, c
         const status = Number(e && e.status) || 0;
         // Токена в e.message нет по построению msClient — логируем сообщение спокойно.
         log('warn', 'ms_connect_failed', { status, error: e && e.message });
+        // Здесь 401/403 = ПРИСЛАННЫЙ токен не подошёл (ошибка ввода) — 400, а не
+        // ms_token_revoked (тот про уже сохранённый и отозванный токен в data-роутах).
         if (status === 401 || status === 403) {
           return res.status(400).json({ error: 'Токен отклонён МойСкладом' });
         }
@@ -136,18 +192,97 @@ function registerMsRoutes({ app, requireAuth, db, msCrypto, msFetch, cacheGet, c
         org_name: orgName,
         access_token_enc: msCrypto.encrypt(token),
       });
+      // Ротация токена/пере-connect существующего канала: старые ms:*-ответы могли быть собраны
+      // умершим токеном — сбрасываем сразу (для свежесозданного канала purge — no-op).
+      msCachePurge(channelId);
       res.json({ ok: true, channel_id: channelId, org_name: orgName });
     } catch (e) {
       next(e);
     }
   });
 
+  // GET /api/ms/status — состояние подключения для Settings/connect-CTA. Без 404 при
+  // отсутствии учётки (в отличие от data-роутов) и без расшифровки токена: connected — это
+  // «строка ms_accounts существует», ничего секретного наружу.
+  app.get('/api/ms/status', requireAuth, async (req, res, next) => {
+    try {
+      const resolved = await resolveMsChannel(req, res, { optional: true });
+      if (!resolved) return;
+      res.json({
+        connected: !!resolved.acc,
+        org_name: resolved.acc ? resolved.acc.org_name || null : null,
+      });
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  // DELETE /api/ms/account — отключить МойСклад от канала. Сносится ТОЛЬКО учётка (токен);
+  // канал и архив ms_daily живут дальше (история остаётся, повторный connect её продолжит).
+  // Идемпотентно: повторный DELETE без учётки — тот же { ok:true }. Отключение — admin-действие
+  // воркспейса (зеркало DELETE /api/ig/oauth).
+  app.delete('/api/ms/account', requireAuth, async (req, res, next) => {
+    try {
+      const resolved = await resolveMsChannel(req, res, { optional: true });
+      if (!resolved) return;
+      if (!resolved.channel) {
+        return res.status(404).json({ error: 'МойСклад не подключён к этому каналу' });
+      }
+      if (!hasWorkspaceRole(resolved.channel, req.user, 'admin')) {
+        return res.status(403).json({ error: 'Недостаточно прав в этом воркспейсе' });
+      }
+      await db.deleteMsAccount(resolved.channel.id);
+      // Кэш-ответы канала собраны отозванным подключением — выкидываем сразу, а не по TTL.
+      msCachePurge(resolved.channel.id);
+      res.json({ ok: true });
+    } catch (e) {
+      next(e);
+    }
+  });
+
   // GET /api/ms/summary?days=30 — выручка (продажи) и заказы дневными сериями за окно.
+  // days=0 («Всё») — из архива ms_daily, без единого запроса к МС.
   app.get('/api/ms/summary', requireAuth, async (req, res, next) => {
     try {
+      const days = daysOf(req);
+
+      if (days === 0) {
+        // Архивная ветка: канал резолвим и 404-им как data-роут (после отключения учётки «Всё»
+        // ведёт себя как остальные периоды — connect-CTA), но токен НЕ трогаем: читаем только БД.
+        const resolved = await resolveMsChannel(req, res);
+        if (!resolved) return;
+        const cacheKey = `ms:summary:${resolved.channel.id}:0`;
+        const cached = cacheGet(cacheKey);
+        if (cached) return res.json(cached);
+        // ForActor — канон tenant-read (боундари-гвард запрещает *Internal в routes); повторный
+        // ownership-чек поверх resolveMsChannel дёшев и не даёт разъехаться при рефакторинге.
+        const rows = await db.getMsDailyAllForActor(resolved.channel.id, req.user);
+        // Суммируем в копейках и конвертируем один раз на границе — как в живой ветке.
+        let revenueKop = 0;
+        let ordersKop = 0;
+        let ordersCount = 0;
+        const revSeries = [];
+        const ordSeries = [];
+        for (const r of rows) {
+          const rev = Number(r.revenue_kopecks) || 0;
+          const oSum = Number(r.orders_sum_kopecks) || 0;
+          const oCount = Number(r.orders_count) || 0;
+          revenueKop += rev;
+          ordersKop += oSum;
+          ordersCount += oCount;
+          revSeries.push({ day: r.day, value: kopecksToRub(rev) });
+          ordSeries.push({ day: r.day, sum: kopecksToRub(oSum), count: oCount });
+        }
+        const data = {
+          revenue: { total: kopecksToRub(revenueKop), series: revSeries },
+          orders: { totalSum: kopecksToRub(ordersKop), totalCount: ordersCount, series: ordSeries },
+        };
+        cacheSet(cacheKey, data);
+        return res.json(data);
+      }
+
       const ms = await resolveMs(req, res);
       if (!ms) return;
-      const days = daysOf(req);
       const cacheKey = `ms:summary:${ms.channel.id}:${days}`;
       const cached = cacheGet(cacheKey);
       if (cached) return res.json(cached);
@@ -196,11 +331,14 @@ function registerMsRoutes({ app, requireAuth, db, msCrypto, msFetch, cacheGet, c
   });
 
   // GET /api/ms/top-products?days=30&limit=10 — топ товаров по прибыли за окно.
+  // days=0 здесь НЕ поддержан: у МС profit/byproduct — только оконный отчёт, а архива
+  // по-товарно мы не копим (слайс 2а — только дневные суммы), поэтому 0 падает в дефолт 30.
   app.get('/api/ms/top-products', requireAuth, async (req, res, next) => {
     try {
       const ms = await resolveMs(req, res);
       if (!ms) return;
-      const days = daysOf(req);
+      const daysRaw = daysOf(req);
+      const days = daysRaw === 0 ? 30 : daysRaw;
       const limitRaw = parseInt(req.query.limit, 10);
       // Кэп 1..50 ДО кэш-ключа — та же дисциплина ограниченной кардинальности, что у days.
       const limit = Math.min(MS_TOP_LIMIT_MAX, Math.max(1, Number.isFinite(limitRaw) ? limitRaw : MS_TOP_LIMIT_DEFAULT));

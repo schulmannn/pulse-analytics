@@ -557,6 +557,19 @@ const MsTopProductsSchema = z
   })
   .passthrough();
 
+const MsStatusSchema = z.object({ connected: z.boolean(), org_name: z.string().nullable().optional() }).passthrough();
+
+export function useMsStatus() {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    enabled: channelId != null,
+    queryKey: ['ms-status', channelId],
+    staleTime: STALE_STATUS,
+    retry: false,
+    queryFn: ({ signal }) => apiGet('/api/ms/status', MsStatusSchema, { signal, channelId }),
+  });
+}
+
 export function useMsSummary(days: number) {
   const { channelId } = useSelectedChannel();
   return useQuery({

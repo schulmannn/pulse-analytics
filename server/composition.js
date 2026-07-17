@@ -27,6 +27,7 @@ const { createIgUsageGate } = require('./infrastructure/igUsageGate');
 const {
   createInstagramCollectionJob,
 } = require('./jobs/instagramCollectionJob');
+const { createMsCollectionJob } = require('./jobs/msCollectionJob');
 const { createMemoryCache } = require('./infrastructure/memoryCache');
 const { createPersistenceJob } = require('./jobs/persistenceJob');
 const { createTgQrCollectionJob } = require('./jobs/tgQrCollectionJob');
@@ -261,6 +262,17 @@ function createComposition(config, overrides = {}) {
   });
   const collectIgForAccount = igCollectionJob.collectIgForAccount;
 
+  // Дневной сбор МойСклада в архив ms_daily — jobs/msCollectionJob (проход по всем подключённым
+  // складам, durable per-day гейты). Пишет через backgroundDb, как IG-сбор; msFetch/msCrypto —
+  // те же синглтоны, что у живых роутов (у МС нет отдельного paced-клиента: лимит per-account,
+  // а не app-level). Проход едет в collection recovery runner ниже — тот же планировщик/интервал.
+  const msCollectionJob = createMsCollectionJob({
+    db: backgroundDb,
+    msFetch,
+    msCrypto,
+    log,
+  });
+
   // Оркестратор дневного персистенса (сырой TG-снимок, IG-сбор per-account/day под runJobOnce,
   // прунинг, capacity-rollup) — jobs/persistenceJob. Зовётся как отслеживаемый post-response tail;
   // его runIgCollectionPass переиспользует и recovery-бегунок. Всё на backgroundDb.
@@ -447,6 +459,7 @@ function createComposition(config, overrides = {}) {
       runIgCollectionPass,
       processTgQrCollection,
       repairCentralMedia,
+      runMsCollectionPass: msCollectionJob.runMsCollectionPass,
       igCap: config.runtime.igAccountsPerPass,
       tgCap: config.runtime.tgQrChannelsPerPass,
       mediaCap: config.runtime.tgMediaRepairPerPass,

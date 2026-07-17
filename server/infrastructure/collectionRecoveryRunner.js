@@ -23,6 +23,10 @@ function createCollectionRecoveryRunner({
   // Bounded, best-effort central-channel cover repair (fills tg_post_media so the open thumb proxy stops
   // 503-ing). Optional so pure-scheduler tests need not inject it; defaults to an inert no-op.
   repairCentralMedia = async () => ({ skipped: true }),
+  // Дневной сбор МойСклада (jobs/msCollectionJob) — едет тем же планировщиком/интервалом, что
+  // IG-проход; внутри свой durable day-gate, так что реальная работа случается раз в день.
+  // Optional (inert no-op) — pure-scheduler тесты и composition без МС-вертикали не задеты.
+  runMsCollectionPass = async () => ({ skipped: true }),
   igCap,
   tgCap,
   mediaCap,
@@ -51,11 +55,12 @@ function createCollectionRecoveryRunner({
       // ({ accepted:false }) — тогда проход просто не выполняется. Дожидаемся, чтобы single-flight
       // держался до конца реальной работы прохода.
       const result = await jobTracker.run(async () => {
-        // IG и Telegram независимы и идут параллельно (background pool=2). Внутри Telegram lane
-        // обычный QR-сбор и узкий central-media repair идут ПОСЛЕДОВАТЕЛЬНО: один пользовательский
-        // session не получает два одновременных MTProto fan-out, а repair не превращается в третью
-        // конкурентную pipeline. Оба шага изолируют свой сбой и наследуют общий lifecycle/gating.
-        const [ig, tgLane] = await Promise.all([
+        // IG, Telegram и МойСклад — независимые upstream'ы и идут параллельными lanes. Внутри
+        // Telegram lane обычный QR-сбор и узкий central-media repair идут ПОСЛЕДОВАТЕЛЬНО: один
+        // пользовательский session не получает два одновременных MTProto fan-out, а repair не
+        // превращается в лишнюю конкурентную pipeline. Каждая lane изолирует свой сбой и
+        // наследует общий lifecycle/gating.
+        const [ig, tgLane, ms] = await Promise.all([
           runIgCollectionPass({ cap: igCap })
             .catch((e) => { log('error', 'recovery_ig_pass_failed', { error: e.message }); return null; }),
           (async () => {
@@ -65,9 +70,11 @@ function createCollectionRecoveryRunner({
               .catch((e) => { log('error', 'recovery_media_pass_failed', { error: e.message }); return null; });
             return { tg, media };
           })(),
+          runMsCollectionPass()
+            .catch((e) => { log('error', 'recovery_ms_pass_failed', { error: e.message }); return null; }),
         ]);
         const { tg, media } = tgLane;
-        log('info', 'collection_recovery_pass_done', { ig, tg, media });
+        log('info', 'collection_recovery_pass_done', { ig, tg, media, ms });
       }, { job: 'collection_recovery_pass' });
       if (result && result.accepted === false) return { skipped: true };
       return { skipped: false };

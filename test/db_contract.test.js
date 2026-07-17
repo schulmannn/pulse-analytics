@@ -34,20 +34,22 @@ const EXPECTED_FUNCTIONS = [
   'upsertChannelDaily', 'upsertPosts', 'upsertMentions', 'upsertIgTags', 'getIgTags',
   'listCentralPostsMissingMedia',
   'saveRawSnapshot', 'pruneRawSnapshots', 'pruneIgMediaDaily', 'pruneIngestReceipts', 'rollupChannelMonthly',
-  'upsertIgDaily', 'upsertIgMediaDaily',
+  'upsertIgDaily', 'upsertIgMediaDaily', 'upsertMsDaily',
   // analytics reads (finding 5: контракт доступа — Internal для cron/service, ForActor для роутов;
   // голого un-gated db.getChannelHistory/getSnapshot/… в публичном API больше НЕТ)
   'getChannelHistoryInternal', 'getMentionsHistoryInternal', 'getMentionsArchiveInternal',
   'getSnapshotInternal', 'getLatestVelocityInternal', 'listPostsInternal', 'listIgDailyInternal', 'listIgMediaDailyInternal',
+  'getMsDailyAllInternal',
   'getPublicTgChannelPhoto',
   'getChannelHistoryForActor', 'getMentionsHistoryForActor', 'getMentionsArchiveForActor',
   'getSnapshotForActor', 'getLatestVelocityForActor', 'listPostsForActor', 'listIgDailyForActor', 'listIgMediaDailyForActor',
+  'getMsDailyAllForActor',
   // bugs / crashes
   'createBug', 'createCrash', 'upsertCrashSignature', 'recordCrashOccurrence', 'setCrashNotionPage', 'touchCrashNotified',
   'listBugs', 'updateBug', 'deleteBug', 'bugExists', 'getBug', 'addAttachmentIfRoom', 'getAttachment',
   // integrations (ig accounts / ms accounts / tg sessions)
   'saveIgAccount', 'getIgAccount', 'updateIgToken', 'deleteIgAccount', 'listIgAccounts',
-  'saveMsAccount', 'getMsAccount',
+  'saveMsAccount', 'getMsAccount', 'listMsAccounts', 'deleteMsAccount',
   'saveTgSession', 'getTgSession', 'deleteTgSession', 'listTgSessions', 'rotateTgSessionCiphertext',
   'listTgQrCollectCandidates',
   'recordTgSessionAttempt', 'recordTgSessionSuccess', 'recordTgSessionFailure',
