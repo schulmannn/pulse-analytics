@@ -298,6 +298,36 @@ function createChannelsRepo({ pool, enabled, transaction, ensureExternalSource }
     });
   }
 
+  // Standalone-канал МойСклада — строка channels без платформенной TG/IG-идентичности
+  // (source='ms', username NULL), зеркально createIgChannel. Дедуп по идентичности — у
+  // вызывающего (findMsChannelByAccount), чтобы повторный connect того же аккаунта обновлял
+  // токен существующего канала, а не плодил дубль источника.
+  async function createMsChannel({ owner_uid, name }) {
+    if (!enabled || owner_uid == null) return null;
+    const title = String(name || '').trim() || 'МойСклад';
+    // Finding 2: канал + workspace-привязка одной транзакцией (см. createChannel).
+    return transaction(async (client) => {
+      const { rows } = await client.query(
+        `INSERT INTO channels (owner_uid, username, title, status, source)
+         VALUES ($1,NULL,$2,'active','ms') RETURNING ${CHANNEL_COLS}`,
+        [owner_uid, title]);
+      const row = rows[0] || null;
+      // Workspace сейчас; канонический ms-source штампует saveMsAccount (accountId известен там).
+      if (row) await ensureChannelCanonical(row.id, owner_uid, {}, client);
+      return row;
+    });
+  }
+
+  // Канал пользователя, уже держащий эту учётку МойСклада (дедуп повторного connect).
+  async function findMsChannelByAccount(uid, msAccountId) {
+    if (!enabled || uid == null || !msAccountId) return null;
+    const { rows } = await pool.query(
+      `SELECT c.id FROM channels c JOIN ms_accounts ma ON ma.channel_id = c.id
+       WHERE c.owner_uid=$1 AND ma.ms_account_id=$2 AND c.status<>'disabled' LIMIT 1`,
+      [uid, String(msAccountId)]);
+    return rows[0] ? rows[0].id : null;
+  }
+
   // The user's channel already holding this Instagram identity (multi-account reconnect dedup).
   async function findIgChannelByIgUser(uid, igUserId) {
     if (!enabled || uid == null || !igUserId) return null;
@@ -427,7 +457,7 @@ function createChannelsRepo({ pool, enabled, transaction, ensureExternalSource }
     listChannels, getDefaultChannelId, getChannelOrDefault, getChannel, getChannelById, getOwnerChannelId, setChannelTgId,
     getTgChannelIdentity, saveTgChannelAccessHash,
     ensurePersonalWorkspace, ensureChannelCanonical,
-    createChannel, createIgChannel, findIgChannelByIgUser, createTgChannel, deleteChannel,
+    createChannel, createIgChannel, findIgChannelByIgUser, createMsChannel, findMsChannelByAccount, createTgChannel, deleteChannel,
     createApiKey, getChannelByApiKey, listApiKeys, revokeApiKey,
     listAnnotations, createAnnotation, deleteAnnotation,
   };

@@ -93,6 +93,11 @@ function loadConfig(env = process.env) {
       oauthMaxInFlight: Number(env.IG_OAUTH_MAX_INFLIGHT || 8),
       oauthAcquireTimeoutMs: Number(env.IG_OAUTH_ACQUIRE_TIMEOUT_MS || 2000),
     }),
+    moysklad: Object.freeze({
+      // Ключ шифрования токенов МойСклада (AES-256-GCM, lib/ms_crypto) — по образцу
+      // instagram.tokenKey: пусто = connect-флоу inert (/api/ms/connect отвечает 503).
+      tokenKey: env.MS_TOKEN_KEY || '',
+    }),
     telegram: Object.freeze({
       botToken: env.TG_BOT_TOKEN || '',
       channel: env.TG_CHANNEL || '',
