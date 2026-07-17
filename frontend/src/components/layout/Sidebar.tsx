@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useChannels, useHistory, useTgQrStatus } from '@/api/queries';
@@ -10,7 +10,7 @@ import { useMediaQuery } from '@/lib/useMediaQuery';
 import { useSidebarMode } from '@/lib/sidebar';
 import { freshness, latestHistoryDay } from '@/lib/freshness';
 import { cn } from '@/lib/utils';
-import { Icon } from '@/components/nav-icons';
+import { Icon, PanelToggleGlyph } from '@/components/nav-icons';
 import { SourceSwitcher } from './SourceSwitcher';
 import { AccountMenuContent, ACCOUNT_MENU_SHELL, avatarInitials } from './AccountMenu';
 import { useActiveNetworkNav, type NavLinkDef } from './nav';
@@ -79,23 +79,18 @@ export function Sidebar({ email, role, avatar }: { email?: string; role?: string
 /**
  * Sidebar utility strip — the panel toggle (Ctrl+B) and search (⌘K, opens the global command
  * palette) as quiet ghost actions. No brand block here (the wordmark stays on the Landing page),
- * so the strip is LEFT-aligned chrome (owner call) and the channel card below is the sidebar's
- * first real content. In the rail the actions stack centered, so the toggle always stays reachable.
+ * so Search stays on the left navigation axis and the toggle marks the moving outer edge. The
+ * channel card below remains the sidebar's first real content; in the rail the actions stack.
  */
 function SidebarActions({ rail, onToggle }: { rail: boolean; onToggle: () => void }) {
   return (
-    // The toggle stays on the 32px rail axis. Search glides diagonally below it while collapsing,
-    // instead of jumping from a horizontal flex row to a vertical one in a single frame.
-    <div className="sidebar-actions relative mx-3 mt-3">
-      <GhostIconButton
-        onClick={onToggle}
-        label={rail ? 'Показать панель' : 'Скрыть панель'}
-        title={rail ? 'Показать панель · Ctrl+B' : 'Скрыть панель · Ctrl+B'}
-        expanded={!rail}
-        className="sidebar-action sidebar-action-toggle"
-      >
-        <Icon name="panel" className="h-4 w-4" />
-      </GhostIconButton>
+    // Kimi-style edge-led chrome: the toggle rides the sidebar's OUTER edge — pinned to the right in
+    // the expanded panel, sliding back onto the 32px rail axis as the surface collapses — while Search
+    // holds the stable left axis (top when open, below the toggle in the rail). Both actions are
+    // absolutely placed and animate their transform on the one shared collapse/expand beat, so the
+    // strip travels with the width instead of re-flowing a flex row into a column in a single frame.
+    <div className="sidebar-actions relative mt-3">
+      <SidebarToggle rail={rail} onToggle={onToggle} />
       <GhostIconButton
         onClick={openCommandPalette}
         label="Поиск"
@@ -104,6 +99,43 @@ function SidebarActions({ rail, onToggle }: { rail: boolean; onToggle: () => voi
       >
         <Icon name="search" className="h-4 w-4" />
       </GhostIconButton>
+    </div>
+  );
+}
+
+/**
+ * Sidebar panel toggle — the morphing glyph + a CSS-only tooltip beside it. The glyph reveals a
+ * directional chevron on hover/focus (see `PanelToggleGlyph`); the tooltip (a separate, pointer-events
+ * none layer to the right) carries the Russian action label plus discrete `Ctrl`/`B` key chips. Both
+ * the icon morph and the tooltip open on :hover AND :focus-visible via `index.css` — no hover React
+ * state, no timers, so the CSS transitions stay interruptible. `aria-describedby` links the tooltip
+ * (role="tooltip") to the button for AT; there is no native `title`, so the hint is never duplicated.
+ */
+function SidebarToggle({ rail, onToggle }: { rail: boolean; onToggle: () => void }) {
+  const label = rail ? 'Показать панель' : 'Скрыть панель';
+  const tipId = useId();
+  return (
+    <div className="sidebar-action sidebar-action-toggle">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-label={label}
+        aria-expanded={!rail}
+        aria-describedby={tipId}
+        className="sidebar-toggle-btn flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-hover-row hover:text-foreground focus-visible:bg-hover-row focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+      >
+        <PanelToggleGlyph rail={rail} className="sidebar-toggle-glyph h-4 w-4" />
+      </button>
+      <span
+        id={tipId}
+        role="tooltip"
+        data-sidebar-tooltip
+        className="sidebar-tooltip rounded-lg border bg-popover px-2.5 py-1.5 text-xs text-popover-foreground"
+      >
+        <span className="whitespace-nowrap">{label}</span>
+        <kbd className="sidebar-key font-mono text-2xs">Ctrl</kbd>
+        <kbd className="sidebar-key font-mono text-2xs">B</kbd>
+      </span>
     </div>
   );
 }

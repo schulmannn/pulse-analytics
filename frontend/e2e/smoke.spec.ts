@@ -94,38 +94,76 @@ test('desktop sidebar glides between open and rail without moving the icon axis'
   expect(openSidebar.width).toBeCloseTo(240, 0);
   const canvasInset = openMain.x - openSidebar.width;
   expect(canvasInset).toBeGreaterThanOrEqual(0);
+  // Expanded (Kimi-led): Search holds the left rail axis, the toggle is pinned to the panel's right edge.
+  expect(openSearch.x).toBeLessThan(openToggle.x - 20);
   expect(openSearch.y).toBeCloseTo(openToggle.y, 0);
-  expect(openSearch.x).toBeGreaterThan(openToggle.x + 20);
+  const rightGap = openSidebar.x + openSidebar.width - (openToggle.x + openToggle.width);
+  expect(rightGap).toBeCloseTo(12, 0);
+
+  // Toggle glyph + tooltip: an original morph reveals a directional chevron and a compact hint on
+  // hover AND keyboard focus, honestly pointing «hide» while the panel is open. No native title.
+  const tooltip = sidebar.getByRole('tooltip');
+  const chevron = toggle.locator('.panel-chevron');
+  expect(await toggle.getAttribute('title')).toBeNull();
+  await expect(toggle.locator('.sidebar-toggle-glyph')).toHaveAttribute('data-direction', 'hide');
+  await expect(tooltip).toHaveCSS('opacity', '0');
+  await toggle.hover();
+  await expect(tooltip).toHaveCSS('opacity', '1');
+  await expect(tooltip).toContainText('Скрыть панель');
+  await expect(tooltip.locator('kbd')).toHaveText(['Ctrl', 'B']);
+  await expect(chevron).toHaveCSS('opacity', '1');
+  await search.hover();
+  await expect(tooltip).toHaveCSS('opacity', '0');
+  // Keyboard Tab creates :focus-visible; advancing to Search closes the same affordance.
+  await page.keyboard.press('Tab');
+  await expect(toggle).toBeFocused();
+  await expect(tooltip).toHaveCSS('opacity', '1');
+  await expect(chevron).toHaveCSS('opacity', '1');
+  await page.keyboard.press('Tab');
+  await expect(search).toBeFocused();
+  await expect(tooltip).toHaveCSS('opacity', '0');
 
   const expandDuration = await sidebar.evaluate((element) =>
     Math.max(...getComputedStyle(element).transitionDuration.split(',').map((part) => Number.parseFloat(part))),
   );
-  expect(expandDuration).toBeGreaterThanOrEqual(0.29);
+  // One shared ~300ms edge-led beat — no asymmetric collapse/expand pair.
+  expect(expandDuration).toBeCloseTo(0.3, 1);
 
   await toggle.click();
   await expect(sidebar).toHaveAttribute('data-rail', 'true');
   await expect.poll(async () => (await sidebar.boundingBox())?.width ?? 0).toBeCloseTo(64, 0);
   await expect(homeCopy).toHaveCSS('opacity', '0');
 
+  const railToggleBtn = page.getByRole('button', { name: 'Показать панель' });
   const [railSidebar, railMain, railGlyph, railToggle, railSearch] = await Promise.all([
     requireBox(sidebar),
     requireBox(main),
     requireBox(homeGlyph),
-    requireBox(page.getByRole('button', { name: 'Показать панель' })),
+    requireBox(railToggleBtn),
     requireBox(search),
   ]);
   expect(railSidebar.width).toBeCloseTo(64, 0);
   expect(railMain.x - railSidebar.width).toBeCloseTo(canvasInset, 0);
+  // Main canvas travels exactly the 240→64 delta (176px) and the icon axis never moves.
+  expect(openMain.x - railMain.x).toBeCloseTo(176, 0);
   expect(openMain.x - railMain.x).toBeCloseTo(openSidebar.width - railSidebar.width, 0);
   expect(Math.abs((railGlyph.x + railGlyph.width / 2) - (openGlyph.x + openGlyph.width / 2))).toBeLessThanOrEqual(1);
+  // Rail: the toggle is back on the icon axis, Search drops below it.
   expect(railSearch.x).toBeCloseTo(railToggle.x, 0);
   expect(railSearch.y).toBeGreaterThan(railToggle.y + 20);
+  // Chevron flips to the honest «reveal» direction in the rail.
+  await expect(railToggleBtn.locator('.sidebar-toggle-glyph')).toHaveAttribute('data-direction', 'show');
+  await railToggleBtn.hover();
+  await expect(tooltip).toContainText('Показать панель');
+  await expect(tooltip).toHaveCSS('opacity', '1');
+  await search.hover();
+  await expect(tooltip).toHaveCSS('opacity', '0');
 
   const collapseDuration = await sidebar.evaluate((element) =>
     Math.max(...getComputedStyle(element).transitionDuration.split(',').map((part) => Number.parseFloat(part))),
   );
-  expect(collapseDuration).toBeGreaterThanOrEqual(0.23);
-  expect(collapseDuration).toBeLessThan(expandDuration);
+  expect(collapseDuration).toBeCloseTo(0.3, 1);
+  expect(collapseDuration).toBeCloseTo(expandDuration, 1);
 
   // Ctrl+B uses the same mode path. A focused input must keep the browser shortcut from toggling.
   await page.keyboard.press('Control+b');
@@ -170,4 +208,12 @@ test('reduced motion removes sidebar duration and staged copy delay', async ({ p
   const delays = timing.delay.split(',').map((part) => Number.parseFloat(part));
   expect(Math.max(...durations)).toBeLessThan(0.001);
   expect(Math.max(...delays)).toBe(0);
+
+  // The toggle tooltip/glyph reveal is collapsed by the same global net.
+  const reducedTiming = await sidebar.getByRole('tooltip').evaluate((element) => ({
+    duration: getComputedStyle(element).transitionDuration,
+    delay: getComputedStyle(element).transitionDelay,
+  }));
+  expect(Math.max(...reducedTiming.duration.split(',').map((part) => Number.parseFloat(part)))).toBeLessThan(0.001);
+  expect(Math.max(...reducedTiming.delay.split(',').map((part) => Number.parseFloat(part)))).toBe(0);
 });
