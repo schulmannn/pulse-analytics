@@ -3,8 +3,9 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
 import QRCode from 'qrcode';
 import { useQueryClient } from '@tanstack/react-query';
-import { useChannels, useConnectIg, useDisconnectIg, useIgOauthStatus, useMsStatus, useTgQrStatus } from '@/api/queries';
+import { useChannels, useConnectIg, useDisconnectIg, useIgOauthStatus, useMsBackfillStatus, useMsStatus, useTgQrStatus } from '@/api/queries';
 import { ApiError, apiSend } from '@/api/client';
+import { fmt } from '@/lib/format';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { cn } from '@/lib/utils';
 
@@ -371,6 +372,85 @@ function PanelHead({ id, name, pill }: { id: ServiceId; name: string; pill: { la
   );
 }
 
+// ── МойСклад: история заказов (бэкфилл с прогрессом — слайс 2б) ──
+function MsBackfillBlock() {
+  const qc = useQueryClient();
+  const backfill = useMsBackfillStatus(true);
+  const [startErr, setStartErr] = useState<string | null>(null);
+  const st = backfill.data;
+  const startBackfill = async () => {
+    setStartErr(null);
+    try {
+      await apiSend('POST', '/api/ms/backfill');
+      await qc.invalidateQueries({ queryKey: ['ms-backfill'] });
+    } catch (err) {
+      setStartErr(err instanceof ApiError ? err.message : 'Не удалось запустить загрузку.');
+    }
+  };
+  const monthLabel = (m?: string | null) =>
+    m ? new Date(`${m}-01T00:00:00`).toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' }) : null;
+
+  if (backfill.isPending || !st) return null;
+
+  if (st.status === 'running') {
+    const total = st.total && st.total > 0 ? st.total : null;
+    const pct = total ? Math.min(100, Math.round((st.fetched / total) * 100)) : null;
+    return (
+      <div className="rounded-xl border border-border bg-background p-3.5">
+        <div className="flex items-baseline justify-between gap-3 text-xs">
+          <span className="font-medium text-foreground">Загружаем историю заказов…</span>
+          <span className="tabular-nums text-muted-foreground">
+            {fmt.num(st.fetched)}
+            {total ? ` из ~${fmt.num(total)}` : ''}
+            {monthLabel(st.cursor_month) ? ` · ${monthLabel(st.cursor_month)}` : ''}
+          </span>
+        </div>
+        {/* Строка загрузки (владелец): определённая при известном итоге, бегущая — при неизвестном. */}
+        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+          <div
+            className="h-full rounded-full bg-primary transition-[width] duration-300"
+            style={{ width: pct != null ? `${pct}%` : '30%' }}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (st.status === 'done') {
+    return (
+      <p className="text-xs text-muted-foreground">
+        История заказов загружена: <span className="font-medium tabular-nums text-foreground">{fmt.num(st.orders_in_db ?? st.fetched)}</span>{' '}
+        — свежие заказы доливаются автоматически.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <button
+        type="button"
+        onClick={() => void startBackfill()}
+        className="btn-pill border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+      >
+        Загрузить историю заказов
+      </button>
+      <p className="text-2xs text-muted-foreground">
+        Разово выгрузим все заказы (у больших складов — с строкой прогресса); это откроет средний чек по истории,
+        когорты и повторные покупки.
+      </p>
+      {/* start() при error сознательно начинает С НУЛЯ (resume-с-курсора — только для брошенных
+          running); повтор безопасен — upsert заказов заменяющий. Не обещать «продолжит с места». */}
+      {st.status === 'error' && (
+        <p className="text-xs text-ember">
+          Прошлая загрузка прервалась{st.error ? `: ${String(st.error)}` : ''} — запустите ещё раз, прогон начнётся
+          заново (уже загруженное безопасно перезапишется).
+        </p>
+      )}
+      {startErr && <p className="text-xs text-ember">{startErr}</p>}
+    </div>
+  );
+}
+
 // ── МойСклад: подключение по токену API ──
 function MoySkladPanel() {
   const qc = useQueryClient();
@@ -440,6 +520,7 @@ function MoySkladPanel() {
             Подключена организация <b className="font-medium text-foreground">{orgName}</b>. Выручка, заказы и топ
             товаров уже считаются; дневной архив пополняется автоматически.
           </p>
+          <MsBackfillBlock />
           <div className="flex flex-wrap items-center gap-3">
             <Link
               to="/sklad"

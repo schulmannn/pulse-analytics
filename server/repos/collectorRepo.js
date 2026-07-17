@@ -465,6 +465,92 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
     return rows.length;
   }
 
+  // Заказы покупателей МойСклада (архив ms_orders, слайс 2б). rows: [{ order_id, moment,
+  // sum_kopecks, state, agent_id, agent_name }] — суммы в КОПЕЙКАХ. Идемпотентный батч-upsert по
+  // (channel_id, order_id); как у ms_daily — СОЗНАТЕЛЬНО полная ЗАМЕНА строки, не COALESCE:
+  // заказы в МС правят задним числом (сумма/статус/контрагент меняются, в т.ч. вниз), и
+  // повторный проход обязан донести правку, а не «дополнить». Формат moment валидирует движок
+  // (jobs/msBackfillJob) — та же дисциплина, что dayOf в msCollectionJob: repo лишь отбрасывает
+  // строки без ключа/даты, чтобы дырявая строка не уронила jsonb-каст всего батча.
+  async function upsertMsOrders(channelId, rows, executor = pool) {
+    if (!enabled || !channelId || !rows || !rows.length) return 0;
+    const clean = rows.filter((r) => r && r.order_id != null && r.moment != null);
+    if (!clean.length) return 0;
+    const sql = `INSERT INTO ms_orders
+        (channel_id, order_id, moment, sum_kopecks, state, agent_id, agent_name, updated_at)
+      SELECT $1, x.order_id, x.moment, COALESCE(x.sum_kopecks, 0), x.state, x.agent_id, x.agent_name, now()
+        FROM jsonb_to_recordset($2::jsonb) AS x(
+          order_id text, moment timestamptz, sum_kopecks bigint,
+          state text, agent_id text, agent_name text
+        )
+      ON CONFLICT (channel_id, order_id) DO UPDATE SET
+        moment=EXCLUDED.moment,
+        sum_kopecks=EXCLUDED.sum_kopecks,
+        state=EXCLUDED.state,
+        agent_id=EXCLUDED.agent_id,
+        agent_name=EXCLUDED.agent_name,
+        updated_at=now()`;
+    await executor.query(sql, [channelId, JSON.stringify(clean)]);
+    return clean.length;
+  }
+
+  // Сколько заказов канала уже в архиве — для /api/ms/backfill-status (orders_in_db).
+  // COUNT(*)::int безопасен: счётчик заказов одного склада заведомо < 2^31.
+  async function countMsOrders(channelId) {
+    if (!enabled || !channelId) return 0;
+    const { rows } = await pool.query(
+      'SELECT COUNT(*)::int AS n FROM ms_orders WHERE channel_id=$1', [channelId]);
+    return rows[0] ? rows[0].n : 0;
+  }
+
+  // Durable-состояние бэкфилла заказов одного канала (ms_backfill_state), null = ещё не стартовал.
+  // updated_age_seconds считается В БД (одни часы с writer'ом: setMsBackfillState ставит
+  // updated_at=now() тем же Postgres-клоком) — движок сравнивает свежесть/протухлость строки
+  // без парсинга ISO-строк и без риска рассинхрона часов процесса и БД.
+  async function getMsBackfillState(channelId) {
+    if (!enabled || !channelId) return null;
+    const { rows } = await pool.query(
+      `SELECT channel_id, status, to_char(cursor_from,'YYYY-MM-DD') AS cursor_from,
+              total_estimate, fetched_count, error,
+              to_char(started_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS started_at,
+              to_char(updated_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS updated_at,
+              EXTRACT(EPOCH FROM (now() - updated_at))::int AS updated_age_seconds
+         FROM ms_backfill_state WHERE channel_id=$1`, [channelId]);
+    return rows[0] || null;
+  }
+
+  // Частичный upsert состояния бэкфилла: меняются ТОЛЬКО присланные ключи patch (явный null
+  // пишет NULL — например сброс error при рестарте), updated_at штампуется ВСЕГДА (heartbeat
+  // живого прогона). Динамика SQL — строго по allow-list'у колонок, значения только биндами:
+  // caller-controlled имён/SQL в запросе нет по построению. status дополнительно держит
+  // CHECK-констрейнт таблицы (единственный писатель — движок с фиксированными литералами).
+  const MS_BACKFILL_COLUMNS = ['status', 'cursor_from', 'total_estimate', 'fetched_count', 'error', 'started_at'];
+  async function setMsBackfillState(channelId, patch = {}) {
+    if (!enabled || !channelId) return false;
+    const cols = ['channel_id'];
+    const vals = ['$1'];
+    const params = [channelId];
+    const sets = [];
+    for (const col of MS_BACKFILL_COLUMNS) {
+      if (!(col in patch)) continue;
+      let v = patch[col];
+      // Краткое сообщение об ошибке — как ingest_receipts.error: обрезаем, токенов в тексте
+      // нет по построению msClient (он их не кладёт в message).
+      if (col === 'error' && v != null) v = String(v).slice(0, 1000);
+      params.push(v);
+      cols.push(col);
+      vals.push(`$${params.length}`);
+      sets.push(`${col}=$${params.length}`);
+    }
+    sets.push('updated_at=now()');
+    await pool.query(
+      `INSERT INTO ms_backfill_state (${cols.join(', ')}, updated_at)
+       VALUES (${vals.join(', ')}, now())
+       ON CONFLICT (channel_id) DO UPDATE SET ${sets.join(', ')}`,
+      params);
+    return true;
+  }
+
   // Per-media lifetime-инсайты по дням. rows: [{ media_id, day, reach, likes, comments,
   // saved, shares, views }]. Insights кумулятивны → каждый день — новая точка траектории.
   async function upsertIgMediaDaily(channelId, rows, executor = pool) {
@@ -637,6 +723,7 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
     saveSnapshot, saveVelocity,
     ingestCollectorPayload, persistCentralDaily, persistTgBundleTx,
     upsertIgDaily, upsertIgMediaDaily, upsertMsDaily,
+    upsertMsOrders, countMsOrders, getMsBackfillState, setMsBackfillState,
     saveRawSnapshot, pruneRawSnapshots, pruneIgMediaDaily, pruneIngestReceipts, rollupChannelMonthly,
   };
 }

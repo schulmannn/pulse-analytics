@@ -27,6 +27,11 @@ function createCollectionRecoveryRunner({
   // IG-проход; внутри свой durable day-gate, так что реальная работа случается раз в день.
   // Optional (inert no-op) — pure-scheduler тесты и composition без МС-вертикали не задеты.
   runMsCollectionPass = async () => ({ skipped: true }),
+  // Заказы МойСклада (jobs/msBackfillJob.runMsOrdersPass): resume брошенных бэкфиллов + дневная
+  // доливка свежих заказов done-каналам. Идёт ПОСЛЕ дневного архива в ТОЙ ЖЕ ms-lane
+  // (последовательно): оба пути бьют один per-account лимит МС (45/3с) — не удваиваем нагрузку
+  // на склад конкуренцией. Optional (inert no-op) — как остальные lane-зависимости.
+  runMsOrdersPass = async () => ({ skipped: true }),
   igCap,
   tgCap,
   mediaCap,
@@ -60,7 +65,7 @@ function createCollectionRecoveryRunner({
         // пользовательский session не получает два одновременных MTProto fan-out, а repair не
         // превращается в лишнюю конкурентную pipeline. Каждая lane изолирует свой сбой и
         // наследует общий lifecycle/gating.
-        const [ig, tgLane, ms] = await Promise.all([
+        const [ig, tgLane, msLane] = await Promise.all([
           runIgCollectionPass({ cap: igCap })
             .catch((e) => { log('error', 'recovery_ig_pass_failed', { error: e.message }); return null; }),
           (async () => {
@@ -70,11 +75,19 @@ function createCollectionRecoveryRunner({
               .catch((e) => { log('error', 'recovery_media_pass_failed', { error: e.message }); return null; });
             return { tg, media };
           })(),
-          runMsCollectionPass()
-            .catch((e) => { log('error', 'recovery_ms_pass_failed', { error: e.message }); return null; }),
+          // МС-lane последовательна (как Telegram): дневной архив, затем заказы (resume+topup) —
+          // один per-account лимит МС не делится между двумя конкурентными проходами.
+          (async () => {
+            const ms = await runMsCollectionPass()
+              .catch((e) => { log('error', 'recovery_ms_pass_failed', { error: e.message }); return null; });
+            const msOrders = await runMsOrdersPass()
+              .catch((e) => { log('error', 'recovery_ms_orders_pass_failed', { error: e.message }); return null; });
+            return { ms, msOrders };
+          })(),
         ]);
         const { tg, media } = tgLane;
-        log('info', 'collection_recovery_pass_done', { ig, tg, media, ms });
+        const { ms, msOrders } = msLane;
+        log('info', 'collection_recovery_pass_done', { ig, tg, media, ms, msOrders });
       }, { job: 'collection_recovery_pass' });
       if (result && result.accepted === false) return { skipped: true };
       return { skipped: false };

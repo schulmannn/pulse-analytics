@@ -30,6 +30,7 @@ const {
   createInstagramCollectionJob,
 } = require('./jobs/instagramCollectionJob');
 const { createMsCollectionJob } = require('./jobs/msCollectionJob');
+const { createMsBackfillEngine } = require('./jobs/msBackfillJob');
 const { createMemoryCache } = require('./infrastructure/memoryCache');
 const { createPersistenceJob } = require('./jobs/persistenceJob');
 const { createTgQrCollectionJob } = require('./jobs/tgQrCollectionJob');
@@ -275,6 +276,17 @@ function createComposition(config, overrides = {}) {
     log,
   });
 
+  // Чанковый бэкфилл заказов покупателей (ms_orders) + resume/доливка — jobs/msBackfillJob.
+  // Один инстанс на процесс: его in-process single-flight и должен быть общим для роута
+  // (POST /api/ms/backfill стартует fire-and-forget) и recovery-бегунка (runMsOrdersPass).
+  // Пишет через backgroundDb (тяжёлый постраничный прогон не занимает live-коннекты).
+  const msBackfillEngine = createMsBackfillEngine({
+    db: backgroundDb,
+    msFetch,
+    msCrypto,
+    log,
+  });
+
   // Оркестратор дневного персистенса (сырой TG-снимок, IG-сбор per-account/day под runJobOnce,
   // прунинг, capacity-rollup) — jobs/persistenceJob. Зовётся как отслеживаемый post-response tail;
   // его runIgCollectionPass переиспользует и recovery-бегунок. Всё на backgroundDb.
@@ -446,6 +458,7 @@ function createComposition(config, overrides = {}) {
       igMock,
       msCrypto,
       msFetch,
+      msBackfill: msBackfillEngine,
       nearestOf,
       cacheGet,
       cacheSet,
@@ -486,6 +499,7 @@ function createComposition(config, overrides = {}) {
       processTgQrCollection,
       repairCentralMedia,
       runMsCollectionPass: msCollectionJob.runMsCollectionPass,
+      runMsOrdersPass: msBackfillEngine.runMsOrdersPass,
       igCap: config.runtime.igAccountsPerPass,
       tgCap: config.runtime.tgQrChannelsPerPass,
       mediaCap: config.runtime.tgMediaRepairPerPass,

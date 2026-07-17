@@ -50,7 +50,7 @@ function createApp(deps) {
     limiter, authLimiter, mediaLimiter,
     hashPassword, verifyPassword, DUMMY_HASH, signSession, SESSION_TTL, GOOGLE_CLIENT_ID,
     appBase, sha256, newToken, VERIFY_TTL, RESET_TTL, sendEmail, emailShell, emailBtn, escHtml,
-    igFetch, refreshIgIfNeeded, igConfigured, igCrypto, igMock, msCrypto, msFetch, nearestOf,
+    igFetch, refreshIgIfNeeded, igConfigured, igCrypto, igMock, msCrypto, msFetch, msBackfill, nearestOf,
     cacheGet, cacheSet, cache, IG_ACCOUNT, IG_TOKEN, IG_GRAPH, AUTH_SECRET,
     tgCrypto, collectQrChannelsNow, collectManagedPostStatsNow, TG_TOKEN, TG_CHANNEL,
     timingSafeEqualStr, dailyIngestJob, jobTracker, mtprotoClient, notionCrash,
@@ -177,12 +177,13 @@ function createApp(deps) {
     oauthAcquireTimeoutMs: config.instagram.oauthAcquireTimeoutMs,
   });
 
-  // Роуты МойСклада (connect по API-токену + summary/top-products + status/disconnect) —
+  // Роуты МойСклада (connect по API-токену + summary/top-products + status/disconnect +
+  // backfill заказов: msBackfill = engine из composition, старт fire-and-forget + прогресс) —
   // routes/moysklad.js. msCrypto/msFetch построены в composition (зеркально igCrypto/igFetch);
   // канал data-роуты резолвят тем же заголовком x-channel-id, что IG (см. resolveMs внутри).
   // cache (полный контракт keys/delete) — для точечной инвалидации ms:*-ключей канала на
   // connect/disconnect, как igCachePurge в ig-oauth.
-  registerMsRoutes({ app, requireAuth, db, msCrypto, msFetch, cacheGet, cacheSet, cache, log });
+  registerMsRoutes({ app, requireAuth, db, msCrypto, msFetch, msBackfill, cacheGet, cacheSet, cache, log });
 
   registerChannelsRoutes({ app, db, requireAuth, audit, getDbReady });
 
