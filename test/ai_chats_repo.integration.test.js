@@ -1,6 +1,6 @@
 'use strict';
 
-// Integration-тесты aiChatsRepo (личные AI-диалоги, 026) — на РЕАЛЬНОМ Postgres. Без
+// Integration-тесты aiChatsRepo (личные AI-диалоги, 027) — на РЕАЛЬНОМ Postgres. Без
 // TEST_DATABASE_URL всё SKIP'ается (как campaigns/users/channels). Локальный стенд:
 //   TEST_DATABASE_URL=postgresql://postgres@localhost:5432/pulse PGSSL=disable npm test
 // Каждый прогон живёт на своих строках (nonce в email) и чистит за собой (удаление

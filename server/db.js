@@ -231,7 +231,7 @@ function createDatabase(config, overrides = {}) {
     enabled,
     getAccessibleChannel: channelsRepo.getChannel,
   });
-  // Личные AI-диалоги (026): все методы uid-scoped; аналитика в чат попадает только через
+  // Личные AI-диалоги (027): все методы uid-scoped; аналитика в чат попадает только через
   // ForActor-инструменты aiChatService, не через этот repo.
   const aiChatsRepo = createAiChatsRepo({ pool, enabled });
 
