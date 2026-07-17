@@ -12,12 +12,20 @@
    Инварианты продукта зашиты в данные и подписи:
      • TG-просмотры и IG-охват — РАЗНЫЕ метрики, инструменты не смешивают их в одно число;
      • TG «просмотры канала» = сумма дневного потока channel_daily.views (включая старые посты);
-     • IG followers = валовые новые подписки (gross), нетто = follows − unfollows. */
+     • IG followers = валовые новые подписки (gross), нетто = follows − unfollows;
+     • деньги МойСклада (выручка/заказы/средний чек) — своя система величин, с просмотрами
+       и охватами не смешиваются.
+
+   Складские инструменты: сводка/клиенты/воронка читают НАШ архив (ms_daily / ms_orders,
+   ForActor-ридеры); топ товаров и имена статусов — живые вызовы МойСклада через инъектированный
+   sklad = { msFetch, msCrypto } (токен расшифровывается на время вызова и никуда не пишется;
+   без подключённого аккаунта инструмент честно отвечает ошибкой). */
 
 const MAX_DAYS = 365;
 const DAILY_ROWS_CAP = 35; // до ~5 недель отдаём дни как есть, дальше — недельные бакеты
+const MS_TOP_FETCH_LIMIT = 1000; // одна страница отчёта прибыльности (максимум API МС)
 
-function createAiTools({ db }) {
+function createAiTools({ db, sklad }) {
   const definitions = [
     {
       name: 'get_telegram_metrics',
@@ -83,6 +91,62 @@ function createAiTools({ db }) {
       input_schema: { type: 'object', properties: {} },
     },
     {
+      name: 'get_sklad_metrics',
+      description:
+        'Продажи МойСклада за период (дневной архив): выручка, число и сумма заказов, средний чек. ' +
+        'Используй для вопросов о деньгах, продажах и динамике магазина. channel_id — источник с пометкой «МойСклад».',
+      input_schema: {
+        type: 'object',
+        properties: {
+          channel_id: { type: 'integer', description: 'id источника «МойСклад»' },
+          days: { type: 'integer', minimum: 1, maximum: MAX_DAYS, description: 'окно в днях, по умолчанию 30' },
+        },
+        required: ['channel_id'],
+      },
+    },
+    {
+      name: 'get_sklad_customers',
+      description:
+        'Покупатели МойСклада за период: сколько всего, новые vs повторные (новый = первый заказ клиента за всю ' +
+        'историю), заказы и выручка по каждой группе, сколько клиентов вообще покупали повторно.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          channel_id: { type: 'integer', description: 'id источника «МойСклад»' },
+          days: { type: 'integer', minimum: 1, maximum: MAX_DAYS, description: 'окно в днях, по умолчанию 30' },
+        },
+        required: ['channel_id'],
+      },
+    },
+    {
+      name: 'get_sklad_funnel',
+      description:
+        'Воронка статусов заказов МойСклада за период: сколько заказов и на какую сумму в каждом статусе ' +
+        '(новый, в работе, отгружен, возврат и т.п. — по справочнику организации).',
+      input_schema: {
+        type: 'object',
+        properties: {
+          channel_id: { type: 'integer', description: 'id источника «МойСклад»' },
+          days: { type: 'integer', minimum: 1, maximum: MAX_DAYS, description: 'окно в днях, по умолчанию 30' },
+        },
+        required: ['channel_id'],
+      },
+    },
+    {
+      name: 'get_sklad_top_products',
+      description:
+        'Топ товаров МойСклада по выручке за период: количество, выручка, прибыль по каждому товару.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          channel_id: { type: 'integer', description: 'id источника «МойСклад»' },
+          days: { type: 'integer', minimum: 1, maximum: 90, description: 'окно в днях, по умолчанию 30' },
+          limit: { type: 'integer', minimum: 1, maximum: 20, description: 'сколько товаров, по умолчанию 5' },
+        },
+        required: ['channel_id'],
+      },
+    },
+    {
       name: 'get_campaign_summary',
       description:
         'Сводка кампании по id: публикации и метрики раздельно по Telegram (просмотры/реакции/пересылки/ответы) ' +
@@ -104,6 +168,10 @@ function createAiTools({ db }) {
       case 'get_mentions_summary': return mentionsSummary(args, user);
       case 'get_campaigns': return campaigns(user);
       case 'get_campaign_summary': return campaignSummary(args, user);
+      case 'get_sklad_metrics': return skladMetrics(args, user);
+      case 'get_sklad_customers': return skladCustomers(args, user);
+      case 'get_sklad_funnel': return skladFunnel(args, user);
+      case 'get_sklad_top_products': return skladTopProducts(args, user);
       default: return { error: `Неизвестный инструмент: ${name}` };
     }
   }
@@ -310,6 +378,169 @@ function createAiTools({ db }) {
     };
   }
 
+  // ── МойСклад: сводка продаж из дневного архива ──────────────────────────────────────────────
+  async function skladMetrics(args, user) {
+    const gate = await accessibleChannel(args, user);
+    if (gate.error) return gate;
+    const days = clampDays(args.days);
+    const since = sinceDayIso(days);
+    const rows = (await db.getMsDailyAllForActor(gate.channel.id, user)).filter((r) => r.day >= since);
+    if (!rows.length) {
+      return {
+        channel: channelRef(gate.channel), period_days: days,
+        note: 'Складских данных за период нет (МойСклад не подключён к этому источнику или архив ещё копится).',
+      };
+    }
+    const revenue = sumBy(rows, 'revenue_kopecks');
+    const ordersCount = sumBy(rows, 'orders_count');
+    const ordersSum = sumBy(rows, 'orders_sum_kopecks');
+    const out = {
+      channel: channelRef(gate.channel),
+      period_days: days,
+      days_with_data: rows.length,
+      totals: {
+        revenue_rub: kopToRub(revenue),
+        orders_count: ordersCount,
+        orders_sum_rub: kopToRub(ordersSum),
+        avg_check_rub: ordersCount > 0 ? kopToRub(ordersSum / ordersCount) : null,
+      },
+      note: 'Деньги МойСклада — отдельная система величин; не смешивай с просмотрами/охватами соцсетей. Средний чек = сумма заказов / число заказов.',
+    };
+    if (rows.length <= DAILY_ROWS_CAP) {
+      out.daily = rows.map((r) => ({
+        day: r.day,
+        revenue_rub: kopToRub(r.revenue_kopecks),
+        orders: r.orders_count,
+        orders_sum_rub: kopToRub(r.orders_sum_kopecks),
+      }));
+    } else {
+      out.weekly = weeklyBuckets(
+        rows.map((r) => ({ day: r.day, revenue_kopecks: r.revenue_kopecks, orders: r.orders_count, orders_sum_kopecks: r.orders_sum_kopecks })),
+        ['revenue_kopecks', 'orders', 'orders_sum_kopecks'],
+      ).map((w) => ({
+        week_start: w.week_start, days: w.days,
+        revenue_rub: kopToRub(w.revenue_kopecks || 0), orders: w.orders || 0,
+        orders_sum_rub: kopToRub(w.orders_sum_kopecks || 0),
+      }));
+    }
+    return out;
+  }
+
+  // ── МойСклад: новые vs повторные покупатели ─────────────────────────────────────────────────
+  async function skladCustomers(args, user) {
+    const gate = await accessibleChannel(args, user);
+    if (gate.error) return gate;
+    const days = clampDays(args.days);
+    const data = await db.getMsCustomersForActor(gate.channel.id, user, { sinceDay: sinceDayIso(days) });
+    const s = data.summary;
+    if (!s.customers && !s.no_agent_orders) {
+      return { channel: channelRef(gate.channel), period_days: days, note: 'Заказов с покупателями за период нет.' };
+    }
+    return {
+      channel: channelRef(gate.channel),
+      period_days: days,
+      customers_total: s.customers,
+      new_customers: s.new_customers,
+      repeat_customers: s.repeat_customers,
+      orders: { by_new: s.orders_new, by_repeat: s.orders_repeat },
+      revenue_rub: { by_new: kopToRub(s.sum_new_kopecks), by_repeat: kopToRub(s.sum_repeat_kopecks) },
+      repeat_ever_customers: s.repeat_ever,
+      orders_without_customer: s.no_agent_orders,
+      note: '«Новый» = первый заказ клиента за всю историю; клиент с первым заказом до окна считается повторным. Заказы без привязанного покупателя посчитаны отдельно.',
+    };
+  }
+
+  // ── МойСклад: воронка статусов (архив + живой словарь имён, мягкая деградация) ──────────────
+  async function skladFunnel(args, user) {
+    const gate = await accessibleChannel(args, user);
+    if (gate.error) return gate;
+    const days = clampDays(args.days);
+    const rows = await db.getMsFunnelForActor(gate.channel.id, user, { sinceDay: sinceDayIso(days) });
+    if (!rows.length) {
+      return { channel: channelRef(gate.channel), period_days: days, note: 'Заказов за период нет.' };
+    }
+    const dict = await skladStatesDict(gate.channel);
+    return {
+      channel: channelRef(gate.channel),
+      period_days: days,
+      statuses: rows.map((r) => ({
+        status: r.state_id == null ? 'Без статуса' : (dict && dict[String(r.state_id)]) || r.state_id,
+        orders: r.orders,
+        sum_rub: kopToRub(r.sum_kopecks),
+      })),
+      ...(dict ? {} : { note: 'Справочник имён статусов недоступен — показаны технические id.' }),
+    };
+  }
+
+  // ── МойСклад: топ товаров по выручке (живой отчёт прибыльности) ─────────────────────────────
+  async function skladTopProducts(args, user) {
+    const gate = await accessibleChannel(args, user);
+    if (gate.error) return gate;
+    const account = await skladAccount(gate.channel);
+    if (!account) return { error: 'МойСклад не подключён к этому источнику.' };
+    const days = Math.min(90, Math.max(1, toInt(args.days) || 30));
+    const limit = Math.min(20, Math.max(1, toInt(args.limit) || 5));
+    let report;
+    try {
+      report = await sklad.msFetch(
+        account.token,
+        `/report/profit/byproduct?momentFrom=${encodeURIComponent(`${sinceDayIso(days)} 00:00:00`)}` +
+          `&momentTo=${encodeURIComponent(`${todayIso()} 23:59:00`)}&limit=${MS_TOP_FETCH_LIMIT}`,
+      );
+    } catch (e) {
+      return { error: `МойСклад недоступен (${(e && e.status) || 'сеть'}). Попробуй позже.` };
+    }
+    const rows = (report && Array.isArray(report.rows) ? report.rows : [])
+      .map((r) => ({
+        name: r && r.assortment && typeof r.assortment.name === 'string' ? r.assortment.name : null,
+        quantity: Number(r && r.sellQuantity) || 0,
+        revenue_rub: kopToRub(Number(r && r.sellSum) || 0),
+        profit_rub: kopToRub(Number(r && r.profit) || 0),
+      }))
+      // МС отдаёт отчёт не по выручке (алфавит ассортимента) — сортируем сами, как /api/ms/top-products.
+      .sort((a, b) => b.revenue_rub - a.revenue_rub || b.quantity - a.quantity);
+    const metaSize = Number(report && report.meta && report.meta.size);
+    return {
+      channel: channelRef(gate.channel),
+      period_days: days,
+      top: rows.slice(0, limit),
+      products_in_window: Number.isFinite(metaSize) ? metaSize : rows.length,
+      ...(Number.isFinite(metaSize) && metaSize > MS_TOP_FETCH_LIMIT
+        ? { note: `Ассортимент окна больше ${MS_TOP_FETCH_LIMIT} позиций — топ посчитан по первой странице отчёта.` }
+        : {}),
+    };
+  }
+
+  // Расшифрованный токен МС для живых вызовов: только при инъектированном sklad и подключённом
+  // аккаунте канала. Токен живёт в замыкании вызова и никогда не попадает в результат/лог.
+  async function skladAccount(channel) {
+    if (!sklad || !sklad.msFetch || !sklad.msCrypto || !sklad.msCrypto.configured()) return null;
+    const account = await db.getMsAccount(channel.id).catch(() => null);
+    if (!account || !account.access_token_enc) return null;
+    try {
+      return { token: sklad.msCrypto.decrypt(account.access_token_enc) };
+    } catch {
+      return null;
+    }
+  }
+
+  // Словарь статусов заказов (id → имя) живым вызовом; null при недоступности — воронка
+  // деградирует до технических id, DB-агрегат не становится заложником живого МС.
+  async function skladStatesDict(channel) {
+    const account = await skladAccount(channel);
+    if (!account) return null;
+    try {
+      const meta = await sklad.msFetch(account.token, '/entity/customerorder/metadata');
+      const dict = {};
+      for (const s of (meta && Array.isArray(meta.states) ? meta.states : [])) {
+        if (s && s.id != null && typeof s.name === 'string') dict[String(s.id)] = s.name;
+      }
+      return dict;
+    } catch {
+      return null;
+    }
+  }
+
   return { definitions, run };
 }
 
@@ -317,6 +548,19 @@ function createAiTools({ db }) {
 const toInt = (v) => {
   const n = Number.parseInt(v, 10);
   return Number.isFinite(n) ? n : 0;
+};
+// Копейки БД/МС → рубли на границе инструмента (та же семантика, что kopecksToRub в routes).
+const kopToRub = (k) => Math.round(Number(k) || 0) / 100;
+// 'YYYY-MM-DD' по часам процесса (Railway = UTC) — та же система координат, что у MS-роутов.
+const dayIso = (d) => {
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${m}-${day}`;
+};
+const todayIso = () => dayIso(new Date());
+const sinceDayIso = (days) => {
+  const now = new Date();
+  return dayIso(new Date(now.getFullYear(), now.getMonth(), now.getDate() - (days - 1)));
 };
 const sumBy = (rows, key) => rows.reduce((acc, r) => acc + (Number(r[key]) || 0), 0);
 const round2 = (v) => Math.round(v * 100) / 100;

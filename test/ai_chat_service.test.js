@@ -198,3 +198,129 @@ test('makeChatTitle: схлопывает пробелы и режет по гр
   assert.ok(title.endsWith('…'));
   assert.equal(makeChatTitle('   '), null);
 });
+
+// ── Складские инструменты (МойСклад) ────────────────────────────────────────────────────────────
+
+const skladDb = (over = {}) => fakeDb({
+  getChannel: async (id) => (id === 9 ? { id: 9, title: 'ИП Тест Склад', username: null } : null),
+  getMsDailyAllForActor: async () => [],
+  getMsCustomersForActor: async () => ({
+    summary: {
+      customers: 0, new_customers: 0, repeat_customers: 0, orders_new: 0, orders_repeat: 0,
+      sum_new_kopecks: 0, sum_repeat_kopecks: 0, no_agent_orders: 0, repeat_ever: 0,
+    },
+    series: [],
+  }),
+  getMsFunnelForActor: async () => [],
+  getMsAccount: async () => null,
+  ...over,
+});
+
+test('sklad_metrics: окно фильтруется, копейки → рубли, средний чек считается', async () => {
+  const today = new Date();
+  const dayAgo = (n) => {
+    const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - n);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+  const db = skladDb({
+    getMsDailyAllForActor: async () => [
+      { day: dayAgo(100), revenue_kopecks: 999_00, orders_count: 9, orders_sum_kopecks: 999_00 }, // вне окна
+      { day: dayAgo(5), revenue_kopecks: 500_00, orders_count: 2, orders_sum_kopecks: 600_00 },
+      { day: dayAgo(1), revenue_kopecks: 250_50, orders_count: 1, orders_sum_kopecks: 200_00 },
+    ],
+  });
+  const tools = createAiTools({ db });
+  const res = await tools.run('get_sklad_metrics', { channel_id: 9, days: 30 }, { uid: 1 });
+  assert.equal(res.totals.revenue_rub, 750.5, 'строка вне окна отброшена, копейки → рубли');
+  assert.equal(res.totals.orders_count, 3);
+  assert.equal(res.totals.orders_sum_rub, 800);
+  assert.ok(Math.abs(res.totals.avg_check_rub - 266.67) < 0.01, 'средний чек = сумма заказов / число заказов');
+  assert.equal(res.daily.length, 2);
+});
+
+test('sklad_customers: маппинг новых/повторных в рубли + честная пустота', async () => {
+  const db = skladDb({
+    getMsCustomersForActor: async () => ({
+      summary: {
+        customers: 10, new_customers: 6, repeat_customers: 4, orders_new: 6, orders_repeat: 9,
+        sum_new_kopecks: 100_000, sum_repeat_kopecks: 250_000, no_agent_orders: 2, repeat_ever: 17,
+      },
+      series: [],
+    }),
+  });
+  const tools = createAiTools({ db });
+  const res = await tools.run('get_sklad_customers', { channel_id: 9 }, { uid: 1 });
+  assert.equal(res.new_customers, 6);
+  assert.equal(res.revenue_rub.by_repeat, 2500);
+  assert.equal(res.orders_without_customer, 2);
+
+  // Пустой архив (дефолтный skladDb) — честная пустота, не ошибка.
+  const empty = await createAiTools({ db: skladDb() }).run('get_sklad_customers', { channel_id: 9 }, { uid: 1 });
+  assert.match(empty.note, /Заказов с покупателями за период нет/);
+});
+
+test('sklad_funnel: имена статусов из живого словаря; без аккаунта — id + пометка', async () => {
+  const rows = [
+    { state_id: 's-new', orders: 5, sum_kopecks: 500_00 },
+    { state_id: null, orders: 1, sum_kopecks: 100_00 },
+  ];
+  const withDict = createAiTools({
+    db: skladDb({
+      getMsFunnelForActor: async () => rows,
+      getMsAccount: async () => ({ access_token_enc: 'enc' }),
+    }),
+    sklad: {
+      msCrypto: { configured: () => true, decrypt: (e) => `TOKEN:${e}` },
+      msFetch: async (token, path) => {
+        assert.equal(token, 'TOKEN:enc');
+        assert.match(path, /customerorder\/metadata/);
+        return { states: [{ id: 's-new', name: 'Новый' }] };
+      },
+    },
+  });
+  const named = await withDict.run('get_sklad_funnel', { channel_id: 9 }, { uid: 1 });
+  assert.deepEqual(named.statuses.map((s) => s.status), ['Новый', 'Без статуса']);
+  assert.equal(named.statuses[0].sum_rub, 500);
+
+  const bare = await createAiTools({ db: skladDb({ getMsFunnelForActor: async () => rows }) })
+    .run('get_sklad_funnel', { channel_id: 9 }, { uid: 1 });
+  assert.equal(bare.statuses[0].status, 's-new', 'без словаря — технический id');
+  assert.match(bare.note, /Справочник имён статусов недоступен/);
+});
+
+test('sklad_top_products: сортировка по выручке у нас; без аккаунта — честная ошибка', async () => {
+  const tools = createAiTools({
+    db: skladDb({ getMsAccount: async () => ({ access_token_enc: 'enc' }) }),
+    sklad: {
+      msCrypto: { configured: () => true, decrypt: () => 'T' },
+      msFetch: async (_t, path) => {
+        assert.match(path, /report\/profit\/byproduct/);
+        assert.match(path, /limit=1000/);
+        return {
+          meta: { size: 3 },
+          rows: [
+            { assortment: { name: 'А-мелочь' }, sellQuantity: 61, sellSum: 0, profit: 0 },
+            { assortment: { name: 'Б-хит' }, sellQuantity: 2, sellSum: 900_00, profit: 300_00 },
+            { assortment: { name: 'В-середина' }, sellQuantity: 1, sellSum: 400_00, profit: 100_00 },
+          ],
+        };
+      },
+    },
+  });
+  const res = await tools.run('get_sklad_top_products', { channel_id: 9, limit: 2 }, { uid: 1 });
+  assert.deepEqual(res.top.map((r) => r.name), ['Б-хит', 'В-середина'], 'топ по выручке, не по алфавиту');
+  assert.equal(res.top[0].revenue_rub, 900);
+  assert.equal(res.products_in_window, 3);
+
+  const noAccount = await createAiTools({ db: skladDb() })
+    .run('get_sklad_top_products', { channel_id: 9 }, { uid: 1 });
+  assert.match(noAccount.error, /не подключён/);
+});
+
+test('sklad-инструменты: ownership-гейт — чужой канал неотличим от отсутствующего', async () => {
+  const tools = createAiTools({ db: skladDb() });
+  for (const name of ['get_sklad_metrics', 'get_sklad_customers', 'get_sklad_funnel', 'get_sklad_top_products']) {
+    const res = await tools.run(name, { channel_id: 777 }, { uid: 1 });
+    assert.match(res.error, /не найден или недоступен/, name);
+  }
+});
