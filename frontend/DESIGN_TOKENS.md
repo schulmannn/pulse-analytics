@@ -199,6 +199,13 @@ under `prefers-reduced-motion: reduce`, so token-driven rules never need a per-r
 loops (reorder jiggle, starfield twinkle) and readability-critical reveals additionally carry explicit
 `animation: none`. JS motion (framer on the landing) gates in-component via `useReducedMotion`.
 
+**Desktop sidebar.** The persistent column remains layout-pushing in both modes (`240px` expanded,
+`64px` rail): collapse uses `--motion-base`, expansion uses the calmer `--motion-reveal`. Icons and
+avatars occupy a fixed `40px` first track centred on the rail axis; only the second-track copy is
+masked/faded/translated. The surface leads copy on expansion by half a `--motion-press` beat, while
+collapse removes copy immediately. The reduced-motion override clears that reveal delay as well as
+collapsing duration, so the mode switch never waits on invisible text.
+
 **Bespoke (not canon).** Illustration loops keep their own timings on purpose and are allow-listed by
 the lint: cartograph (error/404/empty), the `/connect` orbital hub + starfield, and the reorder jiggle.
 Framer on the public landing is its own system (`EASE` constant + per-variant durations).
