@@ -19,6 +19,8 @@ import {
   useHomeBlocks,
   useWidgetPrefs,
 } from '@/lib/widgetPrefsStore';
+import { cn } from '@/lib/utils';
+import { PAGE_HEADER_SHELL } from '@/lib/pageChrome';
 import { ChannelScope } from '@/lib/channel-context';
 import { getRememberedChannel } from '@/lib/channel';
 import { resolveHomeSourceChannel } from '@/lib/channelSource';
@@ -246,8 +248,8 @@ export function Home() {
           same treatment as the feed sticky header). Desktop (md+): a stable «Добавить виджет» +
           «Изменить/Готово» toolbar (fixed footprint, no hover-reflow). Mobile (<md): the compact
           expand-on-touch edit chip, preserved verbatim. */}
-      <div className="sticky top-0 z-sticky -mx-4 mb-6 flex items-start justify-between gap-3 bg-background px-4 py-3 sm:-mx-6 sm:px-6 md:items-center">
-        <h2 className="text-2xl font-medium tracking-tight text-foreground">Главная</h2>
+      <div className={cn(PAGE_HEADER_SHELL, 'flex items-start justify-between gap-3 md:items-center')}>
+        <h2 className="text-xl font-medium tracking-tight text-foreground">Главная</h2>
         <div className="flex items-center gap-2">
           {/* Desktop read mode owns one direct catalog command. Empty and edit states expose their
               own single add affordance instead, so identical CTAs never compete on one screen. */}
@@ -313,30 +315,19 @@ export function Home() {
         />
       ) : (
         <HomeEditContext.Provider value={editing}>
-          {/* Edit-mode board — the grid keeps its full width and single 6-col footprint (no
-              decorative narrowing / nested «page card»). A quiet desktop state label replaces
-              the old canvas effect; mobile keeps its full-bleed board verbatim. */}
+          {/* Edit-mode board — one FLAT canvas (no grey fill, border or nested «page card»). Entering
+              «Изменить» steps the whole grid calmly inward ~52px/side on desktop (lg+, CSS max-width
+              on .home-board-canvas — interruptible, reduced-motion flattens it to instant); mobile
+              keeps its full-bleed board verbatim. */}
           <div className="home-board-canvas" data-editing={editing}>
-            {editing && (
-              <div
-                className="hidden items-center gap-2 border-b border-border pb-3 text-xs font-medium text-muted-foreground md:flex"
-                aria-live="polite"
-              >
-                <svg
-                  className="h-4 w-4 shrink-0 text-muted-foreground"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="M8 6h.01M8 12h.01M8 18h.01M16 6h.01M16 12h.01M16 18h.01" />
-                </svg>
-                <span>Редактирование</span>
-              </div>
-            )}
+            {/* Edit state is announced to assistive tech ONLY — no visible row or border-b divider
+                (владелец: серая линия/разделитель «Редактирование» между верхними карточками лишняя).
+                The visible cue is the calm desktop inward step of the whole grid (.home-board-canvas
+                narrows in edit) plus the per-card reorder/remove controls. sr-only carries no layout
+                box, so nothing shifts and the mobile board is untouched. */}
+            <p className="sr-only" role="status" aria-live="polite">
+              {editing ? 'Режим редактирования доски' : 'Просмотр доски'}
+            </p>
             <ChannelRecencyProvider value={recency}>
               <WidgetGroup id="home" className="grid grid-flow-dense grid-cols-1 gap-6 lg:grid-cols-6">
                 {known.map((key) => {

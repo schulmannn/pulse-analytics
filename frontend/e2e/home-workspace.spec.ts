@@ -67,7 +67,7 @@ test.describe('desktop /home workspace (dark, 1440)', () => {
     await expect(add).toBeFocused();
   });
 
-  test('edit mode: full-width board, reorder/remove hint + dock, no nested page-card', async ({ page }, testInfo) => {
+  test('edit mode: board steps inward (calm desktop motion), dock, no nested page-card, no grey divider', async ({ page }, testInfo) => {
     await seedBoard(page);
     await bootDemo(page, '/home', { theme: 'dark' });
 
@@ -77,15 +77,30 @@ test.describe('desktop /home workspace (dark, 1440)', () => {
     const restWidth = (await board.boundingBox())!.width;
     const sidebarWidth = (await sidebar.boundingBox())!.width;
 
+    // The narrowing is a real max-width transition (animation contract locked by the computed
+    // property, not by a sleep) — не мгновенный перескок ширины.
+    const transition = await board.evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { prop: cs.transitionProperty, dur: cs.transitionDuration };
+    });
+    expect(transition.prop).toContain('max-width');
+    expect(transition.dur).not.toBe('0s');
+
     const edit = page.locator('button.edit-toggle');
     await edit.click();
     await expect(edit).toHaveAttribute('aria-pressed', 'true');
-    await expect(page.getByText('Редактирование', { exact: true })).toBeVisible();
+    // The mode is announced to assistive tech via an sr-only status — no visible «Редактирование»
+    // row / border-b divider between the top cards anymore (владелец: серая линия лишняя).
+    await expect(page.getByText('Редактирование', { exact: true })).toHaveCount(0);
+    await expect(page.locator('.home-board-canvas p[role="status"]')).toHaveText('Режим редактирования доски');
     await expect(page.locator('.add-widget-trigger')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Добавить виджет', exact: true })).toHaveCount(0);
 
+    // The whole grid steps calmly inward ~52px per side (≈104px total) — a noticeable, quiet move.
+    await expect.poll(async () => Math.round(restWidth - (await board.boundingBox())!.width)).toBeGreaterThanOrEqual(90);
     const editWidth = (await board.boundingBox())!.width;
-    expect(Math.abs(editWidth - restWidth)).toBeLessThanOrEqual(1);
+    expect(restWidth - editWidth).toBeLessThanOrEqual(120);
+    // The sidebar never moves; the board stays centred (no decorative frame around it).
     expect(Math.abs((await sidebar.boundingBox())!.width - sidebarWidth)).toBeLessThanOrEqual(1);
     await expect(page.locator('[data-source-identity]')).toHaveCount(6);
     const hScroll = await page.evaluate(
@@ -96,6 +111,32 @@ test.describe('desktop /home workspace (dark, 1440)', () => {
     const shot = testInfo.outputPath('home-edit-dark.png');
     await page.screenshot({ path: shot, fullPage: true });
     await testInfo.attach('home-edit-dark', { path: shot, contentType: 'image/png' });
+
+    // «Готово» reverts the grid exactly to its resting width (interruptible, symmetric).
+    await edit.click();
+    await expect(edit).toHaveAttribute('aria-pressed', 'false');
+    await expect.poll(async () => Math.round(Math.abs((await board.boundingBox())!.width - restWidth))).toBeLessThanOrEqual(1);
+  });
+
+  test('edit mode narrowing is instant under reduced motion (no width tween)', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await seedBoard(page);
+    await bootDemo(page, '/home', { theme: 'dark' });
+
+    const board = page.locator('.home-board-canvas');
+    await board.waitFor({ state: 'visible', timeout: 15_000 });
+    // The global reduced-motion cap collapses the transition duration to ~0 — the endpoint (inward
+    // step) still applies, just without the tween.
+    const dur = await board.evaluate((el) => getComputedStyle(el).transitionDuration);
+    expect(parseFloat(dur), `reduced-motion transition was ${dur}`).toBeLessThanOrEqual(0.001);
+
+    const restWidth = (await board.boundingBox())!.width;
+    await page.locator('button.edit-toggle').click();
+    await expect(page.locator('button.edit-toggle')).toHaveAttribute('aria-pressed', 'true');
+    // Narrows immediately (no need to wait out a tween) and by the same amount.
+    const editWidth = (await board.boundingBox())!.width;
+    expect(restWidth - editWidth).toBeGreaterThanOrEqual(90);
+    expect(restWidth - editWidth).toBeLessThanOrEqual(120);
   });
 
   test('empty state: unframed surface, catalog CTA, availability-aware defaults', async ({ page }, testInfo) => {

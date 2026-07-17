@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Skeleton } from '@/components/ui/skeleton';
+import { cn } from '@/lib/utils';
+import { PAGE_HEADER_SHELL } from '@/lib/pageChrome';
 
 /**
- * The section SHELL shared by every dashboard feed page (TG and IG): the rounded block surface
- * with the sticky fat header ({@link FeedBlock}) and the progressive-disclosure mount guard
+ * The section SHELL shared by every dashboard feed page (TG and IG): a FLAT working surface with the
+ * sticky page header ({@link FeedBlock}) and the progressive-disclosure mount guard
  * ({@link LazyBlock}). Both networks' focused pages render through this module (via the feed
  * registry, panels/feed/feeds.tsx), so the section look cannot drift between networks.
  *
@@ -14,9 +16,12 @@ import { Skeleton } from '@/components/ui/skeleton';
  */
 
 /**
- * One block surface (steep Home): a rounded panel a shade apart from the canvas, fat header, then
- * the lazily-mounted content. Light theme uses the full card white (a /50 mix over near-white paper
- * is imperceptible); dark keeps the half-mix so the canvas→surface→widget layering reads.
+ * One feed section = the SAME flat canvas as the personal Home (владелец: Обзор/Аналитика/Контент
+ * должны быть одной flat рабочей поверхностью, как Главная). No own rounded/bordered/card surface
+ * and no extra page padding — the widgets below carry the only card chrome, exactly like Home. The
+ * sticky header reuses {@link PAGE_HEADER_SHELL} (shared with Home), so its geometry — the canvas
+ * bleed, the solid seam-free background and the gap to the content — stays in lockstep with Home
+ * instead of drifting into a private copy of the classes.
  */
 export function FeedBlock({
   section,
@@ -35,21 +40,11 @@ export function FeedBlock({
   headerRight?: ReactNode;
 }) {
   return (
-    <section
-      data-feed-block={section}
-      className="scroll-mt-4 rounded-2xl border border-border bg-card dark:bg-card/50 px-3 py-4 sm:p-7"
-    >
-      {/* Sticky section title (steep): «Обзор» stays put while the widgets scroll under it. It
-          spans the card width (negative margins cancel the section padding) and rounds to match the
-          card top. Фон — .feed-head-surface (index.css): РОВНО тот же цвет, что тело секции,
-          непрозрачный. Полупрозрачный blur-фон прошлой итерации читался как более светлая полоса
-          с «серой линией» на стыке (владелец) — теперь шапка неотличима от секции, пока контент
-          не подъедет под неё, и просто срезает его без видимого шва. Отступ до виджетов ужат
-          mb-6→mb-2 + pb-3→pb-1.5 (steep-плотность). top-0 (не top-2): на фид-роутах топбара нет,
-          а 8px-зазор над заголовком просвечивал заезжающий контент — прижимаем к самому верху
-          (баг «полоса пропускает текст сверху»). z-10 keeps it under widget menus (z-popover). */}
-      <div className="feed-head-surface sticky top-0 z-10 -mx-3 -mt-4 mb-2 flex items-center justify-between gap-3 rounded-t-2xl px-3 pb-1.5 pt-4 sm:-mx-7 sm:-mt-7 sm:px-7 sm:pt-7">
-        <h2 className="text-2xl font-medium tracking-tight text-foreground">{title}</h2>
+    <section data-feed-block={section} className="scroll-mt-4">
+      {/* Sticky page header (shared geometry with Home): «Обзор» stays put while the widgets scroll
+          under it, over a solid canvas bg with no hairline — the strip simply clips the content. */}
+      <div className={cn(PAGE_HEADER_SHELL, 'flex items-center justify-between gap-3')}>
+        <h2 className="min-w-0 truncate text-2xl font-medium tracking-tight text-foreground">{title}</h2>
         {headerRight}
       </div>
       <LazyBlock eager={eager} onMount={onMount}>
