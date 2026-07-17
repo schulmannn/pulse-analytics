@@ -368,15 +368,18 @@ function createComposition(config, overrides = {}) {
   });
 
   // ── AI-ассистент (STEEP-паттерн) ──────────────────────────────────
-  // Провайдер: Anthropic при заданном ключе; БЕЗ ключа вне production — детерминированный mock
-  // (dev/CI/e2e работают без секрета); production без ключа — off (роуты 503, me.ai.enabled=false).
+  // Провайдер: Anthropic при заданном ключе; БЕЗ ключа — детерминированный mock ВЕЗДЕ, включая
+  // production (решение владельца 2026-07-17: обкатка UI до подключения ANTHROPIC_API_KEY).
+  // Это безопасно, пока фича superuser-only и mock-ответ сам себя подписывает; ПЕРЕД открытием
+  // фичи всем пользователям вернуть `allowMock: !config.isProduction` (прод без ключа → off),
+  // иначе реальные пользователи получат заглушку вместо честного 503.
   const aiProvider =
     overrides.aiProvider ||
     createAiProvider({
       apiKey: config.ai.apiKey,
       model: config.ai.model,
       maxOutputTokens: config.ai.maxOutputTokens,
-      allowMock: !config.isProduction,
+      allowMock: true,
       log,
     });
   const aiChatService = createAiChatService({
