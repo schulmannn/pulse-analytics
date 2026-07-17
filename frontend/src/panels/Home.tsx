@@ -30,7 +30,7 @@ import { ConfigWidget } from '@/components/ConfigWidget';
 import { WidgetErrorBoundary } from '@/components/WidgetErrorBoundary';
 import { WidgetCatalogModal } from '@/components/WidgetCatalogModal';
 import { CreateWidgetDialog } from '@/components/CreateWidgetDialog';
-import { addWidgetConfig, getWidgetConfig, removeWidgetConfig, useWidgetConfigs } from '@/lib/widgetStore';
+import { addWidgetConfig, addWidgetForMetric, getWidgetConfig, removeWidgetConfig, updateWidgetConfig, useWidgetConfigs } from '@/lib/widgetStore';
 import { isLegacyKey, legacyConfigId } from '@/lib/legacyWidgets';
 import { configIdFromKey, customKey, healedLegacyConfig, isCustomKey, type WidgetConfig } from '@/lib/widgetConfig';
 import {
@@ -182,6 +182,26 @@ export function Home() {
     }
 
     const keys = defaultHomeKeys(channels);
+    // MS-only workspace: кураторских карточек склада в HOME_REGISTRY нет (defaultHomeKeys отдаёт
+    // []) — сеем доску СТАНДАРТНЫМ add-флоу каталога (addWidgetForMetric + pinToHome, ровно то,
+    // что делает «Добавить виджет»), никакой новой машинерии. Ритм: Выручка на всю ширину,
+    // Заказы + Средний чек парой. Достижимо только с пустой доски (empty-state CTA) — дублей нет.
+    if (keys.length === 0 && channels.some((c) => c.source === 'ms')) {
+      const seeded: string[] = [];
+      for (const [metricId, size] of [
+        ['ms.revenue', 'full'],
+        ['ms.orders', 'half'],
+        ['ms.avgCheck', 'half'],
+      ] as const) {
+        const w = addWidgetForMetric(metricId);
+        if (!w) continue;
+        updateWidgetConfig(w.id, { size });
+        seeded.push(customKey(w.id));
+      }
+      setGroupOrder('home', seeded.map((key) => `custom-${configIdFromKey(key) ?? ''}`));
+      setHomeBlocks(seeded);
+      return;
+    }
     // The desktop composition is a deliberate 100 / 50+50 / 100 / 100 rhythm. Preserve any old
     // per-widget choice, but give a genuinely new board enough room for its narrative and line chart.
     if (keys.includes('growth') && !getWidgetConfig(legacyConfigId('growth'))) {
