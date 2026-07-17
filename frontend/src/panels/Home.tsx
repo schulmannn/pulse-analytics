@@ -44,6 +44,7 @@ import {
 import { HomeSourceProvider } from '@/lib/homeSourceContext';
 import { useActiveNetwork } from '@/components/layout/nav';
 import { networkByKey } from '@/lib/networks';
+import { HomeAiHero } from '@/panels/ai/HomeAiHero';
 
 /**
  * Personal Home — a per-user board of the widgets the reader pinned via the ⋯ «На главную» item
@@ -293,6 +294,11 @@ export function Home() {
           </div>
         </div>
       </div>
+
+      {/* AI-hero (STEEP-паттерн): приветствие + «Спросить…» + недавние чаты. Только desktop-ветка
+          и только при me.ai.enabled (внутри компонента) — mobile и пользователи без фичи не видят
+          ничего, доска ниже не меняется. */}
+      {isDesktop && <HomeAiHero />}
 
       {known.length === 0 && !editing ? (
         <HomeEmptyState

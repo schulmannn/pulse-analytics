@@ -79,6 +79,9 @@ export const MeSchema = z
     email: z.string().optional().nullable(), // tolerant: parsing must not crash if the server ever omits/nulls it
     role: z.string().optional(),
     avatar: z.string().optional().nullable(), // base64 data URL profile photo
+    // Гейт AI-поверхностей (hero на Главной, /ai): optional — старые ответы/фикстуры без поля
+    // просто прячут фичу, ничего не ломая.
+    ai: z.object({ enabled: z.boolean().optional() }).passthrough().optional(),
   })
   .passthrough();
 export type Me = z.infer<typeof MeSchema>;

@@ -16,6 +16,7 @@
     "check": "npm run check:syntax && npm run check:migrations && npm run check:boundaries && npm run lint && node --test test/*.test.js"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.112.1",
     "compression": "^1.8.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",

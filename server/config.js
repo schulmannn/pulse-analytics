@@ -128,6 +128,24 @@ function loadConfig(env = process.env) {
       token: env.NOTION_TOKEN || '',
       crashDatabaseId: env.NOTION_CRASH_DB || '',
     }),
+    ai: Object.freeze({
+      // AI-ассистент (Anthropic Claude, «Спросить что угодно» + чаты). Без ключа фича мягко
+      // выключена в production (роуты отвечают 503, /api/auth/me отдаёт ai.enabled=false);
+      // ВНЕ production без ключа включается детерминированный mock-провайдер (dev/CI/e2e),
+      // чтобы весь стек — роуты/SSE/tools/квота — работал без секрета и сети.
+      apiKey: env.ANTHROPIC_API_KEY || '',
+      model: env.AI_MODEL || 'claude-sonnet-5',
+      // Дневной лимит вопросов на пользователя (счётчик ai_usage_daily). v1 доступен только
+      // superuser'у, но лимит всё равно ограждает API-бюджет от runaway-использования.
+      dailyMessageLimit: Number(env.AI_DAILY_MESSAGE_LIMIT || 200),
+      // Жёсткий потолок tool-раундов агентного цикла на один вопрос: даже если модель
+      // продолжает просить инструменты, цикл завершается принудительно.
+      maxToolRounds: Number(env.AI_MAX_TOOL_ROUNDS || 6),
+      // Потолок токенов ОДНОГО ответа модели (стримится по SSE; не путать с дневным лимитом).
+      // 4096: у Sonnet 5 adaptive thinking включён по умолчанию и расходует тот же бюджет,
+      // что и видимый ответ — 2048 рисковал бы обрывом на середине.
+      maxOutputTokens: Number(env.AI_MAX_OUTPUT_TOKENS || 4096),
+    }),
     cache: Object.freeze({
       // In-memory response cache (infrastructure/memoryCache) — bounded LRU. maxEntries caps retained
       // responses from the unbounded key space (per-channel × per-param); ttlMs is
@@ -220,6 +238,33 @@ function validateConfig(config) {
   }
   if (!!config.notion.token !== !!config.notion.crashDatabaseId) {
     add('notion', 'NOTION_TOKEN и NOTION_CRASH_DB должны быть заданы вместе.');
+  }
+  // AI-ассистент: модель непустая (дефолт есть всегда — пустая строка означает явную порчу env),
+  // лимиты в разумных границах. 0/отрицательный дневной лимит запретил бы фичу молча — для
+  // выключения достаточно не задавать ANTHROPIC_API_KEY.
+  if (typeof config.ai.model !== 'string' || !config.ai.model.trim()) {
+    add('ai.model', 'AI_MODEL должен быть непустой строкой (например, claude-sonnet-5).');
+  }
+  if (
+    !Number.isInteger(config.ai.dailyMessageLimit) ||
+    config.ai.dailyMessageLimit < 1 ||
+    config.ai.dailyMessageLimit > 10000
+  ) {
+    add('ai.dailyMessageLimit', 'AI_DAILY_MESSAGE_LIMIT должен быть целым числом в диапазоне 1..10000.');
+  }
+  if (
+    !Number.isInteger(config.ai.maxToolRounds) ||
+    config.ai.maxToolRounds < 1 ||
+    config.ai.maxToolRounds > 12
+  ) {
+    add('ai.maxToolRounds', 'AI_MAX_TOOL_ROUNDS должен быть целым числом в диапазоне 1..12.');
+  }
+  if (
+    !Number.isInteger(config.ai.maxOutputTokens) ||
+    config.ai.maxOutputTokens < 256 ||
+    config.ai.maxOutputTokens > 16000
+  ) {
+    add('ai.maxOutputTokens', 'AI_MAX_OUTPUT_TOKENS должен быть целым числом в диапазоне 256..16000.');
   }
   // Rotation ключей managed-сессии Telegram. Сообщения НИКОГДА не печатают значения ключей — только
   // структурные факты (счётчики/наличие), иначе секрет утечёт в лог валидации.

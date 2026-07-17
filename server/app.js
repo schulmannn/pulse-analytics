@@ -35,6 +35,7 @@ const { registerIgRoutes } = require('./routes/ig');
 const { registerMsRoutes } = require('./routes/moysklad');
 const { registerAccountRoutes } = require('./routes/account');
 const { registerHistoryRoutes } = require('./routes/history');
+const { registerAiRoutes } = require('./routes/ai');
 
 // createApp(deps) — собирает и возвращает Express-app. deps несёт всё, что composition.js
 // строит из окружения/БД/таймеров: config, db, готовые middleware (requireAuth/…),
@@ -53,6 +54,7 @@ function createApp(deps) {
     cacheGet, cacheSet, cache, IG_ACCOUNT, IG_TOKEN, IG_GRAPH, AUTH_SECRET,
     tgCrypto, collectQrChannelsNow, collectManagedPostStatsNow, TG_TOKEN, TG_CHANNEL,
     timingSafeEqualStr, dailyIngestJob, jobTracker, mtprotoClient, notionCrash,
+    aiChatService,
   } = deps;
 
   const app = express();
@@ -147,6 +149,8 @@ function createApp(deps) {
     emailShell,
     emailBtn,
     escHtml,
+    // /api/auth/me отдаёт ai.enabled — фронт гейтит AI-поверхности одним bootstrap-запросом.
+    aiEnabledFor: (user) => aiChatService.enabledFor(user),
   });
 
   // Account/admin/prefs/config routes are isolated in routes/account.js (accountLimiter travels with
@@ -284,6 +288,9 @@ function createApp(deps) {
 
   // Postgres-backed history reads are isolated in routes/history.js.
   registerHistoryRoutes({ app, requireAuth, resolveChannel, db, log });
+
+  // AI-чат (STEEP-паттерн): CRUD диалогов + SSE-ответ ассистента. v1 — superuser-only.
+  registerAiRoutes({ app, db, requireAuth, requireSuper, aiChatService, audit, log, getDbReady });
 
   // Bug tracker, crash telemetry and bug attachments are isolated in their own route module.
   registerBugsRoutes({
