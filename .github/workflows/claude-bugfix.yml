@@ -20,7 +20,7 @@ jobs:
   fix:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Claude — diagnose & fix bug, open PR
         uses: anthropics/claude-code-action@v1
@@ -51,14 +51,18 @@ jobs:
             ----- END UNTRUSTED-BUG-REPORT -----
 
             Steps:
-            1. Locate the relevant code (public/index.html, server/index.js, server/db.js, or mtproto/service.py).
+            1. Locate the relevant code. The backend is decomposed under server/ (routes/ → services/ →
+               repos/ → db/, wired in app.js/composition.js; server/db.js is a thin facade); the dashboard
+               SPA lives under frontend/src/; the Telegram microservice is mtproto/service.py. CLAUDE.md's
+               architecture section maps the entry points.
             2. Diagnose the root cause. The CI runner CANNOT run the live app (no Telethon session / Postgres /
                real Telegram data) — do NOT try to start it. Reason from the description, the code, and the
                stub-based test approach in CLAUDE.md.
             3. Make a MINIMAL, surgical fix in the style of the surrounding code. Add or adjust a unit test using
                the stub pattern from CLAUDE.md when it's feasible.
-            4. Verify what you can: `node --check` on changed server files; parse the inline <script> of
-               index.html via vm.Script if you touched the frontend; `python -m py_compile` if you touched Python.
+            4. Verify what you can: `node --check` on changed server files plus the relevant Node tests;
+               for frontend/src changes run the relevant Vitest test and TypeScript check after `npm ci`
+               in frontend/; run `python -m py_compile` and the relevant pytest test for Python changes.
             5. Open a PULL REQUEST against `main` titled "fix: bug #${{ github.event.client_payload.id }} — <short summary>".
                In the PR body: root cause, the fix, your reproduction reasoning, and a note that live verification is
                pending the Railway deploy. DO NOT merge. DO NOT push to main directly.

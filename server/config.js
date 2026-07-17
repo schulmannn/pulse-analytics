@@ -46,7 +46,9 @@ function loadConfig(env = process.env) {
     }),
     database: Object.freeze({
       url: env.DATABASE_URL || '',
-      sslMode: env.PGSSL || 'auto',
+      // PGSSL is the historical Atlavue name; PGSSLMODE is the standard libpq alias. `auto`
+      // disables TLS only for Railway's private hostname and verifies every external server.
+      sslMode: String(env.PGSSL || env.PGSSLMODE || 'auto').toLowerCase(),
       // Conservative production-safe default: 10 keeps headroom under Postgres/Railway
       // connection caps for one web replica (ADR-002) without over-provisioning idle conns.
       poolMax: Number(env.PGPOOL_MAX || 10),
@@ -204,6 +206,9 @@ function validateConfig(config) {
   }
   if (prod && !config.database.url && !config.database.allowDbLess) {
     add('database.url', 'DATABASE_URL обязателен в production, если не задан ALLOW_DBLESS=true.');
+  }
+  if (!['auto', 'disable', 'require', 'verify-full'].includes(config.database.sslMode)) {
+    add('database.sslMode', 'PGSSL/PGSSLMODE должен быть одним из auto, disable, require, verify-full.');
   }
   if (config.telegram.mtprotoUrl && !config.telegram.mtprotoToken) {
     add('telegram.mtprotoToken', 'MTPROTO_TOKEN обязателен, когда задан MTPROTO_URL (аутентифицирует web→mtproto).');

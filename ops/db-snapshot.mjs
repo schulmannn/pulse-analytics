@@ -9,6 +9,7 @@
 import pg from 'pg';
 import { mkdirSync, writeFileSync, createWriteStream } from 'node:fs';
 import { join } from 'node:path';
+import { sslForDatabase } from './db-ssl.mjs';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 if (!DATABASE_URL) {
@@ -18,14 +19,7 @@ if (!DATABASE_URL) {
 const outDir = process.argv[2] || `ops/snapshots/${new Date().toISOString().replace(/[:.]/g, '-')}`;
 mkdirSync(outDir, { recursive: true });
 
-const pool = new pg.Pool({ connectionString: DATABASE_URL, max: 2, ssl: sslFor(DATABASE_URL) });
-
-function sslFor(url) {
-  if (process.env.PGSSL === 'disable') return false;
-  if (process.env.PGSSL === 'require') return { rejectUnauthorized: false };
-  if (/localhost|127\.0\.0\.1|\.railway\.internal/.test(url)) return false;
-  return { rejectUnauthorized: false };
-}
+const pool = new pg.Pool({ connectionString: DATABASE_URL, max: 2, ssl: sslForDatabase(DATABASE_URL) });
 
 // JSON-safe encoding for the two non-JSON column families we use: bytea (bug screenshots) and
 // dates/timestamps (ISO strings round-trip fine through node-pg on insert).

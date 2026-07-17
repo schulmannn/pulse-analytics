@@ -12,6 +12,7 @@
 import crypto from 'node:crypto';
 import http from 'node:http';
 import pg from 'pg';
+import { sslForDatabase } from './db-ssl.mjs';
 
 const args = process.argv.slice(2);
 const USERS = Number(args[args.indexOf('--users') + 1] || 100);
@@ -64,7 +65,7 @@ const record = (name, out) => {
 
 // Server-side saturation sampling while the run is hot.
 const dbUrl = process.env.DATABASE_URL;
-const pgPool = dbUrl ? new pg.Pool({ connectionString: dbUrl, max: 1, ssl: /localhost|127\.0\.0\.1/.test(dbUrl) ? false : { rejectUnauthorized: false } }) : null;
+const pgPool = dbUrl ? new pg.Pool({ connectionString: dbUrl, max: 1, ssl: sslForDatabase(dbUrl) }) : null;
 let peakBackends = 0;
 const sampler = pgPool
   ? setInterval(async () => {

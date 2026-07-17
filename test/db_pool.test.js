@@ -97,3 +97,16 @@ test('DB-less pool is inert and Railway private URLs disable SSL by default', as
   assert.deepEqual(await disabled.ping(), { enabled: false, ok: true });
   assert.equal(resolveSsl('postgres://db.railway.internal/pulse'), false);
 });
+
+test('resolveSsl: verify-full and external auto validate the server certificate', () => {
+  assert.deepEqual(resolveSsl('postgres://external/pulse', 'verify-full'), { rejectUnauthorized: true });
+  assert.deepEqual(resolveSsl('postgres://db.railway.internal/pulse', 'verify-full'), { rejectUnauthorized: true });
+  assert.deepEqual(resolveSsl('postgres://external/pulse', 'auto'), { rejectUnauthorized: true });
+});
+
+test('resolveSsl: Railway auto stays private-plaintext; weaker external modes require explicit opt-in', () => {
+  assert.equal(resolveSsl('postgres://db.railway.internal/pulse', 'auto'), false);
+  assert.equal(resolveSsl('postgres://external/pulse', 'disable'), false);
+  assert.deepEqual(resolveSsl('postgres://external/pulse', 'require'), { rejectUnauthorized: false });
+  assert.throws(() => resolveSsl('postgres://external/pulse', 'bogus'), /unsupported Postgres SSL mode/);
+});

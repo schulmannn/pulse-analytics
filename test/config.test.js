@@ -45,6 +45,20 @@ test('validateConfig: границы IG OAuth admission-контроля', () =>
   assert.ok(hugeTimeout.some((e) => e.field === 'instagram.oauthAcquireTimeoutMs'));
 });
 
+test('Postgres SSL mode accepts the standard alias, normalizes it, and rejects unsafe typos', () => {
+  assert.equal(loadConfig({ PGSSLMODE: 'VERIFY-FULL' }).database.sslMode, 'verify-full');
+  assert.equal(
+    loadConfig({ PGSSL: 'require', PGSSLMODE: 'verify-full' }).database.sslMode,
+    'require',
+    'historical PGSSL keeps precedence for compatibility',
+  );
+  for (const mode of ['auto', 'disable', 'require', 'verify-full']) {
+    assert.ok(!validateConfig(loadConfig({ PGSSLMODE: mode })).some((e) => e.field === 'database.sslMode'));
+  }
+  assert.ok(validateConfig(loadConfig({ PGSSLMODE: 'prefer' }))
+    .some((e) => e.field === 'database.sslMode'), 'unknown/weaker fallback is rejected instead of guessed');
+});
+
 test('loadConfig: значения из env + нормализация', () => {
   const c = loadConfig({
     NODE_ENV: 'production', PORT: '8080', TRUST_PROXY_HOPS: '3', CORS_ORIGINS: 'a.com, b.com ,',

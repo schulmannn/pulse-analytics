@@ -11,6 +11,7 @@
 // ON CONFLICT DO NOTHING on every insert. NEVER run against a database you care about with --wipe.
 // load100x is heavy (7.3M daily + 3.3M posts + 1M mentions) — expect minutes and ~3-4 GB on disk.
 import pg from 'pg';
+import { sslForDatabase } from './db-ssl.mjs';
 
 const args = process.argv.slice(2);
 const preset = args.includes('--preset') ? args[args.indexOf('--preset') + 1] : 'drill';
@@ -40,7 +41,7 @@ if (/railway|amazonaws|azure/.test(DATABASE_URL) && wipe) {
 const pool = new pg.Pool({
   connectionString: DATABASE_URL,
   max: 4,
-  ssl: /localhost|127\.0\.0\.1/.test(DATABASE_URL) ? false : { rejectUnauthorized: false },
+  ssl: sslForDatabase(DATABASE_URL),
 });
 
 // Seeded LCG — reproducible pseudo-randomness, no Math.random.

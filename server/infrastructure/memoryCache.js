@@ -2,9 +2,12 @@
 //  Atlavue — in-memory кэш ответов (infrastructure)
 // ═══════════════════════════════════════════════════════════════
 // Бывший cache-блок index.js (PR E), тела literal. Интерфейс повторяет прежние
-// договорённости app.js: `cache.size` (свойство-геттер, как у Map) и `cache.clear()`.
-// Свип-интервал НЕ стартует при создании — main.js зовёт start() после listen и stop()
-// на остановке (createApp таймеров не создаёт; unref — свип не держит процесс в тестах).
+// договорённости app.js: `cache.size` (свойство-геттер, как у Map), `cache.clear()`,
+// а также `cache.keys()`/`cache.delete(key)` для точечной инвалидации (IG connect/disconnect
+// чистит записи одного аккаунта — раньше эти методы были только у голого Map в тестах, из-за
+// чего в проде фабрика бросала TypeError). Свип-интервал НЕ стартует при создании — main.js
+// зовёт start() после listen и stop() на остановке (createApp таймеров не создаёт; unref — свип
+// не держит процесс в тестах).
 
 'use strict';
 
@@ -52,6 +55,11 @@ function createMemoryCache({ ttlMs = 10 * 60 * 1000, maxEntries = 500, sweepMs =
   return {
     get, set, start, stop,
     clear: () => cache.clear(),
+    // Snapshot of current keys — callers iterate it and call delete() for targeted purges. A
+    // snapshot (not the live iterator) so a caller may delete while looping without relying on
+    // Map's in-iteration mutation semantics.
+    keys: () => Array.from(cache.keys()),
+    delete: (key) => cache.delete(key),
     get size() { return cache.size; },
   };
 }

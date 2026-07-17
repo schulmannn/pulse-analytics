@@ -7,13 +7,22 @@ try {
   // Postgres is optional in DB-less development and tests.
 }
 
+// Maps a libpq-style sslmode to a pg `ssl` option. `require` intentionally follows PostgreSQL
+// semantics: encryption without server-identity verification. `verify-full` validates both the
+// certificate chain and hostname. Safe `auto` keeps Railway's private network plaintext, but treats
+// every external database as verify-full; operators of a private/self-signed external endpoint must
+// opt into the weaker `require` mode explicitly instead of inheriting a silent MITM risk.
 function resolveSsl(connectionString, sslMode = 'auto') {
   const mode = String(sslMode || 'auto').toLowerCase();
   if (mode === 'disable') return false;
+  if (mode === 'verify-full') return { rejectUnauthorized: true };
   if (mode === 'require') return { rejectUnauthorized: false };
-  return /\.railway\.internal/i.test(connectionString)
-    ? false
-    : { rejectUnauthorized: false };
+  if (mode === 'auto') {
+    return /\.railway\.internal/i.test(connectionString)
+      ? false
+      : { rejectUnauthorized: true };
+  }
+  throw new Error('unsupported Postgres SSL mode');
 }
 
 function createPool(

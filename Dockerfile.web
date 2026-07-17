@@ -4,9 +4,10 @@
 # Часть сплита рантаймов: Python в этом образе НЕТ (см. Dockerfile.mtproto).
 
 # ── Stage 1: build the new frontend (Sprint 3F — Vite/React/TS SPA → static dist) ──
-# Strangler-fig: this dist/ is served by Express under /app, alongside the legacy
-# public/index.html at '/'. If this stage fails, the whole image fails — so `npm run
-# build` is verified locally before this Dockerfile change ships.
+# Post-catover (3F-3): this dist/ is the primary dashboard, served by Express at '/'; the
+# legacy public/index.html shell survives only at /legacy as a reversible escape hatch. If
+# this stage fails, the whole image fails — so `npm run build` is verified locally before
+# this Dockerfile change ships.
 FROM node:20-slim AS frontend
 WORKDIR /fe
 COPY frontend/package.json frontend/package-lock.json ./
@@ -31,7 +32,11 @@ COPY server ./server
 # Shared narrative-движок (недельный дайджест в report-email) — собран стадией frontend.
 COPY --from=frontend /server/lib/narrative.gen.cjs ./server/lib/narrative.gen.cjs
 COPY public ./public
-# New frontend build output (served at /app).
+# New frontend build output (served at /).
 COPY --from=frontend /fe/dist ./frontend/dist
+
+# The runtime only reads application assets and talks to Postgres/upstreams; keep package install
+# and image assembly privileged, then drop to the non-root user provided by node:20-slim.
+USER node
 
 CMD ["npm", "start"]

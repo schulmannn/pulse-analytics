@@ -115,3 +115,22 @@ test('clear empties the cache', () => {
   assert.equal(cache.size, 0);
   assert.equal(cache.get('a'), null);
 });
+
+test('keys()/delete(): targeted invalidation primitive for igCachePurge', () => {
+  const cache = createMemoryCache({ maxEntries: 10, ttlMs: HOUR });
+  cache.set('ig:media:1', 'a');
+  cache.set('ig:media:2', 'b');
+  cache.set('other:1', 'c');
+
+  const keys = cache.keys();
+  assert.ok(Array.isArray(keys), 'keys() returns a snapshot array, not a live iterator');
+  assert.deepEqual(keys.sort(), ['ig:media:1', 'ig:media:2', 'other:1']);
+
+  // Deleting while iterating the snapshot is safe (the array is decoupled from the Map).
+  for (const k of cache.keys()) if (k.startsWith('ig:')) cache.delete(k);
+  assert.equal(cache.get('ig:media:1'), null);
+  assert.equal(cache.get('ig:media:2'), null);
+  assert.equal(cache.get('other:1'), 'c', 'unrelated key survives targeted purge');
+
+  assert.equal(cache.delete('nope'), false, 'delete() returns false for a missing key');
+});
