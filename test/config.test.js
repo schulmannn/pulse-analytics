@@ -91,6 +91,31 @@ test('validateConfig: cache cap и TTL должны оставаться в бе
   }
 });
 
+test('loadConfig/validateConfig: GDPR_EXPORT_PAGE_SIZE — дефолт 1000, env, границы 1..1000', () => {
+  assert.equal(loadConfig({}).database.gdprExportPageSize, 1000, 'дефолт 1000');
+  assert.equal(loadConfig({ GDPR_EXPORT_PAGE_SIZE: '500' }).database.gdprExportPageSize, 500);
+  // Дефолт и валидные значения не дают ошибок.
+  assert.deepEqual(validateConfig(loadConfig({})).filter((e) => e.field === 'database.gdprExportPageSize'), []);
+  assert.deepEqual(
+    validateConfig(loadConfig({ GDPR_EXPORT_PAGE_SIZE: '1000' })).filter((e) => e.field === 'database.gdprExportPageSize'),
+    [],
+    'потолок 10000 валиден',
+  );
+  // NaN / дробь / ≤0 / слишком большое — отклоняются на старте (иначе гигантская страница = OOM).
+  for (const env of [
+    { GDPR_EXPORT_PAGE_SIZE: 'abc' },
+    { GDPR_EXPORT_PAGE_SIZE: '0' },
+    { GDPR_EXPORT_PAGE_SIZE: '-1' },
+    { GDPR_EXPORT_PAGE_SIZE: '2.5' },
+    { GDPR_EXPORT_PAGE_SIZE: '1001' },
+  ]) {
+    assert.ok(
+      validateConfig(loadConfig(env)).some((e) => e.field === 'database.gdprExportPageSize'),
+      `${JSON.stringify(env)} отклонён`,
+    );
+  }
+});
+
 test('loadConfig: appUrl — RAW без дефолта (пусто = не задан), с тримом хвостового «/»', () => {
   // Контракт B2c: appBase() в index решает фолбэк сам — config НЕ подставляет atlavue
   // (в отличие от publicUrl, который дефолтит для validateConfig).
