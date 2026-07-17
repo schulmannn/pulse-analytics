@@ -436,27 +436,25 @@ div[data-widget-tinted] {
 }
 
 /* ── Sidebar mode motion (expanded 240px ↔ icon-rail 64px) ──────────────────────────────────────
-   The column WIDTH animates because the sidebar PUSHES the main canvas (there is no overlay); the
-   inner copy is masked/faded/translated so labels, section headings and source/account details
-   slide out instead of popping. Icons/avatars stay in a fixed left gutter (anchored, not
-   teleporting — only the copy after them collapses, and the row's overflow clip masks the residue).
-   Two beats off the shared ladder + house easing: collapse is the quicker one (--motion-base),
-   expansion the calmer one (--motion-reveal), keyed off [data-rail]. No JS timers — CSS transitions
-   are interruptible, so rapid toggles reverse and settle on their own with no stale state. The
-   global reduced-motion net collapses durations; the staged copy delay is cleared below as well. */
+   Atlavue keeps a layout-pushing rail rather than copying an overlay hide. The width, outer-edge
+   toggle, action well and copy masks nevertheless share one 300ms edge-led beat, so the panel reads
+   as one moving surface. Icons/avatars remain anchored in the fixed first track; rows clip the copy.
+   No JS timers: rapid toggles reverse the CSS transition, and the global reduced-motion net collapses
+   every duration to ~0. */
 .sidebar-shell {
-  transition: width var(--motion-reveal) var(--ease-standard); /* expand — calm ease-out */
-}
-.sidebar-shell[data-rail='true'] {
-  transition: width var(--motion-base) var(--ease-standard); /* collapse — the quicker beat */
+  transition: width var(--motion-reveal) var(--ease-standard);
 }
 
-/* The utility buttons keep the same 32px x-axis as the rail icons. Search moves beneath the toggle
-   while the action well grows, so the source card below travels continuously rather than jumping
-   when a flex row becomes a column. */
+/* The utility strip: Search holds the 32px rail axis; the toggle is pinned to the panel's right edge
+   when open and slides back onto the axis as the surface collapses (it tracks the moving outer edge).
+   Both are absolutely placed and animate transform on the shared beat, so the source card below
+   travels continuously rather than jumping when a flex row would become a column. */
 .sidebar-actions {
   height: 1.75rem;
-  transition: height var(--motion-reveal) var(--ease-standard);
+  margin-inline: 0.75rem;
+  transition:
+    height var(--motion-reveal) var(--ease-standard),
+    margin-inline var(--motion-reveal) var(--ease-standard);
 }
 .sidebar-action {
   position: absolute;
@@ -464,27 +462,107 @@ div[data-widget-tinted] {
   inset-inline-start: 0;
   transition: transform var(--motion-reveal) var(--ease-standard);
 }
+/* Expanded: Search is centred on x=32 while the toggle is right-aligned. As width shrinks, the right
+   anchor follows the edge without a magic translation; the rail margin finishes both on x=32. */
 .sidebar-action-toggle {
-  transform: translateX(0.375rem);
+  inset-inline-start: auto;
+  inset-inline-end: 0;
 }
 .sidebar-action-search {
-  transform: translateX(2.875rem);
+  transform: translateX(0.375rem);
 }
 .sidebar-shell[data-rail='true'] .sidebar-actions {
   height: 3.75rem;
-  transition-duration: var(--motion-base);
-}
-.sidebar-shell[data-rail='true'] .sidebar-action {
-  transition-duration: var(--motion-base);
+  margin-inline: 1.125rem;
 }
 .sidebar-shell[data-rail='true'] .sidebar-action-search {
-  transform: translate(0.375rem, 2rem);
+  transform: translateY(2rem);
+}
+
+/* Toggle glyph morph (CSS-only, ~200ms): at rest the panel outline + left divider; on hover/focus the
+   divider fades out and the directional chevron slides in. The chevron's DIRECTION (‹ hide / › reveal)
+   is set in the JSX off `rail`; only its reveal is styled here. */
+.sidebar-toggle-glyph .panel-divider {
+  opacity: 1;
+  transform: translateX(0) scaleY(1);
+  transform-box: fill-box;
+  transform-origin: center;
+  transition:
+    opacity var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
+}
+.sidebar-toggle-glyph .panel-chevron {
+  opacity: 0;
+  transform: translateX(-1px);
+  transform-origin: center;
+  transition:
+    opacity var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
+}
+.sidebar-toggle-btn:hover .panel-divider,
+.sidebar-toggle-btn:focus-visible .panel-divider {
+  opacity: 0.55;
+  transform: translateX(-1px) scaleY(0.55);
+}
+.sidebar-toggle-btn:hover .panel-chevron,
+.sidebar-toggle-btn:focus-visible .panel-chevron {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+/* Compact tooltip beside the toggle — a separate, non-interactive layer opening to the RIGHT of the
+   button on hover/focus-visible, without shifting layout (absolute, pointer-events none). Overflows the
+   sidebar into the canvas like the reference; it inherits the aside's z-nav stacking, so it paints over
+   main. No native `title` duplicates it — `aria-describedby` links this role="tooltip" for AT. */
+.sidebar-tooltip {
+  position: absolute;
+  inset-inline-start: 100%;
+  inset-block-start: 50%;
+  margin-inline-start: 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 1;
+  transform: translate(-0.25rem, -50%);
+  transition:
+    opacity var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
+}
+.sidebar-toggle-btn:hover ~ .sidebar-tooltip,
+.sidebar-toggle-btn:focus-visible ~ .sidebar-tooltip {
+  opacity: 1;
+  transform: translate(0, -50%);
+}
+.sidebar-tooltip::before {
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-start: -0.25rem;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-bottom: 1px solid hsl(var(--border));
+  border-left: 1px solid hsl(var(--border));
+  background-color: hsl(var(--popover));
+  content: '';
+  transform: translateY(-50%) rotate(45deg);
+}
+/* Key chips — quiet keycaps (hairline + faint surface), distinct from the label. */
+.sidebar-key {
+  border-radius: var(--radius);
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--foreground) / 0.06);
+  padding: 0.125rem 0.3rem;
+  line-height: 1;
+  color: hsl(var(--muted-foreground));
 }
 
 /* Horizontal copy — nav labels, @handle/subtitle, email/plan, freshness text, the account chevron.
    It occupies the second track of a 40px + remainder grid: the first track is the final rail width,
-   so icons and avatars never move. Expansion lets the surface lead by half a press beat before copy
-   enters; collapse removes copy immediately. `aria-hidden` follows rail state in the markup. */
+   so icons and avatars never move. It fades/translates on the SAME shared beat as the surface (no
+   staged delay), so the copy rides the width instead of lagging behind a disconnected edge.
+   `aria-hidden` follows rail state in the markup. */
 .sidebar-shell .sidebar-copy {
   min-width: 0;
   overflow: hidden;
@@ -492,14 +570,13 @@ div[data-widget-tinted] {
   opacity: 1;
   transform: translateX(0);
   transition:
-    opacity var(--motion-fast) var(--ease-standard) calc(var(--motion-press) / 2),
-    transform var(--motion-base) var(--ease-standard) calc(var(--motion-press) / 2);
+    opacity var(--motion-reveal) var(--ease-standard),
+    transform var(--motion-reveal) var(--ease-standard);
 }
 .sidebar-shell[data-rail='true'] .sidebar-copy {
   opacity: 0;
   transform: translateX(-0.5rem);
   pointer-events: none;
-  transition-delay: initial;
 }
 .sidebar-shell .sidebar-copy-placeholder {
   opacity: 0;
@@ -520,7 +597,6 @@ div[data-widget-tinted] {
   margin-top: 0.75rem;
   border-top-color: hsl(var(--border));
   padding-top: 0.75rem;
-  transition-duration: var(--motion-base);
 }
 .sidebar-shell .sidebar-section-label {
   overflow: hidden;
@@ -528,8 +604,8 @@ div[data-widget-tinted] {
   opacity: 1;
   transform: translateX(0);
   transition:
-    opacity var(--motion-fast) var(--ease-standard) calc(var(--motion-press) / 2),
-    transform var(--motion-base) var(--ease-standard) calc(var(--motion-press) / 2),
+    opacity var(--motion-reveal) var(--ease-standard),
+    transform var(--motion-reveal) var(--ease-standard),
     max-height var(--motion-reveal) var(--ease-standard),
     padding-bottom var(--motion-reveal) var(--ease-standard);
 }
@@ -538,8 +614,6 @@ div[data-widget-tinted] {
   transform: translateX(-0.5rem);
   max-height: 0;
   padding-bottom: 0;
-  transition-delay: initial;
-  transition-duration: var(--motion-fast), var(--motion-base), var(--motion-base), var(--motion-base);
 }
 
 /* Active background hands off to the rail's thin indicator instead of switching in one frame. */
@@ -555,21 +629,11 @@ div[data-widget-tinted] {
   transform-origin: center;
   transition:
     opacity var(--motion-fast) var(--ease-standard),
-    transform var(--motion-base) var(--ease-standard);
+    transform var(--motion-reveal) var(--ease-standard);
 }
 .sidebar-shell[data-rail='true'] .sidebar-rail-active {
   opacity: 1;
   transform: translateY(-50%) scaleY(1);
-  transition-delay: calc(var(--motion-press) / 2);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  /* The global net collapses durations; clear staged reveal delays as well so the mode is immediate. */
-  .sidebar-shell .sidebar-copy,
-  .sidebar-shell .sidebar-section-label,
-  .sidebar-shell .sidebar-rail-active {
-    transition-delay: initial !important;
-  }
 }
 
 /* ── Home edit mode (steep «Edit» feel): a LIGHT page-level toggle + soft reveal of card

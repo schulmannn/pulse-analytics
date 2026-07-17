@@ -200,11 +200,21 @@ loops (reorder jiggle, starfield twinkle) and readability-critical reveals addit
 `animation: none`. JS motion (framer on the landing) gates in-component via `useReducedMotion`.
 
 **Desktop sidebar.** The persistent column remains layout-pushing in both modes (`240px` expanded,
-`64px` rail): collapse uses `--motion-base`, expansion uses the calmer `--motion-reveal`. Icons and
-avatars occupy a fixed `40px` first track centred on the rail axis; only the second-track copy is
-masked/faded/translated. The surface leads copy on expansion by half a `--motion-press` beat, while
-collapse removes copy immediately. The reduced-motion override clears that reveal delay as well as
-collapsing duration, so the mode switch never waits on invisible text.
+`64px` rail). Both directions share **one edge-led beat** — `--motion-reveal` on the width, the
+outer-edge toggle transform, and the copy masks alike — so the surface moves as a single 300ms
+gesture (the reference's single sidebar transform) rather than an asymmetric collapse/expand pair. No
+staged copy delay: labels ride the same beat instead of lagging a disconnected edge. Icons and avatars
+occupy a fixed `40px` first track centred on the rail axis; only the second-track copy is
+masked/faded/translated. The global reduced-motion net collapses the duration to ~0, and since no rule
+carries a transition-delay the mode switch is immediate.
+
+The **toggle** rides the sidebar's moving outer edge — pinned to the panel's right edge when open,
+sliding back onto the `32px` rail axis as it collapses (Search holds the left axis, dropping below the
+toggle in the rail). Its glyph is an original morph: a quiet panel outline + divider at rest that, on
+`:hover`/`:focus-visible`, fades the divider and reveals a directional chevron (`‹` hide when open,
+`›` reveal in the rail) over `--motion-fast`. A compact CSS-only tooltip (a pointer-events-none layer
+to the right, `role="tooltip"` + `aria-describedby`, no native `title`) opens on the same hover/focus
+carrying the Russian label and discrete `Ctrl`/`B` key chips.
 
 **Bespoke (not canon).** Illustration loops keep their own timings on purpose and are allow-listed by
 the lint: cartograph (error/404/empty), the `/connect` orbital hub + starfield, and the reorder jiggle.

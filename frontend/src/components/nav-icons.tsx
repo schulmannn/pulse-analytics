@@ -57,3 +57,30 @@ export function Icon({ name, ...props }: { name: IconName } & SVGProps<SVGSVGEle
     </svg>
   );
 }
+
+/**
+ * Sidebar-toggle glyph — an original Atlavue morph (NOT the shared `Icon`): at rest a quiet panel
+ * outline + left divider; on hover/focus the divider contracts and a directional chevron appears,
+ * honestly points the way the surface will move — «‹» (collapse, expanded) or «›» (reveal, rail).
+ * The reveal is CSS-only (`.panel-divider` / `.panel-chevron` off the button's :hover/:focus-visible
+ * in index.css) so there's no hover React state; only the chevron DIRECTION follows `rail` here.
+ */
+export function PanelToggleGlyph({ rail, className }: { rail: boolean; className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      data-direction={rail ? 'show' : 'hide'}
+      className={className}
+    >
+      <path className="panel-frame" d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" />
+      <path className="panel-divider" d="M9 3v18" />
+      <path className="panel-chevron" d={rail ? 'm12.5 8.5 3 3.5-3 3.5' : 'm15.5 8.5-3 3.5 3 3.5'} />
+    </svg>
+  );
+}
