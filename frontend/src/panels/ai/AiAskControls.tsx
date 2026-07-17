@@ -172,6 +172,38 @@ function IconButton({
   );
 }
 
+/** Круглая кнопка отправки (STEEP): стрелка ↑ в акцентном круге; busy — маленький спиннер. */
+export function AiSendButton({
+  disabled,
+  busy = false,
+  label = 'Отправить',
+}: {
+  disabled: boolean;
+  busy?: boolean;
+  label?: string;
+}) {
+  return (
+    <button
+      type="submit"
+      aria-label={label}
+      title={label}
+      disabled={disabled}
+      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      {busy ? (
+        <svg viewBox="0 0 16 16" fill="none" className="h-4 w-4 animate-spin" aria-hidden="true">
+          <circle cx="8" cy="8" r="6" stroke="currentColor" strokeOpacity="0.35" strokeWidth="2" />
+          <path d="M14 8a6 6 0 0 0-6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" className="h-4 w-4" aria-hidden="true">
+          <path d="M8 12.5v-9M4 7l4-3.5L12 7" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      )}
+    </button>
+  );
+}
+
 function Chip({ label, onRemove }: { label: string; onRemove: () => void }) {
   return (
     <button

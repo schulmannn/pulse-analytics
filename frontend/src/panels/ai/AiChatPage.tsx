@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useChannels, useMe } from '@/api/queries';
-import { AiAskControls } from '@/panels/ai/AiAskControls';
+import { AiAskControls, AiSendButton } from '@/panels/ai/AiAskControls';
+import { AiEmptyState } from '@/panels/ai/AiEmptyState';
 import { composeAiQuestion, emptyAiAskContext, type AiAskContext } from '@/lib/aiAsk';
 import {
   aiToolLabel,
@@ -42,34 +43,37 @@ export function AiChatPage() {
   return chatId == null ? <ChatIndex /> : <ChatThread key={chatId} chatId={chatId} />;
 }
 
-// ── Индекс: «Спросить» + реестр чатов ────────────────────────────────────────────────────────────
+// ── Экран нового чата (STEEP): шапка с дропдауном недавних, глиф по центру, композер внизу ──────
 function ChatIndex() {
   const chatsQuery = useAiChats(true);
   const channels = useChannels().data?.channels ?? [];
   const create = useCreateAiChat();
-  const del = useDeleteAiChat();
   const navigate = useNavigate();
   const [text, setText] = useState('');
   const [ctx, setCtx] = useState<AiAskContext>(emptyAiAskContext);
   const [error, setError] = useState<string | null>(null);
 
-  const ask = () => {
-    if (!text.trim() || create.isPending) return;
-    const q = composeAiQuestion(text, ctx, channels);
+  // Единая отправка: и составленный из композера вопрос, и клик по подсказке.
+  const askWith = (q: string) => {
+    if (!q.trim() || create.isPending) return;
     setError(null);
     create.mutate(undefined, {
       onSuccess: ({ chat }) => navigate(`/ai/${chat.id}`, { state: { q } }),
       onError: (e) => setError(e instanceof Error ? e.message : 'Не удалось создать чат'),
     });
   };
+  const ask = () => {
+    if (!text.trim()) return;
+    askWith(composeAiQuestion(text, ctx, channels));
+  };
 
   const chats = chatsQuery.data?.chats ?? [];
   const usage = chatsQuery.data?.usage;
 
   return (
-    <div className="mx-auto max-w-3xl">
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="text-2xl font-medium tracking-tight text-foreground">AI-чат</h2>
+    <div className="mx-auto flex min-h-[calc(100vh-8rem)] max-w-3xl flex-col">
+      <div className="sticky top-0 z-sticky -mx-4 flex items-center justify-between gap-3 bg-background px-4 py-3 sm:-mx-6 sm:px-6">
+        <RecentChatsMenu chats={chats} />
         {usage && (
           <span className="text-2xs font-medium text-muted-foreground" title="Вопросов сегодня / дневной лимит">
             {usage.used}/{usage.limit} за сегодня
@@ -77,82 +81,103 @@ function ChatIndex() {
         )}
       </div>
 
+      <div className="flex flex-1 items-center justify-center py-10">
+        <AiEmptyState disabled={create.isPending} onPick={askWith} />
+      </div>
+
+      {error && (
+        <div className="mb-3 rounded-lg border border-border bg-card px-3 py-2 text-sm text-destructive" role="alert">
+          {error}
+        </div>
+      )}
+
       <form
-        className="mt-6 rounded-2xl border border-border bg-card p-4 transition-colors focus-within:border-primary/50"
+        className="sticky bottom-0 -mx-4 bg-background px-4 py-3 sm:-mx-6 sm:px-6"
         onSubmit={(e) => {
           e.preventDefault();
           ask();
         }}
       >
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              ask();
-            }
-          }}
-          rows={3}
-          maxLength={4000}
-          placeholder="Спросите о ваших метриках — ассистент читает данные подключённых источников"
-          aria-label="Вопрос AI-ассистенту"
-          className="w-full resize-none bg-transparent text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground"
-        />
-        <div className="mt-2 flex items-end justify-between gap-3">
-          <AiAskControls ctx={ctx} onCtx={setCtx} disabled={create.isPending} />
-          <button
-            type="submit"
-            disabled={!text.trim() || create.isPending}
-            className="btn-pill shrink-0 bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {create.isPending ? 'Открываю…' : 'Спросить'}
-          </button>
-        </div>
-        {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
-      </form>
-
-      <div className="mt-8">
-        <div className="text-2xs font-medium uppercase tracking-wider text-muted-foreground">Все чаты</div>
-        {chatsQuery.isLoading ? (
-          <div className="mt-3 space-y-2">
-            <Skeleton className="h-9 w-full" />
-            <Skeleton className="h-9 w-2/3" />
+        <div className="rounded-2xl border border-border bg-card p-2.5 transition-colors focus-within:border-primary/50">
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                ask();
+              }
+            }}
+            rows={2}
+            maxLength={4000}
+            disabled={create.isPending}
+            placeholder="Спросите о ваших метриках…"
+            aria-label="Вопрос AI-ассистенту"
+            className="w-full resize-none bg-transparent px-1.5 text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-60"
+          />
+          <div className="mt-1.5 flex items-end justify-between gap-2">
+            <AiAskControls ctx={ctx} onCtx={setCtx} disabled={create.isPending} />
+            <AiSendButton disabled={!text.trim() || create.isPending} busy={create.isPending} />
           </div>
-        ) : chats.length === 0 ? (
-          <p className="mt-3 text-sm text-muted-foreground">
-            Пока пусто. Задайте первый вопрос — чат сохранится здесь.
-          </p>
-        ) : (
-          <ul className="mt-2 divide-y divide-border border-y border-border">
-            {chats.map((chat) => (
-              <li key={chat.id} className="group flex items-center gap-2">
-                <Link
-                  to={`/ai/${chat.id}`}
-                  className="min-w-0 flex-1 truncate px-1 py-2.5 text-sm text-foreground transition-colors hover:text-primary"
-                >
-                  {chat.title || 'Без названия'}
-                </Link>
-                {typeof chat.message_count === 'number' && (
-                  <span className="text-2xs tabular-nums text-muted-foreground">{chat.message_count}</span>
-                )}
-                <button
-                  type="button"
-                  aria-label="Удалить чат"
-                  title="Удалить чат"
-                  disabled={del.isPending}
-                  onClick={() => del.mutate(chat.id)}
-                  className="rounded p-1.5 text-muted-foreground opacity-0 transition-all hover:bg-muted hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
-                >
-                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-4 w-4" aria-hidden="true">
-                    <path d="M3 5h10M6.5 5V3.5h3V5M5 5l.6 8h4.8L11 5" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+/** Заголовок «Новый AI-чат» с STEEP-дропдауном недавних чатов (⌄ появляется, когда чаты есть). */
+function RecentChatsMenu({ chats }: { chats: { id: number; title: string }[] }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  if (!chats.length) {
+    return <h2 className="text-base font-medium text-foreground">Новый AI-чат</h2>;
+  }
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1.5 rounded px-1 py-0.5 text-base font-medium text-foreground transition-colors hover:bg-muted"
+      >
+        Новый AI-чат
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true">
+          <path d="m4 6.5 4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full z-popover mt-2 w-72 rounded-xl border border-border bg-card p-1.5">
+          <div className="px-2.5 py-1 text-2xs font-medium tracking-wider text-muted-foreground">Недавние чаты</div>
+          {chats.slice(0, 10).map((chat) => (
+            <Link
+              key={chat.id}
+              to={`/ai/${chat.id}`}
+              onClick={() => setOpen(false)}
+              className="block truncate rounded px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              title={chat.title || 'Без названия'}
+            >
+              {chat.title || 'Без названия'}
+            </Link>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -317,12 +342,10 @@ function ChatThread({ chatId }: { chatId: number }) {
         </div>
       </div>
 
-      <div className="flex-1 space-y-6 py-4">
-        {messages.length === 0 && !pending && (
-          <p className="pt-8 text-center text-sm text-muted-foreground">
-            Спросите о динамике, топ-постах, упоминаниях или кампаниях — ассистент читает данные
-            ваших источников.
-          </p>
+      {/* Пустой тред центрирует STEEP-глиф с подсказками; с первым же сообщением — обычная лента. */}
+      <div className={`flex-1 py-4 ${messages.length === 0 && !pending && !banner ? 'flex items-center justify-center' : 'space-y-6'}`}>
+        {messages.length === 0 && !pending && !banner && (
+          <AiEmptyState disabled={!!pending} onPick={(q) => send(q)} />
         )}
         {messages.map((m) => (
           <MessageRow key={m.id} message={m} />
@@ -380,17 +403,7 @@ function ChatThread({ chatId }: { chatId: number }) {
           />
           <div className="mt-1.5 flex items-end justify-between gap-2">
             <AiAskControls ctx={ctx} onCtx={setCtx} disabled={!!pending} />
-            <button
-              type="submit"
-              disabled={!text.trim() || !!pending}
-              aria-label="Отправить"
-              title="Отправить"
-              className="btn-pill shrink-0 bg-primary p-2 text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4" aria-hidden="true">
-                <path d="M8 12.5v-9M4 7l4-3.5L12 7" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </button>
+            <AiSendButton disabled={!text.trim() || !!pending} />
           </div>
         </div>
       </form>
