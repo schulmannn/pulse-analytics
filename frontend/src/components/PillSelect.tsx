@@ -254,7 +254,7 @@ export function PillSelect<T extends string = string>({
         className={cn(
           'inline-flex h-8 max-w-full items-center justify-between gap-1 rounded-full border border-border bg-background px-3 text-xs font-medium text-foreground transition-colors',
           'outline-none hover:bg-muted focus-visible:ring-1 focus-visible:ring-primary',
-          disabled && 'cursor-not-allowed opacity-50 hover:bg-background',
+          disabled && 'pointer-events-none opacity-50',
           className,
         )}
       >
@@ -301,7 +301,7 @@ export function PillSelect<T extends string = string>({
                       className={cn(
                         'flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-xs transition-colors',
                         o.disabled
-                          ? 'cursor-not-allowed text-muted-foreground/60'
+                          ? 'pointer-events-none text-muted-foreground/60'
                           : isSelected
                             ? 'bg-primary/10 text-foreground'
                             : isActive

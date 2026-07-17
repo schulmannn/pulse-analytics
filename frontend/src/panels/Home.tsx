@@ -594,7 +594,7 @@ function HomeEmptyState({
             type="button"
             onClick={onSeedDefaults}
             disabled={defaultsPending}
-            className="btn-pill border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+            className="btn-pill border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
           >
             Собрать по умолчанию
           </button>

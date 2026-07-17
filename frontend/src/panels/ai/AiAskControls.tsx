@@ -163,7 +163,7 @@ function IconButton({
       aria-expanded={expanded}
       disabled={disabled}
       onClick={onClick}
-      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border transition-colors disabled:pointer-events-none disabled:opacity-50 ${
         expanded ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'
       }`}
     >
@@ -188,7 +188,7 @@ export function AiSendButton({
       aria-label={label}
       title={label}
       disabled={disabled}
-      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
+      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-40"
     >
       {busy ? (
         <svg viewBox="0 0 16 16" fill="none" className="h-4 w-4 animate-spin" aria-hidden="true">

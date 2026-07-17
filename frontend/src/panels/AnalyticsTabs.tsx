@@ -182,7 +182,7 @@ function TgAnalyticsExportButton() {
       disabled={rows.length === 0}
       aria-label="Экспорт метрик аналитики за выбранный период в CSV"
       title={rows.length === 0 ? 'Нет метрик за выбранный период' : undefined}
-      className="mb-1 hidden shrink-0 btn-pill border border-border bg-background px-3.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 md:inline-flex"
+      className="mb-1 hidden shrink-0 btn-pill border border-border bg-background px-3.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50 md:inline-flex"
     >
       Экспорт метрик
     </button>

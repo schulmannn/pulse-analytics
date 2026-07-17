@@ -62,7 +62,7 @@ export function IgAnalytics({ ig }: { ig: IgData }) {
             disabled={exportRows.length === 0}
             aria-label="Экспорт метрик аналитики за выбранный период в CSV"
             title={exportRows.length === 0 ? 'Нет метрик за выбранный период' : undefined}
-            className="btn-pill border border-border bg-background px-3.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            className="btn-pill border border-border bg-background px-3.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
           >
             Экспорт метрик
           </button>
