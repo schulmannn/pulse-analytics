@@ -281,12 +281,13 @@ export function SourceSwitcher({ rail = false, mobile = false }: { rail?: boolea
       aria-haspopup={mobile && openable ? 'dialog' : undefined}
       aria-expanded={openable ? open : undefined}
       className={cn(
-        'flex w-full items-center rounded text-left transition-colors',
-        rail ? 'justify-center py-1' : 'gap-2.5 px-2 py-1.5',
+        mobile
+          ? 'flex w-full items-center gap-2.5 rounded px-2 py-1.5 text-left transition-colors'
+          : 'grid w-full grid-cols-[40px_minmax(0,1fr)] items-center overflow-hidden rounded py-1.5 text-left transition-colors',
         openable ? 'cursor-pointer hover:bg-hover-row/60' : 'cursor-default',
       )}
     >
-      <span className="relative shrink-0">
+      <span className={cn('relative shrink-0', !mobile && 'justify-self-center')}>
         <ChannelAvatar
           source={current?.source}
           initial={initial}
@@ -296,15 +297,16 @@ export function SourceSwitcher({ rail = false, mobile = false }: { rail?: boolea
         {/* Network badge overlays the avatar's bottom-right — identifies the active source's net. */}
         <NetworkBadge network={network} className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5" />
       </span>
-      {!rail && (
-        <>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-medium text-foreground">{handle}</span>
-            <span className="block truncate text-xs text-muted-foreground">{subtitle}</span>
-          </span>
-          {openable && <Icon name="chevron" className="h-4 w-4 shrink-0 text-muted-foreground" />}
-        </>
-      )}
+      <span
+        aria-hidden={rail}
+        className={cn('min-w-0 flex-1 items-center', mobile ? 'flex gap-2.5' : 'sidebar-copy flex gap-2.5 pl-2.5')}
+      >
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-medium text-foreground">{handle}</span>
+          <span className="block truncate text-xs text-muted-foreground">{subtitle}</span>
+        </span>
+        {openable && <Icon name="chevron" aria-hidden="true" className="h-4 w-4 shrink-0 text-muted-foreground" />}
+      </span>
     </button>
   );
 
@@ -326,7 +328,7 @@ export function SourceSwitcher({ rail = false, mobile = false }: { rail?: boolea
 
   // Desktop sidebar (md+): the trigger + an absolute dropdown, anchored under the source card.
   return (
-    <div ref={cardRef} className={cn('relative', rail ? 'px-2' : 'px-3')}>
+    <div ref={cardRef} className="relative px-3">
       {trigger}
       {open && openable && (
         <div

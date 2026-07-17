@@ -435,6 +435,143 @@ div[data-widget-tinted] {
   .widget-enter { animation: none; }
 }
 
+/* ── Sidebar mode motion (expanded 240px ↔ icon-rail 64px) ──────────────────────────────────────
+   The column WIDTH animates because the sidebar PUSHES the main canvas (there is no overlay); the
+   inner copy is masked/faded/translated so labels, section headings and source/account details
+   slide out instead of popping. Icons/avatars stay in a fixed left gutter (anchored, not
+   teleporting — only the copy after them collapses, and the row's overflow clip masks the residue).
+   Two beats off the shared ladder + house easing: collapse is the quicker one (--motion-base),
+   expansion the calmer one (--motion-reveal), keyed off [data-rail]. No JS timers — CSS transitions
+   are interruptible, so rapid toggles reverse and settle on their own with no stale state. The
+   global reduced-motion net collapses durations; the staged copy delay is cleared below as well. */
+.sidebar-shell {
+  transition: width var(--motion-reveal) var(--ease-standard); /* expand — calm ease-out */
+}
+.sidebar-shell[data-rail='true'] {
+  transition: width var(--motion-base) var(--ease-standard); /* collapse — the quicker beat */
+}
+
+/* The utility buttons keep the same 32px x-axis as the rail icons. Search moves beneath the toggle
+   while the action well grows, so the source card below travels continuously rather than jumping
+   when a flex row becomes a column. */
+.sidebar-actions {
+  height: 1.75rem;
+  transition: height var(--motion-reveal) var(--ease-standard);
+}
+.sidebar-action {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  transition: transform var(--motion-reveal) var(--ease-standard);
+}
+.sidebar-action-toggle {
+  transform: translateX(0.375rem);
+}
+.sidebar-action-search {
+  transform: translateX(2.875rem);
+}
+.sidebar-shell[data-rail='true'] .sidebar-actions {
+  height: 3.75rem;
+  transition-duration: var(--motion-base);
+}
+.sidebar-shell[data-rail='true'] .sidebar-action {
+  transition-duration: var(--motion-base);
+}
+.sidebar-shell[data-rail='true'] .sidebar-action-search {
+  transform: translate(0.375rem, 2rem);
+}
+
+/* Horizontal copy — nav labels, @handle/subtitle, email/plan, freshness text, the account chevron.
+   It occupies the second track of a 40px + remainder grid: the first track is the final rail width,
+   so icons and avatars never move. Expansion lets the surface lead by half a press beat before copy
+   enters; collapse removes copy immediately. `aria-hidden` follows rail state in the markup. */
+.sidebar-shell .sidebar-copy {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  opacity: 1;
+  transform: translateX(0);
+  transition:
+    opacity var(--motion-fast) var(--ease-standard) calc(var(--motion-press) / 2),
+    transform var(--motion-base) var(--ease-standard) calc(var(--motion-press) / 2);
+}
+.sidebar-shell[data-rail='true'] .sidebar-copy {
+  opacity: 0;
+  transform: translateX(-0.5rem);
+  pointer-events: none;
+  transition-delay: initial;
+}
+.sidebar-shell .sidebar-copy-placeholder {
+  opacity: 0;
+}
+
+/* Section headings and the separator rhythm change continuously too. Keeping both states mounted
+   avoids the old one-frame jump from `mt-4` straight to `border + mt-3 + pt-3`. */
+.sidebar-shell .sidebar-nav-group-labelled {
+  margin-top: 1rem;
+  border-top: 1px solid transparent;
+  padding-top: 0;
+  transition:
+    margin-top var(--motion-reveal) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard),
+    padding-top var(--motion-reveal) var(--ease-standard);
+}
+.sidebar-shell[data-rail='true'] .sidebar-nav-group-labelled {
+  margin-top: 0.75rem;
+  border-top-color: hsl(var(--border));
+  padding-top: 0.75rem;
+  transition-duration: var(--motion-base);
+}
+.sidebar-shell .sidebar-section-label {
+  overflow: hidden;
+  max-height: 1.5rem;
+  opacity: 1;
+  transform: translateX(0);
+  transition:
+    opacity var(--motion-fast) var(--ease-standard) calc(var(--motion-press) / 2),
+    transform var(--motion-base) var(--ease-standard) calc(var(--motion-press) / 2),
+    max-height var(--motion-reveal) var(--ease-standard),
+    padding-bottom var(--motion-reveal) var(--ease-standard);
+}
+.sidebar-shell[data-rail='true'] .sidebar-section-label {
+  opacity: 0;
+  transform: translateX(-0.5rem);
+  max-height: 0;
+  padding-bottom: 0;
+  transition-delay: initial;
+  transition-duration: var(--motion-fast), var(--motion-base), var(--motion-base), var(--motion-base);
+}
+
+/* Active background hands off to the rail's thin indicator instead of switching in one frame. */
+.sidebar-shell .sidebar-nav-item-active {
+  background-color: hsl(var(--hover-row));
+}
+.sidebar-shell[data-rail='true'] .sidebar-nav-item-active {
+  background-color: transparent;
+}
+.sidebar-shell .sidebar-rail-active {
+  opacity: 0;
+  transform: translateY(-50%) scaleY(0.5);
+  transform-origin: center;
+  transition:
+    opacity var(--motion-fast) var(--ease-standard),
+    transform var(--motion-base) var(--ease-standard);
+}
+.sidebar-shell[data-rail='true'] .sidebar-rail-active {
+  opacity: 1;
+  transform: translateY(-50%) scaleY(1);
+  transition-delay: calc(var(--motion-press) / 2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* The global net collapses durations; clear staged reveal delays as well so the mode is immediate. */
+  .sidebar-shell .sidebar-copy,
+  .sidebar-shell .sidebar-section-label,
+  .sidebar-shell .sidebar-rail-active {
+    transition-delay: initial !important;
+  }
+}
+
 /* ── Home edit mode (steep «Edit» feel): a LIGHT page-level toggle + soft reveal of card
    controls when edit mode opens. No heavy fills / shadows — depth stays hairline-only. ─────── */
 @layer components {

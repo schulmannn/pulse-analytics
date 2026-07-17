@@ -46,6 +46,7 @@ export function Sidebar({ email, role, avatar }: { email?: string; role?: string
   return (
     <aside
       aria-label="Боковая панель"
+      data-rail={rail ? 'true' : 'false'}
       className={cn(
         // FLAT canvas strip (steep — owner call): no floating card, no hairline, no inset — the
         // sidebar is just the canvas itself; the content's cards carry all the surface contrast.
@@ -53,8 +54,9 @@ export function Sidebar({ email, role, avatar }: { email?: string; role?: string
         // sticky Topbar (z-sticky), under scrim/modals.
         // h-full (не h-screen): на md+ оболочка — inset-панель с паддингом корня, экранная
         // высота вылезала бы за нижний зазор.
-        'sticky top-0 z-nav hidden h-full shrink-0 flex-col bg-background md:flex print:hidden',
-        'transition-[width] duration-200 motion-reduce:transition-none',
+        // `sidebar-shell` owns the width→motion (asymmetric collapse/expand off [data-rail]) and, via
+        // its descendant rules, the copy/heading masking — so nothing inside pops while width moves.
+        'sidebar-shell sticky top-0 z-nav hidden h-full shrink-0 flex-col bg-background md:flex print:hidden',
         rail ? 'w-16' : 'w-60',
       )}
     >
@@ -62,7 +64,7 @@ export function Sidebar({ email, role, avatar }: { email?: string; role?: string
 
       <div className="mt-2">
         <SourceSwitcher rail={rail} />
-        <div className={rail ? 'px-2' : 'px-3'}>
+        <div className="px-3">
           <SidebarStatus rail={rail} />
         </div>
       </div>
@@ -82,16 +84,24 @@ export function Sidebar({ email, role, avatar }: { email?: string; role?: string
  */
 function SidebarActions({ rail, onToggle }: { rail: boolean; onToggle: () => void }) {
   return (
-    <div className={cn('flex px-3 pt-3', rail ? 'flex-col items-center gap-1' : 'items-center justify-start gap-1')}>
+    // The toggle stays on the 32px rail axis. Search glides diagonally below it while collapsing,
+    // instead of jumping from a horizontal flex row to a vertical one in a single frame.
+    <div className="sidebar-actions relative mx-3 mt-3">
       <GhostIconButton
         onClick={onToggle}
         label={rail ? 'Показать панель' : 'Скрыть панель'}
         title={rail ? 'Показать панель · Ctrl+B' : 'Скрыть панель · Ctrl+B'}
         expanded={!rail}
+        className="sidebar-action sidebar-action-toggle"
       >
         <Icon name="panel" className="h-4 w-4" />
       </GhostIconButton>
-      <GhostIconButton onClick={openCommandPalette} label="Поиск" title="Поиск · ⌘K">
+      <GhostIconButton
+        onClick={openCommandPalette}
+        label="Поиск"
+        title="Поиск · ⌘K"
+        className="sidebar-action sidebar-action-search"
+      >
         <Icon name="search" className="h-4 w-4" />
       </GhostIconButton>
     </div>
@@ -104,12 +114,14 @@ function GhostIconButton({
   label,
   title,
   expanded,
+  className,
   children,
 }: {
   onClick: () => void;
   label: string;
   title: string;
   expanded?: boolean;
+  className?: string;
   children: ReactNode;
 }) {
   return (
@@ -119,7 +131,10 @@ function GhostIconButton({
       aria-label={label}
       aria-expanded={expanded}
       title={title}
-      className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-hover-row hover:text-foreground"
+      className={cn(
+        'flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-hover-row hover:text-foreground',
+        className,
+      )}
     >
       {children}
     </button>
@@ -153,9 +168,11 @@ function SidebarNav({ rail }: { rail: boolean }) {
 function SidebarNavGroup({ label, items, rail }: { label?: string; items: NavLinkDef[]; rail: boolean }) {
   if (items.length === 0) return null;
   return (
-    <div className={cn('space-y-0.5', label && (rail ? 'mt-3 border-t border-border pt-3' : 'mt-4'))}>
-      {label && !rail && (
-        <div className="px-2 pb-1 text-2xs font-medium text-ink3">{label}</div>
+    <div className={cn('sidebar-nav-group space-y-0.5', label && 'sidebar-nav-group-labelled')}>
+      {/* The heading stays mounted and collapses (opacity + max-height) instead of unmounting, so it
+          slides away with the width rather than popping. aria-hidden in the rail keeps AT quiet. */}
+      {label && (
+        <div aria-hidden={rail} className="sidebar-section-label px-2 pb-1 text-2xs font-medium text-ink3">{label}</div>
       )}
       {items.map((item) => <NavItem key={item.to} {...item} rail={rail} />)}
     </div>
@@ -191,23 +208,26 @@ function SidebarStatus({ rail }: { rail?: boolean }) {
   // Reserve this row's height even before freshness resolves — the same flex row with a muted dot and
   // an invisible (but same-metrics) label — so the nav below doesn't jump down when it appears. That
   // pop-in was the shell-wide layout shift measured on every route (see e2e/layout-shift.spec.ts).
-  const rowClass = cn('flex items-center gap-2 pt-1 text-2xs text-muted-foreground', rail ? 'justify-center' : 'px-2');
+  // The dot stays anchored at the left gutter in both modes; the label is always mounted and rides the
+  // shared `.sidebar-copy` mask (faded + collapsed) in the rail rather than unmounting.
+  const rowClass = 'grid grid-cols-[40px_minmax(0,1fr)] items-center pt-1 text-2xs text-muted-foreground';
   if (!health) {
     return (
       <div aria-hidden="true" className={rowClass}>
-        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-muted" />
-        {!rail && <span className="truncate font-mono opacity-0">обновлено —</span>}
+        <span className="flex justify-center">
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-muted" />
+        </span>
+        <span className="sidebar-copy sidebar-copy-placeholder block truncate pl-2 font-mono">обновлено —</span>
       </div>
     );
   }
   const dotClass = health.tone === 'error' ? 'bg-ember' : health.tone === 'warn' ? 'bg-status-warn' : 'bg-verdant';
   return (
     <div title={rail ? health.label : undefined} className={rowClass}>
-      <span
-        aria-hidden="true"
-        className={cn('h-1.5 w-1.5 shrink-0 rounded-full', dotClass)}
-      />
-      {!rail && <span className="truncate font-mono">{health.label}</span>}
+      <span aria-hidden="true" className="flex justify-center">
+        <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', dotClass)} />
+      </span>
+      <span aria-hidden={rail} className="sidebar-copy block truncate pl-2 font-mono">{health.label}</span>
     </div>
   );
 }
@@ -224,28 +244,27 @@ function NavItem({ to, label, icon, end, rail }: NavLinkDef & { rail?: boolean }
       aria-label={rail ? label : undefined}
       className={({ isActive }) =>
         cn(
-          'relative flex h-9 items-center rounded-xl text-sm transition-colors',
-          rail ? 'justify-center' : 'gap-2.5 px-2',
+          // The first grid track is exactly the rail's available width (64px − 2 × 12px nav inset),
+          // so every glyph remains centred on x=32 in both modes while only the copy track collapses.
+          'sidebar-nav-item relative grid h-9 grid-cols-[40px_minmax(0,1fr)] items-center overflow-hidden rounded-xl text-sm transition-colors',
           isActive
-            ? // Rail (collapsed): no heavy filled square — a thin left indicator pill (below) + the
-              // active glyph reads lighter. Expanded: the full-row neutral highlight stays.
-              rail
-              ? 'font-medium text-foreground'
-              : 'bg-hover-row font-medium text-foreground'
+            ? 'sidebar-nav-item-active font-medium text-foreground'
             : 'text-ink2 hover:bg-hover-row/60 hover:text-foreground',
         )
       }
     >
       {({ isActive }) => (
         <>
-          {rail && isActive && (
+          {isActive && (
             <span
               aria-hidden="true"
-              className="absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-full bg-foreground"
+              className="sidebar-rail-active absolute left-0 top-1/2 h-4 w-[3px] rounded-full bg-foreground"
             />
           )}
-          <Icon name={icon} className="h-[18px] w-[18px] shrink-0" />
-          {!rail && <span className="truncate whitespace-nowrap">{label}</span>}
+          <span className="flex justify-center">
+            <Icon name={icon} className="h-[18px] w-[18px] shrink-0" />
+          </span>
+          <span aria-hidden={rail} className="sidebar-copy block truncate whitespace-nowrap pl-2.5">{label}</span>
         </>
       )}
     </NavLink>
@@ -278,7 +297,7 @@ function SidebarUserRow({
   useDismiss(open, setOpen, rowRef, triggerRef);
 
   return (
-    <div ref={rowRef} className={cn('relative border-t border-border py-2', rail ? 'px-2' : 'px-3')}>
+    <div ref={rowRef} className="relative border-t border-border px-3 py-2">
       <button
         ref={triggerRef}
         type="button"
@@ -286,23 +305,20 @@ function SidebarUserRow({
         aria-label="Аккаунт"
         aria-expanded={open}
         title={rail ? email : undefined}
-        className={cn(
-          'flex w-full items-center rounded text-left transition-colors hover:bg-hover-row/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
-          rail ? 'justify-center py-1' : 'gap-2.5 px-2 py-1.5',
-        )}
+        className="grid w-full grid-cols-[40px_minmax(0,1fr)] items-center overflow-hidden rounded py-1.5 text-left transition-colors hover:bg-hover-row/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
       >
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-avatar text-2xs font-medium text-ink2">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center justify-self-center overflow-hidden rounded-full bg-avatar text-2xs font-medium text-ink2">
           {avatar ? <img src={avatar} alt="" className="h-full w-full object-cover" /> : avatarInitials(email)}
         </span>
-        {!rail && (
-          <>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm text-foreground">{email ?? 'Аккаунт'}</span>
-              <span className="block truncate text-2xs text-muted-foreground">План {PLAN_LABEL[plan]}</span>
-            </span>
-            <Icon name="chevron" className={cn('h-4 w-4 shrink-0 text-muted-foreground transition-transform', open && 'rotate-180')} />
-          </>
-        )}
+        {/* Identity + chevron stay mounted and mask out in the rail (aria-hidden there) rather than
+            unmounting, so they slide away with the width instead of popping. */}
+        <span aria-hidden={rail} className="sidebar-copy flex min-w-0 items-center gap-2.5 pl-2.5">
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm text-foreground">{email ?? 'Аккаунт'}</span>
+            <span className="block truncate text-2xs text-muted-foreground">План {PLAN_LABEL[plan]}</span>
+          </span>
+          <Icon name="chevron" aria-hidden="true" className={cn('h-4 w-4 shrink-0 text-muted-foreground transition-transform', open && 'rotate-180')} />
+        </span>
       </button>
       {open && (
         <div
