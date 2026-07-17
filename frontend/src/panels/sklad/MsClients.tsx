@@ -1,4 +1,6 @@
+import { useContext } from 'react';
 import { useMsCohorts, useMsCustomers, useMsTopCustomers } from '@/api/queries';
+import { ChartExpandedContext } from '@/components/ExpandableChart';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
 import { LineChart } from '@/components/LineChart';
@@ -59,7 +61,7 @@ export function MsClients() {
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
-      <ChartWidget id="ms-customers" title="Покупатели" fixedSize="half" noExpand>
+      <ChartWidget id="ms-customers" title="Покупатели" fixedSize="half">
         <ChartCardBody value={fmt.num(summary.customers)} caption={windowLabel}>
           {sampled.length > 1 ? (
             <LineChart
@@ -76,7 +78,7 @@ export function MsClients() {
         </ChartCardBody>
       </ChartWidget>
 
-      <ChartWidget id="ms-repeat" title="Повторные покупки" fixedSize="half" noExpand>
+      <ChartWidget id="ms-repeat" title="Повторные покупки" fixedSize="half">
         {days === 0 ? (
           // На «Всё» окно совпадает с историей — «новых в окне» не бывает; честная метрика
           // здесь — сколько клиентов вообще возвращалось.
@@ -113,7 +115,7 @@ function MsTopCustomersCard({
   windowLabel: string;
 }) {
   return (
-    <ChartWidget id="ms-top-customers" title={`Топ покупателей ${windowLabel}`} fixedSize="full" noExpand>
+    <ChartWidget id="ms-top-customers" title={`Топ покупателей ${windowLabel}`} fixedSize="full">
       {state.isPending ? (
         <div className="space-y-2 py-2">
           {Array.from({ length: 5 }).map((_, i) => (
@@ -220,7 +222,7 @@ function cohortMonthLabel(m: string) {
 
 function MsCohortsCard({ state }: { state: ReturnType<typeof useMsCohorts> }) {
   return (
-    <ChartWidget id="ms-cohorts" title="Когорты: возвращаемость по месяцу первой покупки" fixedSize="full" noExpand>
+    <ChartWidget id="ms-cohorts" title="Когорты: возвращаемость по месяцу первой покупки" fixedSize="full">
       {state.isPending ? (
         <div className="space-y-2 py-2">
           {Array.from({ length: 4 }).map((_, i) => (
@@ -232,24 +234,40 @@ function MsCohortsCard({ state }: { state: ReturnType<typeof useMsCohorts> }) {
           Когорт пока нет — они появятся после загрузки истории заказов.
         </p>
       ) : (
-        <>
-          {/* Широкая матрица скроллится ВНУТРИ карточки (канон: без горизонтального overflow
-              страницы; мобильное поведение не ломаем). */}
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] border-separate border-spacing-0 text-xs tabular-nums">
-              <thead>
-                <tr className="text-2xs text-muted-foreground">
-                  <th className="py-1.5 pr-3 text-left font-medium">Первая покупка</th>
-                  <th className="py-1.5 pr-3 text-right font-medium">Клиентов</th>
-                  {COHORT_OFFSETS.map((o) => (
-                    <th key={o} className="w-12 py-1.5 text-center font-medium">
-                      {o === 0 ? '0' : `+${o}`}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {state.data.cohorts.slice(-12).map((c) => {
+        <MsCohortsTable cohorts={state.data.cohorts} />
+      )}
+    </ChartWidget>
+  );
+}
+
+/** Таблица когорт — ОТДЕЛЬНЫМ компонентом внутри детей карточки: ChartExpandedContext провайдится
+    оверлеем разворота ВОКРУГ детей, поэтому читать его можно только отсюда (чтение в MsCohortsCard
+    видело бы вечный false). Разворот показывает все когорты, свёрнуто — последние 12. */
+function MsCohortsTable({
+  cohorts,
+}: {
+  cohorts: Array<{ cohort_month: string; size: number; cells: Array<{ offset: number; active: number }> }>;
+}) {
+  const expanded = useContext(ChartExpandedContext);
+  return (
+    <>
+      {/* Широкая матрица скроллится ВНУТРИ карточки (канон: без горизонтального overflow
+          страницы; мобильное поведение не ломаем). */}
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[720px] border-separate border-spacing-0 text-xs tabular-nums">
+          <thead>
+            <tr className="text-2xs text-muted-foreground">
+              <th className="py-1.5 pr-3 text-left font-medium">Первая покупка</th>
+              <th className="py-1.5 pr-3 text-right font-medium">Клиентов</th>
+              {COHORT_OFFSETS.map((o) => (
+                <th key={o} className="w-12 py-1.5 text-center font-medium">
+                  {o === 0 ? '0' : `+${o}`}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {(expanded ? cohorts : cohorts.slice(-12)).map((c) => {
                   const byOffset = new Map(c.cells.map((cell) => [cell.offset, cell.active]));
                   const now = new Date();
                   // Сколько offset-месяцев когорты уже НАСТУПИЛО: прошедший месяц без заказов —
@@ -284,15 +302,13 @@ function MsCohortsCard({ state }: { state: ReturnType<typeof useMsCohorts> }) {
                     </tr>
                   );
                 })}
-              </tbody>
-            </table>
-          </div>
-          <p className="mt-2 text-2xs text-muted-foreground">
-            Доля клиентов когорты, сделавших заказ через N месяцев после первой покупки; «0» — месяц самой первой
-            покупки.
-          </p>
-        </>
-      )}
-    </ChartWidget>
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-2 text-2xs text-muted-foreground">
+        Доля клиентов когорты, сделавших заказ через N месяцев после первой покупки; «0» — месяц самой первой
+        покупки.
+      </p>
+    </>
   );
 }

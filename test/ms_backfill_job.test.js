@@ -261,13 +261,52 @@ test('mapping: null-safe agent/state, agent_id/state_id из последнег�
   assert.deepEqual(db.upserts[0].rows, [
     {
       order_id: 'full', moment: day, sum_kopecks: 100,
-      state: 'Новый', state_id: 'state-uuid-9', agent_id: 'uuid-1', agent_name: 'ИП Пион',
+      state: 'Новый', state_id: 'state-uuid-9', sales_channel_id: null, city: null,
+      agent_id: 'uuid-1', agent_name: 'ИП Пион',
     },
     {
       order_id: 'bare', moment: day, sum_kopecks: 12550,
-      state: null, state_id: null, agent_id: null, agent_name: null,
+      state: null, state_id: null, sales_channel_id: null, city: null,
+      agent_id: null, agent_name: null,
     },
   ]);
+});
+
+test('mapping (слайс 6): sales_channel_id из saleschannel href, city из shipmentAddressFull.city (trim), отсутствие обоих → null, кривой href → null', async () => {
+  const cur = monthStartAt(0);
+  const day = `${fmtDay(cur)} 10:00:00.000`;
+  const db = makeDb();
+  const { engine } = makeEngine({
+    db,
+    handlers: scriptedApi({
+      total: 3,
+      oldestMoment: day,
+      byWindow: () => [
+        // Прод-форма без expand: salesChannel — meta-only ссылка …/entity/saleschannel/<uuid>;
+        // shipmentAddressFull — ВЛОЖЕННЫЙ объект (не ссылка) с .city и прочими полями адреса.
+        order('geo', day, {
+          salesChannel: { meta: { href: 'https://api.moysklad.ru/api/remap/1.2/entity/saleschannel/sc-uuid-7?x=y' } },
+          shipmentAddressFull: { city: '  г Москва  ', postalCode: '101000' },
+        }),
+        order('nogeo', day, {}),                    // ни канала, ни адреса → оба null
+        order('emptycity', day, {
+          salesChannel: { meta: {} },               // href нет → id null
+          shipmentAddressFull: { city: '   ' },     // пусто после trim → null
+        }),
+      ],
+    }),
+  });
+  await engine.start(7);
+  assert.equal(db.upserts.length, 1);
+  const rows = db.upserts[0].rows;
+  assert.equal(rows.length, 3);
+  assert.equal(rows[0].order_id, 'geo');
+  assert.equal(rows[0].sales_channel_id, 'sc-uuid-7', 'id канала = последний сегмент href (query-хвост отрезан)');
+  assert.equal(rows[0].city, 'г Москва', 'city обрезан по краям, префикс НЕ трогаем (нормализация — в SQL на чтении)');
+  assert.equal(rows[1].sales_channel_id, null);
+  assert.equal(rows[1].city, null);
+  assert.equal(rows[2].sales_channel_id, null, 'saleschannel без href → id null');
+  assert.equal(rows[2].city, null, 'пустой город после trim → null');
 });
 
 test('single-flight: параллельный start того же канала отвергается сразу, «уже идёт»', async () => {

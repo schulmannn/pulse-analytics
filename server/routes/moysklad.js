@@ -5,7 +5,7 @@ const { hasWorkspaceRole } = require('../middleware/tenant');
 
 /**
  * Роуты МойСклада (/api/ms/{connect,summary,top-products,top-customers,status,account,backfill,
- * backfill-status,funnel,customers,cohorts,returns}) — серверная половина
+ * backfill-status,funnel,customers,cohorts,returns,sales-by-channel,geography}) — серверная половина
  * источника «склад», зеркально Instagram-вертикали: connect валидирует токен живыми
  * identity-вызовами и сохраняет его ТОЛЬКО шифрованным (lib/ms_crypto), data-роуты резолвят
  * канал тем же механизмом, что resolveIg (?channel= / заголовок x-channel-id, дефолт через
@@ -18,7 +18,10 @@ const { hasWorkspaceRole } = require('../middleware/tenant');
  * Слайс 3 (funnel/customers/cohorts) читает архив ms_orders (движок jobs/msBackfillJob) —
  * дешёвые DB-агрегаты без кэша; живой у них только словарь статусов (funnel) и /returns
  * (page-loop). top-customers — тот же DB-агрегат + живой словарь имён контрагентов одним
- * вызовом. connect/disconnect пишут audit-события ms_connect/ms_disconnect (зеркало ig-oauth) —
+ * вызовом. Слайс 6 (sales-by-channel/geography, миграция 031) — тоже DB-агрегаты архива:
+ * sales-by-channel добирает имена/типы каналов живым словарём saleschannel (кэш 1 час, зеркало
+ * loadStatesDict), geography — чистый DB с нормализацией города в SQL, без словаря и кэша.
+ * connect/disconnect пишут audit-события ms_connect/ms_disconnect (зеркало ig-oauth) —
  * только identity-поля учётки, токенов в metadata нет.
  * sleepFn — инъекция паузы page-loop'а для детерминированных тестов (как у движка бэкфилла).
  */
@@ -49,9 +52,10 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
   const MS_RETURNS_PAGE_LIMIT = 1000;
   const MS_RETURNS_PAGE_CAP = 5;
   const MS_RETURNS_PAGE_PAUSE_MS = 150;
-  // Живые вызовы дорогие → кэш: словарь статусов меняется редко (1 час, инвалидация TTL'ом),
-  // возвраты — обычный data-TTL 10 минут.
+  // Живые вызовы дорогие → кэш: словари статусов и каналов продаж меняются редко (1 час,
+  // инвалидация TTL'ом), возвраты — обычный data-TTL 10 минут.
   const MS_STATES_CACHE_TTL_MS = 60 * 60 * 1000;
+  const MS_CHANNELS_CACHE_TTL_MS = 60 * 60 * 1000;
   const MS_RETURNS_CACHE_TTL_MS = 10 * 60 * 1000;
   const sleep = sleepFn || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
 
@@ -624,6 +628,138 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
     cacheSet(cacheKey, dict, MS_STATES_CACHE_TTL_MS);
     return dict;
   }
+
+  // Словарь каналов продаж канала: id → { name, type } из GET /entity/saleschannel?limit=100
+  // (у склада каналов десятки — одна страница с запасом; saleschannel.meta.href заказов
+  // оканчивается …/entity/saleschannel/<uuid> — тем же uuid ключуем). Кэш 1 час
+  // (`ms:channels:<channelId>` — msCachePurge при disconnect его тоже снимет, слот канала третий);
+  // словарь меняется редко. Мягкая деградация как у loadStatesDict: сеть/5xx → null
+  // (sales-by-channel отдаёт голые id), неуспех НЕ кэшируем. ИСКЛЮЧЕНИЕ — 401/403: токен отозван,
+  // re-throw наружу → ms_token_revoked-путь роута (молчаливый name:null прятал бы умершее
+  // подключение, как в top-customers).
+  async function loadChannelsDict(ms) {
+    const cacheKey = `ms:channels:${ms.channel.id}`;
+    const cached = cacheGet(cacheKey);
+    if (cached) return cached;
+    let data;
+    try {
+      data = await msFetch(ms.token, '/entity/saleschannel?limit=100');
+    } catch (e) {
+      const status = Number(e && e.status) || 0;
+      if (status === 401 || status === 403) throw e;   // отозванный токен — наверх, не глотаем
+      log('warn', 'ms_channels_dict_failed', {
+        channelId: ms.channel.id, status, error: e && e.message,
+      });
+      return null;
+    }
+    const dict = {};
+    const rows = data && Array.isArray(data.rows) ? data.rows : [];
+    for (const c of rows) {
+      if (!c || c.id == null) continue;
+      dict[String(c.id)] = {
+        name: typeof c.name === 'string' ? c.name : null,
+        type: typeof c.type === 'string' ? c.type : null,
+      };
+    }
+    cacheSet(cacheKey, dict, MS_CHANNELS_CACHE_TTL_MS);
+    return dict;
+  }
+
+  // GET /api/ms/sales-by-channel?days= — продажи по каналам сбыта за окно (архив ms_orders,
+  // days=0 = вся история). Сам агрегат — дешёвое DB-чтение БЕЗ кэша ответа; живой только словарь
+  // имён/типов каналов (см. loadChannelsDict, кэш 1 час). Строка sales_channel_id=NULL (заказы
+  // без канала / строки до миграции 031) в rows не кладётся — уходит счётчиком no_channel_orders
+  // (как no_state_orders у воронки). resolveMs (не resolveMsChannel): словарю нужен токен, а «не
+  // подключён» здесь отвечает 404 как остальные data-роуты.
+  app.get('/api/ms/sales-by-channel', requireAuth, async (req, res, next) => {
+    try {
+      const days = daysOf(req);
+      const ms = await resolveMs(req, res);
+      if (!ms) return;
+      // ForActor — канон tenant-read (как funnel): повторный ownership-чек дёшев.
+      const rows = await db.getMsSalesByChannelForActor(ms.channel.id, req.user, { sinceDay: sinceDayOf(days) });
+      let dict;
+      try {
+        dict = await loadChannelsDict(ms);
+      } catch (e) {
+        // 401/403 из словаря = отозванный токен: честный reconnect-CTA (loadChannelsDict глотает
+        // только сеть/5xx → null; ms_token_revoked он пробрасывает наверх).
+        return sendMsError(res, e, { route: 'sales-by-channel', channelId: ms.channel.id });
+      }
+      let totalOrders = 0;
+      let noChannelOrders = 0;
+      const out = [];
+      for (const r of rows) {
+        totalOrders += r.orders;
+        if (r.sales_channel_id == null) {
+          noChannelOrders += r.orders;
+          continue;
+        }
+        const ch = dict ? dict[r.sales_channel_id] : null;
+        out.push({
+          sales_channel_id: r.sales_channel_id,
+          // Канал удалён/словарь недоступен → name/type null (фронт покажет заглушку).
+          name: ch ? ch.name : null,
+          type: ch ? ch.type : null,
+          orders: r.orders,
+          sum: kopecksToRub(r.sum_kopecks),
+        });
+      }
+      res.json({ window_days: days, total_orders: totalOrders, no_channel_orders: noChannelOrders, rows: out });
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  // GET /api/ms/geography?days= — топ городов доставки за окно (архив ms_orders, days=0 = вся
+  // история). Чистый DB-агрегат БЕЗ словаря и БЕЗ кэша: город нормализован в SQL («г Москва» и
+  // «Москва» — один город), заказы без города/самовывоз считаются отдельно (no_city_orders).
+  // Суммы наружу — в рублях. resolveMs (как customers/cohorts): единая форма 404/401/503, хотя
+  // токен здесь не нужен.
+  app.get('/api/ms/geography', requireAuth, async (req, res, next) => {
+    try {
+      const days = daysOf(req);
+      const ms = await resolveMs(req, res);
+      if (!ms) return;
+      const geo = await db.getMsGeographyForActor(ms.channel.id, req.user, { sinceDay: sinceDayOf(days) });
+      res.json({
+        window_days: days,
+        total_orders: geo.total_orders,
+        no_city_orders: geo.no_city_orders,
+        rows: geo.rows.map((r) => ({ city: r.city, orders: r.orders, sum: kopecksToRub(r.sum_kopecks) })),
+      });
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  // GET /api/ms/channel-series?days=&channel=<id> — дневная серия выручки/заказов, ОПЦИОНАЛЬНО по
+  // одному каналу продаж (слайс 6в: «настроить график по источнику»). channel отсутствует/'all' →
+  // все каналы (итог). Чистый DB-агрегат из архива ms_orders БЕЗ словаря и БЕЗ кэша; серия — только
+  // дни с заказами (фронт дозаполняет нули). channel-параметр валидируем строго: либо 'all', либо
+  // UUID-подобный id канала (иначе игнор → все) — caller-controlled строка идёт только биндом
+  // в SQL, но лишний мусор в фильтр не пускаем. Суммы наружу — в рублях.
+  app.get('/api/ms/channel-series', requireAuth, async (req, res, next) => {
+    try {
+      const days = daysOf(req);
+      const ms = await resolveMs(req, res);
+      if (!ms) return;
+      const raw = typeof req.query.channel === 'string' ? req.query.channel : '';
+      // 'all'/пусто → null (все каналы); иначе принимаем только строку, похожую на id МС (UUID-хвост).
+      const salesChannelId = !raw || raw === 'all' || !/^[0-9a-fA-F-]{16,}$/.test(raw) ? null : raw;
+      const series = await db.getMsChannelSeriesForActor(ms.channel.id, req.user, {
+        sinceDay: sinceDayOf(days),
+        salesChannelId,
+      });
+      res.json({
+        window_days: days,
+        channel: salesChannelId,
+        series: series.map((r) => ({ day: r.day, orders: r.orders, sum: kopecksToRub(r.sum_kopecks) })),
+      });
+    } catch (e) {
+      next(e);
+    }
+  });
 
   // GET /api/ms/funnel?days= — воронка статусов заказов за окно (архив ms_orders). Сам агрегат —
   // дешёвое DB-чтение БЕЗ кэша ответа; живой только словарь имён/цветов (см. loadStatesDict).

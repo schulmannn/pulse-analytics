@@ -1,4 +1,6 @@
+import { useContext } from 'react';
 import { Link } from 'react-router-dom';
+import { ChartExpandedContext } from '@/components/ExpandableChart';
 import { useMsFunnel, useMsReturns, useMsSummary, useMsTopProducts } from '@/api/queries';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
@@ -83,7 +85,7 @@ export function MsOverview() {
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
-      <ChartWidget id="ms-revenue" title="Выручка" fixedSize="half" noExpand>
+      <ChartWidget id="ms-revenue" title="Выручка" fixedSize="half">
         <ChartCardBody value={`${fmt.short(revenue.total)} ₽`} caption={windowLabel}>
           {revValues.length > 1 ? (
             <LineChart
@@ -98,7 +100,7 @@ export function MsOverview() {
         </ChartCardBody>
       </ChartWidget>
 
-      <ChartWidget id="ms-orders" title="Заказы" fixedSize="half" noExpand>
+      <ChartWidget id="ms-orders" title="Заказы" fixedSize="half">
         <ChartCardBody
           value={fmt.num(orders.totalCount)}
           caption={`на ${fmt.short(orders.totalSum)} ₽ ${windowLabel}`}
@@ -116,7 +118,7 @@ export function MsOverview() {
         </ChartCardBody>
       </ChartWidget>
 
-      <ChartWidget id="ms-avg-check" title="Средний чек" fixedSize="half" noExpand>
+      <ChartWidget id="ms-avg-check" title="Средний чек" fixedSize="half">
         <ChartCardBody value={avgTotal != null ? `${fmt.short(avgTotal)} ₽` : '—'} caption={windowLabel}>
           {avgValues.filter((v) => v != null).length > 1 ? (
             <LineChart
@@ -131,7 +133,7 @@ export function MsOverview() {
         </ChartCardBody>
       </ChartWidget>
 
-      <ChartWidget id="ms-funnel" title="Воронка статусов" fixedSize="half" noExpand>
+      <ChartWidget id="ms-funnel" title="Воронка статусов" fixedSize="half">
         {funnel.isPending ? (
           <div className="space-y-2 py-2">
             {Array.from({ length: 4 }).map((_, i) => (
@@ -163,7 +165,7 @@ export function MsOverview() {
         )}
       </ChartWidget>
 
-      <ChartWidget id="ms-top-products" title="Топ товаров по выручке" fixedSize="half" noExpand>
+      <ChartWidget id="ms-top-products" title="Топ товаров по выручке" fixedSize="half">
         {top.isPending ? (
           <div className="space-y-2 py-2">
             {Array.from({ length: 4 }).map((_, i) => (
@@ -173,26 +175,11 @@ export function MsOverview() {
         ) : top.isError || !top.data || top.data.rows.length === 0 ? (
           <p className="py-4 text-sm text-muted-foreground">Нет продаж за период.</p>
         ) : (
-          <ul>
-            {/* Half-тайл фиксированной высоты вмещает 5 строк без внутреннего скролла (канон плотности). */}
-            {top.data.rows.slice(0, 5).map((row, i) => (
-              <li key={`${row.name}-${i}`} className="flex items-center gap-3 border-t border-border py-2.5 first:border-t-0">
-                <span className="w-5 shrink-0 text-center text-xs font-medium tabular-nums text-muted-foreground">{i + 1}</span>
-                <span className="min-w-0 flex-1 truncate text-sm text-foreground">{row.name}</span>
-                <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{fmt.num(row.quantity)} шт.</span>
-                <span className="w-24 shrink-0 text-right text-sm font-medium tabular-nums">{fmt.short(row.revenue)} ₽</span>
-                {/* Прибыль бывает отрицательной — показываем честно, но без красного крика (канон тихих дельт). */}
-                <span className="w-24 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
-                  {row.profit >= 0 ? '' : '−'}
-                  {fmt.short(Math.abs(row.profit))} ₽
-                </span>
-              </li>
-            ))}
-          </ul>
+          <MsTopProductsList rows={top.data.rows} />
         )}
       </ChartWidget>
 
-      <ChartWidget id="ms-returns" title="Возвраты" fixedSize="half" noExpand>
+      <ChartWidget id="ms-returns" title="Возвраты" fixedSize="half">
         {returns.isPending ? (
           <div className="space-y-2 py-2">
             <Skeleton className="h-8 w-1/3" />
@@ -217,9 +204,39 @@ export function MsOverview() {
   );
 }
 
-/** Строки воронки: топ-5 статусов окна барами в акценте графиков + сводный хвост. Цвета статусов
-    из МС сознательно НЕ красим в бары (пёстрый набор пользовательских цветов кричал бы против
-    канона тихих карточек) — цвет живёт точкой-меткой у имени. */
+/** Список топ-товаров. Half-тайл фиксированной высоты вмещает 5 строк без внутреннего скролла
+    (канон плотности); РАЗВОРОТ карточки (ChartExpandedContext — тот же паттерн, что Breakdown)
+    показывает полный состав ответа. */
+function MsTopProductsList({
+  rows,
+}: {
+  rows: Array<{ name: string; quantity: number; revenue: number; profit: number }>;
+}) {
+  const expanded = useContext(ChartExpandedContext);
+  const shown = expanded ? rows : rows.slice(0, 5);
+  return (
+    <ul>
+      {shown.map((row, i) => (
+        <li key={`${row.name}-${i}`} className="flex items-center gap-3 border-t border-border py-2.5 first:border-t-0">
+          <span className="w-5 shrink-0 text-center text-xs font-medium tabular-nums text-muted-foreground">{i + 1}</span>
+          <span className="min-w-0 flex-1 truncate text-sm text-foreground">{row.name}</span>
+          <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{fmt.num(row.quantity)} шт.</span>
+          <span className="w-24 shrink-0 text-right text-sm font-medium tabular-nums">{fmt.short(row.revenue)} ₽</span>
+          {/* Прибыль бывает отрицательной — показываем честно, но без красного крика (канон тихих дельт). */}
+          <span className="w-24 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+            {row.profit >= 0 ? '' : '−'}
+            {fmt.short(Math.abs(row.profit))} ₽
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Строки воронки: топ-5 статусов окна барами в акценте графиков + сводный хвост; разворот
+    карточки показывает ВСЕ статусы. Цвета статусов из МС сознательно НЕ красим в бары (пёстрый
+    набор пользовательских цветов кричал бы против канона тихих карточек) — цвет живёт
+    точкой-меткой у имени. */
 function MsFunnelRows({
   rows,
   totalOrders,
@@ -229,8 +246,9 @@ function MsFunnelRows({
   totalOrders: number;
   noState: number;
 }) {
-  const top = rows.slice(0, 5);
-  const restOrders = rows.slice(5).reduce((acc, r) => acc + r.orders, 0) + noState;
+  const expanded = useContext(ChartExpandedContext);
+  const top = expanded ? rows : rows.slice(0, 5);
+  const restOrders = (expanded ? [] : rows.slice(5)).reduce((acc, r) => acc + r.orders, 0) + noState;
   const max = top[0]?.orders ?? 1;
   return (
     <div className="space-y-2 pt-1">

@@ -687,6 +687,80 @@ export function useMsCohorts() {
   });
 }
 
+const MsSalesByChannelSchema = z
+  .object({
+    window_days: z.number(),
+    total_orders: z.number(),
+    no_channel_orders: z.number(),
+    rows: z.array(
+      z
+        .object({
+          sales_channel_id: z.string(),
+          name: z.string().nullable(),
+          type: z.string().nullable(),
+          orders: z.number(),
+          sum: z.number(),
+        })
+        .passthrough(),
+    ),
+  })
+  .passthrough();
+
+export function useMsSalesByChannel(days: number) {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    enabled: channelId != null,
+    queryKey: ['ms-sales-by-channel', channelId, days],
+    staleTime: STALE_LIVE,
+    retry: false,
+    queryFn: ({ signal }) => apiGet(`/api/ms/sales-by-channel?days=${days}`, MsSalesByChannelSchema, { signal, channelId }),
+  });
+}
+
+const MsChannelSeriesSchema = z
+  .object({
+    window_days: z.number(),
+    channel: z.string().nullable(),
+    series: z.array(z.object({ day: z.string(), orders: z.number(), sum: z.number() }).passthrough()),
+  })
+  .passthrough();
+
+export function useMsChannelSeries(days: number, channel: string | null) {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    enabled: channelId != null,
+    queryKey: ['ms-channel-series', channelId, days, channel ?? 'all'],
+    staleTime: STALE_LIVE,
+    retry: false,
+    queryFn: ({ signal }) =>
+      apiGet(
+        `/api/ms/channel-series?days=${days}${channel ? `&channel=${encodeURIComponent(channel)}` : ''}`,
+        MsChannelSeriesSchema,
+        { signal, channelId },
+      ),
+  });
+}
+
+const MsGeographySchema = z
+  .object({
+    window_days: z.number(),
+    total_orders: z.number(),
+    no_city_orders: z.number(),
+    rows: z.array(z.object({ city: z.string(), orders: z.number(), sum: z.number() }).passthrough()),
+  })
+  .passthrough();
+
+export function useMsGeography(days: number) {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    enabled: channelId != null,
+    queryKey: ['ms-geography', channelId, days],
+    staleTime: STALE_LIVE,
+    retry: false,
+    queryFn: ({ signal }) => apiGet(`/api/ms/geography?days=${days}`, MsGeographySchema, { signal, channelId }),
+  });
+}
+
 const MsTopCustomersSchema = z
   .object({
     window_days: z.number(),

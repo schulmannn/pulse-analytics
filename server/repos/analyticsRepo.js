@@ -560,6 +560,84 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
     return (rows[0] && rows[0].day) || null;
   }
 
+  // Продажи по каналам сбыта (слайс 6): заказы окна GROUP BY sales_channel_id (включая NULL —
+  // заказы без канала / строки до миграции 031), сумма DESC. Имя/тип канала репо НЕ знает — их
+  // мапит словарь saleschannel на границе API (/api/ms/sales-by-channel), здесь только устойчивые
+  // id и числа (зеркало getMsFunnel, но порядок по выручке, как у топов).
+  async function getMsSalesByChannelInternal(channelId, { sinceDay = null } = {}) {
+    if (!enabled || !channelId) return [];
+    const { rows } = await pool.query(
+      `SELECT sales_channel_id, COUNT(*)::int AS orders, COALESCE(SUM(sum_kopecks),0)::bigint AS sum_kopecks
+         FROM ms_orders
+        WHERE channel_id=$1 AND ($2::date IS NULL OR moment >= $2::date)
+        GROUP BY sales_channel_id
+        ORDER BY SUM(sum_kopecks) DESC, sales_channel_id NULLS LAST`,
+      [channelId, msSinceDay(sinceDay)]);
+    return rows.map((r) => numifyMetrics(r, ['orders', 'sum_kopecks']));
+  }
+
+  // Нормализация города доставки для группировки: срезаем ведущий префикс «г »/«г.»/«город »
+  // (регистронезависимо) и обрезаем пробелы — «г Москва», «Москва», «город Москва» это ОДИН
+  // город. Пустой результат → NULL (NULLIF), заказ уходит в no_city_orders. Живая форма МС
+  // (shipmentAddressFull.city) именно такая: «г Каспийск», «Москва», «Moscow». Сырой город
+  // движок хранит как есть — префикс режется только на чтении, чтобы правило было одно и здесь.
+  const MS_CITY_NORM = `NULLIF(btrim(regexp_replace(city, '^(г|г\\.|город)\\s+', '', 'i')), '')`;
+
+  // География доставки (слайс 6): топ городов окна по сумме заказов (город нормализован в SQL,
+  // NULL/пустые отброшены — их считает no_city_orders). Плюс total_orders окна (все заказы, с
+  // городом и без) — знаменатель «доли с гео» на границе API. Суммы — копейки (рубли — граница
+  // API). Форма ответа — объект { rows, total_orders, no_city_orders }: total/no_city нужны роуту
+  // рядом с топом, а второй узкий SELECT в той же функции дешевле отдельного repo-метода и держит
+  // всю гео-логику в одном месте (repo владеет SQL, роут остаётся тонким). limit кэпуется здесь
+  // (repo не доверяет вызывающему, как listPosts/top-customers).
+  async function getMsGeographyInternal(channelId, { sinceDay = null, limit = 15 } = {}) {
+    if (!enabled || !channelId) return { rows: [], total_orders: 0, no_city_orders: 0 };
+    const safeLimit = Math.min(50, Math.max(1, Number.parseInt(limit, 10) || 15));
+    const since = msSinceDay(sinceDay);
+    const topQ = await pool.query(
+      `SELECT ${MS_CITY_NORM} AS city,
+              COUNT(*)::int AS orders,
+              COALESCE(SUM(sum_kopecks),0)::bigint AS sum_kopecks
+         FROM ms_orders
+        WHERE channel_id=$1 AND ($2::date IS NULL OR moment >= $2::date)
+          AND ${MS_CITY_NORM} IS NOT NULL
+        GROUP BY ${MS_CITY_NORM}
+        ORDER BY SUM(sum_kopecks) DESC, ${MS_CITY_NORM}
+        LIMIT $3`,
+      [channelId, since, safeLimit]);
+    const totalsQ = await pool.query(
+      `SELECT COUNT(*)::int AS total_orders,
+              COUNT(*) FILTER (WHERE ${MS_CITY_NORM} IS NULL)::int AS no_city_orders
+         FROM ms_orders
+        WHERE channel_id=$1 AND ($2::date IS NULL OR moment >= $2::date)`,
+      [channelId, since]);
+    const t = totalsQ.rows[0] || {};
+    return {
+      rows: topQ.rows.map((r) => numifyMetrics(r, ['orders', 'sum_kopecks'])),
+      total_orders: toMetricNumber(t.total_orders) || 0,
+      no_city_orders: toMetricNumber(t.no_city_orders) || 0,
+    };
+  }
+
+  // Дневная серия выручки/заказов, опционально ФИЛЬТРОВАННАЯ по одному каналу продаж (слайс 6в):
+  // это «настроить график по источнику» из запроса владельца — та же ось salesChannel, но во
+  // времени. salesChannelId=null → все каналы (итог, как summary из архива). День = date-part
+  // moment БЕЗ tz-конверсий (канон MS-архива). Отдаёт ТОЛЬКО дни с заказами — фронт дозаполняет
+  // календарь нулями (канон customers.series/mentions.daily). Суммы — копейки (рубли — граница API).
+  async function getMsChannelSeriesInternal(channelId, { sinceDay = null, salesChannelId = null } = {}) {
+    if (!enabled || !channelId) return [];
+    const { rows } = await pool.query(
+      `SELECT to_char(moment,'YYYY-MM-DD') AS day,
+              COUNT(*)::int AS orders,
+              COALESCE(SUM(sum_kopecks),0)::bigint AS sum_kopecks
+         FROM ms_orders
+        WHERE channel_id=$1 AND ($2::date IS NULL OR moment >= $2::date)
+          AND ($3::text IS NULL OR sales_channel_id = $3)
+        GROUP BY 1 ORDER BY 1`,
+      [channelId, msSinceDay(sinceDay), salesChannelId || null]);
+    return rows.map((r) => numifyMetrics(r, ['orders', 'sum_kopecks']));
+  }
+
   // ── Actor-gated reads: сначала проверяем доступ, иначе пусто (ПУТЬ ДЛЯ РОУТОВ) ──────────────────
   // null-доступ → пустой результат того же типа, что у Internal (список → [], одиночка → null).
   const allowed = (channelId, actor) => getAccessibleChannel(channelId, actor);
@@ -606,6 +684,18 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
   async function getMsOldestOrderDayForActor(channelId, actor) {
     return (await allowed(channelId, actor)) ? getMsOldestOrderDayInternal(channelId) : null;
   }
+  async function getMsSalesByChannelForActor(channelId, actor, opts = {}) {
+    return (await allowed(channelId, actor)) ? getMsSalesByChannelInternal(channelId, opts) : [];
+  }
+  async function getMsGeographyForActor(channelId, actor, opts = {}) {
+    // Нет доступа → та же форма, что у Internal (объект с нулями), не список — роут не ветвится.
+    return (await allowed(channelId, actor))
+      ? getMsGeographyInternal(channelId, opts)
+      : { rows: [], total_orders: 0, no_city_orders: 0 };
+  }
+  async function getMsChannelSeriesForActor(channelId, actor, opts = {}) {
+    return (await allowed(channelId, actor)) ? getMsChannelSeriesInternal(channelId, opts) : [];
+  }
 
     // ── ig-tags read (finding 7: чтение — analytics, write — collectorRepo) ──
   async function getIgTags(limit = 100) {
@@ -640,10 +730,12 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
     getLatestVelocityInternal, listPostsInternal, listIgDailyInternal, listIgMediaDailyInternal,
     getMsDailyAllInternal, getMsFunnelInternal, getMsCustomersInternal, getMsCohortsInternal,
     getMsTopCustomersInternal, getMsOldestOrderDayInternal,
+    getMsSalesByChannelInternal, getMsGeographyInternal, getMsChannelSeriesInternal,
     getChannelHistoryForActor, getMentionsHistoryForActor, getMentionsArchiveForActor,
     getSnapshotForActor, getLatestVelocityForActor, listPostsForActor, listIgDailyForActor, listIgMediaDailyForActor,
     getMsDailyAllForActor, getMsFunnelForActor, getMsCustomersForActor, getMsCohortsForActor,
     getMsTopCustomersForActor, getMsOldestOrderDayForActor,
+    getMsSalesByChannelForActor, getMsGeographyForActor, getMsChannelSeriesForActor,
   };
 }
 
