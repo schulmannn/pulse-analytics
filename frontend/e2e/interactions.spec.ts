@@ -392,7 +392,7 @@ test('edit toggle: compact expand chip on mobile, stable labelled tool on deskto
   expect(Math.abs(active!.width - idle!.width)).toBeLessThan(0.5);
 });
 
-test.describe('home edit-mode board (no decorative narrowing / nested page-card)', () => {
+test.describe('home edit-mode board (calm inward step, flat canvas — no nested page-card)', () => {
   // Seed one pinned widget so the board grid (#home) renders at rest AND in edit — otherwise an empty
   // Home shows HomeEmptyState (no #home) until edit mode. Same seed shape the drill-guard test uses;
   // addInitScript stacks BEFORE bootDemo's own seed.
@@ -402,7 +402,7 @@ test.describe('home edit-mode board (no decorative narrowing / nested page-card)
       localStorage.setItem('pulse_widget_configs', JSON.stringify([{ id: 'probe1', metricId: 'tg.views', viz: 'line' }]));
     });
 
-  test('board keeps its full width in edit mode and shows a reorder/remove hint (desktop)', async ({ page }) => {
+  test('board steps calmly inward in edit mode over a flat canvas (desktop)', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await seedBoard(page);
     await bootDemo(page, '/home');
@@ -415,25 +415,26 @@ test.describe('home edit-mode board (no decorative narrowing / nested page-card)
 
     await toggle.click();
     await expect(toggle).toHaveAttribute('aria-pressed', 'true');
-    await page.waitForTimeout(120);
-    // The board stays at its full width — no decorative narrowing, no boxed-in «page card».
+    // The whole grid steps inward ~52px per side (≈104px total) — noticeable but calm.
+    await expect.poll(async () => Math.round(restingWidth - (await board.boundingBox())!.width)).toBeGreaterThanOrEqual(90);
     const editingWidth = (await board.boundingBox())!.width;
-    expect(Math.abs(editingWidth - restingWidth)).toBeLessThanOrEqual(1);
-    // No grey surface / hairline frame wrapping the whole board.
+    expect(restingWidth - editingWidth).toBeLessThanOrEqual(120);
+    // Still ONE flat canvas — no grey surface / hairline frame wrapping the whole board (the inward
+    // step is a pure max-width move; the element carries no background or border of its own).
     const surface = await board.evaluate((el) => {
       const cs = getComputedStyle(el);
       return { background: cs.backgroundColor, border: cs.borderTopColor, borderWidth: cs.borderTopWidth };
     });
     expect(surface.background).toBe('rgba(0, 0, 0, 0)');
     expect(surface.borderWidth === '0px' || surface.border === 'rgba(0, 0, 0, 0)').toBeTruthy();
-    // The mode is signalled by a quiet state row instead.
-    await expect(page.getByText('Редактирование', { exact: true })).toBeVisible();
+    // The mode is signalled by an sr-only status — no visible «Редактирование» row / grey divider.
+    await expect(page.getByText('Редактирование', { exact: true })).toHaveCount(0);
+    await expect(board.locator('p[role="status"]')).toHaveText('Режим редактирования доски');
 
     await toggle.click();
     await expect(toggle).toHaveAttribute('aria-pressed', 'false');
-    await page.waitForTimeout(120);
-    const revertedWidth = (await board.boundingBox())!.width;
-    expect(Math.abs(revertedWidth - restingWidth)).toBeLessThanOrEqual(1);
+    // «Готово» reverts the grid exactly to its resting width.
+    await expect.poll(async () => Math.round(Math.abs((await board.boundingBox())!.width - restingWidth))).toBeLessThanOrEqual(1);
   });
 
   for (const w of [360, 390, 430]) {

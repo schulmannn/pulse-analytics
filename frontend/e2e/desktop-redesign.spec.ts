@@ -56,6 +56,52 @@ test('desktop analytics keeps source and summary hierarchy explicit', async ({ p
   await testInfo.attach('analytics-formats-dark', { path: analyticsShot, contentType: 'image/png' });
 });
 
+test('desktop feed shell is one flat canvas aligned with Home (no nested page-card)', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-1440', 'desktop-only flat feed shell');
+  await bootDemo(page, '/', { theme: 'dark' });
+
+  const block = page.locator('section[data-feed-block]').first();
+  await block.waitFor({ state: 'visible', timeout: 15_000 });
+
+  // The feed section carries NO surface of its own — no rounded/bordered/bg card, no page padding.
+  // The widgets below own the only card chrome, exactly like the personal Home board.
+  const surface = await block.evaluate((el) => {
+    const cs = getComputedStyle(el);
+    return {
+      bg: cs.backgroundColor,
+      borderTop: cs.borderTopWidth,
+      borderLeft: cs.borderLeftWidth,
+      padLeft: cs.paddingLeft,
+      padRight: cs.paddingRight,
+      padTop: cs.paddingTop,
+    };
+  });
+  expect(surface.bg).toBe('rgba(0, 0, 0, 0)');
+  expect(surface.borderTop).toBe('0px');
+  expect(surface.borderLeft).toBe('0px');
+  expect(surface.padLeft).toBe('0px');
+  expect(surface.padRight).toBe('0px');
+  expect(surface.padTop).toBe('0px');
+
+  // Header title and body content share ONE left edge (the shared canvas) — nothing is inset by a
+  // page-card wrapper.
+  const titleBox = (await block.getByRole('heading', { name: 'Обзор', exact: true }).boundingBox())!;
+  const firstCardBox = (await block.locator('section:has(h3)').first().boundingBox())!;
+  expect(Math.abs(titleBox.x - firstCardBox.x)).toBeLessThanOrEqual(1);
+
+  // …and that edge is the same one the personal Home header sits on (shared PAGE_HEADER_SHELL).
+  await page.goto('/home');
+  const homeTitle = page.getByRole('heading', { name: 'Главная', exact: true });
+  await homeTitle.waitFor({ state: 'visible', timeout: 15_000 });
+  const homeTitleBox = (await homeTitle.boundingBox())!;
+  expect(Math.abs(titleBox.x - homeTitleBox.x)).toBeLessThanOrEqual(1);
+
+  await page.goto('/');
+  const shot = testInfo.outputPath('feed-shell-flat-dark.png');
+  await page.screenshot({ path: shot, fullPage: true });
+  await testInfo.attach('feed-shell-flat-dark', { path: shot, contentType: 'image/png' });
+});
+
 test('desktop Overview keeps period context compact', async ({ page }, testInfo) => {
   await page.addInitScript(() => {
     localStorage.setItem(

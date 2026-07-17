@@ -392,18 +392,6 @@ div[data-widget-tinted] {
   color: hsl(var(--brand-iris) / 0.8);
 }
 
-/* ── Feed sticky header surface (FeedBlock, panels/feed/useFeed) ───────────────────────────
-   EXACTLY the surface of the section body it caps, opaque. Dark's section body is bg-card/50
-   composited over the page --background; color-mix in srgb reproduces that composite as one
-   opaque colour, so the sticky strip is indistinguishable from the section at rest and simply
-   clips scrolling widgets — no lighter band, no seam line, no backdrop-blur needed. */
-.feed-head-surface {
-  background: hsl(var(--card));
-}
-.dark .feed-head-surface {
-  background: color-mix(in srgb, hsl(var(--card)) 50%, hsl(var(--background)));
-}
-
 /* ── Widget reorder (iOS jiggle): tiny alternating wobble while drag-and-drop mode is on.
    Deliberate exception to the "no motion" restraint — it IS the mode indicator. ─────────── */
 @keyframes widget-jiggle {
@@ -810,6 +798,24 @@ div[data-widget-tinted] {
   }
 }
 
+/* Edit mode steps the whole board grid calmly INWARD ~52px per side (desktop lg+), echoing an
+   "editable canvas" cue — a pure max-width layout move (no scale, shadow, frame or grey fill; the
+   canvas stays flat and transparent, per canon). mx-auto keeps it centred as it narrows; the sticky
+   page header is a SIBLING outside this element, so only the card grid moves while the header holds
+   its full width. Interruptible by construction (toggling data-editing reverses the running
+   transition), and the global prefers-reduced-motion cap flattens the duration to instant — the
+   narrowing itself still applies, just without the tween. Mobile (<lg) keeps its full-bleed board. */
+@media (min-width: 1024px) {
+  .home-board-canvas {
+    margin-inline: auto;
+    max-width: 100%;
+    transition: max-width var(--motion-base) var(--ease-standard);
+  }
+  .home-board-canvas[data-editing='true'] {
+    max-width: calc(100% - 6.5rem);
+  }
+}
+
 .add-widget-dock {
   position: fixed;
   left: 50%;
@@ -817,15 +823,24 @@ div[data-widget-tinted] {
   z-index: 40;
   transform: translateX(-50%);
 }
+/* Fixed dock button — floats over the multicoloured board cards, so it needs an OPAQUE calm surface
+   to stay legible (владелец: прошлая полупрозрачная кнопка «просвечивала» карточки). A near-solid
+   neutral popover tint + backdrop blur/saturate reads as a solid chip over any card colour, lifted
+   by a soft shadow and a hairline border — no shouting brand colour. */
 .add-widget-trigger {
   display: inline-flex;
   min-height: 40px;
   align-items: center;
   justify-content: center;
-  border: 1px solid hsl(var(--foreground) / 0.12);
-  background: hsl(var(--foreground) / 0.08);
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--popover) / 0.92);
   color: hsl(var(--foreground));
   padding: 0 18px;
+  box-shadow:
+    0 10px 28px -8px hsl(0 0% 0% / 0.5),
+    0 2px 6px -2px hsl(0 0% 0% / 0.32);
+  backdrop-filter: blur(10px) saturate(140%);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
   transition:
     background-color var(--motion-base) ease,
     border-color var(--motion-base) ease,
@@ -835,8 +850,8 @@ div[data-widget-tinted] {
 .add-widget-trigger:hover,
 .add-widget-trigger:focus-visible,
 .add-widget-trigger[aria-expanded='true'] {
-  background: hsl(var(--foreground) / 0.14);
-  border-color: hsl(var(--foreground) / 0.2);
+  background: hsl(var(--popover));
+  border-color: hsl(var(--foreground) / 0.24);
   color: hsl(var(--foreground));
 }
 .add-widget-trigger:active {
