@@ -208,7 +208,9 @@ export function Connect() {
 
             {/* nodes */}
             {SERVICES.map((s, i) => {
-              const theta = (i * Math.PI) / 4;
+              // Шаг — от ФАКТИЧЕСКОГО числа узлов, не жёсткие π/4: восьмишаговая сетка с девятым
+              // источником (МойСклад) клала Facebook (i=8, 2π) ровно под Telegram (i=0).
+              const theta = (i * 2 * Math.PI) / SERVICES.length;
               const left = 50 + RADIUS * Math.sin(theta);
               const top = 50 - RADIUS * Math.cos(theta);
               const st = stateOf(s);
@@ -464,11 +466,29 @@ function MsBackfillBlock() {
   }
 
   if (st.status === 'done') {
+    // Done-состояние ОБЯЗАНО оставлять путь к повторному прогону (прод-фидбек владельца: после
+    // слайса 3 воронке нужен state_id у старых строк, а кнопки не было — тупик). Повтор безопасен:
+    // upsert заказов заменяющий, движок на done стартует заново.
     return (
-      <p className="text-xs text-muted-foreground">
-        История заказов загружена: <span className="font-medium tabular-nums text-foreground">{fmt.num(st.orders_in_db ?? st.fetched)}</span>{' '}
-        — свежие заказы доливаются автоматически.
-      </p>
+      <div className="space-y-2">
+        <p className="text-xs text-muted-foreground">
+          История заказов загружена: <span className="font-medium tabular-nums text-foreground">{fmt.num(st.orders_in_db ?? st.fetched)}</span>{' '}
+          — свежие заказы доливаются автоматически.
+        </p>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <button
+            type="button"
+            onClick={() => void startBackfill()}
+            className="btn-pill border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+          >
+            Обновить историю заказов
+          </button>
+          <span className="text-2xs text-muted-foreground">
+            перечитает все заказы заново — например, чтобы подтянуть статусы для воронки
+          </span>
+        </div>
+        {startErr && <p className="text-xs text-ember">{startErr}</p>}
+      </div>
     );
   }
 
