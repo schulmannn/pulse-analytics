@@ -400,6 +400,9 @@ function createComposition(config, overrides = {}) {
     provider: aiProvider,
     dailyMessageLimit: config.ai.dailyMessageLimit,
     maxToolRounds: config.ai.maxToolRounds,
+    // Складские инструменты ассистента: живой топ товаров и словарь статусов ходят в МС тем же
+    // клиентом/шифром, что data-роуты; без MS_TOKEN_KEY/аккаунта инструменты честно отказывают.
+    sklad: { msFetch, msCrypto },
   });
 
   // Флаг дренажа (graceful shutdown): main.js ставит true в stop() → /api/ready 503.
