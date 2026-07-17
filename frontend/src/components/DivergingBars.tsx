@@ -17,7 +17,10 @@ interface Hover {
   i: number;
 }
 
-/** Bars around a horizontal zero-line (positive up = primary role, negative down = negative role). Fills the
+/** Bars around a horizontal zero-line, MONOCHROME in the card's accent (steep): direction is
+    encoded by position around zero, so both directions ride --chart-role-primary — the down bars
+    a step quieter (opacity), never the semantic red/green (владелец: бары не кричат; на
+    тинтованной карточке бары автоматически берут её пастель через accent-скоуп). Fills the
     height an ancestor dictates — the fixed widget tile or the expand overlay — via
     ExpandedChartHeightContext (like BarChart), else the caller's `height`, else 120px. */
 export function DivergingBars({ values, labels, titles, height }: DivergingBarsProps) {
@@ -85,14 +88,16 @@ export function DivergingBars({ values, labels, titles, height }: DivergingBarsP
         y: v >= 0 ? mid - bh : mid,
         w: barWidth,
         h: bh,
-        fill: v >= 0 ? 'hsl(var(--chart-role-primary))' : 'hsl(var(--chart-role-negative))',
+        fill: 'hsl(var(--chart-role-primary))',
+        // Down bars: same ink, one luminance step quieter — position already says the direction.
+        op: v >= 0 ? 1 : 0.6,
       };
     });
 
     const barsLayer = (
       <>
         {bars.map((b, i) => (
-          <rect key={i} x={b.x} y={b.y} width={b.w} height={b.h} fill={b.fill} rx={1} />
+          <rect key={i} x={b.x} y={b.y} width={b.w} height={b.h} fill={b.fill} fillOpacity={b.op} rx={1} />
         ))}
       </>
     );
@@ -173,6 +178,7 @@ export function DivergingBars({ values, labels, titles, height }: DivergingBarsP
             width={bars[hover.i].w}
             height={bars[hover.i].h}
             fill={bars[hover.i].fill}
+            fillOpacity={bars[hover.i].op}
             rx={1}
             className="pointer-events-none"
           />

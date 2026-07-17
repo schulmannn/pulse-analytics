@@ -31,6 +31,9 @@ import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { splitDailyWindows } from '@/lib/delta';
 import { MediaThumb } from '@/components/MediaThumb';
 
+/** Короткий день недели для тултипов дневной гранулы («чт, 2 июл») — артефакт v2. */
+const WEEKDAY_FMT = new Intl.DateTimeFormat('ru-RU', { weekday: 'short' });
+
 // ── View state (all in the URL so links restore the exact view, like steep) ──────────────
 type ChartType = 'line' | 'bar' | 'rank' | 'pivot';
 type CompareMode = 'off' | 'prev' | 'year';
@@ -381,7 +384,12 @@ export function MetricPage() {
   }
 
   const valueFmt = metricKey === 'subscribers' ? fmt.num : fmt.short;
-  const titles = series.values.map((v, i) => `${series.labels[i]}: ${valueFmt(v)}`);
+  // День недели в тултипе (артефакт v2, steep): «чт, 2 июл: 2 800». Только на дневной грануле
+  // ограниченного окна — там индекс ↔ календарный день точен (та же арифметика, что pinnedDayKey).
+  const titles = series.values.map((v, i) => {
+    const wd = effGrain === 'day' && winFrom != null ? `${WEEKDAY_FMT.format(new Date(winFrom + i * DAY_MS))}, ` : '';
+    return `${wd}${series.labels[i]}: ${valueFmt(v)}`;
+  });
 
   // Уровневая метрика (Подписчики): бары УРОВНЯ от нуля почти все во всю высоту — падение
   // визуально теряется (скриншот владельца: «непонятно, что происходит падение»). Как на
@@ -602,16 +610,20 @@ export function MetricPage() {
         <span aria-hidden="true">←</span> Обзор
       </Link>
 
-      {/* Headline — COMPACT (steep): one baseline row (number · Δ · metric/window/source context),
-          not a stacked hero block. The metric route deliberately has no global topbar. */}
+      {/* Headline v2 (артефакт владельца): страница ведёт ИМЕНЕМ метрики — тихая шапка, только
+          идентичность. Итог окна живёт в «Сравнении» справа (сумма окна из графика не читается,
+          hero в шапке её дублировал); период — в тайм-баре под графиком. На <lg rail уезжает под
+          график, поэтому компактный итог остаётся в шапке только там. The metric route
+          deliberately has no global topbar. */}
       <div>
-        <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-          <span className="text-hero font-medium leading-none tabular-nums tracking-tight">{meta.total}</span>
+        <h1 className="text-2xl font-medium tracking-tight text-foreground">{def.label}</h1>
+        {channelHandle ? (
+          <div className="mt-1 text-xs tracking-wide text-muted-foreground">Telegram {channelHandle}</div>
+        ) : null}
+        <div className="mt-2 flex flex-wrap items-baseline gap-x-2.5 gap-y-1 lg:hidden">
+          <span className="text-3xl font-medium leading-none tabular-nums tracking-tight">{meta.total}</span>
           <DeltaPill delta={meta.trend} />
-          <span className="text-xs tracking-wide text-muted-foreground">
-            {def.label} · {periodLabel}
-            {channelHandle ? <span className="text-ink3"> · Telegram {channelHandle}</span> : null}
-          </span>
+          <span className="text-xs tracking-wide text-muted-foreground">{periodLabel}</span>
         </div>
         {meta.caption ? <div className="mt-1.5 text-xs text-muted-foreground">{meta.caption}</div> : null}
       </div>
@@ -624,6 +636,7 @@ export function MetricPage() {
             title={chartTitle}
             defaultSize="full"
             noExpand
+            strip
             action={
               <div role="group" aria-label="Тип графика" className="flex shrink-0 overflow-hidden rounded-full border border-border">
                 {chartTypes.map((kind) => (
@@ -692,6 +705,118 @@ export function MetricPage() {
               <PivotTable columns={pivot.columns} rows={pivot.rows} valueFmt={fmt.short} />
             )}
           </ChartWidget>
+
+          {/* Тайм-бар принадлежит графику (артефакт v2): гранулярность слева, пресеты окна,
+              свой диапазон и пейджер окон — одной строкой сразу под канвасом, а не плавающей
+              sticky-панелью у края экрана. Пикер открывается вниз — под графиком места больше. */}
+          <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2.5 print:hidden">
+            <div role="group" aria-label="Гранулярность" className="flex overflow-hidden rounded-full border border-border">
+              {(['day', 'week', 'month'] as Grain[]).map((g) => (
+                <button
+                  key={g}
+                  type="button"
+                  disabled={!grainAllowed[g]}
+                  aria-pressed={effGrain === g}
+                  onClick={() => setParam('grain', g === 'day' ? null : g)}
+                  className={`px-2.5 py-1 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                    effGrain === g ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'
+                  } border-r border-border last:border-r-0`}
+                >
+                  {GRAIN_LABEL[g]}
+                </button>
+              ))}
+            </div>
+            <span className="flex-1" />
+            {(
+              [
+                { days: 7 as PeriodDays, label: '7д' },
+                { days: 30 as PeriodDays, label: '30д' },
+                { days: 90 as PeriodDays, label: '90д' },
+                { days: 0 as PeriodDays, label: 'Всё' },
+              ]
+            ).map((chip) => (
+              <button
+                key={chip.days}
+                type="button"
+                aria-pressed={!range && days === chip.days}
+                onClick={() => setDays(chip.days)}
+                className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors ${
+                  !range && days === chip.days
+                    ? 'border-primary/40 bg-primary/10 text-primary'
+                    : 'border-border text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {chip.label}
+              </button>
+            ))}
+            {/* «Свой диапазон» — opens the calendar picker; applies to the global period `range`
+                (URL-persisted, used everywhere via inRange). The active range is shown by the chip below. */}
+            <div className="relative">
+              <button
+                type="button"
+                aria-haspopup="dialog"
+                aria-expanded={pickerOpen}
+                onClick={() => setPickerOpen((v) => !v)}
+                className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors ${
+                  range ? 'border-primary/40 text-primary' : 'border-border text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                Свой диапазон
+              </button>
+              {pickerOpen && (
+                <>
+                  <div className="fixed inset-0 z-popover" onClick={() => setPickerOpen(false)} aria-hidden="true" />
+                  <div
+                    role="dialog"
+                    aria-label="Свой диапазон дат"
+                    className="absolute right-0 top-full z-popover mt-2 rounded-xl border border-border bg-popover p-3"
+                  >
+                    <DateRangePicker
+                      value={range}
+                      onApply={(r) => {
+                        setRange(r);
+                        setPickerOpen(false);
+                      }}
+                      onReset={() => {
+                        setRange(null);
+                        setPickerOpen(false);
+                      }}
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+            {range && (
+              <button
+                type="button"
+                onClick={() => setRange(null)}
+                title="Сбросить произвольный период"
+                className="rounded-full border border-primary/40 bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary"
+              >
+                {fmt.day(range.from)} – {fmt.day(range.to)} ×
+              </button>
+            )}
+            <div className="flex items-center">
+              <button
+                type="button"
+                onClick={() => shiftWindow(-1)}
+                disabled={winFrom == null}
+                aria-label="Предыдущее окно"
+                className="rounded px-1.5 py-0.5 text-sm text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                ‹
+              </button>
+              <button
+                type="button"
+                onClick={() => shiftWindow(1)}
+                disabled={!range}
+                aria-label="Следующее окно"
+                className="rounded px-1.5 py-0.5 text-sm text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                ›
+              </button>
+            </div>
+          </div>
 
           {pinnedValid != null && pinnedIsChart && (
             <PinnedDayPanel
@@ -774,28 +899,19 @@ export function MetricPage() {
           )}
         </div>
 
-        {/* Explore rail — breakdown dimension, comparison baseline, the About block. */}
+        {/* Composer rail (артефакт v2): Сравнение первым — после инверсии шапки итог окна живёт
+            здесь, и это первое, что ищет глаз; ниже — Разбивка и «О метрике». */}
         <aside className="space-y-5 border-l border-border pl-5">
-          {field && (
-            <ChartSection title="Разбивка">
-              <SegSelect
-                ariaLabel="Измерение разбивки"
-                value={dim}
-                onChange={(next) => setParam('dim', next === 'format' ? null : next)}
-                options={[
-                  { value: 'format' as Dim, label: 'Формат' },
-                  { value: 'weekday' as Dim, label: 'День недели' },
-                ]}
-              />
-              <Breakdown items={breakdownItems} />
-            </ChartSection>
-          )}
-
           <ChartSection title="Сравнение">
+            {/* Итог окна — канонический дом итога после тихой шапки (hero переехал сюда). */}
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="text-xs text-muted-foreground">Текущий период</span>
+              <span className="text-base font-medium tabular-nums text-foreground">{meta.total}</span>
+            </div>
             {winFrom == null ? (
-              <p className="text-xs text-muted-foreground">Для окна «Всё» прошлого периода не существует.</p>
+              <p className="mt-3 text-xs text-muted-foreground">Для окна «Всё» прошлого периода не существует.</p>
             ) : (
-              <>
+              <div className="mt-3">
                 <SegSelect
                   ariaLabel="База сравнения"
                   value={cmp}
@@ -810,7 +926,6 @@ export function MetricPage() {
                   <p className="text-xs text-muted-foreground">Выберите базу — пунктир на линии, пары в рейтинге и Δ появятся автоматически.</p>
                 ) : compare ? (
                   <div className="space-y-2 text-sm">
-                    <CompareRow label="Текущий период" value={compare.current} strong />
                     <CompareRow label={cmpLabel ?? ''} value={compare.previous} />
                     {compareDelta != null && (
                       <div className="flex items-baseline justify-between gap-3 border-t border-border pt-2">
@@ -827,9 +942,24 @@ export function MetricPage() {
                     В загруженных постах недостаточно данных за {cmpLabel} — сравнить не с чем.
                   </p>
                 )}
-              </>
+              </div>
             )}
           </ChartSection>
+
+          {field && (
+            <ChartSection title="Разбивка">
+              <SegSelect
+                ariaLabel="Измерение разбивки"
+                value={dim}
+                onChange={(next) => setParam('dim', next === 'format' ? null : next)}
+                options={[
+                  { value: 'format' as Dim, label: 'Формат' },
+                  { value: 'weekday' as Dim, label: 'День недели' },
+                ]}
+              />
+              <Breakdown items={breakdownItems} />
+            </ChartSection>
+          )}
 
           <ChartSection title="О метрике">
             <dl className="space-y-3 text-sm">
@@ -846,118 +976,6 @@ export function MetricPage() {
             Открыть аналитику <span aria-hidden="true">→</span>
           </Link>
         </aside>
-      </div>
-
-      {/* Bottom time bar (steep): grain on the left, window presets + pager on the right. */}
-      {/* Тулбар — канон sticky-хедеров (solid bg + hairline, без blur/тени/полупрозрачности):
-          плавающий полупрозрачный пилл читался как баг — строки «Топ постов» просвечивали сквозь. */}
-      <div className="sticky bottom-0 z-10 -mx-4 flex flex-wrap items-center gap-2 border-t border-border bg-background px-4 py-2 sm:-mx-6 sm:px-6 print:hidden">
-        <div role="group" aria-label="Гранулярность" className="flex overflow-hidden rounded-full border border-border">
-          {(['day', 'week', 'month'] as Grain[]).map((g) => (
-            <button
-              key={g}
-              type="button"
-              disabled={!grainAllowed[g]}
-              aria-pressed={effGrain === g}
-              onClick={() => setParam('grain', g === 'day' ? null : g)}
-              className={`px-2.5 py-1 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-                effGrain === g ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'
-              } border-r border-border last:border-r-0`}
-            >
-              {GRAIN_LABEL[g]}
-            </button>
-          ))}
-        </div>
-        <span className="flex-1" />
-        {(
-          [
-            { days: 7 as PeriodDays, label: '7д' },
-            { days: 30 as PeriodDays, label: '30д' },
-            { days: 90 as PeriodDays, label: '90д' },
-            { days: 0 as PeriodDays, label: 'Всё' },
-          ]
-        ).map((chip) => (
-          <button
-            key={chip.days}
-            type="button"
-            aria-pressed={!range && days === chip.days}
-            onClick={() => setDays(chip.days)}
-            className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors ${
-              !range && days === chip.days
-                ? 'border-primary/40 bg-primary/10 text-primary'
-                : 'border-border text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            {chip.label}
-          </button>
-        ))}
-        {/* «Свой диапазон» — opens the calendar picker; applies to the global period `range`
-            (URL-persisted, used everywhere via inRange). The active range is shown by the chip below. */}
-        <div className="relative">
-          <button
-            type="button"
-            aria-haspopup="dialog"
-            aria-expanded={pickerOpen}
-            onClick={() => setPickerOpen((v) => !v)}
-            className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors ${
-              range ? 'border-primary/40 text-primary' : 'border-border text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            Свой диапазон
-          </button>
-          {pickerOpen && (
-            <>
-              <div className="fixed inset-0 z-popover" onClick={() => setPickerOpen(false)} aria-hidden="true" />
-              <div
-                role="dialog"
-                aria-label="Свой диапазон дат"
-                className="absolute bottom-full right-0 z-popover mb-2 rounded-xl border border-border bg-popover p-3"
-              >
-                <DateRangePicker
-                  value={range}
-                  onApply={(r) => {
-                    setRange(r);
-                    setPickerOpen(false);
-                  }}
-                  onReset={() => {
-                    setRange(null);
-                    setPickerOpen(false);
-                  }}
-                />
-              </div>
-            </>
-          )}
-        </div>
-        {range && (
-          <button
-            type="button"
-            onClick={() => setRange(null)}
-            title="Сбросить произвольный период"
-            className="rounded-full border border-primary/40 bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary"
-          >
-            {fmt.day(range.from)} – {fmt.day(range.to)} ×
-          </button>
-        )}
-        <div className="flex items-center">
-          <button
-            type="button"
-            onClick={() => shiftWindow(-1)}
-            disabled={winFrom == null}
-            aria-label="Предыдущее окно"
-            className="rounded px-1.5 py-0.5 text-sm text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            ‹
-          </button>
-          <button
-            type="button"
-            onClick={() => shiftWindow(1)}
-            disabled={!range}
-            aria-label="Следующее окно"
-            className="rounded px-1.5 py-0.5 text-sm text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            ›
-          </button>
-        </div>
       </div>
 
       {openPost && (

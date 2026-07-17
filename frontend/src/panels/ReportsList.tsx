@@ -106,7 +106,7 @@ function ReportsListDesktop() {
       ) : reportsQuery.isError ? (
         <ReportsErrorState error={reportsQuery.error} />
       ) : reports.length === 0 ? (
-        <div className="rounded border border-dashed border-border bg-background px-4 py-10 text-center">
+        <div className="rounded-xl border border-dashed border-border bg-background px-4 py-10 text-center">
           <p className="text-sm font-medium text-foreground">Отчётов пока нет</p>
           <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
             Соберите документ из блоков аналитики — его можно распечатать в PDF и получать письмом
@@ -285,7 +285,7 @@ function ReportsListMobile() {
       ) : reportsQuery.isError ? (
         <ReportsErrorState error={reportsQuery.error} />
       ) : reports.length === 0 ? (
-        <div className="rounded border border-dashed border-border bg-background px-4 py-10 text-center">
+        <div className="rounded-xl border border-dashed border-border bg-background px-4 py-10 text-center">
           <p className="text-sm font-medium text-foreground">Отчётов пока нет</p>
           <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
             Соберите документ из блоков аналитики — его можно распечатать в PDF и получать письмом

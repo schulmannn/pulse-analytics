@@ -65,7 +65,9 @@ export function Analytics() {
       {/* Grouped tabs break the 20-chart wall into Динамика / Аудитория / Контент / Сравнение —
           each tab renders only its section family (progressive disclosure). The desktop-only export
           control sits alongside the tabs and covers the whole analytics window regardless of tab. */}
-      <div className="flex items-end justify-between gap-3 border-b border-border">
+      {/* Пилюльные табы (steep-регистр): подчёркивание border-b-2 выбивалось из пилюльного
+          языка сегментов; активный таб — тихая secondary-заливка, никакой синей линии. */}
+      <div className="flex items-center justify-between gap-3">
       <div role="tablist" aria-label="Разделы аналитики" className="flex gap-1 overflow-x-auto">
         {ANALYTICS_TABS.map((t) => (
           <button
@@ -87,8 +89,8 @@ export function Analytics() {
               requestAnimationFrame(() => document.getElementById(`analytics-tab-${next.key}`)?.focus());
             }}
             className={cn(
-              'shrink-0 rounded-t border-b-2 px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
-              tab === t.key ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground',
+              'shrink-0 rounded-full px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+              tab === t.key ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground',
             )}
           >
             {t.label}

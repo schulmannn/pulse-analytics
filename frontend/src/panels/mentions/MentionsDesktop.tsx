@@ -202,7 +202,7 @@ export function MentionsDesktop() {
   if (!hasArchive) {
     return (
       <>
-        <div className="flex flex-col items-center justify-center rounded border border-border bg-background px-4 py-12 text-center">
+        <div className="flex flex-col items-center justify-center rounded-xl border border-border bg-background px-4 py-12 text-center">
           <h3 className="mb-1 text-base font-medium text-foreground">Аналитика упоминаний бренда</h3>
           <p className="mb-5 max-w-md text-sm text-muted-foreground">
             {settings?.configured
@@ -326,7 +326,7 @@ export function MentionsDesktop() {
       </div>
 
       {settingsError && (
-        <div role="alert" className="flex items-center justify-between gap-4 rounded border border-destructive/40 bg-destructive/5 px-4 py-2.5 text-sm text-muted-foreground">
+        <div role="alert" className="flex items-center justify-between gap-4 rounded-xl border border-destructive/40 bg-destructive/5 px-4 py-2.5 text-sm text-muted-foreground">
           <span>Не удалось загрузить правила поиска: {settingsError}</span>
           <button type="button" onClick={() => void mentionSettings.refetch()} className="shrink-0 text-foreground underline underline-offset-4">
             Повторить
@@ -335,7 +335,7 @@ export function MentionsDesktop() {
       )}
 
       {liveError && (
-        <div role="alert" className="flex items-center justify-between gap-4 rounded border border-destructive/40 bg-destructive/5 px-4 py-2.5 text-sm text-muted-foreground">
+        <div role="alert" className="flex items-center justify-between gap-4 rounded-xl border border-destructive/40 bg-destructive/5 px-4 py-2.5 text-sm text-muted-foreground">
           <span>Не удалось обновить: {liveError} Показан сохранённый архив.</span>
           {needsReconnect && (
             <Link className="shrink-0 text-primary underline underline-offset-4" to="/connect?source=telegram&tab=qr&action=reconnect">

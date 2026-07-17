@@ -58,7 +58,7 @@ function DemoBanner() {
   const { demo, exitDemo } = useDemo();
   if (!demo) return null;
   return (
-    <div className="mb-5 flex flex-wrap items-center gap-x-3 gap-y-2 rounded border border-primary/30 px-4 py-2.5 text-sm">
+    <div className="mb-5 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-border bg-card px-4 py-2.5 text-sm">
       <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
       <span className="text-foreground">Демо-режим — данные примерные, для ознакомления.</span>
       <button

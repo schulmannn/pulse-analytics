@@ -166,7 +166,7 @@ export function MapBlock() {
         <span className="whitespace-nowrap">Карта аудитории</span>
         <span aria-hidden="true" className="h-px flex-1 bg-border" />
       </h3>
-      <div className="rounded border border-dashed border-border bg-background px-4 py-8 text-center">
+      <div className="rounded-xl border border-dashed border-border bg-background px-4 py-8 text-center">
         <p className="text-sm font-medium text-foreground">География недоступна для Telegram</p>
         <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
           Telegram не отдаёт географию аудитории. Блок появится для источников с демографией
