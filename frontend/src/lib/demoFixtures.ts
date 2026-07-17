@@ -272,9 +272,24 @@ function postStats() {
  * Resolve a request path to its demo fixture, or `undefined` to let the request fall through to the
  * real server (Instagram endpoints, anything not covered). The path may carry a query string.
  */
+// Аннотации-события (chart_annotations) — флажки ⚑ на линии метрик-страницы. Дни считаются в
+// ЛОКАЛЬНОЙ зоне (как localDayKey у MetricPage), иначе флажок промахнётся мимо точки на сутки.
+function demoLocalDay(daysAgo: number): string {
+  const d = new Date(Date.now() - daysAgo * 86_400_000);
+  const pad = (x: number) => String(x).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+const ANNOTATIONS = () => ({
+  annotations: [
+    { id: 1, day: demoLocalDay(12), label: 'Реклама у блогера' },
+    { id: 2, day: demoLocalDay(5), label: 'Пост-хит' },
+  ],
+});
+
 export function demoFixture(path: string): unknown | undefined {
   const p = path.split('?')[0];
   if (p === '/api/channels') return CHANNELS;
+  if (/^\/api\/channels\/\d+\/annotations$/.test(p)) return ANNOTATIONS();
   if (p === '/api/tg/full') return TG_FULL;
   if (p === '/api/history/channel') return HISTORY_RESP;
   if (p === '/api/history/mentions' || p === '/api/tg/mtproto/mentions') return MENTIONS;

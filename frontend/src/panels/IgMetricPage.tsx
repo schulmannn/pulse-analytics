@@ -164,17 +164,18 @@ const WINDOW_PILLS = [
   { days: 0, label: 'Всё' },
 ];
 
-/** Sticky bottom window bar (steep) — presets only. The daily explorer feeds it a page-local
-    window; the aggregate/ER pages wire it to the GLOBAL period (their windows live in useIgData),
-    so every /metrics/ig-* page carries its own control — the feed header stopped being the only
-    steering wheel when the feeds moved to the page-period system.
-    Solid, не blur-пилл: плавающая полупрозрачная пилюля на TG-странице уже была признана багом
-    и заменена сплошным баром (#109) — это рецидив того же паттерна (дизайн-проход №3).
+/** Тайм-бар окна — presets only. v2: тайм-бар принадлежит графику — рендерится одной строкой
+    сразу под графиковым блоком своего варианта, НЕ sticky-панелью у нижнего края экрана
+    (плавающая панель у края — тот же паттерн, что уже признавался багом: #109, дизайн-проход №3).
+    The daily explorer feeds it a page-local window; the aggregate/ER pages wire it to the GLOBAL
+    period (their windows live in useIgData), so every /metrics/ig-* page carries its own control —
+    the feed header stopped being the only steering wheel when the feeds moved to the page-period
+    system.
     `allowAll` = false на агрегатных/ER-страницах: живые insights не отдают «всё время», чип «Всё»
     молча показывал 90д — окно, которое страница не может исполнить, не предлагаем. */
 function WindowBar({ value, onChange, allowAll = true }: { value: number; onChange: (days: PeriodDays) => void; allowAll?: boolean }) {
   return (
-    <div className="sticky bottom-0 z-10 flex flex-wrap items-center gap-2 border-t border-border bg-background px-1 py-2 print:hidden">
+    <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2.5 print:hidden">
       <span className="text-xs font-medium text-muted-foreground">Окно</span>
       <span className="flex-1" />
       {WINDOW_PILLS.filter((chip) => allowAll || chip.days !== 0).map((chip) => (
@@ -327,18 +328,18 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
         <span aria-hidden="true">←</span> Instagram
       </Link>
 
-      {/* Compact steep headline — the route has no global topbar; the metric name stays in this row. Для ig-follows при
-          живом уровне headline = текущая база и её изменение за окно (как ТГ «Подписчики»),
-          а не сумма подписок — сумма остаётся в статистике под графиком «Подписки по дням». */}
+      {/* Тихая шапка v2: страница ведёт ИМЕНЕМ метрики, итог окна живёт в «Сравнении» справа
+          (hero в шапке его дублировал), окно — в тайм-баре под графиком. На <lg rail уезжает под
+          график, поэтому компактный итог остаётся в шапке только там. Для ig-follows при живом
+          уровне страница ведёт «Подписчиками» (текущая база, как ТГ), а не суммой подписок. */}
       {lvlNow != null ? (
         <div>
-          <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-            <span className="text-hero font-medium leading-none tabular-nums tracking-tight">{fmt.kpi(lvlNow)}</span>
+          <h1 className="text-2xl font-medium tracking-tight text-foreground">Подписчики</h1>
+          <div className="mt-1 text-xs tracking-wide text-muted-foreground">{handle ? `Instagram ${handle}` : 'Instagram'}</div>
+          <div className="mt-2 flex flex-wrap items-baseline gap-x-2.5 gap-y-1 lg:hidden">
+            <span className="text-3xl font-medium leading-none tabular-nums tracking-tight">{fmt.kpi(lvlNow)}</span>
             <DeltaPill delta={lvlTrend} />
-            <span className="text-xs tracking-wide text-muted-foreground">
-              Подписчики · {periodLabel}
-              {handle ? <span className="text-ink3"> · Instagram {handle}</span> : null}
-            </span>
+            <span className="text-xs tracking-wide text-muted-foreground">{periodLabel}</span>
           </div>
           <div className="mt-1.5 text-xs text-muted-foreground">
             {lvlDiff != null && lvlDiff !== 0 ? (
@@ -356,13 +357,12 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
         </div>
       ) : (
         <div>
-          <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-            <span className="text-hero font-medium leading-none tabular-nums tracking-tight">{fmt.kpi(sumCur)}</span>
+          <h1 className="text-2xl font-medium tracking-tight text-foreground">{daily.term}</h1>
+          <div className="mt-1 text-xs tracking-wide text-muted-foreground">{handle ? `Instagram ${handle}` : 'Instagram'}</div>
+          <div className="mt-2 flex flex-wrap items-baseline gap-x-2.5 gap-y-1 lg:hidden">
+            <span className="text-3xl font-medium leading-none tabular-nums tracking-tight">{fmt.kpi(sumCur)}</span>
             <DeltaPill delta={trend} />
-            <span className="text-xs tracking-wide text-muted-foreground">
-              {daily.term} · {periodLabel}
-              {handle ? <span className="text-ink3"> · Instagram {handle}</span> : null}
-            </span>
+            <span className="text-xs tracking-wide text-muted-foreground">{periodLabel}</span>
           </div>
           <div className="mt-1.5 text-xs text-muted-foreground">сумма по дням за окно</div>
         </div>
@@ -489,6 +489,10 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
             )}
           </ChartSection>
 
+          {/* Тайм-бар принадлежит графику (v2): пресеты окна одной строкой сразу под канвасом,
+              а не плавающей панелью у края экрана. Presets only: у архива пока нет своего диапазона. */}
+          <WindowBar value={days} onChange={setDays} />
+
           {pinnedValid != null && pinnedDay != null && (
             <PinnedDayPanel
               dateLabel={win.labels[pinnedValid] ?? pinnedDay}
@@ -526,7 +530,15 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
         {/* Explore rail — flat hairline sections (no widget chrome: these are controls, not cards). */}
         <aside className="space-y-6">
           <RailSection title="Сравнение">
-            {/* На ig-follows headline говорит про НЕТТО-изменение базы, а rail сравнивает серию
+            {/* Итог окна — канонический дом итога после тихой шапки (v2: hero переехал сюда).
+                Для ig-follows это текущая база (то, чем ведёт страница), не сумма подписок. */}
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="text-xs text-muted-foreground">Текущее окно</span>
+              <span className="text-base font-medium tabular-nums text-foreground">
+                {lvlNow != null ? fmt.kpi(lvlNow) : fmt.kpi(sumCur)}
+              </span>
+            </div>
+            {/* На ig-follows итог выше говорит про НЕТТО-изменение базы, а rail сравнивает серию
                 графика «Подписки по дням» (валовые) — одна строка контекста снимает конфликт
                 (дизайн-проход №3: рецидив gross-vs-net без подписи). */}
             {metricKey === 'ig-follows' && lvlNow != null && (
@@ -548,10 +560,14 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
               <p className="text-xs text-muted-foreground">Для окна «Всё» прошлого периода не существует.</p>
             ) : ghostOk ? (
               <div className="space-y-2 text-sm">
-                <div className="flex items-baseline justify-between gap-3">
-                  <span className="text-xs text-muted-foreground">Текущий период</span>
-                  <span className="font-medium tabular-nums">{fmt.kpi(sumCur)}</span>
-                </div>
+                {/* v2: строку текущего значения не дублируем — итог уже стоит первой строкой секции.
+                    Исключение ig-follows: там итог = база, а здесь валовая сумма подписок окна. */}
+                {lvlNow != null && (
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="text-xs text-muted-foreground">Текущий период</span>
+                    <span className="font-medium tabular-nums">{fmt.kpi(sumCur)}</span>
+                  </div>
+                )}
                 <div className="flex items-baseline justify-between gap-3">
                   <span className="text-xs text-muted-foreground">{cmpLabel}</span>
                   <span className="tabular-nums">{sumPrev != null ? fmt.kpi(sumPrev) : '—'}</span>
@@ -586,9 +602,6 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
           </Link>
         </aside>
       </div>
-
-      {/* Bottom window bar (steep). Presets only: the archive has no custom-range picker yet. */}
-      <WindowBar value={days} onChange={setDays} />
     </div>
   );
 }
@@ -609,20 +622,22 @@ function IgAggregatePage({ def, pair, windowDays, handle }: { def: IgAggDef; pai
         <span aria-hidden="true">←</span> Instagram
       </Link>
 
+      {/* Тихая шапка v2: имя метрики ведёт, итог окна живёт в «Сравнении» справа; компактный итог
+          остаётся только на узких экранах (там rail уезжает под основной блок). */}
       <div>
-        <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-          <span className="text-hero font-medium leading-none tabular-nums tracking-tight">{pair.hasCur ? fmt.kpi(pair.cur) : '—'}</span>
+        <h1 className="text-2xl font-medium tracking-tight text-foreground">{def.term}</h1>
+        <div className="mt-1 text-xs tracking-wide text-muted-foreground">{handle ? `Instagram ${handle}` : 'Instagram'}</div>
+        <div className="mt-2 flex flex-wrap items-baseline gap-x-2.5 gap-y-1 lg:hidden">
+          <span className="text-3xl font-medium leading-none tabular-nums tracking-tight">{pair.hasCur ? fmt.kpi(pair.cur) : '—'}</span>
           <DeltaPill delta={trend} />
-          <span className="text-xs tracking-wide text-muted-foreground">
-            {def.term} · {windowDays} дн.
-            {handle ? <span className="text-ink3"> · Instagram {handle}</span> : null}
-          </span>
+          <span className="text-xs tracking-wide text-muted-foreground">{windowDays} дн.</span>
         </div>
-        <div className="mt-1.5 text-xs text-muted-foreground">агрегат за окно — переключатели внизу страницы</div>
+        {/* «внизу страницы» больше не правда: тайм-бар живёт под блоком периода (v2). */}
+        <div className="mt-1.5 text-xs text-muted-foreground">агрегат за выбранное окно</div>
       </div>
 
       <div className="grid grid-cols-1 gap-6 xl:gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
-        <div className="min-w-0">
+        <div className="min-w-0 space-y-6">
           <ChartSection title="Период против периода" defaultSize="full" noExpand>
             {pair.hasCur ? (
               <div className="grid grid-cols-1 gap-px border-t border-border bg-border sm:grid-cols-3">
@@ -648,9 +663,21 @@ function IgAggregatePage({ def, pair, windowDays, handle }: { def: IgAggDef; pai
               Дневной серии для этой метрики Instagram не отдаёт — сравниваем агрегаты периодов, а не рисуем придуманный график.
             </p>
           </ChartSection>
+
+          {/* Тайм-бар принадлежит блоку периода (v2): переключатели окна сразу под ним,
+              а не плавающей панелью у края страницы. */}
+          <WindowBar value={days} onChange={setDays} allowAll={false} />
         </div>
 
         <aside className="space-y-6">
+          {/* v2: итог живёт в «Сравнении» — первая секция rail. Прошлый период у агрегатной
+              страницы уже разложен в основном блоке, поэтому здесь только строка итога. */}
+          <RailSection title="Сравнение">
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="text-xs text-muted-foreground">Текущее окно</span>
+              <span className="text-base font-medium tabular-nums text-foreground">{pair.hasCur ? fmt.kpi(pair.cur) : '—'}</span>
+            </div>
+          </RailSection>
           <RailSection title="О метрике">
             <dl className="space-y-3 text-sm">
               <AboutRow label="Как считается" text={def.formula} />
@@ -662,8 +689,6 @@ function IgAggregatePage({ def, pair, windowDays, handle }: { def: IgAggDef; pai
           </Link>
         </aside>
       </div>
-
-      <WindowBar value={days} onChange={setDays} allowAll={false} />
     </div>
   );
 }
@@ -712,20 +737,22 @@ function IgErPage({
         <span aria-hidden="true">←</span> Instagram
       </Link>
 
+      {/* Тихая шапка v2: имя метрики ведёт, итог окна живёт в «Сравнении» справа; компактный итог
+          остаётся только на узких экранах (там rail уезжает под основной блок). */}
       <div>
-        <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-          <span className="text-hero font-medium leading-none tabular-nums tracking-tight">{hasCur ? `${erReach.toFixed(2)}%` : '—'}</span>
+        <h1 className="text-2xl font-medium tracking-tight text-foreground">{ER_DEF.term}</h1>
+        <div className="mt-1 text-xs tracking-wide text-muted-foreground">{handle ? `Instagram ${handle}` : 'Instagram'}</div>
+        <div className="mt-2 flex flex-wrap items-baseline gap-x-2.5 gap-y-1 lg:hidden">
+          <span className="text-3xl font-medium leading-none tabular-nums tracking-tight">{hasCur ? `${erReach.toFixed(2)}%` : '—'}</span>
           <DeltaPill delta={trend} />
-          <span className="text-xs tracking-wide text-muted-foreground">
-            {ER_DEF.term} · {windowDays} дн.
-            {handle ? <span className="text-ink3"> · Instagram {handle}</span> : null}
-          </span>
+          <span className="text-xs tracking-wide text-muted-foreground">{windowDays} дн.</span>
         </div>
-        <div className="mt-1.5 text-xs text-muted-foreground">агрегат за окно — переключатели внизу страницы</div>
+        {/* «внизу страницы» больше не правда: тайм-бар живёт под блоком периода (v2). */}
+        <div className="mt-1.5 text-xs text-muted-foreground">агрегат за выбранное окно</div>
       </div>
 
       <div className="grid grid-cols-1 gap-6 xl:gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
-        <div className="min-w-0">
+        <div className="min-w-0 space-y-6">
           <ChartSection title="Период против периода" defaultSize="full" noExpand>
             {hasCur ? (
               <>
@@ -754,9 +781,21 @@ function IgErPage({
               <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">Instagram не вернул составляющие ER за период.</div>
             )}
           </ChartSection>
+
+          {/* Тайм-бар принадлежит блоку периода (v2): переключатели окна сразу под ним,
+              а не плавающей панелью у края страницы. */}
+          <WindowBar value={days} onChange={setDays} allowAll={false} />
         </div>
 
         <aside className="space-y-6">
+          {/* v2: итог живёт в «Сравнении» — первая секция rail. Прошлый период у ER уже
+              разложен в основном блоке, поэтому здесь только строка итога. */}
+          <RailSection title="Сравнение">
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="text-xs text-muted-foreground">Текущее окно</span>
+              <span className="text-base font-medium tabular-nums text-foreground">{hasCur ? `${erReach.toFixed(2)}%` : '—'}</span>
+            </div>
+          </RailSection>
           <RailSection title="О метрике">
             <dl className="space-y-3 text-sm">
               <AboutRow label="Как считается" text={ER_DEF.formula} />
@@ -768,8 +807,6 @@ function IgErPage({
           </Link>
         </aside>
       </div>
-
-      <WindowBar value={days} onChange={setDays} allowAll={false} />
     </div>
   );
 }

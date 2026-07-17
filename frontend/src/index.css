@@ -791,6 +791,8 @@ section[data-narr-link] {
   --card-tint-alpha: 0.16;
 }
 .dark section[data-narr-link] {
+  /* Тёмный ховер/подсветка — только hairline: тинт-лифт на плоском slate читался как «серое
+     пятно» на части карточки (владелец), поэтому dark держит alpha 0 и здесь, и на card-hover. */
   border-color: rgb(255 255 255 / 0.12);
-  --card-tint-alpha: 0.08;
+  --card-tint-alpha: 0;
 }

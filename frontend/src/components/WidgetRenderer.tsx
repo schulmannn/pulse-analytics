@@ -1,11 +1,12 @@
-import { useContext } from 'react';
+import { useContext, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { DeltaPill } from '@/components/DeltaPill';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { PieChart } from '@/components/PieChart';
 import { Breakdown } from '@/components/Breakdown';
-import { ChartExpandedContext, WidgetTargetContext } from '@/components/ExpandableChart';
+import { ChartExpandedContext, ExpandedChartHeightContext, WidgetTargetContext } from '@/components/ExpandableChart';
+import { observeSize } from '@/lib/observeSize';
 import { MetricExplainPanel, MetricExplainTooltip } from '@/components/MetricExplain';
 import { Skeleton } from '@/components/ui/skeleton';
 import { pluralRu } from '@/lib/resolveWidgetMetric';
@@ -65,6 +66,20 @@ export function WidgetRenderer({
   // Detail overlay / explorer set this true → show the full explain panel there; the collapsed card
   // gets the compact ⓘ instead (see the meta row below).
   const expanded = useContext(ChartExpandedContext);
+  // The chart must size to ITS band, not the whole card body: the card's height context carries the
+  // full body measurement (hero + chart + meta), so a hero-led card's chart rendered taller than its
+  // flex band and the bottom of the plot (min-value points) was clipped by overflow-hidden
+  // (владелец: «графики не вмещаются по оси Y»). Measure the band itself and override the context
+  // for the chart subtree only (Breakdown self-measures; the meta/hero rows stay outside).
+  const bandRef = useRef<HTMLDivElement>(null);
+  const [bandH, setBandH] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const el = bandRef.current;
+    if (!el) return;
+    const measure = () => setBandH(el.clientHeight || null);
+    measure();
+    return observeSize(el, measure);
+  }, [result.empty]);
   if (result.empty) {
     return (
       <div className="flex h-full min-h-[6rem] flex-col items-center justify-center gap-1.5 px-3 text-center">
@@ -129,8 +144,10 @@ export function WidgetRenderer({
         {/* overflow-hidden: fixed-tile charts size their svg from the measured BODY height, which
             can overrun this flex-1 band and paint under the meta line / stats footer — clip the
             chart to its allotted band so the caption stays legible. */}
-        <div className={`min-h-0 flex-1 overflow-hidden ${showHero ? 'mt-3' : ''}`}>
-          <WidgetChart result={result} eff={eff} onDrill={onDrill} expanded={expanded} />
+        <div ref={bandRef} className={`min-h-0 flex-1 overflow-hidden ${showHero ? 'mt-3' : ''}`}>
+          <ExpandedChartHeightContext.Provider value={bandH}>
+            <WidgetChart result={result} eff={eff} onDrill={onDrill} expanded={expanded} />
+          </ExpandedChartHeightContext.Provider>
         </div>
       </WidgetTargetContext.Provider>
       {expanded ? (

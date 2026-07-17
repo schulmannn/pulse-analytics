@@ -27,6 +27,7 @@ export function PinnedDayPanel({
   postsEmpty = 'В этот день публикаций не было.',
   showPosts = true,
   onClose,
+  footer,
 }: {
   dateLabel: string;
   rows: { label: string; value: ReactNode }[];
@@ -36,6 +37,8 @@ export function PinnedDayPanel({
   /** Off for metrics whose series isn't post-addressable (subscriber levels on «Всё»/weeks). */
   showPosts?: boolean;
   onClose: () => void;
+  /** Host-page extras under the panel (метрик-страница: события дня — chart_annotations). */
+  footer?: ReactNode;
 }) {
   return (
     <section className="rounded-2xl border border-border bg-card p-4 dark:border-white/[0.06] sm:p-5">
@@ -101,6 +104,7 @@ export function PinnedDayPanel({
           )}
         </div>
       )}
+      {footer}
     </section>
   );
 }

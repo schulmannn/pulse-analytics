@@ -45,6 +45,15 @@ interface LineChartProps {
   /** PINNED point (steep): a persistent dashed crosshair + solid marker at this index, set by
       the host page from onPointClick — the anchor for a «этот день» panel. null/undefined = off. */
   pinnedIndex?: number | null;
+  /** Per-point titles for the STRUCTURED hover card (weekday-prefixed dates on the metric page);
+      falls back to `labels`. The plain-text tooltip keeps reading `titles`. */
+  hoverTitles?: string[];
+  /** The comparison series' OWN calendar labels per point — joined into its hover row, so the
+      compared value carries its real date («Пред. период · вт, 18 июн» — артефакт v2). */
+  ghostTitles?: string[];
+  /** Event flags (chart_annotations): ⚑ markers at these indices near the plot bottom; the label
+      joins the hover readout of that point. Host page maps days → indices. */
+  flags?: Array<{ i: number; label: string }>;
 }
 
 interface Hover {
@@ -112,6 +121,9 @@ export function LineChart({
   legendToggle = true,
   emphasizeLastLabel = false,
   pinnedIndex = null,
+  hoverTitles,
+  ghostTitles,
+  flags,
 }: LineChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   // Press position (client px) for the drag guard — see onSvgClick below.
@@ -439,11 +451,22 @@ export function LineChart({
   const n = values.length;
   const anomalySet = new Set(anomalyIdx);
 
+  const flagMap = new Map((flags ?? []).map((f) => [f.i, f.label] as const));
   const tipText = (i: number) => {
     let base = titles?.[i] ?? fmt.num(values[i]);
     // Hovering a compared chart reads both series at once (comparison shown).
     if (activeGhost && activeGhost[i] != null) base = `${base} · пред. ${fmt.num(activeGhost[i])}`;
-    return anomalySet.has(i) ? `${base} · аномалия` : base;
+    if (anomalySet.has(i)) base = `${base} · аномалия`;
+    const fl = flagMap.get(i);
+    return fl ? `${base} · ⚑ ${fl}` : base;
+  };
+  // Structured-card title: weekday-prefixed date (hoverTitles) + anomaly + event flag markers.
+  const cardTitle = (i: number) => {
+    const parts: string[] = [hoverTitles?.[i] ?? labels?.[i] ?? ''];
+    if (anomalySet.has(i)) parts.push('аномалия');
+    const fl = flagMap.get(i);
+    if (fl) parts.push(`⚑ ${fl}`);
+    return parts.filter(Boolean).join(' · ');
   };
   // The hover readout: a STRUCTURED card (date · Текущий · comparison · Δ) whenever a ghost series
   // is present — so the tooltip is an instrument, not a caption. Without a comparison, keep the
@@ -455,12 +478,16 @@ export function LineChart({
       const prev = activeGhost[i];
       const rows: TooltipRow[] = [
         { label: 'Текущий', value: fmt.num(cur), color: 'hsl(var(--chart-role-primary))' },
-        { label: ghostLabel, value: fmt.num(prev), color: 'hsl(var(--chart-role-comparison))' },
+        {
+          // Своя дата у строки сравнения (артефакт v2): «Пред. период · вт, 18 июн».
+          label: ghostTitles?.[i] ? `${ghostLabel} · ${ghostTitles[i]}` : ghostLabel,
+          value: fmt.num(prev),
+          color: 'hsl(var(--chart-role-comparison))',
+        },
       ];
       const d = prev !== 0 ? ((cur - prev) / Math.abs(prev)) * 100 : null;
       if (d != null && Number.isFinite(d)) rows.push({ label: 'Δ', value: `${d >= 0 ? '+' : '−'}${Math.abs(d).toFixed(1)}%` });
-      const title = anomalySet.has(i) ? `${labels?.[i] ?? ''} · аномалия` : labels?.[i];
-      return { x: p.x, y: p.y, title, rows };
+      return { x: p.x, y: p.y, title: cardTitle(i), rows };
     }
     if (expanded) {
       const rows: TooltipRow[] = [
@@ -470,8 +497,7 @@ export function LineChart({
           color: 'hsl(var(--chart-role-primary))',
         },
       ];
-      const title = anomalySet.has(i) ? `${labels?.[i] ?? ''} · аномалия` : labels?.[i];
-      return { x: p.x, y: p.y, title, rows };
+      return { x: p.x, y: p.y, title: cardTitle(i), rows };
     }
     return { x: p.x, y: p.y, text: tipText(i) };
   };
@@ -542,6 +568,33 @@ export function LineChart({
         onClick={onSvgClick}
       >
         {plot.staticLayer}
+
+        {/* Событ/annotation flags (артефакт v2 п.7): ⚑ у нижней кромки + пунктир к точке дня;
+            подпись события читается в ховер-карточке этого дня. */}
+        {flagMap.size > 0 && (
+          <g className="pointer-events-none">
+            {[...flagMap.keys()]
+              .filter((i) => i >= 0 && i < n)
+              .map((i) => (
+                <g key={`fl${i}`}>
+                  <line
+                    x1={points[i].x}
+                    y1={points[i].y + 6}
+                    x2={points[i].x}
+                    y2={plotBottom - 15}
+                    stroke="hsl(var(--border))"
+                    strokeWidth="1"
+                    strokeDasharray="1 3"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                  <circle cx={points[i].x} cy={plotBottom - 8} r="7" fill="hsl(var(--popover))" stroke="hsl(var(--border))" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+                  <text x={points[i].x} y={plotBottom - 4.5} textAnchor="middle" className="select-none fill-muted-foreground text-2xs">
+                    ⚑
+                  </text>
+                </g>
+              ))}
+          </g>
+        )}
 
         {/* PINNED point — persistent dashed crosshair + solid marker (under the live hover). */}
         {pinnedIndex != null && points[pinnedIndex] && (
