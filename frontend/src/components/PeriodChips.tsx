@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { DateRangePicker } from '@/components/DateRangePicker';
+import { SegmentedControl } from '@/components/SegmentedControl';
 import type { DateRange, PeriodDays } from '@/lib/period';
 
 const PRESETS: { days: PeriodDays; label: string }[] = [
@@ -53,22 +54,15 @@ export function PeriodChips({
   }, [pickerOpen]);
   return (
     <div role="group" aria-label="Период" className={cn('relative flex flex-wrap items-center gap-1.5', className)}>
-      {PRESETS.map((chip) => (
-        <button
-          key={chip.days}
-          type="button"
-          onClick={() => onChange(chip.days)}
-          aria-pressed={!range && value === chip.days}
-          className={cn(
-            'rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors',
-            !range && value === chip.days
-              ? 'border-primary/40 bg-primary/10 text-primary'
-              : 'border-border text-muted-foreground hover:text-foreground',
-          )}
-        >
-          {chip.label}
-        </button>
-      ))}
+      {/* Presets ride the shared sliding-glider primitive; a picked custom range deselects every
+          preset (value matches no segment → the glider hides). Rendered `groupless` so this one
+          public «Период» group stays the sole labelled group (the «Свой период» pill lives in it). */}
+      <SegmentedControl
+        groupless
+        value={range ? '' : String(value)}
+        onChange={(days) => onChange(Number(days) as PeriodDays)}
+        options={PRESETS.map((chip) => ({ value: String(chip.days), content: chip.label }))}
+      />
       {onRangeChange && (
         <>
           <button

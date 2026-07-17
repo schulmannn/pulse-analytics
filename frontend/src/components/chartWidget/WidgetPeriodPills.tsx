@@ -1,4 +1,5 @@
 import { WIDGET_PERIODS } from '@/components/widgets/EditWidgetDialog';
+import { SegmentedControl } from '@/components/SegmentedControl';
 import { usePagePeriod } from '@/lib/period';
 import type { PeriodDays } from '@/lib/period';
 
@@ -21,38 +22,35 @@ export function WidgetPeriodPills({ days, onChange, hidden }: WidgetPeriodPillsP
   const activeDays = pagePeriod?.days ?? days;
   const customRange = pagePeriod?.range ?? null;
   const changePeriod = pagePeriod?.setDays ?? onChange;
-  const pillClass = (active: boolean) =>
-    `relative inline-flex min-h-8 min-w-8 items-center justify-center rounded px-2 text-2xs font-medium tabular-nums transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 sm:min-h-0 sm:min-w-0 sm:justify-start sm:px-0.5 sm:pb-1 sm:pt-0.5 ${
-      active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
-    }`;
+
+  // Presets ride the shared sliding-glider primitive. When a custom range is active the glider
+  // hides (value matches no preset) and the «Свой» indicator stands in — same custom-range display
+  // semantics as before. Segments keep a ≥32px mobile hit area (compact desktop look returns at sm),
+  // and this component owns the single public group so its dynamic label stays the sole labelled one.
+  const touch = 'min-h-8 min-w-8 tabular-nums sm:min-h-0 sm:min-w-0';
 
   return (
     <div
       role="group"
       aria-label={pagePeriod ? 'Период страницы' : 'Период виджета'}
-      className="mt-2 flex items-center gap-3 print:hidden"
+      className="mt-2 flex items-center gap-2 print:hidden"
     >
       {customRange && (
-        <span className={pillClass(true)} title="Выбранный период страницы">
+        <span
+          className={`inline-flex ${touch} items-center justify-center rounded-full bg-secondary px-2.5 py-1 text-2xs font-medium text-foreground`}
+          title="Выбранный период страницы"
+        >
           Свой
-          <span aria-hidden="true" className="absolute inset-x-0 bottom-1 h-px bg-primary sm:-bottom-px" />
         </span>
       )}
-      {WIDGET_PERIODS.map((period) => {
-        const active = !customRange && activeDays === period.days;
-        return (
-          <button
-            key={period.days}
-            type="button"
-            aria-pressed={active}
-            onClick={() => changePeriod(period.days)}
-            className={pillClass(active)}
-          >
-            {period.label}
-            {active && <span aria-hidden="true" className="absolute inset-x-0 bottom-1 h-px bg-primary sm:-bottom-px" />}
-          </button>
-        );
-      })}
+      <SegmentedControl
+        groupless
+        size="sm"
+        segmentClassName={touch}
+        value={customRange ? '' : String(activeDays)}
+        onChange={(next) => changePeriod(Number(next) as PeriodDays)}
+        options={WIDGET_PERIODS.map((period) => ({ value: String(period.days), content: period.label }))}
+      />
     </div>
   );
 }

@@ -12,6 +12,7 @@ import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { ChartExpandedContext } from '@/components/ExpandableChart';
 import { DeltaPill } from '@/components/DeltaPill';
+import { SegmentedControl } from '@/components/SegmentedControl';
 import { ErrorState } from '@/components/ErrorState';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PinnedDayPanel } from '@/components/PinnedDayPanel';
@@ -178,19 +179,16 @@ function WindowBar({ value, onChange, allowAll = true }: { value: number; onChan
     <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2.5 print:hidden">
       <span className="text-xs font-medium text-muted-foreground">Окно</span>
       <span className="flex-1" />
-      {WINDOW_PILLS.filter((chip) => allowAll || chip.days !== 0).map((chip) => (
-        <button
-          key={chip.days}
-          type="button"
-          aria-pressed={value === chip.days}
-          onClick={() => onChange(chip.days as PeriodDays)}
-          className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors ${
-            value === chip.days ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:text-foreground'
-          }`}
-        >
-          {chip.label}
-        </button>
-      ))}
+      {/* Presets on the shared sliding-glider primitive. */}
+      <SegmentedControl
+        ariaLabel="Окно"
+        value={String(value)}
+        onChange={(days) => onChange(Number(days) as PeriodDays)}
+        options={WINDOW_PILLS.filter((chip) => allowAll || chip.days !== 0).map((chip) => ({
+          value: String(chip.days),
+          content: chip.label,
+        }))}
+      />
     </div>
   );
 }
@@ -424,21 +422,16 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
             defaultSize="full"
             noExpand
             action={
-              <div role="group" aria-label="Тип графика" className="flex shrink-0 overflow-hidden rounded-full border border-border">
-                {(['line', 'bar'] as const).map((k) => (
-                  <button
-                    key={k}
-                    type="button"
-                    aria-pressed={kind === k}
-                    onClick={() => setKind(k)}
-                    className={`border-r border-border px-2.5 py-1 text-xs font-medium transition-colors last:border-r-0 ${
-                      kind === k ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    {k === 'line' ? 'Линия' : 'Столбцы'}
-                  </button>
-                ))}
-              </div>
+              <SegmentedControl
+                ariaLabel="Тип графика"
+                className="shrink-0"
+                value={kind}
+                onChange={setKind}
+                options={[
+                  { value: 'line', content: 'Линия', ariaLabel: 'Тип графика: Линия' },
+                  { value: 'bar', content: 'Столбцы', ariaLabel: 'Тип графика: Столбцы' },
+                ]}
+              />
             }
           >
             {n > 1 ? (

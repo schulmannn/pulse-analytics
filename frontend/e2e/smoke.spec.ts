@@ -60,12 +60,16 @@ test('overview has one authoritative top-bar period and no card-local controls',
   // The page default wins over every stale saved widget override without rendering duplicate UI.
   await expect(pagePeriod.getByRole('button', { name: '30д' })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByText('Просмотры · 30 дн.')).toBeVisible();
+  const periodIndicator = pagePeriod.locator('[data-segmented-indicator]');
+  await expect(periodIndicator).toHaveCount(1);
+  const indicatorBefore = await periodIndicator.evaluate((node) => getComputedStyle(node).transform);
   const contextCard = page.getByRole('heading', { name: 'Главное изменение', exact: true }).locator('..').locator('..');
   const contextBefore = await contextCard.innerText();
 
   // The sole top-bar control re-windows every card on the page.
   await pagePeriod.getByRole('button', { name: '7д' }).click();
   await expect(pagePeriod.getByRole('button', { name: '7д' })).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(() => periodIndicator.evaluate((node) => getComputedStyle(node).transform)).not.toBe(indicatorBefore);
   await expect(page.getByText('Просмотры · 7 дн.')).toBeVisible();
   await expect.poll(() => contextCard.innerText()).not.toBe(contextBefore);
 });

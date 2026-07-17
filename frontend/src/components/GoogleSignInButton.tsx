@@ -60,8 +60,13 @@ export function GoogleSignInButton({ text = 'continue_with' }: { text?: 'continu
             if (resp.credential) googleLogin.mutate(resp.credential, { onSuccess: () => navigate('/') });
           },
         });
-        ref.current.innerHTML = '';
-        id.renderButton(ref.current, { theme: 'outline', size: 'large', shape: 'pill', text, width: 320, locale: 'ru' });
+        const host = ref.current;
+        host.innerHTML = '';
+        // The auth card owns horizontal padding, so a fixed 320px GIS button can overflow on a
+        // narrow viewport. Google accepts an explicit pixel width; cap it at the old desktop size
+        // while respecting the actual host width on first render.
+        const width = Math.min(320, Math.floor(host.clientWidth) || 320);
+        id.renderButton(host, { theme: 'outline', size: 'large', shape: 'pill', text, width, locale: 'ru' });
       })
       .catch(() => setLoadErr(true));
     return () => {

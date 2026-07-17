@@ -8,6 +8,7 @@ import type { PeriodDays } from '@/lib/period';
 import { useFocusTrap } from '@/lib/useFocusTrap';
 import { useChannels } from '@/api/queries';
 import { PillSelect } from '@/components/PillSelect';
+import { SegmentedControl } from '@/components/SegmentedControl';
 import type { SeriesGrain, WidgetPrefs, WidgetSize } from '@/lib/widgetPrefsStore';
 import { SIZE_RANK, type WidgetVariant } from '@/components/widgets/variants';
 
@@ -32,38 +33,24 @@ function DialogPeriodSegment({
 }) {
   const pagePeriod = usePagePeriod();
   const following = prefs.period === undefined && pagePeriod != null;
-  const cell = (active: boolean) =>
-    `flex-1 border-r border-border px-2 py-1.5 text-xs font-medium tabular-nums transition-colors last:border-r-0 ${
-      active ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
-    }`;
+  // «Стр.» (follow-page) + the presets are one mutually-exclusive set, so they ride the shared
+  // sliding-glider primitive.
+  const value = following ? 'follow' : String(prefs.period ?? DEFAULT_WIDGET_DAYS);
+  const options = [
+    ...(pagePeriod != null
+      ? ([{ value: 'follow', content: 'Стр.', title: 'Следовать периоду страницы' }] as const)
+      : []),
+    ...WIDGET_PERIODS.map((p) => ({ value: String(p.days), content: p.label })),
+  ];
   return (
-    <div className="mt-2 flex overflow-hidden rounded-full border border-border">
-      {pagePeriod != null && (
-        <button
-          type="button"
-          aria-pressed={following}
-          title="Следовать периоду страницы"
-          onClick={() => onChange({ ...prefs, period: undefined })}
-          className={cell(following)}
-        >
-          Стр.
-        </button>
-      )}
-      {WIDGET_PERIODS.map((p) => {
-        const active = following ? false : (prefs.period ?? DEFAULT_WIDGET_DAYS) === p.days;
-        return (
-          <button
-            key={p.days}
-            type="button"
-            aria-pressed={active}
-            onClick={() => onChange({ ...prefs, period: p.days })}
-            className={cell(active)}
-          >
-            {p.label}
-          </button>
-        );
-      })}
-    </div>
+    <SegmentedControl
+      ariaLabel="Период виджета"
+      className="mt-2 w-full"
+      segmentClassName="px-2 tabular-nums"
+      value={value}
+      onChange={(next) => onChange({ ...prefs, period: next === 'follow' ? undefined : (Number(next) as PeriodDays) })}
+      options={options}
+    />
   );
 }
 
@@ -426,24 +413,14 @@ export function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, sh
           <div className="mt-4">
             <span className="text-2xs tracking-wide text-muted-foreground">Грануляция</span>
             {/* Bucket the daily series by week/month (sums). День clears the pref. */}
-            <div className="mt-2 flex overflow-hidden rounded-full border border-border">
-              {GRAIN_OPTIONS.map((g) => {
-                const active = (prefs.grain ?? 'day') === g.value;
-                return (
-                  <button
-                    key={g.value}
-                    type="button"
-                    aria-pressed={active}
-                    onClick={() => onChange({ ...prefs, grain: g.value === 'day' ? undefined : g.value })}
-                    className={`flex-1 border-r border-border px-2 py-1.5 text-xs font-medium transition-colors last:border-r-0 ${
-                      active ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
-                    }`}
-                  >
-                    {g.label}
-                  </button>
-                );
-              })}
-            </div>
+            <SegmentedControl
+              ariaLabel="Грануляция виджета"
+              className="mt-2 w-full"
+              segmentClassName="px-2"
+              value={prefs.grain ?? 'day'}
+              onChange={(next) => onChange({ ...prefs, grain: next === 'day' ? undefined : next })}
+              options={GRAIN_OPTIONS.map((g) => ({ value: g.value, content: g.label }))}
+            />
           </div>
         )}
 

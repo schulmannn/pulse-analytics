@@ -143,22 +143,30 @@ function PanelSuspense({ children }: { children: ReactNode }) {
   );
 }
 
-/** Auth page scaffold: brand mark corner + the centered 380px form column (mirrors AuthShell). */
+/** Auth page scaffold: centered brand mark above the card-scale surface (mirrors AuthShell so the
+    card doesn't jump when the page resolves). */
 function AuthSuspense({ children }: { children: ReactNode }) {
   return (
     <Suspense
       fallback={
-        <div className="relative flex min-h-screen items-center justify-center bg-background px-5 py-16">
-          <div className="absolute left-6 top-6">
-            <Skeleton className="h-5 w-24" />
-          </div>
-          <div className="w-full max-w-[380px]">
-            <Skeleton className="h-8 w-2/3" />
-            <Skeleton className="mt-3 h-4 w-full" />
-            <div className="mt-6 space-y-4">
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="mt-5 h-10 w-full rounded-full" />
+        <div className="flex min-h-screen items-center justify-center bg-background px-5 py-12">
+          <div className="w-full max-w-[400px]">
+            <div className="mb-6 flex justify-center">
+              <Skeleton className="h-6 w-28" />
+            </div>
+            <div className="rounded-2xl border border-border bg-card p-7 sm:p-8">
+              <Skeleton className="h-8 w-2/3" />
+              <div className="mt-6 space-y-4">
+                <div className="space-y-1.5">
+                  <Skeleton className="h-4 w-16" />
+                  <Skeleton className="h-10 w-full rounded-lg" />
+                </div>
+                <div className="space-y-1.5">
+                  <Skeleton className="h-4 w-16" />
+                  <Skeleton className="h-10 w-full rounded-lg" />
+                </div>
+                <Skeleton className="mt-5 h-10 w-full rounded-full" />
+              </div>
             </div>
           </div>
         </div>

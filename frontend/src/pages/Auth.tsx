@@ -1,25 +1,74 @@
 import { useState } from 'react';
-import type { FormEvent, ReactNode } from 'react';
+import type { FormEvent, InputHTMLAttributes, ReactNode } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useForgot, useLogin, useRegister, useReset, useVerify } from '@/api/queries';
 import { AtlavueMark } from '@/components/AtlavueMark';
 import { GoogleSignInButton } from '@/components/GoogleSignInButton';
+import { cn } from '@/lib/utils';
 
-// "Atlavue Refined Technical" auth — light, quiet, calmer than the dashboard. Warm paper canvas,
-// hairline-bordered fields, pill primary button, one calm blue accent. Semantic/brand tokens only.
+// "Atlavue Refined Technical" auth — a calm dark card on the near-black canvas: one card-scale
+// surface, hairline field shells with a compact leading icon, a full-width pill submit and one calm
+// blue accent. Semantic/brand tokens only; borders-only depth (no shadow/glow).
 
-const INPUT_CLASS =
-  'w-full rounded border border-border bg-card px-3.5 py-2.5 text-sm text-foreground placeholder:text-ink3 focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50';
 const BUTTON_CLASS =
   'btn-pill mt-5 w-full bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50';
 const LABEL_CLASS = 'mb-1.5 block text-sm font-medium text-ink2';
 const LINK_CLASS = 'cursor-pointer font-medium text-primary hover:underline';
 
+// Lean stroke-only glyphs (the house icon language) that sit inside a field shell.
+const FIELD_ICONS = {
+  mail: ['M4 6h16v12H4z', 'm4 7 8 6 8-6'],
+  lock: ['M6 11h12v9H6z', 'M9 11V8a3 3 0 0 1 6 0v3'],
+} satisfies Record<string, string[]>;
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Не удалось выполнить запрос';
 }
 
-/** Light page shell: brand top-left, a centered, left-aligned form column (quieter than the app). */
+function FieldIcon({ paths }: { paths: string[] }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 shrink-0 text-ink3" aria-hidden="true">
+      {paths.map((d) => (
+        <path key={d} d={d} />
+      ))}
+    </svg>
+  );
+}
+
+/**
+ * One accessible auth field: a label bound to the input plus a hairline shell that lights up on
+ * `focus-within` and carries a compact leading icon. The shell owns the border/focus ring so the
+ * icon and the input read as one control; all native input props (type, autoComplete, required,
+ * disabled, minLength…) pass straight through to the real `<input>` for correct browser behaviour.
+ */
+function AuthField({
+  id,
+  label,
+  icon,
+  className,
+  ...inputProps
+}: { id: string; label: string; icon: keyof typeof FIELD_ICONS } & InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <div>
+      <label htmlFor={id} className={LABEL_CLASS}>
+        {label}
+      </label>
+      <div className="flex items-center gap-2.5 rounded-lg border border-input bg-background px-3 transition-colors focus-within:border-primary focus-within:ring-1 focus-within:ring-primary">
+        <FieldIcon paths={FIELD_ICONS[icon]} />
+        <input
+          id={id}
+          className={cn(
+            'w-full bg-transparent py-2.5 text-sm text-foreground placeholder:text-ink3 focus:outline-none disabled:opacity-50',
+            className,
+          )}
+          {...inputProps}
+        />
+      </div>
+    </div>
+  );
+}
+
+/** Dark page shell: near-black canvas, a centered brand mark above one card-scale auth surface. */
 function AuthShell({
   title,
   subtitle,
@@ -30,16 +79,17 @@ function AuthShell({
   children: ReactNode;
 }) {
   return (
-    <div className="relative flex min-h-screen items-center justify-center bg-background px-5 py-16 text-foreground">
-      <Link to="/" className="absolute left-6 top-6 flex items-center gap-2.5">
-        <AtlavueMark className="h-5 w-5 text-primary" />
-        <span className="text-lg font-medium tracking-tight text-foreground">Atlavue</span>
-      </Link>
-
-      <div className="w-full max-w-[380px]">
-        <h1 className="text-2xl font-medium tracking-tight text-foreground">{title}</h1>
-        {subtitle && <p className="mt-2 text-sm leading-relaxed text-ink2">{subtitle}</p>}
-        <div className="mt-6">{children}</div>
+    <div className="flex min-h-screen items-center justify-center bg-background px-5 py-12 text-foreground">
+      <div className="w-full max-w-[400px]">
+        <Link to="/" className="mb-6 flex items-center justify-center gap-2.5">
+          <AtlavueMark className="h-6 w-6 text-primary" />
+          <span className="text-lg font-medium tracking-tight text-foreground">Atlavue</span>
+        </Link>
+        <div className="rounded-2xl border border-border bg-card p-7 sm:p-8">
+          <h1 className="text-2xl font-medium tracking-tight text-foreground">{title}</h1>
+          {subtitle && <p className="mt-2 text-sm leading-relaxed text-ink2">{subtitle}</p>}
+          <div className="mt-6">{children}</div>
+        </div>
       </div>
     </div>
   );
@@ -97,18 +147,16 @@ export function LoginPage() {
     return (
       <AuthShell title="Сброс пароля">
         <form onSubmit={handleForgot}>
-          <label className={LABEL_CLASS} htmlFor="forgot-email">
-            Email для сброса пароля
-          </label>
-          <input
+          <AuthField
             id="forgot-email"
+            label="Email для сброса пароля"
+            icon="mail"
             type="email"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
             placeholder="you@example.com"
             required
             disabled={forgotMutation.isPending}
-            className={INPUT_CLASS}
           />
           <button type="submit" disabled={forgotMutation.isPending} className={BUTTON_CLASS}>
             {forgotMutation.isPending ? 'Отправка…' : 'Отправить ссылку'}
@@ -143,11 +191,10 @@ export function LoginPage() {
   return (
     <AuthShell title="Войти в Atlavue">
       <form onSubmit={handleLogin}>
-        <label className={LABEL_CLASS} htmlFor="login-email">
-          Email
-        </label>
-        <input
+        <AuthField
           id="login-email"
+          label="Email"
+          icon="mail"
           type="email"
           value={email}
           onChange={(event) => setEmail(event.target.value)}
@@ -155,21 +202,20 @@ export function LoginPage() {
           autoComplete="username"
           required
           disabled={loginMutation.isPending}
-          className={INPUT_CLASS}
         />
-        <label className={`${LABEL_CLASS} mt-4`} htmlFor="login-password">
-          Пароль
-        </label>
-        <input
-          id="login-password"
-          type="password"
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          autoComplete="current-password"
-          required
-          disabled={loginMutation.isPending}
-          className={INPUT_CLASS}
-        />
+        <div className="mt-4">
+          <AuthField
+            id="login-password"
+            label="Пароль"
+            icon="lock"
+            type="password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            autoComplete="current-password"
+            required
+            disabled={loginMutation.isPending}
+          />
+        </div>
         <button type="submit" disabled={loginMutation.isPending} className={BUTTON_CLASS}>
           {loginMutation.isPending ? 'Вход…' : 'Войти'}
         </button>
@@ -216,11 +262,10 @@ export function RegisterPage() {
       subtitle="Подключите канал и получите обзор просмотров, постов и состояния сбора."
     >
       <form onSubmit={handleSubmit}>
-        <label className={LABEL_CLASS} htmlFor="reg-email">
-          Email
-        </label>
-        <input
+        <AuthField
           id="reg-email"
+          label="Email"
+          icon="mail"
           type="email"
           value={email}
           onChange={(event) => setEmail(event.target.value)}
@@ -228,23 +273,22 @@ export function RegisterPage() {
           autoComplete="username"
           required
           disabled={registerMutation.isPending}
-          className={INPUT_CLASS}
         />
-        <label className={`${LABEL_CLASS} mt-4`} htmlFor="reg-password">
-          Пароль
-        </label>
-        <input
-          id="reg-password"
-          type="password"
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          placeholder="минимум 8 символов"
-          minLength={8}
-          autoComplete="new-password"
-          required
-          disabled={registerMutation.isPending}
-          className={INPUT_CLASS}
-        />
+        <div className="mt-4">
+          <AuthField
+            id="reg-password"
+            label="Пароль"
+            icon="lock"
+            type="password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            placeholder="минимум 8 символов"
+            minLength={8}
+            autoComplete="new-password"
+            required
+            disabled={registerMutation.isPending}
+          />
+        </div>
         <button type="submit" disabled={registerMutation.isPending} className={BUTTON_CLASS}>
           {registerMutation.isPending ? 'Регистрация…' : 'Создать аккаунт'}
         </button>
@@ -328,11 +372,10 @@ export function ResetPage() {
     <AuthShell title="Новый пароль">
       <form onSubmit={handleSubmit}>
         {!token && <p className="mb-2 text-sm text-destructive">Ссылка неполная — откройте её из письма целиком или запросите новую через «Забыли пароль?».</p>}
-        <label className={LABEL_CLASS} htmlFor="reset-password">
-          Новый пароль
-        </label>
-        <input
+        <AuthField
           id="reset-password"
+          label="Новый пароль"
+          icon="lock"
           type="password"
           value={password}
           onChange={(event) => setPassword(event.target.value)}
@@ -340,7 +383,6 @@ export function ResetPage() {
           minLength={8}
           required
           disabled={!token || resetMutation.isPending}
-          className={INPUT_CLASS}
         />
         <button type="submit" disabled={!token || resetMutation.isPending} className={BUTTON_CLASS}>
           {resetMutation.isPending ? 'Сохранение…' : 'Сохранить пароль'}

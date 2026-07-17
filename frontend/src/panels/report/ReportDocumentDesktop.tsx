@@ -4,6 +4,7 @@ import { useDeleteReport, useUpdateReport } from '@/api/queries';
 import type { Report } from '@/api/schemas';
 import { ErrorState } from '@/components/ErrorState';
 import { PillSelect } from '@/components/PillSelect';
+import { SegmentedControl } from '@/components/SegmentedControl';
 import { Skeleton } from '@/components/ui/skeleton';
 import { fmt } from '@/lib/format';
 import type { PeriodDays } from '@/lib/period';
@@ -12,7 +13,6 @@ import type { ReportDraft, ReportSchedule } from '@/lib/reportDraft';
 import { reportPeriodLabel } from '@/lib/reportListModel';
 import { defaultBlock } from '@/lib/reportBlocks';
 import type { ReportBlockKey, ReportBlockType } from '@/lib/reportBlocks';
-import { cn } from '@/lib/utils';
 import { PERIOD_CHIPS } from '@/panels/report/blocks';
 import { ReportComposition } from '@/panels/report/ReportComposition';
 import { useReportData } from '@/panels/report/useReportData';
@@ -148,25 +148,15 @@ export function ReportDocumentDesktop({
           />
 
           <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
-            <label className="text-xs font-medium text-muted-foreground">
+            <div className="text-xs font-medium text-muted-foreground">
               <span className="mb-1 block">Период</span>
-              <div className="flex overflow-hidden rounded-full border border-border">
-                {PERIOD_CHIPS.map((chip) => (
-                  <button
-                    key={chip.days}
-                    type="button"
-                    aria-pressed={draft.periodDays === chip.days}
-                    onClick={() => pickPeriod(chip.days)}
-                    className={cn(
-                      'border-r border-border px-3 py-1.5 text-xs font-medium transition-colors last:border-r-0',
-                      draft.periodDays === chip.days ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted/50',
-                    )}
-                  >
-                    {chip.label}
-                  </button>
-                ))}
-              </div>
-            </label>
+              <SegmentedControl
+                ariaLabel="Период отчёта"
+                value={String(draft.periodDays)}
+                onChange={(days) => pickPeriod(Number(days) as PeriodDays)}
+                options={PERIOD_CHIPS.map((chip) => ({ value: String(chip.days), content: chip.label }))}
+              />
+            </div>
 
             <div className="text-xs font-medium text-muted-foreground">
               <span className="mb-1 block">Источник · Telegram</span>
