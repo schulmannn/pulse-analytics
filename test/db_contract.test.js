@@ -61,8 +61,8 @@ const EXPECTED_FUNCTIONS = [
   'claimJob', 'completeJob', 'failJob', 'getJob', 'runJobOnce', 'pruneTerminalJobs',
   // auditRepo
   'pruneAuditEvents',
-  // gdpr
-  'deleteUserAccount', 'exportUserData',
+  // gdpr (export стримится в res — streamUserExport заменил буферизующий exportUserData)
+  'deleteUserAccount', 'streamUserExport',
 ];
 
 const EXPECTED_VALUES = [

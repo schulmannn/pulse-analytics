@@ -1,10 +1,38 @@
 // Integration tests for GDPR erasure/export (F4/F5): db.deleteUserAccount must erase EVERY
 // user-linked row (cascade completeness), keep shared identity rows, anonymize the audit trail —
-// and db.exportUserData must never leak credentials. Same contour as tenancy.integration.test.js:
-// needs the local stand, SKIPS without TEST_DATABASE_URL.
+// and db.streamUserExport must stream the archive in bounded keyset pages without leaking
+// credentials or foreign channels, with no duplication/omission across page boundaries (incl.
+// equal timestamps). Same contour as tenancy.integration.test.js: needs the local stand, SKIPS
+// without TEST_DATABASE_URL.
 const test = require('node:test');
 const assert = require('node:assert');
 const { createTestDatabase } = require('./testDatabase');
+
+/** Fake res-коллектор: гоняет реальный streamUserExport в память и парсит собранный JSON.
+ *  write→true (без эмуляции backpressure — она покрыта юнит-тестом), end/destroy шлют 'close'. */
+function collectorRes() {
+  const listeners = {};
+  return {
+    chunks: [], writableEnded: false, destroyed: false, headers: {},
+    setHeader(k, v) { this.headers[k] = v; },
+    on(ev, fn) { (listeners[ev] = listeners[ev] || []).push(fn); return this; },
+    off(ev, fn) { if (listeners[ev]) listeners[ev] = listeners[ev].filter((f) => f !== fn); return this; },
+    emit(ev, ...a) { (listeners[ev] || []).slice().forEach((f) => f(...a)); },
+    write(s) { this.chunks.push(s); return true; },
+    end(cb) { this.writableEnded = true; if (cb) cb(); this.emit('close'); },
+    destroy() { this.destroyed = true; this.emit('close'); },
+    body() { return this.chunks.join(''); },
+  };
+}
+
+/** Прогоняет экспорт через фейковый res на выбранном размере страницы и возвращает исход + JSON.
+ *  pageSize — per-call override keyset-страницы (тестовый шов; прод-роут его не передаёт). */
+async function runExport(uid, { pageSize } = {}) {
+  const res = collectorRes();
+  let ready = false;
+  const outcome = await db.streamUserExport(uid, res, { onReady() { ready = true; }, pageSize });
+  return { outcome, ready, res, json: outcome === 'ok' ? JSON.parse(res.body()) : null };
+}
 
 const TEST_DB = process.env.TEST_DATABASE_URL;
 const skip = TEST_DB ? false : 'TEST_DATABASE_URL not set (integration suite runs on the local stand)';
@@ -172,7 +200,7 @@ test('erasure: a source claimed ONLY by the erased user (private channel) is swe
     'orphaned source (its username/title can identify a private channel owner) is erased');
 });
 
-test('export: exportUserData carries the archive but never credentials or foreign channels', { skip }, async () => {
+test('export: streamUserExport carries the archive but never credentials or foreign channels', { skip }, async () => {
   const a = await seedRichUser('exp-a');
   const b = await seedRichUser('exp-b');
   // A is a member of B's workspace — B's channel must NOT appear in A's export.
@@ -181,7 +209,10 @@ test('export: exportUserData carries the archive but never credentials or foreig
 
   await pool.query(`UPDATE users SET avatar_url='data:image/png;base64,AVATAR' WHERE id=$1`, [a.uid]);
 
-  const data = await db.exportUserData(a.uid);
+  const { outcome, ready, res, json: data } = await runExport(a.uid);
+  assert.strictEqual(outcome, 'ok', 'stream completed');
+  assert.strictEqual(ready, true, 'onReady fired before the first byte');
+  assert.strictEqual(res.headers['Cache-Control'], undefined, 'headers are the route’s job (onReady), not the service');
   assert.ok(data, 'export exists');
   assert.strictEqual(data.account.id, a.uid);
   assert.strictEqual(data.account.avatar_url, 'data:image/png;base64,AVATAR', 'avatar (personal photo) exported');
@@ -197,13 +228,106 @@ test('export: exportUserData carries the archive but never credentials or foreig
   assert.deepStrictEqual(data.prefs, { h: 1 }, 'prefs included');
 
   // The credential blacklist: nothing that smells like a secret may appear ANYWHERE in the JSON.
-  const flat = JSON.stringify(data);
+  const flat = res.body();
   for (const secret of ['SECRET_TG_SESSION', 'SECRET_IG_TOKEN', 'pass_hash', 'session_enc', 'access_token_enc', 'token_version']) {
     assert.ok(!flat.includes(secret), `export must not contain ${secret}`);
   }
 
   const exportedIds = data.channels.map((c) => c.id);
   assert.ok(!exportedIds.includes(b.ch), 'membership channel (foreign data) excluded');
+});
+
+test('export: keyset pages tile the archive with no duplication/omission, incl. equal timestamps', { skip }, async () => {
+  const a = await seedRichUser('page-a');
+  // seedRichUser already added day0 daily + 1 post + 1 ig_daily + 1 annotation. Pile on more so the
+  // archive spans several pages at pageSize=2, and force a DUPLICATE date_published so the post
+  // keyset must lean on its (date_published, post_id) tie-breaker to avoid dupes/holes on a boundary.
+  const day = (n) => `(CURRENT_DATE - ${n})`;
+  for (let n = 1; n <= 4; n++) {
+    await pool.query(`INSERT INTO channel_daily (channel_id, day, views) VALUES ($1, ${day(n)}, $2)`, [a.ch, n]);
+    await pool.query(`INSERT INTO ig_daily (channel_id, day, reach) VALUES ($1, ${day(n)}, $2)`, [a.ch, n]);
+    await pool.query(
+      `INSERT INTO ig_media_daily (channel_id, media_id, day, reach) VALUES ($1, $2, ${day(n)}, $3)`,
+      [a.ch, `media-${n}`, n]);
+    await pool.query(`INSERT INTO chart_annotations (channel_id, day, label, created_by) VALUES ($1, ${day(n)}, $2, $3)`,
+      [a.ch, `ann-${n}`, a.uid]);
+  }
+  // Eight posts: two share the SAME date_published, and three have NULL date_published. The NULL
+  // tail forces real PostgreSQL through the dense-placeholder branch on a page boundary.
+  const sameTs = '2024-03-03T10:00:00.000Z';
+  const tsList = [
+    sameTs, sameTs, '2024-03-01T00:00:00Z', '2024-03-02T00:00:00Z',
+    '2024-03-04T00:00:00Z', null, null, null,
+  ];
+  for (const ts of tsList) {
+    const pid = nextPostId++;
+    await pool.query(`INSERT INTO posts (post_id, channel_id, date_published, views) VALUES ($1, $2, $3, 1)`,
+      [pid, a.ch, ts]);
+  }
+
+  // Whole archive fetched in one shot (large page) is the reference; small pages must match it exactly.
+  const big = (await runExport(a.uid, { pageSize: 1000 })).json.channels[0].archive;
+  const small = (await runExport(a.uid, { pageSize: 2 })).json.channels[0].archive;
+
+  for (const arr of ['daily', 'posts', 'mentions', 'velocity', 'annotations']) {
+    assert.deepStrictEqual(small[arr], big[arr], `${arr}: paged read equals single-shot read`);
+  }
+  // Every post present exactly once (no dupes, no holes) despite the shared timestamp + page split.
+  assert.strictEqual(small.posts.length, 8 + 1, 'all posts incl. seed post, exactly once');
+  const gotIds = small.posts.map((p) => String(p.post_id)).sort();
+  const wantIds = big.posts.map((p) => String(p.post_id)).sort();
+  assert.deepStrictEqual(gotIds, wantIds, 'post_id set identical — no duplication or omission');
+  // Deterministic order: date_published asc, post_id asc — the two equal-ts posts sit adjacent, ordered by id.
+  const eq = small.posts
+    .filter((p) => p.date_published && new Date(p.date_published).toISOString() === sameTs)
+    .map((p) => String(p.post_id));
+  assert.deepStrictEqual(eq, [...eq].sort((x, y) => Number(x) - Number(y)), 'equal timestamps break ties by ascending post_id');
+  assert.strictEqual(small.posts.filter((p) => p.date_published == null).length, 3,
+    'NULL timestamp tail crosses pages without omission');
+
+  const igSmall = (await runExport(a.uid, { pageSize: 2 })).json.channels[0].instagram;
+  const igBig = (await runExport(a.uid, { pageSize: 1000 })).json.channels[0].instagram;
+  assert.deepStrictEqual(igSmall.daily, igBig.daily, 'ig daily: paged equals single-shot');
+  assert.deepStrictEqual(igSmall.media_daily, igBig.media_daily, 'ig media: paged equals single-shot');
+});
+
+test('export: workspaces, reports and the channel list also tile in keyset pages (bounded head)', { skip }, async () => {
+  const a = await seedRichUser('head-a');
+  // Team-workspaces не ограничены partial unique для personal, поэтому добавляем два: все три
+  // top-level набора должны пересечь pageSize=2 без опоры на продуктовые cap'ы.
+  for (const n of [1, 2]) {
+    const { rows: [w] } = await pool.query(
+      `INSERT INTO workspaces (name, owner_uid, kind) VALUES ($1, $2, 'team') RETURNING id`,
+      [`team-${nonce}-${n}`, a.uid]);
+    await pool.query(
+      `INSERT INTO workspace_members (workspace_id, uid, role) VALUES ($1, $2, 'owner')`,
+      [w.id, a.uid]);
+  }
+  // Two more reports + a second channel make the remaining head sets span pageSize=2 too.
+  for (const n of [1, 2]) {
+    await pool.query(`INSERT INTO reports (uid, name, config) VALUES ($1, $2, '{"blocks":[]}'::jsonb)`,
+      [a.uid, `report2-${nonce}-${n}`]);
+  }
+  const src2 = await mkSource(`${nonce}-head-2`);
+  const ch2 = await mkChannel(a.uid, a.ws, src2, `chan2_${nonce}_head`);
+  await pool.query(`INSERT INTO channel_daily (channel_id, day, views) VALUES ($1, CURRENT_DATE, 7)`, [ch2]);
+
+  const big = (await runExport(a.uid, { pageSize: 1000 })).json;
+  const small = (await runExport(a.uid, { pageSize: 2 })).json;
+
+  assert.deepStrictEqual(small.workspaces, big.workspaces, 'workspaces: paged read equals single-shot');
+  assert.strictEqual(small.workspaces.length, 3, 'personal + two team workspaces, exactly once');
+  assert.deepStrictEqual(small.reports, big.reports, 'reports: paged read equals single-shot');
+  assert.strictEqual(small.reports.length, 3, 'all three reports, exactly once across page boundaries');
+  assert.deepStrictEqual(small.channels, big.channels, 'channel list: paged read equals single-shot');
+  assert.strictEqual(small.channels.length, 2, 'both channels present across the paged list');
+});
+
+test('export: a missing user streams nothing and reports not_found', { skip }, async () => {
+  const { outcome, ready, res } = await runExport(2_000_000_000);
+  assert.strictEqual(outcome, 'not_found');
+  assert.strictEqual(ready, false, 'onReady not fired — 404 still possible');
+  assert.strictEqual(res.chunks.length, 0, 'not a single byte written');
 });
 
 test('erasure: deleting one user twice is a clean false, not an error', { skip }, async () => {

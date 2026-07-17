@@ -107,18 +107,26 @@ function registerAccountRoutes({ app, requireAuth, requireSuper, db, audit, send
   });
 
   // Все персональные данные одним JSON-файлом (архивы каналов включены; credentials —
-  // pass_hash / TG-сессия / IG-токен — не покидают сервер никогда, см. db.exportUserData).
+  // pass_hash / TG-сессия / IG-токен — не покидают сервер никогда, см. db.streamUserExport).
+  // Ответ СТРИМИТСЯ keyset-страницами: архив на несколько каналов × 730 дн не буферизуем в один
+  // объект (OOM). db.streamUserExport пишет документ прямо в res и возвращает исход; заголовки
+  // ставим через onReady — ПОСЛЕ подтверждения, что юзер есть (иначе штатный 404), но ДО первого
+  // байта. Аудит — только на полностью дописанном экспорте ('ok'), не на обрыве/сбое.
   app.get('/api/account/export', accountLimiter, requireAuth, async (req, res, next) => {
     if (!db.enabled) return res.status(503).json({ error: 'БД не подключена' });
     try {
-      const data = await db.exportUserData(req.user.uid);
-      if (!data) return res.status(404).json({ error: 'Пользователь не найден' });
-      audit(req, 'account.exported', {}).catch(() => {});
-      // Самый чувствительный ответ приложения — никакому кэшу его не хранить.
-      res.setHeader('Cache-Control', 'no-store');
-      res.setHeader('Content-Disposition',
-        `attachment; filename="atlavue-export-${new Date().toISOString().slice(0, 10)}.json"`);
-      res.json(data);
+      const outcome = await db.streamUserExport(req.user.uid, res, {
+        onReady() {
+          // Самый чувствительный ответ приложения — никакому кэшу его не хранить.
+          res.setHeader('Cache-Control', 'no-store');
+          res.setHeader('Content-Disposition',
+            `attachment; filename="atlavue-export-${new Date().toISOString().slice(0, 10)}.json"`);
+          res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        },
+      });
+      if (outcome === 'not_found') return res.status(404).json({ error: 'Пользователь не найден' });
+      if (outcome === 'ok') audit(req, 'account.exported', {}).catch(() => {});
+      // 'aborted' / 'stream_error': ответ уже завершён/уничтожен — второй раз не отвечаем.
     } catch (e) { next(e); }
   });
 

@@ -43,6 +43,12 @@ function loadConfig(env = process.env) {
       // can't starve live HTTP/auth/tenant requests of connections. Default 2: enough for the
       // sequential collection passes without eating into the main pool's headroom.
       backgroundPoolMax: Number(env.PGPOOL_BACKGROUND_MAX || 2),
+      // GDPR-экспорт стримится keyset-страницами: сколько архивных строк тянуть за одну страницу.
+      // Ограничивает пиковую память ответа (одна страница в буфере), не весь архив. Меньше —
+      // экономнее память/дольше; 1000 — единицы сотен КБ на страницу при текущем масштабе.
+      // Валидируется как целое в 1..1000 (validateConfig): оператор может уменьшить дефолт, но не
+      // отключить ограничение памяти гигантской страницей.
+      gdprExportPageSize: Number(env.GDPR_EXPORT_PAGE_SIZE || 1000),
       // Fail-fast timeouts (мс). Без них пул мог висеть на выдаче коннекта, а зависший
       // запрос — держать соединение бесконечно; db-unavailable→503 маппинг уже есть в db/errors.
       connectionTimeoutMs: Number(env.PG_CONNECTION_TIMEOUT_MS || 3000),
@@ -336,6 +342,15 @@ function validateConfig(config) {
     config.cache.ttlMs > 3600000
   ) {
     add('cache.ttlMs', 'CACHE_TTL_MS должен быть целым числом (мс) в диапазоне 1000..3600000.');
+  }
+  // GDPR keyset-страница: целое 1..1000. Слишком большое значение свело бы на нет ограничение
+  // памяти стриминг-экспорта (одна страница = пик RSS ответа); дробь/NaN/≤0 бессмысленны.
+  if (
+    !Number.isInteger(config.database.gdprExportPageSize) ||
+    config.database.gdprExportPageSize < 1 ||
+    config.database.gdprExportPageSize > 1000
+  ) {
+    add('database.gdprExportPageSize', 'GDPR_EXPORT_PAGE_SIZE должен быть целым числом в диапазоне 1..1000.');
   }
   // Instagram OAuth admission-контроль. cap вне [1..64] бессмыслен (0 = connect всегда 503, гигантский
   // = нет защиты от пикового fan-out); acquire-таймаут держим в [100мс..10с]: слишком мало = ложные

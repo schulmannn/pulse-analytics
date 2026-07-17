@@ -167,7 +167,7 @@ function createDatabase(config, overrides = {}) {
 
   // ── GDPR (erasure/export, F4/F5) → services/gdprService (PR 8) ──────────────────────────────
   // Сервис, не repo: пересекает все домены. Композиция ниже, фасад тот же (db.deleteUserAccount/
-  // db.exportUserData) — routes/account.js не менялся.
+  // db.streamUserExport) — routes/account.js вызывает фасад тот же.
 
   // ── Repo composition (P2 stage 5) — thin re-export so the public `db` API is unchanged ──
   // pool/enabled are scoped to this database instance; each repo owns a domain's queries and its
@@ -212,7 +212,11 @@ function createDatabase(config, overrides = {}) {
   // Audit trail — запись + возрастной ретеншн (auditRepo). Зависит только от pool+enabled.
   const auditRepo = createAuditRepo({ pool, enabled });
   // GDPR — сервис над пулом+transaction (кросс-доменные erasure/export; спека: GDPR=service).
-  const gdprService = createGdprService({ pool, enabled, transaction });
+  // pageSize — размер keyset-страницы стриминг-экспорта (из config: services читают только
+  // внедрённые deps, не окружение — check:boundaries).
+  const gdprService = createGdprService({
+    pool, enabled, transaction, exportPageSize: config.database.gdprExportPageSize,
+  });
   // Campaign membership performs an atomic lock/count/insert through the shared transaction helper.
   const campaignsRepo = createCampaignsRepo({
     pool,
@@ -256,7 +260,7 @@ function createDatabase(config, overrides = {}) {
     mentionSettings: mentionSettingsRepo, // getMentionSettingsInternal/ForActor, upsertMentionSettingsForActor
     jobs: jobsRepo, // claimJob, completeJob, failJob, getJob, runJobOnce, pruneTerminalJobs
     audit: auditRepo, // recordAuditEvent, pruneAuditEvents
-    gdpr: gdprService, // deleteUserAccount, exportUserData (сервис, не repo)
+    gdpr: gdprService, // deleteUserAccount, streamUserExport (сервис, не repo)
   });
 }
 
