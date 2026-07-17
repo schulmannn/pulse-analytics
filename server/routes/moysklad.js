@@ -4,24 +4,28 @@ const { kopecksToRub } = require('../lib/msClient');
 const { hasWorkspaceRole } = require('../middleware/tenant');
 
 /**
- * Роуты МойСклада (/api/ms/{connect,summary,top-products,status,account,backfill,backfill-status,
- * funnel,customers,cohorts,returns}) — серверная половина
+ * Роуты МойСклада (/api/ms/{connect,summary,top-products,top-customers,status,account,backfill,
+ * backfill-status,funnel,customers,cohorts,returns}) — серверная половина
  * источника «склад», зеркально Instagram-вертикали: connect валидирует токен живыми
  * identity-вызовами и сохраняет его ТОЛЬКО шифрованным (lib/ms_crypto), data-роуты резолвят
  * канал тем же механизмом, что resolveIg (?channel= / заголовок x-channel-id, дефолт через
  * db.getChannelOrDefault — тот же ownership/disabled-предикат), и кэшируются как IG-роуты
  * (дефолтный TTL memoryCache). Все суммы наружу — в РУБЛЯХ (kopecksToRub), внутри МС/БД —
  * копейки. Токен нигде не логируется и не попадает в ответы/сообщения ошибок (msClient держит
- * его только в заголовке запроса). days=0 («Всё») обслуживается ИЗ АРХИВА ms_daily (его копит
- * jobs/msCollectionJob) — живых вызовов МС не делает и токена не требует. Слайс 3
- * (funnel/customers/cohorts) читает архив ms_orders (движок jobs/msBackfillJob) — дешёвые
- * DB-агрегаты без кэша; живой у них только словарь статусов (funnel) и /returns (page-loop).
+ * его только в заголовке запроса). days=0 («Всё») в summary обслуживается ИЗ АРХИВА ms_daily
+ * (его копит jobs/msCollectionJob) — живых вызовов МС не делает и токена не требует; в
+ * top-products «Всё» — живой отчёт полного диапазона от старейшего заказа архива (кэш 1 час).
+ * Слайс 3 (funnel/customers/cohorts) читает архив ms_orders (движок jobs/msBackfillJob) —
+ * дешёвые DB-агрегаты без кэша; живой у них только словарь статусов (funnel) и /returns
+ * (page-loop). top-customers — тот же DB-агрегат + живой словарь имён контрагентов одним
+ * вызовом. connect/disconnect пишут audit-события ms_connect/ms_disconnect (зеркало ig-oauth) —
+ * только identity-поля учётки, токенов в metadata нет.
  * sleepFn — инъекция паузы page-loop'а для детерминированных тестов (как у движка бэкфилла).
  */
-function registerMsRoutes({ app, requireAuth, db, msCrypto, msFetch, msBackfill, cacheGet, cacheSet, cache, log, sleepFn }) {
+function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBackfill, cacheGet, cacheSet, cache, log, sleepFn }) {
   // Узкий enum периодов ДО кэш-ключа (как nearestOf у IG): произвольный days плодил бы
-  // per-value кэш-записи, каждая ценой пары upstream-запросов. 0 = «Всё» (архив ms_daily,
-  // upstream-вызовов нет). Не-enum → дефолт 30.
+  // per-value кэш-записи, каждая ценой пары upstream-запросов. 0 = «Всё» (summary — архив
+  // ms_daily без upstream; top-products — живой отчёт полного диапазона). Не-enum → дефолт 30.
   const MS_DAYS_ALLOWED = [0, 7, 30, 90];
   const daysOf = (req) => {
     const n = parseInt(req.query.days, 10);
@@ -35,6 +39,10 @@ function registerMsRoutes({ app, requireAuth, db, msCrypto, msFetch, msBackfill,
   const MS_TOP_PAGE_LIMIT = 1000;
   const MS_TOP_PAGE_CAP = 3;
   const MS_TOP_PAGE_PAUSE_MS = 150;
+  // «Всё» у топа товаров — живой отчёт ПОЛНОГО диапазона (на складе владельца ~1116 позиций,
+  // страницы по ~3с) → отдельный кэш 1 час: пересобирать чаще дорого, а история меняется
+  // медленно. Живые окна (7/30/90) остаются на коротком дефолтном TTL.
+  const MS_TOP_ALL_CACHE_TTL_MS = 60 * 60 * 1000;
   // Живой page-loop /api/ms/returns: страницы по 1000 (лимит МС без expand) с паузой, как у
   // движка бэкфилла; cap 5 страниц — потолок одного запроса (5000 возвратов за окно; больше —
   // честный truncated, не бесконечный проход по чужому лимиту 45/3с).
@@ -223,6 +231,9 @@ function registerMsRoutes({ app, requireAuth, db, msCrypto, msFetch, msBackfill,
       // Ротация токена/пере-connect существующего канала: старые ms:*-ответы могли быть собраны
       // умершим токеном — сбрасываем сразу (для свежесозданного канала purge — no-op).
       msCachePurge(channelId);
+      // Аудит подключения (зеркало ig_oauth_connected): только identity-поля — id учётки МС и
+      // имя организации. Токена в metadata нет и быть не может: audit-строки живут год.
+      await audit(req, 'ms_connect', { channelId, msAccountId: accountId, orgName });
       res.json({ ok: true, channel_id: channelId, org_name: orgName });
     } catch (e) {
       next(e);
@@ -262,6 +273,12 @@ function registerMsRoutes({ app, requireAuth, db, msCrypto, msFetch, msBackfill,
       await db.deleteMsAccount(resolved.channel.id);
       // Кэш-ответы канала собраны отозванным подключением — выкидываем сразу, а не по TTL.
       msCachePurge(resolved.channel.id);
+      // Аудит отключения (зеркало ig_oauth_disconnected): ms_account_id — безопасный
+      // identity-факт («кто отключил какой склад»), у идемпотентного повтора его нет → null.
+      await audit(req, 'ms_disconnect', {
+        channelId: resolved.channel.id,
+        msAccountId: (resolved.acc && resolved.acc.ms_account_id) || null,
+      });
       res.json({ ok: true });
     } catch (e) {
       next(e);
@@ -415,25 +432,39 @@ function registerMsRoutes({ app, requireAuth, db, msCrypto, msFetch, msBackfill,
   });
 
   // GET /api/ms/top-products?days=30&limit=10 — топ товаров по ВЫРУЧКЕ за окно.
-  // days=0 здесь НЕ поддержан: у МС profit/byproduct — только оконный отчёт, а архива
-  // по-товарно мы не копим (слайс 2а — только дневные суммы), поэтому 0 падает в дефолт 30.
   // МС отдаёт отчёт НЕ по выручке (фактически — алфавит ассортимента), а сортировка в
   // параметрах отчёта не документирована → добираем окно постранично (limit/offset, cap и
   // пауза — как у /returns) и сортируем у себя; наружу уходят первые limit строк.
+  // days=0 («Всё»): по-товарного архива нет (слайс 2а копит только дневные суммы), поэтому
+  // «Всё» — тот же живой отчёт, но с окном от первого дня месяца СТАРЕЙШЕГО заказа канала в
+  // архиве ms_orders до сейчас (полный диапазон проверен живым токеном: profit/byproduct
+  // отвечает ~3.6с на страницу при ~1116 позициях — страницы/cap те же). Пустой архив
+  // (бэкфилл ещё не запускали) → консервативный якорь '2020-01-01': он раньше любого реального
+  // склада продукта, а лишние пустые месяцы отчёту МС не вредят — строк за них просто нет.
   app.get('/api/ms/top-products', requireAuth, async (req, res, next) => {
     try {
       const ms = await resolveMs(req, res);
       if (!ms) return;
-      const daysRaw = daysOf(req);
-      const days = daysRaw === 0 ? 30 : daysRaw;
+      const days = daysOf(req);
       const limitRaw = parseInt(req.query.limit, 10);
       // Кэп 1..50 ДО кэш-ключа — та же дисциплина ограниченной кардинальности, что у days.
       const limit = Math.min(MS_TOP_LIMIT_MAX, Math.max(1, Number.isFinite(limitRaw) ? limitRaw : MS_TOP_LIMIT_DEFAULT));
+      // days в ключе разводит дорогое «Всё» (час) и живые окна (дефолтный TTL) по разным записям.
       const cacheKey = `ms:top:${ms.channel.id}:${days}:${limit}`;
       const cached = cacheGet(cacheKey);
       if (cached) return res.json(cached);
 
-      const { momentFrom, momentTo } = periodWindow(days);
+      let momentFrom;
+      let momentTo;
+      if (days === 0) {
+        // ForActor — канон tenant-read (как days=0 в summary). oldestDay 'YYYY-MM-DD' → якорь
+        // окна с первого дня того же месяца (полные месяцы читаются человеком как «вся история»).
+        const oldestDay = await db.getMsOldestOrderDayForActor(ms.channel.id, req.user);
+        momentFrom = `${oldestDay ? `${oldestDay.slice(0, 7)}-01` : '2020-01-01'} 00:00:00`;
+        momentTo = `${fmtDay(new Date())} 23:59:00`;
+      } else {
+        ({ momentFrom, momentTo } = periodWindow(days));
+      }
       const all = [];
       let metaSize = null;
       let truncated = false;
@@ -484,7 +515,73 @@ function registerMsRoutes({ app, requireAuth, db, msCrypto, msFetch, msBackfill,
         profit: kopecksToRub(r.profitKopecks),
       }));
       const data = { rows, total: metaSize != null ? metaSize : all.length, truncated };
-      cacheSet(cacheKey, data);
+      if (days === 0) cacheSet(cacheKey, data, MS_TOP_ALL_CACHE_TTL_MS);
+      else cacheSet(cacheKey, data);
+      res.json(data);
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  // GET /api/ms/top-customers?days= — топ клиентов по сумме заказов за окно (архив ms_orders,
+  // days=0 = вся история). Сам агрегат — дешёвое DB-чтение (ForActor — канон tenant-read);
+  // живой только словарь имён: контрагентов у склада тысячи (у владельца ~10k), полный
+  // справочник не нужен — имена ≤10 строк топа добираются ОДНИМ вызовом /entity/counterparty
+  // с OR-фильтром `filter=id=<uuid>;id=<uuid>` («;» между условиями одного поля у МС — OR;
+  // проверено живым токеном), фильтр целиком URL-encoded — как у движка бэкфилла.
+  // Кэш — ВЕСЬ ответ роута на дефолтные 10 минут по days: проще отдельного часового кэша имён
+  // (`ms:cpnames:<ids>`) — ключей ровно enum days (а не комбинации id), правила инвалидации
+  // одни на роут (msCachePurge снимает и его), а кэш-хит не делает вообще ничего, даже
+  // DB-агрегата. Сбой словаря НЕ роняет роут — rows с name:null (зеркало деградации
+  // loadStatesDict), и такой деградированный ответ сознательно НЕ кэшируем: следующий запрос
+  // попробует имена снова, а не залипнет безымянным на весь TTL. Исключение — 401/403 от МС:
+  // токен отозван, честный ms_token_revoked-путь (reconnect-CTA, как у остальных data-роутов);
+  // молчаливый name:null здесь прятал бы умершее подключение.
+  app.get('/api/ms/top-customers', requireAuth, async (req, res, next) => {
+    try {
+      const days = daysOf(req);
+      const ms = await resolveMs(req, res);
+      if (!ms) return;
+      const cacheKey = `ms:topcust:${ms.channel.id}:${days}`;
+      const cached = cacheGet(cacheKey);
+      if (cached) return res.json(cached);
+
+      const top = await db.getMsTopCustomersForActor(ms.channel.id, req.user, { sinceDay: sinceDayOf(days) });
+      // null = словарь недоступен (деградация), Map = удачный резолв; пустой Map — тоже ответ
+      // (все контрагенты топа удалены из МС — их имена честно null, но кэшировать можно).
+      let names = null;
+      if (top.length) {
+        const filter = top.map((r) => `id=${r.agent_id}`).join(';');
+        try {
+          const cps = await msFetch(
+            ms.token,
+            `/entity/counterparty?filter=${encodeURIComponent(filter)}&limit=${top.length}`,
+          );
+          names = new Map();
+          for (const c of cps && Array.isArray(cps.rows) ? cps.rows : []) {
+            if (c && c.id != null) names.set(String(c.id), typeof c.name === 'string' ? c.name : null);
+          }
+        } catch (e) {
+          const status = Number(e && e.status) || 0;
+          if (status === 401 || status === 403) {
+            return sendMsError(res, e, { route: 'top-customers', channelId: ms.channel.id });
+          }
+          log('warn', 'ms_counterparty_names_failed', {
+            channelId: ms.channel.id, status, error: e && e.message,
+          });
+        }
+      }
+      const data = {
+        window_days: days,
+        rows: top.map((r) => ({
+          agent_id: r.agent_id,
+          // Контрагент удалён/не найден в словаре → name null — фронт покажет заглушку.
+          name: names ? (names.get(String(r.agent_id)) ?? null) : null,
+          orders: r.orders,
+          sum: kopecksToRub(r.sum_kopecks),
+        })),
+      };
+      if (names !== null || !top.length) cacheSet(cacheKey, data);
       res.json(data);
     } catch (e) {
       next(e);

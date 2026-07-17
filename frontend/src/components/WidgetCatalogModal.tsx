@@ -11,10 +11,11 @@ import { CATEGORY_LABEL, CATEGORY_ORDER, metricsForSource, type MetricDef, type 
  * existing picker; this is the metric-first path alongside it.
  */
 
-const SOURCE_LABEL: Record<'tg' | 'ig', string> = { tg: 'Telegram', ig: 'Instagram' };
-// Both sources resolve now (TG: S3; IG: S11). A metric with no data for the active channel still
-// renders an honest «Нет данных» card, but the catalogue only offers metrics the resolver handles.
-const AVAILABLE_SOURCES: Array<'tg' | 'ig'> = ['tg', 'ig'];
+const SOURCE_LABEL: Record<'tg' | 'ig' | 'ms', string> = { tg: 'Telegram', ig: 'Instagram', ms: 'МойСклад' };
+// All sources resolve now (TG: S3; IG: S11; МС: слайс 4). A metric with no data for the active
+// channel still renders an honest «Нет данных» card, but the catalogue only offers metrics the
+// resolver handles — вкладки не гейтятся по подключённости (канон TG/IG сохранён и для МС).
+const AVAILABLE_SOURCES: Array<'tg' | 'ig' | 'ms'> = ['tg', 'ig', 'ms'];
 
 export function WidgetCatalogModal({
   onPick,
@@ -23,7 +24,7 @@ export function WidgetCatalogModal({
   onPick: (metricId: string) => void;
   onClose: () => void;
 }) {
-  const [source, setSource] = useState<'tg' | 'ig'>(AVAILABLE_SOURCES[0]);
+  const [source, setSource] = useState<'tg' | 'ig' | 'ms'>(AVAILABLE_SOURCES[0]);
   const [query, setQuery] = useState('');
 
   // Modal focus contract. Order matters: useFocusTrap's effect must run FIRST so it snapshots the

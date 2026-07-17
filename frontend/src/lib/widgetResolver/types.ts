@@ -33,7 +33,7 @@ export interface WidgetLedgerRow {
 }
 
 export interface WidgetMeta {
-  network?: 'tg' | 'ig';
+  network?: 'tg' | 'ig' | 'ms';
   sourceLabel?: string;
   periodLabel?: string;
   samplePosts?: number;
@@ -77,6 +77,16 @@ export interface IgDataContext {
   history?: IgHistoryData;
 }
 
+/** Данные МойСклада для резолвера. Структурная копия ответа /api/ms/summary (queries.ts):
+ *  серии УЖЕ нарезаны сервером под окно виджета (в отличие от IG, где окно режется на клиенте),
+ *  суммы уже в рублях. */
+export interface MsDataContext {
+  summary?: {
+    revenue: { total: number; series: Array<{ day: string; value: number }> };
+    orders: { totalCount: number; totalSum: number; series: Array<{ day: string; count: number; sum: number }> };
+  } | null;
+}
+
 export interface DataContext {
   now: number;
   days: PeriodDays;
@@ -84,6 +94,7 @@ export interface DataContext {
   inRange: (dateISO: string | null | undefined) => boolean;
   tg?: TgDataContext;
   ig?: IgDataContext;
+  ms?: MsDataContext;
 }
 
 export type WidgetMetricResolver = (

@@ -11,6 +11,7 @@ import { getRememberedChannel } from '@/lib/channel';
 import { resolveHomeSourceChannel } from '@/lib/channelSource';
 import { useWidgetData } from '@/lib/useWidgetData';
 import { useIgWidgetData } from '@/lib/useIgWidgetData';
+import { useMsWidgetData } from '@/lib/useMsWidgetData';
 import { getMetric } from '@/lib/widgetMetrics';
 import { coerceSizeForViz, effectiveTinted } from '@/lib/widgetSurface';
 import { updateWidgetConfig } from '@/lib/widgetStore';
@@ -42,7 +43,7 @@ export const ConfigWidget = memo(function ConfigWidget({ config, homeKey }: { co
   const navigate = useNavigate();
   const metric = getMetric(config.metricId);
   const legacyKey = legacyKeyForMetricId(config.metricId);
-  const sourceNetwork = metric?.source === 'ig' ? 'ig' : 'tg';
+  const sourceNetwork = metric?.source === 'ig' ? 'ig' : metric?.source === 'ms' ? 'ms' : 'tg';
   // Metric widgets and legacy composites both drive the universal editor / explorer.
   const configurable = !!metric || !!legacyKey;
   const label = config.title || metric?.label || (legacyKey ? LEGACY_LABEL[legacyKey] : undefined) || 'Метрика';
@@ -65,9 +66,12 @@ export const ConfigWidget = memo(function ConfigWidget({ config, homeKey }: { co
   // the wrong channel's data; пин, совпадающий с активным каналом, дриллится как раньше.
   // Previews and the explorer sandbox never pass onDrill, so they stay static regardless.
   const drillKey = metric?.drillKey;
+  // drillTo — absolute-path drill для метрик без страницы /metrics/:drillKey (МС → /sklad);
+  // охрана «пин ≠ активный канал» та же: целевая страница читает глобальный свитчер.
+  const drillTo = metric?.drillTo;
   const onDrill =
-    drillKey && (effectiveSource == null || effectiveSource === globalChannelId)
-      ? () => navigate(`/metrics/${drillKey}`)
+    (drillKey || drillTo) && (effectiveSource == null || effectiveSource === globalChannelId)
+      ? () => navigate(drillTo ?? `/metrics/${drillKey}`)
       : undefined;
 
   // Central surface + width policy (widgetSurface): a multi-series / tabular viz never carries a tonal
@@ -142,7 +146,9 @@ export function WidgetBody({ config, onDrill, drillLabel }: { config: WidgetConf
   const legacyKey = legacyKeyForMetricId(config.metricId);
   if (legacyKey) return <LegacyWidgetBody legacyKey={legacyKey} config={config} />;
   const metric = getMetric(config.metricId);
-  return metric?.source === 'ig' ? <IgWidgetBody config={config} /> : <TgWidgetBody config={config} onDrill={onDrill} drillLabel={drillLabel} />;
+  if (metric?.source === 'ig') return <IgWidgetBody config={config} />;
+  if (metric?.source === 'ms') return <MsWidgetBody config={config} onDrill={onDrill} drillLabel={drillLabel} />;
+  return <TgWidgetBody config={config} onDrill={onDrill} drillLabel={drillLabel} />;
 }
 
 /** A legacy composite body (KpiGrid / TopPosts / …) hosted in the unified card. It reads
@@ -179,4 +185,10 @@ function IgWidgetBody({ config }: { config: WidgetConfig }) {
   const { result, isLoading } = useIgWidgetData(config);
   if (isLoading) return <WidgetSkeleton viz={config.viz} />;
   return <WidgetRenderer result={result} viz={config.viz} />;
+}
+
+function MsWidgetBody({ config, onDrill, drillLabel }: { config: WidgetConfig; onDrill?: () => void; drillLabel?: string }) {
+  const { result, isLoading } = useMsWidgetData(config);
+  if (isLoading) return <WidgetSkeleton viz={config.viz} />;
+  return <WidgetRenderer result={result} viz={config.viz} onDrill={onDrill} drillLabel={drillLabel} />;
 }

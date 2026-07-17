@@ -6,6 +6,7 @@ import { getMetric } from '@/lib/widgetMetrics';
 import type { MetricResolver } from '@/lib/widgetMetrics';
 import type { WidgetConfig } from '@/lib/widgetConfig';
 import { resolveIgMetric } from '@/lib/widgetResolver/ig';
+import { resolveMsMetric } from '@/lib/widgetResolver/ms';
 import { COMPARISON_LABEL, commonMeta, wantsGhostLine } from '@/lib/widgetResolver/shared';
 import { TG_WIDGET_RESOLVERS } from '@/lib/widgetResolver/tg';
 import type {
@@ -31,6 +32,7 @@ const unavailable: WidgetMetricResolver = (_metric, _config, _ctx, out) => ({ ..
 const WIDGET_RESOLVERS: Record<MetricResolver, WidgetMetricResolver> = {
   ...TG_WIDGET_RESOLVERS,
   ig: resolveIgMetric,
+  ms: resolveMsMetric,
   unavailable,
 };
 
@@ -68,8 +70,8 @@ function resolveTargetValue(config: WidgetConfig, ctx: DataContext): number | nu
 export function resolveWidgetMetric(config: WidgetConfig, ctx: DataContext): WidgetResult {
   const result = resolveMetricCore(config, ctx);
   const source = getMetric(config.metricId)?.source;
-  const network: 'tg' | 'ig' =
-    source === 'ig' ? 'ig' : source === 'tg' ? 'tg' : ctx.ig && !ctx.tg ? 'ig' : 'tg';
+  const network: 'tg' | 'ig' | 'ms' =
+    source === 'ig' ? 'ig' : source === 'ms' ? 'ms' : source === 'tg' ? 'tg' : ctx.ig && !ctx.tg ? 'ig' : 'tg';
   result.meta = { ...commonMeta(config, ctx, network), ...result.meta };
 
   const comparison = config.comparison;

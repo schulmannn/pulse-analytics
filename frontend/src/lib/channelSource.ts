@@ -6,17 +6,17 @@ import type { Channel } from '@/api/schemas';
  * (`source === 'ig'` и `source === 'ms'` — у них нет Telegram-стороны), and Instagram offers ONLY
  * channels with a linked Instagram account (`ig_connected`). Keeping this in one place stops the
  * widget editor from listing чужие каналы under a metric (and vice-versa). Callers narrow the
- * metric's network to 'tg' | 'ig' first (a catalogue metric is always one of the two).
+ * metric's network to 'tg' | 'ig' | 'ms' first.
  */
-export function channelsForSource(channels: Channel[], source: 'tg' | 'ig'): Channel[] {
-  return source === 'ig'
-    ? channels.filter((c) => !!c.ig_connected)
-    : channels.filter((c) => c.source !== 'ig' && c.source !== 'ms');
+export function channelsForSource(channels: Channel[], source: 'tg' | 'ig' | 'ms'): Channel[] {
+  if (source === 'ig') return channels.filter((c) => !!c.ig_connected);
+  if (source === 'ms') return channels.filter((c) => c.source === 'ms');
+  return channels.filter((c) => c.source !== 'ig' && c.source !== 'ms');
 }
 
 /** Whether a channel id is a valid pinned source for the given network (used to spot a stale pin —
  *  e.g. a Telegram channel left on an Instagram widget from before source-aware filtering). */
-export function isEligibleSource(channels: Channel[], source: 'tg' | 'ig', id: number): boolean {
+export function isEligibleSource(channels: Channel[], source: 'tg' | 'ig' | 'ms', id: number): boolean {
   return channelsForSource(channels, source).some((c) => c.id === id);
 }
 
@@ -30,7 +30,7 @@ export function isEligibleSource(channels: Channel[], source: 'tg' | 'ig', id: n
  */
 export function resolveHomeSourceChannel(
   channels: Channel[],
-  source: 'tg' | 'ig',
+  source: 'tg' | 'ig' | 'ms',
   remembered: number | null,
 ): number | null {
   const eligible = channelsForSource(channels, source);

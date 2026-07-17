@@ -687,6 +687,28 @@ export function useMsCohorts() {
   });
 }
 
+const MsTopCustomersSchema = z
+  .object({
+    window_days: z.number(),
+    rows: z.array(
+      z
+        .object({ agent_id: z.string(), name: z.string().nullable(), orders: z.number(), sum: z.number() })
+        .passthrough(),
+    ),
+  })
+  .passthrough();
+
+export function useMsTopCustomers(days: number) {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    enabled: channelId != null,
+    queryKey: ['ms-top-customers', channelId, days],
+    staleTime: STALE_LIVE,
+    retry: false,
+    queryFn: ({ signal }) => apiGet(`/api/ms/top-customers?days=${days}`, MsTopCustomersSchema, { signal, channelId }),
+  });
+}
+
 const MsReturnsSchema = z
   .object({ window_days: z.number(), count: z.number(), sum: z.number(), truncated: z.boolean().optional() })
   .passthrough();

@@ -16,24 +16,26 @@ import {
 } from '@/lib/widgetMetrics';
 import { DRILL_KEYS } from '@/lib/kpiDerive';
 
-const SOURCES = new Set(['tg', 'ig', 'all']);
+const SOURCES = new Set(['tg', 'ig', 'ms', 'all']);
 const KINDS = new Set(['value', 'series', 'breakdown', 'table']);
-const UNITS = new Set(['number', 'percent', 'posts', 'views']);
+const UNITS = new Set(['number', 'percent', 'posts', 'views', 'currency']);
 const VIZ = new Set<WidgetViz>(['kpi', 'line', 'bar', 'donut', 'list', 'rank', 'pivot', 'table', 'ledger']);
 const RESOLVERS = new Set<MetricResolver>([
   'tg.core',
   'tg.ratio',
   'tg.netGrowth',
   'tg.breakdown',
+  'ms',
   'ig',
   'unavailable',
 ]);
 
 describe('widgetMetrics catalogue', () => {
-  it('is non-empty and covers both TG and IG', () => {
+  it('is non-empty and covers TG, IG and МС', () => {
     expect(WIDGET_METRICS.length).toBeGreaterThan(0);
     expect(WIDGET_METRICS.some((m) => m.source === 'tg')).toBe(true);
     expect(WIDGET_METRICS.some((m) => m.source === 'ig')).toBe(true);
+    expect(WIDGET_METRICS.some((m) => m.source === 'ms')).toBe(true);
   });
 
   it('every metric has well-formed required fields', () => {

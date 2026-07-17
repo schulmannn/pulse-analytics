@@ -32,10 +32,12 @@ export const VIZ_LABEL: Record<WidgetViz, string> = {
   ledger: 'Значения',
 };
 
-/** The number formatter for a unit: percent → «6.5%», views → compact (fmt.short), else fmt.num. */
+/** The number formatter for a unit: percent → «6.5%», views → compact (fmt.short),
+ *  currency → «1.2 млн ₽» (рубли МойСклада), else fmt.num. */
 export function unitFormat(unit: MetricUnit): (n: number) => string {
   if (unit === 'percent') return (n) => `${n.toFixed(1)}%`;
   if (unit === 'views') return (n) => fmt.short(n);
+  if (unit === 'currency') return (n) => `${fmt.short(n)} ₽`;
   return (n) => fmt.num(n); // number / posts
 }
 

@@ -1,11 +1,11 @@
-import { useMsCohorts, useMsCustomers } from '@/api/queries';
+import { useMsCohorts, useMsCustomers, useMsTopCustomers } from '@/api/queries';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
 import { LineChart } from '@/components/LineChart';
 import { ErrorState } from '@/components/ErrorState';
 import { Skeleton } from '@/components/ui/skeleton';
 import { lttbDownsample } from '@/lib/downsample';
-import { fmt } from '@/lib/format';
+import { fmt, pluralRu } from '@/lib/format';
 import { usePagePeriod } from '@/lib/period';
 
 /**
@@ -20,6 +20,7 @@ export function MsClients() {
   const windowLabel = days === 0 ? 'за всё время' : `за ${days} дн.`;
   const customers = useMsCustomers(days);
   const cohorts = useMsCohorts();
+  const topCustomers = useMsTopCustomers(days);
 
   if (customers.isPending) {
     return (
@@ -95,8 +96,49 @@ export function MsClients() {
         )}
       </ChartWidget>
 
+      <MsTopCustomersCard state={topCustomers} windowLabel={windowLabel} />
+
       <MsCohortsCard state={cohorts} />
     </div>
+  );
+}
+
+/** Топ покупателей окна по выручке (слайс 4): имена резолвит бэк словарём counterparty по id;
+    удалённый/безымянный контрагент честно показывается заглушкой, а не выпадает из топа. */
+function MsTopCustomersCard({
+  state,
+  windowLabel,
+}: {
+  state: ReturnType<typeof useMsTopCustomers>;
+  windowLabel: string;
+}) {
+  return (
+    <ChartWidget id="ms-top-customers" title={`Топ покупателей ${windowLabel}`} fixedSize="full" noExpand>
+      {state.isPending ? (
+        <div className="space-y-2 py-2">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <Skeleton key={`tc${i}`} className="h-6 w-full" />
+          ))}
+        </div>
+      ) : state.isError || !state.data || state.data.rows.length === 0 ? (
+        <p className="py-4 text-sm text-muted-foreground">Нет покупателей за период.</p>
+      ) : (
+        <ul>
+          {state.data.rows.map((row, i) => (
+            <li key={row.agent_id} className="flex items-center gap-3 border-t border-border py-2.5 first:border-t-0">
+              <span className="w-5 shrink-0 text-center text-xs font-medium tabular-nums text-muted-foreground">{i + 1}</span>
+              <span className={`min-w-0 flex-1 truncate text-sm ${row.name ? 'text-foreground' : 'text-muted-foreground'}`}>
+                {row.name ?? 'Без имени'}
+              </span>
+              <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                {fmt.num(row.orders)} {pluralRu(row.orders, ['заказ', 'заказа', 'заказов'])}
+              </span>
+              <span className="w-28 shrink-0 text-right text-sm font-medium tabular-nums">{fmt.short(row.sum)} ₽</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </ChartWidget>
   );
 }
 
