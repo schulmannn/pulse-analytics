@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { useMe } from '@/api/queries';
+import { useChannels, useMe } from '@/api/queries';
+import { AiAskControls } from '@/panels/ai/AiAskControls';
+import { composeAiQuestion, emptyAiAskContext, type AiAskContext } from '@/lib/aiAsk';
 import {
   aiToolLabel,
   useAiChat,
@@ -43,15 +45,17 @@ export function AiChatPage() {
 // ── Индекс: «Спросить» + реестр чатов ────────────────────────────────────────────────────────────
 function ChatIndex() {
   const chatsQuery = useAiChats(true);
+  const channels = useChannels().data?.channels ?? [];
   const create = useCreateAiChat();
   const del = useDeleteAiChat();
   const navigate = useNavigate();
   const [text, setText] = useState('');
+  const [ctx, setCtx] = useState<AiAskContext>(emptyAiAskContext);
   const [error, setError] = useState<string | null>(null);
 
   const ask = () => {
-    const q = text.trim();
-    if (!q || create.isPending) return;
+    if (!text.trim() || create.isPending) return;
+    const q = composeAiQuestion(text, ctx, channels);
     setError(null);
     create.mutate(undefined, {
       onSuccess: ({ chat }) => navigate(`/ai/${chat.id}`, { state: { q } }),
@@ -95,11 +99,12 @@ function ChatIndex() {
           aria-label="Вопрос AI-ассистенту"
           className="w-full resize-none bg-transparent text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground"
         />
-        <div className="mt-2 flex items-center justify-end">
+        <div className="mt-2 flex items-end justify-between gap-3">
+          <AiAskControls ctx={ctx} onCtx={setCtx} disabled={create.isPending} />
           <button
             type="submit"
             disabled={!text.trim() || create.isPending}
-            className="btn-pill bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+            className="btn-pill shrink-0 bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {create.isPending ? 'Открываю…' : 'Спросить'}
           </button>
@@ -155,6 +160,7 @@ function ChatIndex() {
 // ── Тред: сообщения + стриминг ───────────────────────────────────────────────────────────────────
 function ChatThread({ chatId }: { chatId: number }) {
   const query = useAiChat(chatId);
+  const channels = useChannels().data?.channels ?? [];
   const create = useCreateAiChat();
   const del = useDeleteAiChat();
   const qc = useQueryClient();
@@ -163,6 +169,7 @@ function ChatThread({ chatId }: { chatId: number }) {
   const [pending, setPending] = useState<Pending | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
   const [text, setText] = useState('');
+  const [ctx, setCtx] = useState<AiAskContext>(emptyAiAskContext);
   const abortRef = useRef<AbortController | null>(null);
   const autoSentRef = useRef(false);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -218,6 +225,14 @@ function ChatThread({ chatId }: { chatId: number }) {
           void qc.invalidateQueries({ queryKey: ['ai-chats'] });
         });
       });
+  };
+
+  // Композер: текст + выбранный контекст (@источники, период) → один составленный вопрос.
+  const submit = () => {
+    if (!text.trim() || pending) return;
+    send(composeAiQuestion(text, ctx, channels));
+    setText('');
+    setCtx(emptyAiAskContext);
   };
 
   // Вопрос, принесённый router-state'ом (hero Главной / индекс): автоотправка ровно один раз,
@@ -343,21 +358,17 @@ function ChatThread({ chatId }: { chatId: number }) {
         className="sticky bottom-0 -mx-4 border-t border-border bg-background px-4 py-3 sm:-mx-6 sm:px-6"
         onSubmit={(e) => {
           e.preventDefault();
-          send(text);
-          setText('');
+          submit();
         }}
       >
-        <div className="flex items-end gap-2 rounded-2xl border border-border bg-card p-2.5 transition-colors focus-within:border-primary/50">
+        <div className="rounded-2xl border border-border bg-card p-2.5 transition-colors focus-within:border-primary/50">
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
-                if (text.trim() && !pending) {
-                  send(text);
-                  setText('');
-                }
+                submit();
               }
             }}
             rows={2}
@@ -367,17 +378,20 @@ function ChatThread({ chatId }: { chatId: number }) {
             aria-label="Сообщение ассистенту"
             className="max-h-40 w-full resize-none bg-transparent px-1.5 text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-60"
           />
-          <button
-            type="submit"
-            disabled={!text.trim() || !!pending}
-            aria-label="Отправить"
-            title="Отправить"
-            className="btn-pill shrink-0 bg-primary p-2 text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4" aria-hidden="true">
-              <path d="M8 12.5v-9M4 7l4-3.5L12 7" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
+          <div className="mt-1.5 flex items-end justify-between gap-2">
+            <AiAskControls ctx={ctx} onCtx={setCtx} disabled={!!pending} />
+            <button
+              type="submit"
+              disabled={!text.trim() || !!pending}
+              aria-label="Отправить"
+              title="Отправить"
+              className="btn-pill shrink-0 bg-primary p-2 text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-4 w-4" aria-hidden="true">
+                <path d="M8 12.5v-9M4 7l4-3.5L12 7" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+          </div>
         </div>
       </form>
     </div>
