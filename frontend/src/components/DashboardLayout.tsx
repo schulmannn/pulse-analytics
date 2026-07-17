@@ -27,9 +27,13 @@ export function DashboardLayout({ email, role, avatar }: DashboardLayoutProps) {
   // Widget customisation follows the account (user_prefs), not the browser.
   useWidgetPrefsSync();
   return (
-    <div className="flex min-h-screen bg-background text-foreground">
+    // Desktop shell — inset-панель («завершение области», владелец/Kimi-референс): контент живёт
+    // в скруглённом окне с зазором от краёв вьюпорта и СОБСТВЕННЫМ скроллом, так что нижняя
+    // кромка панели видна всегда, а не убегает за экран. Sticky-шапки страниц липнут к верху
+    // панели. Мобильный поток (<md) нетронут: оконный скролл, без рамки.
+    <div className="flex min-h-screen bg-background text-foreground md:h-screen md:gap-2.5 md:overflow-hidden md:p-2.5">
       <Sidebar email={email} role={role} avatar={avatar} />
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-w-0 flex-1 flex-col md:overflow-y-auto md:rounded-2xl md:border md:border-border">
         {isMd ? (
           isDesktopMetricRoute ? null : <Topbar />
         ) : (

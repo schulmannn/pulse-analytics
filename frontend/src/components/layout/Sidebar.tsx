@@ -51,7 +51,9 @@ export function Sidebar({ email, role, avatar }: { email?: string; role?: string
         // sidebar is just the canvas itself; the content's cards carry all the surface contrast.
         // z-nav lets the overhanging popovers (rail dropdown, user-row menu) paint above the
         // sticky Topbar (z-sticky), under scrim/modals.
-        'sticky top-0 z-nav hidden h-screen shrink-0 flex-col bg-background md:flex print:hidden',
+        // h-full (не h-screen): на md+ оболочка — inset-панель с паддингом корня, экранная
+        // высота вылезала бы за нижний зазор.
+        'sticky top-0 z-nav hidden h-full shrink-0 flex-col bg-background md:flex print:hidden',
         'transition-[width] duration-200 motion-reduce:transition-none',
         rail ? 'w-16' : 'w-60',
       )}

@@ -233,7 +233,7 @@ export function SubscriberGrowth() {
       drillLabel="Рост подписчиков"
     >
       {values.length > 1 ? (
-        <Sparkline values={values} labels={labels} area strokeWidth={2} interactive caption="по дням" formatValue={fmt.num} className="h-full min-h-14 w-full" />
+        <Sparkline values={values} labels={labels} area strokeWidth={2} interactive formatValue={fmt.num} className="h-full min-h-14 w-full" />
       ) : (
         <p className="mt-4 text-xs text-muted-foreground">Недостаточно истории для графика.</p>
       )}

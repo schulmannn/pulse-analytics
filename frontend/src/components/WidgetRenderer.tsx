@@ -252,7 +252,9 @@ function WidgetChart({ result, eff, onDrill, expanded = false }: { result: Widge
         // Extreme VALUE LABELS are detail-surface furniture: on the card face they double the
         // hero over a tiny sparkline (текст-шум); the expanded chart keeps them (peak label).
         markExtremes={expanded && c.values.length > 1}
-        showPoints={c.values.length > 1 && c.values.length <= 45}
+        // Кольца-точки — деталь-поверхностей (метрик-страница/разворот); на карточке они были
+        // единственным местом в продукте с точками на каждой дате (владелец: «нигде больше»).
+        showPoints={expanded && c.values.length > 1 && c.values.length <= 45}
         onPointClick={onPointClick}
       />
     );
