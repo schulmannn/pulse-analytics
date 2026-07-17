@@ -32,6 +32,17 @@ function loadConfig(env = process.env) {
       // publicUrl выше — другое поле (с дефолтом) для validateConfig; НЕ путать.
       appUrl: (env.APP_URL || '').replace(/\/$/, ''),
       trustedHosts: env.TRUSTED_HOSTS || '',
+      // Явные HTTP-таймауты сервера (мс), выставляются в main.js сразу после app.listen. Node по
+      // умолчанию держит keepAliveTimeout=5000 — короче 60-секундного keep-alive публичного
+      // Railway-прокси, поэтому прокси может переиспользовать соединение, которое Node уже закрыл
+      // (ECONNRESET/502 на первом же запросе после простоя). Дефолты выравнивают порядок:
+      //   keepAlive (65с) > Railway 60с, а headers (66с) > keepAlive — так требует Node
+      //   (headersTimeout охватывает окно keep-alive-простоя перед приходом заголовков).
+      // requestTimeout (5 мин) ограничивает ТОЛЬКО приём запроса; server.timeout мы НЕ трогаем
+      // (остаётся 0), иначе долгий стриминговый ответ GDPR-экспорта убивался бы по простою сокета.
+      keepAliveTimeoutMs: Number(env.HTTP_KEEP_ALIVE_TIMEOUT_MS || 65000),
+      headersTimeoutMs: Number(env.HTTP_HEADERS_TIMEOUT_MS || 66000),
+      requestTimeoutMs: Number(env.HTTP_REQUEST_TIMEOUT_MS || 300000),
     }),
     database: Object.freeze({
       url: env.DATABASE_URL || '',
@@ -326,6 +337,52 @@ function validateConfig(config) {
   }
   if (!Number.isInteger(config.http.trustProxy) || config.http.trustProxy < 0) {
     add('http.trustProxy', 'TRUST_PROXY_HOPS должен быть целым неотрицательным числом.');
+  }
+  // HTTP-таймауты сервера. Все три — положительные целые (мс); requestTimeout НЕЛЬЗЯ обнулять (0 у
+  // Node = «без лимита приёма запроса», что мы не хотим включать неявно). keepAlive обязан быть
+  // строго больше 60000, иначе снова окажется короче 60-секундного Railway-прокси и вернётся исходный
+  // дефект переиспользования уже закрытого соединения. headers обязан быть больше keepAlive (Node так
+  // требует). Верхние границы консервативны и конечны: keepAlive ≤ 300000 (5 мин простоя keep-alive),
+  // headers ≤ 600000 (10 мин), requestTimeout в диапазоне 60000..3600000 и не короче headers
+  // (полный request не должен истечь раньше собственных заголовков). Стриминговый ОТВЕТ ими не
+  // ограничивается — server.timeout остаётся 0 (см. main.js), поэтому GDPR-экспорт не обрывается.
+  for (const [field, value, unit] of [
+    ['http.keepAliveTimeoutMs', config.http.keepAliveTimeoutMs, 'HTTP_KEEP_ALIVE_TIMEOUT_MS'],
+    ['http.headersTimeoutMs', config.http.headersTimeoutMs, 'HTTP_HEADERS_TIMEOUT_MS'],
+    ['http.requestTimeoutMs', config.http.requestTimeoutMs, 'HTTP_REQUEST_TIMEOUT_MS'],
+  ]) {
+    if (!Number.isInteger(value) || value <= 0) {
+      add(field, `${unit} должен быть положительным целым числом (мс).`);
+    }
+  }
+  if (
+    Number.isInteger(config.http.keepAliveTimeoutMs) &&
+    (config.http.keepAliveTimeoutMs <= 60000 || config.http.keepAliveTimeoutMs > 300000)
+  ) {
+    add('http.keepAliveTimeoutMs', 'HTTP_KEEP_ALIVE_TIMEOUT_MS должен быть целым числом (мс) в диапазоне 60001..300000 (строго больше 60с keep-alive Railway-прокси).');
+  }
+  if (
+    Number.isInteger(config.http.headersTimeoutMs) &&
+    Number.isInteger(config.http.keepAliveTimeoutMs) &&
+    config.http.headersTimeoutMs <= config.http.keepAliveTimeoutMs
+  ) {
+    add('http.headersTimeoutMs', 'HTTP_HEADERS_TIMEOUT_MS должен быть строго больше HTTP_KEEP_ALIVE_TIMEOUT_MS.');
+  }
+  if (Number.isInteger(config.http.headersTimeoutMs) && config.http.headersTimeoutMs > 600000) {
+    add('http.headersTimeoutMs', 'HTTP_HEADERS_TIMEOUT_MS не должен превышать 600000 мс (10 мин).');
+  }
+  if (
+    Number.isInteger(config.http.requestTimeoutMs) &&
+    (config.http.requestTimeoutMs < 60000 || config.http.requestTimeoutMs > 3600000)
+  ) {
+    add('http.requestTimeoutMs', 'HTTP_REQUEST_TIMEOUT_MS должен быть целым числом (мс) в диапазоне 60000..3600000.');
+  }
+  if (
+    Number.isInteger(config.http.requestTimeoutMs) &&
+    Number.isInteger(config.http.headersTimeoutMs) &&
+    config.http.requestTimeoutMs < config.http.headersTimeoutMs
+  ) {
+    add('http.requestTimeoutMs', 'HTTP_REQUEST_TIMEOUT_MS не должен быть короче HTTP_HEADERS_TIMEOUT_MS.');
   }
   // Кэш-ответов: жёсткие границы. Слишком малый cap бесполезен, слишком большой — риск RSS;
   // TTL вне [1с..1ч] означает либо бесполезный кэш, либо застойные данные.

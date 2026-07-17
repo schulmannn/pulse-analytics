@@ -81,6 +81,15 @@ async function main({
   const listenPort = port != null ? port : config.http.port;
   const server = app.listen(listenPort);
 
+  // Явные HTTP-таймауты выставляются СИНХРОННО сразу после app.listen (до await'а listening), чтобы
+  // ни одно соединение не могло попасть на дефолтный 5-секундный keepAliveTimeout Node — короче
+  // 60-секундного keep-alive Railway-прокси. headersTimeout держим строго больше keepAliveTimeout
+  // (требование Node). server.timeout НАМЕРЕННО не трогаем — он остаётся 0 (нет тайм-аута простоя
+  // in-flight сокета), иначе долгий стриминговый ответ GDPR-экспорта обрывался бы на полпути.
+  server.keepAliveTimeout = config.http.keepAliveTimeoutMs;
+  server.headersTimeout = config.http.headersTimeoutMs;
+  server.requestTimeout = config.http.requestTimeoutMs;
+
   try {
     await waitForListening(server);
   } catch (error) {
