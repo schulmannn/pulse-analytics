@@ -208,7 +208,7 @@ export function TopPosts({ variant = 'table' }: { variant?: 'table' | 'cards' } 
                     {title}
                   </span>
                   {reason && (
-                    <span className="mt-0.5 block truncate text-2xs text-verdant">▲ {reason}</span>
+                    <span className="mt-0.5 block truncate text-2xs text-muted-foreground">▲ {reason}</span>
                   )}
                 </span>
                 {COLUMNS.map((c) => (

@@ -46,7 +46,7 @@ export function ChartSection(props: ChartSectionProps) {
         className={`${
           props.strip
             ? 'group/strip relative flex flex-col'
-            : `flex flex-col ${SIZE_HEIGHT[effectiveSize]} rounded-2xl border bg-card p-4 shadow-[0_12px_32px_-30px_rgba(0,0,0,0.9)] sm:p-5 transition-colors hover:border-ink3/40 hover:[--card-tint-alpha:0.16] dark:hover:border-white/[0.12] dark:hover:[--card-tint-alpha:0.18]`
+            : `flex flex-col ${SIZE_HEIGHT[effectiveSize]} rounded-2xl border bg-card p-4 shadow-[0_12px_32px_-30px_rgba(0,0,0,0.9)] sm:p-5 transition-colors hover:border-ink3/40 hover:[--card-tint-alpha:0.16] dark:hover:border-white/[0.12] dark:hover:[--card-tint-alpha:0.08]`
         } ${
           model.controls.homeEditing && props.homeKey
             ? 'border-ink3/25'

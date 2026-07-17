@@ -29,7 +29,8 @@ export function ChangeSummary({ compact = false }: { compact?: boolean } = {}) {
       }
     : explainChange(dated.map((post) => ({ day: post.date!, v: post.reach })), days, now);
   const story = describeChange(change, 'Просмотры публикаций');
-  const directionClass = change.direction === 'up' ? 'text-verdant' : change.direction === 'down' ? 'text-ember' : 'text-foreground';
+  // Quiet register (steep): the sentence already names the direction — no evaluative colour.
+  const directionClass = 'text-foreground';
 
   if (change.insufficient) {
     const current = posts.filter((post) => inRange(post.date));

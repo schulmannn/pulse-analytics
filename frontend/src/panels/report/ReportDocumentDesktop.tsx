@@ -150,7 +150,7 @@ export function ReportDocumentDesktop({
           <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
             <label className="text-xs font-medium text-muted-foreground">
               <span className="mb-1 block">Период</span>
-              <div className="flex overflow-hidden rounded border border-border">
+              <div className="flex overflow-hidden rounded-full border border-border">
                 {PERIOD_CHIPS.map((chip) => (
                   <button
                     key={chip.days}

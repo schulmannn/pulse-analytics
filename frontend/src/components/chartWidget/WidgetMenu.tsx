@@ -98,7 +98,7 @@ export function WidgetMenu({
         <div
           role="menu"
           aria-label={`Меню виджета «${label}»`}
-          className="absolute right-0 top-full z-popover mt-1 w-48 rounded-lg border border-border bg-card p-1.5"
+          className="absolute right-0 top-full z-popover mt-1 w-48 rounded-xl border border-border bg-card p-1.5"
           onClick={(event) => event.stopPropagation()}
           onKeyDown={(event) => {
             if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;

@@ -93,7 +93,7 @@ export function WidgetCatalogModal({
             type="button"
             aria-label="Закрыть"
             onClick={onClose}
-            className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            className="rounded-full p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
             <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
               <path d="M6 6l12 12M18 6 6 18" strokeLinecap="round" />
@@ -104,7 +104,7 @@ export function WidgetCatalogModal({
         {/* Source tabs (only when more than one source is available) + search. */}
         <div className="mt-4 flex flex-wrap items-center gap-3">
           {AVAILABLE_SOURCES.length > 1 && (
-            <div role="group" aria-label="Источник" className="flex overflow-hidden rounded border border-border">
+            <div role="group" aria-label="Источник" className="flex overflow-hidden rounded-full border border-border">
               {AVAILABLE_SOURCES.map((s) => (
                 <button
                   key={s}

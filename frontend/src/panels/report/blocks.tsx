@@ -96,7 +96,7 @@ export function InlineAdd({
         </svg>
       </button>
       {open && (
-        <div className="absolute left-1/2 top-full z-popover mt-1 w-64 -translate-x-1/2 rounded-lg border border-border bg-card p-1.5 text-left">
+        <div className="absolute left-1/2 top-full z-popover mt-1 w-64 -translate-x-1/2 rounded-xl border border-border bg-card p-1.5 text-left">
           {ADD_TYPES.filter((t) => allowMap || t.type !== 'map').map((t) => (
             <button
               key={t.type}

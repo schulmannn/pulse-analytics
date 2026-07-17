@@ -134,7 +134,7 @@ export function CreateReportDialog({ onClose }: { onClose: () => void }) {
       <div
         ref={panelRef}
         tabIndex={-1}
-        className="my-auto w-full max-w-lg rounded-lg border border-border bg-card p-5 focus:outline-none"
+        className="my-auto w-full max-w-lg rounded-xl border border-border bg-card p-5 focus:outline-none"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="text-sm font-medium text-foreground">Новый отчёт</h2>
@@ -225,7 +225,7 @@ export function CreateReportDialog({ onClose }: { onClose: () => void }) {
 
           <div>
             <span className="text-xs font-medium text-muted-foreground">Период</span>
-            <div className="mt-1.5 flex overflow-hidden rounded border border-border">
+            <div className="mt-1.5 flex overflow-hidden rounded-full border border-border">
               {PERIOD_CHIPS.map((chip) => (
                 <button
                   key={chip.days}

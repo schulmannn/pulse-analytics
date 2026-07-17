@@ -238,10 +238,12 @@ export function Home() {
   return (
     <div>
       {/* Sticky page header — the Add / Edit actions stay reachable while scrolling the board.
-          Solid bg + a hairline (no blur/shadow per governance); bg bleeds to the content padding.
-          Desktop (md+): a stable «Добавить виджет» + «Изменить/Готово» toolbar (fixed footprint, no
-          hover-reflow). Mobile (<md): the compact expand-on-touch edit chip, preserved verbatim. */}
-      <div className="sticky top-0 z-sticky -mx-4 mb-6 flex items-start justify-between gap-3 border-b border-border bg-background px-4 py-3 sm:-mx-6 sm:px-6 md:items-center">
+          Solid canvas bg, NO hairline: the strip is indistinguishable from the page at rest and
+          simply clips the board sliding under it (владелец: «серая полоса» под шапкой лишняя —
+          same treatment as the feed sticky header). Desktop (md+): a stable «Добавить виджет» +
+          «Изменить/Готово» toolbar (fixed footprint, no hover-reflow). Mobile (<md): the compact
+          expand-on-touch edit chip, preserved verbatim. */}
+      <div className="sticky top-0 z-sticky -mx-4 mb-6 flex items-start justify-between gap-3 bg-background px-4 py-3 sm:-mx-6 sm:px-6 md:items-center">
         <h2 className="text-2xl font-medium tracking-tight text-foreground">Главная</h2>
         <div className="flex items-center gap-2">
           {/* Desktop read mode owns one direct catalog command. Empty and edit states expose their
@@ -252,7 +254,7 @@ export function Home() {
               onClick={() => add.openCatalog()}
               aria-label="Добавить виджет"
               title="Добавить виджет"
-              className="hidden items-center gap-1.5 rounded-md border border-border bg-transparent px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-muted md:inline-flex"
+              className="btn-pill hidden items-center gap-1.5 border border-border bg-transparent px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-muted md:inline-flex"
             >
               <svg className="h-4 w-4 shrink-0 text-primary" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
                 <path d="M8 3v10M3 8h10" strokeLinecap="round" />
@@ -483,7 +485,7 @@ function AddWidgetBar({ pinned, onOpenCatalog }: { pinned: string[]; onOpenCatal
         + Добавить виджет
       </button>
       {open && (
-        <div className="add-widget-popover absolute bottom-full left-1/2 z-popover mb-2 w-72 -translate-x-1/2 rounded-lg border border-border bg-card p-1.5">
+        <div className="add-widget-popover absolute bottom-full left-1/2 z-popover mb-2 w-72 -translate-x-1/2 rounded-xl border border-border bg-card p-1.5">
           {/* Metric-first path: the shared searchable catalogue → a config-driven widget. */}
           <button
             type="button"

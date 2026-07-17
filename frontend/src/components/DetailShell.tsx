@@ -96,7 +96,7 @@ export function DetailShell({ ariaLabel, onClose, variant, originRect, children 
       aria-label="Закрыть"
       // top uses max(1rem, safe-area) so the × clears a notch on the mobile edge-to-edge sheet
       // (env resolves to 0 on desktop / non-notched viewports → the original 1rem inset).
-      className="absolute right-4 top-[max(1rem,env(safe-area-inset-top))] z-10 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      className="absolute right-4 top-[max(1rem,env(safe-area-inset-top))] z-10 rounded-full p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
     >
       <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" aria-hidden="true">
         <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />

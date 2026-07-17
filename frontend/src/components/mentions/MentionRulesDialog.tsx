@@ -115,7 +115,7 @@ export function MentionRulesDialog({
             onClick={onClose}
             aria-label="Закрыть правила упоминаний"
             title="Закрыть"
-            className="flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+            className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
           >
             <Icon name="close" className="size-4" />
           </button>
@@ -149,7 +149,7 @@ export function MentionRulesDialog({
 
           <div>
             <span className="text-xs font-medium text-muted-foreground">Совпадение</span>
-            <div role="group" aria-label="Режим совпадения" className="mt-1.5 inline-flex overflow-hidden rounded border border-border">
+            <div role="group" aria-label="Режим совпадения" className="mt-1.5 inline-flex overflow-hidden rounded-full border border-border">
               {([
                 ['contains', 'Вхождение'],
                 ['word', 'Целое слово'],

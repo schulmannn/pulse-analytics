@@ -23,7 +23,7 @@ semantic token.
 | Panel surface | `--card` `--popover` | `#fff` panels used **sparingly** — sections are hairline-delimited |
 | Secondary/tertiary ink | `--muted-foreground` `--ink2` `--ink3` | text hierarchy by shade, not weight |
 | Accent (single hue) | `--primary` `--accent` `--accent-foreground` | `--accent-foreground` is AA-calibrated for ink on the blue tints |
-| Deltas | `--brand-verdant` (up) `--brand-ember` / `-strong` (down) | deepened to clear AA 4.5 as text + on 10% tint |
+| Deltas | `--brand-verdant` (up) `--brand-ember` / `-strong` (down) | reserved for CHART roles (DivergingBars) and status surfaces; the ↑/↓ delta chips and card stats read **muted** (steep: direction lives in the arrow/sign, nothing screams) |
 | Status | `--status-warn` | risk / demo / stale collector |
 | Hairline | `--border` `--input` | decorative separators (the *only* borders in the system) |
 | Categorical series | `--chart-1 … --chart-6` | Muted/refined (Steep-noble), Okabe-Ito-ordered for colour-blind safety; light stays deep enough for non-text 3.0 on white, dark goes softer; series always carry a label too |
@@ -101,8 +101,10 @@ version / API status only).
 (`var(--radius)` and −2/−4px). **Card-scale surfaces are `rounded-2xl` (16px)** — one radius family
 for the widget card (`ChartSection`), its skeleton/error placeholders (they must match the loaded
 card, CLS), the feed section shell + its sticky header, the detail overlay (`DetailShell`) and the
-post-detail modals. Pill controls and icon buttons are `rounded-full`. Transient floaters (⋯ menus,
-popovers, dialogs) stay a step tighter (`rounded-lg`/`rounded-xl`) so they read as chrome, not cards.
+post-detail modals. Pill controls and icon buttons are `rounded-full`. Transient floaters — ⋯ menus,
+popovers, pickers, listbox popups (`PillSelect`) and dialogs — sit one step tighter at **`rounded-xl`
+(12px)** so they read as chrome, not cards; tooltips stay tight (`rounded`/`rounded-md`). The full
+radius ladder: cards/overlays 16 → floating chrome 12 → inputs/controls 4 → pills full.
 
 ## Border / hairline opacity
 

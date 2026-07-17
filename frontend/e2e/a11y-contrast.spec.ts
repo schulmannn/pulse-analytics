@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { AxeBuilder } from '@axe-core/playwright';
-import { bootDemo } from './helpers';
+import { bootDemo, detailOverlayOpener } from './helpers';
 
 /**
  * Color-contrast gate (the rule the main a11y suite intentionally excludes) — WCAG 1.4.3 text
@@ -47,7 +47,9 @@ for (const theme of THEMES) {
 
   test(`contrast (${theme}): detail overlay`, async ({ page }, testInfo) => {
     await bootDemo(page, '/', { theme });
-    await page.getByRole('button', { name: /^Развернуть виджет/ }).first().click();
+    // The FIRST expand button belongs to a drillTo card (navigates to a metric page, no dialog) —
+    // open the canonical generic-overlay card instead, like every other overlay spec.
+    await detailOverlayOpener(page).click();
     await expect(page.getByRole('dialog')).toBeVisible();
     await expectNoContrastViolations(page, testInfo, `${theme}-detail`);
   });

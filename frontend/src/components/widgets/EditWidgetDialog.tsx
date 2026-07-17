@@ -37,7 +37,7 @@ function DialogPeriodSegment({
       active ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
     }`;
   return (
-    <div className="mt-2 flex overflow-hidden rounded border border-border">
+    <div className="mt-2 flex overflow-hidden rounded-full border border-border">
       {pagePeriod != null && (
         <button
           type="button"
@@ -370,7 +370,7 @@ export function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, sh
             {/* S / M / L on the 6-col grid. Selecting the card's defaultSize
                 clears the pref (fall back to the default). Sizes below the active variant's
                 floor are disabled — that presentation needs the width. */}
-            <div className="mt-2 flex overflow-hidden rounded border border-border">
+            <div className="mt-2 flex overflow-hidden rounded-full border border-border">
               {(() => {
                 // Highlight the EFFECTIVE size (a full-only variant clamps the card up even when
                 // the stored/default is smaller) — never a disabled button that the card ignores.
@@ -426,7 +426,7 @@ export function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, sh
           <div className="mt-4">
             <span className="text-2xs tracking-wide text-muted-foreground">Грануляция</span>
             {/* Bucket the daily series by week/month (sums). День clears the pref. */}
-            <div className="mt-2 flex overflow-hidden rounded border border-border">
+            <div className="mt-2 flex overflow-hidden rounded-full border border-border">
               {GRAIN_OPTIONS.map((g) => {
                 const active = (prefs.grain ?? 'day') === g.value;
                 return (

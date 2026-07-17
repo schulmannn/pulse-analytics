@@ -331,7 +331,7 @@ export function SourceSwitcher({ rail = false, mobile = false }: { rail?: boolea
       {open && openable && (
         <div
           className={cn(
-            'absolute top-full z-popover mt-1 overflow-hidden rounded border bg-popover p-1',
+            'absolute top-full z-popover mt-1 overflow-hidden rounded-xl border bg-popover p-1',
             // In the rail the popover overhangs the 64px column instead of squeezing into it.
             rail ? 'left-2 w-60' : 'inset-x-3',
           )}

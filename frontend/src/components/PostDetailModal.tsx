@@ -117,7 +117,7 @@ export function PostDetailModal({
             type="button"
             onClick={onClose}
             aria-label="Закрыть"
-            className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            className="rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4">
               <path d="M18 6 6 18M6 6l12 12" strokeLinecap="round" />

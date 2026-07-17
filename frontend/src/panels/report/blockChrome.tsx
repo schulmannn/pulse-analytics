@@ -73,7 +73,7 @@ function BlockCtl({
       disabled={disabled}
       title={label}
       aria-label={label}
-      className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-30"
+      className="flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-30"
     >
       {children}
     </button>
@@ -111,7 +111,7 @@ export function Segmented({
   onChange: (v: string) => void;
 }) {
   return (
-    <div className="flex overflow-hidden rounded border border-border">
+    <div className="flex overflow-hidden rounded-full border border-border">
       {options.map((o) => {
         const active = o.value === value;
         return (

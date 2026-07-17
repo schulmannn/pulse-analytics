@@ -396,7 +396,7 @@ function Segmented<T extends string>({
   onChange: (v: T) => void;
 }) {
   return (
-    <div className="flex overflow-hidden rounded border border-border">
+    <div className="flex overflow-hidden rounded-full border border-border">
       {options.map((o) => {
         const active = value === o.value;
         return (
@@ -507,7 +507,7 @@ function FilterBuilder({
             <div className="mb-1.5 flex items-center justify-between gap-2">
               <span className="text-2xs font-medium tracking-wide text-muted-foreground">{dim.label}</span>
               {selected.size > 0 && (
-                <div role="group" aria-label={`Режим фильтра «${dim.label}»`} className="flex overflow-hidden rounded border border-border">
+                <div role="group" aria-label={`Режим фильтра «${dim.label}»`} className="flex overflow-hidden rounded-full border border-border">
                   {(['in', 'not_in'] as FilterOp[]).map((o) => (
                     <button
                       key={o}

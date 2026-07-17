@@ -74,8 +74,8 @@ export function WidgetRenderer({
         </svg>
         <div className="text-sm font-medium text-foreground">Нет данных за период</div>
         <p className="text-2xs text-muted-foreground">Попробуйте другой период или источник.</p>
-        {/* WHAT was empty — the same source/window line a healthy card carries. */}
-        <WidgetMetaLine meta={result.meta} className="max-w-full" />
+        {/* WHAT was empty — here the full source/window line IS the message. */}
+        <WidgetMetaLine meta={result.meta} className="max-w-full" verbose />
       </div>
     );
   }
@@ -119,7 +119,7 @@ export function WidgetRenderer({
           {(result.caption || progress) && (
             <div className="mt-1 flex flex-wrap items-baseline gap-x-2 text-xs text-muted-foreground">
               {result.caption ? <span>{result.caption}</span> : null}
-              {progress ? <span className="font-medium text-primary">{progress}</span> : null}
+              {progress ? <span className="font-medium text-muted-foreground">{progress}</span> : null}
             </div>
           )}
         </div>
@@ -130,7 +130,7 @@ export function WidgetRenderer({
             can overrun this flex-1 band and paint under the meta line / stats footer — clip the
             chart to its allotted band so the caption stays legible. */}
         <div className={`min-h-0 flex-1 overflow-hidden ${showHero ? 'mt-3' : ''}`}>
-          <WidgetChart result={result} eff={eff} onDrill={onDrill} />
+          <WidgetChart result={result} eff={eff} onDrill={onDrill} expanded={expanded} />
         </div>
       </WidgetTargetContext.Provider>
       {expanded ? (
@@ -145,28 +145,35 @@ export function WidgetRenderer({
           info={<MetricExplainTooltip metricId={result.metricId} meta={result.meta} />}
         />
       )}
-      <SeriesStatsFooter result={result} eff={eff} />
+      {/* Макс/Среднее ledger belongs to the PROOF surface — the expanded detail. On the card face
+          it duplicated the hero and the chart (владелец: «слишком много текста», steep cards
+          carry title + number + delta + chart, nothing else). */}
+      {expanded && <SeriesStatsFooter result={result} eff={eff} />}
     </div>
   );
 }
 
 /**
- * The unified «source + data-quality» caption (steep honesty line): network · @source (when pinned) ·
- * window · sample («12 постов» / «30 дн. в архиве») · freshness · «сравнение скрыто — …». One muted
- * single line; only the segments the resolver truly knows are rendered, and a stale-data segment
- * takes the warn tone. shrink-0 + truncate so it never squeezes the chart or wraps the tile.
+ * The «source + data-quality» caption. The card face keeps the QUIET subset (steep: карточка —
+ * это заголовок, число, дельта и график): period + sample when they explain the number, plus the
+ * honesty segments that must not hide (stale freshness in warn tone, «сравнение скрыто — …»).
+ * Identity (network · @source) lives in the card header chip / page header, and the long-form
+ * quality meta (archive depth, fresh-when-fresh) in the ⓘ tooltip and the expanded panel.
+ * `verbose` restores every known segment — the empty state uses it to say WHAT exactly was empty.
+ * One muted truncating line, never wraps the tile.
  */
-function WidgetMetaLine({ meta, className = '', info }: { meta?: WidgetMeta; className?: string; info?: ReactNode }) {
+function WidgetMetaLine({ meta, className = '', info, verbose = false }: { meta?: WidgetMeta; className?: string; info?: ReactNode; verbose?: boolean }) {
   const segs: Array<{ key: string; text: string; warn?: boolean }> = [];
   if (meta) {
-    if (meta.network) segs.push({ key: 'net', text: meta.network === 'ig' ? 'Instagram' : 'Telegram' });
-    if (meta.sourceLabel) segs.push({ key: 'src', text: meta.sourceLabel });
+    if (verbose && meta.network) segs.push({ key: 'net', text: meta.network === 'ig' ? 'Instagram' : 'Telegram' });
+    if (verbose && meta.sourceLabel) segs.push({ key: 'src', text: meta.sourceLabel });
     if (meta.periodLabel) segs.push({ key: 'per', text: meta.periodLabel });
     if (meta.samplePosts != null && meta.samplePosts > 0)
       segs.push({ key: 'smp', text: `${meta.samplePosts} ${pluralRu(meta.samplePosts, ['пост', 'поста', 'постов'])}` });
-    if (meta.archiveDays != null && meta.archiveDays > 0)
+    if (verbose && meta.archiveDays != null && meta.archiveDays > 0)
       segs.push({ key: 'arc', text: `${meta.archiveDays} дн. в архиве` });
-    if (meta.fresh) segs.push({ key: 'fr', text: `данные: ${meta.fresh.label}`, warn: meta.fresh.stale });
+    if (meta.fresh && (verbose || meta.fresh.stale))
+      segs.push({ key: 'fr', text: `данные: ${meta.fresh.label}`, warn: meta.fresh.stale });
     if (meta.comparisonNote) segs.push({ key: 'cmp', text: meta.comparisonNote });
   }
   // No dynamic segments, but the ⓘ may still carry the static formula/source — keep it reachable.
@@ -214,7 +221,7 @@ function SeriesStatsFooter({ result, eff }: { result: WidgetResult; eff: WidgetV
 
 /** The chart region — picks a primitive by the effective viz and feeds it the adapted data. Charts
  *  read their height from the card's ExpandedChartHeightContext, so no explicit height here. */
-function WidgetChart({ result, eff, onDrill }: { result: WidgetResult; eff: WidgetViz; onDrill?: () => void }) {
+function WidgetChart({ result, eff, onDrill, expanded = false }: { result: WidgetResult; eff: WidgetViz; onDrill?: () => void; expanded?: boolean }) {
   const onPointClick = onDrill ? () => onDrill() : undefined;
   if (eff === 'line') {
     const c = seriesToChart(result);
@@ -225,7 +232,9 @@ function WidgetChart({ result, eff, onDrill }: { result: WidgetResult; eff: Widg
         titles={c.titles}
         ghost={result.ghost}
         ghostLabel={result.ghostLabel}
-        markExtremes={c.values.length > 1}
+        // Extreme VALUE LABELS are detail-surface furniture: on the card face they double the
+        // hero over a tiny sparkline (текст-шум); the expanded chart keeps them (peak label).
+        markExtremes={expanded && c.values.length > 1}
         showPoints={c.values.length > 1 && c.values.length <= 45}
         onPointClick={onPointClick}
       />

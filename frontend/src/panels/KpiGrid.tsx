@@ -373,8 +373,8 @@ function StatTile({ label, value, trend, deltaText, info, onDrill }: StatTilePro
   const cell = onDrill
     ? { onClick: onDrill, title: 'Подробный разбор', className: 'cursor-pointer rounded-md py-1 transition-colors hover:bg-muted/40' }
     : {};
-  const deltaColor =
-    trend?.dir === 'up' ? 'text-verdant' : trend?.dir === 'down' ? 'text-ember' : 'text-muted-foreground';
+  // Quiet register (steep): the ↑/↓ arrow carries direction, the colour stays muted.
+  const deltaColor = 'text-muted-foreground';
   return (
     <div {...cell}>
       <div className="flex items-center gap-1 text-2xs tracking-wide text-muted-foreground">
