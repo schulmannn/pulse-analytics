@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useChannels, useMe } from '@/api/queries';
 import { useAiChats, useCreateAiChat } from '@/api/aiChat';
-import { AiAskControls } from '@/panels/ai/AiAskControls';
+import { AiAskControls, AiSendButton } from '@/panels/ai/AiAskControls';
 import { composeAiQuestion, emptyAiAskContext, type AiAskContext } from '@/lib/aiAsk';
 
 /**
@@ -68,16 +68,7 @@ export function HomeAiHero() {
           <div className="mt-2 flex items-end justify-between gap-3">
             {/* STEEP-пикеры: @ = источник-контекст, часы = период. Выбор уходит в текст вопроса. */}
             <AiAskControls ctx={ctx} onCtx={setCtx} disabled={create.isPending} />
-            <button
-              type="submit"
-              disabled={!text.trim() || create.isPending}
-              className="btn-pill inline-flex items-center gap-1.5 bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {create.isPending ? 'Открываю…' : 'Спросить'}
-              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-3.5 w-3.5" aria-hidden="true">
-                <path d="M8 12V4M4.5 7.5 8 4l3.5 3.5" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </button>
+            <AiSendButton disabled={!text.trim() || create.isPending} busy={create.isPending} />
           </div>
           {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
         </form>

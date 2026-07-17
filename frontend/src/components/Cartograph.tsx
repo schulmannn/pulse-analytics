@@ -12,8 +12,9 @@ import { cn } from '@/lib/utils';
  *   broken-route  — a route with a gap → load / fetch failure (ErrorState)
  *   terra         — uncharted blank territory → empty state (EmptyState)
  *   globe         — graticule sphere, a broken meridian → alternate crash motif
+ *   assistant     — спарк-пузырь с мини-графиком → пустой AI-чат (AiEmptyState)
  */
-export type CartographName = 'compass' | 'off-map' | 'broken-route' | 'terra' | 'globe';
+export type CartographName = 'compass' | 'off-map' | 'broken-route' | 'terra' | 'globe' | 'assistant';
 
 interface CartographProps {
   name: CartographName;
@@ -29,6 +30,7 @@ const VIEWBOX: Record<CartographName, string> = {
   'off-map': '0 0 220 150',
   'broken-route': '0 0 200 110',
   terra: '0 0 72 72',
+  assistant: '0 0 172 128',
 };
 
 export function Cartograph({ name, className, animate = true }: CartographProps) {
@@ -48,6 +50,7 @@ export function Cartograph({ name, className, animate = true }: CartographProps)
       {name === 'off-map' && <OffMap animate={animate} />}
       {name === 'broken-route' && <BrokenRoute animate={animate} />}
       {name === 'terra' && <Terra animate={animate} />}
+      {name === 'assistant' && <Assistant animate={animate} />}
     </svg>
   );
 }
@@ -143,6 +146,32 @@ function Terra({ animate }: { animate: boolean }) {
         <path d="M42 24 54 28 42 32Z" className="fill-primary" />
       </g>
       <circle cx="42" cy="47" r="2" className="fill-primary" />
+    </>
+  );
+}
+
+/* Пузырь диалога с мини-графиком внутри + искры: ассистент готов говорить о данных.
+   Язык тот же, что у остальных глифов: контур на --border, единственный акцент --primary,
+   пульс искры — существующий cartograph-pulse (гаснет под reduced-motion). */
+function Assistant({ animate }: { animate: boolean }) {
+  return (
+    <>
+      <path
+        d="M32 24 h84 a12 12 0 0 1 12 12 v42 a12 12 0 0 1 -12 12 H72 l-16 16 v-16 H32 a12 12 0 0 1 -12 -12 V36 a12 12 0 0 1 12 -12 Z"
+        className={tick}
+      />
+      <line x1="36" y1="78" x2="112" y2="78" className={faint} />
+      <line x1="36" y1="60" x2="112" y2="60" className={faint} strokeDasharray="1 6" />
+      <line x1="36" y1="44" x2="112" y2="44" className={faint} strokeDasharray="1 6" />
+      <polyline points="36,72 54,62 70,66 88,48 102,54 112,42" className="stroke-primary" />
+      <circle cx="112" cy="42" r="2.6" className="fill-primary" />
+      <g className={animate ? 'cartograph-pulse' : undefined}>
+        <path d="M142 26 l4 9 9 4 -9 4 -4 9 -4 -9 -9 -4 9 -4 Z" className="stroke-primary" />
+      </g>
+      <g className={animate ? 'cartograph-pulse-2' : undefined}>
+        <path d="M152 66 l2.4 5.4 5.4 2.4 -5.4 2.4 -2.4 5.4 -2.4 -5.4 -5.4 -2.4 5.4 -2.4 Z" className={faint} />
+      </g>
+      <path d="M132 8 l1.8 4 4 1.8 -4 1.8 -1.8 4 -1.8 -4 -4 -1.8 4 -1.8 Z" className={faint} />
     </>
   );
 }
