@@ -142,7 +142,7 @@ export function DateRangePicker({ value, onApply, onReset }: Props) {
           onClick={() => shiftMonth(1)}
           disabled={atCurrentMonth}
           aria-label="Следующий месяц"
-          className="rounded-full p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+          className="rounded-full p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-35"
         >
           <Chevron dir="right" />
         </button>
@@ -176,7 +176,9 @@ export function DateRangePicker({ value, onApply, onReset }: Props) {
                   : inRange(ts)
                     ? 'bg-accent text-foreground'
                     : 'text-foreground hover:bg-muted',
-                isFuture && 'cursor-not-allowed opacity-35 hover:bg-transparent',
+                // pointer-events-none: гасит и красный not-allowed-курсор, и hover-подсветку, и
+                // mouseenter-предпросмотр диапазона на невыбираемом будущем дне.
+                isFuture && 'pointer-events-none opacity-35',
                 isToday && !isEdge && 'ring-1 ring-inset ring-primary/40',
               )}
             >

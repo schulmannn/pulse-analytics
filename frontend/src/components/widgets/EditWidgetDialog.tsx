@@ -386,7 +386,7 @@ export function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, sh
                     aria-pressed={active}
                     disabled={disabled}
                     onClick={() => onChange({ ...prefs, size: o.size === defaultSize ? undefined : o.size })}
-                    className={`flex-1 border-r border-border px-2 py-1.5 text-xs font-medium transition-colors last:border-r-0 disabled:cursor-not-allowed disabled:opacity-40 ${
+                    className={`flex-1 border-r border-border px-2 py-1.5 text-xs font-medium transition-colors last:border-r-0 disabled:pointer-events-none disabled:opacity-40 ${
                       active ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
                     }`}
                   >

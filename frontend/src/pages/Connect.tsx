@@ -630,7 +630,7 @@ function MoySkladPanel() {
             <button
               type="submit"
               disabled={!token.trim() || busy}
-              className="btn-pill shrink-0 bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+              className="btn-pill shrink-0 bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
             >
               {busy ? 'Проверяем…' : 'Подключить'}
             </button>

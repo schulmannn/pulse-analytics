@@ -833,7 +833,7 @@ export function MetricPage() {
                   disabled={!grainAllowed[g]}
                   aria-pressed={effGrain === g}
                   onClick={() => setParam('grain', g === 'day' ? null : g)}
-                  className={`px-2.5 py-1 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                  className={`px-2.5 py-1 text-xs font-medium transition-colors disabled:pointer-events-none disabled:opacity-40 ${
                     effGrain === g ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'
                   } border-r border-border last:border-r-0`}
                 >
@@ -917,7 +917,7 @@ export function MetricPage() {
                 onClick={() => shiftWindow(-1)}
                 disabled={winFrom == null}
                 aria-label="Предыдущее окно"
-                className="rounded px-1.5 py-0.5 text-sm text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+                className="rounded px-1.5 py-0.5 text-sm text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
               >
                 ‹
               </button>
@@ -926,7 +926,7 @@ export function MetricPage() {
                 onClick={() => shiftWindow(1)}
                 disabled={!range}
                 aria-label="Следующее окно"
-                className="rounded px-1.5 py-0.5 text-sm text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+                className="rounded px-1.5 py-0.5 text-sm text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
               >
                 ›
               </button>
@@ -1009,7 +1009,7 @@ export function MetricPage() {
                       <button
                         type="submit"
                         disabled={!annLabel.trim() || annBusy}
-                        className="btn-pill shrink-0 border border-border px-3 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                        className="btn-pill shrink-0 border border-border px-3 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-40"
                       >
                         ⚑ Отметить
                       </button>
