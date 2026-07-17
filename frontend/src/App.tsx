@@ -41,6 +41,9 @@ const Bugs = lazyFrom(() => import('@/panels/Bugs'), 'Bugs');
 const Connect = lazyFrom(() => import('@/pages/Connect'), 'Connect');
 // Страница кампании — редкий standalone-роут, живёт вне entry-чанка (bundle-size гейт).
 const CampaignPage = lazyFrom(() => import('@/panels/CampaignPage'), 'CampaignPage');
+// AI-чат — lazy: стриминговая механика (lib/aiStream) не едет в entry-чанк; на Главной живёт
+// только лёгкий hero (panels/ai/HomeAiHero), который сюда лишь навигирует.
+const AiChatPage = lazyFrom(() => import('@/panels/ai/AiChatPage'), 'AiChatPage');
 // Public legal pages (Instagram / Meta App Review requires reachable Privacy + Data Deletion URLs).
 const Privacy = lazyFrom(() => import('@/pages/Legal'), 'Privacy');
 const DataDeletion = lazyFrom(() => import('@/pages/Legal'), 'DataDeletion');
@@ -75,6 +78,9 @@ export default function App() {
         {/* Страница кампании — standalone, как reports/:id. Списка-маршрута нет намеренно:
             список кампаний живёт вкладкой в «Контенте» (и не появляется в sidebar). */}
         <Route path="campaigns/:id" element={<PanelSuspense><CampaignPage /></PanelSuspense>} />
+        {/* AI-чат: индекс + тред. Виден только при me.ai.enabled (страница сама гейтится). */}
+        <Route path="ai" element={<PanelSuspense><AiChatPage /></PanelSuspense>} />
+        <Route path="ai/:chatId" element={<PanelSuspense><AiChatPage /></PanelSuspense>} />
         {/* Pre-multi-reports bookmarks land on the index. */}
         <Route path="report" element={<Navigate to="/reports" replace />} />
         <Route path="settings" element={<PanelSuspense><Settings /></PanelSuspense>} />
