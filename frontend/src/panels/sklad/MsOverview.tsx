@@ -67,6 +67,10 @@ export function MsOverview() {
   const revValues = revenue.series.map((p) => p.value);
   const ordLabels = orders.series.map((p) => fmt.day(p.day));
   const ordValues = orders.series.map((p) => p.count);
+  // Средний чек по дням = сумма/число заказов дня; день без заказов — ЧЕСТНЫЙ null-разрыв
+  // (деление на ноль дало бы «ноль-которого-не-было» — канон разрывов).
+  const avgValues = orders.series.map((p) => (p.count > 0 ? p.sum / p.count : null));
+  const avgTotal = orders.totalCount > 0 ? orders.totalSum / orders.totalCount : null;
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
@@ -103,7 +107,22 @@ export function MsOverview() {
         </ChartCardBody>
       </ChartWidget>
 
-      <ChartWidget id="ms-top-products" title={days === 0 ? 'Топ товаров по выручке · 30 дн.' : 'Топ товаров по выручке'} defaultSize="full" noExpand>
+      <ChartWidget id="ms-avg-check" title="Средний чек" fixedSize="half" noExpand>
+        <ChartCardBody value={avgTotal != null ? `${fmt.short(avgTotal)} ₽` : '—'} caption={windowLabel}>
+          {avgValues.filter((v) => v != null).length > 1 ? (
+            <LineChart
+              values={avgValues}
+              labels={ordLabels}
+              titles={orders.series.map((p) => (p.count > 0 ? `${fmt.day(p.day)}: ${fmt.num(Math.round(p.sum / p.count))} ₽` : `${fmt.day(p.day)}: заказов не было`))}
+              yMin={0}
+            />
+          ) : (
+            <p className="text-xs text-muted-foreground">Недостаточно дней с заказами для графика.</p>
+          )}
+        </ChartCardBody>
+      </ChartWidget>
+
+      <ChartWidget id="ms-top-products" title={days === 0 ? 'Топ товаров по выручке · 30 дн.' : 'Топ товаров по выручке'} fixedSize="half" noExpand>
         {top.isPending ? (
           <div className="space-y-2 py-2">
             {Array.from({ length: 4 }).map((_, i) => (
@@ -114,7 +133,8 @@ export function MsOverview() {
           <p className="py-4 text-sm text-muted-foreground">Нет продаж за период.</p>
         ) : (
           <ul>
-            {top.data.rows.map((row, i) => (
+            {/* Half-тайл фиксированной высоты вмещает 5 строк без внутреннего скролла (канон плотности). */}
+            {top.data.rows.slice(0, 5).map((row, i) => (
               <li key={`${row.name}-${i}`} className="flex items-center gap-3 border-t border-border py-2.5 first:border-t-0">
                 <span className="w-5 shrink-0 text-center text-xs font-medium tabular-nums text-muted-foreground">{i + 1}</span>
                 <span className="min-w-0 flex-1 truncate text-sm text-foreground">{row.name}</span>

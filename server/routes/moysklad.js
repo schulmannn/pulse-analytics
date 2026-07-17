@@ -4,7 +4,8 @@ const { kopecksToRub } = require('../lib/msClient');
 const { hasWorkspaceRole } = require('../middleware/tenant');
 
 /**
- * Роуты МойСклада (/api/ms/{connect,summary,top-products,status,account}) — серверная половина
+ * Роуты МойСклада (/api/ms/{connect,summary,top-products,status,account,backfill,backfill-status})
+ * — серверная половина
  * источника «склад», зеркально Instagram-вертикали: connect валидирует токен живыми
  * identity-вызовами и сохраняет его ТОЛЬКО шифрованным (lib/ms_crypto), data-роуты резолвят
  * канал тем же механизмом, что resolveIg (?channel= / заголовок x-channel-id, дефолт через
@@ -14,7 +15,7 @@ const { hasWorkspaceRole } = require('../middleware/tenant');
  * его только в заголовке запроса). days=0 («Всё») обслуживается ИЗ АРХИВА ms_daily (его копит
  * jobs/msCollectionJob) — живых вызовов МС не делает и токена не требует.
  */
-function registerMsRoutes({ app, requireAuth, db, msCrypto, msFetch, cacheGet, cacheSet, cache, log }) {
+function registerMsRoutes({ app, requireAuth, db, msCrypto, msFetch, msBackfill, cacheGet, cacheSet, cache, log }) {
   // Узкий enum периодов ДО кэш-ключа (как nearestOf у IG): произвольный days плодил бы
   // per-value кэш-записи, каждая ценой пары upstream-запросов. 0 = «Всё» (архив ms_daily,
   // upstream-вызовов нет). Не-enum → дефолт 30.
@@ -235,6 +236,62 @@ function registerMsRoutes({ app, requireAuth, db, msCrypto, msFetch, cacheGet, c
       // Кэш-ответы канала собраны отозванным подключением — выкидываем сразу, а не по TTL.
       msCachePurge(resolved.channel.id);
       res.json({ ok: true });
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  // POST /api/ms/backfill — запустить чанковый бэкфилл заказов покупателей в архив ms_orders
+  // (движок jobs/msBackfillJob). Admin-действие воркспейса (образец DELETE /api/ms/account):
+  // прогон тянет ВСЮ историю аккаунта у МС. Сам прогон — fire-and-forget: ответ сразу, durable
+  // прогресс движок ведёт в ms_backfill_state, UI забирает его из GET /api/ms/backfill-status.
+  // resolveMs (с расшифровкой) ДО старта: нерабочий токен/ключ даёт честный 503/401 сейчас,
+  // а не тихий сбой в фоне. Повторный вызов при живом прогоне → 409 (движок single-flight'ит
+  // и сам — на случай гонки двух запросов в одном процессе).
+  app.post('/api/ms/backfill', requireAuth, async (req, res, next) => {
+    try {
+      const ms = await resolveMs(req, res);
+      if (!ms) return;
+      if (!hasWorkspaceRole(ms.channel, req.user, 'admin')) {
+        return res.status(403).json({ error: 'Недостаточно прав в этом воркспейсе' });
+      }
+      if (await msBackfill.isBusy(ms.channel.id)) {
+        return res.status(409).json({ error: 'Загрузка уже идёт' });
+      }
+      msBackfill.start(ms.channel.id).then(
+        (out) => log('info', 'ms_backfill_finished', {
+          channelId: ms.channel.id, status: out && out.status, fetched: out && out.fetched,
+        }),
+        // Исход-ошибка уже записана движком в state (UI её увидит) — здесь только журнал.
+        (e) => log('warn', 'ms_backfill_failed', { channelId: ms.channel.id, error: e && e.message }),
+      );
+      res.json({ ok: true, status: 'running' });
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  // GET /api/ms/backfill-status — живой прогресс бэкфилла. СОЗНАТЕЛЬНО без memoryCache: UI
+  // поллит счётчик во время прогона, TTL-кэш показывал бы замороженный прогресс; чтения дешёвые
+  // (две PK/индекс-выборки). resolveMs без требования admin — смотреть прогресс может любой
+  // участник воркспейса, форма 403/404/503 совпадает с data-роутами. fetched может отличаться
+  // от total: оценка снята на старте, заказы создавались во время прогона — это ок.
+  app.get('/api/ms/backfill-status', requireAuth, async (req, res, next) => {
+    try {
+      const ms = await resolveMs(req, res);
+      if (!ms) return;
+      const [state, ordersInDb] = await Promise.all([
+        db.getMsBackfillState(ms.channel.id),
+        db.countMsOrders(ms.channel.id),
+      ]);
+      res.json({
+        status: state ? state.status : 'idle',
+        fetched: state ? Number(state.fetched_count) || 0 : 0,
+        total: state && state.total_estimate != null ? Number(state.total_estimate) : null,
+        cursor_month: state && state.cursor_from ? String(state.cursor_from).slice(0, 7) : null,
+        error: state && state.error ? state.error : null,
+        orders_in_db: ordersInDb,
+      });
     } catch (e) {
       next(e);
     }

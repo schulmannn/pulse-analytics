@@ -35,6 +35,7 @@ const EXPECTED_FUNCTIONS = [
   'listCentralPostsMissingMedia',
   'saveRawSnapshot', 'pruneRawSnapshots', 'pruneIgMediaDaily', 'pruneIngestReceipts', 'rollupChannelMonthly',
   'upsertIgDaily', 'upsertIgMediaDaily', 'upsertMsDaily',
+  'upsertMsOrders', 'countMsOrders', 'getMsBackfillState', 'setMsBackfillState',
   // analytics reads (finding 5: контракт доступа — Internal для cron/service, ForActor для роутов;
   // голого un-gated db.getChannelHistory/getSnapshot/… в публичном API больше НЕТ)
   'getChannelHistoryInternal', 'getMentionsHistoryInternal', 'getMentionsArchiveInternal',

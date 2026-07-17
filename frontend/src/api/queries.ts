@@ -570,6 +570,32 @@ export function useMsStatus() {
   });
 }
 
+const MsBackfillStatusSchema = z
+  .object({
+    status: z.string(),
+    fetched: z.number(),
+    total: z.number().nullable().optional(),
+    cursor_month: z.string().nullable().optional(),
+    orders_in_db: z.number().optional(),
+    error: z.string().nullable().optional(),
+  })
+  .passthrough();
+type MsBackfillStatus = z.infer<typeof MsBackfillStatusSchema>;
+
+export function useMsBackfillStatus(enabled: boolean) {
+  const { channelId } = useSelectedChannel();
+  // Явные дженерики обязательны: inline-refetchInterval, читающий query.state.data,
+  // зацикливает вывод TQueryFnData и схлопывает тип данных в {}.
+  return useQuery<MsBackfillStatus, Error>({
+    enabled: enabled && channelId != null,
+    queryKey: ['ms-backfill', channelId],
+    retry: false,
+    // Живой прогресс: пока история грузится — опрос каждые 2с; в покое интервала нет.
+    refetchInterval: (query) => (query.state.data?.status === 'running' ? 2000 : false),
+    queryFn: ({ signal }) => apiGet('/api/ms/backfill-status', MsBackfillStatusSchema, { signal, channelId }),
+  });
+}
+
 export function useMsSummary(days: number) {
   const { channelId } = useSelectedChannel();
   return useQuery({
