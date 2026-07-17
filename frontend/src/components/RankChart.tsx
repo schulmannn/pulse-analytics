@@ -19,7 +19,7 @@ function DeltaText({ current, base }: { current: number; base: number | null | u
   if (base == null || base <= 0) return null;
   const d = ((current - base) / base) * 100;
   return (
-    <span className={`text-xs font-medium tabular-nums ${d >= 0 ? 'text-verdant' : 'text-ember'}`}>
+    <span className="text-xs font-medium tabular-nums text-muted-foreground">
       {d >= 0 ? '▲' : '▼'}
       {Math.abs(d).toFixed(1)}%
     </span>

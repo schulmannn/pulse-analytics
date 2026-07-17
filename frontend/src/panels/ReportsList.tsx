@@ -131,7 +131,7 @@ function ReportsListDesktop() {
               aria-label="Поиск отчётов"
               className="h-9 w-64 max-w-full rounded border border-border bg-background px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
             />
-            <div className="flex overflow-hidden rounded border border-border" role="group" aria-label="Фильтр отчётов">
+            <div className="flex overflow-hidden rounded-full border border-border" role="group" aria-label="Фильтр отчётов">
               {(
                 [
                   ['all', 'Все'],

@@ -88,7 +88,7 @@ export function ExpandableChart({ title, children, renderExpanded, renderExpande
           onClick={() => setIsOpen(true)}
           aria-label="Развернуть график"
           title="Развернуть график"
-          className="absolute right-1 top-1 z-10 rounded border border-transparent p-1 text-muted-foreground transition-colors hover:border-border hover:bg-background hover:text-foreground"
+          className="absolute right-1 top-1 z-10 rounded-full border border-transparent p-1 text-muted-foreground transition-colors hover:border-border hover:bg-background hover:text-foreground"
         >
           <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
             <path d="M7 17 17 7M9 7h8v8" strokeLinecap="round" strokeLinejoin="round" />
@@ -235,7 +235,7 @@ export function ChartExpandOverlay({ title, children, renderExpanded, renderExpa
                   </button>
                 ))}
               {grainable && (
-                <div role="group" aria-label="Грануляция" className="flex shrink-0 overflow-hidden rounded border border-border">
+                <div role="group" aria-label="Грануляция" className="flex shrink-0 overflow-hidden rounded-full border border-border">
                   {(['day', 'week', 'month'] as const).map((g) => (
                     <button
                       key={g}
@@ -264,7 +264,7 @@ export function ChartExpandOverlay({ title, children, renderExpanded, renderExpa
                 </button>
               )}
               {renderExpandedBar && (
-                <div role="group" aria-label="Тип графика" className="ml-auto flex shrink-0 overflow-hidden rounded border border-border">
+                <div role="group" aria-label="Тип графика" className="ml-auto flex shrink-0 overflow-hidden rounded-full border border-border">
                   <OverlayKindButton kind="line" active={kind === 'line'} onSelect={setKind} />
                   <OverlayKindButton kind="bar" active={kind === 'bar'} onSelect={setKind} />
                 </div>

@@ -70,8 +70,10 @@ export interface KpiCardProps {
     already frames them, and a bg-background plate inside a card read as a sharp-cornered inset
     box (owner report on the IG «Показатели» hero; the TG KpiGrid rule). */
 export function KpiCard({ label, value, hint, trend, deltaText, deltaTone, onDrill }: KpiCardProps) {
-  const deltaColor =
-    deltaTone === 'up' ? 'text-verdant' : deltaTone === 'down' ? 'text-ember' : 'text-muted-foreground';
+  // Quiet register (steep): the delta reads muted — direction lives in its sign/arrow, never in
+  // an evaluative colour. deltaTone stays in the props contract for call-site compatibility.
+  void deltaTone;
+  const deltaColor = 'text-muted-foreground';
   return (
     <div className="py-1">
       {/* Паритет с TG StatTile (аудит: «twin» расходился кеглем и базовой линией дельты). */}
@@ -140,7 +142,7 @@ export function KpiHero({
               to={drillTo}
               aria-label={`Разбор: ${label}`}
               title="Подробный разбор"
-              className="absolute right-1 top-1 z-10 rounded border border-transparent p-1 text-muted-foreground transition-colors hover:border-border hover:bg-background hover:text-foreground"
+              className="absolute right-1 top-1 z-10 rounded-full border border-transparent p-1 text-muted-foreground transition-colors hover:border-border hover:bg-background hover:text-foreground"
             >
               <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                 <path d="M7 17 17 7M9 7h8v8" strokeLinecap="round" strokeLinejoin="round" />
@@ -345,13 +347,14 @@ export function SubscriberMovement({
   net: { cur: number; prev: number; hasCur: boolean; hasPrev: boolean };
   compact?: boolean;
 }) {
+  // Quiet register (steep): signs (+/−) carry direction; no evaluative red/green on the stats.
   const cells = [
-    { label: 'Подписки', text: follows.hasCur ? `+${fmt.num(follows.cur)}` : '—', color: follows.hasCur ? 'text-verdant' : 'text-muted-foreground' },
-    { label: 'Отписки', text: unfollows.hasCur ? `−${fmt.num(unfollows.cur)}` : '—', color: unfollows.hasCur ? 'text-ember' : 'text-muted-foreground' },
+    { label: 'Подписки', text: follows.hasCur ? `+${fmt.num(follows.cur)}` : '—', color: follows.hasCur ? 'text-foreground' : 'text-muted-foreground' },
+    { label: 'Отписки', text: unfollows.hasCur ? `−${fmt.num(unfollows.cur)}` : '—', color: unfollows.hasCur ? 'text-foreground' : 'text-muted-foreground' },
     {
       label: 'Чистый прирост',
       text: net.hasCur ? signedNum(net.cur) : '—',
-      color: !net.hasCur ? 'text-muted-foreground' : net.cur > 0 ? 'text-verdant' : net.cur < 0 ? 'text-ember' : 'text-foreground',
+      color: net.hasCur ? 'text-foreground' : 'text-muted-foreground',
     },
   ];
   return (
@@ -422,7 +425,7 @@ export function IgAudienceBody({ ig }: { ig: IgData }) {
           <div className="flex items-baseline gap-2">
             <div className="kpi-accent text-hero font-medium leading-none tabular-nums tracking-tight">{fmt.kpi(ig.followers)}</div>
             {net.hasCur && net.cur !== 0 && (
-              <span className={`text-sm font-medium tabular-nums ${net.cur > 0 ? 'text-verdant' : 'text-ember'}`}>
+              <span className="text-sm font-medium tabular-nums text-muted-foreground">
                 {signedNum(net.cur)}
               </span>
             )}

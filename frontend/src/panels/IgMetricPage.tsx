@@ -424,7 +424,7 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
             defaultSize="full"
             noExpand
             action={
-              <div role="group" aria-label="Тип графика" className="flex shrink-0 overflow-hidden rounded border border-border">
+              <div role="group" aria-label="Тип графика" className="flex shrink-0 overflow-hidden rounded-full border border-border">
                 {(['line', 'bar'] as const).map((k) => (
                   <button
                     key={k}

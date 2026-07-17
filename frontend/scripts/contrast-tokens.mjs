@@ -48,11 +48,14 @@ const over = (fg, bg, alpha) => fg.map((c, i) => c * alpha + bg[i] * (1 - alpha)
 
 /** Resolve `--role: var(--target);` aliases (the chart-role tokens) into a parsed palette by copying
     the target's channels. The role block is theme-agnostic in CSS (var() resolves per theme at
-    runtime), so the SAME alias list applies to both the light and dark palettes. */
+    runtime), so the SAME alias list applies to both the light and dark palettes. An alias must
+    NEVER overwrite a token the theme's own block defines explicitly — in CSS the more specific
+    declaration wins, and without this guard :root's `--chart-N-accent: var(--chart-N)` clobbered
+    dark's explicit steep-pastels, silently gating the dark accent pairs against phantom colours. */
 function applyAliases(tokens) {
   for (const m of css.matchAll(/--([a-z0-9-]+):\s*var\(--([a-z0-9-]+)\)\s*;/g)) {
     const [, name, target] = m;
-    if (tokens[target]) tokens[name] = tokens[target];
+    if (tokens[target] && !tokens[name]) tokens[name] = tokens[target];
   }
   return tokens;
 }

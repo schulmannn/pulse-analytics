@@ -625,7 +625,7 @@ export function MetricPage() {
             defaultSize="full"
             noExpand
             action={
-              <div role="group" aria-label="Тип графика" className="flex shrink-0 overflow-hidden rounded border border-border">
+              <div role="group" aria-label="Тип графика" className="flex shrink-0 overflow-hidden rounded-full border border-border">
                 {chartTypes.map((kind) => (
                   <ChartTypeButton
                     key={kind}
@@ -852,7 +852,7 @@ export function MetricPage() {
       {/* Тулбар — канон sticky-хедеров (solid bg + hairline, без blur/тени/полупрозрачности):
           плавающий полупрозрачный пилл читался как баг — строки «Топ постов» просвечивали сквозь. */}
       <div className="sticky bottom-0 z-10 -mx-4 flex flex-wrap items-center gap-2 border-t border-border bg-background px-4 py-2 sm:-mx-6 sm:px-6 print:hidden">
-        <div role="group" aria-label="Гранулярность" className="flex overflow-hidden rounded border border-border">
+        <div role="group" aria-label="Гранулярность" className="flex overflow-hidden rounded-full border border-border">
           {(['day', 'week', 'month'] as Grain[]).map((g) => (
             <button
               key={g}
@@ -911,7 +911,7 @@ export function MetricPage() {
               <div
                 role="dialog"
                 aria-label="Свой диапазон дат"
-                className="absolute bottom-full right-0 z-popover mb-2 rounded-lg border border-border bg-popover p-3"
+                className="absolute bottom-full right-0 z-popover mb-2 rounded-xl border border-border bg-popover p-3"
               >
                 <DateRangePicker
                   value={range}
@@ -985,7 +985,7 @@ export function SegSelect<T extends string>({
   ariaLabel: string;
 }) {
   return (
-    <div role="group" aria-label={ariaLabel} className="mb-3 flex overflow-hidden rounded border border-border">
+    <div role="group" aria-label={ariaLabel} className="mb-3 flex overflow-hidden rounded-full border border-border">
       {options.map((opt) => (
         <button
           key={opt.value}

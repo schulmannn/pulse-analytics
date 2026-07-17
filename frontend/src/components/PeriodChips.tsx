@@ -91,7 +91,7 @@ export function PeriodChips({
             <>
               {/* Scrim = клик мимо; Esc обрабатывает keydown-эффект выше. */}
               <div className="fixed inset-0 z-popover" aria-hidden="true" onClick={() => setPickerOpen(false)} />
-              <div className="absolute right-0 top-full z-popover mt-2 rounded-lg border border-border bg-popover p-3">
+              <div className="absolute right-0 top-full z-popover mt-2 rounded-xl border border-border bg-popover p-3">
                 <DateRangePicker
                   value={range ?? null}
                   onApply={(r) => {

@@ -130,7 +130,7 @@ export function DateRangePicker({ value, onApply, onReset }: Props) {
           type="button"
           onClick={() => shiftMonth(-1)}
           aria-label="Предыдущий месяц"
-          className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          className="rounded-full p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         >
           <Chevron dir="left" />
         </button>
@@ -142,7 +142,7 @@ export function DateRangePicker({ value, onApply, onReset }: Props) {
           onClick={() => shiftMonth(1)}
           disabled={atCurrentMonth}
           aria-label="Следующий месяц"
-          className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+          className="rounded-full p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
         >
           <Chevron dir="right" />
         </button>

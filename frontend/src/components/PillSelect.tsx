@@ -272,7 +272,7 @@ export function PillSelect<T extends string = string>({
               aria-label={ariaLabel}
               aria-activedescendant={activeIndex >= 0 ? optionId(activeIndex) : undefined}
               className={cn(
-                'fixed max-h-[min(320px,60vh)] min-w-[8rem] overflow-y-auto rounded-lg border border-border bg-popover p-1 shadow-[0_12px_32px_rgba(0,0,0,0.22)] dark:border-white/10 dark:shadow-[0_14px_36px_rgba(0,0,0,0.48)]',
+                'fixed max-h-[min(320px,60vh)] min-w-[8rem] overflow-y-auto rounded-xl border border-border bg-popover p-1 shadow-[0_12px_32px_rgba(0,0,0,0.22)] dark:border-white/10 dark:shadow-[0_14px_36px_rgba(0,0,0,0.48)]',
                 popupLayer,
               )}
               style={{

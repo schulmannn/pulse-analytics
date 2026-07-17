@@ -64,7 +64,7 @@ function DemoBanner() {
       <button
         type="button"
         onClick={exitDemo}
-        className="ml-auto shrink-0 rounded border border-border bg-background px-3 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+        className="btn-pill ml-auto shrink-0 border border-border bg-background px-3 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted"
       >
         Выйти из демо
       </button>

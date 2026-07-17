@@ -127,15 +127,16 @@
     color-scheme: dark;
     --background: 0 0% 4%;             /* neutral near-black canvas #0a0a0a (steep-style) */
     --foreground: 0 0% 95%;            /* neutral off-white */
-    --card: 0 0% 8%;                   /* lifted surface #141414 — widgets */
+    --card: 228 6% 11%;                /* lifted cool slate #1a1b1e — flat steep card (владелец:
+                                          прежний #141414 с сизой размывкой читался «серовато») */
     --card-foreground: 0 0% 95%;
-    --popover: 0 0% 11%;               /* menus float above #1c1c1c */
+    --popover: 228 6% 14%;             /* menus float above the slate card #212227 */
     --popover-foreground: 0 0% 95%;
     --primary: 219 80% 68%;
     --primary-foreground: 0 0% 4%;     /* text on blue button = new page black */
-    --secondary: 0 0% 13%;
+    --secondary: 228 5% 15%;
     --secondary-foreground: 0 0% 95%;
-    --muted: 0 0% 13%;
+    --muted: 228 5% 15%;
     --muted-foreground: 0 0% 58%;
     --accent: 219 40% 22%;
     --accent-foreground: 219 80% 78%;
@@ -150,8 +151,9 @@
 
     --brand-iris: 219 80% 70%;
     --brand-iris-soft: 219 80% 76%;
-    --card-tint: 219 26% 62%;          /* default card tint — lifted for the near-black --card */
-    --card-tint-alpha: 0.11;
+    --card-tint: 219 26% 62%;          /* hover-only in dark: at rest the card is FLAT slate
+                                          (steep) — the resting wash is what read «серовато» */
+    --card-tint-alpha: 0;
     --brand-verdant: 147 45% 52%;
     --brand-ember: 11 78% 62%;
     --brand-ember-strong: 11 78% 66%;
@@ -160,8 +162,8 @@
     --amber-tint: 39 30% 18%;
     --green-tint: 147 25% 16%;
     --blue-tint: 219 40% 20%;
-    /* Above card (8%) AND popover (11%) so row-hover reads on both surfaces. */
-    --hover-row: 0 0% 15%;
+    /* Above card (11%) AND popover (14%) so row-hover reads on both surfaces. */
+    --hover-row: 228 5% 18%;
     --avatar: 0 0% 22%;
 
     /* Chip identity tints, dark: deeper fields + lifted inks (same 6 hues as light). */
@@ -790,5 +792,5 @@ section[data-narr-link] {
 }
 .dark section[data-narr-link] {
   border-color: rgb(255 255 255 / 0.12);
-  --card-tint-alpha: 0.18;
+  --card-tint-alpha: 0.08;
 }

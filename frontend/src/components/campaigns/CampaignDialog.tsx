@@ -179,7 +179,7 @@ export function CampaignDialog({
 
           <div>
             <span className="text-xs font-medium text-muted-foreground">Статус</span>
-            <div className="mt-1.5 flex overflow-hidden rounded border border-border">
+            <div className="mt-1.5 flex overflow-hidden rounded-full border border-border">
               {CAMPAIGN_STATUSES.map((s) => (
                 <button
                   key={s}

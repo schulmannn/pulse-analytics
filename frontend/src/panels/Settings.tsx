@@ -165,7 +165,7 @@ export function Settings() {
               type="button"
               onClick={close}
               aria-label="Закрыть настройки"
-              className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              className="rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             >
               <SettingsIcon name="close" className="h-4 w-4" />
             </button>

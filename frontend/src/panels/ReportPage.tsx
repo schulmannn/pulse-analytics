@@ -535,7 +535,7 @@ function ReportDocumentBody({
               onClick={() => setRenaming(true)}
               title="Переименовать отчёт"
               aria-label="Переименовать отчёт"
-              className="shrink-0 self-center rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground print:hidden"
+              className="shrink-0 self-center rounded-full p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground print:hidden"
             >
               <PencilGlyph className="h-4 w-4" />
             </button>
@@ -584,7 +584,7 @@ function ReportDocumentBody({
                 @{channelName} ⌄
               </button>
               {channelOpen && (
-                <div className="absolute left-0 top-full z-popover mt-1 w-52 rounded border border-border bg-card p-1">
+                <div className="absolute left-0 top-full z-popover mt-1 w-52 rounded-xl border border-border bg-card p-1">
                   <button
                     type="button"
                     onClick={() => {
