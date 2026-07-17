@@ -542,6 +542,21 @@ export function useChannels() {
   });
 }
 
+// ── Аннотации-события трендов (chart_annotations): флажки «реклама / пост-хит» на графике ────
+const AnnotationSchema = z.object({ id: z.number(), day: z.string(), label: z.string() }).passthrough();
+const AnnotationsResponseSchema = z.object({ annotations: z.array(AnnotationSchema).default([]) }).passthrough();
+export type ChartAnnotation = z.infer<typeof AnnotationSchema>;
+
+export function useAnnotations(channelId: number | null) {
+  return useQuery({
+    enabled: channelId != null,
+    queryKey: ['annotations', channelId],
+    staleTime: STALE_ARCHIVE,
+    retry: false,
+    queryFn: ({ signal }) => apiGet(`/api/channels/${channelId}/annotations`, AnnotationsResponseSchema, { signal }),
+  });
+}
+
 export function useChannelKeys(id: number | null) {
   return useQuery({
     enabled: id != null,

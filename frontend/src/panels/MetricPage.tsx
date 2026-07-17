@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom';
-import { useChannels, useHistory, useTgFull } from '@/api/queries';
+import { useQueryClient } from '@tanstack/react-query';
+import { useAnnotations, useChannels, useHistory, useTgFull } from '@/api/queries';
+import { apiSend } from '@/api/client';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { usePeriod } from '@/lib/period';
 import type { PeriodDays } from '@/lib/period';
@@ -231,6 +233,12 @@ export function MetricPage() {
   const { data, isPending, isError, error } = useTgFull(days, { windowPair: true });
   const { data: history } = useHistory(730);
   const { channelId } = useSelectedChannel();
+  // Флажки-события на линии (артефакт v2 п.7): бэкенд chart_annotations существовал без фронта.
+  const annotationsQuery = useAnnotations(channelId);
+  const queryClient = useQueryClient();
+  const [annLabel, setAnnLabel] = useState('');
+  const [annBusy, setAnnBusy] = useState(false);
+  const [annError, setAnnError] = useState<string | null>(null);
   const { data: channelsData } = useChannels();
   const [openPost, setOpenPost] = useState<NormalizedPost | null>(null);
 
@@ -386,10 +394,35 @@ export function MetricPage() {
   const valueFmt = metricKey === 'subscribers' ? fmt.num : fmt.short;
   // День недели в тултипе (артефакт v2, steep): «чт, 2 июл: 2 800». Только на дневной грануле
   // ограниченного окна — там индекс ↔ календарный день точен (та же арифметика, что pinnedDayKey).
+  const dayAddressable = effGrain === 'day' && winFrom != null;
   const titles = series.values.map((v, i) => {
-    const wd = effGrain === 'day' && winFrom != null ? `${WEEKDAY_FMT.format(new Date(winFrom + i * DAY_MS))}, ` : '';
+    const wd = dayAddressable ? `${WEEKDAY_FMT.format(new Date(winFrom! + i * DAY_MS))}, ` : '';
     return `${wd}${series.labels[i]}: ${valueFmt(v)}`;
   });
+  // Заголовки структурной ховер-карточки (дата с днём недели, без значения) + СВОИ даты строк
+  // сравнения («Пред. период · вт, 18 июн» — артефакт v2 п.5).
+  const hoverTitles = dayAddressable
+    ? series.values.map((_, i) => `${WEEKDAY_FMT.format(new Date(winFrom! + i * DAY_MS))}, ${series.labels[i]}`)
+    : undefined;
+  const ghostTitles =
+    dayAddressable && baseWin
+      ? series.values.map((_, i) => `${WEEKDAY_FMT.format(new Date(baseWin.from + i * DAY_MS))}, ${fmt.day(baseWin.from + i * DAY_MS)}`)
+      : undefined;
+  // Флажки: день аннотации ('YYYY-MM-DD') → индекс точки текущего окна; несколько событий одного
+  // дня склеиваются в одну подпись.
+  const annotations = annotationsQuery.data?.annotations ?? [];
+  const chartFlags = (() => {
+    if (!dayAddressable || annotations.length === 0) return undefined;
+    const indexByDay = new Map<string, number>();
+    for (let i = 0; i < series.values.length; i++) indexByDay.set(localDayKey(winFrom! + i * DAY_MS), i);
+    const byIndex = new Map<number, string>();
+    for (const a of annotations) {
+      const i = indexByDay.get(a.day);
+      if (i == null) continue;
+      byIndex.set(i, byIndex.has(i) ? `${byIndex.get(i)} · ${a.label}` : a.label);
+    }
+    return byIndex.size > 0 ? [...byIndex].map(([i, label]) => ({ i, label })) : undefined;
+  })();
 
   // Уровневая метрика (Подписчики): бары УРОВНЯ от нуля почти все во всю высоту — падение
   // визуально теряется (скриншот владельца: «непонятно, что происходит падение»). Как на
@@ -576,6 +609,36 @@ export function MetricPage() {
     }
   };
 
+  // ── События дня (chart_annotations): создание/удаление из панели пина ────────────────────
+  const addAnnotation = async (dayKey: string) => {
+    const label = annLabel.trim();
+    if (!label || !channelId || annBusy) return;
+    setAnnBusy(true);
+    setAnnError(null);
+    try {
+      await apiSend('POST', `/api/channels/${channelId}/annotations`, { day: dayKey, label });
+      setAnnLabel('');
+      await queryClient.invalidateQueries({ queryKey: ['annotations', channelId] });
+    } catch {
+      setAnnError('Не удалось сохранить событие — нужны права участника воркспейса.');
+    } finally {
+      setAnnBusy(false);
+    }
+  };
+  const removeAnnotation = async (annId: number) => {
+    if (!channelId || annBusy) return;
+    setAnnBusy(true);
+    setAnnError(null);
+    try {
+      await apiSend('DELETE', `/api/channels/${channelId}/annotations/${annId}`);
+      await queryClient.invalidateQueries({ queryKey: ['annotations', channelId] });
+    } catch {
+      setAnnError('Не удалось удалить событие.');
+    } finally {
+      setAnnBusy(false);
+    }
+  };
+
   const chartTitle =
     chartType === 'rank'
       ? `Рейтинг · ${DIM_LABEL[dim].toLowerCase()}`
@@ -595,6 +658,7 @@ export function MetricPage() {
   const pinnedIsChart = chartType === 'line' || (chartType === 'bar' && !isLevel);
   const canResolveDay = field != null && effGrain === 'day' && winFrom != null;
   const pinnedDayKey = pinnedValid != null && canResolveDay ? localDayKey(winFrom! + pinnedValid * DAY_MS) : null;
+  const pinnedDayFlags = pinnedDayKey ? annotations.filter((a) => a.day === pinnedDayKey) : [];
   const pinnedPosts = pinnedDayKey
     ? normPosts
         .filter((p) => p.date && localDayKey(Date.parse(p.date)) === pinnedDayKey)
@@ -658,6 +722,9 @@ export function MetricPage() {
                   values={series.values}
                   labels={series.labels}
                   titles={titles}
+                  hoverTitles={hoverTitles}
+                  ghostTitles={ghostTitles}
+                  flags={chartFlags}
                   height={chartH}
                   markExtremes
                   markAnomalies={effGrain === 'day' && (metricKey === 'views' || metricKey === 'subscribers')}
@@ -850,6 +917,59 @@ export function MetricPage() {
               }))}
               showPosts={canResolveDay}
               onClose={() => setPinned(null)}
+              footer={
+                pinnedDayKey ? (
+                  <div className="mt-4 border-t border-border pt-3">
+                    {/* События дня (chart_annotations): пин уже выбрал день — здесь событие
+                        создаётся и удаляется; флажок ⚑ появляется на линии. */}
+                    {pinnedDayFlags.length > 0 && (
+                      <div className="space-y-1.5">
+                        {pinnedDayFlags.map((a) => (
+                          <div key={a.id} className="flex items-center gap-2 text-xs">
+                            <span aria-hidden="true" className="shrink-0 text-muted-foreground">⚑</span>
+                            <span className="min-w-0 flex-1 truncate text-foreground">{a.label}</span>
+                            <button
+                              type="button"
+                              aria-label={`Удалить событие «${a.label}»`}
+                              title="Удалить событие"
+                              disabled={annBusy}
+                              onClick={() => void removeAnnotation(a.id)}
+                              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-destructive disabled:opacity-40"
+                            >
+                              <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                                <path d="M6 6l12 12M18 6 6 18" strokeLinecap="round" />
+                              </svg>
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <form
+                      className="mt-2 flex items-center gap-2"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        void addAnnotation(pinnedDayKey);
+                      }}
+                    >
+                      <input
+                        value={annLabel}
+                        onChange={(e) => setAnnLabel(e.target.value)}
+                        maxLength={80}
+                        placeholder="Отметить событие дня — реклама, пост-хит…"
+                        className="h-8 min-w-0 flex-1 rounded border border-border bg-background px-2.5 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
+                      />
+                      <button
+                        type="submit"
+                        disabled={!annLabel.trim() || annBusy}
+                        className="btn-pill shrink-0 border border-border px-3 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        ⚑ Отметить
+                      </button>
+                    </form>
+                    {annError && <p className="mt-1.5 text-2xs text-ember">{annError}</p>}
+                  </div>
+                ) : undefined
+              }
             />
           )}
 

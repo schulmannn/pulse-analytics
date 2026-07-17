@@ -49,6 +49,19 @@ for (const route of ROUTES) {
   });
 }
 
+// «Главная» is per-user, but the DEFAULT desktop board is deterministic: seed it via the
+// empty-state action and hold it to the same density contract — the clipped-chart bug (a chart
+// sized to the whole card body instead of its band) lived exactly on these hero-led cards.
+test('no inner scrollbars — home (seeded defaults)', async ({ page }) => {
+  test.skip((page.viewportSize()?.width ?? 0) < 768, 'desktop-only: autoseed exists only on the desktop empty board');
+  await bootDemo(page, '/home');
+  await page.getByRole('button', { name: 'Собрать по умолчанию' }).click();
+  await page.locator('section h3').first().waitFor({ state: 'visible' });
+  await page.waitForTimeout(800);
+  const overflowing = await overflowingCards(page);
+  expect(overflowing, `card bodies with an inner scrollbar on seeded /home: ${JSON.stringify(overflowing)}`).toEqual([]);
+});
+
 test('chart x-axis labels stay sparse and unrotated on compact charts', async ({ page }) => {
   await bootDemo(page, '/analytics');
   const audit = await page.evaluate(() => {
