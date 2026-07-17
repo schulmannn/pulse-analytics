@@ -7,9 +7,11 @@
 //
 // --yes skips the 5-second abort window (for scripted drills).
 import pg from 'pg';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import readline from 'node:readline';
+import { externalReferencers } from './db-restore-safety.mjs';
+import { sslForDatabase } from './db-ssl.mjs';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 const dir = process.argv[2];
@@ -19,13 +21,7 @@ if (!DATABASE_URL || !dir) {
 }
 const manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'));
 
-function sslFor(url) {
-  if (process.env.PGSSL === 'disable') return false;
-  if (process.env.PGSSL === 'require') return { rejectUnauthorized: false };
-  if (/localhost|127\.0\.0\.1|\.railway\.internal/.test(url)) return false;
-  return { rejectUnauthorized: false };
-}
-const pool = new pg.Pool({ connectionString: DATABASE_URL, max: 2, ssl: sslFor(DATABASE_URL) });
+const pool = new pg.Pool({ connectionString: DATABASE_URL, max: 2, ssl: sslForDatabase(DATABASE_URL) });
 
 function decodeValue(v) {
   if (v && typeof v === 'object' && typeof v.__bytea === 'string') return Buffer.from(v.__bytea, 'base64');
@@ -45,8 +41,10 @@ if (!process.argv.includes('--yes')) {
 const { rows: fkRows } = await pool.query(`
   SELECT tc.table_name AS child, ccu.table_name AS parent
   FROM information_schema.table_constraints tc
-  JOIN information_schema.constraint_column_usage ccu ON ccu.constraint_name = tc.constraint_name
-  WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public'
+  JOIN information_schema.constraint_column_usage ccu
+    ON ccu.constraint_schema = tc.constraint_schema AND ccu.constraint_name = tc.constraint_name
+  WHERE tc.constraint_type = 'FOREIGN KEY'
+    AND tc.table_schema = 'public' AND ccu.table_schema = 'public'
 `);
 const tables = Object.keys(manifest.tables);
 const parentsOf = new Map(tables.map((t) => [t, new Set()]));
@@ -81,20 +79,29 @@ try {
     }
   }
 
-  // Truncate children-last is unnecessary — one CASCADE statement handles the graph atomically.
-  const quoted = tables.filter((t) => t !== 'schema_migrations').map((t) => `"${t}"`).join(', ');
-  await client.query(`TRUNCATE ${quoted} CASCADE`);
+  // Put the whole snapshotted FK graph in one TRUNCATE statement. Deliberately omit CASCADE:
+  // Postgres remains the final fail-closed guard if a dependent table is missed by the friendly
+  // preflight (including a non-public child or a concurrent schema change).
+  const truncateTables = tables.filter((t) => t !== 'schema_migrations');
+  // Give an actionable error for the common case: a newer PUBLIC child table is absent from an
+  // older snapshot. The previous CASCADE restore silently lost those rows.
+  const external = externalReferencers(fkRows, truncateTables);
+  if (external.length > 0) {
+    throw new Error(
+      `refusing to restore: out-of-snapshot table(s) `
+      + `[${external.join(', ')}] that reference snapshotted tables. Snapshot the full schema `
+      + `(or drop/repopulate those tables manually) before restoring.`,
+    );
+  }
+  const quoted = truncateTables.map((t) => `"${t}"`).join(', ');
+  await client.query(`TRUNCATE ${quoted}`);
 
   for (const t of ordered) {
     if (t === 'schema_migrations') continue; // versions belong to the migration runner, not the data
     const file = join(dir, `${t}.jsonl`);
-    let lines;
-    try {
-      lines = readFileSync(file, 'utf8').split('\n').filter(Boolean);
-    } catch {
-      console.warn(`skip ${t}: no file in snapshot`);
-      continue;
-    }
+    // A manifest entry without its JSONL payload is a corrupt/incomplete snapshot. Never leave the
+    // just-truncated table empty and continue: readFileSync must throw so the outer transaction rolls back.
+    const lines = readFileSync(file, 'utf8').split('\n').filter(Boolean);
     // json/jsonb params must go over the wire as STRINGS: node-pg serialises a JS Array parameter
     // as a Postgres array literal ({...}), which is invalid json — the classic pg gotcha.
     const { rows: colTypes } = await client.query(

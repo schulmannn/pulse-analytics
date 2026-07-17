@@ -8,13 +8,19 @@
  */
 const { parseMentionsRange } = require('../lib/mentionsRange');
 
-function registerHistoryRoutes({ app, requireAuth, resolveChannel, db }) {
+function registerHistoryRoutes({ app, requireAuth, resolveChannel, db, log = () => {} }) {
   app.get('/api/history/channel', requireAuth, resolveChannel, async (req, res) => {
-    const days = Math.min(1000, parseInt(req.query.days) || 365);
+    const days = Math.min(1000, parseInt(req.query.days, 10) || 365);
     try {
       res.json({ enabled: db.enabled, rows: await db.getChannelHistoryForActor(req.channel.id, req.user, days) });
-    } catch (e) {
-      res.status(200).json({ enabled: db.enabled, rows: [], error: e.message });
+    } catch (error) {
+      // Degrade to a shaped, empty 200 so the panel never hard-fails; return a stable
+      // non-sensitive message (raw e.message can carry SQL/DSN internals and is surfaced in the UI).
+      log('error', 'history_channel_read_failed', {
+        code: error && error.code ? String(error.code) : 'unknown',
+        request_id: req.requestId,
+      });
+      res.status(200).json({ enabled: db.enabled, rows: [], error: 'История временно недоступна' });
     }
   });
 
@@ -37,8 +43,14 @@ function registerHistoryRoutes({ app, requireAuth, resolveChannel, db }) {
         days, limit, source: req.query.source, range,
       });
       res.json({ enabled: db.enabled, ...(data || { available: false }) });
-    } catch (e) {
-      res.status(200).json({ enabled: db.enabled, available: false, error: e.message });
+    } catch (error) {
+      // Same degradation contract as /channel: shaped 200, stable non-sensitive message. This
+      // `error` is rendered to the user as the panel's reason, so it must not leak internals.
+      log('error', 'history_mentions_read_failed', {
+        code: error && error.code ? String(error.code) : 'unknown',
+        request_id: req.requestId,
+      });
+      res.status(200).json({ enabled: db.enabled, available: false, error: 'История упоминаний временно недоступна' });
     }
   });
 }

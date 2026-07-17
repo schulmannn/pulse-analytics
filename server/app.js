@@ -275,7 +275,7 @@ function createApp(deps) {
   }));
 
   // Postgres-backed history reads are isolated in routes/history.js.
-  registerHistoryRoutes({ app, requireAuth, resolveChannel, db });
+  registerHistoryRoutes({ app, requireAuth, resolveChannel, db, log });
 
   // Bug tracker, crash telemetry and bug attachments are isolated in their own route module.
   registerBugsRoutes({

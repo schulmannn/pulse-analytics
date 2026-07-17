@@ -13,14 +13,17 @@ const { createAdmissionController } = require('../lib/admissionController');
 // are requested at connect time (Meta blog 2025-03-24).
 const IG_OAUTH_SCOPES  = 'instagram_business_basic,instagram_business_manage_insights';
 const IG_STATE_TTL = 10 * 60 * 1000;
+const IG_STATE_COOKIE = 'atlavue_ig_oauth_state';
+const IG_STATE_COOKIE_PATH = '/api/ig/oauth/callback';
+const IG_STATE_MAX_PENDING = 1024;
 
 /**
  * Instagram OAuth (per-channel connect) routes — extracted verbatim from index.js.
  *
  * Owns the oauth-only surface: igOauthConfigured, the signed-state helpers (signIgState/parseIgState)
  * and their HMAC key (derived here from the injected AUTH_SECRET — the domain-separated 'ig-state'
- * subkey), and igCachePurge (only the connect/disconnect flow purges the IG data cache; it iterates
- * the injected `cache` Map). Shared data-layer bits (igConfigured, IG_GRAPH) still live in index.js
+ * subkey), and igCachePurge (only the connect/disconnect flow purges the IG data cache through the
+ * injected bounded-cache contract). Shared data-layer bits (igConfigured, IG_GRAPH) still live in index.js
  * — the IG cron + resolveIg use them — and are injected. igCrypto is the stateless token-encryption
  * singleton. appBase builds the public base URL for the redirect_uri and the SPA bounce.
  */
@@ -28,6 +31,7 @@ function registerIgOauthRoutes({
   app, db, requireAuth, audit, log, fetchWithTimeout, asyncHandler,
   appBase, cache, igConfigured, igCrypto, AUTH_SECRET, IG_GRAPH,
   IG_CLIENT_ID, IG_CLIENT_SECRET, oauthMaxInFlight, oauthAcquireTimeoutMs,
+  oauthStateStore = new Map(),
 }) {
   // Bounded admission for the OAuth callback: it fans out three DEPENDENT external exchanges
   // (code→short→long→/me), each with a multi-second timeout, so an onboarding peak could otherwise
@@ -48,16 +52,30 @@ function registerIgOauthRoutes({
   // so a connect/disconnect flips the UI immediately instead of waiting out the 10-min TTL.
   function igCachePurge(accountId) {
     if (!accountId) return;
-    const id = String(accountId);
-    // Delimiter-aware: match the account id as a whole ':'-segment, so purging id 123 never touches
-    // 1234's keys (a substring `includes(':123')` would). Keys look like ig:<kind>:<accountId>[:<param>].
-    for (const k of cache.keys()) if (k.startsWith('ig:') && k.split(':').includes(id)) cache.delete(k);
+    try {
+      if (!cache || typeof cache.keys !== 'function' || typeof cache.delete !== 'function') {
+        throw new Error('cache contract has no targeted invalidation');
+      }
+      const id = String(accountId);
+      // Delimiter-aware: match the exact account slot, so purging id 123 never touches 1234 or a
+      // different account whose trailing parameter happens to equal 123.
+      for (const k of cache.keys()) {
+        const parts = k.split(':');
+        if (parts[0] === 'ig' && parts[2] === id) cache.delete(k);
+      }
+    } catch (error) {
+      // Cache invalidation is secondary to the already-durable integration mutation. Never turn a
+      // successful connect/disconnect into a false error; stale data will still expire by TTL.
+      log('warn', 'ig_cache_purge_failed', {
+        error: error && error.message ? error.message : 'unknown',
+      });
+    }
   }
 
   // OAuth "state": a signed, expiring blob binding the connect flow to (uid, channelId). The
-  // callback lands WITHOUT a session header (top-level browser redirect from Instagram), so the
-  // signed state is the only trustworthy attribution — HMAC(IG_STATE_KEY, a domain-separated
-  // subkey of AUTH_SECRET) + 10-min expiry + nonce.
+  // callback lands WITHOUT a session header (top-level browser redirect from Instagram), so HMAC
+  // protects attribution while a server-side one-time nonce + HttpOnly cookie provide the required
+  // browser-session/CSRF binding.
   const IG_STATE_KEY = crypto.createHmac('sha256', AUTH_SECRET).update('ig-state').digest();
   function signIgState(payload) {
     const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
@@ -77,15 +95,77 @@ function registerIgOauthRoutes({
     } catch { return null; }
   }
 
+  function cookieValue(req, name) {
+    const raw = req.headers && req.headers.cookie;
+    if (!raw) return '';
+    for (const part of String(raw).split(';')) {
+      const index = part.indexOf('=');
+      if (index < 0 || part.slice(0, index).trim() !== name) continue;
+      try { return decodeURIComponent(part.slice(index + 1).trim()); } catch { return ''; }
+    }
+    return '';
+  }
+
+  function isHttps(req) {
+    try { return new URL(appBase(req)).protocol === 'https:'; } catch { return false; }
+  }
+
+  function writeStateCookie(req, res, value, maxAge) {
+    const attrs = [
+      `${IG_STATE_COOKIE}=${encodeURIComponent(value)}`,
+      `Path=${IG_STATE_COOKIE_PATH}`,
+      'HttpOnly',
+      'SameSite=Lax',
+      `Max-Age=${maxAge}`,
+    ];
+    if (isHttps(req)) attrs.push('Secure');
+    res.setHeader('Set-Cookie', attrs.join('; '));
+  }
+
+  function rememberState(payload) {
+    const now = Date.now();
+    for (const [nonce, pending] of oauthStateStore) {
+      if (!pending || pending.exp <= now) oauthStateStore.delete(nonce);
+    }
+    while (oauthStateStore.size >= IG_STATE_MAX_PENDING) {
+      oauthStateStore.delete(oauthStateStore.keys().next().value);
+    }
+    oauthStateStore.set(payload.nonce, {
+      exp: payload.exp,
+      uid: payload.uid,
+      channelId: payload.channelId,
+      ns: payload.ns,
+    });
+  }
+
+  // OAuth BCP requires the state token to be both one-time and bound to the user agent. The signed
+  // payload prevents tampering; this atomic in-process consume prevents replay (one web replica is
+  // an enforced runtime invariant), and the host-only HttpOnly cookie binds it to the browser that
+  // started the flow. A deploy during the ten-minute window fails closed and the user simply retries.
+  function consumeState(req, payload) {
+    const nonce = payload && typeof payload.nonce === 'string' ? payload.nonce : '';
+    const fromCookie = cookieValue(req, IG_STATE_COOKIE);
+    if (!nonce || !fromCookie || nonce.length !== fromCookie.length) return false;
+    if (!crypto.timingSafeEqual(Buffer.from(nonce), Buffer.from(fromCookie))) return false;
+    const pending = oauthStateStore.get(nonce);
+    if (!pending) return false;
+    oauthStateStore.delete(nonce);
+    return pending.exp > Date.now()
+      && pending.uid === payload.uid
+      && pending.channelId === payload.channelId
+      && pending.ns === payload.ns;
+  }
+
   // ── Instagram OAuth (per-channel connect) ─────────────────────────
   // "Business Login for Instagram" (Instagram API with Instagram Login, no Facebook Page).
   // Flow: start (authed, returns authorize_url) → user authorizes on instagram.com → callback
-  // (credential-free, trusts the signed state) → code→short→long-lived token → stored encrypted
+  // (credential-free, validates one-time browser-bound state) → code→short→long-lived token → stored encrypted
   // against the channel. Inert until IG_CLIENT_ID/IG_CLIENT_SECRET/IG_TOKEN_KEY + a DB are set.
 
   // POST /api/ig/oauth/start — begin connecting an Instagram account to the selected channel.
   // Returns { authorize_url } for a top-level browser navigation (a session header can't survive
-  // the OAuth redirect, so we can't 302 here). The (uid, channelId) are bound into a signed state.
+  // the OAuth redirect, so we can't 302 here). The (uid, channelId) are bound into signed state;
+  // the nonce is also registered server-side and placed in a host-only browser cookie.
   app.post('/api/ig/oauth/start', requireAuth, asyncHandler(async (req, res) => {
     if (!igOauthConfigured()) return res.status(400).json({ error: 'Подключение Instagram не настроено на сервере' });
     // ?new_source=1 — connect the account as its OWN standalone source (a fresh channels row is
@@ -100,7 +180,14 @@ function registerIgOauthRoutes({
       // trusts the signed state, so gating the state mint here covers the whole flow.
       if (!hasWorkspaceRole(ch, req.user, 'admin')) return res.status(403).json({ error: 'Недостаточно прав в этом воркспейсе' });
     }
-    const state = signIgState({ uid: req.user.uid, channelId, ns: newSource ? 1 : 0, nonce: crypto.randomBytes(12).toString('base64url'), exp: Date.now() + IG_STATE_TTL });
+    const payload = {
+      uid: req.user.uid,
+      channelId,
+      ns: newSource ? 1 : 0,
+      nonce: crypto.randomBytes(12).toString('base64url'),
+      exp: Date.now() + IG_STATE_TTL,
+    };
+    const state = signIgState(payload);
     const authorizeUrl = 'https://www.instagram.com/oauth/authorize?' + new URLSearchParams({
       client_id: IG_CLIENT_ID,
       redirect_uri: `${appBase(req)}/api/ig/oauth/callback`,
@@ -109,21 +196,27 @@ function registerIgOauthRoutes({
       state,
     }).toString();
     await audit(req, 'ig_oauth_start', { channelId });
+    rememberState(payload);
+    writeStateCookie(req, res, payload.nonce, Math.ceil(IG_STATE_TTL / 1000));
     res.json({ authorize_url: authorizeUrl });
   }));
 
   // GET /api/ig/oauth/callback — Instagram redirects the user's browser here after they authorize.
-  // No session header (top-level redirect), so trust comes from the signed state. Exchanges the code
-  // for a long-lived token, stores it encrypted against the channel, then bounces the browser back
+  // No session header (top-level redirect), so trust comes from signed attribution plus one-time
+  // browser-bound state. Exchanges the code for a long-lived token, stores it encrypted, then bounces
   // into the SPA with a success/error flag. Never renders tokens; logs stay secret-free.
   app.get('/api/ig/oauth/callback', async (req, res) => {
-    const back = (q) => res.redirect(302, `${appBase(req)}/instagram?${q}`);
+    const back = (q) => {
+      writeStateCookie(req, res, '', 0);
+      return res.redirect(302, `${appBase(req)}/instagram?${q}`);
+    };
     try {
-      if (req.query.error) return back('ig_error=denied');
       if (!igOauthConfigured()) return back('ig_error=server');
       const st = parseIgState(req.query.state);
       const code = String(req.query.code || '');
-      if (!st || !code) return back('ig_error=state');
+      if (!st || !consumeState(req, st)) return back('ig_error=state');
+      if (req.query.error) return back('ig_error=denied');
+      if (!code) return back('ig_error=state');
 
       // Re-verify the user still exists/active and still owns the target channel (state can outlive
       // a permission change).
