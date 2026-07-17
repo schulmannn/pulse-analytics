@@ -10,6 +10,7 @@ import { observeSize } from '@/lib/observeSize';
 import { MetricExplainPanel, MetricExplainTooltip } from '@/components/MetricExplain';
 import { Skeleton } from '@/components/ui/skeleton';
 import { pluralRu } from '@/lib/resolveWidgetMetric';
+import { networkDisplayName } from '@/lib/networks';
 import type { WidgetMeta, WidgetResult } from '@/lib/resolveWidgetMetric';
 import type { WidgetViz } from '@/lib/widgetMetrics';
 import { breakdownTitles, effectiveViz, seriesStats, seriesToChart } from '@/lib/widgetRender';
@@ -182,7 +183,9 @@ export function WidgetRenderer({
 function WidgetMetaLine({ meta, className = '', info, verbose = false }: { meta?: WidgetMeta; className?: string; info?: ReactNode; verbose?: boolean }) {
   const segs: Array<{ key: string; text: string; warn?: boolean }> = [];
   if (meta) {
-    if (verbose && meta.network) segs.push({ key: 'net', text: meta.network === 'ig' ? 'Instagram' : 'Telegram' });
+    // Network label reads from the registry, so a МойСклад widget says «МойСклад», not «Telegram»
+    // (the old `=== 'ig' ? … : 'Telegram'` fell every non-IG network — including ms — to Telegram).
+    if (verbose && meta.network) segs.push({ key: 'net', text: networkDisplayName(meta.network) });
     if (verbose && meta.sourceLabel) segs.push({ key: 'src', text: meta.sourceLabel });
     if (meta.periodLabel) segs.push({ key: 'per', text: meta.periodLabel });
     if (meta.samplePosts != null && meta.samplePosts > 0)

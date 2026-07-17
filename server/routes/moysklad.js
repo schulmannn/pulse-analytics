@@ -65,12 +65,12 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
     const day = String(d.getDate()).padStart(2, '0');
     return `${d.getFullYear()}-${m}-${day}`;
   };
-  // Окно периода: «сегодня-(days-1) 00:00:00» … «сегодня 23:59:00» — границы moment
+  // Окно периода: «сегодня-(days-1) 00:00:00» … «сегодня 23:59:59» — границы moment
   // у отчётов МС включительные, day-серия plotseries отдаёт ровно days точек.
   function periodWindow(days) {
     const now = new Date();
     const from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (days - 1));
-    return { momentFrom: `${fmtDay(from)} 00:00:00`, momentTo: `${fmtDay(now)} 23:59:00` };
+    return { momentFrom: `${fmtDay(from)} 00:00:00`, momentTo: `${fmtDay(now)} 23:59:59` };
   }
   // Нижняя граница того же календарного окна для DB-агрегатов ms_orders: 'YYYY-MM-DD' или
   // null («Всё» = вся история архива). Та же система координат, что periodWindow/движок.
@@ -79,6 +79,64 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
     const now = new Date();
     return fmtDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() - (days - 1)));
   };
+  const isDayKey = (v) => {
+    if (typeof v !== 'string') return false;
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+    if (!match) return false;
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const parsed = new Date(Date.UTC(year, month - 1, day));
+    return parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === day;
+  };
+
+  // Единый разбор периода ВСЕХ data-роутов: пресет days ЛИБО точный произвольный диапазон
+  // (?from&to=YYYY-MM-DD, инклюзивный с обоих концов — окно топбара). Фронт всегда шлёт days
+  // (пресет-фолбэк) рядом с from/to. Возвращает:
+  //   invalid=true — from/to присланы, но кривые/перевёрнуты: роут честно отвечает 400, а не
+  //                  молча расширяет окно.
+  //   sinceDay/untilDay — инклюзивные дневные границы для DB-агрегатов (repo применяет
+  //                       moment>=since и moment<until+1); пресеты и «Всё» заканчиваются сегодня.
+  //   momentFrom/momentTo — инклюзивные 'YYYY-MM-DD HH:MM:SS' границы для ЖИВЫХ отчётов МС;
+  //                         оба null у пресета «Всё» (days=0 — без окна).
+  //   range — true для произвольного диапазона (отличает его от days=0 в ветвлениях роутов).
+  //   periodKey — стабильный кэш-токен ('r:from:to' | 'd:days').
+  function parseMsPeriod(req) {
+    const days = daysOf(req);
+    const rawFrom = req.query.from;
+    const rawTo = req.query.to;
+    if (rawFrom != null || rawTo != null) {
+      if (!isDayKey(rawFrom) || !isDayKey(rawTo) || rawFrom > rawTo) {
+        return { invalid: true };
+      }
+      return {
+        invalid: false, range: true, days,
+        sinceDay: rawFrom, untilDay: rawTo,
+        momentFrom: `${rawFrom} 00:00:00`, momentTo: `${rawTo} 23:59:59`,
+        periodKey: `r:${rawFrom}:${rawTo}`,
+      };
+    }
+    const win = days === 0 ? null : periodWindow(days);
+    const today = fmtDay(new Date());
+    return {
+      invalid: false, range: false, days,
+      // Архив также ограничиваем сегодняшним днём: будущие датированные заказы не должны
+      // попадать в 7/30/90/«Всё», пока top bar показывает окно, заканчивающееся сегодня.
+      sinceDay: sinceDayOf(days), untilDay: today,
+      momentFrom: win ? win.momentFrom : null, momentTo: win ? win.momentTo : null,
+      periodKey: `d:${days}`,
+    };
+  }
+  // Ошибочный диапазон — честный 400 (не «сервис недоступен», не тихое расширение окна).
+  const badRange = (res) =>
+    res.status(400).json({ error: 'Некорректный диапазон дат (ожидается from<=to в формате YYYY-MM-DD)' });
+
+  // Мультивыбор каналов в channel-series: список id жёстко ограничен, чтобы фильтр `= ANY(...)`
+  // и breakdown не разрастались. Разбивку на отдельные серии дополнительно кэпуем читаемым лимитом.
+  const MS_CHANNEL_SERIES_MAX = 20;
+  const MS_CHANNEL_SERIES_GROUP_MAX = 6;
+  const isMsChannelId = (v) =>
+    typeof v === 'string' && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(v);
 
   // Единый маппинг ошибок msFetch для data-роутов. 429 (уже ПОСЛЕ одной внутренней повторной
   // попытки клиента) → честный 503 с retry-хинтом: у МС жёсткий лимит 45 запросов/3с, «зайди
@@ -349,14 +407,16 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
   // days=0 («Всё») — из архива ms_daily, без единого запроса к МС.
   app.get('/api/ms/summary', requireAuth, async (req, res, next) => {
     try {
-      const days = daysOf(req);
+      const period = parseMsPeriod(req);
+      if (period.invalid) return badRange(res);
 
-      if (days === 0) {
+      if (period.days === 0 && !period.range) {
         // Архивная ветка: канал резолвим и 404-им как data-роут (после отключения учётки «Всё»
         // ведёт себя как остальные периоды — connect-CTA), но токен НЕ трогаем: читаем только БД.
+        // Произвольный диапазон сюда НЕ попадает (range=false) — он всегда идёт живым plotseries.
         const resolved = await resolveMsChannel(req, res);
         if (!resolved) return;
-        const cacheKey = `ms:summary:${resolved.channel.id}:0`;
+        const cacheKey = `ms:summary:${resolved.channel.id}:${period.periodKey}`;
         const cached = cacheGet(cacheKey);
         if (cached) return res.json(cached);
         // ForActor — канон tenant-read (боундари-гвард запрещает *Internal в routes); повторный
@@ -388,11 +448,11 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
 
       const ms = await resolveMs(req, res);
       if (!ms) return;
-      const cacheKey = `ms:summary:${ms.channel.id}:${days}`;
+      const cacheKey = `ms:summary:${ms.channel.id}:${period.periodKey}`;
       const cached = cacheGet(cacheKey);
       if (cached) return res.json(cached);
 
-      const { momentFrom, momentTo } = periodWindow(days);
+      const { momentFrom, momentTo } = period;
       const q = `momentFrom=${encodeURIComponent(momentFrom)}&momentTo=${encodeURIComponent(momentTo)}&interval=day`;
       let sales;
       let orders;
@@ -447,27 +507,29 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
   // склада продукта, а лишние пустые месяцы отчёту МС не вредят — строк за них просто нет.
   app.get('/api/ms/top-products', requireAuth, async (req, res, next) => {
     try {
+      const period = parseMsPeriod(req);
+      if (period.invalid) return badRange(res);
       const ms = await resolveMs(req, res);
       if (!ms) return;
-      const days = daysOf(req);
       const limitRaw = parseInt(req.query.limit, 10);
       // Кэп 1..50 ДО кэш-ключа — та же дисциплина ограниченной кардинальности, что у days.
       const limit = Math.min(MS_TOP_LIMIT_MAX, Math.max(1, Number.isFinite(limitRaw) ? limitRaw : MS_TOP_LIMIT_DEFAULT));
-      // days в ключе разводит дорогое «Всё» (час) и живые окна (дефолтный TTL) по разным записям.
-      const cacheKey = `ms:top:${ms.channel.id}:${days}:${limit}`;
+      // periodKey в ключе разводит дорогое «Всё» (час), живые окна и произвольные диапазоны.
+      const cacheKey = `ms:top:${ms.channel.id}:${period.periodKey}:${limit}`;
       const cached = cacheGet(cacheKey);
       if (cached) return res.json(cached);
 
       let momentFrom;
       let momentTo;
-      if (days === 0) {
-        // ForActor — канон tenant-read (как days=0 в summary). oldestDay 'YYYY-MM-DD' → якорь
-        // окна с первого дня того же месяца (полные месяцы читаются человеком как «вся история»).
+      if (period.momentFrom) {
+        // Пресет 7/30/90 или произвольный диапазон — окно уже посчитано разбором периода.
+        ({ momentFrom, momentTo } = period);
+      } else {
+        // days=0 «Всё»: ForActor — канон tenant-read. oldestDay 'YYYY-MM-DD' → якорь окна с
+        // первого дня того же месяца (полные месяцы читаются человеком как «вся история»).
         const oldestDay = await db.getMsOldestOrderDayForActor(ms.channel.id, req.user);
         momentFrom = `${oldestDay ? `${oldestDay.slice(0, 7)}-01` : '2020-01-01'} 00:00:00`;
-        momentTo = `${fmtDay(new Date())} 23:59:00`;
-      } else {
-        ({ momentFrom, momentTo } = periodWindow(days));
+        momentTo = `${fmtDay(new Date())} 23:59:59`;
       }
       const all = [];
       let metaSize = null;
@@ -519,7 +581,8 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
         profit: kopecksToRub(r.profitKopecks),
       }));
       const data = { rows, total: metaSize != null ? metaSize : all.length, truncated };
-      if (days === 0) cacheSet(cacheKey, data, MS_TOP_ALL_CACHE_TTL_MS);
+      // Дорогое «Всё» (полный диапазон архива) кэшируем на час; окна/диапазоны — короткий дефолт.
+      if (period.days === 0 && !period.range) cacheSet(cacheKey, data, MS_TOP_ALL_CACHE_TTL_MS);
       else cacheSet(cacheKey, data);
       res.json(data);
     } catch (e) {
@@ -543,14 +606,17 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
   // молчаливый name:null здесь прятал бы умершее подключение.
   app.get('/api/ms/top-customers', requireAuth, async (req, res, next) => {
     try {
-      const days = daysOf(req);
+      const period = parseMsPeriod(req);
+      if (period.invalid) return badRange(res);
       const ms = await resolveMs(req, res);
       if (!ms) return;
-      const cacheKey = `ms:topcust:${ms.channel.id}:${days}`;
+      const cacheKey = `ms:topcust:${ms.channel.id}:${period.periodKey}`;
       const cached = cacheGet(cacheKey);
       if (cached) return res.json(cached);
 
-      const top = await db.getMsTopCustomersForActor(ms.channel.id, req.user, { sinceDay: sinceDayOf(days) });
+      const top = await db.getMsTopCustomersForActor(ms.channel.id, req.user, {
+        sinceDay: period.sinceDay, untilDay: period.untilDay,
+      });
       // null = словарь недоступен (деградация), Map = удачный резолв; пустой Map — тоже ответ
       // (все контрагенты топа удалены из МС — их имена честно null, но кэшировать можно).
       let names = null;
@@ -576,7 +642,7 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
         }
       }
       const data = {
-        window_days: days,
+        window_days: period.days,
         rows: top.map((r) => ({
           agent_id: r.agent_id,
           // Контрагент удалён/не найден в словаре → name null — фронт покажет заглушку.
@@ -673,11 +739,14 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
   // подключён» здесь отвечает 404 как остальные data-роуты.
   app.get('/api/ms/sales-by-channel', requireAuth, async (req, res, next) => {
     try {
-      const days = daysOf(req);
+      const period = parseMsPeriod(req);
+      if (period.invalid) return badRange(res);
       const ms = await resolveMs(req, res);
       if (!ms) return;
       // ForActor — канон tenant-read (как funnel): повторный ownership-чек дёшев.
-      const rows = await db.getMsSalesByChannelForActor(ms.channel.id, req.user, { sinceDay: sinceDayOf(days) });
+      const rows = await db.getMsSalesByChannelForActor(ms.channel.id, req.user, {
+        sinceDay: period.sinceDay, untilDay: period.untilDay,
+      });
       let dict;
       try {
         dict = await loadChannelsDict(ms);
@@ -705,7 +774,7 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
           sum: kopecksToRub(r.sum_kopecks),
         });
       }
-      res.json({ window_days: days, total_orders: totalOrders, no_channel_orders: noChannelOrders, rows: out });
+      res.json({ window_days: period.days, total_orders: totalOrders, no_channel_orders: noChannelOrders, rows: out });
     } catch (e) {
       next(e);
     }
@@ -718,12 +787,15 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
   // токен здесь не нужен.
   app.get('/api/ms/geography', requireAuth, async (req, res, next) => {
     try {
-      const days = daysOf(req);
+      const period = parseMsPeriod(req);
+      if (period.invalid) return badRange(res);
       const ms = await resolveMs(req, res);
       if (!ms) return;
-      const geo = await db.getMsGeographyForActor(ms.channel.id, req.user, { sinceDay: sinceDayOf(days) });
+      const geo = await db.getMsGeographyForActor(ms.channel.id, req.user, {
+        sinceDay: period.sinceDay, untilDay: period.untilDay,
+      });
       res.json({
-        window_days: days,
+        window_days: period.days,
         total_orders: geo.total_orders,
         no_city_orders: geo.no_city_orders,
         rows: geo.rows.map((r) => ({ city: r.city, orders: r.orders, sum: kopecksToRub(r.sum_kopecks) })),
@@ -733,28 +805,71 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
     }
   });
 
-  // GET /api/ms/channel-series?days=&channel=<id> — дневная серия выручки/заказов, ОПЦИОНАЛЬНО по
-  // одному каналу продаж (слайс 6в: «настроить график по источнику»). channel отсутствует/'all' →
-  // все каналы (итог). Чистый DB-агрегат из архива ms_orders БЕЗ словаря и БЕЗ кэша; серия — только
-  // дни с заказами (фронт дозаполняет нули). channel-параметр валидируем строго: либо 'all', либо
-  // UUID-подобный id канала (иначе игнор → все) — caller-controlled строка идёт только биндом
-  // в SQL, но лишний мусор в фильтр не пускаем. Суммы наружу — в рублях.
+  // GET /api/ms/channel-series?days=&channels=<id,id,…>&breakdown=1 — дневная серия выручки/заказов
+  // по оси каналов продаж (слайс 6в «настроить график по источнику», расширено до мультивыбора).
+  //   channels отсутствует/'all' → все каналы, АГРЕГАТ (Steep: фильтр = агрегация выбранных).
+  //   channels=<список id> → агрегат ТОЛЬКО по выбранным (bounded ≤20, только UUID-подобные id,
+  //                          дубликаты схлопнуты, мусор отброшен — в SQL уходит text[]-бинд).
+  //   breakdown=1 (только при выбранных каналах) → плюс `groups` — по серии на канал (bounded
+  //                          читаемым лимитом; group_total/group_limit говорят об усечении честно).
+  // Обратная совместимость: legacy `channel=<id>` понимается как channels с одним id. Чистый
+  // DB-агрегат из архива ms_orders БЕЗ словаря/кэша; серия — только дни с заказами (фронт дозаполняет
+  // нули). Суммы наружу — в рублях. Произвольный диапазон топбара honored через parseMsPeriod.
   app.get('/api/ms/channel-series', requireAuth, async (req, res, next) => {
     try {
-      const days = daysOf(req);
+      const period = parseMsPeriod(req);
+      if (period.invalid) return badRange(res);
       const ms = await resolveMs(req, res);
       if (!ms) return;
-      const raw = typeof req.query.channel === 'string' ? req.query.channel : '';
-      // 'all'/пусто → null (все каналы); иначе принимаем только строку, похожую на id МС (UUID-хвост).
-      const salesChannelId = !raw || raw === 'all' || !/^[0-9a-fA-F-]{16,}$/.test(raw) ? null : raw;
-      const series = await db.getMsChannelSeriesForActor(ms.channel.id, req.user, {
-        sinceDay: sinceDayOf(days),
-        salesChannelId,
+
+      const raw = typeof req.query.channels === 'string' ? req.query.channels
+        : typeof req.query.channel === 'string' ? req.query.channel   // legacy single
+          : '';
+      // 'all'/пусто → нет выбора (все каналы). Явный список принимается только целиком:
+      // тихо отбросить битый/21-й id означало бы показать данные НЕ по выбранному фильтру.
+      const parsed = raw === 'all' || raw === '' ? [] : raw.split(',').map((s) => s.trim());
+      if (parsed.some((id) => !isMsChannelId(id))) {
+        return res.status(400).json({ error: 'Некорректный идентификатор канала продаж' });
+      }
+      const selected = [...new Set(parsed)];
+      if (selected.length > MS_CHANNEL_SERIES_MAX) {
+        return res.status(400).json({ error: `Можно выбрать не более ${MS_CHANNEL_SERIES_MAX} каналов` });
+      }
+      const salesChannelIds = selected.length ? selected : null;
+      const breakdown = selected.length > 0 && (req.query.breakdown === '1' || req.query.breakdown === 'true');
+
+      const agg = await db.getMsChannelSeriesForActor(ms.channel.id, req.user, {
+        sinceDay: period.sinceDay, untilDay: period.untilDay, salesChannelIds,
       });
+
+      let groups = null;
+      let groupLimit;
+      let groupTotal;
+      if (breakdown) {
+        // Разбивку на отдельные серии кэпуем читаемым лимитом; остаток честно отражают
+        // group_total (сколько выбрано) vs group_limit (сколько серий отдали).
+        const groupIds = selected.slice(0, MS_CHANNEL_SERIES_GROUP_MAX);
+        const flat = await db.getMsChannelSeriesGroupedForActor(ms.channel.id, req.user, {
+          sinceDay: period.sinceDay, untilDay: period.untilDay, salesChannelIds: groupIds,
+        });
+        const byChannel = new Map();
+        for (const r of flat) {
+          if (!byChannel.has(r.sales_channel_id)) byChannel.set(r.sales_channel_id, []);
+          byChannel.get(r.sales_channel_id).push({ day: r.day, orders: r.orders, sum: kopecksToRub(r.sum_kopecks) });
+        }
+        // Порядок серий = порядок выбранных id (стабилен, детерминирован для тестов).
+        groups = groupIds.map((id) => ({ sales_channel_id: id, series: byChannel.get(id) || [] }));
+        groupTotal = selected.length;
+        groupLimit = groupIds.length;
+      }
+
       res.json({
-        window_days: days,
-        channel: salesChannelId,
-        series: series.map((r) => ({ day: r.day, orders: r.orders, sum: kopecksToRub(r.sum_kopecks) })),
+        window_days: period.days,
+        channels: salesChannelIds,
+        series: agg.map((r) => ({ day: r.day, orders: r.orders, sum: kopecksToRub(r.sum_kopecks) })),
+        groups,
+        group_limit: groupLimit,
+        group_total: groupTotal,
       });
     } catch (e) {
       next(e);
@@ -768,11 +883,14 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
   // повторного прогона бэкфилла) в rows не кладётся — уходит счётчиком no_state_orders.
   app.get('/api/ms/funnel', requireAuth, async (req, res, next) => {
     try {
-      const days = daysOf(req);
+      const period = parseMsPeriod(req);
+      if (period.invalid) return badRange(res);
       const ms = await resolveMs(req, res);
       if (!ms) return;
       // ForActor — канон tenant-read (как days=0 в summary): повторный ownership-чек дёшев.
-      const rows = await db.getMsFunnelForActor(ms.channel.id, req.user, { sinceDay: sinceDayOf(days) });
+      const rows = await db.getMsFunnelForActor(ms.channel.id, req.user, {
+        sinceDay: period.sinceDay, untilDay: period.untilDay,
+      });
       const dict = await loadStatesDict(ms);
       let totalOrders = 0;
       let noStateOrders = 0;
@@ -792,7 +910,7 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
           sum: kopecksToRub(r.sum_kopecks),
         });
       }
-      res.json({ window_days: days, total_orders: totalOrders, no_state_orders: noStateOrders, rows: out });
+      res.json({ window_days: period.days, total_orders: totalOrders, no_state_orders: noStateOrders, rows: out });
     } catch (e) {
       next(e);
     }
@@ -803,16 +921,19 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
   // канала (не окна). Чистый DB-агрегат — без кэша; суммы наружу в рублях.
   app.get('/api/ms/customers', requireAuth, async (req, res, next) => {
     try {
-      const days = daysOf(req);
+      const period = parseMsPeriod(req);
+      if (period.invalid) return badRange(res);
       const ms = await resolveMs(req, res);
       if (!ms) return;
-      const data = await db.getMsCustomersForActor(ms.channel.id, req.user, { sinceDay: sinceDayOf(days) });
+      const data = await db.getMsCustomersForActor(ms.channel.id, req.user, {
+        sinceDay: period.sinceDay, untilDay: period.untilDay,
+      });
       // null от ForActor = доступ отозван между resolveMs и чтением (гонка) — честный 403,
       // а не сфабрикованные нули.
       if (!data) return res.status(403).json({ error: 'Нет доступа к этому каналу' });
       const s = data.summary;
       res.json({
-        window_days: days,
+        window_days: period.days,
         summary: {
           customers: s.customers,
           new_customers: s.new_customers,
@@ -851,18 +972,18 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
   // паузой; days=0 — вся история БЕЗ фильтра. Живые вызовы дорогие → кэш 10 минут.
   app.get('/api/ms/returns', requireAuth, async (req, res, next) => {
     try {
-      const days = daysOf(req);
+      const period = parseMsPeriod(req);
+      if (period.invalid) return badRange(res);
       const ms = await resolveMs(req, res);
       if (!ms) return;
-      const cacheKey = `ms:returns:${ms.channel.id}:${days}`;
+      const cacheKey = `ms:returns:${ms.channel.id}:${period.periodKey}`;
       const cached = cacheGet(cacheKey);
       if (cached) return res.json(cached);
 
+      // Окно-фильтр из разбора периода (пресет/диапазон); «Всё» (momentFrom=null) — без фильтра.
       let filterQ = '';
-      if (days !== 0) {
-        const now = new Date();
-        const from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (days - 1));
-        filterQ = `filter=${encodeURIComponent(`moment>=${fmtDay(from)} 00:00:00;moment<=${fmtDay(now)} 23:59:59`)}&`;
+      if (period.momentFrom && period.momentTo) {
+        filterQ = `filter=${encodeURIComponent(`moment>=${period.momentFrom};moment<=${period.momentTo}`)}&`;
       }
       let count = 0;
       let sumKopecks = 0;
@@ -889,7 +1010,7 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
       } catch (e) {
         return sendMsError(res, e, { route: 'returns', channelId: ms.channel.id });
       }
-      const data = { window_days: days, count, sum: kopecksToRub(sumKopecks), truncated };
+      const data = { window_days: period.days, count, sum: kopecksToRub(sumKopecks), truncated };
       cacheSet(cacheKey, data, MS_RETURNS_CACHE_TTL_MS);
       res.json(data);
     } catch (e) {

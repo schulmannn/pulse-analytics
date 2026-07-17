@@ -439,6 +439,7 @@ export function IgAudienceBody({ ig }: { ig: IgData }) {
               area
               strokeWidth={2}
               interactive
+              caption="по дням"
               formatValue={(n) => fmt.num(Math.round(n))}
               className="h-full min-h-14 w-full"
             />

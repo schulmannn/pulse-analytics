@@ -382,7 +382,24 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
   // moment хранит МС-локальное время «как UTC» (процесс и БД — UTC, Railway-канон), поэтому
   // date_trunc/to_char по нему и есть календарь МойСклада. Суммы — КОПЕЙКИ (рубли — граница API);
   // bigint-суммы pg отдаёт строками → на выходе приводим к Number (toMetricNumber).
-  const msSinceDay = (v) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null);
+  const msDay = (v) => {
+    if (typeof v !== 'string') return null;
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+    if (!match) return null;
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const parsed = new Date(Date.UTC(year, month - 1, day));
+    return parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === day
+      ? v
+      : null;
+  };
+  const msSinceDay = msDay;
+  // Верхняя граница окна (тот же формат YYYY-MM-DD). ВКЛЮЧИТЕЛЬНАЯ по дню: SQL применяет её как
+  // `moment < (untilDay + 1)`, поэтому весь день `to` попадает в окно (произвольный диапазон
+  // топбара инклюзивен с обоих концов). null допустим только для внутренних all-time вызовов;
+  // HTTP-периоды передают сегодняшний день и тем самым исключают будущие датированные заказы.
+  const msUntilDay = msDay;
 
   // «Первый заказ клиента» — канон новизны для customers/cohorts: ЗА ВСЮ историю канала (не окна!).
   // DISTINCT ON (agent_id … ORDER BY moment, order_id) даёт ровно ОДНУ first-строку даже при
@@ -401,20 +418,22 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
         FROM ms_orders o
         JOIN firsts f ON f.agent_id = o.agent_id
        WHERE o.channel_id=$1 AND ($2::date IS NULL OR o.moment >= $2::date)
+         AND ($3::date IS NULL OR o.moment < ($3::date + 1))
     )`;
 
   // Воронка статусов: заказы окна GROUP BY state_id (включая NULL — строки до миграции 030 /
   // заказы без статуса), orders DESC. Имя/цвет статуса репо НЕ знает — их мапит словарь
   // metadata/states на границе API (/api/ms/funnel), здесь только устойчивые id и числа.
-  async function getMsFunnelInternal(channelId, { sinceDay = null } = {}) {
+  async function getMsFunnelInternal(channelId, { sinceDay = null, untilDay = null } = {}) {
     if (!enabled || !channelId) return [];
     const { rows } = await pool.query(
       `SELECT state_id, COUNT(*)::int AS orders, COALESCE(SUM(sum_kopecks),0)::bigint AS sum_kopecks
          FROM ms_orders
         WHERE channel_id=$1 AND ($2::date IS NULL OR moment >= $2::date)
+          AND ($3::date IS NULL OR moment < ($3::date + 1))
         GROUP BY state_id
         ORDER BY COUNT(*) DESC, state_id NULLS LAST`,
-      [channelId, msSinceDay(sinceDay)]);
+      [channelId, msSinceDay(sinceDay), msUntilDay(untilDay)]);
     return rows.map((r) => numifyMetrics(r, ['orders', 'sum_kopecks']));
   }
 
@@ -423,13 +442,13 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
   // повторный. repeat_ever (клиенты с ≥2 заказами за всю историю) — глобальная константа канала
   // для окна «Всё», где repeat_customers по определению 0. Серия отдаёт только дни с заказами
   // (нулевые календарные дни дозаполняет фронт — канон mentions.daily/ms_daily).
-  async function getMsCustomersInternal(channelId, { sinceDay = null } = {}) {
+  async function getMsCustomersInternal(channelId, { sinceDay = null, untilDay = null } = {}) {
     const empty = {
       customers: 0, new_customers: 0, repeat_customers: 0, orders_new: 0, orders_repeat: 0,
       sum_new_kopecks: 0, sum_repeat_kopecks: 0, no_agent_orders: 0, repeat_ever: 0,
     };
     if (!enabled || !channelId) return { summary: { ...empty }, series: [] };
-    const params = [channelId, msSinceDay(sinceDay)];
+    const params = [channelId, msSinceDay(sinceDay), msUntilDay(untilDay)];
     const summaryQ = await pool.query(
       `WITH ${MS_FIRSTS_CTE}, ${MS_WIN_CTE}
        SELECT COUNT(DISTINCT w.agent_id)::int AS customers,
@@ -438,10 +457,12 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
               COALESCE(SUM(w.sum_kopecks) FILTER (WHERE w.is_new),0)::bigint AS sum_new_kopecks,
               COALESCE(SUM(w.sum_kopecks) FILTER (WHERE NOT w.is_new),0)::bigint AS sum_repeat_kopecks,
               (SELECT COUNT(*) FROM firsts f
-                WHERE ($2::date IS NULL OR f.first_moment >= $2::date))::int AS new_customers,
+                WHERE ($2::date IS NULL OR f.first_moment >= $2::date)
+                  AND ($3::date IS NULL OR f.first_moment < ($3::date + 1)))::int AS new_customers,
               (SELECT COUNT(*) FROM ms_orders n
                 WHERE n.channel_id=$1 AND n.agent_id IS NULL
-                  AND ($2::date IS NULL OR n.moment >= $2::date))::int AS no_agent_orders,
+                  AND ($2::date IS NULL OR n.moment >= $2::date)
+                  AND ($3::date IS NULL OR n.moment < ($3::date + 1)))::int AS no_agent_orders,
               (SELECT COUNT(*) FROM (
                  SELECT 1 FROM ms_orders r
                   WHERE r.channel_id=$1 AND r.agent_id IS NOT NULL
@@ -534,7 +555,7 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
   // tie-break (orders DESC, agent_id) — порядок стабилен между прогонами, как у top-products.
   // Имена контрагентов репо сознательно НЕ отдаёт: архивный agent_name протухает после
   // переименования в МС — актуальные имена резолвит граница API одним живым вызовом словаря.
-  async function getMsTopCustomersInternal(channelId, { sinceDay = null, limit = 10 } = {}) {
+  async function getMsTopCustomersInternal(channelId, { sinceDay = null, untilDay = null, limit = 10 } = {}) {
     if (!enabled || !channelId) return [];
     // Кэп 1..50 — repo не доверяет вызывающему (та же дисциплина, что listPosts).
     const safeLimit = Math.min(50, Math.max(1, Number.parseInt(limit, 10) || 10));
@@ -542,10 +563,11 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
       `SELECT agent_id, COUNT(*)::int AS orders, COALESCE(SUM(sum_kopecks),0)::bigint AS sum_kopecks
          FROM ms_orders
         WHERE channel_id=$1 AND agent_id IS NOT NULL AND ($2::date IS NULL OR moment >= $2::date)
+          AND ($3::date IS NULL OR moment < ($3::date + 1))
         GROUP BY agent_id
         ORDER BY SUM(sum_kopecks) DESC, COUNT(*) DESC, agent_id
-        LIMIT $3`,
-      [channelId, msSinceDay(sinceDay), safeLimit]);
+        LIMIT $4`,
+      [channelId, msSinceDay(sinceDay), msUntilDay(untilDay), safeLimit]);
     return rows.map((r) => numifyMetrics(r, ['orders', 'sum_kopecks']));
   }
 
@@ -564,15 +586,16 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
   // заказы без канала / строки до миграции 031), сумма DESC. Имя/тип канала репо НЕ знает — их
   // мапит словарь saleschannel на границе API (/api/ms/sales-by-channel), здесь только устойчивые
   // id и числа (зеркало getMsFunnel, но порядок по выручке, как у топов).
-  async function getMsSalesByChannelInternal(channelId, { sinceDay = null } = {}) {
+  async function getMsSalesByChannelInternal(channelId, { sinceDay = null, untilDay = null } = {}) {
     if (!enabled || !channelId) return [];
     const { rows } = await pool.query(
       `SELECT sales_channel_id, COUNT(*)::int AS orders, COALESCE(SUM(sum_kopecks),0)::bigint AS sum_kopecks
          FROM ms_orders
         WHERE channel_id=$1 AND ($2::date IS NULL OR moment >= $2::date)
+          AND ($3::date IS NULL OR moment < ($3::date + 1))
         GROUP BY sales_channel_id
         ORDER BY SUM(sum_kopecks) DESC, sales_channel_id NULLS LAST`,
-      [channelId, msSinceDay(sinceDay)]);
+      [channelId, msSinceDay(sinceDay), msUntilDay(untilDay)]);
     return rows.map((r) => numifyMetrics(r, ['orders', 'sum_kopecks']));
   }
 
@@ -590,27 +613,30 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
   // рядом с топом, а второй узкий SELECT в той же функции дешевле отдельного repo-метода и держит
   // всю гео-логику в одном месте (repo владеет SQL, роут остаётся тонким). limit кэпуется здесь
   // (repo не доверяет вызывающему, как listPosts/top-customers).
-  async function getMsGeographyInternal(channelId, { sinceDay = null, limit = 15 } = {}) {
+  async function getMsGeographyInternal(channelId, { sinceDay = null, untilDay = null, limit = 15 } = {}) {
     if (!enabled || !channelId) return { rows: [], total_orders: 0, no_city_orders: 0 };
     const safeLimit = Math.min(50, Math.max(1, Number.parseInt(limit, 10) || 15));
     const since = msSinceDay(sinceDay);
+    const until = msUntilDay(untilDay);
     const topQ = await pool.query(
       `SELECT ${MS_CITY_NORM} AS city,
               COUNT(*)::int AS orders,
               COALESCE(SUM(sum_kopecks),0)::bigint AS sum_kopecks
          FROM ms_orders
         WHERE channel_id=$1 AND ($2::date IS NULL OR moment >= $2::date)
+          AND ($3::date IS NULL OR moment < ($3::date + 1))
           AND ${MS_CITY_NORM} IS NOT NULL
         GROUP BY ${MS_CITY_NORM}
         ORDER BY SUM(sum_kopecks) DESC, ${MS_CITY_NORM}
-        LIMIT $3`,
-      [channelId, since, safeLimit]);
+        LIMIT $4`,
+      [channelId, since, until, safeLimit]);
     const totalsQ = await pool.query(
       `SELECT COUNT(*)::int AS total_orders,
               COUNT(*) FILTER (WHERE ${MS_CITY_NORM} IS NULL)::int AS no_city_orders
          FROM ms_orders
-        WHERE channel_id=$1 AND ($2::date IS NULL OR moment >= $2::date)`,
-      [channelId, since]);
+        WHERE channel_id=$1 AND ($2::date IS NULL OR moment >= $2::date)
+          AND ($3::date IS NULL OR moment < ($3::date + 1))`,
+      [channelId, since, until]);
     const t = totalsQ.rows[0] || {};
     return {
       rows: topQ.rows.map((r) => numifyMetrics(r, ['orders', 'sum_kopecks'])),
@@ -624,17 +650,51 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
   // времени. salesChannelId=null → все каналы (итог, как summary из архива). День = date-part
   // moment БЕЗ tz-конверсий (канон MS-архива). Отдаёт ТОЛЬКО дни с заказами — фронт дозаполняет
   // календарь нулями (канон customers.series/mentions.daily). Суммы — копейки (рубли — граница API).
-  async function getMsChannelSeriesInternal(channelId, { sinceDay = null, salesChannelId = null } = {}) {
+  // Список id каналов продаж → text[] для `= ANY(...)`, либо null (все каналы). Обратная
+  // совместимость: одиночный salesChannelId (legacy-параметр слайса 6в) заворачиваем в массив.
+  const msChannelIds = ({ salesChannelIds = null, salesChannelId = null } = {}) => {
+    if (Array.isArray(salesChannelIds) && salesChannelIds.length) return salesChannelIds;
+    if (salesChannelId) return [salesChannelId];
+    return null;
+  };
+
+  async function getMsChannelSeriesInternal(channelId, opts = {}) {
     if (!enabled || !channelId) return [];
+    const { sinceDay = null, untilDay = null } = opts;
+    const ids = msChannelIds(opts);
     const { rows } = await pool.query(
       `SELECT to_char(moment,'YYYY-MM-DD') AS day,
               COUNT(*)::int AS orders,
               COALESCE(SUM(sum_kopecks),0)::bigint AS sum_kopecks
          FROM ms_orders
         WHERE channel_id=$1 AND ($2::date IS NULL OR moment >= $2::date)
-          AND ($3::text IS NULL OR sales_channel_id = $3)
+          AND ($3::date IS NULL OR moment < ($3::date + 1))
+          AND ($4::text[] IS NULL OR sales_channel_id = ANY($4::text[]))
         GROUP BY 1 ORDER BY 1`,
-      [channelId, msSinceDay(sinceDay), salesChannelId || null]);
+      [channelId, msSinceDay(sinceDay), msUntilDay(untilDay), ids]);
+    return rows.map((r) => numifyMetrics(r, ['orders', 'sum_kopecks']));
+  }
+
+  // Разбивка дневной серии ПО каналам (breakdown): те же окно-границы, но GROUP BY канал+день.
+  // Требует явный список id (breakdown без выбранных каналов бессмыслен) — пустой список → [].
+  // Плоские строки { sales_channel_id, day, orders, sum_kopecks }; пивот в серии по каналу —
+  // на границе API (роут). Порядок стабилен (канал, день) для детерминированных тестов.
+  async function getMsChannelSeriesGroupedInternal(channelId, { sinceDay = null, untilDay = null, salesChannelIds = null } = {}) {
+    if (!enabled || !channelId) return [];
+    const ids = Array.isArray(salesChannelIds) ? salesChannelIds.filter(Boolean) : [];
+    if (!ids.length) return [];
+    const { rows } = await pool.query(
+      `SELECT sales_channel_id,
+              to_char(moment,'YYYY-MM-DD') AS day,
+              COUNT(*)::int AS orders,
+              COALESCE(SUM(sum_kopecks),0)::bigint AS sum_kopecks
+         FROM ms_orders
+        WHERE channel_id=$1 AND ($2::date IS NULL OR moment >= $2::date)
+          AND ($3::date IS NULL OR moment < ($3::date + 1))
+          AND sales_channel_id = ANY($4::text[])
+        GROUP BY sales_channel_id, 2
+        ORDER BY sales_channel_id, 2`,
+      [channelId, msSinceDay(sinceDay), msUntilDay(untilDay), ids]);
     return rows.map((r) => numifyMetrics(r, ['orders', 'sum_kopecks']));
   }
 
@@ -696,6 +756,9 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
   async function getMsChannelSeriesForActor(channelId, actor, opts = {}) {
     return (await allowed(channelId, actor)) ? getMsChannelSeriesInternal(channelId, opts) : [];
   }
+  async function getMsChannelSeriesGroupedForActor(channelId, actor, opts = {}) {
+    return (await allowed(channelId, actor)) ? getMsChannelSeriesGroupedInternal(channelId, opts) : [];
+  }
 
     // ── ig-tags read (finding 7: чтение — analytics, write — collectorRepo) ──
   async function getIgTags(limit = 100) {
@@ -731,11 +794,13 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
     getMsDailyAllInternal, getMsFunnelInternal, getMsCustomersInternal, getMsCohortsInternal,
     getMsTopCustomersInternal, getMsOldestOrderDayInternal,
     getMsSalesByChannelInternal, getMsGeographyInternal, getMsChannelSeriesInternal,
+    getMsChannelSeriesGroupedInternal,
     getChannelHistoryForActor, getMentionsHistoryForActor, getMentionsArchiveForActor,
     getSnapshotForActor, getLatestVelocityForActor, listPostsForActor, listIgDailyForActor, listIgMediaDailyForActor,
     getMsDailyAllForActor, getMsFunnelForActor, getMsCustomersForActor, getMsCohortsForActor,
     getMsTopCustomersForActor, getMsOldestOrderDayForActor,
     getMsSalesByChannelForActor, getMsGeographyForActor, getMsChannelSeriesForActor,
+    getMsChannelSeriesGroupedForActor,
   };
 }
 

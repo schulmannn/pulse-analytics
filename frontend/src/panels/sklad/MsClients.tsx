@@ -9,6 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { lttbDownsample } from '@/lib/downsample';
 import { fmt, pluralRu } from '@/lib/format';
 import { usePagePeriod } from '@/lib/period';
+import { msDensifyWindow, useMsPagePeriod, type MsPeriod } from '@/lib/msPeriod';
 
 /**
  * «Клиенты» МойСклада — покупательская аналитика АРХИВА заказов (ms_orders, слайс 3).
@@ -19,10 +20,11 @@ import { usePagePeriod } from '@/lib/period';
 export function MsClients() {
   const pp = usePagePeriod();
   const days = pp ? pp.days : 30;
-  const windowLabel = days === 0 ? 'за всё время' : `за ${days} дн.`;
-  const customers = useMsCustomers(days);
+  const period = useMsPagePeriod();
+  const windowLabel = pp?.range ? 'за выбранный период' : days === 0 ? 'за всё время' : `за ${days} дн.`;
+  const customers = useMsCustomers(period);
   const cohorts = useMsCohorts();
-  const topCustomers = useMsTopCustomers(days);
+  const topCustomers = useMsTopCustomers(period);
 
   if (customers.isPending) {
     return (
@@ -42,6 +44,8 @@ export function MsClients() {
       <ErrorState
         title="Не удалось получить данные о покупателях"
         reason={customers.error instanceof Error ? customers.error.message : 'ошибка'}
+        onRetry={() => customers.refetch()}
+        retrying={customers.isFetching}
       />
     );
   }
@@ -51,7 +55,7 @@ export function MsClients() {
   // нулями: день без заказов для СЧЁТЧИКА заказов — честный ноль, а не разрыв (разрыв = пропуск
   // сбора, здесь сбора нет — есть арифметика по архиву). Затем длинные окна («Всё» = годы точек)
   // даунсэмплим по канону графиков; обе серии на одной сетке — один LTTB-проход по сумме дня.
-  const dense = densifyDays(series, days);
+  const dense = densifyDays(series, period);
   const sampled = lttbDownsample(dense, 140, (r) => r.new_orders + r.repeat_orders);
   const labels = sampled.map((r) => fmt.day(r.day));
   const newValues = sampled.map((r) => r.new_orders);
@@ -79,7 +83,7 @@ export function MsClients() {
       </ChartWidget>
 
       <ChartWidget id="ms-repeat" title="Повторные покупки" fixedSize="half">
-        {days === 0 ? (
+        {days === 0 && !pp?.range ? (
           // На «Всё» окно совпадает с историей — «новых в окне» не бывает; честная метрика
           // здесь — сколько клиентов вообще возвращалось.
           <ChartCardBody
@@ -122,7 +126,15 @@ function MsTopCustomersCard({
             <Skeleton key={`tc${i}`} className="h-6 w-full" />
           ))}
         </div>
-      ) : state.isError || !state.data || state.data.rows.length === 0 ? (
+      ) : state.isError ? (
+        <ErrorState
+          className="py-4"
+          title="Не удалось получить топ покупателей"
+          reason={state.error instanceof Error ? state.error.message : 'ошибка'}
+          onRetry={() => state.refetch()}
+          retrying={state.isFetching}
+        />
+      ) : !state.data || state.data.rows.length === 0 ? (
         <p className="py-4 text-sm text-muted-foreground">Нет покупателей за период.</p>
       ) : (
         <ul>
@@ -183,22 +195,15 @@ type MsDayPoint = { day: string; new_orders: number; repeat_orders: number };
 const localDayKey = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
-/** Календарная сетка окна: от sinceDay бэка (сегодня−(days−1), локальные дни — зеркало
-    sinceDayOf роута) до сегодня; на «Всё» (0) — от первого дня серии. */
-function densifyDays(series: MsDayPoint[], days: number): MsDayPoint[] {
-  const today = new Date();
-  let start: Date;
-  if (days > 0) {
-    start = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (days - 1));
-  } else if (series.length > 0) {
-    const [y, m, d] = series[0].day.split('-').map(Number);
-    start = new Date(y, m - 1, d);
-  } else {
-    return [];
-  }
+/** Календарная сетка окна периода (обе границы): пресет — сегодня−(days−1)…сегодня, произвольный
+    диапазон — from…to (инклюзивно), «Всё» (0) — от первого дня серии до сегодня. Зеркало
+    sinceDay/untilDay роута через общий msDensifyWindow — окно дозаполнения = окну запроса. */
+function densifyDays(series: MsDayPoint[], period: MsPeriod): MsDayPoint[] {
+  const win = msDensifyWindow(period, series[0]?.day);
+  if (!win) return [];
   const byDay = new Map(series.map((r) => [r.day, r]));
   const out: MsDayPoint[] = [];
-  for (const d = new Date(start); d <= today; d.setDate(d.getDate() + 1)) {
+  for (const d = new Date(win.start); d <= win.end; d.setDate(d.getDate() + 1)) {
     const key = localDayKey(d);
     const row = byDay.get(key);
     out.push({ day: key, new_orders: row?.new_orders ?? 0, repeat_orders: row?.repeat_orders ?? 0 });
@@ -229,7 +234,15 @@ function MsCohortsCard({ state }: { state: ReturnType<typeof useMsCohorts> }) {
             <Skeleton key={`c${i}`} className="h-6 w-full" />
           ))}
         </div>
-      ) : state.isError || !state.data || state.data.cohorts.length === 0 ? (
+      ) : state.isError ? (
+        <ErrorState
+          className="py-4"
+          title="Не удалось получить когорты"
+          reason={state.error instanceof Error ? state.error.message : 'ошибка'}
+          onRetry={() => state.refetch()}
+          retrying={state.isFetching}
+        />
+      ) : !state.data || state.data.cohorts.length === 0 ? (
         <p className="py-4 text-sm text-muted-foreground">
           Когорт пока нет — они появятся после загрузки истории заказов.
         </p>

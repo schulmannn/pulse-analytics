@@ -101,6 +101,13 @@ export function networkByKey(key: string): NetworkDef {
   return NETWORKS.find((n) => n.key === key) ?? NETWORKS[0];
 }
 
+/** Human display name for a network key (nav/meta chips). One source of truth, so a new source
+    (МойСклад, VK, …) never needs a hand-typed label branch at every call site. Unknown keys fall
+    back to the default network's name. */
+export function networkDisplayName(key: string): string {
+  return networkByKey(key).name;
+}
+
 /** The network owning a pathname — matched by prefix; the prefixless first entry is the default. */
 export function networkForPath(pathname: string): Network {
   return (NETWORKS.find((n) => 'prefix' in n && pathname.startsWith(n.prefix)) ?? NETWORKS[0]).key;

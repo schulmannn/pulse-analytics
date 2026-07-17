@@ -262,7 +262,7 @@ test('top-products: days=0 — окно от первого дня месяца 
   assert.deepEqual(res.body.rows, [{ name: 'Товар', quantity: 1, revenue: 100, profit: 10 }]);
   assert.equal(windows.length, 1);
   assert.equal(windows[0].from, '2023-05-01 00:00:00', 'якорь — первый день месяца старейшего заказа');
-  assert.match(windows[0].to, /^\d{4}-\d{2}-\d{2} 23:59:00$/, 'верх окна — сейчас, как у живых окон');
+  assert.match(windows[0].to, /^\d{4}-\d{2}-\d{2} 23:59:59$/, 'верх окна — конец сегодняшнего дня');
 
   // days=30 сразу после «Всё» обязан сходить в МС сам: кэш-ключ включает days.
   await invoke(routes, 'GET /api/ms/top-products', { query: { days: '30' } });
@@ -505,32 +505,150 @@ test('geography: days=0 → вся история (sinceDay null)', async () => 
   assert.equal(seenSince, null);
 });
 
-test('channel-series: channel-параметр валидируется (all/junk→null, UUID→фильтр), копейки→рубли, БЕЗ кэша', async () => {
+test('channel-series: мультивыбор валидируется (all, UUID-список, строгий кэп ≤20, legacy channel=), копейки→рубли', async () => {
   const seen = [];
   const { routes } = buildMs({
     msFetch: async () => { throw new Error('channel-series не ходит в МС'); },
     db: {
       getMsChannelSeriesForActor: async (channelId, actor, opts) => {
-        seen.push(opts.salesChannelId);
+        seen.push(opts.salesChannelIds);
         assert.equal(channelId, 5);
         assert.equal(actor.uid, 7);
         return [{ day: '2026-07-15', orders: 2, sum_kopecks: 150000 }];
       },
     },
   });
-  // 'all' → null (все каналы)
-  const rAll = await invoke(routes, 'GET /api/ms/channel-series', { query: { days: '30', channel: 'all' } });
+  // 'all' → null (все каналы, агрегат)
+  const rAll = await invoke(routes, 'GET /api/ms/channel-series', { query: { days: '30', channels: 'all' } });
   assert.equal(rAll.statusCode, 200);
-  assert.deepEqual(rAll.body, { window_days: 30, channel: null, series: [{ day: '2026-07-15', orders: 2, sum: 1500 }] });
+  assert.deepEqual(rAll.body, {
+    window_days: 30, channels: null, series: [{ day: '2026-07-15', orders: 2, sum: 1500 }],
+    groups: null, group_limit: undefined, group_total: undefined,
+  });
   // отсутствует → null
   await invoke(routes, 'GET /api/ms/channel-series', { query: { days: '30' } });
-  // мусорный channel → null (не пускаем в фильтр)
-  await invoke(routes, 'GET /api/ms/channel-series', { query: { days: '30', channel: 'DROP TABLE' } });
-  // валидный UUID-подобный id → фильтр
-  const id = '16f07379-8039-11ec-0a80-03970021e97d';
-  const rId = await invoke(routes, 'GET /api/ms/channel-series', { query: { days: '30', channel: id } });
-  assert.equal(rId.body.channel, id);
-  assert.deepEqual(seen, [null, null, null, id], 'all/пусто/мусор → null; только UUID проходит в repo');
+  // Валидные UUID остаются; дубликат схлопнут.
+  const a = '16f07379-8039-11ec-0a80-03970021e97d';
+  const b = '26f07379-8039-11ec-0a80-03970021e97e';
+  const rMulti = await invoke(routes, 'GET /api/ms/channel-series', {
+    query: { days: '30', channels: `${a},${b},${a}` },
+  });
+  assert.deepEqual(rMulti.body.channels, [a, b]);
+  // Явный битый id не должен тихо превращать фильтр в «все каналы».
+  const rJunk = await invoke(routes, 'GET /api/ms/channel-series', {
+    query: { days: '30', channels: `${a},DROP TABLE` },
+  });
+  assert.equal(rJunk.statusCode, 400);
+  // legacy single channel= понимается как channels=[id]
+  const rLegacy = await invoke(routes, 'GET /api/ms/channel-series', { query: { days: '30', channel: a } });
+  assert.deepEqual(rLegacy.body.channels, [a]);
+  // Кэп ≤20 строгий: 25 id → 400, а не тихая потеря пяти фильтров.
+  const many = Array.from({ length: 25 }, (_, i) => `${String(i).padStart(2, '0')}f07379-8039-11ec-0a80-03970021e97d`);
+  const rMany = await invoke(routes, 'GET /api/ms/channel-series', { query: { days: '30', channels: many.join(',') } });
+  assert.equal(rMany.statusCode, 400);
+  assert.deepEqual(seen, [null, null, [a, b], [a]], 'all/пусто → null; только полностью валидные списки доходят до repo');
+});
+
+test('channel-series: breakdown=1 отдаёт по серии на канал (bounded), group_total/limit честны', async () => {
+  const a = '16f07379-8039-11ec-0a80-03970021e97d';
+  const b = '26f07379-8039-11ec-0a80-03970021e97e';
+  let groupedOpts = null;
+  const { routes } = buildMs({
+    msFetch: async () => { throw new Error('channel-series не ходит в МС'); },
+    db: {
+      getMsChannelSeriesForActor: async () => [{ day: '2026-07-15', orders: 3, sum_kopecks: 300000 }],
+      getMsChannelSeriesGroupedForActor: async (channelId, actor, opts) => {
+        groupedOpts = opts;
+        return [
+          { sales_channel_id: a, day: '2026-07-15', orders: 2, sum_kopecks: 200000 },
+          { sales_channel_id: b, day: '2026-07-15', orders: 1, sum_kopecks: 100000 },
+        ];
+      },
+    },
+  });
+  const r = await invoke(routes, 'GET /api/ms/channel-series', {
+    query: { days: '30', channels: `${a},${b}`, breakdown: '1' },
+  });
+  assert.equal(r.statusCode, 200);
+  assert.deepEqual(groupedOpts.salesChannelIds, [a, b]);
+  assert.equal(r.body.group_total, 2);
+  assert.equal(r.body.group_limit, 2);
+  assert.deepEqual(r.body.groups, [
+    { sales_channel_id: a, series: [{ day: '2026-07-15', orders: 2, sum: 2000 }] },
+    { sales_channel_id: b, series: [{ day: '2026-07-15', orders: 1, sum: 1000 }] },
+  ]);
+  // Агрегат по-прежнему присутствует рядом с разбивкой.
+  assert.deepEqual(r.body.series, [{ day: '2026-07-15', orders: 3, sum: 3000 }]);
+});
+
+test('channel-series: breakdown БЕЗ выбранных каналов игнорируется (нужен явный выбор)', async () => {
+  let groupedCalled = false;
+  const { routes } = buildMs({
+    msFetch: async () => { throw new Error('нет'); },
+    db: {
+      getMsChannelSeriesForActor: async () => [],
+      getMsChannelSeriesGroupedForActor: async () => { groupedCalled = true; return []; },
+    },
+  });
+  const r = await invoke(routes, 'GET /api/ms/channel-series', { query: { days: '30', breakdown: '1' } });
+  assert.equal(r.body.groups, null);
+  assert.equal(groupedCalled, false, 'breakdown без каналов не дёргает grouped-repo');
+});
+
+test('MS data-роуты: точный диапазон from/to → sinceDay/untilDay в repo; кривой диапазон → 400', async () => {
+  const seen = [];
+  const { routes } = buildMs({
+    msFetch: async () => { throw new Error('DB-агрегат в МС не ходит'); },
+    db: {
+      getMsSalesByChannelForActor: async (_channelId, _actor, opts) => {
+        seen.push(opts);
+        return [];
+      },
+    },
+  });
+  const ok = await invoke(routes, 'GET /api/ms/sales-by-channel', {
+    query: { days: '30', from: '2026-03-05', to: '2026-03-18' },
+  });
+  assert.equal(ok.statusCode, 200);
+  assert.deepEqual(seen.at(-1), { sinceDay: '2026-03-05', untilDay: '2026-03-18' }, 'обе границы окна');
+  // Перевёрнутый диапазон — честный 400 (не тихое расширение окна).
+  const bad = await invoke(routes, 'GET /api/ms/sales-by-channel', {
+    query: { days: '30', from: '2026-03-18', to: '2026-03-05' },
+  });
+  assert.equal(bad.statusCode, 400);
+  // Кривой формат — тоже 400.
+  const malformed = await invoke(routes, 'GET /api/ms/sales-by-channel', {
+    query: { days: '30', from: 'nope', to: '2026-03-05' },
+  });
+  assert.equal(malformed.statusCode, 400);
+  // Regex-похожая, но невозможная календарная дата тоже отклоняется до SQL/upstream.
+  const impossible = await invoke(routes, 'GET /api/ms/sales-by-channel', {
+    query: { days: '30', from: '2026-02-30', to: '2026-03-05' },
+  });
+  assert.equal(impossible.statusCode, 400);
+});
+
+test('MS summary: точный диапазон идёт ЖИВЫМ plotseries (не архивной веткой days=0)', async () => {
+  const paths = [];
+  const { routes } = buildMs({
+    msFetch: async (_token, path) => {
+      paths.push(path);
+      return { series: [] };
+    },
+    db: {
+      // Архивную ветку НЕ должны трогать при диапазоне.
+      getMsDailyAllForActor: async () => { throw new Error('архивная ветка не для диапазона'); },
+    },
+  });
+  const r = await invoke(routes, 'GET /api/ms/summary', {
+    query: { days: '0', from: '2026-03-05', to: '2026-03-18' },
+  });
+  assert.equal(r.statusCode, 200);
+  assert.equal(paths.length, 2, 'sales + orders plotseries');
+  for (const p of paths) {
+    assert.match(decodeURIComponent(p), /momentFrom=2026-03-05 00:00:00/);
+    assert.match(decodeURIComponent(p), /momentTo=2026-03-18 23:59:59/);
+  }
 });
 
 test('connect/disconnect: audit-события ms_connect/ms_disconnect с identity-полями и БЕЗ токена', async () => {
