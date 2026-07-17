@@ -29,6 +29,12 @@ function registerMsRoutes({ app, requireAuth, db, msCrypto, msFetch, msBackfill,
   };
   const MS_TOP_LIMIT_DEFAULT = 10;
   const MS_TOP_LIMIT_MAX = 50;
+  // Страничная добивка отчёта прибыльности для топа: МС не сортирует отчёт по выручке, поэтому
+  // окно добирается целиком (страницы по 1000, тот же потолок API, что у /returns) и сортируется
+  // у нас. Cap 3 страницы = 3000 позиций ассортимента за окно; больше — честный truncated.
+  const MS_TOP_PAGE_LIMIT = 1000;
+  const MS_TOP_PAGE_CAP = 3;
+  const MS_TOP_PAGE_PAUSE_MS = 150;
   // Живой page-loop /api/ms/returns: страницы по 1000 (лимит МС без expand) с паузой, как у
   // движка бэкфилла; cap 5 страниц — потолок одного запроса (5000 возвратов за окно; больше —
   // честный truncated, не бесконечный проход по чужому лимиту 45/3с).
@@ -408,9 +414,12 @@ function registerMsRoutes({ app, requireAuth, db, msCrypto, msFetch, msBackfill,
     }
   });
 
-  // GET /api/ms/top-products?days=30&limit=10 — топ товаров по прибыли за окно.
+  // GET /api/ms/top-products?days=30&limit=10 — топ товаров по ВЫРУЧКЕ за окно.
   // days=0 здесь НЕ поддержан: у МС profit/byproduct — только оконный отчёт, а архива
   // по-товарно мы не копим (слайс 2а — только дневные суммы), поэтому 0 падает в дефолт 30.
+  // МС отдаёт отчёт НЕ по выручке (фактически — алфавит ассортимента), а сортировка в
+  // параметрах отчёта не документирована → добираем окно постранично (limit/offset, cap и
+  // пауза — как у /returns) и сортируем у себя; наружу уходят первые limit строк.
   app.get('/api/ms/top-products', requireAuth, async (req, res, next) => {
     try {
       const ms = await resolveMs(req, res);
@@ -425,25 +434,56 @@ function registerMsRoutes({ app, requireAuth, db, msCrypto, msFetch, msBackfill,
       if (cached) return res.json(cached);
 
       const { momentFrom, momentTo } = periodWindow(days);
-      let report;
+      const all = [];
+      let metaSize = null;
+      let truncated = false;
       try {
-        report = await msFetch(
-          ms.token,
-          `/report/profit/byproduct?momentFrom=${encodeURIComponent(momentFrom)}&momentTo=${encodeURIComponent(momentTo)}&limit=${limit}`,
-        );
+        let offset = 0;
+        for (let page = 0; ; page++) {
+          const report = await msFetch(
+            ms.token,
+            `/report/profit/byproduct?momentFrom=${encodeURIComponent(momentFrom)}&momentTo=${encodeURIComponent(momentTo)}` +
+              `&limit=${MS_TOP_PAGE_LIMIT}&offset=${offset}`,
+          );
+          const pageRows = report && Array.isArray(report.rows) ? report.rows : [];
+          if (page === 0) {
+            // meta.size — полный размер выборки у МС (страница может быть короче лимита).
+            const size = Number(report && report.meta && report.meta.size);
+            metaSize = Number.isFinite(size) ? size : null;
+          }
+          for (const r of pageRows) {
+            all.push({
+              name: r && r.assortment && typeof r.assortment.name === 'string' ? r.assortment.name : null,
+              quantity: Number(r && r.sellQuantity) || 0,
+              // Копейки как есть до самого выхода — сортировка по целым, рубли на границе.
+              revenueKopecks: Math.round(Number(r && r.sellSum) || 0),
+              profitKopecks: Math.round(Number(r && r.profit) || 0),
+            });
+          }
+          if (pageRows.length < MS_TOP_PAGE_LIMIT) break;                     // хвост добран
+          if (page + 1 >= MS_TOP_PAGE_CAP) { truncated = true; break; }       // упёрлись в cap
+          offset += MS_TOP_PAGE_LIMIT;
+          await sleep(MS_TOP_PAGE_PAUSE_MS);
+        }
       } catch (e) {
         return sendMsError(res, e, { route: 'top-products', channelId: ms.channel.id });
       }
 
-      const rows = (report && Array.isArray(report.rows) ? report.rows : []).map((r) => ({
-        name: r && r.assortment && typeof r.assortment.name === 'string' ? r.assortment.name : null,
-        quantity: Number(r && r.sellQuantity) || 0,
-        revenue: kopecksToRub(Number(r && r.sellSum) || 0),
-        profit: kopecksToRub(Number(r && r.profit) || 0),
+      // «По выручке», как подписан виджет; tie-break по количеству и имени — порядок
+      // детерминирован между прогонами и не зависит от порядка страниц МС.
+      all.sort(
+        (a, b) =>
+          b.revenueKopecks - a.revenueKopecks ||
+          b.quantity - a.quantity ||
+          String(a.name || '').localeCompare(String(b.name || ''), 'ru'),
+      );
+      const rows = all.slice(0, limit).map((r) => ({
+        name: r.name,
+        quantity: r.quantity,
+        revenue: kopecksToRub(r.revenueKopecks),
+        profit: kopecksToRub(r.profitKopecks),
       }));
-      // meta.size — полный размер выборки у МС (страница может быть короче лимита).
-      const metaSize = Number(report && report.meta && report.meta.size);
-      const data = { rows, total: Number.isFinite(metaSize) ? metaSize : rows.length };
+      const data = { rows, total: metaSize != null ? metaSize : all.length, truncated };
       cacheSet(cacheKey, data);
       res.json(data);
     } catch (e) {
