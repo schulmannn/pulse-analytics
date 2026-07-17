@@ -85,12 +85,16 @@ export function WidgetExpandOverlay({
     <ChartExpandOverlay
       title={label}
       accentStyle={accentStyle ?? undefined}
-      initialDays={periodControl ? days : undefined}
+      // A rich explorer owns window controls even when the working page suppresses card-local
+      // period controls. Seed it from the authoritative page/widget window; otherwise opening a
+      // 30-day MoySklad/TG/IG card silently highlighted the overlay's 90-day fallback.
+      initialDays={richExpand || periodControl ? days : undefined}
       renderExpanded={richExpand ? expand?.renderExpanded : undefined}
       renderExpandedBar={richExpand ? expand?.renderExpandedBar : undefined}
       statsFor={richExpand ? expand?.statsFor : undefined}
       statsSum={expand?.statsSum ?? true}
       grainable={richExpand ? expand?.grainable : undefined}
+      extraControls={richExpand ? expand?.extraControls : undefined}
       onClose={onClose}
       originRect={originRect}
     >

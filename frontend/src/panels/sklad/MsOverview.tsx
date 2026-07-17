@@ -11,6 +11,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { lttbDownsample } from '@/lib/downsample';
 import { fmt } from '@/lib/format';
 import { usePagePeriod } from '@/lib/period';
+import { useMsPagePeriod } from '@/lib/msPeriod';
 
 /**
  * Обзор «МойСклада» — первый не-социальный источник. Все числа приходят СЕРВЕР-АГРЕГИРОВАННЫМИ
@@ -20,15 +21,17 @@ import { usePagePeriod } from '@/lib/period';
  */
 export function MsOverview() {
   const pp = usePagePeriod();
-  // «Всё» (0) обслуживается из нашего дневного архива ms_daily (слайс 2а), живые окна — 7/30/90.
+  // «Всё» (0) обслуживается из нашего дневного архива ms_daily (слайс 2а), живые окна — 7/30/90;
+  // точный диапазон топбара honored единым сериализатором (useMsPagePeriod → from/to).
   const days = pp ? pp.days : 30;
-  const windowLabel = days === 0 ? 'за всё время' : `за ${days} дн.`;
-  const summary = useMsSummary(days);
+  const period = useMsPagePeriod();
+  const windowLabel = pp?.range ? 'за выбранный период' : days === 0 ? 'за всё время' : `за ${days} дн.`;
+  const summary = useMsSummary(period);
   // «Всё» (0) бэк со слайса 4 считает честно: полный диапазон от старейшего заказа архива
   // (страничная добивка отчёта + кэш 1 час) — подмена 0→30 больше не нужна.
-  const top = useMsTopProducts(days);
-  const funnel = useMsFunnel(days);
-  const returns = useMsReturns(days);
+  const top = useMsTopProducts(period);
+  const funnel = useMsFunnel(period);
+  const returns = useMsReturns(period);
 
   if (summary.isPending) {
     return (
@@ -65,7 +68,14 @@ export function MsOverview() {
         />
       );
     }
-    return <ErrorState title="Не удалось получить данные МойСклада" reason={summary.error instanceof Error ? summary.error.message : 'ошибка'} />;
+    return (
+      <ErrorState
+        title="Не удалось получить данные МойСклада"
+        reason={summary.error instanceof Error ? summary.error.message : 'ошибка'}
+        onRetry={() => summary.refetch()}
+        retrying={summary.isFetching}
+      />
+    );
   }
 
   const { revenue, orders } = summary.data;
@@ -140,8 +150,16 @@ export function MsOverview() {
               <Skeleton key={`f${i}`} className="h-6 w-full" />
             ))}
           </div>
-        ) : funnel.isError || !funnel.data ? (
-          <p className="py-4 text-sm text-muted-foreground">Не удалось получить статусы заказов.</p>
+        ) : funnel.isError ? (
+          <ErrorState
+            className="py-4"
+            title="Не удалось получить статусы заказов"
+            reason={funnel.error instanceof Error ? funnel.error.message : 'ошибка'}
+            onRetry={() => funnel.refetch()}
+            retrying={funnel.isFetching}
+          />
+        ) : !funnel.data ? (
+          <p className="py-4 text-sm text-muted-foreground">Нет данных о статусах за период.</p>
         ) : funnel.data.rows.length === 0 ? (
           funnel.data.no_state_orders > 0 ? (
             // Заказы есть, а статусов нет: state_id появился в слайсе 3 — старые строки заполнит
@@ -172,7 +190,15 @@ export function MsOverview() {
               <Skeleton key={`t${i}`} className="h-6 w-full" />
             ))}
           </div>
-        ) : top.isError || !top.data || top.data.rows.length === 0 ? (
+        ) : top.isError ? (
+          <ErrorState
+            className="py-4"
+            title="Не удалось получить топ товаров"
+            reason={top.error instanceof Error ? top.error.message : 'ошибка'}
+            onRetry={() => top.refetch()}
+            retrying={top.isFetching}
+          />
+        ) : !top.data || top.data.rows.length === 0 ? (
           <p className="py-4 text-sm text-muted-foreground">Нет продаж за период.</p>
         ) : (
           <MsTopProductsList rows={top.data.rows} />
@@ -185,8 +211,16 @@ export function MsOverview() {
             <Skeleton className="h-8 w-1/3" />
             <Skeleton className="h-4 w-1/2" />
           </div>
-        ) : returns.isError || !returns.data ? (
-          <p className="py-4 text-sm text-muted-foreground">Не удалось получить возвраты.</p>
+        ) : returns.isError ? (
+          <ErrorState
+            className="py-4"
+            title="Не удалось получить возвраты"
+            reason={returns.error instanceof Error ? returns.error.message : 'ошибка'}
+            onRetry={() => returns.refetch()}
+            retrying={returns.isFetching}
+          />
+        ) : !returns.data ? (
+          <p className="py-4 text-sm text-muted-foreground">Нет данных о возвратах за период.</p>
         ) : (
           <ChartCardBody
             value={fmt.num(returns.data.count)}

@@ -251,6 +251,7 @@ function TgTrendStat({
           area
           strokeWidth={2}
           interactive
+          caption="по датам публикаций"
           formatValue={format}
           className="h-full min-h-14 w-full"
         />

@@ -66,6 +66,73 @@ function demoIgPayload(path: string): unknown | undefined {
   return undefined;
 }
 
+const MS_CHANNELS = [
+  { id: '16f07379-8039-11ec-0a80-03970021e97d', name: 'Интернет-магазин', type: 'ECOMMERCE', orders: 48, sum: 428_000 },
+  { id: '26f07379-8039-11ec-0a80-03970021e97e', name: 'Партнёры', type: 'DIRECT_SALES', orders: 17, sum: 206_000 },
+  { id: '36f07379-8039-11ec-0a80-03970021e97f', name: 'Розница', type: 'OTHER', orders: 31, sum: 159_000 },
+];
+
+/** Deterministic MoySklad slice used only by desktop browser tests. It mirrors the production
+    contract closely enough to exercise aggregate filters, breakdown groups, ranking and explorer. */
+function demoMsPayload(url: URL): unknown | undefined {
+  const path = url.pathname;
+  const days = Number(url.searchParams.get('days')) || 30;
+  if (path === '/api/ms/sales-by-channel') {
+    return {
+      window_days: days,
+      total_orders: MS_CHANNELS.reduce((total, row) => total + row.orders, 0) + 4,
+      no_channel_orders: 4,
+      rows: MS_CHANNELS.map(({ id, ...row }) => ({ sales_channel_id: id, ...row })),
+    };
+  }
+  if (path === '/api/ms/geography') {
+    return {
+      window_days: days,
+      total_orders: 100,
+      no_city_orders: 7,
+      rows: [
+        { city: 'Москва', orders: 44, sum: 362_000 },
+        { city: 'Санкт-Петербург', orders: 29, sum: 248_000 },
+        { city: 'Казань', orders: 20, sum: 151_000 },
+      ],
+    };
+  }
+  if (path === '/api/ms/channel-series') {
+    const selected = (url.searchParams.get('channels') ?? '')
+      .split(',')
+      .map((id) => id.trim())
+      .filter(Boolean);
+    const active = selected.length ? MS_CHANNELS.filter((channel) => selected.includes(channel.id)) : MS_CHANNELS;
+    const count = days === 0 ? 90 : days;
+    const dayKeys = Array.from({ length: count }, (_, index) =>
+      new Date(Date.now() - (count - index - 1) * DAY_MS).toISOString().slice(0, 10),
+    );
+    const channelSeries = (channelIndex: number) =>
+      dayKeys.map((day, index) => ({
+        day,
+        orders: 1 + ((index + channelIndex) % 4),
+        sum: 4_500 + channelIndex * 1_700 + ((index * 977) % 5_200),
+      }));
+    const groups = active.map((channel) => {
+      const sourceIndex = MS_CHANNELS.findIndex((item) => item.id === channel.id);
+      return { sales_channel_id: channel.id, series: channelSeries(sourceIndex) };
+    });
+    return {
+      window_days: days,
+      channels: selected.length ? selected : null,
+      series: dayKeys.map((day, index) => ({
+        day,
+        orders: groups.reduce((total, group) => total + group.series[index].orders, 0),
+        sum: groups.reduce((total, group) => total + group.series[index].sum, 0),
+      })),
+      groups: url.searchParams.get('breakdown') === '1' ? groups : null,
+      group_limit: groups.length,
+      group_total: active.length,
+    };
+  }
+  return undefined;
+}
+
 /**
  * Boot the app straight into the authenticated DEMO dashboard: stub /api/auth/me and set the demo
  * flag before load, so the whole Telegram dashboard renders from deterministic client-side fixtures —
@@ -79,13 +146,15 @@ export async function bootDemo(page: Page, route = '/', opts: { theme?: 'light' 
   // optional request (IG/media today, future integrations tomorrow) gets a deterministic response
   // instead of leaking through Vite's proxy to a missing local backend and filling CI with ECONNREFUSED.
   await page.route(/^https?:\/\/[^/]+\/api\//, (r) => {
-    const path = new URL(r.request().url()).pathname;
+    const url = new URL(r.request().url());
+    const path = url.pathname;
     const isMe = path === '/api/auth/me';
     const igPayload = demoIgPayload(path);
+    const msPayload = demoMsPayload(url);
     return r.fulfill({
-      status: isMe || igPayload !== undefined ? 200 : 404,
+      status: isMe || igPayload !== undefined || msPayload !== undefined ? 200 : 404,
       contentType: 'application/json',
-      body: JSON.stringify(isMe ? DEMO_ME : igPayload ?? { error: 'not_available_in_demo' }),
+      body: JSON.stringify(isMe ? DEMO_ME : igPayload ?? msPayload ?? { error: 'not_available_in_demo' }),
     });
   });
   await page.addInitScript(

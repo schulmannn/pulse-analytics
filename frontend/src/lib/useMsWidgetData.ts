@@ -13,7 +13,9 @@ import type { WidgetConfig } from '@/lib/widgetConfig';
 export function useMsWidgetData(config: WidgetConfig): { result: WidgetResult; isLoading: boolean } {
   const days = config.period ?? DEFAULT_WIDGET_DAYS;
   const period = useMemo(() => widgetPeriodValue(days), [days]);
-  const summaryQ = useMsSummary(days);
+  // Home-виджет несёт СВОЙ пресет-период (без произвольного диапазона топбара) — сериализуем как
+  // preset-only MsPeriod, чтобы поведение Главной осталось прежним (канон #5: пресеты стабильны).
+  const summaryQ = useMsSummary({ days });
   const { channelId } = useSelectedChannel();
 
   const result = useMemo(() => {

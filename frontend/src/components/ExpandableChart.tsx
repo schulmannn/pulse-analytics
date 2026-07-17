@@ -52,6 +52,11 @@ export interface ChartExpandConfig {
   /** The renderers honour the grain arg (flow series bucketed by week/month). Off for level
       series — bucketing sums would lie there, so the segment stays hidden. */
   grainable?: boolean;
+  /** Host-specific controls rendered in the overlay's control row (their own leading line). Kept
+      generic so a source can inject extra segmented controls / pickers — e.g. МойСклад's metric
+      (Revenue/Orders/AOV), view (Aggregate/By channel) and channel multiselect — into the shared
+      explorer instead of forking an MS-only modal. Undefined everywhere else (non-MS unchanged). */
+  extraControls?: ReactNode;
 }
 
 interface ExpandableChartProps extends ChartExpandConfig {
@@ -148,7 +153,7 @@ function snapToWindow(days: number | undefined): number {
  * at full explorer axes (Tier-1). Owns its own period + line/bar state, so a fresh open
  * always starts on the line at 3М — like the metric pages.
  */
-export function ChartExpandOverlay({ title, children, renderExpanded, renderExpandedBar, statsFor, statsSum = true, grainable, initialDays, onClose, originRect, accentStyle }: ChartExpandOverlayProps) {
+export function ChartExpandOverlay({ title, children, renderExpanded, renderExpandedBar, statsFor, statsSum = true, grainable, extraControls, initialDays, onClose, originRect, accentStyle }: ChartExpandOverlayProps) {
   const chartRegionRef = useRef<HTMLDivElement>(null);
   const [days, setDays] = useState(() => snapToWindow(initialDays));
   // Overlay-local presentation; reopening always starts on the line, like metric pages.
@@ -217,6 +222,7 @@ export function ChartExpandOverlay({ title, children, renderExpanded, renderExpa
               {headline.caption && <span className="text-2xs text-muted-foreground">{headline.caption}</span>}
             </div>
           )}
+          {extraControls && <div className="flex flex-wrap items-center gap-2 pt-2">{extraControls}</div>}
           {(renderExpanded || renderExpandedBar) && (
             <div className="flex flex-wrap items-center gap-2 pt-2">
               {renderExpanded && (

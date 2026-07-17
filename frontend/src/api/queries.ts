@@ -10,6 +10,7 @@ const STALE_STATUS = 60 * 1000;        // свежесть-статусы (colle
 
 import { z } from 'zod';
 import { apiGet, apiSend } from '@/api/client';
+import { msPeriodKey, msPeriodQuery, type MsPeriod } from '@/lib/msPeriod';
 import type { CampaignSourceScope } from '@/lib/campaignSources';
 import {
   AdminUserSchema,
@@ -618,14 +619,14 @@ const MsFunnelSchema = z
   })
   .passthrough();
 
-export function useMsFunnel(days: number) {
+export function useMsFunnel(period: MsPeriod) {
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: channelId != null,
-    queryKey: ['ms-funnel', channelId, days],
+    queryKey: ['ms-funnel', channelId, ...msPeriodKey(period)],
     staleTime: STALE_LIVE,
     retry: false,
-    queryFn: ({ signal }) => apiGet(`/api/ms/funnel?days=${days}`, MsFunnelSchema, { signal, channelId }),
+    queryFn: ({ signal }) => apiGet(`/api/ms/funnel?${msPeriodQuery(period)}`, MsFunnelSchema, { signal, channelId }),
   });
 }
 
@@ -651,14 +652,14 @@ const MsCustomersSchema = z
   })
   .passthrough();
 
-export function useMsCustomers(days: number) {
+export function useMsCustomers(period: MsPeriod) {
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: channelId != null,
-    queryKey: ['ms-customers', channelId, days],
+    queryKey: ['ms-customers', channelId, ...msPeriodKey(period)],
     staleTime: STALE_LIVE,
     retry: false,
-    queryFn: ({ signal }) => apiGet(`/api/ms/customers?days=${days}`, MsCustomersSchema, { signal, channelId }),
+    queryFn: ({ signal }) => apiGet(`/api/ms/customers?${msPeriodQuery(period)}`, MsCustomersSchema, { signal, channelId }),
   });
 }
 
@@ -706,35 +707,54 @@ const MsSalesByChannelSchema = z
   })
   .passthrough();
 
-export function useMsSalesByChannel(days: number) {
+export function useMsSalesByChannel(period: MsPeriod) {
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: channelId != null,
-    queryKey: ['ms-sales-by-channel', channelId, days],
+    queryKey: ['ms-sales-by-channel', channelId, ...msPeriodKey(period)],
     staleTime: STALE_LIVE,
     retry: false,
-    queryFn: ({ signal }) => apiGet(`/api/ms/sales-by-channel?days=${days}`, MsSalesByChannelSchema, { signal, channelId }),
+    queryFn: ({ signal }) =>
+      apiGet(`/api/ms/sales-by-channel?${msPeriodQuery(period)}`, MsSalesByChannelSchema, { signal, channelId }),
   });
 }
 
+const MsDayPointSchema = z.object({ day: z.string(), orders: z.number(), sum: z.number() }).passthrough();
 const MsChannelSeriesSchema = z
   .object({
     window_days: z.number(),
-    channel: z.string().nullable(),
-    series: z.array(z.object({ day: z.string(), orders: z.number(), sum: z.number() }).passthrough()),
+    // Echo of the selected channel ids (null = all channels aggregated).
+    channels: z.array(z.string()).nullable(),
+    // AGGREGATE series over the selected channels (or all) — the Steep «filter = aggregate» view.
+    series: z.array(MsDayPointSchema),
+    // Per-channel series, present only when Breakdown is requested; bounded server-side.
+    groups: z
+      .array(z.object({ sales_channel_id: z.string(), series: z.array(MsDayPointSchema) }).passthrough())
+      .nullable()
+      .optional(),
+    // How many separate series the server rendered vs how many the caller asked for — lets the UI
+    // state the limit honestly rather than silently dropping channels.
+    group_limit: z.number().optional(),
+    group_total: z.number().optional(),
   })
   .passthrough();
+export type MsChannelSeries = z.infer<typeof MsChannelSeriesSchema>;
 
-export function useMsChannelSeries(days: number, channel: string | null) {
+/** Daily revenue/orders series for the sales-channel axis. `channels` empty = all channels
+    aggregated (the default). `breakdown` asks the server for per-channel series (bounded). */
+export function useMsChannelSeries(period: MsPeriod, opts: { channels: string[]; breakdown: boolean }) {
   const { channelId } = useSelectedChannel();
+  const channels = [...opts.channels].sort();
+  const breakdown = opts.breakdown && channels.length > 0;
+  const channelParam = channels.length > 0 ? `&channels=${encodeURIComponent(channels.join(','))}` : '';
   return useQuery({
     enabled: channelId != null,
-    queryKey: ['ms-channel-series', channelId, days, channel ?? 'all'],
+    queryKey: ['ms-channel-series', channelId, ...msPeriodKey(period), channels.join(',') || 'all', breakdown],
     staleTime: STALE_LIVE,
     retry: false,
     queryFn: ({ signal }) =>
       apiGet(
-        `/api/ms/channel-series?days=${days}${channel ? `&channel=${encodeURIComponent(channel)}` : ''}`,
+        `/api/ms/channel-series?${msPeriodQuery(period)}${channelParam}${breakdown ? '&breakdown=1' : ''}`,
         MsChannelSeriesSchema,
         { signal, channelId },
       ),
@@ -750,14 +770,14 @@ const MsGeographySchema = z
   })
   .passthrough();
 
-export function useMsGeography(days: number) {
+export function useMsGeography(period: MsPeriod) {
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: channelId != null,
-    queryKey: ['ms-geography', channelId, days],
+    queryKey: ['ms-geography', channelId, ...msPeriodKey(period)],
     staleTime: STALE_LIVE,
     retry: false,
-    queryFn: ({ signal }) => apiGet(`/api/ms/geography?days=${days}`, MsGeographySchema, { signal, channelId }),
+    queryFn: ({ signal }) => apiGet(`/api/ms/geography?${msPeriodQuery(period)}`, MsGeographySchema, { signal, channelId }),
   });
 }
 
@@ -772,14 +792,14 @@ const MsTopCustomersSchema = z
   })
   .passthrough();
 
-export function useMsTopCustomers(days: number) {
+export function useMsTopCustomers(period: MsPeriod) {
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: channelId != null,
-    queryKey: ['ms-top-customers', channelId, days],
+    queryKey: ['ms-top-customers', channelId, ...msPeriodKey(period)],
     staleTime: STALE_LIVE,
     retry: false,
-    queryFn: ({ signal }) => apiGet(`/api/ms/top-customers?days=${days}`, MsTopCustomersSchema, { signal, channelId }),
+    queryFn: ({ signal }) => apiGet(`/api/ms/top-customers?${msPeriodQuery(period)}`, MsTopCustomersSchema, { signal, channelId }),
   });
 }
 
@@ -787,36 +807,37 @@ const MsReturnsSchema = z
   .object({ window_days: z.number(), count: z.number(), sum: z.number(), truncated: z.boolean().optional() })
   .passthrough();
 
-export function useMsReturns(days: number) {
+export function useMsReturns(period: MsPeriod) {
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: channelId != null,
-    queryKey: ['ms-returns', channelId, days],
+    queryKey: ['ms-returns', channelId, ...msPeriodKey(period)],
     staleTime: STALE_LIVE,
     retry: false,
-    queryFn: ({ signal }) => apiGet(`/api/ms/returns?days=${days}`, MsReturnsSchema, { signal, channelId }),
+    queryFn: ({ signal }) => apiGet(`/api/ms/returns?${msPeriodQuery(period)}`, MsReturnsSchema, { signal, channelId }),
   });
 }
 
-export function useMsSummary(days: number) {
+export function useMsSummary(period: MsPeriod) {
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: channelId != null,
-    queryKey: ['ms-summary', channelId, days],
+    queryKey: ['ms-summary', channelId, ...msPeriodKey(period)],
     staleTime: STALE_LIVE,
     retry: false,
-    queryFn: ({ signal }) => apiGet(`/api/ms/summary?days=${days}`, MsSummarySchema, { signal, channelId }),
+    queryFn: ({ signal }) => apiGet(`/api/ms/summary?${msPeriodQuery(period)}`, MsSummarySchema, { signal, channelId }),
   });
 }
 
-export function useMsTopProducts(days: number, limit = 10) {
+export function useMsTopProducts(period: MsPeriod, limit = 10) {
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: channelId != null,
-    queryKey: ['ms-top-products', channelId, days, limit],
+    queryKey: ['ms-top-products', channelId, ...msPeriodKey(period), limit],
     staleTime: STALE_LIVE,
     retry: false,
-    queryFn: ({ signal }) => apiGet(`/api/ms/top-products?days=${days}&limit=${limit}`, MsTopProductsSchema, { signal, channelId }),
+    queryFn: ({ signal }) =>
+      apiGet(`/api/ms/top-products?${msPeriodQuery(period)}&limit=${limit}`, MsTopProductsSchema, { signal, channelId }),
   });
 }
 

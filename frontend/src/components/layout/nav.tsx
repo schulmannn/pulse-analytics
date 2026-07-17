@@ -65,6 +65,12 @@ export const FEED_ROUTES = [
   '/instagram/analytics',
   '/instagram/content',
   '/instagram/audience',
+  // «МойСклад» analysis pages render their own FeedBlock header exactly like TG/IG, so the layout
+  // must NOT also mount its Atlavue topbar + divider over them (it did, because these routes were
+  // absent here — the shared shell fell through to the default Topbar and rendered twice).
+  '/sklad',
+  '/sklad/clients',
+  '/sklad/channels',
 ];
 
 /** Topbar h1 for the current route; metric pages resolve to the metric's display name. */
