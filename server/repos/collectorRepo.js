@@ -438,6 +438,33 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
     return rows.length;
   }
 
+  // Дневные метрики МойСклада. rows: [{ day:'YYYY-MM-DD', revenue_kopecks, orders_count,
+  // orders_sum_kopecks }] — суммы в КОПЕЙКАХ (BIGINT; рубли — на границе API). Батч-upsert по
+  // (channel_id, day) — идемпотентность канон. В отличие от ig_daily здесь СОЗНАТЕЛЬНО нет
+  // COALESCE-семантики «дополнить, не затереть»: крон пере-снимает 7-дневное окно ЦЕЛИКОМ из
+  // источника истины (plotseries), а правки МС задним числом бывают и ВНИЗ (удалили документ →
+  // день должен похудеть) — свежая точка честно ЗАМЕНЯЕТ старую. Контракт вызывающего: день
+  // пишется только когда ОБА отчёта окна пришли (msCollectionJob частичных строк не строит),
+  // поэтому отсутствие продаж/заказов в дне = честный 0, а не «метрика недоступна»; COALESCE к 0
+  // здесь лишь страховка NOT NULL-контракта таблицы от дырявой строки.
+  async function upsertMsDaily(channelId, rows, executor = pool) {
+    if (!enabled || !channelId || !rows || !rows.length) return 0;
+    const sql = `INSERT INTO ms_daily
+        (channel_id, day, revenue_kopecks, orders_count, orders_sum_kopecks, updated_at)
+      SELECT $1, x.day::date, COALESCE(x.revenue_kopecks, 0), COALESCE(x.orders_count, 0),
+             COALESCE(x.orders_sum_kopecks, 0), now()
+        FROM jsonb_to_recordset($2::jsonb) AS x(
+          day text, revenue_kopecks bigint, orders_count integer, orders_sum_kopecks bigint
+        )
+      ON CONFLICT (channel_id, day) DO UPDATE SET
+        revenue_kopecks=EXCLUDED.revenue_kopecks,
+        orders_count=EXCLUDED.orders_count,
+        orders_sum_kopecks=EXCLUDED.orders_sum_kopecks,
+        updated_at=now()`;
+    await executor.query(sql, [channelId, JSON.stringify(rows)]);
+    return rows.length;
+  }
+
   // Per-media lifetime-инсайты по дням. rows: [{ media_id, day, reach, likes, comments,
   // saved, shares, views }]. Insights кумулятивны → каждый день — новая точка траектории.
   async function upsertIgMediaDaily(channelId, rows, executor = pool) {
@@ -609,7 +636,7 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
     upsertPostMedia, getPostMedia, listCentralPostsMissingMedia,
     saveSnapshot, saveVelocity,
     ingestCollectorPayload, persistCentralDaily, persistTgBundleTx,
-    upsertIgDaily, upsertIgMediaDaily,
+    upsertIgDaily, upsertIgMediaDaily, upsertMsDaily,
     saveRawSnapshot, pruneRawSnapshots, pruneIgMediaDaily, pruneIngestReceipts, rollupChannelMonthly,
   };
 }

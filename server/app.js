@@ -173,10 +173,12 @@ function createApp(deps) {
     oauthAcquireTimeoutMs: config.instagram.oauthAcquireTimeoutMs,
   });
 
-  // Роуты МойСклада (connect по API-токену + summary/top-products) — routes/moysklad.js.
-  // msCrypto/msFetch построены в composition (зеркально igCrypto/igFetch); канал data-роуты
-  // резолвят тем же заголовком x-channel-id, что IG (см. resolveMs внутри).
-  registerMsRoutes({ app, requireAuth, db, msCrypto, msFetch, cacheGet, cacheSet, log });
+  // Роуты МойСклада (connect по API-токену + summary/top-products + status/disconnect) —
+  // routes/moysklad.js. msCrypto/msFetch построены в composition (зеркально igCrypto/igFetch);
+  // канал data-роуты резолвят тем же заголовком x-channel-id, что IG (см. resolveMs внутри).
+  // cache (полный контракт keys/delete) — для точечной инвалидации ms:*-ключей канала на
+  // connect/disconnect, как igCachePurge в ig-oauth.
+  registerMsRoutes({ app, requireAuth, db, msCrypto, msFetch, cacheGet, cacheSet, cache, log });
 
   registerChannelsRoutes({ app, db, requireAuth, audit, getDbReady });
 

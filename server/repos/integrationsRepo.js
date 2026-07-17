@@ -137,6 +137,30 @@ function createIntegrationsRepo({ pool, enabled, ensureExternalSource, transacti
     return rows[0] || null;
   }
 
+  // Все подключённые аккаунты МойСклада ЖИВЫХ каналов — для доверенного дневного крона
+  // (msCollectionJob дешифрует токен и ходит в отчёты). Зеркало listIgAccounts, но с явным
+  // JOIN-фильтром status<>'disabled': выключенный канал не должен тратить лимит МС (45/3с)
+  // на сбор, который никто не читает. Без ownership-фильтра — крон доверенный, итерирует все
+  // строки. ms_account_id нужен ключу durable per-day джобы (reconnect другого склада тем же
+  // каналом не наследует сегодняшний succeeded — тот же урок, что accountKey IG-прохода).
+  async function listMsAccounts() {
+    if (!enabled) return [];
+    const { rows } = await pool.query(
+      `SELECT ma.channel_id, ma.ms_account_id, ma.org_name, ma.access_token_enc
+         FROM ms_accounts ma
+         JOIN channels c ON c.id = ma.channel_id AND c.status <> 'disabled'
+        ORDER BY ma.channel_id ASC`);
+    return rows;
+  }
+
+  // Отключение источника: сносим ТОЛЬКО строку учётки (токен). Канал и архив ms_daily живут
+  // дальше — история остаётся читаемой, повторный connect того же склада её продолжит.
+  async function deleteMsAccount(channelId) {
+    if (!enabled || !channelId) return false;
+    const { rowCount } = await pool.query('DELETE FROM ms_accounts WHERE channel_id=$1', [channelId]);
+    return rowCount > 0;
+  }
+
   // ── Telegram QR sessions (managed connect) ───────────────────────────
   // One encrypted user session per account (callers encrypt via lib/tg_crypto — the repo never sees
   // plaintext). Covers every channel where that user is an admin; QR-connected channels reach it
@@ -297,7 +321,7 @@ function createIntegrationsRepo({ pool, enabled, ensureExternalSource, transacti
 
   return {
     saveIgAccount, getIgAccount, updateIgToken, deleteIgAccount, listIgAccounts,
-    saveMsAccount, getMsAccount,
+    saveMsAccount, getMsAccount, listMsAccounts, deleteMsAccount,
     saveTgSession, getTgSession, deleteTgSession, listTgSessions, rotateTgSessionCiphertext,
     listTgQrCollectCandidates,
     recordTgSessionAttempt, recordTgSessionSuccess, recordTgSessionFailure,

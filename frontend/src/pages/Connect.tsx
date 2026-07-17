@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
 import QRCode from 'qrcode';
 import { useQueryClient } from '@tanstack/react-query';
-import { useChannels, useConnectIg, useDisconnectIg, useIgOauthStatus, useTgQrStatus } from '@/api/queries';
+import { useChannels, useConnectIg, useDisconnectIg, useIgOauthStatus, useMsStatus, useTgQrStatus } from '@/api/queries';
 import { ApiError, apiSend } from '@/api/client';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { cn } from '@/lib/utils';
@@ -374,10 +374,23 @@ function PanelHead({ id, name, pill }: { id: ServiceId; name: string; pill: { la
 // ── МойСклад: подключение по токену API ──
 function MoySkladPanel() {
   const qc = useQueryClient();
+  const status = useMsStatus();
   const [token, setToken] = useState('');
   const [busy, setBusy] = useState(false);
-  const [orgName, setOrgName] = useState<string | null>(null);
+  const [freshOrg, setFreshOrg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Статус живёт на сервере (переживает перезагрузку страницы); freshOrg — мгновенный отклик
+  // сразу после подключения, пока инвалидация статуса доезжает.
+  const connected = freshOrg != null || (status.data?.connected ?? false);
+  const orgName = freshOrg ?? status.data?.org_name ?? 'организация';
+
+  const invalidateMs = () =>
+    Promise.all([
+      qc.invalidateQueries({ queryKey: ['channels'] }),
+      qc.invalidateQueries({ queryKey: ['ms-status'] }),
+      qc.invalidateQueries({ queryKey: ['ms-summary'] }),
+      qc.invalidateQueries({ queryKey: ['ms-top-products'] }),
+    ]);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -389,11 +402,26 @@ function MoySkladPanel() {
       // Токен уходит только на НАШ бэкенд (шифруется AES-256-GCM до записи) — в браузере,
       // логах и git он не живёт; в МойСклад ходит сервер.
       const res = (await apiSend('POST', '/api/ms/connect', { token: value })) as { org_name?: string };
-      setOrgName(res?.org_name || 'организация');
+      setFreshOrg(res?.org_name || 'организация');
       setToken('');
-      await qc.invalidateQueries({ queryKey: ['channels'] });
+      await invalidateMs();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Не удалось подключить МойСклад.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const disconnect = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await apiSend('DELETE', '/api/ms/account');
+      setFreshOrg(null);
+      await invalidateMs();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Не удалось отключить источник.');
     } finally {
       setBusy(false);
     }
@@ -404,20 +432,31 @@ function MoySkladPanel() {
       <PanelHead
         id="moysklad"
         name="МойСклад"
-        pill={orgName ? { label: 'Подключён', tone: 'ok' } : { label: 'Доступен', tone: 'go' }}
+        pill={connected ? { label: 'Подключён', tone: 'ok' } : { label: 'Доступен', tone: 'go' }}
       />
-      {orgName ? (
+      {connected ? (
         <div className="mt-4 space-y-4">
           <p className="text-sm text-muted-foreground">
             Подключена организация <b className="font-medium text-foreground">{orgName}</b>. Выручка, заказы и топ
-            товаров уже считаются.
+            товаров уже считаются; дневной архив пополняется автоматически.
           </p>
-          <Link
-            to="/sklad"
-            className="btn-pill inline-flex bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-          >
-            Открыть Обзор склада →
-          </Link>
+          <div className="flex flex-wrap items-center gap-3">
+            <Link
+              to="/sklad"
+              className="btn-pill inline-flex bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+            >
+              Открыть Обзор склада →
+            </Link>
+            <button
+              type="button"
+              onClick={() => void disconnect()}
+              disabled={busy}
+              className="btn-pill border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-destructive disabled:opacity-50"
+            >
+              Отключить
+            </button>
+          </div>
+          {error && <p className="text-xs text-ember">{error}</p>}
         </div>
       ) : (
         <div className="mt-4 space-y-4">
