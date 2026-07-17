@@ -19,6 +19,7 @@ import type { NormalizedPost } from '@/lib/posts';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ErrorState } from '@/components/ErrorState';
 import { DeltaPill } from '@/components/DeltaPill';
+import { SegmentedControl } from '@/components/SegmentedControl';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { DivergingBars } from '@/components/DivergingBars';
@@ -746,16 +747,19 @@ export function MetricPage() {
             noExpand
             strip
             action={
-              <div role="group" aria-label="Тип графика" className="flex shrink-0 overflow-hidden rounded-full border border-border">
-                {chartTypes.map((kind) => (
-                  <ChartTypeButton
-                    key={kind}
-                    kind={kind}
-                    active={chartType === kind}
-                    onSelect={(next) => setParam('chart', next === 'line' ? null : next)}
-                  />
-                ))}
-              </div>
+              <SegmentedControl
+                ariaLabel="Тип графика"
+                className="shrink-0"
+                segmentClassName="w-8"
+                value={chartType}
+                onChange={(next) => setParam('chart', next === 'line' ? null : next)}
+                options={chartTypes.map((kind) => ({
+                  value: kind,
+                  content: <ChartTypeIcon kind={kind} />,
+                  ariaLabel: `Тип графика: ${CHART_TYPE_LABEL[kind]}`,
+                  title: CHART_TYPE_LABEL[kind],
+                }))}
+              />
             }
           >
             {chartType === 'line' && (
@@ -825,45 +829,30 @@ export function MetricPage() {
               свой диапазон и пейджер окон — одной строкой сразу под канвасом, а не плавающей
               sticky-панелью у края экрана. Пикер открывается вниз — под графиком места больше. */}
           <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2.5 print:hidden">
-            <div role="group" aria-label="Гранулярность" className="flex overflow-hidden rounded-full border border-border">
-              {(['day', 'week', 'month'] as Grain[]).map((g) => (
-                <button
-                  key={g}
-                  type="button"
-                  disabled={!grainAllowed[g]}
-                  aria-pressed={effGrain === g}
-                  onClick={() => setParam('grain', g === 'day' ? null : g)}
-                  className={`px-2.5 py-1 text-xs font-medium transition-colors disabled:pointer-events-none disabled:opacity-40 ${
-                    effGrain === g ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'
-                  } border-r border-border last:border-r-0`}
-                >
-                  {GRAIN_LABEL[g]}
-                </button>
-              ))}
-            </div>
+            <SegmentedControl
+              ariaLabel="Гранулярность"
+              value={effGrain}
+              onChange={(g) => setParam('grain', g === 'day' ? null : g)}
+              options={(['day', 'week', 'month'] as Grain[]).map((g) => ({
+                value: g,
+                content: GRAIN_LABEL[g],
+                disabled: !grainAllowed[g],
+              }))}
+            />
             <span className="flex-1" />
-            {(
-              [
-                { days: 7 as PeriodDays, label: '7д' },
-                { days: 30 as PeriodDays, label: '30д' },
-                { days: 90 as PeriodDays, label: '90д' },
-                { days: 0 as PeriodDays, label: 'Всё' },
-              ]
-            ).map((chip) => (
-              <button
-                key={chip.days}
-                type="button"
-                aria-pressed={!range && days === chip.days}
-                onClick={() => setDays(chip.days)}
-                className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors ${
-                  !range && days === chip.days
-                    ? 'border-primary/40 bg-primary/10 text-primary'
-                    : 'border-border text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                {chip.label}
-              </button>
-            ))}
+            {/* Presets on the shared sliding-glider primitive; a picked custom range deselects every
+                preset (value matches nothing → the glider hides). */}
+            <SegmentedControl
+              ariaLabel="Период"
+              value={range ? '' : String(days)}
+              onChange={(d) => setDays(Number(d) as PeriodDays)}
+              options={[
+                { value: '7', content: '7д' },
+                { value: '30', content: '30д' },
+                { value: '90', content: '90д' },
+                { value: '0', content: 'Всё' },
+              ]}
+            />
             {/* «Свой диапазон» — opens the calendar picker; applies to the global period `range`
                 (URL-persisted, used everywhere via inRange). The active range is shown by the chip below. */}
             <div className="relative">
@@ -1158,7 +1147,9 @@ export function MetricPage() {
   );
 }
 
-/** Bounded segmented control for the rail selects (dimension / comparison baseline). */
+/** Bounded segmented control for the rail selects (dimension / comparison baseline) — a thin,
+    full-width wrapper over the shared {@link SegmentedControl} so the rail matches every other
+    segmented group by construction. */
 export function SegSelect<T extends string>({
   value,
   onChange,
@@ -1171,47 +1162,23 @@ export function SegSelect<T extends string>({
   ariaLabel: string;
 }) {
   return (
-    <div role="group" aria-label={ariaLabel} className="mb-3 flex overflow-hidden rounded-full border border-border">
-      {options.map((opt) => (
-        <button
-          key={opt.value}
-          type="button"
-          aria-pressed={value === opt.value}
-          onClick={() => onChange(opt.value)}
-          className={`flex-1 border-r border-border px-2 py-1 text-xs font-medium transition-colors last:border-r-0 ${
-            value === opt.value ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'
-          }`}
-        >
-          {opt.label}
-        </button>
-      ))}
-    </div>
+    <SegmentedControl
+      ariaLabel={ariaLabel}
+      className="mb-3 w-full"
+      segmentClassName="px-2"
+      value={value}
+      onChange={onChange}
+      options={options.map((opt) => ({ value: opt.value, content: opt.label }))}
+    />
   );
 }
 
-/** One cell of the chart-type switcher (steep's Explore icons, bounded segment). */
-function ChartTypeButton({
-  kind,
-  active,
-  onSelect,
-}: {
-  kind: 'line' | 'bar' | 'rank' | 'pivot';
-  active: boolean;
-  onSelect: (k: 'line' | 'bar' | 'rank' | 'pivot') => void;
-}) {
-  const LABELS = { line: 'Линия', bar: 'Столбцы', rank: 'Рейтинг', pivot: 'Сводная' } as const;
-  const label = LABELS[kind];
+const CHART_TYPE_LABEL = { line: 'Линия', bar: 'Столбцы', rank: 'Рейтинг', pivot: 'Сводная' } as const;
+
+/** The steep Explore glyph for a chart-type segment (icon-only; its label rides `aria-label`). */
+function ChartTypeIcon({ kind }: { kind: 'line' | 'bar' | 'rank' | 'pivot' }) {
   return (
-    <button
-      type="button"
-      aria-pressed={active}
-      title={label}
-      aria-label={`Тип графика: ${label}`}
-      onClick={() => onSelect(kind)}
-      className={`flex h-7 w-8 items-center justify-center border-r border-border transition-colors last:border-r-0 ${
-        active ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
-      }`}
-    >
+    <>
       {kind === 'line' && (
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-3.5 w-3.5" aria-hidden="true">
           <path d="M1.5 11.5 5.5 7l3 2.5 5.5-6" strokeLinecap="round" strokeLinejoin="round" />
@@ -1239,7 +1206,7 @@ function ChartTypeButton({
           <rect x="8.5" y="8.5" width="5.5" height="5.5" rx="0.5" />
         </svg>
       )}
-    </button>
+    </>
   );
 }
 

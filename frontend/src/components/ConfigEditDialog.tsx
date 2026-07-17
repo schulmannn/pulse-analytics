@@ -4,6 +4,7 @@ import { useFocusTrap } from '@/lib/useFocusTrap';
 import { useChannels } from '@/api/queries';
 import { WidgetBody } from '@/components/ConfigWidget';
 import { PillSelect } from '@/components/PillSelect';
+import { SegmentedControl } from '@/components/SegmentedControl';
 import { ChannelScope } from '@/lib/channel-context';
 import { ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import { DEFAULT_WIDGET_DAYS } from '@/lib/period';
@@ -215,6 +216,7 @@ export function WidgetConfigControls({
       {cap.viz && spec.supportedViz.length > 1 ? (
         <Field label="Визуализация">
           <Segmented
+            ariaLabel="Визуализация"
             options={spec.supportedViz.map((v) => ({ value: v, label: VIZ_LABEL[v] }))}
             value={config.viz}
             onChange={(viz) => onChange({ viz })}
@@ -226,6 +228,7 @@ export function WidgetConfigControls({
 
       <Field label="Период">
         <Segmented
+          ariaLabel="Период"
           options={PERIODS.map((p) => ({ value: String(p.days), label: p.label }))}
           value={String(config.period ?? DEFAULT_WIDGET_DAYS)}
           onChange={(v) => onChange({ period: Number(v) as PeriodDays })}
@@ -235,6 +238,7 @@ export function WidgetConfigControls({
       {cap.grain ? (
         <Field label="Грануляция">
           <Segmented
+            ariaLabel="Грануляция"
             options={GRAINS.map((g) => ({ value: g.value, label: g.label }))}
             value={config.grain ?? 'day'}
             onChange={(v) => onChange({ grain: v as WidgetGrain })}
@@ -247,6 +251,7 @@ export function WidgetConfigControls({
       {cap.comparison ? (
         <Field label="Сравнение">
           <Segmented
+            ariaLabel="Сравнение"
             options={CMP_MODES.map((m) => ({ value: m.value, label: m.label }))}
             value={cmpMode}
             onChange={(v) => {
@@ -260,6 +265,7 @@ export function WidgetConfigControls({
           {cmpMode !== 'none' && (
             <div className="mt-2">
               <Segmented
+                ariaLabel="Отображение сравнения"
                 options={CMP_DISPLAY.map((d) => ({ value: d.value, label: d.label }))}
                 value={cmpDisplay}
                 onChange={(v) => onChange({ comparison: { mode: cmpMode, display: v as ComparisonDisplay } })}
@@ -303,6 +309,7 @@ export function WidgetConfigControls({
 
       <Field label="Размер">
         <Segmented
+          ariaLabel="Размер"
           options={SIZES.filter((s) => s.value !== 'third' || vizAllowsThirdWidth(config.viz)).map((s) => ({ value: s.value, label: s.label }))}
           value={coerceSizeForViz(config.viz, config.size ?? 'third')}
           onChange={(v) => onChange({ size: v as WidgetSize })}
@@ -385,35 +392,29 @@ function DisabledField({ label, reason }: { label: string; reason: string }) {
   );
 }
 
-/** A bounded segmented control (steep's Explore segments). */
+/** A bounded segmented control (steep's Explore segments) — a thin, full-width adapter over the
+    shared {@link SegmentedControl} so every `<Field>` segment (Период, Грануляция, Сравнение…) rides
+    the one sliding-glider primitive. */
 function Segmented<T extends string>({
+  ariaLabel,
   options,
   value,
   onChange,
 }: {
+  ariaLabel: string;
   options: Array<{ value: T; label: string }>;
   value: T;
   onChange: (v: T) => void;
 }) {
   return (
-    <div className="flex overflow-hidden rounded-full border border-border">
-      {options.map((o) => {
-        const active = value === o.value;
-        return (
-          <button
-            key={o.value}
-            type="button"
-            aria-pressed={active}
-            onClick={() => onChange(o.value)}
-            className={`flex-1 border-r border-border px-2 py-1.5 text-xs font-medium transition-colors last:border-r-0 ${
-              active ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
-            }`}
-          >
-            {o.label}
-          </button>
-        );
-      })}
-    </div>
+    <SegmentedControl
+      ariaLabel={ariaLabel}
+      className="w-full"
+      segmentClassName="px-2"
+      value={value}
+      onChange={onChange}
+      options={options.map((o) => ({ value: o.value, content: o.label }))}
+    />
   );
 }
 
@@ -437,6 +438,7 @@ function TargetField({ config, onChange }: { config: WidgetConfig; onChange: (pa
   return (
     <Field label="Цель">
       <Segmented
+        ariaLabel="Тип цели"
         options={TARGET_TYPES}
         value={type}
         onChange={(t) => {

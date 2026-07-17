@@ -9,6 +9,7 @@ import { useFocusTrap } from '@/lib/useFocusTrap';
 import { PERIOD_CHIPS } from '@/panels/report/blocks';
 import type { PeriodDays } from '@/lib/period';
 import { PillSelect } from '@/components/PillSelect';
+import { SegmentedControl } from '@/components/SegmentedControl';
 import { cn } from '@/lib/utils';
 
 // Create-time templates: a compact set of curated starting points (selectable rows, not cards).
@@ -225,22 +226,14 @@ export function CreateReportDialog({ onClose }: { onClose: () => void }) {
 
           <div>
             <span className="text-xs font-medium text-muted-foreground">Период</span>
-            <div className="mt-1.5 flex overflow-hidden rounded-full border border-border">
-              {PERIOD_CHIPS.map((chip) => (
-                <button
-                  key={chip.days}
-                  type="button"
-                  aria-pressed={periodDays === chip.days}
-                  onClick={() => setPeriodDays(chip.days)}
-                  className={cn(
-                    'flex-1 border-r border-border px-2 py-1.5 text-xs font-medium transition-colors last:border-r-0',
-                    periodDays === chip.days ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted/50',
-                  )}
-                >
-                  {chip.label}
-                </button>
-              ))}
-            </div>
+            <SegmentedControl
+              ariaLabel="Период отчёта"
+              className="mt-1.5 w-full"
+              segmentClassName="px-2"
+              value={String(periodDays)}
+              onChange={(days) => setPeriodDays(Number(days) as PeriodDays)}
+              options={PERIOD_CHIPS.map((chip) => ({ value: String(chip.days), content: chip.label }))}
+            />
           </div>
 
           <label className="block text-xs font-medium text-muted-foreground">

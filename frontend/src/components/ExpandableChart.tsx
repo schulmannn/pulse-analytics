@@ -2,6 +2,7 @@ import { createContext, useLayoutEffect, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { DetailShell } from '@/components/DetailShell';
+import { SegmentedControl } from '@/components/SegmentedControl';
 import { fmt } from '@/lib/format';
 import { pctDelta } from '@/lib/delta';
 import { DeltaPill } from '@/components/DeltaPill';
@@ -218,38 +219,25 @@ export function ChartExpandOverlay({ title, children, renderExpanded, renderExpa
           )}
           {(renderExpanded || renderExpandedBar) && (
             <div className="flex flex-wrap items-center gap-2 pt-2">
-              {renderExpanded &&
-                WINDOWS.map((window) => (
-                  <button
-                    key={window.days}
-                    type="button"
-                    aria-pressed={days === window.days}
-                    onClick={() => setDays(window.days)}
-                    className={`whitespace-nowrap border-b-2 px-3 py-2 text-xs font-medium transition-colors ${
-                      days === window.days
-                        ? 'border-primary text-foreground'
-                        : 'border-transparent text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    {window.label}
-                  </button>
-                ))}
+              {renderExpanded && (
+                <SegmentedControl
+                  ariaLabel="Окно"
+                  value={String(days)}
+                  onChange={(d) => setDays(Number(d))}
+                  options={WINDOWS.map((window) => ({ value: String(window.days), content: window.label }))}
+                />
+              )}
               {grainable && (
-                <div role="group" aria-label="Грануляция" className="flex shrink-0 overflow-hidden rounded-full border border-border">
-                  {(['day', 'week', 'month'] as const).map((g) => (
-                    <button
-                      key={g}
-                      type="button"
-                      aria-pressed={grain === g}
-                      onClick={() => setGrain(g)}
-                      className={`border-r border-border px-2.5 py-1.5 text-xs font-medium transition-colors last:border-r-0 ${
-                        grain === g ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
-                      }`}
-                    >
-                      {g === 'day' ? 'День' : g === 'week' ? 'Неделя' : 'Месяц'}
-                    </button>
-                  ))}
-                </div>
+                <SegmentedControl
+                  ariaLabel="Грануляция"
+                  className="shrink-0"
+                  value={grain}
+                  onChange={setGrain}
+                  options={(['day', 'week', 'month'] as const).map((g) => ({
+                    value: g,
+                    content: g === 'day' ? 'День' : g === 'week' ? 'Неделя' : 'Месяц',
+                  }))}
+                />
               )}
               {statsFor && (
                 <button
@@ -264,10 +252,17 @@ export function ChartExpandOverlay({ title, children, renderExpanded, renderExpa
                 </button>
               )}
               {renderExpandedBar && (
-                <div role="group" aria-label="Тип графика" className="ml-auto flex shrink-0 overflow-hidden rounded-full border border-border">
-                  <OverlayKindButton kind="line" active={kind === 'line'} onSelect={setKind} />
-                  <OverlayKindButton kind="bar" active={kind === 'bar'} onSelect={setKind} />
-                </div>
+                <SegmentedControl
+                  ariaLabel="Тип графика"
+                  className="ml-auto shrink-0"
+                  segmentClassName="w-8"
+                  value={kind}
+                  onChange={setKind}
+                  options={[
+                    { value: 'line', content: <OverlayKindIcon kind="line" />, ariaLabel: 'Тип графика: Линия', title: 'Линия' },
+                    { value: 'bar', content: <OverlayKindIcon kind="bar" />, ariaLabel: 'Тип графика: Столбцы', title: 'Столбцы' },
+                  ]}
+                />
               )}
             </div>
           )}
@@ -298,40 +293,19 @@ export function ChartExpandOverlay({ title, children, renderExpanded, renderExpa
   );
 }
 
-/** One cell of the overlay's line↔bar toggle — same visual language as the metric-page segment. */
-function OverlayKindButton({
-  kind,
-  active,
-  onSelect,
-}: {
-  kind: 'line' | 'bar';
-  active: boolean;
-  onSelect: (k: 'line' | 'bar') => void;
-}) {
-  const label = kind === 'line' ? 'Линия' : 'Столбцы';
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      title={label}
-      aria-label={`Тип графика: ${label}`}
-      onClick={() => onSelect(kind)}
-      className={`flex h-7 w-8 items-center justify-center border-r border-border transition-colors last:border-r-0 ${
-        active ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
-      }`}
-    >
-      {kind === 'line' ? (
-        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-3.5 w-3.5" aria-hidden="true">
-          <path d="M1.5 11.5 5.5 7l3 2.5 5.5-6" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      ) : (
-        <svg viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5" aria-hidden="true">
-          <rect x="2" y="8" width="3" height="6" rx="0.5" />
-          <rect x="6.5" y="4" width="3" height="10" rx="0.5" />
-          <rect x="11" y="6" width="3" height="8" rx="0.5" />
-        </svg>
-      )}
-    </button>
+/** The overlay's line↔bar glyph — icon-only content for the shared segmented toggle (its label
+    rides the segment's `aria-label`). Same visual language as the metric-page segment. */
+function OverlayKindIcon({ kind }: { kind: 'line' | 'bar' }) {
+  return kind === 'line' ? (
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-3.5 w-3.5" aria-hidden="true">
+      <path d="M1.5 11.5 5.5 7l3 2.5 5.5-6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ) : (
+    <svg viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5" aria-hidden="true">
+      <rect x="2" y="8" width="3" height="6" rx="0.5" />
+      <rect x="6.5" y="4" width="3" height="10" rx="0.5" />
+      <rect x="11" y="6" width="3" height="8" rx="0.5" />
+    </svg>
   );
 }
 
