@@ -27,6 +27,10 @@ interface LineChartProps {
   ghost?: Array<number | null>;
   /** Legend name for the ghost series (default «Прошлый период»). */
   ghostLabel?: string;
+  /** Legend/tooltip name for the PRIMARY series. Default keeps the compare-семантику («Текущий
+      период»/«Текущий»); pass a name when the ghost is a параллельная серия, а не прошлый период
+      (например «Новые» vs «Повторные» на клиентской странице МС). */
+  primaryLabel?: string;
   /** Bare value labels at the max point and the last point (no pills — Refined Technical). */
   markExtremes?: boolean;
   /** Hollow rings on every data point (steep-style reading aid for daily series). */
@@ -118,6 +122,7 @@ export function LineChart({
   markAnomalies,
   ghost,
   ghostLabel = 'Прошлый период',
+  primaryLabel,
   markExtremes = false,
   showPoints = false,
   fullAxes = false,
@@ -568,7 +573,7 @@ export function LineChart({
     if (prev != null) {
       const cur = v;
       const rows: TooltipRow[] = [
-        { label: 'Текущий', value: fmt.num(cur), color: 'hsl(var(--chart-role-primary))' },
+        { label: primaryLabel ?? 'Текущий', value: fmt.num(cur), color: 'hsl(var(--chart-role-primary))' },
         {
           // Своя дата у строки сравнения (артефакт v2): «Пред. период · вт, 18 июн».
           label: ghostTitles?.[i] ? `${ghostLabel} · ${ghostTitles[i]}` : ghostLabel,
@@ -785,7 +790,7 @@ export function LineChart({
         <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-2xs font-medium text-muted-foreground">
           <span className="flex select-none items-center gap-1.5">
             <span aria-hidden="true" className="h-0.5 w-4 rounded-full" style={{ backgroundColor: 'hsl(var(--chart-role-primary))' }} />
-            Текущий период
+            {primaryLabel ?? 'Текущий период'}
           </span>
           {legendToggle ? (
             <button

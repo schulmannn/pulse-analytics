@@ -375,6 +375,160 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
     return rows.map((r) => numifyMetrics(r, MS_DAILY_METRICS));
   }
 
+  // ── Агрегаты архива заказов МойСклада (ms_orders, слайс 3) ─────────────────────────────────────
+  // Общие правила блока: все чтения — по одному channel_id (tenant-ключ в каждом запросе); окно —
+  // только нижняя граница sinceDay ('YYYY-MM-DD' | null = вся история), провалидированная здесь же
+  // (repo не доверяет вызывающему). Календарный день/месяц = date-part moment БЕЗ tz-конверсий:
+  // moment хранит МС-локальное время «как UTC» (процесс и БД — UTC, Railway-канон), поэтому
+  // date_trunc/to_char по нему и есть календарь МойСклада. Суммы — КОПЕЙКИ (рубли — граница API);
+  // bigint-суммы pg отдаёт строками → на выходе приводим к Number (toMetricNumber).
+  const msSinceDay = (v) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null);
+
+  // «Первый заказ клиента» — канон новизны для customers/cohorts: ЗА ВСЮ историю канала (не окна!).
+  // DISTINCT ON (agent_id … ORDER BY moment, order_id) даёт ровно ОДНУ first-строку даже при
+  // нескольких заказах в одну секунду — order_id (PK-часть) детерминированно рвёт ничью, поэтому
+  // ровно один заказ агента может быть is_new. Заказы без agent_id в firsts/win не участвуют —
+  // их честно считает no_agent_orders (фронт покажет сноску).
+  const MS_FIRSTS_CTE = `firsts AS (
+      SELECT DISTINCT ON (agent_id) agent_id, moment AS first_moment, order_id AS first_order_id
+        FROM ms_orders
+       WHERE channel_id=$1 AND agent_id IS NOT NULL
+       ORDER BY agent_id, moment, order_id
+    )`;
+  const MS_WIN_CTE = `win AS (
+      SELECT o.order_id, o.moment, o.sum_kopecks, o.agent_id,
+             (o.order_id = f.first_order_id) AS is_new
+        FROM ms_orders o
+        JOIN firsts f ON f.agent_id = o.agent_id
+       WHERE o.channel_id=$1 AND ($2::date IS NULL OR o.moment >= $2::date)
+    )`;
+
+  // Воронка статусов: заказы окна GROUP BY state_id (включая NULL — строки до миграции 030 /
+  // заказы без статуса), orders DESC. Имя/цвет статуса репо НЕ знает — их мапит словарь
+  // metadata/states на границе API (/api/ms/funnel), здесь только устойчивые id и числа.
+  async function getMsFunnelInternal(channelId, { sinceDay = null } = {}) {
+    if (!enabled || !channelId) return [];
+    const { rows } = await pool.query(
+      `SELECT state_id, COUNT(*)::int AS orders, COALESCE(SUM(sum_kopecks),0)::bigint AS sum_kopecks
+         FROM ms_orders
+        WHERE channel_id=$1 AND ($2::date IS NULL OR moment >= $2::date)
+        GROUP BY state_id
+        ORDER BY COUNT(*) DESC, state_id NULLS LAST`,
+      [channelId, msSinceDay(sinceDay)]);
+    return rows.map((r) => numifyMetrics(r, ['orders', 'sum_kopecks']));
+  }
+
+  // Новые vs повторные клиенты: summary + дневная серия окна. «Новый» заказ = ПЕРВЫЙ заказ этого
+  // agent_id за всю историю (см. MS_FIRSTS_CTE), поэтому клиент с первым заказом ДО окна в окне —
+  // повторный. repeat_ever (клиенты с ≥2 заказами за всю историю) — глобальная константа канала
+  // для окна «Всё», где repeat_customers по определению 0. Серия отдаёт только дни с заказами
+  // (нулевые календарные дни дозаполняет фронт — канон mentions.daily/ms_daily).
+  async function getMsCustomersInternal(channelId, { sinceDay = null } = {}) {
+    const empty = {
+      customers: 0, new_customers: 0, repeat_customers: 0, orders_new: 0, orders_repeat: 0,
+      sum_new_kopecks: 0, sum_repeat_kopecks: 0, no_agent_orders: 0, repeat_ever: 0,
+    };
+    if (!enabled || !channelId) return { summary: { ...empty }, series: [] };
+    const params = [channelId, msSinceDay(sinceDay)];
+    const summaryQ = await pool.query(
+      `WITH ${MS_FIRSTS_CTE}, ${MS_WIN_CTE}
+       SELECT COUNT(DISTINCT w.agent_id)::int AS customers,
+              COUNT(*) FILTER (WHERE w.is_new)::int AS orders_new,
+              COUNT(*) FILTER (WHERE NOT w.is_new)::int AS orders_repeat,
+              COALESCE(SUM(w.sum_kopecks) FILTER (WHERE w.is_new),0)::bigint AS sum_new_kopecks,
+              COALESCE(SUM(w.sum_kopecks) FILTER (WHERE NOT w.is_new),0)::bigint AS sum_repeat_kopecks,
+              (SELECT COUNT(*) FROM firsts f
+                WHERE ($2::date IS NULL OR f.first_moment >= $2::date))::int AS new_customers,
+              (SELECT COUNT(*) FROM ms_orders n
+                WHERE n.channel_id=$1 AND n.agent_id IS NULL
+                  AND ($2::date IS NULL OR n.moment >= $2::date))::int AS no_agent_orders,
+              (SELECT COUNT(*) FROM (
+                 SELECT 1 FROM ms_orders r
+                  WHERE r.channel_id=$1 AND r.agent_id IS NOT NULL
+                  GROUP BY r.agent_id HAVING COUNT(*) >= 2) rr)::int AS repeat_ever
+         FROM win w`, params);
+    const s = summaryQ.rows[0] || {};
+    const summary = {
+      customers: toMetricNumber(s.customers) || 0,
+      new_customers: toMetricNumber(s.new_customers) || 0,
+      // Производное здесь, а не в SQL: new_customers ⊆ customers по построению (первый заказ
+      // окна сам лежит в окне), поэтому разность неотрицательна.
+      repeat_customers: (toMetricNumber(s.customers) || 0) - (toMetricNumber(s.new_customers) || 0),
+      orders_new: toMetricNumber(s.orders_new) || 0,
+      orders_repeat: toMetricNumber(s.orders_repeat) || 0,
+      sum_new_kopecks: toMetricNumber(s.sum_new_kopecks) || 0,
+      sum_repeat_kopecks: toMetricNumber(s.sum_repeat_kopecks) || 0,
+      no_agent_orders: toMetricNumber(s.no_agent_orders) || 0,
+      repeat_ever: toMetricNumber(s.repeat_ever) || 0,
+    };
+    const seriesQ = await pool.query(
+      `WITH ${MS_FIRSTS_CTE}, ${MS_WIN_CTE}
+       SELECT to_char(w.moment,'YYYY-MM-DD') AS day,
+              COUNT(*) FILTER (WHERE w.is_new)::int AS new_orders,
+              COUNT(*) FILTER (WHERE NOT w.is_new)::int AS repeat_orders
+         FROM win w
+        GROUP BY 1 ORDER BY 1`, params);
+    return {
+      summary,
+      series: seriesQ.rows.map((r) => ({
+        day: r.day,
+        new_orders: toMetricNumber(r.new_orders) || 0,
+        repeat_orders: toMetricNumber(r.repeat_orders) || 0,
+      })),
+    };
+  }
+
+  // Когорты удержания: когорта = месяц ПЕРВОГО заказа клиента, cell — сколько клиентов когорты
+  // сделали ≥1 заказ в месяце cohort_month+offset. SQL отдаёт плоский (cohort, activity, active),
+  // сетку собирает JS: offsets — ПЛОТНО от 0 до последнего активного месяца КАНАЛА (нули между
+  // активностями честно заполнены; горизонт data-driven, а не «до сегодня» — детерминирован для
+  // тестов и не плодит пустой хвост). Только agent_id IS NOT NULL; окна нет — когорты по
+  // определению вся история (фронт обрежет что не влезло).
+  async function getMsCohortsInternal(channelId) {
+    if (!enabled || !channelId) return [];
+    const { rows } = await pool.query(
+      `WITH firsts AS (
+         SELECT agent_id, MIN(moment) AS first_moment
+           FROM ms_orders
+          WHERE channel_id=$1 AND agent_id IS NOT NULL
+          GROUP BY agent_id
+       )
+       SELECT to_char(date_trunc('month', f.first_moment),'YYYY-MM') AS cohort_month,
+              to_char(date_trunc('month', o.moment),'YYYY-MM') AS activity_month,
+              COUNT(DISTINCT o.agent_id)::int AS active
+         FROM ms_orders o
+         JOIN firsts f ON f.agent_id = o.agent_id
+        WHERE o.channel_id=$1
+        GROUP BY 1, 2
+        ORDER BY 1, 2`, [channelId]);
+    if (!rows.length) return [];
+    // 'YYYY-MM' → порядковый номер месяца; offset = разница номеров (activity ≥ cohort всегда:
+    // first_moment — минимум moment агента).
+    const monthIdx = (ym) => {
+      const [y, m] = ym.split('-').map(Number);
+      return y * 12 + (m - 1);
+    };
+    const maxIdx = Math.max(...rows.map((r) => monthIdx(r.activity_month)));
+    const byCohort = new Map();
+    for (const r of rows) {
+      let c = byCohort.get(r.cohort_month);
+      if (!c) {
+        c = { cohort_month: r.cohort_month, active: new Map() };
+        byCohort.set(r.cohort_month, c);
+      }
+      c.active.set(monthIdx(r.activity_month) - monthIdx(r.cohort_month), toMetricNumber(r.active) || 0);
+    }
+    return Array.from(byCohort.values()).map((c) => {
+      const span = maxIdx - monthIdx(c.cohort_month);
+      const cells = [];
+      for (let offset = 0; offset <= span; offset++) {
+        cells.push({ offset, active: c.active.get(offset) || 0 });
+      }
+      // size = active на offset 0: первый заказ каждого клиента когорты лежит в её месяце.
+      return { cohort_month: c.cohort_month, size: c.active.get(0) || 0, cells };
+    });
+  }
+
   // ── Actor-gated reads: сначала проверяем доступ, иначе пусто (ПУТЬ ДЛЯ РОУТОВ) ──────────────────
   // null-доступ → пустой результат того же типа, что у Internal (список → [], одиночка → null).
   const allowed = (channelId, actor) => getAccessibleChannel(channelId, actor);
@@ -405,6 +559,15 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
   }
   async function getMsDailyAllForActor(channelId, actor) {
     return (await allowed(channelId, actor)) ? getMsDailyAllInternal(channelId) : [];
+  }
+  async function getMsFunnelForActor(channelId, actor, opts = {}) {
+    return (await allowed(channelId, actor)) ? getMsFunnelInternal(channelId, opts) : [];
+  }
+  async function getMsCustomersForActor(channelId, actor, opts = {}) {
+    return (await allowed(channelId, actor)) ? getMsCustomersInternal(channelId, opts) : null;
+  }
+  async function getMsCohortsForActor(channelId, actor) {
+    return (await allowed(channelId, actor)) ? getMsCohortsInternal(channelId) : [];
   }
 
     // ── ig-tags read (finding 7: чтение — analytics, write — collectorRepo) ──
@@ -438,10 +601,10 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
     getChannelHistoryInternal, getMentionsHistoryInternal, getMentionsArchiveInternal,
     getSnapshotInternal, getPublicTgChannelPhoto,
     getLatestVelocityInternal, listPostsInternal, listIgDailyInternal, listIgMediaDailyInternal,
-    getMsDailyAllInternal,
+    getMsDailyAllInternal, getMsFunnelInternal, getMsCustomersInternal, getMsCohortsInternal,
     getChannelHistoryForActor, getMentionsHistoryForActor, getMentionsArchiveForActor,
     getSnapshotForActor, getLatestVelocityForActor, listPostsForActor, listIgDailyForActor, listIgMediaDailyForActor,
-    getMsDailyAllForActor,
+    getMsDailyAllForActor, getMsFunnelForActor, getMsCustomersForActor, getMsCohortsForActor,
   };
 }
 

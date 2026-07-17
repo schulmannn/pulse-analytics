@@ -4,8 +4,8 @@ const { kopecksToRub } = require('../lib/msClient');
 const { hasWorkspaceRole } = require('../middleware/tenant');
 
 /**
- * Роуты МойСклада (/api/ms/{connect,summary,top-products,status,account,backfill,backfill-status})
- * — серверная половина
+ * Роуты МойСклада (/api/ms/{connect,summary,top-products,status,account,backfill,backfill-status,
+ * funnel,customers,cohorts,returns}) — серверная половина
  * источника «склад», зеркально Instagram-вертикали: connect валидирует токен живыми
  * identity-вызовами и сохраняет его ТОЛЬКО шифрованным (lib/ms_crypto), data-роуты резолвят
  * канал тем же механизмом, что resolveIg (?channel= / заголовок x-channel-id, дефолт через
@@ -13,9 +13,12 @@ const { hasWorkspaceRole } = require('../middleware/tenant');
  * (дефолтный TTL memoryCache). Все суммы наружу — в РУБЛЯХ (kopecksToRub), внутри МС/БД —
  * копейки. Токен нигде не логируется и не попадает в ответы/сообщения ошибок (msClient держит
  * его только в заголовке запроса). days=0 («Всё») обслуживается ИЗ АРХИВА ms_daily (его копит
- * jobs/msCollectionJob) — живых вызовов МС не делает и токена не требует.
+ * jobs/msCollectionJob) — живых вызовов МС не делает и токена не требует. Слайс 3
+ * (funnel/customers/cohorts) читает архив ms_orders (движок jobs/msBackfillJob) — дешёвые
+ * DB-агрегаты без кэша; живой у них только словарь статусов (funnel) и /returns (page-loop).
+ * sleepFn — инъекция паузы page-loop'а для детерминированных тестов (как у движка бэкфилла).
  */
-function registerMsRoutes({ app, requireAuth, db, msCrypto, msFetch, msBackfill, cacheGet, cacheSet, cache, log }) {
+function registerMsRoutes({ app, requireAuth, db, msCrypto, msFetch, msBackfill, cacheGet, cacheSet, cache, log, sleepFn }) {
   // Узкий enum периодов ДО кэш-ключа (как nearestOf у IG): произвольный days плодил бы
   // per-value кэш-записи, каждая ценой пары upstream-запросов. 0 = «Всё» (архив ms_daily,
   // upstream-вызовов нет). Не-enum → дефолт 30.
@@ -26,6 +29,17 @@ function registerMsRoutes({ app, requireAuth, db, msCrypto, msFetch, msBackfill,
   };
   const MS_TOP_LIMIT_DEFAULT = 10;
   const MS_TOP_LIMIT_MAX = 50;
+  // Живой page-loop /api/ms/returns: страницы по 1000 (лимит МС без expand) с паузой, как у
+  // движка бэкфилла; cap 5 страниц — потолок одного запроса (5000 возвратов за окно; больше —
+  // честный truncated, не бесконечный проход по чужому лимиту 45/3с).
+  const MS_RETURNS_PAGE_LIMIT = 1000;
+  const MS_RETURNS_PAGE_CAP = 5;
+  const MS_RETURNS_PAGE_PAUSE_MS = 150;
+  // Живые вызовы дорогие → кэш: словарь статусов меняется редко (1 час, инвалидация TTL'ом),
+  // возвраты — обычный data-TTL 10 минут.
+  const MS_STATES_CACHE_TTL_MS = 60 * 60 * 1000;
+  const MS_RETURNS_CACHE_TTL_MS = 10 * 60 * 1000;
+  const sleep = sleepFn || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
 
   // 'YYYY-MM-DD' по местным часам процесса (Railway = UTC) — как остальные дневные окна бэка.
   const fmtDay = (d) => {
@@ -40,6 +54,13 @@ function registerMsRoutes({ app, requireAuth, db, msCrypto, msFetch, msBackfill,
     const from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (days - 1));
     return { momentFrom: `${fmtDay(from)} 00:00:00`, momentTo: `${fmtDay(now)} 23:59:00` };
   }
+  // Нижняя граница того же календарного окна для DB-агрегатов ms_orders: 'YYYY-MM-DD' или
+  // null («Всё» = вся история архива). Та же система координат, что periodWindow/движок.
+  const sinceDayOf = (days) => {
+    if (days === 0) return null;
+    const now = new Date();
+    return fmtDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() - (days - 1)));
+  };
 
   // Единый маппинг ошибок msFetch для data-роутов. 429 (уже ПОСЛЕ одной внутренней повторной
   // попытки клиента) → честный 503 с retry-хинтом: у МС жёсткий лимит 45 запросов/3с, «зайди
@@ -424,6 +445,179 @@ function registerMsRoutes({ app, requireAuth, db, msCrypto, msFetch, msBackfill,
       const metaSize = Number(report && report.meta && report.meta.size);
       const data = { rows, total: Number.isFinite(metaSize) ? metaSize : rows.length };
       cacheSet(cacheKey, data);
+      res.json(data);
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  // Словарь статусов заказов канала: id → { name, color:'#rrggbb' } из
+  // GET /entity/customerorder/metadata (state.meta.href заказов оканчивается
+  // metadata/states/<uuid> — тем же uuid ключуем словарь). color у МС — int RGB → hex-строка.
+  // Кэш 1 час (`ms:states:<channelId>` — msCachePurge при disconnect его тоже снимет, слот
+  // канала третий); словарь меняется редко, TTL достаточно. Сбой словаря (МС лёг/токен отозван)
+  // деградирует МЯГКО: null, funnel отвечает голыми id — DB-агрегат не заложник живого МС.
+  // Неуспех сознательно НЕ кэшируем — следующий запрос попробует снова.
+  async function loadStatesDict(ms) {
+    const cacheKey = `ms:states:${ms.channel.id}`;
+    const cached = cacheGet(cacheKey);
+    if (cached) return cached;
+    let meta;
+    try {
+      meta = await msFetch(ms.token, '/entity/customerorder/metadata');
+    } catch (e) {
+      log('warn', 'ms_states_dict_failed', {
+        channelId: ms.channel.id, status: Number(e && e.status) || 0, error: e && e.message,
+      });
+      return null;
+    }
+    const dict = {};
+    const states = meta && Array.isArray(meta.states) ? meta.states : [];
+    for (const s of states) {
+      if (!s || s.id == null) continue;
+      const colorNum = Number(s.color);
+      dict[String(s.id)] = {
+        name: typeof s.name === 'string' ? s.name : null,
+        // >>>0 и slice(-6) — страховки от отрицательного/переполненного int; канон МС — 24-бит RGB.
+        color: Number.isFinite(colorNum)
+          ? `#${(colorNum >>> 0).toString(16).padStart(6, '0').slice(-6)}`
+          : null,
+      };
+    }
+    cacheSet(cacheKey, dict, MS_STATES_CACHE_TTL_MS);
+    return dict;
+  }
+
+  // GET /api/ms/funnel?days= — воронка статусов заказов за окно (архив ms_orders). Сам агрегат —
+  // дешёвое DB-чтение БЕЗ кэша ответа; живой только словарь имён/цветов (см. loadStatesDict).
+  // resolveMs (не resolveMsChannel) сознательно: словарю нужен токен, и «не подключён» здесь
+  // отвечает 404 как остальные data-роуты. Строка state_id=NULL (заказы без статуса и строки до
+  // повторного прогона бэкфилла) в rows не кладётся — уходит счётчиком no_state_orders.
+  app.get('/api/ms/funnel', requireAuth, async (req, res, next) => {
+    try {
+      const days = daysOf(req);
+      const ms = await resolveMs(req, res);
+      if (!ms) return;
+      // ForActor — канон tenant-read (как days=0 в summary): повторный ownership-чек дёшев.
+      const rows = await db.getMsFunnelForActor(ms.channel.id, req.user, { sinceDay: sinceDayOf(days) });
+      const dict = await loadStatesDict(ms);
+      let totalOrders = 0;
+      let noStateOrders = 0;
+      const out = [];
+      for (const r of rows) {
+        totalOrders += r.orders;
+        if (r.state_id == null) {
+          noStateOrders += r.orders;
+          continue;
+        }
+        const st = dict ? dict[r.state_id] : null;
+        out.push({
+          state_id: r.state_id,
+          name: st ? st.name : null,
+          color: st ? st.color : null,
+          orders: r.orders,
+          sum: kopecksToRub(r.sum_kopecks),
+        });
+      }
+      res.json({ window_days: days, total_orders: totalOrders, no_state_orders: noStateOrders, rows: out });
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  // GET /api/ms/customers?days= — новые vs повторные клиенты за окно (архив ms_orders).
+  // Семантика новизны пришпилена в repo: «новый» заказ = ПЕРВЫЙ заказ agent_id за ВСЮ историю
+  // канала (не окна). Чистый DB-агрегат — без кэша; суммы наружу в рублях.
+  app.get('/api/ms/customers', requireAuth, async (req, res, next) => {
+    try {
+      const days = daysOf(req);
+      const ms = await resolveMs(req, res);
+      if (!ms) return;
+      const data = await db.getMsCustomersForActor(ms.channel.id, req.user, { sinceDay: sinceDayOf(days) });
+      // null от ForActor = доступ отозван между resolveMs и чтением (гонка) — честный 403,
+      // а не сфабрикованные нули.
+      if (!data) return res.status(403).json({ error: 'Нет доступа к этому каналу' });
+      const s = data.summary;
+      res.json({
+        window_days: days,
+        summary: {
+          customers: s.customers,
+          new_customers: s.new_customers,
+          repeat_customers: s.repeat_customers,
+          orders_new: s.orders_new,
+          orders_repeat: s.orders_repeat,
+          sum_new: kopecksToRub(s.sum_new_kopecks),
+          sum_repeat: kopecksToRub(s.sum_repeat_kopecks),
+          no_agent_orders: s.no_agent_orders,
+          repeat_ever: s.repeat_ever,
+        },
+        series: data.series,
+      });
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  // GET /api/ms/cohorts — когортное удержание по месяцу первого заказа (вся история архива,
+  // без параметров — фронт сам обрежет глубину). Чистый DB-агрегат — без кэша; денег в ответе
+  // нет, только счётчики клиентов.
+  app.get('/api/ms/cohorts', requireAuth, async (req, res, next) => {
+    try {
+      const ms = await resolveMs(req, res);
+      if (!ms) return;
+      const cohorts = await db.getMsCohortsForActor(ms.channel.id, req.user);
+      res.json({ cohorts });
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  // GET /api/ms/returns?days= — возвраты покупателей ЖИВЫМ page-loop'ом по /entity/salesreturn
+  // (архива возвратов не копим — редкая сущность, счёт/сумма окна снимаются напрямую). Окно и
+  // пагинация — как у движка бэкфилла: filter целиком URL-encoded, страницы limit/offset с
+  // паузой; days=0 — вся история БЕЗ фильтра. Живые вызовы дорогие → кэш 10 минут.
+  app.get('/api/ms/returns', requireAuth, async (req, res, next) => {
+    try {
+      const days = daysOf(req);
+      const ms = await resolveMs(req, res);
+      if (!ms) return;
+      const cacheKey = `ms:returns:${ms.channel.id}:${days}`;
+      const cached = cacheGet(cacheKey);
+      if (cached) return res.json(cached);
+
+      let filterQ = '';
+      if (days !== 0) {
+        const now = new Date();
+        const from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (days - 1));
+        filterQ = `filter=${encodeURIComponent(`moment>=${fmtDay(from)} 00:00:00;moment<=${fmtDay(now)} 23:59:59`)}&`;
+      }
+      let count = 0;
+      let sumKopecks = 0;
+      let truncated = false;
+      let offset = 0;
+      try {
+        for (let page = 0; ; page++) {
+          // order=moment,asc — как у движка: детерминированная нарезка страниц между запросами.
+          const path = `/entity/salesreturn?${filterQ}order=${encodeURIComponent('moment,asc')}` +
+            `&limit=${MS_RETURNS_PAGE_LIMIT}&offset=${offset}`;
+          const pageData = await msFetch(ms.token, path);
+          const rows = pageData && Array.isArray(pageData.rows) ? pageData.rows : [];
+          for (const r of rows) {
+            count += 1;
+            // Копейки как есть (сумма конвертируется в рубли один раз на выходе); Math.round —
+            // страховка от дробной копейки, как в движке.
+            sumKopecks += Math.round(Number(r && r.sum) || 0);
+          }
+          if (rows.length < MS_RETURNS_PAGE_LIMIT) break;          // хвост выборки добран
+          if (page + 1 >= MS_RETURNS_PAGE_CAP) { truncated = true; break; }   // упёрлись в cap
+          offset += MS_RETURNS_PAGE_LIMIT;
+          await sleep(MS_RETURNS_PAGE_PAUSE_MS);
+        }
+      } catch (e) {
+        return sendMsError(res, e, { route: 'returns', channelId: ms.channel.id });
+      }
+      const data = { window_days: days, count, sum: kopecksToRub(sumKopecks), truncated };
+      cacheSet(cacheKey, data, MS_RETURNS_CACHE_TTL_MS);
       res.json(data);
     } catch (e) {
       next(e);

@@ -375,22 +375,69 @@ function PanelHead({ id, name, pill }: { id: ServiceId; name: string; pill: { la
 // ── МойСклад: история заказов (бэкфилл с прогрессом — слайс 2б) ──
 function MsBackfillBlock() {
   const qc = useQueryClient();
-  const backfill = useMsBackfillStatus(true);
+  // kick = «только что нажали»: движок пишет running-строку ПОСЛЕ живой оценки объёма (~секунда),
+  // поэтому сразу после POST статус ещё старый — и без принудительного поллинга интервал хука не
+  // завёлся бы вовсе (кнопка выглядела мёртвой — прод-фидбек владельца).
+  const [kick, setKick] = useState(false);
+  // Статус на момент клика: любое ИЗМЕНЕНИЕ статуса (running/error/…) гасит kick и отдаёт рендер
+  // настоящей ветке. Таймаут-страховка — на случай, если движок умер до первой записи state.
+  const kickBaseRef = useRef<string | null>(null);
+  const prevStatusRef = useRef<string | null>(null);
   const [startErr, setStartErr] = useState<string | null>(null);
+  const backfill = useMsBackfillStatus(true, kick);
   const st = backfill.data;
+
+  useEffect(() => {
+    const s = st?.status ?? null;
+    if (kick && s !== null && s !== kickBaseRef.current) setKick(false);
+    // Финиш прогона: витрины склада (средний чек, воронка, когорты) читают ms_orders — обновить.
+    if (prevStatusRef.current === 'running' && s === 'done') {
+      qc.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).startsWith('ms-') });
+    }
+    prevStatusRef.current = s;
+  }, [st?.status, kick, qc]);
+  useEffect(() => {
+    if (!kick) return;
+    const t = setTimeout(() => setKick(false), 30_000);
+    return () => clearTimeout(t);
+  }, [kick]);
+
   const startBackfill = async () => {
     setStartErr(null);
+    kickBaseRef.current = st?.status ?? null;
+    setKick(true);
     try {
       await apiSend('POST', '/api/ms/backfill');
-      await qc.invalidateQueries({ queryKey: ['ms-backfill'] });
     } catch (err) {
-      setStartErr(err instanceof ApiError ? err.message : 'Не удалось запустить загрузку.');
+      if (err instanceof ApiError && err.status === 409) {
+        // Прогон уже идёт (другая вкладка/повторный клик) — не ошибка: поллинг покажет прогресс.
+      } else {
+        setKick(false);
+        setStartErr(err instanceof ApiError ? err.message : 'Не удалось запустить загрузку.');
+        return;
+      }
     }
+    await qc.invalidateQueries({ queryKey: ['ms-backfill'] });
   };
   const monthLabel = (m?: string | null) =>
     m ? new Date(`${m}-01T00:00:00`).toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' }) : null;
 
   if (backfill.isPending || !st) return null;
+
+  // Мгновенный отклик на клик: bare-состояние «запускаем» до первой записи движка.
+  if (kick && st.status !== 'running') {
+    return (
+      <div className="rounded-xl border border-border bg-background p-3.5">
+        <div className="flex items-baseline justify-between gap-3 text-xs">
+          <span className="font-medium text-foreground">Запускаем загрузку…</span>
+          <span className="tabular-nums text-muted-foreground">оцениваем объём заказов</span>
+        </div>
+        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+          <div className="h-full w-1/3 animate-pulse rounded-full bg-primary" />
+        </div>
+      </div>
+    );
+  }
 
   if (st.status === 'running') {
     const total = st.total && st.total > 0 ? st.total : null;
@@ -435,9 +482,15 @@ function MsBackfillBlock() {
         Загрузить историю заказов
       </button>
       <p className="text-2xs text-muted-foreground">
-        Разово выгрузим все заказы (у больших складов — с строкой прогресса); это откроет средний чек по истории,
+        Разово выгрузим все заказы (у больших складов — со строкой прогресса); это откроет средний чек по истории,
         когорты и повторные покупки.
       </p>
+      {(st.orders_in_db ?? 0) > 0 && (
+        <p className="text-2xs text-muted-foreground">
+          В архиве уже <span className="font-medium tabular-nums text-foreground">{fmt.num(st.orders_in_db ?? 0)}</span>{' '}
+          заказов.
+        </p>
+      )}
       {/* start() при error сознательно начинает С НУЛЯ (resume-с-курсора — только для брошенных
           running); повтор безопасен — upsert заказов заменяющий. Не обещать «продолжит с места». */}
       {st.status === 'error' && (

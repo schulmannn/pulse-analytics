@@ -1,4 +1,5 @@
-import { useMsSummary, useMsTopProducts } from '@/api/queries';
+import { Link } from 'react-router-dom';
+import { useMsFunnel, useMsReturns, useMsSummary, useMsTopProducts } from '@/api/queries';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
 import { LineChart } from '@/components/LineChart';
@@ -23,6 +24,8 @@ export function MsOverview() {
   // По-товарного АРХИВА пока нет (фаза 2б): на «Всё» топ честно считается живым отчётом за 30 дн.
   const topDays = days === 0 ? 30 : days;
   const top = useMsTopProducts(topDays);
+  const funnel = useMsFunnel(days);
+  const returns = useMsReturns(days);
 
   if (summary.isPending) {
     return (
@@ -122,6 +125,38 @@ export function MsOverview() {
         </ChartCardBody>
       </ChartWidget>
 
+      <ChartWidget id="ms-funnel" title="Воронка статусов" fixedSize="half" noExpand>
+        {funnel.isPending ? (
+          <div className="space-y-2 py-2">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={`f${i}`} className="h-6 w-full" />
+            ))}
+          </div>
+        ) : funnel.isError || !funnel.data ? (
+          <p className="py-4 text-sm text-muted-foreground">Не удалось получить статусы заказов.</p>
+        ) : funnel.data.rows.length === 0 ? (
+          funnel.data.no_state_orders > 0 ? (
+            // Заказы есть, а статусов нет: state_id появился в слайсе 3 — старые строки заполнит
+            // повторная загрузка истории (идемпотентная), честно ведём туда.
+            <p className="py-4 text-xs text-muted-foreground">
+              У загруженных заказов ещё нет статусов — запустите{' '}
+              <Link className="text-primary underline-offset-2 hover:underline" to="/connect">
+                загрузку истории
+              </Link>{' '}
+              повторно, и воронка заполнится.
+            </p>
+          ) : (
+            <p className="py-4 text-sm text-muted-foreground">Нет заказов за период.</p>
+          )
+        ) : (
+          <MsFunnelRows
+            rows={funnel.data.rows}
+            totalOrders={funnel.data.total_orders}
+            noState={funnel.data.no_state_orders}
+          />
+        )}
+      </ChartWidget>
+
       <ChartWidget id="ms-top-products" title={days === 0 ? 'Топ товаров по выручке · 30 дн.' : 'Топ товаров по выручке'} fixedSize="half" noExpand>
         {top.isPending ? (
           <div className="space-y-2 py-2">
@@ -150,6 +185,79 @@ export function MsOverview() {
           </ul>
         )}
       </ChartWidget>
+
+      <ChartWidget id="ms-returns" title="Возвраты" fixedSize="half" noExpand>
+        {returns.isPending ? (
+          <div className="space-y-2 py-2">
+            <Skeleton className="h-8 w-1/3" />
+            <Skeleton className="h-4 w-1/2" />
+          </div>
+        ) : returns.isError || !returns.data ? (
+          <p className="py-4 text-sm text-muted-foreground">Не удалось получить возвраты.</p>
+        ) : (
+          <ChartCardBody
+            value={fmt.num(returns.data.count)}
+            caption={`на ${fmt.short(returns.data.sum)} ₽ ${windowLabel}`}
+          >
+            <div className="space-y-1.5 text-2xs text-muted-foreground">
+              {/* Живое чтение salesreturn с cap по страницам: упёрлись — честное «не менее». */}
+              {returns.data.truncated && <p>Показано не менее — возвратов за период больше лимита выборки.</p>}
+              <p>Возвраты считаются отдельно и из выручки не вычитаются.</p>
+            </div>
+          </ChartCardBody>
+        )}
+      </ChartWidget>
+    </div>
+  );
+}
+
+/** Строки воронки: топ-5 статусов окна барами в акценте графиков + сводный хвост. Цвета статусов
+    из МС сознательно НЕ красим в бары (пёстрый набор пользовательских цветов кричал бы против
+    канона тихих карточек) — цвет живёт точкой-меткой у имени. */
+function MsFunnelRows({
+  rows,
+  totalOrders,
+  noState,
+}: {
+  rows: Array<{ state_id: string; name: string | null; color: string | null; orders: number; sum: number }>;
+  totalOrders: number;
+  noState: number;
+}) {
+  const top = rows.slice(0, 5);
+  const restOrders = rows.slice(5).reduce((acc, r) => acc + r.orders, 0) + noState;
+  const max = top[0]?.orders ?? 1;
+  return (
+    <div className="space-y-2 pt-1">
+      {top.map((r) => (
+        <div key={r.state_id}>
+          <div className="flex items-baseline justify-between gap-3 text-xs">
+            <span className="flex min-w-0 items-center gap-1.5 text-foreground">
+              {r.color && (
+                <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: r.color }} />
+              )}
+              <span className="truncate">{r.name ?? 'Статус без имени'}</span>
+            </span>
+            <span className="shrink-0 tabular-nums text-muted-foreground">
+              <span className="font-medium text-foreground">{fmt.num(r.orders)}</span> · {fmt.short(r.sum)} ₽
+            </span>
+          </div>
+          <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full rounded-full"
+              style={{
+                width: `${Math.max(4, Math.round((r.orders / max) * 100))}%`,
+                backgroundColor: 'hsl(var(--chart-role-primary) / 0.75)',
+              }}
+            />
+          </div>
+        </div>
+      ))}
+      {restOrders > 0 && (
+        <p className="text-2xs text-muted-foreground">
+          Ещё {fmt.num(restOrders)} {noState > 0 ? `заказов (из них без статуса ${fmt.num(noState)})` : 'заказов'} из{' '}
+          {fmt.num(totalOrders)}.
+        </p>
+      )}
     </div>
   );
 }

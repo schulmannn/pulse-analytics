@@ -582,7 +582,7 @@ const MsBackfillStatusSchema = z
   .passthrough();
 type MsBackfillStatus = z.infer<typeof MsBackfillStatusSchema>;
 
-export function useMsBackfillStatus(enabled: boolean) {
+export function useMsBackfillStatus(enabled: boolean, pollAnyway = false) {
   const { channelId } = useSelectedChannel();
   // Явные дженерики обязательны: inline-refetchInterval, читающий query.state.data,
   // зацикливает вывод TQueryFnData и схлопывает тип данных в {}.
@@ -590,9 +590,115 @@ export function useMsBackfillStatus(enabled: boolean) {
     enabled: enabled && channelId != null,
     queryKey: ['ms-backfill', channelId],
     retry: false,
-    // Живой прогресс: пока история грузится — опрос каждые 2с; в покое интервала нет.
-    refetchInterval: (query) => (query.state.data?.status === 'running' ? 2000 : false),
+    // Живой прогресс: опрос каждые 2с пока история грузится ИЛИ пока вызывающий ждёт старта
+    // (pollAnyway): движок пишет running-строку только ПОСЛЕ живой оценки объёма (~секунда),
+    // и без внешнего толчка интервал не завёлся бы вовсе — кнопка выглядела мёртвой (прод-фидбек).
+    refetchInterval: (query) => (pollAnyway || query.state.data?.status === 'running' ? 2000 : false),
     queryFn: ({ signal }) => apiGet('/api/ms/backfill-status', MsBackfillStatusSchema, { signal, channelId }),
+  });
+}
+
+// ── МойСклад, слайс 3: аналитика архива заказов (все суммы уже В РУБЛЯХ с бэка) ──
+const MsFunnelSchema = z
+  .object({
+    window_days: z.number(),
+    total_orders: z.number(),
+    no_state_orders: z.number(),
+    rows: z.array(
+      z
+        .object({
+          state_id: z.string(),
+          name: z.string().nullable(),
+          color: z.string().nullable(),
+          orders: z.number(),
+          sum: z.number(),
+        })
+        .passthrough(),
+    ),
+  })
+  .passthrough();
+
+export function useMsFunnel(days: number) {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    enabled: channelId != null,
+    queryKey: ['ms-funnel', channelId, days],
+    staleTime: STALE_LIVE,
+    retry: false,
+    queryFn: ({ signal }) => apiGet(`/api/ms/funnel?days=${days}`, MsFunnelSchema, { signal, channelId }),
+  });
+}
+
+const MsCustomersSchema = z
+  .object({
+    window_days: z.number(),
+    summary: z
+      .object({
+        customers: z.number(),
+        new_customers: z.number(),
+        repeat_customers: z.number(),
+        orders_new: z.number(),
+        orders_repeat: z.number(),
+        sum_new: z.number(),
+        sum_repeat: z.number(),
+        no_agent_orders: z.number(),
+        repeat_ever: z.number(),
+      })
+      .passthrough(),
+    series: z.array(
+      z.object({ day: z.string(), new_orders: z.number(), repeat_orders: z.number() }).passthrough(),
+    ),
+  })
+  .passthrough();
+
+export function useMsCustomers(days: number) {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    enabled: channelId != null,
+    queryKey: ['ms-customers', channelId, days],
+    staleTime: STALE_LIVE,
+    retry: false,
+    queryFn: ({ signal }) => apiGet(`/api/ms/customers?days=${days}`, MsCustomersSchema, { signal, channelId }),
+  });
+}
+
+const MsCohortsSchema = z
+  .object({
+    cohorts: z.array(
+      z
+        .object({
+          cohort_month: z.string(),
+          size: z.number(),
+          cells: z.array(z.object({ offset: z.number(), active: z.number() }).passthrough()),
+        })
+        .passthrough(),
+    ),
+  })
+  .passthrough();
+
+export function useMsCohorts() {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    enabled: channelId != null,
+    queryKey: ['ms-cohorts', channelId],
+    staleTime: STALE_ARCHIVE,
+    retry: false,
+    queryFn: ({ signal }) => apiGet('/api/ms/cohorts', MsCohortsSchema, { signal, channelId }),
+  });
+}
+
+const MsReturnsSchema = z
+  .object({ window_days: z.number(), count: z.number(), sum: z.number(), truncated: z.boolean().optional() })
+  .passthrough();
+
+export function useMsReturns(days: number) {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    enabled: channelId != null,
+    queryKey: ['ms-returns', channelId, days],
+    staleTime: STALE_LIVE,
+    retry: false,
+    queryFn: ({ signal }) => apiGet(`/api/ms/returns?days=${days}`, MsReturnsSchema, { signal, channelId }),
   });
 }
 

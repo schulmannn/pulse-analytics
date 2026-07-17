@@ -65,22 +65,26 @@ function createMsBackfillEngine({ db, msFetch, msCrypto, log = () => {}, sleepFn
   // meta-only ссылками (name отсутствует) — тогда NULL, не падение. moment валидируем строго
   // (тот же урок, что dayOf в msCollectionJob): одна кривая строка иначе уронила бы
   // timestamptz-каст ВСЕГО jsonb-батча в upsertMsOrders.
+  // id сущности = последний сегмент href meta-ссылки (…/entity/counterparty/<uuid>,
+  // …/metadata/states/<uuid>); query-хвост отрезаем, пустые сегменты не считаются.
+  const metaHrefId = (link) => {
+    const href = link && link.meta && typeof link.meta.href === 'string' ? link.meta.href : '';
+    return href ? href.split('?')[0].split('/').filter(Boolean).pop() || null : null;
+  };
   function orderToRow(o) {
     if (!o || o.id == null) return null;
     const moment = typeof o.moment === 'string' ? o.moment : '';
     if (!/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/.test(moment)) return null;
-    // id контрагента = последний сегмент href meta-ссылки (…/entity/counterparty/<uuid>);
-    // query-хвост отрезаем, пустые сегменты не считаются.
-    let agentId = null;
-    const href = o.agent && o.agent.meta && typeof o.agent.meta.href === 'string' ? o.agent.meta.href : '';
-    if (href) agentId = href.split('?')[0].split('/').filter(Boolean).pop() || null;
     return {
       order_id: String(o.id),
       moment,
       // Копейки как есть; Math.round — страховка от неожиданной дробной копейки, не конверсия.
       sum_kopecks: Math.round(Number(o.sum) || 0),
       state: o.state && typeof o.state.name === 'string' ? o.state.name : null,
-      agent_id: agentId,
+      // Имя статуса без expand пусто (см. выше) — храним устойчивый id (миграция 030), имя/цвет
+      // добавляет словарь metadata/states на границе API (/api/ms/funnel).
+      state_id: metaHrefId(o.state),
+      agent_id: metaHrefId(o.agent),
       agent_name: o.agent && typeof o.agent.name === 'string' ? o.agent.name : null,
     };
   }

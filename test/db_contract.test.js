@@ -40,11 +40,11 @@ const EXPECTED_FUNCTIONS = [
   // голого un-gated db.getChannelHistory/getSnapshot/… в публичном API больше НЕТ)
   'getChannelHistoryInternal', 'getMentionsHistoryInternal', 'getMentionsArchiveInternal',
   'getSnapshotInternal', 'getLatestVelocityInternal', 'listPostsInternal', 'listIgDailyInternal', 'listIgMediaDailyInternal',
-  'getMsDailyAllInternal',
+  'getMsDailyAllInternal', 'getMsFunnelInternal', 'getMsCustomersInternal', 'getMsCohortsInternal',
   'getPublicTgChannelPhoto',
   'getChannelHistoryForActor', 'getMentionsHistoryForActor', 'getMentionsArchiveForActor',
   'getSnapshotForActor', 'getLatestVelocityForActor', 'listPostsForActor', 'listIgDailyForActor', 'listIgMediaDailyForActor',
-  'getMsDailyAllForActor',
+  'getMsDailyAllForActor', 'getMsFunnelForActor', 'getMsCustomersForActor', 'getMsCohortsForActor',
   // bugs / crashes
   'createBug', 'createCrash', 'upsertCrashSignature', 'recordCrashOccurrence', 'setCrashNotionPage', 'touchCrashNotified',
   'listBugs', 'updateBug', 'deleteBug', 'bugExists', 'getBug', 'addAttachmentIfRoom', 'getAttachment',
