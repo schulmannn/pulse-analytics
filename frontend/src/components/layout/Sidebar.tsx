@@ -222,7 +222,7 @@ function NavItem({ to, label, icon, end, rail }: NavLinkDef & { rail?: boolean }
       aria-label={rail ? label : undefined}
       className={({ isActive }) =>
         cn(
-          'relative flex h-9 items-center rounded text-sm transition-colors',
+          'relative flex h-9 items-center rounded-xl text-sm transition-colors',
           rail ? 'justify-center' : 'gap-2.5 px-2',
           isActive
             ? // Rail (collapsed): no heavy filled square — a thin left indicator pill (below) + the
