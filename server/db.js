@@ -16,6 +16,7 @@ const { createChannelsRepo } = require('./repos/channelsRepo');
 const { createSourcesRepo } = require('./repos/sourcesRepo');
 const { createIntegrationsRepo } = require('./repos/integrationsRepo');
 const { createMentionSettingsRepo } = require('./repos/mentionSettingsRepo');
+const { createAiChatsRepo } = require('./repos/aiChatsRepo');
 const { createAuditRepo } = require('./repos/auditRepo');
 const { createGdprService } = require('./services/gdprService');
 // DB core (P2 db/core): пул / Railway-SSL / enabled / ping / close + классификация недоступности
@@ -230,6 +231,9 @@ function createDatabase(config, overrides = {}) {
     enabled,
     getAccessibleChannel: channelsRepo.getChannel,
   });
+  // Личные AI-диалоги (026): все методы uid-scoped; аналитика в чат попадает только через
+  // ForActor-инструменты aiChatService, не через этот repo.
+  const aiChatsRepo = createAiChatsRepo({ pool, enabled });
 
   // db.js-локальные экспорты (домены, ещё не вынесенные в repos/*): core + collector-writes +
   // analytics-reads + bugs/crashes. По мере распила эти наборы переезжают в свои repo.
@@ -258,6 +262,7 @@ function createDatabase(config, overrides = {}) {
     reports: reportsRepo, // REPORT_SCHEDULES, listReports, getReport, createReport, updateReport, deleteReport, listDueReports, markReportSent, reserveReportDelivery, clearReportDelivery, listPostsWindow
     campaigns: campaignsRepo, // CAMPAIGN_*, listCampaigns, getCampaign, create/update/deleteCampaign, add/remove/listCampaignPosts, getCampaignSummary
     mentionSettings: mentionSettingsRepo, // getMentionSettingsInternal/ForActor, upsertMentionSettingsForActor
+    aiChats: aiChatsRepo, // listAiChats, createAiChat, getAiChat, deleteAiChat, listAiChatMessages, appendAiChatMessage, getAiUsageToday, bumpAiUsage
     jobs: jobsRepo, // claimJob, completeJob, failJob, getJob, runJobOnce, pruneTerminalJobs
     audit: auditRepo, // recordAuditEvent, pruneAuditEvents
     gdpr: gdprService, // deleteUserAccount, streamUserExport (сервис, не repo)

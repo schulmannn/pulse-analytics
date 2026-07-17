@@ -20,6 +20,8 @@ const { log: defaultLog } = require('./lib/observability');
 const { makeResolveChannel, hasWorkspaceRole } = require('./middleware/tenant');
 const { createApp } = require('./app');
 const { createAuthService } = require('./services/authService');
+const { createAiProvider } = require('./infrastructure/aiProvider');
+const { createAiChatService } = require('./services/aiChatService');
 const { createEmailService } = require('./services/emailService');
 const { createAuditService } = require('./services/auditService');
 const { createInstagramClient } = require('./infrastructure/instagramClient');
@@ -365,6 +367,26 @@ function createComposition(config, overrides = {}) {
     processTgQrCollection,
   });
 
+  // ── AI-ассистент (STEEP-паттерн) ──────────────────────────────────
+  // Провайдер: Anthropic при заданном ключе; БЕЗ ключа вне production — детерминированный mock
+  // (dev/CI/e2e работают без секрета); production без ключа — off (роуты 503, me.ai.enabled=false).
+  const aiProvider =
+    overrides.aiProvider ||
+    createAiProvider({
+      apiKey: config.ai.apiKey,
+      model: config.ai.model,
+      maxOutputTokens: config.ai.maxOutputTokens,
+      allowMock: !config.isProduction,
+      log,
+    });
+  const aiChatService = createAiChatService({
+    db,
+    log,
+    provider: aiProvider,
+    dailyMessageLimit: config.ai.dailyMessageLimit,
+    maxToolRounds: config.ai.maxToolRounds,
+  });
+
   // Флаг дренажа (graceful shutdown): main.js ставит true в stop() → /api/ready 503.
   const drainState = { draining: false };
 
@@ -439,6 +461,7 @@ function createComposition(config, overrides = {}) {
       jobTracker,
       mtprotoClient,
       notionCrash,
+      aiChatService,
     });
   }
 

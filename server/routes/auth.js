@@ -7,6 +7,7 @@ function registerAuthRoutes({
   hashPassword, verifyPassword, DUMMY_HASH, signSession, SESSION_TTL,
   GOOGLE_CLIENT_ID, fetchWithTimeout, log, audit, appBase, sha256, newToken,
   VERIFY_TTL, RESET_TTL, sendEmail, emailShell, emailBtn, escHtml,
+  aiEnabledFor,
 }) {
   const verifyEmailHtml = (link) => emailShell('Подтверди email',
     `<p>Активируй аккаунт в Atlavue:</p>${emailBtn(link, 'Подтвердить email')}<p style="color:#64748d;font-size:13px">Ссылка действует 24 часа. Если это были не вы — проигнорируйте письмо.</p>`);
@@ -137,7 +138,14 @@ function registerAuthRoutes({
     if (db.enabled) {
       avatar = await db.getUserAvatar(req.user.uid).catch(() => null);
     }
-    res.json({ uid: req.user.uid, email: req.user.email, role: req.user.role, avatar });
+    res.json({
+      uid: req.user.uid,
+      email: req.user.email,
+      role: req.user.role,
+      avatar,
+      // Гейт AI-поверхностей фронта одним bootstrap-запросом (v1: superuser + настроенный провайдер).
+      ai: { enabled: !!(aiEnabledFor && aiEnabledFor(req.user)) },
+    });
   }));
 
   // Personal avatar — a small base64 data URL on the user row (resized client-side). Own-route JSON
