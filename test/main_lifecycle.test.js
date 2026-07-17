@@ -124,6 +124,97 @@ test('runtime removes signal listeners and drains tracked tails before DB close'
   assert.equal(events.filter((event) => event === 'db.close').length, 1);
 });
 
+test('applies explicit HTTP server timeouts after listen and keeps server.timeout at 0 for streamed responses', async () => {
+  const http = require('node:http');
+  const events = [];
+  const app = express();
+  app.get('/health', (_req, res) => res.json({ ok: true }));
+  const composition = {
+    db: { async close() { events.push('db.close'); } },
+    memoryCache: { start() {}, stop() {} },
+    jobTracker: createJobTracker(),
+    drainState: { draining: false },
+    async boot() {},
+    createHttpApp() { return app; },
+  };
+
+  const runtime = await main({
+    env: { NODE_ENV: 'test' },
+    port: 0,
+    compositionFactory: () => composition,
+    shutdownTimeoutMs: 1_000,
+  });
+
+  // Реальный http.Server с явными таймаутами ровно из config (дефолты 65000/66000/300000).
+  assert.ok(runtime.server instanceof http.Server, 'возвращается настоящий http.Server');
+  assert.equal(runtime.server.keepAliveTimeout, runtime.config.http.keepAliveTimeoutMs);
+  assert.equal(runtime.server.keepAliveTimeout, 65000);
+  assert.equal(runtime.server.headersTimeout, runtime.config.http.headersTimeoutMs);
+  assert.equal(runtime.server.headersTimeout, 66000);
+  assert.equal(runtime.server.requestTimeout, runtime.config.http.requestTimeoutMs);
+  assert.equal(runtime.server.requestTimeout, 300000);
+  // server.timeout остаётся 0 — нет тайм-аута простоя in-flight сокета, стриминговый ответ жив.
+  assert.equal(runtime.server.timeout, 0, 'server.timeout не выставлялся (остаётся 0)');
+  assert.equal(runtime.server.listenerCount('timeout'), 0, 'слушатель timeout не добавлялся');
+  // keepAlive строго больше 60с Railway-прокси, headers строго больше keepAlive (инвариант Node).
+  assert.ok(runtime.server.keepAliveTimeout > 60000);
+  assert.ok(runtime.server.headersTimeout > runtime.server.keepAliveTimeout);
+
+  await runtime.stop();
+  process.exitCode = 0;
+});
+
+test('a slow streamed response stays alive past a short interval (server.timeout stays 0)', async () => {
+  const http = require('node:http');
+  const app = express();
+  // Стримит тело чанками с паузами — совокупно дольше короткого интервала, но без единой длинной
+  // синхронной паузы (не флейки). Если бы кто-то выставил server.timeout, сокет бы оборвался.
+  app.get('/slow-stream', (_req, res) => {
+    res.writeHead(200, { 'content-type': 'text/plain' });
+    let n = 0;
+    const tick = () => {
+      if (n >= 6) { res.end('done'); return; }
+      res.write(`chunk-${n}\n`);
+      n += 1;
+      setTimeout(tick, 30);
+    };
+    tick();
+  });
+  const composition = {
+    db: { async close() {} },
+    memoryCache: { start() {}, stop() {} },
+    jobTracker: createJobTracker(),
+    drainState: { draining: false },
+    async boot() {},
+    createHttpApp() { return app; },
+  };
+
+  const runtime = await main({
+    env: { NODE_ENV: 'test' },
+    port: 0,
+    compositionFactory: () => composition,
+    shutdownTimeoutMs: 2_000,
+  });
+
+  const boundPort = runtime.server.address().port;
+  const body = await new Promise((resolve, reject) => {
+    const req = http.get({ host: '127.0.0.1', port: boundPort, path: '/slow-stream' }, (res) => {
+      let data = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => resolve(data));
+    });
+    req.on('error', reject);
+  });
+
+  assert.match(body, /chunk-0/, 'первый чанк получен');
+  assert.match(body, /done$/, 'стриминговый ответ дожил до конца, не оборван таймаутом');
+  assert.equal(runtime.server.timeout, 0, 'server.timeout всё ещё 0');
+
+  await runtime.stop();
+  process.exitCode = 0;
+});
+
 test('operational runner starts after listen and stops before DB close (alongside collection runner)', async () => {
   const events = [];
   const app = express();

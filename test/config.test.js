@@ -116,6 +116,142 @@ test('loadConfig/validateConfig: GDPR_EXPORT_PAGE_SIZE — дефолт 1000, en
   }
 });
 
+test('loadConfig: HTTP-таймауты сервера — дефолты и env-переопределения', () => {
+  const d = loadConfig({});
+  assert.equal(d.http.keepAliveTimeoutMs, 65000, 'keepAlive дефолт 65с (> 60с Railway-прокси)');
+  assert.equal(d.http.headersTimeoutMs, 66000, 'headers дефолт 66с (> keepAlive)');
+  assert.equal(d.http.requestTimeoutMs, 300000, 'requestTimeout дефолт 5 мин');
+  const c = loadConfig({
+    HTTP_KEEP_ALIVE_TIMEOUT_MS: '70000',
+    HTTP_HEADERS_TIMEOUT_MS: '71000',
+    HTTP_REQUEST_TIMEOUT_MS: '120000',
+  });
+  assert.equal(c.http.keepAliveTimeoutMs, 70000);
+  assert.equal(c.http.headersTimeoutMs, 71000);
+  assert.equal(c.http.requestTimeoutMs, 120000);
+});
+
+test('validateConfig: HTTP-таймауты — дефолты и валидные env → нет ошибок', () => {
+  const httpTimeoutErrs = (env) =>
+    validateConfig(loadConfig(env)).filter((e) => e.field.startsWith('http.') && /Timeout/.test(e.field));
+  assert.deepEqual(httpTimeoutErrs({}), [], 'дефолты валидны');
+  // Граничные валидные значения: keepAlive на нижней (60001) и верхней (300000) границах,
+  // headers строго выше keepAlive и ≤ 600000, requestTimeout не короче headers и ≤ 3600000.
+  assert.deepEqual(
+    httpTimeoutErrs({
+      HTTP_KEEP_ALIVE_TIMEOUT_MS: '60001',
+      HTTP_HEADERS_TIMEOUT_MS: '60002',
+      HTTP_REQUEST_TIMEOUT_MS: '60002',
+    }),
+    [],
+    'нижние границы валидны',
+  );
+  assert.deepEqual(
+    httpTimeoutErrs({
+      HTTP_KEEP_ALIVE_TIMEOUT_MS: '300000',
+      HTTP_HEADERS_TIMEOUT_MS: '600000',
+      HTTP_REQUEST_TIMEOUT_MS: '3600000',
+    }),
+    [],
+    'верхние границы валидны',
+  );
+});
+
+test('validateConfig: HTTP-таймауты — keepAlive ≤ 60000 отклонён (нельзя вернуть Railway-прокси mismatch)', () => {
+  for (const v of ['60000', '5000', '30000']) {
+    const errs = validateConfig(loadConfig({ HTTP_KEEP_ALIVE_TIMEOUT_MS: v }));
+    assert.ok(errs.some((e) => e.field === 'http.keepAliveTimeoutMs'), `keepAlive=${v} (≤60000) отклонён`);
+  }
+  // Выше верхней границы 300000 тоже отклоняется.
+  assert.ok(
+    validateConfig(loadConfig({ HTTP_KEEP_ALIVE_TIMEOUT_MS: '300001' })).some((e) => e.field === 'http.keepAliveTimeoutMs'),
+    'keepAlive выше 300000 отклонён',
+  );
+});
+
+test('validateConfig: HTTP-таймауты — headers должен быть строго больше keepAlive', () => {
+  // headers == keepAlive недопустим.
+  assert.ok(
+    validateConfig(loadConfig({ HTTP_KEEP_ALIVE_TIMEOUT_MS: '65000', HTTP_HEADERS_TIMEOUT_MS: '65000' }))
+      .some((e) => e.field === 'http.headersTimeoutMs'),
+    'headers == keepAlive отклонён',
+  );
+  // headers < keepAlive недопустим.
+  assert.ok(
+    validateConfig(loadConfig({ HTTP_KEEP_ALIVE_TIMEOUT_MS: '65000', HTTP_HEADERS_TIMEOUT_MS: '64000' }))
+      .some((e) => e.field === 'http.headersTimeoutMs'),
+    'headers < keepAlive отклонён',
+  );
+  // Выше верхней границы 600000 отклоняется.
+  assert.ok(
+    validateConfig(loadConfig({ HTTP_HEADERS_TIMEOUT_MS: '600001' })).some((e) => e.field === 'http.headersTimeoutMs'),
+    'headers выше 600000 отклонён',
+  );
+});
+
+test('validateConfig: HTTP request timeout не короче headers timeout', () => {
+  assert.ok(
+    validateConfig(loadConfig({
+      HTTP_KEEP_ALIVE_TIMEOUT_MS: '65000',
+      HTTP_HEADERS_TIMEOUT_MS: '70000',
+      HTTP_REQUEST_TIMEOUT_MS: '69999',
+    })).some((e) => e.field === 'http.requestTimeoutMs'),
+    'requestTimeout < headersTimeout отклонён',
+  );
+  assert.equal(
+    validateConfig(loadConfig({
+      HTTP_KEEP_ALIVE_TIMEOUT_MS: '65000',
+      HTTP_HEADERS_TIMEOUT_MS: '70000',
+      HTTP_REQUEST_TIMEOUT_MS: '70000',
+    })).some((e) => e.field === 'http.requestTimeoutMs'),
+    false,
+    'requestTimeout == headersTimeout валиден',
+  );
+});
+
+test('validateConfig: HTTP-таймауты — 0/отрицательные/дробные/NaN отклонены (requestTimeout не обнуляем)', () => {
+  // requestTimeout=0 недопустим: 0 у Node = «без лимита приёма», не должен включаться неявно.
+  assert.ok(
+    validateConfig(loadConfig({ HTTP_REQUEST_TIMEOUT_MS: '0' })).some((e) => e.field === 'http.requestTimeoutMs'),
+    'requestTimeout=0 отклонён (не тихое отключение)',
+  );
+  for (const env of [
+    { HTTP_REQUEST_TIMEOUT_MS: '-1' },
+    { HTTP_REQUEST_TIMEOUT_MS: '59999' },
+    { HTTP_REQUEST_TIMEOUT_MS: '2.5' },
+    { HTTP_REQUEST_TIMEOUT_MS: 'abc' },
+    { HTTP_REQUEST_TIMEOUT_MS: '3600001' },
+  ]) {
+    assert.ok(
+      validateConfig(loadConfig(env)).some((e) => e.field === 'http.requestTimeoutMs'),
+      `${JSON.stringify(env)} отклонён`,
+    );
+  }
+  // keepAlive дробный/NaN отклонён.
+  assert.ok(
+    validateConfig(loadConfig({ HTTP_KEEP_ALIVE_TIMEOUT_MS: '65000.5' })).some((e) => e.field === 'http.keepAliveTimeoutMs'),
+    'дробный keepAlive отклонён',
+  );
+  assert.ok(
+    validateConfig(loadConfig({ HTTP_KEEP_ALIVE_TIMEOUT_MS: 'NaN' })).some((e) => e.field === 'http.keepAliveTimeoutMs'),
+    'NaN keepAlive отклонён',
+  );
+  // headers NaN отклонён.
+  assert.ok(
+    validateConfig(loadConfig({ HTTP_HEADERS_TIMEOUT_MS: 'NaN' })).some((e) => e.field === 'http.headersTimeoutMs'),
+    'NaN headers отклонён',
+  );
+});
+
+test('validateConfig: сообщения HTTP-таймаутов НЕ содержат env-значений', () => {
+  const errs = validateConfig(loadConfig({
+    HTTP_KEEP_ALIVE_TIMEOUT_MS: '4242', HTTP_HEADERS_TIMEOUT_MS: '9191', HTTP_REQUEST_TIMEOUT_MS: '0',
+  }));
+  const joined = JSON.stringify(errs) + new ConfigError(errs).message;
+  assert.equal(joined.includes('4242'), false, 'значение keepAlive не утекает');
+  assert.equal(joined.includes('9191'), false, 'значение headers не утекает');
+});
+
 test('loadConfig: appUrl — RAW без дефолта (пусто = не задан), с тримом хвостового «/»', () => {
   // Контракт B2c: appBase() в index решает фолбэк сам — config НЕ подставляет atlavue
   // (в отличие от publicUrl, который дефолтит для validateConfig).
