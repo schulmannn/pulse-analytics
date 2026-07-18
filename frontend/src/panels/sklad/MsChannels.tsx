@@ -10,7 +10,15 @@ import { ErrorState } from '@/components/ErrorState';
 import { Skeleton } from '@/components/ui/skeleton';
 import { fmt, pluralRu } from '@/lib/format';
 import { usePagePeriod } from '@/lib/period';
-import { useMsPagePeriod, type MsPeriod } from '@/lib/msPeriod';
+import { msPreviousPeriod, useMsPagePeriod, type MsPeriod } from '@/lib/msPeriod';
+import {
+  buildMsChannelContributionItems,
+  msChannelContributionCurrent,
+  msChannelContributionDelta,
+  sortMsChannelContributionItems,
+  type MsChannelContributionMetric,
+  type MsSalesByChannelData,
+} from '@/lib/msChannelContribution';
 import {
   aggregatePlotPoints,
   bucketPoints,
@@ -40,6 +48,8 @@ export function MsChannels() {
   const days = pp ? pp.days : 30;
   const windowLabel = pp?.range ? 'за выбранный период' : days === 0 ? 'за всё время' : `за ${days} дн.`;
   const channels = useMsSalesByChannel(period);
+  const previousPeriod = useMemo(() => msPreviousPeriod(period), [period]);
+  const previousChannels = useMsSalesByChannel(previousPeriod ?? period);
   const geo = useMsGeography(period);
   const channelOptions = useMemo(
     () => (channels.data?.rows ?? []).map((r) => ({ id: r.sales_channel_id, name: r.name ?? 'Канал без имени' })),
@@ -61,6 +71,22 @@ export function MsChannels() {
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
       <MsChannelDynamicsCard period={period} windowLabel={windowLabel} options={channelOptions} />
 
+      <ChartWidget id="ms-channel-contribution" title="Что изменило результат" fixedSize="full" drillTo="/metrics/ms-sales-channels">
+        {channels.isPending ? (
+          <ListSkeleton rows={6} />
+        ) : !channels.data || channels.data.total_orders === 0 ? (
+          <p className="py-4 text-sm text-muted-foreground">Нет продаж за период.</p>
+        ) : (
+          <MsChannelContribution
+            current={channels.data}
+            previous={previousPeriod && !previousChannels.isError ? (previousChannels.data ?? null) : null}
+            comparisonState={
+              !previousPeriod ? 'unavailable' : previousChannels.isError ? 'error' : previousChannels.isPending ? 'pending' : 'ready'
+            }
+          />
+        )}
+      </ChartWidget>
+
       <ChartWidget id="ms-channels" title={`Продажи по каналам ${windowLabel}`} fixedSize="full" drillTo="/metrics/ms-sales-channels">
         {channels.isPending ? (
           <ListSkeleton rows={6} />
@@ -71,6 +97,7 @@ export function MsChannels() {
             rows={channels.data.rows}
             totalOrders={channels.data.total_orders}
             noChannel={channels.data.no_channel_orders}
+            noChannelSum={channels.data.no_channel_sum}
           />
         )}
       </ChartWidget>
@@ -581,15 +608,17 @@ export function MsChannelRows({
   rows,
   totalOrders,
   noChannel,
+  noChannelSum,
 }: {
   rows: SalesRow[];
   totalOrders: number;
   noChannel: number;
+  noChannelSum: number;
 }) {
   const expanded = useContext(ChartExpandedContext);
   const [sort, setSort] = useState<SortKey>('revenue');
   const aov = (r: SalesRow) => (r.orders > 0 ? r.sum / r.orders : 0);
-  const totalSum = useMemo(() => rows.reduce((a, r) => a + r.sum, 0), [rows]);
+  const totalSum = useMemo(() => rows.reduce((a, r) => a + r.sum, noChannelSum), [rows, noChannelSum]);
   const sorted = useMemo(() => {
     const arr = [...rows];
     arr.sort((a, b) => {
@@ -651,7 +680,136 @@ export function MsChannelRows({
       {restOrders > 0 && (
         <p className="text-2xs text-muted-foreground">
           {expanded ? 'Из них' : 'Ещё'} {fmt.num(restOrders)}{' '}
-          {noChannel > 0 ? `заказов (без канала ${fmt.num(noChannel)})` : 'заказов'} из {fmt.num(totalOrders)}.
+          {noChannel > 0 ? `заказов (без канала ${fmt.num(noChannel)} · ${fmt.short(noChannelSum)} ₽)` : 'заказов'} из {fmt.num(totalOrders)}.
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ── Вклад каналов: текущее окно против равного предыдущего ────────────────────────────────────
+
+function signedValue(delta: number, metric: MsChannelContributionMetric): string {
+  const sign = delta > 0 ? '+' : delta < 0 ? '−' : '';
+  return metric === 'revenue'
+    ? `${sign}${fmt.short(Math.abs(delta))} ₽`
+    : `${sign}${fmt.num(Math.abs(delta))}`;
+}
+
+/**
+ * Decision view rather than another ranking: current share and signed absolute change against the
+ * exactly equal previous window. Positive and negative deltas reconcile to the overall change;
+ * previous-only channels and the explicit «Без канала» row remain visible.
+ */
+export function MsChannelContribution({
+  current,
+  previous,
+  comparisonState,
+}: {
+  current: MsSalesByChannelData;
+  previous: MsSalesByChannelData | null;
+  comparisonState: 'ready' | 'pending' | 'error' | 'unavailable';
+}) {
+  const expanded = useContext(ChartExpandedContext);
+  const [metric, setMetric] = useState<MsChannelContributionMetric>('revenue');
+  const comparable = comparisonState === 'ready' && previous != null;
+  const items = useMemo(
+    () => buildMsChannelContributionItems(current, comparable ? previous : null),
+    [current, previous, comparable],
+  );
+  const sorted = useMemo(
+    () => sortMsChannelContributionItems(items, metric, comparable),
+    [items, metric, comparable],
+  );
+  const shown = useMemo(() => {
+    if (expanded || sorted.length <= 8) return sorted;
+    const synthetic = sorted.find((item) => item.synthetic);
+    const regular = sorted.filter((item) => !item.synthetic).slice(0, synthetic ? 7 : 8);
+    return synthetic ? [...regular, synthetic] : regular;
+  }, [expanded, sorted]);
+  const shownIds = useMemo(() => new Set(shown.map((item) => item.id)), [shown]);
+  const hidden = sorted.filter((item) => !shownIds.has(item.id));
+  const total = items.reduce((sum, item) => sum + msChannelContributionCurrent(item, metric), 0);
+  const max = Math.max(...items.map((item) => msChannelContributionCurrent(item, metric)), 1);
+  const hiddenValue = hidden.reduce((sum, item) => sum + msChannelContributionCurrent(item, metric), 0);
+
+  return (
+    <div className="space-y-2.5 pt-1">
+      <SegmentedControl
+        ariaLabel="Метрика вклада каналов"
+        value={metric}
+        onChange={(value) => setMetric(value as MsChannelContributionMetric)}
+        options={[
+          { value: 'revenue', content: 'Выручка' },
+          { value: 'orders', content: 'Заказы' },
+        ]}
+      />
+      {comparisonState === 'unavailable' && (
+        <p className="text-2xs text-muted-foreground">
+          Для окна «Всё» нет равного предыдущего периода — показана только текущая доля.
+        </p>
+      )}
+      {comparisonState === 'pending' && <p className="text-2xs text-muted-foreground">Загружаем равный предыдущий период…</p>}
+      {comparisonState === 'error' && (
+        <p role="status" className="text-2xs text-muted-foreground">
+          Сравнение с предыдущим периодом недоступно. Текущие значения показаны без подстановки нулей.
+        </p>
+      )}
+      {shown.map((it) => {
+        const currentValue = msChannelContributionCurrent(it, metric);
+        const share = total > 0 ? (currentValue / total) * 100 : 0;
+        const delta = msChannelContributionDelta(it, metric);
+        const deltaColor = delta == null || delta === 0
+          ? 'hsl(var(--muted-foreground))'
+          : delta > 0 ? 'hsl(var(--chart-role-positive))' : 'hsl(var(--chart-role-negative))';
+        return (
+          <div key={it.id}>
+            <div className="flex items-baseline justify-between gap-3 text-xs">
+              <span className="flex min-w-0 items-baseline gap-2 text-foreground">
+                <span className={`truncate ${it.synthetic ? 'text-muted-foreground' : ''}`}>{it.name}</span>
+                {it.type && CHANNEL_TYPE_LABEL[it.type] && (
+                  <span className="shrink-0 text-2xs text-muted-foreground">{CHANNEL_TYPE_LABEL[it.type]}</span>
+                )}
+              </span>
+              <span className="flex shrink-0 items-baseline gap-2 tabular-nums text-muted-foreground">
+                <span>
+                  <span className="font-medium text-foreground">
+                    {metric === 'revenue' ? `${fmt.short(currentValue)} ₽` : fmt.num(currentValue)}
+                  </span>{' '}
+                  · {share.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}%
+                </span>
+                {comparable && delta != null && (
+                  <span
+                    className="inline-flex items-center gap-0.5 text-2xs"
+                    style={{ color: deltaColor }}
+                    title="Изменение против равного предыдущего окна"
+                  >
+                    <span aria-hidden="true">{delta > 0 ? '▲' : delta < 0 ? '▼' : '•'}</span>
+                    {signedValue(delta, metric)}
+                  </span>
+                )}
+              </span>
+            </div>
+            <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
+              <div
+                className="h-full rounded-full"
+                style={{
+                  width: `${currentValue === 0 ? 0 : Math.max(3, Math.round((currentValue / max) * 100))}%`,
+                  backgroundColor: `hsl(var(--chart-role-primary) / ${it.synthetic ? '0.4' : '0.75'})`,
+                }}
+              />
+            </div>
+          </div>
+        );
+      })}
+      {hiddenValue > 0 && (
+        <p className="text-2xs text-muted-foreground">
+          Ещё {metric === 'revenue' ? `${fmt.short(hiddenValue)} ₽` : `${fmt.num(hiddenValue)} ${pluralRu(hiddenValue, ['заказ', 'заказа', 'заказов'])}`} в свёрнутых каналах.
+        </p>
+      )}
+      {comparable && (
+        <p className="text-2xs text-muted-foreground">
+          Положительные и отрицательные изменения каналов, включая «Без канала», в сумме дают общее изменение.
         </p>
       )}
     </div>

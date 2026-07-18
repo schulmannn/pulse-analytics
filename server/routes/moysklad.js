@@ -755,8 +755,8 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
   // GET /api/ms/sales-by-channel?days= — продажи по каналам сбыта за окно (архив ms_orders,
   // days=0 = вся история). Сам агрегат — дешёвое DB-чтение БЕЗ кэша ответа; живой только словарь
   // имён/типов каналов (см. loadChannelsDict, кэш 1 час). Строка sales_channel_id=NULL (заказы
-  // без канала / строки до миграции 031) в rows не кладётся — уходит счётчиком no_channel_orders
-  // (как no_state_orders у структуры статусов). resolveMs (не resolveMsChannel): словарю нужен токен, а «не
+  // без канала / строки до миграции 031) в rows не кладётся — уходит счётчиками no_channel_orders и
+  // no_channel_sum (как no_state_orders/no_state_sum у структуры статусов). resolveMs (не resolveMsChannel): словарю нужен токен, а «не
   // подключён» здесь отвечает 404 как остальные data-роуты.
   app.get('/api/ms/sales-by-channel', requireAuth, async (req, res, next) => {
     try {
@@ -778,11 +778,15 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
       }
       let totalOrders = 0;
       let noChannelOrders = 0;
+      let noChannelSum = 0;
       const out = [];
       for (const r of rows) {
         totalOrders += r.orders;
         if (r.sales_channel_id == null) {
           noChannelOrders += r.orders;
+          // Выручка строки без канала уходит рядом со счётчиком (no_channel_sum) — синтетическая
+          // строка «Без канала» на странице вклада каналов должна честно нести и свою долю выручки.
+          noChannelSum += kopecksToRub(r.sum_kopecks);
           continue;
         }
         const ch = dict ? dict[r.sales_channel_id] : null;
@@ -795,7 +799,13 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
           sum: kopecksToRub(r.sum_kopecks),
         });
       }
-      res.json({ window_days: period.days, total_orders: totalOrders, no_channel_orders: noChannelOrders, rows: out });
+      res.json({
+        window_days: period.days,
+        total_orders: totalOrders,
+        no_channel_orders: noChannelOrders,
+        no_channel_sum: noChannelSum,
+        rows: out,
+      });
     } catch (e) {
       next(e);
     }
