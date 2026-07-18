@@ -212,7 +212,31 @@ function demoMsPayload(url: URL): unknown | undefined {
       ],
     };
   }
-  if (path === '/api/ms/cohorts') return { cohorts: [] };
+  if (path === '/api/ms/cohorts') {
+    // Детерминированные когорты за последние 4 месяца (относительно now, чтобы клетки были
+    // «наступившими», а не будущими-пустыми). Клетка несёт active (клиентов с заказом) и revenue
+    // (₽ выручки их заказов) — покрывает три режима полной страницы: возвращаемость/выручка/LTV.
+    const cohortMonth = (monthsAgo: number) => {
+      const d = new Date();
+      d.setDate(1);
+      d.setMonth(d.getMonth() - monthsAgo);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    };
+    // size, затем по offset: [active, revenue]. Ретеншен спадает, выручка когорты тоже.
+    const specs = [
+      { monthsAgo: 3, size: 40, cells: [[40, 200_000], [22, 132_000], [14, 98_000], [9, 72_000]] },
+      { monthsAgo: 2, size: 30, cells: [[30, 150_000], [16, 96_000], [10, 65_000]] },
+      { monthsAgo: 1, size: 25, cells: [[25, 130_000], [12, 78_000]] },
+      { monthsAgo: 0, size: 18, cells: [[18, 99_000]] },
+    ];
+    return {
+      cohorts: specs.map((spec) => ({
+        cohort_month: cohortMonth(spec.monthsAgo),
+        size: spec.size,
+        cells: spec.cells.map(([active, revenue], offset) => ({ offset, active, revenue })),
+      })),
+    };
+  }
   if (path === '/api/ms/returns') {
     const count = days === 0 ? 90 : days;
     const series = Array.from({ length: count }, (_, index) => ({

@@ -1041,15 +1041,28 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
     }
   });
 
-  // GET /api/ms/cohorts — когортное удержание по месяцу первого заказа (вся история архива,
-  // без параметров — фронт сам обрежет глубину). Чистый DB-агрегат — без кэша; денег в ответе
-  // нет, только счётчики клиентов.
+  // GET /api/ms/cohorts — когортное удержание + монетизация по месяцу первого заказа (вся история
+  // архива, без параметров — фронт сам обрежет глубину). Чистый DB-агрегат — без кэша. Каждая
+  // клетка несёт active (клиентов когорты с заказом в offset-месяце) и revenue выручки этих
+  // заказов; репо отдаёт revenue_kopecks (КОПЕЙКИ), в рубли конвертируем здесь на границе
+  // (kopecksToRub — единый денежный контракт МС-роутов). Unsafe BIGINT остаётся null, а не
+  // выдуманным нулём. Возвраты не вычитаются.
   app.get('/api/ms/cohorts', requireAuth, async (req, res, next) => {
     try {
       const ms = await resolveMs(req, res);
       if (!ms) return;
       const cohorts = await db.getMsCohortsForActor(ms.channel.id, req.user);
-      res.json({ cohorts });
+      res.json({
+        cohorts: cohorts.map((c) => ({
+          cohort_month: c.cohort_month,
+          size: c.size,
+          cells: c.cells.map((cell) => ({
+            offset: cell.offset,
+            active: cell.active,
+            revenue: kopecksToRub(cell.revenue_kopecks),
+          })),
+        })),
+      });
     } catch (e) {
       next(e);
     }

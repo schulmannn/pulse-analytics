@@ -193,17 +193,26 @@ test('RFM: exact-window aggregate, recency на конец окна, NULL-agent 
   assert.equal(await db.getMsRfmForActor(ch.id, { uid: stranger.id }, { untilDay: '2026-03-31' }), null);
 });
 
-test('cohorts: когорта = месяц первого заказа, offset 0 = size, нули дозаполнены до горизонта канала', { skip }, async () => {
+test('cohorts: когорта = месяц первого заказа, offset 0 = size, нули дозаполнены + выручка клетки в копейках', { skip }, async () => {
+  // revenue_kopecks клетки = SUM(sum_kopecks) заказов клиентов когорты в offset-месяце (безагентные
+  // n1/n2 не в firsts → в когорты не попадают). A: 1000/2000/3000; B: b1+b2=2000, март 0; C: 700.
   assert.deepEqual(await db.getMsCohortsInternal(ch.id), [
     {
       cohort_month: '2026-01', size: 1,   // A активен во всех трёх месяцах
-      cells: [{ offset: 0, active: 1 }, { offset: 1, active: 1 }, { offset: 2, active: 1 }],
+      cells: [
+        { offset: 0, active: 1, revenue_kopecks: 1000 },
+        { offset: 1, active: 1, revenue_kopecks: 2000 },
+        { offset: 2, active: 1, revenue_kopecks: 3000 },
+      ],
     },
     {
       cohort_month: '2026-02', size: 1,   // B активен только в своём месяце; март — честный 0
-      cells: [{ offset: 0, active: 1 }, { offset: 1, active: 0 }],
+      cells: [
+        { offset: 0, active: 1, revenue_kopecks: 2000 },   // b1(1500)+b2(500)
+        { offset: 1, active: 0, revenue_kopecks: 0 },
+      ],
     },
-    { cohort_month: '2026-03', size: 1, cells: [{ offset: 0, active: 1 }] },
+    { cohort_month: '2026-03', size: 1, cells: [{ offset: 0, active: 1, revenue_kopecks: 700 }] },
   ]);
 });
 

@@ -77,6 +77,42 @@ async function invoke(routes, key, { query = {}, headers = {}, body = {} } = {})
   return res;
 }
 
+test('cohorts: tenant DB aggregate converts exact kopecks to rubles and preserves unsafe null', async () => {
+  const seen = [];
+  const { routes } = buildMs({
+    msFetch: async () => { throw new Error('cohorts must not call live MoySklad'); },
+    db: {
+      getMsCohortsForActor: async (channelId, actor) => {
+        seen.push({ channelId, uid: actor.uid });
+        return [{
+          cohort_month: '2026-01',
+          size: 2,
+          cells: [
+            { offset: 0, active: 2, revenue_kopecks: 123_450 },
+            { offset: 1, active: 0, revenue_kopecks: 0 },
+            { offset: 2, active: 1, revenue_kopecks: null },
+          ],
+        }];
+      },
+    },
+  });
+
+  const res = await invoke(routes, 'GET /api/ms/cohorts');
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(seen, [{ channelId: 5, uid: 7 }]);
+  assert.deepEqual(res.body, {
+    cohorts: [{
+      cohort_month: '2026-01',
+      size: 2,
+      cells: [
+        { offset: 0, active: 2, revenue: 1234.5 },
+        { offset: 1, active: 0, revenue: 0 },
+        { offset: 2, active: 1, revenue: null },
+      ],
+    }],
+  });
+});
+
 test('returns: DB-агрегат точного окна без живого запроса к МС; копейки→рубли, дневная серия', async () => {
   const seen = [];
   const { routes } = buildMs({

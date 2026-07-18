@@ -16,6 +16,7 @@ import { msPreviousPeriod, useMsResolvedPeriod, type MsPeriod } from '@/lib/msPe
 import { metricTotal, type Grain, type Metric } from '@/lib/msSeries';
 import { customerMetricTotal, type MsCustomerMetric } from '@/lib/msCustomerSeries';
 import type { MsChannelContributionMetric } from '@/lib/msChannelContribution';
+import { MS_COHORT_MODES, type MsCohortMode } from '@/lib/msCohortMode';
 import {
   applyMsMetricChannels,
   applyMsMetricEnum,
@@ -194,6 +195,10 @@ const CONTRIBUTION_URL: MsMetricUrlSchema = {
   enums: { metric: { values: ['revenue', 'orders'], defaultValue: 'revenue' }, compare: COMPARE },
 };
 const COMPARE_URL: MsMetricUrlSchema = { enums: { compare: COMPARE } };
+// Когорты — только режим клетки (mode); окна нет (вся история), поэтому ни period, ни compare.
+const COHORTS_URL: MsMetricUrlSchema = {
+  enums: { mode: { values: [...MS_COHORT_MODES], defaultValue: 'retention' } },
+};
 
 /** One merge-and-replace URL owner per metric page: no competing effects or history spam. */
 function useMsMetricUrlControls(schema: MsMetricUrlSchema) {
@@ -1164,21 +1169,60 @@ function MsRfmPage() {
   );
 }
 
+// Заголовок/описание карточки под выбранный режим — deals честно называет monthly-выручку/клиента
+// и кумулятивный LTV, ничего не именуя «прибылью».
+const COHORT_MODE_META: Record<MsCohortMode, { title: string; formula: string }> = {
+  retention: {
+    title: 'Возвращаемость',
+    formula:
+      'Доля клиентов когорты (по месяцу первой покупки), сделавших заказ через N месяцев после неё; «0» — месяц самой первой покупки.',
+  },
+  revenue: {
+    title: 'Выручка на клиента',
+    formula:
+      'Выручка заказов N-го месяца, делённая на ИСХОДНЫЙ размер когорты (не на активных) — помесячно, в рублях. Это не среднее и не прибыль; возвраты не вычитаются.',
+  },
+  ltv: {
+    title: 'LTV на клиента',
+    formula:
+      'Накопленная выручка с 0-го по N-й месяц, делённая на ИСХОДНЫЙ размер когорты — LTV в рублях. Не прибыль; возвраты не вычитаются.',
+  },
+};
+
 function MsCohortsPage() {
   const cohorts = useMsCohorts();
+  const controls = useMsMetricUrlControls(COHORTS_URL);
+  const mode = controls.values.mode as MsCohortMode;
+  const meta = COHORT_MODE_META[mode];
   return (
     <MsMetricShell
       back={BACK_CLIENTS}
       term="Когорты"
-      descriptor="Возвращаемость по месяцу первой покупки"
+      descriptor="Возвращаемость и монетизация по месяцу первой покупки"
       about={{
-        formula:
-          'Доля клиентов когорты (по месяцу первой покупки), сделавших заказ через N месяцев после неё; «0» — месяц самой первой покупки.',
-        included: 'Будущие месяцы когорты — пустые (данных ещё нет), а не ноль.',
-        source: 'Архив заказов МойСклада (ms_orders).',
+        formula: meta.formula,
+        included:
+          'Все режимы нормированы на исходный размер когорты, поэтому когорты разного размера сравнимы. Будущие месяцы когорты — пустые (данных ещё нет), а не ноль.',
+        source: 'Архив заказов МойСклада (ms_orders); суммы в рублях, возвраты не вычитаются.',
       }}
     >
-      <MsReportCard id="ms-page-cohorts" title="Таблица когорт">
+      <MsReportCard
+        id="ms-page-cohorts"
+        title={meta.title}
+        action={
+          <SegmentedControl
+            ariaLabel="Режим когортной матрицы"
+            size="sm"
+            value={mode}
+            onChange={(value) => controls.setEnum('mode', value)}
+            options={[
+              { value: 'retention', content: 'Возвращаемость' },
+              { value: 'revenue', content: 'Выручка/клиент' },
+              { value: 'ltv', content: 'LTV' },
+            ]}
+          />
+        }
+      >
         {cohorts.isPending ? (
           <ListSkeleton rows={6} />
         ) : cohorts.isError ? (
@@ -1192,7 +1236,7 @@ function MsCohortsPage() {
         ) : !cohorts.data || cohorts.data.cohorts.length === 0 ? (
           <p className="py-4 text-sm text-muted-foreground">Когорт пока нет — они появятся после загрузки истории заказов.</p>
         ) : (
-          <MsCohortsTable cohorts={cohorts.data.cohorts} />
+          <MsCohortsTable cohorts={cohorts.data.cohorts} mode={mode} />
         )}
       </MsReportCard>
     </MsMetricShell>
