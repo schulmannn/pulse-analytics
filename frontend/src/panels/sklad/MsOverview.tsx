@@ -167,7 +167,7 @@ export function MsOverview() {
       </ChartWidget>
 
       <ChartWidget id="ms-funnel" title="Статусы заказов" fixedSize="half" drillTo="/metrics/ms-funnel">
-        <div className="mb-2 flex justify-end">
+        <div className="mb-1 flex justify-end">
           <SegmentedControl
             ariaLabel="Показатель распределения заказов по статусам"
             size="sm"
@@ -428,7 +428,7 @@ export function MsSummaryExplorer({
   );
 }
 
-/** Строки структуры: топ-5 последних сохранённых статусов заказов окна + сводный хвост; разворот
+/** Строки структуры: компактный топ-4 последних сохранённых статусов заказов окна + сводный хвост; разворот
     карточки показывает ВСЕ статусы. Цвета статусов из МС сознательно НЕ красим в бары (пёстрый
     набор пользовательских цветов кричал бы против канона тихих карточек) — цвет живёт
     точкой-меткой у имени. */
@@ -450,14 +450,14 @@ export function MsFunnelRows({
   const ranked = [...rows].sort(
     (a, b) => selectedValue(b) - selectedValue(a) || b.orders - a.orders || a.state_id.localeCompare(b.state_id),
   );
-  const top = expanded ? ranked : ranked.slice(0, 5);
-  const tail = expanded ? [] : ranked.slice(5);
+  const top = expanded ? ranked : ranked.slice(0, 4);
+  const tail = expanded ? [] : ranked.slice(4);
   const restOrders = tail.reduce((acc, row) => acc + row.orders, 0) + noState;
   const restSum = tail.reduce((acc, row) => acc + row.sum, 0) + noStateSum;
   const totalSum = rows.reduce((acc, row) => acc + row.sum, 0) + noStateSum;
   const max = Math.max(1, ...top.map((row) => Math.max(0, selectedValue(row))));
   return (
-    <div className="space-y-2 pt-1">
+    <div className={expanded ? 'space-y-2 pt-1' : 'space-y-1.5'}>
       {top.map((r) => (
         <div key={r.state_id}>
           <div className="flex items-baseline justify-between gap-3 text-xs">

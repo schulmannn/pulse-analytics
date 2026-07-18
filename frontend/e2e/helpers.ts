@@ -109,9 +109,45 @@ function demoMsComparison() {
   };
 }
 
+// Production-shaped MAXIMUM compact payloads for the three list cards that overflow their fixed
+// 264px half-tile when a real tenant fills them (funnel statuses, top products, geography). Opt-in
+// via `bootDemo(..., { msMax: true })`; every other spec keeps the small default slice below. Long
+// Russian names + many rows + a non-empty aggregate/no-state/no-city tail reproduce the worst case.
+const MS_MAX_FUNNEL_ROWS = [
+  { state_id: 's1', name: 'Новый заказ (ожидает подтверждения)', color: '#4a90d9', orders: 214, sum: 3_120_000 },
+  { state_id: 's2', name: 'Подтверждён менеджером', color: '#2e8b57', orders: 188, sum: 2_740_000 },
+  { state_id: 's3', name: 'Собран на складе', color: '#f5a623', orders: 156, sum: 2_010_000 },
+  { state_id: 's4', name: 'Передан в службу доставки', color: '#7b61ff', orders: 132, sum: 1_680_000 },
+  { state_id: 's5', name: 'Доставлен покупателю', color: '#50b0a0', orders: 118, sum: 1_450_000 },
+  { state_id: 's6', name: 'Возврат оформлен', color: '#c0504d', orders: 44, sum: 520_000 },
+  { state_id: 's7', name: 'Отменён покупателем', color: '#9b59b6', orders: 31, sum: 340_000 },
+  { state_id: 's8', name: 'Ожидает оплаты', color: '#e67e22', orders: 27, sum: 300_000 },
+];
+
+const MS_MAX_TOP_PRODUCTS = [
+  { name: 'Кофемашина автоматическая De Longhi Magnifica S', quantity: 128, revenue: 3_120_000, profit: 640_000, margin: 20.5 },
+  { name: 'Робот-пылесос Xiaomi Roborock S8 Pro Ultra', quantity: 96, revenue: 2_480_000, profit: 520_000, margin: 21.0 },
+  { name: 'Смартфон Samsung Galaxy S24 Ultra 512 ГБ', quantity: 74, revenue: 2_010_000, profit: 310_000, margin: 15.4 },
+  { name: 'Наушники Apple AirPods Pro 2-го поколения USB-C', quantity: 210, revenue: 1_680_000, profit: 420_000, margin: 25.0 },
+  { name: 'Телевизор LG OLED evo C4 65 дюймов 4K', quantity: 38, revenue: 1_450_000, profit: 190_000, margin: 13.1 },
+  { name: 'Игровая консоль Sony PlayStation 5 Slim', quantity: 52, revenue: 1_120_000, profit: 150_000, margin: 13.4 },
+];
+
+const MS_MAX_GEOGRAPHY = [
+  { city: 'Москва', orders: 342, sum: 5_120_000 },
+  { city: 'Санкт-Петербург', orders: 268, sum: 3_940_000 },
+  { city: 'Екатеринбург', orders: 141, sum: 1_820_000 },
+  { city: 'Новосибирск', orders: 118, sum: 1_460_000 },
+  { city: 'Нижний Новгород', orders: 96, sum: 1_180_000 },
+  { city: 'Ростов-на-Дону', orders: 84, sum: 1_020_000 },
+  { city: 'Казань', orders: 73, sum: 910_000 },
+  { city: 'Челябинск', orders: 61, sum: 760_000 },
+];
+
 /** Deterministic MoySklad slice used only by desktop browser tests. It mirrors the production
-    contract closely enough to exercise aggregate filters, breakdown groups, ranking and explorer. */
-function demoMsPayload(url: URL): unknown | undefined {
+    contract closely enough to exercise aggregate filters, breakdown groups, ranking and explorer.
+    `opts.max` swaps the three list-card payloads for their production-shaped maximum variants. */
+function demoMsPayload(url: URL, opts: { max?: boolean } = {}): unknown | undefined {
   const path = url.pathname;
   const rawDays = url.searchParams.get('days');
   const days = rawDays === '0' ? 0 : Number(rawDays) || 30;
@@ -138,6 +174,17 @@ function demoMsPayload(url: URL): unknown | undefined {
     };
   }
   if (path === '/api/ms/funnel') {
+    if (opts.max) {
+      const rows = MS_MAX_FUNNEL_ROWS;
+      const noStateOrders = 18;
+      return {
+        window_days: days,
+        total_orders: rows.reduce((total, row) => total + row.orders, 0) + noStateOrders,
+        no_state_orders: noStateOrders,
+        no_state_sum: 210_000,
+        rows,
+      };
+    }
     return {
       window_days: days,
       total_orders: 96,
@@ -153,12 +200,14 @@ function demoMsPayload(url: URL): unknown | undefined {
   if (path === '/api/ms/top-products') {
     const sort = url.searchParams.get('sort') ?? 'revenue';
     const limit = Number(url.searchParams.get('limit')) || 10;
-    const rows = [
-      { name: 'Товар A', quantity: 120, revenue: 240_000, profit: 60_000, margin: 25 },
-      { name: 'Товар B', quantity: 80, revenue: 160_000, profit: 80_000, margin: 50 },
-      { name: 'Товар C', quantity: 60, revenue: 90_000, profit: -5_000, margin: -5.56 },
-      { name: 'Товар без продаж', quantity: 0, revenue: 0, profit: 10_000, margin: null },
-    ];
+    const rows: Array<{ name: string; quantity: number; revenue: number; profit: number; margin: number | null }> = opts.max
+      ? [...MS_MAX_TOP_PRODUCTS]
+      : [
+          { name: 'Товар A', quantity: 120, revenue: 240_000, profit: 60_000, margin: 25 },
+          { name: 'Товар B', quantity: 80, revenue: 160_000, profit: 80_000, margin: 50 },
+          { name: 'Товар C', quantity: 60, revenue: 90_000, profit: -5_000, margin: -5.56 },
+          { name: 'Товар без продаж', quantity: 0, revenue: 0, profit: 10_000, margin: null },
+        ];
     const value = (row: (typeof rows)[number]) =>
       sort === 'profit' ? row.profit : sort === 'margin' ? row.margin : row.revenue;
     rows.sort((a, b) => {
@@ -308,6 +357,16 @@ function demoMsPayload(url: URL): unknown | undefined {
     };
   }
   if (path === '/api/ms/geography') {
+    if (opts.max) {
+      const rows = MS_MAX_GEOGRAPHY;
+      const noCity = 47;
+      return {
+        window_days: days,
+        total_orders: rows.reduce((total, row) => total + row.orders, 0) + noCity,
+        no_city_orders: noCity,
+        rows,
+      };
+    }
     return {
       window_days: days,
       total_orders: 100,
@@ -366,7 +425,11 @@ function demoMsPayload(url: URL): unknown | undefined {
  * `opts.theme` pins the pulse_theme preference before load (default: system → the Playwright
  * environment's light) — the contrast gate scans both palettes explicitly.
  */
-export async function bootDemo(page: Page, route = '/', opts: { theme?: 'light' | 'dark' } = {}): Promise<void> {
+export async function bootDemo(
+  page: Page,
+  route = '/',
+  opts: { theme?: 'light' | 'dark'; msMax?: boolean } = {},
+): Promise<void> {
   // Covered demo endpoints resolve inside api/client.ts and never reach the network. Any uncovered
   // optional request (IG/media today, future integrations tomorrow) gets a deterministic response
   // instead of leaking through Vite's proxy to a missing local backend and filling CI with ECONNREFUSED.
@@ -375,7 +438,7 @@ export async function bootDemo(page: Page, route = '/', opts: { theme?: 'light' 
     const path = url.pathname;
     const isMe = path === '/api/auth/me';
     const igPayload = demoIgPayload(path);
-    const msPayload = demoMsPayload(url);
+    const msPayload = demoMsPayload(url, { max: opts.msMax });
     return r.fulfill({
       status: isMe || igPayload !== undefined || msPayload !== undefined ? 200 : 404,
       contentType: 'application/json',

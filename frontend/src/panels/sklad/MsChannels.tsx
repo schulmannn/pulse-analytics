@@ -825,7 +825,7 @@ export function MsChannelContribution({
   );
 }
 
-/** Топ городов доставки: строки-бары по числу заказов; разворот — все города. */
+/** Топ городов доставки: compact показывает пять строк и честный хвост; разворот — все города. */
 export function MsGeographyRows({
   rows,
   noCity,
@@ -836,10 +836,11 @@ export function MsGeographyRows({
   totalOrders: number;
 }) {
   const expanded = useContext(ChartExpandedContext);
-  const shown = expanded ? rows : rows.slice(0, 6);
+  const shown = expanded ? rows : rows.slice(0, 5);
+  const hiddenCities = expanded ? 0 : Math.max(0, rows.length - shown.length);
   const maxOrders = rows[0]?.orders ?? 1;
   return (
-    <div className="space-y-2.5 pt-1">
+    <div className={expanded ? 'space-y-2.5 pt-1' : 'space-y-1.5'}>
       {shown.map((r) => (
         <div key={r.city}>
           <div className="flex items-baseline justify-between gap-3 text-xs">
@@ -859,7 +860,16 @@ export function MsGeographyRows({
           </div>
         </div>
       ))}
-      {noCity > 0 && (
+      {!expanded && (hiddenCities > 0 || noCity > 0) && (
+        <p className="truncate text-2xs text-muted-foreground">
+          {hiddenCities > 0 && (
+            <>Ещё {fmt.num(hiddenCities)} {pluralRu(hiddenCities, ['город', 'города', 'городов'])} в отчёте</>
+          )}
+          {hiddenCities > 0 && noCity > 0 && ' · '}
+          {noCity > 0 && <>Без города: {fmt.num(noCity)} из {fmt.num(totalOrders)}</>}
+        </p>
+      )}
+      {expanded && noCity > 0 && (
         <p className="text-2xs text-muted-foreground">
           Без города доставки (самовывоз / не указан): {fmt.num(noCity)} из {fmt.num(totalOrders)}.
         </p>
