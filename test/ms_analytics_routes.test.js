@@ -15,6 +15,7 @@
 //     no_channel_orders, мягкая деградация без кэша, 401/403 → ms_token_revoked, кэш-хит словаря);
 //   • /api/ms/geography — чистый DB-агрегат (нормализация города — в SQL, здесь только проброс
 //     total/no_city и копейки→рубли, без словаря и кэша);
+//   • /api/ms/rfm — exact-window tenant-агрегат без live-вызова, копейки→рубли и no-agent хвост;
 //   • connect/disconnect — audit-события ms_connect/ms_disconnect без токена в metadata.
 
 const test = require('node:test');
@@ -232,6 +233,46 @@ test('customers: дневные суммы конвертируются в ру�
   ]);
   assert.equal(res.body.summary.sum_new, 123.45);
   assert.equal(res.body.summary.sum_repeat, 678.9);
+});
+
+test('rfm: точное окно и actor доходят до repo, суммы конвертируются, bad range не читается', async () => {
+  let calls = 0;
+  const { routes } = buildMs({
+    msFetch: async () => { throw new Error('rfm не ходит в живой МойСклад'); },
+    db: {
+      getMsRfmForActor: async (channelId, actor, opts) => {
+        calls += 1;
+        assert.equal(channelId, 5);
+        assert.equal(actor.uid, 7);
+        assert.deepEqual(opts, { sinceDay: '2026-07-01', untilDay: '2026-07-18', asOfDay: '2026-07-18' });
+        return {
+          as_of: '2026-07-18', customers: 2, no_agent_orders: 3,
+          total_orders: 5, total_sum_kopecks: 12345,
+          segments: [{
+            key: 'loyal', customers: 2, orders: 5, sum_kopecks: 12345,
+            average_recency_days: 2.5, average_frequency: 2.5, average_monetary_kopecks: 6172.5,
+          }],
+        };
+      },
+    },
+  });
+  const res = await invoke(routes, 'GET /api/ms/rfm', {
+    query: { days: '30', from: '2026-07-01', to: '2026-07-18' },
+  });
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, {
+    window_days: 30, as_of: '2026-07-18', customers: 2, no_agent_orders: 3,
+    total_orders: 5, total_sum: 123.45,
+    segments: [{
+      key: 'loyal', customers: 2, orders: 5, sum: 123.45,
+      average_recency_days: 2.5, average_frequency: 2.5, average_monetary: 61.725,
+    }],
+  });
+  const bad = await invoke(routes, 'GET /api/ms/rfm', {
+    query: { days: '30', from: '2026-07-18', to: '2026-07-01' },
+  });
+  assert.equal(bad.statusCode, 400);
+  assert.equal(calls, 1);
 });
 
 test('top-products: полный raw-отчёт сортируется до limit и переиспользуется между метриками', async () => {

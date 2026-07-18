@@ -9,6 +9,7 @@ describe('MoySklad metric route registry', () => {
       'ms-aov',
       'ms-customers',
       'ms-repeat',
+      'ms-rfm',
       'ms-channels',
       'ms-funnel',
       'ms-products',

@@ -6,7 +6,7 @@ const { hasWorkspaceRole } = require('../middleware/tenant');
 
 /**
  * Роуты МойСклада (/api/ms/{connect,summary,top-products,top-customers,status,account,backfill,
- * backfill-status,funnel,customers,cohorts,returns,sales-by-channel,geography}) — серверная половина
+ * backfill-status,funnel,customers,rfm,cohorts,returns,sales-by-channel,geography}) — серверная половина
  * источника «склад», зеркально Instagram-вертикали: connect валидирует токен живыми
  * identity-вызовами и сохраняет его ТОЛЬКО шифрованным (lib/ms_crypto), data-роуты резолвят
  * канал тем же механизмом, что resolveIg (?channel= / заголовок x-channel-id, дефолт через
@@ -991,6 +991,43 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
           repeat_orders: row.repeat_orders,
           sum_new: kopecksToRub(row.sum_new_kopecks),
           sum_repeat: kopecksToRub(row.sum_repeat_kopecks),
+        })),
+      });
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  // GET /api/ms/rfm?days= — relative R/F/M segmentation over customers with an order in the
+  // exact selected window. Pure archive aggregate: no token decryption/live MoySklad call. Scores
+  // are tie-safe mid-rank 1..5 values; raw customer ids stay inside the repo/domain boundary.
+  app.get('/api/ms/rfm', requireAuth, async (req, res, next) => {
+    try {
+      const period = parseMsPeriod(req);
+      if (period.invalid) return badRange(res);
+      const resolved = await resolveMsChannel(req, res);
+      if (!resolved) return;
+      const data = await db.getMsRfmForActor(resolved.channel.id, req.user, {
+        sinceDay: period.sinceDay,
+        untilDay: period.untilDay,
+        asOfDay: period.untilDay,
+      });
+      if (!data) return res.status(403).json({ error: 'Нет доступа к этому каналу' });
+      res.json({
+        window_days: period.days,
+        as_of: data.as_of,
+        customers: data.customers,
+        no_agent_orders: data.no_agent_orders,
+        total_orders: data.total_orders,
+        total_sum: kopecksToRub(data.total_sum_kopecks),
+        segments: data.segments.map((segment) => ({
+          key: segment.key,
+          customers: segment.customers,
+          orders: segment.orders,
+          sum: kopecksToRub(segment.sum_kopecks),
+          average_recency_days: segment.average_recency_days,
+          average_frequency: segment.average_frequency,
+          average_monetary: kopecksToRub(segment.average_monetary_kopecks),
         })),
       });
     } catch (e) {
