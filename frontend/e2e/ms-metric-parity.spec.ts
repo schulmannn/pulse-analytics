@@ -8,7 +8,7 @@ const ROUTES = [
   ['/metrics/ms-customers', 'Покупатели'],
   ['/metrics/ms-repeat', 'Повторные покупки'],
   ['/metrics/ms-channels', 'Каналы продаж'],
-  ['/metrics/ms-funnel', 'Воронка статусов'],
+  ['/metrics/ms-funnel', 'Структура заказов по статусам'],
   ['/metrics/ms-products', 'Товары'],
   ['/metrics/ms-returns', 'Возвраты'],
   ['/metrics/ms-sales-channels', 'Продажи по каналам'],
@@ -18,6 +18,7 @@ const ROUTES = [
 ] as const;
 
 test('all MoySklad drill targets use the shared full metric-page grammar', async ({ page }, testInfo) => {
+  test.setTimeout(180_000); // Один long-form сценарий последовательно проверяет все 13 маршрутов.
   test.skip(testInfo.project.name !== 'desktop-1440', 'MoySklad analytics is desktop-first');
   await bootDemo(page, ROUTES[0][0], { theme: 'dark' });
 
@@ -29,6 +30,11 @@ test('all MoySklad drill targets use the shared full metric-page grammar', async
     await expect(page.getByRole('heading', { name: 'О метрике' })).toBeVisible();
     await expect(page.getByRole('link', { name: /МойСклад ·/ })).toBeVisible();
     await expect(page.getByRole('dialog')).toHaveCount(0);
+    if (route === '/metrics/ms-funnel') {
+      await expect(page.getByText('Заказы, созданные в выбранном окне, по последнему сохранённому статусу')).toBeVisible();
+      await expect(page.getByText(/Это не история переходов, не конверсия и не порядок этапов/)).toBeVisible();
+      await expect(page.getByText('Воронка статусов', { exact: true })).toHaveCount(0);
+    }
     expect(await overflowingCards(page)).toEqual([]);
   }
 });

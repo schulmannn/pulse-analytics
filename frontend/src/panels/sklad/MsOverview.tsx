@@ -166,10 +166,10 @@ export function MsOverview() {
         </ChartCardBody>
       </ChartWidget>
 
-      <ChartWidget id="ms-funnel" title="Воронка статусов" fixedSize="half" drillTo="/metrics/ms-funnel">
+      <ChartWidget id="ms-funnel" title="Статусы заказов" fixedSize="half" drillTo="/metrics/ms-funnel">
         <div className="mb-2 flex justify-end">
           <SegmentedControl
-            ariaLabel="Метрика воронки"
+            ariaLabel="Показатель распределения заказов по статусам"
             size="sm"
             value={funnelMetric}
             onChange={setFunnelMetric}
@@ -204,7 +204,7 @@ export function MsOverview() {
               <Link className="text-primary underline-offset-2 hover:underline" to="/connect">
                 загрузку истории
               </Link>{' '}
-              повторно, и воронка заполнится.
+              повторно, и статусы появятся в аналитике.
             </p>
           ) : (
             <p className="py-4 text-sm text-muted-foreground">Нет заказов за период.</p>
@@ -397,7 +397,7 @@ export function MsSummaryExplorer({
   );
 }
 
-/** Строки воронки: топ-5 статусов окна барами в акценте графиков + сводный хвост; разворот
+/** Строки структуры: топ-5 последних сохранённых статусов заказов окна + сводный хвост; разворот
     карточки показывает ВСЕ статусы. Цвета статусов из МС сознательно НЕ красим в бары (пёстрый
     набор пользовательских цветов кричал бы против канона тихих карточек) — цвет живёт
     точкой-меткой у имени. */

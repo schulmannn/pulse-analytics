@@ -421,7 +421,8 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
          AND ($3::date IS NULL OR o.moment < ($3::date + 1))
     )`;
 
-  // Воронка статусов: заказы окна GROUP BY state_id (включая NULL — строки до миграции 030 /
+  // Структура заказов по статусам (НЕ воронка/конверсия — истории переходов между статусами нет):
+  // заказы, созданные в окне, GROUP BY последний сохранённый state_id (включая NULL — строки до миграции 030 /
   // заказы без статуса), orders DESC. Имя/цвет статуса репо НЕ знает — их мапит словарь
   // metadata/states на границе API (/api/ms/funnel), здесь только устойчивые id и числа.
   async function getMsFunnelInternal(channelId, { sinceDay = null, untilDay = null } = {}) {
