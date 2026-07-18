@@ -1,7 +1,6 @@
 import { useContext, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
-import type { ChartExpandConfig } from '@/components/ExpandableChart';
 import { useMsFunnel, useMsReturns, useMsSummary } from '@/api/queries';
 import { MsTopProductsCard } from '@/panels/sklad/MsTopProducts';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
@@ -119,7 +118,7 @@ export function MsOverview() {
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
-      <ChartWidget id="ms-revenue" title="Выручка" fixedSize="half" expand={msSummaryExpand('revenue')}>
+      <ChartWidget id="ms-revenue" title="Выручка" fixedSize="half" drillTo="/metrics/ms-revenue">
         <ChartCardBody value={`${fmt.short(revenue.total)} ₽`} caption={windowLabel}>
           {revValues.length > 1 ? (
             <LineChart
@@ -134,7 +133,7 @@ export function MsOverview() {
         </ChartCardBody>
       </ChartWidget>
 
-      <ChartWidget id="ms-orders" title="Заказы" fixedSize="half" expand={msSummaryExpand('orders')}>
+      <ChartWidget id="ms-orders" title="Заказы" fixedSize="half" drillTo="/metrics/ms-orders">
         <ChartCardBody
           value={fmt.num(orders.totalCount)}
           caption={`на ${fmt.short(orders.totalSum)} ₽ ${windowLabel}`}
@@ -152,7 +151,7 @@ export function MsOverview() {
         </ChartCardBody>
       </ChartWidget>
 
-      <ChartWidget id="ms-avg-check" title="Средний чек" fixedSize="half" expand={msSummaryExpand('aov')}>
+      <ChartWidget id="ms-avg-check" title="Средний чек" fixedSize="half" drillTo="/metrics/ms-aov">
         <ChartCardBody value={avgTotal != null ? `${fmt.short(avgTotal)} ₽` : '—'} caption={`${windowLabel} · по дням с заказами`}>
           {avgValues.length > 1 ? (
             <LineChart
@@ -167,7 +166,7 @@ export function MsOverview() {
         </ChartCardBody>
       </ChartWidget>
 
-      <ChartWidget id="ms-funnel" title="Воронка статусов" fixedSize="half">
+      <ChartWidget id="ms-funnel" title="Воронка статусов" fixedSize="half" drillTo="/metrics/ms-funnel">
         <div className="mb-2 flex justify-end">
           <SegmentedControl
             ariaLabel="Метрика воронки"
@@ -221,11 +220,11 @@ export function MsOverview() {
         )}
       </ChartWidget>
 
-      <ChartWidget id="ms-top-products" title="Товары" fixedSize="half">
+      <ChartWidget id="ms-top-products" title="Товары" fixedSize="half" drillTo="/metrics/ms-products">
         <MsTopProductsCard period={period} />
       </ChartWidget>
 
-      <ChartWidget id="ms-returns" title="Возвраты" fixedSize="half">
+      <ChartWidget id="ms-returns" title="Возвраты" fixedSize="half" drillTo="/metrics/ms-returns">
         {returns.isPending ? (
           <div className="space-y-2 py-2">
             <Skeleton className="h-8 w-1/3" />
@@ -258,41 +257,27 @@ export function MsOverview() {
   );
 }
 
-/**
- * Rich explorer выручки/заказов/среднего чека — тот же общий overlay (период 7/30/90/Всё ·
- * грануляция День/Неделя/Месяц · линия/столбцы), что у Telegram/Instagram и графика каналов МС.
- * renderExpanded/renderExpandedBar сами тянут summary для ВЫБРАННОГО окна оверлея (свой MsPeriod),
- * а не переиспользуют топбар-payload карточки. statsFor намеренно НЕ задаём: он считался бы по
- * данным исходного окна страницы и разошёлся бы с окном оверлея — честнее показать число и дельту
- * внутри графика (ChartCardBody), посчитанные ровно для выбранного периода.
- */
-function msSummaryExpand(metric: Metric): ChartExpandConfig {
-  return {
-    renderExpanded: (d, grain) => (
-      <MsSummaryExplorer metric={metric} period={{ days: d }} grain={grain} kind="line" />
-    ),
-    renderExpandedBar: (d, grain) => (
-      <MsSummaryExplorer metric={metric} period={{ days: d }} grain={grain} kind="bar" />
-    ),
-    grainable: true,
-  };
-}
-
 /** Полноэкранный график одной метрики обзора. Агрегация по бакету: выручка=сумма, заказы=сумма,
     средний чек=sum(выручка)/sum(заказы) (НЕ среднее дневных чеков и никогда чек=0 для бакета без
-    заказов — пустые бакеты среднего чека отфильтрованы, ряд остаётся непрерывным по датам). */
-function MsSummaryExplorer({
+    заказов — пустые бакеты среднего чека отфильтрованы, ряд остаётся непрерывным по датам).
+    Экспортируется для полностраничного `/metrics/ms-*` explorer (panels/sklad/MsMetricPage). */
+export function MsSummaryExplorer({
   metric,
   period,
+  comparisonPeriod,
   grain = 'day',
   kind,
 }: {
   metric: Metric;
   period: MsPeriod;
+  comparisonPeriod?: MsPeriod | null;
   grain?: Grain;
   kind: 'line' | 'bar';
 }) {
   const summary = useMsSummary(period);
+  // Keep hook order stable. Without a comparison window React Query deduplicates this with the
+  // current request; with one it fetches the exact preceding calendar range.
+  const comparison = useMsSummary(comparisonPeriod ?? period);
   const expandedHeight = useContext(ExpandedChartHeightContext);
 
   if (summary.isPending) {
@@ -337,19 +322,78 @@ function MsSummaryExplorer({
   const values = points.map((p) => metricValue(metric, p));
   const labels = points.map((p) => fmt.day(p.day));
   const titles = points.map((p) => `${fmt.day(p.day)}: ${fmtMetric(metric, metricValue(metric, p))}`);
+  const comparisonDayPoints: DayPoint[] | null =
+    comparisonPeriod && comparison.data
+      ? metric === 'revenue'
+        ? comparison.data.revenue.series.map((p) => ({ day: p.day, orders: 0, sum: p.value }))
+        : comparison.data.orders.series.map((p) => ({ day: p.day, orders: p.count, sum: p.sum }))
+      : null;
+  const comparisonPoints = comparisonDayPoints
+    ? aggregatePlotPoints(
+        bucketPoints(densifyDayPoints(comparisonDayPoints, comparisonPeriod!), grain),
+        metric,
+        CHART_MAX_POINTS,
+      )
+    : [];
+  const ghostValues = comparisonPoints.map((p) => metricValue(metric, p));
+  const ghostOk = ghostValues.length === values.length && ghostValues.length >= 2;
   const total = metricTotal(dayPoints, metric);
-  const windowWord = period.days === 0 ? 'за всё время' : `за ${period.days} дн.`;
+  const windowWord = period.from && period.to
+    ? `${fmt.day(period.from)} – ${fmt.day(period.to)}`
+    : period.days === 0
+      ? 'за всё время'
+      : `за ${period.days} дн.`;
   const caption =
     metric === 'aov' ? `${windowWord} · по ${GRAIN_BUCKET_WORD[grain]} с заказами` : windowWord;
+  const numeric = values.filter((value): value is number => value != null && Number.isFinite(value));
+  const numericSum = numeric.reduce((sum, value) => sum + value, 0);
+  const stats = numeric.length > 0
+    ? [
+        { label: 'Мин', value: fmtMetric(metric, Math.min(...numeric)) },
+        { label: 'Макс', value: fmtMetric(metric, Math.max(...numeric)) },
+        { label: 'Среднее', value: fmtMetric(metric, numericSum / numeric.length) },
+        { label: metric === 'aov' ? 'Итог' : 'Сумма', value: total == null ? '—' : fmtMetric(metric, total) },
+      ]
+    : [];
 
   return (
-    <ChartCardBody value={total != null ? fmtMetric(metric, total) : '—'} caption={caption}>
-      {kind === 'bar' ? (
-        <BarChart values={values.map((v) => v ?? 0)} labels={labels} titles={titles} height={expandedHeight ?? undefined} />
-      ) : (
-        <LineChart values={values} labels={labels} titles={titles} yMin={0} height={expandedHeight ?? undefined} />
+    <>
+      <ChartCardBody value={total != null ? fmtMetric(metric, total) : '—'} caption={caption}>
+        {kind === 'bar' ? (
+          <BarChart
+            values={values.map((v) => v ?? 0)}
+            ghost={ghostOk ? ghostValues.map((v) => v ?? 0) : undefined}
+            ghostLabel="Пред. период"
+            legendToggle={false}
+            labels={labels}
+            titles={titles}
+            height={expandedHeight ?? undefined}
+          />
+        ) : (
+          <LineChart
+            values={values}
+            ghost={ghostOk ? ghostValues : undefined}
+            ghostLabel="Пред. период"
+            ghostTitles={ghostOk ? comparisonPoints.map((p) => fmt.day(p.day)) : undefined}
+            legendToggle={false}
+            labels={labels}
+            titles={titles}
+            yMin={0}
+            height={expandedHeight ?? undefined}
+          />
+        )}
+      </ChartCardBody>
+      {stats.length > 0 && (
+        <div className="mt-4 grid grid-cols-2 gap-x-6 gap-y-2 border-t border-border pt-3 sm:grid-cols-4">
+          {stats.map((row) => (
+            <div key={row.label} className="flex items-baseline justify-between gap-3">
+              <span className="text-xs text-muted-foreground">{row.label}</span>
+              <span className="text-sm font-medium tabular-nums">{row.value}</span>
+            </div>
+          ))}
+        </div>
       )}
-    </ChartCardBody>
+    </>
   );
 }
 
@@ -357,7 +401,7 @@ function MsSummaryExplorer({
     карточки показывает ВСЕ статусы. Цвета статусов из МС сознательно НЕ красим в бары (пёстрый
     набор пользовательских цветов кричал бы против канона тихих карточек) — цвет живёт
     точкой-меткой у имени. */
-function MsFunnelRows({
+export function MsFunnelRows({
   rows,
   totalOrders,
   noState,

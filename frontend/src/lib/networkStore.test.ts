@@ -45,9 +45,11 @@ describe('routeNetworkOwner — exact route ownership', () => {
     expect(routeNetworkOwner('/mentions')).toBe('tg');
   });
 
-  it('splits /metrics by the ig- prefix', () => {
+  it('splits /metrics by the ig-/ms- prefixes', () => {
     expect(routeNetworkOwner('/metrics/ig-reach')).toBe('ig');
     expect(routeNetworkOwner('/metrics/ig-follows')).toBe('ig');
+    expect(routeNetworkOwner('/metrics/ms-revenue')).toBe('ms');
+    expect(routeNetworkOwner('/metrics/ms-channels')).toBe('ms');
     expect(routeNetworkOwner('/metrics/views')).toBe('tg');
     expect(routeNetworkOwner('/metrics/er')).toBe('tg');
   });

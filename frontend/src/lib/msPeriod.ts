@@ -17,15 +17,48 @@ export interface MsPeriod {
 }
 
 /** epoch ms → local YYYY-MM-DD (mirror of the sklad panels' localDayKey). */
-function dayKey(ms: number): string {
+export function msDayKey(ms: number): string {
   const d = new Date(ms);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 /** The authoritative MS window from a page period. `null` (outside a feed) → the 30д default. */
-export function msPeriod(pp: PagePeriodValue | null): MsPeriod {
-  if (pp?.range) return { days: pp.days, from: dayKey(pp.range.from), to: dayKey(pp.range.to) };
+export function msPeriod(pp: Pick<PagePeriodValue, 'days' | 'range'> | null): MsPeriod {
+  if (pp?.range) return { days: pp.days, from: msDayKey(pp.range.from), to: msDayKey(pp.range.to) };
   return { days: pp ? pp.days : 30 };
+}
+
+function shiftDayKey(key: string, offset: number): string {
+  const date = dayToDate(key);
+  date.setDate(date.getDate() + offset);
+  return msDayKey(date.getTime());
+}
+
+/** Inclusive calendar bounds actually requested by an MS preset/custom period. */
+export function msPeriodBounds(period: MsPeriod, now: number = Date.now()): { from: string; to: string } | null {
+  if (period.from && period.to) return { from: period.from, to: period.to };
+  if (period.days <= 0) return null;
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  const to = msDayKey(today.getTime());
+  return { from: shiftDayKey(to, -(period.days - 1)), to };
+}
+
+/** Immediately preceding equal inclusive calendar window. «Всё» has no honest predecessor. */
+export function msPreviousPeriod(period: MsPeriod, now: number = Date.now()): MsPeriod | null {
+  const bounds = msPeriodBounds(period, now);
+  if (!bounds) return null;
+  const from = dayToDate(bounds.from);
+  const to = dayToDate(bounds.to);
+  const days = Math.round(
+    (Date.UTC(to.getFullYear(), to.getMonth(), to.getDate())
+      - Date.UTC(from.getFullYear(), from.getMonth(), from.getDate())) / 86_400_000,
+  ) + 1;
+  return {
+    days: period.days,
+    from: shiftDayKey(bounds.from, -days),
+    to: shiftDayKey(bounds.from, -1),
+  };
 }
 
 /** The page-level MS window as a hook — the shape every sklad panel reads. */

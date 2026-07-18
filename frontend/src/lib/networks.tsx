@@ -121,7 +121,7 @@ export function networkForPath(pathname: string): Network {
  * prefix-based, apart from the /instagram and /metrics families:
  *   /instagram, /instagram/*         → ig
  *   exact /, /analytics, /posts, /mentions → tg
- *   /metrics/ig-*                    → ig; other /metrics/*  → tg
+ *   /metrics/ig-* → ig; /metrics/ms-* → ms; other /metrics/*  → tg
  *   everything else                  → null (agnostic — the store decides)
  */
 export function routeNetworkOwner(pathname: string): Network | null {
@@ -131,7 +131,10 @@ export function routeNetworkOwner(pathname: string): Network | null {
     return 'tg';
   }
   if (pathname.startsWith('/metrics/')) {
-    return pathname.slice('/metrics/'.length).startsWith('ig-') ? 'ig' : 'tg';
+    const key = pathname.slice('/metrics/'.length);
+    if (key.startsWith('ig-')) return 'ig';
+    if (key.startsWith('ms-')) return 'ms';
+    return 'tg';
   }
   return null;
 }

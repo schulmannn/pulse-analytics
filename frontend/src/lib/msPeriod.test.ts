@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { msPeriod, msPeriodKey, msPeriodQuery } from './msPeriod';
+import { msPeriod, msPeriodBounds, msPeriodKey, msPeriodQuery, msPreviousPeriod } from './msPeriod';
 import type { PagePeriodValue } from './period';
 import { endOfLocalDay, startOfLocalDay } from './period';
 
@@ -33,5 +33,32 @@ describe('msPeriod — page period → MS window', () => {
     // A custom window keys distinctly from any preset, and two ranges stay distinct.
     expect(msPeriodKey(p)).toEqual(['r', '2026-03-05', '2026-03-18']);
     expect(msPeriodKey(p)).not.toEqual(msPeriodKey(msPeriod(pp({ days: 30 }))));
+  });
+});
+
+describe('msPreviousPeriod — equal inclusive calendar windows', () => {
+  const NOW = new Date(2026, 6, 18, 12).getTime();
+
+  it.each([
+    [7, '2026-07-12', '2026-07-18', '2026-07-05', '2026-07-11'],
+    [30, '2026-06-19', '2026-07-18', '2026-05-20', '2026-06-18'],
+    [90, '2026-04-20', '2026-07-18', '2026-01-20', '2026-04-19'],
+  ])('keeps a %i-day preset exact', (days, from, to, prevFrom, prevTo) => {
+    const period = { days };
+    expect(msPeriodBounds(period, NOW)).toEqual({ from, to });
+    expect(msPreviousPeriod(period, NOW)).toEqual({ days, from: prevFrom, to: prevTo });
+  });
+
+  it('shifts a custom range by its inclusive calendar-day count', () => {
+    expect(msPreviousPeriod({ days: 30, from: '2026-03-05', to: '2026-03-18' }, NOW)).toEqual({
+      days: 30,
+      from: '2026-02-19',
+      to: '2026-03-04',
+    });
+  });
+
+  it('does not invent a predecessor for All', () => {
+    expect(msPeriodBounds({ days: 0 }, NOW)).toBeNull();
+    expect(msPreviousPeriod({ days: 0 }, NOW)).toBeNull();
   });
 });

@@ -1,12 +1,10 @@
-import { useContext, useState } from 'react';
+import { useContext } from 'react';
 import { useMsCohorts, useMsCustomers, useMsTopCustomers } from '@/api/queries';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
-import type { ChartExpandConfig } from '@/components/ExpandableChart';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
 import { BarChart } from '@/components/BarChart';
 import { LineChart } from '@/components/LineChart';
-import { SegmentedControl } from '@/components/SegmentedControl';
 import { ErrorState } from '@/components/ErrorState';
 import { Skeleton } from '@/components/ui/skeleton';
 import { lttbDownsample } from '@/lib/downsample';
@@ -37,8 +35,6 @@ export function MsClients() {
   const customers = useMsCustomers(period);
   const cohorts = useMsCohorts();
   const topCustomers = useMsTopCustomers(period);
-  const [customersMetric, setCustomersMetric] = useState<MsCustomerMetric>('orders');
-  const [repeatMetric, setRepeatMetric] = useState<MsCustomerMetric>('repeatShare');
 
   if (customers.isPending) {
     return (
@@ -85,7 +81,7 @@ export function MsClients() {
         id="ms-customers"
         title="Покупатели"
         fixedSize="half"
-        expand={msCustomerExpand(customersMetric, setCustomersMetric)}
+        drillTo="/metrics/ms-customers"
       >
         <ChartCardBody value={fmt.num(summary.customers)} caption={windowLabel}>
           {sampled.length > 1 ? (
@@ -108,7 +104,7 @@ export function MsClients() {
         id="ms-repeat"
         title="Повторные покупки"
         fixedSize="half"
-        expand={msCustomerExpand(repeatMetric, setRepeatMetric)}
+        drillTo="/metrics/ms-repeat"
       >
         {days === 0 && !pp?.range ? (
           // На «Всё» окно совпадает с историей — «новых в окне» не бывает; честная метрика
@@ -136,39 +132,16 @@ export function MsClients() {
   );
 }
 
-const CUSTOMER_METRIC_OPTIONS = [
+/** Метрики покупательских explorer'ов — общий список для полностраничного `/metrics/ms-*`. */
+export const CUSTOMER_METRIC_OPTIONS = [
   { value: 'orders' as const, content: 'Заказы' },
   { value: 'revenue' as const, content: 'Выручка' },
   { value: 'repeatShare' as const, content: 'Доля повторных' },
 ];
 
-/** Shared overlay contract: the overlay owns period/grain/chart type; the page owns only the
-    customer metric selector, so both cards use the same explorer instead of a MoySklad-only modal. */
-function msCustomerExpand(
-  metric: MsCustomerMetric,
-  onMetricChange: (metric: MsCustomerMetric) => void,
-): ChartExpandConfig {
-  return {
-    renderExpanded: (days, grain) => (
-      <MsCustomerExplorer metric={metric} period={{ days }} grain={grain} kind="line" />
-    ),
-    renderExpandedBar: (days, grain) => (
-      <MsCustomerExplorer metric={metric} period={{ days }} grain={grain} kind="bar" />
-    ),
-    grainable: true,
-    extraControls: (
-      <SegmentedControl
-        ariaLabel="Метрика покупателей"
-        size="sm"
-        value={metric}
-        onChange={onMetricChange}
-        options={CUSTOMER_METRIC_OPTIONS}
-      />
-    ),
-  };
-}
-
-function MsCustomerExplorer({
+/** Полностраничный explorer покупателей (новые/повторные · выручка · доля повторной выручки);
+    сам тянет данные для выбранного окна. Экспортируется для `/metrics/ms-*` (MsMetricPage). */
+export function MsCustomerExplorer({
   metric,
   period,
   grain = 'day',
@@ -276,44 +249,56 @@ function MsTopCustomersCard({
   windowLabel: string;
 }) {
   return (
-    <ChartWidget id="ms-top-customers" title={`Топ покупателей ${windowLabel}`} fixedSize="full">
-      {state.isPending ? (
-        <div className="space-y-2 py-2">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <Skeleton key={`tc${i}`} className="h-6 w-full" />
-          ))}
-        </div>
-      ) : state.isError ? (
-        <ErrorState
-          className="py-4"
-          title="Не удалось получить топ покупателей"
-          reason={state.error instanceof Error ? state.error.message : 'ошибка'}
-          onRetry={() => state.refetch()}
-          retrying={state.isFetching}
-        />
-      ) : !state.data || state.data.rows.length === 0 ? (
-        <p className="py-4 text-sm text-muted-foreground">Нет покупателей за период.</p>
-      ) : (
-        <ul>
-          {state.data.rows.map((row, i) => (
-            <li key={row.agent_id} className="flex items-center gap-3 border-t border-border py-2.5 first:border-t-0">
-              <span className="w-5 shrink-0 text-center text-xs font-medium tabular-nums text-muted-foreground">{i + 1}</span>
-              <span className={`min-w-0 flex-1 truncate text-sm ${row.name ? 'text-foreground' : 'text-muted-foreground'}`}>
-                {row.name ?? 'Без имени'}
-              </span>
-              <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                {fmt.num(row.orders)} {pluralRu(row.orders, ['заказ', 'заказа', 'заказов'])}
-              </span>
-              <span className="w-28 shrink-0 text-right text-sm font-medium tabular-nums">{fmt.short(row.sum)} ₽</span>
-            </li>
-          ))}
-        </ul>
-      )}
+    <ChartWidget id="ms-top-customers" title={`Топ покупателей ${windowLabel}`} fixedSize="full" drillTo="/metrics/ms-top-customers">
+      <MsTopCustomersBody state={state} />
     </ChartWidget>
   );
 }
 
-function MsRepeatBreakdown({
+/** Тело «Топ покупателей» — общий для карточки и полностраничного `/metrics/ms-top-customers`. */
+export function MsTopCustomersBody({ state }: { state: ReturnType<typeof useMsTopCustomers> }) {
+  if (state.isPending) {
+    return (
+      <div className="space-y-2 py-2">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <Skeleton key={`tc${i}`} className="h-6 w-full" />
+        ))}
+      </div>
+    );
+  }
+  if (state.isError) {
+    return (
+      <ErrorState
+        className="py-4"
+        title="Не удалось получить топ покупателей"
+        reason={state.error instanceof Error ? state.error.message : 'ошибка'}
+        onRetry={() => state.refetch()}
+        retrying={state.isFetching}
+      />
+    );
+  }
+  if (!state.data || state.data.rows.length === 0) {
+    return <p className="py-4 text-sm text-muted-foreground">Нет покупателей за период.</p>;
+  }
+  return (
+    <ul>
+      {state.data.rows.map((row, i) => (
+        <li key={row.agent_id} className="flex items-center gap-3 border-t border-border py-2.5 first:border-t-0">
+          <span className="w-5 shrink-0 text-center text-xs font-medium tabular-nums text-muted-foreground">{i + 1}</span>
+          <span className={`min-w-0 flex-1 truncate text-sm ${row.name ? 'text-foreground' : 'text-muted-foreground'}`}>
+            {row.name ?? 'Без имени'}
+          </span>
+          <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+            {fmt.num(row.orders)} {pluralRu(row.orders, ['заказ', 'заказа', 'заказов'])}
+          </span>
+          <span className="w-28 shrink-0 text-right text-sm font-medium tabular-nums">{fmt.short(row.sum)} ₽</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+export function MsRepeatBreakdown({
   summary,
   repeatRevenueShare,
   allTime = false,
@@ -382,7 +367,7 @@ function cohortMonthLabel(m: string) {
 
 function MsCohortsCard({ state }: { state: ReturnType<typeof useMsCohorts> }) {
   return (
-    <ChartWidget id="ms-cohorts" title="Когорты: возвращаемость по месяцу первой покупки" fixedSize="full">
+    <ChartWidget id="ms-cohorts" title="Когорты: возвращаемость по месяцу первой покупки" fixedSize="full" drillTo="/metrics/ms-cohorts">
       {state.isPending ? (
         <div className="space-y-2 py-2">
           {Array.from({ length: 4 }).map((_, i) => (
@@ -411,7 +396,7 @@ function MsCohortsCard({ state }: { state: ReturnType<typeof useMsCohorts> }) {
 /** Таблица когорт — ОТДЕЛЬНЫМ компонентом внутри детей карточки: ChartExpandedContext провайдится
     оверлеем разворота ВОКРУГ детей, поэтому читать его можно только отсюда (чтение в MsCohortsCard
     видело бы вечный false). Разворот показывает все когорты, свёрнуто — последние 12. */
-function MsCohortsTable({
+export function MsCohortsTable({
   cohorts,
 }: {
   cohorts: Array<{ cohort_month: string; size: number; cells: Array<{ offset: number; active: number }> }>;

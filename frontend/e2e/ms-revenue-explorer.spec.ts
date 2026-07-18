@@ -3,31 +3,36 @@ import { bootDemo } from './helpers';
 
 test.beforeEach(async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop-1440', 'MoySklad analytics is desktop-first');
-  // Deep-link straight into the ?detail= overlay of the revenue card — the exact path a user hits
-  // when opening «Развернуть» on МойСклад → Обзор → Выручка.
-  await bootDemo(page, '/sklad?detail=ms-revenue', { theme: 'dark' });
+  await bootDemo(page, '/sklad', { theme: 'dark' });
 });
 
-test('MoySklad revenue detail opens the shared rich explorer with working controls', async ({ page }, testInfo) => {
-  const dialog = page.getByRole('dialog', { name: 'График: Выручка' });
-  await expect(dialog).toBeVisible();
+test('MoySklad revenue drills into the full /metrics/ms-revenue page with working controls', async ({ page }, testInfo) => {
+  // «Развернуть» на карточке «Выручка» больше не открывает модалку `?detail=`, а ведёт на
+  // полностраничную метрику `/metrics/ms-revenue` — та же архитектура, что у эталона IG /metrics/ig-reach.
+  await page.getByRole('button', { name: 'Развернуть виджет «Выручка»' }).click();
+  await expect(page).toHaveURL(/\/metrics\/ms-revenue$/);
 
-  // Tier-2 rich explorer — the SHARED overlay used by Telegram/Instagram and the MS channels chart,
-  // not a mere enlarged compact card: it carries period, grain and line/bar controls.
-  const windowGroup = dialog.getByRole('group', { name: 'Окно', exact: true });
+  // Тихая шапка + назад-ссылка на раздел (никакой role="dialog").
+  await expect(page.getByRole('heading', { name: 'Выручка', level: 1 })).toBeVisible();
+  await expect(page.getByRole('link', { name: /МойСклад · Обзор/ })).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Сравнение' })).toBeVisible();
+  await expect(page.getByRole('group', { name: 'База сравнения' })).toBeVisible();
+
+  // Контролы графика живут на самой странице: окно, грануляция, тип графика.
+  const windowGroup = page.getByRole('group', { name: 'Окно', exact: true });
+  const grainGroup = page.getByRole('group', { name: 'Грануляция' });
+  const kindGroup = page.getByRole('group', { name: 'Тип графика' });
   await expect(windowGroup).toBeVisible();
-  const grainGroup = dialog.getByRole('group', { name: 'Грануляция' });
+  await expect(windowGroup.getByRole('button', { name: 'Свой период' })).toBeVisible();
   await expect(grainGroup).toBeVisible();
-  const kindGroup = dialog.getByRole('group', { name: 'Тип графика' });
   await expect(kindGroup).toBeVisible();
 
-  // Seeded from the authoritative top-bar window (30д), not the overlay's 90д fallback.
   await expect(windowGroup.getByRole('button', { name: '30д' })).toHaveAttribute('aria-pressed', 'true');
-  await expect(dialog.getByText('за 30 дн.')).toBeVisible();
-  await expect(dialog.locator('svg[data-chart-kind="line"]')).toBeVisible();
+  await expect(page.getByText('за 30 дн.')).toBeVisible();
+  await expect(page.locator('svg[data-chart-kind="line"]')).toBeVisible();
 
-  // The period control fetches/uses the SELECTED window instead of reusing the original top-bar
-  // payload. Waiting for the exact request makes this an architectural assertion, not only a label.
+  // Окно тянет ВЫБРАННЫЙ период (архитектурная проверка через точный запрос), а не топбар-payload.
   const request90 = page.waitForRequest((request) => {
     const url = new URL(request.url());
     return url.pathname === '/api/ms/summary' && url.searchParams.get('days') === '90';
@@ -35,17 +40,23 @@ test('MoySklad revenue detail opens the shared rich explorer with working contro
   await windowGroup.getByRole('button', { name: '90д' }).click();
   await request90;
   await expect(windowGroup.getByRole('button', { name: '90д' })).toHaveAttribute('aria-pressed', 'true');
-  await expect(dialog.getByText('за 90 дн.')).toBeVisible();
+  await expect(page.getByText('за 90 дн.')).toBeVisible();
 
-  // Grain control works (день → месяц).
+  // Грануляция (день → месяц).
   await grainGroup.getByRole('button', { name: 'Месяц' }).click();
   await expect(grainGroup.getByRole('button', { name: 'Месяц' })).toHaveAttribute('aria-pressed', 'true');
 
-  // Line ↔ bar switch works.
-  await kindGroup.getByRole('button', { name: 'Тип графика: Столбцы' }).click();
-  await expect(dialog.locator('svg[data-chart-kind="bar"]')).toBeVisible();
+  // Линия ↔ столбцы.
+  await kindGroup.getByRole('button', { name: 'Столбцы' }).click();
+  await expect(page.locator('svg[data-chart-kind="bar"]')).toBeVisible();
 
   const shot = testInfo.outputPath('moysklad-revenue-explorer-dark.png');
   await page.screenshot({ path: shot, fullPage: true });
   await testInfo.attach('moysklad-revenue-explorer-dark', { path: shot, contentType: 'image/png' });
+});
+
+test('legacy detail deep-link redirects to the canonical MS metric route', async ({ page }) => {
+  await bootDemo(page, '/sklad?detail=ms-revenue', { theme: 'dark' });
+  await expect(page).toHaveURL(/\/metrics\/ms-revenue$/);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
 });

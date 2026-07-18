@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { Suspense, lazy, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { isMsMetricKey } from '@/panels/sklad/msMetricKeys';
 import { useIgData } from '@/lib/useIgData';
 import { usePeriod, type PeriodDays } from '@/lib/period';
 import { pairDelta } from '@/lib/igMetrics';
@@ -150,12 +151,41 @@ export function isIgMetricKey(raw: string | undefined): boolean {
   return raw != null && (raw in DAILY_DEFS || raw in AGG_DEFS || raw === 'ig-er');
 }
 
-/** /metrics/:key dispatcher: TG keys → the TG explorer, ig-* keys → the IG page. MetricPage
-    itself redirects unknown keys home, so the fallthrough stays safe. */
+/** МойСклад metric/report pages live in their own lazy chunk: a TG/IG user opening a TG/IG metric
+    page must never download the MS panel bundle (it's only pulled when an `ms-*` key opens here). */
+const MsMetricPageLazy = lazy(() => import('@/panels/sklad/MsMetricPage').then((m) => ({ default: m.MsMetricPage })));
+
+/** /metrics/:key dispatcher: TG keys → the TG explorer, ig-* keys → the IG page, ms-* keys → the
+    МойСклад page. MetricPage itself redirects unknown keys home, so the fallthrough stays safe. */
 export function MetricRoute() {
   const { key } = useParams<{ key: string }>();
+  if (isMsMetricKey(key)) {
+    return (
+      <Suspense fallback={<MetricRouteFallback />}>
+        <MsMetricPageLazy metricKey={key} />
+      </Suspense>
+    );
+  }
   if (isIgMetricKey(key)) return <IgMetricPage metricKey={key!} />;
   return <MetricPage />;
+}
+
+/** Layout-matching scaffold for the lazy MS page (breadcrumb + hero + two-column shell). */
+function MetricRouteFallback() {
+  return (
+    <div className="space-y-5">
+      <Skeleton className="h-3 w-24" />
+      <Skeleton className="h-8 w-48" />
+      <div className="grid grid-cols-1 gap-6 xl:gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
+        <Skeleton className="h-[420px] w-full" />
+        <div className="space-y-4">
+          <Skeleton className="h-3 w-24" />
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-full" />
+        </div>
+      </div>
+    </div>
+  );
 }
 
 const WINDOW_PILLS = [
