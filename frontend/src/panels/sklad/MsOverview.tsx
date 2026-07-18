@@ -1,17 +1,32 @@
 import { useContext } from 'react';
 import { Link } from 'react-router-dom';
-import { ChartExpandedContext } from '@/components/ExpandableChart';
+import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
+import type { ChartExpandConfig } from '@/components/ExpandableChart';
 import { useMsFunnel, useMsReturns, useMsSummary, useMsTopProducts } from '@/api/queries';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
 import { LineChart } from '@/components/LineChart';
+import { BarChart } from '@/components/BarChart';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { Skeleton } from '@/components/ui/skeleton';
 import { lttbDownsample } from '@/lib/downsample';
 import { fmt } from '@/lib/format';
 import { usePagePeriod } from '@/lib/period';
-import { useMsPagePeriod } from '@/lib/msPeriod';
+import { useMsPagePeriod, type MsPeriod } from '@/lib/msPeriod';
+import {
+  aggregatePlotPoints,
+  bucketPoints,
+  densifyDayPoints,
+  fmtMetric,
+  metricTotal,
+  metricValue,
+  CHART_MAX_POINTS,
+  GRAIN_BUCKET_WORD,
+  type DayPoint,
+  type Grain,
+  type Metric,
+} from '@/lib/msSeries';
 
 /**
  * Обзор «МойСклада» — первый не-социальный источник. Все числа приходят СЕРВЕР-АГРЕГИРОВАННЫМИ
@@ -88,14 +103,21 @@ export function MsOverview() {
   const revValues = revSeries.map((p) => p.value);
   const ordLabels = ordSeries.map((p) => fmt.day(p.day));
   const ordValues = ordSeries.map((p) => p.count);
-  // Средний чек по дням = сумма/число заказов дня; день без заказов — ЧЕСТНЫЙ null-разрыв
-  // (деление на ноль дало бы «ноль-которого-не-было» — канон разрывов).
-  const avgValues = ordSeries.map((p) => (p.count > 0 ? p.sum / p.count : null));
+  // Средний чек — непрерывный ряд НАБЛЮДЕНИЙ по дням С заказами: день без заказов даёт
+  // неопределённый чек, а общий LineChart трактует такой null как пропуск сбора и рвёт линию в
+  // россыпь точек. Фильтруем пустые дни ДО рендера (реальные даты сохраняются), затем даунсэмплим.
+  const avgSampled = lttbDownsample(
+    orders.series.filter((p) => p.count > 0),
+    140,
+    (p) => p.sum / p.count,
+  );
+  const avgLabels = avgSampled.map((p) => fmt.day(p.day));
+  const avgValues = avgSampled.map((p) => p.sum / p.count);
   const avgTotal = orders.totalCount > 0 ? orders.totalSum / orders.totalCount : null;
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
-      <ChartWidget id="ms-revenue" title="Выручка" fixedSize="half">
+      <ChartWidget id="ms-revenue" title="Выручка" fixedSize="half" expand={msSummaryExpand('revenue')}>
         <ChartCardBody value={`${fmt.short(revenue.total)} ₽`} caption={windowLabel}>
           {revValues.length > 1 ? (
             <LineChart
@@ -110,7 +132,7 @@ export function MsOverview() {
         </ChartCardBody>
       </ChartWidget>
 
-      <ChartWidget id="ms-orders" title="Заказы" fixedSize="half">
+      <ChartWidget id="ms-orders" title="Заказы" fixedSize="half" expand={msSummaryExpand('orders')}>
         <ChartCardBody
           value={fmt.num(orders.totalCount)}
           caption={`на ${fmt.short(orders.totalSum)} ₽ ${windowLabel}`}
@@ -128,13 +150,13 @@ export function MsOverview() {
         </ChartCardBody>
       </ChartWidget>
 
-      <ChartWidget id="ms-avg-check" title="Средний чек" fixedSize="half">
-        <ChartCardBody value={avgTotal != null ? `${fmt.short(avgTotal)} ₽` : '—'} caption={windowLabel}>
-          {avgValues.filter((v) => v != null).length > 1 ? (
+      <ChartWidget id="ms-avg-check" title="Средний чек" fixedSize="half" expand={msSummaryExpand('aov')}>
+        <ChartCardBody value={avgTotal != null ? `${fmt.short(avgTotal)} ₽` : '—'} caption={`${windowLabel} · по дням с заказами`}>
+          {avgValues.length > 1 ? (
             <LineChart
               values={avgValues}
-              labels={ordLabels}
-              titles={ordSeries.map((p) => (p.count > 0 ? `${fmt.day(p.day)}: ${fmt.num(Math.round(p.sum / p.count))} ₽` : `${fmt.day(p.day)}: заказов не было`))}
+              labels={avgLabels}
+              titles={avgSampled.map((p) => `${fmt.day(p.day)}: ${fmt.num(Math.round(p.sum / p.count))} ₽`)}
               yMin={0}
             />
           ) : (
@@ -235,6 +257,101 @@ export function MsOverview() {
         )}
       </ChartWidget>
     </div>
+  );
+}
+
+/**
+ * Rich explorer выручки/заказов/среднего чека — тот же общий overlay (период 7/30/90/Всё ·
+ * грануляция День/Неделя/Месяц · линия/столбцы), что у Telegram/Instagram и графика каналов МС.
+ * renderExpanded/renderExpandedBar сами тянут summary для ВЫБРАННОГО окна оверлея (свой MsPeriod),
+ * а не переиспользуют топбар-payload карточки. statsFor намеренно НЕ задаём: он считался бы по
+ * данным исходного окна страницы и разошёлся бы с окном оверлея — честнее показать число и дельту
+ * внутри графика (ChartCardBody), посчитанные ровно для выбранного периода.
+ */
+function msSummaryExpand(metric: Metric): ChartExpandConfig {
+  return {
+    renderExpanded: (d, grain) => (
+      <MsSummaryExplorer metric={metric} period={{ days: d }} grain={grain} kind="line" />
+    ),
+    renderExpandedBar: (d, grain) => (
+      <MsSummaryExplorer metric={metric} period={{ days: d }} grain={grain} kind="bar" />
+    ),
+    grainable: true,
+  };
+}
+
+/** Полноэкранный график одной метрики обзора. Агрегация по бакету: выручка=сумма, заказы=сумма,
+    средний чек=sum(выручка)/sum(заказы) (НЕ среднее дневных чеков и никогда чек=0 для бакета без
+    заказов — пустые бакеты среднего чека отфильтрованы, ряд остаётся непрерывным по датам). */
+function MsSummaryExplorer({
+  metric,
+  period,
+  grain = 'day',
+  kind,
+}: {
+  metric: Metric;
+  period: MsPeriod;
+  grain?: Grain;
+  kind: 'line' | 'bar';
+}) {
+  const summary = useMsSummary(period);
+  const expandedHeight = useContext(ExpandedChartHeightContext);
+
+  if (summary.isPending) {
+    return (
+      <div className="py-2">
+        <Skeleton className="h-4 w-1/4" />
+        <Skeleton className="mt-3 h-48 w-full" />
+      </div>
+    );
+  }
+  if (summary.isError) {
+    return (
+      <ErrorState
+        title="Не удалось получить данные МойСклада"
+        reason={summary.error instanceof Error ? summary.error.message : 'ошибка'}
+        onRetry={() => summary.refetch()}
+        retrying={summary.isFetching}
+      />
+    );
+  }
+
+  const { revenue, orders } = summary.data;
+  // Выручка — отдельный отчёт продаж (нет привязки к числу заказов); заказы/средний чек — из
+  // серии заказов (sum + count). Каждая метрика берёт свой авторитетный ряд, а не суммирует чужой.
+  const dayPoints: DayPoint[] =
+    metric === 'revenue'
+      ? revenue.series.map((p) => ({ day: p.day, orders: 0, sum: p.value }))
+      : orders.series.map((p) => ({ day: p.day, orders: p.count, sum: p.sum }));
+
+  const bucketed = bucketPoints(densifyDayPoints(dayPoints, period), grain);
+  const points = aggregatePlotPoints(bucketed, metric, CHART_MAX_POINTS);
+  if (points.length < 2) {
+    return (
+      <p className="py-4 text-xs text-muted-foreground">
+        {metric === 'aov'
+          ? 'Недостаточно бакетов с заказами для среднего чека за период.'
+          : 'Недостаточно данных за период.'}
+      </p>
+    );
+  }
+
+  const values = points.map((p) => metricValue(metric, p));
+  const labels = points.map((p) => fmt.day(p.day));
+  const titles = points.map((p) => `${fmt.day(p.day)}: ${fmtMetric(metric, metricValue(metric, p))}`);
+  const total = metricTotal(dayPoints, metric);
+  const windowWord = period.days === 0 ? 'за всё время' : `за ${period.days} дн.`;
+  const caption =
+    metric === 'aov' ? `${windowWord} · по ${GRAIN_BUCKET_WORD[grain]} с заказами` : windowWord;
+
+  return (
+    <ChartCardBody value={total != null ? fmtMetric(metric, total) : '—'} caption={caption}>
+      {kind === 'bar' ? (
+        <BarChart values={values.map((v) => v ?? 0)} labels={labels} titles={titles} height={expandedHeight ?? undefined} />
+      ) : (
+        <LineChart values={values} labels={labels} titles={titles} yMin={0} height={expandedHeight ?? undefined} />
+      )}
+    </ChartCardBody>
   );
 }
 

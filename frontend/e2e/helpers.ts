@@ -77,6 +77,52 @@ const MS_CHANNELS = [
 function demoMsPayload(url: URL): unknown | undefined {
   const path = url.pathname;
   const days = Number(url.searchParams.get('days')) || 30;
+  if (path === '/api/ms/summary') {
+    // Deterministic daily revenue/orders series over the requested window. `days=0` («Всё») spans
+    // 90 days. A few zero-order days exercise the sparse-AOV path; the caption varies by window so
+    // the explorer can prove it re-fetched the SELECTED period instead of reusing the top-bar one.
+    const count = days === 0 ? 90 : days;
+    const dayKeys = Array.from({ length: count }, (_, index) =>
+      new Date(Date.now() - (count - index - 1) * DAY_MS).toISOString().slice(0, 10),
+    );
+    const orderRows = dayKeys.map((day, index) => {
+      const orderCount = index % 6 === 0 ? 0 : 1 + ((index * 3) % 5);
+      return { day, count: orderCount, sum: orderCount === 0 ? 0 : 3_800 + ((index * 137) % 6_200) };
+    });
+    const revenueRows = dayKeys.map((day, index) => ({ day, value: 3_600 + ((index * 151) % 5_400) }));
+    return {
+      revenue: { total: revenueRows.reduce((total, row) => total + row.value, 0), series: revenueRows },
+      orders: {
+        totalSum: orderRows.reduce((total, row) => total + row.sum, 0),
+        totalCount: orderRows.reduce((total, row) => total + row.count, 0),
+        series: orderRows,
+      },
+    };
+  }
+  if (path === '/api/ms/funnel') {
+    return {
+      window_days: days,
+      total_orders: 96,
+      no_state_orders: 4,
+      rows: [
+        { state_id: 's1', name: 'Новый', color: '#4a90d9', orders: 40, sum: 320_000 },
+        { state_id: 's2', name: 'Выполнен', color: '#2e8b57', orders: 38, sum: 300_000 },
+        { state_id: 's3', name: 'Отменён', color: '#c0504d', orders: 14, sum: 90_000 },
+      ],
+    };
+  }
+  if (path === '/api/ms/top-products') {
+    return {
+      rows: [
+        { name: 'Товар A', quantity: 120, revenue: 240_000, profit: 90_000 },
+        { name: 'Товар B', quantity: 80, revenue: 160_000, profit: 40_000 },
+        { name: 'Товар C', quantity: 60, revenue: 90_000, profit: -5_000 },
+      ],
+    };
+  }
+  if (path === '/api/ms/returns') {
+    return { window_days: days, count: 6, sum: 42_000, truncated: false };
+  }
   if (path === '/api/ms/sales-by-channel') {
     return {
       window_days: days,
@@ -108,11 +154,14 @@ function demoMsPayload(url: URL): unknown | undefined {
       new Date(Date.now() - (count - index - 1) * DAY_MS).toISOString().slice(0, 10),
     );
     const channelSeries = (channelIndex: number) =>
-      dayKeys.map((day, index) => ({
-        day,
-        orders: 1 + ((index + channelIndex) % 4),
-        sum: 4_500 + channelIndex * 1_700 + ((index * 977) % 5_200),
-      }));
+      dayKeys.map((day, index) => {
+        const orders = (index + channelIndex) % 5 === 0 ? 0 : 1 + ((index + channelIndex) % 4);
+        return {
+          day,
+          orders,
+          sum: orders === 0 ? 0 : 4_500 + channelIndex * 1_700 + ((index * 977) % 5_200),
+        };
+      });
     const groups = active.map((channel) => {
       const sourceIndex = MS_CHANNELS.findIndex((item) => item.id === channel.id);
       return { sales_channel_id: channel.id, series: channelSeries(sourceIndex) };
