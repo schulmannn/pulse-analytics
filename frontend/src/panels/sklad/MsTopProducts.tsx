@@ -12,8 +12,8 @@ import { cumulativeContribution, cumulativePointLabel } from '@/lib/msConcentrat
 import type { MsPeriod } from '@/lib/msPeriod';
 
 type TopRow = { name: string; quantity: number; revenue: number; profit: number; margin: number | null };
-type ConcentrationMetric = 'revenue' | 'profit';
-type ExpandedView = 'concentration' | 'ranking';
+export type ConcentrationMetric = 'revenue' | 'profit';
+export type ExpandedView = 'concentration' | 'ranking';
 
 const COMPACT_ROWS = 5;
 const EXPANDED_LIMIT = 50;
@@ -31,11 +31,35 @@ const PRODUCT_SORT_OPTIONS: Array<{ value: MsProductSort; content: string }> = [
  * концентрации. Компакт тянет только 5 строк; разворот — свою sort-specific выборку (limit 50),
  * которую backend отдаёт из ОДНОГО кэшированного raw-отчёта (без второго page-loop к МойСкладу).
  */
-export function MsTopProductsCard({ period }: { period: MsPeriod }) {
+export function MsTopProductsCard({
+  period,
+  view: viewProp,
+  onView,
+  productSort: productSortProp,
+  onProductSort,
+  concMetric: concMetricProp,
+  onConcMetric,
+}: {
+  period: MsPeriod;
+  // Optional controlled bindings so the canonical `/metrics/ms-products` page can own these
+  // controls in the URL; omitted → the card stays self-owned (compact tile in Обзор).
+  view?: ExpandedView;
+  onView?: (view: ExpandedView) => void;
+  productSort?: MsProductSort;
+  onProductSort?: (sort: MsProductSort) => void;
+  concMetric?: ConcentrationMetric;
+  onConcMetric?: (metric: ConcentrationMetric) => void;
+}) {
   const expanded = useContext(ChartExpandedContext);
-  const [productSort, setProductSort] = useState<MsProductSort>('revenue');
-  const [view, setView] = useState<ExpandedView>('concentration');
-  const [concMetric, setConcMetric] = useState<ConcentrationMetric>('revenue');
+  const [productSortState, setProductSortState] = useState<MsProductSort>('revenue');
+  const [viewState, setViewState] = useState<ExpandedView>('concentration');
+  const [concMetricState, setConcMetricState] = useState<ConcentrationMetric>('revenue');
+  const productSort = productSortProp ?? productSortState;
+  const setProductSort = onProductSort ?? setProductSortState;
+  const view = viewProp ?? viewState;
+  const setView = onView ?? setViewState;
+  const concMetric = concMetricProp ?? concMetricState;
+  const setConcMetric = onConcMetric ?? setConcMetricState;
 
   // Концентрация сортирует по своей метрике (выручка/прибыль), рейтинг — по productSort. Компакт
   // сортирует по productSort. Переключение метрики концентрации меняет sort → backend переиспользует
