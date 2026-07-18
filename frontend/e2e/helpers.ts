@@ -203,6 +203,7 @@ function demoMsPayload(url: URL): unknown | undefined {
       window_days: days,
       total_orders: MS_CHANNELS.reduce((total, row) => total + row.orders, 0) + 4,
       no_channel_orders: 4,
+      no_channel_sum: 8_500,
       rows: MS_CHANNELS.map(({ id, ...row }) => ({ sales_channel_id: id, ...row })),
     };
   }

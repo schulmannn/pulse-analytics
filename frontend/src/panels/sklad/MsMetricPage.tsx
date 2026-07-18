@@ -36,6 +36,7 @@ import {
 } from '@/panels/sklad/MsClients';
 import {
   MsChannelChart,
+  MsChannelContribution,
   MsChannelControls,
   MsChannelRows,
   MsGeographyRows,
@@ -781,14 +782,18 @@ function MsSalesChannelsPage() {
   const window = useMsMetricWindow();
   const channels = useMsSalesByChannel(window.period);
   const previous = useMsSalesByChannel(window.previousPeriod ?? window.period);
-  const revenueOf = (data: typeof channels.data) => data ? data.rows.reduce((sum, row) => sum + row.sum, 0) : null;
+  const revenueOf = (data: typeof channels.data) => data
+    ? data.rows.reduce((sum, row) => sum + row.sum, data.no_channel_sum)
+    : null;
   return (
     <MsMetricShell
       back={BACK_CHANNELS}
       term="Продажи по каналам"
-      descriptor="Каналы продаж с долей выручки и средним чеком за окно"
+      descriptor="Доля каждого канала и его абсолютный вклад в изменение выручки или заказов"
       about={{
-        formula: 'Каналы продаж с долей выручки, числом заказов и средним чеком; сортировка по выручке / заказам / чеку / имени.',
+        formula:
+          'Доля канала = его выручка или заказы ÷ общий результат окна, включая заказы без канала. Вклад в изменение — знаковая абсолютная разница канала против равного предыдущего окна; положительные и отрицательные изменения в сумме дают общее изменение.',
+        included: 'Заказы без канала — отдельная синтетическая строка «Без канала», а не сноска. Для окна «Всё» предыдущего равного периода нет — изменение не рассчитывается.',
         source: 'Заказы МойСклада с salesChannel.',
       }}
       comparison={
@@ -803,7 +808,7 @@ function MsSalesChannelsPage() {
         />
       }
     >
-      <MsReportCard id="ms-page-sales-channels" title="Все каналы">
+      <MsReportCard id="ms-page-sales-channels" title="Что изменило результат">
         {channels.isPending ? (
           <ListSkeleton rows={6} />
         ) : channels.isError ? (
@@ -814,13 +819,37 @@ function MsSalesChannelsPage() {
             onRetry={() => channels.refetch()}
             retrying={channels.isFetching}
           />
-        ) : !channels.data || channels.data.rows.length === 0 ? (
+        ) : !channels.data || channels.data.total_orders === 0 ? (
+          <p className="py-4 text-sm text-muted-foreground">Нет продаж за период.</p>
+        ) : (
+          <MsChannelContribution
+            current={channels.data}
+            previous={window.previousPeriod && !previous.isError ? (previous.data ?? null) : null}
+            comparisonState={
+              !window.previousPeriod ? 'unavailable' : previous.isError ? 'error' : previous.isPending ? 'pending' : 'ready'
+            }
+          />
+        )}
+      </MsReportCard>
+      <MsReportCard id="ms-page-sales-channel-structure" title="Структура текущего периода">
+        {channels.isPending ? (
+          <ListSkeleton rows={6} />
+        ) : channels.isError ? (
+          <ErrorState
+            className="py-4"
+            title="Не удалось получить каналы продаж"
+            reason={channels.error instanceof Error ? channels.error.message : 'ошибка'}
+            onRetry={() => channels.refetch()}
+            retrying={channels.isFetching}
+          />
+        ) : !channels.data || channels.data.total_orders === 0 ? (
           <p className="py-4 text-sm text-muted-foreground">Нет продаж за период.</p>
         ) : (
           <MsChannelRows
             rows={channels.data.rows}
             totalOrders={channels.data.total_orders}
             noChannel={channels.data.no_channel_orders}
+            noChannelSum={channels.data.no_channel_sum}
           />
         )}
       </MsReportCard>

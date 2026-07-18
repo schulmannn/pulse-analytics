@@ -547,6 +547,7 @@ test('sales-by-channel: словарь saleschannel мапит name/type, NULL-�
     window_days: 30,
     total_orders: 19,          // 10+4+2+3 (NULL-канал тоже в total)
     no_channel_orders: 3,      // строка sales_channel_id=NULL — счётчиком, не в rows
+    no_channel_sum: 7.5,       // сумма той же NULL-строки переводится из копеек в рубли
     rows: [
       { sales_channel_id: 'ch-site', name: 'Сайт - Notem tilda', type: 'ECOMMERCE', orders: 10, sum: 5000 },
       { sales_channel_id: 'ch-direct', name: 'Instagram Direct', type: 'SOCIAL_NETWORK', orders: 4, sum: 1200 },

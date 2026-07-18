@@ -732,6 +732,8 @@ const MsSalesByChannelSchema = z
     window_days: z.number(),
     total_orders: z.number(),
     no_channel_orders: z.number(),
+    // Выручка заказов без канала (синтетическая строка «Без канала» на странице вклада каналов).
+    no_channel_sum: z.number(),
     rows: z.array(
       z
         .object({
