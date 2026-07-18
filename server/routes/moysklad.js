@@ -1,6 +1,7 @@
 'use strict';
 
 const { kopecksToRub } = require('../lib/msClient');
+const { summarizeTopProducts } = require('../lib/msTopProducts');
 const { hasWorkspaceRole } = require('../middleware/tenant');
 
 /**
@@ -601,7 +602,10 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
         profit: kopecksToRub(r.profitKopecks),
         margin: r.revenueKopecks > 0 ? Math.round(marginOf(r) * 100) / 100 : null,
       }));
-      res.json({ rows, total: raw.total, truncated: raw.truncated });
+      // Additive-сводка концентрации считается по ПОЛНОМУ raw ДО sort/limit (тот же кэш, без
+      // второго page-loop): достаточно для доли топ-10 по выручке/прибыли, общей маржи, счётчика
+      // товаров и убыточных позиций. rows/total/truncated неизменны для обратной совместимости.
+      res.json({ rows, total: raw.total, truncated: raw.truncated, summary: summarizeTopProducts(raw) });
     } catch (e) {
       next(e);
     }

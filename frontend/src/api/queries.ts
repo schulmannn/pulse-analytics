@@ -552,6 +552,23 @@ const MsSummarySchema = z
     orders: z.object({ totalSum: z.number(), totalCount: z.number(), series: z.array(MsOrdersPointSchema) }).passthrough(),
   })
   .passthrough();
+// Additive-сводка концентрации: считается сервером по ПОЛНОМУ raw-отчёту до limit. null =
+// отчёт усечён/неполон (честно недоступна). Доли/маржа = null при неположительном знаменателе.
+const MsTopSummarySchema = z
+  .object({
+    complete: z.boolean(),
+    product_count: z.number(),
+    top_n: z.number(),
+    revenue_positive_total: z.number(),
+    profit_positive_total: z.number(),
+    revenue_top10_share_pct: z.number().nullable(),
+    profit_top10_share_pct: z.number().nullable(),
+    net_margin_pct: z.number().nullable(),
+    loss_making_count: z.number(),
+    loss_making_amount: z.number(),
+  })
+  .passthrough();
+export type MsTopSummary = z.infer<typeof MsTopSummarySchema>;
 const MsTopProductsSchema = z
   .object({
     rows: z.array(
@@ -565,6 +582,9 @@ const MsTopProductsSchema = z
         })
         .passthrough(),
     ),
+    total: z.number().optional(),
+    truncated: z.boolean().optional(),
+    summary: MsTopSummarySchema.nullable().optional(),
   })
   .passthrough();
 

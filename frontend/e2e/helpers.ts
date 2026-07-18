@@ -135,6 +135,20 @@ function demoMsPayload(url: URL): unknown | undefined {
       rows: rows.slice(0, limit),
       total: rows.length,
       truncated: false,
+      // Сводка концентрации считается сервером по полному отчёту (ниже — согласованные величины
+      // для строк выше, в рублях): pos-выручка 240k+160k+90k, pos-прибыль 60k+80k+10k, убыток C 5k.
+      summary: {
+        complete: true,
+        product_count: rows.length,
+        top_n: 10,
+        revenue_positive_total: 490_000,
+        profit_positive_total: 150_000,
+        revenue_top10_share_pct: 100,
+        profit_top10_share_pct: 100,
+        net_margin_pct: 29.6,
+        loss_making_count: 1,
+        loss_making_amount: 5_000,
+      },
     };
   }
   if (path === '/api/ms/customers') {
