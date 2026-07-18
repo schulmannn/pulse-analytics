@@ -21,6 +21,7 @@
 const { sameTenantSource, channelAccessSql } = require('../db/access');
 const { parseMentionsRange, rangeDayCount } = require('../lib/mentionsRange');
 const { toMetricNumber } = require('../lib/metricNumber');
+const { buildMsRfm } = require('../domain/msRfm');
 
 // Metric counter columns are BIGINT (migration 023); node-postgres returns BIGINT as a decimal
 // STRING. Convert exactly the widened counters back to JS numbers (safe within MAX_SAFE_METRIC) so
@@ -504,6 +505,42 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
     };
   }
 
+  // RFM по клиентам, у которых есть заказ в выбранном окне. SQL владеет только tenant/window-
+  // агрегацией; относительные tie-safe scores и сегменты строит чистый domain helper. Recency
+  // считается в календарных днях на конец окна, а заказы без agent_id исключаются явно.
+  async function getMsRfmInternal(channelId, { sinceDay = null, untilDay = null, asOfDay = null } = {}) {
+    if (!enabled || !channelId) return buildMsRfm([], { asOf: asOfDay || untilDay, noAgentOrders: 0 });
+    const { rows } = await pool.query(
+      `WITH win AS (
+         SELECT agent_id, moment, sum_kopecks
+           FROM ms_orders
+          WHERE channel_id=$1 AND ($2::date IS NULL OR moment >= $2::date)
+            AND ($3::date IS NULL OR moment < ($3::date + 1))
+       ), customer_rows AS (
+         SELECT agent_id, MAX(moment)::date AS last_day, COUNT(*)::int AS orders,
+                COALESCE(SUM(sum_kopecks),0)::bigint AS sum_kopecks
+           FROM win WHERE agent_id IS NOT NULL GROUP BY agent_id
+       ), meta AS (
+         SELECT COUNT(*) FILTER (WHERE agent_id IS NULL)::int AS no_agent_orders,
+                to_char(COALESCE($4::date, CURRENT_DATE),'YYYY-MM-DD') AS as_of
+           FROM win
+       )
+       SELECT c.agent_id,
+              (COALESCE($4::date, CURRENT_DATE) - c.last_day)::int AS recency_days,
+              c.orders, c.sum_kopecks, m.no_agent_orders, m.as_of
+         FROM meta m LEFT JOIN customer_rows c ON TRUE
+        ORDER BY c.agent_id NULLS LAST`,
+      [channelId, msSinceDay(sinceDay), msUntilDay(untilDay), msUntilDay(asOfDay || untilDay)]);
+    const first = rows[0] || {};
+    const customers = rows
+      .filter((row) => row.agent_id != null)
+      .map((row) => numifyMetrics(row, ['recency_days', 'orders', 'sum_kopecks']));
+    return buildMsRfm(customers, {
+      asOf: first.as_of || asOfDay || untilDay || null,
+      noAgentOrders: toMetricNumber(first.no_agent_orders) || 0,
+    });
+  }
+
   // Когорты удержания: когорта = месяц ПЕРВОГО заказа клиента, cell — сколько клиентов когорты
   // сделали ≥1 заказ в месяце cohort_month+offset. SQL отдаёт плоский (cohort, activity, active),
   // сетку собирает JS: offsets — ПЛОТНО от 0 до последнего активного месяца КАНАЛА (нули между
@@ -743,6 +780,9 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
   async function getMsCohortsForActor(channelId, actor) {
     return (await allowed(channelId, actor)) ? getMsCohortsInternal(channelId) : [];
   }
+  async function getMsRfmForActor(channelId, actor, opts = {}) {
+    return (await allowed(channelId, actor)) ? getMsRfmInternal(channelId, opts) : null;
+  }
   async function getMsTopCustomersForActor(channelId, actor, opts = {}) {
     return (await allowed(channelId, actor)) ? getMsTopCustomersInternal(channelId, opts) : [];
   }
@@ -796,13 +836,13 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
     getChannelHistoryInternal, getMentionsHistoryInternal, getMentionsArchiveInternal,
     getSnapshotInternal, getPublicTgChannelPhoto,
     getLatestVelocityInternal, listPostsInternal, listIgDailyInternal, listIgMediaDailyInternal,
-    getMsDailyAllInternal, getMsFunnelInternal, getMsCustomersInternal, getMsCohortsInternal,
+    getMsDailyAllInternal, getMsFunnelInternal, getMsCustomersInternal, getMsRfmInternal, getMsCohortsInternal,
     getMsTopCustomersInternal, getMsOldestOrderDayInternal,
     getMsSalesByChannelInternal, getMsGeographyInternal, getMsChannelSeriesInternal,
     getMsChannelSeriesGroupedInternal,
     getChannelHistoryForActor, getMentionsHistoryForActor, getMentionsArchiveForActor,
     getSnapshotForActor, getLatestVelocityForActor, listPostsForActor, listIgDailyForActor, listIgMediaDailyForActor,
-    getMsDailyAllForActor, getMsFunnelForActor, getMsCustomersForActor, getMsCohortsForActor,
+    getMsDailyAllForActor, getMsFunnelForActor, getMsCustomersForActor, getMsRfmForActor, getMsCohortsForActor,
     getMsTopCustomersForActor, getMsOldestOrderDayForActor,
     getMsSalesByChannelForActor, getMsGeographyForActor, getMsChannelSeriesForActor,
     getMsChannelSeriesGroupedForActor,

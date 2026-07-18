@@ -1,10 +1,11 @@
-import { useContext } from 'react';
-import { useMsCohorts, useMsCustomers, useMsTopCustomers } from '@/api/queries';
+import { useContext, useState } from 'react';
+import { useMsCohorts, useMsCustomers, useMsRfm, useMsTopCustomers } from '@/api/queries';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
 import { BarChart } from '@/components/BarChart';
 import { LineChart } from '@/components/LineChart';
+import { SegmentedControl } from '@/components/SegmentedControl';
 import { ErrorState } from '@/components/ErrorState';
 import { Skeleton } from '@/components/ui/skeleton';
 import { lttbDownsample } from '@/lib/downsample';
@@ -35,6 +36,7 @@ export function MsClients() {
   const customers = useMsCustomers(period);
   const cohorts = useMsCohorts();
   const topCustomers = useMsTopCustomers(period);
+  const rfm = useMsRfm(period);
 
   if (customers.isPending) {
     return (
@@ -123,6 +125,10 @@ export function MsClients() {
             <MsRepeatBreakdown summary={summary} repeatRevenueShare={repeatRevenueShare} />
           </ChartCardBody>
         )}
+      </ChartWidget>
+
+      <ChartWidget id="ms-rfm" title="RFM-сегменты" fixedSize="full" drillTo="/metrics/ms-rfm">
+        <MsRfmBody state={rfm} />
       </ChartWidget>
 
       <MsTopCustomersCard state={topCustomers} windowLabel={windowLabel} />
@@ -295,6 +301,103 @@ export function MsTopCustomersBody({ state }: { state: ReturnType<typeof useMsTo
         </li>
       ))}
     </ul>
+  );
+}
+
+type RfmMode = 'customers' | 'revenue';
+
+const RFM_SEGMENTS = {
+  champions: { label: 'Чемпионы', action: 'часто покупают, недавно и на крупную сумму', color: 'hsl(var(--chart-role-positive))' },
+  loyal: { label: 'Лояльные', action: 'стабильно возвращаются и приносят выручку', color: 'hsl(var(--chart-role-primary))' },
+  potential: { label: 'Потенциально лояльные', action: 'есть потенциал для следующей покупки', color: 'hsl(var(--chart-role-comparison))' },
+  new: { label: 'Новые', action: 'покупали недавно, но пока редко', color: 'hsl(var(--chart-role-primary) / 0.65)' },
+  at_risk: { label: 'Под риском', action: 'раньше были ценными, но давно не покупали', color: 'hsl(var(--chart-role-negative))' },
+  hibernating: { label: 'Спящие', action: 'давно не покупали и были малоактивны', color: 'hsl(var(--muted-foreground) / 0.55)' },
+} as const;
+
+/** Aggregate-only RFM distribution: no customer ids leave the API. Scores are relative to the
+    selected window population, so the UI never presents them as absolute lifetime labels. */
+export function MsRfmBody({
+  state,
+  detailed = false,
+}: {
+  state: ReturnType<typeof useMsRfm>;
+  detailed?: boolean;
+}) {
+  const expanded = useContext(ChartExpandedContext);
+  const [mode, setMode] = useState<RfmMode>('customers');
+  if (state.isPending) {
+    return (
+      <div className="space-y-2 py-2">
+        {Array.from({ length: 6 }).map((_, i) => <Skeleton key={`rfm${i}`} className="h-7 w-full" />)}
+      </div>
+    );
+  }
+  if (state.isError) {
+    return (
+      <ErrorState
+        className="py-4"
+        title="Не удалось рассчитать RFM-сегменты"
+        reason={state.error instanceof Error ? state.error.message : 'ошибка'}
+        onRetry={() => state.refetch()}
+        retrying={state.isFetching}
+      />
+    );
+  }
+  if (!state.data || state.data.customers === 0) {
+    return <p className="py-4 text-sm text-muted-foreground">Нет покупателей с заказами в выбранном окне.</p>;
+  }
+
+  const total = mode === 'customers' ? state.data.customers : state.data.total_sum;
+  return (
+    <div className="space-y-3 pt-1">
+      <SegmentedControl
+        ariaLabel="Метрика RFM-сегментов"
+        value={mode}
+        onChange={(value) => setMode(value as RfmMode)}
+        options={[
+          { value: 'customers', content: 'Клиенты' },
+          { value: 'revenue', content: 'Выручка' },
+        ]}
+      />
+      <div className="space-y-2.5">
+        {state.data.segments.map((segment) => {
+          const meta = RFM_SEGMENTS[segment.key];
+          const value = mode === 'customers' ? segment.customers : segment.sum;
+          const share = total > 0 ? (value / total) * 100 : 0;
+          return (
+            <div key={segment.key}>
+              <div className="flex items-baseline justify-between gap-3 text-xs">
+                <span className="min-w-0 truncate text-foreground">{meta.label}</span>
+                <span className="shrink-0 tabular-nums text-muted-foreground">
+                  <span className="font-medium text-foreground">
+                    {mode === 'customers' ? fmt.num(value) : `${fmt.short(value)} ₽`}
+                  </span>{' '}
+                  · {share.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}%
+                </span>
+              </div>
+              <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">
+                <div className="h-full rounded-full" style={{ width: `${Math.max(0, share)}%`, backgroundColor: meta.color }} />
+              </div>
+              {(detailed || expanded) && segment.customers > 0 && (
+                <p className="mt-1 text-2xs text-muted-foreground">
+                  {meta.action}; в среднем R {segment.average_recency_days == null ? '—' : segment.average_recency_days.toLocaleString('ru-RU', { maximumFractionDigits: 1 })} дн. · F {segment.average_frequency == null ? '—' : segment.average_frequency.toLocaleString('ru-RU', { maximumFractionDigits: 1 })} заказа · M {segment.average_monetary == null ? '—' : `${fmt.short(segment.average_monetary)} ₽`}.
+                </p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <p className="text-2xs text-muted-foreground">
+        Оценки R/F/M относительны покупателям этого окна и устойчивы к одинаковым значениям;
+        {state.data.as_of ? ` дата среза ${fmt.day(state.data.as_of)}.` : ' дата среза не определена.'}
+      </p>
+      {state.data.no_agent_orders > 0 && (
+        <p className="text-2xs text-muted-foreground">
+          Без контрагента: {fmt.num(state.data.no_agent_orders)} {pluralRu(state.data.no_agent_orders, ['заказ', 'заказа', 'заказов'])} — не сегментированы.
+        </p>
+      )}
+    </div>
   );
 }
 

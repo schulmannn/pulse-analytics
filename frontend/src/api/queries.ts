@@ -702,6 +702,43 @@ export function useMsCustomers(period: MsPeriod) {
   });
 }
 
+const MsRfmSchema = z
+  .object({
+    window_days: z.number(),
+    as_of: z.string().nullable(),
+    customers: z.number(),
+    no_agent_orders: z.number(),
+    total_orders: z.number(),
+    total_sum: z.number(),
+    segments: z.array(
+      z
+        .object({
+          key: z.enum(['champions', 'loyal', 'potential', 'new', 'at_risk', 'hibernating']),
+          customers: z.number(),
+          orders: z.number(),
+          sum: z.number(),
+          average_recency_days: z.number().nullable(),
+          average_frequency: z.number().nullable(),
+          average_monetary: z.number().nullable(),
+        })
+        .passthrough(),
+    ),
+  })
+  .passthrough();
+
+export type MsRfm = z.infer<typeof MsRfmSchema>;
+
+export function useMsRfm(period: MsPeriod) {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    enabled: channelId != null,
+    queryKey: ['ms-rfm', channelId, ...msPeriodKey(period)],
+    staleTime: STALE_LIVE,
+    retry: false,
+    queryFn: ({ signal }) => apiGet(`/api/ms/rfm?${msPeriodQuery(period)}`, MsRfmSchema, { signal, channelId }),
+  });
+}
+
 const MsCohortsSchema = z
   .object({
     cohorts: z.array(

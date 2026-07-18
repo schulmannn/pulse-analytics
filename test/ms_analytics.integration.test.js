@@ -151,6 +151,32 @@ test('customers (окно): «новый» = первый заказ ЗА ВСЮ
   ]);
 });
 
+test('RFM: exact-window aggregate, recency на конец окна, NULL-agent отдельно и tenant gate', { skip }, async () => {
+  const result = await db.getMsRfmInternal(ch.id, {
+    untilDay: '2026-03-31', asOfDay: '2026-03-31',
+  });
+  assert.equal(result.as_of, '2026-03-31');
+  assert.equal(result.customers, 3);
+  assert.equal(result.no_agent_orders, 2);
+  assert.equal(result.total_orders, 6);
+  assert.equal(result.total_sum_kopecks, 8700);
+  const byKey = new Map(result.segments.map((segment) => [segment.key, segment]));
+  assert.deepEqual(byKey.get('loyal'), {
+    key: 'loyal', customers: 1, orders: 3, sum_kopecks: 6000,
+    average_recency_days: 24, average_frequency: 3, average_monetary_kopecks: 6000,
+  });
+  assert.deepEqual(byKey.get('at_risk'), {
+    key: 'at_risk', customers: 1, orders: 2, sum_kopecks: 2000,
+    average_recency_days: 45, average_frequency: 2, average_monetary_kopecks: 2000,
+  });
+  assert.deepEqual(byKey.get('new'), {
+    key: 'new', customers: 1, orders: 1, sum_kopecks: 700,
+    average_recency_days: 11, average_frequency: 1, average_monetary_kopecks: 700,
+  });
+  assert.equal((await db.getMsRfmForActor(ch.id, { uid: owner.id }, { untilDay: '2026-03-31' })).customers, 3);
+  assert.equal(await db.getMsRfmForActor(ch.id, { uid: stranger.id }, { untilDay: '2026-03-31' }), null);
+});
+
 test('cohorts: когорта = месяц первого заказа, offset 0 = size, нули дозаполнены до горизонта канала', { skip }, async () => {
   assert.deepEqual(await db.getMsCohortsInternal(ch.id), [
     {

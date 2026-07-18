@@ -185,6 +185,24 @@ function demoMsPayload(url: URL): unknown | undefined {
       series,
     };
   }
+  if (path === '/api/ms/rfm') {
+    return {
+      window_days: days,
+      as_of: new Date().toISOString().slice(0, 10),
+      customers: 100,
+      no_agent_orders: 3,
+      total_orders: 200,
+      total_sum: 1_500_000,
+      segments: [
+        { key: 'champions', customers: 12, orders: 50, sum: 500_000, average_recency_days: 2, average_frequency: 4.2, average_monetary: 41_667 },
+        { key: 'loyal', customers: 22, orders: 60, sum: 400_000, average_recency_days: 7, average_frequency: 2.7, average_monetary: 18_182 },
+        { key: 'potential', customers: 25, orders: 35, sum: 250_000, average_recency_days: 12, average_frequency: 1.4, average_monetary: 10_000 },
+        { key: 'new', customers: 20, orders: 20, sum: 100_000, average_recency_days: 3, average_frequency: 1, average_monetary: 5_000 },
+        { key: 'at_risk', customers: 13, orders: 25, sum: 200_000, average_recency_days: 24, average_frequency: 1.9, average_monetary: 15_385 },
+        { key: 'hibernating', customers: 8, orders: 10, sum: 50_000, average_recency_days: 28, average_frequency: 1.3, average_monetary: 6_250 },
+      ],
+    };
+  }
   if (path === '/api/ms/top-customers') {
     return {
       window_days: days,

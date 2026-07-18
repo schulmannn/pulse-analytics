@@ -22,6 +22,7 @@ import {
   useMsFunnel,
   useMsGeography,
   useMsReturns,
+  useMsRfm,
   useMsSalesByChannel,
   useMsSummary,
   useMsTopCustomers,
@@ -31,6 +32,7 @@ import { MsSummaryExplorer, MsFunnelRows } from '@/panels/sklad/MsOverview';
 import {
   MsCustomerExplorer,
   MsCohortsTable,
+  MsRfmBody,
   MsTopCustomersBody,
   CUSTOMER_METRIC_OPTIONS,
 } from '@/panels/sklad/MsClients';
@@ -110,6 +112,8 @@ export function MsMetricPage({ metricKey }: { metricKey: string }) {
           defaultMetric="repeatShare"
         />
       );
+    case 'ms-rfm':
+      return <MsRfmPage />;
     case 'ms-channels':
       return <MsChannelsPage />;
     case 'ms-funnel':
@@ -934,6 +938,42 @@ function MsTopCustomersPage() {
     >
       <MsReportCard id="ms-page-top-customers" title="Топ покупателей">
         <MsTopCustomersBody state={topCustomers} />
+      </MsReportCard>
+      <ControlBar window={window} />
+    </MsMetricShell>
+  );
+}
+
+function MsRfmPage() {
+  const window = useMsMetricWindow();
+  const rfm = useMsRfm(window.period);
+  const previous = useMsRfm(window.previousPeriod ?? window.period);
+  return (
+    <MsMetricShell
+      back={BACK_CLIENTS}
+      term="RFM-сегменты"
+      descriptor="Относительная ценность и активность покупателей выбранного окна"
+      about={{
+        formula:
+          'R — календарные дни от последнего заказа до конца окна; F — число заказов; M — сумма заказов. Для каждой величины покупатели получают относительный score 1–5 по mid-rank: одинаковые значения всегда получают одинаковую оценку, а полностью одинаковая выборка — нейтральную 3.',
+        included:
+          'Только контрагенты с заказом в выбранном окне. Заказы без контрагента показаны отдельно. Возвраты не вычитаются: их архив и семантика выпускаются отдельной метрикой.',
+        source: 'Архив заказов МойСклада (ms_orders); расчёт на точную дату конца выбранного окна.',
+      }}
+      comparison={
+        <ComparisonReadout
+          current={rfm.data?.customers ?? null}
+          previous={window.previousPeriod ? (previous.data?.customers ?? null) : null}
+          format={(value) => `${fmt.num(value)} ${value === 1 ? 'покупатель' : 'покупателей'}`}
+          previousPeriod={window.previousPeriod}
+          pending={rfm.isPending || (window.previousPeriod != null && previous.isPending)}
+          error={rfm.isError || (window.previousPeriod != null && previous.isError)}
+          label="Покупатели в RFM"
+        />
+      }
+    >
+      <MsReportCard id="ms-page-rfm" title="Сегменты покупателей">
+        <MsRfmBody state={rfm} detailed />
       </MsReportCard>
       <ControlBar window={window} />
     </MsMetricShell>
