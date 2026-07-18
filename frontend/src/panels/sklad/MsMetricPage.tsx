@@ -62,6 +62,7 @@ import {
 } from '@/panels/sklad/MsChannels';
 import {
   MsTopProductsCard,
+  type ChangeMetric,
   type ConcentrationMetric,
   type ExpandedView,
 } from '@/panels/sklad/MsTopProducts';
@@ -178,9 +179,12 @@ const FUNNEL_URL: MsMetricUrlSchema = {
 };
 const PRODUCTS_URL: MsMetricUrlSchema = {
   enums: {
-    view: { values: ['concentration', 'ranking'], defaultValue: 'concentration' },
+    view: { values: ['concentration', 'ranking', 'dynamics'], defaultValue: 'concentration' },
     sort: { values: ['revenue', 'profit', 'margin'], defaultValue: 'revenue' },
     concentration: { values: ['revenue', 'profit'], defaultValue: 'revenue' },
+    // Метрика изменения на вкладке «Динамика»; сервер отдаёт все три сразу, поэтому это чистый
+    // клиентский переключатель, не влияющий на запрос/кэш.
+    change: { values: ['revenue', 'profit', 'units'], defaultValue: 'revenue' },
   },
 };
 const RETURNS_URL: MsMetricUrlSchema = {
@@ -843,15 +847,23 @@ function MsProductsPage() {
   const view = controls.values.view as ExpandedView;
   const productSort = controls.values.sort as MsProductSort;
   const concentration = controls.values.concentration as ConcentrationMetric;
+  const changeMetric = controls.values.change as ChangeMetric;
   return (
     <MsMetricShell
       back={BACK_OVERVIEW}
       term="Товары"
-      descriptor="Концентрация и рейтинг ассортимента за окно"
+      descriptor="Концентрация, рейтинг и динамика ассортимента за окно"
+      comparison={
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          Вкладка «Динамика» сравнивает выбранное окно с непосредственно предшествующим равным
+          периодом. Для окна «Всё» сопоставимого предыдущего периода нет.
+        </p>
+      }
       about={{
         formula:
-          'Концентрация — доля топ-N в положительной выручке или валовой прибыли (знаменатель по полному отчёту до limit). Рейтинг — сортировка по выручке / прибыли / марже.',
-        included: 'Маржа определена только при положительной выручке; убыточные позиции показаны отдельно.',
+          'Концентрация — доля топ-N в положительной выручке или валовой прибыли (знаменатель по полному отчёту до limit). Рейтинг — сортировка по выручке / прибыли / марже. Динамика сравнивает окно с предыдущим равным по выручке / валовой прибыли / штукам.',
+        included:
+          'Маржа определена только при положительной выручке; убыточные позиции показаны отдельно. Динамика доказывает лишь наличие/отсутствие продаж в окнах; для «Всё» предыдущего равного окна нет. Возвраты не вычитаются.',
         source: 'Отчёт по товарам МойСклада (profit).',
       }}
     >
@@ -864,6 +876,8 @@ function MsProductsPage() {
           onProductSort={(value) => controls.setEnum('sort', value)}
           concMetric={concentration}
           onConcMetric={(value) => controls.setEnum('concentration', value)}
+          changeMetric={changeMetric}
+          onChangeMetric={(value) => controls.setEnum('change', value)}
         />
       </MsReportCard>
       <ControlBar window={window} />

@@ -1,6 +1,6 @@
 import { useContext, useState } from 'react';
-import type { MsProductSort, MsTopSummary } from '@/api/queries';
-import { useMsTopProducts } from '@/api/queries';
+import type { MsAssortmentComparison, MsMetricComparison, MsProductSort, MsTopSummary } from '@/api/queries';
+import { useMsAssortmentComparison, useMsTopProducts } from '@/api/queries';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
 import { LineChart } from '@/components/LineChart';
@@ -13,7 +13,9 @@ import type { MsPeriod } from '@/lib/msPeriod';
 
 type TopRow = { name: string; quantity: number; revenue: number; profit: number; margin: number | null };
 export type ConcentrationMetric = 'revenue' | 'profit';
-export type ExpandedView = 'concentration' | 'ranking';
+export type ExpandedView = 'concentration' | 'ranking' | 'dynamics';
+/** Метрика изменения на вкладке «Динамика»: выручка / валовая прибыль / штуки. */
+export type ChangeMetric = 'revenue' | 'profit' | 'units';
 
 const COMPACT_ROWS = 5;
 const EXPANDED_LIMIT = 50;
@@ -39,6 +41,8 @@ export function MsTopProductsCard({
   onProductSort,
   concMetric: concMetricProp,
   onConcMetric,
+  changeMetric: changeMetricProp,
+  onChangeMetric,
 }: {
   period: MsPeriod;
   // Optional controlled bindings so the canonical `/metrics/ms-products` page can own these
@@ -49,50 +53,41 @@ export function MsTopProductsCard({
   onProductSort?: (sort: MsProductSort) => void;
   concMetric?: ConcentrationMetric;
   onConcMetric?: (metric: ConcentrationMetric) => void;
+  changeMetric?: ChangeMetric;
+  onChangeMetric?: (metric: ChangeMetric) => void;
 }) {
   const expanded = useContext(ChartExpandedContext);
   const [productSortState, setProductSortState] = useState<MsProductSort>('revenue');
   const [viewState, setViewState] = useState<ExpandedView>('concentration');
   const [concMetricState, setConcMetricState] = useState<ConcentrationMetric>('revenue');
+  const [changeMetricState, setChangeMetricState] = useState<ChangeMetric>('revenue');
   const productSort = productSortProp ?? productSortState;
   const setProductSort = onProductSort ?? setProductSortState;
   const view = viewProp ?? viewState;
   const setView = onView ?? setViewState;
   const concMetric = concMetricProp ?? concMetricState;
   const setConcMetric = onConcMetric ?? setConcMetricState;
+  const changeMetric = changeMetricProp ?? changeMetricState;
+  const setChangeMetric = onChangeMetric ?? setChangeMetricState;
 
   // Концентрация сортирует по своей метрике (выручка/прибыль), рейтинг — по productSort. Компакт
   // сортирует по productSort. Переключение метрики концентрации меняет sort → backend переиспользует
   // тот же raw-кэш.
   const activeSort: MsProductSort = expanded && view === 'concentration' ? concMetric : productSort;
-  const top = useMsTopProducts(period, expanded ? EXPANDED_LIMIT : COMPACT_ROWS, activeSort);
-
-  if (top.isPending) {
-    return (
-      <div className="space-y-2 py-2">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <Skeleton key={`t${i}`} className="h-6 w-full" />
-        ))}
-      </div>
-    );
-  }
-  if (top.isError) {
-    return (
-      <ErrorState
-        className="py-4"
-        title="Не удалось получить топ товаров"
-        reason={top.error instanceof Error ? top.error.message : 'ошибка'}
-        onRetry={() => top.refetch()}
-        retrying={top.isFetching}
-      />
-    );
-  }
-
-  const rows = (top.data?.rows ?? []) as TopRow[];
-  const summary = top.data?.summary ?? null;
+  // Прямой URL `view=dynamics` не должен одновременно запускать обычный top-products и opt-in
+  // comparison: два параллельных miss одного raw-cache удвоили бы дорогой upstream page-loop.
+  const top = useMsTopProducts(
+    period,
+    expanded ? EXPANDED_LIMIT : COMPACT_ROWS,
+    activeSort,
+    !(expanded && view === 'dynamics'),
+  );
 
   if (!expanded) {
-    // Компакт — прежний вид: «Рейтинг» + метрика + 5 строк.
+    // Компакт — прежний вид: «Рейтинг» + метрика + 5 строк. Сравнение здесь НИКОГДА не запрашивается.
+    if (top.isPending) return <TopProductsSkeleton />;
+    if (top.isError) return <TopProductsError state={top} />;
+    const rows = (top.data?.rows ?? []) as TopRow[];
     return (
       <>
         <div className="mb-2 flex items-center justify-between gap-3">
@@ -114,6 +109,9 @@ export function MsTopProductsCard({
     );
   }
 
+  const rows = (top.data?.rows ?? []) as TopRow[];
+  const summary = top.data?.summary ?? null;
+
   return (
     <div className="flex min-h-0 flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -125,6 +123,7 @@ export function MsTopProductsCard({
           options={[
             { value: 'concentration', content: 'Концентрация' },
             { value: 'ranking', content: 'Рейтинг' },
+            { value: 'dynamics', content: 'Динамика' },
           ]}
         />
         {view === 'concentration' ? (
@@ -138,6 +137,18 @@ export function MsTopProductsCard({
               { value: 'profit', content: 'Валовая прибыль' },
             ]}
           />
+        ) : view === 'dynamics' ? (
+          <SegmentedControl
+            ariaLabel="Метрика изменения"
+            size="sm"
+            value={changeMetric}
+            onChange={setChangeMetric}
+            options={[
+              { value: 'revenue', content: 'Выручка' },
+              { value: 'profit', content: 'Валовая прибыль' },
+              { value: 'units', content: 'Штуки' },
+            ]}
+          />
         ) : (
           <SegmentedControl
             ariaLabel="Метрика рейтинга товаров"
@@ -148,7 +159,15 @@ export function MsTopProductsCard({
           />
         )}
       </div>
-      {view === 'ranking' ? (
+      {view === 'dynamics' ? (
+        // Только вкладка «Динамика» тянет сравнение (opt-in compare=prev); свои loading/error/пустые
+        // и «Всё»-недоступно состояния она держит внутри.
+        <MsAssortmentDynamics period={period} metric={changeMetric} />
+      ) : top.isPending ? (
+        <TopProductsSkeleton />
+      ) : top.isError ? (
+        <TopProductsError state={top} />
+      ) : view === 'ranking' ? (
         rows.length === 0 ? (
           <p className="py-4 text-sm text-muted-foreground">Нет продаж за период.</p>
         ) : (
@@ -158,6 +177,28 @@ export function MsTopProductsCard({
         <MsConcentrationView rows={rows} summary={summary} metric={concMetric} />
       )}
     </div>
+  );
+}
+
+function TopProductsSkeleton() {
+  return (
+    <div className="space-y-2 py-2">
+      {Array.from({ length: 4 }).map((_, i) => (
+        <Skeleton key={`t${i}`} className="h-6 w-full" />
+      ))}
+    </div>
+  );
+}
+
+function TopProductsError({ state }: { state: ReturnType<typeof useMsTopProducts> }) {
+  return (
+    <ErrorState
+      className="py-4"
+      title="Не удалось получить топ товаров"
+      reason={state.error instanceof Error ? state.error.message : 'ошибка'}
+      onRetry={() => state.refetch()}
+      retrying={state.isFetching}
+    />
   );
 }
 
@@ -307,4 +348,152 @@ function formatProductSecondary(row: { revenue: number; profit: number; margin: 
   if (metric === 'profit') return `выруч. ${fmt.short(row.revenue)} ₽ · ${formatMargin(row.margin)}`;
   if (metric === 'margin') return `приб. ${formatProfit(row.profit)} · выруч. ${fmt.short(row.revenue)} ₽`;
   return `приб. ${formatProfit(row.profit)} · ${formatMargin(row.margin)}`;
+}
+
+// ── Динамика: сравнение с предыдущим равным окном ──────────────────────────────────────────────
+
+type Mover = MsMetricComparison['gainers'][number];
+type MoverKind = 'gain' | 'loss' | 'appeared' | 'disappeared';
+
+/** Значение метрики в её натуральной единице (сервер уже дал рубли/штуки). */
+export function fmtChangeValue(value: number, unit: 'rub' | 'count'): string {
+  return unit === 'rub' ? `${fmt.short(value)} ₽` : `${fmt.num(value)} шт.`;
+}
+
+/**
+ * Приглушённая подпись изменения (steep-канон «ничего не кричит» — без зелёного/красного). Рост/
+ * падение показывают %-дельту, а при неположительной предыдущей базе (deltaPct == null) — абсолютный сдвиг.
+ * Появившиеся/пропавшие честно отмечают отсутствие продаж в другом окне, а не выдуманный ±100%.
+ */
+export function changeLabel(entry: Mover, kind: MoverKind, unit: 'rub' | 'count'): string {
+  if (kind === 'appeared') return 'ранее продаж не было';
+  if (kind === 'disappeared') return 'сейчас продаж нет';
+  const arrow = entry.delta >= 0 ? '▲' : '▼';
+  if (entry.deltaPct == null) return `${arrow} ${fmtChangeValue(Math.abs(entry.delta), unit)}`;
+  return `${arrow} ${Math.abs(entry.deltaPct).toFixed(1)}%`;
+}
+
+const MOVER_EMPTY: Record<MoverKind, string> = {
+  gain: 'Нет товаров, выросших в обоих окнах.',
+  loss: 'Нет товаров, снизившихся в обоих окнах.',
+  appeared: 'Нет товаров с продажами только в текущем окне.',
+  disappeared: 'Нет товаров без продаж в текущем окне.',
+};
+
+function MoverList({ title, entries, unit, kind }: { title: string; entries: Mover[]; unit: 'rub' | 'count'; kind: MoverKind }) {
+  return (
+    <section className="min-w-0">
+      <h4 className="mb-1.5 text-2xs tracking-wide text-muted-foreground">{title}</h4>
+      {entries.length === 0 ? (
+        <p className="py-2 text-xs text-muted-foreground">{MOVER_EMPTY[kind]}</p>
+      ) : (
+        <ul>
+          {entries.map((entry, i) => (
+            <li
+              key={`${entry.name}-${i}`}
+              className="flex items-center gap-3 border-t border-border py-1.5 first:border-t-0"
+            >
+              <span className="min-w-0 flex-1 truncate text-sm text-foreground">{entry.name || '—'}</span>
+              <span className="shrink-0 text-sm tabular-nums text-foreground">
+                {fmtChangeValue(kind === 'disappeared' ? entry.previous : entry.current, unit)}
+              </span>
+              <span className="w-32 shrink-0 truncate text-right text-2xs tabular-nums text-muted-foreground">
+                {changeLabel(entry, kind, unit)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+/** Метрик-независимые счётчики присутствия: сколько товаров в обоих окнах, появились, пропали. */
+function DynamicsCounts({ counts }: { counts: { current_only: number; previous_only: number; both: number } }) {
+  const tiles = [
+    { label: 'Товаров в обоих окнах', value: fmt.num(counts.both) },
+    { label: 'Появились продажи', value: fmt.num(counts.current_only) },
+    { label: 'Нет продаж в текущем', value: fmt.num(counts.previous_only) },
+  ];
+  return (
+    <div className="grid grid-cols-1 gap-x-6 gap-y-2 border-b border-border pb-3 sm:grid-cols-3">
+      {tiles.map((t) => (
+        <div key={t.label} className="flex items-baseline justify-between gap-3">
+          <span className="text-2xs tracking-wide text-muted-foreground">{t.label}</span>
+          <span className="text-sm font-medium tabular-nums text-foreground">{t.value}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Вкладка «Динамика»: текущее окно против предыдущего равного. Решающие вопросы — наибольший рост и
+ * падение (товары из обоих окон), товары с продажами только сейчас и только в прошлом окне. Не
+ * называем последние «снятыми с продажи», а текущие-only — «новинками каталога»: отчёт доказывает
+ * только наличие/отсутствие продаж в окнах. Возвраты в отчёт profit не входят и не вычитаются.
+ */
+function MsAssortmentDynamics({ period, metric }: { period: MsPeriod; metric: ChangeMetric }) {
+  const q = useMsAssortmentComparison(period, true);
+  if (q.isPending) return <TopProductsSkeleton />;
+  if (q.isError) {
+    return (
+      <ErrorState
+        className="py-4"
+        title="Не удалось получить сравнение периодов"
+        reason={q.error instanceof Error ? q.error.message : 'ошибка'}
+        onRetry={() => q.refetch()}
+        retrying={q.isFetching}
+      />
+    );
+  }
+  const comparison: MsAssortmentComparison | undefined = q.data?.comparison;
+  if (!comparison) {
+    return <p className="py-4 text-sm text-muted-foreground">Сравнение с предыдущим периодом недоступно.</p>;
+  }
+  if (!comparison.available) {
+    return (
+      <p className="py-4 text-sm text-muted-foreground">
+        Для окна «Всё» предыдущего равного периода не существует — сравнение недоступно.
+      </p>
+    );
+  }
+  const m = comparison.metrics[metric];
+  const nothing =
+    m.gainers.length === 0 && m.losers.length === 0 && m.appeared.length === 0 && m.disappeared.length === 0;
+  return (
+    <div className="flex min-h-0 flex-col gap-4">
+      {comparison.partial && (
+        <p className="text-xs text-muted-foreground">
+          Отчёт по товарам за период неполон — сравнение основано на частичных данных.
+        </p>
+      )}
+      {comparison.identity_fallback_count > 0 && (
+        <p className="text-xs text-muted-foreground">
+          Для {fmt.num(comparison.identity_fallback_count)} позиций МойСклад не вернул стабильный ID —
+          сопоставление выполнено по названию.
+        </p>
+      )}
+      <DynamicsCounts counts={comparison.counts} />
+      {nothing ? (
+        <p className="py-4 text-sm text-muted-foreground">Продажи в обоих окнах не различаются по выбранному показателю.</p>
+      ) : (
+        <div className="grid grid-cols-1 gap-x-8 gap-y-5 lg:grid-cols-2">
+          <MoverList title="Наибольший рост" entries={m.gainers} unit={m.unit} kind="gain" />
+          <MoverList title="Наибольшее падение" entries={m.losers} unit={m.unit} kind="loss" />
+          <MoverList title="Появились продажи" entries={m.appeared} unit={m.unit} kind="appeared" />
+          <MoverList title="Нет продаж в текущем периоде" entries={m.disappeared} unit={m.unit} kind="disappeared" />
+        </div>
+      )}
+      <p className="text-2xs leading-relaxed text-muted-foreground">
+        Предыдущее окно {formatComparisonDay(comparison.previous.from)} —{' '}
+        {formatComparisonDay(comparison.previous.to)}, текущее {formatComparisonDay(comparison.current.from)} —{' '}
+        {formatComparisonDay(comparison.current.to)}. Возвраты не вычитаются.
+      </p>
+    </div>
+  );
+}
+
+function formatComparisonDay(day: string): string {
+  return `${day.slice(8, 10)}.${day.slice(5, 7)}.${day.slice(0, 4)}`;
 }

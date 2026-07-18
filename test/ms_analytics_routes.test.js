@@ -545,6 +545,199 @@ test('top-products: days=0 на пустом архиве — консерват
   assert.equal(seenFrom, '2020-01-01 00:00:00');
 });
 
+// Хелперы окон сравнения: день из moment-границы и разница в календарных днях (UTC-безопасно).
+const dayOfMoment = (moment) => String(moment).slice(0, 10);
+const utcDay = (key) => {
+  const [y, m, d] = String(key).split('-').map(Number);
+  return Date.UTC(y, m - 1, d);
+};
+const dayDiff = (a, b) => (utcDay(a) - utcDay(b)) / 86_400_000;
+
+// Отчётная строка byproduct со стабильной href-identity (или без неё для фолбэка).
+const prod = (name, href, sellSum, profit, sellQuantity) => ({
+  assortment: href ? { name, meta: { href } } : { name },
+  sellQuantity,
+  sellSum,
+  profit,
+});
+
+test('top-products compare=prev: произвольный диапазон — точное предыдущее равное непересекающееся окно; identity по href не сливает одноимённые товары', async () => {
+  const windows = [];
+  // hrefA «Хит» и hrefB «Хит» — ОДНО имя, РАЗНЫЕ href: не должны слиться в один товар.
+  const current = [
+    prod('Хит', 'https://api.moysklad.ru/entity/product/aaa', 1000_00, 300_00, 10), // both → рост
+    prod('Хит', 'https://api.moysklad.ru/entity/product/bbb', 500_00, 100_00, 5),   // current-only → появился
+    prod('Падение', 'https://api.moysklad.ru/entity/product/ccc', 200_00, 50_00, 2),// both → падение
+    prod('Новинка', 'https://api.moysklad.ru/entity/product/ddd', 800_00, 200_00, 8),// current-only → появился
+  ];
+  const previous = [
+    prod('Хит', 'https://api.moysklad.ru/entity/product/aaa', 400_00, 100_00, 4),   // база роста hrefA
+    prod('Падение', 'https://api.moysklad.ru/entity/product/ccc', 900_00, 300_00, 9),// база падения
+    prod('Ушёл', 'https://api.moysklad.ru/entity/product/eee', 700_00, 150_00, 7),  // previous-only → пропал
+  ];
+  const { routes } = buildMs({
+    msFetch: async (_token, path) => {
+      const q = new URLSearchParams(path.split('?')[1] || '');
+      const from = q.get('momentFrom');
+      windows.push({ from, to: q.get('momentTo') });
+      if (from.startsWith('2026-06-08')) return { rows: current, meta: { size: current.length } };
+      if (from.startsWith('2026-06-01')) return { rows: previous, meta: { size: previous.length } };
+      throw new Error(`неожиданное окно ${from}`);
+    },
+  });
+
+  const res = await invoke(routes, 'GET /api/ms/top-products', {
+    query: { days: '7', from: '2026-06-08', to: '2026-06-14', compare: 'prev', limit: '3' },
+  });
+  assert.equal(res.statusCode, 200);
+  assert.equal(windows.length, 2, 'ровно два окна: текущее и предыдущее');
+  assert.deepEqual(windows[1], { from: '2026-06-01 00:00:00', to: '2026-06-07 23:59:59' },
+    'предыдущее равное окно кончается ровно днём раньше и не пересекается');
+
+  const cmp = res.body.comparison;
+  assert.equal(cmp.available, true);
+  assert.equal(cmp.partial, false);
+  assert.equal(cmp.identity_fallback_count, 0);
+  assert.deepEqual(cmp.current, { from: '2026-06-08', to: '2026-06-14' });
+  assert.deepEqual(cmp.previous, { from: '2026-06-01', to: '2026-06-07' });
+  // Присутствие метрик-независимо: hrefA+hrefC в обоих, hrefB+hrefD только текущие, hrefE только прошлый.
+  assert.deepEqual(cmp.counts, { current_only: 2, previous_only: 1, both: 2 });
+
+  const rev = cmp.metrics.revenue;
+  assert.equal(rev.unit, 'rub');
+  // Рост: только товары из обоих окон. hrefA «Хит» 400→1000.
+  assert.deepEqual(rev.gainers, [{ name: 'Хит', current: 1000, previous: 400, delta: 600, deltaPct: 150 }]);
+  // Падение: hrefC «Падение» 900→200; %-дельта по ненулевой базе.
+  assert.deepEqual(rev.losers, [{ name: 'Падение', current: 200, previous: 900, delta: -700, deltaPct: -77.8 }]);
+  // Появились продажи (current-only): по убыванию текущей выручки; предыдущая база 0 → %-дельта null.
+  assert.deepEqual(rev.appeared, [
+    { name: 'Новинка', current: 800, previous: 0, delta: 800, deltaPct: null },
+    { name: 'Хит', current: 500, previous: 0, delta: 500, deltaPct: null },
+  ]);
+  // Нет продаж в текущем (previous-only): показываем предыдущую величину.
+  assert.deepEqual(rev.disappeared, [{ name: 'Ушёл', current: 0, previous: 700, delta: -700, deltaPct: -100 }]);
+
+  // units — те же категории на целых штуках, без рублей.
+  assert.equal(cmp.metrics.units.unit, 'count');
+  assert.deepEqual(cmp.metrics.units.gainers, [{ name: 'Хит', current: 10, previous: 4, delta: 6, deltaPct: 150 }]);
+
+  // Переключение sort/метрики повторно окон НЕ грузит (оба окна в кэше).
+  await invoke(routes, 'GET /api/ms/top-products', {
+    query: { days: '7', from: '2026-06-08', to: '2026-06-14', compare: 'prev', sort: 'profit' },
+  });
+  assert.equal(windows.length, 2, 'compare переиспользует кэш обоих окон');
+});
+
+test('top-products compare=prev: пресет 7д — равное непересекающееся окно, длины совпадают', async () => {
+  const windows = [];
+  const { routes } = buildMs({
+    msFetch: async (_token, path) => {
+      const q = new URLSearchParams(path.split('?')[1] || '');
+      windows.push({ from: q.get('momentFrom'), to: q.get('momentTo') });
+      return { rows: [prod('Товар', 'https://x/product/a', 100_00, 10_00, 1)], meta: { size: 1 } };
+    },
+  });
+  const res = await invoke(routes, 'GET /api/ms/top-products', { query: { days: '7', compare: 'prev' } });
+  assert.equal(res.statusCode, 200);
+  assert.equal(windows.length, 2);
+  const cur = res.body.comparison.current;
+  const prev = res.body.comparison.previous;
+  assert.equal(dayDiff(cur.to, cur.from), 6, 'текущее окно 7 дней');
+  assert.equal(dayDiff(prev.to, prev.from), 6, 'предыдущее окно тоже 7 дней');
+  assert.equal(dayDiff(cur.from, prev.to), 1, 'предыдущее кончается ровно за день до текущего (нет overlap)');
+});
+
+test('top-products compare=prev: days=0 «Всё» — предыдущего окна нет, второй fetch не делается', async () => {
+  let fetches = 0;
+  let oldestCalls = 0;
+  const { routes } = buildMs({
+    msFetch: async () => {
+      fetches += 1;
+      return { rows: [prod('Товар', 'https://x/product/a', 100_00, 10_00, 1)], meta: { size: 1 } };
+    },
+    db: { getMsOldestOrderDayForActor: async () => { oldestCalls += 1; return '2024-01-10'; } },
+  });
+  const res = await invoke(routes, 'GET /api/ms/top-products', { query: { days: '0', compare: 'prev' } });
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.comparison, { available: false, reason: 'all' });
+  assert.equal(fetches, 1, 'для «Всё» предыдущее окно не грузится');
+  assert.equal(oldestCalls, 1, 'архивный якорь спрошен только для текущего окна');
+});
+
+test('top-products: без compare легаси-ответ не содержит comparison и не делает второй fetch', async () => {
+  let fetches = 0;
+  const { routes } = buildMs({
+    msFetch: async () => {
+      fetches += 1;
+      return { rows: [prod('Товар', 'https://x/product/a', 100_00, 10_00, 1)], meta: { size: 1 } };
+    },
+  });
+  const res = await invoke(routes, 'GET /api/ms/top-products', { query: { days: '30' } });
+  assert.equal(res.statusCode, 200);
+  assert.equal('comparison' in res.body, false, 'поле comparison отсутствует без compare=prev');
+  assert.equal(fetches, 1);
+});
+
+test('top-products compare=prev: усечённое окно помечает сравнение partial', async () => {
+  // Каждое окно упирается в page-cap (три полные страницы) → truncated. Любая усечённая сторона
+  // делает сравнение честно неполным: крупный сдвиг мог остаться на недобранной странице.
+  const bigPage = Array.from({ length: 1000 }, (_, i) => prod(`p-${i}`, `https://x/product/${i}`, 100_00, 10_00, 1));
+  const { routes } = buildMs({ msFetch: async () => ({ rows: bigPage }) });
+  const res = await invoke(routes, 'GET /api/ms/top-products', { query: { days: '30', compare: 'prev' } });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.truncated, true);
+  assert.equal(res.body.comparison.available, true);
+  assert.equal(res.body.comparison.partial, true, 'усечённая сторона делает сравнение честно partial');
+});
+
+test('top-products compare=prev: short page при большем meta.size тоже partial', async () => {
+  let fetches = 0;
+  const { routes } = buildMs({
+    msFetch: async () => {
+      fetches += 1;
+      return {
+        rows: [prod('Товар', 'https://x/product/a', 100_00, 10_00, 1)],
+        meta: { size: fetches === 1 ? 2 : 1 },
+      };
+    },
+  });
+  const res = await invoke(routes, 'GET /api/ms/top-products', { query: { days: '7', compare: 'prev' } });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.truncated, false, 'page-cap не достигнут');
+  assert.equal(res.body.comparison.partial, true, 'meta.size раскрывает недобранный текущий отчёт');
+});
+
+test('top-products compare=prev: fallback identity по имени обозначается явно', async () => {
+  const { routes } = buildMs({
+    msFetch: async () => ({
+      rows: [prod('Legacy без href', null, 100_00, 10_00, 1)],
+      meta: { size: 1 },
+    }),
+  });
+  const res = await invoke(routes, 'GET /api/ms/top-products', { query: { days: '7', compare: 'prev' } });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.comparison.identity_fallback_count, 1);
+  assert.deepEqual(res.body.comparison.counts, { current_only: 0, previous_only: 0, both: 1 });
+});
+
+test('top-products compare=prev: процент прибыли от неположительной базы недоступен', async () => {
+  let fetches = 0;
+  const { routes } = buildMs({
+    msFetch: async () => {
+      fetches += 1;
+      return {
+        rows: [prod('Выход из убытка', 'https://x/product/loss', 100_00, fetches === 1 ? 100_00 : -100_00, 1)],
+        meta: { size: 1 },
+      };
+    },
+  });
+  const res = await invoke(routes, 'GET /api/ms/top-products', { query: { days: '7', compare: 'prev' } });
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.comparison.metrics.profit.gainers, [{
+    name: 'Выход из убытка', current: 100, previous: -100, delta: 200, deltaPct: null,
+  }]);
+});
+
 test('top-customers: sinceDay-окно в repo, имена ОДНИМ OR-вызовом словаря, кэш-хит вторым вызовом', async () => {
   const fetches = [];
   const repoCalls = [];

@@ -72,6 +72,43 @@ const MS_CHANNELS = [
   { id: '36f07379-8039-11ec-0a80-03970021e97f', name: 'Розница', type: 'OTHER', orders: 31, sum: 159_000 },
 ];
 
+/** Deterministic assortment comparison (compare=prev) for the «Динамика» tab. Values are already in
+    the metric natural unit (rub / count), previous-base-zero rows carry deltaPct=null. */
+function demoMsComparison() {
+  return {
+    available: true,
+    partial: false,
+    identity_fallback_count: 0,
+    current: { from: '2026-06-01', to: '2026-06-30' },
+    previous: { from: '2026-05-02', to: '2026-05-31' },
+    counts: { current_only: 1, previous_only: 1, both: 2 },
+    metrics: {
+      revenue: {
+        unit: 'rub',
+        gainers: [{ name: 'Товар A', current: 240_000, previous: 120_000, delta: 120_000, deltaPct: 100 }],
+        losers: [{ name: 'Товар C', current: 90_000, previous: 180_000, delta: -90_000, deltaPct: -50 }],
+        appeared: [{ name: 'Товар D', current: 60_000, previous: 0, delta: 60_000, deltaPct: null }],
+        disappeared: [{ name: 'Товар Z', current: 0, previous: 40_000, delta: -40_000, deltaPct: -100 }],
+      },
+      profit: {
+        unit: 'rub',
+        gainers: [{ name: 'Товар B', current: 80_000, previous: 50_000, delta: 30_000, deltaPct: 60 }],
+        losers: [{ name: 'Товар C', current: -5_000, previous: 20_000, delta: -25_000, deltaPct: -125 }],
+        appeared: [{ name: 'Товар D', current: 12_000, previous: 0, delta: 12_000, deltaPct: null }],
+        disappeared: [{ name: 'Товар Z', current: 0, previous: 9_000, delta: -9_000, deltaPct: -100 }],
+      },
+      units: {
+        unit: 'count',
+        gainers: [{ name: 'Товар A', current: 120, previous: 70, delta: 50, deltaPct: 71.4 }],
+        losers: [{ name: 'Товар C', current: 60, previous: 90, delta: -30, deltaPct: -33.3 }],
+        appeared: [{ name: 'Товар D', current: 18, previous: 0, delta: 18, deltaPct: null }],
+        disappeared: [{ name: 'Товар Z', current: 0, previous: 14, delta: -14, deltaPct: -100 }],
+      },
+    },
+    limit: 5,
+  };
+}
+
 /** Deterministic MoySklad slice used only by desktop browser tests. It mirrors the production
     contract closely enough to exercise aggregate filters, breakdown groups, ranking and explorer. */
 function demoMsPayload(url: URL): unknown | undefined {
@@ -131,7 +168,7 @@ function demoMsPayload(url: URL): unknown | undefined {
       if (av != null && bv == null) return -1;
       return (bv ?? 0) - (av ?? 0) || a.name.localeCompare(b.name, 'ru');
     });
-    return {
+    const body: Record<string, unknown> = {
       rows: rows.slice(0, limit),
       total: rows.length,
       truncated: false,
@@ -150,6 +187,11 @@ function demoMsPayload(url: URL): unknown | undefined {
         loss_making_amount: 5_000,
       },
     };
+    // Сравнение с предыдущим равным окном добавляется ТОЛЬКО при compare=prev (вкладка «Динамика»).
+    if (url.searchParams.get('compare') === 'prev') {
+      body.comparison = days === 0 ? { available: false, reason: 'all' } : demoMsComparison();
+    }
+    return body;
   }
   if (path === '/api/ms/customers') {
     const count = days === 0 ? 120 : days;
