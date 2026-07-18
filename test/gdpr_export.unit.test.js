@@ -199,6 +199,14 @@ test('стрим: собирает валидный JSON прежней форм
         [{ day: '2024-01-01', views: 1, __c0: '2024-01-01' }, { day: '2024-01-02', views: 2, __c0: '2024-01-02' }],
         [{ day: '2024-01-03', views: 3, __c0: '2024-01-03' }],
       ],
+      ms_orders: [[{
+        order_id: 'order-1', moment: '2024-01-02T10:00:00Z', sum_kopecks: '15000',
+        agent_id: 'agent-1', agent_name: 'Customer', __c0: 'order-1',
+      }]],
+      ms_returns: [[{
+        return_id: 'return-1', moment: '2024-01-03T10:00:00Z', sum_kopecks: '5000',
+        agent_id: 'agent-1', agent_name: 'Customer', __c0: 'return-1',
+      }]],
     },
     singles: {},
   });
@@ -217,6 +225,9 @@ test('стрим: собирает валидный JSON прежней форм
   assert.strictEqual(daily.length, 3, 'все три строки, без дублей/пропусков на стыке страниц');
   assert.deepStrictEqual(daily.map((r) => r.day), ['2024-01-01', '2024-01-02', '2024-01-03']);
   assert.ok(!('__c0' in daily[0]), 'служебный курсор-алиас вырезан из вывода');
+  assert.deepStrictEqual(doc.channels[0].archive.ms_orders.map((r) => r.order_id), ['order-1']);
+  assert.deepStrictEqual(doc.channels[0].archive.ms_returns.map((r) => r.return_id), ['return-1']);
+  assert.ok(!('__c0' in doc.channels[0].archive.ms_returns[0]), 'MoySklad cursor alias is not exported');
   assert.deepStrictEqual(doc.channels[0].instagram, null);
 
   // Курсор второй страницы = последний __c0 первой ('2024-01-02').

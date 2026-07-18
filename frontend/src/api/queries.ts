@@ -882,7 +882,18 @@ export function useMsTopCustomers(period: MsPeriod) {
 }
 
 const MsReturnsSchema = z
-  .object({ window_days: z.number(), count: z.number(), sum: z.number(), truncated: z.boolean().optional() })
+  .object({
+    window_days: z.number(),
+    archive_status: z.enum(['pending', 'idle', 'running', 'done', 'error']),
+    complete: z.boolean(),
+    archived_count: z.number(),
+    total_estimate: z.number().nullable(),
+    count: z.number(),
+    sum: z.number(),
+    // Дневная серия архива (только дни с возвратами; фронт дозаполняет календарь нулями). Сумма
+    // уже в рублях. Возвраты считаются ОТДЕЛЬНО и из выручки заказов не вычитаются.
+    series: z.array(z.object({ day: z.string(), count: z.number(), sum: z.number() }).passthrough()).default([]),
+  })
   .passthrough();
 
 export function useMsReturns(period: MsPeriod) {

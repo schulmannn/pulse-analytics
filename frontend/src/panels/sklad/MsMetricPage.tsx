@@ -7,7 +7,6 @@ import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/E
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { PeriodChips } from '@/components/PeriodChips';
 import { SourceIdentity } from '@/components/SourceIdentity';
-import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
 import { ErrorState } from '@/components/ErrorState';
 import { Skeleton } from '@/components/ui/skeleton';
 import { fmt } from '@/lib/format';
@@ -28,7 +27,14 @@ import {
   useMsTopCustomers,
   useMsCohorts,
 } from '@/api/queries';
-import { MsSummaryExplorer, MsFunnelRows } from '@/panels/sklad/MsOverview';
+import {
+  MsSummaryExplorer,
+  MsFunnelRows,
+  MsReturnsExplorer,
+  RETURNS_METRIC_OPTIONS,
+  fmtReturnsMetric,
+  type MsReturnsMetric,
+} from '@/panels/sklad/MsOverview';
 import {
   MsCustomerExplorer,
   MsCohortsTable,
@@ -728,56 +734,68 @@ function MsProductsPage() {
 
 function MsReturnsPage() {
   const window = useMsMetricWindow();
-  const returns = useMsReturns(window.period);
+  const [grain, setGrain] = useState<Grain>('day');
+  const [kind, setKind] = useState<'line' | 'bar'>('line');
+  const [metric, setMetric] = useState<MsReturnsMetric>('count');
+  const current = useMsReturns(window.period);
   const previous = useMsReturns(window.previousPeriod ?? window.period);
-  const windowLabel = window.range
-    ? `${fmt.day(window.range.from)} – ${fmt.day(window.range.to)}`
-    : window.days === 0 ? 'за всё время' : `за ${window.days} дн.`;
+  const valueOf = (data: typeof current.data) => (data?.complete
+    ? (metric === 'count' ? data.count : data.sum)
+    : null);
+  const format = (value: number) => fmtReturnsMetric(metric, value);
   return (
     <MsMetricShell
       back={BACK_OVERVIEW}
       term="Возвраты"
       descriptor="Возвраты МойСклада за выбранное окно"
       about={{
-        formula: 'Число и сумма возвратов (salesreturn) за окно.',
-        included: 'Возвраты считаются отдельно и из выручки не вычитаются.',
-        source: 'Документы возвратов МойСклада (salesreturn).',
+        formula: 'Число и сумма возвратов (salesreturn), созданных в выбранном окне, дневной серией из архива.',
+        included: 'Возвраты считаются отдельно и из выручки/RFM заказов НЕ вычитаются.',
+        source: 'Архив возвратов МойСклада (ms_returns).',
       }}
       comparison={
         <ComparisonReadout
-          current={returns.data?.sum ?? null}
-          previous={window.previousPeriod ? (previous.data?.sum ?? null) : null}
-          format={(value) => `${fmt.short(value)} ₽`}
+          current={valueOf(current.data)}
+          previous={window.previousPeriod ? valueOf(previous.data) : null}
+          format={format}
           previousPeriod={window.previousPeriod}
-          pending={returns.isPending || (window.previousPeriod != null && previous.isPending)}
-          error={returns.isError || (window.previousPeriod != null && previous.isError)}
-          label="Сумма возвратов"
+          pending={current.isPending || (window.previousPeriod != null && previous.isPending)}
+          error={current.isError || (window.previousPeriod != null && previous.isError)}
+          label={metric === 'count' ? 'Число возвратов' : 'Сумма возвратов'}
         />
       }
     >
-      <MsReportCard id="ms-page-returns" title="Возвраты">
-        {returns.isPending ? (
-          <ListSkeleton rows={2} />
-        ) : returns.isError ? (
-          <ErrorState
-            className="py-4"
-            title="Не удалось получить возвраты"
-            reason={returns.error instanceof Error ? returns.error.message : 'ошибка'}
-            onRetry={() => returns.refetch()}
-            retrying={returns.isFetching}
+      <MsChartCard
+        id="ms-page-returns"
+        title="По периодам"
+        kind={kind}
+        onKind={setKind}
+        chart={
+          <MsReturnsExplorer
+            metric={metric}
+            period={window.period}
+            comparisonPeriod={window.previousPeriod}
+            grain={grain}
+            kind={kind}
           />
-        ) : !returns.data ? (
-          <p className="py-4 text-sm text-muted-foreground">Нет данных о возвратах за период.</p>
-        ) : (
-          <ChartCardBody value={fmt.num(returns.data.count)} caption={`на ${fmt.short(returns.data.sum)} ₽ ${windowLabel}`}>
-            <div className="space-y-1.5 text-2xs text-muted-foreground">
-              {returns.data.truncated && <p>Показано не менее — возвратов за период больше лимита выборки.</p>}
-              <p>Возвраты считаются отдельно и из выручки не вычитаются.</p>
-            </div>
-          </ChartCardBody>
-        )}
-      </MsReportCard>
-      <ControlBar window={window} />
+        }
+        controlBar={
+          <ControlBar
+            window={window}
+            grain={grain}
+            onGrain={setGrain}
+            extra={
+              <SegmentedControl
+                ariaLabel="Метрика возвратов"
+                className="shrink-0"
+                value={metric}
+                onChange={setMetric}
+                options={RETURNS_METRIC_OPTIONS}
+              />
+            }
+          />
+        }
+      />
     </MsMetricShell>
   );
 }

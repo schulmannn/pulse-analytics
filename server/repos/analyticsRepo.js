@@ -687,6 +687,42 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
     };
   }
 
+  // Возвраты покупателей (архив ms_returns, миграция 032): точный оконный count/sum + дневная
+  // серия. Читается вместо прежнего live salesreturn page-loop — токен не расшифровывается, к МС
+  // не ходим. Суммы — КОПЕЙКИ (рубли — граница API). Серия отдаёт ТОЛЬКО дни с возвратами (фронт
+  // дозаполняет календарь нулями, канон customers.series/mentions.daily). Возвраты СОЗНАТЕЛЬНО
+  // считаются отдельно и из выручки/RFM заказов НЕ вычитаются.
+  async function getMsReturnsInternal(channelId, { sinceDay = null, untilDay = null } = {}) {
+    if (!enabled || !channelId) return { count: 0, sum_kopecks: 0, series: [] };
+    const params = [channelId, msSinceDay(sinceDay), msUntilDay(untilDay)];
+    // Одна SQL snapshot: totals и daily не могут разъехаться, если top-up пишет между запросами.
+    const { rows } = await pool.query(
+      `WITH win AS (
+         SELECT moment, sum_kopecks FROM ms_returns
+          WHERE channel_id=$1 AND ($2::date IS NULL OR moment >= $2::date)
+            AND ($3::date IS NULL OR moment < ($3::date + 1))
+       ), totals AS (
+         SELECT COUNT(*)::int AS count, COALESCE(SUM(sum_kopecks),0)::bigint AS sum_kopecks FROM win
+       ), daily AS (
+         SELECT to_char(moment,'YYYY-MM-DD') AS day, COUNT(*)::int AS count,
+                COALESCE(SUM(sum_kopecks),0)::bigint AS sum_kopecks
+           FROM win GROUP BY 1
+       )
+       SELECT t.count AS total_count, t.sum_kopecks AS total_sum_kopecks,
+              d.day, d.count, d.sum_kopecks
+         FROM totals t LEFT JOIN daily d ON TRUE ORDER BY d.day NULLS LAST`, params);
+    const t = rows[0] || {};
+    return {
+      count: toMetricNumber(t.total_count) || 0,
+      sum_kopecks: toMetricNumber(t.total_sum_kopecks) || 0,
+      series: rows.filter((r) => r.day != null).map((r) => ({
+        day: r.day,
+        count: toMetricNumber(r.count) || 0,
+        sum_kopecks: toMetricNumber(r.sum_kopecks) || 0,
+      })),
+    };
+  }
+
   // Дневная серия выручки/заказов, опционально ФИЛЬТРОВАННАЯ по одному каналу продаж (слайс 6в):
   // это «настроить график по источнику» из запроса владельца — та же ось salesChannel, но во
   // времени. salesChannelId=null → все каналы (итог, как summary из архива). День = date-part
@@ -801,6 +837,10 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
   async function getMsChannelSeriesForActor(channelId, actor, opts = {}) {
     return (await allowed(channelId, actor)) ? getMsChannelSeriesInternal(channelId, opts) : [];
   }
+  async function getMsReturnsForActor(channelId, actor, opts = {}) {
+    // null от ForActor = доступ отозван (гонка) — роут ответит 403, а не сфабрикованными нулями.
+    return (await allowed(channelId, actor)) ? getMsReturnsInternal(channelId, opts) : null;
+  }
   async function getMsChannelSeriesGroupedForActor(channelId, actor, opts = {}) {
     return (await allowed(channelId, actor)) ? getMsChannelSeriesGroupedInternal(channelId, opts) : [];
   }
@@ -839,13 +879,13 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
     getMsDailyAllInternal, getMsFunnelInternal, getMsCustomersInternal, getMsRfmInternal, getMsCohortsInternal,
     getMsTopCustomersInternal, getMsOldestOrderDayInternal,
     getMsSalesByChannelInternal, getMsGeographyInternal, getMsChannelSeriesInternal,
-    getMsChannelSeriesGroupedInternal,
+    getMsChannelSeriesGroupedInternal, getMsReturnsInternal,
     getChannelHistoryForActor, getMentionsHistoryForActor, getMentionsArchiveForActor,
     getSnapshotForActor, getLatestVelocityForActor, listPostsForActor, listIgDailyForActor, listIgMediaDailyForActor,
     getMsDailyAllForActor, getMsFunnelForActor, getMsCustomersForActor, getMsRfmForActor, getMsCohortsForActor,
     getMsTopCustomersForActor, getMsOldestOrderDayForActor,
     getMsSalesByChannelForActor, getMsGeographyForActor, getMsChannelSeriesForActor,
-    getMsChannelSeriesGroupedForActor,
+    getMsChannelSeriesGroupedForActor, getMsReturnsForActor,
   };
 }
 

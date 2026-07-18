@@ -245,9 +245,38 @@ export function MsOverview() {
             value={fmt.num(returns.data.count)}
             caption={`на ${fmt.short(returns.data.sum)} ₽ ${windowLabel}`}
           >
-            <div className="space-y-1.5 text-2xs text-muted-foreground">
-              {/* Живое чтение salesreturn с cap по страницам: упёрлись — честное «не менее». */}
-              {returns.data.truncated && <p>Показано не менее — возвратов за период больше лимита выборки.</p>}
+            {returns.data.complete && returns.data.count === 0 ? (
+              <p className="py-4 text-xs text-muted-foreground">Возвратов за период нет.</p>
+            ) : (
+              (() => {
+                // Реальная дневная линия числа возвратов: архивную серию (только дни с возвратами)
+                // дозаполняем календарными нулями по окну, затем даунсэмплим до канона ~140 точек.
+                const dense = densifyDayPoints(
+                  returns.data.series.map((r) => ({ day: r.day, orders: r.count, sum: r.sum })),
+                  period,
+                );
+                const sampled = lttbDownsample(dense, 140, (p) => p.orders);
+                return sampled.length > 1 ? (
+                  <LineChart
+                    values={sampled.map((p) => p.orders)}
+                    labels={sampled.map((p) => fmt.day(p.day))}
+                    titles={sampled.map((p) => `${fmt.day(p.day)}: ${fmt.num(p.orders)} · ${fmt.short(p.sum)} ₽`)}
+                    yMin={0}
+                  />
+                ) : (
+                  <p className="text-xs text-muted-foreground">Недостаточно дней для графика.</p>
+                );
+              })()
+            )}
+            <div className="mt-2 space-y-1.5 text-2xs text-muted-foreground">
+              {!returns.data.complete && (
+                <p>
+                  Архив возвратов ещё загружается. Показаны только уже сохранённые документы
+                  {returns.data.total_estimate == null
+                    ? '.'
+                    : `: ${fmt.num(returns.data.archived_count)} из примерно ${fmt.num(returns.data.total_estimate)}.`}
+                </p>
+              )}
               <p>Возвраты считаются отдельно и из выручки не вычитаются.</p>
             </div>
           </ChartCardBody>
@@ -466,4 +495,148 @@ export function MsFunnelRows({
       )}
     </div>
   );
+}
+
+/** Метрика возвратов страницы `/metrics/ms-returns`: число документов или их сумма. */
+export type MsReturnsMetric = 'count' | 'sum';
+
+export const RETURNS_METRIC_OPTIONS: Array<{ value: MsReturnsMetric; content: string }> = [
+  { value: 'count', content: 'Число' },
+  { value: 'sum', content: 'Сумма' },
+];
+
+/** Формат значения выбранной метрики возвратов (число — штуки, сумма — рубли). */
+export function fmtReturnsMetric(metric: MsReturnsMetric, value: number | null): string {
+  if (value == null) return '—';
+  return metric === 'count' ? fmt.num(value) : `${fmt.short(value)} ₽`;
+}
+
+/** Итог метрики возвратов за окно (сумма по дням серии). */
+export function returnsMetricTotal(series: Array<{ count: number; sum: number }>, metric: MsReturnsMetric): number {
+  return series.reduce((total, row) => total + (metric === 'count' ? row.count : row.sum), 0);
+}
+
+/**
+ * Полноэкранный график возвратов одной метрики (число / сумма) — self-fetch по выбранному окну.
+ * Дневную архивную серию (только дни с возвратами) дозаполняем календарными нулями, агрегируем по
+ * бакету грануляции и накладываем призрак равного предыдущего окна. Возвраты СОЗНАТЕЛЬНО считаются
+ * отдельно и из выручки заказов не вычитаются. Экспортируется для `/metrics/ms-returns`.
+ */
+export function MsReturnsExplorer({
+  metric,
+  period,
+  comparisonPeriod,
+  grain = 'day',
+  kind,
+}: {
+  metric: MsReturnsMetric;
+  period: MsPeriod;
+  comparisonPeriod?: MsPeriod | null;
+  grain?: Grain;
+  kind: 'line' | 'bar';
+}) {
+  const returns = useMsReturns(period);
+  const comparison = useMsReturns(comparisonPeriod ?? period);
+  const expandedHeight = useContext(ExpandedChartHeightContext);
+
+  if (returns.isPending) {
+    return (
+      <div className="py-2">
+        <Skeleton className="h-4 w-1/4" />
+        <Skeleton className="mt-3 h-48 w-full" />
+      </div>
+    );
+  }
+  if (returns.isError) {
+    return (
+      <ErrorState
+        title="Не удалось получить возвраты"
+        reason={returns.error instanceof Error ? returns.error.message : 'ошибка'}
+        onRetry={() => returns.refetch()}
+        retrying={returns.isFetching}
+      />
+    );
+  }
+
+  // Метрика возвратов ложится на общий DayPoint: число → orders, сумма → sum; график берёт
+  // соответствующую роль msSeries ('orders'/'revenue') — та же арифметика бакетов и нулей.
+  const seriesMetric: Metric = metric === 'count' ? 'orders' : 'revenue';
+  const toPoints = (rows: Array<{ day: string; count: number; sum: number }>): DayPoint[] =>
+    rows.map((r) => ({ day: r.day, orders: r.count, sum: r.sum }));
+
+  const dayPoints = toPoints(returns.data.series);
+  const bucketed = bucketPoints(densifyDayPoints(dayPoints, period), grain);
+  const points = aggregatePlotPoints(bucketed, seriesMetric, CHART_MAX_POINTS);
+  const total = metric === 'count' ? returns.data.count : returns.data.sum;
+  if (points.length < 2) {
+    return (
+      <ChartCardBody value={fmtReturnsMetric(metric, total)} caption={windowWord(period)}>
+        <p className="py-4 text-xs text-muted-foreground">Недостаточно дней для графика за период.</p>
+        {!returns.data.complete && <ReturnsArchiveNotice data={returns.data} />}
+        <p className="mt-2 text-2xs text-muted-foreground">Возвраты считаются отдельно и из выручки не вычитаются.</p>
+      </ChartCardBody>
+    );
+  }
+
+  const values = points.map((p) => metricValue(seriesMetric, p));
+  const labels = points.map((p) => fmt.day(p.day));
+  const titles = points.map((p) => `${fmt.day(p.day)}: ${fmtReturnsMetric(metric, metricValue(seriesMetric, p))}`);
+  const comparisonPoints = comparisonPeriod && comparison.data
+    ? aggregatePlotPoints(
+        bucketPoints(densifyDayPoints(toPoints(comparison.data.series), comparisonPeriod), grain),
+        seriesMetric,
+        CHART_MAX_POINTS,
+      )
+    : [];
+  const ghostValues = comparisonPoints.map((p) => metricValue(seriesMetric, p));
+  const ghostOk = returns.data.complete && comparison.data?.complete === true
+    && ghostValues.length === values.length && ghostValues.length >= 2;
+
+  return (
+    <ChartCardBody value={fmtReturnsMetric(metric, total)} caption={windowWord(period)}>
+      {kind === 'bar' ? (
+        <BarChart
+          values={values.map((v) => v ?? 0)}
+          ghost={ghostOk ? ghostValues.map((v) => v ?? 0) : undefined}
+          ghostLabel="Пред. период"
+          legendToggle={false}
+          labels={labels}
+          titles={titles}
+          height={expandedHeight ?? undefined}
+        />
+      ) : (
+        <LineChart
+          values={values}
+          ghost={ghostOk ? ghostValues : undefined}
+          ghostLabel="Пред. период"
+          ghostTitles={ghostOk ? comparisonPoints.map((p) => fmt.day(p.day)) : undefined}
+          legendToggle={false}
+          labels={labels}
+          titles={titles}
+          yMin={0}
+          height={expandedHeight ?? undefined}
+        />
+      )}
+      {!returns.data.complete && <ReturnsArchiveNotice data={returns.data} />}
+      <p className="mt-3 text-2xs text-muted-foreground">Возвраты считаются отдельно и из выручки не вычитаются.</p>
+    </ChartCardBody>
+  );
+}
+
+function ReturnsArchiveNotice({ data }: { data: ReturnType<typeof useMsReturns>['data'] }) {
+  if (!data || data.complete) return null;
+  return (
+    <p className="mt-3 text-2xs text-muted-foreground">
+      Архив возвратов ещё загружается. Показаны только уже сохранённые документы
+      {data.total_estimate == null
+        ? '.'
+        : `: ${fmt.num(data.archived_count)} из примерно ${fmt.num(data.total_estimate)}.`}
+    </p>
+  );
+}
+
+/** Короткая подпись окна для caption'ов возвратов. */
+function windowWord(period: MsPeriod): string {
+  if (period.custom && period.from && period.to) return `${fmt.day(period.from)} – ${fmt.day(period.to)}`;
+  return period.days === 0 ? 'за всё время' : `за ${period.days} дн.`;
 }

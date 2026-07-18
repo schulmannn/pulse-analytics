@@ -556,6 +556,101 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
     return true;
   }
 
+  // Возвраты покупателей МойСклада (архив ms_returns, миграция 032). rows: [{ return_id, moment,
+  // sum_kopecks, agent_id, agent_name }] — суммы в КОПЕЙКАХ. Идемпотентный батч-upsert по
+  // (channel_id, return_id); как ms_orders — СОЗНАТЕЛЬНО полная ЗАМЕНА строки, не COALESCE:
+  // возвраты в МС правят задним числом (сумма/контрагент меняются, в т.ч. вниз и на NULL), и
+  // повторный проход обязан донести правку, а не «дополнить». Формат moment валидирует движок
+  // (jobs/msBackfillJob); repo повторяет fail-closed проверку ключа/даты/денег до SQL, чтобы ни
+  // один сторонний вызов не мог тихо занизить архив или уронить timestamptz-каст всего батча.
+  async function upsertMsReturns(channelId, rows, executor = pool) {
+    if (!enabled || !channelId || !rows || !rows.length) return 0;
+    const clean = [];
+    for (const row of rows) {
+      if (!row || row.return_id == null || !String(row.return_id).trim()) {
+        const error = new Error('MoySklad return id is missing');
+        error.code = 'ms_return_invalid_id';
+        throw error;
+      }
+      if (typeof row.moment !== 'string'
+        || !/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/.test(row.moment)) {
+        const error = new Error('MoySklad return moment is invalid');
+        error.code = 'ms_return_invalid_moment';
+        throw error;
+      }
+      const amount = Number(row.sum_kopecks);
+      if (row.sum_kopecks == null || !Number.isSafeInteger(amount) || amount < 0) {
+        const error = new Error('MoySklad return amount is outside the exact numeric contract');
+        error.code = 'ms_return_metric_out_of_range';
+        throw error;
+      }
+      clean.push({ ...row, return_id: String(row.return_id), sum_kopecks: amount });
+    }
+    const sql = `INSERT INTO ms_returns
+        (channel_id, return_id, moment, sum_kopecks, agent_id, agent_name, updated_at)
+      SELECT $1, x.return_id, x.moment, x.sum_kopecks, x.agent_id, x.agent_name, now()
+        FROM jsonb_to_recordset($2::jsonb) AS x(
+          return_id text, moment timestamptz, sum_kopecks bigint, agent_id text, agent_name text
+        )
+      ON CONFLICT (channel_id, return_id) DO UPDATE SET
+        moment=EXCLUDED.moment,
+        sum_kopecks=EXCLUDED.sum_kopecks,
+        agent_id=EXCLUDED.agent_id,
+        agent_name=EXCLUDED.agent_name,
+        updated_at=now()`;
+    await executor.query(sql, [channelId, JSON.stringify(clean)]);
+    return clean.length;
+  }
+
+  // Сколько возвратов канала уже в архиве — для будущего returns-progress. COUNT(*)::int безопасен.
+  async function countMsReturns(channelId) {
+    if (!enabled || !channelId) return 0;
+    const { rows } = await pool.query(
+      'SELECT COUNT(*)::int AS n FROM ms_returns WHERE channel_id=$1', [channelId]);
+    return rows[0] ? rows[0].n : 0;
+  }
+
+  // Durable-состояние бэкфилла ВОЗВРАТОВ одного канала (ms_returns_backfill_state, миграция 032) —
+  // зеркало getMsBackfillState, но отдельная таблица (полоса возвратов независима от заказов).
+  async function getMsReturnsBackfillState(channelId) {
+    if (!enabled || !channelId) return null;
+    const { rows } = await pool.query(
+      `SELECT channel_id, status, to_char(cursor_from,'YYYY-MM-DD') AS cursor_from,
+              total_estimate, fetched_count, error,
+              to_char(started_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS started_at,
+              to_char(updated_at,'YYYY-MM-DD"T"HH24:MI:SSOF') AS updated_at,
+              EXTRACT(EPOCH FROM (now() - updated_at))::int AS updated_age_seconds
+         FROM ms_returns_backfill_state WHERE channel_id=$1`, [channelId]);
+    return rows[0] || null;
+  }
+
+  // Частичный upsert состояния бэкфилла возвратов — та же дисциплина, что setMsBackfillState
+  // (allow-list колонок, значения только биндами, updated_at=now() всегда как heartbeat).
+  const MS_RETURNS_BACKFILL_COLUMNS = ['status', 'cursor_from', 'total_estimate', 'fetched_count', 'error', 'started_at'];
+  async function setMsReturnsBackfillState(channelId, patch = {}) {
+    if (!enabled || !channelId) return false;
+    const cols = ['channel_id'];
+    const vals = ['$1'];
+    const params = [channelId];
+    const sets = [];
+    for (const col of MS_RETURNS_BACKFILL_COLUMNS) {
+      if (!(col in patch)) continue;
+      let v = patch[col];
+      if (col === 'error' && v != null) v = String(v).slice(0, 1000);
+      params.push(v);
+      cols.push(col);
+      vals.push(`$${params.length}`);
+      sets.push(`${col}=$${params.length}`);
+    }
+    sets.push('updated_at=now()');
+    await pool.query(
+      `INSERT INTO ms_returns_backfill_state (${cols.join(', ')}, updated_at)
+       VALUES (${vals.join(', ')}, now())
+       ON CONFLICT (channel_id) DO UPDATE SET ${sets.join(', ')}`,
+      params);
+    return true;
+  }
+
   // Per-media lifetime-инсайты по дням. rows: [{ media_id, day, reach, likes, comments,
   // saved, shares, views }]. Insights кумулятивны → каждый день — новая точка траектории.
   async function upsertIgMediaDaily(channelId, rows, executor = pool) {
@@ -729,6 +824,7 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
     ingestCollectorPayload, persistCentralDaily, persistTgBundleTx,
     upsertIgDaily, upsertIgMediaDaily, upsertMsDaily,
     upsertMsOrders, countMsOrders, getMsBackfillState, setMsBackfillState,
+    upsertMsReturns, countMsReturns, getMsReturnsBackfillState, setMsReturnsBackfillState,
     saveRawSnapshot, pruneRawSnapshots, pruneIgMediaDaily, pruneIngestReceipts, rollupChannelMonthly,
   };
 }

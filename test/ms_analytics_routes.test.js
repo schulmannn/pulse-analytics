@@ -3,8 +3,9 @@
 // Route-тесты слайсов 3–4 МойСклада (fake-app паттерн reports_route/campaigns_route): auth —
 // pass-middleware, db/msFetch/msCrypto — стабы, кэш — реальный memoryCache (без start(), таймеров
 // нет), пауза page-loop'а — записывающий sleepFn (как в тестах движка бэкфилла). Фокус:
-//   • /api/ms/returns — живой page-loop (окно-фильтр целиком URL-encoded, страницы limit/offset,
-//     cap → truncated, копейки → рубли на границе, кэш-хит вторым вызовом, ms_token_revoked);
+//   • /api/ms/returns — DB-агрегат архива ms_returns (точное окно в репо, БЕЗ живого запроса к
+//     МС, копейки→рубли на границе, дневная серия, «Всё» без нижней границы, 403 при отзыве, 400
+//     на кривом диапазоне);
 //   • /api/ms/funnel — словарь статусов (int-цвет → '#rrggbb', NULL-строка → no_state_orders,
 //     мягкая деградация без словаря, неуспех словаря не кэшируется);
 //   • /api/ms/top-products days=0 — честное «Всё» (якорь от старейшего заказа архива, фолбэк
@@ -43,6 +44,9 @@ function buildMs({ msFetch, db = {} } = {}) {
       enabled: true,
       getChannelOrDefault: async () => ({ id: 5, owner_uid: 7 }),
       getMsAccount: async () => ({ access_token_enc: 'enc', org_name: 'ООО Ромашка', ms_account_id: 'acc-1' }),
+      getMsReturnsBackfillState: async () => ({
+        status: 'done', fetched_count: 3, total_estimate: 3,
+      }),
       ...db,
     },
     audit: async (_req, action, meta) => { audits.push({ action, meta }); },
@@ -73,69 +77,99 @@ async function invoke(routes, key, { query = {}, headers = {}, body = {} } = {})
   return res;
 }
 
-const ret = (sum) => ({ sum });
-
-test('returns: окно-фильтр encoded как у движка, страницы суммируются в копейках, наружу рубли', async () => {
-  const fetches = [];
-  const fullPage = Array.from({ length: 1000 }, () => ret(100));
-  const { routes, sleeps } = buildMs({
-    msFetch: async (token, path) => {
-      assert.equal(token, 'TOKEN:enc');
-      assert.ok(!path.includes(' '), `path обязан быть URL-encoded (пробел в: ${path})`);
-      fetches.push(path);
-      const q = new URLSearchParams(path.split('?')[1] || '');
-      assert.match(q.get('filter'), /^moment>=\d{4}-\d{2}-\d{2} 00:00:00;moment<=\d{4}-\d{2}-\d{2} 23:59:59$/);
-      assert.equal(q.get('limit'), '1000');
-      assert.equal(q.get('order'), 'moment,asc');
-      return Number(q.get('offset')) === 0 ? { rows: fullPage } : { rows: [ret(250.4), ret(50)] };
+test('returns: DB-агрегат точного окна без живого запроса к МС; копейки→рубли, дневная серия', async () => {
+  const seen = [];
+  const { routes } = buildMs({
+    msFetch: async () => { throw new Error('returns не должен ходить в МС — читает архив'); },
+    db: {
+      getMsReturnsForActor: async (channelId, actor, opts) => {
+        seen.push({ channelId, uid: actor && actor.uid, opts });
+        return {
+          count: 3,
+          sum_kopecks: 100_300,   // 1003 ₽ — одна конверсия на границе
+          series: [
+            { day: '2026-07-10', count: 2, sum_kopecks: 50_150 },
+            { day: '2026-07-12', count: 1, sum_kopecks: 50_150 },
+          ],
+        };
+      },
     },
   });
   const res = await invoke(routes, 'GET /api/ms/returns', { query: { days: '30' } });
   assert.equal(res.statusCode, 200);
-  // 1000×100 + 250 + 50 = 100 300 копеек = 1003 ₽ (одна конверсия на границе).
-  assert.deepEqual(res.body, { window_days: 30, count: 1002, sum: 1003, truncated: false });
-  assert.equal(fetches.length, 2);
-  assert.deepEqual(sleeps, [150], 'пауза ровно между страницами (после последней не спим)');
+  assert.deepEqual(res.body, {
+    window_days: 30,
+    archive_status: 'done',
+    complete: true,
+    archived_count: 3,
+    total_estimate: 3,
+    count: 3,
+    sum: 1003,
+    series: [
+      { day: '2026-07-10', count: 2, sum: 501.5 },
+      { day: '2026-07-12', count: 1, sum: 501.5 },
+    ],
+  });
+  // Точное окно уходит в репо (actor-gated), канал — резолвнутый tenant; live-вызова не было.
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].channelId, 5);
+  assert.equal(seen[0].uid, 7);
+  assert.match(seen[0].opts.sinceDay, /^\d{4}-\d{2}-\d{2}$/);
+  assert.match(seen[0].opts.untilDay, /^\d{4}-\d{2}-\d{2}$/);
 });
 
-test('returns: cap 5 страниц → truncated, дальше МС не дёргаем', async () => {
-  let n = 0;
-  const fullPage = Array.from({ length: 1000 }, () => ret(10));
-  const { routes, sleeps } = buildMs({ msFetch: async () => { n += 1; return { rows: fullPage }; } });
-  const res = await invoke(routes, 'GET /api/ms/returns', { query: { days: '7' } });
-  assert.deepEqual(res.body, { window_days: 7, count: 5000, sum: 500, truncated: true });
-  assert.equal(n, 5, 'ровно cap страниц');
-  assert.deepEqual(sleeps, [150, 150, 150, 150]);
-});
-
-test('returns: days=0 — вся история БЕЗ фильтра; повторный вызов — кэш-хит без запросов к МС', async () => {
-  const fetches = [];
+test('returns: days=0 («Всё») — без нижней границы окна, по-прежнему из архива', async () => {
+  const seen = [];
   const { routes } = buildMs({
-    msFetch: async (_token, path) => {
-      fetches.push(path);
-      assert.ok(!path.includes('filter='), 'days=0 живёт без фильтра окна');
-      return { rows: [ret(1234)] };
+    msFetch: async () => { throw new Error('не должен ходить в МС'); },
+    db: {
+      getMsReturnsForActor: async (_c, _a, opts) => {
+        seen.push(opts);
+        return { count: 0, sum_kopecks: 0, series: [] };
+      },
     },
   });
-  const first = await invoke(routes, 'GET /api/ms/returns', { query: { days: '0' } });
-  assert.deepEqual(first.body, { window_days: 0, count: 1, sum: 12.34, truncated: false });
-  assert.equal(fetches.length, 1);
-  const second = await invoke(routes, 'GET /api/ms/returns', { query: { days: '0' } });
-  assert.deepEqual(second.body, first.body);
-  assert.equal(fetches.length, 1, 'второй ответ — из кэша (10 минут)');
+  const res = await invoke(routes, 'GET /api/ms/returns', { query: { days: '0' } });
+  assert.deepEqual(res.body, {
+    window_days: 0, archive_status: 'done', complete: true,
+    archived_count: 3, total_estimate: 3, count: 0, sum: 0, series: [],
+  });
+  assert.equal(seen[0].sinceDay, null, '«Всё» = без нижней границы');
 });
 
-test('returns: 401/403 от МС → 401 ms_token_revoked (reconnect-CTA, как остальные data-роуты)', async () => {
+test('returns: null от ForActor (доступ отозван) → 403, без сфабрикованных нулей', async () => {
   const { routes } = buildMs({
-    msFetch: async () => {
-      const e = new Error('МойСклад: HTTP 401');
-      e.status = 401;
-      throw e;
+    msFetch: async () => { throw new Error('не должен ходить в МС'); },
+    db: { getMsReturnsForActor: async () => null },
+  });
+  const res = await invoke(routes, 'GET /api/ms/returns', { query: { days: '30' } });
+  assert.equal(res.statusCode, 403);
+});
+
+test('returns: незавершённый архив маркирует частичный ноль, а не выдаёт его за полный', async () => {
+  const { routes } = buildMs({
+    msFetch: async () => { throw new Error('не должен ходить в МС'); },
+    db: {
+      getMsReturnsForActor: async () => ({ count: 0, sum_kopecks: 0, series: [] }),
+      getMsReturnsBackfillState: async () => ({
+        status: 'running', fetched_count: 12, total_estimate: 40,
+      }),
     },
   });
   const res = await invoke(routes, 'GET /api/ms/returns', { query: { days: '30' } });
-  assert.equal(res.statusCode, 401);
-  assert.equal(res.body.code, 'ms_token_revoked');
+  assert.deepEqual(res.body, {
+    window_days: 30, archive_status: 'running', complete: false,
+    archived_count: 12, total_estimate: 40, count: 0, sum: 0, series: [],
+  });
+});
+
+test('returns: кривой диапазон from/to → 400 (не тихое расширение окна)', async () => {
+  const { routes } = buildMs({
+    msFetch: async () => { throw new Error('не должен ходить в МС'); },
+    db: { getMsReturnsForActor: async () => { throw new Error('репо не должен вызываться при 400'); } },
+  });
+  const res = await invoke(routes, 'GET /api/ms/returns', { query: { from: '2026-07-31', to: '2026-07-01' } });
+  assert.equal(res.statusCode, 400);
 });
 
 test('/api/ms/funnel: словарь статусов мапит имя и int-цвет → #rrggbb, NULL-строка → no_state_orders, словарь кэшируется', async () => {
