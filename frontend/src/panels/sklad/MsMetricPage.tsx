@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import type { ReactNode } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { ChartSection as RailSection } from '@/components/instagram/shared';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
@@ -15,6 +15,13 @@ import { usePeriod, type DateRange, type PeriodDays } from '@/lib/period';
 import { msPreviousPeriod, useMsResolvedPeriod, type MsPeriod } from '@/lib/msPeriod';
 import { metricTotal, type Grain, type Metric } from '@/lib/msSeries';
 import { customerMetricTotal, type MsCustomerMetric } from '@/lib/msCustomerSeries';
+import type { MsChannelContributionMetric } from '@/lib/msChannelContribution';
+import {
+  applyMsMetricChannels,
+  applyMsMetricEnum,
+  parseMsMetricUrl,
+  type MsMetricUrlSchema,
+} from '@/lib/msMetricUrlState';
 import {
   useMsChannelSeries,
   useMsCustomers,
@@ -26,6 +33,7 @@ import {
   useMsSummary,
   useMsTopCustomers,
   useMsCohorts,
+  type MsProductSort,
 } from '@/api/queries';
 import {
   MsSummaryExplorer,
@@ -51,7 +59,11 @@ import {
   type View,
   type ChannelOption,
 } from '@/panels/sklad/MsChannels';
-import { MsTopProductsCard } from '@/panels/sklad/MsTopProducts';
+import {
+  MsTopProductsCard,
+  type ConcentrationMetric,
+  type ExpandedView,
+} from '@/panels/sklad/MsTopProducts';
 import { isMsMetricKey } from '@/panels/sklad/msMetricKeys';
 
 /**
@@ -143,6 +155,66 @@ export function MsMetricPage({ metricKey }: { metricKey: string }) {
 
 /** Re-export guard so the route dispatcher can gate `ms-*` keys without importing the page eagerly. */
 export { isMsMetricKey };
+
+// ── URL-owned explorer controls ─────────────────────────────────────────────────────────────
+
+const GRAIN = { values: ['day', 'week', 'month'], defaultValue: 'day' } as const;
+const CHART = { values: ['line', 'bar'], defaultValue: 'line' } as const;
+const COMPARE = { values: ['prev', 'off'], defaultValue: 'prev' } as const;
+const SUMMARY_URL: MsMetricUrlSchema = { enums: { grain: GRAIN, chart: CHART, compare: COMPARE } };
+const CHANNELS_URL: MsMetricUrlSchema = {
+  enums: {
+    grain: GRAIN,
+    chart: CHART,
+    metric: { values: ['revenue', 'orders', 'aov'], defaultValue: 'revenue' },
+    view: { values: ['aggregate', 'breakdown'], defaultValue: 'aggregate' },
+    compare: COMPARE,
+  },
+  channels: true,
+};
+const FUNNEL_URL: MsMetricUrlSchema = {
+  enums: { metric: { values: ['orders', 'revenue'], defaultValue: 'orders' }, compare: COMPARE },
+};
+const PRODUCTS_URL: MsMetricUrlSchema = {
+  enums: {
+    view: { values: ['concentration', 'ranking'], defaultValue: 'concentration' },
+    sort: { values: ['revenue', 'profit', 'margin'], defaultValue: 'revenue' },
+    concentration: { values: ['revenue', 'profit'], defaultValue: 'revenue' },
+  },
+};
+const RETURNS_URL: MsMetricUrlSchema = {
+  enums: {
+    grain: GRAIN,
+    chart: CHART,
+    metric: { values: ['count', 'sum'], defaultValue: 'count' },
+    compare: COMPARE,
+  },
+};
+const CONTRIBUTION_URL: MsMetricUrlSchema = {
+  enums: { metric: { values: ['revenue', 'orders'], defaultValue: 'revenue' }, compare: COMPARE },
+};
+const COMPARE_URL: MsMetricUrlSchema = { enums: { compare: COMPARE } };
+
+/** One merge-and-replace URL owner per metric page: no competing effects or history spam. */
+function useMsMetricUrlControls(schema: MsMetricUrlSchema) {
+  const [params, setParams] = useSearchParams();
+  const parsed = useMemo(() => parseMsMetricUrl(params, schema), [params, schema]);
+  const canonical = parsed.canonical.toString();
+  const current = params.toString();
+
+  useEffect(() => {
+    if (canonical !== current) setParams(parsed.canonical, { replace: true });
+  }, [canonical, current, parsed.canonical, setParams]);
+
+  const setEnum = useCallback((key: string, value: string) => {
+    setParams((prev) => applyMsMetricEnum(prev, schema, key, value), { replace: true });
+  }, [schema, setParams]);
+  const setChannels = useCallback((ids: readonly string[]) => {
+    setParams((prev) => applyMsMetricChannels(prev, ids), { replace: true });
+  }, [setParams]);
+
+  return { values: parsed.values, channels: parsed.channels, setEnum, setChannels };
+}
 
 // ── Shared shell ─────────────────────────────────────────────────────────────────────────────
 
@@ -289,6 +361,8 @@ function ComparisonReadout({
   pending = false,
   error = false,
   label = 'Текущее окно',
+  mode,
+  onMode,
 }: {
   current: number | null;
   previous: number | null;
@@ -297,8 +371,9 @@ function ComparisonReadout({
   pending?: boolean;
   error?: boolean;
   label?: string;
+  mode: 'off' | 'prev';
+  onMode: (mode: 'off' | 'prev') => void;
 }) {
-  const [mode, setMode] = useState<'off' | 'prev'>('prev');
   const delta = current != null && previous != null && previous !== 0
     ? ((current - previous) / Math.abs(previous)) * 100
     : null;
@@ -314,7 +389,7 @@ function ComparisonReadout({
         ariaLabel="База сравнения"
         size="sm"
         value={mode}
-        onChange={setMode}
+        onChange={onMode}
         options={[
           { value: 'off', content: 'Выкл' },
           { value: 'prev', content: 'Пред. период', disabled: previousPeriod == null },
@@ -413,10 +488,13 @@ function MsSummaryPage({
   about: AboutDef;
 }) {
   const window = useMsMetricWindow();
-  const [grain, setGrain] = useState<Grain>('day');
-  const [kind, setKind] = useState<'line' | 'bar'>('line');
+  const controls = useMsMetricUrlControls(SUMMARY_URL);
+  const grain = controls.values.grain as Grain;
+  const kind = controls.values.chart as 'line' | 'bar';
+  const compare = controls.values.compare as 'off' | 'prev';
+  const comparisonPeriod = compare === 'prev' ? window.previousPeriod : null;
   const current = useMsSummary(window.period);
-  const previous = useMsSummary(window.previousPeriod ?? window.period);
+  const previous = useMsSummary(comparisonPeriod ?? window.period);
   const valueOf = (data: typeof current.data): number | null => {
     if (!data) return null;
     if (metric === 'revenue') return data.revenue.total;
@@ -433,11 +511,13 @@ function MsSummaryPage({
       comparison={
         <ComparisonReadout
           current={valueOf(current.data)}
-          previous={window.previousPeriod ? valueOf(previous.data) : null}
+          previous={comparisonPeriod ? valueOf(previous.data) : null}
           format={format}
           previousPeriod={window.previousPeriod}
-          pending={current.isPending || (window.previousPeriod != null && previous.isPending)}
-          error={current.isError || (window.previousPeriod != null && previous.isError)}
+          pending={current.isPending || (comparisonPeriod != null && previous.isPending)}
+          error={current.isError || (comparisonPeriod != null && previous.isError)}
+          mode={compare}
+          onMode={(value) => controls.setEnum('compare', value)}
         />
       }
     >
@@ -445,17 +525,17 @@ function MsSummaryPage({
         id={`ms-page-${metric}`}
         title="По периодам"
         kind={kind}
-        onKind={setKind}
+        onKind={(value) => controls.setEnum('chart', value)}
         chart={
           <MsSummaryExplorer
             metric={metric}
             period={window.period}
-            comparisonPeriod={window.previousPeriod}
+            comparisonPeriod={comparisonPeriod}
             grain={grain}
             kind={kind}
           />
         }
-        controlBar={<ControlBar window={window} grain={grain} onGrain={setGrain} />}
+        controlBar={<ControlBar window={window} grain={grain} onGrain={(value) => controls.setEnum('grain', value)} />}
       />
     </MsMetricShell>
   );
@@ -473,11 +553,22 @@ function MsCustomerPage({
   defaultMetric: MsCustomerMetric;
 }) {
   const window = useMsMetricWindow();
-  const [grain, setGrain] = useState<Grain>('day');
-  const [kind, setKind] = useState<'line' | 'bar'>('line');
-  const [metric, setMetric] = useState<MsCustomerMetric>(defaultMetric);
+  const urlSchema = useMemo<MsMetricUrlSchema>(() => ({
+    enums: {
+      grain: GRAIN,
+      chart: CHART,
+      metric: { values: ['orders', 'revenue', 'repeatShare'], defaultValue: defaultMetric },
+      compare: COMPARE,
+    },
+  }), [defaultMetric]);
+  const controls = useMsMetricUrlControls(urlSchema);
+  const grain = controls.values.grain as Grain;
+  const kind = controls.values.chart as 'line' | 'bar';
+  const metric = controls.values.metric as MsCustomerMetric;
+  const compare = controls.values.compare as 'off' | 'prev';
+  const comparisonPeriod = compare === 'prev' ? window.previousPeriod : null;
   const current = useMsCustomers(window.period);
-  const previous = useMsCustomers(window.previousPeriod ?? window.period);
+  const previous = useMsCustomers(comparisonPeriod ?? window.period);
   const valueOf = (data: typeof current.data) => data ? customerMetricTotal(data.series, metric).value : null;
   const format = (value: number) =>
     metric === 'orders' ? fmt.num(value) : metric === 'revenue' ? `${fmt.short(value)} ₽` : `${value.toFixed(1)}%`;
@@ -495,11 +586,13 @@ function MsCustomerPage({
       comparison={
         <ComparisonReadout
           current={valueOf(current.data)}
-          previous={window.previousPeriod ? valueOf(previous.data) : null}
+          previous={comparisonPeriod ? valueOf(previous.data) : null}
           format={format}
           previousPeriod={window.previousPeriod}
-          pending={current.isPending || (window.previousPeriod != null && previous.isPending)}
-          error={current.isError || (window.previousPeriod != null && previous.isError)}
+          pending={current.isPending || (comparisonPeriod != null && previous.isPending)}
+          error={current.isError || (comparisonPeriod != null && previous.isError)}
+          mode={compare}
+          onMode={(value) => controls.setEnum('compare', value)}
         />
       }
     >
@@ -507,19 +600,19 @@ function MsCustomerPage({
         id="ms-page-customers"
         title="По периодам"
         kind={kind}
-        onKind={setKind}
+        onKind={(value) => controls.setEnum('chart', value)}
         chart={<MsCustomerExplorer metric={metric} period={window.period} grain={grain} kind={kind} />}
         controlBar={
           <ControlBar
             window={window}
             grain={grain}
-            onGrain={setGrain}
+            onGrain={(value) => controls.setEnum('grain', value)}
             extra={
               <SegmentedControl
                 ariaLabel="Метрика покупателей"
                 className="shrink-0"
                 value={metric}
-                onChange={setMetric}
+                onChange={(value) => controls.setEnum('metric', value)}
                 options={CUSTOMER_METRIC_OPTIONS}
               />
             }
@@ -534,21 +627,43 @@ function MsCustomerPage({
 
 function MsChannelsPage() {
   const window = useMsMetricWindow();
-  const [grain, setGrain] = useState<Grain>('day');
-  const [kind, setKind] = useState<'line' | 'bar'>('line');
-  const [metric, setMetric] = useState<Metric>('revenue');
-  const [view, setView] = useState<View>('aggregate');
-  const [selected, setSelected] = useState<string[]>([]);
+  const controls = useMsMetricUrlControls(CHANNELS_URL);
+  const grain = controls.values.grain as Grain;
+  const requestedKind = controls.values.chart as 'line' | 'bar';
+  const metric = controls.values.metric as Metric;
+  const view = controls.values.view as View;
+  const compare = controls.values.compare as 'off' | 'prev';
+  const selected = controls.channels;
+  const comparisonPeriod = compare === 'prev' ? window.previousPeriod : null;
   const channels = useMsSalesByChannel(window.period);
-  const options: ChannelOption[] = (channels.data?.rows ?? []).map((r) => ({
+  const options: ChannelOption[] = useMemo(() => (channels.data?.rows ?? []).map((r) => ({
     id: r.sales_channel_id,
     name: r.name ?? 'Канал без имени',
-  }));
+  })), [channels.data?.rows]);
+  const selectableOptions = useMemo(() => {
+    const known = new Set(options.map((option) => option.id.toLowerCase()));
+    return [
+      ...options,
+      ...selected
+        .filter((id) => !known.has(id))
+        .map((id) => ({ id, name: `Недоступный канал · ${id.slice(0, 8)}` })),
+    ];
+  }, [options, selected]);
   const breakdown = view === 'breakdown';
+  const kind: 'line' | 'bar' = breakdown ? 'line' : requestedKind;
   const currentSeries = useMsChannelSeries(window.period, { channels: selected, breakdown: false });
-  const previousSeries = useMsChannelSeries(window.previousPeriod ?? window.period, { channels: selected, breakdown: false });
+  const previousSeries = useMsChannelSeries(comparisonPeriod ?? window.period, { channels: selected, breakdown: false });
   const valueOf = (data: typeof currentSeries.data) => data ? metricTotal(data.series, metric) : null;
   const format = (value: number) => metric === 'orders' ? fmt.num(value) : `${fmt.short(value)} ₽`;
+
+  // A multi-series breakdown is line-only. Direct incompatible links become canonical before the
+  // user can share them; rendering is already line-only on the first frame.
+  useEffect(() => {
+    if (breakdown && requestedKind === 'bar') controls.setEnum('chart', 'line');
+  }, [breakdown, controls.setEnum, requestedKind]);
+  // A valid selected ID can legitimately be absent from the current-period aggregate (zero sales)
+  // or have become unavailable. Keep it explicit instead of silently broadening an empty filter to
+  // "all channels"; the picker exposes the placeholder so the user can remove it deliberately.
   // Мультисерийные столбцы на 6×140 значений — нечитаемый частокол: в breakdown оставляем только
   // линии и прячем переключатель типа (как и в прежнем оверлее).
   const allowKind = !breakdown;
@@ -565,11 +680,13 @@ function MsChannelsPage() {
       comparison={
         <ComparisonReadout
           current={valueOf(currentSeries.data)}
-          previous={window.previousPeriod ? valueOf(previousSeries.data) : null}
+          previous={comparisonPeriod ? valueOf(previousSeries.data) : null}
           format={format}
           previousPeriod={window.previousPeriod}
-          pending={currentSeries.isPending || (window.previousPeriod != null && previousSeries.isPending)}
-          error={currentSeries.isError || (window.previousPeriod != null && previousSeries.isError)}
+          pending={currentSeries.isPending || (comparisonPeriod != null && previousSeries.isPending)}
+          error={currentSeries.isError || (comparisonPeriod != null && previousSeries.isError)}
+          mode={compare}
+          onMode={(value) => controls.setEnum('compare', value)}
         />
       }
     >
@@ -577,14 +694,14 @@ function MsChannelsPage() {
         id="ms-page-channels"
         title="По периодам"
         kind={allowKind ? kind : undefined}
-        onKind={allowKind ? setKind : undefined}
+        onKind={allowKind ? (value) => controls.setEnum('chart', value) : undefined}
         chart={
           <MsChannelChart
             period={window.period}
             metric={metric}
             breakdown={breakdown}
             selected={selected}
-            options={options}
+            options={selectableOptions}
             grain={grain}
             kind={allowKind ? kind : 'line'}
           />
@@ -593,16 +710,16 @@ function MsChannelsPage() {
           <ControlBar
             window={window}
             grain={grain}
-            onGrain={setGrain}
+            onGrain={(value) => controls.setEnum('grain', value)}
             extra={
               <MsChannelControls
                 metric={metric}
-                onMetric={setMetric}
+                onMetric={(value) => controls.setEnum('metric', value)}
                 view={view}
-                onView={setView}
-                options={options}
+                onView={(value) => controls.setEnum('view', value)}
+                options={selectableOptions}
                 selected={selected}
-                onSelected={setSelected}
+                onSelected={controls.setChannels}
               />
             }
           />
@@ -638,9 +755,12 @@ function MsReportCard({
 
 function MsFunnelPage() {
   const window = useMsMetricWindow();
-  const [metric, setMetric] = useState<'orders' | 'revenue'>('orders');
+  const controls = useMsMetricUrlControls(FUNNEL_URL);
+  const metric = controls.values.metric as 'orders' | 'revenue';
+  const compare = controls.values.compare as 'off' | 'prev';
+  const comparisonPeriod = compare === 'prev' ? window.previousPeriod : null;
   const funnel = useMsFunnel(window.period);
-  const previous = useMsFunnel(window.previousPeriod ?? window.period);
+  const previous = useMsFunnel(comparisonPeriod ?? window.period);
   const valueOf = (data: typeof funnel.data) => {
     if (!data) return null;
     return data.rows.reduce((sum, row) => sum + (metric === 'orders' ? row.orders : row.sum), 0)
@@ -659,11 +779,13 @@ function MsFunnelPage() {
       comparison={
         <ComparisonReadout
           current={valueOf(funnel.data)}
-          previous={window.previousPeriod ? valueOf(previous.data) : null}
+          previous={comparisonPeriod ? valueOf(previous.data) : null}
           format={format}
           previousPeriod={window.previousPeriod}
-          pending={funnel.isPending || (window.previousPeriod != null && previous.isPending)}
-          error={funnel.isError || (window.previousPeriod != null && previous.isError)}
+          pending={funnel.isPending || (comparisonPeriod != null && previous.isPending)}
+          error={funnel.isError || (comparisonPeriod != null && previous.isError)}
+          mode={compare}
+          onMode={(value) => controls.setEnum('compare', value)}
         />
       }
     >
@@ -675,7 +797,7 @@ function MsFunnelPage() {
             ariaLabel="Показатель распределения заказов по статусам"
             size="sm"
             value={metric}
-            onChange={setMetric}
+            onChange={(value) => controls.setEnum('metric', value)}
             options={[
               { value: 'orders', content: 'Заказы' },
               { value: 'revenue', content: 'Выручка' },
@@ -712,6 +834,10 @@ function MsFunnelPage() {
 
 function MsProductsPage() {
   const window = useMsMetricWindow();
+  const controls = useMsMetricUrlControls(PRODUCTS_URL);
+  const view = controls.values.view as ExpandedView;
+  const productSort = controls.values.sort as MsProductSort;
+  const concentration = controls.values.concentration as ConcentrationMetric;
   return (
     <MsMetricShell
       back={BACK_OVERVIEW}
@@ -725,7 +851,15 @@ function MsProductsPage() {
       }}
     >
       <MsReportCard id="ms-page-products" title="Отчёт по товарам">
-        <MsTopProductsCard period={window.period} />
+        <MsTopProductsCard
+          period={window.period}
+          view={view}
+          onView={(value) => controls.setEnum('view', value)}
+          productSort={productSort}
+          onProductSort={(value) => controls.setEnum('sort', value)}
+          concMetric={concentration}
+          onConcMetric={(value) => controls.setEnum('concentration', value)}
+        />
       </MsReportCard>
       <ControlBar window={window} />
     </MsMetricShell>
@@ -734,11 +868,14 @@ function MsProductsPage() {
 
 function MsReturnsPage() {
   const window = useMsMetricWindow();
-  const [grain, setGrain] = useState<Grain>('day');
-  const [kind, setKind] = useState<'line' | 'bar'>('line');
-  const [metric, setMetric] = useState<MsReturnsMetric>('count');
+  const controls = useMsMetricUrlControls(RETURNS_URL);
+  const grain = controls.values.grain as Grain;
+  const kind = controls.values.chart as 'line' | 'bar';
+  const metric = controls.values.metric as MsReturnsMetric;
+  const compare = controls.values.compare as 'off' | 'prev';
+  const comparisonPeriod = compare === 'prev' ? window.previousPeriod : null;
   const current = useMsReturns(window.period);
-  const previous = useMsReturns(window.previousPeriod ?? window.period);
+  const previous = useMsReturns(comparisonPeriod ?? window.period);
   const valueOf = (data: typeof current.data) => (data?.complete
     ? (metric === 'count' ? data.count : data.sum)
     : null);
@@ -756,12 +893,14 @@ function MsReturnsPage() {
       comparison={
         <ComparisonReadout
           current={valueOf(current.data)}
-          previous={window.previousPeriod ? valueOf(previous.data) : null}
+          previous={comparisonPeriod ? valueOf(previous.data) : null}
           format={format}
           previousPeriod={window.previousPeriod}
-          pending={current.isPending || (window.previousPeriod != null && previous.isPending)}
-          error={current.isError || (window.previousPeriod != null && previous.isError)}
+          pending={current.isPending || (comparisonPeriod != null && previous.isPending)}
+          error={current.isError || (comparisonPeriod != null && previous.isError)}
           label={metric === 'count' ? 'Число возвратов' : 'Сумма возвратов'}
+          mode={compare}
+          onMode={(value) => controls.setEnum('compare', value)}
         />
       }
     >
@@ -769,12 +908,12 @@ function MsReturnsPage() {
         id="ms-page-returns"
         title="По периодам"
         kind={kind}
-        onKind={setKind}
+        onKind={(value) => controls.setEnum('chart', value)}
         chart={
           <MsReturnsExplorer
             metric={metric}
             period={window.period}
-            comparisonPeriod={window.previousPeriod}
+            comparisonPeriod={comparisonPeriod}
             grain={grain}
             kind={kind}
           />
@@ -783,13 +922,13 @@ function MsReturnsPage() {
           <ControlBar
             window={window}
             grain={grain}
-            onGrain={setGrain}
+            onGrain={(value) => controls.setEnum('grain', value)}
             extra={
               <SegmentedControl
                 ariaLabel="Метрика возвратов"
                 className="shrink-0"
                 value={metric}
-                onChange={setMetric}
+                onChange={(value) => controls.setEnum('metric', value)}
                 options={RETURNS_METRIC_OPTIONS}
               />
             }
@@ -802,11 +941,17 @@ function MsReturnsPage() {
 
 function MsSalesChannelsPage() {
   const window = useMsMetricWindow();
+  const controls = useMsMetricUrlControls(CONTRIBUTION_URL);
+  const metric = controls.values.metric as MsChannelContributionMetric;
+  const compare = controls.values.compare as 'off' | 'prev';
+  const comparisonPeriod = compare === 'prev' ? window.previousPeriod : null;
   const channels = useMsSalesByChannel(window.period);
-  const previous = useMsSalesByChannel(window.previousPeriod ?? window.period);
-  const revenueOf = (data: typeof channels.data) => data
-    ? data.rows.reduce((sum, row) => sum + row.sum, data.no_channel_sum)
+  const previous = useMsSalesByChannel(comparisonPeriod ?? window.period);
+  const totalOf = (data: typeof channels.data) => data
+    ? data.rows.reduce((sum, row) => sum + (metric === 'revenue' ? row.sum : row.orders),
+        metric === 'revenue' ? data.no_channel_sum : data.no_channel_orders)
     : null;
+  const format = (value: number) => metric === 'revenue' ? `${fmt.short(value)} ₽` : fmt.num(value);
   return (
     <MsMetricShell
       back={BACK_CHANNELS}
@@ -820,13 +965,15 @@ function MsSalesChannelsPage() {
       }}
       comparison={
         <ComparisonReadout
-          current={revenueOf(channels.data)}
-          previous={window.previousPeriod ? revenueOf(previous.data) : null}
-          format={(value) => `${fmt.short(value)} ₽`}
+          current={totalOf(channels.data)}
+          previous={comparisonPeriod ? totalOf(previous.data) : null}
+          format={format}
           previousPeriod={window.previousPeriod}
-          pending={channels.isPending || (window.previousPeriod != null && previous.isPending)}
-          error={channels.isError || (window.previousPeriod != null && previous.isError)}
-          label="Выручка каналов"
+          pending={channels.isPending || (comparisonPeriod != null && previous.isPending)}
+          error={channels.isError || (comparisonPeriod != null && previous.isError)}
+          label={metric === 'revenue' ? 'Выручка каналов' : 'Заказы каналов'}
+          mode={compare}
+          onMode={(value) => controls.setEnum('compare', value)}
         />
       }
     >
@@ -846,10 +993,14 @@ function MsSalesChannelsPage() {
         ) : (
           <MsChannelContribution
             current={channels.data}
-            previous={window.previousPeriod && !previous.isError ? (previous.data ?? null) : null}
+            previous={comparisonPeriod && !previous.isError ? (previous.data ?? null) : null}
             comparisonState={
-              !window.previousPeriod ? 'unavailable' : previous.isError ? 'error' : previous.isPending ? 'pending' : 'ready'
+              compare === 'off' ? 'disabled'
+                : !window.previousPeriod ? 'unavailable'
+                  : previous.isError ? 'error' : previous.isPending ? 'pending' : 'ready'
             }
+            metric={metric}
+            onMetric={(value) => controls.setEnum('metric', value)}
           />
         )}
       </MsReportCard>
@@ -882,8 +1033,11 @@ function MsSalesChannelsPage() {
 
 function MsGeographyPage() {
   const window = useMsMetricWindow();
+  const controls = useMsMetricUrlControls(COMPARE_URL);
+  const compare = controls.values.compare as 'off' | 'prev';
+  const comparisonPeriod = compare === 'prev' ? window.previousPeriod : null;
   const geo = useMsGeography(window.period);
-  const previous = useMsGeography(window.previousPeriod ?? window.period);
+  const previous = useMsGeography(comparisonPeriod ?? window.period);
   return (
     <MsMetricShell
       back={BACK_CHANNELS}
@@ -896,12 +1050,14 @@ function MsGeographyPage() {
       comparison={
         <ComparisonReadout
           current={geo.data?.total_orders ?? null}
-          previous={window.previousPeriod ? (previous.data?.total_orders ?? null) : null}
+          previous={comparisonPeriod ? (previous.data?.total_orders ?? null) : null}
           format={fmt.num}
           previousPeriod={window.previousPeriod}
-          pending={geo.isPending || (window.previousPeriod != null && previous.isPending)}
-          error={geo.isError || (window.previousPeriod != null && previous.isError)}
+          pending={geo.isPending || (comparisonPeriod != null && previous.isPending)}
+          error={geo.isError || (comparisonPeriod != null && previous.isError)}
           label="Заказы с географией"
+          mode={compare}
+          onMode={(value) => controls.setEnum('compare', value)}
         />
       }
     >
@@ -929,8 +1085,11 @@ function MsGeographyPage() {
 
 function MsTopCustomersPage() {
   const window = useMsMetricWindow();
+  const controls = useMsMetricUrlControls(COMPARE_URL);
+  const compare = controls.values.compare as 'off' | 'prev';
+  const comparisonPeriod = compare === 'prev' ? window.previousPeriod : null;
   const topCustomers = useMsTopCustomers(window.period);
-  const previous = useMsTopCustomers(window.previousPeriod ?? window.period);
+  const previous = useMsTopCustomers(comparisonPeriod ?? window.period);
   const sumOf = (data: typeof topCustomers.data) => data ? data.rows.reduce((sum, row) => sum + row.sum, 0) : null;
   return (
     <MsMetricShell
@@ -945,12 +1104,14 @@ function MsTopCustomersPage() {
       comparison={
         <ComparisonReadout
           current={sumOf(topCustomers.data)}
-          previous={window.previousPeriod ? sumOf(previous.data) : null}
+          previous={comparisonPeriod ? sumOf(previous.data) : null}
           format={(value) => `${fmt.short(value)} ₽`}
           previousPeriod={window.previousPeriod}
-          pending={topCustomers.isPending || (window.previousPeriod != null && previous.isPending)}
-          error={topCustomers.isError || (window.previousPeriod != null && previous.isError)}
+          pending={topCustomers.isPending || (comparisonPeriod != null && previous.isPending)}
+          error={topCustomers.isError || (comparisonPeriod != null && previous.isError)}
           label="Сумма показанного топа"
+          mode={compare}
+          onMode={(value) => controls.setEnum('compare', value)}
         />
       }
     >
@@ -964,8 +1125,11 @@ function MsTopCustomersPage() {
 
 function MsRfmPage() {
   const window = useMsMetricWindow();
+  const controls = useMsMetricUrlControls(COMPARE_URL);
+  const compare = controls.values.compare as 'off' | 'prev';
+  const comparisonPeriod = compare === 'prev' ? window.previousPeriod : null;
   const rfm = useMsRfm(window.period);
-  const previous = useMsRfm(window.previousPeriod ?? window.period);
+  const previous = useMsRfm(comparisonPeriod ?? window.period);
   return (
     <MsMetricShell
       back={BACK_CLIENTS}
@@ -981,12 +1145,14 @@ function MsRfmPage() {
       comparison={
         <ComparisonReadout
           current={rfm.data?.customers ?? null}
-          previous={window.previousPeriod ? (previous.data?.customers ?? null) : null}
+          previous={comparisonPeriod ? (previous.data?.customers ?? null) : null}
           format={(value) => `${fmt.num(value)} ${value === 1 ? 'покупатель' : 'покупателей'}`}
           previousPeriod={window.previousPeriod}
-          pending={rfm.isPending || (window.previousPeriod != null && previous.isPending)}
-          error={rfm.isError || (window.previousPeriod != null && previous.isError)}
+          pending={rfm.isPending || (comparisonPeriod != null && previous.isPending)}
+          error={rfm.isError || (comparisonPeriod != null && previous.isError)}
           label="Покупатели в RFM"
+          mode={compare}
+          onMode={(value) => controls.setEnum('compare', value)}
         />
       }
     >

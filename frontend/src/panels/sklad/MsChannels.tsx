@@ -11,6 +11,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { fmt, pluralRu } from '@/lib/format';
 import { usePagePeriod } from '@/lib/period';
 import { msPreviousPeriod, useMsPagePeriod, type MsPeriod } from '@/lib/msPeriod';
+import { MS_CHANNEL_SELECTION_LIMIT } from '@/lib/msMetricUrlState';
 import {
   buildMsChannelContributionItems,
   msChannelContributionCurrent,
@@ -128,7 +129,8 @@ export type ChannelOption = { id: string; name: string };
 
 // Отдельные серии breakdown ограничены читаемым лимитом (steep: пёстрый частокол не читается).
 const MAX_BREAKDOWN_SERIES = 6;
-const MAX_SELECTED_CHANNELS = 20;
+// Единый источник лимита выбора каналов — тот же, что применяет URL-парсер (bounded deep link).
+const MAX_SELECTED_CHANNELS = MS_CHANNEL_SELECTION_LIMIT;
 // Категориальная палитра канона (--chart-1..6, Okabe-Ito) — серия = идентичность, не оценка.
 const SERIES_COLORS = [1, 2, 3, 4, 5, 6].map((n) => `hsl(var(--chart-${n}))`);
 
@@ -705,13 +707,20 @@ export function MsChannelContribution({
   current,
   previous,
   comparisonState,
+  metric: metricProp,
+  onMetric,
 }: {
   current: MsSalesByChannelData;
   previous: MsSalesByChannelData | null;
-  comparisonState: 'ready' | 'pending' | 'error' | 'unavailable';
+  comparisonState: 'ready' | 'pending' | 'error' | 'unavailable' | 'disabled';
+  /** Optional controlled binding for the canonical full metric page; compact cards stay local. */
+  metric?: MsChannelContributionMetric;
+  onMetric?: (metric: MsChannelContributionMetric) => void;
 }) {
   const expanded = useContext(ChartExpandedContext);
-  const [metric, setMetric] = useState<MsChannelContributionMetric>('revenue');
+  const [metricState, setMetricState] = useState<MsChannelContributionMetric>('revenue');
+  const metric = metricProp ?? metricState;
+  const setMetric = onMetric ?? setMetricState;
   const comparable = comparisonState === 'ready' && previous != null;
   const items = useMemo(
     () => buildMsChannelContributionItems(current, comparable ? previous : null),
