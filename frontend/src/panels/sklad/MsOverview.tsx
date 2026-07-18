@@ -243,7 +243,20 @@ export function MsOverview() {
         ) : (
           <ChartCardBody
             value={fmt.num(returns.data.count)}
-            caption={`на ${fmt.short(returns.data.sum)} ₽ ${windowLabel}`}
+            caption={
+              <div className="max-w-48 space-y-1 leading-snug">
+                <div>на {fmt.short(returns.data.sum)} ₽ {windowLabel}</div>
+                {!returns.data.complete && (
+                  <div>
+                    Архив ещё загружается
+                    {returns.data.total_estimate == null
+                      ? '.'
+                      : `: ${fmt.num(returns.data.archived_count)} из примерно ${fmt.num(returns.data.total_estimate)}.`}
+                  </div>
+                )}
+                <div>Возвраты считаются отдельно и из выручки не вычитаются.</div>
+              </div>
+            }
           >
             {returns.data.complete && returns.data.count === 0 ? (
               <p className="py-4 text-xs text-muted-foreground">Возвратов за период нет.</p>
@@ -268,17 +281,6 @@ export function MsOverview() {
                 );
               })()
             )}
-            <div className="mt-2 space-y-1.5 text-2xs text-muted-foreground">
-              {!returns.data.complete && (
-                <p>
-                  Архив возвратов ещё загружается. Показаны только уже сохранённые документы
-                  {returns.data.total_estimate == null
-                    ? '.'
-                    : `: ${fmt.num(returns.data.archived_count)} из примерно ${fmt.num(returns.data.total_estimate)}.`}
-                </p>
-              )}
-              <p>Возвраты считаются отдельно и из выручки не вычитаются.</p>
-            </div>
           </ChartCardBody>
         )}
       </ChartWidget>
