@@ -25,17 +25,23 @@ const monthStartAt = (delta) => {
   return new Date(now.getFullYear(), now.getMonth() + delta, 1);
 };
 
-function makeDb({ accounts = [ACC], states = {}, skipKeys = [] } = {}) {
+function makeDb({ accounts = [ACC], states = {}, returnsStates = {}, skipKeys = [] } = {}) {
   const stateByChannel = new Map(
     Object.entries(states).map(([k, v]) => [Number(k), { ...v }]),
   );
+  const returnsStateByChannel = new Map(
+    Object.entries(returnsStates).map(([k, v]) => [Number(k), { ...v }]),
+  );
   const patches = [];
+  const returnsPatches = [];
   const upserts = [];
+  const returnsUpserts = [];
   const jobKeys = [];
   const skips = new Set(skipKeys);
   return {
     enabled: true,
     patches, upserts, jobKeys, stateByChannel,
+    returnsPatches, returnsUpserts, returnsStateByChannel,
     listMsAccounts: async () => accounts,
     getMsAccount: async (channelId) => accounts.find((a) => a.channel_id === channelId) || null,
     getMsBackfillState: async (channelId) => stateByChannel.get(channelId) || null,
@@ -48,6 +54,16 @@ function makeDb({ accounts = [ACC], states = {}, skipKeys = [] } = {}) {
     },
     upsertMsOrders: async (channelId, rows) => { upserts.push({ channelId, rows }); return rows.length; },
     countMsOrders: async () => 0,
+    // Полоса возвратов — отдельные state/arrays (ms_returns_backfill_state, миграция 032).
+    getMsReturnsBackfillState: async (channelId) => returnsStateByChannel.get(channelId) || null,
+    setMsReturnsBackfillState: async (channelId, patch) => {
+      returnsPatches.push({ channelId, patch: { ...patch } });
+      const prev = returnsStateByChannel.get(channelId) || { channel_id: channelId, status: 'idle', fetched_count: 0 };
+      returnsStateByChannel.set(channelId, { ...prev, ...patch, updated_age_seconds: 0 });
+      return true;
+    },
+    upsertMsReturns: async (channelId, rows) => { returnsUpserts.push({ channelId, rows }); return rows.length; },
+    countMsReturns: async () => 0,
     runJobOnce: async (kind, key, fn) => {
       jobKeys.push(`${kind}|${key}`);
       if (skips.has(key)) return { skipped: true, job: null };
@@ -410,6 +426,13 @@ test('runMsOrdersPass: resume + topup за один вызов (порядок: 
   assert.deepEqual(out.topup, { channels: 2, orders: 2, errors: 0, skipped: 0 });
   assert.equal(db.stateByChannel.get(7).status, 'done', 'зависший бэкфилл дорезюмирован');
   assert.equal(db.stateByChannel.get(9).status, 'done', 'долитый канал остался done');
+  // Полоса возвратов идёт следом: у обоих каналов returns-state нет → self-heal стартует полный
+  // бэкфилл (оба аккаунта в scriptedApi без старейшего возврата → сразу done, 0 fetched), затем
+  // done-каналам — дневная доливка возвратов под своим day-gate.
+  assert.deepEqual(out.returns.backfill, { resumed: 0, started: 2, errors: 0 });
+  assert.deepEqual(out.returns.topup, { channels: 2, returns: 2, errors: 0, skipped: 0 });
+  assert.equal(db.returnsStateByChannel.get(7).status, 'done', 'возвраты канала 7 догнаны self-heal');
+  assert.equal(db.returnsStateByChannel.get(9).status, 'done', 'возвраты канала 9 догнаны self-heal');
 });
 
 test('resume: недешифруемый токен — warn+skip, строка остаётся running (после починки ключа добёрется)', async () => {
@@ -423,6 +446,154 @@ test('resume: недешифруемый токен — warn+skip, строка 
   assert.equal(db.stateByChannel.get(7).status, 'running', 'состояние не сломано — resumable после починки');
 });
 
+// ── Полоса ВОЗВРАТОВ (ms_returns, миграция 032) — отдельный durable-курсор, тот же движок ──────
+
+test('startReturns: полный бэкфилл /entity/salesreturn помесячно → done, отдельная полоса (заказы не тронуты)', async () => {
+  const prevMonth = monthStartAt(-1);
+  const oldestMoment = `${fmtDay(prevMonth)} 10:00:00.000`;
+  const db = makeDb();
+  const { engine, fetches } = makeEngine({
+    db,
+    handlers: scriptedApi({
+      total: 2,
+      oldestMoment,
+      byWindow: (from) => (from === fmtDay(prevMonth)
+        ? [order('r1', `${fmtDay(prevMonth)} 10:00:00.000`)]
+        : [order('r2', `${fmtDay(monthStartAt(0))} 09:00:00.000`)]),
+    }),
+  });
+  const out = await engine.startReturns(7);
+  assert.deepEqual(out, { status: 'done', fetched: 2 });
+  assert.ok(fetches.every((f) => f.path.startsWith('/entity/salesreturn')), 'все запросы — по salesreturn');
+  assert.equal(db.returnsUpserts.length, 2);
+  assert.equal(db.returnsStateByChannel.get(7).status, 'done');
+  // Полоса заказов не задета: ни записи в ms_backfill_state, ни upsert заказов.
+  assert.equal(db.patches.length, 0);
+  assert.equal(db.upserts.length, 0);
+  assert.equal(db.stateByChannel.get(7), undefined);
+});
+
+test('returns mapping: невалидная сумма явно останавливает неполный архив, а не превращается в 0', async () => {
+  const cur = monthStartAt(0);
+  const day = `${fmtDay(cur)} 10:00:00.000`;
+  const db = makeDb();
+  const { engine } = makeEngine({
+    db,
+    handlers: scriptedApi({
+      total: 2,
+      oldestMoment: day,
+      byWindow: () => [
+        order('zero', day, { sum: 0, agent: { meta: { href: 'https://api.moysklad.ru/api/remap/1.2/entity/counterparty/ag-1?x=y' }, name: 'ИП Пион' } }),
+        order('nan', day, { sum: 'мусор' }),
+      ],
+    }),
+  });
+  await assert.rejects(engine.startReturns(7), { code: 'ms_return_invalid_sum' });
+  assert.equal(db.returnsUpserts.length, 0, 'весь page не помечен сохранённым частично');
+  assert.equal(db.returnsStateByChannel.get(7).status, 'error');
+  assert.match(db.returnsStateByChannel.get(7).error, /сумма вне допустимого диапазона/);
+});
+
+test('resumeReturns: нет строки → self-heal полный бэкфилл; stale running → resume с курсора; свежий running не трогается', async () => {
+  const curMonth = monthStartAt(0);
+  const db = makeDb({
+    accounts: [
+      ACC,
+      { ...ACC, channel_id: 9, ms_account_id: 'acc-2', access_token_enc: 'enc2' },
+      { ...ACC, channel_id: 11, ms_account_id: 'acc-3', access_token_enc: 'enc3' },
+    ],
+    returnsStates: {
+      9: { channel_id: 9, status: 'running', cursor_from: fmtDay(curMonth), fetched_count: 3, updated_age_seconds: 3600 },
+      11: { channel_id: 11, status: 'running', cursor_from: fmtDay(curMonth), fetched_count: 1, updated_age_seconds: 30 },
+    },
+  });
+  const { engine } = makeEngine({
+    db,
+    handlers: scriptedApi({
+      total: 1,
+      oldestMoment: `${fmtDay(curMonth)} 10:00:00.000`,
+      byWindow: () => [order('r', `${fmtDay(curMonth)} 12:00:00.000`)],
+    }),
+  });
+  const stats = await engine.resumeReturns();
+  assert.deepEqual(stats, { resumed: 1, started: 1, errors: 0 });
+  assert.equal(db.returnsStateByChannel.get(7).status, 'done', 'канал без строки догнан self-heal');
+  assert.equal(db.returnsStateByChannel.get(9).status, 'done', 'stale running дорезюмирован');
+  assert.equal(db.returnsStateByChannel.get(9).fetched_count, 4, 'счётчик продолжен (3+1), не обнулён');
+  assert.equal(db.returnsStateByChannel.get(11).status, 'running', 'свежий running (живой прогон) не тронут');
+});
+
+test('resumeReturns: error старше stale-порога автоматически повторяется, потому что отдельной кнопки нет', async () => {
+  const curMonth = monthStartAt(0);
+  const db = makeDb({
+    returnsStates: {
+      7: { channel_id: 7, status: 'error', cursor_from: fmtDay(curMonth), fetched_count: 2, updated_age_seconds: 3600 },
+    },
+  });
+  const { engine } = makeEngine({
+    db,
+    handlers: scriptedApi({
+      total: 3,
+      oldestMoment: `${fmtDay(curMonth)} 10:00:00.000`,
+      byWindow: () => [order('fixed', `${fmtDay(curMonth)} 12:00:00.000`)],
+    }),
+  });
+  assert.deepEqual(await engine.resumeReturns(), { resumed: 1, started: 0, errors: 0 });
+  assert.equal(db.returnsStateByChannel.get(7).status, 'done');
+  assert.equal(db.returnsStateByChannel.get(7).fetched_count, 3);
+});
+
+test('доливка возвратов: done-каналу окно 7 дней под ms_returns_topup gate, полоса заказов не тронута', async () => {
+  const now = new Date();
+  const weekAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
+  const db = makeDb({
+    returnsStates: { 7: { channel_id: 7, status: 'done', cursor_from: null, fetched_count: 20, updated_age_seconds: 86400 } },
+  });
+  const windows = [];
+  const { engine } = makeEngine({
+    db,
+    handlers: scriptedApi({
+      total: 20,
+      oldestMoment: null,
+      byWindow: (from, to) => { windows.push([from, to]); return [order('fresh', `${fmtDay(now)} 09:00:00.000`)]; },
+    }),
+  });
+  const stats = await engine.runReturnsTopupPass();
+  assert.deepEqual(stats, { channels: 1, returns: 1, errors: 0, skipped: 0 });
+  const day = new Date().toISOString().slice(0, 10);
+  assert.deepEqual(db.jobKeys, [`ms_returns_topup|7:acc-1:${day}`]);
+  assert.deepEqual(windows, [[fmtDay(weekAgo), fmtDay(now)]]);
+  assert.equal(db.returnsUpserts.length, 1);
+  assert.equal(db.returnsPatches.length, 0, 'доливка не трогает ms_returns_backfill_state');
+  assert.equal(db.patches.length, 0, 'полоса заказов не задета');
+});
+
+test('startReturns single-flight: параллельный старт того же канала отвергается «уже идёт»', async () => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const cur = monthStartAt(0);
+  const db = makeDb();
+  const { engine } = makeEngine({
+    db,
+    handlers: async (q) => {
+      if (q.get('filter') == null && q.get('order') !== 'moment,asc') {
+        await gate;
+        return { meta: { size: 1 }, rows: [] };
+      }
+      return scriptedApi({
+        total: 1,
+        oldestMoment: `${fmtDay(cur)} 10:00:00.000`,
+        byWindow: () => [order('r', `${fmtDay(cur)} 10:00:00.000`)],
+      })(q);
+    },
+  });
+  const first = engine.startReturns(7);
+  assert.equal(await engine.isBusy(7), true, 'общий busy-гард видит полосу возвратов');
+  await assert.rejects(engine.startReturns(7), (e) => e.code === 'MS_BACKFILL_RUNNING' && /уже идёт/.test(e.message));
+  release();
+  assert.deepEqual(await first, { status: 'done', fetched: 1 });
+});
+
 test('DB off / MS_TOKEN_KEY не задан: start отвергается, resume/topup инертны', async () => {
   const db = makeDb();
   const offDb = { ...db, enabled: false };
@@ -434,7 +605,9 @@ test('DB off / MS_TOKEN_KEY не задан: start отвергается, resum
     sleepFn: async () => {},
   });
   await assert.rejects(off.start(7), /База данных недоступна/);
+  await assert.rejects(off.startReturns(7), /База данных недоступна/);
   assert.deepEqual(await off.resume(), { resumed: 0, errors: 0 });
+  assert.deepEqual(await off.resumeReturns(), { resumed: 0, started: 0, errors: 0 });
 
   const noKey = createMsBackfillEngine({
     db,
@@ -444,5 +617,7 @@ test('DB off / MS_TOKEN_KEY не задан: start отвергается, resum
     sleepFn: async () => {},
   });
   await assert.rejects(noKey.start(7), /MS_TOKEN_KEY/);
+  await assert.rejects(noKey.startReturns(7), /MS_TOKEN_KEY/);
   assert.deepEqual(await noKey.runTopupPass(), { channels: 0, orders: 0, errors: 0, skipped: 0 });
+  assert.deepEqual(await noKey.runReturnsTopupPass(), { channels: 0, returns: 0, errors: 0, skipped: 0 });
 });

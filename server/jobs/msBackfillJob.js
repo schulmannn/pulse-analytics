@@ -214,9 +214,11 @@ function createMsBackfillEngine({ db, msFetch, msCrypto, log = () => {}, sleepFn
   async function isBusy(channelId) {
     const id = Number(channelId) || 0;
     if (!id) return false;
-    if (inFlight.has(id)) return true;
+    if (inFlight.has(id) || inFlightReturns.has(id)) return true;
     const state = await db.getMsBackfillState(id).catch(() => null);
-    return isFreshRunning(state);
+    if (isFreshRunning(state)) return true;
+    const returnsState = await db.getMsReturnsBackfillState(id).catch(() => null);
+    return isFreshRunning(returnsState);
   }
 
   // Resume зависших бэкфиллов (рестарт процесса убил прогон): running-строки старше
@@ -314,15 +316,271 @@ function createMsBackfillEngine({ db, msFetch, msCrypto, log = () => {}, sleepFn
     return stats;
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════════════════════
+  //  Полоса ВОЗВРАТОВ (ms_returns, миграция 032) — отдельный durable-курсор, тот же движок
+  // ═══════════════════════════════════════════════════════════════════════════════════════════
+  // Возвраты (salesreturn) редки и правятся задним числом так же, как заказы, поэтому наполняются
+  // ТЕМ ЖЕ помесячным page-циклом и дневной доливкой, но НЕЗАВИСИМОЙ полосой: свой in-process
+  // single-flight (inFlightReturns) и свой ms_returns_backfill_state. Развязка критична — у уже
+  // существующих аккаунтов бэкфилл заказов на момент деплоя часто уже status='done', и дели мы с
+  // ним курсор, история возвратов была бы пропущена (курсор давно за горизонтом) ИЛИ прогресс
+  // заказов затёрт. Поэтому полоса возвратов ведёт свой курсор и САМА догоняет полную историю на
+  // recovery-проходе (self-heal без переподключения склада).
+  const inFlightReturns = new Set();
+
+  // Строка salesreturn → строка ms_returns. Невалидный документ останавливает полосу с явным
+  // incomplete/error вместо тихого занижения архива: пропустить его и всё равно поставить done
+  // было бы таким же выдуманным результатом, как превратить мусорную сумму в 0.
+  function returnToRow(r) {
+    if (!r || r.id == null || !String(r.id).trim()) {
+      const error = new Error('Некорректный документ возврата: нет id');
+      error.code = 'ms_return_invalid_id';
+      throw error;
+    }
+    const moment = typeof r.moment === 'string' ? r.moment : '';
+    if (!/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/.test(moment)) {
+      const error = new Error('Некорректный документ возврата: нет даты');
+      error.code = 'ms_return_invalid_moment';
+      throw error;
+    }
+    const sum = Number(r.sum);
+    const rounded = Math.round(sum);
+    if (r.sum == null || !Number.isFinite(sum) || !Number.isSafeInteger(rounded) || rounded < 0) {
+      const error = new Error('Некорректный документ возврата: сумма вне допустимого диапазона');
+      error.code = 'ms_return_invalid_sum';
+      throw error;
+    }
+    return {
+      return_id: String(r.id),
+      moment,
+      sum_kopecks: rounded,   // копейки как есть; round — страховка от дробной копейки
+      agent_id: metaHrefId(r.agent),
+      agent_name: r.agent && typeof r.agent.name === 'string' ? r.agent.name : null,
+    };
+  }
+
+  // Страничный цикл окна возвратов — зеркало fetchWindowPages, но /entity/salesreturn.
+  async function fetchReturnsWindowPages(token, fromDay, toDay, onPage) {
+    const filter = `moment>=${fromDay} 00:00:00;moment<=${toDay} 23:59:59`;
+    let offset = 0;
+    for (;;) {
+      const path = `/entity/salesreturn?filter=${encodeURIComponent(filter)}` +
+        `&order=${encodeURIComponent('moment,asc')}&limit=${MS_ORDERS_PAGE_LIMIT}&offset=${offset}`;
+      const page = await msFetch(token, path);
+      const raw = page && Array.isArray(page.rows) ? page.rows : [];
+      await onPage(raw.map(returnToRow));
+      if (raw.length < MS_ORDERS_PAGE_LIMIT) return;
+      offset += MS_ORDERS_PAGE_LIMIT;
+      await sleep(MS_ORDERS_PAGE_PAUSE_MS);
+    }
+  }
+
+  // Помесячный resume-able цикл возвратов — зеркало runWindowLoop (ms_returns_backfill_state).
+  async function runReturnsWindowLoop(channelId, token, cursorFromDay, fetchedStart) {
+    let fetched = fetchedStart;
+    try {
+      let cursor = parseDay(cursorFromDay);
+      const lastMonth = monthStart(new Date());
+      while (monthStart(cursor) <= lastMonth) {
+        const winFrom = fmtDay(cursor);
+        const winTo = fmtDay(monthEnd(cursor));
+        await fetchReturnsWindowPages(token, winFrom, winTo, async (rows) => {
+          if (rows.length) await db.upsertMsReturns(channelId, rows);
+          fetched += rows.length;
+          await db.setMsReturnsBackfillState(channelId, {
+            status: 'running', cursor_from: winFrom, fetched_count: fetched,
+          });
+        });
+        cursor = nextMonthStart(cursor);
+        await db.setMsReturnsBackfillState(channelId, {
+          status: 'running', cursor_from: fmtDay(cursor), fetched_count: fetched,
+        });
+      }
+      await db.setMsReturnsBackfillState(channelId, { status: 'done', fetched_count: fetched, error: null });
+      return { status: 'done', fetched };
+    } catch (e) {
+      await db.setMsReturnsBackfillState(channelId, { status: 'error', error: shortMsg(e) }).catch(() => {});
+      throw e;
+    }
+  }
+
+  // Полный прогон возвратов канала — зеркало runBackfill (оценка → старейший → claim → цикл).
+  // token уже расшифрован вызывающим (startReturns/resumeReturns) — decrypt здесь не дублируем.
+  async function runReturnsBackfill(channelId, token) {
+    let cursorFrom;
+    try {
+      const head = await msFetch(token, `/entity/salesreturn?limit=1`);
+      const size = Number(head && head.meta && head.meta.size);
+      const totalEstimate = Number.isFinite(size) ? size : null;
+      const oldest = await msFetch(token, `/entity/salesreturn?limit=1&order=${encodeURIComponent('moment,asc')}`);
+      const first = oldest && Array.isArray(oldest.rows) && oldest.rows[0];
+      const firstMoment = first && typeof first.moment === 'string' ? first.moment.slice(0, 10) : '';
+      if (totalEstimate === 0 || !/^\d{4}-\d{2}-\d{2}$/.test(firstMoment)) {
+        await db.setMsReturnsBackfillState(channelId, {
+          status: 'done', cursor_from: null, total_estimate: totalEstimate ?? 0,
+          fetched_count: 0, error: null, started_at: new Date(),
+        });
+        return { status: 'done', fetched: 0 };
+      }
+      cursorFrom = fmtDay(monthStart(parseDay(firstMoment)));
+      await db.setMsReturnsBackfillState(channelId, {
+        status: 'running', cursor_from: cursorFrom, total_estimate: totalEstimate,
+        fetched_count: 0, error: null, started_at: new Date(),
+      });
+    } catch (e) {
+      await db.setMsReturnsBackfillState(channelId, { status: 'error', error: shortMsg(e) }).catch(() => {});
+      throw e;
+    }
+    return runReturnsWindowLoop(channelId, token, cursorFrom, 0);
+  }
+
+  // Публичный старт бэкфилла возвратов (роут зовёт fire-and-forget рядом со start()). Sync
+  // single-flight по inFlightReturns (до первого await); durable-свежесть проверяет runBackfill-эхо.
+  function startReturns(channelId) {
+    const id = Number(channelId) || 0;
+    if (!id) return Promise.reject(new Error('channelId обязателен'));
+    if (!db.enabled) return Promise.reject(new Error('База данных недоступна'));
+    if (!msCrypto.configured()) return Promise.reject(new Error('MS_TOKEN_KEY не задан'));
+    if (inFlightReturns.has(id)) {
+      const err = new Error('Загрузка уже идёт');
+      err.code = 'MS_BACKFILL_RUNNING';
+      return Promise.reject(err);
+    }
+    inFlightReturns.add(id);
+    return (async () => {
+      const prior = await db.getMsReturnsBackfillState(id);
+      if (prior && prior.status === 'running' && ageSeconds(prior) < MS_BACKFILL_FRESH_RUNNING_SECONDS) {
+        const err = new Error('Загрузка уже идёт');
+        err.code = 'MS_BACKFILL_RUNNING';
+        throw err;
+      }
+      const acc = await db.getMsAccount(id);
+      if (!acc || !acc.access_token_enc) throw new Error('МойСклад не подключён к этому каналу');
+      const token = msCrypto.decrypt(acc.access_token_enc);
+      return runReturnsBackfill(id, token);
+    })().finally(() => inFlightReturns.delete(id));
+  }
+
+  // Resume/self-heal полосы возвратов. Кандидаты — по listMsAccounts. Для каждого канала:
+  //   • свежая running-строка → живой прогон, не трогаем;
+  //   • stale running с курсором → продолжаем с cursor_from (как resume заказов);
+  //   • НЕТ строки / idle → self-heal: полный бэкфилл возвратов с нуля (существующий аккаунт с
+  //     давно завершённым бэкфиллом заказов так безопасно догоняет ВСЮ историю возвратов после
+  //     деплоя — без переподключения склада);
+  //   • done → пропуск (доливку ведёт runReturnsTopupPass);
+  //   • error старше stale-порога → автоматический retry: отдельной пользовательской кнопки у
+  //     returns-полосы нет, поэтому вечный error иначе никогда бы не самовосстановился.
+  async function resumeReturns() {
+    const stats = { resumed: 0, started: 0, errors: 0 };
+    if (!db.enabled || !msCrypto.configured()) return stats;
+    let accounts = [];
+    try { accounts = await db.listMsAccounts(); }
+    catch (e) { log('error', 'ms_returns_list_failed', { error: e.message }); return stats; }
+    for (const acc of accounts) {
+      const channelId = acc.channel_id;
+      if (inFlightReturns.has(channelId)) continue;
+      const state = await db.getMsReturnsBackfillState(channelId).catch(() => null);
+      if (state && state.status === 'running' && ageSeconds(state) < MS_BACKFILL_STALE_RESUME_SECONDS) continue;
+      if (state && state.status === 'done') continue;
+      if (state && state.status === 'error'
+        && !(ageSeconds(state) >= MS_BACKFILL_STALE_RESUME_SECONDS)) continue;
+      const staleResume = !!(state && (state.status === 'running' || state.status === 'error') && state.cursor_from);
+      let token;
+      try {
+        token = msCrypto.decrypt(acc.access_token_enc);
+      } catch (e) {
+        log('warn', 'ms_token_decrypt_failed', { channelId, error: e.message });
+        stats.errors++;
+        continue;
+      }
+      inFlightReturns.add(channelId);
+      try {
+        if (staleResume) {
+          await runReturnsWindowLoop(channelId, token, state.cursor_from, Number(state.fetched_count) || 0);
+          stats.resumed++;
+          log('info', 'ms_returns_backfill_resumed', { channelId });
+        } else {
+          // нет строки / idle → полный догон истории возвратов
+          await runReturnsBackfill(channelId, token);
+          stats.started++;
+          log('info', 'ms_returns_backfill_started', { channelId });
+        }
+      } catch (e) {
+        stats.errors++;
+        log('error', 'ms_returns_backfill_failed', { channelId, error: e.message });
+      } finally {
+        inFlightReturns.delete(channelId);
+      }
+    }
+    return stats;
+  }
+
+  // Дневная доливка возвратов done-каналам: окно 7 дней тем же page-циклом, durable day-gate
+  // 'ms_returns_topup' (ключ с ms_account_id — reconnect другого склада не наследует succeeded).
+  async function runReturnsTopupPass() {
+    const stats = { channels: 0, returns: 0, errors: 0, skipped: 0 };
+    if (!db.enabled || !msCrypto.configured()) return stats;
+    let accounts = [];
+    try { accounts = await db.listMsAccounts(); }
+    catch (e) { log('error', 'ms_returns_list_failed', { error: e.message }); return stats; }
+    const day = new Date().toISOString().slice(0, 10);
+    for (const acc of accounts) {
+      const channelId = acc.channel_id;
+      if (inFlightReturns.has(channelId)) continue;
+      const state = await db.getMsReturnsBackfillState(channelId).catch(() => null);
+      if (!state || state.status !== 'done') continue;
+      let token;
+      try {
+        token = msCrypto.decrypt(acc.access_token_enc);
+      } catch (e) {
+        log('warn', 'ms_token_decrypt_failed', { channelId, error: e.message });
+        stats.errors++;
+        continue;
+      }
+      try {
+        const key = `${channelId}:${acc.ms_account_id || 'unknown'}:${day}`;
+        const out = await db.runJobOnce('ms_returns_topup', key, async () => {
+          const now = new Date();
+          const from = fmtDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() - MS_ORDERS_TOPUP_WINDOW_DAYS));
+          let n = 0;
+          await fetchReturnsWindowPages(token, from, fmtDay(now), async (rows) => {
+            if (rows.length) await db.upsertMsReturns(channelId, rows);
+            n += rows.length;
+          });
+          return n;
+        });
+        if (out.skipped) { stats.skipped++; continue; }
+        stats.channels++;
+        stats.returns += Number(out.result) || 0;
+      } catch (e) {
+        stats.errors++;
+        log('error', 'ms_returns_topup_failed', { channelId, error: e.message });
+      }
+    }
+    return stats;
+  }
+
+  // Полный проход полосы возвратов (recovery-бегунок): resume/self-heal, затем дневная доливка.
+  async function runReturnsPass() {
+    const backfill = await resumeReturns();
+    const topup = await runReturnsTopupPass();
+    return { backfill, topup };
+  }
+
   // Единый вход для recovery-бегунка (ms-lane, после дневного архива): сперва resume брошенных
-  // прогонов, затем дневная доливка. Последовательно — оба пути бьют один per-account лимит МС.
+  // прогонов заказов, затем их доливка, затем ПОСЛЕДОВАТЕЛЬНО полоса возвратов (resume/self-heal +
+  // доливка). Все пути делят ОДИН per-account лимит МС — только последовательно, не конкурентно.
   async function runMsOrdersPass() {
     const resumeStats = await resume();
     const topup = await runTopupPass();
-    return { resume: resumeStats, topup };
+    const returns = await runReturnsPass();
+    return { resume: resumeStats, topup, returns };
   }
 
-  return { start, resume, runTopupPass, runMsOrdersPass, isBusy };
+  return {
+    start, resume, runTopupPass, runMsOrdersPass, isBusy,
+    startReturns, resumeReturns, runReturnsTopupPass, runReturnsPass,
+  };
 }
 
 module.exports = {

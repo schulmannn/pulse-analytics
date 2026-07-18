@@ -80,6 +80,16 @@ const ARCHIVE_SPECS = {
     keys: [{ col: 'day', cast: 'date' }, { col: 'id', cast: 'integer' }],
     order: 'day ASC, id ASC',
   },
+  msOrders: {
+    from: 'ms_orders', chanCol: 'channel_id',
+    cols: 'order_id, moment, sum_kopecks, state, agent_id, agent_name, updated_at, state_id, sales_channel_id, city',
+    keys: [{ col: 'order_id', cast: 'text' }], order: 'order_id ASC',
+  },
+  msReturns: {
+    from: 'ms_returns', chanCol: 'channel_id',
+    cols: 'return_id, moment, sum_kopecks, agent_id, agent_name, updated_at',
+    keys: [{ col: 'return_id', cast: 'text' }], order: 'return_id ASC',
+  },
   igDaily: {
     from: 'ig_daily', cols: '*', chanCol: 'channel_id',
     keys: [{ col: 'day', cast: 'date' }], order: 'day ASC',
@@ -392,6 +402,8 @@ function createGdprService({ pool, enabled, transaction, exportPageSize }) {
           await w.write(',"mentions":'); await streamArchive(w, client, ARCHIVE_SPECS.mentions, ch.id, PAGE);
           await w.write(',"velocity":'); await streamArchive(w, client, ARCHIVE_SPECS.velocity, ch.id, PAGE);
           await w.write(',"annotations":'); await streamArchive(w, client, ARCHIVE_SPECS.annotations, ch.id, PAGE);
+          await w.write(',"ms_orders":'); await streamArchive(w, client, ARCHIVE_SPECS.msOrders, ch.id, PAGE);
+          await w.write(',"ms_returns":'); await streamArchive(w, client, ARCHIVE_SPECS.msReturns, ch.id, PAGE);
           await w.write('}'); // /archive
 
           const mentionSettings = (await q(

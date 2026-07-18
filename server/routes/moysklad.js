@@ -17,8 +17,9 @@ const { hasWorkspaceRole } = require('../middleware/tenant');
  * (его копит jobs/msCollectionJob) — живых вызовов МС не делает и токена не требует; в
  * top-products «Всё» — живой отчёт полного диапазона от старейшего заказа архива (кэш 1 час).
  * Слайс 3 (funnel/customers/cohorts) читает архив ms_orders (движок jobs/msBackfillJob) —
- * дешёвые DB-агрегаты без кэша; живой у них только словарь статусов (funnel) и /returns
- * (page-loop). top-customers — тот же DB-агрегат + живой словарь имён контрагентов одним
+ * дешёвые DB-агрегаты без кэша; живой у них только словарь статусов (funnel). /returns тоже
+ * читает архив (ms_returns, миграция 032 — свою полосу бэкфилла ведёт тот же движок) без живого
+ * запроса к МС. top-customers — тот же DB-агрегат + живой словарь имён контрагентов одним
  * вызовом. Слайс 6 (sales-by-channel/geography, миграция 031) — тоже DB-агрегаты архива:
  * sales-by-channel добирает имена/типы каналов живым словарём saleschannel (кэш 1 час, зеркало
  * loadStatesDict), geography — чистый DB с нормализацией города в SQL, без словаря и кэша.
@@ -49,17 +50,11 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
   // страницы по ~3с) → отдельный кэш 1 час: пересобирать чаще дорого, а история меняется
   // медленно. Живые окна (7/30/90) остаются на коротком дефолтном TTL.
   const MS_TOP_ALL_CACHE_TTL_MS = 60 * 60 * 1000;
-  // Живой page-loop /api/ms/returns: страницы по 1000 (лимит МС без expand) с паузой, как у
-  // движка бэкфилла; cap 5 страниц — потолок одного запроса (5000 возвратов за окно; больше —
-  // честный truncated, не бесконечный проход по чужому лимиту 45/3с).
-  const MS_RETURNS_PAGE_LIMIT = 1000;
-  const MS_RETURNS_PAGE_CAP = 5;
-  const MS_RETURNS_PAGE_PAUSE_MS = 150;
   // Живые вызовы дорогие → кэш: словари статусов и каналов продаж меняются редко (1 час,
-  // инвалидация TTL'ом), возвраты — обычный data-TTL 10 минут.
+  // инвалидация TTL'ом). Возвраты теперь читаются из архива (ms_returns) — своего live-кэша не
+  // требуют.
   const MS_STATES_CACHE_TTL_MS = 60 * 60 * 1000;
   const MS_CHANNELS_CACHE_TTL_MS = 60 * 60 * 1000;
-  const MS_RETURNS_CACHE_TTL_MS = 10 * 60 * 1000;
   const sleep = sleepFn || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
 
   // 'YYYY-MM-DD' по местным часам процесса (Railway = UTC) — как остальные дневные окна бэка.
@@ -367,13 +362,24 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
       if (await msBackfill.isBusy(ms.channel.id)) {
         return res.status(409).json({ error: 'Загрузка уже идёт' });
       }
-      msBackfill.start(ms.channel.id).then(
+      const ordersRun = msBackfill.start(ms.channel.id).then(
         (out) => log('info', 'ms_backfill_finished', {
           channelId: ms.channel.id, status: out && out.status, fetched: out && out.fetched,
         }),
         // Исход-ошибка уже записана движком в state (UI её увидит) — здесь только журнал.
         (e) => log('warn', 'ms_backfill_failed', { channelId: ms.channel.id, error: e && e.message }),
       );
+      // Полоса возвратов (ms_returns) имеет свой durable state/single-flight, но идёт ПОСЛЕ заказов:
+      // обе полосы делят лимит одного аккаунта МС и не должны конкурировать за него. Ошибка заказов
+      // уже записана в их state и не блокирует независимую попытку возвратов.
+      if (typeof msBackfill.startReturns === 'function') {
+        ordersRun.then(() => msBackfill.startReturns(ms.channel.id)).then(
+          (out) => log('info', 'ms_returns_backfill_finished', {
+            channelId: ms.channel.id, status: out && out.status, fetched: out && out.fetched,
+          }),
+          (e) => log('warn', 'ms_returns_backfill_failed', { channelId: ms.channel.id, error: e && e.message }),
+        );
+      }
       res.json({ ok: true, status: 'running' });
     } catch (e) {
       next(e);
@@ -1049,53 +1055,41 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
     }
   });
 
-  // GET /api/ms/returns?days= — возвраты покупателей ЖИВЫМ page-loop'ом по /entity/salesreturn
-  // (архива возвратов не копим — редкая сущность, счёт/сумма окна снимаются напрямую). Окно и
-  // пагинация — как у движка бэкфилла: filter целиком URL-encoded, страницы limit/offset с
-  // паузой; days=0 — вся история БЕЗ фильтра. Живые вызовы дорогие → кэш 10 минут.
+  // GET /api/ms/returns?days= — возвраты покупателей ИЗ АРХИВА ms_returns (миграция 032). Точный
+  // оконный count/sum + дневная серия одним tenant-агрегатом; токен НЕ расшифровывается и живого
+  // запроса к МС нет (архив наполняет полоса возвратов jobs/msBackfillJob). Границы — тот же
+  // разбор периода, что у funnel/customers/rfm: инклюзивные календарные дни, «Всё» без нижней
+  // границы. Суммы наружу в рублях (одна конверсия на границе). Возвраты СОЗНАТЕЛЬНО считаются
+  // отдельно и из выручки/RFM заказов не вычитаются.
   app.get('/api/ms/returns', requireAuth, async (req, res, next) => {
     try {
       const period = parseMsPeriod(req);
       if (period.invalid) return badRange(res);
-      const ms = await resolveMs(req, res);
-      if (!ms) return;
-      const cacheKey = `ms:returns:${ms.channel.id}:${period.periodKey}`;
-      const cached = cacheGet(cacheKey);
-      if (cached) return res.json(cached);
-
-      // Окно-фильтр из разбора периода (пресет/диапазон); «Всё» (momentFrom=null) — без фильтра.
-      let filterQ = '';
-      if (period.momentFrom && period.momentTo) {
-        filterQ = `filter=${encodeURIComponent(`moment>=${period.momentFrom};moment<=${period.momentTo}`)}&`;
-      }
-      let count = 0;
-      let sumKopecks = 0;
-      let truncated = false;
-      let offset = 0;
-      try {
-        for (let page = 0; ; page++) {
-          // order=moment,asc — как у движка: детерминированная нарезка страниц между запросами.
-          const path = `/entity/salesreturn?${filterQ}order=${encodeURIComponent('moment,asc')}` +
-            `&limit=${MS_RETURNS_PAGE_LIMIT}&offset=${offset}`;
-          const pageData = await msFetch(ms.token, path);
-          const rows = pageData && Array.isArray(pageData.rows) ? pageData.rows : [];
-          for (const r of rows) {
-            count += 1;
-            // Копейки как есть (сумма конвертируется в рубли один раз на выходе); Math.round —
-            // страховка от дробной копейки, как в движке.
-            sumKopecks += Math.round(Number(r && r.sum) || 0);
-          }
-          if (rows.length < MS_RETURNS_PAGE_LIMIT) break;          // хвост выборки добран
-          if (page + 1 >= MS_RETURNS_PAGE_CAP) { truncated = true; break; }   // упёрлись в cap
-          offset += MS_RETURNS_PAGE_LIMIT;
-          await sleep(MS_RETURNS_PAGE_PAUSE_MS);
-        }
-      } catch (e) {
-        return sendMsError(res, e, { route: 'returns', channelId: ms.channel.id });
-      }
-      const data = { window_days: period.days, count, sum: kopecksToRub(sumKopecks), truncated };
-      cacheSet(cacheKey, data, MS_RETURNS_CACHE_TTL_MS);
-      res.json(data);
+      const resolved = await resolveMsChannel(req, res);
+      if (!resolved) return;
+      const data = await db.getMsReturnsForActor(resolved.channel.id, req.user, {
+        sinceDay: period.sinceDay, untilDay: period.untilDay,
+      });
+      // null от ForActor = доступ отозван между resolve и чтением (гонка) — честный 403.
+      if (!data) return res.status(403).json({ error: 'Нет доступа к этому каналу' });
+      const archive = await db.getMsReturnsBackfillState(resolved.channel.id);
+      const archiveStatus = archive && typeof archive.status === 'string' ? archive.status : 'pending';
+      res.json({
+        window_days: period.days,
+        archive_status: archiveStatus,
+        complete: archiveStatus === 'done',
+        archived_count: archive ? Number(archive.fetched_count) || 0 : 0,
+        total_estimate: archive && archive.total_estimate != null
+          && Number.isFinite(Number(archive.total_estimate))
+          ? Number(archive.total_estimate) : null,
+        count: data.count,
+        sum: kopecksToRub(data.sum_kopecks),
+        series: data.series.map((row) => ({
+          day: row.day,
+          count: row.count,
+          sum: kopecksToRub(row.sum_kopecks),
+        })),
+      });
     } catch (e) {
       next(e);
     }

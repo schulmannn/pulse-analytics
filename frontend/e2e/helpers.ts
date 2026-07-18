@@ -214,7 +214,23 @@ function demoMsPayload(url: URL): unknown | undefined {
   }
   if (path === '/api/ms/cohorts') return { cohorts: [] };
   if (path === '/api/ms/returns') {
-    return { window_days: days, count: 6, sum: 42_000, truncated: false };
+    const count = days === 0 ? 90 : days;
+    const series = Array.from({ length: count }, (_, index) => ({
+      day: new Date(Date.now() - (count - index - 1) * DAY_MS).toISOString().slice(0, 10),
+      // Детерминированный «редкий» ряд: возврат примерно раз в пять дней, сумма кратна индексу.
+      count: index % 5 === 0 ? 1 : 0,
+      sum: index % 5 === 0 ? 7_000 : 0,
+    }));
+    return {
+      window_days: days,
+      archive_status: 'done',
+      complete: true,
+      archived_count: 18,
+      total_estimate: 18,
+      count: series.reduce((total, row) => total + row.count, 0),
+      sum: series.reduce((total, row) => total + row.sum, 0),
+      series,
+    };
   }
   if (path === '/api/ms/sales-by-channel') {
     return {

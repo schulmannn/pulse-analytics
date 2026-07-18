@@ -115,6 +115,15 @@ async function seedRichUser(tag) {
     `INSERT INTO chart_annotations (channel_id, day, label, created_by) VALUES ($1, CURRENT_DATE, 'launch', $2)`,
     [ch, uid]);
   await pool.query(
+    `INSERT INTO ms_orders
+       (channel_id, order_id, moment, sum_kopecks, state, agent_id, agent_name, state_id, sales_channel_id, city)
+     VALUES ($1, $2, now(), 15000, 'new', $3, 'Personal customer', 'state-1', 'web', 'Moscow')`,
+    [ch, `${nonce}-${tag}-order`, `${nonce}-${tag}-agent`]);
+  await pool.query(
+    `INSERT INTO ms_returns (channel_id, return_id, moment, sum_kopecks, agent_id, agent_name)
+     VALUES ($1, $2, now(), 5000, $3, 'Personal customer')`,
+    [ch, `${nonce}-${tag}-return`, `${nonce}-${tag}-agent`]);
+  await pool.query(
     `INSERT INTO channel_mention_settings
        (channel_id, include_terms, exclude_terms, exclude_sources, match_mode, updated_by)
      VALUES ($1, ARRAY['brand'], ARRAY['spam'], ARRAY['noise'], 'word', $2)`,
@@ -165,6 +174,8 @@ test('erasure: deleteUserAccount removes every user-linked row, spares neighbour
     ['ig_accounts', `SELECT count(*) FROM ig_accounts WHERE channel_id=$1`, [a.ch]],
     ['ig_daily', `SELECT count(*) FROM ig_daily WHERE channel_id=$1`, [a.ch]],
     ['chart_annotations', `SELECT count(*) FROM chart_annotations WHERE channel_id=$1`, [a.ch]],
+    ['ms_orders', `SELECT count(*) FROM ms_orders WHERE channel_id=$1`, [a.ch]],
+    ['ms_returns', `SELECT count(*) FROM ms_returns WHERE channel_id=$1`, [a.ch]],
   ]) {
     assert.strictEqual(await count(sql, params), 0, `${label}: erased`);
   }
@@ -220,6 +231,9 @@ test('export: streamUserExport carries the archive but never credentials or fore
   assert.strictEqual(data.channels[0].id, a.ch);
   assert.strictEqual(data.channels[0].archive.daily.length, 1, 'daily archive included');
   assert.strictEqual(data.channels[0].archive.posts.length, 1, 'posts archive included');
+  assert.strictEqual(data.channels[0].archive.ms_orders.length, 1, 'MoySklad orders archive included');
+  assert.strictEqual(data.channels[0].archive.ms_returns.length, 1, 'MoySklad returns archive included');
+  assert.strictEqual(data.channels[0].archive.ms_returns[0].agent_name, 'Personal customer');
   assert.deepStrictEqual(data.channels[0].mention_settings.include_terms, ['brand'], 'mention rules included');
   assert.strictEqual(data.channels[0].mention_settings.match_mode, 'word');
   assert.ok(data.channels[0].instagram, 'ig profile included');
@@ -269,7 +283,7 @@ test('export: keyset pages tile the archive with no duplication/omission, incl. 
   const big = (await runExport(a.uid, { pageSize: 1000 })).json.channels[0].archive;
   const small = (await runExport(a.uid, { pageSize: 2 })).json.channels[0].archive;
 
-  for (const arr of ['daily', 'posts', 'mentions', 'velocity', 'annotations']) {
+  for (const arr of ['daily', 'posts', 'mentions', 'velocity', 'annotations', 'ms_orders', 'ms_returns']) {
     assert.deepStrictEqual(small[arr], big[arr], `${arr}: paged read equals single-shot read`);
   }
   // Every post present exactly once (no dupes, no holes) despite the shared timestamp + page split.
