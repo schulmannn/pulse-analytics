@@ -554,7 +554,17 @@ const MsSummarySchema = z
   .passthrough();
 const MsTopProductsSchema = z
   .object({
-    rows: z.array(z.object({ name: z.string(), quantity: z.number(), revenue: z.number(), profit: z.number() }).passthrough()),
+    rows: z.array(
+      z
+        .object({
+          name: z.string(),
+          quantity: z.number(),
+          revenue: z.number(),
+          profit: z.number(),
+          margin: z.number().nullable(),
+        })
+        .passthrough(),
+    ),
   })
   .passthrough();
 
@@ -605,6 +615,7 @@ const MsFunnelSchema = z
     window_days: z.number(),
     total_orders: z.number(),
     no_state_orders: z.number(),
+    no_state_sum: z.number(),
     rows: z.array(
       z
         .object({
@@ -647,7 +658,15 @@ const MsCustomersSchema = z
       })
       .passthrough(),
     series: z.array(
-      z.object({ day: z.string(), new_orders: z.number(), repeat_orders: z.number() }).passthrough(),
+      z
+        .object({
+          day: z.string(),
+          new_orders: z.number(),
+          repeat_orders: z.number(),
+          sum_new: z.number(),
+          sum_repeat: z.number(),
+        })
+        .passthrough(),
     ),
   })
   .passthrough();
@@ -829,15 +848,17 @@ export function useMsSummary(period: MsPeriod) {
   });
 }
 
-export function useMsTopProducts(period: MsPeriod, limit = 10) {
+export type MsProductSort = 'revenue' | 'profit' | 'margin';
+
+export function useMsTopProducts(period: MsPeriod, limit = 10, sort: MsProductSort = 'revenue') {
   const { channelId } = useSelectedChannel();
   return useQuery({
     enabled: channelId != null,
-    queryKey: ['ms-top-products', channelId, ...msPeriodKey(period), limit],
+    queryKey: ['ms-top-products', channelId, ...msPeriodKey(period), limit, sort],
     staleTime: STALE_LIVE,
     retry: false,
     queryFn: ({ signal }) =>
-      apiGet(`/api/ms/top-products?${msPeriodQuery(period)}&limit=${limit}`, MsTopProductsSchema, { signal, channelId }),
+      apiGet(`/api/ms/top-products?${msPeriodQuery(period)}&limit=${limit}&sort=${sort}`, MsTopProductsSchema, { signal, channelId }),
   });
 }
 

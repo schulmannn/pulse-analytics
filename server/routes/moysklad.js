@@ -36,6 +36,8 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
   };
   const MS_TOP_LIMIT_DEFAULT = 10;
   const MS_TOP_LIMIT_MAX = 50;
+  const MS_TOP_SORTS = new Set(['revenue', 'profit', 'margin']);
+  const topSortOf = (req) => (MS_TOP_SORTS.has(req.query.sort) ? req.query.sort : 'revenue');
   // Страничная добивка отчёта прибыльности для топа: МС не сортирует отчёт по выручке, поэтому
   // окно добирается целиком (страницы по 1000, тот же потолок API, что у /returns) и сортируется
   // у нас. Cap 3 страницы = 3000 позиций ассортимента за окно; больше — честный truncated.
@@ -495,7 +497,7 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
     }
   });
 
-  // GET /api/ms/top-products?days=30&limit=10 — топ товаров по ВЫРУЧКЕ за окно.
+  // GET /api/ms/top-products?days=30&limit=10&sort=revenue|profit|margin — рейтинг товаров.
   // МС отдаёт отчёт НЕ по выручке (фактически — алфавит ассортимента), а сортировка в
   // параметрах отчёта не документирована → добираем окно постранично (limit/offset, cap и
   // пауза — как у /returns) и сортируем у себя; наружу уходят первые limit строк.
@@ -514,77 +516,92 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
       const limitRaw = parseInt(req.query.limit, 10);
       // Кэп 1..50 ДО кэш-ключа — та же дисциплина ограниченной кардинальности, что у days.
       const limit = Math.min(MS_TOP_LIMIT_MAX, Math.max(1, Number.isFinite(limitRaw) ? limitRaw : MS_TOP_LIMIT_DEFAULT));
-      // periodKey в ключе разводит дорогое «Всё» (час), живые окна и произвольные диапазоны.
-      const cacheKey = `ms:top:${ms.channel.id}:${period.periodKey}:${limit}`;
-      const cached = cacheGet(cacheKey);
-      if (cached) return res.json(cached);
+      const sort = topSortOf(req);
+      // Полный нормализованный отчёт кэшируется ОДИН раз на окно: переключение сортировки и limit
+      // не должно повторять дорогой page-loop МойСклада. Слот channelId остаётся третьим, поэтому
+      // connect/disconnect точечно инвалидирует raw-кэш через общий msCachePurge.
+      const rawCacheKey = `ms:topraw:${ms.channel.id}:${period.periodKey}`;
+      let raw = cacheGet(rawCacheKey);
 
-      let momentFrom;
-      let momentTo;
-      if (period.momentFrom) {
-        // Пресет 7/30/90 или произвольный диапазон — окно уже посчитано разбором периода.
-        ({ momentFrom, momentTo } = period);
-      } else {
-        // days=0 «Всё»: ForActor — канон tenant-read. oldestDay 'YYYY-MM-DD' → якорь окна с
-        // первого дня того же месяца (полные месяцы читаются человеком как «вся история»).
-        const oldestDay = await db.getMsOldestOrderDayForActor(ms.channel.id, req.user);
-        momentFrom = `${oldestDay ? `${oldestDay.slice(0, 7)}-01` : '2020-01-01'} 00:00:00`;
-        momentTo = `${fmtDay(new Date())} 23:59:59`;
-      }
-      const all = [];
-      let metaSize = null;
-      let truncated = false;
-      try {
-        let offset = 0;
-        for (let page = 0; ; page++) {
-          const report = await msFetch(
-            ms.token,
-            `/report/profit/byproduct?momentFrom=${encodeURIComponent(momentFrom)}&momentTo=${encodeURIComponent(momentTo)}` +
-              `&limit=${MS_TOP_PAGE_LIMIT}&offset=${offset}`,
-          );
-          const pageRows = report && Array.isArray(report.rows) ? report.rows : [];
-          if (page === 0) {
-            // meta.size — полный размер выборки у МС (страница может быть короче лимита).
-            const size = Number(report && report.meta && report.meta.size);
-            metaSize = Number.isFinite(size) ? size : null;
-          }
-          for (const r of pageRows) {
-            all.push({
-              name: r && r.assortment && typeof r.assortment.name === 'string' ? r.assortment.name : null,
-              quantity: Number(r && r.sellQuantity) || 0,
-              // Копейки как есть до самого выхода — сортировка по целым, рубли на границе.
-              revenueKopecks: Math.round(Number(r && r.sellSum) || 0),
-              profitKopecks: Math.round(Number(r && r.profit) || 0),
-            });
-          }
-          if (pageRows.length < MS_TOP_PAGE_LIMIT) break;                     // хвост добран
-          if (page + 1 >= MS_TOP_PAGE_CAP) { truncated = true; break; }       // упёрлись в cap
-          offset += MS_TOP_PAGE_LIMIT;
-          await sleep(MS_TOP_PAGE_PAUSE_MS);
+      if (!raw) {
+        let momentFrom;
+        let momentTo;
+        if (period.momentFrom) {
+          // Пресет 7/30/90 или произвольный диапазон — окно уже посчитано разбором периода.
+          ({ momentFrom, momentTo } = period);
+        } else {
+          // days=0 «Всё»: ForActor — канон tenant-read. oldestDay 'YYYY-MM-DD' → якорь окна с
+          // первого дня того же месяца (полные месяцы читаются человеком как «вся история»).
+          const oldestDay = await db.getMsOldestOrderDayForActor(ms.channel.id, req.user);
+          momentFrom = `${oldestDay ? `${oldestDay.slice(0, 7)}-01` : '2020-01-01'} 00:00:00`;
+          momentTo = `${fmtDay(new Date())} 23:59:59`;
         }
-      } catch (e) {
-        return sendMsError(res, e, { route: 'top-products', channelId: ms.channel.id });
+        const all = [];
+        let metaSize = null;
+        let truncated = false;
+        try {
+          let offset = 0;
+          for (let page = 0; ; page++) {
+            const report = await msFetch(
+              ms.token,
+              `/report/profit/byproduct?momentFrom=${encodeURIComponent(momentFrom)}&momentTo=${encodeURIComponent(momentTo)}` +
+                `&limit=${MS_TOP_PAGE_LIMIT}&offset=${offset}`,
+            );
+            const pageRows = report && Array.isArray(report.rows) ? report.rows : [];
+            if (page === 0) {
+              // meta.size — полный размер выборки у МС (страница может быть короче лимита).
+              const size = Number(report && report.meta && report.meta.size);
+              metaSize = Number.isFinite(size) ? size : null;
+            }
+            for (const r of pageRows) {
+              all.push({
+                name: r && r.assortment && typeof r.assortment.name === 'string' ? r.assortment.name : null,
+                quantity: Number(r && r.sellQuantity) || 0,
+                // Копейки как есть до самого выхода — сортировка по целым, рубли на границе.
+                revenueKopecks: Math.round(Number(r && r.sellSum) || 0),
+                profitKopecks: Math.round(Number(r && r.profit) || 0),
+              });
+            }
+            if (pageRows.length < MS_TOP_PAGE_LIMIT) break;                     // хвост добран
+            if (page + 1 >= MS_TOP_PAGE_CAP) { truncated = true; break; }       // упёрлись в cap
+            offset += MS_TOP_PAGE_LIMIT;
+            await sleep(MS_TOP_PAGE_PAUSE_MS);
+          }
+        } catch (e) {
+          return sendMsError(res, e, { route: 'top-products', channelId: ms.channel.id });
+        }
+        raw = { rows: all, total: metaSize != null ? metaSize : all.length, truncated };
+        if (period.days === 0 && !period.range) cacheSet(rawCacheKey, raw, MS_TOP_ALL_CACHE_TTL_MS);
+        else cacheSet(rawCacheKey, raw);
       }
 
-      // «По выручке», как подписан виджет; tie-break по количеству и имени — порядок
-      // детерминирован между прогонами и не зависит от порядка страниц МС.
-      all.sort(
-        (a, b) =>
-          b.revenueKopecks - a.revenueKopecks ||
-          b.quantity - a.quantity ||
-          String(a.name || '').localeCompare(String(b.name || ''), 'ru'),
-      );
-      const rows = all.slice(0, limit).map((r) => ({
+      const marginOf = (r) => (r.revenueKopecks > 0 ? (r.profitKopecks / r.revenueKopecks) * 100 : null);
+      // Сортируем КОПИЮ полного отчёта до limit. Для неопределённой маржи (выручка <= 0) место
+      // всегда в хвосте; затем устойчивые финансовые tie-break'и и имя.
+      const ranked = [...raw.rows].sort((a, b) => {
+        if (sort === 'profit') {
+          return b.profitKopecks - a.profitKopecks || b.revenueKopecks - a.revenueKopecks ||
+            b.quantity - a.quantity || String(a.name || '').localeCompare(String(b.name || ''), 'ru');
+        }
+        if (sort === 'margin') {
+          const am = marginOf(a);
+          const bm = marginOf(b);
+          if (am == null && bm != null) return 1;
+          if (am != null && bm == null) return -1;
+          return (bm ?? 0) - (am ?? 0) || b.profitKopecks - a.profitKopecks ||
+            b.revenueKopecks - a.revenueKopecks || String(a.name || '').localeCompare(String(b.name || ''), 'ru');
+        }
+        return b.revenueKopecks - a.revenueKopecks || b.quantity - a.quantity ||
+          b.profitKopecks - a.profitKopecks || String(a.name || '').localeCompare(String(b.name || ''), 'ru');
+      });
+      const rows = ranked.slice(0, limit).map((r) => ({
         name: r.name,
         quantity: r.quantity,
         revenue: kopecksToRub(r.revenueKopecks),
         profit: kopecksToRub(r.profitKopecks),
+        margin: r.revenueKopecks > 0 ? Math.round(marginOf(r) * 100) / 100 : null,
       }));
-      const data = { rows, total: metaSize != null ? metaSize : all.length, truncated };
-      // Дорогое «Всё» (полный диапазон архива) кэшируем на час; окна/диапазоны — короткий дефолт.
-      if (period.days === 0 && !period.range) cacheSet(cacheKey, data, MS_TOP_ALL_CACHE_TTL_MS);
-      else cacheSet(cacheKey, data);
-      res.json(data);
+      res.json({ rows, total: raw.total, truncated: raw.truncated });
     } catch (e) {
       next(e);
     }
@@ -894,11 +911,13 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
       const dict = await loadStatesDict(ms);
       let totalOrders = 0;
       let noStateOrders = 0;
+      let noStateSumKopecks = 0;
       const out = [];
       for (const r of rows) {
         totalOrders += r.orders;
         if (r.state_id == null) {
           noStateOrders += r.orders;
+          noStateSumKopecks += r.sum_kopecks;
           continue;
         }
         const st = dict ? dict[r.state_id] : null;
@@ -910,7 +929,13 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
           sum: kopecksToRub(r.sum_kopecks),
         });
       }
-      res.json({ window_days: period.days, total_orders: totalOrders, no_state_orders: noStateOrders, rows: out });
+      res.json({
+        window_days: period.days,
+        total_orders: totalOrders,
+        no_state_orders: noStateOrders,
+        no_state_sum: kopecksToRub(noStateSumKopecks),
+        rows: out,
+      });
     } catch (e) {
       next(e);
     }
@@ -945,7 +970,13 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
           no_agent_orders: s.no_agent_orders,
           repeat_ever: s.repeat_ever,
         },
-        series: data.series,
+        series: data.series.map((row) => ({
+          day: row.day,
+          new_orders: row.new_orders,
+          repeat_orders: row.repeat_orders,
+          sum_new: kopecksToRub(row.sum_new_kopecks),
+          sum_repeat: kopecksToRub(row.sum_repeat_kopecks),
+        })),
       });
     } catch (e) {
       next(e);

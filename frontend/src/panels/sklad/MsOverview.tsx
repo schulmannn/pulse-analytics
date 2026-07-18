@@ -1,5 +1,6 @@
-import { useContext } from 'react';
+import { useContext, useState } from 'react';
 import { Link } from 'react-router-dom';
+import type { MsProductSort } from '@/api/queries';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import type { ChartExpandConfig } from '@/components/ExpandableChart';
 import { useMsFunnel, useMsReturns, useMsSummary, useMsTopProducts } from '@/api/queries';
@@ -10,6 +11,7 @@ import { BarChart } from '@/components/BarChart';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { Skeleton } from '@/components/ui/skeleton';
+import { SegmentedControl } from '@/components/SegmentedControl';
 import { lttbDownsample } from '@/lib/downsample';
 import { fmt } from '@/lib/format';
 import { usePagePeriod } from '@/lib/period';
@@ -44,7 +46,9 @@ export function MsOverview() {
   const summary = useMsSummary(period);
   // «Всё» (0) бэк со слайса 4 считает честно: полный диапазон от старейшего заказа архива
   // (страничная добивка отчёта + кэш 1 час) — подмена 0→30 больше не нужна.
-  const top = useMsTopProducts(period);
+  const [productSort, setProductSort] = useState<MsProductSort>('revenue');
+  const [funnelMetric, setFunnelMetric] = useState<'orders' | 'revenue'>('orders');
+  const top = useMsTopProducts(period, 50, productSort);
   const funnel = useMsFunnel(period);
   const returns = useMsReturns(period);
 
@@ -166,6 +170,18 @@ export function MsOverview() {
       </ChartWidget>
 
       <ChartWidget id="ms-funnel" title="Воронка статусов" fixedSize="half">
+        <div className="mb-2 flex justify-end">
+          <SegmentedControl
+            ariaLabel="Метрика воронки"
+            size="sm"
+            value={funnelMetric}
+            onChange={setFunnelMetric}
+            options={[
+              { value: 'orders', content: 'Заказы' },
+              { value: 'revenue', content: 'Выручка' },
+            ]}
+          />
+        </div>
         {funnel.isPending ? (
           <div className="space-y-2 py-2">
             {Array.from({ length: 4 }).map((_, i) => (
@@ -201,11 +217,27 @@ export function MsOverview() {
             rows={funnel.data.rows}
             totalOrders={funnel.data.total_orders}
             noState={funnel.data.no_state_orders}
+            noStateSum={funnel.data.no_state_sum}
+            metric={funnelMetric}
           />
         )}
       </ChartWidget>
 
-      <ChartWidget id="ms-top-products" title="Топ товаров по выручке" fixedSize="half">
+      <ChartWidget id="ms-top-products" title="Товары" fixedSize="half">
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <span className="text-2xs text-muted-foreground">Рейтинг</span>
+          <SegmentedControl
+            ariaLabel="Метрика рейтинга товаров"
+            size="sm"
+            value={productSort}
+            onChange={setProductSort}
+            options={[
+              { value: 'revenue', content: 'Выручка' },
+              { value: 'profit', content: 'Прибыль' },
+              { value: 'margin', content: 'Маржа' },
+            ]}
+          />
+        </div>
         {top.isPending ? (
           <div className="space-y-2 py-2">
             {Array.from({ length: 4 }).map((_, i) => (
@@ -223,7 +255,7 @@ export function MsOverview() {
         ) : !top.data || top.data.rows.length === 0 ? (
           <p className="py-4 text-sm text-muted-foreground">Нет продаж за период.</p>
         ) : (
-          <MsTopProductsList rows={top.data.rows} />
+          <MsTopProductsList rows={top.data.rows} metric={productSort} />
         )}
       </ChartWidget>
 
@@ -360,28 +392,56 @@ function MsSummaryExplorer({
     показывает полный состав ответа. */
 function MsTopProductsList({
   rows,
+  metric,
 }: {
-  rows: Array<{ name: string; quantity: number; revenue: number; profit: number }>;
+  rows: Array<{ name: string; quantity: number; revenue: number; profit: number; margin: number | null }>;
+  metric: MsProductSort;
 }) {
   const expanded = useContext(ChartExpandedContext);
   const shown = expanded ? rows : rows.slice(0, 5);
   return (
     <ul>
       {shown.map((row, i) => (
-        <li key={`${row.name}-${i}`} className="flex items-center gap-3 border-t border-border py-2.5 first:border-t-0">
+        <li key={`${row.name}-${i}`} className="flex items-center gap-3 border-t border-border py-1.5 first:border-t-0">
           <span className="w-5 shrink-0 text-center text-xs font-medium tabular-nums text-muted-foreground">{i + 1}</span>
           <span className="min-w-0 flex-1 truncate text-sm text-foreground">{row.name}</span>
           <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{fmt.num(row.quantity)} шт.</span>
-          <span className="w-24 shrink-0 text-right text-sm font-medium tabular-nums">{fmt.short(row.revenue)} ₽</span>
-          {/* Прибыль бывает отрицательной — показываем честно, но без красного крика (канон тихих дельт). */}
-          <span className="w-24 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
-            {row.profit >= 0 ? '' : '−'}
-            {fmt.short(Math.abs(row.profit))} ₽
+          <span className="w-20 shrink-0 text-right text-sm font-medium tabular-nums text-foreground">
+            {formatProductPrimary(row, metric)}
+          </span>
+          <span className="w-36 shrink-0 text-right text-2xs tabular-nums text-muted-foreground">
+            {formatProductSecondary(row, metric)}
           </span>
         </li>
       ))}
     </ul>
   );
+}
+
+function formatProfit(value: number): string {
+  return `${value < 0 ? '−' : ''}${fmt.short(Math.abs(value))} ₽`;
+}
+
+function formatMargin(value: number | null): string {
+  return value == null ? '—' : `${value.toFixed(1)}%`;
+}
+
+function formatProductPrimary(
+  row: { revenue: number; profit: number; margin: number | null },
+  metric: MsProductSort,
+): string {
+  if (metric === 'profit') return formatProfit(row.profit);
+  if (metric === 'margin') return formatMargin(row.margin);
+  return `${fmt.short(row.revenue)} ₽`;
+}
+
+function formatProductSecondary(
+  row: { revenue: number; profit: number; margin: number | null },
+  metric: MsProductSort,
+): string {
+  if (metric === 'profit') return `выруч. ${fmt.short(row.revenue)} ₽ · ${formatMargin(row.margin)}`;
+  if (metric === 'margin') return `приб. ${formatProfit(row.profit)} · выруч. ${fmt.short(row.revenue)} ₽`;
+  return `приб. ${formatProfit(row.profit)} · ${formatMargin(row.margin)}`;
 }
 
 /** Строки воронки: топ-5 статусов окна барами в акценте графиков + сводный хвост; разворот
@@ -392,15 +452,26 @@ function MsFunnelRows({
   rows,
   totalOrders,
   noState,
+  noStateSum,
+  metric,
 }: {
   rows: Array<{ state_id: string; name: string | null; color: string | null; orders: number; sum: number }>;
   totalOrders: number;
   noState: number;
+  noStateSum: number;
+  metric: 'orders' | 'revenue';
 }) {
   const expanded = useContext(ChartExpandedContext);
-  const top = expanded ? rows : rows.slice(0, 5);
-  const restOrders = (expanded ? [] : rows.slice(5)).reduce((acc, r) => acc + r.orders, 0) + noState;
-  const max = top[0]?.orders ?? 1;
+  const selectedValue = (row: { orders: number; sum: number }) => (metric === 'orders' ? row.orders : row.sum);
+  const ranked = [...rows].sort(
+    (a, b) => selectedValue(b) - selectedValue(a) || b.orders - a.orders || a.state_id.localeCompare(b.state_id),
+  );
+  const top = expanded ? ranked : ranked.slice(0, 5);
+  const tail = expanded ? [] : ranked.slice(5);
+  const restOrders = tail.reduce((acc, row) => acc + row.orders, 0) + noState;
+  const restSum = tail.reduce((acc, row) => acc + row.sum, 0) + noStateSum;
+  const totalSum = rows.reduce((acc, row) => acc + row.sum, 0) + noStateSum;
+  const max = Math.max(1, ...top.map((row) => Math.max(0, selectedValue(row))));
   return (
     <div className="space-y-2 pt-1">
       {top.map((r) => (
@@ -413,24 +484,31 @@ function MsFunnelRows({
               <span className="truncate">{r.name ?? 'Статус без имени'}</span>
             </span>
             <span className="shrink-0 tabular-nums text-muted-foreground">
-              <span className="font-medium text-foreground">{fmt.num(r.orders)}</span> · {fmt.short(r.sum)} ₽
+              {metric === 'orders' ? (
+                <><span className="font-medium text-foreground">{fmt.num(r.orders)}</span> · {fmt.short(r.sum)} ₽</>
+              ) : (
+                <><span className="font-medium text-foreground">{fmt.short(r.sum)} ₽</span> · {fmt.num(r.orders)}</>
+              )}
             </span>
           </div>
           <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
             <div
               className="h-full rounded-full"
               style={{
-                width: `${Math.max(4, Math.round((r.orders / max) * 100))}%`,
+                width: `${Math.max(4, Math.round((Math.max(0, selectedValue(r)) / max) * 100))}%`,
                 backgroundColor: 'hsl(var(--chart-role-primary) / 0.75)',
               }}
             />
           </div>
         </div>
       ))}
-      {restOrders > 0 && (
+      {(metric === 'orders' ? restOrders > 0 : restSum !== 0) && (
         <p className="text-2xs text-muted-foreground">
-          Ещё {fmt.num(restOrders)} {noState > 0 ? `заказов (из них без статуса ${fmt.num(noState)})` : 'заказов'} из{' '}
-          {fmt.num(totalOrders)}.
+          {metric === 'orders' ? (
+            <>Ещё {fmt.num(restOrders)} {noState > 0 ? `заказов (из них без статуса ${fmt.num(noState)})` : 'заказов'} из {fmt.num(totalOrders)}.</>
+          ) : (
+            <>Ещё {fmt.short(restSum)} ₽ {noStateSum !== 0 ? `(без статуса ${fmt.short(noStateSum)} ₽)` : 'выручки'} из {fmt.short(totalSum)} ₽.</>
+          )}
         </p>
       )}
     </div>
