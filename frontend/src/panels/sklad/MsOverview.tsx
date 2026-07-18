@@ -1,9 +1,9 @@
 import { useContext, useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { MsProductSort } from '@/api/queries';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import type { ChartExpandConfig } from '@/components/ExpandableChart';
-import { useMsFunnel, useMsReturns, useMsSummary, useMsTopProducts } from '@/api/queries';
+import { useMsFunnel, useMsReturns, useMsSummary } from '@/api/queries';
+import { MsTopProductsCard } from '@/panels/sklad/MsTopProducts';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
 import { LineChart } from '@/components/LineChart';
@@ -46,9 +46,7 @@ export function MsOverview() {
   const summary = useMsSummary(period);
   // «Всё» (0) бэк со слайса 4 считает честно: полный диапазон от старейшего заказа архива
   // (страничная добивка отчёта + кэш 1 час) — подмена 0→30 больше не нужна.
-  const [productSort, setProductSort] = useState<MsProductSort>('revenue');
   const [funnelMetric, setFunnelMetric] = useState<'orders' | 'revenue'>('orders');
-  const top = useMsTopProducts(period, 50, productSort);
   const funnel = useMsFunnel(period);
   const returns = useMsReturns(period);
 
@@ -224,39 +222,7 @@ export function MsOverview() {
       </ChartWidget>
 
       <ChartWidget id="ms-top-products" title="Товары" fixedSize="half">
-        <div className="mb-2 flex items-center justify-between gap-3">
-          <span className="text-2xs text-muted-foreground">Рейтинг</span>
-          <SegmentedControl
-            ariaLabel="Метрика рейтинга товаров"
-            size="sm"
-            value={productSort}
-            onChange={setProductSort}
-            options={[
-              { value: 'revenue', content: 'Выручка' },
-              { value: 'profit', content: 'Прибыль' },
-              { value: 'margin', content: 'Маржа' },
-            ]}
-          />
-        </div>
-        {top.isPending ? (
-          <div className="space-y-2 py-2">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={`t${i}`} className="h-6 w-full" />
-            ))}
-          </div>
-        ) : top.isError ? (
-          <ErrorState
-            className="py-4"
-            title="Не удалось получить топ товаров"
-            reason={top.error instanceof Error ? top.error.message : 'ошибка'}
-            onRetry={() => top.refetch()}
-            retrying={top.isFetching}
-          />
-        ) : !top.data || top.data.rows.length === 0 ? (
-          <p className="py-4 text-sm text-muted-foreground">Нет продаж за период.</p>
-        ) : (
-          <MsTopProductsList rows={top.data.rows} metric={productSort} />
-        )}
+        <MsTopProductsCard period={period} />
       </ChartWidget>
 
       <ChartWidget id="ms-returns" title="Возвраты" fixedSize="half">
@@ -385,63 +351,6 @@ function MsSummaryExplorer({
       )}
     </ChartCardBody>
   );
-}
-
-/** Список топ-товаров. Half-тайл фиксированной высоты вмещает 5 строк без внутреннего скролла
-    (канон плотности); РАЗВОРОТ карточки (ChartExpandedContext — тот же паттерн, что Breakdown)
-    показывает полный состав ответа. */
-function MsTopProductsList({
-  rows,
-  metric,
-}: {
-  rows: Array<{ name: string; quantity: number; revenue: number; profit: number; margin: number | null }>;
-  metric: MsProductSort;
-}) {
-  const expanded = useContext(ChartExpandedContext);
-  const shown = expanded ? rows : rows.slice(0, 5);
-  return (
-    <ul>
-      {shown.map((row, i) => (
-        <li key={`${row.name}-${i}`} className="flex items-center gap-3 border-t border-border py-1.5 first:border-t-0">
-          <span className="w-5 shrink-0 text-center text-xs font-medium tabular-nums text-muted-foreground">{i + 1}</span>
-          <span className="min-w-0 flex-1 truncate text-sm text-foreground">{row.name}</span>
-          <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{fmt.num(row.quantity)} шт.</span>
-          <span className="w-20 shrink-0 text-right text-sm font-medium tabular-nums text-foreground">
-            {formatProductPrimary(row, metric)}
-          </span>
-          <span className="w-36 shrink-0 text-right text-2xs tabular-nums text-muted-foreground">
-            {formatProductSecondary(row, metric)}
-          </span>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function formatProfit(value: number): string {
-  return `${value < 0 ? '−' : ''}${fmt.short(Math.abs(value))} ₽`;
-}
-
-function formatMargin(value: number | null): string {
-  return value == null ? '—' : `${value.toFixed(1)}%`;
-}
-
-function formatProductPrimary(
-  row: { revenue: number; profit: number; margin: number | null },
-  metric: MsProductSort,
-): string {
-  if (metric === 'profit') return formatProfit(row.profit);
-  if (metric === 'margin') return formatMargin(row.margin);
-  return `${fmt.short(row.revenue)} ₽`;
-}
-
-function formatProductSecondary(
-  row: { revenue: number; profit: number; margin: number | null },
-  metric: MsProductSort,
-): string {
-  if (metric === 'profit') return `выруч. ${fmt.short(row.revenue)} ₽ · ${formatMargin(row.margin)}`;
-  if (metric === 'margin') return `приб. ${formatProfit(row.profit)} · выруч. ${fmt.short(row.revenue)} ₽`;
-  return `приб. ${formatProfit(row.profit)} · ${formatMargin(row.margin)}`;
 }
 
 /** Строки воронки: топ-5 статусов окна барами в акценте графиков + сводный хвост; разворот

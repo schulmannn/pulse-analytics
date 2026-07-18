@@ -292,6 +292,79 @@ test('top-products: полный raw-отчёт сортируется до limi
   assert.equal(fetches.length, 2, 'все sort/limit-проекции используют один raw page-loop');
 });
 
+test('top-products: сводка концентрации по ПОЛНОМУ raw до limit; знаменатели, доли топ-10, убытки; кэш переиспользуется', async () => {
+  // 13 позиций в одной странице: 10 крупных, 2 средних, 1 убыточная. Знаем точные знаменатели.
+  const rows = [];
+  for (let i = 0; i < 10; i += 1) rows.push({ assortment: { name: `big-${i}` }, sellQuantity: 1, sellSum: 100_00, profit: 50_00 });
+  rows.push({ assortment: { name: 'mid-a' }, sellQuantity: 1, sellSum: 50_00, profit: 25_00 });
+  rows.push({ assortment: { name: 'mid-b' }, sellQuantity: 1, sellSum: 50_00, profit: 25_00 });
+  rows.push({ assortment: { name: 'loss' }, sellQuantity: 1, sellSum: 20_00, profit: -30_00 });
+  let fetches = 0;
+  const { routes } = buildMs({
+    msFetch: async () => {
+      fetches += 1;
+      return { rows, meta: { size: rows.length } };
+    },
+  });
+  const res = await invoke(routes, 'GET /api/ms/top-products', { query: { days: '30', limit: '3' } });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.rows.length, 3, 'limit ограничивает только rows, не сводку');
+  assert.deepEqual(res.body.summary, {
+    complete: true,
+    product_count: 13, // считается по полному отчёту, а не по limit
+    top_n: 10,
+    revenue_positive_total: 1120, // 10*100 + 2*50 + 20 (₽)
+    profit_positive_total: 550, // 10*50 + 2*25 (убыток НЕ входит в положительный знаменатель)
+    revenue_top10_share_pct: 89.3, // 1000 / 1120
+    profit_top10_share_pct: 90.9, // 500 / 550
+    net_margin_pct: 46.4, // 520 / 1120
+    loss_making_count: 1,
+    loss_making_amount: 30, // |−30 ₽|
+  });
+
+  // Переключение сортировки/limit не повторяет page-loop и не меняет сводку (она метрик-независима).
+  const profit = await invoke(routes, 'GET /api/ms/top-products', { query: { days: '30', limit: '5', sort: 'profit' } });
+  assert.deepEqual(profit.body.summary, res.body.summary);
+  await invoke(routes, 'GET /api/ms/top-products', { query: { days: '30', sort: 'margin' } });
+  assert.equal(fetches, 1, 'сводка и все проекции читают один кэшированный raw-отчёт');
+});
+
+test('top-products: усечённый отчёт (упёрлись в page-cap) → сводки нет (null)', async () => {
+  const fullPage = Array.from({ length: 1000 }, (_, i) => ({
+    assortment: { name: `p-${i}` },
+    sellQuantity: 1,
+    sellSum: 100_00,
+    profit: 10_00,
+  }));
+  let fetches = 0;
+  const { routes } = buildMs({
+    msFetch: async () => {
+      fetches += 1;
+      return { rows: fullPage };
+    },
+  });
+  const res = await invoke(routes, 'GET /api/ms/top-products', { query: { days: '7', limit: '5' } });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.truncated, true, 'три полные страницы → упёрлись в cap');
+  assert.equal(fetches, 3);
+  assert.equal(res.body.summary, null, 'доля по частичному знаменателю недоступна');
+});
+
+test('top-products: meta.size больше фактически полученного short page → сводки нет (null)', async () => {
+  const { routes } = buildMs({
+    msFetch: async () => ({
+      rows: [{ assortment: { name: 'partial' }, sellQuantity: 1, sellSum: 100_00, profit: 50_00 }],
+      meta: { size: 2 },
+    }),
+  });
+  const res = await invoke(routes, 'GET /api/ms/top-products', { query: { days: '30', limit: '5' } });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.truncated, false, 'page-cap не достигнут');
+  assert.equal(res.body.total, 2);
+  assert.equal(res.body.rows.length, 1);
+  assert.equal(res.body.summary, null, 'meta.size подтверждает неполный raw-отчёт');
+});
+
 test('top-products: days=0 — окно от первого дня месяца старейшего заказа архива; кэш-ключ различает 0 и 30', async () => {
   const windows = [];
   const oldestCalls = [];
@@ -340,7 +413,24 @@ test('top-products: days=0 на пустом архиве — консерват
   });
   const res = await invoke(routes, 'GET /api/ms/top-products', { query: { days: '0' } });
   assert.equal(res.statusCode, 200);
-  assert.deepEqual(res.body, { rows: [], total: 0, truncated: false });
+  // Пустой отчёт: сводка есть (не усечён), но знаменатели пусты → доли/маржа честно null.
+  assert.deepEqual(res.body, {
+    rows: [],
+    total: 0,
+    truncated: false,
+    summary: {
+      complete: true,
+      product_count: 0,
+      top_n: 10,
+      revenue_positive_total: 0,
+      profit_positive_total: 0,
+      revenue_top10_share_pct: null,
+      profit_top10_share_pct: null,
+      net_margin_pct: null,
+      loss_making_count: 0,
+      loss_making_amount: 0,
+    },
+  });
   assert.equal(seenFrom, '2020-01-01 00:00:00');
 });
 
