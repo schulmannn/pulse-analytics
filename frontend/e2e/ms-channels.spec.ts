@@ -12,7 +12,8 @@ test('MoySklad channels uses the flat feed shell and multi-channel explorer', as
   await expect(page.getByRole('heading', { name: 'Atlavue', exact: true })).toHaveCount(0);
   await expect(page.getByRole('group', { name: 'Период', exact: true })).toHaveCount(1);
 
-  const dynamics = page.getByRole('heading', { name: /Выручка по каналам/ }).locator('xpath=ancestor::section[1]');
+  // Anchor on the stable control group: the widget heading changes with the selected metric.
+  const dynamics = page.locator('section').filter({ has: page.getByRole('group', { name: 'Метрика' }) }).first();
   await expect(dynamics.getByRole('group', { name: 'Метрика' })).toBeVisible();
   await expect(dynamics.getByRole('group', { name: 'Вид' })).toBeVisible();
 
@@ -25,9 +26,10 @@ test('MoySklad channels uses the flat feed shell and multi-channel explorer', as
   await expect(dynamics.getByText('2 канала', { exact: true })).toBeVisible();
 
   await dynamics.getByRole('group', { name: 'Вид' }).getByRole('button', { name: 'По каналам' }).click();
-  await expect(dynamics.getByText('Интернет-магазин', { exact: true })).toBeVisible();
-  await expect(dynamics.getByText('Партнёры', { exact: true })).toBeVisible();
-  const comparisonChart = dynamics.getByRole('img', { name: /Выручка по каналам/ });
+  const comparisonChart = dynamics.getByRole('img', {
+    name: /Выручка по каналам: Интернет-магазин, Партнёры/,
+  });
+  await expect(comparisonChart).toBeVisible();
   await comparisonChart.focus();
   await expect(dynamics.locator('.z-tooltip')).toBeVisible();
   await page.keyboard.press('ArrowLeft');
@@ -35,6 +37,17 @@ test('MoySklad channels uses the flat feed shell and multi-channel explorer', as
   const pageShot = testInfo.outputPath('moysklad-channels-page-dark.png');
   await page.screenshot({ path: pageShot, fullPage: true });
   await testInfo.attach('moysklad-channels-page-dark', { path: pageShot, contentType: 'image/png' });
+
+  // Sparse AOV keeps the shared calendar axis and honest empty tooltips, but each selected channel
+  // remains a readable observation line instead of a collection of isolated one-point segments.
+  await dynamics.getByRole('group', { name: 'Метрика' }).getByRole('button', { name: 'Средний чек' }).click();
+  const aovComparisonChart = dynamics.getByRole('img', { name: /Средний чек по каналам/ });
+  await expect(aovComparisonChart).toBeVisible();
+  await expect(dynamics.getByText(/только периоды с заказами/)).toBeVisible();
+  const aovShot = testInfo.outputPath('moysklad-channels-aov-dark.png');
+  await page.screenshot({ path: aovShot, fullPage: true });
+  await testInfo.attach('moysklad-channels-aov-dark', { path: aovShot, contentType: 'image/png' });
+  await dynamics.getByRole('group', { name: 'Метрика' }).getByRole('button', { name: 'Выручка' }).click();
 
   await page.getByRole('button', { name: /Развернуть виджет «Выручка по каналам/ }).click();
   const dialog = page.getByRole('dialog', { name: /График: Выручка по каналам/ });
