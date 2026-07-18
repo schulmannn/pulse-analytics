@@ -1,7 +1,12 @@
 'use strict';
 
 const { kopecksToRub } = require('../lib/msClient');
-const { summarizeTopProducts } = require('../lib/msTopProducts');
+const {
+  summarizeTopProducts,
+  assortmentIdentity,
+  previousWindow,
+  buildAssortmentComparison,
+} = require('../lib/msTopProducts');
 const { hasWorkspaceRole } = require('../middleware/tenant');
 
 /**
@@ -514,6 +519,44 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
   // отвечает ~3.6с на страницу при ~1116 позициях — страницы/cap те же). Пустой архив
   // (бэкфилл ещё не запускали) → консервативный якорь '2020-01-01': он раньше любого реального
   // склада продукта, а лишние пустые месяцы отчёту МС не вредят — строк за них просто нет.
+  // Один page-loop отчёта profit/byproduct за окно → нормализованные строки (копейки как есть) со
+  // стабильной непрозрачной identity (assortmentIdentity) для сопоставления окон. Бросает при сбое
+  // msFetch — вызывающий маппит его через sendMsError, сохраняя 401/403/429/5xx-семантику.
+  async function loadTopRawWindow(token, momentFrom, momentTo) {
+    const all = [];
+    let metaSize = null;
+    let truncated = false;
+    let offset = 0;
+    for (let page = 0; ; page++) {
+      const report = await msFetch(
+        token,
+        `/report/profit/byproduct?momentFrom=${encodeURIComponent(momentFrom)}&momentTo=${encodeURIComponent(momentTo)}` +
+          `&limit=${MS_TOP_PAGE_LIMIT}&offset=${offset}`,
+      );
+      const pageRows = report && Array.isArray(report.rows) ? report.rows : [];
+      if (page === 0) {
+        // meta.size — полный размер выборки у МС (страница может быть короче лимита).
+        const size = Number(report && report.meta && report.meta.size);
+        metaSize = Number.isFinite(size) ? size : null;
+      }
+      for (const r of pageRows) {
+        all.push({
+          key: assortmentIdentity(r),
+          name: r && r.assortment && typeof r.assortment.name === 'string' ? r.assortment.name : null,
+          quantity: Number(r && r.sellQuantity) || 0,
+          // Копейки как есть до самого выхода — сортировка по целым, рубли на границе.
+          revenueKopecks: Math.round(Number(r && r.sellSum) || 0),
+          profitKopecks: Math.round(Number(r && r.profit) || 0),
+        });
+      }
+      if (pageRows.length < MS_TOP_PAGE_LIMIT) break;                     // хвост добран
+      if (page + 1 >= MS_TOP_PAGE_CAP) { truncated = true; break; }       // упёрлись в cap
+      offset += MS_TOP_PAGE_LIMIT;
+      await sleep(MS_TOP_PAGE_PAUSE_MS);
+    }
+    return { rows: all, total: metaSize != null ? metaSize : all.length, truncated };
+  }
+
   app.get('/api/ms/top-products', requireAuth, async (req, res, next) => {
     try {
       const period = parseMsPeriod(req);
@@ -524,62 +567,54 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
       // Кэп 1..50 ДО кэш-ключа — та же дисциплина ограниченной кардинальности, что у days.
       const limit = Math.min(MS_TOP_LIMIT_MAX, Math.max(1, Number.isFinite(limitRaw) ? limitRaw : MS_TOP_LIMIT_DEFAULT));
       const sort = topSortOf(req);
-      // Полный нормализованный отчёт кэшируется ОДИН раз на окно: переключение сортировки и limit
-      // не должно повторять дорогой page-loop МойСклада. Слот channelId остаётся третьим, поэтому
-      // connect/disconnect точечно инвалидирует raw-кэш через общий msCachePurge.
-      const rawCacheKey = `ms:topraw:${ms.channel.id}:${period.periodKey}`;
-      let raw = cacheGet(rawCacheKey);
+      // Opt-in сравнение с предыдущим равным окном. Легаси-ответ и вызовы без compare второго
+      // page-loop не делают и не меняются.
+      const wantCompare = req.query.compare === 'prev';
 
-      if (!raw) {
-        let momentFrom;
-        let momentTo;
-        if (period.momentFrom) {
-          // Пресет 7/30/90 или произвольный диапазон — окно уже посчитано разбором периода.
-          ({ momentFrom, momentTo } = period);
-        } else {
-          // days=0 «Всё»: ForActor — канон tenant-read. oldestDay 'YYYY-MM-DD' → якорь окна с
-          // первого дня того же месяца (полные месяцы читаются человеком как «вся история»).
-          const oldestDay = await db.getMsOldestOrderDayForActor(ms.channel.id, req.user);
-          momentFrom = `${oldestDay ? `${oldestDay.slice(0, 7)}-01` : '2020-01-01'} 00:00:00`;
-          momentTo = `${fmtDay(new Date())} 23:59:59`;
-        }
-        const all = [];
-        let metaSize = null;
-        let truncated = false;
-        try {
-          let offset = 0;
-          for (let page = 0; ; page++) {
-            const report = await msFetch(
-              ms.token,
-              `/report/profit/byproduct?momentFrom=${encodeURIComponent(momentFrom)}&momentTo=${encodeURIComponent(momentTo)}` +
-                `&limit=${MS_TOP_PAGE_LIMIT}&offset=${offset}`,
-            );
-            const pageRows = report && Array.isArray(report.rows) ? report.rows : [];
-            if (page === 0) {
-              // meta.size — полный размер выборки у МС (страница может быть короче лимита).
-              const size = Number(report && report.meta && report.meta.size);
-              metaSize = Number.isFinite(size) ? size : null;
-            }
-            for (const r of pageRows) {
-              all.push({
-                name: r && r.assortment && typeof r.assortment.name === 'string' ? r.assortment.name : null,
-                quantity: Number(r && r.sellQuantity) || 0,
-                // Копейки как есть до самого выхода — сортировка по целым, рубли на границе.
-                revenueKopecks: Math.round(Number(r && r.sellSum) || 0),
-                profitKopecks: Math.round(Number(r && r.profit) || 0),
-              });
-            }
-            if (pageRows.length < MS_TOP_PAGE_LIMIT) break;                     // хвост добран
-            if (page + 1 >= MS_TOP_PAGE_CAP) { truncated = true; break; }       // упёрлись в cap
-            offset += MS_TOP_PAGE_LIMIT;
-            await sleep(MS_TOP_PAGE_PAUSE_MS);
+      // Полный нормализованный отчёт кэшируется ОДИН раз на окно (по его periodKey): переключение
+      // сортировки, limit, view и compare не плодит ключей и не повторяет дорогой page-loop МС.
+      // Слот channelId остаётся третьим, поэтому connect/disconnect точечно инвалидирует raw-кэш
+      // через общий msCachePurge.
+      const loadWindow = async (periodKey, momentFrom, momentTo, longTtl) => {
+        const cacheKey = `ms:topraw:${ms.channel.id}:${periodKey}`;
+        const cached = cacheGet(cacheKey);
+        if (cached) return cached;
+        const raw = await loadTopRawWindow(ms.token, momentFrom, momentTo);
+        cacheSet(cacheKey, raw, longTtl ? MS_TOP_ALL_CACHE_TTL_MS : undefined);
+        return raw;
+      };
+
+      // Текущее окно: пресет/диапазон уже посчитаны разбором; «Всё» — якорь от старейшего заказа
+      // архива (ForActor — канон tenant-read; первый день того же месяца читается как «вся история»).
+      let curFrom = period.momentFrom;
+      let curTo = period.momentTo;
+      if (!curFrom) {
+        const oldestDay = await db.getMsOldestOrderDayForActor(ms.channel.id, req.user);
+        curFrom = `${oldestDay ? `${oldestDay.slice(0, 7)}-01` : '2020-01-01'} 00:00:00`;
+        curTo = `${fmtDay(new Date())} 23:59:59`;
+      }
+      const isAll = period.days === 0 && !period.range;
+
+      let raw;
+      let comparison;
+      try {
+        raw = await loadWindow(period.periodKey, curFrom, curTo, isAll);
+        if (wantCompare) {
+          // Предыдущее равное окно выводим НА СЕРВЕРЕ из инклюзивных дневных границ. «Всё» (sinceDay
+          // отсутствует) равного предыдущего окна не имеет → честная недоступность БЕЗ второго fetch.
+          const prev = previousWindow(period.sinceDay, period.untilDay);
+          if (!prev) {
+            comparison = { available: false, reason: 'all' };
+          } else {
+            const prevRaw = await loadWindow(prev.periodKey, prev.momentFrom, prev.momentTo, false);
+            comparison = buildAssortmentComparison(raw, prevRaw, {
+              current: { from: period.sinceDay, to: period.untilDay },
+              previous: { from: prev.sinceDay, to: prev.untilDay },
+            });
           }
-        } catch (e) {
-          return sendMsError(res, e, { route: 'top-products', channelId: ms.channel.id });
         }
-        raw = { rows: all, total: metaSize != null ? metaSize : all.length, truncated };
-        if (period.days === 0 && !period.range) cacheSet(rawCacheKey, raw, MS_TOP_ALL_CACHE_TTL_MS);
-        else cacheSet(rawCacheKey, raw);
+      } catch (e) {
+        return sendMsError(res, e, { route: 'top-products', channelId: ms.channel.id });
       }
 
       const marginOf = (r) => (r.revenueKopecks > 0 ? (r.profitKopecks / r.revenueKopecks) * 100 : null);
@@ -611,7 +646,10 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
       // Additive-сводка концентрации считается по ПОЛНОМУ raw ДО sort/limit (тот же кэш, без
       // второго page-loop): достаточно для доли топ-10 по выручке/прибыли, общей маржи, счётчика
       // товаров и убыточных позиций. rows/total/truncated неизменны для обратной совместимости.
-      res.json({ rows, total: raw.total, truncated: raw.truncated, summary: summarizeTopProducts(raw) });
+      // comparison добавляется ТОЛЬКО при compare=prev (иначе поля нет — легаси-контракт цел).
+      const body = { rows, total: raw.total, truncated: raw.truncated, summary: summarizeTopProducts(raw) };
+      if (comparison) body.comparison = comparison;
+      res.json(body);
     } catch (e) {
       next(e);
     }

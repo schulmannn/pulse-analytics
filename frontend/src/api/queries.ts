@@ -569,6 +569,52 @@ const MsTopSummarySchema = z
   })
   .passthrough();
 export type MsTopSummary = z.infer<typeof MsTopSummarySchema>;
+
+// Сравнение ассортимента с предыдущим равным окном (opt-in compare=prev). Все величины уже в
+// натуральной единице метрики: rub — рубли (сервер конвертировал копейки на границе), count — штуки.
+// deltaPct честно null, когда предыдущая база <= 0 (ноль не даёт конечного процента, отрицательная
+// прибыль не имеет однозначной процентной интерпретации). Сопоставление и вывод
+// предыдущего окна — на сервере; фронт только рендерит.
+const MsMoverSchema = z
+  .object({
+    name: z.string(),
+    current: z.number(),
+    previous: z.number(),
+    delta: z.number(),
+    deltaPct: z.number().nullable(),
+  })
+  .passthrough();
+const MsMetricComparisonSchema = z
+  .object({
+    unit: z.enum(['rub', 'count']),
+    gainers: z.array(MsMoverSchema),
+    losers: z.array(MsMoverSchema),
+    appeared: z.array(MsMoverSchema),
+    disappeared: z.array(MsMoverSchema),
+  })
+  .passthrough();
+export type MsMetricComparison = z.infer<typeof MsMetricComparisonSchema>;
+const MsAssortmentComparisonSchema = z.discriminatedUnion('available', [
+  z.object({ available: z.literal(false), reason: z.string() }).passthrough(),
+  z
+    .object({
+      available: z.literal(true),
+      partial: z.boolean(),
+      identity_fallback_count: z.number(),
+      current: z.object({ from: z.string(), to: z.string() }).passthrough(),
+      previous: z.object({ from: z.string(), to: z.string() }).passthrough(),
+      counts: z.object({ current_only: z.number(), previous_only: z.number(), both: z.number() }).passthrough(),
+      metrics: z.object({
+        revenue: MsMetricComparisonSchema,
+        profit: MsMetricComparisonSchema,
+        units: MsMetricComparisonSchema,
+      }),
+      limit: z.number(),
+    })
+    .passthrough(),
+]);
+export type MsAssortmentComparison = z.infer<typeof MsAssortmentComparisonSchema>;
+
 const MsTopProductsSchema = z
   .object({
     rows: z.array(
@@ -585,6 +631,7 @@ const MsTopProductsSchema = z
     total: z.number().optional(),
     truncated: z.boolean().optional(),
     summary: MsTopSummarySchema.nullable().optional(),
+    comparison: MsAssortmentComparisonSchema.optional(),
   })
   .passthrough();
 
@@ -922,15 +969,34 @@ export function useMsSummary(period: MsPeriod) {
 
 export type MsProductSort = 'revenue' | 'profit' | 'margin';
 
-export function useMsTopProducts(period: MsPeriod, limit = 10, sort: MsProductSort = 'revenue') {
+export function useMsTopProducts(period: MsPeriod, limit = 10, sort: MsProductSort = 'revenue', enabled = true) {
   const { channelId } = useSelectedChannel();
   return useQuery({
-    enabled: channelId != null,
+    enabled: enabled && channelId != null,
     queryKey: ['ms-top-products', channelId, ...msPeriodKey(period), limit, sort],
     staleTime: STALE_LIVE,
     retry: false,
     queryFn: ({ signal }) =>
       apiGet(`/api/ms/top-products?${msPeriodQuery(period)}&limit=${limit}&sort=${sort}`, MsTopProductsSchema, { signal, channelId }),
+  });
+}
+
+/**
+ * Сравнение ассортимента текущего окна с предыдущим равным (compare=prev). Отдельный хук с `enabled`-
+ * гейтом, чтобы компактная карточка «Товаров» НИКОГДА не запрашивала сравнение — только полная
+ * страница на вкладке «Динамика». Сервер отдаёт сразу три метрики (выручка/прибыль/штуки), поэтому
+ * ключ окна-независим от выбранной метрики: переключение показателя не рефетчит и не плодит ключей.
+ * `limit=1` держит легаси-rows минимальными — списки движений приходят из comparison, а не из rows.
+ */
+export function useMsAssortmentComparison(period: MsPeriod, enabled: boolean) {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    enabled: enabled && channelId != null,
+    queryKey: ['ms-top-products-compare', channelId, ...msPeriodKey(period)],
+    staleTime: STALE_LIVE,
+    retry: false,
+    queryFn: ({ signal }) =>
+      apiGet(`/api/ms/top-products?${msPeriodQuery(period)}&limit=1&compare=prev`, MsTopProductsSchema, { signal, channelId }),
   });
 }
 
