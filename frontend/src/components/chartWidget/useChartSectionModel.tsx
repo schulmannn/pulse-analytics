@@ -10,6 +10,7 @@ import {
   WidgetPeriodProvider,
   resolveEffectivePeriod,
   resolveRequestedWidgetDays,
+  usePeriod,
   useChannelRecency,
   usePagePeriod,
   widgetPeriodValue,
@@ -56,10 +57,26 @@ export function useChartSectionModel(props: ChartSectionProps) {
   const originRectRef = useRef<DOMRect | null>(null);
   const cardPressRef = useRef<{ x: number; y: number } | null>(null);
   const [bodyHeight, setBodyHeight] = useState<number | null>(null);
+  const pagePeriod = usePagePeriod();
+  const explorerPeriod = usePeriod();
 
-  const expandOpen = searchParams.get('detail') === widgetId;
+  // A `drillTo` card never opens the in-place overlay — its expand affordance navigates to a
+  // dedicated metric route. Guard the URL-driven open too, so a stale `?detail=<id>` deep-link can't
+  // resurrect the retired overlay for a card that has since moved to a full metric page.
+  const legacyDetailMatch = searchParams.get('detail') === widgetId;
+  const expandOpen = !drillTo && legacyDetailMatch;
+  useEffect(() => {
+    if (!drillTo || !legacyDetailMatch) return;
+    if (pagePeriod?.range) explorerPeriod.setRange(pagePeriod.range);
+    else if (pagePeriod) explorerPeriod.setDays(pagePeriod.days);
+    navigate(drillTo, { replace: true });
+  }, [drillTo, explorerPeriod, legacyDetailMatch, navigate, pagePeriod]);
   const openExpand = useCallback(() => {
     if (drillTo) {
+      // A detail route owns the global explorer period. Seed it from the authoritative feed top bar
+      // before navigating so 7/30/90/custom never snaps back to an unrelated old metric-page value.
+      if (pagePeriod?.range) explorerPeriod.setRange(pagePeriod.range);
+      else if (pagePeriod) explorerPeriod.setDays(pagePeriod.days);
       navigate(drillTo);
       return;
     }
@@ -72,7 +89,7 @@ export function useChartSectionModel(props: ChartSectionProps) {
       },
       { replace: false },
     );
-  }, [drillTo, navigate, setSearchParams, widgetId]);
+  }, [drillTo, explorerPeriod, navigate, pagePeriod, setSearchParams, widgetId]);
   const closeExpand = useCallback(() => {
     setSearchParams(
       (previous) => {
@@ -120,7 +137,6 @@ export function useChartSectionModel(props: ChartSectionProps) {
     else setEditOpen(true);
   }, [configEditor]);
 
-  const pagePeriod = usePagePeriod();
   const pageControlled = pagePeriod != null;
   const pageRange = pagePeriod?.range ?? null;
   const requestedDays: PeriodDays = resolveRequestedWidgetDays(pagePeriod?.days, prefs.period);

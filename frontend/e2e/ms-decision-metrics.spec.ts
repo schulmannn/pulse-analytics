@@ -30,15 +30,21 @@ test('product ranking switches between revenue, profit and margin without clippi
 });
 
 test('customer cards expose repeat revenue and the shared independent-window explorer', async ({ page }, testInfo) => {
+  test.setTimeout(90_000);
   await bootDemo(page, '/sklad/clients', { theme: 'dark' });
   const repeatCard = page.getByRole('heading', { name: 'Повторные покупки' }).locator('xpath=ancestor::section[1]');
   await expect(repeatCard.getByText('Доля повторной выручки')).toBeVisible();
 
+  // «Развернуть» ведёт на полностраничную метрику /metrics/ms-customers (общий independent-window
+  // explorer), а не в модальный оверлей.
   await page.getByRole('button', { name: 'Развернуть виджет «Покупатели»' }).click();
-  const dialog = page.getByRole('dialog', { name: 'График: Покупатели' });
-  await expect(dialog).toBeVisible();
-  const metric = dialog.getByRole('group', { name: 'Метрика покупателей' });
-  const window = dialog.getByRole('group', { name: 'Окно' });
+  await expect(page).toHaveURL(/\/metrics\/ms-customers$/);
+  // The MS metric page is a lazy chunk. Allow the cold Vite transform to finish when this suite
+  // runs in parallel with the all-routes parity pass; the production bundle is already built.
+  await expect(page.getByRole('heading', { name: 'Покупатели', level: 1 })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  const metric = page.getByRole('group', { name: 'Метрика покупателей' });
+  const window = page.getByRole('group', { name: 'Окно', exact: true });
   await expect(metric).toBeVisible();
   await expect(window.getByRole('button', { name: '30д' })).toHaveAttribute('aria-pressed', 'true');
 
@@ -49,13 +55,13 @@ test('customer cards expose repeat revenue and the shared independent-window exp
   await window.getByRole('button', { name: '90д' }).click();
   await request90;
   await metric.getByRole('button', { name: 'Выручка' }).click();
-  await expect(dialog.getByText('новые и повторные покупки')).toBeVisible();
+  await expect(page.getByText('новые и повторные покупки', { exact: true })).toBeVisible();
   await metric.getByRole('button', { name: 'Доля повторных' }).click();
-  await expect(dialog.getByText('доля повторной выручки')).toBeVisible();
+  await expect(page.getByText('доля повторной выручки', { exact: true })).toBeVisible();
 
-  await dialog.getByRole('group', { name: 'Грануляция' }).getByRole('button', { name: 'Месяц' }).click();
-  await dialog.getByRole('group', { name: 'Тип графика' }).getByRole('button', { name: 'Тип графика: Столбцы' }).click();
-  await expect(dialog.locator('svg[data-chart-kind="bar"]')).toBeVisible();
+  await page.getByRole('group', { name: 'Грануляция' }).getByRole('button', { name: 'Месяц' }).click();
+  await page.getByRole('group', { name: 'Тип графика' }).getByRole('button', { name: 'Столбцы' }).click();
+  await expect(page.locator('svg[data-chart-kind="bar"]')).toBeVisible();
 
   const shot = testInfo.outputPath('moysklad-customers-explorer-dark.png');
   await page.screenshot({ path: shot, fullPage: true });

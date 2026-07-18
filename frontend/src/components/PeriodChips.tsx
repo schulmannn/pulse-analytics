@@ -30,12 +30,15 @@ export function PeriodChips({
   range,
   onRangeChange,
   className,
+  ariaLabel = 'Период',
 }: {
   value: PeriodDays;
   onChange: (days: PeriodDays) => void;
   range?: DateRange | null;
   onRangeChange?: (range: DateRange | null) => void;
   className?: string;
+  /** Accessible group name; metric explorers call the same control «Окно». */
+  ariaLabel?: string;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -53,7 +56,7 @@ export function PeriodChips({
     return () => document.removeEventListener('keydown', onKey);
   }, [pickerOpen]);
   return (
-    <div role="group" aria-label="Период" className={cn('relative flex flex-wrap items-center gap-1.5', className)}>
+    <div role="group" aria-label={ariaLabel} className={cn('relative flex flex-wrap items-center gap-1.5', className)}>
       {/* Presets ride the shared sliding-glider primitive; a picked custom range deselects every
           preset (value matches no segment → the glider hides). Rendered `groupless` so this one
           public «Период» group stays the sole labelled group (the «Свой период» pill lives in it). */}

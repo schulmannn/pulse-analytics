@@ -3,7 +3,6 @@ import { useMsChannelSeries, useMsGeography, useMsSalesByChannel } from '@/api/q
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
-import type { ChartExpandConfig } from '@/components/ExpandableChart';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { SegmentedControl } from '@/components/SegmentedControl';
@@ -62,7 +61,7 @@ export function MsChannels() {
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
       <MsChannelDynamicsCard period={period} windowLabel={windowLabel} options={channelOptions} />
 
-      <ChartWidget id="ms-channels" title={`Продажи по каналам ${windowLabel}`} fixedSize="full">
+      <ChartWidget id="ms-channels" title={`Продажи по каналам ${windowLabel}`} fixedSize="full" drillTo="/metrics/ms-sales-channels">
         {channels.isPending ? (
           <ListSkeleton rows={6} />
         ) : !channels.data || channels.data.rows.length === 0 ? (
@@ -76,7 +75,7 @@ export function MsChannels() {
         )}
       </ChartWidget>
 
-      <ChartWidget id="ms-geography" title={`География заказов ${windowLabel}`} fixedSize="half">
+      <ChartWidget id="ms-geography" title={`География заказов ${windowLabel}`} fixedSize="half" drillTo="/metrics/ms-geography">
         {geo.isPending ? (
           <ListSkeleton rows={5} />
         ) : geo.isError ? (
@@ -97,8 +96,8 @@ export function MsChannels() {
 }
 
 // ── Метрики оси каналов ────────────────────────────────────────────────────────────────────
-type View = 'aggregate' | 'breakdown';
-type ChannelOption = { id: string; name: string };
+export type View = 'aggregate' | 'breakdown';
+export type ChannelOption = { id: string; name: string };
 
 // Отдельные серии breakdown ограничены читаемым лимитом (steep: пёстрый частокол не читается).
 const MAX_BREAKDOWN_SERIES = 6;
@@ -135,47 +134,26 @@ function MsChannelDynamicsCard({
   const [selected, setSelected] = useState<string[]>([]);
   const breakdown = view === 'breakdown';
 
-  const controls = (inModal = false) => (
-    <MsChannelControls
-      metric={metric}
-      onMetric={setMetric}
-      view={view}
-      onView={setView}
-      options={options}
-      selected={selected}
-      onSelected={setSelected}
-      inModal={inModal}
-    />
-  );
-
-  // Развёрнутый режим: тот же общий overlay (период 7/30/90/Всё · грануляция · линия/столбцы) +
-  // MS-контролы. renderExpanded сам тянет данные для выбранного окна overlay'а (свой MsPeriod).
-  const expand: ChartExpandConfig = {
-    renderExpanded: (d, grain) => (
-      <MsChannelChart period={{ days: d }} metric={metric} breakdown={breakdown} selected={selected} options={options} grain={grain} kind="line" />
-    ),
-    // Мультисерийные столбцы на 6×140 значений превращаются в нечитаемый частокол. В режиме
-    // breakdown оставляем сравнение линиями и честно убираем переключатель типа; для агрегата
-    // общий line/bar control работает полностью.
-    renderExpandedBar: breakdown
-      ? undefined
-      : (d, grain) => (
-          <MsChannelChart period={{ days: d }} metric={metric} breakdown={false} selected={selected} options={options} grain={grain} kind="bar" />
-        ),
-    grainable: true,
-    extraControls: controls(true),
-  };
-
   return (
-    <ChartWidget id="ms-channel-series" title={`${METRIC_LABEL[metric]} по каналам ${windowLabel}`} fixedSize="full" expand={expand}>
-      <div className="mb-3">{controls()}</div>
+    <ChartWidget id="ms-channel-series" title={`${METRIC_LABEL[metric]} по каналам ${windowLabel}`} fixedSize="full" drillTo="/metrics/ms-channels">
+      <div className="mb-3">
+        <MsChannelControls
+          metric={metric}
+          onMetric={setMetric}
+          view={view}
+          onView={setView}
+          options={options}
+          selected={selected}
+          onSelected={setSelected}
+        />
+      </div>
       <MsChannelChart period={period} metric={metric} breakdown={breakdown} selected={selected} options={options} kind="line" />
     </ChartWidget>
   );
 }
 
 /** MS-контролы (метрика · вид · каналы) — одни и те же в свёрнутой карточке и в explorer'е. */
-function MsChannelControls({
+export function MsChannelControls({
   metric,
   onMetric,
   view,
@@ -310,7 +288,7 @@ function MsChannelPicker({
 
 /** График оси каналов: агрегат (одна линия/столбцы) или разбивка (до 6 линий). Сам тянет данные
     для своего окна — переиспользуется и в карточке, и в explorer'е (там своё окно из пилюль). */
-function MsChannelChart({
+export function MsChannelChart({
   period,
   metric,
   breakdown,
@@ -599,7 +577,7 @@ type SortKey = 'revenue' | 'orders' | 'aov' | 'name';
 
 /** Каналы продаж с явной сортировкой (выручка/заказы/средний чек/имя), долей выручки и средним
     чеком по строке. Свёрнуто — топ-8, разворот — все; строку без канала бэк выносит в noChannel. */
-function MsChannelRows({
+export function MsChannelRows({
   rows,
   totalOrders,
   noChannel,
@@ -681,7 +659,7 @@ function MsChannelRows({
 }
 
 /** Топ городов доставки: строки-бары по числу заказов; разворот — все города. */
-function MsGeographyRows({
+export function MsGeographyRows({
   rows,
   noCity,
   totalOrders,

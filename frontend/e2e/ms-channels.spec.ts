@@ -7,6 +7,7 @@ test.beforeEach(async ({ page }, testInfo) => {
 });
 
 test('MoySklad channels uses the flat feed shell and multi-channel explorer', async ({ page }, testInfo) => {
+  test.setTimeout(90_000);
   await expect(page.getByRole('heading', { name: 'Каналы', exact: true })).toBeVisible();
   await expect(page.locator('[data-source-identity]')).toContainText('МойСклад');
   await expect(page.getByRole('heading', { name: 'Atlavue', exact: true })).toHaveCount(0);
@@ -49,18 +50,28 @@ test('MoySklad channels uses the flat feed shell and multi-channel explorer', as
   await testInfo.attach('moysklad-channels-aov-dark', { path: aovShot, contentType: 'image/png' });
   await dynamics.getByRole('group', { name: 'Метрика' }).getByRole('button', { name: 'Выручка' }).click();
 
+  // «Развернуть» ведёт на полностраничную метрику /metrics/ms-channels (общий explorer с MS-контролами),
+  // а не в модальный оверлей. Страница открывается со своим состоянием (агрегат по умолчанию).
   await page.getByRole('button', { name: /Развернуть виджет «Выручка по каналам/ }).click();
-  const dialog = page.getByRole('dialog', { name: /График: Выручка по каналам/ });
-  await expect(dialog.getByRole('group', { name: 'Метрика' })).toBeVisible();
-  await expect(dialog.getByRole('group', { name: 'Вид' })).toBeVisible();
-  await expect(dialog.getByRole('group', { name: 'Окно' })).toBeVisible();
-  await expect(dialog.getByRole('group', { name: 'Окно' }).getByRole('button', { name: '30д' })).toHaveAttribute('aria-pressed', 'true');
-  await expect(dialog.getByRole('group', { name: 'Грануляция' })).toBeVisible();
-  // Breakdown stays a multi-line comparison; aggregate mode owns the meaningful line/bar toggle.
-  await expect(dialog.getByRole('group', { name: 'Тип графика' })).toHaveCount(0);
-  await dialog.getByRole('group', { name: 'Вид' }).getByRole('button', { name: 'Итог' }).click();
-  await expect(dialog.getByRole('group', { name: 'Тип графика' })).toBeVisible();
-  await dialog.getByRole('group', { name: 'Тип графика' }).getByRole('button', { name: 'Тип графика: Столбцы' }).click();
+  await expect(page).toHaveURL(/\/metrics\/ms-channels$/);
+  // The MS metric page is a lazy chunk. Allow the cold Vite transform to finish when this suite
+  // runs in parallel with the all-routes parity pass; the production bundle is already built.
+  await expect(page.getByRole('heading', { name: 'Каналы продаж', level: 1 })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByRole('group', { name: 'Метрика' })).toBeVisible();
+  const viewGroup = page.getByRole('group', { name: 'Вид' });
+  await expect(viewGroup).toBeVisible();
+  const windowGroup = page.getByRole('group', { name: 'Окно', exact: true });
+  await expect(windowGroup).toBeVisible();
+  await expect(windowGroup.getByRole('button', { name: '30д' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('group', { name: 'Грануляция' })).toBeVisible();
+  // Aggregate (default) owns the meaningful line/bar toggle; breakdown stays a multi-line comparison.
+  await expect(page.getByRole('group', { name: 'Тип графика' })).toBeVisible();
+  await viewGroup.getByRole('button', { name: 'По каналам' }).click();
+  await expect(page.getByRole('group', { name: 'Тип графика' })).toHaveCount(0);
+  await viewGroup.getByRole('button', { name: 'Итог' }).click();
+  await expect(page.getByRole('group', { name: 'Тип графика' })).toBeVisible();
+  await page.getByRole('group', { name: 'Тип графика' }).getByRole('button', { name: 'Столбцы' }).click();
 
   const shot = testInfo.outputPath('moysklad-channels-explorer-dark.png');
   await page.screenshot({ path: shot, fullPage: true });
