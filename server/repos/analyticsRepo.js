@@ -486,7 +486,9 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
       `WITH ${MS_FIRSTS_CTE}, ${MS_WIN_CTE}
        SELECT to_char(w.moment,'YYYY-MM-DD') AS day,
               COUNT(*) FILTER (WHERE w.is_new)::int AS new_orders,
-              COUNT(*) FILTER (WHERE NOT w.is_new)::int AS repeat_orders
+              COUNT(*) FILTER (WHERE NOT w.is_new)::int AS repeat_orders,
+              COALESCE(SUM(w.sum_kopecks) FILTER (WHERE w.is_new),0)::bigint AS sum_new_kopecks,
+              COALESCE(SUM(w.sum_kopecks) FILTER (WHERE NOT w.is_new),0)::bigint AS sum_repeat_kopecks
          FROM win w
         GROUP BY 1 ORDER BY 1`, params);
     return {
@@ -495,6 +497,8 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
         day: r.day,
         new_orders: toMetricNumber(r.new_orders) || 0,
         repeat_orders: toMetricNumber(r.repeat_orders) || 0,
+        sum_new_kopecks: toMetricNumber(r.sum_new_kopecks) || 0,
+        sum_repeat_kopecks: toMetricNumber(r.sum_repeat_kopecks) || 0,
       })),
     };
   }

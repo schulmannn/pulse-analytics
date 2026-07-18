@@ -1,15 +1,27 @@
-import { useContext } from 'react';
+import { useContext, useState } from 'react';
 import { useMsCohorts, useMsCustomers, useMsTopCustomers } from '@/api/queries';
-import { ChartExpandedContext } from '@/components/ExpandableChart';
+import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
+import type { ChartExpandConfig } from '@/components/ExpandableChart';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
+import { BarChart } from '@/components/BarChart';
 import { LineChart } from '@/components/LineChart';
+import { SegmentedControl } from '@/components/SegmentedControl';
 import { ErrorState } from '@/components/ErrorState';
 import { Skeleton } from '@/components/ui/skeleton';
 import { lttbDownsample } from '@/lib/downsample';
 import { fmt, pluralRu } from '@/lib/format';
 import { usePagePeriod } from '@/lib/period';
-import { msDensifyWindow, useMsPagePeriod, type MsPeriod } from '@/lib/msPeriod';
+import { useMsPagePeriod, type MsPeriod } from '@/lib/msPeriod';
+import {
+  bucketCustomerDays,
+  customerMetricTotal,
+  customerMetricValues,
+  customerPlotPoints,
+  densifyCustomerDays,
+  type MsCustomerMetric,
+} from '@/lib/msCustomerSeries';
+import { CHART_MAX_POINTS, type Grain } from '@/lib/msSeries';
 
 /**
  * «Клиенты» МойСклада — покупательская аналитика АРХИВА заказов (ms_orders, слайс 3).
@@ -25,6 +37,8 @@ export function MsClients() {
   const customers = useMsCustomers(period);
   const cohorts = useMsCohorts();
   const topCustomers = useMsTopCustomers(period);
+  const [customersMetric, setCustomersMetric] = useState<MsCustomerMetric>('orders');
+  const [repeatMetric, setRepeatMetric] = useState<MsCustomerMetric>('repeatShare');
 
   if (customers.isPending) {
     return (
@@ -55,23 +69,31 @@ export function MsClients() {
   // нулями: день без заказов для СЧЁТЧИКА заказов — честный ноль, а не разрыв (разрыв = пропуск
   // сбора, здесь сбора нет — есть арифметика по архиву). Затем длинные окна («Всё» = годы точек)
   // даунсэмплим по канону графиков; обе серии на одной сетке — один LTTB-проход по сумме дня.
-  const dense = densifyDays(series, period);
+  const dense = densifyCustomerDays(series, period);
   const sampled = lttbDownsample(dense, 140, (r) => r.new_orders + r.repeat_orders);
   const labels = sampled.map((r) => fmt.day(r.day));
   const newValues = sampled.map((r) => r.new_orders);
   const repeatValues = sampled.map((r) => r.repeat_orders);
   const repeatShare = summary.customers > 0 ? Math.round((summary.repeat_customers / summary.customers) * 100) : 0;
   const everShare = summary.repeat_ever; // клиенты с ≥2 заказами за всю историю
+  const repeatRevenueTotal = summary.sum_new + summary.sum_repeat;
+  const repeatRevenueShare = repeatRevenueTotal > 0 ? (summary.sum_repeat / repeatRevenueTotal) * 100 : null;
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
-      <ChartWidget id="ms-customers" title="Покупатели" fixedSize="half">
+      <ChartWidget
+        id="ms-customers"
+        title="Покупатели"
+        fixedSize="half"
+        expand={msCustomerExpand(customersMetric, setCustomersMetric)}
+      >
         <ChartCardBody value={fmt.num(summary.customers)} caption={windowLabel}>
           {sampled.length > 1 ? (
             <LineChart
               values={newValues}
               ghost={repeatValues}
               primaryLabel="Новые"
+              comparisonDelta={false}
               ghostLabel="Повторные"
               labels={labels}
               yMin={0}
@@ -82,7 +104,12 @@ export function MsClients() {
         </ChartCardBody>
       </ChartWidget>
 
-      <ChartWidget id="ms-repeat" title="Повторные покупки" fixedSize="half">
+      <ChartWidget
+        id="ms-repeat"
+        title="Повторные покупки"
+        fixedSize="half"
+        expand={msCustomerExpand(repeatMetric, setRepeatMetric)}
+      >
         {days === 0 && !pp?.range ? (
           // На «Всё» окно совпадает с историей — «новых в окне» не бывает; честная метрика
           // здесь — сколько клиентов вообще возвращалось.
@@ -90,14 +117,14 @@ export function MsClients() {
             value={`${summary.customers > 0 ? Math.round((everShare / summary.customers) * 100) : 0}%`}
             caption={`возвращались: ${fmt.num(everShare)} из ${fmt.num(summary.customers)} клиентов`}
           >
-            <MsRepeatBreakdown summary={summary} allTime />
+            <MsRepeatBreakdown summary={summary} repeatRevenueShare={repeatRevenueShare} allTime />
           </ChartCardBody>
         ) : (
           <ChartCardBody
             value={`${repeatShare}%`}
             caption={`повторных покупателей ${windowLabel}`}
           >
-            <MsRepeatBreakdown summary={summary} />
+            <MsRepeatBreakdown summary={summary} repeatRevenueShare={repeatRevenueShare} />
           </ChartCardBody>
         )}
       </ChartWidget>
@@ -106,6 +133,136 @@ export function MsClients() {
 
       <MsCohortsCard state={cohorts} />
     </div>
+  );
+}
+
+const CUSTOMER_METRIC_OPTIONS = [
+  { value: 'orders' as const, content: 'Заказы' },
+  { value: 'revenue' as const, content: 'Выручка' },
+  { value: 'repeatShare' as const, content: 'Доля повторных' },
+];
+
+/** Shared overlay contract: the overlay owns period/grain/chart type; the page owns only the
+    customer metric selector, so both cards use the same explorer instead of a MoySklad-only modal. */
+function msCustomerExpand(
+  metric: MsCustomerMetric,
+  onMetricChange: (metric: MsCustomerMetric) => void,
+): ChartExpandConfig {
+  return {
+    renderExpanded: (days, grain) => (
+      <MsCustomerExplorer metric={metric} period={{ days }} grain={grain} kind="line" />
+    ),
+    renderExpandedBar: (days, grain) => (
+      <MsCustomerExplorer metric={metric} period={{ days }} grain={grain} kind="bar" />
+    ),
+    grainable: true,
+    extraControls: (
+      <SegmentedControl
+        ariaLabel="Метрика покупателей"
+        size="sm"
+        value={metric}
+        onChange={onMetricChange}
+        options={CUSTOMER_METRIC_OPTIONS}
+      />
+    ),
+  };
+}
+
+function MsCustomerExplorer({
+  metric,
+  period,
+  grain = 'day',
+  kind,
+}: {
+  metric: MsCustomerMetric;
+  period: MsPeriod;
+  grain?: Grain;
+  kind: 'line' | 'bar';
+}) {
+  const customers = useMsCustomers(period);
+  const expandedHeight = useContext(ExpandedChartHeightContext);
+
+  if (customers.isPending) {
+    return (
+      <div className="py-2">
+        <Skeleton className="h-4 w-1/4" />
+        <Skeleton className="mt-3 h-48 w-full" />
+      </div>
+    );
+  }
+  if (customers.isError) {
+    return (
+      <ErrorState
+        title="Не удалось получить динамику покупателей"
+        reason={customers.error instanceof Error ? customers.error.message : 'ошибка'}
+        onRetry={() => customers.refetch()}
+        retrying={customers.isFetching}
+      />
+    );
+  }
+
+  const bucketed = bucketCustomerDays(densifyCustomerDays(customers.data.series, period), grain);
+  // Доля без выручки не равна нулю. Как у sparse-AOV, соединяем только реальные наблюдения,
+  // сохраняя их настоящие даты, чтобы пустые дни не превращали линию в россыпь точек.
+  const relevant = metric === 'repeatShare'
+    ? bucketed.filter((point) => point.sum_new + point.sum_repeat > 0)
+    : bucketed;
+  const points = customerPlotPoints(relevant, CHART_MAX_POINTS);
+  if (points.length < 2) {
+    return <p className="py-4 text-xs text-muted-foreground">Недостаточно данных за выбранный период.</p>;
+  }
+
+  const pairs = points.map((point) => customerMetricValues(point, metric));
+  const primary = pairs.map((pair) => pair.primary);
+  const repeat = metric === 'repeatShare' ? undefined : pairs.map((pair) => pair.repeat ?? 0);
+  const labels = points.map((point) => fmt.day(point.day));
+  const titles = points.map((point, index) => {
+    const pair = pairs[index];
+    if (metric === 'repeatShare') return `${fmt.day(point.day)}: ${pair.primary?.toFixed(1) ?? '—'}%`;
+    const suffix = metric === 'revenue' ? ' ₽' : '';
+    return `${fmt.day(point.day)}: новые ${fmt.num(pair.primary ?? 0)}${suffix} · повторные ${fmt.num(pair.repeat ?? 0)}${suffix}`;
+  });
+  const totals = customerMetricTotal(relevant, metric);
+  const headline = totals.value == null
+    ? '—'
+    : metric === 'orders'
+      ? fmt.num(totals.value)
+      : metric === 'revenue'
+        ? `${fmt.short(totals.value)} ₽`
+        : `${totals.value.toFixed(1)}%`;
+  const caption = metric === 'repeatShare' ? 'доля повторной выручки' : 'новые и повторные покупки';
+  const formatValue = (value: number) =>
+    metric === 'orders' ? fmt.num(value) : metric === 'revenue' ? `${fmt.short(value)} ₽` : `${value.toFixed(1)}%`;
+
+  return (
+    <ChartCardBody value={headline} caption={caption}>
+      {kind === 'bar' ? (
+        <BarChart
+          values={primary.map((value) => value ?? 0)}
+          ghost={repeat}
+          primaryLabel={metric === 'repeatShare' ? 'Доля повторной выручки' : 'Новые'}
+          ghostLabel="Повторные"
+          comparisonDelta={false}
+          formatValue={formatValue}
+          labels={labels}
+          titles={titles}
+          height={expandedHeight ?? undefined}
+        />
+      ) : (
+        <LineChart
+          values={primary}
+          ghost={repeat}
+          primaryLabel={metric === 'repeatShare' ? 'Доля повторной выручки' : 'Новые'}
+          ghostLabel="Повторные"
+          comparisonDelta={false}
+          formatValue={formatValue}
+          labels={labels}
+          titles={titles}
+          yMin={0}
+          height={expandedHeight ?? undefined}
+        />
+      )}
+    </ChartCardBody>
   );
 }
 
@@ -158,19 +315,22 @@ function MsTopCustomersCard({
 
 function MsRepeatBreakdown({
   summary,
+  repeatRevenueShare,
   allTime = false,
 }: {
   summary: {
     new_customers: number;
     repeat_customers: number;
     orders_repeat: number;
+    sum_new: number;
     sum_repeat: number;
     no_agent_orders: number;
   };
+  repeatRevenueShare: number | null;
   allTime?: boolean;
 }) {
   return (
-    <div className="space-y-1.5 text-xs text-muted-foreground">
+    <div className="space-y-2 text-xs text-muted-foreground">
       {!allTime && (
         <p>
           Новых <span className="font-medium tabular-nums text-foreground">{fmt.num(summary.new_customers)}</span> ·
@@ -181,6 +341,22 @@ function MsRepeatBreakdown({
         Повторные заказы: <span className="font-medium tabular-nums text-foreground">{fmt.num(summary.orders_repeat)}</span>{' '}
         на <span className="font-medium tabular-nums text-foreground">{fmt.short(summary.sum_repeat)} ₽</span>
       </p>
+      <div className="pt-1">
+        <div className="mb-1 flex items-center justify-between gap-3 text-2xs">
+          <span>Доля повторной выручки</span>
+          <span className="font-medium tabular-nums text-foreground">
+            {repeatRevenueShare == null ? '—' : `${repeatRevenueShare.toFixed(1)}%`}
+          </span>
+        </div>
+        <div className="h-1.5 overflow-hidden rounded-full bg-foreground/10" aria-hidden="true">
+          {repeatRevenueShare != null && (
+            <div
+              className="h-full rounded-full bg-[hsl(var(--chart-role-comparison))]"
+              style={{ width: `${Math.min(100, Math.max(0, repeatRevenueShare))}%` }}
+            />
+          )}
+        </div>
+      </div>
       {summary.no_agent_orders > 0 && (
         // Честная сноска вместо тихого искажения: заказы без контрагента в клиентские метрики
         // не входят (некому приписать повторность).
@@ -188,27 +364,6 @@ function MsRepeatBreakdown({
       )}
     </div>
   );
-}
-
-type MsDayPoint = { day: string; new_orders: number; repeat_orders: number };
-
-const localDayKey = (d: Date) =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-
-/** Календарная сетка окна периода (обе границы): пресет — сегодня−(days−1)…сегодня, произвольный
-    диапазон — from…to (инклюзивно), «Всё» (0) — от первого дня серии до сегодня. Зеркало
-    sinceDay/untilDay роута через общий msDensifyWindow — окно дозаполнения = окну запроса. */
-function densifyDays(series: MsDayPoint[], period: MsPeriod): MsDayPoint[] {
-  const win = msDensifyWindow(period, series[0]?.day);
-  if (!win) return [];
-  const byDay = new Map(series.map((r) => [r.day, r]));
-  const out: MsDayPoint[] = [];
-  for (const d = new Date(win.start); d <= win.end; d.setDate(d.getDate() + 1)) {
-    const key = localDayKey(d);
-    const row = byDay.get(key);
-    out.push({ day: key, new_orders: row?.new_orders ?? 0, repeat_orders: row?.repeat_orders ?? 0 });
-  }
-  return out;
 }
 
 const COHORT_OFFSETS = Array.from({ length: 12 }, (_, i) => i);

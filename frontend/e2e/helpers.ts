@@ -76,7 +76,8 @@ const MS_CHANNELS = [
     contract closely enough to exercise aggregate filters, breakdown groups, ranking and explorer. */
 function demoMsPayload(url: URL): unknown | undefined {
   const path = url.pathname;
-  const days = Number(url.searchParams.get('days')) || 30;
+  const rawDays = url.searchParams.get('days');
+  const days = rawDays === '0' ? 0 : Number(rawDays) || 30;
   if (path === '/api/ms/summary') {
     // Deterministic daily revenue/orders series over the requested window. `days=0` («Всё») spans
     // 90 days. A few zero-order days exercise the sparse-AOV path; the caption varies by window so
@@ -104,6 +105,7 @@ function demoMsPayload(url: URL): unknown | undefined {
       window_days: days,
       total_orders: 96,
       no_state_orders: 4,
+      no_state_sum: 24_000,
       rows: [
         { state_id: 's1', name: 'Новый', color: '#4a90d9', orders: 40, sum: 320_000 },
         { state_id: 's2', name: 'Выполнен', color: '#2e8b57', orders: 38, sum: 300_000 },
@@ -112,14 +114,73 @@ function demoMsPayload(url: URL): unknown | undefined {
     };
   }
   if (path === '/api/ms/top-products') {
+    const sort = url.searchParams.get('sort') ?? 'revenue';
+    const limit = Number(url.searchParams.get('limit')) || 10;
+    const rows = [
+      { name: 'Товар A', quantity: 120, revenue: 240_000, profit: 60_000, margin: 25 },
+      { name: 'Товар B', quantity: 80, revenue: 160_000, profit: 80_000, margin: 50 },
+      { name: 'Товар C', quantity: 60, revenue: 90_000, profit: -5_000, margin: -5.56 },
+      { name: 'Товар без продаж', quantity: 0, revenue: 0, profit: 10_000, margin: null },
+    ];
+    const value = (row: (typeof rows)[number]) =>
+      sort === 'profit' ? row.profit : sort === 'margin' ? row.margin : row.revenue;
+    rows.sort((a, b) => {
+      const av = value(a);
+      const bv = value(b);
+      if (av == null && bv != null) return 1;
+      if (av != null && bv == null) return -1;
+      return (bv ?? 0) - (av ?? 0) || a.name.localeCompare(b.name, 'ru');
+    });
     return {
+      rows: rows.slice(0, limit),
+      total: rows.length,
+      truncated: false,
+    };
+  }
+  if (path === '/api/ms/customers') {
+    const count = days === 0 ? 120 : days;
+    const series = Array.from({ length: count }, (_, index) => {
+      const day = new Date(Date.now() - (count - index - 1) * DAY_MS).toISOString().slice(0, 10);
+      const newOrders = index % 4 === 0 ? 0 : 1 + (index % 3);
+      const repeatOrders = index % 3 === 0 ? 2 : index % 5 === 0 ? 1 : 0;
+      return {
+        day,
+        new_orders: newOrders,
+        repeat_orders: repeatOrders,
+        sum_new: newOrders * (4_000 + (index % 4) * 700),
+        sum_repeat: repeatOrders * (7_000 + (index % 3) * 900),
+      };
+    });
+    const ordersNew = series.reduce((sum, row) => sum + row.new_orders, 0);
+    const ordersRepeat = series.reduce((sum, row) => sum + row.repeat_orders, 0);
+    const sumNew = series.reduce((sum, row) => sum + row.sum_new, 0);
+    const sumRepeat = series.reduce((sum, row) => sum + row.sum_repeat, 0);
+    return {
+      window_days: days,
+      summary: {
+        customers: 172,
+        new_customers: 151,
+        repeat_customers: 21,
+        orders_new: ordersNew,
+        orders_repeat: ordersRepeat,
+        sum_new: sumNew,
+        sum_repeat: sumRepeat,
+        no_agent_orders: 3,
+        repeat_ever: 37,
+      },
+      series,
+    };
+  }
+  if (path === '/api/ms/top-customers') {
+    return {
+      window_days: days,
       rows: [
-        { name: 'Товар A', quantity: 120, revenue: 240_000, profit: 90_000 },
-        { name: 'Товар B', quantity: 80, revenue: 160_000, profit: 40_000 },
-        { name: 'Товар C', quantity: 60, revenue: 90_000, profit: -5_000 },
+        { agent_id: 'a1', name: 'ООО «Покупатель»', orders: 4, sum: 120_000 },
+        { agent_id: 'a2', name: 'ИП Клиент', orders: 2, sum: 64_000 },
       ],
     };
   }
+  if (path === '/api/ms/cohorts') return { cohorts: [] };
   if (path === '/api/ms/returns') {
     return { window_days: days, count: 6, sum: 42_000, truncated: false };
   }

@@ -31,6 +31,10 @@ interface LineChartProps {
       период»/«Текущий»); pass a name when the ghost is a параллельная серия, а не прошлый период
       (например «Новые» vs «Повторные» на клиентской странице МС). */
   primaryLabel?: string;
+  /** Show a percentage delta between primary and ghost. Disable for parallel categories. */
+  comparisonDelta?: boolean;
+  /** Metric-aware tooltip formatting; axes remain numeric. */
+  formatValue?: (value: number) => string;
   /** Bare value labels at the max point and the last point (no pills — Refined Technical). */
   markExtremes?: boolean;
   /** Hollow rings on every data point (steep-style reading aid for daily series). */
@@ -123,6 +127,8 @@ export function LineChart({
   ghost,
   ghostLabel = 'Прошлый период',
   primaryLabel,
+  comparisonDelta = true,
+  formatValue = fmt.num,
   markExtremes = false,
   showPoints = false,
   fullAxes = false,
@@ -573,23 +579,23 @@ export function LineChart({
     if (prev != null) {
       const cur = v;
       const rows: TooltipRow[] = [
-        { label: primaryLabel ?? 'Текущий', value: fmt.num(cur), color: 'hsl(var(--chart-role-primary))' },
+        { label: primaryLabel ?? 'Текущий', value: formatValue(cur), color: 'hsl(var(--chart-role-primary))' },
         {
           // Своя дата у строки сравнения (артефакт v2): «Пред. период · вт, 18 июн».
           label: ghostTitles?.[i] ? `${ghostLabel} · ${ghostTitles[i]}` : ghostLabel,
-          value: fmt.num(prev),
+          value: formatValue(prev),
           color: 'hsl(var(--chart-role-comparison))',
         },
       ];
       const d = prev !== 0 ? ((cur - prev) / Math.abs(prev)) * 100 : null;
-      if (d != null && Number.isFinite(d)) rows.push({ label: 'Δ', value: `${d >= 0 ? '+' : '−'}${Math.abs(d).toFixed(1)}%` });
+      if (comparisonDelta && d != null && Number.isFinite(d)) rows.push({ label: 'Δ', value: `${d >= 0 ? '+' : '−'}${Math.abs(d).toFixed(1)}%` });
       return { x: p.x, y: py, title: cardTitle(i), rows };
     }
     if (expanded) {
       const rows: TooltipRow[] = [
         {
           label: 'Текущий период',
-          value: fmt.num(v),
+          value: formatValue(v),
           color: 'hsl(var(--chart-role-primary))',
         },
       ];

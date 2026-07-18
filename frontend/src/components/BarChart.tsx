@@ -16,6 +16,12 @@ interface BarChartProps {
   /** Comparison series (previous period / baseline), drawn as a dashed --chart-2 overlay
       line across the bar tops, with a legend row — the visual delta for bar charts. */
   ghost?: number[];
+  /** Legend/tooltip name for the primary series when ghost is a parallel category, not a period. */
+  primaryLabel?: string;
+  /** Show a percentage delta between primary and ghost. Disable for parallel categories. */
+  comparisonDelta?: boolean;
+  /** Metric-aware tooltip formatting; axes remain numeric. */
+  formatValue?: (value: number) => string;
   /** Legend name for the ghost series (default «Прошлый период»). */
   ghostLabel?: string;
   /** When set, bars become clickable (a drilldown gesture): a click anywhere on the chart fires
@@ -40,7 +46,7 @@ const BAR_RATIO = 0.7;
 // Approximate glyph width of the 11px tabular numerals used for tick/value labels.
 const CHAR_W = 6.6;
 
-export function BarChart({ values, labels, titles, height = 200, ghost, ghostLabel = 'Прошлый период', onPointClick, legendToggle = true, pinnedIndex = null }: BarChartProps) {
+export function BarChart({ values, labels, titles, height = 200, ghost, primaryLabel = 'Текущий', ghostLabel = 'Прошлый период', comparisonDelta = true, formatValue = fmt.num, onPointClick, legendToggle = true, pinnedIndex = null }: BarChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   // Press position (client px) for the drag guard: the svg-level onClick would otherwise drill on
   // a press-drag-release scrub (the browser retargets a cross-child click to the svg). null = no
@@ -307,11 +313,11 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
       const cur = values[i];
       const prev = activeGhost[i];
       const rows: TooltipRow[] = [
-        { label: 'Текущий', value: fmt.num(cur), color: 'hsl(var(--chart-role-primary))' },
-        { label: ghostLabel, value: fmt.num(prev), color: 'hsl(var(--chart-role-comparison))' },
+        { label: primaryLabel, value: formatValue(cur), color: 'hsl(var(--chart-role-primary))' },
+        { label: ghostLabel, value: formatValue(prev), color: 'hsl(var(--chart-role-comparison))' },
       ];
       const d = prev !== 0 ? ((cur - prev) / Math.abs(prev)) * 100 : null;
-      if (d != null && Number.isFinite(d)) rows.push({ label: 'Δ', value: `${d >= 0 ? '+' : '−'}${Math.abs(d).toFixed(1)}%` });
+      if (comparisonDelta && d != null && Number.isFinite(d)) rows.push({ label: 'Δ', value: `${d >= 0 ? '+' : '−'}${Math.abs(d).toFixed(1)}%` });
       return { x, y, title: labels?.[i], rows };
     }
     if (expanded) {
@@ -322,7 +328,7 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
         rows: [
           {
             label: 'Текущий период',
-            value: fmt.num(values[i]),
+            value: formatValue(values[i]),
             color: 'hsl(var(--chart-role-primary))',
           },
         ],
@@ -449,7 +455,7 @@ export function BarChart({ values, labels, titles, height = 200, ghost, ghostLab
         <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-2xs font-medium text-muted-foreground">
           <span className="flex select-none items-center gap-1.5">
             <span aria-hidden="true" className="h-2 w-3 rounded-sm" style={{ backgroundColor: 'hsl(var(--chart-role-primary))' }} />
-            Текущий период
+            {primaryLabel === 'Текущий' ? 'Текущий период' : primaryLabel}
           </span>
           {legendToggle ? (
             <button
