@@ -310,11 +310,15 @@ function MsConcentrationKpis({ summary }: { summary: MsTopSummary }) {
 
 /** Список топ-товаров. Компакт передаёт `limit=5`; разворот-рейтинг показывает весь состав ответа. */
 function MsTopProductsList({ rows, metric, limit }: { rows: TopRow[]; metric: MsProductSort; limit?: number }) {
+  const expanded = useContext(ChartExpandedContext);
   const shown = limit != null ? rows.slice(0, limit) : rows;
   return (
     <ul>
       {shown.map((row, i) => (
-        <li key={`${row.name}-${i}`} className="flex items-center gap-3 border-t border-border py-1.5 first:border-t-0">
+        <li
+          key={`${row.name}-${i}`}
+          className={`flex items-center gap-3 border-t border-border first:border-t-0 ${expanded ? 'py-1.5' : 'py-1'}`}
+        >
           <span className="w-5 shrink-0 text-center text-xs font-medium tabular-nums text-muted-foreground">{i + 1}</span>
           <span className="min-w-0 flex-1 truncate text-sm text-foreground">{row.name}</span>
           <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{fmt.num(row.quantity)} шт.</span>
