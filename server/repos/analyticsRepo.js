@@ -541,12 +541,14 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
     });
   }
 
-  // Когорты удержания: когорта = месяц ПЕРВОГО заказа клиента, cell — сколько клиентов когорты
-  // сделали ≥1 заказ в месяце cohort_month+offset. SQL отдаёт плоский (cohort, activity, active),
-  // сетку собирает JS: offsets — ПЛОТНО от 0 до последнего активного месяца КАНАЛА (нули между
-  // активностями честно заполнены; горизонт data-driven, а не «до сегодня» — детерминирован для
-  // тестов и не плодит пустой хвост). Только agent_id IS NOT NULL; окна нет — когорты по
-  // определению вся история (фронт обрежет что не влезло).
+  // Когорты удержания + монетизация: когорта = месяц ПЕРВОГО заказа клиента, cell — сколько
+  // клиентов когорты сделали ≥1 заказ в месяце cohort_month+offset (active) И их суммарная выручка
+  // заказов этого месяца (revenue_kopecks — КОПЕЙКИ, как лежат в БД; в рубли конвертирует граница
+  // API). SQL отдаёт плоский (cohort, activity, active, revenue), сетку собирает JS: offsets —
+  // ПЛОТНО от 0 до последнего активного месяца КАНАЛА (нули между активностями честно заполнены;
+  // горизонт data-driven, а не «до сегодня» — детерминирован для тестов и не плодит пустой хвост).
+  // Только agent_id IS NOT NULL; окна нет — когорты по определению вся история (фронт обрежет что
+  // не влезло). Возвраты СОЗНАТЕЛЬНО не вычитаются (тот же инвариант, что у ms_orders/RFM).
   async function getMsCohortsInternal(channelId) {
     if (!enabled || !channelId) return [];
     const { rows } = await pool.query(
@@ -558,7 +560,8 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
        )
        SELECT to_char(date_trunc('month', f.first_moment),'YYYY-MM') AS cohort_month,
               to_char(date_trunc('month', o.moment),'YYYY-MM') AS activity_month,
-              COUNT(DISTINCT o.agent_id)::int AS active
+              COUNT(DISTINCT o.agent_id)::int AS active,
+              COALESCE(SUM(o.sum_kopecks),0)::bigint AS revenue_kopecks
          FROM ms_orders o
          JOIN firsts f ON f.agent_id = o.agent_id
         WHERE o.channel_id=$1
@@ -576,19 +579,28 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
     for (const r of rows) {
       let c = byCohort.get(r.cohort_month);
       if (!c) {
-        c = { cohort_month: r.cohort_month, active: new Map() };
+        c = { cohort_month: r.cohort_month, cells: new Map() };
         byCohort.set(r.cohort_month, c);
       }
-      c.active.set(monthIdx(r.activity_month) - monthIdx(r.cohort_month), toMetricNumber(r.active) || 0);
+      c.cells.set(monthIdx(r.activity_month) - monthIdx(r.cohort_month), {
+        active: toMetricNumber(r.active) || 0,
+        // Unsafe BIGINT must stay honest missing data, never become an invented zero.
+        revenue_kopecks: toMetricNumber(r.revenue_kopecks),
+      });
     }
     return Array.from(byCohort.values()).map((c) => {
       const span = maxIdx - monthIdx(c.cohort_month);
       const cells = [];
       for (let offset = 0; offset <= span; offset++) {
-        cells.push({ offset, active: c.active.get(offset) || 0 });
+        const cell = c.cells.get(offset);
+        cells.push({
+          offset,
+          active: cell?.active || 0,
+          revenue_kopecks: cell ? cell.revenue_kopecks : 0,
+        });
       }
       // size = active на offset 0: первый заказ каждого клиента когорты лежит в её месяце.
-      return { cohort_month: c.cohort_month, size: c.active.get(0) || 0, cells };
+      return { cohort_month: c.cohort_month, size: c.cells.get(0)?.active || 0, cells };
     });
   }
 

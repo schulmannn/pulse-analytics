@@ -746,7 +746,9 @@ const MsCohortsSchema = z
         .object({
           cohort_month: z.string(),
           size: z.number(),
-          cells: z.array(z.object({ offset: z.number(), active: z.number() }).passthrough()),
+          // revenue — выручка заказов клиентов когорты в offset-месяце, В РУБЛЯХ (граница API уже
+          // сконвертировала копейки). active/size сохранены для ретеншена и старых вызывающих.
+          cells: z.array(z.object({ offset: z.number(), active: z.number(), revenue: z.number().nullable() }).passthrough()),
         })
         .passthrough(),
     ),

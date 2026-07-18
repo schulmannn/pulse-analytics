@@ -21,6 +21,7 @@ import {
   type MsCustomerMetric,
 } from '@/lib/msCustomerSeries';
 import { CHART_MAX_POINTS, type Grain } from '@/lib/msSeries';
+import { cohortCellValue, isMoneyCohortMode, type MsCohortCell, type MsCohortMode } from '@/lib/msCohortMode';
 
 /**
  * «Клиенты» МойСклада — покупательская аналитика АРХИВА заказов (ms_orders, слайс 3).
@@ -496,15 +497,63 @@ function MsCohortsCard({ state }: { state: ReturnType<typeof useMsCohorts> }) {
   );
 }
 
+// Подпись под матрицей и aria — своя для каждого режима: ретеншен считает ДОЛЮ клиентов, а
+// денежные режимы нормируют на ИСХОДНЫЙ размер когорты (не на активных), поэтому формулировка
+// обязана это разделять. Возвраты нигде не вычитаются (инвариант ms_orders/RFM).
+const COHORT_MODE_CAPTION: Record<MsCohortMode, string> = {
+  retention:
+    'Доля клиентов когорты, сделавших заказ через N месяцев после первой покупки; «0» — месяц самой первой покупки.',
+  revenue:
+    'Выручка заказов N-го месяца на одного ИСХОДНОГО клиента когорты (₽), помесячно — не среднее и не прибыль; возвраты не вычтены.',
+  ltv: 'Накопленная выручка с 0-го по N-й месяц на одного ИСХОДНОГО клиента когорты (₽) — LTV; возвраты не вычтены.',
+};
+
+/** Формат значения клетки: ретеншен — проценты, деньги — компактные рубли (клетка узкая). */
+function cohortCellLabel(value: number | null, mode: MsCohortMode): string {
+  if (value == null) return '—';
+  return isMoneyCohortMode(mode) ? `${fmt.short(value)} ₽` : `${Math.round(value * 100)}%`;
+}
+
+/** Полная подсказка клетки (title/aria) — всегда точные числа, режим явно назван. */
+function cohortCellTitle(cell: MsCohortCell, size: number, value: number | null, mode: MsCohortMode): string {
+  if (mode === 'retention') return `${fmt.num(cell.active)} из ${fmt.num(size)} клиентов`;
+  if (value == null) return 'Сумма недоступна в точном числовом диапазоне';
+  const per = `${fmt.num(value)} ₽ на клиента (÷ ${fmt.num(size)} исходных)`;
+  return mode === 'revenue' ? `Выручка месяца: ${per}` : `Накопленная выручка (LTV): ${per}`;
+}
+
 /** Таблица когорт — ОТДЕЛЬНЫМ компонентом внутри детей карточки: ChartExpandedContext провайдится
     оверлеем разворота ВОКРУГ детей, поэтому читать его можно только отсюда (чтение в MsCohortsCard
-    видело бы вечный false). Разворот показывает все когорты, свёрнуто — последние 12. */
+    видело бы вечный false). Разворот показывает все когорты, свёрнуто — последние 12. `mode` по
+    умолчанию 'retention' — компактная карточка Клиентов остаётся ретеншен-only и обратносовместима;
+    режим передаёт только каноническая полная страница. */
 export function MsCohortsTable({
   cohorts,
+  mode = 'retention',
 }: {
-  cohorts: Array<{ cohort_month: string; size: number; cells: Array<{ offset: number; active: number }> }>;
+  cohorts: Array<{ cohort_month: string; size: number; cells: MsCohortCell[] }>;
+  mode?: MsCohortMode;
 }) {
   const expanded = useContext(ChartExpandedContext);
+  const rows = expanded ? cohorts : cohorts.slice(-12);
+  const money = isMoneyCohortMode(mode);
+  const now = new Date();
+  const nowIdx = now.getFullYear() * 12 + now.getMonth();
+  // Максимум значения по видимым уже-наступившим клеткам — для сопоставимой заливки в денежных
+  // режимах (ретеншен нормирован сам: доля 0..1). Отрицательные значения заливку не получают.
+  let colorMax = 1;
+  if (money) {
+    colorMax = 0;
+    for (const c of rows) {
+      const elapsed = nowIdx - monthIndex(c.cohort_month);
+      for (const o of COHORT_OFFSETS) {
+        if (o > elapsed || c.size === 0) continue;
+        const v = cohortCellValue(c.cells, c.size, o, mode) ?? 0;
+        if (v > colorMax) colorMax = v;
+      }
+    }
+    if (colorMax <= 0) colorMax = 1;
+  }
   return (
     <>
       {/* Широкая матрица скроллится ВНУТРИ карточки (канон: без горизонтального overflow
@@ -523,12 +572,10 @@ export function MsCohortsTable({
             </tr>
           </thead>
           <tbody>
-            {(expanded ? cohorts : cohorts.slice(-12)).map((c) => {
-                  const byOffset = new Map(c.cells.map((cell) => [cell.offset, cell.active]));
-                  const now = new Date();
+            {rows.map((c) => {
                   // Сколько offset-месяцев когорты уже НАСТУПИЛО: прошедший месяц без заказов —
-                  // честный 0%, будущий — пустая клетка (данных ещё нет, не ноль).
-                  const elapsed = now.getFullYear() * 12 + now.getMonth() - monthIndex(c.cohort_month);
+                  // честный 0, будущий — пустая клетка (данных ещё нет, не ноль).
+                  const elapsed = nowIdx - monthIndex(c.cohort_month);
                   return (
                     <tr key={c.cohort_month}>
                       <td className="whitespace-nowrap border-t border-border py-1.5 pr-3 text-left text-muted-foreground">
@@ -541,16 +588,18 @@ export function MsCohortsTable({
                         if (o > elapsed || c.size === 0) {
                           return <td key={o} className="border-t border-border" />;
                         }
-                        const active = byOffset.get(o) ?? 0;
-                        const share = active / c.size;
+                        const cell = c.cells.find((x) => x.offset === o) ?? { offset: o, active: 0, revenue: 0 };
+                        const value = cohortCellValue(c.cells, c.size, o, mode);
+                        // Заливка: ретеншен — доля; деньги — доля от максимума (только положительные).
+                        const intensity = money ? Math.max(0, value ?? 0) / colorMax : (value ?? 0);
                         return (
                           <td key={o} className="border-t border-border p-0.5 text-center">
                             <span
                               className="block rounded px-1 py-1 text-foreground"
-                              style={{ backgroundColor: `hsl(var(--chart-role-primary) / ${(share * 0.45).toFixed(3)})` }}
-                              title={`${fmt.num(active)} из ${fmt.num(c.size)} клиентов`}
+                              style={{ backgroundColor: `hsl(var(--chart-role-primary) / ${(intensity * 0.45).toFixed(3)})` }}
+                              title={cohortCellTitle(cell, c.size, value, mode)}
                             >
-                              {Math.round(share * 100)}%
+                              {cohortCellLabel(value, mode)}
                             </span>
                           </td>
                         );
@@ -561,10 +610,7 @@ export function MsCohortsTable({
           </tbody>
         </table>
       </div>
-      <p className="mt-2 text-2xs text-muted-foreground">
-        Доля клиентов когорты, сделавших заказ через N месяцев после первой покупки; «0» — месяц самой первой
-        покупки.
-      </p>
+      <p className="mt-2 text-2xs text-muted-foreground">{COHORT_MODE_CAPTION[mode]}</p>
     </>
   );
 }
