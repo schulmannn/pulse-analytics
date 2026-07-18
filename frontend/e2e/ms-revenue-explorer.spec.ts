@@ -38,7 +38,25 @@ test('MoySklad revenue drills into the full /metrics/ms-revenue page with workin
     return url.pathname === '/api/ms/summary' && url.searchParams.get('days') === '90';
   });
   await windowGroup.getByRole('button', { name: '90д' }).click();
-  await request90;
+  const request = await request90;
+  const requestUrl = new URL(request.url());
+  const from = requestUrl.searchParams.get('from');
+  const to = requestUrl.searchParams.get('to');
+  expect(from).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  expect(to).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+
+  // Пресет закреплён на локальных календарных днях браузера: обе границы реально уходят в API,
+  // окно включительно содержит ровно 90 дней, а правая граница — локальное «сегодня».
+  const utcDay = (key: string) => {
+    const [year, month, day] = key.split('-').map(Number);
+    return Date.UTC(year, month - 1, day);
+  };
+  expect((utcDay(to!) - utcDay(from!)) / 86_400_000 + 1).toBe(90);
+  const localToday = await page.evaluate(() => {
+    const date = new Date();
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  });
+  expect(to).toBe(localToday);
   await expect(windowGroup.getByRole('button', { name: '90д' })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByText('за 90 дн.')).toBeVisible();
 

@@ -13,7 +13,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { fmt } from '@/lib/format';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { usePeriod, type DateRange, type PeriodDays } from '@/lib/period';
-import { msPeriod, msPreviousPeriod, type MsPeriod } from '@/lib/msPeriod';
+import { msPreviousPeriod, useMsResolvedPeriod, type MsPeriod } from '@/lib/msPeriod';
 import { metricTotal, type Grain, type Metric } from '@/lib/msSeries';
 import { customerMetricTotal, type MsCustomerMetric } from '@/lib/msCustomerSeries';
 import {
@@ -227,7 +227,7 @@ interface MsMetricWindow {
 
 function useMsMetricWindow(): MsMetricWindow {
   const { days, setDays, range, setRange } = usePeriod();
-  const period = useMemo(() => msPeriod({ days, range }), [days, range]);
+  const period = useMsResolvedPeriod({ days, range });
   const previousPeriod = useMemo(() => msPreviousPeriod(period), [period]);
   return { days, setDays, range, setRange, period, previousPeriod };
 }

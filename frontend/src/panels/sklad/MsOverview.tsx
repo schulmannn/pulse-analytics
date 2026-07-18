@@ -338,7 +338,7 @@ export function MsSummaryExplorer({
   const ghostValues = comparisonPoints.map((p) => metricValue(metric, p));
   const ghostOk = ghostValues.length === values.length && ghostValues.length >= 2;
   const total = metricTotal(dayPoints, metric);
-  const windowWord = period.from && period.to
+  const windowWord = period.custom && period.from && period.to
     ? `${fmt.day(period.from)} – ${fmt.day(period.to)}`
     : period.days === 0
       ? 'за всё время'
