@@ -392,7 +392,7 @@ function MsBackfillBlock() {
   useEffect(() => {
     const s = st?.status ?? null;
     if (kick && s !== null && s !== kickBaseRef.current) setKick(false);
-    // Финиш прогона: витрины склада (средний чек, воронка, когорты) читают ms_orders — обновить.
+    // Финиш прогона: витрины склада (средний чек, статусы заказов, когорты) читают ms_orders — обновить.
     if (prevStatusRef.current === 'running' && s === 'done') {
       qc.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).startsWith('ms-') });
     }
@@ -467,7 +467,7 @@ function MsBackfillBlock() {
 
   if (st.status === 'done') {
     // Done-состояние ОБЯЗАНО оставлять путь к повторному прогону (прод-фидбек владельца: после
-    // слайса 3 воронке нужен state_id у старых строк, а кнопки не было — тупик). Повтор безопасен:
+    // слайса 3 аналитике статусов нужен state_id у старых строк, а кнопки не было — тупик). Повтор безопасен:
     // upsert заказов заменяющий, движок на done стартует заново.
     return (
       <div className="space-y-2">
@@ -484,7 +484,7 @@ function MsBackfillBlock() {
             Обновить историю заказов
           </button>
           <span className="text-2xs text-muted-foreground">
-            перечитает все заказы заново — например, чтобы подтянуть статусы для воронки
+            перечитает все заказы и обновит их последние статусы в аналитике
           </span>
         </div>
         {startErr && <p className="text-xs text-ember">{startErr}</p>}

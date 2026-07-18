@@ -137,7 +137,7 @@ test('returns: 401/403 от МС → 401 ms_token_revoked (reconnect-CTA, как
   assert.equal(res.body.code, 'ms_token_revoked');
 });
 
-test('funnel: словарь статусов мапит имя и int-цвет → #rrggbb, NULL-строка → no_state_orders, словарь кэшируется', async () => {
+test('/api/ms/funnel: словарь статусов мапит имя и int-цвет → #rrggbb, NULL-строка → no_state_orders, словарь кэшируется', async () => {
   const metaPaths = [];
   const { routes } = buildMs({
     msFetch: async (_token, path) => {
@@ -174,7 +174,7 @@ test('funnel: словарь статусов мапит имя и int-цвет 
   assert.equal(metaPaths.length, 1, 'второй запрос берёт словарь из кэша (1 час)');
 });
 
-test('funnel: недоступный словарь деградирует мягко (name/color null) и НЕ кэшируется; days=0 → вся история', async () => {
+test('/api/ms/funnel: недоступный словарь деградирует мягко (name/color null) и НЕ кэшируется; days=0 → вся история', async () => {
   let metaCalls = 0;
   let seenSince = 'UNSET';
   const { routes } = buildMs({

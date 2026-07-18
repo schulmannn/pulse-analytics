@@ -92,7 +92,7 @@ test.after(async () => {
   await pool.end();
 });
 
-test('funnel: GROUP BY state_id включая NULL, orders DESC, копейки числами (state_id пережил upsert)', { skip }, async () => {
+test('getMsFunnelInternal: GROUP BY state_id включая NULL, orders DESC, копейки числами (state_id пережил upsert)', { skip }, async () => {
   const rows = await db.getMsFunnelInternal(ch.id, {});
   assert.deepEqual(rows, [
     { state_id: S_BLUE, orders: 4, sum_kopecks: 5600 },   // a1+a3+b1+n1
@@ -103,7 +103,7 @@ test('funnel: GROUP BY state_id включая NULL, orders DESC, копейки
   assert.deepEqual(await db.getMsFunnelInternal(ch.id, { sinceDay: 'DROP TABLE' }), rows);
 });
 
-test('funnel: окно sinceDay режет по календарному дню moment', { skip }, async () => {
+test('getMsFunnelInternal: окно sinceDay режет по календарному дню moment', { skip }, async () => {
   assert.deepEqual(await db.getMsFunnelInternal(ch.id, { sinceDay: '2026-03-01' }), [
     { state_id: S_BLUE, orders: 2, sum_kopecks: 3100 },   // a3+n1
     { state_id: null, orders: 1, sum_kopecks: 700 },      // c1
@@ -309,13 +309,13 @@ test('channel-series: multi-channel aggregate, inclusive end day and grouped bre
 });
 
 test('ForActor: владелец видит агрегаты, чужой actor — пусто (репо гейтит доступ сам)', { skip }, async () => {
-  assert.equal((await db.getMsFunnelForActor(ch.id, { uid: owner.id }, {})).length, 3, 'владелец видит воронку');
+  assert.equal((await db.getMsFunnelForActor(ch.id, { uid: owner.id }, {})).length, 3, 'владелец видит структуру статусов');
   assert.equal((await db.getMsCustomersForActor(ch.id, { uid: owner.id }, {})).summary.customers, 3, 'владелец видит клиентов');
   assert.equal((await db.getMsCohortsForActor(ch.id, { uid: owner.id })).length, 3, 'владелец видит когорты');
   assert.equal((await db.getMsTopCustomersForActor(ch.id, { uid: owner.id }, {})).length, 3, 'владелец видит топ клиентов');
   assert.equal(await db.getMsOldestOrderDayForActor(ch.id, { uid: owner.id }), '2026-01-02', 'владелец видит старейший день');
 
-  assert.deepEqual(await db.getMsFunnelForActor(ch.id, { uid: stranger.id }, {}), [], 'чужой → [] (воронка)');
+  assert.deepEqual(await db.getMsFunnelForActor(ch.id, { uid: stranger.id }, {}), [], 'чужой → [] (структура статусов)');
   assert.equal(await db.getMsCustomersForActor(ch.id, { uid: stranger.id }, {}), null, 'чужой → null (клиенты)');
   assert.deepEqual(await db.getMsCohortsForActor(ch.id, { uid: stranger.id }), [], 'чужой → [] (когорты)');
   assert.deepEqual(await db.getMsTopCustomersForActor(ch.id, { uid: stranger.id }, {}), [], 'чужой → [] (топ клиентов)');

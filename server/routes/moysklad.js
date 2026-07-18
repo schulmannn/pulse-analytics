@@ -756,7 +756,7 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
   // days=0 = вся история). Сам агрегат — дешёвое DB-чтение БЕЗ кэша ответа; живой только словарь
   // имён/типов каналов (см. loadChannelsDict, кэш 1 час). Строка sales_channel_id=NULL (заказы
   // без канала / строки до миграции 031) в rows не кладётся — уходит счётчиком no_channel_orders
-  // (как no_state_orders у воронки). resolveMs (не resolveMsChannel): словарю нужен токен, а «не
+  // (как no_state_orders у структуры статусов). resolveMs (не resolveMsChannel): словарю нужен токен, а «не
   // подключён» здесь отвечает 404 как остальные data-роуты.
   app.get('/api/ms/sales-by-channel', requireAuth, async (req, res, next) => {
     try {
@@ -897,7 +897,8 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
     }
   });
 
-  // GET /api/ms/funnel?days= — воронка статусов заказов за окно (архив ms_orders). Сам агрегат —
+  // GET /api/ms/funnel?days= — заказы, созданные в окне, по последнему сохранённому статусу;
+  // это распределение, а не воронка/конверсия или исторический статус на конец окна (архив ms_orders). Сам агрегат —
   // дешёвое DB-чтение БЕЗ кэша ответа; живой только словарь имён/цветов (см. loadStatesDict).
   // resolveMs (не resolveMsChannel) сознательно: словарю нужен токен, и «не подключён» здесь
   // отвечает 404 как остальные data-роуты. Строка state_id=NULL (заказы без статуса и строки до
