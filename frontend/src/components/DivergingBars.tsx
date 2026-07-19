@@ -2,6 +2,7 @@ import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } fro
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { columnIndex } from '@/lib/chartHover';
 import { axisLabelIndexSet } from '@/lib/chartLabels';
+import { observeSize } from '@/lib/observeSize';
 import { ChartTooltip } from '@/components/ChartTooltip';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
 
@@ -38,10 +39,7 @@ export function DivergingBars({ values, labels, titles, height }: DivergingBarsP
     if (!el) return;
     const measure = () => setWidth(el.clientWidth || 600);
     measure();
-    if (typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
+    return observeSize(el, measure);
   }, []);
 
   // The readout must not linger once the chart scrolls away or the window loses focus —

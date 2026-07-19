@@ -938,19 +938,34 @@ div[data-widget-tinted] {
 }
 
 /* Ambient motion for the cartograph glyphs — a deliberate, subtle exception to the no-motion
-   restraint (it gives the empty/broken states a little life); fully disabled under reduced-motion. */
+   restraint (it gives the empty/broken states a little life); fully disabled under reduced-motion.
+   FINITE on purpose: Chromium does not composite CSS animations on <svg> children, so an
+   `infinite` glyph keeps the renderer from ever idling while it is in the viewport (per-frame
+   main-thread churn). Six iterations give the state its life, then the frame goes static.
+   Every cycle starts and ends on its own boundary pose and `fill-mode: both` holds it, so the
+   stop is seamless (pulse ends at full opacity = the static pose; travel ends invisible = the
+   animate-less markup). Off-viewport pause: Cartograph.tsx toggles .cartograph-offscreen on the
+   root svg via IntersectionObserver — see below. */
 @keyframes cartograph-needle { 0%, 100% { transform: rotate(26deg); } 50% { transform: rotate(43deg); } }
 @keyframes cartograph-flag   { 0%, 100% { transform: rotate(-3deg); } 50% { transform: rotate(4deg); } }
-@keyframes cartograph-pulse  { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
-@keyframes cartograph-orbit  { from { transform: translateX(-58px); } to { transform: translateX(58px); } }
+@keyframes cartograph-pulse  { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+@keyframes cartograph-orbit  { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-58px); } 75% { transform: translateX(58px); } }
 @keyframes cartograph-travel { 0% { offset-distance: 0%; opacity: 0; } 8% { opacity: 1; } 92% { opacity: 1; } 100% { offset-distance: 100%; opacity: 0; } }
 
-.cartograph-needle  { transform-box: view-box; transform-origin: 80px 80px; animation: cartograph-needle 4.4s ease-in-out infinite; }
-.cartograph-orbit   { transform-box: view-box; transform-origin: 80px 80px; animation: cartograph-orbit 6s ease-in-out infinite alternate; }
-.cartograph-flag    { transform-box: fill-box; transform-origin: bottom left; animation: cartograph-flag 3.2s ease-in-out infinite; }
-.cartograph-pulse   { animation: cartograph-pulse 2.6s ease-in-out infinite; }
-.cartograph-pulse-2 { animation: cartograph-pulse 2.6s ease-in-out infinite; animation-delay: 0.4s; }
-.cartograph-travel  { offset-path: path('M54 104 C 84 92 96 118 122 94 S 172 66 198 52'); animation: cartograph-travel 3.4s cubic-bezier(0.5, 0, 0.5, 1) infinite; }
+.cartograph-needle  { transform-box: view-box; transform-origin: 80px 80px; animation: cartograph-needle 4.4s ease-in-out 6 both; }
+.cartograph-orbit   { transform-box: view-box; transform-origin: 80px 80px; animation: cartograph-orbit 12s ease-in-out 6 both; }
+.cartograph-flag    { transform-box: fill-box; transform-origin: bottom left; animation: cartograph-flag 3.2s ease-in-out 6 both; }
+.cartograph-pulse   { animation: cartograph-pulse 2.6s ease-in-out 6 both; }
+.cartograph-pulse-2 { animation: cartograph-pulse 2.6s ease-in-out 6 both; animation-delay: 0.4s; }
+.cartograph-travel  { offset-path: path('M54 104 C 84 92 96 118 122 94 S 172 66 198 52'); animation: cartograph-travel 3.4s cubic-bezier(0.5, 0, 0.5, 1) 6 both; }
+
+/* Glyph out of the viewport (Cartograph's IntersectionObserver) — ambient cycles hold their
+   frame instead of burning main-thread time behind the scroll. */
+.cartograph-offscreen :where(.cartograph-needle, .cartograph-orbit, .cartograph-flag,
+.cartograph-pulse, .cartograph-pulse-2, .cartograph-travel) {
+  /* biome-ignore lint/complexity/noImportantStyles: paused must beat the implicit play-state of the `animation` shorthand above regardless of rule order / specificity ties. */
+  animation-play-state: paused !important;
+}
 
 @media (prefers-reduced-motion: reduce) {
   .cartograph-needle, .cartograph-orbit, .cartograph-flag,

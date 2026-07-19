@@ -7,7 +7,7 @@ import type { MetricResolver } from '@/lib/widgetMetrics';
 import type { WidgetConfig } from '@/lib/widgetConfig';
 import { resolveIgMetric } from '@/lib/widgetResolver/ig';
 import { resolveMsMetric } from '@/lib/widgetResolver/ms';
-import { COMPARISON_LABEL, commonMeta, wantsGhostLine } from '@/lib/widgetResolver/shared';
+import { COMPARISON_LABEL, capResultSeries, commonMeta, wantsGhostLine } from '@/lib/widgetResolver/shared';
 import { TG_WIDGET_RESOLVERS } from '@/lib/widgetResolver/tg';
 import type {
   DataContext,
@@ -115,5 +115,19 @@ export function resolveWidgetMetric(config: WidgetConfig, ctx: DataContext): Wid
       }
     }
   }
-  return result;
+
+  // Визуальный кап — СТРОГО последним: все производные (хедлайн/дельта в резолверах, ghost'ы и
+  // target выше, «Макс/Среднее» через stats) уже посчитаны от полной серии; кап меняет только
+  // плотность точек на линии. Один вызов здесь покрывает TG/IG/MS-резолверы разом.
+  const fullSeries = result.series;
+  if (fullSeries && fullSeries.length >= 2) {
+    let max = Number.NEGATIVE_INFINITY;
+    let sum = 0;
+    for (const point of fullSeries) {
+      if (point.value > max) max = point.value;
+      sum += point.value;
+    }
+    result.stats = { max, avg: sum / fullSeries.length };
+  }
+  return capResultSeries(result, config.viz);
 }

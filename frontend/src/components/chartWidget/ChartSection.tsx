@@ -1,4 +1,4 @@
-import { PERIOD_WORD, SIZE_COL_SPAN, SIZE_HEIGHT } from './constants';
+import { PERIOD_WORD, SIZE_COL_SPAN, SIZE_DEFER_RENDER, SIZE_HEIGHT } from './constants';
 import { useChartSectionModel } from './useChartSectionModel';
 import { WidgetBody } from './WidgetBody';
 import { WidgetHeader } from './WidgetHeader';
@@ -42,11 +42,19 @@ export function ChartSection(props: ChartSectionProps) {
       onPointerUp={reorder ? () => group?.dragEnd() : undefined}
       onPointerCancel={reorder ? () => group?.dragEnd() : undefined}
     >
+      {/* content-visibility живёт на КАРТОЧКЕ, а не на внешнем section: paint containment клипает
+          содержимое по padding-box, а резидентная тень карточки — декорация самого элемента и
+          клипу не подлежит (на section она стала бы «контентом» и обрезалась). Гейты: в
+          reorder-режиме FLIP/drag WidgetGroup меряет и глайдит карточки — консервативно рендерим
+          всё; открытое меню (absolute top-full) может вылезать за низ карточки — без гейта его
+          обрезал бы тот же paint containment. Оба переключения затрагивают одну-две карточки. */}
       <div
         className={`${
           props.strip
             ? 'group/strip relative flex flex-col'
-            : `flex flex-col ${SIZE_HEIGHT[effectiveSize]} rounded-2xl border bg-card p-4 shadow-[0_12px_32px_-30px_rgba(0,0,0,0.9)] sm:p-5 transition-colors hover:border-ink3/40 hover:[--card-tint-alpha:0.16] dark:hover:border-white/[0.12] dark:hover:[--card-tint-alpha:0]`
+            : `flex flex-col ${SIZE_HEIGHT[effectiveSize]} ${
+                reorder || model.controls.menuOpen ? '' : SIZE_DEFER_RENDER[effectiveSize]
+              } rounded-2xl border bg-card p-4 shadow-[0_12px_32px_-30px_rgba(0,0,0,0.9)] sm:p-5 transition-colors hover:border-ink3/40 hover:[--card-tint-alpha:0.16] dark:hover:border-white/[0.12] dark:hover:[--card-tint-alpha:0]`
         } ${
           model.controls.homeEditing && props.homeKey
             ? 'border-ink3/25'

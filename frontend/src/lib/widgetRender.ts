@@ -61,9 +61,17 @@ export function seriesToChart(result: WidgetResult): ChartSeries {
  *  beside a chart so a line reads as numbers too, not just a shape. Empty for <2 points (nothing to
  *  summarise beyond the hero). Formatted by the metric unit. */
 export function seriesStats(result: WidgetResult): { label: string; value: string }[] {
+  const f = unitFormat(result.unit);
+  // result.stats — от ПОЛНОЙ серии до визуального капа (LTTB сохраняет экстремумы и смещает
+  // среднее по выборке вверх); пересчёт по series — фолбэк для путей мимо resolveWidgetMetric.
+  if (result.stats) {
+    return [
+      { label: 'Макс', value: f(result.stats.max) },
+      { label: 'Среднее', value: f(Math.round(result.stats.avg)) },
+    ];
+  }
   const vals = (result.series ?? []).map((p) => p.value);
   if (vals.length < 2) return [];
-  const f = unitFormat(result.unit);
   const max = Math.max(...vals);
   const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
   return [

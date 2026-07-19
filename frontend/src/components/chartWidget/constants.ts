@@ -13,6 +13,22 @@ export const SIZE_HEIGHT: Record<WidgetSize, string> = {
   full: '',
 };
 
+/**
+ * Отложенный рендер фикс.-размерных карточек (перф «фризов»: бут /home раскладывал всю доску
+ * разом). Офскрин-карточка держит бокс ровно в пиксели SIZE_HEIGHT через contain-intrinsic-size,
+ * а layout/paint её содержимого браузер скипает до приближения к viewport'у — заодно ставя на
+ * паузу CSS-анимации внутри. Ключи ОБЯЗАНЫ зеркалить SIZE_HEIGHT (те же пиксели); full —
+ * авто-высотный, интрисика для него нет — не скипаем. Только md+ (мобильный этап не трогаем);
+ * print возвращает рендер, иначе в PDF уедут пустые тела (порядок @media print ПОСЛЕ
+ * @media (min-width) в выхлопе Tailwind — override работает, проверено компиляцией).
+ */
+export const SIZE_DEFER_RENDER: Record<WidgetSize, string> = {
+  third:
+    'md:[content-visibility:auto] md:[contain-intrinsic-size:auto_264px] print:[content-visibility:visible]',
+  half: 'md:[content-visibility:auto] md:[contain-intrinsic-size:auto_264px] print:[content-visibility:visible]',
+  full: '',
+};
+
 export const REMOVE_EXIT_MS = 200;
 
 export const ICON_BUTTON_CLASS =

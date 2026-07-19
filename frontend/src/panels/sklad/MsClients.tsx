@@ -1,4 +1,4 @@
-import { useContext, useState } from 'react';
+import { useContext, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useMsCohorts, useMsCustomers, useMsRfm, useMsTopCustomers } from '@/api/queries';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
@@ -40,6 +40,25 @@ export function MsClients() {
   const topCustomers = useMsTopCustomers(period);
   const rfm = useMsRfm(period);
 
+  // Бэк отдаёт только дни С заказами (канон mentions.daily) — дозаполняем календарную сетку окна
+  // нулями: день без заказов для СЧЁТЧИКА заказов — честный ноль, а не разрыв (разрыв = пропуск
+  // сбора, здесь сбора нет — есть арифметика по архиву). Затем длинные окна («Всё» = годы точек)
+  // даунсэмплим по канону графиков; обе серии на одной сетке — один LTTB-проход по сумме дня.
+  // Тяжёлый дериват (densify до 730 дн + LTTB) — мемо по данным/окну, а не на каждый рендер;
+  // хук ДО early-return (React #310).
+  const series = customers.data?.series;
+  const chart = useMemo(() => {
+    if (!series) return null;
+    const dense = densifyCustomerDays(series, period);
+    const sampled = lttbDownsample(dense, 140, (r) => r.new_orders + r.repeat_orders);
+    return {
+      count: sampled.length,
+      labels: sampled.map((r) => fmt.day(r.day)),
+      newValues: sampled.map((r) => r.new_orders),
+      repeatValues: sampled.map((r) => r.repeat_orders),
+    };
+  }, [series, period]);
+
   if (customers.isPending) {
     return (
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
@@ -64,16 +83,7 @@ export function MsClients() {
     );
   }
 
-  const { summary, series } = customers.data;
-  // Бэк отдаёт только дни С заказами (канон mentions.daily) — дозаполняем календарную сетку окна
-  // нулями: день без заказов для СЧЁТЧИКА заказов — честный ноль, а не разрыв (разрыв = пропуск
-  // сбора, здесь сбора нет — есть арифметика по архиву). Затем длинные окна («Всё» = годы точек)
-  // даунсэмплим по канону графиков; обе серии на одной сетке — один LTTB-проход по сумме дня.
-  const dense = densifyCustomerDays(series, period);
-  const sampled = lttbDownsample(dense, 140, (r) => r.new_orders + r.repeat_orders);
-  const labels = sampled.map((r) => fmt.day(r.day));
-  const newValues = sampled.map((r) => r.new_orders);
-  const repeatValues = sampled.map((r) => r.repeat_orders);
+  const { summary } = customers.data;
   const repeatShare = summary.customers > 0 ? Math.round((summary.repeat_customers / summary.customers) * 100) : 0;
   const everShare = summary.repeat_ever; // клиенты с ≥2 заказами за всю историю
   const repeatRevenueTotal = summary.sum_new + summary.sum_repeat;
@@ -88,14 +98,14 @@ export function MsClients() {
         drillTo="/metrics/ms-customers"
       >
         <ChartCardBody value={fmt.num(summary.customers)} caption={windowLabel}>
-          {sampled.length > 1 ? (
+          {chart && chart.count > 1 ? (
             <LineChart
-              values={newValues}
-              ghost={repeatValues}
+              values={chart.newValues}
+              ghost={chart.repeatValues}
               primaryLabel="Новые"
               comparisonDelta={false}
               ghostLabel="Повторные"
-              labels={labels}
+              labels={chart.labels}
               yMin={0}
             />
           ) : (
@@ -163,6 +173,34 @@ export function MsCustomerExplorer({
   const customers = useMsCustomers(period);
   const expandedHeight = useContext(ExpandedChartHeightContext);
 
+  // Тяжёлый дериват (densify всего окна до 730 дн + бакетинг + точки/подписи) — мемо по
+  // данным/окну/грануляции/метрике, а не на каждый рендер; хук ДО early-return (React #310).
+  const series = customers.data?.series;
+  const model = useMemo(() => {
+    if (!series) return null;
+    const bucketed = bucketCustomerDays(densifyCustomerDays(series, period), grain);
+    // Доля без выручки не равна нулю. Как у sparse-AOV, соединяем только реальные наблюдения,
+    // сохраняя их настоящие даты, чтобы пустые дни не превращали линию в россыпь точек.
+    const relevant = metric === 'repeatShare'
+      ? bucketed.filter((point) => point.sum_new + point.sum_repeat > 0)
+      : bucketed;
+    const points = customerPlotPoints(relevant, CHART_MAX_POINTS);
+    const pairs = points.map((point) => customerMetricValues(point, metric));
+    return {
+      count: points.length,
+      primary: pairs.map((pair) => pair.primary),
+      repeat: metric === 'repeatShare' ? undefined : pairs.map((pair) => pair.repeat ?? 0),
+      labels: points.map((point) => fmt.day(point.day)),
+      titles: points.map((point, index) => {
+        const pair = pairs[index];
+        if (metric === 'repeatShare') return `${fmt.day(point.day)}: ${pair.primary?.toFixed(1) ?? '—'}%`;
+        const suffix = metric === 'revenue' ? ' ₽' : '';
+        return `${fmt.day(point.day)}: новые ${fmt.num(pair.primary ?? 0)}${suffix} · повторные ${fmt.num(pair.repeat ?? 0)}${suffix}`;
+      }),
+      totals: customerMetricTotal(relevant, metric),
+    };
+  }, [series, period, grain, metric]);
+
   if (customers.isPending) {
     return (
       <div className="py-2">
@@ -182,28 +220,11 @@ export function MsCustomerExplorer({
     );
   }
 
-  const bucketed = bucketCustomerDays(densifyCustomerDays(customers.data.series, period), grain);
-  // Доля без выручки не равна нулю. Как у sparse-AOV, соединяем только реальные наблюдения,
-  // сохраняя их настоящие даты, чтобы пустые дни не превращали линию в россыпь точек.
-  const relevant = metric === 'repeatShare'
-    ? bucketed.filter((point) => point.sum_new + point.sum_repeat > 0)
-    : bucketed;
-  const points = customerPlotPoints(relevant, CHART_MAX_POINTS);
-  if (points.length < 2) {
+  if (!model || model.count < 2) {
     return <p className="py-4 text-xs text-muted-foreground">Недостаточно данных за выбранный период.</p>;
   }
 
-  const pairs = points.map((point) => customerMetricValues(point, metric));
-  const primary = pairs.map((pair) => pair.primary);
-  const repeat = metric === 'repeatShare' ? undefined : pairs.map((pair) => pair.repeat ?? 0);
-  const labels = points.map((point) => fmt.day(point.day));
-  const titles = points.map((point, index) => {
-    const pair = pairs[index];
-    if (metric === 'repeatShare') return `${fmt.day(point.day)}: ${pair.primary?.toFixed(1) ?? '—'}%`;
-    const suffix = metric === 'revenue' ? ' ₽' : '';
-    return `${fmt.day(point.day)}: новые ${fmt.num(pair.primary ?? 0)}${suffix} · повторные ${fmt.num(pair.repeat ?? 0)}${suffix}`;
-  });
-  const totals = customerMetricTotal(relevant, metric);
+  const { primary, repeat, labels, titles, totals } = model;
   const headline = totals.value == null
     ? '—'
     : metric === 'orders'
