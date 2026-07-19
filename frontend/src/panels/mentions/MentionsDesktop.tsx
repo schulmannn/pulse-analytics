@@ -653,11 +653,14 @@ function MentionsTable({
         <div className="overflow-x-auto">
           <table className="w-full border-collapse text-left text-sm">
             <thead>
+              {/* Умеренные min-w: текстовые колонки сжимаются первыми (truncate/line-clamp), иначе
+                  на узком desktop числовая колонка уезжает за край скролл-контейнера и цифры
+                  выглядят обрезанными. */}
               <tr className="border-b border-border text-xs font-medium tracking-wider text-muted-foreground">
-                <th className="min-w-[180px] py-2.5 pl-0 pr-3">
+                <th className="min-w-[140px] py-2.5 pl-0 pr-3">
                   <SortButton label="Источник" active={filters.sort === 'source'} order={filters.order} onClick={() => toggleSort('source')} align="left" />
                 </th>
-                <th className="min-w-[240px] px-3 py-2.5">Упоминание</th>
+                <th className="min-w-[140px] px-3 py-2.5">Упоминание</th>
                 <th className="w-[104px] px-3 py-2.5 text-right">
                   <SortButton label="Просмотры" active={filters.sort === 'views'} order={filters.order} onClick={() => toggleSort('views')} align="right" />
                 </th>
@@ -687,7 +690,7 @@ function MentionsTable({
                     {r.views != null ? fmt.num(r.views) : <span className="text-muted-foreground/40">—</span>}
                   </td>
                   <td className="px-3 py-2.5 text-right align-top text-xs tabular-nums text-muted-foreground">
-                    {r.date ? fmt.date(r.date) : '—'}
+                    {r.date ? <TwoLineDate iso={r.date} /> : '—'}
                   </td>
                   <td className="py-2.5 pl-3 pr-0 text-right align-top">
                     {r.link ? (
@@ -713,6 +716,17 @@ function MentionsTable({
         </div>
       )}
     </div>
+  );
+}
+
+/** Дата максимум в две строки («20 июн.» / «06:01»): узкая колонка не должна ломать дату на три. */
+function TwoLineDate({ iso }: { iso: string }) {
+  const [day, time] = fmt.date(iso).split(', ');
+  return (
+    <span className="inline-flex flex-col items-end">
+      <span className="whitespace-nowrap">{day}</span>
+      {time && <span className="whitespace-nowrap">{time}</span>}
+    </span>
   );
 }
 

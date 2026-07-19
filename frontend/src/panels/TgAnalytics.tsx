@@ -9,6 +9,7 @@ import { BarChart } from '@/components/BarChart';
 import { ChartCardBody, ChartSection } from '@/components/ChartWidget';
 import { WidgetGroup } from '@/components/widgets/WidgetGroup';
 import { breakdownVariants, seriesBarValuesVariant } from '@/components/widgets/variants';
+import { Breakdown } from '@/components/Breakdown';
 import { pctDelta } from '@/lib/delta';
 import { DivergingBars } from '@/components/DivergingBars';
 import { EmptyState } from '@/components/EmptyState';
@@ -428,6 +429,18 @@ function WeekdayBestDay({ full }: { full: TgFull | undefined }) {
   );
 }
 
+/** «N всего» под строками «Динамики оттока» — reads the same resolved window as its rows. */
+function FollowerFlowTotal({ graphs }: { graphs: TgGraphs | undefined }) {
+  const period = useWidgetPeriod();
+  const flow = deriveFollowerFlows(graphs, calendarWindowForPeriod(period));
+  if (flow.values.length === 0) return null;
+  return (
+    <div className="mt-3 text-xs font-medium text-muted-foreground">
+      {fmt.num(flow.joinedTotal + flow.leftTotal)} всего
+    </div>
+  );
+}
+
 function average(values: number[]): number | null {
   return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
 }
@@ -458,13 +471,15 @@ function TgAnalyticsSummary({ full }: { full: TgFull | undefined }) {
   const erv = average(posts.map((post) => post.erv).filter((value): value is number => value != null));
   const virality = average(posts.map((post) => post.virality).filter((value): value is number => value != null));
   const cappedSample = posts.length >= 100;
-  const items = [
+  // Captions must fit the tile without ellipsis («вовлечённость на пр…»); full wording, when it
+  // adds anything, lives in captionTitle → title-атрибут.
+  const items: { label: string; value: string; caption: string; captionTitle?: string }[] = [
     { label: 'Ср. просмотры', value: formatAverage(average(posts.map((post) => post.reach))), caption: cappedSample ? 'по последним 100 публ.' : `по ${fmt.num(posts.length)} публ.` },
     { label: 'Публикации', value: fmt.num(posts.length), caption: cappedSample ? 'выборка периода, до 100' : 'в выбранном периоде' },
-    { label: 'Ср. ERV', value: formatRate(erv), caption: 'вовлечённость на просмотр' },
+    { label: 'Ср. ERV', value: formatRate(erv), caption: 'на просмотр', captionTitle: 'вовлечённость на просмотр' },
     { label: 'Виральность', value: formatRate(virality), caption: 'репосты / просмотры' },
-    { label: 'Реакций / пост', value: formatAverage(average(posts.map((post) => post.likes))), caption: 'среднее по публикациям' },
-    { label: 'Репостов / пост', value: formatAverage(average(posts.map((post) => post.shares))), caption: 'среднее по публикациям' },
+    { label: 'Реакций / пост', value: formatAverage(average(posts.map((post) => post.likes))), caption: 'в среднем на пост', captionTitle: 'среднее по публикациям' },
+    { label: 'Репостов / пост', value: formatAverage(average(posts.map((post) => post.shares))), caption: 'в среднем на пост', captionTitle: 'среднее по публикациям' },
   ];
 
   return (
@@ -473,7 +488,7 @@ function TgAnalyticsSummary({ full }: { full: TgFull | undefined }) {
         <div key={item.label} className="min-w-0">
           <div className="truncate text-2xs tracking-wide text-muted-foreground">{item.label}</div>
           <div className="mt-1.5 text-2xl font-medium tabular-nums tracking-tight text-foreground">{item.value}</div>
-          <div className="mt-1 truncate text-2xs text-muted-foreground">{item.caption}</div>
+          <div className="mt-1 truncate text-2xs text-muted-foreground" title={item.captionTitle}>{item.caption}</div>
         </div>
       ))}
     </div>
@@ -799,7 +814,10 @@ export function TgAnalytics({
             // bar (preset AND custom «Свой» range) via deriveNetGrowth — no longer a fixed 30-day
             // slice; existence is still gated by the whole payload so a narrow empty window
             // doesn't make the section vanish.
-            title="Чистый прирост подписчиков"
+            // «подписчиков» обрезалось в карточке («Чистый прирост подпи…») и ясно из контекста;
+            // id держит прежний ключ prefs-store, чтобы сохранённые настройки виджета не слетели.
+            id="Чистый прирост подписчиков"
+            title="Чистый прирост"
             drillTo="/metrics/subscribers"
             periodControl
             variants={(period) => {
@@ -829,6 +847,9 @@ export function TgAnalytics({
         )}
 
         {inGroup('dynamics') && netGrowthPresent && (
+          // Аудит: красно-зелёный донат был единственной круговой в продукте. Единственное
+          // представление — две строки Breakdown БЕЗ color (нейтральный приглушённый трек
+          // --chart-role-primary); «N всего» из центра доната живёт футером (FollowerFlowTotal).
           <ChartSection
             title="Динамика оттока"
             periodControl
@@ -837,12 +858,27 @@ export function TgAnalytics({
               if (flow.values.length === 0) {
                 return [{ key: 'list', label: 'Список', render: <EmptyState title="Нет данных за выбранный период." /> }];
               }
-              return breakdownVariants([
-                { label: 'Подписалось', value: flow.joinedTotal, display: fmt.num(flow.joinedTotal), color: 'hsl(var(--brand-verdant))' },
-                { label: 'Отписалось', value: flow.leftTotal, display: fmt.num(flow.leftTotal), color: 'hsl(var(--brand-ember))' },
-              ]);
+              const flowTotal = flow.joinedTotal + flow.leftTotal;
+              const rowDisplay = (value: number) =>
+                flowTotal > 0 ? `${fmt.num(value)} · ${Math.round((value / flowTotal) * 100)}%` : fmt.num(value);
+              return [
+                {
+                  key: 'list',
+                  label: 'Список',
+                  render: (
+                    <Breakdown
+                      items={[
+                        { label: 'Отписалось', value: flow.leftTotal, display: rowDisplay(flow.leftTotal) },
+                        { label: 'Подписалось', value: flow.joinedTotal, display: rowDisplay(flow.joinedTotal) },
+                      ]}
+                    />
+                  ),
+                },
+              ];
             }}
-          />
+          >
+            <FollowerFlowTotal graphs={graphs} />
+          </ChartSection>
         )}
 
         {/* Раньше оба графика жили в одной двойной секции — её ячейка была вдвое выше соседних и

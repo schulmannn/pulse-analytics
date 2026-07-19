@@ -35,7 +35,10 @@ export function WidgetHeader({
 }: WidgetHeaderProps) {
   return (
     <div className={strip && !reorder ? 'absolute -top-1 right-0 z-10 flex items-center' : 'flex shrink-0 items-center gap-3'}>
-      <h3 className={strip && !reorder ? 'sr-only' : 'widget-title min-w-0 flex-1 truncate text-sm font-medium tracking-tight text-foreground'}>
+      <h3
+        title={label}
+        className={strip && !reorder ? 'sr-only' : 'widget-title min-w-0 flex-1 truncate text-sm font-medium tracking-tight text-foreground'}
+      >
         {label}
       </h3>
       {action}

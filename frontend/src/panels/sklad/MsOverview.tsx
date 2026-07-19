@@ -1,6 +1,7 @@
-import { useContext, useState } from 'react';
+import { useContext, useLayoutEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
+import { observeSize } from '@/lib/observeSize';
 import { useMsFunnel, useMsReturns, useMsSummary } from '@/api/queries';
 import { MsTopProductsCard } from '@/panels/sklad/MsTopProducts';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
@@ -11,6 +12,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { Skeleton } from '@/components/ui/skeleton';
 import { SegmentedControl } from '@/components/SegmentedControl';
+import { Sparkline } from '@/components/Sparkline';
 import { lttbDownsample } from '@/lib/downsample';
 import { fmt } from '@/lib/format';
 import { usePagePeriod } from '@/lib/period';
@@ -241,49 +243,99 @@ export function MsOverview() {
         ) : !returns.data ? (
           <p className="py-4 text-sm text-muted-foreground">Нет данных о возвратах за период.</p>
         ) : (
-          <ChartCardBody
-            value={fmt.num(returns.data.count)}
-            caption={
-              <div className="max-w-48 space-y-1 leading-snug">
-                <div>на {fmt.short(returns.data.sum)} ₽ {windowLabel}</div>
-                {!returns.data.complete && (
-                  <div>
-                    Архив ещё загружается
-                    {returns.data.total_estimate == null
-                      ? '.'
-                      : `: ${fmt.num(returns.data.archived_count)} из примерно ${fmt.num(returns.data.total_estimate)}.`}
-                  </div>
-                )}
-                <div>Возвраты считаются отдельно и из выручки не вычитаются.</div>
-              </div>
-            }
-          >
-            {returns.data.complete && returns.data.count === 0 ? (
-              <p className="py-4 text-xs text-muted-foreground">Возвратов за период нет.</p>
-            ) : (
-              (() => {
-                // Реальная дневная линия числа возвратов: архивную серию (только дни с возвратами)
-                // дозаполняем календарными нулями по окну, затем даунсэмплим до канона ~140 точек.
-                const dense = densifyDayPoints(
-                  returns.data.series.map((r) => ({ day: r.day, orders: r.count, sum: r.sum })),
-                  period,
-                );
-                const sampled = lttbDownsample(dense, 140, (p) => p.orders);
-                return sampled.length > 1 ? (
-                  <LineChart
-                    values={sampled.map((p) => p.orders)}
-                    labels={sampled.map((p) => fmt.day(p.day))}
-                    titles={sampled.map((p) => `${fmt.day(p.day)}: ${fmt.num(p.orders)} · ${fmt.short(p.sum)} ₽`)}
-                    yMin={0}
-                  />
-                ) : (
-                  <p className="text-xs text-muted-foreground">Недостаточно дней для графика.</p>
-                );
-              })()
-            )}
-          </ChartCardBody>
+          <MsReturnsCardBody data={returns.data} period={period} windowLabel={windowLabel} />
         )}
       </ChartWidget>
+    </div>
+  );
+}
+
+/** Тело карточки «Возвраты» — вертикальная компоновка вместо горизонтального ChartCardBody:
+    число + подпись сразу под заголовком, график в середине, сноски приглушённым текстом внизу
+    (горизонтальная раскладка прижимала число к левому низу, а дисклеймер уносила вверх, оставляя
+    диагональную пустоту). */
+function MsReturnsCardBody({
+  data,
+  period,
+  windowLabel,
+}: {
+  data: NonNullable<ReturnType<typeof useMsReturns>['data']>;
+  period: MsPeriod;
+  windowLabel: string;
+}) {
+  // Реальная дневная линия числа возвратов: архивную серию (только дни с возвратами)
+  // дозаполняем календарными нулями по окну, затем даунсэмплим до канона ~140 точек.
+  const dense = densifyDayPoints(
+    data.series.map((r) => ({ day: r.day, orders: r.count, sum: r.sum })),
+    period,
+  );
+  const sampled = lttbDownsample(dense, 140, (p) => p.orders);
+  const expanded = useContext(ChartExpandedContext);
+  // Высоту svg считаем от ФАКТИЧЕСКОЙ высоты слота (паттерн band-измерения WidgetRenderer), а не
+  // от бюджета «тело минус оценка шапки/сносок»: оценка расходилась с фактом на единицы px и
+  // рвала overflow-hidden слот. 26 = ряд X-подписей LineChart (~22px) + зазор.
+  const slotRef = useRef<HTMLDivElement | null>(null);
+  const [slotHeight, setSlotHeight] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const el = slotRef.current;
+    if (!el) return;
+    const measure = () => setSlotHeight(el.clientHeight);
+    measure();
+    return observeSize(el, measure);
+  }, []);
+  const chartHeight = slotHeight != null && slotHeight > 0 ? Math.max(slotHeight - 26, 48) : null;
+  return (
+    <div className="flex h-full min-h-0 flex-col pt-1">
+      <div className="shrink-0">
+        <div className="kpi-accent text-3xl font-medium leading-none tabular-nums tracking-tight">
+          {fmt.num(data.count)}
+        </div>
+        <div className="mt-1.5 text-2xs text-muted-foreground">{`на ${fmt.short(data.sum)} ₽ ${windowLabel}`}</div>
+      </div>
+      {/* overflow-hidden — страховка на кадр между измерением слота и ре-рендером графика. */}
+      <div ref={slotRef} className="mt-2 min-h-0 flex-1 overflow-hidden">
+        {data.complete && data.count === 0 ? (
+          <p className="py-2 text-xs text-muted-foreground">Возвратов за период нет.</p>
+        ) : sampled.length > 1 ? (
+          expanded ? (
+            <ExpandedChartHeightContext.Provider value={chartHeight}>
+              <LineChart
+                values={sampled.map((p) => p.orders)}
+                labels={sampled.map((p) => fmt.day(p.day))}
+                titles={sampled.map((p) => `${fmt.day(p.day)}: ${fmt.num(p.orders)} · ${fmt.short(p.sum)} ₽`)}
+                yMin={0}
+              />
+            </ExpandedChartHeightContext.Provider>
+          ) : (
+            // Тайл: минимальная высота LineChart (svg 80 + ряд подписей 22) не влезает в остаток
+            // 264px-колонки — здесь канонный компакт-примитив Sparkline, полный график в развороте.
+            <div className="flex h-full items-center">
+              <Sparkline
+                values={sampled.map((p) => p.orders)}
+                labels={sampled.map((p) => fmt.day(p.day))}
+                color="hsl(var(--chart-role-primary))"
+                area
+                interactive
+                formatValue={(v) => fmt.num(v)}
+                className="h-12 w-full"
+              />
+            </div>
+          )
+        ) : (
+          <p className="text-xs text-muted-foreground">Недостаточно дней для графика.</p>
+        )}
+      </div>
+      <div className="mt-2 shrink-0 space-y-1 text-2xs text-muted-foreground">
+        {!data.complete && (
+          <p>
+            Архив возвратов ещё загружается. Показаны только уже сохранённые документы
+            {data.total_estimate == null
+              ? '.'
+              : `: ${fmt.num(data.archived_count)} из примерно ${fmt.num(data.total_estimate)}.`}
+          </p>
+        )}
+        <p>Возвраты считаются отдельно и из выручки не вычитаются.</p>
+      </div>
     </div>
   );
 }

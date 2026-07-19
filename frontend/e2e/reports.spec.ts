@@ -171,7 +171,7 @@ test.describe('Отчёты — desktop', () => {
     await expect(weekly).toContainText('Раз в неделю');
     // Legacy-строка без channelId/periodDays/blocks — честные фолбэки.
     const legacy = page.getByRole('row', { name: /Контент план/ });
-    await expect(legacy).toContainText('По переключателю');
+    await expect(legacy).toContainText('Текущий источник');
     await expect(legacy).toContainText('30д');
     await expect(legacy).toContainText('Базовый набор');
 

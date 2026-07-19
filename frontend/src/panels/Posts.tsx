@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils';
 import { markdownToPlainText } from '@/lib/markdown';
 import { Card, CardContent } from '@/components/ui/card';
 import { ErrorState } from '@/components/ErrorState';
+import { Icon } from '@/components/nav-icons';
 import { calendarWindowForPeriod, usePagePeriod, widgetPeriodValue } from '@/lib/period';
 import { downloadCsv } from '@/lib/csv';
 import { tgContentRows } from '@/lib/contentExport';
@@ -502,7 +503,7 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
                     )}
                   </td>
                   <td className="py-2.5 pl-0 pr-3 text-center">
-                    <PostThumb thumb={post.thumb} mediaType={post.mediaType} albumSize={post.albumSize} />
+                    <PostThumb thumb={post.thumb} mediaType={post.mediaType} albumSize={post.albumSize} icon />
                   </td>
                   <td className="px-3 py-2.5">
                     {isClickable ? (
@@ -552,7 +553,7 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
                     {post.er != null ? `${post.er.toFixed(1)}%` : <span className="text-muted-foreground/40">—</span>}
                   </td>
                   <td className="px-3 py-2.5 pr-0 text-right text-xs tabular-nums text-muted-foreground">
-                    {post.date ? fmt.date(post.date) : '—'}
+                    {post.date ? <TwoLineDate iso={post.date} /> : '—'}
                   </td>
                 </tr>
               );
@@ -650,6 +651,17 @@ function SortButton({
   );
 }
 
+/** Дата максимум в две строки («20 июн.» / «06:01»): узкая колонка не должна ломать дату на три. */
+function TwoLineDate({ iso }: { iso: string }) {
+  const [day, time] = fmt.date(iso).split(', ');
+  return (
+    <span className="inline-flex flex-col items-end">
+      <span className="whitespace-nowrap">{day}</span>
+      {time && <span className="whitespace-nowrap">{time}</span>}
+    </span>
+  );
+}
+
 /** Media-format word for the post-caption subline — replaces the ad-hoc date there (date is now its
     own sortable column), so the format bucket the search/filter uses is also legible in the row. */
 function FormatTag({ post }: { post: NormalizedPost }) {
@@ -660,9 +672,10 @@ function FormatTag({ post }: { post: NormalizedPost }) {
 
 /**
  * A metric cell with explicit comparable-period median context. The value is always shown; the
- * «±N% к медиане» delta appears only when periodMedian cleared the min-sample gate (never a faked
- * benchmark). Colour is reserved for the primary signal column (`tone="signal"`, reach) so the
- * table doesn't read as a rainbow — secondary columns keep the label but stay muted.
+ * delta appears only when periodMedian cleared the min-sample gate (never a faked benchmark). In
+ * the dense table the delta is SHORT («+28%», full wording in the title tooltip) — repeating
+ * «к медиане» in every cell is noise. One colour rule for every metric column (`dir` → green/red);
+ * `tone` only picks the value ink (primary signal column vs muted secondary).
  */
 function MedianCell({
   value,
@@ -677,34 +690,54 @@ function MedianCell({
 }) {
   if (value == null) return <span className="text-muted-foreground/40">—</span>;
   const cmp = compareToMedian(value, median);
-  const deltaColor =
-    tone === 'signal' && cmp
-      ? cmp.dir === 'above'
-        ? 'text-verdant'
-        : cmp.dir === 'below'
-          ? 'text-ember'
-          : 'text-muted-foreground'
-      : 'text-muted-foreground';
+  const deltaColor = cmp
+    ? cmp.dir === 'above'
+      ? 'text-verdant'
+      : cmp.dir === 'below'
+        ? 'text-ember'
+        : 'text-muted-foreground'
+    : 'text-muted-foreground';
+  const deltaShort = cmp
+    ? cmp.dir === 'at' ? '±0%' : `${cmp.pct > 0 ? '+' : '−'}${Math.abs(Math.round(cmp.pct))}%`
+    : null;
   return (
     <>
       <span className={cn('block font-medium tabular-nums', tone === 'signal' ? 'text-foreground' : 'text-muted-foreground')}>
         {format(value)}
       </span>
-      {cmp && <span className={cn('block text-2xs', deltaColor)}>{medianDeltaLabel(cmp)}</span>}
+      {cmp && (
+        <span className={cn('block text-2xs tabular-nums', deltaColor)} title="к медиане за период">
+          {deltaShort}
+        </span>
+      )}
     </>
   );
 }
 
 /**
  * Превью поста с честным фолбэком: битый/недоступный thumb — больше не молчаливый серый квадрат
- * (дизайн-проход №3) — при ошибке показываем тип медиа словом, как у текстовых.
+ * (дизайн-проход №3). В desktop-таблице (`icon`) фолбэк — line-art иконка типа медиа (словом тип
+ * уже дублирует FormatTag в колонке «Пост»); мобильный список сохраняет прежний словесный фолбэк.
  */
-function PostThumb({ thumb, mediaType, albumSize }: { thumb: string | null; mediaType: string | null; albumSize: number }) {
+function PostThumb({
+  thumb,
+  mediaType,
+  albumSize,
+  icon = false,
+}: {
+  thumb: string | null;
+  mediaType: string | null;
+  albumSize: number;
+  icon?: boolean;
+}) {
   const [broken, setBroken] = useState(false);
   const label =
     mediaType === 'video' ? 'Видео' : mediaType === 'photo' ? (albumSize > 1 ? `${albumSize} фото` : 'Фото') : 'Текст';
   return (
-    <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded border border-border/40 bg-muted">
+    <div
+      title={icon && (!thumb || broken) ? label : undefined}
+      className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded border border-border/40 bg-muted"
+    >
       {thumb && !broken ? (
         <img
           loading="lazy"
@@ -713,6 +746,12 @@ function PostThumb({ thumb, mediaType, albumSize }: { thumb: string | null; medi
           referrerPolicy="no-referrer"
           onError={() => setBroken(true)}
           className="h-full w-full object-cover"
+        />
+      ) : icon ? (
+        <Icon
+          name={mediaType === 'video' ? 'playCircle' : mediaType === 'photo' ? 'image' : 'posts'}
+          aria-hidden="true"
+          className="size-4 text-muted-foreground"
         />
       ) : (
         <span className="px-0.5 text-center text-2xs font-medium leading-tight text-muted-foreground">{label}</span>

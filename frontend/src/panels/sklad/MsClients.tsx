@@ -1,4 +1,5 @@
 import { useContext, useState } from 'react';
+import type { ReactNode } from 'react';
 import { useMsCohorts, useMsCustomers, useMsRfm, useMsTopCustomers } from '@/api/queries';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
@@ -112,19 +113,19 @@ export function MsClients() {
         {days === 0 && !pp?.range ? (
           // На «Всё» окно совпадает с историей — «новых в окне» не бывает; честная метрика
           // здесь — сколько клиентов вообще возвращалось.
-          <ChartCardBody
+          <MsStatCardBody
             value={`${summary.customers > 0 ? Math.round((everShare / summary.customers) * 100) : 0}%`}
             caption={`возвращались: ${fmt.num(everShare)} из ${fmt.num(summary.customers)} клиентов`}
           >
             <MsRepeatBreakdown summary={summary} repeatRevenueShare={repeatRevenueShare} allTime />
-          </ChartCardBody>
+          </MsStatCardBody>
         ) : (
-          <ChartCardBody
+          <MsStatCardBody
             value={`${repeatShare}%`}
             caption={`повторных покупателей ${windowLabel}`}
           >
             <MsRepeatBreakdown summary={summary} repeatRevenueShare={repeatRevenueShare} />
-          </ChartCardBody>
+          </MsStatCardBody>
         )}
       </ChartWidget>
 
@@ -307,7 +308,7 @@ export function MsTopCustomersBody({ state }: { state: ReturnType<typeof useMsTo
 
 type RfmMode = 'customers' | 'revenue';
 
-const RFM_SEGMENTS = {
+export const RFM_SEGMENTS = {
   champions: { label: 'Чемпионы', action: 'часто покупают, недавно и на крупную сумму', color: 'hsl(var(--chart-role-positive))' },
   loyal: { label: 'Лояльные', action: 'стабильно возвращаются и приносят выручку', color: 'hsl(var(--chart-role-primary))' },
   potential: { label: 'Потенциально лояльные', action: 'есть потенциал для следующей покупки', color: 'hsl(var(--chart-role-comparison))' },
@@ -316,14 +317,24 @@ const RFM_SEGMENTS = {
   hibernating: { label: 'Спящие', action: 'давно не покупали и были малоактивны', color: 'hsl(var(--muted-foreground) / 0.55)' },
 } as const;
 
-/** Aggregate-only RFM distribution: no customer ids leave the API. Scores are relative to the
-    selected window population, so the UI never presents them as absolute lifetime labels. */
+export type RfmSegmentKey = keyof typeof RFM_SEGMENTS;
+
+/** RFM distribution stays aggregate — no customer ids travel through THIS endpoint. Drilling into a
+    segment's customer list is a separate deliberate tenant-scoped route (`/api/ms/rfm-customers`,
+    rendered by MsRfmSegmentCustomers on the ms-rfm page). Scores are relative to the selected window
+    population, so the UI never presents them as absolute lifetime labels. With `onSelectSegment` the
+    segment rows become toggle buttons (the page owns the selection, канон — URL-контрол); without it
+    (compact card, expand overlay) the markup stays exactly as before. */
 export function MsRfmBody({
   state,
   detailed = false,
+  selectedSegment = null,
+  onSelectSegment,
 }: {
   state: ReturnType<typeof useMsRfm>;
   detailed?: boolean;
+  selectedSegment?: string | null;
+  onSelectSegment?: (key: RfmSegmentKey) => void;
 }) {
   const expanded = useContext(ChartExpandedContext);
   const [mode, setMode] = useState<RfmMode>('customers');
@@ -366,8 +377,8 @@ export function MsRfmBody({
           const meta = RFM_SEGMENTS[segment.key];
           const value = mode === 'customers' ? segment.customers : segment.sum;
           const share = total > 0 ? (value / total) * 100 : 0;
-          return (
-            <div key={segment.key}>
+          const row = (
+            <>
               <div className="flex items-baseline justify-between gap-3 text-xs">
                 <span className="min-w-0 truncate text-foreground">{meta.label}</span>
                 <span className="shrink-0 tabular-nums text-muted-foreground">
@@ -385,7 +396,22 @@ export function MsRfmBody({
                   {meta.action}; в среднем R {segment.average_recency_days == null ? '—' : segment.average_recency_days.toLocaleString('ru-RU', { maximumFractionDigits: 1 })} дн. · F {segment.average_frequency == null ? '—' : segment.average_frequency.toLocaleString('ru-RU', { maximumFractionDigits: 1 })} заказа · M {segment.average_monetary == null ? '—' : `${fmt.short(segment.average_monetary)} ₽`}.
                 </p>
               )}
-            </div>
+            </>
+          );
+          if (!onSelectSegment) return <div key={segment.key}>{row}</div>;
+          const selected = selectedSegment === segment.key;
+          return (
+            <button
+              key={segment.key}
+              type="button"
+              aria-pressed={selected}
+              onClick={() => onSelectSegment(segment.key)}
+              className={`block w-full rounded-lg px-2 py-1.5 text-left transition-colors ${
+                selected ? 'bg-muted/40' : 'hover:bg-muted/25'
+              }`}
+            >
+              {row}
+            </button>
           );
         })}
       </div>
@@ -398,6 +424,27 @@ export function MsRfmBody({
           Без контрагента: {fmt.num(state.data.no_agent_orders)} {pluralRu(state.data.no_agent_orders, ['заказ', 'заказа', 'заказов'])} — не сегментированы.
         </p>
       )}
+    </div>
+  );
+}
+
+/** Вертикальное тело карточки-статистики без графика: значение + подпись сразу под заголовком,
+    строки ниже. Горизонтальный ChartCardBody прижимал число к левому низу, а строки — к правому
+    верху, оставляя диагональную пустоту. */
+function MsStatCardBody({
+  value,
+  caption,
+  children,
+}: {
+  value: string;
+  caption: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div className="pt-1">
+      <div className="kpi-accent text-3xl font-medium leading-none tabular-nums tracking-tight">{value}</div>
+      <div className="mt-1.5 text-2xs text-muted-foreground">{caption}</div>
+      <div className="mt-3">{children}</div>
     </div>
   );
 }
@@ -539,21 +586,19 @@ export function MsCohortsTable({
   const money = isMoneyCohortMode(mode);
   const now = new Date();
   const nowIdx = now.getFullYear() * 12 + now.getMonth();
-  // Максимум значения по видимым уже-наступившим клеткам — для сопоставимой заливки в денежных
-  // режимах (ретеншен нормирован сам: доля 0..1). Отрицательные значения заливку не получают.
-  let colorMax = 1;
-  if (money) {
-    colorMax = 0;
-    for (const c of rows) {
-      const elapsed = nowIdx - monthIndex(c.cohort_month);
-      for (const o of COHORT_OFFSETS) {
-        if (o > elapsed || c.size === 0) continue;
-        const v = cohortCellValue(c.cells, c.size, o, mode) ?? 0;
-        if (v > colorMax) colorMax = v;
-      }
+  // Максимум значения по видимым уже-наступившим клеткам — опора тепловой шкалы. В ретеншене
+  // колонка «0» исключена: там по определению всегда 100%, и шкала «от неё» делала 1% и 8%
+  // одинаково-прозрачными (нечитаемый плоский текст). Отрицательные значения заливку не получают.
+  let colorMax = 0;
+  for (const c of rows) {
+    const elapsed = nowIdx - monthIndex(c.cohort_month);
+    for (const o of COHORT_OFFSETS) {
+      if (o > elapsed || c.size === 0 || (!money && o === 0)) continue;
+      const v = cohortCellValue(c.cells, c.size, o, mode) ?? 0;
+      if (v > colorMax) colorMax = v;
     }
-    if (colorMax <= 0) colorMax = 1;
   }
+  if (colorMax <= 0) colorMax = 1;
   return (
     <>
       {/* Широкая матрица скроллится ВНУТРИ карточки (канон: без горизонтального overflow
@@ -590,8 +635,21 @@ export function MsCohortsTable({
                         }
                         const cell = c.cells.find((x) => x.offset === o) ?? { offset: o, active: 0, revenue: 0 };
                         const value = cohortCellValue(c.cells, c.size, o, mode);
-                        // Заливка: ретеншен — доля; деньги — доля от максимума (только положительные).
-                        const intensity = money ? Math.max(0, value ?? 0) / colorMax : (value ?? 0);
+                        if (!money && o === 0) {
+                          // Ретеншен, «0» — месяц самой первой покупки, всегда 100% по
+                          // определению: приглушённый плоский текст вместо шумной пилюли.
+                          return (
+                            <td
+                              key={o}
+                              className="border-t border-border py-1.5 text-center text-muted-foreground"
+                              title={cohortCellTitle(cell, c.size, value, mode)}
+                            >
+                              {cohortCellLabel(value, mode)}
+                            </td>
+                          );
+                        }
+                        // Заливка: доля от максимума видимой таблицы (только положительные).
+                        const intensity = Math.min(1, Math.max(0, value ?? 0) / colorMax);
                         return (
                           <td key={o} className="border-t border-border p-0.5 text-center">
                             <span

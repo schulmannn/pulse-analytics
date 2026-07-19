@@ -7,11 +7,13 @@ const {
   previousWindow,
   buildAssortmentComparison,
 } = require('../lib/msTopProducts');
+const { SEGMENT_ORDER } = require('../domain/msRfm');
 const { hasWorkspaceRole } = require('../middleware/tenant');
 
 /**
  * Роуты МойСклада (/api/ms/{connect,summary,top-products,top-customers,status,account,backfill,
- * backfill-status,funnel,customers,rfm,cohorts,returns,sales-by-channel,geography}) — серверная половина
+ * backfill-status,funnel,customers,rfm,rfm-customers,cohorts,returns,sales-by-channel,geography}) —
+ * серверная половина
  * источника «склад», зеркально Instagram-вертикали: connect валидирует токен живыми
  * identity-вызовами и сохраняет его ТОЛЬКО шифрованным (lib/ms_crypto), data-роуты резолвят
  * канал тем же механизмом, что resolveIg (?channel= / заголовок x-channel-id, дефолт через
@@ -1044,7 +1046,9 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
 
   // GET /api/ms/rfm?days= — relative R/F/M segmentation over customers with an order in the
   // exact selected window. Pure archive aggregate: no token decryption/live MoySklad call. Scores
-  // are tie-safe mid-rank 1..5 values; raw customer ids stay inside the repo/domain boundary.
+  // are tie-safe mid-rank 1..5 values; the aggregate itself stays id-free — customer-level rows
+  // are deliberately served to the channel owner by the dedicated /api/ms/rfm-customers listing
+  // (same window/scoring, ForActor-gated).
   app.get('/api/ms/rfm', requireAuth, async (req, res, next) => {
     try {
       const period = parseMsPeriod(req);
@@ -1074,6 +1078,106 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
           average_monetary: kopecksToRub(segment.average_monetary_kopecks),
         })),
       });
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  // GET /api/ms/rfm-customers?days=&segment=&limit=&offset= — покупатели ОДНОГО RFM-сегмента.
+  // Популяцию окна целиком скорит и фильтрует domain (ТОТ ЖЕ код присвоения сегментов, что у
+  // агрегата /api/ms/rfm — счётчики обязаны сходиться), пагинация — ПОСЛЕ фильтра+сортировки.
+  // Токен нужен только словарю имён/адресов: /entity/counterparty OR-фильтром по id строк
+  // СТРАНИЦЫ, чанками по 25 id (зеркало top-customers, но страница может быть до 200 строк).
+  // Кэш — весь ответ по (period, segment, limit, offset); деградация словаря (не-401/403) →
+  // name/address:null БЕЗ кэша, 401/403 → ms_token_revoked-путь.
+  const MS_RFM_CUST_LIMIT_DEFAULT = 50;
+  const MS_RFM_CUST_LIMIT_MAX = 200;
+  const MS_RFM_CUST_DICT_CHUNK = 25;
+  app.get('/api/ms/rfm-customers', requireAuth, async (req, res, next) => {
+    try {
+      const period = parseMsPeriod(req);
+      if (period.invalid) return badRange(res);
+      const segment = typeof req.query.segment === 'string' ? req.query.segment : '';
+      if (!SEGMENT_ORDER.includes(segment)) {
+        return res.status(400).json({ error: 'Неизвестный RFM-сегмент' });
+      }
+      const limitRaw = Number.parseInt(req.query.limit, 10);
+      const limit = Number.isFinite(limitRaw)
+        ? Math.min(MS_RFM_CUST_LIMIT_MAX, Math.max(1, limitRaw))
+        : MS_RFM_CUST_LIMIT_DEFAULT;
+      const offsetRaw = Number.parseInt(req.query.offset, 10);
+      const offset = Number.isFinite(offsetRaw) ? Math.max(0, offsetRaw) : 0;
+      const ms = await resolveMs(req, res);
+      if (!ms) return;
+      const cacheKey = `ms:rfmcust:${ms.channel.id}:${period.periodKey}:${segment}:${limit}:${offset}`;
+      const cached = cacheGet(cacheKey);
+      if (cached) return res.json(cached);
+
+      const data = await db.getMsRfmCustomersForActor(ms.channel.id, req.user, {
+        sinceDay: period.sinceDay, untilDay: period.untilDay, asOfDay: period.untilDay, segment,
+      });
+      // null от ForActor = доступ отозван между resolve и чтением (гонка) — честный 403.
+      if (!data) return res.status(403).json({ error: 'Нет доступа к этому каналу' });
+      const page = data.customers.slice(offset, offset + limit);
+
+      // null = словарь недоступен (деградация), Map = удачный резолв; пустая Map — тоже ответ
+      // (все контрагенты страницы удалены из МС — их имена/адреса честно null, но кэшировать можно).
+      let dict = null;
+      if (page.length) {
+        try {
+          const resolvedDict = new Map();
+          for (let i = 0; i < page.length; i += MS_RFM_CUST_DICT_CHUNK) {
+            const chunk = page.slice(i, i + MS_RFM_CUST_DICT_CHUNK);
+            const filter = chunk.map((row) => `id=${row.agent_id}`).join(';');
+            const cps = await msFetch(
+              ms.token,
+              `/entity/counterparty?filter=${encodeURIComponent(filter)}&limit=${chunk.length}`,
+            );
+            for (const c of cps && Array.isArray(cps.rows) ? cps.rows : []) {
+              if (c && c.id != null) {
+                resolvedDict.set(String(c.id), {
+                  name: typeof c.name === 'string' ? c.name : null,
+                  address: typeof c.actualAddress === 'string' ? c.actualAddress : null,
+                });
+              }
+            }
+          }
+          dict = resolvedDict;
+        } catch (e) {
+          const status = Number(e && e.status) || 0;
+          if (status === 401 || status === 403) {
+            return sendMsError(res, e, { route: 'rfm-customers', channelId: ms.channel.id });
+          }
+          log('warn', 'ms_counterparty_names_failed', {
+            channelId: ms.channel.id, status, error: e && e.message,
+          });
+        }
+      }
+      const payload = {
+        window_days: period.days,
+        as_of: data.as_of,
+        segment,
+        total_customers: data.total_customers,
+        rows: page.map((row) => {
+          // Контрагент удалён/не найден в словаре → name/address null — фронт покажет заглушку.
+          const cp = dict ? dict.get(String(row.agent_id)) : null;
+          return {
+            agent_id: row.agent_id,
+            name: cp ? cp.name : null,
+            address: cp ? cp.address : null,
+            city: row.city ?? null,
+            orders: row.orders,
+            sum: kopecksToRub(row.sum_kopecks),
+            last_day: row.last_day,
+            recency_days: row.recency_days,
+            r: row.r,
+            f: row.f,
+            m: row.m,
+          };
+        }),
+      };
+      if (dict !== null || !page.length) cacheSet(cacheKey, payload);
+      res.json(payload);
     } catch (e) {
       next(e);
     }

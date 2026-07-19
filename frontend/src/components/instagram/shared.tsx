@@ -123,13 +123,14 @@ export function KpiHero({
 }) {
   const navigate = useNavigate();
   const daily = (series ?? []).filter((p) => p.day !== 'total');
+  // Без emphasizeLastLabel: акцент-пилюля на последней метке оси среди плоских соседок читалась
+  // как залипший ховер, а не как подсветка «сегодня» (прод-фидбек по Обзору) — метки ровные.
   const chart = daily.length > 1 && (
     <LineChart
       values={daily.map((p) => p.value)}
       labels={pickLabels(daily)}
       titles={daily.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)}`)}
       height={112}
-      emphasizeLastLabel
     />
   );
   // Steep anatomy (owner rule): label + number + delta bottom-left, the chart inset to the RIGHT.
@@ -347,6 +348,18 @@ export function SubscriberMovement({
   net: { cur: number; prev: number; hasCur: boolean; hasPrev: boolean };
   compact?: boolean;
 }) {
+  // Окно без единого сэмпла по всем трём строкам (hasCur=false, т.е. данных нет — валидный ноль
+  // ставит hasCur=true и рисуется как обычно): три прочерка рядом с «пред. период» читались как
+  // сломанная загрузка — вместо колонок одна честная приглушённая строка, футнота скрыта.
+  if (!follows.hasCur && !unfollows.hasCur && !net.hasCur) {
+    return (
+      <div className={`border-t border-border ${compact ? 'pt-3' : 'pt-4'}`}>
+        <p className={`${compact ? 'text-2xs' : 'text-xs'} text-muted-foreground`}>
+          Подписки и отписки за этот период недоступны
+        </p>
+      </div>
+    );
+  }
   // Quiet register (steep): signs (+/−) carry direction; no evaluative red/green on the stats.
   const cells = [
     { label: 'Подписки', text: follows.hasCur ? `+${fmt.num(follows.cur)}` : '—', color: follows.hasCur ? 'text-foreground' : 'text-muted-foreground' },

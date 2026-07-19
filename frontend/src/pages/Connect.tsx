@@ -174,10 +174,9 @@ export function Connect() {
         <p className="text-2xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
           Источников {SERVICES.length} · подключено {connectedCount}
         </p>
-        <h1 className="text-2xl font-medium tracking-tight text-foreground">Соберите свой атлас данных</h1>
+        <h1 className="text-2xl font-medium tracking-tight text-foreground">Подключение источников</h1>
         <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-          Каждая площадка — точка на орбите вокруг Atlavue. Выберите источник, чтобы подключить его.
-          Подключённые светятся синим, доступные — в контуре, будущие — пунктиром.
+          Выберите площадку — справа появятся статус и шаги подключения.
         </p>
       </div>
 

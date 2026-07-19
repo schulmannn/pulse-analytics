@@ -50,9 +50,9 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       <div className="flex min-h-screen items-center justify-center bg-background p-6 text-foreground">
         <div className="flex w-full max-w-sm flex-col items-center rounded border border-border bg-card p-8 text-center">
           <Cartograph name="compass" className="h-28 w-auto" />
-          <h2 className="mt-5 text-lg font-medium tracking-tight">Кажется, мы сбились с курса</h2>
+          <h2 className="mt-5 text-lg font-medium tracking-tight">Не удалось загрузить раздел</h2>
           <p className="mt-2 text-sm text-muted-foreground">
-            Интерфейс не смог отрисоваться · <span className="font-mono">{error.name || 'Ошибка'}</span>. Обычно помогает обновить страницу.
+            Обновите страницу — обычно это помогает · <span className="font-mono">{error.name || 'Ошибка'}</span>
           </p>
           {this.state.traceId && (
             <p className="mt-1 text-2xs text-muted-foreground">

@@ -90,7 +90,7 @@ export function MsTopProductsCard({
     const rows = (top.data?.rows ?? []) as TopRow[];
     return (
       <>
-        <div className="mb-2 flex items-center justify-between gap-3">
+        <div className="mb-1.5 flex items-center justify-between gap-3">
           <span className="text-2xs text-muted-foreground">Рейтинг</span>
           <SegmentedControl
             ariaLabel="Метрика рейтинга товаров"
@@ -308,24 +308,34 @@ function MsConcentrationKpis({ summary }: { summary: MsTopSummary }) {
   );
 }
 
-/** Список топ-товаров. Компакт передаёт `limit=5`; разворот-рейтинг показывает весь состав ответа. */
+/** Список топ-товаров. Компакт передаёт `limit=5`; разворот-рейтинг показывает весь состав ответа.
+    В компакте (half-тайл 264px) строки плотнее и без колонки «шт.» (кол-во уходит в title), иначе
+    пятая строка режется кромкой карточки, а названию остаётся ~160px («Свеча в …»). */
 function MsTopProductsList({ rows, metric, limit }: { rows: TopRow[]; metric: MsProductSort; limit?: number }) {
-  const expanded = useContext(ChartExpandedContext);
-  const shown = limit != null ? rows.slice(0, limit) : rows;
+  const compact = limit != null;
+  const shown = compact ? rows.slice(0, limit) : rows;
   return (
     <ul>
       {shown.map((row, i) => (
         <li
           key={`${row.name}-${i}`}
-          className={`flex items-center gap-3 border-t border-border first:border-t-0 ${expanded ? 'py-1.5' : 'py-1'}`}
+          className={`flex items-center gap-3 border-t border-border first:border-t-0 ${compact ? 'py-1' : 'py-1.5'}`}
         >
           <span className="w-5 shrink-0 text-center text-xs font-medium tabular-nums text-muted-foreground">{i + 1}</span>
-          <span className="min-w-0 flex-1 truncate text-sm text-foreground">{row.name}</span>
-          <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{fmt.num(row.quantity)} шт.</span>
+          <span
+            title={compact ? `${row.name} · ${fmt.num(row.quantity)} шт.` : row.name}
+            className="min-w-0 flex-1 truncate text-sm text-foreground"
+          >
+            {row.name}
+          </span>
+          {!compact && (
+            <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{fmt.num(row.quantity)} шт.</span>
+          )}
           <span className="w-20 shrink-0 text-right text-sm font-medium tabular-nums text-foreground">
             {formatProductPrimary(row, metric)}
           </span>
-          <span className="w-36 shrink-0 text-right text-2xs tabular-nums text-muted-foreground">
+          {/* nowrap: перенос вторички на 2-ю строку раздувал бы строку и рвал 264px-тайл. */}
+          <span className="w-36 shrink-0 whitespace-nowrap text-right text-2xs tabular-nums text-muted-foreground">
             {formatProductSecondary(row, metric)}
           </span>
         </li>
