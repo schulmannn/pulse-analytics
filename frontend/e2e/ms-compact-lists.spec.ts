@@ -1,7 +1,8 @@
 import { expect, test } from '@playwright/test';
 import { bootDemo, overflowingCards } from './helpers';
 
-test.beforeEach(async (_fixtures, testInfo) => {
+// biome-ignore lint/correctness/noEmptyPattern: Playwright требует деструктуризацию первым аргументом фикстур
+test.beforeEach(async ({}, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop-1440', 'MoySklad analytics is desktop-first');
 });
 

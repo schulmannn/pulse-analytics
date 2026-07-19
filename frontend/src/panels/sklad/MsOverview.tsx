@@ -1,6 +1,7 @@
-import { useContext, useState } from 'react';
+import { useContext, useLayoutEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
+import { observeSize } from '@/lib/observeSize';
 import { useMsFunnel, useMsReturns, useMsSummary } from '@/api/queries';
 import { MsTopProductsCard } from '@/panels/sklad/MsTopProducts';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
@@ -11,6 +12,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { Skeleton } from '@/components/ui/skeleton';
 import { SegmentedControl } from '@/components/SegmentedControl';
+import { Sparkline } from '@/components/Sparkline';
 import { lttbDownsample } from '@/lib/downsample';
 import { fmt } from '@/lib/format';
 import { usePagePeriod } from '@/lib/period';
@@ -261,7 +263,6 @@ function MsReturnsCardBody({
   period: MsPeriod;
   windowLabel: string;
 }) {
-  const ctxHeight = useContext(ExpandedChartHeightContext);
   // Реальная дневная линия числа возвратов: архивную серию (только дни с возвратами)
   // дозаполняем календарными нулями по окну, затем даунсэмплим до канона ~140 точек.
   const dense = densifyDayPoints(
@@ -269,11 +270,20 @@ function MsReturnsCardBody({
     period,
   );
   const sampled = lttbDownsample(dense, 140, (p) => p.orders);
-  // Тайл сообщает контекстом высоту ВСЕГО тела — в вертикальной колонке график делит её с
-  // заголовком и сносками, поэтому резервируем их и отдаём графику остаток тем же контекстом
-  // (иначе svg занял бы всё тело и вытолкнул сноску за overflow).
-  const reserved = 60 + (data.complete ? 26 : 60);
-  const chartHeight = ctxHeight != null ? Math.max(ctxHeight - reserved, 80) : null;
+  const expanded = useContext(ChartExpandedContext);
+  // Высоту svg считаем от ФАКТИЧЕСКОЙ высоты слота (паттерн band-измерения WidgetRenderer), а не
+  // от бюджета «тело минус оценка шапки/сносок»: оценка расходилась с фактом на единицы px и
+  // рвала overflow-hidden слот. 26 = ряд X-подписей LineChart (~22px) + зазор.
+  const slotRef = useRef<HTMLDivElement | null>(null);
+  const [slotHeight, setSlotHeight] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const el = slotRef.current;
+    if (!el) return;
+    const measure = () => setSlotHeight(el.clientHeight);
+    measure();
+    return observeSize(el, measure);
+  }, []);
+  const chartHeight = slotHeight != null && slotHeight > 0 ? Math.max(slotHeight - 26, 48) : null;
   return (
     <div className="flex h-full min-h-0 flex-col pt-1">
       <div className="shrink-0">
@@ -282,20 +292,35 @@ function MsReturnsCardBody({
         </div>
         <div className="mt-1.5 text-2xs text-muted-foreground">{`на ${fmt.short(data.sum)} ₽ ${windowLabel}`}</div>
       </div>
-      {/* overflow-hidden: при расхождении оценки резерва с фактом (многострочная архивная
-          сноска) график тихо подрезается в своём слоте, а не наезжает на сноску внизу. */}
-      <div className="mt-2 min-h-0 flex-1 overflow-hidden">
+      {/* overflow-hidden — страховка на кадр между измерением слота и ре-рендером графика. */}
+      <div ref={slotRef} className="mt-2 min-h-0 flex-1 overflow-hidden">
         {data.complete && data.count === 0 ? (
           <p className="py-2 text-xs text-muted-foreground">Возвратов за период нет.</p>
         ) : sampled.length > 1 ? (
-          <ExpandedChartHeightContext.Provider value={chartHeight}>
-            <LineChart
-              values={sampled.map((p) => p.orders)}
-              labels={sampled.map((p) => fmt.day(p.day))}
-              titles={sampled.map((p) => `${fmt.day(p.day)}: ${fmt.num(p.orders)} · ${fmt.short(p.sum)} ₽`)}
-              yMin={0}
-            />
-          </ExpandedChartHeightContext.Provider>
+          expanded ? (
+            <ExpandedChartHeightContext.Provider value={chartHeight}>
+              <LineChart
+                values={sampled.map((p) => p.orders)}
+                labels={sampled.map((p) => fmt.day(p.day))}
+                titles={sampled.map((p) => `${fmt.day(p.day)}: ${fmt.num(p.orders)} · ${fmt.short(p.sum)} ₽`)}
+                yMin={0}
+              />
+            </ExpandedChartHeightContext.Provider>
+          ) : (
+            // Тайл: минимальная высота LineChart (svg 80 + ряд подписей 22) не влезает в остаток
+            // 264px-колонки — здесь канонный компакт-примитив Sparkline, полный график в развороте.
+            <div className="flex h-full items-center">
+              <Sparkline
+                values={sampled.map((p) => p.orders)}
+                labels={sampled.map((p) => fmt.day(p.day))}
+                color="hsl(var(--chart-role-primary))"
+                area
+                interactive
+                formatValue={(v) => fmt.num(v)}
+                className="h-12 w-full"
+              />
+            </div>
+          )
         ) : (
           <p className="text-xs text-muted-foreground">Недостаточно дней для графика.</p>
         )}

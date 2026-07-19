@@ -334,9 +334,8 @@ function MsTopProductsList({ rows, metric, limit }: { rows: TopRow[]; metric: Ms
           <span className="w-20 shrink-0 text-right text-sm font-medium tabular-nums text-foreground">
             {formatProductPrimary(row, metric)}
           </span>
-          <span
-            className={`shrink-0 text-right text-2xs tabular-nums text-muted-foreground ${compact ? 'w-28' : 'w-36'}`}
-          >
+          {/* nowrap: перенос вторички на 2-ю строку раздувал бы строку и рвал 264px-тайл. */}
+          <span className="w-36 shrink-0 whitespace-nowrap text-right text-2xs tabular-nums text-muted-foreground">
             {formatProductSecondary(row, metric)}
           </span>
         </li>
