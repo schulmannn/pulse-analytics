@@ -786,6 +786,59 @@ export function useMsRfm(period: MsPeriod) {
   });
 }
 
+// Покупатели одного RFM-сегмента — в отличие от агрегатного /api/ms/rfm это сознательный
+// tenant-scoped листинг. name/address резолвит живой словарь counterparty только для строк
+// страницы; при сбое словаря бэк честно отдаёт name/address = null (и не кэширует ответ).
+const MsRfmCustomersSchema = z
+  .object({
+    window_days: z.number(),
+    as_of: z.string().nullable(),
+    segment: z.string(),
+    // Покупателей в ЭТОМ сегменте за окно (после фильтра, до пагинации) — опора «Показать ещё».
+    total_customers: z.number(),
+    rows: z.array(
+      z
+        .object({
+          agent_id: z.string(),
+          name: z.string().nullable(),
+          address: z.string().nullable(),
+          // Город ПОСЛЕДНЕГО заказа клиента с непустым city (архив ms_orders); null если нет.
+          city: z.string().nullable(),
+          orders: z.number(),
+          sum: z.number(),
+          last_day: z.string(),
+          recency_days: z.number(),
+          r: z.number(),
+          f: z.number(),
+          m: z.number(),
+        })
+        .passthrough(),
+    ),
+  })
+  .passthrough();
+
+export type MsRfmCustomers = z.infer<typeof MsRfmCustomersSchema>;
+
+/** Размер страницы листинга покупателей сегмента (совпадает с серверным дефолтом limit=50). */
+export const MS_RFM_CUSTOMERS_PAGE = 50;
+
+/** Страница покупателей выбранного RFM-сегмента; `segment == null` — сегмент не выбран, запрос не идёт. */
+export function useMsRfmSegmentCustomers(period: MsPeriod, segment: string | null, offset: number) {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    enabled: channelId != null && segment != null,
+    queryKey: ['ms-rfm-customers', channelId, ...msPeriodKey(period), segment, offset],
+    staleTime: STALE_LIVE,
+    retry: false,
+    queryFn: ({ signal }) =>
+      apiGet(
+        `/api/ms/rfm-customers?${msPeriodQuery(period)}&segment=${encodeURIComponent(segment ?? '')}&limit=${MS_RFM_CUSTOMERS_PAGE}&offset=${offset}`,
+        MsRfmCustomersSchema,
+        { signal, channelId },
+      ),
+  });
+}
+
 const MsCohortsSchema = z
   .object({
     cohorts: z.array(

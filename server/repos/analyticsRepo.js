@@ -21,7 +21,7 @@
 const { sameTenantSource, channelAccessSql } = require('../db/access');
 const { parseMentionsRange, rangeDayCount } = require('../lib/mentionsRange');
 const { toMetricNumber } = require('../lib/metricNumber');
-const { buildMsRfm } = require('../domain/msRfm');
+const { buildMsRfm, buildMsRfmCustomers } = require('../domain/msRfm');
 
 // Metric counter columns are BIGINT (migration 023); node-postgres returns BIGINT as a decimal
 // STRING. Convert exactly the widened counters back to JS numbers (safe within MAX_SAFE_METRIC) so
@@ -541,6 +541,49 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
     });
   }
 
+  // Листинг покупателей ОДНОГО RFM-сегмента (/api/ms/rfm-customers): то же окно, что
+  // getMsRfmInternal, плюс на клиента last_day (день последнего заказа окна) и city — город
+  // ПОСЛЕДНЕГО заказа с непустым city (сырой btrim, без гео-нормализации — это адресный факт
+  // строки, не группировка). Скоринг НЕ в SQL: scores относительны ВСЕЙ популяции окна, поэтому
+  // тянем её целиком, а сегменты присваивает ТОТ ЖЕ domain-код, что у агрегата
+  // (buildMsRfmCustomers ↔ buildMsRfm — parity-инвариант). Фильтр по сегменту и контрактную
+  // сортировку тоже делает domain; SQL владеет только tenant/window-агрегацией.
+  async function getMsRfmCustomersInternal(channelId, { sinceDay = null, untilDay = null, asOfDay = null, segment } = {}) {
+    if (!enabled || !channelId) return buildMsRfmCustomers([], { segment, asOf: asOfDay || untilDay || null });
+    const { rows } = await pool.query(
+      `WITH win AS (
+         SELECT agent_id, moment, sum_kopecks, city, order_id
+           FROM ms_orders
+          WHERE channel_id=$1 AND ($2::date IS NULL OR moment >= $2::date)
+            AND ($3::date IS NULL OR moment < ($3::date + 1))
+       ), customer_rows AS (
+         SELECT agent_id, MAX(moment)::date AS last_day, COUNT(*)::int AS orders,
+                COALESCE(SUM(sum_kopecks),0)::bigint AS sum_kopecks,
+                -- order_id рвёт ничью заказов одной секунды (канон MS_FIRSTS_CTE) — иначе
+                -- выбор города недетерминирован между запросами и кэш-перезаписями.
+                (ARRAY_AGG(NULLIF(btrim(city),'') ORDER BY moment DESC, order_id DESC)
+                   FILTER (WHERE NULLIF(btrim(city),'') IS NOT NULL))[1] AS city
+           FROM win WHERE agent_id IS NOT NULL GROUP BY agent_id
+       ), meta AS (
+         SELECT to_char(COALESCE($4::date, CURRENT_DATE),'YYYY-MM-DD') AS as_of
+       )
+       SELECT c.agent_id,
+              (COALESCE($4::date, CURRENT_DATE) - c.last_day)::int AS recency_days,
+              to_char(c.last_day,'YYYY-MM-DD') AS last_day,
+              c.orders, c.sum_kopecks, c.city, m.as_of
+         FROM meta m LEFT JOIN customer_rows c ON TRUE
+        ORDER BY c.agent_id NULLS LAST`,
+      [channelId, msSinceDay(sinceDay), msUntilDay(untilDay), msUntilDay(asOfDay || untilDay)]);
+    const first = rows[0] || {};
+    const customers = rows
+      .filter((row) => row.agent_id != null)
+      .map((row) => numifyMetrics(row, ['recency_days', 'orders', 'sum_kopecks']));
+    return buildMsRfmCustomers(customers, {
+      segment,
+      asOf: first.as_of || asOfDay || untilDay || null,
+    });
+  }
+
   // Когорты удержания + монетизация: когорта = месяц ПЕРВОГО заказа клиента, cell — сколько
   // клиентов когорты сделали ≥1 заказ в месяце cohort_month+offset (active) И их суммарная выручка
   // заказов этого месяца (revenue_kopecks — КОПЕЙКИ, как лежат в БД; в рубли конвертирует граница
@@ -831,6 +874,9 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
   async function getMsRfmForActor(channelId, actor, opts = {}) {
     return (await allowed(channelId, actor)) ? getMsRfmInternal(channelId, opts) : null;
   }
+  async function getMsRfmCustomersForActor(channelId, actor, opts = {}) {
+    return (await allowed(channelId, actor)) ? getMsRfmCustomersInternal(channelId, opts) : null;
+  }
   async function getMsTopCustomersForActor(channelId, actor, opts = {}) {
     return (await allowed(channelId, actor)) ? getMsTopCustomersInternal(channelId, opts) : [];
   }
@@ -888,13 +934,15 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
     getChannelHistoryInternal, getMentionsHistoryInternal, getMentionsArchiveInternal,
     getSnapshotInternal, getPublicTgChannelPhoto,
     getLatestVelocityInternal, listPostsInternal, listIgDailyInternal, listIgMediaDailyInternal,
-    getMsDailyAllInternal, getMsFunnelInternal, getMsCustomersInternal, getMsRfmInternal, getMsCohortsInternal,
+    getMsDailyAllInternal, getMsFunnelInternal, getMsCustomersInternal, getMsRfmInternal,
+    getMsRfmCustomersInternal, getMsCohortsInternal,
     getMsTopCustomersInternal, getMsOldestOrderDayInternal,
     getMsSalesByChannelInternal, getMsGeographyInternal, getMsChannelSeriesInternal,
     getMsChannelSeriesGroupedInternal, getMsReturnsInternal,
     getChannelHistoryForActor, getMentionsHistoryForActor, getMentionsArchiveForActor,
     getSnapshotForActor, getLatestVelocityForActor, listPostsForActor, listIgDailyForActor, listIgMediaDailyForActor,
-    getMsDailyAllForActor, getMsFunnelForActor, getMsCustomersForActor, getMsRfmForActor, getMsCohortsForActor,
+    getMsDailyAllForActor, getMsFunnelForActor, getMsCustomersForActor, getMsRfmForActor,
+    getMsRfmCustomersForActor, getMsCohortsForActor,
     getMsTopCustomersForActor, getMsOldestOrderDayForActor,
     getMsSalesByChannelForActor, getMsGeographyForActor, getMsChannelSeriesForActor,
     getMsChannelSeriesGroupedForActor, getMsReturnsForActor,

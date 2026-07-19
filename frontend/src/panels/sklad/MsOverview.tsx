@@ -241,49 +241,76 @@ export function MsOverview() {
         ) : !returns.data ? (
           <p className="py-4 text-sm text-muted-foreground">Нет данных о возвратах за период.</p>
         ) : (
-          <ChartCardBody
-            value={fmt.num(returns.data.count)}
-            caption={
-              <div className="max-w-48 space-y-1 leading-snug">
-                <div>на {fmt.short(returns.data.sum)} ₽ {windowLabel}</div>
-                {!returns.data.complete && (
-                  <div>
-                    Архив ещё загружается
-                    {returns.data.total_estimate == null
-                      ? '.'
-                      : `: ${fmt.num(returns.data.archived_count)} из примерно ${fmt.num(returns.data.total_estimate)}.`}
-                  </div>
-                )}
-                <div>Возвраты считаются отдельно и из выручки не вычитаются.</div>
-              </div>
-            }
-          >
-            {returns.data.complete && returns.data.count === 0 ? (
-              <p className="py-4 text-xs text-muted-foreground">Возвратов за период нет.</p>
-            ) : (
-              (() => {
-                // Реальная дневная линия числа возвратов: архивную серию (только дни с возвратами)
-                // дозаполняем календарными нулями по окну, затем даунсэмплим до канона ~140 точек.
-                const dense = densifyDayPoints(
-                  returns.data.series.map((r) => ({ day: r.day, orders: r.count, sum: r.sum })),
-                  period,
-                );
-                const sampled = lttbDownsample(dense, 140, (p) => p.orders);
-                return sampled.length > 1 ? (
-                  <LineChart
-                    values={sampled.map((p) => p.orders)}
-                    labels={sampled.map((p) => fmt.day(p.day))}
-                    titles={sampled.map((p) => `${fmt.day(p.day)}: ${fmt.num(p.orders)} · ${fmt.short(p.sum)} ₽`)}
-                    yMin={0}
-                  />
-                ) : (
-                  <p className="text-xs text-muted-foreground">Недостаточно дней для графика.</p>
-                );
-              })()
-            )}
-          </ChartCardBody>
+          <MsReturnsCardBody data={returns.data} period={period} windowLabel={windowLabel} />
         )}
       </ChartWidget>
+    </div>
+  );
+}
+
+/** Тело карточки «Возвраты» — вертикальная компоновка вместо горизонтального ChartCardBody:
+    число + подпись сразу под заголовком, график в середине, сноски приглушённым текстом внизу
+    (горизонтальная раскладка прижимала число к левому низу, а дисклеймер уносила вверх, оставляя
+    диагональную пустоту). */
+function MsReturnsCardBody({
+  data,
+  period,
+  windowLabel,
+}: {
+  data: NonNullable<ReturnType<typeof useMsReturns>['data']>;
+  period: MsPeriod;
+  windowLabel: string;
+}) {
+  const ctxHeight = useContext(ExpandedChartHeightContext);
+  // Реальная дневная линия числа возвратов: архивную серию (только дни с возвратами)
+  // дозаполняем календарными нулями по окну, затем даунсэмплим до канона ~140 точек.
+  const dense = densifyDayPoints(
+    data.series.map((r) => ({ day: r.day, orders: r.count, sum: r.sum })),
+    period,
+  );
+  const sampled = lttbDownsample(dense, 140, (p) => p.orders);
+  // Тайл сообщает контекстом высоту ВСЕГО тела — в вертикальной колонке график делит её с
+  // заголовком и сносками, поэтому резервируем их и отдаём графику остаток тем же контекстом
+  // (иначе svg занял бы всё тело и вытолкнул сноску за overflow).
+  const reserved = 60 + (data.complete ? 26 : 60);
+  const chartHeight = ctxHeight != null ? Math.max(ctxHeight - reserved, 80) : null;
+  return (
+    <div className="flex h-full min-h-0 flex-col pt-1">
+      <div className="shrink-0">
+        <div className="kpi-accent text-3xl font-medium leading-none tabular-nums tracking-tight">
+          {fmt.num(data.count)}
+        </div>
+        <div className="mt-1.5 text-2xs text-muted-foreground">{`на ${fmt.short(data.sum)} ₽ ${windowLabel}`}</div>
+      </div>
+      {/* overflow-hidden: при расхождении оценки резерва с фактом (многострочная архивная
+          сноска) график тихо подрезается в своём слоте, а не наезжает на сноску внизу. */}
+      <div className="mt-2 min-h-0 flex-1 overflow-hidden">
+        {data.complete && data.count === 0 ? (
+          <p className="py-2 text-xs text-muted-foreground">Возвратов за период нет.</p>
+        ) : sampled.length > 1 ? (
+          <ExpandedChartHeightContext.Provider value={chartHeight}>
+            <LineChart
+              values={sampled.map((p) => p.orders)}
+              labels={sampled.map((p) => fmt.day(p.day))}
+              titles={sampled.map((p) => `${fmt.day(p.day)}: ${fmt.num(p.orders)} · ${fmt.short(p.sum)} ₽`)}
+              yMin={0}
+            />
+          </ExpandedChartHeightContext.Provider>
+        ) : (
+          <p className="text-xs text-muted-foreground">Недостаточно дней для графика.</p>
+        )}
+      </div>
+      <div className="mt-2 shrink-0 space-y-1 text-2xs text-muted-foreground">
+        {!data.complete && (
+          <p>
+            Архив возвратов ещё загружается. Показаны только уже сохранённые документы
+            {data.total_estimate == null
+              ? '.'
+              : `: ${fmt.num(data.archived_count)} из примерно ${fmt.num(data.total_estimate)}.`}
+          </p>
+        )}
+        <p>Возвраты считаются отдельно и из выручки не вычитаются.</p>
+      </div>
     </div>
   );
 }

@@ -64,6 +64,25 @@ describe('buildWeekNarrative', () => {
     expect(plainWeak).not.toContain('повторить'); // совет без находки не выдумывается
   });
 
+  it('чип героя режет длинный заголовок по границе слова, не посреди («…присо…» не рождается)', () => {
+    const heroChip = (title: string) => {
+      const posts = [post(title, 380, 34, 10.3, 4), post('Обычный', 402, 11, 3.0), post('Ещё один', 440, 10, 2.5)];
+      const chip = buildWeekNarrative({ ...base, posts }).paragraphs.flat().find((s) => s.kind === 'post');
+      return chip && chip.kind === 'post' ? chip.text : '';
+    };
+    expect(heroChip('Сливочный забег и подарки от брендов 18 июля присоединяйтесь к празднику')).toBe(
+      '«Сливочный забег и подарки от брендов 18 июля…»',
+    );
+    // Хвостовая пунктуация на месте реза не остаётся перед «…».
+    expect(heroChip('Сливочный забег и подарки от брендов 18 июля, присоединяйтесь')).toBe(
+      '«Сливочный забег и подарки от брендов 18 июля…»',
+    );
+    // Пробел раньше 30-й позиции — откат съел бы полстроки: остаётся жёсткий рез по 52.
+    expect(heroChip(`Слово ${'а'.repeat(60)}`)).toBe(`«Слово ${'а'.repeat(46)}…»`);
+    // Короткий заголовок — без «…».
+    expect(heroChip('Герой процесса')).toBe('«Герой процесса»');
+  });
+
   it('рекорд месяца упоминается только старше обеих недель', () => {
     const withOld = mkSeries([100, 100, 100, 2000, 100, 100, 100, ...Array(7).fill(120), ...Array(7).fill(110), ...Array(7).fill(100)]);
     const plain = norm(narrativeToPlain(buildWeekNarrative({ ...base, viewsDaily: withOld })));

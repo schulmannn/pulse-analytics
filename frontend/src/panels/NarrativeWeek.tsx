@@ -243,8 +243,11 @@ export function NarrativeWeekBody() {
     });
   return (
     <>
-      <div className="flex gap-6">
-        <div className="min-w-0 flex-1">
+      <div className="flex h-full gap-6">
+        {/* Фикс. высота карточки клипала хвост рассказа посреди строки: колонка текста скроллится
+            (глобальный тонкий скроллбар), маска гасит нижние 28px как знак «ниже ещё есть», а pb-7
+            выводит последнюю строку из зоны затухания при доскролле. */}
+        <div className="min-w-0 flex-1 overflow-y-auto pb-7 [mask-image:linear-gradient(180deg,#000_calc(100%-28px),transparent)]">
           <NarrativeProse paragraphs={nar.paragraphs} onPost={setOpenPost} />
         </div>
         {facts.length > 0 && (

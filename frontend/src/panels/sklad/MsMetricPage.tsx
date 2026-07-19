@@ -50,7 +50,10 @@ import {
   MsRfmBody,
   MsTopCustomersBody,
   CUSTOMER_METRIC_OPTIONS,
+  RFM_SEGMENTS,
+  type RfmSegmentKey,
 } from '@/panels/sklad/MsClients';
+import { MsRfmSegmentCustomers } from '@/panels/sklad/MsRfmCustomers';
 import {
   MsChannelChart,
   MsChannelContribution,
@@ -202,6 +205,16 @@ const COMPARE_URL: MsMetricUrlSchema = { enums: { compare: COMPARE } };
 // Когорты — только режим клетки (mode); окна нет (вся история), поэтому ни period, ни compare.
 const COHORTS_URL: MsMetricUrlSchema = {
   enums: { mode: { values: [...MS_COHORT_MODES], defaultValue: 'retention' } },
+};
+const RFM_URL: MsMetricUrlSchema = {
+  enums: {
+    // 'none' = сегмент не выбран (дефолт — из URL убирается); остальные ключи — канон RFM_SEGMENTS.
+    segment: {
+      values: ['none', 'champions', 'loyal', 'potential', 'new', 'at_risk', 'hibernating'],
+      defaultValue: 'none',
+    },
+    compare: COMPARE,
+  },
 };
 
 /** One merge-and-replace URL owner per metric page: no competing effects or history spam. */
@@ -1144,8 +1157,11 @@ function MsTopCustomersPage() {
 
 function MsRfmPage() {
   const window = useMsMetricWindow();
-  const controls = useMsMetricUrlControls(COMPARE_URL);
+  const controls = useMsMetricUrlControls(RFM_URL);
   const compare = controls.values.compare as 'off' | 'prev';
+  // Выбранный сегмент живёт в URL (?segment=at_risk) — ссылка на провал шарится и переживает reload.
+  const segmentParam = controls.values.segment as RfmSegmentKey | 'none';
+  const selectedSegment = segmentParam === 'none' ? null : segmentParam;
   const comparisonPeriod = compare === 'prev' ? window.previousPeriod : null;
   const rfm = useMsRfm(window.period);
   const previous = useMsRfm(comparisonPeriod ?? window.period);
@@ -1176,8 +1192,18 @@ function MsRfmPage() {
       }
     >
       <MsReportCard id="ms-page-rfm" title="Сегменты покупателей">
-        <MsRfmBody state={rfm} detailed />
+        <MsRfmBody
+          state={rfm}
+          detailed
+          selectedSegment={selectedSegment}
+          onSelectSegment={(key) => controls.setEnum('segment', key === selectedSegment ? 'none' : key)}
+        />
       </MsReportCard>
+      {selectedSegment != null && (
+        <MsReportCard id="ms-page-rfm-customers" title={`Покупатели · ${RFM_SEGMENTS[selectedSegment].label}`}>
+          <MsRfmSegmentCustomers period={window.period} segment={selectedSegment} />
+        </MsReportCard>
+      )}
       <ControlBar window={window} />
     </MsMetricShell>
   );

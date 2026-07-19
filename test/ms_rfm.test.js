@@ -2,7 +2,9 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { scoreByMidRank, segmentOf, buildMsRfm, SEGMENT_ORDER } = require('../server/domain/msRfm');
+const {
+  scoreByMidRank, segmentOf, buildMsRfm, buildMsRfmCustomers, SEGMENT_ORDER,
+} = require('../server/domain/msRfm');
 
 test('RFM mid-rank: ties share a score and an all-tied dimension is neutral', () => {
   assert.deepEqual(scoreByMidRank([{ v: 10 }, { v: 10 }, { v: 10 }], (row) => row.v), [3, 3, 3]);
@@ -60,5 +62,87 @@ test('RFM fails explicitly instead of converting an unsafe monetary value to zer
   assert.throws(
     () => buildMsRfm([{ agent_id: 'bad', recency_days: 0, orders: 1, sum_kopecks: null }]),
     { code: 'ms_rfm_metric_out_of_range' },
+  );
+});
+
+// Популяция с представителями большинства сегментов + спроектированными ничьими для сортировки:
+// w1/w2 — champions с равной суммой (тай-брейк orders), h1/h2/h3 — hibernating с равными
+// суммами/orders (тай-брейк agent_id) и меньшей суммой у h3.
+const RFM_CUSTOMERS_FIXTURE = [
+  { agent_id: 'w1', recency_days: 0, orders: 6, sum_kopecks: 90000, last_day: '2026-07-18', city: 'Москва' },
+  { agent_id: 'w2', recency_days: 1, orders: 5, sum_kopecks: 90000, last_day: '2026-07-17', city: null },
+  { agent_id: 'n1', recency_days: 0, orders: 1, sum_kopecks: 15000, last_day: '2026-07-18', city: 'Тверь' },
+  { agent_id: 'n2', recency_days: 2, orders: 1, sum_kopecks: 14000, last_day: '2026-07-16', city: null },
+  { agent_id: 'mid', recency_days: 30, orders: 3, sum_kopecks: 30000, last_day: '2026-06-18', city: 'Казань' },
+  { agent_id: 'mid2', recency_days: 45, orders: 2, sum_kopecks: 25000, last_day: '2026-06-03', city: null },
+  { agent_id: 'h1', recency_days: 200, orders: 1, sum_kopecks: 2000, last_day: '2025-12-31', city: null },
+  { agent_id: 'h2', recency_days: 220, orders: 1, sum_kopecks: 2000, last_day: '2025-12-11', city: 'Сочи' },
+  { agent_id: 'h3', recency_days: 240, orders: 1, sum_kopecks: 1000, last_day: '2025-11-21', city: null },
+  { agent_id: 'h4', recency_days: 260, orders: 2, sum_kopecks: 2000, last_day: '2025-11-01', city: null },
+];
+
+test('RFM customers listing: parity-инвариант с агрегатом на тех же rows', () => {
+  const rows = RFM_CUSTOMERS_FIXTURE;
+  const aggregate = buildMsRfm(rows, { asOf: '2026-07-18' });
+  // Эталонное присвоение сегментов — напрямую теми же примитивами (scoreByMidRank + segmentOf).
+  const rScores = scoreByMidRank(rows, (row) => row.recency_days, { lowerIsBetter: true });
+  const fScores = scoreByMidRank(rows, (row) => row.orders);
+  const mScores = scoreByMidRank(rows, (row) => row.sum_kopecks);
+  const expected = new Map(SEGMENT_ORDER.map((key) => [key, []]));
+  rows.forEach((row, index) => {
+    const key = segmentOf({ r: rScores[index], f: fScores[index], m: mScores[index], orders: row.orders });
+    expected.get(key).push(row.agent_id);
+  });
+
+  let totalAcross = 0;
+  for (const segment of SEGMENT_ORDER) {
+    const listing = buildMsRfmCustomers(rows, { segment, asOf: '2026-07-18' });
+    assert.equal(listing.as_of, '2026-07-18');
+    assert.equal(listing.customers.length, listing.total_customers,
+      'customers — полный отфильтрованный список (пагинация — забота роута)');
+    assert.equal(
+      listing.total_customers,
+      aggregate.segments.find((s) => s.key === segment).customers,
+      `счётчик листинга ${segment} обязан равняться segments[].customers агрегата`,
+    );
+    assert.deepEqual(
+      listing.customers.map((c) => c.agent_id).sort(),
+      expected.get(segment).sort(),
+      `состав сегмента ${segment} обязан совпадать с segmentOf-присвоением`,
+    );
+    // Каждая строка несёт scores того же присвоения.
+    for (const c of listing.customers) {
+      const index = rows.findIndex((row) => row.agent_id === c.agent_id);
+      assert.deepEqual({ r: c.r, f: c.f, m: c.m }, { r: rScores[index], f: fScores[index], m: mScores[index] });
+    }
+    totalAcross += listing.total_customers;
+  }
+  assert.equal(totalAcross, aggregate.customers, 'сумма total_customers по сегментам == customers агрегата');
+});
+
+test('RFM customers listing: контрактная сортировка и прозрачный пропуск city/last_day', () => {
+  const champions = buildMsRfmCustomers(RFM_CUSTOMERS_FIXTURE, { segment: 'champions', asOf: '2026-07-18' });
+  // Равная сумма 90000 → тай-брейк orders DESC: w1 (6) впереди w2 (5).
+  assert.deepEqual(champions.customers.map((c) => c.agent_id), ['w1', 'w2']);
+  const hibernating = buildMsRfmCustomers(RFM_CUSTOMERS_FIXTURE, { segment: 'hibernating', asOf: '2026-07-18' });
+  // h1/h2 — полная ничья по сумме и orders → agent_id ASC; h3 с меньшей суммой — последним.
+  assert.deepEqual(hibernating.customers.map((c) => c.agent_id), ['h1', 'h2', 'h3']);
+  // city/last_day проходят насквозь без числового контракта (null — тоже честное значение).
+  assert.equal(champions.customers[0].last_day, '2026-07-18');
+  assert.equal(champions.customers[0].city, 'Москва');
+  assert.equal(champions.customers[1].city, null);
+  assert.deepEqual(hibernating.customers[1], {
+    agent_id: 'h2', recency_days: 220, orders: 1, sum_kopecks: 2000,
+    r: hibernating.customers[1].r, f: hibernating.customers[1].f, m: hibernating.customers[1].m,
+    last_day: '2025-12-11', city: 'Сочи',
+  });
+});
+
+test('RFM customers listing: пустая популяция и неизвестный сегмент', () => {
+  const empty = buildMsRfmCustomers([], { segment: 'loyal', asOf: '2026-07-18' });
+  assert.deepEqual(empty, { as_of: '2026-07-18', total_customers: 0, customers: [] });
+  assert.throws(
+    () => buildMsRfmCustomers([], { segment: 'vip' }),
+    { code: 'ms_rfm_unknown_segment' },
   );
 });

@@ -81,13 +81,11 @@ function ReportsListDesktop() {
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-6">
+      {/* Заголовок страницы живёт в шапке приложения — тело открывает вводный абзац. */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-2xl font-medium tracking-tight">Отчёты</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Сохранённые документы на данных Telegram: собираются из блоков, доставка приходит письмом
-          </p>
-        </div>
+        <p className="text-sm text-muted-foreground">
+          Сохранённые отчёты по вашим источникам: собираются из блоков, по расписанию приходят на почту.
+        </p>
         {!demo && (
           <button
             type="button"
@@ -127,7 +125,7 @@ function ReportsListDesktop() {
               type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Поиск по названию или источнику"
+              placeholder="Название или источник"
               aria-label="Поиск отчётов"
               className="h-9 w-64 max-w-full rounded border border-border bg-background px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
             />
@@ -184,7 +182,7 @@ function ReportsListDesktop() {
                         </Link>
                       </td>
                       <td className="py-2.5 pr-3 text-muted-foreground">
-                        {src ?? 'По переключателю'}
+                        {src ?? 'Текущий источник'}
                       </td>
                       <td className="py-2.5 pr-3 text-muted-foreground">{reportPeriodLabel(report.period_days)}</td>
                       <td className="py-2.5 pr-3 text-muted-foreground">{reportBlockCountLabel(report.block_count)}</td>
@@ -219,7 +217,7 @@ function ReportsListMobile() {
   const handleCreate = (template?: (typeof REPORT_TEMPLATES)[number]) =>
     createReport.mutate(
       {
-        name: template?.name ?? 'Новый отчёт',
+        name: template?.name ?? `Отчёт от ${fmt.day(new Date())}`,
         config: { blocks: [...(template?.blocks ?? DEFAULT_REPORT_BLOCKS)] },
       },
       { onSuccess: (data) => navigate(`/reports/${data.report.id}`) },

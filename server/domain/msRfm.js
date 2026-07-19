@@ -33,11 +33,12 @@ function segmentOf({ r, f, m, orders = 0 }) {
 
 const round1 = (value) => Math.round(value * 10) / 10;
 
-/**
- * Build aggregate-only RFM output. Scores are relative to the selected customer population;
- * mid-ranks keep ties identical and an all-tied dimension neutral at 3.
- */
-function buildMsRfm(rows, { asOf, noAgentOrders = 0 } = {}) {
+// ЕДИНСТВЕННОЕ место присвоения scores/сегмента строке: и агрегат (buildMsRfm), и листинг
+// (buildMsRfmCustomers) проходят здесь, поэтому инвариант «счётчики сегмента листинга ==
+// segments[].customers агрегата на тех же rows» держится кодом, а не дисциплиной. Exact numeric
+// contract проверяет ТОЛЬКО скоринговые метрики; сервисные поля листинга (city/last_day)
+// пропускаются прозрачно, как есть.
+function scoreAndSegment(rows) {
   const clean = rows.map((row) => {
     const recency = Number(row.recency_days);
     const orders = Number(row.orders);
@@ -50,24 +51,41 @@ function buildMsRfm(rows, { asOf, noAgentOrders = 0 } = {}) {
       error.code = 'ms_rfm_metric_out_of_range';
       throw error;
     }
-    return {
+    const out = {
       agent_id: String(row.agent_id),
       recency_days: recency,
       orders,
       sum_kopecks: monetary,
     };
+    if (row.last_day !== undefined) out.last_day = row.last_day;
+    if (row.city !== undefined) out.city = row.city;
+    return out;
   });
   const rScores = scoreByMidRank(clean, (row) => row.recency_days, { lowerIsBetter: true });
   const fScores = scoreByMidRank(clean, (row) => row.orders);
   const mScores = scoreByMidRank(clean, (row) => row.sum_kopecks);
+  return clean.map((row, index) => ({
+    ...row,
+    r: rScores[index],
+    f: fScores[index],
+    m: mScores[index],
+    segment: segmentOf({ r: rScores[index], f: fScores[index], m: mScores[index], orders: row.orders }),
+  }));
+}
+
+/**
+ * Build aggregate-only RFM output. Scores are relative to the selected customer population;
+ * mid-ranks keep ties identical and an all-tied dimension neutral at 3.
+ */
+function buildMsRfm(rows, { asOf, noAgentOrders = 0 } = {}) {
+  const scored = scoreAndSegment(rows);
   const buckets = new Map(SEGMENT_ORDER.map((key) => [key, {
     key, customers: 0, orders: 0, sum_kopecks: 0,
     recency_days_total: 0, frequency_total: 0, monetary_kopecks_total: 0,
   }]));
 
-  clean.forEach((row, index) => {
-    const key = segmentOf({ r: rScores[index], f: fScores[index], m: mScores[index], orders: row.orders });
-    const bucket = buckets.get(key);
+  scored.forEach((row) => {
+    const bucket = buckets.get(row.segment);
     bucket.customers += 1;
     bucket.orders += row.orders;
     bucket.sum_kopecks += row.sum_kopecks;
@@ -92,12 +110,49 @@ function buildMsRfm(rows, { asOf, noAgentOrders = 0 } = {}) {
 
   return {
     as_of: asOf || null,
-    customers: clean.length,
+    customers: scored.length,
     no_agent_orders: Math.max(0, Number(noAgentOrders) || 0),
-    total_orders: clean.reduce((sum, row) => sum + row.orders, 0),
-    total_sum_kopecks: clean.reduce((sum, row) => sum + row.sum_kopecks, 0),
+    total_orders: scored.reduce((sum, row) => sum + row.orders, 0),
+    total_sum_kopecks: scored.reduce((sum, row) => sum + row.sum_kopecks, 0),
     segments,
   };
 }
 
-module.exports = { SEGMENT_ORDER, scoreByMidRank, segmentOf, buildMsRfm };
+/**
+ * Листинг покупателей ОДНОГО сегмента: тот же скоринг/присвоение (scoreAndSegment), что у
+ * buildMsRfm — по построению счётчик сегмента здесь всегда равен segments[].customers агрегата
+ * на тех же rows. rows — ВСЯ популяция окна (scores относительны популяции, фильтровать до
+ * скоринга нельзя). Сортировка контрактная: sum_kopecks DESC → orders DESC → agent_id ASC.
+ */
+function buildMsRfmCustomers(rows, { segment, asOf } = {}) {
+  if (!SEGMENT_ORDER.includes(segment)) {
+    const error = new Error('unknown RFM segment');
+    error.code = 'ms_rfm_unknown_segment';
+    throw error;
+  }
+  const picked = scoreAndSegment(rows)
+    .filter((row) => row.segment === segment)
+    .sort((a, b) => b.sum_kopecks - a.sum_kopecks
+      || b.orders - a.orders
+      || (a.agent_id < b.agent_id ? -1 : a.agent_id > b.agent_id ? 1 : 0));
+  return {
+    as_of: asOf || null,
+    total_customers: picked.length,
+    customers: picked.map((row) => {
+      const out = {
+        agent_id: row.agent_id,
+        recency_days: row.recency_days,
+        orders: row.orders,
+        sum_kopecks: row.sum_kopecks,
+        r: row.r,
+        f: row.f,
+        m: row.m,
+      };
+      if (row.last_day !== undefined) out.last_day = row.last_day;
+      if (row.city !== undefined) out.city = row.city;
+      return out;
+    }),
+  };
+}
+
+module.exports = { SEGMENT_ORDER, scoreByMidRank, segmentOf, buildMsRfm, buildMsRfmCustomers };
