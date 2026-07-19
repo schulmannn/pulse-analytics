@@ -2,6 +2,7 @@ import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } fro
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { EmptyState } from '@/components/EmptyState';
 import { fmt } from '@/lib/format';
+import { observeSize } from '@/lib/observeSize';
 import { columnIndex } from '@/lib/chartHover';
 import { axisLabelIndexSet } from '@/lib/chartLabels';
 import { ChartTooltip, type TooltipRow, type TooltipState } from '@/components/ChartTooltip';
@@ -84,10 +85,7 @@ export function BarChart({ values, labels, titles, height = 200, ghost, primaryL
     if (!el) return;
     const measure = () => setWidth(el.clientWidth || 600);
     measure();
-    if (typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
+    return observeSize(el, measure);
   }, []);
 
   // The readout must not linger once the chart scrolls under the sticky header or the

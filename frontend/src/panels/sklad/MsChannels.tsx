@@ -338,6 +338,51 @@ export function MsChannelChart({
   const expandedHeight = useContext(ExpandedChartHeightContext);
   const nameById = useMemo(() => new Map(options.map((o) => [o.id, o.name])), [options]);
 
+  // Тяжёлые дериваты окна (densify до 730 дн, у разбивки ×6 серий, бакетинг + подписи) — мемо по
+  // данным/окну/грануляции/метрике, а не на каждый рендер; хук ДО early-return (React #310).
+  const data = series.data;
+  const model = useMemo(() => {
+    if (!data) return null;
+    // Разбивка по каналам: отдельные серии (ограничены читаемым лимитом, честно подписан остаток).
+    if (breakdown && data.groups && data.groups.length > 0) {
+      const groups = data.groups.slice(0, MAX_BREAKDOWN_SERIES);
+      // Общее окно всех групп: для «Всё» (window зависит от первого дня) берём МИНИМАЛЬНЫЙ день по
+      // всем группам, чтобы линии densify'ились в одну сетку и X совпадал. Затем densify → бакетинг.
+      const firstDay = groups
+        .flatMap((g) => g.series.map((p) => p.day))
+        .reduce<string | undefined>((a, b) => (a && a < b ? a : b), undefined);
+      const bucketed = groups.map((g) => bucketPoints(densifyDayPoints(g.series, period, firstDay), grain));
+      const gridDays = bucketed[0] ? bucketed[0].map((p) => p.day) : [];
+      const strideIdx = pickIndexes(gridDays.length, CHART_MAX_POINTS);
+      return {
+        kind: 'breakdown' as const,
+        groupCount: groups.length,
+        groupTotal: data.group_total ?? null,
+        labels: strideIdx.map((i) => fmt.day(gridDays[i])),
+        chartSeries: groups.map((g, gi) => ({
+          name: nameById.get(g.sales_channel_id) ?? 'Канал',
+          color: SERIES_COLORS[gi % SERIES_COLORS.length],
+          values: strideIdx.map((i) => (bucketed[gi][i] ? metricValue(metric, bucketed[gi][i]) : null)),
+        })),
+      };
+    }
+    // Агрегат (все или выбранные каналы одной серией). Дозаполняем дневную сетку окна нулями,
+    // ЗАТЕМ группируем по грануляции (порядок важен: бакетинг сырых редких дней потерял бы нули).
+    const bucketed = bucketPoints(densifyDayPoints(data.series, period), grain);
+    // Средний чек: рисуем ТОЛЬКО бакеты с заказами непрерывным рядом наблюдений (бакет без заказов
+    // даёт неопределённый чек → null → общий LineChart рвёт линию в россыпь точек). Выручку/заказы
+    // оставляем полной сеткой с честными нулями. Настоящие даты бакетов сохраняются.
+    const points = aggregatePlotPoints(bucketed, metric, CHART_MAX_POINTS);
+    return {
+      kind: 'aggregate' as const,
+      count: points.length,
+      values: points.map((p) => metricValue(metric, p)),
+      labels: points.map((p) => fmt.day(p.day)),
+      titles: points.map((p) => `${fmt.day(p.day)}: ${fmtMetric(metric, metricValue(metric, p))}`),
+      total: metricTotal(data.series, metric),
+    };
+  }, [data, period, grain, metric, breakdown, nameById]);
+
   if (series.isPending) return <ListSkeleton rows={4} />;
   if (series.isError) {
     return (
@@ -349,33 +394,16 @@ export function MsChannelChart({
       />
     );
   }
-  const data = series.data;
-  if (!data) return null;
+  if (!model) return null;
 
-  // Разбивка по каналам: отдельные серии (ограничены читаемым лимитом, честно подписан остаток).
-  if (breakdown && data.groups && data.groups.length > 0) {
-    const groups = data.groups.slice(0, MAX_BREAKDOWN_SERIES);
-    // Общее окно всех групп: для «Всё» (window зависит от первого дня) берём МИНИМАЛЬНЫЙ день по
-    // всем группам, чтобы линии densify'ились в одну сетку и X совпадал. Затем densify → бакетинг.
-    const firstDay = groups
-      .flatMap((g) => g.series.map((p) => p.day))
-      .reduce<string | undefined>((a, b) => (a && a < b ? a : b), undefined);
-    const bucketed = groups.map((g) => bucketPoints(densifyDayPoints(g.series, period, firstDay), grain));
-    const gridDays = bucketed[0] ? bucketed[0].map((p) => p.day) : [];
-    const strideIdx = pickIndexes(gridDays.length, CHART_MAX_POINTS);
-    const labels = strideIdx.map((i) => gridDays[i]);
-    const chartSeries = groups.map((g, gi) => ({
-      name: nameById.get(g.sales_channel_id) ?? 'Канал',
-      color: SERIES_COLORS[gi % SERIES_COLORS.length],
-      values: strideIdx.map((i) => (bucketed[gi][i] ? metricValue(metric, bucketed[gi][i]) : null)),
-    }));
-    const hiddenTotal = data.group_total ?? selected.length;
+  if (model.kind === 'breakdown') {
+    const hiddenTotal = model.groupTotal ?? selected.length;
     return (
       <div>
-        <MsMultiLine series={chartSeries} labels={labels.map(fmt.day)} height={expandedHeight ?? 200} metric={metric} />
-        {hiddenTotal > groups.length && (
+        <MsMultiLine series={model.chartSeries} labels={model.labels} height={expandedHeight ?? 200} metric={metric} />
+        {hiddenTotal > model.groupCount && (
           <p className="mt-2 text-2xs text-muted-foreground">
-            Показаны первые {groups.length} каналов из {hiddenTotal} — разбивка ограничена для читаемости.
+            Показаны первые {model.groupCount} каналов из {hiddenTotal} — разбивка ограничена для читаемости.
           </p>
         )}
         {breakdown && selected.length === 0 && (
@@ -389,14 +417,7 @@ export function MsChannelChart({
     return <p className="py-4 text-xs text-muted-foreground">Выберите каналы, чтобы разбить график по каждому.</p>;
   }
 
-  // Агрегат (все или выбранные каналы одной серией). Дозаполняем дневную сетку окна нулями,
-  // ЗАТЕМ группируем по грануляции (порядок важен: бакетинг сырых редких дней потерял бы нули).
-  const bucketed = bucketPoints(densifyDayPoints(data.series, period), grain);
-  // Средний чек: рисуем ТОЛЬКО бакеты с заказами непрерывным рядом наблюдений (бакет без заказов
-  // даёт неопределённый чек → null → общий LineChart рвёт линию в россыпь точек). Выручку/заказы
-  // оставляем полной сеткой с честными нулями. Настоящие даты бакетов сохраняются.
-  const points = aggregatePlotPoints(bucketed, metric, CHART_MAX_POINTS);
-  if (points.length < 2) {
+  if (model.count < 2) {
     return (
       <p className="py-4 text-xs text-muted-foreground">
         {metric === 'aov'
@@ -405,10 +426,7 @@ export function MsChannelChart({
       </p>
     );
   }
-  const values = points.map((p) => metricValue(metric, p));
-  const labels = points.map((p) => fmt.day(p.day));
-  const titles = points.map((p) => `${fmt.day(p.day)}: ${fmtMetric(metric, metricValue(metric, p))}`);
-  const total = metricTotal(data.series, metric);
+  const { values, labels, titles, total } = model;
   const channelCaption =
     selected.length === 0 ? 'Все каналы' : `${selected.length} ${pluralRu(selected.length, ['канал', 'канала', 'каналов'])}`;
   // Средний чек агрегируется по бакетам с заказами — подписываем это честно (день/неделя/месяц).
@@ -442,38 +460,44 @@ function MsMultiLine({
   const plotRef = useRef<HTMLDivElement>(null);
   const [hovered, setHovered] = useState<number | null>(null);
   const [focused, setFocused] = useState(false);
-  const nums = series.flatMap((s) => s.values).filter((v): v is number => v != null);
-  const max = nums.length ? Math.max(...nums, 0) : 1;
   const n = labels.length;
-  const x = (i: number) => (n <= 1 ? 0 : (i / (n - 1)) * 100);
-  const y = (v: number) => (max <= 0 ? 100 : 100 - (v / max) * 100);
-  // Для среднего чека null означает не пропуск сбора, а отсутствие определённого значения в период
-  // без заказов. Соединяем реальные наблюдения, сохраняя их календарные X-позиции; tooltip на пустом
-  // периоде по-прежнему показывает «—». Для остальных метрик настоящий null остаётся разрывом.
-  type Pt = { x: number; y: number };
-  const segmentsOf = (values: (number | null)[]): { lines: string[]; lone: Pt[] } => {
-    if (metric === 'aov') {
-      const observed = values.flatMap((v, i) => (v == null ? [] : [{ x: x(i), y: y(v) }]));
-      if (observed.length >= 2) {
-        return { lines: [observed.map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(' ')], lone: [] };
+  // Геометрия серий (max, экранные координаты, сегменты полилиний) от ховера не зависит — мемо по
+  // данным, иначе каждый pointermove-рендер пересобирал бы до 6×CHART_MAX_POINTS точек заново.
+  const geometry = useMemo(() => {
+    const nums = series.flatMap((s) => s.values).filter((v): v is number => v != null);
+    const max = nums.length ? Math.max(...nums, 0) : 1;
+    const x = (i: number) => (n <= 1 ? 0 : (i / (n - 1)) * 100);
+    const y = (v: number) => (max <= 0 ? 100 : 100 - (v / max) * 100);
+    // Для среднего чека null означает не пропуск сбора, а отсутствие определённого значения в период
+    // без заказов. Соединяем реальные наблюдения, сохраняя их календарные X-позиции; tooltip на пустом
+    // периоде по-прежнему показывает «—». Для остальных метрик настоящий null остаётся разрывом.
+    type Pt = { x: number; y: number };
+    const segmentsOf = (values: (number | null)[]): { lines: string[]; lone: Pt[] } => {
+      if (metric === 'aov') {
+        const observed = values.flatMap((v, i) => (v == null ? [] : [{ x: x(i), y: y(v) }]));
+        if (observed.length >= 2) {
+          return { lines: [observed.map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(' ')], lone: [] };
+        }
+        return { lines: [], lone: observed };
       }
-      return { lines: [], lone: observed };
-    }
-    const lines: string[] = [];
-    const lone: Pt[] = [];
-    let cur: Pt[] = [];
-    const flush = () => {
-      if (cur.length >= 2) lines.push(cur.map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(' '));
-      else if (cur.length === 1) lone.push(cur[0]);
-      cur = [];
+      const lines: string[] = [];
+      const lone: Pt[] = [];
+      let cur: Pt[] = [];
+      const flush = () => {
+        if (cur.length >= 2) lines.push(cur.map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(' '));
+        else if (cur.length === 1) lone.push(cur[0]);
+        cur = [];
+      };
+      values.forEach((v, i) => {
+        if (v == null) flush();
+        else cur.push({ x: x(i), y: y(v) });
+      });
+      flush();
+      return { lines, lone };
     };
-    values.forEach((v, i) => {
-      if (v == null) flush();
-      else cur.push({ x: x(i), y: y(v) });
-    });
-    flush();
-    return { lines, lone };
-  };
+    return { max, x, segments: series.map((s) => segmentsOf(s.values)) };
+  }, [series, n, metric]);
+  const { max, x } = geometry;
   const hoverAt = (clientX: number) => {
     const rect = plotRef.current?.getBoundingClientRect();
     if (!rect || n === 0) return;
@@ -526,8 +550,8 @@ function MsMultiLine({
             </div>
           )}
           <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="relative w-full" style={{ height }} aria-hidden="true">
-            {series.map((s) => {
-              const { lines, lone } = segmentsOf(s.values);
+            {series.map((s, si) => {
+              const { lines, lone } = geometry.segments[si];
               return (
                 <g key={s.name}>
                   {lines.map((pts, si) => (

@@ -53,6 +53,9 @@ export interface WidgetResult {
   series?: WidgetSeriesPoint[];
   ghost?: number[];
   ghostLabel?: string;
+  /** «Макс/Среднее» от ПОЛНОЙ серии, посчитанные до визуального капа (LTTB оставляет экстремумы —
+   *  среднее по прореженной выборке смещено вверх). Рендер предпочитает их пересчёту по series. */
+  stats?: { max: number; avg: number };
   breakdown?: WidgetBreakdownItem[];
   rows?: WidgetLedgerRow[];
   target?: number;

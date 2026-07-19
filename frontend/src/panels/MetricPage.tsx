@@ -31,8 +31,10 @@ import { PostDetailModal } from '@/components/PostDetailModal';
 import { ChartSection } from '@/components/instagram/shared';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { DateRangePicker } from '@/components/DateRangePicker';
+import { lttbDownsample } from '@/lib/downsample';
 import { DAY_MS, alignGhost, baselineCoveredByPosts, bucketKeyOf, bucketKeysInWindow, comparisonWindow } from '@/lib/metricSeries';
 import type { Grain } from '@/lib/metricSeries';
+import { CHART_MAX_POINTS, pickIndexes } from '@/lib/msSeries';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
 import { splitDailyWindows } from '@/lib/delta';
 import { MediaThumb } from '@/components/MediaThumb';
@@ -644,6 +646,29 @@ export function MetricPage() {
   const lineValues = gapAware(series.values, winFrom);
   const lineGhost = ghost ? gapAware(ghost, baseWin?.from ?? null) : ghost;
 
+  // Кап длинной ЛИНИИ (канон CLAUDE.md: длинные серии даунсэмплятся до CHART_MAX_POINTS перед
+  // рендером): «Всё» отдаёт дневной архив целиком — до 730 точек уходили в LineChart сырыми.
+  // ТОЛЬКО когда день НЕ адресуется индексом (dayAddressable): дневная адресация — weekday-тултипы,
+  // флажки-событий и пин дня — считает дату как winFrom + i·DAY_MS, и прореженный индекс лгал бы.
+  // Bar/rank/pivot и панель пина остаются на ПОЛНОЙ серии (децимация столбцов врёт пропусками
+  // дней); sampledLineIdx маппит точку прореженной линии обратно в индекс полной серии. С ghost —
+  // pickIndexes (единые индексы обеих линий — канон msSeries для мультисерий), без ghost форму
+  // держит LTTB; null-разрывы для отбора формы читаются как 0, в отрисовку идут как null.
+  const sampledLineIdx = (() => {
+    if (dayAddressable || lineValues.length <= CHART_MAX_POINTS) return null;
+    if (lineGhost) return pickIndexes(lineValues.length, CHART_MAX_POINTS);
+    const all = lineValues.map((_, i) => i);
+    return lttbDownsample(all, CHART_MAX_POINTS, (i) => lineValues[i] ?? 0);
+  })();
+  const lineChart = sampledLineIdx
+    ? {
+        values: sampledLineIdx.map((i) => lineValues[i] ?? null),
+        labels: sampledLineIdx.map((i) => series.labels[i] ?? ''),
+        titles: sampledLineIdx.map((i) => titles[i] ?? ''),
+        ghost: lineGhost ? sampledLineIdx.map((i) => lineGhost[i] ?? null) : undefined,
+      }
+    : { values: lineValues, labels: series.labels, titles, ghost: lineGhost };
+
   // ── События дня (chart_annotations): создание/удаление из панели пина ────────────────────
   const addAnnotation = async (dayKey: string) => {
     const label = annLabel.trim();
@@ -688,6 +713,13 @@ export function MetricPage() {
   // winFrom..winTo, so index ↔ calendar day is exact) and only for post-derived metrics;
   // elsewhere the panel shows the numbers without a post list.
   const pinnedValid = pinned != null && pinned >= 0 && pinned < series.values.length ? pinned : null;
+  // Позиция пина НА ПРОРЕЖЕННОЙ линии (pinned хранит индекс полной серии — панель пина и
+  // соседняя дельта считаются от полных данных).
+  const pinnedLineIndex = (() => {
+    if (pinnedValid == null || !sampledLineIdx) return pinnedValid;
+    const pos = sampledLineIdx.indexOf(pinnedValid);
+    return pos === -1 ? null : pos;
+  })();
   // Дельта-бары уровневой метрики (DivergingBars) кликов не несут — пин только для line и
   // обычных столбцов потока.
   const pinnedIsChart = chartType === 'line' || (chartType === 'bar' && !isLevel);
@@ -767,9 +799,9 @@ export function MetricPage() {
                  (dashboards are axis-free; the explorer is where the scale lives). */
               <ChartExpandedContext.Provider value={true}>
                 <LineChart
-                  values={lineValues}
-                  labels={series.labels}
-                  titles={titles}
+                  values={lineChart.values}
+                  labels={lineChart.labels}
+                  titles={lineChart.titles}
                   hoverTitles={hoverTitles}
                   ghostTitles={ghostTitles}
                   flags={chartFlags}
@@ -777,16 +809,18 @@ export function MetricPage() {
                   markExtremes
                   markAnomalies={effGrain === 'day' && (metricKey === 'views' || metricKey === 'subscribers')}
                   showPoints={series.values.length > 1 && series.values.length <= 45}
-                  ghost={lineGhost}
+                  ghost={lineChart.ghost}
                   ghostLabel={cmp !== 'off' ? CMP_CHIP[cmp] : undefined}
                   legendToggle={false}
                   yMin={ZERO_BASED[metricKey] && series.values.length > 1 ? 0 : undefined}
                   onPointClick={(i) => {
+                    // Пин хранит индекс ПОЛНОЙ серии (sampledLineIdx маппит клик обратно).
+                    const oi = sampledLineIdx ? sampledLineIdx[i] : i;
                     // Дыру не пинить: у пропущенного дня нет ни значения, ни постов.
-                    if (lineValues[i] == null) return;
-                    setPinned((p) => (p === i ? null : i));
+                    if (lineValues[oi] == null) return;
+                    setPinned((p) => (p === oi ? null : oi));
                   }}
-                  pinnedIndex={pinnedValid}
+                  pinnedIndex={pinnedLineIndex}
                 />
               </ChartExpandedContext.Provider>
             )}

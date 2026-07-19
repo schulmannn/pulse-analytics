@@ -706,3 +706,50 @@ describe('resolveWidgetMetric — meta honesty fixes (verify round)', () => {
     expect(r.meta!.comparisonNote).toBe('сравнение пока не поддерживается для этой метрики');
   });
 });
+
+describe('resolveWidgetMetric — визуальный кап длинных серий (generic-слой)', () => {
+  // 400-дневное окно: 380 постов по одному в день + 20 пустых дней = 400 дневных бакетов.
+  const WIN_FROM_400 = NOW - 399 * DAY;
+  const inRange400 = (d: string | null | undefined) => {
+    if (!d) return false;
+    const t = Date.parse(d);
+    return Number.isFinite(t) && t >= WIN_FROM_400 && t <= WIN_TO;
+  };
+  const manyPosts = Array.from({ length: 380 }, (_, i) => mkPost(i + 1, 100 + (i % 7) * 10));
+  const fullLong = { ...(full as object), posts: manyPosts } as unknown as TgFull;
+  // days: 0 = пресет «Всё»: окно data-driven — 380 дневных бакетов (только дни с постами).
+  const longCtx: DataContext = {
+    now: NOW,
+    days: 0,
+    range: null,
+    inRange: inRange400,
+    tg: { full: fullLong, history, channels, graphs, channelId: 1 },
+  };
+  const fullSum = manyPosts.reduce((s, p) => s + p.views, 0);
+
+  it('линия длиннее CHART_MAX_POINTS капается; хедлайн и stats — от ПОЛНОЙ серии', () => {
+    const r = resolveWidgetMetric(cfg('tg.views'), longCtx);
+    expect(r.empty).toBeFalsy();
+    expect(r.series!.length).toBeLessThanOrEqual(140); // CHART_MAX_POINTS (msSeries.ts)
+    expect(r.series!.length).toBeGreaterThan(2);
+    expect(r.valueRaw).toBe(fullSum); // хедлайн посчитан ДО капа
+    expect(r.stats).toBeDefined(); // «Макс/Среднее» от полной 380-точечной серии, не от выборки
+    expect(r.stats!.max).toBe(160); // максимум дневного бакета = максимум поста (1 пост/день)
+    expect(r.stats!.avg).toBeCloseTo(fullSum / 380, 6);
+  });
+
+  it('generic-ghost (moving_average) строится от полной серии и прореживается теми же индексами', () => {
+    const r = resolveWidgetMetric(
+      cfg('tg.views', { comparison: { mode: 'moving_average', display: 'ghost_line' } }),
+      longCtx,
+    );
+    expect(r.ghost).toBeDefined();
+    expect(r.ghost!.length).toBe(r.series!.length); // единые индексы: base↔current не рассинхронены
+    expect(r.ghostLabel).toBeTruthy();
+  });
+
+  it('бары не капаются (децимация дней в столбцах врёт)', () => {
+    const r = resolveWidgetMetric(cfg('tg.views', { viz: 'bar' }), longCtx);
+    expect(r.series!.length).toBe(380);
+  });
+});

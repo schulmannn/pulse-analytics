@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 
 /**
@@ -34,10 +35,27 @@ const VIEWBOX: Record<CartographName, string> = {
 };
 
 export function Cartograph({ name, className, animate = true }: CartographProps) {
+  const ref = useRef<SVGSVGElement>(null);
+  const [offscreen, setOffscreen] = useState(false);
+  // Chromium не композитит CSS-анимации на детях <svg>: пока ambient-цикл играет, рендерер не
+  // идлится ни на кадр. Вне вьюпорта вешаем .cartograph-offscreen (animation-play-state: paused,
+  // см. index.css) — глиф за экраном не жжёт main thread. Срабатывает на границах видимости,
+  // не на каждом кадре скролла. reduced-motion глушится в CSS и в наблюдателе не нуждается.
+  useEffect(() => {
+    const el = ref.current;
+    if (!animate || !el || typeof IntersectionObserver === 'undefined') return;
+    const io = new IntersectionObserver((entries) => {
+      const last = entries[entries.length - 1];
+      if (last) setOffscreen(!last.isIntersecting);
+    });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [animate]);
   return (
     <svg
+      ref={ref}
       viewBox={VIEWBOX[name]}
-      className={cn('cartograph block h-32 w-auto', className)}
+      className={cn('cartograph block h-32 w-auto', offscreen && 'cartograph-offscreen', className)}
       fill="none"
       strokeWidth={1.6}
       strokeLinecap="round"

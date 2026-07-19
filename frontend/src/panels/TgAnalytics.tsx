@@ -1,6 +1,8 @@
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useTgFull, useTgGraphs } from '@/api/queries';
 import type { TgFull, TgGraphs } from '@/api/schemas';
+import { lttbDownsample } from '@/lib/downsample';
+import { CHART_MAX_POINTS } from '@/lib/msSeries';
 import { normalizeTgPosts } from '@/lib/posts';
 import { compareDdMm } from '@/lib/dates';
 import { fmt, ruAxisLabel, ruSeriesName, ddmmDay, pluralRu } from '@/lib/format';
@@ -19,7 +21,8 @@ import {
   splitCalendarRows,
   useWidgetPeriod,
 } from '@/lib/period';
-import type { CalendarWindow } from '@/lib/period';
+import type { CalendarWindow, WidgetPeriodValue } from '@/lib/period';
+import type { WidgetSeriesOpts } from '@/lib/widgetPrefsStore';
 import { cn } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
 
@@ -141,6 +144,24 @@ export function windowGraphSeries(values: number[], xs: number[], win: CalendarW
     ? selected.previous.reduce((sum, row) => sum + row.value, 0)
     : null;
   return { values: wValues, labels, titles, total, prevTotal };
+}
+
+/** Кап ЛИНЕЙНОГО представления длинной серии (канон CLAUDE.md: длинные серии даунсэмплятся через
+    lttbDownsample до CHART_MAX_POINTS перед рендером): окно «Всё» отдаёт архив graphs целиком —
+    до 730 дневных точек уходили в LineChart сырыми. LTTB держит форму, labels/titles сжимаются
+    теми же выбранными точками. ТОЛЬКО для линий: столбцы и леджер «Столбцы + значения» остаются
+    на полной серии — децимация баров врёт пропусками дней, а молча менять гранулярность нельзя.
+    Итог/prevTotal не трогаем — они уже посчитаны от полного окна (кап чисто визуальный). */
+function capLineSeries<T extends { values: number[]; labels: string[]; titles: string[] }>(w: T): T {
+  if (w.values.length <= CHART_MAX_POINTS) return w;
+  const rows = w.values.map((value, i) => ({ value, label: w.labels[i] ?? '', title: w.titles[i] ?? '' }));
+  const sampled = lttbDownsample(rows, CHART_MAX_POINTS, (row) => row.value);
+  return {
+    ...w,
+    values: sampled.map((row) => row.value),
+    labels: sampled.map((row) => row.label),
+    titles: sampled.map((row) => row.title),
+  };
 }
 
 /**
@@ -520,15 +541,6 @@ export function TgAnalytics({
   // the KPI ledger snapshot + graphs-driven series. Post-derived CHART VALUES are re-derived
   // inside TgWidgetBody from the resolved page/Home-widget window.
   const derived = useMemo(() => deriveTgAnalytics(full, graphs, alwaysInRange), [full, graphs]);
-
-  if (isFullPending || (group !== 'content' && isGraphsPending)) {
-    return <TgAnalyticsSkeletons showSummary={inGroup('dynamics')} />;
-  }
-
-  if (!full && !graphs) {
-    return <EmptyState title="Данных аналитики пока нет." reason="Как только collector-агент пришлёт первый снимок, здесь появятся графики." />;
-  }
-
   const {
     last14Dates, vbdValues, vbdTitles, vbdPrev,
     interGroup, viewSeries, shareSeries,
@@ -537,7 +549,6 @@ export function TgAnalytics({
     netGrowthPresent,
     maxWdAvg,
   } = derived;
-  const wdLabels = WD_LABELS;
 
   // Content group, campaign-scoped: a source is (tg, channelId); when a campaign is selected the
   // post-derived sections keep only its members, and composition/views-by-type switch from the
@@ -545,11 +556,238 @@ export function TgAnalytics({
   // `keep` is a pass-through when no campaign is active, so the non-campaign path is byte-identical.
   const keep: Keep = campaign?.active ? campaign.inCampaign : keepAll;
   // Whole-payload (alwaysInRange) versions gate section EXISTENCE — same policy as elsewhere, so a
-  // narrow card window that happens to be empty doesn't make the section vanish (its own empty shows).
-  const emojiItems = deriveEmojis(full, alwaysInRange, keep);
-  const formatPerfItems = deriveFormatPerf(full, alwaysInRange, keep);
-  const compositionItems = deriveCompositionFromPosts(full, alwaysInRange, keep);
-  const viewsByTypeItems = deriveViewsByTypeFromPosts(full, alwaysInRange, keep);
+  // narrow card window that happens to be empty doesn't make the section vanish (its own empty
+  // shows). useMemo (перф): раньше четыре пост-derive (normalizeTgPosts ×4 по ≤100 постам)
+  // пересчитывались на КАЖДЫЙ рендер страницы — усилитель кадровых штормов.
+  const { emojiItems, formatPerfItems, compositionItems, viewsByTypeItems } = useMemo(
+    () => ({
+      emojiItems: deriveEmojis(full, alwaysInRange, keep),
+      formatPerfItems: deriveFormatPerf(full, alwaysInRange, keep),
+      compositionItems: deriveCompositionFromPosts(full, alwaysInRange, keep),
+      viewsByTypeItems: deriveViewsByTypeFromPosts(full, alwaysInRange, keep),
+    }),
+    [full, keep],
+  );
+
+  // ── Стабильные variants-функции карточек ────────────────────────────────────────────────────
+  // useChartSectionModel мемоизирует variants(period, seriesOpts) по IDENTITY самой функции —
+  // инлайн-стрелки в JSX пересобирали переданные чартам массивы (и их plot-мемо) на каждом
+  // рендере страницы. Все хуки — строго ДО early-return ниже (React #310).
+  const emojiVariants = useCallback(
+    (period: WidgetPeriodValue) =>
+      breakdownVariants(
+        deriveEmojis(full, period.inRange, keep).map((e) => ({ label: e.label, value: e.value, display: fmt.num(e.value) })),
+      ),
+    [full, keep],
+  );
+  const compositionVariants = useCallback(
+    (period: WidgetPeriodValue) =>
+      breakdownVariants(
+        deriveCompositionFromPosts(full, period.inRange, keep).map((c) => ({
+          label: c.label,
+          value: c.value,
+          display: fmt.num(c.value),
+          color: c.color,
+        })),
+      ),
+    [full, keep],
+  );
+  const viewsByTypeVariants = useCallback(
+    (period: WidgetPeriodValue) =>
+      breakdownVariants(
+        deriveViewsByTypeFromPosts(full, period.inRange, keep).map((t) => ({
+          label: t.label,
+          value: t.value,
+          display: fmt.num(t.value),
+        })),
+      ),
+    [full, keep],
+  );
+  const formatPerfVariants = useCallback(
+    (period: WidgetPeriodValue) =>
+      breakdownVariants(
+        deriveFormatPerf(full, period.inRange, keep).map((f) => ({ label: f.label, value: f.avgErv, display: `${f.avgErv.toFixed(1)}% ERV · ${f.n} ${pluralRu(f.n, ['пост', 'поста', 'постов'])}` })),
+      ),
+    [full, keep],
+  );
+  const viewsVariants = useCallback(
+    (period: WidgetPeriodValue, series: WidgetSeriesOpts) => {
+      if (!viewSeries || !interGroup) return [];
+      // Windowed by the WIDGET period (follows the page top bar — preset AND custom «Свой»
+      // range — by default) through the edit-dialog display opts; the steep body adds the
+      // window total + the mandatory comparison vs the previous window (honest null on «Всё»).
+      const w = windowGraphSeries(viewSeries.values, interGroup.x, calendarWindowForPeriod(period), 'просмотров', series);
+      const line = capLineSeries(w);
+      const delta = w.prevTotal != null && w.prevTotal > 0 ? pctDelta(w.total, w.prevTotal) : null;
+      const caption = delta ? 'к пред. периоду' : period.days === 0 ? 'за всё время' : undefined;
+      return [
+        {
+          key: 'line',
+          label: 'Линия',
+          render: (
+            <ChartCardBody value={fmt.kpi(w.total)} delta={delta} caption={caption}>
+              <LineChart values={line.values} labels={line.labels} titles={line.titles} markAnomalies emphasizeLastLabel />
+            </ChartCardBody>
+          ),
+        },
+        {
+          // Дневные ПОТОКИ (не уровни) — столбцы от нуля здесь честные.
+          key: 'bar',
+          label: 'Столбцы',
+          render: (
+            <ChartCardBody value={fmt.kpi(w.total)} delta={delta} caption={caption}>
+              <BarChart values={w.values} labels={w.labels} titles={w.titles} />
+            </ChartCardBody>
+          ),
+        },
+        seriesBarValuesVariant(w.values, w.labels, w.titles, { sum: true }),
+      ];
+    },
+    [viewSeries, interGroup],
+  );
+  const sharesVariants = useCallback(
+    (period: WidgetPeriodValue, series: WidgetSeriesOpts) => {
+      if (!shareSeries || !interGroup) return [];
+      const w = windowGraphSeries(shareSeries.values, interGroup.x, calendarWindowForPeriod(period), 'репостов', series);
+      const line = capLineSeries(w);
+      const delta = w.prevTotal != null && w.prevTotal > 0 ? pctDelta(w.total, w.prevTotal) : null;
+      const caption = delta ? 'к пред. периоду' : period.days === 0 ? 'за всё время' : undefined;
+      return [
+        {
+          key: 'line',
+          label: 'Линия',
+          render: (
+            <ChartCardBody value={fmt.kpi(w.total)} delta={delta} caption={caption}>
+              <LineChart values={line.values} labels={line.labels} titles={line.titles} emphasizeLastLabel />
+            </ChartCardBody>
+          ),
+        },
+        {
+          key: 'bar',
+          label: 'Столбцы',
+          render: (
+            <ChartCardBody value={fmt.kpi(w.total)} delta={delta} caption={caption}>
+              <BarChart values={w.values} labels={w.labels} titles={w.titles} />
+            </ChartCardBody>
+          ),
+        },
+        seriesBarValuesVariant(w.values, w.labels, w.titles, { sum: true }),
+      ];
+    },
+    [shareSeries, interGroup],
+  );
+  const netGrowthVariants = useCallback(
+    (period: WidgetPeriodValue) => {
+      const w = deriveNetGrowth(graphs, calendarWindowForPeriod(period));
+      const delta = w.prevTotal != null && w.prevTotal > 0 && w.total >= 0 ? pctDelta(w.total, w.prevTotal) : null;
+      const caption = delta ? 'к пред. периоду' : period.days === 0 && !period.range ? 'за всё время' : 'за период';
+      return [
+        {
+          key: 'bar',
+          label: 'Столбцы',
+          render:
+            w.values.length > 0 ? (
+              <ChartCardBody
+                value={`${w.total >= 0 ? '+' : '−'}${fmt.kpi(Math.abs(w.total))}`}
+                delta={delta}
+                caption={caption}
+              >
+                <DivergingBars values={w.values} titles={w.titles} />
+              </ChartCardBody>
+            ) : (
+              <EmptyState title="Нет данных за выбранный период." />
+            ),
+        },
+      ];
+    },
+    [graphs],
+  );
+  // Аудит: красно-зелёный донат был единственной круговой в продукте. Единственное представление —
+  // две строки Breakdown БЕЗ color (нейтральный приглушённый трек --chart-role-primary);
+  // «N всего» из центра доната живёт футером (FollowerFlowTotal).
+  const churnVariants = useCallback(
+    (period: WidgetPeriodValue) => {
+      const flow = deriveFollowerFlows(graphs, calendarWindowForPeriod(period));
+      if (flow.values.length === 0) {
+        return [{ key: 'list', label: 'Список', render: <EmptyState title="Нет данных за выбранный период." /> }];
+      }
+      const flowTotal = flow.joinedTotal + flow.leftTotal;
+      const rowDisplay = (value: number) =>
+        flowTotal > 0 ? `${fmt.num(value)} · ${Math.round((value / flowTotal) * 100)}%` : fmt.num(value);
+      return [
+        {
+          key: 'list',
+          label: 'Список',
+          render: (
+            <Breakdown
+              items={[
+                { label: 'Отписалось', value: flow.leftTotal, display: rowDisplay(flow.leftTotal) },
+                { label: 'Подписалось', value: flow.joinedTotal, display: rowDisplay(flow.joinedTotal) },
+              ]}
+            />
+          ),
+        },
+      ];
+    },
+    [graphs],
+  );
+  const weekdayVariants = useCallback(
+    (period: WidgetPeriodValue) => {
+      const { wdAvgValues } = deriveWeekday(full, period.inRange);
+      return [
+        {
+          key: 'bar',
+          label: 'Столбцы',
+          render: (
+            <div>
+              <div className="mb-2 text-2xs tracking-wide text-muted-foreground">Ср. просмотры</div>
+              <BarChart values={wdAvgValues} labels={WD_LABELS} titles={wdAvgValues.map((v, i) => `${WD_LABELS[i]}: ${fmt.num(v)} ср. просмотров`)} />
+            </div>
+          ),
+        },
+        {
+          key: 'line',
+          label: 'Линия',
+          render: <LineChart values={wdAvgValues} labels={WD_LABELS} titles={wdAvgValues.map((v, i) => `${WD_LABELS[i]}: ${fmt.num(v)} ср. просмотров`)} yMin={0} />,
+        },
+      ];
+    },
+    [full],
+  );
+  const postCountVariants = useCallback(
+    (period: WidgetPeriodValue) => {
+      const { wdCountValues } = deriveWeekday(full, period.inRange);
+      return [
+        {
+          key: 'bar',
+          label: 'Столбцы',
+          render: (
+            <div className="max-w-[560px]">
+              <BarChart values={wdCountValues} labels={WD_LABELS} titles={wdCountValues.map((v, i) => `${WD_LABELS[i]}: ${fmt.num(v)} постов`)} />
+            </div>
+          ),
+        },
+        {
+          key: 'line',
+          label: 'Линия',
+          render: (
+            <div className="max-w-[560px]">
+              <LineChart values={wdCountValues} labels={WD_LABELS} titles={wdCountValues.map((v, i) => `${WD_LABELS[i]}: ${fmt.num(v)} постов`)} yMin={0} />
+            </div>
+          ),
+        },
+      ];
+    },
+    [full],
+  );
+
+  if (isFullPending || (group !== 'content' && isGraphsPending)) {
+    return <TgAnalyticsSkeletons showSummary={inGroup('dynamics')} />;
+  }
+
+  if (!full && !graphs) {
+    return <EmptyState title="Данных аналитики пока нет." reason="Как только collector-агент пришлёт первый снимок, здесь появятся графики." />;
+  }
 
   return (
     <div className="space-y-6">
@@ -604,63 +842,22 @@ export function TgAnalytics({
         {/* Пост-производный: топ эмодзи считаются по постам выбранного окна (variants-fn form).
             Под фильтром кампании — только по её публикациям из текущего источника. */}
         {inGroup('content') && emojiItems.length > 0 && (
-          <ChartSection
-            title="Реакции по эмодзи"
-            periodControl
-            variants={(period) =>
-              breakdownVariants(
-                deriveEmojis(full, period.inRange, keep).map((e) => ({ label: e.label, value: e.value, display: fmt.num(e.value) })),
-              )
-            }
-          />
+          <ChartSection title="Реакции по эмодзи" periodControl variants={emojiVariants} />
         )}
 
         {/* Всегда из публикаций выбранного окна; keep дополнительно ограничивает кампанией. */}
         {inGroup('content') && compositionItems.length > 0 && (
-          <ChartSection
-            title="Состав вовлечённости"
-            periodControl
-            variants={(period) =>
-              breakdownVariants(
-                deriveCompositionFromPosts(full, period.inRange, keep).map((c) => ({
-                  label: c.label,
-                  value: c.value,
-                  display: fmt.num(c.value),
-                  color: c.color,
-                })),
-              )
-            }
-          />
+          <ChartSection title="Состав вовлечённости" periodControl variants={compositionVariants} />
         )}
 
         {/* Средний охват формата — по публикациям выбранного окна и выбранной кампании. */}
         {inGroup('content') && viewsByTypeItems.length > 0 && (
-          <ChartSection
-            title="Ср. охват по типу"
-            periodControl
-            variants={(period) =>
-              breakdownVariants(
-                deriveViewsByTypeFromPosts(full, period.inRange, keep).map((t) => ({
-                  label: t.label,
-                  value: t.value,
-                  display: fmt.num(t.value),
-                })),
-              )
-            }
-          />
+          <ChartSection title="Ср. охват по типу" periodControl variants={viewsByTypeVariants} />
         )}
 
         {/* Пост-производный: средний ERV по формату — по постам выбранного окна и кампании. */}
         {inGroup('content') && formatPerfItems.length > 0 && (
-          <ChartSection
-            title="Вовлечённость по формату"
-            periodControl
-            variants={(period) =>
-              breakdownVariants(
-                deriveFormatPerf(full, period.inRange, keep).map((f) => ({ label: f.label, value: f.avgErv, display: `${f.avgErv.toFixed(1)}% ERV · ${f.n} ${pluralRu(f.n, ['пост', 'поста', 'постов'])}` })),
-              )
-            }
-          />
+          <ChartSection title="Вовлечённость по формату" periodControl variants={formatPerfVariants} />
         )}
 
         {/* Раньше «Просмотры и репосты» были ОДНИМ двойным виджетом (два графика в столбик) —
@@ -676,10 +873,11 @@ export function TgAnalytics({
             drillTo="/metrics/views"
             // Rich explorer (steep): «Развернуть» grows 1М/3М/6М/Всё pills, a line↔bar toggle and a
             // Мин/Макс/Среднее/Сумма strip — windowing the full graphs series the inline card can't.
+            // Линия развёрнутого вида капается (capLineSeries); бары/статы — полное окно.
             expand={{
               grainable: true,
               renderExpanded: (days, grain) => {
-                const w = windowGraphSeries(viewSeries.values, interGroup.x, calendarWindowForDays(days), 'просмотров', { grain });
+                const w = capLineSeries(windowGraphSeries(viewSeries.values, interGroup.x, calendarWindowForDays(days), 'просмотров', { grain }));
                 return <LineChart values={w.values} labels={w.labels} titles={w.titles} markAnomalies markExtremes emphasizeLastLabel />;
               },
               renderExpandedBar: (days, grain) => {
@@ -690,36 +888,7 @@ export function TgAnalytics({
             }}
             seriesOptions
             periodControl
-            variants={(period, series) => {
-              // Windowed by the WIDGET period (follows the page top bar — preset AND custom «Свой»
-              // range — by default) through the edit-dialog display opts; the steep body adds the
-              // window total + the mandatory comparison vs the previous window (honest null on «Всё»).
-              const w = windowGraphSeries(viewSeries.values, interGroup.x, calendarWindowForPeriod(period), 'просмотров', series);
-              const delta = w.prevTotal != null && w.prevTotal > 0 ? pctDelta(w.total, w.prevTotal) : null;
-              const caption = delta ? 'к пред. периоду' : period.days === 0 ? 'за всё время' : undefined;
-              return [
-                {
-                  key: 'line',
-                  label: 'Линия',
-                  render: (
-                    <ChartCardBody value={fmt.kpi(w.total)} delta={delta} caption={caption}>
-                      <LineChart values={w.values} labels={w.labels} titles={w.titles} markAnomalies emphasizeLastLabel />
-                    </ChartCardBody>
-                  ),
-                },
-                {
-                  // Дневные ПОТОКИ (не уровни) — столбцы от нуля здесь честные.
-                  key: 'bar',
-                  label: 'Столбцы',
-                  render: (
-                    <ChartCardBody value={fmt.kpi(w.total)} delta={delta} caption={caption}>
-                      <BarChart values={w.values} labels={w.labels} titles={w.titles} />
-                    </ChartCardBody>
-                  ),
-                },
-                seriesBarValuesVariant(w.values, w.labels, w.titles, { sum: true }),
-              ];
-            }}
+            variants={viewsVariants}
           />
         )}
         {inGroup('dynamics') && interGroup && shareSeries && (
@@ -731,7 +900,7 @@ export function TgAnalytics({
             expand={{
               grainable: true,
               renderExpanded: (days, grain) => {
-                const w = windowGraphSeries(shareSeries.values, interGroup.x, calendarWindowForDays(days), 'репостов', { grain });
+                const w = capLineSeries(windowGraphSeries(shareSeries.values, interGroup.x, calendarWindowForDays(days), 'репостов', { grain }));
                 return <LineChart values={w.values} labels={w.labels} titles={w.titles} markAnomalies markExtremes emphasizeLastLabel />;
               },
               renderExpandedBar: (days, grain) => {
@@ -742,32 +911,7 @@ export function TgAnalytics({
             }}
             seriesOptions
             periodControl
-            variants={(period, series) => {
-              const w = windowGraphSeries(shareSeries.values, interGroup.x, calendarWindowForPeriod(period), 'репостов', series);
-              const delta = w.prevTotal != null && w.prevTotal > 0 ? pctDelta(w.total, w.prevTotal) : null;
-              const caption = delta ? 'к пред. периоду' : period.days === 0 ? 'за всё время' : undefined;
-              return [
-                {
-                  key: 'line',
-                  label: 'Линия',
-                  render: (
-                    <ChartCardBody value={fmt.kpi(w.total)} delta={delta} caption={caption}>
-                      <LineChart values={w.values} labels={w.labels} titles={w.titles} emphasizeLastLabel />
-                    </ChartCardBody>
-                  ),
-                },
-                {
-                  key: 'bar',
-                  label: 'Столбцы',
-                  render: (
-                    <ChartCardBody value={fmt.kpi(w.total)} delta={delta} caption={caption}>
-                      <BarChart values={w.values} labels={w.labels} titles={w.titles} />
-                    </ChartCardBody>
-                  ),
-                },
-                seriesBarValuesVariant(w.values, w.labels, w.titles, { sum: true }),
-              ];
-            }}
+            variants={sharesVariants}
           />
         )}
 
@@ -820,63 +964,12 @@ export function TgAnalytics({
             title="Чистый прирост"
             drillTo="/metrics/subscribers"
             periodControl
-            variants={(period) => {
-              const w = deriveNetGrowth(graphs, calendarWindowForPeriod(period));
-              const delta = w.prevTotal != null && w.prevTotal > 0 && w.total >= 0 ? pctDelta(w.total, w.prevTotal) : null;
-              const caption = delta ? 'к пред. периоду' : period.days === 0 && !period.range ? 'за всё время' : 'за период';
-              return [
-                {
-                  key: 'bar',
-                  label: 'Столбцы',
-                  render:
-                    w.values.length > 0 ? (
-                      <ChartCardBody
-                        value={`${w.total >= 0 ? '+' : '−'}${fmt.kpi(Math.abs(w.total))}`}
-                        delta={delta}
-                        caption={caption}
-                      >
-                        <DivergingBars values={w.values} titles={w.titles} />
-                      </ChartCardBody>
-                    ) : (
-                      <EmptyState title="Нет данных за выбранный период." />
-                    ),
-                },
-              ];
-            }}
+            variants={netGrowthVariants}
           />
         )}
 
         {inGroup('dynamics') && netGrowthPresent && (
-          // Аудит: красно-зелёный донат был единственной круговой в продукте. Единственное
-          // представление — две строки Breakdown БЕЗ color (нейтральный приглушённый трек
-          // --chart-role-primary); «N всего» из центра доната живёт футером (FollowerFlowTotal).
-          <ChartSection
-            title="Динамика оттока"
-            periodControl
-            variants={(period) => {
-              const flow = deriveFollowerFlows(graphs, calendarWindowForPeriod(period));
-              if (flow.values.length === 0) {
-                return [{ key: 'list', label: 'Список', render: <EmptyState title="Нет данных за выбранный период." /> }];
-              }
-              const flowTotal = flow.joinedTotal + flow.leftTotal;
-              const rowDisplay = (value: number) =>
-                flowTotal > 0 ? `${fmt.num(value)} · ${Math.round((value / flowTotal) * 100)}%` : fmt.num(value);
-              return [
-                {
-                  key: 'list',
-                  label: 'Список',
-                  render: (
-                    <Breakdown
-                      items={[
-                        { label: 'Отписалось', value: flow.leftTotal, display: rowDisplay(flow.leftTotal) },
-                        { label: 'Подписалось', value: flow.joinedTotal, display: rowDisplay(flow.joinedTotal) },
-                      ]}
-                    />
-                  ),
-                },
-              ];
-            }}
-          >
+          <ChartSection title="Динамика оттока" periodControl variants={churnVariants}>
             <FollowerFlowTotal graphs={graphs} />
           </ChartSection>
         )}
@@ -886,30 +979,7 @@ export function TgAnalytics({
             пост-производные: считаются по постам выбранного окна. Раньше они игнорировали период
             вовсе и шли по всем постам. */}
         {inGroup('audience') && maxWdAvg > 0 && (
-          <ChartSection
-            title="По дням недели"
-            periodControl
-            variants={(period) => {
-              const { wdAvgValues } = deriveWeekday(full, period.inRange);
-              return [
-                {
-                  key: 'bar',
-                  label: 'Столбцы',
-                  render: (
-                    <div>
-                      <div className="mb-2 text-2xs tracking-wide text-muted-foreground">Ср. просмотры</div>
-                      <BarChart values={wdAvgValues} labels={wdLabels} titles={wdAvgValues.map((v, i) => `${wdLabels[i]}: ${fmt.num(v)} ср. просмотров`)} />
-                    </div>
-                  ),
-                },
-                {
-                  key: 'line',
-                  label: 'Линия',
-                  render: <LineChart values={wdAvgValues} labels={wdLabels} titles={wdAvgValues.map((v, i) => `${wdLabels[i]}: ${fmt.num(v)} ср. просмотров`)} yMin={0} />,
-                },
-              ];
-            }}
-          >
+          <ChartSection title="По дням недели" periodControl variants={weekdayVariants}>
             <WeekdayBestDay full={full} />
           </ChartSection>
         )}
@@ -918,33 +988,7 @@ export function TgAnalytics({
           /* D6.3: секция — последняя в «Аудитории» и при нечётном числе плиток растягивается
              на обе колонки; 7 столбиков с кэпом 48px по центру full-width ряда = «острова в
              пустоте». max-w держит чарт компактным слева (в 1×-плитке кэп не срабатывает). */
-          <ChartSection
-            title="Количество постов"
-            periodControl
-            variants={(period) => {
-              const { wdCountValues } = deriveWeekday(full, period.inRange);
-              return [
-                {
-                  key: 'bar',
-                  label: 'Столбцы',
-                  render: (
-                    <div className="max-w-[560px]">
-                      <BarChart values={wdCountValues} labels={wdLabels} titles={wdCountValues.map((v, i) => `${wdLabels[i]}: ${fmt.num(v)} постов`)} />
-                    </div>
-                  ),
-                },
-                {
-                  key: 'line',
-                  label: 'Линия',
-                  render: (
-                    <div className="max-w-[560px]">
-                      <LineChart values={wdCountValues} labels={wdLabels} titles={wdCountValues.map((v, i) => `${wdLabels[i]}: ${fmt.num(v)} постов`)} yMin={0} />
-                    </div>
-                  ),
-                },
-              ];
-            }}
-          />
+          <ChartSection title="Количество постов" periodControl variants={postCountVariants} />
         )}
       </WidgetGroup>
     </div>

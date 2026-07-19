@@ -1,6 +1,7 @@
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { EmptyState } from '@/components/EmptyState';
 import { fmt } from '@/lib/format';
+import { observeSize } from '@/lib/observeSize';
 import { ChartTooltip } from '@/components/ChartTooltip';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
 
@@ -85,10 +86,7 @@ export function PieChart({ values, labels, titles, colors, height = 200 }: PieCh
     if (!el) return;
     const measure = () => setWidth(el.clientWidth || 600);
     measure();
-    if (typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
+    return observeSize(el, measure);
   }, []);
 
   // The readout must not linger once the chart scrolls under the sticky header or the window

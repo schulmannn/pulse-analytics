@@ -74,27 +74,45 @@ export function WidgetGroup({ id, className, children }: WidgetGroupProps) {
   // ── Дырозатыкание: одинокая карточка в ПОСЛЕДНЕМ ряду растягивается на весь ряд ──────────
   // Хвостовая дыра (half-виджет + пустые колонки до края) читается как сломанная сетка — ряд не
   // должен уметь так выглядеть, даже если юзер сам ресайзнул (визуальный аудит). Прямой DOM-стиль
-  // вместо state: ни ре-рендеров, ни риска #185; rAF-хоп по паттерну observeSize. Каждый прогон
-  // сначала СНИМАЕТ прошлую растяжку, меряет честный layout и решает заново — идемпотентно.
+  // вместо state: ни ре-рендеров, ни риска #185; rAF-хоп по паттерну observeSize. Прогон сначала
+  // только ЧИТАЕТ: не изменилась сигнатура раскладки → полный no-op без единой записи в style
+  // (прежний write-then-read на каждый rAF форсил reflow всей страницы и не давал RO-циклу
+  // угаснуть). Изменилась — снимаем прошлую растяжку, меряем честный layout и решаем заново.
   const groupRootRef = useRef<HTMLDivElement>(null);
   const stretchedRef = useRef<HTMLElement | null>(null);
+  // Сигнатура ПРИМЕНЁННОЙ раскладки (ширина корня + offsetLeft:offsetWidth карточек): высоты в
+  // неё не входят намеренно — принадлежность ряду и ширины колонок от них не зависят, а именно
+  // высоты дёргаются при доезде данных/ховерах и будят RO группы каждый кадр.
+  const appliedSigRef = useRef('');
   useEffect(() => {
     let handle = 0;
+    const layoutSig = (root: HTMLElement, els: HTMLElement[]) =>
+      `${root.clientWidth}|${els.map((el) => `${el.offsetLeft}:${el.offsetWidth}`).join(',')}`;
     const apply = () => {
       const root = groupRootRef.current;
       if (!root) return;
+      // Только чтение на чистом layout'е — reflow не форсится.
+      const els = [...nodes.current.values()].filter((el) => el.isConnected && el.offsetWidth > 0);
+      const sig = layoutSig(root, els);
+      if (sig === appliedSigRef.current) return;
+      // Раскладка реально изменилась — единственный момент, когда позволены записи в style.
+      const hadStretch = stretchedRef.current !== null;
       if (stretchedRef.current) {
         stretchedRef.current.style.gridColumn = '';
         stretchedRef.current = null;
       }
-      const els = [...nodes.current.values()].filter((el) => el.isConnected && el.offsetWidth > 0);
-      if (els.length < 2) return;
-      const maxTop = Math.max(...els.map((el) => el.offsetTop));
-      const lastRow = els.filter((el) => el.offsetTop === maxTop);
-      if (lastRow.length === 1 && lastRow[0].offsetWidth < root.clientWidth * 0.8) {
-        lastRow[0].style.gridColumn = '1 / -1';
-        stretchedRef.current = lastRow[0];
+      // Семантика решения прежняя: одиночка в последнем ряду уже 0.8 ширины корня — тянется.
+      if (els.length >= 2) {
+        const maxTop = Math.max(...els.map((el) => el.offsetTop));
+        const lastRow = els.filter((el) => el.offsetTop === maxTop);
+        if (lastRow.length === 1 && lastRow[0].offsetWidth < root.clientWidth * 0.8) {
+          lastRow[0].style.gridColumn = '1 / -1';
+          stretchedRef.current = lastRow[0];
+        }
       }
+      // Запоминаем сигнатуру ИТОГОВОЙ раскладки: без записей она равна уже посчитанной, после
+      // записей — перемеряем, чтобы следующий прогон no-op'нулся на ней же.
+      appliedSigRef.current = hadStretch || stretchedRef.current ? layoutSig(root, els) : sig;
     };
     const schedule = () => {
       cancelAnimationFrame(handle);

@@ -31,9 +31,12 @@ export function DashboardLayout({ email, role, avatar }: DashboardLayoutProps) {
     // в скруглённом окне с зазором от краёв вьюпорта и СОБСТВЕННЫМ скроллом, так что нижняя
     // кромка панели видна всегда, а не убегает за экран. Sticky-шапки страниц липнут к верху
     // панели. Мобильный поток (<md) нетронут: оконный скролл, без рамки.
+    // scrollbar-gutter:stable у единственного desktop-скроллера резервирует полосу под классический
+    // скроллбар: его появление/исчезновение больше не меняет ширину контента и не будит
+    // ResizeObserver-волну по всем карточкам (источник покадровых штормов после прокрутки).
     <div className="flex min-h-screen bg-background text-foreground md:h-screen md:gap-2.5 md:overflow-hidden md:p-2.5">
       <Sidebar email={email} role={role} avatar={avatar} />
-      <div className="flex min-w-0 flex-1 flex-col md:overflow-y-auto md:rounded-2xl md:border md:border-border">
+      <div className="flex min-w-0 flex-1 flex-col md:overflow-y-auto md:rounded-2xl md:border md:border-border md:[scrollbar-gutter:stable]">
         {isMd ? (
           isDesktopMetricRoute ? null : <Topbar />
         ) : (

@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { lttbDownsample } from '@/lib/downsample';
+import { CHART_MAX_POINTS } from '@/lib/msSeries';
 import { fmt } from '@/lib/format';
 import { pctDelta, type MetricDelta } from '@/lib/delta';
 import { DeltaPill } from '@/components/DeltaPill';
@@ -125,11 +127,14 @@ export function KpiHero({
   const daily = (series ?? []).filter((p) => p.day !== 'total');
   // Без emphasizeLastLabel: акцент-пилюля на последней метке оси среди плоских соседок читалась
   // как залипший ховер, а не как подсветка «сегодня» (прод-фидбек по Обзору) — метки ровные.
-  const chart = daily.length > 1 && (
+  // Кап длинной линии (канон CLAUDE.md): на «Всё» дневной архив уходил в чарт целиком —
+  // LTTB прореживает до CHART_MAX_POINTS, labels/titles строятся из тех же выбранных точек.
+  const shown = lttbDownsample(daily, CHART_MAX_POINTS, (p) => p.value);
+  const chart = shown.length > 1 && (
     <LineChart
-      values={daily.map((p) => p.value)}
-      labels={pickLabels(daily)}
-      titles={daily.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)}`)}
+      values={shown.map((p) => p.value)}
+      labels={pickLabels(shown)}
+      titles={shown.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)}`)}
       height={112}
     />
   );
@@ -249,6 +254,9 @@ export function TrendCard({ title, series, drillTo, id, homeKey, defaultSize }: 
           ? selected.previous.reduce((acc, p) => acc + p.value, 0)
           : null;
         const delta = prev != null && prev > 0 ? pctDelta(total, prev) : null;
+        // Кап линии (канон CLAUDE.md): «Всё» отдаёт многосотневный дневной архив — итог/дельта
+        // выше посчитаны от ПОЛНОГО окна, прореживается только рисуемая линия.
+        const line = lttbDownsample(w, CHART_MAX_POINTS, (p) => p.value);
         return [
           {
             key: 'line',
@@ -257,9 +265,9 @@ export function TrendCard({ title, series, drillTo, id, homeKey, defaultSize }: 
               w.length > 1 ? (
                 <ChartCardBody value={fmt.kpi(total)} delta={delta} caption={delta ? 'к пред. периоду' : period.days === 0 ? 'за всё время' : undefined}>
                   <LineChart
-                    values={w.map((p) => p.value)}
-                    labels={pickLabels(w)}
-                    titles={w.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)}`)}
+                    values={line.map((p) => p.value)}
+                    labels={pickLabels(line)}
+                    titles={line.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)}`)}
                     emphasizeLastLabel
                   />
                 </ChartCardBody>

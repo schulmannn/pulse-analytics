@@ -1,3 +1,4 @@
+import { lttbDownsample } from '@/lib/downsample';
 import { freshness, latestDataMs } from '@/lib/freshness';
 import {
   DAY_MS,
@@ -6,10 +7,12 @@ import {
   comparisonWindow,
 } from '@/lib/metricSeries';
 import type { SeriesGrain } from '@/lib/metricSeries';
+import { CHART_MAX_POINTS, pickIndexes } from '@/lib/msSeries';
 import type { NormalizedPost } from '@/lib/posts';
 import type { PostMetricField } from '@/lib/kpiDerive';
 import type { ComparisonConfig, ComparisonMode, WidgetConfig, WidgetGrain } from '@/lib/widgetConfig';
-import type { DataContext, WidgetMeta, WidgetSeriesPoint } from '@/lib/widgetResolver/types';
+import type { WidgetViz } from '@/lib/widgetMetrics';
+import type { DataContext, WidgetMeta, WidgetResult, WidgetSeriesPoint } from '@/lib/widgetResolver/types';
 
 export const COMPARISON_LABEL: Record<ComparisonMode, string> = {
   none: '',
@@ -77,6 +80,32 @@ export function bucketPostField(
   }
   const keys = winFrom != null ? bucketKeysInWindow(winFrom, winTo, grain) : [...by.keys()].sort();
   return keys.map((key) => ({ date: key, value: by.get(key) ?? 0 }));
+}
+
+/**
+ * Кап длинной серии виджета перед рендером (канон CLAUDE.md: серии длиннее CHART_MAX_POINTS
+ * даунсэмплятся до отрисовки, иначе суб-пиксельная мазня и дорогие кадры — окно «Всё» отдаёт
+ * до 730 дневных бакетов). Вызывается ОДИН раз в generic-слое resolveWidgetMetric, строго
+ * последним шагом: хедлайн/дельта/target/ghost'ы/stats уже посчитаны от ПОЛНОЙ серии — кап
+ * меняет только плотность точек графика. Только визуальная децимация ЛИНЕЙНЫХ представлений:
+ * столбцы (`viz === 'bar'`) не трогаем — пропущенные дни в барах врут, а молча менять
+ * гранулярность запрещено. labels/titles сжимаются согласованно сами: рендер строит их из
+ * выбранных точек серии (widgetRender.seriesToChart). Ghost прореживается ТЕМИ ЖЕ индексами
+ * (pickIndexes — канон msSeries для мультисерий: LTTB выбирал бы разные индексы для каждой
+ * линии и рассинхронизировал base↔current); одиночной линии форму держит LTTB.
+ */
+export function capResultSeries(out: WidgetResult, viz: WidgetViz): WidgetResult {
+  const series = out.series;
+  if (viz === 'bar' || !series || series.length <= CHART_MAX_POINTS) return out;
+  const ghost = out.ghost;
+  if (ghost && ghost.length === series.length) {
+    const idx = pickIndexes(series.length, CHART_MAX_POINTS);
+    out.series = idx.map((i) => series[i]);
+    out.ghost = idx.map((i) => ghost[i]);
+  } else {
+    out.series = lttbDownsample(series, CHART_MAX_POINTS, (point) => point.value);
+  }
+  return out;
 }
 
 export function bucketSubscriberLevels(
