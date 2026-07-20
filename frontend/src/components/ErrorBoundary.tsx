@@ -1,6 +1,7 @@
 import { Component } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
 import { Cartograph } from '@/components/Cartograph';
+import { isChunkLoadError } from '@/lib/lazyWithReload';
 import { buildWidgetErrorReport, nextTraceId } from '@/lib/widgetErrors';
 import { reportCrashToServer } from '@/lib/crashReporting';
 
@@ -52,7 +53,15 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
           <Cartograph name="compass" className="h-28 w-auto" />
           <h2 className="mt-5 text-lg font-medium tracking-tight">Не удалось загрузить раздел</h2>
           <p className="mt-2 text-sm text-muted-foreground">
-            Обновите страницу — обычно это помогает · <span className="font-mono">{error.name || 'Ошибка'}</span>
+            {/* Чанк-ошибка после деплоя (авто-reload из lazyWithReload не помог): честная причина
+                вместо generic-текста — кнопка «Обновить» ниже уже делает нужное. */}
+            {isChunkLoadError(error) ? (
+              'Вышло обновление приложения — обновите страницу.'
+            ) : (
+              <>
+                Обновите страницу — обычно это помогает · <span className="font-mono">{error.name || 'Ошибка'}</span>
+              </>
+            )}
           </p>
           {this.state.traceId && (
             <p className="mt-1 text-2xs text-muted-foreground">

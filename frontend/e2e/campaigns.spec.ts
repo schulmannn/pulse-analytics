@@ -329,8 +329,20 @@ test.describe('Кампании (desktop)', () => {
     await page.getByRole('link', { name: 'Контент' }).first().click();
     await page.getByRole('tab', { name: 'Кампании' }).click();
     await page.getByTestId('campaigns-table').getByRole('row').filter({ hasText: 'Запуск продукта' }).click();
-    await page.getByRole('button', { name: 'Убрать' }).first().click();
-    await expect(page.getByTestId('campaign-posts-table').locator('tbody tr')).toHaveCount(1);
+    // Приложение убирает строку НЕ оптимистично: DELETE → invalidate → фоновый рефетч → рендер.
+    // Один toHaveCount(1) на весь этот конвейер флакует под полной параллельной нагрузкой, поэтому
+    // ждём детерминированно: сортировка date DESC ставит пост 103 первым — убираем именно его,
+    // дожидаемся ответа мутации, затем исчезновения самой строки, и только потом меряем счётчик.
+    const postsRows = page.getByTestId('campaign-posts-table').locator('tbody tr');
+    const removedRow = postsRows.filter({ hasText: 'Обычный пост вне кампании' });
+    await expect(removedRow).toHaveCount(1);
+    const removeDone = page.waitForResponse(
+      (r) => r.request().method() === 'DELETE' && /\/api\/campaigns\/\d+\/posts$/.test(new URL(r.url()).pathname),
+    );
+    await removedRow.getByRole('button', { name: 'Убрать' }).click();
+    await removeDone;
+    await expect(removedRow).toHaveCount(0);
+    await expect(postsRows).toHaveCount(1);
 
     // ── Архивация ──
     await page.getByTestId('campaign-archive-toggle').click();

@@ -200,7 +200,7 @@ export function useLogout() {
  * request provably matches the query key and cancelQueries() aborts it. NOTE: disabled
  * queries report `isPending` (not `isLoading`) — consumers gate skeletons on isPending.
  */
-export function useTgFull(days: PeriodDays, opts?: { windowPair?: boolean }) {
+export function useTgFull(days: PeriodDays, opts?: { windowPair?: boolean; enabled?: boolean }) {
   const { channelId } = useSelectedChannel();
   const { range } = usePeriod();
   // The global custom range only applies to the comparison surfaces (metric pages / report /
@@ -215,7 +215,9 @@ export function useTgFull(days: PeriodDays, opts?: { windowPair?: boolean }) {
     ? Math.min(100, effectiveLimit(days, effRange) * 2)
     : effectiveLimit(days, effRange);
   return useQuery({
-    enabled: channelId != null,
+    // opts.enabled — внешний гейт ПОВЕРХ канального (прогрессивная загрузка Главной: офскрин-
+    // карточка держит query disabled, см. lib/widgetViewport). queryKey не меняется.
+    enabled: channelId != null && opts?.enabled !== false,
     queryKey: ['tg-full', channelId, days, effRange?.from ?? 0, effRange?.to ?? 0, limit],
     staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet(`/api/tg/full?limit=${limit}`, TgFullSchema, { signal, channelId }),
@@ -319,10 +321,11 @@ export function useMentionsArchive(
 }
 
 /** Subscriber history (Postgres channel_daily). Default 730 days. */
-export function useHistory(days = 730) {
+export function useHistory(days = 730, opts?: { enabled?: boolean }) {
   const { channelId } = useSelectedChannel();
   return useQuery({
-    enabled: channelId != null,
+    // opts.enabled — внешний гейт поверх канального (офскрин-виджеты Главной), queryKey прежний.
+    enabled: channelId != null && opts?.enabled !== false,
     queryKey: ['history-channel', channelId, days],
     staleTime: STALE_ARCHIVE,
     queryFn: ({ signal }) => apiGet(`/api/history/channel?days=${days}`, HistorySchema, { signal, channelId }),
@@ -505,10 +508,11 @@ export function useTgStats() {
   });
 }
 
-export function useTgGraphs() {
+export function useTgGraphs(opts?: { enabled?: boolean }) {
   const { channelId } = useSelectedChannel();
   return useQuery({
-    enabled: channelId != null,
+    // opts.enabled — внешний гейт поверх канального (офскрин-виджеты Главной), queryKey прежний.
+    enabled: channelId != null && opts?.enabled !== false,
     queryKey: ['tg-graphs', channelId],
     staleTime: STALE_LIVE,
     queryFn: ({ signal }) => apiGet('/api/tg/mtproto/graphs', GraphsSchema, { signal, channelId }),
@@ -837,6 +841,23 @@ export function useMsRfmSegmentCustomers(period: MsPeriod, segment: string | nul
         { signal, channelId },
       ),
   });
+}
+
+/** Императивная страница ТОГО ЖЕ листинга для CSV-выгрузки сегмента. Прямой apiGet, мимо кэша
+    React Query: у выгрузки свой limit, и запись её страниц под ключи интерактивного листинга
+    (limit=50) подсунула бы «Показать ещё» чужие по размеру страницы. */
+export function fetchMsRfmCustomersPage(
+  channelId: number,
+  period: MsPeriod,
+  segment: string,
+  limit: number,
+  offset: number,
+): Promise<MsRfmCustomers> {
+  return apiGet(
+    `/api/ms/rfm-customers?${msPeriodQuery(period)}&segment=${encodeURIComponent(segment)}&limit=${limit}&offset=${offset}`,
+    MsRfmCustomersSchema,
+    { channelId },
+  );
 }
 
 const MsCohortsSchema = z

@@ -11,6 +11,11 @@ interface DetailShellProps {
   /** 'panel' — a centered Card over a dimmed backdrop (the read explorer). 'fullscreen' — an opaque
    *  edge-to-edge surface (the config sandbox). */
   variant: 'panel' | 'fullscreen';
+  /** 'panel' only. 'viewport' (default) stretches the Card to the full inset height — the explorer
+   *  reading posture. 'content' lets a small body (a 3-row breakdown) size the panel itself:
+   *  height auto + a sane min, same max as today — the Card floats centered in the viewport instead
+   *  of towing ~80% dead space. Mobile (<sm) keeps the full-height edge-to-edge sheet in BOTH modes. */
+  fit?: 'viewport' | 'content';
   /** The clicked card's viewport rect at open time (captured by ChartWidget before the URL changes).
    *  When present (and motion is allowed) the panel grows out of that footprint — a shared-element
    *  "card-to-detail" transition. Absent for URL / back-forward / shared-link opens → plain appear. */
@@ -27,7 +32,7 @@ interface DetailShellProps {
  * control / card menu can't double-handle it), and the × close. Everything visual — header, controls,
  * body, rail — is the caller's `children`, so each surface renders exactly as before.
  */
-export function DetailShell({ ariaLabel, onClose, variant, originRect, children }: DetailShellProps) {
+export function DetailShell({ ariaLabel, onClose, variant, fit = 'viewport', originRect, children }: DetailShellProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   useFocusTrap(panelRef);
   // NO useLayerBack here (unlike PostDetailModal/SourceSheet): this shell is already URL-driven —
@@ -131,7 +136,12 @@ export function DetailShell({ ariaLabel, onClose, variant, originRect, children 
       <Card
         ref={panelRef}
         tabIndex={-1}
-        className="relative z-10 flex h-full w-full flex-col overflow-hidden rounded-none pb-[env(safe-area-inset-bottom)] focus:outline-none sm:rounded-2xl sm:pb-0"
+        // fit='content': ≥sm the Card sizes to its body (auto height, ~200px floor, same 100% cap),
+        // so a small breakdown floats centered instead of a near-empty full-height panel. The base
+        // (mobile) branch stays h-full — the edge-to-edge sheet contract is untouched.
+        className={`relative z-10 flex w-full flex-col overflow-hidden rounded-none pb-[env(safe-area-inset-bottom)] focus:outline-none sm:rounded-2xl sm:pb-0 ${
+          fit === 'content' ? 'h-full sm:h-auto sm:max-h-full sm:min-h-[200px]' : 'h-full'
+        }`}
       >
         {closeButton}
         {children}

@@ -1,5 +1,6 @@
 import { useContext, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useMsCohorts, useMsCustomers, useMsRfm, useMsTopCustomers } from '@/api/queries';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
@@ -11,7 +12,7 @@ import { ErrorState } from '@/components/ErrorState';
 import { Skeleton } from '@/components/ui/skeleton';
 import { lttbDownsample } from '@/lib/downsample';
 import { fmt, pluralRu } from '@/lib/format';
-import { usePagePeriod } from '@/lib/period';
+import { usePagePeriod, usePeriod } from '@/lib/period';
 import { useMsPagePeriod, type MsPeriod } from '@/lib/msPeriod';
 import {
   bucketCustomerDays,
@@ -32,6 +33,8 @@ import { cohortCellValue, isMoneyCohortMode, type MsCohortCell, type MsCohortMod
  */
 export function MsClients() {
   const pp = usePagePeriod();
+  const navigate = useNavigate();
+  const explorerPeriod = usePeriod();
   const days = pp ? pp.days : 30;
   const period = useMsPagePeriod();
   const windowLabel = pp?.range ? 'за выбранный период' : days === 0 ? 'за всё время' : `за ${days} дн.`;
@@ -140,7 +143,18 @@ export function MsClients() {
       </ChartWidget>
 
       <ChartWidget id="ms-rfm" title="RFM-сегменты" fixedSize="full" drillTo="/metrics/ms-rfm">
-        <MsRfmBody state={rfm} />
+        {/* Строка сегмента ведёт сразу в провал ?segment=<key> (клик по карточке мимо строк —
+            обычный drillTo без сегмента). Обязателен ТОТ ЖЕ посев глобального explorer-периода,
+            что делает openExpand drillTo-карточки (useChartSectionModel): metric-страница владеет
+            им, и без посева 7/30/90/кастом откатился бы к прежнему значению другой страницы. */}
+        <MsRfmBody
+          state={rfm}
+          onSelectSegment={(key) => {
+            if (pp?.range) explorerPeriod.setRange(pp.range);
+            else if (pp) explorerPeriod.setDays(pp.days);
+            navigate(`/metrics/ms-rfm?segment=${key}`);
+          }}
+        />
       </ChartWidget>
 
       <MsTopCustomersCard state={topCustomers} windowLabel={windowLabel} />

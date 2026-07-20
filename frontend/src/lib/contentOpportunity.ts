@@ -25,6 +25,59 @@ export function opportunityShareBoundary(formatCount: number): number {
   return formatCount > 0 ? 1 / formatCount : 0.5;
 }
 
+export interface OpportunityChipPoint {
+  /** Позиция чипа в процентах плоскости (`y` — CSS `bottom`, больше = выше). */
+  x: number;
+  y: number;
+}
+
+export interface OpportunityChipLayoutOptions {
+  /** Дистанция по X (п.п.), ближе которой чипы считаются пересекающимися по горизонтали. */
+  xOverlap?: number;
+  /** Высота чипа + зазор в процентах высоты плоскости — шаг вертикального разведения. */
+  step?: number;
+  /** Границы плоскости по вертикали (совпадают с клампами opportunityY). */
+  minY?: number;
+  maxY?: number;
+}
+
+/**
+ * Детерминированное разведение чипов форматов на скаттер-плоскости — без физики и итераций
+ * до сходимости. Чипы обходятся в порядке возрастания X (при равных X — исходный порядок);
+ * последующий чип, пересекающийся с уже размещённым по обеим осям, каскадно пересаживается
+ * на высоту чипа + зазор НИЖЕ конфликтующего. Если каскад выводит за нижний край плоскости,
+ * чип разводится вверх; результат кламплен в границы. Позиции возвращаются по исходным
+ * индексам входа.
+ */
+export function resolveOpportunityChipOverlaps(
+  chips: readonly OpportunityChipPoint[],
+  { xOverlap = 10, step = 14, minY = 12, maxY = 88 }: OpportunityChipLayoutOptions = {},
+): OpportunityChipPoint[] {
+  const order = chips.map((_, index) => index).sort((a, b) => chips[a].x - chips[b].x || a - b);
+  const placed: OpportunityChipPoint[] = [];
+  const result: OpportunityChipPoint[] = chips.map((chip) => ({ ...chip }));
+  const conflictWith = (x: number, y: number) =>
+    placed.find((other) => Math.abs(other.x - x) < xOverlap && Math.abs(other.y - y) < step);
+  for (const index of order) {
+    const { x } = chips[index];
+    const start = Math.min(maxY, Math.max(minY, chips[index].y));
+    // Каждый прыжок строго монотонен (ниже/выше конфликтующего ровно на step), поэтому каждый
+    // размещённый чип встречается не более одного раза — цикл ограничен числом размещённых.
+    let y = start;
+    for (let hit = conflictWith(x, y); hit; hit = conflictWith(x, y)) y = hit.y - step;
+    if (y < minY) {
+      y = start;
+      for (let hit = conflictWith(x, y); hit && y < maxY; hit = conflictWith(x, y)) {
+        y = Math.min(maxY, hit.y + step);
+      }
+    }
+    const resolved = { x, y };
+    placed.push(resolved);
+    result[index] = resolved;
+  }
+  return result;
+}
+
 const FORMAT_LABELS: Record<string, string> = {
   text: 'Текст',
   photo: 'Фото',

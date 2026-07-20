@@ -125,8 +125,8 @@ export function KpiHero({
 }) {
   const navigate = useNavigate();
   const daily = (series ?? []).filter((p) => p.day !== 'total');
-  // Без emphasizeLastLabel: акцент-пилюля на последней метке оси среди плоских соседок читалась
-  // как залипший ховер, а не как подсветка «сегодня» (прод-фидбек по Обзору) — метки ровные.
+  // Метки оси ровные: акцент-пилюля последней метки удалена продуктово (прод-фидбек по Обзору:
+  // читалась как залипший ховер) — см. компакт-метки в LineChart.
   // Кап длинной линии (канон CLAUDE.md): на «Всё» дневной архив уходил в чарт целиком —
   // LTTB прореживает до CHART_MAX_POINTS, labels/titles строятся из тех же выбранных точек.
   const shown = lttbDownsample(daily, CHART_MAX_POINTS, (p) => p.value);
@@ -268,7 +268,6 @@ export function TrendCard({ title, series, drillTo, id, homeKey, defaultSize }: 
                     values={line.map((p) => p.value)}
                     labels={pickLabels(line)}
                     titles={line.map((p) => `${fmtDay(p.day)}: ${fmt.num(p.value)}`)}
-                    emphasizeLastLabel
                   />
                 </ChartCardBody>
               ) : (

@@ -3,7 +3,7 @@
 
 import { movingAverageGhost, sameWeekdayGhost } from '@/lib/metricSeries';
 import { getMetric } from '@/lib/widgetMetrics';
-import type { MetricResolver } from '@/lib/widgetMetrics';
+import type { MetricResolver, SeriesAggregation } from '@/lib/widgetMetrics';
 import type { WidgetConfig } from '@/lib/widgetConfig';
 import { resolveIgMetric } from '@/lib/widgetResolver/ig';
 import { resolveMsMetric } from '@/lib/widgetResolver/ms';
@@ -28,6 +28,24 @@ export type {
 export { pluralRu } from '@/lib/format';
 
 const unavailable: WidgetMetricResolver = (_metric, _config, _ctx, out) => ({ ...out, empty: true });
+
+/**
+ * Вид агрегации серии для недельного капа баров (capResultSeries): канон — `seriesAgg` каталога
+ * (widgetMetrics), где 'level' = last-of-bucket, остальное — поток (сумма корзины).
+ * Классификация ВСЕХ series-метрик каталога:
+ *  - flow (сумма): tg.views, tg.avgReach (его СЕРИЯ — дневные суммы охвата bucketPostField,
+ *    среднее живёт только в хедлайне), tg.reactions, tg.forwards, tg.netGrowth (сумма дневных
+ *    нетто = нетто недели), ig.reach, ig.netFollowers, ig.interactions, ms.revenue, ms.orders;
+ *  - level (last-of-bucket): tg.subscribers, ig.followers — каталог (`seriesAgg: 'level'`,
+ *    серии bucketSubscriberLevels), плюс докласифицированный здесь ms.avgCheck: средний чек —
+ *    не поток (сумма дневных СРЕДНИХ за неделю завышала бы значение на порядок), last-of-bucket
+ *    сохраняет масштаб честно.
+ */
+const SERIES_AGG_OVERRIDES: Record<string, SeriesAggregation> = { 'ms.avgCheck': 'level' };
+
+function seriesAggOf(metricId: string): SeriesAggregation {
+  return getMetric(metricId)?.seriesAgg ?? SERIES_AGG_OVERRIDES[metricId] ?? 'flow';
+}
 
 const WIDGET_RESOLVERS: Record<MetricResolver, WidgetMetricResolver> = {
   ...TG_WIDGET_RESOLVERS,
@@ -129,5 +147,5 @@ export function resolveWidgetMetric(config: WidgetConfig, ctx: DataContext): Wid
     }
     result.stats = { max, avg: sum / fullSeries.length };
   }
-  return capResultSeries(result, config.viz);
+  return capResultSeries(result, config.viz, seriesAggOf(config.metricId));
 }

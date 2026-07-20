@@ -11,7 +11,7 @@ import { CHART_MAX_POINTS, pickIndexes } from '@/lib/msSeries';
 import type { NormalizedPost } from '@/lib/posts';
 import type { PostMetricField } from '@/lib/kpiDerive';
 import type { ComparisonConfig, ComparisonMode, WidgetConfig, WidgetGrain } from '@/lib/widgetConfig';
-import type { WidgetViz } from '@/lib/widgetMetrics';
+import type { SeriesAggregation, WidgetViz } from '@/lib/widgetMetrics';
 import type { DataContext, WidgetMeta, WidgetResult, WidgetSeriesPoint } from '@/lib/widgetResolver/types';
 
 export const COMPARISON_LABEL: Record<ComparisonMode, string> = {
@@ -87,16 +87,53 @@ export function bucketPostField(
  * даунсэмплятся до отрисовки, иначе суб-пиксельная мазня и дорогие кадры — окно «Всё» отдаёт
  * до 730 дневных бакетов). Вызывается ОДИН раз в generic-слое resolveWidgetMetric, строго
  * последним шагом: хедлайн/дельта/target/ghost'ы/stats уже посчитаны от ПОЛНОЙ серии — кап
- * меняет только плотность точек графика. Только визуальная децимация ЛИНЕЙНЫХ представлений:
- * столбцы (`viz === 'bar'`) не трогаем — пропущенные дни в барах врут, а молча менять
- * гранулярность запрещено. labels/titles сжимаются согласованно сами: рендер строит их из
- * выбранных точек серии (widgetRender.seriesToChart). Ghost прореживается ТЕМИ ЖЕ индексами
- * (pickIndexes — канон msSeries для мультисерий: LTTB выбирал бы разные индексы для каждой
- * линии и рассинхронизировал base↔current); одиночной линии форму держит LTTB.
+ * меняет только плотность точек графика.
+ *
+ * Линии — визуальная децимация: ghost прореживается ТЕМИ ЖЕ индексами (pickIndexes — канон
+ * msSeries для мультисерий: LTTB выбирал бы разные индексы для каждой линии и рассинхронизировал
+ * base↔current); одиночной линии форму держит LTTB. labels/titles сжимаются согласованно сами:
+ * рендер строит их из выбранных точек серии (widgetRender.seriesToChart).
+ *
+ * Столбцы (`viz === 'bar'`) децимировать нельзя — пропущенные дни в барах врут. Вместо этого
+ * длинная дневная серия ЧЕСТНО агрегируется в календарные недели (Monday-anchored — та же
+ * математика корзин, что у windowGraphSeries в TgAnalytics): `kind === 'flow'` суммируется,
+ * `kind === 'level'` (подписчики/фолловеры — bucketSubscriberLevels-серии) берёт last-of-bucket.
+ * date корзины = понедельник (bucketKeyOf(..., 'week')), так что подписи оси — даты понедельников;
+ * маркер «по неделям» дописывается в meta.periodLabel (строку меты карточки). Ghost выровнен по
+ * ДНЕВНЫМ индексам и после агрегации длине не соответствует — отбрасывается с честной
+ * meta.comparisonNote вместо рассинхронизированной пары серий.
  */
-export function capResultSeries(out: WidgetResult, viz: WidgetViz): WidgetResult {
+export function capResultSeries(out: WidgetResult, viz: WidgetViz, kind: SeriesAggregation = 'flow'): WidgetResult {
   const series = out.series;
-  if (viz === 'bar' || !series || series.length <= CHART_MAX_POINTS) return out;
+  if (!series || series.length <= CHART_MAX_POINTS) return out;
+  if (viz === 'bar') {
+    // Лексикографический сорт YYYY-MM-DD-ключей = хронология; для level порядок обязателен
+    // (last-of-bucket), для flow безразличен. Непарсибельная дата — честно оставить как есть.
+    const points = [...series].sort((a, b) => a.date.localeCompare(b.date));
+    const by = new Map<string, number>();
+    for (const point of points) {
+      const timestamp = Date.parse(point.date);
+      if (!Number.isFinite(timestamp)) return out;
+      const key = bucketKeyOf(timestamp, 'week');
+      by.set(key, kind === 'level' ? point.value : (by.get(key) ?? 0) + point.value);
+    }
+    out.series = [...by.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, value]) => ({ date, value }));
+    if (out.ghost && out.ghost.length !== out.series.length) {
+      out.ghost = undefined;
+      out.ghostLabel = undefined;
+      out.meta = { ...out.meta, comparisonNote: 'сравнение недоступно для агрегированных недель' };
+    }
+    out.meta = {
+      ...out.meta,
+      periodLabel: out.meta?.periodLabel ? `${out.meta.periodLabel} · по неделям` : 'по неделям',
+      // Машинный признак для рендера: per-point тултипы обязаны нести « · неделя», иначе
+      // «<дата понедельника>: значение» читается как один день (честность подписи).
+      seriesGrain: 'week',
+    };
+    return out;
+  }
   const ghost = out.ghost;
   if (ghost && ghost.length === series.length) {
     const idx = pickIndexes(series.length, CHART_MAX_POINTS);

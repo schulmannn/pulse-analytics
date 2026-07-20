@@ -44,6 +44,21 @@ describe('seriesToChart', () => {
     expect(c.labels).toHaveLength(2);
     expect(c.titles).toHaveLength(2);
     expect(c.titles[0]).toContain(c.labels[0]);
+    expect(c.titles[0]).not.toContain('неделя'); // дневная серия — без недельного суффикса
+  });
+  it('недельно агрегированная серия несёт « · неделя» в каждом тултипе', () => {
+    const result = {
+      metricId: 'tg.views',
+      kind: 'series',
+      unit: 'views',
+      meta: { seriesGrain: 'week' },
+      series: [
+        { date: '2026-06-08', value: 700 },
+        { date: '2026-06-15', value: 900 },
+      ],
+    } as WidgetResult;
+    const c = seriesToChart(result);
+    expect(c.titles.every((t) => t.endsWith(' · неделя'))).toBe(true);
   });
   it('handles a missing series as empty arrays', () => {
     const c = seriesToChart({ metricId: 'x', kind: 'value', unit: 'number' } as WidgetResult);

@@ -103,7 +103,7 @@ export function MsChannels() {
         )}
       </ChartWidget>
 
-      <ChartWidget id="ms-geography" title={`География заказов ${windowLabel}`} fixedSize="half" drillTo="/metrics/ms-geography">
+      <ChartWidget id="ms-geography" title={`География заказов ${windowLabel}`} fixedSize="full" drillTo="/metrics/ms-geography">
         {geo.isPending ? (
           <ListSkeleton rows={5} />
         ) : geo.isError ? (
@@ -863,27 +863,34 @@ export function MsGeographyRows({
   const shown = expanded ? rows : rows.slice(0, 5);
   const hiddenCities = expanded ? 0 : Math.max(0, rows.length - shown.length);
   const maxOrders = rows[0]?.orders ?? 1;
+  const cityRows = shown.map((r) => (
+    <div key={r.city}>
+      <div className="flex items-baseline justify-between gap-3 text-xs">
+        <span className="min-w-0 truncate text-foreground">{r.city}</span>
+        <span className="shrink-0 tabular-nums text-muted-foreground">
+          <span className="font-medium text-foreground">{fmt.num(r.orders)}</span> · {fmt.short(r.sum)} ₽
+        </span>
+      </div>
+      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
+        <div
+          className="h-full rounded-full"
+          style={{
+            width: `${Math.max(3, Math.round((r.orders / maxOrders) * 100))}%`,
+            backgroundColor: 'hsl(var(--chart-role-primary) / 0.75)',
+          }}
+        />
+      </div>
+    </div>
+  ));
   return (
     <div className={expanded ? 'space-y-2.5 pt-1' : 'space-y-1.5'}>
-      {shown.map((r) => (
-        <div key={r.city}>
-          <div className="flex items-baseline justify-between gap-3 text-xs">
-            <span className="min-w-0 truncate text-foreground">{r.city}</span>
-            <span className="shrink-0 tabular-nums text-muted-foreground">
-              <span className="font-medium text-foreground">{fmt.num(r.orders)}</span> · {fmt.short(r.sum)} ₽
-            </span>
-          </div>
-          <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
-            <div
-              className="h-full rounded-full"
-              style={{
-                width: `${Math.max(3, Math.round((r.orders / maxOrders) * 100))}%`,
-                backgroundColor: 'hsl(var(--chart-role-primary) / 0.75)',
-              }}
-            />
-          </div>
-        </div>
-      ))}
+      {expanded ? (
+        cityRows
+      ) : (
+        // Full-width карточка: на md+ города встают в две колонки, сноска остаётся на всю ширину
+        // под ними; мобайл — прежняя одна колонка с тем же вертикальным ритмом.
+        <div className="grid grid-cols-1 gap-x-6 gap-y-1.5 md:grid-cols-2">{cityRows}</div>
+      )}
       {!expanded && (hiddenCities > 0 || noCity > 0) && (
         <p className="truncate text-2xs text-muted-foreground">
           {hiddenCities > 0 && (
