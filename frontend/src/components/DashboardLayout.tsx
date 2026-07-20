@@ -35,9 +35,9 @@ export function DashboardLayout({ email, role, avatar }: DashboardLayoutProps) {
     // scrollbar-gutter:stable у единственного desktop-скроллера резервирует полосу под классический
     // скроллбар: его появление/исчезновение больше не меняет ширину контента и не будит
     // ResizeObserver-волну по всем карточкам (источник покадровых штормов после прокрутки).
-    <div className="flex min-h-screen bg-background text-foreground md:h-screen md:gap-2.5 md:overflow-hidden md:p-2.5">
+    <div className="dashboard-shell flex min-h-screen bg-muted/35 text-foreground md:h-screen md:overflow-hidden">
       <Sidebar email={email} role={role} avatar={avatar} />
-      <div className="flex min-w-0 flex-1 flex-col md:overflow-y-auto md:rounded-2xl md:border md:border-border md:[scrollbar-gutter:stable]">
+      <div className="dashboard-content-frame flex min-w-0 flex-1 flex-col bg-background md:m-2 md:ml-0 md:overflow-y-auto md:rounded-xl md:border md:border-border/80 md:shadow-sm md:[scrollbar-gutter:stable]">
         {isMd ? (
           isDesktopMetricRoute ? null : <Topbar />
         ) : (
@@ -46,7 +46,7 @@ export function DashboardLayout({ email, role, avatar }: DashboardLayoutProps) {
         {/* Extra bottom padding on mobile clears the fixed bottom nav; md+ navigates via the sidebar. */}
         <main
           className={cn(
-            'flex-1 px-4 pb-24 sm:px-6 md:pb-5',
+            'dashboard-main flex-1 px-4 pb-24 sm:px-6 md:pb-6',
             isDesktopMetricRoute ? 'pt-3' : 'pt-5',
           )}
         >
@@ -66,8 +66,8 @@ function DemoBanner() {
   const { demo, exitDemo } = useDemo();
   if (!demo) return null;
   return (
-    <div className="mb-5 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-border bg-card px-4 py-2.5 text-sm">
-      <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
+    <div className="mb-5 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-primary/20 bg-primary/[0.06] px-4 py-2.5 text-sm shadow-sm">
+      <span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full bg-primary shadow-[0_0_0_4px_hsl(var(--primary)/0.12)]" />
       <span className="text-foreground">Демо-режим — данные примерные, для ознакомления.</span>
       <Button
         type="button"
@@ -90,8 +90,9 @@ function Topbar() {
   const title = FEED_ROUTES.includes(pathname) ? null : routeTitle(pathname);
   if (!title) return null;
   return (
-    <header data-dashboard-topbar className="sticky top-0 z-sticky flex h-14 items-center gap-3 border-b bg-background/80 px-4 backdrop-blur sm:gap-4 sm:px-6 print:hidden">
-      <h1 className="min-w-0 truncate text-lg font-medium tracking-tight">{title}</h1>
+    <header data-dashboard-topbar className="sticky top-0 z-sticky flex h-14 items-center gap-3 border-b bg-background/90 px-4 backdrop-blur-xl sm:gap-4 sm:px-6 print:hidden">
+      <span aria-hidden="true" className="h-4 w-1 rounded-full bg-primary" />
+      <h1 className="min-w-0 truncate text-base font-semibold tracking-tight">{title}</h1>
     </header>
   );
 }

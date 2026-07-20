@@ -49,6 +49,8 @@ import { HomeSourceProvider } from '@/lib/homeSourceContext';
 import { useActiveNetwork } from '@/components/layout/nav';
 import { networkByKey } from '@/lib/networks';
 import { HomeAiHero } from '@/panels/ai/HomeAiHero';
+import { Button } from '@/components/ui/button';
+import { Plus } from 'lucide-react';
 
 /**
  * Personal Home — a per-user board of the widgets the reader pinned via the ⋯ «На главную» item
@@ -262,30 +264,36 @@ export function Home() {
 
   return (
     <div>
-      {/* Sticky page header — the Add / Edit actions stay reachable while scrolling the board.
-          Solid canvas bg, NO hairline: the strip is indistinguishable from the page at rest and
-          simply clips the board sliding under it (владелец: «серая полоса» под шапкой лишняя —
-          same treatment as the feed sticky header). Desktop (md+): a stable «Добавить виджет» +
+      {/* Sticky shadcn-style page header — the Add / Edit actions stay reachable while scrolling the
+          board. The shared translucent surface and quiet hairline match the focused feed pages.
+          Desktop (md+): a stable «Добавить виджет» +
           «Изменить/Готово» toolbar (fixed footprint, no hover-reflow). Mobile (<md): the compact
           expand-on-touch edit chip, preserved verbatim. */}
-      <div className={cn(PAGE_HEADER_SHELL, 'flex items-start justify-between gap-3 md:items-center')}>
-        <h2 className="text-xl font-medium tracking-tight text-foreground">Главная</h2>
+      <div className={cn(PAGE_HEADER_SHELL, 'flex items-start justify-between gap-4 md:items-center')}>
+        <div className="min-w-0">
+          <p className="mb-1 hidden text-xs font-medium uppercase tracking-[0.16em] text-primary md:block">
+            Рабочее пространство
+          </p>
+          <h2 className="text-2xl font-semibold tracking-tight text-foreground md:text-3xl">Главная</h2>
+          <p className="mt-1 hidden text-sm text-muted-foreground md:block">
+            Ваши ключевые показатели и источники в одной настраиваемой доске.
+          </p>
+        </div>
         <div className="flex items-center gap-2">
           {/* Desktop read mode owns one direct catalog command. Empty and edit states expose their
               own single add affordance instead, so identical CTAs never compete on one screen. */}
           {known.length > 0 && !editing && (
-            <button
+            <Button
               type="button"
               onClick={() => add.openCatalog()}
               aria-label="Добавить виджет"
               title="Добавить виджет"
-              className="btn-pill hidden items-center gap-1.5 border border-border bg-transparent px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-muted md:inline-flex"
+              size="sm"
+              className="hidden md:inline-flex"
             >
-              <svg className="h-4 w-4 shrink-0 text-primary" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
-                <path d="M8 3v10M3 8h10" strokeLinecap="round" />
-              </svg>
+              <Plus aria-hidden="true" />
               Добавить виджет
-            </button>
+            </Button>
           )}
           <div className="edit-toggle-slot">
             <button
@@ -559,8 +567,8 @@ function AddWidgetBar({ pinned, onOpenCatalog }: { pinned: string[]; onOpenCatal
 
 /**
  * First-ever Home. Desktop (md+): a calm UNFRAMED working surface — a headline, guidance and two
- * actions laid out on the page, not boxed in a decorative card. Mobile (<md): the framed card is
- * preserved verbatim (its «Добавить виджет» primary still enters edit mode → bottom dock). The
+ * actions laid out on the page, not boxed in a decorative card. Mobile (<md): the framed card keeps
+ * the same interaction contract (its «Добавить виджет» primary enters edit mode → bottom dock). The
  * primary desktop CTA opens the catalog directly; «Собрать по умолчанию» seeds the availability-aware
  * default board.
  */
@@ -620,7 +628,7 @@ function HomeEmptyState({
     );
   }
   return (
-    <div className="mx-auto max-w-md rounded-2xl border border-border bg-card p-6 text-center sm:p-8">
+    <div className="mx-auto max-w-md rounded-xl border border-border/80 bg-card p-6 text-center shadow-sm sm:p-8">
       <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-full border border-border text-muted-foreground">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden="true">
           <path d="M3 10.5 12 3l9 7.5" />
