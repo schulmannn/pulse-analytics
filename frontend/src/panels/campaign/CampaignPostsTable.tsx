@@ -5,6 +5,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { NetworkBadge } from '@/components/campaigns/shared';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   applyCampaignPostTableState,
   filterPostsByQuery,
@@ -210,12 +211,10 @@ function InteractivePostsTable({
               <tr className="border-b border-border text-xs font-medium text-muted-foreground">
                 {canEdit && (
                   <th className="w-10 py-3 pl-0 pr-2">
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       aria-label="Выбрать все публикации"
                       checked={allVisibleSelected}
-                      onChange={toggleAll}
-                      className="size-4 accent-primary"
+                      onCheckedChange={toggleAll}
                       data-testid="campaign-select-all"
                     />
                   </th>
@@ -236,12 +235,10 @@ function InteractivePostsTable({
                   <tr key={k} className="transition-colors hover:bg-hover-row">
                     {canEdit && (
                       <td className="py-3 pl-0 pr-2">
-                        <input
-                          type="checkbox"
+                        <Checkbox
                           aria-label="Выбрать публикацию"
                           checked={selected.has(k)}
-                          onChange={() => toggle(p)}
-                          className="size-4 accent-primary"
+                          onCheckedChange={() => toggle(p)}
                           data-testid="campaign-post-select"
                         />
                       </td>

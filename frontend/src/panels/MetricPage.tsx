@@ -31,6 +31,7 @@ import { PostDetailModal } from '@/components/PostDetailModal';
 import { ChartSection } from '@/components/instagram/shared';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { DateRangePicker } from '@/components/DateRangePicker';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { lttbDownsample } from '@/lib/downsample';
 import { DAY_MS, alignGhost, baselineCoveredByPosts, bucketKeyOf, bucketKeysInWindow, comparisonWindow } from '@/lib/metricSeries';
 import type { Grain } from '@/lib/metricSeries';
@@ -228,14 +229,6 @@ export function MetricPage() {
   const { days, setDays, range, setRange, inRange } = usePeriod();
   // «Свой диапазон» calendar popover (the DateRangePicker → global period `range`, URL-persisted).
   const [pickerOpen, setPickerOpen] = useState(false);
-  useEffect(() => {
-    if (!pickerOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setPickerOpen(false);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [pickerOpen]);
   const { data, isPending, isError, error } = useTgFull(days, { windowPair: true });
   const { data: history } = useHistory(730);
   const { channelId } = useSelectedChannel();
@@ -889,41 +882,31 @@ export function MetricPage() {
             />
             {/* «Свой диапазон» — opens the calendar picker; applies to the global period `range`
                 (URL-persisted, used everywhere via inRange). The active range is shown by the chip below. */}
-            <div className="relative">
-              <button
-                type="button"
-                aria-haspopup="dialog"
-                aria-expanded={pickerOpen}
-                onClick={() => setPickerOpen((v) => !v)}
-                className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors ${
-                  range ? 'border-primary/40 text-primary' : 'border-border text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                Свой диапазон
-              </button>
-              {pickerOpen && (
-                <>
-                  <div className="fixed inset-0 z-popover" onClick={() => setPickerOpen(false)} aria-hidden="true" />
-                  <div
-                    role="dialog"
-                    aria-label="Свой диапазон дат"
-                    className="absolute right-0 top-full z-popover mt-2 rounded-xl border border-border bg-popover p-3"
-                  >
-                    <DateRangePicker
-                      value={range}
-                      onApply={(r) => {
-                        setRange(r);
-                        setPickerOpen(false);
-                      }}
-                      onReset={() => {
-                        setRange(null);
-                        setPickerOpen(false);
-                      }}
-                    />
-                  </div>
-                </>
-              )}
-            </div>
+            <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors ${
+                    range ? 'border-primary/40 text-primary' : 'border-border text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  Свой диапазон
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="end" sideOffset={8} className="w-auto p-3">
+                <DateRangePicker
+                  value={range}
+                  onApply={(nextRange) => {
+                    setRange(nextRange);
+                    setPickerOpen(false);
+                  }}
+                  onReset={() => {
+                    setRange(null);
+                    setPickerOpen(false);
+                  }}
+                />
+              </PopoverContent>
+            </Popover>
             {range && (
               <button
                 type="button"

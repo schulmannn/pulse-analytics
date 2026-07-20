@@ -5,6 +5,7 @@ import { useChannels } from '@/api/queries';
 import { WidgetBody } from '@/components/ConfigWidget';
 import { PillSelect } from '@/components/PillSelect';
 import { SegmentedControl } from '@/components/SegmentedControl';
+import { Switch } from '@/components/ui/switch';
 import { ChannelScope } from '@/lib/channel-context';
 import { ExpandedChartHeightContext } from '@/components/ExpandableChart';
 import { DEFAULT_WIDGET_DAYS } from '@/lib/period';
@@ -346,25 +347,14 @@ export function WidgetConfigControls({
       </div>
 
       {vizAllowsTonalSurface(config.viz) ? (
-        <button
-          type="button"
-          role="switch"
-          aria-checked={config.style?.tinted ?? true}
-          onClick={() => onChange({ style: { ...config.style, tinted: (config.style?.tinted ?? true) ? false : true } })}
-          className="mt-4 flex w-full items-center justify-between gap-2 text-left text-sm text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <span>Цветной фон</span>
-          <span
-            aria-hidden="true"
-            className={
-              (config.style?.tinted ?? true)
-                ? 'rounded-full border border-primary/40 px-2 py-0.5 text-2xs font-medium text-primary'
-                : 'rounded-full border border-border px-2 py-0.5 text-2xs font-medium text-muted-foreground'
-            }
-          >
-            {(config.style?.tinted ?? true) ? 'вкл' : 'выкл'}
-          </span>
-        </button>
+        <div className="mt-4 flex w-full items-center justify-between gap-2 text-sm text-muted-foreground">
+          <label htmlFor="config-tinted">Цветной фон</label>
+          <Switch
+            id="config-tinted"
+            checked={config.style?.tinted ?? true}
+            onCheckedChange={(checked) => onChange({ style: { ...config.style, tinted: checked } })}
+          />
+        </div>
       ) : (
         <DisabledField label="Цветной фон" reason="для сравнений и категорий фон остаётся нейтральным" />
       )}

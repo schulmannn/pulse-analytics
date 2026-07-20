@@ -18,6 +18,7 @@ import { IgPostDetailModal } from '@/components/instagram/IgPostDetailModal';
 import { AddToCampaignDialog } from '@/components/campaigns/AddToCampaignDialog';
 import { CampaignFilterControl } from '@/components/campaigns/CampaignFilterControl';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Checkbox } from '@/components/ui/checkbox';
 import { RichText } from '@/components/RichText';
 import { exportIgPosts } from '@/lib/igExport';
 import { exportFilename } from '@/lib/analyticsExport';
@@ -324,12 +325,10 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
             <thead>
               <tr className="border-b border-border text-xs font-medium text-muted-foreground">
                 <th className="w-10 py-2.5 pl-0 pr-2">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     aria-label="Выбрать все видимые публикации"
                     checked={allVisibleSelected}
-                    onChange={toggleAllVisible}
-                    className="size-4 accent-primary"
+                    onCheckedChange={toggleAllVisible}
                   />
                 </th>
                 <th className="w-12 py-2.5 pl-0 pr-3 text-center"></th>
@@ -365,12 +364,10 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
                   >
                     <td className="py-2.5 pl-0 pr-2" onClick={(e) => e.stopPropagation()}>
                       {post.id != null && (
-                        <input
-                          type="checkbox"
+                        <Checkbox
                           aria-label="Выбрать публикацию"
                           checked={selected.has(post.id)}
-                          onChange={() => toggleSelect(post.id!)}
-                          className="size-4 accent-primary"
+                          onCheckedChange={() => toggleSelect(post.id!)}
                           data-testid="ig-post-select"
                         />
                       )}

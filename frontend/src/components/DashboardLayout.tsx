@@ -8,6 +8,7 @@ import { NETWORKS, NetworkGlyph } from '@/lib/networks';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { MobileBottomNav, MobileHeader } from '@/components/layout/MobileNav';
 import { FEED_ROUTES, routeTitle, useActiveNetwork } from '@/components/layout/nav';
+import { Button } from '@/components/ui/button';
 
 interface DashboardLayoutProps {
   email?: string;
@@ -68,13 +69,15 @@ function DemoBanner() {
     <div className="mb-5 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-border bg-card px-4 py-2.5 text-sm">
       <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
       <span className="text-foreground">Демо-режим — данные примерные, для ознакомления.</span>
-      <button
+      <Button
         type="button"
+        variant="secondary"
+        size="xs"
         onClick={exitDemo}
-        className="btn-pill ml-auto shrink-0 border border-border bg-background px-3 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+        className="ml-auto shrink-0"
       >
         Выйти из демо
-      </button>
+      </Button>
     </div>
   );
 }

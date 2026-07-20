@@ -1,4 +1,4 @@
-import { useRef, useState, type ChangeEvent, type FormEvent } from 'react';
+import { useState, type ChangeEvent, type FormEvent } from 'react';
 import {
   useChangePassword,
   useDeleteAccount,
@@ -10,6 +10,21 @@ import { ApiError } from '@/api/client';
 import { resizeImageToDataUrl } from '@/lib/image';
 import { useTheme, type ThemeMode } from '@/lib/theme';
 import { cn } from '@/lib/utils';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
   BTN_DESTRUCTIVE,
   BTN_SECONDARY,
@@ -34,7 +49,13 @@ export function ProfileSection() {
   const avatar = me.data?.avatar;
   const email = me.data?.email ?? '';
   const initials =
-    (email ? email.replace(/@.*/, '').replace(/[^\p{L}]/gu, '').slice(0, 2).toUpperCase() : '') || '?';
+    (email
+      ? email
+          .replace(/@.*/, '')
+          .replace(/[^\p{L}]/gu, '')
+          .slice(0, 2)
+          .toUpperCase()
+      : '') || '?';
 
   const onFile = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -63,10 +84,22 @@ export function ProfileSection() {
         control={
           <>
             <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-avatar text-xs font-medium text-ink2">
-              {avatar ? <img src={avatar} alt="" className="h-full w-full object-cover" /> : initials}
+              {avatar ? (
+                <img
+                  src={avatar}
+                  alt=""
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                initials
+              )}
             </span>
             <label className={cn(BTN_SECONDARY, 'cursor-pointer')}>
-              {updateAvatar.isPending ? 'Загрузка…' : avatar ? 'Сменить фото' : 'Загрузить фото'}
+              {updateAvatar.isPending
+                ? 'Загрузка…'
+                : avatar
+                  ? 'Сменить фото'
+                  : 'Загрузить фото'}
               <input
                 type="file"
                 accept="image/png,image/jpeg,image/webp"
@@ -87,18 +120,28 @@ export function ProfileSection() {
             )}
           </>
         }
-        footer={err ? <p className="mt-2 text-xs font-medium text-destructive">{err}</p> : null}
+        footer={
+          err ? (
+            <p className="mt-2 text-xs font-medium text-destructive">{err}</p>
+          ) : null
+        }
       />
       <SettingsRow
         title="Email"
         description="Адрес, с которым вы входите в Atlavue."
-        control={<span className="font-mono text-xs text-ink2">{email || '—'}</span>}
+        control={
+          <span className="font-mono text-xs text-ink2">{email || '—'}</span>
+        }
       />
     </SettingsGroup>
   );
 }
 
-const THEME_OPTIONS: Array<{ value: ThemeMode; label: string; icon: SettingsIconName }> = [
+const THEME_OPTIONS: Array<{
+  value: ThemeMode;
+  label: string;
+  icon: SettingsIconName;
+}> = [
   { value: 'light', label: 'Светлая', icon: 'sun' },
   { value: 'system', label: 'Системная', icon: 'monitor' },
   { value: 'dark', label: 'Тёмная', icon: 'moon' },
@@ -148,12 +191,6 @@ function ThemeControl() {
     </div>
   );
 }
-
-const PW_INPUT =
-  'w-full rounded border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-ink3 focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50';
-const PW_LABEL = 'mb-1.5 block text-xs font-medium text-ink2';
-const BTN_PRIMARY =
-  'btn-pill bg-primary px-4 py-2 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50';
 
 /** «Безопасность» — change the account password (POST /api/auth/change-password). */
 export function SecuritySection() {
@@ -207,16 +244,18 @@ export function SecuritySection() {
         title="Пароль"
         description="Минимум 8 символов. После смены другие сессии остаются активными."
         footer={
-          <form onSubmit={onSubmit} className="mt-4 w-full max-w-[340px] space-y-3">
+          <form
+            onSubmit={onSubmit}
+            className="mt-4 w-full max-w-[340px] space-y-3"
+          >
             <div>
-              <label htmlFor="pw-current" className={PW_LABEL}>
+              <Label htmlFor="pw-current" className="mb-1.5 block">
                 Текущий пароль
-              </label>
-              <input
+              </Label>
+              <Input
                 id="pw-current"
                 type="password"
                 autoComplete="current-password"
-                className={PW_INPUT}
                 value={current}
                 onChange={(e) => {
                   setCurrent(e.target.value);
@@ -227,17 +266,16 @@ export function SecuritySection() {
               />
             </div>
             <div>
-              <label htmlFor="pw-next" className={PW_LABEL}>
+              <Label htmlFor="pw-next" className="mb-1.5 block">
                 Новый пароль
-              </label>
-              <input
+              </Label>
+              <Input
                 id="pw-next"
                 type="password"
                 autoComplete="new-password"
                 minLength={8}
                 aria-invalid={tooShort || undefined}
                 aria-describedby={tooShort ? 'pw-next-hint' : undefined}
-                className={PW_INPUT}
                 value={next}
                 onChange={(e) => {
                   setNext(e.target.value);
@@ -246,19 +284,22 @@ export function SecuritySection() {
                 }}
                 disabled={changePassword.isPending}
               />
-              {tooShort && <p id="pw-next-hint" className="mt-1 text-2xs text-ink3">Минимум 8 символов.</p>}
+              {tooShort && (
+                <p id="pw-next-hint" className="mt-1 text-2xs text-ink3">
+                  Минимум 8 символов.
+                </p>
+              )}
             </div>
             <div>
-              <label htmlFor="pw-confirm" className={PW_LABEL}>
+              <Label htmlFor="pw-confirm" className="mb-1.5 block">
                 Повторите новый пароль
-              </label>
-              <input
+              </Label>
+              <Input
                 id="pw-confirm"
                 type="password"
                 autoComplete="new-password"
                 aria-invalid={mismatch || undefined}
                 aria-describedby={mismatch ? 'pw-confirm-err' : undefined}
-                className={PW_INPUT}
                 value={confirm}
                 onChange={(e) => {
                   setConfirm(e.target.value);
@@ -267,16 +308,27 @@ export function SecuritySection() {
                 }}
                 disabled={changePassword.isPending}
               />
-              {mismatch && <p id="pw-confirm-err" className="mt-1 text-2xs text-destructive">Пароли не совпадают.</p>}
+              {mismatch && (
+                <p
+                  id="pw-confirm-err"
+                  className="mt-1 text-2xs text-destructive"
+                >
+                  Пароли не совпадают.
+                </p>
+              )}
             </div>
 
             <div className="flex items-center gap-3 pt-0.5" aria-live="polite">
-              <button type="submit" className={BTN_PRIMARY} disabled={!canSubmit}>
+              <Button type="submit" size="sm" disabled={!canSubmit}>
                 {changePassword.isPending ? 'Сохранение…' : 'Изменить пароль'}
-              </button>
-              {done && <span className="text-xs font-medium text-primary">Пароль изменён</span>}
+              </Button>
+              {done && <Badge variant="success">Пароль изменён</Badge>}
             </div>
-            {err && <p role="alert" className="text-xs font-medium text-destructive">{err}</p>}
+            {err && (
+              <Alert variant="destructive" className="py-2.5">
+                <AlertDescription className="text-xs">{err}</AlertDescription>
+              </Alert>
+            )}
           </form>
         }
       />
@@ -297,13 +349,12 @@ function DeleteAccountRow() {
   const [open, setOpen] = useState(false);
   const [confirm, setConfirm] = useState('');
   const [err, setErr] = useState<string | null>(null);
-  // Открытие/отмена размонтируют сфокусированный элемент — возвращаем фокус явно.
-  const openerRef = useRef<HTMLButtonElement>(null);
 
   const email = me.data?.email ?? '';
   if (me.data?.role === 'superuser') return null;
 
-  const match = confirm.trim().toLowerCase() === email.toLowerCase() && email.length > 0;
+  const match =
+    confirm.trim().toLowerCase() === email.toLowerCase() && email.length > 0;
 
   const onDelete = async (e: FormEvent) => {
     e.preventDefault();
@@ -328,55 +379,70 @@ function DeleteAccountRow() {
       title="Удалить аккаунт"
       description="Немедленно и безвозвратно: каналы, архивы, отчёты, подключения. Копии в резервных бэкапах исчезают при их ротации (до 30 дней)."
       control={
-        !open ? (
-          <button ref={openerRef} type="button" onClick={() => setOpen(true)} className={BTN_DESTRUCTIVE}>
-            Удалить аккаунт
-          </button>
-        ) : null
-      }
-      footer={
-        open ? (
-          <form onSubmit={onDelete} className="mt-4 w-full max-w-[340px] space-y-3">
-            <div>
-              <label htmlFor="del-confirm" className={PW_LABEL}>
-                Введите email аккаунта для подтверждения
-              </label>
-              <input
-                id="del-confirm"
-                type="email"
-                autoComplete="off"
-                autoFocus
-                placeholder={email}
-                className={PW_INPUT}
-                value={confirm}
-                onChange={(e) => {
-                  setConfirm(e.target.value);
-                  setErr(null);
-                }}
-                disabled={deleteAccount.isPending}
-              />
-            </div>
-            <div className="flex items-center gap-3">
-              <button type="submit" className={BTN_DESTRUCTIVE} disabled={!match || deleteAccount.isPending}>
-                {deleteAccount.isPending ? 'Удаление…' : 'Удалить навсегда'}
-              </button>
-              <button
-                type="button"
-                className={BTN_SECONDARY}
-                onClick={() => {
-                  setOpen(false);
-                  setConfirm('');
-                  setErr(null);
-                  requestAnimationFrame(() => openerRef.current?.focus());
-                }}
-                disabled={deleteAccount.isPending}
-              >
-                Отмена
-              </button>
-            </div>
-            {err && <p role="alert" className="text-xs font-medium text-destructive">{err}</p>}
-          </form>
-        ) : null
+        <AlertDialog
+          open={open}
+          onOpenChange={(nextOpen) => {
+            setOpen(nextOpen);
+            if (!nextOpen && !deleteAccount.isPending) {
+              setConfirm('');
+              setErr(null);
+            }
+          }}
+        >
+          <AlertDialogTrigger asChild>
+            <Button type="button" variant="destructive" size="sm">
+              Удалить аккаунт
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent className="max-w-md">
+            <form onSubmit={onDelete} className="space-y-4">
+              <AlertDialogHeader>
+                <AlertDialogTitle>Удалить аккаунт навсегда?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Действие нельзя отменить. Введите email{' '}
+                  <strong className="font-medium text-foreground">
+                    {email}
+                  </strong>
+                  , чтобы подтвердить удаление всех данных.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <div className="space-y-1.5">
+                <Label htmlFor="del-confirm">Email аккаунта</Label>
+                <Input
+                  id="del-confirm"
+                  type="email"
+                  autoComplete="off"
+                  autoFocus
+                  placeholder={email}
+                  value={confirm}
+                  onChange={(event) => {
+                    setConfirm(event.target.value);
+                    setErr(null);
+                  }}
+                  disabled={deleteAccount.isPending}
+                />
+              </div>
+              {err && (
+                <Alert variant="destructive" className="py-2.5">
+                  <AlertDescription className="text-xs">{err}</AlertDescription>
+                </Alert>
+              )}
+              <AlertDialogFooter>
+                <AlertDialogCancel disabled={deleteAccount.isPending}>
+                  Отмена
+                </AlertDialogCancel>
+                <Button
+                  type="submit"
+                  variant="destructive"
+                  size="sm"
+                  disabled={!match || deleteAccount.isPending}
+                >
+                  {deleteAccount.isPending ? 'Удаление…' : 'Удалить навсегда'}
+                </Button>
+              </AlertDialogFooter>
+            </form>
+          </AlertDialogContent>
+        </AlertDialog>
       }
     />
   );

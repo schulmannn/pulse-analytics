@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import type { ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useChannels, useHistory, useTgQrStatus } from '@/api/queries';
@@ -11,10 +11,14 @@ import { useSidebarMode } from '@/lib/sidebar';
 import { freshness, latestHistoryDay } from '@/lib/freshness';
 import { cn } from '@/lib/utils';
 import { Icon, PanelToggleGlyph } from '@/components/nav-icons';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { SourceSwitcher } from './SourceSwitcher';
-import { AccountMenuContent, ACCOUNT_MENU_SHELL, avatarInitials } from './AccountMenu';
+import { AccountMenuContent, avatarInitials } from './AccountMenu';
 import { useActiveNetworkNav, type NavLinkDef } from './nav';
-import { useDismiss } from './useDismiss';
 
 /**
  * Persistent sidebar (md+), steep-style: a real flex column that PUSHES content — expanded
@@ -324,45 +328,43 @@ function SidebarUserRow({
 }) {
   const [open, setOpen] = useState(false);
   const plan = usePlan();
-  const rowRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  useDismiss(open, setOpen, rowRef, triggerRef);
 
   return (
-    <div ref={rowRef} className="relative border-t border-border px-3 py-2">
-      <button
-        ref={triggerRef}
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-label="Аккаунт"
-        aria-expanded={open}
-        title={rail ? email : undefined}
-        className="grid w-full grid-cols-[40px_minmax(0,1fr)] items-center overflow-hidden rounded py-1.5 text-left transition-colors hover:bg-hover-row/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
-      >
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center justify-self-center overflow-hidden rounded-full bg-avatar text-2xs font-medium text-ink2">
-          {avatar ? <img src={avatar} alt="" className="h-full w-full object-cover" /> : avatarInitials(email)}
-        </span>
-        {/* Identity + chevron stay mounted and mask out in the rail (aria-hidden there) rather than
-            unmounting, so they slide away with the width instead of popping. */}
-        <span aria-hidden={rail} className="sidebar-copy flex min-w-0 items-center gap-2.5 pl-2.5">
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm text-foreground">{email ?? 'Аккаунт'}</span>
-            <span className="block truncate text-2xs text-muted-foreground">План {PLAN_LABEL[plan]}</span>
-          </span>
-          <Icon name="chevron" aria-hidden="true" className={cn('h-4 w-4 shrink-0 text-muted-foreground transition-transform', open && 'rotate-180')} />
-        </span>
-      </button>
-      {open && (
-        <div
+    <div className="border-t border-border px-3 py-2">
+      <DropdownMenu open={open} onOpenChange={setOpen}>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            aria-label="Аккаунт"
+            title={rail ? email : undefined}
+            className="grid w-full grid-cols-[40px_minmax(0,1fr)] items-center overflow-hidden rounded py-1.5 text-left transition-colors hover:bg-hover-row/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+          >
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center justify-self-center overflow-hidden rounded-full bg-avatar text-2xs font-medium text-ink2">
+              {avatar ? <img src={avatar} alt="" className="h-full w-full object-cover" /> : avatarInitials(email)}
+            </span>
+            {/* Identity + chevron stay mounted and mask out in the rail (aria-hidden there) rather than
+                unmounting, so they slide away with the width instead of popping. */}
+            <span aria-hidden={rail} className="sidebar-copy flex min-w-0 items-center gap-2.5 pl-2.5">
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm text-foreground">{email ?? 'Аккаунт'}</span>
+                <span className="block truncate text-2xs text-muted-foreground">План {PLAN_LABEL[plan]}</span>
+              </span>
+              <Icon name="chevron" aria-hidden="true" className={cn('h-4 w-4 shrink-0 text-muted-foreground transition-transform', open && 'rotate-180')} />
+            </span>
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          side="top"
+          align="start"
+          sideOffset={4}
           className={cn(
-            'absolute bottom-full z-popover mb-1',
-            rail ? 'left-2 w-64' : 'inset-x-3',
-            ACCOUNT_MENU_SHELL,
+            'w-64',
+            !rail && 'w-[var(--radix-dropdown-menu-trigger-width)]',
           )}
         >
           <AccountMenuContent email={email} role={role} avatar={avatar} onClose={() => setOpen(false)} />
-        </div>
-      )}
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }

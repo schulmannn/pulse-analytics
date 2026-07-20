@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { Cartograph } from '@/components/Cartograph';
+import { Button } from '@/components/ui/button';
 
 interface EmptyStateProps {
   /** One-line heading naming the empty space (e.g. "Публикаций пока нет"). */
@@ -40,12 +41,9 @@ export function EmptyState({ title, reason, action, glyph = true, compact = fals
       <p className="text-sm font-medium text-foreground">{title}</p>
       {reason ? <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">{reason}</p> : null}
       {action ? (
-        <Link
-          to={action.to}
-          className="mt-3 inline-block text-sm font-medium text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary"
-        >
-          {action.label} →
-        </Link>
+        <Button asChild size="sm" className="mt-3">
+          <Link to={action.to}>{action.label} →</Link>
+        </Button>
       ) : null}
     </div>
   );

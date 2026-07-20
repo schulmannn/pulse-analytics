@@ -20,11 +20,25 @@ export default defineConfig({
         // it, so Rollup places it in the Landing async chunk (never in the entry).
         manualChunks(id: string) {
           if (!id.includes('node_modules')) return undefined;
-          if (/[\\/]node_modules[\\/](react|react-dom|scheduler|react-router|react-router-dom|@remix-run)[\\/]/.test(id)) {
+          if (
+            /[\\/]node_modules[\\/](react|react-dom|scheduler|react-router|react-router-dom|@remix-run)[\\/]/.test(
+              id,
+            )
+          ) {
             return 'vendor';
           }
           if (/[\\/]node_modules[\\/]@tanstack[\\/]/.test(id)) return 'vendor';
           if (/[\\/]node_modules[\\/]zod[\\/]/.test(id)) return 'vendor';
+          // shadcn primitives are copied into the app, while their accessible interaction runtime
+          // comes from Radix. Keep that stable runtime out of the frequently-changing app entry;
+          // menus, dialogs, selects and tooltips can share one long-lived browser cache.
+          if (
+            /[\\/]node_modules[\\/](@radix-ui|@floating-ui|lucide-react|class-variance-authority|react-remove-scroll|react-remove-scroll-bar|react-style-singleton|use-callback-ref|use-sidecar)[\\/]/.test(
+              id,
+            )
+          ) {
+            return 'ui-vendor';
+          }
           return undefined;
         },
       },

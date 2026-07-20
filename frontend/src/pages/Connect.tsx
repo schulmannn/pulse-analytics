@@ -8,6 +8,7 @@ import { ApiError, apiSend } from '@/api/client';
 import { fmt } from '@/lib/format';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { cn } from '@/lib/utils';
+import { Progress } from '@/components/ui/progress';
 
 /**
  * /connect — the source hub. Platforms sit on an orbit around Atlavue (atlas + view), the same
@@ -433,9 +434,7 @@ function MsBackfillBlock() {
           <span className="font-medium text-foreground">Запускаем загрузку…</span>
           <span className="tabular-nums text-muted-foreground">оцениваем объём заказов</span>
         </div>
-        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
-          <div className="h-full w-1/3 animate-pulse rounded-full bg-primary" />
-        </div>
+        <Progress className="mt-2 h-1.5" />
       </div>
     );
   }
@@ -454,12 +453,7 @@ function MsBackfillBlock() {
           </span>
         </div>
         {/* Строка загрузки (владелец): определённая при известном итоге, бегущая — при неизвестном. */}
-        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
-          <div
-            className="h-full rounded-full bg-primary transition-[width] duration-300"
-            style={{ width: pct != null ? `${pct}%` : '30%' }}
-          />
-        </div>
+        <Progress className="mt-2 h-1.5" value={pct ?? undefined} />
       </div>
     );
   }
