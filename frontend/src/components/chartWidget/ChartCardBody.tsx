@@ -25,7 +25,7 @@ export function ChartCardBody({
   hero = false,
   children,
 }: ChartCardBodyProps) {
-  const numberClass = `kpi-accent ${hero ? 'text-hero' : 'text-4xl'} font-semibold leading-none tabular-nums tracking-tight`;
+  const numberClass = `kpi-accent ${hero ? 'text-hero' : 'text-3xl'} font-medium leading-none tabular-nums tracking-tight`;
   return (
     <div className="flex h-full min-h-0 items-end gap-4">
       <div className="flex shrink-0 flex-col items-start gap-1.5 pb-0.5">

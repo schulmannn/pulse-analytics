@@ -6,7 +6,7 @@ import { PAGE_HEADER_SHELL } from '@/lib/pageChrome';
 
 /**
  * The section SHELL shared by every dashboard feed page (TG and IG): a FLAT working surface with the
- * sticky shadcn-style page header ({@link FeedBlock}) and the progressive-disclosure mount guard
+ * sticky page header ({@link FeedBlock}) and the progressive-disclosure mount guard
  * ({@link LazyBlock}). Both networks' focused pages render through this module (via the feed
  * registry, panels/feed/feeds.tsx), so the section look cannot drift between networks.
  *
@@ -19,8 +19,8 @@ import { PAGE_HEADER_SHELL } from '@/lib/pageChrome';
  * One feed section = the SAME flat canvas as the personal Home (владелец: Обзор/Аналитика/Контент
  * должны быть одной flat рабочей поверхностью, как Главная). No own rounded/bordered/card surface
  * and no extra page padding — the widgets below carry the only card chrome, exactly like Home. The
- * sticky header reuses {@link PAGE_HEADER_SHELL} (shared with Home), so its geometry — canvas
- * bleed, translucent bordered surface and gap to the content — stays in lockstep with Home
+ * sticky header reuses {@link PAGE_HEADER_SHELL} (shared with Home), so its geometry — the canvas
+ * bleed, the solid seam-free background and the gap to the content — stays in lockstep with Home
  * instead of drifting into a private copy of the classes.
  */
 export function FeedBlock({
@@ -41,8 +41,8 @@ export function FeedBlock({
 }) {
   return (
     <section data-feed-block={section} className="scroll-mt-4">
-      {/* Sticky page header (shared geometry with Home): «Обзор» stays put while widgets scroll
-          under the translucent, bordered site-header surface. */}
+      {/* Sticky page header (shared geometry with Home): «Обзор» stays put while the widgets scroll
+          under it, over a solid canvas bg with no hairline — the strip simply clips the content. */}
       <div className={cn(PAGE_HEADER_SHELL, 'flex items-center justify-between gap-3')}>
         <h2 className="min-w-0 truncate text-2xl font-medium tracking-tight text-foreground">{title}</h2>
         {headerRight}

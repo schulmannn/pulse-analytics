@@ -52,15 +52,15 @@ export function Sidebar({ email, role, avatar }: { email?: string; role?: string
       aria-label="Боковая панель"
       data-rail={rail ? 'true' : 'false'}
       className={cn(
-        // dashboard-01 composition: navigation owns a distinct, lightly elevated surface while the
-        // inset content frame stays independently scrollable.
+        // FLAT canvas strip (steep — owner call): no floating card, no hairline, no inset — the
+        // sidebar is just the canvas itself; the content's cards carry all the surface contrast.
         // z-nav lets the overhanging popovers (rail dropdown, user-row menu) paint above the
         // sticky Topbar (z-sticky), under scrim/modals.
         // h-full (не h-screen): на md+ оболочка — inset-панель с паддингом корня, экранная
         // высота вылезала бы за нижний зазор.
         // `sidebar-shell` owns the width→motion (asymmetric collapse/expand off [data-rail]) and, via
         // its descendant rules, the copy/heading masking — so nothing inside pops while width moves.
-        'sidebar-shell dashboard-sidebar sticky top-0 z-nav hidden h-full shrink-0 flex-col bg-card/55 md:flex print:hidden',
+        'sidebar-shell sticky top-0 z-nav hidden h-full shrink-0 flex-col bg-background md:flex print:hidden',
         rail ? 'w-16' : 'w-60',
       )}
     >
@@ -284,8 +284,8 @@ function NavItem({ to, label, icon, end, rail }: NavLinkDef & { rail?: boolean }
           // so every glyph remains centred on x=32 in both modes while only the copy track collapses.
           'sidebar-nav-item relative grid h-9 grid-cols-[40px_minmax(0,1fr)] items-center overflow-hidden rounded-xl text-sm transition-colors',
           isActive
-            ? 'sidebar-nav-item-active bg-primary/10 font-medium text-primary'
-            : 'text-ink2 hover:bg-muted hover:text-foreground',
+            ? 'sidebar-nav-item-active font-medium text-foreground'
+            : 'text-ink2 hover:bg-hover-row/60 hover:text-foreground',
         )
       }
     >
@@ -294,7 +294,7 @@ function NavItem({ to, label, icon, end, rail }: NavLinkDef & { rail?: boolean }
           {isActive && (
             <span
               aria-hidden="true"
-              className="sidebar-rail-active absolute left-0 top-1/2 h-5 w-[3px] rounded-full bg-primary"
+              className="sidebar-rail-active absolute left-0 top-1/2 h-4 w-[3px] rounded-full bg-foreground"
             />
           )}
           <span className="flex justify-center">
@@ -330,14 +330,14 @@ function SidebarUserRow({
   const plan = usePlan();
 
   return (
-    <div className="border-t border-border/70 bg-muted/20 px-3 py-2.5">
+    <div className="border-t border-border px-3 py-2">
       <DropdownMenu open={open} onOpenChange={setOpen}>
         <DropdownMenuTrigger asChild>
           <button
             type="button"
             aria-label="Аккаунт"
             title={rail ? email : undefined}
-            className="grid w-full grid-cols-[40px_minmax(0,1fr)] items-center overflow-hidden rounded-lg py-1.5 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+            className="grid w-full grid-cols-[40px_minmax(0,1fr)] items-center overflow-hidden rounded py-1.5 text-left transition-colors hover:bg-hover-row/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
           >
             <span className="flex h-8 w-8 shrink-0 items-center justify-center justify-self-center overflow-hidden rounded-full bg-avatar text-2xs font-medium text-ink2">
               {avatar ? <img src={avatar} alt="" className="h-full w-full object-cover" /> : avatarInitials(email)}
