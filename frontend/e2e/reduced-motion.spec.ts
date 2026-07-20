@@ -30,6 +30,37 @@ test('reduced motion: dashboard settles with zero running animations', async ({ 
   expect(running, `still animating under reduced motion: ${JSON.stringify(running)}`).toEqual([]);
 });
 
+test('reduced motion: chart marks and tooltip render in their final state', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await bootDemo(page, '/analytics');
+
+  const chart = page.locator('svg[data-chart-kind="line"]').first();
+  await chart.waitFor({ state: 'visible', timeout: 15_000 });
+  const chartMotion = page.locator('[data-chart-motion]');
+  const motionCount = await chartMotion.count();
+  expect(motionCount).toBeGreaterThan(0);
+  const markStyle = await chartMotion.first().evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { animationName: style.animationName, opacity: style.opacity, transform: style.transform };
+  });
+  expect(markStyle.animationName).toBe('none');
+  expect(markStyle.opacity).toBe('1');
+  expect(markStyle.transform).toBe('none');
+
+  await chart.scrollIntoViewIfNeeded();
+  const box = await chart.boundingBox();
+  if (!box) throw new Error('chart svg has no box');
+  await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
+  const tooltip = page.locator('[data-chart-tooltip]');
+  await expect(tooltip).toBeVisible();
+  const tooltipStyle = await tooltip.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { animationName: style.animationName, transitionDuration: style.transitionDuration };
+  });
+  expect(tooltipStyle.animationName).toBe('none');
+  expect(Number.parseFloat(tooltipStyle.transitionDuration)).toBeLessThanOrEqual(0.001);
+});
+
 test('reduced motion: home edit mode works and does not jiggle', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await bootDemo(page, '/home');

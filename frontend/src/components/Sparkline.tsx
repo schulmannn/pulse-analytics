@@ -53,6 +53,11 @@ export function Sparkline({
   const [hover, setHover] = useState<number | null>(null);
   if (!values || values.length < 2) return null;
 
+  // Stable data signature for the reveal (see index.css «Chart motion») — the line/area fade replays
+  // when the series changes, never on hover (separate state) or a container resize (geometry is % of
+  // the viewBox, not part of this key).
+  const motionKey = values.join(',');
+
   const n = values.length;
   const min = Math.min(...values);
   const max = Math.max(...values);
@@ -119,26 +124,28 @@ export function Sparkline({
           className="h-full w-full"
           aria-hidden="true"
         >
-          {area && (
-            <>
-              <defs>
-                <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={color} stopOpacity="0.32" />
-                  <stop offset="100%" stopColor={color} stopOpacity="0" />
-                </linearGradient>
-              </defs>
-              <path d={sparkAreaPath(values)} fill={`url(#${gradientId})`} />
-            </>
-          )}
-          <path
-            d={sparkPath(values)}
-            fill="none"
-            stroke={color}
-            strokeWidth={strokeWidth}
-            strokeLinejoin="round"
-            strokeLinecap="round"
-            vectorEffect="non-scaling-stroke"
-          />
+          <g key={motionKey} data-chart-motion="reveal">
+            {area && (
+              <>
+                <defs>
+                  <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={color} stopOpacity="0.32" />
+                    <stop offset="100%" stopColor={color} stopOpacity="0" />
+                  </linearGradient>
+                </defs>
+                <path d={sparkAreaPath(values)} fill={`url(#${gradientId})`} />
+              </>
+            )}
+            <path
+              d={sparkPath(values)}
+              fill="none"
+              stroke={color}
+              strokeWidth={strokeWidth}
+              strokeLinejoin="round"
+              strokeLinecap="round"
+              vectorEffect="non-scaling-stroke"
+            />
+          </g>
         </svg>
 
         {interactive && (

@@ -506,6 +506,9 @@ function MsMultiLine({
   };
   const axisIndexes = [...new Set([0, Math.floor((n - 1) / 2), n - 1])].filter((i) => i >= 0);
   const hoverX = hovered == null ? null : x(hovered);
+  // Stable data signature for the reveal (see index.css «Chart motion») — the up-to-6 series fade in
+  // when the metric/period/selection changes, never on hover (separate state) or a container resize.
+  const motionKey = series.map((s) => s.values.join(',')).join('|');
   const ariaSummary = `${METRIC_LABEL[metric]} по каналам: ${series.map((item) => item.name).join(', ')}`;
   return (
     <div>
@@ -550,28 +553,32 @@ function MsMultiLine({
             </div>
           )}
           <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="relative w-full" style={{ height }} aria-hidden="true" data-chart-curve="smooth">
-            {series.map((s, si) => {
-              const { lines, lone } = geometry.segments[si];
-              return (
-                <g key={s.name}>
-                  {lines.map((path, si) => (
-                    <path
-                      key={`l${si}`}
-                      d={path}
-                      fill="none"
-                      stroke={s.color}
-                      strokeWidth="1.5"
-                      vectorEffect="non-scaling-stroke"
-                      strokeLinejoin="round"
-                      strokeLinecap="round"
-                    />
-                  ))}
-                  {lone.map((p, pi) => (
-                    <circle key={`p${pi}`} cx={p.x} cy={p.y} r="1.4" fill={s.color} />
-                  ))}
-                </g>
-              );
-            })}
+            {/* Series lines fade-reveal on a data change; the keyed group keeps the hover guide below
+                it out of the motion so scrubbing never re-reveals the chart. */}
+            <g key={motionKey} data-chart-motion="reveal">
+              {series.map((s, si) => {
+                const { lines, lone } = geometry.segments[si];
+                return (
+                  <g key={s.name}>
+                    {lines.map((path, si) => (
+                      <path
+                        key={`l${si}`}
+                        d={path}
+                        fill="none"
+                        stroke={s.color}
+                        strokeWidth="1.5"
+                        vectorEffect="non-scaling-stroke"
+                        strokeLinejoin="round"
+                        strokeLinecap="round"
+                      />
+                    ))}
+                    {lone.map((p, pi) => (
+                      <circle key={`p${pi}`} cx={p.x} cy={p.y} r="1.4" fill={s.color} />
+                    ))}
+                  </g>
+                );
+              })}
+            </g>
             {hoverX != null && (
               <line x1={hoverX} x2={hoverX} y1="0" y2="100" stroke="hsl(var(--foreground) / 0.35)" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
             )}

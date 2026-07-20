@@ -14,6 +14,9 @@ export function InlineSpark({ values, width = 92, height = 20 }: { values: numbe
   const y = (v: number) => height - pad - (v / max) * (height - pad * 2);
   const points = values.map((value, index) => ({ x: pad + index * step, y: y(value) }));
   const last = points[points.length - 1];
+  // Stable data signature for the reveal (see index.css «Chart motion») — the tiny line fades in when
+  // its series changes; keyed on content so it never replays on a re-render with the same values.
+  const motionKey = values.join(',');
   return (
     <svg
       width={width}
@@ -23,16 +26,18 @@ export function InlineSpark({ values, width = 92, height = 20 }: { values: numbe
       data-chart-curve="smooth"
       className="mx-0.5 inline-block align-[-4px]"
     >
-      <path
-        fill="none"
-        stroke="hsl(var(--chart-role-primary))"
-        strokeWidth="1.6"
-        vectorEffect="non-scaling-stroke"
-        strokeLinejoin="round"
-        strokeLinecap="round"
-        d={smoothSvgPath(points, 1)}
-      />
-      <circle cx={last.x} cy={last.y} r="2.2" fill="hsl(var(--chart-role-primary))" />
+      <g key={motionKey} data-chart-motion="reveal">
+        <path
+          fill="none"
+          stroke="hsl(var(--chart-role-primary))"
+          strokeWidth="1.6"
+          vectorEffect="non-scaling-stroke"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+          d={smoothSvgPath(points, 1)}
+        />
+        <circle cx={last.x} cy={last.y} r="2.2" fill="hsl(var(--chart-role-primary))" />
+      </g>
     </svg>
   );
 }
