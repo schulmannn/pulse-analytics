@@ -650,8 +650,8 @@ function MentionsTable({
       {empty ? (
         <div className="py-8 text-center text-sm text-muted-foreground">{empty}</div>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-left text-sm">
+        <div className="data-table-surface data-table-scroll">
+          <table className="data-table text-left text-sm">
             <thead>
               {/* Умеренные min-w: текстовые колонки сжимаются первыми (truncate/line-clamp), иначе
                   на узком desktop числовая колонка уезжает за край скролл-контейнера и цифры

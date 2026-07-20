@@ -132,7 +132,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
   const hasContentFilters = filters.q.trim() !== '' || filters.format !== 'all';
 
   const toolbar = (
-    <div className="space-y-3 border-b border-border pb-3">
+    <>
       <div className="flex flex-wrap items-center justify-between gap-3">
         {tabs}
         <button
@@ -152,7 +152,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
           disabled={rows.length === 0}
           aria-label="Экспорт показанных публикаций в CSV"
           title={rows.length === 0 ? 'Нет публикаций для экспорта' : `CSV: ${rows.length} показанных публикаций`}
-          className="btn-pill border border-border bg-background px-3.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+          className="btn-pill inline-flex h-8 items-center border border-border bg-background px-3.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
         >
           Экспорт таблицы
         </button>
@@ -168,7 +168,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
               onChange={(e) => update({ q: e.target.value })}
               placeholder="Поиск по тексту и хэштегам"
               aria-label="Поиск по публикациям"
-              className="w-56 rounded border border-border bg-background px-2.5 py-1 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
+              className="h-8 w-56 rounded-full border border-border bg-background px-3 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-primary/40"
             />
           </label>
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -197,14 +197,14 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
           {scope.length > 0 && reachMedian == null && <span>сравнение появится от {MEDIAN_MIN_SAMPLE} публикаций</span>}
         </div>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2 border-t border-border/60 pt-3">
         {selectedItems.length > 0 ? (
           <>
             <span className="text-xs tabular-nums text-muted-foreground">Выбрано: {fmt.num(selectedItems.length)}</span>
             <button
               type="button"
               onClick={() => setAddItems(selectedItems)}
-              className="btn-pill bg-primary px-3.5 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+              className="btn-pill inline-flex h-8 items-center bg-primary px-3.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
               data-testid="add-to-campaign"
             >
               Добавить в кампанию
@@ -214,7 +214,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
                 type="button"
                 onClick={onRemoveFromCampaign}
                 disabled={removeMut.isPending}
-                className="btn-pill border border-border px-3.5 py-1.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50"
+                className="btn-pill inline-flex h-8 items-center border border-border px-3.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50"
                 data-testid="remove-from-campaign"
               >
                 {removeMut.isPending ? 'Убираю…' : 'Убрать из кампании'}
@@ -223,7 +223,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
             <button
               type="button"
               onClick={() => setSelected(new Set())}
-              className="btn-pill px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+              className="btn-pill inline-flex h-8 items-center px-3 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
             >
               Снять выбор
             </button>
@@ -237,7 +237,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
         )}
         {removeMut.isError && <span role="alert" className="text-2xs text-destructive">Не удалось убрать из кампании.</span>}
       </div>
-    </div>
+    </>
   );
 
   const dialog = addItems && addItems.length > 0 && (
@@ -287,22 +287,36 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
     </section>
   );
 
+  // Self-contained shadcn card shell — the header (tabs/export + filters/actions) sits on a tinted
+  // rule above whatever body the current state renders (skeleton / error / empty / table).
+  const publicationsCard = (body: ReactNode) => (
+    <section
+      data-ig-content-publications
+      className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm dark:border-white/[0.06]"
+    >
+      <div className="space-y-3 border-b border-border px-4 py-4 sm:px-5">{toolbar}</div>
+      {body}
+    </section>
+  );
+
   // Loading / error gates for the campaign-scoped fetch (matches Posts.tsx).
   if (campaignId != null && campaignPostsQ.isPending) {
     return (
-      <div className="space-y-6">
-        {toolbar}
-        <div className="space-y-2 py-4">
-          {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}
-        </div>
+      <div className="space-y-8">
+        {publicationsCard(
+          <div className="space-y-2 px-4 py-4 sm:px-5">
+            {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-9 w-full" />)}
+          </div>,
+        )}
       </div>
     );
   }
   if (campaignId != null && campaignPostsQ.isError) {
     return (
-      <div className="space-y-6">
-        {toolbar}
-        <p className="py-6 text-center text-sm text-muted-foreground">Не удалось загрузить публикации кампании.</p>
+      <div className="space-y-8">
+        {publicationsCard(
+          <p className="px-4 py-10 text-center text-sm text-muted-foreground">Не удалось загрузить публикации кампании.</p>,
+        )}
       </div>
     );
   }
@@ -316,115 +330,130 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
 
   return (
     <div className="space-y-8">
-      {toolbar}
-      {rows.length === 0 ? (
-        <div className="py-8 text-center text-sm text-muted-foreground" data-testid="ig-content-empty">{emptyMessage}</div>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-left text-sm">
-            <thead>
-              <tr className="border-b border-border text-xs font-medium text-muted-foreground">
-                <th className="w-10 py-2.5 pl-0 pr-2">
-                  <Checkbox
-                    aria-label="Выбрать все видимые публикации"
-                    checked={allVisibleSelected}
-                    onCheckedChange={toggleAllVisible}
-                  />
-                </th>
-                <th className="w-12 py-2.5 pl-0 pr-3 text-center"></th>
-                <th className="min-w-[240px] px-3 py-2.5">Публикация</th>
-                {IG_CONTENT_SORT_COLUMNS.filter((c) => c.key !== 'date').map((c) => {
-                  const active = c.key === filters.sort;
+      {publicationsCard(
+        rows.length === 0 ? (
+          <div className="px-4 py-12 text-center text-sm text-muted-foreground sm:px-5" data-testid="ig-content-empty">{emptyMessage}</div>
+        ) : (
+          <div className="overflow-x-auto" data-ig-content-table>
+            <table className="data-table data-table--compact text-left text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted/25 text-2xs font-medium tracking-wide text-muted-foreground">
+                  <th className="w-10 py-2.5 pl-4 pr-2 sm:pl-5">
+                    <Checkbox
+                      aria-label="Выбрать все видимые публикации"
+                      checked={allVisibleSelected}
+                      onCheckedChange={toggleAllVisible}
+                    />
+                  </th>
+                  <th className="w-12 py-2.5 pl-0 pr-3 text-center"></th>
+                  <th className="min-w-[240px] px-3 py-2.5">Публикация</th>
+                  {IG_CONTENT_SORT_COLUMNS.filter((c) => c.key !== 'date').map((c) => {
+                    const active = c.key === filters.sort;
+                    return (
+                      <th
+                        key={c.key}
+                        aria-sort={active ? (filters.order === 'desc' ? 'descending' : 'ascending') : undefined}
+                        className="w-[104px] px-3 py-2.5 text-right"
+                      >
+                        <SortButton label={c.label} active={active} order={filters.order} onClick={() => toggleSort(c.key)} />
+                      </th>
+                    );
+                  })}
+                  <th
+                    aria-sort={filters.sort === 'date' ? (filters.order === 'desc' ? 'descending' : 'ascending') : undefined}
+                    className="w-[96px] px-3 py-2.5 pr-4 text-right sm:pr-5"
+                  >
+                    <SortButton label="Дата" active={filters.sort === 'date'} order={filters.order} onClick={() => toggleSort('date')} />
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {rows.map((post, idx) => {
+                  const clickable = post.id != null;
+                  const isOpen = post.id != null && post.id === openId;
+                  const isSelected = post.id != null && selected.has(post.id);
                   return (
-                    <th
-                      key={c.key}
-                      aria-sort={active ? (filters.order === 'desc' ? 'descending' : 'ascending') : undefined}
-                      className="w-[104px] px-3 py-2.5 text-right last:pr-0"
+                    <tr
+                      key={post.id ?? idx}
+                      data-ig-content-row
+                      data-ig-content-open={isOpen ? '' : undefined}
+                      data-ig-content-selected={isSelected ? '' : undefined}
+                      onClick={clickable ? () => setOpenId(post.id!) : undefined}
+                      className={cn(
+                        'group transition-colors',
+                        clickable && 'cursor-pointer',
+                        isOpen
+                          ? 'bg-primary/[0.10]'
+                          : isSelected
+                            ? 'bg-primary/[0.05] hover:bg-primary/[0.08]'
+                            : 'hover:bg-muted/40',
+                      )}
                     >
-                      <SortButton label={c.label} active={active} order={filters.order} onClick={() => toggleSort(c.key)} />
-                    </th>
+                      <td className="py-3 pl-4 pr-2 sm:pl-5" onClick={(e) => e.stopPropagation()}>
+                        {post.id != null && (
+                          <Checkbox
+                            aria-label="Выбрать публикацию"
+                            checked={selected.has(post.id)}
+                            onCheckedChange={() => toggleSelect(post.id!)}
+                            data-testid="ig-post-select"
+                          />
+                        )}
+                      </td>
+                      <td className="py-3 pl-0 pr-3 text-center">
+                        <IgPostThumb post={post} />
+                      </td>
+                      <td className="px-3 py-3">
+                        {clickable ? (
+                          <button
+                            type="button"
+                            onClick={() => setOpenId(post.id!)}
+                            data-ig-content-open-trigger
+                            className="block w-full max-w-sm space-y-1 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45 md:max-w-md lg:max-w-lg"
+                          >
+                            <span className={cn('line-clamp-1 font-medium', post.caption ? 'text-foreground' : 'italic text-muted-foreground')}>
+                              {post.caption || 'Без подписи'}
+                            </span>
+                            <span className="mt-1 flex items-center gap-2">
+                              <IgFormatTag post={post} />
+                            </span>
+                          </button>
+                        ) : (
+                          <div className="max-w-sm space-y-1 md:max-w-md lg:max-w-lg">
+                            <div className={cn('line-clamp-1 font-medium', post.caption ? 'text-foreground' : 'italic text-muted-foreground')}>
+                              {post.caption ? <RichText text={post.caption} /> : 'Без подписи'}
+                            </div>
+                            <div className="mt-1 flex items-center gap-2"><IgFormatTag post={post} /></div>
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-3 py-3 text-right">
+                        <MedianCell value={post.reach == null ? null : Number(post.reach)} median={reachMedian} tone="signal" format={fmt.num} />
+                      </td>
+                      <td className="px-3 py-3 text-right">
+                        <MedianCell value={post.views == null ? null : Number(post.views)} median={viewsMedian} tone="muted" format={fmt.num} />
+                      </td>
+                      <td className="px-3 py-3 text-right">
+                        <MedianCell value={igInteractions(post)} median={interactionsMedian} tone="muted" format={fmt.num} />
+                      </td>
+                      <td className="px-3 py-3 text-right">
+                        <MedianCell value={post.saved == null ? null : Number(post.saved)} median={savedMedian} tone="muted" format={fmt.num} />
+                      </td>
+                      <td className="px-3 py-3 text-right">
+                        <MedianCell value={post.shares == null ? null : Number(post.shares)} median={sharesMedian} tone="muted" format={fmt.num} />
+                      </td>
+                      <td className="px-3 py-3 text-right">
+                        <MedianCell value={igEr(post)} median={erMedian} tone="muted" format={(v) => `${v.toFixed(2)}%`} />
+                      </td>
+                      <td className="px-3 py-3 pr-4 text-right text-xs tabular-nums text-muted-foreground sm:pr-5">
+                        {post.timestamp ? fmt.date(post.timestamp) : <span className="text-muted-foreground/40">—</span>}
+                      </td>
+                    </tr>
                   );
                 })}
-                <th
-                  aria-sort={filters.sort === 'date' ? (filters.order === 'desc' ? 'descending' : 'ascending') : undefined}
-                  className="w-[96px] px-3 py-2.5 pr-0 text-right"
-                >
-                  <SortButton label="Дата" active={filters.sort === 'date'} order={filters.order} onClick={() => toggleSort('date')} />
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {rows.map((post, idx) => {
-                const clickable = post.id != null;
-                return (
-                  <tr
-                    key={post.id ?? idx}
-                    onClick={clickable ? () => setOpenId(post.id!) : undefined}
-                    className={cn('group transition-colors hover:bg-hover-row', clickable && 'cursor-pointer')}
-                  >
-                    <td className="py-2.5 pl-0 pr-2" onClick={(e) => e.stopPropagation()}>
-                      {post.id != null && (
-                        <Checkbox
-                          aria-label="Выбрать публикацию"
-                          checked={selected.has(post.id)}
-                          onCheckedChange={() => toggleSelect(post.id!)}
-                          data-testid="ig-post-select"
-                        />
-                      )}
-                    </td>
-                    <td className="py-2.5 pl-0 pr-3 text-center">
-                      <IgPostThumb post={post} />
-                    </td>
-                    <td className="px-3 py-2.5">
-                      {clickable ? (
-                        <button
-                          type="button"
-                          onClick={() => setOpenId(post.id!)}
-                          className="block w-full max-w-sm space-y-1 text-left md:max-w-md lg:max-w-lg"
-                        >
-                          <span className={cn('line-clamp-1 font-medium', post.caption ? 'text-foreground' : 'italic text-muted-foreground')}>
-                            {post.caption || 'Без подписи'}
-                          </span>
-                          <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                            <IgFormatTag post={post} />
-                          </span>
-                        </button>
-                      ) : (
-                        <div className="max-w-sm space-y-1 md:max-w-md lg:max-w-lg">
-                          <div className={cn('line-clamp-1 font-medium', post.caption ? 'text-foreground' : 'italic text-muted-foreground')}>
-                            {post.caption ? <RichText text={post.caption} /> : 'Без подписи'}
-                          </div>
-                          <div className="flex items-center gap-2 text-xs text-muted-foreground"><IgFormatTag post={post} /></div>
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-3 py-2.5 text-right last:pr-0">
-                      <MedianCell value={post.reach == null ? null : Number(post.reach)} median={reachMedian} tone="signal" format={fmt.num} />
-                    </td>
-                    <td className="px-3 py-2.5 text-right last:pr-0">
-                      <MedianCell value={post.views == null ? null : Number(post.views)} median={viewsMedian} tone="muted" format={fmt.num} />
-                    </td>
-                    <td className="px-3 py-2.5 text-right last:pr-0">
-                      <MedianCell value={igInteractions(post)} median={interactionsMedian} tone="muted" format={fmt.num} />
-                    </td>
-                    <td className="px-3 py-2.5 text-right last:pr-0">
-                      <MedianCell value={post.saved == null ? null : Number(post.saved)} median={savedMedian} tone="muted" format={fmt.num} />
-                    </td>
-                    <td className="px-3 py-2.5 text-right last:pr-0">
-                      <MedianCell value={post.shares == null ? null : Number(post.shares)} median={sharesMedian} tone="muted" format={fmt.num} />
-                    </td>
-                    <td className="px-3 py-2.5 text-right last:pr-0">
-                      <MedianCell value={igEr(post)} median={erMedian} tone="muted" format={(v) => `${v.toFixed(2)}%`} />
-                    </td>
-                    <td className="px-3 py-2.5 pr-0 text-right text-xs tabular-nums text-muted-foreground">
-                      {post.timestamp ? fmt.date(post.timestamp) : <span className="text-muted-foreground/40">—</span>}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+              </tbody>
+            </table>
+          </div>
+        ),
       )}
 
       {secondaryBlock}
@@ -514,7 +543,14 @@ function IgFormatTag({ post }: { post: IgPost }) {
         : classifyIgFormat(post) === 'video'
           ? 'Видео'
           : MEDIA_TYPE_LABEL[post.media_type ?? ''] ?? 'Фото';
-  return <span>{label}</span>;
+  return (
+    <span
+      data-ig-content-format
+      className="inline-flex rounded-full border border-border bg-background px-1.5 py-0.5 text-2xs leading-none text-muted-foreground"
+    >
+      {label}
+    </span>
+  );
 }
 
 /**
@@ -558,7 +594,7 @@ function IgPostThumb({ post }: { post: IgPost }) {
   const cover = post.thumbnail_url || (!isVideo ? post.media_url : null) || null;
   const label = classifyIgFormat(post) === 'reels' ? 'Reels' : classifyIgFormat(post) === 'video' ? 'Видео' : classifyIgFormat(post) === 'carousel' ? 'Альбом' : 'Фото';
   return (
-    <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded border border-border/40 bg-muted">
+    <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border/40 bg-muted">
       {cover && !broken ? (
         <img loading="lazy" src={cover} alt="" referrerPolicy="no-referrer" onError={() => setBroken(true)} className="h-full w-full object-cover" />
       ) : (

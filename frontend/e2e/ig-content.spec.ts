@@ -154,6 +154,42 @@ test.describe('Instagram Контент 2.0 (desktop)', () => {
     expect(csv).not.toContain('reel drop');
   });
 
+  test('shadcn-карточка публикаций: оболочка, вложенный overflow, hooks выбора/открытия', async ({ page }, testInfo) => {
+    await boot(page);
+    await page.goto('/instagram/content');
+
+    // Самодостаточная карточка-оболочка с шапкой (табы/экспорт) и таблицей внутри.
+    const card = page.locator('[data-ig-content-publications]');
+    await expect(card).toBeVisible();
+    await expect(card.getByRole('button', { name: 'Экспорт показанных публикаций в CSV' })).toBeVisible();
+    const table = page.locator('[data-ig-content-table]');
+    await expect(card.locator('[data-ig-content-table]')).toHaveCount(1);
+    const rows = page.locator('[data-ig-content-row]');
+    await expect(rows).toHaveCount(6);
+    // Устойчивая иерархия строки: миниатюра + постоянный бейдж формата.
+    await expect(rows.first().locator('[data-ig-content-format]')).toBeVisible();
+
+    // Выбор помечает строку (data-hook), но НЕ открывает детальную модалку.
+    await rows.first().getByTestId('ig-post-select').click();
+    await expect(rows.first()).toHaveAttribute('data-ig-content-selected', '');
+    await expect(page.getByRole('dialog', { name: 'Детали публикации' })).toHaveCount(0);
+
+    // Горизонтальный overflow таблицы живёт ВНУТРИ карточки на узком десктопе; страница не едет вбок.
+    await page.setViewportSize({ width: 820, height: 900 });
+    const contained = await table.evaluate((el) => el.scrollWidth > el.clientWidth);
+    expect(contained).toBeTruthy();
+    const noPageOverflow = await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth + 1,
+    );
+    expect(noPageOverflow).toBeTruthy();
+    await testInfo.attach('ig-content-card-midwidth', { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' });
+
+    // Открытое состояние строки помечается data-hook и открывает модалку.
+    await rows.first().locator('[data-ig-content-open-trigger]').click();
+    await expect(rows.first()).toHaveAttribute('data-ig-content-open', '');
+    await expect(page.getByRole('dialog', { name: 'Детали публикации' })).toBeVisible();
+  });
+
   test('строка таблицы открывает детальную модалку публикации', async ({ page }, testInfo) => {
     await boot(page);
     await page.goto('/instagram/content');

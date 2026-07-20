@@ -162,11 +162,11 @@ export function TopPosts({ variant = 'table' }: { variant?: 'table' | 'cards' } 
 
       <div
         data-testid="tg-top-posts-table"
-        className={cn('overflow-x-auto', variant === 'cards' ? 'hidden' : 'hidden md:block')}
+        className={cn('data-table-surface data-table-scroll', variant === 'cards' ? 'hidden' : 'hidden md:block')}
       >
         <div className="min-w-[560px]">
           {/* header */}
-          <div className="flex items-center gap-3 border-b border-border pb-2 text-2xs text-muted-foreground">
+          <div className="flex min-h-10 items-center gap-3 border-b border-border bg-muted/40 px-4 py-2.5 text-2xs text-muted-foreground">
             <span className="w-5 shrink-0" />
             <span className="flex-1">Пост</span>
             {COLUMNS.map((c) => {
@@ -204,7 +204,7 @@ export function TopPosts({ variant = 'table' }: { variant?: 'table' | 'cards' } 
                 type="button"
                 onClick={() => setSelected({ post, rank: idx + 1, reason })}
                 title="Открыть детали поста"
-                className="group flex w-full items-center gap-3 border-b border-border py-3 text-left transition-colors hover:bg-hover-row focus-visible:bg-hover-row focus-visible:outline-none"
+                className="group flex w-full items-center gap-3 border-b border-border px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-muted/30 focus-visible:bg-muted/30 focus-visible:outline-none"
               >
                 <span className="w-5 shrink-0 text-center text-xs tabular-nums text-ink3">{idx + 1}</span>
                 <span className="min-w-0 flex-1">

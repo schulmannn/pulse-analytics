@@ -136,9 +136,9 @@ export function MsStockTable({ period, sort }: { period: MsPeriod; sort: MsStock
     return <p className="py-4 text-sm text-muted-foreground">Остатки недоступны.</p>;
   }
   return (
-    <div>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[560px] border-separate border-spacing-0 text-sm tabular-nums">
+    <div className="data-table-surface">
+      <div className="data-table-scroll">
+        <table className="data-table data-table--compact min-w-[560px] text-sm tabular-nums">
           <thead>
             <tr className="text-2xs text-muted-foreground">
               <th className="py-1.5 pr-3 text-left font-medium">Товар</th>
@@ -172,7 +172,7 @@ export function MsStockTable({ period, sort }: { period: MsPeriod; sort: MsStock
           </tbody>
         </table>
       </div>
-      <p className="mt-3 text-2xs text-muted-foreground">
+      <p className="data-table-note">
         Скорость продаж — по выбранному окну ({fmt.num(stock.data.window_days)} дн.); «нет продаж» —
         за окно не продано ни одной штуки, прогноз не определён.
         {rows.length >= 200 && ' Показаны 200 самых срочных позиций.'}

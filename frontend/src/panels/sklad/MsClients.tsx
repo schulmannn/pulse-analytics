@@ -635,11 +635,11 @@ export function MsCohortsTable({
   }
   if (colorMax <= 0) colorMax = 1;
   return (
-    <>
+    <div className="data-table-surface">
       {/* Широкая матрица скроллится ВНУТРИ карточки (канон: без горизонтального overflow
           страницы; мобильное поведение не ломаем). */}
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[720px] border-separate border-spacing-0 text-xs tabular-nums">
+      <div className="data-table-scroll">
+        <table className="data-table data-table--compact min-w-[720px] text-xs tabular-nums">
           <thead>
             <tr className="text-2xs text-muted-foreground">
               <th className="py-1.5 pr-3 text-left font-medium">Первая покупка</th>
@@ -703,7 +703,7 @@ export function MsCohortsTable({
           </tbody>
         </table>
       </div>
-      <p className="mt-2 text-2xs text-muted-foreground">{COHORT_MODE_CAPTION[mode]}</p>
-    </>
+      <p className="data-table-note">{COHORT_MODE_CAPTION[mode]}</p>
+    </div>
   );
 }

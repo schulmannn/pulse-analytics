@@ -49,8 +49,8 @@ export function InsightsBlock({ insights, limit }: { insights: IgInsight[]; limi
     saves / likes / shares) that arrive as current-vs-previous totals, not a daily series. */
 export function PeriodCompareBlock({ rows }: { rows: { label: string; pair: WindowPair }[] }) {
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-left text-sm">
+    <div className="data-table-surface data-table-scroll">
+      <table className="data-table text-left text-sm">
         <thead>
           <tr className="border-b border-border text-xs font-medium tracking-wider text-muted-foreground">
             <th className="p-4">Метрика</th>
