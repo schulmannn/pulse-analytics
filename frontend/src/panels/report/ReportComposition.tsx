@@ -153,12 +153,14 @@ export function ReportComposition({ blocks, data, editable, onInsert, onMove, on
       case 'metric-subscribers':
         return (
           <ReportMetricCard title="Подписчики по дням" total={drillMeta.subscribers.total} trend={drillMeta.subscribers.trend}
-            series={subsSpark} valueFmt={fmt.num} to="/metrics/subscribers" onOpen={openPinnedTelegramSource} />
+            series={subsSpark} valueFmt={fmt.num} to="/metrics/subscribers" onOpen={openPinnedTelegramSource}
+            chartAppearance="rhea" chartLabel="Подписчики" />
         );
       case 'metric-reactions':
         return (
           <ReportMetricCard title="Реакции по дням" total={drillMeta.reactions.total} trend={drillMeta.reactions.trend}
-            series={reactionsSeries} valueFmt={fmt.short} zeroBase to="/metrics/reactions" onOpen={openPinnedTelegramSource} />
+            series={reactionsSeries} valueFmt={fmt.short} zeroBase to="/metrics/reactions" onOpen={openPinnedTelegramSource}
+            chartAppearance="rhea" chartLabel="Реакции" />
         );
       case 'weekly-table': {
         const table = renderWeeklyTable();
@@ -221,6 +223,7 @@ export function ReportComposition({ blocks, data, editable, onInsert, onMove, on
         const metric = CHART_METRICS.some((m) => m.value === rawMetric) ? rawMetric : 'views';
         const viz: 'line' | 'bar' = block.config.viz === 'bar' ? 'bar' : 'line';
         const spec = chartSpec(metric);
+        const chartLabel = CHART_METRICS.find((option) => option.value === metric)?.label ?? spec.label;
         return (
           <section className="report-section min-w-0 space-y-3">
             <div className="flex flex-wrap items-center gap-3">
@@ -238,7 +241,8 @@ export function ReportComposition({ blocks, data, editable, onInsert, onMove, on
               <span className="text-2xl font-medium tabular-nums tracking-tight">{drillMeta[spec.drill].total}</span>
               <DeltaPill delta={drillMeta[spec.drill].trend} subtle />
             </div>
-            <ReportChart series={spec.series} viz={viz} valueFmt={spec.valueFmt} zeroBase={spec.zeroBase} />
+            <ReportChart series={spec.series} viz={viz} valueFmt={spec.valueFmt} zeroBase={spec.zeroBase}
+              chartAppearance={viz === 'line' ? 'rhea' : 'default'} chartLabel={chartLabel} />
           </section>
         );
       }

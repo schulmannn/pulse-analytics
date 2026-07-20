@@ -323,7 +323,17 @@ test.describe('Отчёты — desktop', () => {
     const report = textReport();
     report.id = 3;
     report.name = 'Отчёт второго канала';
-    report.config = { blocks: ['metric-views'], periodDays: 30, channelId: 3 };
+    report.config = {
+      blocks: [
+        'metric-views',
+        'metric-subscribers',
+        'metric-reactions',
+        { id: 'line-views', type: 'chart', config: { metric: 'views', viz: 'line' } },
+        { id: 'bar-views', type: 'chart', config: { metric: 'views', viz: 'bar' } },
+      ],
+      periodDays: 30,
+      channelId: 3,
+    };
     await bootReports(page, [report]);
     await page.addInitScript(() => {
       localStorage.setItem('pulse_network', 'ig');
@@ -332,16 +342,19 @@ test.describe('Отчёты — desktop', () => {
 
     await page.goto('/reports/3');
     await expect(page.getByRole('heading', { name: 'Отчёт второго канала' })).toBeVisible();
-    const referenceChart = page.locator('svg[data-chart-kind="line"][data-chart-appearance="rhea"]');
-    await expect(referenceChart).toHaveCount(1);
+    const referenceCharts = page.locator('svg[data-chart-kind="line"][data-chart-appearance="rhea"]');
+    await expect(referenceCharts).toHaveCount(4);
+    const referenceChart = referenceCharts.first();
     await expect(referenceChart).toBeVisible();
+    await expect(page.locator('svg[data-chart-kind="bar"]')).toHaveCount(1);
+    await expect(page.locator('svg[data-chart-kind="bar"][data-chart-appearance="rhea"]')).toHaveCount(0);
     const chartBox = await referenceChart.boundingBox();
     expect(chartBox).not.toBeNull();
     await page.mouse.move(chartBox!.x + chartBox!.width * 0.62, chartBox!.y + chartBox!.height * 0.45);
     const referenceTooltip = page.locator('[data-chart-tooltip-appearance="rhea"]');
     await expect(referenceTooltip).toBeVisible();
     await expect(referenceTooltip).toContainText('Просмотры');
-    const drillLink = page.getByRole('link', { name: 'Открыть →' });
+    const drillLink = page.locator('[data-report-chart-label="Просмотры"]').getByRole('link', { name: 'Открыть →' });
     await expect(drillLink).toBeVisible();
     const metricShot = testInfo.outputPath('report-metric-desktop.png');
     await page.screenshot({ path: metricShot, fullPage: true });
