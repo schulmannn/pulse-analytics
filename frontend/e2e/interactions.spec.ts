@@ -53,7 +53,15 @@ test('chart hover: tooltip readout appears, moves and clears (single-svg hit-tes
   // 'smooth' and the primary series path is drawn with cubic (C) commands, not straight L segments.
   await expect(chart).toHaveAttribute('data-chart-appearance', 'default');
   await expect(chart).toHaveAttribute('data-chart-curve', 'smooth');
-  await expect(chart.locator('[data-chart-series="primary"]')).toHaveAttribute('d', /\bC\b/);
+  const primarySeries = chart.locator('[data-chart-series="primary"]');
+  await expect(primarySeries).toHaveAttribute('d', /\sC/);
+  await expect(primarySeries).toHaveAttribute('data-chart-motion', 'reveal');
+  const lineMotion = await primarySeries.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { animationName: style.animationName, animationDuration: style.animationDuration };
+  });
+  expect(lineMotion.animationName).toContain('chart-fade-in');
+  expect(Number.parseFloat(lineMotion.animationDuration)).toBeGreaterThan(0);
   // mouse.move targets raw viewport coordinates and never auto-scrolls — bring the chart into
   // the viewport first, then read its box.
   await chart.scrollIntoViewIfNeeded();
@@ -70,6 +78,12 @@ test('chart hover: tooltip readout appears, moves and clears (single-svg hit-tes
   // flat series, so assert it stays visible rather than diffing text).
   await page.mouse.move(box.x + box.width * 0.85, box.y + box.height * 0.5);
   await expect(tooltip.first()).toBeVisible();
+  const tooltipMotion = await tooltip.first().evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { animationName: style.animationName, transitionProperty: style.transitionProperty };
+  });
+  expect(tooltipMotion.animationName).toContain('chart-fade-in');
+  expect(tooltipMotion.transitionProperty).toContain('transform');
   expect(early.length).toBeGreaterThan(0);
 
   // Leaving the chart clears the readout (container mouseleave). The top-left corner is app
@@ -114,6 +128,10 @@ test('metric explorer gives the plot desktop space and exposes a hover inspector
   await page.getByRole('button', { name: 'Тип графика: Столбцы' }).click();
   const bars = page.locator('svg[data-chart-kind="bar"][data-chart-expanded]').first();
   await expect(bars).toHaveAttribute('data-chart-comparison', 'stacked');
+  const barMotion = bars.locator('g[data-chart-motion="grow"]');
+  await expect(barMotion).toHaveCount(1);
+  const barAnimation = await barMotion.evaluate((element) => getComputedStyle(element).animationName);
+  expect(barAnimation).toContain('chart-bar-grow');
   expect(await bars.locator('path[data-chart-series="current"]').count()).toBeGreaterThan(1);
   expect(await bars.locator('path[data-chart-series="comparison"]').count()).toBeGreaterThan(1);
   const barBox = await bars.boundingBox();

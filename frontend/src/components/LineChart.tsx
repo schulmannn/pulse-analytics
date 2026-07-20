@@ -219,6 +219,13 @@ export function LineChart({
   const showGhost = hasGhostLegend && !ghostHidden;
   const activeGhost = showGhost ? ghost : undefined;
 
+  // Stable data signature for the reveal (see index.css «Chart motion»). Keyed on the SERIES content
+  // — primary values + the shown comparison — so the fade replays on a period / filter / compare
+  // change but NOT on hover (separate state), tooltip movement or a ResizeObserver width change
+  // (width is deliberately absent). A same-key re-render updates geometry in place without remounting,
+  // so a resize never restarts the motion; a new key remounts the group and replays it once.
+  const motionKey = `${values?.length ?? 0}|${(values ?? []).join(',')}|${activeGhost?.join(',') ?? ''}`;
+
   // ── Geometry + the static plot, memoized APART from hover ────────────────────────────────
   // Hover is a per-mousemove setState: without this memo every crosshair step re-derived the
   // scale, rebuilt every path string and re-created the whole element tree. Now a hover
@@ -441,16 +448,29 @@ export function LineChart({
 
         {/* Comparison stays on the same y-scale. Explorer comparison uses a second solid smooth
             area (the shadcn pattern); legacy hosts retain the lighter dashed reference line. */}
-        {comparison && ghostAreaPath && <path data-chart-series="comparison-area" d={ghostAreaPath} fill={`url(#${comparisonGradientId})`} />}
+        {comparison && ghostAreaPath && (
+          <path
+            key={`comparison-area-${motionKey}`}
+            data-chart-series="comparison-area"
+            data-chart-motion="reveal"
+            d={ghostAreaPath}
+            fill={`url(#${comparisonGradientId})`}
+          />
+        )}
         {ghostPath && (
           <path
+            key={`comparison-line-${motionKey}`}
             data-chart-series="comparison"
+            data-chart-motion="reveal"
             d={ghostPath}
             fill="none"
             stroke="hsl(var(--chart-role-comparison))"
             strokeWidth={comparison ? '2' : '1.8'}
             strokeDasharray={comparison ? undefined : '5 4'}
-            opacity={comparison ? '0.95' : '0.8'}
+            // strokeOpacity (not the element `opacity` attr) carries the dim: the reveal animates the
+            // element `opacity` 0→1, and its `both` end-state would otherwise override an `opacity`
+            // attribute and brighten the dashed ghost to full. strokeOpacity is a separate channel.
+            strokeOpacity={comparison ? '0.95' : '0.8'}
             strokeLinejoin="round"
             strokeLinecap="round"
             vectorEffect="non-scaling-stroke"
@@ -494,9 +514,28 @@ export function LineChart({
 
         {/* Gradient area + line — сегментами (пустой d не рендерим: серия может быть
             россыпью одиночных измерений без единого сплошного отрезка) */}
-        {areaPath && <path data-chart-series="primary-area" d={areaPath} fill={`url(#${gradientId})`} />}
+        {areaPath && (
+          <path
+            key={`primary-area-${motionKey}`}
+            data-chart-series="primary-area"
+            data-chart-motion="reveal"
+            d={areaPath}
+            fill={`url(#${gradientId})`}
+          />
+        )}
         {linePath && (
-          <path data-chart-series="primary" d={linePath} fill="none" stroke="hsl(var(--chart-role-primary))" strokeWidth={richStyle ? '2' : '2.5'} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+          <path
+            key={`primary-line-${motionKey}`}
+            data-chart-series="primary"
+            data-chart-motion="reveal"
+            d={linePath}
+            fill="none"
+            stroke="hsl(var(--chart-role-primary))"
+            strokeWidth={richStyle ? '2' : '2.5'}
+            strokeLinejoin="round"
+            strokeLinecap="round"
+            vectorEffect="non-scaling-stroke"
+          />
         )}
 
         {/* Одиночное измерение между дырами — точка вместо невидимой линии нулевой длины */}
@@ -560,7 +599,7 @@ export function LineChart({
     );
 
     return { W, h, gutterW, step, points, yFor, hasXAxis, plotTop: padY, plotBottom: h - padB, staticLayer };
-  }, [values, labels, activeGhost, hasGhostLegend, target, refLines, yMin, yMax, width, ctxHeight, height, expanded, showAxes, markExtremes, showPoints, anomalyIdx, gradientId, comparisonGradientId, rhea, comparison, richStyle]);
+  }, [values, labels, activeGhost, hasGhostLegend, target, refLines, yMin, yMax, width, ctxHeight, height, expanded, showAxes, markExtremes, showPoints, anomalyIdx, gradientId, comparisonGradientId, rhea, comparison, richStyle, motionKey]);
 
   // Пустое состояние считается по РЕАЛЬНЫМ точкам (plot = null при < 2 non-null): серия из
   // одних null-дней — честное «нет данных», а не нулевая линия.
@@ -711,6 +750,8 @@ export function LineChart({
         onMouseDown={onPointClick ? (e) => (pressRef.current = { x: e.clientX, y: e.clientY }) : undefined}
         onClick={onSvgClick}
       >
+        {/* Grid and axes stay visually anchored while only the keyed data marks reveal again after a
+            period/filter change. Hover / pin / flag overlays never remount the series. */}
         {plot.staticLayer}
 
         {/* Событ/annotation flags (артефакт v2 п.7): ⚑ у нижней кромки + пунктир к точке дня;

@@ -33,6 +33,10 @@ test('MoySklad channels uses the flat feed shell and multi-channel explorer', as
   await expect(comparisonChart).toBeVisible();
   await expect(comparisonChart.locator('svg')).toHaveAttribute('data-chart-curve', 'smooth');
   await expect(comparisonChart.locator('path').first()).toHaveAttribute('d', /\bC/);
+  const channelMotion = comparisonChart.locator('[data-chart-motion="reveal"]');
+  await expect(channelMotion).toHaveCount(1);
+  const channelAnimation = await channelMotion.evaluate((element) => getComputedStyle(element).animationName);
+  expect(channelAnimation).toContain('chart-fade-in');
   await comparisonChart.focus();
   await expect(dynamics.locator('.z-tooltip')).toBeVisible();
   await page.keyboard.press('ArrowLeft');

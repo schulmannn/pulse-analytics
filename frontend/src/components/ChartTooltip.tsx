@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 /** One line of a structured readout: a label (with an optional series-colour dot) and a value. */
 export type TooltipRow = { label: string; value: string; color?: string };
@@ -16,6 +16,21 @@ export type TooltipState =
 export function ChartTooltip({ tip, appearance = 'default' }: { tip: TooltipState; appearance?: 'default' | 'rhea' | 'comparison' }) {
   const ref = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ w: 0, h: 0, cw: 0 });
+  // The tooltip fades in on mount and GLIDES between points via the shared [data-chart-tooltip]
+  // transform transition (index.css). But the very first (measured) frame moves the box by half its
+  // width as the clamp resolves from an unmeasured origin — with the transition live that would read
+  // as an unwanted slide-in. So the glide is armed one frame AFTER the tooltip appears: the first
+  // placement snaps (transition suppressed inline), every subsequent point-to-point move glides.
+  const hasTip = tip !== null;
+  const [glide, setGlide] = useState(false);
+  useEffect(() => {
+    if (!hasTip) {
+      setGlide(false);
+      return;
+    }
+    const id = requestAnimationFrame(() => setGlide(true));
+    return () => cancelAnimationFrame(id);
+  }, [hasTip]);
 
   // Re-measure after every render: the text (and thus the box) changes per hovered point,
   // and the offsetParent is the chart container whose width we clamp against.
@@ -61,7 +76,7 @@ export function ChartTooltip({ tip, appearance = 'default' }: { tip: TooltipStat
           ? 'min-w-[148px] max-w-[220px] rounded-xl border-foreground/10 shadow-[0_10px_30px_rgba(0,0,0,0.14)] dark:border-white/10 dark:shadow-[0_14px_36px_rgba(0,0,0,0.4)]'
           : 'min-w-[176px] max-w-[240px] rounded-md border-border shadow-[0_12px_32px_rgba(0,0,0,0.22)] dark:border-white/10 dark:shadow-[0_14px_36px_rgba(0,0,0,0.48)]'
       }`}
-      style={{ transform: `translate(${cx - half}px, ${Math.max(top, 0)}px)`, visibility: measured ? 'visible' : 'hidden' }}
+      style={{ transform: `translate(${cx - half}px, ${Math.max(top, 0)}px)`, visibility: measured ? 'visible' : 'hidden', transition: glide ? undefined : 'none' }}
     >
       {tip.rows ? (
         <>

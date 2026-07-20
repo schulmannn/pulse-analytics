@@ -194,6 +194,17 @@ arbitrary `duration-[…]` / `ease-[…]` are **not** (lint hard-fails). CSS cus
 inline `style.transition` too, so JS-driven transitions use `var(--motion-glide) var(--ease-standard)`
 (see the reorder FLIP in `ChartWidget.tsx`).
 
+**Chart reveal.** Series charts (`LineChart` / `BarChart` / `Sparkline` / `InlineSpark` / the custom
+`MsMultiLine`) softly reveal on mount and whenever the underlying series changes: lines + areas
+fade-reveal (`--motion-reveal`), bars grow from the baseline (`scaleY` from a `fill-box` bottom origin)
++ fade. The motion carries a `data-chart-motion="reveal"|"grow"` hook and replays via a **stable
+data-derived React key** — a period/filter swap remounts and replays; hover, tooltip movement and
+ResizeObserver width changes are excluded from the key, so they never restart it. The dashed comparison
+ghost keeps its pattern (we animate opacity/transform, never `stroke-dasharray`; its dim rides
+`strokeOpacity`). The shared `ChartTooltip` fades in and glides between points via a tokenised
+`transform` transition (`--motion-base`, never `left`/`top`) — one `[data-chart-tooltip]` rule owns it
+for default/rhea/comparison alike.
+
 **Reduced motion.** A global safety net in `index.css` collapses every animation/transition to 0.01ms
 under `prefers-reduced-motion: reduce`, so token-driven rules never need a per-rule guard. Infinite
 loops (reorder jiggle, starfield twinkle) and readability-critical reveals additionally carry explicit

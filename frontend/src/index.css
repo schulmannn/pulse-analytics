@@ -491,25 +491,60 @@
     font-weight: 500;
     opacity: 0.82;
   }
-  .report-rhea [data-chart-tooltip-appearance='rhea'] {
+  /* Rhea / comparison tooltips keep their Geist face; the fade-in + transform glide is the SHARED
+     [data-chart-tooltip] motion (chart-motion block below) now, so it is no longer re-declared per
+     appearance — one rule owns the motion for default, rhea and comparison alike. */
+  .report-rhea [data-chart-tooltip-appearance='rhea'],
+  [data-chart-tooltip-appearance='comparison'] {
     font-family: 'Geist Variable', 'Inter', system-ui, -apple-system, sans-serif;
-    animation: report-chart-tooltip-in var(--motion-fast) var(--ease-standard) both;
-    transition: transform var(--motion-entrance) var(--ease-standard);
-    will-change: transform;
   }
 
-  @keyframes report-chart-tooltip-in {
+  /* ── Chart motion (token-driven; see frontend/DESIGN_TOKENS.md «Motion») ───────────────────────
+     Series charts softly reveal on mount and whenever the underlying series changes (period / filter):
+     the animated group carries a stable DATA-derived React key, so a resize (new geometry, SAME key)
+     re-renders in place and never replays, while a period / filter swap (new key) remounts and does.
+     Hover, tooltip movement and ResizeObserver width changes are all excluded from that key. Lines +
+     areas fade-reveal; bars grow from the baseline (scaleY from a fill-box bottom origin) + fade. The
+     dashed comparison stroke is untouched — we animate element / group OPACITY (or a transform), never
+     stroke-dasharray, so a dashed series can never turn solid or lose its pattern; the dashed ghost even
+     carries its dim on strokeOpacity so the fade's opacity channel can't brighten it. The shared tooltip
+     fades on mount and glides between points via a tokenised transform transition (never left / top,
+     so no layout loop). Reduced motion collapses all of it via the global net AND the explicit rules
+     below. Durations stay on the --motion-* ladder; no raw values escape index.css. */
+  @keyframes chart-fade-in {
     from { opacity: 0; }
     to { opacity: 1; }
   }
-
-  /* Metric explorer: the shared readout follows the same quick fade + eased horizontal glide as
-     the shadcn reference. The data attribute keeps this motion scoped away from legacy charts. */
-  [data-chart-tooltip-appearance='comparison'] {
-    font-family: 'Geist Variable', 'Inter', system-ui, -apple-system, sans-serif;
-    animation: report-chart-tooltip-in var(--motion-fast) var(--ease-standard) both;
-    transition: transform var(--motion-entrance) var(--ease-standard);
+  @keyframes chart-bar-grow {
+    from { transform: scaleY(0); }
+    to { transform: scaleY(1); }
+  }
+  [data-chart-motion='reveal'] {
+    animation: chart-fade-in var(--motion-reveal) var(--ease-standard) both;
+  }
+  [data-chart-motion='grow'] {
+    transform-box: fill-box;
+    transform-origin: bottom;
+    animation:
+      chart-bar-grow var(--motion-reveal) var(--ease-standard) both,
+      chart-fade-in var(--motion-fast) var(--ease-standard) both;
+  }
+  [data-chart-tooltip] {
+    animation: chart-fade-in var(--motion-fast) var(--ease-standard) both;
+    transition: transform var(--motion-base) var(--ease-standard);
     will-change: transform;
+  }
+  /* Chart-scoped final states — belt-and-braces over the global reduced-motion net: motion off, the
+     marks render at their natural end state (opacity 1 · scaleY 1) and the tooltip snaps to position. */
+  @media (prefers-reduced-motion: reduce) {
+    [data-chart-motion='reveal'],
+    [data-chart-motion='grow'] {
+      animation: none;
+    }
+    [data-chart-tooltip] {
+      animation: none;
+      transition: none;
+    }
   }
 
   /* Second report-only Rhea slice: tables use the same calm card surface as charts, while their

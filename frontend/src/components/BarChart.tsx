@@ -151,6 +151,12 @@ export function BarChart({
   const showGhost = hasGhost && !ghostHidden;
   const activeGhost = showGhost ? ghost : undefined;
 
+  // Stable data signature for the grow-in (see index.css «Chart motion»). Keyed on the SERIES content
+  // — primary values + the shown comparison — so the bars grow from the baseline again on a period /
+  // filter / compare change, but NOT on hover (separate state), tooltip movement or a ResizeObserver
+  // width change (width is absent). Same key → geometry updates in place (no remount, no replay).
+  const motionKey = `${values?.length ?? 0}|${(values ?? []).join(',')}|${activeGhost?.join(',') ?? ''}`;
+
   // ── Geometry + the static plot, memoized APART from hover ────────────────────────────────
   // Hover used to swap every bar's opacity and re-create the whole element tree per mousemove
   // (plus a transparent hit-rect per column). Now the bars render ONCE into a cached layer; the
@@ -469,7 +475,12 @@ export function BarChart({
             the un-dim on leave snaps (the full-opacity highlight unmounts in the same commit) — no
             below-idle dip on the just-hovered bar. */}
         <g className={hover ? 'transition-opacity' : undefined} opacity={hover ? 0.5 : appearance === 'comparison' ? 1 : 0.85}>
-          {plot.barsLayer}
+          {/* Inner keyed group grows the bars from the baseline (fill-box scaleY) + fades on a data
+              change; the outer group keeps owning the hover dim. Stacked/grouped geometry is preserved
+              — the whole group scales as one from the shared baseline, so segments never gap. */}
+          <g key={motionKey} data-chart-motion="grow">
+            {plot.barsLayer}
+          </g>
         </g>
 
         {/* Full-opacity highlight of the hovered bar — BETWEEN the dimmed bars and the ghost/target
