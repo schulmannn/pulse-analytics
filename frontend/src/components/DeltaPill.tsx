@@ -1,8 +1,12 @@
 import type { MetricDelta } from '@/lib/delta';
 
 /**
- * Shared shadcn-style outlined trend badge. Direction remains explicit in the arrow while the
- * restrained success/destructive tint makes KPI scanning faster than a bare muted percentage.
+ * Shared trend indicator, deliberately QUIET (steep register): a muted ↑/↓ + percentage with no
+ * evaluative colour and no tinted chip — direction lives in the arrow, judgement stays with the
+ * reader (владелец: «ничего не кричит»). Hidden when flat or unknown. The `subtle` prop is kept
+ * for call-site compatibility; both variants render the same quiet span now. Single source of
+ * truth for KPI cards, the drill-down, the comparison tables, and the IG panel. Positive/negative
+ * COLOUR remains reserved for chart roles (DivergingBars) and status surfaces — not this chip.
  */
 export function DeltaPill({ delta, subtle = false }: { delta?: MetricDelta | null; subtle?: boolean }) {
   void subtle;
@@ -10,13 +14,7 @@ export function DeltaPill({ delta, subtle = false }: { delta?: MetricDelta | nul
   const direction = delta.dir === 'up' ? '↑' : '↓';
   const percentage = delta.pct >= 100 ? delta.pct.toFixed(0) : delta.pct.toFixed(1);
   return (
-    <span
-      className={`inline-flex shrink-0 items-center rounded-md border px-1.5 py-0.5 text-2xs font-semibold tabular-nums shadow-sm ${
-        delta.dir === 'up'
-          ? 'border-verdant/20 bg-verdant/10 text-verdant'
-          : 'border-destructive/20 bg-destructive/10 text-destructive'
-      }`}
-    >
+    <span className="shrink-0 text-xs font-medium tabular-nums text-muted-foreground">
       {direction}
       {percentage}%
     </span>

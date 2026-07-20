@@ -223,7 +223,7 @@ export function useChartSectionModel(props: ChartSectionProps) {
   const innerStyle: CSSProperties = {};
   if (activeTinted && !activeColor) {
     innerStyle.background =
-      'linear-gradient(145deg, hsl(var(--card)) 35%, color-mix(in oklab, hsl(var(--primary)) 8%, hsl(var(--card))))';
+      'radial-gradient(120% 90% at 50% 0%, hsl(var(--card-tint) / var(--card-tint-alpha)), transparent 62%), hsl(var(--card))';
   }
   (innerStyle as Record<string, string>)['--enter-delay'] = `${Math.min(Math.max(sequenceIndex, 0), 8) * 35}ms`;
   if (dragging) {
