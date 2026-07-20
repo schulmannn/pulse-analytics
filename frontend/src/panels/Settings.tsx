@@ -1,10 +1,18 @@
-import { useCallback, useEffect, useRef } from 'react';
-import { createPortal } from 'react-dom';
+import { useCallback } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useMe } from '@/api/queries';
-import { useFocusTrap } from '@/lib/useFocusTrap';
 import { cn } from '@/lib/utils';
-import { SettingsIcon, type SettingsIconName } from '@/components/settings/primitives';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  SettingsIcon,
+  type SettingsIconName,
+} from '@/components/settings/primitives';
 import {
   AppearanceSection,
   ProfileSection,
@@ -39,16 +47,14 @@ const DATA_SECTIONS = [
 const SECTIONS = [...ACCOUNT_SECTIONS, ...DATA_SECTIONS];
 type SectionKey = (typeof SECTIONS)[number]['key'];
 
-const isSection = (raw: string | null): raw is SectionKey => SECTIONS.some((s) => s.key === raw);
+const isSection = (raw: string | null): raw is SectionKey =>
+  SECTIONS.some((s) => s.key === raw);
 
 export function Settings() {
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
   const me = useMe();
   const isSuperuser = me.data?.role === 'superuser';
-  const panelRef = useRef<HTMLDivElement>(null);
-  useFocusTrap(panelRef);
-
   const rawSection = params.get('section');
   const section: SectionKey = isSection(rawSection) ? rawSection : 'account';
   const active = SECTIONS.find((s) => s.key === section) ?? SECTIONS[0];
@@ -81,156 +87,128 @@ export function Settings() {
     else navigate('/');
   }, [navigate]);
 
-  // Escape closes; body scroll is locked while the dialog is open (PostDetailModal pattern).
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') close();
-    };
-    document.addEventListener('keydown', onKey);
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = prevOverflow;
-    };
-  }, [close]);
-
-  return createPortal(
-    <div
-      className="fixed inset-0 z-modal flex items-center justify-center md:p-6"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Настройки"
-    >
-      {/* Dim + blur the dashboard behind (its main area renders empty while the route is /settings). */}
-      <div className="absolute inset-0 bg-background/70 backdrop-blur-sm backdrop-grayscale" onClick={close} aria-hidden="true" />
-
-      <div
-        ref={panelRef}
-        tabIndex={-1}
-        className="relative z-10 flex h-full w-full flex-col overflow-hidden bg-background focus:outline-none md:h-[min(85vh,720px)] md:max-w-4xl md:flex-row md:rounded md:border md:border-border"
-      >
-        {/* Left mini-nav — pane switcher (md+). */}
-        <nav
-          aria-label="Разделы настроек"
-          className="hidden w-[200px] shrink-0 flex-col overflow-y-auto border-r border-border p-3 md:flex"
+  return (
+    <Dialog open onOpenChange={(open) => !open && close()}>
+      <DialogContent className="flex h-full max-h-none w-full max-w-none flex-col gap-0 overflow-hidden rounded-none border-0 bg-background p-0 md:h-[min(85vh,720px)] md:w-[calc(100%-3rem)] md:max-w-4xl md:flex-row md:rounded md:border md:border-border">
+        <DialogDescription className="sr-only">
+          Настройки аккаунта, данных и подключений
+        </DialogDescription>
+        <Tabs
+          value={section}
+          onValueChange={(value) => setSection(value as SectionKey)}
+          className="flex h-full min-h-0 w-full flex-col md:flex-row"
         >
-          <div className="px-2.5 pb-3 pt-1 text-sm font-medium tracking-tight text-foreground">Настройки</div>
-          <div className="space-y-0.5">
-            {ACCOUNT_SECTIONS.map((item) => (
-              <SectionNavItem
-                key={item.key}
-                item={item}
-                active={section === item.key}
-                onSelect={() => setSection(item.key)}
-              />
-            ))}
-          </div>
-          <p className="px-2.5 pb-1.5 pt-4 text-2xs font-medium tracking-wider text-muted-foreground">
-            Данные и подключения
-          </p>
-          <div className="space-y-0.5">
-            {DATA_SECTIONS.map((item) => (
-              <SectionNavItem
-                key={item.key}
-                item={item}
-                active={section === item.key}
-                onSelect={() => setSection(item.key)}
-              />
-            ))}
-          </div>
-          {isSuperuser && (
-            <>
-              <div className="mx-1 my-3 border-t border-border" aria-hidden="true" />
-              <Link
-                to="/admin"
-                className="flex items-center gap-2.5 rounded px-2.5 py-1.5 text-sm text-ink2 transition-colors hover:bg-hover-row/60 hover:text-foreground"
-              >
-                <SettingsIcon name="shield" className="h-4 w-4 shrink-0" />
-                <span className="flex-1">Админ</span>
-                <SettingsIcon name="external" className="h-3.5 w-3.5 shrink-0 text-ink3" />
-              </Link>
-            </>
-          )}
-        </nav>
-
-        {/* Right column: header (+ mobile tab row) + the scrollable content pane. */}
-        <div className="flex min-w-0 flex-1 flex-col">
-          <header className="flex items-center justify-between gap-3 border-b border-border px-4 py-3 md:px-8">
-            <h2 className="min-w-0 truncate text-lg font-medium tracking-tight">
-              <span className="md:hidden">Настройки</span>
-              <span className="hidden md:inline">{active.label}</span>
-            </h2>
-            <button
-              type="button"
-              onClick={close}
-              aria-label="Закрыть настройки"
-              className="rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            >
-              <SettingsIcon name="close" className="h-4 w-4" />
-            </button>
-          </header>
-
-          {/* Mobile: the mini-nav becomes a horizontal scrollable tab row. */}
-          <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-border px-3 md:hidden">
-            <div role="tablist" aria-label="Разделы настроек" className="flex shrink-0 gap-1">
-              {SECTIONS.map((item) => (
-                <button
+          {/* Left mini-nav — pane switcher (md+). */}
+          <nav
+            aria-label="Разделы настроек"
+            className="hidden w-[200px] shrink-0 flex-col overflow-y-auto border-r border-border p-3 md:flex"
+          >
+            <div className="px-2.5 pb-3 pt-1 text-sm font-medium tracking-tight text-foreground">
+              Настройки
+            </div>
+            <div className="space-y-0.5">
+              {ACCOUNT_SECTIONS.map((item) => (
+                <SectionNavItem
                   key={item.key}
-                  id={`settings-tab-${item.key}`}
-                  type="button"
-                  role="tab"
-                  aria-selected={section === item.key}
-                  tabIndex={section === item.key ? 0 : -1}
-                  onClick={() => setSection(item.key)}
-                  // APG tabs (канон AnalyticsTabs): роли tab обещают стрелки — roving tabindex
-                  // + перенос фокуса на активированный таб (micro-хвост аудита #113).
-                  onKeyDown={(e) => {
-                    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
-                    e.preventDefault();
-                    const i = SECTIONS.findIndex((x) => x.key === section);
-                    const next = SECTIONS[(i + (e.key === 'ArrowRight' ? 1 : SECTIONS.length - 1)) % SECTIONS.length]!;
-                    setSection(next.key);
-                    requestAnimationFrame(() => document.getElementById(`settings-tab-${next.key}`)?.focus());
-                  }}
-                  className={cn(
-                    'shrink-0 rounded-t border-b-2 px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
-                    section === item.key
-                      ? 'border-primary text-foreground'
-                      : 'border-transparent text-muted-foreground hover:text-foreground',
-                  )}
-                >
-                  {item.label}
-                </button>
+                  item={item}
+                  active={section === item.key}
+                  onSelect={() => setSection(item.key)}
+                />
+              ))}
+            </div>
+            <p className="px-2.5 pb-1.5 pt-4 text-2xs font-medium tracking-wider text-muted-foreground">
+              Данные и подключения
+            </p>
+            <div className="space-y-0.5">
+              {DATA_SECTIONS.map((item) => (
+                <SectionNavItem
+                  key={item.key}
+                  item={item}
+                  active={section === item.key}
+                  onSelect={() => setSection(item.key)}
+                />
               ))}
             </div>
             {isSuperuser && (
-              <Link
-                to="/admin"
-                className="flex shrink-0 items-center gap-1 border-b-2 border-transparent px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
-              >
-                Админ
-                <SettingsIcon name="external" className="h-3 w-3" />
-              </Link>
+              <>
+                <div
+                  className="mx-1 my-3 border-t border-border"
+                  aria-hidden="true"
+                />
+                <Link
+                  to="/admin"
+                  className="flex items-center gap-2.5 rounded px-2.5 py-1.5 text-sm text-ink2 transition-colors hover:bg-hover-row/60 hover:text-foreground"
+                >
+                  <SettingsIcon name="shield" className="h-4 w-4 shrink-0" />
+                  <span className="flex-1">Админ</span>
+                  <SettingsIcon
+                    name="external"
+                    className="h-3.5 w-3.5 shrink-0 text-ink3"
+                  />
+                </Link>
+              </>
             )}
-          </div>
+          </nav>
 
-          <div className="flex-1 overflow-y-auto px-4 py-5 md:px-8 md:py-6">
-            <div className="mx-auto w-full max-w-[640px] space-y-10">
-              {section === 'account' && <ProfileSection />}
-              {section === 'appearance' && <AppearanceSection />}
-              {section === 'security' && <SecuritySection />}
-              {section === 'billing' && <BillingSection />}
-              {section === 'team' && <TeamSection onOpenBilling={() => setSection('billing')} />}
-              {section === 'data' && <DataSection onOpenChannels={() => setSection('channels')} />}
-              {section === 'channels' && <ChannelsSection />}
-              {section === 'instagram' && <InstagramSection />}
+          {/* Right column: header (+ mobile tab row) + the scrollable content pane. */}
+          <div className="flex min-w-0 flex-1 flex-col">
+            <header className="flex items-center justify-between gap-3 border-b border-border px-4 py-3 md:px-8">
+              <DialogTitle className="min-w-0 truncate pr-8 text-lg font-medium tracking-tight">
+                <span className="md:hidden">Настройки</span>
+                <span className="hidden md:inline">{active.label}</span>
+              </DialogTitle>
+            </header>
+
+            {/* Mobile: the mini-nav becomes a horizontal scrollable tab row. */}
+            <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-border px-3 md:hidden">
+              <TabsList
+                aria-label="Разделы настроек"
+                className="flex h-auto shrink-0 justify-start gap-1 rounded-none border-0 bg-transparent p-0"
+              >
+                {SECTIONS.map((item) => (
+                  <TabsTrigger
+                    key={item.key}
+                    value={item.key}
+                    className={cn(
+                      'shrink-0 rounded-b-none rounded-t border-b-2 bg-transparent px-3 py-2 text-sm font-medium',
+                      'border-transparent text-muted-foreground hover:text-foreground data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-foreground',
+                    )}
+                  >
+                    {item.label}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+              {isSuperuser && (
+                <Link
+                  to="/admin"
+                  className="flex shrink-0 items-center gap-1 border-b-2 border-transparent px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  Админ
+                  <SettingsIcon name="external" className="h-3 w-3" />
+                </Link>
+              )}
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-4 py-5 md:px-8 md:py-6">
+              <div className="mx-auto w-full max-w-[640px] space-y-10">
+                {section === 'account' && <ProfileSection />}
+                {section === 'appearance' && <AppearanceSection />}
+                {section === 'security' && <SecuritySection />}
+                {section === 'billing' && <BillingSection />}
+                {section === 'team' && (
+                  <TeamSection onOpenBilling={() => setSection('billing')} />
+                )}
+                {section === 'data' && (
+                  <DataSection onOpenChannels={() => setSection('channels')} />
+                )}
+                {section === 'channels' && <ChannelsSection />}
+                {section === 'instagram' && <InstagramSection />}
+              </div>
             </div>
           </div>
-        </div>
-      </div>
-    </div>,
-    document.body,
+        </Tabs>
+      </DialogContent>
+    </Dialog>
   );
 }
 

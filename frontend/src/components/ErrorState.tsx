@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { Cartograph } from '@/components/Cartograph';
+import { Button } from '@/components/ui/button';
 
 interface ErrorStateProps {
   /** Heading — what failed, plainly (default "Не удалось загрузить"). */
@@ -26,14 +27,15 @@ export function ErrorState({ title = 'Не удалось загрузить', r
       <p className="mt-4 text-sm font-medium text-foreground">{title}</p>
       {reason ? <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">{reason}</p> : null}
       {onRetry ? (
-        <button
+        <Button
           type="button"
+          size="sm"
           onClick={onRetry}
           disabled={retrying}
-          className="btn-pill mt-4 bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+          className="mt-4"
         >
           {retrying ? 'Загрузка…' : 'Повторить'}
-        </button>
+        </Button>
       ) : null}
     </div>
   );

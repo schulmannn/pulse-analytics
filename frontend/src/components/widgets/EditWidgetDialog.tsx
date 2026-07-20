@@ -9,6 +9,7 @@ import { useFocusTrap } from '@/lib/useFocusTrap';
 import { useChannels } from '@/api/queries';
 import { PillSelect } from '@/components/PillSelect';
 import { SegmentedControl } from '@/components/SegmentedControl';
+import { Switch } from '@/components/ui/switch';
 import type { SeriesGrain, WidgetPrefs, WidgetSize } from '@/lib/widgetPrefsStore';
 import { SIZE_RANK, type WidgetVariant } from '@/components/widgets/variants';
 
@@ -445,25 +446,14 @@ export function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, sh
         )}
 
         {showSeries && (
-          <button
-            type="button"
-            role="switch"
-            aria-checked={prefs.includeToday !== false}
-            onClick={() => onChange({ ...prefs, includeToday: prefs.includeToday === false ? undefined : false })}
-            className="mt-4 flex w-full items-center justify-between gap-2 text-left text-sm text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <span>Включая сегодня</span>
-            <span
-              aria-hidden="true"
-              className={
-                prefs.includeToday !== false
-                  ? 'rounded-full border border-primary/40 px-2 py-0.5 text-2xs font-medium text-primary'
-                  : 'rounded-full border border-border px-2 py-0.5 text-2xs font-medium text-muted-foreground'
-              }
-            >
-              {prefs.includeToday !== false ? 'вкл' : 'выкл'}
-            </span>
-          </button>
+          <div className="mt-4 flex w-full items-center justify-between gap-2 text-sm text-muted-foreground">
+            <label htmlFor="widget-include-today">Включая сегодня</label>
+            <Switch
+              id="widget-include-today"
+              checked={prefs.includeToday !== false}
+              onCheckedChange={(checked) => onChange({ ...prefs, includeToday: checked ? undefined : false })}
+            />
+          </div>
         )}
 
         <div className="mt-4">
@@ -491,25 +481,14 @@ export function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, sh
           </div>
         </div>
 
-        <button
-          type="button"
-          role="switch"
-          aria-checked={prefs.tinted ?? true}
-          onClick={() => onChange({ ...prefs, tinted: !(prefs.tinted ?? true) })}
-          className="mt-4 flex w-full items-center justify-between gap-2 text-left text-sm text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <span>Цветной фон</span>
-          <span
-            aria-hidden="true"
-            className={
-              (prefs.tinted ?? true)
-                ? 'rounded-full border border-primary/40 px-2 py-0.5 text-2xs font-medium text-primary'
-                : 'rounded-full border border-border px-2 py-0.5 text-2xs font-medium text-muted-foreground'
-            }
-          >
-            {(prefs.tinted ?? true) ? 'вкл' : 'выкл'}
-          </span>
-        </button>
+        <div className="mt-4 flex w-full items-center justify-between gap-2 text-sm text-muted-foreground">
+          <label htmlFor="widget-tinted">Цветной фон</label>
+          <Switch
+            id="widget-tinted"
+            checked={prefs.tinted ?? true}
+            onCheckedChange={(checked) => onChange({ ...prefs, tinted: checked })}
+          />
+        </div>
 
         <div className="mt-5 flex items-center justify-between border-t border-border pt-3">
           <button

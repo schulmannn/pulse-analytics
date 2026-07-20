@@ -1,5 +1,6 @@
 import type { Campaign, CampaignStatus } from '@/api/schemas';
 import { CAMPAIGN_STATUS_LABEL } from '@/api/schemas';
+import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 
 /** Роли, которым сервер разрешает изменять кампанию (viewer — read-only). UI прячет
@@ -9,18 +10,16 @@ export function canEditCampaign(campaign: Pick<Campaign, 'my_role'> | null | und
   return role === 'member' || role === 'admin' || role === 'owner';
 }
 
-const STATUS_CLASS: Record<CampaignStatus, string> = {
-  active: 'bg-primary/10 text-primary',
-  completed: 'bg-verdant/10 text-verdant',
-  archived: 'bg-muted text-muted-foreground',
+const STATUS_VARIANT: Record<CampaignStatus, 'default' | 'success' | 'secondary'> = {
+  active: 'default',
+  completed: 'success',
+  archived: 'secondary',
 };
 
 export function CampaignStatusChip({ status }: { status: string }) {
-  const key = (status in STATUS_CLASS ? status : 'active') as CampaignStatus;
+  const key = (status in STATUS_VARIANT ? status : 'active') as CampaignStatus;
   return (
-    <span className={cn('inline-flex rounded px-1.5 py-0.5 text-2xs font-medium', STATUS_CLASS[key])}>
-      {CAMPAIGN_STATUS_LABEL[key]}
-    </span>
+    <Badge variant={STATUS_VARIANT[key]}>{CAMPAIGN_STATUS_LABEL[key]}</Badge>
   );
 }
 
@@ -38,14 +37,9 @@ export function CampaignColorDot({ color, className }: { color: string | null | 
 /** Платформа публикации — везде рядом с источником (методологии сетей различаются). */
 export function NetworkBadge({ network }: { network: string }) {
   return (
-    <span
-      className={cn(
-        'inline-flex rounded px-1.5 py-0.5 text-2xs font-medium',
-        network === 'ig' ? 'bg-muted text-foreground' : 'bg-primary/10 text-primary',
-      )}
-    >
+    <Badge variant={network === 'ig' ? 'secondary' : 'default'}>
       {network === 'ig' ? 'IG' : 'TG'}
-    </span>
+    </Badge>
   );
 }
 

@@ -1,4 +1,5 @@
 import type { ReactNode, SVGProps } from 'react';
+import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 /**
@@ -66,9 +67,9 @@ export function SettingsRow({ title, description, control, footer, className }: 
 
 // Shared control styles — pill radius (chrome buttons follow btn-pill; inputs keep --radius).
 export const BTN_SECONDARY =
-  'btn-pill border border-border bg-background px-3.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50';
+  buttonVariants({ variant: 'secondary', size: 'sm' });
 export const BTN_DESTRUCTIVE =
-  'btn-pill border border-destructive/20 bg-background px-3.5 py-1.5 text-xs font-medium text-destructive transition-colors hover:bg-destructive/5 disabled:opacity-50';
+  buttonVariants({ variant: 'destructive', size: 'sm' });
 
 /** Lean stroke-only glyphs for the settings nav (local — the shell's nav-icons set stays untouched). */
 const PATHS = {

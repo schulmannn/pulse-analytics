@@ -284,6 +284,9 @@ test.describe('Кампании (desktop)', () => {
     await page.screenshot({ path: selectShot, fullPage: true });
     await testInfo.attach('campaign-pill-select-dark', { path: selectShot, contentType: 'image/png' });
     await page.keyboard.press('ArrowDown');
+    // Radix moves the active option in a deferred callback. Wait for that focus transfer before
+    // confirming, otherwise Enter can race the callback and re-select «Все источники».
+    await expect(page.locator('[role="option"][data-value="tg:1"]')).toBeFocused();
     await page.keyboard.press('Enter');
     await expect(sourceFilter).toHaveAttribute('data-value', 'tg:1');
     await expect(page).toHaveURL(/source=tg%3A1/);

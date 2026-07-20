@@ -14,6 +14,7 @@ import { downloadCsv } from '@/lib/csv';
 import { tgContentRows } from '@/lib/contentExport';
 import { exportFilename } from '@/lib/analyticsExport';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Checkbox } from '@/components/ui/checkbox';
 import { RichText } from '@/components/RichText';
 import { PostDetailModal } from '@/components/PostDetailModal';
 import { MEDIAN_MIN_SAMPLE, compareToMedian, medianDeltaLabel, periodMedian } from '@/lib/postMedian';
@@ -441,12 +442,10 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
           <thead>
             <tr className="border-b border-border text-xs font-medium tracking-wider text-muted-foreground">
               <th className="w-10 py-2.5 pl-0 pr-2">
-                <input
-                  type="checkbox"
+                <Checkbox
                   aria-label="Выбрать все видимые публикации"
                   checked={allVisibleSelected}
-                  onChange={toggleAllVisible}
-                  className="size-4 accent-primary"
+                  onCheckedChange={toggleAllVisible}
                 />
               </th>
               <th className="w-12 py-2.5 pl-0 pr-3 text-center"></th>
@@ -493,12 +492,10 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
                   {/* Чекбокс не должен открывать модалку — гасим всплытие на ячейке. */}
                   <td className="py-2.5 pl-0 pr-2" onClick={(e) => e.stopPropagation()}>
                     {post.id != null && (
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         aria-label="Выбрать публикацию"
                         checked={selected.has(post.id)}
-                        onChange={() => toggleSelect(post.id!)}
-                        className="size-4 accent-primary"
+                        onCheckedChange={() => toggleSelect(post.id!)}
                         data-testid="post-select"
                       />
                     )}

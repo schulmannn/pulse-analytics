@@ -10,10 +10,11 @@ import {
   useTeam,
   type TeamRole,
 } from '@/lib/team';
-import { cn } from '@/lib/utils';
 import { PillSelect } from '@/components/PillSelect';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
-  BTN_DESTRUCTIVE,
   SettingsGroup,
   SettingsIcon,
   SettingsRow,
@@ -38,13 +39,13 @@ function TeamUpsell({ onOpenBilling }: { onOpenBilling: () => void }) {
         title="Команда доступна на Pro и Max"
         description="Приглашайте коллег в общий дашборд: роли «Редактор» и «Наблюдатель», до 10 участников на Max."
         control={
-          <button
+          <Button
             type="button"
+            size="sm"
             onClick={onOpenBilling}
-            className="btn-pill bg-primary px-4 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
           >
             Смотреть тарифы
-          </button>
+          </Button>
         }
       />
     </SettingsGroup>
@@ -84,7 +85,7 @@ function TeamRoster({ plan }: { plan: 'pro' | 'max' }) {
         footer={
           <>
             <form onSubmit={onInvite} className="mt-3 flex flex-col gap-2 sm:flex-row">
-            <input
+            <Input
               type="email"
               value={email}
               onChange={(e) => {
@@ -93,7 +94,7 @@ function TeamRoster({ plan }: { plan: 'pro' | 'max' }) {
               }}
               placeholder="email коллеги"
               disabled={full}
-              className="w-full flex-1 rounded border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-ink3 focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
+              className="w-full flex-1"
             />
             <div className="flex shrink-0 items-center gap-2">
               <PillSelect<TeamRole>
@@ -103,13 +104,13 @@ function TeamRoster({ plan }: { plan: 'pro' | 'max' }) {
                 disabled={full}
                 ariaLabel="Роль"
               />
-              <button
+              <Button
                 type="submit"
+                size="sm"
                 disabled={full || email.trim().length === 0}
-                className="btn-pill bg-primary px-4 py-2 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
               >
                 Пригласить
-              </button>
+              </Button>
             </div>
             </form>
             {err && <p className="mt-2 text-xs font-medium text-destructive">{err}</p>}
@@ -136,14 +137,15 @@ function TeamRoster({ plan }: { plan: 'pro' | 'max' }) {
                 onValueChange={(v) => setMemberRole(m.email, v)}
                 ariaLabel={`Роль ${m.email}`}
               />
-              <button
+              <Button
                 type="button"
+                variant="destructive"
+                size="icon-xs"
                 onClick={() => removeMember(m.email)}
                 aria-label={`Убрать ${m.email}`}
-                className={cn(BTN_DESTRUCTIVE, 'px-2.5')}
               >
                 <SettingsIcon name="close" className="h-3.5 w-3.5" />
-              </button>
+              </Button>
             </>
           }
         />
@@ -171,9 +173,7 @@ function MemberRow({
         </span>
         <div className="min-w-0">
           <div className="truncate text-sm text-foreground">{email}</div>
-          <div className={cn('text-2xs', badgeMuted ? 'text-muted-foreground' : 'text-primary')}>
-            {badge}
-          </div>
+          <Badge variant={badgeMuted ? 'secondary' : 'outline'}>{badge}</Badge>
         </div>
       </div>
       {control && <div className="flex shrink-0 items-center gap-2">{control}</div>}

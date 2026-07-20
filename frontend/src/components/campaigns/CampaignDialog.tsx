@@ -1,16 +1,31 @@
-import { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useState } from 'react';
 import { useCreateCampaign, useUpdateCampaign } from '@/api/queries';
 import type { Campaign, CampaignStatus } from '@/api/schemas';
 import { CAMPAIGN_STATUSES, CAMPAIGN_STATUS_LABEL } from '@/api/schemas';
-import { useFocusTrap } from '@/lib/useFocusTrap';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 
 // Приглушённая палитра меток в духе системы (один синий — акцент, остальные тихие).
-const COLOR_PRESETS = ['#2d6be0', '#0f9d8f', '#b48a2f', '#c2512d', '#7c5cad', '#6b7280'];
-
-const INPUT_CLASS =
-  'mt-1 w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary';
+const COLOR_PRESETS = [
+  '#2d6be0',
+  '#0f9d8f',
+  '#b48a2f',
+  '#c2512d',
+  '#7c5cad',
+  '#6b7280',
+];
 
 /**
  * Создание/редактирование кампании — портальный диалог по канону ConfigEditDialog
@@ -45,24 +60,6 @@ export function CampaignDialog({
   const pending = create.isPending || update.isPending;
   const serverError = (create.error ?? update.error) as Error | null;
 
-  const panelRef = useRef<HTMLDivElement>(null);
-  useFocusTrap(panelRef);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        onClose();
-      }
-    };
-    document.addEventListener('keydown', onKey, true);
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.removeEventListener('keydown', onKey, true);
-      document.body.style.overflow = prev;
-    };
-  }, [onClose]);
-
   const submit = async () => {
     const trimmed = name.trim();
     if (!trimmed) {
@@ -88,7 +85,9 @@ export function CampaignDialog({
     }
     const data = initial
       ? await update.mutateAsync(body).catch(() => null)
-      : await create.mutateAsync({ ...body, channel_id: channelId! }).catch(() => null);
+      : await create
+          .mutateAsync({ ...body, channel_id: channelId! })
+          .catch(() => null);
     if (data) {
       onSaved?.(data.campaign);
       onClose();
@@ -97,56 +96,56 @@ export function CampaignDialog({
 
   const error = localError ?? (serverError ? serverError.message : null);
 
-  return createPortal(
-    <div
-      className="fixed inset-0 z-modal flex items-start justify-center overflow-y-auto bg-background/70 p-4 backdrop-blur-sm backdrop-grayscale sm:p-8"
-      role="dialog"
-      aria-modal="true"
-      aria-label={initial ? `Изменение кампании «${initial.name}»` : 'Новая кампания'}
-      onClick={onClose}
-    >
-      <div
-        ref={panelRef}
-        tabIndex={-1}
-        className="my-auto w-full max-w-md rounded-xl border border-border bg-card p-5 focus:outline-none"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 className="text-sm font-medium text-foreground">
-          {initial ? 'Изменить кампанию' : 'Новая кампания'}
-        </h2>
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>
+            {initial ? 'Изменить кампанию' : 'Новая кампания'}
+          </DialogTitle>
+          <DialogDescription className="sr-only">
+            {initial
+              ? `Изменение кампании «${initial.name}»`
+              : 'Создание новой кампании'}
+          </DialogDescription>
+        </DialogHeader>
 
         <form
-          className="mt-4 space-y-4"
+          className="space-y-4"
           onSubmit={(e) => {
             e.preventDefault();
             void submit();
           }}
         >
-          <label className="block text-xs font-medium text-muted-foreground">
-            Название
-            <input
+          <div className="space-y-1.5">
+            <Label htmlFor="campaign-name">Название</Label>
+            <Input
+              id="campaign-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
               maxLength={120}
               placeholder="Запуск продукта"
-              className={INPUT_CLASS}
+              autoFocus
             />
-          </label>
+          </div>
 
-          <label className="block text-xs font-medium text-muted-foreground">
-            Описание
-            <textarea
+          <div className="space-y-1.5">
+            <Label htmlFor="campaign-description">Описание</Label>
+            <Textarea
+              id="campaign-description"
               value={description ?? ''}
               onChange={(e) => setDescription(e.target.value)}
               maxLength={2000}
               rows={2}
               placeholder="Необязательно: что объединяет эти публикации"
-              className={cn(INPUT_CLASS, 'resize-none')}
+              className="resize-none"
             />
-          </label>
+          </div>
 
           <div>
-            <span className="text-xs font-medium text-muted-foreground">Метка</span>
+            <Label asChild>
+              <span>Метка</span>
+            </Label>
             <div className="mt-1.5 flex items-center gap-2">
               <button
                 type="button"
@@ -155,7 +154,9 @@ export function CampaignDialog({
                 title="Без цвета"
                 className={cn(
                   'flex size-6 items-center justify-center rounded-full border text-2xs text-muted-foreground',
-                  color == null ? 'border-primary ring-1 ring-primary' : 'border-border hover:border-muted-foreground',
+                  color == null
+                    ? 'border-primary ring-1 ring-primary'
+                    : 'border-border hover:border-muted-foreground',
                 )}
               >
                 —
@@ -169,7 +170,9 @@ export function CampaignDialog({
                   aria-label={`Цвет ${preset}`}
                   className={cn(
                     'size-6 rounded-full border border-transparent transition-transform',
-                    color === preset ? 'ring-2 ring-primary ring-offset-2 ring-offset-card' : 'hover:scale-110',
+                    color === preset
+                      ? 'ring-2 ring-primary ring-offset-2 ring-offset-card'
+                      : 'hover:scale-110',
                   )}
                   style={{ backgroundColor: preset }}
                 />
@@ -178,7 +181,9 @@ export function CampaignDialog({
           </div>
 
           <div>
-            <span className="text-xs font-medium text-muted-foreground">Статус</span>
+            <Label asChild>
+              <span>Статус</span>
+            </Label>
             <div className="mt-1.5 flex overflow-hidden rounded-full border border-border">
               {CAMPAIGN_STATUSES.map((s) => (
                 <button
@@ -188,7 +193,9 @@ export function CampaignDialog({
                   onClick={() => setStatus(s)}
                   className={cn(
                     'flex-1 border-r border-border px-2 py-1.5 text-xs transition-colors last:border-r-0',
-                    status === s ? 'bg-primary/10 font-medium text-primary' : 'text-muted-foreground hover:bg-muted/50',
+                    status === s
+                      ? 'bg-primary/10 font-medium text-primary'
+                      : 'text-muted-foreground hover:bg-muted/50',
                   )}
                 >
                   {CAMPAIGN_STATUS_LABEL[s]}
@@ -198,41 +205,42 @@ export function CampaignDialog({
           </div>
 
           <div className="grid grid-cols-2 gap-3">
-            <label className="block text-xs font-medium text-muted-foreground">
-              Начало
-              <input type="date" value={startDate ?? ''} onChange={(e) => setStartDate(e.target.value)} className={INPUT_CLASS} />
-            </label>
-            <label className="block text-xs font-medium text-muted-foreground">
-              Окончание
-              <input type="date" value={endDate ?? ''} onChange={(e) => setEndDate(e.target.value)} className={INPUT_CLASS} />
-            </label>
+            <div className="space-y-1.5">
+              <Label htmlFor="campaign-start">Начало</Label>
+              <Input
+                id="campaign-start"
+                type="date"
+                value={startDate ?? ''}
+                onChange={(e) => setStartDate(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="campaign-end">Окончание</Label>
+              <Input
+                id="campaign-end"
+                type="date"
+                value={endDate ?? ''}
+                onChange={(e) => setEndDate(e.target.value)}
+              />
+            </div>
           </div>
 
           {error && (
-            <p role="alert" className="text-xs text-destructive">
-              {error}
-            </p>
+            <Alert variant="destructive" className="py-2.5">
+              <AlertDescription className="text-xs">{error}</AlertDescription>
+            </Alert>
           )}
 
-          <div className="flex items-center justify-end gap-2 border-t border-border pt-4">
-            <button
-              type="button"
-              onClick={onClose}
-              className="btn-pill px-3.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
-            >
+          <DialogFooter>
+            <Button type="button" variant="ghost" size="sm" onClick={onClose}>
               Отмена
-            </button>
-            <button
-              type="submit"
-              disabled={pending || !name.trim()}
-              className="btn-pill bg-primary px-4 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-            >
+            </Button>
+            <Button type="submit" size="sm" disabled={pending || !name.trim()}>
               {pending ? 'Сохранение…' : initial ? 'Сохранить' : 'Создать'}
-            </button>
-          </div>
+            </Button>
+          </DialogFooter>
         </form>
-      </div>
-    </div>,
-    document.body,
+      </DialogContent>
+    </Dialog>
   );
 }
