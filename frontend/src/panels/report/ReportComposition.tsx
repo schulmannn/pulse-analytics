@@ -87,13 +87,19 @@ export function ReportComposition({ blocks, data, editable, onInsert, onMove, on
     if (!weekly) return null;
     return (
       <div className="report-table-group">
-        <div className="report-table-shell overflow-x-auto">
+        <div className="report-table-shell overflow-x-auto" data-report-table="weekly">
           <table className="report-table w-full min-w-[560px] border-collapse text-sm">
-            <thead>
+            <caption className="sr-only">Динамика показателей по неделям</caption>
+            <thead className="report-table__head">
               <tr>
-                <th className="report-table__heading py-1.5 pr-2 text-left text-2xs font-medium tracking-wide text-muted-foreground">нед. с</th>
-                {weekly.weeks.map((w) => (
-                  <th key={w.key} className="report-table__heading px-1 py-1.5 text-right text-2xs font-medium tabular-nums text-muted-foreground">
+                <th scope="col" className="report-table__heading py-1.5 pr-2 text-left text-2xs font-medium tracking-wide text-muted-foreground">Неделя с</th>
+                {weekly.weeks.map((w, weekIndex) => (
+                  <th
+                    key={w.key}
+                    scope="col"
+                    className="report-table__heading px-1 py-1.5 text-right text-2xs font-medium tabular-nums text-muted-foreground"
+                    data-current={weekIndex === weekly.weeks.length - 1 ? 'true' : undefined}
+                  >
                     {w.label}
                   </th>
                 ))}
@@ -104,21 +110,40 @@ export function ReportComposition({ blocks, data, editable, onInsert, onMove, on
                 const rowMax = Math.max(...row.values.map((v) => (v == null ? 0 : Math.abs(v))), 0);
                 return (
                   <tr key={row.label} className="report-table__row border-t border-border">
-                    <td className="report-table__label py-1 pr-2 text-xs text-muted-foreground">{row.label}</td>
-                    {row.values.map((value, i) => (
-                      <td key={weekly.weeks[i].key} className="report-table__cell px-1 py-1">
-                        <div className="report-table__value relative overflow-hidden rounded px-2 py-1 text-right tabular-nums">
-                          <div aria-hidden="true" className="absolute inset-0" style={cellTint(value, rowMax, row.signed)} />
-                          <span className="relative">
-                            {value == null
-                              ? '—'
-                              : row.signed
-                                ? `${value > 0 ? '+' : value < 0 ? '−' : ''}${fmt.num(Math.abs(value))}`
-                                : fmt.short(value)}
-                          </span>
-                        </div>
-                      </td>
-                    ))}
+                    <th scope="row" className="report-table__label py-1 pr-2 text-left text-xs text-muted-foreground">{row.label}</th>
+                    {row.values.map((value, i) => {
+                      const direction = row.signed && value != null
+                        ? value > 0 ? 'positive' : value < 0 ? 'negative' : 'neutral'
+                        : undefined;
+                      const heatWidth = value == null || rowMax <= 0 ? 0 : Math.min(Math.abs(value) / rowMax, 1) * 100;
+                      return (
+                        <td
+                          key={weekly.weeks[i].key}
+                          className="report-table__cell px-1 py-1"
+                          data-current={i === weekly.weeks.length - 1 ? 'true' : undefined}
+                        >
+                          <div className="report-table__value relative overflow-hidden rounded px-2 py-1 text-right tabular-nums">
+                            <div
+                              aria-hidden="true"
+                              className="report-table__heat absolute"
+                              style={{ ...cellTint(value, rowMax, row.signed), width: `${heatWidth}%` }}
+                            />
+                            <span className="report-table__formatted relative" data-direction={direction}>
+                              {direction === 'positive' || direction === 'negative' ? (
+                                <span aria-hidden="true" className="report-table__trend-icon">
+                                  {direction === 'positive' ? '↑' : '↓'}
+                                </span>
+                              ) : null}
+                              {value == null
+                                ? '—'
+                                : row.signed
+                                  ? `${value > 0 ? '+' : value < 0 ? '−' : ''}${fmt.num(Math.abs(value))}`
+                                  : fmt.short(value)}
+                            </span>
+                          </div>
+                        </td>
+                      );
+                    })}
                   </tr>
                 );
               })}
