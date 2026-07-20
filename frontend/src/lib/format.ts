@@ -151,7 +151,35 @@ export function ruSeriesName(name?: string | null): string {
   return RU_SERIES[raw.toLowerCase()] ?? raw;
 }
 
-/** Sparkline SVG path for a value series (viewBox 200×32). */
+/**
+ * A smooth cubic SVG path whose control points stay inside every adjacent pair's y-range.
+ * `precision` keeps tiny/custom viewBox paths compact while full-size charts can retain exact
+ * measured coordinates.
+ */
+export function smoothSvgPath(
+  points: ReadonlyArray<{ x: number; y: number }>,
+  precision?: number,
+): string {
+  const first = points[0];
+  if (!first) return '';
+  const format = (value: number) => precision == null ? String(value) : value.toFixed(precision);
+  const point = ({ x, y }: { x: number; y: number }) => `${format(x)},${format(y)}`;
+  let path = `M${point(first)}`;
+  for (let i = 1; i < points.length; i++) {
+    const previous = points[i - 1];
+    const current = points[i];
+    const middleX = (previous.x + current.x) / 2;
+    path += ` C${format(middleX)},${format(previous.y)} ${format(middleX)},${format(current.y)} ${point(current)}`;
+  }
+  return path;
+}
+
+/**
+ * Sparkline SVG path for a value series (viewBox 200×32) as a NON-OVERSHOOTING smooth cubic —
+ * the same principle LineChart uses: horizontal control handles at each segment's midpoint keep
+ * the curve inside that pair's [prev, curr] range, so a tiny trend line never invents a peak
+ * above its maximum or a dip below its minimum, and the endpoints stay exact.
+ */
 export function sparkPath(values: number[]): string {
   if (!values || values.length === 0) return '';
   const w = 200, h = 32, pad = 2;
@@ -159,13 +187,9 @@ export function sparkPath(values: number[]): string {
   const max = Math.max(...values);
   const range = max - min || 1;
   const step = (w - pad * 2) / Math.max(values.length - 1, 1);
-  return values
-    .map((v, i) => {
-      const x = pad + i * step;
-      const y = h - pad - ((v - min) / range) * (h - pad * 2);
-      return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(' ');
+  const px = (i: number) => pad + i * step;
+  const py = (v: number) => h - pad - ((v - min) / range) * (h - pad * 2);
+  return smoothSvgPath(values.map((value, index) => ({ x: px(index), y: py(value) })), 1);
 }
 
 /** Closed area variant of {@link sparkPath} for the soft fill underneath. */

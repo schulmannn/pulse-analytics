@@ -8,7 +8,7 @@ import { BarChart } from '@/components/BarChart';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { ErrorState } from '@/components/ErrorState';
 import { Skeleton } from '@/components/ui/skeleton';
-import { fmt, pluralRu } from '@/lib/format';
+import { fmt, pluralRu, smoothSvgPath } from '@/lib/format';
 import { usePagePeriod } from '@/lib/period';
 import { msPreviousPeriod, useMsPagePeriod, type MsPeriod } from '@/lib/msPeriod';
 import { MS_CHANNEL_SELECTION_LIMIT } from '@/lib/msMetricUrlState';
@@ -476,7 +476,7 @@ function MsMultiLine({
       if (metric === 'aov') {
         const observed = values.flatMap((v, i) => (v == null ? [] : [{ x: x(i), y: y(v) }]));
         if (observed.length >= 2) {
-          return { lines: [observed.map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(' ')], lone: [] };
+          return { lines: [smoothSvgPath(observed, 2)], lone: [] };
         }
         return { lines: [], lone: observed };
       }
@@ -484,7 +484,7 @@ function MsMultiLine({
       const lone: Pt[] = [];
       let cur: Pt[] = [];
       const flush = () => {
-        if (cur.length >= 2) lines.push(cur.map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(' '));
+        if (cur.length >= 2) lines.push(smoothSvgPath(cur, 2));
         else if (cur.length === 1) lone.push(cur[0]);
         cur = [];
       };
@@ -549,15 +549,15 @@ function MsMultiLine({
               ))}
             </div>
           )}
-          <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="relative w-full" style={{ height }} aria-hidden="true">
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="relative w-full" style={{ height }} aria-hidden="true" data-chart-curve="smooth">
             {series.map((s, si) => {
               const { lines, lone } = geometry.segments[si];
               return (
                 <g key={s.name}>
-                  {lines.map((pts, si) => (
-                    <polyline
+                  {lines.map((path, si) => (
+                    <path
                       key={`l${si}`}
-                      points={pts}
+                      d={path}
                       fill="none"
                       stroke={s.color}
                       strokeWidth="1.5"
