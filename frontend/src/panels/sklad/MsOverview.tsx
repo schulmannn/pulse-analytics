@@ -4,6 +4,7 @@ import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/E
 import { observeSize } from '@/lib/observeSize';
 import { useMsFunnel, useMsReturns, useMsSummary } from '@/api/queries';
 import { MsTopProductsCard } from '@/panels/sklad/MsTopProducts';
+import { MsStockCard } from '@/panels/sklad/MsStock';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
 import { LineChart } from '@/components/LineChart';
@@ -245,6 +246,12 @@ export function MsOverview() {
         ) : (
           <MsReturnsCardBody data={returns.data} period={period} windowLabel={windowLabel} />
         )}
+      </ChartWidget>
+
+      {/* Остатки «что заканчивается»: карточка self-fetch (свои loading/error/empty), «Всё»
+          внутри подменяется конечным 30-дневным окном — см. msStockPeriod. */}
+      <ChartWidget id="ms-stock" title="Остатки" fixedSize="half" drillTo="/metrics/ms-stock">
+        <MsStockCard period={period} />
       </ChartWidget>
     </div>
   );

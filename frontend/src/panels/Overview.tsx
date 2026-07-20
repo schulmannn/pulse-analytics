@@ -2,6 +2,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useChannels, useHistory, useTgFull, useTgQrStatus } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { useWidgetPeriod } from '@/lib/period';
+import { useWidgetInView } from '@/lib/widgetViewport';
 import { pctDelta, subscriberChange } from '@/lib/delta';
 import { fmt } from '@/lib/format';
 import { freshness, latestHistoryDay } from '@/lib/freshness';
@@ -195,7 +196,10 @@ export function GrowthChartBlock({ id, homeKey, defaultColor }: { id?: string; h
 
 export function SubscriberGrowth() {
   const { days, inRange, range } = useWidgetPeriod();
-  const { data: history } = useHistory(730);
+  // Прогрессивная загрузка Главной: легаси-пин «Рост подписчиков» (тело внутри ChartSection с
+  // homeKey) не фетчит офскрин. На Обзоре (GrowthChartBlock без homeKey) контекст = true.
+  const inView = useWidgetInView();
+  const { data: history } = useHistory(730, { enabled: inView });
   const { channelId } = useSelectedChannel();
   const { data: channelsData } = useChannels();
   const current = channelsData?.channels.find((c) => c.id === channelId);

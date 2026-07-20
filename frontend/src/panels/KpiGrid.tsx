@@ -13,6 +13,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { ChartCardBody } from '@/components/ChartWidget';
 import { CompactStatHeadline } from '@/components/CompareStat';
 import { usePagePeriod, useWidgetPeriod, widgetPeriodValue } from '@/lib/period';
+import { useWidgetInView } from '@/lib/widgetViewport';
 import type { MetricDelta } from '@/lib/delta';
 import { getDrillMetric, type MetricDef } from '@/lib/widgetMetrics';
 import { deriveKpis } from '@/lib/kpiDerive';
@@ -32,8 +33,11 @@ export function useTgKpis() {
   );
   const { days, inRange } = period;
   const range = pagePeriod?.range ?? null;
-  const { data, isPending, isError, error } = useTgFull(0);
-  const { data: history } = useHistory(730);
+  // Прогрессивная загрузка Главной: легаси-«Показатели» на доске (тело внутри ChartSection с
+  // homeKey) не фетчат офскрин. На Обзоре хук живёт на уровне страницы — контекст = true.
+  const inView = useWidgetInView();
+  const { data, isPending, isError, error } = useTgFull(0, { enabled: inView });
+  const { data: history } = useHistory(730, { enabled: inView });
   const { channelId } = useSelectedChannel();
   const { data: channelsData } = useChannels();
   const derived = useMemo(

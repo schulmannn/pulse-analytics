@@ -12,8 +12,8 @@ const { hasWorkspaceRole } = require('../middleware/tenant');
 
 /**
  * Роуты МойСклада (/api/ms/{connect,summary,top-products,top-customers,status,account,backfill,
- * backfill-status,funnel,customers,rfm,rfm-customers,cohorts,returns,sales-by-channel,geography}) —
- * серверная половина
+ * backfill-status,funnel,customers,rfm,rfm-customers,cohorts,returns,sales-by-channel,geography,
+ * stock}) — серверная половина
  * источника «склад», зеркально Instagram-вертикали: connect валидирует токен живыми
  * identity-вызовами и сохраняет его ТОЛЬКО шифрованным (lib/ms_crypto), data-роуты резолвят
  * канал тем же механизмом, что resolveIg (?channel= / заголовок x-channel-id, дефолт через
@@ -63,6 +63,14 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
   const MS_STATES_CACHE_TTL_MS = 60 * 60 * 1000;
   const MS_CHANNELS_CACHE_TTL_MS = 60 * 60 * 1000;
   const sleep = sleepFn || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+
+  // id сущности = последний сегмент href meta-ссылки (…/entity/product/<uuid>) — канон metaHrefId
+  // движка бэкфилла: query-хвост отрезаем, пустые сегменты не считаются. Принимает и meta-ссылку
+  // ({ meta:{href} } — строка отчёта stock), и вложенный assortment строк profit.
+  const metaHrefId = (link) => {
+    const href = link && link.meta && typeof link.meta.href === 'string' ? link.meta.href : '';
+    return href ? href.split('?')[0].split('/').filter(Boolean).pop() || null : null;
+  };
 
   // 'YYYY-MM-DD' по местным часам процесса (Railway = UTC) — как остальные дневные окна бэка.
   const fmtDay = (d) => {
@@ -544,6 +552,9 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
       for (const r of pageRows) {
         all.push({
           key: assortmentIdentity(r),
+          // id товара (хвост assortment.meta.href) — для матча со строками отчёта остатков
+          // (/api/ms/stock); наружу в top-products не уходит.
+          id: metaHrefId(r && r.assortment),
           name: r && r.assortment && typeof r.assortment.name === 'string' ? r.assortment.name : null,
           quantity: Number(r && r.sellQuantity) || 0,
           // Копейки как есть до самого выхода — сортировка по целым, рубли на границе.
@@ -557,6 +568,19 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
       await sleep(MS_TOP_PAGE_PAUSE_MS);
     }
     return { rows: all, total: metaSize != null ? metaSize : all.length, truncated };
+  }
+
+  // Полный нормализованный отчёт profit/byproduct ОДНОГО окна из общего raw-кэша
+  // (`ms:topraw:<ch>:<periodKey>`). Кэш делят top-products (все sort/limit/compare-проекции) и
+  // /api/ms/stock (скорость продаж): пришедший первым оплачивает page-loop МС, остальные читают
+  // кэш. Слот channelId — третий, поэтому msCachePurge снимает и его.
+  async function loadTopRawCached(ms, periodKey, momentFrom, momentTo, longTtl) {
+    const cacheKey = `ms:topraw:${ms.channel.id}:${periodKey}`;
+    const cached = cacheGet(cacheKey);
+    if (cached) return cached;
+    const raw = await loadTopRawWindow(ms.token, momentFrom, momentTo);
+    cacheSet(cacheKey, raw, longTtl ? MS_TOP_ALL_CACHE_TTL_MS : undefined);
+    return raw;
   }
 
   app.get('/api/ms/top-products', requireAuth, async (req, res, next) => {
@@ -574,17 +598,10 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
       const wantCompare = req.query.compare === 'prev';
 
       // Полный нормализованный отчёт кэшируется ОДИН раз на окно (по его periodKey): переключение
-      // сортировки, limit, view и compare не плодит ключей и не повторяет дорогой page-loop МС.
-      // Слот channelId остаётся третьим, поэтому connect/disconnect точечно инвалидирует raw-кэш
-      // через общий msCachePurge.
-      const loadWindow = async (periodKey, momentFrom, momentTo, longTtl) => {
-        const cacheKey = `ms:topraw:${ms.channel.id}:${periodKey}`;
-        const cached = cacheGet(cacheKey);
-        if (cached) return cached;
-        const raw = await loadTopRawWindow(ms.token, momentFrom, momentTo);
-        cacheSet(cacheKey, raw, longTtl ? MS_TOP_ALL_CACHE_TTL_MS : undefined);
-        return raw;
-      };
+      // сортировки, limit, view и compare не плодит ключей и не повторяет дорогой page-loop МС
+      // (общий с /api/ms/stock raw-кэш — см. loadTopRawCached).
+      const loadWindow = (periodKey, momentFrom, momentTo, longTtl) =>
+        loadTopRawCached(ms, periodKey, momentFrom, momentTo, longTtl);
 
       // Текущее окно: пресет/диапазон уже посчитаны разбором; «Всё» — якорь от старейшего заказа
       // архива (ForActor — канон tenant-read; первый день того же месяца читается как «вся история»).
@@ -652,6 +669,112 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
       const body = { rows, total: raw.total, truncated: raw.truncated, summary: summarizeTopProducts(raw) };
       if (comparison) body.comparison = comparison;
       res.json(body);
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  // Кламп строк ответа /api/ms/stock: наружу уходят первые 200 позиций по срочности (сорт ниже) —
+  // остальное для вопроса «что заканчивается» не решает, а ответ остаётся ограниченным.
+  const MS_STOCK_ROWS_MAX = 200;
+
+  // Страничная добивка живого отчёта остатков /report/stock/all (страницы по 1000 и пауза — тот же
+  // потолок API, что у profit/returns; cap 3 страницы = 3000 позиций). Строка отчёта: meta.href
+  // (id товара хвостом — канон metaHrefId), name, stock, reserve. Бросает при сбое msFetch —
+  // вызывающий маппит через sendMsError.
+  async function loadStockRows(token) {
+    const all = [];
+    let offset = 0;
+    for (let page = 0; ; page++) {
+      const report = await msFetch(token, `/report/stock/all?limit=${MS_TOP_PAGE_LIMIT}&offset=${offset}`);
+      const pageRows = report && Array.isArray(report.rows) ? report.rows : [];
+      for (const r of pageRows) {
+        all.push({
+          id: metaHrefId(r),
+          name: r && typeof r.name === 'string' ? r.name : null,
+          stock: Number(r && r.stock) || 0,
+          reserve: Number(r && r.reserve) || 0,
+        });
+      }
+      if (pageRows.length < MS_TOP_PAGE_LIMIT) break;                 // хвост добран
+      if (page + 1 >= MS_TOP_PAGE_CAP) break;                         // упёрлись в cap
+      offset += MS_TOP_PAGE_LIMIT;
+      await sleep(MS_TOP_PAGE_PAUSE_MS);
+    }
+    return all;
+  }
+
+  // GET /api/ms/stock?days=N — «что заканчивается»: живой отчёт остатков, обогащённый скоростью
+  // продаж окна из ТОГО ЖЕ raw-кэша profit/byproduct, что кормит top-products (loadTopRawCached —
+  // второго page-loop продаж нет). Матч продаж к остатку — по id товара (хвост meta.href, канон
+  // metaHrefId движка бэкфилла), фолбэк по имени для строк без href. days_left = остаток ÷
+  // (продано/дней окна); при нулевых продажах — null («нет продаж»), а не выдуманная
+  // бесконечность. Окно ОБЯЗАНО быть конечным: «Всё» (days=0 без диапазона) — честный 400,
+  // скорости продаж нужен конечный знаменатель. Сорт — days_left ASC NULLS LAST, затем stock ASC;
+  // наружу первые MS_STOCK_ROWS_MAX строк. Кэш всего ответа `ms:stock:<ch>:<periodKey>` на
+  // дефолтные 10 минут (как top-customers; msCachePurge снимает и его). resolveMs — токен нужен
+  // обоим живым отчётам; 401/403/429/5xx — канон sendMsError.
+  app.get('/api/ms/stock', requireAuth, async (req, res, next) => {
+    try {
+      const period = parseMsPeriod(req);
+      if (period.invalid) return badRange(res);
+      if (period.days === 0 && !period.range) {
+        return res.status(400).json({ error: 'Для остатков нужно конечное окно — выберите период в днях' });
+      }
+      const ms = await resolveMs(req, res);
+      if (!ms) return;
+      const cacheKey = `ms:stock:${ms.channel.id}:${period.periodKey}`;
+      const cached = cacheGet(cacheKey);
+      if (cached) return res.json(cached);
+
+      // Знаменатель скорости — фактическая инклюзивная длина окна в днях (у произвольного
+      // диапазона days — лишь пресет-фолбэк топбара, не длина).
+      const utcDayMs = (key) => {
+        const [y, m, d] = String(key).split('-').map(Number);
+        return Date.UTC(y, m - 1, d);
+      };
+      const windowDays = period.range
+        ? Math.round((utcDayMs(period.untilDay) - utcDayMs(period.sinceDay)) / 86_400_000) + 1
+        : period.days;
+
+      let stockRows;
+      let salesRaw;
+      try {
+        stockRows = await loadStockRows(ms.token);
+        salesRaw = await loadTopRawCached(ms, period.periodKey, period.momentFrom, period.momentTo, false);
+      } catch (e) {
+        return sendMsError(res, e, { route: 'stock', channelId: ms.channel.id });
+      }
+
+      // Продано за окно по товару: точный матч по id; строки без href копятся по имени. Фолбэк
+      // по имени применяется и когда id остатка не нашёлся в продажах — лучше консервативно
+      // сопоставить по имени, чем потерять скорость позиции.
+      const soldById = new Map();
+      const soldByName = new Map();
+      for (const r of salesRaw.rows) {
+        const qty = Number(r.quantity) || 0;
+        if (r.id) soldById.set(r.id, (soldById.get(r.id) || 0) + qty);
+        if (r.name) soldByName.set(r.name, (soldByName.get(r.name) || 0) + qty);
+      }
+      const rows = stockRows.map((r) => {
+        const sold = r.id != null && soldById.has(r.id)
+          ? soldById.get(r.id)
+          : r.name != null && soldByName.has(r.name)
+            ? soldByName.get(r.name)
+            : 0;
+        const daysLeft = sold > 0 && windowDays > 0
+          ? Math.round((r.stock / (sold / windowDays)) * 10) / 10
+          : null;
+        return { id: r.id, name: r.name, stock: r.stock, reserve: r.reserve, days_left: daysLeft, sold_window: sold };
+      });
+      rows.sort((a, b) => {
+        if (a.days_left == null && b.days_left != null) return 1;   // NULLS LAST
+        if (a.days_left != null && b.days_left == null) return -1;
+        return ((a.days_left ?? 0) - (b.days_left ?? 0)) || (a.stock - b.stock);
+      });
+      const data = { window_days: windowDays, rows: rows.slice(0, MS_STOCK_ROWS_MAX) };
+      cacheSet(cacheKey, data);
+      res.json(data);
     } catch (e) {
       next(e);
     }
@@ -1109,7 +1232,9 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
       const offset = Number.isFinite(offsetRaw) ? Math.max(0, offsetRaw) : 0;
       const ms = await resolveMs(req, res);
       if (!ms) return;
-      const cacheKey = `ms:rfmcust:${ms.channel.id}:${period.periodKey}:${segment}:${limit}:${offset}`;
+      // rfmcust2: версия кэш-ключа поднята при добавлении phone/email в строки — иначе после
+      // деплоя ещё до 10 минут отдавались бы кэш-строки без новых полей.
+      const cacheKey = `ms:rfmcust2:${ms.channel.id}:${period.periodKey}:${segment}:${limit}:${offset}`;
       const cached = cacheGet(cacheKey);
       if (cached) return res.json(cached);
 
@@ -1138,6 +1263,8 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
                 resolvedDict.set(String(c.id), {
                   name: typeof c.name === 'string' ? c.name : null,
                   address: typeof c.actualAddress === 'string' ? c.actualAddress : null,
+                  phone: typeof c.phone === 'string' ? c.phone : null,
+                  email: typeof c.email === 'string' ? c.email : null,
                 });
               }
             }
@@ -1165,6 +1292,8 @@ function registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBa
             agent_id: row.agent_id,
             name: cp ? cp.name : null,
             address: cp ? cp.address : null,
+            phone: cp ? cp.phone : null,
+            email: cp ? cp.email : null,
             city: row.city ?? null,
             orders: row.orders,
             sum: kopecksToRub(row.sum_kopecks),

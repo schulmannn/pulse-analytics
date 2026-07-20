@@ -69,6 +69,7 @@ import {
   type ConcentrationMetric,
   type ExpandedView,
 } from '@/panels/sklad/MsTopProducts';
+import { MsStockTable, STOCK_SORT_OPTIONS, type MsStockSort } from '@/panels/sklad/MsStock';
 import { isMsMetricKey } from '@/panels/sklad/msMetricKeys';
 
 /**
@@ -153,6 +154,8 @@ export function MsMetricPage({ metricKey }: { metricKey: string }) {
       return <MsTopCustomersPage />;
     case 'ms-cohorts':
       return <MsCohortsPage />;
+    case 'ms-stock':
+      return <MsStockPage />;
     default:
       return null;
   }
@@ -189,6 +192,11 @@ const PRODUCTS_URL: MsMetricUrlSchema = {
     // клиентский переключатель, не влияющий на запрос/кэш.
     change: { values: ['revenue', 'profit', 'units'], defaultValue: 'revenue' },
   },
+};
+const STOCK_URL: MsMetricUrlSchema = {
+  // Только клиентская сортировка таблицы: запрос/кэш от неё не зависят (сервер всегда отдаёт
+  // порядок по срочности), поэтому compare/grain здесь нет.
+  enums: { sort: { values: ['days', 'stock', 'sold'], defaultValue: 'days' } },
 };
 const RETURNS_URL: MsMetricUrlSchema = {
   enums: {
@@ -892,6 +900,56 @@ function MsProductsPage() {
           changeMetric={changeMetric}
           onChangeMetric={(value) => controls.setEnum('change', value)}
         />
+      </MsReportCard>
+      <ControlBar window={window} />
+    </MsMetricShell>
+  );
+}
+
+function MsStockPage() {
+  const window = useMsMetricWindow();
+  const controls = useMsMetricUrlControls(STOCK_URL);
+  const sort = controls.values.sort as MsStockSort;
+  // Окну остатков нужен конечный знаменатель скорости продаж — «Всё» недоступно. Прецедента
+  // скрытия пилюли «Всё» в PeriodChips нет, поэтому канонный редирект: выбранное «Всё»
+  // немедленно переводится в 30 дн; кадр до редиректа тело уже запрашивает конечным окном
+  // (msStockPeriod внутри MsStockTable), так что 400 к серверу не уходит.
+  useEffect(() => {
+    if (window.days === 0 && !window.range) window.setDays(30);
+  }, [window.days, window.range, window.setDays]);
+  return (
+    <MsMetricShell
+      back={BACK_OVERVIEW}
+      term="Остатки"
+      descriptor="Что заканчивается: остатки склада и дни до нуля по скорости продаж окна"
+      about={{
+        formula:
+          '«~Дней до нуля» = остаток ÷ средняя дневная скорость продаж выбранного окна (продано за окно ÷ дней в окне). Резерв из остатка не вычитается — показан отдельной колонкой.',
+        included:
+          'Товар без продаж за окно получает «нет продаж» — прогноз для него не определён. Окно «Всё» недоступно: скорости нужен конечный знаменатель, выбор переводится в 30 дн. Показаны первые 200 позиций по срочности.',
+        source: 'Живой отчёт остатков МойСклада (stock/all) + отчёт продаж по товарам (profit).',
+      }}
+      comparison={
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          Остатки — живой снимок склада на сейчас; окно задаёт только скорость продаж, поэтому
+          сравнение периодов не рассчитывается.
+        </p>
+      }
+    >
+      <MsReportCard
+        id="ms-page-stock"
+        title="Все позиции"
+        action={
+          <SegmentedControl
+            ariaLabel="Сортировка остатков"
+            size="sm"
+            value={sort}
+            onChange={(value) => controls.setEnum('sort', value)}
+            options={STOCK_SORT_OPTIONS}
+          />
+        }
+      >
+        <MsStockTable period={window.period} sort={sort} />
       </MsReportCard>
       <ControlBar window={window} />
     </MsMetricShell>

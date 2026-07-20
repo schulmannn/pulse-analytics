@@ -46,7 +46,8 @@ function createApp(deps) {
   const {
     config, db, log,
     fetchWithTimeout,
-    requireAuth, requireSuper, resolveChannel, audit, getDbReady, getDraining,
+    requireAuth, requireSuper, setSessionCookie, clearSessionCookie,
+    resolveChannel, audit, getDbReady, getDraining,
     limiter, authLimiter, mediaLimiter,
     hashPassword, verifyPassword, DUMMY_HASH, signSession, SESSION_TTL, GOOGLE_CLIENT_ID,
     appBase, sha256, newToken, VERIFY_TTL, RESET_TTL, sendEmail, emailShell, emailBtn, escHtml,
@@ -151,6 +152,9 @@ function createApp(deps) {
     escHtml,
     // /api/auth/me отдаёт ai.enabled — фронт гейтит AI-поверхности одним bootstrap-запросом.
     aiEnabledFor: (user) => aiChatService.enabledFor(user),
+    // Cookie-auth фаза 1: login/google ставят HttpOnly-cookie, logout чистит.
+    setSessionCookie,
+    clearSessionCookie,
   });
 
   // Account/admin/prefs/config routes are isolated in routes/account.js (accountLimiter travels with

@@ -6,6 +6,8 @@
 // HTTP-listener. Переиспользует общий граф зависимостей (createComposition) и тот же бегунок, что и
 // web в режиме `inline` — продуктовая логика сбора не дублируется. Контракт:
 //   • COLLECTION_RECOVERY_MODE обязан быть `worker` — иначе процесс не стартует (не молчит в inline);
+//   • JOBS_MODE (гейт web-планировщиков в server/main.js) worker ИГНОРИРУЕТ: смысл worker-процесса —
+//     всегда гонять свои джобы, поэтому «те же env, что у web» (включая JOBS_MODE=off) его не гасят;
 //   • БД обязана быть включена и достижима — иначе процесс падает явно, а не «выглядит здоровым» вхолостую;
 //   • recovery-бегунок использует unref-таймеры (не держат event loop), поэтому процесс держится живым
 //     собственным ref-таймером-keepalive до явной остановки;
@@ -41,6 +43,13 @@ async function runWorker({
       `[worker] COLLECTION_RECOVERY_MODE обязан быть 'worker' для standalone recovery-процесса ` +
         `(получено '${config.runtime.collectionRecoveryMode}'); web-процесс запускается через server/index.js.`,
     );
+  }
+
+  // JOBS_MODE — гейт ТОЛЬКО web-планировщиков (server/main.js). Worker-сервису Railway копирует env
+  // web-сервиса, поэтому здесь может оказаться JOBS_MODE=off — worker его сознательно игнорирует
+  // (иначе «выключенный web» выключил бы и worker, и джобы не гонял бы никто). Логируем для ops.
+  if (env.JOBS_MODE !== undefined) {
+    console.log('[worker] JOBS_MODE игнорируется: worker всегда гоняет свои джобы (гейт относится только к web)');
   }
 
   const createComposition =

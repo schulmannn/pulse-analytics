@@ -10,6 +10,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { PostDetailModal } from '@/components/PostDetailModal';
 import { EmptyState } from '@/components/EmptyState';
 import { useWidgetPeriod } from '@/lib/period';
+import { useWidgetInView } from '@/lib/widgetViewport';
 import { Icon } from '@/components/nav-icons';
 
 /**
@@ -54,7 +55,10 @@ import { ErrorState } from '@/components/ErrorState';
 export function TopPosts({ variant = 'table' }: { variant?: 'table' | 'cards' } = {}) {
   // Resolved feed/Home window. Wide fetch (limit 100), filtered client-side by inRange.
   const { inRange } = useWidgetPeriod();
-  const { data, isPending, isError, refetch } = useTgFull(0);
+  // Прогрессивная загрузка Главной: легаси-пин (тело внутри ChartSection с homeKey) не фетчит
+  // офскрин. На Обзоре/в отчётах контекст = true — поведение прежнее.
+  const inView = useWidgetInView();
+  const { data, isPending, isError, refetch } = useTgFull(0, { enabled: inView });
   // Thumbnail safety: the /api/tg/mtproto/thumb proxy is only trustworthy for the ONE central
   // channel (message ids resolve through it), so only vouch for proxy covers when the selected
   // source is central. Any other source gets a neutral placeholder instead of possibly-wrong media.

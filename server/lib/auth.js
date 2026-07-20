@@ -96,4 +96,57 @@ function isSessionStale(exp, now, ttl) {
   return typeof exp === 'number' && exp - now < ttl / 2;
 }
 
-module.exports = { createAuth, hashPassword, verifyPassword, SCRYPT, rateLimitKey, isSessionStale };
+// ── Cookie-транспорт сессии (cookie-auth, фаза 1) ────────────────────────────
+// Тот же stateless-HMAC-токен, но доставленный HttpOnly-cookie. Header-путь
+// (X-Session-Token) остаётся каноном для SPA/legacy; cookie читается ТОЛЬКО когда
+// заголовка нет. Хелперы чистые + экспортированы, чтобы точный контракт (парсинг,
+// атрибуты Set-Cookie, CSRF-предикат) был unit-заперт — как isSessionStale выше.
+const SESSION_COOKIE = 'pulse_session';
+
+// Значение cookie из сырого заголовка Cookie (без cookie-parser — как cookieValue в
+// ig-oauth). Токен — base64url + точка, percent-encoding при записи не используется,
+// поэтому значение возвращается как есть (декодирование не нужно).
+function readCookie(header, name) {
+  if (!header || typeof header !== 'string') return null;
+  for (const part of header.split(';')) {
+    const eq = part.indexOf('=');
+    if (eq < 0 || part.slice(0, eq).trim() !== name) continue;
+    const value = part.slice(eq + 1).trim();
+    return value || null;
+  }
+  return null;
+}
+
+// Строка Set-Cookie сессии: HttpOnly (не читается из JS — токен не утекает через XSS),
+// SameSite=Lax (cookie не уходит с кросс-сайтовым POST), Path=/. Max-Age — серверный
+// срок токена (SESSION_TTL, мс → сек). Secure — по флагу (req.secure: за Railway-прокси
+// true, на локальном http — нет). Пустой token + maxAgeMs=0 = сброс cookie (logout).
+function serializeSessionCookie(token, { secure, maxAgeMs }) {
+  const attrs = [
+    `${SESSION_COOKIE}=${token}`,
+    `Max-Age=${Math.floor(maxAgeMs / 1000)}`,
+    'Path=/',
+    'HttpOnly',
+    'SameSite=Lax',
+  ];
+  if (secure) attrs.push('Secure');
+  return attrs.join('; ');
+}
+
+// CSRF-предикат для мутаций, аутентифицированных через cookie: браузер шлёт cookie сам,
+// поэтому требуем доказательство same-origin — Origin равен origin запроса; при
+// отсутствии Origin допустим Referer с тем же origin; иначе false (403). Присутствующий,
+// но чужой Origin НЕ падает на Referer-фоллбек. Header-аутентифицированные запросы сюда
+// не заходят вовсе: кастомный заголовок сам по себе CSRF-барьер.
+function isCsrfSafe({ origin, referer, requestOrigin }) {
+  if (origin) return origin === requestOrigin;
+  if (referer) {
+    try { return new URL(referer).origin === requestOrigin; } catch { return false; }
+  }
+  return false;
+}
+
+module.exports = {
+  createAuth, hashPassword, verifyPassword, SCRYPT, rateLimitKey, isSessionStale,
+  SESSION_COOKIE, readCookie, serializeSessionCookie, isCsrfSafe,
+};

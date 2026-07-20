@@ -9,7 +9,14 @@
 'use strict';
 
 const crypto = require('crypto');
-const { createAuth, hashPassword, SCRYPT, isSessionStale } = require('../lib/auth');
+const {
+  createAuth, hashPassword, SCRYPT, isSessionStale,
+  SESSION_COOKIE, readCookie, serializeSessionCookie, isCsrfSafe,
+} = require('../lib/auth');
+
+// Мутации, которые за cookie-транспортом обязаны пройти same-origin CSRF-проверку.
+// Безопасные методы (GET/HEAD/OPTIONS) не меняют состояние — их не гейтим.
+const MUTATION_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 function createAuthService({ config, db }) {
   // Token signing secret: a dedicated SESSION_SECRET and nothing else. There is no
@@ -64,13 +71,50 @@ function createAuthService({ config, db }) {
     } catch (e) { console.error('[db] adopt owner channel failed:', e.message); }
   }
 
+  // Ставит/обновляет сессионную cookie тем же токеном, что уходит в JSON/заголовке
+  // (cookie-auth фаза 1: меняется только транспорт, не формат токена). Secure — от
+  // req.secure: trust proxy уже настроен, за Railway это true, на локальном http — нет.
+  // append (не set), чтобы не затереть чужой Set-Cookie на том же ответе.
+  function setSessionCookie(req, res, token) {
+    res.append('Set-Cookie', serializeSessionCookie(token, { secure: req.secure, maxAgeMs: SESSION_TTL }));
+  }
+
+  // Сброс cookie (logout): пустое значение + Max-Age=0 с теми же атрибутами.
+  function clearSessionCookie(req, res) {
+    res.append('Set-Cookie', serializeSessionCookie('', { secure: req.secure, maxAgeMs: 0 }));
+  }
+
   // Auth: validates the token, then re-checks the user is still active (so role
   // changes / disable take effect immediately, not only on next login). Every valid
   // session carries a numeric uid (parseToken rejects anything else), so req.user
   // always maps to a real users row.
+  // Транспорт (фаза 1 cookie-auth): заголовок X-Session-Token ПРИОРИТЕТНЕЕ — cookie
+  // 'pulse_session' читается только когда заголовка нет (битый header с валидной cookie
+  // всё равно 401 — заголовок объявил намерение и проиграл). Токен один и тот же.
   async function requireAuth(req, res, next) {
-    const sess = parseToken(req.headers['x-session-token']);
+    const headerToken = req.headers['x-session-token'];
+    const viaCookie = !headerToken;
+    // Cookie-транспорт отвергает КРОСС-САЙТОВЫЕ запросы целиком (включая GET: SameSite=Lax
+    // пропускает cookie на top-level навигациях, а у нас есть квотные GET — searchPosts
+    // ~10/день, живые МС-отчёты). Sec-Fetch-Site шлют все современные браузеры; без
+    // заголовка (старый Safari, curl) поведение прежнее — мутации всё равно ловит
+    // Origin-гейт ниже. Header-путь не гейтится: кастомный заголовок кросс-сайтово недоступен.
+    const crossSite = viaCookie && req.headers['sec-fetch-site'] === 'cross-site';
+    const sess = crossSite
+      ? null
+      : parseToken(viaCookie ? readCookie(req.headers.cookie, SESSION_COOKIE) : headerToken);
     if (!sess) return res.status(401).json({ error: 'Сессия истекла, войди снова' });
+    // CSRF-гейт: мутацию, аутентифицированную через cookie (браузер шлёт её сам, в т.ч.
+    // с чужого сайта), пускаем только при доказанном same-origin — Origin (или, без него,
+    // Referer) равен origin запроса. Header-аутентифицированные запросы не трогаем:
+    // кастомный заголовок недоступен кросс-сайтовой форме и сам по себе CSRF-барьер.
+    if (viaCookie && MUTATION_METHODS.has(req.method) && !isCsrfSafe({
+      origin: req.headers.origin,
+      referer: req.headers.referer,
+      requestOrigin: `${req.protocol}://${req.get('host')}`,
+    })) {
+      return res.status(403).json({ error: 'csrf' });
+    }
     req.session = sess;
     try {
       const u = await db.getUserById(sess.uid);
@@ -88,6 +132,7 @@ function createAuthService({ config, db }) {
       if (isSessionStale(sess.exp, now, SESSION_TTL)) {
         const fresh = signSession({ uid: u.id, role: u.role, exp: now + SESSION_TTL, tokenVersion: u.token_version });
         res.set('X-Session-Refresh', fresh);
+        setSessionCookie(req, res, fresh); // cookie-транспорт скользит вместе с header-путём
         res.set('Cache-Control', 'no-store'); // a response carrying a token must never be shared-cached
       }
       next();
@@ -105,6 +150,7 @@ function createAuthService({ config, db }) {
     VERIFY_TTL, RESET_TTL, sha256, newToken, DUMMY_HASH,
     bootstrapAdmin, claimOwnerChannel,
     requireAuth, requireSuper,
+    setSessionCookie, clearSessionCookie,
   };
 }
 

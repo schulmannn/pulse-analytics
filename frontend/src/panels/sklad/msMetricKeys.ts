@@ -19,6 +19,7 @@ export const MS_METRIC_KEYS = [
   'ms-geography',
   'ms-top-customers',
   'ms-cohorts',
+  'ms-stock',
 ] as const;
 
 export type MsMetricKey = (typeof MS_METRIC_KEYS)[number];

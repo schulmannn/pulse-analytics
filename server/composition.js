@@ -138,6 +138,8 @@ function createComposition(config, overrides = {}) {
     claimOwnerChannel,
     requireAuth,
     requireSuper,
+    setSessionCookie,
+    clearSessionCookie,
   } = authService;
 
   // Журнал действий — services/auditService.js (IP_HASH_KEY выводится внутри из AUTH_SECRET).
@@ -432,6 +434,8 @@ function createComposition(config, overrides = {}) {
       fetchWithTimeout,
       requireAuth,
       requireSuper,
+      setSessionCookie,
+      clearSessionCookie,
       resolveChannel,
       audit,
       getDbReady: () => dbReady,

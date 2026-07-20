@@ -18,6 +18,7 @@ describe('MoySklad metric route registry', () => {
       'ms-geography',
       'ms-top-customers',
       'ms-cohorts',
+      'ms-stock',
     ]);
   });
 

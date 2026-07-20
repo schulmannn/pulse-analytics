@@ -2,7 +2,10 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const { promisify } = require('node:util');
-const { createAuth, hashPassword, verifyPassword, rateLimitKey, isSessionStale } = require('../server/lib/auth');
+const {
+  createAuth, hashPassword, verifyPassword, rateLimitKey, isSessionStale,
+  SESSION_COOKIE, readCookie, serializeSessionCookie, isCsrfSafe,
+} = require('../server/lib/auth');
 
 const scryptAsync = promisify(crypto.scrypt);
 
@@ -94,6 +97,51 @@ test('verifyPassword is constant-cost / falsey against the anti-enumeration DUMM
   const DUMMY_HASH = `scrypt$${SCRYPT.N}$${SCRYPT.r}$${SCRYPT.p}$${'0'.repeat(32)}$${'0'.repeat(128)}`;
   // Missing-user path verifies against DUMMY_HASH: must resolve false, never throw.
   assert.strictEqual(await verifyPassword('anything', DUMMY_HASH), false);
+});
+
+// ── Cookie-транспорт сессии (фаза 1): чистые хелперы ─────────────────────────
+
+test('readCookie достаёт pulse_session из заголовка Cookie и терпит мусор', () => {
+  assert.strictEqual(readCookie(`a=1; ${SESSION_COOKIE}=tok.sig; b=2`, SESSION_COOKIE), 'tok.sig');
+  assert.strictEqual(readCookie(`${SESSION_COOKIE}=tok.sig`, SESSION_COOKIE), 'tok.sig');
+  // имя-префикс другой cookie не матчится, пустое значение → null
+  assert.strictEqual(readCookie(`x${SESSION_COOKIE}=nope`, SESSION_COOKIE), null);
+  assert.strictEqual(readCookie(`${SESSION_COOKIE}=`, SESSION_COOKIE), null);
+  assert.strictEqual(readCookie('', SESSION_COOKIE), null);
+  assert.strictEqual(readCookie(undefined, SESSION_COOKIE), null);
+  assert.strictEqual(readCookie('garbage-without-equals', SESSION_COOKIE), null);
+});
+
+test('serializeSessionCookie: HttpOnly+Lax+Path=/, Max-Age в секундах, Secure по флагу', () => {
+  const ttl = 7 * 24 * 60 * 60 * 1000;
+  assert.strictEqual(
+    serializeSessionCookie('tok.sig', { secure: false, maxAgeMs: ttl }),
+    `${SESSION_COOKIE}=tok.sig; Max-Age=604800; Path=/; HttpOnly; SameSite=Lax`,
+  );
+  assert.strictEqual(
+    serializeSessionCookie('tok.sig', { secure: true, maxAgeMs: ttl }),
+    `${SESSION_COOKIE}=tok.sig; Max-Age=604800; Path=/; HttpOnly; SameSite=Lax; Secure`,
+  );
+  // сброс (logout): пустое значение + Max-Age=0
+  assert.strictEqual(
+    serializeSessionCookie('', { secure: false, maxAgeMs: 0 }),
+    `${SESSION_COOKIE}=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax`,
+  );
+});
+
+test('isCsrfSafe: Origin решает; Referer — только когда Origin отсутствует', () => {
+  const requestOrigin = 'https://app.example';
+  // совпавший Origin → ок; чужой → нет (и Referer уже не спасает)
+  assert.strictEqual(isCsrfSafe({ origin: 'https://app.example', referer: undefined, requestOrigin }), true);
+  assert.strictEqual(isCsrfSafe({ origin: 'https://evil.example', referer: 'https://app.example/x', requestOrigin }), false);
+  // браузерный Origin: null (sandboxed iframe / data:) — не same-origin
+  assert.strictEqual(isCsrfSafe({ origin: 'null', referer: undefined, requestOrigin }), false);
+  // без Origin: same-origin Referer проходит, чужой/битый — нет
+  assert.strictEqual(isCsrfSafe({ origin: undefined, referer: 'https://app.example/page?x=1', requestOrigin }), true);
+  assert.strictEqual(isCsrfSafe({ origin: undefined, referer: 'https://evil.example/page', requestOrigin }), false);
+  assert.strictEqual(isCsrfSafe({ origin: undefined, referer: 'not a url', requestOrigin }), false);
+  // ни Origin, ни Referer → отказ (403 в requireAuth)
+  assert.strictEqual(isCsrfSafe({ origin: undefined, referer: undefined, requestOrigin }), false);
 });
 
 test('rate-limit key is per-user for sessions and per-IP otherwise', () => {

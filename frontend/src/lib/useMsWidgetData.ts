@@ -9,13 +9,17 @@ import { useSelectedChannel } from '@/lib/channel-context';
 import { DEFAULT_WIDGET_DAYS, widgetPeriodValue } from '@/lib/period';
 import { resolveWidgetMetric, type DataContext, type WidgetResult } from '@/lib/resolveWidgetMetric';
 import type { WidgetConfig } from '@/lib/widgetConfig';
+import { useWidgetInView } from '@/lib/widgetViewport';
 
 export function useMsWidgetData(config: WidgetConfig): { result: WidgetResult; isLoading: boolean } {
   const days = config.period ?? DEFAULT_WIDGET_DAYS;
   const period = useMemo(() => widgetPeriodValue(days), [days]);
+  // Прогрессивная загрузка Главной (зеркало useWidgetData): офскрин-карточка держит запрос
+  // disabled, пока не приблизится к вьюпорту. Вне Главной контекст = true — всё как раньше.
+  const inView = useWidgetInView();
   // Home-виджет несёт СВОЙ пресет-период (без произвольного диапазона топбара) — сериализуем как
   // preset-only MsPeriod, чтобы поведение Главной осталось прежним (канон #5: пресеты стабильны).
-  const summaryQ = useMsSummary({ days });
+  const summaryQ = useMsSummary({ days }, { enabled: inView });
   const { channelId } = useSelectedChannel();
 
   const result = useMemo(() => {
