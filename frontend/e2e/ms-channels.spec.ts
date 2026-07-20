@@ -31,6 +31,8 @@ test('MoySklad channels uses the flat feed shell and multi-channel explorer', as
     name: /Выручка по каналам: Интернет-магазин, Партнёры/,
   });
   await expect(comparisonChart).toBeVisible();
+  await expect(comparisonChart.locator('svg')).toHaveAttribute('data-chart-curve', 'smooth');
+  await expect(comparisonChart.locator('path').first()).toHaveAttribute('d', /\bC/);
   await comparisonChart.focus();
   await expect(dynamics.locator('.z-tooltip')).toBeVisible();
   await page.keyboard.press('ArrowLeft');

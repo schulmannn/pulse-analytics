@@ -49,6 +49,11 @@ test('chart hover: tooltip readout appears, moves and clears (single-svg hit-tes
   // hover derives the point index from the pointer x, no per-point rects.
   const chart = page.locator('svg[aria-label^="График:"]').first();
   await chart.waitFor({ state: 'visible', timeout: 15_000 });
+  // Default widget line charts (no rhea/comparison appearance) are smooth now: the metadata reads
+  // 'smooth' and the primary series path is drawn with cubic (C) commands, not straight L segments.
+  await expect(chart).toHaveAttribute('data-chart-appearance', 'default');
+  await expect(chart).toHaveAttribute('data-chart-curve', 'smooth');
+  await expect(chart.locator('[data-chart-series="primary"]')).toHaveAttribute('d', /\bC\b/);
   // mouse.move targets raw viewport coordinates and never auto-scrolls — bring the chart into
   // the viewport first, then read its box.
   await chart.scrollIntoViewIfNeeded();

@@ -1,7 +1,7 @@
 import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { EmptyState } from '@/components/EmptyState';
-import { fmt } from '@/lib/format';
+import { fmt, smoothSvgPath } from '@/lib/format';
 import { detectAnomalies } from '@/lib/anomaly';
 import { nearestPointIndex } from '@/lib/chartHover';
 import { axisLabelIndexes } from '@/lib/chartLabels';
@@ -115,26 +115,6 @@ export function axisLabel(v: number, step: number): string {
   return fmt.num(v);
 }
 
-function seriesPath(points: Array<{ x: number; y: number }>, smooth: boolean): string {
-  const first = points[0];
-  if (!first) return '';
-  let path = `M ${first.x} ${first.y}`;
-  for (let i = 1; i < points.length; i++) {
-    const previous = points[i - 1];
-    const current = points[i];
-    if (!previous || !current) continue;
-    if (!smooth) {
-      path += ` L ${current.x} ${current.y}`;
-      continue;
-    }
-    // Horizontal control handles keep the curve inside each pair's value range: the line reads
-    // smoothly without inventing overshoot above a peak or below a zero-value day.
-    const middleX = (previous.x + current.x) / 2;
-    path += ` C ${middleX} ${previous.y} ${middleX} ${current.y} ${current.x} ${current.y}`;
-  }
-  return path;
-}
-
 export function LineChart({
   values,
   labels,
@@ -192,7 +172,11 @@ export function LineChart({
   const showAxes = fullAxes || expanded;
   const rhea = appearance === 'rhea';
   const comparison = appearance === 'comparison';
-  const smooth = rhea || comparison;
+  // Rich shadcn-style treatment — softer 2px stroke, stronger fading area tint, hover halo and no
+  // pole dots — stays isolated to the Rhea/comparison hosts. The smooth CURVE (smoothSvgPath) is now
+  // universal and independent of this: default widget cards curve too, but keep the flat tint,
+  // 2.5px stroke and first/last pole markers below.
+  const richStyle = rhea || comparison;
   // Strip colons from useId — valid in ids, but break SVG url(#…) refs in some browsers.
   const chartId = useId().replace(/:/g, '');
   const gradientId = `lc${chartId}`;
@@ -344,12 +328,13 @@ export function LineChart({
     }
     if (run.length > 0) segs.push(run);
     const lineSegs = segs.filter((s) => s.length >= 2);
-    // Один path с подпутями M…L… — stroke остаётся одним элементом, разрывы честные.
-    const linePath = lineSegs.map((segment) => seriesPath(segment, smooth)).join(' ');
+    // Один path с подпутями M…C… — stroke остаётся одним элементом, разрывы честные.
+    const linePath = lineSegs.map((segment) => smoothSvgPath(segment)).join(' ');
     // Каждый сегмент заливки замыкается на СВОЮ базовую линию — дыра остаётся незакрашенной.
+    // Верх заливки — та же сглаженная кривая, что и линия (общий smoothSvgPath), низ — по baseY.
     const baseY = h - padB;
     const areaPath = lineSegs
-      .map((segment) => `${seriesPath(segment, smooth)} L ${segment[segment.length - 1].x} ${baseY} L ${segment[0].x} ${baseY} Z`)
+      .map((segment) => `${smoothSvgPath(segment)} L ${segment[segment.length - 1].x} ${baseY} L ${segment[0].x} ${baseY} Z`)
       .join(' ');
     // Сегмент из одной точки: точка-кружок — единственное измерение между дырами всё равно факт,
     // а линия нулевой длины была бы невидима.
@@ -372,9 +357,9 @@ export function LineChart({
     }
     if (ghostRun.length > 0) ghostSegs.push(ghostRun);
     const ghostLineSegs = ghostSegs.filter((segment) => segment.length >= 2);
-    const ghostPath = ghostLineSegs.map((segment) => seriesPath(segment, smooth)).join(' ');
+    const ghostPath = ghostLineSegs.map((segment) => smoothSvgPath(segment)).join(' ');
     const ghostAreaPath = ghostLineSegs
-      .map((segment) => `${seriesPath(segment, smooth)} L ${segment[segment.length - 1].x} ${baseY} L ${segment[0].x} ${baseY} Z`)
+      .map((segment) => `${smoothSvgPath(segment)} L ${segment[segment.length - 1].x} ${baseY} L ${segment[0].x} ${baseY} Z`)
       .join(' ');
 
     // Real x-axis ticks (axes mode): width-aware stride so labels never collide — one label
@@ -421,8 +406,8 @@ export function LineChart({
           {/* Default cards keep the flat Steep tint. The isolated Rhea treatment follows the
               shadcn area-chart recipe with a stronger top tint fading toward the baseline. */}
           <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="hsl(var(--chart-role-primary))" stopOpacity={smooth ? '0.3' : expanded ? '0.05' : '0.12'} />
-            <stop offset="100%" stopColor="hsl(var(--chart-role-primary))" stopOpacity={smooth ? '0.035' : expanded ? '0.05' : '0.12'} />
+            <stop offset="0%" stopColor="hsl(var(--chart-role-primary))" stopOpacity={richStyle ? '0.3' : expanded ? '0.05' : '0.12'} />
+            <stop offset="100%" stopColor="hsl(var(--chart-role-primary))" stopOpacity={richStyle ? '0.035' : expanded ? '0.05' : '0.12'} />
           </linearGradient>
           {comparison && (
             <linearGradient id={comparisonGradientId} x1="0" y1="0" x2="0" y2="1">
@@ -511,7 +496,7 @@ export function LineChart({
             россыпью одиночных измерений без единого сплошного отрезка) */}
         {areaPath && <path data-chart-series="primary-area" d={areaPath} fill={`url(#${gradientId})`} />}
         {linePath && (
-          <path data-chart-series="primary" d={linePath} fill="none" stroke="hsl(var(--chart-role-primary))" strokeWidth={smooth ? '2' : '2.5'} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+          <path data-chart-series="primary" d={linePath} fill="none" stroke="hsl(var(--chart-role-primary))" strokeWidth={richStyle ? '2' : '2.5'} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
         )}
 
         {/* Одиночное измерение между дырами — точка вместо невидимой линии нулевой длины */}
@@ -538,8 +523,10 @@ export function LineChart({
         })}
 
         {/* Полюса линии (steep): начало — полая точка, конец — сплошной маркер «сейчас».
-            Оба стоят на РЕАЛЬНЫХ точках: краевые дыры маркеров не получают. */}
-        {!smooth && (
+            Оба стоят на РЕАЛЬНЫХ точках: краевые дыры маркеров не получают. Полюса — часть
+            дефолтного стиля карточек; rich-хосты (Rhea/comparison) их прячут, кривая при этом
+            одинаково сглажена в обоих режимах. */}
+        {!richStyle && (
           <>
             <circle cx={firstPt.x} cy={firstPt.y} r="3.5" fill="hsl(var(--background))" stroke="hsl(var(--chart-role-primary))" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
             <circle cx={lastPt.x} cy={lastPt.y} r="4" fill="hsl(var(--chart-role-primary))" stroke="hsl(var(--background))" strokeWidth="2" vectorEffect="non-scaling-stroke" />
@@ -573,7 +560,7 @@ export function LineChart({
     );
 
     return { W, h, gutterW, step, points, yFor, hasXAxis, plotTop: padY, plotBottom: h - padB, staticLayer };
-  }, [values, labels, activeGhost, hasGhostLegend, target, refLines, yMin, yMax, width, ctxHeight, height, expanded, showAxes, markExtremes, showPoints, anomalyIdx, gradientId, comparisonGradientId, rhea, comparison, smooth]);
+  }, [values, labels, activeGhost, hasGhostLegend, target, refLines, yMin, yMax, width, ctxHeight, height, expanded, showAxes, markExtremes, showPoints, anomalyIdx, gradientId, comparisonGradientId, rhea, comparison, richStyle]);
 
   // Пустое состояние считается по РЕАЛЬНЫМ точкам (plot = null при < 2 non-null): серия из
   // одних null-дней — честное «нет данных», а не нулевая линия.
@@ -707,7 +694,7 @@ export function LineChart({
         data-chart-kind="line"
         data-chart-expanded={expanded ? '' : undefined}
         data-chart-appearance={appearance}
-        data-chart-curve={smooth ? 'smooth' : 'linear'}
+        data-chart-curve="smooth"
         data-chart-comparison={comparison && hasGhostLegend ? 'area' : undefined}
         className={`block w-full ${onPointClick ? 'cursor-pointer' : 'cursor-crosshair'}`}
         height={h}

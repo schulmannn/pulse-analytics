@@ -121,16 +121,28 @@ describe('ruSeriesName', () => {
 });
 
 describe('spark paths', () => {
-  it('creates one SVG command per value', () => {
+  it('draws a non-overshooting smooth cubic — one C segment per gap, exact endpoints', () => {
+    // Horizontal control handles (midpoint x, endpoint y) keep every segment inside its pair's
+    // value range: no Bezier control point ever sits above the higher point or below the lower.
     const path = sparkPath([0, 10, 5]);
-    expect(path).toBe('M2.0,30.0 L100.0,2.0 L198.0,16.0');
-    expect(path.split(' ')).toHaveLength(3);
+    expect(path).toBe('M2.0,30.0 C51.0,30.0 51.0,2.0 100.0,2.0 C149.0,2.0 149.0,16.0 198.0,16.0');
+    // One move + one cubic per adjacent pair (n − 1 cubics).
+    expect(path.startsWith('M')).toBe(true);
+    expect(path.match(/C/g)).toHaveLength(2);
+    // Endpoints are exact: first/last drawn coordinate equals the point's own y (30.0 / 16.0).
+    expect(path.startsWith('M2.0,30.0')).toBe(true);
+    expect(path.endsWith('198.0,16.0')).toBe(true);
+    // Every control-point y is one of the two adjacent point ys — never an overshoot value.
+    const ys = [...path.matchAll(/,(-?\d+\.\d)/g)].map((m) => Number(m[1]));
+    for (const y of ys) expect(y >= 2.0 && y <= 30.0).toBe(true);
     expect(sparkPath([])).toBe('');
   });
 
-  it('closes the area path at the bottom corners', () => {
+  it('closes the area path along the same smooth top, down to the baseline corners', () => {
     const area = sparkAreaPath([0, 10, 5]);
-    expect(area.startsWith('M2.0,30.0')).toBe(true);
+    // The fill top is the identical smooth stroke path; only the baseline close is appended.
+    expect(area.startsWith(sparkPath([0, 10, 5]))).toBe(true);
+    expect(area).toContain(' C');
     expect(area.endsWith('L200,32 L0,32 Z')).toBe(true);
     expect(sparkAreaPath([])).toBe('');
   });
