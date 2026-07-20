@@ -28,7 +28,7 @@ export function SourceIdentity({
   return (
     <span
       className={cn(
-        'hidden min-w-0 max-w-52 items-center gap-1.5 text-2xs text-muted-foreground md:inline-flex',
+        'hidden min-w-0 max-w-44 items-center gap-1.5 rounded-md border border-border/80 bg-background/65 px-2 py-1 text-2xs font-medium text-muted-foreground shadow-sm backdrop-blur md:inline-flex',
         className,
       )}
       data-source-identity
@@ -44,7 +44,7 @@ export function SourceIdentity({
         </span>
       ) : (
         <span className="shrink-0" style={{ color: networkByKey(network).color }} aria-hidden="true">
-          <NetworkGlyph k={network} className="h-3 w-3" />
+          <NetworkGlyph k={network} className="h-3.5 w-3.5" />
         </span>
       )}
       <span className="truncate">
