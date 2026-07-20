@@ -14,6 +14,7 @@ import { addWidgetForMetric } from '@/lib/widgetStore';
 import { pinToHome } from '@/lib/widgetPrefsStore';
 import { customKey } from '@/lib/widgetConfig';
 import { fmt, pluralRu } from '@/lib/format';
+import { cn } from '@/lib/utils';
 import { markdownToPlainText } from '@/lib/markdown';
 import { PinnedDayPanel } from '@/components/PinnedDayPanel';
 import type { NormalizedPost } from '@/lib/posts';
@@ -29,7 +30,6 @@ import { Breakdown } from '@/components/Breakdown';
 import { RankChart } from '@/components/RankChart';
 import { PivotTable } from '@/components/PivotTable';
 import { PostDetailModal } from '@/components/PostDetailModal';
-import { ChartSection } from '@/components/instagram/shared';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { DateRangePicker } from '@/components/DateRangePicker';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -1056,48 +1056,131 @@ export function MetricPage() {
           )}
 
           {field && (
-            <ChartSection title={`Топ постов по ${CONTRIB_LABEL[metricKey] ?? 'метрике'}`}>
+            <section
+              data-metric-top-posts
+              className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm dark:border-white/[0.06]"
+            >
+              <header className="flex items-end justify-between gap-3 border-b border-border px-4 py-4 sm:px-5">
+                <div className="min-w-0">
+                  <div className="text-2xs font-medium tracking-wide text-muted-foreground">Публикации</div>
+                  <h3 className="mt-1 truncate text-sm font-semibold tracking-tight text-foreground">
+                    Топ постов по {CONTRIB_LABEL[metricKey] ?? 'метрике'}
+                  </h3>
+                </div>
+                {contributors.length > 0 && (
+                  <span className="shrink-0 rounded-full border border-border bg-background px-2.5 py-1 text-2xs tabular-nums text-muted-foreground">
+                    {contributors.length} в рейтинге
+                  </span>
+                )}
+              </header>
               {contributors.length > 0 ? (
-                <ul>
-                  {contributors.map((post, i) => {
-                    const value = Number(post[field] ?? 0);
-                    const share = fieldSumAll > 0 ? Math.round((value / fieldSumAll) * 100) : 0;
-                    const text = post.caption ? markdownToPlainText(post.caption) : 'Без подписи';
-                    return (
-                      <li key={post.id ?? i} className="border-t border-border first:border-t-0">
-                        <button
-                          type="button"
-                          onClick={() => setOpenPost(post)}
-                          className="flex w-full items-center gap-3 py-2.5 text-left transition-colors hover:bg-hover-row"
-                        >
-                          <span className="w-5 shrink-0 text-center text-xs font-medium tabular-nums text-muted-foreground">
-                            {i + 1}
-                          </span>
-                          <MediaThumb
-                            src={smallThumbUrl(post.thumb)}
-                            label={postThumbLabel(post)}
-                            className="h-9 w-9"
-                          />
-                          <span className="min-w-0 flex-1 truncate text-sm text-foreground">{text}</span>
-                          <span className="shrink-0 text-right">
-                            <span className="block text-sm font-medium tabular-nums">{fmt.short(value)}</span>
-                            {share > 0 && (
-                              <span className="block text-2xs text-muted-foreground">
-                                {share}
-                                {SHARE_LABEL[metricKey] ?? '% периода'}
+                (() => {
+                  // Полоса под подписью — доля относительно лидера списка (не периода): #1 всегда
+                  // заполнен, дальше виден спад. Числовой процент справа остаётся долей периода.
+                  const topValue = Number(contributors[0]?.[field] ?? 0);
+                  return (
+                    <>
+                      <div
+                        aria-hidden="true"
+                        className="hidden grid-cols-[2rem_2.5rem_minmax(0,1fr)_6rem] items-center gap-3 border-b border-border bg-muted/25 px-5 py-2 text-2xs font-medium tracking-wide text-muted-foreground sm:grid"
+                      >
+                        <span className="text-center">№</span>
+                        <span />
+                        <span>Публикация</span>
+                        <span className="text-right">Результат</span>
+                      </div>
+                      <ol>
+                      {contributors.map((post, i) => {
+                        const value = Number(post[field] ?? 0);
+                        const share = fieldSumAll > 0 ? Math.round((value / fieldSumAll) * 100) : 0;
+                        const barPct = topValue > 0 ? Math.max(2, Math.round((value / topValue) * 100)) : 0;
+                        const text = post.caption ? markdownToPlainText(post.caption) : 'Без подписи';
+                        const format = postThumbLabel(post);
+                        const selected = openPost === post || (!!openPost?.id && openPost.id === post.id);
+                        return (
+                          <li
+                            key={post.id ?? i}
+                            data-top-post-row
+                            data-top-post-selected={selected ? '' : undefined}
+                            className="border-t border-border/70 first:border-t-0"
+                          >
+                            <button
+                              type="button"
+                              aria-pressed={selected}
+                              onClick={() => setOpenPost(post)}
+                              className={cn(
+                                'grid w-full grid-cols-[1.75rem_2.5rem_minmax(0,1fr)_auto] items-center gap-2.5 px-4 py-3 text-left transition-colors sm:grid-cols-[2rem_2.5rem_minmax(0,1fr)_6rem] sm:gap-3 sm:px-5',
+                                'hover:bg-muted/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45',
+                                selected && 'bg-primary/[0.08] hover:bg-primary/[0.1]',
+                              )}
+                            >
+                              <span
+                                className={cn(
+                                  'flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-2xs font-semibold tabular-nums',
+                                  i === 0
+                                    ? 'bg-primary text-primary-foreground'
+                                    : i < 3
+                                      ? 'bg-primary/10 text-primary'
+                                      : 'text-muted-foreground',
+                                )}
+                              >
+                                {i + 1}
                               </span>
-                            )}
-                          </span>
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
+                              <MediaThumb
+                                src={smallThumbUrl(post.thumb)}
+                                label={format}
+                                className="h-10 w-10 rounded-lg"
+                              />
+                              <span className="min-w-0 flex-1">
+                                <span className="line-clamp-2 block text-xs font-medium leading-5 text-foreground sm:text-sm">
+                                  {text}
+                                </span>
+                                <span
+                                  data-top-post-format
+                                  className="mt-1 inline-flex rounded-full border border-border bg-background px-1.5 py-0.5 text-2xs leading-none text-muted-foreground"
+                                >
+                                  {format}
+                                </span>
+                                <span className="mt-1.5 block h-1 w-full overflow-hidden rounded-full bg-muted">
+                                  <span
+                                    className="block h-full rounded-full transition-[width]"
+                                    style={{
+                                      width: `${barPct}%`,
+                                      backgroundColor: 'hsl(var(--chart-role-primary) / 0.72)',
+                                    }}
+                                  />
+                                </span>
+                              </span>
+                              <span className="min-w-[3.75rem] shrink-0 text-right sm:min-w-0">
+                                <span className="block text-sm font-semibold tabular-nums text-foreground">
+                                  {fmt.short(value)}
+                                </span>
+                                {share > 0 && (
+                                  <span className="block text-2xs text-muted-foreground">
+                                    {share}
+                                    {SHARE_LABEL[metricKey] ?? '% периода'}
+                                  </span>
+                                )}
+                              </span>
+                            </button>
+                          </li>
+                        );
+                      })}
+                      </ol>
+                    </>
+                  );
+                })()
               ) : (
-                <div className="py-6 text-center text-sm text-muted-foreground">Недостаточно данных за период.</div>
+                <div className="px-5 py-10 text-center text-sm text-muted-foreground">
+                  Недостаточно данных за период.
+                </div>
               )}
-              {reconcile && <p className="text-xs text-muted-foreground">{reconcile}</p>}
-            </ChartSection>
+              {reconcile && (
+                <p className="border-t border-border bg-muted/20 px-4 py-3 text-xs leading-relaxed text-muted-foreground sm:px-5">
+                  {reconcile}
+                </p>
+              )}
+            </section>
           )}
         </div>
 

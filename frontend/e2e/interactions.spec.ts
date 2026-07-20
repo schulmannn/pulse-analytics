@@ -226,6 +226,47 @@ test('metric explorer redesign stays contained on mobile', async ({ page }, test
   });
 });
 
+test('metric explorer top posts use a contained interactive card', async ({ page }, testInfo) => {
+  test.skip(
+    !['desktop-1440', 'mobile-430'].includes(testInfo.project.name),
+    'Top-post card contract only needs the widest and narrowest layouts',
+  );
+  await bootDemo(page, '/metrics/views', { theme: testInfo.project.name === 'mobile-430' ? 'light' : 'dark' });
+
+  const card = page.locator('[data-metric-top-posts]');
+  await card.scrollIntoViewIfNeeded();
+  await expect(card).toBeVisible();
+  await expect(card.getByRole('heading', { name: /Топ постов по/ })).toBeVisible();
+
+  const rows = card.locator('[data-top-post-row]');
+  await expect(rows).toHaveCount(8);
+  await expect(card.locator('[data-top-post-format]')).toHaveCount(8);
+  const firstRow = rows.first();
+  const firstButton = firstRow.getByRole('button');
+  await expect(firstButton).toHaveAttribute('aria-pressed', 'false');
+
+  const cardBox = await card.boundingBox();
+  const viewport = page.viewportSize();
+  if (!cardBox || !viewport) throw new Error('top-post card has no measurable viewport box');
+  expect(cardBox.x).toBeGreaterThanOrEqual(0);
+  expect(cardBox.x + cardBox.width).toBeLessThanOrEqual(viewport.width + 1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true);
+  await testInfo.attach(`metric-explorer-top-posts-${testInfo.project.name}`, {
+    body: await page.screenshot({ fullPage: false }),
+    contentType: 'image/png',
+  });
+
+  await firstButton.click();
+  const dialog = page.getByRole('dialog', { name: 'Детали поста №1' });
+  await expect(dialog).toBeVisible();
+  await expect(firstRow).toHaveAttribute('data-top-post-selected', '');
+  await expect(firstButton).toHaveAttribute('aria-pressed', 'true');
+  await dialog.getByRole('button', { name: 'Закрыть' }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(firstRow).not.toHaveAttribute('data-top-post-selected', '');
+  await expect(firstButton).toHaveAttribute('aria-pressed', 'false');
+});
+
 test('chart drill guard: a scrub across the chart does not navigate', async ({ page }) => {
   // Seed a drillable line widget (tg.views has a metric page) pinned to Home so its chart's
   // point-click drills to /metrics/views. addInitScript stacks before bootDemo's own seed. A
