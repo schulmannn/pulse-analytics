@@ -114,6 +114,26 @@ export function axisLabel(v: number, step: number): string {
   return fmt.num(v);
 }
 
+function seriesPath(points: Array<{ x: number; y: number }>, smooth: boolean): string {
+  const first = points[0];
+  if (!first) return '';
+  let path = `M ${first.x} ${first.y}`;
+  for (let i = 1; i < points.length; i++) {
+    const previous = points[i - 1];
+    const current = points[i];
+    if (!previous || !current) continue;
+    if (!smooth) {
+      path += ` L ${current.x} ${current.y}`;
+      continue;
+    }
+    // Horizontal control handles keep the curve inside each pair's value range: the line reads
+    // smoothly without inventing overshoot above a peak or below a zero-value day.
+    const middleX = (previous.x + current.x) / 2;
+    path += ` C ${middleX} ${previous.y} ${middleX} ${current.y} ${current.x} ${current.y}`;
+  }
+  return path;
+}
+
 export function LineChart({
   values,
   labels,
@@ -320,11 +340,11 @@ export function LineChart({
     if (run.length > 0) segs.push(run);
     const lineSegs = segs.filter((s) => s.length >= 2);
     // Один path с подпутями M…L… — stroke остаётся одним элементом, разрывы честные.
-    const linePath = lineSegs.map((s) => s.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')).join(' ');
+    const linePath = lineSegs.map((segment) => seriesPath(segment, rhea)).join(' ');
     // Каждый сегмент заливки замыкается на СВОЮ базовую линию — дыра остаётся незакрашенной.
     const baseY = h - padB;
     const areaPath = lineSegs
-      .map((s) => `${s.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')} L ${s[s.length - 1].x} ${baseY} L ${s[0].x} ${baseY} Z`)
+      .map((segment) => `${seriesPath(segment, rhea)} L ${segment[segment.length - 1].x} ${baseY} L ${segment[0].x} ${baseY} Z`)
       .join(' ');
     // Сегмент из одной точки: точка-кружок — единственное измерение между дырами всё равно факт,
     // а линия нулевой длины была бы невидима.
@@ -466,7 +486,7 @@ export function LineChart({
             россыпью одиночных измерений без единого сплошного отрезка) */}
         {areaPath && <path d={areaPath} fill={`url(#${gradientId})`} />}
         {linePath && (
-          <path d={linePath} fill="none" stroke="hsl(var(--chart-role-primary))" strokeWidth={rhea ? '2' : '2.5'} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+          <path data-chart-series="primary" d={linePath} fill="none" stroke="hsl(var(--chart-role-primary))" strokeWidth={rhea ? '2' : '2.5'} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
         )}
 
         {/* Одиночное измерение между дырами — точка вместо невидимой линии нулевой длины */}
@@ -662,6 +682,7 @@ export function LineChart({
         data-chart-kind="line"
         data-chart-expanded={expanded ? '' : undefined}
         data-chart-appearance={appearance}
+        data-chart-curve={rhea ? 'smooth' : 'linear'}
         className={`block w-full ${onPointClick ? 'cursor-pointer' : 'cursor-crosshair'}`}
         height={h}
         viewBox={`0 0 ${W} ${h}`}
@@ -756,8 +777,8 @@ export function LineChart({
             )}
             {hovered.y != null && (
               <>
-                {rhea && <circle cx={hovered.x} cy={hovered.y} r="7" fill="hsl(var(--chart-role-selection) / 0.16)" />}
-                <circle cx={hovered.x} cy={hovered.y} r={rhea ? '3.5' : '4'} fill="hsl(var(--chart-role-selection))" stroke="hsl(var(--background))" strokeWidth={rhea ? '2' : '1.5'} />
+                {rhea && <circle data-chart-hover-halo cx={hovered.x} cy={hovered.y} r="7" fill="hsl(var(--chart-role-selection) / 0.16)" />}
+                <circle data-chart-hover-marker cx={hovered.x} cy={hovered.y} r={rhea ? '3.5' : '4'} fill="hsl(var(--chart-role-selection))" stroke="hsl(var(--background))" strokeWidth={rhea ? '2' : '1.5'} />
               </>
             )}
           </>

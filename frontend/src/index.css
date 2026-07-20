@@ -341,9 +341,21 @@
     padding: 1.25rem;
     background: hsl(var(--card));
     color: hsl(var(--card-foreground));
+    cursor: pointer;
     box-shadow:
       0 1px 2px hsl(var(--foreground) / 0.04),
       0 0 0 1px hsl(var(--foreground) / 0.08);
+    transition: background-color var(--motion-fast) var(--ease-standard), box-shadow var(--motion-fast) var(--ease-standard);
+  }
+  .report-rhea .report-metric-card:hover {
+    background: hsl(var(--muted) / 0.16);
+    box-shadow:
+      0 8px 24px -20px hsl(var(--foreground) / 0.45),
+      0 0 0 1px hsl(var(--foreground) / 0.14);
+  }
+  .report-rhea .report-metric-card:focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 3px;
   }
   .report-rhea .report-metric-card__header {
     gap: 0.75rem;
@@ -356,20 +368,6 @@
   }
   .report-rhea .report-metric-card__rule {
     display: none;
-  }
-  .report-rhea .report-metric-card__action {
-    display: inline-flex;
-    height: 1.75rem;
-    align-items: center;
-    border: 1px solid hsl(var(--border));
-    border-radius: 1rem;
-    padding-inline: 0.75rem;
-    color: hsl(var(--foreground));
-    background: hsl(var(--background));
-  }
-  .report-rhea .report-metric-card__action:hover {
-    background: hsl(var(--muted));
-    color: hsl(var(--foreground));
   }
   .report-rhea .report-metric-card__value {
     margin-top: -0.25rem;
@@ -405,12 +403,23 @@
   .report-rhea [data-chart-appearance='rhea'] {
     cursor: default;
   }
+  .report-rhea .report-metric-card [data-chart-appearance='rhea'] {
+    cursor: pointer;
+  }
   .report-rhea [data-chart-appearance='rhea'] [data-chart-axis-label='x'] {
     font-weight: 500;
     opacity: 0.82;
   }
   .report-rhea [data-chart-tooltip-appearance='rhea'] {
     font-family: 'Geist Variable', 'Inter', system-ui, -apple-system, sans-serif;
+    animation: report-chart-tooltip-in var(--motion-fast) var(--ease-standard) both;
+    transition: transform var(--motion-entrance) var(--ease-standard);
+    will-change: transform;
+  }
+
+  @keyframes report-chart-tooltip-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
   }
 
   /* Second report-only Rhea slice: tables use the same calm card surface as charts, while their
