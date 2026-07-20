@@ -34,6 +34,11 @@ interface BarChartProps {
   /** Whether the comparison legend chip is an interactive show/hide toggle (default). Pass false
       where a page-level compare control already owns the on/off (the metric page). */
   legendToggle?: boolean;
+  /** Visual relationship between two series. The default keeps legacy grouped pairs; `stacked`
+      is the shadcn-style detail-view treatment with one segmented column per date. */
+  comparisonStyle?: 'grouped' | 'stacked';
+  /** Compact shadcn-style tooltip and higher-contrast series treatment for the metric explorer. */
+  appearance?: 'default' | 'comparison';
 }
 
 interface Hover {
@@ -47,7 +52,45 @@ const BAR_RATIO = 0.7;
 // Approximate glyph width of the 11px tabular numerals used for tick/value labels.
 const CHAR_W = 6.6;
 
-export function BarChart({ values, labels, titles, height = 200, ghost, primaryLabel = 'Текущий', ghostLabel = 'Прошлый период', comparisonDelta = true, formatValue = fmt.num, onPointClick, legendToggle = true, pinnedIndex = null }: BarChartProps) {
+interface BarBox { x: number; y: number; w: number; h: number }
+
+/** A stack segment with independently rounded outer corners, avoiding seams at the join. */
+function stackSegmentPath(box: BarBox, roundTop: boolean, roundBottom: boolean): string {
+  if (box.h <= 0 || box.w <= 0) return '';
+  const top = roundTop ? Math.min(4, box.w / 2, box.h / 2) : 0;
+  const bottom = roundBottom ? Math.min(4, box.w / 2, box.h / 2) : 0;
+  const right = box.x + box.w;
+  const base = box.y + box.h;
+  return [
+    `M ${box.x + top} ${box.y}`,
+    `H ${right - top}`,
+    top ? `Q ${right} ${box.y} ${right} ${box.y + top}` : `L ${right} ${box.y}`,
+    `V ${base - bottom}`,
+    bottom ? `Q ${right} ${base} ${right - bottom} ${base}` : `L ${right} ${base}`,
+    `H ${box.x + bottom}`,
+    bottom ? `Q ${box.x} ${base} ${box.x} ${base - bottom}` : `L ${box.x} ${base}`,
+    `V ${box.y + top}`,
+    top ? `Q ${box.x} ${box.y} ${box.x + top} ${box.y}` : `L ${box.x} ${box.y}`,
+    'Z',
+  ].join(' ');
+}
+
+export function BarChart({
+  values,
+  labels,
+  titles,
+  height = 200,
+  ghost,
+  primaryLabel = 'Текущий',
+  ghostLabel = 'Прошлый период',
+  comparisonDelta = true,
+  formatValue = fmt.num,
+  onPointClick,
+  legendToggle = true,
+  pinnedIndex = null,
+  comparisonStyle = 'grouped',
+  appearance = 'default',
+}: BarChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   // Press position (client px) for the drag guard: the svg-level onClick would otherwise drill on
   // a press-drag-release scrub (the browser retargets a cross-child click to the svg). null = no
@@ -116,10 +159,13 @@ export function BarChart({ values, labels, titles, height = 200, ghost, primaryL
   const plot = useMemo(() => {
     if (!values || values.length === 0) return null;
 
+    const stacked = comparisonStyle === 'stacked' && !!activeGhost;
+
     // Expanded view: bars scale against a NICE domain top (1/2/5×10ⁿ) so the y ticks land on
     // round values, like LineChart — the old max/mid pair printed «262» next to «2.5k».
-    // The domain also covers the target and the (shown) comparison line — both must stay visible.
-    const rawMax = Math.max(...values, 1, target ?? 0, ...(activeGhost ?? []));
+    // A stacked comparison owns the sum-domain; grouped pairs keep the larger individual value.
+    const stackedTotals = stacked ? values.map((value, i) => value + (activeGhost?.[i] ?? 0)) : [];
+    const rawMax = Math.max(...values, 1, target ?? 0, ...(activeGhost ?? []), ...stackedTotals);
     const scale = expanded ? niceScale(0, rawMax) : null;
     const max = scale ? scale.hi : rawMax;
     const n = values.length;
@@ -157,7 +203,7 @@ export function BarChart({ values, labels, titles, height = 200, ghost, primaryL
     // «странно смотрится» — смешение языков форм). Группированные пары: прошлое слева
     // (приглушённый comparison-тон), текущее справа; 2px-зазор внутри пары (dataviz-канон).
     const GROUP_GAP = 2;
-    const subW = activeGhost ? Math.max((barWidth - GROUP_GAP) / 2, 1) : barWidth;
+    const subW = activeGhost && !stacked ? Math.max((barWidth - GROUP_GAP) / 2, 1) : barWidth;
     const bandX = (i: number) => offsetX + i * itemWidth + (itemWidth - barWidth) / 2;
 
     // Per-bar boxes — the cached rect layer below and the hover highlight both draw from these.
@@ -165,21 +211,27 @@ export function BarChart({ values, labels, titles, height = 200, ghost, primaryL
     const bars = values.map((val, i) => {
       const barHeight = (val / max) * usable;
       return {
-        x: bandX(i) + (activeGhost ? subW + GROUP_GAP : 0),
+        x: bandX(i) + (activeGhost && !stacked ? subW + GROUP_GAP : 0),
         y: graphHeight - barHeight,
         w: subW,
         // Zero is a real absence, not a tiny bar. Keeping the old 2px minimum for positive values
         // preserves visibility of small counts without drawing a false dotted baseline on sparse
         // daily series such as mentions.
-        h: val === 0 ? 0 : Math.max(barHeight, 2),
+        h: val === 0 ? 0 : stacked ? barHeight : Math.max(barHeight, 2),
       };
     });
     const ghostBars = activeGhost
       ? activeGhost.map((v, i) => {
           const h = (v / max) * usable;
-          return { x: bandX(i), y: graphHeight - h, w: subW, h: v === 0 ? 0 : Math.max(h, 2) };
+          return {
+            x: bandX(i),
+            y: stacked ? bars[i].y - h : graphHeight - h,
+            w: subW,
+            h: v === 0 ? 0 : stacked ? h : Math.max(h, 2),
+          };
         })
       : [];
+    const columnTops = values.map((_, i) => stacked && ghostBars[i]?.h > 0 ? ghostBars[i].y : bars[i].y);
 
     // Under the bars: gridlines + tick labels (expanded only).
     const underLayer = (
@@ -203,11 +255,25 @@ export function BarChart({ values, labels, titles, height = 200, ghost, primaryL
     // Ghost-пара рисуется в том же слое (контекст тускнеет вместе с остальными колонками).
     const barsLayer = (
       <>
-        {ghostBars.map((b, i) => (
-          <rect key={`gb${i}`} x={b.x} y={b.y} width={b.w} height={b.h} fill="hsl(var(--chart-role-comparison) / 0.35)" rx={2} />
+        {bars.map((b, i) => stacked ? (
+          <path
+            key={`b${i}`}
+            data-chart-series="current"
+            d={stackSegmentPath(b, ghostBars[i]?.h <= 0, true)}
+            fill="hsl(var(--chart-role-primary))"
+          />
+        ) : (
+          <rect key={`b${i}`} data-chart-series="current" x={b.x} y={b.y} width={b.w} height={b.h} fill="hsl(var(--chart-role-primary))" rx={2} />
         ))}
-        {bars.map((b, i) => (
-          <rect key={i} x={b.x} y={b.y} width={b.w} height={b.h} fill="hsl(var(--chart-role-primary))" rx={2} />
+        {ghostBars.map((b, i) => stacked ? (
+          <path
+            key={`gb${i}`}
+            data-chart-series="comparison"
+            d={stackSegmentPath(b, true, bars[i]?.h <= 0)}
+            fill="hsl(var(--chart-role-comparison))"
+          />
+        ) : (
+          <rect key={`gb${i}`} data-chart-series="comparison" x={b.x} y={b.y} width={b.w} height={b.h} fill="hsl(var(--chart-role-comparison) / 0.35)" rx={2} />
         ))}
       </>
     );
@@ -219,7 +285,7 @@ export function BarChart({ values, labels, titles, height = 200, ghost, primaryL
         {values.map((val, i) => {
           const strideHit = labelIndexes.has(i);
           const showLabel = labels?.[i] && strideHit;
-          const showValue = expanded && strideHit;
+          const showValue = expanded && strideHit && !stacked;
           if (!showLabel && !showValue) return null;
           return (
             <g key={`l${i}`}>
@@ -288,15 +354,18 @@ export function BarChart({ values, labels, titles, height = 200, ghost, primaryL
       </>
     );
 
-    return { chartWidth, chartHeight, graphHeight, offsetX, itemWidth, bars, barTop, barCenterX, underLayer, barsLayer, overLayer };
-  }, [values, labels, activeGhost, hasGhost, target, refLines, width, ctxHeight, height, expanded]);
+    return { chartWidth, chartHeight, graphHeight, offsetX, itemWidth, bars, ghostBars, columnTops, stacked, barTop, barCenterX, underLayer, barsLayer, overLayer };
+  }, [values, labels, activeGhost, hasGhost, target, refLines, width, ctxHeight, height, expanded, comparisonStyle]);
 
   if (!values || values.length === 0 || !plot) {
     return <EmptyState compact title="Нет данных за период" className="flex h-40 items-center justify-center" />;
   }
 
-  const { chartWidth, chartHeight, graphHeight, offsetX, itemWidth, bars, barTop, barCenterX } = plot;
+  const { chartWidth, chartHeight, graphHeight, offsetX, itemWidth, bars, ghostBars, columnTops, stacked, barTop, barCenterX } = plot;
   const n = values.length;
+  const ariaMax = stacked && activeGhost
+    ? Math.max(...values.map((value, i) => value + (activeGhost[i] ?? 0)))
+    : Math.max(...values);
 
   const tipText = (i: number) => {
     const base = titles?.[i] ?? `${labels?.[i] ?? ''}: ${values[i]}`;
@@ -306,7 +375,7 @@ export function BarChart({ values, labels, titles, height = 200, ghost, primaryL
   // metric's own title text. Anchored to the hovered bar's top-centre.
   const buildTip = (i: number): TooltipState => {
     const x = barCenterX(i);
-    const y = barTop(values[i]);
+    const y = columnTops[i] ?? barTop(values[i]);
     if (activeGhost && activeGhost[i] != null) {
       const cur = values[i];
       const prev = activeGhost[i];
@@ -379,13 +448,15 @@ export function BarChart({ values, labels, titles, height = 200, ghost, primaryL
       <svg
         data-chart-kind="bar"
         data-chart-expanded={expanded ? '' : undefined}
+        data-chart-appearance={appearance}
+        data-chart-comparison={stacked ? 'stacked' : activeGhost ? 'grouped' : undefined}
         className={`block w-full ${onPointClick ? 'cursor-pointer' : 'cursor-crosshair'}`}
         height={chartHeight}
         viewBox={`0 0 ${chartWidth} ${chartHeight}`}
         preserveAspectRatio="none"
         // Named graphic for AT (PieChart idiom) — see LineChart.tsx: series max, not the scale top.
         role="img"
-        aria-label={`Столбчатая диаграмма: ${values.length} столбцов, макс ${fmt.short(Math.max(...values))}`}
+        aria-label={`Столбчатая диаграмма: ${values.length} столбцов, макс ${fmt.short(ariaMax)}`}
         onMouseMove={onSvgMove}
         onMouseDown={onPointClick ? (e) => (pressRef.current = { x: e.clientX, y: e.clientY }) : undefined}
         onClick={onSvgClick}
@@ -397,22 +468,44 @@ export function BarChart({ values, labels, titles, height = 200, ghost, primaryL
             re-rendering a rect per column per mousemove. transition-opacity only WHILE hovered so
             the un-dim on leave snaps (the full-opacity highlight unmounts in the same commit) — no
             below-idle dip on the just-hovered bar. */}
-        <g className={hover ? 'transition-opacity' : undefined} opacity={hover ? 0.55 : 0.85}>
+        <g className={hover ? 'transition-opacity' : undefined} opacity={hover ? 0.5 : appearance === 'comparison' ? 1 : 0.85}>
           {plot.barsLayer}
         </g>
 
         {/* Full-opacity highlight of the hovered bar — BETWEEN the dimmed bars and the ghost/target
             overlay, so the comparison + goal lines still paint OVER it (HEAD paint order). */}
-        {hover && hover.i < n && (
+        {hover && hover.i < n && stacked ? (
+          <g className="pointer-events-none">
+            <path
+              d={stackSegmentPath(bars[hover.i], ghostBars[hover.i]?.h <= 0, true)}
+              fill="hsl(var(--chart-role-primary))"
+            />
+            {ghostBars[hover.i] && (
+              <path
+                d={stackSegmentPath(ghostBars[hover.i], true, bars[hover.i]?.h <= 0)}
+                fill="hsl(var(--chart-role-comparison))"
+              />
+            )}
+          </g>
+        ) : hover && hover.i < n ? (
           <rect x={bars[hover.i].x} y={bars[hover.i].y} width={bars[hover.i].w} height={bars[hover.i].h} fill="hsl(var(--chart-role-selection))" rx={2} className="pointer-events-none" />
-        )}
+        ) : null}
 
         {plot.overLayer}
 
         {/* PINNED column — persistent highlight + dashed crosshair (under the live hover). */}
         {pinnedIndex != null && pinnedIndex < n && bars[pinnedIndex] && (
           <g className="pointer-events-none">
-            <rect x={bars[pinnedIndex].x} y={bars[pinnedIndex].y} width={bars[pinnedIndex].w} height={bars[pinnedIndex].h} fill="hsl(var(--chart-role-selection))" rx={2} />
+            <rect
+              x={bars[pinnedIndex].x}
+              y={stacked ? columnTops[pinnedIndex] : bars[pinnedIndex].y}
+              width={bars[pinnedIndex].w}
+              height={stacked ? graphHeight - columnTops[pinnedIndex] : bars[pinnedIndex].h}
+              fill={stacked ? 'none' : 'hsl(var(--chart-role-selection))'}
+              stroke={stacked ? 'hsl(var(--chart-role-selection))' : undefined}
+              strokeWidth={stacked ? 2 : undefined}
+              rx={stacked ? 4 : 2}
+            />
             <line
               x1={barCenterX(pinnedIndex)}
               y1={0}
@@ -464,19 +557,19 @@ export function BarChart({ values, labels, titles, height = 200, ghost, primaryL
               className={`flex select-none items-center gap-1.5 rounded transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${ghostHidden ? 'opacity-40 line-through' : ''}`}
             >
               {/* Свотч-прямоугольник: сравнение теперь рисуется столбцами, не пунктиром. */}
-              <span aria-hidden="true" className="h-2 w-3 rounded-sm" style={{ backgroundColor: 'hsl(var(--chart-role-comparison) / 0.35)' }} />
+              <span aria-hidden="true" className="h-2 w-3 rounded-sm" style={{ backgroundColor: stacked ? 'hsl(var(--chart-role-comparison))' : 'hsl(var(--chart-role-comparison) / 0.35)' }} />
               {ghostLabel}
             </button>
           ) : (
             <span className="flex select-none items-center gap-1.5">
-              <span aria-hidden="true" className="h-2 w-3 rounded-sm" style={{ backgroundColor: 'hsl(var(--chart-role-comparison) / 0.35)' }} />
+              <span aria-hidden="true" className="h-2 w-3 rounded-sm" style={{ backgroundColor: stacked ? 'hsl(var(--chart-role-comparison))' : 'hsl(var(--chart-role-comparison) / 0.35)' }} />
               {ghostLabel}
             </span>
           )}
         </div>
       )}
       {/* Readout anchored to the hovered bar's top-center (not the cursor) */}
-      <ChartTooltip tip={hover && hover.i < n ? buildTip(hover.i) : null} />
+      <ChartTooltip tip={hover && hover.i < n ? buildTip(hover.i) : null} appearance={appearance} />
     </div>
   );
 }

@@ -422,6 +422,15 @@
     to { opacity: 1; }
   }
 
+  /* Metric explorer: the shared readout follows the same quick fade + eased horizontal glide as
+     the shadcn reference. The data attribute keeps this motion scoped away from legacy charts. */
+  [data-chart-tooltip-appearance='comparison'] {
+    font-family: 'Geist Variable', 'Inter', system-ui, -apple-system, sans-serif;
+    animation: report-chart-tooltip-in var(--motion-fast) var(--ease-standard) both;
+    transition: transform var(--motion-entrance) var(--ease-standard);
+    will-change: transform;
+  }
+
   /* Second report-only Rhea slice: tables use the same calm card surface as charts, while their
      dense numeric structure remains intact. These selectors are scoped to the desktop report. */
   .report-rhea .report-table-shell,
