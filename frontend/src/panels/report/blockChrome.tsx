@@ -82,7 +82,7 @@ function BlockCtl({
 
 /** Print-hidden row of a block's own inline config controls (metric / viz / source). */
 export function BlockControls({ children }: { children: ReactNode }) {
-  return <div className="flex flex-wrap items-center gap-2 print:hidden">{children}</div>;
+  return <div className="report-block-controls flex flex-wrap items-center gap-2 print:hidden">{children}</div>;
 }
 
 /** Hairline control backed by PillSelect — accessible + cheap, same external API. */
@@ -97,7 +97,16 @@ export function MiniSelect({
   onChange: (v: string) => void;
   ariaLabel: string;
 }) {
-  return <PillSelect value={value} options={options} onValueChange={onChange} ariaLabel={ariaLabel} />;
+  return (
+    <PillSelect
+      value={value}
+      options={options}
+      onValueChange={onChange}
+      ariaLabel={ariaLabel}
+      className="report-select"
+      contentClassName="report-select-content"
+    />
+  );
 }
 
 /** Two/three-way segmented toggle (line ↔ bar). */
@@ -111,7 +120,7 @@ export function Segmented({
   onChange: (v: string) => void;
 }) {
   return (
-    <div className="flex overflow-hidden rounded-full border border-border">
+    <div className="report-segmented flex overflow-hidden rounded-full border border-border">
       {options.map((o) => {
         const active = o.value === value;
         return (
@@ -120,8 +129,8 @@ export function Segmented({
             type="button"
             aria-pressed={active}
             onClick={() => onChange(o.value)}
-            className={`border-r border-border px-2 py-1 text-xs font-medium transition-colors last:border-r-0 ${
-              active ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+            className={`report-segmented__option border-r border-border px-2 py-1 text-xs font-medium transition-colors last:border-r-0 ${
+              active ? 'report-segmented__option--active text-foreground' : 'text-muted-foreground hover:text-foreground'
             }`}
           >
             {o.label}

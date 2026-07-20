@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Pencil, Printer, Save, X } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useDeleteReport, useUpdateReport } from '@/api/queries';
 import type { Report } from '@/api/schemas';
 import { ErrorState } from '@/components/ErrorState';
 import { PillSelect } from '@/components/PillSelect';
 import { SegmentedControl } from '@/components/SegmentedControl';
+import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { fmt } from '@/lib/format';
 import type { PeriodDays } from '@/lib/period';
@@ -124,7 +126,7 @@ export function ReportDocumentDesktop({
   const channelLabel = data.channelLabel;
 
   return (
-    <div className="mx-auto w-full max-w-6xl">
+    <div className="report-rhea mx-auto w-full max-w-6xl">
       <Link
         to="/reports"
         className="inline-flex w-fit items-center gap-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground print:hidden"
@@ -144,12 +146,12 @@ export function ReportDocumentDesktop({
             maxLength={120}
             aria-label="Название отчёта"
             placeholder="Название отчёта"
-            className="w-full border-b border-primary/40 bg-transparent pb-1 text-3xl font-medium tracking-tight text-foreground focus:border-primary focus:outline-none"
+            className="report-title-input w-full border-b border-primary/40 bg-transparent pb-1 text-3xl font-medium tracking-tight text-foreground focus:border-primary focus:outline-none"
           />
 
           <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
-            <div className="text-xs font-medium text-muted-foreground">
-              <span className="mb-1 block">Период</span>
+            <div className="report-field text-xs font-medium text-muted-foreground">
+              <span className="report-field__label mb-1 block">Период</span>
               <SegmentedControl
                 ariaLabel="Период отчёта"
                 value={String(draft.periodDays)}
@@ -158,13 +160,14 @@ export function ReportDocumentDesktop({
               />
             </div>
 
-            <div className="text-xs font-medium text-muted-foreground">
-              <span className="mb-1 block">Источник · Telegram</span>
+            <div className="report-field text-xs font-medium text-muted-foreground">
+              <span className="report-field__label mb-1 block">Источник · Telegram</span>
               <PillSelect
                 value={draft.source != null ? String(draft.source) : ''}
                 onValueChange={(v) => pickSource(v ? Number(v) : null)}
                 ariaLabel="Источник · Telegram"
-                className="min-w-52"
+                className="report-select min-w-52"
+                contentClassName="report-select-content"
                 options={[
                   { value: '', label: 'Выберите источник', disabled: true },
                   ...(draft.source != null && !sourceValid
@@ -178,12 +181,14 @@ export function ReportDocumentDesktop({
               />
             </div>
 
-            <div className="text-xs font-medium text-muted-foreground">
-              <span className="mb-1 block">Доставка на почту</span>
+            <div className="report-field text-xs font-medium text-muted-foreground">
+              <span className="report-field__label mb-1 block">Доставка на почту</span>
               <PillSelect<ReportSchedule>
                 value={draft.schedule}
                 onValueChange={(v) => setDraft((x) => ({ ...x, schedule: v }))}
                 ariaLabel="Доставка на почту"
+                className="report-select"
+                contentClassName="report-select-content"
                 options={[
                   { value: 'none', label: 'Выкл' },
                   { value: 'weekly', label: 'Раз в неделю' },
@@ -207,56 +212,68 @@ export function ReportDocumentDesktop({
           )}
 
           <div className="flex items-center gap-2 border-y border-border py-3">
-            <button
+            <Button
               type="button"
               onClick={cancelEdit}
-              className="btn-pill px-3.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+              variant="ghost"
+              size="sm"
+              className="report-control text-muted-foreground"
             >
+              <X aria-hidden="true" />
               Отмена
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               onClick={save}
               disabled={savePending || !nameValid || !sourceValid || !dirty}
-              className="btn-pill bg-primary px-4 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+              size="sm"
+              className="report-control bg-foreground text-background shadow-sm hover:bg-foreground/80"
             >
+              <Save aria-hidden="true" />
               {savePending ? 'Сохранение…' : 'Сохранить'}
-            </button>
+            </Button>
             <span className="flex-1" />
-            <button
+            <Button
               type="button"
               onClick={handleDelete}
               disabled={deleteReport.isPending}
-              className="text-xs font-medium text-muted-foreground transition-colors hover:text-destructive disabled:opacity-50"
+              variant="ghost"
+              size="sm"
+              className="report-control text-muted-foreground hover:text-destructive"
             >
               {deleteReport.isPending ? 'Удаление…' : 'Удалить отчёт'}
-            </button>
+            </Button>
           </div>
         </div>
       ) : (
         // ── Read mode: a working document header, no editor chrome ──
         <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <h1 className="text-3xl font-medium tracking-tight text-foreground">{report.name}</h1>
+            <h1 className="report-title text-3xl font-medium tracking-tight text-foreground">{report.name}</h1>
             <p className="mt-1 text-sm text-muted-foreground">
               Telegram · {channelLabel} · {periodText} · обновлён {fmt.date(report.updated_at)}
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2 print:hidden">
-            <button
+            <Button
               type="button"
               onClick={enterEdit}
-              className="btn-pill border border-border bg-background px-3.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+              size="sm"
+              className="report-control bg-foreground text-background shadow-sm hover:bg-foreground/80"
             >
+              <Pencil aria-hidden="true" />
               Редактировать
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               onClick={() => window.print()}
-              className="btn-pill border border-border bg-background px-3.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+              variant="outline"
+              size="sm"
+              className="report-control border-foreground/10 bg-card text-foreground shadow-sm"
             >
+              <Printer aria-hidden="true" />
               Печать / PDF
-            </button>
+            </Button>
           </div>
         </div>
       )}

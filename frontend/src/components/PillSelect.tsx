@@ -24,6 +24,7 @@ export interface PillSelectProps<T extends string = string> {
   placeholder?: string;
   disabled?: boolean;
   className?: string;
+  contentClassName?: string;
   testId?: string;
   id?: string;
 }
@@ -45,6 +46,7 @@ export function PillSelect<T extends string = string>({
   placeholder = 'Выбрать',
   disabled = false,
   className,
+  contentClassName,
   testId,
   id,
 }: PillSelectProps<T>) {
@@ -65,7 +67,7 @@ export function PillSelect<T extends string = string>({
       >
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
-      <SelectContent align="start" aria-label={ariaLabel}>
+      <SelectContent align="start" aria-label={ariaLabel} className={contentClassName}>
         {options.map((option) => (
           <SelectItem
             key={option.value || EMPTY_VALUE}

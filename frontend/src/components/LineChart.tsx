@@ -62,6 +62,8 @@ interface LineChartProps {
   /** Event flags (chart_annotations): ⚑ markers at these indices near the plot bottom; the label
       joins the hover readout of that point. Host page maps days → indices. */
   flags?: Array<{ i: number; label: string }>;
+  /** Optional visual treatment for a host trialling a denser shadcn/Rhea chart skin. */
+  appearance?: 'default' | 'rhea';
 }
 
 interface Hover {
@@ -134,6 +136,7 @@ export function LineChart({
   hoverTitles,
   ghostTitles,
   flags,
+  appearance = 'default',
 }: LineChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   // Press position (client px) for the drag guard — see onSvgClick below.
@@ -166,6 +169,7 @@ export function LineChart({
   const targetCtx = useContext(WidgetTargetContext);
   const target = targetCtx != null && Number.isFinite(targetCtx) ? targetCtx : null;
   const showAxes = fullAxes || expanded;
+  const rhea = appearance === 'rhea';
   // Strip colons from useId — valid in ids, but break SVG url(#…) refs in some browsers.
   const gradientId = `lc${useId().replace(/:/g, '')}`;
 
@@ -240,8 +244,8 @@ export function LineChart({
         : 0;
     const h = Math.max((ctxHeight ?? height ?? 200) - belowRows, 80);
     const W = Math.max(width, 1);
-    const padR = 10;
-    const padY = 12;
+    const padR = rhea ? 4 : 10;
+    const padY = rhea ? 8 : 12;
     // Real x-axis (tick marks + date labels INSIDE the svg) in axes mode — the explorer/metric
     // reading. Needs a taller bottom band; the axis-free cards keep the symmetric pad and the
     // minimal first/mid/last HTML row below the svg. Requires PER-POINT labels (one per value);
@@ -277,7 +281,7 @@ export function LineChart({
     // Left gutter reserved for the y labels (right-aligned inside it) so they never sit
     // on the line/area and the first label is never clipped by the container edge.
     // Axis-free mode keeps only a sliver so edge markers (rings) don't clip on the viewBox.
-    const gutterW = showAxes
+    const gutterW = showAxes && !rhea
       ? Math.max(28, Math.round(Math.max(...yLabels.map((l) => l.length)) * CHAR_W) + 14)
       : 6;
 
@@ -387,24 +391,22 @@ export function LineChart({
     const staticLayer = (
       <>
         <defs>
-          {/* Area fill — FLAT, even tint (Steep-noble): NO vertical gradient wash. One low opacity
-              from the line to the baseline reads as a calm solid fill, not a fading glow (both stops
-              share the opacity → deliberately flat). The expanded explorer is quieter still. On a
-              tinted card the fill just deepens the accent evenly, keeping the whole tile monochrome. */}
+          {/* Default cards keep the flat Steep tint. The isolated Rhea treatment follows the
+              shadcn area-chart recipe with a stronger top tint fading toward the baseline. */}
           <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="hsl(var(--chart-role-primary))" stopOpacity={expanded ? '0.05' : '0.12'} />
-            <stop offset="100%" stopColor="hsl(var(--chart-role-primary))" stopOpacity={expanded ? '0.05' : '0.12'} />
+            <stop offset="0%" stopColor="hsl(var(--chart-role-primary))" stopOpacity={rhea ? '0.3' : expanded ? '0.05' : '0.12'} />
+            <stop offset="100%" stopColor="hsl(var(--chart-role-primary))" stopOpacity={rhea ? '0.04' : expanded ? '0.05' : '0.12'} />
           </linearGradient>
         </defs>
 
         {/* Gridlines — start after the label gutter */}
         {yGridPositions.map((yPos, idx) => (
-          <line key={idx} x1={gutterW} y1={yPos} x2={W} y2={yPos} stroke="hsl(var(--border))" strokeDasharray="4 6" strokeWidth="1" opacity="0.6" vectorEffect="non-scaling-stroke" />
+          <line key={idx} x1={gutterW} y1={yPos} x2={W} y2={yPos} stroke="hsl(var(--border))" strokeDasharray={rhea ? '3 3' : '4 6'} strokeWidth="1" opacity={rhea ? '0.72' : '0.6'} vectorEffect="non-scaling-stroke" />
         ))}
 
         {/* Large explorer plots need a vertical rhythm as well: it makes the grid a clear hover
             target and keeps dates aligned with their values across a wide canvas. */}
-        {xTicks.map((tick) => (
+        {!rhea && xTicks.map((tick) => (
           <line
             key={`grid-x${tick.i}`}
             x1={tick.px}
@@ -464,7 +466,7 @@ export function LineChart({
             россыпью одиночных измерений без единого сплошного отрезка) */}
         {areaPath && <path d={areaPath} fill={`url(#${gradientId})`} />}
         {linePath && (
-          <path d={linePath} fill="none" stroke="hsl(var(--chart-role-primary))" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+          <path d={linePath} fill="none" stroke="hsl(var(--chart-role-primary))" strokeWidth={rhea ? '2' : '2.5'} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
         )}
 
         {/* Одиночное измерение между дырами — точка вместо невидимой линии нулевой длины */}
@@ -492,8 +494,12 @@ export function LineChart({
 
         {/* Полюса линии (steep): начало — полая точка, конец — сплошной маркер «сейчас».
             Оба стоят на РЕАЛЬНЫХ точках: краевые дыры маркеров не получают. */}
-        <circle cx={firstPt.x} cy={firstPt.y} r="3.5" fill="hsl(var(--background))" stroke="hsl(var(--chart-role-primary))" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
-        <circle cx={lastPt.x} cy={lastPt.y} r="4" fill="hsl(var(--chart-role-primary))" stroke="hsl(var(--background))" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+        {!rhea && (
+          <>
+            <circle cx={firstPt.x} cy={firstPt.y} r="3.5" fill="hsl(var(--background))" stroke="hsl(var(--chart-role-primary))" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+            <circle cx={lastPt.x} cy={lastPt.y} r="4" fill="hsl(var(--chart-role-primary))" stroke="hsl(var(--background))" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+          </>
+        )}
 
         {/* Max / last value labels (markExtremes) — bare tabular text, no boxes */}
         {extremes.map((e) => (
@@ -503,7 +509,7 @@ export function LineChart({
         ))}
 
         {/* Y-axis labels — right-aligned in the reserved gutter */}
-        {yGridPositions.map((yPos, idx) => (
+        {!rhea && yGridPositions.map((yPos, idx) => (
           <text key={idx} x={gutterW - 8} y={yPos + 3.5} textAnchor="end" className="pointer-events-none select-none fill-muted-foreground text-2xs font-medium tabular-nums">
             {yLabels[idx]}
           </text>
@@ -512,7 +518,7 @@ export function LineChart({
         {/* X-axis (axes mode) — tick marks + date labels inside the bottom band */}
         {xTicks.map((t) => (
           <g key={`x${t.i}`}>
-            <line x1={t.px} y1={h - padB + 3} x2={t.px} y2={h - padB + 7} stroke="hsl(var(--border))" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+            {!rhea && <line x1={t.px} y1={h - padB + 3} x2={t.px} y2={h - padB + 7} stroke="hsl(var(--border))" strokeWidth="1" vectorEffect="non-scaling-stroke" />}
             <text x={t.x} y={h - 8} textAnchor="middle" data-chart-axis-label="x" className="pointer-events-none select-none fill-muted-foreground text-2xs font-medium tabular-nums">
               {t.text}
             </text>
@@ -522,7 +528,7 @@ export function LineChart({
     );
 
     return { W, h, gutterW, step, points, yFor, hasXAxis, plotTop: padY, plotBottom: h - padB, staticLayer };
-  }, [values, labels, activeGhost, hasGhostLegend, target, refLines, yMin, yMax, width, ctxHeight, height, expanded, showAxes, markExtremes, showPoints, anomalyIdx, gradientId]);
+  }, [values, labels, activeGhost, hasGhostLegend, target, refLines, yMin, yMax, width, ctxHeight, height, expanded, showAxes, markExtremes, showPoints, anomalyIdx, gradientId, rhea]);
 
   // Пустое состояние считается по РЕАЛЬНЫМ точкам (plot = null при < 2 non-null): серия из
   // одних null-дней — честное «нет данных», а не нулевая линия.
@@ -586,10 +592,10 @@ export function LineChart({
       if (comparisonDelta && d != null && Number.isFinite(d)) rows.push({ label: 'Δ', value: `${d >= 0 ? '+' : '−'}${Math.abs(d).toFixed(1)}%` });
       return { x: p.x, y: py, title: cardTitle(i), rows };
     }
-    if (expanded) {
+    if (expanded || rhea) {
       const rows: TooltipRow[] = [
         {
-          label: 'Текущий период',
+          label: primaryLabel ?? 'Текущий период',
           value: formatValue(v),
           color: 'hsl(var(--chart-role-primary))',
         },
@@ -655,6 +661,7 @@ export function LineChart({
       <svg
         data-chart-kind="line"
         data-chart-expanded={expanded ? '' : undefined}
+        data-chart-appearance={appearance}
         className={`block w-full ${onPointClick ? 'cursor-pointer' : 'cursor-crosshair'}`}
         height={h}
         viewBox={`0 0 ${W} ${h}`}
@@ -748,7 +755,10 @@ export function LineChart({
               <circle cx={hovered.x} cy={hoverGhostY} r="3.5" fill="hsl(var(--card))" stroke="hsl(var(--chart-role-comparison))" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
             )}
             {hovered.y != null && (
-              <circle cx={hovered.x} cy={hovered.y} r="4" fill="hsl(var(--chart-role-selection))" stroke="hsl(var(--background))" strokeWidth="1.5" />
+              <>
+                {rhea && <circle cx={hovered.x} cy={hovered.y} r="7" fill="hsl(var(--chart-role-selection) / 0.16)" />}
+                <circle cx={hovered.x} cy={hovered.y} r={rhea ? '3.5' : '4'} fill="hsl(var(--chart-role-selection))" stroke="hsl(var(--background))" strokeWidth={rhea ? '2' : '1.5'} />
+              </>
             )}
           </>
         )}
@@ -799,7 +809,7 @@ export function LineChart({
       )}
 
       {/* Readout anchored to the snapped data point (not the cursor) so it stays inside the chart */}
-      <ChartTooltip tip={hovered ? buildTip(hover!.i) : null} />
+      <ChartTooltip tip={hovered ? buildTip(hover!.i) : null} appearance={appearance} />
     </div>
   );
 }
