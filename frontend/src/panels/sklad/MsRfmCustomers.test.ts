@@ -5,6 +5,7 @@ import {
   collectRfmSegmentRows,
   rfmCustomersCsvRows,
   rfmExportFilename,
+  uniqueContactValues,
 } from './MsRfmCustomers';
 
 type Row = MsRfmCustomers['rows'][number];
@@ -14,6 +15,8 @@ const baseRow = (): Row => ({
   agent_id: 'a1',
   name: 'ООО Ромашка',
   address: 'г. Москва, ул. Ленина, д. 1',
+  phone: '+7 900 000-00-01',
+  email: 'romashka@example.com',
   city: 'Москва',
   orders: 3,
   sum: 4500,
@@ -27,8 +30,11 @@ const baseRow = (): Row => ({
 describe('rfmCustomersCsvRows', () => {
   it('проецирует строку сегмента в русские колонки в заданном порядке', () => {
     const lines = toCsv(rfmCustomersCsvRows([row()])).split('\r\n');
-    expect(lines[0]).toBe('Покупатель,Адрес,Город,Заказов,Сумма ₽,Последний заказ,Дней с заказа,R,F,M');
-    expect(lines[1]).toBe('ООО Ромашка,"г. Москва, ул. Ленина, д. 1",Москва,3,4500,2026-07-01,19,3,2,2');
+    expect(lines[0]).toBe('Покупатель,Адрес,Телефон,Email,Город,Заказов,Сумма ₽,Последний заказ,Дней с заказа,R,F,M');
+    // Ведущий апостроф у телефона — канонный формула-гард lib/csv для строк, начинающихся с +.
+    expect(lines[1]).toBe(
+      "ООО Ромашка,\"г. Москва, ул. Ленина, д. 1\",'+7 900 000-00-01,romashka@example.com,Москва,3,4500,2026-07-01,19,3,2,2",
+    );
   });
 
   it('эскейпит кавычки и разделители по RFC-4180 (канон lib/csv)', () => {
@@ -39,8 +45,30 @@ describe('rfmCustomersCsvRows', () => {
   });
 
   it('null-поля словаря контрагентов — честные пустые ячейки', () => {
-    const csv = toCsv(rfmCustomersCsvRows([row({ name: null, address: null, city: null, orders: 1, sum: 900 })]));
-    expect(csv.split('\r\n')[1]).toBe(',,,1,900,2026-07-01,19,3,2,2');
+    const csv = toCsv(rfmCustomersCsvRows([
+      row({ name: null, address: null, phone: null, email: null, city: null, orders: 1, sum: 900 }),
+    ]));
+    expect(csv.split('\r\n')[1]).toBe(',,,,,1,900,2026-07-01,19,3,2,2');
+  });
+});
+
+describe('uniqueContactValues', () => {
+  it('уникальные непустые значения поля в порядке строк; trim; null/пробелы отбрасываются', () => {
+    const rows = [
+      row({ agent_id: 'a1', phone: '+7 900 000-00-01' }),
+      row({ agent_id: 'a2', phone: null }),
+      row({ agent_id: 'a3', phone: ' +7 900 000-00-02 ' }),
+      row({ agent_id: 'a4', phone: '+7 900 000-00-01' }),
+      row({ agent_id: 'a5', phone: '   ' }),
+    ];
+    expect(uniqueContactValues(rows, 'phone')).toEqual(['+7 900 000-00-01', '+7 900 000-00-02']);
+  });
+
+  it('email-поле независимо от phone; все null → пустой список', () => {
+    expect(uniqueContactValues([row({ email: null }), row({ email: null })], 'email')).toEqual([]);
+    expect(
+      uniqueContactValues([row({ email: 'a@b.ru', phone: null })], 'email'),
+    ).toEqual(['a@b.ru']);
   });
 });
 
@@ -94,6 +122,6 @@ describe('скачивание через канон lib/csv', () => {
     // Blob.text() по спеке «UTF-8 decode» съедает ведущий BOM — проверяем сырые байты EF BB BF.
     const bytes = new Uint8Array(await created[0].arrayBuffer());
     expect([bytes[0], bytes[1], bytes[2]]).toEqual([0xef, 0xbb, 0xbf]);
-    expect(await created[0].text()).toContain('Покупатель,Адрес,Город');
+    expect(await created[0].text()).toContain('Покупатель,Адрес,Телефон,Email,Город');
   });
 });

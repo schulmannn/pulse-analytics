@@ -291,6 +291,7 @@ export function useMentionsArchive(
   source?: string | null,
   limit?: number,
   range?: DateRange | null,
+  opts?: { enabled?: boolean },
 ) {
   const { channelId } = useSelectedChannel();
   const d = days === 7 || days === 30 || days === 90 ? days : 0;
@@ -312,7 +313,8 @@ export function useMentionsArchive(
   if (lim) search.set('limit', String(lim));
   const qs = search.toString();
   return useQuery({
-    enabled: channelId != null,
+    // opts.enabled — внешний гейт поверх канального (офскрин-виджеты Главной), queryKey прежний.
+    enabled: channelId != null && opts?.enabled !== false,
     queryKey: ['mentions-archive', channelId, d, src, lim, rng?.from ?? null, rng?.to ?? null],
     staleTime: STALE_ARCHIVE,
     queryFn: ({ signal }) =>
@@ -333,10 +335,11 @@ export function useHistory(days = 730, opts?: { enabled?: boolean }) {
 }
 
 /** View-velocity snapshot (how fast posts accumulate reach). */
-export function useVelocity() {
+export function useVelocity(opts?: { enabled?: boolean }) {
   const { channelId } = useSelectedChannel();
   return useQuery({
-    enabled: channelId != null,
+    // opts.enabled — внешний гейт поверх канального (офскрин-виджеты Главной), queryKey прежний.
+    enabled: channelId != null && opts?.enabled !== false,
     queryKey: ['velocity', channelId],
     staleTime: STALE_ARCHIVE,
     queryFn: ({ signal }) => apiGet('/api/tg/mtproto/velocity', VelocitySchema, { signal, channelId }),
@@ -380,10 +383,11 @@ export function useIgPosts(limit = 20, enabled = true) {
 }
 
 /** Audience demographics + format/contact breakdowns (total_value envelope). */
-export function useIgBreakdowns(timeframe = 'last_30_days') {
+export function useIgBreakdowns(timeframe = 'last_30_days', enabled = true) {
   const { channelId } = useSelectedChannel();
   return useQuery({
-    enabled: channelId != null,
+    // enabled — внешний гейт поверх канального (офскрин-виджеты Главной), queryKey прежний.
+    enabled: enabled && channelId != null,
     queryKey: ['ig-breakdowns', channelId, timeframe],
     staleTime: STALE_ARCHIVE,
     queryFn: ({ signal }) => apiGet(`/api/ig/breakdowns?timeframe=${timeframe}`, IgBreakdownsSchema, { signal, channelId }),
@@ -391,10 +395,11 @@ export function useIgBreakdowns(timeframe = 'last_30_days') {
 }
 
 /** Online-followers hourly map (best-time heatmap). Degrades to empty gracefully. */
-export function useIgOnline() {
+export function useIgOnline(enabled = true) {
   const { channelId } = useSelectedChannel();
   return useQuery({
-    enabled: channelId != null,
+    // enabled — внешний гейт поверх канального (офскрин-виджеты Главной), queryKey прежний.
+    enabled: enabled && channelId != null,
     queryKey: ['ig-online', channelId],
     staleTime: STALE_ARCHIVE,
     queryFn: ({ signal }) => apiGet('/api/ig/online', IgOnlineSchema, { signal, channelId }),
@@ -806,6 +811,9 @@ const MsRfmCustomersSchema = z
           agent_id: z.string(),
           name: z.string().nullable(),
           address: z.string().nullable(),
+          // Контакты из того же словаря counterparty; при деградации словаря — null.
+          phone: z.string().nullable(),
+          email: z.string().nullable(),
           // Город ПОСЛЕДНЕГО заказа клиента с непустым city (архив ms_orders); null если нет.
           city: z.string().nullable(),
           orders: z.number(),
@@ -1030,10 +1038,11 @@ export function useMsReturns(period: MsPeriod) {
   });
 }
 
-export function useMsSummary(period: MsPeriod) {
+export function useMsSummary(period: MsPeriod, opts?: { enabled?: boolean }) {
   const { channelId } = useSelectedChannel();
   return useQuery({
-    enabled: channelId != null,
+    // opts.enabled — внешний гейт поверх канального (офскрин-виджеты Главной), queryKey прежний.
+    enabled: channelId != null && opts?.enabled !== false,
     queryKey: ['ms-summary', channelId, ...msPeriodKey(period)],
     staleTime: STALE_LIVE,
     retry: false,
@@ -1071,6 +1080,42 @@ export function useMsAssortmentComparison(period: MsPeriod, enabled: boolean) {
     retry: false,
     queryFn: ({ signal }) =>
       apiGet(`/api/ms/top-products?${msPeriodQuery(period)}&limit=1&compare=prev`, MsTopProductsSchema, { signal, channelId }),
+  });
+}
+
+const MsStockSchema = z
+  .object({
+    window_days: z.number(),
+    // Сервер сортирует по срочности (days_left ASC NULLS LAST → stock ASC) и отдаёт первые
+    // 200 строк; days_left=null — товар без продаж за окно («нет продаж», не бесконечность).
+    rows: z.array(
+      z
+        .object({
+          id: z.string().nullable(),
+          name: z.string().nullable(),
+          stock: z.number(),
+          reserve: z.number(),
+          days_left: z.number().nullable(),
+          sold_window: z.number(),
+        })
+        .passthrough(),
+    ),
+  })
+  .passthrough();
+export type MsStock = z.infer<typeof MsStockSchema>;
+export type MsStockRow = MsStock['rows'][number];
+
+/** Остатки «что заканчивается»: живой отчёт склада + скорость продаж выбранного окна. Окно
+    ОБЯЗАНО быть конечным — «Всё» (days=0 без диапазона) сервер отвечает 400, вызывающие
+    подменяют его конечным 30-дневным окном. */
+export function useMsStock(period: MsPeriod) {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    enabled: channelId != null,
+    queryKey: ['ms-stock', channelId, ...msPeriodKey(period)],
+    staleTime: STALE_LIVE,
+    retry: false,
+    queryFn: ({ signal }) => apiGet(`/api/ms/stock?${msPeriodQuery(period)}`, MsStockSchema, { signal, channelId }),
   });
 }
 

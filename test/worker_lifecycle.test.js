@@ -122,6 +122,25 @@ test('worker boots, starts the runner behind a ref keepalive, no HTTP', async ()
   await runtime.stop();
 });
 
+test('worker ignores JOBS_MODE (web-only gate): jobs still run with JOBS_MODE=off in env', async () => {
+  // Railway-worker получает «те же env», что и web (включая JOBS_MODE=off на split-топологии).
+  // Гейт относится ТОЛЬКО к web-планировщикам (server/main.js); worker обязан гонять джобы всегда —
+  // иначе off+worker оставил бы сбор вообще без владельца.
+  const { composition, events } = makeWorkerComposition();
+  const { setIntervalFn, clearIntervalFn } = makeIntervals(events);
+  const runtime = await runWorker({
+    env: { ...WORKER_ENV, JOBS_MODE: 'off' },
+    compositionFactory: () => composition,
+    installSignalHandlers: false,
+    shutdownTimeoutMs: 1_000,
+    setIntervalFn,
+    clearIntervalFn,
+  });
+  assert.ok(events.includes('runner.start'), 'collection runner стартует несмотря на JOBS_MODE=off');
+  await runtime.stop();
+  assert.ok(events.includes('close:a'), 'чистое завершение как обычно');
+});
+
 test('worker never starts or stops the operational runner (web-only)', async () => {
   const { composition, events } = makeWorkerComposition();
   const { setIntervalFn, clearIntervalFn } = makeIntervals(events);

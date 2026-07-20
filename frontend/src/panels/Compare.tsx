@@ -4,6 +4,7 @@ import { fmt, pluralRu } from '@/lib/format';
 import { pctDelta } from '@/lib/delta';
 import { describeChange, explainChange } from '@/lib/whyChanged';
 import { calendarWindowForPeriod, periodDateTimestamp, splitCalendarRows, useWidgetPeriod } from '@/lib/period';
+import { useWidgetInView } from '@/lib/widgetViewport';
 import { Skeleton } from '@/components/ui/skeleton';
 import { DeltaPill } from '@/components/DeltaPill';
 import { BarChart } from '@/components/BarChart';
@@ -71,7 +72,10 @@ import { ErrorState } from '@/components/ErrorState';
 
 export function Compare() {
   const { days, range } = useWidgetPeriod();
-  const { data, isPending, isError, refetch } = useTgFull(0, { windowPair: true });
+  // Прогрессивная загрузка Главной: пин «Сравнение периодов» (тело внутри ChartSection с homeKey)
+  // не фетчит офскрин. В Аналитике/отчётах контекст = true — поведение прежнее.
+  const inView = useWidgetInView();
+  const { data, isPending, isError, refetch } = useTgFull(0, { windowPair: true, enabled: inView });
 
   if (isPending) return <CompareSkeleton />;
   // Честная ошибка вместо молчаливого исчезновения панели (дизайн-аудит: null = дыра без retry).

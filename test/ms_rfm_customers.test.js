@@ -2,9 +2,10 @@
 
 // Route-тесты /api/ms/rfm-customers (fake-app паттерн ms_analytics_routes.test): auth —
 // pass-middleware, db/msFetch/msCrypto — стабы, кэш — реальный memoryCache. Фокус:
-//   • happy-path — сегмент/окно/asOf доходят до repo, имена+адреса живым словарём counterparty,
-//     копейки→рубли, city/last_day/scores в строках, кэш-хит вторым вызовом;
-//   • деградация словаря (не-401/403) → name/address:null БЕЗ кэша; 401/403 → ms_token_revoked;
+//   • happy-path — сегмент/окно/asOf доходят до repo, имена+адреса+phone/email живым словарём
+//     counterparty, копейки→рубли, city/last_day/scores в строках, кэш-хит вторым вызовом;
+//   • деградация словаря (не-401/403) → name/address/phone/email:null БЕЗ кэша;
+//     401/403 → ms_token_revoked;
 //   • 400 на неизвестный segment (repo не вызывается) и на кривой диапазон from/to;
 //   • пагинация ПОСЛЕ фильтра+сортировки: limit/offset-срез, клампы (1..200 / >=0), словарь
 //     ТОЛЬКО по id строк страницы чанками по 25; пустая страница кэшируется без словаря.
@@ -79,8 +80,14 @@ test('rfm-customers: сегмент/окно в repo, имена+адреса О
       const q = new URLSearchParams(path.split('?')[1] || '');
       assert.equal(q.get('filter'), 'id=cp-a;id=cp-b', 'OR-фильтр по id строк страницы');
       assert.equal(q.get('limit'), '2', 'limit = числу строк чанка');
-      // cp-b словарь не вернул (контрагент удалён) — name/address обязаны стать null, не роняя роут.
-      return { rows: [{ id: 'cp-a', name: 'ООО Ромашка', actualAddress: 'г Москва, Тверская 1' }] };
+      // cp-b словарь не вернул (контрагент удалён) — name/address/phone/email обязаны стать null,
+      // не роняя роут. email отсутствует и у cp-a (не строка) → null зеркально name/actualAddress.
+      return {
+        rows: [{
+          id: 'cp-a', name: 'ООО Ромашка', actualAddress: 'г Москва, Тверская 1',
+          phone: '+7 900 000-00-01',
+        }],
+      };
     },
     db: {
       getMsRfmCustomersForActor: async (channelId, actor, opts) => {
@@ -113,11 +120,12 @@ test('rfm-customers: сегмент/окно в repo, имена+адреса О
     total_customers: 2,
     rows: [
       {
-        agent_id: 'cp-a', name: 'ООО Ромашка', address: 'г Москва, Тверская 1', city: 'Москва',
+        agent_id: 'cp-a', name: 'ООО Ромашка', address: 'г Москва, Тверская 1',
+        phone: '+7 900 000-00-01', email: null, city: 'Москва',
         orders: 5, sum: 1000, last_day: '2026-07-17', recency_days: 1, r: 5, f: 5, m: 5,
       },
       {
-        agent_id: 'cp-b', name: null, address: null, city: null,
+        agent_id: 'cp-b', name: null, address: null, phone: null, email: null, city: null,
         orders: 2, sum: 40.5, last_day: '2026-07-10', recency_days: 8, r: 4, f: 4, m: 4,
       },
     ],
@@ -152,7 +160,7 @@ test('rfm-customers: сбой словаря → name/address:null без кэш
   const res = await invoke(routes, 'GET /api/ms/rfm-customers', { query: { days: '0', segment: 'new' } });
   assert.equal(res.statusCode, 200, 'DB-агрегат не заложник живого МС');
   assert.deepEqual(res.body.rows, [{
-    agent_id: 'cp-a', name: null, address: null, city: null,
+    agent_id: 'cp-a', name: null, address: null, phone: null, email: null, city: null,
     orders: 1, sum: 1, last_day: '2026-07-15', recency_days: 3, r: 3, f: 3, m: 3,
   }]);
   assert.equal(seenSince, null, 'days=0 = вся история (sinceDay null)');

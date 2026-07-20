@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { fetchMsRfmCustomersPage, useMsRfmSegmentCustomers, type MsRfmCustomers } from '@/api/queries';
 import { ErrorState } from '@/components/ErrorState';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -20,12 +20,14 @@ export function rfmExportFilename(segment: string, nowMs: number = Date.now()): 
 }
 
 /** Чистая проекция строк сегмента в CSV-колонки (русские заголовки — файл читает владелец).
-    null-поля словаря контрагентов (имя/адрес/город) — честные пустые ячейки; эскейп кавычек,
-    разделителей и BOM — канон lib/csv. */
+    null-поля словаря контрагентов (имя/адрес/контакты/город) — честные пустые ячейки; эскейп
+    кавычек, разделителей и BOM — канон lib/csv. */
 export function rfmCustomersCsvRows(rows: Row[]): CsvRow[] {
   return rows.map((row) => ({
     Покупатель: row.name,
     Адрес: row.address,
+    Телефон: row.phone,
+    Email: row.email,
     Город: row.city,
     Заказов: row.orders,
     'Сумма ₽': row.sum,
@@ -35,6 +37,22 @@ export function rfmCustomersCsvRows(rows: Row[]): CsvRow[] {
     F: row.f,
     M: row.m,
   }));
+}
+
+type ContactField = 'phone' | 'email';
+
+/** Уникальные непустые значения контактного поля в порядке строк сегмента — сырьё для
+    «Телефоны»/«Почты» (копирование аудитории в буфер). Trim отсекает строки из одних пробелов;
+    дедуп — точным совпадением после trim. */
+export function uniqueContactValues(rows: Row[], field: ContactField): string[] {
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const raw = row[field];
+    if (typeof raw !== 'string') continue;
+    const value = raw.trim();
+    if (value) seen.add(value);
+  }
+  return [...seen];
 }
 
 /** Offset-цикл по ВСЕМ страницам сегмента до total_customers. `fetchPage` инжектируется — юнит-тест
@@ -76,6 +94,17 @@ export function MsRfmSegmentCustomers({ period, segment }: { period: MsPeriod; s
   const [offset, setOffset] = useState(0);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  // «Телефоны»/«Почты»: какое поле сейчас собирается (disabled на время сборки) и 2-секундный
+  // фидбек на самой кнопке («Скопировано N» / «Нет данных»).
+  const [copying, setCopying] = useState<ContactField | null>(null);
+  const [copyNote, setCopyNote] = useState<{ field: ContactField; text: string } | null>(null);
+  const copyNoteTimer = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (copyNoteTimer.current != null) window.clearTimeout(copyNoteTimer.current);
+    },
+    [],
+  );
   // Канонический React-сброс derived-состояния при смене пропсов: setState прямо в рендере
   // (React откатывает вывод и рендерит заново) — эффект опоздал бы на кадр и мигнул чужими строками.
   const stale = acc.key !== windowKey;
@@ -83,6 +112,7 @@ export function MsRfmSegmentCustomers({ period, segment }: { period: MsPeriod; s
     setAcc(EMPTY(windowKey));
     setOffset(0);
     setExportError(null);
+    setCopyNote(null);
   }
   const effOffset = stale ? 0 : offset;
   const page = useMsRfmSegmentCustomers(period, segment, effOffset);
@@ -144,6 +174,47 @@ export function MsRfmSegmentCustomers({ period, segment }: { period: MsPeriod; s
     }
   };
 
+  const showCopyNote = (field: ContactField, text: string) => {
+    setCopyNote({ field, text });
+    if (copyNoteTimer.current != null) window.clearTimeout(copyNoteTimer.current);
+    copyNoteTimer.current = window.setTimeout(() => setCopyNote(null), 2000);
+  };
+
+  // «Телефоны»/«Почты» — сегмент как аудитория: собираем ВСЕ страницы сегмента (тот же offset-цикл,
+  // что у CSV), берём уникальные непустые значения и кладём в буфер через запятую+пробел.
+  const handleCopyContacts = async (field: ContactField) => {
+    if (copying != null || channelId == null) return;
+    setCopying(field);
+    setCopyNote(null);
+    try {
+      const all = await collectRfmSegmentRows((contactsOffset) =>
+        fetchMsRfmCustomersPage(channelId, period, segment, MS_RFM_EXPORT_PAGE, contactsOffset),
+      );
+      const values = uniqueContactValues(all, field);
+      if (values.length === 0) {
+        showCopyNote(field, 'Нет данных');
+      } else {
+        await navigator.clipboard.writeText(values.join(', '));
+        showCopyNote(field, `Скопировано ${fmt.num(values.length)}`);
+      }
+    } catch {
+      showCopyNote(field, 'Не удалось');
+    } finally {
+      setCopying(null);
+    }
+  };
+
+  const contactAction = (field: ContactField, label: string) => (
+    <button
+      type="button"
+      onClick={() => handleCopyContacts(field)}
+      disabled={copying != null}
+      className="shrink-0 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+    >
+      {copyNote != null && copyNote.field === field ? copyNote.text : label}
+    </button>
+  );
+
   return (
     <div>
       {total != null && (
@@ -151,14 +222,18 @@ export function MsRfmSegmentCustomers({ period, segment }: { period: MsPeriod; s
           <p className="text-xs text-muted-foreground">
             {fmt.num(total)} {pluralRu(total, ['покупатель', 'покупателя', 'покупателей'])}
           </p>
-          <button
-            type="button"
-            onClick={handleExport}
-            disabled={exporting}
-            className="btn-pill shrink-0 border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
-          >
-            {exporting ? 'Готовим…' : 'Выгрузить CSV'}
-          </button>
+          <div className="flex shrink-0 items-center gap-3">
+            {contactAction('phone', 'Телефоны')}
+            {contactAction('email', 'Почты')}
+            <button
+              type="button"
+              onClick={handleExport}
+              disabled={exporting}
+              className="btn-pill shrink-0 border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
+            >
+              {exporting ? 'Готовим…' : 'Выгрузить CSV'}
+            </button>
+          </div>
         </div>
       )}
       {exportError != null && (

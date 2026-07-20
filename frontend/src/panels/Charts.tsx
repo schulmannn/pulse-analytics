@@ -9,6 +9,7 @@ import { ChartTooltip, type TooltipState } from '@/components/ChartTooltip';
 import { fmt, ruAxisLabel, pluralRu } from '@/lib/format';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useWidgetPeriod } from '@/lib/period';
+import { useWidgetInView } from '@/lib/widgetViewport';
 
 import { ChartCardBody, ChartSection } from '@/components/ChartWidget';
 import { seriesBarValuesVariant } from '@/components/widgets/variants';
@@ -204,7 +205,9 @@ export function HistoryChartBlock({ id, homeKey }: HomeBlockProps = {}) {
 
 /** Bare, config-driven history body for Home. The surrounding ConfigWidget owns all card chrome. */
 export function HistoryWidgetBody({ viz }: { viz: WidgetViz }) {
-  const { data, isPending, isError, refetch } = useHistory(730);
+  // Прогрессивная загрузка Главной: офскрин-пин не фетчит (вне Главной контекст = true).
+  const inView = useWidgetInView();
+  const { data, isPending, isError, refetch } = useHistory(730, { enabled: inView });
   const { inRange } = useWidgetPeriod();
 
   if (isPending) return <ChartSkeletonBody />;
@@ -305,7 +308,9 @@ export function HeatmapChartBlock({ id, homeKey }: HomeBlockProps = {}) {
 
 /** Bare, self-fetching heatmap body shared by the source card and ConfigWidget. */
 export function HeatmapWidgetBody() {
-  const { data, isPending } = useTgFull(0);
+  // Прогрессивная загрузка Главной: офскрин-пин не фетчит (вне Главной контекст = true).
+  const inView = useWidgetInView();
+  const { data, isPending } = useTgFull(0, { enabled: inView });
   if (isPending) return <ChartSkeletonBody />;
   return <HeatmapBody posts={data?.posts ?? []} />;
 }
@@ -514,7 +519,9 @@ export function VelocityChartBlock({ id, homeKey }: HomeBlockProps = {}) {
 
 /** Bare, config-driven velocity body for Home. */
 export function VelocityWidgetBody({ viz }: { viz: WidgetViz }) {
-  const { data, isPending } = useVelocity();
+  // Прогрессивная загрузка Главной: офскрин-пин не фетчит (вне Главной контекст = true).
+  const inView = useWidgetInView();
+  const { data, isPending } = useVelocity({ enabled: inView });
   if (isPending) return <ChartSkeletonBody />;
 
   const byDay = data?.by_day ?? [];

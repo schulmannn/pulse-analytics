@@ -347,6 +347,20 @@ function demoMsPayload(url: URL, opts: { max?: boolean } = {}): unknown | undefi
       series,
     };
   }
+  if (path === '/api/ms/stock') {
+    // Прод-форма /api/ms/stock: сорт days_left ASC NULLS LAST; первая строка «скоро кончится»
+    // (days_left ≤ 7) отрабатывает warn-подсветку карточки «Остатки».
+    return {
+      window_days: days === 0 ? 30 : days,
+      rows: [
+        { id: 'sku-cam', name: 'Кофемашина автоматическая De Longhi', stock: 3, reserve: 1, days_left: 4, sold_window: 21 },
+        { id: 'sku-tv', name: 'Телевизор LG OLED evo C4 65 дюймов 4K', stock: 12, reserve: 0, days_left: 18, sold_window: 20 },
+        { id: 'sku-ps', name: 'Игровая консоль Sony PlayStation 5 Slim', stock: 25, reserve: 2, days_left: 47, sold_window: 16 },
+        { id: 'sku-rob', name: 'Робот-пылесос Dreame X40 Ultra', stock: 40, reserve: 0, days_left: 160, sold_window: 8 },
+        { id: 'sku-dead', name: 'Гирлянда новогодняя LED 20 м', stock: 90, reserve: 0, days_left: null, sold_window: 0 },
+      ],
+    };
+  }
   if (path === '/api/ms/sales-by-channel') {
     return {
       window_days: days,

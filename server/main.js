@@ -72,6 +72,23 @@ async function main({
     );
   }
 
+  // JOBS_MODE — web-гейт периодических планировщиков (готовность к выносу джоб в отдельный
+  // Railway-сервис, см. docs/WORKER.md):
+  //   • 'inline' (дефолт) — прежнее поведение: web стартует collection- и operational-бегунки;
+  //   • 'off'    — web НЕ планирует периодические джобы (оба бегунка собраны composition, но не
+  //     стартуют). HTTP/health и вся по-запросу работа — ingest-хвосты POST /api/ingest/daily,
+  //     kick бэкфилла POST /api/ms/backfill — работают как раньше: они request-driven и этим
+  //     гейтом не покрываются.
+  // Неизвестное значение фатально сразу (та же философия, что typo в COLLECTION_RECOVERY_MODE):
+  // молчаливый фолбэк в 'inline' рядом с работающим worker удвоил бы запуск джобов (ADR-002).
+  // Worker-entrypoint (server/worker.js) этот гейт игнорирует — его смысл всегда гонять джобы.
+  const jobsMode = String(env.JOBS_MODE || 'inline').trim().toLowerCase();
+  if (!['inline', 'off'].includes(jobsMode)) {
+    throw new Error(
+      `[boot] JOBS_MODE должен быть 'inline' или 'off' (получено '${env.JOBS_MODE}').`,
+    );
+  }
+
   const createComposition =
     compositionFactory || require('./composition').createComposition;
   const composition = await createComposition(config);
@@ -98,13 +115,19 @@ async function main({
   }
 
   composition.memoryCache.start();
-  // Recovery-бегунок фонового сбора: стартует ПОСЛЕ listen (не задерживает readiness); инертен при
-  // выключенной БД и в composition без этого поля (тесты жизненного цикла).
-  composition.collectionRunner?.start?.();
-  // Operational-бегунок (scheduled-отчёты + дневная maintenance): стартует web-only ПОСЛЕ listen рядом
-  // с collection runner; инертен при выключенной БД и в composition без этого поля (тесты жизненного
-  // цикла). Standalone worker его НЕ стартует.
-  composition.operationalRunner?.start?.();
+  if (jobsMode !== 'off') {
+    // Recovery-бегунок фонового сбора: стартует ПОСЛЕ listen (не задерживает readiness); инертен при
+    // выключенной БД и в composition без этого поля (тесты жизненного цикла).
+    composition.collectionRunner?.start?.();
+    // Operational-бегунок (scheduled-отчёты + дневная maintenance): стартует web-only ПОСЛЕ listen
+    // рядом с collection runner; инертен при выключенной БД и в composition без этого поля (тесты
+    // жизненного цикла). Standalone worker его НЕ стартует.
+    composition.operationalRunner?.start?.();
+  } else {
+    // JOBS_MODE=off: периодические джобы гоняет отдельный worker-процесс (docs/WORKER.md).
+    // stop() ниже всё равно зовёт runner.stop() — он идемпотентен и безопасен для не-стартовавшего.
+    console.log('[boot] JOBS_MODE=off — web не планирует периодические джобы (их гоняет worker)');
+  }
   const boundAddress = server.address();
   const boundPort =
     boundAddress && typeof boundAddress === 'object'

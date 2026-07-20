@@ -7,7 +7,7 @@ function registerAuthRoutes({
   hashPassword, verifyPassword, DUMMY_HASH, signSession, SESSION_TTL,
   GOOGLE_CLIENT_ID, fetchWithTimeout, log, audit, appBase, sha256, newToken,
   VERIFY_TTL, RESET_TTL, sendEmail, emailShell, emailBtn, escHtml,
-  aiEnabledFor,
+  aiEnabledFor, setSessionCookie, clearSessionCookie,
 }) {
   const verifyEmailHtml = (link) => emailShell('Подтверди email',
     `<p>Активируй аккаунт в Atlavue:</p>${emailBtn(link, 'Подтвердить email')}<p style="color:#64748d;font-size:13px">Ссылка действует 24 часа. Если это были не вы — проигнорируйте письмо.</p>`);
@@ -66,6 +66,9 @@ function registerAuthRoutes({
       const token = signSession({ uid: u.id, role: u.role, exp: expires, tokenVersion: u.token_version });
       req.user = { uid: u.id, role: u.role, email: u.email };
       audit(req, 'auth.login', {}).catch(() => {});
+      // Cookie-auth фаза 1: тот же токен дополнительно уезжает HttpOnly-cookie;
+      // JSON-ответ не меняется — header-клиенты (SPA/legacy) живут как раньше.
+      setSessionCookie(req, res, token);
       return res.json({ token,
         expiresAt: new Date(expires).toISOString(), user: { email: u.email, role: u.role } });
     } catch (e) { return next(e); }
@@ -116,6 +119,7 @@ function registerAuthRoutes({
       const token = signSession({ uid: u.id, role: u.role, exp: expires, tokenVersion: u.token_version });
       req.user = { uid: u.id, role: u.role, email: u.email };
       audit(req, 'auth.google', {}).catch(() => {});
+      setSessionCookie(req, res, token); // как в /api/auth/login — cookie дублирует токен
       return res.json({ token, expiresAt: new Date(expires).toISOString(), user: { email: u.email, role: u.role } });
     } catch (e) {
       log('error', 'google_auth_error', { error: e.message });
@@ -127,6 +131,7 @@ function registerAuthRoutes({
     try {
       await db.revokeUserSessions(req.user.uid);
       audit(req, 'auth.logout', {}).catch(() => {});
+      clearSessionCookie(req, res); // token_version уже отозвал токен; cookie чистим для гигиены
       res.json({ ok: true });
     } catch (e) {
       next(e);

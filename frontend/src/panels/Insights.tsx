@@ -1,6 +1,7 @@
 import { useTgFull, useTgGraphs, useHistory, useVelocity } from '@/api/queries';
 import { normalizeTgPosts, type NormalizedPost } from '@/lib/posts';
 import { useWidgetPeriod } from '@/lib/period';
+import { useWidgetInView } from '@/lib/widgetViewport';
 import { dailyWindowDelta, subscriberChange } from '@/lib/delta';
 import { markdownToPlainText } from '@/lib/markdown';
 import { buildTgInsights, type TgInsight } from '@/lib/tgInsights';
@@ -43,10 +44,13 @@ function topHashtagLift(posts: NormalizedPost[]): { tag: string; lift: number } 
  */
 export function Insights() {
   const { days, inRange, range } = useWidgetPeriod();
-  const { data, isPending } = useTgFull(days);
-  const { data: graphs } = useTgGraphs();
-  const { data: history } = useHistory(730);
-  const { data: velocity } = useVelocity();
+  // Прогрессивная загрузка Главной: пин «Главное» (тело внутри ChartSection с homeKey) не фетчит
+  // офскрин. В Аналитике/отчётах контекст = true — поведение прежнее.
+  const inView = useWidgetInView();
+  const { data, isPending } = useTgFull(days, { enabled: inView });
+  const { data: graphs } = useTgGraphs({ enabled: inView });
+  const { data: history } = useHistory(730, { enabled: inView });
+  const { data: velocity } = useVelocity({ enabled: inView });
 
   if (isPending) return <InsightsSkeleton />;
 

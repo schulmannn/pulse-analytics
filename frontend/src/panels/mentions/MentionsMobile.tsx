@@ -10,6 +10,7 @@ import { WidgetGroup } from '@/components/widgets/WidgetGroup';
 import { breakdownVariants } from '@/components/widgets/variants';
 import { LineChart } from '@/components/LineChart';
 import { useWidgetPeriod } from '@/lib/period';
+import { useWidgetInView } from '@/lib/widgetViewport';
 import type { WidgetViz } from '@/lib/widgetMetrics';
 import { ErrorState } from '@/components/ErrorState';
 
@@ -265,7 +266,10 @@ export function MentionsByDayWidget({ byDay, id, homeKey }: { byDay: Record<stri
 
 /** Bare, config-driven body for Home. ConfigWidget owns the card, period and presentation switch. */
 export function MentionsWidgetBody({ viz }: { viz: WidgetViz }) {
-  const archive = useMentionsArchive();
+  // Прогрессивная загрузка Главной: офскрин-пин не фетчит (вне Главной контекст = true).
+  // Позиционные аргументы = дефолты хука, queryKey прежний.
+  const inView = useWidgetInView();
+  const archive = useMentionsArchive(0, null, undefined, null, { enabled: inView });
   const { days } = useWidgetPeriod();
 
   if (archive.isPending) return <Skeleton className="h-40 w-full" />;

@@ -9,20 +9,25 @@ import { useSelectedChannel } from '@/lib/channel-context';
 import { DEFAULT_WIDGET_DAYS, widgetPeriodValue } from '@/lib/period';
 import { resolveWidgetMetric, type DataContext, type WidgetResult } from '@/lib/resolveWidgetMetric';
 import type { WidgetConfig } from '@/lib/widgetConfig';
+import { useWidgetInView } from '@/lib/widgetViewport';
 
 export function useIgWidgetData(config: WidgetConfig): { result: WidgetResult; isLoading: boolean } {
   const days = config.period ?? DEFAULT_WIDGET_DAYS;
   const period = useMemo(() => widgetPeriodValue(days), [days]);
 
+  // Прогрессивная загрузка Главной (зеркало useWidgetData): офскрин-карточка держит запросы
+  // disabled, пока не приблизится к вьюпорту. Вне Главной контекст = true — всё как раньше.
+  const inView = useWidgetInView();
+
   // Match useIgData's param mapping: insights day-count (capped 90) + the breakdowns timeframe bucket.
   const insDays = days > 0 ? Math.min(days, 90) : 90;
   const timeframe = days === 7 ? 'last_14_days' : days === 90 || days === 0 ? 'last_90_days' : 'last_30_days';
 
-  const profileQ = useIgProfile();
-  const insightsQ = useIgInsights(insDays);
-  const breakdownsQ = useIgBreakdowns(timeframe);
-  const onlineQ = useIgOnline();
-  const historyQ = useIgHistory();
+  const profileQ = useIgProfile(inView);
+  const insightsQ = useIgInsights(insDays, inView);
+  const breakdownsQ = useIgBreakdowns(timeframe, inView);
+  const onlineQ = useIgOnline(inView);
+  const historyQ = useIgHistory(400, inView);
   const { channelId } = useSelectedChannel();
 
   const result = useMemo(() => {

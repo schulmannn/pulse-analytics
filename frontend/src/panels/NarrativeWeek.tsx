@@ -12,6 +12,7 @@ import { tgWeekMetrics } from '@/lib/tgWeekMetrics';
 import { buildWeekNarrative, type NarrativeIgInput, type NarrativeInput, type NarrativeParagraph, type NarrativeSeg } from '@/lib/narrative';
 import { ChartSection } from '@/components/ChartWidget';
 import type { WidgetSize } from '@/lib/widgetPrefsStore';
+import { useWidgetInView } from '@/lib/widgetViewport';
 import { DeltaPill } from '@/components/DeltaPill';
 import { InlineSpark } from '@/components/InlineSpark';
 import { PostDetailModal } from '@/components/PostDetailModal';
@@ -32,9 +33,12 @@ import { Skeleton } from '@/components/ui/skeleton';
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 function useWeekNarrativeInput(): { input: NarrativeInput | null; posts: NormalizedPost[]; loading: boolean; error: boolean; retry: () => void } {
-  const { data: full, isPending: fullPending, isError: fullError, refetch: refetchFull } = useTgFull(0);
-  const { data: graphs, isPending: graphsPending } = useTgGraphs();
-  const { data: history } = useHistory(730);
+  // Прогрессивная загрузка Главной: тело рендерится внутри ChartSection (Provider для homeKey-
+  // карточек), офскрин-пин не фетчит до приближения. Вне Главной контекст = true — как раньше.
+  const inView = useWidgetInView();
+  const { data: full, isPending: fullPending, isError: fullError, refetch: refetchFull } = useTgFull(0, { enabled: inView });
+  const { data: graphs, isPending: graphsPending } = useTgGraphs({ enabled: inView });
+  const { data: history } = useHistory(730, { enabled: inView });
   const { channelId } = useSelectedChannel();
   const { data: channelsData } = useChannels();
 
@@ -80,6 +84,10 @@ function useWeekNarrativeInput(): { input: NarrativeInput | null; posts: Normali
 export function useIgWeekInput(): { input: NarrativeIgInput | null; loading: boolean; notConnected: boolean } {
   const { demo } = useDemo();
   const { channelId } = useSelectedChannel();
+  // Прогрессивная загрузка Главной: офскрин-пин не пробует IG-эндпоинты до приближения к
+  // вьюпорту (вне Главной контекст = true). Гейт только на fetch — loading/notConnected ниже
+  // по-прежнему считаются от capability-гейта, офскрин честно читается как «загрузка».
+  const inView = useWidgetInView();
   // Capability gate from the already-cached useChannels response: an unconnected selected channel
   // must NOT fan out the five IG endpoints below (they'd only return a discarded mock). While
   // channels are unresolved we probe nothing and report honest loading.
@@ -92,11 +100,12 @@ export function useIgWeekInput(): { input: NarrativeIgInput | null; loading: boo
     channelKnown: channelId != null,
     igConnected: !!selected?.ig_connected,
   });
-  const profileQ = useIgProfile(gate.igEnabled);
-  const insightsQ = useIgInsights(14, gate.igEnabled);
-  const insights7Q = useIgInsights(7, gate.igEnabled);
-  const historyQ = useIgHistory(400, gate.igEnabled);
-  const postsQ = useIgPosts(24, gate.igEnabled);
+  const igFetch = gate.igEnabled && inView;
+  const profileQ = useIgProfile(igFetch);
+  const insightsQ = useIgInsights(14, igFetch);
+  const insights7Q = useIgInsights(7, igFetch);
+  const historyQ = useIgHistory(400, igFetch);
+  const postsQ = useIgPosts(24, igFetch);
   const profile = profileQ.data;
   const ins = insightsQ.data;
   const ins7 = insights7Q.data;
