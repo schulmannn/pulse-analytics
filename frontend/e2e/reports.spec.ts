@@ -318,6 +318,39 @@ test.describe('Отчёты — desktop', () => {
     expect(state.putCount).toBe(1);
   });
 
+  test('недельная таблица использует компактный sticky-ledger и выделяет текущую неделю', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'desktop-1440', 'desktop weekly table styling');
+    const report = textReport();
+    report.id = 4;
+    report.name = 'Недельная динамика';
+    report.config = { blocks: ['weekly-table'], periodDays: 30, channelId: 1 };
+    await bootReports(page, [report]);
+
+    await page.goto('/reports/4');
+    await expect(page.getByRole('heading', { name: 'Недельная динамика' })).toBeVisible();
+    const weeklyTable = page.locator('[data-report-table="weekly"]');
+    await expect(weeklyTable).toBeVisible();
+    await expect(weeklyTable.locator('tbody tr')).toHaveCount(4);
+    await expect(weeklyTable.getByRole('rowheader', { name: 'Просмотры' })).toBeVisible();
+
+    const stickyHeading = weeklyTable.getByRole('columnheader', { name: 'Неделя с' });
+    await expect(stickyHeading).toBeVisible();
+    expect(await stickyHeading.evaluate((element) => getComputedStyle(element).position)).toBe('sticky');
+    await expect(weeklyTable.locator('[data-current="true"]')).toHaveCount(5);
+    expect(await weeklyTable.locator('[data-direction="positive"]').count()).toBeGreaterThan(0);
+
+    const darkTableShot = testInfo.outputPath('report-weekly-table-dark-desktop.png');
+    await page.screenshot({ path: darkTableShot, fullPage: true });
+    await testInfo.attach('report-weekly-table-dark-desktop', { path: darkTableShot, contentType: 'image/png' });
+
+    await page.evaluate(() => localStorage.setItem('pulse_theme', 'light'));
+    await page.reload();
+    await expect(weeklyTable).toBeVisible();
+    const tableShot = testInfo.outputPath('report-weekly-table-light-desktop.png');
+    await page.screenshot({ path: tableShot, fullPage: true });
+    await testInfo.attach('report-weekly-table-light-desktop', { path: tableShot, contentType: 'image/png' });
+  });
+
   test('drill-down открывает метрику на закреплённом Telegram-источнике отчёта', async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== 'desktop-1440', 'desktop pinned-source drill-down');
     const report = textReport();
