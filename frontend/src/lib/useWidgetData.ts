@@ -10,6 +10,7 @@ import { useSelectedChannel } from '@/lib/channel-context';
 import { DEFAULT_WIDGET_DAYS, widgetPeriodValue } from '@/lib/period';
 import { resolveWidgetMetric, type DataContext, type WidgetResult } from '@/lib/resolveWidgetMetric';
 import type { WidgetConfig } from '@/lib/widgetConfig';
+import { useWidgetInView } from '@/lib/widgetViewport';
 
 export function useWidgetData(config: WidgetConfig): { result: WidgetResult; isLoading: boolean } {
   const days = config.period ?? DEFAULT_WIDGET_DAYS;
@@ -17,12 +18,18 @@ export function useWidgetData(config: WidgetConfig): { result: WidgetResult; isL
   // rest of the app). Memoized on `days` so `inRange`'s identity is stable across re-renders.
   const period = useMemo(() => widgetPeriodValue(days), [days]);
 
+  // Прогрессивная загрузка Главной: карточка ниже вьюпорта (ChartSection ставит Provider для
+  // homeKey-карточек) не запускает запросы, пока не приблизится. Вне Главной контекст = true, всё
+  // как раньше. queryKey не меняется — офскрин-карточка просто держит query disabled (isPending →
+  // скелетон, который всё равно не виден).
+  const inView = useWidgetInView();
+
   // Cached query payloads (windowPair fetches enough history for the comparison/ghost baseline,
   // matching the metric page). Hooks run unconditionally — an IG metric simply resolves to empty
   // until S11 wires the IG paths, without over-thinking conditional fetching here.
-  const fullQ = useTgFull(days, { windowPair: true });
-  const historyQ = useHistory(730);
-  const graphsQ = useTgGraphs();
+  const fullQ = useTgFull(days, { windowPair: true, enabled: inView });
+  const historyQ = useHistory(730, { enabled: inView });
+  const graphsQ = useTgGraphs({ enabled: inView });
   const channelsQ = useChannels();
   const { channelId } = useSelectedChannel();
   const full = fullQ.data;

@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { PERIOD_WORD, SIZE_COL_SPAN, SIZE_DEFER_RENDER, SIZE_HEIGHT } from './constants';
 import { useChartSectionModel } from './useChartSectionModel';
 import { WidgetBody } from './WidgetBody';
@@ -7,11 +8,54 @@ import { WidgetPeriodPills } from './WidgetPeriodPills';
 import type { ChartSectionProps } from './types';
 import { SourceIdentity } from '@/components/SourceIdentity';
 import { useHomeSource } from '@/lib/homeSourceContext';
+import { WidgetInViewContext } from '@/lib/widgetViewport';
 
 /** Configurable dashboard card. Public consumers import this through components/ChartWidget. */
 export function ChartSection(props: ChartSectionProps) {
   const model = useChartSectionModel(props);
   const homeSource = useHomeSource();
+  // Прогрессивная загрузка Главной: только homeKey-карточки (доска) гейтят data-запросы тела до
+  // приближения к вьюпорту — content-visibility (#290) уже скипает их layout/paint, но данные всей
+  // доски фетчались разом. Одноразово: увидели → true навсегда. Без IntersectionObserver
+  // (jsdom/SSR — гвард как в observeSize) не гейтим вовсе.
+  const dataGated = !!props.homeKey;
+  const [inView, setInView] = useState(() => !dataGated || typeof IntersectionObserver === 'undefined');
+  const sectionRef = model.refs.sectionRef;
+  useEffect(() => {
+    if (inView) return;
+    const el = sectionRef.current;
+    if (!el || typeof IntersectionObserver === 'undefined') {
+      setInView(true);
+      return;
+    }
+    // Синхронная проверка: карточка в пределах запаса видимости фетчит прямо на mount-кадре, не
+    // дожидаясь асинхронного первого колбэка IO. Запас зеркалит rootMargin ниже.
+    const nearViewport = () => el.getBoundingClientRect().top < window.innerHeight + 600;
+    if (nearViewport()) {
+      setInView(true);
+      return;
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) setInView(true);
+      },
+      { rootMargin: '600px 0px' },
+    );
+    io.observe(el);
+    // Скролл-фолбэк как в LazyBlock (useFeed): headless/frame-starved окружения, где IO молчит.
+    let lastRun = 0;
+    const onScroll = () => {
+      const now = Date.now();
+      if (now - lastRun < 200) return;
+      lastRun = now;
+      if (nearViewport()) setInView(true);
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      io.disconnect();
+      window.removeEventListener('scroll', onScroll);
+    };
+  }, [inView, sectionRef]);
   const { widgetId, label } = model.identity;
   const { group, sequenceIndex, reorder, dragging, effectiveSize } = model.layout;
   const { prefs, updatePrefs, pinned } = model.preferences;
@@ -48,6 +92,10 @@ export function ChartSection(props: ChartSectionProps) {
           reorder-режиме FLIP/drag WidgetGroup меряет и глайдит карточки — консервативно рендерим
           всё; открытое меню (absolute top-full) может вылезать за низ карточки — без гейта его
           обрезал бы тот же paint containment. Оба переключения затрагивают одну-две карточки. */}
+      {/* Provider оборачивает ТОЛЬКО тело карточки: оверлеи ниже — сиблинги, expand-тело обязано
+          фетчить всегда (deep-link ?detail= может открыть невиденную карточку) и берёт дефолт
+          контекста (true). */}
+      <WidgetInViewContext.Provider value={inView}>
       <div
         className={`${
           props.strip
@@ -147,6 +195,7 @@ export function ChartSection(props: ChartSectionProps) {
           resetKeys={model.bodyResetKeys}
         />
       </div>
+      </WidgetInViewContext.Provider>
 
       <WidgetEditOverlay
         open={model.controls.editOpen}

@@ -51,9 +51,12 @@ export interface ChartSeries {
 export function seriesToChart(result: WidgetResult): ChartSeries {
   const series = result.series ?? [];
   const f = unitFormat(result.unit);
+  // Недельная агрегация (длинные бары): дата точки — понедельник корзины, без « · неделя»
+  // тултип «18 июл.: N» читался бы как один день.
+  const suffix = result.meta?.seriesGrain === 'week' ? ' · неделя' : '';
   const labels = series.map((p) => bucketLabel(p.date));
   const values = series.map((p) => p.value);
-  const titles = series.map((p, i) => `${labels[i]}: ${f(p.value)}`);
+  const titles = series.map((p, i) => `${labels[i]}: ${f(p.value)}${suffix}`);
   return { values, labels, titles };
 }
 

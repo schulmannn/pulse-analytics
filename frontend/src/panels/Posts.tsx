@@ -22,6 +22,7 @@ import { membershipKey, useCampaignFilter, useMembershipSet } from '@/lib/campai
 import { AddToCampaignDialog } from '@/components/campaigns/AddToCampaignDialog';
 import { CampaignFilterControl } from '@/components/campaigns/CampaignFilterControl';
 import { PillSelect } from '@/components/PillSelect';
+import { lazyWithReload } from '@/lib/lazyWithReload';
 import {
   CONTENT_SORT_COLUMNS,
   applyContentFilters,
@@ -35,8 +36,8 @@ import {
 
 // Список кампаний (таблица + create-диалог) грузится лениво: вкладка «Кампании» — не первый
 // экран «Контента», а entry-чанк упирается в bundle-size гейт.
-const CampaignsView = lazy(() =>
-  import('@/components/campaigns/CampaignsView').then((m) => ({ default: m.CampaignsView })),
+const CampaignsView = lazy(
+  lazyWithReload(() => import('@/components/campaigns/CampaignsView').then((m) => ({ default: m.CampaignsView }))),
 );
 
 const FORMAT_OPTIONS: { value: ContentFormat; label: string }[] = [

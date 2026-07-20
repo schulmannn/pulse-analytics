@@ -6,12 +6,13 @@ import { HeatmapWidgetBody, HistoryWidgetBody, VelocityWidgetBody } from '@/pane
 import { Skeleton } from '@/components/ui/skeleton';
 import type { WidgetConfig } from '@/lib/widgetConfig';
 import type { LegacyKey } from '@/lib/legacyWidgets';
+import { lazyWithReload } from '@/lib/lazyWithReload';
 
 // The route and the optional Home widget share one async Mentions chunk. Keeping this adapter lazy
 // matters: a static import here would pull the whole Mentions panel back into the entry bundle and
 // cancel the route-level split declared in panels/feed/feeds.tsx.
-const MentionsWidgetBody = lazy(() =>
-  import('@/panels/Mentions').then((module) => ({ default: module.MentionsWidgetBody })),
+const MentionsWidgetBody = lazy(
+  lazyWithReload(() => import('@/panels/Mentions').then((module) => ({ default: module.MentionsWidgetBody }))),
 );
 
 /**

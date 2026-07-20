@@ -91,14 +91,16 @@ export function useChartSectionModel(props: ChartSectionProps) {
     );
   }, [drillTo, explorerPeriod, navigate, pagePeriod, setSearchParams, widgetId]);
   const closeExpand = useCallback(() => {
-    setSearchParams(
-      (previous) => {
-        const next = new URLSearchParams(previous);
-        next.delete('detail');
-        return next;
-      },
-      { replace: true },
-    );
+    // Закрытие (Escape/крестик/backdrop) чистит ?detail= из ЖИВОГО URL, а не из снапшота рендера:
+    // react-router передаёт функциональному апдейтеру searchParams из замыкания ПОСЛЕДНЕГО рендера
+    // этого компонента, и устаревший снапшот (повторный Escape до ре-рендера, параллельная запись
+    // других параметров) мог собрать URL, где ?detail= уцелел, — URL-driven open (expandOpen выше)
+    // тут же показывал оверлей снова. Live-чтение + no-op, когда параметра уже нет, делают закрытие
+    // идемпотентным: replace (не push), без лишней записи в историю и без воскрешения оверлея.
+    const next = new URLSearchParams(window.location.search);
+    if (next.get('detail') === null) return;
+    next.delete('detail');
+    setSearchParams(next, { replace: true });
   }, [setSearchParams]);
 
   useEffect(() => {

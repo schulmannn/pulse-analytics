@@ -7,6 +7,7 @@ import { DashboardLayout } from '@/components/DashboardLayout';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { ErrorState } from '@/components/ErrorState';
 import { NotFound } from '@/components/NotFound';
+import { lazyWithReload } from '@/lib/lazyWithReload';
 import { PeriodUrlSync } from '@/lib/period-url';
 import { FEEDS, FeedSectionPage } from '@/panels/feed/feeds';
 import { NETWORKS } from '@/lib/networks';
@@ -24,7 +25,7 @@ import { CommandPalette } from '@/components/CommandPalette';
 // explicit click/deep-link, and together they keep the entry chunk under its size gate.
 // TG Overview (the feed index) and Home stay EAGER — the authenticated default must not
 // flash a suspense scaffold on first paint.
-const Landing = lazy(() => import('@/pages/Landing').then((m) => ({ default: m.Landing })));
+const Landing = lazy(lazyWithReload(() => import('@/pages/Landing').then((m) => ({ default: m.Landing }))));
 // Metric explorer cluster (IgMetricPage barrels in MetricPage) — one async chunk.
 const MetricRoute = lazyFrom(() => import('@/panels/IgMetricPage'), 'MetricRoute');
 // Reports index + the report document. ReportsList re-uses ReportPage's error state, so
@@ -48,13 +49,15 @@ const AiChatPage = lazyFrom(() => import('@/panels/ai/AiChatPage'), 'AiChatPage'
 const Privacy = lazyFrom(() => import('@/pages/Legal'), 'Privacy');
 const DataDeletion = lazyFrom(() => import('@/pages/Legal'), 'DataDeletion');
 
-/** React.lazy over a NAMED export (all pages here export by name, not default). */
+/** React.lazy over a NAMED export (all pages here export by name, not default). The factory is
+    wrapped in lazyWithReload: after a deploy a stale tab requests a chunk that no longer exists —
+    the wrapper reloads the page ONCE (fresh index → fresh chunks) instead of showing an error. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function lazyFrom<M extends Record<K, ComponentType<any>>, K extends keyof M & string>(
   load: () => Promise<M>,
   name: K,
 ) {
-  return lazy(() => load().then((m) => ({ default: m[name] })));
+  return lazy(lazyWithReload(() => load().then((m) => ({ default: m[name] }))));
 }
 
 export default function App() {

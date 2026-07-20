@@ -618,6 +618,14 @@ export function TgAnalytics({
       // window total + the mandatory comparison vs the previous window (honest null on «Всё»).
       const w = windowGraphSeries(viewSeries.values, interGroup.x, calendarWindowForPeriod(period), 'просмотров', series);
       const line = capLineSeries(w);
+      // Бары децимировать нельзя (пропуски дней врут), поэтому дневная серия длиннее
+      // CHART_MAX_POINTS («Всё») при НЕвыбранной пользователем грануляции принудительно уходит
+      // в календарные недели — суффикс « · неделя» в titles уже встроен в windowGraphSeries.
+      // Итог/дельта считаются от дневного окна выше (grain меняет только форму чарта).
+      const bars =
+        series.grain === 'day' && w.values.length > CHART_MAX_POINTS
+          ? windowGraphSeries(viewSeries.values, interGroup.x, calendarWindowForPeriod(period), 'просмотров', { ...series, grain: 'week' })
+          : w;
       const delta = w.prevTotal != null && w.prevTotal > 0 ? pctDelta(w.total, w.prevTotal) : null;
       const caption = delta ? 'к пред. периоду' : period.days === 0 ? 'за всё время' : undefined;
       return [
@@ -626,7 +634,7 @@ export function TgAnalytics({
           label: 'Линия',
           render: (
             <ChartCardBody value={fmt.kpi(w.total)} delta={delta} caption={caption}>
-              <LineChart values={line.values} labels={line.labels} titles={line.titles} markAnomalies emphasizeLastLabel />
+              <LineChart values={line.values} labels={line.labels} titles={line.titles} markAnomalies />
             </ChartCardBody>
           ),
         },
@@ -636,11 +644,11 @@ export function TgAnalytics({
           label: 'Столбцы',
           render: (
             <ChartCardBody value={fmt.kpi(w.total)} delta={delta} caption={caption}>
-              <BarChart values={w.values} labels={w.labels} titles={w.titles} />
+              <BarChart values={bars.values} labels={bars.labels} titles={bars.titles} />
             </ChartCardBody>
           ),
         },
-        seriesBarValuesVariant(w.values, w.labels, w.titles, { sum: true }),
+        seriesBarValuesVariant(bars.values, bars.labels, bars.titles, { sum: true }),
       ];
     },
     [viewSeries, interGroup],
@@ -650,6 +658,12 @@ export function TgAnalytics({
       if (!shareSeries || !interGroup) return [];
       const w = windowGraphSeries(shareSeries.values, interGroup.x, calendarWindowForPeriod(period), 'репостов', series);
       const line = capLineSeries(w);
+      // Тот же принудительный недельный grain для баров длиннее CHART_MAX_POINTS, что у
+      // «Просмотров» выше (децимация баров врёт; выбранная пользователем грануляция уважается).
+      const bars =
+        series.grain === 'day' && w.values.length > CHART_MAX_POINTS
+          ? windowGraphSeries(shareSeries.values, interGroup.x, calendarWindowForPeriod(period), 'репостов', { ...series, grain: 'week' })
+          : w;
       const delta = w.prevTotal != null && w.prevTotal > 0 ? pctDelta(w.total, w.prevTotal) : null;
       const caption = delta ? 'к пред. периоду' : period.days === 0 ? 'за всё время' : undefined;
       return [
@@ -658,7 +672,7 @@ export function TgAnalytics({
           label: 'Линия',
           render: (
             <ChartCardBody value={fmt.kpi(w.total)} delta={delta} caption={caption}>
-              <LineChart values={line.values} labels={line.labels} titles={line.titles} emphasizeLastLabel />
+              <LineChart values={line.values} labels={line.labels} titles={line.titles} />
             </ChartCardBody>
           ),
         },
@@ -667,11 +681,11 @@ export function TgAnalytics({
           label: 'Столбцы',
           render: (
             <ChartCardBody value={fmt.kpi(w.total)} delta={delta} caption={caption}>
-              <BarChart values={w.values} labels={w.labels} titles={w.titles} />
+              <BarChart values={bars.values} labels={bars.labels} titles={bars.titles} />
             </ChartCardBody>
           ),
         },
-        seriesBarValuesVariant(w.values, w.labels, w.titles, { sum: true }),
+        seriesBarValuesVariant(bars.values, bars.labels, bars.titles, { sum: true }),
       ];
     },
     [shareSeries, interGroup],
@@ -826,7 +840,7 @@ export function TgAnalytics({
                 label: 'Линия',
                 render: (
                   <>
-                    <LineChart values={vbdValues} labels={[last14Dates[0] ?? '', last14Dates[Math.floor(last14Dates.length / 2)] ?? '', last14Dates[last14Dates.length - 1] ?? '']} titles={vbdTitles} markAnomalies markExtremes ghost={vbdPrev} emphasizeLastLabel />
+                    <LineChart values={vbdValues} labels={[last14Dates[0] ?? '', last14Dates[Math.floor(last14Dates.length / 2)] ?? '', last14Dates[last14Dates.length - 1] ?? '']} titles={vbdTitles} markAnomalies markExtremes ghost={vbdPrev} />
                   </>
                 ),
               },
@@ -878,7 +892,7 @@ export function TgAnalytics({
               grainable: true,
               renderExpanded: (days, grain) => {
                 const w = capLineSeries(windowGraphSeries(viewSeries.values, interGroup.x, calendarWindowForDays(days), 'просмотров', { grain }));
-                return <LineChart values={w.values} labels={w.labels} titles={w.titles} markAnomalies markExtremes emphasizeLastLabel />;
+                return <LineChart values={w.values} labels={w.labels} titles={w.titles} markAnomalies markExtremes />;
               },
               renderExpandedBar: (days, grain) => {
                 const w = windowGraphSeries(viewSeries.values, interGroup.x, calendarWindowForDays(days), 'просмотров', { grain });
@@ -901,7 +915,7 @@ export function TgAnalytics({
               grainable: true,
               renderExpanded: (days, grain) => {
                 const w = capLineSeries(windowGraphSeries(shareSeries.values, interGroup.x, calendarWindowForDays(days), 'репостов', { grain }));
-                return <LineChart values={w.values} labels={w.labels} titles={w.titles} markAnomalies markExtremes emphasizeLastLabel />;
+                return <LineChart values={w.values} labels={w.labels} titles={w.titles} markAnomalies markExtremes />;
               },
               renderExpandedBar: (days, grain) => {
                 const w = windowGraphSeries(shareSeries.values, interGroup.x, calendarWindowForDays(days), 'репостов', { grain });

@@ -8,6 +8,7 @@ import { FeedBlock } from '@/panels/feed/useFeed';
 import { TgSectionLayout, TgPagePeriodControl } from '@/panels/TgFeed';
 import { Overview } from '@/panels/Overview';
 import { SourceIdentity } from '@/components/SourceIdentity';
+import { lazyWithReload } from '@/lib/lazyWithReload';
 
 /**
  * FEED REGISTRY — the second layer over the network registry (lib/networks): where lib/networks
@@ -51,7 +52,7 @@ function lazyFrom<M extends Record<K, ComponentType<any>>, K extends keyof M & s
   load: () => Promise<M>,
   name: K,
 ) {
-  return lazy(() => load().then((m) => ({ default: m[name] })));
+  return lazy(lazyWithReload(() => load().then((m) => ({ default: m[name] }))));
 }
 
 // The IG side stays a SINGLE async chunk (bundle discipline: a logged-in TG-only user never pays

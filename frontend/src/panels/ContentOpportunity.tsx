@@ -5,6 +5,7 @@ import {
   opportunityShareBoundary,
   opportunityX,
   opportunityY,
+  resolveOpportunityChipOverlaps,
 } from '@/lib/contentOpportunity';
 import { useWidgetPeriod } from '@/lib/period';
 import { fmt, pluralRu } from '@/lib/format';
@@ -27,16 +28,12 @@ export function ContentOpportunity({
   }
 
   const recommendations = items.filter((item) => item.opportunity);
-  const points: Array<{ item: (typeof items)[number]; x: number; y: number }> = [];
-  items.forEach((item, index) => {
-    let x = opportunityX(item.share);
-    let y = opportunityY(item.reachIndex);
-    for (let attempt = 0; attempt < 5 && points.some((other) => Math.hypot(x - other.x, y - other.y) < 13); attempt += 1) {
-      x = Math.min(92, Math.max(8, x + (index % 2 === 0 ? 8 : -8)));
-      y = Math.min(88, Math.max(12, y + (attempt % 2 === 0 ? 7 : -4)));
-    }
-    points.push({ item, x, y });
-  });
+  // Детерминированное разведение наезжающих чипов: X честный (доля публикаций), пересечения
+  // разводятся только по вертикали чистой функцией — позиции стабильны между рендерами.
+  const chipPositions = resolveOpportunityChipOverlaps(
+    items.map((item) => ({ x: opportunityX(item.share), y: opportunityY(item.reachIndex) })),
+  );
+  const points = items.map((item, index) => ({ item, ...chipPositions[index] }));
   const shareBoundary = opportunityShareBoundary(items.length) * 100;
 
   return (

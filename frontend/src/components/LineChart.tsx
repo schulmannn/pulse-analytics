@@ -50,10 +50,6 @@ interface LineChartProps {
       where a page-level compare control already owns turning the comparison on/off (the metric
       page) — there the chip renders as a static label so the two controls can't desync. */
   legendToggle?: boolean;
-  /** Render the LAST compact x-label as a quiet accent pill — the steep «current point» cue.
-      Opt-in: only for series that genuinely end at the current period (daily archives), never
-      for categorical axes (weekday averages / hours), where the last label isn't «сейчас». */
-  emphasizeLastLabel?: boolean;
   /** PINNED point (steep): a persistent dashed crosshair + solid marker at this index, set by
       the host page from onPointClick — the anchor for a «этот день» panel. null/undefined = off. */
   pinnedIndex?: number | null;
@@ -134,7 +130,6 @@ export function LineChart({
   fullAxes = false,
   onPointClick,
   legendToggle = true,
-  emphasizeLastLabel = false,
   pinnedIndex = null,
   hoverTitles,
   ghostTitles,
@@ -760,31 +755,16 @@ export function LineChart({
       </svg>
 
       {/* Minimal x labels (axis-free cards): first / mid / last under the svg. Axes mode
-          draws the real in-svg x-axis above instead. */}
+          draws the real in-svg x-axis above instead. Метки ровные: бывшая акцент-пилюля
+          последней метки (emphasizeLastLabel) снята продуктово — прод-фидбек: среди плоских
+          соседок она читалась как залипший ховер, а не подсветка «сегодня». */}
       {labels && labels.length > 0 && !hasXAxis && (
         <div className="mt-1.5 flex select-none items-center justify-between gap-2 px-1 text-2xs font-medium text-muted-foreground">
-          {compactLabelIndexes.map((i) => {
-            // The «current point» pill (steep): the last label rides the series accent so the eye
-            // lands on "today" — colour follows --chart-role-primary, i.e. the widget accent.
-            const pill = emphasizeLastLabel && i === labels.length - 1;
-            return (
-              <span
-                key={i}
-                data-chart-axis-label="x-compact"
-                className={pill ? 'min-w-0 truncate rounded-full px-1.5 py-px' : 'min-w-0 truncate'}
-                style={
-                  pill
-                    ? {
-                        color: 'hsl(var(--chart-role-primary))',
-                        background: 'hsl(var(--chart-role-primary) / 0.14)',
-                      }
-                    : undefined
-                }
-              >
-                {labels[i]}
-              </span>
-            );
-          })}
+          {compactLabelIndexes.map((i) => (
+            <span key={i} data-chart-axis-label="x-compact" className="min-w-0 truncate">
+              {labels[i]}
+            </span>
+          ))}
         </div>
       )}
 

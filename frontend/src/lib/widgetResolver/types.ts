@@ -40,6 +40,8 @@ export interface WidgetMeta {
   archiveDays?: number;
   fresh?: Freshness;
   comparisonNote?: string;
+  /** Серия агрегирована по неделям (длинные бары) — рендер добавляет « · неделя» в тултипы. */
+  seriesGrain?: 'week';
 }
 
 export interface WidgetResult {

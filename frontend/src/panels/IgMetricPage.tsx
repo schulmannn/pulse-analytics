@@ -19,6 +19,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { PinnedDayPanel } from '@/components/PinnedDayPanel';
 import { MetricPage, SegSelect } from '@/panels/MetricPage';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
+import { lazyWithReload } from '@/lib/lazyWithReload';
 
 /**
  * Instagram metric pages — the drill target the unified chart contract points IG cards at
@@ -153,7 +154,7 @@ export function isIgMetricKey(raw: string | undefined): boolean {
 
 /** МойСклад metric/report pages live in their own lazy chunk: a TG/IG user opening a TG/IG metric
     page must never download the MS panel bundle (it's only pulled when an `ms-*` key opens here). */
-const MsMetricPageLazy = lazy(() => import('@/panels/sklad/MsMetricPage').then((m) => ({ default: m.MsMetricPage })));
+const MsMetricPageLazy = lazy(lazyWithReload(() => import('@/panels/sklad/MsMetricPage').then((m) => ({ default: m.MsMetricPage }))));
 
 /** /metrics/:key dispatcher: TG keys → the TG explorer, ig-* keys → the IG page, ms-* keys → the
     МойСклад page. MetricPage itself redirects unknown keys home, so the fallthrough stays safe. */
@@ -410,7 +411,6 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
                     markExtremes
                     showPoints={lvl.values.length <= 45}
                     legendToggle={false}
-                    emphasizeLastLabel
                     onPointClick={(i) => setPinnedLvl((p) => (p === i ? null : i))}
                     pinnedIndex={pinnedLvl != null && pinnedLvl < lvl.values.length ? pinnedLvl : null}
                   />
@@ -479,7 +479,6 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
                     ghostLabel={cmpLabel}
                     legendToggle={false}
                     yMin={0}
-                    emphasizeLastLabel
                     onPointClick={(i) => setPinned((p) => (p === i ? null : i))}
                     pinnedIndex={pinnedValid}
                   />

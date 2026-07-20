@@ -159,18 +159,26 @@ export function ChartExpandOverlay({ title, children, renderExpanded, renderExpa
   // Overlay-local presentation; reopening always starts on the line, like metric pages.
   const [kind, setKind] = useState<'line' | 'bar'>('line');
   const [grain, setGrain] = useState<ExplorerGrain>('day');
+  // Rich (Tier-2) explorer: any of the expand-config renderers/stats/controls. Only THIS posture
+  // keeps the full-viewport panel; a plain (Tier-1) body — e.g. a 3-row breakdown — sizes the
+  // panel to its content (DetailShell fit='content') instead of towing a near-empty screen.
+  const rich = !!(renderExpanded || renderExpandedBar || statsFor || extraControls);
   // Full-screen explorer: the chart fills the viewport-height panel. Measure the flex-1
   // chart region and feed its height (minus a small breathing band) to the charts inside;
-  // the fixed EXPANDED_CHART_HEIGHT stays as the pre-measure fallback.
+  // the fixed EXPANDED_CHART_HEIGHT stays as the pre-measure fallback. Content-fit (Tier-1)
+  // panels do NOT measure: with an auto-height panel the region height FOLLOWS the content, so
+  // feeding it back would self-shrink chart bodies to the floor (an RO feedback loop) — they get
+  // the fixed explorer height instead, and list-like bodies keep their natural height.
   const [regionH, setRegionH] = useState<number | null>(null);
   useLayoutEffect(() => {
+    if (!rich) return;
     const node = chartRegionRef.current;
     if (!node) return;
     const measure = () => setRegionH(node.clientHeight || null);
     measure();
     return observeSize(node, measure);
-  }, []);
-  const chartH = regionH ? Math.max(240, regionH - 8) : EXPANDED_CHART_HEIGHT;
+  }, [rich]);
+  const chartH = rich && regionH ? Math.max(240, regionH - 8) : EXPANDED_CHART_HEIGHT;
 
   // «Линии» toggle: overlay Min/Max/Average reference lines over the series, computed from the same
   // visible values that feed the stats strip. Off by default; only offered with a stats source.
@@ -209,7 +217,7 @@ export function ChartExpandOverlay({ title, children, renderExpanded, renderExpa
       : null;
 
   return (
-    <DetailShell variant="panel" ariaLabel={`График: ${title}`} onClose={onClose} originRect={originRect}>
+    <DetailShell variant="panel" fit={rich ? 'viewport' : 'content'} ariaLabel={`График: ${title}`} onClose={onClose} originRect={originRect}>
       {/* display:contents — no box of its own (the shell's flex layout is untouched), but the
           custom properties still compute here, carrying the widget accent into the portal. */}
       <div className="contents" style={accentStyle}>
