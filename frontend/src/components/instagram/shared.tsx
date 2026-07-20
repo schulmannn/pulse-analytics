@@ -49,7 +49,7 @@ export function ChartSection({ title, children }: { title: string; children: Rea
 }
 
 export function EmptyChart() {
-  return <EmptyState compact title="Нет данных за период" className="h-40" />;
+  return <EmptyState compact size="chart" title="Нет данных за период" />;
 }
 
 /** Signed integer with a typographic minus, e.g. +595 / −23 / 0. */

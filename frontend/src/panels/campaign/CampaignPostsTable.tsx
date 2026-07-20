@@ -4,7 +4,7 @@ import type { CampaignPost } from '@/api/schemas';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { NetworkBadge } from '@/components/campaigns/shared';
-import { Skeleton } from '@/components/ui/skeleton';
+import { TableSkeleton } from '@/components/ui/dataSkeleton';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   applyCampaignPostTableState,
@@ -54,18 +54,14 @@ export function CampaignPostsTable({
   if (postsQ.isPending) {
     return (
       <Frame>
-        <div className="space-y-2">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <Skeleton key={i} className="h-8 w-full" />
-          ))}
-        </div>
+        <TableSkeleton rows={3} columns={5} />
       </Frame>
     );
   }
   if (postsQ.isError) {
     return (
       <Frame>
-        <ErrorState title="Не удалось загрузить публикации" onRetry={() => postsQ.refetch()} retrying={postsQ.isRefetching} />
+        <ErrorState compact title="Не удалось загрузить публикации" onRetry={() => postsQ.refetch()} retrying={postsQ.isRefetching} />
       </Frame>
     );
   }

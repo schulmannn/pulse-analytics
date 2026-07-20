@@ -107,7 +107,7 @@ export function PieChart({ values, labels, titles, colors, height = 200 }: PieCh
   const total = positive.reduce((s, v) => s + v, 0);
 
   if (!values || values.length === 0 || total <= 0) {
-    return <EmptyState compact title="Нет данных за период" className="flex h-40 items-center justify-center" />;
+    return <EmptyState compact size="chart" title="Нет данных за период" />;
   }
 
   // Keep the six largest slices (each a distinct hue: the item's own colour, else a --chart token

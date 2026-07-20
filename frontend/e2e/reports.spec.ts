@@ -380,7 +380,7 @@ test.describe('Отчёты — desktop', () => {
     const referenceChart = referenceCharts.first();
     await expect(referenceChart).toBeVisible();
     await expect(referenceChart).toHaveAttribute('data-chart-curve', 'smooth');
-    await expect(referenceChart.locator('[data-chart-series="primary"]')).toHaveAttribute('d', /\bC\b/);
+    await expect(referenceChart.locator('[data-chart-series="primary"]')).toHaveAttribute('d', /\sC/);
     await expect(page.locator('svg[data-chart-kind="bar"]')).toHaveCount(1);
     await expect(page.locator('svg[data-chart-kind="bar"][data-chart-appearance="rhea"]')).toHaveCount(0);
     const chartBox = await referenceChart.boundingBox();

@@ -384,7 +384,7 @@ export function MentionsDesktop() {
             {timeline.values.length > 0 ? (
               <BarChart values={timeline.values} labels={timeline.labels} titles={timeline.titles} ghost={timeline.ghost} ghostLabel="Предыдущий период" />
             ) : (
-              <EmptyState compact title="За выбранный период упоминаний нет." />
+              <EmptyState compact size="chart" title="За выбранный период упоминаний нет." />
             )}
           </ChartSection>
         </WidgetGroup>
@@ -461,7 +461,7 @@ function SourceLeaderboard({
   selected: string;
   onSelect: (channelId: string) => void;
 }) {
-  if (options.length === 0) return <EmptyState compact title="Нет упоминающих каналов за период." />;
+  if (options.length === 0) return <EmptyState compact size="chart" title="Нет упоминающих каналов за период." />;
   const max = Math.max(...options.map((o) => o.count), 1);
   const top = options.slice(0, 5);
   const selectedOption = selected ? options.find((option) => option.channel_id === selected) : null;
@@ -543,7 +543,7 @@ function PeriodContext({
     });
   }
   if (total === 0 || items.length === 0) {
-    return <EmptyState compact title="Недостаточно данных за период." />;
+    return <EmptyState compact size="chart" title="Недостаточно данных за период." />;
   }
   return (
     <div className="flex h-full flex-col gap-3">
@@ -648,7 +648,7 @@ function MentionsTable({
     <div className="space-y-3">
       {toolbar}
       {empty ? (
-        <div className="py-8 text-center text-sm text-muted-foreground">{empty}</div>
+        <EmptyState compact size="table" title={empty} />
       ) : (
         <div className="data-table-surface data-table-scroll">
           <table className="data-table text-left text-sm">

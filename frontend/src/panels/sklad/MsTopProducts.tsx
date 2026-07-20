@@ -5,8 +5,9 @@ import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/E
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
 import { LineChart } from '@/components/LineChart';
 import { SegmentedControl } from '@/components/SegmentedControl';
+import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
-import { Skeleton } from '@/components/ui/skeleton';
+import { TableSkeleton } from '@/components/ui/dataSkeleton';
 import { fmt } from '@/lib/format';
 import { cumulativeContribution, cumulativePointLabel } from '@/lib/msConcentration';
 import type { MsPeriod } from '@/lib/msPeriod';
@@ -101,7 +102,7 @@ export function MsTopProductsCard({
           />
         </div>
         {rows.length === 0 ? (
-          <p className="py-4 text-sm text-muted-foreground">Нет продаж за период.</p>
+          <EmptyState compact size="table" title="Нет продаж за период." />
         ) : (
           <MsTopProductsList rows={rows} metric={productSort} limit={COMPACT_ROWS} />
         )}
@@ -169,7 +170,7 @@ export function MsTopProductsCard({
         <TopProductsError state={top} />
       ) : view === 'ranking' ? (
         rows.length === 0 ? (
-          <p className="py-4 text-sm text-muted-foreground">Нет продаж за период.</p>
+          <EmptyState compact size="table" title="Нет продаж за период." />
         ) : (
           <MsTopProductsList rows={rows} metric={productSort} />
         )
@@ -181,18 +182,14 @@ export function MsTopProductsCard({
 }
 
 function TopProductsSkeleton() {
-  return (
-    <div className="space-y-2 py-2">
-      {Array.from({ length: 4 }).map((_, i) => (
-        <Skeleton key={`t${i}`} className="h-6 w-full" />
-      ))}
-    </div>
-  );
+  return <TableSkeleton rows={4} columns={3} className="py-2" />;
 }
 
 function TopProductsError({ state }: { state: ReturnType<typeof useMsTopProducts> }) {
   return (
     <ErrorState
+      compact
+      size="table"
       className="py-4"
       title="Не удалось получить топ товаров"
       reason={state.error instanceof Error ? state.error.message : 'ошибка'}
@@ -453,6 +450,8 @@ function MsAssortmentDynamics({ period, metric }: { period: MsPeriod; metric: Ch
   if (q.isError) {
     return (
       <ErrorState
+        compact
+        size="table"
         className="py-4"
         title="Не удалось получить сравнение периодов"
         reason={q.error instanceof Error ? q.error.message : 'ошибка'}
@@ -463,13 +462,16 @@ function MsAssortmentDynamics({ period, metric }: { period: MsPeriod; metric: Ch
   }
   const comparison: MsAssortmentComparison | undefined = q.data?.comparison;
   if (!comparison) {
-    return <p className="py-4 text-sm text-muted-foreground">Сравнение с предыдущим периодом недоступно.</p>;
+    return <EmptyState compact size="table" title="Сравнение с предыдущим периодом недоступно." />;
   }
   if (!comparison.available) {
     return (
-      <p className="py-4 text-sm text-muted-foreground">
-        Для окна «Всё» предыдущего равного периода не существует — сравнение недоступно.
-      </p>
+      <EmptyState
+        compact
+        size="table"
+        title="Сравнение недоступно"
+        reason="Для окна «Всё» предыдущего равного периода не существует."
+      />
     );
   }
   const m = comparison.metrics[metric];

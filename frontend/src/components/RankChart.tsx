@@ -47,7 +47,7 @@ function LegendSwatch({ token, alpha }: { token: string; alpha: number }) {
  */
 export function RankChart({ items, valueFmt, compareLabel }: RankChartProps) {
   if (items.length === 0) {
-    return <EmptyState compact title="Нет данных за период" className="flex h-40 items-center justify-center" />;
+    return <EmptyState compact size="chart" title="Нет данных за период" />;
   }
   const showCompare = compareLabel != null && items.some((i) => i.compare != null);
   const max = Math.max(...items.map((i) => Math.max(i.value, i.compare ?? 0)), 1);

@@ -17,7 +17,9 @@ import {
 import { IgPostDetailModal } from '@/components/instagram/IgPostDetailModal';
 import { AddToCampaignDialog } from '@/components/campaigns/AddToCampaignDialog';
 import { CampaignFilterControl } from '@/components/campaigns/CampaignFilterControl';
-import { Skeleton } from '@/components/ui/skeleton';
+import { EmptyState } from '@/components/EmptyState';
+import { ErrorState } from '@/components/ErrorState';
+import { TableSkeleton } from '@/components/ui/dataSkeleton';
 import { Checkbox } from '@/components/ui/checkbox';
 import { RichText } from '@/components/RichText';
 import { exportIgPosts } from '@/lib/igExport';
@@ -304,9 +306,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
     return (
       <div className="space-y-8">
         {publicationsCard(
-          <div className="space-y-2 px-4 py-4 sm:px-5">
-            {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-9 w-full" />)}
-          </div>,
+          <TableSkeleton rows={3} columns={5} className="px-4 py-4 sm:px-5" />,
         )}
       </div>
     );
@@ -315,7 +315,13 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
     return (
       <div className="space-y-8">
         {publicationsCard(
-          <p className="px-4 py-10 text-center text-sm text-muted-foreground">Не удалось загрузить публикации кампании.</p>,
+          <ErrorState
+            compact
+            size="table"
+            title="Не удалось загрузить публикации кампании"
+            onRetry={() => campaignPostsQ.refetch()}
+            retrying={campaignPostsQ.isRefetching}
+          />,
         )}
       </div>
     );
@@ -332,7 +338,9 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
     <div className="space-y-8">
       {publicationsCard(
         rows.length === 0 ? (
-          <div className="px-4 py-12 text-center text-sm text-muted-foreground sm:px-5" data-testid="ig-content-empty">{emptyMessage}</div>
+          <div data-testid="ig-content-empty">
+            <EmptyState compact size="table" title={emptyMessage} />
+          </div>
         ) : (
           <div className="overflow-x-auto" data-ig-content-table>
             <table className="data-table data-table--compact text-left text-sm">

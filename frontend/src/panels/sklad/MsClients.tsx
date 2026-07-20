@@ -8,7 +8,9 @@ import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
 import { BarChart } from '@/components/BarChart';
 import { LineChart } from '@/components/LineChart';
 import { SegmentedControl } from '@/components/SegmentedControl';
+import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
+import { TableSkeleton } from '@/components/ui/dataSkeleton';
 import { Skeleton } from '@/components/ui/skeleton';
 import { lttbDownsample } from '@/lib/downsample';
 import { fmt, pluralRu } from '@/lib/format';
@@ -235,7 +237,7 @@ export function MsCustomerExplorer({
   }
 
   if (!model || model.count < 2) {
-    return <p className="py-4 text-xs text-muted-foreground">Недостаточно данных за выбранный период.</p>;
+    return <EmptyState compact size="chart" title="Недостаточно данных за выбранный период." />;
   }
 
   const { primary, repeat, labels, titles, totals } = model;
@@ -301,17 +303,13 @@ function MsTopCustomersCard({
 /** Тело «Топ покупателей» — общий для карточки и полностраничного `/metrics/ms-top-customers`. */
 export function MsTopCustomersBody({ state }: { state: ReturnType<typeof useMsTopCustomers> }) {
   if (state.isPending) {
-    return (
-      <div className="space-y-2 py-2">
-        {Array.from({ length: 5 }).map((_, i) => (
-          <Skeleton key={`tc${i}`} className="h-6 w-full" />
-        ))}
-      </div>
-    );
+    return <TableSkeleton rows={5} columns={3} className="py-2" />;
   }
   if (state.isError) {
     return (
       <ErrorState
+        compact
+        size="table"
         className="py-4"
         title="Не удалось получить топ покупателей"
         reason={state.error instanceof Error ? state.error.message : 'ошибка'}
@@ -321,7 +319,7 @@ export function MsTopCustomersBody({ state }: { state: ReturnType<typeof useMsTo
     );
   }
   if (!state.data || state.data.rows.length === 0) {
-    return <p className="py-4 text-sm text-muted-foreground">Нет покупателей за период.</p>;
+    return <EmptyState compact size="table" title="Нет покупателей за период." />;
   }
   return (
     <ul>
@@ -374,15 +372,13 @@ export function MsRfmBody({
   const expanded = useContext(ChartExpandedContext);
   const [mode, setMode] = useState<RfmMode>('customers');
   if (state.isPending) {
-    return (
-      <div className="space-y-2 py-2">
-        {Array.from({ length: 6 }).map((_, i) => <Skeleton key={`rfm${i}`} className="h-7 w-full" />)}
-      </div>
-    );
+    return <TableSkeleton rows={6} columns={4} className="py-2" />;
   }
   if (state.isError) {
     return (
       <ErrorState
+        compact
+        size="table"
         className="py-4"
         title="Не удалось рассчитать RFM-сегменты"
         reason={state.error instanceof Error ? state.error.message : 'ошибка'}
@@ -392,7 +388,7 @@ export function MsRfmBody({
     );
   }
   if (!state.data || state.data.customers === 0) {
-    return <p className="py-4 text-sm text-muted-foreground">Нет покупателей с заказами в выбранном окне.</p>;
+    return <EmptyState compact size="table" title="Нет покупателей с заказами в выбранном окне." />;
   }
 
   const total = mode === 'customers' ? state.data.customers : state.data.total_sum;
@@ -555,13 +551,11 @@ function MsCohortsCard({ state }: { state: ReturnType<typeof useMsCohorts> }) {
   return (
     <ChartWidget id="ms-cohorts" title="Когорты: возвращаемость по месяцу первой покупки" fixedSize="full" drillTo="/metrics/ms-cohorts">
       {state.isPending ? (
-        <div className="space-y-2 py-2">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={`c${i}`} className="h-6 w-full" />
-          ))}
-        </div>
+        <TableSkeleton rows={4} columns={4} className="py-2" />
       ) : state.isError ? (
         <ErrorState
+          compact
+          size="table"
           className="py-4"
           title="Не удалось получить когорты"
           reason={state.error instanceof Error ? state.error.message : 'ошибка'}

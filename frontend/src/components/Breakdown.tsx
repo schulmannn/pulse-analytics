@@ -1,5 +1,6 @@
 import { useContext } from 'react';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
+import { EmptyState } from '@/components/EmptyState';
 
 interface BreakdownItem {
   label: string;
@@ -23,11 +24,7 @@ export function Breakdown({ items }: BreakdownProps) {
   const ctxHeight = useContext(ExpandedChartHeightContext);
 
   if (!items || items.length === 0) {
-    return (
-      <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
-        Нет данных
-      </div>
-    );
+    return <EmptyState compact size="chart" title="Нет данных" />;
   }
 
   const fit =

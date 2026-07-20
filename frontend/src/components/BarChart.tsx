@@ -364,7 +364,7 @@ export function BarChart({
   }, [values, labels, activeGhost, hasGhost, target, refLines, width, ctxHeight, height, expanded, comparisonStyle]);
 
   if (!values || values.length === 0 || !plot) {
-    return <EmptyState compact title="Нет данных за период" className="flex h-40 items-center justify-center" />;
+    return <EmptyState compact size="chart" title="Нет данных за период" />;
   }
 
   const { chartWidth, chartHeight, graphHeight, offsetX, itemWidth, bars, ghostBars, columnTops, stacked, barTop, barCenterX } = plot;

@@ -6,8 +6,9 @@ import { normalizeTgPosts, type NormalizedPost } from '@/lib/posts';
 import { fmt } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { markdownToPlainText } from '@/lib/markdown';
-import { Card, CardContent } from '@/components/ui/card';
+import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
+import { TableSkeleton } from '@/components/ui/dataSkeleton';
 import { Icon } from '@/components/nav-icons';
 import { calendarWindowForPeriod, usePagePeriod, widgetPeriodValue } from '@/lib/period';
 import { downloadCsv } from '@/lib/csv';
@@ -98,25 +99,26 @@ export function Posts() {
 function PostsContent() {
   // ONE wide fetch (limit 0 = server cap 100); the table below windows/filters it. The
   // fetch/skeleton/error stay here; the filtered view is the child.
-  const { data, isPending, isError, error } = useTgFull(0);
+  const { data, isPending, isError, error, refetch, isRefetching } = useTgFull(0);
   const { channelId } = useSelectedChannel();
   const { data: channelsData } = useChannels();
 
   if (isPending) return <PostsSkeletons />;
   if (isError) {
-    return <ErrorState title="Не удалось загрузить публикации" reason={error instanceof Error ? error.message : 'ошибка сервера'} />;
+    return (
+      <ErrorState
+        title="Не удалось загрузить публикации"
+        reason={error instanceof Error ? error.message : 'ошибка сервера'}
+        onRetry={() => refetch()}
+        retrying={isRefetching}
+      />
+    );
   }
 
   const proxyThumbs = channelsData?.channels.find((channel) => channel.id === channelId)?.source === 'central';
   const allPosts = normalizeTgPosts(data?.posts ?? [], data?.channel ?? {}, { proxyThumbs });
   if (allPosts.length === 0) {
-    return (
-      <Card>
-        <CardContent className="py-8 text-center text-sm text-muted-foreground">
-          Постов пока нет
-        </CardContent>
-      </Card>
-    );
+    return <EmptyState title="Публикаций пока нет" reason="Здесь появятся посты выбранного источника, когда они будут собраны." />;
   }
 
   return <PostsTable allPosts={allPosts} loadedCount={data?.posts?.length ?? allPosts.length} />;
@@ -394,11 +396,7 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
     return (
       <div className="space-y-3">
         {toolbar}
-        <div className="space-y-2 py-4">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <Skeleton key={i} className="h-8 w-full" />
-          ))}
-        </div>
+        <TableSkeleton rows={3} columns={5} header={false} className="py-4" />
       </div>
     );
   }
@@ -406,7 +404,12 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
     return (
       <div className="space-y-3">
         {toolbar}
-        <p className="py-6 text-center text-sm text-muted-foreground">Не удалось загрузить публикации кампании.</p>
+        <ErrorState
+          compact
+          title="Не удалось загрузить публикации кампании"
+          onRetry={() => campaignPostsQ.refetch()}
+          retrying={campaignPostsQ.isRefetching}
+        />
       </div>
     );
   }
@@ -421,7 +424,7 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
     return (
       <div className="space-y-3">
         {toolbar}
-        <div className="py-8 text-center text-sm text-muted-foreground">{message}</div>
+        <EmptyState compact size="table" title={message} />
         {addItems && addItems.length > 0 && (
           <AddToCampaignDialog items={addItems} onClose={() => setAddItems(null)} onDone={() => setSelected(new Set())} />
         )}
@@ -433,9 +436,7 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
     <div className="space-y-3">
       {toolbar}
       {noDesktopFilterMatches && (
-        <div className="hidden py-8 text-center text-sm text-muted-foreground md:block">
-          Ничего не найдено по выбранным фильтрам.
-        </div>
+        <EmptyState compact size="table" title="Ничего не найдено по выбранным фильтрам." className="hidden md:flex" />
       )}
       <div className={cn('data-table-surface data-table-scroll hidden md:block', noDesktopFilterMatches && 'md:hidden')}>
         <table className="data-table text-left text-sm">
