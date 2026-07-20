@@ -320,6 +320,278 @@
   .btn-pill {
     border-radius: 9999px;
   }
+
+  /* First report-only Rhea slice. The scope is deliberate: the report can trial denser rounded
+     controls and lifted analytical cards without changing dashboard, marketing or mobile chrome. */
+  .report-rhea .report-control {
+    border-radius: 1rem;
+    transition-property: color, background-color, border-color, box-shadow, transform;
+    transition-duration: var(--motion-fast);
+    transition-timing-function: var(--ease-standard);
+  }
+  .report-rhea .report-control:active:not(:disabled) {
+    transform: translateY(1px);
+  }
+  .report-rhea .report-metric-card {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    overflow: hidden;
+    border-radius: 1.5rem;
+    padding: 1.25rem;
+    background: hsl(var(--card));
+    color: hsl(var(--card-foreground));
+    box-shadow:
+      0 1px 2px hsl(var(--foreground) / 0.04),
+      0 0 0 1px hsl(var(--foreground) / 0.08);
+  }
+  .report-rhea .report-metric-card__header {
+    gap: 0.75rem;
+  }
+  .report-rhea .report-metric-card__title {
+    color: hsl(var(--foreground));
+    font-size: 1rem;
+    line-height: 1.5rem;
+    letter-spacing: -0.01em;
+  }
+  .report-rhea .report-metric-card__rule {
+    display: none;
+  }
+  .report-rhea .report-metric-card__action {
+    display: inline-flex;
+    height: 1.75rem;
+    align-items: center;
+    border: 1px solid hsl(var(--border));
+    border-radius: 1rem;
+    padding-inline: 0.75rem;
+    color: hsl(var(--foreground));
+    background: hsl(var(--background));
+  }
+  .report-rhea .report-metric-card__action:hover {
+    background: hsl(var(--muted));
+    color: hsl(var(--foreground));
+  }
+  .report-rhea .report-metric-card__value {
+    margin-top: -0.25rem;
+  }
+  .report-rhea .report-metric-card__number {
+    font-size: 2rem;
+    line-height: 1;
+    font-weight: 600;
+  }
+  .report-rhea .report-metric-card__chart {
+    margin: -0.25rem -0.25rem -0.25rem;
+    border-radius: 1rem;
+    padding: 0.75rem 0.5rem 0.25rem;
+    background: hsl(var(--muted) / 0.22);
+  }
+  .report-rhea .report-metric-card[data-report-chart-appearance='rhea'] {
+    gap: 1rem;
+  }
+  .report-rhea .report-metric-card[data-report-chart-appearance='rhea'] .report-metric-card__chart {
+    position: relative;
+    margin: 0 -0.25rem -0.25rem;
+    border-radius: 0;
+    padding: 1.125rem 0.25rem 0;
+    background: transparent;
+  }
+  .report-rhea .report-metric-card[data-report-chart-appearance='rhea'] .report-metric-card__chart::before {
+    position: absolute;
+    inset: 0.125rem 0.25rem auto;
+    height: 1px;
+    background: hsl(var(--border) / 0.72);
+    content: '';
+  }
+  .report-rhea [data-chart-appearance='rhea'] {
+    cursor: default;
+  }
+  .report-rhea [data-chart-appearance='rhea'] [data-chart-axis-label='x'] {
+    font-weight: 500;
+    opacity: 0.82;
+  }
+  .report-rhea [data-chart-tooltip-appearance='rhea'] {
+    font-family: 'Geist Variable', 'Inter', system-ui, -apple-system, sans-serif;
+  }
+
+  /* Second report-only Rhea slice: tables use the same calm card surface as charts, while their
+     dense numeric structure remains intact. These selectors are scoped to the desktop report. */
+  .report-rhea .report-table-shell,
+  .report-rhea .report-top-posts-table {
+    overflow: hidden;
+    border: 1px solid hsl(var(--border));
+    border-radius: 1.25rem;
+    background: hsl(var(--card));
+    box-shadow: 0 1px 2px hsl(var(--foreground) / 0.035);
+  }
+  .report-rhea .report-table-shell {
+    overflow-x: auto;
+  }
+  .report-rhea .report-table {
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+  .report-rhea .report-table__heading {
+    height: 2.75rem;
+    border-bottom: 1px solid hsl(var(--border));
+    background: hsl(var(--muted) / 0.38);
+    padding: 0.75rem;
+    color: hsl(var(--muted-foreground));
+    font-size: 0.6875rem;
+    letter-spacing: 0.01em;
+  }
+  .report-rhea .report-table__heading:first-child,
+  .report-rhea .report-table__label {
+    padding-left: 1rem;
+  }
+  .report-rhea .report-table__heading:last-child,
+  .report-rhea .report-table__cell:last-child {
+    padding-right: 1rem;
+  }
+  .report-rhea .report-table__row {
+    transition: background-color var(--motion-fast) var(--ease-standard);
+  }
+  .report-rhea .report-table__row:hover {
+    background: hsl(var(--muted) / 0.18);
+  }
+  .report-rhea .report-table__label,
+  .report-rhea .report-table__cell {
+    height: 3rem;
+    border-top: 0;
+    padding-block: 0.375rem;
+  }
+  .report-rhea .report-table__row + .report-table__row > td {
+    border-top: 1px solid hsl(var(--border) / 0.72);
+  }
+  .report-rhea .report-table__label {
+    color: hsl(var(--foreground));
+    font-weight: 500;
+  }
+  .report-rhea .report-table__value {
+    border-radius: 0.625rem;
+    padding-block: 0.4375rem;
+  }
+  .report-rhea .report-table__note {
+    margin-top: 0.75rem;
+    padding-inline: 0.25rem;
+    line-height: 1.45;
+  }
+
+  .report-rhea .report-top-posts-table [data-testid='tg-top-posts-table'] > div > div:first-child {
+    min-height: 2.75rem;
+    border-bottom: 1px solid hsl(var(--border));
+    background: hsl(var(--muted) / 0.38);
+    padding: 0.75rem 1rem;
+  }
+  .report-rhea .report-top-posts-table [data-testid='tg-top-posts-table'] > div > button {
+    min-height: 3.5rem;
+    border-bottom-color: hsl(var(--border) / 0.72);
+    padding: 0.75rem 1rem;
+  }
+  .report-rhea .report-top-posts-table [data-testid='tg-top-posts-table'] > div > button:last-child {
+    border-bottom: 0;
+  }
+  .report-rhea .report-top-posts-table [data-testid='tg-top-posts-table'] > div > button:hover,
+  .report-rhea .report-top-posts-table [data-testid='tg-top-posts-table'] > div > button:focus-visible {
+    background: hsl(var(--muted) / 0.32);
+  }
+  .report-rhea .report-top-posts-table [data-testid='tg-top-posts-table'] > div > button:focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: -2px;
+  }
+
+  /* Third report-only Rhea slice. The decoded preset uses Geist for both body and headings;
+     controls keep the same semantics, but move from full pills to Rhea's tighter rounded shapes. */
+  .report-rhea,
+  .report-select-content {
+    font-family: 'Geist Variable', 'Inter', system-ui, -apple-system, sans-serif;
+    font-synthesis: none;
+  }
+  .report-rhea .report-title,
+  .report-rhea .report-title-input {
+    font-weight: 600;
+    letter-spacing: -0.035em;
+  }
+  .report-rhea .report-section {
+    min-width: 0;
+  }
+  .report-rhea .report-section > section > h3,
+  .report-rhea .report-section__heading {
+    color: hsl(var(--foreground));
+    font-size: 0.9375rem;
+    font-weight: 600;
+    line-height: 1.25rem;
+    letter-spacing: -0.0125em;
+  }
+  .report-rhea .report-section > section > h3 > span:last-child,
+  .report-rhea .report-section__rule {
+    display: none;
+  }
+  .report-rhea .report-field__label {
+    margin-bottom: 0.375rem;
+    color: hsl(var(--muted-foreground));
+    font-size: 0.6875rem;
+    font-weight: 500;
+    line-height: 1rem;
+    letter-spacing: 0.01em;
+  }
+  .report-rhea .report-select {
+    height: 2rem;
+    border-color: hsl(var(--foreground) / 0.1);
+    border-radius: 0.75rem;
+    background: hsl(var(--card));
+    padding-inline: 0.75rem;
+  }
+  .report-select-content {
+    border-radius: 1rem;
+  }
+  .report-select-content [role='option'] {
+    min-height: 2rem;
+    border-radius: 0.625rem;
+  }
+  .report-rhea [data-segmented-control],
+  .report-rhea .report-segmented {
+    gap: 0.125rem;
+    border-color: hsl(var(--foreground) / 0.1);
+    border-radius: 0.75rem;
+    background: hsl(var(--muted) / 0.32);
+    padding: 0.125rem;
+  }
+  .report-rhea [data-segmented-indicator] {
+    border-radius: 0.625rem;
+    background: hsl(var(--card));
+    box-shadow: 0 0 0 1px hsl(var(--foreground) / 0.08);
+  }
+  .report-rhea [data-segmented-control] > button,
+  .report-rhea .report-segmented__option {
+    min-height: 1.75rem;
+    border-right: 0;
+    border-radius: 0.625rem;
+    padding: 0.375rem 0.625rem;
+  }
+  .report-rhea .report-segmented__option--active {
+    background: hsl(var(--card));
+    box-shadow: 0 0 0 1px hsl(var(--foreground) / 0.08);
+  }
+
+  @media print {
+    .report-rhea .report-metric-card {
+      border-radius: var(--radius);
+      padding: 0;
+      background: transparent;
+      box-shadow: none;
+    }
+    .report-rhea .report-metric-card__chart {
+      margin: 0;
+      padding: 0;
+      background: transparent;
+    }
+    .report-rhea .report-table-shell,
+    .report-rhea .report-top-posts-table {
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+    }
+  }
   /* Roboto Mono is scoped to data-health readouts (timestamps / collector version / API status)
      and other technical figures — never for body copy. */
   .font-mono,

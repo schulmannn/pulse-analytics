@@ -13,7 +13,7 @@ export type TooltipState =
     top edge; clamped horizontally to the container bounds. It never escapes the chart
     upward, and its z-10 keeps it under the sticky app header (z-sticky+), so it can't cover
     the page chrome. Shows instantly on hover (vs. the slow native SVG <title>). */
-export function ChartTooltip({ tip }: { tip: TooltipState }) {
+export function ChartTooltip({ tip, appearance = 'default' }: { tip: TooltipState; appearance?: 'default' | 'rhea' }) {
   const ref = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ w: 0, h: 0, cw: 0 });
 
@@ -53,7 +53,12 @@ export function ChartTooltip({ tip }: { tip: TooltipState }) {
     <div
       ref={ref}
       data-chart-tooltip
-      className="pointer-events-none absolute left-0 top-0 z-10 w-max min-w-[176px] max-w-[240px] rounded-md border border-border bg-popover/98 px-3 py-2.5 text-xs font-medium leading-snug text-popover-foreground shadow-[0_12px_32px_rgba(0,0,0,0.22)] backdrop-blur-sm dark:border-white/10 dark:shadow-[0_14px_36px_rgba(0,0,0,0.48)]"
+      data-chart-tooltip-appearance={appearance}
+      className={`pointer-events-none absolute left-0 top-0 z-10 w-max min-w-[176px] max-w-[240px] border bg-popover/98 px-3 py-2.5 text-xs font-medium leading-snug text-popover-foreground backdrop-blur-sm ${
+        appearance === 'rhea'
+          ? 'rounded-xl border-foreground/10 shadow-[0_10px_30px_rgba(0,0,0,0.14)] dark:border-white/10 dark:shadow-[0_14px_36px_rgba(0,0,0,0.4)]'
+          : 'rounded-md border-border shadow-[0_12px_32px_rgba(0,0,0,0.22)] dark:border-white/10 dark:shadow-[0_14px_36px_rgba(0,0,0,0.48)]'
+      }`}
       style={{ transform: `translate(${cx - half}px, ${Math.max(top, 0)}px)`, visibility: measured ? 'visible' : 'hidden' }}
     >
       {tip.rows ? (

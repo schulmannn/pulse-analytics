@@ -11,6 +11,7 @@ import { PeriodProvider } from '@/lib/period';
 import { clearSessionToken, getSessionToken } from '@/lib/session';
 import { ThemeProvider } from '@/lib/theme';
 import { installGlobalErrorReporter } from '@/lib/crashReporting';
+import '@fontsource-variable/geist';
 import '@/index.css';
 
 // Client-cache defaults: dedupe in-flight requests, serve stale-then-revalidate, and

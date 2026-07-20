@@ -39,6 +39,14 @@ interface CompositionProps {
   onSetConfig: (idx: number, patch: Record<string, unknown>) => void;
 }
 
+function ReportSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="report-section">
+      <ChartSection title={title}>{children}</ChartSection>
+    </div>
+  );
+}
+
 /**
  * The composed report body — config.blocks in order, single-column. Rendering is identical in
  * read and edit mode; only the chrome differs: when `editable`, every gap grows a hover «+», each
@@ -78,44 +86,46 @@ export function ReportComposition({ blocks, data, editable, onInsert, onMove, on
   const renderWeeklyTable = (): ReactNode => {
     if (!weekly) return null;
     return (
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[560px] border-collapse text-sm">
-          <thead>
-            <tr>
-              <th className="py-1.5 pr-2 text-left text-2xs font-medium tracking-wide text-muted-foreground">нед. с</th>
-              {weekly.weeks.map((w) => (
-                <th key={w.key} className="px-1 py-1.5 text-right text-2xs font-medium tabular-nums text-muted-foreground">
-                  {w.label}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {weekly.rows.map((row) => {
-              const rowMax = Math.max(...row.values.map((v) => (v == null ? 0 : Math.abs(v))), 0);
-              return (
-                <tr key={row.label} className="border-t border-border">
-                  <td className="py-1 pr-2 text-xs text-muted-foreground">{row.label}</td>
-                  {row.values.map((value, i) => (
-                    <td key={weekly.weeks[i].key} className="px-1 py-1">
-                      <div className="relative overflow-hidden rounded px-2 py-1 text-right tabular-nums">
-                        <div aria-hidden="true" className="absolute inset-0" style={cellTint(value, rowMax, row.signed)} />
-                        <span className="relative">
-                          {value == null
-                            ? '—'
-                            : row.signed
-                              ? `${value > 0 ? '+' : value < 0 ? '−' : ''}${fmt.num(Math.abs(value))}`
-                              : fmt.short(value)}
-                        </span>
-                      </div>
-                    </td>
-                  ))}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        <p className="mt-2 text-2xs text-muted-foreground">
+      <div className="report-table-group">
+        <div className="report-table-shell overflow-x-auto">
+          <table className="report-table w-full min-w-[560px] border-collapse text-sm">
+            <thead>
+              <tr>
+                <th className="report-table__heading py-1.5 pr-2 text-left text-2xs font-medium tracking-wide text-muted-foreground">нед. с</th>
+                {weekly.weeks.map((w) => (
+                  <th key={w.key} className="report-table__heading px-1 py-1.5 text-right text-2xs font-medium tabular-nums text-muted-foreground">
+                    {w.label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {weekly.rows.map((row) => {
+                const rowMax = Math.max(...row.values.map((v) => (v == null ? 0 : Math.abs(v))), 0);
+                return (
+                  <tr key={row.label} className="report-table__row border-t border-border">
+                    <td className="report-table__label py-1 pr-2 text-xs text-muted-foreground">{row.label}</td>
+                    {row.values.map((value, i) => (
+                      <td key={weekly.weeks[i].key} className="report-table__cell px-1 py-1">
+                        <div className="report-table__value relative overflow-hidden rounded px-2 py-1 text-right tabular-nums">
+                          <div aria-hidden="true" className="absolute inset-0" style={cellTint(value, rowMax, row.signed)} />
+                          <span className="relative">
+                            {value == null
+                              ? '—'
+                              : row.signed
+                                ? `${value > 0 ? '+' : value < 0 ? '−' : ''}${fmt.num(Math.abs(value))}`
+                                : fmt.short(value)}
+                          </span>
+                        </div>
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <p className="report-table__note mt-2 text-2xs text-muted-foreground">
           Заливка — доля от максимума строки; источник — дневной архив, последняя неделя может быть неполной.
         </p>
       </div>
@@ -125,19 +135,20 @@ export function ReportComposition({ blocks, data, editable, onInsert, onMove, on
   const renderPreset = (key: ReportBlockKey): ReactNode => {
     switch (key) {
       case 'kpi-summary':
-        return <ChartSection title="Сводка">{renderKpiLedger()}</ChartSection>;
+        return <ReportSection title="Сводка">{renderKpiLedger()}</ReportSection>;
       case 'week':
       // 'digest' is the deprecated alias — the narrative replaces the old Digest «Инсайт» block.
       case 'digest':
         return (
-          <ChartSection title="Неделя канала">
+          <ReportSection title="Неделя канала">
             <NarrativeWeekBody />
-          </ChartSection>
+          </ReportSection>
         );
       case 'metric-views':
         return (
           <ReportMetricCard title="Просмотры по дням" total={drillMeta.views.total} trend={drillMeta.views.trend}
-            series={viewsSeries} valueFmt={fmt.short} zeroBase to="/metrics/views" onOpen={openPinnedTelegramSource} />
+            series={viewsSeries} valueFmt={fmt.short} zeroBase to="/metrics/views" onOpen={openPinnedTelegramSource}
+            chartAppearance="rhea" chartLabel="Просмотры" />
         );
       case 'metric-subscribers':
         return (
@@ -151,19 +162,21 @@ export function ReportComposition({ blocks, data, editable, onInsert, onMove, on
         );
       case 'weekly-table': {
         const table = renderWeeklyTable();
-        return table && <ChartSection title="По неделям · последние 6">{table}</ChartSection>;
+        return table && <ReportSection title="По неделям · последние 6">{table}</ReportSection>;
       }
       case 'insights':
         return (
-          <ChartSection title="Наблюдения">
+          <ReportSection title="Наблюдения">
             <Insights />
-          </ChartSection>
+          </ReportSection>
         );
       case 'top-posts':
         return (
-          <ChartSection title="Лучшие публикации">
-            <TopPosts />
-          </ChartSection>
+          <ReportSection title="Лучшие публикации">
+            <div className="report-top-posts-table">
+              <TopPosts />
+            </div>
+          </ReportSection>
         );
     }
   };
@@ -209,10 +222,10 @@ export function ReportComposition({ blocks, data, editable, onInsert, onMove, on
         const viz: 'line' | 'bar' = block.config.viz === 'bar' ? 'bar' : 'line';
         const spec = chartSpec(metric);
         return (
-          <section className="min-w-0 space-y-3">
+          <section className="report-section min-w-0 space-y-3">
             <div className="flex flex-wrap items-center gap-3">
-              <h3 className="whitespace-nowrap text-xs font-medium tracking-wider text-muted-foreground">{spec.label}</h3>
-              <span aria-hidden="true" className="h-px flex-1 bg-border" />
+              <h3 className="report-section__heading whitespace-nowrap text-xs font-medium tracking-wider text-muted-foreground">{spec.label}</h3>
+              <span aria-hidden="true" className="report-section__rule h-px flex-1 bg-border" />
               {editable && (
                 <BlockControls>
                   <MiniSelect ariaLabel="Метрика" value={metric} onChange={(v) => onSetConfig(idx, { metric: v })} options={CHART_METRICS} />
@@ -233,13 +246,21 @@ export function ReportComposition({ blocks, data, editable, onInsert, onMove, on
         const rawSource = typeof block.config.source === 'string' ? block.config.source : 'weekly';
         const source = TABLE_SOURCES.some((s) => s.value === rawSource) ? rawSource : 'weekly';
         const body =
-          source === 'top-posts' ? <TopPosts /> : source === 'kpi-ledger' ? renderKpiLedger() : renderWeeklyTable();
+          source === 'top-posts' ? (
+            <div className="report-top-posts-table">
+              <TopPosts />
+            </div>
+          ) : source === 'kpi-ledger' ? (
+            renderKpiLedger()
+          ) : (
+            renderWeeklyTable()
+          );
         const label = TABLE_SOURCES.find((s) => s.value === source)?.label ?? 'Таблица';
         return (
-          <section className="space-y-3">
+          <section className="report-section space-y-3">
             <div className="flex flex-wrap items-center gap-3">
-              <h3 className="whitespace-nowrap text-xs font-medium tracking-wider text-muted-foreground">{label}</h3>
-              <span aria-hidden="true" className="h-px flex-1 bg-border" />
+              <h3 className="report-section__heading whitespace-nowrap text-xs font-medium tracking-wider text-muted-foreground">{label}</h3>
+              <span aria-hidden="true" className="report-section__rule h-px flex-1 bg-border" />
               {editable && (
                 <BlockControls>
                   <MiniSelect ariaLabel="Источник" value={source} onChange={(v) => onSetConfig(idx, { source: v })} options={TABLE_SOURCES} />

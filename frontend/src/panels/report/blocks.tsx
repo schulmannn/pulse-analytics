@@ -161,10 +161,10 @@ export function TextBlock({ value, onChange }: { value: string; onChange: (v: st
     (ready to wire Instagram country/city demographics when a report can target an IG source). */
 export function MapBlock() {
   return (
-    <section className="space-y-3">
-      <h3 className="flex items-center gap-3 text-xs font-medium tracking-wider text-muted-foreground">
+    <section className="report-section space-y-3">
+      <h3 className="report-section__heading flex items-center gap-3 text-xs font-medium tracking-wider text-muted-foreground">
         <span className="whitespace-nowrap">Карта аудитории</span>
-        <span aria-hidden="true" className="h-px flex-1 bg-border" />
+        <span aria-hidden="true" className="report-section__rule h-px flex-1 bg-border" />
       </h3>
       <div className="rounded-xl border border-dashed border-border bg-background px-4 py-8 text-center">
         <p className="text-sm font-medium text-foreground">География недоступна для Telegram</p>
@@ -230,37 +230,45 @@ interface ReportMetricCardProps {
   zeroBase?: boolean;
   to: string;
   onOpen?: () => void;
+  chartAppearance?: 'default' | 'rhea';
+  chartLabel?: string;
 }
 
 /** Compact metric card for a preset metric-* block: headline + chart + a link to the metric page. */
-export function ReportMetricCard({ title, total, trend, series, valueFmt, zeroBase, to, onOpen }: ReportMetricCardProps) {
+export function ReportMetricCard({ title, total, trend, series, valueFmt, zeroBase, to, onOpen, chartAppearance = 'default', chartLabel }: ReportMetricCardProps) {
+  const rheaChart = chartAppearance === 'rhea';
   return (
-    <section className="min-w-0 space-y-3">
-      <div className="flex items-center gap-3">
-        <h3 className="whitespace-nowrap text-xs font-medium tracking-wider text-muted-foreground">{title}</h3>
-        <span aria-hidden="true" className="h-px flex-1 bg-border" />
+    <section className="report-metric-card min-w-0 space-y-3" data-report-chart-appearance={chartAppearance}>
+      <div className="report-metric-card__header flex items-center gap-3">
+        <h3 className="report-metric-card__title whitespace-nowrap text-xs font-medium tracking-wider text-muted-foreground">{title}</h3>
+        <span aria-hidden="true" className="report-metric-card__rule h-px flex-1 bg-border" />
         <Link
           to={to}
           onClick={onOpen}
-          className="whitespace-nowrap text-2xs font-medium text-primary transition-colors hover:text-primary/80 print:hidden"
+          className="report-metric-card__action whitespace-nowrap text-2xs font-medium text-primary transition-colors hover:text-primary/80 print:hidden"
         >
           Открыть →
         </Link>
       </div>
-      <div className="flex items-baseline gap-2">
-        <span className="text-2xl font-medium tabular-nums tracking-tight">{total}</span>
+      <div className="report-metric-card__value flex items-baseline gap-2">
+        <span className="report-metric-card__number text-2xl font-medium tabular-nums tracking-tight">{total}</span>
         <DeltaPill delta={trend} subtle />
       </div>
-      <LineChart
-        values={series.values}
-        labels={series.labels}
-        titles={series.values.map((v, i) => `${series.labels[i]}: ${valueFmt(v)}`)}
-        height={170}
-        fullAxes
-        markExtremes
-        showPoints={series.values.length > 1 && series.values.length <= 45}
-        yMin={zeroBase && series.values.length > 1 ? 0 : undefined}
-      />
+      <div className="report-metric-card__chart">
+        <LineChart
+          values={series.values}
+          labels={series.labels}
+          titles={series.values.map((v, i) => `${series.labels[i]}: ${valueFmt(v)}`)}
+          height={rheaChart ? 200 : 170}
+          fullAxes
+          markExtremes={!rheaChart}
+          showPoints={!rheaChart && series.values.length > 1 && series.values.length <= 45}
+          yMin={zeroBase && series.values.length > 1 ? 0 : undefined}
+          formatValue={valueFmt}
+          primaryLabel={chartLabel}
+          appearance={chartAppearance}
+        />
+      </div>
     </section>
   );
 }

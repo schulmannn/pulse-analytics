@@ -71,15 +71,39 @@ async function bootReports(page: Page, seed: MockReport[]): Promise<BootState> {
     }
     if (path === '/api/tg/full') {
       if (req.headers()['x-channel-id'] === '2') return json(400, { error: 'Источник не поддерживает Telegram' });
+      const posts = Array.from({ length: 30 }, (_, i) => {
+        const views = 2800 + i * 46 + Math.round(Math.sin(i / 2.4) * 420);
+        return {
+          id: i + 1,
+          date: iso((29 - i) * DAY),
+          views,
+          reactions: Math.round(views * 0.052),
+          forwards: Math.round(views * 0.012),
+          replies: Math.round(views * 0.006),
+          media_type: i % 3 === 0 ? 'photo' : 'text',
+          caption: `Пост ${i + 1}`,
+        };
+      });
       return json(200, {
         channel: { title: 'Тестовый канал', username: 'testchan', memberCount: 1200 },
         views_summary: null,
-        posts: [{ id: 1, date: iso(2 * DAY), views: 1000, reactions: 10, forwards: 5, replies: 2, media_type: 'photo', caption: 'Пост' }],
+        posts,
         mtproto_available: true,
         source: 'db',
       });
     }
-    if (path === '/api/history/channel') return json(200, { rows: [] });
+    if (path === '/api/history/channel') {
+      const rows = Array.from({ length: 30 }, (_, i) => ({
+        day: new Date(Date.now() - (29 - i) * DAY).toISOString().slice(0, 10),
+        subscribers: 1080 + i * 4,
+        joins: 12 + (i % 5),
+        leaves: 5 + (i % 3),
+        views: 2800 + i * 46 + Math.round(Math.sin(i / 2.4) * 420),
+        reactions: 120 + i * 3,
+        forwards: 24 + (i % 8),
+      }));
+      return json(200, { enabled: true, rows });
+    }
     if (path.startsWith('/api/tg/')) return json(200, {});
     if (path === '/api/prefs') return json(200, method === 'GET' ? {} : { ok: true });
 
@@ -130,7 +154,7 @@ async function bootReports(page: Page, seed: MockReport[]): Promise<BootState> {
     localStorage.setItem('pulse_token', 'e2e-token');
     localStorage.setItem('pulse_token_exp', String(Date.now() + 60 * 60 * 1000));
     localStorage.setItem('pulse_channel', '1');
-    localStorage.setItem('pulse_theme', 'dark');
+    if (!localStorage.getItem('pulse_theme')) localStorage.setItem('pulse_theme', 'dark');
   });
 
   return state;
@@ -308,11 +332,32 @@ test.describe('Отчёты — desktop', () => {
 
     await page.goto('/reports/3');
     await expect(page.getByRole('heading', { name: 'Отчёт второго канала' })).toBeVisible();
+    const referenceChart = page.locator('svg[data-chart-kind="line"][data-chart-appearance="rhea"]');
+    await expect(referenceChart).toHaveCount(1);
+    await expect(referenceChart).toBeVisible();
+    const chartBox = await referenceChart.boundingBox();
+    expect(chartBox).not.toBeNull();
+    await page.mouse.move(chartBox!.x + chartBox!.width * 0.62, chartBox!.y + chartBox!.height * 0.45);
+    const referenceTooltip = page.locator('[data-chart-tooltip-appearance="rhea"]');
+    await expect(referenceTooltip).toBeVisible();
+    await expect(referenceTooltip).toContainText('Просмотры');
     const drillLink = page.getByRole('link', { name: 'Открыть →' });
     await expect(drillLink).toBeVisible();
     const metricShot = testInfo.outputPath('report-metric-desktop.png');
     await page.screenshot({ path: metricShot, fullPage: true });
     await testInfo.attach('report-metric-dark-desktop', { path: metricShot, contentType: 'image/png' });
+
+    await page.evaluate(() => localStorage.setItem('pulse_theme', 'light'));
+    await page.reload();
+    await expect(referenceChart).toBeVisible();
+    const lightChartBox = await referenceChart.boundingBox();
+    expect(lightChartBox).not.toBeNull();
+    await page.mouse.move(lightChartBox!.x + lightChartBox!.width * 0.62, lightChartBox!.y + lightChartBox!.height * 0.45);
+    await expect(referenceTooltip).toBeVisible();
+    const metricLightShot = testInfo.outputPath('report-metric-light-desktop.png');
+    await page.screenshot({ path: metricLightShot, fullPage: true });
+    await testInfo.attach('report-metric-light-desktop', { path: metricLightShot, contentType: 'image/png' });
+
     await drillLink.click();
     await expect(page).toHaveURL(/\/metrics\/views/);
 
