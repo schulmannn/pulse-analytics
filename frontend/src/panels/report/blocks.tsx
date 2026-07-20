@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { DeltaPill } from '@/components/DeltaPill';
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
@@ -242,21 +242,40 @@ interface ReportMetricCardProps {
   chartLabel?: string;
 }
 
-/** Compact metric card for a preset metric-* block: headline + chart + a link to the metric page. */
+/** Compact metric card for a preset metric-* block: headline + chart + whole-card metric drill. */
 export function ReportMetricCard({ title, total, trend, series, valueFmt, zeroBase, to, onOpen, chartAppearance = 'default', chartLabel }: ReportMetricCardProps) {
   const rheaChart = chartAppearance === 'rhea';
+  const navigate = useNavigate();
+  const pressRef = useRef<{ x: number; y: number } | null>(null);
+  const openDetails = () => {
+    onOpen?.();
+    navigate(to);
+  };
   return (
-    <section className="report-metric-card min-w-0 space-y-3" data-report-chart-appearance={chartAppearance} data-report-chart-label={chartLabel}>
+    <section
+      className="report-metric-card min-w-0 space-y-3"
+      data-report-chart-appearance={chartAppearance}
+      data-report-chart-label={chartLabel}
+      role="link"
+      tabIndex={0}
+      aria-label={`Открыть детали: ${title}`}
+      onPointerDown={(event) => (pressRef.current = { x: event.clientX, y: event.clientY })}
+      onClick={(event) => {
+        if ((event.target as HTMLElement).closest('button, a, input, select, textarea, [role="dialog"]')) return;
+        const press = pressRef.current;
+        pressRef.current = null;
+        if (press && Math.hypot(event.clientX - press.x, event.clientY - press.y) > 5) return;
+        openDetails();
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        openDetails();
+      }}
+    >
       <div className="report-metric-card__header flex items-center gap-3">
         <h3 className="report-metric-card__title whitespace-nowrap text-xs font-medium tracking-wider text-muted-foreground">{title}</h3>
         <span aria-hidden="true" className="report-metric-card__rule h-px flex-1 bg-border" />
-        <Link
-          to={to}
-          onClick={onOpen}
-          className="report-metric-card__action whitespace-nowrap text-2xs font-medium text-primary transition-colors hover:text-primary/80 print:hidden"
-        >
-          Открыть →
-        </Link>
       </div>
       <div className="report-metric-card__value flex items-baseline gap-2">
         <span className="report-metric-card__number text-2xl font-medium tabular-nums tracking-tight">{total}</span>

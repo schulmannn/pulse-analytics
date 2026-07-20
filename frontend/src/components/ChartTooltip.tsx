@@ -54,21 +54,27 @@ export function ChartTooltip({ tip, appearance = 'default' }: { tip: TooltipStat
       ref={ref}
       data-chart-tooltip
       data-chart-tooltip-appearance={appearance}
-      className={`pointer-events-none absolute left-0 top-0 z-10 w-max min-w-[176px] max-w-[240px] border bg-popover/98 px-3 py-2.5 text-xs font-medium leading-snug text-popover-foreground backdrop-blur-sm ${
+      className={`pointer-events-none absolute left-0 top-0 z-10 w-max border bg-popover/98 px-3 py-2.5 text-xs font-medium leading-snug text-popover-foreground backdrop-blur-sm ${
         appearance === 'rhea'
-          ? 'rounded-xl border-foreground/10 shadow-[0_10px_30px_rgba(0,0,0,0.14)] dark:border-white/10 dark:shadow-[0_14px_36px_rgba(0,0,0,0.4)]'
-          : 'rounded-md border-border shadow-[0_12px_32px_rgba(0,0,0,0.22)] dark:border-white/10 dark:shadow-[0_14px_36px_rgba(0,0,0,0.48)]'
+          ? 'min-w-[148px] max-w-[220px] rounded-xl border-foreground/10 shadow-[0_10px_30px_rgba(0,0,0,0.14)] dark:border-white/10 dark:shadow-[0_14px_36px_rgba(0,0,0,0.4)]'
+          : 'min-w-[176px] max-w-[240px] rounded-md border-border shadow-[0_12px_32px_rgba(0,0,0,0.22)] dark:border-white/10 dark:shadow-[0_14px_36px_rgba(0,0,0,0.48)]'
       }`}
       style={{ transform: `translate(${cx - half}px, ${Math.max(top, 0)}px)`, visibility: measured ? 'visible' : 'hidden' }}
     >
       {tip.rows ? (
         <>
-          {tip.title && <div className="mb-2 whitespace-nowrap text-xs font-semibold text-foreground">{tip.title}</div>}
+          {tip.title && <div data-chart-tooltip-title className="mb-2 whitespace-nowrap text-xs font-semibold text-foreground">{tip.title}</div>}
           <div className="space-y-1">
             {tip.rows.map((r, i) => (
-              <div key={i} className="flex items-center justify-between gap-4 whitespace-nowrap">
+              <div key={i} data-chart-tooltip-row className="flex items-center justify-between gap-4 whitespace-nowrap">
                 <span className="flex items-center gap-1.5 text-muted-foreground">
-                  {r.color && <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: r.color }} />}
+                  {r.color && (
+                    <span
+                      aria-hidden="true"
+                      className={appearance === 'rhea' ? 'h-2.5 w-2.5 shrink-0 rounded-[3px]' : 'h-1.5 w-1.5 shrink-0 rounded-full'}
+                      style={{ backgroundColor: r.color }}
+                    />
+                  )}
                   {r.label}
                 </span>
                 <span className="tabular-nums text-foreground">{r.value}</span>

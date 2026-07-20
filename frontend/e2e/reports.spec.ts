@@ -379,6 +379,8 @@ test.describe('Отчёты — desktop', () => {
     await expect(referenceCharts).toHaveCount(4);
     const referenceChart = referenceCharts.first();
     await expect(referenceChart).toBeVisible();
+    await expect(referenceChart).toHaveAttribute('data-chart-curve', 'smooth');
+    await expect(referenceChart.locator('[data-chart-series="primary"]')).toHaveAttribute('d', /\bC\b/);
     await expect(page.locator('svg[data-chart-kind="bar"]')).toHaveCount(1);
     await expect(page.locator('svg[data-chart-kind="bar"][data-chart-appearance="rhea"]')).toHaveCount(0);
     const chartBox = await referenceChart.boundingBox();
@@ -387,8 +389,13 @@ test.describe('Отчёты — desktop', () => {
     const referenceTooltip = page.locator('[data-chart-tooltip-appearance="rhea"]');
     await expect(referenceTooltip).toBeVisible();
     await expect(referenceTooltip).toContainText('Просмотры');
-    const drillLink = page.locator('[data-report-chart-label="Просмотры"]').getByRole('link', { name: 'Открыть →' });
-    await expect(drillLink).toBeVisible();
+    await expect(referenceTooltip.locator('[data-chart-tooltip-title]')).toBeVisible();
+    await expect(referenceTooltip.locator('[data-chart-tooltip-row]')).toHaveCount(1);
+    await expect(referenceChart.locator('[data-chart-hover-marker]')).toHaveCount(1);
+    expect(await referenceTooltip.evaluate((element) => getComputedStyle(element).transitionProperty)).toContain('transform');
+    const drillCard = page.getByRole('link', { name: 'Открыть детали: Просмотры по дням' });
+    await expect(drillCard).toBeVisible();
+    await expect(drillCard.getByText('Открыть →')).toHaveCount(0);
     const metricShot = testInfo.outputPath('report-metric-desktop.png');
     await page.screenshot({ path: metricShot, fullPage: true });
     await testInfo.attach('report-metric-dark-desktop', { path: metricShot, contentType: 'image/png' });
@@ -404,7 +411,7 @@ test.describe('Отчёты — desktop', () => {
     await page.screenshot({ path: metricLightShot, fullPage: true });
     await testInfo.attach('report-metric-light-desktop', { path: metricLightShot, contentType: 'image/png' });
 
-    await drillLink.click();
+    await referenceChart.click({ position: { x: 24, y: 80 } });
     await expect(page).toHaveURL(/\/metrics\/views/);
 
     const sourceState = await page.evaluate(() => ({
