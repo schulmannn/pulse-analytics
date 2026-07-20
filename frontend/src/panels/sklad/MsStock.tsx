@@ -1,7 +1,8 @@
 import { useMemo } from 'react';
 import { useMsStock, type MsStockRow } from '@/api/queries';
+import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
-import { Skeleton } from '@/components/ui/skeleton';
+import { TableSkeleton } from '@/components/ui/dataSkeleton';
 import { fmt } from '@/lib/format';
 import type { MsPeriod } from '@/lib/msPeriod';
 
@@ -43,22 +44,15 @@ export function fmtDaysLeft(daysLeft: number | null): string {
 
 const isWarnRow = (row: MsStockRow): boolean => row.days_left != null && row.days_left <= WARN_DAYS_LEFT;
 
-// Стабильные ключи скелетона (канон MsRfmCustomers.SKELETON_ROWS — без index-key).
-const SKELETON_KEYS = ['st1', 'st2', 'st3', 'st4', 'st5', 'st6', 'st7', 'st8'];
-
 function StockSkeleton({ rows }: { rows: number }) {
-  return (
-    <div className="space-y-2 py-2">
-      {SKELETON_KEYS.slice(0, rows).map((key) => (
-        <Skeleton key={key} className="h-6 w-full" />
-      ))}
-    </div>
-  );
+  return <TableSkeleton rows={rows} columns={4} className="py-2" />;
 }
 
 function StockError({ state }: { state: ReturnType<typeof useMsStock> }) {
   return (
     <ErrorState
+      compact
+      size="table"
       className="py-4"
       title="Не удалось получить остатки"
       reason={state.error instanceof Error ? state.error.message : 'ошибка'}
@@ -76,7 +70,7 @@ export function MsStockCard({ period }: { period: MsPeriod }) {
   if (stock.isError) return <StockError state={stock} />;
   const rows = stock.data?.rows ?? [];
   if (rows.length === 0) {
-    return <p className="py-4 text-sm text-muted-foreground">Остатки недоступны.</p>;
+    return <EmptyState compact size="table" title="Остатки недоступны." />;
   }
   return (
     <>
@@ -133,7 +127,7 @@ export function MsStockTable({ period, sort }: { period: MsPeriod; sort: MsStock
   if (stock.isPending) return <StockSkeleton rows={8} />;
   if (stock.isError) return <StockError state={stock} />;
   if (!rows || rows.length === 0) {
-    return <p className="py-4 text-sm text-muted-foreground">Остатки недоступны.</p>;
+    return <EmptyState compact size="table" title="Остатки недоступны." />;
   }
   return (
     <div className="data-table-surface">

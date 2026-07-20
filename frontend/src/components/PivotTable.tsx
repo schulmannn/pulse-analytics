@@ -25,7 +25,7 @@ interface PivotTableProps {
  */
 export function PivotTable({ columns, rows, valueFmt }: PivotTableProps) {
   if (rows.length === 0 || columns.length === 0) {
-    return <EmptyState compact title="Нет данных за период" className="flex h-40 items-center justify-center" />;
+    return <EmptyState compact size="chart" title="Нет данных за период" />;
   }
   const globalMax = Math.max(...rows.flatMap((r) => r.values.map((v) => v ?? 0)), 0);
   // Inline hsl is data-driven paint (same class as SVG chart fills): the alpha can't be a

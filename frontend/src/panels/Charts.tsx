@@ -7,7 +7,7 @@ import { DivergingBars } from '@/components/DivergingBars';
 import { LineChart } from '@/components/LineChart';
 import { ChartTooltip, type TooltipState } from '@/components/ChartTooltip';
 import { fmt, ruAxisLabel, pluralRu } from '@/lib/format';
-import { Skeleton } from '@/components/ui/skeleton';
+import { ChartSkeleton as DataChartSkeleton } from '@/components/ui/dataSkeleton';
 import { useWidgetPeriod } from '@/lib/period';
 import { useWidgetInView } from '@/lib/widgetViewport';
 
@@ -561,13 +561,5 @@ function ChartSkeleton({ title, id, homeKey, defaultSize }: { title: string; id?
 }
 
 function ChartSkeletonBody() {
-  return (
-    <div className="flex items-end gap-4">
-      <div className="shrink-0">
-        <Skeleton className="h-8 w-24" />
-        <Skeleton className="mt-2 h-3 w-16" />
-      </div>
-      <Skeleton className="h-32 min-w-0 flex-1" />
-    </div>
-  );
+  return <DataChartSkeleton />;
 }

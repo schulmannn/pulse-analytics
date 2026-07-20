@@ -5,7 +5,7 @@ import { pctDelta } from '@/lib/delta';
 import { describeChange, explainChange } from '@/lib/whyChanged';
 import { calendarWindowForPeriod, periodDateTimestamp, splitCalendarRows, useWidgetPeriod } from '@/lib/period';
 import { useWidgetInView } from '@/lib/widgetViewport';
-import { Skeleton } from '@/components/ui/skeleton';
+import { ChartSkeleton, TableSkeleton } from '@/components/ui/dataSkeleton';
 import { DeltaPill } from '@/components/DeltaPill';
 import { BarChart } from '@/components/BarChart';
 import { EmptyState } from '@/components/EmptyState';
@@ -287,7 +287,7 @@ export function Compare() {
 
 function EmptyHint() {
   // По центру ТЕЛА фикс-тайла (канон WidgetRenderer h-full), не в верхней части (аудит).
-  return <EmptyState compact title="Нет данных за период" className="flex h-full min-h-[6rem] items-center justify-center" />;
+  return <EmptyState compact size="chart" title="Нет данных за период" />;
 }
 
 function CompareSkeleton() {
@@ -296,17 +296,11 @@ function CompareSkeleton() {
   // давали скачок раскладки после загрузки (аудит).
   return (
     <div className="space-y-6">
-      <div className="space-y-3">
-        <Skeleton className="h-4 w-1/3" />
-        {Array.from({ length: 4 }).map((_, i) => (
-          <Skeleton key={i} className="h-8 w-full" />
-        ))}
-      </div>
+      <TableSkeleton rows={4} columns={5} />
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
         {Array.from({ length: 2 }).map((_, i) => (
           <div key={i} className="h-[264px] rounded-2xl border border-border bg-card p-5 lg:col-span-3">
-            <Skeleton className="h-4 w-1/4" />
-            <Skeleton className="mt-3 h-40 w-full" />
+            <ChartSkeleton />
           </div>
         ))}
       </div>

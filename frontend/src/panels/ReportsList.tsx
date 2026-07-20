@@ -13,7 +13,8 @@ import {
   reportPeriodLabel,
   type ReportListFilter,
 } from '@/lib/reportListModel';
-import { Skeleton } from '@/components/ui/skeleton';
+import { TableSkeleton } from '@/components/ui/dataSkeleton';
+import { EmptyState } from '@/components/EmptyState';
 import { CreateReportDialog } from '@/components/reports/CreateReportDialog';
 import { ReportsErrorState } from '@/panels/ReportPage';
 import { DEFAULT_REPORT_BLOCKS, type ReportBlockKey } from '@/lib/reportBlocks';
@@ -152,7 +153,7 @@ function ReportsListDesktop() {
           </div>
 
           {visible.length === 0 ? (
-            <p className="py-10 text-center text-sm text-muted-foreground">Ничего не найдено.</p>
+            <EmptyState compact size="table" title="Ничего не найдено." />
           ) : (
             <div className="data-table-surface data-table-scroll">
             <table className="data-table min-w-[760px] text-sm">
@@ -334,18 +335,5 @@ function ReportsListMobile() {
 
 /** Table-shaped loading scaffold (header strip + hairline rows — no card flash). */
 function ReportsListSkeleton() {
-  return (
-    <div>
-      <div className="flex items-center justify-between py-2">
-        <Skeleton className="h-2.5 w-20" />
-        <Skeleton className="h-2.5 w-16" />
-      </div>
-      {Array.from({ length: 4 }).map((_, i) => (
-        <div key={i} className="flex items-center justify-between border-t border-border py-3">
-          <Skeleton className="h-4 w-48" />
-          <Skeleton className="h-3 w-24" />
-        </div>
-      ))}
-    </div>
-  );
+  return <TableSkeleton rows={4} columns={4} />;
 }

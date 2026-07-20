@@ -605,7 +605,7 @@ export function LineChart({
   // одних null-дней — честное «нет данных», а не нулевая линия.
   if (!plot) {
     return (
-      <EmptyState compact title="Нет данных за период" className="flex h-40 items-center justify-center" />
+      <EmptyState compact size="chart" title="Нет данных за период" />
     );
   }
 

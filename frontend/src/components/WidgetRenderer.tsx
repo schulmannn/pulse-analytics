@@ -8,7 +8,8 @@ import { Breakdown } from '@/components/Breakdown';
 import { ChartExpandedContext, ExpandedChartHeightContext, WidgetTargetContext } from '@/components/ExpandableChart';
 import { observeSize } from '@/lib/observeSize';
 import { MetricExplainPanel, MetricExplainTooltip } from '@/components/MetricExplain';
-import { Skeleton } from '@/components/ui/skeleton';
+import { EmptyState } from '@/components/EmptyState';
+import { ChartSkeleton } from '@/components/ui/dataSkeleton';
 import { pluralRu } from '@/lib/resolveWidgetMetric';
 import { networkDisplayName } from '@/lib/networks';
 import type { WidgetMeta, WidgetResult } from '@/lib/resolveWidgetMetric';
@@ -23,19 +24,7 @@ import { breakdownTitles, effectiveViz, seriesStats, seriesToChart } from '@/lib
 export function WidgetSkeleton({ viz }: { viz: WidgetViz }) {
   // Value/series vizzes lead with a hero number; breakdowns (donut/list) lead with the chart itself.
   const heroLed = viz === 'kpi' || viz === 'line' || viz === 'bar';
-  return (
-    <div className="flex h-full min-h-0 flex-col">
-      {heroLed && (
-        <div className="shrink-0 space-y-2">
-          <Skeleton className="h-7 w-28" />
-          <Skeleton className="h-3 w-40" />
-        </div>
-      )}
-      <div className={`min-h-0 flex-1 ${heroLed ? 'mt-3' : ''}`}>
-        <Skeleton className="h-full min-h-[72px] w-full rounded" />
-      </div>
-    </div>
-  );
+  return <ChartSkeleton headline={heroLed} />;
 }
 
 /**
@@ -82,15 +71,17 @@ export function WidgetRenderer({
     return observeSize(el, measure);
   }, [result.empty]);
   if (result.empty) {
+    // The shared compact EmptyState (terra glyph + heading + reason) — one empty language across
+    // the product — plus the verbose meta line that says WHAT exactly was empty (source · window).
+    // `h-auto min-h-0 py-0` neutralises EmptyState's own fill so the meta line sits under it here.
     return (
-      <div className="flex h-full min-h-[6rem] flex-col items-center justify-center gap-1.5 px-3 text-center">
-        <svg className="h-6 w-6 text-ink3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M4 5v14h16" />
-          <path d="M7 14h10" strokeDasharray="2 2.5" opacity="0.7" />
-        </svg>
-        <div className="text-sm font-medium text-foreground">Нет данных за период</div>
-        <p className="text-2xs text-muted-foreground">Попробуйте другой период или источник.</p>
-        {/* WHAT was empty — here the full source/window line IS the message. */}
+      <div className="flex h-full min-h-[6rem] flex-col items-center justify-center gap-2 px-3 text-center">
+        <EmptyState
+          compact
+          title="Нет данных за период"
+          reason="Попробуйте другой период или источник."
+          className="h-auto min-h-0 py-0"
+        />
         <WidgetMetaLine meta={result.meta} className="max-w-full" verbose />
       </div>
     );
