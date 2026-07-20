@@ -312,8 +312,8 @@ function ReportDocumentBody({
   const renderWeeklyTable = (): ReactNode => {
     if (!weekly) return null;
     return (
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[560px] border-collapse text-sm">
+      <div className="data-table-surface data-table-scroll">
+        <table className="data-table data-table--compact min-w-[560px] text-sm">
           <thead>
             <tr>
               <th className="py-1.5 pr-2 text-left text-2xs font-medium tracking-wide text-muted-foreground">нед. с</th>

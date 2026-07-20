@@ -222,8 +222,8 @@ export function HashtagsBlock({ posts }: { posts: IgPost[] }) {
     );
   }
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-left text-sm">
+    <div className="data-table-surface data-table-scroll">
+      <table className="data-table text-left text-sm">
         <thead>
           <tr className="border-b border-border text-xs font-medium tracking-wider text-muted-foreground">
             <th className="p-4">Хэштег</th>
@@ -297,8 +297,8 @@ export function CompareBlock({ posts }: { posts: IgPost[] }) {
       {chosen.length < 2 ? (
         <EmptyState title="Выберите минимум 2 публикации для сравнения (до 4)." />
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
+        <div className="data-table-surface data-table-scroll">
+          <table className="data-table text-left text-sm">
             <thead>
               <tr className="border-b border-border text-xs font-medium tracking-wider text-muted-foreground">
                 <th className="p-4">Метрика</th>

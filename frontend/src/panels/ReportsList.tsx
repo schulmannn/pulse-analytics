@@ -154,8 +154,8 @@ function ReportsListDesktop() {
           {visible.length === 0 ? (
             <p className="py-10 text-center text-sm text-muted-foreground">Ничего не найдено.</p>
           ) : (
-            <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] border-collapse text-sm">
+            <div className="data-table-surface data-table-scroll">
+            <table className="data-table min-w-[760px] text-sm">
               <thead>
                 <tr>
                   <Th className="text-left">Название</Th>
@@ -292,7 +292,8 @@ function ReportsListMobile() {
           <p className="mt-4 text-xs text-muted-foreground">Выберите шаблон выше или создайте пустой отчёт.</p>
         </div>
       ) : (
-        <table className="w-full border-collapse text-sm">
+        <div className="data-table-surface data-table-scroll">
+        <table className="data-table text-sm">
           <thead>
             <tr>
               <th className="py-2 pr-3 text-left text-2xs font-medium tracking-wide text-muted-foreground">Название</th>
@@ -325,6 +326,7 @@ function ReportsListMobile() {
             ))}
           </tbody>
         </table>
+        </div>
       )}
     </div>
   );

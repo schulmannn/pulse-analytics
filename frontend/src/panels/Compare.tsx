@@ -182,8 +182,8 @@ export function Compare() {
           <span aria-hidden="true" className="h-px flex-1 bg-border" />
         </h3>
         {hasPrev ? (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
+          <div className="data-table-surface data-table-scroll">
+            <table className="data-table text-left text-sm">
               <thead>
                 <tr className="border-b border-border text-xs font-medium tracking-wider text-muted-foreground">
                   <th className="py-3 pl-0 pr-4">Метрика</th>

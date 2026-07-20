@@ -321,6 +321,87 @@
     border-radius: 9999px;
   }
 
+  /* Shared dashboard data-table treatment. The shell owns the card chrome and horizontal
+     overflow; the table class owns only typography, dividers and interaction states so complex
+     tables can keep their sorting, selection, sticky cells and data-driven fills. */
+  .data-table-surface {
+    overflow: hidden;
+    border: 1px solid hsl(var(--border));
+    border-radius: 1.25rem;
+    background: hsl(var(--card));
+    box-shadow: 0 1px 2px hsl(var(--foreground) / 0.035);
+  }
+  .data-table-scroll {
+    width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+  }
+  .data-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+  .data-table > thead > tr {
+    background: hsl(var(--muted) / 0.38);
+  }
+  .data-table > thead > tr > th {
+    height: 2.5rem;
+    border-bottom: 1px solid hsl(var(--border));
+    padding: 0.625rem 0.75rem;
+    color: hsl(var(--muted-foreground));
+    font-size: 0.6875rem;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    vertical-align: middle;
+  }
+  .data-table > thead > tr > th:first-child,
+  .data-table > tbody > tr > :first-child {
+    padding-left: 1rem;
+  }
+  .data-table > thead > tr > th:last-child,
+  .data-table > tbody > tr > :last-child {
+    padding-right: 1rem;
+  }
+  .data-table > tbody > tr {
+    transition: background-color var(--motion-fast) var(--ease-standard);
+  }
+  .data-table > tbody > tr:hover,
+  .data-table > tbody > tr:focus-within {
+    background: hsl(var(--muted) / 0.3);
+  }
+  .data-table > tbody > tr[data-state='selected'],
+  .data-table > tbody > tr[data-ig-content-selected] {
+    background: hsl(var(--primary) / 0.07);
+  }
+  .data-table > tbody > tr[data-ig-content-open] {
+    background: hsl(var(--primary) / 0.11);
+  }
+  .data-table > tbody > tr + tr > * {
+    border-top: 1px solid hsl(var(--border) / 0.64);
+  }
+  .data-table > tbody > tr > td,
+  .data-table > tbody > tr > th {
+    min-height: 2.75rem;
+    padding: 0.75rem;
+    vertical-align: middle;
+  }
+  .data-table--compact > thead > tr > th {
+    height: 2.25rem;
+    padding-block: 0.5rem;
+  }
+  .data-table--compact > tbody > tr > td,
+  .data-table--compact > tbody > tr > th {
+    min-height: 2.5rem;
+    padding-block: 0.5rem;
+  }
+  .data-table-note {
+    border-top: 1px solid hsl(var(--border) / 0.64);
+    padding: 0.75rem 1rem;
+    color: hsl(var(--muted-foreground));
+    font-size: 0.6875rem;
+    line-height: 1.45;
+  }
+
   /* First report-only Rhea slice. The scope is deliberate: the report can trial denser rounded
      controls and lifted analytical cards without changing dashboard, marketing or mobile chrome. */
   .report-rhea .report-control {
@@ -572,6 +653,13 @@
   .report-rhea .report-top-posts-table [data-testid='tg-top-posts-table'] > div > button:focus-visible {
     outline: 2px solid hsl(var(--ring));
     outline-offset: -2px;
+  }
+  /* TopPosts is also reused outside reports, where it owns its card shell. Inside the report the
+     parent already owns that surface, so collapse only the nested chrome and keep the shared rows. */
+  .report-rhea .report-top-posts-table .data-table-surface {
+    border: 0;
+    border-radius: inherit;
+    box-shadow: none;
   }
 
   /* Third report-only Rhea slice. The decoded preset uses Geist for both body and headings;

@@ -205,8 +205,8 @@ function InteractivePostsTable({
       {rows.length === 0 ? (
         <EmptyState compact title="Ничего не найдено по запросу." />
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-left text-sm" data-testid="campaign-posts-table">
+        <div className="data-table-surface data-table-scroll">
+          <table className="data-table text-left text-sm" data-testid="campaign-posts-table">
             <thead>
               <tr className="border-b border-border text-xs font-medium text-muted-foreground">
                 {canEdit && (
@@ -319,8 +319,8 @@ function SimplePostsTable({
   removePending: boolean;
 }) {
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full border-collapse text-left text-sm" data-testid="campaign-posts-table">
+    <div className="data-table-surface data-table-scroll">
+      <table className="data-table text-left text-sm" data-testid="campaign-posts-table">
         <thead>
           <tr className="border-b border-border text-xs font-medium tracking-wider text-muted-foreground">
             <th className="py-3 pl-0 pr-3">Источник</th>

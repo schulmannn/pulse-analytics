@@ -437,8 +437,8 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
           Ничего не найдено по выбранным фильтрам.
         </div>
       )}
-      <div className={cn('hidden overflow-x-auto md:block', noDesktopFilterMatches && 'md:hidden')}>
-        <table className="w-full border-collapse text-left text-sm">
+      <div className={cn('data-table-surface data-table-scroll hidden md:block', noDesktopFilterMatches && 'md:hidden')}>
+        <table className="data-table text-left text-sm">
           <thead>
             <tr className="border-b border-border text-xs font-medium tracking-wider text-muted-foreground">
               <th className="w-10 py-2.5 pl-0 pr-2">
