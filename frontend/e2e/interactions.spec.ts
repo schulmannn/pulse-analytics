@@ -133,6 +133,99 @@ test('metric explorer gives the plot desktop space and exposes a hover inspector
   await expect(contributors.getByText(/Фото|Видео/).first()).toBeVisible();
 });
 
+test('metric explorer redesign: cohesive chart card, comparison card, rank/pivot shells, pinned day', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-1440', 'Desktop-only metric explorer contract');
+  await bootDemo(page, '/metrics/views', { theme: 'dark' });
+
+  // 1) Chart panel is ONE rounded card whose toolbar carries a VISIBLE title (no longer sr-only),
+  //    the type switcher, the widget menu, and an integrated footer time-bar.
+  const card = page.locator('[data-metric-chart-card]');
+  await card.waitFor({ state: 'visible', timeout: 15_000 });
+  const cardTitle = card.getByRole('heading', { name: 'По дням' });
+  await expect(cardTitle).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Тип графика: Линия' })).toBeVisible();
+  await expect(card.getByRole('button', { name: /^Меню виджета/ })).toBeVisible();
+  const toolbar = card.locator('[data-metric-toolbar]');
+  await expect(toolbar).toBeVisible();
+  await expect(toolbar.getByRole('group', { name: 'Гранулярность' })).toBeVisible();
+  await expect(toolbar.getByRole('group', { name: 'Период' })).toBeVisible();
+  await expect(toolbar.getByRole('button', { name: 'Свой диапазон' })).toBeVisible();
+  await expect(toolbar.getByRole('button', { name: 'Предыдущее окно' })).toBeVisible();
+  await expect(toolbar.getByRole('button', { name: 'Следующее окно' })).toBeVisible();
+
+  // 2) The comparison rail is a distinct analytical card leading with the current total.
+  const comparison = page.locator('[data-rail-card="comparison"]');
+  await expect(comparison).toBeVisible();
+  await expect(comparison.getByText('Текущий период')).toBeVisible();
+  await testInfo.attach('metric-explorer-redesign-chart-shell', {
+    body: await page.screenshot({ fullPage: false }),
+    contentType: 'image/png',
+  });
+
+  // 3) Rank and Pivot restyle into shells consistent with the chart card.
+  await card.getByRole('button', { name: 'Тип графика: Рейтинг' }).click();
+  await expect(card.locator('[data-rank-chart]')).toBeVisible();
+  await testInfo.attach('metric-explorer-redesign-rank', {
+    body: await page.screenshot({ fullPage: false }),
+    contentType: 'image/png',
+  });
+  await card.getByRole('button', { name: 'Тип графика: Сводная' }).click();
+  await expect(card.locator('[data-pivot-table]')).toBeVisible();
+  await testInfo.attach('metric-explorer-redesign-pivot', {
+    body: await page.screenshot({ fullPage: false }),
+    contentType: 'image/png',
+  });
+
+  // 4) Clicking a line point opens the redesigned scoped detail card; close removes it.
+  await card.getByRole('button', { name: 'Тип графика: Линия' }).click();
+  const line = card.locator('svg[data-chart-kind="line"][data-chart-expanded]').first();
+  await line.waitFor({ state: 'visible', timeout: 10_000 });
+  await line.scrollIntoViewIfNeeded();
+  const lineBox = await line.boundingBox();
+  if (!lineBox) throw new Error('line chart has no box');
+  await page.mouse.click(lineBox.x + lineBox.width * 0.5, lineBox.y + lineBox.height * 0.55);
+  const pinned = page.locator('[data-pinned-day="detail"]');
+  await expect(pinned).toBeVisible();
+  await pinned.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(200);
+  await testInfo.attach('metric-explorer-redesign-pinned-day', {
+    body: await page.screenshot({ fullPage: false }),
+    contentType: 'image/png',
+  });
+  await pinned.getByRole('button', { name: 'Снять выделение точки' }).click();
+  await expect(pinned).toHaveCount(0);
+});
+
+test('metric explorer redesign stays contained on mobile', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'mobile-430', 'Mobile-only metric explorer contract');
+  await bootDemo(page, '/metrics/views', { theme: 'light' });
+
+  const card = page.locator('[data-metric-chart-card]');
+  await expect(card).toBeVisible();
+  await expect(card.getByRole('heading', { name: 'По дням' })).toBeVisible();
+  await expect(card.locator('[data-metric-toolbar]')).toBeVisible();
+  const cardBox = await card.boundingBox();
+  if (!cardBox) throw new Error('metric chart card has no box');
+  expect(cardBox.x + cardBox.width).toBeLessThanOrEqual(430);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true);
+  await testInfo.attach('metric-explorer-redesign-mobile-chart', {
+    body: await page.screenshot({ fullPage: false }),
+    contentType: 'image/png',
+  });
+
+  await card.getByRole('button', { name: 'Тип графика: Сводная' }).click();
+  await expect(card.locator('[data-pivot-table]')).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true);
+
+  const comparison = page.locator('[data-rail-card="comparison"]');
+  await comparison.scrollIntoViewIfNeeded();
+  await expect(comparison).toBeVisible();
+  await testInfo.attach('metric-explorer-redesign-mobile-rail', {
+    body: await page.screenshot({ fullPage: false }),
+    contentType: 'image/png',
+  });
+});
+
 test('chart drill guard: a scrub across the chart does not navigate', async ({ page }) => {
   // Seed a drillable line widget (tg.views has a metric page) pinned to Home so its chart's
   // point-click drills to /metrics/views. addInitScript stacks before bootDemo's own seed. A

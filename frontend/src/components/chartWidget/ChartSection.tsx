@@ -140,6 +140,7 @@ export function ChartSection(props: ChartSectionProps) {
             ) : props.action
           }
           strip={!!props.strip}
+          stripToolbar={!!props.stripToolbar}
           reorder={reorder}
           allowExpand={allowExpand}
           homeKey={props.homeKey}
@@ -183,6 +184,7 @@ export function ChartSection(props: ChartSectionProps) {
         )}
         <WidgetBody
           strip={!!props.strip}
+          stripToolbar={!!props.stripToolbar}
           reorder={reorder}
           bodyRef={model.refs.bodyRef}
           widgetId={widgetId}
