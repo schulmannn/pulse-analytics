@@ -79,9 +79,15 @@ test('metric explorer gives the plot desktop space and exposes a hover inspector
   await expect(page.locator('[data-dashboard-topbar]')).toHaveCount(0);
   const mainBox = await page.locator('main').boundingBox();
   if (!mainBox) throw new Error('metric explorer main has no box');
-  expect(mainBox.y).toBe(0);
+  // The desktop explorer frame intentionally keeps a slim 10px outer inset; it must still start
+  // at the viewport edge region rather than inheriting the regular dashboard top bar spacing.
+  expect(mainBox.y).toBeLessThanOrEqual(12);
   const chart = page.locator('svg[data-chart-kind="line"][data-chart-expanded]').first();
   await chart.waitFor({ state: 'visible', timeout: 15_000 });
+  await expect(chart).toHaveAttribute('data-chart-curve', 'smooth');
+  await expect(chart).toHaveAttribute('data-chart-comparison', 'area');
+  await expect(chart.locator('[data-chart-series="primary-area"]')).toHaveCount(1);
+  await expect(chart.locator('[data-chart-series="comparison-area"]')).toHaveCount(1);
   await chart.scrollIntoViewIfNeeded();
   await page.waitForTimeout(300);
 
@@ -90,7 +96,10 @@ test('metric explorer gives the plot desktop space and exposes a hover inspector
   expect(box.height).toBeGreaterThanOrEqual(540);
 
   await page.mouse.move(box.x + box.width * 0.58, box.y + box.height * 0.5);
-  await expect(page.locator('[data-chart-tooltip]')).toBeVisible();
+  const tooltip = page.locator('[data-chart-tooltip]');
+  await expect(tooltip).toBeVisible();
+  await expect(tooltip).toHaveAttribute('data-chart-tooltip-appearance', 'comparison');
+  expect(await tooltip.locator('[data-chart-tooltip-row]').count()).toBeGreaterThanOrEqual(2);
   await expect(page.locator('[data-chart-crosshair]')).toHaveCount(1);
   await testInfo.attach('metric-explorer-dark-hover', {
     body: await page.screenshot({ fullPage: false }),
@@ -99,11 +108,20 @@ test('metric explorer gives the plot desktop space and exposes a hover inspector
 
   await page.getByRole('button', { name: 'Тип графика: Столбцы' }).click();
   const bars = page.locator('svg[data-chart-kind="bar"][data-chart-expanded]').first();
+  await expect(bars).toHaveAttribute('data-chart-comparison', 'stacked');
+  expect(await bars.locator('path[data-chart-series="current"]').count()).toBeGreaterThan(1);
+  expect(await bars.locator('path[data-chart-series="comparison"]').count()).toBeGreaterThan(1);
   const barBox = await bars.boundingBox();
   if (!barBox) throw new Error('metric explorer bar chart has no box');
   await page.mouse.move(barBox.x + barBox.width * 0.42, barBox.y + barBox.height * 0.5);
-  await expect(page.locator('[data-chart-tooltip]')).toBeVisible();
+  await expect(tooltip).toBeVisible();
+  await expect(tooltip).toHaveAttribute('data-chart-tooltip-appearance', 'comparison');
+  expect(await tooltip.locator('[data-chart-tooltip-row]').count()).toBeGreaterThanOrEqual(2);
   await expect(page.locator('[data-chart-crosshair]')).toHaveCount(1);
+  await testInfo.attach('metric-explorer-dark-stacked-hover', {
+    body: await page.screenshot({ fullPage: false }),
+    contentType: 'image/png',
+  });
 
   // Demo media endpoints intentionally return 404. Failed previews must resolve to a readable
   // media label instead of leaving browser-broken images in the contributor list.

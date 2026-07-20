@@ -62,8 +62,9 @@ interface LineChartProps {
   /** Event flags (chart_annotations): ⚑ markers at these indices near the plot bottom; the label
       joins the hover readout of that point. Host page maps days → indices. */
   flags?: Array<{ i: number; label: string }>;
-  /** Optional visual treatment for a host trialling a denser shadcn/Rhea chart skin. */
-  appearance?: 'default' | 'rhea';
+  /** Optional host-scoped visual treatment. `comparison` keeps the explorer axes while using
+      shadcn-style smooth areas, solid series and a compact shared tooltip. */
+  appearance?: 'default' | 'rhea' | 'comparison';
 }
 
 interface Hover {
@@ -190,8 +191,12 @@ export function LineChart({
   const target = targetCtx != null && Number.isFinite(targetCtx) ? targetCtx : null;
   const showAxes = fullAxes || expanded;
   const rhea = appearance === 'rhea';
+  const comparison = appearance === 'comparison';
+  const smooth = rhea || comparison;
   // Strip colons from useId — valid in ids, but break SVG url(#…) refs in some browsers.
-  const gradientId = `lc${useId().replace(/:/g, '')}`;
+  const chartId = useId().replace(/:/g, '');
+  const gradientId = `lc${chartId}`;
+  const comparisonGradientId = `lcg${chartId}`;
 
   useLayoutEffect(() => {
     const el = containerRef.current;
@@ -340,11 +345,11 @@ export function LineChart({
     if (run.length > 0) segs.push(run);
     const lineSegs = segs.filter((s) => s.length >= 2);
     // Один path с подпутями M…L… — stroke остаётся одним элементом, разрывы честные.
-    const linePath = lineSegs.map((segment) => seriesPath(segment, rhea)).join(' ');
+    const linePath = lineSegs.map((segment) => seriesPath(segment, smooth)).join(' ');
     // Каждый сегмент заливки замыкается на СВОЮ базовую линию — дыра остаётся незакрашенной.
     const baseY = h - padB;
     const areaPath = lineSegs
-      .map((segment) => `${seriesPath(segment, rhea)} L ${segment[segment.length - 1].x} ${baseY} L ${segment[0].x} ${baseY} Z`)
+      .map((segment) => `${seriesPath(segment, smooth)} L ${segment[segment.length - 1].x} ${baseY} L ${segment[0].x} ${baseY} Z`)
       .join(' ');
     // Сегмент из одной точки: точка-кружок — единственное измерение между дырами всё равно факт,
     // а линия нулевой длины была бы невидима.
@@ -352,23 +357,25 @@ export function LineChart({
 
     // Ghost-дыры тоже не выдумываем: null = pen-up, следующий реальный отсчёт открывает новый
     // подпуть — тот же честный разрыв, что у основной серии (раньше null коэрсился бы в 0).
-    const ghostPath =
-      activeGhost && activeGhost.length >= 2
-        ? (() => {
-            let d = '';
-            let pen = false;
-            for (let i = 0; i < activeGhost.length; i++) {
-              const v = activeGhost[i];
-              if (v == null) {
-                pen = false;
-                continue;
-              }
-              d += `${d ? ' ' : ''}${pen ? 'L' : 'M'} ${gutterW + i * step} ${yFor(v)}`;
-              pen = true;
-            }
-            return d;
-          })()
-        : '';
+    const ghostSegs: Array<Array<{ x: number; y: number }>> = [];
+    let ghostRun: Array<{ x: number; y: number }> = [];
+    for (let i = 0; i < (activeGhost?.length ?? 0); i++) {
+      const v = activeGhost?.[i];
+      if (v == null) {
+        if (ghostRun.length > 0) {
+          ghostSegs.push(ghostRun);
+          ghostRun = [];
+        }
+      } else {
+        ghostRun.push({ x: gutterW + i * step, y: yFor(v) });
+      }
+    }
+    if (ghostRun.length > 0) ghostSegs.push(ghostRun);
+    const ghostLineSegs = ghostSegs.filter((segment) => segment.length >= 2);
+    const ghostPath = ghostLineSegs.map((segment) => seriesPath(segment, smooth)).join(' ');
+    const ghostAreaPath = ghostLineSegs
+      .map((segment) => `${seriesPath(segment, smooth)} L ${segment[segment.length - 1].x} ${baseY} L ${segment[0].x} ${baseY} Z`)
+      .join(' ');
 
     // Real x-axis ticks (axes mode): width-aware stride so labels never collide — one label
     // by measured width, always including the first and the last point.
@@ -414,9 +421,15 @@ export function LineChart({
           {/* Default cards keep the flat Steep tint. The isolated Rhea treatment follows the
               shadcn area-chart recipe with a stronger top tint fading toward the baseline. */}
           <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="hsl(var(--chart-role-primary))" stopOpacity={rhea ? '0.3' : expanded ? '0.05' : '0.12'} />
-            <stop offset="100%" stopColor="hsl(var(--chart-role-primary))" stopOpacity={rhea ? '0.04' : expanded ? '0.05' : '0.12'} />
+            <stop offset="0%" stopColor="hsl(var(--chart-role-primary))" stopOpacity={smooth ? '0.3' : expanded ? '0.05' : '0.12'} />
+            <stop offset="100%" stopColor="hsl(var(--chart-role-primary))" stopOpacity={smooth ? '0.035' : expanded ? '0.05' : '0.12'} />
           </linearGradient>
+          {comparison && (
+            <linearGradient id={comparisonGradientId} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="hsl(var(--chart-role-comparison))" stopOpacity="0.22" />
+              <stop offset="100%" stopColor="hsl(var(--chart-role-comparison))" stopOpacity="0.025" />
+            </linearGradient>
+          )}
         </defs>
 
         {/* Gridlines — start after the label gutter */}
@@ -441,10 +454,22 @@ export function LineChart({
           />
         ))}
 
-        {/* Comparison series — the comparison role (deep amber, the colour-blind-safe pair of the
-            brand blue), dashed, same y-scale. The legend row under the chart names both series. */}
+        {/* Comparison stays on the same y-scale. Explorer comparison uses a second solid smooth
+            area (the shadcn pattern); legacy hosts retain the lighter dashed reference line. */}
+        {comparison && ghostAreaPath && <path data-chart-series="comparison-area" d={ghostAreaPath} fill={`url(#${comparisonGradientId})`} />}
         {ghostPath && (
-          <path d={ghostPath} fill="none" stroke="hsl(var(--chart-role-comparison))" strokeWidth="1.8" strokeDasharray="5 4" opacity="0.8" vectorEffect="non-scaling-stroke" />
+          <path
+            data-chart-series="comparison"
+            d={ghostPath}
+            fill="none"
+            stroke="hsl(var(--chart-role-comparison))"
+            strokeWidth={comparison ? '2' : '1.8'}
+            strokeDasharray={comparison ? undefined : '5 4'}
+            opacity={comparison ? '0.95' : '0.8'}
+            strokeLinejoin="round"
+            strokeLinecap="round"
+            vectorEffect="non-scaling-stroke"
+          />
         )}
 
         {/* Target level (widget pref) — a dashed goal line with a small right-aligned label */}
@@ -484,9 +509,9 @@ export function LineChart({
 
         {/* Gradient area + line — сегментами (пустой d не рендерим: серия может быть
             россыпью одиночных измерений без единого сплошного отрезка) */}
-        {areaPath && <path d={areaPath} fill={`url(#${gradientId})`} />}
+        {areaPath && <path data-chart-series="primary-area" d={areaPath} fill={`url(#${gradientId})`} />}
         {linePath && (
-          <path data-chart-series="primary" d={linePath} fill="none" stroke="hsl(var(--chart-role-primary))" strokeWidth={rhea ? '2' : '2.5'} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+          <path data-chart-series="primary" d={linePath} fill="none" stroke="hsl(var(--chart-role-primary))" strokeWidth={smooth ? '2' : '2.5'} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
         )}
 
         {/* Одиночное измерение между дырами — точка вместо невидимой линии нулевой длины */}
@@ -514,7 +539,7 @@ export function LineChart({
 
         {/* Полюса линии (steep): начало — полая точка, конец — сплошной маркер «сейчас».
             Оба стоят на РЕАЛЬНЫХ точках: краевые дыры маркеров не получают. */}
-        {!rhea && (
+        {!smooth && (
           <>
             <circle cx={firstPt.x} cy={firstPt.y} r="3.5" fill="hsl(var(--background))" stroke="hsl(var(--chart-role-primary))" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
             <circle cx={lastPt.x} cy={lastPt.y} r="4" fill="hsl(var(--chart-role-primary))" stroke="hsl(var(--background))" strokeWidth="2" vectorEffect="non-scaling-stroke" />
@@ -548,7 +573,7 @@ export function LineChart({
     );
 
     return { W, h, gutterW, step, points, yFor, hasXAxis, plotTop: padY, plotBottom: h - padB, staticLayer };
-  }, [values, labels, activeGhost, hasGhostLegend, target, refLines, yMin, yMax, width, ctxHeight, height, expanded, showAxes, markExtremes, showPoints, anomalyIdx, gradientId, rhea]);
+  }, [values, labels, activeGhost, hasGhostLegend, target, refLines, yMin, yMax, width, ctxHeight, height, expanded, showAxes, markExtremes, showPoints, anomalyIdx, gradientId, comparisonGradientId, rhea, comparison, smooth]);
 
   // Пустое состояние считается по РЕАЛЬНЫМ точкам (plot = null при < 2 non-null): серия из
   // одних null-дней — честное «нет данных», а не нулевая линия.
@@ -682,7 +707,8 @@ export function LineChart({
         data-chart-kind="line"
         data-chart-expanded={expanded ? '' : undefined}
         data-chart-appearance={appearance}
-        data-chart-curve={rhea ? 'smooth' : 'linear'}
+        data-chart-curve={smooth ? 'smooth' : 'linear'}
+        data-chart-comparison={comparison && hasGhostLegend ? 'area' : undefined}
         className={`block w-full ${onPointClick ? 'cursor-pointer' : 'cursor-crosshair'}`}
         height={h}
         viewBox={`0 0 ${W} ${h}`}
@@ -806,7 +832,7 @@ export function LineChart({
       {ghost && ghost.length >= 2 && (
         <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-2xs font-medium text-muted-foreground">
           <span className="flex select-none items-center gap-1.5">
-            <span aria-hidden="true" className="h-0.5 w-4 rounded-full" style={{ backgroundColor: 'hsl(var(--chart-role-primary))' }} />
+            <span aria-hidden="true" className={comparison ? 'h-2.5 w-2.5 rounded-[3px]' : 'h-0.5 w-4 rounded-full'} style={{ backgroundColor: 'hsl(var(--chart-role-primary))' }} />
             {primaryLabel ?? 'Текущий период'}
           </span>
           {legendToggle ? (
@@ -817,12 +843,12 @@ export function LineChart({
               title={ghostHidden ? 'Показать сравнение' : 'Скрыть сравнение'}
               className={`flex select-none items-center gap-1.5 rounded transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${ghostHidden ? 'opacity-40 line-through' : ''}`}
             >
-              <span aria-hidden="true" className="w-4 border-t-2 border-dashed" style={{ borderColor: 'hsl(var(--chart-role-comparison))' }} />
+              <span aria-hidden="true" className={comparison ? 'h-2.5 w-2.5 rounded-[3px]' : 'w-4 border-t-2 border-dashed'} style={comparison ? { backgroundColor: 'hsl(var(--chart-role-comparison))' } : { borderColor: 'hsl(var(--chart-role-comparison))' }} />
               {ghostLabel}
             </button>
           ) : (
             <span className="flex select-none items-center gap-1.5">
-              <span aria-hidden="true" className="w-4 border-t-2 border-dashed" style={{ borderColor: 'hsl(var(--chart-role-comparison))' }} />
+              <span aria-hidden="true" className={comparison ? 'h-2.5 w-2.5 rounded-[3px]' : 'w-4 border-t-2 border-dashed'} style={comparison ? { backgroundColor: 'hsl(var(--chart-role-comparison))' } : { borderColor: 'hsl(var(--chart-role-comparison))' }} />
               {ghostLabel}
             </span>
           )}

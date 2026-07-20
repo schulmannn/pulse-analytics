@@ -13,7 +13,7 @@ export type TooltipState =
     top edge; clamped horizontally to the container bounds. It never escapes the chart
     upward, and its z-10 keeps it under the sticky app header (z-sticky+), so it can't cover
     the page chrome. Shows instantly on hover (vs. the slow native SVG <title>). */
-export function ChartTooltip({ tip, appearance = 'default' }: { tip: TooltipState; appearance?: 'default' | 'rhea' }) {
+export function ChartTooltip({ tip, appearance = 'default' }: { tip: TooltipState; appearance?: 'default' | 'rhea' | 'comparison' }) {
   const ref = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ w: 0, h: 0, cw: 0 });
 
@@ -29,6 +29,8 @@ export function ChartTooltip({ tip, appearance = 'default' }: { tip: TooltipStat
   });
 
   if (!tip) return null;
+
+  const compact = appearance !== 'default';
 
   const gap = 10;
   const measured = box.w > 0 && box.h > 0;
@@ -55,7 +57,7 @@ export function ChartTooltip({ tip, appearance = 'default' }: { tip: TooltipStat
       data-chart-tooltip
       data-chart-tooltip-appearance={appearance}
       className={`pointer-events-none absolute left-0 top-0 z-10 w-max border bg-popover/98 px-3 py-2.5 text-xs font-medium leading-snug text-popover-foreground backdrop-blur-sm ${
-        appearance === 'rhea'
+        compact
           ? 'min-w-[148px] max-w-[220px] rounded-xl border-foreground/10 shadow-[0_10px_30px_rgba(0,0,0,0.14)] dark:border-white/10 dark:shadow-[0_14px_36px_rgba(0,0,0,0.4)]'
           : 'min-w-[176px] max-w-[240px] rounded-md border-border shadow-[0_12px_32px_rgba(0,0,0,0.22)] dark:border-white/10 dark:shadow-[0_14px_36px_rgba(0,0,0,0.48)]'
       }`}
@@ -71,7 +73,7 @@ export function ChartTooltip({ tip, appearance = 'default' }: { tip: TooltipStat
                   {r.color && (
                     <span
                       aria-hidden="true"
-                      className={appearance === 'rhea' ? 'h-2.5 w-2.5 shrink-0 rounded-[3px]' : 'h-1.5 w-1.5 shrink-0 rounded-full'}
+                      className={compact ? 'h-2.5 w-2.5 shrink-0 rounded-[3px]' : 'h-1.5 w-1.5 shrink-0 rounded-full'}
                       style={{ backgroundColor: r.color }}
                     />
                   )}

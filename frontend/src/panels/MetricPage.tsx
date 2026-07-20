@@ -799,10 +799,11 @@ export function MetricPage() {
                   ghostTitles={ghostTitles}
                   flags={chartFlags}
                   height={chartH}
+                  appearance="comparison"
                   markExtremes
                   markAnomalies={effGrain === 'day' && (metricKey === 'views' || metricKey === 'subscribers')}
-                  showPoints={series.values.length > 1 && series.values.length <= 45}
                   ghost={lineChart.ghost}
+                  primaryLabel="Текущий период"
                   ghostLabel={cmp !== 'off' ? CMP_CHIP[cmp] : undefined}
                   legendToggle={false}
                   yMin={ZERO_BASED[metricKey] && series.values.length > 1 ? 0 : undefined}
@@ -835,8 +836,11 @@ export function MetricPage() {
                     labels={series.labels}
                     titles={titles}
                     height={chartH}
+                    appearance="comparison"
                     ghost={ghost}
+                    primaryLabel="Текущий период"
                     ghostLabel={cmp !== 'off' ? CMP_CHIP[cmp] : undefined}
+                    comparisonStyle="stacked"
                     legendToggle={false}
                     onPointClick={(i) => setPinned((p) => (p === i ? null : i))}
                     pinnedIndex={pinnedValid}
