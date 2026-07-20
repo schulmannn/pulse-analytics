@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAnnotations, useChannels, useHistory, useTgFull } from '@/api/queries';
@@ -765,22 +766,35 @@ export function MetricPage() {
       <div className="grid grid-cols-1 gap-6 xl:gap-7 lg:grid-cols-[minmax(0,1fr)_280px]">
         {/* Main column — the big chart in four projections + contributing posts. */}
         <div className="min-w-0 space-y-6">
+          {/* Chart card (артефакт: связная карточка) — заголовок + переключатель типа + меню одной
+              панелью-тулбаром сверху, канвас в теле, тайм-бар футером снизу; единый скруглённый
+              бордер вместо плавающих контролов у края и отдельной border-top-полосы. */}
+          <div
+            data-metric-chart-card
+            className="rounded-2xl border border-border bg-card p-4 shadow-sm dark:border-white/[0.06] sm:p-5"
+          >
           <ChartWidget
             id={`metric-${metricKey}`}
             title={chartTitle}
             defaultSize="full"
             noExpand
             strip
+            stripToolbar
             action={
               <SegmentedControl
                 ariaLabel="Тип графика"
                 className="shrink-0"
-                segmentClassName="w-8"
+                segmentClassName="h-7 min-w-8 gap-1.5 px-2"
                 value={chartType}
                 onChange={(next) => setParam('chart', next === 'line' ? null : next)}
                 options={chartTypes.map((kind) => ({
                   value: kind,
-                  content: <ChartTypeIcon kind={kind} />,
+                  content: (
+                    <>
+                      <ChartTypeIcon kind={kind} />
+                      <span className="hidden xl:inline">{CHART_TYPE_LABEL[kind]}</span>
+                    </>
+                  ),
                   ariaLabel: `Тип графика: ${CHART_TYPE_LABEL[kind]}`,
                   title: CHART_TYPE_LABEL[kind],
                 }))}
@@ -856,10 +870,13 @@ export function MetricPage() {
             )}
           </ChartWidget>
 
-          {/* Тайм-бар принадлежит графику (артефакт v2): гранулярность слева, пресеты окна,
-              свой диапазон и пейджер окон — одной строкой сразу под канвасом, а не плавающей
-              sticky-панелью у края экрана. Пикер открывается вниз — под графиком места больше. */}
-          <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2.5 print:hidden">
+          {/* Тайм-бар — футер карточки графика (артефакт v2): гранулярность слева, пресеты окна,
+              свой диапазон и пейджер окон одной строкой под канвасом. Контролы держат единую
+              высоту (h-7) и радиусы, поэтому читаются одной панелью. Пикер открывается вниз. */}
+          <div
+            data-metric-toolbar
+            className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-3 dark:border-white/[0.06] print:hidden"
+          >
             <SegmentedControl
               ariaLabel="Гранулярность"
               value={effGrain}
@@ -890,7 +907,7 @@ export function MetricPage() {
               <PopoverTrigger asChild>
                 <button
                   type="button"
-                  className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors ${
+                  className={`inline-flex h-7 items-center rounded-full border px-3 text-xs font-medium transition-colors ${
                     range ? 'border-primary/40 text-primary' : 'border-border text-muted-foreground hover:text-foreground'
                   }`}
                 >
@@ -916,35 +933,39 @@ export function MetricPage() {
                 type="button"
                 onClick={() => setRange(null)}
                 title="Сбросить произвольный период"
-                className="rounded-full border border-primary/40 bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary"
+                className="inline-flex h-7 items-center gap-1 rounded-full border border-primary/40 bg-primary/10 px-3 text-xs font-medium text-primary"
               >
-                {fmt.day(range.from)} – {fmt.day(range.to)} ×
+                {fmt.day(range.from)} – {fmt.day(range.to)} <span aria-hidden="true">×</span>
               </button>
             )}
-            <div className="flex items-center">
+            {/* Пейджер окон — единой пилюлей с бордером (как одна двухкнопочная деталь тулбара). */}
+            <div className="inline-flex h-7 items-center rounded-full border border-border">
               <button
                 type="button"
                 onClick={() => shiftWindow(-1)}
                 disabled={winFrom == null}
                 aria-label="Предыдущее окно"
-                className="rounded px-1.5 py-0.5 text-sm text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                className="inline-flex h-full items-center rounded-l-full px-2 text-sm text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
               >
                 ‹
               </button>
+              <span aria-hidden="true" className="h-4 w-px bg-border" />
               <button
                 type="button"
                 onClick={() => shiftWindow(1)}
                 disabled={!range}
                 aria-label="Следующее окно"
-                className="rounded px-1.5 py-0.5 text-sm text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                className="inline-flex h-full items-center rounded-r-full px-2 text-sm text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
               >
                 ›
               </button>
             </div>
           </div>
+          </div>
 
           {pinnedValid != null && pinnedIsChart && (
             <PinnedDayPanel
+              appearance="detail"
               dateLabel={series.labels[pinnedValid] ?? ''}
               rows={[
                 { label: 'Значение', value: fmt.num(series.values[pinnedValid]) },
@@ -977,14 +998,17 @@ export function MetricPage() {
               onClose={() => setPinned(null)}
               footer={
                 pinnedDayKey ? (
-                  <div className="mt-4 border-t border-border pt-3">
+                  <div
+                    data-pinned-day-events
+                    className="mt-4 rounded-xl border border-border bg-background/40 p-3 dark:border-white/[0.06]"
+                  >
                     {/* События дня (chart_annotations): пин уже выбрал день — здесь событие
                         создаётся и удаляется; флажок ⚑ появляется на линии. */}
                     {pinnedDayFlags.length > 0 && (
                       <div className="space-y-1.5">
                         {pinnedDayFlags.map((a) => (
                           <div key={a.id} className="flex items-center gap-2 text-xs">
-                            <span aria-hidden="true" className="shrink-0 text-muted-foreground">⚑</span>
+                            <span aria-hidden="true" className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">⚑</span>
                             <span className="min-w-0 flex-1 truncate text-foreground">{a.label}</span>
                             <button
                               type="button"
@@ -1003,7 +1027,7 @@ export function MetricPage() {
                       </div>
                     )}
                     <form
-                      className="mt-2 flex items-center gap-2"
+                      className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center"
                       onSubmit={(e) => {
                         e.preventDefault();
                         void addAnnotation(pinnedDayKey);
@@ -1014,12 +1038,12 @@ export function MetricPage() {
                         onChange={(e) => setAnnLabel(e.target.value)}
                         maxLength={80}
                         placeholder="Отметить событие дня — реклама, пост-хит…"
-                        className="h-8 min-w-0 flex-1 rounded border border-border bg-background px-2.5 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
+                        className="h-9 min-w-0 flex-1 rounded-lg border border-border bg-card px-3 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-primary/40"
                       />
                       <button
                         type="submit"
                         disabled={!annLabel.trim() || annBusy}
-                        className="btn-pill shrink-0 border border-border px-3 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-40"
+                        className="btn-pill inline-flex h-9 shrink-0 items-center justify-center border border-border px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-40"
                       >
                         ⚑ Отметить
                       </button>
@@ -1077,19 +1101,18 @@ export function MetricPage() {
           )}
         </div>
 
-        {/* Composer rail (артефакт v2): Сравнение первым — после инверсии шапки итог окна живёт
-            здесь, и это первое, что ищет глаз; ниже — Разбивка и «О метрике». */}
-        <aside className="space-y-5 border-l border-border pl-5">
-          <ChartSection title="Сравнение">
-            {/* Итог окна — канонический дом итога после тихой шапки (hero переехал сюда). */}
-            <div className="flex items-baseline justify-between gap-3">
-              <span className="text-xs text-muted-foreground">Текущий период</span>
-              <span className="text-base font-medium tabular-nums text-foreground">{meta.total}</span>
-            </div>
+        {/* Composer rail (артефакт): аналитические карточки вместо волосяных секций у бордюра.
+            «Сравнение» первым и с явной иерархией — итог окна доминирует, база и Δ вторичны;
+            ниже — Разбивка и «О метрике» той же карточной иерархией. */}
+        <aside className="space-y-4">
+          <RailCard title="Сравнение" mark="comparison">
+            {/* Итог окна — доминанта карточки (hero переехал сюда после тихой шапки). */}
+            <div className="text-2xs tracking-wide text-muted-foreground">Текущий период</div>
+            <div className="mt-1 text-3xl font-medium leading-none tabular-nums text-foreground">{meta.total}</div>
             {winFrom == null ? (
               <p className="mt-3 text-xs text-muted-foreground">Для окна «Всё» прошлого периода не существует.</p>
             ) : (
-              <div className="mt-3">
+              <div className="mt-4">
                 <SegSelect
                   ariaLabel="База сравнения"
                   value={cmp}
@@ -1101,17 +1124,18 @@ export function MetricPage() {
                   ]}
                 />
                 {cmp === 'off' ? (
-                  <p className="text-xs text-muted-foreground">Выберите базу — пунктир на линии, пары в рейтинге и Δ появятся автоматически.</p>
+                  <p className="text-xs text-muted-foreground">Выберите базу — серия сравнения, пары в рейтинге и Δ появятся автоматически.</p>
                 ) : compare ? (
-                  <div className="space-y-2 text-sm">
-                    <CompareRow label={cmpLabel ?? ''} value={compare.previous} />
+                  <div className="space-y-3">
+                    {/* Значение базы — вторичный вес; Δ — цветной бейдж (прирост/спад). */}
+                    <div className="flex items-baseline justify-between gap-3">
+                      <span className="text-xs text-muted-foreground">{cmpLabel}</span>
+                      <span className="text-base font-medium tabular-nums text-ink2">{compare.previous}</span>
+                    </div>
                     {compareDelta != null && (
-                      <div className="flex items-baseline justify-between gap-3 border-t border-border pt-2">
+                      <div className="flex items-center justify-between gap-3 border-t border-border pt-3 dark:border-white/[0.06]">
                         <span className="text-xs text-muted-foreground">Изменение</span>
-                        <span className={`text-xs font-medium tabular-nums ${compareDelta >= 0 ? 'text-verdant' : 'text-ember'}`}>
-                          {compareDelta >= 0 ? '▲' : '▼'}
-                          {Math.abs(compareDelta).toFixed(1)}%
-                        </span>
+                        <DeltaBadge value={compareDelta} />
                       </div>
                     )}
                   </div>
@@ -1122,10 +1146,10 @@ export function MetricPage() {
                 )}
               </div>
             )}
-          </ChartSection>
+          </RailCard>
 
           {field && (
-            <ChartSection title="Разбивка">
+            <RailCard title="Разбивка" mark="breakdown">
               <SegSelect
                 ariaLabel="Измерение разбивки"
                 value={dim}
@@ -1136,16 +1160,16 @@ export function MetricPage() {
                 ]}
               />
               <Breakdown items={breakdownItems} />
-            </ChartSection>
+            </RailCard>
           )}
 
-          <ChartSection title="О метрике">
+          <RailCard title="О метрике" mark="about">
             <dl className="space-y-3 text-sm">
               {def.formula && <AboutRow label="Как считается" text={def.formula} />}
               {def.included && <AboutRow label="Что учитывается" text={def.included} />}
               {def.source && <AboutRow label="Источник" text={def.source} />}
             </dl>
-          </ChartSection>
+          </RailCard>
 
           <Link
             to="/analytics"
@@ -1231,12 +1255,34 @@ function ChartTypeIcon({ kind }: { kind: 'line' | 'bar' | 'rank' | 'pivot' }) {
   );
 }
 
-function CompareRow({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
+/** Analytical rail card — a titled rounded surface shared by Сравнение / Разбивка / О метрике, so
+    the rail reads as a stack of cards rather than disconnected hairline sections. */
+function RailCard({ title, mark, children }: { title: string; mark?: string; children: ReactNode }) {
   return (
-    <div className="flex items-baseline justify-between gap-3 border-t border-border pt-2 first:border-t-0 first:pt-0">
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <span className={strong ? 'font-medium tabular-nums text-foreground' : 'tabular-nums text-ink2'}>{value}</span>
-    </div>
+    <section
+      data-rail-card={mark}
+      className="rounded-2xl border border-border bg-card p-4 shadow-sm dark:border-white/[0.06] sm:p-5"
+    >
+      <h3 className="text-xs font-medium tracking-wider text-muted-foreground">{title}</h3>
+      <div className="mt-3">{children}</div>
+    </section>
+  );
+}
+
+/** Colour-coded change badge for the comparison card — the one evaluated Δ that leans on tone
+    (gain = verdant, loss = ember); direction also rides the ▲/▼ glyph for colour-blind safety. */
+function DeltaBadge({ value }: { value: number }) {
+  const up = value > 0;
+  const down = value < 0;
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium tabular-nums ${
+        up ? 'bg-verdant/10 text-verdant' : down ? 'bg-ember/10 text-ember' : 'bg-muted text-muted-foreground'
+      }`}
+    >
+      <span aria-hidden="true">{up ? '▲' : down ? '▼' : '—'}</span>
+      {Math.abs(value).toFixed(1)}%
+    </span>
   );
 }
 

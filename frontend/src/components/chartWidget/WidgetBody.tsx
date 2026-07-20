@@ -6,6 +6,8 @@ import type { WidgetPeriodValue } from '@/lib/period';
 
 interface WidgetBodyProps {
   strip: boolean;
+  /** In-flow toolbar header above the body (no floating corner controls to clear). */
+  stripToolbar?: boolean;
   reorder: boolean;
   bodyRef: RefObject<HTMLDivElement>;
   widgetId: string;
@@ -21,6 +23,7 @@ interface WidgetBodyProps {
 /** Provider and error-boundary shell around the card's renderable body. */
 export function WidgetBody({
   strip,
+  stripToolbar,
   reorder,
   bodyRef,
   widgetId,
@@ -32,12 +35,15 @@ export function WidgetBody({
   footer,
   resetKeys,
 }: WidgetBodyProps) {
+  // Floating strip reserves `pr-8` for its corner controls; a toolbar strip has an in-flow header
+  // above it, so it just needs the standard top gap (like a non-strip card body).
+  const bodyLayout = strip
+    ? stripToolbar
+      ? 'mt-3 flex min-h-0 flex-col'
+      : 'flex min-h-0 flex-col pr-8'
+    : 'mt-3 flex min-h-0 flex-1 flex-col';
   return (
-    <div
-      className={`${strip ? 'flex min-h-0 flex-col pr-8' : 'mt-3 flex min-h-0 flex-1 flex-col'} ${
-        reorder ? 'pointer-events-none' : ''
-      }`}
-    >
+    <div className={`${bodyLayout} ${reorder ? 'pointer-events-none' : ''}`}>
       <WidgetPeriodProvider value={period}>
         <WidgetTargetContext.Provider value={target}>
           <div ref={bodyRef} className="min-h-0 flex-1 overflow-hidden">

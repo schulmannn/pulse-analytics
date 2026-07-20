@@ -36,6 +36,10 @@ export interface ChartSectionProps {
   periodControl?: boolean;
   /** Thin full-width summary row without card chrome. */
   strip?: boolean;
+  /** Renders the strip header in-flow as a visible title + action toolbar (instead of the default
+      floating sr-only header). Opt-in, page-scoped — the metric explorer wraps such a strip in its
+      own card shell so the title/switcher/menu read as one toolbar. */
+  stripToolbar?: boolean;
   /** Personal Home registry key used by the pin/unpin command. */
   homeKey?: string;
   /** Enables grain, include-today, and target controls for compatible series widgets. */

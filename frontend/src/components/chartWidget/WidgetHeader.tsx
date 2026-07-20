@@ -12,6 +12,8 @@ interface WidgetHeaderProps {
   label: string;
   action?: ReactNode;
   strip: boolean;
+  /** In-flow strip header with a visible title (metric explorer toolbar). */
+  stripToolbar?: boolean;
   reorder: boolean;
   allowExpand: boolean;
   homeKey?: string;
@@ -25,6 +27,7 @@ export function WidgetHeader({
   label,
   action,
   strip,
+  stripToolbar,
   reorder,
   allowExpand,
   homeKey,
@@ -33,11 +36,15 @@ export function WidgetHeader({
   onExpand,
   menu,
 }: WidgetHeaderProps) {
+  // A «floating» strip parks the controls in the top-right corner over a headline-less summary; a
+  // toolbar strip (metric explorer) lays them in-flow with a visible title, so the page's card can
+  // frame title + switcher + menu as one row.
+  const floating = strip && !stripToolbar && !reorder;
   return (
-    <div className={strip && !reorder ? 'absolute -top-1 right-0 z-10 flex items-center' : 'flex shrink-0 items-center gap-3'}>
+    <div className={floating ? 'absolute -top-1 right-0 z-10 flex items-center' : 'flex shrink-0 items-center gap-3'}>
       <h3
         title={label}
-        className={strip && !reorder ? 'sr-only' : 'widget-title min-w-0 flex-1 truncate text-sm font-medium tracking-tight text-foreground'}
+        className={floating ? 'sr-only' : 'widget-title min-w-0 flex-1 truncate text-sm font-medium tracking-tight text-foreground'}
       >
         {label}
       </h3>
