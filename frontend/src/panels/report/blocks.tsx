@@ -188,11 +188,15 @@ export function ReportChart({
   viz,
   valueFmt,
   zeroBase,
+  chartAppearance = 'default',
+  chartLabel,
 }: {
   series: DailySeries;
   viz: 'line' | 'bar';
   valueFmt: (n: number) => string;
   zeroBase?: boolean;
+  chartAppearance?: 'default' | 'rhea';
+  chartLabel?: string;
 }) {
   if (series.values.length <= 1) {
     return (
@@ -207,6 +211,7 @@ export function ReportChart({
       </ChartExpandedContext.Provider>
     );
   }
+  const rheaChart = chartAppearance === 'rhea';
   return (
     <LineChart
       values={series.values}
@@ -214,9 +219,12 @@ export function ReportChart({
       titles={titles}
       height={200}
       fullAxes
-      markExtremes
-      showPoints={series.values.length <= 45}
+      markExtremes={!rheaChart}
+      showPoints={!rheaChart && series.values.length <= 45}
       yMin={zeroBase ? 0 : undefined}
+      formatValue={valueFmt}
+      primaryLabel={chartLabel}
+      appearance={chartAppearance}
     />
   );
 }
@@ -238,7 +246,7 @@ interface ReportMetricCardProps {
 export function ReportMetricCard({ title, total, trend, series, valueFmt, zeroBase, to, onOpen, chartAppearance = 'default', chartLabel }: ReportMetricCardProps) {
   const rheaChart = chartAppearance === 'rhea';
   return (
-    <section className="report-metric-card min-w-0 space-y-3" data-report-chart-appearance={chartAppearance}>
+    <section className="report-metric-card min-w-0 space-y-3" data-report-chart-appearance={chartAppearance} data-report-chart-label={chartLabel}>
       <div className="report-metric-card__header flex items-center gap-3">
         <h3 className="report-metric-card__title whitespace-nowrap text-xs font-medium tracking-wider text-muted-foreground">{title}</h3>
         <span aria-hidden="true" className="report-metric-card__rule h-px flex-1 bg-border" />
