@@ -11,7 +11,7 @@ import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
-import { Skeleton } from '@/components/ui/skeleton';
+import { ChartSkeleton, TableSkeleton } from '@/components/ui/dataSkeleton';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { Sparkline } from '@/components/Sparkline';
 import { lttbDownsample } from '@/lib/downsample';
@@ -57,8 +57,7 @@ export function MsOverview() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
         {Array.from({ length: 2 }).map((_, i) => (
           <div key={i} className="h-[264px] rounded-2xl border border-border bg-card p-5 lg:col-span-3">
-            <Skeleton className="h-4 w-1/4" />
-            <Skeleton className="mt-3 h-40 w-full" />
+            <ChartSkeleton />
           </div>
         ))}
       </div>
@@ -131,7 +130,7 @@ export function MsOverview() {
               yMin={0}
             />
           ) : (
-            <p className="text-xs text-muted-foreground">Недостаточно дней для графика.</p>
+            <EmptyState compact size="chart" title="Недостаточно дней для графика." />
           )}
         </ChartCardBody>
       </ChartWidget>
@@ -149,7 +148,7 @@ export function MsOverview() {
               yMin={0}
             />
           ) : (
-            <p className="text-xs text-muted-foreground">Недостаточно дней для графика.</p>
+            <EmptyState compact size="chart" title="Недостаточно дней для графика." />
           )}
         </ChartCardBody>
       </ChartWidget>
@@ -164,7 +163,7 @@ export function MsOverview() {
               yMin={0}
             />
           ) : (
-            <p className="text-xs text-muted-foreground">Недостаточно дней с заказами для графика.</p>
+            <EmptyState compact size="chart" title="Недостаточно дней с заказами для графика." />
           )}
         </ChartCardBody>
       </ChartWidget>
@@ -183,13 +182,11 @@ export function MsOverview() {
           />
         </div>
         {funnel.isPending ? (
-          <div className="space-y-2 py-2">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={`f${i}`} className="h-6 w-full" />
-            ))}
-          </div>
+          <TableSkeleton rows={4} columns={3} className="py-2" />
         ) : funnel.isError ? (
           <ErrorState
+            compact
+            size="table"
             className="py-4"
             title="Не удалось получить статусы заказов"
             reason={funnel.error instanceof Error ? funnel.error.message : 'ошибка'}
@@ -197,7 +194,7 @@ export function MsOverview() {
             retrying={funnel.isFetching}
           />
         ) : !funnel.data ? (
-          <p className="py-4 text-sm text-muted-foreground">Нет данных о статусах за период.</p>
+          <EmptyState compact size="table" title="Нет данных о статусах за период." />
         ) : funnel.data.rows.length === 0 ? (
           funnel.data.no_state_orders > 0 ? (
             // Заказы есть, а статусов нет: state_id появился в слайсе 3 — старые строки заполнит
@@ -210,7 +207,7 @@ export function MsOverview() {
               повторно, и статусы появятся в аналитике.
             </p>
           ) : (
-            <p className="py-4 text-sm text-muted-foreground">Нет заказов за период.</p>
+            <EmptyState compact size="table" title="Нет заказов за период." />
           )
         ) : (
           <MsFunnelRows
@@ -229,12 +226,11 @@ export function MsOverview() {
 
       <ChartWidget id="ms-returns" title="Возвраты" fixedSize="half" drillTo="/metrics/ms-returns">
         {returns.isPending ? (
-          <div className="space-y-2 py-2">
-            <Skeleton className="h-8 w-1/3" />
-            <Skeleton className="h-4 w-1/2" />
-          </div>
+          <ChartSkeleton />
         ) : returns.isError ? (
           <ErrorState
+            compact
+            size="chart"
             className="py-4"
             title="Не удалось получить возвраты"
             reason={returns.error instanceof Error ? returns.error.message : 'ошибка'}
@@ -242,7 +238,7 @@ export function MsOverview() {
             retrying={returns.isFetching}
           />
         ) : !returns.data ? (
-          <p className="py-4 text-sm text-muted-foreground">Нет данных о возвратах за период.</p>
+          <EmptyState compact size="chart" title="Нет данных о возвратах за период." />
         ) : (
           <MsReturnsCardBody data={returns.data} period={period} windowLabel={windowLabel} />
         )}
@@ -302,7 +298,7 @@ function MsReturnsCardBody({
       {/* overflow-hidden — страховка на кадр между измерением слота и ре-рендером графика. */}
       <div ref={slotRef} className="mt-2 min-h-0 flex-1 overflow-hidden">
         {data.complete && data.count === 0 ? (
-          <p className="py-2 text-xs text-muted-foreground">Возвратов за период нет.</p>
+          <EmptyState compact title="Возвратов за период нет." className="min-h-0 py-2" />
         ) : sampled.length > 1 ? (
           expanded ? (
             <ExpandedChartHeightContext.Provider value={chartHeight}>
@@ -329,7 +325,7 @@ function MsReturnsCardBody({
             </div>
           )
         ) : (
-          <p className="text-xs text-muted-foreground">Недостаточно дней для графика.</p>
+          <EmptyState compact title="Недостаточно дней для графика." className="min-h-0 py-2" />
         )}
       </div>
       <div className="mt-2 shrink-0 space-y-1 text-2xs text-muted-foreground">
@@ -371,16 +367,13 @@ export function MsSummaryExplorer({
   const expandedHeight = useContext(ExpandedChartHeightContext);
 
   if (summary.isPending) {
-    return (
-      <div className="py-2">
-        <Skeleton className="h-4 w-1/4" />
-        <Skeleton className="mt-3 h-48 w-full" />
-      </div>
-    );
+    return <ChartSkeleton className="py-2" />;
   }
   if (summary.isError) {
     return (
       <ErrorState
+        compact
+        size="chart"
         title="Не удалось получить данные МойСклада"
         reason={summary.error instanceof Error ? summary.error.message : 'ошибка'}
         onRetry={() => summary.refetch()}
@@ -401,11 +394,13 @@ export function MsSummaryExplorer({
   const points = aggregatePlotPoints(bucketed, metric, CHART_MAX_POINTS);
   if (points.length < 2) {
     return (
-      <p className="py-4 text-xs text-muted-foreground">
-        {metric === 'aov'
+      <EmptyState
+        compact
+        size="chart"
+        title={metric === 'aov'
           ? 'Недостаточно бакетов с заказами для среднего чека за период.'
           : 'Недостаточно данных за период.'}
-      </p>
+      />
     );
   }
 
@@ -601,16 +596,13 @@ export function MsReturnsExplorer({
   const expandedHeight = useContext(ExpandedChartHeightContext);
 
   if (returns.isPending) {
-    return (
-      <div className="py-2">
-        <Skeleton className="h-4 w-1/4" />
-        <Skeleton className="mt-3 h-48 w-full" />
-      </div>
-    );
+    return <ChartSkeleton className="py-2" />;
   }
   if (returns.isError) {
     return (
       <ErrorState
+        compact
+        size="chart"
         title="Не удалось получить возвраты"
         reason={returns.error instanceof Error ? returns.error.message : 'ошибка'}
         onRetry={() => returns.refetch()}
@@ -632,7 +624,7 @@ export function MsReturnsExplorer({
   if (points.length < 2) {
     return (
       <ChartCardBody value={fmtReturnsMetric(metric, total)} caption={windowWord(period)}>
-        <p className="py-4 text-xs text-muted-foreground">Недостаточно дней для графика за период.</p>
+        <EmptyState compact size="chart" title="Недостаточно дней для графика за период." />
         {!returns.data.complete && <ReturnsArchiveNotice data={returns.data} />}
         <p className="mt-2 text-2xs text-muted-foreground">Возвраты считаются отдельно и из выручки не вычитаются.</p>
       </ChartCardBody>

@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { fetchMsRfmCustomersPage, useMsRfmSegmentCustomers, type MsRfmCustomers } from '@/api/queries';
+import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
-import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ui/button';
+import { TableSkeleton } from '@/components/ui/dataSkeleton';
 import { toYmd } from '@/lib/analyticsExport';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { downloadCsv, type CsvRow } from '@/lib/csv';
@@ -79,8 +81,6 @@ interface Acc {
 
 const EMPTY = (key: string): Acc => ({ key, rows: [], total: null });
 
-const SKELETON_ROWS = ['rc1', 'rc2', 'rc3', 'rc4', 'rc5'];
-
 /**
  * Покупатели выбранного RFM-сегмента — сознательный tenant-scoped листинг (в отличие от
  * агрегатного распределения MsRfmBody). Страницы по 50 строк копятся в состоянии («Показать ещё»),
@@ -131,17 +131,13 @@ export function MsRfmSegmentCustomers({ period, segment }: { period: MsPeriod; s
   const total = stale ? null : acc.total;
 
   if (rows.length === 0 && page.isPending) {
-    return (
-      <div className="space-y-2 py-2">
-        {SKELETON_ROWS.map((key) => (
-          <Skeleton key={key} className="h-6 w-full" />
-        ))}
-      </div>
-    );
+    return <TableSkeleton rows={5} columns={3} header={false} className="py-2" />;
   }
   if (rows.length === 0 && page.isError) {
     return (
       <ErrorState
+        compact
+        size="table"
         className="py-4"
         title="Не удалось получить покупателей сегмента"
         reason={page.error instanceof Error ? page.error.message : 'ошибка'}
@@ -151,7 +147,7 @@ export function MsRfmSegmentCustomers({ period, segment }: { period: MsPeriod; s
     );
   }
   if (total === 0) {
-    return <p className="py-4 text-sm text-muted-foreground">Нет покупателей в сегменте за период.</p>;
+    return <EmptyState compact size="table" title="Нет покупателей в сегменте за период." />;
   }
 
   const allNamesNull = rows.length > 0 && rows.every((row) => row.name == null);
@@ -225,19 +221,23 @@ export function MsRfmSegmentCustomers({ period, segment }: { period: MsPeriod; s
           <div className="flex shrink-0 items-center gap-3">
             {contactAction('phone', 'Телефоны')}
             {contactAction('email', 'Почты')}
-            <button
+            <Button
               type="button"
+              variant="outline"
+              size="sm"
               onClick={handleExport}
               disabled={exporting}
-              className="btn-pill shrink-0 border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
+              className="shrink-0"
             >
               {exporting ? 'Готовим…' : 'Выгрузить CSV'}
-            </button>
+            </Button>
           </div>
         </div>
       )}
       {exportError != null && (
         <ErrorState
+          compact
+          size="table"
           className="mt-2 py-4"
           title="Не удалось выгрузить CSV"
           reason={exportError}
@@ -272,6 +272,8 @@ export function MsRfmSegmentCustomers({ period, segment }: { period: MsPeriod; s
       </ul>
       {page.isError && (
         <ErrorState
+          compact
+          size="table"
           className="mt-2 py-4"
           title="Не удалось получить следующую страницу"
           reason={page.error instanceof Error ? page.error.message : 'ошибка'}
@@ -280,14 +282,16 @@ export function MsRfmSegmentCustomers({ period, segment }: { period: MsPeriod; s
         />
       )}
       {!page.isError && total != null && rows.length < total && (
-        <button
+        <Button
           type="button"
+          variant="outline"
+          size="sm"
           onClick={() => setOffset(rows.length)}
           disabled={page.isFetching}
-          className="btn-pill mt-3 border border-border px-4 py-2 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
+          className="mt-3"
         >
           {page.isFetching ? 'Загрузка…' : 'Показать ещё'}
-        </button>
+        </Button>
       )}
       {/* Деградацию словаря и честно-пустой ответ (все контрагенты страницы удалены из МС)
           контракт не различает — формулировка нейтральная, без вины «справочник недоступен». */}

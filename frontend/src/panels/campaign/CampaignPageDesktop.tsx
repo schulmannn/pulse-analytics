@@ -6,6 +6,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { Icon } from '@/components/nav-icons';
 import { LineChart } from '@/components/LineChart';
 import { PieChart } from '@/components/PieChart';
+import { Button } from '@/components/ui/button';
 import {
   CampaignColorDot,
   CampaignStatusChip,
@@ -257,30 +258,36 @@ function CampaignHeader({
         ) : null}
         {canEdit && (
           <div className="ml-auto flex items-center gap-2">
-            <button
+            <Button
               type="button"
+              variant="outline"
+              size="sm"
               onClick={onEdit}
-              className="btn-pill border border-border bg-background px-3.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+              className="text-muted-foreground"
             >
               Изменить
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              variant="outline"
+              size="sm"
               onClick={onToggleArchive}
               disabled={archivePending}
-              className="btn-pill border border-border bg-background px-3.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+              className="text-muted-foreground"
               data-testid="campaign-archive-toggle"
             >
               {archivePending ? '…' : isArchived ? 'Вернуть из архива' : 'В архив'}
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              variant="ghost"
+              size="sm"
               onClick={onDelete}
               disabled={deletePending}
-              className="btn-pill px-3.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-destructive disabled:opacity-50"
+              className="hover:text-destructive"
             >
               {deletePending ? 'Удаление…' : 'Удалить'}
-            </button>
+            </Button>
           </div>
         )}
       </div>

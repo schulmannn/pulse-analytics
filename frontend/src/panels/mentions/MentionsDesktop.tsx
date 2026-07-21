@@ -23,6 +23,7 @@ import { fmt } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { BarChart } from '@/components/BarChart';
 import { PillSelect } from '@/components/PillSelect';
+import { SearchField } from '@/components/SearchField';
 import { ChartSection } from '@/components/ChartWidget';
 import { WidgetGroup } from '@/components/widgets/WidgetGroup';
 import { EmptyState } from '@/components/EmptyState';
@@ -588,17 +589,13 @@ function MentionsTable({
   const toolbar = (
     <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border pb-3">
       <div className="flex flex-wrap items-center gap-3">
-        <label className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="sr-only">Поиск по упоминаниям</span>
-          <input
-            type="search"
-            value={filters.q}
-            onChange={(e) => onUpdate({ q: e.target.value })}
-            placeholder="Поиск по каналу и тексту"
-            aria-label="Поиск по упоминаниям"
-            className="w-56 rounded border border-border bg-background px-2.5 py-1 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
-          />
-        </label>
+        <SearchField
+          className="w-56"
+          value={filters.q}
+          onChange={(q) => onUpdate({ q })}
+          placeholder="Поиск по каналу и тексту"
+          ariaLabel="Поиск по упоминаниям"
+        />
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span className="shrink-0">Кто упомянул</span>
           <PillSelect

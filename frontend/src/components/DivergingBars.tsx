@@ -4,6 +4,7 @@ import { columnIndex } from '@/lib/chartHover';
 import { axisLabelIndexSet } from '@/lib/chartLabels';
 import { observeSize } from '@/lib/observeSize';
 import { ChartTooltip } from '@/components/ChartTooltip';
+import { EmptyState } from '@/components/EmptyState';
 import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/ExpandableChart';
 
 interface DivergingBarsProps {
@@ -125,11 +126,7 @@ export function DivergingBars({ values, labels, titles, height }: DivergingBarsP
   }, [values, labels, width, ctxHeight, height, expanded]);
 
   if (!values || values.length === 0 || !plot) {
-    return (
-      <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
-        Нет данных
-      </div>
-    );
+    return <EmptyState compact size="chart" title="Нет данных" />;
   }
 
   const { W, h, mid, step, bars, labelPad } = plot;

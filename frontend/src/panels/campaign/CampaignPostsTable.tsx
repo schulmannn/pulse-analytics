@@ -3,8 +3,10 @@ import { useSearchParams } from 'react-router-dom';
 import type { CampaignPost } from '@/api/schemas';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
+import { SearchField } from '@/components/SearchField';
 import { NetworkBadge } from '@/components/campaigns/shared';
 import { TableSkeleton } from '@/components/ui/dataSkeleton';
+import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   applyCampaignPostTableState,
@@ -159,14 +161,13 @@ function InteractivePostsTable({
         <span className="text-xs tabular-nums text-muted-foreground" data-testid="campaign-posts-count">
           {query ? `${fmt.num(rows.length)} из ${fmt.num(posts.length)} публ.` : `${fmt.num(posts.length)} публ.`}
         </span>
-        <input
-          type="search"
+        <SearchField
+          className="ml-auto min-w-52"
           value={query}
-          onChange={(e) => patchTableState({ q: e.target.value })}
-          aria-label="Поиск публикаций кампании"
+          onChange={(q) => patchTableState({ q })}
+          ariaLabel="Поиск публикаций кампании"
           placeholder="Поиск по подписи или источнику"
-          className="ml-auto h-8 min-w-52 rounded border border-border bg-background px-2.5 text-xs text-foreground outline-none transition-colors placeholder:text-muted-foreground hover:bg-muted focus:border-primary"
-          data-testid="campaign-posts-search"
+          testId="campaign-posts-search"
         />
       </div>
 
@@ -175,22 +176,25 @@ function InteractivePostsTable({
           {selectedRows.length > 0 ? (
             <>
               <span className="text-xs tabular-nums text-muted-foreground">Выбрано: {fmt.num(selectedRows.length)}</span>
-              <button
+              <Button
                 type="button"
+                variant="outline"
+                size="sm"
                 onClick={removeSelected}
                 disabled={removePending}
-                className="btn-pill border border-border bg-background px-3.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-destructive disabled:opacity-50"
+                className="text-muted-foreground hover:text-destructive"
                 data-testid="campaign-bulk-remove"
               >
                 {removePending ? 'Убираю…' : 'Убрать выбранные'}
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
+                variant="ghost"
+                size="sm"
                 onClick={() => setSelected(new Set())}
-                className="btn-pill px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
               >
                 Снять выбор
-              </button>
+              </Button>
             </>
           ) : (
             <span className="text-2xs text-muted-foreground">Отметьте публикации, чтобы убрать их из кампании</span>

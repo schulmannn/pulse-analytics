@@ -15,6 +15,9 @@ import {
 } from '@/lib/reportListModel';
 import { TableSkeleton } from '@/components/ui/dataSkeleton';
 import { EmptyState } from '@/components/EmptyState';
+import { SearchField } from '@/components/SearchField';
+import { SegmentedControl } from '@/components/SegmentedControl';
+import { Button } from '@/components/ui/button';
 import { CreateReportDialog } from '@/components/reports/CreateReportDialog';
 import { ReportsErrorState } from '@/panels/ReportPage';
 import { DEFAULT_REPORT_BLOCKS, type ReportBlockKey } from '@/lib/reportBlocks';
@@ -88,13 +91,9 @@ function ReportsListDesktop() {
           Сохранённые отчёты по вашим источникам: собираются из блоков, по расписанию приходят на почту.
         </p>
         {!demo && (
-          <button
-            type="button"
-            onClick={() => setDialogOpen(true)}
-            className="btn-pill bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-          >
+          <Button type="button" onClick={() => setDialogOpen(true)}>
             Создать отчёт
-          </button>
+          </Button>
         )}
       </div>
 
@@ -111,45 +110,29 @@ function ReportsListDesktop() {
             Соберите документ из блоков аналитики — его можно распечатать в PDF и получать письмом
             раз в неделю или месяц.
           </p>
-          <button
-            type="button"
-            onClick={() => setDialogOpen(true)}
-            className="btn-pill mt-4 bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-          >
+          <Button type="button" onClick={() => setDialogOpen(true)} className="mt-4">
             Создать отчёт
-          </button>
+          </Button>
         </div>
       ) : (
         <>
           <div className="flex flex-wrap items-center gap-3">
-            <input
-              type="search"
+            <SearchField
+              className="w-64 max-w-full"
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={setQuery}
               placeholder="Название или источник"
-              aria-label="Поиск отчётов"
-              className="h-9 w-64 max-w-full rounded border border-border bg-background px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
+              ariaLabel="Поиск отчётов"
             />
-            <div className="flex overflow-hidden rounded-full border border-border" role="group" aria-label="Фильтр отчётов">
-              {(
-                [
-                  ['all', 'Все'],
-                  ['delivery', 'С доставкой'],
-                ] as Array<[ReportListFilter, string]>
-              ).map(([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  aria-pressed={filter === value}
-                  onClick={() => setFilter(value)}
-                  className={`border-r border-border px-3 py-1.5 text-xs font-medium transition-colors last:border-r-0 ${
-                    filter === value ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
+            <SegmentedControl<ReportListFilter>
+              ariaLabel="Фильтр отчётов"
+              value={filter}
+              onChange={setFilter}
+              options={[
+                { value: 'all', content: 'Все' },
+                { value: 'delivery', content: 'С доставкой' },
+              ]}
+            />
           </div>
 
           {visible.length === 0 ? (
@@ -236,14 +219,9 @@ function ReportsListMobile() {
           </p>
         </div>
         {!demo && (
-          <button
-            type="button"
-            onClick={() => handleCreate()}
-            disabled={createReport.isPending}
-            className="btn-pill bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-          >
+          <Button type="button" onClick={() => handleCreate()} disabled={createReport.isPending}>
             {createReport.isPending ? 'Создание…' : 'Создать отчёт'}
-          </button>
+          </Button>
         )}
       </div>
 
@@ -284,14 +262,10 @@ function ReportsListMobile() {
       ) : reportsQuery.isError ? (
         <ReportsErrorState error={reportsQuery.error} />
       ) : reports.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-border bg-background px-4 py-10 text-center">
-          <p className="text-sm font-medium text-foreground">Отчётов пока нет</p>
-          <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
-            Соберите документ из блоков аналитики — его можно распечатать в PDF и получать письмом
-            раз в неделю или месяц.
-          </p>
-          <p className="mt-4 text-xs text-muted-foreground">Выберите шаблон выше или создайте пустой отчёт.</p>
-        </div>
+        <EmptyState
+          title="Отчётов пока нет"
+          reason="Соберите документ из блоков аналитики — его можно распечатать в PDF и получать письмом раз в неделю или месяц. Выберите шаблон выше или создайте пустой отчёт."
+        />
       ) : (
         <div className="data-table-surface data-table-scroll">
         <table className="data-table text-sm">

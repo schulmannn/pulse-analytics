@@ -10,8 +10,7 @@ import { LineChart } from '@/components/LineChart';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
-import { TableSkeleton } from '@/components/ui/dataSkeleton';
-import { Skeleton } from '@/components/ui/skeleton';
+import { ChartSkeleton, TableSkeleton } from '@/components/ui/dataSkeleton';
 import { lttbDownsample } from '@/lib/downsample';
 import { fmt, pluralRu } from '@/lib/format';
 import { usePagePeriod, usePeriod } from '@/lib/period';
@@ -69,8 +68,7 @@ export function MsClients() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
         {Array.from({ length: 2 }).map((_, i) => (
           <div key={i} className="h-[264px] rounded-2xl border border-border bg-card p-5 lg:col-span-3">
-            <Skeleton className="h-4 w-1/4" />
-            <Skeleton className="mt-3 h-40 w-full" />
+            <ChartSkeleton />
           </div>
         ))}
       </div>
@@ -114,7 +112,7 @@ export function MsClients() {
               yMin={0}
             />
           ) : (
-            <p className="text-xs text-muted-foreground">Недостаточно дней для графика.</p>
+            <EmptyState compact size="chart" title="Недостаточно дней для графика." />
           )}
         </ChartCardBody>
       </ChartWidget>
@@ -218,16 +216,13 @@ export function MsCustomerExplorer({
   }, [series, period, grain, metric]);
 
   if (customers.isPending) {
-    return (
-      <div className="py-2">
-        <Skeleton className="h-4 w-1/4" />
-        <Skeleton className="mt-3 h-48 w-full" />
-      </div>
-    );
+    return <ChartSkeleton className="py-2" />;
   }
   if (customers.isError) {
     return (
       <ErrorState
+        compact
+        size="chart"
         title="Не удалось получить динамику покупателей"
         reason={customers.error instanceof Error ? customers.error.message : 'ошибка'}
         onRetry={() => customers.refetch()}
@@ -563,9 +558,12 @@ function MsCohortsCard({ state }: { state: ReturnType<typeof useMsCohorts> }) {
           retrying={state.isFetching}
         />
       ) : !state.data || state.data.cohorts.length === 0 ? (
-        <p className="py-4 text-sm text-muted-foreground">
-          Когорт пока нет — они появятся после загрузки истории заказов.
-        </p>
+        <EmptyState
+          compact
+          size="table"
+          title="Когорт пока нет"
+          reason="Они появятся после загрузки истории заказов."
+        />
       ) : (
         <MsCohortsTable cohorts={state.data.cohorts} />
       )}
