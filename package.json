@@ -28,6 +28,6 @@
     "@biomejs/biome": "2.5.3"
   },
   "engines": {
-    "node": ">=18.17"
+    "node": ">=20.19"
   }
 }
