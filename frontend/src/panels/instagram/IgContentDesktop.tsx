@@ -1,17 +1,18 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
-// Astryx runtime primitives (scoped design-system pilot) — subpath imports for tree-shaking.
-import { Theme } from '@astryxdesign/core/theme';
-import { neutralTheme } from '@astryxdesign/theme-neutral/built';
-import { Toolbar } from '@astryxdesign/core/Toolbar';
-import { MultiSelector } from '@astryxdesign/core/MultiSelector';
-import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl';
+// Astryx runtime primitives (scoped design-system rollout) — subpath imports for tree-shaking.
 import { Token } from '@astryxdesign/core/Token';
-import { LayoutPanel } from '@astryxdesign/core/Layout';
 import { MetadataList, MetadataListItem } from '@astryxdesign/core/MetadataList';
 import { Text as AxText } from '@astryxdesign/core/Text';
 import { Button as AxButton } from '@astryxdesign/core/Button';
-import '@/astryx-pilot.css';
+import {
+  WorkspaceInspector,
+  WorkspaceSurface,
+  WorkspaceViewToolbar,
+  WORKSPACE_DENSITY_CELL,
+  WORKSPACE_DENSITY_HEAD,
+  type WorkspaceDensity,
+} from '@/components/data-workspace';
 import type { IgData } from '@/lib/useIgData';
 import type { IgPost, CampaignPostInput } from '@/api/schemas';
 import { useIgTags, useRemoveCampaignPosts } from '@/api/queries';
@@ -58,7 +59,6 @@ import {
   type IgSecondaryView,
 } from '@/lib/igContentFilters';
 import { cn } from '@/lib/utils';
-import { useTheme } from '@/lib/theme';
 import { useIgScopedPosts, toCampaignItems } from '@/panels/instagram/igContentScope';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -120,18 +120,7 @@ const COLUMN_OPTIONS: { value: string; label: string }[] = [
 ];
 const ALL_COLUMN_KEYS = COLUMN_OPTIONS.map((o) => o.value);
 
-type Density = 'compact' | 'balanced' | 'spacious';
-const DENSITY_OPTIONS: { value: Density; label: string }[] = [
-  { value: 'compact', label: 'Плотно' },
-  { value: 'balanced', label: 'Обычно' },
-  { value: 'spacious', label: 'Свободно' },
-];
-// 'balanced' == the historical padding, so the default look is unchanged; compact/spacious flank it.
-const DENSITY_CELL: Record<Density, string> = { compact: 'py-2', balanced: 'py-3', spacious: 'py-4' };
-const DENSITY_HEAD: Record<Density, string> = { compact: 'py-2', balanced: 'py-2.5', spacious: 'py-3' };
-
 export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) {
-  const { theme } = useTheme();
   const [params, setParams] = useSearchParams();
   const paramsRef = useRef(params);
   const { channelId, campaignId, campaignPostsQ, posts, formatItems } = useIgScopedPosts(ig);
@@ -148,7 +137,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
   const [addItems, setAddItems] = useState<CampaignPostInput[] | null>(null);
   // Table view state (local, not URL-backed): which columns show + row density.
   const [visibleCols, setVisibleCols] = useState<string[]>(ALL_COLUMN_KEYS);
-  const [density, setDensity] = useState<Density>('balanced');
+  const [density, setDensity] = useState<WorkspaceDensity>('balanced');
 
   // Сброс выбора/инспектора при смене источника/кампании/окна/фильтров (примитивные deps — window.* стабильны).
   useEffect(() => {
@@ -172,8 +161,10 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
     const current = paramsRef.current;
     commitParams(applyIgContentFilters(current, { ...parseIgContentFilters(current), ...patch }));
   };
-  const toggleSort = (key: IgContentFilters['sort']) =>
-    update(key === filters.sort ? { order: filters.order === 'desc' ? 'asc' : 'desc' } : { sort: key, order: 'desc' });
+  const toggleSort = (key: IgContentFilters['sort']) => {
+    const current = parseIgContentFilters(paramsRef.current);
+    update(key === current.sort ? { order: current.order === 'desc' ? 'asc' : 'desc' } : { sort: key, order: 'desc' });
+  };
   const setSecondary = (next: IgSecondaryView) =>
     commitParams(applyIgSecondaryView(paramsRef.current, next));
 
@@ -195,8 +186,8 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
   const reachMedian = medians.reach;
 
   const shownMetricCols = METRIC_COLS.filter((c) => visibleCols.includes(c.key));
-  const cellY = DENSITY_CELL[density];
-  const headY = DENSITY_HEAD[density];
+  const cellY = WORKSPACE_DENSITY_CELL[density];
+  const headY = WORKSPACE_DENSITY_HEAD[density];
 
   const updateVisibleColumns = (next: string[]) => {
     setVisibleCols(next);
@@ -302,40 +293,15 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
           {scope.length > 0 && reachMedian == null && <span>сравнение появится от {MEDIAN_MIN_SAMPLE} публикаций</span>}
         </div>
       </div>
-      {/* Astryx table toolbar — column visibility + row density. Pure Astryx children keep the
-          toolbar's roving-tabindex intact; the search/format filters above stay native for their
-          established URL/selectPill contracts. */}
-      <Toolbar
-        label="Вид таблицы"
-        size="sm"
-        gap={2}
-        startContent={<AxText type="supporting" size="2xs">Вид таблицы</AxText>}
-        endContent={
-          <>
-            <MultiSelector
-              label="Колонки"
-              placeholder="Колонки"
-              size="sm"
-              options={COLUMN_OPTIONS}
-              value={visibleCols}
-              onChange={updateVisibleColumns}
-              triggerDisplay="badges"
-              maxBadges={1}
-              hasSelectAll
-              selectAllLabel="Все показатели"
-            />
-            <SegmentedControl
-              label="Плотность строк"
-              size="sm"
-              value={density}
-              onChange={(v) => setDensity(v as Density)}
-            >
-              {DENSITY_OPTIONS.map((d) => (
-                <SegmentedControlItem key={d.value} value={d.value} label={d.label} />
-              ))}
-            </SegmentedControl>
-          </>
-        }
+      {/* Reusable data-workspace view toolbar — column visibility + row density. The search/format
+          filters above stay native for their established URL/selectPill contracts. */}
+      <WorkspaceViewToolbar
+        columns={COLUMN_OPTIONS}
+        visibleColumns={visibleCols}
+        onVisibleColumnsChange={updateVisibleColumns}
+        selectAllLabel="Все показатели"
+        density={density}
+        onDensityChange={setDensity}
       />
       {/* Активные фильтры — снимаемые Astryx-токены; модель уже в URL (igContentFilters), токены
           лишь визуализируют её и снимают по одному. */}
@@ -608,7 +574,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
 
   return (
     <div className="space-y-8">
-      <Theme theme={neutralTheme} mode={theme}>
+      <WorkspaceSurface>
         <div
           className={cn(
             'grid gap-6 lg:items-start',
@@ -628,7 +594,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
             />
           )}
         </div>
-      </Theme>
+      </WorkspaceSurface>
 
       {!campaignDataBlocked && secondaryBlock}
       {detail}
@@ -661,62 +627,56 @@ function IgPostInspector({
   onAddToCampaign: (post: IgPost) => void;
 }) {
   return (
-    <LayoutPanel
+    <WorkspaceInspector
       label="Детали выбранной публикации"
-      role="complementary"
-      hasDivider
-      padding={4}
-      width="100%"
+      title="Детали публикации"
+      onClose={onClose}
+      bodyProps={{ 'data-ig-content-inspector': '', 'data-ig-content-inspector-open': '' }}
+      footer={
+        <>
+          {post.id != null && (
+            <AxButton
+              label="Открыть подробнее"
+              variant="primary"
+              size="sm"
+              onClick={() => onOpenFull(post.id!)}
+            />
+          )}
+          {!campaignScoped && canCampaign && post.id != null && (
+            <AxButton
+              label="Добавить в кампанию"
+              variant="secondary"
+              size="sm"
+              onClick={() => onAddToCampaign(post)}
+            />
+          )}
+        </>
+      }
     >
-      <div className="space-y-4" data-ig-content-inspector data-ig-content-inspector-open="">
-          <div className="flex items-center justify-between gap-3">
-            <AxText type="label">Детали публикации</AxText>
-            <AxButton label="Закрыть" variant="ghost" size="sm" onClick={onClose} />
+      <div className="flex items-start gap-3">
+        <IgPostThumb post={post} />
+        <div className="min-w-0 flex-1 space-y-1">
+          <AxText type="label" maxLines={2}>
+            {post.caption || 'Без подписи'}
+          </AxText>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Token label={igFormatLabel(post)} size="sm" color="gray" />
+            {post.timestamp && <AxText type="supporting" size="2xs">{fmt.date(post.timestamp)}</AxText>}
           </div>
-          <div className="flex items-start gap-3">
-            <IgPostThumb post={post} />
-            <div className="min-w-0 flex-1 space-y-1">
-              <AxText type="label" maxLines={2}>
-                {post.caption || 'Без подписи'}
-              </AxText>
-              <div className="flex flex-wrap items-center gap-1.5">
-                <Token label={igFormatLabel(post)} size="sm" color="gray" />
-                {post.timestamp && <AxText type="supporting" size="2xs">{fmt.date(post.timestamp)}</AxText>}
-              </div>
-            </div>
-          </div>
-
-          <InspectorBenchmark post={post} reachMedian={reachMedian} />
-
-          <MetadataList title="Показатели" columns="single" label={{ position: 'start' }}>
-            <MetadataListItem label="Охват">{fmt.num(post.reach)}</MetadataListItem>
-            <MetadataListItem label="Просмотры">{fmt.num(post.views)}</MetadataListItem>
-            <MetadataListItem label="Взаимодействия">{fmt.num(igInteractions(post))}</MetadataListItem>
-            <MetadataListItem label="ER">{igEr(post) != null ? `${igEr(post)!.toFixed(2)}%` : '—'}</MetadataListItem>
-            <MetadataListItem label="Сохранения">{fmt.num(post.saved)}</MetadataListItem>
-            <MetadataListItem label="Репосты">{fmt.num(post.shares)}</MetadataListItem>
-          </MetadataList>
-
-          <div className="flex flex-wrap gap-2">
-            {post.id != null && (
-              <AxButton
-                label="Открыть подробнее"
-                variant="primary"
-                size="sm"
-                onClick={() => onOpenFull(post.id!)}
-              />
-            )}
-            {!campaignScoped && canCampaign && post.id != null && (
-              <AxButton
-                label="Добавить в кампанию"
-                variant="secondary"
-                size="sm"
-                onClick={() => onAddToCampaign(post)}
-              />
-            )}
-          </div>
+        </div>
       </div>
-    </LayoutPanel>
+
+      <InspectorBenchmark post={post} reachMedian={reachMedian} />
+
+      <MetadataList title="Показатели" columns="single" label={{ position: 'start' }}>
+        <MetadataListItem label="Охват">{fmt.num(post.reach)}</MetadataListItem>
+        <MetadataListItem label="Просмотры">{fmt.num(post.views)}</MetadataListItem>
+        <MetadataListItem label="Взаимодействия">{fmt.num(igInteractions(post))}</MetadataListItem>
+        <MetadataListItem label="ER">{igEr(post) != null ? `${igEr(post)!.toFixed(2)}%` : '—'}</MetadataListItem>
+        <MetadataListItem label="Сохранения">{fmt.num(post.saved)}</MetadataListItem>
+        <MetadataListItem label="Репосты">{fmt.num(post.shares)}</MetadataListItem>
+      </MetadataList>
+    </WorkspaceInspector>
   );
 }
 

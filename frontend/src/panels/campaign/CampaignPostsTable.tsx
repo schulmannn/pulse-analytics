@@ -1,10 +1,20 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
+// Astryx runtime primitives (via the shared data-workspace boundary) — subpath imports for tree-shaking.
+import { MetadataList, MetadataListItem } from '@astryxdesign/core/MetadataList';
+import { Text as AxText } from '@astryxdesign/core/Text';
+import { Button as AxButton } from '@astryxdesign/core/Button';
 import type { CampaignPost } from '@/api/schemas';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { SearchField } from '@/components/SearchField';
 import { NetworkBadge } from '@/components/campaigns/shared';
+import {
+  WorkspaceInspector,
+  WorkspaceSurface,
+  WorkspaceViewToolbar,
+  type WorkspaceDensity,
+} from '@/components/data-workspace';
 import { TableSkeleton } from '@/components/ui/dataSkeleton';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -92,12 +102,21 @@ function Frame({ children }: { children: React.ReactNode }) {
   );
 }
 
-const SORT_COLUMNS: { key: PostSortKey; label: string }[] = [
-  { key: 'result', label: 'Основной результат' },
-  { key: 'interactions', label: 'Взаимодействия' },
+// The two configurable metric columns. Keys match PostSortKey, so column visibility, sorting and the
+// inspector all read one source of truth. Publication/source/date + selection/remove stay pinned.
+interface CampaignMetricCol {
+  key: Extract<PostSortKey, 'result' | 'interactions'>;
+  label: string;
+  get: (p: CampaignPost) => CampaignPostMetric;
+}
+const METRIC_COLS: CampaignMetricCol[] = [
+  { key: 'result', label: 'Основной результат', get: postPrimaryResult },
+  { key: 'interactions', label: 'Взаимодействия', get: postInteractions },
 ];
+const COLUMN_OPTIONS = METRIC_COLS.map((c) => ({ value: c.key, label: c.label }));
+const ALL_COLUMN_KEYS = COLUMN_OPTIONS.map((o) => o.value);
 
-/** Desktop: поиск + сортировка (URL) + счётчик + чекбоксы + групповое удаление. */
+/** Desktop: поиск + сортировка (URL) + счётчик + чекбоксы + групповое удаление + вид таблицы + инспектор. */
 function InteractivePostsTable({
   posts,
   canEdit,
@@ -116,28 +135,45 @@ function InteractivePostsTable({
   const { q: query, sort, order } = tableState;
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Table view state (local, not URL-backed): which metric columns show + row density.
+  const [visibleCols, setVisibleCols] = useState<string[]>(ALL_COLUMN_KEYS);
+  const [density, setDensity] = useState<WorkspaceDensity>('balanced');
+  // openKey → the post shown in the adjacent inspector (row click).
+  const [openKey, setOpenKey] = useState<string | null>(null);
 
   const rows = useMemo(
     () => sortPosts(filterPostsByQuery(posts, query), sort, order),
     [posts, query, sort, order],
   );
 
-  // Выбор чистим от строк, выпавших из фильтра/удалённых, чтобы «Убрать выбранные» не бил вслепую.
+  // Выбор и инспектор чистим от строк, выпавших из фильтра/удалённых, чтобы действия не били вслепую.
   useEffect(() => {
     const visible = new Set(rows.map(postKey));
     setSelected((prev) => {
       const next = new Set([...prev].filter((k) => visible.has(k)));
       return next.size === prev.size ? prev : next;
     });
+    setOpenKey((prev) => (prev != null && !visible.has(prev) ? null : prev));
   }, [rows]);
 
   const patchTableState = (patch: Partial<CampaignPostTableState>) => {
-    setSearchParams(applyCampaignPostTableState(searchParams, { ...tableState, ...patch }), { replace: true });
+    // URL is shared with sibling controls (source filter / chart mode). Reading the live location
+    // prevents a fast sibling change from being overwritten before this component re-renders.
+    const current = new URLSearchParams(window.location.search);
+    const next = applyCampaignPostTableState(current, { ...parseCampaignPostTableState(current), ...patch });
+    setSearchParams(next, { replace: true });
   };
   const onSort = (key: PostSortKey) => {
     if (key === sort) patchTableState({ order: order === 'desc' ? 'asc' : 'desc' });
     else patchTableState({ sort: key, order: 'desc' });
   };
+
+  // Скрытие активной метрики сортировки безопасно возвращает сортировку к «дата, убыв».
+  const updateVisibleColumns = (next: string[]) => {
+    setVisibleCols(next);
+    if (sort !== 'date' && !next.includes(sort)) patchTableState({ sort: 'date', order: 'desc' });
+  };
+  const shownMetricCols = METRIC_COLS.filter((c) => visibleCols.includes(c.key));
 
   const selectedRows = rows.filter((p) => selected.has(postKey(p)));
   const allVisibleSelected = rows.length > 0 && rows.every((p) => selected.has(postKey(p)));
@@ -154,122 +190,237 @@ function InteractivePostsTable({
     onRemovePosts?.(selectedRows);
   };
 
-  return (
-    <div>
-      <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2">
-        <h3 className="text-sm font-medium text-foreground">Публикации кампании</h3>
-        <span className="text-xs tabular-nums text-muted-foreground" data-testid="campaign-posts-count">
-          {query ? `${fmt.num(rows.length)} из ${fmt.num(posts.length)} публ.` : `${fmt.num(posts.length)} публ.`}
-        </span>
-        <SearchField
-          className="ml-auto min-w-52"
-          value={query}
-          onChange={(q) => patchTableState({ q })}
-          ariaLabel="Поиск публикаций кампании"
-          placeholder="Поиск по подписи или источнику"
-          testId="campaign-posts-search"
-        />
-      </div>
+  const openPost = openKey != null ? rows.find((p) => postKey(p) === openKey) ?? null : null;
 
-      {canEdit && (
-        <div className="mb-2 flex min-h-8 items-center gap-2" data-testid="campaign-bulk-bar">
-          {selectedRows.length > 0 ? (
-            <>
-              <span className="text-xs tabular-nums text-muted-foreground">Выбрано: {fmt.num(selectedRows.length)}</span>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={removeSelected}
-                disabled={removePending}
-                className="text-muted-foreground hover:text-destructive"
-                data-testid="campaign-bulk-remove"
-              >
-                {removePending ? 'Убираю…' : 'Убрать выбранные'}
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => setSelected(new Set())}
-              >
-                Снять выбор
-              </Button>
-            </>
-          ) : (
-            <span className="text-2xs text-muted-foreground">Отметьте публикации, чтобы убрать их из кампании</span>
+  return (
+    <WorkspaceSurface>
+      <div>
+        <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+          <h3 className="text-sm font-medium text-foreground">Публикации кампании</h3>
+          <span className="text-xs tabular-nums text-muted-foreground" data-testid="campaign-posts-count">
+            {query ? `${fmt.num(rows.length)} из ${fmt.num(posts.length)} публ.` : `${fmt.num(posts.length)} публ.`}
+          </span>
+          <SearchField
+            className="ml-auto min-w-52"
+            value={query}
+            onChange={(q) => patchTableState({ q })}
+            ariaLabel="Поиск публикаций кампании"
+            placeholder="Поиск по подписи или источнику"
+            testId="campaign-posts-search"
+          />
+        </div>
+
+        {canEdit && (
+          <div className="mb-2 flex min-h-8 items-center gap-2" data-testid="campaign-bulk-bar">
+            {selectedRows.length > 0 ? (
+              <>
+                <span className="text-xs tabular-nums text-muted-foreground">Выбрано: {fmt.num(selectedRows.length)}</span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={removeSelected}
+                  disabled={removePending}
+                  className="text-muted-foreground hover:text-destructive"
+                  data-testid="campaign-bulk-remove"
+                >
+                  {removePending ? 'Убираю…' : 'Убрать выбранные'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setSelected(new Set())}
+                >
+                  Снять выбор
+                </Button>
+              </>
+            ) : (
+              <span className="text-2xs text-muted-foreground">Отметьте публикации, чтобы убрать их из кампании</span>
+            )}
+          </div>
+        )}
+
+        <div className="mb-3">
+          <WorkspaceViewToolbar
+            columns={COLUMN_OPTIONS}
+            visibleColumns={visibleCols}
+            onVisibleColumnsChange={updateVisibleColumns}
+            selectAllLabel="Все показатели"
+            density={density}
+            onDensityChange={setDensity}
+          />
+        </div>
+
+        <div
+          className={cn(
+            'grid gap-6 lg:items-start',
+            openPost && 'lg:grid-cols-[minmax(0,1fr)_minmax(300px,340px)]',
+          )}
+        >
+          <div className="min-w-0">
+            {rows.length === 0 ? (
+              <EmptyState compact title="Ничего не найдено по запросу." />
+            ) : (
+              <div className="data-table-surface">
+                <div className="data-table-scroll">
+                  <table
+                    className="data-table text-left text-sm"
+                    data-testid="campaign-posts-table"
+                    data-density={density}
+                  >
+                  <thead>
+                    <tr className="border-b border-border text-xs font-medium text-muted-foreground">
+                      {canEdit && (
+                        <th className="w-10 py-3 pl-0 pr-2">
+                          <Checkbox
+                            aria-label="Выбрать все публикации"
+                            checked={allVisibleSelected}
+                            onCheckedChange={toggleAll}
+                            data-testid="campaign-select-all"
+                          />
+                        </th>
+                      )}
+                      <th className="min-w-[260px] py-3 pl-0 pr-3">Публикация</th>
+                      <th className="min-w-[160px] px-3 py-3">Источник</th>
+                      {shownMetricCols.map((c) => (
+                        <SortHeader key={c.key} label={c.label} active={sort === c.key} order={order} onClick={() => onSort(c.key)} align="right" />
+                      ))}
+                      <SortHeader label="Дата" active={sort === 'date'} order={order} onClick={() => onSort('date')} align="left" />
+                      {canEdit && <th className="px-3 py-3 text-right last:pr-0"></th>}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {rows.map((p) => {
+                      const k = postKey(p);
+                      const isOpen = k === openKey;
+                      const isSelected = selected.has(k);
+                      return (
+                        <tr
+                          key={k}
+                          data-campaign-post-row
+                          data-campaign-post-open={isOpen ? '' : undefined}
+                          onClick={() => setOpenKey(k)}
+                          className={cn(
+                            'cursor-pointer transition-colors',
+                            isOpen ? 'bg-primary/10' : isSelected ? 'bg-primary/5 hover:bg-primary/8' : 'hover:bg-hover-row',
+                          )}
+                        >
+                          {canEdit && (
+                            <td className="py-3 pl-0 pr-2" onClick={(e) => e.stopPropagation()}>
+                              <Checkbox
+                                aria-label="Выбрать публикацию"
+                                checked={selected.has(k)}
+                                onCheckedChange={() => toggle(p)}
+                                data-testid="campaign-post-select"
+                              />
+                            </td>
+                          )}
+                          <PostCell post={p} first onOpen={() => setOpenKey(k)} />
+                          <SourceCell post={p} />
+                          {shownMetricCols.map((c) => (
+                            <CampaignMetricCell key={c.key} metric={c.get(p)} />
+                          ))}
+                          <td className="px-3 py-3 text-xs tabular-nums text-muted-foreground">
+                            {p.published_at ? fmt.date(p.published_at) : '—'}
+                          </td>
+                          {canEdit && (
+                            <td className="px-3 py-3 text-right last:pr-0" onClick={(e) => e.stopPropagation()}>
+                              <button
+                                type="button"
+                                onClick={() => onRemovePost(p)}
+                                disabled={removePending}
+                                className="text-xs font-medium text-muted-foreground transition-colors hover:text-destructive disabled:opacity-50"
+                              >
+                                Убрать
+                              </button>
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {openPost && (
+            <CampaignPostInspector
+              post={openPost}
+              canEdit={canEdit}
+              removePending={removePending}
+              onClose={() => setOpenKey(null)}
+              onRemove={() => onRemovePost(openPost)}
+            />
           )}
         </div>
-      )}
+      </div>
+    </WorkspaceSurface>
+  );
+}
 
-      {rows.length === 0 ? (
-        <EmptyState compact title="Ничего не найдено по запросу." />
-      ) : (
-        <div className="data-table-surface data-table-scroll">
-          <table className="data-table text-left text-sm" data-testid="campaign-posts-table">
-            <thead>
-              <tr className="border-b border-border text-xs font-medium text-muted-foreground">
-                {canEdit && (
-                  <th className="w-10 py-3 pl-0 pr-2">
-                    <Checkbox
-                      aria-label="Выбрать все публикации"
-                      checked={allVisibleSelected}
-                      onCheckedChange={toggleAll}
-                      data-testid="campaign-select-all"
-                    />
-                  </th>
-                )}
-                <th className="min-w-[260px] py-3 pl-0 pr-3">Публикация</th>
-                <th className="min-w-[160px] px-3 py-3">Источник</th>
-                {SORT_COLUMNS.map((c) => (
-                  <SortHeader key={c.key} label={c.label} active={sort === c.key} order={order} onClick={() => onSort(c.key)} align="right" />
-                ))}
-                <SortHeader label="Дата" active={sort === 'date'} order={order} onClick={() => onSort('date')} align="left" />
-                {canEdit && <th className="px-3 py-3 text-right last:pr-0"></th>}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {rows.map((p) => {
-                const k = postKey(p);
-                return (
-                  <tr key={k} className="transition-colors hover:bg-hover-row">
-                    {canEdit && (
-                      <td className="py-3 pl-0 pr-2">
-                        <Checkbox
-                          aria-label="Выбрать публикацию"
-                          checked={selected.has(k)}
-                          onCheckedChange={() => toggle(p)}
-                          data-testid="campaign-post-select"
-                        />
-                      </td>
-                    )}
-                    <PostCell post={p} first />
-                    <SourceCell post={p} />
-                    <CampaignMetricCell metric={postPrimaryResult(p)} />
-                    <CampaignMetricCell metric={postInteractions(p)} />
-                    <td className="px-3 py-3 text-xs tabular-nums text-muted-foreground">
-                      {p.published_at ? fmt.date(p.published_at) : '—'}
-                    </td>
-                    {canEdit && (
-                      <td className="px-3 py-3 text-right last:pr-0">
-                        <button
-                          type="button"
-                          onClick={() => onRemovePost(p)}
-                          disabled={removePending}
-                          className="text-xs font-medium text-muted-foreground transition-colors hover:text-destructive disabled:opacity-50"
-                        >
-                          Убрать
-                        </button>
-                      </td>
-                    )}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
+/**
+ * Соседний инспектор выбранной строки — read-first сводка на Astryx LayoutPanel. Читает уже
+ * загруженную публикацию и те же campaign-хелперы, что и таблица: сеть/источник, подпись, дата,
+ * основной результат и взаимодействия с честной семантикой недоступности. Ничего не пересчитывает.
+ */
+function CampaignPostInspector({
+  post,
+  canEdit,
+  removePending,
+  onClose,
+  onRemove,
+}: {
+  post: CampaignPost;
+  canEdit: boolean;
+  removePending: boolean;
+  onClose: () => void;
+  onRemove: () => void;
+}) {
+  const primary = postPrimaryResult(post);
+  const interactions = postInteractions(post);
+  const sourceLabel = post.accessible
+    ? post.channel_title || post.channel_username || `#${post.channel_id}`
+    : 'Источник недоступен';
+  const metricText = (metric: CampaignPostMetric) => (metric.value == null ? '—' : fmt.short(metric.value));
+  return (
+    <WorkspaceInspector
+      label="Детали выбранной публикации"
+      title="Детали публикации"
+      onClose={onClose}
+      bodyProps={{ 'data-campaign-inspector': '', 'data-campaign-inspector-open': '' }}
+      footer={
+        canEdit ? (
+          <AxButton
+            label={removePending ? 'Убираю…' : 'Убрать из кампании'}
+            variant="secondary"
+            size="sm"
+            isDisabled={removePending}
+            onClick={onRemove}
+          />
+        ) : undefined
+      }
+    >
+      <div className="flex items-center gap-2">
+        <NetworkBadge network={post.network} />
+        <AxText type="supporting" size="2xs">{sourceLabel}</AxText>
+      </div>
+      <AxText type="label" maxLines={3}>
+        {post.accessible
+          ? post.caption
+            ? markdownToPlainText(post.caption)
+            : 'Без подписи'
+          : 'Содержимое скрыто'}
+      </AxText>
+      {post.published_at && <AxText type="supporting" size="2xs">{fmt.date(post.published_at)}</AxText>}
+
+      <MetadataList title="Показатели" columns="single" label={{ position: 'start' }}>
+        <MetadataListItem label={primary.label}>{metricText(primary)}</MetadataListItem>
+        <MetadataListItem label={interactions.label}>{metricText(interactions)}</MetadataListItem>
+      </MetadataList>
+    </WorkspaceInspector>
   );
 }
 
@@ -378,15 +529,27 @@ function SourceCell({ post: p, first = false }: { post: CampaignPost; first?: bo
   );
 }
 
-function PostCell({ post: p, first = false }: { post: CampaignPost; first?: boolean }) {
+function PostCell({ post: p, first = false, onOpen }: { post: CampaignPost; first?: boolean; onOpen?: () => void }) {
+  const body = p.accessible ? (
+    <span className={cn('line-clamp-1 max-w-md', p.caption ? 'text-foreground' : 'italic text-muted-foreground')}>
+      {p.caption ? markdownToPlainText(p.caption) : 'Без подписи'}
+    </span>
+  ) : (
+    <span className="italic text-muted-foreground">Содержимое скрыто</span>
+  );
   return (
     <td className={cn(first ? 'py-3 pl-0 pr-3' : 'px-3 py-3')}>
-      {p.accessible ? (
-        <span className={cn('line-clamp-1 max-w-md', p.caption ? 'text-foreground' : 'italic text-muted-foreground')}>
-          {p.caption ? markdownToPlainText(p.caption) : 'Без подписи'}
-        </span>
+      {onOpen ? (
+        <button
+          type="button"
+          onClick={onOpen}
+          data-campaign-post-open-trigger
+          className="block w-full max-w-md rounded text-left focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45"
+        >
+          {body}
+        </button>
       ) : (
-        <span className="italic text-muted-foreground">Содержимое скрыто</span>
+        body
       )}
     </td>
   );

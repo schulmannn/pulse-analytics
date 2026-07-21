@@ -261,7 +261,9 @@ test.describe('Смешанная кампания TG+IG', () => {
     await expect.poll(() => new URL(page.url()).searchParams.get('q')).toBe('reels');
     await expect(tableRows).toHaveCount(1);
     await selectPill(page.getByTestId('campaign-source-filter'), { value: '' });
+    await expect.poll(() => new URL(page.url()).searchParams.has('source')).toBe(false);
     await page.getByTestId('campaign-posts-search').fill('');
+    await expect.poll(() => new URL(page.url()).searchParams.has('q')).toBe(false);
 
     // Сортировка пишет канонический sort и сохраняет выбранный режим графика.
     await table.getByRole('button', { name: 'Основной результат', exact: true }).click();
@@ -269,13 +271,78 @@ test.describe('Смешанная кампания TG+IG', () => {
     await expect.poll(() => new URL(page.url()).searchParams.get('metric')).toBe('ig_reach');
     await expect.poll(() => new URL(page.url()).searchParams.has('tq')).toBe(false);
     await expect.poll(() => new URL(page.url()).searchParams.has('tsort')).toBe(false);
+    await expect(tableRows).toHaveCount(4);
 
     // Групповое удаление: выбрать одну TG- и одну IG-строку и убрать только membership.
     await tableRows.filter({ hasText: 'TG видео о продукте' }).getByTestId('campaign-post-select').check();
     await tableRows.filter({ hasText: 'IG reels тизер' }).getByTestId('campaign-post-select').check();
     await expect(page.getByText('Выбрано: 2')).toBeVisible();
     await page.getByTestId('campaign-bulk-remove').click();
+    const removeConfirm = page.getByRole('alertdialog');
+    await expect(removeConfirm).toBeVisible();
+    await expect(removeConfirm.getByText('Убрать 2 публ. из кампании?')).toBeVisible();
+    await removeConfirm.getByRole('button', { name: 'Убрать' }).click();
     await expect(tableRows).toHaveCount(2);
+  });
+
+  test('рабочая поверхность: плотность · видимость колонок · соседний инспектор · изоляция клика', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name === 'mobile-430', 'desktop-поверхность (интерактивная таблица скрыта на мобильном)');
+    await boot(page);
+    const table = page.getByTestId('campaign-posts-table');
+    const tableRows = table.locator('tbody tr');
+    await expect(tableRows).toHaveCount(4);
+
+    // ── Плотность — Astryx SegmentedControl (radiogroup). Дефолт «Обычно» → data-density=balanced. ──
+    await expect(table).toHaveAttribute('data-density', 'balanced');
+    await page.getByRole('radio', { name: 'Плотно' }).click();
+    await expect(table).toHaveAttribute('data-density', 'compact');
+    await page.getByRole('radio', { name: 'Свободно' }).click();
+    await expect(table).toHaveAttribute('data-density', 'spacious');
+
+    // ── Видимость колонок — Astryx MultiSelector. Скрытие активной метрики сортировки безопасно ──
+    // ── возвращает сортировку к «дата, убыв». ──
+    await table.getByRole('button', { name: 'Основной результат', exact: true }).click();
+    await expect.poll(() => new URL(page.url()).searchParams.get('sort')).toBe('result');
+    await expect(table.getByRole('columnheader', { name: 'Основной результат' })).toBeVisible();
+    await page.getByRole('combobox', { name: 'Колонки' }).click();
+    await page.getByRole('option', { name: 'Основной результат' }).click();
+    await page.keyboard.press('Escape');
+    await expect(table.getByRole('columnheader', { name: 'Основной результат' })).toHaveCount(0);
+    await expect.poll(() => new URL(page.url()).searchParams.has('sort')).toBe(false);
+    // Взаимодействия остаётся, идентичность/дата/действия по-прежнему на месте.
+    await expect(table.getByRole('columnheader', { name: 'Взаимодействия' })).toBeVisible();
+    await expect(table.getByRole('columnheader', { name: 'Публикация' })).toBeVisible();
+    await expect(table.getByRole('columnheader', { name: 'Дата' })).toBeVisible();
+    await expect(tableRows).toHaveCount(4);
+
+    // ── Соседний инспектор: клик по строке раскрывает панель с сетью/источником и метриками. ──
+    await tableRows.filter({ hasText: 'TG видео о продукте' }).locator('[data-campaign-post-open-trigger]').click();
+    const inspector = page.locator('[data-campaign-inspector-open]');
+    await expect(inspector).toBeVisible();
+    await expect(inspector.getByText('TG видео о продукте')).toBeVisible();
+    await expect(inspector.getByText('TG просмотры')).toBeVisible();
+    await expect(inspector.getByText('TG реакции + репосты + комментарии')).toBeVisible();
+    const overflowContract = await table.evaluate((element) => ({
+      tableOverflowX: getComputedStyle(element.parentElement!).overflowX,
+      pageFitsViewport: document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
+    }));
+    expect(['auto', 'scroll']).toContain(overflowContract.tableOverflowX);
+    expect(overflowContract.pageFitsViewport).toBeTruthy();
+    await testInfo.attach('campaign-inspector-desktop', { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' });
+
+    // ── Чекбокс не открывает инспектор (клик изолирован от строки). ──
+    await inspector.getByRole('button', { name: 'Закрыть' }).click();
+    await expect(page.locator('[data-campaign-inspector-open]')).toHaveCount(0);
+    await tableRows.filter({ hasText: 'TG анонс запуска' }).getByTestId('campaign-post-select').check();
+    await expect(page.getByText('Выбрано: 1')).toBeVisible();
+    await expect(page.locator('[data-campaign-inspector-open]')).toHaveCount(0);
+
+    // ── Инспектор закрывается, когда его пост уходит из выборки (фильтр/удаление). ──
+    await tableRows.filter({ hasText: 'IG reels тизер' }).locator('[data-campaign-post-open-trigger]').click();
+    await expect(page.locator('[data-campaign-inspector-open]')).toBeVisible();
+    await page.getByTestId('campaign-posts-search').fill('карточка');
+    await expect(tableRows).toHaveCount(1);
+    await expect(page.locator('[data-campaign-inspector-open]')).toHaveCount(0);
   });
 
   test('mobile сохраняет прежние графики и семантику таблицы', async ({ page }, testInfo) => {
