@@ -11,6 +11,7 @@ import { PeriodProvider } from '@/lib/period';
 import { clearSessionToken, getSessionToken } from '@/lib/session';
 import { ThemeProvider } from '@/lib/theme';
 import { installGlobalErrorReporter } from '@/lib/crashReporting';
+import { Toaster } from '@/components/ui/sonner';
 import '@fontsource-variable/geist';
 import '@/index.css';
 
@@ -56,6 +57,9 @@ createRoot(document.getElementById('root')!).render(
             <BrowserRouter basename="/">
               <DemoProvider>
                 <App />
+                {/* Глобальные тосты (sonner). Внутри ThemeProvider — Toaster читает нашу тему;
+                    колбэки действий замыкают navigate у call-site, роутер-контекст ему не нужен. */}
+                <Toaster />
               </DemoProvider>
             </BrowserRouter>
           </PeriodProvider>

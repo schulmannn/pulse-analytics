@@ -1,7 +1,5 @@
-import { useEffect, useRef } from 'react';
-import { createPortal } from 'react-dom';
-import { useFocusTrap } from '@/lib/useFocusTrap';
 import { useChannels } from '@/api/queries';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { WidgetBody } from '@/components/ConfigWidget';
 import { PillSelect } from '@/components/PillSelect';
 import { SegmentedControl } from '@/components/SegmentedControl';
@@ -92,25 +90,6 @@ export function ConfigEditDialog({
   const spec = editorSpec(config);
   const metric = getMetric(config.metricId);
   const legacyKey = legacyKeyForMetricId(config.metricId);
-  // Modal focus contract (like PostDetailModal/DetailShell): move focus in, trap Tab, restore the
-  // opener on close — without it aria-modal hides content the keyboard is actually walking.
-  const panelRef = useRef<HTMLDivElement>(null);
-  useFocusTrap(panelRef);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        onClose();
-      }
-    };
-    document.addEventListener('keydown', onKey, true);
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.removeEventListener('keydown', onKey, true);
-      document.body.style.overflow = prev;
-    };
-  }, [onClose]);
 
   const reset = () =>
     onChange({
@@ -127,20 +106,12 @@ export function ConfigEditDialog({
       style: undefined,
     });
 
-  return createPortal(
-    <div
-      className="fixed inset-0 z-modal flex items-start justify-center overflow-y-auto bg-background/70 p-4 backdrop-blur-xs backdrop-grayscale sm:p-8"
-      role="dialog"
-      aria-modal="true"
-      aria-label={`Настройка виджета «${config.title || spec.label}»`}
-      onClick={onClose}
-    >
-      <div
-        ref={panelRef}
-        tabIndex={-1}
-        className="my-auto grid w-full max-w-3xl grid-cols-1 gap-5 rounded-xl border border-border bg-card p-5 focus:outline-hidden sm:grid-cols-[minmax(0,1fr)_300px]"
-        onClick={(e) => e.stopPropagation()}
-      >
+  // Radix (ui/dialog) владеет порталом, focus-trap'ом, Escape, скролл-локом и возвратом фокуса —
+  // ручной контракт (useFocusTrap + capture-Escape + body.overflow) ушёл целиком.
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="grid max-w-3xl grid-cols-1 gap-5 sm:grid-cols-[minmax(0,1fr)_300px]">
+        <DialogTitle className="sr-only">{`Настройка виджета «${config.title || spec.label}»`}</DialogTitle>
         {/* Left — live preview: the SAME body the card shows, over the config being edited, so every
             change is seen before it's committed (edits already write through to the store). */}
         <div className="min-w-0">
@@ -185,9 +156,8 @@ export function ConfigEditDialog({
             </button>
           </div>
         </div>
-      </div>
-    </div>,
-    document.body,
+      </DialogContent>
+    </Dialog>
   );
 }
 

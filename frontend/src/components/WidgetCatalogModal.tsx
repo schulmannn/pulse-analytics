@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { useFocusTrap } from '@/lib/useFocusTrap';
+import { useMemo, useRef, useState } from 'react';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { CATEGORY_LABEL, CATEGORY_ORDER, metricsForSource, type MetricDef, type WidgetViz } from '@/lib/widgetMetrics';
 
 /**
@@ -26,33 +25,7 @@ export function WidgetCatalogModal({
 }) {
   const [source, setSource] = useState<'tg' | 'ig' | 'ms'>(AVAILABLE_SOURCES[0]);
   const [query, setQuery] = useState('');
-
-  // Modal focus contract. Order matters: useFocusTrap's effect must run FIRST so it snapshots the
-  // real opener before focus moves; the search field is then focused from the second effect (an
-  // `autoFocus` attribute would fire during commit — before the trap — corrupting the opener
-  // snapshot and getting overridden by the trap's panel.focus()).
-  const panelRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
-  useFocusTrap(panelRef);
-  useEffect(() => {
-    searchRef.current?.focus();
-  }, []);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        onClose();
-      }
-    };
-    document.addEventListener('keydown', onKey, true);
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.removeEventListener('keydown', onKey, true);
-      document.body.style.overflow = prev;
-    };
-  }, [onClose]);
 
   const q = query.trim().toLowerCase();
   // Group the source's metrics by category, applying the search filter (label + formula text).
@@ -74,22 +47,19 @@ export function WidgetCatalogModal({
 
   const empty = groups.length === 0;
 
-  return createPortal(
-    <div
-      className="fixed inset-0 z-modal flex items-start justify-center overflow-y-auto bg-background/70 p-4 backdrop-blur-xs backdrop-grayscale sm:p-8"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Каталог метрик"
-      onClick={onClose}
-    >
-      <div
-        ref={panelRef}
-        tabIndex={-1}
-        className="my-auto w-full max-w-2xl rounded-xl border border-border bg-card p-5 focus:outline-hidden"
-        onClick={(e) => e.stopPropagation()}
+  // Radix (ui/dialog) владеет порталом, focus-trap'ом, Escape, скролл-локом и возвратом фокуса.
+  // onOpenAutoFocus → поиск: дефолтный фокус Radix на панели, а канон каталога — сразу печатать.
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent
+        className="max-w-2xl"
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          searchRef.current?.focus();
+        }}
       >
         <div className="flex items-center justify-between gap-3">
-          <div className="text-sm font-medium text-foreground">Добавить метрику</div>
+          <DialogTitle className="text-sm font-medium text-foreground">Добавить метрику</DialogTitle>
           <button
             type="button"
             aria-label="Закрыть"
@@ -148,9 +118,8 @@ export function WidgetCatalogModal({
             ))
           )}
         </div>
-      </div>
-    </div>,
-    document.body,
+      </DialogContent>
+    </Dialog>
   );
 }
 

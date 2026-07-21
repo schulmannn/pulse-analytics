@@ -1,12 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useState } from 'react';
+import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { usePostStats } from '@/api/queries';
 import type { NormalizedPost } from '@/lib/posts';
 import { fmt, ruAxisLabel } from '@/lib/format';
 import { cn } from '@/lib/utils';
+import { Dialog, DialogOverlay, DialogPortal, DialogTitle, useRestoreOpenerFocus } from '@/components/ui/dialog';
 import { MetricInfo } from '@/components/InfoTooltip';
 import { getDrillMetric, getMetric, type MetricDef } from '@/lib/widgetMetrics';
-import { useFocusTrap } from '@/lib/useFocusTrap';
 import { useLayerBack } from '@/lib/useLayerBack';
 import { LineChart } from '@/components/LineChart';
 import { RichText } from '@/components/RichText';
@@ -60,44 +60,30 @@ export function PostDetailModal({
   onAddToCampaign,
   onClose,
 }: PostDetailModalProps) {
-  const panelRef = useRef<HTMLDivElement>(null);
   const [previewFailed, setPreviewFailed] = useState(false);
   const hasPreview = !!post.thumb && !previewFailed;
-  useFocusTrap(panelRef);
   // Browser Back / the phone's back gesture closes the modal instead of leaving the page.
   useLayerBack(onClose);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', onKey);
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = prevOverflow;
-    };
-  }, [onClose]);
+  // Сырой DialogPrimitive.Content (не DialogContent) — реставрацию опенера подключаем сами.
+  const restoreOpener = useRestoreOpenerFocus();
 
   const pct = (v: number | null, digits: number) => (v != null ? `${v.toFixed(digits)}%` : '—');
 
-  return createPortal(
-    <div
-      className="fixed inset-0 z-modal flex items-end justify-center sm:items-center"
-      role="dialog"
-      aria-modal="true"
-      aria-label={rank != null ? `Детали поста №${rank}` : 'Детали поста'}
-    >
-      <div
-        className="absolute inset-0 bg-background/70 backdrop-blur-xs backdrop-grayscale"
-        onClick={onClose}
-        aria-hidden="true"
-      />
-      <div
-        ref={panelRef}
-        tabIndex={-1}
-        className="relative z-10 flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl border bg-card focus:outline-hidden sm:rounded-2xl lg:max-w-5xl"
-      >
+  // Radix (ui/dialog primitives) владеет порталом, focus-trap'ом, Escape, скролл-локом и
+  // возвратом фокуса. Content собран вручную (не стоковый DialogContent): мобильный канон —
+  // edge-to-edge bottom-sheet (items-end + rounded-t-2xl), который центрированный сток сломал бы;
+  // e2e mobile-nav это пинит. Клик по обёртке вне панели = outside для dismissable-слоя Radix.
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogPortal>
+        <DialogOverlay />
+        <div className="fixed inset-0 z-modal flex items-end justify-center sm:items-center">
+          <DialogPrimitive.Content
+            aria-label={rank != null ? `Детали поста №${rank}` : 'Детали поста'}
+            onCloseAutoFocus={restoreOpener}
+            className="relative flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl border bg-card focus:outline-hidden sm:rounded-2xl lg:max-w-5xl"
+          >
+            <DialogTitle className="sr-only">{rank != null ? `Детали поста №${rank}` : 'Детали поста'}</DialogTitle>
         {/* Header */}
         <div className="flex items-center justify-between border-b px-5 py-3">
           <div className="flex items-center gap-2.5">
@@ -266,9 +252,10 @@ export function PostDetailModal({
             )}
           </div>
         )}
-      </div>
-    </div>,
-    document.body,
+          </DialogPrimitive.Content>
+        </div>
+      </DialogPortal>
+    </Dialog>
   );
 }
 

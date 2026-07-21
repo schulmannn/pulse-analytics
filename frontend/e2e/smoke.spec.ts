@@ -258,7 +258,11 @@ test('desktop sidebar glides between open and rail without moving the icon axis'
   await expect(combobox).toBeFocused();
   await combobox.press('Control+b');
   await page.waitForTimeout(320);
-  expect((await requireBox(sidebar)).width).toBeCloseTo(64, 0);
+  // Палитра теперь настоящий модальный Radix-диалог: пока она открыта, фон честно aria-hidden,
+  // и role-локатор сайдбара слепнет. Геометрию меряем CSS-локатором — контракт тот же
+  // (Ctrl+B в фокусе поиска НЕ тогглит панель), меняется только механизм замера.
+  const sidebarCss = page.locator('aside[aria-label="Боковая панель"]');
+  expect((await requireBox(sidebarCss)).width).toBeCloseTo(64, 0);
   await page.keyboard.press('Escape');
 
   // Interrupting an expansion must reverse through CSS and settle on the last requested state.

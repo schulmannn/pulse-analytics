@@ -1,7 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useFocusTrap } from '@/lib/useFocusTrap';
 import { useChannels, useLogout, useMe } from '@/api/queries';
 import { useSelectedChannel } from '@/lib/channel-context';
 import { setCommandPaletteOpen, toggleCommandPalette, useCommandPaletteOpen } from '@/lib/command-palette';
@@ -11,6 +10,14 @@ import { setActiveNetwork } from '@/lib/networkStore';
 import { getDrillMetric } from '@/lib/widgetMetrics';
 import { Icon } from '@/components/nav-icons';
 import type { IconName } from '@/components/nav-icons';
+import {
+  CommandDialog,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command';
 
 interface PaletteCommand {
   id: string;
@@ -111,17 +118,14 @@ function saveRecent(id: string) {
 
 export function CommandPalette() {
   const { open, setOpen } = useCommandPalette();
-  // The dialog is a separate component mounted per open: an always-mounted component's focus-trap
-  // effect would arm exactly once at app boot with a null panel (CommandPalette lives permanently
-  // in App). Mount-per-open also resets query/selection naturally and lets the trap restore the
-  // ⌘K-time focus position on close.
+  // Mount-per-open (как и раньше): query/recents сбрасываются естественно, cmdk строит список
+  // заново на каждое открытие (recents другой вкладки подтягиваются при следующем ⌘K).
   if (!open) return null;
   return <PaletteDialog close={() => setOpen(false)} />;
 }
 
 function PaletteDialog({ close }: { close: () => void }) {
   const [query, setQuery] = useState('');
-  const [selectedIndex, setSelectedIndex] = useState(0);
   // History is read at mount — i.e. per open (another tab may have added entries since last time).
   const [recents] = useState<string[]>(loadRecents);
   const navigate = useNavigate();
@@ -129,17 +133,6 @@ function PaletteDialog({ close }: { close: () => void }) {
   const channelsQuery = useChannels();
   const logout = useLogout();
   const { setChannelId } = useSelectedChannel();
-
-  // Modal focus contract: the trap arms FIRST (snapshotting the real ⌘K-time opener to restore on
-  // close), then the search field takes initial focus. An `autoFocus` attribute would fire during
-  // commit — before the trap's effect — corrupting the opener snapshot and then losing focus to
-  // the trap's panel.focus().
-  const panelRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-  useFocusTrap(panelRef);
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
 
   const iconFor = (name: IconName) => <Icon name={name} className="h-4 w-4 shrink-0" />;
 
@@ -248,163 +241,91 @@ function PaletteDialog({ close }: { close: () => void }) {
     },
   };
 
-  const commands: PaletteCommand[] = [...routeCommands, ...metricCommands,
-    ...igMetricCommands, ...sourceCommands, logoutCommand];
-  const normalizedQuery = query.trim().toLowerCase();
+  const groups: PaletteSection[] = [
+    { title: 'Разделы', items: routeCommands },
+    { title: 'Метрики', items: [...metricCommands, ...igMetricCommands] },
+    ...(sourceCommands.length > 0 ? [{ title: 'Источники', items: sourceCommands }] : []),
+    { title: 'Аккаунт', items: [logoutCommand] },
+  ];
+  const byId = new Map(groups.flatMap((g) => g.items).map((c) => [c.id, c]));
+  const recentItems = recents
+    .map((id) => byId.get(id))
+    .filter((c): c is PaletteCommand => c !== undefined);
 
-  // Empty query = browsable groups with the history on top; a query = one flat hit list.
-  const sections: PaletteSection[] = [];
-  if (normalizedQuery) {
-    sections.push({ title: null, items: commands.filter((c) => c.search.includes(normalizedQuery)) });
-  } else {
-    const byId = new Map(commands.map((c) => [c.id, c]));
-    const recentItems = recents
-      .map((id) => byId.get(id))
-      .filter((c): c is PaletteCommand => c !== undefined);
-    if (recentItems.length > 0) sections.push({ title: 'Недавнее', items: recentItems });
-    sections.push({ title: 'Разделы', items: routeCommands });
-    sections.push({ title: 'Метрики', items: metricCommands });
-    if (sourceCommands.length > 0) sections.push({ title: 'Источники', items: sourceCommands });
-    sections.push({ title: 'Аккаунт', items: [logoutCommand] });
-  }
-  const flatCommands = sections.flatMap((s) => s.items);
-  // Per-section start offset → a row's flat index = offset + position (keyboard selection
-  // walks the flat list while the render stays grouped).
-  const offsets: number[] = [];
-  {
-    let acc = 0;
-    for (const section of sections) {
-      offsets.push(acc);
-      acc += section.items.length;
-    }
-  }
-
-  useEffect(() => {
-    setSelectedIndex(0);
-  }, [flatCommands.length, normalizedQuery]);
-
-  const execute = (command: PaletteCommand | undefined) => {
-    if (!command) return;
+  const execute = (command: PaletteCommand) => {
     saveRecent(command.id);
     command.run();
     close();
   };
 
+  // cmdk владеет фильтрацией (fuzzy, command-score), клавиатурой и ARIA-комбобоксом — ручной
+  // flat-index/aria-activedescendant слой ушёл целиком. value = label; старые substring-термины
+  // уехали в keywords, так что прежние запросы находят то же самое (но опечатко-устойчивее).
+  // «Недавнее» видно только на пустом запросе (как раньше); дубли id между «Недавнее» и группами
+  // разведены value-префиксом.
   return (
-    <div
-      className="fixed inset-0 z-modal flex items-start justify-center bg-background/70 p-4 pt-[16vh] backdrop-blur-xs backdrop-grayscale"
-      onClick={close}
+    <CommandDialog
+      open
+      onOpenChange={(nextOpen) => !nextOpen && close()}
+      title="Поиск"
+      description="Поиск: разделы, метрики, источники"
+      className="top-[16vh] max-w-xl translate-y-0 gap-0"
     >
-      <div
-        ref={panelRef}
-        tabIndex={-1}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Поиск"
-        className="w-full max-w-xl overflow-hidden rounded-xl border border-border bg-card focus:outline-hidden"
-        onClick={(event) => event.stopPropagation()}
-      >
-        {/* Input-first, no title bar (Claude / steep «Jump to»): icon + field + esc chip. */}
-        <div className="flex items-center gap-3 px-4">
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true">
-            <circle cx="7" cy="7" r="4.5" />
-            <path d="m10.5 10.5 3 3" strokeLinecap="round" />
-          </svg>
-          <input
-            ref={inputRef}
-            // ARIA 1.2 combobox: ↑/↓ move a virtual selection while DOM focus stays here, so the
-            // active option must be exposed via aria-activedescendant — without it a screen reader
-            // hears nothing on the advertised «↑↓ — навигация» and Enter runs an unnamed command.
-            role="combobox"
-            aria-label="Поиск"
-            aria-expanded={flatCommands.length > 0}
-            aria-autocomplete="list"
-            aria-controls={flatCommands.length > 0 ? 'cp-list' : undefined}
-            aria-activedescendant={flatCommands.length > 0 ? `cp-opt-${selectedIndex}` : undefined}
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            onKeyDown={(event) => {
-              // Scroll only on KEYBOARD moves (the list scrolls at max-h-[46vh] while ↑/↓ drive a
-              // virtual selection). Hover also moves the selection — scrolling there would jump
-              // the list under a stationary cursor and creep it via re-fired mouseenter.
-              if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-                event.preventDefault();
-                if (flatCommands.length === 0) return;
-                const next =
-                  event.key === 'ArrowDown'
-                    ? (selectedIndex + 1) % flatCommands.length
-                    : (selectedIndex - 1 + flatCommands.length) % flatCommands.length;
-                setSelectedIndex(next);
-                document.getElementById(`cp-opt-${next}`)?.scrollIntoView({ block: 'nearest' });
-              } else if (event.key === 'Enter') {
-                event.preventDefault();
-                execute(flatCommands[selectedIndex]);
-              }
-            }}
-            placeholder="Поиск: разделы, метрики, источники…"
-            className="min-w-0 flex-1 bg-transparent py-3.5 text-sm text-foreground outline-hidden placeholder:text-muted-foreground"
-          />
-          <kbd className="rounded border border-border px-1.5 py-0.5 font-mono text-2xs text-muted-foreground">esc</kbd>
-        </div>
-
-        <div className="max-h-[46vh] overflow-y-auto border-t border-border p-2">
-          {flatCommands.length > 0 ? (
-            // The listbox half of the combobox. Sections are role=group children (a listbox may
-            // contain only options/groups), their visual titles hidden from AT in favour of the
-            // groups' accessible names.
-            <div id="cp-list" role="listbox" aria-label="Команды">
-              {sections.map((section, s) =>
-                section.items.length === 0 ? null : (
-                  <div key={section.title ?? 'hits'} role="group" aria-label={section.title ?? 'Результаты'}>
-                    {section.title && (
-                      <div aria-hidden="true" className="px-3 pb-1 pt-3 text-2xs font-medium uppercase tracking-wide text-ink3 first:pt-1.5">
-                        {section.title}
-                      </div>
-                    )}
-                    {section.items.map((command, i) => {
-                      const index = offsets[s] + i;
-                      const active = index === selectedIndex;
-                      return (
-                        <button
-                          key={`${section.title ?? 'hits'}:${command.id}`}
-                          type="button"
-                          id={`cp-opt-${index}`}
-                          role="option"
-                          aria-selected={active}
-                          onMouseEnter={() => setSelectedIndex(index)}
-                          onClick={() => execute(command)}
-                          className={`flex w-full items-center gap-2.5 rounded px-3 py-2 text-left text-sm transition-colors ${
-                            active ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                          }`}
-                        >
-                          {command.icon ?? <span className="h-4 w-4 shrink-0" aria-hidden="true" />}
-                          <span className="min-w-0 flex-1 truncate">{command.label}</span>
-                          {active && (
-                            <kbd className="shrink-0 rounded border border-border px-1.5 py-0.5 font-mono text-2xs text-muted-foreground">
-                              ⏎
-                            </kbd>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                ),
-              )}
-            </div>
-          ) : (
-            <div className="px-3 py-8 text-center text-sm text-muted-foreground">
-              Ничего не нашлось
-            </div>
-          )}
-        </div>
-
-        {/* Footer hints (steep/Claude): quiet keyboard legend, no chrome. */}
-        <div className="flex items-center gap-4 border-t border-border px-4 py-2 text-2xs text-muted-foreground">
-          <span>↑↓ — навигация</span>
-          <span>⏎ — открыть</span>
-          <span>esc — закрыть</span>
-        </div>
+      <div className="flex items-center gap-1 pr-4 [&_[data-slot=command-input-wrapper]]:h-12 [&_[data-slot=command-input-wrapper]]:flex-1 [&_[data-slot=command-input-wrapper]]:border-b-0 [&_[data-slot=command-input-wrapper]]:px-4">
+        <CommandInput
+          aria-label="Поиск"
+          value={query}
+          onValueChange={setQuery}
+          placeholder="Поиск: разделы, метрики, источники…"
+        />
+        <kbd className="rounded border border-border px-1.5 py-0.5 font-mono text-2xs text-muted-foreground">esc</kbd>
       </div>
-    </div>
+      <CommandList className="max-h-[46vh] border-t border-border p-2">
+        <CommandEmpty className="px-3 py-8 text-center text-sm text-muted-foreground">Ничего не нашлось</CommandEmpty>
+        {!query && recentItems.length > 0 && (
+          <CommandGroup heading="Недавнее">
+            {recentItems.map((command) => (
+              <PaletteRow key={`recent:${command.id}`} command={command} valuePrefix="recent:" onRun={execute} />
+            ))}
+          </CommandGroup>
+        )}
+        {groups.map((group) => (
+          <CommandGroup key={group.title} heading={group.title ?? undefined}>
+            {group.items.map((command) => (
+              <PaletteRow key={command.id} command={command} onRun={execute} />
+            ))}
+          </CommandGroup>
+        ))}
+      </CommandList>
+      {/* Footer hints (steep/Claude): quiet keyboard legend, no chrome. */}
+      <div className="flex items-center gap-4 border-t border-border px-4 py-2 text-2xs text-muted-foreground">
+        <span>↑↓ — навигация</span>
+        <span>⏎ — открыть</span>
+        <span>esc — закрыть</span>
+      </div>
+    </CommandDialog>
+  );
+}
+
+/** Одна строка палитры: канон-вид (иконка + label) поверх cmdk CommandItem. */
+function PaletteRow({
+  command,
+  onRun,
+  valuePrefix = '',
+}: {
+  command: PaletteCommand;
+  onRun: (command: PaletteCommand) => void;
+  valuePrefix?: string;
+}) {
+  return (
+    <CommandItem
+      value={`${valuePrefix}${command.label}`}
+      keywords={command.search.split(/\s+/)}
+      onSelect={() => onRun(command)}
+      className="gap-2.5 px-3 py-2 text-sm text-muted-foreground data-[selected=true]:bg-muted data-[selected=true]:text-foreground"
+    >
+      {command.icon ?? <span className="h-4 w-4 shrink-0" aria-hidden="true" />}
+      <span className="min-w-0 flex-1 truncate">{command.label}</span>
+    </CommandItem>
   );
 }
