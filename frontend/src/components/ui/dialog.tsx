@@ -27,10 +27,33 @@ const DialogOverlay = React.forwardRef<
 ));
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
 
+/**
+ * Все домашние диалоги открываются ПРОГРАММНО (open через state, без Radix Trigger), поэтому
+ * дефолтная реставрация фокуса Radix (на триггер) уходит в body. Снимок открывателя берём на
+ * ПЕРВОМ рендере (Radix уводит фокус эффектом позже) и возвращаем его на закрытии — контракт
+ * прежнего useFocusTrap, теперь в одном месте для всех диалогов. Пользовательский
+ * onCloseAutoFocus (если передан) выполняется после и может переопределить цель.
+ */
+export function useRestoreOpenerFocus(): (event: Event) => void {
+  const openerRef = React.useRef<HTMLElement | null>(null);
+  if (openerRef.current === null && typeof document !== 'undefined' && document.activeElement instanceof HTMLElement) {
+    openerRef.current = document.activeElement;
+  }
+  return React.useCallback((event: Event) => {
+    const opener = openerRef.current;
+    if (opener?.isConnected) {
+      event.preventDefault();
+      opener.focus();
+    }
+  }, []);
+}
+
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
->(({ className, children, ...props }, ref) => (
+>(({ className, children, onCloseAutoFocus, ...props }, ref) => {
+  const restoreOpener = useRestoreOpenerFocus();
+  return (
   <DialogPortal>
     <DialogOverlay />
     <DialogPrimitive.Content
@@ -39,6 +62,10 @@ const DialogContent = React.forwardRef<
         'fixed left-[50%] top-[50%] z-modal grid max-h-[calc(100vh-2rem)] w-[calc(100%-2rem)] max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 overflow-y-auto rounded-xl border border-border bg-card p-5 duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 motion-reduce:duration-0',
         className,
       )}
+      onCloseAutoFocus={(event) => {
+        restoreOpener(event);
+        onCloseAutoFocus?.(event);
+      }}
       {...props}
     >
       {children}
@@ -48,7 +75,8 @@ const DialogContent = React.forwardRef<
       </DialogPrimitive.Close>
     </DialogPrimitive.Content>
   </DialogPortal>
-));
+  );
+});
 DialogContent.displayName = DialogPrimitive.Content.displayName;
 
 const DialogHeader = ({

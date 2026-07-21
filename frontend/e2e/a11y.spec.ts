@@ -120,7 +120,9 @@ test('keyboard: ⌘K palette is a live combobox and restores focus on close', as
   const after = await combo.getAttribute('aria-activedescendant');
   expect(after).not.toBe(before);
   expect(after).toBeTruthy();
-  await expect(page.locator(`#${after}`)).toHaveAttribute('aria-selected', 'true');
+  // cmdk/Radix ids содержат двоеточия (radix-:r0:) — голый #id ломает css-парсер, атрибутный
+  // селектор проверяет тот же контракт (activedescendant указывает на живой выбранный option).
+  await expect(page.locator(`[id="${after}"]`)).toHaveAttribute('aria-selected', 'true');
   await page.keyboard.press('Escape');
   await expect(combo).toHaveCount(0);
   await expect(opener).toBeFocused();

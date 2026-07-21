@@ -1,6 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { useFocusTrap } from '@/lib/useFocusTrap';
+import { useState } from 'react';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { WidgetConfigControls } from '@/components/ConfigEditDialog';
 import { WidgetBody } from '@/components/ConfigWidget';
 import { WidgetErrorBoundary } from '@/components/WidgetErrorBoundary';
@@ -30,48 +29,18 @@ export function CreateWidgetDialog({
     () => defaultWidget(metricId) ?? { id: 'draft', metricId, viz: 'kpi' },
   );
 
-  // Modal focus contract (declared before the `!metric` early return — hooks rule). The catalog that
-  // opened this dialog unmounts in the same commit, so without the trap focus lands on <body> behind
-  // an aria-modal overlay and Tab walks the obscured page.
-  const panelRef = useRef<HTMLDivElement>(null);
-  useFocusTrap(panelRef);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        onClose();
-      }
-    };
-    document.addEventListener('keydown', onKey, true);
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.removeEventListener('keydown', onKey, true);
-      document.body.style.overflow = prev;
-    };
-  }, [onClose]);
-
   if (!metric) return null;
 
   // Every edit re-validates the whole draft (same path as the store's updateWidgetConfig), so the
   // preview and the eventual stored widget can never diverge.
   const patch = (p: Partial<WidgetConfig>) => setDraft((d) => normalizeWidget({ ...d, ...p }) ?? d);
 
-  return createPortal(
-    <div
-      className="fixed inset-0 z-modal flex items-start justify-center overflow-y-auto bg-background/70 p-4 backdrop-blur-xs backdrop-grayscale sm:p-8"
-      role="dialog"
-      aria-modal="true"
-      aria-label={`Собрать виджет «${draft.title || metric.label}»`}
-      onClick={onClose}
-    >
-      <div
-        ref={panelRef}
-        tabIndex={-1}
-        className="my-auto grid w-full max-w-3xl grid-cols-1 gap-5 rounded-xl border border-border bg-card p-5 focus:outline-hidden sm:grid-cols-[minmax(0,1fr)_300px]"
-        onClick={(e) => e.stopPropagation()}
-      >
+  // Radix (ui/dialog) владеет порталом, focus-trap'ом, Escape, скролл-локом и возвратом фокуса —
+  // ручной контракт (useFocusTrap + capture-Escape + body.overflow) ушёл целиком.
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="grid max-w-3xl grid-cols-1 gap-5 sm:grid-cols-[minmax(0,1fr)_300px]">
+        <DialogTitle className="sr-only">{`Собрать виджет «${draft.title || metric.label}»`}</DialogTitle>
         {/* Left — live preview of the card body. */}
         <div className="min-w-0">
           <div className="mb-2 text-sm font-medium text-foreground">Предпросмотр</div>
@@ -126,8 +95,7 @@ export function CreateWidgetDialog({
             </button>
           </div>
         </div>
-      </div>
-    </div>,
-    document.body,
+      </DialogContent>
+    </Dialog>
   );
 }

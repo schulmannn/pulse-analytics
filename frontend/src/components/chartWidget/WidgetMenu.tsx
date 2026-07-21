@@ -1,4 +1,6 @@
 import { useEffect, useRef } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
 import type { GroupCtxValue } from '@/components/widgets/WidgetGroup';
 import { pinToHome, unpinFromHome } from '@/lib/widgetPrefsStore';
 import type { WidgetPrefs } from '@/lib/widgetPrefsStore';
@@ -41,6 +43,8 @@ export function WidgetMenu({
 }: WidgetMenuProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
 
   useEffect(() => {
     if (!open) return;
@@ -188,8 +192,20 @@ export function WidgetMenu({
               onClick={() => {
                 buttonRef.current?.focus();
                 onOpenChange(false);
-                if (pinned) unpinFromHome(homeKey);
-                else pinToHome(homeKey);
+                // Результат пина живёт на ДРУГОЙ странице — до тостов действие было немым
+                // (единственный фидбек — смена пункта меню при следующем открытии). На самой
+                // /home пин виден сразу — там тост был бы шумом.
+                if (pinned) {
+                  unpinFromHome(homeKey);
+                  if (pathname !== '/home') toast(`«${label}» — убрано с главной`);
+                } else {
+                  pinToHome(homeKey);
+                  if (pathname !== '/home') {
+                    toast(`«${label}» — на главной`, {
+                      action: { label: 'Открыть', onClick: () => navigate('/home') },
+                    });
+                  }
+                }
                 requestAnimationFrame(() => {
                   if (!buttonRef.current?.isConnected)
                     document.querySelector<HTMLElement>('.edit-toggle')?.focus();

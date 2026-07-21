@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { useCreateCampaign, useUpdateCampaign } from '@/api/queries';
 import type { Campaign, CampaignStatus } from '@/api/schemas';
 import { CAMPAIGN_STATUSES, CAMPAIGN_STATUS_LABEL } from '@/api/schemas';
@@ -91,6 +92,8 @@ export function CampaignDialog({
     if (data) {
       onSaved?.(data.campaign);
       onClose();
+      // Диалог закрывается мгновенно — до тоста успех был неотличим от отмены.
+      toast(initial ? 'Кампания сохранена' : `Кампания «${data.campaign.name}» создана`);
     }
   };
 
