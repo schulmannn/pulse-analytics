@@ -7,6 +7,7 @@ import { columnIndex } from '@/lib/chartHover';
 import { axisLabelIndexSet } from '@/lib/chartLabels';
 import { ChartTooltip, type TooltipRow, type TooltipState } from '@/components/ChartTooltip';
 import { axisLabel, niceScale } from '@/components/LineChart';
+import { seriesMotionKey } from '@/lib/chartMotion';
 import { ChartExpandedContext, ChartRefLinesContext, ExpandedChartHeightContext, WidgetTargetContext } from '@/components/ExpandableChart';
 
 interface BarChartProps {
@@ -155,7 +156,7 @@ export function BarChart({
   // — primary values + the shown comparison — so the bars grow from the baseline again on a period /
   // filter / compare change, but NOT on hover (separate state), tooltip movement or a ResizeObserver
   // width change (width is absent). Same key → geometry updates in place (no remount, no replay).
-  const motionKey = `${values?.length ?? 0}|${(values ?? []).join(',')}|${activeGhost?.join(',') ?? ''}`;
+  const motionKey = seriesMotionKey(values, activeGhost);
 
   // ── Geometry + the static plot, memoized APART from hover ────────────────────────────────
   // Hover used to swap every bar's opacity and re-create the whole element tree per mousemove

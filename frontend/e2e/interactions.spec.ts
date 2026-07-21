@@ -55,13 +55,35 @@ test('chart hover: tooltip readout appears, moves and clears (single-svg hit-tes
   await expect(chart).toHaveAttribute('data-chart-curve', 'smooth');
   const primarySeries = chart.locator('[data-chart-series="primary"]');
   await expect(primarySeries).toHaveAttribute('d', /\sC/);
-  await expect(primarySeries).toHaveAttribute('data-chart-motion', 'reveal');
-  const lineMotion = await primarySeries.evaluate((element) => {
+  // The line/area now REVEAL with an undistorted left→right clip wipe: the primary marks share one
+  // keyed sweep group (grid/axes stay outside it), animated by chart-sweep-in — not a bare fade.
+  const sweepGroup = chart.locator('g[data-chart-motion="sweep"]').first();
+  await expect(sweepGroup).toBeVisible();
+  const lineMotion = await sweepGroup.evaluate((element) => {
     const style = getComputedStyle(element);
     return { animationName: style.animationName, animationDuration: style.animationDuration };
   });
-  expect(lineMotion.animationName).toContain('chart-fade-in');
+  expect(lineMotion.animationName).toContain('chart-sweep-in');
   expect(Number.parseFloat(lineMotion.animationDuration)).toBeGreaterThan(0);
+  // A real period change replaces the keyed data layer and therefore replays the sweep. This is
+  // the user-visible contract we care about; width/hover changes keep the same key (covered by the
+  // seriesMotionKey unit tests) and do not replace this node.
+  const sweepBeforePeriodChange = await sweepGroup.elementHandle();
+  if (!sweepBeforePeriodChange) throw new Error('chart sweep group has no element handle');
+  await page.getByRole('group', { name: 'Период', exact: true }).getByRole('button', { name: '7д', exact: true }).click();
+  const sweepAfterPeriodChange = chart.locator('g[data-chart-motion="sweep"]').first();
+  await expect(sweepAfterPeriodChange).toBeVisible();
+  const periodMotion = await sweepAfterPeriodChange.evaluate((element, previousElement) => {
+    const style = getComputedStyle(element);
+    return {
+      nodeWasReplaced: element !== previousElement,
+      animationName: style.animationName,
+      clipPath: style.clipPath,
+    };
+  }, sweepBeforePeriodChange);
+  expect(periodMotion.nodeWasReplaced).toBe(true);
+  expect(periodMotion.animationName).toContain('chart-sweep-in');
+  expect(periodMotion.clipPath).not.toBe('none');
   // mouse.move targets raw viewport coordinates and never auto-scrolls — bring the chart into
   // the viewport first, then read its box.
   await chart.scrollIntoViewIfNeeded();
