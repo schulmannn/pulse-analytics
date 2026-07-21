@@ -160,6 +160,26 @@ async function bootReports(page: Page, seed: MockReport[]): Promise<BootState> {
   return state;
 }
 
+/** Документ с ≥3 секциями — для оглавления (Astryx Outline). */
+const outlineReport = (): MockReport => ({
+  id: 1,
+  name: 'Итоги недели',
+  schedule: 'none',
+  last_sent_at: null,
+  created_at: iso(3 * DAY),
+  updated_at: iso(DAY),
+  config: {
+    blocks: [
+      { id: 'b1', type: 'preset', config: { key: 'kpi-summary' } },
+      { id: 'b2', type: 'preset', config: { key: 'week' } },
+      { id: 'b3', type: 'preset', config: { key: 'insights' } },
+      { id: 'b4', type: 'preset', config: { key: 'top-posts' } },
+    ],
+    periodDays: 30,
+    channelId: 1,
+  },
+});
+
 const textReport = (): MockReport => ({
   id: 1,
   name: 'Итоги недели',
@@ -426,6 +446,34 @@ test.describe('Отчёты — desktop', () => {
 });
 
 test.describe('Отчёты — mobile-инвариант', () => {
+
+  test('оглавление документа: 2xl-рейл со scroll-spy ведёт по разделам', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== 'desktop-1440', 'desktop документ (2xl-рейл поверх той же вёрстки)');
+    await page.setViewportSize({ width: 1680, height: 950 });
+    await bootReports(page, [outlineReport()]);
+
+    await page.goto('/reports/1');
+    await page.locator('main').waitFor({ state: 'visible', timeout: 25_000 });
+
+    // Рейл видим на 2xl и перечисляет заголовки секций документа.
+    const outline = page.getByTestId('report-outline');
+    await expect(outline).toBeVisible();
+    await expect(outline.getByRole('button', { name: 'Сводка' })).toBeVisible();
+    await expect(outline.getByRole('button', { name: 'Наблюдения' })).toBeVisible();
+    const last = outline.getByRole('button', { name: 'Лучшие публикации' });
+    await expect(last).toBeVisible();
+
+    // Клик по последнему пункту уводит к секции; scroll-spy переносит активность на неё.
+    await last.click();
+    await expect
+      .poll(async () => (await last.getAttribute('aria-current')) ?? 'none', { timeout: 5_000 })
+      .toBe('true');
+
+    // Обычный десктоп (1440) рейл не показывает — макет документа не тронут.
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await expect(outline).toBeHidden();
+  });
+
   test('mobile сохраняет прежнюю поверхность; desktop-chrome не появляется', async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== 'mobile-430', 'mobile-инвариант (430px)');
     await bootReports(page, [textReport()]);

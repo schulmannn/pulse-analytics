@@ -7,6 +7,7 @@ import { AiEmptyState } from '@/panels/ai/AiEmptyState';
 import { composeAiQuestion, emptyAiAskContext, type AiAskContext } from '@/lib/aiAsk';
 import {
   aiToolLabel,
+  aiToolRoute,
   useAiChat,
   useAiChats,
   useCreateAiChat,
@@ -369,11 +370,7 @@ function ChatThread({ chatId }: { chatId: number }) {
             </div>
           </>
         )}
-        {banner && (
-          <div className="rounded-lg border border-border bg-card px-3 py-2 text-sm text-destructive" role="alert">
-            {banner}
-          </div>
-        )}
+        {banner && <SystemMessage text={banner} />}
         <div ref={bottomRef} />
       </div>
 
@@ -417,7 +414,7 @@ function MessageRow({ message }: { message: AiMessage }) {
   const trace = message.tool_trace ?? [];
   return (
     <div className="max-w-none">
-      {trace.length > 0 && <ToolChips tools={trace.map((t) => traceToChip(t))} />}
+      {trace.length > 0 && <ToolSources trace={trace} />}
       {message.content ? (
         <div className="mt-1.5">
           <AiRichBlocks text={message.content} />
@@ -435,10 +432,19 @@ function MessageRow({ message }: { message: AiMessage }) {
   );
 }
 
-const traceToChip = (t: AiToolTrace): PendingTool => ({
-  name: t.name,
-  status: t.ok === false ? 'error' : 'end',
-});
+/** Системная строка (Astryx System Message): центрированная тихая ремарка ленты — не карточка.
+    role=alert сохраняется (баннеры здесь только про сбои стрима/лимиты). */
+function SystemMessage({ text }: { text: string }) {
+  return (
+    <p role="alert" className="flex items-center justify-center gap-1.5 py-1 text-center text-2xs text-muted-foreground">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-3 w-3 shrink-0 text-status-warn" aria-hidden="true">
+        <circle cx="8" cy="8" r="6.2" />
+        <path d="M8 5v3.6M8 11h.01" strokeLinecap="round" />
+      </svg>
+      {text}
+    </p>
+  );
+}
 
 function UserBubble({ text }: { text: string }) {
   return (
@@ -450,16 +456,10 @@ function UserBubble({ text }: { text: string }) {
   );
 }
 
-/** Чипы инструментов: во время стрима — активный со спиннером, после — тихая строка «Данные: …». */
-function ToolChips({ tools, streaming = false }: { tools: PendingTool[]; streaming?: boolean }) {
+/** Чипы инструментов ВО ВРЕМЯ стрима: активный со спиннером, завершённые с глифом. Устоявшиеся
+    сообщения рендерят {@link ToolSources}. */
+function ToolChips({ tools }: { tools: PendingTool[]; streaming?: boolean }) {
   if (!tools.length) return null;
-  if (!streaming) {
-    const labels = [...new Set(tools.filter((t) => t.status !== 'error').map((t) => aiToolLabel(t.name)))];
-    if (!labels.length) return null;
-    return (
-      <p className="text-2xs font-medium text-muted-foreground">Данные: {labels.join(' · ')}</p>
-    );
-  }
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       {tools.map((t, i) => (
@@ -473,6 +473,84 @@ function ToolChips({ tools, streaming = false }: { tools: PendingTool[]; streami
           {aiToolLabel(t.name)}
         </span>
       ))}
+    </div>
+  );
+}
+
+/**
+ * «Источники» под ответом — Astryx Citation + Tool Calls в одном (наш трейс И ЕСТЬ источники
+ * утверждений): уникальные успешные инструменты — чипы-ссылки на поверхность с теми же данными
+ * (карта AI_TOOL_ROUTES), разворот — детали каждого вызова (статус/ошибка). Ошибочные вызовы не
+ * прячутся: счётчик в кнопке + строка с текстом ошибки в развороте.
+ */
+function ToolSources({ trace }: { trace: AiToolTrace[] }) {
+  const [open, setOpen] = useState(false);
+  if (!trace.length) return null;
+  const seen = new Set<string>();
+  const sources = trace.filter((entry) => {
+    if (entry.ok === false || seen.has(entry.name)) return false;
+    seen.add(entry.name);
+    return true;
+  });
+  const failed = trace.filter((entry) => entry.ok === false).length;
+  return (
+    <div className="text-2xs">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          className="inline-flex items-center gap-1 rounded font-medium text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <svg
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            className={`h-3 w-3 transition-transform ${open ? 'rotate-90' : ''}`}
+            aria-hidden="true"
+          >
+            <path d="m6 4 4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          Источники
+          {failed > 0 && <span className="text-status-warn"> · {failed} с ошибкой</span>}
+        </button>
+        {sources.map((entry) => {
+          const route = aiToolRoute(entry.name);
+          const chip = (
+            <span key={entry.name} className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 font-medium text-muted-foreground transition-colors">
+              {aiToolLabel(entry.name)}
+              {route && (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-2.5 w-2.5" aria-hidden="true">
+                  <path d="M7 17 17 7M9 7h8v8" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              )}
+            </span>
+          );
+          return route ? (
+            <Link key={entry.name} to={route} className="hover:[&>span]:border-primary/40 hover:[&>span]:text-foreground">
+              {chip}
+            </Link>
+          ) : (
+            <span key={entry.name}>{chip}</span>
+          );
+        })}
+      </div>
+      {open && (
+        <ul className="mt-1.5 space-y-1 border-l border-border pl-3">
+          {trace.map((entry, index) => (
+            // Один инструмент может вызываться несколько раз — индекс стабилен для устоявшегося трейса.
+            // eslint-disable-next-line react/no-array-index-key
+            <li key={`${entry.name}-${index}`} className="flex items-start gap-1.5 text-muted-foreground">
+              <span className="mt-0.5">{entry.ok === false ? <CrossIcon /> : <CheckIcon />}</span>
+              <span>
+                {aiToolLabel(entry.name)}
+                {entry.error && <span className="text-status-warn"> — {entry.error}</span>}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

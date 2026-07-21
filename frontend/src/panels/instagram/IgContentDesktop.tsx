@@ -68,6 +68,27 @@ const FORMAT_OPTIONS: { value: IgContentFormat; label: string }[] = [
   { value: 'reels', label: 'Reels' },
 ];
 
+
+/** Снимаемый токен активного фильтра: подпись + × (канон-пилюля, focus-видимый). */
+function FilterChip({ label, onClear, clearLabel }: { label: string; onClear: () => void; clearLabel: string }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/5 py-0.5 pl-2.5 pr-1 text-2xs font-medium text-foreground">
+      {label}
+      <button
+        type="button"
+        aria-label={clearLabel}
+        title={clearLabel}
+        onClick={onClear}
+        className="rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40"
+      >
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-3 w-3" aria-hidden="true">
+          <path d="m4.5 4.5 7 7M11.5 4.5l-7 7" strokeLinecap="round" />
+        </svg>
+      </button>
+    </span>
+  );
+}
+
 export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) {
   const [params, setParams] = useSearchParams();
   const { channelId, campaignId, campaignPostsQ, posts, formatItems } = useIgScopedPosts(ig);
@@ -199,6 +220,22 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
           {scope.length > 0 && reachMedian == null && <span>сравнение появится от {MEDIAN_MIN_SAMPLE} публикаций</span>}
         </div>
       </div>
+      {/* Активные фильтры — снимаемые токены (Astryx Power Search/Tokenizer, канон-пилюли):
+          модель уже в URL (igContentFilters) — чипы лишь визуализируют и снимают её по одному. */}
+      {hasContentFilters && (
+        <div className="flex flex-wrap items-center gap-1.5" data-testid="ig-filter-chips">
+          {filters.q.trim() !== '' && (
+            <FilterChip label={`Поиск: «${filters.q.trim()}»`} onClear={() => update({ q: '' })} clearLabel="Убрать поиск" />
+          )}
+          {filters.format !== 'all' && (
+            <FilterChip
+              label={`Формат: ${FORMAT_OPTIONS.find((option) => option.value === filters.format)?.label ?? filters.format}`}
+              onClear={() => update({ format: 'all' })}
+              clearLabel="Убрать фильтр формата"
+            />
+          )}
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-2 border-t border-border/60 pt-3">
         {selectedItems.length > 0 ? (
           <>

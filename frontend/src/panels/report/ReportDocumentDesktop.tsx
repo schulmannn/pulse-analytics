@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useConfirm } from '@/components/ConfirmDialogProvider';
+import { cn } from '@/lib/utils';
 import { Pencil, Printer, Save, X } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useDeleteReport, useUpdateReport } from '@/api/queries';
@@ -291,15 +292,18 @@ export function ReportDocumentDesktop({
             reason={data.error instanceof Error ? data.error.message : 'ошибка'}
           />
         ) : (
-          <ReportComposition
-            blocks={blocks}
-            data={data}
-            editable={editing}
-            onInsert={insertBlock}
-            onMove={moveBlock}
-            onRemove={removeBlock}
-            onSetConfig={setBlockConfig}
-          />
+          <>
+            <ReportOutline blocks={blocks} editing={editing} />
+            <ReportComposition
+              blocks={blocks}
+              data={data}
+              editable={editing}
+              onInsert={insertBlock}
+              onMove={moveBlock}
+              onRemove={removeBlock}
+              onSetConfig={setBlockConfig}
+            />
+          </>
         )}
       </div>
 
@@ -309,6 +313,101 @@ export function ReportDocumentDesktop({
         </p>
       </div>
     </div>
+  );
+}
+
+
+/**
+ * Оглавление длинного документа (Astryx Outline): фикс-рейл справа ТОЛЬКО на 2xl+ — макет
+ * max-w-6xl на обычном десктопе не двигается ни на пиксель. Заголовки собираются из DOM
+ * (.report-section h3) — устойчиво к любым будущим блокам; scroll-spy на IntersectionObserver;
+ * скрыт в редактировании и в print (PDF-канон документа без чужого хрома).
+ */
+function ReportOutline({ blocks, editing }: { blocks: ReadonlyArray<unknown>; editing: boolean }) {
+  const [items, setItems] = useState<Array<{ id: string; title: string }>>([]);
+  const [active, setActive] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (editing) {
+      setItems([]);
+      return;
+    }
+    // После рендера состава: разделы получают стабильные id по порядку, заголовок — из их h3.
+    const frame = requestAnimationFrame(() => {
+      const nodes = [...document.querySelectorAll<HTMLElement>('.report-section')];
+      setItems(
+        nodes.map((node, index) => {
+          if (!node.id) node.id = `report-sec-${index}`;
+          return { id: node.id, title: node.querySelector('h3')?.textContent?.trim() || `Раздел ${index + 1}` };
+        }),
+      );
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [blocks, editing]);
+
+  useEffect(() => {
+    if (items.length === 0) return;
+    // Детерминированный spy по позициям (IO у дна документа неоднозначен: предыдущая высокая
+    // секция продолжает пересекать «активную полосу»): активна ПОСЛЕДНЯЯ секция, чей верх выше
+    // трети вьюпорта; ниже первой секции — первая.
+    let frame = 0;
+    const measure = () => {
+      frame = 0;
+      const line = window.innerHeight * 0.3;
+      let current = items[0]?.id ?? null;
+      for (const item of items) {
+        const el = document.getElementById(item.id);
+        if (el && el.getBoundingClientRect().top <= line) current = item.id;
+      }
+      // Дно документа: последняя секция может физически не долистываться до активной линии —
+      // прокрутка упёрлась в конец значит читается именно она.
+      if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4) {
+        current = items[items.length - 1]?.id ?? current;
+      }
+      setActive(current);
+    };
+    const onScroll = () => {
+      if (!frame) frame = requestAnimationFrame(measure);
+    };
+    measure();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll);
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+    };
+  }, [items]);
+
+  // Короткому документу оглавление не нужно — не рисуем хром ради хрома.
+  if (editing || items.length < 3) return null;
+  return (
+    <nav
+      aria-label="Оглавление отчёта"
+      data-testid="report-outline"
+      className="fixed right-6 top-28 z-sticky hidden w-44 2xl:block print:hidden"
+    >
+      <p className="text-2xs font-medium uppercase tracking-wider text-muted-foreground">Оглавление</p>
+      <ul className="mt-2 space-y-0.5 border-l border-border">
+        {items.map((item) => (
+          <li key={item.id}>
+            <button
+              type="button"
+              onClick={() => document.getElementById(item.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+              aria-current={active === item.id ? 'true' : undefined}
+              className={cn(
+                '-ml-px block w-full truncate border-l-2 py-0.5 pl-3 text-left text-2xs transition-colors',
+                active === item.id
+                  ? 'border-primary font-medium text-foreground'
+                  : 'border-transparent text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {item.title}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </nav>
   );
 }
 
