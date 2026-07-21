@@ -129,7 +129,7 @@ export function ConfigEditDialog({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-modal flex items-start justify-center overflow-y-auto bg-background/70 p-4 backdrop-blur-sm backdrop-grayscale sm:p-8"
+      className="fixed inset-0 z-modal flex items-start justify-center overflow-y-auto bg-background/70 p-4 backdrop-blur-xs backdrop-grayscale sm:p-8"
       role="dialog"
       aria-modal="true"
       aria-label={`Настройка виджета «${config.title || spec.label}»`}
@@ -138,7 +138,7 @@ export function ConfigEditDialog({
       <div
         ref={panelRef}
         tabIndex={-1}
-        className="my-auto grid w-full max-w-3xl grid-cols-1 gap-5 rounded-xl border border-border bg-card p-5 focus:outline-none sm:grid-cols-[minmax(0,1fr)_300px]"
+        className="my-auto grid w-full max-w-3xl grid-cols-1 gap-5 rounded-xl border border-border bg-card p-5 focus:outline-hidden sm:grid-cols-[minmax(0,1fr)_300px]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Left — live preview: the SAME body the card shows, over the config being edited, so every
@@ -304,7 +304,7 @@ export function WidgetConfigControls({
           value={config.title ?? ''}
           placeholder={spec.label}
           onChange={(e) => onChange({ title: e.target.value || undefined })}
-          className="mt-1 w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
+          className="mt-1 w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
         />
       </label>
 
@@ -449,7 +449,7 @@ function TargetField({ config, onChange }: { config: WidgetConfig; onChange: (pa
             const num = raw === '' ? undefined : Number(raw);
             onChange({ target: { type: 'fixed', value: num !== undefined && Number.isFinite(num) && num > 0 ? num : undefined } });
           }}
-          className="mt-2 w-full rounded border border-border bg-background px-3 py-2 text-sm tabular-nums text-foreground outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
+          className="mt-2 w-full rounded border border-border bg-background px-3 py-2 text-sm tabular-nums text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
         />
       )}
       {type === 'dynamic' && (

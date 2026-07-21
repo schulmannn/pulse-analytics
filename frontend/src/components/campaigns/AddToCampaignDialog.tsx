@@ -84,7 +84,7 @@ export function AddToCampaignDialog({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-modal flex items-start justify-center overflow-y-auto bg-background/70 p-4 backdrop-blur-sm backdrop-grayscale sm:p-8"
+      className="fixed inset-0 z-modal flex items-start justify-center overflow-y-auto bg-background/70 p-4 backdrop-blur-xs backdrop-grayscale sm:p-8"
       role="dialog"
       aria-modal="true"
       aria-label="Добавить публикации в кампанию"
@@ -93,7 +93,7 @@ export function AddToCampaignDialog({
       <div
         ref={panelRef}
         tabIndex={-1}
-        className="my-auto w-full max-w-md rounded-xl border border-border bg-card p-5 focus:outline-none"
+        className="my-auto w-full max-w-md rounded-xl border border-border bg-card p-5 focus:outline-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {result ? (
@@ -170,7 +170,7 @@ export function AddToCampaignDialog({
                       onChange={(e) => setNewName(e.target.value)}
                       maxLength={120}
                       placeholder="Запуск продукта"
-                      className="mt-1 w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
+                      className="mt-1 w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
                     />
                   </label>
                 ) : (

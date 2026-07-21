@@ -267,7 +267,7 @@ export function SourceSwitcher({ rail = false, mobile = false }: { rail?: boolea
       value={query}
       onChange={(e) => setQuery(e.target.value)}
       placeholder="Поиск источника…"
-      className="mb-1 w-full rounded bg-transparent px-2 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
+      className="mb-1 w-full rounded bg-transparent px-2 py-1.5 text-sm text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
     />
   ) : null;
 
@@ -377,11 +377,11 @@ function SourceSheet({ title, onClose, children }: { title: string; onClose: () 
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex flex-col justify-end" role="dialog" aria-modal="true" aria-label={title}>
-      <div className="detail-backdrop-in absolute inset-0 bg-background/70 backdrop-blur-sm backdrop-grayscale" onClick={onClose} aria-hidden="true" />
+      <div className="detail-backdrop-in absolute inset-0 bg-background/70 backdrop-blur-xs backdrop-grayscale" onClick={onClose} aria-hidden="true" />
       <div
         ref={sheetRef}
         tabIndex={-1}
-        className="sheet-in relative z-10 flex max-h-[85vh] w-full flex-col overflow-hidden rounded-t-xl border-t border-border bg-popover pb-[env(safe-area-inset-bottom)] focus:outline-none"
+        className="sheet-in relative z-10 flex max-h-[85vh] w-full flex-col overflow-hidden rounded-t-xl border-t border-border bg-popover pb-[env(safe-area-inset-bottom)] focus:outline-hidden"
       >
         <div className="flex shrink-0 items-center justify-between gap-2 px-3 pb-1 pt-2.5">
           <span className="text-2xs font-medium uppercase tracking-wide text-ink3">Источник</span>

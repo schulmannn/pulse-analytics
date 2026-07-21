@@ -159,7 +159,7 @@ export function IgPostCard({
       </div>
       {/* Uniform 4:5 cover (Instagram portrait) keeps the grid rows aligned; missing previews
           get a neutral placeholder tile instead of an empty box. */}
-      <div className="flex aspect-[4/5] w-full items-center justify-center overflow-hidden rounded bg-muted text-muted-foreground">
+      <div className="flex aspect-4/5 w-full items-center justify-center overflow-hidden rounded bg-muted text-muted-foreground">
         {cover ? (
           <img src={cover} alt="" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
         ) : (

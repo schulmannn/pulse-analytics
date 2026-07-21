@@ -36,7 +36,7 @@ export function ChartCardBody({
             aria-label={drillLabel ? `Разбор: ${drillLabel}` : undefined}
             title="Подробный разбор"
             onClick={onValueClick}
-            className={`${numberClass} rounded text-left transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40`}
+            className={`${numberClass} rounded text-left transition-colors hover:text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40`}
           >
             {value}
           </button>

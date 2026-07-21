@@ -89,7 +89,7 @@ export function Analytics() {
               requestAnimationFrame(() => document.getElementById(`analytics-tab-${next.key}`)?.focus());
             }}
             className={cn(
-              'shrink-0 rounded-full px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+              'shrink-0 rounded-full px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40',
               tab === t.key ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground',
             )}
           >
@@ -204,7 +204,7 @@ function FormatsTab() {
       {/* Scope row near the tab controls. `empty:hidden` keeps a new workspace (no campaigns →
           CampaignFilterControl renders null) from leaving a stray gap above the widgets. */}
       <div
-        className="hidden flex-wrap items-center gap-3 empty:hidden md:flex md:[&:not(:empty)]:mb-8"
+        className="hidden flex-wrap items-center gap-3 empty:hidden md:flex md:not-empty:mb-8"
         data-testid="analytics-campaign-scope"
         aria-live="polite"
       >

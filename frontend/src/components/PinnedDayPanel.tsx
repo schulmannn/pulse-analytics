@@ -51,7 +51,7 @@ export function PinnedDayPanel({
   return (
     <section
       data-pinned-day={appearance}
-      className={`rounded-2xl border border-border bg-card p-4 dark:border-white/[0.06] sm:p-5 ${detail ? 'shadow-sm' : ''}`}
+      className={`rounded-2xl border border-border bg-card p-4 dark:border-white/6 sm:p-5 ${detail ? 'shadow-xs' : ''}`}
     >
       <div className="flex items-center gap-3">
         {detail ? (
@@ -82,7 +82,7 @@ export function PinnedDayPanel({
       {detail ? (
         <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
           {rows.map((r) => (
-            <div key={r.label} className="rounded-lg border border-border bg-background/40 px-3 py-2 dark:border-white/[0.06]">
+            <div key={r.label} className="rounded-lg border border-border bg-background/40 px-3 py-2 dark:border-white/6">
               <div className="text-2xs tracking-wide text-muted-foreground">{r.label}</div>
               <div className="mt-1 text-sm font-medium tabular-nums text-foreground">{r.value}</div>
             </div>

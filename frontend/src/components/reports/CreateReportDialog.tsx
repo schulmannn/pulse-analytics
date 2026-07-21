@@ -44,7 +44,7 @@ const TEMPLATES: Array<{ id: string; name: string; description: string; blocks: 
 ];
 
 const INPUT_CLASS =
-  'mt-1 w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary';
+  'mt-1 w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-1 focus:ring-primary';
 
 /**
  * Портальный диалог создания отчёта по канону CampaignDialog (focus trap, capture-Escape,
@@ -126,7 +126,7 @@ export function CreateReportDialog({ onClose }: { onClose: () => void }) {
 
   return createPortal(
     <div
-      className="fixed inset-0 z-modal flex items-start justify-center overflow-y-auto bg-background/70 p-4 backdrop-blur-sm backdrop-grayscale sm:p-8"
+      className="fixed inset-0 z-modal flex items-start justify-center overflow-y-auto bg-background/70 p-4 backdrop-blur-xs backdrop-grayscale sm:p-8"
       role="dialog"
       aria-modal="true"
       aria-label="Новый отчёт"
@@ -135,7 +135,7 @@ export function CreateReportDialog({ onClose }: { onClose: () => void }) {
       <div
         ref={panelRef}
         tabIndex={-1}
-        className="my-auto w-full max-w-lg rounded-xl border border-border bg-card p-5 focus:outline-none"
+        className="my-auto w-full max-w-lg rounded-xl border border-border bg-card p-5 focus:outline-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="text-sm font-medium text-foreground">Новый отчёт</h2>

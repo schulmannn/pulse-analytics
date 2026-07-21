@@ -76,7 +76,7 @@ export function WidgetCatalogModal({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-modal flex items-start justify-center overflow-y-auto bg-background/70 p-4 backdrop-blur-sm backdrop-grayscale sm:p-8"
+      className="fixed inset-0 z-modal flex items-start justify-center overflow-y-auto bg-background/70 p-4 backdrop-blur-xs backdrop-grayscale sm:p-8"
       role="dialog"
       aria-modal="true"
       aria-label="Каталог метрик"
@@ -85,7 +85,7 @@ export function WidgetCatalogModal({
       <div
         ref={panelRef}
         tabIndex={-1}
-        className="my-auto w-full max-w-2xl rounded-xl border border-border bg-card p-5 focus:outline-none"
+        className="my-auto w-full max-w-2xl rounded-xl border border-border bg-card p-5 focus:outline-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between gap-3">
@@ -127,7 +127,7 @@ export function WidgetCatalogModal({
             value={query}
             placeholder="Поиск метрики…"
             onChange={(e) => setQuery(e.target.value)}
-            className="min-w-0 flex-1 rounded border border-border bg-background px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
+            className="min-w-0 flex-1 rounded border border-border bg-background px-3 py-2 text-sm text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
           />
         </div>
 

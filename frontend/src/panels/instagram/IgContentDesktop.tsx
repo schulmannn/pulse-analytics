@@ -296,7 +296,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
   const publicationsCard = (body: ReactNode) => (
     <section
       data-ig-content-publications
-      className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm dark:border-white/[0.06]"
+      className="overflow-hidden rounded-2xl border border-border bg-card shadow-xs dark:border-white/6"
     >
       <div className="space-y-3 border-b border-border px-4 py-4 sm:px-5">{toolbar}</div>
       {body}
@@ -393,9 +393,9 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
                         'group transition-colors',
                         clickable && 'cursor-pointer',
                         isOpen
-                          ? 'bg-primary/[0.10]'
+                          ? 'bg-primary/10'
                           : isSelected
-                            ? 'bg-primary/[0.05] hover:bg-primary/[0.08]'
+                            ? 'bg-primary/5 hover:bg-primary/8'
                             : 'hover:bg-muted/40',
                       )}
                     >
@@ -418,7 +418,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
                             type="button"
                             onClick={() => setOpenId(post.id!)}
                             data-ig-content-open-trigger
-                            className="block w-full max-w-sm space-y-1 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45 md:max-w-md lg:max-w-lg"
+                            className="block w-full max-w-sm space-y-1 rounded text-left focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45 md:max-w-md lg:max-w-lg"
                           >
                             <span className={cn('line-clamp-1 font-medium', post.caption ? 'text-foreground' : 'italic text-muted-foreground')}>
                               {post.caption || 'Без подписи'}

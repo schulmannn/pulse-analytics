@@ -345,7 +345,7 @@ function DrillValue({
         onDrill();
       }}
       className={cn(
-        'rounded text-left transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+        'rounded text-left transition-colors hover:text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40',
         className,
       )}
     >

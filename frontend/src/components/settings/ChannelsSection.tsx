@@ -99,7 +99,7 @@ export function ChannelsSection() {
                 aria-invalid={errorMessage ? true : undefined}
                 aria-describedby={errorMessage ? 'add-channel-err' : undefined}
                 disabled={createChannelMutation.isPending}
-                className="w-full rounded border bg-background py-2 pl-7 pr-3 font-mono text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                className="w-full rounded border bg-background py-2 pl-7 pr-3 font-mono text-sm focus:outline-hidden focus:ring-1 focus:ring-primary"
               />
             </div>
             <button

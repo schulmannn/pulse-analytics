@@ -95,11 +95,11 @@ export function IgPostDetailModal({
       aria-modal="true"
       aria-label="Детали публикации"
     >
-      <div className="absolute inset-0 bg-background/70 backdrop-blur-sm backdrop-grayscale" onClick={onClose} aria-hidden="true" />
+      <div className="absolute inset-0 bg-background/70 backdrop-blur-xs backdrop-grayscale" onClick={onClose} aria-hidden="true" />
       <div
         ref={panelRef}
         tabIndex={-1}
-        className="relative z-10 flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl border bg-card focus:outline-none sm:rounded-2xl lg:max-w-4xl"
+        className="relative z-10 flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl border bg-card focus:outline-hidden sm:rounded-2xl lg:max-w-4xl"
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b px-5 py-3">
@@ -136,7 +136,7 @@ export function IgPostDetailModal({
                   alt=""
                   referrerPolicy="no-referrer"
                   onError={() => setPreviewFailed(true)}
-                  className="max-h-72 w-full rounded-lg object-cover lg:max-h-[26rem]"
+                  className="max-h-72 w-full rounded-lg object-cover lg:max-h-104"
                 />
               ) : (
                 <MediaFallback video={isVideo} />

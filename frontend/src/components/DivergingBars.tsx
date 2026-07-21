@@ -53,7 +53,7 @@ export function DivergingBars({ values, labels, titles, height }: DivergingBarsP
     window.addEventListener('blur', clear);
     return () => {
       window.removeEventListener('scroll', clear, true);
-      window.removeEventListener('blur', clear);
+      window.removeEventListener('blur-sm', clear);
     };
   }, [hasHover]);
 

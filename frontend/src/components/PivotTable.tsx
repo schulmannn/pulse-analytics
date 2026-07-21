@@ -39,7 +39,7 @@ export function PivotTable({ columns, rows, valueFmt }: PivotTableProps) {
     <div data-pivot-table className="data-table-surface data-table-scroll">
       <table className="data-table data-table--compact text-sm" style={{ minWidth: Math.max(columns.length * 76 + 112, 320) }}>
         <thead>
-          <tr className="border-b border-border dark:border-white/[0.06]">
+          <tr className="border-b border-border dark:border-white/6">
             <th
               aria-hidden="true"
               className="sticky left-0 z-10 w-28 bg-card px-3 py-2"
@@ -53,7 +53,7 @@ export function PivotTable({ columns, rows, valueFmt }: PivotTableProps) {
         </thead>
         <tbody>
           {rows.map((row) => (
-            <tr key={row.label} className="border-t border-border first:border-t-0 dark:border-white/[0.04]">
+            <tr key={row.label} className="border-t border-border first:border-t-0 dark:border-white/4">
               <th scope="row" className="sticky left-0 z-10 bg-card px-3 py-1.5 text-left text-xs font-normal text-muted-foreground">{row.label}</th>
               {row.values.map((value, i) => (
                 <td key={columns[i].key} className="px-1 py-1">

@@ -146,7 +146,7 @@ export function ReportDocumentDesktop({
             maxLength={120}
             aria-label="Название отчёта"
             placeholder="Название отчёта"
-            className="report-title-input w-full border-b border-primary/40 bg-transparent pb-1 text-3xl font-medium tracking-tight text-foreground focus:border-primary focus:outline-none"
+            className="report-title-input w-full border-b border-primary/40 bg-transparent pb-1 text-3xl font-medium tracking-tight text-foreground focus:border-primary focus:outline-hidden"
           />
 
           <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
@@ -227,7 +227,7 @@ export function ReportDocumentDesktop({
               onClick={save}
               disabled={savePending || !nameValid || !sourceValid || !dirty}
               size="sm"
-              className="report-control bg-foreground text-background shadow-sm hover:bg-foreground/80"
+              className="report-control bg-foreground text-background shadow-xs hover:bg-foreground/80"
             >
               <Save aria-hidden="true" />
               {savePending ? 'Сохранение…' : 'Сохранить'}
@@ -259,7 +259,7 @@ export function ReportDocumentDesktop({
               type="button"
               onClick={enterEdit}
               size="sm"
-              className="report-control bg-foreground text-background shadow-sm hover:bg-foreground/80"
+              className="report-control bg-foreground text-background shadow-xs hover:bg-foreground/80"
             >
               <Pencil aria-hidden="true" />
               Редактировать
@@ -269,7 +269,7 @@ export function ReportDocumentDesktop({
               onClick={() => window.print()}
               variant="outline"
               size="sm"
-              className="report-control border-foreground/10 bg-card text-foreground shadow-sm"
+              className="report-control border-foreground/10 bg-card text-foreground shadow-xs"
             >
               <Printer aria-hidden="true" />
               Печать / PDF
