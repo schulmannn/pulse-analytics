@@ -55,35 +55,10 @@ test('chart hover: tooltip readout appears, moves and clears (single-svg hit-tes
   await expect(chart).toHaveAttribute('data-chart-curve', 'smooth');
   const primarySeries = chart.locator('[data-chart-series="primary"]');
   await expect(primarySeries).toHaveAttribute('d', /\sC/);
-  // The line/area now REVEAL with an undistorted left→right clip wipe: the primary marks share one
-  // keyed sweep group (grid/axes stay outside it), animated by chart-sweep-in — not a bare fade.
-  const sweepGroup = chart.locator('g[data-chart-motion="sweep"]').first();
-  await expect(sweepGroup).toBeVisible();
-  const lineMotion = await sweepGroup.evaluate((element) => {
-    const style = getComputedStyle(element);
-    return { animationName: style.animationName, animationDuration: style.animationDuration };
-  });
-  expect(lineMotion.animationName).toContain('chart-sweep-in');
-  expect(Number.parseFloat(lineMotion.animationDuration)).toBeGreaterThan(0);
-  // A real period change replaces the keyed data layer and therefore replays the sweep. This is
-  // the user-visible contract we care about; width/hover changes keep the same key (covered by the
-  // seriesMotionKey unit tests) and do not replace this node.
-  const sweepBeforePeriodChange = await sweepGroup.elementHandle();
-  if (!sweepBeforePeriodChange) throw new Error('chart sweep group has no element handle');
-  await page.getByRole('group', { name: 'Период', exact: true }).getByRole('button', { name: '7д', exact: true }).click();
-  const sweepAfterPeriodChange = chart.locator('g[data-chart-motion="sweep"]').first();
-  await expect(sweepAfterPeriodChange).toBeVisible();
-  const periodMotion = await sweepAfterPeriodChange.evaluate((element, previousElement) => {
-    const style = getComputedStyle(element);
-    return {
-      nodeWasReplaced: element !== previousElement,
-      animationName: style.animationName,
-      clipPath: style.clipPath,
-    };
-  }, sweepBeforePeriodChange);
-  expect(periodMotion.nodeWasReplaced).toBe(true);
-  expect(periodMotion.animationName).toContain('chart-sweep-in');
-  expect(periodMotion.clipPath).not.toBe('none');
+  // The isolated data layer is present and settled; hover below must not restart it.
+  const morphGroup = chart.locator('g[data-chart-motion="morph"]').first();
+  await expect(morphGroup).toBeVisible();
+  await expect(morphGroup).toHaveAttribute('data-chart-morph-state', 'idle');
   // mouse.move targets raw viewport coordinates and never auto-scrolls — bring the chart into
   // the viewport first, then read its box.
   await chart.scrollIntoViewIfNeeded();
@@ -112,6 +87,69 @@ test('chart hover: tooltip readout appears, moves and clears (single-svg hit-tes
   // chrome on every viewport — guaranteed chart-free.
   await page.mouse.move(5, 5);
   await expect(tooltip).toHaveCount(0);
+});
+
+test('metric line chart flows from one period shape into the next', async ({ page }, testInfo) => {
+  // Desktop-only, like the sibling metric-explorer contract: the expanded explorer (and its in-place
+  // period swap) is a desktop surface; the mobile UI is a separate, out-of-scope stage.
+  test.skip(testInfo.project.name !== 'desktop-1440', 'Desktop-only metric explorer morph');
+  await bootDemo(page, '/metrics/views', { theme: 'dark' });
+  const chart = page.locator('svg[data-chart-kind="line"][data-chart-expanded]').first();
+  await chart.waitFor({ state: 'visible', timeout: 15_000 });
+  const primarySeries = chart.locator('[data-chart-series="primary"]');
+  const comparisonSeries = chart.locator('[data-chart-series="comparison"]');
+  const morphGroup = chart.locator('g[data-chart-motion="morph"]').first();
+  await expect(morphGroup).toHaveAttribute('data-chart-morph-state', 'idle');
+  const morphNode = await morphGroup.elementHandle();
+  if (!morphNode) throw new Error('chart morph group has no element handle');
+  const oldPath = await primarySeries.getAttribute('d');
+  const oldComparisonPath = await comparisonSeries.getAttribute('d');
+  if (!oldPath) throw new Error('primary chart path is empty before period change');
+  if (!oldComparisonPath) throw new Error('comparison chart path is empty before period change');
+
+  // The explorer defaults to 30d. Sample every browser frame while switching to the genuinely
+  // shorter 7d window so a fast polling client cannot miss the running state.
+  await expect(page.getByRole('group', { name: 'Период', exact: true }).getByRole('button', { name: '30д' })).toHaveAttribute('aria-pressed', 'true');
+  await chart.evaluate((svg) => {
+    const state = window as unknown as { __morphFrames: Array<{ primary: string; comparison: string; state: string | null }> };
+    state.__morphFrames = [];
+    const startedAt = performance.now();
+    const sample = () => {
+      const group = svg.querySelector('g[data-chart-motion="morph"]');
+      const primary = svg.querySelector('[data-chart-series="primary"]');
+      const comparison = svg.querySelector('[data-chart-series="comparison"]');
+      state.__morphFrames.push({
+        primary: primary?.getAttribute('d') ?? '',
+        comparison: comparison?.getAttribute('d') ?? '',
+        state: group?.getAttribute('data-chart-morph-state') ?? null,
+      });
+      if (performance.now() - startedAt < 1200) requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  });
+  await page.getByRole('group', { name: 'Период', exact: true }).getByRole('button', { name: '7д', exact: true }).click();
+  await page.waitForTimeout(1250);
+  const frames = await page.evaluate(() => (window as unknown as { __morphFrames: Array<{ primary: string; comparison: string; state: string | null }> }).__morphFrames);
+  const finalPath = await primarySeries.getAttribute('d');
+  const finalComparisonPath = await comparisonSeries.getAttribute('d');
+  const sameMorphNode = await morphGroup.evaluate((element, previousElement) => element === previousElement, morphNode);
+  const morphEvidence = JSON.stringify({
+    sameMorphNode,
+    states: [...new Set(frames.map((frame) => frame.state))],
+    distinctPaths: new Set(frames.map((frame) => frame.primary)).size,
+    pathChanged: finalPath !== oldPath,
+  });
+
+  expect(frames.some((frame) => frame.state === 'running'), morphEvidence).toBe(true);
+  expect(frames.at(-1)?.state).toBe('idle');
+  expect(finalPath).not.toBe(oldPath);
+  expect(finalComparisonPath).not.toBe(oldComparisonPath);
+  expect(frames.some((frame) => frame.primary.length > 0 && frame.primary !== oldPath && frame.primary !== finalPath)).toBe(true);
+  expect(frames.some((frame) => frame.comparison.length > 0 && frame.comparison !== oldComparisonPath && frame.comparison !== finalComparisonPath)).toBe(true);
+  expect(frames.at(-1)?.primary).toBe(finalPath);
+  expect(frames.at(-1)?.comparison).toBe(finalComparisonPath);
+  expect(sameMorphNode).toBe(true);
+  await expect(morphGroup).toHaveAttribute('data-chart-morph-state', 'idle');
 });
 
 test('metric explorer gives the plot desktop space and exposes a hover inspector', async ({ page }, testInfo) => {

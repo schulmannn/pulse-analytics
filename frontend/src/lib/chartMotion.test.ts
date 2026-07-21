@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { seriesMotionKey } from '@/lib/chartMotion';
 
-// The data-change chart motion (line/area clip `sweep`, sparkline `reveal`, bar `grow`) replays only
-// when the React key changes. seriesMotionKey OWNS that key, so its invariants ARE the motion's
-// replay contract: it must change on real content changes and stay byte-identical for everything
-// that must NOT restart the animation (hover, tooltip, width-only resize, a value-identical refetch).
+// The data-change chart motion (line/area coordinate morph, sparkline `reveal`, bar `grow`) starts
+// only when the data signature changes. Its invariants ARE the motion's replay contract: it must
+// change on real content changes and stay byte-identical for hover, tooltip, width-only resize and
+// a value-identical refetch, none of which may restart the animation.
 describe('seriesMotionKey (chart data-change replay contract)', () => {
   it('a value-identical rerender yields the SAME key (no replay on identity churn)', () => {
     // A refetch producing an equal-but-referentially-new array is the classic false replay.
@@ -31,7 +31,7 @@ describe('seriesMotionKey (chart data-change replay contract)', () => {
 
   it('distinguishes a null gap from a zero day (a hole is real absence)', () => {
     // null serializes to an empty field, 0 to "0" — a collector-skipped day must not read as the
-    // same series as a genuine zero, or the sweep would fail to replay when a hole appears / fills.
+    // same series as a genuine zero, or the morph would not run when a hole appears / fills.
     expect(seriesMotionKey([1, null, 3])).not.toBe(seriesMotionKey([1, 0, 3]));
   });
 

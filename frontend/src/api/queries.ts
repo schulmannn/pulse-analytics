@@ -52,7 +52,7 @@ import {
   TgQrStatusSchema,
   VelocitySchema,
 } from '@/api/schemas';
-import type { CampaignPostInput, CampaignStatus, MentionRules, ReportConfig } from '@/api/schemas';
+import type { CampaignPostInput, CampaignStatus, MentionRules, ReportConfig, TgFull } from '@/api/schemas';
 import { clearSessionToken, setSessionToken } from '@/lib/session';
 import { isDemoMode } from '@/lib/demo';
 import { useSelectedChannel } from '@/lib/channel-context';
@@ -214,12 +214,20 @@ export function useTgFull(days: PeriodDays, opts?: { windowPair?: boolean; enabl
   const limit = opts?.windowPair
     ? Math.min(100, effectiveLimit(days, effRange) * 2)
     : effectiveLimit(days, effRange);
-  return useQuery({
+  return useQuery<TgFull>({
     // opts.enabled — внешний гейт ПОВЕРХ канального (прогрессивная загрузка Главной: офскрин-
     // карточка держит query disabled, см. lib/widgetViewport). queryKey не меняется.
     enabled: channelId != null && opts?.enabled !== false,
     queryKey: ['tg-full', channelId, days, effRange?.from ?? 0, effRange?.to ?? 0, limit],
     staleTime: STALE_LIVE,
+    // Comparison surfaces (metric pages / report / «Сравнение» — windowPair) keep the previous
+    // window's data mounted while a new period for the SAME channel loads: without it MetricPage
+    // flashed a full-page skeleton on every period change, destroying the old SVG geometry before
+    // MorphingSeries could interpolate it into the new shape (no morph). Scoped to windowPair so
+    // plain feed widgets keep their skeleton-on-refetch behavior. Never carry data across a channel
+    // switch — that would flash another source's metrics (source-invariant, see CLAUDE.md).
+    placeholderData: (previous, previousQuery) =>
+      opts?.windowPair && previousQuery?.queryKey[1] === channelId ? previous : undefined,
     queryFn: ({ signal }) => apiGet(`/api/tg/full?limit=${limit}`, TgFullSchema, { signal, channelId }),
   });
 }

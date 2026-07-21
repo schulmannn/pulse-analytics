@@ -235,6 +235,7 @@
     --motion-glide: 260ms;    /* FLIP reorder glide · icon stroke draw-on                  */
     --motion-reveal: 300ms;   /* larger reveals (add-widget rise)                          */
     --motion-entrance: 350ms; /* card mount rise                                           */
+    --motion-morph: 700ms;    /* LineChart UPDATE morph (period→period shape flow, RAF)    */
   }
 
   /* ── Chart series roles (semantic layer over the deep/muted palette) ────────────────────────────
@@ -500,21 +501,25 @@
   }
 
   /* ── Chart motion (token-driven; see frontend/DESIGN_TOKENS.md «Motion») ───────────────────────
-     Series charts softly reveal on mount and whenever the underlying series changes (period / filter):
-     the animated group carries a stable DATA-derived React key, so a resize (new geometry, SAME key)
-     re-renders in place and never replays, while a period / filter swap (new key) remounts and does.
-     Hover, tooltip movement and ResizeObserver width changes are all excluded from that key. The real
-     line/area charts REVEAL with an undistorted left→right clip wipe (`sweep`, the shadcn/Recharts
-     «draw-on» read): clip-path only, so the path geometry is never scaled/stretched — grid, axes,
-     target and reference lines all sit OUTSIDE the swept group and stay anchored. Micro-charts
-     (sparkline / inline / multi-line) keep the lighter `reveal` fade; bars grow from the baseline
-     (scaleY from a fill-box bottom origin) + fade. The dashed comparison stroke is untouched — we
-     animate group OPACITY / clip-path (or a transform), never stroke-dasharray, so a dashed series can
-     never turn solid or lose its pattern; the dashed ghost even
-     carries its dim on strokeOpacity so the fade's opacity channel can't brighten it. The shared tooltip
-     fades on mount and glides between points via a tokenised transform transition (never left / top,
-     so no layout loop). Reduced motion collapses all of it via the global net AND the explicit rules
-     below. Durations stay on the --motion-* ladder; no raw values escape index.css. */
+     Micro-charts (sparkline / inline / multi-line) softly reveal on mount and whenever the series
+     changes: the animated group carries a stable DATA-derived React key, so a resize (new geometry,
+     SAME key) re-renders in place and never replays, while a period / filter swap (new key) remounts
+     and does. Hover, tooltip movement and ResizeObserver width changes are all excluded from that key.
+     Bars grow from the baseline (scaleY from a fill-box bottom origin) + fade.
+
+     The full-size LineChart line/area MORPHS instead of remounting: on a period/filter change the
+     primary + comparison paths interpolate their point geometry from the old shape to the new one via
+     a localized RAF loop in MorphingSeries (shape flow, the shadcn/Recharts UPDATE read — NOT a clip
+     wipe). That morph is JS-driven; the only CSS here is a one-shot MOUNT reveal fade on the morph
+     group (`morph`), which never replays on an update (no re-mount). The comparison stroke is
+     untouched — we morph point geometry, never stroke-dasharray, so a dashed series can never turn
+     solid or lose its pattern; the dashed ghost even carries its dim on strokeOpacity so the fade's
+     opacity channel can't brighten it. The shared tooltip fades on mount and glides between points via
+     a tokenised transform transition (never left / top, so no layout loop). Reduced motion collapses
+     all of it via the global net AND the explicit rules below — and MorphingSeries skips its RAF loop
+     entirely, snapping to the final geometry. Durations stay on the --motion-* ladder; the morph's JS
+     duration mirrors --motion-morph and its easing mirrors --ease-standard, so no raw motion values
+     escape the tokens. */
   @keyframes chart-fade-in {
     from { opacity: 0; }
     to { opacity: 1; }
@@ -523,20 +528,13 @@
     from { transform: scaleY(0); }
     to { transform: scaleY(1); }
   }
-  /* Left→right clip wipe for the line/area group: the right inset shrinks 100%→0%, revealing the
-     marks in place. clip-path never scales the path, so geometry stays true under the non-uniform
-     preserveAspectRatio="none" stretch; a short fade rides along so the leading edge isn't hard. */
-  @keyframes chart-sweep-in {
-    from { clip-path: inset(0 100% 0 0); }
-    to { clip-path: inset(0 0 0 0); }
-  }
   [data-chart-motion='reveal'] {
     animation: chart-fade-in var(--motion-reveal) var(--ease-standard) both;
   }
-  [data-chart-motion='sweep'] {
-    animation:
-      chart-sweep-in var(--motion-reveal) var(--ease-standard) both,
-      chart-fade-in var(--motion-fast) var(--ease-standard) both;
+  /* MOUNT-only reveal for the morphing line/area group. Updates are the JS point-interpolation morph
+     (MorphingSeries), which does not re-mount this node, so this fade runs once on entrance only. */
+  [data-chart-motion='morph'] {
+    animation: chart-fade-in var(--motion-reveal) var(--ease-standard) both;
   }
   [data-chart-motion='grow'] {
     transform-box: fill-box;
@@ -554,7 +552,7 @@
      marks render at their natural end state (opacity 1 · scaleY 1) and the tooltip snaps to position. */
   @media (prefers-reduced-motion: reduce) {
     [data-chart-motion='reveal'],
-    [data-chart-motion='sweep'],
+    [data-chart-motion='morph'],
     [data-chart-motion='grow'] {
       animation: none;
     }

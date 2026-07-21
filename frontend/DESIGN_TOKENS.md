@@ -188,23 +188,30 @@ UI motion pulls from these; components must not inline a duration/easing.
 | `--motion-glide` | 260ms | FLIP reorder glide · icon stroke draw-on |
 | `--motion-reveal` | 300ms | larger reveals (add-widget rise) |
 | `--motion-entrance` | 350ms | card mount rise |
+| `--motion-morph` | 700ms | point-to-point line/area interpolation after a data-window change |
 
 Tailwind's `duration-{100,200,300}` + `ease-out` utilities are an accepted part of the scale;
 arbitrary `duration-[…]` / `ease-[…]` are **not** (lint hard-fails). CSS custom props resolve inside
 inline `style.transition` too, so JS-driven transitions use `var(--motion-glide) var(--ease-standard)`
 (see the reorder FLIP in `ChartWidget.tsx`).
 
-**Chart reveal.** Series charts softly reveal on mount and whenever the underlying series changes. The
-full-size `LineChart` (line + area, primary and comparison) REVEALS with an undistorted left→right
-**clip wipe** — the shadcn/Recharts «draw-on» read: `clip-path: inset()` sweeps the right edge 100%→0%
-over `--motion-reveal` (hook `data-chart-motion="sweep"`), so the path geometry is never scaled or
-stretched and the grid/axes/target/reference lines — which sit OUTSIDE the swept group — stay anchored.
+**Chart motion.** The full-size `LineChart` (line + area, primary and comparison) follows the
+shadcn/Recharts update model: after a period or filter change, old point coordinates are proportionally
+matched to the new point count and interpolated into the target shape. This is a real **shape morph**,
+not a clip wipe or cross-fade. The isolated `MorphingSeries` layer owns the RAF loop, so grid, axes,
+target/reference lines, labels and interaction overlays stay anchored. A stable data signature starts
+the morph only for real series changes; hover, tooltip movement, value-identical refetches and width-only
+resizes do not restart it. Rapid changes continue from the currently displayed geometry. Nulls remain
+honest gaps and never create an interpolated bridge. The dashed comparison ghost keeps its pattern
+because point geometry changes without touching `stroke-dasharray`.
+Period-backed comparison surfaces retain the previous query result as placeholder data only for the
+same source, so a loading skeleton cannot unmount the old SVG before the morph starts; source changes
+still clear immediately and never flash another channel's metrics.
+
 Micro-charts (`Sparkline` / `InlineSpark` / the custom `MsMultiLine`) keep the lighter `reveal` fade
 (`chart-fade-in`, `--motion-reveal`); bars grow from the baseline (`grow` — `scaleY` from a `fill-box`
-bottom origin) + fade. Every hook replays via a **stable data-derived React key** — a period/filter swap
-remounts and replays; hover, tooltip movement and ResizeObserver width changes are excluded from the
-key, so they never restart it. The dashed comparison ghost keeps its pattern (we clip / animate
-group opacity, never `stroke-dasharray`; its dim rides `strokeOpacity`, a channel the fade can't touch).
+bottom origin) + fade. The LineChart's `data-chart-motion="morph"` CSS hook is mount-only; data updates
+reuse the same node and run the point interpolation over `--motion-morph`.
 The shared `ChartTooltip` fades in and glides between points via a tokenised
 `transform` transition (`--motion-base`, never `left`/`top`) — one `[data-chart-tooltip]` rule owns it
 for default/rhea/comparison alike.
@@ -212,7 +219,8 @@ for default/rhea/comparison alike.
 **Reduced motion.** A global safety net in `index.css` collapses every animation/transition to 0.01ms
 under `prefers-reduced-motion: reduce`, so token-driven rules never need a per-rule guard. Infinite
 loops (reorder jiggle, starfield twinkle) and readability-critical reveals additionally carry explicit
-`animation: none`. JS motion (framer on the landing) gates in-component via `useReducedMotion`.
+`animation: none`. JS motion gates in-component: framer uses `useReducedMotion`, while
+`MorphingSeries` checks the media query and renders the final path without scheduling RAF work.
 
 **Desktop sidebar.** The persistent column remains layout-pushing in both modes (`240px` expanded,
 `64px` rail). Both directions share **one edge-led beat** — `--motion-reveal` on the width, the
