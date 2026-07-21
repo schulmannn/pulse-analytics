@@ -647,6 +647,7 @@ export const IgPostSchema = z
     media_product_type: z.string().optional().nullable(),
     media_url: z.string().optional().nullable(),
     thumbnail_url: z.string().optional().nullable(),
+    table_thumbnail_url: z.string().optional().nullable(),
     permalink: z.string().optional().nullable(),
     timestamp: z.string().optional().nullable(),
     like_count: z.coerce.number().optional().nullable(),

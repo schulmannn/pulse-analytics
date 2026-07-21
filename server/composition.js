@@ -418,8 +418,8 @@ function createComposition(config, overrides = {}) {
 
   // Public media proxies (thumb / channel photo) are open <img src> routes, so beyond the global
   // /api limiter they get a dedicated modest per-IP limiter to keep an anonymous scraper from
-  // hammering the MTProto service. Defined here with the other rate limiters and injected into the
-  // TG routes.
+  // hammering the MTProto service or the IG thumbnail resizer. Defined here with the other rate
+  // limiters and injected into both media route modules.
   const mediaLimiter = rateLimit({
     windowMs: 60 * 1000,
     limit: 120,

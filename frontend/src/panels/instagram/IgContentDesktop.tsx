@@ -813,7 +813,9 @@ function IgPostThumb({ post }: { post: IgPost }) {
   const [brokenSrc, setBrokenSrc] = useState<string | null>(null);
   const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
   const isVideo = post.media_type === 'VIDEO' || post.media_product_type === 'REELS';
-  const cover = post.thumbnail_url || (!isVideo ? post.media_url : null) || null;
+  const originalCover = post.thumbnail_url || (!isVideo ? post.media_url : null) || null;
+  const proxyFailed = post.table_thumbnail_url != null && brokenSrc === post.table_thumbnail_url;
+  const cover = proxyFailed ? originalCover : post.table_thumbnail_url || originalCover;
   const broken = cover != null && brokenSrc === cover;
   const loaded = cover != null && loadedSrc === cover;
   const label = classifyIgFormat(post) === 'reels' ? 'Reels' : classifyIgFormat(post) === 'video' ? 'Видео' : classifyIgFormat(post) === 'carousel' ? 'Альбом' : 'Фото';

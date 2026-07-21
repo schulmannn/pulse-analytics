@@ -169,6 +169,7 @@ function createApp(deps) {
     app, requireAuth, db, log,
     igFetch, refreshIgIfNeeded, igConfigured, igCrypto, igMock, nearestOf,
     cacheGet, cacheSet, IG_ACCOUNT, IG_TOKEN,
+    mediaLimiter, fetchWithTimeout, AUTH_SECRET,
   });
 
   // Instagram OAuth (per-channel connect) routes are isolated in routes/ig-oauth.js — the

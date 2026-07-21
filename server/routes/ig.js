@@ -1,5 +1,16 @@
 'use strict';
 
+const { createAdmissionController } = require('../lib/admissionController');
+const {
+  IG_THUMB_CACHE_TTL_MS,
+  verifyIgThumbnailToken,
+  igThumbnailPath,
+  igThumbnailCacheKey,
+  downloadIgThumbnailSource,
+  resizeIgThumbnail,
+  safeIgThumbnailErrorCode,
+} = require('../lib/igThumbnail');
+
 /**
  * Instagram data routes (/api/ig/{profile,tags,insights,posts,breakdowns,online,stories,history})
  * plus the per-request resolveIg middleware — extracted verbatim from index.js.
@@ -16,7 +27,18 @@ function registerIgRoutes({
   app, requireAuth, db, log,
   igFetch, refreshIgIfNeeded, igConfigured, igCrypto, igMock, nearestOf,
   cacheGet, cacheSet, IG_ACCOUNT, IG_TOKEN,
+  mediaLimiter = (_req, _res, next) => next(),
+  fetchWithTimeout,
+  AUTH_SECRET,
+  resizeThumbnail = resizeIgThumbnail,
 }) {
+  const thumbnailInflight = new Map();
+  const thumbnailAdmission = createAdmissionController({
+    maxInFlight: 4,
+    maxWaiting: 32,
+    acquireTimeoutMs: 5000,
+  });
+
   // Per-request IG identity: resolve { accountId, token, source } for THIS request's channel.
   // Priority: (1) the channel's own OAuth token from ig_accounts (decrypted + refreshed);
   // (2) the global env single-account token; (3) null → the route serves mock. Unlike
@@ -71,6 +93,56 @@ function registerIgRoutes({
       res.json(data);
     } catch (e) {
       next(e);
+    }
+  });
+
+  // A signed, bounded image proxy for compact table covers. /api/ig/posts mints the token only after
+  // resolveIg has authorized the account, so this route never accepts an arbitrary user URL and plain
+  // <img> tags do not depend on a cookie/header auth transport. The original CDN URL remains in the
+  // post payload for detail views and is also the graceful fallback if resizing is temporarily down.
+  app.get('/api/ig/thumb', mediaLimiter, async (req, res) => {
+    const sourceUrl = verifyIgThumbnailToken(req.query.t, AUTH_SECRET);
+    if (!sourceUrl) return res.status(404).end();
+
+    const cacheKey = igThumbnailCacheKey(sourceUrl);
+    const cached = cacheGet(cacheKey);
+    if (Buffer.isBuffer(cached)) {
+      res.set('Content-Type', 'image/jpeg');
+      res.set('Cache-Control', 'public, max-age=86400, immutable');
+      res.set('Content-Length', String(cached.length));
+      return res.send(cached);
+    }
+
+    try {
+      let pending = thumbnailInflight.get(cacheKey);
+      if (!pending) {
+        pending = (async () => {
+          const release = await thumbnailAdmission.acquire();
+          try {
+            const source = await downloadIgThumbnailSource(fetchWithTimeout, sourceUrl);
+            const jpeg = await resizeThumbnail(source);
+            if (!Buffer.isBuffer(jpeg) || !jpeg.length) throw new Error('empty resize result');
+            cacheSet(cacheKey, jpeg, IG_THUMB_CACHE_TTL_MS);
+            return jpeg;
+          } finally {
+            release();
+          }
+        })();
+        thumbnailInflight.set(cacheKey, pending);
+      }
+      const jpeg = await pending;
+      res.set('Content-Type', 'image/jpeg');
+      res.set('Cache-Control', 'public, max-age=86400, immutable');
+      res.set('Content-Length', String(jpeg.length));
+      return res.send(jpeg);
+    } catch (error) {
+      log('warn', 'ig_thumbnail_proxy_failed', { code: safeIgThumbnailErrorCode(error) });
+      res.status(302);
+      res.set('Location', sourceUrl);
+      res.set('Cache-Control', 'no-store');
+      return res.end();
+    } finally {
+      thumbnailInflight.delete(cacheKey);
     }
   });
 
@@ -231,7 +303,13 @@ function registerIgRoutes({
         })
       );
 
-      const result = { data: posts };
+      const data = posts.map((post) => {
+        const isVideo = post.media_type === 'VIDEO' || post.media_product_type === 'REELS';
+        const cover = post.thumbnail_url || (!isVideo ? post.media_url : null) || null;
+        const tableThumbnailUrl = cover ? igThumbnailPath(cover, AUTH_SECRET) : null;
+        return tableThumbnailUrl ? { ...post, table_thumbnail_url: tableThumbnailUrl } : post;
+      });
+      const result = { data };
       cacheSet(cacheKey, result);
       res.json(result);
     } catch (e) {
