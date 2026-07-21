@@ -10,9 +10,12 @@ import { Button } from '@/components/ui/button';
  * axis-free card plot band; `table` matches a few dense rows. Shared with {@link ErrorState}.
  */
 export type DataStateSize = 'chart' | 'table';
+// tile-short: в тесном фикс-тайле резерв-футпринт отпускается (контент и так центрируется в
+// слоте через h-full) — иначе min-h + py + многострочный reason превышали 264px-слот (прод-класс
+// багов «состояние не влезло в тайл»; см. container-запросы `tile` в index.css).
 export const dataStateSizeClass: Record<DataStateSize, string> = {
-  chart: 'min-h-40',
-  table: 'min-h-32',
+  chart: 'min-h-40 tile-short:min-h-0',
+  table: 'min-h-32 tile-short:min-h-0',
 };
 
 interface EmptyStateProps {
@@ -45,12 +48,14 @@ export function EmptyState({ title, reason, action, glyph = true, compact = fals
     return (
       <div
         className={cn(
-          'flex h-full min-h-24 flex-col items-center justify-center gap-1.5 py-4 text-center',
+          // tile-short:*: зеркало ErrorState.compact — в тесном фикс-тайле резерв и ритм ужимаются
+          // сами (CQ `tile`, index.css), пустое состояние не распирает 264px-слот.
+          'flex h-full min-h-24 flex-col items-center justify-center gap-1.5 py-4 text-center tile-short:min-h-0 tile-short:h-auto tile-short:flex-1 tile-short:gap-1 tile-short:py-2',
           size && dataStateSizeClass[size],
           className,
         )}
       >
-        {glyph ? <Cartograph name="terra" className="h-8 w-auto opacity-80" /> : null}
+        {glyph ? <Cartograph name="terra" className="h-8 w-auto opacity-80 tile-short:h-6" /> : null}
         <p className={cn('text-sm', reason ? 'font-medium text-foreground' : 'text-muted-foreground')}>{title}</p>
         {reason ? <p className="mx-auto max-w-xs text-2xs text-muted-foreground">{reason}</p> : null}
         {action ? (
@@ -62,12 +67,19 @@ export function EmptyState({ title, reason, action, glyph = true, compact = fals
     );
   }
   return (
-    <div className={cn('flex flex-col items-center rounded border border-dashed border-border bg-background px-4 py-8 text-center', className)}>
-      {glyph ? <Cartograph name="terra" className="mb-3 h-12 w-auto" /> : null}
+    // tile-short:*: полный вариант в тесном фикс-тайле конвергирует к компактной иерархии
+    // (зеркало ErrorState) — рамка гаснет, ритм ужимается, ничего не клипается.
+    <div
+      className={cn(
+        'flex flex-col items-center rounded border border-dashed border-border bg-background px-4 py-8 text-center tile-short:flex-1 tile-short:min-h-0 tile-short:justify-center tile-short:gap-1 tile-short:rounded-none tile-short:border-0 tile-short:bg-transparent tile-short:px-3 tile-short:py-2',
+        className,
+      )}
+    >
+      {glyph ? <Cartograph name="terra" className="mb-3 h-12 w-auto tile-short:mb-0 tile-short:h-6 tile-short:opacity-80" /> : null}
       <p className="text-sm font-medium text-foreground">{title}</p>
-      {reason ? <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">{reason}</p> : null}
+      {reason ? <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground tile-short:mt-0 tile-short:max-w-xs tile-short:text-2xs tile-short:line-clamp-2">{reason}</p> : null}
       {action ? (
-        <Button asChild size="sm" className="mt-3">
+        <Button asChild size="sm" className="mt-3 tile-short:mt-1">
           <Link to={action.to}>{action.label} →</Link>
         </Button>
       ) : null}

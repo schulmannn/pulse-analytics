@@ -35,14 +35,18 @@ export function ErrorState({ title = 'Не удалось загрузить', r
       <div
         role="alert"
         className={cn(
-          'flex h-full min-h-24 flex-col items-center justify-center gap-1.5 py-4 text-center',
+          // tile-short:*: в тесном фикс-тайле (CQ `tile`, index.css) состояние ужимается само —
+          // py/gap/глиф меньше, reason клампится — и «Повторить» гарантированно остаётся в слоте.
+          // Вариантные утилиты в выхлопе позже базовых, поэтому tile-short:py-2 перебивает и
+          // py-4 этой строки, и py-4 из call-site className.
+          'flex h-full min-h-24 flex-col items-center justify-center gap-1.5 py-4 text-center tile-short:min-h-0 tile-short:h-auto tile-short:flex-1 tile-short:gap-1 tile-short:py-2',
           size && dataStateSizeClass[size],
           className,
         )}
       >
-        <Cartograph name="broken-route" className="h-8 w-auto opacity-80" />
+        <Cartograph name="broken-route" className="h-8 w-auto opacity-80 tile-short:h-6" />
         <p className="text-sm font-medium text-foreground">{title}</p>
-        {reason ? <p className="mx-auto max-w-xs text-2xs text-muted-foreground">{reason}</p> : null}
+        {reason ? <p className="mx-auto max-w-xs text-2xs text-muted-foreground tile-short:line-clamp-2">{reason}</p> : null}
         {onRetry ? (
           <Button type="button" size="sm" variant="outline" onClick={onRetry} disabled={retrying} className="mt-1">
             {retrying ? 'Загрузка…' : 'Повторить'}
@@ -52,17 +56,26 @@ export function ErrorState({ title = 'Не удалось загрузить', r
     );
   }
   return (
-    <div role="alert" className={cn('flex flex-col items-center rounded border border-dashed border-border bg-background px-4 py-8 text-center', className)}>
-      <Cartograph name="broken-route" className="h-16 w-auto" />
-      <p className="mt-4 text-sm font-medium text-foreground">{title}</p>
-      {reason ? <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">{reason}</p> : null}
+    // tile-short:*: полный вариант, случайно попавший в тесный фикс-тайл (систематический риск —
+    // любой будущий call-site), конвергирует к компактной иерархии: рамка-пунктир гаснет (карточка
+    // уже рамка), глиф/отступы компактные, reason клампится — вместо клипа overflow-hidden.
+    <div
+      role="alert"
+      className={cn(
+        'flex flex-col items-center rounded border border-dashed border-border bg-background px-4 py-8 text-center tile-short:flex-1 tile-short:min-h-0 tile-short:justify-center tile-short:gap-1 tile-short:rounded-none tile-short:border-0 tile-short:bg-transparent tile-short:px-3 tile-short:py-2',
+        className,
+      )}
+    >
+      <Cartograph name="broken-route" className="h-16 w-auto tile-short:h-6 tile-short:opacity-80" />
+      <p className="mt-4 text-sm font-medium text-foreground tile-short:mt-0">{title}</p>
+      {reason ? <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground tile-short:mt-0 tile-short:max-w-xs tile-short:text-2xs tile-short:line-clamp-2">{reason}</p> : null}
       {onRetry ? (
         <Button
           type="button"
           size="sm"
           onClick={onRetry}
           disabled={retrying}
-          className="mt-4"
+          className="mt-4 tile-short:mt-1"
         >
           {retrying ? 'Загрузка…' : 'Повторить'}
         </Button>
