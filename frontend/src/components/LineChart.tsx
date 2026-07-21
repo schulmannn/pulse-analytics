@@ -1,8 +1,10 @@
 import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { EmptyState } from '@/components/EmptyState';
-import { fmt, smoothSvgPath } from '@/lib/format';
+import { fmt } from '@/lib/format';
 import { seriesMotionKey } from '@/lib/chartMotion';
+import { MorphingSeries, type MorphGeom } from '@/components/MorphingSeries';
+import type { MorphPoint } from '@/lib/chartMorph';
 import { detectAnomalies } from '@/lib/anomaly';
 import { nearestPointIndex } from '@/lib/chartHover';
 import { axisLabelIndexes } from '@/lib/chartLabels';
@@ -220,12 +222,11 @@ export function LineChart({
   const showGhost = hasGhostLegend && !ghostHidden;
   const activeGhost = showGhost ? ghost : undefined;
 
-  // Stable data signature for the sweep (see index.css «Chart motion»). Keyed on the SERIES content
-  // — primary values + the shown comparison — so the clip-wipe replays on a period / filter / compare
-  // change but NOT on hover (separate state), tooltip movement or a ResizeObserver width change
-  // (width is deliberately absent). A same-key re-render updates geometry in place without remounting,
-  // so a resize never restarts the motion; a new key remounts the group and replays it once.
-  const motionKey = seriesMotionKey(values, activeGhost);
+  // Stable data signature for the shape morph (see index.css «Chart motion»). Primary values plus
+  // the shown comparison start a transition on a real period/filter/compare swap, while hover,
+  // identity-only refetches and ResizeObserver width changes never restart it. `null` remains
+  // distinct from a real zero in the signature.
+  const motionSignature = seriesMotionKey(values, activeGhost);
 
   // ── Geometry + the static plot, memoized APART from hover ────────────────────────────────
   // Hover is a per-mousemove setState: without this memo every crosshair step re-derived the
@@ -335,40 +336,19 @@ export function LineChart({
       }
     }
     if (run.length > 0) segs.push(run);
-    const lineSegs = segs.filter((s) => s.length >= 2);
-    // Один path с подпутями M…C… — stroke остаётся одним элементом, разрывы честные.
-    const linePath = lineSegs.map((segment) => smoothSvgPath(segment)).join(' ');
-    // Каждый сегмент заливки замыкается на СВОЮ базовую линию — дыра остаётся незакрашенной.
-    // Верх заливки — та же сглаженная кривая, что и линия (общий smoothSvgPath), низ — по baseY.
     const baseY = h - padB;
-    const areaPath = lineSegs
-      .map((segment) => `${smoothSvgPath(segment)} L ${segment[segment.length - 1].x} ${baseY} L ${segment[0].x} ${baseY} Z`)
-      .join(' ');
     // Сегмент из одной точки: точка-кружок — единственное измерение между дырами всё равно факт,
     // а линия нулевой длины была бы невидима.
     const lonePts = segs.filter((s) => s.length === 1).map((s) => s[0]);
 
-    // Ghost-дыры тоже не выдумываем: null = pen-up, следующий реальный отсчёт открывает новый
-    // подпуть — тот же честный разрыв, что у основной серии (раньше null коэрсился бы в 0).
-    const ghostSegs: Array<Array<{ x: number; y: number }>> = [];
-    let ghostRun: Array<{ x: number; y: number }> = [];
-    for (let i = 0; i < (activeGhost?.length ?? 0); i++) {
-      const v = activeGhost?.[i];
-      if (v == null) {
-        if (ghostRun.length > 0) {
-          ghostSegs.push(ghostRun);
-          ghostRun = [];
-        }
-      } else {
-        ghostRun.push({ x: gutterW + i * step, y: yFor(v) });
-      }
-    }
-    if (ghostRun.length > 0) ghostSegs.push(ghostRun);
-    const ghostLineSegs = ghostSegs.filter((segment) => segment.length >= 2);
-    const ghostPath = ghostLineSegs.map((segment) => smoothSvgPath(segment)).join(' ');
-    const ghostAreaPath = ghostLineSegs
-      .map((segment) => `${smoothSvgPath(segment)} L ${segment[segment.length - 1].x} ${baseY} L ${segment[0].x} ${baseY} Z`)
-      .join(' ');
+    // Point geometry for the morph data-layer (MorphingSeries). The line/area PATH strings are built
+    // there — and RE-built each frame during a period morph — via the shared buildSeriesPaths, so
+    // nothing here bakes a path (the whole plot must stay OUT of the RAF loop). `null` stays a gap;
+    // baseY closes each area segment. Ghost x-spacing matches the primary (gutterW + i·step).
+    const primaryPoints: MorphPoint[] = points.map((p) => ({ x: p.x, y: p.y }));
+    const ghostPoints: MorphPoint[] | null = activeGhost
+      ? activeGhost.map((v, i) => ({ x: gutterW + i * step, y: v != null ? yFor(v) : null }))
+      : null;
 
     // Real x-axis ticks (axes mode): width-aware stride so labels never collide — one label
     // by measured width, always including the first and the last point.
@@ -408,7 +388,13 @@ export function LineChart({
       });
     })();
 
-    const staticLayer = (
+    // ── The chart splits into three z-layers so the RAF morph re-renders ONLY the series paths ──
+    // `staticUnder` (defs, grid, target/reference lines) sits below the series; `MorphingSeries`
+    // (rendered between them in the SVG body) owns the morphing primary/comparison line+area; and
+    // `staticOver` (lone points, rings, poles, value/axis labels) sits above. Both static fragments
+    // are part of this memo, so a morph frame's setState — confined to MorphingSeries — never rebuilds
+    // the axes, labels or hover geometry. Target/reference hairlines read as «drawn under the series».
+    const staticUnder = (
       <>
         <defs>
           {/* Default cards keep the flat Steep tint. The isolated Rhea treatment follows the
@@ -447,34 +433,6 @@ export function LineChart({
           />
         ))}
 
-        {/* Comparison stays on the same y-scale. Explorer comparison uses a second solid smooth
-            area (the shadcn pattern); legacy hosts retain the lighter dashed reference line. The
-            comparison marks share ONE keyed sweep group so they clip-wipe in together on a data
-            change; the group clips (never touches stroke-dasharray) so the dashed pattern survives. */}
-        {ghostPath && (
-          <g key={`comparison-${motionKey}`} data-chart-motion="sweep">
-            {comparison && ghostAreaPath && (
-              <path data-chart-series="comparison-area" d={ghostAreaPath} fill={`url(#${comparisonGradientId})`} />
-            )}
-            <path
-              data-chart-series="comparison"
-              d={ghostPath}
-              fill="none"
-              stroke="hsl(var(--chart-role-comparison))"
-              strokeWidth={comparison ? '2' : '1.8'}
-              strokeDasharray={comparison ? undefined : '5 4'}
-              // strokeOpacity (not the element `opacity` attr) carries the dim: the sweep group's
-              // companion fade animates the group `opacity` 0→1, and its `both` end-state would
-              // otherwise override an `opacity` attribute and brighten the dashed ghost to full.
-              // strokeOpacity is a separate channel the fade can't touch.
-              strokeOpacity={comparison ? '0.95' : '0.8'}
-              strokeLinejoin="round"
-              strokeLinecap="round"
-              vectorEffect="non-scaling-stroke"
-            />
-          </g>
-        )}
-
         {/* Target level (widget pref) — a dashed goal line with a small right-aligned label */}
         {target != null && (
           <>
@@ -509,34 +467,11 @@ export function LineChart({
             ))}
           </>
         )}
+      </>
+    );
 
-        {/* Primary marks — area, line, lone points, per-point rings, anomaly rings, poles and the
-            extreme value labels — share ONE keyed sweep group so a period/filter change clip-wipes
-            the whole series in together left→right, undistorted, while the grid/axes/target/ref
-            lines above and below stay OUTSIDE the group and anchored. */}
-        <g key={`primary-${motionKey}`} data-chart-motion="sweep">
-        {/* Gradient area + line — сегментами (пустой d не рендерим: серия может быть
-            россыпью одиночных измерений без единого сплошного отрезка) */}
-        {areaPath && (
-          <path
-            data-chart-series="primary-area"
-            d={areaPath}
-            fill={`url(#${gradientId})`}
-          />
-        )}
-        {linePath && (
-          <path
-            data-chart-series="primary"
-            d={linePath}
-            fill="none"
-            stroke="hsl(var(--chart-role-primary))"
-            strokeWidth={richStyle ? '2' : '2.5'}
-            strokeLinejoin="round"
-            strokeLinecap="round"
-            vectorEffect="non-scaling-stroke"
-          />
-        )}
-
+    const staticOver = (
+      <>
         {/* Одиночное измерение между дырами — точка вместо невидимой линии нулевой длины */}
         {lonePts.map((p) => (
           <circle key={`lone${p.x}`} cx={p.x} cy={p.y} r="2.5" fill="hsl(var(--chart-role-primary))" className="pointer-events-none" />
@@ -577,7 +512,6 @@ export function LineChart({
             {e.text}
           </text>
         ))}
-        </g>
 
         {/* Y-axis labels — right-aligned in the reserved gutter */}
         {!rhea && yGridPositions.map((yPos, idx) => (
@@ -598,8 +532,13 @@ export function LineChart({
       </>
     );
 
-    return { W, h, gutterW, step, points, yFor, hasXAxis, plotTop: padY, plotBottom: h - padB, staticLayer };
-  }, [values, labels, activeGhost, hasGhostLegend, target, refLines, yMin, yMax, width, ctxHeight, height, expanded, showAxes, markExtremes, showPoints, anomalyIdx, gradientId, comparisonGradientId, rhea, comparison, richStyle, motionKey]);
+    return {
+      W, h, gutterW, step, points, yFor, hasXAxis,
+      plotTop: padY, plotBottom: h - padB,
+      staticUnder, staticOver,
+      morphGeom: { primary: primaryPoints, ghost: ghostPoints, baseY } as MorphGeom,
+    };
+  }, [values, labels, activeGhost, hasGhostLegend, target, refLines, yMin, yMax, width, ctxHeight, height, expanded, showAxes, markExtremes, showPoints, anomalyIdx, gradientId, comparisonGradientId, rhea, comparison, richStyle]);
 
   // Пустое состояние считается по РЕАЛЬНЫМ точкам (plot = null при < 2 non-null): серия из
   // одних null-дней — честное «нет данных», а не нулевая линия.
@@ -750,9 +689,17 @@ export function LineChart({
         onMouseDown={onPointClick ? (e) => (pressRef.current = { x: e.clientX, y: e.clientY }) : undefined}
         onClick={onSvgClick}
       >
-        {/* Grid and axes stay visually anchored while only the keyed data marks reveal again after a
-            period/filter change. Hover / pin / flag overlays never remount the series. */}
-        {plot.staticLayer}
+        {/* Only the data layer animates. Axes, labels and all interaction overlays stay anchored. */}
+        {plot.staticUnder}
+        <MorphingSeries
+          geom={plot.morphGeom}
+          signature={motionSignature}
+          primaryGradientId={gradientId}
+          comparisonGradientId={comparisonGradientId}
+          comparison={comparison}
+          richStyle={richStyle}
+        />
+        {plot.staticOver}
 
         {/* Событ/annotation flags (артефакт v2 п.7): ⚑ у нижней кромки + пунктир к точке дня;
             подпись события читается в ховер-карточке этого дня. */}

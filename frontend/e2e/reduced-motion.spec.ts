@@ -32,9 +32,9 @@ test('reduced motion: dashboard settles with zero running animations', async ({ 
 
 test('reduced motion: chart marks and tooltip render in their final state', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await bootDemo(page, '/analytics');
+  await bootDemo(page, '/metrics/views', { theme: 'dark' });
 
-  const chart = page.locator('svg[data-chart-kind="line"]').first();
+  const chart = page.locator('svg[data-chart-kind="line"][data-chart-expanded]').first();
   await chart.waitFor({ state: 'visible', timeout: 15_000 });
   const chartMotion = page.locator('[data-chart-motion]');
   const motionCount = await chartMotion.count();
@@ -46,12 +46,17 @@ test('reduced motion: chart marks and tooltip render in their final state', asyn
   expect(markStyle.animationName).toBe('none');
   expect(markStyle.opacity).toBe('1');
   expect(markStyle.transform).toBe('none');
-  const sweepStyle = await chart.locator('g[data-chart-motion="sweep"]').first().evaluate((element) => {
-    const style = getComputedStyle(element);
-    return { animationName: style.animationName, clipPath: style.clipPath };
-  });
-  expect(sweepStyle.animationName).toBe('none');
-  expect(sweepStyle.clipPath).toBe('none');
+  const morphGroup = chart.locator('g[data-chart-motion="morph"]').first();
+  const morphStyle = await morphGroup.evaluate((element) => getComputedStyle(element).animationName);
+  expect(morphStyle).toBe('none');
+  await expect(morphGroup).toHaveAttribute('data-chart-morph-state', 'idle');
+  const primary = chart.locator('[data-chart-series="primary"]');
+  const oldPath = await primary.getAttribute('d');
+  await expect(page.getByRole('group', { name: 'Период', exact: true }).getByRole('button', { name: '30д' })).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('group', { name: 'Период', exact: true }).getByRole('button', { name: '7д', exact: true }).click();
+  await expect.poll(() => primary.getAttribute('d')).not.toBe(oldPath);
+  // JS motion observes the same preference: it snaps to the target without scheduling a RAF frame.
+  await expect(morphGroup).toHaveAttribute('data-chart-morph-state', 'idle');
 
   await chart.scrollIntoViewIfNeeded();
   const box = await chart.boundingBox();
