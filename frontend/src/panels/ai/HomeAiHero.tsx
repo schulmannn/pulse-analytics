@@ -63,7 +63,7 @@ export function HomeAiHero() {
             maxLength={4000}
             placeholder="Спросите о ваших метриках: «Как вырос канал за месяц?», «Какие посты зашли лучше всего?»"
             aria-label="Вопрос AI-ассистенту"
-            className="w-full resize-none bg-transparent text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground"
+            className="w-full resize-none bg-transparent text-sm leading-relaxed text-foreground outline-hidden placeholder:text-muted-foreground"
           />
           <div className="mt-2 flex items-end justify-between gap-3">
             {/* STEEP-пикеры: @ = источник-контекст, часы = период. Выбор уходит в текст вопроса. */}

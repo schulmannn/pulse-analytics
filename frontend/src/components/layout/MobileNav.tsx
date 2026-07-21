@@ -21,7 +21,7 @@ export function MobileBottomNav() {
   return (
     <nav
       className={cn(
-        'fixed inset-x-0 bottom-0 z-nav grid border-t bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden print:hidden',
+        'fixed inset-x-0 bottom-0 z-nav grid border-t bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm md:hidden print:hidden',
         GRID_COLS[nav.length] ?? 'grid-cols-5',
       )}
     >

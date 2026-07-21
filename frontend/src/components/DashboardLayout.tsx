@@ -37,7 +37,7 @@ export function DashboardLayout({ email, role, avatar }: DashboardLayoutProps) {
     // ResizeObserver-волну по всем карточкам (источник покадровых штормов после прокрутки).
     <div className="flex min-h-screen bg-background text-foreground md:h-screen md:gap-2.5 md:overflow-hidden md:p-2.5">
       <Sidebar email={email} role={role} avatar={avatar} />
-      <div className="flex min-w-0 flex-1 flex-col md:overflow-y-auto md:rounded-2xl md:border md:border-border md:[scrollbar-gutter:stable]">
+      <div className="flex min-w-0 flex-1 flex-col md:overflow-y-auto md:rounded-2xl md:border md:border-border md:scrollbar-gutter-stable">
         {isMd ? (
           isDesktopMetricRoute ? null : <Topbar />
         ) : (
@@ -50,7 +50,7 @@ export function DashboardLayout({ email, role, avatar }: DashboardLayoutProps) {
             isDesktopMetricRoute ? 'pt-3' : 'pt-5',
           )}
         >
-          <div className="mx-auto w-full max-w-screen-2xl">
+          <div className="mx-auto w-full max-w-(--breakpoint-2xl)">
             <DemoBanner />
             <Outlet />
           </div>
@@ -90,7 +90,7 @@ function Topbar() {
   const title = FEED_ROUTES.includes(pathname) ? null : routeTitle(pathname);
   if (!title) return null;
   return (
-    <header data-dashboard-topbar className="sticky top-0 z-sticky flex h-14 items-center gap-3 border-b bg-background/80 px-4 backdrop-blur sm:gap-4 sm:px-6 print:hidden">
+    <header data-dashboard-topbar className="sticky top-0 z-sticky flex h-14 items-center gap-3 border-b bg-background/80 px-4 backdrop-blur-sm sm:gap-4 sm:px-6 print:hidden">
       <h1 className="min-w-0 truncate text-lg font-medium tracking-tight">{title}</h1>
     </header>
   );

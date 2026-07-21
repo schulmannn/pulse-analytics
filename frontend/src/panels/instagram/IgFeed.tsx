@@ -97,7 +97,7 @@ export function IgShell() {
     <div
       className={cn(
         'flex items-start justify-between gap-3 rounded-lg border px-4 py-3 text-sm',
-        notice.kind === 'ok' ? 'border-verdant/40 bg-verdant/[0.05]' : 'border-destructive/40 bg-destructive/[0.04]',
+        notice.kind === 'ok' ? 'border-verdant/40 bg-verdant/5' : 'border-destructive/40 bg-destructive/4',
       )}
     >
       <span className="text-foreground">{notice.msg}</span>

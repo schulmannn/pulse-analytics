@@ -60,7 +60,7 @@ export function CreateWidgetDialog({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-modal flex items-start justify-center overflow-y-auto bg-background/70 p-4 backdrop-blur-sm backdrop-grayscale sm:p-8"
+      className="fixed inset-0 z-modal flex items-start justify-center overflow-y-auto bg-background/70 p-4 backdrop-blur-xs backdrop-grayscale sm:p-8"
       role="dialog"
       aria-modal="true"
       aria-label={`Собрать виджет «${draft.title || metric.label}»`}
@@ -69,7 +69,7 @@ export function CreateWidgetDialog({
       <div
         ref={panelRef}
         tabIndex={-1}
-        className="my-auto grid w-full max-w-3xl grid-cols-1 gap-5 rounded-xl border border-border bg-card p-5 focus:outline-none sm:grid-cols-[minmax(0,1fr)_300px]"
+        className="my-auto grid w-full max-w-3xl grid-cols-1 gap-5 rounded-xl border border-border bg-card p-5 focus:outline-hidden sm:grid-cols-[minmax(0,1fr)_300px]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Left — live preview of the card body. */}

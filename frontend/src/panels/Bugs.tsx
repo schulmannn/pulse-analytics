@@ -70,7 +70,7 @@ export function Bugs() {
               placeholder="Опишите проблему или предложение…"
               rows={3}
               disabled={createBugMutation.isPending}
-              className="w-full resize-y rounded border bg-background p-2.5 text-sm leading-relaxed focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
+              className="w-full resize-y rounded border bg-background p-2.5 text-sm leading-relaxed focus:outline-hidden focus:ring-1 focus:ring-primary disabled:opacity-50"
             />
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div className="flex items-center gap-3">
@@ -167,7 +167,7 @@ function BugRowCard({ bug, availableStatuses, onDelete }: BugRowCardProps) {
     <Card className={`transition-opacity ${isCompleted ? 'opacity-60' : ''}`}>
       <CardContent className="space-y-3.5 p-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="flex-1 whitespace-pre-wrap break-words text-sm font-medium leading-relaxed text-foreground">
+          <div className="flex-1 whitespace-pre-wrap wrap-break-word text-sm font-medium leading-relaxed text-foreground">
             {bug.text}
           </div>
           <button

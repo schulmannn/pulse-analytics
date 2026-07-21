@@ -771,7 +771,7 @@ export function MetricPage() {
               бордер вместо плавающих контролов у края и отдельной border-top-полосы. */}
           <div
             data-metric-chart-card
-            className="rounded-2xl border border-border bg-card p-4 shadow-sm dark:border-white/[0.06] sm:p-5"
+            className="rounded-2xl border border-border bg-card p-4 shadow-xs dark:border-white/6 sm:p-5"
           >
           <ChartWidget
             id={`metric-${metricKey}`}
@@ -875,7 +875,7 @@ export function MetricPage() {
               высоту (h-7) и радиусы, поэтому читаются одной панелью. Пикер открывается вниз. */}
           <div
             data-metric-toolbar
-            className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-3 dark:border-white/[0.06] print:hidden"
+            className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-3 dark:border-white/6 print:hidden"
           >
             <SegmentedControl
               ariaLabel="Гранулярность"
@@ -1000,7 +1000,7 @@ export function MetricPage() {
                 pinnedDayKey ? (
                   <div
                     data-pinned-day-events
-                    className="mt-4 rounded-xl border border-border bg-background/40 p-3 dark:border-white/[0.06]"
+                    className="mt-4 rounded-xl border border-border bg-background/40 p-3 dark:border-white/6"
                   >
                     {/* События дня (chart_annotations): пин уже выбрал день — здесь событие
                         создаётся и удаляется; флажок ⚑ появляется на линии. */}
@@ -1038,7 +1038,7 @@ export function MetricPage() {
                         onChange={(e) => setAnnLabel(e.target.value)}
                         maxLength={80}
                         placeholder="Отметить событие дня — реклама, пост-хит…"
-                        className="h-9 min-w-0 flex-1 rounded-lg border border-border bg-card px-3 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-primary/40"
+                        className="h-9 min-w-0 flex-1 rounded-lg border border-border bg-card px-3 text-xs text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-2 focus:ring-primary/40"
                       />
                       <button
                         type="submit"
@@ -1058,7 +1058,7 @@ export function MetricPage() {
           {field && (
             <section
               data-metric-top-posts
-              className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm dark:border-white/[0.06]"
+              className="overflow-hidden rounded-2xl border border-border bg-card shadow-xs dark:border-white/6"
             >
               <header className="flex items-end justify-between gap-3 border-b border-border px-4 py-4 sm:px-5">
                 <div className="min-w-0">
@@ -1110,8 +1110,8 @@ export function MetricPage() {
                               onClick={() => setOpenPost(post)}
                               className={cn(
                                 'grid w-full grid-cols-[1.75rem_2.5rem_minmax(0,1fr)_auto] items-center gap-2.5 px-4 py-3 text-left transition-colors sm:grid-cols-[2rem_2.5rem_minmax(0,1fr)_6rem] sm:gap-3 sm:px-5',
-                                'hover:bg-muted/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45',
-                                selected && 'bg-primary/[0.08] hover:bg-primary/[0.1]',
+                                'hover:bg-muted/45 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45',
+                                selected && 'bg-primary/8 hover:bg-primary/10',
                               )}
                             >
                               <span
@@ -1151,7 +1151,7 @@ export function MetricPage() {
                                   />
                                 </span>
                               </span>
-                              <span className="min-w-[3.75rem] shrink-0 text-right sm:min-w-0">
+                              <span className="min-w-15 shrink-0 text-right sm:min-w-0">
                                 <span className="block text-sm font-semibold tabular-nums text-foreground">
                                   {fmt.short(value)}
                                 </span>
@@ -1216,7 +1216,7 @@ export function MetricPage() {
                       <span className="text-base font-medium tabular-nums text-ink2">{compare.previous}</span>
                     </div>
                     {compareDelta != null && (
-                      <div className="flex items-center justify-between gap-3 border-t border-border pt-3 dark:border-white/[0.06]">
+                      <div className="flex items-center justify-between gap-3 border-t border-border pt-3 dark:border-white/6">
                         <span className="text-xs text-muted-foreground">Изменение</span>
                         <DeltaBadge value={compareDelta} />
                       </div>
@@ -1344,7 +1344,7 @@ function RailCard({ title, mark, children }: { title: string; mark?: string; chi
   return (
     <section
       data-rail-card={mark}
-      className="rounded-2xl border border-border bg-card p-4 shadow-sm dark:border-white/[0.06] sm:p-5"
+      className="rounded-2xl border border-border bg-card p-4 shadow-xs dark:border-white/6 sm:p-5"
     >
       <h3 className="text-xs font-medium tracking-wider text-muted-foreground">{title}</h3>
       <div className="mt-3">{children}</div>

@@ -203,7 +203,7 @@ export function LineChart({
     window.addEventListener('blur', clear);
     return () => {
       window.removeEventListener('scroll', clear, true);
-      window.removeEventListener('blur', clear);
+      window.removeEventListener('blur-sm', clear);
     };
   }, [hasHover]);
 
@@ -816,7 +816,7 @@ export function LineChart({
               aria-pressed={!ghostHidden}
               onClick={() => setGhostHidden((v) => !v)}
               title={ghostHidden ? 'Показать сравнение' : 'Скрыть сравнение'}
-              className={`flex select-none items-center gap-1.5 rounded transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${ghostHidden ? 'opacity-40 line-through' : ''}`}
+              className={`flex select-none items-center gap-1.5 rounded transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40 ${ghostHidden ? 'opacity-40 line-through' : ''}`}
             >
               <span aria-hidden="true" className={comparison ? 'h-2.5 w-2.5 rounded-[3px]' : 'w-4 border-t-2 border-dashed'} style={comparison ? { backgroundColor: 'hsl(var(--chart-role-comparison))' } : { borderColor: 'hsl(var(--chart-role-comparison))' }} />
               {ghostLabel}

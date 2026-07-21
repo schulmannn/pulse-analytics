@@ -150,7 +150,7 @@ export function TextBlock({ value, onChange }: { value: string; onChange: (v: st
         rows={1}
         placeholder="Текст…"
         aria-label="Текстовый блок"
-        className="block w-full resize-none rounded border-0 bg-transparent p-0 text-base leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/60 focus:ring-1 focus:ring-primary print:hidden"
+        className="block w-full resize-none rounded border-0 bg-transparent p-0 text-base leading-relaxed text-foreground outline-hidden placeholder:text-muted-foreground/60 focus:ring-1 focus:ring-primary print:hidden"
       />
       <p className="hidden whitespace-pre-wrap text-base leading-relaxed text-foreground print:block">{value}</p>
     </>

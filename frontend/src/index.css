@@ -1,6 +1,1327 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
+
+@plugin 'tailwindcss-animate';
+
+@custom-variant dark (&:is(.dark *));
+
+/* v3-parity: в Tailwind v4 `hover:` по умолчанию действует только на устройствах с ховером
+   (@media (hover: hover)) — это меняло бы живое поведение тач-устройств, а мобильный канон
+   заморожен до отдельного mobile-этапа. Возвращаем семантику v3 дословно. */
+@custom-variant hover (&:hover);
+
+@utility container {
+  margin-inline: auto;
+  padding-inline: 1.5rem;
+  @media (width >= --theme(--breakpoint-sm)) {
+    max-width: none;
+  }
+  @media (width >= 1200px) {
+    max-width: 1200px;
+  }
+}
+
+@theme {
+  --font-sans: Inter, system-ui, -apple-system, sans-serif;
+  --font-mono: Roboto Mono, ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 0.9375rem;
+  --text-hero: 2.75rem;
+  --text-hero--line-height: 1;
+
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-ink2: hsl(var(--ink2));
+  --color-ink3: hsl(var(--ink3));
+  --color-amber-tint: hsl(var(--amber-tint));
+  --color-green-tint: hsl(var(--green-tint));
+  --color-blue-tint: hsl(var(--blue-tint));
+  --color-hover-row: hsl(var(--hover-row));
+  --color-avatar: hsl(var(--avatar));
+
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+
+  --color-iris: hsl(var(--brand-iris));
+  --color-iris-soft: hsl(var(--brand-iris-soft));
+
+  --color-verdant: hsl(var(--brand-verdant));
+  --color-ember: hsl(var(--brand-ember));
+  --color-ember-strong: hsl(var(--brand-ember-strong));
+  --color-status-warn: hsl(var(--status-warn));
+
+  --color-chart-1: hsl(var(--chart-1));
+  --color-chart-2: hsl(var(--chart-2));
+  --color-chart-3: hsl(var(--chart-3));
+  --color-chart-4: hsl(var(--chart-4));
+  --color-chart-5: hsl(var(--chart-5));
+  --color-chart-6: hsl(var(--chart-6));
+
+  --color-chart-role-primary: hsl(var(--chart-role-primary));
+  --color-chart-role-comparison: hsl(var(--chart-role-comparison));
+  --color-chart-role-positive: hsl(var(--chart-role-positive));
+  --color-chart-role-negative: hsl(var(--chart-role-negative));
+  --color-chart-role-warning: hsl(var(--chart-role-warning));
+  --color-chart-role-neutral: hsl(var(--chart-role-neutral));
+  --color-chart-role-selection: hsl(var(--chart-role-selection));
+
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+
+  --z-index-sticky: 20;
+  --z-index-nav: 30;
+  --z-index-popover: 40;
+  --z-index-modal: 50;
+  --z-index-modal-popover: 55;
+  --z-index-toast: 60;
+  --z-index-tooltip: 70;
+}
+
+/*
+  The default border color has changed to `currentcolor` in Tailwind CSS v4,
+  so we've added these compatibility styles to make sure everything still
+  looks the same as it did with Tailwind CSS v3.
+
+  If we ever want to remove these styles, we need to add an explicit border
+  color utility to any element that depends on these defaults.
+*/
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentcolor);
+  }
+
+  /* v3-parity: v4-preflight убрал `cursor: pointer` у кнопок (в v3 он был). Возвращаем, иначе
+     каждый chrome-контрол получил бы стрелку. Disabled-канон не задет: у выключенных контролов
+     pointer-events-none (см. канон DISABLED), псевдокласс здесь — страховка. */
+  button:not(:disabled),
+  [role='button']:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+@utility btn-pill {
+  /* Pill button radius (Steep-style). Apply to chrome buttons/CTAs; inputs keep --radius. */
+  border-radius: 9999px;
+}
+
+@utility data-table-surface {
+  /* Shared dashboard data-table treatment. The shell owns the card chrome and horizontal
+     overflow; the table class owns only typography, dividers and interaction states so complex
+     tables can keep their sorting, selection, sticky cells and data-driven fills. */
+  overflow: hidden;
+  border: 1px solid hsl(var(--border));
+  border-radius: 1.25rem;
+  background: hsl(var(--card));
+  box-shadow: 0 1px 2px hsl(var(--foreground) / 0.035);
+  /* TopPosts is also reused outside reports, where it owns its card shell. Inside the report the
+     parent already owns that surface, so collapse only the nested chrome and keep the shared rows. */
+  .report-rhea .report-top-posts-table & {
+    border: 0;
+    border-radius: inherit;
+    box-shadow: none;
+  }
+}
+
+@utility data-table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
+@utility data-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  & > thead > tr {
+    background: hsl(var(--muted) / 0.38);
+  }
+  & > thead > tr > th {
+    height: 2.5rem;
+    border-bottom: 1px solid hsl(var(--border));
+    padding: 0.625rem 0.75rem;
+    color: hsl(var(--muted-foreground));
+    font-size: 0.6875rem;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    vertical-align: middle;
+  }
+  & > thead > tr > th:first-child {
+    padding-left: 1rem;
+  }
+  & > tbody > tr > :first-child {
+    padding-left: 1rem;
+  }
+  & > thead > tr > th:last-child {
+    padding-right: 1rem;
+  }
+  & > tbody > tr > :last-child {
+    padding-right: 1rem;
+  }
+  & > tbody > tr {
+    transition: background-color var(--motion-fast) var(--ease-standard);
+  }
+  & > tbody > tr:hover {
+    background: hsl(var(--muted) / 0.3);
+  }
+  & > tbody > tr:focus-within {
+    background: hsl(var(--muted) / 0.3);
+  }
+  & > tbody > tr[data-state='selected'] {
+    background: hsl(var(--primary) / 0.07);
+  }
+  & > tbody > tr[data-ig-content-selected] {
+    background: hsl(var(--primary) / 0.07);
+  }
+  & > tbody > tr[data-ig-content-open] {
+    background: hsl(var(--primary) / 0.11);
+  }
+  & > tbody > tr + tr > * {
+    border-top: 1px solid hsl(var(--border) / 0.64);
+  }
+  & > tbody > tr > td {
+    min-height: 2.75rem;
+    padding: 0.75rem;
+    vertical-align: middle;
+  }
+  & > tbody > tr > th {
+    min-height: 2.75rem;
+    padding: 0.75rem;
+    vertical-align: middle;
+  }
+}
+
+@utility data-table--compact {
+  & > thead > tr > th {
+    height: 2.25rem;
+    padding-block: 0.5rem;
+  }
+  & > tbody > tr > td {
+    min-height: 2.5rem;
+    padding-block: 0.5rem;
+  }
+  & > tbody > tr > th {
+    min-height: 2.5rem;
+    padding-block: 0.5rem;
+  }
+}
+
+@utility data-table-note {
+  border-top: 1px solid hsl(var(--border) / 0.64);
+  padding: 0.75rem 1rem;
+  color: hsl(var(--muted-foreground));
+  font-size: 0.6875rem;
+  line-height: 1.45;
+}
+
+@utility report-rhea {
+  /* First report-only Rhea slice. The scope is deliberate: the report can trial denser rounded
+     controls and lifted analytical cards without changing dashboard, marketing or mobile chrome. */
+  & .report-control {
+    border-radius: 1rem;
+    transition-property:
+      color, background-color, border-color, box-shadow, transform;
+    transition-duration: var(--motion-fast);
+    transition-timing-function: var(--ease-standard);
+  }
+  & .report-control:active:not(:disabled) {
+    transform: translateY(1px);
+  }
+  & .report-metric-card {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    overflow: hidden;
+    border-radius: 1.5rem;
+    padding: 1.25rem;
+    background: hsl(var(--card));
+    color: hsl(var(--card-foreground));
+    cursor: pointer;
+    box-shadow:
+      0 1px 2px hsl(var(--foreground) / 0.04),
+      0 0 0 1px hsl(var(--foreground) / 0.08);
+    transition:
+      background-color var(--motion-fast) var(--ease-standard),
+      box-shadow var(--motion-fast) var(--ease-standard);
+  }
+  & .report-metric-card:hover {
+    background: hsl(var(--muted) / 0.16);
+    box-shadow:
+      0 8px 24px -20px hsl(var(--foreground) / 0.45),
+      0 0 0 1px hsl(var(--foreground) / 0.14);
+  }
+  & .report-metric-card:focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 3px;
+  }
+  & .report-metric-card__header {
+    gap: 0.75rem;
+  }
+  & .report-metric-card__title {
+    color: hsl(var(--foreground));
+    font-size: 1rem;
+    line-height: 1.5rem;
+    letter-spacing: -0.01em;
+  }
+  & .report-metric-card__rule {
+    display: none;
+  }
+  & .report-metric-card__value {
+    margin-top: -0.25rem;
+  }
+  & .report-metric-card__number {
+    font-size: 2rem;
+    line-height: 1;
+    font-weight: 600;
+  }
+  & .report-metric-card__chart {
+    margin: -0.25rem -0.25rem -0.25rem;
+    border-radius: 1rem;
+    padding: 0.75rem 0.5rem 0.25rem;
+    background: hsl(var(--muted) / 0.22);
+  }
+  & .report-metric-card[data-report-chart-appearance='rhea'] {
+    gap: 1rem;
+  }
+  &
+    .report-metric-card[data-report-chart-appearance='rhea']
+    .report-metric-card__chart {
+    position: relative;
+    margin: 0 -0.25rem -0.25rem;
+    border-radius: 0;
+    padding: 1.125rem 0.25rem 0;
+    background: transparent;
+  }
+  &
+    .report-metric-card[data-report-chart-appearance='rhea']
+    .report-metric-card__chart::before {
+    position: absolute;
+    inset: 0.125rem 0.25rem auto;
+    height: 1px;
+    background: hsl(var(--border) / 0.72);
+    content: '';
+  }
+  & [data-chart-appearance='rhea'] {
+    cursor: default;
+  }
+  & .report-metric-card [data-chart-appearance='rhea'] {
+    cursor: pointer;
+  }
+  & [data-chart-appearance='rhea'] [data-chart-axis-label='x'] {
+    font-weight: 500;
+    opacity: 0.82;
+  }
+  /* Rhea / comparison tooltips keep their Geist face; the fade-in + transform glide is the SHARED
+     [data-chart-tooltip] motion (chart-motion block below) now, so it is no longer re-declared per
+     appearance — one rule owns the motion for default, rhea and comparison alike. */
+  & [data-chart-tooltip-appearance='rhea'] {
+    font-family:
+      'Geist Variable',
+      'Inter',
+      system-ui,
+      -apple-system,
+      sans-serif;
+  }
+  /* Chart-scoped final states — belt-and-braces over the global reduced-motion net: motion off, the
+     marks render at their natural end state (opacity 1 · scaleY 1) and the tooltip snaps to position. */
+
+  /* Second report-only Rhea slice: tables use the same calm card surface as charts, while their
+     dense numeric structure remains intact. These selectors are scoped to the desktop report. */
+  & .report-table-shell {
+    overflow: hidden;
+    border: 1px solid hsl(var(--border));
+    border-radius: 1.25rem;
+    background: hsl(var(--card));
+    box-shadow: 0 1px 2px hsl(var(--foreground) / 0.035);
+  }
+  & .report-top-posts-table {
+    overflow: hidden;
+    border: 1px solid hsl(var(--border));
+    border-radius: 1.25rem;
+    background: hsl(var(--card));
+    box-shadow: 0 1px 2px hsl(var(--foreground) / 0.035);
+  }
+  & .report-table-shell {
+    overflow-x: auto;
+  }
+  & .report-table {
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+  & .report-table__heading {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    height: 2.5rem;
+    border-bottom: 1px solid hsl(var(--border));
+    background: hsl(var(--muted) / 0.38);
+    padding: 0.625rem 0.75rem;
+    color: hsl(var(--muted-foreground));
+    font-size: 0.6875rem;
+    letter-spacing: 0.01em;
+  }
+  & .report-table__heading:first-child {
+    position: sticky;
+    left: 0;
+    padding-left: 1rem;
+    box-shadow: 1px 0 0 hsl(var(--border) / 0.58);
+  }
+  & .report-table__label {
+    position: sticky;
+    left: 0;
+    padding-left: 1rem;
+    box-shadow: 1px 0 0 hsl(var(--border) / 0.58);
+  }
+  & .report-table__heading:first-child {
+    z-index: 3;
+    min-width: 9.5rem;
+  }
+  & .report-table__label {
+    z-index: 1;
+    background: hsl(var(--card));
+    transition: background-color var(--motion-fast) var(--ease-standard);
+  }
+  & .report-table__heading:last-child {
+    padding-right: 1rem;
+  }
+  & .report-table__cell:last-child {
+    padding-right: 1rem;
+  }
+  & .report-table__row {
+    animation: report-table-row-in var(--motion-fast) var(--ease-standard) both;
+    transition: background-color var(--motion-fast) var(--ease-standard);
+  }
+  & .report-table__row:hover {
+    background: hsl(var(--muted) / 0.28);
+  }
+  & .report-table__row:hover .report-table__label {
+    background: hsl(var(--muted) / 0.28);
+  }
+  & .report-table__label {
+    height: 2.75rem;
+    border-top: 0;
+    padding-block: 0.25rem;
+  }
+  & .report-table__cell {
+    height: 2.75rem;
+    border-top: 0;
+    padding-block: 0.25rem;
+  }
+  & .report-table__row + .report-table__row > * {
+    border-top: 1px solid hsl(var(--border) / 0.58);
+  }
+  & .report-table__label {
+    color: hsl(var(--foreground));
+    font-weight: 500;
+  }
+  & .report-table__value {
+    border-radius: 0.625rem;
+    padding-block: 0.375rem;
+  }
+  & .report-table__heat {
+    inset-block: 0.25rem;
+    right: 0.25rem;
+    max-width: calc(100% - 0.5rem);
+    border-radius: 0.375rem;
+  }
+  & .report-table__formatted {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.25rem;
+    font-weight: 500;
+  }
+  & .report-table__formatted[data-direction='positive'] {
+    color: hsl(var(--brand-verdant));
+  }
+  & .report-table__formatted[data-direction='negative'] {
+    color: hsl(var(--brand-ember));
+  }
+  & .report-table__formatted[data-direction='neutral'] {
+    color: hsl(var(--muted-foreground));
+  }
+  & .report-table__trend-icon {
+    font-size: 0.6875rem;
+    line-height: 1;
+    opacity: 0.82;
+  }
+  & .report-table [data-current='true'] {
+    background-color: hsl(var(--brand-iris) / 0.035);
+  }
+  & .report-table__note {
+    margin-top: 0.75rem;
+    padding-inline: 0.25rem;
+    line-height: 1.45;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    & .report-table__row {
+      animation: none;
+    }
+  }
+
+  &
+    .report-top-posts-table
+    [data-testid='tg-top-posts-table']
+    > div
+    > div:first-child {
+    min-height: 2.75rem;
+    border-bottom: 1px solid hsl(var(--border));
+    background: hsl(var(--muted) / 0.38);
+    padding: 0.75rem 1rem;
+  }
+  & .report-top-posts-table [data-testid='tg-top-posts-table'] > div > button {
+    min-height: 3.5rem;
+    border-bottom-color: hsl(var(--border) / 0.72);
+    padding: 0.75rem 1rem;
+  }
+  &
+    .report-top-posts-table
+    [data-testid='tg-top-posts-table']
+    > div
+    > button:last-child {
+    border-bottom: 0;
+  }
+  &
+    .report-top-posts-table
+    [data-testid='tg-top-posts-table']
+    > div
+    > button:hover {
+    background: hsl(var(--muted) / 0.32);
+  }
+  &
+    .report-top-posts-table
+    [data-testid='tg-top-posts-table']
+    > div
+    > button:focus-visible {
+    background: hsl(var(--muted) / 0.32);
+  }
+  &
+    .report-top-posts-table
+    [data-testid='tg-top-posts-table']
+    > div
+    > button:focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: -2px;
+  }
+  /* TopPosts is also reused outside reports, where it owns its card shell. Inside the report the
+     parent already owns that surface, so collapse only the nested chrome and keep the shared rows. */
+  & .report-top-posts-table .data-table-surface {
+    border: 0;
+    border-radius: inherit;
+    box-shadow: none;
+  }
+
+  /* Third report-only Rhea slice. The decoded preset uses Geist for both body and headings;
+     controls keep the same semantics, but move from full pills to Rhea's tighter rounded shapes. */
+  font-family:
+    'Geist Variable',
+    'Inter',
+    system-ui,
+    -apple-system,
+    sans-serif;
+  font-synthesis: none;
+  & .report-title {
+    font-weight: 600;
+    letter-spacing: -0.035em;
+  }
+  & .report-title-input {
+    font-weight: 600;
+    letter-spacing: -0.035em;
+  }
+  & .report-section {
+    min-width: 0;
+  }
+  & .report-section > section > h3 {
+    color: hsl(var(--foreground));
+    font-size: 0.9375rem;
+    font-weight: 600;
+    line-height: 1.25rem;
+    letter-spacing: -0.0125em;
+  }
+  & .report-section__heading {
+    color: hsl(var(--foreground));
+    font-size: 0.9375rem;
+    font-weight: 600;
+    line-height: 1.25rem;
+    letter-spacing: -0.0125em;
+  }
+  & .report-section > section > h3 > span:last-child {
+    display: none;
+  }
+  & .report-section__rule {
+    display: none;
+  }
+  & .report-field__label {
+    margin-bottom: 0.375rem;
+    color: hsl(var(--muted-foreground));
+    font-size: 0.6875rem;
+    font-weight: 500;
+    line-height: 1rem;
+    letter-spacing: 0.01em;
+  }
+  & .report-select {
+    height: 2rem;
+    border-color: hsl(var(--foreground) / 0.1);
+    border-radius: 0.75rem;
+    background: hsl(var(--card));
+    padding-inline: 0.75rem;
+  }
+  & [data-segmented-control] {
+    gap: 0.125rem;
+    border-color: hsl(var(--foreground) / 0.1);
+    border-radius: 0.75rem;
+    background: hsl(var(--muted) / 0.32);
+    padding: 0.125rem;
+  }
+  & .report-segmented {
+    gap: 0.125rem;
+    border-color: hsl(var(--foreground) / 0.1);
+    border-radius: 0.75rem;
+    background: hsl(var(--muted) / 0.32);
+    padding: 0.125rem;
+  }
+  & [data-segmented-indicator] {
+    border-radius: 0.625rem;
+    background: hsl(var(--card));
+    box-shadow: 0 0 0 1px hsl(var(--foreground) / 0.08);
+  }
+  & [data-segmented-control] > button {
+    min-height: 1.75rem;
+    border-right: 0;
+    border-radius: 0.625rem;
+    padding: 0.375rem 0.625rem;
+  }
+  & .report-segmented__option {
+    min-height: 1.75rem;
+    border-right: 0;
+    border-radius: 0.625rem;
+    padding: 0.375rem 0.625rem;
+  }
+  & .report-segmented__option--active {
+    background: hsl(var(--card));
+    box-shadow: 0 0 0 1px hsl(var(--foreground) / 0.08);
+  }
+
+  @media print {
+    & .report-metric-card {
+      border-radius: var(--radius);
+      padding: 0;
+      background: transparent;
+      box-shadow: none;
+    }
+    & .report-metric-card__chart {
+      margin: 0;
+      padding: 0;
+      background: transparent;
+    }
+    & .report-table-shell {
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+    }
+    & .report-top-posts-table {
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+    }
+  }
+}
+
+@utility report-control {
+  /* First report-only Rhea slice. The scope is deliberate: the report can trial denser rounded
+     controls and lifted analytical cards without changing dashboard, marketing or mobile chrome. */
+  .report-rhea & {
+    border-radius: 1rem;
+    transition-property:
+      color, background-color, border-color, box-shadow, transform;
+    transition-duration: var(--motion-fast);
+    transition-timing-function: var(--ease-standard);
+  }
+  .report-rhea &:active:not(:disabled) {
+    transform: translateY(1px);
+  }
+}
+
+@utility report-metric-card {
+  .report-rhea & {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    overflow: hidden;
+    border-radius: 1.5rem;
+    padding: 1.25rem;
+    background: hsl(var(--card));
+    color: hsl(var(--card-foreground));
+    cursor: pointer;
+    box-shadow:
+      0 1px 2px hsl(var(--foreground) / 0.04),
+      0 0 0 1px hsl(var(--foreground) / 0.08);
+    transition:
+      background-color var(--motion-fast) var(--ease-standard),
+      box-shadow var(--motion-fast) var(--ease-standard);
+  }
+  .report-rhea &:hover {
+    background: hsl(var(--muted) / 0.16);
+    box-shadow:
+      0 8px 24px -20px hsl(var(--foreground) / 0.45),
+      0 0 0 1px hsl(var(--foreground) / 0.14);
+  }
+  .report-rhea &:focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 3px;
+  }
+  .report-rhea &[data-report-chart-appearance='rhea'] {
+    gap: 1rem;
+  }
+  .report-rhea
+    &[data-report-chart-appearance='rhea']
+    .report-metric-card__chart {
+    position: relative;
+    margin: 0 -0.25rem -0.25rem;
+    border-radius: 0;
+    padding: 1.125rem 0.25rem 0;
+    background: transparent;
+  }
+  .report-rhea
+    &[data-report-chart-appearance='rhea']
+    .report-metric-card__chart::before {
+    position: absolute;
+    inset: 0.125rem 0.25rem auto;
+    height: 1px;
+    background: hsl(var(--border) / 0.72);
+    content: '';
+  }
+  .report-rhea & [data-chart-appearance='rhea'] {
+    cursor: pointer;
+  }
+
+  @media print {
+    .report-rhea & {
+      border-radius: var(--radius);
+      padding: 0;
+      background: transparent;
+      box-shadow: none;
+    }
+  }
+}
+
+@utility report-metric-card__header {
+  .report-rhea & {
+    gap: 0.75rem;
+  }
+}
+
+@utility report-metric-card__title {
+  .report-rhea & {
+    color: hsl(var(--foreground));
+    font-size: 1rem;
+    line-height: 1.5rem;
+    letter-spacing: -0.01em;
+  }
+}
+
+@utility report-metric-card__rule {
+  .report-rhea & {
+    display: none;
+  }
+}
+
+@utility report-metric-card__value {
+  .report-rhea & {
+    margin-top: -0.25rem;
+  }
+}
+
+@utility report-metric-card__number {
+  .report-rhea & {
+    font-size: 2rem;
+    line-height: 1;
+    font-weight: 600;
+  }
+}
+
+@utility report-metric-card__chart {
+  .report-rhea & {
+    margin: -0.25rem -0.25rem -0.25rem;
+    border-radius: 1rem;
+    padding: 0.75rem 0.5rem 0.25rem;
+    background: hsl(var(--muted) / 0.22);
+  }
+  .report-rhea .report-metric-card[data-report-chart-appearance='rhea'] & {
+    position: relative;
+    margin: 0 -0.25rem -0.25rem;
+    border-radius: 0;
+    padding: 1.125rem 0.25rem 0;
+    background: transparent;
+  }
+  .report-rhea
+    .report-metric-card[data-report-chart-appearance='rhea']
+    &::before {
+    position: absolute;
+    inset: 0.125rem 0.25rem auto;
+    height: 1px;
+    background: hsl(var(--border) / 0.72);
+    content: '';
+  }
+
+  @media print {
+    .report-rhea & {
+      margin: 0;
+      padding: 0;
+      background: transparent;
+    }
+  }
+}
+
+@utility report-table-shell {
+  /* Chart-scoped final states — belt-and-braces over the global reduced-motion net: motion off, the
+     marks render at their natural end state (opacity 1 · scaleY 1) and the tooltip snaps to position. */
+
+  /* Second report-only Rhea slice: tables use the same calm card surface as charts, while their
+     dense numeric structure remains intact. These selectors are scoped to the desktop report. */
+  .report-rhea & {
+    overflow: hidden;
+    border: 1px solid hsl(var(--border));
+    border-radius: 1.25rem;
+    background: hsl(var(--card));
+    box-shadow: 0 1px 2px hsl(var(--foreground) / 0.035);
+  }
+  .report-rhea & {
+    overflow-x: auto;
+  }
+
+  @media print {
+    .report-rhea & {
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+    }
+  }
+}
+
+@utility report-top-posts-table {
+  .report-rhea & {
+    overflow: hidden;
+    border: 1px solid hsl(var(--border));
+    border-radius: 1.25rem;
+    background: hsl(var(--card));
+    box-shadow: 0 1px 2px hsl(var(--foreground) / 0.035);
+  }
+
+  .report-rhea & [data-testid='tg-top-posts-table'] > div > div:first-child {
+    min-height: 2.75rem;
+    border-bottom: 1px solid hsl(var(--border));
+    background: hsl(var(--muted) / 0.38);
+    padding: 0.75rem 1rem;
+  }
+  .report-rhea & [data-testid='tg-top-posts-table'] > div > button {
+    min-height: 3.5rem;
+    border-bottom-color: hsl(var(--border) / 0.72);
+    padding: 0.75rem 1rem;
+  }
+  .report-rhea & [data-testid='tg-top-posts-table'] > div > button:last-child {
+    border-bottom: 0;
+  }
+  .report-rhea & [data-testid='tg-top-posts-table'] > div > button:hover {
+    background: hsl(var(--muted) / 0.32);
+  }
+
+  .report-rhea
+    &
+    [data-testid='tg-top-posts-table']
+    > div
+    > button:focus-visible {
+    background: hsl(var(--muted) / 0.32);
+  }
+  .report-rhea
+    &
+    [data-testid='tg-top-posts-table']
+    > div
+    > button:focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: -2px;
+  }
+  /* TopPosts is also reused outside reports, where it owns its card shell. Inside the report the
+     parent already owns that surface, so collapse only the nested chrome and keep the shared rows. */
+  .report-rhea & .data-table-surface {
+    border: 0;
+    border-radius: inherit;
+    box-shadow: none;
+  }
+
+  @media print {
+    .report-rhea & {
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+    }
+  }
+}
+
+@utility report-table {
+  .report-rhea & {
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+  .report-rhea & [data-current='true'] {
+    background-color: hsl(var(--brand-iris) / 0.035);
+  }
+}
+
+@utility report-table__heading {
+  .report-rhea & {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    height: 2.5rem;
+    border-bottom: 1px solid hsl(var(--border));
+    background: hsl(var(--muted) / 0.38);
+    padding: 0.625rem 0.75rem;
+    color: hsl(var(--muted-foreground));
+    font-size: 0.6875rem;
+    letter-spacing: 0.01em;
+  }
+  .report-rhea &:first-child {
+    position: sticky;
+    left: 0;
+    padding-left: 1rem;
+    box-shadow: 1px 0 0 hsl(var(--border) / 0.58);
+  }
+  .report-rhea &:first-child {
+    z-index: 3;
+    min-width: 9.5rem;
+  }
+  .report-rhea &:last-child {
+    padding-right: 1rem;
+  }
+}
+
+@utility report-table__label {
+  .report-rhea & {
+    position: sticky;
+    left: 0;
+    padding-left: 1rem;
+    box-shadow: 1px 0 0 hsl(var(--border) / 0.58);
+  }
+  .report-rhea & {
+    z-index: 1;
+    background: hsl(var(--card));
+    transition: background-color var(--motion-fast) var(--ease-standard);
+  }
+  .report-rhea .report-table__row:hover & {
+    background: hsl(var(--muted) / 0.28);
+  }
+  .report-rhea & {
+    height: 2.75rem;
+    border-top: 0;
+    padding-block: 0.25rem;
+  }
+  .report-rhea & {
+    color: hsl(var(--foreground));
+    font-weight: 500;
+  }
+}
+
+@utility report-table__cell {
+  .report-rhea &:last-child {
+    padding-right: 1rem;
+  }
+
+  .report-rhea & {
+    height: 2.75rem;
+    border-top: 0;
+    padding-block: 0.25rem;
+  }
+}
+
+@utility report-table__row {
+  .report-rhea & {
+    animation: report-table-row-in var(--motion-fast) var(--ease-standard) both;
+    transition: background-color var(--motion-fast) var(--ease-standard);
+  }
+  .report-rhea &:hover {
+    background: hsl(var(--muted) / 0.28);
+  }
+  .report-rhea &:hover .report-table__label {
+    background: hsl(var(--muted) / 0.28);
+  }
+  .report-rhea & + & > * {
+    border-top: 1px solid hsl(var(--border) / 0.58);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .report-rhea & {
+      animation: none;
+    }
+  }
+}
+
+@utility report-table__value {
+  .report-rhea & {
+    border-radius: 0.625rem;
+    padding-block: 0.375rem;
+  }
+}
+
+@utility report-table__heat {
+  .report-rhea & {
+    inset-block: 0.25rem;
+    right: 0.25rem;
+    max-width: calc(100% - 0.5rem);
+    border-radius: 0.375rem;
+  }
+}
+
+@utility report-table__formatted {
+  .report-rhea & {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.25rem;
+    font-weight: 500;
+  }
+  .report-rhea &[data-direction='positive'] {
+    color: hsl(var(--brand-verdant));
+  }
+  .report-rhea &[data-direction='negative'] {
+    color: hsl(var(--brand-ember));
+  }
+  .report-rhea &[data-direction='neutral'] {
+    color: hsl(var(--muted-foreground));
+  }
+}
+
+@utility report-table__trend-icon {
+  .report-rhea & {
+    font-size: 0.6875rem;
+    line-height: 1;
+    opacity: 0.82;
+  }
+}
+
+@utility report-table__note {
+  .report-rhea & {
+    margin-top: 0.75rem;
+    padding-inline: 0.25rem;
+    line-height: 1.45;
+  }
+}
+
+@utility report-select-content {
+  font-family:
+    'Geist Variable',
+    'Inter',
+    system-ui,
+    -apple-system,
+    sans-serif;
+  font-synthesis: none;
+  border-radius: 1rem;
+  & [role='option'] {
+    min-height: 2rem;
+    border-radius: 0.625rem;
+  }
+}
+
+@utility report-title {
+  .report-rhea & {
+    font-weight: 600;
+    letter-spacing: -0.035em;
+  }
+}
+
+@utility report-title-input {
+  .report-rhea & {
+    font-weight: 600;
+    letter-spacing: -0.035em;
+  }
+}
+
+@utility report-section {
+  .report-rhea & {
+    min-width: 0;
+  }
+  .report-rhea & > section > h3 {
+    color: hsl(var(--foreground));
+    font-size: 0.9375rem;
+    font-weight: 600;
+    line-height: 1.25rem;
+    letter-spacing: -0.0125em;
+  }
+  .report-rhea & > section > h3 > span:last-child {
+    display: none;
+  }
+}
+
+@utility report-section__heading {
+  .report-rhea & {
+    color: hsl(var(--foreground));
+    font-size: 0.9375rem;
+    font-weight: 600;
+    line-height: 1.25rem;
+    letter-spacing: -0.0125em;
+  }
+}
+
+@utility report-section__rule {
+  .report-rhea & {
+    display: none;
+  }
+}
+
+@utility report-field__label {
+  .report-rhea & {
+    margin-bottom: 0.375rem;
+    color: hsl(var(--muted-foreground));
+    font-size: 0.6875rem;
+    font-weight: 500;
+    line-height: 1rem;
+    letter-spacing: 0.01em;
+  }
+}
+
+@utility report-select {
+  .report-rhea & {
+    height: 2rem;
+    border-color: hsl(var(--foreground) / 0.1);
+    border-radius: 0.75rem;
+    background: hsl(var(--card));
+    padding-inline: 0.75rem;
+  }
+}
+
+@utility report-segmented {
+  .report-rhea & {
+    gap: 0.125rem;
+    border-color: hsl(var(--foreground) / 0.1);
+    border-radius: 0.75rem;
+    background: hsl(var(--muted) / 0.32);
+    padding: 0.125rem;
+  }
+}
+
+@utility report-segmented__option {
+  .report-rhea & {
+    min-height: 1.75rem;
+    border-right: 0;
+    border-radius: 0.625rem;
+    padding: 0.375rem 0.625rem;
+  }
+}
+
+@utility report-segmented__option--active {
+  .report-rhea & {
+    background: hsl(var(--card));
+    box-shadow: 0 0 0 1px hsl(var(--foreground) / 0.08);
+  }
+}
+
+@utility font-mono {
+  /* Roboto Mono is scoped to data-health readouts (timestamps / collector version / API status)
+     and other technical figures — never for body copy. */
+  font-feature-settings: 'tnum' 1;
+}
+
+@utility tnum-mono {
+  font-feature-settings: 'tnum' 1;
+}
+
+@utility chip-tint-1 {
+  /* Letter-avatar identity chips — bg + ink travel as one class so a chip can never end up
+     with a mismatched pair. Picked via chipTint() (DashboardLayout); themed via --chip-N-*. */
+  background-color: hsl(var(--chip-1-bg));
+  color: hsl(var(--chip-1-ink));
+}
+
+@utility chip-tint-2 {
+  background-color: hsl(var(--chip-2-bg));
+  color: hsl(var(--chip-2-ink));
+}
+
+@utility chip-tint-3 {
+  background-color: hsl(var(--chip-3-bg));
+  color: hsl(var(--chip-3-ink));
+}
+
+@utility chip-tint-4 {
+  background-color: hsl(var(--chip-4-bg));
+  color: hsl(var(--chip-4-ink));
+}
+
+@utility chip-tint-5 {
+  background-color: hsl(var(--chip-5-bg));
+  color: hsl(var(--chip-5-ink));
+}
+
+@utility chip-tint-6 {
+  background-color: hsl(var(--chip-6-bg));
+  color: hsl(var(--chip-6-ink));
+}
+
+@utility edit-toggle-slot {
+  /* The Edit ↔ Готово toggle: a Steep-like compact tool. The header reserves a fixed slot while
+     the chip expands inside it on hover/focus/active, so the page title never reflows. */
+  position: relative;
+  width: 108px;
+  height: 36px;
+  flex: 0 0 108px;
+}
+
+@utility edit-toggle {
+  position: absolute;
+  inset-block: 0;
+  right: 0;
+  display: inline-flex;
+  width: 36px;
+  min-width: 36px;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0;
+  overflow: hidden;
+  padding-inline: 9px;
+  color: hsl(var(--foreground));
+  background: hsl(var(--foreground) / 0.07);
+  border: 1px solid hsl(var(--foreground) / 0.08);
+  transition:
+    width var(--motion-base) var(--ease-standard),
+    gap var(--motion-base) var(--ease-standard),
+    padding-inline var(--motion-base) var(--ease-standard),
+    background-color var(--motion-base) ease,
+    border-color var(--motion-base) ease,
+    color var(--motion-base) ease,
+    transform var(--motion-press) var(--ease-standard);
+  &:hover {
+    width: 108px;
+    gap: 7px;
+    padding-inline: 12px;
+  }
+  &:focus-visible {
+    width: 108px;
+    gap: 7px;
+    padding-inline: 12px;
+  }
+  &[data-active='true'] {
+    width: 108px;
+    gap: 7px;
+    padding-inline: 12px;
+  }
+  &:hover {
+    background: hsl(var(--foreground) / 0.11);
+    border-color: hsl(var(--foreground) / 0.12);
+  }
+  &:focus-visible {
+    background: hsl(var(--foreground) / 0.11);
+    border-color: hsl(var(--foreground) / 0.12);
+  }
+  &:active {
+    transform: scale(0.98);
+    background: hsl(var(--foreground) / 0.14);
+  }
+  &[data-active='true']:active {
+    background: hsl(var(--foreground) / 0.82);
+  }
+  &[data-active='true'] {
+    background: hsl(var(--foreground) / 0.9);
+    border-color: hsl(var(--foreground) / 0.9);
+    color: hsl(var(--background));
+  }
+  &[data-active='true'] .i-edit {
+    opacity: 0;
+    transform: scale(0.6) rotate(8deg);
+  }
+  &[data-active='true'] .i-done {
+    opacity: 1;
+    transform: scale(1) rotate(0);
+  }
+  &[data-active='true'] .i-done path {
+    stroke-dashoffset: 0;
+  }
+}
+
+@utility edit-toggle-icons {
+  /* Pencil → check morph: the pencil lifts + spins out while the check DRAWS itself in via
+     stroke-dashoffset (not a plain crossfade) — that draw-on is the signature morph beat. */
+  position: relative;
+  display: inline-block;
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  & > svg {
+    position: absolute;
+    inset: 0;
+    width: 16px;
+    height: 16px;
+    transition:
+      opacity var(--motion-fast) ease,
+      transform var(--motion-base) var(--ease-standard);
+  }
+  & .i-done {
+    opacity: 0;
+    transform: scale(0.6) rotate(-8deg);
+  }
+  /* Check hidden = its single (pathLength-normalised) stroke fully retracted; drawn = offset 0. */
+  & .i-done path {
+    stroke-dasharray: 1;
+    stroke-dashoffset: 1;
+    transition: stroke-dashoffset var(--motion-glide) var(--ease-standard);
+  }
+}
+
+@utility i-done {
+  .edit-toggle-icons & {
+    opacity: 0;
+    transform: scale(0.6) rotate(-8deg);
+  }
+  /* Check hidden = its single (pathLength-normalised) stroke fully retracted; drawn = offset 0. */
+  .edit-toggle-icons & path {
+    stroke-dasharray: 1;
+    stroke-dashoffset: 1;
+    transition: stroke-dashoffset var(--motion-glide) var(--ease-standard);
+  }
+  .edit-toggle[data-active='true'] & {
+    opacity: 1;
+    transform: scale(1) rotate(0);
+  }
+  .edit-toggle[data-active='true'] & path {
+    stroke-dashoffset: 0;
+  }
+}
+
+@utility i-edit {
+  .edit-toggle[data-active='true'] & {
+    opacity: 0;
+    transform: scale(0.6) rotate(8deg);
+  }
+}
+
+@utility cartograph {
+  & :where(path, line, circle, ellipse, rect, polygon, polyline) {
+    vector-effect: non-scaling-stroke;
+  }
+}
 
 /* "Atlavue Refined Technical" tokens (Refined UI + Swiss Modern + Technical UI), in HSL channels.
    Light = default; dark via the `.dark` class. Warm paper canvas + warm ink scale + warm hairlines
@@ -313,194 +1634,11 @@
   a:focus-visible,
   [role='button']:focus-visible,
   [role='tab']:focus-visible {
-    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+    @apply outline-hidden ring-2 ring-ring ring-offset-2 ring-offset-background;
   }
 }
 
 @layer components {
-  /* Pill button radius (Steep-style). Apply to chrome buttons/CTAs; inputs keep --radius. */
-  .btn-pill {
-    border-radius: 9999px;
-  }
-
-  /* Shared dashboard data-table treatment. The shell owns the card chrome and horizontal
-     overflow; the table class owns only typography, dividers and interaction states so complex
-     tables can keep their sorting, selection, sticky cells and data-driven fills. */
-  .data-table-surface {
-    overflow: hidden;
-    border: 1px solid hsl(var(--border));
-    border-radius: 1.25rem;
-    background: hsl(var(--card));
-    box-shadow: 0 1px 2px hsl(var(--foreground) / 0.035);
-  }
-  .data-table-scroll {
-    width: 100%;
-    overflow-x: auto;
-    overscroll-behavior-inline: contain;
-  }
-  .data-table {
-    width: 100%;
-    border-collapse: separate;
-    border-spacing: 0;
-  }
-  .data-table > thead > tr {
-    background: hsl(var(--muted) / 0.38);
-  }
-  .data-table > thead > tr > th {
-    height: 2.5rem;
-    border-bottom: 1px solid hsl(var(--border));
-    padding: 0.625rem 0.75rem;
-    color: hsl(var(--muted-foreground));
-    font-size: 0.6875rem;
-    font-weight: 500;
-    letter-spacing: 0.01em;
-    vertical-align: middle;
-  }
-  .data-table > thead > tr > th:first-child,
-  .data-table > tbody > tr > :first-child {
-    padding-left: 1rem;
-  }
-  .data-table > thead > tr > th:last-child,
-  .data-table > tbody > tr > :last-child {
-    padding-right: 1rem;
-  }
-  .data-table > tbody > tr {
-    transition: background-color var(--motion-fast) var(--ease-standard);
-  }
-  .data-table > tbody > tr:hover,
-  .data-table > tbody > tr:focus-within {
-    background: hsl(var(--muted) / 0.3);
-  }
-  .data-table > tbody > tr[data-state='selected'],
-  .data-table > tbody > tr[data-ig-content-selected] {
-    background: hsl(var(--primary) / 0.07);
-  }
-  .data-table > tbody > tr[data-ig-content-open] {
-    background: hsl(var(--primary) / 0.11);
-  }
-  .data-table > tbody > tr + tr > * {
-    border-top: 1px solid hsl(var(--border) / 0.64);
-  }
-  .data-table > tbody > tr > td,
-  .data-table > tbody > tr > th {
-    min-height: 2.75rem;
-    padding: 0.75rem;
-    vertical-align: middle;
-  }
-  .data-table--compact > thead > tr > th {
-    height: 2.25rem;
-    padding-block: 0.5rem;
-  }
-  .data-table--compact > tbody > tr > td,
-  .data-table--compact > tbody > tr > th {
-    min-height: 2.5rem;
-    padding-block: 0.5rem;
-  }
-  .data-table-note {
-    border-top: 1px solid hsl(var(--border) / 0.64);
-    padding: 0.75rem 1rem;
-    color: hsl(var(--muted-foreground));
-    font-size: 0.6875rem;
-    line-height: 1.45;
-  }
-
-  /* First report-only Rhea slice. The scope is deliberate: the report can trial denser rounded
-     controls and lifted analytical cards without changing dashboard, marketing or mobile chrome. */
-  .report-rhea .report-control {
-    border-radius: 1rem;
-    transition-property: color, background-color, border-color, box-shadow, transform;
-    transition-duration: var(--motion-fast);
-    transition-timing-function: var(--ease-standard);
-  }
-  .report-rhea .report-control:active:not(:disabled) {
-    transform: translateY(1px);
-  }
-  .report-rhea .report-metric-card {
-    display: flex;
-    flex-direction: column;
-    gap: 1.25rem;
-    overflow: hidden;
-    border-radius: 1.5rem;
-    padding: 1.25rem;
-    background: hsl(var(--card));
-    color: hsl(var(--card-foreground));
-    cursor: pointer;
-    box-shadow:
-      0 1px 2px hsl(var(--foreground) / 0.04),
-      0 0 0 1px hsl(var(--foreground) / 0.08);
-    transition: background-color var(--motion-fast) var(--ease-standard), box-shadow var(--motion-fast) var(--ease-standard);
-  }
-  .report-rhea .report-metric-card:hover {
-    background: hsl(var(--muted) / 0.16);
-    box-shadow:
-      0 8px 24px -20px hsl(var(--foreground) / 0.45),
-      0 0 0 1px hsl(var(--foreground) / 0.14);
-  }
-  .report-rhea .report-metric-card:focus-visible {
-    outline: 2px solid hsl(var(--ring));
-    outline-offset: 3px;
-  }
-  .report-rhea .report-metric-card__header {
-    gap: 0.75rem;
-  }
-  .report-rhea .report-metric-card__title {
-    color: hsl(var(--foreground));
-    font-size: 1rem;
-    line-height: 1.5rem;
-    letter-spacing: -0.01em;
-  }
-  .report-rhea .report-metric-card__rule {
-    display: none;
-  }
-  .report-rhea .report-metric-card__value {
-    margin-top: -0.25rem;
-  }
-  .report-rhea .report-metric-card__number {
-    font-size: 2rem;
-    line-height: 1;
-    font-weight: 600;
-  }
-  .report-rhea .report-metric-card__chart {
-    margin: -0.25rem -0.25rem -0.25rem;
-    border-radius: 1rem;
-    padding: 0.75rem 0.5rem 0.25rem;
-    background: hsl(var(--muted) / 0.22);
-  }
-  .report-rhea .report-metric-card[data-report-chart-appearance='rhea'] {
-    gap: 1rem;
-  }
-  .report-rhea .report-metric-card[data-report-chart-appearance='rhea'] .report-metric-card__chart {
-    position: relative;
-    margin: 0 -0.25rem -0.25rem;
-    border-radius: 0;
-    padding: 1.125rem 0.25rem 0;
-    background: transparent;
-  }
-  .report-rhea .report-metric-card[data-report-chart-appearance='rhea'] .report-metric-card__chart::before {
-    position: absolute;
-    inset: 0.125rem 0.25rem auto;
-    height: 1px;
-    background: hsl(var(--border) / 0.72);
-    content: '';
-  }
-  .report-rhea [data-chart-appearance='rhea'] {
-    cursor: default;
-  }
-  .report-rhea .report-metric-card [data-chart-appearance='rhea'] {
-    cursor: pointer;
-  }
-  .report-rhea [data-chart-appearance='rhea'] [data-chart-axis-label='x'] {
-    font-weight: 500;
-    opacity: 0.82;
-  }
-  /* Rhea / comparison tooltips keep their Geist face; the fade-in + transform glide is the SHARED
-     [data-chart-tooltip] motion (chart-motion block below) now, so it is no longer re-declared per
-     appearance — one rule owns the motion for default, rhea and comparison alike. */
-  .report-rhea [data-chart-tooltip-appearance='rhea'],
-  [data-chart-tooltip-appearance='comparison'] {
-    font-family: 'Geist Variable', 'Inter', system-ui, -apple-system, sans-serif;
-  }
-
   /* ── Chart motion (token-driven; see frontend/DESIGN_TOKENS.md «Motion») ───────────────────────
      Full-size LineChart and Sparkline line/area marks MORPH instead of remounting: on a period/filter
      change their paths interpolate point geometry from the old shape to the new one through isolated
@@ -548,8 +1686,6 @@
     transition: transform var(--motion-base) var(--ease-standard);
     will-change: transform;
   }
-  /* Chart-scoped final states — belt-and-braces over the global reduced-motion net: motion off, the
-     marks render at their natural end state (opacity 1 · scaleY 1) and the tooltip snaps to position. */
   @media (prefers-reduced-motion: reduce) {
     [data-chart-motion='reveal'],
     [data-chart-motion='morph'],
@@ -562,266 +1698,14 @@
     }
   }
 
-  /* Second report-only Rhea slice: tables use the same calm card surface as charts, while their
-     dense numeric structure remains intact. These selectors are scoped to the desktop report. */
-  .report-rhea .report-table-shell,
-  .report-rhea .report-top-posts-table {
-    overflow: hidden;
-    border: 1px solid hsl(var(--border));
-    border-radius: 1.25rem;
-    background: hsl(var(--card));
-    box-shadow: 0 1px 2px hsl(var(--foreground) / 0.035);
-  }
-  .report-rhea .report-table-shell {
-    overflow-x: auto;
-  }
-  .report-rhea .report-table {
-    border-collapse: separate;
-    border-spacing: 0;
-  }
-  .report-rhea .report-table__heading {
-    position: sticky;
-    top: 0;
-    z-index: 2;
-    height: 2.5rem;
-    border-bottom: 1px solid hsl(var(--border));
-    background: hsl(var(--muted) / 0.38);
-    padding: 0.625rem 0.75rem;
-    color: hsl(var(--muted-foreground));
-    font-size: 0.6875rem;
-    letter-spacing: 0.01em;
-  }
-  .report-rhea .report-table__heading:first-child,
-  .report-rhea .report-table__label {
-    position: sticky;
-    left: 0;
-    padding-left: 1rem;
-    box-shadow: 1px 0 0 hsl(var(--border) / 0.58);
-  }
-  .report-rhea .report-table__heading:first-child {
-    z-index: 3;
-    min-width: 9.5rem;
-  }
-  .report-rhea .report-table__label {
-    z-index: 1;
-    background: hsl(var(--card));
-    transition: background-color var(--motion-fast) var(--ease-standard);
-  }
-  .report-rhea .report-table__heading:last-child,
-  .report-rhea .report-table__cell:last-child {
-    padding-right: 1rem;
-  }
-  .report-rhea .report-table__row {
-    animation: report-table-row-in var(--motion-fast) var(--ease-standard) both;
-    transition: background-color var(--motion-fast) var(--ease-standard);
-  }
-  .report-rhea .report-table__row:hover {
-    background: hsl(var(--muted) / 0.28);
-  }
-  .report-rhea .report-table__row:hover .report-table__label {
-    background: hsl(var(--muted) / 0.28);
-  }
-  .report-rhea .report-table__label,
-  .report-rhea .report-table__cell {
-    height: 2.75rem;
-    border-top: 0;
-    padding-block: 0.25rem;
-  }
-  .report-rhea .report-table__row + .report-table__row > * {
-    border-top: 1px solid hsl(var(--border) / 0.58);
-  }
-  .report-rhea .report-table__label {
-    color: hsl(var(--foreground));
-    font-weight: 500;
-  }
-  .report-rhea .report-table__value {
-    border-radius: 0.625rem;
-    padding-block: 0.375rem;
-  }
-  .report-rhea .report-table__heat {
-    inset-block: 0.25rem;
-    right: 0.25rem;
-    max-width: calc(100% - 0.5rem);
-    border-radius: 0.375rem;
-  }
-  .report-rhea .report-table__formatted {
-    display: inline-flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 0.25rem;
-    font-weight: 500;
-  }
-  .report-rhea .report-table__formatted[data-direction='positive'] {
-    color: hsl(var(--brand-verdant));
-  }
-  .report-rhea .report-table__formatted[data-direction='negative'] {
-    color: hsl(var(--brand-ember));
-  }
-  .report-rhea .report-table__formatted[data-direction='neutral'] {
-    color: hsl(var(--muted-foreground));
-  }
-  .report-rhea .report-table__trend-icon {
-    font-size: 0.6875rem;
-    line-height: 1;
-    opacity: 0.82;
-  }
-  .report-rhea .report-table [data-current='true'] {
-    background-color: hsl(var(--brand-iris) / 0.035);
-  }
-  .report-rhea .report-table__note {
-    margin-top: 0.75rem;
-    padding-inline: 0.25rem;
-    line-height: 1.45;
-  }
-
   @keyframes report-table-row-in {
     from { opacity: 0; transform: translateY(3px); }
     to { opacity: 1; transform: translateY(0); }
   }
-  @media (prefers-reduced-motion: reduce) {
-    .report-rhea .report-table__row { animation: none; }
-  }
-
-  .report-rhea .report-top-posts-table [data-testid='tg-top-posts-table'] > div > div:first-child {
-    min-height: 2.75rem;
-    border-bottom: 1px solid hsl(var(--border));
-    background: hsl(var(--muted) / 0.38);
-    padding: 0.75rem 1rem;
-  }
-  .report-rhea .report-top-posts-table [data-testid='tg-top-posts-table'] > div > button {
-    min-height: 3.5rem;
-    border-bottom-color: hsl(var(--border) / 0.72);
-    padding: 0.75rem 1rem;
-  }
-  .report-rhea .report-top-posts-table [data-testid='tg-top-posts-table'] > div > button:last-child {
-    border-bottom: 0;
-  }
-  .report-rhea .report-top-posts-table [data-testid='tg-top-posts-table'] > div > button:hover,
-  .report-rhea .report-top-posts-table [data-testid='tg-top-posts-table'] > div > button:focus-visible {
-    background: hsl(var(--muted) / 0.32);
-  }
-  .report-rhea .report-top-posts-table [data-testid='tg-top-posts-table'] > div > button:focus-visible {
-    outline: 2px solid hsl(var(--ring));
-    outline-offset: -2px;
-  }
-  /* TopPosts is also reused outside reports, where it owns its card shell. Inside the report the
-     parent already owns that surface, so collapse only the nested chrome and keep the shared rows. */
-  .report-rhea .report-top-posts-table .data-table-surface {
-    border: 0;
-    border-radius: inherit;
-    box-shadow: none;
-  }
-
-  /* Third report-only Rhea slice. The decoded preset uses Geist for both body and headings;
-     controls keep the same semantics, but move from full pills to Rhea's tighter rounded shapes. */
-  .report-rhea,
-  .report-select-content {
-    font-family: 'Geist Variable', 'Inter', system-ui, -apple-system, sans-serif;
-    font-synthesis: none;
-  }
-  .report-rhea .report-title,
-  .report-rhea .report-title-input {
-    font-weight: 600;
-    letter-spacing: -0.035em;
-  }
-  .report-rhea .report-section {
-    min-width: 0;
-  }
-  .report-rhea .report-section > section > h3,
-  .report-rhea .report-section__heading {
-    color: hsl(var(--foreground));
-    font-size: 0.9375rem;
-    font-weight: 600;
-    line-height: 1.25rem;
-    letter-spacing: -0.0125em;
-  }
-  .report-rhea .report-section > section > h3 > span:last-child,
-  .report-rhea .report-section__rule {
-    display: none;
-  }
-  .report-rhea .report-field__label {
-    margin-bottom: 0.375rem;
-    color: hsl(var(--muted-foreground));
-    font-size: 0.6875rem;
-    font-weight: 500;
-    line-height: 1rem;
-    letter-spacing: 0.01em;
-  }
-  .report-rhea .report-select {
-    height: 2rem;
-    border-color: hsl(var(--foreground) / 0.1);
-    border-radius: 0.75rem;
-    background: hsl(var(--card));
-    padding-inline: 0.75rem;
-  }
-  .report-select-content {
-    border-radius: 1rem;
-  }
-  .report-select-content [role='option'] {
-    min-height: 2rem;
-    border-radius: 0.625rem;
-  }
-  .report-rhea [data-segmented-control],
-  .report-rhea .report-segmented {
-    gap: 0.125rem;
-    border-color: hsl(var(--foreground) / 0.1);
-    border-radius: 0.75rem;
-    background: hsl(var(--muted) / 0.32);
-    padding: 0.125rem;
-  }
-  .report-rhea [data-segmented-indicator] {
-    border-radius: 0.625rem;
-    background: hsl(var(--card));
-    box-shadow: 0 0 0 1px hsl(var(--foreground) / 0.08);
-  }
-  .report-rhea [data-segmented-control] > button,
-  .report-rhea .report-segmented__option {
-    min-height: 1.75rem;
-    border-right: 0;
-    border-radius: 0.625rem;
-    padding: 0.375rem 0.625rem;
-  }
-  .report-rhea .report-segmented__option--active {
-    background: hsl(var(--card));
-    box-shadow: 0 0 0 1px hsl(var(--foreground) / 0.08);
-  }
-
-  @media print {
-    .report-rhea .report-metric-card {
-      border-radius: var(--radius);
-      padding: 0;
-      background: transparent;
-      box-shadow: none;
-    }
-    .report-rhea .report-metric-card__chart {
-      margin: 0;
-      padding: 0;
-      background: transparent;
-    }
-    .report-rhea .report-table-shell,
-    .report-rhea .report-top-posts-table {
-      border-radius: 0;
-      background: transparent;
-      box-shadow: none;
-    }
-  }
-  /* Roboto Mono is scoped to data-health readouts (timestamps / collector version / API status)
-     and other technical figures — never for body copy. */
-  .font-mono,
-  .tnum-mono {
-    font-feature-settings: 'tnum' 1;
-  }
-  /* Letter-avatar identity chips — bg + ink travel as one class so a chip can never end up
-     with a mismatched pair. Picked via chipTint() (DashboardLayout); themed via --chip-N-*. */
-  .chip-tint-1 { background-color: hsl(var(--chip-1-bg)); color: hsl(var(--chip-1-ink)); }
-  .chip-tint-2 { background-color: hsl(var(--chip-2-bg)); color: hsl(var(--chip-2-ink)); }
-  .chip-tint-3 { background-color: hsl(var(--chip-3-bg)); color: hsl(var(--chip-3-ink)); }
-  .chip-tint-4 { background-color: hsl(var(--chip-4-bg)); color: hsl(var(--chip-4-ink)); }
-  .chip-tint-5 { background-color: hsl(var(--chip-5-bg)); color: hsl(var(--chip-5-ink)); }
-  .chip-tint-6 { background-color: hsl(var(--chip-6-bg)); color: hsl(var(--chip-6-ink)); }
 }
 
-/* ── Design governance (Atlavue Refined Technical) — intentional rules, documented so future
+@layer utilities {
+  /* ── Design governance (Atlavue Refined Technical) — intentional rules, documented so future
    work doesn't "helpfully" regress them. Type scale + radius live in tailwind.config.js. ──────
    • Depth = HAIRLINES + z-index ONLY. No box-shadows / blur / glow — tooltips, popovers and
      modals are borders-only. This is a deliberate "designed, not generated" signal; do not add
@@ -837,7 +1721,7 @@
      quieter still (0.06 → 0, ended at ~68% height). Fill is the primary role at low opacity. See the
      `expanded` gradient stops in LineChart.tsx. */
 
-/* ── Widget accent surfaces (see ChartWidget) ──────────────────────────────────────────────
+  /* ── Widget accent surfaces (see ChartWidget) ──────────────────────────────────────────────
    An ACCENTED card (user picked a colour) paints its tinted background from these rules, not
    inline: light keeps the shipped top-anchored radial wash; dark goes FLAT tonal — an even
    color-mix of the accent into the card (steep's surface, no gradient). --brand-iris is
@@ -845,581 +1729,552 @@
    just read it. The un-coloured default card keeps its neutral --card-tint wash inline
    (unchanged). In dark the hero number inside an accented card rides the same colour — one
    hue paints number + line + dot + surface (steep); light keeps ink numbers. */
-div[data-widget-tinted] {
-  background:
-    radial-gradient(120% 90% at 50% 0%, hsl(var(--brand-iris) / 0.15), transparent 62%),
-    hsl(var(--card));
-}
-.dark div[data-widget-tinted] {
-  /* The saturated steep surface: 26% of the DEEP companion (not the pale line — see the token
+  div[data-widget-tinted] {
+    background:
+      radial-gradient(
+        120% 90% at 50% 0%,
+        hsl(var(--brand-iris) / 0.15),
+        transparent 62%
+      ),
+      hsl(var(--card));
+  }
+  .dark div[data-widget-tinted] {
+    /* The saturated steep surface: 26% of the DEEP companion (not the pale line — see the token
      block) flat-mixed into the card. Line/number keep riding --brand-iris. Captions on the tint
      get a LIGHTER muted ink: the standard muted-foreground passes 4.5 only on the bare card —
      any visible tint sinks it (contrast-tokens.mjs gates this pair with THIS value). */
-  background: color-mix(in oklab, hsl(var(--brand-iris-deep, var(--brand-iris))) 26%, hsl(var(--card)));
-  --muted-foreground: 240 6% 84%;
-}
-.dark [data-widget-accented] .kpi-accent {
-  color: hsl(var(--brand-iris));
-}
-/* Steep-parity: on the TINTED card the section TITLE rides the same accent as number/line/surface —
+    background: color-mix(
+      in oklab,
+      hsl(var(--brand-iris-deep, var(--brand-iris))) 26%,
+      hsl(var(--card))
+    );
+    --muted-foreground: 240 6% 84%;
+  }
+  .dark [data-widget-accented] .kpi-accent {
+    color: hsl(var(--brand-iris));
+  }
+  /* Steep-parity: on the TINTED card the section TITLE rides the same accent as number/line/surface —
    the whole card tells its story in one hue. Neutral / un-tinted cards keep the default ink title
    (WidgetHeader's text-foreground), light keeps ink titles (same scoping rationale as .kpi-accent).
    Contrast: the identical fg/bg pair the hero number is gated on in contrast-tokens.mjs
    («accent N number on tonal surface», text 4.5) — the title adds no new pair. */
-.dark div[data-widget-tinted] .widget-title {
-  color: hsl(var(--brand-iris));
-}
-/* Icon affordances (⋯ / ↗ / ×, ICON_BUTTON_CLASS) follow at a QUIETER step of the same hue —
+  .dark div[data-widget-tinted] .widget-title {
+    color: hsl(var(--brand-iris));
+  }
+  /* Icon affordances (⋯ / ↗ / ×, ICON_BUTTON_CLASS) follow at a QUIETER step of the same hue —
    chrome under the title, above the captions. :not(:hover) hands hover back to the layered
    utilities (hover:text-foreground / hover:text-destructive), which an unlayered rule would
    otherwise always out-rank. Gated non-text 3.0 («accent N icon @0.8 on tonal surface»). */
-.dark div[data-widget-tinted] .widget-icon:not(:hover) {
-  color: hsl(var(--brand-iris) / 0.8);
-}
+  .dark div[data-widget-tinted] .widget-icon:not(:hover) {
+    color: hsl(var(--brand-iris) / 0.8);
+  }
 
-/* ── Widget reorder (iOS jiggle): tiny alternating wobble while drag-and-drop mode is on.
+  /* ── Widget reorder (iOS jiggle): tiny alternating wobble while drag-and-drop mode is on.
    Deliberate exception to the "no motion" restraint — it IS the mode indicator. ─────────── */
-@keyframes widget-jiggle {
-  0% { transform: rotate(-0.35deg); }
-  50% { transform: rotate(0.4deg); }
-  100% { transform: rotate(-0.35deg); }
-}
-.widget-jiggle {
-  animation: widget-jiggle 0.32s ease-in-out infinite;
-  /* alternate slots get an inline duration/delay from ChartSection — nth-child can't see
+  @keyframes widget-jiggle {
+    0% {
+      transform: rotate(-0.35deg);
+    }
+    50% {
+      transform: rotate(0.4deg);
+    }
+    100% {
+      transform: rotate(-0.35deg);
+    }
+  }
+  .widget-jiggle {
+    animation: widget-jiggle 0.32s ease-in-out infinite;
+    /* alternate slots get an inline duration/delay from ChartSection — nth-child can't see
      grid order, and the card is its section's only child since the 2-layer FLIP split */
-}
-@media (prefers-reduced-motion: reduce) {
-  .widget-jiggle { animation: none; }
-}
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .widget-jiggle {
+      animation: none;
+    }
+  }
 
-/* ── Widget entrance: a quiet fade-rise when a card mounts (feed open / tab switch).
+  /* ── Widget entrance: a quiet fade-rise when a card mounts (feed open / tab switch).
    Staggered per grid slot via --enter-delay (inline from ChartSection). Never applied in
    reorder mode — the jiggle owns `animation` there. ─────────────────────────────────── */
-@keyframes widget-rise {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-.widget-enter {
-  animation: widget-rise var(--motion-entrance) var(--ease-standard) both;
-  animation-delay: var(--enter-delay, 0ms);
-}
-@media (prefers-reduced-motion: reduce) {
-  .widget-enter { animation: none; }
-}
+  @keyframes widget-rise {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  .widget-enter {
+    animation: widget-rise var(--motion-entrance) var(--ease-standard) both;
+    animation-delay: var(--enter-delay, 0ms);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .widget-enter {
+      animation: none;
+    }
+  }
 
-/* ── Sidebar mode motion (expanded 240px ↔ icon-rail 64px) ──────────────────────────────────────
+  /* ── Sidebar mode motion (expanded 240px ↔ icon-rail 64px) ──────────────────────────────────────
    Atlavue keeps a layout-pushing rail rather than copying an overlay hide. The width, outer-edge
    toggle, action well and copy masks nevertheless share one 300ms edge-led beat, so the panel reads
    as one moving surface. Icons/avatars remain anchored in the fixed first track; rows clip the copy.
    No JS timers: rapid toggles reverse the CSS transition, and the global reduced-motion net collapses
    every duration to ~0. */
-.sidebar-shell {
-  transition: width var(--motion-reveal) var(--ease-standard);
-}
+  .sidebar-shell {
+    transition: width var(--motion-reveal) var(--ease-standard);
+  }
 
-/* The utility strip: Search holds the 32px rail axis; the toggle is pinned to the panel's right edge
+  /* The utility strip: Search holds the 32px rail axis; the toggle is pinned to the panel's right edge
    when open and slides back onto the axis as the surface collapses (it tracks the moving outer edge).
    Both are absolutely placed and animate transform on the shared beat, so the source card below
    travels continuously rather than jumping when a flex row would become a column. */
-.sidebar-actions {
-  height: 1.75rem;
-  margin-inline: 0.75rem;
-  transition:
-    height var(--motion-reveal) var(--ease-standard),
-    margin-inline var(--motion-reveal) var(--ease-standard);
-}
-.sidebar-action {
-  position: absolute;
-  inset-block-start: 0;
-  inset-inline-start: 0;
-  transition: transform var(--motion-reveal) var(--ease-standard);
-}
-/* Expanded: Search is centred on x=32 while the toggle is right-aligned. As width shrinks, the right
+  .sidebar-actions {
+    height: 1.75rem;
+    margin-inline: 0.75rem;
+    transition:
+      height var(--motion-reveal) var(--ease-standard),
+      margin-inline var(--motion-reveal) var(--ease-standard);
+  }
+  .sidebar-action {
+    position: absolute;
+    inset-block-start: 0;
+    inset-inline-start: 0;
+    transition: transform var(--motion-reveal) var(--ease-standard);
+  }
+  /* Expanded: Search is centred on x=32 while the toggle is right-aligned. As width shrinks, the right
    anchor follows the edge without a magic translation; the rail margin finishes both on x=32. */
-.sidebar-action-toggle {
-  inset-inline-start: auto;
-  inset-inline-end: 0;
-}
-.sidebar-action-search {
-  transform: translateX(0.375rem);
-}
-.sidebar-shell[data-rail='true'] .sidebar-actions {
-  height: 3.75rem;
-  margin-inline: 1.125rem;
-}
-.sidebar-shell[data-rail='true'] .sidebar-action-search {
-  transform: translateY(2rem);
-}
+  .sidebar-action-toggle {
+    inset-inline-start: auto;
+    inset-inline-end: 0;
+  }
+  .sidebar-action-search {
+    transform: translateX(0.375rem);
+  }
+  .sidebar-shell[data-rail='true'] .sidebar-actions {
+    height: 3.75rem;
+    margin-inline: 1.125rem;
+  }
+  .sidebar-shell[data-rail='true'] .sidebar-action-search {
+    transform: translateY(2rem);
+  }
 
-/* Toggle glyph morph (CSS-only, ~200ms): at rest the panel outline + left divider; on hover/focus the
+  /* Toggle glyph morph (CSS-only, ~200ms): at rest the panel outline + left divider; on hover/focus the
    divider fades out and the directional chevron slides in. The chevron's DIRECTION (‹ hide / › reveal)
    is set in the JSX off `rail`; only its reveal is styled here. */
-.sidebar-toggle-glyph .panel-divider {
-  opacity: 1;
-  transform: translateX(0) scaleY(1);
-  transform-box: fill-box;
-  transform-origin: center;
-  transition:
-    opacity var(--motion-fast) var(--ease-standard),
-    transform var(--motion-fast) var(--ease-standard);
-}
-.sidebar-toggle-glyph .panel-chevron {
-  opacity: 0;
-  transform: translateX(-1px);
-  transform-origin: center;
-  transition:
-    opacity var(--motion-fast) var(--ease-standard),
-    transform var(--motion-fast) var(--ease-standard);
-}
-.sidebar-toggle-btn:hover .panel-divider,
-.sidebar-toggle-btn:focus-visible .panel-divider {
-  opacity: 0.55;
-  transform: translateX(-1px) scaleY(0.55);
-}
-.sidebar-toggle-btn:hover .panel-chevron,
-.sidebar-toggle-btn:focus-visible .panel-chevron {
-  opacity: 1;
-  transform: translateX(0);
-}
+  .sidebar-toggle-glyph .panel-divider {
+    opacity: 1;
+    transform: translateX(0) scaleY(1);
+    transform-box: fill-box;
+    transform-origin: center;
+    transition:
+      opacity var(--motion-fast) var(--ease-standard),
+      transform var(--motion-fast) var(--ease-standard);
+  }
+  .sidebar-toggle-glyph .panel-chevron {
+    opacity: 0;
+    transform: translateX(-1px);
+    transform-origin: center;
+    transition:
+      opacity var(--motion-fast) var(--ease-standard),
+      transform var(--motion-fast) var(--ease-standard);
+  }
+  .sidebar-toggle-btn:hover .panel-divider,
+  .sidebar-toggle-btn:focus-visible .panel-divider {
+    opacity: 0.55;
+    transform: translateX(-1px) scaleY(0.55);
+  }
+  .sidebar-toggle-btn:hover .panel-chevron,
+  .sidebar-toggle-btn:focus-visible .panel-chevron {
+    opacity: 1;
+    transform: translateX(0);
+  }
 
-/* Compact tooltip beside the toggle — a separate, non-interactive layer opening to the RIGHT of the
+  /* Compact tooltip beside the toggle — a separate, non-interactive layer opening to the RIGHT of the
    button on hover/focus-visible, without shifting layout (absolute, pointer-events none). Overflows the
    sidebar into the canvas like the reference; it inherits the aside's z-nav stacking, so it paints over
    main. No native `title` duplicates it — `aria-describedby` links this role="tooltip" for AT. */
-.sidebar-tooltip {
-  position: absolute;
-  inset-inline-start: 100%;
-  inset-block-start: 50%;
-  margin-inline-start: 0.5rem;
-  display: flex;
-  align-items: center;
-  gap: 0.375rem;
-  white-space: nowrap;
-  opacity: 0;
-  pointer-events: none;
-  z-index: 1;
-  transform: translate(-0.25rem, -50%);
-  transition:
-    opacity var(--motion-fast) var(--ease-standard),
-    transform var(--motion-fast) var(--ease-standard);
-}
-.sidebar-toggle-btn:hover ~ .sidebar-tooltip,
-.sidebar-toggle-btn:focus-visible ~ .sidebar-tooltip {
-  opacity: 1;
-  transform: translate(0, -50%);
-}
-.sidebar-tooltip::before {
-  position: absolute;
-  inset-block-start: 50%;
-  inset-inline-start: -0.25rem;
-  width: 0.5rem;
-  height: 0.5rem;
-  border-bottom: 1px solid hsl(var(--border));
-  border-left: 1px solid hsl(var(--border));
-  background-color: hsl(var(--popover));
-  content: '';
-  transform: translateY(-50%) rotate(45deg);
-}
-/* Key chips — quiet keycaps (hairline + faint surface), distinct from the label. */
-.sidebar-key {
-  border-radius: var(--radius);
-  border: 1px solid hsl(var(--border));
-  background-color: hsl(var(--foreground) / 0.06);
-  padding: 0.125rem 0.3rem;
-  line-height: 1;
-  color: hsl(var(--muted-foreground));
-}
+  .sidebar-tooltip {
+    position: absolute;
+    inset-inline-start: 100%;
+    inset-block-start: 50%;
+    margin-inline-start: 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 1;
+    transform: translate(-0.25rem, -50%);
+    transition:
+      opacity var(--motion-fast) var(--ease-standard),
+      transform var(--motion-fast) var(--ease-standard);
+  }
+  .sidebar-toggle-btn:hover ~ .sidebar-tooltip,
+  .sidebar-toggle-btn:focus-visible ~ .sidebar-tooltip {
+    opacity: 1;
+    transform: translate(0, -50%);
+  }
+  .sidebar-tooltip::before {
+    position: absolute;
+    inset-block-start: 50%;
+    inset-inline-start: -0.25rem;
+    width: 0.5rem;
+    height: 0.5rem;
+    border-bottom: 1px solid hsl(var(--border));
+    border-left: 1px solid hsl(var(--border));
+    background-color: hsl(var(--popover));
+    content: '';
+    transform: translateY(-50%) rotate(45deg);
+  }
+  /* Key chips — quiet keycaps (hairline + faint surface), distinct from the label. */
+  .sidebar-key {
+    border-radius: var(--radius);
+    border: 1px solid hsl(var(--border));
+    background-color: hsl(var(--foreground) / 0.06);
+    padding: 0.125rem 0.3rem;
+    line-height: 1;
+    color: hsl(var(--muted-foreground));
+  }
 
-/* Horizontal copy — nav labels, @handle/subtitle, email/plan, freshness text, the account chevron.
+  /* Horizontal copy — nav labels, @handle/subtitle, email/plan, freshness text, the account chevron.
    It occupies the second track of a 40px + remainder grid: the first track is the final rail width,
    so icons and avatars never move. It fades/translates on the SAME shared beat as the surface (no
    staged delay), so the copy rides the width instead of lagging behind a disconnected edge.
    `aria-hidden` follows rail state in the markup. */
-.sidebar-shell .sidebar-copy {
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  opacity: 1;
-  transform: translateX(0);
-  transition:
-    opacity var(--motion-reveal) var(--ease-standard),
-    transform var(--motion-reveal) var(--ease-standard);
-}
-.sidebar-shell[data-rail='true'] .sidebar-copy {
-  opacity: 0;
-  transform: translateX(-0.5rem);
-  pointer-events: none;
-}
-.sidebar-shell .sidebar-copy-placeholder {
-  opacity: 0;
-}
-
-/* Section headings and the separator rhythm change continuously too. Keeping both states mounted
-   avoids the old one-frame jump from `mt-4` straight to `border + mt-3 + pt-3`. */
-.sidebar-shell .sidebar-nav-group-labelled {
-  margin-top: 1rem;
-  border-top: 1px solid transparent;
-  padding-top: 0;
-  transition:
-    margin-top var(--motion-reveal) var(--ease-standard),
-    border-color var(--motion-fast) var(--ease-standard),
-    padding-top var(--motion-reveal) var(--ease-standard);
-}
-.sidebar-shell[data-rail='true'] .sidebar-nav-group-labelled {
-  margin-top: 0.75rem;
-  border-top-color: hsl(var(--border));
-  padding-top: 0.75rem;
-}
-.sidebar-shell .sidebar-section-label {
-  overflow: hidden;
-  max-height: 1.5rem;
-  opacity: 1;
-  transform: translateX(0);
-  transition:
-    opacity var(--motion-reveal) var(--ease-standard),
-    transform var(--motion-reveal) var(--ease-standard),
-    max-height var(--motion-reveal) var(--ease-standard),
-    padding-bottom var(--motion-reveal) var(--ease-standard);
-}
-.sidebar-shell[data-rail='true'] .sidebar-section-label {
-  opacity: 0;
-  transform: translateX(-0.5rem);
-  max-height: 0;
-  padding-bottom: 0;
-}
-
-/* Active background hands off to the rail's thin indicator instead of switching in one frame. */
-.sidebar-shell .sidebar-nav-item-active {
-  background-color: hsl(var(--hover-row));
-}
-.sidebar-shell[data-rail='true'] .sidebar-nav-item-active {
-  background-color: transparent;
-}
-.sidebar-shell .sidebar-rail-active {
-  opacity: 0;
-  transform: translateY(-50%) scaleY(0.5);
-  transform-origin: center;
-  transition:
-    opacity var(--motion-fast) var(--ease-standard),
-    transform var(--motion-reveal) var(--ease-standard);
-}
-.sidebar-shell[data-rail='true'] .sidebar-rail-active {
-  opacity: 1;
-  transform: translateY(-50%) scaleY(1);
-}
-
-/* ── Home edit mode (steep «Edit» feel): a LIGHT page-level toggle + soft reveal of card
-   controls when edit mode opens. No heavy fills / shadows — depth stays hairline-only. ─────── */
-@layer components {
-  /* The Edit ↔ Готово toggle: a Steep-like compact tool. The header reserves a fixed slot while
-     the chip expands inside it on hover/focus/active, so the page title never reflows. */
-  .edit-toggle-slot {
-    position: relative;
-    width: 108px;
-    height: 36px;
-    flex: 0 0 108px;
-  }
-  .edit-toggle {
-    position: absolute;
-    inset-block: 0;
-    right: 0;
-    display: inline-flex;
-    width: 36px;
-    min-width: 36px;
-    align-items: center;
-    justify-content: flex-start;
-    gap: 0;
+  .sidebar-shell .sidebar-copy {
+    min-width: 0;
     overflow: hidden;
-    padding-inline: 9px;
-    color: hsl(var(--foreground));
-    background: hsl(var(--foreground) / 0.07);
-    border: 1px solid hsl(var(--foreground) / 0.08);
-    transition:
-      width var(--motion-base) var(--ease-standard),
-      gap var(--motion-base) var(--ease-standard),
-      padding-inline var(--motion-base) var(--ease-standard),
-      background-color var(--motion-base) ease,
-      border-color var(--motion-base) ease,
-      color var(--motion-base) ease,
-      transform var(--motion-press) var(--ease-standard);
-  }
-  .edit-toggle:hover,
-  .edit-toggle:focus-visible,
-  .edit-toggle[data-active='true'] {
-    width: 108px;
-    gap: 7px;
-    padding-inline: 12px;
-  }
-  .edit-toggle:hover,
-  .edit-toggle:focus-visible {
-    background: hsl(var(--foreground) / 0.11);
-    border-color: hsl(var(--foreground) / 0.12);
-  }
-  .edit-toggle:active {
-    transform: scale(0.98);
-    background: hsl(var(--foreground) / 0.14);
-  }
-  .edit-toggle[data-active='true']:active {
-    background: hsl(var(--foreground) / 0.82);
-  }
-  .edit-toggle[data-active='true'] {
-    background: hsl(var(--foreground) / 0.9);
-    border-color: hsl(var(--foreground) / 0.9);
-    color: hsl(var(--background));
-  }
-  /* Pencil → check morph: the pencil lifts + spins out while the check DRAWS itself in via
-     stroke-dashoffset (not a plain crossfade) — that draw-on is the signature morph beat. */
-  .edit-toggle-icons {
-    position: relative;
-    display: inline-block;
-    flex: 0 0 16px;
-    width: 16px;
-    height: 16px;
-  }
-  .edit-toggle-icons > svg {
-    position: absolute;
-    inset: 0;
-    width: 16px;
-    height: 16px;
-    transition: opacity var(--motion-fast) ease, transform var(--motion-base) var(--ease-standard);
-  }
-  .edit-toggle-icons .i-done {
-    opacity: 0;
-    transform: scale(0.6) rotate(-8deg);
-  }
-  /* Check hidden = its single (pathLength-normalised) stroke fully retracted; drawn = offset 0. */
-  .edit-toggle-icons .i-done path {
-    stroke-dasharray: 1;
-    stroke-dashoffset: 1;
-    transition: stroke-dashoffset var(--motion-glide) var(--ease-standard);
-  }
-  .edit-toggle[data-active='true'] .i-edit {
-    opacity: 0;
-    transform: scale(0.6) rotate(8deg);
-  }
-  .edit-toggle[data-active='true'] .i-done {
+    white-space: nowrap;
     opacity: 1;
-    transform: scale(1) rotate(0);
+    transform: translateX(0);
+    transition:
+      opacity var(--motion-reveal) var(--ease-standard),
+      transform var(--motion-reveal) var(--ease-standard);
   }
-  .edit-toggle[data-active='true'] .i-done path {
-    stroke-dashoffset: 0;
+  .sidebar-shell[data-rail='true'] .sidebar-copy {
+    opacity: 0;
+    transform: translateX(-0.5rem);
+    pointer-events: none;
   }
-}
-/* The label stays mounted for the state crossfade, but the compact idle chip hides the text. Hover,
-   keyboard focus and active edit mode reveal it with a short slide-in inside the fixed header slot. */
-.edit-toggle-label {
-  display: inline-grid;
-  place-items: center;
-  width: 64px;
-  min-width: 64px;
-  overflow: hidden;
-  text-align: center;
-  opacity: 0;
-  transform: translateX(-5px);
-  transition: opacity var(--motion-fast) ease, transform var(--motion-base) var(--ease-standard);
-}
-.edit-toggle-label > span {
-  grid-area: 1 / 1;
-  white-space: nowrap;
-  transition: opacity var(--motion-fast) ease, transform var(--motion-base) var(--ease-standard);
-}
-.edit-toggle:hover .edit-toggle-label,
-.edit-toggle:focus-visible .edit-toggle-label,
-.edit-toggle[data-active='true'] .edit-toggle-label {
-  opacity: 1;
-  transform: translateX(0);
-}
-.edit-toggle-label-done {
-  opacity: 0;
-  transform: translateY(4px);
-}
-.edit-toggle[data-active='true'] .edit-toggle-label-edit {
-  opacity: 0;
-  transform: translateY(-4px);
-}
-.edit-toggle[data-active='true'] .edit-toggle-label-done {
-  opacity: 1;
-  transform: translateY(0);
-}
+  .sidebar-shell .sidebar-copy-placeholder {
+    opacity: 0;
+  }
 
-/* Desktop (md+): the compact expand-on-hover chip is a mobile affordance. On desktop the toggle is
+  /* Section headings and the separator rhythm change continuously too. Keeping both states mounted
+   avoids the old one-frame jump from `mt-4` straight to `border + mt-3 + pt-3`. */
+  .sidebar-shell .sidebar-nav-group-labelled {
+    margin-top: 1rem;
+    border-top: 1px solid transparent;
+    padding-top: 0;
+    transition:
+      margin-top var(--motion-reveal) var(--ease-standard),
+      border-color var(--motion-fast) var(--ease-standard),
+      padding-top var(--motion-reveal) var(--ease-standard);
+  }
+  .sidebar-shell[data-rail='true'] .sidebar-nav-group-labelled {
+    margin-top: 0.75rem;
+    border-top-color: hsl(var(--border));
+    padding-top: 0.75rem;
+  }
+  .sidebar-shell .sidebar-section-label {
+    overflow: hidden;
+    max-height: 1.5rem;
+    opacity: 1;
+    transform: translateX(0);
+    transition:
+      opacity var(--motion-reveal) var(--ease-standard),
+      transform var(--motion-reveal) var(--ease-standard),
+      max-height var(--motion-reveal) var(--ease-standard),
+      padding-bottom var(--motion-reveal) var(--ease-standard);
+  }
+  .sidebar-shell[data-rail='true'] .sidebar-section-label {
+    opacity: 0;
+    transform: translateX(-0.5rem);
+    max-height: 0;
+    padding-bottom: 0;
+  }
+
+  /* Active background hands off to the rail's thin indicator instead of switching in one frame. */
+  .sidebar-shell .sidebar-nav-item-active {
+    background-color: hsl(var(--hover-row));
+  }
+  .sidebar-shell[data-rail='true'] .sidebar-nav-item-active {
+    background-color: transparent;
+  }
+  .sidebar-shell .sidebar-rail-active {
+    opacity: 0;
+    transform: translateY(-50%) scaleY(0.5);
+    transform-origin: center;
+    transition:
+      opacity var(--motion-fast) var(--ease-standard),
+      transform var(--motion-reveal) var(--ease-standard);
+  }
+  .sidebar-shell[data-rail='true'] .sidebar-rail-active {
+    opacity: 1;
+    transform: translateY(-50%) scaleY(1);
+  }
+
+  /* ── Home edit mode (steep «Edit» feel): a LIGHT page-level toggle + soft reveal of card
+   controls when edit mode opens. No heavy fills / shadows — depth stays hairline-only. ─────── */
+}
+@layer utilities {
+  /* The label stays mounted for the state crossfade, but the compact idle chip hides the text. Hover,
+   keyboard focus and active edit mode reveal it with a short slide-in inside the fixed header slot. */
+  .edit-toggle-label {
+    display: inline-grid;
+    place-items: center;
+    width: 64px;
+    min-width: 64px;
+    overflow: hidden;
+    text-align: center;
+    opacity: 0;
+    transform: translateX(-5px);
+    transition:
+      opacity var(--motion-fast) ease,
+      transform var(--motion-base) var(--ease-standard);
+  }
+  .edit-toggle-label > span {
+    grid-area: 1 / 1;
+    white-space: nowrap;
+    transition:
+      opacity var(--motion-fast) ease,
+      transform var(--motion-base) var(--ease-standard);
+  }
+  .edit-toggle:hover .edit-toggle-label,
+  .edit-toggle:focus-visible .edit-toggle-label,
+  .edit-toggle[data-active='true'] .edit-toggle-label {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  .edit-toggle-label-done {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  .edit-toggle[data-active='true'] .edit-toggle-label-edit {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  .edit-toggle[data-active='true'] .edit-toggle-label-done {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  /* Desktop (md+): the compact expand-on-hover chip is a mobile affordance. On desktop the toggle is
    a stable, always-labelled tool that never changes width/position on hover, so the header cannot
    reflow. Only colour/press transitions
    remain; the slot flows inline instead of reserving 108px for an absolute chip. The mobile rules
    above are left byte-for-byte intact below this breakpoint. */
-@media (min-width: 768px) {
-  .edit-toggle-slot {
-    position: static;
-    width: auto;
-    height: auto;
-    flex: 0 0 auto;
+  @media (min-width: 768px) {
+    .edit-toggle-slot {
+      position: static;
+      width: auto;
+      height: auto;
+      flex: 0 0 auto;
+    }
+    .edit-toggle,
+    .edit-toggle:hover,
+    .edit-toggle:focus-visible {
+      position: static;
+      width: auto;
+      min-width: 0;
+      height: 36px;
+      gap: 7px;
+      padding-inline: 12px;
+    }
+    .edit-toggle-label {
+      width: auto;
+      min-width: 0;
+      opacity: 1;
+      transform: none;
+    }
   }
-  .edit-toggle,
-  .edit-toggle:hover,
-  .edit-toggle:focus-visible {
-    position: static;
-    width: auto;
-    min-width: 0;
-    height: 36px;
-    gap: 7px;
-    padding-inline: 12px;
-  }
-  .edit-toggle-label {
-    width: auto;
-    min-width: 0;
-    opacity: 1;
-    transform: none;
-  }
-}
 
-/* Edit mode keeps the board at its full width and single 6-col footprint without a nested page
+  /* Edit mode keeps the board at its full width and single 6-col footprint without a nested page
    frame. The reorder/remove affordances are signalled by the per-card controls and a quiet desktop
    state row. Desktop-only bottom room in edit mode keeps the fixed «+ Добавить виджет» dock from
    overlapping the last row — mobile edit-mode spacing is left exactly as it was. */
-@media (min-width: 768px) {
-  .home-board-canvas[data-editing='true'] {
-    padding-bottom: 72px;
+  @media (min-width: 768px) {
+    .home-board-canvas[data-editing='true'] {
+      padding-bottom: 72px;
+    }
   }
-}
 
-/* Edit mode steps the whole board grid calmly INWARD ~52px per side (desktop lg+), echoing an
+  /* Edit mode steps the whole board grid calmly INWARD ~52px per side (desktop lg+), echoing an
    "editable canvas" cue — a pure max-width layout move (no scale, shadow, frame or grey fill; the
    canvas stays flat and transparent, per canon). mx-auto keeps it centred as it narrows; the sticky
    page header is a SIBLING outside this element, so only the card grid moves while the header holds
    its full width. Interruptible by construction (toggling data-editing reverses the running
    transition), and the global prefers-reduced-motion cap flattens the duration to instant — the
    narrowing itself still applies, just without the tween. Mobile (<lg) keeps its full-bleed board. */
-@media (min-width: 1024px) {
-  .home-board-canvas {
-    margin-inline: auto;
-    max-width: 100%;
-    transition: max-width var(--motion-base) var(--ease-standard);
+  @media (min-width: 1024px) {
+    .home-board-canvas {
+      margin-inline: auto;
+      max-width: 100%;
+      transition: max-width var(--motion-base) var(--ease-standard);
+    }
+    .home-board-canvas[data-editing='true'] {
+      max-width: calc(100% - 6.5rem);
+    }
   }
-  .home-board-canvas[data-editing='true'] {
-    max-width: calc(100% - 6.5rem);
-  }
-}
 
-.add-widget-dock {
-  position: fixed;
-  left: 50%;
-  bottom: max(22px, env(safe-area-inset-bottom));
-  z-index: 40;
-  transform: translateX(-50%);
-}
-/* Fixed dock button — floats over the multicoloured board cards, so it needs an OPAQUE calm surface
+  .add-widget-dock {
+    position: fixed;
+    left: 50%;
+    bottom: max(22px, env(safe-area-inset-bottom));
+    z-index: 40;
+    transform: translateX(-50%);
+  }
+  /* Fixed dock button — floats over the multicoloured board cards, so it needs an OPAQUE calm surface
    to stay legible (владелец: прошлая полупрозрачная кнопка «просвечивала» карточки). A near-solid
    neutral popover tint + backdrop blur/saturate reads as a solid chip over any card colour, lifted
    by a soft shadow and a hairline border — no shouting brand colour. */
-.add-widget-trigger {
-  display: inline-flex;
-  min-height: 40px;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid hsl(var(--border));
-  background: hsl(var(--popover) / 0.92);
-  color: hsl(var(--foreground));
-  padding: 0 18px;
-  box-shadow:
-    0 10px 28px -8px hsl(0 0% 0% / 0.5),
-    0 2px 6px -2px hsl(0 0% 0% / 0.32);
-  backdrop-filter: blur(10px) saturate(140%);
-  -webkit-backdrop-filter: blur(10px) saturate(140%);
-  transition:
-    background-color var(--motion-base) ease,
-    border-color var(--motion-base) ease,
-    color var(--motion-base) ease,
-    transform var(--motion-press) var(--ease-standard);
-}
-.add-widget-trigger:hover,
-.add-widget-trigger:focus-visible,
-.add-widget-trigger[aria-expanded='true'] {
-  background: hsl(var(--popover));
-  border-color: hsl(var(--foreground) / 0.24);
-  color: hsl(var(--foreground));
-}
-.add-widget-trigger:active {
-  transform: scale(0.98);
-}
-.add-widget-popover {
-  max-height: min(420px, calc(100vh - 140px));
-  overflow-y: auto;
-}
-/* ── Detail overlay: the dim backdrop fades in (120–180ms) while the panel grows out of the clicked
+  .add-widget-trigger {
+    display: inline-flex;
+    min-height: 40px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid hsl(var(--border));
+    background: hsl(var(--popover) / 0.92);
+    color: hsl(var(--foreground));
+    padding: 0 18px;
+    box-shadow:
+      0 10px 28px -8px hsl(0 0% 0% / 0.5),
+      0 2px 6px -2px hsl(0 0% 0% / 0.32);
+    backdrop-filter: blur(10px) saturate(140%);
+    -webkit-backdrop-filter: blur(10px) saturate(140%);
+    transition:
+      background-color var(--motion-base) ease,
+      border-color var(--motion-base) ease,
+      color var(--motion-base) ease,
+      transform var(--motion-press) var(--ease-standard);
+  }
+  .add-widget-trigger:hover,
+  .add-widget-trigger:focus-visible,
+  .add-widget-trigger[aria-expanded='true'] {
+    background: hsl(var(--popover));
+    border-color: hsl(var(--foreground) / 0.24);
+    color: hsl(var(--foreground));
+  }
+  .add-widget-trigger:active {
+    transform: scale(0.98);
+  }
+  .add-widget-popover {
+    max-height: min(420px, calc(100vh - 140px));
+    overflow-y: auto;
+  }
+  /* ── Detail overlay: the dim backdrop fades in (120–180ms) while the panel grows out of the clicked
    card (shared-element FLIP is JS-driven in DetailShell). Panel morph carries the rest. ───────── */
-@keyframes detail-backdrop-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-.detail-backdrop-in {
-  animation: detail-backdrop-in var(--motion-press) ease both;
-}
-@media (prefers-reduced-motion: reduce) {
-  .detail-backdrop-in { animation: none; }
-}
+  @keyframes detail-backdrop-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  .detail-backdrop-in {
+    animation: detail-backdrop-in var(--motion-press) ease both;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .detail-backdrop-in {
+      animation: none;
+    }
+  }
 
-/* ── Bottom sheet (mobile source switcher): the panel slides up from the bottom edge while its
+  /* ── Bottom sheet (mobile source switcher): the panel slides up from the bottom edge while its
    backdrop fades in (detail-backdrop-in). Explicit `animation: none` under reduced-motion so the
    large translate never flashes through the 0.01ms global cap. ──────────────────────────────── */
-@keyframes sheet-up {
-  from { transform: translateY(100%); }
-  to { transform: translateY(0); }
-}
-.sheet-in {
-  animation: sheet-up var(--motion-reveal) var(--ease-standard) both;
-}
-@media (prefers-reduced-motion: reduce) {
-  .sheet-in { animation: none; }
-}
+  @keyframes sheet-up {
+    from {
+      transform: translateY(100%);
+    }
+    to {
+      transform: translateY(0);
+    }
+  }
+  .sheet-in {
+    animation: sheet-up var(--motion-reveal) var(--ease-standard) both;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .sheet-in {
+      animation: none;
+    }
+  }
 
-/* A card's «×» remove affordance appears with a soft scale-in, staggered per grid slot via the
+  /* A card's «×» remove affordance appears with a soft scale-in, staggered per grid slot via the
    card's --enter-delay (inherited from the inner card). */
-@keyframes home-remove-in {
-  from { opacity: 0; transform: scale(0.9) translateY(-3px); }
-  to { opacity: 1; transform: scale(1) translateY(0); }
-}
-.home-remove-enter {
-  animation: home-remove-in var(--motion-base) var(--ease-standard) both;
-  animation-delay: var(--enter-delay, 0ms);
-}
-/* …and it LEAVES the same way on «Готово» — a quick scale/opacity out (var(--motion-fast), kept in
+  @keyframes home-remove-in {
+    from {
+      opacity: 0;
+      transform: scale(0.9) translateY(-3px);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
+  }
+  .home-remove-enter {
+    animation: home-remove-in var(--motion-base) var(--ease-standard) both;
+    animation-delay: var(--enter-delay, 0ms);
+  }
+  /* …and it LEAVES the same way on «Готово» — a quick scale/opacity out (var(--motion-fast), kept in
    sync with REMOVE_EXIT_MS in ChartWidget) instead of teleporting away the instant edit mode closes. */
-@keyframes home-remove-out {
-  from { opacity: 1; transform: scale(1) translateY(0); }
-  to { opacity: 0; transform: scale(0.9) translateY(-3px); }
-}
-.home-remove-exit {
-  animation: home-remove-out var(--motion-fast) var(--ease-standard) both;
-}
-/* The fixed «+ Добавить виджет» dock rises into place while preserving its centered translateX. */
-@keyframes add-widget-in {
-  from { opacity: 0; transform: translate(-50%, 8px); }
-  to { opacity: 1; transform: translate(-50%, 0); }
-}
-.add-widget-enter {
-  animation: add-widget-in var(--motion-reveal) var(--ease-standard) both;
-}
-@media (prefers-reduced-motion: reduce) {
-  /* No press-dip, no glyph slide, no stroke draw-on — the check simply shows drawn when active. */
-  .edit-toggle { transition: none; }
-  .edit-toggle:active { transform: none; }
-  .edit-toggle-icons > svg,
-  .edit-toggle-icons .i-done path,
-  .edit-toggle-label > span { transition: none; }
-  .edit-toggle-icons .i-done path { stroke-dashoffset: 0; }
-  .home-remove-enter,
-  .home-remove-exit,
-  .add-widget-enter { animation: none; }
-}
+  @keyframes home-remove-out {
+    from {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
+    to {
+      opacity: 0;
+      transform: scale(0.9) translateY(-3px);
+    }
+  }
+  .home-remove-exit {
+    animation: home-remove-out var(--motion-fast) var(--ease-standard) both;
+  }
+  /* The fixed «+ Добавить виджет» dock rises into place while preserving its centered translateX. */
+  @keyframes add-widget-in {
+    from {
+      opacity: 0;
+      transform: translate(-50%, 8px);
+    }
+    to {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
+  }
+  .add-widget-enter {
+    animation: add-widget-in var(--motion-reveal) var(--ease-standard) both;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    /* No press-dip, no glyph slide, no stroke draw-on — the check simply shows drawn when active. */
+    .edit-toggle {
+      transition: none;
+    }
+    .edit-toggle:active {
+      transform: none;
+    }
+    .edit-toggle-icons > svg,
+    .edit-toggle-icons .i-done path,
+    .edit-toggle-label > span {
+      transition: none;
+    }
+    .edit-toggle-icons .i-done path {
+      stroke-dashoffset: 0;
+    }
+    .home-remove-enter,
+    .home-remove-exit,
+    .add-widget-enter {
+      animation: none;
+    }
+  }
 
-/* ── Cartograph illustrations (error / 404 / empty states) ───────────────────────────────────
+  /* ── Cartograph illustrations (error / 404 / empty states) ───────────────────────────────────
    Line-art crisp at any size; keep vector-effect layered so Tailwind fill and stroke color
    utilities (in @layer utilities) still win over these defaults. */
-@layer components {
-  .cartograph :where(path, line, circle, ellipse, rect, polygon, polyline) {
-    vector-effect: non-scaling-stroke;
-  }
 }
 
 /* Ambient motion for the cartograph glyphs — a deliberate, subtle exception to the no-motion

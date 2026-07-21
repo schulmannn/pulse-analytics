@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
 import { fileURLToPath, URL } from 'node:url';
 
 // 3F-3 catover: the new app is now the primary dashboard served at '/', so `base` is
@@ -7,7 +8,8 @@ import { fileURLToPath, URL } from 'node:url';
 // phase.) The legacy shell stays reachable at /legacy until the B2 cleanup.
 export default defineConfig({
   base: '/',
-  plugins: [react()],
+  // Tailwind v4 через first-party Vite-плагин (быстрее PostCSS-пути; postcss.config.js удалён).
+  plugins: [react(), tailwindcss()],
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },

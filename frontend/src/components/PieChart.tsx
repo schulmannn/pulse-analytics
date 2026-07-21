@@ -99,7 +99,7 @@ export function PieChart({ values, labels, titles, colors, height = 200 }: PieCh
     window.addEventListener('blur', clear);
     return () => {
       window.removeEventListener('scroll', clear, true);
-      window.removeEventListener('blur', clear);
+      window.removeEventListener('blur-sm', clear);
     };
   }, [hasHover]);
 

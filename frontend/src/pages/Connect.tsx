@@ -191,7 +191,7 @@ export function Connect() {
             aria-label="Источники данных"
             tabIndex={0}
             style={{ '--ring-r': `${ringR}px` } as CSSProperties}
-            className="relative aspect-square w-[min(420px,86vw)] rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4 focus-visible:ring-offset-background"
+            className="relative aspect-square w-[min(420px,86vw)] rounded-full outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4 focus-visible:ring-offset-background"
           >
             {/* rings */}
             <div className="absolute inset-0 rounded-full border border-border" aria-hidden="true" />
@@ -199,7 +199,7 @@ export function Connect() {
 
             {/* hub */}
             <div className="connect-hub absolute left-1/2 top-1/2 flex aspect-square w-[38%] -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center rounded-full border border-border bg-card px-4 text-center" aria-live="polite">
-              <span className="text-2xs font-medium uppercase tracking-[0.1em] text-muted-foreground">Источник</span>
+              <span className="text-2xs font-medium uppercase tracking-widest text-muted-foreground">Источник</span>
               <span className="mt-1 text-base font-medium tracking-tight text-foreground sm:text-lg">{active.name}</span>
               <span className="mt-0.5 text-2xs text-muted-foreground">
                 {activeState === 'connected' ? 'Подключён' : activeState === 'available' ? 'Доступен' : 'Скоро'}
@@ -618,7 +618,7 @@ function MoySkladPanel() {
               onChange={(e) => setToken(e.target.value)}
               placeholder="Токен API МойСклада"
               autoComplete="off"
-              className="h-9 min-w-0 flex-1 rounded border border-border bg-background px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
+              className="h-9 min-w-0 flex-1 rounded border border-border bg-background px-3 text-sm text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
             />
             <button
               type="submit"
@@ -1110,7 +1110,7 @@ function TgScanning({
           onChange={(e) => setPassword(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') onSubmit(); }}
           placeholder="Облачный пароль"
-          className="mt-3 w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-1 focus:ring-primary"
+          className="mt-3 w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground outline-hidden focus:ring-1 focus:ring-primary"
         />
         {err && <p role="alert" className="mt-2 text-xs font-medium text-destructive">{err}</p>}
         <button

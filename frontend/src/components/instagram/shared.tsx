@@ -87,7 +87,7 @@ export function KpiCard({ label, value, hint, trend, deltaText, deltaTone, onDri
             aria-label={`Разбор: ${label}`}
             title="Подробный разбор"
             onClick={onDrill}
-            className="rounded text-left text-2xl font-medium tabular-nums tracking-tight transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            className="rounded text-left text-2xl font-medium tabular-nums tracking-tight transition-colors hover:text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40"
           >
             {value}
           </button>

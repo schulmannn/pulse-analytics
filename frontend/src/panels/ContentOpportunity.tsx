@@ -54,7 +54,7 @@ export function ContentOpportunity({
               <button
                 type="button"
                 className={cn(
-                  'relative flex h-9 min-w-9 items-center justify-center rounded-full border px-2 text-xs font-medium tabular-nums transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+                  'relative flex h-9 min-w-9 items-center justify-center rounded-full border px-2 text-xs font-medium tabular-nums transition-transform hover:scale-105 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50',
                   item.opportunity
                     ? 'border-verdant/50 bg-verdant/15 text-verdant'
                     : item.confidence === 'low'

@@ -94,7 +94,7 @@ export function IgConnectPanel() {
     'Действия в профиле и переходы',
   ];
   return (
-    <Card className="border-status-warn/40 bg-status-warn/[0.02]">
+    <Card className="border-status-warn/40 bg-status-warn/2">
       <CardContent className="p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex items-start gap-3">

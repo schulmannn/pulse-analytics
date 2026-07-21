@@ -102,11 +102,11 @@ export function ChartSection(props: ChartSectionProps) {
             ? 'group/strip relative flex flex-col'
             : `flex flex-col ${SIZE_HEIGHT[effectiveSize]} ${
                 reorder || model.controls.menuOpen ? '' : SIZE_DEFER_RENDER[effectiveSize]
-              } rounded-2xl border bg-card p-4 shadow-[0_12px_32px_-30px_rgba(0,0,0,0.9)] sm:p-5 transition-colors hover:border-ink3/40 hover:[--card-tint-alpha:0.16] dark:hover:border-white/[0.12] dark:hover:[--card-tint-alpha:0]`
+              } rounded-2xl border bg-card p-4 shadow-[0_12px_32px_-30px_rgba(0,0,0,0.9)] sm:p-5 transition-colors hover:border-ink3/40 hover:[--card-tint-alpha:0.16] dark:hover:border-white/12 dark:hover:[--card-tint-alpha:0]`
         } ${
           model.controls.homeEditing && props.homeKey
             ? 'border-ink3/25'
-            : 'border-border dark:border-white/[0.06]'
+            : 'border-border dark:border-white/6'
         } ${reorder ? 'widget-jiggle' : 'widget-enter cursor-pointer'} ${dragging ? 'shadow-lg' : ''}`}
         style={model.layout.innerStyle}
         data-widget-accented={model.layout.activeColor ? '' : undefined}

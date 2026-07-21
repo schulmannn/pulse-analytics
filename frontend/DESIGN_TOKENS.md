@@ -2,7 +2,7 @@
 
 One place that names every design decision, so components consume tokens instead of re-typing
 magic values ("каждый компонент сам по себе"). Definitions live in **`src/index.css` `:root`** (colour,
-surface, radius, motion) and **`tailwind.config.js`** (type scale, radius bindings, colour bindings).
+surface, radius, motion) and the **`@theme` block in `src/index.css`** (type scale, radius bindings, colour bindings — Tailwind v4, no JS config).
 Two scripts guard the canon (see [Governance](#governance)).
 
 > Philosophy: *Refined Technical* — near-black desktop dark theme is the primary product surface;
@@ -14,7 +14,7 @@ Two scripts guard the canon (see [Governance](#governance)).
 ## Colour & surfaces
 
 All colours are HSL channels in `src/index.css` (`:root, .force-light` = light, `.dark` = dark) and
-bound to Tailwind utilities in `tailwind.config.js`. Never hardcode a hex/hsl in a component — use the
+bound to Tailwind utilities in the `@theme` block (`src/index.css`). Never hardcode a hex/hsl in a component — use the
 semantic token.
 
 | Role | Token(s) | Notes |
@@ -32,7 +32,7 @@ semantic token.
 ### Chart series roles
 
 Chart components consume **semantic role tokens** (`--chart-role-*` in `index.css`, bound as
-`chart-role.*` in `tailwind.config.js`), never a raw `brand-*/chart-*` hue — so a widget can't invent
+`--color-chart-role-*` in the `@theme` block), never a raw `brand-*/chart-*` hue — so a widget can't invent
 an ad-hoc colour and every series colour has one audited source. Each role aliases a deep/muted
 palette token that already resolves per theme, so roles follow light/dark automatically. Colour-blind
 safe: **primary** (blue) vs **comparison** (deep amber) is the Okabe-Ito high-contrast pair;
@@ -85,7 +85,7 @@ widget's visualisation. Both live in **`src/lib/widgetSurface.ts`** (pure, unit-
 
 ## Type scale
 
-**One** ladder, in `tailwind.config.js` `fontSize`. No magic `text-[Npx]` — the lint hard-fails on it.
+**One** ladder, in the `@theme` block (`--text-*`). No magic `text-[Npx]` — the lint hard-fails on it.
 Keep ≲4 steps on a single screen.
 
 `text-2xs` 11 (meta · axis ticks) · `text-xs` 12 (caption) · `text-sm` 14 (body/default) ·
@@ -148,7 +148,7 @@ or clips; the extra content lives in «Развернуть». The contract, top
 Depth is primarily **hairlines + z-index**, so the stack order must be explicit. The small,
 centrally-defined card/tooltip shadows do not determine stacking and must not be copied into new
 one-off elevation values.
-The floating/overlay layer pulls from **one** named ladder (`zIndex` in `tailwind.config.js`) — never
+The floating/overlay layer pulls from **one** named ladder (`--z-index-*` in the `@theme` block) — never
 hand-pick a raw `z-40`/`z-50` for an overlay. Plain in-flow stacking *inside* a single component (a
 `relative z-10` label over its own fill) stays untokenised; the scale governs cross-surface overlays.
 

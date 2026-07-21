@@ -75,7 +75,7 @@ export function WidgetRenderer({
     // the product — plus the verbose meta line that says WHAT exactly was empty (source · window).
     // `h-auto min-h-0 py-0` neutralises EmptyState's own fill so the meta line sits under it here.
     return (
-      <div className="flex h-full min-h-[6rem] flex-col items-center justify-center gap-2 px-3 text-center">
+      <div className="flex h-full min-h-24 flex-col items-center justify-center gap-2 px-3 text-center">
         <EmptyState
           compact
           title="Нет данных за период"
@@ -112,7 +112,7 @@ export function WidgetRenderer({
                 type="button"
                 onClick={onDrill}
                 aria-label={drillLabel ? `Разбор: ${drillLabel}` : 'Открыть страницу метрики'}
-                className="rounded text-2xl font-medium leading-none tabular-nums tracking-tight text-foreground transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                className="rounded text-2xl font-medium leading-none tabular-nums tracking-tight text-foreground transition-colors hover:text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40"
               >
                 {result.value}
               </button>

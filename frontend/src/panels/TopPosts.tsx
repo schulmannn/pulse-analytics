@@ -204,7 +204,7 @@ export function TopPosts({ variant = 'table' }: { variant?: 'table' | 'cards' } 
                 type="button"
                 onClick={() => setSelected({ post, rank: idx + 1, reason })}
                 title="Открыть детали поста"
-                className="group flex w-full items-center gap-3 border-b border-border px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-muted/30 focus-visible:bg-muted/30 focus-visible:outline-none"
+                className="group flex w-full items-center gap-3 border-b border-border px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-muted/30 focus-visible:bg-muted/30 focus-visible:outline-hidden"
               >
                 <span className="w-5 shrink-0 text-center text-xs tabular-nums text-ink3">{idx + 1}</span>
                 <span className="min-w-0 flex-1">
@@ -245,7 +245,7 @@ export function TopPosts({ variant = 'table' }: { variant?: 'table' | 'cards' } 
               key={post.id ?? idx}
               type="button"
               onClick={() => setSelected({ post, rank: idx + 1, reason })}
-              className="group flex w-full items-center gap-3 border-b border-border py-3 text-left transition-colors hover:bg-hover-row focus-visible:bg-hover-row focus-visible:outline-none"
+              className="group flex w-full items-center gap-3 border-b border-border py-3 text-left transition-colors hover:bg-hover-row focus-visible:bg-hover-row focus-visible:outline-hidden"
             >
               <span className="w-5 shrink-0 text-center text-xs tabular-nums text-ink3">{idx + 1}</span>
               <span className="min-w-0 flex-1">
@@ -325,7 +325,7 @@ function TopPostCard({ post, rank, onOpen }: { post: NormalizedPost; rank: numbe
       onClick={onOpen}
       title="Открыть детали поста"
       data-testid="tg-top-post-card"
-      className="group flex flex-col border-t border-border pt-3 text-left focus-visible:outline-none"
+      className="group flex flex-col border-t border-border pt-3 text-left focus-visible:outline-hidden"
     >
       <div className="mb-2 flex items-center justify-between text-2xs font-medium tracking-wide">
         <span className="tabular-nums text-ink3">#{rank}</span>
@@ -334,7 +334,7 @@ function TopPostCard({ post, rank, onOpen }: { post: NormalizedPost; rank: numbe
       {/* Stable 4:5 cover keeps the 3-up row aligned; absent/failed media falls back to a glyph. */}
       <div
         data-testid="tg-top-post-media"
-        className="flex aspect-[4/5] w-full items-center justify-center overflow-hidden rounded bg-muted text-muted-foreground"
+        className="flex aspect-4/5 w-full items-center justify-center overflow-hidden rounded bg-muted text-muted-foreground"
       >
         {cover ? (
           <img
@@ -375,7 +375,7 @@ function TopPostsSkeleton({ variant = 'table' }: { variant?: 'table' | 'cards' }
                 <Skeleton className="h-3 w-6" />
                 <Skeleton className="h-3 w-12" />
               </div>
-              <Skeleton className="aspect-[4/5] w-full rounded" />
+              <Skeleton className="aspect-4/5 w-full rounded" />
               <Skeleton className="mt-3 h-4 w-full" />
               <Skeleton className="mt-2 h-4 w-3/4" />
               <Skeleton className="mt-3 h-10 w-full" />

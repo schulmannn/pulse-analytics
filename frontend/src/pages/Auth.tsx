@@ -58,7 +58,7 @@ function AuthField({
         <input
           id={id}
           className={cn(
-            'w-full bg-transparent py-2.5 text-sm text-foreground placeholder:text-ink3 focus:outline-none disabled:opacity-50',
+            'w-full bg-transparent py-2.5 text-sm text-foreground placeholder:text-ink3 focus:outline-hidden disabled:opacity-50',
             className,
           )}
           {...inputProps}

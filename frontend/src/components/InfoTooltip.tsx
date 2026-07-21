@@ -39,7 +39,7 @@ export function InfoTooltip({ title, children, className }: InfoTooltipProps) {
               setOpen((value) => !value);
             }}
             className={cn(
-              'inline-flex h-4 w-4 items-center justify-center rounded-full align-middle text-muted-foreground/70 transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+              'inline-flex h-4 w-4 items-center justify-center rounded-full align-middle text-muted-foreground/70 transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40',
               className,
             )}
           >

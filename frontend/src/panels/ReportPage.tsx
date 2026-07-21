@@ -524,11 +524,11 @@ function ReportDocumentBody({
                 e.currentTarget.blur();
               }
             }}
-            className="mt-1 w-full border-b border-primary/40 bg-transparent text-3xl font-medium tracking-tight text-foreground focus:border-primary focus:outline-none"
+            className="mt-1 w-full border-b border-primary/40 bg-transparent text-3xl font-medium tracking-tight text-foreground focus:border-primary focus:outline-hidden"
           />
         ) : (
           <h2 className="mt-1 flex items-baseline gap-2 text-3xl font-medium tracking-tight">
-            <span className="min-w-0 break-words">{report.name}</span>
+            <span className="min-w-0 wrap-break-word">{report.name}</span>
             <button
               ref={pencilRef}
               type="button"

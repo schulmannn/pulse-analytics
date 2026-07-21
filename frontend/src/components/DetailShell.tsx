@@ -114,7 +114,7 @@ export function DetailShell({ ariaLabel, onClose, variant, fit = 'viewport', ori
       <div
         ref={panelRef}
         tabIndex={-1}
-        className="fixed inset-0 z-modal flex flex-col bg-background focus:outline-none"
+        className="fixed inset-0 z-modal flex flex-col bg-background focus:outline-hidden"
         role="dialog"
         aria-modal="true"
         aria-label={ariaLabel}
@@ -132,14 +132,14 @@ export function DetailShell({ ariaLabel, onClose, variant, fit = 'viewport', ori
   // strip clears the home indicator. ≥sm restores the floating inset + panel radius.
   return createPortal(
     <div className="fixed inset-0 z-modal flex items-center justify-center p-0 sm:p-4" role="dialog" aria-modal="true" aria-label={ariaLabel}>
-      <div className="detail-backdrop-in absolute inset-0 bg-background/70 backdrop-blur-sm backdrop-grayscale" onClick={onClose} aria-hidden="true" />
+      <div className="detail-backdrop-in absolute inset-0 bg-background/70 backdrop-blur-xs backdrop-grayscale" onClick={onClose} aria-hidden="true" />
       <Card
         ref={panelRef}
         tabIndex={-1}
         // fit='content': ≥sm the Card sizes to its body (auto height, ~200px floor, same 100% cap),
         // so a small breakdown floats centered instead of a near-empty full-height panel. The base
         // (mobile) branch stays h-full — the edge-to-edge sheet contract is untouched.
-        className={`relative z-10 flex w-full flex-col overflow-hidden rounded-none pb-[env(safe-area-inset-bottom)] focus:outline-none sm:rounded-2xl sm:pb-0 ${
+        className={`relative z-10 flex w-full flex-col overflow-hidden rounded-none pb-[env(safe-area-inset-bottom)] focus:outline-hidden sm:rounded-2xl sm:pb-0 ${
           fit === 'content' ? 'h-full sm:h-auto sm:max-h-full sm:min-h-[200px]' : 'h-full'
         }`}
       >

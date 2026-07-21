@@ -113,7 +113,7 @@ function ChatIndex() {
             disabled={create.isPending}
             placeholder="Спросите о ваших метриках…"
             aria-label="Вопрос AI-ассистенту"
-            className="w-full resize-none bg-transparent px-1.5 text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-60"
+            className="w-full resize-none bg-transparent px-1.5 text-sm leading-relaxed text-foreground outline-hidden placeholder:text-muted-foreground disabled:opacity-60"
           />
           <div className="mt-1.5 flex items-end justify-between gap-2">
             <AiAskControls ctx={ctx} onCtx={setCtx} disabled={create.isPending} />
@@ -399,7 +399,7 @@ function ChatThread({ chatId }: { chatId: number }) {
             disabled={!!pending}
             placeholder={pending ? 'Ассистент отвечает…' : 'Задайте вопрос…'}
             aria-label="Сообщение ассистенту"
-            className="max-h-40 w-full resize-none bg-transparent px-1.5 text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-60"
+            className="max-h-40 w-full resize-none bg-transparent px-1.5 text-sm leading-relaxed text-foreground outline-hidden placeholder:text-muted-foreground disabled:opacity-60"
           />
           <div className="mt-1.5 flex items-end justify-between gap-2">
             <AiAskControls ctx={ctx} onCtx={setCtx} disabled={!!pending} />

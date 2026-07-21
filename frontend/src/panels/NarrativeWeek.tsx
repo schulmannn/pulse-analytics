@@ -187,7 +187,7 @@ function SegSpan({ seg, onPost }: { seg: NarrativeSeg; onPost: (i: number) => vo
           to={seg.to}
           onMouseEnter={() => narrLinkHover(seg.to!, true)}
           onMouseLeave={() => narrLinkHover(seg.to!, false)}
-          className="kpi-accent rounded font-medium tabular-nums text-foreground underline decoration-dotted decoration-1 underline-offset-4 transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+          className="kpi-accent rounded font-medium tabular-nums text-foreground underline decoration-dotted decoration-1 underline-offset-4 transition-colors hover:text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40"
         >
           {seg.text}
         </Link>
@@ -200,7 +200,7 @@ function SegSpan({ seg, onPost }: { seg: NarrativeSeg; onPost: (i: number) => vo
       return <InlineSpark values={seg.values} />;
     case 'post': {
       const chip =
-        'rounded text-left font-medium text-foreground underline decoration-dotted decoration-1 underline-offset-4 transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40';
+        'rounded text-left font-medium text-foreground underline decoration-dotted decoration-1 underline-offset-4 transition-colors hover:text-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40';
       // IG-медиа живёт по permalink (карточек IG-постов в приложении нет), TG-пост — в модалке.
       if (seg.href) {
         return (
@@ -256,7 +256,7 @@ export function NarrativeWeekBody() {
         {/* Фикс. высота карточки клипала хвост рассказа посреди строки: колонка текста скроллится
             (глобальный тонкий скроллбар), маска гасит нижние 28px как знак «ниже ещё есть», а pb-7
             выводит последнюю строку из зоны затухания при доскролле. */}
-        <div className="min-w-0 flex-1 overflow-y-auto pb-7 [mask-image:linear-gradient(180deg,#000_calc(100%-28px),transparent)]">
+        <div className="min-w-0 flex-1 overflow-y-auto pb-7 mask-[linear-gradient(180deg,#000_calc(100%-28px),transparent)]">
           <NarrativeProse paragraphs={nar.paragraphs} onPost={setOpenPost} />
         </div>
         {facts.length > 0 && (

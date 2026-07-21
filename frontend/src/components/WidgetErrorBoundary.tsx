@@ -94,7 +94,7 @@ export class WidgetErrorBoundary extends Component<WidgetErrorBoundaryProps, Wid
     if (!traceId) return this.props.children;
 
     const body = (
-      <div className="flex h-full min-h-[6rem] flex-col items-center justify-center gap-1.5 px-3 py-4 text-center">
+      <div className="flex h-full min-h-24 flex-col items-center justify-center gap-1.5 px-3 py-4 text-center">
         <svg
           className="h-6 w-6 text-ink3"
           viewBox="0 0 24 24"
@@ -137,7 +137,7 @@ export class WidgetErrorBoundary extends Component<WidgetErrorBoundaryProps, Wid
     const size = this.props.size ?? 'half';
     return (
       <section className={`min-w-0 ${CARD_SPAN[size]}`}>
-        <div className={`flex ${CARD_MIN_H[size]} flex-col rounded-2xl border border-border bg-card p-4 dark:border-white/[0.06] sm:p-5`}>
+        <div className={`flex ${CARD_MIN_H[size]} flex-col rounded-2xl border border-border bg-card p-4 dark:border-white/6 sm:p-5`}>
           <h3 className="shrink-0 truncate text-xs font-medium tracking-wider text-muted-foreground">
             {this.props.label || 'Виджет'}
           </h3>

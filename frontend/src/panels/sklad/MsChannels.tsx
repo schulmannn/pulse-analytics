@@ -295,7 +295,7 @@ function MsChannelPicker({
             )}
           </div>
           {options.map((o) => (
-            <label key={o.id} className="flex cursor-pointer items-center gap-2 rounded-lg px-1.5 py-1.5 text-xs text-foreground hover:bg-foreground/[0.06]">
+            <label key={o.id} className="flex cursor-pointer items-center gap-2 rounded-lg px-1.5 py-1.5 text-xs text-foreground hover:bg-foreground/6">
               <input
                 type="checkbox"
                 checked={selected.includes(o.id)}
@@ -529,7 +529,7 @@ function MsMultiLine({
           role="img"
           aria-label={ariaSummary}
           tabIndex={0}
-          className="relative rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+          className="relative rounded-sm outline-hidden focus-visible:ring-2 focus-visible:ring-primary/60"
           onPointerMove={(event) => hoverAt(event.clientX)}
           onPointerLeave={() => {
             if (!focused) setHovered(null);
@@ -589,7 +589,7 @@ function MsMultiLine({
           </svg>
           {hovered != null && (
             <div
-              className={`pointer-events-none absolute top-2 z-tooltip min-w-44 rounded-lg border border-border bg-popover/95 px-2.5 py-2 text-2xs shadow-lg backdrop-blur-sm ${hovered > n * 0.62 ? '-translate-x-full' : ''}`}
+              className={`pointer-events-none absolute top-2 z-tooltip min-w-44 rounded-lg border border-border bg-popover/95 px-2.5 py-2 text-2xs shadow-lg backdrop-blur-xs ${hovered > n * 0.62 ? '-translate-x-full' : ''}`}
               style={{ left: `${hoverX ?? 0}%` }}
             >
               <p className="mb-1 font-medium text-foreground">{labels[hovered]}</p>
@@ -615,7 +615,7 @@ function MsMultiLine({
         {series.map((s) => (
           <span key={s.name} className="inline-flex items-center gap-1.5 text-2xs text-muted-foreground">
             <span aria-hidden="true" className="h-1.5 w-3 rounded-full" style={{ backgroundColor: s.color }} />
-            <span className="max-w-[10rem] truncate">{s.name}</span>
+            <span className="max-w-40 truncate">{s.name}</span>
           </span>
         ))}
         <span className="text-2xs text-muted-foreground">

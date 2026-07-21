@@ -292,7 +292,7 @@ function PaletteDialog({ close }: { close: () => void }) {
 
   return (
     <div
-      className="fixed inset-0 z-modal flex items-start justify-center bg-background/70 p-4 pt-[16vh] backdrop-blur-sm backdrop-grayscale"
+      className="fixed inset-0 z-modal flex items-start justify-center bg-background/70 p-4 pt-[16vh] backdrop-blur-xs backdrop-grayscale"
       onClick={close}
     >
       <div
@@ -301,7 +301,7 @@ function PaletteDialog({ close }: { close: () => void }) {
         role="dialog"
         aria-modal="true"
         aria-label="Поиск"
-        className="w-full max-w-xl overflow-hidden rounded-xl border border-border bg-card focus:outline-none"
+        className="w-full max-w-xl overflow-hidden rounded-xl border border-border bg-card focus:outline-hidden"
         onClick={(event) => event.stopPropagation()}
       >
         {/* Input-first, no title bar (Claude / steep «Jump to»): icon + field + esc chip. */}
@@ -342,7 +342,7 @@ function PaletteDialog({ close }: { close: () => void }) {
               }
             }}
             placeholder="Поиск: разделы, метрики, источники…"
-            className="min-w-0 flex-1 bg-transparent py-3.5 text-sm text-foreground outline-none placeholder:text-muted-foreground"
+            className="min-w-0 flex-1 bg-transparent py-3.5 text-sm text-foreground outline-hidden placeholder:text-muted-foreground"
           />
           <kbd className="rounded border border-border px-1.5 py-0.5 font-mono text-2xs text-muted-foreground">esc</kbd>
         </div>

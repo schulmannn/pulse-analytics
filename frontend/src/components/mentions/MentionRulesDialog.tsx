@@ -7,7 +7,7 @@ import { useFocusTrap } from '@/lib/useFocusTrap';
 import { cn } from '@/lib/utils';
 
 const INPUT_CLASS =
-  'mt-1.5 w-full resize-none rounded border border-border bg-background px-3 py-2.5 text-sm leading-5 text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary focus:ring-1 focus:ring-primary read-only:cursor-default read-only:text-muted-foreground';
+  'mt-1.5 w-full resize-none rounded border border-border bg-background px-3 py-2.5 text-sm leading-5 text-foreground outline-hidden placeholder:text-muted-foreground/70 focus:border-primary focus:ring-1 focus:ring-primary read-only:cursor-default read-only:text-muted-foreground';
 
 function lines(value: string): string[] {
   return value
@@ -91,7 +91,7 @@ export function MentionRulesDialog({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-modal flex items-start justify-center overflow-y-auto bg-background/75 p-8 backdrop-blur-sm backdrop-grayscale"
+      className="fixed inset-0 z-modal flex items-start justify-center overflow-y-auto bg-background/75 p-8 backdrop-blur-xs backdrop-grayscale"
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
@@ -100,7 +100,7 @@ export function MentionRulesDialog({
       <div
         ref={panelRef}
         tabIndex={-1}
-        className="my-auto w-full max-w-2xl rounded-lg border border-border bg-card shadow-2xl focus:outline-none"
+        className="my-auto w-full max-w-2xl rounded-lg border border-border bg-card shadow-2xl focus:outline-hidden"
         onClick={(event) => event.stopPropagation()}
       >
         <header className="flex items-start justify-between gap-6 border-b border-border px-6 py-5">

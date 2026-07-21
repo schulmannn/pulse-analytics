@@ -126,7 +126,7 @@ function SidebarToggle({ rail, onToggle }: { rail: boolean; onToggle: () => void
         aria-label={label}
         aria-expanded={!rail}
         aria-describedby={tipId}
-        className="sidebar-toggle-btn flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-hover-row hover:text-foreground focus-visible:bg-hover-row focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        className="sidebar-toggle-btn flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-hover-row hover:text-foreground focus-visible:bg-hover-row focus-visible:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40"
       >
         <PanelToggleGlyph rail={rail} className="sidebar-toggle-glyph h-4 w-4" />
       </button>
@@ -337,7 +337,7 @@ function SidebarUserRow({
             type="button"
             aria-label="Аккаунт"
             title={rail ? email : undefined}
-            className="grid w-full grid-cols-[40px_minmax(0,1fr)] items-center overflow-hidden rounded py-1.5 text-left transition-colors hover:bg-hover-row/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+            className="grid w-full grid-cols-[40px_minmax(0,1fr)] items-center overflow-hidden rounded py-1.5 text-left transition-colors hover:bg-hover-row/60 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/50"
           >
             <span className="flex h-8 w-8 shrink-0 items-center justify-center justify-self-center overflow-hidden rounded-full bg-avatar text-2xs font-medium text-ink2">
               {avatar ? <img src={avatar} alt="" className="h-full w-full object-cover" /> : avatarInitials(email)}
@@ -359,7 +359,7 @@ function SidebarUserRow({
           sideOffset={4}
           className={cn(
             'w-64',
-            !rail && 'w-[var(--radix-dropdown-menu-trigger-width)]',
+            !rail && 'w-(--radix-dropdown-menu-trigger-width)',
           )}
         >
           <AccountMenuContent email={email} role={role} avatar={avatar} onClose={() => setOpen(false)} />

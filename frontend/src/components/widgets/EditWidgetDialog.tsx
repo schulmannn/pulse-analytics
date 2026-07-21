@@ -145,7 +145,7 @@ function VariantCarousel({
   const offset = viewportW / 2 - CAROUSEL_CARD_W / 2 - activeIdx * (CAROUSEL_CARD_W + CAROUSEL_GAP);
 
   const arrowCls =
-    'absolute top-1/2 z-10 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-card/90 text-muted-foreground backdrop-blur transition-colors hover:text-foreground disabled:opacity-30 disabled:hover:text-muted-foreground';
+    'absolute top-1/2 z-10 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-card/90 text-muted-foreground backdrop-blur-sm transition-colors hover:text-foreground disabled:opacity-30 disabled:hover:text-muted-foreground';
 
   return (
     <div>
@@ -327,7 +327,7 @@ export function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, sh
 
   return createPortal(
     <div
-      className="fixed inset-0 z-modal flex items-center justify-center bg-background/70 p-4 backdrop-blur-sm backdrop-grayscale"
+      className="fixed inset-0 z-modal flex items-center justify-center bg-background/70 p-4 backdrop-blur-xs backdrop-grayscale"
       role="dialog"
       aria-modal="true"
       aria-label={`Настройка виджета «${prefs.title || defaultTitle}»`}
@@ -336,7 +336,7 @@ export function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, sh
       <div
         ref={panelRef}
         tabIndex={-1}
-        className={`max-h-[85vh] w-full ${variants && variants.length > 1 ? 'max-w-lg' : 'max-w-sm'} overflow-y-auto rounded-xl border border-border bg-card p-5 focus:outline-none`}
+        className={`max-h-[85vh] w-full ${variants && variants.length > 1 ? 'max-w-lg' : 'max-w-sm'} overflow-y-auto rounded-xl border border-border bg-card p-5 focus:outline-hidden`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="text-sm font-medium text-foreground">Настройка виджета</div>
@@ -396,7 +396,7 @@ export function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, sh
             value={prefs.title ?? ''}
             placeholder={defaultTitle}
             onChange={(e) => onChange({ ...prefs, title: e.target.value || undefined })}
-            className="mt-1 w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
+            className="mt-1 w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
           />
         </label>
 
@@ -440,7 +440,7 @@ export function EditWidgetDialog({ defaultTitle, prefs, variants, showPeriod, sh
                 const num = raw === '' ? undefined : Number(raw);
                 onChange({ ...prefs, target: num !== undefined && Number.isFinite(num) && num > 0 ? num : undefined });
               }}
-              className="mt-1 w-full rounded border border-border bg-background px-3 py-2 text-sm tabular-nums text-foreground outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
+              className="mt-1 w-full rounded border border-border bg-background px-3 py-2 text-sm tabular-nums text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
             />
           </label>
         )}

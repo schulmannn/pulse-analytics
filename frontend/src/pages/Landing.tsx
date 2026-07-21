@@ -338,7 +338,7 @@ function Hero() {
   return (
     <section className="relative border-b border-border">
       <HeroAurora />
-      <div className={`${MAXW} relative z-[1] grid items-center gap-12 py-16 md:grid-cols-[minmax(0,420px)_1fr] md:py-24`}>
+      <div className={`${MAXW} relative z-1 grid items-center gap-12 py-16 md:grid-cols-[minmax(0,420px)_1fr] md:py-24`}>
         <HeroCopy reduce={reduce} />
         <div className="relative hidden md:block">
           <div className="overflow-hidden rounded-xl border border-border bg-card shadow-[0_30px_70px_-40px_rgba(20,24,40,0.28)]">
@@ -366,7 +366,7 @@ function FloatBob({
       transition={{ ...SPRING, delay: reduce ? 0 : delay }}
     >
       <motion.div
-        className="will-change-transform [backface-visibility:hidden]"
+        className="will-change-transform backface-hidden"
         animate={reduce ? undefined : { y: [0, -6, 0] }}
         transition={reduce ? undefined : { duration: bob, repeat: Infinity, ease: 'easeInOut', delay }}
       >
@@ -451,7 +451,7 @@ function Reveal({ children, className, delay = 0 }: { children: ReactNode; class
 // ── page sections ──────────────────────────────────────────────────────────
 function Header() {
   return (
-    <header className="sticky top-0 z-20 border-b border-border bg-background/90 backdrop-blur">
+    <header className="sticky top-0 z-20 border-b border-border bg-background/90 backdrop-blur-sm">
       <div className={`${MAXW} flex h-[68px] items-center justify-between`}>
         <Link to="/" className="flex items-center gap-2.5">
           <AtlavueMark className="h-[18px] w-[18px] text-primary" />

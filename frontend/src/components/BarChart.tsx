@@ -142,7 +142,7 @@ export function BarChart({
     window.addEventListener('blur', clear);
     return () => {
       window.removeEventListener('scroll', clear, true);
-      window.removeEventListener('blur', clear);
+      window.removeEventListener('blur-sm', clear);
     };
   }, [hasHover]);
 
@@ -566,7 +566,7 @@ export function BarChart({
               aria-pressed={!ghostHidden}
               onClick={() => setGhostHidden((v) => !v)}
               title={ghostHidden ? 'Показать сравнение' : 'Скрыть сравнение'}
-              className={`flex select-none items-center gap-1.5 rounded transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${ghostHidden ? 'opacity-40 line-through' : ''}`}
+              className={`flex select-none items-center gap-1.5 rounded transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40 ${ghostHidden ? 'opacity-40 line-through' : ''}`}
             >
               {/* Свотч-прямоугольник: сравнение теперь рисуется столбцами, не пунктиром. */}
               <span aria-hidden="true" className="h-2 w-3 rounded-sm" style={{ backgroundColor: stacked ? 'hsl(var(--chart-role-comparison))' : 'hsl(var(--chart-role-comparison) / 0.35)' }} />
