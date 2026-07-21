@@ -9,8 +9,6 @@ import {
   WorkspaceInspector,
   WorkspaceSurface,
   WorkspaceViewToolbar,
-  WORKSPACE_DENSITY_CELL,
-  WORKSPACE_DENSITY_HEAD,
   type WorkspaceDensity,
 } from '@/components/data-workspace';
 import type { IgData } from '@/lib/useIgData';
@@ -186,8 +184,6 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
   const reachMedian = medians.reach;
 
   const shownMetricCols = METRIC_COLS.filter((c) => visibleCols.includes(c.key));
-  const cellY = WORKSPACE_DENSITY_CELL[density];
-  const headY = WORKSPACE_DENSITY_HEAD[density];
 
   const updateVisibleColumns = (next: string[]) => {
     setVisibleCols(next);
@@ -461,26 +457,29 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
     );
   } else {
     cardBody = (
-      <div className="overflow-x-auto" data-ig-content-table>
-        <table className="data-table data-table--compact text-left text-sm" data-ig-content-density={density}>
+      <div
+        className="overflow-x-auto overflow-y-hidden overscroll-x-contain [contain:paint]"
+        data-ig-content-table
+      >
+        <table className="data-table text-left text-sm" data-density={density}>
           <thead>
             <tr className={cn('border-b border-border bg-muted/25 text-2xs font-medium tracking-wide text-muted-foreground')}>
-              <th className={cn('w-10 pl-4 pr-2 sm:pl-5', headY)}>
+              <th className="w-10 pl-4 pr-2 sm:pl-5">
                 <Checkbox
                   aria-label="Выбрать все видимые публикации"
                   checked={allVisibleSelected}
                   onCheckedChange={toggleAllVisible}
                 />
               </th>
-              <th className={cn('w-12 pl-0 pr-3 text-center', headY)}></th>
-              <th className={cn('min-w-[240px] px-3', headY)}>Публикация</th>
+              <th className="w-12 pl-0 pr-3 text-center"></th>
+              <th className="min-w-[240px] px-3">Публикация</th>
               {shownMetricCols.map((c) => {
                 const active = c.key === filters.sort;
                 return (
                   <th
                     key={c.key}
                     aria-sort={active ? (filters.order === 'desc' ? 'descending' : 'ascending') : undefined}
-                    className={cn('w-[104px] px-3 text-right', headY)}
+                    className="w-[104px] px-3 text-right"
                   >
                     <SortButton label={c.label} active={active} order={filters.order} onClick={() => toggleSort(c.key)} />
                   </th>
@@ -488,7 +487,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
               })}
               <th
                 aria-sort={filters.sort === 'date' ? (filters.order === 'desc' ? 'descending' : 'ascending') : undefined}
-                className={cn('w-[96px] px-3 pr-4 text-right sm:pr-5', headY)}
+                className="w-[96px] px-3 pr-4 text-right sm:pr-5"
               >
                 <SortButton label="Дата" active={filters.sort === 'date'} order={filters.order} onClick={() => toggleSort('date')} />
               </th>
@@ -507,7 +506,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
                   data-ig-content-selected={isSelected ? '' : undefined}
                   onClick={clickable ? () => setOpenId(post.id!) : undefined}
                   className={cn(
-                    'group transition-colors',
+                    'group',
                     clickable && 'cursor-pointer',
                     isOpen
                       ? 'bg-primary/10'
@@ -516,7 +515,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
                         : 'hover:bg-muted/40',
                   )}
                 >
-                  <td className={cn('pl-4 pr-2 sm:pl-5', cellY)} onClick={(e) => e.stopPropagation()}>
+                  <td className="pl-4 pr-2 sm:pl-5" onClick={(e) => e.stopPropagation()}>
                     {post.id != null && (
                       <Checkbox
                         aria-label="Выбрать публикацию"
@@ -526,10 +525,10 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
                       />
                     )}
                   </td>
-                  <td className={cn('pl-0 pr-3 text-center', cellY)}>
+                  <td className="pl-0 pr-3 text-center">
                     <IgPostThumb post={post} />
                   </td>
-                  <td className={cn('px-3', cellY)}>
+                  <td className="px-3">
                     {clickable ? (
                       <button
                         type="button"
@@ -555,12 +554,12 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
                   </td>
                   {shownMetricCols.map((c) => {
                     return (
-                      <td key={c.key} className={cn('px-3 text-right', cellY)}>
+                      <td key={c.key} className="px-3 text-right">
                         <MedianCell value={c.get(post)} median={medians[c.key]} tone={c.tone} format={c.format} />
                       </td>
                     );
                   })}
-                  <td className={cn('px-3 pr-4 text-right text-xs tabular-nums text-muted-foreground sm:pr-5', cellY)}>
+                  <td className="px-3 pr-4 text-right text-xs tabular-nums text-muted-foreground sm:pr-5">
                     {post.timestamp ? fmt.date(post.timestamp) : <span className="text-muted-foreground/40">—</span>}
                   </td>
                 </tr>
@@ -811,17 +810,35 @@ function MedianCell({
 
 /** Small square preview for a table row; neutral word-fallback on missing/broken cover. */
 function IgPostThumb({ post }: { post: IgPost }) {
-  const [broken, setBroken] = useState(false);
+  const [brokenSrc, setBrokenSrc] = useState<string | null>(null);
+  const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
   const isVideo = post.media_type === 'VIDEO' || post.media_product_type === 'REELS';
   const cover = post.thumbnail_url || (!isVideo ? post.media_url : null) || null;
+  const broken = cover != null && brokenSrc === cover;
+  const loaded = cover != null && loadedSrc === cover;
   const label = classifyIgFormat(post) === 'reels' ? 'Reels' : classifyIgFormat(post) === 'video' ? 'Видео' : classifyIgFormat(post) === 'carousel' ? 'Альбом' : 'Фото';
+
   return (
-    <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border/40 bg-muted">
-      {cover && !broken ? (
-        <img loading="lazy" src={cover} alt="" referrerPolicy="no-referrer" onError={() => setBroken(true)} className="h-full w-full object-cover" />
-      ) : (
+    <div className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border/40 bg-muted">
+      {(!cover || broken || !loaded) && (
         <span className="px-0.5 text-center text-2xs font-medium leading-tight text-muted-foreground">{label}</span>
       )}
+      {cover && !broken ? (
+        <img
+          loading="lazy"
+          decoding="async"
+          fetchPriority="low"
+          width={40}
+          height={40}
+          draggable={false}
+          src={cover}
+          alt=""
+          referrerPolicy="no-referrer"
+          onLoad={() => setLoadedSrc(cover)}
+          onError={() => setBrokenSrc(cover)}
+          className={cn('absolute inset-0 h-full w-full object-cover', loaded ? 'opacity-100' : 'opacity-0')}
+        />
+      ) : null}
     </div>
   );
 }

@@ -5,8 +5,6 @@ export { WorkspaceSurface } from './WorkspaceSurface';
 export {
   WorkspaceViewToolbar,
   WORKSPACE_DENSITY_OPTIONS,
-  WORKSPACE_DENSITY_CELL,
-  WORKSPACE_DENSITY_HEAD,
   type WorkspaceDensity,
   type WorkspaceColumnOption,
 } from './WorkspaceViewToolbar';

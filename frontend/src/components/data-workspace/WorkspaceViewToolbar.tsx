@@ -12,12 +12,6 @@ export const WORKSPACE_DENSITY_OPTIONS: { value: WorkspaceDensity; label: string
   { value: 'spacious', label: 'Свободно' },
 ];
 
-// 'balanced' == the historical padding, so the default look is unchanged; compact/spacious flank it.
-// Tables that render explicit per-cell padding use these maps; tables driven by the shared
-// `data-table[data-density]` CSS use the attribute instead.
-export const WORKSPACE_DENSITY_CELL: Record<WorkspaceDensity, string> = { compact: 'py-2', balanced: 'py-3', spacious: 'py-4' };
-export const WORKSPACE_DENSITY_HEAD: Record<WorkspaceDensity, string> = { compact: 'py-2', balanced: 'py-2.5', spacious: 'py-3' };
-
 export interface WorkspaceColumnOption {
   value: string;
   label: string;
@@ -56,30 +50,37 @@ export function WorkspaceViewToolbar({
       gap={2}
       startContent={<AxText type="supporting" size="2xs">{label}</AxText>}
       endContent={
-        <>
-          <MultiSelector
-            label={columnsLabel}
-            placeholder={columnsLabel}
-            size="sm"
-            options={columns}
-            value={visibleColumns}
-            onChange={onVisibleColumnsChange}
-            triggerDisplay="badges"
-            maxBadges={1}
-            hasSelectAll
-            selectAllLabel={selectAllLabel}
-          />
-          <SegmentedControl
-            label="Плотность строк"
-            size="sm"
-            value={density}
-            onChange={(v) => onDensityChange(v as WorkspaceDensity)}
-          >
-            {WORKSPACE_DENSITY_OPTIONS.map((d) => (
-              <SegmentedControlItem key={d.value} value={d.value} label={d.label} />
-            ))}
-          </SegmentedControl>
-        </>
+        <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
+          <div className="flex items-center gap-1.5">
+            <AxText type="supporting" size="2xs">{columnsLabel}</AxText>
+            <MultiSelector
+              label={columnsLabel}
+              isLabelHidden
+              placeholder={columnsLabel}
+              size="sm"
+              options={columns}
+              value={visibleColumns}
+              onChange={onVisibleColumnsChange}
+              triggerDisplay="badges"
+              maxBadges={1}
+              hasSelectAll
+              selectAllLabel={selectAllLabel}
+            />
+          </div>
+          <div className="flex items-center gap-1.5">
+            <AxText type="supporting" size="2xs">Плотность</AxText>
+            <SegmentedControl
+              label="Плотность строк"
+              size="sm"
+              value={density}
+              onChange={(v) => onDensityChange(v as WorkspaceDensity)}
+            >
+              {WORKSPACE_DENSITY_OPTIONS.map((d) => (
+                <SegmentedControlItem key={d.value} value={d.value} label={d.label} />
+              ))}
+            </SegmentedControl>
+          </div>
+        </div>
       }
     />
   );

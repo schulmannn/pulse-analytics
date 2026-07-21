@@ -215,19 +215,48 @@ test.describe('Instagram Контент 2.0 (desktop)', () => {
     await expect(inspector).toBeVisible();
   });
 
-  test('Astryx-панель вида: плотность строк и видимость колонок', async ({ page }) => {
+  test('Astryx-панель вида: плотность строк, выравнивание и видимость колонок', async ({ page }) => {
     await boot(page);
     await page.goto('/instagram/content');
+    const tableShell = page.locator('[data-ig-content-table]');
     const table = page.locator('[data-ig-content-table] table');
+    const firstRow = table.locator('tbody tr').first();
 
-    // Плотность — Astryx SegmentedControl (radiogroup). Дефолт «Обычно», переключаем на «Плотно».
-    await expect(table).toHaveAttribute('data-ig-content-density', 'balanced');
+    await expect(firstRow).toBeVisible();
+
+    // В таблице нет вложенного вертикального скролла: страницу прокручивает только dashboard shell.
+    await expect.poll(() => tableShell.evaluate((node) => getComputedStyle(node).overflowY)).toBe('hidden');
+
+    // Подписи и контролы образуют одну горизонтальную строку.
+    const columns = page.getByRole('combobox', { name: 'Колонки' });
+    const density = page.getByRole('radiogroup', { name: 'Плотность строк' });
+    const [columnsCenter, densityCenter] = await Promise.all([
+      columns.evaluate((node) => {
+        const rect = node.getBoundingClientRect();
+        return rect.top + rect.height / 2;
+      }),
+      density.evaluate((node) => {
+        const rect = node.getBoundingClientRect();
+        return rect.top + rect.height / 2;
+      }),
+    ]);
+    expect(Math.abs(columnsCenter - densityCenter)).toBeLessThanOrEqual(2);
+
+    // Проверяем не только состояние контрола, но и фактическую высоту строки во всех режимах.
+    await expect(table).toHaveAttribute('data-density', 'balanced');
+    const balancedHeight = await firstRow.evaluate((node) => node.getBoundingClientRect().height);
     await page.getByRole('radio', { name: 'Плотно' }).click();
-    await expect(table).toHaveAttribute('data-ig-content-density', 'compact');
+    await expect(table).toHaveAttribute('data-density', 'compact');
+    const compactHeight = await firstRow.evaluate((node) => node.getBoundingClientRect().height);
+    await page.getByRole('radio', { name: 'Свободно' }).click();
+    await expect(table).toHaveAttribute('data-density', 'spacious');
+    const spaciousHeight = await firstRow.evaluate((node) => node.getBoundingClientRect().height);
+    expect(balancedHeight - compactHeight).toBeGreaterThanOrEqual(6);
+    expect(spaciousHeight - balancedHeight).toBeGreaterThanOrEqual(6);
 
     // Видимость колонок — Astryx MultiSelector. «Просмотры» видна по умолчанию, скрываем её.
     await expect(page.getByRole('columnheader', { name: /Просмотры/ })).toBeVisible();
-    await page.getByRole('combobox', { name: 'Колонки' }).click();
+    await columns.click();
     await page.getByRole('option', { name: 'Просмотры' }).click();
     await page.keyboard.press('Escape');
     await expect(page.getByRole('columnheader', { name: /Просмотры/ })).toHaveCount(0);
