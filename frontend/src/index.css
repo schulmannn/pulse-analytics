@@ -130,6 +130,34 @@
   border-radius: 9999px;
 }
 
+/* ── Widget-slot container queries ─────────────────────────────────────────────────────────────
+   Тело виджета (WidgetBody slot) — именованный CQ-контейнер `tile`: содержимое карточки меряет
+   СВОЙ слот, а не вьюпорт. Full-карточки авто-высотные — контейнер только по inline-оси (height-
+   запросы в них честно не матчатся); фикс-тайлы (SIZE_HEIGHT third/half) высотой заданы флексом,
+   не контентом — size-containment легален и открывает height-запросы. */
+@utility widget-tile {
+  container: tile / inline-size;
+}
+@utility widget-tile-fixed {
+  container: tile / size;
+  /* Флекс-колонка, чтобы состояние данных могло занять ОСТАТОК слота (tile-short:flex-1), а не
+     100% высоты (h-full поверх сиблинга-переключателя = гарантированный клип на высоту сиблинга).
+     Слот и так BFC (overflow-hidden), схлопывания маргинов через границу не было и нет; между
+     сиблингами тел виджетов смежные mt/mb-пары не встречаются (пиксель-паритет это сторожит). */
+  display: flex;
+  flex-direction: column;
+}
+
+/* `tile-short:` — состояние «слот реально тесный по высоте» (< 15rem ≈ фикс-тайл 264px за вычетом
+   рамки карточки). ErrorState/EmptyState под ним компактнеют АВТОМАТИЧЕСКИ — прод-класс багов
+   «состояние данных не влезло в тайл» закрыт механизмом, а не ручным подбором на каждом call-site.
+   Вне контейнера (страничные состояния, expand-оверлей) запрос не матчится — вид не меняется. */
+@custom-variant tile-short {
+  @container tile (height < 15rem) {
+    @slot;
+  }
+}
+
 @utility data-table-surface {
   /* Shared dashboard data-table treatment. The shell owns the card chrome and horizontal
      overflow; the table class owns only typography, dividers and interaction states so complex
