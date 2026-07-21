@@ -15,6 +15,10 @@ interface WidgetBodyProps {
   period: WidgetPeriodValue;
   target: number | null;
   fillHeight: number | null;
+  /** Фикс-высотный тайл (SIZE_HEIGHT third/half): слот становится size-контейнером `tile`
+      (высота задана флексом → containment легален), и height-запросы (tile-short:) работают.
+      Авто-высотные full/strip меряются только по ширине. */
+  fixedTile: boolean;
   primary: ReactNode;
   footer?: ReactNode;
   resetKeys: unknown[];
@@ -31,6 +35,7 @@ export function WidgetBody({
   period,
   target,
   fillHeight,
+  fixedTile,
   primary,
   footer,
   resetKeys,
@@ -46,7 +51,7 @@ export function WidgetBody({
     <div className={`${bodyLayout} ${reorder ? 'pointer-events-none' : ''}`}>
       <WidgetPeriodProvider value={period}>
         <WidgetTargetContext.Provider value={target}>
-          <div ref={bodyRef} className="min-h-0 flex-1 overflow-hidden">
+          <div ref={bodyRef} className={`min-h-0 flex-1 overflow-hidden ${fixedTile ? 'widget-tile-fixed' : 'widget-tile'}`}>
             <WidgetErrorBoundary variant="inline" widgetId={widgetId} label={label} resetKeys={resetKeys}>
               <ExpandedChartHeightContext.Provider value={fillHeight}>
                 {primary}
