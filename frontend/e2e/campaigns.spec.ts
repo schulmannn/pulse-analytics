@@ -355,5 +355,19 @@ test.describe('Кампании (desktop)', () => {
     // Публикации целы: в «Контенте» по-прежнему все 3 поста.
     await page.getByRole('link', { name: 'Контент' }).first().click();
     await expect(page.locator('table tbody tr')).toHaveCount(3);
+
+    // ── Tree List: разворот кампании в списке показывает её публикации лениво ──
+    await page.getByRole('tab', { name: 'Кампании' }).click();
+    // Дефолтный фильтр списка — «Все»: архивная кампания видна без переключений.
+    await page.getByTestId('campaigns-table').locator('tbody tr').first().waitFor({ timeout: 10_000 });
+    await page.getByRole('button', { name: /Показать публикации/ }).first().click();
+    const branch = page.getByTestId('campaign-branch');
+    await expect(branch).toBeVisible();
+    // После удаления membership в кампании остался ровно один пост — «Запуск: пост 2».
+    await expect(branch.locator('li')).toHaveCount(1);
+    await expect(branch).toContainText('Запуск: пост 2');
+    // Повторный клик сворачивает ветку.
+    await page.getByRole('button', { name: /Скрыть публикации/ }).first().click();
+    await expect(branch).toHaveCount(0);
   });
 });

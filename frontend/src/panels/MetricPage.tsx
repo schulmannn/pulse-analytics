@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { InspectorHandle } from '@/components/InspectorHandle';
 import type { ReactNode } from 'react';
 import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -763,7 +764,9 @@ export function MetricPage() {
         {meta.caption ? <div className="mt-1.5 text-xs text-muted-foreground">{meta.caption}</div> : null}
       </div>
 
-      <div className="grid grid-cols-1 gap-6 xl:gap-7 lg:grid-cols-[minmax(0,1fr)_280px]">
+      {/* relative + InspectorHandle: тянущаяся ширина инспектора (см. components/InspectorHandle). */}
+      <div className="relative grid grid-cols-1 gap-6 xl:gap-7 lg:grid-cols-[minmax(0,1fr)_var(--inspector-w,280px)]">
+        <InspectorHandle defaultWidth={280} />
         {/* Main column — the big chart in four projections + contributing posts. */}
         <div className="min-w-0 space-y-6">
           {/* Chart card (артефакт: связная карточка) — заголовок + переключатель типа + меню одной

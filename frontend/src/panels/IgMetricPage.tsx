@@ -1,4 +1,5 @@
 import { Suspense, lazy, useEffect, useState } from 'react';
+import { InspectorHandle } from '@/components/InspectorHandle';
 import { Link, useParams } from 'react-router-dom';
 import { isMsMetricKey } from '@/panels/sklad/msMetricKeys';
 import { useIgData } from '@/lib/useIgData';
@@ -397,7 +398,8 @@ export function IgMetricPage({ metricKey }: { metricKey: string }) {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-6 xl:gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
+      <div className="relative grid grid-cols-1 gap-6 xl:gap-8 lg:grid-cols-[minmax(0,1fr)_var(--inspector-w,300px)]">
+        <InspectorHandle />
         <div className="min-w-0 space-y-6">
           {lvl != null && (
             <>
@@ -658,7 +660,8 @@ function IgAggregatePage({ def, pair, windowDays, handle }: { def: IgAggDef; pai
         <div className="mt-1.5 text-xs text-muted-foreground">агрегат за выбранное окно</div>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 xl:gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
+      <div className="relative grid grid-cols-1 gap-6 xl:gap-8 lg:grid-cols-[minmax(0,1fr)_var(--inspector-w,300px)]">
+        <InspectorHandle />
         <div className="min-w-0 space-y-6">
           <ChartSection title="Период против периода" defaultSize="full" noExpand>
             {pair.hasCur ? (
@@ -773,7 +776,8 @@ function IgErPage({
         <div className="mt-1.5 text-xs text-muted-foreground">агрегат за выбранное окно</div>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 xl:gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
+      <div className="relative grid grid-cols-1 gap-6 xl:gap-8 lg:grid-cols-[minmax(0,1fr)_var(--inspector-w,300px)]">
+        <InspectorHandle />
         <div className="min-w-0 space-y-6">
           <ChartSection title="Период против периода" defaultSize="full" noExpand>
             {hasCur ? (
