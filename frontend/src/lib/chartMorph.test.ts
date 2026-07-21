@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildSeriesPaths,
-  easeStandard,
+  easeChartMorph,
   interpolatePoints,
   resamplePoints,
   type MorphPoint,
@@ -148,25 +148,25 @@ describe('buildSeriesPaths (segments + smooth cubic, honest gaps)', () => {
   });
 });
 
-describe('easeStandard (house --ease-standard mirrored in JS)', () => {
+describe('easeChartMorph (Recharts `ease` / --ease-chart-morph mirrored in JS)', () => {
   it('is pinned at the endpoints', () => {
-    expect(easeStandard(0)).toBe(0);
-    expect(easeStandard(1)).toBe(1);
-    expect(easeStandard(-0.5)).toBe(0);
-    expect(easeStandard(2)).toBe(1);
+    expect(easeChartMorph(0)).toBe(0);
+    expect(easeChartMorph(1)).toBe(1);
+    expect(easeChartMorph(-0.5)).toBe(0);
+    expect(easeChartMorph(2)).toBe(1);
   });
 
   it('is monotonically increasing across the unit interval', () => {
     let prev = -Infinity;
     for (let i = 0; i <= 20; i++) {
-      const y = easeStandard(i / 20);
+      const y = easeChartMorph(i / 20);
       expect(y).toBeGreaterThanOrEqual(prev);
       prev = y;
     }
   });
 
-  it('front-loads progress (ease-out): halfway in time is already past halfway in value', () => {
-    expect(easeStandard(0.5)).toBeGreaterThan(0.5);
-    expect(easeStandard(0.5)).toBeLessThan(1);
+  it('uses the gentler Recharts ease curve instead of the old heavily front-loaded settle curve', () => {
+    expect(easeChartMorph(0.5)).toBeGreaterThan(0.5);
+    expect(easeChartMorph(0.5)).toBeLessThan(0.85);
   });
 });

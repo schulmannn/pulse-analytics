@@ -176,19 +176,21 @@ Rules:
 
 ## Motion
 
-The house easing + a small duration ladder, defined once in `src/index.css` `:root` (theme-agnostic).
-UI motion pulls from these; components must not inline a duration/easing.
+The house easing, chart-parity easing and a small duration ladder are defined once in
+`src/index.css` `:root` (theme-agnostic). UI motion pulls from these; components must not inline a
+duration/easing.
 
 | Token | Value | Use |
 |---|---|---|
-| `--ease-standard` | `cubic-bezier(0.2, 0.7, 0.3, 1)` | the house entrance / settle ease-out — **the only** hand-authored easing |
+| `--ease-standard` | `cubic-bezier(0.2, 0.7, 0.3, 1)` | the house entrance / settle ease-out |
+| `--ease-chart-morph` | `cubic-bezier(0.25, 0.1, 0.25, 1)` | Recharts `ease` parity for point-to-point chart updates |
 | `--motion-press` | 140ms | tactile press feedback (button dip) |
 | `--motion-fast` | 200ms | quick opacity / colour fades |
 | `--motion-base` | 240ms | standard control transition (mode swap · icon · hover→active) |
 | `--motion-glide` | 260ms | FLIP reorder glide · icon stroke draw-on |
 | `--motion-reveal` | 300ms | larger reveals (add-widget rise) |
 | `--motion-entrance` | 350ms | card mount rise |
-| `--motion-morph` | 700ms | point-to-point line/area interpolation after a data-window change |
+| `--motion-morph` | 1500ms | Recharts-parity point interpolation after a data-window change |
 
 Tailwind's `duration-{100,200,300}` + `ease-out` utilities are an accepted part of the scale;
 arbitrary `duration-[…]` / `ease-[…]` are **not** (lint hard-fails). CSS custom props resolve inside
@@ -212,6 +214,8 @@ Other micro-charts (`InlineSpark` / the custom `MsMultiLine`) keep the lighter `
 (`chart-fade-in`, `--motion-reveal`); bars grow from the baseline (`grow` — `scaleY` from a `fill-box`
 bottom origin) + fade. The LineChart and Sparkline `data-chart-motion="morph"` CSS hook is mount-only;
 data updates reuse the same node and run point interpolation over `--motion-morph`.
+The update duration and easing intentionally match the shadcn example's unoverridden Recharts Area
+defaults (`1500ms`, `ease`); the shorter house settle curve made most movement land too early.
 The shared `ChartTooltip` fades in and glides between points via a tokenised
 `transform` transition (`--motion-base`, never `left`/`top`) — one `[data-chart-tooltip]` rule owns it
 for default/rhea/comparison alike.

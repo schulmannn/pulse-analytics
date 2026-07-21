@@ -229,13 +229,14 @@
      Full canon + usage: frontend/DESIGN_TOKENS.md. */
   :root {
     --ease-standard: cubic-bezier(0.2, 0.7, 0.3, 1); /* entrance / settle ease-out — the house curve */
+    --ease-chart-morph: cubic-bezier(0.25, 0.1, 0.25, 1); /* Recharts `ease` update curve */
     --motion-press: 140ms;    /* tactile press feedback (button dip)                       */
     --motion-fast: 200ms;     /* quick opacity / colour fades                              */
     --motion-base: 240ms;     /* standard control transition (mode swap · icon · hover→active) */
     --motion-glide: 260ms;    /* FLIP reorder glide · icon stroke draw-on                  */
     --motion-reveal: 300ms;   /* larger reveals (add-widget rise)                          */
     --motion-entrance: 350ms; /* card mount rise                                           */
-    --motion-morph: 700ms;    /* chart UPDATE morph (period→period shape flow, RAF)        */
+    --motion-morph: 1500ms;   /* Recharts-parity chart UPDATE morph (shape flow, RAF)      */
   }
 
   /* ── Chart series roles (semantic layer over the deep/muted palette) ────────────────────────────
@@ -517,7 +518,7 @@
      a tokenised transform transition (never left / top, so no layout loop). Reduced motion collapses
      all of it via the global net AND the explicit rules below — and MorphingSeries skips its RAF loop
      entirely, snapping to the final geometry. Durations stay on the --motion-* ladder; the morph's JS
-     duration mirrors --motion-morph and its easing mirrors --ease-standard, so no raw motion values
+     duration mirrors --motion-morph and its easing mirrors --ease-chart-morph, so no raw motion values
      escape the tokens. */
   @keyframes chart-fade-in {
     from { opacity: 0; }

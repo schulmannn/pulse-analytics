@@ -123,12 +123,12 @@ test('metric line chart flows from one period shape into the next', async ({ pag
         comparison: comparison?.getAttribute('d') ?? '',
         state: group?.getAttribute('data-chart-morph-state') ?? null,
       });
-      if (performance.now() - startedAt < 1200) requestAnimationFrame(sample);
+      if (performance.now() - startedAt < 1900) requestAnimationFrame(sample);
     };
     requestAnimationFrame(sample);
   });
   await page.getByRole('group', { name: 'Период', exact: true }).getByRole('button', { name: '7д', exact: true }).click();
-  await page.waitForTimeout(1250);
+  await page.waitForTimeout(1950);
   const frames = await page.evaluate(() => (window as unknown as { __morphFrames: Array<{ primary: string; comparison: string; state: string | null }> }).__morphFrames);
   const finalPath = await primarySeries.getAttribute('d');
   const finalComparisonPath = await comparisonSeries.getAttribute('d');

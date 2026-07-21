@@ -5,7 +5,7 @@
 // duration and the reduced-motion gate stay identical across every chart surface.
 
 /** Morph duration — mirrors the `--motion-morph` token (a RAF loop can't read the CSS var mid-frame). */
-const MORPH_MS_FALLBACK = 700;
+const MORPH_MS_FALLBACK = 1500;
 
 export function readMorphMs(): number {
   if (typeof window === 'undefined') return MORPH_MS_FALLBACK;
