@@ -4,6 +4,7 @@ import { PillSelect } from '@/components/PillSelect';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
+import { useConfirm } from '@/components/ConfirmDialogProvider';
 import { fmt } from '@/lib/format';
 import { Skeleton } from '@/components/ui/skeleton';
 
@@ -12,6 +13,7 @@ const SEVERITY_LABELS: Record<string, string> = { low: 'Низкая', medium: '
 const STATUS_LABELS: Record<string, string> = { open: 'Открыт', in_progress: 'В работе', done: 'Готово', wont_fix: 'Не баг' };
 
 export function Bugs() {
+  const confirm = useConfirm();
   const { data, isLoading, isError, error } = useBugs();
   const createBugMutation = useCreateBug();
   const deleteBugMutation = useDeleteBug();
@@ -113,8 +115,9 @@ export function Bugs() {
                 key={bug.id}
                 bug={bug}
                 availableStatuses={availableStatuses}
-                onDelete={(id) => {
-                  if (window.confirm('Удалить запись из баг-трекера?')) deleteBugMutation.mutate(id);
+                onDelete={async (id) => {
+                  const ok = await confirm({ title: 'Удалить запись из баг-трекера?' });
+                  if (ok) deleteBugMutation.mutate(id);
                 }}
               />
             ))}

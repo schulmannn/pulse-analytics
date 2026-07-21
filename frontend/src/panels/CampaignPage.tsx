@@ -10,6 +10,7 @@ import {
 } from '@/api/queries';
 import type { CampaignPost } from '@/api/schemas';
 import { EmptyState } from '@/components/EmptyState';
+import { useConfirm } from '@/components/ConfirmDialogProvider';
 import { ErrorState } from '@/components/ErrorState';
 import { CampaignDialog } from '@/components/campaigns/CampaignDialog';
 import { canEditCampaign } from '@/components/campaigns/shared';
@@ -37,6 +38,7 @@ export function CampaignPage() {
   const params = useParams();
   const id = /^\d+$/.test(params.id ?? '') ? Number(params.id) : null;
   const navigate = useNavigate();
+  const confirm = useConfirm();
   const [searchParams, setSearchParams] = useSearchParams();
   const isDesktop = useMediaQuery('(min-width: 768px)');
 
@@ -118,8 +120,12 @@ export function CampaignPage() {
   if (!summary || !campaign) return <EmptyState title="Кампания не найдена" action={{ to: CAMPAIGNS_LIST, label: 'К списку кампаний' }} />;
 
   const isArchived = campaign.status === 'archived';
-  const onDelete = () => {
-    if (!window.confirm(`Удалить кампанию «${campaign.name}»? Публикации останутся в источниках.`)) return;
+  const onDelete = async () => {
+    const ok = await confirm({
+      title: `Удалить кампанию «${campaign.name}»?`,
+      reason: 'Публикации останутся в источниках — удаляется только группировка.',
+    });
+    if (!ok) return;
     del.mutate(campaign.id, { onSuccess: () => navigate(CAMPAIGNS_LIST) });
   };
   const onToggleArchive = () => {
@@ -131,13 +137,23 @@ export function CampaignPage() {
       items: list.map((p) => ({ network: p.network as 'tg' | 'ig', channel_id: p.channel_id, post_ref: p.post_ref })),
     });
   };
-  const onRemovePost = (p: CampaignPost) => {
-    if (!window.confirm('Убрать публикацию из кампании? Сама публикация не удаляется.')) return;
+  const onRemovePost = async (p: CampaignPost) => {
+    const ok = await confirm({
+      title: 'Убрать публикацию из кампании?',
+      reason: 'Сама публикация не удаляется.',
+      actionLabel: 'Убрать',
+    });
+    if (!ok) return;
     removeMembership([p]);
   };
-  const onRemovePosts = (list: CampaignPost[]) => {
+  const onRemovePosts = async (list: CampaignPost[]) => {
     if (list.length === 0) return;
-    if (!window.confirm(`Убрать ${list.length} публ. из кампании? Сами публикации не удаляются.`)) return;
+    const ok = await confirm({
+      title: `Убрать ${list.length} публ. из кампании?`,
+      reason: 'Сами публикации не удаляются.',
+      actionLabel: 'Убрать',
+    });
+    if (!ok) return;
     removeMembership(list);
   };
 

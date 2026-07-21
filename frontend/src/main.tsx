@@ -12,6 +12,7 @@ import { clearSessionToken, getSessionToken } from '@/lib/session';
 import { ThemeProvider } from '@/lib/theme';
 import { installGlobalErrorReporter } from '@/lib/crashReporting';
 import { Toaster } from '@/components/ui/sonner';
+import { ConfirmProvider } from '@/components/ConfirmDialogProvider';
 import '@fontsource-variable/geist';
 import '@/index.css';
 
@@ -56,7 +57,10 @@ createRoot(document.getElementById('root')!).render(
           <PeriodProvider>
             <BrowserRouter basename="/">
               <DemoProvider>
-                <App />
+                {/* Промис-confirm поверх канонного alert-dialog — замена window.confirm. */}
+                <ConfirmProvider>
+                  <App />
+                </ConfirmProvider>
                 {/* Глобальные тосты (sonner). Внутри ThemeProvider — Toaster читает нашу тему;
                     колбэки действий замыкают navigate у call-site, роутер-контекст ему не нужен. */}
                 <Toaster />

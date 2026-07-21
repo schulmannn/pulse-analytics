@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useConfirm } from '@/components/ConfirmDialogProvider';
 import { Pencil, Printer, Save, X } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useDeleteReport, useUpdateReport } from '@/api/queries';
@@ -38,6 +39,7 @@ export function ReportDocumentDesktop({
 }) {
   const data = useReportData();
   const navigate = useNavigate();
+  const confirm = useConfirm();
   const updateReport = useUpdateReport(report.id);
   const deleteReport = useDeleteReport();
 
@@ -117,8 +119,12 @@ export function ReportDocumentDesktop({
     if (savePending || !nameValid || !sourceValid) return;
     updateReport.mutate(draftToPutBody(draft, report.config), { onSuccess: () => setMode('read') });
   };
-  const handleDelete = () => {
-    if (!window.confirm(`Удалить отчёт «${report.name}»?`)) return;
+  const handleDelete = async () => {
+    const ok = await confirm({
+      title: `Удалить отчёт «${report.name}»?`,
+      reason: 'Документ и его настройки будут удалены.',
+    });
+    if (!ok) return;
     deleteReport.mutate(report.id, { onSuccess: () => navigate('/reports', { replace: true }) });
   };
 
