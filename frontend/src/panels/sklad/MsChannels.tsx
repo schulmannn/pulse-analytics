@@ -6,8 +6,9 @@ import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/E
 import { LineChart } from '@/components/LineChart';
 import { BarChart } from '@/components/BarChart';
 import { SegmentedControl } from '@/components/SegmentedControl';
+import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
-import { Skeleton } from '@/components/ui/skeleton';
+import { ChartSkeleton, TableSkeleton } from '@/components/ui/dataSkeleton';
 import { fmt, pluralRu, smoothSvgPath } from '@/lib/format';
 import { usePagePeriod } from '@/lib/period';
 import { msPreviousPeriod, useMsPagePeriod, type MsPeriod } from '@/lib/msPeriod';
@@ -76,7 +77,7 @@ export function MsChannels() {
         {channels.isPending ? (
           <ListSkeleton rows={6} />
         ) : !channels.data || channels.data.total_orders === 0 ? (
-          <p className="py-4 text-sm text-muted-foreground">Нет продаж за период.</p>
+          <EmptyState compact size="table" title="Нет продаж за период." />
         ) : (
           <MsChannelContribution
             current={channels.data}
@@ -92,7 +93,7 @@ export function MsChannels() {
         {channels.isPending ? (
           <ListSkeleton rows={6} />
         ) : !channels.data || channels.data.rows.length === 0 ? (
-          <p className="py-4 text-sm text-muted-foreground">Нет продаж за период.</p>
+          <EmptyState compact size="table" title="Нет продаж за период." />
         ) : (
           <MsChannelRows
             rows={channels.data.rows}
@@ -108,13 +109,15 @@ export function MsChannels() {
           <ListSkeleton rows={5} />
         ) : geo.isError ? (
           <ErrorState
+            compact
+            size="table"
             title="Не удалось получить географию заказов"
             reason={geo.error instanceof Error ? geo.error.message : 'ошибка'}
             onRetry={() => geo.refetch()}
             retrying={geo.isFetching}
           />
         ) : !geo.data || geo.data.rows.length === 0 ? (
-          <p className="py-4 text-sm text-muted-foreground">Нет городов доставки за период.</p>
+          <EmptyState compact size="table" title="Нет городов доставки за период." />
         ) : (
           <MsGeographyRows rows={geo.data.rows} noCity={geo.data.no_city_orders} totalOrders={geo.data.total_orders} />
         )}
@@ -135,13 +138,7 @@ const MAX_SELECTED_CHANNELS = MS_CHANNEL_SELECTION_LIMIT;
 const SERIES_COLORS = [1, 2, 3, 4, 5, 6].map((n) => `hsl(var(--chart-${n}))`);
 
 function ListSkeleton({ rows }: { rows: number }) {
-  return (
-    <div className="space-y-2 py-2">
-      {Array.from({ length: rows }).map((_, i) => (
-        <Skeleton key={i} className="h-6 w-full" />
-      ))}
-    </div>
-  );
+  return <TableSkeleton rows={rows} columns={4} className="py-2" />;
 }
 
 /**
@@ -383,10 +380,12 @@ export function MsChannelChart({
     };
   }, [data, period, grain, metric, breakdown, nameById]);
 
-  if (series.isPending) return <ListSkeleton rows={4} />;
+  if (series.isPending) return <ChartSkeleton className="py-2" />;
   if (series.isError) {
     return (
       <ErrorState
+        compact
+        size="chart"
         title="Не удалось получить динамику каналов"
         reason={series.error instanceof Error ? series.error.message : 'ошибка'}
         onRetry={() => series.refetch()}
@@ -414,16 +413,21 @@ export function MsChannelChart({
   }
 
   if (breakdown && selected.length === 0) {
-    return <p className="py-4 text-xs text-muted-foreground">Выберите каналы, чтобы разбить график по каждому.</p>;
+    return <EmptyState compact size="chart" title="Выберите каналы, чтобы разбить график по каждому." />;
   }
 
   if (model.count < 2) {
     return (
-      <p className="py-4 text-xs text-muted-foreground">
-        {metric === 'aov'
+      <EmptyState
+        compact
+        size="chart"
+        title={metric === 'aov'
           ? 'Недостаточно бакетов с заказами для среднего чека за период.'
-          : 'Недостаточно данных по каналу за период. Если каналы пусты — запустите повторную загрузку истории на «Подключении».'}
-      </p>
+          : 'Недостаточно данных по каналу за период.'}
+        reason={metric === 'aov'
+          ? undefined
+          : 'Если каналы пусты — запустите повторную загрузку истории на «Подключении».'}
+      />
     );
   }
   const { values, labels, titles, total } = model;

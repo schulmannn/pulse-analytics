@@ -4,6 +4,8 @@ import { ChartSection } from '@/components/ChartWidget';
 import { EmptyState } from '@/components/EmptyState';
 import { LineChart } from '@/components/LineChart';
 import { PieChart } from '@/components/PieChart';
+import { PillSelect, PillSelectField } from '@/components/PillSelect';
+import { Button } from '@/components/ui/button';
 import {
   CampaignColorDot,
   CampaignStatusChip,
@@ -74,51 +76,57 @@ export function CampaignPageMobile(props: CampaignViewProps) {
           ) : null}
           {canEdit && (
             <div className="ml-auto flex items-center gap-2">
-              <button
+              <Button
                 type="button"
+                variant="outline"
+                size="sm"
                 onClick={onEdit}
-                className="btn-pill border border-border bg-background px-3.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+                className="text-muted-foreground"
               >
                 Изменить
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
+                variant="outline"
+                size="sm"
                 onClick={onToggleArchive}
                 disabled={archivePending}
-                className="btn-pill border border-border bg-background px-3.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+                className="text-muted-foreground"
                 data-testid="campaign-archive-toggle"
               >
                 {archivePending ? '…' : isArchived ? 'Вернуть из архива' : 'В архив'}
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
+                variant="ghost"
+                size="sm"
                 onClick={onDelete}
                 disabled={deletePending}
-                className="btn-pill px-3.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-destructive disabled:opacity-50"
+                className="hover:text-destructive"
               >
                 {deletePending ? 'Удаление…' : 'Удалить'}
-              </button>
+              </Button>
             </div>
           )}
         </div>
         {campaign.description ? <p className="max-w-2xl text-sm text-muted-foreground">{campaign.description}</p> : null}
         {sourceOptions.length > 0 && (
-          <label className="inline-flex w-fit items-center gap-2 text-xs text-muted-foreground">
-            <span>Источник</span>
-            <select
+          <PillSelectField label="Источник">
+            <PillSelect
               value={selectedSource ? campaignSourceKey(selectedSource) : ''}
-              onChange={(event) => onSelectSource(event.target.value)}
-              className="h-8 min-w-56 rounded border border-border bg-background px-2.5 text-xs font-medium text-foreground outline-none transition-colors hover:bg-muted focus:border-primary"
-              data-testid="campaign-source-filter"
-            >
-              <option value="">Все источники</option>
-              {sourceOptions.map((option) => (
-                <option key={option.key} value={option.key}>
-                  {option.label} · {fmt.num(option.posts)} публ.
-                </option>
-              ))}
-            </select>
-          </label>
+              onValueChange={onSelectSource}
+              ariaLabel="Источник"
+              testId="campaign-source-filter"
+              className="min-w-56"
+              options={[
+                { value: '', label: 'Все источники' },
+                ...sourceOptions.map((option) => ({
+                  value: option.key,
+                  label: `${option.label} · ${fmt.num(option.posts)} публ.`,
+                })),
+              ]}
+            />
+          </PillSelectField>
         )}
         <p className="text-xs text-muted-foreground">
           {selectedSource

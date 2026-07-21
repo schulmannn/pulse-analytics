@@ -5,6 +5,8 @@ import type { IgPost, CampaignPostInput } from '@/api/schemas';
 import { useIgTags, useRemoveCampaignPosts } from '@/api/queries';
 import { ChartSection } from '@/components/ChartWidget';
 import { PillSelect } from '@/components/PillSelect';
+import { SearchField } from '@/components/SearchField';
+import { Button } from '@/components/ui/button';
 import { WidgetGroup } from '@/components/widgets/WidgetGroup';
 import { Section } from '@/components/instagram/shared';
 import {
@@ -137,8 +139,10 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
     <>
       <div className="flex flex-wrap items-center justify-between gap-3">
         {tabs}
-        <button
+        <Button
           type="button"
+          variant="outline"
+          size="sm"
           onClick={() =>
             exportIgPosts(
               rows,
@@ -154,25 +158,21 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
           disabled={rows.length === 0}
           aria-label="Экспорт показанных публикаций в CSV"
           title={rows.length === 0 ? 'Нет публикаций для экспорта' : `CSV: ${rows.length} показанных публикаций`}
-          className="btn-pill inline-flex h-8 items-center border border-border bg-background px-3.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+          className="text-muted-foreground"
         >
           Экспорт таблицы
-        </button>
+        </Button>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <div className="flex flex-wrap items-center gap-3">
           <CampaignFilterControl />
-          <label className="flex items-center gap-2 text-xs text-muted-foreground">
-            <span className="sr-only">Поиск по публикациям</span>
-            <input
-              type="search"
-              value={filters.q}
-              onChange={(e) => update({ q: e.target.value })}
-              placeholder="Поиск по тексту и хэштегам"
-              aria-label="Поиск по публикациям"
-              className="h-8 w-56 rounded-full border border-border bg-background px-3 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-primary/40"
-            />
-          </label>
+          <SearchField
+            className="w-56"
+            value={filters.q}
+            onChange={(q) => update({ q })}
+            placeholder="Поиск по тексту и хэштегам"
+            ariaLabel="Поиск по публикациям"
+          />
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <span className="shrink-0">Формат</span>
             <PillSelect<IgContentFormat>
@@ -203,32 +203,34 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
         {selectedItems.length > 0 ? (
           <>
             <span className="text-xs tabular-nums text-muted-foreground">Выбрано: {fmt.num(selectedItems.length)}</span>
-            <button
+            <Button
               type="button"
+              size="sm"
               onClick={() => setAddItems(selectedItems)}
-              className="btn-pill inline-flex h-8 items-center bg-primary px-3.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
               data-testid="add-to-campaign"
             >
               Добавить в кампанию
-            </button>
+            </Button>
             {campaignId != null && (
-              <button
+              <Button
                 type="button"
+                variant="outline"
+                size="sm"
                 onClick={onRemoveFromCampaign}
                 disabled={removeMut.isPending}
-                className="btn-pill inline-flex h-8 items-center border border-border px-3.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50"
                 data-testid="remove-from-campaign"
               >
                 {removeMut.isPending ? 'Убираю…' : 'Убрать из кампании'}
-              </button>
+              </Button>
             )}
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="sm"
               onClick={() => setSelected(new Set())}
-              className="btn-pill inline-flex h-8 items-center px-3 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
             >
               Снять выбор
-            </button>
+            </Button>
           </>
         ) : (
           <span className="text-2xs text-muted-foreground">

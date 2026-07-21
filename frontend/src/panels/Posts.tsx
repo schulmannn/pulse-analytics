@@ -24,6 +24,8 @@ import { membershipKey, useCampaignFilter, useMembershipSet } from '@/lib/campai
 import { AddToCampaignDialog } from '@/components/campaigns/AddToCampaignDialog';
 import { CampaignFilterControl } from '@/components/campaigns/CampaignFilterControl';
 import { PillSelect } from '@/components/PillSelect';
+import { SearchField } from '@/components/SearchField';
+import { Button } from '@/components/ui/button';
 import { lazyWithReload } from '@/lib/lazyWithReload';
 import {
   CONTENT_SORT_COLUMNS,
@@ -291,17 +293,13 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
         <div className="flex flex-wrap items-center gap-3">
           <CampaignFilterControl />
           {/* Desktop-only filters: text search + media format (mobile keeps the untouched list). */}
-          <label className="hidden items-center gap-2 text-xs text-muted-foreground md:flex">
-            <span className="sr-only">Поиск по публикациям</span>
-            <input
-              type="search"
-              value={filters.q}
-              onChange={(e) => update({ q: e.target.value })}
-              placeholder="Поиск по тексту и хэштегам"
-              aria-label="Поиск по публикациям"
-              className="w-56 rounded border border-border bg-background px-2.5 py-1 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
-            />
-          </label>
+          <SearchField
+            className="hidden w-56 md:block"
+            value={filters.q}
+            onChange={(q) => update({ q })}
+            placeholder="Поиск по тексту и хэштегам"
+            ariaLabel="Поиск по публикациям"
+          />
           <div className="hidden items-center gap-2 text-xs text-muted-foreground md:flex">
             <span className="shrink-0">Формат</span>
             <PillSelect<ContentFormat>
@@ -313,16 +311,18 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
             />
           </div>
           {/* Desktop-only content export — exactly the rows shown below. */}
-          <button
+          <Button
             type="button"
+            variant="outline"
+            size="sm"
             onClick={onExport}
             disabled={rows.length === 0}
             aria-label="Экспорт показанных публикаций в CSV"
             title={rows.length === 0 ? 'Нет публикаций для экспорта' : `CSV: ${rows.length} показанных публикаций`}
-            className="hidden btn-pill border border-border bg-background px-3.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50 md:inline-flex"
+            className="hidden text-muted-foreground md:inline-flex"
           >
             Экспорт таблицы
-          </button>
+          </Button>
         </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs text-muted-foreground">
           <span className="tabular-nums" data-testid="content-result-count">{fmt.num(rows.length)} публ.</span>
@@ -351,32 +351,34 @@ function PostsTable({ allPosts, loadedCount }: { allPosts: NormalizedPost[]; loa
         {selectedItems.length > 0 ? (
           <>
             <span className="text-xs tabular-nums text-muted-foreground">Выбрано: {fmt.num(selectedItems.length)}</span>
-            <button
+            <Button
               type="button"
+              size="sm"
               onClick={() => setAddItems(selectedItems)}
-              className="btn-pill bg-primary px-3.5 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
               data-testid="add-to-campaign"
             >
               Добавить в кампанию
-            </button>
+            </Button>
             {campaignId != null && (
-              <button
+              <Button
                 type="button"
+                variant="outline"
+                size="sm"
                 onClick={onRemoveFromCampaign}
                 disabled={removeMut.isPending}
-                className="btn-pill border border-border px-3.5 py-1.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50"
                 data-testid="remove-from-campaign"
               >
                 {removeMut.isPending ? 'Убираю…' : 'Убрать из кампании'}
-              </button>
+              </Button>
             )}
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="sm"
               onClick={() => setSelected(new Set())}
-              className="btn-pill px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
             >
               Снять выбор
-            </button>
+            </Button>
           </>
         ) : (
           <span className="text-2xs text-muted-foreground">

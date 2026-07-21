@@ -7,7 +7,9 @@ import { ChartExpandedContext, ExpandedChartHeightContext } from '@/components/E
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { PeriodChips } from '@/components/PeriodChips';
 import { SourceIdentity } from '@/components/SourceIdentity';
+import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
+import { TableSkeleton } from '@/components/ui/dataSkeleton';
 import { Skeleton } from '@/components/ui/skeleton';
 import { fmt } from '@/lib/format';
 import { useExplorerChartHeight } from '@/lib/useExplorerChartHeight';
@@ -839,6 +841,8 @@ function MsFunnelPage() {
           <ListSkeleton rows={6} />
         ) : funnel.isError ? (
           <ErrorState
+            compact
+            size="table"
             className="py-4"
             title="Не удалось получить статусы заказов"
             reason={funnel.error instanceof Error ? funnel.error.message : 'ошибка'}
@@ -846,7 +850,7 @@ function MsFunnelPage() {
             retrying={funnel.isFetching}
           />
         ) : !funnel.data || funnel.data.rows.length === 0 ? (
-          <p className="py-4 text-sm text-muted-foreground">Нет заказов со статусами за период.</p>
+          <EmptyState compact size="table" title="Нет заказов со статусами за период." />
         ) : (
           <MsFunnelRows
             rows={funnel.data.rows}
@@ -1072,6 +1076,8 @@ function MsSalesChannelsPage() {
           <ListSkeleton rows={6} />
         ) : channels.isError ? (
           <ErrorState
+            compact
+            size="table"
             className="py-4"
             title="Не удалось получить каналы продаж"
             reason={channels.error instanceof Error ? channels.error.message : 'ошибка'}
@@ -1079,7 +1085,7 @@ function MsSalesChannelsPage() {
             retrying={channels.isFetching}
           />
         ) : !channels.data || channels.data.total_orders === 0 ? (
-          <p className="py-4 text-sm text-muted-foreground">Нет продаж за период.</p>
+          <EmptyState compact size="table" title="Нет продаж за период." />
         ) : (
           <MsChannelContribution
             current={channels.data}
@@ -1099,6 +1105,8 @@ function MsSalesChannelsPage() {
           <ListSkeleton rows={6} />
         ) : channels.isError ? (
           <ErrorState
+            compact
+            size="table"
             className="py-4"
             title="Не удалось получить каналы продаж"
             reason={channels.error instanceof Error ? channels.error.message : 'ошибка'}
@@ -1106,7 +1114,7 @@ function MsSalesChannelsPage() {
             retrying={channels.isFetching}
           />
         ) : !channels.data || channels.data.total_orders === 0 ? (
-          <p className="py-4 text-sm text-muted-foreground">Нет продаж за период.</p>
+          <EmptyState compact size="table" title="Нет продаж за период." />
         ) : (
           <MsChannelRows
             rows={channels.data.rows}
@@ -1156,6 +1164,8 @@ function MsGeographyPage() {
           <ListSkeleton rows={6} />
         ) : geo.isError ? (
           <ErrorState
+            compact
+            size="table"
             className="py-4"
             title="Не удалось получить географию заказов"
             reason={geo.error instanceof Error ? geo.error.message : 'ошибка'}
@@ -1163,7 +1173,7 @@ function MsGeographyPage() {
             retrying={geo.isFetching}
           />
         ) : !geo.data || geo.data.rows.length === 0 ? (
-          <p className="py-4 text-sm text-muted-foreground">Нет городов доставки за период.</p>
+          <EmptyState compact size="table" title="Нет городов доставки за период." />
         ) : (
           <MsGeographyRows rows={geo.data.rows} noCity={geo.data.no_city_orders} totalOrders={geo.data.total_orders} />
         )}
@@ -1325,6 +1335,8 @@ function MsCohortsPage() {
           <ListSkeleton rows={6} />
         ) : cohorts.isError ? (
           <ErrorState
+            compact
+            size="table"
             className="py-4"
             title="Не удалось получить когорты"
             reason={cohorts.error instanceof Error ? cohorts.error.message : 'ошибка'}
@@ -1332,7 +1344,12 @@ function MsCohortsPage() {
             retrying={cohorts.isFetching}
           />
         ) : !cohorts.data || cohorts.data.cohorts.length === 0 ? (
-          <p className="py-4 text-sm text-muted-foreground">Когорт пока нет — они появятся после загрузки истории заказов.</p>
+          <EmptyState
+            compact
+            size="table"
+            title="Когорт пока нет"
+            reason="Они появятся после загрузки истории заказов."
+          />
         ) : (
           <MsCohortsTable cohorts={cohorts.data.cohorts} mode={mode} />
         )}
@@ -1342,11 +1359,5 @@ function MsCohortsPage() {
 }
 
 function ListSkeleton({ rows }: { rows: number }) {
-  return (
-    <div className="space-y-2 py-2">
-      {Array.from({ length: rows }).map((_, i) => (
-        <Skeleton key={i} className="h-6 w-full" />
-      ))}
-    </div>
-  );
+  return <TableSkeleton rows={rows} columns={4} className="py-2" />;
 }

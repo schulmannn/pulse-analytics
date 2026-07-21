@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
 import { DateRangePicker } from '@/components/DateRangePicker';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import {
@@ -68,20 +69,24 @@ export function PeriodChips({
       {onRangeChange && (
         <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
           <PopoverTrigger asChild>
-            <button
+            {/* Part of the shared Button system rather than an ad-hoc pill; the active (picked-range)
+                state tints the same outline chip so it still reads as pressed next to the presets. */}
+            <Button
               type="button"
+              variant="outline"
+              size="xs"
               aria-pressed={!!range}
               className={cn(
-                'rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors',
+                'font-medium',
                 range
-                  ? 'border-primary/40 bg-primary/10 text-primary'
-                  : 'border-border text-muted-foreground hover:text-foreground',
+                  ? 'border-primary/40 bg-primary/10 text-primary hover:bg-primary/10 hover:text-primary'
+                  : 'border-border bg-transparent text-muted-foreground hover:bg-transparent hover:text-foreground',
               )}
             >
               {range
                 ? `${fmtRangeChip(range.from)} – ${fmtRangeChip(range.to)}`
                 : 'Свой период'}
-            </button>
+            </Button>
           </PopoverTrigger>
           <PopoverContent align="end" sideOffset={8} className="w-auto p-3">
             <DateRangePicker
