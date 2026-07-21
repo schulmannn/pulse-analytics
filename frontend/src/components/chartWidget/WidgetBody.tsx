@@ -9,7 +9,7 @@ interface WidgetBodyProps {
   /** In-flow toolbar header above the body (no floating corner controls to clear). */
   stripToolbar?: boolean;
   reorder: boolean;
-  bodyRef: RefObject<HTMLDivElement>;
+  bodyRef: RefObject<HTMLDivElement | null>;
   widgetId: string;
   label: string;
   period: WidgetPeriodValue;
