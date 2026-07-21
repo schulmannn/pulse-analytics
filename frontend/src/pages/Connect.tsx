@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
 import QRCode from 'qrcode';
 import { useQueryClient } from '@tanstack/react-query';
-import { useChannels, useConnectIg, useDisconnectIg, useIgOauthStatus, useMsBackfillStatus, useMsStatus, useTgQrStatus } from '@/api/queries';
+import { useChannels, useCollectorStatus, useConnectIg, useCreateKey, useDisconnectIg, useIgOauthStatus, useMsBackfillStatus, useMsStatus, useTgQrStatus } from '@/api/queries';
 import { ApiError, apiSend } from '@/api/client';
 import { fmt } from '@/lib/format';
 import { useSelectedChannel } from '@/lib/channel-context';
@@ -1313,9 +1313,62 @@ function TgConnected({ username, channels, onDisconnect, busy }: { username: str
   );
 }
 
-// ── Collector agent guide (the "pro" path — the session stays on the user's machine) ──
+// ── Collector agent wizard (the "pro" path — the session stays on the user's machine) ──
+/**
+ * Интерактивный пошаговый мастер вместо статичной инструкции (паттерн blocks.so dialog-11/
+ * onboarding-steps): ключ создаётся ПРЯМО в шаге 1 (раньше гоняли в Настройки и обратно), а
+ * финальный шаг — живая проверка агента поллингом collector-status, так что мануал замыкается
+ * наблюдаемым «агент на связи», а не «обновите дашборд через минуту».
+ */
+const WIZARD_STEPS = ['Ключ', 'Telegram-app', 'Сессия', '.env', 'Проверка'] as const;
+
 function CollectorGuide({ channelName }: { channelName: string | null }) {
   const handle = channelName ?? '@ваш_канал';
+  const { channelId } = useSelectedChannel();
+  const qc = useQueryClient();
+  const [step, setStep] = useState(1);
+  const [visited, setVisited] = useState(1);
+  const goTo = (n: number) => {
+    setStep(n);
+    setVisited((v) => Math.max(v, n));
+  };
+
+  // Шаг 1 — ключ прямо здесь (паттерн ChannelsSection): one-time показ + копирование.
+  const createKey = useCreateKey(channelId ?? 0);
+  const [oneTimeKey, setOneTimeKey] = useState<string | null>(null);
+  const [keyErr, setKeyErr] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const handleCreateKey = async () => {
+    setKeyErr(null);
+    setCopied(false);
+    try {
+      const res = await createKey.mutateAsync({ label: 'локальный коллектор' });
+      if (res.key) setOneTimeKey(res.key);
+    } catch (error) {
+      setKeyErr(error instanceof ApiError ? error.message : 'Не удалось сгенерировать ключ — попробуйте ещё раз');
+    }
+  };
+  const copyKey = (txt: string) => {
+    navigator.clipboard.writeText(txt).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  // Шаг 5 — живая проверка: поллим collector-status, пока шаг открыт.
+  const onCheckStep = step === WIZARD_STEPS.length;
+  const statusQ = useCollectorStatus(onCheckStep ? channelId : null);
+  useEffect(() => {
+    if (!onCheckStep || channelId == null) return;
+    const timer = window.setInterval(
+      () => qc.invalidateQueries({ queryKey: ['collector-status', channelId] }),
+      5000,
+    );
+    return () => window.clearInterval(timer);
+  }, [onCheckStep, channelId, qc]);
+  const collectorStatus = statusQ.data?.status ?? null;
+  const agentAlive = !!collectorStatus && !collectorStatus.stale;
+
   return (
     <div>
       <p className="text-sm leading-relaxed text-muted-foreground">
@@ -1334,48 +1387,199 @@ function CollectorGuide({ channelName }: { channelName: string | null }) {
         </p>
       </div>
 
-      <div className="mt-5">
-        <Step n={1} title="Получите API-ключ канала">
-          <Link to="/settings" className="text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary">Настройки</Link>{' '}
-          → канал <Code>{handle}</Code> → «Создать ключ» → скопируйте <Code>pa_…</Code> (показывается один раз).
-        </Step>
-        <Step n={2} title="Создайте Telegram-приложение">
-          <a href="https://my.telegram.org" target="_blank" rel="noreferrer" className="text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary">my.telegram.org</a>{' '}
-          → API development tools → создайте app → запишите <Code>api_id</Code> и <Code>api_hash</Code>.
-        </Step>
-        <Step n={3} title="Получите строку сессии (один раз)">
-          Установите Telethon и залогиньтесь по номеру и коду — скопируйте напечатанную строку:
-          <CodeBlock>{`pip install telethon
+      {/* Прогресс-шапка мастера: пройденные шаги кликабельны (вернуться и перечитать). */}
+      <ol className="mt-5 flex items-center gap-1" aria-label="Шаги настройки коллектора">
+        {WIZARD_STEPS.map((label, index) => {
+          const n = index + 1;
+          const done = n < step;
+          const active = n === step;
+          const reachable = n <= visited;
+          return (
+            <li key={label} className={cn('flex items-center gap-1', n < WIZARD_STEPS.length && 'flex-1')}>
+              <button
+                type="button"
+                onClick={() => reachable && setStep(n)}
+                disabled={!reachable}
+                aria-current={active ? 'step' : undefined}
+                className={cn(
+                  'flex items-center gap-1.5 rounded-full py-0.5 pl-0.5 pr-2 text-2xs font-medium transition-colors',
+                  active ? 'text-foreground' : 'text-muted-foreground',
+                  reachable && !active && 'hover:text-foreground',
+                  !reachable && 'pointer-events-none',
+                )}
+              >
+                <span
+                  className={cn(
+                    'flex size-5 shrink-0 items-center justify-center rounded-full text-2xs font-medium',
+                    active ? 'bg-primary text-primary-foreground' : done ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground',
+                  )}
+                >
+                  {done ? (
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="size-3" aria-hidden="true">
+                      <path d="m5 13 4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  ) : (
+                    n
+                  )}
+                </span>
+                <span className="hidden sm:inline">{label}</span>
+              </button>
+              {n < WIZARD_STEPS.length && <span aria-hidden="true" className="h-px min-w-3 flex-1 bg-border" />}
+            </li>
+          );
+        })}
+      </ol>
+
+      <div className="mt-4 min-h-48 rounded-lg border border-border p-4">
+        {step === 1 && (
+          <div>
+            <h3 className="text-sm font-medium text-foreground">API-ключ канала</h3>
+            {channelId == null ? (
+              <p className="mt-2 text-sm text-muted-foreground">
+                Сначала добавьте канал в{' '}
+                <Link to="/settings" className="text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary">Настройках</Link>
+                {' '}— ключ выпускается для конкретного канала.
+              </p>
+            ) : (
+              <div className="mt-2 space-y-3">
+                <p className="text-sm leading-relaxed text-muted-foreground">
+                  Ключ для <Code>{handle}</Code> создаётся здесь и показывается{' '}
+                  <span className="font-medium text-foreground">один раз</span>. Уже есть действующий ключ — этот шаг можно пропустить.
+                </p>
+                {!oneTimeKey && (
+                  <button
+                    type="button"
+                    onClick={handleCreateKey}
+                    disabled={createKey.isPending}
+                    className="btn-pill bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
+                  >
+                    {createKey.isPending ? 'Генерация…' : 'Создать ключ'}
+                  </button>
+                )}
+                {keyErr && <p role="alert" className="text-xs text-destructive">{keyErr}</p>}
+                {oneTimeKey && (
+                  <div role="status" className="space-y-2 rounded border border-status-warn/40 bg-background p-3">
+                    <p className="text-xs font-medium text-status-warn">Скопируйте сейчас — повторно ключ не показывается.</p>
+                    <div className="flex items-center gap-2">
+                      <code className="min-w-0 flex-1 truncate rounded bg-muted px-2 py-1.5 font-mono text-xs">{oneTimeKey}</code>
+                      <button
+                        type="button"
+                        onClick={() => copyKey(oneTimeKey)}
+                        className="btn-pill shrink-0 border border-border px-3 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                      >
+                        {copied ? 'Скопировано' : 'Копировать'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+        {step === 2 && (
+          <div>
+            <h3 className="text-sm font-medium text-foreground">Создайте Telegram-приложение</h3>
+            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+              <a href="https://my.telegram.org" target="_blank" rel="noreferrer" className="text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary">my.telegram.org</a>{' '}
+              → API development tools → создайте app → запишите <Code>api_id</Code> и <Code>api_hash</Code>.
+            </p>
+          </div>
+        )}
+        {step === 3 && (
+          <div>
+            <h3 className="text-sm font-medium text-foreground">Получите строку сессии (один раз)</h3>
+            <div className="mt-2 text-sm leading-relaxed text-muted-foreground">
+              Установите Telethon и залогиньтесь по номеру и коду — скопируйте напечатанную строку:
+              <CodeBlock>{`pip install telethon
 python -c "from telethon.sync import TelegramClient as T; \\
 from telethon.sessions import StringSession as S; \\
 print(T(S(), API_ID, 'API_HASH').start().session.save())"`}</CodeBlock>
-        </Step>
-        <Step n={4} title="Заполните .env рядом с агентом">
-          <CodeBlock>{`PULSE_API_URL=${window.location.origin}
+            </div>
+          </div>
+        )}
+        {step === 4 && (
+          <div>
+            <h3 className="text-sm font-medium text-foreground">Заполните .env рядом с агентом</h3>
+            <div className="mt-2 text-sm leading-relaxed text-muted-foreground">
+              <CodeBlock>{`PULSE_API_URL=${window.location.origin}
 PULSE_API_KEY=pa_…        # ключ из шага 1
 TG_API_ID=123456          # из шага 2
 TG_API_HASH=…             # из шага 2
 TG_SESSION=…              # из шага 3
 TG_CHANNEL=${handle}`}</CodeBlock>
-          <p className="mt-2 text-xs text-muted-foreground">
-            Ingest URL берётся из <Code>PULSE_API_URL</Code>: <Code>{INGEST_URL}</Code>
-          </p>
-        </Step>
-        <Step n={5} title="Запустите агента" last>
-          <CodeBlock>{`python collector/pulse_collector.py doctor   # проверка конфига
+              <p className="mt-2 text-xs text-muted-foreground">
+                Ingest URL берётся из <Code>PULSE_API_URL</Code>: <Code>{INGEST_URL}</Code>
+              </p>
+            </div>
+          </div>
+        )}
+        {step === 5 && (
+          <div>
+            <h3 className="text-sm font-medium text-foreground">Запустите агента — мы ждём его здесь</h3>
+            <div className="mt-2 text-sm leading-relaxed text-muted-foreground">
+              <CodeBlock>{`python collector/pulse_collector.py doctor   # проверка конфига
 python collector/pulse_collector.py once     # один прогон
 python collector/pulse_collector.py run      # дальше каждые 6 ч`}</CodeBlock>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Обновите дашборд через минуту — <Code>{handle}</Code> покажет цифры. Упоминания: флаг <Code>--mentions</Code>.
-          </p>
-        </Step>
+            </div>
+            <div
+              data-testid="collector-live-check"
+              className={cn(
+                'mt-3 flex items-center gap-2.5 rounded border p-3 text-sm',
+                agentAlive ? 'border-verdant/40 bg-verdant/[0.05] text-foreground' : 'border-border text-muted-foreground',
+              )}
+            >
+              {agentAlive ? (
+                <>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="size-4 shrink-0 text-verdant" aria-hidden="true">
+                    <path d="m5 13 4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  <span>
+                    Агент на связи — данные получены{' '}
+                    {collectorStatus?.last_success_at ? fmt.date(collectorStatus.last_success_at) : 'только что'}.{' '}
+                    <Link to="/" className="text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary">Открыть дашборд →</Link>
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span aria-hidden="true" className="size-3 shrink-0 animate-pulse rounded-full bg-status-warn/70" />
+                  <span>Ждём первый прогон агента… страница проверяет связь каждые 5 секунд.</span>
+                </>
+              )}
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">Упоминания: флаг <Code>--mentions</Code>.</p>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-3 flex items-center justify-between">
+        <button
+          type="button"
+          onClick={() => step > 1 && setStep(step - 1)}
+          disabled={step === 1}
+          className="btn-pill border border-border px-3.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+        >
+          Назад
+        </button>
+        {step < WIZARD_STEPS.length ? (
+          <button
+            type="button"
+            onClick={() => goTo(step + 1)}
+            className="btn-pill bg-primary px-4 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+          >
+            Далее
+          </button>
+        ) : (
+          <Link to="/" className="btn-pill bg-primary px-4 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90">
+            Открыть дашборд
+          </Link>
+        )}
       </div>
 
       <div className="mt-4 border-t border-border pt-4">
         <h3 className="text-2xs font-medium uppercase tracking-wider text-muted-foreground">Если что-то не так</h3>
         <ul className="mt-2 list-disc space-y-1.5 pl-5 text-sm text-muted-foreground">
           <li><Code>doctor</Code> пишет «Missing env» → проверьте <Code>.env</Code>.</li>
-          <li>401/403 на ingest → ключ не тот или отозван → пересоздайте в Настройках.</li>
+          <li>401/403 на ingest → ключ не тот или отозван → пересоздайте в шаге 1.</li>
           <li>Данных нет → агент должен оставаться запущенным (<Code>run</Code>) или висеть по расписанию.</li>
         </ul>
         <p className="mt-2 text-xs text-muted-foreground">
@@ -1413,20 +1617,6 @@ function CodeBlock({ children }: { children: ReactNode }) {
     <pre className="mt-2 overflow-x-auto rounded border border-border bg-muted px-3 py-2.5 font-mono text-xs leading-relaxed text-foreground">
       {children}
     </pre>
-  );
-}
-
-function Step({ n, title, children, last }: { n: number; title: string; children: ReactNode; last?: boolean }) {
-  return (
-    <div className={cn('flex gap-3 border-t border-border py-4', last && 'border-b')}>
-      <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary">
-        {n}
-      </span>
-      <div className="min-w-0 flex-1">
-        <h3 className="text-sm font-medium text-foreground">{title}</h3>
-        <div className="mt-1 text-sm leading-relaxed text-muted-foreground">{children}</div>
-      </div>
-    </div>
   );
 }
 

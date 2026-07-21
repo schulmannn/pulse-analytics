@@ -228,7 +228,6 @@ async function bootCampaigns(page: Page) {
 test.describe('Кампании (desktop)', () => {
   test('создание → выбор постов → добавление → сводка → фильтр контента → удаление membership → архив', async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== 'desktop-1440', 'desktop-сценарий (bulk-таблица скрыта на мобильном)');
-    page.on('dialog', (d) => d.accept());
     await bootCampaigns(page);
 
     // ── Вкладка «Кампании»: рабочий список, empty state, создание через диалог ──
@@ -343,6 +342,8 @@ test.describe('Кампании (desktop)', () => {
       (r) => r.request().method() === 'DELETE' && /\/api\/campaigns\/\d+\/posts$/.test(new URL(r.url()).pathname),
     );
     await removedRow.getByRole('button', { name: 'Убрать' }).click();
+    // Подтверждение теперь канонный alert-dialog (был window.confirm → page.on('dialog')).
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Убрать' }).click();
     await removeDone;
     await expect(removedRow).toHaveCount(0);
     await expect(postsRows).toHaveCount(1);

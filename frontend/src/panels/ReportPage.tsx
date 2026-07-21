@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useConfirm } from '@/components/ConfirmDialogProvider';
 import type { ReactNode } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { useChannels, useDeleteReport, useHistory, useReport, useTgFull, useUpdateReport } from '@/api/queries';
@@ -122,6 +123,7 @@ function ReportDocumentBody({
   const { channelId } = useSelectedChannel();
   const { data: channelsData } = useChannels();
   const navigate = useNavigate();
+  const confirm = useConfirm();
   const updateReport = useUpdateReport(report.id);
   const deleteReport = useDeleteReport();
 
@@ -289,8 +291,12 @@ function ReportDocumentBody({
     const next = raw.trim();
     if (next && next !== report.name && next.length <= 120) updateReport.mutate({ name: next });
   };
-  const handleDelete = () => {
-    if (!window.confirm(`Удалить отчёт «${report.name}»?`)) return;
+  const handleDelete = async () => {
+    const ok = await confirm({
+      title: `Удалить отчёт «${report.name}»?`,
+      reason: 'Документ и его настройки будут удалены.',
+    });
+    if (!ok) return;
     deleteReport.mutate(report.id, { onSuccess: () => navigate('/reports', { replace: true }) });
   };
 

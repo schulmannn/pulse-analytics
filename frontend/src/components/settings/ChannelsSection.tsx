@@ -17,6 +17,7 @@ import { ChannelAvatar } from '@/components/ChannelAvatar';
 import { EmptyState } from '@/components/EmptyState';
 import { SourceStatus } from '@/components/SourceStatus';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useConfirm } from '@/components/ConfirmDialogProvider';
 import {
   BTN_DESTRUCTIVE,
   SettingsGroup,
@@ -25,6 +26,7 @@ import {
 
 /** «Каналы» — add a Telegram channel + the connected list with collector API keys. */
 export function ChannelsSection() {
+  const confirm = useConfirm();
   const { data, isLoading, isError, error, refetch } = useChannels();
   const me = useMe();
   // UID/Owner are internal identifiers — admin debugging info, not product language.
@@ -72,8 +74,16 @@ export function ChannelsSection() {
     }
   };
 
-  const handleDeleteChannel = (id: number, title: string) => {
-    if (window.confirm(`Удалить канал "${title}" из мониторинга? Это необратимо.`)) {
+  const handleDeleteChannel = async (id: number, title: string) => {
+    // Необратимое действие → type-to-confirm (паттерн GDPR-удаления аккаунта): кнопка мертва,
+    // пока имя канала не введено точно.
+    const ok = await confirm({
+      title: `Удалить канал «${title}»?`,
+      reason: 'Архивы, настройки и подключения канала будут удалены. Это необратимо.',
+      typeToConfirm: title,
+      typeToConfirmLabel: 'Название канала',
+    });
+    if (ok) {
       if (activeChannelKeysId === id) setActiveChannelKeysId(null);
       deleteChannelMutation.mutate(id);
     }
@@ -202,6 +212,7 @@ export function ChannelsSection() {
 }
 
 function ChannelKeysPanel({ channelId }: { channelId: number }) {
+  const confirm = useConfirm();
   const { data, isLoading, isError, refetch } = useChannelKeys(channelId);
   const createKeyMutation = useCreateKey(channelId);
   const [keyError, setKeyError] = useState<string | null>(null);
@@ -333,8 +344,13 @@ function ChannelKeysPanel({ channelId }: { channelId: number }) {
                 ) : (
                   <button
                     type="button"
-                    onClick={() => {
-                      if (window.confirm('Отозвать ключ? Коллектор потеряет доступ.')) revokeKeyMutation.mutate(k.id);
+                    onClick={async () => {
+                      const ok = await confirm({
+                        title: 'Отозвать ключ?',
+                        reason: 'Коллектор с этим ключом потеряет доступ немедленно.',
+                        actionLabel: 'Отозвать',
+                      });
+                      if (ok) revokeKeyMutation.mutate(k.id);
                     }}
                     disabled={revokeKeyMutation.isPending}
                     className="font-sans text-2xs text-destructive hover:underline disabled:opacity-50"

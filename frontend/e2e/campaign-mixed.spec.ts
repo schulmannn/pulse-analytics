@@ -200,7 +200,6 @@ async function boot(page: Page) {
 test.describe('Смешанная кампания TG+IG', () => {
   test('раздельные KPI · один таймлайн-эксплорер с режимами · интерактивная таблица', async ({ page }, testInfo) => {
     test.skip(testInfo.project.name === 'mobile-430', 'desktop-поверхность (интерактивная таблица скрыта на мобильном)');
-    page.on('dialog', (d) => d.accept());
     await boot(page);
     await testInfo.attach('campaign-mixed-desktop', {
       body: await page.screenshot({ fullPage: true }),
