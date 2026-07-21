@@ -23,7 +23,7 @@ const liveLayers = new Set<string>();
 let layerSeq = 0;
 
 export function useLayerBack(onClose: () => void) {
-  const idRef = useRef<string>();
+  const idRef = useRef<string | undefined>(undefined);
   if (!idRef.current) idRef.current = `layer-${++layerSeq}`;
   // The latest close handler without re-running the history effect (parents re-create closures).
   const onCloseRef = useRef(onClose);

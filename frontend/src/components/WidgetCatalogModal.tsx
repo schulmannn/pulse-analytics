@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { CATEGORY_LABEL, CATEGORY_ORDER, metricsForSource, type MetricDef, type WidgetViz } from '@/lib/widgetMetrics';
 
@@ -181,7 +181,7 @@ function VizGlyph({ viz }: { viz: WidgetViz }) {
   );
 }
 
-const VIZ_GLYPH: Partial<Record<WidgetViz, JSX.Element>> = {
+const VIZ_GLYPH: Partial<Record<WidgetViz, ReactNode>> = {
   line: <path d="M3 16l5-6 4 3 5-8 4 5" />,
   bar: (
     <>
