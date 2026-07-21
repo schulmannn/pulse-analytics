@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const { ipKeyGenerator } = require('express-rate-limit');
 const { log } = require('../lib/observability');
 const {
   CURRENT_SCHEMA_VERSION,
@@ -67,11 +68,12 @@ function registerCollectorRoutes({
 }) {
   const limiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 60,
+    limit: 60,
     keyGenerator: req => {
       const header = String(req.get('authorization') || '');
       const raw = header.startsWith('Bearer ') ? header.slice(7).trim() : String(req.get('x-api-key') || '').trim();
-      return raw ? sha256(raw) : `ip:${req.ip || ''}`;
+      // v8: IP-фоллбек нормализуется ipKeyGenerator'ом (IPv6 /56-бакет, см. composition.js).
+      return raw ? sha256(raw) : `ip:${req.ip ? ipKeyGenerator(req.ip) : 'unknown'}`;
     },
     message: { error: 'Слишком много ingest-запросов' },
   });

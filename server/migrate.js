@@ -1,6 +1,6 @@
 'use strict';
 
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 const { loadConfig, validateConfig, ConfigError } = require('./config');
 const { createDatabase } = require('./db');
 let db = null;

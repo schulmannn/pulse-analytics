@@ -4,7 +4,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 'use strict';
-const rateLimit = require('express-rate-limit');
+const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 const crypto = require('crypto');
 const { createDatabase } = require('./db');
 const { hashPassword, verifyPassword, rateLimitKey } = require('./lib/auth');
@@ -104,16 +104,18 @@ function createComposition(config, overrides = {}) {
   // fall back to a per-IP bucket. 600/15min is generous for real dashboard usage.
   const limiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 600,
+    limit: 600,
+    // v8: сырые IPv6 в ключах запрещены валидацией — ipKeyGenerator нормализует до /56-бакета
+    // (иначе ротация адресов внутри одного /64 обнуляла бы лимит). uid-ветка не меняется.
     keyGenerator: (req) =>
-      rateLimitKey(parseToken(req.headers['x-session-token']), req.ip),
+      rateLimitKey(parseToken(req.headers['x-session-token']), req.ip ? ipKeyGenerator(req.ip) : undefined),
     message: { error: 'Слишком много запросов. Попробуй через 15 минут.' },
   });
 
   // Stricter limiter for auth endpoints (brute-force / enumeration hardening).
   const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 20,
+    limit: 20,
     message: { error: 'Слишком много попыток входа. Подожди 15 минут.' },
   });
 
@@ -420,7 +422,7 @@ function createComposition(config, overrides = {}) {
   // TG routes.
   const mediaLimiter = rateLimit({
     windowMs: 60 * 1000,
-    max: 120,
+    limit: 120,
     message: { error: 'Слишком много запросов. Попробуй через минуту.' },
   });
 
