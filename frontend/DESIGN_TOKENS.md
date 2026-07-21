@@ -195,23 +195,23 @@ arbitrary `duration-[…]` / `ease-[…]` are **not** (lint hard-fails). CSS cus
 inline `style.transition` too, so JS-driven transitions use `var(--motion-glide) var(--ease-standard)`
 (see the reorder FLIP in `ChartWidget.tsx`).
 
-**Chart motion.** The full-size `LineChart` (line + area, primary and comparison) follows the
-shadcn/Recharts update model: after a period or filter change, old point coordinates are proportionally
-matched to the new point count and interpolated into the target shape. This is a real **shape morph**,
-not a clip wipe or cross-fade. The isolated `MorphingSeries` layer owns the RAF loop, so grid, axes,
-target/reference lines, labels and interaction overlays stay anchored. A stable data signature starts
-the morph only for real series changes; hover, tooltip movement, value-identical refetches and width-only
-resizes do not restart it. Rapid changes continue from the currently displayed geometry. Nulls remain
-honest gaps and never create an interpolated bridge. The dashed comparison ghost keeps its pattern
-because point geometry changes without touching `stroke-dasharray`.
+**Chart motion.** The full-size `LineChart` (line + area, primary and comparison) and shared `Sparkline`
+follow the shadcn/Recharts update model: after a period or filter change, old point coordinates are
+proportionally matched to the new point count and interpolated into the target shape. This is a real
+**shape morph**, not a clip wipe or cross-fade. Isolated `MorphingSeries` / `SparklineSeries` layers own
+the RAF loops, so axes, labels, card content and interaction overlays stay anchored. A stable data
+signature starts the morph only for real series changes; hover, tooltip movement, value-identical
+refetches and width-only resizes do not restart it. Rapid changes continue from the currently displayed
+geometry. Nulls in the full chart remain honest gaps and never create an interpolated bridge. The dashed
+comparison ghost keeps its pattern because point geometry changes without touching `stroke-dasharray`.
 Period-backed comparison surfaces retain the previous query result as placeholder data only for the
 same source, so a loading skeleton cannot unmount the old SVG before the morph starts; source changes
 still clear immediately and never flash another channel's metrics.
 
-Micro-charts (`Sparkline` / `InlineSpark` / the custom `MsMultiLine`) keep the lighter `reveal` fade
+Other micro-charts (`InlineSpark` / the custom `MsMultiLine`) keep the lighter `reveal` fade
 (`chart-fade-in`, `--motion-reveal`); bars grow from the baseline (`grow` — `scaleY` from a `fill-box`
-bottom origin) + fade. The LineChart's `data-chart-motion="morph"` CSS hook is mount-only; data updates
-reuse the same node and run the point interpolation over `--motion-morph`.
+bottom origin) + fade. The LineChart and Sparkline `data-chart-motion="morph"` CSS hook is mount-only;
+data updates reuse the same node and run point interpolation over `--motion-morph`.
 The shared `ChartTooltip` fades in and glides between points via a tokenised
 `transform` transition (`--motion-base`, never `left`/`top`) — one `[data-chart-tooltip]` rule owns it
 for default/rhea/comparison alike.

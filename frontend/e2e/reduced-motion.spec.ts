@@ -72,6 +72,31 @@ test('reduced motion: chart marks and tooltip render in their final state', asyn
   expect(Number.parseFloat(tooltipStyle.transitionDuration)).toBeLessThanOrEqual(0.001);
 });
 
+test('reduced motion: overview sparkline snaps to the new period shape without running', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await bootDemo(page, '/');
+
+  const heroCard = page.locator('section').filter({
+    has: page.getByRole('heading', { name: 'Просмотры', exact: true }),
+  });
+  const chart = heroCard.locator('svg[data-chart-kind="sparkline"]').first();
+  await chart.waitFor({ state: 'visible', timeout: 15_000 });
+  const morphGroup = chart.locator('g[data-chart-motion="morph"]').first();
+  const primary = chart.locator('[data-chart-series="primary"]');
+  // The mount-only reveal fade is off under the global net; the group starts (and stays) idle.
+  const morphAnimation = await morphGroup.evaluate((element) => getComputedStyle(element).animationName);
+  expect(morphAnimation).toBe('none');
+  await expect(morphGroup).toHaveAttribute('data-chart-morph-state', 'idle');
+  const oldPath = await primary.getAttribute('d');
+
+  const pagePeriod = page.getByRole('group', { name: 'Период', exact: true });
+  await expect(pagePeriod.getByRole('button', { name: '30д' })).toHaveAttribute('aria-pressed', 'true');
+  await pagePeriod.getByRole('button', { name: '7д', exact: true }).click();
+  // The geometry jumps straight to the target — the path changes but the morph never enters running.
+  await expect.poll(() => primary.getAttribute('d')).not.toBe(oldPath);
+  await expect(morphGroup).toHaveAttribute('data-chart-morph-state', 'idle');
+});
+
 test('reduced motion: home edit mode works and does not jiggle', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await bootDemo(page, '/home');
