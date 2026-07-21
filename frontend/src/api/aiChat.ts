@@ -100,3 +100,15 @@ export const AI_TOOL_LABELS: Record<string, string> = {
   get_campaign_summary: 'сводка кампании',
 };
 export const aiToolLabel = (name: string): string => AI_TOOL_LABELS[name] ?? name;
+
+/** Куда «проваливается» источник ответа: инструмент → поверхность с этими же данными. Карта —
+    основа «Источников» под ответом (Astryx Citation, наш вариант: цитата = живой drill). */
+export const AI_TOOL_ROUTES: Record<string, string> = {
+  get_telegram_metrics: '/analytics',
+  get_telegram_top_posts: '/posts',
+  get_instagram_metrics: '/instagram/analytics',
+  get_mentions_summary: '/mentions',
+  get_campaigns: '/posts?view=campaigns',
+  get_campaign_summary: '/posts?view=campaigns',
+};
+export const aiToolRoute = (name: string): string | null => AI_TOOL_ROUTES[name] ?? null;
