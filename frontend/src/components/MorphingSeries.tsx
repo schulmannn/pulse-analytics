@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { buildSeriesPaths, easeStandard, interpolatePoints, resamplePoints, type MorphPoint } from '@/lib/chartMorph';
+import { buildSeriesPaths, easeChartMorph, interpolatePoints, resamplePoints, type MorphPoint } from '@/lib/chartMorph';
 import { prefersReducedMotion, readMorphMs } from '@/lib/chartMotionRuntime';
 
 /**
@@ -95,7 +95,7 @@ export function MorphingSeries({
     }
     const now = performance.now();
     const t = anim.dur <= 0 ? 1 : Math.min((now - anim.start) / anim.dur, 1);
-    const e = easeStandard(t);
+    const e = easeChartMorph(t);
     const target = geomRef.current;
     const fromP = resamplePoints(anim.fromP, target.primary.length);
     const curP = interpolatePoints(fromP, target.primary, e);

@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { easeStandard, interpolatePoints, resamplePoints, type MorphPoint } from '@/lib/chartMorph';
+import { easeChartMorph, interpolatePoints, resamplePoints, type MorphPoint } from '@/lib/chartMorph';
 import { prefersReducedMotion, readMorphMs } from '@/lib/chartMotionRuntime';
 import { smoothSvgPath } from '@/lib/format';
 
@@ -84,7 +84,7 @@ export function SparklineSeries({ points, signature, color, strokeWidth, area, g
     }
     const now = performance.now();
     const t = anim.dur <= 0 ? 1 : Math.min((now - anim.start) / anim.dur, 1);
-    const e = easeStandard(t);
+    const e = easeChartMorph(t);
     const target = targetRef.current;
     const from = resamplePoints(anim.from, target.length);
     const cur = interpolatePoints(from, target, e);

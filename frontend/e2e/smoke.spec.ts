@@ -100,7 +100,7 @@ test('overview sparkline flows from one period shape into the next', async ({ pa
   const pagePeriod = page.getByRole('group', { name: 'Период', exact: true });
   await expect(pagePeriod.getByRole('button', { name: '30д' })).toHaveAttribute('aria-pressed', 'true');
   await chart.evaluate((svg) => {
-    const state = window as unknown as { __sparkFrames: Array<{ primary: string; state: string | null }> };
+    const state = window as unknown as { __sparkFrames: Array<{ primary: string; state: string | null; at: number }> };
     state.__sparkFrames = [];
     const startedAt = performance.now();
     const sample = () => {
@@ -109,27 +109,42 @@ test('overview sparkline flows from one period shape into the next', async ({ pa
       state.__sparkFrames.push({
         primary: primary?.getAttribute('d') ?? '',
         state: group?.getAttribute('data-chart-morph-state') ?? null,
+        at: performance.now() - startedAt,
       });
-      if (performance.now() - startedAt < 1100) requestAnimationFrame(sample);
+      if (performance.now() - startedAt < 1900) requestAnimationFrame(sample);
     };
     requestAnimationFrame(sample);
   });
   await pagePeriod.getByRole('button', { name: '7д', exact: true }).click();
-  await page.waitForTimeout(1150);
-  const frames = await page.evaluate(() => (window as unknown as { __sparkFrames: Array<{ primary: string; state: string | null }> }).__sparkFrames);
+  await page.waitForTimeout(1950);
+  const frames = await page.evaluate(() => (window as unknown as {
+    __sparkFrames: Array<{ primary: string; state: string | null; at: number }>;
+  }).__sparkFrames);
   const finalPath = await primarySeries.getAttribute('d');
   const sameMorphNode = await morphGroup.evaluate((element, previousElement) => element === previousElement, morphNode);
+  const firstRunningIndex = frames.findIndex((frame) => frame.state === 'running');
+  const firstIdleAfterRunning = firstRunningIndex >= 0
+    ? frames.slice(firstRunningIndex + 1).find((frame) => frame.state === 'idle')
+    : undefined;
+  const measuredMorphMs = firstRunningIndex >= 0 && firstIdleAfterRunning
+    ? firstIdleAfterRunning.at - frames[firstRunningIndex].at
+    : -1;
   const morphEvidence = JSON.stringify({
     sameMorphNode,
     states: [...new Set(frames.map((frame) => frame.state))],
     distinctPaths: new Set(frames.map((frame) => frame.primary)).size,
     pathChanged: finalPath !== oldPath,
+    measuredMorphMs,
   });
 
   // Running state occurred; the final shape settled idle and differs from the start; at least one
   // intermediate frame differs from BOTH endpoints (a genuine morph, not a snap); the morph node
   // survived (no keyed remount).
   expect(frames.some((frame) => frame.state === 'running'), morphEvidence).toBe(true);
+  // Recharts/shadcn parity: the update is intentionally visible for about 1.5s, never the old
+  // front-loaded ~700ms flash. Leave scheduling tolerance for loaded CI runners.
+  expect(measuredMorphMs, morphEvidence).toBeGreaterThanOrEqual(1300);
+  expect(measuredMorphMs, morphEvidence).toBeLessThanOrEqual(1750);
   expect(frames.at(-1)?.state).toBe('idle');
   expect(finalPath).not.toBe(oldPath);
   expect(frames.some((frame) => frame.primary.length > 0 && frame.primary !== oldPath && frame.primary !== finalPath), morphEvidence).toBe(true);

@@ -122,13 +122,13 @@ export function buildSeriesPaths(
   return { line, area };
 }
 
-// House easing (`--ease-standard`) evaluated in JS: RAF can't consume the CSS custom property, so we
-// mirror the SAME control points here — one easing shape across the CSS reveals and the JS morph. The
-// token's Bézier control points are x = (0.2, 0.3), y = (0.7, 1); endpoints fixed at 0 and 1. Keep
-// these four constants in sync with the `--ease-standard` definition in src/index.css.
-const EASE_C1X = 0.2;
-const EASE_C2X = 0.3;
-const EASE_C1Y = 0.7;
+// Recharts' default `ease` evaluated in JS: the RAF loop can't consume a CSS timing function, so we
+// mirror its cubic-bezier(0.25, 0.1, 0.25, 1) control points here. Keep these constants in sync with
+// `--ease-chart-morph` in src/index.css. This is deliberately gentler than the house settle ease,
+// whose strongly front-loaded progress made a 700ms chart morph look almost instantaneous.
+const EASE_C1X = 0.25;
+const EASE_C2X = 0.25;
+const EASE_C1Y = 0.1;
 const EASE_C2Y = 1;
 
 function bezier(c1: number, c2: number, u: number): number {
@@ -140,8 +140,8 @@ function bezierSlope(c1: number, c2: number, u: number): number {
   return 3 * v * v * c1 + 6 * v * u * (c2 - c1) + 3 * u * u * (1 - c2);
 }
 
-/** House-eased progress: maps linear time `x ∈ [0,1]` through `--ease-standard`. Clamped and monotone. */
-export function easeStandard(x: number): number {
+/** Recharts-parity progress through `--ease-chart-morph`. Clamped and monotone. */
+export function easeChartMorph(x: number): number {
   if (x <= 0) return 0;
   if (x >= 1) return 1;
   // Newton-solve bezierX(u) = x, then evaluate bezierY(u).
