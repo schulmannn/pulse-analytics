@@ -55,7 +55,7 @@ function registerBugsRoutes({
   // swallowed and acked, so a crash report can't itself become a crash.
   const crashLimiter = rateLimit({
     windowMs: 5 * 60 * 1000,
-    max: 30,
+    limit: 30,
     // requireAuth runs BEFORE this limiter, so req.user is always set (no raw-ip fallback needed).
     keyGenerator: (req) => `crash:u${req.user.uid}`,
     message: { error: 'Слишком много отчётов об ошибках.' },

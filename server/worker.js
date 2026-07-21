@@ -173,7 +173,7 @@ async function runWorker({
 }
 
 if (require.main === module) {
-  require('dotenv').config();
+  require('dotenv').config({ quiet: true });
   runWorker().catch((error) => {
     console.error('[worker] fatal:', error && error.message);
     process.exit(1);

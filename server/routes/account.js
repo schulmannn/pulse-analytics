@@ -102,7 +102,7 @@ function registerAccountRoutes({ app, requireAuth, requireSuper, db, audit, send
   // украденным токеном (bulk-экспорт, brute «угадай email» на DELETE), не от юзера.
   const accountLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 10,
+    limit: 10,
     message: { error: 'Слишком много запросов к данным аккаунта. Подожди 15 минут.' },
   });
 

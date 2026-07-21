@@ -1,6 +1,8 @@
 'use strict';
 
-const defaultFetch = require('node-fetch');
+// Нативный fetch (Node ≥18) — node-fetch выпилен; bind нужен undici (голая ссылка
+// на fetch без this у некоторых версий кидает Illegal invocation).
+const defaultFetch = (...args) => fetch(...args);
 
 const NOTION_VERSION = '2022-06-28';
 const rt = (value) =>
