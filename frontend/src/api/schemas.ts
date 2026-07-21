@@ -893,8 +893,10 @@ export const CampaignSummarySchema = z
       .object({ from: z.string().optional().nullable(), to: z.string().optional().nullable() })
       .passthrough()
       .optional(),
-    tg: CampaignPlatformSchema.optional().default({}),
-    ig: CampaignPlatformSchema.optional().default({}),
+    // zod4: prefault = v3-семантика default'а (значение прогоняется через схему: {} наполняется
+    // вложенными default'ами posts:0/available:false). Голый .default() в v4 требует OUTPUT-тип.
+    tg: CampaignPlatformSchema.optional().prefault({}),
+    ig: CampaignPlatformSchema.optional().prefault({}),
     by_source: z
       .array(
         z
@@ -940,7 +942,7 @@ export const CampaignSummarySchema = z
       })
       .passthrough()
       .optional()
-      .default({}),
+      .prefault({}),
   })
   .passthrough();
 export type CampaignSummary = z.infer<typeof CampaignSummarySchema>;

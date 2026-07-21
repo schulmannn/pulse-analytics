@@ -62,8 +62,8 @@ function normalizeWidgetOrderMap(raw: Record<string, unknown>): Record<string, s
   return out;
 }
 
-const WidgetPrefsMapSchema = z.record(z.unknown()).catch({}).transform(normalizeWidgetPrefsMap);
-const WidgetOrderMapSchema = z.record(z.unknown()).catch({}).transform(normalizeWidgetOrderMap);
+const WidgetPrefsMapSchema = z.record(z.string(), z.unknown()).catch({}).transform(normalizeWidgetPrefsMap);
+const WidgetOrderMapSchema = z.record(z.string(), z.unknown()).catch({}).transform(normalizeWidgetOrderMap);
 const HomeBlocksSchema = z.array(z.unknown()).catch([]).transform(normalizeStringArray);
 const WidgetConfigsSchema = z.array(z.unknown()).catch([]).transform(normalizeWidgets);
 
