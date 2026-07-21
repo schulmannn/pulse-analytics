@@ -1,4 +1,13 @@
-@import 'tailwindcss';
+/* Astryx pilot (десктопный IG «Контент»): заранее фиксируем порядок слоёв, чтобы
+   route-level `astryx-pilot.css` не зависел от момента загрузки. Tailwind preflight идёт до
+   Astryx, иначе он обнуляет button/input внутри компонентов. Tailwind utilities остаются после Astryx и
+   продолжают выигрывать в legacy-разметке. `tailwind-theme.css` не импортируем: он бы
+   переопределил Atlavue-утилиты text-primary/bg-* во всём приложении. */
+@layer reset, theme, base, astryx-base, astryx-theme, components, utilities;
+
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/preflight.css' layer(base);
+@import 'tailwindcss/utilities.css' layer(utilities);
 
 @plugin 'tailwindcss-animate';
 

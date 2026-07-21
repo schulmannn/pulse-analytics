@@ -1,5 +1,17 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
+// Astryx runtime primitives (scoped design-system pilot) — subpath imports for tree-shaking.
+import { Theme } from '@astryxdesign/core/theme';
+import { neutralTheme } from '@astryxdesign/theme-neutral/built';
+import { Toolbar } from '@astryxdesign/core/Toolbar';
+import { MultiSelector } from '@astryxdesign/core/MultiSelector';
+import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl';
+import { Token } from '@astryxdesign/core/Token';
+import { LayoutPanel } from '@astryxdesign/core/Layout';
+import { MetadataList, MetadataListItem } from '@astryxdesign/core/MetadataList';
+import { Text as AxText } from '@astryxdesign/core/Text';
+import { Button as AxButton } from '@astryxdesign/core/Button';
+import '@/astryx-pilot.css';
 import type { IgData } from '@/lib/useIgData';
 import type { IgPost, CampaignPostInput } from '@/api/schemas';
 import { useIgTags, useRemoveCampaignPosts } from '@/api/queries';
@@ -30,7 +42,6 @@ import { fmt } from '@/lib/format';
 import { MEDIA_TYPE_LABEL } from '@/lib/igMetrics';
 import { compareToMedian, medianDeltaLabel, periodMedian, MEDIAN_MIN_SAMPLE } from '@/lib/postMedian';
 import {
-  IG_CONTENT_SORT_COLUMNS,
   IG_SECONDARY_VIEWS,
   applyIgContentFilters,
   applyIgSecondaryView,
@@ -43,13 +54,20 @@ import {
   sortIgPosts,
   type IgContentFilters,
   type IgContentFormat,
+  type IgContentSort,
   type IgSecondaryView,
 } from '@/lib/igContentFilters';
 import { cn } from '@/lib/utils';
+import { useTheme } from '@/lib/theme';
 import { useIgScopedPosts, toCampaignItems } from '@/panels/instagram/igContentScope';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Desktop — dense Publications table + secondary analyses behind a compact tab
+// Desktop — Astryx data-workspace pilot: dense Publications table + a scoped Astryx
+// table toolbar (column visibility · density), Astryx active-filter tokens, an
+// adjacent selected-post inspector, and the secondary analyses behind a compact tab.
+// The whole surface is wrapped in a pilot-scoped <Theme> that mirrors the app's mode;
+// all business behaviour (URL-backed filters, campaign scope, selection/bulk actions,
+// sort/median semantics, empty/loading/error) is preserved.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const SECONDARY_LABEL: Record<IgSecondaryView, string> = {
@@ -68,52 +86,96 @@ const FORMAT_OPTIONS: { value: IgContentFormat; label: string }[] = [
   { value: 'reels', label: 'Reels' },
 ];
 
-
-/** Снимаемый токен активного фильтра: подпись + × (канон-пилюля, focus-видимый). */
-function FilterChip({ label, onClear, clearLabel }: { label: string; onClear: () => void; clearLabel: string }) {
-  return (
-    <span className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/5 py-0.5 pl-2.5 pr-1 text-2xs font-medium text-foreground">
-      {label}
-      <button
-        type="button"
-        aria-label={clearLabel}
-        title={clearLabel}
-        onClick={onClear}
-        className="rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40"
-      >
-        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-3 w-3" aria-hidden="true">
-          <path d="m4.5 4.5 7 7M11.5 4.5l-7 7" strokeLinecap="round" />
-        </svg>
-      </button>
-    </span>
-  );
+/** Human word for a post's honest media bucket — shared by the row badge and the inspector. */
+function igFormatLabel(post: IgPost): string {
+  const bucket = classifyIgFormat(post);
+  if (bucket === 'reels') return 'Reels';
+  if (bucket === 'carousel') return 'Карусель';
+  if (bucket === 'video') return 'Видео';
+  return MEDIA_TYPE_LABEL[post.media_type ?? ''] ?? 'Фото';
 }
 
+// The metric columns the table can show/hide + sort by. The getter is the single source of truth for
+// the value, its sort (via IG_CONTENT_SORT_COLUMNS) AND the median comparison — no divergence.
+type MetricTone = 'signal' | 'muted';
+interface MetricCol {
+  key: Exclude<IgContentSort, 'date'>;
+  label: string;
+  tone: MetricTone;
+  get: (p: IgPost) => number | null;
+  format: (v: number) => string;
+}
+const METRIC_COLS: MetricCol[] = [
+  { key: 'reach', label: 'Охват', tone: 'signal', get: (p) => (p.reach == null ? null : Number(p.reach)), format: fmt.num },
+  { key: 'views', label: 'Просмотры', tone: 'muted', get: (p) => (p.views == null ? null : Number(p.views)), format: fmt.num },
+  { key: 'interactions', label: 'Взаимодействия', tone: 'muted', get: igInteractions, format: fmt.num },
+  { key: 'saved', label: 'Сохранения', tone: 'muted', get: (p) => (p.saved == null ? null : Number(p.saved)), format: fmt.num },
+  { key: 'shares', label: 'Репосты', tone: 'muted', get: (p) => (p.shares == null ? null : Number(p.shares)), format: fmt.num },
+  { key: 'er', label: 'ER', tone: 'muted', get: igEr, format: (v) => `${v.toFixed(2)}%` },
+];
+
+/** Metric columns are optional; selection, publication identity and date stay visible. */
+const COLUMN_OPTIONS: { value: string; label: string }[] = [
+  ...METRIC_COLS.map((c) => ({ value: c.key, label: c.label })),
+];
+const ALL_COLUMN_KEYS = COLUMN_OPTIONS.map((o) => o.value);
+
+type Density = 'compact' | 'balanced' | 'spacious';
+const DENSITY_OPTIONS: { value: Density; label: string }[] = [
+  { value: 'compact', label: 'Плотно' },
+  { value: 'balanced', label: 'Обычно' },
+  { value: 'spacious', label: 'Свободно' },
+];
+// 'balanced' == the historical padding, so the default look is unchanged; compact/spacious flank it.
+const DENSITY_CELL: Record<Density, string> = { compact: 'py-2', balanced: 'py-3', spacious: 'py-4' };
+const DENSITY_HEAD: Record<Density, string> = { compact: 'py-2', balanced: 'py-2.5', spacious: 'py-3' };
+
 export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) {
+  const { theme } = useTheme();
   const [params, setParams] = useSearchParams();
+  const paramsRef = useRef(params);
   const { channelId, campaignId, campaignPostsQ, posts, formatItems } = useIgScopedPosts(ig);
 
   const filters = useMemo(() => parseIgContentFilters(params), [params]);
   const secondary = parseIgSecondaryView(params.get('more'));
   const removeMut = useRemoveCampaignPosts();
 
+  // openId → the post shown in the adjacent inspector; detailId → the full modal (explicit action).
   const [openId, setOpenId] = useState<string | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // Снимок выбора при открытии диалога (onDone чистит selection; диалог живёт до экрана результата).
   const [addItems, setAddItems] = useState<CampaignPostInput[] | null>(null);
+  // Table view state (local, not URL-backed): which columns show + row density.
+  const [visibleCols, setVisibleCols] = useState<string[]>(ALL_COLUMN_KEYS);
+  const [density, setDensity] = useState<Density>('balanced');
 
-  // Сброс выбора при смене источника/кампании/окна/фильтров (примитивные deps — window.* стабильны).
+  // Сброс выбора/инспектора при смене источника/кампании/окна/фильтров (примитивные deps — window.* стабильны).
   useEffect(() => {
     setSelected(new Set());
     setAddItems(null);
+    setOpenId(null);
+    setDetailId(null);
   }, [channelId, campaignId, ig.window.since, ig.window.until, filters.q, filters.format]);
 
-  const update = (patch: Partial<IgContentFilters>) =>
-    setParams(applyIgContentFilters(params, { ...filters, ...patch }), { replace: true });
+  useEffect(() => {
+    paramsRef.current = params;
+  }, [params]);
+
+  // React Router does not queue consecutive setSearchParams updaters like React state. Keep an
+  // eager ref so a fast «clear search → pick format» sequence composes both URL changes.
+  const commitParams = (next: URLSearchParams) => {
+    paramsRef.current = next;
+    setParams(next, { replace: true });
+  };
+  const update = (patch: Partial<IgContentFilters>) => {
+    const current = paramsRef.current;
+    commitParams(applyIgContentFilters(current, { ...parseIgContentFilters(current), ...patch }));
+  };
   const toggleSort = (key: IgContentFilters['sort']) =>
     update(key === filters.sort ? { order: filters.order === 'desc' ? 'asc' : 'desc' } : { sort: key, order: 'desc' });
   const setSecondary = (next: IgSecondaryView) =>
-    setParams(applyIgSecondaryView(params, next), { replace: true });
+    commitParams(applyIgSecondaryView(paramsRef.current, next));
 
   // Comparable-period scope = the windowed (campaign-scoped) set; medians measured over THIS set,
   // not the search subset, so a search never shifts the benchmark.
@@ -123,12 +185,25 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
 
   const medianOf = (get: (p: IgPost) => number | null) =>
     periodMedian(scope.map(get).filter((v): v is number => v != null));
-  const reachMedian = medianOf((p) => (p.reach == null ? null : Number(p.reach)));
-  const viewsMedian = medianOf((p) => (p.views == null ? null : Number(p.views)));
-  const interactionsMedian = medianOf(igInteractions);
-  const savedMedian = medianOf((p) => (p.saved == null ? null : Number(p.saved)));
-  const sharesMedian = medianOf((p) => (p.shares == null ? null : Number(p.shares)));
-  const erMedian = medianOf(igEr);
+  // One median per metric column, keyed the same as the column — used by cells AND the inspector.
+  const medians = useMemo(
+    () => Object.fromEntries(METRIC_COLS.map((c) => [c.key, medianOf(c.get)])) as Record<MetricCol['key'], number | null>,
+    // scope identity is enough — the getters are module constants.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [scope],
+  );
+  const reachMedian = medians.reach;
+
+  const shownMetricCols = METRIC_COLS.filter((c) => visibleCols.includes(c.key));
+  const cellY = DENSITY_CELL[density];
+  const headY = DENSITY_HEAD[density];
+
+  const updateVisibleColumns = (next: string[]) => {
+    setVisibleCols(next);
+    if (filters.sort !== 'date' && !next.includes(filters.sort)) {
+      update({ sort: 'date', order: 'desc' });
+    }
+  };
 
   const toggleSelect = (id: string) =>
     setSelected((prev) => {
@@ -154,7 +229,14 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
   };
 
   const openPost = openId != null ? scope.find((p) => p.id === openId) ?? null : null;
+  const detailPost = detailId != null ? scope.find((p) => p.id === detailId) ?? null : null;
   const hasContentFilters = filters.q.trim() !== '' || filters.format !== 'all';
+
+  const openFullDetail = (id: string) => setDetailId(id);
+  const inspectorAddToCampaign = (post: IgPost) => {
+    if (post.id == null || channelId == null) return;
+    setAddItems(toCampaignItems([post], channelId, new Set([post.id])));
+  };
 
   const toolbar = (
     <>
@@ -220,18 +302,61 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
           {scope.length > 0 && reachMedian == null && <span>сравнение появится от {MEDIAN_MIN_SAMPLE} публикаций</span>}
         </div>
       </div>
-      {/* Активные фильтры — снимаемые токены (Astryx Power Search/Tokenizer, канон-пилюли):
-          модель уже в URL (igContentFilters) — чипы лишь визуализируют и снимают её по одному. */}
+      {/* Astryx table toolbar — column visibility + row density. Pure Astryx children keep the
+          toolbar's roving-tabindex intact; the search/format filters above stay native for their
+          established URL/selectPill contracts. */}
+      <Toolbar
+        label="Вид таблицы"
+        size="sm"
+        gap={2}
+        startContent={<AxText type="supporting" size="2xs">Вид таблицы</AxText>}
+        endContent={
+          <>
+            <MultiSelector
+              label="Колонки"
+              placeholder="Колонки"
+              size="sm"
+              options={COLUMN_OPTIONS}
+              value={visibleCols}
+              onChange={updateVisibleColumns}
+              triggerDisplay="badges"
+              maxBadges={1}
+              hasSelectAll
+              selectAllLabel="Все показатели"
+            />
+            <SegmentedControl
+              label="Плотность строк"
+              size="sm"
+              value={density}
+              onChange={(v) => setDensity(v as Density)}
+            >
+              {DENSITY_OPTIONS.map((d) => (
+                <SegmentedControlItem key={d.value} value={d.value} label={d.label} />
+              ))}
+            </SegmentedControl>
+          </>
+        }
+      />
+      {/* Активные фильтры — снимаемые Astryx-токены; модель уже в URL (igContentFilters), токены
+          лишь визуализируют её и снимают по одному. */}
       {hasContentFilters && (
         <div className="flex flex-wrap items-center gap-1.5" data-testid="ig-filter-chips">
           {filters.q.trim() !== '' && (
-            <FilterChip label={`Поиск: «${filters.q.trim()}»`} onClear={() => update({ q: '' })} clearLabel="Убрать поиск" />
+            <Token
+              label={`Поиск: «${filters.q.trim()}»`}
+              size="sm"
+              color="blue"
+              description="Убрать поиск"
+              onRemove={() => update({ q: '' })}
+            />
           )}
           {filters.format !== 'all' && (
-            <FilterChip
+            <Token
               label={`Формат: ${FORMAT_OPTIONS.find((option) => option.value === filters.format)?.label ?? filters.format}`}
-              onClear={() => update({ format: 'all' })}
-              clearLabel="Убрать фильтр формата"
+              size="sm"
+              color="gray"
+              description="Убрать фильтр формата"
+              onRemove={() => update({ format: 'all' })}
             />
           )}
         </div>
@@ -284,21 +409,21 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
   const dialog = addItems && addItems.length > 0 && (
     <AddToCampaignDialog items={addItems} onClose={() => setAddItems(null)} onDone={() => setSelected(new Set())} />
   );
-  const detail = openPost && (
+  const detail = detailPost && (
     <IgPostDetailModal
-      post={openPost}
-      reachComparison={compareToMedian(openPost.reach == null ? null : Number(openPost.reach), reachMedian)}
+      post={detailPost}
+      reachComparison={compareToMedian(detailPost.reach == null ? null : Number(detailPost.reach), reachMedian)}
       benchmarkUnavailable={reachMedian == null}
       onAddToCampaign={
-        openPost.id != null && channelId != null
+        detailPost.id != null && channelId != null
           ? () => {
-              const items = toCampaignItems([openPost], channelId, new Set([openPost.id!]));
-              setOpenId(null);
+              const items = toCampaignItems([detailPost], channelId, new Set([detailPost.id!]));
+              setDetailId(null);
               setAddItems(items);
             }
           : undefined
       }
-      onClose={() => setOpenId(null)}
+      onClose={() => setDetailId(null)}
     />
   );
 
@@ -327,9 +452,10 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
       <IgSecondaryBody view={secondary} ig={ig} posts={scope} formatItems={formatItems} />
     </section>
   );
+  const campaignDataBlocked = campaignId != null && (campaignPostsQ.isPending || campaignPostsQ.isError);
 
-  // Self-contained shadcn card shell — the header (tabs/export + filters/actions) sits on a tinted
-  // rule above whatever body the current state renders (skeleton / error / empty / table).
+  // Self-contained shadcn card shell — the header (tabs/export + filters/table-view/actions) sits on a
+  // tinted rule above whatever body the current state renders (skeleton / error / empty / table).
   const publicationsCard = (body: ReactNode) => (
     <section
       data-ig-content-publications
@@ -340,32 +466,6 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
     </section>
   );
 
-  // Loading / error gates for the campaign-scoped fetch (matches Posts.tsx).
-  if (campaignId != null && campaignPostsQ.isPending) {
-    return (
-      <div className="space-y-8">
-        {publicationsCard(
-          <TableSkeleton rows={3} columns={5} className="px-4 py-4 sm:px-5" />,
-        )}
-      </div>
-    );
-  }
-  if (campaignId != null && campaignPostsQ.isError) {
-    return (
-      <div className="space-y-8">
-        {publicationsCard(
-          <ErrorState
-            compact
-            size="table"
-            title="Не удалось загрузить публикации кампании"
-            onRetry={() => campaignPostsQ.refetch()}
-            retrying={campaignPostsQ.isRefetching}
-          />,
-        )}
-      </div>
-    );
-  }
-
   const emptyMessage =
     campaignId != null && scope.length === 0
       ? 'В этой кампании нет публикаций из текущего источника за выбранный период.'
@@ -373,141 +473,264 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
         ? 'За выбранный период публикаций нет.'
         : 'Ничего не найдено по выбранным фильтрам.';
 
-  return (
-    <div className="space-y-8">
-      {publicationsCard(
-        rows.length === 0 ? (
-          <div data-testid="ig-content-empty">
-            <EmptyState compact size="table" title={emptyMessage} />
-          </div>
-        ) : (
-          <div className="overflow-x-auto" data-ig-content-table>
-            <table className="data-table data-table--compact text-left text-sm">
-              <thead>
-                <tr className="border-b border-border bg-muted/25 text-2xs font-medium tracking-wide text-muted-foreground">
-                  <th className="w-10 py-2.5 pl-4 pr-2 sm:pl-5">
-                    <Checkbox
-                      aria-label="Выбрать все видимые публикации"
-                      checked={allVisibleSelected}
-                      onCheckedChange={toggleAllVisible}
-                    />
+  // ─── One card body per state (loading / error / empty / table) ────────────────
+  let cardBody: ReactNode;
+  if (campaignId != null && campaignPostsQ.isPending) {
+    cardBody = <TableSkeleton rows={3} columns={5} className="px-4 py-4 sm:px-5" />;
+  } else if (campaignId != null && campaignPostsQ.isError) {
+    cardBody = (
+      <ErrorState
+        compact
+        size="table"
+        title="Не удалось загрузить публикации кампании"
+        onRetry={() => campaignPostsQ.refetch()}
+        retrying={campaignPostsQ.isRefetching}
+      />
+    );
+  } else if (rows.length === 0) {
+    cardBody = (
+      <div data-testid="ig-content-empty">
+        <EmptyState compact size="table" title={emptyMessage} />
+      </div>
+    );
+  } else {
+    cardBody = (
+      <div className="overflow-x-auto" data-ig-content-table>
+        <table className="data-table data-table--compact text-left text-sm" data-ig-content-density={density}>
+          <thead>
+            <tr className={cn('border-b border-border bg-muted/25 text-2xs font-medium tracking-wide text-muted-foreground')}>
+              <th className={cn('w-10 pl-4 pr-2 sm:pl-5', headY)}>
+                <Checkbox
+                  aria-label="Выбрать все видимые публикации"
+                  checked={allVisibleSelected}
+                  onCheckedChange={toggleAllVisible}
+                />
+              </th>
+              <th className={cn('w-12 pl-0 pr-3 text-center', headY)}></th>
+              <th className={cn('min-w-[240px] px-3', headY)}>Публикация</th>
+              {shownMetricCols.map((c) => {
+                const active = c.key === filters.sort;
+                return (
+                  <th
+                    key={c.key}
+                    aria-sort={active ? (filters.order === 'desc' ? 'descending' : 'ascending') : undefined}
+                    className={cn('w-[104px] px-3 text-right', headY)}
+                  >
+                    <SortButton label={c.label} active={active} order={filters.order} onClick={() => toggleSort(c.key)} />
                   </th>
-                  <th className="w-12 py-2.5 pl-0 pr-3 text-center"></th>
-                  <th className="min-w-[240px] px-3 py-2.5">Публикация</th>
-                  {IG_CONTENT_SORT_COLUMNS.filter((c) => c.key !== 'date').map((c) => {
-                    const active = c.key === filters.sort;
-                    return (
-                      <th
-                        key={c.key}
-                        aria-sort={active ? (filters.order === 'desc' ? 'descending' : 'ascending') : undefined}
-                        className="w-[104px] px-3 py-2.5 text-right"
+                );
+              })}
+              <th
+                aria-sort={filters.sort === 'date' ? (filters.order === 'desc' ? 'descending' : 'ascending') : undefined}
+                className={cn('w-[96px] px-3 pr-4 text-right sm:pr-5', headY)}
+              >
+                <SortButton label="Дата" active={filters.sort === 'date'} order={filters.order} onClick={() => toggleSort('date')} />
+              </th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {rows.map((post, idx) => {
+              const clickable = post.id != null;
+              const isOpen = post.id != null && post.id === openId;
+              const isSelected = post.id != null && selected.has(post.id);
+              return (
+                <tr
+                  key={post.id ?? idx}
+                  data-ig-content-row
+                  data-ig-content-open={isOpen ? '' : undefined}
+                  data-ig-content-selected={isSelected ? '' : undefined}
+                  onClick={clickable ? () => setOpenId(post.id!) : undefined}
+                  className={cn(
+                    'group transition-colors',
+                    clickable && 'cursor-pointer',
+                    isOpen
+                      ? 'bg-primary/10'
+                      : isSelected
+                        ? 'bg-primary/5 hover:bg-primary/8'
+                        : 'hover:bg-muted/40',
+                  )}
+                >
+                  <td className={cn('pl-4 pr-2 sm:pl-5', cellY)} onClick={(e) => e.stopPropagation()}>
+                    {post.id != null && (
+                      <Checkbox
+                        aria-label="Выбрать публикацию"
+                        checked={selected.has(post.id)}
+                        onCheckedChange={() => toggleSelect(post.id!)}
+                        data-testid="ig-post-select"
+                      />
+                    )}
+                  </td>
+                  <td className={cn('pl-0 pr-3 text-center', cellY)}>
+                    <IgPostThumb post={post} />
+                  </td>
+                  <td className={cn('px-3', cellY)}>
+                    {clickable ? (
+                      <button
+                        type="button"
+                        onClick={() => setOpenId(post.id!)}
+                        data-ig-content-open-trigger
+                        className="block w-full max-w-sm space-y-1 rounded text-left focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45 md:max-w-md lg:max-w-lg"
                       >
-                        <SortButton label={c.label} active={active} order={filters.order} onClick={() => toggleSort(c.key)} />
-                      </th>
+                        <span className={cn('line-clamp-1 font-medium', post.caption ? 'text-foreground' : 'italic text-muted-foreground')}>
+                          {post.caption || 'Без подписи'}
+                        </span>
+                        <span className="mt-1 flex items-center gap-2">
+                          <IgFormatTag post={post} />
+                        </span>
+                      </button>
+                    ) : (
+                      <div className="max-w-sm space-y-1 md:max-w-md lg:max-w-lg">
+                        <div className={cn('line-clamp-1 font-medium', post.caption ? 'text-foreground' : 'italic text-muted-foreground')}>
+                          {post.caption ? <RichText text={post.caption} /> : 'Без подписи'}
+                        </div>
+                        <div className="mt-1 flex items-center gap-2"><IgFormatTag post={post} /></div>
+                      </div>
+                    )}
+                  </td>
+                  {shownMetricCols.map((c) => {
+                    return (
+                      <td key={c.key} className={cn('px-3 text-right', cellY)}>
+                        <MedianCell value={c.get(post)} median={medians[c.key]} tone={c.tone} format={c.format} />
+                      </td>
                     );
                   })}
-                  <th
-                    aria-sort={filters.sort === 'date' ? (filters.order === 'desc' ? 'descending' : 'ascending') : undefined}
-                    className="w-[96px] px-3 py-2.5 pr-4 text-right sm:pr-5"
-                  >
-                    <SortButton label="Дата" active={filters.sort === 'date'} order={filters.order} onClick={() => toggleSort('date')} />
-                  </th>
+                  <td className={cn('px-3 pr-4 text-right text-xs tabular-nums text-muted-foreground sm:pr-5', cellY)}>
+                    {post.timestamp ? fmt.date(post.timestamp) : <span className="text-muted-foreground/40">—</span>}
+                  </td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {rows.map((post, idx) => {
-                  const clickable = post.id != null;
-                  const isOpen = post.id != null && post.id === openId;
-                  const isSelected = post.id != null && selected.has(post.id);
-                  return (
-                    <tr
-                      key={post.id ?? idx}
-                      data-ig-content-row
-                      data-ig-content-open={isOpen ? '' : undefined}
-                      data-ig-content-selected={isSelected ? '' : undefined}
-                      onClick={clickable ? () => setOpenId(post.id!) : undefined}
-                      className={cn(
-                        'group transition-colors',
-                        clickable && 'cursor-pointer',
-                        isOpen
-                          ? 'bg-primary/10'
-                          : isSelected
-                            ? 'bg-primary/5 hover:bg-primary/8'
-                            : 'hover:bg-muted/40',
-                      )}
-                    >
-                      <td className="py-3 pl-4 pr-2 sm:pl-5" onClick={(e) => e.stopPropagation()}>
-                        {post.id != null && (
-                          <Checkbox
-                            aria-label="Выбрать публикацию"
-                            checked={selected.has(post.id)}
-                            onCheckedChange={() => toggleSelect(post.id!)}
-                            data-testid="ig-post-select"
-                          />
-                        )}
-                      </td>
-                      <td className="py-3 pl-0 pr-3 text-center">
-                        <IgPostThumb post={post} />
-                      </td>
-                      <td className="px-3 py-3">
-                        {clickable ? (
-                          <button
-                            type="button"
-                            onClick={() => setOpenId(post.id!)}
-                            data-ig-content-open-trigger
-                            className="block w-full max-w-sm space-y-1 rounded text-left focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/45 md:max-w-md lg:max-w-lg"
-                          >
-                            <span className={cn('line-clamp-1 font-medium', post.caption ? 'text-foreground' : 'italic text-muted-foreground')}>
-                              {post.caption || 'Без подписи'}
-                            </span>
-                            <span className="mt-1 flex items-center gap-2">
-                              <IgFormatTag post={post} />
-                            </span>
-                          </button>
-                        ) : (
-                          <div className="max-w-sm space-y-1 md:max-w-md lg:max-w-lg">
-                            <div className={cn('line-clamp-1 font-medium', post.caption ? 'text-foreground' : 'italic text-muted-foreground')}>
-                              {post.caption ? <RichText text={post.caption} /> : 'Без подписи'}
-                            </div>
-                            <div className="mt-1 flex items-center gap-2"><IgFormatTag post={post} /></div>
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-3 py-3 text-right">
-                        <MedianCell value={post.reach == null ? null : Number(post.reach)} median={reachMedian} tone="signal" format={fmt.num} />
-                      </td>
-                      <td className="px-3 py-3 text-right">
-                        <MedianCell value={post.views == null ? null : Number(post.views)} median={viewsMedian} tone="muted" format={fmt.num} />
-                      </td>
-                      <td className="px-3 py-3 text-right">
-                        <MedianCell value={igInteractions(post)} median={interactionsMedian} tone="muted" format={fmt.num} />
-                      </td>
-                      <td className="px-3 py-3 text-right">
-                        <MedianCell value={post.saved == null ? null : Number(post.saved)} median={savedMedian} tone="muted" format={fmt.num} />
-                      </td>
-                      <td className="px-3 py-3 text-right">
-                        <MedianCell value={post.shares == null ? null : Number(post.shares)} median={sharesMedian} tone="muted" format={fmt.num} />
-                      </td>
-                      <td className="px-3 py-3 text-right">
-                        <MedianCell value={igEr(post)} median={erMedian} tone="muted" format={(v) => `${v.toFixed(2)}%`} />
-                      </td>
-                      <td className="px-3 py-3 pr-4 text-right text-xs tabular-nums text-muted-foreground sm:pr-5">
-                        {post.timestamp ? fmt.date(post.timestamp) : <span className="text-muted-foreground/40">—</span>}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        ),
-      )}
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
 
-      {secondaryBlock}
+  return (
+    <div className="space-y-8">
+      <Theme theme={neutralTheme} mode={theme}>
+        <div
+          className={cn(
+            'grid gap-6 lg:items-start',
+            openPost && 'lg:grid-cols-[minmax(0,1fr)_minmax(320px,360px)]',
+          )}
+        >
+          <div className="min-w-0">{publicationsCard(cardBody)}</div>
+          {openPost && (
+            <IgPostInspector
+              post={openPost}
+              reachMedian={reachMedian}
+              campaignScoped={campaignId != null}
+              canCampaign={channelId != null}
+              onClose={() => setOpenId(null)}
+              onOpenFull={openFullDetail}
+              onAddToCampaign={inspectorAddToCampaign}
+            />
+          )}
+        </div>
+      </Theme>
+
+      {!campaignDataBlocked && secondaryBlock}
       {detail}
       {dialog}
     </div>
   );
+}
+
+/**
+ * The adjacent desktop inspector — a focused, read-first summary of the row selected in the table,
+ * built from Astryx LayoutPanel + MetadataList + Text + Token + Button. It never re-fetches or
+ * duplicates business logic: it reads the already-loaded post and the period reach-median, and the
+ * full IgPostDetailModal stays one explicit «Открыть подробнее» click away.
+ */
+function IgPostInspector({
+  post,
+  reachMedian,
+  campaignScoped,
+  canCampaign,
+  onClose,
+  onOpenFull,
+  onAddToCampaign,
+}: {
+  post: IgPost;
+  reachMedian: number | null;
+  campaignScoped: boolean;
+  canCampaign: boolean;
+  onClose: () => void;
+  onOpenFull: (id: string) => void;
+  onAddToCampaign: (post: IgPost) => void;
+}) {
+  return (
+    <LayoutPanel
+      label="Детали выбранной публикации"
+      role="complementary"
+      hasDivider
+      padding={4}
+      width="100%"
+    >
+      <div className="space-y-4" data-ig-content-inspector data-ig-content-inspector-open="">
+          <div className="flex items-center justify-between gap-3">
+            <AxText type="label">Детали публикации</AxText>
+            <AxButton label="Закрыть" variant="ghost" size="sm" onClick={onClose} />
+          </div>
+          <div className="flex items-start gap-3">
+            <IgPostThumb post={post} />
+            <div className="min-w-0 flex-1 space-y-1">
+              <AxText type="label" maxLines={2}>
+                {post.caption || 'Без подписи'}
+              </AxText>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Token label={igFormatLabel(post)} size="sm" color="gray" />
+                {post.timestamp && <AxText type="supporting" size="2xs">{fmt.date(post.timestamp)}</AxText>}
+              </div>
+            </div>
+          </div>
+
+          <InspectorBenchmark post={post} reachMedian={reachMedian} />
+
+          <MetadataList title="Показатели" columns="single" label={{ position: 'start' }}>
+            <MetadataListItem label="Охват">{fmt.num(post.reach)}</MetadataListItem>
+            <MetadataListItem label="Просмотры">{fmt.num(post.views)}</MetadataListItem>
+            <MetadataListItem label="Взаимодействия">{fmt.num(igInteractions(post))}</MetadataListItem>
+            <MetadataListItem label="ER">{igEr(post) != null ? `${igEr(post)!.toFixed(2)}%` : '—'}</MetadataListItem>
+            <MetadataListItem label="Сохранения">{fmt.num(post.saved)}</MetadataListItem>
+            <MetadataListItem label="Репосты">{fmt.num(post.shares)}</MetadataListItem>
+          </MetadataList>
+
+          <div className="flex flex-wrap gap-2">
+            {post.id != null && (
+              <AxButton
+                label="Открыть подробнее"
+                variant="primary"
+                size="sm"
+                onClick={() => onOpenFull(post.id!)}
+              />
+            )}
+            {!campaignScoped && canCampaign && post.id != null && (
+              <AxButton
+                label="Добавить в кампанию"
+                variant="secondary"
+                size="sm"
+                onClick={() => onAddToCampaign(post)}
+              />
+            )}
+          </div>
+      </div>
+    </LayoutPanel>
+  );
+}
+
+/** Honest reach-vs-median line for the inspector — same semantics as the table cell and the modal. */
+function InspectorBenchmark({ post, reachMedian }: { post: IgPost; reachMedian: number | null }) {
+  const cmp = compareToMedian(post.reach == null ? null : Number(post.reach), reachMedian);
+  if (!cmp) {
+    if (reachMedian == null) {
+      return <AxText type="supporting" size="2xs">Недостаточно публикаций для сравнения с медианой периода</AxText>;
+    }
+    return null;
+  }
+  const color = cmp.dir === 'above' ? 'green' : cmp.dir === 'below' ? 'red' : 'gray';
+  return <Token label={`Охват ${medianDeltaLabel(cmp)}`} size="sm" color={color} />;
 }
 
 /** The selected secondary analysis — one block at a time (the desktop table is the hero). */
@@ -582,20 +805,12 @@ function SortButton({ label, active, order, onClick }: { label: string; active: 
 
 /** Format word for the caption subline — the honest bucket the search/filter uses, made legible. */
 function IgFormatTag({ post }: { post: IgPost }) {
-  const label =
-    classifyIgFormat(post) === 'reels'
-      ? 'Reels'
-      : classifyIgFormat(post) === 'carousel'
-        ? 'Карусель'
-        : classifyIgFormat(post) === 'video'
-          ? 'Видео'
-          : MEDIA_TYPE_LABEL[post.media_type ?? ''] ?? 'Фото';
   return (
     <span
       data-ig-content-format
       className="inline-flex rounded-full border border-border bg-background px-1.5 py-0.5 text-2xs leading-none text-muted-foreground"
     >
-      {label}
+      {igFormatLabel(post)}
     </span>
   );
 }

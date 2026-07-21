@@ -112,6 +112,7 @@ test.describe('Instagram Контент 2.0 (desktop)', () => {
     await expect(page).toHaveURL(/q=launch/);
     await expect(rows).toHaveCount(2);
     await page.getByLabel('Поиск по публикациям').fill('');
+    await expect(page).not.toHaveURL(/q=/);
 
     // Формат: Reels — только медиа-продукт REELS (не любое видео).
     await selectPill(page.getByTestId('ig-format-filter'), { value: 'reels' });
@@ -184,22 +185,55 @@ test.describe('Instagram Контент 2.0 (desktop)', () => {
     expect(noPageOverflow).toBeTruthy();
     await testInfo.attach('ig-content-card-midwidth', { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' });
 
-    // Открытое состояние строки помечается data-hook и открывает модалку.
+    // Открытое состояние строки помечается data-hook и раскрывает СОСЕДНИЙ Astryx-инспектор
+    // (не модалку). Полная модалка остаётся явным действием из инспектора.
     await rows.first().locator('[data-ig-content-open-trigger]').click();
     await expect(rows.first()).toHaveAttribute('data-ig-content-open', '');
+    await expect(page.locator('[data-ig-content-inspector-open]')).toBeVisible();
+    await expect(page.getByRole('dialog', { name: 'Детали публикации' })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Открыть подробнее' }).click();
     await expect(page.getByRole('dialog', { name: 'Детали публикации' })).toBeVisible();
   });
 
-  test('строка таблицы открывает детальную модалку публикации', async ({ page }, testInfo) => {
+  test('строка раскрывает соседний инспектор; полная модалка — явным действием', async ({ page }, testInfo) => {
     await boot(page);
     await page.goto('/instagram/content');
-    await page.locator('table tbody tr').first().getByRole('button').click();
+    await page.locator('table tbody tr').first().locator('[data-ig-content-open-trigger]').click();
+    const inspector = page.locator('[data-ig-content-inspector-open]');
+    await expect(inspector).toBeVisible();
+    await expect(inspector.getByText('Взаимодействия')).toBeVisible();
+    await testInfo.attach('ig-content-inspector-dark-desktop', { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' });
+
+    // «Открыть подробнее» поднимает полную модалку поверх инспектора.
+    await page.getByRole('button', { name: 'Открыть подробнее' }).click();
     const detail = page.getByRole('dialog', { name: 'Детали публикации' });
     await expect(detail).toBeVisible();
     await expect(detail.getByText('Взаимодействия')).toBeVisible();
-    await testInfo.attach('ig-content-detail-dark-desktop', { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' });
     await page.keyboard.press('Escape');
     await expect(detail).toBeHidden();
+    // Инспектор остаётся раскрытым после закрытия модалки.
+    await expect(inspector).toBeVisible();
+  });
+
+  test('Astryx-панель вида: плотность строк и видимость колонок', async ({ page }) => {
+    await boot(page);
+    await page.goto('/instagram/content');
+    const table = page.locator('[data-ig-content-table] table');
+
+    // Плотность — Astryx SegmentedControl (radiogroup). Дефолт «Обычно», переключаем на «Плотно».
+    await expect(table).toHaveAttribute('data-ig-content-density', 'balanced');
+    await page.getByRole('radio', { name: 'Плотно' }).click();
+    await expect(table).toHaveAttribute('data-ig-content-density', 'compact');
+
+    // Видимость колонок — Astryx MultiSelector. «Просмотры» видна по умолчанию, скрываем её.
+    await expect(page.getByRole('columnheader', { name: /Просмотры/ })).toBeVisible();
+    await page.getByRole('combobox', { name: 'Колонки' }).click();
+    await page.getByRole('option', { name: 'Просмотры' }).click();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('columnheader', { name: /Просмотры/ })).toHaveCount(0);
+    await expect(page.getByRole('columnheader', { name: /Дата/ })).toBeVisible();
+    // Скрытие колонки не меняет число строк.
+    await expect(page.locator('table tbody tr')).toHaveCount(6);
   });
 
   test('активный фильтр кампании позволяет убрать membership из таблицы (пост не удаляется)', async ({ page }) => {
