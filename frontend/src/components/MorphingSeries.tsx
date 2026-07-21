@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { buildSeriesPaths, easeStandard, interpolatePoints, resamplePoints, type MorphPoint } from '@/lib/chartMorph';
+import { prefersReducedMotion, readMorphMs } from '@/lib/chartMotionRuntime';
 
 /**
  * The UPDATE-morph data layer for {@link LineChart}. Isolated in its OWN component so the RAF loop's
@@ -43,18 +44,6 @@ function samePoints(a: ReadonlyArray<MorphPoint> | null, b: ReadonlyArray<MorphP
 
 function sameGeometry(a: MorphGeom, b: MorphGeom): boolean {
   return a.baseY === b.baseY && samePoints(a.primary, b.primary) && samePoints(a.ghost, b.ghost);
-}
-
-/** Morph duration — mirrors the `--motion-morph` token (RAF can't read the CSS var mid-loop). */
-const MORPH_MS_FALLBACK = 700;
-function readMorphMs(): number {
-  if (typeof window === 'undefined') return MORPH_MS_FALLBACK;
-  const raw = getComputedStyle(document.documentElement).getPropertyValue('--motion-morph');
-  const ms = Number.parseFloat(raw);
-  return Number.isFinite(ms) && ms > 0 ? ms : MORPH_MS_FALLBACK;
-}
-function prefersReducedMotion(): boolean {
-  return typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 }
 
 export function MorphingSeries({

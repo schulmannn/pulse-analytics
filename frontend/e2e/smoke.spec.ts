@@ -74,6 +74,70 @@ test('overview has one authoritative top-bar period and no card-local controls',
   await expect.poll(() => contextCard.innerText()).not.toBe(contextBefore);
 });
 
+test('overview sparkline flows from one period shape into the next', async ({ page }, testInfo) => {
+  // Desktop-only for a deterministic single-frame budget; the Sparkline morph itself is viewport
+  // agnostic (its geometry lives in a fixed 200×32 viewBox). Mirrors the LineChart period-morph
+  // contract (interactions.spec) but for the inline sparkline the Overview cards use.
+  test.skip(testInfo.project.name !== 'desktop-1440', 'Desktop-only sparkline morph budget');
+  await bootDemo(page, '/');
+
+  // The «Просмотры» hero card carries an area sparkline over the page-period views series.
+  const heroCard = page.locator('section').filter({
+    has: page.getByRole('heading', { name: 'Просмотры', exact: true }),
+  });
+  const chart = heroCard.locator('svg[data-chart-kind="sparkline"]').first();
+  await chart.waitFor({ state: 'visible', timeout: 15_000 });
+  const primarySeries = chart.locator('[data-chart-series="primary"]');
+  const morphGroup = chart.locator('g[data-chart-motion="morph"]').first();
+  await expect(morphGroup).toHaveAttribute('data-chart-morph-state', 'idle');
+  const morphNode = await morphGroup.elementHandle();
+  if (!morphNode) throw new Error('sparkline morph group has no element handle');
+  const oldPath = await primarySeries.getAttribute('d');
+  if (!oldPath) throw new Error('sparkline path is empty before period change');
+
+  // The Overview defaults to 30д. Sample every browser frame while switching to the shorter 7д
+  // window so a fast polling client cannot miss the running state.
+  const pagePeriod = page.getByRole('group', { name: 'Период', exact: true });
+  await expect(pagePeriod.getByRole('button', { name: '30д' })).toHaveAttribute('aria-pressed', 'true');
+  await chart.evaluate((svg) => {
+    const state = window as unknown as { __sparkFrames: Array<{ primary: string; state: string | null }> };
+    state.__sparkFrames = [];
+    const startedAt = performance.now();
+    const sample = () => {
+      const group = svg.querySelector('g[data-chart-motion="morph"]');
+      const primary = svg.querySelector('[data-chart-series="primary"]');
+      state.__sparkFrames.push({
+        primary: primary?.getAttribute('d') ?? '',
+        state: group?.getAttribute('data-chart-morph-state') ?? null,
+      });
+      if (performance.now() - startedAt < 1100) requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  });
+  await pagePeriod.getByRole('button', { name: '7д', exact: true }).click();
+  await page.waitForTimeout(1150);
+  const frames = await page.evaluate(() => (window as unknown as { __sparkFrames: Array<{ primary: string; state: string | null }> }).__sparkFrames);
+  const finalPath = await primarySeries.getAttribute('d');
+  const sameMorphNode = await morphGroup.evaluate((element, previousElement) => element === previousElement, morphNode);
+  const morphEvidence = JSON.stringify({
+    sameMorphNode,
+    states: [...new Set(frames.map((frame) => frame.state))],
+    distinctPaths: new Set(frames.map((frame) => frame.primary)).size,
+    pathChanged: finalPath !== oldPath,
+  });
+
+  // Running state occurred; the final shape settled idle and differs from the start; at least one
+  // intermediate frame differs from BOTH endpoints (a genuine morph, not a snap); the morph node
+  // survived (no keyed remount).
+  expect(frames.some((frame) => frame.state === 'running'), morphEvidence).toBe(true);
+  expect(frames.at(-1)?.state).toBe('idle');
+  expect(finalPath).not.toBe(oldPath);
+  expect(frames.some((frame) => frame.primary.length > 0 && frame.primary !== oldPath && frame.primary !== finalPath), morphEvidence).toBe(true);
+  expect(frames.at(-1)?.primary).toBe(finalPath);
+  expect(sameMorphNode).toBe(true);
+  await expect(morphGroup).toHaveAttribute('data-chart-morph-state', 'idle');
+});
+
 test('desktop sidebar glides between open and rail without moving the icon axis', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop-1440', 'desktop sidebar motion');
   await page.addInitScript(() => localStorage.setItem('pulse_sidebar', 'open'));

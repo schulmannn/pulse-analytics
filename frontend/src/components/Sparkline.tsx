@@ -1,7 +1,8 @@
-import { useId, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import type { MouseEvent } from 'react';
-import { sparkAreaPath, sparkPath } from '@/lib/format';
 import { seriesMotionKey } from '@/lib/chartMotion';
+import type { MorphPoint } from '@/lib/chartMorph';
+import { SparklineSeries } from '@/components/SparklineSeries';
 import { cn } from '@/lib/utils';
 
 interface SparklineProps {
@@ -33,6 +34,25 @@ const VBW = 200;
 const VBH = 32;
 
 /**
+ * Target geometry in viewBox coordinates — the SAME px/py mapping {@link sparkPath} uses (min/max
+ * normalisation, PAD inset), so a settled morph frame is byte-identical to the static render. The
+ * viewBox is fixed (200×32); geometry depends only on the values, never on container size, so a
+ * resize can't change these points and never restarts the morph.
+ */
+function computeSparkPoints(values: number[]): MorphPoint[] {
+  const n = values.length;
+  if (n === 0) return [];
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const step = (VBW - PAD * 2) / Math.max(n - 1, 1);
+  return values.map((v, i) => ({
+    x: PAD + i * step,
+    y: VBH - PAD - ((v - min) / range) * (VBH - PAD * 2),
+  }));
+}
+
+/**
  * Tiny inline trend line. `area` adds a gradient fill that fades to transparent (featured
  * KPIs); compact tiles use just the stroke. When `interactive`, it gains a peak marker, a
  * current-value dot, and a hover dot + guide that (with `caption`) surfaces the date/value/Δ
@@ -52,11 +72,16 @@ export function Sparkline({
   // Strip colons from useId — they're valid in ids but break SVG url(#…) refs in some browsers.
   const gradientId = `sl${useId().replace(/:/g, '')}`;
   const [hover, setHover] = useState<number | null>(null);
+  // Target morph geometry, memoised on the VALUES reference: a hover rerender keeps the same `values`
+  // ref (hover is local state — the parent doesn't re-render), so the morph layer sees a stable
+  // `points` and never restarts; a period/filter swap hands down a new array → new geometry → morph.
+  const points = useMemo(() => computeSparkPoints(values ?? []), [values]);
   if (!values || values.length < 2) return null;
 
-  // Stable data signature for the reveal (see index.css «Chart motion») — the line/area fade replays
-  // when the series changes, never on hover (separate state) or a container resize (geometry is % of
-  // the viewBox, not part of this key).
+  // Stable DATA signature (see index.css «Chart motion») — a change (period / filter swap, longer /
+  // shorter window) tells the morph layer to flow from the old shape into the new one; hover (separate
+  // state), a container resize (viewBox geometry is size-independent) and a value-identical refetch all
+  // yield the SAME key, so none of them restart the morph.
   const motionKey = seriesMotionKey(values);
 
   const n = values.length;
@@ -124,29 +149,27 @@ export function Sparkline({
           preserveAspectRatio="none"
           className="h-full w-full"
           aria-hidden="true"
+          data-chart-kind="sparkline"
         >
-          <g key={motionKey} data-chart-motion="reveal">
-            {area && (
-              <>
-                <defs>
-                  <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={color} stopOpacity="0.32" />
-                    <stop offset="100%" stopColor={color} stopOpacity="0" />
-                  </linearGradient>
-                </defs>
-                <path d={sparkAreaPath(values)} fill={`url(#${gradientId})`} />
-              </>
-            )}
-            <path
-              d={sparkPath(values)}
-              fill="none"
-              stroke={color}
-              strokeWidth={strokeWidth}
-              strokeLinejoin="round"
-              strokeLinecap="round"
-              vectorEffect="non-scaling-stroke"
-            />
-          </g>
+          {area && (
+            <defs>
+              <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={color} stopOpacity="0.32" />
+                <stop offset="100%" stopColor={color} stopOpacity="0" />
+              </linearGradient>
+            </defs>
+          )}
+          {/* The line/area MORPH from the previous shape into the new one on a data change (same as the
+              full LineChart) instead of remounting + fading — one stable node whose point geometry
+              interpolates. The mount-only reveal fade lives on data-chart-motion="morph" in index.css. */}
+          <SparklineSeries
+            points={points}
+            signature={motionKey}
+            color={color}
+            strokeWidth={strokeWidth}
+            area={area}
+            gradientId={gradientId}
+          />
         </svg>
 
         {interactive && (

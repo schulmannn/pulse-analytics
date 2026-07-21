@@ -235,7 +235,7 @@
     --motion-glide: 260ms;    /* FLIP reorder glide · icon stroke draw-on                  */
     --motion-reveal: 300ms;   /* larger reveals (add-widget rise)                          */
     --motion-entrance: 350ms; /* card mount rise                                           */
-    --motion-morph: 700ms;    /* LineChart UPDATE morph (period→period shape flow, RAF)    */
+    --motion-morph: 700ms;    /* chart UPDATE morph (period→period shape flow, RAF)        */
   }
 
   /* ── Chart series roles (semantic layer over the deep/muted palette) ────────────────────────────
@@ -501,17 +501,16 @@
   }
 
   /* ── Chart motion (token-driven; see frontend/DESIGN_TOKENS.md «Motion») ───────────────────────
-     Micro-charts (sparkline / inline / multi-line) softly reveal on mount and whenever the series
-     changes: the animated group carries a stable DATA-derived React key, so a resize (new geometry,
-     SAME key) re-renders in place and never replays, while a period / filter swap (new key) remounts
-     and does. Hover, tooltip movement and ResizeObserver width changes are all excluded from that key.
-     Bars grow from the baseline (scaleY from a fill-box bottom origin) + fade.
+     Full-size LineChart and Sparkline line/area marks MORPH instead of remounting: on a period/filter
+     change their paths interpolate point geometry from the old shape to the new one through isolated
+     RAF layers (MorphingSeries / SparklineSeries). Different point counts are proportionally matched,
+     giving the shadcn/Recharts UPDATE read — NOT a clip wipe or cross-fade. Hover, tooltip movement,
+     ResizeObserver changes and value-identical refetches do not restart the morph. InlineSpark and
+     custom multi-line micro-charts retain the lighter keyed reveal; bars grow from the baseline
+     (scaleY from a fill-box bottom origin) + fade.
 
-     The full-size LineChart line/area MORPHS instead of remounting: on a period/filter change the
-     primary + comparison paths interpolate their point geometry from the old shape to the new one via
-     a localized RAF loop in MorphingSeries (shape flow, the shadcn/Recharts UPDATE read — NOT a clip
-     wipe). That morph is JS-driven; the only CSS here is a one-shot MOUNT reveal fade on the morph
-     group (`morph`), which never replays on an update (no re-mount). The comparison stroke is
+     Morph animation is JS-driven; the only CSS here is a one-shot MOUNT reveal fade on the stable
+     morph group (`morph`), which never replays on an update (no re-mount). The comparison stroke is
      untouched — we morph point geometry, never stroke-dasharray, so a dashed series can never turn
      solid or lose its pattern; the dashed ghost even carries its dim on strokeOpacity so the fade's
      opacity channel can't brighten it. The shared tooltip fades on mount and glides between points via
@@ -531,8 +530,8 @@
   [data-chart-motion='reveal'] {
     animation: chart-fade-in var(--motion-reveal) var(--ease-standard) both;
   }
-  /* MOUNT-only reveal for the morphing line/area group. Updates are the JS point-interpolation morph
-     (MorphingSeries), which does not re-mount this node, so this fade runs once on entrance only. */
+  /* MOUNT-only reveal for morphing line/area groups. Updates are JS point-interpolation morphs
+     (MorphingSeries / SparklineSeries), which keep this node mounted, so the fade runs only once. */
   [data-chart-motion='morph'] {
     animation: chart-fade-in var(--motion-reveal) var(--ease-standard) both;
   }

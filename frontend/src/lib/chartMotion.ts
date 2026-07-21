@@ -1,6 +1,6 @@
 /**
- * Stable, DATA-derived signature for chart data-change motion (line/area point morph,
- * sparkline reveal and bar grow — see index.css «Chart motion»).
+ * Stable, DATA-derived signature for chart data-change motion (full-size and sparkline point
+ * morphs, plus bar grow — see index.css «Chart motion»).
  *
  * Keyed on the SERIES CONTENT — the primary values plus the shown comparison — and NOTHING else:
  * container width, hover, tooltip position and referential identity are all deliberately absent, so
