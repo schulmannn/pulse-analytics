@@ -1,6 +1,7 @@
 import { useId, useState } from 'react';
 import type { MouseEvent } from 'react';
 import { sparkAreaPath, sparkPath } from '@/lib/format';
+import { seriesMotionKey } from '@/lib/chartMotion';
 import { cn } from '@/lib/utils';
 
 interface SparklineProps {
@@ -56,7 +57,7 @@ export function Sparkline({
   // Stable data signature for the reveal (see index.css «Chart motion») — the line/area fade replays
   // when the series changes, never on hover (separate state) or a container resize (geometry is % of
   // the viewBox, not part of this key).
-  const motionKey = values.join(',');
+  const motionKey = seriesMotionKey(values);
 
   const n = values.length;
   const min = Math.min(...values);

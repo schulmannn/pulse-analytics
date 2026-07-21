@@ -194,14 +194,18 @@ arbitrary `duration-[…]` / `ease-[…]` are **not** (lint hard-fails). CSS cus
 inline `style.transition` too, so JS-driven transitions use `var(--motion-glide) var(--ease-standard)`
 (see the reorder FLIP in `ChartWidget.tsx`).
 
-**Chart reveal.** Series charts (`LineChart` / `BarChart` / `Sparkline` / `InlineSpark` / the custom
-`MsMultiLine`) softly reveal on mount and whenever the underlying series changes: lines + areas
-fade-reveal (`--motion-reveal`), bars grow from the baseline (`scaleY` from a `fill-box` bottom origin)
-+ fade. The motion carries a `data-chart-motion="reveal"|"grow"` hook and replays via a **stable
-data-derived React key** — a period/filter swap remounts and replays; hover, tooltip movement and
-ResizeObserver width changes are excluded from the key, so they never restart it. The dashed comparison
-ghost keeps its pattern (we animate opacity/transform, never `stroke-dasharray`; its dim rides
-`strokeOpacity`). The shared `ChartTooltip` fades in and glides between points via a tokenised
+**Chart reveal.** Series charts softly reveal on mount and whenever the underlying series changes. The
+full-size `LineChart` (line + area, primary and comparison) REVEALS with an undistorted left→right
+**clip wipe** — the shadcn/Recharts «draw-on» read: `clip-path: inset()` sweeps the right edge 100%→0%
+over `--motion-reveal` (hook `data-chart-motion="sweep"`), so the path geometry is never scaled or
+stretched and the grid/axes/target/reference lines — which sit OUTSIDE the swept group — stay anchored.
+Micro-charts (`Sparkline` / `InlineSpark` / the custom `MsMultiLine`) keep the lighter `reveal` fade
+(`chart-fade-in`, `--motion-reveal`); bars grow from the baseline (`grow` — `scaleY` from a `fill-box`
+bottom origin) + fade. Every hook replays via a **stable data-derived React key** — a period/filter swap
+remounts and replays; hover, tooltip movement and ResizeObserver width changes are excluded from the
+key, so they never restart it. The dashed comparison ghost keeps its pattern (we clip / animate
+group opacity, never `stroke-dasharray`; its dim rides `strokeOpacity`, a channel the fade can't touch).
+The shared `ChartTooltip` fades in and glides between points via a tokenised
 `transform` transition (`--motion-base`, never `left`/`top`) — one `[data-chart-tooltip]` rule owns it
 for default/rhea/comparison alike.
 

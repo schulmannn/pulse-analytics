@@ -503,10 +503,14 @@
      Series charts softly reveal on mount and whenever the underlying series changes (period / filter):
      the animated group carries a stable DATA-derived React key, so a resize (new geometry, SAME key)
      re-renders in place and never replays, while a period / filter swap (new key) remounts and does.
-     Hover, tooltip movement and ResizeObserver width changes are all excluded from that key. Lines +
-     areas fade-reveal; bars grow from the baseline (scaleY from a fill-box bottom origin) + fade. The
-     dashed comparison stroke is untouched — we animate element / group OPACITY (or a transform), never
-     stroke-dasharray, so a dashed series can never turn solid or lose its pattern; the dashed ghost even
+     Hover, tooltip movement and ResizeObserver width changes are all excluded from that key. The real
+     line/area charts REVEAL with an undistorted left→right clip wipe (`sweep`, the shadcn/Recharts
+     «draw-on» read): clip-path only, so the path geometry is never scaled/stretched — grid, axes,
+     target and reference lines all sit OUTSIDE the swept group and stay anchored. Micro-charts
+     (sparkline / inline / multi-line) keep the lighter `reveal` fade; bars grow from the baseline
+     (scaleY from a fill-box bottom origin) + fade. The dashed comparison stroke is untouched — we
+     animate group OPACITY / clip-path (or a transform), never stroke-dasharray, so a dashed series can
+     never turn solid or lose its pattern; the dashed ghost even
      carries its dim on strokeOpacity so the fade's opacity channel can't brighten it. The shared tooltip
      fades on mount and glides between points via a tokenised transform transition (never left / top,
      so no layout loop). Reduced motion collapses all of it via the global net AND the explicit rules
@@ -519,8 +523,20 @@
     from { transform: scaleY(0); }
     to { transform: scaleY(1); }
   }
+  /* Left→right clip wipe for the line/area group: the right inset shrinks 100%→0%, revealing the
+     marks in place. clip-path never scales the path, so geometry stays true under the non-uniform
+     preserveAspectRatio="none" stretch; a short fade rides along so the leading edge isn't hard. */
+  @keyframes chart-sweep-in {
+    from { clip-path: inset(0 100% 0 0); }
+    to { clip-path: inset(0 0 0 0); }
+  }
   [data-chart-motion='reveal'] {
     animation: chart-fade-in var(--motion-reveal) var(--ease-standard) both;
+  }
+  [data-chart-motion='sweep'] {
+    animation:
+      chart-sweep-in var(--motion-reveal) var(--ease-standard) both,
+      chart-fade-in var(--motion-fast) var(--ease-standard) both;
   }
   [data-chart-motion='grow'] {
     transform-box: fill-box;
@@ -538,6 +554,7 @@
      marks render at their natural end state (opacity 1 · scaleY 1) and the tooltip snaps to position. */
   @media (prefers-reduced-motion: reduce) {
     [data-chart-motion='reveal'],
+    [data-chart-motion='sweep'],
     [data-chart-motion='grow'] {
       animation: none;
     }

@@ -2,6 +2,7 @@ import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useStat
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import { EmptyState } from '@/components/EmptyState';
 import { fmt, smoothSvgPath } from '@/lib/format';
+import { seriesMotionKey } from '@/lib/chartMotion';
 import { detectAnomalies } from '@/lib/anomaly';
 import { nearestPointIndex } from '@/lib/chartHover';
 import { axisLabelIndexes } from '@/lib/chartLabels';
@@ -219,12 +220,12 @@ export function LineChart({
   const showGhost = hasGhostLegend && !ghostHidden;
   const activeGhost = showGhost ? ghost : undefined;
 
-  // Stable data signature for the reveal (see index.css «Chart motion»). Keyed on the SERIES content
-  // — primary values + the shown comparison — so the fade replays on a period / filter / compare
+  // Stable data signature for the sweep (see index.css «Chart motion»). Keyed on the SERIES content
+  // — primary values + the shown comparison — so the clip-wipe replays on a period / filter / compare
   // change but NOT on hover (separate state), tooltip movement or a ResizeObserver width change
   // (width is deliberately absent). A same-key re-render updates geometry in place without remounting,
   // so a resize never restarts the motion; a new key remounts the group and replays it once.
-  const motionKey = `${values?.length ?? 0}|${(values ?? []).join(',')}|${activeGhost?.join(',') ?? ''}`;
+  const motionKey = seriesMotionKey(values, activeGhost);
 
   // ── Geometry + the static plot, memoized APART from hover ────────────────────────────────
   // Hover is a per-mousemove setState: without this memo every crosshair step re-derived the
@@ -447,34 +448,31 @@ export function LineChart({
         ))}
 
         {/* Comparison stays on the same y-scale. Explorer comparison uses a second solid smooth
-            area (the shadcn pattern); legacy hosts retain the lighter dashed reference line. */}
-        {comparison && ghostAreaPath && (
-          <path
-            key={`comparison-area-${motionKey}`}
-            data-chart-series="comparison-area"
-            data-chart-motion="reveal"
-            d={ghostAreaPath}
-            fill={`url(#${comparisonGradientId})`}
-          />
-        )}
+            area (the shadcn pattern); legacy hosts retain the lighter dashed reference line. The
+            comparison marks share ONE keyed sweep group so they clip-wipe in together on a data
+            change; the group clips (never touches stroke-dasharray) so the dashed pattern survives. */}
         {ghostPath && (
-          <path
-            key={`comparison-line-${motionKey}`}
-            data-chart-series="comparison"
-            data-chart-motion="reveal"
-            d={ghostPath}
-            fill="none"
-            stroke="hsl(var(--chart-role-comparison))"
-            strokeWidth={comparison ? '2' : '1.8'}
-            strokeDasharray={comparison ? undefined : '5 4'}
-            // strokeOpacity (not the element `opacity` attr) carries the dim: the reveal animates the
-            // element `opacity` 0→1, and its `both` end-state would otherwise override an `opacity`
-            // attribute and brighten the dashed ghost to full. strokeOpacity is a separate channel.
-            strokeOpacity={comparison ? '0.95' : '0.8'}
-            strokeLinejoin="round"
-            strokeLinecap="round"
-            vectorEffect="non-scaling-stroke"
-          />
+          <g key={`comparison-${motionKey}`} data-chart-motion="sweep">
+            {comparison && ghostAreaPath && (
+              <path data-chart-series="comparison-area" d={ghostAreaPath} fill={`url(#${comparisonGradientId})`} />
+            )}
+            <path
+              data-chart-series="comparison"
+              d={ghostPath}
+              fill="none"
+              stroke="hsl(var(--chart-role-comparison))"
+              strokeWidth={comparison ? '2' : '1.8'}
+              strokeDasharray={comparison ? undefined : '5 4'}
+              // strokeOpacity (not the element `opacity` attr) carries the dim: the sweep group's
+              // companion fade animates the group `opacity` 0→1, and its `both` end-state would
+              // otherwise override an `opacity` attribute and brighten the dashed ghost to full.
+              // strokeOpacity is a separate channel the fade can't touch.
+              strokeOpacity={comparison ? '0.95' : '0.8'}
+              strokeLinejoin="round"
+              strokeLinecap="round"
+              vectorEffect="non-scaling-stroke"
+            />
+          </g>
         )}
 
         {/* Target level (widget pref) — a dashed goal line with a small right-aligned label */}
@@ -512,22 +510,23 @@ export function LineChart({
           </>
         )}
 
+        {/* Primary marks — area, line, lone points, per-point rings, anomaly rings, poles and the
+            extreme value labels — share ONE keyed sweep group so a period/filter change clip-wipes
+            the whole series in together left→right, undistorted, while the grid/axes/target/ref
+            lines above and below stay OUTSIDE the group and anchored. */}
+        <g key={`primary-${motionKey}`} data-chart-motion="sweep">
         {/* Gradient area + line — сегментами (пустой d не рендерим: серия может быть
             россыпью одиночных измерений без единого сплошного отрезка) */}
         {areaPath && (
           <path
-            key={`primary-area-${motionKey}`}
             data-chart-series="primary-area"
-            data-chart-motion="reveal"
             d={areaPath}
             fill={`url(#${gradientId})`}
           />
         )}
         {linePath && (
           <path
-            key={`primary-line-${motionKey}`}
             data-chart-series="primary"
-            data-chart-motion="reveal"
             d={linePath}
             fill="none"
             stroke="hsl(var(--chart-role-primary))"
@@ -578,6 +577,7 @@ export function LineChart({
             {e.text}
           </text>
         ))}
+        </g>
 
         {/* Y-axis labels — right-aligned in the reserved gutter */}
         {!rhea && yGridPositions.map((yPos, idx) => (

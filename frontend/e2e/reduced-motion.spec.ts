@@ -46,6 +46,12 @@ test('reduced motion: chart marks and tooltip render in their final state', asyn
   expect(markStyle.animationName).toBe('none');
   expect(markStyle.opacity).toBe('1');
   expect(markStyle.transform).toBe('none');
+  const sweepStyle = await chart.locator('g[data-chart-motion="sweep"]').first().evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { animationName: style.animationName, clipPath: style.clipPath };
+  });
+  expect(sweepStyle.animationName).toBe('none');
+  expect(sweepStyle.clipPath).toBe('none');
 
   await chart.scrollIntoViewIfNeeded();
   const box = await chart.boundingBox();
