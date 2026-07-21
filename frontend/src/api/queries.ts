@@ -32,8 +32,10 @@ import {
   GraphsSchema,
   HistorySchema,
   IgBreakdownsSchema,
+  type IgBreakdowns,
   IgHistorySchema,
   IgInsightsSchema,
+  type IgInsights,
   IgOnlineSchema,
   IgPostsSchema,
   IgProfileSchema,
@@ -372,10 +374,20 @@ export function useIgProfile(enabled = true) {
  *  window + the previous one (for deltas), since they have no daily series to slice. */
 export function useIgInsights(days = 90, enabled = true) {
   const { channelId } = useSelectedChannel();
-  return useQuery({
+  // Explicit TData (useTgFull-style): the placeholderData callback otherwise degrades inference
+  // for every `insightsQ.data` consumer.
+  return useQuery<IgInsights>({
     enabled: enabled && channelId != null,
     queryKey: ['ig-insights', channelId, days],
     staleTime: STALE_LIVE,
+    // A period change re-keys `days`; keep the previous window's data mounted while the new one
+    // loads (same contract as useTgFull windowPair). Without it ig.loading flips to true and the
+    // IG shell/metric page swaps the WHOLE view for a skeleton — the chart unmounts and the
+    // MorphingSeries period morph never runs (owner report: «переход не как в shadcn»). The old
+    // series re-windows client-side instantly, then the fresh response retargets the morph.
+    // Never carry data across a channel switch — that would flash another source's metrics.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[1] === channelId ? previous : undefined,
     queryFn: ({ signal }) => apiGet(`/api/ig/insights?days=${days}`, IgInsightsSchema, { signal, channelId }),
   });
 }
@@ -393,11 +405,15 @@ export function useIgPosts(limit = 20, enabled = true) {
 /** Audience demographics + format/contact breakdowns (total_value envelope). */
 export function useIgBreakdowns(timeframe = 'last_30_days', enabled = true) {
   const { channelId } = useSelectedChannel();
-  return useQuery({
+  return useQuery<IgBreakdowns>({
     // enabled — внешний гейт поверх канального (офскрин-виджеты Главной), queryKey прежний.
     enabled: enabled && channelId != null,
     queryKey: ['ig-breakdowns', channelId, timeframe],
     staleTime: STALE_ARCHIVE,
+    // Period switches re-key `timeframe` — hold the previous breakdowns for the same channel so
+    // the Аудитория sections don't collapse to empty mid-switch (mirrors useIgInsights above).
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[1] === channelId ? previous : undefined,
     queryFn: ({ signal }) => apiGet(`/api/ig/breakdowns?timeframe=${timeframe}`, IgBreakdownsSchema, { signal, channelId }),
   });
 }
