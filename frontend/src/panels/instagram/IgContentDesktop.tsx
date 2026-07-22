@@ -257,7 +257,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
         <div className="flex flex-wrap items-center gap-3">
           <CampaignFilterControl />
           <SearchField
-            className="w-56"
+            className="w-64 [&_input]:h-10 [&_input]:rounded-[10px]"
             value={filters.q}
             onChange={(q) => update({ q })}
             placeholder="Поиск по тексту и хэштегам"
@@ -347,48 +347,40 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
           )}
         </div>
       )}
-      <div className="flex flex-wrap items-center gap-2 border-t border-border/60 pt-3">
-        {selectedItems.length > 0 ? (
-          <>
-            <span className="text-xs tabular-nums text-muted-foreground">Выбрано: {fmt.num(selectedItems.length)}</span>
+      {selectedItems.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 border-t border-border/60 pt-3">
+          <span className="text-xs tabular-nums text-muted-foreground">Выбрано: {fmt.num(selectedItems.length)}</span>
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => setAddItems(selectedItems)}
+            data-testid="add-to-campaign"
+          >
+            Добавить в кампанию
+          </Button>
+          {campaignId != null && (
             <Button
               type="button"
+              variant="outline"
               size="sm"
-              onClick={() => setAddItems(selectedItems)}
-              data-testid="add-to-campaign"
+              onClick={onRemoveFromCampaign}
+              disabled={removeMut.isPending}
+              data-testid="remove-from-campaign"
             >
-              Добавить в кампанию
+              {removeMut.isPending ? 'Убираю…' : 'Убрать из кампании'}
             </Button>
-            {campaignId != null && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={onRemoveFromCampaign}
-                disabled={removeMut.isPending}
-                data-testid="remove-from-campaign"
-              >
-                {removeMut.isPending ? 'Убираю…' : 'Убрать из кампании'}
-              </Button>
-            )}
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => setSelected(new Set())}
-            >
-              Снять выбор
-            </Button>
-          </>
-        ) : (
-          <span className="text-2xs text-muted-foreground">
-            {campaignId != null
-              ? 'Отметьте публикации, чтобы добавить или убрать их из кампании'
-              : 'Отметьте публикации, чтобы добавить их в кампанию'}
-          </span>
-        )}
-        {removeMut.isError && <span role="alert" className="text-2xs text-destructive">Не удалось убрать из кампании.</span>}
-      </div>
+          )}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setSelected(new Set())}
+          >
+            Снять выбор
+          </Button>
+          {removeMut.isError && <span role="alert" className="text-2xs text-destructive">Не удалось убрать из кампании.</span>}
+        </div>
+      )}
     </>
   );
 

@@ -225,6 +225,20 @@ test.describe('Instagram Контент 2.0 (desktop)', () => {
 
     await expect(firstRow).toBeVisible();
 
+    // Поясняющей полосы нет; массовые действия появляются только после реального выбора.
+    await expect(page.getByText('Отметьте публикации, чтобы добавить их в кампанию')).toHaveCount(0);
+    const addToCampaign = page.getByTestId('add-to-campaign');
+    await expect(addToCampaign).toHaveCount(0);
+    await firstRow.getByTestId('ig-post-select').click();
+    await expect(addToCampaign).toBeVisible();
+    await firstRow.getByTestId('ig-post-select').click();
+    await expect(addToCampaign).toHaveCount(0);
+
+    // Локальный search input повторяет более мягкую геометрию shadcn, не меняя другие экраны.
+    const search = page.getByRole('searchbox', { name: 'Поиск по публикациям' });
+    const searchRadius = await search.evaluate((node) => Number.parseFloat(getComputedStyle(node).borderRadius));
+    expect(searchRadius).toBeGreaterThanOrEqual(8);
+
     // В таблице нет вложенного вертикального скролла: страницу прокручивает только dashboard shell.
     await expect.poll(() => tableShell.evaluate((node) => getComputedStyle(node).overflowY)).toBe('hidden');
 
