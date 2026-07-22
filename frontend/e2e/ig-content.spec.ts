@@ -405,7 +405,7 @@ test.describe('Instagram Контент 2.0 (desktop)', () => {
     await expect(page.getByRole('radiogroup', { name: 'Плотность строк' })).toHaveCount(0);
     await expect(table).not.toHaveAttribute('data-density', /.+/);
 
-    // Карточка и вложенная таблица используют один почти чёрный background; граница создаёт
+    // Карточка публикаций и вложенная таблица используют один общий table-surface; граница создаёт
     // иерархию без отдельной серой подложки. Неотмеченный checkbox остаётся полупрозрачным.
     const [cardBackground, tableBackground, tableBorderRadius, checkboxBackground] = await Promise.all([
       card.evaluate((node) => getComputedStyle(node).backgroundColor),
@@ -416,6 +416,53 @@ test.describe('Instagram Контент 2.0 (desktop)', () => {
     expect(tableBackground).toBe(cardBackground);
     expect(tableBorderRadius).not.toBe('0px');
     expect(checkboxBackground).not.toBe('rgb(0, 0, 0)');
+
+    // Тёмная трёхслойная иерархия: канвас (страница) темнее таблицы, таблица темнее виджет-карточки.
+    // Все поверхности нейтральны/почти нейтральны, а граница остаётся видимой поверх table-surface.
+    const hierarchy = await page.evaluate(() => {
+      const channels = (value: string) => {
+        const values = (value.match(/[\d.]+/g) ?? []).map(Number).slice(0, 3);
+        // Chromium may serialize modern HSL-derived colors as `color(srgb r g b)`, whose channels
+        // are normalized to 0..1 rather than the 0..255 values returned by legacy `rgb(...)`.
+        return value.startsWith('color(') ? values.map((channel) => channel * 255) : values;
+      };
+      const rgb = (el: Element | null) => {
+        if (!el) return null;
+        const m = channels(getComputedStyle(el).backgroundColor);
+        return { r: m[0] ?? 0, g: m[1] ?? 0, b: m[2] ?? 0 };
+      };
+      const tableEl = document.querySelector('[data-ig-content-table]');
+      return {
+        canvas: rgb(document.querySelector('.min-h-screen')),
+        table: rgb(tableEl),
+        widget: rgb(
+          Array.from(document.querySelectorAll('.bg-card')).find((el) =>
+            el.textContent?.includes('Вовлечённость по форматам'),
+          ) ?? null,
+        ),
+        // Border colours can serialize as `oklab/oklch`, whose leading number is lightness rather
+        // than a channel, so the hairline is checked by string identity, not a channel sum.
+        tableFill: tableEl ? getComputedStyle(tableEl).backgroundColor : '',
+        border: tableEl ? getComputedStyle(tableEl).borderTopColor : '',
+      };
+    });
+    if (!hierarchy.canvas || !hierarchy.table || !hierarchy.widget) {
+      throw new Error('Dark surface hierarchy samples are unavailable');
+    }
+    const sum = (c: { r: number; g: number; b: number }) => c.r + c.g + c.b;
+    const spread = (c: { r: number; g: number; b: number }) =>
+      Math.max(c.r, c.g, c.b) - Math.min(c.r, c.g, c.b);
+    // canvas < table < widget-card по светлоте — три различимых слоя.
+    expect(sum(hierarchy.canvas)).toBeLessThan(sum(hierarchy.table));
+    expect(sum(hierarchy.table)).toBeLessThan(sum(hierarchy.widget));
+    // Поверхности нейтральны/почти нейтральны (никакого выраженного оттенка).
+    for (const surface of [hierarchy.canvas, hierarchy.table, hierarchy.widget]) {
+      expect(spread(surface)).toBeLessThanOrEqual(6);
+    }
+    // Граница видима: отдельный цвет hairline поверх table-surface, а не полностью прозрачный.
+    expect(hierarchy.border).not.toBe(hierarchy.tableFill);
+    expect(hierarchy.border).not.toBe('rgba(0, 0, 0, 0)');
+    expect(hierarchy.border).not.toBe('transparent');
     await testInfo.attach('ig-content-shadcn-table', {
       body: await page.screenshot({ fullPage: true }),
       contentType: 'image/png',

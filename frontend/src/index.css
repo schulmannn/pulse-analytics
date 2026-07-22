@@ -72,6 +72,12 @@
   --color-card: hsl(var(--card));
   --color-card-foreground: hsl(var(--card-foreground));
 
+  /* Shared data/table surface — the near-black slab the Instagram publications card, its nested
+     table shell, sticky header and bulk bar all paint with. A distinct step between the page
+     canvas (--background) and the lifted widget --card so the table never dissolves into black.
+     Light aliases --background (no visual change); dark sets its own value below. */
+  --color-surface-table: hsl(var(--surface-table));
+
   --color-iris: hsl(var(--brand-iris));
   --color-iris-soft: hsl(var(--brand-iris-soft));
 
@@ -289,15 +295,16 @@
 
 @utility ig-content-table {
   /* The Instagram publications table follows the quieter shadcn data-table surface instead of
-     inheriting the grey dashboard treatment from the shared data-table utility. */
-  background: hsl(var(--background));
+     inheriting the grey dashboard treatment from the shared data-table utility. The shared
+     --surface-table token keeps the table one calm slab with the card shell around it. */
+  background: hsl(var(--surface-table));
   &.data-table > thead > tr {
     background: transparent;
   }
   &.data-table > thead > tr > th {
     height: 3rem;
     border-bottom-color: hsl(var(--border) / 0.72);
-    background: hsl(var(--background));
+    background: hsl(var(--surface-table));
     padding-block: 0.5rem;
     color: hsl(var(--foreground));
     font-size: 0.875rem;
@@ -1441,6 +1448,9 @@
     --foreground: 60 6% 10%;           /* ink    #1a1a17 */
     --card: 0 0% 100%;                 /* panel  #ffffff (sparingly) */
     --card-foreground: 60 6% 10%;
+    /* Data/table surface aliases the paper canvas in light — the publications card, table shell and
+       sticky header stay exactly as before. Dark gives it its own near-black step (see .dark). */
+    --surface-table: var(--background);
     --popover: 0 0% 100%;
     --popover-foreground: 60 6% 10%;
     --primary: 219 74% 53%;            /* accent #2d6be0 — links / active / brand only */
@@ -1549,11 +1559,16 @@
 
   .dark {
     color-scheme: dark;
-    --background: 0 0% 4%;             /* neutral near-black canvas #0a0a0a (steep-style) */
+    --background: 0 0% 3%;             /* deepest layer — near-black page canvas #080808 */
     --foreground: 0 0% 95%;            /* neutral off-white */
-    --card: 228 6% 11%;                /* lifted cool slate #1a1b1e — flat steep card (владелец:
-                                          прежний #141414 с сизой размывкой читался «серовато») */
+    --card: 228 6% 8%;                 /* lifted cool slate #141416 — widget/chart card surface, one
+                                          calm step above the table so dashboard cards read as their
+                                          own layer, not unrelated grey slabs */
     --card-foreground: 0 0% 95%;
+    /* Middle layer of the dark surface hierarchy: canvas #080808 < table #0D0D0F < card #141416.
+       The Instagram publications card/table/sticky-header/bulk-bar share this slab so the table no
+       longer dissolves into the page black, while staying darker than the widget cards below. */
+    --surface-table: 228 6% 5%;        /* #0D0D0F */
     --popover: 228 6% 14%;             /* menus float above the slate card #212227 */
     --popover-foreground: 0 0% 95%;
     --primary: 219 80% 68%;
@@ -1566,8 +1581,9 @@
     --accent-foreground: 219 80% 78%;
     --destructive: 11 70% 55%;
     --destructive-foreground: 0 0% 100%;
-    --border: 0 0% 17%;                /* subtle neutral hairline on black */
-    --input: 0 0% 17%;
+    --border: 240 5% 16%;              /* near-neutral hairline #27272A — stays visible on every
+                                          layer of the dark surface hierarchy */
+    --input: 240 5% 16%;
     --ring: 219 80% 68%;
 
     --ink2: 0 0% 72%;
@@ -1586,7 +1602,7 @@
     --amber-tint: 39 30% 18%;
     --green-tint: 147 25% 16%;
     --blue-tint: 219 40% 20%;
-    /* Above card (11%) AND popover (14%) so row-hover reads on both surfaces. */
+    /* Above card (8%) AND popover (14%) so row-hover reads on both surfaces. */
     --hover-row: 228 5% 18%;
     --avatar: 0 0% 22%;
 

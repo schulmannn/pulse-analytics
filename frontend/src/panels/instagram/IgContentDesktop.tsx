@@ -604,7 +604,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
         >
           <SortButton label="Дата" active={filters.sort === 'date'} order={filters.order} onClick={() => toggleSort('date')} />
         </th>
-        <th aria-hidden="true" className="sticky right-0 z-[2] w-10 bg-background px-2"></th>
+        <th aria-hidden="true" className="sticky right-0 z-[2] w-10 bg-surface-table px-2"></th>
       </tr>
     </thead>
   );
@@ -613,7 +613,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
     ? createPortal(
         <div
           data-ig-content-sticky-header
-          className="fixed z-sticky overflow-hidden border-b border-border/75 bg-background shadow-sm"
+          className="fixed z-sticky overflow-hidden border-b border-border/75 bg-surface-table shadow-sm"
           style={{ top: stickyHeader.top, left: stickyHeader.left, width: stickyHeader.width }}
         >
           <table
@@ -637,7 +637,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
           role="toolbar"
           aria-label="Действия с выбранными публикациями"
           data-testid="ig-content-bulk-bar"
-          className="fixed bottom-6 z-popover flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-2 rounded-xl border border-white/20 bg-background p-2 pl-3 text-foreground shadow-[0_-1px_0_rgba(255,255,255,0.07),0_14px_36px_rgba(0,0,0,0.72)] motion-safe:animate-in motion-safe:fade-in-0"
+          className="fixed bottom-6 z-popover flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-2 rounded-xl border border-white/20 bg-surface-table p-2 pl-3 text-foreground shadow-[0_-1px_0_rgba(255,255,255,0.07),0_14px_36px_rgba(0,0,0,0.72)] motion-safe:animate-in motion-safe:fade-in-0"
           style={{ left: tableViewport.centerX, maxWidth: tableViewport.maxWidth }}
         >
           <span className="shrink-0 pr-1 text-xs tabular-nums text-muted-foreground" aria-live="polite">
@@ -648,7 +648,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
             size="sm"
             onClick={() => setAddItems(selectedItems)}
             data-testid="add-to-campaign"
-            className="bg-foreground text-background hover:bg-foreground/90 focus-visible:ring-foreground/35"
+            className="bg-foreground text-surface-table hover:bg-foreground/90 focus-visible:ring-foreground/35"
           >
             Добавить в кампанию
           </Button>
@@ -683,7 +683,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
   const publicationsCard = (body: ReactNode) => (
     <section
       data-ig-content-publications
-      className="overflow-hidden rounded-2xl border border-border/75 bg-background shadow-xs"
+      className="overflow-hidden rounded-2xl border border-border/75 bg-surface-table shadow-xs"
     >
       <div className="space-y-3 px-4 py-4 sm:px-5">{toolbar}</div>
       {body}
@@ -723,7 +723,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
       <div
         ref={tableShellRef}
         className={cn(
-          'mx-4 overflow-x-auto overflow-y-hidden overscroll-x-contain rounded-xl border border-border/75 bg-background [contain:paint] sm:mx-5',
+          'mx-4 overflow-x-auto overflow-y-hidden overscroll-x-contain rounded-xl border border-border/75 bg-surface-table [contain:paint] sm:mx-5',
           paginated ? 'mb-3 sm:mb-3.5' : 'mb-4 sm:mb-5',
         )}
         data-ig-content-table
@@ -1193,7 +1193,7 @@ export function IgContentTableSkeleton({ metricCount = METRIC_COLS.length }: { m
       aria-busy="true"
       aria-label="Загрузка публикаций"
       data-testid="ig-content-table-skeleton"
-      className="mx-4 mb-4 overflow-hidden rounded-xl border border-border/75 bg-background sm:mx-5 sm:mb-5"
+      className="mx-4 mb-4 overflow-hidden rounded-xl border border-border/75 bg-surface-table sm:mx-5 sm:mb-5"
     >
       <table aria-hidden="true" className="data-table ig-content-table text-left text-sm">
         <thead>
@@ -1240,7 +1240,7 @@ export function IgContentTableSkeleton({ metricCount = METRIC_COLS.length }: { m
 export function IgContentPageSkeleton() {
   return (
     <div className="space-y-8">
-      <section className="overflow-hidden rounded-2xl border border-border/75 bg-background shadow-xs">
+      <section className="overflow-hidden rounded-2xl border border-border/75 bg-surface-table shadow-xs">
         <div className="space-y-3 px-4 py-4 sm:px-5" aria-hidden="true">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <Skeleton className="h-7 w-40 rounded-full" />
