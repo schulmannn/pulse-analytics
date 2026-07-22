@@ -267,7 +267,9 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
       }
 
       const next: StickyHeaderGeometry = {
-        top: Math.round(stickyTop),
+        // Floor instead of round: a fractional page-header bottom (common at browser zoom / DPR)
+        // must never leave a sub-pixel slit where the scrolling thumbnails can flash through.
+        top: Math.floor(stickyTop),
         left: Math.round(shellRect.left + shell.clientLeft),
         width: Math.round(shell.clientWidth),
         tableWidth: Math.round(tableRect.width),

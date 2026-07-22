@@ -331,7 +331,8 @@ test.describe('Instagram Контент 2.0 (desktop)', () => {
         tableBackground: getComputedStyle(table.parentElement ?? table).backgroundColor,
       };
     });
-    expect(Math.abs(stickyGeometry.headerTop - stickyGeometry.pageHeaderBottom)).toBeLessThanOrEqual(3);
+    expect(stickyGeometry.headerTop).toBeLessThanOrEqual(stickyGeometry.pageHeaderBottom);
+    expect(stickyGeometry.pageHeaderBottom - stickyGeometry.headerTop).toBeLessThanOrEqual(1);
     expect(Math.abs(stickyGeometry.headerWidth - stickyGeometry.tableViewportWidth)).toBeLessThanOrEqual(2);
     expect(stickyGeometry.headerBackground).toBe(stickyGeometry.tableBackground);
     expect(stickyGeometry.headerCellBackground).toBe(stickyGeometry.tableBackground);
