@@ -257,7 +257,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
         <div className="flex flex-wrap items-center gap-3">
           <CampaignFilterControl />
           <SearchField
-            className="w-64 [&_input]:h-10 [&_input]:rounded-[10px]"
+            className="w-64 [&_input]:h-8 [&_input]:rounded-[10px]"
             value={filters.q}
             onChange={(q) => update({ q })}
             placeholder="Поиск по тексту и хэштегам"
@@ -479,7 +479,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
       >
         <table className="data-table ig-content-table text-left text-sm">
           <thead>
-            <tr className="text-2xs font-medium tracking-wide text-muted-foreground">
+            <tr className="text-2xs font-semibold tracking-wide text-foreground">
               <th className="w-10 pl-4 pr-2 sm:pl-5">
                 <Checkbox
                   aria-label="Выбрать все видимые публикации"
@@ -770,10 +770,10 @@ function SortButton({ label, active, order, onClick }: { label: string; active: 
     <button
       type="button"
       onClick={onClick}
-      className={cn('ml-auto inline-flex items-center gap-1 tabular-nums transition-colors', active ? 'text-primary' : 'hover:text-foreground')}
+      className="ml-auto inline-flex items-center gap-1 font-semibold tabular-nums text-foreground transition-colors hover:text-foreground/80"
     >
       {label}
-      <span aria-hidden="true" className={cn('text-2xs', !active && 'text-ink3/60')}>
+      <span aria-hidden="true" className={cn('text-2xs', active ? 'text-primary' : 'text-ink3/60')}>
         {active ? (order === 'desc' ? '↓' : '↑') : '↕'}
       </span>
     </button>

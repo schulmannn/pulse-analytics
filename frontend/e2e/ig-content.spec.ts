@@ -238,6 +238,26 @@ test.describe('Instagram Контент 2.0 (desktop)', () => {
     const search = page.getByRole('searchbox', { name: 'Поиск по публикациям' });
     const searchRadius = await search.evaluate((node) => Number.parseFloat(getComputedStyle(node).borderRadius));
     expect(searchRadius).toBeGreaterThanOrEqual(8);
+    const campaignFilter = page.getByRole('combobox', { name: 'Фильтр по кампании' });
+    const formatFilter = page.getByRole('combobox', { name: 'Формат публикаций' });
+    const [searchHeight, campaignHeight, formatHeight] = await Promise.all([
+      search.evaluate((node) => node.getBoundingClientRect().height),
+      campaignFilter.evaluate((node) => node.getBoundingClientRect().height),
+      formatFilter.evaluate((node) => node.getBoundingClientRect().height),
+    ]);
+    expect(searchHeight).toBe(campaignHeight);
+    expect(searchHeight).toBe(formatHeight);
+
+    // Заголовки таблицы — белые и semibold, включая активную сортируемую колонку.
+    const publicationHeader = page.getByRole('columnheader', { name: 'Публикация' });
+    const activeSort = page.getByRole('button', { name: 'Охват' });
+    const [publicationStyle, activeSortStyle] = await Promise.all([
+      publicationHeader.evaluate((node) => ({ color: getComputedStyle(node).color, weight: getComputedStyle(node).fontWeight })),
+      activeSort.evaluate((node) => ({ color: getComputedStyle(node).color, weight: getComputedStyle(node).fontWeight })),
+    ]);
+    expect(publicationStyle.weight).toBe('600');
+    expect(activeSortStyle.weight).toBe('600');
+    expect(activeSortStyle.color).toBe(publicationStyle.color);
 
     // В таблице нет вложенного вертикального скролла: страницу прокручивает только dashboard shell.
     await expect.poll(() => tableShell.evaluate((node) => getComputedStyle(node).overflowY)).toBe('hidden');

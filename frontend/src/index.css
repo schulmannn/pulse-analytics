@@ -298,6 +298,8 @@
     height: 3rem;
     border-bottom-color: hsl(var(--border) / 0.72);
     padding-block: 0.5rem;
+    color: hsl(var(--foreground));
+    font-weight: 600;
   }
   & > tbody > tr > td,
   & > tbody > tr > th {
