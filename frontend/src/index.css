@@ -310,9 +310,24 @@
   &.data-table > tbody > tr + tr > * {
     border-top-color: hsl(var(--border) / 0.52);
   }
+  &.data-table > tbody > tr {
+    transition: background-color var(--motion-fast) var(--ease-standard);
+  }
   &.data-table > tbody > tr:hover,
   &.data-table > tbody > tr:focus-within {
-    background: hsl(var(--muted) / 0.16);
+    background: hsl(var(--muted) / 0.3);
+  }
+  &.data-table > tbody > tr[data-ig-content-selected] {
+    background: hsl(var(--primary) / 0.05);
+  }
+  &.data-table > tbody > tr[data-ig-content-selected]:hover,
+  &.data-table > tbody > tr[data-ig-content-selected]:focus-within {
+    background: hsl(var(--primary) / 0.08);
+  }
+  &.data-table > tbody > tr[data-ig-content-open],
+  &.data-table > tbody > tr[data-ig-content-open]:hover,
+  &.data-table > tbody > tr[data-ig-content-open]:focus-within {
+    background: hsl(var(--primary) / 0.1);
   }
 }
 

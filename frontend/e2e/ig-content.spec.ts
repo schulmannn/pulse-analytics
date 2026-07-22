@@ -228,11 +228,44 @@ test.describe('Instagram Контент 2.0 (desktop)', () => {
     // Поясняющей полосы нет; массовые действия появляются только после реального выбора.
     await expect(page.getByText('Отметьте публикации, чтобы добавить их в кампанию')).toHaveCount(0);
     const addToCampaign = page.getByTestId('add-to-campaign');
+    const bulkBar = page.getByTestId('ig-content-bulk-bar');
     await expect(addToCampaign).toHaveCount(0);
+    await expect(bulkBar).toHaveCount(0);
     await firstRow.getByTestId('ig-post-select').click();
     await expect(addToCampaign).toBeVisible();
+    await expect(bulkBar).toBeVisible();
+    const bulkGeometry = await bulkBar.evaluate((node) => {
+      const rect = node.getBoundingClientRect();
+      const shell = document.querySelector('[data-ig-content-table]')?.getBoundingClientRect();
+      return {
+        position: getComputedStyle(node).position,
+        bottomGap: window.innerHeight - rect.bottom,
+        centerX: rect.left + rect.width / 2,
+        shellCenterX: shell ? shell.left + shell.width / 2 : 0,
+      };
+    });
+    expect(bulkGeometry.position).toBe('fixed');
+    expect(bulkGeometry.bottomGap).toBeGreaterThanOrEqual(20);
+    expect(bulkGeometry.bottomGap).toBeLessThanOrEqual(28);
+    expect(Math.abs(bulkGeometry.centerX - bulkGeometry.shellCenterX)).toBeLessThanOrEqual(2);
+    await testInfo.attach('ig-content-bulk-actions', {
+      body: await page.screenshot(),
+      contentType: 'image/png',
+    });
     await firstRow.getByTestId('ig-post-select').click();
     await expect(addToCampaign).toHaveCount(0);
+    await expect(bulkBar).toHaveCount(0);
+
+    // Кликабельность строки читается по hover: поверхность светлеет, справа появляется стрелка.
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.getByRole('heading', { name: 'Контент' }).hover();
+    const openIndicator = firstRow.getByTestId('ig-content-open-indicator');
+    const backgroundBeforeHover = await firstRow.evaluate((node) => getComputedStyle(node).backgroundColor);
+    await expect.poll(() => openIndicator.evaluate((node) => getComputedStyle(node).opacity)).toBe('0');
+    await firstRow.hover();
+    const backgroundAfterHover = await firstRow.evaluate((node) => getComputedStyle(node).backgroundColor);
+    expect(backgroundAfterHover).not.toBe(backgroundBeforeHover);
+    await expect.poll(() => openIndicator.evaluate((node) => getComputedStyle(node).opacity)).toBe('1');
 
     // Локальный search input повторяет более мягкую геометрию shadcn, не меняя другие экраны.
     const search = page.getByRole('searchbox', { name: 'Поиск по публикациям' });
@@ -340,6 +373,17 @@ test.describe('Instagram Контент 2.0 (desktop)', () => {
     await expect(page.getByRole('columnheader', { name: /Дата/ })).toBeVisible();
     // Скрытие колонки не меняет число строк.
     await expect(page.locator('table tbody tr')).toHaveCount(6);
+
+    // Выбранный набор колонок переживает reload; повреждённое значение безопасно откатывается
+    // к полному набору, а не ломает таблицу.
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('pulse_ig_content_columns'))).not.toContain('views');
+    await page.reload();
+    await expect(page.locator('[data-ig-content-table] tbody tr').first()).toBeVisible();
+    await expect(page.getByRole('columnheader', { name: /Просмотры/ })).toHaveCount(0);
+    await expect(page.getByRole('columnheader', { name: /Дата/ })).toBeVisible();
+    await page.evaluate(() => localStorage.setItem('pulse_ig_content_columns', 'broken-json{'));
+    await page.reload();
+    await expect(page.getByRole('columnheader', { name: /Просмотры/ })).toBeVisible();
   });
 
   test('активный фильтр кампании позволяет убрать membership из таблицы (пост не удаляется)', async ({ page }) => {

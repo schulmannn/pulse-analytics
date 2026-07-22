@@ -6,7 +6,7 @@ import { Token } from '@astryxdesign/core/Token';
 import { MetadataList, MetadataListItem } from '@astryxdesign/core/MetadataList';
 import { Text as AxText } from '@astryxdesign/core/Text';
 import { Button as AxButton } from '@astryxdesign/core/Button';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import { WorkspaceInspector, WorkspaceSurface } from '@/components/data-workspace';
 import type { IgData } from '@/lib/useIgData';
 import type { IgPost, CampaignPostInput } from '@/api/schemas';
@@ -119,6 +119,27 @@ const COLUMN_OPTIONS: { value: string; label: string }[] = [
   ...METRIC_COLS.map((c) => ({ value: c.key, label: c.label })),
 ];
 const ALL_COLUMN_KEYS = COLUMN_OPTIONS.map((o) => o.value);
+const COLUMN_VISIBILITY_KEY = 'pulse_ig_content_columns';
+
+function readVisibleColumns(): string[] {
+  if (typeof window === 'undefined') return ALL_COLUMN_KEYS;
+  try {
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(COLUMN_VISIBILITY_KEY) ?? 'null');
+    if (!Array.isArray(parsed) || parsed.some((key) => typeof key !== 'string')) return ALL_COLUMN_KEYS;
+    const saved = new Set(parsed);
+    return ALL_COLUMN_KEYS.filter((key) => saved.has(key));
+  } catch {
+    return ALL_COLUMN_KEYS;
+  }
+}
+
+function persistVisibleColumns(columns: string[]): void {
+  try {
+    window.localStorage.setItem(COLUMN_VISIBILITY_KEY, JSON.stringify(columns));
+  } catch {
+    // Storage may be unavailable; the table still works with this session's in-memory state.
+  }
+}
 
 interface StickyHeaderGeometry {
   top: number;
@@ -126,6 +147,11 @@ interface StickyHeaderGeometry {
   width: number;
   tableWidth: number;
   scrollLeft: number;
+}
+
+interface TableViewportGeometry {
+  centerX: number;
+  maxWidth: number;
 }
 
 export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) {
@@ -143,12 +169,13 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // Снимок выбора при открытии диалога (onDone чистит selection; диалог живёт до экрана результата).
   const [addItems, setAddItems] = useState<CampaignPostInput[] | null>(null);
-  // Table view state (local, not URL-backed): which optional metric columns are visible.
-  const [visibleCols, setVisibleCols] = useState<string[]>(ALL_COLUMN_KEYS);
+  // Table view state is intentionally not URL-backed, but survives a reload on this browser.
+  const [visibleCols, setVisibleCols] = useState<string[]>(readVisibleColumns);
   const tableShellRef = useRef<HTMLDivElement>(null);
   const tableRef = useRef<HTMLTableElement>(null);
   const tableHeaderRef = useRef<HTMLTableSectionElement>(null);
   const [stickyHeader, setStickyHeader] = useState<StickyHeaderGeometry | null>(null);
+  const [tableViewport, setTableViewport] = useState<TableViewportGeometry | null>(null);
 
   // Сброс выбора/инспектора при смене источника/кампании/окна/фильтров (примитивные deps — window.* стабильны).
   useEffect(() => {
@@ -208,6 +235,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
     const header = tableHeaderRef.current;
     if (!shell || !table || !header) {
       setStickyHeader(null);
+      setTableViewport(null);
       return;
     }
 
@@ -223,6 +251,15 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
       const headerRect = header.getBoundingClientRect();
       const stickyTop = feedHeader.getBoundingClientRect().bottom;
       const shouldStick = headerRect.top < stickyTop && tableRect.bottom > stickyTop + headerRect.height;
+      const nextViewport = {
+        centerX: Math.round(shellRect.left + shellRect.width / 2),
+        maxWidth: Math.max(0, Math.round(shellRect.width - 32)),
+      };
+      setTableViewport((current) =>
+        current?.centerX === nextViewport.centerX && current.maxWidth === nextViewport.maxWidth
+          ? current
+          : nextViewport,
+      );
 
       if (!shouldStick) {
         setStickyHeader((current) => (current == null ? current : null));
@@ -271,6 +308,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
 
   const updateVisibleColumns = (next: string[]) => {
     setVisibleCols(next);
+    persistVisibleColumns(next);
     if (filters.sort !== 'date' && !next.includes(filters.sort)) {
       update({ sort: 'date', order: 'desc' });
     }
@@ -431,40 +469,6 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
           )}
         </div>
       )}
-      {selectedItems.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2 border-t border-border/60 pt-3">
-          <span className="text-xs tabular-nums text-muted-foreground">Выбрано: {fmt.num(selectedItems.length)}</span>
-          <Button
-            type="button"
-            size="sm"
-            onClick={() => setAddItems(selectedItems)}
-            data-testid="add-to-campaign"
-          >
-            Добавить в кампанию
-          </Button>
-          {campaignId != null && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={onRemoveFromCampaign}
-              disabled={removeMut.isPending}
-              data-testid="remove-from-campaign"
-            >
-              {removeMut.isPending ? 'Убираю…' : 'Убрать из кампании'}
-            </Button>
-          )}
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => setSelected(new Set())}
-          >
-            Снять выбор
-          </Button>
-          {removeMut.isError && <span role="alert" className="text-2xs text-destructive">Не удалось убрать из кампании.</span>}
-        </div>
-      )}
     </>
   );
 
@@ -550,6 +554,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
         >
           <SortButton label="Дата" active={filters.sort === 'date'} order={filters.order} onClick={() => toggleSort('date')} />
         </th>
+        <th aria-hidden="true" className="sticky right-0 z-[2] w-10 bg-background/96 px-2"></th>
       </tr>
     </thead>
   );
@@ -571,6 +576,52 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
           >
             {renderTableHeader(true)}
           </table>
+        </div>,
+        document.body,
+      )
+    : null;
+
+  const floatingBulkActions = selectedItems.length > 0 && tableViewport != null && typeof document !== 'undefined'
+    ? createPortal(
+        <div
+          role="toolbar"
+          aria-label="Действия с выбранными публикациями"
+          data-testid="ig-content-bulk-bar"
+          className="fixed bottom-6 z-popover flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-2 rounded-2xl border border-border/80 bg-popover/95 p-2 pl-3 text-popover-foreground shadow-2xl backdrop-blur-md motion-safe:animate-in motion-safe:fade-in-0"
+          style={{ left: tableViewport.centerX, maxWidth: tableViewport.maxWidth }}
+        >
+          <span className="shrink-0 pr-1 text-xs tabular-nums text-muted-foreground" aria-live="polite">
+            Выбрано: {fmt.num(selectedItems.length)}
+          </span>
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => setAddItems(selectedItems)}
+            data-testid="add-to-campaign"
+          >
+            Добавить в кампанию
+          </Button>
+          {campaignId != null && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onRemoveFromCampaign}
+              disabled={removeMut.isPending}
+              data-testid="remove-from-campaign"
+            >
+              {removeMut.isPending ? 'Убираю…' : 'Убрать из кампании'}
+            </Button>
+          )}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setSelected(new Set())}
+          >
+            Снять выбор
+          </Button>
+          {removeMut.isError && <span role="alert" className="text-2xs text-destructive">Не удалось убрать из кампании.</span>}
         </div>,
         document.body,
       )
@@ -694,6 +745,20 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
                   <td className="px-3 pr-4 text-right text-xs tabular-nums text-muted-foreground sm:pr-5">
                     {post.timestamp ? fmt.date(post.timestamp) : <span className="text-muted-foreground/40">—</span>}
                   </td>
+                  <td className="sticky right-0 z-[1] w-10 border-l border-border/0 bg-inherit px-2 text-center transition-colors group-hover:border-border/40">
+                    {clickable && (
+                      <ChevronRight
+                        aria-hidden="true"
+                        data-testid="ig-content-open-indicator"
+                        className={cn(
+                          'mx-auto size-4 transition-[opacity,transform,color] duration-200',
+                          isOpen
+                            ? 'text-primary opacity-100'
+                            : 'translate-x-1 text-muted-foreground opacity-0 group-hover:translate-x-0 group-hover:opacity-100 group-focus-within:translate-x-0 group-focus-within:opacity-100',
+                        )}
+                      />
+                    )}
+                  </td>
                 </tr>
               );
             })}
@@ -731,6 +796,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
       {detail}
       {dialog}
       {floatingTableHeader}
+      {floatingBulkActions}
     </div>
   );
 }
