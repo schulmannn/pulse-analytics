@@ -300,7 +300,10 @@
     background: hsl(var(--background));
     padding-block: 0.5rem;
     color: hsl(var(--foreground));
+    font-size: 0.875rem;
     font-weight: 600;
+    letter-spacing: 0;
+    line-height: 1.25rem;
   }
   &.data-table > tbody > tr > td,
   &.data-table > tbody > tr > th {

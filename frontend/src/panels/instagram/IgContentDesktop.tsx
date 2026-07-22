@@ -589,7 +589,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
           role="toolbar"
           aria-label="Действия с выбранными публикациями"
           data-testid="ig-content-bulk-bar"
-          className="fixed bottom-6 z-popover flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-2 rounded-2xl border border-border/80 bg-popover/95 p-2 pl-3 text-popover-foreground shadow-2xl backdrop-blur-md motion-safe:animate-in motion-safe:fade-in-0"
+          className="fixed bottom-6 z-popover flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-2 rounded-xl border border-border/80 bg-background p-2 pl-3 text-foreground shadow-xl motion-safe:animate-in motion-safe:fade-in-0"
           style={{ left: tableViewport.centerX, maxWidth: tableViewport.maxWidth }}
         >
           <span className="shrink-0 pr-1 text-xs tabular-nums text-muted-foreground" aria-live="polite">
@@ -600,6 +600,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
             size="sm"
             onClick={() => setAddItems(selectedItems)}
             data-testid="add-to-campaign"
+            className="bg-foreground text-background hover:bg-foreground/90 focus-visible:ring-foreground/35"
           >
             Добавить в кампанию
           </Button>

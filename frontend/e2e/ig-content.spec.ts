@@ -237,17 +237,30 @@ test.describe('Instagram Контент 2.0 (desktop)', () => {
     const bulkGeometry = await bulkBar.evaluate((node) => {
       const rect = node.getBoundingClientRect();
       const shell = document.querySelector('[data-ig-content-table]')?.getBoundingClientRect();
+      const shellNode = document.querySelector('[data-ig-content-table]');
+      const cta = node.querySelector('[data-testid="add-to-campaign"]');
+      if (!shellNode || !cta) throw new Error('Bulk action styling is unavailable');
       return {
         position: getComputedStyle(node).position,
         bottomGap: window.innerHeight - rect.bottom,
         centerX: rect.left + rect.width / 2,
         shellCenterX: shell ? shell.left + shell.width / 2 : 0,
+        background: getComputedStyle(node).backgroundColor,
+        tableBackground: getComputedStyle(shellNode).backgroundColor,
+        radius: Number.parseFloat(getComputedStyle(node).borderRadius),
+        ctaBackground: getComputedStyle(cta).backgroundColor,
+        ctaColor: getComputedStyle(cta).color,
+        foreground: getComputedStyle(document.body).color,
       };
     });
     expect(bulkGeometry.position).toBe('fixed');
     expect(bulkGeometry.bottomGap).toBeGreaterThanOrEqual(20);
     expect(bulkGeometry.bottomGap).toBeLessThanOrEqual(28);
     expect(Math.abs(bulkGeometry.centerX - bulkGeometry.shellCenterX)).toBeLessThanOrEqual(2);
+    expect(bulkGeometry.background).toBe(bulkGeometry.tableBackground);
+    expect(bulkGeometry.radius).toBeLessThanOrEqual(12);
+    expect(bulkGeometry.ctaBackground).toBe(bulkGeometry.foreground);
+    expect(bulkGeometry.ctaColor).toBe(bulkGeometry.tableBackground);
     await testInfo.attach('ig-content-bulk-actions', {
       body: await page.screenshot(),
       contentType: 'image/png',
@@ -284,13 +297,17 @@ test.describe('Instagram Контент 2.0 (desktop)', () => {
     // Заголовки таблицы — белые и semibold, включая активную сортируемую колонку.
     const publicationHeader = page.getByRole('columnheader', { name: 'Публикация' });
     const activeSort = page.getByRole('button', { name: 'Охват' });
-    const [publicationStyle, activeSortStyle] = await Promise.all([
-      publicationHeader.evaluate((node) => ({ color: getComputedStyle(node).color, weight: getComputedStyle(node).fontWeight })),
-      activeSort.evaluate((node) => ({ color: getComputedStyle(node).color, weight: getComputedStyle(node).fontWeight })),
+    const firstRowTitle = firstRow.locator('[data-ig-content-open-trigger]');
+    const [publicationStyle, activeSortStyle, firstRowTitleStyle] = await Promise.all([
+      publicationHeader.evaluate((node) => ({ color: getComputedStyle(node).color, weight: getComputedStyle(node).fontWeight, fontSize: getComputedStyle(node).fontSize })),
+      activeSort.evaluate((node) => ({ color: getComputedStyle(node).color, weight: getComputedStyle(node).fontWeight, fontSize: getComputedStyle(node).fontSize })),
+      firstRowTitle.evaluate((node) => ({ fontSize: getComputedStyle(node).fontSize })),
     ]);
     expect(publicationStyle.weight).toBe('600');
     expect(activeSortStyle.weight).toBe('600');
     expect(activeSortStyle.color).toBe(publicationStyle.color);
+    expect(publicationStyle.fontSize).toBe(firstRowTitleStyle.fontSize);
+    expect(activeSortStyle.fontSize).toBe(firstRowTitleStyle.fontSize);
 
     // Активная сортировка всегда видна; неактивные стрелки проявляются только при hover/focus.
     const activeSortArrow = activeSort.locator('span[aria-hidden="true"]');
