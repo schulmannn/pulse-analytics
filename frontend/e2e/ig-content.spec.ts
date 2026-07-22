@@ -215,9 +215,10 @@ test.describe('Instagram Контент 2.0 (desktop)', () => {
     await expect(inspector).toBeVisible();
   });
 
-  test('Astryx-панель вида: плотность строк, выравнивание и видимость колонок', async ({ page }) => {
+  test('shadcn-таблица: фиксированная плотность, спокойная поверхность и видимость колонок', async ({ page }, testInfo) => {
     await boot(page);
     await page.goto('/instagram/content');
+    const card = page.locator('[data-ig-content-publications]');
     const tableShell = page.locator('[data-ig-content-table]');
     const table = page.locator('[data-ig-content-table] table');
     const firstRow = table.locator('tbody tr').first();
@@ -227,37 +228,32 @@ test.describe('Instagram Контент 2.0 (desktop)', () => {
     // В таблице нет вложенного вертикального скролла: страницу прокручивает только dashboard shell.
     await expect.poll(() => tableShell.evaluate((node) => getComputedStyle(node).overflowY)).toBe('hidden');
 
-    // Подписи и контролы образуют одну горизонтальную строку.
-    const columns = page.getByRole('combobox', { name: 'Колонки' });
-    const density = page.getByRole('radiogroup', { name: 'Плотность строк' });
-    const [columnsCenter, densityCenter] = await Promise.all([
-      columns.evaluate((node) => {
-        const rect = node.getBoundingClientRect();
-        return rect.top + rect.height / 2;
-      }),
-      density.evaluate((node) => {
-        const rect = node.getBoundingClientRect();
-        return rect.top + rect.height / 2;
-      }),
+    // Плотность фиксирована: пользовательского переключателя и технического атрибута больше нет.
+    await expect(page.getByRole('radiogroup', { name: 'Плотность строк' })).toHaveCount(0);
+    await expect(table).not.toHaveAttribute('data-density', /.+/);
+
+    // Карточка и вложенная таблица используют один почти чёрный background; граница создаёт
+    // иерархию без отдельной серой подложки. Неотмеченный checkbox остаётся полупрозрачным.
+    const [cardBackground, tableBackground, tableBorderRadius, checkboxBackground] = await Promise.all([
+      card.evaluate((node) => getComputedStyle(node).backgroundColor),
+      tableShell.evaluate((node) => getComputedStyle(node).backgroundColor),
+      tableShell.evaluate((node) => getComputedStyle(node).borderRadius),
+      firstRow.getByTestId('ig-post-select').evaluate((node) => getComputedStyle(node).backgroundColor),
     ]);
-    expect(Math.abs(columnsCenter - densityCenter)).toBeLessThanOrEqual(2);
+    expect(tableBackground).toBe(cardBackground);
+    expect(tableBorderRadius).not.toBe('0px');
+    expect(checkboxBackground).not.toBe('rgb(0, 0, 0)');
+    await testInfo.attach('ig-content-shadcn-table', {
+      body: await page.screenshot({ fullPage: true }),
+      contentType: 'image/png',
+    });
 
-    // Проверяем не только состояние контрола, но и фактическую высоту строки во всех режимах.
-    await expect(table).toHaveAttribute('data-density', 'balanced');
-    const balancedHeight = await firstRow.evaluate((node) => node.getBoundingClientRect().height);
-    await page.getByRole('radio', { name: 'Плотно' }).click();
-    await expect(table).toHaveAttribute('data-density', 'compact');
-    const compactHeight = await firstRow.evaluate((node) => node.getBoundingClientRect().height);
-    await page.getByRole('radio', { name: 'Свободно' }).click();
-    await expect(table).toHaveAttribute('data-density', 'spacious');
-    const spaciousHeight = await firstRow.evaluate((node) => node.getBoundingClientRect().height);
-    expect(balancedHeight - compactHeight).toBeGreaterThanOrEqual(6);
-    expect(spaciousHeight - balancedHeight).toBeGreaterThanOrEqual(6);
-
-    // Видимость колонок — Astryx MultiSelector. «Просмотры» видна по умолчанию, скрываем её.
+    // Видимость колонок — shadcn DropdownMenu. «Просмотры» видна по умолчанию, скрываем её.
+    const columns = page.getByRole('button', { name: 'Колонки' });
+    await expect(columns).toBeVisible();
     await expect(page.getByRole('columnheader', { name: /Просмотры/ })).toBeVisible();
     await columns.click();
-    await page.getByRole('option', { name: 'Просмотры' }).click();
+    await page.getByRole('menuitemcheckbox', { name: 'Просмотры' }).click();
     await page.keyboard.press('Escape');
     await expect(page.getByRole('columnheader', { name: /Просмотры/ })).toHaveCount(0);
     await expect(page.getByRole('columnheader', { name: /Дата/ })).toBeVisible();

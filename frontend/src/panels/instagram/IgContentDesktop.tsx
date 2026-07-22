@@ -5,12 +5,8 @@ import { Token } from '@astryxdesign/core/Token';
 import { MetadataList, MetadataListItem } from '@astryxdesign/core/MetadataList';
 import { Text as AxText } from '@astryxdesign/core/Text';
 import { Button as AxButton } from '@astryxdesign/core/Button';
-import {
-  WorkspaceInspector,
-  WorkspaceSurface,
-  WorkspaceViewToolbar,
-  type WorkspaceDensity,
-} from '@/components/data-workspace';
+import { ChevronDown } from 'lucide-react';
+import { WorkspaceInspector, WorkspaceSurface } from '@/components/data-workspace';
 import type { IgData } from '@/lib/useIgData';
 import type { IgPost, CampaignPostInput } from '@/api/schemas';
 import { useIgTags, useRemoveCampaignPosts } from '@/api/queries';
@@ -18,6 +14,12 @@ import { ChartSection } from '@/components/ChartWidget';
 import { PillSelect } from '@/components/PillSelect';
 import { SearchField } from '@/components/SearchField';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { WidgetGroup } from '@/components/widgets/WidgetGroup';
 import { Section } from '@/components/instagram/shared';
 import {
@@ -60,10 +62,9 @@ import { cn } from '@/lib/utils';
 import { useIgScopedPosts, toCampaignItems } from '@/panels/instagram/igContentScope';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Desktop — Astryx data-workspace pilot: dense Publications table + a scoped Astryx
-// table toolbar (column visibility · density), Astryx active-filter tokens, an
-// adjacent selected-post inspector, and the secondary analyses behind a compact tab.
-// The whole surface is wrapped in a pilot-scoped <Theme> that mirrors the app's mode;
+// Desktop — shadcn-style Publications table with a scoped Astryx inspector and active-filter
+// tokens. Column visibility stays local to the table; row density is intentionally fixed.
+// The surface remains wrapped in a scoped <Theme> for the Astryx primitives only;
 // all business behaviour (URL-backed filters, campaign scope, selection/bulk actions,
 // sort/median semantics, empty/loading/error) is preserved.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -133,9 +134,8 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // Снимок выбора при открытии диалога (onDone чистит selection; диалог живёт до экрана результата).
   const [addItems, setAddItems] = useState<CampaignPostInput[] | null>(null);
-  // Table view state (local, not URL-backed): which columns show + row density.
+  // Table view state (local, not URL-backed): which optional metric columns are visible.
   const [visibleCols, setVisibleCols] = useState<string[]>(ALL_COLUMN_KEYS);
-  const [density, setDensity] = useState<WorkspaceDensity>('balanced');
 
   // Сброс выбора/инспектора при смене источника/кампании/окна/фильтров (примитивные deps — window.* стабильны).
   useEffect(() => {
@@ -274,31 +274,55 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
             />
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs text-muted-foreground">
-          <span className="tabular-nums" data-testid="ig-content-result-count">{fmt.num(rows.length)} публ.</span>
-          {hasContentFilters && (
-            <button type="button" onClick={() => update({ q: '', format: 'all' })} className="text-2xs font-medium text-primary hover:underline">
-              Сбросить фильтры
-            </button>
-          )}
-          {campaignId != null && campaignPostsQ.data && (
-            <span className="tabular-nums">
-              {fmt.num(scope.length)} из {fmt.num(campaignPostsQ.data.posts.length)} публ. кампании — из этого источника
-            </span>
-          )}
-          {scope.length > 0 && reachMedian == null && <span>сравнение появится от {MEDIAN_MIN_SAMPLE} публикаций</span>}
+        <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
+          <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 text-2xs text-muted-foreground">
+            <span className="tabular-nums" data-testid="ig-content-result-count">{fmt.num(rows.length)} публ.</span>
+            {hasContentFilters && (
+              <button type="button" onClick={() => update({ q: '', format: 'all' })} className="text-2xs font-medium text-primary hover:underline">
+                Сбросить фильтры
+              </button>
+            )}
+            {campaignId != null && campaignPostsQ.data && (
+              <span className="tabular-nums">
+                {fmt.num(scope.length)} из {fmt.num(campaignPostsQ.data.posts.length)} публ. кампании — из этого источника
+              </span>
+            )}
+            {scope.length > 0 && reachMedian == null && <span>сравнение появится от {MEDIAN_MIN_SAMPLE} публикаций</span>}
+          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                aria-label="Колонки"
+                className="h-9 gap-2 bg-background/70"
+              >
+                Колонки
+                <ChevronDown className="size-4 opacity-60" aria-hidden="true" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52">
+              {COLUMN_OPTIONS.map((option) => (
+                <DropdownMenuCheckboxItem
+                  key={option.value}
+                  checked={visibleCols.includes(option.value)}
+                  onCheckedChange={(checked) => {
+                    const next = checked
+                      ? ALL_COLUMN_KEYS.filter(
+                          (key) => key === option.value || visibleCols.includes(key),
+                        )
+                      : visibleCols.filter((key) => key !== option.value);
+                    updateVisibleColumns(next);
+                  }}
+                >
+                  {option.label}
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
-      {/* Reusable data-workspace view toolbar — column visibility + row density. The search/format
-          filters above stay native for their established URL/selectPill contracts. */}
-      <WorkspaceViewToolbar
-        columns={COLUMN_OPTIONS}
-        visibleColumns={visibleCols}
-        onVisibleColumnsChange={updateVisibleColumns}
-        selectAllLabel="Все показатели"
-        density={density}
-        onDensityChange={setDensity}
-      />
       {/* Активные фильтры — снимаемые Astryx-токены; модель уже в URL (igContentFilters), токены
           лишь визуализируют её и снимают по одному. */}
       {hasContentFilters && (
@@ -416,14 +440,14 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
   );
   const campaignDataBlocked = campaignId != null && (campaignPostsQ.isPending || campaignPostsQ.isError);
 
-  // Self-contained shadcn card shell — the header (tabs/export + filters/table-view/actions) sits on a
-  // tinted rule above whatever body the current state renders (skeleton / error / empty / table).
+  // Self-contained shadcn card shell: a quiet background and a separately bordered table keep the
+  // controls and rows visually distinct without introducing a large grey workspace surface.
   const publicationsCard = (body: ReactNode) => (
     <section
       data-ig-content-publications
-      className="overflow-hidden rounded-2xl border border-border bg-card shadow-xs dark:border-white/6"
+      className="overflow-hidden rounded-2xl border border-border/75 bg-background shadow-xs"
     >
-      <div className="space-y-3 border-b border-border px-4 py-4 sm:px-5">{toolbar}</div>
+      <div className="space-y-3 px-4 py-4 sm:px-5">{toolbar}</div>
       {body}
     </section>
   );
@@ -458,17 +482,18 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
   } else {
     cardBody = (
       <div
-        className="overflow-x-auto overflow-y-hidden overscroll-x-contain [contain:paint]"
+        className="mx-4 mb-4 overflow-x-auto overflow-y-hidden overscroll-x-contain rounded-xl border border-border/75 bg-background [contain:paint] sm:mx-5 sm:mb-5"
         data-ig-content-table
       >
-        <table className="data-table text-left text-sm" data-density={density}>
+        <table className="data-table ig-content-table text-left text-sm">
           <thead>
-            <tr className={cn('border-b border-border bg-muted/25 text-2xs font-medium tracking-wide text-muted-foreground')}>
+            <tr className="text-2xs font-medium tracking-wide text-muted-foreground">
               <th className="w-10 pl-4 pr-2 sm:pl-5">
                 <Checkbox
                   aria-label="Выбрать все видимые публикации"
                   checked={allVisibleSelected}
                   onCheckedChange={toggleAllVisible}
+                  className="border-muted-foreground/35 bg-muted/20 shadow-none"
                 />
               </th>
               <th className="w-12 pl-0 pr-3 text-center"></th>
@@ -493,7 +518,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
               </th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-border">
+          <tbody>
             {rows.map((post, idx) => {
               const clickable = post.id != null;
               const isOpen = post.id != null && post.id === openId;
@@ -522,6 +547,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
                         checked={selected.has(post.id)}
                         onCheckedChange={() => toggleSelect(post.id!)}
                         data-testid="ig-post-select"
+                        className="border-muted-foreground/35 bg-muted/20 shadow-none"
                       />
                     )}
                   </td>
