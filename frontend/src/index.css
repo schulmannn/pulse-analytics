@@ -297,11 +297,10 @@
   &.data-table > thead > tr > th {
     height: 3rem;
     border-bottom-color: hsl(var(--border) / 0.72);
-    background: hsl(var(--background) / 0.96);
+    background: hsl(var(--background));
     padding-block: 0.5rem;
     color: hsl(var(--foreground));
     font-weight: 600;
-    backdrop-filter: blur(8px);
   }
   &.data-table > tbody > tr > td,
   &.data-table > tbody > tr > th {

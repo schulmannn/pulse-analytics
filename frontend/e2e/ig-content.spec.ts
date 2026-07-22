@@ -320,15 +320,21 @@ test.describe('Instagram Контент 2.0 (desktop)', () => {
       const pageHeader = document.querySelector('[data-feed-page-header]');
       const table = document.querySelector('[data-ig-content-table] table');
       if (!header || !pageHeader || !table) throw new Error('Instagram sticky header geometry is unavailable');
+      const headerCell = header.querySelector('th');
       return {
         headerTop: header.getBoundingClientRect().top,
         pageHeaderBottom: pageHeader.getBoundingClientRect().bottom,
         headerWidth: header.getBoundingClientRect().width,
         tableViewportWidth: table.parentElement?.clientWidth ?? 0,
+        headerBackground: getComputedStyle(header).backgroundColor,
+        headerCellBackground: headerCell ? getComputedStyle(headerCell).backgroundColor : '',
+        tableBackground: getComputedStyle(table.parentElement ?? table).backgroundColor,
       };
     });
     expect(Math.abs(stickyGeometry.headerTop - stickyGeometry.pageHeaderBottom)).toBeLessThanOrEqual(3);
     expect(Math.abs(stickyGeometry.headerWidth - stickyGeometry.tableViewportWidth)).toBeLessThanOrEqual(2);
+    expect(stickyGeometry.headerBackground).toBe(stickyGeometry.tableBackground);
+    expect(stickyGeometry.headerCellBackground).toBe(stickyGeometry.tableBackground);
     await testInfo.attach('ig-content-sticky-header', {
       body: await page.screenshot(),
       contentType: 'image/png',

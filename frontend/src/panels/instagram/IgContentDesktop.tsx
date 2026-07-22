@@ -554,7 +554,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
         >
           <SortButton label="Дата" active={filters.sort === 'date'} order={filters.order} onClick={() => toggleSort('date')} />
         </th>
-        <th aria-hidden="true" className="sticky right-0 z-[2] w-10 bg-background/96 px-2"></th>
+        <th aria-hidden="true" className="sticky right-0 z-[2] w-10 bg-background px-2"></th>
       </tr>
     </thead>
   );
@@ -563,7 +563,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
     ? createPortal(
         <div
           data-ig-content-sticky-header
-          className="fixed z-sticky overflow-hidden border-b border-border/75 bg-background/95 shadow-sm backdrop-blur-md"
+          className="fixed z-sticky overflow-hidden border-b border-border/75 bg-background shadow-sm"
           style={{ top: stickyHeader.top, left: stickyHeader.left, width: stickyHeader.width }}
         >
           <table
