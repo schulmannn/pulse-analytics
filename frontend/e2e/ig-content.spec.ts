@@ -259,6 +259,53 @@ test.describe('Instagram Контент 2.0 (desktop)', () => {
     expect(activeSortStyle.weight).toBe('600');
     expect(activeSortStyle.color).toBe(publicationStyle.color);
 
+    // Активная сортировка всегда видна; неактивные стрелки проявляются только при hover/focus.
+    const activeSortArrow = activeSort.locator('span[aria-hidden="true"]');
+    const inactiveSort = page.getByRole('button', { name: 'Просмотры' });
+    const inactiveSortArrow = inactiveSort.locator('span[aria-hidden="true"]');
+    await expect.poll(() => activeSortArrow.evaluate((node) => getComputedStyle(node).opacity)).toBe('1');
+    await expect.poll(() => inactiveSortArrow.evaluate((node) => getComputedStyle(node).opacity)).toBe('0');
+    await inactiveSort.hover();
+    await expect.poll(() => inactiveSortArrow.evaluate((node) => getComputedStyle(node).opacity)).toBe('1');
+
+    // Заголовок остаётся сразу под sticky-заголовком страницы, пока таблица в кадре. Отдельного
+    // вертикального скроллера у таблицы по-прежнему нет.
+    await page.setViewportSize({ width: 1440, height: 520 });
+    const main = page.locator('main');
+    await main.evaluate((node) => {
+      const scroller = node.parentElement;
+      const header = node.querySelector('[data-ig-content-table] thead');
+      const pageHeader = node.querySelector('[data-feed-page-header]');
+      if (!scroller || !header || !pageHeader) throw new Error('Instagram table scroll geometry is unavailable');
+      const delta = header.getBoundingClientRect().top - pageHeader.getBoundingClientRect().bottom + 80;
+      scroller.scrollTop += delta;
+    });
+    const stickyHeader = page.locator('[data-ig-content-sticky-header]');
+    await expect(stickyHeader).toBeVisible();
+    const stickyGeometry = await page.evaluate(() => {
+      const header = document.querySelector('[data-ig-content-sticky-header]');
+      const pageHeader = document.querySelector('[data-feed-page-header]');
+      const table = document.querySelector('[data-ig-content-table] table');
+      if (!header || !pageHeader || !table) throw new Error('Instagram sticky header geometry is unavailable');
+      return {
+        headerTop: header.getBoundingClientRect().top,
+        pageHeaderBottom: pageHeader.getBoundingClientRect().bottom,
+        headerWidth: header.getBoundingClientRect().width,
+        tableViewportWidth: table.parentElement?.clientWidth ?? 0,
+      };
+    });
+    expect(Math.abs(stickyGeometry.headerTop - stickyGeometry.pageHeaderBottom)).toBeLessThanOrEqual(3);
+    expect(Math.abs(stickyGeometry.headerWidth - stickyGeometry.tableViewportWidth)).toBeLessThanOrEqual(2);
+    await testInfo.attach('ig-content-sticky-header', {
+      body: await page.screenshot(),
+      contentType: 'image/png',
+    });
+    await main.evaluate((node) => {
+      if (node.parentElement) node.parentElement.scrollTop = 0;
+    });
+    await expect(stickyHeader).toHaveCount(0);
+    await page.setViewportSize({ width: 1440, height: 900 });
+
     // В таблице нет вложенного вертикального скролла: страницу прокручивает только dashboard shell.
     await expect.poll(() => tableShell.evaluate((node) => getComputedStyle(node).overflowY)).toBe('hidden');
 

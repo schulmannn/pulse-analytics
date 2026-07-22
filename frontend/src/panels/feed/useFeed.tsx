@@ -43,7 +43,7 @@ export function FeedBlock({
     <section data-feed-block={section} className="scroll-mt-4">
       {/* Sticky page header (shared geometry with Home): «Обзор» stays put while the widgets scroll
           under it, over a solid canvas bg with no hairline — the strip simply clips the content. */}
-      <div className={cn(PAGE_HEADER_SHELL, 'flex items-center justify-between gap-3')}>
+      <div data-feed-page-header className={cn(PAGE_HEADER_SHELL, 'flex items-center justify-between gap-3')}>
         <h2 className="min-w-0 truncate text-2xl font-medium tracking-tight text-foreground">{title}</h2>
         {headerRight}
       </div>

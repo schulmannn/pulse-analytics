@@ -291,25 +291,27 @@
   /* The Instagram publications table follows the quieter shadcn data-table surface instead of
      inheriting the grey dashboard treatment from the shared data-table utility. */
   background: hsl(var(--background));
-  & > thead > tr {
+  &.data-table > thead > tr {
     background: transparent;
   }
-  & > thead > tr > th {
+  &.data-table > thead > tr > th {
     height: 3rem;
     border-bottom-color: hsl(var(--border) / 0.72);
+    background: hsl(var(--background) / 0.96);
     padding-block: 0.5rem;
     color: hsl(var(--foreground));
     font-weight: 600;
+    backdrop-filter: blur(8px);
   }
-  & > tbody > tr > td,
-  & > tbody > tr > th {
+  &.data-table > tbody > tr > td,
+  &.data-table > tbody > tr > th {
     padding-block: 0.5rem;
   }
-  & > tbody > tr + tr > * {
+  &.data-table > tbody > tr + tr > * {
     border-top-color: hsl(var(--border) / 0.52);
   }
-  & > tbody > tr:hover,
-  & > tbody > tr:focus-within {
+  &.data-table > tbody > tr:hover,
+  &.data-table > tbody > tr:focus-within {
     background: hsl(var(--muted) / 0.16);
   }
 }

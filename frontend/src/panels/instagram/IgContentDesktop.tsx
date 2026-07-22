@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
 // Astryx runtime primitives (scoped design-system rollout) — subpath imports for tree-shaking.
 import { Token } from '@astryxdesign/core/Token';
@@ -119,6 +120,14 @@ const COLUMN_OPTIONS: { value: string; label: string }[] = [
 ];
 const ALL_COLUMN_KEYS = COLUMN_OPTIONS.map((o) => o.value);
 
+interface StickyHeaderGeometry {
+  top: number;
+  left: number;
+  width: number;
+  tableWidth: number;
+  scrollLeft: number;
+}
+
 export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) {
   const [params, setParams] = useSearchParams();
   const paramsRef = useRef(params);
@@ -136,6 +145,10 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
   const [addItems, setAddItems] = useState<CampaignPostInput[] | null>(null);
   // Table view state (local, not URL-backed): which optional metric columns are visible.
   const [visibleCols, setVisibleCols] = useState<string[]>(ALL_COLUMN_KEYS);
+  const tableShellRef = useRef<HTMLDivElement>(null);
+  const tableRef = useRef<HTMLTableElement>(null);
+  const tableHeaderRef = useRef<HTMLTableSectionElement>(null);
+  const [stickyHeader, setStickyHeader] = useState<StickyHeaderGeometry | null>(null);
 
   // Сброс выбора/инспектора при смене источника/кампании/окна/фильтров (примитивные deps — window.* стабильны).
   useEffect(() => {
@@ -184,6 +197,77 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
   const reachMedian = medians.reach;
 
   const shownMetricCols = METRIC_COLS.filter((c) => visibleCols.includes(c.key));
+
+  // The table needs horizontal overflow, which makes native CSS sticky bind to that shell instead
+  // of the dashboard's vertical scroller. Mirror only the header into a fixed portal while the
+  // original header is above the sticky page title; horizontal scroll and column widths stay tied
+  // to the real table, and the dashboard remains the sole vertical scroller.
+  useLayoutEffect(() => {
+    const shell = tableShellRef.current;
+    const table = tableRef.current;
+    const header = tableHeaderRef.current;
+    if (!shell || !table || !header) {
+      setStickyHeader(null);
+      return;
+    }
+
+    const dashboardScroller = shell.closest('main')?.parentElement;
+    const feedHeader = shell.closest('[data-feed-block]')?.querySelector<HTMLElement>('[data-feed-page-header]');
+    if (!dashboardScroller || !feedHeader) return;
+
+    let frame = 0;
+    const measure = () => {
+      frame = 0;
+      const shellRect = shell.getBoundingClientRect();
+      const tableRect = table.getBoundingClientRect();
+      const headerRect = header.getBoundingClientRect();
+      const stickyTop = feedHeader.getBoundingClientRect().bottom;
+      const shouldStick = headerRect.top < stickyTop && tableRect.bottom > stickyTop + headerRect.height;
+
+      if (!shouldStick) {
+        setStickyHeader((current) => (current == null ? current : null));
+        return;
+      }
+
+      const next: StickyHeaderGeometry = {
+        top: Math.round(stickyTop),
+        left: Math.round(shellRect.left + shell.clientLeft),
+        width: Math.round(shell.clientWidth),
+        tableWidth: Math.round(tableRect.width),
+        scrollLeft: Math.round(shell.scrollLeft),
+      };
+      setStickyHeader((current) =>
+        current != null &&
+        current.top === next.top &&
+        current.left === next.left &&
+        current.width === next.width &&
+        current.tableWidth === next.tableWidth &&
+        current.scrollLeft === next.scrollLeft
+          ? current
+          : next,
+      );
+    };
+    const scheduleMeasure = () => {
+      if (frame === 0) frame = window.requestAnimationFrame(measure);
+    };
+
+    measure();
+    dashboardScroller.addEventListener('scroll', scheduleMeasure, { passive: true });
+    shell.addEventListener('scroll', scheduleMeasure, { passive: true });
+    window.addEventListener('resize', scheduleMeasure);
+    const resizeObserver = new ResizeObserver(scheduleMeasure);
+    resizeObserver.observe(shell);
+    resizeObserver.observe(table);
+    resizeObserver.observe(feedHeader);
+
+    return () => {
+      dashboardScroller.removeEventListener('scroll', scheduleMeasure);
+      shell.removeEventListener('scroll', scheduleMeasure);
+      window.removeEventListener('resize', scheduleMeasure);
+      resizeObserver.disconnect();
+      if (frame !== 0) window.cancelAnimationFrame(frame);
+    };
+  }, [rows.length, visibleCols]);
 
   const updateVisibleColumns = (next: string[]) => {
     setVisibleCols(next);
@@ -432,6 +516,66 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
   );
   const campaignDataBlocked = campaignId != null && (campaignPostsQ.isPending || campaignPostsQ.isError);
 
+  const renderTableHeader = (floating = false) => (
+    <thead
+      ref={floating ? undefined : tableHeaderRef}
+      aria-hidden={!floating && stickyHeader != null ? true : undefined}
+    >
+      <tr className="text-2xs font-semibold tracking-wide text-foreground">
+        <th className="w-10 pl-4 pr-2 sm:pl-5">
+          <Checkbox
+            aria-label="Выбрать все видимые публикации"
+            checked={allVisibleSelected}
+            onCheckedChange={toggleAllVisible}
+            className="border-muted-foreground/35 bg-muted/20 shadow-none"
+          />
+        </th>
+        <th className="w-12 pl-0 pr-3 text-center"></th>
+        <th className="min-w-[240px] px-3">Публикация</th>
+        {shownMetricCols.map((c) => {
+          const active = c.key === filters.sort;
+          return (
+            <th
+              key={c.key}
+              aria-sort={active ? (filters.order === 'desc' ? 'descending' : 'ascending') : undefined}
+              className="w-[104px] px-3 text-right"
+            >
+              <SortButton label={c.label} active={active} order={filters.order} onClick={() => toggleSort(c.key)} />
+            </th>
+          );
+        })}
+        <th
+          aria-sort={filters.sort === 'date' ? (filters.order === 'desc' ? 'descending' : 'ascending') : undefined}
+          className="w-[96px] px-3 pr-4 text-right sm:pr-5"
+        >
+          <SortButton label="Дата" active={filters.sort === 'date'} order={filters.order} onClick={() => toggleSort('date')} />
+        </th>
+      </tr>
+    </thead>
+  );
+
+  const floatingTableHeader = stickyHeader != null && typeof document !== 'undefined'
+    ? createPortal(
+        <div
+          data-ig-content-sticky-header
+          className="fixed z-sticky overflow-hidden border-b border-border/75 bg-background/95 shadow-sm backdrop-blur-md"
+          style={{ top: stickyHeader.top, left: stickyHeader.left, width: stickyHeader.width }}
+        >
+          <table
+            aria-label="Закреплённые заголовки таблицы публикаций"
+            className="data-table ig-content-table text-left text-sm"
+            style={{
+              width: stickyHeader.tableWidth,
+              transform: `translateX(-${stickyHeader.scrollLeft}px)`,
+            }}
+          >
+            {renderTableHeader(true)}
+          </table>
+        </div>,
+        document.body,
+      )
+    : null;
+
   // Self-contained shadcn card shell: a quiet background and a separately bordered table keep the
   // controls and rows visually distinct without introducing a large grey workspace surface.
   const publicationsCard = (body: ReactNode) => (
@@ -474,42 +618,12 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
   } else {
     cardBody = (
       <div
+        ref={tableShellRef}
         className="mx-4 mb-4 overflow-x-auto overflow-y-hidden overscroll-x-contain rounded-xl border border-border/75 bg-background [contain:paint] sm:mx-5 sm:mb-5"
         data-ig-content-table
       >
-        <table className="data-table ig-content-table text-left text-sm">
-          <thead>
-            <tr className="text-2xs font-semibold tracking-wide text-foreground">
-              <th className="w-10 pl-4 pr-2 sm:pl-5">
-                <Checkbox
-                  aria-label="Выбрать все видимые публикации"
-                  checked={allVisibleSelected}
-                  onCheckedChange={toggleAllVisible}
-                  className="border-muted-foreground/35 bg-muted/20 shadow-none"
-                />
-              </th>
-              <th className="w-12 pl-0 pr-3 text-center"></th>
-              <th className="min-w-[240px] px-3">Публикация</th>
-              {shownMetricCols.map((c) => {
-                const active = c.key === filters.sort;
-                return (
-                  <th
-                    key={c.key}
-                    aria-sort={active ? (filters.order === 'desc' ? 'descending' : 'ascending') : undefined}
-                    className="w-[104px] px-3 text-right"
-                  >
-                    <SortButton label={c.label} active={active} order={filters.order} onClick={() => toggleSort(c.key)} />
-                  </th>
-                );
-              })}
-              <th
-                aria-sort={filters.sort === 'date' ? (filters.order === 'desc' ? 'descending' : 'ascending') : undefined}
-                className="w-[96px] px-3 pr-4 text-right sm:pr-5"
-              >
-                <SortButton label="Дата" active={filters.sort === 'date'} order={filters.order} onClick={() => toggleSort('date')} />
-              </th>
-            </tr>
-          </thead>
+        <table ref={tableRef} className="data-table ig-content-table text-left text-sm">
+          {renderTableHeader()}
           <tbody>
             {rows.map((post, idx) => {
               const clickable = post.id != null;
@@ -616,6 +730,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
       {!campaignDataBlocked && secondaryBlock}
       {detail}
       {dialog}
+      {floatingTableHeader}
     </div>
   );
 }
@@ -770,10 +885,18 @@ function SortButton({ label, active, order, onClick }: { label: string; active: 
     <button
       type="button"
       onClick={onClick}
-      className="ml-auto inline-flex items-center gap-1 font-semibold tabular-nums text-foreground transition-colors hover:text-foreground/80"
+      className="group ml-auto inline-flex items-center gap-1 font-semibold tabular-nums text-foreground transition-colors hover:text-foreground/80"
     >
       {label}
-      <span aria-hidden="true" className={cn('text-2xs', active ? 'text-primary' : 'text-ink3/60')}>
+      <span
+        aria-hidden="true"
+        className={cn(
+          'text-2xs transition-opacity',
+          active
+            ? 'text-primary'
+            : 'text-ink3/60 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100',
+        )}
+      >
         {active ? (order === 'desc' ? '↓' : '↑') : '↕'}
       </span>
     </button>
