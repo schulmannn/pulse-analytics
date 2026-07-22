@@ -35,8 +35,8 @@ import { AddToCampaignDialog } from '@/components/campaigns/AddToCampaignDialog'
 import { CampaignFilterControl } from '@/components/campaigns/CampaignFilterControl';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
-import { TableSkeleton } from '@/components/ui/dataSkeleton';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Skeleton } from '@/components/ui/skeleton';
 import { RichText } from '@/components/RichText';
 import { exportIgPosts } from '@/lib/igExport';
 import { exportFilename } from '@/lib/analyticsExport';
@@ -54,6 +54,7 @@ import {
   parseIgContentFilters,
   parseIgSecondaryView,
   sortIgPosts,
+  IG_CONTENT_SORT_NONE,
   type IgContentFilters,
   type IgContentFormat,
   type IgContentSort,
@@ -121,6 +122,18 @@ const COLUMN_OPTIONS: { value: string; label: string }[] = [
 const ALL_COLUMN_KEYS = COLUMN_OPTIONS.map((o) => o.value);
 const COLUMN_VISIBILITY_KEY = 'pulse_ig_content_columns';
 
+/** One page of the publications table; a footer appears only past this (task: pagination for large sets). */
+const PAGE_SIZE = 25;
+
+/**
+ * Monochrome selection: the checked box is a white/foreground chip with a black/background tick —
+ * never the primary-blue fill from the shared Checkbox primitive. Unchecked stays the quiet
+ * translucent field the sticky-header/e2e geometry expects.
+ */
+const IG_SELECT_CHECKBOX_CLASS =
+  'border-muted-foreground/35 bg-muted/20 shadow-none focus-visible:ring-foreground/40 ' +
+  'data-[state=checked]:border-foreground data-[state=checked]:bg-foreground data-[state=checked]:text-background';
+
 function readVisibleColumns(): string[] {
   if (typeof window === 'undefined') return ALL_COLUMN_KEYS;
   try {
@@ -171,6 +184,8 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
   const [addItems, setAddItems] = useState<CampaignPostInput[] | null>(null);
   // Table view state is intentionally not URL-backed, but survives a reload on this browser.
   const [visibleCols, setVisibleCols] = useState<string[]>(readVisibleColumns);
+  // Current 1-based page — only material once the result set exceeds one page (see PAGE_SIZE).
+  const [page, setPage] = useState(1);
   const tableShellRef = useRef<HTMLDivElement>(null);
   const tableRef = useRef<HTMLTableElement>(null);
   const tableHeaderRef = useRef<HTMLTableSectionElement>(null);
@@ -184,6 +199,13 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
     setOpenId(null);
     setDetailId(null);
   }, [channelId, campaignId, ig.window.since, ig.window.until, filters.q, filters.format]);
+
+  // Filtering / sorting / scope / period changes send the reader back to the first page (selection
+  // deliberately survives — it is kept separate from the reset above). Over-scroll past the last page
+  // is clamped below, so a shrinking result set can never strand the reader on an empty page.
+  useEffect(() => {
+    setPage(1);
+  }, [channelId, campaignId, ig.window.since, ig.window.until, filters.q, filters.format, filters.sort, filters.order]);
 
   useEffect(() => {
     paramsRef.current = params;
@@ -199,9 +221,14 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
     const current = paramsRef.current;
     commitParams(applyIgContentFilters(current, { ...parseIgContentFilters(current), ...patch }));
   };
-  const toggleSort = (key: IgContentFilters['sort']) => {
+  // Three-state cycle for a column: inactive → desc → asc → no sort. Clicking a different (inactive)
+  // column always restarts at desc. The no-sort third state resets order to the default so the URL
+  // never carries a meaningless `order`, and it preserves the filtered input order (see sortIgPosts).
+  const toggleSort = (key: IgContentSort) => {
     const current = parseIgContentFilters(paramsRef.current);
-    update(key === current.sort ? { order: current.order === 'desc' ? 'asc' : 'desc' } : { sort: key, order: 'desc' });
+    if (current.sort !== key) update({ sort: key, order: 'desc' });
+    else if (current.order === 'desc') update({ order: 'asc' });
+    else update({ sort: IG_CONTENT_SORT_NONE, order: 'desc' });
   };
   const setSecondary = (next: IgSecondaryView) =>
     commitParams(applyIgSecondaryView(paramsRef.current, next));
@@ -211,6 +238,23 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
   const scope = posts;
   const visible = filterIgPosts(scope, { q: filters.q, format: filters.format });
   const rows = sortIgPosts(visible, filters.sort, filters.order);
+
+  // Pagination is conditional: ≤ PAGE_SIZE rows render whole with no footer. Past that, slice a page
+  // and clamp the current page so filter/scope changes that shrink the set never leave an empty view.
+  // CSV export, the result count and the total selection all keep working off the FULL `rows` set.
+  const totalRows = rows.length;
+  const pageCount = Math.max(1, Math.ceil(totalRows / PAGE_SIZE));
+  const paginated = totalRows > PAGE_SIZE;
+  const currentPage = Math.min(page, pageCount);
+  const pageStart = (currentPage - 1) * PAGE_SIZE;
+  const pagedRows = paginated ? rows.slice(pageStart, pageStart + PAGE_SIZE) : rows;
+
+  // A background refetch can shrink the result set without changing any URL/scope dependency from
+  // the reset effect above. Persist the derived clamp back into state so the navigation callbacks
+  // never need several clicks to recover from a now-nonexistent page.
+  useEffect(() => {
+    setPage((previous) => Math.min(Math.max(1, previous), pageCount));
+  }, [pageCount]);
 
   const medianOf = (get: (p: IgPost) => number | null) =>
     periodMedian(scope.map(get).filter((v): v is number => v != null));
@@ -306,12 +350,14 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
       resizeObserver.disconnect();
       if (frame !== 0) window.cancelAnimationFrame(frame);
     };
-  }, [rows.length, visibleCols]);
+  }, [rows.length, currentPage, visibleCols]);
 
   const updateVisibleColumns = (next: string[]) => {
     setVisibleCols(next);
     persistVisibleColumns(next);
-    if (filters.sort !== 'date' && !next.includes(filters.sort)) {
+    // Hiding the actively-sorted metric column must leave a valid state → fall back to the
+    // always-present date column. The no-sort state and the date column are already valid.
+    if (filters.sort !== 'date' && filters.sort !== IG_CONTENT_SORT_NONE && !next.includes(filters.sort)) {
       update({ sort: 'date', order: 'desc' });
     }
   };
@@ -323,7 +369,9 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
       else next.add(id);
       return next;
     });
-  const visibleIds = rows.map((p) => p.id).filter((id): id is string => !!id);
+  // «Select all visible» = the rows actually on screen: the current page once pagination exists,
+  // otherwise the whole set (pagedRows === rows when unpaginated). Selection still spans pages.
+  const visibleIds = pagedRows.map((p) => p.id).filter((id): id is string => !!id);
   const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.has(id));
   const toggleAllVisible = () =>
     setSelected((prev) => {
@@ -533,7 +581,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
             aria-label="Выбрать все видимые публикации"
             checked={allVisibleSelected}
             onCheckedChange={toggleAllVisible}
-            className="border-muted-foreground/35 bg-muted/20 shadow-none"
+            className={IG_SELECT_CHECKBOX_CLASS}
           />
         </th>
         <th className="w-12 pl-0 pr-3 text-center"></th>
@@ -652,7 +700,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
   // ─── One card body per state (loading / error / empty / table) ────────────────
   let cardBody: ReactNode;
   if (campaignId != null && campaignPostsQ.isPending) {
-    cardBody = <TableSkeleton rows={3} columns={5} className="px-4 py-4 sm:px-5" />;
+    cardBody = <IgContentTableSkeleton metricCount={shownMetricCols.length} />;
   } else if (campaignId != null && campaignPostsQ.isError) {
     cardBody = (
       <ErrorState
@@ -671,15 +719,19 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
     );
   } else {
     cardBody = (
+      <>
       <div
         ref={tableShellRef}
-        className="mx-4 mb-4 overflow-x-auto overflow-y-hidden overscroll-x-contain rounded-xl border border-border/75 bg-background [contain:paint] sm:mx-5 sm:mb-5"
+        className={cn(
+          'mx-4 overflow-x-auto overflow-y-hidden overscroll-x-contain rounded-xl border border-border/75 bg-background [contain:paint] sm:mx-5',
+          paginated ? 'mb-3 sm:mb-3.5' : 'mb-4 sm:mb-5',
+        )}
         data-ig-content-table
       >
         <table ref={tableRef} className="data-table ig-content-table text-left text-sm">
           {renderTableHeader()}
           <tbody>
-            {rows.map((post, idx) => {
+            {pagedRows.map((post, idx) => {
               const clickable = post.id != null;
               const isOpen = post.id != null && post.id === openId;
               const isSelected = post.id != null && selected.has(post.id);
@@ -696,7 +748,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
                     isOpen
                       ? 'bg-primary/10'
                       : isSelected
-                        ? 'bg-primary/5 hover:bg-primary/8'
+                        ? 'bg-foreground/[0.04] hover:bg-foreground/[0.07]'
                         : 'hover:bg-muted/40',
                   )}
                 >
@@ -707,7 +759,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
                         checked={selected.has(post.id)}
                         onCheckedChange={() => toggleSelect(post.id!)}
                         data-testid="ig-post-select"
-                        className="border-muted-foreground/35 bg-muted/20 shadow-none"
+                        className={IG_SELECT_CHECKBOX_CLASS}
                       />
                     )}
                   </td>
@@ -768,6 +820,17 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
           </tbody>
         </table>
       </div>
+      {paginated && (
+        <IgContentPaginationFooter
+          page={currentPage}
+          pageCount={pageCount}
+          pageSize={PAGE_SIZE}
+          total={totalRows}
+          onPrev={() => setPage((p) => Math.max(1, p - 1))}
+          onNext={() => setPage((p) => Math.min(pageCount, p + 1))}
+        />
+      )}
+      </>
     );
   }
 
@@ -962,7 +1025,7 @@ function SortButton({ label, active, order, onClick }: { label: string; active: 
         className={cn(
           'text-2xs transition-opacity',
           active
-            ? 'text-primary'
+            ? 'text-foreground'
             : 'text-ink3/60 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100',
         )}
       >
@@ -1051,6 +1114,146 @@ function IgPostThumb({ post }: { post: IgPost }) {
           className={cn('absolute inset-0 h-full w-full object-cover', loaded ? 'opacity-100' : 'opacity-0')}
         />
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * Compact shadcn-style pagination footer — rendered only for result sets larger than one page. It
+ * reports the on-screen window as «X–Y из N» and moves with outline Назад/Вперёд buttons that
+ * disable at the boundaries. Lives inside the publications card, directly below the table.
+ */
+function IgContentPaginationFooter({
+  page,
+  pageCount,
+  pageSize,
+  total,
+  onPrev,
+  onNext,
+}: {
+  page: number;
+  pageCount: number;
+  pageSize: number;
+  total: number;
+  onPrev: () => void;
+  onNext: () => void;
+}) {
+  const from = (page - 1) * pageSize + 1;
+  const to = Math.min(page * pageSize, total);
+  return (
+    <nav
+      aria-label="Постраничная навигация публикаций"
+      data-testid="ig-content-pagination"
+      className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 px-4 py-3 sm:px-5"
+    >
+      <span className="text-xs tabular-nums text-muted-foreground" aria-live="polite" data-testid="ig-content-pagination-range">
+        {fmt.num(from)}–{fmt.num(to)} из {fmt.num(total)}
+      </span>
+      <div className="flex items-center gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={onPrev}
+          disabled={page <= 1}
+          aria-label="Предыдущая страница"
+        >
+          Назад
+        </Button>
+        <span className="px-1 text-xs tabular-nums text-muted-foreground">
+          {fmt.num(page)} / {fmt.num(pageCount)}
+        </span>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={onNext}
+          disabled={page >= pageCount}
+          aria-label="Следующая страница"
+        >
+          Вперёд
+        </Button>
+      </div>
+    </nav>
+  );
+}
+
+/**
+ * Table-shaped loading for the publications table — the real card/table shell, header hairline and
+ * column widths are preserved while ~6 non-interactive row skeletons stand in for the rows. Reused
+ * by campaign-scoped pending loads (inside the card) and by the initial-load page skeleton.
+ * Accessible: one busy status region; the mirrored table is aria-hidden and never focusable.
+ */
+export function IgContentTableSkeleton({ metricCount = METRIC_COLS.length }: { metricCount?: number }) {
+  const metrics = Array.from({ length: Math.max(0, metricCount) });
+  const skeletonRows = Array.from({ length: 6 });
+  return (
+    <div
+      role="status"
+      aria-busy="true"
+      aria-label="Загрузка публикаций"
+      data-testid="ig-content-table-skeleton"
+      className="mx-4 mb-4 overflow-hidden rounded-xl border border-border/75 bg-background sm:mx-5 sm:mb-5"
+    >
+      <table aria-hidden="true" className="data-table ig-content-table text-left text-sm">
+        <thead>
+          <tr className="text-2xs font-semibold tracking-wide text-foreground">
+            <th className="w-10 pl-4 pr-2 sm:pl-5"><Skeleton className="h-4 w-4 rounded" /></th>
+            <th className="w-12 pl-0 pr-3" />
+            <th className="min-w-[240px] px-3"><Skeleton className="h-3 w-24" /></th>
+            {metrics.map((_, i) => (
+              <th key={i} className="w-[104px] px-3"><Skeleton className="ml-auto h-3 w-12" /></th>
+            ))}
+            <th className="w-[96px] px-3 pr-4 sm:pr-5"><Skeleton className="ml-auto h-3 w-10" /></th>
+            <th className="w-10 px-2" />
+          </tr>
+        </thead>
+        <tbody>
+          {skeletonRows.map((_, r) => (
+            <tr key={r}>
+              <td className="pl-4 pr-2 sm:pl-5"><Skeleton className="h-4 w-4 rounded" /></td>
+              <td className="pl-0 pr-3"><Skeleton className="h-10 w-10 rounded-lg" /></td>
+              <td className="px-3">
+                <div className="space-y-1.5">
+                  <Skeleton className="h-3.5 w-40 max-w-full" />
+                  <Skeleton className="h-3 w-16 rounded-full" />
+                </div>
+              </td>
+              {metrics.map((_, i) => (
+                <td key={i} className="px-3"><Skeleton className="ml-auto h-3.5 w-12" /></td>
+              ))}
+              <td className="px-3 pr-4 sm:pr-5"><Skeleton className="ml-auto h-3 w-10" /></td>
+              <td className="w-10 px-2" />
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/**
+ * Initial-load skeleton for /instagram/content — the publications card shell (a toolbar band over
+ * the table-shaped skeleton) so a cold load reads as THIS page rather than the generic dashboard
+ * card skeleton. The table skeleton owns the busy status; the toolbar band is decorative.
+ */
+export function IgContentPageSkeleton() {
+  return (
+    <div className="space-y-8">
+      <section className="overflow-hidden rounded-2xl border border-border/75 bg-background shadow-xs">
+        <div className="space-y-3 px-4 py-4 sm:px-5" aria-hidden="true">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <Skeleton className="h-7 w-40 rounded-full" />
+            <Skeleton className="h-8 w-32 rounded-lg" />
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <Skeleton className="h-8 w-28 rounded-lg" />
+            <Skeleton className="h-8 w-64 rounded-lg" />
+            <Skeleton className="h-8 w-40 rounded-lg" />
+          </div>
+        </div>
+        <IgContentTableSkeleton />
+      </section>
     </div>
   );
 }

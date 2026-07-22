@@ -1,15 +1,17 @@
 import { useEffect, useState } from 'react';
-import { Outlet, useOutletContext, useSearchParams } from 'react-router-dom';
+import { Outlet, useLocation, useOutletContext, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useIgData } from '@/lib/useIgData';
 import type { IgData } from '@/lib/useIgData';
 import { useSelectedChannel } from '@/lib/channel-context';
+import { useMediaQuery } from '@/lib/useMediaQuery';
 import { usePagePeriod } from '@/lib/period';
 import { PeriodChips } from '@/components/PeriodChips';
 import { IgConnectPanel } from '@/components/instagram/health';
 import { ErrorState } from '@/components/ErrorState';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
+import { IgContentPageSkeleton } from '@/panels/instagram/IgContentDesktop';
 import { IgOverview } from '@/panels/instagram/IgOverview';
 import { IgAnalytics } from '@/panels/instagram/IgAnalytics';
 import { IgContent } from '@/panels/instagram/IgContent';
@@ -92,6 +94,14 @@ export function IgShell() {
   // The whole IG data cluster, fetched ONCE (React Query dedupes the underlying ig-* queries).
   const ig = useIgData();
   const { notice, dismiss } = useIgConnectNotice();
+  const location = useLocation();
+  const isDesktop = useMediaQuery('(min-width: 768px)');
+  // A cold load landing on the desktop publications table shows a table-shaped skeleton (its own
+  // geometry) rather than the generic dashboard card; every other IG route keeps the generic one.
+  const onContentTable =
+    isDesktop &&
+    location.pathname.endsWith('/instagram/content') &&
+    new URLSearchParams(location.search).get('view') !== 'campaigns';
 
   const banner = notice ? (
     <div
@@ -115,7 +125,9 @@ export function IgShell() {
     </div>
   ) : null;
 
-  if (ig.loading) return <div className="space-y-6">{banner}<InstagramSkeleton /></div>;
+  if (ig.loading) {
+    return <div className="space-y-6">{banner}{onContentTable ? <IgContentPageSkeleton /> : <InstagramSkeleton />}</div>;
+  }
   if (ig.error) {
     return (
       <div className="space-y-6">

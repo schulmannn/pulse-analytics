@@ -37,6 +37,12 @@ describe('parseIgContentFilters — normalises every param to a valid default', 
     expect(f.order).toBe('desc');
   });
 
+  it('parses the explicit no-sort third state (sort=none)', () => {
+    expect(parseIgContentFilters(new URLSearchParams('sort=none')).sort).toBe('none');
+    // A stray order alongside sort=none parses but is inert (sortIgPosts ignores it).
+    expect(parseIgContentFilters(new URLSearchParams('sort=none&order=asc'))).toMatchObject({ sort: 'none', order: 'asc' });
+  });
+
   it('keeps spaces while typing a multi-word query', () => {
     expect(parseIgContentFilters(new URLSearchParams('q=product%20launch')).q).toBe('product launch');
     expect(parseIgContentFilters(new URLSearchParams('q=launch%20')).q).toBe('launch ');
@@ -81,6 +87,18 @@ describe('applyIgContentFilters — defaults omitted, other params preserved', (
   it('round-trips: parse(apply(f)) === f', () => {
     const f = { q: 'sale', format: 'photo' as const, sort: 'views' as const, order: 'asc' as const };
     expect(parseIgContentFilters(applyIgContentFilters(new URLSearchParams(), f))).toEqual(f);
+  });
+
+  it('serialises sort=none and drops the now-meaningless order', () => {
+    const next = applyIgContentFilters(new URLSearchParams('sort=views&order=asc'), {
+      ...IG_CONTENT_DEFAULTS,
+      sort: 'none',
+      order: 'asc',
+    });
+    expect(next.get('sort')).toBe('none');
+    expect(next.has('order')).toBe(false);
+    // Round-trips: parse reads the no-sort state back with the default order.
+    expect(parseIgContentFilters(next).sort).toBe('none');
   });
 
   it('drops a whitespace-only query but preserves meaningful inter-word spaces', () => {
@@ -217,6 +235,16 @@ describe('sortIgPosts — direction + null-last stability', () => {
     const input = [post({ id: '1', reach: 5 }), post({ id: '2', reach: 5 }), post({ id: '3', reach: 5 })];
     expect(sortIgPosts(input, 'reach', 'desc').map((p) => p.id)).toEqual(['1', '2', '3']);
     expect(input.map((p) => p.id)).toEqual(['1', '2', '3']);
+  });
+
+  it('the no-sort state preserves the filtered input order via a non-mutating shallow copy', () => {
+    // Input order is deliberately NOT the reach order — «none» must keep it exactly, in either «order».
+    const input = [post({ id: '3', reach: 5 }), post({ id: '1', reach: 50 }), post({ id: '2', reach: 20 })];
+    const out = sortIgPosts(input, 'none', 'desc');
+    expect(out.map((p) => p.id)).toEqual(['3', '1', '2']);
+    expect(sortIgPosts(input, 'none', 'asc').map((p) => p.id)).toEqual(['3', '1', '2']);
+    expect(out).not.toBe(input); // shallow copy — never the same array reference
+    expect(input.map((p) => p.id)).toEqual(['3', '1', '2']); // caller array untouched
   });
 });
 

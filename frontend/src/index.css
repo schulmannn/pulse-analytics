@@ -319,12 +319,13 @@
   &.data-table > tbody > tr:focus-within {
     background: hsl(var(--muted) / 0.3);
   }
+  /* Monochrome selection — a subtle neutral foreground tint, never the primary-blue fill. */
   &.data-table > tbody > tr[data-ig-content-selected] {
-    background: hsl(var(--primary) / 0.05);
+    background: hsl(var(--foreground) / 0.04);
   }
   &.data-table > tbody > tr[data-ig-content-selected]:hover,
   &.data-table > tbody > tr[data-ig-content-selected]:focus-within {
-    background: hsl(var(--primary) / 0.08);
+    background: hsl(var(--foreground) / 0.07);
   }
   &.data-table > tbody > tr[data-ig-content-open],
   &.data-table > tbody > tr[data-ig-content-open]:hover,

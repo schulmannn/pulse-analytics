@@ -23,7 +23,11 @@ const IG_POSTS = [
   { id: 'p6', timestamp: iso(8 * DAY), media_type: 'IMAGE', reach: 1500, views: 1550, like_count: 60, comments_count: 4, saved: 9, shares: 4, total_interactions: 77, caption: 'midweek update #promo' },
 ];
 
-async function boot(page: Page, seedCampaignMembers: string[] = []) {
+async function boot(
+  page: Page,
+  seedCampaignMembers: string[] = [],
+  posts: Array<Record<string, unknown>> = IG_POSTS,
+) {
   const memberships = new Set(seedCampaignMembers);
   const campaignRow = () => ({
     id: 1, workspace_id: 1, name: 'Запуск', description: '', color: null, status: 'active',
@@ -62,7 +66,7 @@ async function boot(page: Page, seedCampaignMembers: string[] = []) {
     // IG data cluster.
     if (path === '/api/ig/profile') return json(200, { mock: false, username: 'igacct', name: 'IG аккаунт', followers_count: 12000, synced_at: Date.now() });
     if (path === '/api/ig/insights') return json(200, { mock: false, data: [] });
-    if (path === '/api/ig/posts') return json(200, { mock: false, data: IG_POSTS });
+    if (path === '/api/ig/posts') return json(200, { mock: false, data: posts });
     if (path === '/api/ig/breakdowns') return json(200, { mock: false, data: [] });
     if (path === '/api/ig/online') return json(200, { mock: false, data: [] });
     if (path === '/api/ig/stories') return json(200, { mock: false, data: [] });
@@ -96,12 +100,39 @@ test.describe('Instagram Контент 2.0 (desktop)', () => {
     test.skip(testInfo.project.name !== 'desktop-1440', 'desktop-таблица и её фильтры скрыты на мобильном');
   });
 
+  test('холодная загрузка сохраняет геометрию таблицы шестью skeleton-строками', async ({ page }, testInfo) => {
+    await boot(page);
+    let releasePosts!: () => void;
+    const postsReady = new Promise<void>((resolve) => { releasePosts = resolve; });
+    await page.route('**/api/ig/posts**', async (route) => {
+      await postsReady;
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ mock: false, data: IG_POSTS }) });
+    });
+
+    await page.goto('/instagram/content', { waitUntil: 'domcontentloaded' });
+    const skeleton = page.getByTestId('ig-content-table-skeleton');
+    await expect(skeleton).toBeVisible();
+    await expect(skeleton).toHaveAttribute('aria-busy', 'true');
+    await expect(skeleton.locator('thead th')).toHaveCount(11);
+    await expect(skeleton.locator('tbody tr')).toHaveCount(6);
+    await testInfo.attach('ig-content-table-skeleton', {
+      body: await page.screenshot(),
+      contentType: 'image/png',
+    });
+
+    releasePosts();
+    await expect(skeleton).toHaveCount(0);
+    await expect(page.locator('[data-ig-content-table] tbody tr')).toHaveCount(6);
+  });
+
   test('поиск/формат/сортировка + вторичный разбор сериализуются в URL, композируются и переживают reload', async ({ page }, testInfo) => {
     await boot(page);
     await page.goto('/instagram/content');
     const rows = page.locator('table tbody tr');
     await expect(rows).toHaveCount(6);
     await expect(page.getByTestId('ig-content-result-count')).toHaveText(/6 публ\./);
+    // ≤ 25 rows → no pagination footer at all.
+    await expect(page.getByTestId('ig-content-pagination')).toHaveCount(0);
     await testInfo.attach('ig-content-dark-desktop', { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' });
 
     // Чистый дефолт не засоряет URL.
@@ -430,5 +461,125 @@ test.describe('Instagram Контент 2.0 (desktop)', () => {
     await selectPill(page.getByTestId('campaign-filter'), { label: 'Все' });
     await expect(page).not.toHaveURL(/campaign=/);
     await expect(rows).toHaveCount(6);
+  });
+
+  test('трёхстадийная сортировка колонки: desc → asc → без сортировки, монохромная стрелка', async ({ page }) => {
+    await boot(page);
+    await page.goto('/instagram/content');
+    const saved = page.getByRole('button', { name: /Сохранения/ });
+    const savedHeader = page.getByRole('columnheader', { name: /Сохранения/ });
+
+    // 1-й клик неактивной колонки → desc (дефолт, order в URL нет), aria-sort=descending.
+    await saved.click();
+    await expect(page).toHaveURL(/sort=saved/);
+    await expect(page).not.toHaveURL(/order=/);
+    await expect(savedHeader).toHaveAttribute('aria-sort', 'descending');
+
+    // 2-й клик → asc.
+    await saved.click();
+    await expect(page).toHaveURL(/order=asc/);
+    await expect(savedHeader).toHaveAttribute('aria-sort', 'ascending');
+
+    // 3-й клик → без сортировки: sort=none, order из URL уходит, ни одна колонка не помечена aria-sort.
+    await saved.click();
+    await expect(page).toHaveURL(/sort=none/);
+    await expect(page).not.toHaveURL(/order=/);
+    await expect(page.locator('th[aria-sort]')).toHaveCount(0);
+
+    // Активная стрелка сортировки монохромна (белый foreground), не синий primary.
+    await saved.click(); // из none снова стартует с desc на этой колонке
+    await expect(savedHeader).toHaveAttribute('aria-sort', 'descending');
+    const arrowColor = await saved.locator('span[aria-hidden="true"]').evaluate((n) => getComputedStyle(n).color);
+    const foreground = await page.evaluate(() => getComputedStyle(document.body).color);
+    expect(arrowColor).toBe(foreground);
+
+    // Дип-линк ?sort=none воспроизводит состояние «без сортировки» после reload.
+    await page.goto('/instagram/content?sort=none');
+    await expect(page.locator('table tbody tr')).toHaveCount(6);
+    await expect(page.locator('th[aria-sort]')).toHaveCount(0);
+  });
+
+  test('монохромный выбор: строка и чекбокс белые/foreground, без синего primary', async ({ page }) => {
+    await boot(page);
+    await page.goto('/instagram/content');
+    const firstRow = page.locator('table tbody tr').first();
+    await firstRow.getByTestId('ig-post-select').click();
+    await expect(firstRow).toHaveAttribute('data-ig-content-selected', '');
+
+    const tone = await firstRow.evaluate((node) => {
+      const parse = (c: string) => (c.match(/[\d.]+/g) ?? []).map(Number);
+      const [r, g, b] = parse(getComputedStyle(node).backgroundColor);
+      const cb = node.querySelector('[data-testid="ig-post-select"]');
+      const check = cb ? parse(getComputedStyle(cb).backgroundColor) : [];
+      return { r, g, b, check };
+    });
+    const foreground = await page.evaluate(() => {
+      const c = (getComputedStyle(document.body).color.match(/[\d.]+/g) ?? []).map(Number);
+      return { r: c[0], g: c[1], b: c[2] };
+    });
+    // Селект-тинт строки — нейтральный серый (r==g==b), а не синий primary.
+    expect(tone.r).toBe(tone.g);
+    expect(tone.g).toBe(tone.b);
+    // Отмеченный чекбокс залит foreground (белым), не primary-синим.
+    expect(tone.check[0]).toBe(foreground.r);
+    expect(tone.check[1]).toBe(foreground.g);
+    expect(tone.check[2]).toBe(foreground.b);
+  });
+
+  test('пагинация только для больших наборов: футер, навигация, select-all страницы, полный CSV', async ({ page }, testInfo) => {
+    const many = Array.from({ length: 30 }, (_, i) => ({
+      id: `m${i + 1}`,
+      timestamp: iso((i + 1) * (DAY / 2)),
+      media_type: 'IMAGE',
+      reach: 3000 - i * 10,
+      views: 100,
+      like_count: 1,
+      comments_count: 0,
+      saved: 1,
+      shares: 0,
+      total_interactions: 2,
+      caption: `bulk post ${i + 1}`,
+    }));
+    await boot(page, [], many);
+    await page.goto('/instagram/content');
+    const rows = page.locator('table tbody tr');
+
+    // Первая страница = 25 строк, футер виден, счётчик — общее число.
+    await expect(rows).toHaveCount(25);
+    await expect(page.getByTestId('ig-content-result-count')).toHaveText(/30 публ\./);
+    const footer = page.getByTestId('ig-content-pagination');
+    await expect(footer).toBeVisible();
+    await expect(page.getByTestId('ig-content-pagination-range')).toHaveText('1–25 из 30');
+    const prev = page.getByRole('button', { name: 'Предыдущая страница' });
+    const next = page.getByRole('button', { name: 'Следующая страница' });
+    await expect(prev).toBeDisabled();
+
+    // «Выбрать все видимые» = только текущая страница (25), выбор переживает переход.
+    await page.getByLabel('Выбрать все видимые публикации').check();
+    await expect(page.getByText('Выбрано: 25')).toBeVisible();
+    await next.click();
+    await expect(rows).toHaveCount(5);
+    await expect(page.getByTestId('ig-content-pagination-range')).toHaveText('26–30 из 30');
+    await expect(next).toBeDisabled();
+    await expect(page.getByText('Выбрано: 25')).toBeVisible();
+    await testInfo.attach('ig-content-pagination-page-two', {
+      body: await page.screenshot(),
+      contentType: 'image/png',
+    });
+
+    // CSV со 2-й страницы всё равно экспортирует ВСЕ отфильтрованные строки (обе страницы).
+    const downloadPromise = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Экспорт показанных публикаций в CSV' }).click();
+    const download = await downloadPromise;
+    const downloadPath = await download.path();
+    if (!downloadPath) throw new Error('Instagram content CSV has no local download path');
+    const csv = await readFile(downloadPath, 'utf8');
+    expect(csv).toContain('bulk post 1');
+    expect(csv).toContain('bulk post 30');
+
+    // Фильтрация сбрасывает на 1-ю страницу и, став ≤25, убирает футер целиком.
+    await page.getByLabel('Поиск по публикациям').fill('bulk post 5');
+    await expect(rows).toHaveCount(1);
+    await expect(footer).toHaveCount(0);
   });
 });

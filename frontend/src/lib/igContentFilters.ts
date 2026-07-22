@@ -19,7 +19,14 @@ import type { IgPost } from '@/api/schemas';
 
 export type IgContentFormat = 'all' | 'photo' | 'video' | 'carousel' | 'reels';
 export type IgContentSort = 'date' | 'reach' | 'views' | 'interactions' | 'saved' | 'shares' | 'er';
+/**
+ * The sort SELECTION also models the explicit third state — `'none'` — reached by cycling an active
+ * column past `asc`. In that state the table preserves the filtered input order (no column is sorted
+ * or marked aria-sort). Only real columns ({@link IgContentSort}) ever carry a direction.
+ */
+export type IgContentSortSelection = IgContentSort | 'none';
 export type SortOrder = 'asc' | 'desc';
+export const IG_CONTENT_SORT_NONE = 'none' as const;
 
 /** The secondary analyses the desktop table hides behind a compact tab control (task 5). */
 export type IgSecondaryView = 'formats' | 'reels' | 'hashtags' | 'stories' | 'tags';
@@ -31,7 +38,7 @@ const SECONDARY_SET: ReadonlySet<string> = new Set(IG_SECONDARY_VIEWS);
 export interface IgContentFilters {
   q: string;
   format: IgContentFormat;
-  sort: IgContentSort;
+  sort: IgContentSortSelection;
   order: SortOrder;
 }
 
@@ -133,7 +140,13 @@ export function parseIgContentFilters(params: URLSearchParams): IgContentFilters
     // inter-word space on the next URL-driven render, blocking a multi-word phrase.
     q: params.get('q') ?? '',
     format: rawFormat && FORMATS.has(rawFormat) ? (rawFormat as IgContentFormat) : IG_CONTENT_DEFAULTS.format,
-    sort: rawSort && SORT_KEYS.has(rawSort) ? (rawSort as IgContentSort) : IG_CONTENT_DEFAULTS.sort,
+    // `sort=none` is the explicit no-sort third state; any other unknown value falls back to default.
+    sort:
+      rawSort === IG_CONTENT_SORT_NONE
+        ? IG_CONTENT_SORT_NONE
+        : rawSort && SORT_KEYS.has(rawSort)
+          ? (rawSort as IgContentSort)
+          : IG_CONTENT_DEFAULTS.sort,
     order: rawOrder === 'asc' ? 'asc' : IG_CONTENT_DEFAULTS.order,
   };
 }
@@ -160,7 +173,8 @@ export function applyIgContentFilters(prev: URLSearchParams, filters: IgContentF
   if (filters.sort === IG_CONTENT_DEFAULTS.sort) next.delete('sort');
   else next.set('sort', filters.sort);
 
-  if (filters.order === IG_CONTENT_DEFAULTS.order) next.delete('order');
+  // In the no-sort state the direction is meaningless — never serialise a stray `order`.
+  if (filters.sort === IG_CONTENT_SORT_NONE || filters.order === IG_CONTENT_DEFAULTS.order) next.delete('order');
   else next.set('order', filters.order);
 
   return next;
@@ -194,11 +208,14 @@ export function filterIgPosts(
 }
 
 /**
- * Stable sort by the chosen column/direction. Missing metrics (null) always stay at the bottom in
- * BOTH directions; reversing a sort must not promote rows that have no value. Ties keep input order
- * (Array.prototype.sort is stable), so the default reach-desc order is deterministic.
+ * Stable sort by the chosen column/direction. The `'none'` selection preserves the filtered input
+ * order exactly (a shallow copy — never mutates the caller's array). Missing metrics (null) always
+ * stay at the bottom in BOTH directions; reversing a sort must not promote rows that have no value.
+ * Ties keep input order (Array.prototype.sort is stable), so the default reach-desc order is
+ * deterministic.
  */
-export function sortIgPosts(posts: IgPost[], sort: IgContentSort, order: SortOrder): IgPost[] {
+export function sortIgPosts(posts: IgPost[], sort: IgContentSortSelection, order: SortOrder): IgPost[] {
+  if (sort === IG_CONTENT_SORT_NONE) return [...posts];
   const col = IG_CONTENT_SORT_COLUMNS.find((c) => c.key === sort) ?? IG_CONTENT_SORT_COLUMNS[1]!;
   const dir = order === 'asc' ? 1 : -1;
   return [...posts].sort((a, b) => {
