@@ -589,7 +589,7 @@ export function IgContentDesktop({ ig, tabs }: { ig: IgData; tabs: ReactNode }) 
           role="toolbar"
           aria-label="Действия с выбранными публикациями"
           data-testid="ig-content-bulk-bar"
-          className="fixed bottom-6 z-popover flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-2 rounded-xl border border-border/80 bg-background p-2 pl-3 text-foreground shadow-xl motion-safe:animate-in motion-safe:fade-in-0"
+          className="fixed bottom-6 z-popover flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-2 rounded-xl border border-white/20 bg-background p-2 pl-3 text-foreground shadow-[0_-1px_0_rgba(255,255,255,0.07),0_14px_36px_rgba(0,0,0,0.72)] motion-safe:animate-in motion-safe:fade-in-0"
           style={{ left: tableViewport.centerX, maxWidth: tableViewport.maxWidth }}
         >
           <span className="shrink-0 pr-1 text-xs tabular-nums text-muted-foreground" aria-live="polite">

@@ -247,6 +247,8 @@ test.describe('Instagram Контент 2.0 (desktop)', () => {
         shellCenterX: shell ? shell.left + shell.width / 2 : 0,
         background: getComputedStyle(node).backgroundColor,
         tableBackground: getComputedStyle(shellNode).backgroundColor,
+        borderColor: getComputedStyle(node).borderTopColor,
+        boxShadow: getComputedStyle(node).boxShadow,
         radius: Number.parseFloat(getComputedStyle(node).borderRadius),
         ctaBackground: getComputedStyle(cta).backgroundColor,
         ctaColor: getComputedStyle(cta).color,
@@ -258,6 +260,8 @@ test.describe('Instagram Контент 2.0 (desktop)', () => {
     expect(bulkGeometry.bottomGap).toBeLessThanOrEqual(28);
     expect(Math.abs(bulkGeometry.centerX - bulkGeometry.shellCenterX)).toBeLessThanOrEqual(2);
     expect(bulkGeometry.background).toBe(bulkGeometry.tableBackground);
+    expect(bulkGeometry.borderColor).not.toBe(bulkGeometry.background);
+    expect(bulkGeometry.boxShadow).not.toBe('none');
     expect(bulkGeometry.radius).toBeLessThanOrEqual(12);
     expect(bulkGeometry.ctaBackground).toBe(bulkGeometry.foreground);
     expect(bulkGeometry.ctaColor).toBe(bulkGeometry.tableBackground);
