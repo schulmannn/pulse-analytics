@@ -161,6 +161,71 @@ function createIntegrationsRepo({ pool, enabled, ensureExternalSource, transacti
     return rowCount > 0;
   }
 
+  // ── Яндекс.Метрика (per-channel счётчик, подключение по OAuth-токену) ─────────
+  // Одна учётка Метрики на канал, зеркально ms_accounts. Токен приходит и отдаётся УЖЕ
+  // шифрованным (callers шифруют/дешифруют через lib/ym_crypto) — repo никогда не видит
+  // plaintext и не логирует его.
+  async function saveYmAccount(channelId, { counter_id, counter_name, site, counter_created_day, access_token_enc }) {
+    if (!enabled || !channelId) return false;
+    // Зеркало saveMsAccount: canonical ym-source → строка учётки → штамп source_id канала —
+    // одной транзакцией, чтобы падение между записями не оставило учётку без source-связки.
+    // counter_name идёт в external_sources как title (витринное имя), site — как username
+    // (доменный handle счётчика — ближайший аналог хэндла).
+    return transaction(async (client) => {
+      const srcId = await ensureExternalSource('ym', counter_id, { username: site, title: counter_name }, client);
+      await client.query(
+        `INSERT INTO ym_accounts (channel_id, counter_id, counter_name, site, counter_created_day, access_token_enc, source_id, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7, now())
+         ON CONFLICT (channel_id) DO UPDATE SET
+           counter_id=EXCLUDED.counter_id, counter_name=EXCLUDED.counter_name,
+           site=EXCLUDED.site, counter_created_day=EXCLUDED.counter_created_day,
+           access_token_enc=EXCLUDED.access_token_enc,
+           source_id=COALESCE(EXCLUDED.source_id, ym_accounts.source_id), updated_at=now()`,
+        [channelId, counter_id, counter_name || null, site || null, counter_created_day || null, access_token_enc, srcId]);
+      await client.query(
+        `UPDATE channels SET source_id=$2 WHERE id=$1 AND source_id IS NULL AND tg_channel_id IS NULL AND source='ym'`,
+        [channelId, srcId]);
+      return true;
+    });
+  }
+
+  // Полная строка вместе с шифрованным токеном (callers дешифруют). null = не подключён.
+  async function getYmAccount(channelId) {
+    if (!enabled || !channelId) return null;
+    const { rows } = await pool.query(
+      `SELECT channel_id, counter_id, counter_name, site,
+              to_char(counter_created_day,'YYYY-MM-DD') AS counter_created_day,
+              access_token_enc,
+              to_char(connected_at,'YYYY-MM-DD"T"HH24:MI:SS') AS connected_at
+         FROM ym_accounts WHERE channel_id=$1`, [channelId]);
+    return rows[0] || null;
+  }
+
+  // Все подключённые счётчики ЖИВЫХ каналов — для доверенного дневного крона
+  // (ymCollectionJob дешифрует токен и ходит в отчёты). Зеркало listMsAccounts: JOIN-фильтр
+  // status<>'disabled' — выключенный канал не тратит квоту Метрики на сбор, который никто не
+  // читает; без ownership-фильтра — крон доверенный. counter_id нужен ключу durable per-day
+  // джобы (reconnect другого счётчика тем же каналом не наследует сегодняшний succeeded).
+  async function listYmAccounts() {
+    if (!enabled) return [];
+    const { rows } = await pool.query(
+      `SELECT ya.channel_id, ya.counter_id, ya.counter_name,
+              to_char(ya.counter_created_day,'YYYY-MM-DD') AS counter_created_day,
+              ya.access_token_enc
+         FROM ym_accounts ya
+         JOIN channels c ON c.id = ya.channel_id AND c.status <> 'disabled'
+        ORDER BY ya.channel_id ASC`);
+    return rows;
+  }
+
+  // Отключение источника: сносим ТОЛЬКО строку учётки (токен). Канал и архив ym_daily живут
+  // дальше — история остаётся читаемой, повторный connect того же счётчика её продолжит.
+  async function deleteYmAccount(channelId) {
+    if (!enabled || !channelId) return false;
+    const { rowCount } = await pool.query('DELETE FROM ym_accounts WHERE channel_id=$1', [channelId]);
+    return rowCount > 0;
+  }
+
   // ── Telegram QR sessions (managed connect) ───────────────────────────
   // One encrypted user session per account (callers encrypt via lib/tg_crypto — the repo never sees
   // plaintext). Covers every channel where that user is an admin; QR-connected channels reach it
@@ -322,6 +387,7 @@ function createIntegrationsRepo({ pool, enabled, ensureExternalSource, transacti
   return {
     saveIgAccount, getIgAccount, updateIgToken, deleteIgAccount, listIgAccounts,
     saveMsAccount, getMsAccount, listMsAccounts, deleteMsAccount,
+    saveYmAccount, getYmAccount, listYmAccounts, deleteYmAccount,
     saveTgSession, getTgSession, deleteTgSession, listTgSessions, rotateTgSessionCiphertext,
     listTgQrCollectCandidates,
     recordTgSessionAttempt, recordTgSessionSuccess, recordTgSessionFailure,

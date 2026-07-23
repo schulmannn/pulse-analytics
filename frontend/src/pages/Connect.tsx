@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
 import QRCode from 'qrcode';
 import { useQueryClient } from '@tanstack/react-query';
-import { useChannels, useCollectorStatus, useConnectIg, useCreateKey, useDisconnectIg, useIgOauthStatus, useMsBackfillStatus, useMsStatus, useTgQrStatus } from '@/api/queries';
+import { useChannels, useCollectorStatus, useConnectIg, useCreateKey, useDisconnectIg, useIgOauthStatus, useMsBackfillStatus, useMsStatus, useTgQrStatus, useYmStatus } from '@/api/queries';
 import { ApiError, apiSend } from '@/api/client';
 import { fmt } from '@/lib/format';
 import { useSelectedChannel } from '@/lib/channel-context';
@@ -20,8 +20,8 @@ import { Progress } from '@/components/ui/progress';
 
 const INGEST_URL = `${window.location.origin}/api/collector/ingest`;
 
-type ServiceId = 'telegram' | 'instagram' | 'moysklad' | 'threads' | 'youtube' | 'tiktok' | 'x' | 'vk' | 'facebook';
-type ServiceKind = 'telegram' | 'instagram' | 'moysklad' | 'soon';
+type ServiceId = 'telegram' | 'instagram' | 'moysklad' | 'metrika' | 'threads' | 'youtube' | 'tiktok' | 'x' | 'vk' | 'facebook';
+type ServiceKind = 'telegram' | 'instagram' | 'moysklad' | 'metrika' | 'soon';
 
 interface Service {
   id: ServiceId;
@@ -37,6 +37,8 @@ const SERVICES: Service[] = [
   { id: 'instagram', name: 'Instagram', kind: 'instagram' },
   // «МойСклад» — первый не-социальный источник: продажи/заказы по токену API.
   { id: 'moysklad', name: 'МойСклад', kind: 'moysklad' },
+  // «Яндекс.Метрика» — веб-аналитика сайта: визиты/посетители/источники по OAuth-токену.
+  { id: 'metrika', name: 'Яндекс.Метрика', kind: 'metrika' },
   { id: 'threads', name: 'Threads', kind: 'soon', soon: 'Threads-метрики отдаёт тот же токен Instagram — ближайший кандидат после IG.' },
   { id: 'youtube', name: 'YouTube', kind: 'soon', soon: 'Аналитика каналов и видео через YouTube Data API + вход Google.' },
   { id: 'tiktok', name: 'TikTok', kind: 'soon', soon: 'Статистика аккаунта через TikTok for Developers (нужна проверка приложения).' },
@@ -50,6 +52,7 @@ const GLYPHS: Record<ServiceId, ReactNode> = {
   telegram: (<><path d="M22 4 2 11l6 2.5L11 20l3-4 5 3z" /><path d="m8 13.5 8-6" /></>),
   instagram: (<><rect x="3.5" y="3.5" width="17" height="17" rx="5" /><circle cx="12" cy="12" r="4" /><circle cx="17.3" cy="6.7" r="1" className="fill-current" stroke="none" /></>),
   moysklad: (<><path d="M12 3 3.5 7.5v9L12 21l8.5-4.5v-9L12 3Z" /><path d="M3.5 7.5 12 12l8.5-4.5M12 12v9" /></>),
+  metrika: (<path d="M5 20v-6M12 20V9M19 20V4" />),
   threads: (<path d="M16 8c-1.5-2-6-2.5-8 0-2.5 3-1 9 3 9 3 0 4-2 4-4s-1.5-3-3.5-3-3 2-1.5 3" />),
   youtube: (<><rect x="2.5" y="6" width="19" height="12" rx="4" /><path d="m10 9.5 5 2.5-5 2.5z" /></>),
   tiktok: (<><path d="M10 8v6.5a3 3 0 1 1-3-3" /><path d="M10 8c.5 2 2 3.5 5 3.5" /></>),
@@ -259,6 +262,7 @@ export function Connect() {
           )}
           {active.kind === 'instagram' && <InstagramPanel />}
           {active.kind === 'moysklad' && <MoySkladPanel />}
+          {active.kind === 'metrika' && <MetrikaPanel />}
           {active.kind === 'soon' && <SoonPanel name={active.name} glyph={active.id} note={active.soon ?? ''} />}
         </div>
       </div>
@@ -628,6 +632,167 @@ function MoySkladPanel() {
               {busy ? 'Проверяем…' : 'Подключить'}
             </button>
           </form>
+          {error && <p className="text-xs text-ember">{error}</p>}
+          <p className="text-2xs text-muted-foreground">
+            Токен хранится только на сервере в зашифрованном виде (AES-256-GCM) и не попадает в логи.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Яндекс.Метрика: подключение по OAuth-токену (+ выбор счётчика при нескольких) ──
+function MetrikaPanel() {
+  const qc = useQueryClient();
+  const status = useYmStatus();
+  const [token, setToken] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [freshName, setFreshName] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  // Несколько счётчиков на аккаунте: сервер отвечает choice_required + список (id/имя/сайт —
+  // не секреты), клиент повторяет connect с выбранным counter_id. Токен остаётся в памяти
+  // формы между шагами и уходит только на НАШ бэкенд.
+  const [counters, setCounters] = useState<Array<{ id: string; name: string | null; site: string | null }> | null>(null);
+  const connected = freshName != null || (status.data?.connected ?? false);
+  const counterName = freshName ?? status.data?.counter_name ?? status.data?.site ?? 'счётчик';
+
+  const invalidateYm = () =>
+    Promise.all([
+      qc.invalidateQueries({ queryKey: ['channels'] }),
+      qc.invalidateQueries({ queryKey: ['ym-status'] }),
+      qc.invalidateQueries({ queryKey: ['ym-summary'] }),
+      qc.invalidateQueries({ queryKey: ['ym-sources'] }),
+    ]);
+
+  const connect = async (counterId?: string) => {
+    const value = token.trim();
+    if (!value || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      // Токен уходит только на НАШ бэкенд (шифруется AES-256-GCM до записи) — в браузере,
+      // логах и git он не живёт; в Яндекс ходит сервер.
+      const res = (await apiSend('POST', '/api/ym/connect', counterId ? { token: value, counter_id: counterId } : { token: value })) as {
+        choice_required?: boolean;
+        counters?: Array<{ id: string; name: string | null; site: string | null }>;
+        counter_name?: string | null;
+        site?: string | null;
+      };
+      if (res?.choice_required) {
+        setCounters(Array.isArray(res.counters) ? res.counters : []);
+        return;
+      }
+      setFreshName(res?.counter_name || res?.site || 'счётчик');
+      setToken('');
+      setCounters(null);
+      await invalidateYm();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Не удалось подключить Яндекс.Метрику.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    void connect();
+  };
+
+  const disconnect = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await apiSend('DELETE', '/api/ym/account');
+      setFreshName(null);
+      await invalidateYm();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Не удалось отключить источник.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-5 sm:p-6">
+      <PanelHead
+        id="metrika"
+        name="Яндекс.Метрика"
+        pill={connected ? { label: 'Подключена', tone: 'ok' } : { label: 'Доступна', tone: 'go' }}
+      />
+      {connected ? (
+        <div className="mt-4 space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Подключён счётчик <b className="font-medium text-foreground">{counterName}</b>. Визиты, посетители и
+            источники трафика уже считаются; дневной архив (включая историю счётчика) пополняется автоматически.
+          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <Link
+              to="/metrika"
+              className="btn-pill inline-flex bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+            >
+              Открыть Обзор Метрики →
+            </Link>
+            <button
+              type="button"
+              onClick={() => void disconnect()}
+              disabled={busy}
+              className="btn-pill border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-destructive disabled:opacity-50"
+            >
+              Отключить
+            </button>
+          </div>
+          {error && <p className="text-xs text-ember">{error}</p>}
+        </div>
+      ) : (
+        <div className="mt-4 space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Трафик сайта из Яндекс.Метрики — рядом с аналитикой каналов. Понадобится OAuth-токен Яндекса с
+            доступом к Метрике (право <b className="font-medium text-foreground">metrika:read</b>); выпустить его
+            можно на oauth.yandex.ru для своего приложения.
+          </p>
+          <form onSubmit={submit} className="flex items-center gap-2">
+            <input
+              type="password"
+              value={token}
+              onChange={(e) => {
+                setToken(e.target.value);
+                setCounters(null);
+              }}
+              placeholder="OAuth-токен Яндекса"
+              autoComplete="off"
+              className="h-9 min-w-0 flex-1 rounded border border-border bg-background px-3 text-sm text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-1 focus:ring-primary"
+            />
+            <button
+              type="submit"
+              disabled={!token.trim() || busy}
+              className="btn-pill shrink-0 bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
+            >
+              {busy ? 'Проверяем…' : 'Подключить'}
+            </button>
+          </form>
+          {counters && (
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground">
+                {counters.length
+                  ? 'На аккаунте несколько счётчиков — выберите, какой подключить:'
+                  : 'На аккаунте не нашлось счётчиков Метрики.'}
+              </p>
+              {counters.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void connect(c.id)}
+                  className="flex w-full items-baseline justify-between gap-3 rounded-lg border border-border px-3 py-2 text-left text-sm transition-colors hover:border-primary/60 hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
+                >
+                  <span className="min-w-0 truncate font-medium text-foreground">{c.name ?? c.site ?? `Счётчик ${c.id}`}</span>
+                  <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{c.site ?? c.id}</span>
+                </button>
+              ))}
+            </div>
+          )}
           {error && <p className="text-xs text-ember">{error}</p>}
           <p className="text-2xs text-muted-foreground">
             Токен хранится только на сервере в зашифрованном виде (AES-256-GCM) и не попадает в логи.

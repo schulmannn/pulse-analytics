@@ -35,6 +35,7 @@ const IG_MEDIA_METRICS = ['reach', 'likes', 'comments', 'saved', 'shares', 'view
 // Копеечные суммы ms_daily — BIGINT (pg отдаёт строкой); orders_count — INTEGER (уже number,
 // numify — no-op-страховка). Бюджет toMetricNumber (9e15) = 90 трлн ₽ — за глаза.
 const MS_DAILY_METRICS = ['revenue_kopecks', 'orders_count', 'orders_sum_kopecks'];
+const YM_DAILY_METRICS = ['visits', 'users', 'pageviews'];
 const IG_TAG_METRICS = ['like_count', 'comments_count'];
 const numifyMetrics = (row, keys) => {
   const out = { ...row };
@@ -374,6 +375,26 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
       `SELECT to_char(day,'YYYY-MM-DD') AS day, revenue_kopecks, orders_count, orders_sum_kopecks
          FROM ms_daily WHERE channel_id=$1 ORDER BY day ASC`, [channelId]);
     return rows.map((r) => numifyMetrics(r, MS_DAILY_METRICS));
+  }
+
+  // Есть ли у канала хоть одна строка архива Метрики — дешёвый EXISTS для решения
+  // «бэкфилл всей истории или дневное окно» в ymCollectionJob (доверенный крон; в req/res-путях
+  // не используется). Чтение всего архива ради этого вопроса было бы ежедневным лишним сканом.
+  async function hasYmDaily(channelId) {
+    if (!enabled || !channelId) return false;
+    const { rows } = await pool.query('SELECT 1 FROM ym_daily WHERE channel_id=$1 LIMIT 1', [channelId]);
+    return rows.length > 0;
+  }
+
+  // Весь дневной архив Яндекс.Метрики канала («Всё» в summary), day ASC — зеркало
+  // getMsDailyAllInternal: глубина ограничена самим кроном (первый проход бэкфиллит историю
+  // счётчика), bigint-счётчики pg отдаёт строками → numify на выходе.
+  async function getYmDailyAllInternal(channelId) {
+    if (!enabled || !channelId) return [];
+    const { rows } = await pool.query(
+      `SELECT to_char(day,'YYYY-MM-DD') AS day, visits, users, pageviews
+         FROM ym_daily WHERE channel_id=$1 ORDER BY day ASC`, [channelId]);
+    return rows.map((r) => numifyMetrics(r, YM_DAILY_METRICS));
   }
 
   // ── Агрегаты архива заказов МойСклада (ms_orders, слайс 3) ─────────────────────────────────────
@@ -862,6 +883,10 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
   async function getMsDailyAllForActor(channelId, actor) {
     return (await allowed(channelId, actor)) ? getMsDailyAllInternal(channelId) : [];
   }
+
+  async function getYmDailyAllForActor(channelId, actor) {
+    return (await allowed(channelId, actor)) ? getYmDailyAllInternal(channelId) : [];
+  }
   async function getMsFunnelForActor(channelId, actor, opts = {}) {
     return (await allowed(channelId, actor)) ? getMsFunnelInternal(channelId, opts) : [];
   }
@@ -934,14 +959,14 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
     getChannelHistoryInternal, getMentionsHistoryInternal, getMentionsArchiveInternal,
     getSnapshotInternal, getPublicTgChannelPhoto,
     getLatestVelocityInternal, listPostsInternal, listIgDailyInternal, listIgMediaDailyInternal,
-    getMsDailyAllInternal, getMsFunnelInternal, getMsCustomersInternal, getMsRfmInternal,
+    getMsDailyAllInternal, hasYmDaily, getYmDailyAllInternal, getMsFunnelInternal, getMsCustomersInternal, getMsRfmInternal,
     getMsRfmCustomersInternal, getMsCohortsInternal,
     getMsTopCustomersInternal, getMsOldestOrderDayInternal,
     getMsSalesByChannelInternal, getMsGeographyInternal, getMsChannelSeriesInternal,
     getMsChannelSeriesGroupedInternal, getMsReturnsInternal,
     getChannelHistoryForActor, getMentionsHistoryForActor, getMentionsArchiveForActor,
     getSnapshotForActor, getLatestVelocityForActor, listPostsForActor, listIgDailyForActor, listIgMediaDailyForActor,
-    getMsDailyAllForActor, getMsFunnelForActor, getMsCustomersForActor, getMsRfmForActor,
+    getMsDailyAllForActor, getYmDailyAllForActor, getMsFunnelForActor, getMsCustomersForActor, getMsRfmForActor,
     getMsRfmCustomersForActor, getMsCohortsForActor,
     getMsTopCustomersForActor, getMsOldestOrderDayForActor,
     getMsSalesByChannelForActor, getMsGeographyForActor, getMsChannelSeriesForActor,
