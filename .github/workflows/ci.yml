@@ -43,7 +43,7 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             frontend/package-lock.json
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - run: npm ci
@@ -86,7 +86,7 @@ jobs:
       - name: Audit npm dependencies (frontend)
         run: npm audit --omit=dev --audit-level=high
         working-directory: frontend
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       # Игноры ниже — ИЗВЕСТНЫЕ advisories transitive starlette 0.37.2 (тянется пином
