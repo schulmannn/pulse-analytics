@@ -677,3 +677,191 @@ test('квота 420 Метрики → 503 + заголовок Retry-After (н
   assert.equal(res.statusCode, 503);
   assert.equal(res.headers['Retry-After'], '120', 'исходный длинный Retry-After 420 дошёл до клиента');
 });
+
+// ── Слайс аудитории/источников: устройства / реферальные сайты / соцсети ───────────────────────
+
+test('devices: точная размерность deviceCategory + метрики визиты/посетители/отказы, lang=ru', async () => {
+  const paths = [];
+  const { routes } = buildYm({
+    ymFetch: async (_t, path) => {
+      paths.push(path);
+      return {
+        data: [
+          { dimensions: [{ id: '2', name: 'Смартфоны' }], metrics: [90, 60, 41.2] },
+          { dimensions: [{ id: '1', name: 'ПК' }], metrics: [50, 40, 22.0] },
+        ],
+        totals: [150, 105, 33.4],
+      };
+    },
+  });
+  const res = await invoke(routes, 'GET /api/ym/devices', { query: { days: '30' } });
+  assert.equal(res.statusCode, 200);
+  assert.ok(paths[0].includes('ym:s:deviceCategory'), 'официальная размерность устройства');
+  assert.ok(paths[0].includes('ym:s:visits,ym:s:users,ym:s:bounceRate'), 'контрактные метрики');
+  assert.ok(paths[0].includes('sort=-ym:s:visits'), 'сортировка по визитам');
+  assert.ok(paths[0].includes('accuracy=full'));
+  assert.ok(paths[0].includes('lang=ru'), 'русские имена устройств');
+  assert.deepEqual(res.body, {
+    visits_total: 150,
+    users_total: 105,
+    meta: {},
+    rows: [
+      { id: '2', name: 'Смартфоны', visits: 90, users: 60, bounce_rate: 41.2 },
+      { id: '1', name: 'ПК', visits: 50, users: 40, bounce_rate: 22 },
+    ],
+  });
+});
+
+test('referrers: официальный externalRefererDomain (не сырой refererDomain), БЕЗ lang', async () => {
+  const paths = [];
+  const { routes } = buildYm({
+    ymFetch: async (_t, path) => {
+      paths.push(path);
+      return {
+        data: [
+          { dimensions: [{ id: null, name: 'vc.ru' }], metrics: [30, 25, 18.0] },
+          { dimensions: [{ id: null, name: 'habr.com' }], metrics: [12, 10, 44.4] },
+        ],
+        totals: [60, 48, 30.1],
+      };
+    },
+  });
+  const res = await invoke(routes, 'GET /api/ym/referrers', { query: { days: '30' } });
+  assert.equal(res.statusCode, 200);
+  assert.ok(paths[0].includes('ym:s:externalRefererDomain'), 'внешние домены-рефереры');
+  assert.ok(!paths[0].includes('dimensions=ym:s:refererDomain'), 'не сырой домен внутреннего реферера');
+  assert.ok(
+    decodeURIComponent(paths[0]).includes("filters=ym:s:lastsignTrafficSource=='referral'"),
+    'totals ограничены реферальным источником',
+  );
+  assert.ok(!/lang=ru/.test(paths[0]), 'домены — сырьё, lang не нужен');
+  assert.equal(res.body.visits_total, 60);
+  assert.deepEqual(res.body.rows.map((r) => r.name), ['vc.ru', 'habr.com']);
+  assert.equal(res.body.rows[1].bounce_rate, 44.4);
+});
+
+test('social: lastsignSocialNetwork (форма ym:s:<attribution>SocialNetwork), lang=ru', async () => {
+  const paths = [];
+  const { routes } = buildYm({
+    ymFetch: async (_t, path) => {
+      paths.push(path);
+      return {
+        data: [{ dimensions: [{ id: 'vkontakte', name: 'ВКонтакте' }], metrics: [20, 16, 35.0] }],
+        totals: [20, 16, 35.0],
+      };
+    },
+  });
+  const res = await invoke(routes, 'GET /api/ym/social', { query: { days: '30' } });
+  assert.equal(res.statusCode, 200);
+  assert.ok(paths[0].includes('ym:s:lastsignSocialNetwork'), 'last-significant соцсеть');
+  assert.ok(
+    decodeURIComponent(paths[0]).includes("filters=ym:s:lastsignTrafficSource=='social'"),
+    'totals ограничены социальным источником',
+  );
+  assert.ok(paths[0].includes('lang=ru'), 'русские имена сетей');
+  assert.deepEqual(res.body.rows, [{ id: 'vkontakte', name: 'ВКонтакте', visits: 20, users: 16, bounce_rate: 35 }]);
+});
+
+test('messengers: Telegram — отдельная lastsignMessenger-размерность и messenger totals', async () => {
+  const paths = [];
+  const { routes } = buildYm({
+    ymFetch: async (_t, path) => {
+      paths.push(path);
+      return {
+        data: [{ dimensions: [{ id: 'telegram', name: 'Telegram' }], metrics: [18, 14, 25] }],
+        totals: [18, 14, 25],
+      };
+    },
+  });
+  const res = await invoke(routes, 'GET /api/ym/messengers', { query: { days: '30' } });
+  assert.equal(res.statusCode, 200);
+  assert.ok(paths[0].includes('ym:s:lastsignMessenger'));
+  assert.ok(
+    decodeURIComponent(paths[0]).includes("filters=ym:s:lastsignTrafficSource=='messenger'"),
+    'totals ограничены переходами из мессенджеров',
+  );
+  assert.deepEqual(res.body.rows, [
+    { id: 'telegram', name: 'Telegram', visits: 18, users: 14, bounce_rate: 25 },
+  ]);
+});
+
+test('breakdown: пустые/undefined-строки размерности отбрасываются, отказы null-safe (не 0)', async () => {
+  const { routes } = buildYm({
+    ymFetch: async () => ({
+      data: [
+        // Реальная строка с нулевым % отказов — 0 значимый, сохраняется.
+        { dimensions: [{ id: 'vk', name: 'ВКонтакте' }], metrics: [10, 8, 0] },
+        // Отказы отсутствуют/пусты → null («нет данных»), а не 0.
+        { dimensions: [{ id: 'ok', name: 'Одноклассники' }], metrics: [5, 4, null] },
+        // Пустая размерность (нет id и имени) — не строка отчёта.
+        { dimensions: [{ id: null, name: '' }], metrics: [3, 2, 12] },
+        { dimensions: [{ id: null, name: null }], metrics: [1, 1, 50] },
+      ],
+      totals: [19, 15, 20.0],
+    }),
+  });
+  const res = await invoke(routes, 'GET /api/ym/social', { query: { days: '30' } });
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.rows, [
+    { id: 'vk', name: 'ВКонтакте', visits: 10, users: 8, bounce_rate: 0 },
+    { id: 'ok', name: 'Одноклассники', visits: 5, users: 4, bounce_rate: null },
+  ]);
+  // totals полного отчёта авторитетнее суммы отфильтрованного среза.
+  assert.equal(res.body.visits_total, 19);
+  assert.equal(res.body.users_total, 15);
+});
+
+test('breakdown: битый totals падает на сумму видимых строк', async () => {
+  const { routes } = buildYm({
+    ymFetch: async () => ({
+      data: [
+        { dimensions: [{ id: '1', name: 'ПК' }], metrics: [7, 5, 10] },
+        { dimensions: [{ id: '2', name: 'Смартфоны' }], metrics: [3, 2, 20] },
+      ],
+      totals: [],
+    }),
+  });
+  const res = await invoke(routes, 'GET /api/ym/devices', { query: { days: '30' } });
+  assert.equal(res.body.visits_total, 10);
+  assert.equal(res.body.users_total, 7);
+});
+
+test('breakdown: null totals не превращается в ложный ноль', async () => {
+  const { routes } = buildYm({
+    ymFetch: async () => ({
+      data: [{ dimensions: [{ id: '1', name: 'ПК' }], metrics: [7, 5, 10] }],
+      totals: [null, null, null],
+    }),
+  });
+  const res = await invoke(routes, 'GET /api/ym/devices', { query: { days: '30' } });
+  assert.equal(res.body.visits_total, 7);
+  assert.equal(res.body.users_total, 5);
+});
+
+test('breakdown «Всё»: date1 = counter_created_day, часовой кэш (повторно к Метрике не ходим)', async () => {
+  const paths = [];
+  const { routes } = buildYm({
+    ymFetch: async (_t, path) => { paths.push(path); return { data: [], totals: [0, 0, 0] }; },
+  });
+  const r1 = await invoke(routes, 'GET /api/ym/referrers', { query: { days: '0' } });
+  assert.equal(r1.statusCode, 200);
+  assert.ok(paths[0].includes('date1=2024-03-01'), 'якорь «Всё» — counter_created_day');
+  const r2 = await invoke(routes, 'GET /api/ym/referrers', { query: { days: '0' } });
+  assert.equal(r2.statusCode, 200);
+  assert.equal(paths.length, 1, '«Всё» закэшировано на час — второй ответ из кэша');
+});
+
+test('breakdown: сэмплирование прокидывается в meta; отозванный токен → ym_token_revoked', async () => {
+  const sampled = buildYm({
+    ymFetch: async () => ({ data: [], totals: [0, 0, 0], sampled: true, sample_share: 0.5 }),
+  });
+  const r1 = await invoke(sampled.routes, 'GET /api/ym/devices', { query: { days: '7' } });
+  assert.deepEqual(r1.body.meta, { sampled: true, sample_share: 0.5 });
+
+  const revoked = buildYm({
+    ymFetch: async () => { const e = new Error('Invalid oauth_token'); e.status = 401; throw e; },
+  });
+  const r2 = await invoke(revoked.routes, 'GET /api/ym/social', { query: { days: '30' } });
+  assert.equal(r2.statusCode, 401);
+  assert.equal(r2.body.code, 'ym_token_revoked');
+});

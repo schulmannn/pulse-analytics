@@ -1,6 +1,17 @@
 import { useContext, useState } from 'react';
 import { ChartExpandedContext } from '@/components/ExpandableChart';
-import { useYmGoals, useYmLandings, useYmPages, useYmSources, useYmSummary, useYmUtm } from '@/api/queries';
+import {
+  useYmDevices,
+  useYmGoals,
+  useYmLandings,
+  useYmMessengers,
+  useYmPages,
+  useYmReferrers,
+  useYmSocial,
+  useYmSources,
+  useYmSummary,
+  useYmUtm,
+} from '@/api/queries';
 import { PillSelect } from '@/components/PillSelect';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
@@ -20,6 +31,29 @@ import { useMsPagePeriod } from '@/lib/msPeriod';
  * страниц) — свои и никогда не смешиваются с TG-просмотрами или IG-охватом. Когда period totals
  * недоступны, подпись посетителей честно отмечает, что итог является суммой дневных уникальных.
  */
+/** Локализация типов устройств по стабильному значению ym:s:deviceCategory. Reporting API может
+    вернуть числовой id, а документация группировки называет строковые значения — поддерживаем оба. */
+const YM_DEVICE_LABELS: Record<string, string> = {
+  '1': 'Десктоп',
+  '2': 'Смартфоны',
+  '3': 'Планшеты',
+  '4': 'ТВ',
+  desktop: 'Десктоп',
+  mobile: 'Смартфоны',
+  tablet: 'Планшеты',
+  tv: 'ТВ',
+};
+
+/** Вторичный контекст строки разреза: посетители + отказы (когда доступны). Отказы nullable —
+    «—»-семантика: при null подпункт отказов просто опускается, а не превращается в «0%». */
+const breakdownNote = (users: number, bounceRate: number | null): string =>
+  [
+    `${fmt.num(users)} чел.`,
+    bounceRate != null ? `${bounceRate.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}% отказов` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
 export function YmOverview() {
   const pp = usePagePeriod();
   const days = pp ? pp.days : 30;
@@ -29,6 +63,10 @@ export function YmOverview() {
   const windowLabel = pp?.range ? 'за выбранный период' : days === 0 ? 'за всё время' : `за ${days} дн.`;
   const summary = useYmSummary(period);
   const sources = useYmSources(period);
+  const referrers = useYmReferrers(period);
+  const social = useYmSocial(period);
+  const messengers = useYmMessengers(period);
+  const devices = useYmDevices(period);
   const goals = useYmGoals(period);
   const utm = useYmUtm(period);
   const pages = useYmPages(period);
@@ -159,6 +197,141 @@ export function YmOverview() {
             }))}
             tailWord="визитов"
             unitTotal={sources.data.visits_total}
+          />
+        )}
+      </ChartWidget>
+
+      {/* Реферальные сайты: внешние домены (externalRefererDomain) — визиты + отказы по строке. */}
+      <ChartWidget id="ym-referrers" title="Реферальные сайты" fixedSize="half">
+        {referrers.isPending ? (
+          <TableSkeleton rows={4} columns={2} className="py-2" />
+        ) : referrers.isError ? (
+          <ErrorState
+            compact
+            size="table"
+            className="py-4"
+            title="Не удалось получить реферальные сайты"
+            reason={referrers.error instanceof Error ? referrers.error.message : 'ошибка'}
+            onRetry={() => referrers.refetch()}
+            retrying={referrers.isFetching}
+          />
+        ) : referrers.data.rows.length === 0 ? (
+          <EmptyState
+            compact
+            size="table"
+            title="Реферальных переходов за период нет."
+            reason="Здесь появятся внешние сайты, приводящие трафик по ссылкам."
+          />
+        ) : (
+          <YmBreakdownRows
+            rows={referrers.data.rows.map((r) => ({
+              key: r.name ?? r.id ?? 'unknown',
+              label: r.name ?? r.id ?? 'домен',
+              value: r.visits,
+              note: breakdownNote(r.users, r.bounce_rate),
+            }))}
+            tailWord="визитов"
+            unitTotal={referrers.data.visits_total}
+          />
+        )}
+      </ChartWidget>
+
+      {/* Соцсети: конкретные сети (lastsignSocialNetwork) — визиты + отказы по строке. */}
+      <ChartWidget id="ym-social" title="Соцсети" fixedSize="half">
+        {social.isPending ? (
+          <TableSkeleton rows={4} columns={2} className="py-2" />
+        ) : social.isError ? (
+          <ErrorState
+            compact
+            size="table"
+            className="py-4"
+            title="Не удалось получить соцсети"
+            reason={social.error instanceof Error ? social.error.message : 'ошибка'}
+            onRetry={() => social.refetch()}
+            retrying={social.isFetching}
+          />
+        ) : social.data.rows.length === 0 ? (
+          <EmptyState
+            compact
+            size="table"
+            title="Переходов из соцсетей за период нет."
+            reason="Здесь появятся конкретные соцсети, приводящие трафик."
+          />
+        ) : (
+          <YmBreakdownRows
+            rows={social.data.rows.map((r) => ({
+              key: r.id ?? r.name ?? 'unknown',
+              label: r.name ?? r.id ?? 'соцсеть',
+              value: r.visits,
+              note: breakdownNote(r.users, r.bounce_rate),
+            }))}
+            tailWord="визитов"
+            unitTotal={social.data.visits_total}
+          />
+        )}
+      </ChartWidget>
+
+      {/* Мессенджеры: отдельная размерность Метрики — Telegram не теряется внутри «Соцсетей». */}
+      <ChartWidget id="ym-messengers" title="Мессенджеры" fixedSize="half">
+        {messengers.isPending ? (
+          <TableSkeleton rows={4} columns={2} className="py-2" />
+        ) : messengers.isError ? (
+          <ErrorState
+            compact
+            size="table"
+            className="py-4"
+            title="Не удалось получить мессенджеры"
+            reason={messengers.error instanceof Error ? messengers.error.message : 'ошибка'}
+            onRetry={() => messengers.refetch()}
+            retrying={messengers.isFetching}
+          />
+        ) : messengers.data.rows.length === 0 ? (
+          <EmptyState
+            compact
+            size="table"
+            title="Переходов из мессенджеров за период нет."
+            reason="Здесь появятся Telegram и другие мессенджеры, приводящие трафик."
+          />
+        ) : (
+          <YmBreakdownRows
+            rows={messengers.data.rows.map((r) => ({
+              key: r.id ?? r.name ?? 'unknown',
+              label: r.name ?? r.id ?? 'мессенджер',
+              value: r.visits,
+              note: breakdownNote(r.users, r.bounce_rate),
+            }))}
+            tailWord="визитов"
+            unitTotal={messengers.data.visits_total}
+          />
+        )}
+      </ChartWidget>
+
+      {/* Устройства: тип устройства (deviceCategory) — локализация по стабильному id, имя — фолбэк. */}
+      <ChartWidget id="ym-devices" title="Устройства" fixedSize="half">
+        {devices.isPending ? (
+          <TableSkeleton rows={4} columns={2} className="py-2" />
+        ) : devices.isError ? (
+          <ErrorState
+            compact
+            size="table"
+            className="py-4"
+            title="Не удалось получить устройства"
+            reason={devices.error instanceof Error ? devices.error.message : 'ошибка'}
+            onRetry={() => devices.refetch()}
+            retrying={devices.isFetching}
+          />
+        ) : devices.data.rows.length === 0 ? (
+          <EmptyState compact size="table" title="Нет визитов за период." />
+        ) : (
+          <YmBreakdownRows
+            rows={devices.data.rows.map((r) => ({
+              key: r.id ?? r.name ?? 'unknown',
+              label: (r.id != null ? YM_DEVICE_LABELS[r.id] : undefined) ?? r.name ?? 'Другие устройства',
+              value: r.visits,
+              note: breakdownNote(r.users, r.bounce_rate),
+            }))}
+            tailWord="визитов"
+            unitTotal={devices.data.visits_total}
           />
         )}
       </ChartWidget>

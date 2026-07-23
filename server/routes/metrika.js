@@ -3,7 +3,8 @@
 const { hasWorkspaceRole } = require('../middleware/tenant');
 
 /**
- * Роуты Яндекс.Метрики (/api/ym/{connect,status,account,summary,sources,goals,pages,landings,utm}) —
+ * Роуты Яндекс.Метрики
+ * (/api/ym/{connect,status,account,summary,sources,devices,referrers,social,messengers,goals,pages,landings,utm}) —
  * серверная половина
  * источника «метрика», зеркально МойСклад-вертикали: connect валидирует OAuth-токен живым
  * identity-вызовом (management/v1/counters) и сохраняет его ТОЛЬКО шифрованным (lib/ym_crypto),
@@ -27,7 +28,8 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
     const n = parseInt(req.query.days, 10);
     return YM_DAYS_ALLOWED.includes(n) ? n : 30;
   };
-  // «Всё» у breakdown-роутов (sources/goals/pages/landings/utm) — живой отчёт ПОЛНОГО диапазона счётчика
+  // «Всё» у breakdown-роутов (sources/devices/referrers/social/messengers/goals/pages/landings/utm) —
+  // живой отчёт ПОЛНОГО диапазона счётчика
   // → отдельный кэш 1 час (зеркало MS_TOP_ALL_CACHE_TTL_MS): история меняется медленно,
   // пересобирать чаще дорого.
   const YM_ALL_RANGE_CACHE_TTL_MS = 60 * 60 * 1000;
@@ -980,6 +982,123 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
     } catch (e) {
       next(e);
     }
+  });
+
+  // ── Разрезы аудитории/источников: устройства / рефералы / соцсети / мессенджеры ────────────────
+  // Один контракт на четыре официальные размерности: визиты/посетители + отказы по строке, сортировка
+  // по визитам, accuracy=full. Метрики — колонки строки (visits,users,bounceRate); отказы —
+  // средняя, поэтому null-safe (absent/null ≠ 0). Пустые/undefined-строки размерности (без домена
+  // у externalRefererDomain, без сети у lastsignSocialNetwork) отбрасываются и наружу не текут —
+  // ни query-строк, ни PII. totals = итог ПОЛНОГО отчёта (авторитетнее суммы среза limit).
+  const YM_BREAKDOWN_METRICS = 'ym:s:visits,ym:s:users,ym:s:bounceRate';
+  // Устройств у deviceCategory всего ~4 (десктоп/смартфон/планшет/ТВ) — компактный потолок.
+  const YM_DEVICES_LIMIT = 10;
+  // Реферальные домены — высокая кардинальность (каждый внешний сайт — строка); шире sources,
+  // но всё равно ограничено: хвост «Ещё N … из M» честно закрывает срез.
+  const YM_REFERRERS_LIMIT = 100;
+  // Соцсетей у lastsignSocialNetwork — десятки; тот же потолок, что у источников.
+  const YM_SOCIAL_LIMIT = 50;
+  // Telegram и другие мессенджеры у Метрики — отдельная размерность, не SocialNetwork.
+  const YM_MESSENGERS_LIMIT = 50;
+
+  const breakdownRowsFromBody = (body) =>
+    (body && Array.isArray(body.data) ? body.data : [])
+      .map((row) => {
+        const dim = row && Array.isArray(row.dimensions) && row.dimensions[0];
+        const m = row && Array.isArray(row.metrics) ? row.metrics : [];
+        // Отказы — средняя: absent/null остаётся null («нет данных»), но реальный 0% сохраняется.
+        const bounce = numOrNull(m[2]);
+        const id = dim && dim.id != null ? String(dim.id).trim() : '';
+        const name = dim && typeof dim.name === 'string' ? dim.name.trim() : '';
+        return {
+          id: id || null,
+          name: name || null,
+          visits: Math.round(Number(m[0]) || 0),
+          users: Math.round(Number(m[1]) || 0),
+          bounce_rate: bounce == null ? null : round2(bounce),
+        };
+      })
+      // Строка без id И без имени = «не определено»/пустой домен: не показываем и не считаем строкой.
+      .filter((r) => r.id != null || r.name != null);
+
+  const breakdownTotals = (body, rows) => {
+    const totals = body && Array.isArray(body.totals) ? body.totals : [];
+    const visits = numOrNull(totals[0]);
+    const users = numOrNull(totals[1]);
+    const visits_total = visits != null
+      ? Math.round(visits)
+      : rows.reduce((acc, r) => acc + r.visits, 0);
+    const users_total = users != null
+      ? Math.round(users)
+      : rows.reduce((acc, r) => acc + r.users, 0);
+    return { visits_total, users_total };
+  };
+
+  // Общий обработчик разреза: фиксированная размерность (НЕ пользовательский ввод — инъекции нет),
+  // тот же период-контракт 7/30/90/диапазон/«Всё» и часовой кэш «Всё», что у sources. lang=ru
+  // только там, где влияет на интерпретируемые имена (устройства/соцсети); домены рефереров — сырьё.
+  function registerYmBreakdown(route, dimension, limit, { lang = false, filter = null } = {}) {
+    app.get(`/api/ym/${route}`, requireAuth, async (req, res, next) => {
+      try {
+        const period = parseYmPeriod(req);
+        if (period.invalid) return badRange(res);
+        const ym = await resolveYm(req, res);
+        if (!ym) return;
+        const cacheKey = `ym:${route}:${ym.channel.id}:${period.periodKey}`;
+        const cached = cacheGet(cacheKey);
+        if (cached) return res.json(cached);
+        const isAll = period.days === 0 && !period.range;
+        const { date1, date2 } = isAll
+          ? await allRangeWindow(ym, req.user)
+          : { date1: period.date1, date2: period.date2 };
+
+        let body;
+        try {
+          body = await ymFetch(
+            ym.token,
+            `/stat/v1/data?ids=${encodeURIComponent(ym.acc.counter_id)}` +
+              `&metrics=${YM_BREAKDOWN_METRICS}` +
+              `&dimensions=${dimension}&sort=-ym:s:visits` +
+              `&date1=${date1}&date2=${date2}` +
+              `&limit=${limit}&accuracy=full` +
+              `${filter ? `&filters=${encodeURIComponent(filter)}` : ''}` +
+              `${lang ? '&lang=ru' : ''}`,
+          );
+        } catch (e) {
+          return sendYmError(res, e, { route, channelId: ym.channel.id });
+        }
+
+        const rows = breakdownRowsFromBody(body);
+        const { visits_total, users_total } = breakdownTotals(body, rows);
+        const data = { visits_total, users_total, rows, meta: samplingMeta(body) };
+        cacheSet(cacheKey, data, isAll ? YM_ALL_RANGE_CACHE_TTL_MS : undefined);
+        res.json(data);
+      } catch (e) {
+        next(e);
+      }
+    });
+  }
+
+  // GET /api/ym/devices?days=30 — разбивка по типу устройства (ym:s:deviceCategory: десктоп/
+  // смартфон/планшет/ТВ). id устройства стабилен — фронт локализует по нему, имя lang=ru — фолбэк.
+  registerYmBreakdown('devices', 'ym:s:deviceCategory', YM_DEVICES_LIMIT, { lang: true });
+  // GET /api/ym/referrers?days=30 — внешние домены-рефереры (ym:s:externalRefererDomain, НЕ сырой
+  // refererDomain: внутренние переходы/сам счётчик не подмешиваются). Фильтр источника гарантирует,
+  // что totals относятся именно к реферальным визитам, а не ко всему трафику сайта.
+  registerYmBreakdown('referrers', 'ym:s:externalRefererDomain', YM_REFERRERS_LIMIT, {
+    filter: "ym:s:lastsignTrafficSource=='referral'",
+  });
+  // GET /api/ym/social?days=30 — конкретные соцсети (ym:s:lastsignSocialNetwork — «последний
+  // значимый», согласовано с /sources). Фиксированный source-фильтр делает totals социальными.
+  registerYmBreakdown('social', 'ym:s:lastsignSocialNetwork', YM_SOCIAL_LIMIT, {
+    lang: true,
+    filter: "ym:s:lastsignTrafficSource=='social'",
+  });
+  // GET /api/ym/messengers?days=30 — Telegram/WhatsApp/Viber и другие мессенджеры. В Метрике это
+  // отдельная от SocialNetwork размерность, поэтому не маскируем её под соцсети и не теряем Telegram.
+  registerYmBreakdown('messengers', 'ym:s:lastsignMessenger', YM_MESSENGERS_LIMIT, {
+    lang: true,
+    filter: "ym:s:lastsignTrafficSource=='messenger'",
   });
 }
 
