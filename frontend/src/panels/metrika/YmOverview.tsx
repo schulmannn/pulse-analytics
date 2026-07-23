@@ -55,6 +55,29 @@ const breakdownNote = (users: number, bounceRate: number | null): string =>
     .filter(Boolean)
     .join(' · ');
 
+/** Контекст выбранной цели для строки разреза: конверсия (CR, %) + число достижений. Возвращает
+    null, когда цель не выбрана (goalId==null) — тогда строка остаётся с базовым (визиты/отказы)
+    контекстом. Конверсия/достижения nullable по отдельности: показываем то, что реально пришло. */
+const goalNote = (
+  goalId: number | null | undefined,
+  reaches: number | null | undefined,
+  conversion: number | null | undefined,
+): string | null => {
+  if (goalId == null) return null;
+  return (
+    [
+      conversion != null ? `CR ${conversion.toLocaleString('ru-RU', { maximumFractionDigits: 2 })}%` : null,
+      reaches != null ? `${fmt.num(reaches)} достиж.` : null,
+    ]
+      .filter(Boolean)
+      .join(' · ') || null
+  );
+};
+
+/** Склейка базового и целевого контекста строки в одну note-строку (базовый всегда, цель — если есть). */
+const joinNote = (base: string | null, goal: string | null): string | null =>
+  [base, goal].filter(Boolean).join(' · ') || null;
+
 export function YmOverview() {
   const pp = usePagePeriod();
   const days = pp ? pp.days : 30;
@@ -62,27 +85,46 @@ export function YmOverview() {
   // хелпер): «Всё» (0) берёт серии из ym_daily, живые окна — 7/30/90/точный диапазон.
   const period = useMsPagePeriod();
   const windowLabel = pp?.range ? 'за выбранный период' : days === 0 ? 'за всё время' : `за ${days} дн.`;
+  const goals = useYmGoals(period);
+  // Одна ЯВНО выбранная цель атрибуции на всю доску: источники/UTM/устройства/страницы входа
+  // читают один и тот же выбор. Селекторы появляются, ТОЛЬКО когда на счётчике есть цели. Храним
+  // id строкой (контракт PillSelect); '' = «Без цели» (дефолт — топ-цель НЕ подставляем автоматически).
+  const [attributionGoal, setAttributionGoal] = useState('');
+  const goalRows = goals.data?.rows ?? [];
+  const hasGoals = goalRows.length > 0;
+  // Период/счётчик мог смениться, пока в state остался id прежней цели. Валидируем ПРОИЗВОДНО (без
+  // useEffect-починки): id обязан существовать в текущем словаре, иначе показываем «Без цели» и шлём
+  // null до нового явного выбора. Одно значение — общий value всех четырёх синхронных селекторов.
+  const validGoalValue = hasGoals && goalRows.some((goal) => goal.id === attributionGoal) ? attributionGoal : '';
+  const selectedGoalId = validGoalValue !== '' ? Number(validGoalValue) : null;
+
   const summary = useYmSummary(period);
-  const sources = useYmSources(period);
+  const sources = useYmSources(period, selectedGoalId);
   const referrers = useYmReferrers(period);
   const social = useYmSocial(period);
   const messengers = useYmMessengers(period);
-  const devices = useYmDevices(period);
-  const goals = useYmGoals(period);
-  const utm = useYmUtm(period);
+  const devices = useYmDevices(period, selectedGoalId);
+  const utm = useYmUtm(period, selectedGoalId);
   const pages = useYmPages(period);
-  // Селектор цели лендингов появляется, ТОЛЬКО когда на счётчике есть цели (иначе — базовый отчёт).
-  // Храним id строкой (контракт PillSelect); '' = «Без цели». Сервер валидирует id числовым гейтом.
-  const [landingGoal, setLandingGoal] = useState('');
-  const goalRows = goals.data?.rows ?? [];
-  const hasGoals = goalRows.length > 0;
-  // Период/счётчик мог смениться, пока в state остался id прежней цели. Не отправляем такую
-  // цель до явного нового выбора: id должен существовать в текущем словаре целей.
-  const selectedGoalId =
-    hasGoals && landingGoal !== '' && goalRows.some((goal) => goal.id === landingGoal)
-      ? Number(landingGoal)
-      : null;
   const landings = useYmLandings(period, selectedGoalId);
+  // Общие опции + рендер синхронного селектора цели (одинаковое value/handler на всех карточках,
+  // card-specific aria-label). Показываем ТОЛЬКО при наличии целей — иначе UI как прежде.
+  const goalOptions = [
+    { value: '', label: 'Без цели' },
+    ...goalRows.map((g) => ({ value: g.id, label: g.name ?? `Цель ${g.id}` })),
+  ];
+  const goalSelect = (ariaLabel: string) =>
+    hasGoals ? (
+      <PillSelect
+        value={validGoalValue}
+        onValueChange={setAttributionGoal}
+        ariaLabel={ariaLabel}
+        // SelectTrigger is w-full by default; as a card-header action it must stay compact or it
+        // pushes the title out of the flex row. Long goal names remain truncated inside the pill.
+        className="h-7 w-32 shrink-0 text-2xs sm:w-40"
+        options={goalOptions}
+      />
+    ) : undefined;
 
   if (summary.isPending) {
     return (
@@ -174,7 +216,12 @@ export function YmOverview() {
       {/* Качество трафика: отказы/длительность/глубина/новые/роботы — nullable, «—» когда недоступно. */}
       <YmQualityStrip quality={quality} qualitySeries={qualitySeries} meta={meta} windowLabel={windowLabel} />
 
-      <ChartWidget id="ym-sources" title="Источники трафика" fixedSize="half">
+      <ChartWidget
+        id="ym-sources"
+        title="Источники трафика"
+        fixedSize="half"
+        action={goalSelect('Цель для источников трафика')}
+      >
         {sources.isPending ? (
           <TableSkeleton rows={4} columns={2} className="py-2" />
         ) : sources.isError ? (
@@ -195,7 +242,10 @@ export function YmOverview() {
               key: r.id ?? r.name ?? 'unknown',
               label: r.name ?? 'Другие источники',
               value: r.visits,
-              note: `${fmt.num(r.users)} чел.`,
+              note: joinNote(
+                `${fmt.num(r.users)} чел.`,
+                goalNote(sources.data.goal_id, r.goal_reaches, r.goal_conversion),
+              ),
             }))}
             tailWord="визитов"
             unitTotal={sources.data.visits_total}
@@ -309,7 +359,12 @@ export function YmOverview() {
       </ChartWidget>
 
       {/* Устройства: тип устройства (deviceCategory) — локализация по стабильному id, имя — фолбэк. */}
-      <ChartWidget id="ym-devices" title="Устройства" fixedSize="half">
+      <ChartWidget
+        id="ym-devices"
+        title="Устройства"
+        fixedSize="half"
+        action={goalSelect('Цель для устройств')}
+      >
         {devices.isPending ? (
           <TableSkeleton rows={4} columns={2} className="py-2" />
         ) : devices.isError ? (
@@ -330,7 +385,10 @@ export function YmOverview() {
               key: r.id ?? r.name ?? 'unknown',
               label: (r.id != null ? YM_DEVICE_LABELS[r.id] : undefined) ?? r.name ?? 'Другие устройства',
               value: r.visits,
-              note: breakdownNote(r.users, r.bounce_rate),
+              note: joinNote(
+                breakdownNote(r.users, r.bounce_rate),
+                goalNote(devices.data.goal_id, r.goal_reaches, r.goal_conversion),
+              ),
             }))}
             tailWord="визитов"
             unitTotal={devices.data.visits_total}
@@ -376,7 +434,12 @@ export function YmOverview() {
       </ChartWidget>
 
       {/* UTM: только размеченные визиты в строках; неразмеченные — честной сноской, не строкой. */}
-      <ChartWidget id="ym-utm" title="UTM-метки" fixedSize="half">
+      <ChartWidget
+        id="ym-utm"
+        title="UTM-метки"
+        fixedSize="half"
+        action={goalSelect('Цель для UTM-меток')}
+      >
         {utm.isPending ? (
           <TableSkeleton rows={4} columns={2} className="py-2" />
         ) : utm.isError ? (
@@ -402,7 +465,7 @@ export function YmOverview() {
               key: r.id ?? r.name ?? 'unknown',
               label: r.name ?? r.id ?? 'utm',
               value: r.visits,
-              note: `${fmt.num(r.users)} чел.`,
+              note: joinNote(`${fmt.num(r.users)} чел.`, goalNote(utm.data.goal_id, r.goal_reaches, r.goal_conversion)),
             }))}
             tailWord="визитов"
             unitTotal={utm.data.tagged_visits}
@@ -450,20 +513,7 @@ export function YmOverview() {
         id="ym-landings"
         title="Страницы входа"
         fixedSize="half"
-        action={
-          hasGoals ? (
-            <PillSelect
-              value={landingGoal}
-              onValueChange={setLandingGoal}
-              ariaLabel="Цель для страниц входа"
-              className="h-7 text-2xs"
-              options={[
-                { value: '', label: 'Без цели' },
-                ...goalRows.map((g) => ({ value: g.id, label: g.name ?? `Цель ${g.id}` })),
-              ]}
-            />
-          ) : undefined
-        }
+        action={goalSelect('Цель для страниц входа')}
       >
         {landings.isPending ? (
           <TableSkeleton rows={4} columns={2} className="py-2" />
@@ -485,17 +535,13 @@ export function YmOverview() {
               key: r.path,
               label: r.path,
               value: r.visits,
-              // Отказы всегда; конверсия цели — только когда цель выбрана и метрика пришла.
-              note: [
+              // Отказы всегда; конверсия/достижения цели — только когда цель выбрана и метрика пришла.
+              note: joinNote(
                 r.bounce_rate != null
                   ? `${r.bounce_rate.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}% отказов`
                   : null,
-                landings.data.goal_id != null && r.goal_conversion != null
-                  ? `CR ${r.goal_conversion.toLocaleString('ru-RU', { maximumFractionDigits: 2 })}%`
-                  : null,
-              ]
-                .filter(Boolean)
-                .join(' · ') || null,
+                goalNote(landings.data.goal_id, r.goal_reaches, r.goal_conversion),
+              ),
             }))}
             tailWord="визитов"
             unitTotal={landings.data.visits_total}

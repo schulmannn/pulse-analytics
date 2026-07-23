@@ -705,6 +705,30 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
     }
   });
 
+  // Опциональный goal_id: положительный safe-integer ЛИБО ничего. Иное (инъекция, дробь,
+  // отрицательное, переполнение) → null: цель просто не запрашивается, отчёт остаётся базовым.
+  // Хелпер объявлен до всех использующих его роутов (sources/utm/devices/landings), чтобы
+  // атрибуционный контракт был общим, а не принадлежал только секции лендингов.
+  const goalIdOf = (req) => {
+    const raw = req.query.goal_id;
+    if (raw == null || raw === '') return null;
+    const n = Number(raw);
+    return Number.isSafeInteger(n) && n > 0 ? n : null;
+  };
+  // Метрики выбранной цели для строки отчёта в АДДИТИВНОЙ форме number|null: reaches — счётчик
+  // достижений (absent≠0, missing → null; реальный ноль upstream остаётся 0), conversionRate — %
+  // визитов строки с достижением. null-пара, когда цель не запрашивалась (goalId==null). reachIdx —
+  // позиция ym:s:goal<id>reaches в metrics строки (conversionRate следом, reachIdx+1).
+  const goalRowFields = (m, goalId, reachIdx) => {
+    if (goalId == null) return { goal_reaches: null, goal_conversion: null };
+    const reaches = numOrNull(m[reachIdx]);
+    const conversion = numOrNull(m[reachIdx + 1]);
+    return {
+      goal_reaches: reaches == null ? null : Math.round(reaches),
+      goal_conversion: conversion == null ? null : round2(conversion),
+    };
+  };
+
   // GET /api/ym/sources?days=30 — разбивка визитов/посетителей по источникам трафика
   // (ym:s:lastsignTrafficSource, атрибуция «последний значимый»). Всегда живой отчёт (компактный,
   // один запрос); «Всё» — полный диапазон от даты создания счётчика (фолбэк — старейший день
@@ -713,9 +737,11 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
     try {
       const period = parseYmPeriod(req);
       if (period.invalid) return badRange(res);
+      const goalId = goalIdOf(req);
       const ym = await resolveYm(req, res);
       if (!ym) return;
-      const cacheKey = `ym:sources:${ym.channel.id}:${period.periodKey}`;
+      // Цель (g0 — без цели) входит в кэш-ключ: атрибуция цели не делит запись с базовым отчётом.
+      const cacheKey = `ym:sources:${ym.channel.id}:${period.periodKey}:g${goalId || 0}`;
       const cached = cacheGet(cacheKey);
       if (cached) return res.json(cached);
 
@@ -724,12 +750,17 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
         ? await allRangeWindow(ym, req.user)
         : { date1: period.date1, date2: period.date2 };
 
+      // goalId — уже число (или null): интерполяция в имена метрик инъекционно-безопасна. Достижения/
+      // конверсию цели дописываем ПОСЛЕ визитов/посетителей — базовые totals/сортировка не меняются.
+      let metrics = 'ym:s:visits,ym:s:users';
+      if (goalId != null) metrics += `,ym:s:goal${goalId}reaches,ym:s:goal${goalId}conversionRate`;
+
       let body;
       try {
         body = await ymFetch(
           ym.token,
           `/stat/v1/data?ids=${encodeURIComponent(ym.acc.counter_id)}` +
-            '&metrics=ym:s:visits,ym:s:users' +
+            `&metrics=${metrics}` +
             '&dimensions=ym:s:lastsignTrafficSource&sort=-ym:s:visits' +
             `&date1=${date1}&date2=${date2}` +
             `&limit=${YM_SOURCES_LIMIT}&accuracy=full&lang=ru`,
@@ -747,6 +778,7 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
             name: dim && typeof dim.name === 'string' && dim.name ? dim.name : null,
             visits: Math.round(Number(m[0]) || 0),
             users: Math.round(Number(m[1]) || 0),
+            ...goalRowFields(m, goalId, 2),
           };
         })
         .filter((r) => r.id != null || r.name != null);
@@ -759,7 +791,7 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
       const usersTotal = Number.isFinite(Number(totals[1]))
         ? Math.round(Number(totals[1]))
         : rows.reduce((acc, r) => acc + r.users, 0);
-      const data = { visits_total: visitsTotal, users_total: usersTotal, rows };
+      const data = { goal_id: goalId, visits_total: visitsTotal, users_total: usersTotal, rows };
       cacheSet(cacheKey, data, isAll ? YM_ALL_RANGE_CACHE_TTL_MS : undefined);
       res.json(data);
     } catch (e) {
@@ -935,15 +967,6 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
     if (!Number.isFinite(n) || n < 1) return YM_LANDINGS_LIMIT_DEFAULT;
     return Math.min(n, YM_LANDINGS_LIMIT_MAX);
   };
-  // Опциональный goal_id: положительный safe-integer ЛИБО ничего. Иное (инъекция, дробь,
-  // отрицательное, переполнение) → null: цель просто не запрашивается, отчёт остаётся базовым.
-  const goalIdOf = (req) => {
-    const raw = req.query.goal_id;
-    if (raw == null || raw === '') return null;
-    const n = Number(raw);
-    return Number.isSafeInteger(n) && n > 0 ? n : null;
-  };
-
   // GET /api/ym/landings?days=30&limit=10&goal_id=<id?> — топ страниц входа по визитам.
   app.get('/api/ym/landings', requireAuth, async (req, res, next) => {
     try {
@@ -1018,9 +1041,11 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
     try {
       const period = parseYmPeriod(req);
       if (period.invalid) return badRange(res);
+      const goalId = goalIdOf(req);
       const ym = await resolveYm(req, res);
       if (!ym) return;
-      const cacheKey = `ym:utm:${ym.channel.id}:${period.periodKey}`;
+      // Цель (g0 — без цели) входит в кэш-ключ — атрибуция не делит запись с базовым отчётом.
+      const cacheKey = `ym:utm:${ym.channel.id}:${period.periodKey}:g${goalId || 0}`;
       const cached = cacheGet(cacheKey);
       if (cached) return res.json(cached);
       const isAll = period.days === 0 && !period.range;
@@ -1028,12 +1053,17 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
         ? await allRangeWindow(ym, req.user)
         : { date1: period.date1, date2: period.date2 };
 
+      // goalId — уже число (или null): вклейка в имена метрик инъекционно-безопасна. Достижения/
+      // конверсию цели дописываем ПОСЛЕ визитов/посетителей — totals[0] и разметка не меняются.
+      let metrics = 'ym:s:visits,ym:s:users';
+      if (goalId != null) metrics += `,ym:s:goal${goalId}reaches,ym:s:goal${goalId}conversionRate`;
+
       let body;
       try {
         body = await ymFetch(
           ym.token,
           `/stat/v1/data?ids=${encodeURIComponent(ym.acc.counter_id)}` +
-            '&metrics=ym:s:visits,ym:s:users' +
+            `&metrics=${metrics}` +
             '&dimensions=ym:s:UTMSource&sort=-ym:s:visits' +
             `&date1=${date1}&date2=${date2}` +
             `&limit=${YM_SOURCES_LIMIT}&accuracy=full`,
@@ -1050,6 +1080,7 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
           name: dim && typeof dim.name === 'string' && dim.name ? dim.name : null,
           visits: Math.round(Number(m[0]) || 0),
           users: Math.round(Number(m[1]) || 0),
+          ...goalRowFields(m, goalId, 2),
         };
       });
       const rows = mapped.filter((r) => r.id != null || r.name != null);
@@ -1060,6 +1091,7 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
         ? Math.round(Number(totals[0]))
         : mapped.reduce((acc, r) => acc + r.visits, 0);
       const data = {
+        goal_id: goalId,
         visits_total: visitsTotal,
         tagged_visits: Math.max(0, visitsTotal - untaggedVisits),
         untagged_visits: untaggedVisits,
@@ -1089,7 +1121,9 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
   // Telegram и другие мессенджеры у Метрики — отдельная размерность, не SocialNetwork.
   const YM_MESSENGERS_LIMIT = 50;
 
-  const breakdownRowsFromBody = (body) =>
+  // goalOpt !== null включает АДДИТИВНЫЕ поля цели у строки (только там, где разрез их поддерживает —
+  // устройства): reaches/conversionRate идут после базовых visits,users,bounceRate → индекс 3.
+  const breakdownRowsFromBody = (body, goalOpt = null) =>
     (body && Array.isArray(body.data) ? body.data : [])
       .map((row) => {
         const dim = row && Array.isArray(row.dimensions) && row.dimensions[0];
@@ -1098,13 +1132,15 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
         const bounce = numOrNull(m[2]);
         const id = dim && dim.id != null ? String(dim.id).trim() : '';
         const name = dim && typeof dim.name === 'string' ? dim.name.trim() : '';
-        return {
+        const r = {
           id: id || null,
           name: name || null,
           visits: Math.round(Number(m[0]) || 0),
           users: Math.round(Number(m[1]) || 0),
           bounce_rate: bounce == null ? null : round2(bounce),
         };
+        if (goalOpt) Object.assign(r, goalRowFields(m, goalOpt.goalId, 3));
+        return r;
       })
       // Строка без id И без имени = «не определено»/пустой домен: не показываем и не считаем строкой.
       .filter((r) => r.id != null || r.name != null);
@@ -1125,14 +1161,21 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
   // Общий обработчик разреза: фиксированная размерность (НЕ пользовательский ввод — инъекции нет),
   // тот же период-контракт 7/30/90/диапазон/«Всё» и часовой кэш «Всё», что у sources. lang=ru
   // только там, где влияет на интерпретируемые имена (устройства/соцсети); домены рефереров — сырьё.
-  function registerYmBreakdown(route, dimension, limit, { lang = false, filter = null } = {}) {
+  // goals:true — разрез поддерживает атрибуцию ОДНОЙ выбранной цели (сейчас только устройства):
+  // добавляет goal_id в кэш-ключ/ответ и достижения/конверсию цели по строке. Для разрезов без
+  // goals контракт байт-в-байт прежний (ни goal_id, ни поля цели, ключ без g-слота) — рефереры/
+  // соцсети/мессенджеры не меняются молча.
+  function registerYmBreakdown(route, dimension, limit, { lang = false, filter = null, goals = false } = {}) {
     app.get(`/api/ym/${route}`, requireAuth, async (req, res, next) => {
       try {
         const period = parseYmPeriod(req);
         if (period.invalid) return badRange(res);
+        const goalId = goals ? goalIdOf(req) : null;
         const ym = await resolveYm(req, res);
         if (!ym) return;
-        const cacheKey = `ym:${route}:${ym.channel.id}:${period.periodKey}`;
+        const cacheKey = goals
+          ? `ym:${route}:${ym.channel.id}:${period.periodKey}:g${goalId || 0}`
+          : `ym:${route}:${ym.channel.id}:${period.periodKey}`;
         const cached = cacheGet(cacheKey);
         if (cached) return res.json(cached);
         const isAll = period.days === 0 && !period.range;
@@ -1140,12 +1183,17 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
           ? await allRangeWindow(ym, req.user)
           : { date1: period.date1, date2: period.date2 };
 
+        // goalId — уже число (или null): вклейка в имена метрик инъекционно-безопасна. Достижения/
+        // конверсию цели дописываем ПОСЛЕ базовых visits,users,bounceRate — totals/сортировка те же.
+        let metrics = YM_BREAKDOWN_METRICS;
+        if (goalId != null) metrics += `,ym:s:goal${goalId}reaches,ym:s:goal${goalId}conversionRate`;
+
         let body;
         try {
           body = await ymFetch(
             ym.token,
             `/stat/v1/data?ids=${encodeURIComponent(ym.acc.counter_id)}` +
-              `&metrics=${YM_BREAKDOWN_METRICS}` +
+              `&metrics=${metrics}` +
               `&dimensions=${dimension}&sort=-ym:s:visits` +
               `&date1=${date1}&date2=${date2}` +
               `&limit=${limit}&accuracy=full` +
@@ -1156,9 +1204,11 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
           return sendYmError(res, e, { route, channelId: ym.channel.id });
         }
 
-        const rows = breakdownRowsFromBody(body);
+        const rows = breakdownRowsFromBody(body, goals ? { goalId } : null);
         const { visits_total, users_total } = breakdownTotals(body, rows);
-        const data = { visits_total, users_total, rows, meta: samplingMeta(body) };
+        const data = goals
+          ? { goal_id: goalId, visits_total, users_total, rows, meta: samplingMeta(body) }
+          : { visits_total, users_total, rows, meta: samplingMeta(body) };
         cacheSet(cacheKey, data, isAll ? YM_ALL_RANGE_CACHE_TTL_MS : undefined);
         res.json(data);
       } catch (e) {
@@ -1167,9 +1217,10 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
     });
   }
 
-  // GET /api/ym/devices?days=30 — разбивка по типу устройства (ym:s:deviceCategory: десктоп/
-  // смартфон/планшет/ТВ). id устройства стабилен — фронт локализует по нему, имя lang=ru — фолбэк.
-  registerYmBreakdown('devices', 'ym:s:deviceCategory', YM_DEVICES_LIMIT, { lang: true });
+  // GET /api/ym/devices?days=30&goal_id=<id?> — разбивка по типу устройства (ym:s:deviceCategory:
+  // десктоп/смартфон/планшет/ТВ). id устройства стабилен — фронт локализует по нему, имя lang=ru —
+  // фолбэк. goals:true — единственный разрез с атрибуцией выбранной цели (достижения/конверсия).
+  registerYmBreakdown('devices', 'ym:s:deviceCategory', YM_DEVICES_LIMIT, { lang: true, goals: true });
   // GET /api/ym/referrers?days=30 — внешние домены-рефереры (ym:s:externalRefererDomain, НЕ сырой
   // refererDomain: внутренние переходы/сам счётчик не подмешиваются). Фильтр источника гарантирует,
   // что totals относятся именно к реферальным визитам, а не ко всему трафику сайта.

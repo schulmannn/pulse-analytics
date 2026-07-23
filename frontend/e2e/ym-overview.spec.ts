@@ -198,6 +198,21 @@ const DEVICES = {
   meta: {},
 };
 
+// Атрибуция цели: карточка, получив &goal_id=11, отвечает АДДИТИВНО (goal_id + goal_reaches/
+// goal_conversion по строкам). Значения CR/reaches уникальны по карточке, чтобы e2e-локаторы не
+// схлопывались между источниками/устройствами/UTM/страницами входа.
+function withGoalCtx<T extends { rows: readonly Record<string, unknown>[] }>(
+  base: T,
+  reaches: number,
+  conversion: number,
+): T {
+  return {
+    ...base,
+    goal_id: 11,
+    rows: base.rows.map((r) => ({ ...r, goal_reaches: reaches, goal_conversion: conversion })),
+  } as T;
+}
+
 async function bootMetrika(page: Page, path: string, { connected = true } = {}) {
   const state = { connected, connectCalls: [] as Array<Record<string, unknown>> };
   await page.route(/^https?:\/\/[^/]+\/api\//, async (route) => {
@@ -220,16 +235,18 @@ async function bootMetrika(page: Page, path: string, { connected = true } = {}) 
         ? { connected: true, counter_name: 'nōtem', counter_id: '65383336', site: 'notem.ru' }
         : { connected: false, counter_name: null, counter_id: null, site: null });
     }
+    const goalId = new URL(request.url()).searchParams.get('goal_id');
+    const attributed = goalId === '11';
     if (urlPath === '/api/ym/summary') return json(200, SUMMARY);
-    if (urlPath === '/api/ym/sources') return json(200, SOURCES);
+    if (urlPath === '/api/ym/sources') return json(200, attributed ? withGoalCtx(SOURCES, 6, 3.1) : SOURCES);
     if (urlPath === '/api/ym/goals') return json(200, GOALS);
-    if (urlPath === '/api/ym/utm') return json(200, UTM);
+    if (urlPath === '/api/ym/utm') return json(200, attributed ? withGoalCtx(UTM, 8, 5.3) : UTM);
     if (urlPath === '/api/ym/pages') return json(200, PAGES);
     if (urlPath === '/api/ym/referrers') return json(200, REFERRERS);
     if (urlPath === '/api/ym/social') return json(200, SOCIAL);
     if (urlPath === '/api/ym/messengers') return json(200, MESSENGERS);
-    if (urlPath === '/api/ym/devices') return json(200, DEVICES);
-    if (urlPath === '/api/ym/landings') return json(200, LANDINGS);
+    if (urlPath === '/api/ym/devices') return json(200, attributed ? withGoalCtx(DEVICES, 7, 4.2) : DEVICES);
+    if (urlPath === '/api/ym/landings') return json(200, attributed ? withGoalCtx(LANDINGS, 9, 6.4) : LANDINGS);
     if (urlPath === '/api/ym/connect' && request.method() === 'POST') {
       const body = request.postDataJSON() as Record<string, unknown>;
       state.connectCalls.push(body);
@@ -281,7 +298,11 @@ test('Обзор Метрики: карточки метрик, источник
   await expect(page.getByText(/сумма по дням/)).toHaveCount(0);
 
   // Источники: компактный топ-4 + сводный хвост (5-я строка спрятана до разворота).
-  await expect(page.getByRole('heading', { name: 'Источники трафика', exact: true })).toBeVisible();
+  const sourcesHeading = page.getByRole('heading', { name: 'Источники трафика', exact: true });
+  // Chromium считает узел внутри content-visibility:auto «уже в layout» и иногда не скроллит
+  // через scrollIntoViewIfNeeded под параллельной E2E-нагрузкой. Явный DOM-scroll снимает флап.
+  await sourcesHeading.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+  await expect(sourcesHeading).toBeVisible();
   await expect(page.getByText('Переходы из поисковых систем')).toBeVisible();
   await expect(page.getByText('Прямые заходы')).toBeVisible();
   await expect(page.getByText('Внутренние переходы')).toHaveCount(0);
@@ -350,6 +371,51 @@ test('Обзор Метрики: карточки метрик, источник
 
   // Период-чипсы (общий page-period контракт) на месте.
   await expect(page.getByRole('group', { name: 'Период', exact: true })).toHaveCount(1);
+});
+
+test('Атрибуция цели: синхронные селекторы источники/UTM/устройства/входы + CR и достижения', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-1440', 'Метрика — desktop-first поверхность');
+  await bootMetrika(page, '/metrika');
+
+  const sourcesSel = page.getByLabel('Цель для источников трафика');
+  const devicesSel = page.getByLabel('Цель для устройств');
+  const utmSel = page.getByLabel('Цель для UTM-меток');
+  const landingsSel = page.getByLabel('Цель для страниц входа');
+
+  // Дефолт — «Без цели» на всех карточках (топ-цель НЕ подставляется автоматически).
+  await expect(sourcesSel).toContainText('Без цели');
+  await expect(devicesSel).toContainText('Без цели');
+  await expect(utmSel).toContainText('Без цели');
+  await expect(landingsSel).toContainText('Без цели');
+  // Без цели контекст строки остаётся базовым — конверсии/достижений именно в источниках нет.
+  // Глобально CR уже присутствует в самостоятельной карточке «Цели», поэтому скоуп обязателен.
+  const sourcesCard = page
+    .getByRole('heading', { name: 'Источники трафика', exact: true })
+    .locator('xpath=ancestor::section[1]');
+  await expect(sourcesCard.getByText(/CR /)).toHaveCount(0);
+
+  // Выбираем цель в ОДНОЙ карточке (источники) — состояние общее, значит меняется всюду.
+  await sourcesSel.click();
+  await page.getByRole('option', { name: 'Оформление заказа' }).click();
+
+  // Все четыре селектора синхронно показывают выбранную цель.
+  await expect(sourcesSel).toContainText('Оформление заказа');
+  await expect(devicesSel).toContainText('Оформление заказа');
+  await expect(utmSel).toContainText('Оформление заказа');
+  await expect(landingsSel).toContainText('Оформление заказа');
+
+  // Честный контекст цели по строке: конверсия (CR — уникальна на карточку) + число достижений.
+  await expect(page.getByText(/CR 3,1%/).first()).toBeVisible(); // источники
+  await expect(page.getByText(/6 достиж\./).first()).toBeVisible();
+  await devicesSel.scrollIntoViewIfNeeded();
+  await expect(page.getByText(/CR 4,2%/).first()).toBeVisible(); // устройства
+  await utmSel.scrollIntoViewIfNeeded();
+  await expect(page.getByText(/CR 5,3%/).first()).toBeVisible(); // UTM
+
+  // Страницы входа — последняя карточка (content-visibility): доскроллим и проверим CR/достижения.
+  await page.getByRole('heading', { name: 'Страницы входа', exact: true }).scrollIntoViewIfNeeded();
+  await expect(page.getByText(/CR 6,4%/).first()).toBeVisible();
+  await expect(page.getByText(/9 достиж\./).first()).toBeVisible();
 });
 
 test('Подключение Метрики: токен → выбор счётчика → подключено (токен только в POST-теле)', async ({ page }, testInfo) => {
