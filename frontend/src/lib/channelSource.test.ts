@@ -7,11 +7,13 @@ import { channelsForSource, isEligibleSource, resolveHomeSourceChannel } from '.
 //  - a Telegram channel with a linked Instagram account (ig_connected)
 //  - a standalone Instagram source (source === 'ig')
 //  - a standalone MoySklad source (source === 'ms') — не принадлежит ни TG, ни IG
+//  - a standalone Yandex Metrika source (source === 'ym') — тоже не принадлежит ни TG, ни IG
 const tg: Channel = { id: 1, username: 'bynotem', title: 'bynotem', source: null, ig_connected: false };
 const tgWithIg: Channel = { id: 2, username: 'tydaaya', title: 'tydaaya', source: null, ig_connected: true };
 const igStandalone: Channel = { id: 3, username: 'ig_only', title: 'ig_only', source: 'ig', ig_connected: false };
 const msStandalone: Channel = { id: 4, username: null, title: 'ИП Хайдукова', source: 'ms', ig_connected: false };
-const all = [tg, tgWithIg, igStandalone, msStandalone];
+const ymStandalone: Channel = { id: 5, username: null, title: 'notem.ru', source: 'ym', ig_connected: false };
+const all = [tg, tgWithIg, igStandalone, msStandalone, ymStandalone];
 
 describe('channelsForSource', () => {
   it('Telegram list excludes standalone Instagram sources', () => {
@@ -21,6 +23,16 @@ describe('channelsForSource', () => {
   it('Telegram list excludes standalone MoySklad sources (склад — не Telegram)', () => {
     expect(channelsForSource([msStandalone, tg], 'tg').map((c) => c.id)).toEqual([1]);
     expect(isEligibleSource(all, 'tg', 4)).toBe(false);
+  });
+
+  it('Telegram list excludes standalone Metrika sources (счётчик — не Telegram)', () => {
+    expect(channelsForSource([ymStandalone, tg], 'tg').map((c) => c.id)).toEqual([1]);
+    expect(isEligibleSource(all, 'tg', 5)).toBe(false);
+  });
+
+  it('Metrika list offers only standalone ym channels', () => {
+    expect(channelsForSource(all, 'ym').map((c) => c.id)).toEqual([5]);
+    expect(channelsForSource([tg, msStandalone], 'ym')).toEqual([]);
   });
 
   it('Instagram list offers only channels with a linked IG account', () => {

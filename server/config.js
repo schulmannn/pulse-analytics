@@ -98,6 +98,11 @@ function loadConfig(env = process.env) {
       // instagram.tokenKey: пусто = connect-флоу inert (/api/ms/connect отвечает 503).
       tokenKey: env.MS_TOKEN_KEY || '',
     }),
+    metrika: Object.freeze({
+      // Ключ шифрования OAuth-токенов Яндекс.Метрики (AES-256-GCM, lib/ym_crypto) — по образцу
+      // moysklad.tokenKey: пусто = connect-флоу inert (/api/ym/connect отвечает 503).
+      tokenKey: env.YM_TOKEN_KEY || '',
+    }),
     telegram: Object.freeze({
       botToken: env.TG_BOT_TOKEN || '',
       channel: env.TG_CHANNEL || '',

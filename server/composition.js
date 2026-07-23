@@ -14,6 +14,8 @@ const { createMtprotoClient } = require('./lib/mtproto-client');
 const { createIgCrypto } = require('./lib/ig_crypto');
 const { createMsCrypto } = require('./lib/ms_crypto');
 const { createMsClient } = require('./lib/msClient');
+const { createYmCrypto } = require('./lib/ym_crypto');
+const { createYmClient } = require('./lib/ymClient');
 const { createTgCrypto } = require('./lib/tg_crypto');
 const { createNotionCrashClient } = require('./lib/notion_crash');
 const { log: defaultLog } = require('./lib/observability');
@@ -31,6 +33,7 @@ const {
 } = require('./jobs/instagramCollectionJob');
 const { createMsCollectionJob } = require('./jobs/msCollectionJob');
 const { createMsBackfillEngine } = require('./jobs/msBackfillJob');
+const { createYmCollectionJob } = require('./jobs/ymCollectionJob');
 const { createMemoryCache } = require('./infrastructure/memoryCache');
 const { createPersistenceJob } = require('./jobs/persistenceJob');
 const { createTgQrCollectionJob } = require('./jobs/tgQrCollectionJob');
@@ -79,6 +82,14 @@ function createComposition(config, overrides = {}) {
   const msClient =
     overrides.msClient || createMsClient({ fetchImpl: fetchWithTimeout, log });
   const msFetch = msClient.msFetch;
+  // Яндекс.Метрика: свой ключ шифрования токенов (YM_TOKEN_KEY) + единый исходящий GET-клиент
+  // (lib/ymClient — заголовок OAuth, один ретрай на 429). Тот же fetchWithTimeout; токены живут
+  // только в заголовке запроса, в логи не попадают.
+  const ymCrypto =
+    overrides.ymCrypto || createYmCrypto(config.metrika.tokenKey);
+  const ymClient =
+    overrides.ymClient || createYmClient({ fetchImpl: fetchWithTimeout, log });
+  const ymFetch = ymClient.ymFetch;
   const tgCrypto =
     overrides.tgCrypto ||
     createTgCrypto(config.telegram.sessionKey, config.telegram.previousSessionKeys);
@@ -280,6 +291,17 @@ function createComposition(config, overrides = {}) {
     log,
   });
 
+  // Дневной сбор Яндекс.Метрики в архив ym_daily — jobs/ymCollectionJob (проход по всем
+  // подключённым счётчикам, durable per-day гейты; первый проход после connect бэкфиллит всю
+  // историю счётчика). Пишет через backgroundDb, как МС-сбор; ymFetch/ymCrypto — те же
+  // синглтоны, что у живых роутов. Проход едет в collection recovery runner ниже.
+  const ymCollectionJob = createYmCollectionJob({
+    db: backgroundDb,
+    ymFetch,
+    ymCrypto,
+    log,
+  });
+
   // Чанковый бэкфилл заказов покупателей (ms_orders) + resume/доливка — jobs/msBackfillJob.
   // Один инстанс на процесс: его in-process single-flight и должен быть общим для роута
   // (POST /api/ms/backfill стартует fire-and-forget) и recovery-бегунка (runMsOrdersPass).
@@ -468,6 +490,8 @@ function createComposition(config, overrides = {}) {
       msCrypto,
       msFetch,
       msBackfill: msBackfillEngine,
+      ymCrypto,
+      ymFetch,
       nearestOf,
       cacheGet,
       cacheSet,
@@ -509,6 +533,7 @@ function createComposition(config, overrides = {}) {
       repairCentralMedia,
       runMsCollectionPass: msCollectionJob.runMsCollectionPass,
       runMsOrdersPass: msBackfillEngine.runMsOrdersPass,
+      runYmCollectionPass: ymCollectionJob.runYmCollectionPass,
       igCap: config.runtime.igAccountsPerPass,
       tgCap: config.runtime.tgQrChannelsPerPass,
       mediaCap: config.runtime.tgMediaRepairPerPass,

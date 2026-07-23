@@ -681,6 +681,68 @@ export function useMsStatus() {
   });
 }
 
+// ── «Яндекс.Метрика» (source='ym'): сервер-агрегированные дневные отчёты счётчика ────────────
+const YmSeriesBlockSchema = z
+  .object({ total: z.number(), series: z.array(z.object({ day: z.string(), value: z.number() }).passthrough()) })
+  .passthrough();
+const YmSummarySchema = z
+  .object({ visits: YmSeriesBlockSchema, users: YmSeriesBlockSchema, pageviews: YmSeriesBlockSchema })
+  .passthrough();
+const YmSourcesSchema = z
+  .object({
+    visits_total: z.number(),
+    users_total: z.number(),
+    rows: z.array(
+      z
+        .object({ id: z.string().nullable(), name: z.string().nullable(), visits: z.number(), users: z.number() })
+        .passthrough(),
+    ),
+  })
+  .passthrough();
+const YmStatusSchema = z
+  .object({
+    connected: z.boolean(),
+    counter_name: z.string().nullable().optional(),
+    counter_id: z.string().nullable().optional(),
+    site: z.string().nullable().optional(),
+  })
+  .passthrough();
+
+export function useYmStatus() {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    enabled: channelId != null,
+    queryKey: ['ym-status', channelId],
+    staleTime: STALE_STATUS,
+    retry: false,
+    queryFn: ({ signal }) => apiGet('/api/ym/status', YmStatusSchema, { signal, channelId }),
+  });
+}
+
+// Период Метрики сериализуется тем же feed-топбаром, что у МС (msPeriodQuery/msPeriodKey —
+// сете-агностичные хелперы окна): одна система координат окон на все не-социальные источники.
+export function useYmSummary(period: MsPeriod) {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    enabled: channelId != null,
+    queryKey: ['ym-summary', channelId, ...msPeriodKey(period)],
+    staleTime: STALE_LIVE,
+    retry: false,
+    queryFn: ({ signal }) => apiGet(`/api/ym/summary?${msPeriodQuery(period)}`, YmSummarySchema, { signal, channelId }),
+  });
+}
+
+export function useYmSources(period: MsPeriod) {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    enabled: channelId != null,
+    queryKey: ['ym-sources', channelId, ...msPeriodKey(period)],
+    staleTime: STALE_LIVE,
+    retry: false,
+    queryFn: ({ signal }) => apiGet(`/api/ym/sources?${msPeriodQuery(period)}`, YmSourcesSchema, { signal, channelId }),
+  });
+}
+
 const MsBackfillStatusSchema = z
   .object({
     status: z.string(),

@@ -164,6 +164,23 @@ const MS_PARTS: Record<string, SectionParts> = {
   channels: { Body: MsChannels, HeaderRight: TgPagePeriodControl },
 };
 
+// «Яндекс.Метрика» — свой lazy-чанк (bundle-гейт: TG/IG-пользователь его не платит). Период —
+// те же page-period чипсы, что у остальных сетей.
+const YmOverview = lazyFrom(() => import('@/panels/metrika/YmOverview'), 'YmOverview');
+
+/** Минимальный shell «Метрики»: page-period провайдер + секционный Outlet (у сети одна секция). */
+function YmShellRoute() {
+  return (
+    <PagePeriodProvider>
+      <Outlet />
+    </PagePeriodProvider>
+  );
+}
+
+const YM_PARTS: Record<string, SectionParts> = {
+  '': { Body: YmOverview, HeaderRight: TgPagePeriodControl },
+};
+
 /** Zip the network's nav (paths + labels — the single source of truth) with the body map. A nav
     row without a body is skipped defensively rather than crashing the whole feed. */
 function buildSections(net: Network, parts: Record<string, SectionParts>): FeedSectionDef[] {
@@ -179,6 +196,7 @@ export const FEEDS: Record<Network, NetworkFeedDef> = {
   tg: { Shell: TgSectionLayout, sections: buildSections('tg', TG_PARTS) },
   ig: { Shell: IgShellRoute, sections: buildSections('ig', IG_PARTS) },
   ms: { Shell: MsShellRoute, sections: buildSections('ms', MS_PARTS) },
+  ym: { Shell: YmShellRoute, sections: buildSections('ym', YM_PARTS) },
 };
 
 /**

@@ -15,4 +15,10 @@ describe('FEED_ROUTES — feed pages suppress the shared Atlavue topbar', () => 
       expect(FEED_ROUTES).toContain(route);
     }
   });
+
+  // Обзор Метрики рендерит собственный FeedBlock-заголовок — без строки здесь layout смонтировал
+  // бы поверх него дублирующий Atlavue-topbar (тот же регресс, что был у «МойСклада»).
+  it('covers the Yandex Metrika overview page', () => {
+    expect(FEED_ROUTES).toContain('/metrika');
+  });
 });

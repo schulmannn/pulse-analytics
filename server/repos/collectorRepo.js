@@ -465,6 +465,31 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
     return rows.length;
   }
 
+  // Дневные метрики Яндекс.Метрики. rows: [{ day:'YYYY-MM-DD', visits, users, pageviews }] —
+  // целые счётчики (BIGINT). Батч-upsert по (channel_id, day), зеркально upsertMsDaily и с той же
+  // сознательной ЗАМЕНЯЮЩЕЙ семантикой (не COALESCE): крон пере-снимает окно ЦЕЛИКОМ из отчёта
+  // Метрики, а её допересчёт свежих дней бывает и ВНИЗ (пересмотр роботности) — свежая точка
+  // честно ЗАМЕНЯЕТ старую. Контракт вызывающего: все три метрики приходят одним отчётом
+  // (ymCollectionJob частичных строк не строит), поэтому отсутствие трафика в дне = честный 0;
+  // COALESCE к 0 здесь лишь страховка NOT NULL-контракта таблицы от дырявой строки.
+  async function upsertYmDaily(channelId, rows, executor = pool) {
+    if (!enabled || !channelId || !rows || !rows.length) return 0;
+    const sql = `INSERT INTO ym_daily
+        (channel_id, day, visits, users, pageviews, updated_at)
+      SELECT $1, x.day::date, COALESCE(x.visits, 0), COALESCE(x.users, 0),
+             COALESCE(x.pageviews, 0), now()
+        FROM jsonb_to_recordset($2::jsonb) AS x(
+          day text, visits bigint, users bigint, pageviews bigint
+        )
+      ON CONFLICT (channel_id, day) DO UPDATE SET
+        visits=EXCLUDED.visits,
+        users=EXCLUDED.users,
+        pageviews=EXCLUDED.pageviews,
+        updated_at=now()`;
+    await executor.query(sql, [channelId, JSON.stringify(rows)]);
+    return rows.length;
+  }
+
   // Заказы покупателей МойСклада (архив ms_orders, слайс 2б). rows: [{ order_id, moment,
   // sum_kopecks, state, state_id, agent_id, agent_name }] — суммы в КОПЕЙКАХ. Идемпотентный
   // батч-upsert по (channel_id, order_id); как у ms_daily — СОЗНАТЕЛЬНО полная ЗАМЕНА строки, не
@@ -822,7 +847,7 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
     upsertPostMedia, getPostMedia, listCentralPostsMissingMedia,
     saveSnapshot, saveVelocity,
     ingestCollectorPayload, persistCentralDaily, persistTgBundleTx,
-    upsertIgDaily, upsertIgMediaDaily, upsertMsDaily,
+    upsertIgDaily, upsertIgMediaDaily, upsertMsDaily, upsertYmDaily,
     upsertMsOrders, countMsOrders, getMsBackfillState, setMsBackfillState,
     upsertMsReturns, countMsReturns, getMsReturnsBackfillState, setMsReturnsBackfillState,
     saveRawSnapshot, pruneRawSnapshots, pruneIgMediaDaily, pruneIngestReceipts, rollupChannelMonthly,

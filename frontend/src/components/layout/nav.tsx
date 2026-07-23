@@ -71,6 +71,8 @@ export const FEED_ROUTES = [
   '/sklad',
   '/sklad/clients',
   '/sklad/channels',
+  // «Метрика» — тот же FeedBlock-заголовок, что у остальных сетей.
+  '/metrika',
 ];
 
 /** Topbar h1 for the current route; metric pages resolve to the metric's display name. */

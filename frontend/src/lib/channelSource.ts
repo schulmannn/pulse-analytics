@@ -8,15 +8,16 @@ import type { Channel } from '@/api/schemas';
  * widget editor from listing чужие каналы under a metric (and vice-versa). Callers narrow the
  * metric's network to 'tg' | 'ig' | 'ms' first.
  */
-export function channelsForSource(channels: Channel[], source: 'tg' | 'ig' | 'ms'): Channel[] {
+export function channelsForSource(channels: Channel[], source: 'tg' | 'ig' | 'ms' | 'ym'): Channel[] {
   if (source === 'ig') return channels.filter((c) => !!c.ig_connected);
   if (source === 'ms') return channels.filter((c) => c.source === 'ms');
-  return channels.filter((c) => c.source !== 'ig' && c.source !== 'ms');
+  if (source === 'ym') return channels.filter((c) => c.source === 'ym');
+  return channels.filter((c) => c.source !== 'ig' && c.source !== 'ms' && c.source !== 'ym');
 }
 
 /** Whether a channel id is a valid pinned source for the given network (used to spot a stale pin —
  *  e.g. a Telegram channel left on an Instagram widget from before source-aware filtering). */
-export function isEligibleSource(channels: Channel[], source: 'tg' | 'ig' | 'ms', id: number): boolean {
+export function isEligibleSource(channels: Channel[], source: 'tg' | 'ig' | 'ms' | 'ym', id: number): boolean {
   return channelsForSource(channels, source).some((c) => c.id === id);
 }
 

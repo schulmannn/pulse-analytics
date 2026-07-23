@@ -33,6 +33,7 @@ const { registerMentionsRoutes } = require('./routes/mentions');
 const { registerIgOauthRoutes } = require('./routes/ig-oauth');
 const { registerIgRoutes } = require('./routes/ig');
 const { registerMsRoutes } = require('./routes/moysklad');
+const { registerYmRoutes } = require('./routes/metrika');
 const { registerAccountRoutes } = require('./routes/account');
 const { registerHistoryRoutes } = require('./routes/history');
 const { registerAiRoutes } = require('./routes/ai');
@@ -51,7 +52,8 @@ function createApp(deps) {
     limiter, authLimiter, mediaLimiter,
     hashPassword, verifyPassword, DUMMY_HASH, signSession, SESSION_TTL, GOOGLE_CLIENT_ID,
     appBase, sha256, newToken, VERIFY_TTL, RESET_TTL, sendEmail, emailShell, emailBtn, escHtml,
-    igFetch, refreshIgIfNeeded, igConfigured, igCrypto, igMock, msCrypto, msFetch, msBackfill, nearestOf,
+    igFetch, refreshIgIfNeeded, igConfigured, igCrypto, igMock, msCrypto, msFetch, msBackfill,
+    ymCrypto, ymFetch, nearestOf,
     cacheGet, cacheSet, cache, IG_ACCOUNT, IG_TOKEN, IG_GRAPH, AUTH_SECRET,
     tgCrypto, collectQrChannelsNow, collectManagedPostStatsNow, TG_TOKEN, TG_CHANNEL,
     timingSafeEqualStr, dailyIngestJob, jobTracker, mtprotoClient, notionCrash,
@@ -190,6 +192,11 @@ function createApp(deps) {
   // connect/disconnect, как igCachePurge в ig-oauth. audit — connect/disconnect пишут
   // ms_connect/ms_disconnect в общий trail, как соседние register* (ig-oauth, channels).
   registerMsRoutes({ app, requireAuth, db, audit, msCrypto, msFetch, msBackfill, cacheGet, cacheSet, cache, log });
+
+  // Роуты Яндекс.Метрики (connect по OAuth-токену + summary/sources + status/disconnect) —
+  // routes/metrika.js, зеркало МС-блока выше: ymCrypto/ymFetch из composition, тот же
+  // x-channel-id-резолв, точечная инвалидация ym:*-ключей, audit ym_connect/ym_disconnect.
+  registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cacheGet, cacheSet, cache, log });
 
   registerChannelsRoutes({ app, db, requireAuth, audit, getDbReady });
 

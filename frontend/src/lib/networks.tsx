@@ -55,8 +55,8 @@ export const NETWORKS = [
       { to: '/posts', label: 'Контент', icon: 'posts' },
       { to: '/mentions', label: 'Упоминания', icon: 'mentions' },
     ],
-    // Standalone Instagram/МойСклад sources have no Telegram side.
-    hasChannel: (c) => c.source !== 'ig' && c.source !== 'ms',
+    // Standalone Instagram/МойСклад/Метрика sources have no Telegram side.
+    hasChannel: (c) => c.source !== 'ig' && c.source !== 'ms' && c.source !== 'ym',
   },
   {
     key: 'ig',
@@ -90,6 +90,20 @@ export const NETWORKS = [
     ],
     // Отдельный канал source='ms', создаётся при подключении токена.
     hasChannel: (c) => c.source === 'ms',
+  },
+  {
+    // «Яндекс.Метрика» — веб-аналитика сайта (визиты/посетители/просмотры). Величины — СВОИ,
+    // с TG-просмотрами и IG-охватом не смешиваются (тот же канон, что TG-views ≠ IG-reach).
+    key: 'ym',
+    name: 'Метрика',
+    color: '#FC3F1D',
+    home: '/metrika',
+    prefix: '/metrika',
+    nav: [
+      { to: '/metrika', label: 'Обзор', icon: 'overview', end: true },
+    ],
+    // Отдельный канал source='ym', создаётся при подключении OAuth-токена счётчика.
+    hasChannel: (c) => c.source === 'ym',
   },
 ] as const satisfies readonly NetworkDef[];
 
@@ -126,6 +140,7 @@ export function networkForPath(pathname: string): Network {
  */
 export function routeNetworkOwner(pathname: string): Network | null {
   if (pathname === '/sklad' || pathname.startsWith('/sklad/')) return 'ms';
+  if (pathname === '/metrika' || pathname.startsWith('/metrika/')) return 'ym';
   if (pathname === '/instagram' || pathname.startsWith('/instagram/')) return 'ig';
   if (pathname === '/' || pathname === '/analytics' || pathname === '/posts' || pathname === '/mentions') {
     return 'tg';
@@ -164,6 +179,14 @@ export function NetworkGlyph({ k, className }: { k: string; className?: string }
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className} aria-hidden="true">
         <path d="M12 3 3.5 7.5v9L12 21l8.5-4.5v-9L12 3Z" strokeLinejoin="round" />
         <path d="M3.5 7.5 12 12l8.5-4.5M12 12v9" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  if (k === 'ym') {
+    // «Метрика» — три восходящих столбика (веб-аналитика), в духе stroke-only сета.
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className} aria-hidden="true">
+        <path d="M5 20v-6M12 20V9M19 20V4" strokeLinecap="round" />
       </svg>
     );
   }
