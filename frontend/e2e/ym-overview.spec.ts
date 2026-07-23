@@ -102,11 +102,8 @@ async function bootMetrika(page: Page, path: string, { connected = true } = {}) 
   return state;
 }
 
-test.beforeEach(({}, testInfo) => {
+test('Обзор Метрики: карточки метрик, источники трафика, свой FeedBlock-заголовок без дублей', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'desktop-1440', 'Метрика — desktop-first поверхность');
-});
-
-test('Обзор Метрики: карточки метрик, источники трафика, свой FeedBlock-заголовок без дублей', async ({ page }) => {
   await bootMetrika(page, '/metrika');
 
   // Свой заголовок секции (FEED_ROUTES) — общий Atlavue-topbar не дублируется.
@@ -134,7 +131,8 @@ test('Обзор Метрики: карточки метрик, источник
   await expect(page.getByRole('group', { name: 'Период', exact: true })).toHaveCount(1);
 });
 
-test('Подключение Метрики: токен → выбор счётчика → подключено (токен только в POST-теле)', async ({ page }) => {
+test('Подключение Метрики: токен → выбор счётчика → подключено (токен только в POST-теле)', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-1440', 'Метрика — desktop-first поверхность');
   const state = await bootMetrika(page, '/connect?source=metrika', { connected: false });
 
   // Панель источника выбрана дип-линком.
