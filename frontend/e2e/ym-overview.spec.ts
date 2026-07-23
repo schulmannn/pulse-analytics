@@ -48,6 +48,35 @@ const SOURCES = {
   ],
 };
 
+const GOALS = {
+  truncated: false,
+  rows: [
+    { id: '11', name: 'Оформление заказа', reaches: 12, conversion_rate: 2.4 },
+    { id: '22', name: 'Подписка на рассылку', reaches: 7, conversion_rate: 1.1 },
+  ],
+};
+
+const UTM = {
+  visits_total: 145,
+  tagged_visits: 45,
+  untagged_visits: 100,
+  rows: [
+    { id: 'instagram', name: 'instagram', visits: 30, users: 22 },
+    { id: 'telegram', name: 'telegram', visits: 15, users: 12 },
+  ],
+};
+
+const PAGES = {
+  pageviews_total: 402,
+  rows: [
+    { path: '/catalog/notebooks', pageviews: 180, users: 90 },
+    { path: '/', pageviews: 120, users: 80 },
+    { path: '/about', pageviews: 42, users: 30 },
+    { path: '/delivery', pageviews: 30, users: 22 },
+    { path: '/blog/new-collection', pageviews: 20, users: 15 },
+  ],
+};
+
 async function bootMetrika(page: Page, path: string, { connected = true } = {}) {
   const state = { connected, connectCalls: [] as Array<Record<string, unknown>> };
   await page.route(/^https?:\/\/[^/]+\/api\//, async (route) => {
@@ -72,6 +101,9 @@ async function bootMetrika(page: Page, path: string, { connected = true } = {}) 
     }
     if (urlPath === '/api/ym/summary') return json(200, SUMMARY);
     if (urlPath === '/api/ym/sources') return json(200, SOURCES);
+    if (urlPath === '/api/ym/goals') return json(200, GOALS);
+    if (urlPath === '/api/ym/utm') return json(200, UTM);
+    if (urlPath === '/api/ym/pages') return json(200, PAGES);
     if (urlPath === '/api/ym/connect' && request.method() === 'POST') {
       const body = request.postDataJSON() as Record<string, unknown>;
       state.connectCalls.push(body);
@@ -126,6 +158,22 @@ test('Обзор Метрики: карточки метрик, источник
   await expect(page.getByText('Прямые заходы')).toBeVisible();
   await expect(page.getByText('Внутренние переходы')).toHaveCount(0);
   await expect(page.getByText(/Ещё 4 визитов из 145/)).toBeVisible();
+
+  // Слайс 2 — цели: имя + reaches + конверсия отдельной метрикой.
+  await expect(page.getByRole('heading', { name: 'Цели', exact: true })).toBeVisible();
+  await expect(page.getByText('Оформление заказа')).toBeVisible();
+  await expect(page.getByText(/CR 2,4%/)).toBeVisible();
+
+  // Слайс 2 — UTM: размеченные строки + честная сноска о визитах без метки.
+  await expect(page.getByRole('heading', { name: 'UTM-метки', exact: true })).toBeVisible();
+  await expect(page.getByText('instagram', { exact: true })).toBeVisible();
+  await expect(page.getByText(/Без метки — 100 визитов из 145/)).toBeVisible();
+
+  // Слайс 2 — топ-страницы: пути, компактный топ-4 (5-я строка спрятана) + хвост «из полного отчёта».
+  await expect(page.getByRole('heading', { name: 'Топ-страницы', exact: true })).toBeVisible();
+  await expect(page.getByText('/catalog/notebooks')).toBeVisible();
+  await expect(page.getByText('/blog/new-collection')).toHaveCount(0);
+  await expect(page.getByText(/Ещё 20 просмотров из 402/)).toBeVisible();
 
   // Период-чипсы (общий page-period контракт) на месте.
   await expect(page.getByRole('group', { name: 'Период', exact: true })).toHaveCount(1);

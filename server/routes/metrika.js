@@ -3,7 +3,8 @@
 const { hasWorkspaceRole } = require('../middleware/tenant');
 
 /**
- * Роуты Яндекс.Метрики (/api/ym/{connect,status,account,summary,sources}) — серверная половина
+ * Роуты Яндекс.Метрики (/api/ym/{connect,status,account,summary,sources,goals,pages,utm}) —
+ * серверная половина
  * источника «метрика», зеркально МойСклад-вертикали: connect валидирует OAuth-токен живым
  * identity-вызовом (management/v1/counters) и сохраняет его ТОЛЬКО шифрованным (lib/ym_crypto),
  * data-роуты резолвят канал тем же механизмом (?channel= / заголовок x-channel-id, дефолт через
@@ -26,9 +27,10 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
     const n = parseInt(req.query.days, 10);
     return YM_DAYS_ALLOWED.includes(n) ? n : 30;
   };
-  // «Всё» у sources — живой отчёт ПОЛНОГО диапазона счётчика → отдельный кэш 1 час
-  // (зеркало MS_TOP_ALL_CACHE_TTL_MS): история меняется медленно, пересобирать чаще дорого.
-  const YM_SOURCES_ALL_CACHE_TTL_MS = 60 * 60 * 1000;
+  // «Всё» у breakdown-роутов (sources/goals/pages/utm) — живой отчёт ПОЛНОГО диапазона счётчика
+  // → отдельный кэш 1 час (зеркало MS_TOP_ALL_CACHE_TTL_MS): история меняется медленно,
+  // пересобирать чаще дорого.
+  const YM_ALL_RANGE_CACHE_TTL_MS = 60 * 60 * 1000;
   // Консервативный якорь «Всё», когда дата создания счётчика неизвестна и архив пуст:
   // раньше любого реального счётчика продукта, лишние пустые годы отчёту Метрики не вредят.
   const YM_ALL_ANCHOR_DAY = '2015-01-01';
@@ -177,6 +179,18 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
       return null;
     }
     return { channel: resolved.channel, acc: resolved.acc, token };
+  }
+
+  // Полный диапазон счётчика для «Всё»-отчётов breakdown-роутов: дата создания счётчика
+  // (снята на connect) → фолбэк на старейший день архива → консервативный якорь. Инклюзивно
+  // по сегодняшний день.
+  async function allRangeWindow(ym, actor) {
+    let date1 = ym.acc.counter_created_day;
+    if (!date1) {
+      const archive = await db.getYmDailyAllForActor(ym.channel.id, actor);
+      date1 = (archive[0] && archive[0].day) || YM_ALL_ANCHOR_DAY;
+    }
+    return { date1, date2: fmtDay(new Date()) };
   }
 
   // Форма ответа management/v1/counters → безопасные identity-поля счётчика (без токена).
@@ -438,16 +452,9 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
       if (cached) return res.json(cached);
 
       const isAll = period.days === 0 && !period.range;
-      let date1 = period.date1;
-      let date2 = period.date2;
-      if (isAll) {
-        date1 = ym.acc.counter_created_day;
-        if (!date1) {
-          const archive = await db.getYmDailyAllForActor(ym.channel.id, req.user);
-          date1 = (archive[0] && archive[0].day) || YM_ALL_ANCHOR_DAY;
-        }
-        date2 = fmtDay(new Date());
-      }
+      const { date1, date2 } = isAll
+        ? await allRangeWindow(ym, req.user)
+        : { date1: period.date1, date2: period.date2 };
 
       let body;
       try {
@@ -485,7 +492,225 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
         ? Math.round(Number(totals[1]))
         : rows.reduce((acc, r) => acc + r.users, 0);
       const data = { visits_total: visitsTotal, users_total: usersTotal, rows };
-      cacheSet(cacheKey, data, isAll ? YM_SOURCES_ALL_CACHE_TTL_MS : undefined);
+      cacheSet(cacheKey, data, isAll ? YM_ALL_RANGE_CACHE_TTL_MS : undefined);
+      res.json(data);
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  // ── Цели (слайс 2): management-словарь + reaches/conversionRate батчами ─────────────────────
+  // Словарь целей меняется редко → часовой кэш (канон словарей МС); НЕуспех словаря не
+  // кэшируется. id целей проходят строгий числовой гейт ДО вклейки в имена метрик
+  // (ym:s:goal<id>reaches) — произвольная строка в metrics-параметр не попадает по построению.
+  const YM_GOALS_DICT_CACHE_TTL_MS = 60 * 60 * 1000;
+  // Потолок целей отчёта: 2 батча по 10 целей (пара reaches+conversionRate на цель = 20 метрик,
+  // лимит API на запрос). Больше 20 осмысленных целей — экзотика; честный truncated-флаг.
+  const YM_GOALS_MAX = 20;
+  const YM_GOALS_BATCH = 10;
+
+  async function loadGoalsDict(ym) {
+    const cacheKey = `ym:goals-dict:${ym.channel.id}`;
+    const cached = cacheGet(cacheKey);
+    if (cached) return cached;
+    const body = await ymFetch(
+      ym.token,
+      `/management/v1/counter/${encodeURIComponent(ym.acc.counter_id)}/goals`,
+    );
+    const goals = (body && Array.isArray(body.goals) ? body.goals : [])
+      .map((g) => ({
+        id: Number(g && g.id),
+        name: g && typeof g.name === 'string' && g.name.trim() ? g.name.trim() : null,
+      }))
+      .filter((g) => Number.isSafeInteger(g.id) && g.id > 0);
+    cacheSet(cacheKey, goals, YM_GOALS_DICT_CACHE_TTL_MS);
+    return goals;
+  }
+
+  // GET /api/ym/goals?days=30 — достижения целей за окно: reaches (все достижения) +
+  // conversionRate (% визитов с достижением; из reaches НЕ выводится — отдельная метрика).
+  // Сортировка по reaches — у себя: метрики здесь колонки totals, а не строки отчёта.
+  app.get('/api/ym/goals', requireAuth, async (req, res, next) => {
+    try {
+      const period = parseYmPeriod(req);
+      if (period.invalid) return badRange(res);
+      const ym = await resolveYm(req, res);
+      if (!ym) return;
+      const cacheKey = `ym:goals:${ym.channel.id}:${period.periodKey}`;
+      const cached = cacheGet(cacheKey);
+      if (cached) return res.json(cached);
+      const isAll = period.days === 0 && !period.range;
+
+      let goals;
+      try {
+        goals = await loadGoalsDict(ym);
+      } catch (e) {
+        return sendYmError(res, e, { route: 'goals-dict', channelId: ym.channel.id });
+      }
+      if (!goals.length) {
+        const data = { rows: [], truncated: false };
+        cacheSet(cacheKey, data, isAll ? YM_ALL_RANGE_CACHE_TTL_MS : undefined);
+        return res.json(data);
+      }
+
+      const { date1, date2 } = isAll
+        ? await allRangeWindow(ym, req.user)
+        : { date1: period.date1, date2: period.date2 };
+      const take = goals.slice(0, YM_GOALS_MAX);
+      const chunks = [];
+      for (let i = 0; i < take.length; i += YM_GOALS_BATCH) chunks.push(take.slice(i, i + YM_GOALS_BATCH));
+      const byGoal = new Map();
+      try {
+        const results = await Promise.all(chunks.map((chunk) => ymFetch(
+          ym.token,
+          `/stat/v1/data?ids=${encodeURIComponent(ym.acc.counter_id)}` +
+            `&metrics=${chunk.map((g) => `ym:s:goal${g.id}reaches,ym:s:goal${g.id}conversionRate`).join(',')}` +
+            `&date1=${date1}&date2=${date2}&accuracy=full`,
+        )));
+        // Без dimensions значения живут в totals (выровнены по порядку metrics); data может быть
+        // пустым при нулевом окне — totals есть всегда, ||0 закрывает и неожиданную форму.
+        results.forEach((body, ci) => {
+          const totals = body && Array.isArray(body.totals) ? body.totals : [];
+          chunks[ci].forEach((g, gi) => {
+            byGoal.set(g.id, {
+              reaches: Math.round(Number(totals[gi * 2]) || 0),
+              conversion_rate: Math.round((Number(totals[gi * 2 + 1]) || 0) * 100) / 100,
+            });
+          });
+        });
+      } catch (e) {
+        return sendYmError(res, e, { route: 'goals', channelId: ym.channel.id });
+      }
+      const rows = take
+        .map((g) => ({ id: String(g.id), name: g.name, ...byGoal.get(g.id) }))
+        .sort((a, b) => b.reaches - a.reaches || a.id.localeCompare(b.id));
+      const data = { rows, truncated: goals.length > YM_GOALS_MAX };
+      cacheSet(cacheKey, data, isAll ? YM_ALL_RANGE_CACHE_TTL_MS : undefined);
+      res.json(data);
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  // ── Топ-страницы (слайс 2): hits-неймспейс ym:pv (просмотры страниц, не визиты) ─────────────
+  const YM_PAGES_LIMIT_DEFAULT = 10;
+  const YM_PAGES_LIMIT_MAX = 50;
+  const pagesLimitOf = (req) => {
+    const n = parseInt(req.query.limit, 10);
+    if (!Number.isFinite(n) || n < 1) return YM_PAGES_LIMIT_DEFAULT;
+    return Math.min(n, YM_PAGES_LIMIT_MAX);
+  };
+
+  // GET /api/ym/pages?days=30&limit=10 — страницы по просмотрам (ym:pv:URLPath: путь без
+  // домена/query — читаемая identity страницы). totals — итог полного отчёта для хвоста «из M».
+  app.get('/api/ym/pages', requireAuth, async (req, res, next) => {
+    try {
+      const period = parseYmPeriod(req);
+      if (period.invalid) return badRange(res);
+      const limit = pagesLimitOf(req);
+      const ym = await resolveYm(req, res);
+      if (!ym) return;
+      const cacheKey = `ym:pages:${ym.channel.id}:${period.periodKey}:${limit}`;
+      const cached = cacheGet(cacheKey);
+      if (cached) return res.json(cached);
+      const isAll = period.days === 0 && !period.range;
+      const { date1, date2 } = isAll
+        ? await allRangeWindow(ym, req.user)
+        : { date1: period.date1, date2: period.date2 };
+
+      let body;
+      try {
+        body = await ymFetch(
+          ym.token,
+          `/stat/v1/data?ids=${encodeURIComponent(ym.acc.counter_id)}` +
+            '&metrics=ym:pv:pageviews,ym:pv:users' +
+            '&dimensions=ym:pv:URLPath&sort=-ym:pv:pageviews' +
+            `&date1=${date1}&date2=${date2}` +
+            `&limit=${limit}&accuracy=full`,
+        );
+      } catch (e) {
+        return sendYmError(res, e, { route: 'pages', channelId: ym.channel.id });
+      }
+
+      const rows = (body && Array.isArray(body.data) ? body.data : [])
+        .map((row) => {
+          const dim = row && Array.isArray(row.dimensions) && row.dimensions[0];
+          const m = row && Array.isArray(row.metrics) ? row.metrics : [];
+          return {
+            path: dim && typeof dim.name === 'string' && dim.name ? dim.name : null,
+            pageviews: Math.round(Number(m[0]) || 0),
+            users: Math.round(Number(m[1]) || 0),
+          };
+        })
+        .filter((r) => r.path != null);
+      const totals = body && Array.isArray(body.totals) ? body.totals : [];
+      const pageviewsTotal = Number.isFinite(Number(totals[0]))
+        ? Math.round(Number(totals[0]))
+        : rows.reduce((acc, r) => acc + r.pageviews, 0);
+      const data = { pageviews_total: pageviewsTotal, rows };
+      cacheSet(cacheKey, data, isAll ? YM_ALL_RANGE_CACHE_TTL_MS : undefined);
+      res.json(data);
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  // GET /api/ym/utm?days=30 — визиты/посетители по utm_source. Визиты БЕЗ метки не прячутся и
+  // не смешиваются с размеченными: null-строка отчёта уходит в untagged_visits (сноска UI), в
+  // rows остаются только размеченные источники. tagged = total − untagged (арифметика полного
+  // отчёта, а не суммы среза limit). lang не нужен: значения — сырые utm-строки.
+  app.get('/api/ym/utm', requireAuth, async (req, res, next) => {
+    try {
+      const period = parseYmPeriod(req);
+      if (period.invalid) return badRange(res);
+      const ym = await resolveYm(req, res);
+      if (!ym) return;
+      const cacheKey = `ym:utm:${ym.channel.id}:${period.periodKey}`;
+      const cached = cacheGet(cacheKey);
+      if (cached) return res.json(cached);
+      const isAll = period.days === 0 && !period.range;
+      const { date1, date2 } = isAll
+        ? await allRangeWindow(ym, req.user)
+        : { date1: period.date1, date2: period.date2 };
+
+      let body;
+      try {
+        body = await ymFetch(
+          ym.token,
+          `/stat/v1/data?ids=${encodeURIComponent(ym.acc.counter_id)}` +
+            '&metrics=ym:s:visits,ym:s:users' +
+            '&dimensions=ym:s:UTMSource&sort=-ym:s:visits' +
+            `&date1=${date1}&date2=${date2}` +
+            `&limit=${YM_SOURCES_LIMIT}&accuracy=full`,
+        );
+      } catch (e) {
+        return sendYmError(res, e, { route: 'utm', channelId: ym.channel.id });
+      }
+
+      const mapped = (body && Array.isArray(body.data) ? body.data : []).map((row) => {
+        const dim = row && Array.isArray(row.dimensions) && row.dimensions[0];
+        const m = row && Array.isArray(row.metrics) ? row.metrics : [];
+        return {
+          id: dim && dim.id != null ? String(dim.id) : null,
+          name: dim && typeof dim.name === 'string' && dim.name ? dim.name : null,
+          visits: Math.round(Number(m[0]) || 0),
+          users: Math.round(Number(m[1]) || 0),
+        };
+      });
+      const rows = mapped.filter((r) => r.id != null || r.name != null);
+      const untagged = mapped.find((r) => r.id == null && r.name == null);
+      const untaggedVisits = untagged ? untagged.visits : 0;
+      const totals = body && Array.isArray(body.totals) ? body.totals : [];
+      const visitsTotal = Number.isFinite(Number(totals[0]))
+        ? Math.round(Number(totals[0]))
+        : mapped.reduce((acc, r) => acc + r.visits, 0);
+      const data = {
+        visits_total: visitsTotal,
+        tagged_visits: Math.max(0, visitsTotal - untaggedVisits),
+        untagged_visits: untaggedVisits,
+        rows,
+      };
+      cacheSet(cacheKey, data, isAll ? YM_ALL_RANGE_CACHE_TTL_MS : undefined);
       res.json(data);
     } catch (e) {
       next(e);

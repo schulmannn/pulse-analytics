@@ -743,6 +743,71 @@ export function useYmSources(period: MsPeriod) {
   });
 }
 
+// Слайс 2: цели (reaches + conversionRate — отдельная метрика, из reaches не выводится),
+// топ-страницы (hits-неймспейс, просмотры ≠ визиты) и utm_source-разрез с честным хвостом
+// неразмеченных визитов.
+const YmGoalsSchema = z
+  .object({
+    rows: z.array(
+      z
+        .object({ id: z.string(), name: z.string().nullable(), reaches: z.number(), conversion_rate: z.number() })
+        .passthrough(),
+    ),
+    truncated: z.boolean(),
+  })
+  .passthrough();
+const YmPagesSchema = z
+  .object({
+    pageviews_total: z.number(),
+    rows: z.array(z.object({ path: z.string(), pageviews: z.number(), users: z.number() }).passthrough()),
+  })
+  .passthrough();
+const YmUtmSchema = z
+  .object({
+    visits_total: z.number(),
+    tagged_visits: z.number(),
+    untagged_visits: z.number(),
+    rows: z.array(
+      z
+        .object({ id: z.string().nullable(), name: z.string().nullable(), visits: z.number(), users: z.number() })
+        .passthrough(),
+    ),
+  })
+  .passthrough();
+
+export function useYmGoals(period: MsPeriod) {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    enabled: channelId != null,
+    queryKey: ['ym-goals', channelId, ...msPeriodKey(period)],
+    staleTime: STALE_LIVE,
+    retry: false,
+    queryFn: ({ signal }) => apiGet(`/api/ym/goals?${msPeriodQuery(period)}`, YmGoalsSchema, { signal, channelId }),
+  });
+}
+
+export function useYmPages(period: MsPeriod) {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    enabled: channelId != null,
+    queryKey: ['ym-pages', channelId, ...msPeriodKey(period)],
+    staleTime: STALE_LIVE,
+    retry: false,
+    queryFn: ({ signal }) => apiGet(`/api/ym/pages?${msPeriodQuery(period)}`, YmPagesSchema, { signal, channelId }),
+  });
+}
+
+export function useYmUtm(period: MsPeriod) {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    enabled: channelId != null,
+    queryKey: ['ym-utm', channelId, ...msPeriodKey(period)],
+    staleTime: STALE_LIVE,
+    retry: false,
+    queryFn: ({ signal }) => apiGet(`/api/ym/utm?${msPeriodQuery(period)}`, YmUtmSchema, { signal, channelId }),
+  });
+}
+
 const MsBackfillStatusSchema = z
   .object({
     status: z.string(),

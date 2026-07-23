@@ -1,6 +1,6 @@
 import { useContext } from 'react';
 import { ChartExpandedContext } from '@/components/ExpandableChart';
-import { useYmSources, useYmSummary } from '@/api/queries';
+import { useYmGoals, useYmPages, useYmSources, useYmSummary, useYmUtm } from '@/api/queries';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
 import { LineChart } from '@/components/LineChart';
@@ -28,6 +28,9 @@ export function YmOverview() {
   const windowLabel = pp?.range ? 'за выбранный период' : days === 0 ? 'за всё время' : `за ${days} дн.`;
   const summary = useYmSummary(period);
   const sources = useYmSources(period);
+  const goals = useYmGoals(period);
+  const utm = useYmUtm(period);
+  const pages = useYmPages(period);
 
   if (summary.isPending) {
     return (
@@ -124,57 +127,181 @@ export function YmOverview() {
         ) : sources.data.rows.length === 0 ? (
           <EmptyState compact size="table" title="Нет визитов за период." />
         ) : (
-          <YmSourcesRows rows={sources.data.rows} visitsTotal={sources.data.visits_total} />
+          <YmBreakdownRows
+            rows={sources.data.rows.map((r) => ({
+              key: r.id ?? r.name ?? 'unknown',
+              label: r.name ?? 'Другие источники',
+              value: r.visits,
+              note: `${fmt.num(r.users)} чел.`,
+            }))}
+            tailWord="визитов"
+            unitTotal={sources.data.visits_total}
+          />
+        )}
+      </ChartWidget>
+
+      {/* Цели: reaches за окно + конверсия отдельной метрикой (CR не выводится из reaches). */}
+      <ChartWidget id="ym-goals" title="Цели" fixedSize="half">
+        {goals.isPending ? (
+          <TableSkeleton rows={4} columns={2} className="py-2" />
+        ) : goals.isError ? (
+          <ErrorState
+            compact
+            size="table"
+            className="py-4"
+            title="Не удалось получить цели"
+            reason={goals.error instanceof Error ? goals.error.message : 'ошибка'}
+            onRetry={() => goals.refetch()}
+            retrying={goals.isFetching}
+          />
+        ) : goals.data.rows.length === 0 ? (
+          <EmptyState
+            compact
+            size="table"
+            title="На счётчике нет целей."
+            reason="Настройте цели в Яндекс.Метрике — конверсии появятся здесь."
+          />
+        ) : (
+          <YmBreakdownRows
+            rows={goals.data.rows.map((g) => ({
+              key: g.id,
+              label: g.name ?? `Цель ${g.id}`,
+              value: g.reaches,
+              // Конверсия — не знаковая дельта (fmt.pct) и не целое (fmt.num): доли процента
+              // значимы, локаль ru даёт запятую.
+              note: `CR ${g.conversion_rate.toLocaleString('ru-RU', { maximumFractionDigits: 2 })}%`,
+            }))}
+            tailWord="достижений"
+            footnote={goals.data.truncated ? 'Показаны первые 20 целей счётчика.' : null}
+          />
+        )}
+      </ChartWidget>
+
+      {/* UTM: только размеченные визиты в строках; неразмеченные — честной сноской, не строкой. */}
+      <ChartWidget id="ym-utm" title="UTM-метки" fixedSize="half">
+        {utm.isPending ? (
+          <TableSkeleton rows={4} columns={2} className="py-2" />
+        ) : utm.isError ? (
+          <ErrorState
+            compact
+            size="table"
+            className="py-4"
+            title="Не удалось получить UTM-разметку"
+            reason={utm.error instanceof Error ? utm.error.message : 'ошибка'}
+            onRetry={() => utm.refetch()}
+            retrying={utm.isFetching}
+          />
+        ) : utm.data.rows.length === 0 ? (
+          <EmptyState
+            compact
+            size="table"
+            title="UTM-меток за период нет."
+            reason="Размечайте ссылки в постах utm_source — источники появятся здесь."
+          />
+        ) : (
+          <YmBreakdownRows
+            rows={utm.data.rows.map((r) => ({
+              key: r.id ?? r.name ?? 'unknown',
+              label: r.name ?? r.id ?? 'utm',
+              value: r.visits,
+              note: `${fmt.num(r.users)} чел.`,
+            }))}
+            tailWord="визитов"
+            unitTotal={utm.data.tagged_visits}
+            footnote={
+              utm.data.untagged_visits > 0
+                ? `Без метки — ${fmt.num(utm.data.untagged_visits)} визитов из ${fmt.num(utm.data.visits_total)}.`
+                : null
+            }
+          />
+        )}
+      </ChartWidget>
+
+      {/* Топ-страницы: hits-отчёт (просмотры страниц ≠ визиты — другая единица, чем сверху). */}
+      <ChartWidget id="ym-pages" title="Топ-страницы" fixedSize="half">
+        {pages.isPending ? (
+          <TableSkeleton rows={4} columns={2} className="py-2" />
+        ) : pages.isError ? (
+          <ErrorState
+            compact
+            size="table"
+            className="py-4"
+            title="Не удалось получить страницы"
+            reason={pages.error instanceof Error ? pages.error.message : 'ошибка'}
+            onRetry={() => pages.refetch()}
+            retrying={pages.isFetching}
+          />
+        ) : pages.data.rows.length === 0 ? (
+          <EmptyState compact size="table" title="Нет просмотров за период." />
+        ) : (
+          <YmBreakdownRows
+            rows={pages.data.rows.map((r) => ({
+              key: r.path,
+              label: r.path,
+              value: r.pageviews,
+              note: `${fmt.num(r.users)} чел.`,
+            }))}
+            tailWord="просмотров"
+            unitTotal={pages.data.pageviews_total}
+          />
         )}
       </ChartWidget>
     </div>
   );
 }
 
-/** Строки источников: компактный топ-4 по визитам + сводный хвост; разворот карточки показывает
-    ВСЕ строки отчёта. Бары — тихий одноцветный канон (цвет серии, не оценка), как статусы у МС. */
-export function YmSourcesRows({
+/** Общие строки breakdown-карточек Метрики (источники/цели/UTM/страницы): компактный топ-4 по
+    value + сводный хвост «Ещё N <word> [из M]»; разворот карточки показывает ВСЕ строки отчёта.
+    Бары — тихий одноцветный канон (цвет серии, не оценка), как статусы заказов у МС. */
+export function YmBreakdownRows({
   rows,
-  visitsTotal,
+  tailWord,
+  unitTotal = null,
+  footnote = null,
 }: {
-  rows: Array<{ id: string | null; name: string | null; visits: number; users: number }>;
-  visitsTotal: number;
+  rows: Array<{ key: string; label: string; value: number; note: string | null }>;
+  /** Слово хвоста в родительном падеже множественного («визитов», «достижений», «просмотров»). */
+  tailWord: string;
+  /** Итог ПОЛНОГО отчёта для «Ещё N … из M.»; null — хвост без «из M». */
+  unitTotal?: number | null;
+  /** Приглушённая сноска под списком (усечение целей, визиты без метки). */
+  footnote?: string | null;
 }) {
   const expanded = useContext(ChartExpandedContext);
-  // Сервер уже сортирует -visits; пересортировка здесь — страховка стабильности вида.
-  const ranked = [...rows].sort((a, b) => b.visits - a.visits || (a.id ?? '').localeCompare(b.id ?? ''));
+  // Сервер уже сортирует по убыванию; пересортировка здесь — страховка стабильности вида.
+  const ranked = [...rows].sort((a, b) => b.value - a.value || a.key.localeCompare(b.key));
   const top = expanded ? ranked : ranked.slice(0, 4);
   const tail = expanded ? [] : ranked.slice(4);
-  const restVisits = tail.reduce((acc, row) => acc + row.visits, 0);
-  const max = Math.max(1, ...top.map((row) => Math.max(0, row.visits)));
+  const restValue = tail.reduce((acc, row) => acc + row.value, 0);
+  const max = Math.max(1, ...top.map((row) => Math.max(0, row.value)));
   return (
     <div className={expanded ? 'space-y-2 pt-1' : 'space-y-1.5'}>
       {top.map((r) => (
-        <div key={r.id ?? r.name ?? 'unknown'}>
+        <div key={r.key}>
           <div className="flex items-baseline justify-between gap-3 text-xs">
-            <span className="min-w-0 truncate text-foreground">{r.name ?? 'Другие источники'}</span>
+            <span className="min-w-0 truncate text-foreground">{r.label}</span>
             <span className="shrink-0 tabular-nums text-muted-foreground">
-              <span className="font-medium text-foreground">{fmt.num(r.visits)}</span>
-              {' · '}
-              {fmt.num(r.users)} чел.
+              <span className="font-medium text-foreground">{fmt.num(r.value)}</span>
+              {r.note != null && <>{' · '}{r.note}</>}
             </span>
           </div>
           <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
             <div
               className="h-full rounded-full"
               style={{
-                width: `${Math.max(4, Math.round((Math.max(0, r.visits) / max) * 100))}%`,
+                width: `${Math.max(4, Math.round((Math.max(0, r.value) / max) * 100))}%`,
                 backgroundColor: 'hsl(var(--chart-role-primary) / 0.75)',
               }}
             />
           </div>
         </div>
       ))}
-      {restVisits > 0 && (
+      {restValue > 0 && (
         <p className="text-2xs text-muted-foreground">
-          Ещё {fmt.num(restVisits)} визитов из {fmt.num(visitsTotal)}.
+          Ещё {fmt.num(restValue)} {tailWord}{unitTotal != null ? ` из ${fmt.num(unitTotal)}` : ''}.
         </p>
       )}
+      {footnote != null && <p className="text-2xs text-muted-foreground">{footnote}</p>}
     </div>
   );
 }
