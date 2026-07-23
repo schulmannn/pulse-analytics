@@ -775,6 +775,82 @@ export function useYmSources(period: MsPeriod) {
   });
 }
 
+// Слайс аудитории/источников: устройства (ym:s:deviceCategory), реферальные сайты
+// (ym:s:externalRefererDomain — внешние домены, без внутренних переходов) и соцсети
+// (ym:s:lastsignSocialNetwork). Единый контракт: визиты/посетители + отказы по строке (nullable —
+// средняя без данных честно недоступна, не 0). meta — сэмпл/лаг только когда Reporting API их дал.
+const YmBreakdownSchema = z
+  .object({
+    visits_total: z.number(),
+    users_total: z.number(),
+    rows: z.array(
+      z
+        .object({
+          id: z.string().nullable(),
+          name: z.string().nullable(),
+          visits: z.number(),
+          users: z.number(),
+          bounce_rate: z.number().nullable(),
+        })
+        .passthrough(),
+    ),
+    meta: z
+      .object({
+        sampled: z.boolean().optional(),
+        sample_share: z.number().optional(),
+        data_lag: z.number().optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
+export type YmBreakdown = z.infer<typeof YmBreakdownSchema>;
+
+export function useYmDevices(period: MsPeriod) {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    enabled: channelId != null,
+    queryKey: ['ym-devices', channelId, ...msPeriodKey(period)],
+    staleTime: STALE_LIVE,
+    retry: false,
+    queryFn: ({ signal }) => apiGet(`/api/ym/devices?${msPeriodQuery(period)}`, YmBreakdownSchema, { signal, channelId }),
+  });
+}
+
+export function useYmReferrers(period: MsPeriod) {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    enabled: channelId != null,
+    queryKey: ['ym-referrers', channelId, ...msPeriodKey(period)],
+    staleTime: STALE_LIVE,
+    retry: false,
+    queryFn: ({ signal }) => apiGet(`/api/ym/referrers?${msPeriodQuery(period)}`, YmBreakdownSchema, { signal, channelId }),
+  });
+}
+
+export function useYmSocial(period: MsPeriod) {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    enabled: channelId != null,
+    queryKey: ['ym-social', channelId, ...msPeriodKey(period)],
+    staleTime: STALE_LIVE,
+    retry: false,
+    queryFn: ({ signal }) => apiGet(`/api/ym/social?${msPeriodQuery(period)}`, YmBreakdownSchema, { signal, channelId }),
+  });
+}
+
+export function useYmMessengers(period: MsPeriod) {
+  const { channelId } = useSelectedChannel();
+  return useQuery({
+    enabled: channelId != null,
+    queryKey: ['ym-messengers', channelId, ...msPeriodKey(period)],
+    staleTime: STALE_LIVE,
+    retry: false,
+    queryFn: ({ signal }) =>
+      apiGet(`/api/ym/messengers?${msPeriodQuery(period)}`, YmBreakdownSchema, { signal, channelId }),
+  });
+}
+
 // Слайс 2: цели (reaches + conversionRate — отдельная метрика, из reaches не выводится),
 // топ-страницы (hits-неймспейс, просмотры ≠ визиты) и utm_source-разрез с честным хвостом
 // неразмеченных визитов.

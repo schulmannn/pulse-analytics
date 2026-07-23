@@ -109,6 +109,56 @@ const PAGES = {
   ],
 };
 
+// Слайс аудитории/источников: реферальные сайты, соцсети, устройства. visits_total у каждого
+// уникален, чтобы хвост «Ещё N визитов из M» не совпал одним локатором с несколькими карточками.
+const REFERRERS = {
+  visits_total: 210,
+  users_total: 150,
+  rows: [
+    { id: null, name: 'vc.ru', visits: 90, users: 70, bounce_rate: 18.0 },
+    { id: null, name: 'habr.com', visits: 60, users: 45, bounce_rate: 30.5 },
+    { id: null, name: 't.me', visits: 30, users: 22, bounce_rate: 40.0 },
+    { id: null, name: 'dzen.ru', visits: 20, users: 15, bounce_rate: 50.0 },
+    { id: null, name: 'pikabu.ru', visits: 10, users: 8, bounce_rate: 60.0 },
+  ],
+  meta: {},
+};
+
+const SOCIAL = {
+  visits_total: 60,
+  users_total: 45,
+  rows: [
+    { id: 'vkontakte', name: 'ВКонтакте', visits: 40, users: 30, bounce_rate: 35.4 },
+    { id: 'youtube', name: 'YouTube', visits: 10, users: 8, bounce_rate: 45.0 },
+    { id: 'instagram', name: 'Instagram', visits: 10, users: 7, bounce_rate: 32.0 },
+  ],
+  meta: {},
+};
+
+const MESSENGERS = {
+  visits_total: 34,
+  users_total: 27,
+  rows: [
+    { id: 'telegram', name: 'Telegram', visits: 26, users: 21, bounce_rate: 28.0 },
+    { id: 'whatsapp', name: 'WhatsApp', visits: 8, users: 6, bounce_rate: 37.5 },
+  ],
+  meta: {},
+};
+
+// Устройства: имена намеренно английские — карточка обязана локализовать по СТАБИЛЬНОМУ id
+// (id '2' → «Смартфоны»), а не показывать сырое имя API. Четыре строки → без хвоста.
+const DEVICES = {
+  visits_total: 150,
+  users_total: 105,
+  rows: [
+    { id: '2', name: 'Mobile', visits: 90, users: 60, bounce_rate: 41.2 },
+    { id: '1', name: 'Desktop', visits: 50, users: 40, bounce_rate: 22.0 },
+    { id: '3', name: 'Tablet', visits: 8, users: 4, bounce_rate: 30.0 },
+    { id: '4', name: 'TV', visits: 2, users: 1, bounce_rate: 10.0 },
+  ],
+  meta: {},
+};
+
 async function bootMetrika(page: Page, path: string, { connected = true } = {}) {
   const state = { connected, connectCalls: [] as Array<Record<string, unknown>> };
   await page.route(/^https?:\/\/[^/]+\/api\//, async (route) => {
@@ -136,6 +186,10 @@ async function bootMetrika(page: Page, path: string, { connected = true } = {}) 
     if (urlPath === '/api/ym/goals') return json(200, GOALS);
     if (urlPath === '/api/ym/utm') return json(200, UTM);
     if (urlPath === '/api/ym/pages') return json(200, PAGES);
+    if (urlPath === '/api/ym/referrers') return json(200, REFERRERS);
+    if (urlPath === '/api/ym/social') return json(200, SOCIAL);
+    if (urlPath === '/api/ym/messengers') return json(200, MESSENGERS);
+    if (urlPath === '/api/ym/devices') return json(200, DEVICES);
     if (urlPath === '/api/ym/landings') return json(200, LANDINGS);
     if (urlPath === '/api/ym/connect' && request.method() === 'POST') {
       const body = request.postDataJSON() as Record<string, unknown>;
@@ -209,6 +263,26 @@ test('Обзор Метрики: карточки метрик, источник
   await expect(page.getByText('/catalog/notebooks')).toBeVisible();
   await expect(page.getByText('/blog/new-collection')).toHaveCount(0);
   await expect(page.getByText(/Ещё 20 просмотров из 402/)).toBeVisible();
+
+  // Слайс аудитории/источников — реферальные сайты: внешние домены + хвост своего total.
+  await expect(page.getByRole('heading', { name: 'Реферальные сайты', exact: true })).toBeVisible();
+  await expect(page.getByText('vc.ru', { exact: true })).toBeVisible();
+  await expect(page.getByText('pikabu.ru')).toHaveCount(0);
+  await expect(page.getByText(/Ещё 10 визитов из 210/)).toBeVisible();
+
+  // Соцсети: конкретные сети (lastsignSocialNetwork) + отказы вторичным контекстом.
+  await expect(page.getByRole('heading', { name: 'Соцсети', exact: true })).toBeVisible();
+  await expect(page.getByText('ВКонтакте', { exact: true })).toBeVisible();
+  await expect(page.getByText(/35,4% отказов/)).toBeVisible();
+
+  // Telegram у Метрики относится к отдельной размерности Messenger, а не SocialNetwork.
+  await expect(page.getByRole('heading', { name: 'Мессенджеры', exact: true })).toBeVisible();
+  await expect(page.getByText('Telegram', { exact: true })).toBeVisible();
+
+  // Устройства: локализация по СТАБИЛЬНОМУ id (id '2' → «Смартфоны»), сырое имя API не течёт.
+  await expect(page.getByRole('heading', { name: 'Устройства', exact: true })).toBeVisible();
+  await expect(page.getByText('Смартфоны', { exact: true })).toBeVisible();
+  await expect(page.getByText('Mobile')).toHaveCount(0);
 
   // Слайс качества — полоса качества трафика: отказы/средний визит/глубина/новые/доля новых.
   await expect(page.getByRole('heading', { name: 'Качество трафика', exact: true })).toBeVisible();
