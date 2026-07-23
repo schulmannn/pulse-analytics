@@ -4,7 +4,7 @@ const { hasWorkspaceRole } = require('../middleware/tenant');
 
 /**
  * Роуты Яндекс.Метрики
- * (/api/ym/{connect,status,account,summary,sources,devices,referrers,social,messengers,goals,pages,landings,utm}) —
+ * (/api/ym/{connect,status,account,summary,sources,devices,referrers,social,messengers,goals,pages,landings,exits,hourly,utm}) —
  * серверная половина
  * источника «метрика», зеркально МойСклад-вертикали: connect валидирует OAuth-токен живым
  * identity-вызовом (management/v1/counters) и сохраняет его ТОЛЬКО шифрованным (lib/ym_crypto),
@@ -1026,6 +1026,165 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
         ? Math.round(Number(totals[0]))
         : rows.reduce((acc, r) => acc + r.visits, 0);
       const data = { goal_id: goalId, visits_total: visitsTotal, rows, meta: samplingMeta(body) };
+      cacheSet(cacheKey, data, isAll ? YM_ALL_RANGE_CACHE_TTL_MS : undefined);
+      res.json(data);
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  // ── Страницы выхода (этот слайс): разбивка визитов по ПОСЛЕДНЕЙ странице визита ──────────────
+  // ym:s:endURLPath — задокументированное зеркало ym:s:startURLPath (страницы входа): путь выхода
+  // БЕЗ query (query-строки плодят кардинальность и тянут PII). Форма ответа зеркалит /landings
+  // (путь + визиты/посетители + отказы), но БЕЗ атрибуции цели: «достижение цели на странице
+  // ВЫХОДА» семантически спорно, поэтому в этот слайс сознательно не входит.
+  const YM_EXITS_LIMIT_DEFAULT = 10;
+  const YM_EXITS_LIMIT_MAX = 50;
+  const exitsLimitOf = (req) => {
+    const n = parseInt(req.query.limit, 10);
+    if (!Number.isFinite(n) || n < 1) return YM_EXITS_LIMIT_DEFAULT;
+    return Math.min(n, YM_EXITS_LIMIT_MAX);
+  };
+  // GET /api/ym/exits?days=30&limit=10 — топ страниц выхода по визитам.
+  app.get('/api/ym/exits', requireAuth, async (req, res, next) => {
+    try {
+      const period = parseYmPeriod(req);
+      if (period.invalid) return badRange(res);
+      const limit = exitsLimitOf(req);
+      const ym = await resolveYm(req, res);
+      if (!ym) return;
+      const cacheKey = `ym:exits:${ym.channel.id}:${period.periodKey}:${limit}`;
+      const cached = cacheGet(cacheKey);
+      if (cached) return res.json(cached);
+      const isAll = period.days === 0 && !period.range;
+      const { date1, date2 } = isAll
+        ? await allRangeWindow(ym, req.user)
+        : { date1: period.date1, date2: period.date2 };
+
+      let body;
+      try {
+        body = await ymFetch(
+          ym.token,
+          `/stat/v1/data?ids=${encodeURIComponent(ym.acc.counter_id)}` +
+            '&metrics=ym:s:visits,ym:s:users,ym:s:bounceRate' +
+            '&dimensions=ym:s:endURLPath&sort=-ym:s:visits' +
+            `&date1=${date1}&date2=${date2}` +
+            `&limit=${limit}&accuracy=full`,
+        );
+      } catch (e) {
+        return sendYmError(res, e, { route: 'exits', channelId: ym.channel.id });
+      }
+
+      const rows = (body && Array.isArray(body.data) ? body.data : [])
+        .map((row) => {
+          const dim = row && Array.isArray(row.dimensions) && row.dimensions[0];
+          const m = row && Array.isArray(row.metrics) ? row.metrics : [];
+          const bounce = numOrNull(m[2]);
+          return {
+            path: dim && typeof dim.name === 'string' && dim.name ? dim.name : null,
+            visits: Math.round(Number(m[0]) || 0),
+            users: Math.round(Number(m[1]) || 0),
+            bounce_rate: bounce == null ? null : round2(bounce),
+          };
+        })
+        .filter((r) => r.path != null);
+      // totals = итог ПОЛНОГО отчёта (не среза limit) — для хвоста «из M визитов».
+      const totals = body && Array.isArray(body.totals) ? body.totals : [];
+      const visitsTotal = Number.isFinite(Number(totals[0]))
+        ? Math.round(Number(totals[0]))
+        : rows.reduce((acc, r) => acc + r.visits, 0);
+      const data = { visits_total: visitsTotal, rows, meta: samplingMeta(body) };
+      cacheSet(cacheKey, data, isAll ? YM_ALL_RANGE_CACHE_TTL_MS : undefined);
+      res.json(data);
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  // ── Ритм трафика по часам (этот слайс): распределение визитов по часу суток (ym:s:hour, 0..23) ─
+  // Не «топ-N», а ПОЛНЫЙ суточный профиль: всегда 24 плотные строки 0..23 (час без визитов —
+  // честный 0, а не пропуск), сортировка по часу. Отвечает «когда приходят посетители», а не «какой
+  // час главный». Живой отчёт (как sources/pages); архив/персистентность не нужны — это
+  // кросс-секционное распределение, а не дневной ряд. Час читаем из размерности защитно (id||name →
+  // int, гейт 0..23): неожиданная форма ответа деградирует к нулям, а не роняет роут.
+  app.get('/api/ym/hourly', requireAuth, async (req, res, next) => {
+    try {
+      const period = parseYmPeriod(req);
+      if (period.invalid) return badRange(res);
+      const ym = await resolveYm(req, res);
+      if (!ym) return;
+      const cacheKey = `ym:hourly:${ym.channel.id}:${period.periodKey}`;
+      const cached = cacheGet(cacheKey);
+      if (cached) return res.json(cached);
+      const isAll = period.days === 0 && !period.range;
+      const { date1, date2 } = isAll
+        ? await allRangeWindow(ym, req.user)
+        : { date1: period.date1, date2: period.date2 };
+
+      let body;
+      try {
+        body = await ymFetch(
+          ym.token,
+          `/stat/v1/data?ids=${encodeURIComponent(ym.acc.counter_id)}` +
+            '&metrics=ym:s:visits,ym:s:users' +
+            '&dimensions=ym:s:hour&sort=ym:s:hour' +
+            `&date1=${date1}&date2=${date2}` +
+            '&limit=24&accuracy=full',
+        );
+      } catch (e) {
+        return sendYmError(res, e, { route: 'hourly', channelId: ym.channel.id });
+      }
+
+      const byHour = new Map();
+      for (const row of body && Array.isArray(body.data) ? body.data : []) {
+        const dim = row && Array.isArray(row.dimensions) && row.dimensions[0];
+        const raw = dim ? (dim.id != null ? dim.id : dim.name) : null;
+        // Официальная форма размерности — HH:MM; id в живых ответах также может быть целым
+        // часом. Строгий разбор не принимает частичные значения вроде "14foo", которые parseInt
+        // ошибочно превратил бы в 14.
+        const match = raw == null
+          ? null
+          : /^(?:([01]?\d|2[0-3])(?::[0-5]\d)?)$/.exec(String(raw).trim());
+        if (!match) continue;
+        const hour = Number(match[1]);
+        const m = row && Array.isArray(row.metrics) ? row.metrics : [];
+        // В нормальном отчёте час уникален. Суммирование — защитный контракт для неожиданной
+        // дублированной строки: ни один кусок реального трафика не теряется.
+        const previous = byHour.get(hour) || { visits: 0, users: 0 };
+        byHour.set(hour, {
+          visits: previous.visits + Math.round(Number(m[0]) || 0),
+          users: previous.users + Math.round(Number(m[1]) || 0),
+        });
+      }
+      // Плотное окно 0..23: суточный профиль не должен иметь разрывов. Пик — час максимума визитов
+      // (ничья → более ранний час, детерминированно); только при реальных визитах, иначе null.
+      const rows = [];
+      let peakHour = null;
+      let peakVisits = -1;
+      for (let h = 0; h < 24; h += 1) {
+        const cell = byHour.get(h) || { visits: 0, users: 0 };
+        rows.push({ hour: h, visits: cell.visits, users: cell.users });
+        if (cell.visits > peakVisits) {
+          peakVisits = cell.visits;
+          peakHour = h;
+        }
+      }
+      const totals = body && Array.isArray(body.totals) ? body.totals : [];
+      const visitsTotal = Number.isFinite(Number(totals[0]))
+        ? Math.round(Number(totals[0]))
+        : rows.reduce((acc, r) => acc + r.visits, 0);
+      const usersTotal = Number.isFinite(Number(totals[1]))
+        ? Math.round(Number(totals[1]))
+        : rows.reduce((acc, r) => acc + r.users, 0);
+      const data = {
+        visits_total: visitsTotal,
+        users_total: usersTotal,
+        // Пик существует только при сигнале в валидных часовых строках. Авторитетный total может
+        // быть >0 даже при неожиданной/неразобранной размерности — в таком случае не выдумываем 0:00.
+        peak_hour: peakVisits > 0 ? peakHour : null,
+        rows,
+        meta: samplingMeta(body),
+      };
       cacheSet(cacheKey, data, isAll ? YM_ALL_RANGE_CACHE_TTL_MS : undefined);
       res.json(data);
     } catch (e) {

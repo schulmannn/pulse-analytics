@@ -148,6 +148,33 @@ const PAGES = {
   ],
 };
 
+// Слайс ритма/выходов: ритм по часам (24 плотные строки + пик) и страницы выхода (endURLPath —
+// зеркало входов, без атрибуции цели). visits_total у выходов уникален (140), чтобы хвост не совпал.
+const HOURLY = {
+  // visits_total намеренно уникален (132 ≠ 145 визитов-карточки), чтобы fmt.short-значение ритма
+  // не схлопнуло exact-локатор итога визитов.
+  visits_total: 132,
+  users_total: 90,
+  peak_hour: 14,
+  rows: Array.from({ length: 24 }, (_, h) => ({
+    hour: h,
+    visits: h === 14 ? 30 : h === 9 ? 20 : 2,
+    users: h === 14 ? 22 : h === 9 ? 14 : 1,
+  })),
+};
+
+const EXITS = {
+  visits_total: 140,
+  rows: [
+    { path: '/checkout/success', visits: 70, users: 55, bounce_rate: 12.5 },
+    { path: '/', visits: 35, users: 30, bounce_rate: 60.0 },
+    { path: '/catalog', visits: 20, users: 15, bounce_rate: 45.0 },
+    { path: '/contacts', visits: 10, users: 8, bounce_rate: 70.0 },
+    { path: '/faq', visits: 5, users: 4, bounce_rate: 80.0 },
+  ],
+  meta: { sampled: false },
+};
+
 // Слайс аудитории/источников: реферальные сайты, соцсети, устройства. visits_total у каждого
 // уникален, чтобы хвост «Ещё N визитов из M» не совпал одним локатором с несколькими карточками.
 const REFERRERS = {
@@ -247,6 +274,8 @@ async function bootMetrika(page: Page, path: string, { connected = true } = {}) 
     if (urlPath === '/api/ym/messengers') return json(200, MESSENGERS);
     if (urlPath === '/api/ym/devices') return json(200, attributed ? withGoalCtx(DEVICES, 7, 4.2) : DEVICES);
     if (urlPath === '/api/ym/landings') return json(200, attributed ? withGoalCtx(LANDINGS, 9, 6.4) : LANDINGS);
+    if (urlPath === '/api/ym/hourly') return json(200, HOURLY);
+    if (urlPath === '/api/ym/exits') return json(200, EXITS);
     if (urlPath === '/api/ym/connect' && request.method() === 'POST') {
       const body = request.postDataJSON() as Record<string, unknown>;
       state.connectCalls.push(body);
@@ -358,6 +387,14 @@ test('Обзор Метрики: карточки метрик, источник
   await expect(page.getByText(/выборка 50%/)).toBeVisible();
   await expect(page.getByText(/задержка данных ~2 ч/)).toBeVisible();
 
+  // Слайс ритма/выходов — heatmap по часам: заголовок, час пика и точная доступная клетка.
+  const hourlyHeading = page.getByRole('heading', { name: 'Трафик по часам', exact: true });
+  await hourlyHeading.scrollIntoViewIfNeeded();
+  await expect(hourlyHeading).toBeVisible();
+  await expect(page.getByText(/Пик в 14:00/)).toBeVisible();
+  await expect(page.getByText('Часы — в часовом поясе счётчика')).toBeVisible();
+  await expect(page.getByRole('img', { name: '14:00 — 30 визитов, 22 посетителей' })).toBeVisible();
+
   // Слайс качества — страницы входа (startURLPath) с отказами по строке + селектор цели.
   // Карточка — последняя на доске; content-visibility гасит её отрисовку до подхода к вьюпорту,
   // поэтому доскролливаем заголовок в вид перед проверками.
@@ -368,6 +405,15 @@ test('Обзор Метрики: карточки метрик, источник
   await expect(page.getByText(/22,5% отказов/)).toBeVisible();
   // Селектор цели виден, так как на счётчике есть цели.
   await expect(page.getByLabel('Цель для страниц входа')).toBeVisible();
+
+  // Слайс ритма/выходов — страницы выхода (endURLPath): путь + отказы + хвост своего total (140).
+  const exitsHeading = page.getByRole('heading', { name: 'Страницы выхода', exact: true });
+  await exitsHeading.scrollIntoViewIfNeeded();
+  await expect(exitsHeading).toBeVisible();
+  await expect(page.getByText('/checkout/success')).toBeVisible();
+  await expect(page.getByText(/12,5% отказов/)).toBeVisible();
+  await expect(page.getByText('/faq')).toHaveCount(0);
+  await expect(page.getByText(/Ещё 5 визитов из 140/)).toBeVisible();
 
   // Период-чипсы (общий page-period контракт) на месте.
   await expect(page.getByRole('group', { name: 'Период', exact: true })).toHaveCount(1);
