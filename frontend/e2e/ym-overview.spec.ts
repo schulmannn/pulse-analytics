@@ -34,6 +34,38 @@ const SUMMARY = {
       { day: '2026-07-22', value: 282 },
     ],
   },
+  // Слайс качества: точные итоги периода + качество из body.totals; серии остаются дневными.
+  quality: {
+    bounce_rate: 34.2,
+    avg_visit_duration_seconds: 96,
+    page_depth: 2.77,
+    new_users: 61,
+    percent_new_visitors: 42,
+  },
+  meta: {
+    exact_period_totals: true,
+    all_time: false,
+    sampled: true,
+    sample_share: 0.5,
+    sample_size: 500,
+    sample_space: 1000,
+    data_lag: 7200,
+  },
+};
+
+const LANDINGS = {
+  goal_id: null,
+  // Хвост «Ещё 3 визитов из 144» намеренно ОТЛИЧАЕТСЯ от хвоста источников, чтобы e2e-локатор
+  // хвоста не совпал сразу с двумя карточками.
+  visits_total: 144,
+  rows: [
+    { path: '/lp/promo', visits: 80, users: 60, bounce_rate: 22.5 },
+    { path: '/lp/main', visits: 40, users: 35, bounce_rate: 40.1 },
+    { path: '/lp/about', visits: 15, users: 12, bounce_rate: 55.0 },
+    { path: '/lp/delivery', visits: 6, users: 5, bounce_rate: 60.0 },
+    { path: '/lp/blog', visits: 3, users: 2, bounce_rate: 70.0 },
+  ],
+  meta: { sampled: false },
 };
 
 const SOURCES = {
@@ -104,6 +136,7 @@ async function bootMetrika(page: Page, path: string, { connected = true } = {}) 
     if (urlPath === '/api/ym/goals') return json(200, GOALS);
     if (urlPath === '/api/ym/utm') return json(200, UTM);
     if (urlPath === '/api/ym/pages') return json(200, PAGES);
+    if (urlPath === '/api/ym/landings') return json(200, LANDINGS);
     if (urlPath === '/api/ym/connect' && request.method() === 'POST') {
       const body = request.postDataJSON() as Record<string, unknown>;
       state.connectCalls.push(body);
@@ -149,8 +182,10 @@ test('Обзор Метрики: карточки метрик, источник
   await expect(page.getByRole('heading', { name: 'Просмотры страниц', exact: true })).toBeVisible();
   await expect(page.getByText('145', { exact: true })).toBeVisible();
   await expect(page.getByText('402', { exact: true })).toBeVisible();
-  // Честная подпись «посетители = сумма дневных уникальных».
-  await expect(page.getByText(/сумма по дням/)).toBeVisible();
+  // Слайс качества: при точных итогах периода (meta.exact_period_totals) «Посетители» —
+  // период-уникальные, поэтому подписи «сумма по дням» больше НЕТ (она осталась бы только на
+  // «Всё» без живого токена).
+  await expect(page.getByText(/сумма по дням/)).toHaveCount(0);
 
   // Источники: компактный топ-4 + сводный хвост (5-я строка спрятана до разворота).
   await expect(page.getByRole('heading', { name: 'Источники трафика', exact: true })).toBeVisible();
@@ -174,6 +209,26 @@ test('Обзор Метрики: карточки метрик, источник
   await expect(page.getByText('/catalog/notebooks')).toBeVisible();
   await expect(page.getByText('/blog/new-collection')).toHaveCount(0);
   await expect(page.getByText(/Ещё 20 просмотров из 402/)).toBeVisible();
+
+  // Слайс качества — полоса качества трафика: отказы/средний визит/глубина/новые/доля новых.
+  await expect(page.getByRole('heading', { name: 'Качество трафика', exact: true })).toBeVisible();
+  await expect(page.getByText('Отказы', { exact: true })).toBeVisible();
+  await expect(page.getByText('34,2%')).toBeVisible();
+  await expect(page.getByText('Глубина', { exact: true })).toBeVisible();
+  await expect(page.getByText('2,77')).toBeVisible();
+  await expect(page.getByText(/выборка 50%/)).toBeVisible();
+  await expect(page.getByText(/задержка данных ~2 ч/)).toBeVisible();
+
+  // Слайс качества — страницы входа (startURLPath) с отказами по строке + селектор цели.
+  // Карточка — последняя на доске; content-visibility гасит её отрисовку до подхода к вьюпорту,
+  // поэтому доскролливаем заголовок в вид перед проверками.
+  const landingHeading = page.getByRole('heading', { name: 'Страницы входа', exact: true });
+  await landingHeading.scrollIntoViewIfNeeded();
+  await expect(landingHeading).toHaveCount(1);
+  await expect(page.getByText('/lp/promo')).toBeVisible();
+  await expect(page.getByText(/22,5% отказов/)).toBeVisible();
+  // Селектор цели виден, так как на счётчике есть цели.
+  await expect(page.getByLabel('Цель для страниц входа')).toBeVisible();
 
   // Период-чипсы (общий page-period контракт) на месте.
   await expect(page.getByRole('group', { name: 'Период', exact: true })).toHaveCount(1);

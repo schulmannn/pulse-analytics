@@ -685,8 +685,39 @@ export function useMsStatus() {
 const YmSeriesBlockSchema = z
   .object({ total: z.number(), series: z.array(z.object({ day: z.string(), value: z.number() }).passthrough()) })
   .passthrough();
+// Качество трафика: nullable — доли/средние честно недоступны без данных (сервер не выдумывает 0).
+const YmQualitySchema = z
+  .object({
+    bounce_rate: z.number().nullable(),
+    avg_visit_duration_seconds: z.number().nullable(),
+    page_depth: z.number().nullable(),
+    new_users: z.number().nullable(),
+    percent_new_visitors: z.number().nullable(),
+  })
+  .passthrough();
+// Свежесть/сэмплирование: exact_period_totals говорит, доступны ли точные итоги периода; сэмпл/лаг-
+// поля приходят ТОЛЬКО когда Reporting API их вернул (UI молчит о них, когда их нет).
+const YmSummaryMetaSchema = z
+  .object({
+    exact_period_totals: z.boolean(),
+    all_time: z.boolean().optional(),
+    archive_last_day: z.string().nullable().optional(),
+    sampled: z.boolean().optional(),
+    sample_share: z.number().optional(),
+    sample_size: z.number().optional(),
+    sample_space: z.number().optional(),
+    data_lag: z.number().optional(),
+  })
+  .passthrough();
 const YmSummarySchema = z
-  .object({ visits: YmSeriesBlockSchema, users: YmSeriesBlockSchema, pageviews: YmSeriesBlockSchema })
+  .object({
+    visits: YmSeriesBlockSchema,
+    users: YmSeriesBlockSchema,
+    pageviews: YmSeriesBlockSchema,
+    // Дополнены обратно-совместимо: старые потребители читают visits/users/pageviews как прежде.
+    quality: YmQualitySchema.optional(),
+    meta: YmSummaryMetaSchema.optional(),
+  })
   .passthrough();
 const YmSourcesSchema = z
   .object({
@@ -806,6 +837,56 @@ export function useYmUtm(period: MsPeriod) {
     staleTime: STALE_LIVE,
     retry: false,
     queryFn: ({ signal }) => apiGet(`/api/ym/utm?${msPeriodQuery(period)}`, YmUtmSchema, { signal, channelId }),
+  });
+}
+
+// Слайс качества: лендинги (страницы ВХОДА — startURLPath, не PathFull) с отказами и
+// опциональными достижениями/конверсией ОДНОЙ выбранной цели. goal — положительный id или null;
+// сервер валидирует его числовым гейтом до сборки метрик, кэш scoped по каналу+периоду+цели.
+const YmLandingsSchema = z
+  .object({
+    goal_id: z.number().nullable(),
+    visits_total: z.number(),
+    rows: z.array(
+      z
+        .object({
+          path: z.string(),
+          visits: z.number(),
+          users: z.number(),
+          bounce_rate: z.number().nullable(),
+          goal_reaches: z.number().optional(),
+          goal_conversion: z.number().nullable().optional(),
+        })
+        .passthrough(),
+    ),
+    meta: z
+      .object({
+        sampled: z.boolean().optional(),
+        sample_share: z.number().optional(),
+        data_lag: z.number().optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
+export type YmLandings = z.infer<typeof YmLandingsSchema>;
+
+/** Топ страниц входа. `goalId` (положительный id или null) добавляет достижения/конверсию цели;
+    входит в queryKey и в query-строку — переключение цели рефетчит, но не плодит ключей вне цели. */
+export function useYmLandings(period: MsPeriod, goalId: number | null, limit = 10) {
+  const { channelId } = useSelectedChannel();
+  const goalParam = goalId != null && Number.isSafeInteger(goalId) && goalId > 0 ? goalId : null;
+  return useQuery({
+    enabled: channelId != null,
+    queryKey: ['ym-landings', channelId, ...msPeriodKey(period), limit, goalParam ?? 0],
+    staleTime: STALE_LIVE,
+    retry: false,
+    queryFn: ({ signal }) =>
+      apiGet(
+        `/api/ym/landings?${msPeriodQuery(period)}&limit=${limit}${goalParam != null ? `&goal_id=${goalParam}` : ''}`,
+        YmLandingsSchema,
+        { signal, channelId },
+      ),
   });
 }
 
