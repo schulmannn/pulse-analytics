@@ -1,2 +1,2 @@
 telethon==1.43.2
-qrcode>=7.4,<9
+qrcode>=8.2,<9
