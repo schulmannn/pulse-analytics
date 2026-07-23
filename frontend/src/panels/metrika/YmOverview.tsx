@@ -19,6 +19,7 @@ import { LineChart } from '@/components/LineChart';
 import { EmptyState } from '@/components/EmptyState';
 import { ErrorState } from '@/components/ErrorState';
 import { ChartSkeleton, TableSkeleton } from '@/components/ui/dataSkeleton';
+import { InlineSpark } from '@/components/InlineSpark';
 import { lttbDownsample } from '@/lib/downsample';
 import { fmt } from '@/lib/format';
 import { usePagePeriod } from '@/lib/period';
@@ -157,6 +158,7 @@ export function YmOverview() {
   };
 
   const quality = summary.data.quality ?? null;
+  const qualitySeries = summary.data.quality_series ?? null;
   const meta = summary.data.meta ?? null;
   // «Посетители» за окно теперь период-точные, когда сервер дал body.totals; при «Всё» без
   // живого токена подпись остаётся честной «сумма по дням».
@@ -169,8 +171,8 @@ export function YmOverview() {
       {metricCard('ym-users', 'Посетители', users, usersCaption)}
       {metricCard('ym-pageviews', 'Просмотры страниц', pageviews, windowLabel)}
 
-      {/* Качество трафика: отказы/длительность/глубина/новые — nullable, «—» когда недоступно. */}
-      <YmQualityStrip quality={quality} meta={meta} windowLabel={windowLabel} />
+      {/* Качество трафика: отказы/длительность/глубина/новые/роботы — nullable, «—» когда недоступно. */}
+      <YmQualityStrip quality={quality} qualitySeries={qualitySeries} meta={meta} windowLabel={windowLabel} />
 
       <ChartWidget id="ym-sources" title="Источники трафика" fixedSize="half">
         {sources.isPending ? (
@@ -518,15 +520,43 @@ const fmtDuration = (v: number | null | undefined): string => {
   return m > 0 ? `${m}:${String(s).padStart(2, '0')}` : `${s} с`;
 };
 
+interface YmQualityPoint {
+  day: string;
+  value: number | null;
+}
+interface YmQualitySeries {
+  bounce_rate?: YmQualityPoint[];
+  avg_visit_duration_seconds?: YmQualityPoint[];
+  page_depth?: YmQualityPoint[];
+  new_users?: YmQualityPoint[];
+  percent_new_visitors?: YmQualityPoint[];
+  robot_visits?: YmQualityPoint[];
+  robot_percentage?: YmQualityPoint[];
+}
+type YmQualitySeriesKey = keyof YmQualitySeries;
 interface YmQualityTile {
   key: string;
   label: string;
   value: string;
+  /** Ключ дневной серии качества для тренд-спарклайна (тренд — по РЕАЛЬНЫМ точкам, null пропущены). */
+  seriesKey: YmQualitySeriesKey;
 }
 
-/** Полоса качества трафика + тихая сноска о свежести/сэмплировании (без шумных бейджей). */
+/** Доля роботов + их число: «12,3% · 45». Оба null → «—»; показываем, а не исключаем молча. */
+const fmtRobots = (pct: number | null | undefined, count: number | null | undefined): string => {
+  if (pct == null && count == null) return '—';
+  return [pct != null ? fmtQualityPct(pct) : null, count != null ? fmt.short(count) : null]
+    .filter(Boolean)
+    .join(' · ');
+};
+
+/** Полоса качества трафика: 6 KPI (включая явную роботность) с компактными тренд-спарклайнами +
+    тихая сноска о свежести/сэмплировании (без шумных бейджей). Спарклайн показывается, только
+    когда у метрики есть ≥2 реальных дневных точки; спарклайн декоративен (aria-hidden) — значение
+    уже дано числом, поэтому доступность и пустые/загрузочные состояния не меняются. */
 function YmQualityStrip({
   quality,
+  qualitySeries,
   meta,
   windowLabel,
 }: {
@@ -536,7 +566,10 @@ function YmQualityStrip({
     page_depth: number | null;
     new_users: number | null;
     percent_new_visitors: number | null;
+    robot_visits?: number | null;
+    robot_percentage?: number | null;
   } | null;
+  qualitySeries: YmQualitySeries | null;
   meta: {
     exact_period_totals: boolean;
     all_time?: boolean;
@@ -548,12 +581,24 @@ function YmQualityStrip({
   windowLabel: string;
 }) {
   const tiles: YmQualityTile[] = [
-    { key: 'bounce', label: 'Отказы', value: fmtQualityPct(quality?.bounce_rate) },
-    { key: 'dur', label: 'Средний визит', value: fmtDuration(quality?.avg_visit_duration_seconds) },
-    { key: 'depth', label: 'Глубина', value: fmtQualityNum(quality?.page_depth) },
-    { key: 'new', label: 'Новые', value: fmt.short(quality?.new_users ?? null) },
-    { key: 'pctnew', label: 'Доля новых', value: fmtQualityPct(quality?.percent_new_visitors) },
+    { key: 'bounce', label: 'Отказы', value: fmtQualityPct(quality?.bounce_rate), seriesKey: 'bounce_rate' },
+    { key: 'dur', label: 'Средний визит', value: fmtDuration(quality?.avg_visit_duration_seconds), seriesKey: 'avg_visit_duration_seconds' },
+    { key: 'depth', label: 'Глубина', value: fmtQualityNum(quality?.page_depth), seriesKey: 'page_depth' },
+    { key: 'new', label: 'Новые', value: fmt.short(quality?.new_users ?? null), seriesKey: 'new_users' },
+    { key: 'pctnew', label: 'Доля новых', value: fmtQualityPct(quality?.percent_new_visitors), seriesKey: 'percent_new_visitors' },
+    { key: 'robots', label: 'Роботы', value: fmtRobots(quality?.robot_percentage, quality?.robot_visits), seriesKey: 'robot_percentage' },
   ];
+  // Тренд-спарклайн: только РЕАЛЬНЫЕ дневные точки метрики (null = «нет данных» пропускаем), и
+  // только когда их ≥2 — иначе InlineSpark сам ничего не рисует, но экономим и пустой контейнер.
+  const trendValues = (key: YmQualitySeriesKey): number[] => {
+    const points = qualitySeries?.[key];
+    if (!Array.isArray(points)) return [];
+    const realPoints = points.filter((p): p is { day: string; value: number } => p.value != null);
+    // An all-time archive can span thousands of days. The 72px sparkline cannot represent that
+    // many vertices usefully, so retain its shape with the same LTTB helper as the main charts.
+    const values = lttbDownsample(realPoints, 48, (p) => p.value).map((p) => p.value);
+    return values.length >= 2 ? values : [];
+  };
   // Свежесть/качество данных — одна приглушённая строка, элементы включаются только по факту.
   const notes: string[] = [];
   if (meta && meta.exact_period_totals === false) {
@@ -574,20 +619,32 @@ function YmQualityStrip({
     notes.push(`архив по ${fmt.day(meta.archive_last_day)}`);
   }
   return (
-    <div className="rounded-2xl border border-border bg-card p-5 lg:col-span-6">
+    <div data-testid="ym-quality-strip" className="rounded-2xl border border-border bg-card p-5 lg:col-span-6">
       <div className="mb-3 flex items-baseline justify-between gap-3">
         <h3 className="text-sm font-medium text-foreground">Качество трафика</h3>
         <span className="text-2xs text-muted-foreground">{windowLabel}</span>
       </div>
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
-        {tiles.map((t) => (
-          <div key={t.key} className="min-w-0">
-            <div className="text-2xs tracking-wide text-muted-foreground">{t.label}</div>
-            <div className="mt-0.5 text-lg font-medium tabular-nums tracking-tight text-foreground">{t.value}</div>
-          </div>
-        ))}
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+        {tiles.map((t) => {
+          const trend = trendValues(t.seriesKey);
+          return (
+            <div key={t.key} className="min-w-0">
+              <div className="text-2xs tracking-wide text-muted-foreground">{t.label}</div>
+              <div className="mt-0.5 text-lg font-medium tabular-nums tracking-tight text-foreground">{t.value}</div>
+              {trend.length >= 2 && (
+                <div className="mt-1 h-4">
+                  <InlineSpark values={trend} width={72} height={16} />
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
-      {notes.length > 0 && <p className="mt-3 text-2xs text-muted-foreground">{notes.join(' · ')}</p>}
+      {/* Роботность показана в трафике, а не исключена автоматически — честная оговорка. */}
+      <p className="mt-3 text-2xs text-muted-foreground">
+        Роботы «по поведению» учтены в визитах и качестве, а не исключены автоматически.
+      </p>
+      {notes.length > 0 && <p className="mt-1 text-2xs text-muted-foreground">{notes.join(' · ')}</p>}
     </div>
   );
 }

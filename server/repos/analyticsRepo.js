@@ -35,7 +35,10 @@ const IG_MEDIA_METRICS = ['reach', 'likes', 'comments', 'saved', 'shares', 'view
 // Копеечные суммы ms_daily — BIGINT (pg отдаёт строкой); orders_count — INTEGER (уже number,
 // numify — no-op-страховка). Бюджет toMetricNumber (9e15) = 90 трлн ₽ — за глаза.
 const MS_DAILY_METRICS = ['revenue_kopecks', 'orders_count', 'orders_sum_kopecks'];
-const YM_DAILY_METRICS = ['visits', 'users', 'pageviews'];
+// Целые BIGINT-счётчики архива Метрики (pg отдаёт их строками → numify к числу|null). Доли/
+// средние (bounce_rate/avg_visit_duration_seconds/page_depth/percent_new_visitors/
+// robot_percentage) — DOUBLE PRECISION: pg уже отдаёт их числом|null, numify им не нужен.
+const YM_DAILY_METRICS = ['visits', 'users', 'pageviews', 'new_users', 'robot_visits'];
 const IG_TAG_METRICS = ['like_count', 'comments_count'];
 const numifyMetrics = (row, keys) => {
   const out = { ...row };
@@ -392,7 +395,9 @@ function createAnalyticsRepo({ pool, enabled, getAccessibleChannel }) {
   async function getYmDailyAllInternal(channelId) {
     if (!enabled || !channelId) return [];
     const { rows } = await pool.query(
-      `SELECT to_char(day,'YYYY-MM-DD') AS day, visits, users, pageviews
+      `SELECT to_char(day,'YYYY-MM-DD') AS day, visits, users, pageviews,
+              bounce_rate, avg_visit_duration_seconds, page_depth, new_users,
+              percent_new_visitors, robot_visits, robot_percentage
          FROM ym_daily WHERE channel_id=$1 ORDER BY day ASC`, [channelId]);
     return rows.map((r) => numifyMetrics(r, YM_DAILY_METRICS));
   }

@@ -180,6 +180,10 @@ function createIntegrationsRepo({ pool, enabled, ensureExternalSource, transacti
            counter_id=EXCLUDED.counter_id, counter_name=EXCLUDED.counter_name,
            site=EXCLUDED.site, counter_created_day=EXCLUDED.counter_created_day,
            access_token_enc=EXCLUDED.access_token_enc,
+           quality_backfilled_at=CASE
+             WHEN ym_accounts.counter_id=EXCLUDED.counter_id THEN ym_accounts.quality_backfilled_at
+             ELSE NULL
+           END,
            source_id=COALESCE(EXCLUDED.source_id, ym_accounts.source_id), updated_at=now()`,
         [channelId, counter_id, counter_name || null, site || null, counter_created_day || null, access_token_enc, srcId]);
       await client.query(
@@ -211,11 +215,26 @@ function createIntegrationsRepo({ pool, enabled, ensureExternalSource, transacti
     const { rows } = await pool.query(
       `SELECT ya.channel_id, ya.counter_id, ya.counter_name,
               to_char(ya.counter_created_day,'YYYY-MM-DD') AS counter_created_day,
-              ya.access_token_enc
+              ya.access_token_enc,
+              to_char(ya.quality_backfilled_at,'YYYY-MM-DD"T"HH24:MI:SS') AS quality_backfilled_at
          FROM ym_accounts ya
          JOIN channels c ON c.id = ya.channel_id AND c.status <> 'disabled'
         ORDER BY ya.channel_id ASC`);
     return rows;
+  }
+
+  // Durable маркер одноразового бэкфилла качества (миграция 034). Ставится ТОЛЬКО кроном и ТОЛЬКО
+  // после успешного непустого upsert'а полного историко-качественного бэкфилла. Guarded
+  // channel+counter: переподключение ДРУГОГО счётчика тем же каналом (гонка reconnect) не
+  // унаследует чужой succeeded-маркер. `quality_backfilled_at IS NULL` делает пометку
+  // идемпотентной — повторный успешный проход не передёргивает штамп.
+  async function markYmQualityBackfilled(channelId, counterId) {
+    if (!enabled || !channelId || !counterId) return false;
+    const { rowCount } = await pool.query(
+      `UPDATE ym_accounts SET quality_backfilled_at=now()
+         WHERE channel_id=$1 AND counter_id=$2 AND quality_backfilled_at IS NULL`,
+      [channelId, String(counterId)]);
+    return rowCount > 0;
   }
 
   // Отключение источника: сносим ТОЛЬКО строку учётки (токен). Канал и архив ym_daily живут
@@ -387,7 +406,7 @@ function createIntegrationsRepo({ pool, enabled, ensureExternalSource, transacti
   return {
     saveIgAccount, getIgAccount, updateIgToken, deleteIgAccount, listIgAccounts,
     saveMsAccount, getMsAccount, listMsAccounts, deleteMsAccount,
-    saveYmAccount, getYmAccount, listYmAccounts, deleteYmAccount,
+    saveYmAccount, getYmAccount, listYmAccounts, deleteYmAccount, markYmQualityBackfilled,
     saveTgSession, getTgSession, deleteTgSession, listTgSessions, rotateTgSessionCiphertext,
     listTgQrCollectCandidates,
     recordTgSessionAttempt, recordTgSessionSuccess, recordTgSessionFailure,

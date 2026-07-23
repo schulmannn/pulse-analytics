@@ -686,6 +686,8 @@ const YmSeriesBlockSchema = z
   .object({ total: z.number(), series: z.array(z.object({ day: z.string(), value: z.number() }).passthrough()) })
   .passthrough();
 // Качество трафика: nullable — доли/средние честно недоступны без данных (сервер не выдумывает 0).
+// robot_* — явная роботность: число роботных визитов и их доля (Метрика включает роботов «по
+// поведению» в трафик по умолчанию; мы их показываем, а не вычитаем молча).
 const YmQualitySchema = z
   .object({
     bounce_rate: z.number().nullable(),
@@ -693,7 +695,26 @@ const YmQualitySchema = z
     page_depth: z.number().nullable(),
     new_users: z.number().nullable(),
     percent_new_visitors: z.number().nullable(),
+    // optional keeps rolling deploys compatible with an older API that already returned
+    // quality, but did not yet know about robot metrics.
+    robot_visits: z.number().nullable().optional(),
+    robot_percentage: z.number().nullable().optional(),
   })
+  .passthrough();
+// Дневные серии качества (аддитивно): по одной выровненной по дате серии на метрику; value
+// nullable — «нет данных» честно остаётся null. Используются только тренд-спарклайнами KPI.
+const YmQualityPointSchema = z.object({ day: z.string(), value: z.number().nullable() }).passthrough();
+const YmQualitySeriesSchema = z
+  .object({
+    bounce_rate: z.array(YmQualityPointSchema),
+    avg_visit_duration_seconds: z.array(YmQualityPointSchema),
+    page_depth: z.array(YmQualityPointSchema),
+    new_users: z.array(YmQualityPointSchema),
+    percent_new_visitors: z.array(YmQualityPointSchema),
+    robot_visits: z.array(YmQualityPointSchema),
+    robot_percentage: z.array(YmQualityPointSchema),
+  })
+  .partial()
   .passthrough();
 // Свежесть/сэмплирование: exact_period_totals говорит, доступны ли точные итоги периода; сэмпл/лаг-
 // поля приходят ТОЛЬКО когда Reporting API их вернул (UI молчит о них, когда их нет).
@@ -716,6 +737,7 @@ const YmSummarySchema = z
     pageviews: YmSeriesBlockSchema,
     // Дополнены обратно-совместимо: старые потребители читают visits/users/pageviews как прежде.
     quality: YmQualitySchema.optional(),
+    quality_series: YmQualitySeriesSchema.optional(),
     meta: YmSummaryMetaSchema.optional(),
   })
   .passthrough();

@@ -41,8 +41,12 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
 
   // ── Качество трафика (этот слайс): один summary-запрос со СТАБИЛЬНЫМ порядком метрик ──────────
   // Визиты/посетители/просмотры + отказы, средняя длительность визита, глубина, новые посетители
-  // и доля новых. pageDepth берём прямо у Метрики, чтобы не дублировать семантику API сервером.
-  // Порядок метрик — контракт: и дневной summary, и all-range totals читают totals по индексам.
+  // и доля новых, плюс ЯВНАЯ роботность (robotVisits/robotPercentage). pageDepth берём прямо у
+  // Метрики, чтобы не дублировать семантику API сервером. Роботов «по поведению» Метрика включает
+  // в трафик по умолчанию — мы их не вычитаем и не прячем, а показываем отдельной величиной, чтобы
+  // пользователь видел, насколько роботность раздувает отказы/длительность/глубину.
+  // Порядок метрик — контракт: и дневной summary, и all-range totals читают значения по индексам
+  // (0..9), порядок покрыт тестом; дневная серия качества читает metrics[] по тем же индексам.
   const YM_SUMMARY_METRICS = [
     'ym:s:visits',
     'ym:s:users',
@@ -52,6 +56,8 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
     'ym:s:pageDepth',
     'ym:s:newUsers',
     'ym:s:percentNewVisitors',
+    'ym:s:robotVisits',
+    'ym:s:robotPercentage',
   ].join(',');
 
   const round1 = (n) => Math.round(n * 10) / 10;
@@ -69,6 +75,70 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
     page_depth: null,
     new_users: null,
     percent_new_visitors: null,
+    robot_visits: null,
+    robot_percentage: null,
+  };
+
+  // Ключи дневных серий качества (порядок = как в quality-итогах): доли/средние и счётчики
+  // роботности. Каждая точка серии — { day, value|null } (nullable честно = «нет данных»).
+  const YM_QUALITY_SERIES_KEYS = [
+    'bounce_rate',
+    'avg_visit_duration_seconds',
+    'page_depth',
+    'new_users',
+    'percent_new_visitors',
+    'robot_visits',
+    'robot_percentage',
+  ];
+  // Плотная строка дня без трафика: счётчики — честный 0, доли/средние — NULL (не фиктивный 0%).
+  const ZERO_DAILY_QUALITY = {
+    visits: 0,
+    users: 0,
+    pageviews: 0,
+    bounce_rate: null,
+    avg_visit_duration_seconds: null,
+    page_depth: null,
+    new_users: 0,
+    percent_new_visitors: null,
+    robot_visits: 0,
+    robot_percentage: null,
+  };
+  // metrics[] дневной строки отчёта (порядок = YM_SUMMARY_METRICS) → дневная строка с качеством.
+  // Те же знаменательные гейты и округление, что у период-точных итогов ниже и у ymCollectionJob.
+  const dailyQualityFromMetrics = (m) => {
+    const visits = Math.round(Number(m[0]) || 0);
+    const users = Math.round(Number(m[1]) || 0);
+    const pageviews = Math.round(Number(m[2]) || 0);
+    const bounce = numOrNull(m[3]);
+    const dur = numOrNull(m[4]);
+    const depth = numOrNull(m[5]);
+    const newUsers = numOrNull(m[6]);
+    const pctNew = numOrNull(m[7]);
+    const robotVisits = numOrNull(m[8]);
+    const robotPct = numOrNull(m[9]);
+    return {
+      visits,
+      users,
+      pageviews,
+      bounce_rate: visits > 0 && bounce != null ? round2(bounce) : null,
+      avg_visit_duration_seconds: visits > 0 && dur != null ? round1(dur) : null,
+      page_depth: visits > 0 && depth != null ? round2(depth) : null,
+      // Missing count metric is unknown, not zero. Synthetic zero-traffic days use
+      // ZERO_DAILY_QUALITY and therefore still carry honest count zeros.
+      new_users: newUsers == null ? null : Math.round(newUsers),
+      percent_new_visitors: users > 0 && pctNew != null ? round2(pctNew) : null,
+      robot_visits: robotVisits == null ? null : Math.round(robotVisits),
+      robot_percentage: visits > 0 && robotPct != null ? round2(robotPct) : null,
+    };
+  };
+  // Плотные дневные строки (архив или живой отчёт с полями качества) → серии качества: по одной
+  // выровненной по дате серии на метрику. value nullable — «нет данных» остаётся null, а не 0.
+  const buildQualitySeries = (rows) => {
+    const out = {};
+    for (const k of YM_QUALITY_SERIES_KEYS) {
+      out[k] = rows.map((r) => ({ day: r.day, value: r[k] == null ? null : Number(r[k]) }));
+    }
+    return out;
   };
 
   // body.totals (порядок = YM_SUMMARY_METRICS) → ТОЧНЫЕ итоги периода + качество, либо null, если
@@ -88,6 +158,8 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
     const pageDepth = numOrNull(t[5]);
     const newUsers = numOrNull(t[6]);
     const pctNew = numOrNull(t[7]);
+    const robotVisits = numOrNull(t[8]);
+    const robotPct = numOrNull(t[9]);
     return {
       visits,
       users,
@@ -100,6 +172,10 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
         page_depth: visits > 0 && pageDepth != null ? round2(pageDepth) : null,
         new_users: newUsers == null ? null : Math.round(newUsers),
         percent_new_visitors: users > 0 && pctNew != null ? round2(pctNew) : null,
+        // Роботность — явный сигнал: число роботных визитов (count) + их доля (%, при visits>0).
+        // Totals-контракт t[8]/t[9]; отсутствие метрики → честный null, а не 0.
+        robot_visits: robotVisits == null ? null : Math.round(robotVisits),
+        robot_percentage: visits > 0 && robotPct != null ? round2(robotPct) : null,
       },
     };
   };
@@ -123,12 +199,16 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
 
   // base = summaryFromRows(...) (дневные серии + суммарные итоги); exact = exactTotalsFromBody|null.
   // Серии архива/окна НЕ подменяем; точные итоги (когда есть) замещают суммарные, качество — из них.
-  const buildSummary = (base, exact, meta) => {
+  const buildSummary = (base, exact, meta, qualitySeries) => {
     const out = {
       visits: { total: base.visits.total, series: base.visits.series },
       users: { total: base.users.total, series: base.users.series },
       pageviews: { total: base.pageviews.total, series: base.pageviews.series },
       quality: exact ? exact.quality : { ...EMPTY_QUALITY },
+      // Дневные серии качества (все метрики, включая роботность) — АДДИТИВНОЕ поле: старые
+      // потребители читают visits/users/pageviews/quality как прежде. Итоги качества остаются
+      // авторитетно период-точными (exact), серии — только для тренд-спарклайнов.
+      quality_series: qualitySeries || {},
       meta: { exact_period_totals: !!exact, ...meta },
     };
     if (exact) {
@@ -468,11 +548,9 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
       const day = dim && typeof dim.name === 'string' ? dim.name.slice(0, 10) : '';
       if (!isDayKey(day)) continue;
       const m = row && Array.isArray(row.metrics) ? row.metrics : [];
-      byDay.set(day, {
-        visits: Math.round(Number(m[0]) || 0),
-        users: Math.round(Number(m[1]) || 0),
-        pageviews: Math.round(Number(m[2]) || 0),
-      });
+      // Полная дневная строка: визиты/посетители/просмотры (для базовых серий) + качество (для
+      // дневных серий качества). Дни без трафика дозаполняются ниже нулями/NULL.
+      byDay.set(day, dailyQualityFromMetrics(m));
     }
     const series = [];
     // Итерация дней в UTC-полднях — DST-безопасно; границы уже проверены isDayKey.
@@ -480,7 +558,7 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
     const end = Date.parse(`${date2}T12:00:00Z`);
     while (cursor <= end) {
       const day = new Date(cursor).toISOString().slice(0, 10);
-      const row = byDay.get(day) || { visits: 0, users: 0, pageviews: 0 };
+      const row = byDay.get(day) || { ...ZERO_DAILY_QUALITY };
       series.push({ day, ...row });
       cursor += 24 * 60 * 60 * 1000;
     }
@@ -532,6 +610,9 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
         // ForActor — канон tenant-read; повторный ownership-чек поверх resolveYmChannel дёшев.
         const rows = await db.getYmDailyAllForActor(resolved.channel.id, req.user);
         const base = summaryFromRows(rows);
+        // Архивные строки несут поля качества (034) → дневные серии качества строятся прямо из
+        // них, даже когда живое обогащение точных ИТОГОВ недоступно.
+        const qualitySeries = buildQualitySeries(rows);
         const archiveLastDay = rows.length ? rows[rows.length - 1].day : null;
 
         // Живое обогащение «Всё»: ТОЧНЫЕ итоги + качество одним all-range totals-запросом, кэш
@@ -578,7 +659,12 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
             }
           }
         }
-        const data = buildSummary(base, exact, { all_time: true, archive_last_day: archiveLastDay, ...sampling });
+        const data = buildSummary(
+          base,
+          exact,
+          { all_time: true, archive_last_day: archiveLastDay, ...sampling },
+          qualitySeries,
+        );
         return res.json(data);
       }
 
@@ -601,15 +687,17 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
       } catch (e) {
         return sendYmError(res, e, { route: 'summary', channelId: ym.channel.id });
       }
-      // Серии — из дневных строк (первые три метрики visits/users/pageviews); ТОЧНЫЕ итоги
-      // периода — из body.totals (не пересуммируем дни). totals нет → падаем на суммы дней.
-      const base = summaryFromRows(reportToDailySeries(body, period.date1, period.date2));
+      // Серии — из плотных дневных строк (несут и visits/users/pageviews, и качество); ТОЧНЫЕ
+      // итоги периода — из body.totals (не пересуммируем дни). totals нет → падаем на суммы дней.
+      const daily = reportToDailySeries(body, period.date1, period.date2);
+      const base = summaryFromRows(daily);
       const exact = exactTotalsFromBody(body);
-      const data = buildSummary(base, exact, {
-        all_time: false,
-        archive_last_day: null,
-        ...samplingMeta(body),
-      });
+      const data = buildSummary(
+        base,
+        exact,
+        { all_time: false, archive_last_day: null, ...samplingMeta(body) },
+        buildQualitySeries(daily),
+      );
       cacheSet(cacheKey, data);
       res.json(data);
     } catch (e) {

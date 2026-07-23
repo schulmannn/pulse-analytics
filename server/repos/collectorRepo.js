@@ -465,26 +465,45 @@ function createCollectorRepo({ pool, enabled, transaction, setChannelTgId }) {
     return rows.length;
   }
 
-  // Дневные метрики Яндекс.Метрики. rows: [{ day:'YYYY-MM-DD', visits, users, pageviews }] —
-  // целые счётчики (BIGINT). Батч-upsert по (channel_id, day), зеркально upsertMsDaily и с той же
-  // сознательной ЗАМЕНЯЮЩЕЙ семантикой (не COALESCE): крон пере-снимает окно ЦЕЛИКОМ из отчёта
-  // Метрики, а её допересчёт свежих дней бывает и ВНИЗ (пересмотр роботности) — свежая точка
-  // честно ЗАМЕНЯЕТ старую. Контракт вызывающего: все три метрики приходят одним отчётом
-  // (ymCollectionJob частичных строк не строит), поэтому отсутствие трафика в дне = честный 0;
-  // COALESCE к 0 здесь лишь страховка NOT NULL-контракта таблицы от дырявой строки.
+  // Дневные метрики Яндекс.Метрики. rows: [{ day:'YYYY-MM-DD', visits, users, pageviews,
+  //   bounce_rate, avg_visit_duration_seconds, page_depth, new_users, percent_new_visitors,
+  //   robot_visits, robot_percentage }]. Счётчики (visits/users/pageviews/new_users/robot_visits)
+  // — целые BIGINT; доли/средние — DOUBLE PRECISION. Батч-upsert по (channel_id, day), зеркально
+  // upsertMsDaily и с той же сознательной ЗАМЕНЯЮЩЕЙ семантикой (не COALESCE): крон пере-снимает
+  // окно ЦЕЛИКОМ из отчёта Метрики, а её допересчёт свежих дней бывает и ВНИЗ (пересмотр
+  // роботности) — свежая точка честно ЗАМЕНЯЕТ старую. Контракт вызывающего: все метрики приходят
+  // одним отчётом (ymCollectionJob частичных строк не строит), поэтому отсутствие трафика в дне =
+  // честный 0 у счётчиков; COALESCE к 0 у трёх NOT NULL-счётчиков — страховка от дырявой строки.
+  // Доли/средние и nullable-счётчики (new_users/robot_visits) пишутся КАК ЕСТЬ (без COALESCE):
+  // «нет данных» обязано остаться NULL, а не стать ложным нулём.
   async function upsertYmDaily(channelId, rows, executor = pool) {
     if (!enabled || !channelId || !rows || !rows.length) return 0;
     const sql = `INSERT INTO ym_daily
-        (channel_id, day, visits, users, pageviews, updated_at)
+        (channel_id, day, visits, users, pageviews,
+         bounce_rate, avg_visit_duration_seconds, page_depth, new_users,
+         percent_new_visitors, robot_visits, robot_percentage, updated_at)
       SELECT $1, x.day::date, COALESCE(x.visits, 0), COALESCE(x.users, 0),
-             COALESCE(x.pageviews, 0), now()
+             COALESCE(x.pageviews, 0),
+             x.bounce_rate, x.avg_visit_duration_seconds, x.page_depth, x.new_users,
+             x.percent_new_visitors, x.robot_visits, x.robot_percentage, now()
         FROM jsonb_to_recordset($2::jsonb) AS x(
-          day text, visits bigint, users bigint, pageviews bigint
+          day text, visits bigint, users bigint, pageviews bigint,
+          bounce_rate double precision, avg_visit_duration_seconds double precision,
+          page_depth double precision, new_users bigint,
+          percent_new_visitors double precision, robot_visits bigint,
+          robot_percentage double precision
         )
       ON CONFLICT (channel_id, day) DO UPDATE SET
         visits=EXCLUDED.visits,
         users=EXCLUDED.users,
         pageviews=EXCLUDED.pageviews,
+        bounce_rate=EXCLUDED.bounce_rate,
+        avg_visit_duration_seconds=EXCLUDED.avg_visit_duration_seconds,
+        page_depth=EXCLUDED.page_depth,
+        new_users=EXCLUDED.new_users,
+        percent_new_visitors=EXCLUDED.percent_new_visitors,
+        robot_visits=EXCLUDED.robot_visits,
+        robot_percentage=EXCLUDED.robot_percentage,
         updated_at=now()`;
     await executor.query(sql, [channelId, JSON.stringify(rows)]);
     return rows.length;
