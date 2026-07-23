@@ -1,6 +1,7 @@
-import { useContext } from 'react';
+import { useContext, useState } from 'react';
 import { ChartExpandedContext } from '@/components/ExpandableChart';
-import { useYmGoals, useYmPages, useYmSources, useYmSummary, useYmUtm } from '@/api/queries';
+import { useYmGoals, useYmLandings, useYmPages, useYmSources, useYmSummary, useYmUtm } from '@/api/queries';
+import { PillSelect } from '@/components/PillSelect';
 import { ChartSection as ChartWidget } from '@/components/ChartWidget';
 import { ChartCardBody } from '@/components/chartWidget/ChartCardBody';
 import { LineChart } from '@/components/LineChart';
@@ -14,16 +15,16 @@ import { useMsPagePeriod } from '@/lib/msPeriod';
 
 /**
  * Обзор «Яндекс.Метрики» — веб-аналитика сайта рядом с аналитикой каналов. Все числа приходят
- * СЕРВЕР-АГРЕГИРОВАННЫМИ (дневные отчёты Reporting API с accuracy=full, «Всё» — из нашего архива
- * ym_daily). Величины (визиты, посетители, просмотры страниц) — свои и никогда не смешиваются с
- * TG-просмотрами или IG-охватом (канон TG-views ≠ IG-reach). «Посетители» за окно — СУММА дневных
- * уникальных (уникальность внутри дня, не периода) — подпись карточки это честно оговаривает.
+ * СЕРВЕР-АГРЕГИРОВАННЫМИ (дневные отчёты Reporting API с accuracy=full; «Всё» хранит серии в
+ * ym_daily и best-effort обогащает точными live-итогами). Величины (визиты, посетители, просмотры
+ * страниц) — свои и никогда не смешиваются с TG-просмотрами или IG-охватом. Когда period totals
+ * недоступны, подпись посетителей честно отмечает, что итог является суммой дневных уникальных.
  */
 export function YmOverview() {
   const pp = usePagePeriod();
   const days = pp ? pp.days : 30;
   // Окна Метрики сериализует тот же feed-топбар, что у МойСклада (msPeriod — сете-агностичный
-  // хелпер): «Всё» (0) обслуживается из архива ym_daily, живые окна — 7/30/90/точный диапазон.
+  // хелпер): «Всё» (0) берёт серии из ym_daily, живые окна — 7/30/90/точный диапазон.
   const period = useMsPagePeriod();
   const windowLabel = pp?.range ? 'за выбранный период' : days === 0 ? 'за всё время' : `за ${days} дн.`;
   const summary = useYmSummary(period);
@@ -31,6 +32,18 @@ export function YmOverview() {
   const goals = useYmGoals(period);
   const utm = useYmUtm(period);
   const pages = useYmPages(period);
+  // Селектор цели лендингов появляется, ТОЛЬКО когда на счётчике есть цели (иначе — базовый отчёт).
+  // Храним id строкой (контракт PillSelect); '' = «Без цели». Сервер валидирует id числовым гейтом.
+  const [landingGoal, setLandingGoal] = useState('');
+  const goalRows = goals.data?.rows ?? [];
+  const hasGoals = goalRows.length > 0;
+  // Период/счётчик мог смениться, пока в state остался id прежней цели. Не отправляем такую
+  // цель до явного нового выбора: id должен существовать в текущем словаре целей.
+  const selectedGoalId =
+    hasGoals && landingGoal !== '' && goalRows.some((goal) => goal.id === landingGoal)
+      ? Number(landingGoal)
+      : null;
+  const landings = useYmLandings(period, selectedGoalId);
 
   if (summary.isPending) {
     return (
@@ -105,11 +118,21 @@ export function YmOverview() {
     );
   };
 
+  const quality = summary.data.quality ?? null;
+  const meta = summary.data.meta ?? null;
+  // «Посетители» за окно теперь период-точные, когда сервер дал body.totals; при «Всё» без
+  // живого токена подпись остаётся честной «сумма по дням».
+  const exactTotals = meta?.exact_period_totals === true;
+  const usersCaption = exactTotals ? windowLabel : `${windowLabel} · сумма по дням`;
+
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-6">
       {metricCard('ym-visits', 'Визиты', visits, windowLabel)}
-      {metricCard('ym-users', 'Посетители', users, `${windowLabel} · сумма по дням`)}
+      {metricCard('ym-users', 'Посетители', users, usersCaption)}
       {metricCard('ym-pageviews', 'Просмотры страниц', pageviews, windowLabel)}
+
+      {/* Качество трафика: отказы/длительность/глубина/новые — nullable, «—» когда недоступно. */}
+      <YmQualityStrip quality={quality} meta={meta} windowLabel={windowLabel} />
 
       <ChartWidget id="ym-sources" title="Источники трафика" fixedSize="half">
         {sources.isPending ? (
@@ -246,6 +269,152 @@ export function YmOverview() {
           />
         )}
       </ChartWidget>
+
+      {/* Страницы входа (startURLPath): визиты + отказы, опц. конверсия выбранной цели. */}
+      <ChartWidget
+        id="ym-landings"
+        title="Страницы входа"
+        fixedSize="half"
+        action={
+          hasGoals ? (
+            <PillSelect
+              value={landingGoal}
+              onValueChange={setLandingGoal}
+              ariaLabel="Цель для страниц входа"
+              className="h-7 text-2xs"
+              options={[
+                { value: '', label: 'Без цели' },
+                ...goalRows.map((g) => ({ value: g.id, label: g.name ?? `Цель ${g.id}` })),
+              ]}
+            />
+          ) : undefined
+        }
+      >
+        {landings.isPending ? (
+          <TableSkeleton rows={4} columns={2} className="py-2" />
+        ) : landings.isError ? (
+          <ErrorState
+            compact
+            size="table"
+            className="py-4"
+            title="Не удалось получить страницы входа"
+            reason={landings.error instanceof Error ? landings.error.message : 'ошибка'}
+            onRetry={() => landings.refetch()}
+            retrying={landings.isFetching}
+          />
+        ) : landings.data.rows.length === 0 ? (
+          <EmptyState compact size="table" title="Нет визитов по страницам входа за период." />
+        ) : (
+          <YmBreakdownRows
+            rows={landings.data.rows.map((r) => ({
+              key: r.path,
+              label: r.path,
+              value: r.visits,
+              // Отказы всегда; конверсия цели — только когда цель выбрана и метрика пришла.
+              note: [
+                r.bounce_rate != null
+                  ? `${r.bounce_rate.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}% отказов`
+                  : null,
+                landings.data.goal_id != null && r.goal_conversion != null
+                  ? `CR ${r.goal_conversion.toLocaleString('ru-RU', { maximumFractionDigits: 2 })}%`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(' · ') || null,
+            }))}
+            tailWord="визитов"
+            unitTotal={landings.data.visits_total}
+          />
+        )}
+      </ChartWidget>
+    </div>
+  );
+}
+
+/** Форматтеры качества: nullable-aware, русская локаль. «—» — «нет данных», не «0». */
+const fmtQualityPct = (v: number | null | undefined): string =>
+  v == null ? '—' : `${v.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}%`;
+const fmtQualityNum = (v: number | null | undefined, digits = 2): string =>
+  v == null ? '—' : v.toLocaleString('ru-RU', { maximumFractionDigits: digits });
+/** Секунды → «м:сс» (или «с» под минутой). null → «—». */
+const fmtDuration = (v: number | null | undefined): string => {
+  if (v == null) return '—';
+  const total = Math.round(v);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return m > 0 ? `${m}:${String(s).padStart(2, '0')}` : `${s} с`;
+};
+
+interface YmQualityTile {
+  key: string;
+  label: string;
+  value: string;
+}
+
+/** Полоса качества трафика + тихая сноска о свежести/сэмплировании (без шумных бейджей). */
+function YmQualityStrip({
+  quality,
+  meta,
+  windowLabel,
+}: {
+  quality: {
+    bounce_rate: number | null;
+    avg_visit_duration_seconds: number | null;
+    page_depth: number | null;
+    new_users: number | null;
+    percent_new_visitors: number | null;
+  } | null;
+  meta: {
+    exact_period_totals: boolean;
+    all_time?: boolean;
+    archive_last_day?: string | null;
+    sampled?: boolean;
+    sample_share?: number;
+    data_lag?: number;
+  } | null;
+  windowLabel: string;
+}) {
+  const tiles: YmQualityTile[] = [
+    { key: 'bounce', label: 'Отказы', value: fmtQualityPct(quality?.bounce_rate) },
+    { key: 'dur', label: 'Средний визит', value: fmtDuration(quality?.avg_visit_duration_seconds) },
+    { key: 'depth', label: 'Глубина', value: fmtQualityNum(quality?.page_depth) },
+    { key: 'new', label: 'Новые', value: fmt.short(quality?.new_users ?? null) },
+    { key: 'pctnew', label: 'Доля новых', value: fmtQualityPct(quality?.percent_new_visitors) },
+  ];
+  // Свежесть/качество данных — одна приглушённая строка, элементы включаются только по факту.
+  const notes: string[] = [];
+  if (meta && meta.exact_period_totals === false) {
+    notes.push('точные итоги за период недоступны');
+  }
+  if (meta?.sampled) {
+    notes.push(
+      meta.sample_share != null
+        ? `выборка ${Math.round(meta.sample_share * 100)}%`
+        : 'данные семплированы',
+    );
+  }
+  if (meta?.data_lag != null && meta.data_lag > 0) {
+    const hours = Math.round(meta.data_lag / 3600);
+    notes.push(hours >= 1 ? `задержка данных ~${hours} ч` : 'данные обрабатываются');
+  }
+  if (meta?.all_time && meta.archive_last_day) {
+    notes.push(`архив по ${fmt.day(meta.archive_last_day)}`);
+  }
+  return (
+    <div className="rounded-2xl border border-border bg-card p-5 lg:col-span-6">
+      <div className="mb-3 flex items-baseline justify-between gap-3">
+        <h3 className="text-sm font-medium text-foreground">Качество трафика</h3>
+        <span className="text-2xs text-muted-foreground">{windowLabel}</span>
+      </div>
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+        {tiles.map((t) => (
+          <div key={t.key} className="min-w-0">
+            <div className="text-2xs tracking-wide text-muted-foreground">{t.label}</div>
+            <div className="mt-0.5 text-lg font-medium tabular-nums tracking-tight text-foreground">{t.value}</div>
+          </div>
+        ))}
+      </div>
+      {notes.length > 0 && <p className="mt-3 text-2xs text-muted-foreground">{notes.join(' · ')}</p>}
     </div>
   );
 }

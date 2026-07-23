@@ -3,7 +3,7 @@
 const { hasWorkspaceRole } = require('../middleware/tenant');
 
 /**
- * Роуты Яндекс.Метрики (/api/ym/{connect,status,account,summary,sources,goals,pages,utm}) —
+ * Роуты Яндекс.Метрики (/api/ym/{connect,status,account,summary,sources,goals,pages,landings,utm}) —
  * серверная половина
  * источника «метрика», зеркально МойСклад-вертикали: connect валидирует OAuth-токен живым
  * identity-вызовом (management/v1/counters) и сохраняет его ТОЛЬКО шифрованным (lib/ym_crypto),
@@ -11,8 +11,8 @@ const { hasWorkspaceRole } = require('../middleware/tenant');
  * db.getChannelOrDefault — тот же ownership/disabled-предикат) и кэшируются как МС-роуты
  * (дефолтный TTL memoryCache). Токен нигде не логируется и не попадает в ответы/сообщения
  * ошибок (ymClient держит его только в заголовке запроса). days=0 («Всё») в summary
- * обслуживается ИЗ АРХИВА ym_daily (его копит jobs/ymCollectionJob) — живых вызовов Метрики
- * не делает и токена не требует; в sources «Всё» — живой отчёт полного диапазона от даты
+ * строит серии ИЗ АРХИВА ym_daily (его копит jobs/ymCollectionJob), а точные итоги/качество
+ * best-effort обогащает одним часовым live-запросом; в sources «Всё» — живой отчёт полного диапазона от даты
  * создания счётчика (кэш 1 час, зеркало top-products «Всё» у МС). Все живые отчёты идут с
  * accuracy=full — сэмплирование Метрики выключено, числа сходятся с архивом.
  * connect/disconnect пишут audit-события ym_connect/ym_disconnect (зеркало ms_connect) —
@@ -20,14 +20,14 @@ const { hasWorkspaceRole } = require('../middleware/tenant');
  */
 function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cacheGet, cacheSet, cache, log }) {
   // Узкий enum периодов ДО кэш-ключа (канон МС): произвольный days плодил бы per-value
-  // кэш-записи ценой upstream-запросов. 0 = «Всё» (summary — архив без upstream; sources —
-  // живой полный диапазон). Не-enum → дефолт 30.
+  // кэш-записи ценой upstream-запросов. 0 = «Всё» (summary — архив + best-effort live-итоги;
+  // sources — живой полный диапазон). Не-enum → дефолт 30.
   const YM_DAYS_ALLOWED = [0, 7, 30, 90];
   const daysOf = (req) => {
     const n = parseInt(req.query.days, 10);
     return YM_DAYS_ALLOWED.includes(n) ? n : 30;
   };
-  // «Всё» у breakdown-роутов (sources/goals/pages/utm) — живой отчёт ПОЛНОГО диапазона счётчика
+  // «Всё» у breakdown-роутов (sources/goals/pages/landings/utm) — живой отчёт ПОЛНОГО диапазона счётчика
   // → отдельный кэш 1 час (зеркало MS_TOP_ALL_CACHE_TTL_MS): история меняется медленно,
   // пересобирать чаще дорого.
   const YM_ALL_RANGE_CACHE_TTL_MS = 60 * 60 * 1000;
@@ -36,6 +36,118 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
   const YM_ALL_ANCHOR_DAY = '2015-01-01';
   // Разбивка источников — компактный отчёт: типов lastsign-источников у Метрики ~десяток.
   const YM_SOURCES_LIMIT = 50;
+
+  // ── Качество трафика (этот слайс): один summary-запрос со СТАБИЛЬНЫМ порядком метрик ──────────
+  // Визиты/посетители/просмотры + отказы, средняя длительность визита, глубина, новые посетители
+  // и доля новых. pageDepth берём прямо у Метрики, чтобы не дублировать семантику API сервером.
+  // Порядок метрик — контракт: и дневной summary, и all-range totals читают totals по индексам.
+  const YM_SUMMARY_METRICS = [
+    'ym:s:visits',
+    'ym:s:users',
+    'ym:s:pageviews',
+    'ym:s:bounceRate',
+    'ym:s:avgVisitDurationSeconds',
+    'ym:s:pageDepth',
+    'ym:s:newUsers',
+    'ym:s:percentNewVisitors',
+  ].join(',');
+
+  const round1 = (n) => Math.round(n * 10) / 10;
+  const round2 = (n) => Math.round(n * 100) / 100;
+  // Число или null («нет данных» ≠ «0»): доли/средние без знаменателя честно недоступны.
+  const numOrNull = (v) => {
+    if (v == null || v === '') return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const EMPTY_QUALITY = {
+    bounce_rate: null,
+    avg_visit_duration_seconds: null,
+    page_depth: null,
+    new_users: null,
+    percent_new_visitors: null,
+  };
+
+  // body.totals (порядок = YM_SUMMARY_METRICS) → ТОЧНЫЕ итоги периода + качество, либо null, если
+  // totals не пришли. Итоги визитов/посетителей/просмотров тут период-точные (авторитетнее суммы
+  // дневных строк): доли/средние Метрики считает по целому периоду, суммировать их по дням нельзя.
+  const exactTotalsFromBody = (body) => {
+    const t = body && Array.isArray(body.totals) ? body.totals : null;
+    // Пустой/частичный totals не делает период «точным»: базовые три итога — минимальный
+    // контракт summary. Иначе totals:[] ошибочно включал бы exact_period_totals=true.
+    if (!t || t.length < 3) return null;
+    const visits = numOrNull(t[0]);
+    const users = numOrNull(t[1]);
+    const pageviews = numOrNull(t[2]);
+    if (visits == null || users == null || pageviews == null) return null;
+    const bounce = numOrNull(t[3]);
+    const dur = numOrNull(t[4]);
+    const pageDepth = numOrNull(t[5]);
+    const newUsers = numOrNull(t[6]);
+    const pctNew = numOrNull(t[7]);
+    return {
+      visits,
+      users,
+      pageviews,
+      quality: {
+        // При нулевом знаменателе API обычно присылает числовые нули, но для долей/средних это
+        // «нет данных», а не измеренное значение. Не показываем пользователю фиктивное качество.
+        bounce_rate: visits > 0 && bounce != null ? round2(bounce) : null,
+        avg_visit_duration_seconds: visits > 0 && dur != null ? round1(dur) : null,
+        page_depth: visits > 0 && pageDepth != null ? round2(pageDepth) : null,
+        new_users: newUsers == null ? null : Math.round(newUsers),
+        percent_new_visitors: users > 0 && pctNew != null ? round2(pctNew) : null,
+      },
+    };
+  };
+
+  // Верхнеуровневые сэмпл/лаг-поля Reporting API — консервативно, ТОЛЬКО когда реально пришли
+  // (UI раскрывает сэмплирование/лаг без шумных бейджей, если полей нет — метаданные молчат).
+  const samplingMeta = (body) => {
+    const out = {};
+    if (!body || typeof body !== 'object') return out;
+    if (typeof body.sampled === 'boolean') out.sampled = body.sampled;
+    const share = numOrNull(body.sample_share);
+    if (share != null) out.sample_share = share;
+    const size = numOrNull(body.sample_size);
+    if (size != null) out.sample_size = size;
+    const space = numOrNull(body.sample_space);
+    if (space != null) out.sample_space = space;
+    const lag = numOrNull(body.data_lag);
+    if (lag != null) out.data_lag = lag;
+    return out;
+  };
+
+  // base = summaryFromRows(...) (дневные серии + суммарные итоги); exact = exactTotalsFromBody|null.
+  // Серии архива/окна НЕ подменяем; точные итоги (когда есть) замещают суммарные, качество — из них.
+  const buildSummary = (base, exact, meta) => {
+    const out = {
+      visits: { total: base.visits.total, series: base.visits.series },
+      users: { total: base.users.total, series: base.users.series },
+      pageviews: { total: base.pageviews.total, series: base.pageviews.series },
+      quality: exact ? exact.quality : { ...EMPTY_QUALITY },
+      meta: { exact_period_totals: !!exact, ...meta },
+    };
+    if (exact) {
+      if (exact.visits != null) out.visits.total = Math.round(exact.visits);
+      if (exact.users != null) out.users.total = Math.round(exact.users);
+      if (exact.pageviews != null) out.pageviews.total = Math.round(exact.pageviews);
+    }
+    return out;
+  };
+
+  // Токен для best-effort «Всё»-обогащения БЕЗ падений: null, если ключ шифрования не настроен,
+  // учётки/шифроблоба нет или расшифровка не удалась. Ни ciphertext, ни plaintext в лог не идут.
+  const tryReadToken = (acc) => {
+    if (!acc || !acc.access_token_enc || !ymCrypto.configured()) return null;
+    try {
+      return ymCrypto.decrypt(acc.access_token_enc);
+    } catch (e) {
+      log('warn', 'ym_summary_all_token_unreadable', { error: e && e.message });
+      return null;
+    }
+  };
 
   // 'YYYY-MM-DD' по местным часам процесса (Railway = UTC) — как остальные дневные окна бэка.
   const fmtDay = (d) => {
@@ -90,9 +202,22 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
   function sendYmError(res, e, ctx) {
     const status = Number(e && e.status) || 0;
     log('warn', 'ym_fetch_failed', { ...ctx, status, error: e && e.message });
-    if (status === 429) {
+    // Квота Метрики: 429 (rate, уже ПОСЛЕ одной внутренней повторной попытки клиента) и 420
+    // (documented BLOCK на минуты — клиент его НЕ ретраит) → единый пользовательский 503 с
+    // разумным Retry-After. Дефолт заголовка: 420 — минута (блок долгий), 429 — 5с; распарсенный
+    // клиентом Retry-After имеет приоритет. Секунды — единица заголовка Retry-After.
+    if (status === 420 || status === 429) {
+      const fallbackSec = status === 420 ? 60 : 5;
+      const maxSec = status === 420 ? 60 * 60 : 60;
+      const sec = Number.isFinite(e && e.retryAfterMs)
+        ? Math.min(maxSec, Math.max(1, Math.round(e.retryAfterMs / 1000)))
+        : fallbackSec;
+      res.set('Retry-After', String(sec));
       return res.status(503).json({
-        error: 'Яндекс.Метрика ограничила частоту запросов — попробуй через минуту',
+        error:
+          status === 420
+            ? 'Яндекс.Метрика временно заблокировала запросы по квоте — попробуйте через несколько минут'
+            : 'Яндекс.Метрика ограничила частоту запросов — попробуйте через несколько секунд',
       });
     }
     if (status === 401 || status === 403) {
@@ -230,7 +355,7 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
         if (status === 401 || status === 403) {
           return res.status(400).json({ error: 'Токен отклонён Яндексом' });
         }
-        if (status === 429) return sendYmError(res, e, { route: 'connect' });
+        if (status === 429 || status === 420) return sendYmError(res, e, { route: 'connect' });
         return res.status(502).json({ error: 'Яндекс.Метрика недоступна' });
       }
       if (!counters.length) {
@@ -388,8 +513,10 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
     };
   }
 
-  // GET /api/ym/summary?days=30 — визиты/посетители/просмотры дневными сериями за окно.
-  // days=0 («Всё») — из архива ym_daily, без единого запроса к Метрике.
+  // GET /api/ym/summary?days=30 — визиты/посетители/просмотры дневными сериями + качество трафика
+  // за окно. Конечные окна (7/30/90/диапазон) берут ТОЧНЫЕ итоги периода из body.totals одного
+  // запроса; days=0 («Всё») рисует базовые серии из архива ym_daily и best-effort обогащает
+  // качество одним живым all-range totals-запросом (кэш 1 час), честно деградируя без токена.
   app.get('/api/ym/summary', requireAuth, async (req, res, next) => {
     try {
       const period = parseYmPeriod(req);
@@ -397,16 +524,59 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
 
       if (period.days === 0 && !period.range) {
         // Архивная ветка: канал резолвим и 404-им как data-роут (после отключения учётки «Всё»
-        // ведёт себя как остальные периоды — connect-CTA), но токен НЕ трогаем: читаем только БД.
+        // ведёт себя как остальные периоды — connect-CTA). Базовые серии/итоги — только из БД.
         const resolved = await resolveYmChannel(req, res);
         if (!resolved) return;
-        const cacheKey = `ym:summary:${resolved.channel.id}:${period.periodKey}`;
-        const cached = cacheGet(cacheKey);
-        if (cached) return res.json(cached);
         // ForActor — канон tenant-read; повторный ownership-чек поверх resolveYmChannel дёшев.
         const rows = await db.getYmDailyAllForActor(resolved.channel.id, req.user);
-        const data = summaryFromRows(rows);
-        cacheSet(cacheKey, data);
+        const base = summaryFromRows(rows);
+        const archiveLastDay = rows.length ? rows[rows.length - 1].day : null;
+
+        // Живое обогащение «Всё»: ТОЧНЫЕ итоги + качество одним all-range totals-запросом, кэш
+        // 1 час (зеркало часового кэша breakdown-«Всё»). Токен/ключ недоступен ИЛИ запрос упал →
+        // архив рендерится честно, качество = null, meta.exact_period_totals=false. Серии архива
+        // при этом НИКОГДА не подменяются.
+        let exact = null;
+        let sampling = {};
+        const enrichKey = `ym:summary-all-live:${resolved.channel.id}`;
+        const cachedEnrich = cacheGet(enrichKey);
+        if (cachedEnrich) {
+          exact = cachedEnrich.exact;
+          sampling = cachedEnrich.sampling;
+        } else {
+          const token = tryReadToken(resolved.acc);
+          if (token) {
+            try {
+              const { date1, date2 } = await allRangeWindow(resolved, req.user);
+              // No-dim all-range запрос: значения живут в body.totals (стабильный порядок метрик).
+              const body = await ymFetch(
+                token,
+                `/stat/v1/data?ids=${encodeURIComponent(resolved.acc.counter_id)}` +
+                  `&metrics=${YM_SUMMARY_METRICS}` +
+                  `&date1=${date1}&date2=${date2}` +
+                  '&limit=1&accuracy=full',
+              );
+              exact = exactTotalsFromBody(body);
+              sampling = samplingMeta(body);
+              cacheSet(enrichKey, { exact, sampling }, YM_ALL_RANGE_CACHE_TTL_MS);
+            } catch (e) {
+              // Никакого 5xx на весь summary: честный архив лучше пустой ошибки. Контекст без токена.
+              log('warn', 'ym_summary_all_enrich_failed', {
+                channelId: resolved.channel.id,
+                status: Number(e && e.status) || 0,
+              });
+              exact = null;
+              // Короткий negative-cache не даёт каждой перезагрузке страницы повторно долбить
+              // уже упавший live-отчёт. Для квоты уважаем Retry-After (с потолком 5 минут),
+              // для сети/5xx даём 30 секунд; архивный ответ всё это время остаётся доступен.
+              const failureTtl = Number.isFinite(e && e.retryAfterMs)
+                ? Math.min(5 * 60 * 1000, Math.max(1000, e.retryAfterMs))
+                : 30 * 1000;
+              cacheSet(enrichKey, { exact: null, sampling: {} }, failureTtl);
+            }
+          }
+        }
+        const data = buildSummary(base, exact, { all_time: true, archive_last_day: archiveLastDay, ...sampling });
         return res.json(data);
       }
 
@@ -421,7 +591,7 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
         body = await ymFetch(
           ym.token,
           `/stat/v1/data?ids=${encodeURIComponent(ym.acc.counter_id)}` +
-            '&metrics=ym:s:visits,ym:s:users,ym:s:pageviews' +
+            `&metrics=${YM_SUMMARY_METRICS}` +
             '&dimensions=ym:s:date&sort=ym:s:date' +
             `&date1=${period.date1}&date2=${period.date2}` +
             '&limit=100000&accuracy=full',
@@ -429,7 +599,15 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
       } catch (e) {
         return sendYmError(res, e, { route: 'summary', channelId: ym.channel.id });
       }
-      const data = summaryFromRows(reportToDailySeries(body, period.date1, period.date2));
+      // Серии — из дневных строк (первые три метрики visits/users/pageviews); ТОЧНЫЕ итоги
+      // периода — из body.totals (не пересуммируем дни). totals нет → падаем на суммы дней.
+      const base = summaryFromRows(reportToDailySeries(body, period.date1, period.date2));
+      const exact = exactTotalsFromBody(body);
+      const data = buildSummary(base, exact, {
+        all_time: false,
+        archive_last_day: null,
+        ...samplingMeta(body),
+      });
       cacheSet(cacheKey, data);
       res.json(data);
     } catch (e) {
@@ -648,6 +826,93 @@ function registerYmRoutes({ app, requireAuth, db, audit, ymCrypto, ymFetch, cach
         ? Math.round(Number(totals[0]))
         : rows.reduce((acc, r) => acc + r.pageviews, 0);
       const data = { pageviews_total: pageviewsTotal, rows };
+      cacheSet(cacheKey, data, isAll ? YM_ALL_RANGE_CACHE_TTL_MS : undefined);
+      res.json(data);
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  // ── Лендинги (слайс качества): разбивка по СТРАНИЦЕ ВХОДА ─────────────────────────────────────
+  // ym:s:startURLPath (путь входа без query — не PathFull: query-строки плодят кардинальность и
+  // тянут PII). Визиты/посетители/отказы по странице входа + опционально достижения и конверсия
+  // ОДНОЙ выбранной цели. goal_id проходит строгий числовой гейт ДО сборки имён метрик: любая
+  // не-число/не-положительная строка (инъекция) отбрасывается и наружу в metrics не попадает.
+  const YM_LANDINGS_LIMIT_DEFAULT = 10;
+  const YM_LANDINGS_LIMIT_MAX = 50;
+  const landingsLimitOf = (req) => {
+    const n = parseInt(req.query.limit, 10);
+    if (!Number.isFinite(n) || n < 1) return YM_LANDINGS_LIMIT_DEFAULT;
+    return Math.min(n, YM_LANDINGS_LIMIT_MAX);
+  };
+  // Опциональный goal_id: положительный safe-integer ЛИБО ничего. Иное (инъекция, дробь,
+  // отрицательное, переполнение) → null: цель просто не запрашивается, отчёт остаётся базовым.
+  const goalIdOf = (req) => {
+    const raw = req.query.goal_id;
+    if (raw == null || raw === '') return null;
+    const n = Number(raw);
+    return Number.isSafeInteger(n) && n > 0 ? n : null;
+  };
+
+  // GET /api/ym/landings?days=30&limit=10&goal_id=<id?> — топ страниц входа по визитам.
+  app.get('/api/ym/landings', requireAuth, async (req, res, next) => {
+    try {
+      const period = parseYmPeriod(req);
+      if (period.invalid) return badRange(res);
+      const limit = landingsLimitOf(req);
+      const goalId = goalIdOf(req);
+      const ym = await resolveYm(req, res);
+      if (!ym) return;
+      // Кэш scoping: канал + период + limit + цель (g0 — без цели).
+      const cacheKey = `ym:landings:${ym.channel.id}:${period.periodKey}:${limit}:g${goalId || 0}`;
+      const cached = cacheGet(cacheKey);
+      if (cached) return res.json(cached);
+      const isAll = period.days === 0 && !period.range;
+      const { date1, date2 } = isAll
+        ? await allRangeWindow(ym, req.user)
+        : { date1: period.date1, date2: period.date2 };
+
+      // goalId — уже число (или null): интерполяция в имена метрик инъекционно-безопасна.
+      let metrics = 'ym:s:visits,ym:s:users,ym:s:bounceRate';
+      if (goalId != null) metrics += `,ym:s:goal${goalId}reaches,ym:s:goal${goalId}conversionRate`;
+
+      let body;
+      try {
+        body = await ymFetch(
+          ym.token,
+          `/stat/v1/data?ids=${encodeURIComponent(ym.acc.counter_id)}` +
+            `&metrics=${metrics}` +
+            '&dimensions=ym:s:startURLPath&sort=-ym:s:visits' +
+            `&date1=${date1}&date2=${date2}` +
+            `&limit=${limit}&accuracy=full`,
+        );
+      } catch (e) {
+        return sendYmError(res, e, { route: 'landings', channelId: ym.channel.id });
+      }
+
+      const rows = (body && Array.isArray(body.data) ? body.data : [])
+        .map((row) => {
+          const dim = row && Array.isArray(row.dimensions) && row.dimensions[0];
+          const m = row && Array.isArray(row.metrics) ? row.metrics : [];
+          const r = {
+            path: dim && typeof dim.name === 'string' && dim.name ? dim.name : null,
+            visits: Math.round(Number(m[0]) || 0),
+            users: Math.round(Number(m[1]) || 0),
+            bounce_rate: numOrNull(m[2]) == null ? null : round2(numOrNull(m[2])),
+          };
+          if (goalId != null) {
+            r.goal_reaches = Math.round(Number(m[3]) || 0);
+            r.goal_conversion = numOrNull(m[4]) == null ? null : round2(numOrNull(m[4]));
+          }
+          return r;
+        })
+        .filter((r) => r.path != null);
+      // totals = итог ПОЛНОГО отчёта (не среза limit) — для хвоста «из M визитов».
+      const totals = body && Array.isArray(body.totals) ? body.totals : [];
+      const visitsTotal = Number.isFinite(Number(totals[0]))
+        ? Math.round(Number(totals[0]))
+        : rows.reduce((acc, r) => acc + r.visits, 0);
+      const data = { goal_id: goalId, visits_total: visitsTotal, rows, meta: samplingMeta(body) };
       cacheSet(cacheKey, data, isAll ? YM_ALL_RANGE_CACHE_TTL_MS : undefined);
       res.json(data);
     } catch (e) {
