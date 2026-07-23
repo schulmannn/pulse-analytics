@@ -275,6 +275,170 @@ test('decrypt-fail сохранённого токена → 503 (серверн
   assert.equal(res.statusCode, 503);
 });
 
+// ── Слайс 2: цели / топ-страницы / UTM ──────────────────────────────────────────────────────
+
+const goalsDict = (goals) => ({ goals });
+const goalStat = (pairs) => ({ data: [], totals: pairs.flat() });
+
+test('goals: словарь + один батч ≤10 целей, сортировка по reaches, conversionRate из своей метрики', async () => {
+  const paths = [];
+  const { routes } = buildYm({
+    ymFetch: async (_t, path) => {
+      paths.push(path);
+      if (path.startsWith('/management/v1/counter/cnt-1/goals')) {
+        return goalsDict([{ id: 11, name: 'Заказ' }, { id: 22, name: 'Подписка' }]);
+      }
+      // totals выровнены по порядку metrics: [reaches11, cr11, reaches22, cr22]
+      return goalStat([[5, 1.25], [40, 3.333]]);
+    },
+  });
+  const res = await invoke(routes, 'GET /api/ym/goals', { query: { days: '30' } });
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, {
+    truncated: false,
+    rows: [
+      { id: '22', name: 'Подписка', reaches: 40, conversion_rate: 3.33 },
+      { id: '11', name: 'Заказ', reaches: 5, conversion_rate: 1.25 },
+    ],
+  });
+  const stat = paths.find((p) => p.startsWith('/stat/'));
+  assert.ok(stat.includes('ym%3As%3Agoal11reaches%2Cym%3As%3Agoal11conversionRate') || stat.includes('ym:s:goal11reaches,ym:s:goal11conversionRate'));
+  assert.equal(paths.filter((p) => p.startsWith('/stat/')).length, 1, '2 цели = один батч');
+});
+
+test('goals: словарь кэшируется час, 12 целей → 2 батча, 25 → truncated и только первые 20', async () => {
+  const counts = { dict: 0, stat: 0 };
+  const many = Array.from({ length: 25 }, (_, i) => ({ id: i + 1, name: `Цель ${i + 1}` }));
+  const { routes } = buildYm({
+    ymFetch: async (_t, path) => {
+      if (path.startsWith('/management/')) { counts.dict += 1; return goalsDict(many); }
+      counts.stat += 1;
+      return { data: [], totals: Array.from({ length: 20 }, () => 1) };
+    },
+  });
+  const r1 = await invoke(routes, 'GET /api/ym/goals', { query: { days: '30' } });
+  assert.equal(r1.body.truncated, true);
+  assert.equal(r1.body.rows.length, 20, 'потолок 20 целей');
+  assert.equal(counts.stat, 2, '20 целей = 2 батча по 10 пар метрик');
+  // Другое окно: словарь из кэша (dict всё ещё 1), отчёты новые.
+  await invoke(routes, 'GET /api/ym/goals', { query: { days: '7' } });
+  assert.equal(counts.dict, 1, 'словарь целей часовой — повторно не ходили');
+  assert.equal(counts.stat, 4);
+});
+
+test('goals: кривой id цели из словаря НЕ попадает в имена метрик (числовой гейт)', async () => {
+  const paths = [];
+  const { routes } = buildYm({
+    ymFetch: async (_t, path) => {
+      paths.push(path);
+      if (path.startsWith('/management/')) {
+        return goalsDict([{ id: 'DROP TABLE', name: 'зловред' }, { id: 33, name: 'Честная' }]);
+      }
+      return goalStat([[7, 2]]);
+    },
+  });
+  const res = await invoke(routes, 'GET /api/ym/goals', { query: { days: '30' } });
+  assert.deepEqual(res.body.rows.map((r) => r.id), ['33']);
+  const stat = paths.find((p) => p.startsWith('/stat/'));
+  assert.ok(!stat.includes('DROP'), 'нечисловой id отфильтрован до сборки metrics');
+});
+
+test('goals: пустой словарь → rows:[] без stat-запроса; сбой словаря → маппинг sendYmError', async () => {
+  let stats = 0;
+  const empty = buildYm({
+    ymFetch: async (_t, path) => {
+      if (path.startsWith('/management/')) return goalsDict([]);
+      stats += 1;
+      return goalStat([]);
+    },
+  });
+  const r1 = await invoke(empty.routes, 'GET /api/ym/goals', { query: { days: '30' } });
+  assert.deepEqual(r1.body, { rows: [], truncated: false });
+  assert.equal(stats, 0);
+
+  const broken = buildYm({
+    ymFetch: async () => { const e = new Error('Яндекс.Метрика: Invalid oauth_token'); e.status = 401; throw e; },
+  });
+  const r2 = await invoke(broken.routes, 'GET /api/ym/goals', { query: { days: '30' } });
+  assert.equal(r2.statusCode, 401);
+  assert.equal(r2.body.code, 'ym_token_revoked');
+});
+
+test('pages: pv-неймспейс, маппинг строк + totals, limit клампится в 1..50 и живёт в кэш-ключе', async () => {
+  const paths = [];
+  const mk = () => buildYm({
+    ymFetch: async (_t, path) => {
+      paths.push(path);
+      return {
+        data: [
+          { dimensions: [{ name: '/catalog' }], metrics: [500, 300] },
+          { dimensions: [{ name: '/' }], metrics: [200, 180] },
+        ],
+        totals: [900, 600],
+      };
+    },
+  });
+  const { routes } = mk();
+  const res = await invoke(routes, 'GET /api/ym/pages', { query: { days: '30' } });
+  assert.deepEqual(res.body, {
+    pageviews_total: 900,
+    rows: [
+      { path: '/catalog', pageviews: 500, users: 300 },
+      { path: '/', pageviews: 200, users: 180 },
+    ],
+  });
+  assert.ok(paths[0].includes('ym%3Apv%3AURLPath') || paths[0].includes('ym:pv:URLPath'));
+  assert.ok(paths[0].includes('limit=10'), 'дефолтный limit');
+
+  const clamped = await invoke(mk().routes, 'GET /api/ym/pages', { query: { days: '30', limit: '999' } });
+  assert.equal(clamped.statusCode, 200);
+  assert.ok(paths.at(-1).includes('limit=50'), 'потолок 50');
+  // Разные limit не делят кэш-запись: второй вызов с limit=50 из кэша, счётчик путей не растёт.
+  const before = paths.length;
+  await invoke(routes, 'GET /api/ym/pages', { query: { days: '30' } });
+  assert.equal(paths.length, before, 'limit=10 окна 30 дн — кэш-хит');
+});
+
+test('utm: null-строка уходит в untagged_visits, tagged = total − untagged, размеченные — в rows', async () => {
+  const { routes } = buildYm({
+    ymFetch: async () => ({
+      data: [
+        { dimensions: [{ id: null, name: null }], metrics: [60, 40] },
+        { dimensions: [{ id: 'instagram', name: 'instagram' }], metrics: [30, 20] },
+        { dimensions: [{ id: 'tg', name: 'tg' }], metrics: [10, 8] },
+      ],
+      totals: [100, 68],
+    }),
+  });
+  const res = await invoke(routes, 'GET /api/ym/utm', { query: { days: '30' } });
+  assert.deepEqual(res.body, {
+    visits_total: 100,
+    tagged_visits: 40,
+    untagged_visits: 60,
+    rows: [
+      { id: 'instagram', name: 'instagram', visits: 30, users: 20 },
+      { id: 'tg', name: 'tg', visits: 10, users: 8 },
+    ],
+  });
+});
+
+test('goals/pages/utm «Всё»: date1 — counter_created_day учётки (общий allRangeWindow)', async () => {
+  const paths = [];
+  const { routes } = buildYm({
+    ymFetch: async (_t, path) => {
+      paths.push(path);
+      if (path.startsWith('/management/')) return goalsDict([{ id: 1, name: 'Цель' }]);
+      return { data: [], totals: [0, 0] };
+    },
+  });
+  await invoke(routes, 'GET /api/ym/pages', { query: { days: '0' } });
+  await invoke(routes, 'GET /api/ym/utm', { query: { days: '0' } });
+  await invoke(routes, 'GET /api/ym/goals', { query: { days: '0' } });
+  const statPaths = paths.filter((p) => p.startsWith('/stat/'));
+  assert.equal(statPaths.length, 3);
+  for (const p of statPaths) assert.ok(p.includes('date1=2024-03-01'), `якорь «Всё» в ${p.slice(0, 40)}…`);
+});
+
 test('DELETE /api/ym/account: владелец отключает + audit; не-участник — 403 и учётка жива', async () => {
   const deleted = [];
   const mk = (owner) => buildYm({
