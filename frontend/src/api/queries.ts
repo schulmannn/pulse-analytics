@@ -741,13 +741,23 @@ const YmSummarySchema = z
     meta: YmSummaryMetaSchema.optional(),
   })
   .passthrough();
+// goal_id и goal_* — АДДИТИВНАЯ атрибуция выбранной цели (optional/null-safe для rolling-deploy:
+// старый сервер их не присылает). null = цель не выбрана или метрика не пришла; реальный 0 — это 0.
 const YmSourcesSchema = z
   .object({
+    goal_id: z.number().nullable().optional(),
     visits_total: z.number(),
     users_total: z.number(),
     rows: z.array(
       z
-        .object({ id: z.string().nullable(), name: z.string().nullable(), visits: z.number(), users: z.number() })
+        .object({
+          id: z.string().nullable(),
+          name: z.string().nullable(),
+          visits: z.number(),
+          users: z.number(),
+          goal_reaches: z.number().nullable().optional(),
+          goal_conversion: z.number().nullable().optional(),
+        })
         .passthrough(),
     ),
   })
@@ -786,14 +796,26 @@ export function useYmSummary(period: MsPeriod, opts?: { enabled?: boolean }) {
   });
 }
 
-export function useYmSources(period: MsPeriod) {
+// Общий гейт выбранной цели атрибуции: положительный safe-integer ЛИБО null. Не-цель никогда не
+// попадает ни в queryKey (g0), ни в URL — сервер её всё равно отбросит числовым гейтом, но не гоняем
+// зря сеть и не плодим кэш-ключей. Зеркалит серверный goalIdOf.
+const ymGoalParam = (goalId: number | null): number | null =>
+  goalId != null && Number.isSafeInteger(goalId) && goalId > 0 ? goalId : null;
+
+export function useYmSources(period: MsPeriod, goalId: number | null = null) {
   const { channelId } = useSelectedChannel();
+  const goal = ymGoalParam(goalId);
   return useQuery({
     enabled: channelId != null,
-    queryKey: ['ym-sources', channelId, ...msPeriodKey(period)],
+    queryKey: ['ym-sources', channelId, ...msPeriodKey(period), goal ?? 0],
     staleTime: STALE_LIVE,
     retry: false,
-    queryFn: ({ signal }) => apiGet(`/api/ym/sources?${msPeriodQuery(period)}`, YmSourcesSchema, { signal, channelId }),
+    queryFn: ({ signal }) =>
+      apiGet(
+        `/api/ym/sources?${msPeriodQuery(period)}${goal != null ? `&goal_id=${goal}` : ''}`,
+        YmSourcesSchema,
+        { signal, channelId },
+      ),
   });
 }
 
@@ -803,6 +825,9 @@ export function useYmSources(period: MsPeriod) {
 // средняя без данных честно недоступна, не 0). meta — сэмпл/лаг только когда Reporting API их дал.
 const YmBreakdownSchema = z
   .object({
+    // goal_id/goal_* приходят только у разрезов с атрибуцией цели (устройства); прочие разрезы их
+    // не шлют. optional/null-safe → одна схема совместима и с ними, и с rolling-deploy старого сервера.
+    goal_id: z.number().nullable().optional(),
     visits_total: z.number(),
     users_total: z.number(),
     rows: z.array(
@@ -813,6 +838,8 @@ const YmBreakdownSchema = z
           visits: z.number(),
           users: z.number(),
           bounce_rate: z.number().nullable(),
+          goal_reaches: z.number().nullable().optional(),
+          goal_conversion: z.number().nullable().optional(),
         })
         .passthrough(),
     ),
@@ -828,14 +855,20 @@ const YmBreakdownSchema = z
   .passthrough();
 export type YmBreakdown = z.infer<typeof YmBreakdownSchema>;
 
-export function useYmDevices(period: MsPeriod) {
+export function useYmDevices(period: MsPeriod, goalId: number | null = null) {
   const { channelId } = useSelectedChannel();
+  const goal = ymGoalParam(goalId);
   return useQuery({
     enabled: channelId != null,
-    queryKey: ['ym-devices', channelId, ...msPeriodKey(period)],
+    queryKey: ['ym-devices', channelId, ...msPeriodKey(period), goal ?? 0],
     staleTime: STALE_LIVE,
     retry: false,
-    queryFn: ({ signal }) => apiGet(`/api/ym/devices?${msPeriodQuery(period)}`, YmBreakdownSchema, { signal, channelId }),
+    queryFn: ({ signal }) =>
+      apiGet(
+        `/api/ym/devices?${msPeriodQuery(period)}${goal != null ? `&goal_id=${goal}` : ''}`,
+        YmBreakdownSchema,
+        { signal, channelId },
+      ),
   });
 }
 
@@ -894,12 +927,20 @@ const YmPagesSchema = z
   .passthrough();
 const YmUtmSchema = z
   .object({
+    goal_id: z.number().nullable().optional(),
     visits_total: z.number(),
     tagged_visits: z.number(),
     untagged_visits: z.number(),
     rows: z.array(
       z
-        .object({ id: z.string().nullable(), name: z.string().nullable(), visits: z.number(), users: z.number() })
+        .object({
+          id: z.string().nullable(),
+          name: z.string().nullable(),
+          visits: z.number(),
+          users: z.number(),
+          goal_reaches: z.number().nullable().optional(),
+          goal_conversion: z.number().nullable().optional(),
+        })
         .passthrough(),
     ),
   })
@@ -927,14 +968,20 @@ export function useYmPages(period: MsPeriod) {
   });
 }
 
-export function useYmUtm(period: MsPeriod) {
+export function useYmUtm(period: MsPeriod, goalId: number | null = null) {
   const { channelId } = useSelectedChannel();
+  const goal = ymGoalParam(goalId);
   return useQuery({
     enabled: channelId != null,
-    queryKey: ['ym-utm', channelId, ...msPeriodKey(period)],
+    queryKey: ['ym-utm', channelId, ...msPeriodKey(period), goal ?? 0],
     staleTime: STALE_LIVE,
     retry: false,
-    queryFn: ({ signal }) => apiGet(`/api/ym/utm?${msPeriodQuery(period)}`, YmUtmSchema, { signal, channelId }),
+    queryFn: ({ signal }) =>
+      apiGet(
+        `/api/ym/utm?${msPeriodQuery(period)}${goal != null ? `&goal_id=${goal}` : ''}`,
+        YmUtmSchema,
+        { signal, channelId },
+      ),
   });
 }
 

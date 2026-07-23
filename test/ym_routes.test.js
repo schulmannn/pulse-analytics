@@ -228,12 +228,14 @@ test('sources: маппинг строк + totals полного отчёта а
   });
   const res = await invoke(routes, 'GET /api/ym/sources', { query: { days: '30' } });
   assert.equal(res.statusCode, 200);
+  // Без цели: goal_id эхом null, поля цели строк — null (аддитивно, базовый отчёт как прежде).
   assert.deepEqual(res.body, {
+    goal_id: null,
     visits_total: 100,
     users_total: 80,
     rows: [
-      { id: 'organic', name: 'Переходы из поисковых систем', visits: 70, users: 50 },
-      { id: 'direct', name: 'Прямые заходы', visits: 20, users: 15 },
+      { id: 'organic', name: 'Переходы из поисковых систем', visits: 70, users: 50, goal_reaches: null, goal_conversion: null },
+      { id: 'direct', name: 'Прямые заходы', visits: 20, users: 15, goal_reaches: null, goal_conversion: null },
     ],
   });
 });
@@ -412,12 +414,13 @@ test('utm: null-строка уходит в untagged_visits, tagged = total −
   });
   const res = await invoke(routes, 'GET /api/ym/utm', { query: { days: '30' } });
   assert.deepEqual(res.body, {
+    goal_id: null,
     visits_total: 100,
     tagged_visits: 40,
     untagged_visits: 60,
     rows: [
-      { id: 'instagram', name: 'instagram', visits: 30, users: 20 },
-      { id: 'tg', name: 'tg', visits: 10, users: 8 },
+      { id: 'instagram', name: 'instagram', visits: 30, users: 20, goal_reaches: null, goal_conversion: null },
+      { id: 'tg', name: 'tg', visits: 10, users: 8, goal_reaches: null, goal_conversion: null },
     ],
   });
 });
@@ -737,13 +740,16 @@ test('devices: точная размерность deviceCategory + метрик
   assert.ok(paths[0].includes('sort=-ym:s:visits'), 'сортировка по визитам');
   assert.ok(paths[0].includes('accuracy=full'));
   assert.ok(paths[0].includes('lang=ru'), 'русские имена устройств');
+  assert.ok(!paths[0].includes('goal'), 'без goal_id метрики цели не приклеиваются');
+  // Устройства — единственный разрез с атрибуцией: goal_id эхом null, поля цели строк — null.
   assert.deepEqual(res.body, {
+    goal_id: null,
     visits_total: 150,
     users_total: 105,
     meta: {},
     rows: [
-      { id: '2', name: 'Смартфоны', visits: 90, users: 60, bounce_rate: 41.2 },
-      { id: '1', name: 'ПК', visits: 50, users: 40, bounce_rate: 22 },
+      { id: '2', name: 'Смартфоны', visits: 90, users: 60, bounce_rate: 41.2, goal_reaches: null, goal_conversion: null },
+      { id: '1', name: 'ПК', visits: 50, users: 40, bounce_rate: 22, goal_reaches: null, goal_conversion: null },
     ],
   });
 });
@@ -900,4 +906,170 @@ test('breakdown: сэмплирование прокидывается в meta; 
   const r2 = await invoke(revoked.routes, 'GET /api/ym/social', { query: { days: '30' } });
   assert.equal(r2.statusCode, 401);
   assert.equal(r2.body.code, 'ym_token_revoked');
+});
+
+// ── Слайс атрибуции цели: sources / utm / devices ──────────────────────────────────────────────
+
+test('sources: валидный goal_id → метрики цели ПОСЛЕ visits,users; goal_id эхом, база не меняется', async () => {
+  const paths = [];
+  const { routes } = buildYm({
+    ymFetch: async (_t, path) => {
+      paths.push(path);
+      return {
+        data: [
+          { dimensions: [{ id: 'organic', name: 'Поиск' }], metrics: [70, 50, 6, 8.5] },
+          // Реальный ноль достижений — остаётся 0 (не превращается в null).
+          { dimensions: [{ id: 'direct', name: 'Прямые' }], metrics: [20, 15, 0, 0] },
+        ],
+        totals: [100, 80, 6, 6.0],
+      };
+    },
+  });
+  const res = await invoke(routes, 'GET /api/ym/sources', { query: { days: '30', goal_id: '42' } });
+  assert.equal(res.statusCode, 200);
+  assert.ok(
+    paths[0].includes('metrics=ym:s:visits,ym:s:users,ym:s:goal42reaches,ym:s:goal42conversionRate'),
+    'цель дописана строго после базовых метрик',
+  );
+  assert.equal(res.body.goal_id, 42);
+  // Базовые totals визитов/посетителей неизменны.
+  assert.equal(res.body.visits_total, 100);
+  assert.equal(res.body.users_total, 80);
+  assert.deepEqual(res.body.rows, [
+    { id: 'organic', name: 'Поиск', visits: 70, users: 50, goal_reaches: 6, goal_conversion: 8.5 },
+    { id: 'direct', name: 'Прямые', visits: 20, users: 15, goal_reaches: 0, goal_conversion: 0 },
+  ]);
+});
+
+test('sources: инъекционный/кривой goal_id отбрасывается ДО сборки metrics, поля цели = null', async () => {
+  for (const bad of ['7;DROP TABLE', '-1', '1.5', 'abc', '0']) {
+    const paths = [];
+    const { routes } = buildYm({
+      ymFetch: async (_t, path) => {
+        paths.push(path);
+        return { data: [{ dimensions: [{ id: 'organic', name: 'Поиск' }], metrics: [70, 50] }], totals: [70, 50] };
+      },
+    });
+    const res = await invoke(routes, 'GET /api/ym/sources', { query: { days: '30', goal_id: bad } });
+    assert.equal(res.statusCode, 200, `goal_id=${bad} — базовый отчёт, не 500`);
+    assert.equal(res.body.goal_id, null, `goal_id=${bad} не эхом`);
+    assert.ok(!paths[0].includes('goal'), `goal_id=${bad} не попал в metrics`);
+    assert.ok(!paths[0].includes('DROP'), 'инъекция не достигла outbound-запроса');
+    assert.deepEqual(res.body.rows[0], {
+      id: 'organic', name: 'Поиск', visits: 70, users: 50, goal_reaches: null, goal_conversion: null,
+    });
+  }
+});
+
+test('sources: цель входит в кэш-ключ — g0 и g42 обслуживаются раздельно, повторы из кэша', async () => {
+  let fetches = 0;
+  const { routes } = buildYm({
+    ymFetch: async () => { fetches += 1; return { data: [], totals: [0, 0] }; },
+  });
+  await invoke(routes, 'GET /api/ym/sources', { query: { days: '30' } });
+  await invoke(routes, 'GET /api/ym/sources', { query: { days: '30', goal_id: '42' } });
+  assert.equal(fetches, 2, 'без цели и с целью — разные кэш-записи');
+  await invoke(routes, 'GET /api/ym/sources', { query: { days: '30' } });
+  await invoke(routes, 'GET /api/ym/sources', { query: { days: '30', goal_id: '42' } });
+  assert.equal(fetches, 2, 'повторные вызовы каждой ветки — кэш-хиты');
+});
+
+test('utm: валидный goal_id → метрики цели, goal_id эхом, размётка не меняется; инъекция безопасна', async () => {
+  const paths = [];
+  const { routes } = buildYm({
+    ymFetch: async (_t, path) => {
+      paths.push(path);
+      return {
+        data: [
+          { dimensions: [{ id: null, name: null }], metrics: [60, 40, 0, 0] },
+          { dimensions: [{ id: 'instagram', name: 'instagram' }], metrics: [30, 20, 4, 13.3] },
+        ],
+        totals: [100, 68, 4, 4.0],
+      };
+    },
+  });
+  const res = await invoke(routes, 'GET /api/ym/utm', { query: { days: '30', goal_id: '42' } });
+  assert.ok(paths[0].includes('ym:s:goal42reaches') && paths[0].includes('ym:s:goal42conversionRate'));
+  assert.equal(res.body.goal_id, 42);
+  // Разметка визитов (tagged/untagged) считается по totals[0], добавление метрик цели её не сдвигает.
+  assert.equal(res.body.visits_total, 100);
+  assert.equal(res.body.tagged_visits, 40);
+  assert.equal(res.body.untagged_visits, 60);
+  assert.deepEqual(res.body.rows, [
+    { id: 'instagram', name: 'instagram', visits: 30, users: 20, goal_reaches: 4, goal_conversion: 13.3 },
+  ]);
+
+  const badPaths = [];
+  const bad = buildYm({
+    ymFetch: async (_t, path) => { badPaths.push(path); return { data: [], totals: [0, 0] }; },
+  });
+  const r2 = await invoke(bad.routes, 'GET /api/ym/utm', {
+    query: { days: '30', goal_id: '7;DROP TABLE' },
+  });
+  assert.equal(r2.body.goal_id, null);
+  assert.ok(!badPaths[0].includes('goal'), 'кривой id не в metrics');
+  assert.ok(!badPaths[0].includes('DROP'), 'инъекция не достигла outbound-запроса');
+});
+
+test('devices: goal_id → метрики цели ПОСЛЕ bounceRate (idx 3), реальный 0 остаётся 0, absent → null', async () => {
+  const paths = [];
+  const { routes } = buildYm({
+    ymFetch: async (_t, path) => {
+      paths.push(path);
+      return {
+        data: [
+          { dimensions: [{ id: '2', name: 'Смартфоны' }], metrics: [90, 60, 41.2, 5, 5.5] },
+          { dimensions: [{ id: '1', name: 'ПК' }], metrics: [50, 40, 22.0, 0, 0] },
+          // Метрики цели отсутствуют у строки → goal_* = null (не 0).
+          { dimensions: [{ id: '3', name: 'Планшеты' }], metrics: [8, 4, 30.0] },
+        ],
+        totals: [148, 104, 33.4, 5, 3.4],
+      };
+    },
+  });
+  const res = await invoke(routes, 'GET /api/ym/devices', { query: { days: '30', goal_id: '42' } });
+  assert.ok(
+    paths[0].includes('metrics=ym:s:visits,ym:s:users,ym:s:bounceRate,ym:s:goal42reaches,ym:s:goal42conversionRate'),
+    'цель дописана после contract-метрик разреза',
+  );
+  assert.equal(res.body.goal_id, 42);
+  assert.deepEqual(res.body.rows, [
+    { id: '2', name: 'Смартфоны', visits: 90, users: 60, bounce_rate: 41.2, goal_reaches: 5, goal_conversion: 5.5 },
+    { id: '1', name: 'ПК', visits: 50, users: 40, bounce_rate: 22, goal_reaches: 0, goal_conversion: 0 },
+    { id: '3', name: 'Планшеты', visits: 8, users: 4, bounce_rate: 30, goal_reaches: null, goal_conversion: null },
+  ]);
+
+  const badPaths = [];
+  const bad = buildYm({
+    ymFetch: async (_t, path) => {
+      badPaths.push(path);
+      return {
+        data: [{ dimensions: [{ id: '1', name: 'ПК' }], metrics: [10, 8, 20] }],
+        totals: [10, 8, 20],
+      };
+    },
+  });
+  const badRes = await invoke(bad.routes, 'GET /api/ym/devices', {
+    query: { days: '30', goal_id: '42;DROP TABLE' },
+  });
+  assert.equal(badRes.body.goal_id, null);
+  assert.ok(!badPaths[0].includes('goal') && !badPaths[0].includes('DROP'));
+  assert.equal(badRes.body.rows[0].goal_reaches, null);
+});
+
+test('goal_id на не-devices разрезах игнорируется: ни метрик цели, ни goal_id, ни полей строки', async () => {
+  for (const route of ['referrers', 'social', 'messengers']) {
+    const paths = [];
+    const { routes } = buildYm({
+      ymFetch: async (_t, path) => {
+        paths.push(path);
+        return { data: [{ dimensions: [{ id: 'x', name: 'X' }], metrics: [10, 8, 20] }], totals: [10, 8, 20] };
+      },
+    });
+    const res = await invoke(routes, `GET /api/ym/${route}`, { query: { days: '30', goal_id: '42' } });
+    assert.equal(res.statusCode, 200);
+    assert.ok(!paths[0].includes('goal'), `${route}: цель не приклеена к metrics`);
+    assert.equal(res.body.goal_id, undefined, `${route}: goal_id в ответе нет`);
+    assert.equal(res.body.rows[0].goal_reaches, undefined, `${route}: строка без полей цели`);
+  }
 });
